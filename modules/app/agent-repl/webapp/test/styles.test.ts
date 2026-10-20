@@ -5886,8 +5886,14 @@ describe("the repository's subsections and the drag", () => {
     expect(declarationsOf("#ws-sidebar .repo.folded .rows")).toMatch(/display:\s*none/);
   });
 
-  it("indents a subsection's rows under its header", () => {
-    expect(declarationsOf("#ws-sidebar .sb-subsection > .rows")).toMatch(/margin-left:\s*0\.9rem/);
+  it("indents a subsection's rows one step under its header, through the row indent", () => {
+    expect([
+      declarationsOf("#ws-sidebar .sb-subsection > .rows"),
+      declarationsOf("#ws-sidebar .sb-subsection > .rows > .ws"),
+    ]).toEqual([
+      expect.stringMatching(/--row-indent-parent:\s*var\(--row-indent\)/),
+      expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 0\.9rem\)/),
+    ]);
   });
 
   it("lights the subsection a dragged row would join, subtly", () => {
@@ -5950,5 +5956,50 @@ describe("the outcome card", () => {
   it("leaves no rule for the retired notice bubble or the fault pill's chevron", () => {
     const selectors = rulesOf(stylesheet).flatMap((r) => r.selectors);
     expect(selectors.filter((sel) => /response-notice|outcome-marker-chevron|ar-button\.outcome-marker-pill/.test(sel))).toEqual([]);
+  });
+});
+
+/**
+ * THE ROW INDENT: a nested row indents its mark and name only; its tab
+ * number, gutter bar and highlight start at the section's left edge.
+ */
+describe("the row indent", () => {
+  it("starts at no indent", () => {
+    expect(rulesOf(stylesheet).some((rule) => rule.selectors.includes("#ws-sidebar") && /--row-indent:\s*0rem/.test(rule.declarations))).toBe(true);
+  });
+
+  it("pads a row's line by its indent", () => {
+    expect(declarationsOf("#ws-sidebar .row")).toMatch(/padding:\s*var\(--row-pad-y\) 0\.7rem var\(--row-pad-y\) calc\(0\.9rem \+ var\(--row-indent\)\)/);
+  });
+
+  it("pulls the tab number back to one column and hands the indent to the mark", () => {
+    const num = declarationsOf("#ws-sidebar .sb-num") ?? "";
+    expect([
+      /margin-left:\s*calc\(-0\.4rem - var\(--row-indent\)\)/.test(num),
+      /margin-right:\s*calc\(0\.1rem \+ var\(--row-indent\)\)/.test(num),
+    ]).toEqual([true, true]);
+  });
+
+  it("indents a child one generation step, its box itself not indented", () => {
+    const kids = declarationsOf("#ws-sidebar .kids") ?? "";
+    expect([
+      /margin-left/.test(kids),
+      /--row-indent-parent:\s*var\(--row-indent\)/.test(kids),
+      declarationsOf("#ws-sidebar .kids > .ws"),
+    ]).toEqual([false, true, expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 1\.2rem\)/)]);
+  });
+
+  it("draws the family guide where the generation's box once began", () => {
+    expect(declarationsOf("#ws-sidebar .kids::before")).toMatch(/left:\s*calc\(var\(--row-indent-parent\) \+ 1\.55rem\)/);
+  });
+
+  it("keeps the current row's gutter bar at the left edge, its padding carrying the indent", () => {
+    expect(declarationsOf("#ws-sidebar .ws.current > .row")).toMatch(
+      /padding-left:\s*calc\(0\.9rem - var\(--row-gutter-w\) \+ var\(--row-indent\)\)/,
+    );
+  });
+
+  it("leaves no rule indenting a nested row's box or line by itself", () => {
+    expect([declarationsOf("#ws-sidebar .kids .row"), declarationsOf("#ws-sidebar .kids .ws.current > .row")]).toEqual([undefined, undefined]);
   });
 });
