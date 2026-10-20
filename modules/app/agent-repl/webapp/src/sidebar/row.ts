@@ -30,6 +30,7 @@ import type {
   RosterRowAttention,
   RosterRowClosed,
   RosterRowCurrent,
+  RosterRowIdleAsyncUnread,
   RosterRowDetail,
   RosterRowDetailBranch,
   RosterRowDetailCommits,
@@ -62,11 +63,12 @@ import { heatColor } from "../heat.js";
 import { cacheLapseHeat, cacheLapseText } from "./cache-lapse.js";
 import { log } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import { MalformedView } from "../rpc/malformed.js";
 import type { SidebarContext } from "./context.js";
 import { toggleHiddenDropdown } from "./dropdowns.js";
 import { markReviving } from "./reviving.js";
 import { viewedMode } from "./viewed.js";
-import { rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.js";
+import { rosterArmMark, rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.js";
 import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
 import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
@@ -275,6 +277,15 @@ export function drawRosterRow(
     label.classList.add("viewed");
     ws.setAttribute("data-viewed", "true");
   }
+  // THE UNREAD TURN END INKS THE NAME (owner request, 2026-10-20): a row in
+  // the background over a result nobody has read keeps the background's
+  // yellow on its dot, and its name takes the color of the turn end beneath,
+  // until a dwell reads the result and the daemon drops the marker.
+  if (u.idleAsyncUnread !== undefined && !hidden) {
+    const end = drawRosterRowIdleAsyncUnread(u.idleAsyncUnread, status.case, `${path}.idleAsyncUnread`);
+    label.classList.add(rosterArmMark(end).toneClass);
+    ws.setAttribute("data-unread-turn-end", end);
+  }
   // A BAND ROW'S NAME TAKES THE REPOSITORY NAMES' COLOUR, Recently Merged and
   // Hidden alike (owner requests, 2026-10-03 and 2026-10-13); a merged row's
   // timestamp keeps the secondary grey.
@@ -442,6 +453,31 @@ export function drawRosterRowViewed(u: RosterRowViewed, path: string): boolean {
   void u;
   void path;
   return true;
+}
+
+/**
+ * The UNREAD-TURN-END marker of an `idle_async` row: which turn end's result
+ * stands unread under the background, as the status arm it draws once the
+ * background ends. The row's name is inked with that arm's tone.
+ *
+ * A marker on any arm but `idleAsync`, or one whose oneof sets no arm, is a
+ * contract breach and throws rather than guessing a color.
+ */
+export function drawRosterRowIdleAsyncUnread(u: RosterRowIdleAsyncUnread, arm: string, path: string): RosterStatusCase {
+  if (arm !== "idleAsync") {
+    throw new MalformedView(path, `the marker stands on arm '${arm}', and only an idleAsync row may carry it`);
+  }
+  const end = requireCase(u.turnEnd, `${path}.turnEnd`);
+  switch (end.case) {
+    case "done":
+    case "interrupted":
+    case "turnFailed":
+      return end.case;
+    default: {
+      const other: { case: string } = end;
+      return unreachableArm(`${path}.turnEnd`, other.case);
+    }
+  }
 }
 
 /**

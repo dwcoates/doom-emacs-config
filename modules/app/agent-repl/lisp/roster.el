@@ -314,6 +314,21 @@ Nil before any push has carried a row for WS.  This is the ONLY input to
 the tab-bar's partial/full decision: the daemon owns the mode."
   (agent-repl-roster--for-ws ws (lambda (row) (plist-get row :viewed))))
 
+(defun agent-repl-roster-row-idle-async-unread (row)
+  "Return the turn end ROW\='s unread-turn-end marker names, or nil.
+One of `:done', `:interrupted' or `:turn-failed' while ROW is
+`idle_async' over an unread result (`RosterRowIdleAsyncUnread'), nil
+when it carries no marker."
+  (plist-get row :idle-async-unread))
+
+(defun agent-repl-roster-idle-async-unread-for-ws (ws)
+  "Return the unread turn end under WS\='s `idle_async' roster row, or nil.
+Nil before any push has carried a row for WS, and while the row carries
+no unread-turn-end marker.  The tab bar draws WS\='s tab name in that
+turn end\='s color from it
+\(`agent-repl--tab-name-state')."
+  (agent-repl-roster--for-ws ws #'agent-repl-roster-row-idle-async-unread))
+
 (defun agent-repl-roster-row-one-shot (row)
   "Return non-nil when ROW carries the one-shot mark (`RosterRowOneShot').
 The mark is presence alone: the workspace was created as a one-shot."

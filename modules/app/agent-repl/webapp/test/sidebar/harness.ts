@@ -233,6 +233,8 @@ export function row(init: {
   attention?: boolean;
   /** The VIEWED marker: present means the daemon holds this row PARTIAL. */
   viewed?: boolean;
+  /** The UNREAD-TURN-END marker's turn end; omitted = no marker. */
+  idleAsyncUnread?: MessageInitShape<typeof RosterRowSchema>["idleAsyncUnread"];
   /** The REVIVING marker: present while the daemon revives this workspace. */
   reviving?: boolean;
   /** The ONE-SHOT mark's outcome; omitted = the workspace is no one-shot. */
@@ -260,6 +262,7 @@ export function row(init: {
     detail: init.detail ?? {},
     ...(init.attention === true ? { attention: {} } : {}),
     ...(init.viewed === true ? { viewed: {} } : {}),
+    ...(init.idleAsyncUnread === undefined ? {} : { idleAsyncUnread: init.idleAsyncUnread }),
     ...(init.reviving === true ? { reviving: {} } : {}),
     ...(init.oneShot === true ? { oneShot: {} } : {}),
     ...(init.opening === true ? { opening: {} } : {}),

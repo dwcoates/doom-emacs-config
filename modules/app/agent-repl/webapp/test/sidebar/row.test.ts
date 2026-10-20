@@ -1770,6 +1770,80 @@ describe("the detail panel leaves the rail and stays inside the window", () => {
   });
 });
 
+describe("the unread turn end under an idle_async row", () => {
+  const nameOf = (drawn: HTMLElement): HTMLElement => drawn.querySelector(":scope > .row > .name") as HTMLElement;
+  const paintOf = (drawn: HTMLElement, selector: string): string =>
+    inRail(drawn, () => cascadedValue(drawn.querySelector(selector) as HTMLElement, "color"));
+  const idle = { case: "idleAsync", value: {} } as const;
+
+  it.each([
+    { name: "an unread done inks the name green", end: "done", want: "var(--ok)" },
+    { name: "an unread interrupted inks the name green", end: "interrupted", want: "var(--ok)" },
+    { name: "an unread failed turn inks the name turquoise", end: "turnFailed", want: "var(--turquoise)" },
+  ] as const)("$name", ({ end, want }) => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: idle, idleAsyncUnread: { turnEnd: { case: end, value: {} } } }),
+      sidebarContext(),
+      "R",
+    );
+
+    // Assert.
+    expect(paintOf(drawn, ":scope > .row > .name")).toBe(want);
+    expect(drawn.getAttribute("data-unread-turn-end")).toBe(end);
+  });
+
+  it("keeps the status dot on the background's yellow", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: idle, idleAsyncUnread: { turnEnd: { case: "done", value: {} } } }),
+      sidebarContext(),
+      "R",
+    );
+
+    // Assert.
+    expect(paintOf(drawn, ":scope > .row > .st")).toBe("var(--async)");
+  });
+
+  it("leaves a read idle_async row's name on the background's yellow", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", status: idle }), sidebarContext(), "R");
+
+    // Assert.
+    expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--async)");
+    expect(drawn.hasAttribute("data-unread-turn-end")).toBe(false);
+  });
+
+  it("draws no turn-end color on a hidden row", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", status: idle, idleAsyncUnread: { turnEnd: { case: "done", value: {} } } }),
+      sidebarContext(),
+      "R",
+      "hidden",
+    );
+
+    // Assert.
+    expect(nameOf(drawn).classList.contains("tone-green")).toBe(false);
+  });
+
+  it("refuses the marker on any arm but idleAsync", () => {
+    // Arrange.
+    const bad = row({ id: "ws-1", status: { case: "done", value: {} }, idleAsyncUnread: { turnEnd: { case: "done", value: {} } } });
+
+    // Act, Assert.
+    expect(() => drawRosterRow(bad, sidebarContext(), "R")).toThrow(MalformedView);
+  });
+
+  it("refuses a marker that names no turn end", () => {
+    // Arrange.
+    const bad = row({ id: "ws-1", status: idle, idleAsyncUnread: {} });
+
+    // Act, Assert.
+    expect(() => drawRosterRow(bad, sidebarContext(), "R")).toThrow(MalformedView);
+  });
+});
+
 describe("the row's display mode", () => {
   it("greys the NAME when the daemon carries the viewed marker", () => {
     // Arrange, Act.

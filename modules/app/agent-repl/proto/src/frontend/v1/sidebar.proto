@@ -265,6 +265,46 @@ message RosterRowAttention {}
 // never drawn as unread, and an unread one never as read.
 message RosterRowViewed {}
 
+// The UNREAD-TURN-END marker of an `idle_async` row: the background outranks a
+// turn end whose result the user has NOT read yet. PRESENT exactly while the
+// row's `status` is `idle_async` and the last turn's result is unread; absent
+// on every other arm, and on an `idle_async` row whose result is read or which
+// has no turn end beneath it at all.
+//
+// WHY A MARKER AND NOT A STATUS ARM: the workspace IS in the background, so
+// its arm stays `idle_async` (yellow) and every rule keyed on the arm holds.
+// The marker is the one extra fact a surface draws beside it, the unread
+// result standing under the background:
+//
+//   - the sidebar keeps the row's status dot on the `idle_async` yellow, and
+//     inks the row's NAME in the color of the turn end beneath (green for
+//     `done` and `interrupted`, turquoise for `turn_failed`);
+//   - the Emacs tab bar keeps the tab's `[N]` bracket on the `idle_async`
+//     yellow, and paints the space after it and the workspace name in that
+//     turn end's color.
+//
+// A DWELL READS IT. A dwell on the `idle_async` row (MarkWorkspaceViewed)
+// reads the result, as RosterRowViewed states, and the next push omits this
+// marker, so the whole row draws the background's yellow. A new turn resets
+// the result and the marker with it. The daemon resolves the marker in the
+// same render as `status`, so a client draws it as it arrives, with no rule
+// of its own; a row carrying it on any arm but `idle_async` is a contract
+// breach.
+message RosterRowIdleAsyncUnread {
+  // Which TURN END the unread result is, named by the status arm that turn
+  // end draws once the background ends. The producer always sets an arm: a
+  // turn end this schema revision does not name is never sent, so a client
+  // refuses an unset oneof as malformed rather than guessing a color.
+  oneof turn_end {
+    // The turn completed (or stopped as expected): green.
+    RosterRowStatusDone done = 1;
+    // The turn was interrupted by the user: green.
+    RosterRowStatusInterrupted interrupted = 2;
+    // The turn failed: turquoise.
+    RosterRowStatusTurnFailed turn_failed = 3;
+  }
+}
+
 // The REVIVING marker: this workspace's parked (hibernated) session is being
 // brought back up right now. Empty: presence is the fact.
 //
@@ -881,6 +921,12 @@ message RosterRow {
   // The row's DISPLAY MODE: present = PARTIAL (the name recedes), absent =
   // FULL. See RosterRowViewed, which carries the mode's whole contract.
   optional RosterRowViewed viewed = 34;
+
+  // The row's UNREAD-TURN-END marker: present while the row is `idle_async`
+  // over a turn end whose result is unread, naming that turn end, and absent
+  // otherwise. See RosterRowIdleAsyncUnread, which carries the marker's whole
+  // contract.
+  optional RosterRowIdleAsyncUnread idle_async_unread = 69;
 
   // The row's REVIVING marker: present while the daemon brings this parked
   // workspace's session back up, absent otherwise. See RosterRowReviving,

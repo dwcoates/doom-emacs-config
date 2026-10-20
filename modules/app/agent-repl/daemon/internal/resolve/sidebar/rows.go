@@ -102,6 +102,10 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if viewed {
 		out.Viewed = &frontendv1.RosterRowViewed{}
 	}
+	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowIdleAsyncUnread` states
+	// it: set while the row is idle_async over an unread turn end, resolved from
+	// the same read fact as the viewed marker above.
+	out.IdleAsyncUnread = idleAsyncUnreadMarker(s, armName, rowLog)
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowReviving` states it: set
 	// while the revival is in flight, omitted otherwise.
 	if s.reviving {
