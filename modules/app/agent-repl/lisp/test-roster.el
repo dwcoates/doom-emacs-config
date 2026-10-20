@@ -30,7 +30,8 @@
   "Return a decoded `RosterRow' plist for ID, NAME and STATUS.
 OVERRIDES is a plist merged over the defaults: `:closed', `:children' (the
 row's family, recorded through `agent-repl-test--with-family'),
-`:attention', `:priority', `:viewed', `:detached-live', `:one-shot'
+`:attention', `:priority', `:viewed', `:idle-async-unread' (a turn-end
+arm keyword), `:detached-live', `:one-shot'
 \(non-nil for a one-shot), `:async-merging' (non-nil while the branch
 merges async), `:current', `:dir', `:availability' (an arm keyword,
 default `:available')."
@@ -40,6 +41,7 @@ default `:available')."
           :attention (plist-get overrides :attention)
           :priority (plist-get overrides :priority)
           :viewed (plist-get overrides :viewed)
+          :idle-async-unread (plist-get overrides :idle-async-unread)
           :detached-live (plist-get overrides :detached-live)
           :one-shot (and (plist-get overrides :one-shot) t)
           :async-merging (and (plist-get overrides :async-merging) t)
@@ -1836,6 +1838,35 @@ user's next sidebar click."
   "Before any push carried its row, a workspace carries no async-merging marker."
   (agent-repl-test-roster--with-editor
     (should-not (agent-repl-roster-async-merging-for-ws "one"))))
+
+(ert-deftest agent-repl-test-roster-row-idle-async-unread-reads-the-turn-end ()
+  "A row carrying `RosterRowIdleAsyncUnread' reads as its turn end."
+  (should (eq (agent-repl-roster-row-idle-async-unread
+               (agent-repl-test-roster--row "a" "one" :idle-async :idle-async-unread :done))
+              :done)))
+
+(ert-deftest agent-repl-test-roster-row-idle-async-unread-when-absent ()
+  "A row without the marker reads as no unread turn end."
+  (should-not (agent-repl-roster-row-idle-async-unread
+               (agent-repl-test-roster--row "a" "one" :idle-async))))
+
+(ert-deftest agent-repl-test-roster-idle-async-unread-for-ws-after-a-push ()
+  "After a push, a workspace's unread turn end is its current row's."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row
+                                     "a" "one" :idle-async :idle-async-unread :turn-failed))))))
+    ;; Assert
+    (should (eq (agent-repl-roster-idle-async-unread-for-ws "one") :turn-failed))))
+
+(ert-deftest agent-repl-test-roster-idle-async-unread-for-ws-before-any-push ()
+  "Before any push carried its row, a workspace has no unread turn end."
+  (agent-repl-test-roster--with-editor
+    (should-not (agent-repl-roster-idle-async-unread-for-ws "one"))))
 
 (defmacro agent-repl-test-roster--recording-viewed-clears (var &rest body)
   "Run BODY with the viewed-cleared hook recording each WS onto VAR."

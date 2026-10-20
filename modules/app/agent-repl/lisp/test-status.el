@@ -1828,6 +1828,72 @@ bar, and `name\=' on its own status ground (owner requests, 2026-10-13 and
         ;; Assert
         (should (equal (string-trim (substring-no-properties result)) "[1] ws1"))))))
 
+(defmacro agent-repl-test-status--with-unread-entry (state unread-end &rest body)
+  "Run BODY with tab \"ws1\" drawing STATE, its row carrying UNREAD-END as the
+unread-turn-end marker's turn end (nil for no marker)."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'agent-repl--ws-display-state) (lambda (_) ,state))
+             ((symbol-function 'agent-repl--ws-bracket-state) (lambda (_) :idle-async))
+             ((symbol-function 'agent-repl-roster-async-merging-for-ws) (lambda (_) nil))
+             ((symbol-function 'agent-repl-roster-idle-async-unread-for-ws) (lambda (_) ,unread-end))
+             ((symbol-function 'agent-repl--tab-badge-str) (lambda (&rest _) nil)))
+     ,@body))
+
+(ert-deftest agent-repl-test-tab-name-state-takes-the-unread-turn-end ()
+  "A FULL idle_async tab over an unread turn end draws its name in that turn end's state."
+  (dolist (end '(:done :interrupted :turn-failed))
+    (cl-letf (((symbol-function 'agent-repl-roster-idle-async-unread-for-ws) (lambda (_) end)))
+      (should (eq (agent-repl--tab-name-state "ws1" :idle-async) end)))))
+
+(ert-deftest agent-repl-test-tab-name-state-keeps-idle-async-once-read ()
+  "A FULL idle_async tab with no unread turn end keeps the idle_async state."
+  (cl-letf (((symbol-function 'agent-repl-roster-idle-async-unread-for-ws) (lambda (_) nil)))
+    (should (eq (agent-repl--tab-name-state "ws1" :idle-async) :idle-async))))
+
+(ert-deftest agent-repl-test-tab-name-state-leaves-a-partial-tab-alone ()
+  "A PARTIAL tab (nil display state) keeps its uncolored name whatever the marker."
+  (cl-letf (((symbol-function 'agent-repl-roster-idle-async-unread-for-ws) (lambda (_) :done)))
+    (should-not (agent-repl--tab-name-state "ws1" nil))))
+
+(ert-deftest agent-repl-test-render-tab-entry-unread-turn-end-greens-the-name-only ()
+  "An idle_async tab over an unread done reads yellow `[N]\=' then a green name
+\(owner request, 2026-10-20)."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--with-unread-entry :idle-async :done
+      ;; Act
+      (let* ((result (agent-repl--render-tab-entry "ws1" "other" 1))
+             (bracket-pos (string-match "\\[" result))
+             (name-pos (string-match "ws1" result)))
+        ;; Assert
+        (should (equal (plist-get (get-text-property bracket-pos 'face result) :background)
+                       agent-repl--color-idle-async-yellow))
+        (should (eq (get-text-property name-pos 'face result)
+                    (agent-repl--tab-face :done nil)))))))
+
+(ert-deftest agent-repl-test-render-tab-entry-read-idle-async-is-yellow-throughout ()
+  "An idle_async tab whose result is read draws its name in the idle_async face."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--with-unread-entry :idle-async nil
+      ;; Act
+      (let* ((result (agent-repl--render-tab-entry "ws1" "other" 1))
+             (name-pos (string-match "ws1" result)))
+        ;; Assert
+        (should (eq (get-text-property name-pos 'face result)
+                    (agent-repl--tab-face :idle-async nil)))))))
+
+(ert-deftest agent-repl-test-render-tab-entry-selected-unread-turn-end-keeps-the-selection-name ()
+  "A SELECTED idle_async tab draws the same name face with or without the marker."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((name-face (lambda (unread-end)
+                       (agent-repl-test-status--with-unread-entry :idle-async unread-end
+                         (let ((result (agent-repl--render-tab-entry "ws1" "ws1" 1)))
+                           (get-text-property (string-match "ws1" result) 'face result))))))
+      ;; Act / Assert
+      (should (equal (funcall name-face :done) (funcall name-face nil))))))
+
 (ert-deftest agent-repl-test-render-tab-entry-selected-foreground-clears-the-floor ()
   "A rendered SELECTED tab's bracket and name foregrounds both clear
 `agent-repl-tab-contrast-floor' against the selection grey."

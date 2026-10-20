@@ -36,8 +36,8 @@ the user views the workspace, the whole row and tab go back to yellow.
     render as the status, from `s.resultUnreadNow()` and `s.turnEndArm()`.
   - The webapp sidebar (`webapp/src/sidebar/row.ts`) inks the name with the
     turn end's tone class while the row keeps the `idle_async` tone on its dot.
-  - The Emacs tab bar (`lisp/status.el`) paints the name half of the tab with
-    the turn end's palette colors while `[N]` keeps the yellow. A tab already
+  - The Emacs tab bar (`lisp/status.el`, `agent-repl--tab-name-state`) draws the tab name with
+    the turn end's face while `[N]` keeps the yellow. A tab already
     drawn bracket-only (panels closed) has no colored name half, so the marker
     changes nothing there.
   - The elisp wire codec (`lisp/wire-roster.el`) must decode the field,

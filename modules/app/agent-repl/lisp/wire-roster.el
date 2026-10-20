@@ -131,6 +131,31 @@ daemon also raises it by itself when a /clear or compaction completes."
   (agent-repl-wire--decode-empty "RosterRowViewed" value)
   t)
 
+(defconst agent-repl-wire-roster-row-idle-async-unread-arms
+  '((done :done agent-repl-wire-decode-roster-row-status-done)
+    (interrupted :interrupted agent-repl-wire-decode-roster-row-status-interrupted)
+    (turnFailed :turn-failed agent-repl-wire-decode-roster-row-status-turn-failed))
+  "`RosterRowIdleAsyncUnread.turn_end''s arm table: (WIRE-KEY ARM-KEYWORD DECODER).
+Each arm is the turn end's own status arm message, so its keyword is the
+status arm keyword the tab bar\='s palette is keyed by.")
+
+(defun agent-repl-wire-decode-roster-row-idle-async-unread (value)
+  "Decode VALUE as `RosterRowIdleAsyncUnread' and return the turn end\='s arm.
+The UNREAD-TURN-END marker of an `idle_async' row: the result of that turn
+end stands unread under the background.  Returns `:done', `:interrupted'
+or `:turn-failed', the status arm keyword the turn end draws once the
+background ends.  An unset oneof is refused: the producer always names
+the turn end, and a color guessed here would be a second answer to a
+question only the daemon answers."
+  (let ((object (agent-repl-wire--object "RosterRowIdleAsyncUnread" value)))
+    (agent-repl-wire--check-keys
+     "RosterRowIdleAsyncUnread" object
+     (mapcar #'car agent-repl-wire-roster-row-idle-async-unread-arms))
+    (plist-get (agent-repl-wire--decode-oneof
+                "RosterRowIdleAsyncUnread" 'turn_end object
+                agent-repl-wire-roster-row-idle-async-unread-arms)
+               :arm)))
+
 (defun agent-repl-wire-decode-roster-row-reviving (value)
   "Decode VALUE as `RosterRowReviving' and return t.
 The REVIVING marker: the daemon is bringing this parked workspace's
@@ -676,13 +701,14 @@ unknown field by the row's key check."
    "RosterRow" 'status value agent-repl-wire-roster-row-status-arms))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed reviving detachedLive oneShot opening asyncMerging mergePaused lastSelected lastTurnEnded closure lastUpdated availability name current when detail closed)
+  (append '(workspace attention priority viewed idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused lastSelected lastTurnEnded closure lastUpdated availability name current when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
-Returns `(:workspace W :attention A :priority P :viewed V :reviving R
+Returns `(:workspace W :attention A :priority P :viewed V
+:idle-async-unread IU :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
 :merge-paused MP :last-selected L :last-turn-ended LT :closure CL
 :last-updated LU
@@ -695,6 +721,7 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
     (agent-repl-wire--check-keys "RosterRow" object agent-repl-wire--roster-row-keys)
     (agent-repl-wire--decoded
      "RosterRow"
+     (agent-repl-wire--check-roster-row-idle-async-unread
      (list :workspace (agent-repl-wire--decode-message
                        "RosterRow" 'workspace object
                        #'agent-repl-wire-decode-roster-row-workspace)
@@ -707,6 +734,9 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
            :viewed (agent-repl-wire--decode-optional-message
                     "RosterRow" 'viewed object
                     #'agent-repl-wire-decode-roster-row-viewed)
+           :idle-async-unread (agent-repl-wire--decode-optional-message
+                               "RosterRow" 'idleAsyncUnread object
+                               #'agent-repl-wire-decode-roster-row-idle-async-unread)
            :reviving (agent-repl-wire--decode-optional-message
                       "RosterRow" 'reviving object
                       #'agent-repl-wire-decode-roster-row-reviving)
@@ -755,7 +785,20 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
                     #'agent-repl-wire-decode-roster-row-detail)
            :closed (agent-repl-wire--decode-message
                     "RosterRow" 'closed object
-                    #'agent-repl-wire-decode-roster-row-closed)))))
+                    #'agent-repl-wire-decode-roster-row-closed))))))
+
+(defun agent-repl-wire--check-roster-row-idle-async-unread (row)
+  "Return the decoded ROW, refusing an unread-turn-end marker off `idle_async'.
+`RosterRowIdleAsyncUnread' stands only on an `idle_async' row; one on any
+other arm is a contract breach, refused loudly rather than drawn."
+  (let ((end (plist-get row :idle-async-unread))
+        (arm (plist-get (plist-get row :status) :arm)))
+    (when (and end (not (eq arm :idle-async)))
+      (agent-repl-wire--fail
+       "RosterRow" 'idle_async_unread
+       (format "the marker (turn end %s) stands on status %s, and only an idle_async row may carry it"
+               end arm)))
+    row))
 
 ;;;; ---- The lists' rows ----
 ;;

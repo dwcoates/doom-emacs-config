@@ -1145,6 +1145,20 @@ spoken about WS, exactly as `agent-repl-status-tab-state\=' is."
                               ws merging)
     merging))
 
+(defun agent-repl-status-tab-unread-turn-end (ws)
+  "Return the unread turn end under WS\='s `idle_async' row, or nil.
+The marker (`RosterRowIdleAsyncUnread\=') is the daemon\='s: WS is in the
+background over a turn end whose result the user has not read.  Returns
+that turn end\='s status arm keyword (`:done\=', `:interrupted\=' or
+`:turn-failed\='), nil before the roster has spoken about WS or while the
+row carries no marker, exactly as `agent-repl-status-tab-state\=' is."
+  (let ((end (and (fboundp 'agent-repl-roster-idle-async-unread-for-ws)
+                  (agent-repl-roster-idle-async-unread-for-ws ws))))
+    (agent-repl--log-decision (list 'tab-unread-turn-end ws) end
+                              ws "elisp.status.tab-unread-turn-end: ws=%s turn-end=%s"
+                              ws end)
+    end))
+
 (defun agent-repl-status-tab-color (arm)
   "Return the color NAME the tab bar paints ARM with, or \"none\".
 Reads `agent-repl-status-tab-bar-color-table', which is the shared
@@ -2152,6 +2166,22 @@ Set on every character of a tab entry by `agent-repl--render-tab-entry'
 and read by `agent-repl--tabline-items', which splits the tabline into
 one clickable tab-bar item per entry.")
 
+(defun agent-repl--tab-name-state (ws display-state)
+  "Return the palette state whose face draws WS\='s tab NAME.
+DISPLAY-STATE is WS\='s `agent-repl--ws-display-state\='.  It is that
+state, except on a FULL `idle_async\=' tab whose row carries the
+unread-turn-end marker (`agent-repl-status-tab-unread-turn-end\='): there
+the name takes the unread turn end\='s state (`:done\=', `:interrupted\='
+or `:turn-failed\='), so a background workspace over an unread result
+reads as a yellow `[N]\=' then a green name until a dwell reads the
+result and the daemon drops the marker (owner request, 2026-10-20).  The
+bracket is untouched: it keeps the `idle_async\=' yellow.  A PARTIAL tab
+\(nil DISPLAY-STATE) draws its name uncolored already, so the marker
+changes nothing there."
+  (if (eq display-state :idle-async)
+      (or (agent-repl-status-tab-unread-turn-end ws) display-state)
+    display-state))
+
 (defun agent-repl--render-tab-entry (name current-name index)
   "Render a single tab entry for workspace NAME.
 CURRENT-NAME is the active workspace name.  INDEX is the 1-based tab
@@ -2166,7 +2196,9 @@ arm's color.  The bracket label is the tab's 1-based INDEX and nothing
 else: state reaches the bracket as COLOR.  While the row carries the
 async-merging marker the `[N]' bracket takes the async-merge purple
 instead \(`agent-repl--tab-spec-async-merge'), and the space after it and
-the name keep the status.
+the name keep the status.  While a FULL `idle_async' tab carries the
+unread-turn-end marker, the `[N]' bracket keeps the yellow and the name
+takes the unread turn end's color \(`agent-repl--tab-name-state').
 
 The badge run — the roster's priority label and the arm's glyph — is
 drawn BEFORE the name.
@@ -2194,7 +2226,9 @@ the selection highlight and the next step brings it back."
                             (agent-repl--tab-spec-async-merge spec)
                           spec))
          (label         (number-to-string index))
-         (face          (agent-repl--tab-face display-state selected))
+         (face          (agent-repl--tab-face
+                         (agent-repl--tab-name-state name display-state)
+                         selected))
          (badge         (agent-repl--tab-badge-str
                          name (or display-state bracket-state))))
     (propertize (agent-repl--render-tab name spec label face badge)

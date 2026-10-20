@@ -63,6 +63,7 @@ status arm and whatever else the case is about."
                    :attention nil
                    :priority nil
                    :viewed nil
+                   :idle-async-unread nil
                    :reviving nil
                    :detached-live nil
                    :one-shot nil
@@ -115,6 +116,35 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"ready\":{}" "\"asyncMerging\":{\"repo\":{}}"))
                  '("RosterRowAsyncMerging" repo "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-idle-async-unread-marker ()
+  "A row carrying `idleAsyncUnread\=' decodes it as the turn end\='s arm keyword."
+  (dolist (case '(("done" . :done) ("interrupted" . :interrupted) ("turnFailed" . :turn-failed)))
+    ;; Act
+    (let ((row (agent-repl-test-wire-roster--decode
+                #'agent-repl-wire-decode-roster-row
+                (agent-repl-test-wire-roster--row
+                 "\"idleAsync\":{}"
+                 (format "\"idleAsyncUnread\":{\"%s\":{}}" (car case))))))
+      ;; Assert
+      (should (eq (plist-get row :idle-async-unread) (cdr case))))))
+
+(ert-deftest agent-repl-test-wire-roster-row-idle-async-unread-marker-names-a-turn-end ()
+  "`RosterRowIdleAsyncUnread\=' with no turn end set is a contract breach."
+  ;; Act / Assert
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row "\"idleAsync\":{}" "\"idleAsyncUnread\":{}"))
+                 '("RosterRowIdleAsyncUnread" turn_end "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-idle-async-unread-marker-only-on-idle-async ()
+  "The unread-turn-end marker on any arm but `idle_async\=' is a contract breach."
+  ;; Act
+  (let ((breach (agent-repl-test-wire-roster--breach
+                 #'agent-repl-wire-decode-roster-row
+                 (agent-repl-test-wire-roster--row "\"done\":{}" "\"idleAsyncUnread\":{\"done\":{}}"))))
+    ;; Assert
+    (should (equal (seq-take breach 2) '("RosterRow" idle_async_unread)))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-merge-paused-marker ()
   "A row carrying `mergePaused\=' decodes it as PRESENT, beside its status arm."
