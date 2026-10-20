@@ -271,6 +271,7 @@ for metrics that show where restart time goes and when it regressed):
 | `service_restart` | `store` (its sidecar with it), `sidecar` | | `deploy.Restarter`, for a deploy and a boot alike |
 | `workspace_start` | `start`, `wake` | `boot`, `takeover`, `editor_open` | the bring-up, per workspace |
 | `session_start` | `shim`, `slot_wait`, `vendor`, `watch`, `total`, each its own duration (`slot_wait` and `vendor` once per attempt) | `fresh`, `resume`, `wake`, `adopted`, `relaunch`, `cold_answer` | the session fleet, per workspace, whoever asked for the start |
+| `editor_start` | `init`, `daemon_linked`, `first_tab`, `all_tabs`, each from the Emacs process's start | `spawned`, `running` | Emacs, reported through `ReportLatencies` once its startup's open ends |
 | `shim_restart` | `wait`, `prelaunch`, `stand_down`, `resume`, `run` | the relaunch reason (`build_stale`, `restart_verb`, `query_died`, `shim_log_hard_ceiling`) | the rollout's bounce engine, per workspace |
 | `handover_transfer` | `wait`, `run` | | the outgoing daemon, per workspace |
 | `workspace_reconnect` | `host`, `web` | `cold`, `successor`, `webapp_reload` | the daemon, per workspace: from a boot's start, a handover's manifest or a webview reload's push until the workspace's Emacs host or webview stream opens on it |
@@ -281,5 +282,6 @@ Not built, each recorded with its reason:
   the webapp (`docs/protobuf-design/runtime-metrics.md`, entry 8) and
   `workspace_open` is measured by the daemon (judgement call 16).
 - Vendor bytes: no shim counts them (judgement call 6).
-- Emacs reports no latency of its own (judgement call 8), so Emacs's own
-  restart (its launch, an elisp reload) is not timed (judgement call 9).
+- An elisp reload is not timed: Emacs keeps its streams across it, so
+  there is nothing to come back (judgement call 9). Emacs's own launch is
+  timed as `editor_start` (judgement call 17).
