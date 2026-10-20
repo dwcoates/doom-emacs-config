@@ -1067,7 +1067,8 @@ from the names alone:
 prompt (`SPC j RET`) names `SUBMIT_PROMPT_DELIVERY_DEFERRED`, so the queue holds
 it for the running turn's end unjudged, exactly as the rpc would. Unknown
 fields, another version, a relative directory, a missing key, an unspecified
-origin or a delivery this reader does not honor make the file malformed.
+origin, a delivery this reader does not honor or a `queued_at` that is not an
+RFC 3339 instant make the file malformed.
 
 The daemon sweeps the directory at start and every 250ms, in name order, and
 hands each entry to `prompthandler.Handler.Submit` — the rpc's own body — under
@@ -1093,6 +1094,19 @@ answers, WARN for an unregistered directory, ERROR for a fault) and at DEBUG on
 each retry of a kind already stated. The submission carries
 `prompthandler.WithRedrive`, so the queue records its own side of a standing
 refusal at DEBUG: the ingress's record is the one that says it.
+
+AN UNACCEPTED ENTRY IS DRAWN IN THE ROOT FEED'S HELD SECTION
+(`frontend.v1.FeedHeldItem.ingress`). After every sweep the ingress states each
+registered workspace's entries the queue did not accept
+(`holds.IngressSink.SetIngressPending`), each with what it waits on: not yet
+offered, behind an earlier entry, or the kind of the queue's last refusal. An
+entry the queue answered is dropped at once (`DropIngress`). The prompt handler
+CLAIMS a re-driven entry's key for its turn before the queue sees it
+(`ClaimIngress`), and the feed resolver drops a claimed entry in the very
+publication that draws that turn as a held prompt or a prompt row, so a page
+never sees the prompt in both places or in neither. While the page's root feed
+stream is down, the page draws Emacs's own list of the entries instead; once an
+`OpenFeed` answer is applied, this section is the only source.
 
 ONLY THE DAEMON THAT SERVES SWEEPS (`intakegate`, answered by
 `rollout.Controller.ServesIntake`): not a successor still joining, and not an

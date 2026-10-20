@@ -179,6 +179,30 @@ type fakeFeed struct {
 	mu       sync.Mutex
 	panels   []*frontendv1.FeedCommandPanel
 	refusals []refusal
+	claims   []ingressClaim
+}
+
+// ingressClaim is one ClaimIngress call.
+type ingressClaim struct {
+	Key  string
+	Turn ids.TurnID
+}
+
+func (f *fakeFeed) ClaimIngress(_ ids.WorkspaceID, key string, turn ids.TurnID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.claims = append(f.claims, ingressClaim{Key: key, Turn: turn})
+}
+
+func (f *fakeFeed) ingressClaims() []ingressClaim {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.claims) == 0 {
+		return nil
+	}
+	out := make([]ingressClaim, len(f.claims))
+	copy(out, f.claims)
+	return out
 }
 
 // refusal is one mirrored refusal card.

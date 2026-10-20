@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -52,8 +53,9 @@ type Entry struct {
 	Origin string `json:"origin"`
 	// Said is the composed UserSaid in protojson.
 	Said json.RawMessage `json:"said"`
-	// QueuedAt is when the producer wrote the entry. It is carried for the
-	// record only; order is the file name's.
+	// QueuedAt is when the producer wrote the entry, an RFC 3339 instant. It
+	// is what the entry's held-section card says it was queued at; order is
+	// the file name's.
 	QueuedAt string `json:"queued_at"`
 	// Delivery is the SubmitPromptDelivery value NAME, as protojson spells
 	// it, empty for the ordinary delivery.
@@ -66,6 +68,7 @@ type decoded struct {
 	origin   conversationv1.PromptOrigin
 	said     *conversationv1.UserSaid
 	delivery wsm.Delivery
+	queuedAt time.Time
 }
 
 // parse decodes one entry file, refusing anything the ingress could only act
@@ -106,7 +109,11 @@ func parse(data []byte) (decoded, error) {
 	if err != nil {
 		return decoded{}, err
 	}
-	return decoded{Entry: entry, origin: conversationv1.PromptOrigin(value), said: said, delivery: delivery}, nil
+	queuedAt, err := time.Parse(time.RFC3339Nano, entry.QueuedAt)
+	if err != nil {
+		return decoded{}, fmt.Errorf("queued_at %q is not an RFC 3339 instant: %w", entry.QueuedAt, err)
+	}
+	return decoded{Entry: entry, origin: conversationv1.PromptOrigin(value), said: said, delivery: delivery, queuedAt: queuedAt}, nil
 }
 
 // deliveryOf reads an entry's delivery by its value NAME through the one

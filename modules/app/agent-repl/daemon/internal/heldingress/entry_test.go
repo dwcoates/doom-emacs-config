@@ -83,6 +83,7 @@ func TestParseRefusesAnEntryItCouldOnlyActOnByGuessing(t *testing.T) {
 		{name: "a said with no blocks", body: entryJSON(map[string]string{"said": `{"content":{"blocks":[]}}`}), wantCause: "no content blocks"},
 		{name: "a said that is not a UserSaid", body: entryJSON(map[string]string{"said": `{"words":"hi"}`}), wantCause: "decode said"},
 		{name: "an unknown field", body: entryJSON(map[string]string{"priority": `"high"`}), wantCause: "unknown field"},
+		{name: "a queued_at that is not an instant", body: entryJSON(map[string]string{"queued_at": `"yesterday"`}), wantCause: "queued_at"},
 		{name: "trailing data", body: entryJSON(nil) + `{}`, wantCause: "trailing data"},
 		{name: "a truncated document", body: entryJSON(nil)[:20], wantCause: "decode the entry"},
 		{name: "an unknown delivery", body: entryJSON(map[string]string{"delivery": `"SUBMIT_PROMPT_DELIVERY_NOPE"`}), wantCause: "not a delivery"},

@@ -85,6 +85,10 @@ const (
 	// message's own stable id (the vendor record uuid), so the two planes'
 	// deliveries of one message resolve to one row.
 	KindPeer RowKind = "peer"
+	// KindIngress is a held-section item for a held-prompt ingress entry the
+	// queue has not accepted. Keyed by the entry's idempotency key, because the
+	// turn it will run as does not exist until it is accepted.
+	KindIngress RowKind = "ingress"
 )
 
 // AllRowKinds is every row kind, in declaration order. Decode accepts exactly
@@ -104,6 +108,7 @@ var AllRowKinds = []RowKind{
 	KindShellHead,
 	KindSynth,
 	KindPeer,
+	KindIngress,
 }
 
 func knownKind(k RowKind) bool {

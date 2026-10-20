@@ -30,6 +30,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/intakegate"
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
 )
 
@@ -61,6 +62,9 @@ type Deps struct {
 	// an ingested prompt indistinguishable from a typed one — and what dedupes
 	// it by its idempotency key.
 	Prompts prompthandler.Handler
+	// Pending is the held section: told every workspace's unaccepted entries
+	// after each sweep, and each entry the queue answered at once.
+	Pending holds.IngressSink
 	// PublishHost re-pushes one workspace's host state. It is called AFTER an
 	// entry's file is removed, so a client re-counting the directory on that
 	// push reads the removal.
@@ -122,6 +126,8 @@ func New(deps Deps) (Ingress, error) {
 		return nil, fmt.Errorf("heldingress: the workspace lookup is required")
 	case deps.Prompts == nil:
 		return nil, fmt.Errorf("heldingress: the prompt handler is required")
+	case deps.Pending == nil:
+		return nil, fmt.Errorf("heldingress: the held section is required")
 	case deps.PublishHost == nil:
 		return nil, fmt.Errorf("heldingress: the host publisher is required")
 	case deps.Serves == nil:

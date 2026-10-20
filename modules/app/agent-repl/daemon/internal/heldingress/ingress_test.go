@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/flock"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
 )
 
@@ -27,6 +28,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			Dir:            w.dir,
 			WorkspaceByDir: w.ingressLookup(),
 			Prompts:        w.handler,
+			Pending:        w.pending,
 			PublishHost:    func(ids.WorkspaceID) {},
 			Serves:         func() bool { return true },
 			Log:            w.log,
@@ -39,6 +41,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "no directory", mutate: func(d *Deps) { d.Dir = "" }},
 		{name: "no workspace lookup", mutate: func(d *Deps) { d.WorkspaceByDir = nil }},
 		{name: "no prompt handler", mutate: func(d *Deps) { d.Prompts = nil }},
+		{name: "no held section", mutate: func(d *Deps) { d.Pending = nil }},
 		{name: "no host publisher", mutate: func(d *Deps) { d.PublishHost = nil }},
 		{name: "no log surfaces", mutate: func(d *Deps) { d.Log = nil }},
 		{name: "no serving answer", mutate: func(d *Deps) { d.Serves = nil }},
@@ -441,6 +444,7 @@ func TestRunSweepsAtStartBeforeTheFirstTick(t *testing.T) {
 		Dir:            w.dir,
 		WorkspaceByDir: w.ingressLookup(),
 		Prompts:        w.handler,
+		Pending:        w.pending,
 		PublishHost:    func(ws ids.WorkspaceID) { published <- ws },
 		Serves:         func() bool { return true },
 		Log:            w.log,
@@ -571,5 +575,179 @@ func TestSweepSubmitsAnEntryUnderItsOwnDelivery(t *testing.T) {
 				t.Fatalf("submissions = %+v, want one delivered %s", w.handler.calls, tc.want)
 			}
 		})
+	}
+}
+
+// keysAndWaits lists ENTRIES' keys and wait kinds, in order.
+func keysAndWaits(entries []holds.IngressEntry) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, fmt.Sprintf("%s:%d:%s", e.Key, e.Wait.Kind, e.Wait.Detail))
+	}
+	return out
+}
+
+func TestARefusedEntryIsStatedPendingWithWhatItWaitsOn(t *testing.T) {
+	tests := []struct {
+		name     string
+		refusal  error
+		wantWait holds.IngressWait
+	}{
+		{name: "no session", refusal: promptqueue.ErrNoSession, wantWait: holds.IngressWait{Kind: holds.IngressNoSession}},
+		{name: "a merge", refusal: promptqueue.ErrMerging, wantWait: holds.IngressWait{Kind: holds.IngressMerge}},
+		{name: "a cold gate", refusal: promptqueue.ErrColdGate, wantWait: holds.IngressWait{Kind: holds.IngressColdGate}},
+		{name: "a move away", refusal: bounce.ErrMovedAway, wantWait: holds.IngressWait{Kind: holds.IngressMovedAway}},
+		{name: "a fault", refusal: errors.New("boom"), wantWait: holds.IngressWait{Kind: holds.IngressRefused, Detail: "the daemon could not queue this prompt and keeps trying"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			w := newWorld(t)
+			w.handler.refuse["k-1"] = tc.refusal
+			w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
+
+			// Act
+			w.sweep(w.ingress())
+
+			// Assert
+			got, ok := w.pending.lastSet("ws-one")
+			if !ok || len(got) != 1 {
+				t.Fatalf("stated entries = %+v (stated %v), want the refused entry", got, ok)
+			}
+			if got[0].Key != "k-1" || got[0].Wait != tc.wantWait {
+				t.Fatalf("stated entry = %s, want k-1 waiting on %+v", keysAndWaits(got), tc.wantWait)
+			}
+		})
+	}
+}
+
+func TestAPendingEntryCarriesItsSaidAndQueuedAt(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.handler.refuse["k-1"] = promptqueue.ErrNoSession
+	w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
+
+	// Act
+	w.sweep(w.ingress())
+
+	// Assert
+	got, _ := w.pending.lastSet("ws-one")
+	if len(got) != 1 {
+		t.Fatalf("stated entries = %+v, want one", got)
+	}
+	if text := got[0].Said.GetContent().GetBlocks()[0].GetText().GetText(); text != "first" {
+		t.Fatalf("said text = %q, want first", text)
+	}
+	if want := time.Date(2026, 9, 28, 11, 59, 0, 0, time.UTC); !got[0].QueuedAt.Equal(want) {
+		t.Fatalf("queued at = %v, want %v", got[0].QueuedAt, want)
+	}
+}
+
+func TestAnEntryBehindAWaitingOneIsStatedWaitingBehindIt(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.handler.refuse["k-1"] = promptqueue.ErrMerging
+	w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
+	w.write("held_20260928T120002_b.json", "/work/one", "k-2", "second")
+
+	// Act
+	w.sweep(w.ingress())
+
+	// Assert
+	got, _ := w.pending.lastSet("ws-one")
+	want := []string{
+		fmt.Sprintf("k-1:%d:", holds.IngressMerge),
+		fmt.Sprintf("k-2:%d:%s", holds.IngressAwaitingIntake, behindEarlier.Detail),
+	}
+	if !reflect.DeepEqual(keysAndWaits(got), want) {
+		t.Fatalf("stated entries = %v, want %v", keysAndWaits(got), want)
+	}
+}
+
+func TestAnEntryWhoseRetryIsNotDueKeepsWhatItLastWaitedOn(t *testing.T) {
+	// Arrange: the first sweep is refused for want of a session.
+	w := newWorld(t)
+	w.handler.refuse["k-1"] = promptqueue.ErrNoSession
+	w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
+	in := w.ingress()
+	w.sweep(in)
+
+	// Act: a second sweep before the retry is due.
+	w.sweep(in)
+
+	// Assert
+	if calls := len(w.handler.calls); calls != 1 {
+		t.Fatalf("submissions = %d, want the retry not yet made", calls)
+	}
+	got, _ := w.pending.lastSet("ws-one")
+	if want := []string{fmt.Sprintf("k-1:%d:", holds.IngressNoSession)}; !reflect.DeepEqual(keysAndWaits(got), want) {
+		t.Fatalf("stated entries = %v, want %v", keysAndWaits(got), want)
+	}
+}
+
+func TestAnEntryTheQueueAnsweredIsDroppedAndNeverStatedPending(t *testing.T) {
+	tests := []struct {
+		name   string
+		accept bool
+	}{
+		{name: "accepted now", accept: false},
+		{name: "already accepted", accept: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			w := newWorld(t)
+			w.handler.accepted["k-1"] = tc.accept
+			w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
+
+			// Act
+			w.sweep(w.ingress())
+
+			// Assert
+			want := []pendingCall{{Op: "drop", WS: "ws-one", Key: "k-1"}}
+			if !reflect.DeepEqual(w.pending.calls, want) {
+				t.Fatalf("held-section calls = %+v, want only the drop", w.pending.calls)
+			}
+		})
+	}
+}
+
+func TestAWorkspaceWithNoEntriesLeftIsStatedEmptyOnce(t *testing.T) {
+	// Arrange: a refused entry is stated, then accepted.
+	w := newWorld(t)
+	w.handler.refuse["k-1"] = promptqueue.ErrNoSession
+	w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
+	in := w.ingress()
+	w.sweep(in)
+	delete(w.handler.refuse, "k-1")
+	w.now = w.now.Add(time.Hour)
+
+	// Act: the sweep that accepts it, and one more with nothing left.
+	w.sweep(in)
+	w.sweep(in)
+
+	// Assert
+	var sets []int
+	for _, c := range w.pending.calls {
+		if c.Op == "set" {
+			sets = append(sets, len(c.Entries))
+		}
+	}
+	if !reflect.DeepEqual(sets, []int{1, 0}) {
+		t.Fatalf("stated list sizes = %v, want the entry, then the empty list once", sets)
+	}
+}
+
+func TestAnEntryOfAnUnregisteredDirectoryIsNeverStated(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.write("held_20260928T120001_a.json", "/work/nowhere", "k-1", "first")
+
+	// Act
+	w.sweep(w.ingress())
+
+	// Assert
+	if len(w.pending.calls) != 0 {
+		t.Fatalf("held-section calls = %+v, want none: no workspace has a feed to draw it on", w.pending.calls)
 	}
 }
