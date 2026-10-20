@@ -501,6 +501,15 @@ The top bar's effort selector sits between the model selector and the permission
   - A section left with no match is hidden until the search changes.
 - **Pressing the magnifier again, or `Escape` in the bar, closes it and shows everything again.**
 
+## The tab bar shows only while the agent panels are closed
+
+- **The workspace tab bar at the top of the frame is hidden while the agent webview is on screen.**
+  - The webview already shows which workspace you are in.
+- **It comes back as soon as the webview leaves the frame.**
+  - Closing the panels with `SPC o c`.
+  - Opening a file that takes the whole frame.
+  - Any other layout change that drops the webview window.
+
 ## Switching workspaces from the keyboard
 
 - **`SPC p p` lists the workspaces you are working with now.**
