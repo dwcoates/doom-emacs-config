@@ -10,16 +10,28 @@ package logging
 // cannot own that answer for each other. The answer belongs with the other
 // facts every runtime must answer identically, so it is hoisted here.
 //
-// Every consumer appends to what it finds and rolls ONLY at the cap. A deploy,
-// crash, or ordinary process restart never consumes a history generation.
+// Every consumer appends to what it finds and rolls ONLY at the cap or at
+// expiry (retention.go). A deploy, crash, or ordinary process restart never
+// consumes a history generation.
+//
+// THE CURRENT GENERATION IS HELD UNDER A SHARED flock FOR AS LONG AS IT IS
+// OPEN. That lock is how a pruner in ANY process tells a family somebody still
+// writes from one nobody does (PruneDirectory): it is attached to the open file
+// description, so a child that inherits the descriptor (the shim's fd 3) holds
+// it too, and the kernel drops it with the last holder. A roll never leaves the
+// family unlocked: the current file is renamed into slot 1 while still open and
+// locked, and the retiring descriptor is closed only after the fresh one is.
 
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
+	"syscall"
+	"time"
 )
 
 // DefaultCapBytes is how large one generation may grow before the writer
@@ -38,9 +50,10 @@ const DefaultBackups = 5
 // It is safe for concurrent use: a logging package that serializes its own
 // records still shares this writer with whatever else holds it.
 type RotatingFile struct {
-	path    string
-	cap     int64
-	backups int
+	path      string
+	cap       int64
+	backups   int
+	retention time.Duration
 
 	mu   sync.Mutex
 	f    *os.File
@@ -81,9 +94,9 @@ func OpenRotating(path string, capBytes int64, backups int) (*RotatingFile, erro
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create rotating log directory %q: %w", dir, err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := openLocked(path)
 	if err != nil {
-		return nil, fmt.Errorf("open rotating log %q: %w", path, err)
+		return nil, err
 	}
 	info, err := f.Stat()
 	if err != nil {
@@ -93,7 +106,60 @@ func OpenRotating(path string, capBytes int64, backups int) (*RotatingFile, erro
 		}
 		return nil, statErr
 	}
-	return &RotatingFile{path: path, cap: capBytes, backups: backups, f: f, size: info.Size()}, nil
+	return &RotatingFile{path: path, cap: capBytes, backups: backups, retention: DefaultRetention, f: f, size: info.Size()}, nil
+}
+
+// openLocked opens path for append and takes the shared lock on it, then
+// checks that the path STILL names the file it locked. A pruner that holds the
+// exclusive lock may unlink the path between this open and this lock; the
+// check catches that, and the second open creates a fresh file no pruner can
+// take (a fresh file is not expired). A second miss is therefore not a race to
+// wait out but a broken invariant, and it is refused.
+func openLocked(path string) (*os.File, error) {
+	for attempt := 1; attempt <= 2; attempt++ {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return nil, fmt.Errorf("open rotating log %q: %w", path, err)
+		}
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
+			return nil, closeAfter(f, fmt.Errorf("lock rotating log %q: %w", path, err))
+		}
+		same, err := namesFile(path, f)
+		if err != nil {
+			return nil, closeAfter(f, err)
+		}
+		if same {
+			return f, nil
+		}
+		if err := f.Close(); err != nil {
+			return nil, fmt.Errorf("close rotating log %q after a pruner replaced it: %w", path, err)
+		}
+	}
+	return nil, fmt.Errorf("open rotating log %q: the path named a different file after each of two locked opens", path)
+}
+
+// namesFile answers whether path names the file f has open.
+func namesFile(path string, f *os.File) (bool, error) {
+	held, err := f.Stat()
+	if err != nil {
+		return false, fmt.Errorf("stat the open rotating log %q: %w", path, err)
+	}
+	named, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("stat rotating log path %q: %w", path, err)
+	}
+	return os.SameFile(held, named), nil
+}
+
+// closeAfter closes f and answers cause joined with any close failure.
+func closeAfter(f *os.File, cause error) error {
+	if err := f.Close(); err != nil {
+		return errors.Join(cause, fmt.Errorf("close %q: %w", f.Name(), err))
+	}
+	return cause
 }
 
 // Path answers the current generation's path.
@@ -133,22 +199,27 @@ func (r *RotatingFile) Roll() error {
 	return r.rollLocked()
 }
 
-// rollLocked closes the current generation, shifts the retained generations
-// down one slot, and opens a fresh file. Caller holds mu.
+// rollLocked shifts the retained generations down one slot, moving the
+// current file into slot 1 WHILE IT IS STILL OPEN AND LOCKED, opens and locks a
+// fresh current file, and only then closes the retiring descriptor: at every
+// instant some file of the family carries this writer's lock. A failed roll
+// leaves the writer closed, so every later write is refused rather than lost.
+// Caller holds mu.
 func (r *RotatingFile) rollLocked() error {
-	if err := r.f.Close(); err != nil {
-		return fmt.Errorf("close rotating log %q at the cap: %w", r.path, err)
-	}
+	retiring := r.f
 	r.f = nil
 	if err := rotateGenerations(r.path, r.backups); err != nil {
-		return err
+		return closeAfter(retiring, err)
 	}
-	f, err := os.OpenFile(r.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := openLocked(r.path)
 	if err != nil {
-		return fmt.Errorf("reopen rotating log %q at the cap: %w", r.path, err)
+		return closeAfter(retiring, fmt.Errorf("reopen rotating log after the roll: %w", err))
 	}
 	r.f = f
 	r.size = 0
+	if err := retiring.Close(); err != nil {
+		return fmt.Errorf("close the retired generation of rotating log %q: %w", r.path, err)
+	}
 	return nil
 }
 
@@ -196,14 +267,14 @@ func removeIfPresent(path string) error {
 	return nil
 }
 
+// renameIfPresent moves from onto to. An absent from is the rename's own
+// answer rather than a separate stat's, so a generation a pruner removed an
+// instant earlier is absent and not a failure.
 func renameIfPresent(from, to string) error {
-	if _, err := os.Lstat(from); err != nil {
-		if os.IsNotExist(err) {
+	if err := os.Rename(from, to); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
-		return fmt.Errorf("stat rotating log %q while rolling: %w", from, err)
-	}
-	if err := os.Rename(from, to); err != nil {
 		return fmt.Errorf("roll rotating log %q to %q: %w", from, to, err)
 	}
 	return nil
