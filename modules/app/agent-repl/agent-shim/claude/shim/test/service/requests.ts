@@ -76,6 +76,10 @@ export function sendKeepaliveRequest(): shimv1.SendKeepaliveRequest {
   return create(shimv1.SendKeepaliveRequestSchema, {});
 }
 
+export function retryVendorErrorNowRequest(): shimv1.RetryVendorErrorNowRequest {
+  return create(shimv1.RetryVendorErrorNowRequestSchema, {});
+}
+
 export function killSessionRequest(): shimv1.KillSessionRequest {
   return create(shimv1.KillSessionRequestSchema, { force: false });
 }

@@ -1,19 +1,24 @@
 /**
  * engine/vendor-error-retry.ts — retrying a main-agent turn the vendor ended on
- * an API error after its own retries ran out, or on an exhausted usage
- * allowance.
+ * a retryable API failure, or on an exhausted usage allowance.
+ *
+ * AGENT-REPL OWNS THE RETRY CADENCE (owner ruling, 2026-10-20). The vendor
+ * runs with its own in-process API retries OFF (sdk/real-query.ts sets
+ * `CLAUDE_CODE_MAX_RETRIES=0`), so a failed API call ends the turn at once and
+ * every retry is made here, where the footer can count down to it and the
+ * user can ask for it now (shim.v1.RetryVendorErrorNow).
  *
  * THE RULE.
  *
- * - A RETRIED API FAILURE is retried every
+ * - A RETRYABLE API FAILURE is retried every
  *   {@link VENDOR_ERROR_RETRY_INTERVAL_MS} for
  *   {@link VENDOR_ERROR_RETRY_WINDOW_MS}. It qualifies when the turn's
- *   terminal is `AgentFailure.api_request_failed` AND the vendor stated
- *   `api_retry` during the turn: the vendor judged the failure retryable,
- *   retried it (ten times, by its own default), and gave up. The window is
- *   measured from the chain's first `api_retry`; a retry that would start past
- *   it is not made. A refusal the vendor never retried (a 400, an auth or
- *   billing refusal) is not retried here either.
+ *   terminal is `AgentFailure.api_request_failed` of a kind waiting can cure
+ *   ({@link isRetryableApiFailure}): an overload, the API's own error, a
+ *   failure with no status (the connection), or a status the vendor itself
+ *   retries. The window is measured from the chain's first failure; a retry
+ *   that would start past it is not made. A refusal of the request itself (a
+ *   400, an auth, permission or billing refusal) is never retried.
  * - AN EXHAUSTED USAGE ALLOWANCE IS NEVER RETRIED ON THAT CADENCE: asking
  *   before the allowance resets cannot succeed. A usage-limit failure (a 429,
  *   `blocking_limit`, `rapid_refill_breaker`: the set the daemon's footer
@@ -22,29 +27,35 @@
  *   made at the moment the exhausted window resets: the five-hour session
  *   window, or a weekly one. Should the vendor still refuse once that moment
  *   has passed, the retry repeats every {@link VENDOR_ERROR_RETRY_INTERVAL_MS}
- *   for {@link USAGE_LIMIT_RETRY_TAIL_MS} after it. A usage-limit failure with
- *   no exhausted window on record falls to the rule above.
+ *   for {@link USAGE_LIMIT_RETRY_TAIL_MS} after it. A 429 with no exhausted
+ *   window on record is a passing rate limit, retried by the rule above.
  * - EVERY RETRY asks the main agent to continue, as an adopted turn of the
  *   shim's own (engine/session.ts `deliverShimPrompt`).
+ * - THE SCHEDULE IS STATED, whole, every time it changes
+ *   (conversation.v1.SessionVendorErrorRetry): the retry made next, when, and
+ *   the failure it retries; or none, while no retry is due.
+ * - A RETRY CAN BE MADE AT ONCE ({@link VendorErrorRetry.retryNow}): the
+ *   pending one is delivered now instead of at its instant.
  * - THE CHAIN ENDS on the first retry turn that ends any other way (answered,
  *   interrupted, a failure neither rule retries), on a prompt someone else
  *   submits (the session is theirs again; a prompt of theirs that fails the
  *   same way opens a fresh chain), and at stand-down.
  * - ONE TIMER, and it exists only while a retry is due.
  */
+import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
-import type { conversationv1 } from "../proto.js";
-import type { AccountUsageLike, SdkMessage } from "../sdk/types.js";
+import { conversationv1, shimv1 } from "../proto.js";
+import type { AccountUsageLike } from "../sdk/types.js";
 import type { KeepaliveScheduler } from "./keepalive.js";
 import type { ShimPromptDelivery } from "./shim-prompt.js";
 import { vendorErrorRetryPrompt } from "./vendor-error-retry-prompt.js";
 
 const LOGGER = bindLog({ component: "shim-engine-vendor-error-retry", operation: "shim.engine.vendor_error_retry" });
 
-/** How long after a failed turn the next retry is delivered. */
-export const VENDOR_ERROR_RETRY_INTERVAL_MS = 5 * 60 * 1_000;
+/** How long after a failed turn the next retry is delivered (owner ruling, 2026-10-20). */
+export const VENDOR_ERROR_RETRY_INTERVAL_MS = 30 * 1_000;
 
-/** How long after the chain's first vendor retry the shim keeps retrying. */
+/** How long after the chain's first failure the shim keeps retrying. */
 export const VENDOR_ERROR_RETRY_WINDOW_MS = 2 * 60 * 60 * 1_000;
 
 /** How long after an exhausted window's reset the shim keeps retrying. */
@@ -61,10 +72,33 @@ export type UsageReading =
   | { readonly kind: "sampled"; readonly usage: AccountUsageLike }
   | { readonly kind: "unavailable"; readonly detail: string };
 
+/** The retry the chain makes next, as the session stream states it. */
+export interface ScheduledRetry {
+  /** Which retry of the chain it is, 1-based. */
+  readonly attempt: number;
+  /** When it is made, epoch ms. */
+  readonly atMs: number;
+  /** The failure it retries, in the vendor's words. */
+  readonly status: string;
+}
+
+/** What asking for the retry now came to (shim.v1.RetryVendorErrorNow). */
+export type RetryNowOutcome =
+  /** The retry was delivered: the main agent continues the failed turn. */
+  | { readonly kind: "retried" }
+  /** No retry was scheduled. */
+  | { readonly kind: "nothing_scheduled" }
+  /** The main agent was busy; the retry asks again shortly. */
+  | { readonly kind: "busy"; readonly detail: string }
+  /** The retry could not be made and the chain ended. */
+  | { readonly kind: "ended"; readonly detail: string };
+
 /** Everything {@link VendorErrorRetry} does not own. */
 export interface VendorErrorRetryDeps {
   /** Submits the retry prompt as the main agent's next turn. */
   readonly deliver: (prompt: string) => Promise<ShimPromptDelivery>;
+  /** States the schedule on the session stream, whole: the next retry, or none. */
+  readonly state: (scheduled: ScheduledRetry | undefined) => void;
   /** A usage sample taken AFTER it is asked for (engine/serial-probe.ts `run`). */
   readonly readUsage: () => Promise<UsageReading>;
   readonly nowMs: () => number;
@@ -116,7 +150,7 @@ export function exhaustedWindow(usage: AccountUsageLike, nowMs: number): Exhaust
 
 /** How a chain is retrying. */
 type Mode =
-  /** Every interval, until the window from the first `api_retry` closes. */
+  /** Every interval, until the window from the chain's first failure closes. */
   | { readonly kind: "vendor_error"; readonly sinceMs: number }
   /** At the exhausted window's reset, then every interval until the tail closes. */
   | { readonly kind: "usage_limit"; readonly window: ExhaustedWindow; readonly untilMs: number };
@@ -128,6 +162,8 @@ interface Chain {
   mode: Mode | undefined;
   /** How many retries this chain delivered. */
   retries: number;
+  /** The latest failure the chain retries, in the vendor's words. */
+  status: string;
   /** The shim turn the latest delivered retry opened, while it runs. */
   awaiting?: string;
 }
@@ -135,21 +171,21 @@ interface Chain {
 /** What one failed turn's terminal says to the retry. */
 interface Failure {
   readonly turnId: string | undefined;
-  /** The first `api_retry` of the turn, when the vendor retried it. */
-  readonly retriedSinceMs: number | undefined;
-  /** Whether the vendor retried an API failure and gave up. */
-  readonly vendorRetried: boolean;
+  /** Whether the failure is an API failure waiting can cure. */
+  readonly retryable: boolean;
   /** Whether the failure is a usage limit. */
   readonly usageLimit: boolean;
+  /** The failure, in the vendor's words. */
+  readonly status: string;
 }
 
 /** The shim's one vendor-error retry state. */
 export class VendorErrorRetry {
-  /** The first `api_retry` of the vendor turn now running, if it stated one. */
-  private retriedSinceMs: number | undefined;
   private chain: Chain | undefined;
   private nextChainId = 1;
   private handle: unknown;
+  /** The retry the timer makes, while one is armed. */
+  private pending: ScheduledRetry | undefined;
   private stopped = false;
 
   constructor(private readonly deps: VendorErrorRetryDeps) {}
@@ -164,21 +200,12 @@ export class VendorErrorRetry {
     return this.handle !== undefined;
   }
 
-  /** Read one non-keep-alive SDK message for a vendor retry. */
-  observe(message: SdkMessage): void {
-    if (this.stopped) return;
-    if (message.type !== "system" || message.subtype !== "api_retry") return;
-    this.retriedSinceMs ??= this.deps.nowMs();
-  }
-
   /**
    * A non-keep-alive vendor turn ended. TURN_ID is the shim turn its result
    * answered (`undefined` for one that answered none of ours); FRAME is its
    * terminal.
    */
   turnEnded(turnId: string | undefined, frame: conversationv1.AgentFrame): void {
-    const retriedSinceMs = this.retriedSinceMs;
-    this.retriedSinceMs = undefined;
     if (this.stopped) return;
     const chain = this.chain;
     // ANOTHER TURN'S END says nothing about a standing chain: the retry it is
@@ -186,11 +213,11 @@ export class VendorErrorRetry {
     if (chain !== undefined && (chain.awaiting === undefined || chain.awaiting !== turnId)) return;
     const failure: Failure = {
       turnId,
-      retriedSinceMs,
-      vendorRetried: retriedSinceMs !== undefined && isApiRequestFailure(frame),
+      retryable: isRetryableApiFailure(frame),
       usageLimit: isUsageLimit(frame),
+      status: failureStatus(frame),
     };
-    if (!failure.vendorRetried && !failure.usageLimit) {
+    if (!failure.retryable && !failure.usageLimit) {
       if (chain === undefined) return;
       this.end(chain, "the retried turn ended without a failure agent-repl retries", {
         turn_id: turnId,
@@ -200,6 +227,7 @@ export class VendorErrorRetry {
     }
     const retrying = chain ?? this.open(failure);
     retrying.awaiting = undefined;
+    retrying.status = failure.status;
     if (failure.usageLimit) {
       void this.readAllowance(retrying, failure);
       return;
@@ -220,14 +248,33 @@ export class VendorErrorRetry {
     this.stopped = true;
     const chain = this.chain;
     if (chain !== undefined) this.end(chain, "the shim is standing down; the failed turn keeps its failure", { reason });
-    this.retriedSinceMs = undefined;
+  }
+
+  /**
+   * Make the pending retry NOW rather than at its instant (the user asked,
+   * shim.v1.RetryVendorErrorNow). With none pending there is nothing to make:
+   * no chain stands, its usage is still being read, or its latest retry is
+   * already running as a turn.
+   */
+  async retryNow(): Promise<RetryNowOutcome> {
+    const chain = this.chain;
+    if (this.stopped || chain === undefined || this.handle === undefined) {
+      LOGGER.info(
+        { chain: chain?.id ?? 0, standing: chain !== undefined, awaiting: chain?.awaiting ?? "" },
+        "a retry was asked for now, and none is scheduled",
+      );
+      return { kind: "nothing_scheduled" };
+    }
+    this.cancelTimer();
+    LOGGER.info({ chain: chain.id, attempt: chain.retries + 1 }, "a retry was asked for now; agent-repl makes it at once");
+    return this.retry(chain);
   }
 
   private open(failure: Failure): Chain {
-    const opened: Chain = { id: this.nextChainId++, mode: undefined, retries: 0 };
+    const opened: Chain = { id: this.nextChainId++, mode: undefined, retries: 0, status: failure.status };
     this.chain = opened;
     LOGGER.info(
-      { chain: opened.id, turn_id: failure.turnId ?? "", vendor_retried: failure.vendorRetried, usage_limit: failure.usageLimit },
+      { chain: opened.id, turn_id: failure.turnId ?? "", retryable: failure.retryable, usage_limit: failure.usageLimit },
       "the turn ended on a failure agent-repl retries; a retry chain opened",
     );
     return opened;
@@ -237,8 +284,8 @@ export class VendorErrorRetry {
   private retryVendorError(chain: Chain, failure: Failure): void {
     if (chain.mode?.kind !== "vendor_error") {
       // A CHAIN THAT WAS WAITING ON AN ALLOWANCE and now fails some other way
-      // starts the vendor-error window at this failure's first retry.
-      chain.mode = { kind: "vendor_error", sinceMs: failure.retriedSinceMs ?? this.deps.nowMs() };
+      // starts the vendor-error window at this failure.
+      chain.mode = { kind: "vendor_error", sinceMs: this.deps.nowMs() };
     }
     const now = this.deps.nowMs();
     const deadline = chain.mode.sinceMs + VENDOR_ERROR_RETRY_WINDOW_MS;
@@ -253,7 +300,7 @@ export class VendorErrorRetry {
     }
     LOGGER.info(
       { chain: chain.id, turn_id: failure.turnId ?? "", retries: chain.retries, delay_ms: VENDOR_ERROR_RETRY_INTERVAL_MS },
-      "the vendor gave up retrying the turn's API failure; agent-repl retries it after the interval",
+      "the vendor failed the turn's API call; agent-repl retries it after the interval",
     );
     this.arm(chain, VENDOR_ERROR_RETRY_INTERVAL_MS);
   }
@@ -306,7 +353,7 @@ export class VendorErrorRetry {
       return;
     }
     const detail = reading.kind === "sampled" ? "no usage window is exhausted and still to reset" : reading.detail;
-    if (failure.vendorRetried) {
+    if (failure.retryable) {
       LOGGER.info({ chain: chain.id, detail }, "the usage-limit failure names no exhausted allowance; it is retried as a vendor error");
       this.retryVendorError(chain, failure);
       return;
@@ -320,29 +367,33 @@ export class VendorErrorRetry {
       this.handle = undefined;
       void this.retry(chain);
     }, delayMs);
+    this.pending = { attempt: chain.retries + 1, atMs: this.deps.nowMs() + delayMs, status: chain.status };
+    this.deps.state(this.pending);
   }
 
-  private async retry(chain: Chain): Promise<void> {
-    if (this.chain !== chain) return;
+  private async retry(chain: Chain): Promise<RetryNowOutcome> {
+    if (this.chain !== chain) return { kind: "nothing_scheduled" };
+    this.unschedule();
     const attempt = chain.retries + 1;
     let delivery: ShimPromptDelivery;
     try {
       delivery = await this.deps.deliver(vendorErrorRetryPrompt(attempt));
     } catch (err) {
-      if (this.chain !== chain) return;
+      const cause = err instanceof Error ? err.message : String(err);
+      if (this.chain !== chain) return { kind: "ended", detail: cause };
       this.giveUp(
         chain,
         "the vendor refused the retry prompt; agent-repl stopped retrying and the turn keeps its failure",
-        err instanceof Error ? err.message : String(err),
+        cause,
         { attempt },
       );
-      return;
+      return { kind: "ended", detail: cause };
     }
     // A CHAIN ENDED WHILE THE DELIVERY WAS AWAITED (a prompt was submitted, the
     // shim stood down) is not revived by it.
     if (this.chain !== chain) {
       LOGGER.debug({ chain: chain.id, delivery: delivery.kind }, "the retry chain ended while its prompt was being delivered");
-      return;
+      return { kind: "ended", detail: "the retry chain ended while its prompt was being delivered" };
     }
     switch (delivery.kind) {
       case "delivered":
@@ -352,29 +403,31 @@ export class VendorErrorRetry {
           { chain: chain.id, attempt, turn_id: delivery.turnId, mode: chain.mode?.kind ?? "" },
           "delivered the retry; the main agent continues the failed turn",
         );
-        return;
+        return { kind: "retried" };
       case "busy":
         LOGGER.debug({ chain: chain.id, attempt, detail: delivery.detail }, "the main agent is busy; the retry asks again shortly");
         this.arm(chain, VENDOR_ERROR_RETRY_BUSY_MS);
-        return;
+        return { kind: "busy", detail: delivery.detail };
       case "unavailable":
         this.end(chain, "the session cannot take the retry prompt; the failed turn keeps its failure", {
           attempt,
           detail: delivery.detail,
         });
-        return;
+        return { kind: "ended", detail: delivery.detail };
     }
   }
 
   /** The chain ran out: ERROR, because the turn's work is left undone. CAUSE says what ran out. */
   private giveUp(chain: Chain, why: string, cause: string, fields: Record<string, unknown>): void {
     this.cancelTimer();
+    this.unschedule();
     this.chain = undefined;
     LOGGER.error({ chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", cause, ...fields }, why);
   }
 
   private end(chain: Chain, why: string, fields: Record<string, unknown>): void {
     this.cancelTimer();
+    this.unschedule();
     this.chain = undefined;
     LOGGER.info({ chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", ...fields }, why);
   }
@@ -384,11 +437,63 @@ export class VendorErrorRetry {
     this.deps.scheduler.clearTimeout(this.handle);
     this.handle = undefined;
   }
+
+  /** State that no retry is due, once, when one was. */
+  private unschedule(): void {
+    if (this.pending === undefined) return;
+    this.pending = undefined;
+    this.deps.state(undefined);
+  }
 }
 
-/** Whether a terminal is the vendor API failing the request. */
-function isApiRequestFailure(frame: conversationv1.AgentFrame): boolean {
-  return frame.result.case === "failure" && frame.result.value.failure.case === "apiRequestFailed";
+/**
+ * The `unmodeled` types waiting can cure: a failure that stated no status
+ * (the connection itself failed), a timeout or conflict, and every 5xx. The
+ * set the vendor's own retry made, so turning its retries off retries nothing
+ * less.
+ */
+function retryableUnmodeled(type: string): boolean {
+  return type === "unknown" || type === "http_408" || type === "http_409" || /^http_5\d\d$/.test(type);
+}
+
+/**
+ * Whether a terminal is an API failure waiting can cure. A refusal of the
+ * request itself (malformed, too large, unauthorized, unpaid, a model that
+ * does not exist, too much output asked for) fails the same way however
+ * often it is sent, so it is never retried.
+ */
+export function isRetryableApiFailure(frame: conversationv1.AgentFrame): boolean {
+  if (frame.result.case !== "failure") return false;
+  const failure = frame.result.value.failure;
+  if (failure.case !== "apiRequestFailed") return false;
+  const kind = failure.value.kind;
+  switch (kind.case) {
+    case "overloaded":
+    case "internal":
+    case "rateLimited":
+      return true;
+    case "unmodeled":
+      return retryableUnmodeled(kind.value.type);
+    case "invalidRequest":
+    case "authenticationFailed":
+    case "permissionDenied":
+    case "notFound":
+    case "requestTooLarge":
+    case "billingError":
+    case "oauthOrgNotAllowed":
+    case "maxOutputTokens":
+      return false;
+    case undefined:
+      throw new Error("an api_request_failed terminal carries no kind");
+  }
+}
+
+/** The failure a terminal ended on, in the vendor's words, for the schedule's line. */
+function failureStatus(frame: conversationv1.AgentFrame): string {
+  if (frame.result.case !== "failure") return "";
+  const failure = frame.result.value;
+  if (failure.failure.case === "apiRequestFailed") return failure.failure.value.message;
+  return failure.errors[failure.errors.length - 1] ?? failure.failure.case ?? "";
 }
 
 /**
@@ -407,4 +512,41 @@ function isUsageLimit(frame: conversationv1.AgentFrame): boolean {
     default:
       return false;
   }
+}
+
+/** The schedule as the session stream states it: the next retry, or none. */
+export function vendorErrorRetryUpdate(scheduled: ScheduledRetry | undefined): conversationv1.SessionUpdate {
+  return create(conversationv1.SessionUpdateSchema, {
+    update: {
+      case: "vendorErrorRetry",
+      value: create(conversationv1.SessionVendorErrorRetrySchema, {
+        ...(scheduled === undefined
+          ? {}
+          : {
+              scheduled: create(conversationv1.SessionVendorErrorRetryScheduledSchema, {
+                attempt: scheduled.attempt,
+                nextAttemptAtMs: BigInt(scheduled.atMs),
+                status: scheduled.status,
+              }),
+            }),
+      }),
+    },
+  });
+}
+
+/** shim.v1.RetryVendorErrorNow's answer for OUTCOME. */
+export function retryVendorErrorNowResponse(outcome: RetryNowOutcome): shimv1.RetryVendorErrorNowResponse {
+  const arm = ((): shimv1.RetryVendorErrorNowResponse["outcome"] => {
+    switch (outcome.kind) {
+      case "retried":
+        return { case: "retried", value: create(shimv1.RetryVendorErrorNowRetriedSchema, {}) };
+      case "nothing_scheduled":
+        return { case: "nothingScheduled", value: create(shimv1.RetryVendorErrorNowNothingScheduledSchema, {}) };
+      case "busy":
+        return { case: "busy", value: create(shimv1.RetryVendorErrorNowBusySchema, { detail: outcome.detail }) };
+      case "ended":
+        return { case: "ended", value: create(shimv1.RetryVendorErrorNowEndedSchema, { detail: outcome.detail }) };
+    }
+  })();
+  return create(shimv1.RetryVendorErrorNowResponseSchema, { outcome: arm });
 }

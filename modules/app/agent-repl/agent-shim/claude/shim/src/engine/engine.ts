@@ -77,6 +77,9 @@ export interface Engine {
   /** Send one keep-alive now, leaving the cadence as it is. */
   sendKeepalive(request: shimv1.SendKeepaliveRequest): Promise<shimv1.SendKeepaliveResponse>;
 
+  /** Make the scheduled vendor-error retry at once. */
+  retryVendorErrorNow(request: shimv1.RetryVendorErrorNowRequest): Promise<shimv1.RetryVendorErrorNowResponse>;
+
   /** End the session and everything live in it; refuses unless forced. */
   killSession(request: shimv1.KillSessionRequest): Promise<shimv1.KillSessionResponse>;
 
@@ -240,6 +243,10 @@ export class NotImplementedEngine implements Engine {
 
   sendKeepalive(): Promise<shimv1.SendKeepaliveResponse> {
     return Promise.reject(unimplemented("SendKeepalive"));
+  }
+
+  retryVendorErrorNow(): Promise<shimv1.RetryVendorErrorNowResponse> {
+    return Promise.reject(unimplemented("RetryVendorErrorNow"));
   }
 
   killSession(): Promise<shimv1.KillSessionResponse> {

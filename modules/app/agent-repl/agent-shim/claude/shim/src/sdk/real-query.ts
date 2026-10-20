@@ -265,7 +265,12 @@ export function realQueryOptions(spec: RealQuerySpec, mcpServers: Record<string,
     // non-default account). Passing the whole environment through and then
     // stating CLAUDE_CONFIG_DIR keeps PATH/HOME/proxy settings intact while
     // making the account root authoritative rather than inherited by luck.
-    env: { ...process.env, CLAUDE_CONFIG_DIR: spec.claudeConfigDir },
+    //
+    // THE VENDOR MAKES NO API RETRY OF ITS OWN (owner ruling, 2026-10-20):
+    // agent-repl owns the cadence (engine/vendor-error-retry.ts), so a failed
+    // call ends the turn at once and the shim retries it where the footer can
+    // count down to it and the user can ask for it now.
+    env: { ...process.env, CLAUDE_CONFIG_DIR: spec.claudeConfigDir, CLAUDE_CODE_MAX_RETRIES: "0" },
     ...(spec.model === undefined ? {} : { model: spec.model }),
     // THE STDERR CALLBACK OR THE SPAWNER, NEVER BOTH. A custom spawner is
     // where `Options.stderr` stops being fed (`SpawnedProcess` declares no

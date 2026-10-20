@@ -145,6 +145,11 @@ export function validateHibernateRequest(_request: shimv1.HibernateRequest): voi
   // No fields. Nothing to refuse.
 }
 
+/** `shim.v1.RetryVendorErrorNowRequest` — empty by design; the call is the request. */
+export function validateRetryVendorErrorNowRequest(_request: shimv1.RetryVendorErrorNowRequest): void {
+  // No fields. Nothing to refuse.
+}
+
 /** `shim.v1.SendKeepaliveRequest` — empty by design; the call is the request. */
 export function validateSendKeepaliveRequest(_request: shimv1.SendKeepaliveRequest): void {
   // No fields. Nothing to refuse.

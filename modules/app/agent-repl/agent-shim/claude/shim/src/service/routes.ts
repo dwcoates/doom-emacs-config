@@ -30,6 +30,7 @@ import {
   validateGetForkPointRequest,
   validateHibernateRequest,
   validateSetKeepaliveRequest,
+  validateRetryVendorErrorNowRequest,
   validateSendKeepaliveRequest,
   validateKillSessionRequest,
   validateKillTurnRequest,
@@ -224,6 +225,11 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("SendKeepalive");
         validateSendKeepaliveRequest(request);
         return answering("SendKeepalive", () => engine.sendKeepalive(request));
+      },
+      async retryVendorErrorNow(request) {
+        entered("RetryVendorErrorNow");
+        validateRetryVendorErrorNowRequest(request);
+        return answering("RetryVendorErrorNow", () => engine.retryVendorErrorNow(request));
       },
 
       async killSession(request) {

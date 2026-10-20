@@ -166,6 +166,10 @@ export class SessionPushes {
   // that never waited states nothing, and one whose last wait ended replays
   // the empty set it stated then.
   //
+  // `vendorErrorRetry` is the schedule of agent-repl's retry of a failed turn,
+  // a LEVEL: a daemon that (re)attaches while a retry is due must count down
+  // to it from its own stream rather than draw nothing until the next one.
+  //
   // `commandCatalog` is a STANDING SET whose producer obligation is the same
   // restatement on every open (session.proto): it is read beside the opening
   // without being awaited, so it usually lands before the daemon's watch
@@ -182,6 +186,7 @@ export class SessionPushes {
     "effortChanged",
     "commandCatalog",
     "cacheLapse",
+    "vendorErrorRetry",
   ];
 
   /**

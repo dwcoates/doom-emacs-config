@@ -250,6 +250,15 @@ describe("validateSendKeepaliveRequest", () => {
   });
 });
 
+describe("validateRetryVendorErrorNowRequest", () => {
+  it("accepts the empty request the contract declares", () => {
+    // Arrange, Act, Assert.
+    expect(
+      codeOf(() => validate.validateRetryVendorErrorNowRequest(requests.retryVendorErrorNowRequest())),
+    ).toBeUndefined();
+  });
+});
+
 describe("validateSetKeepaliveRequest", () => {
   it.each([
     ["a hold", "hold", undefined],
