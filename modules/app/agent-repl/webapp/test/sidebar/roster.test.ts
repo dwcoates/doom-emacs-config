@@ -174,6 +174,35 @@ describe("the sections", () => {
     expect(sizes).toEqual(["0.98rem", "1.05rem"]);
   });
 
+  it("pads a repository's header above and below 30% less than the band headers'", () => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
+    // Act
+    const pads = inRail(drawn, (rail) =>
+      [".repo-section > .repo-head", ".open-section > .repo-head"].map((selector) => {
+        const header = rail.querySelector(selector) as HTMLElement;
+        return [cascadedValue(header, "padding-top"), cascadedValue(header, "padding-bottom")];
+      }),
+    );
+    // Assert
+    expect(pads).toEqual([
+      ["0.315rem", "0.175rem"],
+      ["0.45rem", "0.25rem"],
+    ]);
+  });
+
+  it("keeps a repository header's side padding the band headers'", () => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
+    // Act
+    const sides = inRail(drawn, (rail) => {
+      const header = rail.querySelector(".repo-section > .repo-head") as HTMLElement;
+      return [cascadedValue(header, "padding-left"), cascadedValue(header, "padding-right")];
+    });
+    // Assert
+    expect(sides).toEqual(["0.7rem", "0.7rem"]);
+  });
+
   it("widens a repository's fold triangle's hit box without moving it, the pointer on the triangle alone", () => {
     // Arrange
     const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
