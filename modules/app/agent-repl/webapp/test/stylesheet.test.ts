@@ -3,14 +3,14 @@
  * THE SHARED STYLESHEET-RULE READERS (`test/stylesheet.ts`).
  *
  * Every test that reads a rule off `src/styles.css` by text goes through
- * `rulesOf`, `selectorOf` or `keyframesOf`, so a comment that names a selector can never be
+ * `rulesOf`, `isOwnRule`, `selectorOf` or `keyframesOf`, so a comment that names a selector can never be
  * credited to the rule after it. `source-text.test.ts` pins that sharing.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { cascadedValue, cascadedValueIn, inDocument, inRail, keyframesOf, rulesOf, selectorOf } from "./stylesheet.js";
+import { cascadedValue, cascadedValueIn, inDocument, inRail, isOwnRule, keyframesOf, rulesOf, selectorOf } from "./stylesheet.js";
 import STYLES_TEST from "./styles.test.ts?raw";
 import STYLESHEET from "./stylesheet.ts?raw";
 import { filesUnder } from "./files-under.js";
@@ -45,6 +45,37 @@ describe("rulesOf", () => {
     const rules = rulesOf(css);
     // Assert
     expect(rules).toEqual(want);
+  });
+});
+
+describe("isOwnRule", () => {
+  it.each([
+    { name: "is a rule whose selector list is the selector alone", css: ".a { color: red; }", want: true },
+    { name: "is not a rule that shares its declarations with another selector", css: ".a, .b { color: red; }", want: false },
+    { name: "is not a rule for a selector that only begins with it", css: ".a:hover { color: red; }", want: false },
+    { name: "is not another selector's own rule", css: ".b { color: red; }", want: false },
+  ])("$name", ({ css, want }) => {
+    // Arrange
+    const [rule] = rulesOf(css);
+
+    // Act
+    const own = isOwnRule(rule, ".a");
+
+    // Assert
+    expect(own).toBe(want);
+  });
+
+  it("is the only place a test asks whether a rule is a selector's own", () => {
+    // Arrange: the hand-rolled shape isOwnRule replaced.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const shape = /selectors\.length === 1/;
+    const owners = new Set([path.join(here, "stylesheet.ts"), fileURLToPath(import.meta.url)]);
+
+    // Act
+    const handRolled = filesUnder(here).filter((file) => !owners.has(file) && shape.test(readFileSync(file, "utf8")));
+
+    // Assert
+    expect(handRolled.map((file) => path.relative(here, file))).toEqual([]);
   });
 });
 

@@ -38,7 +38,7 @@ import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../src/bubble/quote.js";
 import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
-import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
+import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, isOwnRule, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
 import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
 
@@ -112,7 +112,7 @@ function declarationsOf(selector: string): string | undefined {
 
 /** The declarations of the first rule whose selector list is SELECTOR alone. */
 function ownDeclarationsOf(selector: string): string | undefined {
-  return rulesOf(stylesheet).find((rule) => rule.selectors.length === 1 && rule.selectors[0] === selector)
+  return rulesOf(stylesheet).find((rule) => isOwnRule(rule, selector))
     ?.declarations;
 }
 
@@ -2313,8 +2313,7 @@ describe("the one-line clamp's shared shape", () => {
     // Arrange / Act — any other rule re-declaring the box on one clamp alone.
     const handRolled = rulesOf(stylesheet).filter(
       (r) =>
-        r.selectors.length === 1 &&
-        CLAMP_SHAPE_SELECTORS.includes(r.selectors[0] ?? "") &&
+        CLAMP_SHAPE_SELECTORS.some((selector) => isOwnRule(r, selector)) &&
         /display:\s*-webkit-box|-webkit-box-orient/.test(r.declarations),
     );
 
@@ -3519,7 +3518,7 @@ describe("the one bubble rule set", () => {
               (prop === "color" || prop === "--bubble-font-rem") &&
               rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))
             ) &&
-            !(prop === "font-style" && rule.selectors.length === 1 && rule.selectors[0] === THINKING_SELECTOR) &&
+            !(prop === "font-style" && isOwnRule(rule, THINKING_SELECTOR)) &&
             // NO BUBBLE AT ALL (owner ruling, 2026-10-08): the same two
             // selectors also turn off the base rule's box-shadow, the one
             // remaining visible highlight once their fill is already the
@@ -3531,16 +3530,14 @@ describe("the one bubble rule set", () => {
             // the one shared token rule. Its own suite pins all three.
             !(
               (prop === "transition" || prop === "max-width") &&
-              rule.selectors.length === 1 &&
-              rule.selectors[0] === ".bubble.interim-response"
+              isOwnRule(rule, ".bubble.interim-response")
             ) &&
             // THE BLUE PROMPT'S CODE (owner request, 2026-10-19): the user
             // prompt feeds the two code fills their darker blue; the suite
             // "code in a blue prompt bubble" pins both.
             !(
               (prop === "--code-bg" || prop === "--code-block-bg") &&
-              rule.selectors.length === 1 &&
-              rule.selectors[0] === '.bubble[data-variant="user"]'
+              isOwnRule(rule, '.bubble[data-variant="user"]')
             ) &&
             !(prop.startsWith("--usage-") && rule.selectors.includes(".usage-corner")),
         ),
@@ -4142,7 +4139,7 @@ describe("code in a blue prompt bubble (owner request, 2026-10-19)", () => {
   it.each(["--code-bg", "--code-block-bg"])("feeds %s from --prompt-code-bg on the user prompt", (token) => {
     // Arrange / Act
     const decls = rulesOf(stylesheet)
-      .filter((r) => r.selectors.length === 1 && r.selectors[0] === '.bubble[data-variant="user"]')
+      .filter((r) => isOwnRule(r, '.bubble[data-variant="user"]'))
       .map((r) => r.declarations)
       .join(";");
     // Assert
@@ -4203,7 +4200,7 @@ describe("the rail's tone rules", () => {
     ["green", "var(--ok)"],
   ])("paints #ws-sidebar .st.tone-%s with %s", (tone, color) => {
     const rules = rulesOf(stylesheet).filter(
-      (rule) => rule.selectors.length === 1 && rule.selectors[0] === `#ws-sidebar .st.tone-${tone}`,
+      (rule) => isOwnRule(rule, `#ws-sidebar .st.tone-${tone}`),
     );
     expect(rules.at(-1)?.declarations).toContain(`color: ${color}`);
   });
@@ -4239,14 +4236,14 @@ describe("the rail's tone rules", () => {
     const lastIndex = (pred: (rule: (typeof rules)[number]) => boolean): number =>
       rules.reduce((found, rule, index) => (pred(rule) ? index : found), -1);
     const lastTone = lastIndex((rule) => rule.selectors.some((sel) => sel.startsWith("#ws-sidebar .st.tone-")));
-    const inkAt = lastIndex((rule) => rule.selectors.length === 1 && rule.selectors[0] === `#ws-sidebar .st.ink-${ink}`);
+    const inkAt = lastIndex((rule) => isOwnRule(rule, `#ws-sidebar .st.ink-${ink}`));
     expect(inkAt).toBeGreaterThan(lastTone);
     expect(rules[inkAt].declarations).toMatch(/(?:^|;)\s*color\s*:/);
   });
 
   it("inks a paused queue's merge indicators in the inactive dot's grey", () => {
     const rules = rulesOf(stylesheet).filter(
-      (rule) => rule.selectors.length === 1 && rule.selectors[0] === `#ws-sidebar .st.ink-${renderColors.paused_merge_mark.ink}`,
+      (rule) => isOwnRule(rule, `#ws-sidebar .st.ink-${renderColors.paused_merge_mark.ink}`),
     );
     expect(rules.at(-1)?.declarations).toContain("color: var(--muted)");
   });
@@ -4262,7 +4259,7 @@ describe("the turquoise token", () => {
 
   it("gives .tone-turquoise its token", () => {
     const rules = rulesOf(stylesheet).filter(
-      (rule) => rule.selectors.length === 1 && rule.selectors[0] === ".tone-turquoise",
+      (rule) => isOwnRule(rule, ".tone-turquoise"),
     );
     expect(rules.at(-1)?.declarations).toContain("color: var(--turquoise)");
   });
@@ -4429,7 +4426,7 @@ describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => 
 describe("the persistent-wifi glyph button", () => {
   it("carries the chip's color, which is the glyph's black", () => {
     // Arrange / Act
-    const own = rulesOf(stylesheet).find((rule) => rule.selectors.length === 1 && rule.selectors[0] === ".topbar-wifi-button");
+    const own = rulesOf(stylesheet).find((rule) => isOwnRule(rule, ".topbar-wifi-button"));
     // Assert
     expect(own?.declarations ?? "").toMatch(/color:\s*inherit/);
   });
@@ -5176,7 +5173,7 @@ describe("the arc spinner's shape", () => {
     [".tool-spinner", "var(--thinking)"],
     [".feed-load-more-spinner", "var(--muted)"],
   ])("has %s name its token as %s", (selector, token) => {
-    const own = rulesOf(stylesheet).filter((rule) => rule.selectors.length === 1 && rule.selectors[0] === selector);
+    const own = rulesOf(stylesheet).filter((rule) => isOwnRule(rule, selector));
     expect(own.map((rule) => rule.declarations).join(";")).toContain(`--arc-color: ${token}`);
   });
 
@@ -5815,7 +5812,7 @@ describe("the interim corner's shared tokens", () => {
   function ownValueOf(selector: string, prop: string): string | undefined {
     const declares = new RegExp(`(?:^|;)\\s*${prop}:\\s*([^;]+);`);
     return rulesOf(stylesheet)
-      .filter((rule) => rule.selectors.length === 1 && rule.selectors[0] === selector)
+      .filter((rule) => isOwnRule(rule, selector))
       .map((rule) => declares.exec(rule.declarations)?.[1])
       .find((value) => value !== undefined);
   }

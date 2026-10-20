@@ -112,6 +112,15 @@ export function rulesOf(css: string): CssRule[] {
 }
 
 /**
+ * Whether RULE is SELECTOR's OWN rule: its selector list is SELECTOR alone, so
+ * what it declares reaches nothing else. Every scan that asks for a selector's
+ * own rule asks through here.
+ */
+export function isOwnRule(rule: CssRule, selector: string): boolean {
+  return rule.selectors.length === 1 && rule.selectors[0] === selector;
+}
+
+/**
  * The body of the `@keyframes NAME` block in CSS (the real stylesheet by
  * default): everything between its opening brace and the closing brace on its
  * own line, so a block of any number of stops comes back whole. Fails loudly
