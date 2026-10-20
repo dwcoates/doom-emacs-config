@@ -315,13 +315,7 @@ func receiveSelection(
 	stream *connect.ServerStreamForClient[agentreplv1.WatchFeedResponse],
 ) *frontendv1.FeedSelection {
 	t.Helper()
-	for stream.Receive() {
-		if sel := stream.Msg().GetSelection(); sel != nil {
-			return sel
-		}
-	}
-	t.Fatalf("the watch stream ended before a selection arrived: %v", stream.Err())
-	return nil
+	return receivePush(t, stream, "a selection", (*agentreplv1.WatchFeedResponse).GetSelection)
 }
 
 // TestWatchFeedPushesTheSelectionOnTheRootFeed pins that a SelectFeedRow

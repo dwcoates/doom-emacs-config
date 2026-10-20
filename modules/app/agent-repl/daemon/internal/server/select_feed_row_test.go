@@ -868,13 +868,7 @@ func receiveHostSelection(
 	stream *connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse],
 ) *agentreplv1.HostWorkspaceSelection {
 	t.Helper()
-	for stream.Receive() {
-		if sel := stream.Msg().GetSelection(); sel != nil {
-			return sel
-		}
-	}
-	t.Fatalf("the host stream ended before a selection arrived: %v", stream.Err())
-	return nil
+	return receivePush(t, stream, "a selection", (*agentreplv1.WatchHostWorkspaceResponse).GetSelection)
 }
 
 // TestHostSelectionCarriesTheSelectedText pins what Emacs is handed for each
@@ -1186,4 +1180,113 @@ func TestSelectFeedRowTestsBuildTheirLoggedHarnessThroughTheHelper(t *testing.T)
 	if got != 1 {
 		t.Fatalf("hand-rolled logged harnesses = %d, want only newLoggedHarness's own", got)
 	}
+}
+
+// receiveHostEventPastSelection reads the host stream until a push that is
+// neither the host state nor the selection: the next EVENT.
+func receiveHostEventPastSelection(
+	t *testing.T,
+	stream *connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse],
+) *agentreplv1.WatchHostWorkspaceResponse {
+	t.Helper()
+	return receivePush(t, stream, "an event", func(r *agentreplv1.WatchHostWorkspaceResponse) *agentreplv1.WatchHostWorkspaceResponse {
+		if r.GetHost() != nil || r.GetSelection() != nil {
+			return nil
+		}
+		return r
+	})
+}
+
+// TestSelectFeedRowClickOnAFinalResponseAsksTheHostToFocusTheComposer pins
+// which moves push final_response_clicked: only a click that selects a final
+// response. Every other move is followed by a notification click, which must
+// then be the first event the host stream carries, so a stray
+// final_response_clicked shows up as the wrong first event.
+func TestSelectFeedRowClickOnAFinalResponseAsksTheHostToFocusTheComposer(t *testing.T) {
+	tests := []struct {
+		name      string
+		seed      *agentreplv1.SelectFeedRowRequest
+		move      *agentreplv1.SelectFeedRowRequest
+		wantFocus bool
+	}{
+		{name: "a click selecting a final response", move: bubbleMove(&frontendv1.FeedId{Value: "final-1"}), wantFocus: true},
+		{name: "a click moving to another final response", seed: bubbleMove(&frontendv1.FeedId{Value: "final-1"}), move: bubbleMove(&frontendv1.FeedId{Value: "final-2"}), wantFocus: true},
+		{name: "a click deselecting the selected final response", seed: bubbleMove(&frontendv1.FeedId{Value: "final-1"}), move: bubbleMove(&frontendv1.FeedId{Value: "final-1"})},
+		{name: "a click on a rollback prompt", move: bubbleMove(&frontendv1.FeedId{Value: "prompt-1"})},
+		{name: "a click on an interim response", move: bubbleMove(&frontendv1.FeedId{Value: "interim-1"})},
+		{name: "a step landing on a final response", move: boundaryStep(older)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Feed.finals = feedIDs("final-1", "final-2")
+			h.Feed.prompts = feedIDs("prompt-1")
+			h.Feed.markdown = map[string]string{"interim-1": "meanwhile"}
+			if tc.seed != nil {
+				if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(tc.seed)); err != nil {
+					t.Fatalf("seed: %v", err)
+				}
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream := dialHostStream(t, h, ctx)
+
+			// Act.
+			if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(tc.move)); err != nil {
+				t.Fatalf("SelectFeedRow: %v", err)
+			}
+			h.Server.NotificationClicked(testWorkspaceID)
+			first := receiveHostEventPastSelection(t, stream)
+
+			// Assert.
+			if got := first.GetFinalResponseClicked() != nil; got != tc.wantFocus {
+				t.Fatalf("first event = %v, want final_response_clicked %v", first, tc.wantFocus)
+			}
+		})
+	}
+}
+
+// TestSelectFeedRowFinalResponseClickIsNeverReplayed pins that the event is
+// a moment, not state: a host stream opened after the click is handed the
+// selection but not the click, so a reconnect never refocuses the composer.
+func TestSelectFeedRowFinalResponseClickIsNeverReplayed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("final-1")
+	clickRow(t, h, "final-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := dialHostStream(t, h, ctx)
+
+	// Act.
+	h.Server.NotificationClicked(testWorkspaceID)
+	first := receiveHostEventPastSelection(t, stream)
+
+	// Assert.
+	if first.GetNotificationClicked() == nil {
+		t.Fatalf("first event = %v, want notification_clicked (final_response_clicked is never replayed)", first)
+	}
+}
+
+// TestSelectFeedRowFinalResponseClickIsRecordedAtInfo pins that the request
+// to focus the composer enters the workspace log, naming the clicked row.
+func TestSelectFeedRowFinalResponseClickIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h, log := newLoggedHarness(t)
+	h.Feed.finals = feedIDs("final-1")
+
+	// Act.
+	clickRow(t, h, "final-1")
+
+	// Assert.
+	for _, rec := range log.at("INFO") {
+		if strings.Contains(rec.Message, "focus the composer") {
+			if rec.Context["row"] != "final-1" {
+				t.Fatalf("context = %v, want row final-1", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("records = %v, want the focus request at INFO", log.records)
 }

@@ -2183,6 +2183,81 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
     ;; Assert
     (should (equal (agent-repl-test-input--notice) "selection: selection refused"))))
 
+;;;; ---- Focusing the composer for a reply ----
+
+(defmacro agent-repl-test-input--focusing (shown &rest body)
+  "Run BODY with the composer in a second window when SHOWN, else in none.
+The window lookup is stubbed to answer that window (or nil), the other
+window is selected first, and `evil-insert-state' records the buffer it
+ran in onto `insert-buffers'; every INFO record lands on `infos'."
+  (declare (indent 1))
+  `(agent-repl-test-input--with
+     (save-window-excursion
+       (delete-other-windows)
+       (let* ((composer-window (and ,shown (split-window)))
+              (insert-buffers nil)
+              (infos nil))
+         (when composer-window
+           (set-window-buffer composer-window agent-repl-test-input--buffer))
+         (cl-letf (((symbol-function 'agent-repl-window--panel-window)
+                    (lambda (kind ws &optional _frame)
+                      (and (eq kind :input) (equal ws "ws-one") composer-window)))
+                   ((symbol-function 'evil-insert-state)
+                    (lambda (&optional _arg) (push (current-buffer) insert-buffers)))
+                   ((symbol-function 'agent-repl--info)
+                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+           ,@body)))))
+
+(ert-deftest agent-repl-test-input-focus-for-reply-selects-the-composer-window ()
+  "A shown composer takes the keyboard."
+  (agent-repl-test-input--focusing t
+    ;; Act
+    (agent-repl-input-focus-for-reply "ws-one")
+    ;; Assert
+    (should (eq (selected-window) composer-window))))
+
+(ert-deftest agent-repl-test-input-focus-for-reply-enters-insert-state-in-the-composer ()
+  "The composer is put in insert state, in its own buffer."
+  (agent-repl-test-input--focusing t
+    ;; Act
+    (agent-repl-input-focus-for-reply "ws-one")
+    ;; Assert
+    (should (equal insert-buffers (list agent-repl-test-input--buffer)))))
+
+(ert-deftest agent-repl-test-input-focus-for-reply-answers-the-composer-window ()
+  "The window that took the keyboard is the answer."
+  (agent-repl-test-input--focusing t
+    ;; Act / Assert
+    (should (eq (agent-repl-input-focus-for-reply "ws-one") composer-window))))
+
+(ert-deftest agent-repl-test-input-focus-for-reply-is-recorded-at-info ()
+  "Taking the keyboard leaves an INFO record naming the outcome."
+  (agent-repl-test-input--focusing t
+    ;; Act
+    (agent-repl-input-focus-for-reply "ws-one")
+    ;; Assert
+    (should (cl-some (lambda (m) (string-match-p "elisp.input.focus-for-reply ws=ws-one outcome=focused" m))
+                     infos))))
+
+(ert-deftest agent-repl-test-input-focus-for-reply-without-a-composer-window-moves-nothing ()
+  "No composer on the frame leaves the selected window and evil state alone."
+  (agent-repl-test-input--focusing nil
+    ;; Arrange
+    (let ((before (selected-window)))
+      ;; Act
+      (should-not (agent-repl-input-focus-for-reply "ws-one"))
+      ;; Assert
+      (should (equal (list (selected-window) insert-buffers) (list before nil))))))
+
+(ert-deftest agent-repl-test-input-focus-for-reply-without-a-composer-window-is-recorded ()
+  "No composer on the frame is recorded at INFO, naming why nothing moved."
+  (agent-repl-test-input--focusing nil
+    ;; Act
+    (agent-repl-input-focus-for-reply "ws-one")
+    ;; Assert
+    (should (cl-some (lambda (m) (string-match-p "focus-for-reply ws=ws-one outcome=no-composer-window" m))
+                     infos))))
+
 (ert-deftest agent-repl-test-input-refused-step-is-logged ()
   "A refused step is logged at WARN with its cause."
   (agent-repl-test-input--with-select agent-repl-test-input--select-refused

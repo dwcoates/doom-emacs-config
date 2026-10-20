@@ -311,6 +311,8 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda () agent-repl-test-host--current-ws))
                ((symbol-function 'agent-repl--notification-activate)
                 (lambda (ws) (push (cons :activate ws) agent-repl-test-host--effects)))
+               ((symbol-function 'agent-repl-input-focus-for-reply)
+                (lambda (ws) (push (cons :focus-for-reply ws) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-roster-apply-current)
                 (lambda () (cl-incf agent-repl-test-host--reapplied)))
                ((symbol-function 'agent-repl-frontend-reload-webapp)
@@ -2184,6 +2186,28 @@ answers `:unknown' and records the breach rather than opening."
     (agent-repl-test-host--push "ws-1" (list :arm :notification-clicked :value nil))
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.notification-clicked ws=ws-1"))))
+
+;;;; ---- The final-response click ----
+
+(ert-deftest agent-repl-test-host-final-response-click-focuses-this-workspaces-composer ()
+  "A `final_response_clicked' push focuses the composer of the workspace its stream carries."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :final-response-clicked :value nil))
+    ;; Assert
+    (should (equal (car agent-repl-test-host--effects) '(:focus-for-reply . "ws-1")))))
+
+(ert-deftest agent-repl-test-host-final-response-click-is-logged ()
+  "The click reaching Emacs leaves an INFO record naming the workspace."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :final-response-clicked :value nil))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.final-response-clicked ws=ws-1"))))
 
 ;;;; ---- The handover ----
 

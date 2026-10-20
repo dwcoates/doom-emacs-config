@@ -23,13 +23,7 @@ func receiveScale(
 	stream *connect.ServerStreamForClient[agentreplv1.WatchFeedResponse],
 ) *frontendv1.FeedTextScale {
 	t.Helper()
-	for stream.Receive() {
-		if sc := stream.Msg().GetFeedTextScale(); sc != nil {
-			return sc
-		}
-	}
-	t.Fatalf("the watch stream ended before a feed-text-scale frame arrived: %v", stream.Err())
-	return nil
+	return receivePush(t, stream, "a feed-text-scale frame", (*agentreplv1.WatchFeedResponse).GetFeedTextScale)
 }
 
 // TestNextFeedTextScale pins the pure step arithmetic: increase adds the step,

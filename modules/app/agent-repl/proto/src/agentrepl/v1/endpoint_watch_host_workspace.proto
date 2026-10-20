@@ -78,6 +78,15 @@ message WatchHostWorkspaceResponse {
     // An event, never replayed to a late subscriber: an evaluation not
     // answered in time has already been answered `timed_out`.
     HostEvaluate evaluate = 10;
+    // THE READER CLICKED A FINAL RESPONSE IN THE WEBVIEW, selecting it: the
+    // next prompt replies to it, so Emacs puts the keyboard in this
+    // workspace's composer, in insert state, ready to type that reply. Sent
+    // only for a click (SelectFeedRow's `bubble` move) that selects a final
+    // response — never for a step, which the composer already holds the
+    // keyboard for, nor for a click that deselects. An event, not state:
+    // never replayed to a late subscriber, because a click belongs to the
+    // moment it was made; the selection itself rides `selection`.
+    HostWorkspaceFinalResponseClicked final_response_clicked = 11;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -118,6 +127,12 @@ message HostWorkspaceReloadWebapp {
 // rides names the workspace, and selecting that workspace's tab is the whole
 // of Emacs's obligation.
 message HostWorkspaceNotificationClicked {}
+
+// The reader clicked a final response in this workspace's webview, which
+// selected it. Empty: the stream it rides names the workspace, and the
+// selection push carries what was selected, so focusing the composer in
+// insert state is the whole of Emacs's obligation.
+message HostWorkspaceFinalResponseClicked {}
 
 // The host-facing state of one workspace: what Emacs needs to correlate
 // processes, gate its composer, and manage buffers — nothing a webview draws.

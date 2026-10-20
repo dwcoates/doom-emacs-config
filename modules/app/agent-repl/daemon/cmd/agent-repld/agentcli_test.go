@@ -773,4 +773,3 @@ func TestCreateOriginMasterRefusesAChild(t *testing.T) {
 		t.Fatalf("exit %d, requests %v, stderr %q; want the flag refused for a child", code, f.client.requests, f.errOut.String())
 	}
 }
-

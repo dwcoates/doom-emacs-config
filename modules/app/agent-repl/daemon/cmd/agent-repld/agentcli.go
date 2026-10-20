@@ -209,7 +209,9 @@ type cliCall struct {
 func (c *cliCall) flags() (*flag.FlagSet, *string) {
 	fs := flag.NewFlagSet(c.name, flag.ContinueOnError)
 	fs.SetOutput(c.errOut)
-	fs.Usage = func() { fmt.Fprintf(c.errOut, "usage: agent-repld %s %s [-dry-run]\n", strings.Fields(c.name)[0], c.usage) }
+	fs.Usage = func() {
+		fmt.Fprintf(c.errOut, "usage: agent-repld %s %s [-dry-run]\n", strings.Fields(c.name)[0], c.usage)
+	}
 	c.dryRun = fs.Bool("dry-run", false, "print every request that would change something instead of sending it")
 	return fs, fs.String("state-dir", "", "state root, overriding $AGENT_REPL_STATE_DIR")
 }

@@ -587,6 +587,14 @@ The user clicked this workspace's desktop banner; the daemon posted it
 and read the click back, so selecting the tab is all that is left."
   (agent-repl-wire--decode-empty "HostWorkspaceNotificationClicked" value))
 
+;;;; ---- The final-response click push ----
+
+(defun agent-repl-wire-decode-host-workspace-final-response-clicked (value)
+  "Decode VALUE as the empty message `HostWorkspaceFinalResponseClicked'.
+The reader clicked a final response in the webview, selecting it, so
+focusing the composer for the reply is all that is left."
+  (agent-repl-wire--decode-empty "HostWorkspaceFinalResponseClicked" value))
+
 ;;;; ---- The selection push ----
 
 (defun agent-repl-wire-decode-host-workspace-selection (value)
@@ -830,6 +838,10 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `notification_clicked' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-notification-clicked value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-final-response-clicked (value)
+  "Decode the `final_response_clicked' push arm VALUE."
+  (agent-repl-wire-decode-host-workspace-final-response-clicked value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-selection (value)
   "Decode the `selection' push arm VALUE as its `(:kind :markdown)' plist."
   (agent-repl-wire-decode-host-workspace-selection value))
@@ -875,14 +887,17 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
      (notificationClicked :notification-clicked
                           agent-repl-wire-decode-watch-host-workspace-response-notification-clicked)
      (selection :selection agent-repl-wire-decode-watch-host-workspace-response-selection)
-     (evaluate :evaluate agent-repl-wire-decode-watch-host-workspace-response-evaluate))))
+     (evaluate :evaluate agent-repl-wire-decode-watch-host-workspace-response-evaluate)
+     (finalResponseClicked :final-response-clicked
+                           agent-repl-wire-decode-watch-host-workspace-response-final-response-clicked))))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response (value)
   "Decode VALUE as `WatchHostWorkspaceResponse', the push oneof plist."
   (let ((object (agent-repl-wire--object "WatchHostWorkspaceResponse" value)))
     (agent-repl-wire--check-keys
      "WatchHostWorkspaceResponse" object
-     '(host transferred reloadWebapp openInEditor openCommitLog ending notificationClicked selection evaluate))
+     '(host transferred reloadWebapp openInEditor openCommitLog ending notificationClicked selection evaluate
+       finalResponseClicked))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))

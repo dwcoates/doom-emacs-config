@@ -19,13 +19,7 @@ import (
 // receiveProgress reads the next mutation-progress push off STREAM.
 func receiveProgress(t *testing.T, stream *connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse]) *agentreplv1.WorkspaceMutationProgress {
 	t.Helper()
-	for stream.Receive() {
-		if prog := stream.Msg().GetMutationProgress(); prog != nil {
-			return prog
-		}
-	}
-	t.Fatalf("no mutation progress arrived: %v", stream.Err())
-	return nil
+	return receivePush(t, stream, "mutation progress", (*agentreplv1.WatchDaemonResponse).GetMutationProgress)
 }
 
 // hasRecordAt reports whether LOG holds a record at LEVEL for OPERATION.

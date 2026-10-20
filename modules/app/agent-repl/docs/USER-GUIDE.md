@@ -43,6 +43,9 @@ response, and the other way round.
 | `C-s`, or `/` / `?` (command mode) | Search the selected bubble. It opens read-only in a popup, and the search runs there. |
 | `ESC` `ESC` (command mode) | Clear the selection. The first escape only warns. The feed returns to the newest row. |
 
+- **Clicking a final response selects it and puts you in the input window, in insert mode,** so you can type the reply straight away.
+  - Selecting it with `M-s-k` / `M-s-j` leaves the input window's mode as it was, so `/` and `?` still search it.
+  - The input window takes the keyboard only when it is on screen.
 - Clicking the feed's background also clears the selection.
 - Clicking the selected bubble clears the selection too, and the feed stays where it is.
 - **A selection ends when its bubble scrolls out of view.**
