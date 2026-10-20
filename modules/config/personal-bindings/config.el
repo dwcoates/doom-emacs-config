@@ -31,3 +31,23 @@ is loaded."
         (kbd "C-k") #'kill-line))))
 
 (+dwc/bind-minibuffer-kill-line)
+
+(defun +dwc/vterm-toggle (arg)
+  "Toggle the project vterm popup, ready to type when it opens.
+Passes ARG to `+vterm/toggle'.  A sole vterm window is un-fullscreened
+first.  When the toggle shows the popup, point moves to the terminal's
+cursor and evil enters insert state, since a re-shown popup otherwise
+keeps whatever state (usually normal) it was left in.  Returns the
+vterm buffer, as `+vterm/toggle' does."
+  (interactive "P")
+  (when (and (string-search "vterm" (buffer-name))
+             (= (length (window-list)) 1))
+    (+dwc/toggle-window-fullscreen))
+  (let ((buffer (+vterm/toggle arg)))
+    (when (eq (window-buffer (selected-window)) buffer)
+      (with-current-buffer buffer
+        (vterm-reset-cursor-point)
+        (evil-insert-state)))
+    buffer))
+
+(map! :leader :desc "Toggle vterm popup" "o t" #'+dwc/vterm-toggle)

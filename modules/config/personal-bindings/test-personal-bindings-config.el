@@ -87,3 +87,95 @@
     ;; Act / Assert
     (should (equal (should-error (+dwc/bind-minibuffer-kill-line))
                    '(error "Minibuffer keymap test-personal-bindings--not-a-keymap is not a keymap")))))
+
+(defmacro test-personal-bindings--with-vterm-toggle (shown &rest body)
+  "Run BODY with the vterm toggle's collaborators stubbed.
+The stubbed `+vterm/toggle' returns a probe buffer, displayed in the
+selected window when SHOWN is non-nil.  BODY sees `calls', the stub calls
+in order as (NAME . ARGS)."
+  (declare (indent 1))
+  `(let ((calls nil)
+         (probe (generate-new-buffer " *probe-vterm*"))
+         (original (window-buffer (selected-window))))
+     (unwind-protect
+         (cl-letf (((symbol-function '+vterm/toggle)
+                    (lambda (arg)
+                      (push (list '+vterm/toggle arg) calls)
+                      (when ,shown (set-window-buffer (selected-window) probe))
+                      probe))
+                   ((symbol-function 'vterm-reset-cursor-point)
+                    (lambda () (push (list 'vterm-reset-cursor-point (current-buffer)) calls)))
+                   ((symbol-function 'evil-insert-state)
+                    (lambda () (push (list 'evil-insert-state (current-buffer)) calls)))
+                   ((symbol-function '+dwc/toggle-window-fullscreen)
+                    (lambda () (push (list '+dwc/toggle-window-fullscreen) calls))))
+           ,@body)
+       (set-window-buffer (selected-window) original)
+       (kill-buffer probe))))
+
+(ert-deftest test-personal-bindings-vterm-toggle-shown-enters-insert-at-cursor ()
+  "A toggle that shows the popup resets point to the cursor, then enters insert."
+  ;; Arrange
+  (test-personal-bindings--with-vterm-toggle t
+    ;; Act
+    (+dwc/vterm-toggle nil)
+    ;; Assert
+    (should (equal (reverse calls)
+                   (list (list '+vterm/toggle nil)
+                         (list 'vterm-reset-cursor-point probe)
+                         (list 'evil-insert-state probe))))))
+
+(ert-deftest test-personal-bindings-vterm-toggle-hidden-leaves-state-alone ()
+  "A toggle that hides the popup neither moves point nor changes evil state."
+  ;; Arrange
+  (test-personal-bindings--with-vterm-toggle nil
+    ;; Act
+    (+dwc/vterm-toggle nil)
+    ;; Assert
+    (should (equal calls (list (list '+vterm/toggle nil))))))
+
+(ert-deftest test-personal-bindings-vterm-toggle-forwards-prefix-arg ()
+  "The prefix argument reaches `+vterm/toggle' unchanged."
+  ;; Arrange
+  (test-personal-bindings--with-vterm-toggle nil
+    ;; Act
+    (+dwc/vterm-toggle '(4))
+    ;; Assert
+    (should (equal calls (list (list '+vterm/toggle '(4)))))))
+
+(ert-deftest test-personal-bindings-vterm-toggle-sole-vterm-window-unfullscreens ()
+  "Toggling from a sole vterm window un-fullscreens it before toggling."
+  ;; Arrange
+  (test-personal-bindings--with-vterm-toggle nil
+    (with-temp-buffer
+      (rename-buffer "*doom:vterm-popup:probe*" t)
+      (set-window-buffer (selected-window) (current-buffer))
+      (delete-other-windows)
+      ;; Act
+      (+dwc/vterm-toggle nil))
+    ;; Assert
+    (should (equal (reverse calls)
+                   (list (list '+dwc/toggle-window-fullscreen)
+                         (list '+vterm/toggle nil))))))
+
+(ert-deftest test-personal-bindings-vterm-toggle-other-buffer-keeps-layout ()
+  "Toggling from a non-vterm buffer does not un-fullscreen anything."
+  ;; Arrange
+  (test-personal-bindings--with-vterm-toggle nil
+    (with-temp-buffer
+      (rename-buffer "*scratch-probe*" t)
+      (set-window-buffer (selected-window) (current-buffer))
+      (delete-other-windows)
+      ;; Act
+      (+dwc/vterm-toggle nil))
+    ;; Assert
+    (should (equal calls (list (list '+vterm/toggle nil))))))
+
+(ert-deftest test-personal-bindings-vterm-toggle-returns-vterm-buffer ()
+  "The toggle returns the vterm buffer `+vterm/toggle' returned."
+  ;; Arrange
+  (test-personal-bindings--with-vterm-toggle t
+    ;; Act
+    (let ((result (+dwc/vterm-toggle nil)))
+      ;; Assert
+      (should (eq result probe)))))
