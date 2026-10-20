@@ -271,6 +271,10 @@ func TestWatchDaemonRefusesARequestNamingNoBuild(t *testing.T) {
 		{name: "an Emacs naming no process identity", req: &agentreplv1.WatchDaemonRequest{
 			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test", Focus: unfocusedEditor()}},
 		}},
+		{name: "an Emacs stating a pid that is not positive", req: &agentreplv1.WatchDaemonRequest{
+			Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test", Focus: unfocusedEditor(),
+				Instance: testEditorInstance(), Process: &agentreplv1.EditorProcess{Pid: 0}}},
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

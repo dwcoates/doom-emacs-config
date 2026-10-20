@@ -82,6 +82,9 @@ func TestPutHeldPromptRefusesAMissingSubmission(t *testing.T) {
 	if !loggedOperation(log, "daemon.wsm.put_held_prompt", "error") {
 		t.Fatalf("the refusal was not logged at error: %v", log.Records())
 	}
+	if errors.Is(err, ErrHoldRetired) {
+		t.Fatalf("PutHeldPrompt = %v, want a resurrection refusal, not an update that raced a retirement", err)
+	}
 }
 
 func TestPutHeldPromptRoundTripsTheComposerTarget(t *testing.T) {
@@ -419,6 +422,44 @@ func TestUpdateHeldPromptClassificationRefusesARetiredHold(t *testing.T) {
 	// Assert
 	if !errors.Is(err, ErrTombstoned) {
 		t.Fatalf("UpdateHeldPromptClassification = %v, want ErrTombstoned", err)
+	}
+}
+
+func TestAnUpdateRacingARetirementIsATypedRefusalAtDebug(t *testing.T) {
+	kind := HoldReconnect
+	tests := []struct {
+		name   string
+		op     string
+		update func(s DB, turn TurnID) error
+	}{
+		{name: "a verdict", op: "daemon.wsm.update_held_prompt_classification", update: func(s DB, turn TurnID) error {
+			return s.UpdateHeldPromptClassification(context.Background(), turn, Classification{Arm: ArmInterject, At: instant})
+		}},
+		{name: "a hold change", op: "daemon.wsm.update_held_prompt_hold", update: func(s DB, turn TurnID) error {
+			return s.UpdateHeldPromptHold(context.Background(), turn, &kind, "")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+			turn := standingHold(t, s, ws.ID)
+			if err := s.TombstoneHeldPrompt(context.Background(), turn, Tombstone{Kind: "dropped", At: instant}); err != nil {
+				t.Fatalf("TombstoneHeldPrompt: %v", err)
+			}
+
+			// Act
+			err := tt.update(s, turn)
+
+			// Assert
+			if !errors.Is(err, ErrHoldRetired) || !errors.Is(err, ErrTombstoned) {
+				t.Fatalf("update = %v, want ErrHoldRetired, which is an ErrTombstoned", err)
+			}
+			if loggedOperation(log, tt.op, "error") || !loggedOperation(log, tt.op, "debug") {
+				t.Fatalf("records = %v, want the raced update at debug and no error", log.Records())
+			}
+		})
 	}
 }
 

@@ -1235,3 +1235,44 @@ func TestEveryHostStreamDialInTheseTestsGoesThroughTheHelpers(t *testing.T) {
 		t.Fatalf("hand-rolled host stream dials = %v, want only dialHostStream's own %v; use dialHostStream or openHostStream", counts, want)
 	}
 }
+
+func TestAnEmacsStreamMeasuresTheEmacsItStatesWhileItStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Emacs.released = make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	_, err := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{
+		Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "elisp-test",
+			Focus: unfocusedEditor(), Instance: testEditorInstance(), Process: &agentreplv1.EditorProcess{Pid: 4242}}},
+	}))
+	if err != nil {
+		t.Fatalf("open the daemon stream: %v", err)
+	}
+	if got := h.Emacs.all(); len(got) != 1 || got[0] != "attach:4242" {
+		t.Fatalf("while the stream stands: %v, want the stated pid attached", got)
+	}
+
+	// Act
+	cancel()
+	<-h.Emacs.released
+
+	// Assert
+	if got := h.Emacs.all(); len(got) != 2 || got[1] != "release:4242" {
+		t.Fatalf("after the stream ended: %v, want the pid released", got)
+	}
+}
+
+func TestAnEmacsStreamStatingNoProcessMeasuresNoEmacs(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act
+	emacsDaemonStream(t, h, ctx, unfocusedEditor())
+
+	// Assert
+	if got := h.Emacs.all(); len(got) != 0 {
+		t.Fatalf("measured %v, want nothing for an Emacs stating no process", got)
+	}
+}

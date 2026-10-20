@@ -53,8 +53,10 @@ type fakeDB struct {
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	leases     map[ids.WorkspaceID]wsm.Lease
 	held       map[ids.TurnID]*wsm.HeldPrompt
-	order      []ids.TurnID
-	turns      map[ids.TurnID]*wsm.Turn
+	// classificationErr, when set, is what every verdict write answers.
+	classificationErr error
+	order             []ids.TurnID
+	turns             map[ids.TurnID]*wsm.Turn
 	// owed is the resumptions a stand-down owes, by workspace.
 	owed     map[ids.WorkspaceID]map[ids.TurnID]bool
 	schedule *wsm.DrainSchedule
@@ -221,6 +223,9 @@ func (d *fakeDB) PutHeldPrompt(_ context.Context, h wsm.HeldPrompt) error {
 func (d *fakeDB) UpdateHeldPromptClassification(_ context.Context, turn ids.TurnID, c wsm.Classification) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.classificationErr != nil {
+		return d.classificationErr
+	}
 	h, ok := d.held[turn]
 	if !ok {
 		return errors.New("no such hold")

@@ -29,6 +29,12 @@ var ErrSessionIdentityMissing = errors.New("wsm: a session record carries no hos
 // tombstoned hold never resurrects.
 var ErrTombstoned = errors.New("wsm: held prompt is tombstoned")
 
+// ErrHoldRetired is an update to a standing hold that was retired meanwhile:
+// the write raced the prompt's drop, delivery or clear, an ordinary schedule
+// rather than a resurrection. It is an ErrTombstoned, so every caller that
+// tells a retired prompt apart keeps doing so.
+var ErrHoldRetired = fmt.Errorf("wsm: the held prompt was retired before the update: %w", ErrTombstoned)
+
 // ErrRepositoryInUse refuses a repository retirement while one of its
 // workspaces is open or still holds live state. Retiring it would delete
 // records a user can still act on, so the repository is kept and the refusal

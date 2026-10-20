@@ -602,6 +602,14 @@ func (s *server) watchDaemon(
 		// unfocused.
 		release := s.deps.Focus.Attach(isFocused(emacs.GetFocus()))
 		defer release()
+		// THE MEASURED EMACS IS THIS STREAM'S, for the same reason: the one
+		// connected, released when the stream ends. An Emacs whose elisp
+		// predates the field states no process and is not measured.
+		if process := emacs.GetProcess(); process != nil {
+			defer s.deps.Emacs.AttachEmacs(int(process.GetPid()))()
+		} else {
+			s.log.Info("WatchDaemon", "the Emacs stream stated no process; this Emacs is not measured", nil)
+		}
 	}
 	// The reported build is read into the record BEFORE the watcher is
 	// shared: once registered, a deploy's reload may move it under s.mu.

@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -1391,6 +1392,50 @@ func TestARunningTurnThatEndedBeforeTheVerdictIsNoDisagreement(t *testing.T) {
 			if route != classifier.RouteQueue || verdict.Arm != wsm.ArmHoldForTurnEnd || gotError != tt.wantError || askedCount(h) != 0 {
 				t.Fatalf("verdictFor = (%+v, %s), error records = %t, asks = %d; want hold_for_turn_end, error=%t, the model never asked",
 					verdict, route, gotError, askedCount(h), tt.wantError)
+			}
+		})
+	}
+}
+
+func TestAVerdictForAPromptRetiredWhileJudgedIsNotAnError(t *testing.T) {
+	tests := []struct {
+		name      string
+		refusal   error
+		wantLevel string
+		wantMsg   string
+	}{
+		{
+			name:      "the prompt was retired while it was judged",
+			refusal:   fmt.Errorf("wsm: held prompt t1 retired as \"dropped\": %w", wsm.ErrHoldRetired),
+			wantLevel: "info",
+			wantMsg:   "the prompt was retired while it was judged; its verdict is not recorded",
+		},
+		{
+			name:      "the store failed",
+			refusal:   errors.New("disk gone"),
+			wantLevel: "error",
+			wantMsg:   "could not record the verdict",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			h.db.mu.Lock()
+			h.db.classificationErr = tt.refusal
+			h.db.mu.Unlock()
+
+			// Act
+			_, _ = h.q.Submit(context.Background(), submission("t1", "go on"))
+			h.q.waitForClassifications()
+
+			// Assert
+			if !logged(h.log.Records(), tt.wantLevel, opClassify, tt.wantMsg) {
+				t.Fatalf("records = %v, want %s %q", h.log.Records(), tt.wantLevel, tt.wantMsg)
+			}
+			if tt.wantLevel == "info" && logged(h.log.Records(), "error", opClassify, "could not record the verdict") {
+				t.Fatalf("a retired prompt's verdict was recorded as an error: %v", h.log.Records())
 			}
 		})
 	}

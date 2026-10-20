@@ -512,6 +512,15 @@ func (q *queue) runningText(ctx context.Context, ws ids.WorkspaceID, running ids
 // record stamps a verdict on the held prompt and re-pushes the tray.
 func (q *queue) record(ctx context.Context, sub Submission, c wsm.Classification, log dlog.Logger) {
 	if err := q.deps.DB.UpdateHeldPromptClassification(ctx, sub.Turn, c); err != nil {
+		// A PROMPT RETIRED WHILE IT WAS JUDGED (dropped, delivered, cleared)
+		// has no verdict to keep: the judge ran outside the queue's lock, and
+		// the retirement won. Nothing waits on the verdict any more.
+		if errors.Is(err, wsm.ErrHoldRetired) {
+			log.Info(opClassify, "the prompt was retired while it was judged; its verdict is not recorded", dlog.Context{
+				"turn": string(sub.Turn), "cause": err.Error(),
+			})
+			return
+		}
 		log.Error(opClassify, "could not record the verdict", dlog.Context{
 			"turn": string(sub.Turn), "cause": err.Error(),
 		})

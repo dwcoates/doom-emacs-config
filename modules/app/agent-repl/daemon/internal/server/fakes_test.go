@@ -1583,6 +1583,8 @@ type harness struct {
 	LoudFaults publish.Topic[*agentreplv1.DaemonFaultsStanding]
 	// Focus is Emacs's desktop focus, attached by an Emacs WatchDaemon stream.
 	Focus *desktopnotify.Focus
+	// Emacs records every Emacs pid a stream attached and every release.
+	Emacs *fakeEmacsMeasure
 	// Banners is the desktop banners ClaimLiveNotification claims.
 	Banners *fakeBanners
 	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
@@ -1682,6 +1684,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Sidebar:    &fakeSidebar{},
 		Surfaces:   &fakeSurfaces{},
 		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
+		Emacs:      &fakeEmacsMeasure{},
 		Banners:    &fakeBanners{},
 		WebappDist: dist,
 
@@ -1729,6 +1732,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Sidebar:           h.Sidebar,
 		LoudFaults:        &h.LoudFaults,
 		Focus:             h.Focus,
+		Emacs:             h.Emacs,
 		Banners:           h.Banners,
 		PersistentWifi:    h.PersistentWifi,
 		HiddenKeepalives:  h.HiddenKeepalives,
@@ -2266,4 +2270,34 @@ func (f *fakeFeed) sentRows() []sentRow {
 	f.sentMu.Lock()
 	defer f.sentMu.Unlock()
 	return append([]sentRow(nil), f.sent...)
+}
+
+// fakeEmacsMeasure records the Emacs pids streams attached, and their releases,
+// in order, as "attach:<pid>" and "release:<pid>".
+type fakeEmacsMeasure struct {
+	mu     sync.Mutex
+	events []string
+	// released is signalled once per release, so a test awaits a stream's end.
+	released chan struct{}
+}
+
+func (f *fakeEmacsMeasure) AttachEmacs(pid int) func() {
+	f.mu.Lock()
+	f.events = append(f.events, fmt.Sprintf("attach:%d", pid))
+	f.mu.Unlock()
+	return func() {
+		f.mu.Lock()
+		f.events = append(f.events, fmt.Sprintf("release:%d", pid))
+		ch := f.released
+		f.mu.Unlock()
+		if ch != nil {
+			ch <- struct{}{}
+		}
+	}
+}
+
+func (f *fakeEmacsMeasure) all() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.events...)
 }

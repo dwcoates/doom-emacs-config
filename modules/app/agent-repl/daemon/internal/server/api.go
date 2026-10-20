@@ -123,6 +123,9 @@ type Deps struct {
 	// Focus is Emacs's desktop focus: an Emacs WatchDaemon stream attaches it
 	// for the stream's lifetime, and ReportEditorFocus moves it.
 	Focus *desktopnotify.Focus
+	// Emacs measures the Emacs whose WatchDaemon stream stands, for as long
+	// as the stream does (runtimemetrics.Surface.AttachEmacs).
+	Emacs EmacsMeasure
 	// Banners backs ClaimLiveNotification, and SelectWorkspace lets every held
 	// banner go: a workspace the user chose outranks any banner made before.
 	Banners Banners
@@ -459,6 +462,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the standing loud faults")
 	case deps.Focus == nil:
 		return nil, missing("Emacs's focus")
+	case deps.Emacs == nil:
+		return nil, missing("the Emacs measure")
 	case deps.Latencies == nil:
 		return nil, missing("a latency recorder")
 	case deps.RPCs == nil:

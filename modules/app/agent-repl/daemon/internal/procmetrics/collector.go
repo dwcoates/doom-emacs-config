@@ -21,6 +21,9 @@ type Deps struct {
 	Reader Reader
 	// Self is the daemon's pid.
 	Self int
+	// Emacs is the Emacs whose WatchDaemon stream stands, measured with the
+	// WebKit processes it is responsible for.
+	Emacs interface{ PID() (int, bool) }
 	// SockDir is the directory the daemon's shims listen in.
 	SockDir string
 	// DiskPath is a path on the volume whose free space is reported (the
@@ -78,8 +81,8 @@ type Collector struct {
 
 // New builds a collector.
 func New(deps Deps) (*Collector, error) {
-	if deps.Reader == nil || deps.Self <= 0 || deps.SockDir == "" || deps.DiskPath == "" || deps.OnBattery == nil || deps.Log == nil {
-		return nil, errors.New("procmetrics: a reader, the daemon's pid, the socket directory, a disk path, a power source and a logger are required")
+	if deps.Reader == nil || deps.Self <= 0 || deps.Emacs == nil || deps.SockDir == "" || deps.DiskPath == "" || deps.OnBattery == nil || deps.Log == nil {
+		return nil, errors.New("procmetrics: a reader, the daemon's pid, the Emacs holder, the socket directory, a disk path, a power source and a logger are required")
 	}
 	labels := []string{"process", "workspace"}
 	desc := func(name, help string, l []string) *prometheus.Desc { return prometheus.NewDesc(name, help, l, nil) }
@@ -149,7 +152,8 @@ func (c *Collector) collectProcesses(ch chan<- prometheus.Metric) {
 		}
 	}
 	c.note("identity", identityErr)
-	classified := classify(ids, c.deps.Self, c.deps.SockDir, c.deps.Reader.Args)
+	emacs, _ := c.deps.Emacs.PID()
+	classified := classify(ids, c.deps.Self, emacs, c.deps.SockDir, c.deps.Reader.Args)
 	c.note("argv", errors.Join(classified.errs...))
 	c.noteUnknownWebKit(classified.unknownWebKit)
 

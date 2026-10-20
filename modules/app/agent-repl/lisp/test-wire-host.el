@@ -1079,6 +1079,20 @@ composer and vendor_info arms together."
                                                                    :instance "emacs-7"))))))
                  "{\"emacs\":{\"elispBuild\":\"abc123\",\"focus\":{\"focused\":{}},\"instance\":{\"value\":\"emacs-7\"}}}")))
 
+(ert-deftest agent-repl-test-wire-host-watch-daemon-emacs-states-its-process ()
+  "A stated pid rides as the `process' the daemon measures."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize (agent-repl-wire-encode-watch-daemon-emacs
+                                    '(:elisp-build "abc123" :focus (:arm :focused)
+                                      :instance "emacs-7" :pid 4242))))
+                 "{\"elispBuild\":\"abc123\",\"focus\":{\"focused\":{}},\"instance\":{\"value\":\"emacs-7\"},\"process\":{\"pid\":4242}}")))
+
+(ert-deftest agent-repl-test-wire-host-editor-process-not-positive-is-refused ()
+  "A pid that is not a positive integer is refused before anything is sent."
+  (dolist (pid '(0 -1 "4242" nil))
+    (should (equal (agent-repl-test-wire-host--encode-breach #'agent-repl-wire-encode-editor-process pid)
+                   '("EditorProcess" pid "not a positive integer")))))
+
 (ert-deftest agent-repl-test-wire-host-watch-daemon-emacs-without-focus-is-refused ()
   "The focus is REQUIRED: the daemon decides banners on it from the first instant."
   (should (equal (agent-repl-test-wire-host--encode-breach

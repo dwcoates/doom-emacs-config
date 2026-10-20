@@ -546,7 +546,7 @@ missing here or there is a broken seam.")
       (should (equal requests '(nil))))))
 
 (ert-deftest agent-repl-test-rpc-daemon-stream-names-emacs-its-elisp-build-and-focus ()
-  "Every WatchDaemon Emacs opens names it as `emacs' with its elisp and focus."
+  "Every WatchDaemon Emacs opens names it as `emacs' with its elisp, focus and pid."
   ;; Arrange
   (agent-repl-test-rpc--with-logs
     (let ((requests nil))
@@ -563,9 +563,10 @@ missing here or there is a broken seam.")
         (agent-repl-rpc-watch-daemon nil #'ignore #'ignore))
       ;; Assert
       (should (equal requests
-                     '((:client (:arm :emacs :value (:elisp-build "b-test"
+                     `((:client (:arm :emacs :value (:elisp-build "b-test"
                                                      :focus (:arm :focused)
-                                                     :instance "emacs-1")))))))))
+                                                     :instance "emacs-1"
+                                                     :pid ,(emacs-pid))))))))))
 
 (ert-deftest agent-repl-test-rpc-daemon-stream-sends-the-build-and-focus-on-the-wire ()
   "The encoded WatchDaemon body carries `elispBuild' and `focus' under `emacs'."
@@ -581,7 +582,7 @@ missing here or there is a broken seam.")
         ;; Act
         (agent-repl-rpc-watch-daemon nil #'ignore #'ignore))
       ;; Assert
-      (should (equal sent "{\"emacs\":{\"elispBuild\":\"b-test\",\"focus\":{\"unfocused\":{}},\"instance\":{\"value\":\"emacs-1\"}}}")))))
+      (should (equal sent (format "{\"emacs\":{\"elispBuild\":\"b-test\",\"focus\":{\"unfocused\":{}},\"instance\":{\"value\":\"emacs-1\"},\"process\":{\"pid\":%d}}}" (emacs-pid)))))))
 
 (ert-deftest agent-repl-test-rpc-editor-instance-is-stable-within-a-process ()
   "The instance is the same on every call: a reconnect carries it unchanged."

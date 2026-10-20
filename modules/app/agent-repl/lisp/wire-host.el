@@ -1496,7 +1496,9 @@ is refused HERE, before anything is sent."
 
 (defun agent-repl-wire-encode-watch-daemon-emacs (value)
   "Encode `WatchDaemonEmacs' from VALUE.
-VALUE is the plist `(:elisp-build BUILD :focus F :instance I)'.
+VALUE is the plist `(:elisp-build BUILD :focus F :instance I)', plus the
+OPTIONAL `:pid' PID of this Emacs process, which the daemon measures in its
+process metrics while the stream stands (`agent-repl-wire-encode-editor-process').
 The build is REQUIRED and never empty: a watch without it is refused,
 because a deploy could not tell whether this Emacs runs the checkout's
 elisp.  An empty one is refused HERE, before anything is sent.  The focus
@@ -1516,12 +1518,23 @@ reconnect (`agent-repl-wire-encode-editor-instance')."
       (agent-repl-wire--fail "WatchDaemonEmacs" 'instance "required message field is absent"))
     (agent-repl-wire--encoded
      "WatchDaemonEmacs"
-     (list (cons 'elispBuild (agent-repl-wire--encode-string
-                              "WatchDaemonEmacs" 'elispBuild build))
-           (cons 'focus (agent-repl-wire-encode-editor-focus
-                         (plist-get value :focus)))
-           (cons 'instance (agent-repl-wire-encode-editor-instance
-                            (plist-get value :instance)))))))
+     (append
+      (list (cons 'elispBuild (agent-repl-wire--encode-string
+                               "WatchDaemonEmacs" 'elispBuild build))
+            (cons 'focus (agent-repl-wire-encode-editor-focus
+                          (plist-get value :focus)))
+            (cons 'instance (agent-repl-wire-encode-editor-instance
+                             (plist-get value :instance))))
+      (when (plist-member value :pid)
+        (list (cons 'process (agent-repl-wire-encode-editor-process
+                              (plist-get value :pid)))))))))
+
+(defun agent-repl-wire-encode-editor-process (pid)
+  "Encode `EditorProcess' from PID, this Emacs's process id.
+A pid that is not a positive integer is refused HERE, before anything is sent."
+  (unless (and (integerp pid) (> pid 0))
+    (agent-repl-wire--fail "EditorProcess" 'pid "not a positive integer"))
+  (agent-repl-wire--encoded "EditorProcess" (list (cons 'pid pid))))
 
 (defun agent-repl-wire-encode-watch-daemon-request-emacs (value)
   "Encode `WatchDaemonRequest''s `emacs' client arm from VALUE."

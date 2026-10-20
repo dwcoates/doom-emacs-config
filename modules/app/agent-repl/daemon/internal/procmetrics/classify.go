@@ -70,13 +70,15 @@ type classification struct {
 }
 
 // classify sorts the host's processes into agent-repl's groups (see the
-// package comment for the rules). self is the daemon, sockDir the directory
-// its shims listen in.
-func classify(ids map[int]Identity, self int, sockDir string, args func(int) ([]string, error)) classification {
+// package comment for the rules). self is the daemon, emacs the pid of the
+// Emacs whose stream stands (0 for none), sockDir the directory its shims
+// listen in.
+func classify(ids map[int]Identity, self, emacs int, sockDir string, args func(int) ([]string, error)) classification {
 	out := classification{groups: map[int]Group{}}
-	emacs := 0
-	if r := ids[self].Responsible; r != self && r > 0 && strings.EqualFold(ids[r].Name, "emacs") {
-		emacs = r
+	// AN EMACS THAT HAS EXITED IS NOBODY: its stream's end has not been
+	// observed yet, and a pid it no longer holds names no process of ours.
+	if _, alive := ids[emacs]; !alive {
+		emacs = 0
 	}
 	children := map[int][]int{}
 	pids := make([]int, 0, len(ids))
