@@ -183,6 +183,12 @@ type queue struct {
 	// nil.
 	onDrainWait func()
 
+	// onCallWait, when set, is called each time an exclusive call starts
+	// waiting out a standing shim call, with the delivery lock released. It
+	// is how a test observes the wait without timing it; production leaves it
+	// nil.
+	onCallWait func()
+
 	mu     lockwatch.Mutex
 	states map[ids.WorkspaceID]*wsState
 

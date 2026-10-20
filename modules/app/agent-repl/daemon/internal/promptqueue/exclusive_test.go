@@ -191,3 +191,79 @@ func TestAnExclusiveCallWaitingOnABounceEndsWithItsContext(t *testing.T) {
 	}
 	g.finish(h, nil)
 }
+
+// exclusiveDuringStartTurn holds a submission's StartTurn standing, then
+// starts an exclusive call that records which shim call stood when its work
+// ran: its own, once the StartTurn has settled. It answers once the call is waiting on the StartTurn, with the
+// channel that lets the StartTurn return and the call's result channel.
+func exclusiveDuringStartTurn(t *testing.T, h *harness, ctx context.Context) (standingWhenRun *atomic.Value, release chan struct{}, submitted, done chan error) {
+	t.Helper()
+	inside, release := make(chan struct{}), make(chan struct{})
+	h.sender.startHook = func() {
+		close(inside)
+		<-release
+	}
+	submitted = make(chan error, 1)
+	go func() {
+		_, err := h.q.Submit(context.Background(), submission("t1", "go"))
+		submitted <- err
+	}()
+	<-inside
+	waiting := make(chan struct{}, 4)
+	h.q.onCallWait = func() { waiting <- struct{}{} }
+	standingWhenRun, done = &atomic.Value{}, make(chan error, 1)
+	go func() {
+		done <- h.q.Exclusively(ctx, theWorkspace, "fork", func(context.Context) error {
+			call, _ := h.q.standingCall(theWorkspace)
+			standingWhenRun.Store(call.what)
+			return nil
+		})
+	}()
+	<-waiting
+	return standingWhenRun, release, submitted, done
+}
+
+// TestAnExclusiveCallWaitsOutAStandingStartTurnAndRunsAfterIt is the
+// 2026-10-20 crash: a bounce's end delivered the next held prompt, and the
+// fork that had waited on the bounce woke into the lock beside that
+// delivery's StartTurn, which outside refuses by panicking.
+func TestAnExclusiveCallWaitsOutAStandingStartTurnAndRunsAfterIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	standingWhenRun, release, submitted, done := exclusiveDuringStartTurn(t, h, context.Background())
+
+	// Act
+	close(release)
+	err := <-done
+
+	// Assert
+	if serr := <-submitted; serr != nil {
+		t.Fatalf("Submit: %v", serr)
+	}
+	if standing := standingWhenRun.Load(); err != nil || standing != "fork" {
+		t.Fatalf("Exclusively = %v, call standing when run = %v; want the work run as the only call, once the StartTurn settled", err, standing)
+	}
+	if !logged(h.log.Records(), "info", opExclusive, "a shim call is in flight on the workspace; the call waits for it to settle so it never runs beside it") {
+		t.Fatalf("records = %+v, want the wait recorded", h.log.Records())
+	}
+}
+
+func TestAnExclusiveCallWaitingOnAStandingCallEndsWithItsContext(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	standingWhenRun, release, submitted, done := exclusiveDuringStartTurn(t, h, ctx)
+
+	// Act
+	cancel()
+	err := <-done
+	close(release)
+
+	// Assert
+	if serr := <-submitted; serr != nil {
+		t.Fatalf("Submit: %v", serr)
+	}
+	if ran := standingWhenRun.Load(); !errors.Is(err, context.Canceled) || ran != nil {
+		t.Fatalf("Exclusively = %v, ran beside %v; want the context's end and no work run", err, ran)
+	}
+}
