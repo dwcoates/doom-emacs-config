@@ -101,7 +101,7 @@ func TestLoggerReportsADegradedMirrorDurably(t *testing.T) {
 	}
 	defer func() { close(terminal.release); s.Close() }()
 	s.mirror.close()
-	s.mirror = newMirror(terminal, 1)
+	s.mirror = newMirror(terminal, 1, false)
 	log := s.Global()
 	log.Info("daemon.pkg.first", "m", nil)
 	<-terminal.entered

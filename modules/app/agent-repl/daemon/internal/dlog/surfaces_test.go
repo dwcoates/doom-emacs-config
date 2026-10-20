@@ -1,6 +1,7 @@
 package dlog
 
 import (
+	"agentrepl/logging"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -2203,5 +2204,70 @@ func TestCentralClientLogRefusesAKindTheDaemonDoesNotOwn(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatalf("CentralClientLog accepted the kind emacs")
+	}
+}
+
+func TestMirrorsErrorsOnlyOffATerminal(t *testing.T) {
+	// Arrange
+	file, err := os.Create(filepath.Join(t.TempDir(), "daemon.stdio.log"))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer file.Close()
+	device, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	defer device.Close()
+	tests := []struct {
+		name       string
+		f          *os.File
+		errorsOnly bool
+	}{
+		{name: "a regular file, as the detached daemon's stderr is, gets errors alone", f: file, errorsOnly: true},
+		{name: "a character device, as a terminal is, gets every record", f: device, errorsOnly: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := mirrorsErrorsOnly(tt.f)
+
+			// Assert
+			if got != tt.errorsOnly {
+				t.Fatalf("mirrorsErrorsOnly(%s) = %v, want %v", tt.f.Name(), got, tt.errorsOnly)
+			}
+		})
+	}
+}
+
+func TestSurfacesOffATerminalMirrorErrorsAndPersistEverything(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
+	var terminal syncBuffer
+	level, err := parseLevel(LevelInfo)
+	if err != nil {
+		t.Fatalf("parseLevel: %v", err)
+	}
+	s, err := openSurfacesWindow(path, logging.FixedWindow(level), &terminal, true)
+	if err != nil {
+		t.Fatalf("openSurfacesWindow: %v", err)
+	}
+
+	// Act
+	s.Global().Info("daemon.test.quiet", "an info record", Context{})
+	s.Global().Error("daemon.test.loud", "an error record", Context{})
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the run log: %v", err)
+	}
+	persisted := strings.Contains(string(data), "daemon.test.quiet") && strings.Contains(string(data), "daemon.test.loud")
+	mirrored := terminal.String()
+	if !persisted || !strings.Contains(mirrored, "daemon.test.loud") || strings.Contains(mirrored, "daemon.test.quiet") {
+		t.Fatalf("run log = %q, mirror = %q; want both persisted and only the error mirrored", data, mirrored)
 	}
 }

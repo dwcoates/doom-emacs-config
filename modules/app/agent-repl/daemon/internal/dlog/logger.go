@@ -91,7 +91,7 @@ func (l *logger) deliver(rec record) {
 	if err := l.dest.write(line); err != nil {
 		l.s.emergency(l.runtime, err, line)
 	}
-	if status := l.s.mirror.enqueue(line); !status.ok() {
+	if status := l.s.mirror.enqueue(rec.Level, line); !status.ok() {
 		l.reportMirror(status)
 	}
 }

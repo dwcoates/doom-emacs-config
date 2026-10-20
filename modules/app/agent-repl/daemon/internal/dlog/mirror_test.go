@@ -68,11 +68,11 @@ func (w *collectingWriter) all() [][]byte {
 func TestMirrorDeliversWhileHealthy(t *testing.T) {
 	// Arrange.
 	w := newCollectingWriter()
-	m := newMirror(w, 8)
+	m := newMirror(w, 8, false)
 	defer m.close()
 
 	// Act.
-	if status := m.enqueue([]byte("one\n")); !status.ok() {
+	if status := m.enqueue(LevelInfo, []byte("one\n")); !status.ok() {
 		t.Fatalf("status = %+v, want nothing owed", status)
 	}
 	<-w.written
@@ -87,14 +87,14 @@ func TestMirrorDeliversWhileHealthy(t *testing.T) {
 func TestMirrorDropsRatherThanBlocksWhenWedged(t *testing.T) {
 	// Arrange: depth 1, and the writer is stuck inside the first Write.
 	w := newBlockingWriter()
-	m := newMirror(w, 1)
+	m := newMirror(w, 1, false)
 	defer func() { close(w.release); m.close() }()
-	m.enqueue([]byte("first\n"))
-	<-w.entered                   // the drain goroutine is now blocked
-	m.enqueue([]byte("queued\n")) // fills the depth-1 queue
+	m.enqueue(LevelInfo, []byte("first\n"))
+	<-w.entered                              // the drain goroutine is now blocked
+	m.enqueue(LevelInfo, []byte("queued\n")) // fills the depth-1 queue
 
 	// Act: this one has nowhere to go.
-	status := m.enqueue([]byte("dropped\n"))
+	status := m.enqueue(LevelInfo, []byte("dropped\n"))
 
 	// Assert.
 	if status.Dropped != 1 {
@@ -105,18 +105,18 @@ func TestMirrorDropsRatherThanBlocksWhenWedged(t *testing.T) {
 func TestMirrorReportsADropExactlyOnce(t *testing.T) {
 	// Arrange.
 	w := newBlockingWriter()
-	m := newMirror(w, 1)
+	m := newMirror(w, 1, false)
 	defer func() { close(w.release); m.close() }()
-	m.enqueue([]byte("first\n"))
+	m.enqueue(LevelInfo, []byte("first\n"))
 	<-w.entered
-	m.enqueue([]byte("queued\n"))
-	if status := m.enqueue([]byte("dropped\n")); status.Dropped != 1 {
+	m.enqueue(LevelInfo, []byte("queued\n"))
+	if status := m.enqueue(LevelInfo, []byte("dropped\n")); status.Dropped != 1 {
 		t.Fatalf("first report Dropped = %d, want 1", status.Dropped)
 	}
 
 	// Act: the queue is still full, so this one drops too, but the previous
 	// report has already been taken.
-	second := m.enqueue([]byte("dropped again\n"))
+	second := m.enqueue(LevelInfo, []byte("dropped again\n"))
 
 	// Assert.
 	if second.Dropped != 1 {
@@ -128,13 +128,13 @@ func TestMirrorReportsAWriteFailureToTheNextEmitter(t *testing.T) {
 	// Arrange.
 	boom := errors.New("terminal gone")
 	w := &failingWriter{attempted: make(chan struct{}, 4), err: boom}
-	m := newMirror(w, 8)
+	m := newMirror(w, 8, false)
 	defer m.close()
-	m.enqueue([]byte("first\n"))
+	m.enqueue(LevelInfo, []byte("first\n"))
 	<-w.attempted // the failure is now recorded
 
 	// Act.
-	status := m.enqueue([]byte("second\n"))
+	status := m.enqueue(LevelInfo, []byte("second\n"))
 
 	// Assert.
 	if status.Failure == nil || !errors.Is(status.Failure, boom) {
@@ -145,14 +145,14 @@ func TestMirrorReportsAWriteFailureToTheNextEmitter(t *testing.T) {
 func TestMirrorStopsWritingAfterAFailure(t *testing.T) {
 	// Arrange.
 	w := &failingWriter{attempted: make(chan struct{}, 4), err: errors.New("terminal gone")}
-	m := newMirror(w, 8)
+	m := newMirror(w, 8, false)
 	defer m.close()
-	m.enqueue([]byte("first\n"))
+	m.enqueue(LevelInfo, []byte("first\n"))
 	<-w.attempted
 
 	// Act.
-	m.enqueue([]byte("second\n"))
-	status := m.enqueue([]byte("third\n"))
+	m.enqueue(LevelInfo, []byte("second\n"))
+	status := m.enqueue(LevelInfo, []byte("third\n"))
 
 	// Assert: no second attempt was made, and nothing is reported twice.
 	if len(w.attempted) != 0 {
@@ -161,4 +161,52 @@ func TestMirrorStopsWritingAfterAFailure(t *testing.T) {
 	if status.Failure != nil {
 		t.Fatalf("Failure = %v, want the failure reported exactly once", status.Failure)
 	}
+}
+
+func TestAnErrorsOnlyMirrorWritesOnlyErrorRecords(t *testing.T) {
+	tests := []struct {
+		name  string
+		level string
+		want  bool
+	}{
+		{name: "an error record is mirrored", level: LevelError, want: true},
+		{name: "a warning is not", level: LevelWarn, want: false},
+		{name: "an info record is not", level: LevelInfo, want: false},
+		{name: "a debug record is not", level: LevelDebug, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var out syncBuffer
+			m := newMirror(&out, 8, true)
+
+			// Act
+			status := m.enqueue(tt.level, []byte("a line\n"))
+			m.close()
+
+			// Assert
+			if got := out.String() != ""; got != tt.want || !status.ok() {
+				t.Fatalf("mirrored %v (status %+v), want mirrored %v and nothing owed", got, status, tt.want)
+			}
+		})
+	}
+}
+
+// syncBuffer is a bytes.Buffer safe to write from the drain goroutine.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.buf)
 }

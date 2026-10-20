@@ -121,7 +121,7 @@ func openDebugWindow(t *testing.T, clock *windowClock) (*surfaces, string) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
-	s, err := openSurfacesWindow(path, logging.NewWindow(sel, clock.now), io.Discard)
+	s, err := openSurfacesWindow(path, logging.NewWindow(sel, clock.now), io.Discard, false)
 	if err != nil {
 		t.Fatalf("openSurfacesWindow: %v", err)
 	}

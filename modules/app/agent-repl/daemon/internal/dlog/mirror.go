@@ -23,9 +23,12 @@ const mirrorCloseGrace = 2 * time.Second
 // microsecond to a durable write (a stalled pty reader once added seconds to
 // boot by being on the write path).
 type mirror struct {
-	out  io.Writer
-	q    chan []byte
-	done chan struct{}
+	out io.Writer
+	// errorsOnly mirrors ERROR records alone: what someone who is not watching
+	// must still see (see surfaces.go terminalMirror).
+	errorsOnly bool
+	q          chan []byte
+	done       chan struct{}
 	// finished closes when the drain goroutine has returned.
 	finished chan struct{}
 
@@ -47,13 +50,15 @@ type mirrorStatus struct {
 // ok reports whether there is nothing to tell.
 func (s mirrorStatus) ok() bool { return s.Failure == nil && s.Dropped == 0 }
 
-// newMirror starts the drain goroutine for out.
-func newMirror(out io.Writer, depth int) *mirror {
+// newMirror starts the drain goroutine for out, mirroring every record or, with
+// errorsOnly, only ERROR records.
+func newMirror(out io.Writer, depth int, errorsOnly bool) *mirror {
 	m := &mirror{
-		out:      out,
-		q:        make(chan []byte, depth),
-		done:     make(chan struct{}),
-		finished: make(chan struct{}),
+		out:        out,
+		errorsOnly: errorsOnly,
+		q:          make(chan []byte, depth),
+		done:       make(chan struct{}),
+		finished:   make(chan struct{}),
 	}
 	go m.run()
 	return m
@@ -62,7 +67,10 @@ func newMirror(out io.Writer, depth int) *mirror {
 // enqueue offers one line to the terminal and returns whatever the mirror owes
 // the caller. It never blocks: a full queue means the terminal is wedged, and
 // the line is dropped and counted.
-func (m *mirror) enqueue(line []byte) mirrorStatus {
+func (m *mirror) enqueue(level string, line []byte) mirrorStatus {
+	if m.errorsOnly && level != LevelError {
+		return m.take()
+	}
 	select {
 	case m.q <- line:
 	default:
