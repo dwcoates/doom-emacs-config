@@ -454,6 +454,12 @@ run_sink_finding_case() {
                 dangling)
                     ln -s "$current_target.missing" "$workspace/.claude/emacs/$runtime.log"
                     ;;
+                aged)
+                    # A link older than the three-day retention whose target the
+                    # retention pass removed.
+                    ln -s "$current_target.missing" "$workspace/.claude/emacs/$runtime.log"
+                    touch -h -t 202601010000 "$workspace/.claude/emacs/$runtime.log"
+                    ;;
                 unreadable)
                     : >"$current_target"
                     chmod 000 "$current_target"
@@ -496,20 +502,30 @@ EOF
         dangling) finding_pattern="sink absent: $canonical -> $target.missing" ;;
         unreadable) finding_pattern="sink unreadable: $canonical -> $target:" ;;
         directory) finding_pattern="sink not a symlink: $canonical" ;;
-        absent) finding_pattern="sink absent: $canonical" ;;
+        absent | aged) finding_pattern="" ;;
     esac
     finding_file="$err"
-    if [ "$mode" = harvest ]; then
+    if [ "$mode" = harvest ] && [ -n "$finding_pattern" ]; then
         finding_file="$out"
         grep -Eq "ws-$label +$workspace +finding +$broken_runtime +logs.sink" "$out" || attribution_ok=0
     fi
-    if [ "$shape" != absent ]; then
+    if [ "$shape" != absent ] && [ "$shape" != aged ]; then
         grep -q "$continuation_operation" "$out" || continuation_ok=0
+    elif [ "$mode" != zero ]; then
+        grep -q "$continuation_operation" "$out" || continuation_ok=0
+    fi
+    # A sink the workspace has no link for, or whose target aged out, is no
+    # finding at all.
+    local finding_ok=1
+    if [ -n "$finding_pattern" ]; then
+        grep -Fq "$finding_pattern" "$finding_file" || finding_ok=0
+    elif grep -Eq "sink (absent|unreadable|not a symlink)" "$out" "$err"; then
+        finding_ok=0
     fi
     if [ "$expected_rc" -ne 0 ]; then
         grep -q 'none of the selected log sinks could be read' "$err" || failure_ok=0
     fi
-    if [ "$rc" -eq "$expected_rc" ] && grep -Fq "$finding_pattern" "$finding_file" &&
+    if [ "$rc" -eq "$expected_rc" ] && [ "$finding_ok" -eq 1 ] &&
         [ "$continuation_ok" -eq 1 ] && [ "$attribution_ok" -eq 1 ] && [ "$failure_ok" -eq 1 ]; then
         pass "$description"
     else
@@ -527,7 +543,9 @@ test_sink_findings() {
 dangling|dangling|sidecar|harvest|0|a dangling symlink is attributed while the rest is harvested
 unreadable|unreadable|daemon|json|0|an unreadable target is reported while another sink is read
 directory|directory|daemon|json|0|a directory at a canonical sink is reported as not a symlink
-zero-readable|absent|daemon|zero|2|zero readable sinks reports the finding and exits non-zero
+zero-readable|absent|daemon|zero|2|zero readable sinks exits non-zero naming no sink the workspace never had
+absent-link|absent|webapp|harvest|0|a sink the workspace has no link for is no finding while the rest is harvested
+aged-out|aged|sidecar|harvest|0|a link older than the retention whose target is gone is no finding
 EOF
 }
 
