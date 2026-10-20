@@ -168,6 +168,18 @@ Read when that stream ends PLANNED: a planned end on the connection the
 link still names is its daemon leaving, and the roster waits for the
 link\='s own edge rather than re-subscribing on it.")
 
+(defvar agent-repl-roster--view-stream nil
+  "The roster stream that served `agent-repl-roster-view', or nil.
+A view is the daemon's word only while the stream that served it stands
+\(`agent-repl-roster--held-revision').  A re-subscription keeps the view
+\(blanking the tabs would be worse than a stale paint) but NOT its
+authority: its revision and its `current' are the last daemon's, and the
+new stream's revisions start afresh.  On 2026-10-20 a rollout's new daemon
+pushed a field this Emacs refused, every one of its pushes was dropped,
+and the old daemon's view, at a revision past the new daemon's, released
+each answered selection at once and moved the frame back to the
+workspace the user had just left.")
+
 (defvar agent-repl-roster--rows-by-id (make-hash-table :test 'equal)
   "Ref id -> the decoded `RosterRow' the last accepted push carried.
 status.el reads a workspace's paint out of this table, so it is indexed
@@ -1053,6 +1065,9 @@ be invisible:
 
   - relink-pending: a relaunched daemon's arbitrary stamp is not obeyed
     while Emacs re-asserts the user's selection (host.el clears it);
+  - stream-ended, unserved: the view did not come from the stream that
+    stands now (`agent-repl-roster--held-revision'), so its `current' is
+    another daemon's;
   - deferred: Emacs has REQUESTED another workspace that the daemon has
     not answered yet (`agent-repl-host-pending-selection'); that answer
     re-applies the roster, so the last push wins once nothing is pending,
@@ -1068,9 +1083,11 @@ be invisible:
 
 A roster with no `current' decides nothing and says so at DEBUG."
   ;; An answered selection is released once the roster held carries it,
-  ;; before the selection pending is read below.
-  (when agent-repl-roster-view
-    (agent-repl-host-release-confirmed (or (plist-get agent-repl-roster-view :revision) 0)))
+  ;; before the selection pending is read below.  Only a view the standing
+  ;; stream served can carry it (`agent-repl-roster--held-revision').
+  (let ((held (agent-repl-roster--held-revision)))
+    (when held
+      (agent-repl-host-release-confirmed held)))
   (let* ((roster agent-repl-roster-view)
          (id (and roster (agent-repl-roster--current-id roster)))
          ;; A workspace still held for its open has no tab to land on yet;
@@ -1098,6 +1115,13 @@ A roster with no `current' decides nothing and says so at DEBUG."
      ;; states the selection afresh after the link-up re-asserts it.
      ((null agent-repl-roster--stream)
       (agent-repl--info scope "elisp.roster.current: stream-ended id=%s; a view from a daemon that is gone is not followed"
+                        id)
+      nil)
+     ;; NOR DOES ONE THE STANDING STREAM HAS NOT SERVED: a re-subscription
+     ;; keeps the last daemon's view until the new stream's first accepted
+     ;; push replaces it, and that push follows the selection itself.
+     ((not (agent-repl-roster--held-revision))
+      (agent-repl--info scope "elisp.roster.current: unserved id=%s; a view the standing stream has not served is not followed"
                         id)
       nil)
      ((and pending (not (equal id pending-id)))
@@ -1336,14 +1360,30 @@ changed underneath their status buffer."
     (let ((row (plist-get entry :row)))
       (puthash (agent-repl-roster-row-id row) row agent-repl-roster--rows-by-id))))
 
+(defun agent-repl-roster--held-revision ()
+  "Return the revision of the view the STANDING stream served, or nil.
+Nil when no view is held, when no stream stands, or when the view came
+from a stream that is no longer the standing one
+\(`agent-repl-roster--view-stream'): revisions are one daemon\='s count,
+so another stream\='s revision says nothing about this one\='s.  The one
+place a held revision is read, for the selection
+\(`agent-repl-roster-apply-current') and the answer rows
+\(`agent-repl-roster-note-row') alike."
+  (and agent-repl-roster-view
+       agent-repl-roster--stream
+       (eq agent-repl-roster--view-stream agent-repl-roster--stream)
+       (or (plist-get agent-repl-roster-view :revision) 0)))
+
 (defun agent-repl-roster-note-row (row revision)
   "Index ROW, taken from the daemon's roster REVISION, when it is newer.
 An OpenTabs answer carries the row as of the answer (open-tabs.el), so the
 tab it opens is drawn with its true status rather than the last push's.
 The answer and the roster ride separate streams: a row from a revision the
 last applied roster already reached is older or the same, and indexing it
-would roll a status back, so it is kept out.  Answers t when indexed."
-  (let ((held (or (plist-get agent-repl-roster-view :revision) 0)))
+would roll a status back, so it is kept out.  A view the standing stream
+did not serve reached nothing (`agent-repl-roster--held-revision').
+Answers t when indexed."
+  (let ((held (or (agent-repl-roster--held-revision) 0)))
     (if (<= revision held)
         (progn
           (agent-repl--log '(:agent-repl-central "roster reconciliation spans every workspace")
@@ -1365,8 +1405,10 @@ would roll a status back, so it is kept out.  Answers t when indexed."
                (agent-repl-roster-row-status row)
                agent-repl-roster--status-by-id))))
 
-(defun agent-repl-roster-apply (roster)
+(defun agent-repl-roster-apply (roster &optional stream)
   "Apply ROSTER: index it, reconcile the tabs, fire the edges, run the hooks.
+STREAM is the stream that served ROSTER, nil naming the standing one; it
+is recorded as the view\='s (`agent-repl-roster--view-stream').
 A push that DECODES but violates an invariant this file relies on — two
 rows sharing one ref id, or a tab numbered out of its place
 \(`agent-repl-roster--misnumbered') — is logged at ERROR and DROPPED
@@ -1394,6 +1436,7 @@ order, or nil when the push was dropped."
      (t
       (agent-repl-roster--index entries)
       (setq agent-repl-roster-view roster
+            agent-repl-roster--view-stream (or stream agent-repl-roster--stream)
             agent-repl-roster--pushed-at (float-time))
       (let ((order (agent-repl-roster-reconcile roster)))
         ;; THE SELECTION FIRST, right after the tabs it needs exist: the edge
@@ -1431,7 +1474,7 @@ Any other arm is a contract breach, recorded at ERROR and not applied."
      (let ((request-id (agent-repl--next-log-request-id)))
        (agent-repl--with-log-context
         agent-repl--global-log-scope request-id
-        (lambda () (agent-repl-roster-apply (plist-get push :value))))))
+        (lambda () (agent-repl-roster-apply (plist-get push :value) stream)))))
     (:ending
      (setq agent-repl-roster--ending-stream (or stream agent-repl-roster--stream))
      (agent-repl--info '(:agent-repl-central "the roster stream spans workspaces")
