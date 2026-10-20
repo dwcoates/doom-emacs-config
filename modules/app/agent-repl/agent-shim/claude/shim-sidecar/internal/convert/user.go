@@ -64,6 +64,15 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 		// results under the user's role; emitting an empty prompt beside them
 		// would put words in a person's mouth.
 		return out
+	case env.originKind == "peer" && isOwnPeerInjection(record):
+		// AGENT-REPL'S OWN PEER MESSAGE IS ITS PROMPT (R15). An agent's prompt
+		// to this workspace reaches the vendor as a peer message from
+		// `agent-repl:<sender>`; the daemon minted its turn and drew its prompt
+		// row, so this copy is withheld exactly as an SDK prompt is, and never
+		// drawn as another session's message too.
+		c.log.With(at.ctxFor("user-prompt")).
+			LogVerbose("file-plane peer record withheld as vendor_specific (R15: agent-repl's own peer message from %q, entrypoint=%q, is daemon-minted and drawn live)", env.peerSender, str(record["entrypoint"]))
+		return append(out, VendorSpecificEntry(at, "user_prompt", record))
 	case env.originKind == "peer":
 		// A MESSAGE FROM ANOTHER CLAUDE — an inter-session peer message or a
 		// subagent hand-back (`origin.handback` set). It carries `isMeta:true`,
@@ -111,6 +120,20 @@ const sdkEntrypointPrefix = "sdk-"
 // SDK-hosted session, i.e. agent-repl's own.
 func isSDKEntrypoint(entrypoint string) bool {
 	return strings.HasPrefix(entrypoint, sdkEntrypointPrefix)
+}
+
+// agentReplPeerPrefix begins the address agent-repl's own peer messages are
+// sent from: an agent's prompt to another workspace is delivered as
+// `agent-repl:<sending workspace>`. Shared with the shim by contract
+// (shim/src/convert/peer.ts AGENT_REPL_PEER_PREFIX).
+const agentReplPeerPrefix = "agent-repl:"
+
+// isOwnPeerInjection reports whether a peer record is agent-repl's own: a
+// message from agent-repl's address, in a transcript an SDK-hosted session
+// wrote, which only agent-repl's shim injects.
+func isOwnPeerInjection(record map[string]any) bool {
+	return isSDKEntrypoint(str(record["entrypoint"])) &&
+		strings.HasPrefix(str(obj(record["origin"])["from"]), agentReplPeerPrefix)
 }
 
 // humanPrompt decides what becomes of a genuine human file-plane prompt.

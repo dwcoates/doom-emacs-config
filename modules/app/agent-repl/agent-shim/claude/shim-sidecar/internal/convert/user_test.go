@@ -4,6 +4,7 @@ package convert
 // is crossed for adopted external prompts (any other entrypoint, emitted).
 
 import (
+	"encoding/json"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -434,5 +435,80 @@ func TestGenuineHumanPromptStillEmittedNotAsPeer(t *testing.T) {
 	}
 	if peerLineOf(entries[0]) != nil {
 		t.Fatal("a genuine human prompt must not become a peer message")
+	}
+}
+
+// agentReplPeerLine builds agent-repl's own peer message as the vendor files
+// it: an agent's prompt injected on an SDK session's input, from agent-repl's
+// address, ENTRYPOINT naming the session's host.
+func agentReplPeerLine(uuid, from, entrypoint string) string {
+	return `{"type":"user","uuid":"` + uuid + `","isSidechain":false,"isMeta":true,"entrypoint":"` + entrypoint + `",` +
+		`"origin":{"kind":"peer","from":` + quote(from) + `,"fromMode":"prompting","hostInjected":true,"body":"review the parser"},` +
+		`"timestamp":"` + ts1 + `","message":{"role":"user","content":[{"type":"text","text":"<cross-session-message from=\"` + from +
+		`\">\nreview the parser\n</cross-session-message>"}]}}`
+}
+
+func TestAgentReplsOwnPeerMessageIsWithheldAsItsPrompt(t *testing.T) {
+	// Arrange. An agent's prompt to this workspace reaches the vendor as a peer
+	// message from agent-repl's address; the daemon drew its prompt row, so
+	// drawing this copy too would show the prompt twice.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, agentReplPeerLine("u1", "agent-repl:parser-fix", "sdk-ts"))
+
+	// Assert.
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if pageLine(entries[0]) != nil {
+		t.Fatal("agent-repl's own peer message must never be a page line")
+	}
+	if got := vendorKindOf(entries[0]); got != "user_prompt" {
+		t.Fatalf("kind = %q, want user_prompt", got)
+	}
+}
+
+func TestIsOwnPeerInjection(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{name: "agent-repl's address in an SDK session", line: agentReplPeerLine("u1", "agent-repl:parser-fix", "sdk-ts"), want: true},
+		{name: "agent-repl's address in an interactive session", line: agentReplPeerLine("u1", "agent-repl:parser-fix", "cli"), want: false},
+		{name: "another session's socket address", line: interSessionLine("u1", ""), want: false},
+		{name: "a subagent's hand-back", line: peerMessageLine("u1", "child", "done", "envelope", true), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			record := map[string]any{}
+			if err := json.Unmarshal([]byte(tt.line), &record); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+
+			// Act.
+			got := isOwnPeerInjection(record)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("isOwnPeerInjection = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAPeerMessageFromAgentReplsAddressInAnInteractiveSessionIsStillDrawn(t *testing.T) {
+	// Arrange. Only an SDK-hosted session is agent-repl's own; the same address
+	// in a transcript an interactive session wrote is another session's message.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, agentReplPeerLine("u1", "agent-repl:parser-fix", "cli"))
+
+	// Assert.
+	if peerLineOf(entries[0]) == nil {
+		t.Fatal("a peer message outside an SDK session must be drawn as a peer page line")
 	}
 }
