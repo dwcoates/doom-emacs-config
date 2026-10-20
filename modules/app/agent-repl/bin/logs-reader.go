@@ -448,7 +448,7 @@ func generationFiles(selectedSink sink) ([]string, string, []sinkFinding, int) {
 // sinkRetention is logging.DefaultRetention (agent-shim/logging/go
 // retention.go): every log file is removed three days after its last write.
 // This reader is one standalone file built without the module, so the number
-// is restated here and pinned to the library's by its test there.
+// is restated here and pinned to the library's by daemon/reposcans/retention_test.go.
 const sinkRetention = 72 * time.Hour
 
 // linkAgedOut answers whether a canonical link is older than the retention, so

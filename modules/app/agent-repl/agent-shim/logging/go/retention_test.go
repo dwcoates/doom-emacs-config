@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -521,32 +520,6 @@ func TestExpireResultChanged(t *testing.T) {
 			// Act / Assert.
 			if got := tc.result.Changed(); got != tc.want {
 				t.Fatalf("Changed() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestEveryRestatementOfTheRetentionMatchesIt(t *testing.T) {
-	// The log reader is built alone and Emacs is another language, so each
-	// restates the three days; a change to one must change all three.
-	cases := []struct {
-		file string
-		want string
-	}{
-		{file: filepath.Join("..", "..", "..", "bin", "logs-reader.go"), want: "const sinkRetention = 72 * time.Hour"},
-		{file: filepath.Join("..", "..", "..", "lisp", "core.el"), want: "(defcustom agent-repl-log-retention-seconds (* 3 86400)"},
-	}
-	for _, tc := range cases {
-		t.Run(filepath.Base(tc.file), func(t *testing.T) {
-			// Arrange.
-			source, err := os.ReadFile(tc.file)
-			if err != nil {
-				t.Fatalf("read %s: %v", tc.file, err)
-			}
-
-			// Act / Assert.
-			if DefaultRetention != 72*time.Hour || !strings.Contains(string(source), tc.want) {
-				t.Fatalf("%s must restate DefaultRetention (%v) as %q; update every restatement together", tc.file, DefaultRetention, tc.want)
 			}
 		})
 	}
