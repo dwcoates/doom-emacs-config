@@ -263,6 +263,31 @@ func (s *store) SetVendorSessionID(ctx context.Context, id WorkspaceID, vendorSe
 	return previous, nil
 }
 
+// SetSessionModel records the model the user chose for a workspace's session.
+//
+// THE RECORDED MODEL IS THE WORKSPACE'S, NOT THE TRANSCRIPT'S. Every start
+// names it (a fresh start as StartSessionFresh.model, a resume as
+// StartSessionResume.model), so a restart brings the session back on the model
+// the user last picked even when no prompt has run on it yet. Only a model the
+// user chose is written here, so an empty one is refused rather than recorded
+// as "no choice".
+func (s *store) SetSessionModel(ctx context.Context, id WorkspaceID, model string) error {
+	const op = "daemon.wsm.set_session_model"
+	fields := dlog.Context{"workspace": string(id), "model": model}
+	if model == "" {
+		err := fmt.Errorf("wsm: workspace %s: a recorded session model is never empty", id)
+		s.log.Error(op, "refused an empty session model", withError(fields, err))
+		return err
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE sessions SET model = ? WHERE workspace_id = ?`, model, id)
+		if err != nil {
+			return err
+		}
+		return requireOneRow(res, fmt.Sprintf("wsm: session for workspace %s", id))
+	})
+}
+
 // TouchEngagement records last engagement — the idle sweep's input.
 func (s *store) TouchEngagement(ctx context.Context, id WorkspaceID, at time.Time) error {
 	return s.write(ctx, "daemon.wsm.touch_engagement", dlog.Context{"workspace": string(id), "at": at}, func(ctx context.Context, tx *sql.Tx) error {
