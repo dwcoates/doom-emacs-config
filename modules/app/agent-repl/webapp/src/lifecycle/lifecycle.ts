@@ -73,6 +73,7 @@ import { isMalformedView } from "../rpc/malformed.js";
 import { registerWorkspaceMoved } from "../rpc/moved.js";
 import { msOf, requireCase, requireMessage, unreachableArm, unreachablePushArm } from "../rpc/strict.js";
 import type { RevealRelay } from "./reveal-relay.js";
+import type { PromptEcho } from "../prompt-echo.js";
 import { watchStream } from "../rpc/streams.js";
 import { callUnary } from "../rpc/unary.js";
 import { readWebappBuild } from "../webapp-build.js";
@@ -89,6 +90,8 @@ export interface LifecycleDeps {
   newsDigest: Pick<NewsDigestHandle, "apply">;
   /** Where the web stream's `reveal_row` asks go until the feed reveals them. */
   reveals: Pick<RevealRelay, "request">;
+  /** Where the web stream's `prompt_echo` submit instants go (prompt-echo.ts). */
+  promptEcho: Pick<PromptEcho, "echoed">;
 }
 
 /** The adoption retry shape, injected by tests running on fake timers. */
@@ -196,6 +199,12 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
           return;
         case "revealRow":
           deps.reveals.request(requireMessage(push.value.row, "WebWorkspaceRevealRow.row"));
+          return;
+        case "promptEcho":
+          deps.promptEcho.echoed(
+            requireMessage(push.value.turn, "WebWorkspacePromptEcho.turn").value,
+            Number(push.value.submittedAtUnixMs),
+          );
           return;
         default: {
           const other: { case: string } = push;

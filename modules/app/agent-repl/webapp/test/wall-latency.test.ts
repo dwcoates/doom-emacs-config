@@ -43,7 +43,7 @@ describe("recordWallLatency", () => {
 describe("the wall-clock latency sites", () => {
   // EVERY latency that starts in another process ends through the one helper,
   // so none can drift on the clock-step rule or the unit.
-  it.each(["src/switch-latency.ts"])("%s measures through recordWallLatency", (file) => {
+  it.each(["src/switch-latency.ts", "src/prompt-echo.ts"])("%s measures through recordWallLatency", (file) => {
     const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
     expect(source).toContain("recordWallLatency(");
     expect(source).not.toMatch(/wallNow\(\)\s*-/);

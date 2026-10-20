@@ -68,6 +68,7 @@ import { installPageDrawnReport } from "./page-drawn-report.js";
 import { installLatencyReport, REPORT_LATENCIES_RESPONSE, reportLatenciesRequest } from "./latency-report.js";
 import { callUnary } from "./rpc/unary.js";
 import { pageSwitchLatencyEnv, watchPageBoot, watchSwitchLatency } from "./switch-latency.js";
+import { createPromptEcho, installPromptEcho } from "./prompt-echo.js";
 import { createPageSeen } from "./page-seen.js";
 import { createAgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
@@ -220,6 +221,9 @@ export async function boot(): Promise<void> {
     if (pagePresence().embedded) {
       watchSwitchLatency(pagePresence(), latencyEnv, (kind, seconds) => latencies.record(kind, seconds));
     }
+    // A PROMPT'S ECHO ends at its row drawn here (prompt-echo.ts).
+    const promptEcho = createPromptEcho(latencyEnv.wallNow, (kind, seconds) => latencies.record(kind, seconds));
+    installPromptEcho(promptEcho);
     log.info("the webapp booted", {
       operation: "main.boot",
       context: {
@@ -255,7 +259,7 @@ export async function boot(): Promise<void> {
     // merge's bubble here) can arrive before the feed below is mounted; the
     // relay holds it until the feed binds its reveal.
     const reveals = createRevealRelay();
-    startLifecycle(ctx, { drainBannerHost: shell.drainBanner, newsDigest, reveals });
+    startLifecycle(ctx, { drainBannerHost: shell.drainBanner, newsDigest, reveals, promptEcho });
 
     // The dev-mode composer is the only shell element the boot itself reveals;
     // production runs composer-less, so the host ships hidden.

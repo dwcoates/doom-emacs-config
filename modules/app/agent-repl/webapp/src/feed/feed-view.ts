@@ -105,6 +105,7 @@ import { replaceTicking, stopClocks, stopTicking } from "./ticking.js";
 import { isMergeBubble } from "./merge-bubble.js";
 import { keepScrolled } from "./keep-scroll.js";
 import { drawFeedUserPrompt } from "./rows/user-prompt.js";
+import { userPromptDrawn } from "../prompt-echo.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { drawFeedPeerMessage } from "./rows/peer-message.js";
 import { drawFeedSubagentHandback } from "./rows/subagent-handback.js";
@@ -1549,8 +1550,12 @@ export function createFeedController(
   function drawRowBody(row: FeedRow, rc: RowContext): HTMLElement {
     const arm = requireCase(row.row, "FeedRow.row");
     switch (arm.case) {
-      case "userPrompt":
-        return drawFeedUserPrompt(arm.value, rc.previous);
+      case "userPrompt": {
+        const body = drawFeedUserPrompt(arm.value, rc.previous);
+        // A SUBMITTED PROMPT'S ECHO ENDS AT ITS ROW'S FIRST DRAW (prompt-echo.ts).
+        userPromptDrawn(row.turn?.value);
+        return body;
+      }
       case "agentPrompt":
         return drawFeedAgentPrompt(arm.value, rc.previous);
       case "peerMessage":

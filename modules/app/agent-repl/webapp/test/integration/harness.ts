@@ -20,6 +20,7 @@
  * otherwise never complete; `settle()` is how a test waits for the DOM instead
  * of sleeping.
  */
+import { createPromptEcho, installPromptEcho } from "../../src/prompt-echo.js";
 import { createRevealRelay } from "../../src/lifecycle/reveal-relay.js";
 import { clientLogSink } from "../../src/rpc/client-log-sink.js";
 import { createPageSeen } from "../../src/page-seen.js";
@@ -648,7 +649,11 @@ async function mountApp(
   }
   const newsDigest = mountNewsDigest(shell.newsDigest, ctx, { feedScroll: shell.feedScroll });
   handles.push(newsDigest);
-  handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner, newsDigest, reveals: createRevealRelay() }));
+  // MAIN.TS TIMES PROMPT ECHOES; the harness wires the same timing and reports
+  // nowhere, since no test here reads the page's latencies.
+  const promptEcho = createPromptEcho(() => Date.now(), () => undefined);
+  handles.push({ dispose: installPromptEcho(promptEcho) });
+  handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner, newsDigest, reveals: createRevealRelay(), promptEcho }));
 
   const feed = mountFeed(shell.feed, ctx, {
     renderers: createRowRenderers(ctx),
