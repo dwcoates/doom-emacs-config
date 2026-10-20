@@ -8052,7 +8052,6 @@ bubble-body.bubble-body { display: block; }
 .merge-version { color: var(--muted); font-variant-numeric: tabular-nums; }
 .merge-version-incremented { color: var(--ok); }
 .merge-error { display: inline-flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
-.merge-summary { color: var(--err); overflow: hidden; text-overflow: ellipsis; }
 /* The badge says the merge's state as a whole and nothing else — no counts (R5). */
 .merge-badge {
   font-size: 0.85em;

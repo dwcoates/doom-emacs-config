@@ -83,12 +83,14 @@ describe("drawFeedMerge: every result arm", () => {
     expect(el.querySelector(".merge-commit")?.textContent).toBe("a1b2c3d");
   });
 
-  it("draws the failure summary the daemon composed", () => {
+  it("says 'failed' in the head, never the daemon's full summary (the body's own tab carries it)", () => {
     const el = draw(
       mergeHead({ case: "failed", endedAtMs: 61_000n, summary: "tests never passed" }),
     );
     expect(el.getAttribute("data-state")).toBe("failed");
-    expect(el.querySelector(".merge-summary")?.textContent).toBe("tests never passed");
+    expect(el.querySelector(".merge-badge")?.textContent).toBe("failed");
+    expect(el.querySelector(".merge-summary")).toBeNull();
+    expect(el.textContent).not.toContain("tests never passed");
   });
 
   it("says 'abandoned' for a run taken off the queue", () => {
@@ -97,11 +99,12 @@ describe("drawFeedMerge: every result arm", () => {
     expect(el.querySelector(".merge-badge")?.textContent).toBe("abandoned");
   });
 
-  it("draws the abandonment summary the daemon composed", () => {
+  it("says 'abandoned' in the head, never the daemon's full summary", () => {
     const el = draw(
       mergeHead({ case: "abandoned", endedAtMs: 61_000n, summary: "the user dropped it" }),
     );
-    expect(el.querySelector(".merge-summary")?.textContent).toBe("the user dropped it");
+    expect(el.querySelector(".merge-summary")).toBeNull();
+    expect(el.textContent).not.toContain("the user dropped it");
   });
 
   it("holds to the schema: every result arm of FeedMerge is drawn", () => {
