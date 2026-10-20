@@ -239,7 +239,7 @@ func arrangedWorkspaces(in []sidebar.ArrangedWorkspace) []*agentreplv1.ArrangedW
 	for _, family := range in {
 		ws := family.Workspace
 		wire := &agentreplv1.ArrangedWorkspace{
-			Workspace: &workspacev1.WorkspaceRef{Id: string(ws.ID), Dir: ws.Dir},
+			Workspace: ws.Ref(),
 			Name:      ws.Name,
 			Branch:    ws.Branch,
 			Hidden:    ws.Hidden,

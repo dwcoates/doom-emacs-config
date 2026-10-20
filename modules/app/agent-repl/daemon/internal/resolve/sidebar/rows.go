@@ -5,7 +5,6 @@ import (
 	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -82,7 +81,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 
 	out := &frontendv1.RosterRow{
 		Workspace: &frontendv1.RosterRowWorkspace{
-			Workspace: &workspacev1.WorkspaceRef{Id: string(rec.ID), Dir: rec.Dir}},
+			Workspace: rec.Ref()},
 		Name:    &frontendv1.RosterRowName{Text: rec.Name},
 		Current: &frontendv1.RosterRowCurrent{Current: current},
 		When:    when(rec, r.footer.MergeStartedAt(rec.ID), r.footer.TurnClock(rec.ID)),
@@ -340,7 +339,7 @@ func detail(rec wsm.Workspace, summary string, rc rowContext) *frontendv1.Roster
 	}
 	for _, child := range rc.children[rec.ID] {
 		item := &frontendv1.RosterRowDetailChild{
-			Workspace: &workspacev1.WorkspaceRef{Id: string(child.ID), Dir: child.Dir},
+			Workspace: child.Ref(),
 			Name:      child.Name,
 		}
 		if recedes(child, rc.sessions[child.ID]) {

@@ -386,24 +386,19 @@ func familyRefusal(err error) (refusal, bool) {
 	if errors.As(err, &children) {
 		refs := make([]proto.Message, len(children.Children))
 		for i, child := range children.Children {
-			refs[i] = familyRef(child)
+			refs[i] = child.Ref()
 		}
 		return refusal{Arm: "has_open_children", Reason: err.Error(), Fields: map[string]any{
-			"parent": familyRef(children.Parent), "children": refs,
+			"parent": children.Parent.Ref(), "children": refs,
 		}}, true
 	}
 	var parent *wsm.ParentNotOpenError
 	if errors.As(err, &parent) {
 		return refusal{Arm: "parent_not_open", Reason: err.Error(), Fields: map[string]any{
-			"parent": familyRef(parent.Parent), "state": nestedArm(parent.State.String()),
+			"parent": parent.Parent.Ref(), "state": nestedArm(parent.State.String()),
 		}}, true
 	}
 	return refusal{}, false
-}
-
-// familyRef is a family refusal's workspace as the wire names it.
-func familyRef(ref wsm.FamilyRef) *workspacev1.WorkspaceRef {
-	return &workspacev1.WorkspaceRef{Id: string(ref.ID), Dir: ref.Dir}
 }
 
 // setNestedArms selects the arm of every NESTED oneof the refusal named,

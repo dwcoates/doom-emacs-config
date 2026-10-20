@@ -11,7 +11,6 @@ import (
 	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
@@ -657,7 +656,7 @@ func (o *orchestrator) asyncMergeBubble(ctx context.Context, ws, requester ids.W
 		return nil, fmt.Errorf("read the requester of merge workspace %s: %w", ws, err)
 	}
 	bubble := &frontendv1.FeedMergeQueueBubble{
-		Requester: &workspacev1.WorkspaceRef{Id: string(record.ID), Dir: record.Dir},
+		Requester: record.Ref(),
 	}
 	lease, ok := o.leaseOf(ws)
 	if !ok {

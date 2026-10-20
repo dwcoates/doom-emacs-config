@@ -285,7 +285,7 @@ func (o *orchestrator) originOf(ws ids.WorkspaceID) *mergeOrigin {
 		return nil
 	}
 	if record.MergeOf != nil {
-		origin = &mergeOrigin{requester: record.MergeOf.Requester, self: &workspacev1.WorkspaceRef{Id: string(ws), Dir: record.Dir}}
+		origin = &mergeOrigin{requester: record.MergeOf.Requester, self: record.Ref()}
 	}
 	o.mu.Lock()
 	o.originsOf[ws] = origin

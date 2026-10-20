@@ -334,14 +334,9 @@ func (s *server) RequestCommandSupport(
 	subject.Log.Info("daemon.server.request_command_support", "spawned a support workspace",
 		dlog.Context{"command": req.Msg.GetCommand(), "created": string(created.ID)})
 	resp.Result = &agentreplv1.RequestCommandSupportResponse_Success{
-		Success: &agentreplv1.RequestCommandSupportSuccess{Workspace: refOf(created)},
+		Success: &agentreplv1.RequestCommandSupportSuccess{Workspace: created.Ref()},
 	}
 	return connect.NewResponse(resp), nil
-}
-
-// refOf renders a registry record as the ref clients echo back.
-func refOf(record wsm.Workspace) *workspacev1.WorkspaceRef {
-	return &workspacev1.WorkspaceRef{Id: string(record.ID), Dir: record.Dir}
 }
 
 // opSubmit is the operation EVERY typed refusal of SubmitPrompt is filed

@@ -10,7 +10,6 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -303,7 +302,7 @@ func (r *resolver) currentWorkspace() *frontendv1.RosterCurrentWorkspace {
 		return nil
 	}
 	return &frontendv1.RosterCurrentWorkspace{
-		Workspace: &workspacev1.WorkspaceRef{Id: string(ws.ID), Dir: ws.Dir}}
+		Workspace: ws.Ref()}
 }
 
 // selectedWorkspace is the registry's record of the selection, or nil when

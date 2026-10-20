@@ -200,7 +200,7 @@ func (s *server) CreateWorkspace(
 	s.log.Info("daemon.server.create_workspace", "created a workspace",
 		dlog.Context{"workspace": string(created.ID), "dir": created.Dir})
 	resp.Result = &agentreplv1.CreateWorkspaceResponse_Success{
-		Success: &agentreplv1.CreateWorkspaceSuccess{Workspace: refOf(created)},
+		Success: &agentreplv1.CreateWorkspaceSuccess{Workspace: created.Ref()},
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -259,7 +259,7 @@ func (s *server) runBackgroundCreate(ctx context.Context, rpc string, spec works
 			Create: &agentreplv1.WorkspaceCreateProgress{
 				Step: &agentreplv1.WorkspaceCreateProgress_Succeeded{
 					Succeeded: &agentreplv1.WorkspaceCreateSucceeded{
-						Workspace: refOf(created),
+						Workspace: created.Ref(),
 						Name:      created.Name,
 					},
 				},
@@ -420,7 +420,7 @@ func (s *server) RegisterWorkspace(
 	s.log.Info("daemon.server.register_workspace", "registered a workspace",
 		dlog.Context{"workspace": string(record.ID), "dir": record.Dir})
 	resp.Result = &agentreplv1.RegisterWorkspaceResponse_Success{
-		Success: &agentreplv1.RegisterWorkspaceSuccess{Workspace: refOf(record)},
+		Success: &agentreplv1.RegisterWorkspaceSuccess{Workspace: record.Ref()},
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -456,7 +456,7 @@ func (s *server) RegisterRepository(
 				Id: string(registered.Repository.ID), Dir: registered.Repository.Dir,
 			},
 			AlreadyKnown:          registered.RepositoryAlreadyKnown,
-			Workspace:             refOf(registered.Workspace),
+			Workspace:             registered.Workspace.Ref(),
 			WorkspaceAlreadyKnown: registered.WorkspaceAlreadyKnown,
 		},
 	}

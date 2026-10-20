@@ -7,9 +7,9 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/desktopnotify"
+	"agent-repld/internal/wsm"
 )
 
 // opClaimLiveNotification is the operation ClaimLiveNotification's records
@@ -54,7 +54,7 @@ func (s *server) ClaimLiveNotification(
 	}
 	if claim.Live {
 		success.Outcome = &agentreplv1.ClaimLiveNotificationSuccess_Live{Live: &agentreplv1.ClaimLiveNotificationLive{
-			Workspace: &workspacev1.WorkspaceRef{Id: string(claim.Target.ID), Dir: claim.Target.Dir},
+			Workspace: wsm.FamilyRef(claim.Target).Ref(),
 		}}
 	}
 	return connect.NewResponse(&agentreplv1.ClaimLiveNotificationResponse{
