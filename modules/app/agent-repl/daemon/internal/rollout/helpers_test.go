@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/shimclient"
@@ -1373,6 +1374,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		StandDownWindow:  30 * time.Second,
 		Clock:            h.clock,
 		Restarts:         h.restarts,
+		Reconnects:       restarttiming.NewReconnects(h.restarts, h.clock.Now),
 		Progress:         h.progress,
 		Log:              log,
 		Lifetime:         lifetime,

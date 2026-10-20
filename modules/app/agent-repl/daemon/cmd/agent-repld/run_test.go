@@ -1,14 +1,18 @@
 package main
 
 import (
+	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1601,5 +1605,94 @@ func TestRunRefusesToBootWithoutItsStartOrAClock(t *testing.T) {
 				t.Fatalf("run = %v, want the missing timing seam refused", err)
 			}
 		})
+	}
+}
+
+// TestTheLastMetricsPushPrecedesTheStateClose pins the exit's order: the
+// metrics surface pushes its final values, the state collector's among them,
+// before the state client closes, so the push reads an open database.
+func TestTheLastMetricsPushPrecedesTheStateClose(t *testing.T) {
+	// Arrange: a store import endpoint that keeps what it is pushed.
+	root := shortRoot(t)
+	metricsRoot := t.TempDir()
+	pushed := make(chan string, 4)
+	store := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		pushed <- string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(store.Close)
+	storeFile := fmt.Sprintf(`{"import_url":%q,"job":"agent-repl"}`, store.URL+"/api/v1/import/prometheus")
+	if err := os.WriteFile(filepath.Join(metricsRoot, metrics.StoreFile), []byte(storeFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	_ = runIn(t, root, func(o *options) { o.metricsRoot = metricsRoot })
+
+	// Assert.
+	select {
+	case body := <-pushed:
+		if !strings.Contains(body, "agentrepl_log_files{") {
+			t.Fatalf("the last push carries no state series:\n%s", body)
+		}
+	default:
+		t.Fatal("the exit pushed nothing to the store")
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "logs", "daemon.run.log"))
+	if err != nil {
+		t.Fatalf("read the run log: %v", err)
+	}
+	if strings.Contains(string(raw), "database is closed") {
+		t.Fatalf("the last push read a closed state client:\n%s", raw)
+	}
+}
+
+// fakeWorkspaceList answers arranged workspaces, or an error.
+type fakeWorkspaceList struct {
+	workspaces []wsm.Workspace
+	err        error
+}
+
+func (f fakeWorkspaceList) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
+	return f.workspaces, f.err
+}
+
+func TestABootExpectsEveryOpenWorkspacesStreamsBack(t *testing.T) {
+	// Arrange
+	started := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	var rec restarttimingtest.Recorder
+	r := restarttiming.NewReconnects(&rec, func() time.Time { return started.Add(2 * time.Second) })
+	db := fakeWorkspaceList{workspaces: []wsm.Workspace{
+		{ID: "open"}, {ID: "hidden", Hidden: true}, {ID: "closed", Closed: true},
+	}}
+
+	// Act
+	err := expectBootReconnects(context.Background(), db, r, started)
+	for _, ws := range []ids.WorkspaceID{"open", "hidden", "closed"} {
+		r.Connected(ws, restarttiming.ReconnectHost)
+		r.Connected(ws, restarttiming.ReconnectWeb)
+	}
+
+	// Assert
+	if err != nil {
+		t.Fatalf("expectBootReconnects: %v", err)
+	}
+	got := rec.Of(restarttiming.WorkspaceReconnect)
+	if len(got) != 2 || got[0].Workspace() != "open" || got[1].Workspace() != "open" || got[0].Cause() != "cold" || got[0].Seconds() != 2 {
+		t.Fatalf("reconnects = %+v, want the open workspace's two streams, cold, 2s", got)
+	}
+}
+
+func TestABootThatCannotListItsWorkspacesSaysWhy(t *testing.T) {
+	// Arrange
+	r := restarttiming.NewReconnects(&restarttimingtest.Recorder{}, time.Now)
+
+	// Act
+	err := expectBootReconnects(context.Background(), fakeWorkspaceList{err: errors.New("database is locked")}, r, time.Now())
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("expectBootReconnects = %v, want the read's failure", err)
 	}
 }

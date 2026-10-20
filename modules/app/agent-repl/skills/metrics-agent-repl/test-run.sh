@@ -44,7 +44,10 @@ case "$query" in
   *agentrepl_process_cpu*) key="${key}_cpu" ;;
   *agentrepl_process_footprint*) key="${key}_mem" ;;
   *agentrepl_restart_seconds_count*) key="${key}_counts" ;;
+  *agentrepl_restart_seconds_sum*) key="${key}_sums" ;;
   *"histogram_quantile(0.5,"*agentrepl_restart_seconds*) key="${key}_p50" ;;
+  *"histogram_quantile(0.9,"*agentrepl_restart_seconds*) key="${key}_p90" ;;
+  *"histogram_quantile(0.99,"*agentrepl_restart_seconds*) key="${key}_p99" ;;
   *"histogram_quantile(0.95,"*agentrepl_restart_seconds*) key="${key}_p95" ;;
 esac
 if [ -f "$CASE_DIR/answers/$key" ]; then cat "$CASE_DIR/answers/$key"; exit 0; fi
@@ -171,20 +174,20 @@ test_catalog_says_when_nothing_advertises() {
 
 test_restarts_summarizes_each_restart_phase() {
   new_case
-  answer api_v1_query_counts '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total","outcome":"ok"},"value":[1,"3"]},{"metric":{"restart":"deploy","phase":"total","outcome":"failed"},"value":[1,"1"]},{"metric":{"restart":"shim_restart","phase":"run","outcome":"ok"},"value":[1,"12.0001"]}]}}'
-  answer api_v1_query_p50 '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"41.2345"]},{"metric":{"restart":"shim_restart","phase":"run"},"value":[1,"NaN"]}]}}'
-  answer api_v1_query_p95 '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"88.5"]}]}}'
+  answer api_v1_query_counts '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total","outcome":"ok"},"value":[1,"4"]},{"metric":{"restart":"deploy","phase":"total","outcome":"failed"},"value":[1,"1"]},{"metric":{"restart":"workspace_reconnect","phase":"web","outcome":"ok"},"value":[1,"12.0001"]}]}}'
+  answer api_v1_query_sums '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"120"]}]}}'
+  answer api_v1_query_p50 '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"28.123"]},{"metric":{"restart":"workspace_reconnect","phase":"web"},"value":[1,"NaN"]}]}}'
+  answer api_v1_query_p90 '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"40"]}]}}'
+  answer api_v1_query_p99 '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total"},"value":[1,"52.5"]}]}}'
   run --restarts 7
-  if [ "$RC" -eq 0 ] && has $'deploy\ttotal\t3\t1\t41.23\t88.5' && has $'shim_restart\trun\t12\t0\t-\t-'; then
-    pass "restarts prints each restart phase's ok and failed counts and its p50 and p95"
+  if [ "$RC" -eq 0 ] && has $'deploy\ttotal\t4\t1\t30\t28.12\t40\t52.5' && has $'workspace_reconnect\tweb\t12\t0\t-\t-\t-\t-'; then
+    pass "restarts prints each restart phase's ok and failed counts, mean, p50, p90 and p99"
   else fail "restarts" "rc=$RC" "$OUT"; fi
 }
 
 test_restarts_with_none_recorded_says_so() {
   new_case
-  answer api_v1_query_counts '{"status":"success","data":{"result":[]}}'
-  answer api_v1_query_p50 '{"status":"success","data":{"result":[]}}'
-  answer api_v1_query_p95 '{"status":"success","data":{"result":[]}}'
+  for k in counts sums p50 p90 p99; do answer "api_v1_query_$k" '{"status":"success","data":{"result":[]}}'; done
   run --restarts
   if [ "$RC" -eq 1 ]; then pass "restarts exits 1 when no restart was recorded"; else fail "restarts empty" "rc=$RC" "$OUT"; fi
 }
@@ -210,9 +213,7 @@ test_every_counter_query_counts_a_series_first_sample() {
   answer api_v1_query_range_p95 "$BY_VERSION"
   answer api_v1_query_range_cpu '{"status":"success","data":{"result":[]}}'
   answer api_v1_query_range_mem '{"status":"success","data":{"result":[]}}'
-  answer api_v1_query_counts '{"status":"success","data":{"result":[]}}'
-  answer api_v1_query_p50 '{"status":"success","data":{"result":[]}}'
-  answer api_v1_query_p95 '{"status":"success","data":{"result":[]}}'
+  for k in counts sums p50 p90 p99; do answer "api_v1_query_$k" '{"status":"success","data":{"result":[]}}'; done
   run --latency-by-version switch_repeat 1
   run --restart-by-version deploy total 1
   run --restarts 1

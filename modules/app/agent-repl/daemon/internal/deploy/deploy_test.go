@@ -1527,3 +1527,38 @@ func TestNewRefusesAMissingRestartRecorder(t *testing.T) {
 		t.Fatalf("New accepted a Deployer with no restart recorder")
 	}
 }
+
+func TestAReloadedWebviewIsExpectedBackFromItsPush(t *testing.T) {
+	// Arrange: only ws-b's webview is on an older build.
+	h := newHarness(t)
+	h.clients.webviews["ws-a"] = []string{"Web2"}
+	h.clients.webviews["ws-b"] = []string{"Web2", "Web1"}
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	h.d.deps.Reconnects.Connected("ws-a", restarttiming.ReconnectWeb)
+	h.d.deps.Reconnects.Connected("ws-b", restarttiming.ReconnectWeb)
+
+	// Assert
+	got := h.restarts.Of(restarttiming.WorkspaceReconnect)
+	if len(got) != 1 || got[0].Workspace() != "ws-b" || got[0].Cause() != "webapp_reload" {
+		t.Fatalf("reconnects = %+v, want ws-b's reloaded webview alone", got)
+	}
+}
+
+func TestNewRefusesAMissingReconnectTracker(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	deps := h.d.deps
+	deps.Reconnects = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("New accepted a Deployer with no reconnect tracker")
+	}
+}

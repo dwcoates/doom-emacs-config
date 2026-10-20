@@ -44,14 +44,14 @@ func TestRolloutStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
 			name: "a manifest arms a rendezvous", operation: opJoin, state: "rendezvous",
 			before: "unarmed", after: "armed",
 			act: func(c *controller) {
-				c.armSessions(ids.InstanceID("daemon-outgoing-previous"), []ManifestSession{{Workspace: ws, ExpectedHost: true}})
+				c.armSessions(ids.InstanceID("daemon-outgoing-previous"), instant, []ManifestSession{{Workspace: ws, ExpectedHost: true}})
 			},
 		},
 		{
 			name: "a headless workspace is claimed", operation: opJoin, state: "headless_claimed",
 			before: false, after: true,
 			arrange: func(c *controller) {
-				c.armSessions(ids.InstanceID("daemon-outgoing-previous"), []ManifestSession{{Workspace: ws}})
+				c.armSessions(ids.InstanceID("daemon-outgoing-previous"), instant, []ManifestSession{{Workspace: ws}})
 			},
 			act: func(c *controller) { c.claimHeadless() },
 		},
@@ -59,7 +59,7 @@ func TestRolloutStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
 			name: "a failed headless adoption releases its claim", operation: opJoin, state: "headless_claimed",
 			before: true, after: false,
 			arrange: func(c *controller) {
-				c.armSessions(ids.InstanceID("daemon-outgoing-previous"), []ManifestSession{{Workspace: ws}})
+				c.armSessions(ids.InstanceID("daemon-outgoing-previous"), instant, []ManifestSession{{Workspace: ws}})
 				c.claimHeadless()
 			},
 			act: func(c *controller) { c.releaseHeadless(ws) },

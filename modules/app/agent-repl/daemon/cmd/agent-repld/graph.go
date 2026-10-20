@@ -942,6 +942,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	detachedRef := &detachedForwarder{}
 	rolloutController, err := rollout.New(rollout.Deps{
 		Restarts:         p.Metrics,
+		Reconnects:       p.Reconnects,
 		Reports:          detachedRef,
 		Merges:           mergeMover,
 		HoldoutWarnEvery: holdoutWarnEvery,
@@ -1014,6 +1015,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Getenv:     os.Getenv,
 		Deployed:   deployedVersion.Kick,
 		Restarts:   p.Metrics,
+		Reconnects: p.Reconnects,
 	})
 	if err != nil {
 		return nil, err
@@ -1452,6 +1454,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Pages:             supersededPages,
 			Latencies:         p.Metrics,
 			RPCs:              p.Metrics,
+			Reconnects:        p.Reconnects,
 			WebappDist:        paths.WebappDist,
 			ImageOrigin:       images.Handler(),
 			ChessBoards:       chessBoards,

@@ -264,7 +264,10 @@ type Deps struct {
 	// when this daemon stays (restarttiming.Deploy). runtimemetrics.Surface
 	// is the production one.
 	Restarts restarttiming.Recorder
-	Log      dlog.Surfaces
+	// Reconnects is told each webview a reload is pushed to, so its return
+	// is timed. REQUIRED.
+	Reconnects *restarttiming.Reconnects
+	Log        dlog.Surfaces
 }
 
 // Deployer runs deploys, one at a time.
@@ -310,6 +313,8 @@ func New(deps Deps) (*Deployer, error) {
 		return nil, errors.New("deploy: the progress sink is required")
 	case deps.Faults == nil:
 		return nil, errors.New("deploy: the fault recorder is required")
+	case deps.Reconnects == nil:
+		return nil, errors.New("deploy: the reconnect tracker is required; a reloaded webview's return is timed")
 	case deps.Restarts == nil:
 		return nil, errors.New("deploy: the restart recorder is required; every deploy phase is timed")
 	case deps.DaemonBuild == "":
@@ -1060,6 +1065,7 @@ func (d *Deployer) webapp(fresh builds) Outcome {
 		if !stale {
 			continue
 		}
+		d.deps.Reconnects.Expect(restarttiming.ReconnectWebappReload, d.deps.Clock.Now(), restarttiming.ReconnectWeb, ws)
 		d.deps.Clients.PushReloadWebappBuild(ws, fresh.webapp)
 		out.Recipients++
 		d.log.Info(opDecide, "a webview runs an older webapp; pushed the reload", dlog.Context{

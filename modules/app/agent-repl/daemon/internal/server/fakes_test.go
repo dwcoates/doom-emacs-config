@@ -45,6 +45,8 @@ import (
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/restarttiming"
+	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/runtimemetrics"
 	"agent-repld/internal/workspace"
@@ -1491,6 +1493,10 @@ type harness struct {
 	// Latencies records what ReportLatencies accepts.
 	Latencies *fakeLatencies
 	RPCs      *fakeRPCs
+	// Reconnects times the streams a test expects back.
+	Reconnects *restarttiming.Reconnects
+	// ReconnectRecords keeps what Reconnects timed.
+	ReconnectRecords *restarttimingtest.Recorder
 	// SlashCommands is the real catalog table, which a test feeds directly.
 	SlashCommands *commandcatalog.Catalogs
 	Surfaces      *fakeSurfaces
@@ -1570,6 +1576,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		HiddenKeepalives: &fakeHiddenKeepalives{},
 		Latencies:        &fakeLatencies{enabled: true},
 		RPCs:             &fakeRPCs{},
+		ReconnectRecords: &restarttimingtest.Recorder{},
 		NewsDigest:       &fakeNewsDigest{},
 		ClassifierPrompt: &fakeClassifierPrompt{},
 		EditorInstances:  &fakeEditorInstances{},
@@ -1622,6 +1629,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		ChessBoards:       h.ChessBoards,
 		Latencies:         h.Latencies,
 		RPCs:              h.RPCs,
+		Reconnects:        h.reconnects(),
 		ChessWidgetBundle: http.NotFoundHandler(),
 		Log:               h.Surfaces,
 	}
@@ -2087,4 +2095,13 @@ func (f *fakeLatencies) all() []observedLatency {
 // answers arrangeErr.
 func (v *fakeVerbs) FoldSubsection(_ context.Context, sub ids.SubsectionID, folded bool) error {
 	return v.arrange(fmt.Sprintf("FoldSubsection %s %v", sub, folded))
+}
+
+// reconnects answers the harness's reconnect tracker, building it on first
+// use over ReconnectRecords and the wall clock.
+func (h *harness) reconnects() *restarttiming.Reconnects {
+	if h.Reconnects == nil {
+		h.Reconnects = restarttiming.NewReconnects(h.ReconnectRecords, time.Now)
+	}
+	return h.Reconnects
 }

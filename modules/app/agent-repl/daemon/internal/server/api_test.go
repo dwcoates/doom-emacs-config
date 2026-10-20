@@ -511,3 +511,29 @@ func TestNoTestHandBuildsTheSurfacesDeps(t *testing.T) {
 		t.Fatalf("hand-built Deps literals in %v; strip the harness's set with withoutDep", offenders)
 	}
 }
+
+func TestNewRefusesMissingTimingDependencies(t *testing.T) {
+	tests := []struct {
+		name  string
+		strip func(*Deps)
+		want  string
+	}{
+		{"no rpc recorder", func(d *Deps) { d.RPCs = nil }, "an rpc recorder"},
+		{"no reconnect tracker", func(d *Deps) { d.Reconnects = nil }, "a reconnect tracker"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			deps := h.withoutDep(tt.strip)
+
+			// Act.
+			_, err := New(deps)
+
+			// Assert.
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("New = %v, want the refusal naming %s", err, tt.want)
+			}
+		})
+	}
+}

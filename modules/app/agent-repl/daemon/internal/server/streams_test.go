@@ -1,6 +1,7 @@
 package server
 
 import (
+	"agent-repld/internal/restarttiming"
 	"context"
 	"testing"
 	"time"
@@ -976,5 +977,50 @@ func TestANewEmacsStreamBringsNoWorkspaceUp(t *testing.T) {
 	// Assert.
 	if opens, selects := h.Verbs.opens.Load(), h.Verbs.selects.Load(); opens != 0 || selects != 0 {
 		t.Fatalf("opens = %d, selects = %d; want no bring-up from a connecting editor", opens, selects)
+	}
+}
+
+func TestAnExpectedStreamIsTimedWhenItOpens(t *testing.T) {
+	tests := []struct {
+		name  string
+		phase restarttiming.ReconnectPhase
+		open  func(ctx context.Context, h *harness) bool
+	}{
+		{
+			name:  "the host stream",
+			phase: restarttiming.ReconnectHost,
+			open: func(ctx context.Context, h *harness) bool {
+				s, err := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
+				return err == nil && s.Receive()
+			},
+		},
+		{
+			name:  "the web stream",
+			phase: restarttiming.ReconnectWeb,
+			open: func(ctx context.Context, h *harness) bool {
+				s, err := h.Client.WatchWebWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ref(), WebappBuild: "webapp-test"}))
+				return err == nil && s.Receive()
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.reconnects().Expect(restarttiming.ReconnectCold, time.Now().Add(-time.Second), tt.phase, testWorkspaceID)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// Act
+			if !tt.open(ctx, h) {
+				t.Fatal("the stream did not open")
+			}
+
+			// Assert
+			got := h.ReconnectRecords.Of(restarttiming.WorkspaceReconnect)
+			if len(got) != 1 || got[0].Workspace() != testWorkspaceID || got[0].Phase() != string(tt.phase) || got[0].Seconds() < 1 {
+				t.Fatalf("reconnects = %+v, want %s's %s stream after at least 1s", got, testWorkspaceID, tt.phase)
+			}
+		})
 	}
 }

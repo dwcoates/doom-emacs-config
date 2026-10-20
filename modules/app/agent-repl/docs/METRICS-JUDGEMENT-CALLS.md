@@ -214,3 +214,22 @@ Each entry says what was decided, why, and what it departs from.
   would hold the exit for up to two scrape intervals for nothing a push
   does not already deliver.
 
+## 14. Reconnects after a restart are timed by the daemon, per workspace
+
+- Asked (2026-10-20): latencies across restarts and startups, hot reloads
+  included: the time for every workspace to connect, each workspace's, and
+  p50, p90 and p99.
+- Built: `workspace_reconnect`, each workspace's host and webview streams
+  coming back, timed by the daemon from the restart's start: a boot's process
+  start (expecting every open, unhidden workspace), a handover's manifest
+  (expecting the participants it names), or a webview reload's push
+  (expecting each webview it was pushed to). A stream nothing expected (a
+  switch, a page opened later) is not timed.
+- The time every workspace took to come back is the slowest workspace's,
+  the largest `agentrepl_workspace_restart_last_seconds` of the restart, so no
+  separate "all connected" series exists to disagree with it. The skill's
+  `--restarts` prints the mean, p50, p90 and p99 of every phase.
+- Not timed: an elisp reload (Emacs keeps its streams across it, so there is
+  no reconnect to time) and Emacs's own launch before it reaches the daemon
+  (call 9).
+

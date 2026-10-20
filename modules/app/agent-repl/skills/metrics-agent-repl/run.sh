@@ -25,8 +25,8 @@
 #                                    mean CPU (cores) and mean footprint.
 #   --restarts [days]                One line per restart and phase over the
 #                                    last [days] (default 7): how many ended
-#                                    ok and failed, and the p50 and p95 of
-#                                    those that ended ok.
+#                                    ok and failed, and the mean, p50, p90 and
+#                                    p99 of those that ended ok.
 #   --restart-by-version <restart> <phase> [days]
 #                                    The restart phase's p95 per deployed
 #                                    version over the last [days] (default
@@ -237,22 +237,31 @@ case "${1:-}" in
     [[ "$days" =~ ^[0-9]+$ ]] || die "days must be a whole number, not $days"
     window="${days}d"
     counts="$(promql_data query "sum by (restart, phase, outcome) (increase_pure(agentrepl_restart_seconds_count[$window]))")" || exit 2
-    p50="$(promql_data query "histogram_quantile(0.5, sum by (restart, phase, le) (increase_pure(agentrepl_restart_seconds_bucket{outcome=\"ok\"}[$window])))")" || exit 2
-    p95="$(promql_data query "histogram_quantile(0.95, sum by (restart, phase, le) (increase_pure(agentrepl_restart_seconds_bucket{outcome=\"ok\"}[$window])))")" || exit 2
-    lines="$(jq -rn --argjson c "$counts" --argjson p50 "$p50" --argjson p95 "$p95" '
+    sums="$(promql_data query "sum by (restart, phase) (increase_pure(agentrepl_restart_seconds_sum{outcome=\"ok\"}[$window]))")" || exit 2
+    quantile() {
+      promql_data query "histogram_quantile($1, sum by (restart, phase, le) (increase_pure(agentrepl_restart_seconds_bucket{outcome=\"ok\"}[$window])))"
+    }
+    p50="$(quantile 0.5)" || exit 2
+    p90="$(quantile 0.9)" || exit 2
+    p99="$(quantile 0.99)" || exit 2
+    lines="$(jq -rn --argjson c "$counts" --argjson s "$sums" --argjson p50 "$p50" --argjson p90 "$p90" --argjson p99 "$p99" '
       def key: "\(.metric.restart)|\(.metric.phase)";
-      def num: (.value[1] | if . == "NaN" then "-" else (tonumber * 100 | round / 100 | tostring) end);
+      def round2: tonumber * 100 | round / 100 | tostring;
+      def num: (.value[1] | if . == "NaN" then "-" else round2 end);
+      def table($r): [$r[] | {key: key, value: num}] | from_entries;
       ([$c[] | {k: key, o: .metric.outcome, n: (.value[1] | tonumber | round)}]) as $counts
-      | ([$p50[] | {key: key, value: num}] | from_entries) as $m
-      | ([$p95[] | {key: key, value: num}] | from_entries) as $n
+      | ([$s[] | {key: key, value: (.value[1] | tonumber)}] | from_entries) as $sum
+      | table($p50) as $q50 | table($p90) as $q90 | table($p99) as $q99
       | ($counts | map(.k) | unique)[] as $k
+      | ([$counts[] | select(.k == $k and .o == "ok") | .n] | add // 0) as $ok
       | [($k | split("|")[]),
-         ([$counts[] | select(.k == $k and .o == "ok") | .n] | add // 0),
+         $ok,
          ([$counts[] | select(.k == $k and .o == "failed") | .n] | add // 0),
-         ($m[$k] // "-"), ($n[$k] // "-")]
+         (if $ok > 0 and $sum[$k] != null then ($sum[$k] / $ok | round2) else "-" end),
+         ($q50[$k] // "-"), ($q90[$k] // "-"), ($q99[$k] // "-")]
       | @tsv')" || die "could not read the restarts"
     [ -n "$lines" ] || exit 1
-    printf 'restart\tphase\tok\tfailed\tp50_seconds\tp95_seconds\n%s\n' "$lines"
+    printf 'restart\tphase\tok\tfailed\tmean_seconds\tp50_seconds\tp90_seconds\tp99_seconds\n%s\n' "$lines"
     ;;
   --restart-by-version)
     [ -n "${2:-}" ] && [ -n "${3:-}" ] || die "--restart-by-version needs a restart and a phase (see --restarts)"

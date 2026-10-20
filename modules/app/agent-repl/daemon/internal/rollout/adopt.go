@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/standdown"
 	"agent-repld/internal/wsm"
@@ -119,7 +120,7 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	armed := c.armSessions(m.Daemon, m.Sessions)
+	armed := c.armSessions(m.Daemon, m.WrittenAt, m.Sessions)
 	// RETIRED ONLY ONCE IT IS ARMED FROM, so a participant's own re-read
 	// (armFromManifest) can never find the file gone before the rendezvous
 	// it states exists. A read-only handle defers the accounting, and then
@@ -259,7 +260,7 @@ func (c *controller) reclaimHeadless(ws ids.WorkspaceID) bool {
 // than once by design (a successor boots before the incumbent writes it, and
 // both the awaiting poll and a participant's own call re-read it), so every
 // read must be additive.
-func (c *controller) armSessions(outgoing ids.InstanceID, sessions []ManifestSession) int {
+func (c *controller) armSessions(outgoing ids.InstanceID, writtenAt time.Time, sessions []ManifestSession) int {
 	added := 0
 	armed := make([]ManifestSession, 0, len(sessions))
 	c.mu.Lock()
@@ -289,6 +290,14 @@ func (c *controller) armSessions(outgoing ids.InstanceID, sessions []ManifestSes
 			"expected_host": session.ExpectedHost,
 			"expected_web":  session.ExpectedWeb,
 		})
+		// EACH PARTICIPANT THE OUTGOING DAEMON NAMED IS TO COME BACK HERE,
+		// timed from its manifest (restarttiming.ReconnectSuccessor).
+		if session.ExpectedHost {
+			c.deps.Reconnects.Expect(restarttiming.ReconnectSuccessor, writtenAt, restarttiming.ReconnectHost, session.Workspace)
+		}
+		if session.ExpectedWeb {
+			c.deps.Reconnects.Expect(restarttiming.ReconnectSuccessor, writtenAt, restarttiming.ReconnectWeb, session.Workspace)
+		}
 	}
 	return added
 }
@@ -332,7 +341,7 @@ func (c *controller) armFromManifest() error {
 	c.recordManifestSeen()
 	c.recordForcedTakeover(m.Forced)
 	c.recordDeployTakeover(m)
-	added := c.armSessions(m.Daemon, m.Sessions)
+	added := c.armSessions(m.Daemon, m.WrittenAt, m.Sessions)
 	if added > 0 {
 		c.log.Info(opJoin, "armed the adopt rendezvous from a manifest that arrived after boot",
 			dlog.Context{"workspaces": added})
