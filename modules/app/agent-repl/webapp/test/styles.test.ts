@@ -38,7 +38,7 @@ import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../src/bubble/quote.js";
 import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
-import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
+import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, isOwnRule, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
 import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
 
@@ -112,7 +112,7 @@ function declarationsOf(selector: string): string | undefined {
 
 /** The declarations of the first rule whose selector list is SELECTOR alone. */
 function ownDeclarationsOf(selector: string): string | undefined {
-  return rulesOf(stylesheet).find((rule) => rule.selectors.length === 1 && rule.selectors[0] === selector)
+  return rulesOf(stylesheet).find((rule) => isOwnRule(rule, selector))
     ?.declarations;
 }
 
@@ -2313,8 +2313,7 @@ describe("the one-line clamp's shared shape", () => {
     // Arrange / Act — any other rule re-declaring the box on one clamp alone.
     const handRolled = rulesOf(stylesheet).filter(
       (r) =>
-        r.selectors.length === 1 &&
-        CLAMP_SHAPE_SELECTORS.includes(r.selectors[0] ?? "") &&
+        CLAMP_SHAPE_SELECTORS.some((selector) => isOwnRule(r, selector)) &&
         /display:\s*-webkit-box|-webkit-box-orient/.test(r.declarations),
     );
 
@@ -3519,24 +3518,26 @@ describe("the one bubble rule set", () => {
               (prop === "color" || prop === "--bubble-font-rem") &&
               rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))
             ) &&
-            !(prop === "font-style" && rule.selectors.length === 1 && rule.selectors[0] === THINKING_SELECTOR) &&
+            !(prop === "font-style" && isOwnRule(rule, THINKING_SELECTOR)) &&
             // NO BUBBLE AT ALL (owner ruling, 2026-10-08): the same two
             // selectors also turn off the base rule's box-shadow, the one
             // remaining visible highlight once their fill is already the
             // page's own --bg; its own suite below pins it.
             !(prop === "box-shadow" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))) &&
             // AN INTERIM GROWS TO THE RIGHT ON HOVER (owner request,
-            // 2026-10-13): its bubble transitions its cap, and reads the
-            // corner's geometry tokens from the one shared token rule. Its own
-            // suite pins both.
-            !(prop === "transition" && rule.selectors.length === 1 && rule.selectors[0] === ".bubble.interim-response") &&
+            // 2026-10-13): its bubble's cap reads the one animated open width
+            // its transition eases, and reads the corner's geometry tokens from
+            // the one shared token rule. Its own suite pins all three.
+            !(
+              (prop === "transition" || prop === "max-width") &&
+              isOwnRule(rule, ".bubble.interim-response")
+            ) &&
             // THE BLUE PROMPT'S CODE (owner request, 2026-10-19): the user
             // prompt feeds the two code fills their darker blue; the suite
             // "code in a blue prompt bubble" pins both.
             !(
               (prop === "--code-bg" || prop === "--code-block-bg") &&
-              rule.selectors.length === 1 &&
-              rule.selectors[0] === '.bubble[data-variant="user"]'
+              isOwnRule(rule, '.bubble[data-variant="user"]')
             ) &&
             !(prop.startsWith("--usage-") && rule.selectors.includes(".usage-corner")),
         ),
@@ -4138,7 +4139,7 @@ describe("code in a blue prompt bubble (owner request, 2026-10-19)", () => {
   it.each(["--code-bg", "--code-block-bg"])("feeds %s from --prompt-code-bg on the user prompt", (token) => {
     // Arrange / Act
     const decls = rulesOf(stylesheet)
-      .filter((r) => r.selectors.length === 1 && r.selectors[0] === '.bubble[data-variant="user"]')
+      .filter((r) => isOwnRule(r, '.bubble[data-variant="user"]'))
       .map((r) => r.declarations)
       .join(";");
     // Assert
@@ -4199,7 +4200,7 @@ describe("the rail's tone rules", () => {
     ["green", "var(--ok)"],
   ])("paints #ws-sidebar .st.tone-%s with %s", (tone, color) => {
     const rules = rulesOf(stylesheet).filter(
-      (rule) => rule.selectors.length === 1 && rule.selectors[0] === `#ws-sidebar .st.tone-${tone}`,
+      (rule) => isOwnRule(rule, `#ws-sidebar .st.tone-${tone}`),
     );
     expect(rules.at(-1)?.declarations).toContain(`color: ${color}`);
   });
@@ -4235,14 +4236,14 @@ describe("the rail's tone rules", () => {
     const lastIndex = (pred: (rule: (typeof rules)[number]) => boolean): number =>
       rules.reduce((found, rule, index) => (pred(rule) ? index : found), -1);
     const lastTone = lastIndex((rule) => rule.selectors.some((sel) => sel.startsWith("#ws-sidebar .st.tone-")));
-    const inkAt = lastIndex((rule) => rule.selectors.length === 1 && rule.selectors[0] === `#ws-sidebar .st.ink-${ink}`);
+    const inkAt = lastIndex((rule) => isOwnRule(rule, `#ws-sidebar .st.ink-${ink}`));
     expect(inkAt).toBeGreaterThan(lastTone);
     expect(rules[inkAt].declarations).toMatch(/(?:^|;)\s*color\s*:/);
   });
 
   it("inks a paused queue's merge indicators in the inactive dot's grey", () => {
     const rules = rulesOf(stylesheet).filter(
-      (rule) => rule.selectors.length === 1 && rule.selectors[0] === `#ws-sidebar .st.ink-${renderColors.paused_merge_mark.ink}`,
+      (rule) => isOwnRule(rule, `#ws-sidebar .st.ink-${renderColors.paused_merge_mark.ink}`),
     );
     expect(rules.at(-1)?.declarations).toContain("color: var(--muted)");
   });
@@ -4258,7 +4259,7 @@ describe("the turquoise token", () => {
 
   it("gives .tone-turquoise its token", () => {
     const rules = rulesOf(stylesheet).filter(
-      (rule) => rule.selectors.length === 1 && rule.selectors[0] === ".tone-turquoise",
+      (rule) => isOwnRule(rule, ".tone-turquoise"),
     );
     expect(rules.at(-1)?.declarations).toContain("color: var(--turquoise)");
   });
@@ -4425,7 +4426,7 @@ describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => 
 describe("the persistent-wifi glyph button", () => {
   it("carries the chip's color, which is the glyph's black", () => {
     // Arrange / Act
-    const own = rulesOf(stylesheet).find((rule) => rule.selectors.length === 1 && rule.selectors[0] === ".topbar-wifi-button");
+    const own = rulesOf(stylesheet).find((rule) => isOwnRule(rule, ".topbar-wifi-button"));
     // Assert
     expect(own?.declarations ?? "").toMatch(/color:\s*inherit/);
   });
@@ -5172,7 +5173,7 @@ describe("the arc spinner's shape", () => {
     [".tool-spinner", "var(--thinking)"],
     [".feed-load-more-spinner", "var(--muted)"],
   ])("has %s name its token as %s", (selector, token) => {
-    const own = rulesOf(stylesheet).filter((rule) => rule.selectors.length === 1 && rule.selectors[0] === selector);
+    const own = rulesOf(stylesheet).filter((rule) => isOwnRule(rule, selector));
     expect(own.map((rule) => rule.declarations).join(";")).toContain(`--arc-color: ${token}`);
   });
 
@@ -5807,19 +5808,64 @@ describe("the interim corner's shared tokens", () => {
     expect(margins).toEqual(["var(--usage-corner-margin-right)", "var(--usage-corner-margin-right)"]);
   });
 
-  it("opens the cap, the slider and the open body by the one reveal width", () => {
+  /** PROP's value in the rules whose selector list is SELECTOR alone, wherever one declares it. */
+  function ownValueOf(selector: string, prop: string): string | undefined {
+    const declares = new RegExp(`(?:^|;)\\s*${prop}:\\s*([^;]+);`);
+    return rulesOf(stylesheet)
+      .filter((rule) => isOwnRule(rule, selector))
+      .map((rule) => declares.exec(rule.declarations)?.[1])
+      .find((value) => value !== undefined);
+  }
+
+  it("opens the one animated width to the reveal width on the reveal, and no width or margin of its own", () => {
     // Arrange / Act
-    const sites = rulesOf(stylesheet)
-      .filter((rule) => rule.selectors.some((sel) => sel.startsWith(".bubble.interim-response:hover")))
-      .map((rule) => /(?:max-width|width|margin-right):\s*([^;]+);/.exec(rule.declarations)?.[1])
-      .filter((value) => value !== undefined);
+    const reveal = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /^\.bubble\.interim-response:(?:hover|focus-within)/.test(sel)),
+    );
+    const opening = reveal.filter((rule) => /--usage-open:/.test(rule.declarations)).map((rule) => rule.declarations.trim());
+    const sizing = reveal.filter((rule) => /(?:^|;)\s*(?:max-width|width|margin-right):/.test(rule.declarations));
 
     // Assert
-    expect(sites).toEqual([
-      "calc(var(--bubble-max-width) + var(--usage-reveal-w))",
-      "var(--usage-reveal-w)",
-      "var(--usage-reveal-w)",
-    ]);
+    expect([opening, sizing]).toEqual([["--usage-open: var(--usage-reveal-w);"], []]);
+  });
+
+  it.each([
+    [".bubble.interim-response", "max-width", "calc(var(--bubble-max-width) + var(--usage-open))"],
+    [".bubble.interim-response > .bubble-scroll > .usage-corner > .usage-slider", "width", "var(--usage-open)"],
+    [".bubble.interim-response > .bubble-scroll.expanded > .usage-corner + .bubble-body", "margin-right", "var(--usage-open)"],
+  ])("has %s read the one animated width as its %s", (selector, prop, value) => {
+    // Arrange / Act
+    const declared = ownValueOf(selector, prop);
+
+    // Assert
+    expect(declared).toBe(value);
+  });
+
+  it("animates the open width on the bubble's one transition", () => {
+    // Arrange / Act
+    const transition = ownValueOf(".bubble.interim-response", "transition");
+
+    // Assert
+    expect(transition).toBe("--usage-open var(--usage-grow) ease");
+  });
+
+  it("transitions none of the three open sites on its own, so a click that opens a revealed interim starts at the width already open", () => {
+    // Arrange / Act: every interim rule that transitions a width or a margin.
+    const own = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some((sel) => sel.startsWith(".bubble.interim-response")))
+      .filter((rule) => /transition:[^;]*\b(?:max-width|width|margin-right)\b/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors);
+
+    // Assert
+    expect(own).toEqual([]);
+  });
+
+  it("registers the open width as an inherited length that rests at 0", () => {
+    // Arrange / Act
+    const registered = /@property --usage-open\s*\{([^}]*)\}/.exec(stylesheet)?.[1]?.replace(/\s+/g, " ").trim();
+
+    // Assert
+    expect(registered).toBe('syntax: "<length>"; inherits: true; initial-value: 0px;');
   });
 
   it("never hand-rolls the reveal width outside its token", () => {
