@@ -2003,6 +2003,11 @@ type fakeSessions struct {
 	// efforts is every SetEffort asked of the fleet; effortErr its answer.
 	efforts   []effortCall
 	effortErr error
+	// retries is every RetryVendorError asked of the fleet, answered with
+	// retryResponse and retryErr.
+	retries       []ids.WorkspaceID
+	retryResponse *shimv1.RetryVendorErrorNowResponse
+	retryErr      error
 	// vendorRunning makes CancelVendorStart report a run it ended, and
 	// vendorCancels counts every CancelVendorStart asked.
 	vendorRunning bool
@@ -2024,6 +2029,12 @@ type stopCall struct {
 func (s *fakeSessions) SetEffort(_ context.Context, _ dlog.Logger, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error {
 	s.efforts = append(s.efforts, effortCall{WS: ws, Level: level})
 	return s.effortErr
+}
+
+// RetryVendorError records the ask and answers the scripted outcome.
+func (s *fakeSessions) RetryVendorError(_ context.Context, _ dlog.Logger, ws ids.WorkspaceID) (*shimv1.RetryVendorErrorNowResponse, error) {
+	s.retries = append(s.retries, ws)
+	return s.retryResponse, s.retryErr
 }
 
 type effortCall struct {

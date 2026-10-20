@@ -1150,6 +1150,22 @@ func (s *server) SendKeepalive(ctx context.Context, req *connect.Request[shimv1.
 	}), nil
 }
 
+// RetryVendorErrorNow records the retry asked for and answers
+// nothing_scheduled unless a script says otherwise: the fake schedules no
+// retry of its own, so a test that wants one scripts the answer and pushes
+// the schedule on the session stream.
+func (s *server) RetryVendorErrorNow(ctx context.Context, req *connect.Request[shimv1.RetryVendorErrorNowRequest]) (*connect.Response[shimv1.RetryVendorErrorNowResponse], error) {
+	if err := s.enter(ctx, RPCRetryVendorErrorNow, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.RetryVendorErrorNowResponse, *shimv1.RetryVendorErrorNowResponse](s, RPCRetryVendorErrorNow); done {
+		return resp, err
+	}
+	return connect.NewResponse(&shimv1.RetryVendorErrorNowResponse{
+		Outcome: &shimv1.RetryVendorErrorNowResponse_NothingScheduled{NothingScheduled: &shimv1.RetryVendorErrorNowNothingScheduled{}},
+	}), nil
+}
+
 func (s *server) SetSessionModel(ctx context.Context, req *connect.Request[shimv1.SetSessionModelRequest]) (*connect.Response[shimv1.SetSessionModelResponse], error) {
 	if err := s.enter(ctx, RPCSetSessionModel, req.Msg); err != nil {
 		return nil, err

@@ -1634,6 +1634,12 @@ func (c *client) SendKeepalive(ctx context.Context, req *shimv1.SendKeepaliveReq
 	return unary(ctx, c, "send_keepalive", req, validateSendKeepaliveRequest, c.rpc.SendKeepalive)
 }
 
+// RetryVendorErrorNow asks the session for its scheduled vendor-error retry
+// at once.
+func (c *client) RetryVendorErrorNow(ctx context.Context, req *shimv1.RetryVendorErrorNowRequest) (*shimv1.RetryVendorErrorNowResponse, error) {
+	return unary(ctx, c, "retry_vendor_error_now", req, validateRetryVendorErrorNowRequest, c.rpc.RetryVendorErrorNow)
+}
+
 // SetKeepalive holds the session's keep-alive cadence, or runs it again.
 func (c *client) SetKeepalive(ctx context.Context, req *shimv1.SetKeepaliveRequest) (*shimv1.SetKeepaliveResponse, error) {
 	return unary(ctx, c, "set_keepalive", req, validateSetKeepaliveRequest, c.rpc.SetKeepalive)

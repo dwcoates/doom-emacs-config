@@ -46,6 +46,11 @@ type fakeClient struct {
 	// with keepaliveErr when it is set.
 	keepalives   []*shimv1.SetKeepaliveRequest
 	keepaliveErr error
+	// retryNowAsks counts every RetryVendorErrorNow, answered with
+	// retryNowResponse and retryNowErr.
+	retryNowAsks     int
+	retryNowResponse *shimv1.RetryVendorErrorNowResponse
+	retryNowErr      error
 	shimclient.Client
 
 	// efforts is every SetSessionEffort asked; effortResponse and effortErr
@@ -293,6 +298,12 @@ func (c *fakeClient) SetKeepalive(_ context.Context, req *shimv1.SetKeepaliveReq
 		return nil, c.keepaliveErr
 	}
 	return &shimv1.SetKeepaliveResponse{Result: &shimv1.SetKeepaliveResponse_Success{Success: &shimv1.SetKeepaliveSuccess{}}}, nil
+}
+
+// RetryVendorErrorNow counts the ask and answers the scripted outcome.
+func (c *fakeClient) RetryVendorErrorNow(context.Context, *shimv1.RetryVendorErrorNowRequest) (*shimv1.RetryVendorErrorNowResponse, error) {
+	c.retryNowAsks++
+	return c.retryNowResponse, c.retryNowErr
 }
 
 func (c *fakeClient) PID() int { return c.pid }
