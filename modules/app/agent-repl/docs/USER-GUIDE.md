@@ -589,6 +589,13 @@ The top bar's effort selector sits between the model selector and the permission
   - How many commits its branch has past where it was cut.
 - **Picking a workspace that is not open here opens it first.**
   - A merged workspace opens too, to revise what it landed (see "Reopening a merged workspace").
+- **`s-{` and `s-}` step to the tab left or right of the current one, wrapping.**
+- **`s-[` and `s-]` step through the tabs in the order you last viewed them.**
+  - `s-[` goes to the workspace you viewed before this one, and pressed again to the one before that.
+  - `s-]` goes back toward the one you viewed most recently.
+  - Both wrap at the ends, as `s-{` and `s-}` do.
+  - Stepping with them does not count as viewing, so the order holds still while you step through it.
+  - Any other switch, a tab click, `M-1`, `s-{` or a picker, counts as viewing the workspace it lands on.
 
 ## Reopening a merged workspace
 

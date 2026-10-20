@@ -156,6 +156,13 @@ the module."
 (map! "s-{" #'agent-repl-switch-left
       "s-}" #'agent-repl-switch-right)
 
+;; The same steps over the SELECTION HISTORY rather than the bar: `s-[' goes
+;; to the workspace viewed before, and again to the one before that; `s-]'
+;; walks back toward the most recent.  A step records no view, so the
+;; history holds still under the walk.
+(map! "s-[" #'agent-repl-switch-older
+      "s-]" #'agent-repl-switch-newer)
+
 ;;;; ---- M-1 .. M-9 : the tab-bar numerals --------------------------------
 
 ;; ONE SOURCE OF TRUTH FOR NAVIGATION: THE DRAWN TAB ORDER.  Doom binds

@@ -516,10 +516,11 @@ in the order the user made them, and the last press is the last stamp.")
 
 (defvar agent-repl-host--select-queued nil
   "The newest selection waiting behind the one in flight, or nil.
-A cons (WS . ON-SETTLED).  Only the newest is kept: a selection the user
-has already moved past is never sent, because the daemon would stamp it
-`current' only for the next one to overwrite it.  The one it replaces is
-settled `:superseded' so its caller is not left waiting.")
+A list (WS ON-SETTLED KEEP-HISTORY), the arguments of the
+`agent-repl-host-select' it will be sent as.  Only the newest is kept: a
+selection the user has already moved past is never sent, because the daemon
+would stamp it `current' only for the next one to overwrite it.  The one it
+replaces is settled `:superseded' so its caller is not left waiting.")
 
 (defvar agent-repl-host--confirming nil
   "A selection the daemon accepted whose roster has not arrived, or nil.
@@ -577,8 +578,12 @@ the selection pending forever."
                       (car agent-repl-host--confirming) (cdr agent-repl-host--confirming) reason)
     (setq agent-repl-host--confirming nil)))
 
-(defun agent-repl-host-select (ws &optional on-settled)
+(defun agent-repl-host-select (ws &optional on-settled keep-history)
   "Tell the daemon the user switched to workspace WS.
+KEEP-HISTORY non-nil marks the switch as a step of the recency walk
+\(`agent-repl-switch-older'): the daemon stamps `current' and leaves the
+row's last-selected instant standing (agentrepl.v1
+SelectWorkspaceRequest.keep_selection_history).
 ON-SETTLED, when given, is called with `:success', `:error',
 `:standing-down' (the daemon is leaving or already gone: the next daemon
 is asked again) or `:failure' once the call has an outcome
@@ -599,17 +604,17 @@ skipped), or there is no connection to send it on (it is recorded for the
 next link-up to re-assert, and settled `:standing-down')."
   (if agent-repl-host--select-in-flight
       (let ((older agent-repl-host--select-queued))
-        (setq agent-repl-host--select-queued (cons ws on-settled))
+        (setq agent-repl-host--select-queued (list ws on-settled keep-history))
         (agent-repl--info ws "elisp.host.select-queued ws=%s behind=%s superseded=%s"
                           ws agent-repl-host--select-in-flight (or (car older) "none"))
-        (when (and older (cdr older))
-          (funcall (cdr older) :superseded))
+        (when (and older (cadr older))
+          (funcall (cadr older) :superseded))
         t)
-    (agent-repl-host--send-select ws on-settled)))
+    (agent-repl-host--send-select ws on-settled keep-history)))
 
-(defun agent-repl-host--send-select (ws on-settled)
+(defun agent-repl-host--send-select (ws on-settled keep-history)
   "Send WS\='s SelectWorkspace now, holding the in-flight slot until it answers.
-ON-SETTLED is as `agent-repl-host-select' documents."
+ON-SETTLED and KEEP-HISTORY are as `agent-repl-host-select' documents."
   (let ((ref (agent-repl-host-ref ws))
         (conn (agent-repl-host-conn-or-primary ws)))
     (cond
@@ -632,11 +637,13 @@ ON-SETTLED is as `agent-repl-host-select' documents."
       (when on-settled (funcall on-settled :standing-down))
       nil)
      (t
-      (agent-repl--info ws "elisp.host.select ws=%s id=%S" ws (plist-get ref :id))
+      (agent-repl--info ws "elisp.host.select ws=%s id=%S keep-history=%s"
+                        ws (plist-get ref :id) (and keep-history t))
       (setq agent-repl-host--select-in-flight ws)
       (condition-case err
           (agent-repl-rpc-select-workspace
-           conn (list :workspace ref)
+           conn (append (list :workspace ref)
+                        (and keep-history (list :keep-selection-history t)))
            :on-response
            (lambda (response)
              (agent-repl-host--select-settled
@@ -671,7 +678,7 @@ and this is the moment it is judged -- the last push wins."
     (if agent-repl-host--select-queued
         (let ((next agent-repl-host--select-queued))
           (setq agent-repl-host--select-queued nil)
-          (agent-repl-host-select (car next) (cdr next)))
+          (apply #'agent-repl-host-select next))
       (agent-repl-roster-apply-current))))
 
 (defun agent-repl-host--select-failed (ws ref detail on-settled)
@@ -739,6 +746,8 @@ ON-SETTLED is as `agent-repl-host-select' documents."
      (agent-repl--error ws "elisp.host.select-unknown-arm ws=%s arm=%S" ws arm)
      (when on-settled (funcall on-settled :error)))))
 
+(defvar agent-repl--recency-walk-landing)
+
 (defvar agent-repl-host-last-request nil
   "The newest switch request, as (WS . FLOAT-TIME), or nil.
 Read by the roster's follow record, which states how long the frame took
@@ -800,12 +809,21 @@ Every trigger but `startup' is a switch the user made in Emacs and is
 counted (`agent-repl-host--editor-switches'); the startup\='s selection of
 its first tab is Emacs's own.
 
+THE `recency-walk' TRIGGER KEEPS THE SELECTION HISTORY: a step of the walk
+\(`agent-repl-switch-older', `agent-repl-switch-newer') is not a choice, so
+the daemon leaves the last-selected instant standing and Emacs records no
+visit (`agent-repl--recency-walk-landing').  Every other trigger is a
+choice, and ends any walk the frame stood in.
+
 A request that cannot be sent is LOUD: a switch the user asked for that
 goes nowhere is reported in the echo area and at WARN, never dropped.
 Answers t when the request was sent or queued, nil otherwise."
-  (let ((shown (agent-repl--ws-current-name)))
+  (let ((shown (agent-repl--ws-current-name))
+        (walk (eq trigger 'recency-walk)))
     (unless (eq trigger 'startup)
       (agent-repl-host--count-editor-switch ws trigger))
+    ;; Set BEFORE the frame moves: the move's own activation reads it.
+    (setq agent-repl--recency-walk-landing (and walk ws))
     (setq agent-repl-host-last-request (cons ws (float-time)))
     (agent-repl--info ws "elisp.host.switch-requested ws=%s trigger=%s shown=%s pending=%s"
                       ws trigger shown (or (agent-repl-host-pending-selection) "none"))
@@ -826,7 +844,8 @@ Answers t when the request was sent or queued, nil otherwise."
            ws (lambda (outcome)
                 (unless (eq outcome :success)
                   (agent-repl--info ws "elisp.host.switch-request-settled ws=%s outcome=%S"
-                                    ws outcome))))
+                                    ws outcome)))
+           walk)
         (agent-repl-host--move-on-request ws shown))))))
 
 (defun agent-repl-host--move-on-request (ws shown)

@@ -97,6 +97,8 @@ Findings are collected at the end, in "Audit findings".
 | --- | --- | --- | --- | --- |
 | `agent-repl-switch-left` | Switch to the tab on the left, wrapping. | `s-{`, remap of `+workspace/switch-left` | global, numerals map | works |
 | `agent-repl-switch-right` | Switch to the tab on the right, wrapping. | `s-}`, remap of `+workspace/switch-right` | global, numerals map | works |
+| `agent-repl-switch-older` | Switch to the tab viewed before the current one, wrapping, without recording a view. | `s-[` | global | works |
+| `agent-repl-switch-newer` | Switch back toward the most recently viewed tab, wrapping, without recording a view. | `s-]` | global | works |
 | `agent-repl-switch-to-workspace-1` .. `-9` (generated) | Switch to tab slot N. | `M-1`..`M-9`, `s-1`..`s-9`, remap of `+workspace/switch-to-N` | numerals map (evil intercept) | works |
 | `agent-repl-switch-to-workspace` | Switch to tab slot N (the generated commands call it). | - | - | - |
 | `agent-repl-switch-to-project` | Switch to a current or recent workspace, or to a project. | `SPC p p` | leader | leader |

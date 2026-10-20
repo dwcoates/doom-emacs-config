@@ -155,12 +155,20 @@
                  agent-repl-open-most-recent-workspace
                  agent-repl-switch-left
                  agent-repl-switch-right
+                 agent-repl-switch-older
+                 agent-repl-switch-newer
                  agent-repl-switch-to-workspace
                  agent-repl-copy-reference
                  agent-repl-copy-workspace-name
                  agent-repl-revert-and-eval-buffer
                  agent-repl-reload-config))
     (should (commandp cmd))))
+
+(ert-deftest agent-repl-test-keybindings-recency-walk-chords-are-bound ()
+  "`s-[' walks to the workspace viewed before, `s-]' back toward the most recent."
+  (should (string-match-p
+           (regexp-quote "(map! \"s-[\" #'agent-repl-switch-older\n      \"s-]\" #'agent-repl-switch-newer)")
+           (agent-repl-test-keybindings--source))))
 
 (ert-deftest agent-repl-test-keybindings-composer-commands-are-defined ()
   "The composer-local commands input.el binds exist."

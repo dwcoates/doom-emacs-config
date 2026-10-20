@@ -1354,6 +1354,43 @@ neighbours (`agent-repl--step-workspace')."
   (interactive)
   (agent-repl--workspace-cycle 1))
 
+(defun agent-repl--recency-ring (current)
+  "Return the DRAWN tabs, and CURRENT, most recently selected first.
+The ONE selection-recency order (`agent-repl-roster-selection-recency-order')
+over the tabs the bar draws, so `s-[' and `s-]' reach exactly the tabs
+`s-{' and `s-}' do.  CURRENT joins the ring when its tab is not drawn (its
+repository is collapsed), so it still has a place to step from."
+  (let ((drawn (agent-repl--drawn-tab-names)))
+    (agent-repl-roster-selection-recency-order
+     (if (or (null current) (member current drawn))
+         drawn
+       (append drawn (list current))))))
+
+(defun agent-repl--recency-walk (n)
+  "Switch N places along the selection history, positive being older.
+`s-[' and `s-]' are `s-{' and `s-}' over the recency order rather than the
+bar's (`agent-repl--recency-ring'), wrapping at both ends.
+
+A STEP IS NOT A VISIT.  The switch is requested with the `recency-walk'
+trigger, so neither the daemon's last-selected instant nor Emacs's own
+history moves (`agent-repl--recency-walk-landing').  The order therefore
+holds still under the walk, and the current workspace's place in it IS the
+walk's position: `s-[' pressed again lands one older, and `s-]' comes back
+toward the most recent, with no cursor to keep."
+  (agent-repl--step-workspace n #'agent-repl--recency-ring "recency-walk" 'recency-walk))
+
+(defun agent-repl-switch-older ()
+  "Switch to the workspace viewed before the current one, without recording a view.
+Pressed again, goes one further back in the selection history."
+  (interactive)
+  (agent-repl--recency-walk 1))
+
+(defun agent-repl-switch-newer ()
+  "Switch to the workspace viewed after the current one, without recording a view.
+Walks back toward the most recently viewed workspace."
+  (interactive)
+  (agent-repl--recency-walk -1))
+
 (defun agent-repl-switch-to-workspace (&optional n)
   "Switch to the workspace in the Nth slot of the tab bar, counting from 1.
 

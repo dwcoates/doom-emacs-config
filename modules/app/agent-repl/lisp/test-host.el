@@ -189,6 +189,7 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-host--select-in-flight nil)
          (agent-repl-host--select-queued nil)
          (agent-repl-host--confirming nil)
+         (agent-repl--recency-walk-landing nil)
          (agent-repl-host-last-request nil)
          (agent-repl-host--editor-switches 0)
          (agent-repl-host-automatic-switch nil)
@@ -1081,6 +1082,83 @@ says now rather than wait for a push that will never come."
       (should-error (agent-repl-host-select "ws-1")))))
 
 ;;;; ---- Request a switch ----
+
+(defun agent-repl-test-host--selected-keeps ()
+  "The `:keep-selection-history' of each SelectWorkspace sent, oldest first."
+  (mapcar (lambda (call) (plist-get (nth 2 call) :keep-selection-history))
+          (reverse (cl-remove-if-not (lambda (call) (equal (car call) "SelectWorkspace"))
+                                     agent-repl-test-host--calls))))
+
+(ert-deftest agent-repl-test-host-a-recency-walk-request-keeps-the-selection-history ()
+  "A `recency-walk' step asks the daemon to leave the last-selected instant."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    ;; Act
+    (agent-repl-host-request-switch "ws-2" 'recency-walk)
+    ;; Assert
+    (should (equal (agent-repl-test-host--selected-keeps) '(t)))))
+
+(ert-deftest agent-repl-test-host-a-chosen-request-records-the-selection-history ()
+  "Every other trigger is a choice, so the daemon stamps the instant."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    ;; Act
+    (agent-repl-host-request-switch "ws-2" 'cycle)
+    ;; Assert
+    (should (equal (agent-repl-test-host--selected-keeps) '(nil)))))
+
+(ert-deftest agent-repl-test-host-a-recency-walk-request-marks-its-landing ()
+  "The walk's target is marked before the frame moves, so its activation is no visit."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (let ((seen :unset))
+      (cl-letf (((symbol-function 'agent-repl-host--move-on-request)
+                 (lambda (_ws _shown) (setq seen agent-repl--recency-walk-landing))))
+        ;; Act
+        (agent-repl-host-request-switch "ws-2" 'recency-walk))
+      ;; Assert
+      (should (equal seen "ws-2"))
+      (should (equal agent-repl--recency-walk-landing "ws-2")))))
+
+(ert-deftest agent-repl-test-host-a-chosen-request-ends-the-walk ()
+  "Any other trigger clears the walk's landing mark."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (setq agent-repl--recency-walk-landing "ws-1")
+    ;; Act
+    (agent-repl-host-request-switch "ws-2" 'slot)
+    ;; Assert
+    (should-not agent-repl--recency-walk-landing)))
+
+(ert-deftest agent-repl-test-host-a-queued-walk-step-keeps-the-history-when-sent ()
+  "A walk step queued behind one in flight is sent with its own keep flag."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-host-request-switch "ws-1" 'cycle)
+    (agent-repl-host-request-switch "ws-3" 'recency-walk)
+    ;; Act
+    (agent-repl-test-host--answer-held agent-repl-test-host--success)
+    ;; Assert
+    (should (equal (agent-repl-test-host--selected-ids) '("ws-id-1" "ws-id-3")))
+    (should (equal (agent-repl-test-host--selected-keeps) '(nil t)))))
+
+(ert-deftest agent-repl-test-host-select-records-its-keep-flag ()
+  "The send record names whether the select keeps the history."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (setq agent-repl-test-host--logs nil)
+    ;; Act
+    (agent-repl-host-select "ws-2" nil t)
+    ;; Assert
+    (should (cl-some (lambda (line) (string-match-p "elisp.host.select ws=ws-2 .*keep-history=t" line))
+                     (mapcar (lambda (l) (if (stringp l) l (format "%S" l))) agent-repl-test-host--logs)))))
+
 
 (ert-deftest agent-repl-test-host-a-request-sends-select-workspace ()
   "A switch request is a SelectWorkspace for the workspace's ref."
