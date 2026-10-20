@@ -186,6 +186,24 @@ test_restarts_summarizes_each_restart_phase() {
   else fail "restarts" "rc=$RC" "$OUT"; fi
 }
 
+test_restarts_omits_a_phase_with_nothing_in_the_window() {
+  new_case
+  answer api_v1_query_counts '{"status":"success","data":{"result":[{"metric":{"restart":"deploy","phase":"total","outcome":"ok"},"value":[1,"2"]},{"metric":{"restart":"session_start","phase":"slot_wait","cause":"relaunch","outcome":"ok"},"value":[1,"0"]},{"metric":{"restart":"session_start","phase":"slot_wait","cause":"relaunch","outcome":"failed"},"value":[1,"0"]}]}}'
+  for k in sums p50 p90 p99; do answer "api_v1_query_$k" '{"status":"success","data":{"result":[]}}'; done
+  run --restarts 30m
+  if [ "$RC" -eq 0 ] && has $'deploy\ttotal\t-\t2\t0' && ! has 'relaunch'; then
+    pass "restarts leaves out a phase that recorded nothing in the window"
+  else fail "restarts empty phase" "rc=$RC" "$OUT"; fi
+}
+
+test_restarts_with_only_empty_phases_says_none_was_recorded() {
+  new_case
+  answer api_v1_query_counts '{"status":"success","data":{"result":[{"metric":{"restart":"shim_restart","phase":"run","cause":"build_stale","outcome":"ok"},"value":[1,"0"]}]}}'
+  for k in sums p50 p90 p99; do answer "api_v1_query_$k" '{"status":"success","data":{"result":[]}}'; done
+  run --restarts 30m
+  if [ "$RC" -eq 1 ]; then pass "restarts exits 1 when every phase recorded nothing in the window"; else fail "restarts all empty" "rc=$RC" "$OUT"; fi
+}
+
 test_restarts_reads_a_window_of_days_or_a_duration() {
   for window in "7:7d" "30m:30m" "6h:6h" "2d:2d"; do
     new_case
