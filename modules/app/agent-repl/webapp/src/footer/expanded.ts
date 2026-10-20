@@ -104,9 +104,16 @@ export type FooterPanel =
   | "crons"
   | "merges";
 
-/** Every panel name, for the suite and for the persisted-selection check. */
-export const FOOTER_PANELS: readonly FooterPanel[] = [
-  "tokens",
+/** The panels a live-work chip opens: every panel but the tokens cell's. */
+export type FooterChipPanel = Exclude<FooterPanel, "tokens">;
+
+/**
+ * THE CHIP PANELS IN THEIR ONE PRECEDENCE. The strip draws its chips in this
+ * order (`drawFooterLiveWorkChips`). It agrees with the daemon's focus order
+ * (agents, then shells, then monitors), which it extends with the kinds that
+ * never focus.
+ */
+export const CHIP_PANELS: readonly FooterChipPanel[] = [
   "agents",
   "tasks",
   "shells",
@@ -114,6 +121,9 @@ export const FOOTER_PANELS: readonly FooterPanel[] = [
   "crons",
   "merges",
 ];
+
+/** Every panel name, for the suite and for the persisted-selection check. */
+export const FOOTER_PANELS: readonly FooterPanel[] = ["tokens", ...CHIP_PANELS];
 
 /**
  * How many rows the section shows before it scrolls its own content (owner

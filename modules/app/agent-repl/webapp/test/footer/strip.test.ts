@@ -23,7 +23,7 @@ import {
   footerStatusActivity,
   subStatusWords,
 } from "../../src/footer/strip.js";
-import type { FooterPanel } from "../../src/footer/expanded.js";
+import { CHIP_PANELS, type FooterPanel } from "../../src/footer/expanded.js";
 import {
   STATUS_COLOR_CYCLE_MS,
   STATUS_WAVE_CYCLE_MS,
@@ -652,6 +652,22 @@ describe("drawFooterLiveWorkChips", () => {
   it("draws no merge tests chip while the merge is not testing", () => {
     const { row } = drawStrip({ liveWork: { agents: { count: 1 } } });
     expect(row.querySelector('[data-chip="mergeTests"]')).toBeNull();
+  });
+
+  it("draws every chip in CHIP_PANELS order, the chip panels' one precedence", () => {
+    const { row } = drawStrip({
+      liveWork: {
+        merges: { count: 1 },
+        crons: { count: 1 },
+        monitors: { count: 1 },
+        shells: { count: 1 },
+        tasks: { done: 0, total: 1 },
+        agents: { count: 1 },
+      },
+    });
+    expect([...row.querySelectorAll("[data-chip]")].map((el) => el.getAttribute("data-chip"))).toEqual([
+      ...CHIP_PANELS,
+    ]);
   });
 
   it("omits an unset chip entirely", () => {
