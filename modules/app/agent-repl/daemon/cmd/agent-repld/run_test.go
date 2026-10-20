@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1601,5 +1603,45 @@ func TestRunRefusesToBootWithoutItsStartOrAClock(t *testing.T) {
 				t.Fatalf("run = %v, want the missing timing seam refused", err)
 			}
 		})
+	}
+}
+
+// TestTheLastMetricsPushPrecedesTheStateClose pins the exit's order: the
+// metrics surface pushes its final values, the state collector's among them,
+// before the state client closes, so the push reads an open database.
+func TestTheLastMetricsPushPrecedesTheStateClose(t *testing.T) {
+	// Arrange: a store import endpoint that keeps what it is pushed.
+	root := shortRoot(t)
+	metricsRoot := t.TempDir()
+	pushed := make(chan string, 4)
+	store := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		pushed <- string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(store.Close)
+	storeFile := fmt.Sprintf(`{"import_url":%q,"job":"agent-repl"}`, store.URL+"/api/v1/import/prometheus")
+	if err := os.WriteFile(filepath.Join(metricsRoot, metrics.StoreFile), []byte(storeFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	_ = runIn(t, root, func(o *options) { o.metricsRoot = metricsRoot })
+
+	// Assert.
+	select {
+	case body := <-pushed:
+		if !strings.Contains(body, "agentrepl_log_files{") {
+			t.Fatalf("the last push carries no state series:\n%s", body)
+		}
+	default:
+		t.Fatal("the exit pushed nothing to the store")
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "logs", "daemon.run.log"))
+	if err != nil {
+		t.Fatalf("read the run log: %v", err)
+	}
+	if strings.Contains(string(raw), "database is closed") {
+		t.Fatalf("the last push read a closed state client:\n%s", raw)
 	}
 }

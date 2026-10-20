@@ -209,7 +209,10 @@ func run(ctx context.Context, opts options, h hooks) error {
 		})
 		return fmt.Errorf("agent-repld: open the metrics surface: %w", err)
 	}
-	defer metricsSurface.Close()
+	// THE SURFACE CLOSES ONCE, before the state client does (the
+	// metrics_close step below) or at this defer when the boot ends sooner.
+	closeMetrics := sync.OnceFunc(metricsSurface.Close)
+	defer closeMetrics()
 	surfaces.BindRecordCounter(metricsSurface)
 	bootRestarts := h.Restarts
 	if bootRestarts == nil {
@@ -437,6 +440,12 @@ func run(ctx context.Context, opts options, h hooks) error {
 			})
 		}
 	})
+	// THE METRICS SURFACE CLOSES BEFORE THE STATE CLIENT. Its close pushes
+	// every series one last time, the state collector's workspace counts
+	// among them, and they are read from this client; closed after it, the
+	// last push read a closed database and recorded the failure at every
+	// exit (2026-10-20). Deferred after state_close, so it runs first.
+	defer teardown.step("metrics_close", closeMetrics)
 
 	// THE LOG SURFACES LEARN THE MINTED WORKSPACE IDS HERE, the moment the
 	// roster is readable and before any workspace-owned record can be
