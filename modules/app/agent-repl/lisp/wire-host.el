@@ -953,109 +953,94 @@ arm this codec does not know is refused as an unknown field."
      "SelectWorkspaceResponse"
      (agent-repl-wire-decode-select-workspace-response-result object))))
 
-;;;; ---- MarkWorkspaceViewed ----
+;;;; ---- The workspace-subject verbs' one shape ----
 
-(defun agent-repl-wire-encode-mark-workspace-viewed-request-workspace (value)
-  "Encode `MarkWorkspaceViewedRequest''s `workspace' field VALUE."
-  (agent-repl-wire-encode-workspace-ref value))
+;; A WORKSPACE-SUBJECT VERB names one workspace and answers success or the
+;; four refusals the daemon's subject guard raises (`subjectFor'): unknown
+;; workspace, ref mismatch, transferring away, not yet adopted.  Every such
+;; verb whose success is empty shares the codec below, named by its rpc
+;; NAME, so no two copies of the same refusal decoding can drift.
+
+(defun agent-repl-wire--encode-subject-request (name value)
+  "Encode the NAME request plist VALUE `(:workspace REF)'.
+NAME is the rpc's name, e.g. \"ReportPageUnloading\"."
+  (let ((message (concat name "Request")))
+    (unless (plist-member value :workspace)
+      (agent-repl-wire--fail message 'workspace "required message field is absent"))
+    (agent-repl-wire--encoded
+     message
+     (list (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))))))
+
+(defun agent-repl-wire--decode-subject-string-refusal (message key field value)
+  "Decode VALUE as MESSAGE, whose one string FIELD (wire KEY) is its fact."
+  (let ((object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object (list key))
+    (agent-repl-wire--decoded
+     message (list field (agent-repl-wire--decode-string message key object)))))
+
+(defun agent-repl-wire--decode-subject-error (name value)
+  "Decode VALUE as the NAME rpc's Error, a plist (:cause ONEOF).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let* ((message (concat name "Error"))
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys
+     message object '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (agent-repl-wire--decoded
+     message
+     (list :cause
+           (agent-repl-wire--decode-oneof
+            message 'cause object
+            `((unknownWorkspace
+               :unknown-workspace
+               ,(lambda (v) (agent-repl-wire--decode-empty (concat name "UnknownWorkspace") v)))
+              (workspaceRefMismatch
+               :workspace-ref-mismatch
+               ,(lambda (v) (agent-repl-wire--decode-subject-string-refusal
+                             (concat name "WorkspaceRefMismatch") 'registryDir :registry-dir v)))
+              (transferringAway
+               :transferring-away
+               ,(lambda (v) (agent-repl-wire--decode-subject-string-refusal
+                             (concat name "TransferringAway") 'address :address v)))
+              (notYetAdopted
+               :not-yet-adopted
+               ,(lambda (v) (agent-repl-wire--decode-empty (concat name "NotYetAdopted") v)))))))))
+
+(defun agent-repl-wire--decode-subject-response (name value)
+  "Decode VALUE as the NAME rpc's Response.  THE ARM IS THE OUTCOME.
+The success arm is the empty NAME Success message."
+  (let* ((message (concat name "Response"))
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(success error))
+    (agent-repl-wire--decoded
+     message
+     (agent-repl-wire--decode-oneof
+      message 'result object
+      `((success :success ,(lambda (v) (agent-repl-wire--decode-empty (concat name "Success") v)))
+        (error :error ,(lambda (v) (agent-repl-wire--decode-subject-error name v))))))))
+
+;;;; ---- ReportPageUnloading ----
+
+(defun agent-repl-wire-encode-report-page-unloading-request (value)
+  "Encode the ReportPageUnloadingRequest plist VALUE `(:workspace REF)'.
+Emacs's report that it is about to unload the workspace's page on purpose."
+  (agent-repl-wire--encode-subject-request "ReportPageUnloading" value))
+
+(defun agent-repl-wire-decode-report-page-unloading-response (value)
+  "Decode VALUE as `ReportPageUnloadingResponse'.  THE ARM IS THE OUTCOME."
+  (agent-repl-wire--decode-subject-response "ReportPageUnloading" value))
+
+;;;; ---- MarkWorkspaceViewed ----
 
 (defun agent-repl-wire-encode-mark-workspace-viewed-request (value)
   "Encode the MarkWorkspaceViewedRequest plist VALUE `(:workspace REF)'.
 The editor's report that the user has now SEEN this workspace."
-  (unless (plist-member value :workspace)
-    (agent-repl-wire--fail "MarkWorkspaceViewedRequest" 'workspace
-                           "required message field is absent"))
-  (agent-repl-wire--encoded
-   "MarkWorkspaceViewedRequest"
-   (list (cons 'workspace
-               (agent-repl-wire-encode-mark-workspace-viewed-request-workspace
-                (plist-get value :workspace))))))
-
-(defun agent-repl-wire-decode-mark-workspace-viewed-success (value)
-  "Decode VALUE as the empty message `MarkWorkspaceViewedSuccess'.
-Marked; the roster stream carries the row's viewed marker."
-  (agent-repl-wire--decode-empty "MarkWorkspaceViewedSuccess" value))
-
-(defun agent-repl-wire-decode-mark-workspace-viewed-unknown-workspace (value)
-  "Decode VALUE as the empty message `MarkWorkspaceViewedUnknownWorkspace'.
-The workspace id is not in the daemon's registry."
-  (agent-repl-wire--decode-empty "MarkWorkspaceViewedUnknownWorkspace" value))
-
-(defun agent-repl-wire-decode-mark-workspace-viewed-workspace-ref-mismatch (value)
-  "Decode VALUE as `MarkWorkspaceViewedWorkspaceRefMismatch', a plist (`:registry-
-dir').
-The echoed dir disagrees with the registry's dir for this id."
-  (let ((object (agent-repl-wire--object "MarkWorkspaceViewedWorkspaceRefMismatch" value)))
-    (agent-repl-wire--check-keys "MarkWorkspaceViewedWorkspaceRefMismatch" object '(registryDir))
-    (agent-repl-wire--decoded
-     "MarkWorkspaceViewedWorkspaceRefMismatch"
-     (list :registry-dir (agent-repl-wire--decode-string
-                    "MarkWorkspaceViewedWorkspaceRefMismatch" 'registryDir object)))))
-
-(defun agent-repl-wire-decode-mark-workspace-viewed-transferring-away (value)
-  "Decode VALUE as `MarkWorkspaceViewedTransferringAway', a plist (`:address').
-This daemon released the workspace to a successor; dial `address'."
-  (let ((object (agent-repl-wire--object "MarkWorkspaceViewedTransferringAway" value)))
-    (agent-repl-wire--check-keys "MarkWorkspaceViewedTransferringAway" object '(address))
-    (agent-repl-wire--decoded
-     "MarkWorkspaceViewedTransferringAway"
-     (list :address (agent-repl-wire--decode-string
-                    "MarkWorkspaceViewedTransferringAway" 'address object)))))
-
-(defun agent-repl-wire-decode-mark-workspace-viewed-not-yet-adopted (value)
-  "Decode VALUE as the empty message `MarkWorkspaceViewedNotYetAdopted'.
-A joining daemon has not finished adopting this workspace yet."
-  (agent-repl-wire--decode-empty "MarkWorkspaceViewedNotYetAdopted" value))
-
-(defun agent-repl-wire-decode-mark-workspace-viewed-error-unknown-workspace (value)
-  "Decode MarkWorkspaceViewedError's `unknown_workspace' cause arm from VALUE."
-  (agent-repl-wire-decode-mark-workspace-viewed-unknown-workspace value))
-
-(defun agent-repl-wire-decode-mark-workspace-viewed-error-workspace-ref-mismatch (value)
-  "Decode MarkWorkspaceViewedError's `workspace_ref_mismatch' cause arm from VALUE."
-  (agent-repl-wire-decode-mark-workspace-viewed-workspace-ref-mismatch value))
-
-(defun agent-repl-wire-decode-mark-workspace-viewed-error-transferring-away (value)
-  "Decode MarkWorkspaceViewedError's `transferring_away' cause arm from VALUE."
-  (agent-repl-wire-decode-mark-workspace-viewed-transferring-away value))
-
-(defun agent-repl-wire-decode-mark-workspace-viewed-error-not-yet-adopted (value)
-  "Decode MarkWorkspaceViewedError's `not_yet_adopted' cause arm from VALUE."
-  (agent-repl-wire-decode-mark-workspace-viewed-not-yet-adopted value))
-
-(defun agent-repl-wire-decode-mark-workspace-viewed-error-cause (value)
-  "Decode MarkWorkspaceViewedError's `cause' oneof from the object VALUE.
-THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
-arm this codec does not know is refused as an unknown field."
-  (let ((object (agent-repl-wire--object "MarkWorkspaceViewedError" value)))
-    (agent-repl-wire--check-keys "MarkWorkspaceViewedError" object '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
-    (agent-repl-wire--decode-oneof
-     "MarkWorkspaceViewedError" 'cause object
-     '((unknownWorkspace :unknown-workspace agent-repl-wire-decode-mark-workspace-viewed-error-unknown-workspace)
-       (workspaceRefMismatch :workspace-ref-mismatch agent-repl-wire-decode-mark-workspace-viewed-error-workspace-ref-mismatch)
-       (transferringAway :transferring-away agent-repl-wire-decode-mark-workspace-viewed-error-transferring-away)
-       (notYetAdopted :not-yet-adopted agent-repl-wire-decode-mark-workspace-viewed-error-not-yet-adopted)))))
-
-(defun agent-repl-wire-decode-mark-workspace-viewed-error (value)
-  "Decode VALUE as `MarkWorkspaceViewedError', a plist (:cause ONEOF)."
-  (agent-repl-wire--decoded
-   "MarkWorkspaceViewedError"
-   (list :cause (agent-repl-wire-decode-mark-workspace-viewed-error-cause value))))
-
-(defun agent-repl-wire-decode-mark-workspace-viewed-response-result (value)
-  "Decode `MarkWorkspaceViewedResponse''s `result' oneof from the object VALUE."
-  (agent-repl-wire--decode-oneof
-   "MarkWorkspaceViewedResponse" 'result value
-   '((success :success agent-repl-wire-decode-mark-workspace-viewed-success)
-     (error :error agent-repl-wire-decode-mark-workspace-viewed-error))))
+  (agent-repl-wire--encode-subject-request "MarkWorkspaceViewed" value))
 
 (defun agent-repl-wire-decode-mark-workspace-viewed-response (value)
-  "Decode VALUE as `MarkWorkspaceViewedResponse'.  THE ARM IS THE OUTCOME."
-  (let ((object (agent-repl-wire--object "MarkWorkspaceViewedResponse" value)))
-    (agent-repl-wire--check-keys "MarkWorkspaceViewedResponse" object '(success error))
-    (agent-repl-wire--decoded
-     "MarkWorkspaceViewedResponse"
-     (agent-repl-wire-decode-mark-workspace-viewed-response-result object))))
+  "Decode VALUE as `MarkWorkspaceViewedResponse'.  THE ARM IS THE OUTCOME.
+Marked; the roster stream carries the row's viewed marker."
+  (agent-repl-wire--decode-subject-response "MarkWorkspaceViewed" value))
 
 ;;;; ---- AdoptHostWorkspace ----
 

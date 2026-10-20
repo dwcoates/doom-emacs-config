@@ -905,10 +905,7 @@ func TestHostSelectionCarriesTheSelectedText(t *testing.T) {
 			want := h.Feed.markdown[tc.row]
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			stream, err := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
-			if err != nil {
-				t.Fatalf("open the host stream: %v", err)
-			}
+			stream := dialHostStream(t, h, ctx)
 
 			// Act.
 			clickRow(t, h, tc.row)

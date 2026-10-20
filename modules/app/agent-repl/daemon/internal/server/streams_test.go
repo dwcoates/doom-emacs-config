@@ -3,6 +3,10 @@ package server
 import (
 	"agent-repld/internal/restarttiming"
 	"context"
+	"maps"
+	"os"
+	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 
@@ -265,16 +269,9 @@ func TestHostStreamCountsItsParticipant(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-		Workspace: ref(),
-	}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
 	// The relay publishes, which both proves the stream is live and
 	// synchronizes the assertion against the handler's registration.
-	h.Server.Relay().ReloadWebapp(testWorkspaceID)
-	receiveHostEvent(t, stream)
+	openHostStream(t, h, ctx)
 
 	// Act.
 	participants := h.Server.Participants(testWorkspaceID)
@@ -298,14 +295,7 @@ func TestAHostStreamOpenIsRecordedAtInfo(t *testing.T) {
 	defer cancel()
 
 	// Act.
-	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-		Workspace: ref(),
-	}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
-	h.Server.Relay().ReloadWebapp(testWorkspaceID)
-	receiveHostEvent(t, stream)
+	openHostStream(t, h, ctx)
 
 	// Assert.
 	for _, rec := range log.at("INFO") {
@@ -323,14 +313,7 @@ func TestAHostStreamOpenStatesTheHopToTheResolvers(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-		Workspace: ref(),
-	}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
-	h.Server.Relay().ReloadWebapp(testWorkspaceID)
-	receiveHostEvent(t, stream)
+	openHostStream(t, h, ctx)
 
 	// Act.
 	edges := h.Footer.Participants()
@@ -348,14 +331,7 @@ func TestAHostStreamOpenStatesTheHopToTheTopbar(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-		Workspace: ref(),
-	}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
-	h.Server.Relay().ReloadWebapp(testWorkspaceID)
-	receiveHostEvent(t, stream)
+	openHostStream(t, h, ctx)
 
 	// Act.
 	edges := h.Topbar.Participants()
@@ -426,14 +402,7 @@ func TestAHostStreamCloseStatesTheHopDown(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-		Workspace: ref(),
-	}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
-	h.Server.Relay().ReloadWebapp(testWorkspaceID)
-	receiveHostEvent(t, stream)
+	openHostStream(t, h, ctx)
 
 	h.Footer.AwaitEdge(t) // the open edge
 
@@ -453,14 +422,7 @@ func TestTheLastHostStreamClosingReleasesTheEdit(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-		Workspace: ref(),
-	}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
-	h.Server.Relay().ReloadWebapp(testWorkspaceID)
-	receiveHostEvent(t, stream)
+	openHostStream(t, h, ctx)
 	h.Footer.AwaitEdge(t) // the open edge
 
 	// Act.
@@ -481,14 +443,7 @@ func TestAHostStreamOpeningReleasesNoEdit(t *testing.T) {
 	defer cancel()
 
 	// Act.
-	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-		Workspace: ref(),
-	}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
-	h.Server.Relay().ReloadWebapp(testWorkspaceID)
-	receiveHostEvent(t, stream)
+	openHostStream(t, h, ctx)
 	h.Footer.AwaitEdge(t)
 
 	// Assert.
@@ -508,12 +463,7 @@ func TestHostStreamReceivesTheSelectionByKind(t *testing.T) {
 	h.Feed.finals = feedIDs("a", "b", "c")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-		Workspace: ref(),
-	}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
+	stream := dialHostStream(t, h, ctx)
 
 	// Act.
 	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(newer))); err != nil {
@@ -535,12 +485,7 @@ func TestHostStreamReceivesAPromptSelection(t *testing.T) {
 	h.Feed.prompts = feedIDs("p1", "p2")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-		Workspace: ref(),
-	}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
+	stream := dialHostStream(t, h, ctx)
 
 	// Act.
 	if _, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(boundaryStep(newer))); err != nil {
@@ -569,12 +514,7 @@ func TestHostStreamReplaysTheSelectionInForceToALateSubscriber(t *testing.T) {
 	defer cancel()
 
 	// Act: the subscriber attaches only now.
-	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-		Workspace: ref(),
-	}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
+	stream := dialHostStream(t, h, ctx)
 	push := receiveHostEvent(t, stream)
 
 	// Assert.
@@ -656,12 +596,7 @@ func TestAPlannedCloseEndsEachStandingStreamWithItsEndingFrame(t *testing.T) {
 		{
 			name: "WatchHostWorkspace",
 			open: func(t *testing.T, ctx context.Context, h *harness) func() (bool, error) {
-				stream, err := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
-				if err != nil {
-					t.Fatalf("open the host stream: %v", err)
-				}
-				h.Server.Relay().ReloadWebapp(testWorkspaceID)
-				receiveHostEvent(t, stream)
+				stream := openHostStream(t, h, ctx)
 				return func() (bool, error) {
 					last, err := lastFrameBeforeEnd(stream)
 					return last.GetEnding() != nil, err
@@ -1022,5 +957,281 @@ func TestAnExpectedStreamIsTimedWhenItOpens(t *testing.T) {
 				t.Fatalf("reconnects = %+v, want %s's %s stream after at least 1s", got, testWorkspaceID, tt.phase)
 			}
 		})
+	}
+}
+
+// openHostStream opens the workspace's host stream and returns once its
+// handler has registered: the relay's publication reaching the stream proves
+// it live, so no test waits on a delay.
+func openHostStream(t *testing.T, h *harness, ctx context.Context) *connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse] {
+	t.Helper()
+	stream := dialHostStream(t, h, ctx)
+	h.Server.Relay().ReloadWebapp(testWorkspaceID)
+	receiveHostEvent(t, stream)
+	return stream
+}
+
+// dialHostStream opens the workspace's host stream and returns at once, for a
+// test that reads the stream's first event itself.
+func dialHostStream(t *testing.T, h *harness, ctx context.Context) *connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse] {
+	t.Helper()
+	stream, err := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+		Workspace: ref(),
+	}))
+	if err != nil {
+		t.Fatalf("open the host stream: %v", err)
+	}
+	return stream
+}
+
+// reportPageUnloading sends Emacs's unload report, failing the test unless it
+// answers success.
+func reportPageUnloading(t *testing.T, h *harness) {
+	t.Helper()
+	resp, err := h.Client.ReportPageUnloading(context.Background(),
+		connect.NewRequest(&agentreplv1.ReportPageUnloadingRequest{Workspace: ref()}))
+	if err != nil {
+		t.Fatalf("ReportPageUnloading: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ReportPageUnloading result = %v, want success", resp.Msg.GetResult())
+	}
+}
+
+// TestAPageNotYetConnectedIsAwaited pins that a host stream opening before its
+// page connects -- a restart's, a handover's -- states the web hop standing:
+// a page on its way is never drawn as one gone.
+func TestAPageNotYetConnectedIsAwaited(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	openHostStream(t, h, ctx)
+	edge := h.Footer.AwaitEdge(t)
+
+	// Assert.
+	if !edge.Host || !edge.Web {
+		t.Fatalf("footer participant edge = %+v, want the host hop live and the unconnected page awaited", edge)
+	}
+}
+
+// TestAnUnloadedPagesClosedStreamLeavesTheWebHopStanding is the owner's
+// report (2026-10-20): a page Emacs unloaded on purpose closed its web stream,
+// and the working workspace was drawn severed, blue. The report precedes the
+// unload, so the close that follows leaves the hop awaited, on both
+// resolvers that draw it.
+func TestAnUnloadedPagesClosedStreamLeavesTheWebHopStanding(t *testing.T) {
+	tests := []struct {
+		name  string
+		await func(h *harness) participantEdge
+	}{
+		{name: "the footer", await: func(h *harness) participantEdge { return h.Footer.AwaitEdge(t) }},
+		{name: "the topbar", await: func(h *harness) participantEdge { return h.Topbar.AwaitEdge(t) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			openHostStream(t, h, ctx)
+			tt.await(h) // the host open
+			webCtx, closePage := context.WithCancel(ctx)
+			openWebStream(t, h, webCtx)
+			tt.await(h) // the web open
+			reportPageUnloading(t, h)
+			tt.await(h) // the report
+
+			// Act: the page goes away.
+			closePage()
+			edge := tt.await(h)
+
+			// Assert.
+			if !edge.Host || !edge.Web {
+				t.Fatalf("participant edge = %+v, want the unloaded page's web hop standing", edge)
+			}
+		})
+	}
+}
+
+// TestAPageThatConnectedAndWentAwayUnannouncedBreaksTheHop pins the fault the
+// awaiting must not hide: a held page whose stream ends with no unload report,
+// including one that reconnected after an unload, is a broken web hop.
+func TestAPageThatConnectedAndWentAwayUnannouncedBreaksTheHop(t *testing.T) {
+	tests := []struct {
+		name     string
+		unloaded bool
+	}{
+		{name: "a page never unloaded", unloaded: false},
+		{name: "a page reloaded after an unload", unloaded: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			openHostStream(t, h, ctx)
+			h.Footer.AwaitEdge(t) // the host open
+			if tt.unloaded {
+				reportPageUnloading(t, h)
+				h.Footer.AwaitEdge(t) // the report
+			}
+			webCtx, closePage := context.WithCancel(ctx)
+			openWebStream(t, h, webCtx)
+			h.Footer.AwaitEdge(t) // the web open
+
+			// Act.
+			closePage()
+			edge := h.Footer.AwaitEdge(t)
+
+			// Assert.
+			if !edge.Host || edge.Web {
+				t.Fatalf("footer participant edge = %+v, want the web hop broken", edge)
+			}
+		})
+	}
+}
+
+// TestTheLastHostStreamClosingAwaitsThePageAfresh pins the awaiting's scope:
+// a page that broke under one editor connection is awaited again once that
+// connection ends, so the editor reconnecting is not met with a stale fault.
+func TestTheLastHostStreamClosingAwaitsThePageAfresh(t *testing.T) {
+	// Arrange: a page that connected and broke.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hostCtx, closeHost := context.WithCancel(ctx)
+	openHostStream(t, h, hostCtx)
+	h.Footer.AwaitEdge(t) // the host open
+	webCtx, closePage := context.WithCancel(ctx)
+	openWebStream(t, h, webCtx)
+	h.Footer.AwaitEdge(t) // the web open
+	closePage()
+	if edge := h.Footer.AwaitEdge(t); edge.Web {
+		t.Fatalf("participant edge = %+v, want the broken page arranged", edge)
+	}
+
+	// Act.
+	closeHost()
+	edge := h.Footer.AwaitEdge(t)
+
+	// Assert.
+	if edge.Host || !edge.Web {
+		t.Fatalf("footer participant edge = %+v, want the host gone and the page awaited afresh", edge)
+	}
+}
+
+// TestReportPageUnloadingIsRecordedWithTheHops pins the report's record: the
+// participant set's persisted log is how a drawn status is traced to its hop.
+func TestReportPageUnloadingIsRecordedWithTheHops(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{global: log, workspace: log}
+	})
+
+	// Act.
+	reportPageUnloading(t, h)
+
+	// Assert.
+	for _, rec := range log.at("INFO") {
+		if rec.Operation == "daemon.server.participants" &&
+			rec.Context["workspace"] == string(testWorkspaceID) && rec.Context["web_hop"] == true {
+			return
+		}
+	}
+	t.Fatalf("no INFO participants record naming the workspace and its web hop among %v", log.at("INFO"))
+}
+
+// TestReportPageUnloadingRefusesAnUnknownWorkspace pins that an id the
+// registry does not hold answers the unknown_workspace arm and states no hop.
+func TestReportPageUnloadingRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.ReportPageUnloading(context.Background(),
+		connect.NewRequest(&agentreplv1.ReportPageUnloadingRequest{
+			Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReportPageUnloading: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+	if edges := h.Footer.Participants(); len(edges) != 0 {
+		t.Fatalf("footer participant edges = %+v, want none for an unknown workspace", edges)
+	}
+}
+
+// TestOpenHostStreamAnswersOnceTheStreamIsRegistered pins the helper's
+// guarantee: when it returns, the handler counts the stream as a participant.
+func TestOpenHostStreamAnswersOnceTheStreamIsRegistered(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	openHostStream(t, h, ctx)
+
+	// Assert.
+	if !h.Server.Participants(testWorkspaceID).Host {
+		t.Fatal("openHostStream returned before the host stream was registered")
+	}
+}
+
+// TestDialHostStreamLeavesTheFirstEventToTheTest pins the other helper's
+// guarantee: it consumes nothing, so the test reads the stream's first event.
+func TestDialHostStreamLeavesTheFirstEventToTheTest(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := dialHostStream(t, h, ctx)
+
+	// Act.
+	h.Server.NotificationClicked(testWorkspaceID)
+	push := receiveHostEvent(t, stream)
+
+	// Assert.
+	if push.GetNotificationClicked() == nil {
+		t.Fatalf("first event = %v, want the notification the test raised", push)
+	}
+}
+
+// TestEveryHostStreamDialInTheseTestsGoesThroughTheHelpers pins the shared
+// shape: a test that opens the workspace's host stream and fails on a dial
+// error does it through dialHostStream, so a hand-rolled copy fails here.
+func TestEveryHostStreamDialInTheseTestsGoesThroughTheHelpers(t *testing.T) {
+	// Arrange.
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("list the test files: %v", err)
+	}
+	handRolled := regexp.MustCompile(`h\.Client\.WatchHostWorkspace\(ctx,\s*connect\.NewRequest\(&agentreplv1\.WatchHostWorkspaceRequest\{\s*Workspace: ref\(\),?\s*\}\)\)\s*if \w+ != nil \{\s*t\.Fatalf`)
+
+	// Act.
+	counts := map[string]int{}
+	for _, file := range files {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		if n := len(handRolled.FindAllIndex(src, -1)); n > 0 {
+			counts[file] = n
+		}
+	}
+
+	// Assert: dialHostStream's own body is the one site.
+	want := map[string]int{"streams_test.go": 1}
+	if !maps.Equal(counts, want) {
+		t.Fatalf("hand-rolled host stream dials = %v, want only dialHostStream's own %v; use dialHostStream or openHostStream", counts, want)
 	}
 }

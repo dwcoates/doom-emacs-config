@@ -1011,21 +1011,48 @@ func ftAwaitTrue(t *testing.T, ctx interface{ Done() <-chan struct{} }, pred fun
 // ---------------------------------------------------------------------------
 // Connectivity truth per hop (daemon.md invariant 11): a workspace is
 // CONNECTED only while its shim.v1 WatchSession, its WatchHostWorkspace and its
-// WatchWebWorkspace are all live. Any one down is not connected.
+// web hop are all live. The web hop is down only for a page that CONNECTED and
+// went away unannounced; a page not yet connected, or one Emacs unloaded on
+// purpose (ReportPageUnloading), is awaited and never drawn as a fault (owner
+// ruling, 2026-10-20).
 // ---------------------------------------------------------------------------
 
-func TestFooterBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
+// ftBreakTheWebHop connects the workspace's page and lets it go away
+// unannounced, which is what breaks the web hop.
+func ftBreakTheWebHop(f *fixture) {
+	f.web = f.d.WatchWeb(f.ws)
+	f.web.Close()
+}
+
+func TestFooterAwaitsAPageNotYetConnected(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	f.open()
+	footer := f.d.WatchFooter(f.ws)
+
+	// Act: the editor connects; its page has not yet.
+	f.host = f.d.WatchHost(f.ws)
+
+	// Assert
+	awaitFooter(t, f, footer, "idle while the page is awaited", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
+	})
+}
+
+func TestFooterBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
+	t.Parallel()
+	// Arrange: a page that connected and went away.
+	f := newRegistered(t, harness.Opts{})
+	f.open()
 	f.host = f.d.WatchHost(f.ws)
 	footer := f.d.WatchFooter(f.ws)
+	ftBreakTheWebHop(f)
 	awaitFooter(t, f, footer, "disconnected while the web hop is down", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetAgentReplFault() != nil
 	})
 
-	// Act: the page opens its stream, putting the last hop up.
+	// Act: the page opens its stream again, putting the last hop up.
 	f.web = f.d.WatchWeb(f.ws)
 
 	// Assert
@@ -1060,25 +1087,42 @@ func TestTopbarIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
 	f.host = f.d.WatchHost(f.ws)
 	topbar := f.d.WatchTopbar(f.ws)
 
-	// Act, Assert: the connectivity indicator never reads the serving glyph
-	// while a client hop is down.
-	got := awaitTopbar(t, f, topbar, "a resolved topbar", func(v *frontendv1.TopbarView) bool {
-		return v.GetConnectivity() != nil
+	// Act
+	ftBreakTheWebHop(f)
+
+	// Assert: the connectivity indicator leaves the serving glyph while a
+	// client hop is down.
+	awaitTopbar(t, f, topbar, "the not-connected indicator", func(v *frontendv1.TopbarView) bool {
+		return v.GetConnectivity() != nil && v.GetConnectivity().GetTitle() != "connected to the session"
 	})
-	if got.GetConnectivity().GetTitle() == "connected to the session" {
-		t.Fatalf("topbar connectivity = %+v, want not-connected while the web hop is down", got.GetConnectivity())
-	}
 }
 
-func TestTopbarBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
+func TestTopbarIsConnectedWhileAPageIsAwaited(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	f.open()
+	topbar := f.d.WatchTopbar(f.ws)
+
+	// Act: the editor connects; its page has not yet.
+	f.host = f.d.WatchHost(f.ws)
+
+	// Assert
+	awaitTopbar(t, f, topbar, "the connected indicator", func(v *frontendv1.TopbarView) bool {
+		return v.GetConnectivity().GetTitle() == "connected to the session"
+	})
+}
+
+func TestTopbarBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
+	t.Parallel()
+	// Arrange: a page that connected and went away.
+	f := newRegistered(t, harness.Opts{})
+	f.open()
 	f.host = f.d.WatchHost(f.ws)
 	topbar := f.d.WatchTopbar(f.ws)
-	awaitTopbar(t, f, topbar, "a resolved topbar", func(v *frontendv1.TopbarView) bool {
-		return v.GetConnectivity() != nil
+	ftBreakTheWebHop(f)
+	awaitTopbar(t, f, topbar, "the not-connected indicator", func(v *frontendv1.TopbarView) bool {
+		return v.GetConnectivity() != nil && v.GetConnectivity().GetTitle() != "connected to the session"
 	})
 
 	// Act

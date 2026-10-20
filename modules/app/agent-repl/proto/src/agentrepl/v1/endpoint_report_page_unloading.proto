@@ -1,0 +1,71 @@
+// endpoint_report_page_unloading.proto — ReportPageUnloading: Emacs is about
+// to unload this workspace's page ON PURPOSE. HOST section.
+//
+// UNLOADING A PAGE IS A PERFORMANCE MEASURE, NEVER A STATE THE USER SEES
+// (owner ruling, 2026-10-20). Emacs unloads the page of a workspace nobody has
+// looked at for a while (page-unload.el), and the page's WatchWebWorkspace
+// stream ends with it. Without this report the daemon read that end as a
+// broken web hop (daemon.md invariant 11) and drew a working workspace blue
+// until the user switched back to it.
+//
+// THE REPORT PRECEDES THE UNLOAD. Emacs unloads the page only once this call
+// has answered success, so the daemon knows the end is deliberate before the
+// stream can end: no ordering between the two is left to chance. A call that
+// fails leaves the page loaded.
+//
+// WHAT IT MEANS TO THE DAEMON: the workspace's web hop is AWAITED, not broken,
+// until a WatchWebWorkspace stream for it opens again (the switch back that
+// mounts a new page). An awaited hop is never drawn as a fault. The same
+// awaiting stands from the moment a workspace's host stream opens until its
+// page first connects, so neither a restart nor a handover draws a page that
+// has not yet reached the new daemon as broken; only a page that WAS
+// connected and went away without this report is.
+//
+// IDEMPOTENT: reporting an unload again changes nothing.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ReportPageUnloadingRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ReportPageUnloadingResponse {
+  oneof result {
+    ReportPageUnloadingSuccess success = 1;
+    ReportPageUnloadingError error = 2;
+  }
+}
+// Recorded: the page may be unloaded.
+message ReportPageUnloadingSuccess {}
+// Arms derived from the daemon's refusal sites, exactly MarkWorkspaceViewed's:
+// this verb resolves the same subject through the same guard.
+// Validation failures (unset field, blank string) are Connect InvalidArgument, never an arm.
+message ReportPageUnloadingError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    ReportPageUnloadingUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ReportPageUnloadingWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    ReportPageUnloadingTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    ReportPageUnloadingNotYetAdopted not_yet_adopted = 4;
+  }
+}
+message ReportPageUnloadingUnknownWorkspace {}
+message ReportPageUnloadingWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message ReportPageUnloadingTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message ReportPageUnloadingNotYetAdopted {}

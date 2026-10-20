@@ -29,6 +29,15 @@
 ;; count.  A page's mount counts as a look, so a page made ahead of the look at
 ;; startup ages out like any other when it is never visited.
 ;;
+;; AN UNLOAD IS INVISIBLE (owner ruling, 2026-10-20).  It is a performance
+;; measure behind the scenes, never a state the user sees: the workspace's
+;; status reads exactly as it would with its page held.  The page's web
+;; stream ends with the page, and the daemon drew that end as a broken link,
+;; blue, until the user switched back.  So the daemon is told FIRST
+;; (`agent-repl-host-report-page-unloading'), and the page is unloaded only
+;; once it has answered: the report cannot lose a race with the stream's end.
+;; A report that does not land leaves the page loaded.
+;;
 ;; AN UNLOADED PAGE COMES BACK ON THE SWITCH TO IT.  The unload is the same
 ;; detach every remount uses (`agent-repl--frontend-detach-webview'), and the
 ;; switch mounts a workspace with no page as it mounts a new one.  Until then
@@ -47,6 +56,7 @@
 (declare-function agent-repl-open-tabs-hidden-p "open-tabs" (ws))
 (declare-function agent-repl--frontend-precreate-webview "agent-repl-frontend" (ws))
 (declare-function agent-repl--panels-on-view-created "panels" (ws))
+(declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-roster-update-functions)
 
@@ -168,28 +178,55 @@ since the later of its look and the start of the present spell of use."
        agent-repl-page-unload-after)
     'unlooked)))
 
+(defun agent-repl-page-unload--holdable-p (ws)
+  "The page of WS, when it is one a pass may unload, else nil.
+Neither the page the host shows nor the current workspace\='s is ever
+unloaded, and nor is one whose unload is already being reported."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+    (and (buffer-live-p buf)
+         (not (equal ws agent-repl-page-unload--shown))
+         (not (equal ws (agent-repl--ws-current-name)))
+         (not (agent-repl--ws-get ws :page-unloading))
+         buf)))
+
+(defun agent-repl-page-unload--unload (ws reason now)
+  "Unload WS\='s page for REASON, found at NOW, once the daemon is told.
+The page is detached only when the report answers success and the page
+is still one a pass may unload: the user may have switched to it while
+the report was in flight."
+  (agent-repl--ws-put ws :page-unloading t)
+  (agent-repl-host-report-page-unloading
+   ws
+   (lambda ()
+     (agent-repl--ws-put ws :page-unloading nil)
+     (if-let ((buf (agent-repl-page-unload--holdable-p ws)))
+         (progn
+           (agent-repl--frontend-detach-webview ws buf)
+           (agent-repl--ws-put ws :page-unloaded t)
+           (agent-repl--info ws "elisp.page-unload.unloaded ws=%s reason=%s unlooked-s=%d"
+                             ws reason
+                             (round (- now (or (agent-repl--ws-get ws :page-looked-at) now)))))
+       (agent-repl--info ws "elisp.page-unload.kept ws=%s reason=%s why=in-use-since-report"
+                         ws reason)))
+   (lambda ()
+     (agent-repl--ws-put ws :page-unloading nil)
+     (agent-repl--info ws "elisp.page-unload.kept ws=%s reason=%s why=not-reported" ws reason))))
+
 (defun agent-repl-page-unload-pass ()
   "Unload every held page whose workspace is hidden or not looked at lately.
-Neither the page the host shows nor the current workspace's is ever
-unloaded.  Answers how many were unloaded."
+Each unload waits on the daemon being told (`agent-repl-page-unload--unload').
+Answers how many unloads were started."
   (let ((now (agent-repl-page-unload--now))
-        (unloaded 0))
+        (started 0))
     (dolist (ws (agent-repl--live-ws-names))
-      (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-        (when (and (buffer-live-p buf)
-                   (not (equal ws agent-repl-page-unload--shown))
-                   (not (equal ws (agent-repl--ws-current-name))))
-          (when-let ((reason (agent-repl-page-unload--reason ws now)))
-            (agent-repl--frontend-detach-webview ws buf)
-            (agent-repl--ws-put ws :page-unloaded t)
-            (setq unloaded (1+ unloaded))
-            (agent-repl--info ws "elisp.page-unload.unloaded ws=%s reason=%s unlooked-s=%d"
-                              ws reason
-                              (round (- now (or (agent-repl--ws-get ws :page-looked-at) now))))))))
-    (when (> unloaded 0)
+      (when (agent-repl-page-unload--holdable-p ws)
+        (when-let ((reason (agent-repl-page-unload--reason ws now)))
+          (setq started (1+ started))
+          (agent-repl-page-unload--unload ws reason now))))
+    (when (> started 0)
       (agent-repl--info agent-repl--page-unload-central
-                        "elisp.page-unload.pass unloaded=%d" unloaded))
-    unloaded))
+                        "elisp.page-unload.pass started=%d" started))
+    started))
 
 (defun agent-repl-page-unload-start (&optional _conn)
   "Run the pass every `agent-repl-page-unload-interval' seconds.

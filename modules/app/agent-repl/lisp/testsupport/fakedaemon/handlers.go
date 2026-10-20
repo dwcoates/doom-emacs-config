@@ -288,6 +288,10 @@ func (s *fakeServer) SelectWorkspace(ctx context.Context, req *connect.Request[v
 	return resp, err
 }
 
+func (s *fakeServer) ReportPageUnloading(ctx context.Context, req *connect.Request[v1.ReportPageUnloadingRequest]) (*connect.Response[v1.ReportPageUnloadingResponse], error) {
+	return handleUnary[v1.ReportPageUnloadingRequest, v1.ReportPageUnloadingResponse](ctx, s, "ReportPageUnloading", req.Msg)
+}
+
 func (s *fakeServer) MarkWorkspaceViewed(ctx context.Context, req *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error) {
 	return handleUnary[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse](ctx, s, "MarkWorkspaceViewed", req.Msg)
 }

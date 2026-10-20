@@ -197,6 +197,87 @@
                   #'agent-repl-wire-decode-mark-workspace-viewed-response "{}")
                  '("MarkWorkspaceViewedResponse" result "oneof is unset"))))
 
+;;;; ---- The workspace-subject verbs' one shape ----
+
+(ert-deftest agent-repl-test-wire-host-subject-response-names-its-messages-by-the-rpc ()
+  "A breach names the rpc's own message, so the shared codec reads as the verb's."
+  (should (equal (seq-take (agent-repl-test-wire-host--breach
+                            (lambda (v) (agent-repl-wire--decode-subject-response "SomeVerb" v))
+                            "{\"error\":{\"workspaceRefMismatch\":{\"registryDir\":5}}}")
+                           2)
+                 '("SomeVerbWorkspaceRefMismatch" registryDir))))
+
+(ert-deftest agent-repl-test-wire-host-subject-response-refuses-an-unknown-cause ()
+  "A refusal arm the shape does not know is an unknown field, never dropped."
+  (should (equal (car (agent-repl-test-wire-host--breach
+                       (lambda (v) (agent-repl-wire--decode-subject-response "SomeVerb" v))
+                       "{\"error\":{\"mystery\":{}}}"))
+                 "SomeVerbError")))
+
+(ert-deftest agent-repl-test-wire-host-every-subject-verb-shares-the-one-codec ()
+  "MarkWorkspaceViewed and ReportPageUnloading decode every answer identically.
+A hand-rolled copy of either would drift from the shared shape and fail here."
+  (dolist (json '("{\"success\":{}}"
+                  "{\"error\":{\"unknownWorkspace\":{}}}"
+                  "{\"error\":{\"workspaceRefMismatch\":{\"registryDir\":\"/w\"}}}"
+                  "{\"error\":{\"transferringAway\":{\"address\":\"a\"}}}"
+                  "{\"error\":{\"notYetAdopted\":{}}}"))
+    (should (equal (agent-repl-test-wire-host--decode
+                    #'agent-repl-wire-decode-mark-workspace-viewed-response json)
+                   (agent-repl-test-wire-host--decode
+                    #'agent-repl-wire-decode-report-page-unloading-response json)))))
+
+;;;; ---- ReportPageUnloading ----
+
+(ert-deftest agent-repl-test-wire-host-page-unloading-request-echoes-the-ref ()
+  "ReportPageUnloading echoes the daemon-minted ref, never a path it built."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-report-page-unloading-request
+                     '(:workspace (:id "ws-7" :dir "/w/fix")))))
+                 "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}")))
+
+(ert-deftest agent-repl-test-wire-host-page-unloading-request-without-a-ref-is-refused ()
+  "An incomplete request errors before send, never on the wire."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (condition-case err
+                       (progn (agent-repl-wire-encode-report-page-unloading-request nil) nil)
+                     (agent-repl-wire-error (cdr err))))
+                 '("ReportPageUnloadingRequest" workspace
+                   "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-page-unloading-success-is-empty ()
+  "Recorded: the page may be unloaded."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-report-page-unloading-response "{\"success\":{}}")
+                 '(:arm :success :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-page-unloading-error-arms-decode ()
+  "Every refusal arm decodes to its keyword with the facts it carries."
+  (dolist (case '(("{\"error\":{\"unknownWorkspace\":{}}}"
+                   (:arm :unknown-workspace :value nil))
+                  ("{\"error\":{\"workspaceRefMismatch\":{\"registryDir\":\"/w/real\"}}}"
+                   (:arm :workspace-ref-mismatch :value (:registry-dir "/w/real")))
+                  ("{\"error\":{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}}"
+                   (:arm :transferring-away :value (:address "127.0.0.1:9")))
+                  ("{\"error\":{\"notYetAdopted\":{}}}"
+                   (:arm :not-yet-adopted :value nil))))
+    (should (equal (agent-repl-test-wire-host--decode
+                    #'agent-repl-wire-decode-report-page-unloading-response (car case))
+                   (list :arm :error :value (list :cause (cadr case)))))))
+
+(ert-deftest agent-repl-test-wire-host-page-unloading-unset-result-is-a-breach ()
+  "A ReportPageUnloading response with no arm is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-report-page-unloading-response "{}")
+                 '("ReportPageUnloadingResponse" result "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-page-unloading-unset-cause-is-a-breach ()
+  "A ReportPageUnloading error with no cause is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-report-page-unloading-response "{\"error\":{}}")
+                 '("ReportPageUnloadingError" cause "oneof is unset"))))
+
 ;;;; ---- AdoptHostWorkspace ----
 
 (ert-deftest agent-repl-test-wire-host-adopt-request-echoes-the-ref ()

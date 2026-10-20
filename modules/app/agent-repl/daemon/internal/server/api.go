@@ -313,6 +313,13 @@ type server struct {
 	// streams, which is what ParticipantSource answers from.
 	hostHeld map[ids.WorkspaceID]int
 	webHeld  map[ids.WorkspaceID]int
+	// webSeen marks the workspaces whose page has connected a web stream
+	// since the later of their host stream opening and Emacs's last
+	// ReportPageUnloading. Only a page that was seen can be MISSING; one not
+	// seen is awaited, and an awaited web hop is never drawn as a fault
+	// (participantHops). Scoped to the host stream: the last host close
+	// forgets it.
+	webSeen map[ids.WorkspaceID]bool
 	// daemonWatchers are the live WatchDaemon streams whose subscription
 	// already exists. The stand-down announcement is flushed onto every one of
 	// them BEFORE the orderly exit cancels serving, so a client learns the
@@ -505,6 +512,7 @@ func New(deps Deps) (Server, error) {
 		webBuilds:           make(map[ids.WorkspaceID]map[string]string),
 		hostHeld:            make(map[ids.WorkspaceID]int),
 		webHeld:             make(map[ids.WorkspaceID]int),
+		webSeen:             make(map[ids.WorkspaceID]bool),
 		watchTokens:         make(map[string]tokenTarget),
 		pages:               make(map[string]*pageStream),
 		hostIdentityAwaited: make(map[ids.WorkspaceID]time.Time),

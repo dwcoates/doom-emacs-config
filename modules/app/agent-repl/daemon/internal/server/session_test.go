@@ -468,14 +468,7 @@ func TestEditHeldPromptBeginProbesTheStandingHostStream(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
-		Workspace: ref(),
-	}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
-	h.Server.Relay().ReloadWebapp(testWorkspaceID)
-	receiveHostEvent(t, stream)
+	openHostStream(t, h, ctx)
 
 	// Act.
 	if _, err := h.Client.EditHeldPrompt(context.Background(), connect.NewRequest(editRequest("begin"))); err != nil {

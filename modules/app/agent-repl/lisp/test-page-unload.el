@@ -29,6 +29,17 @@
 (defvar agent-repl-test-pu--logged nil
   "Every INFO record's text, newest first.")
 
+(defvar agent-repl-test-pu--report 'reported
+  "How the harness's daemon answers an unload report.
+`reported' answers success at once, `refused' answers failure at once, and
+`pending' holds the answer in `agent-repl-test-pu--pending'.")
+
+(defvar agent-repl-test-pu--pending nil
+  "The held reports, newest first, each (WS ON-REPORTED ON-NOT-REPORTED).")
+
+(defvar agent-repl-test-pu--events nil
+  "Every report and detach, newest first, as (KIND WS).")
+
 (defmacro agent-repl-test-pu--with (names &rest body)
   "Run BODY with live workspaces NAMES, each holding a page, on a hand clock."
   (declare (indent 1))
@@ -37,6 +48,9 @@
            (agent-repl-test-pu--detached nil)
            (agent-repl-test-pu--hidden nil)
            (agent-repl-test-pu--logged nil)
+           (agent-repl-test-pu--report 'reported)
+           (agent-repl-test-pu--pending nil)
+           (agent-repl-test-pu--events nil)
            (agent-repl-page-unload--clock (lambda () agent-repl-test-pu--now))
            (agent-repl-page-unload--shown nil)
            (agent-repl-page-unload--shown-since nil)
@@ -59,8 +73,17 @@
                        ((symbol-function 'agent-repl--ws-current-name) (lambda () nil))
                        ((symbol-function 'agent-repl-open-tabs-hidden-p)
                         (lambda (ws) (member ws agent-repl-test-pu--hidden)))
+                       ((symbol-function 'agent-repl-host-report-page-unloading)
+                        (lambda (ws on-reported on-not-reported)
+                          (push (list 'report ws) agent-repl-test-pu--events)
+                          (pcase agent-repl-test-pu--report
+                            ('reported (funcall on-reported))
+                            ('refused (funcall on-not-reported))
+                            ('pending (push (list ws on-reported on-not-reported)
+                                            agent-repl-test-pu--pending)))))
                        ((symbol-function 'agent-repl--frontend-detach-webview)
                         (lambda (ws buf)
+                          (push (list 'detach ws) agent-repl-test-pu--events)
                           (push ws agent-repl-test-pu--detached)
                           (kill-buffer buf)
                           (agent-repl--ws-put ws :frontend-buffer nil)))
@@ -125,6 +148,74 @@
     (should (agent-repl-test-pu--said-p "elisp.page-unload.reloaded" "ws=alpha"))))
 
 ;;;; ---- The pass ----
+
+(ert-deftest agent-repl-test-pu-the-daemon-is-told-before-the-page-is-unloaded ()
+  "The report precedes the detach, so the stream's end is known deliberate."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-looked-at 0)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal (reverse agent-repl-test-pu--events)
+                   '((report "alpha") (detach "alpha"))))))
+
+(ert-deftest agent-repl-test-pu-a-page-whose-report-did-not-land-is-kept ()
+  "A report the daemon did not take leaves the page loaded, and recorded."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-looked-at 0)
+    (setq agent-repl-test-pu--report 'refused)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal (list agent-repl-test-pu--detached
+                         (agent-repl-page-unloaded-p "alpha")
+                         (agent-repl--ws-get "alpha" :page-unloading))
+                   '(nil nil nil)))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.kept" "ws=alpha" "why=not-reported"))))
+
+(ert-deftest agent-repl-test-pu-a-kept-page-is-reported-again-by-the-next-pass ()
+  "A page kept for a report that did not land is tried again."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-looked-at 0)
+    (setq agent-repl-test-pu--report 'refused)
+    (agent-repl-page-unload-pass)
+    (setq agent-repl-test-pu--report 'reported)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal agent-repl-test-pu--detached '("alpha")))))
+
+(ert-deftest agent-repl-test-pu-a-report-in-flight-is-not-sent-again ()
+  "A pass while a page's report is unanswered does not report it twice."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-looked-at 0)
+    (setq agent-repl-test-pu--report 'pending)
+    (agent-repl-page-unload-pass)
+    ;; Act
+    (let ((started (agent-repl-page-unload-pass)))
+      ;; Assert
+      (should (equal (list started (length agent-repl-test-pu--pending) agent-repl-test-pu--detached)
+                     '(0 1 nil))))))
+
+(ert-deftest agent-repl-test-pu-a-page-shown-while-its-report-was-in-flight-is-kept ()
+  "The user switching to the page before the answer keeps it loaded."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-looked-at 0)
+    (setq agent-repl-test-pu--report 'pending)
+    (agent-repl-page-unload-pass)
+    (setq agent-repl-page-unload--shown "alpha")
+    ;; Act
+    (funcall (nth 1 (car agent-repl-test-pu--pending)))
+    ;; Assert
+    (should (equal (list agent-repl-test-pu--detached (agent-repl-page-unloaded-p "alpha")
+                         (agent-repl--ws-get "alpha" :page-unloading))
+                   '(nil nil nil)))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.kept" "ws=alpha" "why=in-use-since-report"))))
 
 (ert-deftest agent-repl-test-pu-a-page-not-looked-at-in-a-while-is-unloaded ()
   "A page last looked at longer ago than the hold is unloaded, and recorded."

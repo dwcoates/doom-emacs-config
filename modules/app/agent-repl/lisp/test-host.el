@@ -83,6 +83,9 @@
 (defvar agent-repl-test-host--mark-viewed-answer nil
   "What the stubbed MarkWorkspaceViewed answers; see the harness.")
 
+(defvar agent-repl-test-host--unloading-answer nil
+  "What the stubbed ReportPageUnloading answers; see the harness.")
+
 (defvar agent-repl-test-host--effects nil
   "W2-B surface calls, newest first: `(NAME . ARGS)'.")
 
@@ -218,6 +221,8 @@ unary rpc can produce, which the contract never collapses into one."
           (list :response (list :arm :success :value (list :roster-revision 0))))
          (agent-repl-test-host--mark-viewed-answer
           (list :response (list :arm :success :value nil)))
+         (agent-repl-test-host--unloading-answer
+          (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--adopt-answer
           (list :response (list :arm :success :value nil))))
      (cl-letf (((symbol-function 'agent-repl-link-up-p)
@@ -238,6 +243,12 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda (conn request &rest keys)
                   (push (list "MarkWorkspaceViewed" conn request) agent-repl-test-host--calls)
                   (agent-repl-test-host--answer agent-repl-test-host--mark-viewed-answer
+                                                (plist-get keys :on-response)
+                                                (plist-get keys :on-failure))))
+               ((symbol-function 'agent-repl-rpc-report-page-unloading)
+                (lambda (conn request &rest keys)
+                  (push (list "ReportPageUnloading" conn request) agent-repl-test-host--calls)
+                  (agent-repl-test-host--answer agent-repl-test-host--unloading-answer
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure))))
                ((symbol-function 'agent-repl-rpc-adopt-host-workspace)
@@ -567,6 +578,120 @@ looked at."
     (agent-repl-host-mark-viewed "ws-1")
     ;; Assert
     (should (agent-repl-test-host--logged-p :error "elisp.host.mark-viewed-failed"))))
+
+;;;; ---- The workspace-subject verbs' one sender ----
+
+(ert-deftest agent-repl-test-host-subject-verb-skip-records-its-reason ()
+  "A workspace with no ref is not sent, records why, and runs ON-NOT-SENT."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let (not-sent)
+      ;; Act
+      (let ((sent (agent-repl-host--send-subject-verb
+                   "ws-unknown" "some-verb" #'agent-repl-rpc-mark-workspace-viewed
+                   #'ignore (lambda () (setq not-sent t)))))
+        ;; Assert
+        (should (equal (list sent not-sent) '(nil t)))
+        (should (null agent-repl-test-host--calls))))))
+
+(ert-deftest agent-repl-test-host-subject-verb-success-runs-on-success-alone ()
+  "A success answer runs ON-SUCCESS and never ON-NOT-SENT."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let (ran)
+      ;; Act
+      (agent-repl-host--send-subject-verb
+       "ws-1" "some-verb" #'agent-repl-rpc-mark-workspace-viewed
+       (lambda () (push 'success ran)) (lambda () (push 'not-sent ran)))
+      ;; Assert
+      (should (equal ran '(success))))))
+
+(ert-deftest agent-repl-test-host-every-subject-verb-shares-the-one-sender ()
+  "MarkWorkspaceViewed and ReportPageUnloading both send through the one sender.
+A hand-rolled copy of either would not be recorded here."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let (ops)
+      (cl-letf (((symbol-function 'agent-repl-host--send-subject-verb)
+                 (lambda (_ws op &rest _) (push op ops) t)))
+        ;; Act
+        (agent-repl-host-mark-viewed "ws-1")
+        (agent-repl-host-report-page-unloading "ws-1" #'ignore #'ignore))
+      ;; Assert
+      (should (equal (reverse ops) '("mark-viewed" "page-unloading"))))))
+
+;;;; ---- Report page unloading ----
+
+(defun agent-repl-test-host--report-unloading (ws)
+  "Report WS\='s page unloading; answer which callback ran: `reported' or `kept'."
+  (let (outcome)
+    (agent-repl-host-report-page-unloading
+     ws (lambda () (setq outcome 'reported)) (lambda () (setq outcome 'kept)))
+    outcome))
+
+(ert-deftest agent-repl-test-host-page-unloading-echoes-the-ref ()
+  "ReportPageUnloading carries the daemon-minted ref, and success lets the unload run."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--calls nil)
+    ;; Act
+    (let ((outcome (agent-repl-test-host--report-unloading "ws-1")))
+      ;; Assert
+      (should (eq outcome 'reported))
+      (should (equal (car agent-repl-test-host--calls)
+                     (list "ReportPageUnloading"
+                           (nth 1 (car agent-repl-test-host--calls))
+                           (list :workspace (agent-repl-test-host--ref))))))))
+
+(ert-deftest agent-repl-test-host-page-unloading-without-a-ref-keeps-the-page ()
+  "An unregistered workspace is not reported, and its page stays loaded."
+  (agent-repl-test-host--with-harness
+    ;; Arrange / Act
+    (let ((outcome (agent-repl-test-host--report-unloading "ws-unknown")))
+      ;; Assert
+      (should (eq outcome 'kept))
+      (should (null agent-repl-test-host--calls)))))
+
+(ert-deftest agent-repl-test-host-page-unloading-refusal-keeps-the-page ()
+  "A refused report is surfaced, never swallowed, and keeps the page loaded."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--unloading-answer
+          (list :response (list :arm :error :value nil)))
+    ;; Act
+    (let ((outcome (agent-repl-test-host--report-unloading "ws-1")))
+      ;; Assert
+      (should (eq outcome 'kept))
+      (should (agent-repl-test-host--logged-p :error "elisp.host.page-unloading-refused")))))
+
+(ert-deftest agent-repl-test-host-page-unloading-transport-failure-keeps-the-page ()
+  "A report that never lands is recorded at ERROR and keeps the page loaded."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--unloading-answer
+          (list :failure (list :kind :transport :message "no route")))
+    ;; Act
+    (let ((outcome (agent-repl-test-host--report-unloading "ws-1")))
+      ;; Assert
+      (should (eq outcome 'kept))
+      (should (agent-repl-test-host--logged-p :error "elisp.host.page-unloading-failed")))))
+
+(ert-deftest agent-repl-test-host-page-unloading-unknown-arm-keeps-the-page ()
+  "An arm the verb does not know is an ERROR and keeps the page loaded."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--unloading-answer
+          (list :response (list :arm :mystery :value nil)))
+    ;; Act
+    (let ((outcome (agent-repl-test-host--report-unloading "ws-1")))
+      ;; Assert
+      (should (eq outcome 'kept))
+      (should (agent-repl-test-host--logged-p :error "elisp.host.page-unloading-unknown-arm")))))
 
 (defun agent-repl-test-host--standing-down-answer ()
   "The daemon's answer to a select while it is standing down."

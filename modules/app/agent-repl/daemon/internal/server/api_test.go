@@ -267,11 +267,7 @@ func TestRetractTransferredLetsTheNextIdenticalNoticeReachTheHostStream(t *testi
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, err := h.Client.WatchHostWorkspace(ctx,
-		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
-	if err != nil {
-		t.Fatalf("open the host stream: %v", err)
-	}
+	stream := dialHostStream(t, h, ctx)
 	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
 	if receiveHostEvent(t, stream).GetTransferred() == nil {
 		t.Fatal("the first transfer notice did not arrive")
@@ -297,11 +293,7 @@ func TestAHostEventIsNotReplayedToALateHostStream(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	h.Server.PushReloadWebapp(testWorkspaceID)
-	stream, err := h.Client.WatchHostWorkspace(ctx,
-		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
-	if err != nil {
-		t.Fatalf("open the host stream: %v", err)
-	}
+	stream := dialHostStream(t, h, ctx)
 
 	// Act: a later event marks where the stream's first event must be.
 	h.Server.NotificationClicked(testWorkspaceID)
@@ -331,11 +323,7 @@ func TestTheWebappReloadNamesItsBuildOnlyForADeploy(t *testing.T) {
 			h := newHarness(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			stream, err := h.Client.WatchHostWorkspace(ctx,
-				connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
-			if err != nil {
-				t.Fatalf("open the host stream: %v", err)
-			}
+			stream := dialHostStream(t, h, ctx)
 
 			// Act.
 			tt.push(h.Server)
