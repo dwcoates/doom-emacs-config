@@ -142,7 +142,6 @@ describe("the arrangement request", () => {
     ["blankName", "name"],
     ["otherRepository", "own repository"],
     ["anchorElsewhere", "try again"],
-    ["hasParent", "parent"],
   ])("says what the %s arm means", (arm, words) => {
     expect(arrangeSidebarRefusal({ case: arm, value: {} } as never)).toContain(words);
   });

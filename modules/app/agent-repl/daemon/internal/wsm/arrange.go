@@ -30,8 +30,9 @@ import (
 // move a family: only a root STORES a subsection (the
 // workspaces_child_stores_no_subsection triggers refuse a child that stores
 // one), and every read derives a workspace's subsection from its root
-// (rootSubsectionColumn). Moving a root moves its whole family; a child alone
-// cannot be moved to a subsection at all (ErrHasParent).
+// (rootSubsectionColumn). A FAMILY MOVES WHOLE (owner request, 2026-10-20):
+// placing any member places its root (familyRoot), so a parent dragged
+// takes its descendants and a child dragged takes its ancestors.
 //
 // A WORKSPACE SITS ONLY IN A SUBSECTION OF ITS OWN REPOSITORY. The
 // workspaces_subsection_same_repo triggers make SQLite refuse any write that
@@ -137,10 +138,6 @@ var ErrOtherRepository = errors.New("wsm: the arrangement relates two repositori
 // sit in the destination (or that moves with it). Nothing is written.
 var ErrAnchorElsewhere = errors.New("wsm: the workspace to place before is not in the destination")
 
-// ErrHasParent refuses placing a workspace that has a recorded parent: it
-// sits wherever its parent does, and moves only with it. Nothing is written.
-var ErrHasParent = errors.New("wsm: the workspace has a parent and moves only with it")
-
 // ErrNotSiblings refuses moving a workspace onto the tab of one that is not
 // its sibling: one top-level and the other a child, or children of two
 // parents. A child's tab always follows its parent's family, so there is no
@@ -156,7 +153,7 @@ var ErrBlankSubsectionName = errors.New("wsm: a subsection name is blank")
 // arm and records it at its own level.
 func isArrangementRefusal(err error) bool {
 	return errors.Is(err, ErrOtherRepository) || errors.Is(err, ErrAnchorElsewhere) || errors.Is(err, ErrBlankSubsectionName) ||
-		errors.Is(err, ErrHasParent) || errors.Is(err, ErrNotSiblings)
+		errors.Is(err, ErrNotSiblings)
 }
 
 // subsectionName trims NAME and refuses it when nothing is left.
@@ -262,6 +259,10 @@ func (s *store) MoveSubsection(ctx context.Context, id SubsectionID, to Anchor) 
 		if err != nil {
 			return err
 		}
+		// A workspace anchor stands at its family's root's entry.
+		if to, err = rootAnchor(ctx, tx, to); err != nil {
+			return err
+		}
 		if err := requireAnchorOfRepository(ctx, tx, to, sub.Repo); err != nil {
 			return err
 		}
@@ -347,8 +348,8 @@ func (s *store) MoveRepository(ctx context.Context, id RepoID, before *RepoID) e
 	})
 }
 
-// PlaceWorkspaces puts ROOT workspaces WS, in that order, and so their whole
-// families, into subsection INTO (nil: none) of their own repository as one
+// PlaceWorkspaces puts the families of workspaces WS (each resolved to its
+// root, familyRoot), in that order, into subsection INTO (nil: none) of their own repository as one
 // block, at AT: just before a root of the destination, just before a
 // subsection (into none only), or after every entry of the destination (the
 // bottom of the subsection, or of the repository). One workspace is the
@@ -361,8 +362,8 @@ func (s *store) MoveRepository(ctx context.Context, id RepoID, before *RepoID) e
 //
 // Refusals, each writing nothing: no workspace, or one twice, or an anchor
 // among them, or a subsection anchor into a subsection, is refused as
-// malformed; an unknown workspace is ErrNotFound, one with a recorded parent
-// ErrHasParent, workspaces of two repositories or a subsection of another
+// malformed; an unknown workspace is ErrNotFound, workspaces of two
+// repositories or a subsection of another
 // repository ErrOtherRepository, an unknown subsection ErrUnknownSubsection,
 // and a workspace anchor that is not a root in the destination
 // ErrAnchorElsewhere.
@@ -374,15 +375,20 @@ func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *Sub
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		// A FAMILY MOVES WHOLE (familyRoot): each workspace named places
+		// its root, and so its every ancestor and descendant.
+		ws, err := familyRoots(ctx, tx, ws)
+		if err != nil {
+			return err
+		}
+		if at, err = rootAnchor(ctx, tx, at); err != nil {
+			return err
+		}
 		var repo RepoID
 		for i, id := range ws {
 			var own RepoID
-			var parent sql.NullString
-			if err := scanWorkspaceRow(ctx, tx, id, "repo_id, parent_id", &own, &parent); err != nil {
+			if err := scanWorkspaceRow(ctx, tx, id, "repo_id", &own); err != nil {
 				return err
-			}
-			if parent.Valid {
-				return ErrHasParent
 			}
 			if i > 0 && own != repo {
 				return ErrOtherRepository
@@ -452,6 +458,11 @@ func (s *store) MoveWorkspace(ctx context.Context, ws, target WorkspaceID) error
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		// Each tab stands for what the sidebar draws it as (standing).
+		ws, target, err := standingPair(ctx, tx, ws, target)
+		if err != nil {
+			return err
+		}
 		var ownRepo, targetRepo RepoID
 		var ownParent, targetParent sql.NullString
 		if err := scanWorkspaceRow(ctx, tx, ws, "repo_id, parent_id", &ownRepo, &ownParent); err != nil {

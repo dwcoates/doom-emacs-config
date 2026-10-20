@@ -72,9 +72,6 @@ const (
 	// ArmAnchorElsewhere is a workspace placed before one that does not sit
 	// in the destination (ArrangeSidebarError.anchor_elsewhere).
 	ArmAnchorElsewhere = "anchor_elsewhere"
-	// ArmHasParent is a workspace with a recorded parent placed on its own
-	// (ArrangeSidebarError.has_parent): it sits wherever its parent does.
-	ArmHasParent = "has_parent"
 	// ArmNotSiblings is a move between two workspaces that are not siblings
 	// in the arrangement's walk (MoveWorkspaceError.not_siblings).
 	ArmNotSiblings = "not_siblings"

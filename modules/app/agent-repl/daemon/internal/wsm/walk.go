@@ -301,3 +301,112 @@ func permutePlaces(ctx context.Context, tx *sql.Tx, order []WorkspaceID) (map[Wo
 	_, err := tx.ExecContext(ctx, `UPDATE workspaces SET place = -place WHERE place < 0`)
 	return out, err
 }
+
+// standing answers the workspace the sidebar draws ID's row AS, which is the
+// one a tab move (MoveWorkspace, SwapPlaces) moves: ID itself when it has no
+// recorded parent or its parent is open, otherwise the same answer for its
+// parent. A workspace whose parent is not open (closed, hidden, a withheld
+// merge workspace) is drawn in its parent's place, at that parent's depth,
+// so its tab stands for its parent's: a tab drawn at the top level stands
+// for its stored root.
+//
+// A recorded parent chain that cycles is a broken store (ordinary creation
+// cannot make one); it is refused rather than guessed at.
+func standing(ctx context.Context, tx *sql.Tx, id WorkspaceID) (WorkspaceID, error) {
+	seen := map[WorkspaceID]bool{}
+	at := id
+	for {
+		if seen[at] {
+			return "", fmt.Errorf("wsm: the recorded parents of workspace %s cycle", id)
+		}
+		seen[at] = true
+		var parent sql.NullString
+		if err := scanWorkspaceRow(ctx, tx, at, "parent_id", &parent); err != nil {
+			return "", err
+		}
+		if !parent.Valid {
+			return at, nil
+		}
+		up, err := scanWorkspace(tx.QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE id = ?`, parent.String))
+		if err != nil {
+			return "", fmt.Errorf("wsm: the recorded parent %s of workspace %s: %w", parent.String, at, err)
+		}
+		if up.ListedOpen() {
+			return at, nil
+		}
+		at = up.ID
+	}
+}
+
+// familyRoot answers the root of ID's family: the ancestor with no recorded
+// parent, ID itself when it has none. A FAMILY MOVES WHOLE in the
+// arrangement (owner request, 2026-10-20): a child dragged into a
+// subsection takes its ancestors, and so every descendant of its root, as
+// a parent dragged takes its descendants. A recorded parent chain that
+// cycles is a broken store, refused rather than guessed at.
+func familyRoot(ctx context.Context, tx *sql.Tx, id WorkspaceID) (WorkspaceID, error) {
+	seen := map[WorkspaceID]bool{}
+	at := id
+	for {
+		if seen[at] {
+			return "", fmt.Errorf("wsm: the recorded parents of workspace %s cycle", id)
+		}
+		seen[at] = true
+		var parent sql.NullString
+		if err := scanWorkspaceRow(ctx, tx, at, "parent_id", &parent); err != nil {
+			return "", err
+		}
+		if !parent.Valid {
+			return at, nil
+		}
+		at = WorkspaceID(parent.String)
+	}
+}
+
+// familyRoots answers IDS each resolved to its family's root, in order,
+// each root once: two members of one family place it once.
+func familyRoots(ctx context.Context, tx *sql.Tx, ids []WorkspaceID) ([]WorkspaceID, error) {
+	var out []WorkspaceID
+	for _, id := range ids {
+		root, err := familyRoot(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Contains(out, root) {
+			out = append(out, root)
+		}
+	}
+	return out, nil
+}
+
+// rootAnchor answers AT with a workspace anchor resolved to its family's
+// root, which is the entry a family stands at; any other anchor as it is.
+func rootAnchor(ctx context.Context, tx *sql.Tx, at Anchor) (Anchor, error) {
+	before, ok := at.(BeforeWorkspace)
+	if !ok {
+		return at, nil
+	}
+	root, err := familyRoot(ctx, tx, before.ID)
+	if err != nil {
+		return nil, err
+	}
+	return BeforeWorkspace{ID: root}, nil
+}
+
+// standingPair answers WS and TARGET each resolved through standing, for a
+// move of one tab onto another. Two tabs that stand for one family are
+// refused: neither can take the other's place.
+func standingPair(ctx context.Context, tx *sql.Tx, ws, target WorkspaceID) (WorkspaceID, WorkspaceID, error) {
+	from, err := standing(ctx, tx, ws)
+	if err != nil {
+		return "", "", err
+	}
+	to, err := standing(ctx, tx, target)
+	if err != nil {
+		return "", "", err
+	}
+	if from == to {
+		return "", "", fmt.Errorf("wsm: workspaces %s and %s stand for one family, %s", ws, target, from)
+	}
+	return from, to, nil
+}

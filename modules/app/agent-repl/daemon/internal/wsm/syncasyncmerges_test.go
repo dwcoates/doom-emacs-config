@@ -457,6 +457,69 @@ func TestMergeHidden(t *testing.T) {
 	}
 }
 
+func TestListedOpen(t *testing.T) {
+	landed := time.Unix(100, 0)
+	origin := &MergeOrigin{Requester: "ws-r", Request: "req-1"}
+	tests := []struct {
+		name string
+		ws   Workspace
+		want bool
+	}{
+		{name: "an ordinary workspace", ws: Workspace{}, want: true},
+		{name: "a closed workspace", ws: Workspace{Closed: true}, want: false},
+		{name: "a hidden workspace", ws: Workspace{Hidden: true}, want: false},
+		{name: "a withheld merge workspace", ws: Workspace{MergeOf: origin}, want: false},
+		{name: "a revealed merge workspace", ws: Workspace{MergeOf: origin, MergeRevealed: true}, want: true},
+		{name: "a merged workspace reopened", ws: Workspace{MergedAt: &landed}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.ws.ListedOpen()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("ListedOpen() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNoCallSiteSpellsOutListedOpen holds every reader of whether a row is
+// open to ListedOpen: a site that combines the three by hand would drift
+// from it.
+func TestNoCallSiteSpellsOutListedOpen(t *testing.T) {
+	// Arrange
+	root := filepath.Join("..", "..")
+	var offenders []string
+
+	// Act
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(src), "!ws.Closed && !ws.Hidden && !ws.MergeHidden()") && !strings.HasSuffix(path, filepath.Join("wsm", "syncasyncmerges.go")) {
+			offenders = append(offenders, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("these files spell out an open row by hand instead of ListedOpen: %v", offenders)
+	}
+}
+
 // TestNoCallSiteSpellsOutMergeHidden holds every reader of a merge workspace's
 // visibility to MergeHidden: a site that tests MergeRevealed by hand would drift
 // from it (the landed case is the one a hand-rolled test forgets).

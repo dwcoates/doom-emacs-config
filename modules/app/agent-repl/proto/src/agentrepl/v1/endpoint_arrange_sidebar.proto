@@ -88,9 +88,9 @@ message ArrangeMoveSubsection {
     SubsectionRef before = 2;
     // After every other entry of its repository.
     ArrangeEnd end = 3;
-    // Just before this ROOT workspace of the same repository, which sits in
-    // no subsection (anchor_elsewhere otherwise; other_repository for
-    // another repository's).
+    // Just before this workspace's family, of the same repository, whose
+    // root sits in no subsection (anchor_elsewhere otherwise;
+    // other_repository for another repository's).
     workspace.v1.WorkspaceRef before_workspace = 4;
   }
 }
@@ -109,13 +109,14 @@ message ArrangeMoveRepository {
   }
 }
 
-// Put one ROOT workspace (one with no recorded parent) into a subsection of
-// its own repository, or into none, at a place among the roots already there.
+// Put one workspace's FAMILY into a subsection of its own repository, or into
+// none, at a place among the roots already there.
 //
 // A FAMILY NEVER SPLITS ACROSS SUBSECTIONS (owner ruling, 2026-10-14): every
-// descendant sits wherever its root does, at every depth, so placing a root
-// moves its whole family, and a workspace with a parent cannot be placed on
-// its own (the has_parent arm).
+// descendant sits wherever its root does, at every depth. A FAMILY MOVES WHOLE
+// (owner request, 2026-10-20): the workspace named stands for its family's
+// root, so placing a parent takes its descendants and placing a child takes
+// its ancestors (and so their every descendant).
 message ArrangePlaceWorkspace {
   workspace.v1.WorkspaceRef workspace = 1;
   // WHERE IT GOES. THE ARM IS THE DESTINATION; unset is malformed.
@@ -128,8 +129,8 @@ message ArrangePlaceWorkspace {
   }
   // WHERE AMONG THEM. THE ARM IS THE PLACE; unset is malformed.
   oneof at {
-    // Just before this root workspace, which must already sit in the
-    // destination. Naming the moved workspace itself is malformed.
+    // Just before this workspace's family, whose root must already sit in
+    // the destination. Naming the moved workspace itself is malformed.
     workspace.v1.WorkspaceRef before = 4;
     // After every entry of the destination: the bottom of a subsection, or,
     // into no subsection, the bottom of the repository.
@@ -141,13 +142,14 @@ message ArrangePlaceWorkspace {
   }
 }
 
-// Put several ROOT workspaces of one repository, in the order given, into a
-// subsection of it (or into none) as one block at a place among the roots
+// Put several workspaces' FAMILIES of one repository, in the order given,
+// into a subsection of it (or into none) as one block at a place among the roots
 // already there: ArrangePlaceWorkspace for many, applied whole or not at all.
 // The bulk form an agent files a batch of workspaces with.
 message ArrangePlaceWorkspaces {
   // At least one; no workspace twice (InvalidArgument otherwise). Every one
-  // must be a root of the same repository (has_parent, other_repository).
+  // must be of the same repository (other_repository); each stands for its
+  // family's root, and two of one family place it once.
   repeated workspace.v1.WorkspaceRef workspaces = 1;
   // WHERE THEY GO. THE ARM IS THE DESTINATION; unset is malformed.
   oneof into {
@@ -156,8 +158,9 @@ message ArrangePlaceWorkspaces {
   }
   // WHERE AMONG THE ROOTS THERE. THE ARM IS THE PLACE; unset is malformed.
   oneof at {
-    // Just before this root of the destination, which is none of the placed
-    // workspaces (InvalidArgument otherwise).
+    // Just before this workspace's family, whose root sits in the
+    // destination; it is none of the placed workspaces (InvalidArgument
+    // otherwise).
     workspace.v1.WorkspaceRef before = 4;
     // After every entry of the destination, as ArrangePlaceWorkspace.end.
     ArrangeEnd end = 5;
@@ -225,10 +228,12 @@ message ArrangeSidebarError {
     // destination, or a subsection before one that is not a root in no
     // subsection (it moved since the roster the client drew from).
     ArrangeSidebarAnchorElsewhere anchor_elsewhere = 9;
-    // A workspace with a recorded parent was placed on its own: it sits
-    // wherever its parent does, and moves only with it.
-    ArrangeSidebarHasParent has_parent = 10;
   }
+  // `has_parent` (field 10) is RETIRED and reserved: a family moves whole
+  // (owner request, 2026-10-20), so placing a workspace with a recorded
+  // parent places its family's root rather than being refused.
+  reserved 10;
+  reserved "has_parent";
 }
 message ArrangeSidebarUnknownRepository {}
 // Names the subsection ref no subsection matches.
@@ -250,5 +255,3 @@ message ArrangeSidebarBlankName {}
 message ArrangeSidebarOtherRepository {}
 // DELIBERATELY EMPTY: the arm is the fact.
 message ArrangeSidebarAnchorElsewhere {}
-// DELIBERATELY EMPTY: the arm is the fact.
-message ArrangeSidebarHasParent {}

@@ -63,13 +63,6 @@ type openRepo struct {
 	regions []openRegion
 }
 
-// isOpen reports whether WS is listed in the Open section: neither closed nor
-// hidden (OPEN BEATS MERGED, so a merge time alone does not take it out), and
-// not a merge workspace still withheld by its async merge.
-func isOpen(ws wsm.Workspace) bool {
-	return !ws.Closed && !ws.Hidden && !ws.MergeHidden()
-}
-
 // openTree builds the Open section from REG: every open workspace, filed by
 // the arrangement and nested by family, and the workspaces REG's open ones
 // descend from that are not open themselves, which are TRANSPARENT (their open
@@ -86,7 +79,7 @@ func openTree(reg Registry, log dlog.Logger) ([]openRepo, map[ids.RepoID][]wsm.W
 	// every render.
 	placed := map[ids.WorkspaceID]bool{}
 	for _, ws := range reg.Workspaces {
-		if !isOpen(ws) {
+		if !ws.ListedOpen() {
 			continue
 		}
 		placed[ws.ID] = true
@@ -118,7 +111,7 @@ func openTree(reg Registry, log dlog.Logger) ([]openRepo, map[ids.RepoID][]wsm.W
 	orphans := map[ids.RepoID][]wsm.Workspace{}
 	for repo, workspaces := range orphaned {
 		for _, ws := range workspaces {
-			if isOpen(ws) {
+			if ws.ListedOpen() {
 				orphans[repo] = append(orphans[repo], ws)
 			}
 		}
@@ -132,7 +125,7 @@ func openNodes(tree forest, list []wsm.Workspace) []openNode {
 	var out []openNode
 	for _, ws := range list {
 		children := openNodes(tree, tree.children[ws.ID])
-		if !isOpen(ws) {
+		if !ws.ListedOpen() {
 			out = append(out, children...)
 			continue
 		}
