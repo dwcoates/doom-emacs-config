@@ -669,7 +669,8 @@ daemon-scoped push for hours."
                        :value (list :elisp-build (agent-repl-elisp-build)
                                     :focus (agent-repl-wire-editor-focus
                                             (agent-repl--emacs-focused-p))
-                                    :instance (agent-repl-editor-instance))))
+                                    :instance (agent-repl-editor-instance)
+                                    :pid (emacs-pid))))
    on-push on-close on-open))
 
 (defun agent-repl-rpc-open-tabs (conn workspaces on-push on-close)
