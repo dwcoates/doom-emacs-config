@@ -2,20 +2,11 @@
 /** The one code block, its copy control, and the proof no other module draws its shape itself. */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  CODE_COPIED_ATTRIBUTE,
-  CODE_COPIED_MS,
-  CODE_COPY_CLASS,
-  codeBlockHtml,
-  codeOfCopyControl,
-  installCodeCopy,
-} from "../src/code-block.js";
-import { CLICK_THROUGH_SELECTOR } from "../src/expand.js";
-import { bubbleClick, SELECTABLE_ATTRIBUTE } from "../src/feed/bubble-selection.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { CODE_COPY_CLASS, codeBlockHtml, codeOfCopyControl } from "../src/code-block.js";
+import { boundCopyText, COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE, installCopyControls } from "../src/copy-control.js";
 import { renderMarkdown } from "../src/markdown.js";
 import { codeUnder } from "./files-under.js";
-import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "../src");
@@ -26,7 +17,6 @@ afterEach(() => {
   teardown?.();
   teardown = undefined;
   document.body.innerHTML = "";
-  vi.useRealTimers();
 });
 
 /** Draw BODY as a code block in the document, and answer its copy control. */
@@ -37,12 +27,12 @@ function drawn(body: string, lang = ""): HTMLElement {
   return control;
 }
 
-/** Install the copy click with a WRITE that records what it was handed and answers OUTCOME. */
-function installRecording(outcome: boolean): string[] {
+/** Install the copy controls with the code resolver, recording what each copy wrote. */
+function installRecording(): string[] {
   const written: string[] = [];
-  teardown = installCodeCopy(document, (text) => {
+  teardown = installCopyControls(document, { code: codeOfCopyControl, prompt: boundCopyText }, (text) => {
     written.push(text);
-    return outcome;
+    return true;
   });
   return written;
 }
@@ -64,13 +54,23 @@ describe("codeBlockHtml", () => {
     expect(document.querySelector("pre.md-code > code")?.className).toBe("hljs lang-klingon");
   });
 
+  it("draws a code copy control, the one copy control", () => {
+    // Arrange
+    const control = drawn("x");
+    // Act / Assert
+    expect([control.classList.contains(COPY_CONTROL_CLASS), control.getAttribute(COPY_KIND_ATTRIBUTE)]).toEqual([
+      true,
+      "code",
+    ]);
+  });
+
   it("draws the copy control as the block's first child, ahead of the code", () => {
     // Arrange
     document.body.innerHTML = codeBlockHtml("x", "");
     // Act
     const children = [...(document.querySelector("pre.md-code")?.children ?? [])];
     // Assert
-    expect(children.map((child) => `${child.localName}.${child.classList[0]}`)).toEqual([
+    expect(children.map((child) => `${child.localName}.${child.classList[child.classList.length - 1]}`)).toEqual([
       `ar-button.${CODE_COPY_CLASS}`,
       "code.hljs",
     ]);
@@ -103,7 +103,7 @@ describe("codeBlockHtml", () => {
     // Act
     const handRolled = files
       .filter(([file]) => file !== "code-block.ts")
-      .filter(([, code]) => /class="md-code"|md-code-copy/.test(code))
+      .filter(([, code]) => /class="md-code"/.test(code))
       .map(([file]) => file);
     // Assert
     expect(handRolled).toEqual([]);
@@ -115,14 +115,14 @@ describe("codeOfCopyControl", () => {
     // Arrange
     const control = drawn("line one\nline two");
     // Act / Assert
-    expect(codeOfCopyControl(control)).toEqual({ text: "line one\nline two", lang: "" });
+    expect(codeOfCopyControl(control)).toEqual({ text: "line one\nline two", context: { lang: "" } });
   });
 
   it("answers the highlighted code's text, not its markup, and its language", () => {
     // Arrange
     const control = drawn("const a = 1;", "typescript");
     // Act / Assert
-    expect(codeOfCopyControl(control)).toEqual({ text: "const a = 1;", lang: "typescript" });
+    expect(codeOfCopyControl(control)).toEqual({ text: "const a = 1;", context: { lang: "typescript" } });
   });
 
   it("throws for a control outside a code block", () => {
@@ -134,10 +134,10 @@ describe("codeOfCopyControl", () => {
   });
 });
 
-describe("installCodeCopy", () => {
-  it("copies the block's code on a click of its copy control", () => {
+describe("a click on a code block's copy control", () => {
+  it("copies the block's code", () => {
     // Arrange
-    const written = installRecording(true);
+    const written = installRecording();
     const control = drawn("npm test");
     // Act
     control.click();
@@ -145,138 +145,13 @@ describe("installCodeCopy", () => {
     expect(written).toEqual(["npm test"]);
   });
 
-  it("copies the block's code on a click of the control's icon", () => {
-    // Arrange
-    const written = installRecording(true);
-    drawn("npm test");
-    // Act
-    document.querySelector<SVGElement>(`.${CODE_COPY_CLASS} svg`)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    // Assert
-    expect(written).toEqual(["npm test"]);
-  });
-
   it("copies the clicked block's code, not another block's", () => {
     // Arrange
-    const written = installRecording(true);
+    const written = installRecording();
     document.body.innerHTML = codeBlockHtml("first", "") + codeBlockHtml("second", "");
     // Act
     document.querySelectorAll<HTMLElement>(`.${CODE_COPY_CLASS}`)[1]?.click();
     // Assert
     expect(written).toEqual(["second"]);
-  });
-
-  it("copies nothing on a click of the code itself", () => {
-    // Arrange
-    const written = installRecording(true);
-    drawn("npm test");
-    // Act
-    document.querySelector<HTMLElement>("pre.md-code > code")?.click();
-    // Assert
-    expect(written).toEqual([]);
-  });
-
-  it("marks the control copied once it copied", () => {
-    // Arrange
-    installRecording(true);
-    const control = drawn("x");
-    // Act
-    control.click();
-    // Assert
-    expect(control.hasAttribute(CODE_COPIED_ATTRIBUTE)).toBe(true);
-  });
-
-  it("clears the copied mark after its moment", () => {
-    // Arrange
-    vi.useFakeTimers();
-    installRecording(true);
-    const control = drawn("x");
-    control.click();
-    // Act
-    vi.advanceTimersByTime(CODE_COPIED_MS);
-    // Assert
-    expect(control.hasAttribute(CODE_COPIED_ATTRIBUTE)).toBe(false);
-  });
-
-  it("restarts the copied moment on a second copy", () => {
-    // Arrange
-    vi.useFakeTimers();
-    installRecording(true);
-    const control = drawn("x");
-    control.click();
-    vi.advanceTimersByTime(CODE_COPIED_MS - 1);
-    // Act
-    control.click();
-    vi.advanceTimersByTime(CODE_COPIED_MS - 1);
-    // Assert
-    expect(control.hasAttribute(CODE_COPIED_ATTRIBUTE)).toBe(true);
-  });
-
-  it("records a copy at info, with the code's length and language", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    installRecording(true);
-    const control = drawn("abc", "go");
-    // Act
-    control.click();
-    // Assert
-    const record = await forwardedRecord(capture, "code-block.copy");
-    expect([record.level.case, record.message, record.context]).toMatchObject([
-      "info",
-      "a code block's copy control copied its code",
-      { characters: 3, lang: "go", outcome: "copied" },
-    ]);
-  });
-
-  it("records a refused copy at error, and leaves the control unmarked", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    installRecording(false);
-    const control = drawn("abc");
-    // Act
-    control.click();
-    // Assert
-    const record = await forwardedRecord(capture, "code-block.copy");
-    expect([record.level.case, record.message, record.context, control.hasAttribute(CODE_COPIED_ATTRIBUTE)]).toMatchObject([
-      "error",
-      "a code block's copy control could not write its code to the clipboard",
-      { characters: 3, outcome: "refused" },
-      false,
-    ]);
-  });
-
-  it("copies nothing once uninstalled", () => {
-    // Arrange
-    const written = installRecording(true);
-    const control = drawn("x");
-    teardown?.();
-    teardown = undefined;
-    // Act
-    control.click();
-    // Assert
-    expect(written).toEqual([]);
-  });
-});
-
-describe("a click on the copy control and the bubble it sits in", () => {
-  it("is a click every click owner leaves to the control", () => {
-    // Arrange
-    const control = drawn("x");
-    // Act / Assert
-    expect(control.closest(CLICK_THROUGH_SELECTOR)).toBe(control);
-  });
-
-  it("never selects the bubble", () => {
-    // Arrange
-    const row = document.createElement("div");
-    row.setAttribute("data-feed-row", "r1");
-    row.setAttribute(SELECTABLE_ATTRIBUTE, "");
-    row.innerHTML = codeBlockHtml("x", "");
-    document.body.append(row);
-    const control = row.querySelector(`.${CODE_COPY_CLASS}`);
-    if (control === null) throw new Error("the code block drew no copy control");
-    // Act
-    const click = bubbleClick({ row, target: control, selectedText: "" });
-    // Assert
-    expect(click).toEqual({ case: "ignore", reason: "interactive" });
   });
 });

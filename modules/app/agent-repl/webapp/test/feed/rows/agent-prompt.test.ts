@@ -12,6 +12,8 @@ import { MalformedView } from "../../../src/rpc/malformed.js";
 import { receivedFrom, receivedFromWorkspace, sentTo, sentToWorkspace } from "../addresses.js";
 import { PEER_ARROW_CLASS } from "../../../src/feed/rows/peer-arrow.js";
 import { drawFeedAgentPrompt } from "../../../src/feed/rows/agent-prompt.js";
+import { PROMPT_COPY_CLASS } from "../../../src/feed/rows/blocks.js";
+import { boundCopyText } from "../../../src/copy-control.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import {
   PROMPT_WAVE_ATTRIBUTE,
@@ -218,5 +220,28 @@ describe("drawFeedAgentPrompt: the arrow says which way it went", () => {
     const address = sentTo("vetter");
     address.name = undefined;
     expect(() => drawFeedAgentPrompt(agentPrompt(address))).toThrow(MalformedView);
+  });
+});
+
+describe("drawFeedAgentPrompt: the copy control", () => {
+  it("copies the whole prompt's blocks", () => {
+    // Act
+    const el = drawFeedAgentPrompt(
+      agentPrompt(sentTo("vetter"), [
+        { block: { case: "text", value: { text: "first" } } },
+        { block: { case: "text", value: { text: "second" } } },
+      ]),
+    );
+    // Assert
+    const control = el.querySelector(`.${PROMPT_COPY_CLASS}`);
+    expect(control === null ? null : boundCopyText(control).text).toBe("first\n\nsecond");
+  });
+
+  it("leaves the address out of what it copies", () => {
+    // Act
+    const el = drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [{ block: { case: "text", value: { text: "go" } } }]));
+    // Assert
+    const control = el.querySelector(`.${PROMPT_COPY_CLASS}`);
+    expect(control === null ? null : boundCopyText(control).text).toBe("go");
   });
 });
