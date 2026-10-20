@@ -982,6 +982,10 @@ EXECs the daemon.
 - It is an `exec`, so the pid Emacs holds IS the daemon's. The sentinel,
   the boot wait's exit branch and `agent-repl-daemon--spawned-here-p` all
   keep watching the real process.
+- The daemon takes the file over at boot (`daemon/internal/dlog/stdio.go`):
+  it re-opens `daemon.stdio.log` as a rotating file and duplicates it onto
+  fds 1 and 2, so the file rotates at 64 MiB and ages out three days after
+  its last write like every other log (`logging-contract.md` "Retention").
 
 STOPPING IT IS STILL DELIBERATE AND STILL EMACS'S TO DO. The stop verb is
 `UpdateShutdownSchedule{now}` over the link
@@ -1191,7 +1195,8 @@ like an improvement still needs that conversation. Code:
   always run.
 - **Runs go to completion past failures.** The runner keeps going after a suite
   fails, every selected suite reports, and the whole run is archived under
-  `<state>/merge-logs/<lease>-tests-<round>.log`. There is no flake re-run.
+  `<state>/merge-logs/<lease>-tests-<round>.log`, kept three days after its
+  last write (`logging-contract.md` "Retention"). There is no flake re-run.
 - **Only relevant systems run.** The suites are chosen from the paths the
   rebased branch changes against the tip it stands on:
   - a change to one system runs that system's own suites, its unit and

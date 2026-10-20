@@ -21,7 +21,10 @@ central sink `<state>/logs/emacs.central.log` (`agent-repl-log-file-name`),
 beside the daemon's `daemon.run.log`, through the same rungs and the same
 rotation. Its directory is held to the real-directory rule the workspace
 targets are minted under, and the retired OS-temporary default is redirected
-to it on reload.
+to it on reload. Every file Emacs writes is deleted three days after its last write
+(`agent-repl-log-retention-seconds`) by the bounded retention sweep
+`agent-repl--sweep-expired-log-files`, once at first idle and then hourly
+(`logging-contract.md` "Retention").
 
 Every record contains timestamp, runtime, PID, level, verbosity, operation,
 message, and structured context. Workspace records also contain
