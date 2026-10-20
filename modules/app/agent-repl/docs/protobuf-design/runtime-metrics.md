@@ -187,3 +187,27 @@ owner's delegation.
 - Correction kept visible: entry 1's consequences named an Emacs encoder
   in `lisp/rpc.el`; none is needed until Emacs measures a latency itself
   (`docs/METRICS-JUDGEMENT-CALLS.md`, call 8).
+
+### 7. The shim measures its own event loop and heap
+
+- What: `shim.v1.ShimLatencyKind` gains `event_loop_delay`, carried in the
+  existing cumulative latency histograms under the vocabulary entry
+  `shim_event_loop_delay`; `shim.v1.ShimMeasurements` gains an optional
+  `ShimHeap` (used, total and external bytes), a snapshot per frame.
+- Why: the owner asked for heap-size snapshots and event-loop delay for the
+  shim (2026-10-20); the daemon's process collector already reads each
+  shim's CPU and resident memory from the kernel, but a shim that feels
+  stuck is usually a busy event loop, which only the shim can see.
+- Why event-loop delay is a latency kind and not a new field: it is a
+  duration with a distribution (how late a steady timer ran), which is
+  exactly what the cumulative histogram arm carries, so the daemon's
+  validation, folding and series need nothing new. The shim samples it with
+  its own steady timer rather than Node's `monitorEventLoopDelay`, whose
+  histogram exposes percentiles but not per-bucket counts.
+- Why the heap is a snapshot and not cumulative: heap size is a level, not a
+  count, so the daemon publishes it as a gauge per workspace and drops it
+  when the workspace leaves the registry or its shim's counting run changes.
+- Decided under the owner's delegation; additive, so no consumer breaks.
+- Consequences: the daemon's `ShimKinds` table gains the kind (its vocabulary
+  test pins the buckets), and the daemon exposes `agentrepl_shim_heap_bytes`
+  by workspace and kind (`used`, `total`, `external`).

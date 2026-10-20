@@ -36,6 +36,11 @@ const (
 	// From a prompt handed to the vendor to the first response text arriving:
 	// what the vendor's first token costs, plus the shim's own share.
 	ShimLatencyKind_SHIM_LATENCY_KIND_FIRST_OUTPUT ShimLatencyKind = 1
+	// How late a timer the shim arms on a steady cadence runs: the time the
+	// shim's event loop was busy elsewhere when the timer was due. A stuck
+	// loop delays every frame the shim sends and every call it answers, so a
+	// shim that feels stuck shows here first.
+	ShimLatencyKind_SHIM_LATENCY_KIND_EVENT_LOOP_DELAY ShimLatencyKind = 2
 )
 
 // Enum value maps for ShimLatencyKind.
@@ -43,10 +48,12 @@ var (
 	ShimLatencyKind_name = map[int32]string{
 		0: "SHIM_LATENCY_KIND_UNSPECIFIED",
 		1: "SHIM_LATENCY_KIND_FIRST_OUTPUT",
+		2: "SHIM_LATENCY_KIND_EVENT_LOOP_DELAY",
 	}
 	ShimLatencyKind_value = map[string]int32{
-		"SHIM_LATENCY_KIND_UNSPECIFIED":  0,
-		"SHIM_LATENCY_KIND_FIRST_OUTPUT": 1,
+		"SHIM_LATENCY_KIND_UNSPECIFIED":      0,
+		"SHIM_LATENCY_KIND_FIRST_OUTPUT":     1,
+		"SHIM_LATENCY_KIND_EVENT_LOOP_DELAY": 2,
 	}
 )
 
@@ -250,7 +257,12 @@ type ShimMeasurements struct {
 	VendorTraffic *ShimVendorTraffic `protobuf:"bytes,2,opt,name=vendor_traffic,json=vendorTraffic,proto3,oneof" json:"vendor_traffic,omitempty"`
 	// One cumulative histogram per shim-measured latency kind, each kind at
 	// most once. A kind with no observation yet is absent.
-	Latencies     []*ShimLatencyHistogram `protobuf:"bytes,3,rep,name=latencies,proto3" json:"latencies,omitempty"`
+	Latencies []*ShimLatencyHistogram `protobuf:"bytes,3,rep,name=latencies,proto3" json:"latencies,omitempty"`
+	// The shim's JavaScript heap at the moment this frame was built: a
+	// snapshot, not a figure since the counting instant, so the daemon
+	// publishes it as a gauge. UNSET only on a frame built before the first
+	// heap read; every frame after it carries one.
+	Heap          *ShimHeap `protobuf:"bytes,4,opt,name=heap,proto3,oneof" json:"heap,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -306,6 +318,81 @@ func (x *ShimMeasurements) GetLatencies() []*ShimLatencyHistogram {
 	return nil
 }
 
+func (x *ShimMeasurements) GetHeap() *ShimHeap {
+	if x != nil {
+		return x.Heap
+	}
+	return nil
+}
+
+// The shim process's JavaScript heap, as Node's process.memoryUsage() reads
+// it. Resident memory is not here: the daemon's process collector reads it
+// from the kernel for every process, shims included.
+type ShimHeap struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Bytes of the V8 heap in use by live objects (heapUsed).
+	UsedBytes uint64 `protobuf:"varint,1,opt,name=used_bytes,json=usedBytes,proto3" json:"used_bytes,omitempty"`
+	// Bytes V8 has reserved for its heap (heapTotal); `used_bytes` never
+	// exceeds it, and the gap is what V8 can still fill before it grows.
+	TotalBytes uint64 `protobuf:"varint,2,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
+	// Bytes of memory held outside the V8 heap by objects it manages, buffers
+	// included (external).
+	ExternalBytes uint64 `protobuf:"varint,3,opt,name=external_bytes,json=externalBytes,proto3" json:"external_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShimHeap) Reset() {
+	*x = ShimHeap{}
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShimHeap) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShimHeap) ProtoMessage() {}
+
+func (x *ShimHeap) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShimHeap.ProtoReflect.Descriptor instead.
+func (*ShimHeap) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ShimHeap) GetUsedBytes() uint64 {
+	if x != nil {
+		return x.UsedBytes
+	}
+	return 0
+}
+
+func (x *ShimHeap) GetTotalBytes() uint64 {
+	if x != nil {
+		return x.TotalBytes
+	}
+	return 0
+}
+
+func (x *ShimHeap) GetExternalBytes() uint64 {
+	if x != nil {
+		return x.ExternalBytes
+	}
+	return 0
+}
+
 // The shim's traffic with the vendor API, counted in memory where the shim
 // carries it: request and response bytes as they pass. It is the vendor
 // traffic of this workspace's session; traffic of processes the agent runs is
@@ -322,7 +409,7 @@ type ShimVendorTraffic struct {
 
 func (x *ShimVendorTraffic) Reset() {
 	*x = ShimVendorTraffic{}
-	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[3]
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -334,7 +421,7 @@ func (x *ShimVendorTraffic) String() string {
 func (*ShimVendorTraffic) ProtoMessage() {}
 
 func (x *ShimVendorTraffic) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[3]
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -347,7 +434,7 @@ func (x *ShimVendorTraffic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShimVendorTraffic.ProtoReflect.Descriptor instead.
 func (*ShimVendorTraffic) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{3}
+	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ShimVendorTraffic) GetBytesSent() uint64 {
@@ -385,7 +472,7 @@ type ShimLatencyHistogram struct {
 
 func (x *ShimLatencyHistogram) Reset() {
 	*x = ShimLatencyHistogram{}
-	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[4]
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -397,7 +484,7 @@ func (x *ShimLatencyHistogram) String() string {
 func (*ShimLatencyHistogram) ProtoMessage() {}
 
 func (x *ShimLatencyHistogram) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[4]
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -410,7 +497,7 @@ func (x *ShimLatencyHistogram) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShimLatencyHistogram.ProtoReflect.Descriptor instead.
 func (*ShimLatencyHistogram) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{4}
+	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ShimLatencyHistogram) GetKind() ShimLatencyKind {
@@ -455,7 +542,7 @@ type ShimLatencyBucket struct {
 
 func (x *ShimLatencyBucket) Reset() {
 	*x = ShimLatencyBucket{}
-	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[5]
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -467,7 +554,7 @@ func (x *ShimLatencyBucket) String() string {
 func (*ShimLatencyBucket) ProtoMessage() {}
 
 func (x *ShimLatencyBucket) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[5]
+	mi := &file_shim_v1_endpoint_watch_session_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -480,7 +567,7 @@ func (x *ShimLatencyBucket) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShimLatencyBucket.ProtoReflect.Descriptor instead.
 func (*ShimLatencyBucket) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{5}
+	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ShimLatencyBucket) GetUpperBoundSeconds() float64 {
@@ -507,12 +594,20 @@ const file_shim_v1_endpoint_watch_session_proto_rawDesc = "" +
 	"\x06update\x18\x01 \x01(\v2\x1e.conversation.v1.SessionUpdateH\x00R\x06update\x12J\n" +
 	"\x0fsession_started\x18\x02 \x01(\v2\x1f.conversation.v1.SessionStartedH\x00R\x0esessionStarted\x12?\n" +
 	"\fmeasurements\x18\x03 \x01(\v2\x19.shim.v1.ShimMeasurementsH\x00R\fmeasurementsB\a\n" +
-	"\x05frame\"\xdd\x01\n" +
+	"\x05frame\"\x92\x02\n" +
 	"\x10ShimMeasurements\x121\n" +
 	"\x15counted_since_unix_ms\x18\x01 \x01(\x03R\x12countedSinceUnixMs\x12F\n" +
 	"\x0evendor_traffic\x18\x02 \x01(\v2\x1a.shim.v1.ShimVendorTrafficH\x00R\rvendorTraffic\x88\x01\x01\x12;\n" +
-	"\tlatencies\x18\x03 \x03(\v2\x1d.shim.v1.ShimLatencyHistogramR\tlatenciesB\x11\n" +
-	"\x0f_vendor_traffic\"Y\n" +
+	"\tlatencies\x18\x03 \x03(\v2\x1d.shim.v1.ShimLatencyHistogramR\tlatencies\x12*\n" +
+	"\x04heap\x18\x04 \x01(\v2\x11.shim.v1.ShimHeapH\x01R\x04heap\x88\x01\x01B\x11\n" +
+	"\x0f_vendor_trafficB\a\n" +
+	"\x05_heap\"q\n" +
+	"\bShimHeap\x12\x1d\n" +
+	"\n" +
+	"used_bytes\x18\x01 \x01(\x04R\tusedBytes\x12\x1f\n" +
+	"\vtotal_bytes\x18\x02 \x01(\x04R\n" +
+	"totalBytes\x12%\n" +
+	"\x0eexternal_bytes\x18\x03 \x01(\x04R\rexternalBytes\"Y\n" +
 	"\x11ShimVendorTraffic\x12\x1d\n" +
 	"\n" +
 	"bytes_sent\x18\x01 \x01(\x04R\tbytesSent\x12%\n" +
@@ -525,10 +620,11 @@ const file_shim_v1_endpoint_watch_session_proto_rawDesc = "" +
 	"sumSeconds\"n\n" +
 	"\x11ShimLatencyBucket\x12.\n" +
 	"\x13upper_bound_seconds\x18\x01 \x01(\x01R\x11upperBoundSeconds\x12)\n" +
-	"\x10cumulative_count\x18\x02 \x01(\x04R\x0fcumulativeCount*X\n" +
+	"\x10cumulative_count\x18\x02 \x01(\x04R\x0fcumulativeCount*\x80\x01\n" +
 	"\x0fShimLatencyKind\x12!\n" +
 	"\x1dSHIM_LATENCY_KIND_UNSPECIFIED\x10\x00\x12\"\n" +
-	"\x1eSHIM_LATENCY_KIND_FIRST_OUTPUT\x10\x01B Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x1eSHIM_LATENCY_KIND_FIRST_OUTPUT\x10\x01\x12&\n" +
+	"\"SHIM_LATENCY_KIND_EVENT_LOOP_DELAY\x10\x02B Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_watch_session_proto_rawDescOnce sync.Once
@@ -543,31 +639,33 @@ func file_shim_v1_endpoint_watch_session_proto_rawDescGZIP() []byte {
 }
 
 var file_shim_v1_endpoint_watch_session_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_shim_v1_endpoint_watch_session_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_shim_v1_endpoint_watch_session_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_shim_v1_endpoint_watch_session_proto_goTypes = []any{
 	(ShimLatencyKind)(0),         // 0: shim.v1.ShimLatencyKind
 	(*WatchSessionRequest)(nil),  // 1: shim.v1.WatchSessionRequest
 	(*WatchSessionResponse)(nil), // 2: shim.v1.WatchSessionResponse
 	(*ShimMeasurements)(nil),     // 3: shim.v1.ShimMeasurements
-	(*ShimVendorTraffic)(nil),    // 4: shim.v1.ShimVendorTraffic
-	(*ShimLatencyHistogram)(nil), // 5: shim.v1.ShimLatencyHistogram
-	(*ShimLatencyBucket)(nil),    // 6: shim.v1.ShimLatencyBucket
-	(*v1.SessionUpdate)(nil),     // 7: conversation.v1.SessionUpdate
-	(*v1.SessionStarted)(nil),    // 8: conversation.v1.SessionStarted
+	(*ShimHeap)(nil),             // 4: shim.v1.ShimHeap
+	(*ShimVendorTraffic)(nil),    // 5: shim.v1.ShimVendorTraffic
+	(*ShimLatencyHistogram)(nil), // 6: shim.v1.ShimLatencyHistogram
+	(*ShimLatencyBucket)(nil),    // 7: shim.v1.ShimLatencyBucket
+	(*v1.SessionUpdate)(nil),     // 8: conversation.v1.SessionUpdate
+	(*v1.SessionStarted)(nil),    // 9: conversation.v1.SessionStarted
 }
 var file_shim_v1_endpoint_watch_session_proto_depIdxs = []int32{
-	7, // 0: shim.v1.WatchSessionResponse.update:type_name -> conversation.v1.SessionUpdate
-	8, // 1: shim.v1.WatchSessionResponse.session_started:type_name -> conversation.v1.SessionStarted
+	8, // 0: shim.v1.WatchSessionResponse.update:type_name -> conversation.v1.SessionUpdate
+	9, // 1: shim.v1.WatchSessionResponse.session_started:type_name -> conversation.v1.SessionStarted
 	3, // 2: shim.v1.WatchSessionResponse.measurements:type_name -> shim.v1.ShimMeasurements
-	4, // 3: shim.v1.ShimMeasurements.vendor_traffic:type_name -> shim.v1.ShimVendorTraffic
-	5, // 4: shim.v1.ShimMeasurements.latencies:type_name -> shim.v1.ShimLatencyHistogram
-	0, // 5: shim.v1.ShimLatencyHistogram.kind:type_name -> shim.v1.ShimLatencyKind
-	6, // 6: shim.v1.ShimLatencyHistogram.buckets:type_name -> shim.v1.ShimLatencyBucket
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	5, // 3: shim.v1.ShimMeasurements.vendor_traffic:type_name -> shim.v1.ShimVendorTraffic
+	6, // 4: shim.v1.ShimMeasurements.latencies:type_name -> shim.v1.ShimLatencyHistogram
+	4, // 5: shim.v1.ShimMeasurements.heap:type_name -> shim.v1.ShimHeap
+	0, // 6: shim.v1.ShimLatencyHistogram.kind:type_name -> shim.v1.ShimLatencyKind
+	7, // 7: shim.v1.ShimLatencyHistogram.buckets:type_name -> shim.v1.ShimLatencyBucket
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_watch_session_proto_init() }
@@ -587,7 +685,7 @@ func file_shim_v1_endpoint_watch_session_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_watch_session_proto_rawDesc), len(file_shim_v1_endpoint_watch_session_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

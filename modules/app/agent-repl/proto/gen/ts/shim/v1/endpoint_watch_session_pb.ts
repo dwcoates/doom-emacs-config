@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_watch_session.proto.
  */
 export const file_shim_v1_endpoint_watch_session: GenFile = /*@__PURE__*/
-  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3dhdGNoX3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiFQoTV2F0Y2hTZXNzaW9uUmVxdWVzdCLAAQoUV2F0Y2hTZXNzaW9uUmVzcG9uc2USMAoGdXBkYXRlGAEgASgLMh4uY29udmVyc2F0aW9uLnYxLlNlc3Npb25VcGRhdGVIABI6Cg9zZXNzaW9uX3N0YXJ0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWRIABIxCgxtZWFzdXJlbWVudHMYAyABKAsyGS5zaGltLnYxLlNoaW1NZWFzdXJlbWVudHNIAEIHCgVmcmFtZSKvAQoQU2hpbU1lYXN1cmVtZW50cxIdChVjb3VudGVkX3NpbmNlX3VuaXhfbXMYASABKAMSNwoOdmVuZG9yX3RyYWZmaWMYAiABKAsyGi5zaGltLnYxLlNoaW1WZW5kb3JUcmFmZmljSACIAQESMAoJbGF0ZW5jaWVzGAMgAygLMh0uc2hpbS52MS5TaGltTGF0ZW5jeUhpc3RvZ3JhbUIRCg9fdmVuZG9yX3RyYWZmaWMiPwoRU2hpbVZlbmRvclRyYWZmaWMSEgoKYnl0ZXNfc2VudBgBIAEoBBIWCg5ieXRlc19yZWNlaXZlZBgCIAEoBCKPAQoUU2hpbUxhdGVuY3lIaXN0b2dyYW0SJgoEa2luZBgBIAEoDjIYLnNoaW0udjEuU2hpbUxhdGVuY3lLaW5kEisKB2J1Y2tldHMYAiADKAsyGi5zaGltLnYxLlNoaW1MYXRlbmN5QnVja2V0Eg0KBWNvdW50GAMgASgEEhMKC3N1bV9zZWNvbmRzGAQgASgBIkoKEVNoaW1MYXRlbmN5QnVja2V0EhsKE3VwcGVyX2JvdW5kX3NlY29uZHMYASABKAESGAoQY3VtdWxhdGl2ZV9jb3VudBgCIAEoBCpYCg9TaGltTGF0ZW5jeUtpbmQSIQodU0hJTV9MQVRFTkNZX0tJTkRfVU5TUEVDSUZJRUQQABIiCh5TSElNX0xBVEVOQ1lfS0lORF9GSVJTVF9PVVRQVVQQAUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_session]);
+  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3dhdGNoX3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiFQoTV2F0Y2hTZXNzaW9uUmVxdWVzdCLAAQoUV2F0Y2hTZXNzaW9uUmVzcG9uc2USMAoGdXBkYXRlGAEgASgLMh4uY29udmVyc2F0aW9uLnYxLlNlc3Npb25VcGRhdGVIABI6Cg9zZXNzaW9uX3N0YXJ0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWRIABIxCgxtZWFzdXJlbWVudHMYAyABKAsyGS5zaGltLnYxLlNoaW1NZWFzdXJlbWVudHNIAEIHCgVmcmFtZSLeAQoQU2hpbU1lYXN1cmVtZW50cxIdChVjb3VudGVkX3NpbmNlX3VuaXhfbXMYASABKAMSNwoOdmVuZG9yX3RyYWZmaWMYAiABKAsyGi5zaGltLnYxLlNoaW1WZW5kb3JUcmFmZmljSACIAQESMAoJbGF0ZW5jaWVzGAMgAygLMh0uc2hpbS52MS5TaGltTGF0ZW5jeUhpc3RvZ3JhbRIkCgRoZWFwGAQgASgLMhEuc2hpbS52MS5TaGltSGVhcEgBiAEBQhEKD192ZW5kb3JfdHJhZmZpY0IHCgVfaGVhcCJLCghTaGltSGVhcBISCgp1c2VkX2J5dGVzGAEgASgEEhMKC3RvdGFsX2J5dGVzGAIgASgEEhYKDmV4dGVybmFsX2J5dGVzGAMgASgEIj8KEVNoaW1WZW5kb3JUcmFmZmljEhIKCmJ5dGVzX3NlbnQYASABKAQSFgoOYnl0ZXNfcmVjZWl2ZWQYAiABKAQijwEKFFNoaW1MYXRlbmN5SGlzdG9ncmFtEiYKBGtpbmQYASABKA4yGC5zaGltLnYxLlNoaW1MYXRlbmN5S2luZBIrCgdidWNrZXRzGAIgAygLMhouc2hpbS52MS5TaGltTGF0ZW5jeUJ1Y2tldBINCgVjb3VudBgDIAEoBBITCgtzdW1fc2Vjb25kcxgEIAEoASJKChFTaGltTGF0ZW5jeUJ1Y2tldBIbChN1cHBlcl9ib3VuZF9zZWNvbmRzGAEgASgBEhgKEGN1bXVsYXRpdmVfY291bnQYAiABKAQqgAEKD1NoaW1MYXRlbmN5S2luZBIhCh1TSElNX0xBVEVOQ1lfS0lORF9VTlNQRUNJRklFRBAAEiIKHlNISU1fTEFURU5DWV9LSU5EX0ZJUlNUX09VVFBVVBABEiYKIlNISU1fTEFURU5DWV9LSU5EX0VWRU5UX0xPT1BfREVMQVkQAkIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_session]);
 
 /**
  * Nothing to say: the session is the connection's.
@@ -127,6 +127,16 @@ export type ShimMeasurements = Message<"shim.v1.ShimMeasurements"> & {
    * @generated from field: repeated shim.v1.ShimLatencyHistogram latencies = 3;
    */
   latencies: ShimLatencyHistogram[];
+
+  /**
+   * The shim's JavaScript heap at the moment this frame was built: a
+   * snapshot, not a figure since the counting instant, so the daemon
+   * publishes it as a gauge. UNSET only on a frame built before the first
+   * heap read; every frame after it carries one.
+   *
+   * @generated from field: optional shim.v1.ShimHeap heap = 4;
+   */
+  heap?: ShimHeap | undefined;
 };
 
 /**
@@ -135,6 +145,45 @@ export type ShimMeasurements = Message<"shim.v1.ShimMeasurements"> & {
  */
 export const ShimMeasurementsSchema: GenMessage<ShimMeasurements> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_watch_session, 2);
+
+/**
+ * The shim process's JavaScript heap, as Node's process.memoryUsage() reads
+ * it. Resident memory is not here: the daemon's process collector reads it
+ * from the kernel for every process, shims included.
+ *
+ * @generated from message shim.v1.ShimHeap
+ */
+export type ShimHeap = Message<"shim.v1.ShimHeap"> & {
+  /**
+   * Bytes of the V8 heap in use by live objects (heapUsed).
+   *
+   * @generated from field: uint64 used_bytes = 1;
+   */
+  usedBytes: bigint;
+
+  /**
+   * Bytes V8 has reserved for its heap (heapTotal); `used_bytes` never
+   * exceeds it, and the gap is what V8 can still fill before it grows.
+   *
+   * @generated from field: uint64 total_bytes = 2;
+   */
+  totalBytes: bigint;
+
+  /**
+   * Bytes of memory held outside the V8 heap by objects it manages, buffers
+   * included (external).
+   *
+   * @generated from field: uint64 external_bytes = 3;
+   */
+  externalBytes: bigint;
+};
+
+/**
+ * Describes the message shim.v1.ShimHeap.
+ * Use `create(ShimHeapSchema)` to create a new message.
+ */
+export const ShimHeapSchema: GenMessage<ShimHeap> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_watch_session, 3);
 
 /**
  * The shim's traffic with the vendor API, counted in memory where the shim
@@ -165,7 +214,7 @@ export type ShimVendorTraffic = Message<"shim.v1.ShimVendorTraffic"> & {
  * Use `create(ShimVendorTrafficSchema)` to create a new message.
  */
 export const ShimVendorTrafficSchema: GenMessage<ShimVendorTraffic> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_watch_session, 3);
+  messageDesc(file_shim_v1_endpoint_watch_session, 4);
 
 /**
  * One latency kind's distribution since the counting instant, in the shape of
@@ -211,7 +260,7 @@ export type ShimLatencyHistogram = Message<"shim.v1.ShimLatencyHistogram"> & {
  * Use `create(ShimLatencyHistogramSchema)` to create a new message.
  */
 export const ShimLatencyHistogramSchema: GenMessage<ShimLatencyHistogram> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_watch_session, 4);
+  messageDesc(file_shim_v1_endpoint_watch_session, 5);
 
 /**
  * One histogram bucket: how many observations were at or below its bound.
@@ -240,7 +289,7 @@ export type ShimLatencyBucket = Message<"shim.v1.ShimLatencyBucket"> & {
  * Use `create(ShimLatencyBucketSchema)` to create a new message.
  */
 export const ShimLatencyBucketSchema: GenMessage<ShimLatencyBucket> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_watch_session, 5);
+  messageDesc(file_shim_v1_endpoint_watch_session, 6);
 
 /**
  * Which interaction a shim-measured latency measured. Each value names one
@@ -264,6 +313,16 @@ export enum ShimLatencyKind {
    * @generated from enum value: SHIM_LATENCY_KIND_FIRST_OUTPUT = 1;
    */
   FIRST_OUTPUT = 1,
+
+  /**
+   * How late a timer the shim arms on a steady cadence runs: the time the
+   * shim's event loop was busy elsewhere when the timer was due. A stuck
+   * loop delays every frame the shim sends and every call it answers, so a
+   * shim that feels stuck shows here first.
+   *
+   * @generated from enum value: SHIM_LATENCY_KIND_EVENT_LOOP_DELAY = 2;
+   */
+  EVENT_LOOP_DELAY = 2,
 }
 
 /**
