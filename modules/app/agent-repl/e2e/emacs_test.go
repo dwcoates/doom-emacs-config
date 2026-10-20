@@ -1499,9 +1499,7 @@ func (e *Emacs) awaitServer() {
 
 // probeServer is awaitServer's one probe, answering why it failed.
 func (e *Emacs) probeServer() error {
-	ctx, cancel := context.WithTimeout(context.Background(), HeartbeatBound)
-	defer cancel()
-	_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", "(emacs-pid)")
+	_, err := e.emacsclient(context.Background(), HeartbeatBound, "(emacs-pid)")
 	switch {
 	case err == nil:
 		return nil
@@ -1570,11 +1568,9 @@ func (e *Emacs) armHeartbeat() {
 				return
 			case <-ticker.C:
 			}
-			probe, probeCancel := context.WithTimeout(ctx, HeartbeatBound)
 			started := time.Now()
 			cpuBefore, cpuBeforeErr := readCgroupCPUStat(cgroupCPUStatPath)
-			out, err := e.box.Exec(probe, "emacsclient", "--socket-name", e.ServerSocket, "--eval", heartbeatProbe)
-			probeCancel()
+			out, err := e.emacsclient(ctx, HeartbeatBound, heartbeatProbe)
 			if err == nil {
 				if took := int64(time.Since(started)); took > e.heartbeatMax.Load() {
 					e.heartbeatMax.Store(took)
@@ -2076,16 +2072,14 @@ func (e *Emacs) stop() {
 			e.noteTeardownStep("no daemon link was held, so no daemon stop was asked")
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 		// `kill-emacs' never answers by design -- Emacs exits with the client
 		// still waiting -- so only a TIMEOUT is worth reporting: it means
 		// Emacs neither answered nor died, and the reaper is about to find it.
-		_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
-			"--eval", "(kill-emacs)")
-		if err != nil && ctx.Err() != nil {
+		_, err := e.emacsclient(context.Background(), DefaultTimeout, "(kill-emacs)")
+		var unanswered *unansweredError
+		if errors.As(err, &unanswered) {
 			e.t.Logf("emacs did not act on (kill-emacs) within %s: %v", DefaultTimeout, err)
 		}
-		cancel()
 		asked = true
 	}
 	// AND THEN WAIT FOR IT. Asking is not stopping.
@@ -2122,8 +2116,7 @@ func (e *Emacs) daemonLinkState() daemonLink {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
-		out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
-			"--eval", settleDaemonLinkForm)
+		out, err := e.emacsclient(ctx, teardownStopBound, settleDaemonLinkForm)
 		if err != nil {
 			e.t.Logf("emacs was asked whether it holds a daemon link and did not answer: %v", err)
 			return daemonLinkHeld
@@ -2183,10 +2176,7 @@ const settleDaemonLinkForm = `(cond
 // askDaemonToStop asks the daemon to exit through Emacs's own command and
 // reports what came back.
 func (e *Emacs) askDaemonToStop() {
-	ctx, cancel := context.WithTimeout(context.Background(), teardownStopBound)
-	out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
-		"--eval", daemonStopForm)
-	cancel()
+	out, err := e.emacsclient(context.Background(), teardownStopBound, daemonStopForm)
 	if err != nil {
 		// NOT DISCARDED. This is the ONE place Emacs asks the daemon to
 		// exit, and every daemon, shim and shim-lock the reaper then
@@ -2537,11 +2527,9 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 		return zero, fmt.Errorf("write the eval request: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), evalBound)
-	defer cancel()
 	call := fmt.Sprintf("(agent-repl-e2e--eval %q %q)", in, out)
 	started := time.Now()
-	_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", call)
+	_, err := e.emacsclient(context.Background(), evalBound, call)
 	e.recordEvalMax(time.Since(started))
 	if err != nil {
 		// THE FORM IS STILL RUNNING. Killing emacsclient closes one socket;
@@ -2573,6 +2561,33 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 	}
 	return res, nil
 }
+
+// emacsclient asks this Emacs's server to evaluate FORM and answers what it
+// printed, giving up once the call has run for BOUND or CTX ends.
+//
+// It is the ONE way this layer reaches the server socket: the heartbeat, the
+// boot's reachability probe, every scenario eval, the teardown's questions
+// and the stall evidence all ride it, so what counts against a call's bound
+// is decided here once rather than at each site.
+func (e *Emacs) emacsclient(ctx context.Context, bound time.Duration, form string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, bound)
+	defer cancel()
+	out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", form)
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return out, &unansweredError{bound: bound, err: err}
+	}
+	return out, err
+}
+
+// unansweredError is an emacsclient call that ran out its bound. Its message
+// is the call's own failure, which is what every site quoted before.
+type unansweredError struct {
+	bound time.Duration
+	err   error
+}
+
+func (u *unansweredError) Error() string { return u.err.Error() }
+func (u *unansweredError) Unwrap() error { return u.err }
 
 // nativeBacktraceBound is how long gdb is given to attach, unwind every
 // thread and detach. It is not a healthy-phase measurement: the process it
@@ -2784,10 +2799,7 @@ func (e *Emacs) writeNativeBacktrace(text string) {
 // message, or "" if it cannot be asked. It never fails a test on its own: it
 // is evidence about a failure that has already happened.
 func (e *Emacs) stackWhenStuck() string {
-	ctx, cancel := context.WithTimeout(context.Background(), HeartbeatBound)
-	defer cancel()
-	out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
-		"--eval", "(agent-repl-e2e--stack)")
+	out, err := e.emacsclient(context.Background(), HeartbeatBound, "(agent-repl-e2e--stack)")
 	if err != nil {
 		return fmt.Sprintf("\n  (emacs could not be asked what it was doing: %v)", err)
 	}
@@ -2832,9 +2844,7 @@ func (e *Emacs) profileWhenStuck() string {
 	var last error
 	broken := false
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), HeartbeatBound)
-		out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", form)
-		cancel()
+		out, err := e.emacsclient(context.Background(), HeartbeatBound, form)
 		if err != nil && !broken {
 			// A STALL THAT DOES NOT END ON ITS OWN still has to hand over its
 			// profile, and the profile can only be read from an Emacs that is

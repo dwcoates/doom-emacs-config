@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -335,5 +336,102 @@ func TestProbeServerAsksOnceUnderTheHeartbeatBound(t *testing.T) {
 				t.Fatalf("the probe's deadline was %s away, want HeartbeatBound (%s)", d, HeartbeatBound)
 			}
 		})
+	}
+}
+
+// blockingSandbox answers Exec only once its context ends, the way a real
+// emacsclient killed by CommandContext does, and records each argv.
+type blockingSandbox struct {
+	sandbox
+	calls [][]string
+}
+
+func (s *blockingSandbox) Exec(ctx context.Context, argv ...string) (string, error) {
+	s.calls = append(s.calls, argv)
+	<-ctx.Done()
+	return "", errors.New("signal: killed")
+}
+
+// TestEmacsclientAsksTheServerOnceAndNamesARunOutBound pins the one helper
+// every server call rides: one emacsclient against this Emacs's socket, a
+// call that runs out its bound reported as unanswered, and any other failure
+// passed through as itself.
+func TestEmacsclientAsksTheServerOnceAndNamesARunOutBound(t *testing.T) {
+	tests := []struct {
+		name           string
+		box            sandbox
+		wantErr        string
+		wantUnanswered bool
+	}{
+		{name: "an answer comes back as printed", box: &probeSandbox{}},
+		{name: "a failure that is not the bound passes through", box: &probeSandbox{execErr: errors.New("exit status 1")},
+			wantErr: "exit status 1"},
+		{name: "a call that runs out its bound is unanswered", box: &blockingSandbox{},
+			wantErr: "signal: killed", wantUnanswered: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			e := &Emacs{t: t, box: tt.box, ServerSocket: "/s/server"}
+
+			// Act
+			_, err := e.emacsclient(context.Background(), 10*time.Millisecond, "(emacs-pid)")
+
+			// Assert
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("emacsclient() = %v, want nil", err)
+			}
+			if tt.wantErr != "" && (err == nil || err.Error() != tt.wantErr) {
+				t.Fatalf("emacsclient() = %v, want %q", err, tt.wantErr)
+			}
+			var unanswered *unansweredError
+			if got := errors.As(err, &unanswered); got != tt.wantUnanswered {
+				t.Fatalf("emacsclient() unanswered = %v, want %v (err %v)", got, tt.wantUnanswered, err)
+			}
+			want := []string{"emacsclient", "--socket-name", "/s/server", "--eval", "(emacs-pid)"}
+			var calls [][]string
+			switch box := tt.box.(type) {
+			case *probeSandbox:
+				calls = box.calls
+			case *blockingSandbox:
+				calls = box.calls
+			}
+			if len(calls) != 1 || !slices.Equal(calls[0], want) {
+				t.Fatalf("Exec calls = %v, want exactly one %v", calls, want)
+			}
+		})
+	}
+}
+
+// emacsclientExec is a sandbox Exec of emacsclient written out by hand.
+var emacsclientExec = regexp.MustCompile(`\.Exec\([^\n]*"emacsclient"`)
+
+// TestEveryServerCallRidesTheEmacsclientHelper fails a hand-rolled
+// emacsclient Exec anywhere in the layer: such a call would be bounded by its
+// own rule rather than the one the helper decides.
+func TestEveryServerCallRidesTheEmacsclientHelper(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob the layer's sources: %v", err)
+	}
+
+	// Act
+	var sites []string
+	for _, f := range files {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		for _, m := range emacsclientExec.FindAll(src, -1) {
+			sites = append(sites, f+": "+string(m))
+		}
+	}
+
+	// Assert
+	// Spelled in two halves so this file's own source is not a match.
+	want := []string{"emacs_test.go: .Exec(ctx, " + `"emacs` + `client"`}
+	if !slices.Equal(sites, want) {
+		t.Fatalf("emacsclient Exec sites = %q, want only the helper's %q", sites, want)
 	}
 }
