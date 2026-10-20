@@ -13,6 +13,10 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
+(defconst agent-repl-test-status--dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "Directory holding this suite, for tests that read its own source.")
+
 ;;;; ---- Tests: Typed state setters (ws-set-agent-state, ws-set-repl-state) ----
 
 (ert-deftest agent-repl-test-ws-set-agent-state-nil-ws-errors ()
@@ -3565,31 +3569,52 @@ called and verifies the advice runs cleanly."
       (should (plist-get result :hook-present))
       (should-not pre-redisplay-function))))
 
+(defvar persp-activated-functions)
+
+(defmacro agent-repl-test-status--with-tabbar-install (frames &rest body)
+  "Run BODY around `agent-repl--install-fixed-height-tab-bar' in isolation.
+FRAMES is evaluated to the graphical frame list the installer sees.  Every
+global the installer writes (the tab-bar options, `default-frame-alist',
+`frame-inhibit-implied-resize' and the three hooks it appends to) is
+let-bound, so a test leaks nothing into the batch Emacs.  `tab-bar-mode'
+is stubbed to write its real one-line `default-frame-alist' entry, the
+watchdog cleanup and the log are stubbed out, and `pinned' collects each
+`agent-repl--tabbar-pin-frame' call as (FRAME ROWS)."
+  (declare (indent 1))
+  `(let ((auto-resize-tab-bars t)
+         (tab-bar-auto-width t)
+         (tab-bar-format nil)
+         (default-frame-alist nil)
+         (frame-inhibit-implied-resize t)
+         (window-setup-hook nil)
+         (window-configuration-change-hook nil)
+         (persp-activated-functions nil)
+         (frames ,frames)
+         (pinned nil))
+     (cl-letf (((symbol-function 'frame-list) (lambda () frames))
+               ((symbol-function 'display-graphic-p) (lambda (_frame) t))
+               ((symbol-function 'frame-parameter) (lambda (_frame _param) nil))
+               ((symbol-function 'agent-repl--tabbar-pin-frame)
+                (lambda (frame rows) (push (list frame rows) pinned) rows))
+               ((symbol-function 'tab-bar-mode)
+                (lambda (_arg)
+                  (setf (alist-get 'tab-bar-lines default-frame-alist) 1)))
+               ((symbol-function 'agent-repl--retire-redisplay-storm-watchdog)
+                (lambda () '(:timer-cancelled nil :hook-present nil)))
+               ((symbol-function 'agent-repl--log) #'ignore))
+       ,@body)))
+
 (ert-deftest agent-repl-test-fixed-height-tab-bar-default-covers-future-frames ()
   "Installation pins `default-frame-alist' even with no current GUI frame."
-  (let ((auto-resize-tab-bars t)
-        (tab-bar-auto-width t)
-        (tab-bar-format nil)
-        (default-frame-alist nil)
-        (frame-inhibit-implied-resize t)
-        (window-setup-hook nil)
-        (window-configuration-change-hook nil))
-    (cl-letf (((symbol-function 'frame-list) (lambda () nil))
-              ((symbol-function 'display-graphic-p) (lambda (_frame) nil))
-              ((symbol-function 'tab-bar-mode)
-               (lambda (_arg)
-                 (setf (alist-get 'tab-bar-lines default-frame-alist) 1)))
-              ((symbol-function 'agent-repl--retire-redisplay-storm-watchdog)
-               (lambda () '(:timer-cancelled nil :hook-present nil)))
-              ((symbol-function 'agent-repl--log) #'ignore))
-      (agent-repl--install-fixed-height-tab-bar)
-      (should-not auto-resize-tab-bars)
-      (should-not tab-bar-auto-width)
-      (should (eq 'agent-repl-workspace-tabline-items (car tab-bar-format)))
-      (should (= (alist-get 'tab-bar-lines default-frame-alist)
-                 agent-repl--tabline-row-count))
-      (should (eq t (alist-get 'tab-bar-lines-keep-state
-                               default-frame-alist))))))
+  (agent-repl-test-status--with-tabbar-install nil
+    (agent-repl--install-fixed-height-tab-bar)
+    (should-not auto-resize-tab-bars)
+    (should-not tab-bar-auto-width)
+    (should (eq 'agent-repl-workspace-tabline-items (car tab-bar-format)))
+    (should (= (alist-get 'tab-bar-lines default-frame-alist)
+               agent-repl--tabline-row-count))
+    (should (eq t (alist-get 'tab-bar-lines-keep-state
+                             default-frame-alist)))))
 
 (ert-deftest agent-repl-test-tabbar-apply-row-count-sets-selected-frame ()
   "The interactive command forces NS through zero, then reapplies ROWS."
@@ -3721,80 +3746,78 @@ test can assert the re-assertion left an already-correct frame alone, and
 
 (ert-deftest agent-repl-test-fixed-height-tab-bar-appends-reassert-hooks ()
   "Installation appends the re-assertion after Doom's persp handler."
-  ;; Arrange
-  (defvar persp-activated-functions)
-  (let ((auto-resize-tab-bars t)
-        (tab-bar-auto-width t)
-        (default-frame-alist nil)
-        (frame-inhibit-implied-resize t)
-        (window-setup-hook nil)
-        (window-configuration-change-hook nil)
-        (persp-activated-functions (list '+workspaces-load-tab-bar-data-h)))
-    (cl-letf (((symbol-function 'frame-list) (lambda () nil))
-              ((symbol-function 'display-graphic-p) (lambda (_frame) nil))
-              ((symbol-function 'tab-bar-mode) #'ignore)
-              ((symbol-function 'agent-repl--retire-redisplay-storm-watchdog)
-               (lambda () '(:timer-cancelled nil :hook-present nil)))
-              ((symbol-function 'agent-repl--log) #'ignore))
-      ;; Act
-      (agent-repl--install-fixed-height-tab-bar)
-      ;; Assert
-      (should (equal window-setup-hook
-                     '(agent-repl--tabbar-reassert-row-count)))
-      (should (equal persp-activated-functions
-                     '(+workspaces-load-tab-bar-data-h
-                       agent-repl--tabbar-reassert-row-count))))))
+  (agent-repl-test-status--with-tabbar-install nil
+    ;; Arrange
+    (setq persp-activated-functions (list '+workspaces-load-tab-bar-data-h))
+    ;; Act
+    (agent-repl--install-fixed-height-tab-bar)
+    ;; Assert
+    (should (equal window-setup-hook
+                   '(agent-repl--tabbar-reassert-row-count)))
+    (should (equal persp-activated-functions
+                   '(+workspaces-load-tab-bar-data-h
+                     agent-repl--tabbar-reassert-row-count)))))
 
 (ert-deftest agent-repl-test-fixed-height-tab-bar-hooks-window-changes ()
   "Installation puts the re-assertion on `window-configuration-change-hook'."
-  ;; Arrange
-  (defvar persp-activated-functions)
-  (let ((auto-resize-tab-bars t)
-        (tab-bar-auto-width t)
-        (default-frame-alist nil)
-        (frame-inhibit-implied-resize t)
-        (window-setup-hook nil)
-        (window-configuration-change-hook nil)
-        (persp-activated-functions nil))
-    (cl-letf (((symbol-function 'frame-list) (lambda () nil))
-              ((symbol-function 'display-graphic-p) (lambda (_frame) nil))
-              ((symbol-function 'tab-bar-mode) #'ignore)
-              ((symbol-function 'agent-repl--retire-redisplay-storm-watchdog)
-               (lambda () '(:timer-cancelled nil :hook-present nil)))
-              ((symbol-function 'agent-repl--log) #'ignore))
-      ;; Act
-      (agent-repl--install-fixed-height-tab-bar)
-      ;; Assert
-      (should (equal window-configuration-change-hook
-                     '(agent-repl--tabbar-reassert-row-count))))))
+  (agent-repl-test-status--with-tabbar-install nil
+    ;; Act
+    (agent-repl--install-fixed-height-tab-bar)
+    ;; Assert
+    (should (equal window-configuration-change-hook
+                   '(agent-repl--tabbar-reassert-row-count)))))
 
 (ert-deftest agent-repl-test-fixed-height-tab-bar-hides-on-webview-frame ()
   "Installation pins a frame already showing the webview to zero rows."
-  ;; Arrange
-  (let ((auto-resize-tab-bars t)
-        (tab-bar-auto-width t)
-        (default-frame-alist nil)
-        (frame-inhibit-implied-resize t)
-        (window-setup-hook nil)
-        (window-configuration-change-hook nil)
-        (pinned nil))
-    (cl-letf (((symbol-function 'frame-list) (lambda () '(frame-a)))
-              ((symbol-function 'display-graphic-p) (lambda (_frame) t))
-              ((symbol-function 'frame-parameter) (lambda (_frame _param) nil))
-              ((symbol-function 'agent-repl--tabbar-webview-shown-p)
-               (lambda (_frame) t))
-              ((symbol-function 'agent-repl--tabbar-pin-frame)
-               (lambda (frame rows) (push (list frame rows) pinned) rows))
-              ((symbol-function 'tab-bar-mode) #'ignore)
-              ((symbol-function 'agent-repl--retire-redisplay-storm-watchdog)
-               (lambda () '(:timer-cancelled nil :hook-present nil)))
-              ((symbol-function 'agent-repl--log) #'ignore))
+  (agent-repl-test-status--with-tabbar-install '(frame-a)
+    (cl-letf (((symbol-function 'agent-repl--tabbar-webview-shown-p)
+               (lambda (_frame) t)))
       ;; Act
       (agent-repl--install-fixed-height-tab-bar)
       ;; Assert
       (should (equal pinned '((frame-a 0))))
       (should (= agent-repl--tabline-row-count
                  (alist-get 'tab-bar-lines default-frame-alist))))))
+
+(ert-deftest agent-repl-test-tabbar-install-macro-leaks-no-hook ()
+  "The install harness restores every hook the installer appends to."
+  ;; Arrange
+  (let ((outer-window-hook window-configuration-change-hook)
+        (outer-setup-hook window-setup-hook))
+    ;; Act
+    (agent-repl-test-status--with-tabbar-install nil
+      (agent-repl--install-fixed-height-tab-bar))
+    ;; Assert
+    (should (eq outer-window-hook window-configuration-change-hook))
+    (should (eq outer-setup-hook window-setup-hook))))
+
+(ert-deftest agent-repl-test-tabbar-install-tests-share-the-harness ()
+  "Every installer test runs inside the shared install harness."
+  ;; Arrange
+  (let ((source (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "test-status.el"
+                                     agent-repl-test-status--dir))
+                  (buffer-string)))
+        (start 0)
+        (checked 0)
+        (bare nil))
+    ;; Act: each deftest whose body calls the installer must use the macro.
+    (while (string-match "^(ert-deftest \\([^ ]+\\)" source start)
+      (let* ((name (match-string 1 source))
+             (beg (match-beginning 0))
+             (end (or (string-match "^(ert-deftest " source (match-end 0))
+                      (length source)))
+             (body (substring source beg end)))
+        (when (string-match-p "(agent-repl--install-fixed-height-tab-bar)" body)
+          (setq checked (1+ checked))
+          (unless (string-match-p "agent-repl-test-status--with-tabbar-install"
+                                  body)
+            (push name bare)))
+        (setq start end)))
+    ;; Assert: the scan saw the installer tests, and none is hand-rolled.
+    (should (>= checked 4))
+    (should-not bare)))
 
 (ert-deftest agent-repl-test-tabbar-reassert-hides-bar-when-webview-shown ()
   "A two-row frame that now shows the webview is re-pinned to zero rows."
