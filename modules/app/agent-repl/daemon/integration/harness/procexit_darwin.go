@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"syscall"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -48,28 +47,42 @@ func takeExitEvent(pid int) (*exitEvent, error) {
 	return &exitEvent{kq: kq}, nil
 }
 
-// await waits for the exit, bounded by ctx's deadline.
+// await waits for the exit, until ctx ends.
+//
+// THE WAIT ENDS WITH CTX, NOT AT A DEADLINE READ OFF IT. A context bounded on
+// the granted clock (grantedclock.WithBound) has no wall deadline to hand the
+// kernel, so the queue also carries a user event that ctx's end triggers
+// (awakenOnEnd), and either event ends the wait.
 func (e *exitEvent) await(ctx context.Context) error {
-	var timeout *unix.Timespec
-	if deadline, ok := ctx.Deadline(); ok {
-		ts := unix.NsecToTimespec(max(time.Until(deadline), 0).Nanoseconds())
-		timeout = &ts
+	ended := unix.Kevent_t{Ident: exitQueueEndedIdent, Filter: unix.EVFILT_USER, Flags: unix.EV_ADD | unix.EV_CLEAR}
+	if _, err := unix.Kevent(e.kq, []unix.Kevent_t{ended}, nil, nil); err != nil {
+		return fmt.Errorf("register the context's end on the exit queue: %w", err)
 	}
+	release := awakenOnEnd(ctx, func() {
+		trigger := unix.Kevent_t{Ident: exitQueueEndedIdent, Filter: unix.EVFILT_USER, Fflags: unix.NOTE_TRIGGER}
+		_, _ = unix.Kevent(e.kq, []unix.Kevent_t{trigger}, nil, nil)
+	})
+	defer release()
 	events := make([]unix.Kevent_t, 1)
 	for {
-		n, err := unix.Kevent(e.kq, nil, events, timeout)
+		_, err := unix.Kevent(e.kq, nil, events, nil)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
 		if err != nil {
 			return fmt.Errorf("wait for the exit event: %w", err)
 		}
-		if n == 0 {
-			return context.DeadlineExceeded
+		if events[0].Filter == unix.EVFILT_USER {
+			return ctx.Err()
 		}
 		return nil
 	}
 }
+
+// exitQueueEndedIdent names the user event await's context end triggers. It
+// shares the queue with the process filter, whose idents are pids, and a
+// user event's ident is its own namespace.
+const exitQueueEndedIdent = 0
 
 // close releases the registration.
 func (e *exitEvent) close() {

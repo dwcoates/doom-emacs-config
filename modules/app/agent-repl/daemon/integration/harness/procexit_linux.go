@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -36,23 +35,33 @@ func takeExitEvent(pid int) (*exitEvent, error) {
 	return &exitEvent{fd: fd}, nil
 }
 
-// await waits for the exit, bounded by ctx's deadline.
+// await waits for the exit, until ctx ends.
+//
+// THE WAIT ENDS WITH CTX, NOT AT A DEADLINE READ OFF IT. A context bounded on
+// the granted clock (grantedclock.WithBound) has no wall deadline to hand the
+// kernel, so the poll also watches an eventfd that ctx's end writes
+// (awakenOnEnd), and either descriptor ends the wait.
 func (e *exitEvent) await(ctx context.Context) error {
-	timeout := -1
-	if deadline, ok := ctx.Deadline(); ok {
-		timeout = int(max(time.Until(deadline), 0).Milliseconds())
+	ended, err := unix.Eventfd(0, unix.EFD_CLOEXEC)
+	if err != nil {
+		return fmt.Errorf("eventfd for the context's end: %w", err)
 	}
-	fds := []unix.PollFd{{Fd: int32(e.fd), Events: unix.POLLIN}}
+	defer unix.Close(ended)
+	release := awakenOnEnd(ctx, func() {
+		_, _ = unix.Write(ended, []byte{1, 0, 0, 0, 0, 0, 0, 0})
+	})
+	defer release()
+	fds := []unix.PollFd{{Fd: int32(e.fd), Events: unix.POLLIN}, {Fd: int32(ended), Events: unix.POLLIN}}
 	for {
-		n, err := unix.Poll(fds, timeout)
+		_, err := unix.Poll(fds, -1)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
 		if err != nil {
 			return fmt.Errorf("wait for the exit: %w", err)
 		}
-		if n == 0 {
-			return context.DeadlineExceeded
+		if fds[0].Revents == 0 {
+			return ctx.Err()
 		}
 		return nil
 	}
