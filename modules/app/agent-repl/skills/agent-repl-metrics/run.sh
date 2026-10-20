@@ -265,9 +265,13 @@ case "${1:-}" in
       | table($p50) as $q50 | table($p90) as $q90 | table($p99) as $q99
       | ($counts | map(.k) | unique)[] as $k
       | ([$counts[] | select(.k == $k and .o == "ok") | .n] | add // 0) as $ok
+      | ([$counts[] | select(.k == $k and .o == "failed") | .n] | add // 0) as $failed
+      # A phase that recorded nothing in the window (its series is older than
+      # the window) is not a restart of the window: it gets no row.
+      | select($ok + $failed > 0)
       | [($k | split("|")[]),
          $ok,
-         ([$counts[] | select(.k == $k and .o == "failed") | .n] | add // 0),
+         $failed,
          (if $ok > 0 and $sum[$k] != null then ($sum[$k] / $ok | round2) else "-" end),
          ($q50[$k] // "-"), ($q90[$k] // "-"), ($q99[$k] // "-")]
       | @tsv')" || die "could not read the restarts"

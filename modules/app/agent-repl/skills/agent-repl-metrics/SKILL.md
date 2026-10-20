@@ -17,7 +17,7 @@ Answers performance questions about agent-repl from stored history: what a laten
 | `latency <name> [days]` | The latency's p95 per deployed version over the last `days` (default 30). |
 | `regression <name> [seconds] [days]` | The first deployed version whose p95 of the latency went over `seconds` (default: the latency's own threshold). |
 | `trend <process> [days]` | A process group's daily mean CPU and memory. |
-| `restarts [window]` | Every restart phase's ok and failed counts, mean, p50, p90 and p99 by cause, over the last `window`: whole days, or a duration such as `30m`, `6h` or `7d` (default 7 days). |
+| `restarts [window]` | Every restart phase's ok and failed counts, mean, p50, p90 and p99 by cause, over the last `window`: whole days, or a duration such as `30m`, `6h` or `7d` (default 7 days). A phase that recorded nothing in the window gets no row. |
 | `restart <restart> <phase> [days]` | The restart phase's p95 per deployed version over the last `days` (default 30). |
 | `query <promql>` | Evaluate PromQL now. |
 | `add <what>` | Add a metric for `what`, per step 4. |
