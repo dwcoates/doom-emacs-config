@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -315,7 +316,8 @@ func TestProbeServerAsksOnceUnderTheHeartbeatBound(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			box := &probeSandbox{execErr: tt.execErr}
-			e := &Emacs{t: t, box: box, proc: probeProc{exited: tt.exited}, ServerSocket: "/s/server"}
+			e := &Emacs{t: t, box: box, proc: probeProc{exited: tt.exited}, ServerSocket: "/s/server",
+				cpuStall: func() (time.Duration, error) { return 0, nil }}
 
 			// Act
 			err := e.probeServer()
@@ -331,9 +333,168 @@ func TestProbeServerAsksOnceUnderTheHeartbeatBound(t *testing.T) {
 			if len(box.calls) != 1 || !slices.Equal(box.calls[0], want) {
 				t.Fatalf("Exec calls = %v, want exactly one %v", box.calls, want)
 			}
-			if d := box.deadlines[0]; d > HeartbeatBound || d < HeartbeatBound-time.Second {
-				t.Fatalf("the probe's deadline was %s away, want HeartbeatBound (%s)", d, HeartbeatBound)
+			// NO WALL DEADLINE: HeartbeatBound is kept on the granted clock,
+			// and a context deadline would charge the probe for time the
+			// container was starved.
+			if len(box.deadlines) != 0 {
+				t.Fatalf("the probe carried a wall deadline %s away, want none", box.deadlines[0])
 			}
 		})
+	}
+}
+
+// killedErr is what a real emacsclient killed by CommandContext reports.
+var killedErr = errors.New("signal: killed")
+
+// scriptedSandbox answers each Exec by its script and records its argv: with
+// RELEASE set it answers once RELEASE closes, with BLOCK it answers only when
+// its context ends, and otherwise at once with execErr.
+type scriptedSandbox struct {
+	sandbox
+	execErr error
+	block   bool
+	release <-chan struct{}
+	calls   [][]string
+}
+
+func (s *scriptedSandbox) Exec(ctx context.Context, argv ...string) (string, error) {
+	s.calls = append(s.calls, argv)
+	switch {
+	case s.release != nil:
+		select {
+		case <-s.release:
+			return "answer", nil
+		case <-ctx.Done():
+			return "", killedErr
+		}
+	case s.block:
+		<-ctx.Done()
+		return "", killedErr
+	}
+	return "answer", s.execErr
+}
+
+// stallScript is a container CPU stall a test scripts: each reading after
+// the first adds PER to it, and a reading at or past FAILAT (when set) fails.
+// RELEASE, when set, closes once READS readings have been taken.
+type stallScript struct {
+	per     time.Duration
+	failAt  int
+	release chan struct{}
+	after   int
+	reads   int
+	total   time.Duration
+}
+
+func (s *stallScript) read() (time.Duration, error) {
+	s.reads++
+	if s.failAt != 0 && s.reads >= s.failAt {
+		return 0, errors.New("EIO")
+	}
+	if s.reads > 1 {
+		s.total += s.per
+	}
+	if s.release != nil && s.reads == s.after {
+		close(s.release)
+	}
+	return s.total, nil
+}
+
+// TestEmacsclientChargesItsBoundOnlyGrantedTime pins the one helper every
+// server call rides: one emacsclient against this Emacs's socket, a call the
+// granted clock gives more than its bound reported as unanswered, a call the
+// container starved never given up on, and the clock's own failures loud.
+func TestEmacsclientChargesItsBoundOnlyGrantedTime(t *testing.T) {
+	tests := []struct {
+		name           string
+		box            func(stall *stallScript) *scriptedSandbox
+		stall          *stallScript
+		wantOut        string
+		wantErr        string
+		wantUnanswered bool
+		wantCalls      int
+	}{
+		{name: "an answer comes back as printed", box: func(*stallScript) *scriptedSandbox { return &scriptedSandbox{} },
+			stall: &stallScript{}, wantOut: "answer", wantCalls: 1},
+		{name: "a failure that is not the bound passes through",
+			box:   func(*stallScript) *scriptedSandbox { return &scriptedSandbox{execErr: errors.New("exit status 1")} },
+			stall: &stallScript{}, wantOut: "answer", wantErr: "exit status 1", wantCalls: 1},
+		{name: "a call granted more than its bound is unanswered",
+			box:   func(*stallScript) *scriptedSandbox { return &scriptedSandbox{block: true} },
+			stall: &stallScript{}, wantErr: "no answer within 10ms granted", wantUnanswered: true, wantCalls: 1},
+		{name: "a call the container starved past its bound is waited out",
+			box: func(stall *stallScript) *scriptedSandbox {
+				stall.release = make(chan struct{})
+				return &scriptedSandbox{release: stall.release}
+			},
+			stall: &stallScript{per: time.Hour, after: 4}, wantOut: "answer", wantCalls: 1},
+		{name: "a stall that cannot be read refuses the call before it is made",
+			box:   func(*stallScript) *scriptedSandbox { return &scriptedSandbox{} },
+			stall: &stallScript{failAt: 1}, wantErr: "to start a granted clock: EIO", wantCalls: 0},
+		{name: "a stall that stops being readable stops the call",
+			box:   func(*stallScript) *scriptedSandbox { return &scriptedSandbox{block: true} },
+			stall: &stallScript{failAt: 2}, wantErr: "read the container's CPU stall: EIO (emacsclient, stopped for it: signal: killed)", wantCalls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			box := tt.box(tt.stall)
+			e := &Emacs{t: t, box: box, ServerSocket: "/s/server", cpuStall: tt.stall.read}
+
+			// Act
+			out, _, err := e.emacsclient(context.Background(), 10*time.Millisecond, "(emacs-pid)")
+
+			// Assert
+			if out != tt.wantOut {
+				t.Fatalf("emacsclient() out = %q, want %q", out, tt.wantOut)
+			}
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("emacsclient() = %v, want nil", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("emacsclient() = %v, want an error naming %q", err, tt.wantErr)
+			}
+			var unanswered *unansweredError
+			if got := errors.As(err, &unanswered); got != tt.wantUnanswered {
+				t.Fatalf("emacsclient() unanswered = %v, want %v (err %v)", got, tt.wantUnanswered, err)
+			}
+			want := []string{"emacsclient", "--socket-name", "/s/server", "--eval", "(emacs-pid)"}
+			if len(box.calls) != tt.wantCalls || (tt.wantCalls == 1 && !slices.Equal(box.calls[0], want)) {
+				t.Fatalf("Exec calls = %v, want %d of %v", box.calls, tt.wantCalls, want)
+			}
+		})
+	}
+}
+
+// emacsclientExec is a sandbox Exec of emacsclient written out by hand.
+var emacsclientExec = regexp.MustCompile(`\.Exec\([^\n]*"emacsclient"`)
+
+// TestEveryServerCallRidesTheEmacsclientHelper fails a hand-rolled
+// emacsclient Exec anywhere in the layer: such a call would be bounded by its
+// own rule rather than the one the helper decides.
+func TestEveryServerCallRidesTheEmacsclientHelper(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob the layer's sources: %v", err)
+	}
+
+	// Act
+	var sites []string
+	for _, f := range files {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		for _, m := range emacsclientExec.FindAll(src, -1) {
+			sites = append(sites, f+": "+string(m))
+		}
+	}
+
+	// Assert
+	// Spelled in two halves so this file's own source is not a match.
+	want := []string{"emacs_test.go: .Exec(ctx, " + `"emacs` + `client"`}
+	if !slices.Equal(sites, want) {
+		t.Fatalf("emacsclient Exec sites = %q, want only the helper's %q", sites, want)
 	}
 }

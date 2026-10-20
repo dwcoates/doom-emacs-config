@@ -84,6 +84,14 @@ import (
 // its stack was taken). 1.25s was ~1.3x the loaded maximum; 3s is ~3x the
 // 987ms one, and still well under the 5s command-loop block this exists to
 // catch.
+//
+// KEPT ON THE GRANTED CLOCK since 2026-10-20 (grantedclock_test.go): a probe
+// is charged only the time the container was not starved. On wall time a
+// merge gate failed TestEmacsUnknownRosterArmIsRefusedLoudly as EMACS WEDGED
+// at 3.196s while the container was throttled in 32 of 32 periods and Emacs
+// sat waiting on a starved Xvfb. The measurements above were taken on wall
+// time, which is never less than granted time, so the bound only loosened
+// where the container had no CPU to give.
 const HeartbeatBound = 3 * time.Second
 
 // evalBound is how long ONE `emacsclient --eval` of a SCENARIO'S OWN FORM may
@@ -127,6 +135,11 @@ const HeartbeatBound = 3 * time.Second
 // RE-MEASURED UNDER testrun (2026-10-06), as HeartbeatBound was: five
 // full-suite runs reported eval-max tops of 861, 826, 733, 712 and 649ms, so
 // 1.25s was ~1.5x the loaded maximum. 2.6s is ~3x the 861ms one.
+//
+// KEPT ON THE GRANTED CLOCK since 2026-10-20, as HeartbeatBound is: a merge
+// gate killed a registry await's eval at 2.6s of wall while Emacs itself sat
+// runnable in a starved container (TestEmacsSubmitWithNoDaemonIsRefusedLoudly).
+// The `eval-max` phase reports granted time.
 const evalBound = 2600 * time.Millisecond
 
 // daemonStopForm is the teardown's stop, WAITED ON.
@@ -343,6 +356,11 @@ type Emacs struct {
 
 	proc sandboxProc
 
+	// cpuStall reads the container's cumulative CPU stall, which every
+	// server call's granted clock is kept on (grantedclock_test.go).
+	// StartEmacs sets it to containerCPUStall.
+	cpuStall func() (time.Duration, error)
+
 	// evalSeq names each eval's request/response file pair uniquely.
 	evalSeq atomic.Uint64
 
@@ -415,6 +433,9 @@ type Emacs struct {
 type phase struct {
 	name string
 	took time.Duration
+	// wall is set for a phase measured on the granted clock, whose took is
+	// the granted time its bound is kept on.
+	wall time.Duration
 }
 
 // record adds one measured phase.
@@ -424,6 +445,13 @@ func (e *Emacs) record(name string, took time.Duration) {
 	e.phases = append(e.phases, phase{name: name, took: took})
 }
 
+// recordGranted notes a phase measured on the granted clock.
+func (e *Emacs) recordGranted(name string, span grantedSpan) {
+	e.phasesMu.Lock()
+	defer e.phasesMu.Unlock()
+	e.phases = append(e.phases, phase{name: name, took: span.Granted(), wall: span.Wall})
+}
+
 // reportPhases logs every measured duration, ALWAYS -- a passing run is
 // exactly the run whose numbers the bounds are derived from, so they must not
 // be visible only on failure. `go test -v` is where the measurement is read.
@@ -431,14 +459,18 @@ func (e *Emacs) reportPhases() {
 	e.phasesMu.Lock()
 	defer e.phasesMu.Unlock()
 	for _, p := range e.phases {
+		if p.wall != 0 {
+			e.t.Logf("emacs phase %s took %s granted of %s wall", p.name, p.took.Round(time.Millisecond), p.wall.Round(time.Millisecond))
+			continue
+		}
 		e.t.Logf("emacs phase %s took %s", p.name, p.took.Round(time.Millisecond))
 	}
 	if max := e.evalMax.Load(); max > 0 {
-		e.t.Logf("emacs phase eval-max took %s (bound %s)",
+		e.t.Logf("emacs phase eval-max took %s granted (bound %s)",
 			time.Duration(max).Round(time.Millisecond), evalBound)
 	}
 	if max := e.heartbeatMax.Load(); max > 0 {
-		e.t.Logf("emacs phase heartbeat-probe-max took %s (bound %s)",
+		e.t.Logf("emacs phase heartbeat-probe-max took %s granted (bound %s)",
 			time.Duration(max).Round(time.Millisecond), HeartbeatBound)
 	}
 }
@@ -537,6 +569,13 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		MultiRepoRoot:      filepath.Join(root, "multi-repo"),
 		wedged:             make(chan struct{}),
 		stopDaemon:         opts.StopDaemon,
+		cpuStall:           containerCPUStall,
+	}
+	// EVERY SERVER CALL'S BOUND IS KEPT ON THE CONTAINER'S CPU STALL, so a
+	// container that cannot report it cannot run this layer: refused here,
+	// once, rather than as every call's failure.
+	if _, err := e.cpuStall(); err != nil {
+		t.Fatalf("the container's CPU stall cannot be read, and every Emacs bound is kept on it: %v", err)
 	}
 	// The scratch root is unique per test (os.MkdirTemp), so an argv naming
 	// it belongs to this scenario and to nothing else.
@@ -1499,9 +1538,7 @@ func (e *Emacs) awaitServer() {
 
 // probeServer is awaitServer's one probe, answering why it failed.
 func (e *Emacs) probeServer() error {
-	ctx, cancel := context.WithTimeout(context.Background(), HeartbeatBound)
-	defer cancel()
-	_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", "(emacs-pid)")
+	_, _, err := e.emacsclient(context.Background(), HeartbeatBound, "(emacs-pid)")
 	switch {
 	case err == nil:
 		return nil
@@ -1570,13 +1607,11 @@ func (e *Emacs) armHeartbeat() {
 				return
 			case <-ticker.C:
 			}
-			probe, probeCancel := context.WithTimeout(ctx, HeartbeatBound)
 			started := time.Now()
 			cpuBefore, cpuBeforeErr := readCgroupCPUStat(cgroupCPUStatPath)
-			out, err := e.box.Exec(probe, "emacsclient", "--socket-name", e.ServerSocket, "--eval", heartbeatProbe)
-			probeCancel()
+			out, span, err := e.emacsclient(ctx, HeartbeatBound, heartbeatProbe)
 			if err == nil {
-				if took := int64(time.Since(started)); took > e.heartbeatMax.Load() {
+				if took := int64(span.Granted()); took > e.heartbeatMax.Load() {
 					e.heartbeatMax.Store(took)
 				}
 				prompt := heartbeatPrompt(out)
@@ -1592,17 +1627,18 @@ func (e *Emacs) armHeartbeat() {
 			if ctx.Err() != nil || e.proc.Exited() {
 				return
 			}
-			e.declareWedged(fmt.Sprintf("emacs did not answer a heartbeat probe within %s: %v%s",
-				HeartbeatBound, err, cpuOverProbe(cpuBefore, cpuBeforeErr, time.Since(started))))
+			e.declareWedged(fmt.Sprintf("emacs did not answer a heartbeat probe: %v%s",
+				err, cpuOverProbe(cpuBefore, cpuBeforeErr, time.Since(started))))
 			return
 		}
 	}()
 }
 
 // cgroupCPUStatPath is the sandbox container's own CPU accounting (cgroup
-// v2): the container is CPU-limited, and a probe that went unanswered while
-// Emacs sat idle in select is told apart from a wedge by whether the
-// container was being throttled across it.
+// v2). It is EVIDENCE, not the verdict: the probe's bound is already kept on
+// the granted clock, which charges no time the container spent starved, and
+// this says on top what the container's quota did across a probe that still
+// went unanswered.
 const cgroupCPUStatPath = "/sys/fs/cgroup/cpu.stat"
 
 // readCgroupCPUStat reads a cgroup v2 cpu.stat file into its counters.
@@ -2076,16 +2112,14 @@ func (e *Emacs) stop() {
 			e.noteTeardownStep("no daemon link was held, so no daemon stop was asked")
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 		// `kill-emacs' never answers by design -- Emacs exits with the client
 		// still waiting -- so only a TIMEOUT is worth reporting: it means
 		// Emacs neither answered nor died, and the reaper is about to find it.
-		_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
-			"--eval", "(kill-emacs)")
-		if err != nil && ctx.Err() != nil {
+		_, _, err := e.emacsclient(context.Background(), DefaultTimeout, "(kill-emacs)")
+		var unanswered *unansweredError
+		if errors.As(err, &unanswered) {
 			e.t.Logf("emacs did not act on (kill-emacs) within %s: %v", DefaultTimeout, err)
 		}
-		cancel()
 		asked = true
 	}
 	// AND THEN WAIT FOR IT. Asking is not stopping.
@@ -2122,8 +2156,7 @@ func (e *Emacs) daemonLinkState() daemonLink {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
-		out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
-			"--eval", settleDaemonLinkForm)
+		out, _, err := e.emacsclient(ctx, teardownStopBound, settleDaemonLinkForm)
 		if err != nil {
 			e.t.Logf("emacs was asked whether it holds a daemon link and did not answer: %v", err)
 			return daemonLinkHeld
@@ -2183,10 +2216,7 @@ const settleDaemonLinkForm = `(cond
 // askDaemonToStop asks the daemon to exit through Emacs's own command and
 // reports what came back.
 func (e *Emacs) askDaemonToStop() {
-	ctx, cancel := context.WithTimeout(context.Background(), teardownStopBound)
-	out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
-		"--eval", daemonStopForm)
-	cancel()
+	out, _, err := e.emacsclient(context.Background(), teardownStopBound, daemonStopForm)
 	if err != nil {
 		// NOT DISCARDED. This is the ONE place Emacs asks the daemon to
 		// exit, and every daemon, shim and shim-lock the reaper then
@@ -2537,12 +2567,9 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 		return zero, fmt.Errorf("write the eval request: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), evalBound)
-	defer cancel()
 	call := fmt.Sprintf("(agent-repl-e2e--eval %q %q)", in, out)
-	started := time.Now()
-	_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", call)
-	e.recordEvalMax(time.Since(started))
+	_, span, err := e.emacsclient(context.Background(), evalBound, call)
+	e.recordEvalMax(span.Granted())
 	if err != nil {
 		// THE FORM IS STILL RUNNING. Killing emacsclient closes one socket;
 		// it does not unwind the elisp underneath, and Emacs answers a fresh
@@ -2573,6 +2600,73 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 	}
 	return res, nil
 }
+
+// emacsclient asks this Emacs's server to evaluate FORM and answers what it
+// printed, giving up once the call has been GRANTED more than BOUND (see
+// grantedclock_test.go) or CTX ends. SPAN is how long the call took on the
+// granted clock, which is what the layer's bounds are measured in.
+//
+// It is the ONE way this layer reaches the server socket: the heartbeat, the
+// boot's reachability probe, every scenario eval, the teardown's questions
+// and the stall evidence all ride it, so what counts against a call's bound
+// is decided here once rather than at each site -- and it is never the time
+// the container spent with no CPU to give the call.
+func (e *Emacs) emacsclient(ctx context.Context, bound time.Duration, form string) (out string, span grantedSpan, err error) {
+	clock, err := e.startGrantedClock()
+	if err != nil {
+		return "", grantedSpan{}, err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type reply struct {
+		out string
+		err error
+	}
+	replies := make(chan reply, 1)
+	go func() {
+		out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", form)
+		replies <- reply{out: out, err: err}
+	}()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	r, answered, span, waitErr := awaitGranted(replies, ticker.C, clock, bound)
+	if answered {
+		if waitErr != nil {
+			return r.out, span, waitErr
+		}
+		return r.out, span, r.err
+	}
+	cancel()
+	r = <-replies
+	switch {
+	case r.err == nil:
+		// It answered in the instant between the clock's last reading and
+		// the kill, so the bound was beaten after all.
+		return r.out, span, nil
+	case errors.Is(waitErr, errGrantedBoundRunOut):
+		return r.out, span, &unansweredError{bound: bound, span: span, err: r.err}
+	default:
+		return r.out, span, fmt.Errorf("%w (emacsclient, stopped for it: %v)", waitErr, r.err)
+	}
+}
+
+// startGrantedClock starts a granted clock on this container's CPU stall.
+func (e *Emacs) startGrantedClock() (*grantedClock, error) {
+	return startGrantedClock(time.Now, e.cpuStall)
+}
+
+// unansweredError is an emacsclient call the granted clock gave more than
+// its bound without an answer.
+type unansweredError struct {
+	bound time.Duration
+	span  grantedSpan
+	err   error
+}
+
+func (u *unansweredError) Error() string {
+	return fmt.Sprintf("no answer within %s granted (%s): %v", u.bound, u.span, u.err)
+}
+func (u *unansweredError) Unwrap() error { return u.err }
 
 // nativeBacktraceBound is how long gdb is given to attach, unwind every
 // thread and detach. It is not a healthy-phase measurement: the process it
@@ -2784,10 +2878,7 @@ func (e *Emacs) writeNativeBacktrace(text string) {
 // message, or "" if it cannot be asked. It never fails a test on its own: it
 // is evidence about a failure that has already happened.
 func (e *Emacs) stackWhenStuck() string {
-	ctx, cancel := context.WithTimeout(context.Background(), HeartbeatBound)
-	defer cancel()
-	out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
-		"--eval", "(agent-repl-e2e--stack)")
+	out, _, err := e.emacsclient(context.Background(), HeartbeatBound, "(agent-repl-e2e--stack)")
 	if err != nil {
 		return fmt.Sprintf("\n  (emacs could not be asked what it was doing: %v)", err)
 	}
@@ -2832,9 +2923,7 @@ func (e *Emacs) profileWhenStuck() string {
 	var last error
 	broken := false
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), HeartbeatBound)
-		out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", form)
-		cancel()
+		out, _, err := e.emacsclient(context.Background(), HeartbeatBound, form)
 		if err != nil && !broken {
 			// A STALL THAT DOES NOT END ON ITS OWN still has to hand over its
 			// profile, and the profile can only be read from an Emacs that is
@@ -2964,8 +3053,8 @@ func summarize(form string) string {
 //
 // This is this layer's only wait primitive, and it is a POLL rather than a
 // subscription because Emacs state has no push channel out. It never sleeps
-// to synchronize: the bound is a real deadline and the interval is the
-// package's own pollInterval. A wedge short-circuits it, so a hung Emacs
+// to synchronize: the bound is a real deadline, kept on the granted clock,
+// and the interval is the package's own pollInterval. A wedge short-circuits it, so a hung Emacs
 // fails as a hang rather than as whatever the scenario happened to be
 // waiting for.
 func (e *Emacs) AwaitEval(what, form string, pred func(json.RawMessage) bool) json.RawMessage {
@@ -2983,14 +3072,20 @@ func (e *Emacs) AwaitEvalFor(bound time.Duration, what, form string, pred func(j
 	// in this layer must be a stated multiple of an OBSERVED healthy
 	// maximum, and the only run that produces that observation is a run
 	// that passed.
-	started := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), bound)
-	defer cancel()
+	//
+	// THE BOUND IS KEPT ON THE GRANTED CLOCK, as every eval inside it is:
+	// what is awaited is produced by the scenario's own processes -- the
+	// daemon pushing, the shim answering, Emacs drawing -- and time the
+	// container gave none of them a CPU is not time they failed to do it in.
+	clock, err := e.startGrantedClock()
+	if err != nil {
+		e.t.Fatalf("await %s: %v", what, err)
+	}
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
-	var lastValue json.RawMessage
+	var lastValue, satisfied json.RawMessage
 	var lastErr error
-	for {
+	span, err := pollUntilGranted(ticker.C, clock, bound, func() bool {
 		if e.isWedged() {
 			e.t.Fatalf("await %s: emacs wedged: %s", what, e.wedgeCauseString())
 		}
@@ -3008,20 +3103,24 @@ func (e *Emacs) AwaitEvalFor(bound time.Duration, what, form string, pred func(j
 			lastErr = nil
 			lastValue = res.Value
 			if pred(res.Value) {
-				e.record("await "+what, time.Since(started))
-				return res.Value
+				satisfied = res.Value
+				return true
 			}
 		}
-		select {
-		case <-ctx.Done():
-			if lastErr != nil {
-				e.t.Fatalf("await %s: never satisfied within %s; last attempt failed: %v", what, bound, lastErr)
-			}
-			e.t.Fatalf("await %s: never satisfied within %s; last value was %s", what, bound, lastValue)
-			return nil
-		case <-ticker.C:
-		}
+		return false
+	})
+	switch {
+	case err == nil:
+		e.recordGranted("await "+what, span)
+		return satisfied
+	case !errors.Is(err, errGrantedBoundRunOut):
+		e.t.Fatalf("await %s: %v", what, err)
+	case lastErr != nil:
+		e.t.Fatalf("await %s: never satisfied within %s granted (%s); last attempt failed: %v", what, bound, span, lastErr)
+	default:
+		e.t.Fatalf("await %s: never satisfied within %s granted (%s); last value was %s", what, bound, span, lastValue)
 	}
+	return nil
 }
 
 // AwaitTrue waits for a form to become non-nil, which covers most readbacks.

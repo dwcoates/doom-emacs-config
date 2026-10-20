@@ -305,6 +305,9 @@ wedged Emacs looks exactly like a slow one.
   clears itself is still the recursion defect.
 - The heartbeat is armed for the whole life of the Emacs process, including
   teardown, because the recursion defect fired during close/kill.
+- The bound is kept on **the granted clock**, never on wall time (see the
+  section of that name below), so a container with no CPU to give the probe
+  cannot make it read as a wedge.
 - A wedge also hands over a **native backtrace of every thread**, taken from
   outside the process with gdb while the stall is still live. It is the only
   witness that survives an Emacs answering nothing at all; the section below
@@ -962,6 +965,47 @@ bounds from. A bound here cannot quietly drift back into a guess.
 | `doomStageBound` | 7ms → **45ms mean, 93ms max today** | 5s | — | Down from 60s. The staged `.local/cache` carries 591 `.eln` files (58 MiB) now rather than 228 KiB, so the copy is no longer free — but there is still no slow-copy regime to bound: this exists to catch a copy that cannot finish, and it fails inside the test rather than at the suite's timeout. |
 | `evalBound` | **409ms** alone; 861ms under testrun (2026-10-06) | 2.6s | ~3x of the loaded max | **New.** A scenario's own `emacsclient --eval` was bounded by `HeartbeatBound` — the same conflation `daemonLinkBound` was split out of `emacsBootBound` to fix. The heartbeat probe is `(emacs-pid)` and does nothing; a scenario's form opens panels and creates an xwidget webview. It lands on the same number today by coincidence of two similar measurements, not by sharing one. |
 | `xvfbReadyBound` | 121ms | 1s | ~8x | **New.** The 121ms is always the FIRST Xvfb in a fresh container, which pays once for creating `/tmp/.X11-unix`; the steady state is 21-62ms, and the multiple is taken against the slow first start. |
+
+### The granted clock
+
+**Every bound on how long Emacs takes to answer is charged only the time the
+container was not starved.** Wall time is not Emacs's time when the container
+is short of CPU: two Emacsen share a two-CPU container under testrun, each
+with its own WebKit, Xvfb, daemon and shim, so one scenario's busy moment
+leaves the other's processes runnable with nowhere to run. On 2026-10-20 two
+merge gates failed that way:
+
+- `TestEmacsUnknownRosterArmIsRefusedLoudly` was reported EMACS WEDGED at
+  3.196s of wall while the container was throttled in 32 of 32 periods, and
+  Emacs's main thread sat in `XGetWindowProperty` waiting on an Xvfb with no
+  CPU to answer it.
+- `TestEmacsSubmitWithNoDaemonIsRefusedLoudly` had its registry await's eval
+  killed at 2.6s of wall while Emacs itself sat in state R.
+
+The clock (`e2e/grantedclock_test.go`) is wall time less the container's
+cumulative CPU stall: the "some" total of the cgroup's own `cpu.pressure`
+(PSI), which is the time at least one task in the container was runnable
+without a CPU. It counts the container's own quota throttling and a Docker
+VM too busy to grant the quota alike. Measured on the sandbox's kernel
+(`7.0.12-linuxkit`), three spinners under a 0.5-CPU cap: "some" grew 2.53s
+of a 3.0s wall.
+
+- **Kept on it:** every `emacsclient` call (`Emacs.emacsclient`, the one way
+  the layer reaches the server: the heartbeat, the boot probe, every eval,
+  the teardown's questions, the stall evidence) and `AwaitEvalFor`'s bound.
+  A selftest fails any hand-rolled `emacsclient` exec.
+- **The container's stall, not one process's, by design.** An answer from
+  Emacs can wait on any process of the scenario, and a stall charged per
+  process would have to name every one of them to never charge starvation to
+  Emacs. The union over the container cannot miss one. Its only cost is that
+  a real hang is reported later while the container is saturated, never
+  sooner.
+- `StartEmacs` refuses to run on a container whose `cpu.pressure` cannot be
+  read, because every bound above is kept on it.
+- `eval-max`, `heartbeat-probe-max` and every `await` phase report granted
+  time. The bounds in the table above were measured on wall time, which is
+  never less, so none of them loosened except where the container was
+  starved.
 
 ### Subr trampolines are built once per container, not once per scenario
 
