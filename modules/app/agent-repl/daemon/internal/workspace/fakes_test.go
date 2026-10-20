@@ -3122,6 +3122,18 @@ func (d *fakeDB) SetVendorSessionID(_ context.Context, id ids.WorkspaceID, vendo
 	return replaced, nil
 }
 
+// SetSessionModel records the workspace's model on the fake's session row; a
+// workspace with no row is wsm.ErrNotFound, as the store answers it.
+func (d *fakeDB) SetSessionModel(_ context.Context, id ids.WorkspaceID, model string) error {
+	session, ok := d.sessions[id]
+	if !ok {
+		return fmt.Errorf("fake: session for workspace %s: %w", id, wsm.ErrNotFound)
+	}
+	session.Model = model
+	d.sessions[id] = session
+	return nil
+}
+
 // SetAccount takes the session's account; the fake feed draws nothing from it.
 func (f *fakeFeed) SetAccount(ids.WorkspaceID, string) {}
 

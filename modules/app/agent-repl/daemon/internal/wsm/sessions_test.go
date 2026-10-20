@@ -524,6 +524,60 @@ func TestSetVendorSessionIDRefusesAWorkspaceWithNoSession(t *testing.T) {
 	}
 }
 
+func TestSetSessionModelRecordsTheChosenModelAndKeepsTheRestOfTheRow(t *testing.T) {
+	// Arrange
+	db, _ := testStore(t)
+	ws := vendorSession(t, db, "vendor-start")
+
+	// Act
+	err := db.SetSessionModel(context.Background(), ws, "haiku")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetSessionModel: %v", err)
+	}
+	session, _, err := db.Session(context.Background(), ws)
+	if err != nil || session.Model != "haiku" || session.VendorSessionID != "vendor-start" {
+		t.Fatalf("Session = (%+v, %v), want model haiku on the same vendor session", session, err)
+	}
+}
+
+func TestSetSessionModelRefusesAnEmptyModel(t *testing.T) {
+	// Arrange
+	db, log := testStore(t)
+	ws := vendorSession(t, db, "vendor-start")
+	if err := db.SetSessionModel(context.Background(), ws, "opus"); err != nil {
+		t.Fatalf("SetSessionModel: %v", err)
+	}
+
+	// Act
+	err := db.SetSessionModel(context.Background(), ws, "")
+
+	// Assert
+	if err == nil {
+		t.Fatal("an empty session model was recorded")
+	}
+	if session, _, _ := db.Session(context.Background(), ws); session.Model != "opus" {
+		t.Fatalf("model = %q, want the record untouched", session.Model)
+	}
+	if _, ok := recordFor(log, "daemon.wsm.set_session_model", "error", "refused an empty session model"); !ok {
+		t.Fatalf("records = %+v, want the refusal at ERROR", log.Records())
+	}
+}
+
+func TestSetSessionModelRefusesAWorkspaceWithNoSession(t *testing.T) {
+	// Arrange
+	db, _ := testStore(t)
+
+	// Act
+	err := db.SetSessionModel(context.Background(), "no-such-workspace", "opus")
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetSessionModel = %v, want ErrNotFound", err)
+	}
+}
+
 // vendorSession registers a workspace whose session record names vendor.
 func vendorSession(t *testing.T, s *store, vendor string) WorkspaceID {
 	t.Helper()

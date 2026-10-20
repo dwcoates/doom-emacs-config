@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -368,6 +369,77 @@ func TestSenderSetModelCarriesTheColdRefusal(t *testing.T) {
 	}
 }
 
+// TestSenderSetModelRecordsTheWorkspacesModel covers what makes a switch
+// outlive a restart: only a switch the shim made is recorded, and a record
+// that fails reaches the caller rather than leaving a switch that a restart
+// would silently undo.
+func TestSenderSetModelRecordsTheWorkspacesModel(t *testing.T) {
+	success := &shimv1.SetSessionModelResponse{
+		Result: &shimv1.SetSessionModelResponse_Success{Success: &shimv1.SetSessionModelSuccess{}},
+	}
+	refused := &shimv1.SetSessionModelResponse{
+		Result: &shimv1.SetSessionModelResponse_Failure{Failure: &shimv1.SetSessionModelFailure{
+			Detail: "not served",
+			Cause:  &shimv1.SetSessionModelFailure_ModelNotInCatalog{ModelNotInCatalog: &shimv1.SetSessionModelNotInCatalog{}},
+		}},
+	}
+	tests := []struct {
+		name      string
+		response  *shimv1.SetSessionModelResponse
+		recordErr error
+		wantErr   bool
+		want      []string
+	}{
+		{name: "a switch the shim made is recorded", response: success, want: []string{"haiku"}},
+		{name: "a refused switch records nothing", response: refused, wantErr: true},
+		{name: "a failed record reaches the caller", response: success, recordErr: errors.New("disk full"), wantErr: true, want: []string{"haiku"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			recorder := &modelRecorder{err: tt.recordErr}
+			s := &sender{client: &fakeSenderClient{setModel: tt.response}, watcher: watching(&fakeMainWatch{}), recordModel: recorder.record}
+
+			// Act
+			err := s.SetModel(context.Background(), "haiku")
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("SetModel = %v, want error %v", err, tt.wantErr)
+			}
+			if tt.recordErr != nil && !errors.Is(err, tt.recordErr) {
+				t.Fatalf("SetModel = %v, want the record's own cause", err)
+			}
+			if !slices.Equal(recorder.recorded, tt.want) {
+				t.Fatalf("recorded = %v, want %v", recorder.recorded, tt.want)
+			}
+		})
+	}
+}
+
+// TestFleetSenderRecordsTheModelOnTheWorkspacesSessionRow covers the fleet's
+// wiring: the sender's record lands on the workspace's own wsm session row.
+func TestFleetSenderRecordsTheModelOnTheWorkspacesSessionRow(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	got, ok := f.fleet.Sender(ws.ID)
+	if !ok {
+		t.Fatal("Sender: no sender for a live workspace")
+	}
+
+	// Act.
+	err := got.(*sender).recordModel(context.Background(), "haiku")
+
+	// Assert.
+	if err != nil || f.db.sessions[ws.ID].Model != "haiku" {
+		t.Fatalf("recordModel = %v with model %q, want haiku recorded", err, f.db.sessions[ws.ID].Model)
+	}
+}
+
 // senderPointer is the main-watch pointer the live watcher states.
 var senderPointer = &conversationv1.HistoryPointer{Value: "ptr-main-12"}
 
@@ -703,7 +775,19 @@ func watching(w mainWatch) func() (mainWatch, bool) {
 // newTestSender is a sender over CLIENT whose session's main watch already
 // stands and was served nothing.
 func newTestSender(client shimclientSender) *sender {
-	return &sender{client: client, watcher: watching(&fakeMainWatch{})}
+	return &sender{client: client, watcher: watching(&fakeMainWatch{}), recordModel: (&modelRecorder{}).record}
+}
+
+// modelRecorder is a sender's recordModel that keeps every model it was asked
+// to record, answering err.
+type modelRecorder struct {
+	recorded []string
+	err      error
+}
+
+func (r *modelRecorder) record(_ context.Context, model string) error {
+	r.recorded = append(r.recorded, model)
+	return r.err
 }
 
 // TestSenderStartTurnWaitsForTheMainWatch covers the latch: no StartTurn is

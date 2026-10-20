@@ -191,7 +191,7 @@ func (q *queue) runAct(ctx context.Context, d *delivery, act Act, claims []ids.T
 			err = sender.SetModel(ctx, act.Value)
 		})
 		if err != nil {
-			log.Error(opAct, "the shim refused the model change", dlog.Context{"cause": err.Error()})
+			log.Error(opAct, "the model change failed", dlog.Context{"model": act.Value, "cause": err.Error()})
 			return fmt.Errorf("set model on %q: %w", ws, err)
 		}
 	case ActSetPermissionMode:

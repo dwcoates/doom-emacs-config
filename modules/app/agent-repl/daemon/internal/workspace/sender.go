@@ -62,12 +62,18 @@ func (f *Fleet) Sender(ws ids.WorkspaceID) (promptqueue.Sender, bool) {
 	if !f.Live(ws) {
 		return nil, false
 	}
-	return &sender{client: client, watcher: func() (mainWatch, bool) {
-		// Read AT THE CALL, not here: the queue may hold this sender across a
-		// wait, and the watcher a turn is bounded by is the one standing when
-		// the turn is handed over.
-		return f.sessionWatcher(ws)
-	}}, true
+	return &sender{
+		client: client,
+		watcher: func() (mainWatch, bool) {
+			// Read AT THE CALL, not here: the queue may hold this sender across a
+			// wait, and the watcher a turn is bounded by is the one standing when
+			// the turn is handed over.
+			return f.sessionWatcher(ws)
+		},
+		recordModel: func(ctx context.Context, model string) error {
+			return f.deps.DB.SetSessionModel(ctx, ws, model)
+		},
+	}, true
 }
 
 // Watcher answers the workspace's session watcher, false when no session is
@@ -103,6 +109,10 @@ type sender struct {
 	// up. StartTurn waits for its main watch and states the newest pointer
 	// that watch was served as known_through.
 	watcher func() (mainWatch, bool)
+	// recordModel persists the model a SetModel switched the session to as
+	// the workspace's model (wsm SetSessionModel), the one every later start
+	// names.
+	recordModel func(ctx context.Context, model string) error
 }
 
 // mainWatch is the slice of the session watcher StartTurn is bounded by.
@@ -326,6 +336,15 @@ func (s *sender) SetModel(ctx context.Context, model string) error {
 	}
 	if failure := response.GetFailure(); failure != nil {
 		return &ShimRefusal{Verb: "SetSessionModel", Arm: setModelArm(failure), Detail: failure.GetDetail()}
+	}
+	// THE SWITCH IS RECORDED ONLY ONCE THE SHIM HAS MADE IT. Recorded at the
+	// verb instead, a restart while the act still waited in the queue would
+	// bring the session back on the new model ahead of the prompts queued
+	// before the switch, which is exactly the overtaking the queue exists to
+	// prevent. Recorded from the transcript instead, a restart before the
+	// next prompt lost the switch altogether.
+	if err := s.recordModel(ctx, model); err != nil {
+		return fmt.Errorf("the session switched to %q but the workspace's model could not be recorded: %w", model, err)
 	}
 	return nil
 }

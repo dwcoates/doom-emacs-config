@@ -248,10 +248,10 @@ func (x *StartSessionFresh) GetPermissionMode() *v1.AgentPermissionMode {
 	return nil
 }
 
-// Resume an existing vendor session. Carries NO model and NO mode: the SDK
-// records both in the transcript per response and per prompt but does not
-// restore them, so the shim reads the last of each back and passes them —
-// the answer reports what was recovered.
+// Resume an existing vendor session. Carries the WORKSPACE'S MODEL but NO
+// mode: the SDK records both in the transcript per response and per prompt but
+// does not restore them, so the shim reads the mode back from the transcript
+// and passes it — the answer reports what was recovered.
 type StartSessionResume struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The vendor's own identity for it, as a previous StartSession reported.
@@ -290,8 +290,23 @@ type StartSessionResume struct {
 	// prompt. A branch the next prompt started holds none of them, so nothing
 	// here ever needs clearing. Empty for a workspace never rolled back.
 	RolledBackTurns []*v1.TurnId `protobuf:"bytes,4,rep,name=rolled_back_turns,json=rolledBackTurns,proto3" json:"rolled_back_turns,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// THE MODEL THE WORKSPACE RUNS ON, as the daemon recorded the user's choice.
+	// The shim resumes on it rather than on the transcript's last response
+	// model. The transcript is the wrong source for it: a model switch nobody
+	// has prompted on yet is in no response, so a restart in between brought
+	// the session back on the model the user had left, and a response names
+	// the vendor's resolved id rather than the option the user picked.
+	//
+	// Since it is the user's choice, it never counts as a model switch at the
+	// cold gate: the switch was paid for, or refused, when the user made it
+	// (SetSessionModel). A lapsed cache is still judged and refused as ever.
+	//
+	// UNSET only for a workspace the daemon holds no model for (one adopted
+	// with no recorded session). The shim then reads the transcript's last
+	// response model back, and SessionStarted.effective_model reports it.
+	Model         *v1.AgentModel `protobuf:"bytes,5,opt,name=model,proto3,oneof" json:"model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StartSessionResume) Reset() {
@@ -348,6 +363,13 @@ func (x *StartSessionResume) GetRebind() *StartSessionRebind {
 func (x *StartSessionResume) GetRolledBackTurns() []*v1.TurnId {
 	if x != nil {
 		return x.RolledBackTurns
+	}
+	return nil
+}
+
+func (x *StartSessionResume) GetModel() *v1.AgentModel {
+	if x != nil {
+		return x.Model
 	}
 	return nil
 }
@@ -1180,14 +1202,16 @@ const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\x11StartSessionFresh\x126\n" +
 	"\x05model\x18\x01 \x01(\v2\x1b.conversation.v1.AgentModelH\x00R\x05model\x88\x01\x01\x12M\n" +
 	"\x0fpermission_mode\x18\x02 \x01(\v2$.conversation.v1.AgentPermissionModeR\x0epermissionModeB\b\n" +
-	"\x06_model\"\xb8\x02\n" +
+	"\x06_model\"\xfa\x02\n" +
 	"\x12StartSessionResume\x12*\n" +
 	"\x11vendor_session_id\x18\x01 \x01(\tR\x0fvendorSessionId\x12W\n" +
 	"\x10cold_remediation\x18\x02 \x01(\v2'.conversation.v1.SessionColdRemediationH\x00R\x0fcoldRemediation\x88\x01\x01\x128\n" +
 	"\x06rebind\x18\x03 \x01(\v2\x1b.shim.v1.StartSessionRebindH\x01R\x06rebind\x88\x01\x01\x12C\n" +
-	"\x11rolled_back_turns\x18\x04 \x03(\v2\x17.conversation.v1.TurnIdR\x0frolledBackTurnsB\x13\n" +
+	"\x11rolled_back_turns\x18\x04 \x03(\v2\x17.conversation.v1.TurnIdR\x0frolledBackTurns\x126\n" +
+	"\x05model\x18\x05 \x01(\v2\x1b.conversation.v1.AgentModelH\x02R\x05model\x88\x01\x01B\x13\n" +
 	"\x11_cold_remediationB\t\n" +
-	"\a_rebind\"\x14\n" +
+	"\a_rebindB\b\n" +
+	"\x06_model\"\x14\n" +
 	"\x12StartSessionRebind\"\x94\x01\n" +
 	"\x14StartSessionResponse\x128\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1c.shim.v1.StartSessionSuccessH\x00R\asuccess\x128\n" +
@@ -1269,25 +1293,26 @@ var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	19, // 5: shim.v1.StartSessionResume.cold_remediation:type_name -> conversation.v1.SessionColdRemediation
 	4,  // 6: shim.v1.StartSessionResume.rebind:type_name -> shim.v1.StartSessionRebind
 	20, // 7: shim.v1.StartSessionResume.rolled_back_turns:type_name -> conversation.v1.TurnId
-	6,  // 8: shim.v1.StartSessionResponse.success:type_name -> shim.v1.StartSessionSuccess
-	7,  // 9: shim.v1.StartSessionResponse.failure:type_name -> shim.v1.StartSessionFailure
-	21, // 10: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
-	22, // 11: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
-	8,  // 12: shim.v1.StartSessionFailure.vendor_start_failed:type_name -> shim.v1.StartSessionVendorStartFailed
-	13, // 13: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
-	14, // 14: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
-	15, // 15: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
-	16, // 16: shim.v1.StartSessionFailure.lock_holder_unavailable:type_name -> shim.v1.StartSessionLockHolderUnavailable
-	9,  // 17: shim.v1.StartSessionVendorStartFailed.retryable:type_name -> shim.v1.StartSessionVendorStartRetryable
-	12, // 18: shim.v1.StartSessionVendorStartFailed.rejected:type_name -> shim.v1.StartSessionVendorStartRejected
-	10, // 19: shim.v1.StartSessionVendorStartRetryable.network:type_name -> shim.v1.StartSessionVendorStartNetwork
-	11, // 20: shim.v1.StartSessionVendorStartRetryable.vendor:type_name -> shim.v1.StartSessionVendorStartVendor
-	23, // 21: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	17, // 8: shim.v1.StartSessionResume.model:type_name -> conversation.v1.AgentModel
+	6,  // 9: shim.v1.StartSessionResponse.success:type_name -> shim.v1.StartSessionSuccess
+	7,  // 10: shim.v1.StartSessionResponse.failure:type_name -> shim.v1.StartSessionFailure
+	21, // 11: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
+	22, // 12: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
+	8,  // 13: shim.v1.StartSessionFailure.vendor_start_failed:type_name -> shim.v1.StartSessionVendorStartFailed
+	13, // 14: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
+	14, // 15: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
+	15, // 16: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
+	16, // 17: shim.v1.StartSessionFailure.lock_holder_unavailable:type_name -> shim.v1.StartSessionLockHolderUnavailable
+	9,  // 18: shim.v1.StartSessionVendorStartFailed.retryable:type_name -> shim.v1.StartSessionVendorStartRetryable
+	12, // 19: shim.v1.StartSessionVendorStartFailed.rejected:type_name -> shim.v1.StartSessionVendorStartRejected
+	10, // 20: shim.v1.StartSessionVendorStartRetryable.network:type_name -> shim.v1.StartSessionVendorStartNetwork
+	11, // 21: shim.v1.StartSessionVendorStartRetryable.vendor:type_name -> shim.v1.StartSessionVendorStartVendor
+	23, // 22: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
+	23, // [23:23] is the sub-list for method output_type
+	23, // [23:23] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_start_session_proto_init() }

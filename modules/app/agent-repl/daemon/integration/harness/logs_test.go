@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -596,5 +597,60 @@ func TestEveryTurnEndedWaitNamesOpTurnEnded(t *testing.T) {
 	// Assert
 	if len(spelled) != 0 {
 		t.Fatalf("integration tests spell %q by hand instead of harness.OpTurnEnded: %v", OpTurnEnded, spelled)
+	}
+}
+
+// TestExpectWorkspaceRestartWarningsDeclaresTheWholeRestartSet covers the
+// helper's one guarantee: every operation of WorkspaceRestartWarnings is
+// licensed, and nothing else is.
+func TestExpectWorkspaceRestartWarningsDeclaresTheWholeRestartSet(t *testing.T) {
+	// Arrange
+	d := &Daemon{t: t, expected: map[string]bool{}, daemonProc: &daemonProc{}}
+
+	// Act
+	d.ExpectWorkspaceRestartWarnings()
+
+	// Assert
+	if len(d.expected) != len(WorkspaceRestartWarnings) {
+		t.Fatalf("expected = %v, want exactly %v", d.expected, WorkspaceRestartWarnings)
+	}
+	for _, op := range WorkspaceRestartWarnings {
+		if !d.expected[op] {
+			t.Fatalf("expected = %v, want %q declared", d.expected, op)
+		}
+	}
+}
+
+// TestNoIntegrationTestSpellsOutTheWorkspaceRestartWarnings covers the call
+// sites: a test that declares the whole restart set by hand would drift from
+// WorkspaceRestartWarnings unseen, so it must call
+// ExpectWorkspaceRestartWarnings instead.
+func TestNoIntegrationTestSpellsOutTheWorkspaceRestartWarnings(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob(filepath.Join("..", "*_test.go"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("glob the integration tests = (%v, %v), want files", files, err)
+	}
+	call := regexp.MustCompile(`(?s)ExpectWarnings(For)?\((.*?)\)\n`)
+
+	for _, file := range files {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+
+		// Act
+		for _, match := range call.FindAllStringSubmatch(string(raw), -1) {
+			// Assert
+			spelled := 0
+			for _, op := range WorkspaceRestartWarnings {
+				if strings.Contains(match[2], `"`+op+`"`) {
+					spelled++
+				}
+			}
+			if spelled == len(WorkspaceRestartWarnings) {
+				t.Fatalf("%s declares the whole workspace-restart set by hand; call ExpectWorkspaceRestartWarnings:\n%s", file, match[0])
+			}
+		}
 	}
 }

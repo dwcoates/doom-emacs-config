@@ -182,6 +182,9 @@ type DB interface {
 	// SetVendorSessionID records the vendor session id a later resume names
 	// (the id in force after a rotation), answering the one it replaced.
 	SetVendorSessionID(ctx context.Context, id WorkspaceID, vendorSessionID string) (string, error)
+	// SetSessionModel records the model the user chose for a workspace's
+	// session, the one every later start names. An empty model is refused.
+	SetSessionModel(ctx context.Context, id WorkspaceID, model string) error
 	// ClearSessionTerminal retires a workspace's terminal session record, so
 	// a workspace whose shim is live carries none. A workspace with no
 	// session row has nothing to retire and is not a refusal; a deleted
