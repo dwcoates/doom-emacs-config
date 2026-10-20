@@ -64,10 +64,10 @@ message StartSessionFresh {
   conversation.v1.AgentPermissionMode permission_mode = 2;
 }
 
-// Resume an existing vendor session. Carries NO model and NO mode: the SDK
-// records both in the transcript per response and per prompt but does not
-// restore them, so the shim reads the last of each back and passes them —
-// the answer reports what was recovered.
+// Resume an existing vendor session. Carries the WORKSPACE'S MODEL but NO
+// mode: the SDK records both in the transcript per response and per prompt but
+// does not restore them, so the shim reads the mode back from the transcript
+// and passes it — the answer reports what was recovered.
 message StartSessionResume {
   // The vendor's own identity for it, as a previous StartSession reported.
   string vendor_session_id = 1;
@@ -105,6 +105,21 @@ message StartSessionResume {
   // prompt. A branch the next prompt started holds none of them, so nothing
   // here ever needs clearing. Empty for a workspace never rolled back.
   repeated conversation.v1.TurnId rolled_back_turns = 4;
+  // THE MODEL THE WORKSPACE RUNS ON, as the daemon recorded the user's choice.
+  // The shim resumes on it rather than on the transcript's last response
+  // model. The transcript is the wrong source for it: a model switch nobody
+  // has prompted on yet is in no response, so a restart in between brought
+  // the session back on the model the user had left, and a response names
+  // the vendor's resolved id rather than the option the user picked.
+  //
+  // Since it is the user's choice, it never counts as a model switch at the
+  // cold gate: the switch was paid for, or refused, when the user made it
+  // (SetSessionModel). A lapsed cache is still judged and refused as ever.
+  //
+  // UNSET only for a workspace the daemon holds no model for (one adopted
+  // with no recorded session). The shim then reads the transcript's last
+  // response model back, and SessionStarted.effective_model reports it.
+  optional conversation.v1.AgentModel model = 5;
 }
 
 // This resume is a rebind: the workspace's book becomes the resumed
