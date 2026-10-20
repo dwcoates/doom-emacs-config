@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { nextPush } from "../next-push.js";
 import { testTempDir } from "../temp-dir.js";
 import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { logRecordsDuring, logRecordsSince, logSinkMark } from "../log-records.js";
 import { create } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
@@ -9435,9 +9435,17 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
   it("carries the vendor child's stderr into a start that timed out on silence", async () => {
     // THE BOUND STILL FIRES FOR TRUE SILENCE, and when the child explained
     // itself on stderr the refusal says so rather than reporting the quiet.
+    // THE BOUND IS FIRED BY THE TEST, after the stderr line: on a real clock a
+    // loaded host let the 5ms bound fire before the line was delivered, and
+    // the refusal rightly reported only the quiet.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const pending = h.engine.startSession(freshRequest());
     (await untilQuery(h, 0)).spec.onStderr?.("Error: the resume handle is not recognized");
+    vi.advanceTimersByTime(5);
 
     const response = await pending;
     expect(response.result.case === "failure" ? response.result.value.detail : "").toContain(
