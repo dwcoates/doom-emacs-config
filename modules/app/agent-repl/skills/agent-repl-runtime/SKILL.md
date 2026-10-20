@@ -140,9 +140,9 @@ through `run.sh --call` (a typed `agent-repld` verb comes once they land on mast
   only into `noSubsection`; `end` into `noSubsection` is the bottom of the
   repository), or the all-or-nothing `placeWorkspaces {workspaces: [...],
   ...}`, which keeps the given order.
-- Copy every ref verbatim from `GetSidebarArrangement`'s answer. Only a ROOT
-  workspace (one with no parent) is placed; its children always sit with it
-  (`has_parent`), and a workspace moves only within its own repository
+- Copy every ref verbatim from `GetSidebarArrangement`'s answer. A family
+  moves whole: placing any workspace places its root, with every ancestor and
+  descendant, and a workspace moves only within its own repository
   (`other_repository`).
 - Use it when the user asks to organize the sidebar, or after creating several
   child workspaces that belong together, to group them in a named subsection.
