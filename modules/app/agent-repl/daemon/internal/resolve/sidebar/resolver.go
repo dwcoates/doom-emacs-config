@@ -254,7 +254,12 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		defer filter.flush()
 		log = filter
 	}
-	rc := rowContext{sessions: r.state.sessions(), selected: r.state.selected, cause: cause}
+	rc := rowContext{
+		sessions: r.state.sessions(),
+		selected: r.state.selected,
+		cause:    cause,
+		children: childrenOf(r.state.reg.Workspaces),
+	}
 
 	// EVERY WORKSPACE IS IN ONE LIST (taborder.go). OPEN is neither closed nor
 	// hidden, whatever its merge time (OPEN BEATS MERGED: a merged workspace
