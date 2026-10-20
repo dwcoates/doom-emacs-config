@@ -50,10 +50,13 @@ type stateCollector struct {
 	logBytes, logFiles, workspaces *prometheus.Desc
 }
 
-// logRuntime answers the runtime a log file's name carries.
+// logRuntime answers the runtime a log file's name carries: a workspace
+// sink's agent-repl-<id>-<runtime>-<n>.log, or a central file named for its
+// runtime (daemon.run.log and its rotations, daemon.stdio.log,
+// emacs.central.log and its rotations).
 func logRuntime(name string) string {
-	if name == "daemon.run.log" {
-		return "daemon"
+	if central, _, ok := strings.Cut(name, "."); ok && logRuntimes[central] {
+		return central
 	}
 	rest, ok := strings.CutPrefix(name, "agent-repl-")
 	if !ok {

@@ -1103,6 +1103,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Log:           p.Surfaces,
 	})
 	mergeOrchestrator, err := merge.New(merge.Deps{
+		Timings:       p.Metrics,
 		QueueEvents:   queueNotices,
 		Detached:      detachedRef,
 		Names:         verbsRef,

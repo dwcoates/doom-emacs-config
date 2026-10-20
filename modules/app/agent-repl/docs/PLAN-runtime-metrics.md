@@ -251,6 +251,8 @@ run, judgement call 12).
 | `agentrepl_log_records_total` | counter | `runtime`, `level`, `operation` | daemon: every Warn and Error record it writes, its own and Emacs's and the webapp's (`dlog.Surfaces.BindRecordCounter`) |
 | `agentrepl_db_bytes` | gauge | `db`, `file` | daemon (`wsm`) and store (`events`): each SQLite file (`db`, `wal`, `shm`) |
 | `agentrepl_log_bytes`, `agentrepl_log_files` | gauge | `runtime` | daemon: the state root's logs directory, by the runtime each file's name carries |
+| `agentrepl_merge_step_seconds` | histogram | `step` | daemon (`merge`): how long a merge spent on each step before it left it |
+| `agentrepl_merge_seconds` | histogram | `span`, `outcome` | daemon (`merge`): each merge's `pick`, `queued`, `running` and `total` spans, `landed`, `already_on`, `failed` (or `ok` for a pick) |
 | `agentrepl_workspaces` | gauge | `repository`, `state` | daemon: the registry's workspaces, `open`, `hidden` or `closed`; live sessions are `agentrepl_process_count{process="shim"}` |
 
 Process groups (`process`): `daemon`, `daemon_tools`, `store`, `sidecar`,

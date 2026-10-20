@@ -38,6 +38,9 @@ func TestLogRuntime(t *testing.T) {
 		{"agent-repl-c66e3ae73cdf4323-webapp-3987465320.log.1", "webapp"},
 		{"agent-repl-c66e3ae73cdf4323-emacs-v2Wiej.log", "emacs"},
 		{"daemon.run.log", "daemon"},
+		{"daemon.run.log.3", "daemon"},
+		{"daemon.stdio.log", "daemon"},
+		{"emacs.central.log.2", "emacs"},
 		{"agent-repl-c66e3ae73cdf4323-mystery-1.log", "other"},
 		{"notes.txt", "other"},
 	}

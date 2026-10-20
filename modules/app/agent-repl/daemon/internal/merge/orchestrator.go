@@ -362,6 +362,7 @@ func (d Deps) validate() error {
 		}
 	}
 	check(d.DB != nil, "DB")
+	check(d.Timings != nil, "Timings")
 	check(d.Git != nil, "Git")
 	check(d.Queue != nil, "Queue")
 	check(d.Feed != nil, "Feed")

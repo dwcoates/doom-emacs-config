@@ -606,9 +606,44 @@ type Deps struct {
 	// Now is the clock. Injected so a ledger interval and a terminal stamp are
 	// assertable without a real one.
 	Now func() time.Time
+	// Timings records how long each merge stage took (runtimemetrics.Surface):
+	// every step a run leaves, the pick, and each merge's queued, running and
+	// total spans. REQUIRED.
+	Timings Timer
 	// Log is the orchestrator's logger.
 	Log dlog.Surfaces
 }
+
+// Timer records merge stage durations. Each call is an atomic add and never
+// blocks the merge.
+type Timer interface {
+	// ObserveMergeStep records how long a run spent on one step before it
+	// left it, by the step's footer.MergeStep spelling.
+	ObserveMergeStep(step string, took time.Duration)
+	// ObserveMergeSpan records one span of a merge (SpanPick, SpanQueued,
+	// SpanRunning, SpanTotal) by how it ended.
+	ObserveMergeSpan(span, outcome string, took time.Duration)
+}
+
+// The merge spans a Timer records.
+const (
+	// SpanPick is the branch's preparation from the request's instruction.
+	SpanPick = "pick"
+	// SpanQueued is the time from enqueueing until the run was admitted.
+	SpanQueued = "queued"
+	// SpanRunning is the time from admission until the terminal.
+	SpanRunning = "running"
+	// SpanTotal is the time from enqueueing until the terminal.
+	SpanTotal = "total"
+)
+
+// The outcomes a merge span ends in.
+const (
+	OutcomeLanded    = "landed"
+	OutcomeAlreadyOn = "already_on"
+	OutcomeFailed    = "failed"
+	OutcomeOK        = "ok"
+)
 
 // BriefLoader loads one brief by name and splices its values, at use time. It
 // composes rather than returning the parsed brief because a brief is never
