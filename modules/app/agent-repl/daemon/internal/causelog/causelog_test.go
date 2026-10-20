@@ -1,6 +1,11 @@
 package causelog
 
-import "testing"
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestTracker(t *testing.T) {
 	tests := []struct {
@@ -59,5 +64,33 @@ func TestTracker(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNoteRecordsEachNewCauseAndTheRecoveryOnce(t *testing.T) {
+	// Arrange
+	var tr Tracker
+	var got []string
+	note := func(err error) bool {
+		return tr.Note("scrape", err, func(cause string) { got = append(got, "failed:"+cause) }, func() { got = append(got, "recovered") })
+	}
+
+	// Act
+	oks := []bool{
+		note(nil),
+		note(errors.New("a")),
+		note(errors.New("a")),
+		note(errors.New("b")),
+		note(nil),
+		note(nil),
+	}
+
+	// Assert
+	want := []string{"failed:a", "failed:b", "recovered"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("records = %v, want %v", got, want)
+	}
+	if fmt.Sprint(oks) != "[true false false false true true]" {
+		t.Fatalf("answers = %v, want each repetition's success", oks)
 	}
 }
