@@ -1114,7 +1114,8 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
    the numeral its tab carries on the Emacs tab bar (src/sidebar/tab-numbers.ts),
    in a grey darker than --muted, well smaller than the name (owner
    requests, 2026-10-17: grey and smaller than the first white cut, then a
-   little darker and smaller again, then darker once more). The box is a fixed width, so a
+   little darker and smaller again, then darker once more, then slightly
+   lighter again, 2026-10-20). The box is a fixed width, so a
    one- or two-digit number and an unnumbered row all start their mark and
    name at one edge. The box's left margin hands back part of the row's left
    padding, so the rows indent only slightly, and its right margin sets the
@@ -1122,7 +1123,7 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
    (owner request, 2026-10-17). */
 #ws-sidebar {
   --tab-number-w: 0.85rem;
-  --tab-number-color: color-mix(in srgb, var(--muted) 75%, black);
+  --tab-number-color: color-mix(in srgb, var(--muted) 85%, black);
 }
 #ws-sidebar .sb-num {
   flex: 0 0 auto;
