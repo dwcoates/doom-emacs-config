@@ -2,7 +2,6 @@ package ramdisk
 
 import (
 	"errors"
-	"os"
 	"strings"
 	"syscall"
 	"testing"
@@ -56,23 +55,10 @@ func TestParseMemsize(t *testing.T) {
 	}
 }
 
-// holdSeat locks seat i under registry for the test, as another run would.
-func holdSeat(t *testing.T, registry string, i int) *os.File {
-	t.Helper()
-	f, err := openSeat(registry, i)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		t.Fatalf("hold seat %d: %v", i, err)
-	}
-	return f
-}
-
-// seatFree reports whether seat i can be locked right now.
+// seatFree reports whether memory seat i under registry can be locked now.
 func seatFree(t *testing.T, registry string, i int) bool {
 	t.Helper()
-	f, err := openSeat(registry, i)
+	f, err := seatPool(registry, i+1).Open(i)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,74 +73,16 @@ func seatFree(t *testing.T, registry string, i int) bool {
 	return true
 }
 
-func TestTakeSeatTakesTheFirstFreeSeat(t *testing.T) {
-	cases := []struct {
-		name string
-		held []int
-		want int
-	}{
-		{name: "an empty registry gives seat 0", want: 0},
-		{name: "a held seat is passed over", held: []int{0}, want: 1},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			registry := t.TempDir()
-			for _, i := range tc.held {
-				defer holdSeat(t, registry, i).Close()
-			}
-			waited := false
-
-			// Act
-			f, got, err := takeSeat(registry, 2, func(int) { waited = true })
-
-			// Assert
-			if err != nil || got != tc.want || waited {
-				t.Fatalf("takeSeat = seat %d, %v, waited %v; want seat %d at once", got, err, waited, tc.want)
-			}
-			if seatFree(t, registry, got) {
-				t.Fatalf("seat %d reads free while it is held", got)
-			}
-			if err := f.Close(); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
-
-func TestTakeSeatWaitsForTheFirstSeatLetGo(t *testing.T) {
-	// Arrange: both seats held by other runs.
-	registry := t.TempDir()
-	seat0 := holdSeat(t, registry, 0)
-	defer seat0.Close()
-	seat1 := holdSeat(t, registry, 1)
-	waiting := make(chan int, 1)
-	type taken struct {
-		f   *os.File
-		i   int
-		err error
-	}
-	done := make(chan taken, 1)
-
-	// Act: the run waits, and seat 1's holder lets go.
-	go func() {
-		f, i, err := takeSeat(registry, 2, func(held int) { waiting <- held })
-		done <- taken{f, i, err}
-	}()
-	if held := <-waiting; held != 2 {
-		t.Fatalf("the wait was told %d seats are held, want 2", held)
-	}
-	if err := seat1.Close(); err != nil {
-		t.Fatal(err)
-	}
-	got := <-done
+// The memory seats keep the paths every run on the host already shares: a
+// run built before the seats were shared with the core pool and one built
+// after must still contend for the same files.
+func TestTheMemorySeatsLiveInTheRegistrysSeatsDirectory(t *testing.T) {
+	// Act
+	got := seatPool("/reg", 4).Path(3)
 
 	// Assert
-	if got.err != nil || got.i != 1 {
-		t.Fatalf("takeSeat = seat %d, %v; want seat 1, the one let go", got.i, got.err)
-	}
-	if err := got.f.Close(); err != nil {
-		t.Fatal(err)
+	if got != "/reg/seats/seat-3.lock" {
+		t.Fatalf("seatPool(/reg, 4).Path(3) = %q, want /reg/seats/seat-3.lock", got)
 	}
 }
 
