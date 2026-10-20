@@ -5783,6 +5783,12 @@ describe("the repository's subsections and the drag", () => {
     expect([/border:\s*1px solid var\(--border\)/.test(input), /outline:\s*none/.test(input)]).toEqual([true, true]);
   });
 
+  it("sinks the name popup's placeholder toward the input's background", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-name::placeholder")).toMatch(
+      /color:\s*color-mix\(in srgb, var\(--muted\) 55%, var\(--bg\)\)/,
+    );
+  });
+
   it("lifts the drag's copy above the rail and out of the pointer's way", () => {
     const ghost = declarationsOf("#ws-sidebar .sb-drag-ghost") ?? "";
     expect([/position:\s*fixed/.test(ghost), /pointer-events:\s*none/.test(ghost)]).toEqual([true, true]);

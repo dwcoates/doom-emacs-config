@@ -22,7 +22,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_fold_repository.proto.
  */
 export const file_agentrepl_v1_endpoint_fold_repository: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfZm9sZF9yZXBvc2l0b3J5LnByb3RvEgxhZ2VudHJlcGwudjEiwAEKFUZvbGRSZXBvc2l0b3J5UmVxdWVzdBIvCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWYSNAoGZXhwYW5kGAIgASgLMiIuYWdlbnRyZXBsLnYxLkZvbGRSZXBvc2l0b3J5RXhwYW5kSAASOAoIY29sbGFwc2UYAyABKAsyJC5hZ2VudHJlcGwudjEuRm9sZFJlcG9zaXRvcnlDb2xsYXBzZUgAQgYKBGZvbGQiFgoURm9sZFJlcG9zaXRvcnlFeHBhbmQiGAoWRm9sZFJlcG9zaXRvcnlDb2xsYXBzZSKOAQoWRm9sZFJlcG9zaXRvcnlSZXNwb25zZRI2CgdzdWNjZXNzGAEgASgLMiMuYWdlbnRyZXBsLnYxLkZvbGRSZXBvc2l0b3J5U3VjY2Vzc0gAEjIKBWVycm9yGAIgASgLMiEuYWdlbnRyZXBsLnYxLkZvbGRSZXBvc2l0b3J5RXJyb3JIAEIICgZyZXN1bHQiFwoVRm9sZFJlcG9zaXRvcnlTdWNjZXNzImsKE0ZvbGRSZXBvc2l0b3J5RXJyb3ISSwoSdW5rbm93bl9yZXBvc2l0b3J5GAEgASgLMi0uYWdlbnRyZXBsLnYxLkZvbGRSZXBvc2l0b3J5VW5rbm93blJlcG9zaXRvcnlIAEIHCgVjYXVzZSIhCh9Gb2xkUmVwb3NpdG9yeVVua25vd25SZXBvc2l0b3J5QipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfZm9sZF9yZXBvc2l0b3J5LnByb3RvEgxhZ2VudHJlcGwudjEiwAEKFUZvbGRSZXBvc2l0b3J5UmVxdWVzdBIvCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWYSNAoGZXhwYW5kGAIgASgLMiIuYWdlbnRyZXBsLnYxLkZvbGRSZXBvc2l0b3J5RXhwYW5kSAASOAoIY29sbGFwc2UYAyABKAsyJC5hZ2VudHJlcGwudjEuRm9sZFJlcG9zaXRvcnlDb2xsYXBzZUgAQgYKBGZvbGQiFgoURm9sZFJlcG9zaXRvcnlFeHBhbmQiGAoWRm9sZFJlcG9zaXRvcnlDb2xsYXBzZSKOAQoWRm9sZFJlcG9zaXRvcnlSZXNwb25zZRI2CgdzdWNjZXNzGAEgASgLMiMuYWdlbnRyZXBsLnYxLkZvbGRSZXBvc2l0b3J5U3VjY2Vzc0gAEjIKBWVycm9yGAIgASgLMiEuYWdlbnRyZXBsLnYxLkZvbGRSZXBvc2l0b3J5RXJyb3JIAEIICgZyZXN1bHQiFwoVRm9sZFJlcG9zaXRvcnlTdWNjZXNzIq4BChNGb2xkUmVwb3NpdG9yeUVycm9yEksKEnVua25vd25fcmVwb3NpdG9yeRgBIAEoCzItLmFnZW50cmVwbC52MS5Gb2xkUmVwb3NpdG9yeVVua25vd25SZXBvc2l0b3J5SAASQQoNaG9sZHNfY3VycmVudBgCIAEoCzIoLmFnZW50cmVwbC52MS5Gb2xkUmVwb3NpdG9yeUhvbGRzQ3VycmVudEgAQgcKBWNhdXNlIiEKH0ZvbGRSZXBvc2l0b3J5VW5rbm93blJlcG9zaXRvcnkiHAoaRm9sZFJlcG9zaXRvcnlIb2xkc0N1cnJlbnRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.FoldRepositoryRequest
@@ -156,6 +156,14 @@ export type FoldRepositoryError = Message<"agentrepl.v1.FoldRepositoryError"> & 
      */
     value: FoldRepositoryUnknownRepository;
     case: "unknownRepository";
+  } | {
+    /**
+     * A collapse of the repository the current workspace sits in.
+     *
+     * @generated from field: agentrepl.v1.FoldRepositoryHoldsCurrent holds_current = 2;
+     */
+    value: FoldRepositoryHoldsCurrent;
+    case: "holdsCurrent";
   } | { case: undefined; value?: undefined };
 };
 
@@ -178,4 +186,22 @@ export type FoldRepositoryUnknownRepository = Message<"agentrepl.v1.FoldReposito
  */
 export const FoldRepositoryUnknownRepositorySchema: GenMessage<FoldRepositoryUnknownRepository> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_fold_repository, 6);
+
+/**
+ * A collapse asked of the repository the current workspace sits in, refused
+ * as agentrepl.v1.UpdateSidebarViewError.holds_current refuses it: nothing is
+ * recorded and the section stands expanded. DELIBERATELY EMPTY: the arm is
+ * the cause, and the request names the repository.
+ *
+ * @generated from message agentrepl.v1.FoldRepositoryHoldsCurrent
+ */
+export type FoldRepositoryHoldsCurrent = Message<"agentrepl.v1.FoldRepositoryHoldsCurrent"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.FoldRepositoryHoldsCurrent.
+ * Use `create(FoldRepositoryHoldsCurrentSchema)` to create a new message.
+ */
+export const FoldRepositoryHoldsCurrentSchema: GenMessage<FoldRepositoryHoldsCurrent> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_fold_repository, 7);
 

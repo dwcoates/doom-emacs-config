@@ -1074,6 +1074,9 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
   padding: 0.15rem 0.4rem;
   outline: none;
 }
+/* THE NAME'S PLACEHOLDER sinks toward the input's own background (owner
+   request, 2026-10-20), so the hint reads as a hint and not as text. */
+#ws-sidebar .sb-subsection-name::placeholder { color: color-mix(in srgb, var(--muted) 55%, var(--bg)); }
 #ws-sidebar .sb-subsection-name:focus { border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); }
 #ws-sidebar .sb-subsection-popup .sb-form-go { align-self: center; }
 #ws-sidebar .sb-arrange-status:empty { display: none; }

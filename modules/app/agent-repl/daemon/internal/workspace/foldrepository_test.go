@@ -181,12 +181,125 @@ func TestCollapsingARepositoryWhoseWorkspacesCannotBeListedFailsLoudly(t *testin
 	}
 	found := false
 	for _, r := range f.log.logger.Records() {
-		if r.Level == dlog.LevelError && r.Operation == opFoldRepository && strings.Contains(r.Message, "could not list the collapsed") {
+		if r.Level == dlog.LevelError && r.Operation == opFoldRepository && strings.Contains(r.Message, "the collapse was not recorded") {
 			found = true
 		}
 	}
 	if !found {
 		t.Fatal("the failed listing was not recorded at error")
+	}
+	if f.db.repositories[0].Folded || len(f.sidebar.registries) != 0 {
+		t.Fatalf("folded = %v, republications = %d; want nothing recorded when the workspaces cannot be listed",
+			f.db.repositories[0].Folded, len(f.sidebar.registries))
+	}
+}
+
+// current marks a fixture workspace as the user's selection.
+func current(f *fixture, ws ids.WorkspaceID) {
+	record := f.db.workspaces[ws]
+	record.Current = true
+	f.db.workspaces[ws] = record
+}
+
+func TestCollapsingARepositoryHoldingTheCurrentWorkspaceIsRefused(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1"})
+	f.workspace("w1", t.TempDir())
+	inRepo(f, "w1", "repo-1", false)
+	current(f, "w1")
+
+	// Act
+	err := f.verbs.FoldRepository(context.Background(), "repo-1", true)
+
+	// Assert
+	asRefusal(t, err, ArmHoldsCurrent)
+	if f.db.repositories[0].Folded || len(f.sidebar.registries) != 0 || len(f.standDowns) != 0 {
+		t.Fatalf("folded = %v, republications = %d, stand-downs = %v; want nothing done for a refused collapse",
+			f.db.repositories[0].Folded, len(f.sidebar.registries), f.standDowns)
+	}
+}
+
+func TestARefusedCollapseIsRecordedWithTheCurrentWorkspace(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1"})
+	f.workspace("w1", t.TempDir())
+	inRepo(f, "w1", "repo-1", false)
+	current(f, "w1")
+
+	// Act
+	_ = f.verbs.FoldRepository(context.Background(), "repo-1", true)
+
+	// Assert
+	found := false
+	for _, r := range f.log.logger.Records() {
+		if r.Level == dlog.LevelInfo && r.Operation == opRefusal && r.Context["arm"] == ArmHoldsCurrent &&
+			strings.Contains(r.Message, `"w1"`) && r.Context["repo_id"] == "repo-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the refusal was not recorded at INFO naming the repository and the current workspace")
+	}
+}
+
+func TestCollapsingASubsectionHoldingTheCurrentWorkspaceIsRefused(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	sub := ids.SubsectionID("sub-1")
+	f.db.subsections = append(f.db.subsections, wsm.Subsection{ID: sub, Repo: "repo-1", Name: "later", Place: 1})
+	inside := f.workspace("inside", t.TempDir())
+	inside.Subsection = &sub
+	inside.Current = true
+	f.db.with(inside)
+
+	// Act
+	err := f.verbs.FoldSubsection(context.Background(), sub, true)
+
+	// Assert
+	asRefusal(t, err, ArmHoldsCurrent)
+	if f.db.subsections[0].Folded || len(f.standDowns) != 0 {
+		t.Fatalf("folded = %v, stand-downs = %v; want nothing done for a refused collapse", f.db.subsections[0].Folded, f.standDowns)
+	}
+}
+
+func TestCollapsingARepositoryWhoseCurrentWorkspaceIsElsewhereSucceeds(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1"})
+	f.workspace("w1", t.TempDir())
+	inRepo(f, "w1", "repo-1", false)
+	f.workspace("w2", t.TempDir())
+	inRepo(f, "w2", "repo-2", false)
+	current(f, "w2")
+
+	// Act
+	err := f.verbs.FoldRepository(context.Background(), "repo-1", true)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldRepository: %v", err)
+	}
+	if !f.db.repositories[0].Folded || !slices.Equal(f.standDowns, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("folded = %v, stand-downs = %v; want the collapse recorded and only w1 stood down", f.db.repositories[0].Folded, f.standDowns)
+	}
+}
+
+func TestExpandingARepositoryHoldingTheCurrentWorkspaceSucceeds(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Folded: true})
+	f.workspace("w1", t.TempDir())
+	inRepo(f, "w1", "repo-1", false)
+	current(f, "w1")
+
+	// Act
+	err := f.verbs.FoldRepository(context.Background(), "repo-1", false)
+
+	// Assert
+	if err != nil || f.db.repositories[0].Folded {
+		t.Fatalf("FoldRepository = %v, folded = %v; want the expand recorded", err, f.db.repositories[0].Folded)
 	}
 }
 
@@ -227,7 +340,7 @@ func TestFoldTabs(t *testing.T) {
 					}
 					return tt.unknown
 				},
-				holds: func(ws wsm.Workspace) bool { return ws.ID != "other" },
+				members: func(ws wsm.Workspace) bool { return ws.ID != "other" },
 			})
 
 			// Assert
@@ -300,5 +413,59 @@ func TestFoldSubsectionRefusesAnUnknownSubsection(t *testing.T) {
 	}
 	if len(f.sidebar.registries) != 0 {
 		t.Fatalf("roster republications = %d, want none for a refused fold", len(f.sidebar.registries))
+	}
+}
+
+// TestFoldTabsMembershipIsTheSharedOne pins every fold that hides tabs to
+// wsm.FoldMembers: a hand-rolled membership closure would let the sessions a
+// collapse stands down drift from the ones the roster and the refusal count.
+func TestFoldTabsMembershipIsTheSharedOne(t *testing.T) {
+	// Act
+	shared := sourcescan.Count(t, "members: wsm.")
+	byHand := sourcescan.Count(t, "func(ws wsm.Workspace) bool { return ws.Repo ==") +
+		sourcescan.Count(t, "func(ws wsm.Workspace) bool { return ws.Subsection")
+
+	// Assert
+	if shared != 2 || byHand != 0 {
+		t.Fatalf("shared memberships = %d, hand-rolled = %d; want 2 and 0", shared, byHand)
+	}
+}
+
+func TestACollapseIsWrittenUnderTheSelectionLock(t *testing.T) {
+	tests := []struct {
+		name       string
+		folded     bool
+		wantLocked bool
+	}{
+		{name: "a collapse holds the lock a select takes", folded: true, wantLocked: true},
+		{name: "an expand does not", folded: false, wantLocked: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			v := f.verbs.(*verbs)
+			locked := false
+
+			// Act
+			err := v.foldTabs(context.Background(), f.log.logger, foldTabsSpec{
+				op: "daemon.workspace.test", what: "thing", target: "t1", folded: tt.folded,
+				write: func() error {
+					if v.selection.TryLock() {
+						v.selection.Unlock()
+					} else {
+						locked = true
+					}
+					return nil
+				},
+				unknown: func(error) error { return nil },
+				members: wsm.RepositoryMembers("repo-1"),
+			})
+
+			// Assert
+			if err != nil || locked != tt.wantLocked {
+				t.Fatalf("foldTabs = %v, locked during the write = %v; want nil, %v", err, locked, tt.wantLocked)
+			}
+		})
 	}
 }

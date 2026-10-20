@@ -11,6 +11,7 @@
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { SidebarViewFoldSectionSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { SidebarContext } from "./context.js";
+import { log } from "../log.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { changeView } from "./view-change.js";
 import { foldViewKey, paintSectionFold, paintTriangle } from "./view.js";
@@ -25,13 +26,35 @@ export type FoldGesture = (section: HTMLElement, control: HTMLElement) => void;
 export type FoldTarget = MessageInitShape<typeof SidebarViewFoldSectionSchema>["section"];
 
 /**
+ * The attribute a repository section or subsection box carries while the
+ * daemon says its expanded fold holds the current workspace
+ * (`frontend.v1.RosterRepoSectionExpanded.collapse`,
+ * `frontend.v1.RosterSubsectionExpanded.collapse`). It lives on the box
+ * rather than in the gesture, so a push that moves the selection repaints it
+ * without redrawing the section (`roster.ts`'s row patch).
+ */
+export const HOLDS_CURRENT_ATTRIBUTE = "data-holds-current";
+
+/**
  * A section's fold gesture: the other fold, painted on every copy of the
  * section at once and asked of the daemon, whose push carries it to every
  * page (`view-change.ts`).
+ *
+ * A SECTION HOLDING THE CURRENT WORKSPACE NEVER COLLAPSES (owner request,
+ * 2026-10-20): collapsing it would stand down the session the user is in, so
+ * the gesture asks nothing while the box carries `HOLDS_CURRENT_ATTRIBUTE`.
+ * The daemon refuses such a collapse too, for a page a push behind a switch.
  */
 export function sectionFold(sc: SidebarContext, foldKey: string, target: FoldTarget): FoldGesture {
   return (section, control) => {
     const collapse = !section.classList.contains("folded");
+    if (collapse && section.hasAttribute(HOLDS_CURRENT_ATTRIBUTE)) {
+      log.debug("the section holds the current workspace; its fold gesture asks nothing", {
+        operation: "sidebar.fold.holds-current",
+        context: { section: foldKey },
+      });
+      return;
+    }
     void changeView(sc, {
       key: foldViewKey(foldKey),
       value: collapse,
@@ -91,4 +114,53 @@ export function drawRosterSectionFold(fold: RosterSectionFold, path: string): bo
       return unreachableArm(path, other.case);
     }
   }
+}
+
+/**
+ * Whether an expanded repository section or subsection may collapse, as the
+ * daemon resolved it. Both carry the same two arms in their own messages.
+ */
+export type RosterExpandedCollapse =
+  | { case: "collapsible"; value: unknown }
+  | { case: "holdsCurrent"; value: unknown }
+  | { case: undefined; value?: undefined };
+
+/** A repository section's or subsection's fold, whose expanded arm says whether it may collapse. */
+export type CollapsibleSectionFold =
+  | { case: "expanded"; value: { collapse: RosterExpandedCollapse } }
+  | { case: "collapsed"; value: unknown }
+  | { case: undefined; value?: undefined };
+
+/**
+ * Whether FOLD holds the current workspace: only an expanded fold can, and
+ * it says so. EVERY arm is named; an unset fold or collapse is malformed.
+ */
+export function drawRosterHoldsCurrent(fold: CollapsibleSectionFold, path: string): boolean {
+  const arm = requireCase(fold, path);
+  switch (arm.case) {
+    case "collapsed":
+      return false;
+    case "expanded": {
+      const collapse = requireCase(arm.value.collapse, `${path}.expanded.collapse`);
+      switch (collapse.case) {
+        case "collapsible":
+          return false;
+        case "holdsCurrent":
+          return true;
+        default: {
+          const other: { case: string } = collapse;
+          return unreachableArm(`${path}.expanded.collapse`, other.case);
+        }
+      }
+    }
+    default: {
+      const other: { case: string } = arm;
+      return unreachableArm(path, other.case);
+    }
+  }
+}
+
+/** Say on SECTION's box whether it holds the current workspace. */
+export function paintHoldsCurrent(section: HTMLElement, holdsCurrent: boolean): void {
+  section.toggleAttribute(HOLDS_CURRENT_ATTRIBUTE, holdsCurrent);
 }

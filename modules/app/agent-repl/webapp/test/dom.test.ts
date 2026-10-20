@@ -16,6 +16,7 @@ import {
   queryAll,
   repaintMark,
   scrollbarWidthPx,
+  windowOf,
 } from "../src/dom.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeUnder, filesUnder } from "./files-under.js";
@@ -356,6 +357,32 @@ describe("SVG_NS", () => {
     const spelled = [...codeUnder(src)].filter(([, code]) => code.includes("www.w3.org/2000/svg")).map(([path]) => path);
     // Assert
     expect(spelled).toEqual(["dom.ts"]);
+  });
+});
+
+describe("windowOf", () => {
+  it("answers the window the element lives in", () => {
+    // Arrange
+    const el = document.createElement("div");
+    // Act / Assert
+    expect(windowOf(el)).toBe(window);
+  });
+
+  it("throws for an element of a document with no window", () => {
+    // Arrange
+    const el = document.implementation.createHTMLDocument("windowless").createElement("div");
+    // Act / Assert
+    expect(() => windowOf(el)).toThrow(/lives in a window/);
+  });
+
+  it("is the one window lookup every sidebar module asks", () => {
+    // Arrange: every sidebar source file.
+    const src = join(__dirname, "../src");
+    const files = filesUnder(join(src, "sidebar"));
+    // Act: a hand-rolled lookup defines its own windowOf.
+    const rolled = files.filter((f) => /function windowOf\(/.test(readFileSync(f, "utf8"))).map((f) => relative(src, f));
+    // Assert: none, so every caller shares dom.ts's.
+    expect(rolled).toEqual([]);
   });
 });
 

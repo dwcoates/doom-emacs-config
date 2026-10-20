@@ -248,3 +248,46 @@ func TestUpdateSidebarViewRefusesASubsectionFoldWithNoId(t *testing.T) {
 		t.Fatalf("verb calls = %v, want none for a malformed request", h.Verbs.arrangements)
 	}
 }
+
+func TestUpdateSidebarViewAnswersACollapseThatHoldsTheCurrentWorkspace(t *testing.T) {
+	refused := func() error {
+		return &workspace.Refusal{Rpc: "UpdateSidebarView", Arm: workspace.ArmHoldsCurrent, Reason: "holds the current workspace"}
+	}
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		section *agentreplv1.SidebarViewFoldSection
+	}{
+		{
+			name: "a repository",
+			arrange: func(h *harness) {
+				h.DB.repositories = append(h.DB.repositories, wsm.Repository{ID: "repo-1", Dir: "/repos/one"})
+				h.Verbs.foldErr = refused()
+			},
+			section: &agentreplv1.SidebarViewFoldSection{Section: repositorySection("repo-1"), Fold: collapseFold()},
+		},
+		{
+			name:    "a subsection",
+			arrange: func(h *harness) { h.Verbs.arrangeErr = refused() },
+			section: &agentreplv1.SidebarViewFoldSection{Section: subsectionSection("sub-1"), Fold: collapseFold()},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(h)
+
+			// Act
+			resp, err := h.Client.UpdateSidebarView(context.Background(), connect.NewRequest(foldChange(tt.section)))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("UpdateSidebarView: %v", err)
+			}
+			if resp.Msg.GetError().GetHoldsCurrent() == nil {
+				t.Fatalf("result = %v, want holds_current", resp.Msg.GetResult())
+			}
+		})
+	}
+}

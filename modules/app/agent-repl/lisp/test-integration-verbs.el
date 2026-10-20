@@ -1737,7 +1737,7 @@ rest of this suite already asserts against."
          . [((key . ((repository . ,agent-repl-itest-verbs--repo-protojson)))
              (header . ((label . ((text . "itest-repo"))) (count . ((workspaces . 1)))))
              (rows . ((rows . ,(vconcat rows))))
-             (divergence . ((pending . ()))) (expanded . ()))])
+             (divergence . ((pending . ()))) (expanded . ((collapsible . ()))))])
          (openCount . ((workspaces . 1)))))
     (open . ((label . ((text . "Open"))) (expanded . ())))
     (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))

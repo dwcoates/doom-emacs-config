@@ -37,7 +37,7 @@
 import { CONTROL_SELECTOR, createControl, type Control } from "../control.js";
 import type { RosterOpenRows, RosterRepoSection, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { childrenMatching, queryAll } from "../dom.js";
+import { childrenMatching, queryAll, windowOf } from "../dom.js";
 import { EMPTY_SUBSECTION_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
 import { log } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
@@ -181,8 +181,9 @@ export interface NamePopupSpec {
 /**
  * Open the name popup under ANCHOR, replacing any open one.
  *
- * Enter or the button sends; Escape, or a press anywhere outside it, closes
- * it. A blank name is not sent: the contract refuses one, so the popup keeps
+ * Enter or the button sends; Escape, a press anywhere outside it, or the page
+ * losing focus (a click into Emacs outside the page, which the page never
+ * sees as a press) closes it. A blank name is not sent: the contract refuses one, so the popup keeps
  * waiting rather than provoking the refusal.
  */
 export function openSubsectionNamePopup(sc: SidebarContext, anchor: HTMLElement, spec: NamePopupSpec): HTMLElement {
@@ -206,19 +207,23 @@ export function openSubsectionNamePopup(sc: SidebarContext, anchor: HTMLElement,
   submit.textContent = spec.submitLabel;
   popup.append(input, submit);
 
+  const win = windowOf(anchor);
   const outside = (event: PointerEvent): void => {
-    if (!popup.contains(event.target as Node)) close();
+    if (!popup.contains(event.target as Node)) close("a press outside it");
   };
-  const close = (): void => {
+  const blurred = (): void => close("the page lost focus");
+  const close = (why: string): void => {
+    log.debug("closing the subsection name popup", { operation: "sidebar.subsection.popup-close", context: { why } });
     popup.remove();
-    document.removeEventListener("pointerdown", outside, true);
+    win.document.removeEventListener("pointerdown", outside, true);
+    win.removeEventListener("blur", blurred);
   };
   const send = (): void => {
     const name = input.value.trim();
     if (name === "") return;
     log.info("naming a sidebar subsection", { operation: "sidebar.subsection.name", context: { length: name.length } });
     void sendArrangement(sc, submit, spec.change(name)).then((ok) => {
-      if (ok) close();
+      if (ok) close("the name was sent");
     });
   };
   submit.addEventListener("click", (event) => {
@@ -227,9 +232,14 @@ export function openSubsectionNamePopup(sc: SidebarContext, anchor: HTMLElement,
   });
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") send();
-    if (event.key === "Escape") close();
+    if (event.key === "Escape") close("Escape");
   });
-  document.addEventListener("pointerdown", outside, true);
+  win.document.addEventListener("pointerdown", outside, true);
+  win.addEventListener("blur", blurred);
+  log.debug("opening the subsection name popup", {
+    operation: "sidebar.subsection.popup-open",
+    context: { submit: spec.submitLabel },
+  });
   sc.arrange.layer.appendChild(popup);
   input.focus();
   return popup;

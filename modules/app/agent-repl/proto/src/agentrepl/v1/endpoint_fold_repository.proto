@@ -49,6 +49,14 @@ message FoldRepositoryError {
   oneof cause {
     // No registered repository matches the ref.
     FoldRepositoryUnknownRepository unknown_repository = 1;
+    // A collapse of the repository the current workspace sits in.
+    FoldRepositoryHoldsCurrent holds_current = 2;
   }
 }
 message FoldRepositoryUnknownRepository {}
+
+// A collapse asked of the repository the current workspace sits in, refused
+// as agentrepl.v1.UpdateSidebarViewError.holds_current refuses it: nothing is
+// recorded and the section stands expanded. DELIBERATELY EMPTY: the arm is
+// the cause, and the request names the repository.
+message FoldRepositoryHoldsCurrent {}

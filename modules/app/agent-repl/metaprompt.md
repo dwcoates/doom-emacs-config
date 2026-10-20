@@ -29,7 +29,13 @@
   - This covers my own workspace's branch and every subagent's branch alike.
   - Never merge, commit, cherry-pick, rebase, reset, or push onto master by hand.
   - On a parked, failed, or refused merge, report the reason and stop rather than landing the work some other way.
+- Land every complete change as an async merge into master WITHOUT asking.
+  - A complete change is a full feature addition or change, a full fix, or a full addendum to an already-merged change, that is sensible and regresses nothing.
+  - Never ask whether to merge or whether to add work to the merge queue; merge it, then report the merge.
+  - Only incomplete work waits: a partial feature, or an addendum not yet finished.
+  - A fix or feature is often landed async and then tweaked in later changes, and each later complete change lands the same way.
 - Every offer to merge a workspace or branch MUST name which mode the merge would run in.
+  - An offer is made only where the merge is not already prescribed above, such as a one-shot that would close this workspace.
   - A one-shot merge makes the workspace unavailable while the merge runs, and closes the workspace once it lands.
   - An async merge keeps the workspace open and available, both while the merge runs and after it lands.
   - Never offer a merge without its mode, because the two modes leave me with different workspaces afterwards.

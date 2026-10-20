@@ -912,9 +912,38 @@ back."
   "Decode `RosterRepoSection''s `header' field VALUE."
   (agent-repl-wire-decode-roster-section-header value))
 
+(defun agent-repl-wire-decode-roster-repo-section-collapsible (value)
+  "Decode VALUE as the empty message `RosterRepoSectionCollapsible'."
+  (agent-repl-wire--decode-empty "RosterRepoSectionCollapsible" value))
+
+(defun agent-repl-wire-decode-roster-repo-section-holds-current (value)
+  "Decode VALUE as the empty message `RosterRepoSectionHoldsCurrent'."
+  (agent-repl-wire--decode-empty "RosterRepoSectionHoldsCurrent" value))
+
+(defun agent-repl-wire--decode-expanded-collapse (message-name value collapsible holds-current)
+  "Decode VALUE as MESSAGE-NAME, an expanded fold, a plist `(:collapse)'.
+Whether the sidebar's fold gesture may collapse the repository section or
+subsection: never while it holds the current workspace.  COLLAPSIBLE and
+HOLDS-CURRENT decode the two arms, each the message's own empty arm.  Emacs
+folds nothing, but the codec refuses unknown fields, so it is decoded and
+validated whole.  Never unset."
+  (let ((object (agent-repl-wire--object message-name value)))
+    (agent-repl-wire--check-keys message-name object '(collapsible holdsCurrent))
+    (agent-repl-wire--decoded
+     message-name
+     (list :collapse
+           (agent-repl-wire--decode-oneof
+            message-name 'collapse object
+            `((collapsible :collapsible ,collapsible)
+              (holdsCurrent :holds-current ,holds-current)))))))
+
 (defun agent-repl-wire-decode-roster-repo-section-expanded (value)
-  "Decode VALUE as the empty message `RosterRepoSectionExpanded'."
-  (agent-repl-wire--decode-empty "RosterRepoSectionExpanded" value))
+  "Decode VALUE as `RosterRepoSectionExpanded', a plist `(:collapse)'.
+See `agent-repl-wire--decode-expanded-collapse'."
+  (agent-repl-wire--decode-expanded-collapse
+   "RosterRepoSectionExpanded" value
+   'agent-repl-wire-decode-roster-repo-section-collapsible
+   'agent-repl-wire-decode-roster-repo-section-holds-current))
 
 (defun agent-repl-wire-decode-roster-repo-section-collapsed (value)
   "Decode VALUE as the empty message `RosterRepoSectionCollapsed'."
@@ -997,9 +1026,21 @@ The ID, NOT the name: a subsection can be renamed without becoming another."
      (list :subsection-id (agent-repl-wire--decode-string
                            "RosterSubsectionKey" 'subsectionId object)))))
 
+(defun agent-repl-wire-decode-roster-subsection-collapsible (value)
+  "Decode VALUE as the empty message `RosterSubsectionCollapsible'."
+  (agent-repl-wire--decode-empty "RosterSubsectionCollapsible" value))
+
+(defun agent-repl-wire-decode-roster-subsection-holds-current (value)
+  "Decode VALUE as the empty message `RosterSubsectionHoldsCurrent'."
+  (agent-repl-wire--decode-empty "RosterSubsectionHoldsCurrent" value))
+
 (defun agent-repl-wire-decode-roster-subsection-expanded (value)
-  "Decode VALUE as the empty message `RosterSubsectionExpanded'."
-  (agent-repl-wire--decode-empty "RosterSubsectionExpanded" value))
+  "Decode VALUE as `RosterSubsectionExpanded', a plist `(:collapse)'.
+See `agent-repl-wire--decode-expanded-collapse'."
+  (agent-repl-wire--decode-expanded-collapse
+   "RosterSubsectionExpanded" value
+   'agent-repl-wire-decode-roster-subsection-collapsible
+   'agent-repl-wire-decode-roster-subsection-holds-current))
 
 (defun agent-repl-wire-decode-roster-subsection-collapsed (value)
   "Decode VALUE as the empty message `RosterSubsectionCollapsed'."

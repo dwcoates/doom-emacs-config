@@ -10,6 +10,7 @@ import { DRAG_GHOST_CLASS, DRAG_SLOT_CLASS, REARRANGED_ATTRIBUTE } from "../../s
 import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { frameQueue } from "../frame-queue.js";
 import { queryAll } from "../../src/dom.js";
+import { log } from "../../src/log.js";
 import {
   UpdateSidebarViewResponseSchema,
   type UpdateSidebarViewRequest,
@@ -88,6 +89,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   settleOwedDragClick();
   document.body.replaceChildren();
 });
@@ -188,6 +190,31 @@ describe("the new-subsection popup", () => {
     const { sc } = opened();
     document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     expect(sc.arrange.layer.querySelector("[data-subsection-popup]")).toBeNull();
+  });
+
+  it("closes when the page loses focus", () => {
+    const { sc } = opened();
+    window.dispatchEvent(new FocusEvent("blur"));
+    expect(sc.arrange.layer.querySelector("[data-subsection-popup]")).toBeNull();
+  });
+
+  it("logs why it closed", () => {
+    const { input } = opened();
+    const debug = vi.spyOn(log, "debug");
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(debug).toHaveBeenCalledWith("closing the subsection name popup", {
+      operation: "sidebar.subsection.popup-close",
+      context: { why: "Escape" },
+    });
+  });
+
+  it("stops listening once closed", () => {
+    const { input } = opened();
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    const debug = vi.spyOn(log, "debug");
+    window.dispatchEvent(new FocusEvent("blur"));
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    expect(debug.mock.calls.filter(([message]) => message === "closing the subsection name popup")).toEqual([]);
   });
 
   it("keeps the popup open when the subsection is refused", async () => {

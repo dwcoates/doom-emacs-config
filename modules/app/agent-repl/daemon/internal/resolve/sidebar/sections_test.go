@@ -936,3 +936,99 @@ func TestTheOpenCountIsTheSumOfTheSectionCounts(t *testing.T) {
 		t.Fatalf("open count = %d, want the sections' sum %d (2)", got, sum)
 	}
 }
+
+// collapseArms is SECTION's own collapse arm, then each subsection's, as
+// "collapsible" or "holds_current" ("collapsed" for a collapsed one).
+func collapseArms(section *frontendv1.RosterRepoSection) []string {
+	var out []string
+	switch {
+	case section.GetCollapsed() != nil:
+		out = append(out, "collapsed")
+	case section.GetExpanded().GetHoldsCurrent() != nil:
+		out = append(out, "holds_current")
+	case section.GetExpanded().GetCollapsible() != nil:
+		out = append(out, "collapsible")
+	default:
+		out = append(out, "unset")
+	}
+	for _, sub := range section.GetSubsections() {
+		switch {
+		case sub.GetCollapsed() != nil:
+			out = append(out, "collapsed")
+		case sub.GetExpanded().GetHoldsCurrent() != nil:
+			out = append(out, "holds_current")
+		case sub.GetExpanded().GetCollapsible() != nil:
+			out = append(out, "collapsible")
+		default:
+			out = append(out, "unset")
+		}
+	}
+	return out
+}
+
+func TestAnExpandedSectionSaysWhetherItHoldsTheCurrentWorkspace(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(reg *sidebar.Registry)
+		// want is the repository's arm, then the empty subsection's, then later's.
+		want []string
+	}{
+		{
+			name:    "nothing is current",
+			arrange: func(*sidebar.Registry) {},
+			want:    []string{"collapsible", "collapsible", "collapsible"},
+		},
+		{
+			name:    "the current workspace sits in no subsection",
+			arrange: func(reg *sidebar.Registry) { current := ids.WorkspaceID("w2"); reg.Current = &current },
+			want:    []string{"holds_current", "collapsible", "collapsible"},
+		},
+		{
+			name:    "the current workspace sits in a subsection",
+			arrange: func(reg *sidebar.Registry) { current := ids.WorkspaceID("w1"); reg.Current = &current },
+			want:    []string{"holds_current", "collapsible", "holds_current"},
+		},
+		{
+			name: "a collapsed section states no collapse arm",
+			arrange: func(reg *sidebar.Registry) {
+				current := ids.WorkspaceID("w2")
+				reg.Current = &current
+				reg.Repositories[0].Folded = true
+			},
+			want: []string{"collapsed", "collapsible", "collapsible"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			reg := arrangedRegistry()
+			tt.arrange(&reg)
+
+			// Act
+			r.SetRegistry(reg)
+
+			// Assert
+			if got := collapseArms(latest(t, r).GetRepository().GetSections()[0]); !equal(got, tt.want) {
+				t.Fatalf("collapse arms = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestASectionsCollapseArmFollowsASwitch(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+	reg := arrangedRegistry()
+	current := ids.WorkspaceID("w2")
+	reg.Current = &current
+	r.SetRegistry(reg)
+
+	// Act
+	r.SetSelected("w1")
+
+	// Assert
+	if got := collapseArms(latest(t, r).GetRepository().GetSections()[0]); !equal(got, []string{"holds_current", "collapsible", "holds_current"}) {
+		t.Fatalf("collapse arms = %v, want later to hold the switched-to workspace", got)
+	}
+}

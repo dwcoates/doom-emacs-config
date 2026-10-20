@@ -480,6 +480,9 @@ The top bar's effort selector sits between the model selector and the permission
   - The echo area counts the keep-alives sent and names each workspace that got none, with why.
 - **Each heading folds its section with the chevron beside it.**
   - Every workspace's page shows the same folds.
+  - The repository or subsection holding the workspace you are in does not fold.
+    - Folding it would stand that workspace's session down and hide its tab.
+    - Unfolding it always works.
 - **"OPEN" shows how many workspaces it lists, folded or not.**
   - The number counts every row, children of other workspaces included, and the rows of a folded repository too.
 - **The time at the right of an open workspace's row is its running turn's duration.**
@@ -494,6 +497,7 @@ The top bar's effort selector sits between the model selector and the permission
 
 - **The "+" in a repository's header adds a subsection to it.**
   - A box asks for the subsection's name, and the subsection appears at the bottom of the repository.
+  - Clicking anywhere outside the box closes it, a click into Emacs included.
   - Double-click a subsection's name to rename it, and click its "×" to remove it; its workspaces return to the repository.
 - **Drag a workspace's row to move it.**
   - Drop it among the repository's own rows or into any of its subsections, an empty one included.

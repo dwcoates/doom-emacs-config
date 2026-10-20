@@ -290,6 +290,12 @@ func rosterJSON(repoDir string, rows []map[string]any, current string) json.RawM
 			currentRef = ref
 		}
 	}
+	// The section states whether a collapse may be asked, as the daemon
+	// resolves it: never while it holds the current workspace.
+	collapse := map[string]any{"collapsible": map[string]any{}}
+	if currentRef != nil {
+		collapse = map[string]any{"holdsCurrent": map[string]any{}}
+	}
 	roster := map[string]any{
 		"repository": map[string]any{
 			"sections": []any{map[string]any{
@@ -297,7 +303,7 @@ func rosterJSON(repoDir string, rows []map[string]any, current string) json.RawM
 				"header":     map[string]any{"label": map[string]any{"text": filepath.Base(repoDir)}, "count": map[string]any{"workspaces": len(rows)}},
 				"openRows":   map[string]any{"rows": open},
 				"divergence": map[string]any{"pending": map[string]any{}},
-				"expanded":   map[string]any{},
+				"expanded":   collapse,
 			}},
 			"openCount": map[string]any{"workspaces": len(rows)},
 		},

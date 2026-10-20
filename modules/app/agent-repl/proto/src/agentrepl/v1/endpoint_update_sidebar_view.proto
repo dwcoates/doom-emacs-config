@@ -126,6 +126,9 @@ message UpdateSidebarViewError {
     UpdateSidebarViewUnknownRepository unknown_repository = 1;
     // No subsection matches the ref: it was deleted, or never existed.
     UpdateSidebarViewUnknownSubsection unknown_subsection = 3;
+    // A collapse of a repository or subsection that holds the current
+    // workspace.
+    UpdateSidebarViewHoldsCurrent holds_current = 4;
   }
 }
 
@@ -136,3 +139,14 @@ message UpdateSidebarViewUnknownSubsection {}
 // No registered repository matches the ref. DELIBERATELY EMPTY: the arm is
 // the cause.
 message UpdateSidebarViewUnknownRepository {}
+
+// A collapse asked of the repository or subsection the current workspace sits
+// in. Collapsing it would stand down the session the user is looking at and
+// hide its tab, so nothing is recorded and the fold stands expanded. The
+// check and the selection are serialized in the daemon, so a switch racing
+// the ask is either wholly before it or wholly after it. The roster already
+// says so (frontend.v1.RosterRepoSectionExpanded.collapse and
+// frontend.v1.RosterSubsectionExpanded.collapse), so a page reaches this arm
+// only when its roster is a push behind a switch. DELIBERATELY EMPTY: the arm
+// is the cause, and the request names the section.
+message UpdateSidebarViewHoldsCurrent {}

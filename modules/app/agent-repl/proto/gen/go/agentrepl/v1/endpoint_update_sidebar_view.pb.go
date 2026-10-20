@@ -637,6 +637,7 @@ type UpdateSidebarViewError struct {
 	//
 	//	*UpdateSidebarViewError_UnknownRepository
 	//	*UpdateSidebarViewError_UnknownSubsection
+	//	*UpdateSidebarViewError_HoldsCurrent
 	Cause         isUpdateSidebarViewError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -697,6 +698,15 @@ func (x *UpdateSidebarViewError) GetUnknownSubsection() *UpdateSidebarViewUnknow
 	return nil
 }
 
+func (x *UpdateSidebarViewError) GetHoldsCurrent() *UpdateSidebarViewHoldsCurrent {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateSidebarViewError_HoldsCurrent); ok {
+			return x.HoldsCurrent
+		}
+	}
+	return nil
+}
+
 type isUpdateSidebarViewError_Cause interface {
 	isUpdateSidebarViewError_Cause()
 }
@@ -711,9 +721,17 @@ type UpdateSidebarViewError_UnknownSubsection struct {
 	UnknownSubsection *UpdateSidebarViewUnknownSubsection `protobuf:"bytes,3,opt,name=unknown_subsection,json=unknownSubsection,proto3,oneof"`
 }
 
+type UpdateSidebarViewError_HoldsCurrent struct {
+	// A collapse of a repository or subsection that holds the current
+	// workspace.
+	HoldsCurrent *UpdateSidebarViewHoldsCurrent `protobuf:"bytes,4,opt,name=holds_current,json=holdsCurrent,proto3,oneof"`
+}
+
 func (*UpdateSidebarViewError_UnknownRepository) isUpdateSidebarViewError_Cause() {}
 
 func (*UpdateSidebarViewError_UnknownSubsection) isUpdateSidebarViewError_Cause() {}
+
+func (*UpdateSidebarViewError_HoldsCurrent) isUpdateSidebarViewError_Cause() {}
 
 // No subsection matches the ref. DELIBERATELY EMPTY: the arm is the cause,
 // and the request names the subsection.
@@ -791,6 +809,51 @@ func (*UpdateSidebarViewUnknownRepository) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{11}
 }
 
+// A collapse asked of the repository or subsection the current workspace sits
+// in. Collapsing it would stand down the session the user is looking at and
+// hide its tab, so nothing is recorded and the fold stands expanded. The
+// check and the selection are serialized in the daemon, so a switch racing
+// the ask is either wholly before it or wholly after it. The roster already
+// says so (frontend.v1.RosterRepoSectionExpanded.collapse and
+// frontend.v1.RosterSubsectionExpanded.collapse), so a page reaches this arm
+// only when its roster is a push behind a switch. DELIBERATELY EMPTY: the arm
+// is the cause, and the request names the section.
+type UpdateSidebarViewHoldsCurrent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateSidebarViewHoldsCurrent) Reset() {
+	*x = UpdateSidebarViewHoldsCurrent{}
+	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateSidebarViewHoldsCurrent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateSidebarViewHoldsCurrent) ProtoMessage() {}
+
+func (x *UpdateSidebarViewHoldsCurrent) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateSidebarViewHoldsCurrent.ProtoReflect.Descriptor instead.
+func (*UpdateSidebarViewHoldsCurrent) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP(), []int{12}
+}
+
 var File_agentrepl_v1_endpoint_update_sidebar_view_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDesc = "" +
@@ -823,13 +886,15 @@ const file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2&.agentrepl.v1.UpdateSidebarViewSuccessH\x00R\asuccess\x12<\n" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.UpdateSidebarViewErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1a\n" +
-	"\x18UpdateSidebarViewSuccess\"\xfb\x01\n" +
+	"\x18UpdateSidebarViewSuccess\"\xcf\x02\n" +
 	"\x16UpdateSidebarViewError\x12a\n" +
 	"\x12unknown_repository\x18\x01 \x01(\v20.agentrepl.v1.UpdateSidebarViewUnknownRepositoryH\x00R\x11unknownRepository\x12a\n" +
-	"\x12unknown_subsection\x18\x03 \x01(\v20.agentrepl.v1.UpdateSidebarViewUnknownSubsectionH\x00R\x11unknownSubsectionB\a\n" +
+	"\x12unknown_subsection\x18\x03 \x01(\v20.agentrepl.v1.UpdateSidebarViewUnknownSubsectionH\x00R\x11unknownSubsection\x12R\n" +
+	"\rholds_current\x18\x04 \x01(\v2+.agentrepl.v1.UpdateSidebarViewHoldsCurrentH\x00R\fholdsCurrentB\a\n" +
 	"\x05causeJ\x04\b\x02\x10\x03R\funknown_task\"$\n" +
 	"\"UpdateSidebarViewUnknownSubsection\"$\n" +
-	"\"UpdateSidebarViewUnknownRepositoryB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\"UpdateSidebarViewUnknownRepository\"\x1f\n" +
+	"\x1dUpdateSidebarViewHoldsCurrentB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescOnce sync.Once
@@ -843,7 +908,7 @@ func file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_agentrepl_v1_endpoint_update_sidebar_view_proto_goTypes = []any{
 	(*UpdateSidebarViewRequest)(nil),           // 0: agentrepl.v1.UpdateSidebarViewRequest
 	(*SidebarViewFoldSection)(nil),             // 1: agentrepl.v1.SidebarViewFoldSection
@@ -857,27 +922,29 @@ var file_agentrepl_v1_endpoint_update_sidebar_view_proto_goTypes = []any{
 	(*UpdateSidebarViewError)(nil),             // 9: agentrepl.v1.UpdateSidebarViewError
 	(*UpdateSidebarViewUnknownSubsection)(nil), // 10: agentrepl.v1.UpdateSidebarViewUnknownSubsection
 	(*UpdateSidebarViewUnknownRepository)(nil), // 11: agentrepl.v1.UpdateSidebarViewUnknownRepository
-	(*v1.RepositoryRef)(nil),                   // 12: workspace.v1.RepositoryRef
-	(*SubsectionRef)(nil),                      // 13: agentrepl.v1.SubsectionRef
+	(*UpdateSidebarViewHoldsCurrent)(nil),      // 12: agentrepl.v1.UpdateSidebarViewHoldsCurrent
+	(*v1.RepositoryRef)(nil),                   // 13: workspace.v1.RepositoryRef
+	(*SubsectionRef)(nil),                      // 14: agentrepl.v1.SubsectionRef
 }
 var file_agentrepl_v1_endpoint_update_sidebar_view_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.UpdateSidebarViewRequest.fold_section:type_name -> agentrepl.v1.SidebarViewFoldSection
-	12, // 1: agentrepl.v1.SidebarViewFoldSection.repository:type_name -> workspace.v1.RepositoryRef
+	13, // 1: agentrepl.v1.SidebarViewFoldSection.repository:type_name -> workspace.v1.RepositoryRef
 	2,  // 2: agentrepl.v1.SidebarViewFoldSection.recently_merged:type_name -> agentrepl.v1.SidebarViewRecentlyMerged
 	3,  // 3: agentrepl.v1.SidebarViewFoldSection.hidden:type_name -> agentrepl.v1.SidebarViewHidden
 	4,  // 4: agentrepl.v1.SidebarViewFoldSection.open:type_name -> agentrepl.v1.SidebarViewOpen
-	13, // 5: agentrepl.v1.SidebarViewFoldSection.subsection:type_name -> agentrepl.v1.SubsectionRef
+	14, // 5: agentrepl.v1.SidebarViewFoldSection.subsection:type_name -> agentrepl.v1.SubsectionRef
 	5,  // 6: agentrepl.v1.SidebarViewFoldSection.expand:type_name -> agentrepl.v1.SidebarViewExpand
 	6,  // 7: agentrepl.v1.SidebarViewFoldSection.collapse:type_name -> agentrepl.v1.SidebarViewCollapse
 	8,  // 8: agentrepl.v1.UpdateSidebarViewResponse.success:type_name -> agentrepl.v1.UpdateSidebarViewSuccess
 	9,  // 9: agentrepl.v1.UpdateSidebarViewResponse.error:type_name -> agentrepl.v1.UpdateSidebarViewError
 	11, // 10: agentrepl.v1.UpdateSidebarViewError.unknown_repository:type_name -> agentrepl.v1.UpdateSidebarViewUnknownRepository
 	10, // 11: agentrepl.v1.UpdateSidebarViewError.unknown_subsection:type_name -> agentrepl.v1.UpdateSidebarViewUnknownSubsection
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	12, // 12: agentrepl.v1.UpdateSidebarViewError.holds_current:type_name -> agentrepl.v1.UpdateSidebarViewHoldsCurrent
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_sidebar_view_proto_init() }
@@ -905,6 +972,7 @@ func file_agentrepl_v1_endpoint_update_sidebar_view_proto_init() {
 	file_agentrepl_v1_endpoint_update_sidebar_view_proto_msgTypes[9].OneofWrappers = []any{
 		(*UpdateSidebarViewError_UnknownRepository)(nil),
 		(*UpdateSidebarViewError_UnknownSubsection)(nil),
+		(*UpdateSidebarViewError_HoldsCurrent)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -912,7 +980,7 @@ func file_agentrepl_v1_endpoint_update_sidebar_view_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_sidebar_view_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -36,7 +36,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_sidebar_view.proto.
  */
 export const file_agentrepl_v1_endpoint_update_sidebar_view: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3NpZGViYXJfdmlldy5wcm90bxIMYWdlbnRyZXBsLnYxIncKGFVwZGF0ZVNpZGViYXJWaWV3UmVxdWVzdBI8Cgxmb2xkX3NlY3Rpb24YASABKAsyJC5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdGb2xkU2VjdGlvbkgAQggKBmNoYW5nZUoECAIQA1INc2hvd19ncm91cGluZyLLAwoWU2lkZWJhclZpZXdGb2xkU2VjdGlvbhIxCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIABJCCg9yZWNlbnRseV9tZXJnZWQYAyABKAsyJy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdSZWNlbnRseU1lcmdlZEgAEjEKBmhpZGRlbhgHIAEoCzIfLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0hpZGRlbkgAEi0KBG9wZW4YCSABKAsyHS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdPcGVuSAASMQoKc3Vic2VjdGlvbhgKIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASMQoGZXhwYW5kGAQgASgLMh8uYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3RXhwYW5kSAESNQoIY29sbGFwc2UYBSABKAsyIS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdDb2xsYXBzZUgBQgkKB3NlY3Rpb25CBgoEZm9sZEoECAIQA0oECAYQB0oECAgQCVIGdmlld2VkUgR0YXNrUghtYXR1cml0eSIbChlTaWRlYmFyVmlld1JlY2VudGx5TWVyZ2VkIhMKEVNpZGViYXJWaWV3SGlkZGVuIhEKD1NpZGViYXJWaWV3T3BlbiITChFTaWRlYmFyVmlld0V4cGFuZCIVChNTaWRlYmFyVmlld0NvbGxhcHNlIpcBChlVcGRhdGVTaWRlYmFyVmlld1Jlc3BvbnNlEjkKB3N1Y2Nlc3MYASABKAsyJi5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdTdWNjZXNzSAASNQoFZXJyb3IYAiABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdFcnJvckgAQggKBnJlc3VsdCIaChhVcGRhdGVTaWRlYmFyVmlld1N1Y2Nlc3Mi1QEKFlVwZGF0ZVNpZGViYXJWaWV3RXJyb3ISTgoSdW5rbm93bl9yZXBvc2l0b3J5GAEgASgLMjAuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93blJlcG9zaXRvcnlIABJOChJ1bmtub3duX3N1YnNlY3Rpb24YAyABKAsyMC5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdVbmtub3duU3Vic2VjdGlvbkgAQgcKBWNhdXNlSgQIAhADUgx1bmtub3duX3Rhc2siJAoiVXBkYXRlU2lkZWJhclZpZXdVbmtub3duU3Vic2VjdGlvbiIkCiJVcGRhdGVTaWRlYmFyVmlld1Vua25vd25SZXBvc2l0b3J5QipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3NpZGViYXJfdmlldy5wcm90bxIMYWdlbnRyZXBsLnYxIncKGFVwZGF0ZVNpZGViYXJWaWV3UmVxdWVzdBI8Cgxmb2xkX3NlY3Rpb24YASABKAsyJC5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdGb2xkU2VjdGlvbkgAQggKBmNoYW5nZUoECAIQA1INc2hvd19ncm91cGluZyLLAwoWU2lkZWJhclZpZXdGb2xkU2VjdGlvbhIxCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIABJCCg9yZWNlbnRseV9tZXJnZWQYAyABKAsyJy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdSZWNlbnRseU1lcmdlZEgAEjEKBmhpZGRlbhgHIAEoCzIfLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0hpZGRlbkgAEi0KBG9wZW4YCSABKAsyHS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdPcGVuSAASMQoKc3Vic2VjdGlvbhgKIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASMQoGZXhwYW5kGAQgASgLMh8uYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3RXhwYW5kSAESNQoIY29sbGFwc2UYBSABKAsyIS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdDb2xsYXBzZUgBQgkKB3NlY3Rpb25CBgoEZm9sZEoECAIQA0oECAYQB0oECAgQCVIGdmlld2VkUgR0YXNrUghtYXR1cml0eSIbChlTaWRlYmFyVmlld1JlY2VudGx5TWVyZ2VkIhMKEVNpZGViYXJWaWV3SGlkZGVuIhEKD1NpZGViYXJWaWV3T3BlbiITChFTaWRlYmFyVmlld0V4cGFuZCIVChNTaWRlYmFyVmlld0NvbGxhcHNlIpcBChlVcGRhdGVTaWRlYmFyVmlld1Jlc3BvbnNlEjkKB3N1Y2Nlc3MYASABKAsyJi5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdTdWNjZXNzSAASNQoFZXJyb3IYAiABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdFcnJvckgAQggKBnJlc3VsdCIaChhVcGRhdGVTaWRlYmFyVmlld1N1Y2Nlc3MimwIKFlVwZGF0ZVNpZGViYXJWaWV3RXJyb3ISTgoSdW5rbm93bl9yZXBvc2l0b3J5GAEgASgLMjAuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93blJlcG9zaXRvcnlIABJOChJ1bmtub3duX3N1YnNlY3Rpb24YAyABKAsyMC5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdVbmtub3duU3Vic2VjdGlvbkgAEkQKDWhvbGRzX2N1cnJlbnQYBCABKAsyKy5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdIb2xkc0N1cnJlbnRIAEIHCgVjYXVzZUoECAIQA1IMdW5rbm93bl90YXNrIiQKIlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93blN1YnNlY3Rpb24iJAoiVXBkYXRlU2lkZWJhclZpZXdVbmtub3duUmVwb3NpdG9yeSIfCh1VcGRhdGVTaWRlYmFyVmlld0hvbGRzQ3VycmVudEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.UpdateSidebarViewRequest
@@ -317,6 +317,15 @@ export type UpdateSidebarViewError = Message<"agentrepl.v1.UpdateSidebarViewErro
      */
     value: UpdateSidebarViewUnknownSubsection;
     case: "unknownSubsection";
+  } | {
+    /**
+     * A collapse of a repository or subsection that holds the current
+     * workspace.
+     *
+     * @generated from field: agentrepl.v1.UpdateSidebarViewHoldsCurrent holds_current = 4;
+     */
+    value: UpdateSidebarViewHoldsCurrent;
+    case: "holdsCurrent";
   } | { case: undefined; value?: undefined };
 };
 
@@ -358,4 +367,27 @@ export type UpdateSidebarViewUnknownRepository = Message<"agentrepl.v1.UpdateSid
  */
 export const UpdateSidebarViewUnknownRepositorySchema: GenMessage<UpdateSidebarViewUnknownRepository> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 11);
+
+/**
+ * A collapse asked of the repository or subsection the current workspace sits
+ * in. Collapsing it would stand down the session the user is looking at and
+ * hide its tab, so nothing is recorded and the fold stands expanded. The
+ * check and the selection are serialized in the daemon, so a switch racing
+ * the ask is either wholly before it or wholly after it. The roster already
+ * says so (frontend.v1.RosterRepoSectionExpanded.collapse and
+ * frontend.v1.RosterSubsectionExpanded.collapse), so a page reaches this arm
+ * only when its roster is a push behind a switch. DELIBERATELY EMPTY: the arm
+ * is the cause, and the request names the section.
+ *
+ * @generated from message agentrepl.v1.UpdateSidebarViewHoldsCurrent
+ */
+export type UpdateSidebarViewHoldsCurrent = Message<"agentrepl.v1.UpdateSidebarViewHoldsCurrent"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateSidebarViewHoldsCurrent.
+ * Use `create(UpdateSidebarViewHoldsCurrentSchema)` to create a new message.
+ */
+export const UpdateSidebarViewHoldsCurrentSchema: GenMessage<UpdateSidebarViewHoldsCurrent> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 12);
 

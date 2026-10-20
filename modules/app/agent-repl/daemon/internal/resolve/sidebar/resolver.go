@@ -293,15 +293,24 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 // selected. It is stated by IDENTITY, never by a display name, because names
 // collide across repositories.
 func (r *resolver) currentWorkspace() *frontendv1.RosterCurrentWorkspace {
+	ws := r.selectedWorkspace()
+	if ws == nil {
+		return nil
+	}
+	return &frontendv1.RosterCurrentWorkspace{
+		Workspace: &workspacev1.WorkspaceRef{Id: string(ws.ID), Dir: ws.Dir}}
+}
+
+// selectedWorkspace is the registry's record of the selection, or nil when
+// nothing is selected or the registry does not carry it yet.
+func (r *resolver) selectedWorkspace() *wsm.Workspace {
 	if r.state.selected == nil {
 		return nil
 	}
-	for _, ws := range r.state.reg.Workspaces {
-		if ws.ID != *r.state.selected {
-			continue
+	for i := range r.state.reg.Workspaces {
+		if r.state.reg.Workspaces[i].ID == *r.state.selected {
+			return &r.state.reg.Workspaces[i]
 		}
-		return &frontendv1.RosterCurrentWorkspace{
-			Workspace: &workspacev1.WorkspaceRef{Id: string(ws.ID), Dir: ws.Dir}}
 	}
 	return nil
 }

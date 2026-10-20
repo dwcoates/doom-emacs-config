@@ -2456,7 +2456,9 @@ export type RosterStatusArm = RosterStatusCase;
  * (`frontend.v1.RosterRepoSection.fold`), so every fixture section names one.
  */
 function repositoryFold(collapsed: boolean): MessageInitShape<typeof RosterRepoSectionSchema>["fold"] {
-  return collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} };
+  return collapsed
+    ? { case: "collapsed", value: {} }
+    : { case: "expanded", value: { collapse: { case: "collapsible", value: {} } } };
 }
 
 /**

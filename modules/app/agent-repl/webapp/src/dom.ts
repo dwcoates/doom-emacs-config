@@ -126,6 +126,13 @@ export function placeOptional(
   else if (drawn.textContent !== next.textContent) drawn.replaceWith(next);
 }
 
+/** The window a drawn element EL lives in. A drawn element always has one. */
+export function windowOf(el: Element): Window {
+  const win = el.ownerDocument.defaultView;
+  if (win === null) throw new Error("invariant: a drawn element lives in a window");
+  return win;
+}
+
 /**
  * The `ResizeObserver` of the page EL lives in, or null when that page has
  * none (a detached document, or a host without the capability). Every
