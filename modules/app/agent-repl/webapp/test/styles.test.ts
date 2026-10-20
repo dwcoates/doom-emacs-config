@@ -2079,12 +2079,12 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(rule.trim()).toBe("--bubble-bg: var(--selected-final-response-bg) !important;");
   });
 
-  it("dims the selected final response's fill halfway from the selected grey to its own fill", () => {
+  it("dims the selected final response's fill to 37.5% of the way from its own fill to the selected grey", () => {
     // Arrange / Act — declared once on :root, so each theme mixes its own two tokens.
     const declaration = themeValueOf(declarationsOf(":root") ?? "", "--selected-final-response-bg");
 
-    // Assert — color-mix with no percentages splits the two evenly.
-    expect(declaration).toBe("color-mix(in srgb, var(--selected-bubble-bg), var(--assistant))");
+    // Assert — the half-strength grey, 25% dimmer again (0.75 of 50%).
+    expect(declaration).toBe("color-mix(in srgb, var(--selected-bubble-bg) 37.5%, var(--assistant))");
   });
 
   it("never overrides the dimmed final response fill in the dark theme", () => {
