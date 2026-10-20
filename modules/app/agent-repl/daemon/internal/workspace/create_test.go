@@ -1896,4 +1896,3 @@ func TestCreateFromOriginWhoseFetchFailsIsRefusedAndBuildsNothing(t *testing.T) 
 		t.Fatalf("records = %+v, want the refusal recorded with git's failure", f.log.logger.Records())
 	}
 }
-

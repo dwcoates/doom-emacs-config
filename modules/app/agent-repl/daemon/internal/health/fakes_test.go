@@ -117,7 +117,7 @@ func (s *stubSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return n
 // BindRecordTee implements dlog.Surfaces; this double tees nothing.
 func (s *stubSurfaces) BindRecordTee(dlog.RecordTee) {}
 
-func (s *stubSurfaces) BindRecordCounter(dlog.RecordCounter) {}
+func (s *stubSurfaces) BindRecordCounter(dlog.RecordCounter)      {}
 func (s *stubSurfaces) RetainDirectory(string, func(string) bool) {}
 
 func (s *stubSurfaces) DetachDir(string) error { return nil }

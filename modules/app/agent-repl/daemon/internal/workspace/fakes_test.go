@@ -201,7 +201,7 @@ type fakeDB struct {
 	keptHistorySelects []ids.WorkspaceID
 	// keepSelectedErr fails SetCurrentKeepingLastSelected.
 	keepSelectedErr error
-	forgotten          []ids.WorkspaceID
+	forgotten       []ids.WorkspaceID
 	// forgetReport is what Forget answers, and forgetErr makes it fail; the
 	// fake's own map cannot do either on its own.
 	forgetReport wsm.ForgetReport
@@ -2488,7 +2488,7 @@ func (s *fakeSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return n
 // BindRecordTee implements dlog.Surfaces; this double tees nothing.
 func (s *fakeSurfaces) BindRecordTee(dlog.RecordTee) {}
 
-func (s *fakeSurfaces) BindRecordCounter(dlog.RecordCounter) {}
+func (s *fakeSurfaces) BindRecordCounter(dlog.RecordCounter)      {}
 func (s *fakeSurfaces) RetainDirectory(string, func(string) bool) {}
 
 func (s *fakeSurfaces) DetachDir(string) error { return nil }
