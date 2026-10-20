@@ -210,6 +210,68 @@ thing thirty-five times."
         (agent-repl-rebase-onto-origin-master)
         (should (equal fetched '("/tmp/wt" ("fetch" "origin"))))))))
 
+;;;; ---- The release push ----
+
+(defmacro agent-repl-test-commands--with-release-push (&rest body)
+  "Run BODY with the release push's runner, logs and echo area recorded.
+Binds `ran' to the runner's arguments, `logged' to (LEVEL SCOPE TEXT)
+records, and `said' to the last echo-area text."
+  (declare (indent 0))
+  `(let ((ran nil) (logged nil) (said nil)
+         (agent-repl--config-file "/repo/modules/app/agent-repl/config.el"))
+     (cl-letf (((symbol-function 'agent-repl--async-command)
+                (lambda (&rest args) (setq ran args)))
+               ((symbol-function 'agent-repl--info)
+                (lambda (ws fmt &rest args) (push (list :info ws (apply #'format fmt args)) logged)))
+               ((symbol-function 'agent-repl--error)
+                (lambda (ws fmt &rest args) (push (list :error ws (apply #'format fmt args)) logged)))
+               ((symbol-function 'message)
+                (lambda (fmt &rest args) (setq said (apply #'format fmt args)))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-commands-push-release-runs-the-script-from-the-module ()
+  "The command runs the module's own `bin/push-release.sh' from the module directory."
+  (agent-repl-test-commands--with-release-push
+    ;; Act
+    (agent-repl-push-release)
+    ;; Assert
+    (should (equal ran (list "push-release" "/repo/modules/app/agent-repl/"
+                             '("/repo/modules/app/agent-repl/bin/push-release.sh")
+                             #'agent-repl--push-release-callback)))
+    (should (equal (car logged)
+                   (list :info agent-repl--push-release-log-scope
+                         "elisp.commands.push-release-start script=/repo/modules/app/agent-repl/bin/push-release.sh")))))
+
+(ert-deftest agent-repl-test-commands-push-release-success-shows-the-verdict ()
+  "A pushed release echoes the script's last line and records its output at info."
+  (agent-repl-test-commands--with-release-push
+    ;; Act
+    (agent-repl--push-release-callback t "To origin\n[push-release] pushed master at 0.157.0\n")
+    ;; Assert
+    (should (equal said "agent-repl: [push-release] pushed master at 0.157.0"))
+    (should (equal (car (car logged)) :info))
+    (should (string-match-p "push-release-complete" (nth 2 (car logged))))))
+
+(ert-deftest agent-repl-test-commands-push-release-failure-is-an-error ()
+  "A refused push records the whole output at error and echoes the script's verdict."
+  (agent-repl-test-commands--with-release-push
+    ;; Act
+    (agent-repl--push-release-callback nil "[pre-push] REFUSED\n[push-release] origin took neither\n")
+    ;; Assert
+    (should (equal said "agent-repl: release push failed: [push-release] origin took neither"))
+    (should (equal (nth 0 (car logged)) :error))
+    (should (equal (nth 1 (car logged)) agent-repl--push-release-log-scope))
+    (should (string-match-p "push-release-failed output=.*REFUSED" (nth 2 (car logged))))))
+
+(ert-deftest agent-repl-test-commands-push-release-failure-without-output ()
+  "A script killed before it printed still reports its failure."
+  (agent-repl-test-commands--with-release-push
+    ;; Act
+    (agent-repl--push-release-callback nil "")
+    ;; Assert
+    (should (equal said "agent-repl: release push failed: the script printed nothing"))
+    (should (equal (car (car logged)) :error))))
+
 ;;;; ---- File references ----
 
 (ert-deftest agent-repl-test-commands-file-ref-without-a-region ()

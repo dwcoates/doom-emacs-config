@@ -256,6 +256,7 @@ structurally; see the commentary above."
        :desc "Close workspace (view only)"         "d"   #'agent-repl-close-workspace
        :desc "Update GitHub PR description"        "r"   #'agent-repl-update-pr
        :desc "Rebase branch onto origin/master"    "b"   #'agent-repl-rebase-onto-origin-master
+       :desc "Push master as a release"            "C-<return>" #'agent-repl-push-release
        :desc "Toggle debug logging"                "D"   #'agent-repl-toggle-debug
        :desc "Set durable log level"               "L"   #'agent-repl-set-log-file-level
        :desc "Toggle verbose to disk"              "V"   #'agent-repl-toggle-verbose-to-disk

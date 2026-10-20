@@ -164,6 +164,7 @@ Scope keys, shared by every generated diff family: `w` worktree, `s` staged,
 | `agent-repl-update-pr` | Ask the agent to update the branch's PR description. | `SPC j r` | leader | leader |
 | `agent-repl-update-pr-diff-SCOPE` (4, generated: no `branch`) | Update the PR description for a diff scope. | - | - | - |
 | `agent-repl-rebase-onto-origin-master` | Fetch origin, then ask the agent to rebase onto `origin/master`. | `SPC j b` | leader | leader |
+| `agent-repl-push-release` | Push master to origin as a release with `bin/push-release.sh`. | `SPC j C-RET` | leader | leader |
 | `agent-repl-create-or-update-pr-no-self-certified` | Send `/create-or-update-pr` without `--self-certified`. | `SPC j s p` | leader | leader |
 | `agent-repl-create-or-update-pr` | Send `/create-or-update-pr`. | `SPC j s P` | leader | leader |
 | `agent-repl-create-or-update-pr-no-self-certified-paste` | Insert that prompt at point instead of sending it. | `SPC j s C-p` | leader | leader |

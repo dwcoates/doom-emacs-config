@@ -80,6 +80,17 @@
            (regexp-quote "\"C-r\" #'agent-repl-reload-config")
            (agent-repl-test-keybindings--source))))
 
+(ert-deftest agent-repl-test-keybindings-spc-j-C-return-pushes-a-release ()
+  "`SPC j C-RET' pushes master as a release, bound as the GUI's `C-<return>'.
+`C-RET' would read as `C-m', which no GUI Control+Return ever sends."
+  (should (string-match-p
+           (regexp-quote "\"C-<return>\" #'agent-repl-push-release")
+           (agent-repl-test-keybindings--source))))
+
+(ert-deftest agent-repl-test-keybindings-push-release-is-defined ()
+  "The release push the binding names is an interactive command."
+  (should (commandp 'agent-repl-push-release)))
+
 (ert-deftest agent-repl-test-keybindings-admin-verbs-are-defined ()
   "The SPC j a daemon-admin commands all exist."
   (dolist (cmd '(agent-repl-daemon-health
