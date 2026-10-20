@@ -36,12 +36,16 @@ func TestRetryVendorErrorAnswersEachShimOutcomeByItsArm(t *testing.T) {
 		{
 			name:     "busy carries its detail",
 			answered: &shimv1.RetryVendorErrorNowResponse{Outcome: &shimv1.RetryVendorErrorNowResponse_Busy{Busy: &shimv1.RetryVendorErrorNowBusy{Detail: "a turn is in flight"}}},
-			want:     func(s *agentreplv1.RetryVendorErrorSuccess) bool { return s.GetBusy().GetDetail() == "a turn is in flight" },
+			want: func(s *agentreplv1.RetryVendorErrorSuccess) bool {
+				return s.GetBusy().GetDetail() == "a turn is in flight"
+			},
 		},
 		{
 			name:     "ended carries its detail",
 			answered: &shimv1.RetryVendorErrorNowResponse{Outcome: &shimv1.RetryVendorErrorNowResponse_Ended{Ended: &shimv1.RetryVendorErrorNowEnded{Detail: "the session is standing down"}}},
-			want:     func(s *agentreplv1.RetryVendorErrorSuccess) bool { return s.GetEnded().GetDetail() == "the session is standing down" },
+			want: func(s *agentreplv1.RetryVendorErrorSuccess) bool {
+				return s.GetEnded().GetDetail() == "the session is standing down"
+			},
 		},
 	}
 	for _, tt := range tests {
