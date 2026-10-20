@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1854,6 +1854,70 @@ describe("createFeedController: following the tail", () => {
     controller.upsert(userPromptRow("p", "hi", "t1", false));
     // Assert
     expect(acts).not.toContain("promptSent");
+  });
+
+  /** The rows whose bubbles were animated with a glide, by row id. */
+  function glidedRows(): string[] {
+    return animateSpy.mock.contexts
+      .map((el) => (el as HTMLElement).closest("[data-feed-row]")?.getAttribute("data-feed-row") ?? "unrowed");
+  }
+
+  let animateSpy: MockInstance<Element["animate"]>;
+  beforeEach(() => {
+    animateSpy = vi.spyOn(Element.prototype, "animate");
+  });
+  afterEach(() => {
+    animateSpy.mockRestore();
+  });
+  it("glides a newly sent prompt's bubble up into place", () => {
+    // Arrange
+    const { controller } = scrolled(false);
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Act
+    controller.upsert(userPromptRow("p", "hi", "t1", true));
+    // Assert
+    expect(glidedRows()).toEqual(["p"]);
+  });
+
+  it("glides the sent prompt's drawn bubble, inside its row", () => {
+    // Arrange
+    const { controller, host } = scrolled(false);
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Act
+    controller.upsert(userPromptRow("p", "hi", "t1", true));
+    // Assert
+    const row = host.querySelector('[data-feed-row="p"]');
+    expect(animateSpy.mock.contexts[0]).toBe(row?.firstElementChild);
+  });
+
+  it("does not glide a prompt drawn from a page of history", () => {
+    // Arrange
+    const { controller } = scrolled(false);
+    // Act
+    controller.applyPage(page([userPromptRow("p", "hi", "t1", true)]), "replace");
+    // Assert
+    expect(glidedRows()).toEqual([]);
+  });
+
+  it("does not glide again on a redraw of a prompt already drawn", () => {
+    // Arrange
+    const { controller } = scrolled(false);
+    controller.upsert(userPromptRow("p", "hi", "t1", true));
+    animateSpy.mockClear();
+    // Act
+    controller.upsert(userPromptRow("p", "hi, edited", "t1", true));
+    // Assert
+    expect(glidedRows()).toEqual([]);
+  });
+
+  it("does not glide a turn's terminal re-push of a prompt this feed never drew", () => {
+    // Arrange
+    const { controller } = scrolled(false);
+    controller.applyPage(page([responseRow("a")]), "replace");
+    // Act
+    controller.upsert(userPromptRow("p", "hi", "t1", false));
+    // Assert
+    expect(glidedRows()).toEqual([]);
   });
 
   it("keeps the reader's content in place when older rows land above it", () => {

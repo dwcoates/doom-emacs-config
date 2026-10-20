@@ -117,6 +117,7 @@ import {
   separationEndsHistory,
 } from "./rows/separation.js";
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
+import { glideSentPrompt } from "./send-glide.js";
 import { isOwnTurn } from "../composer/own-turns.js";
 import { promptWaves, setPromptWave } from "../breathing.js";
 import { childrenMatching, queryAll } from "../dom.js";
@@ -947,6 +948,10 @@ export function createFeedController(
    * rather than on the prompt: whatever was drawn after the prompt is where
    * the feed lands, and `park` latches the follow so the turn's output keeps
    * autoscrolling. Root feed only, like every other move of the scroll box.
+   *
+   * Once parked, the prompt's bubble GLIDES up into place from behind the
+   * footer (send-glide.ts): this is the one seam that knows a prompt was just
+   * sent, so a prompt drawn from history never glides.
    */
   function parkOnSentPrompt(id: string): void {
     if (opts.scroll === undefined) return;
@@ -955,6 +960,11 @@ export function createFeedController(
       context: { feed: feedName(), row: id },
     });
     opts.scroll.tail.promptSent();
+    const state = states.get(id);
+    // A placed row is always drawn (`drawBody`), so a sent prompt with no body
+    // is this view's own bug, not the wire's.
+    if (state?.body == null) throw new Error(`sent prompt ${id} was parked on before its row was drawn`);
+    glideSentPrompt(state.element, state.body);
   }
 
   /**
