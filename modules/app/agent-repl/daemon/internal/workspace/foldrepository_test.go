@@ -227,7 +227,7 @@ func TestFoldTabs(t *testing.T) {
 					}
 					return tt.unknown
 				},
-				holds: func(ws wsm.Workspace) bool { return ws.ID != "other" },
+				members: func(ws wsm.Workspace) bool { return ws.ID != "other" },
 			})
 
 			// Assert
@@ -300,5 +300,20 @@ func TestFoldSubsectionRefusesAnUnknownSubsection(t *testing.T) {
 	}
 	if len(f.sidebar.registries) != 0 {
 		t.Fatalf("roster republications = %d, want none for a refused fold", len(f.sidebar.registries))
+	}
+}
+
+// TestFoldTabsMembershipIsTheSharedOne pins every fold that hides tabs to
+// wsm.FoldMembers: a hand-rolled membership closure would let the sessions a
+// collapse stands down drift from the ones the roster and the refusal count.
+func TestFoldTabsMembershipIsTheSharedOne(t *testing.T) {
+	// Act
+	shared := sourcescan.Count(t, "members: wsm.")
+	byHand := sourcescan.Count(t, "func(ws wsm.Workspace) bool { return ws.Repo ==") +
+		sourcescan.Count(t, "func(ws wsm.Workspace) bool { return ws.Subsection")
+
+	// Assert
+	if shared != 2 || byHand != 0 {
+		t.Fatalf("shared memberships = %d, hand-rolled = %d; want 2 and 0", shared, byHand)
 	}
 }

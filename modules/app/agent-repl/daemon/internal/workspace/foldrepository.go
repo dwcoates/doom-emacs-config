@@ -35,7 +35,7 @@ func (v *verbs) FoldRepository(ctx context.Context, repo ids.RepoID, folded bool
 			}
 			return refuse(log, "FoldRepository", ArmUnknownRepository, fmt.Sprintf("no repository %q is registered", repo), true)
 		},
-		holds: func(ws wsm.Workspace) bool { return ws.Repo == repo },
+		members: wsm.RepositoryMembers(repo),
 	})
 }
 
@@ -64,7 +64,7 @@ func (v *verbs) FoldSubsection(ctx context.Context, sub ids.SubsectionID, folded
 			return refuseWith(log, "UpdateSidebarView", ArmUnknownSubsection, err.Error(), true,
 				map[string]any{"subsection": &agentreplv1.SubsectionRef{Id: string(sub)}})
 		},
-		holds: func(ws wsm.Workspace) bool { return ws.Subsection != nil && *ws.Subsection == sub },
+		members: wsm.SubsectionMembers(sub),
 	})
 }
 
@@ -82,8 +82,8 @@ type foldTabsSpec struct {
 	// unknown answers the refusal for a write that named no target, nil for
 	// any other failure.
 	unknown func(error) error
-	// holds reports whether a workspace's tab the fold hides.
-	holds func(wsm.Workspace) bool
+	// members are the workspaces whose tabs the fold hides.
+	members wsm.FoldMembers
 }
 
 // foldTabs is THE ONE PATH OF A FOLD THAT HIDES TABS: the fold recorded, the
@@ -110,7 +110,7 @@ func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec
 	}
 	var withheld []string
 	for _, ws := range workspaces {
-		if !spec.holds(ws) || ws.Closed {
+		if !spec.members.StandsDown(ws) {
 			continue
 		}
 		withheld = append(withheld, string(ws.ID))
