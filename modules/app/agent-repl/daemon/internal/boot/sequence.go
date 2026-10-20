@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -100,6 +102,7 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		if err != nil {
 			return Report{}, err
 		}
+		s.sweepStaleSockets(log, &report)
 		if err := s.reconcileManifest(ctx, log, &report); err != nil {
 			return Report{}, err
 		}
@@ -195,9 +198,70 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		"repositories_retired": len(report.RetiredRepositories),
 		"holds_restored":       report.HoldsRestored,
 		"merges_recovered":     len(report.MergesRecovered),
+		"sockets_swept":        report.SocketsSwept,
 		"dispositions":         len(report.Dispositions),
 	})
 	return report, nil
+}
+
+// sweepStaleSockets unlinks every stale socket in the state root's sock
+// directory: the files the shims of earlier daemons left when they died.
+// An AF_UNIX path outlives its listener, and a shim's exit unlinks its own
+// (shimclient publishExit) only when a daemon saw it go, so a crash, a
+// SIGKILL or a daemon that died first leaves the file behind for good.
+//
+// IT RUNS ONLY ON AN INCUMBENT'S BOOT, AFTER ADOPTION, because that is where
+// nothing else can be starting a shim: no predecessor serves, the listener
+// does not accept yet, every survivor has been adopted (its socket probes
+// live and is left alone), and a shim that may still bind a path is a
+// workspace adoption left UNDETERMINED, whose sockets are not touched.
+//
+// IT NEVER FAILS THE BOOT. Unlike the reconciliation around it, nothing here
+// is state the daemon must know to serve: a path that cannot be judged or
+// unlinked is recorded at ERROR and kept, and the boot goes on.
+func (s *sequence) sweepStaleSockets(log dlog.Logger, report *Report) {
+	const op = "daemon.boot.sweep_sockets"
+	dir := s.deps.Layout.SockDir()
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		log.Error(op, "could not read the sock directory; no stale socket is swept this boot", dlog.Context{"dir": dir, "error": err.Error()})
+		return
+	}
+	undetermined := make(map[string]bool, len(report.Undetermined))
+	for _, ws := range report.Undetermined {
+		undetermined[string(ws)] = true
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".sock") {
+			continue
+		}
+		// `<workspace>.sock` and `<workspace>.nN.sock` alike name their
+		// workspace before the first dot (shimsocket.GenerationSuffix).
+		if ws, _, _ := strings.Cut(name, "."); undetermined[ws] {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		state, err := s.socketProbe(path)
+		if err != nil {
+			log.Error(op, "could not tell whether anything listens on a socket; it is kept", dlog.Context{"socket_path": path, "error": err.Error()})
+			continue
+		}
+		if state != shimsocket.StateStale {
+			continue
+		}
+		// ClearStale re-probes, and its own record per path is left out
+		// (nil logger): the sweep's one summary below carries the count.
+		if err := shimsocket.ClearStale(nil, path); err != nil {
+			log.Error(op, "could not unlink a stale socket; it is kept", dlog.Context{"socket_path": path, "error": err.Error()})
+			continue
+		}
+		report.SocketsSwept++
+	}
+	log.Info(op, "unlinked the stale sockets dead shims left", dlog.Context{"dir": dir, "swept": report.SocketsSwept})
 }
 
 // releaseClosedServing heals every CLOSED workspace whose row still names a

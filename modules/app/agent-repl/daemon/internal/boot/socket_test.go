@@ -212,3 +212,107 @@ func TestALockHeldSurvivorIsAnAdoptedSessionNamingItsPID(t *testing.T) {
 		t.Fatalf("adopted session = %+v, want workspace %v and pid %d", got, ws.ID, adoptedShimPID)
 	}
 }
+
+// leaveStaleSocketAt binds a listener and closes it WITHOUT unlinking, then
+// moves the file to path: what a dead shim leaves behind. It is bound in a
+// SHORT temp directory because t.TempDir() embeds the test name and pushes
+// sun_path past the kernel's 104-byte limit.
+func leaveStaleSocketAt(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %q: %v", filepath.Dir(path), err)
+	}
+	short, err := os.MkdirTemp("", "b")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(short) })
+	staged := filepath.Join(short, "s.sock")
+	listener, err := net.Listen("unix", staged)
+	if err != nil {
+		t.Fatalf("listen %q: %v", staged, err)
+	}
+	listener.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close %q: %v", staged, err)
+	}
+	if err := os.Rename(staged, path); err != nil {
+		t.Fatalf("rename %q to %q: %v", staged, path, err)
+	}
+}
+
+// TestTheBootSweepsTheStaleSocketsDeadShimsLeft: a relaunch leaves its old
+// generation's socket behind, and a crash leaves every socket behind, so an
+// incumbent's boot unlinks what nothing listens on -- and nothing a shim may
+// still be starting on.
+func TestTheBootSweepsTheStaleSocketsDeadShimsLeft(t *testing.T) {
+	const orphan = "0123456789abcdef.n2.sock"
+	tests := []struct {
+		name string
+		// joining makes the daemon a successor.
+		joining bool
+		// arrange scripts the harness and answers the socket path to watch.
+		arrange   func(t *testing.T, h *harness) string
+		wantKept  bool
+		wantSwept int
+		wantError bool
+	}{
+		{name: "a stale generation is unlinked", wantSwept: 1, arrange: func(t *testing.T, h *harness) string {
+			path := filepath.Join(h.deps.Layout.SockDir(), orphan)
+			h.socketProbes[path] = shimsocket.StateStale
+			return path
+		}},
+		{name: "a live socket is kept", wantKept: true, arrange: func(t *testing.T, h *harness) string {
+			path := filepath.Join(h.deps.Layout.SockDir(), orphan)
+			h.socketProbes[path] = shimsocket.StateLive
+			return path
+		}},
+		{name: "an undetermined workspace's generations are kept", wantKept: true, arrange: func(t *testing.T, h *harness) string {
+			ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+			h.socketProbeErrs[h.deps.Layout.ShimSocket(string(ws.ID))] = errors.New("permission denied")
+			path := filepath.Join(h.deps.Layout.SockDir(), string(ws.ID)+".n1.sock")
+			h.socketProbes[path] = shimsocket.StateStale
+			return path
+		}},
+		{name: "a socket that cannot be judged is kept and recorded", wantKept: true, wantError: true, arrange: func(t *testing.T, h *harness) string {
+			path := filepath.Join(h.deps.Layout.SockDir(), orphan)
+			h.socketProbeErrs[path] = errors.New("permission denied")
+			return path
+		}},
+		{name: "a joining daemon sweeps nothing", joining: true, wantKept: true, arrange: func(t *testing.T, h *harness) string {
+			path := filepath.Join(h.deps.Layout.SockDir(), orphan)
+			h.socketProbes[path] = shimsocket.StateStale
+			return path
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, func(d *Deps, _ *harness) {
+				if tt.joining {
+					d.JoiningAddress = "127.0.0.1:41111"
+				}
+			})
+			path := tt.arrange(t, h)
+			leaveStaleSocketAt(t, path)
+
+			// Act
+			report, err := h.seq.Run(context.Background())
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			_, statErr := os.Lstat(path)
+			if kept := statErr == nil; kept != tt.wantKept {
+				t.Fatalf("socket kept = %v (stat: %v), want %v", kept, statErr, tt.wantKept)
+			}
+			if report.SocketsSwept != tt.wantSwept {
+				t.Fatalf("report.SocketsSwept = %d, want %d", report.SocketsSwept, tt.wantSwept)
+			}
+			if got := h.hasRecord("error", "daemon.boot.sweep_sockets"); got != tt.wantError {
+				t.Fatalf("sweep ERROR recorded = %v, want %v", got, tt.wantError)
+			}
+		})
+	}
+}

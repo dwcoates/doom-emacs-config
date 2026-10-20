@@ -124,6 +124,9 @@ type Report struct {
 	// They are neither adopted nor orphan-closed: "could not tell" is never
 	// read as free, and this record is the only place that says so.
 	Undetermined []ids.WorkspaceID
+	// SocketsSwept is how many stale sockets dead shims left in the state
+	// root's sock directory this boot unlinked (sweepStaleSockets).
+	SocketsSwept int
 	// Dispositions is the intent manifest's reconciliation, one record per
 	// session. PRESERVED, ROLLED, DIED and UNKNOWN are never collapsed.
 	Dispositions []rollout.Disposition
