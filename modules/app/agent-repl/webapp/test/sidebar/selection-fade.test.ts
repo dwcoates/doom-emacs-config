@@ -209,9 +209,9 @@ describe("the selection fade", () => {
     expect(row.style.getPropertyValue(SELECTION_NUMBER_RISE.durationProperty)).toBe(`${SELECTION_NUMBER_RISE_MS}ms`);
   });
 
-  it("rises over one second", () => {
+  it("rises over half a second", () => {
     // Arrange, Act, Assert
-    expect(SELECTION_NUMBER_RISE_MS).toBe(1000);
+    expect(SELECTION_NUMBER_RISE_MS).toBe(500);
   });
 
   it("runs the rise alone, under its own class and properties", () => {

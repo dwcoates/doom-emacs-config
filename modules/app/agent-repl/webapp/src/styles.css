@@ -1312,10 +1312,11 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
    the Emacs tab bar's selected grey (owner ruling, 2026-10-18;
    design-selection-less-intense.html beside this module). The fill was
    then taken down again to 30% (owner request, 2026-10-19: "a bit darker
-   and less intense"), sitting closer still to the rail's ground. */
+   and less intense"), sitting closer still to the rail's ground, and then
+   back up to 38% (owner request, 2026-10-20: "slightly lighter"). */
 #ws-sidebar {
   --row-current-gutter: color-mix(in srgb, var(--muted) 64%, var(--sidebar-bg));
-  --row-current-tint: color-mix(in srgb, var(--card) 30%, var(--sidebar-bg));
+  --row-current-tint: color-mix(in srgb, var(--card) 38%, var(--sidebar-bg));
 }
 #ws-sidebar .ws.current > .row {
   background-color: var(--row-current-tint);
@@ -1324,8 +1325,9 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
 }
 #ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - var(--row-gutter-w)); }
 /* THE HIGHLIGHTED ROW'S TAB NUMBER IS WHITE (owner request, 2026-10-18): it
-   rises from its own grey into white over a second when the highlight moves
-   to the row, and stays white while the row stays highlighted. The row the
+   rises from its own grey into white over half a second (owner request,
+   2026-10-20: twice as fast as the second it first took) when the highlight
+   moves to the row, and stays white while the row stays highlighted. The row the
    highlight left is back on its grey at once, with no fade (owner request,
    2026-10-18). The row itself stays still (no wash). The classes and lengths are set by
    src/sidebar/selection-fade.ts, which also seeks a redrawn row into the
