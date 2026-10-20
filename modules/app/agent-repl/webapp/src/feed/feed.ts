@@ -102,6 +102,7 @@ import {
 } from "./renderers.js";
 import { drawFeedSubagent, drawFeedDetachedSubagent } from "./rows/subagent.js";
 import { FEED_GROUP_CLASS, activateGroupedMember } from "./tool-group.js";
+import type { EditorIngressView } from "../held/editor-ingress.js";
 import {
   HELD_ENTRY_SELECTOR,
   mountHeldSection,
@@ -142,12 +143,13 @@ export interface FeedDeps {
    */
   presence?: Pick<Presence, "shown" | "onChange">;
   /**
-   * Where the root feed's held section draws: the page's own `#hold-tray`,
-   * after the rows in the same scroll zone. Absent in a fixture rendering the
-   * feed on its own, which then draws no held section (and still requires the
-   * daemon to state one).
+   * The root feed's held section: where it draws (`host`, the page's own
+   * `#hold-tray`, after the rows in the same scroll zone), and the editor's own
+   * ingress entries it draws while the feed is out of reach. Absent in a
+   * fixture rendering the feed on its own, which then draws no held section
+   * (and still requires the daemon to state one).
    */
-  heldHost?: HTMLElement;
+  held?: { host: HTMLElement; editorIngress: EditorIngressView };
 }
 
 export interface FeedHandle extends Handle {
@@ -336,7 +338,9 @@ export function mountFeed(
   // THE ROOT FEED'S HELD SECTION (held/section.ts): drawn after the rows, fed
   // by this feed's own open and watch.
   const held: HeldSection | null =
-    deps.heldHost === undefined ? null : mountHeldSection(deps.heldHost, ctx, { promptHeld });
+    deps.held === undefined
+      ? null
+      : mountHeldSection(deps.held.host, ctx, { promptHeld, editorIngress: deps.held.editorIngress });
 
   openWatch();
 
@@ -431,6 +435,12 @@ export function mountFeed(
       name: "WatchFeed",
       schema: WatchFeedResponseSchema,
       open: (client, signal) => openAndTail(client, signal),
+      // A TAIL THAT ENDED leaves the daemon out of reach until the next open
+      // answers, so the held section draws the editor's own ingress entries
+      // meanwhile (held/section.ts). Our own cancel is no outage.
+      onEnd: (end) => {
+        if (end.kind !== "cancelled") held?.unreachable();
+      },
       onPush: (response) => {
         // A frame carries EXACTLY ONE of a row upsert, a response-selection
         // push, or a feed-text-scale push (endpoint_watch_feed.proto). The two
@@ -510,7 +520,7 @@ export function mountFeed(
         // THE ROOT FEED'S OPEN STATES ITS HELD SECTION, as of the same pin as
         // the page: the tail then carries every later change of it.
         const section = requireMessage(result.value.held, "OpenFeedSuccess.held");
-        held?.apply(section);
+        held?.opened(section);
         markConversationDrawn("page");
         const token = requireMessage(
           result.value.watch,

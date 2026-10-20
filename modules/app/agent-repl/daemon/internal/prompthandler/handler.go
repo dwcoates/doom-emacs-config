@@ -125,6 +125,13 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 		}
 	}
 	turn := c.turn
+	// A RE-DRIVEN INGRESS ENTRY IS CLAIMED FOR ITS TURN BEFORE THE QUEUE SEES
+	// IT, so the held section drops the entry in the very publication that
+	// draws the turn as a held prompt or a prompt row: never in both places,
+	// never in neither.
+	if isRedrive(ctx) && c.key != "" {
+		h.deps.Feed.ClaimIngress(ws, c.key, turn)
+	}
 	disposition, err := h.deps.Queue.Submit(ctx, promptqueue.Submission{
 		WS: ws, Turn: turn, Said: said, Origin: origin, Target: target, Delivery: delivery,
 	})

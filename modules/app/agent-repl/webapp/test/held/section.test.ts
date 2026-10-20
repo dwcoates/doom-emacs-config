@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createEditorIngressView, type EditorIngressView } from "../../src/held/editor-ingress.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
@@ -22,13 +23,14 @@ import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { HeldContext } from "../../src/held/context.js";
 import { testHeldContext } from "./held-context.js";
-import { heldPromptItem } from "../feed/harness.js";
+import { editorIngressEntry, heldIngressItem, heldPromptItem } from "../feed/harness.js";
 import {
   FOLDING_BADGE_CLASS,
   FOLDING_BADGE_LABEL,
   FOLD_FLASH_CLASS,
 } from "../../src/held/fold-motion.js";
 import {
+  EDITOR_INGRESS_ID_PREFIX,
   FOLDING_ATTRIBUTE,
   HELD_ENTRY_SELECTOR,
   HELD_ITEM_ATTRIBUTE,
@@ -81,7 +83,7 @@ const section = (items: FeedHeldItem[]): FeedHeld => create(FeedHeldSchema, { it
 
 /** A section mounted on a fresh host. */
 function mounted(
-  opts: { ticker?: Ticker; promptHeld?: (turn: string) => void } = {},
+  opts: { ticker?: Ticker; promptHeld?: (turn: string) => void; editorIngress?: EditorIngressView } = {},
 ): {
   host: HTMLElement;
   held: ReturnType<typeof mountHeldSection>;
@@ -89,6 +91,7 @@ function mounted(
   const host = document.createElement("section");
   const held = mountHeldSection(host, appContext(opts.ticker), {
     promptHeld: opts.promptHeld ?? vi.fn(),
+    editorIngress: opts.editorIngress ?? createEditorIngressView(),
   });
   return { host, held };
 }
@@ -533,5 +536,127 @@ describe("mountHeldSection's folds", () => {
     await fades.finish();
     // Assert
     expect(m.host.childElementCount).toBe(0);
+  });
+});
+
+/** The held item ids HOST draws, in order. */
+const drawnIds = (host: HTMLElement): string[] =>
+  [...host.querySelectorAll(HELD_ENTRY_SELECTOR)].map((card) => card.getAttribute(HELD_ITEM_ATTRIBUTE) ?? "");
+
+/** The item id an editor ingress card is drawn under. */
+const editorId = (key: string): string => `${EDITOR_INGRESS_ID_PREFIX}${key}`;
+
+describe("mountHeldSection: who draws a prompt waiting in the ingress", () => {
+  it("draws the editor's entries before the root feed has opened", () => {
+    // Arrange
+    const editorIngress = createEditorIngressView();
+    const { host } = mounted({ editorIngress });
+    // Act
+    editorIngress.set([editorIngressEntry("k-1")]);
+    // Assert
+    expect(drawnIds(host)).toEqual([editorId("k-1")]);
+  });
+
+  it("draws only the daemon's section once the root feed opened", () => {
+    // Arrange
+    const editorIngress = createEditorIngressView();
+    editorIngress.set([editorIngressEntry("k-1")]);
+    const { host, held } = mounted({ editorIngress });
+    // Act
+    held.opened(section([promptItem("t1"), heldIngressItem("ingress:k-1")]));
+    // Assert
+    expect(drawnIds(host)).toEqual(["prompt:t1", "ingress:k-1"]);
+  });
+
+  it("ignores the editor's list while the root feed is live", () => {
+    // Arrange
+    const editorIngress = createEditorIngressView();
+    const { host, held } = mounted({ editorIngress });
+    held.opened(section([]));
+    // Act
+    editorIngress.set([editorIngressEntry("k-1")]);
+    // Assert
+    expect(drawnIds(host)).toEqual([]);
+  });
+
+  it("draws the editor's entries in place of the daemon's ingress items once the feed is out of reach", () => {
+    // Arrange
+    const editorIngress = createEditorIngressView();
+    editorIngress.set([editorIngressEntry("k-1"), editorIngressEntry("k-2")]);
+    const { host, held } = mounted({ editorIngress });
+    held.opened(section([promptItem("t1"), heldIngressItem("ingress:k-1")]));
+    // Act
+    held.unreachable();
+    // Assert
+    expect(drawnIds(host)).toEqual(["prompt:t1", editorId("k-1"), editorId("k-2")]);
+  });
+
+  it("redraws the editor's entries as they change while the feed is out of reach", () => {
+    // Arrange
+    const editorIngress = createEditorIngressView();
+    const { host, held } = mounted({ editorIngress });
+    held.opened(section([]));
+    held.unreachable();
+    // Act
+    editorIngress.set([editorIngressEntry("k-3")]);
+    // Assert
+    expect(drawnIds(host)).toEqual([editorId("k-3")]);
+  });
+
+  it("hands the section back to the daemon when the feed opens again", () => {
+    // Arrange
+    const editorIngress = createEditorIngressView();
+    editorIngress.set([editorIngressEntry("k-1")]);
+    const { host, held } = mounted({ editorIngress });
+    held.opened(section([]));
+    held.unreachable();
+    // Act
+    held.opened(section([heldIngressItem("ingress:k-1")]));
+    // Assert
+    expect(drawnIds(host)).toEqual(["ingress:k-1"]);
+  });
+
+  it("parks the feed when an editor entry is first drawn", () => {
+    // Arrange
+    const editorIngress = createEditorIngressView();
+    const promptHeld = vi.fn();
+    mounted({ editorIngress, promptHeld });
+    // Act
+    editorIngress.set([editorIngressEntry("k-1")]);
+    editorIngress.set([editorIngressEntry("k-1")]);
+    // Assert
+    expect(promptHeld.mock.calls).toEqual([["k-1"]]);
+  });
+
+  it("stops redrawing for the editor's list once disposed", () => {
+    // Arrange
+    const editorIngress = createEditorIngressView();
+    const { host, held } = mounted({ editorIngress });
+    held.dispose();
+    // Act
+    editorIngress.set([editorIngressEntry("k-1")]);
+    // Assert
+    expect(host.childElementCount).toBe(0);
+  });
+
+  it("records each change of source", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { held } = mounted();
+    // Act
+    held.opened(section([]));
+    held.unreachable();
+    // Assert
+    await forwardedRecord(capture, "held.source-daemon");
+    await forwardedRecord(capture, "held.source-editor");
+  });
+});
+
+describe("drawHeldItem: an ingress item", () => {
+  it("draws the daemon's ingress item under its own id", () => {
+    // Act
+    const card = drawHeldItem(heldIngressItem("ingress:k-1"), heldContext(), "item", new Map());
+    // Assert
+    expect([card.getAttribute(HELD_ITEM_ATTRIBUTE), card.getAttribute("data-held-ingress")]).toEqual(["ingress:k-1", "daemon"]);
   });
 });

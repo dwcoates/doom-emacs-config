@@ -43,6 +43,16 @@ type heldState struct {
 	editing ids.TurnID
 	// published is the section as last published; nil until the first.
 	published *frontendv1.FeedHeld
+	// ingress are the held-prompt ingress's unaccepted entries as the ingress
+	// last stated them, in the order they were written.
+	ingress []holds.IngressEntry
+	// claims names the turn each ingress entry is being submitted as, by its
+	// idempotency key (ClaimIngress).
+	claims map[string]ids.TurnID
+	// settled names the ingress entries whose claimed turn has been drawn as
+	// a held prompt or a prompt row: they are drawn as that and nowhere else,
+	// whatever happens to the turn after.
+	settled map[string]bool
 }
 
 // heldOf resolves a workspace's held section state, creating it on first sight.
@@ -50,7 +60,7 @@ type heldState struct {
 func (r *resolver) heldOf(ws ids.WorkspaceID) *heldState {
 	h, ok := r.held[ws]
 	if !ok {
-		h = &heldState{}
+		h = &heldState{claims: map[string]ids.TurnID{}, settled: map[string]bool{}}
 		r.held[ws] = h
 	}
 	return h
@@ -162,7 +172,116 @@ func (r *resolver) renderHeld(s *wsState, h *heldState) *frontendv1.FeedHeld {
 			Item: &frontendv1.FeedHeldItem_Prompt{Prompt: card.Prompt},
 		})
 	}
+	for _, entry := range h.ingress {
+		if r.ingressSettled(s, h, entry.Key) {
+			continue
+		}
+		items = append(items, &frontendv1.FeedHeldItem{
+			Id:   r.ingressItemID(s, entry.Key),
+			Item: &frontendv1.FeedHeldItem_Ingress{Ingress: holds.IngressPrompt(entry)},
+		})
+	}
 	return &frontendv1.FeedHeld{Items: items}
+}
+
+// ingressItemID is the identity an ingress entry's item carries: its own, by
+// its idempotency key, on the root feed.
+func (r *resolver) ingressItemID(s *wsState, key string) *frontendv1.FeedId {
+	return r.rowID(s.id, feedid.Feed{Root: true}, feedid.RowKey{Kind: feedid.KindIngress, ID: key})
+}
+
+// ingressSettled reports whether the ingress entry KEY is drawn as what it
+// settled into: its claimed turn stands as a held prompt, or its prompt row is
+// drawn. The first such reading is recorded, so the entry never returns to the
+// section once it has settled, whatever its turn does next. The caller holds
+// the lock.
+func (r *resolver) ingressSettled(s *wsState, h *heldState, key string) bool {
+	if h.settled[key] {
+		return true
+	}
+	turn, claimed := h.claims[key]
+	if !claimed {
+		return false
+	}
+	_, drawn := r.promptRowDrawn(s, turn)
+	if !drawn && !holdStands(h.prompts, turn) {
+		return false
+	}
+	h.settled[key] = true
+	r.logger(s.id).Debug(opHeld, "an ingress entry settled into its turn; the section draws it as that", dlog.Context{
+		"idempotency_key": key, "turn": string(turn), "row_drawn": drawn,
+	})
+	return true
+}
+
+// holdStands reports whether TURN is a standing (unretired) hold in HELD.
+func holdStands(held []wsm.HeldPrompt, turn ids.TurnID) bool {
+	for _, h := range held {
+		if h.Turn == turn && h.Tombstone == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// SetIngressPending installs a workspace's unaccepted ingress entries, whole,
+// and publishes the section when that changed it. A claim or a settlement of
+// an entry no longer stated is forgotten with it.
+func (r *resolver) SetIngressPending(ws ids.WorkspaceID, entries []holds.IngressEntry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	h := r.heldOf(ws)
+	h.ingress = entries
+	stated := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		stated[entry.Key] = true
+	}
+	for key := range h.claims {
+		if !stated[key] {
+			delete(h.claims, key)
+		}
+	}
+	for key := range h.settled {
+		if !stated[key] {
+			delete(h.settled, key)
+		}
+	}
+	r.logger(ws).Debug(opHeld, "the held section took the ingress's unaccepted entries", dlog.Context{"entries": len(entries)})
+	r.publishHeld(s, nil, nil)
+}
+
+// ClaimIngress names the turn the ingress entry KEY is being submitted as. It
+// changes nothing drawn by itself: the entry leaves the section in the
+// publication that draws the turn.
+func (r *resolver) ClaimIngress(ws ids.WorkspaceID, key string, turn ids.TurnID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	h := r.heldOf(ws)
+	h.claims[key] = turn
+	r.logger(ws).Debug(opHeld, "an ingress entry's turn was claimed", dlog.Context{"idempotency_key": key, "turn": string(turn)})
+	r.publishHeld(s, nil, nil)
+}
+
+// DropIngress removes the ingress entry KEY, which the queue answered, and
+// publishes the section when that changed it.
+func (r *resolver) DropIngress(ws ids.WorkspaceID, key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	h := r.heldOf(ws)
+	kept := h.ingress[:0:0]
+	for _, entry := range h.ingress {
+		if entry.Key != key {
+			kept = append(kept, entry)
+		}
+	}
+	h.ingress = kept
+	delete(h.claims, key)
+	delete(h.settled, key)
+	r.logger(ws).Debug(opHeld, "the queue answered an ingress entry; the section dropped it", dlog.Context{"idempotency_key": key})
+	r.publishHeld(s, nil, nil)
 }
 
 // promptRowFor is the identity TURN's prompt row carries, on the feed the turn
@@ -197,6 +316,16 @@ func (r *resolver) heldPromptRow(s *wsState, id string) bool {
 			continue
 		}
 		if _, rowID := r.promptRowFor(s, held.Turn); rowID.GetValue() == id {
+			return true
+		}
+	}
+	// A CLAIMED INGRESS ENTRY'S ROW moves it out of the section too: an
+	// accepted entry delivered at once is drawn as its row, never as a hold.
+	for key, turn := range h.claims {
+		if h.settled[key] {
+			continue
+		}
+		if _, rowID := r.promptRowFor(s, turn); rowID.GetValue() == id {
 			return true
 		}
 	}

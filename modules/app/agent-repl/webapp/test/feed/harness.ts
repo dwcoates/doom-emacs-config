@@ -7,6 +7,8 @@
  * the same four verbs the same way, and so a row fixture is built once from the
  * generated schemas rather than a dozen times by hand.
  */
+import type { EditorIngressEntry } from "../../src/held/editor-ingress.js";
+import { UserSaidSchema } from "../../../proto/gen/ts/conversation/v1/user_pb";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -386,6 +388,33 @@ export function heldPromptItem(id: string, turn: string, text = "held words"): F
       },
     },
   });
+}
+
+/**
+ * A held item for an unaccepted held-prompt ingress entry under item ID,
+ * carrying TEXT, its badge standing for the queue's want of a session.
+ */
+export function heldIngressItem(id: string, text = "ingress words"): FeedHeldItem {
+  return create(FeedHeldItemSchema, {
+    id: feedId(id),
+    item: {
+      case: "ingress",
+      value: {
+        said: { content: { blocks: [{ block: { case: "text", value: { text } } }] } },
+        queuedAt: { atMs: 0n },
+        badge: { label: "waiting for the session", standsFor: { case: "noSession", value: {} } },
+      },
+    },
+  });
+}
+
+/** One of the editor's own ingress entries under KEY, carrying TEXT. */
+export function editorIngressEntry(key: string, text = "editor words"): EditorIngressEntry {
+  return {
+    key,
+    queuedAtMs: 0,
+    said: create(UserSaidSchema, { content: { blocks: [{ block: { case: "text", value: { text } } }] } }),
+  };
 }
 
 /**

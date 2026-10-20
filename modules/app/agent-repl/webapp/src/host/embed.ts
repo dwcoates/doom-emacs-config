@@ -22,6 +22,35 @@ import type { PresenceSource } from "../presence.js";
 import type { WebhostFailureView } from "../failure/webhost.js";
 import { HOST_CHANNEL, onHostChannel, parseHostToPage, type HostToPage, type PageToHost } from "./protocol.js";
 import { pageMutationObserver } from "../dom.js";
+import { fromJson, type JsonObject } from "@bufbuild/protobuf";
+import { UserSaidSchema } from "../../../proto/gen/ts/conversation/v1/user_pb";
+import type { EditorIngressEntry, EditorIngressView } from "../held/editor-ingress.js";
+import type { HeldIngressWireEntry } from "./protocol.js";
+
+/**
+ * The editor's ingress entries, decoded. An entry whose `said` is not a
+ * UserSaid is an ERROR naming its key and left out: the editor wrote what the
+ * daemon would quarantine, and drawing a guess at it would show words nobody
+ * typed.
+ */
+export function decodeHeldIngress(wire: readonly HeldIngressWireEntry[]): EditorIngressEntry[] {
+  const out: EditorIngressEntry[] = [];
+  for (const entry of wire) {
+    try {
+      out.push({
+        key: entry.key,
+        queuedAtMs: Date.parse(entry.queuedAt),
+        said: fromJson(UserSaidSchema, entry.said as JsonObject),
+      });
+    } catch (err) {
+      log.error("an editor ingress entry carried a said this page cannot read; it is not drawn", {
+        operation: "page.held-ingress-undecodable",
+        context: { key: entry.key, cause: (err as Error).message },
+      });
+    }
+  }
+  return out;
+}
 
 /** What the link needs from its environment, injectable for tests. */
 export interface EmbedEnv {
@@ -32,6 +61,8 @@ export interface EmbedEnv {
   readonly webhostFailures: WebhostFailureView;
   /** The page's live log threshold, which the host raises (`logLevel`). */
   readonly levelWindow: LevelWindow;
+  /** The editor's held-prompt ingress entries, which the host hands over (`heldIngress`). */
+  readonly editorIngress: EditorIngressView;
 }
 
 /**
@@ -52,7 +83,7 @@ function isTextField(element: Element | null): boolean {
 
 /** Connect the page in ENV to its host; null when the page is in no host. */
 export function connectToHost(env: EmbedEnv): HostLink | null {
-  const { doc, win, presence, webhostFailures, levelWindow } = env;
+  const { doc, win, presence, webhostFailures, levelWindow, editorIngress } = env;
   if (win.parent === win) return null;
   const host = win.parent;
   const send = (message: PageToHost): void => {
@@ -89,6 +120,9 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         return;
       case "webhostFailures":
         webhostFailures.set(message.failures);
+        return;
+      case "heldIngress":
+        editorIngress.set(decodeHeldIngress(message.entries));
         return;
       case "logLevel":
         applyLogLevel(message.level, message.untilMs);

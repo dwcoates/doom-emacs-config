@@ -49,7 +49,8 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // carried WHOLE on every change. An empty items list is a meaningful value —
 // the daemon is holding nothing for the user — not an absent one.
 message FeedHeld {
-  // The held items, in display order: the held prompts in queue order. The
+  // The held items, in display order: the held prompts in queue order, then
+  // the ingress prompts the queue has not yet accepted, oldest first. The
   // prompt that settles first sits nearest the settled rows.
   repeated FeedHeldItem items = 1;
 }
@@ -66,6 +67,9 @@ message FeedHeldItem {
   oneof item {
     // A prompt the daemon is holding for delivery.
     HeldPrompt prompt = 3;
+    // A prompt waiting in the held-prompt ingress that the daemon has read
+    // and not yet accepted into its queue.
+    HeldIngressPrompt ingress = 5;
   }
   // Tag 2 and the name `merge` are RETIRED: a running merge's bubble is the
   // row pinned to the feed's bottom (FeedRowOrder.pinned), never held. Tag 4
@@ -532,3 +536,85 @@ message HeldPromptAwaitingDelivery {}
 // runs on such an entry; the exit is delivery the moment the restarted shim
 // reports ready.
 message HeldPromptBuildRefreshHold {}
+
+// ---- Ingress prompt: a prompt written to the held-prompt ingress, read by
+// the daemon and not yet accepted into its queue ----
+
+// A prompt the editor wrote to the durable held-prompt ingress
+// (`$AGENT_REPL_STATE_DIR/held-prompts/`) because no daemon answered its
+// submission, which this daemon has read and not yet accepted into its
+// queue.
+//
+// WHY IT IS DRAWN. A prompt in the ingress is the user's, taken and kept,
+// but it is in no queue yet: without this card a prompt sent during an outage
+// is drawn nowhere until it is accepted, and a person who sees nothing sends
+// it again. While the daemon is down the page draws the editor's own list of
+// these entries; once this daemon serves the root feed it is the one source,
+// through this arm.
+//
+// ONE PROMPT, ONE PLACE. The item leaves the section in the SAME publication
+// that draws the prompt as a held prompt (the `prompt` arm) or as a settled
+// prompt row, so no reader sees it in both places or in neither. Its FeedId is
+// the ingress entry's own (its idempotency key), not the prompt row's: the
+// turn the prompt will run as does not exist until it is accepted.
+//
+// NO ACTIONS. Nothing can force, cancel, edit or fold an entry the queue has
+// not accepted; the card draws the prompt and why it waits, and nothing else.
+message HeldIngressPrompt {
+  // What the user said, WHOLE: the very payload the daemon will submit once
+  // the queue accepts it, so the card shows exactly what will land.
+  conversation.v1.UserSaid said = 1;
+  // When the editor wrote the entry.
+  HeldIngressPromptQueuedAt queued_at = 2;
+  // Why the entry still waits. ALWAYS SET: an entry with no badge is a
+  // malformed frame and is rejected loudly.
+  HeldIngressPromptBadge badge = 3;
+}
+
+// When an ingress entry was written, as the editor stamped it.
+message HeldIngressPromptQueuedAt {
+  // Epoch milliseconds.
+  int64 at_ms = 1;
+}
+
+// The one status badge on an ingress prompt's card, composed daemon-side from
+// what the daemon's last attempt to accept the entry met.
+message HeldIngressPromptBadge {
+  // The badge's words, one to three ("waiting for the session"), drawn
+  // verbatim. REQUIRED AND NEVER EMPTY.
+  string label = 1;
+  // The reason said in full, drawn verbatim in the card's expand-only
+  // details. Absent when the full sentence would only repeat the label.
+  optional string detail = 2;
+  // WHAT THE ENTRY WAITS ON. A frontend keys the badge's color by this arm
+  // and never by the words. ALWAYS SET; an unset arm is a malformed frame.
+  oneof stands_for {
+    // Nothing refused the entry: it has not been offered to the queue yet,
+    // waits behind an earlier entry of the same workspace, or waits for its
+    // next attempt.
+    HeldIngressPromptBadgeAwaitingIntake awaiting_intake = 3;
+    // The queue refused it because the workspace has no session to submit to.
+    HeldIngressPromptBadgeNoSession no_session = 4;
+    // The queue refused it because a merge of the workspace is in flight.
+    HeldIngressPromptBadgeMerge merge = 5;
+    // The queue refused it because the session is parked at its cold gate.
+    HeldIngressPromptBadgeColdGate cold_gate = 6;
+    // The queue refused it because the workspace is moving to another daemon.
+    HeldIngressPromptBadgeMovedAway moved_away = 7;
+    // The queue refused it for a reason that is a fault, not a standing
+    // condition; the daemon has logged it and keeps retrying.
+    HeldIngressPromptBadgeRefused refused = 8;
+  }
+}
+// The badge shows an entry not yet offered to the queue, or waiting its turn.
+message HeldIngressPromptBadgeAwaitingIntake {}
+// The badge shows the workspace has no session to take the entry.
+message HeldIngressPromptBadgeNoSession {}
+// The badge shows a merge of the workspace holds the entry back.
+message HeldIngressPromptBadgeMerge {}
+// The badge shows the session's cold gate holds the entry back.
+message HeldIngressPromptBadgeColdGate {}
+// The badge shows the workspace moving to another daemon holds it back.
+message HeldIngressPromptBadgeMovedAway {}
+// The badge shows the queue refused the entry by a fault.
+message HeldIngressPromptBadgeRefused {}

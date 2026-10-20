@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
 )
 
@@ -66,11 +67,48 @@ func (h *fakeHandler) Submit(_ context.Context, ws ids.WorkspaceID, said *conver
 // many times that prompt would reach the shim.
 func (h *fakeHandler) delivered(key string) int { return h.deliveries[key] }
 
+// pendingCall is one call the ingress made on the held section.
+type pendingCall struct {
+	// Op is "set" or "drop".
+	Op      string
+	WS      ids.WorkspaceID
+	Entries []holds.IngressEntry
+	Key     string
+}
+
+// fakePending is the held section: it records every call in order.
+type fakePending struct {
+	calls []pendingCall
+}
+
+func (f *fakePending) SetIngressPending(ws ids.WorkspaceID, entries []holds.IngressEntry) {
+	f.calls = append(f.calls, pendingCall{Op: "set", WS: ws, Entries: entries})
+}
+
+func (f *fakePending) ClaimIngress(ids.WorkspaceID, string, ids.TurnID) {
+	panic("the ingress never claims: the prompt handler does")
+}
+
+func (f *fakePending) DropIngress(ws ids.WorkspaceID, key string) {
+	f.calls = append(f.calls, pendingCall{Op: "drop", WS: ws, Key: key})
+}
+
+// lastSet is the last list stated for WS, and whether one was stated.
+func (f *fakePending) lastSet(ws ids.WorkspaceID) ([]holds.IngressEntry, bool) {
+	for i := len(f.calls) - 1; i >= 0; i-- {
+		if f.calls[i].Op == "set" && f.calls[i].WS == ws {
+			return f.calls[i].Entries, true
+		}
+	}
+	return nil, false
+}
+
 // world is one test's ingress directory, workspace registry and collaborators.
 type world struct {
 	t         *testing.T
 	dir       string
 	handler   *fakeHandler
+	pending   *fakePending
 	log       *dlog.TestSurfaces
 	byDir     map[string]wsm.Workspace
 	published []ids.WorkspaceID
@@ -89,6 +127,7 @@ func newWorld(t *testing.T) *world {
 		t:       t,
 		dir:     t.TempDir(),
 		handler: newFakeHandler(),
+		pending: &fakePending{},
 		log:     dlog.NewTestSurfaces(),
 		byDir: map[string]wsm.Workspace{
 			"/work/one": {ID: "ws-one", Dir: "/work/one"},
@@ -107,6 +146,7 @@ func (w *world) ingress() Ingress {
 		Dir:            w.dir,
 		WorkspaceByDir: w.ingressLookup(),
 		Prompts:        w.handler,
+		Pending:        w.pending,
 		PublishHost: func(ws ids.WorkspaceID) {
 			w.published = append(w.published, ws)
 			w.publishedSaw = append(w.publishedSaw, len(w.entries()))

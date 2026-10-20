@@ -81,6 +81,9 @@ type Resolver interface {
 	// The held section's setters (held.go): the prompt queue's standing holds
 	// and edit claim, and the merge orchestrator's posed offer.
 	holds.Sink
+	// The held section's ingress setters (held.go): the held-prompt ingress's
+	// unaccepted entries, and the prompt handler's claim of each entry's turn.
+	holds.IngressSink
 
 	// SetAccount installs the account the workspace's session spends as: the
 	// logged-in email, "" for a logged-out root. A failed turn's outcome

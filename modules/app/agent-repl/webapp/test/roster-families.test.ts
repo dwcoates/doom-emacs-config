@@ -9,7 +9,7 @@ function row(id: string, children: RosterRow[] = []): RosterRow {
 }
 
 function tabOf(rows: ReturnType<typeof openRow>[], at: number[]) {
-  let open = rows[at[0]!]!;
+  let open = rows[at[0]];
   for (const i of at.slice(1)) open = open.children[i]!;
   return open.tab?.tab;
 }
@@ -53,7 +53,7 @@ describe("numberTabs", () => {
     ]);
     // Assert
     expect([tabOf(first, [0]), tabOf(first, [0, 0]), tabOf(first, [1]), tabOf(sub, [0]), tabOf(second, [0])]).toEqual(
-      [1, 2, 3, 4, 5].map((number) => expect.objectContaining({ case: "numbered", value: expect.objectContaining({ number }) })),
+      [1, 2, 3, 4, 5].map((number): unknown => expect.objectContaining({ case: "numbered", value: expect.objectContaining({ number }) as unknown })),
     );
   });
 
@@ -68,7 +68,7 @@ describe("numberTabs", () => {
     ]);
     // Assert
     expect(tabOf(folded, [0])?.case).toBe("folded");
-    expect(tabOf(shown, [0])).toEqual(expect.objectContaining({ case: "numbered", value: expect.objectContaining({ number: 1 }) }));
+    expect(tabOf(shown, [0])).toEqual(expect.objectContaining({ case: "numbered", value: expect.objectContaining({ number: 1 }) as unknown }));
   });
 
   it("numbers only the listed rows, by their place in the list, folding the rest", () => {

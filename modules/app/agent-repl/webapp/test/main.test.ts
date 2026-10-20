@@ -79,7 +79,7 @@ interface BootRecord {
   /** The feed's "this workspace was switched to", as the boot wires it. */
   feedWorkspaceSelected: Mock;
   /** The last `mountFeed` deps, for the composer-factory and held-host contracts. */
-  feedDeps: { composerFactory?: unknown; heldHost?: unknown } | null;
+  feedDeps: { composerFactory?: unknown; held?: { host: unknown; editorIngress: unknown } } | null;
   /** The context the boot built, so its stream's fate can be read off it. */
   bootedContext: import("../src/rpc/context.js").AppContext | null;
   /** The element `drawCommandPanel` hands back. */
@@ -430,7 +430,7 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     expect(page.mounts.sidebar.mock.calls[0]?.[0]).toBe(document.getElementById("ws-sidebar"));
     expect(page.mounts.topbar.mock.calls[0]?.[0]).toBe(document.getElementById("topbar"));
     expect(page.mounts.feed.mock.calls[0]?.[0]).toBe(document.getElementById("feed"));
-    expect(page.feedDeps?.heldHost).toBe(document.getElementById("hold-tray"));
+    expect(page.feedDeps?.held?.host).toBe(document.getElementById("hold-tray"));
     expect(page.mounts.footer.mock.calls[0]?.[0]).toBe(document.getElementById("footer"));
     expect(page.mounts.login.mock.calls[0]?.[0]).toBe(document.getElementById("login-overlay"));
     expect(page.mounts.newsDigest.mock.calls[0]?.[0]).toBe(document.getElementById("news-digest"));

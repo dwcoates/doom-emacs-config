@@ -468,6 +468,31 @@ describe("commands", () => {
     expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "dismissDigest" });
   });
 
+  it("sends the editor's held-prompt ingress entries to the page", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/");
+    const posted = postsTo("a");
+    const entries = [{ key: "k-1", queuedAt: "2026-10-20T15:18:02Z", said: { content: {} } }];
+
+    // Act
+    const outcome = parsed(host.setHeldIngress("a", entries)).outcome;
+
+    // Assert
+    expect([outcome, posted]).toEqual(["sent", [{ channel: HOST_CHANNEL, kind: "heldIngress", entries }]]);
+  });
+
+  it("refuses ingress entries that are not ingress entries, posting nothing", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/");
+    const posted = postsTo("a");
+
+    // Act
+    const answer = parsed(host.setHeldIngress("a", [{ key: 3 }]));
+
+    // Assert
+    expect([answer.outcome, posted, (answer.notes as unknown[]).length]).toEqual(["refused", [], 1]);
+  });
+
   it("answers absent for a command to a workspace it holds no page for", () => {
     expect(parsed(host.setInputBackground("nobody", "#000")).outcome).toBe("absent");
   });
@@ -493,6 +518,20 @@ describe("hello", () => {
       { channel: HOST_CHANNEL, kind: "inputBackground", background: "#202020" },
       { channel: HOST_CHANNEL, kind: "gateDock", pixels: 90, background: "#202020" },
     ]);
+  });
+
+  it("replays the editor's held-prompt ingress entries to a page that says hello", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/");
+    const entries = [{ key: "k-1", queuedAt: "2026-10-20T15:18:02Z", said: { content: {} } }];
+    host.setHeldIngress("a", entries);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
+
+    // Assert
+    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "heldIngress", entries });
   });
 
   it("forgets the drawn mark of a page that says hello again", () => {

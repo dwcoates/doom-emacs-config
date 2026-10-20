@@ -52,6 +52,9 @@ import {
   drawHeldPrompt,
   drawUnsupportedBlock,
   heldBadgeClasses,
+  drawHeldBadgePill,
+  HELD_BADGE_CLASS,
+  HELD_STATUS_ATTRIBUTE,
   sessionCommandLiteral,
   type HeldPromptDroppedDetail,
   type HeldStatus,
@@ -1600,6 +1603,18 @@ describe("the held status badge table", () => {
     const named = Object.keys(HELD_STATUS_BADGES).sort();
     // Assert
     expect(named).toEqual(Object.keys(EXPECTED_BADGES).sort());
+  });
+
+  it("draws a badge pill of its label, its tone's classes and the fact it stands for", () => {
+    // Act
+    const pill = drawHeldBadgePill("after this turn", "err", "holdForTurnEnd");
+    // Assert
+    expect([pill.tagName, pill.className, pill.getAttribute(HELD_STATUS_ATTRIBUTE), pill.textContent]).toEqual([
+      "SPAN",
+      `badge ${HELD_BADGE_CLASS} err`,
+      "holdForTurnEnd",
+      "after this turn",
+    ]);
   });
 
   it("names every fact the schema's badge can stand for", () => {

@@ -3,6 +3,7 @@ package prompthandler
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -242,6 +243,90 @@ func TestAClaimNeverAcceptedIsRecordedAtItsLevelByWhetherTheSubmissionIsARedrive
 				t.Fatalf("re-driven claim records = %v, want exactly one at %s", levels, tc.wantLevel)
 			}
 		})
+	}
+}
+
+func TestARedriveClaimsItsIngressEntryForItsTurn(t *testing.T) {
+	tests := []struct {
+		name       string
+		ctx        func(context.Context) context.Context
+		key        string
+		wantClaims []ingressClaim
+	}{
+		{name: "a re-drive claims its key for the minted turn", ctx: WithRedrive, key: "key-1",
+			wantClaims: []ingressClaim{{Key: "key-1", Turn: "minted-turn"}}},
+		{name: "an ordinary submission claims nothing", ctx: func(ctx context.Context) context.Context { return ctx }, key: "key-1"},
+		{name: "a re-drive with no key claims nothing", ctx: WithRedrive, key: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			_, err := h.h.Submit(tc.ctx(context.Background()), theWorkspace, userSaid("hello"), tc.key,
+				conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			if got := h.feed.ingressClaims(); !reflect.DeepEqual(got, tc.wantClaims) {
+				t.Fatalf("ingress claims = %+v, want %+v", got, tc.wantClaims)
+			}
+		})
+	}
+}
+
+func TestARedriveClaimsItsIngressEntryBeforeTheQueueSeesIt(t *testing.T) {
+	// Arrange: the queue reports its entry and then holds the submission.
+	h := newHarness(t)
+	h.queue.entered = make(chan struct{}, 1)
+	h.queue.gate = make(chan struct{})
+	done := make(chan error, 1)
+
+	// Act
+	go func() {
+		_, err := h.h.Submit(WithRedrive(context.Background()), theWorkspace, userSaid("hello"), "key-1",
+			conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
+		done <- err
+	}()
+	<-h.queue.entered
+	claimedAtEntry := h.feed.ingressClaims()
+	close(h.queue.gate)
+
+	// Assert
+	if err := <-done; err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	want := []ingressClaim{{Key: "key-1", Turn: "minted-turn"}}
+	if !reflect.DeepEqual(claimedAtEntry, want) {
+		t.Fatalf("claims when the queue was entered = %+v, want %+v", claimedAtEntry, want)
+	}
+}
+
+func TestARedriveOfAnUnacceptedClaimClaimsTheEarlierTurn(t *testing.T) {
+	// Arrange: the key's first submission was refused, so its claim stands
+	// under the first turn.
+	h := newHarness(t)
+	h.queue.submitErr = promptqueue.ErrMerging
+	if _, err := h.submit("hello"); !errors.Is(err, promptqueue.ErrMerging) {
+		t.Fatalf("first Submit = %v, want the merge refusal", err)
+	}
+	h.queue.submitErr = nil
+	h.minted = "second-turn"
+
+	// Act
+	_, err := h.h.Submit(WithRedrive(context.Background()), theWorkspace, userSaid("hello"), "key-1",
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, wsm.DeliveryOrdinary, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	want := []ingressClaim{{Key: "key-1", Turn: "minted-turn"}}
+	if got := h.feed.ingressClaims(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ingress claims = %+v, want %+v", got, want)
 	}
 }
 

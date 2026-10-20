@@ -1296,6 +1296,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Dir:            p.Layout.HeldPromptDir(),
 		WorkspaceByDir: p.DB.WorkspaceByDir,
 		Prompts:        handler,
+		Pending:        feedResolver,
 		PublishHost:    relay.PublishHostWorkspace,
 		Serves:         rolloutController.ServesIntake,
 		Log:            p.Surfaces,

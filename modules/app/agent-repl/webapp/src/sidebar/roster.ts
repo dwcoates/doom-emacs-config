@@ -47,7 +47,7 @@ import {
   type WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { clone, equals, type MessageInitShape } from "@bufbuild/protobuf";
+import { clone, equals } from "@bufbuild/protobuf";
 import { placeChildren } from "./children.js";
 import { queryAll } from "../dom.js";
 import { disposeKeyedRows, drawKeyedRows, patchKeyedRegions, remarkKeyedRows, type KeyedRows } from "./keyed-rows.js";
@@ -86,7 +86,6 @@ import {
 import { openScope, type DrawScope } from "./scope.js";
 import { foldViewKey } from "./view.js";
 import {
-  drawRosterRow,
   drawRosterRowDetailCommits,
   drawRosterRowWhenMerged,
   drawRosterRowWhenShown,

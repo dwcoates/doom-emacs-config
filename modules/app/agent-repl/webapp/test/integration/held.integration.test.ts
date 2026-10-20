@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   FeedHeldItemSchema,
+  HeldIngressPromptBadgeSchema,
   HeldPromptSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import {
@@ -28,8 +29,10 @@ import {
   HOLD_BADGES,
   HOLD_ARMS,
   HOLD_CLASSIFICATION_ARMS,
+  INGRESS_BADGE_ARMS,
   WORKSPACE_ID,
   assertCoversOneof,
+  heldIngressItem,
   heldPromptItem,
   heldSection,
   type HoldClassificationArm,
@@ -51,7 +54,11 @@ async function withTray(init: Parameters<typeof heldSection>[0]): Promise<Harnes
 
 describe("arm coverage", () => {
   it("covers every held item kind", () => {
-    assertCoversOneof(FeedHeldItemSchema, "item", ["prompt"]);
+    assertCoversOneof(FeedHeldItemSchema, "item", ["prompt", "ingress"]);
+  });
+
+  it("covers every ingress badge arm", () => {
+    assertCoversOneof(HeldIngressPromptBadgeSchema, "standsFor", [...INGRESS_BADGE_ARMS]);
   });
 
   it("covers every hold classification arm", () => {
@@ -64,6 +71,34 @@ describe("arm coverage", () => {
 
   it("covers every UpdateHeldPrompt action", () => {
     assertCoversOneof(UpdateHeldPromptRequestSchema, "action", ["release", "drop"]);
+  });
+});
+
+describe.each(INGRESS_BADGE_ARMS)("an ingress prompt waiting on %s", (arm) => {
+  it("draws its badge's words under its arm", async () => {
+    // Arrange / Act
+    await withTray({ items: [heldIngressItem({ arm })] });
+    // Assert
+    const pill = harness.$(`[data-held-ingress="daemon"] [data-held-status="${arm}"]`);
+    expect(pill?.textContent).toBe(`badge ${arm}`);
+  });
+});
+
+describe("an ingress prompt", () => {
+  it("draws what the user said, and no control", async () => {
+    // Arrange / Act
+    await withTray({ items: [heldIngressItem({ text: "what's dmitry's comment" })] });
+    // Assert
+    const card = harness.$('[data-held-ingress="daemon"]');
+    expect([card?.textContent?.includes("what's dmitry's comment"), card?.querySelector("button") ?? null]).toEqual([true, null]);
+  });
+
+  it("is drawn after the held prompts", async () => {
+    // Arrange / Act
+    await withTray({ items: [heldPromptItem(), heldIngressItem()] });
+    // Assert
+    const cards = harness.$$('[data-held-item]').map((card) => card.getAttribute("data-held-item"));
+    expect(cards).toEqual([`held:prompt:${HELD_TURN_ID}`, "held:ingress:k-1"]);
   });
 });
 

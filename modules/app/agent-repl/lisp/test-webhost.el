@@ -439,6 +439,26 @@ so stubbing the accessor would not reach the code under test."
     ;; Assert
     (should (equal (gethash "id-alpha" agent-repl--webhost-gate-docks) '(90)))))
 
+(ert-deftest agent-repl-test-wh-held-ingress-entries-are-sent-and-kept-for-reloads ()
+  "The editor's ingress entries reach the page, and a reloaded host gets them again."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    ;; Act
+    (agent-repl-webhost-set-held-ingress "alpha" [])
+    ;; Assert
+    (should (equal (gethash "id-alpha" agent-repl--webhost-held-ingress) []))
+    (should (= 1 (length (agent-repl-test-wh--sent "setHeldIngress"))))))
+
+(ert-deftest agent-repl-test-wh-removing-a-page-forgets-its-held-ingress ()
+  "A page dropped from the host takes its ingress entries with it."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-set-held-ingress "alpha" [])
+    ;; Act
+    (agent-repl-webhost-remove "alpha")
+    ;; Assert
+    (should-not (gethash "id-alpha" agent-repl--webhost-held-ingress))))
+
 (ert-deftest agent-repl-test-wh-dismissing-a-digest-asks-the-page ()
   "The host relays the close to the workspace's page."
   ;; Arrange
@@ -626,12 +646,14 @@ The current tab's page, not shown here, is the nearest of all."
     (agent-repl-webhost-ensure-page "alpha")
     (agent-repl-webhost-set-input-background "alpha" "#101010")
     (agent-repl-webhost-set-gate-dock "alpha" 90 "#101010")
+    (agent-repl-webhost-set-held-ingress "alpha" [])
     (setq agent-repl-test-wh--calls nil)
     ;; Act
     (agent-repl-test-wh--load "load-committed")
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "setInputBackground"))))
-    (should (= 1 (length (agent-repl-test-wh--sent "setGateDock"))))))
+    (should (= 1 (length (agent-repl-test-wh--sent "setGateDock"))))
+    (should (= 1 (length (agent-repl-test-wh--sent "setHeldIngress"))))))
 
 (ert-deftest agent-repl-test-wh-a-load-replays-once-at-commit ()
   "Of a navigation's stages only the commit replays."

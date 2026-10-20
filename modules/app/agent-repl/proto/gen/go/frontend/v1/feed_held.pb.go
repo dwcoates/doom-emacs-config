@@ -63,7 +63,8 @@ const (
 // the daemon is holding nothing for the user — not an absent one.
 type FeedHeld struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The held items, in display order: the held prompts in queue order. The
+	// The held items, in display order: the held prompts in queue order, then
+	// the ingress prompts the queue has not yet accepted, oldest first. The
 	// prompt that settles first sits nearest the settled rows.
 	Items         []*FeedHeldItem `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -121,6 +122,7 @@ type FeedHeldItem struct {
 	// Types that are valid to be assigned to Item:
 	//
 	//	*FeedHeldItem_Prompt
+	//	*FeedHeldItem_Ingress
 	Item          isFeedHeldItem_Item `protobuf_oneof:"item"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -179,6 +181,15 @@ func (x *FeedHeldItem) GetPrompt() *HeldPrompt {
 	return nil
 }
 
+func (x *FeedHeldItem) GetIngress() *HeldIngressPrompt {
+	if x != nil {
+		if x, ok := x.Item.(*FeedHeldItem_Ingress); ok {
+			return x.Ingress
+		}
+	}
+	return nil
+}
+
 type isFeedHeldItem_Item interface {
 	isFeedHeldItem_Item()
 }
@@ -188,7 +199,15 @@ type FeedHeldItem_Prompt struct {
 	Prompt *HeldPrompt `protobuf:"bytes,3,opt,name=prompt,proto3,oneof"`
 }
 
+type FeedHeldItem_Ingress struct {
+	// A prompt waiting in the held-prompt ingress that the daemon has read
+	// and not yet accepted into its queue.
+	Ingress *HeldIngressPrompt `protobuf:"bytes,5,opt,name=ingress,proto3,oneof"`
+}
+
 func (*FeedHeldItem_Prompt) isFeedHeldItem_Item() {}
+
+func (*FeedHeldItem_Ingress) isFeedHeldItem_Item() {}
 
 // A prompt the daemon is holding for delivery.
 //
@@ -2580,16 +2599,550 @@ func (*HeldPromptBuildRefreshHold) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{39}
 }
 
+// A prompt the editor wrote to the durable held-prompt ingress
+// (`$AGENT_REPL_STATE_DIR/held-prompts/`) because no daemon answered its
+// submission, which this daemon has read and not yet accepted into its
+// queue.
+//
+// WHY IT IS DRAWN. A prompt in the ingress is the user's, taken and kept,
+// but it is in no queue yet: without this card a prompt sent during an outage
+// is drawn nowhere until it is accepted, and a person who sees nothing sends
+// it again. While the daemon is down the page draws the editor's own list of
+// these entries; once this daemon serves the root feed it is the one source,
+// through this arm.
+//
+// ONE PROMPT, ONE PLACE. The item leaves the section in the SAME publication
+// that draws the prompt as a held prompt (the `prompt` arm) or as a settled
+// prompt row, so no reader sees it in both places or in neither. Its FeedId is
+// the ingress entry's own (its idempotency key), not the prompt row's: the
+// turn the prompt will run as does not exist until it is accepted.
+//
+// NO ACTIONS. Nothing can force, cancel, edit or fold an entry the queue has
+// not accepted; the card draws the prompt and why it waits, and nothing else.
+type HeldIngressPrompt struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What the user said, WHOLE: the very payload the daemon will submit once
+	// the queue accepts it, so the card shows exactly what will land.
+	Said *v1.UserSaid `protobuf:"bytes,1,opt,name=said,proto3" json:"said,omitempty"`
+	// When the editor wrote the entry.
+	QueuedAt *HeldIngressPromptQueuedAt `protobuf:"bytes,2,opt,name=queued_at,json=queuedAt,proto3" json:"queued_at,omitempty"`
+	// Why the entry still waits. ALWAYS SET: an entry with no badge is a
+	// malformed frame and is rejected loudly.
+	Badge         *HeldIngressPromptBadge `protobuf:"bytes,3,opt,name=badge,proto3" json:"badge,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeldIngressPrompt) Reset() {
+	*x = HeldIngressPrompt{}
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeldIngressPrompt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeldIngressPrompt) ProtoMessage() {}
+
+func (x *HeldIngressPrompt) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeldIngressPrompt.ProtoReflect.Descriptor instead.
+func (*HeldIngressPrompt) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *HeldIngressPrompt) GetSaid() *v1.UserSaid {
+	if x != nil {
+		return x.Said
+	}
+	return nil
+}
+
+func (x *HeldIngressPrompt) GetQueuedAt() *HeldIngressPromptQueuedAt {
+	if x != nil {
+		return x.QueuedAt
+	}
+	return nil
+}
+
+func (x *HeldIngressPrompt) GetBadge() *HeldIngressPromptBadge {
+	if x != nil {
+		return x.Badge
+	}
+	return nil
+}
+
+// When an ingress entry was written, as the editor stamped it.
+type HeldIngressPromptQueuedAt struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Epoch milliseconds.
+	AtMs          int64 `protobuf:"varint,1,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeldIngressPromptQueuedAt) Reset() {
+	*x = HeldIngressPromptQueuedAt{}
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeldIngressPromptQueuedAt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeldIngressPromptQueuedAt) ProtoMessage() {}
+
+func (x *HeldIngressPromptQueuedAt) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeldIngressPromptQueuedAt.ProtoReflect.Descriptor instead.
+func (*HeldIngressPromptQueuedAt) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *HeldIngressPromptQueuedAt) GetAtMs() int64 {
+	if x != nil {
+		return x.AtMs
+	}
+	return 0
+}
+
+// The one status badge on an ingress prompt's card, composed daemon-side from
+// what the daemon's last attempt to accept the entry met.
+type HeldIngressPromptBadge struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The badge's words, one to three ("waiting for the session"), drawn
+	// verbatim. REQUIRED AND NEVER EMPTY.
+	Label string `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
+	// The reason said in full, drawn verbatim in the card's expand-only
+	// details. Absent when the full sentence would only repeat the label.
+	Detail *string `protobuf:"bytes,2,opt,name=detail,proto3,oneof" json:"detail,omitempty"`
+	// WHAT THE ENTRY WAITS ON. A frontend keys the badge's color by this arm
+	// and never by the words. ALWAYS SET; an unset arm is a malformed frame.
+	//
+	// Types that are valid to be assigned to StandsFor:
+	//
+	//	*HeldIngressPromptBadge_AwaitingIntake
+	//	*HeldIngressPromptBadge_NoSession
+	//	*HeldIngressPromptBadge_Merge
+	//	*HeldIngressPromptBadge_ColdGate
+	//	*HeldIngressPromptBadge_MovedAway
+	//	*HeldIngressPromptBadge_Refused
+	StandsFor     isHeldIngressPromptBadge_StandsFor `protobuf_oneof:"stands_for"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeldIngressPromptBadge) Reset() {
+	*x = HeldIngressPromptBadge{}
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeldIngressPromptBadge) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeldIngressPromptBadge) ProtoMessage() {}
+
+func (x *HeldIngressPromptBadge) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeldIngressPromptBadge.ProtoReflect.Descriptor instead.
+func (*HeldIngressPromptBadge) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *HeldIngressPromptBadge) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *HeldIngressPromptBadge) GetDetail() string {
+	if x != nil && x.Detail != nil {
+		return *x.Detail
+	}
+	return ""
+}
+
+func (x *HeldIngressPromptBadge) GetStandsFor() isHeldIngressPromptBadge_StandsFor {
+	if x != nil {
+		return x.StandsFor
+	}
+	return nil
+}
+
+func (x *HeldIngressPromptBadge) GetAwaitingIntake() *HeldIngressPromptBadgeAwaitingIntake {
+	if x != nil {
+		if x, ok := x.StandsFor.(*HeldIngressPromptBadge_AwaitingIntake); ok {
+			return x.AwaitingIntake
+		}
+	}
+	return nil
+}
+
+func (x *HeldIngressPromptBadge) GetNoSession() *HeldIngressPromptBadgeNoSession {
+	if x != nil {
+		if x, ok := x.StandsFor.(*HeldIngressPromptBadge_NoSession); ok {
+			return x.NoSession
+		}
+	}
+	return nil
+}
+
+func (x *HeldIngressPromptBadge) GetMerge() *HeldIngressPromptBadgeMerge {
+	if x != nil {
+		if x, ok := x.StandsFor.(*HeldIngressPromptBadge_Merge); ok {
+			return x.Merge
+		}
+	}
+	return nil
+}
+
+func (x *HeldIngressPromptBadge) GetColdGate() *HeldIngressPromptBadgeColdGate {
+	if x != nil {
+		if x, ok := x.StandsFor.(*HeldIngressPromptBadge_ColdGate); ok {
+			return x.ColdGate
+		}
+	}
+	return nil
+}
+
+func (x *HeldIngressPromptBadge) GetMovedAway() *HeldIngressPromptBadgeMovedAway {
+	if x != nil {
+		if x, ok := x.StandsFor.(*HeldIngressPromptBadge_MovedAway); ok {
+			return x.MovedAway
+		}
+	}
+	return nil
+}
+
+func (x *HeldIngressPromptBadge) GetRefused() *HeldIngressPromptBadgeRefused {
+	if x != nil {
+		if x, ok := x.StandsFor.(*HeldIngressPromptBadge_Refused); ok {
+			return x.Refused
+		}
+	}
+	return nil
+}
+
+type isHeldIngressPromptBadge_StandsFor interface {
+	isHeldIngressPromptBadge_StandsFor()
+}
+
+type HeldIngressPromptBadge_AwaitingIntake struct {
+	// Nothing refused the entry: it has not been offered to the queue yet,
+	// waits behind an earlier entry of the same workspace, or waits for its
+	// next attempt.
+	AwaitingIntake *HeldIngressPromptBadgeAwaitingIntake `protobuf:"bytes,3,opt,name=awaiting_intake,json=awaitingIntake,proto3,oneof"`
+}
+
+type HeldIngressPromptBadge_NoSession struct {
+	// The queue refused it because the workspace has no session to submit to.
+	NoSession *HeldIngressPromptBadgeNoSession `protobuf:"bytes,4,opt,name=no_session,json=noSession,proto3,oneof"`
+}
+
+type HeldIngressPromptBadge_Merge struct {
+	// The queue refused it because a merge of the workspace is in flight.
+	Merge *HeldIngressPromptBadgeMerge `protobuf:"bytes,5,opt,name=merge,proto3,oneof"`
+}
+
+type HeldIngressPromptBadge_ColdGate struct {
+	// The queue refused it because the session is parked at its cold gate.
+	ColdGate *HeldIngressPromptBadgeColdGate `protobuf:"bytes,6,opt,name=cold_gate,json=coldGate,proto3,oneof"`
+}
+
+type HeldIngressPromptBadge_MovedAway struct {
+	// The queue refused it because the workspace is moving to another daemon.
+	MovedAway *HeldIngressPromptBadgeMovedAway `protobuf:"bytes,7,opt,name=moved_away,json=movedAway,proto3,oneof"`
+}
+
+type HeldIngressPromptBadge_Refused struct {
+	// The queue refused it for a reason that is a fault, not a standing
+	// condition; the daemon has logged it and keeps retrying.
+	Refused *HeldIngressPromptBadgeRefused `protobuf:"bytes,8,opt,name=refused,proto3,oneof"`
+}
+
+func (*HeldIngressPromptBadge_AwaitingIntake) isHeldIngressPromptBadge_StandsFor() {}
+
+func (*HeldIngressPromptBadge_NoSession) isHeldIngressPromptBadge_StandsFor() {}
+
+func (*HeldIngressPromptBadge_Merge) isHeldIngressPromptBadge_StandsFor() {}
+
+func (*HeldIngressPromptBadge_ColdGate) isHeldIngressPromptBadge_StandsFor() {}
+
+func (*HeldIngressPromptBadge_MovedAway) isHeldIngressPromptBadge_StandsFor() {}
+
+func (*HeldIngressPromptBadge_Refused) isHeldIngressPromptBadge_StandsFor() {}
+
+// The badge shows an entry not yet offered to the queue, or waiting its turn.
+type HeldIngressPromptBadgeAwaitingIntake struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeldIngressPromptBadgeAwaitingIntake) Reset() {
+	*x = HeldIngressPromptBadgeAwaitingIntake{}
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeldIngressPromptBadgeAwaitingIntake) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeldIngressPromptBadgeAwaitingIntake) ProtoMessage() {}
+
+func (x *HeldIngressPromptBadgeAwaitingIntake) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeldIngressPromptBadgeAwaitingIntake.ProtoReflect.Descriptor instead.
+func (*HeldIngressPromptBadgeAwaitingIntake) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{43}
+}
+
+// The badge shows the workspace has no session to take the entry.
+type HeldIngressPromptBadgeNoSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeldIngressPromptBadgeNoSession) Reset() {
+	*x = HeldIngressPromptBadgeNoSession{}
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeldIngressPromptBadgeNoSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeldIngressPromptBadgeNoSession) ProtoMessage() {}
+
+func (x *HeldIngressPromptBadgeNoSession) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeldIngressPromptBadgeNoSession.ProtoReflect.Descriptor instead.
+func (*HeldIngressPromptBadgeNoSession) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{44}
+}
+
+// The badge shows a merge of the workspace holds the entry back.
+type HeldIngressPromptBadgeMerge struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeldIngressPromptBadgeMerge) Reset() {
+	*x = HeldIngressPromptBadgeMerge{}
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeldIngressPromptBadgeMerge) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeldIngressPromptBadgeMerge) ProtoMessage() {}
+
+func (x *HeldIngressPromptBadgeMerge) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeldIngressPromptBadgeMerge.ProtoReflect.Descriptor instead.
+func (*HeldIngressPromptBadgeMerge) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{45}
+}
+
+// The badge shows the session's cold gate holds the entry back.
+type HeldIngressPromptBadgeColdGate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeldIngressPromptBadgeColdGate) Reset() {
+	*x = HeldIngressPromptBadgeColdGate{}
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeldIngressPromptBadgeColdGate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeldIngressPromptBadgeColdGate) ProtoMessage() {}
+
+func (x *HeldIngressPromptBadgeColdGate) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeldIngressPromptBadgeColdGate.ProtoReflect.Descriptor instead.
+func (*HeldIngressPromptBadgeColdGate) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{46}
+}
+
+// The badge shows the workspace moving to another daemon holds it back.
+type HeldIngressPromptBadgeMovedAway struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeldIngressPromptBadgeMovedAway) Reset() {
+	*x = HeldIngressPromptBadgeMovedAway{}
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeldIngressPromptBadgeMovedAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeldIngressPromptBadgeMovedAway) ProtoMessage() {}
+
+func (x *HeldIngressPromptBadgeMovedAway) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeldIngressPromptBadgeMovedAway.ProtoReflect.Descriptor instead.
+func (*HeldIngressPromptBadgeMovedAway) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{47}
+}
+
+// The badge shows the queue refused the entry by a fault.
+type HeldIngressPromptBadgeRefused struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeldIngressPromptBadgeRefused) Reset() {
+	*x = HeldIngressPromptBadgeRefused{}
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeldIngressPromptBadgeRefused) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeldIngressPromptBadgeRefused) ProtoMessage() {}
+
+func (x *HeldIngressPromptBadgeRefused) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_held_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeldIngressPromptBadgeRefused.ProtoReflect.Descriptor instead.
+func (*HeldIngressPromptBadgeRefused) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_held_proto_rawDescGZIP(), []int{48}
+}
+
 var File_frontend_v1_feed_held_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\n" +
 	"\x1bfrontend/v1/feed_held.proto\x12\vfrontend.v1\x1a#conversation/v1/slash_command.proto\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a\x16frontend/v1/feed.proto\";\n" +
 	"\bFeedHeld\x12/\n" +
-	"\x05items\x18\x01 \x03(\v2\x19.frontend.v1.FeedHeldItemR\x05items\"\x88\x01\n" +
+	"\x05items\x18\x01 \x03(\v2\x19.frontend.v1.FeedHeldItemR\x05items\"\xc4\x01\n" +
 	"\fFeedHeldItem\x12#\n" +
 	"\x02id\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x02id\x121\n" +
-	"\x06prompt\x18\x03 \x01(\v2\x17.frontend.v1.HeldPromptH\x00R\x06promptB\x06\n" +
+	"\x06prompt\x18\x03 \x01(\v2\x17.frontend.v1.HeldPromptH\x00R\x06prompt\x12:\n" +
+	"\aingress\x18\x05 \x01(\v2\x1e.frontend.v1.HeldIngressPromptH\x00R\aingressB\x06\n" +
 	"\x04itemJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\x05mergeR\x05offer\"\x8d\r\n" +
 	"\n" +
 	"HeldPrompt\x12+\n" +
@@ -2694,7 +3247,33 @@ const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\x16HeldPromptColdGateHold\" \n" +
 	"\x1eHeldPromptColdGateAnsweredHold\"\x1c\n" +
 	"\x1aHeldPromptAwaitingDelivery\"\x1c\n" +
-	"\x1aHeldPromptBuildRefreshHoldB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
+	"\x1aHeldPromptBuildRefreshHold\"\xc2\x01\n" +
+	"\x11HeldIngressPrompt\x12-\n" +
+	"\x04said\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\x12C\n" +
+	"\tqueued_at\x18\x02 \x01(\v2&.frontend.v1.HeldIngressPromptQueuedAtR\bqueuedAt\x129\n" +
+	"\x05badge\x18\x03 \x01(\v2#.frontend.v1.HeldIngressPromptBadgeR\x05badge\"0\n" +
+	"\x19HeldIngressPromptQueuedAt\x12\x13\n" +
+	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\"\xb6\x04\n" +
+	"\x16HeldIngressPromptBadge\x12\x14\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\x12\x1b\n" +
+	"\x06detail\x18\x02 \x01(\tH\x01R\x06detail\x88\x01\x01\x12\\\n" +
+	"\x0fawaiting_intake\x18\x03 \x01(\v21.frontend.v1.HeldIngressPromptBadgeAwaitingIntakeH\x00R\x0eawaitingIntake\x12M\n" +
+	"\n" +
+	"no_session\x18\x04 \x01(\v2,.frontend.v1.HeldIngressPromptBadgeNoSessionH\x00R\tnoSession\x12@\n" +
+	"\x05merge\x18\x05 \x01(\v2(.frontend.v1.HeldIngressPromptBadgeMergeH\x00R\x05merge\x12J\n" +
+	"\tcold_gate\x18\x06 \x01(\v2+.frontend.v1.HeldIngressPromptBadgeColdGateH\x00R\bcoldGate\x12M\n" +
+	"\n" +
+	"moved_away\x18\a \x01(\v2,.frontend.v1.HeldIngressPromptBadgeMovedAwayH\x00R\tmovedAway\x12F\n" +
+	"\arefused\x18\b \x01(\v2*.frontend.v1.HeldIngressPromptBadgeRefusedH\x00R\arefusedB\f\n" +
+	"\n" +
+	"stands_forB\t\n" +
+	"\a_detail\"&\n" +
+	"$HeldIngressPromptBadgeAwaitingIntake\"!\n" +
+	"\x1fHeldIngressPromptBadgeNoSession\"\x1d\n" +
+	"\x1bHeldIngressPromptBadgeMerge\" \n" +
+	"\x1eHeldIngressPromptBadgeColdGate\"!\n" +
+	"\x1fHeldIngressPromptBadgeMovedAway\"\x1f\n" +
+	"\x1dHeldIngressPromptBadgeRefusedB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_frontend_v1_feed_held_proto_rawDescOnce sync.Once
@@ -2708,103 +3287,122 @@ func file_frontend_v1_feed_held_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_feed_held_proto_rawDescData
 }
 
-var file_frontend_v1_feed_held_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
+var file_frontend_v1_feed_held_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
 var file_frontend_v1_feed_held_proto_goTypes = []any{
-	(*FeedHeld)(nil),                           // 0: frontend.v1.FeedHeld
-	(*FeedHeldItem)(nil),                       // 1: frontend.v1.FeedHeldItem
-	(*HeldPrompt)(nil),                         // 2: frontend.v1.HeldPrompt
-	(*HeldPromptFoldAbove)(nil),                // 3: frontend.v1.HeldPromptFoldAbove
-	(*HeldPromptCoalesced)(nil),                // 4: frontend.v1.HeldPromptCoalesced
-	(*HeldSessionAct)(nil),                     // 5: frontend.v1.HeldSessionAct
-	(*HeldSessionActModel)(nil),                // 6: frontend.v1.HeldSessionActModel
-	(*HeldSessionActPermissionMode)(nil),       // 7: frontend.v1.HeldSessionActPermissionMode
-	(*HeldPromptBadge)(nil),                    // 8: frontend.v1.HeldPromptBadge
-	(*HeldPromptBadgeClassifying)(nil),         // 9: frontend.v1.HeldPromptBadgeClassifying
-	(*HeldPromptBadgeInterject)(nil),           // 10: frontend.v1.HeldPromptBadgeInterject
-	(*HeldPromptBadgeAfterToolCall)(nil),       // 11: frontend.v1.HeldPromptBadgeAfterToolCall
-	(*HeldPromptBadgeHoldForTurnEnd)(nil),      // 12: frontend.v1.HeldPromptBadgeHoldForTurnEnd
-	(*HeldPromptBadgeUninterruptibleTurn)(nil), // 13: frontend.v1.HeldPromptBadgeUninterruptibleTurn
-	(*HeldPromptBadgeClassificationError)(nil), // 14: frontend.v1.HeldPromptBadgeClassificationError
-	(*HeldPromptBadgeEditing)(nil),             // 15: frontend.v1.HeldPromptBadgeEditing
-	(*HeldPromptBadgeShutdown)(nil),            // 16: frontend.v1.HeldPromptBadgeShutdown
-	(*HeldPromptBadgeBuildRefresh)(nil),        // 17: frontend.v1.HeldPromptBadgeBuildRefresh
-	(*HeldPromptBadgeReconnect)(nil),           // 18: frontend.v1.HeldPromptBadgeReconnect
-	(*HeldPromptBadgeMerge)(nil),               // 19: frontend.v1.HeldPromptBadgeMerge
-	(*HeldPromptBadgeColdGate)(nil),            // 20: frontend.v1.HeldPromptBadgeColdGate
-	(*HeldPromptBadgeAwaitingDelivery)(nil),    // 21: frontend.v1.HeldPromptBadgeAwaitingDelivery
-	(*HeldPromptBadgeColdGateAnswered)(nil),    // 22: frontend.v1.HeldPromptBadgeColdGateAnswered
-	(*HeldPromptStatusNote)(nil),               // 23: frontend.v1.HeldPromptStatusNote
-	(*HeldPromptEditing)(nil),                  // 24: frontend.v1.HeldPromptEditing
-	(*HeldPromptQueuedAt)(nil),                 // 25: frontend.v1.HeldPromptQueuedAt
-	(*HeldPromptClassifying)(nil),              // 26: frontend.v1.HeldPromptClassifying
-	(*HeldPromptInterject)(nil),                // 27: frontend.v1.HeldPromptInterject
-	(*HeldPromptAfterToolCall)(nil),            // 28: frontend.v1.HeldPromptAfterToolCall
-	(*HeldPromptHoldForTurnEnd)(nil),           // 29: frontend.v1.HeldPromptHoldForTurnEnd
-	(*HeldPromptUninterruptibleTurn)(nil),      // 30: frontend.v1.HeldPromptUninterruptibleTurn
-	(*HeldPromptClassificationError)(nil),      // 31: frontend.v1.HeldPromptClassificationError
-	(*HeldPromptShutdownHold)(nil),             // 32: frontend.v1.HeldPromptShutdownHold
-	(*HeldPromptReconnectHold)(nil),            // 33: frontend.v1.HeldPromptReconnectHold
-	(*HeldPromptMergeHold)(nil),                // 34: frontend.v1.HeldPromptMergeHold
-	(*HeldPromptDaemonHeld)(nil),               // 35: frontend.v1.HeldPromptDaemonHeld
-	(*HeldPromptColdGateHold)(nil),             // 36: frontend.v1.HeldPromptColdGateHold
-	(*HeldPromptColdGateAnsweredHold)(nil),     // 37: frontend.v1.HeldPromptColdGateAnsweredHold
-	(*HeldPromptAwaitingDelivery)(nil),         // 38: frontend.v1.HeldPromptAwaitingDelivery
-	(*HeldPromptBuildRefreshHold)(nil),         // 39: frontend.v1.HeldPromptBuildRefreshHold
-	(*FeedId)(nil),                             // 40: frontend.v1.FeedId
-	(*v1.TurnId)(nil),                          // 41: conversation.v1.TurnId
-	(*v1.UserSaid)(nil),                        // 42: conversation.v1.UserSaid
-	(v1.SessionCommand)(0),                     // 43: conversation.v1.SessionCommand
+	(*FeedHeld)(nil),                             // 0: frontend.v1.FeedHeld
+	(*FeedHeldItem)(nil),                         // 1: frontend.v1.FeedHeldItem
+	(*HeldPrompt)(nil),                           // 2: frontend.v1.HeldPrompt
+	(*HeldPromptFoldAbove)(nil),                  // 3: frontend.v1.HeldPromptFoldAbove
+	(*HeldPromptCoalesced)(nil),                  // 4: frontend.v1.HeldPromptCoalesced
+	(*HeldSessionAct)(nil),                       // 5: frontend.v1.HeldSessionAct
+	(*HeldSessionActModel)(nil),                  // 6: frontend.v1.HeldSessionActModel
+	(*HeldSessionActPermissionMode)(nil),         // 7: frontend.v1.HeldSessionActPermissionMode
+	(*HeldPromptBadge)(nil),                      // 8: frontend.v1.HeldPromptBadge
+	(*HeldPromptBadgeClassifying)(nil),           // 9: frontend.v1.HeldPromptBadgeClassifying
+	(*HeldPromptBadgeInterject)(nil),             // 10: frontend.v1.HeldPromptBadgeInterject
+	(*HeldPromptBadgeAfterToolCall)(nil),         // 11: frontend.v1.HeldPromptBadgeAfterToolCall
+	(*HeldPromptBadgeHoldForTurnEnd)(nil),        // 12: frontend.v1.HeldPromptBadgeHoldForTurnEnd
+	(*HeldPromptBadgeUninterruptibleTurn)(nil),   // 13: frontend.v1.HeldPromptBadgeUninterruptibleTurn
+	(*HeldPromptBadgeClassificationError)(nil),   // 14: frontend.v1.HeldPromptBadgeClassificationError
+	(*HeldPromptBadgeEditing)(nil),               // 15: frontend.v1.HeldPromptBadgeEditing
+	(*HeldPromptBadgeShutdown)(nil),              // 16: frontend.v1.HeldPromptBadgeShutdown
+	(*HeldPromptBadgeBuildRefresh)(nil),          // 17: frontend.v1.HeldPromptBadgeBuildRefresh
+	(*HeldPromptBadgeReconnect)(nil),             // 18: frontend.v1.HeldPromptBadgeReconnect
+	(*HeldPromptBadgeMerge)(nil),                 // 19: frontend.v1.HeldPromptBadgeMerge
+	(*HeldPromptBadgeColdGate)(nil),              // 20: frontend.v1.HeldPromptBadgeColdGate
+	(*HeldPromptBadgeAwaitingDelivery)(nil),      // 21: frontend.v1.HeldPromptBadgeAwaitingDelivery
+	(*HeldPromptBadgeColdGateAnswered)(nil),      // 22: frontend.v1.HeldPromptBadgeColdGateAnswered
+	(*HeldPromptStatusNote)(nil),                 // 23: frontend.v1.HeldPromptStatusNote
+	(*HeldPromptEditing)(nil),                    // 24: frontend.v1.HeldPromptEditing
+	(*HeldPromptQueuedAt)(nil),                   // 25: frontend.v1.HeldPromptQueuedAt
+	(*HeldPromptClassifying)(nil),                // 26: frontend.v1.HeldPromptClassifying
+	(*HeldPromptInterject)(nil),                  // 27: frontend.v1.HeldPromptInterject
+	(*HeldPromptAfterToolCall)(nil),              // 28: frontend.v1.HeldPromptAfterToolCall
+	(*HeldPromptHoldForTurnEnd)(nil),             // 29: frontend.v1.HeldPromptHoldForTurnEnd
+	(*HeldPromptUninterruptibleTurn)(nil),        // 30: frontend.v1.HeldPromptUninterruptibleTurn
+	(*HeldPromptClassificationError)(nil),        // 31: frontend.v1.HeldPromptClassificationError
+	(*HeldPromptShutdownHold)(nil),               // 32: frontend.v1.HeldPromptShutdownHold
+	(*HeldPromptReconnectHold)(nil),              // 33: frontend.v1.HeldPromptReconnectHold
+	(*HeldPromptMergeHold)(nil),                  // 34: frontend.v1.HeldPromptMergeHold
+	(*HeldPromptDaemonHeld)(nil),                 // 35: frontend.v1.HeldPromptDaemonHeld
+	(*HeldPromptColdGateHold)(nil),               // 36: frontend.v1.HeldPromptColdGateHold
+	(*HeldPromptColdGateAnsweredHold)(nil),       // 37: frontend.v1.HeldPromptColdGateAnsweredHold
+	(*HeldPromptAwaitingDelivery)(nil),           // 38: frontend.v1.HeldPromptAwaitingDelivery
+	(*HeldPromptBuildRefreshHold)(nil),           // 39: frontend.v1.HeldPromptBuildRefreshHold
+	(*HeldIngressPrompt)(nil),                    // 40: frontend.v1.HeldIngressPrompt
+	(*HeldIngressPromptQueuedAt)(nil),            // 41: frontend.v1.HeldIngressPromptQueuedAt
+	(*HeldIngressPromptBadge)(nil),               // 42: frontend.v1.HeldIngressPromptBadge
+	(*HeldIngressPromptBadgeAwaitingIntake)(nil), // 43: frontend.v1.HeldIngressPromptBadgeAwaitingIntake
+	(*HeldIngressPromptBadgeNoSession)(nil),      // 44: frontend.v1.HeldIngressPromptBadgeNoSession
+	(*HeldIngressPromptBadgeMerge)(nil),          // 45: frontend.v1.HeldIngressPromptBadgeMerge
+	(*HeldIngressPromptBadgeColdGate)(nil),       // 46: frontend.v1.HeldIngressPromptBadgeColdGate
+	(*HeldIngressPromptBadgeMovedAway)(nil),      // 47: frontend.v1.HeldIngressPromptBadgeMovedAway
+	(*HeldIngressPromptBadgeRefused)(nil),        // 48: frontend.v1.HeldIngressPromptBadgeRefused
+	(*FeedId)(nil),                               // 49: frontend.v1.FeedId
+	(*v1.TurnId)(nil),                            // 50: conversation.v1.TurnId
+	(*v1.UserSaid)(nil),                          // 51: conversation.v1.UserSaid
+	(v1.SessionCommand)(0),                       // 52: conversation.v1.SessionCommand
 }
 var file_frontend_v1_feed_held_proto_depIdxs = []int32{
 	1,  // 0: frontend.v1.FeedHeld.items:type_name -> frontend.v1.FeedHeldItem
-	40, // 1: frontend.v1.FeedHeldItem.id:type_name -> frontend.v1.FeedId
+	49, // 1: frontend.v1.FeedHeldItem.id:type_name -> frontend.v1.FeedId
 	2,  // 2: frontend.v1.FeedHeldItem.prompt:type_name -> frontend.v1.HeldPrompt
-	41, // 3: frontend.v1.HeldPrompt.turn:type_name -> conversation.v1.TurnId
-	42, // 4: frontend.v1.HeldPrompt.said:type_name -> conversation.v1.UserSaid
-	25, // 5: frontend.v1.HeldPrompt.queued_at:type_name -> frontend.v1.HeldPromptQueuedAt
-	26, // 6: frontend.v1.HeldPrompt.classifying:type_name -> frontend.v1.HeldPromptClassifying
-	27, // 7: frontend.v1.HeldPrompt.interject:type_name -> frontend.v1.HeldPromptInterject
-	29, // 8: frontend.v1.HeldPrompt.hold_for_turn_end:type_name -> frontend.v1.HeldPromptHoldForTurnEnd
-	28, // 9: frontend.v1.HeldPrompt.after_tool_call:type_name -> frontend.v1.HeldPromptAfterToolCall
-	30, // 10: frontend.v1.HeldPrompt.uninterruptible_turn:type_name -> frontend.v1.HeldPromptUninterruptibleTurn
-	31, // 11: frontend.v1.HeldPrompt.classification_error:type_name -> frontend.v1.HeldPromptClassificationError
-	35, // 12: frontend.v1.HeldPrompt.daemon_held:type_name -> frontend.v1.HeldPromptDaemonHeld
-	38, // 13: frontend.v1.HeldPrompt.awaiting_delivery:type_name -> frontend.v1.HeldPromptAwaitingDelivery
-	32, // 14: frontend.v1.HeldPrompt.shutdown:type_name -> frontend.v1.HeldPromptShutdownHold
-	33, // 15: frontend.v1.HeldPrompt.reconnect:type_name -> frontend.v1.HeldPromptReconnectHold
-	39, // 16: frontend.v1.HeldPrompt.build_refresh:type_name -> frontend.v1.HeldPromptBuildRefreshHold
-	34, // 17: frontend.v1.HeldPrompt.merge:type_name -> frontend.v1.HeldPromptMergeHold
-	36, // 18: frontend.v1.HeldPrompt.cold_gate:type_name -> frontend.v1.HeldPromptColdGateHold
-	37, // 19: frontend.v1.HeldPrompt.cold_gate_answered:type_name -> frontend.v1.HeldPromptColdGateAnsweredHold
-	24, // 20: frontend.v1.HeldPrompt.editing:type_name -> frontend.v1.HeldPromptEditing
-	8,  // 21: frontend.v1.HeldPrompt.badge:type_name -> frontend.v1.HeldPromptBadge
-	23, // 22: frontend.v1.HeldPrompt.notes:type_name -> frontend.v1.HeldPromptStatusNote
-	4,  // 23: frontend.v1.HeldPrompt.coalesced:type_name -> frontend.v1.HeldPromptCoalesced
-	5,  // 24: frontend.v1.HeldPrompt.act:type_name -> frontend.v1.HeldSessionAct
-	3,  // 25: frontend.v1.HeldPrompt.fold_above:type_name -> frontend.v1.HeldPromptFoldAbove
-	41, // 26: frontend.v1.HeldPromptFoldAbove.above:type_name -> conversation.v1.TurnId
-	6,  // 27: frontend.v1.HeldSessionAct.model:type_name -> frontend.v1.HeldSessionActModel
-	7,  // 28: frontend.v1.HeldSessionAct.permission_mode:type_name -> frontend.v1.HeldSessionActPermissionMode
-	9,  // 29: frontend.v1.HeldPromptBadge.classifying:type_name -> frontend.v1.HeldPromptBadgeClassifying
-	10, // 30: frontend.v1.HeldPromptBadge.interject:type_name -> frontend.v1.HeldPromptBadgeInterject
-	11, // 31: frontend.v1.HeldPromptBadge.after_tool_call:type_name -> frontend.v1.HeldPromptBadgeAfterToolCall
-	12, // 32: frontend.v1.HeldPromptBadge.hold_for_turn_end:type_name -> frontend.v1.HeldPromptBadgeHoldForTurnEnd
-	13, // 33: frontend.v1.HeldPromptBadge.uninterruptible_turn:type_name -> frontend.v1.HeldPromptBadgeUninterruptibleTurn
-	14, // 34: frontend.v1.HeldPromptBadge.classification_error:type_name -> frontend.v1.HeldPromptBadgeClassificationError
-	15, // 35: frontend.v1.HeldPromptBadge.editing:type_name -> frontend.v1.HeldPromptBadgeEditing
-	16, // 36: frontend.v1.HeldPromptBadge.shutdown:type_name -> frontend.v1.HeldPromptBadgeShutdown
-	17, // 37: frontend.v1.HeldPromptBadge.build_refresh:type_name -> frontend.v1.HeldPromptBadgeBuildRefresh
-	18, // 38: frontend.v1.HeldPromptBadge.reconnect:type_name -> frontend.v1.HeldPromptBadgeReconnect
-	19, // 39: frontend.v1.HeldPromptBadge.merge:type_name -> frontend.v1.HeldPromptBadgeMerge
-	20, // 40: frontend.v1.HeldPromptBadge.cold_gate:type_name -> frontend.v1.HeldPromptBadgeColdGate
-	21, // 41: frontend.v1.HeldPromptBadge.awaiting_delivery:type_name -> frontend.v1.HeldPromptBadgeAwaitingDelivery
-	22, // 42: frontend.v1.HeldPromptBadge.cold_gate_answered:type_name -> frontend.v1.HeldPromptBadgeColdGateAnswered
-	43, // 43: frontend.v1.HeldPromptUninterruptibleTurn.command:type_name -> conversation.v1.SessionCommand
-	44, // [44:44] is the sub-list for method output_type
-	44, // [44:44] is the sub-list for method input_type
-	44, // [44:44] is the sub-list for extension type_name
-	44, // [44:44] is the sub-list for extension extendee
-	0,  // [0:44] is the sub-list for field type_name
+	40, // 3: frontend.v1.FeedHeldItem.ingress:type_name -> frontend.v1.HeldIngressPrompt
+	50, // 4: frontend.v1.HeldPrompt.turn:type_name -> conversation.v1.TurnId
+	51, // 5: frontend.v1.HeldPrompt.said:type_name -> conversation.v1.UserSaid
+	25, // 6: frontend.v1.HeldPrompt.queued_at:type_name -> frontend.v1.HeldPromptQueuedAt
+	26, // 7: frontend.v1.HeldPrompt.classifying:type_name -> frontend.v1.HeldPromptClassifying
+	27, // 8: frontend.v1.HeldPrompt.interject:type_name -> frontend.v1.HeldPromptInterject
+	29, // 9: frontend.v1.HeldPrompt.hold_for_turn_end:type_name -> frontend.v1.HeldPromptHoldForTurnEnd
+	28, // 10: frontend.v1.HeldPrompt.after_tool_call:type_name -> frontend.v1.HeldPromptAfterToolCall
+	30, // 11: frontend.v1.HeldPrompt.uninterruptible_turn:type_name -> frontend.v1.HeldPromptUninterruptibleTurn
+	31, // 12: frontend.v1.HeldPrompt.classification_error:type_name -> frontend.v1.HeldPromptClassificationError
+	35, // 13: frontend.v1.HeldPrompt.daemon_held:type_name -> frontend.v1.HeldPromptDaemonHeld
+	38, // 14: frontend.v1.HeldPrompt.awaiting_delivery:type_name -> frontend.v1.HeldPromptAwaitingDelivery
+	32, // 15: frontend.v1.HeldPrompt.shutdown:type_name -> frontend.v1.HeldPromptShutdownHold
+	33, // 16: frontend.v1.HeldPrompt.reconnect:type_name -> frontend.v1.HeldPromptReconnectHold
+	39, // 17: frontend.v1.HeldPrompt.build_refresh:type_name -> frontend.v1.HeldPromptBuildRefreshHold
+	34, // 18: frontend.v1.HeldPrompt.merge:type_name -> frontend.v1.HeldPromptMergeHold
+	36, // 19: frontend.v1.HeldPrompt.cold_gate:type_name -> frontend.v1.HeldPromptColdGateHold
+	37, // 20: frontend.v1.HeldPrompt.cold_gate_answered:type_name -> frontend.v1.HeldPromptColdGateAnsweredHold
+	24, // 21: frontend.v1.HeldPrompt.editing:type_name -> frontend.v1.HeldPromptEditing
+	8,  // 22: frontend.v1.HeldPrompt.badge:type_name -> frontend.v1.HeldPromptBadge
+	23, // 23: frontend.v1.HeldPrompt.notes:type_name -> frontend.v1.HeldPromptStatusNote
+	4,  // 24: frontend.v1.HeldPrompt.coalesced:type_name -> frontend.v1.HeldPromptCoalesced
+	5,  // 25: frontend.v1.HeldPrompt.act:type_name -> frontend.v1.HeldSessionAct
+	3,  // 26: frontend.v1.HeldPrompt.fold_above:type_name -> frontend.v1.HeldPromptFoldAbove
+	50, // 27: frontend.v1.HeldPromptFoldAbove.above:type_name -> conversation.v1.TurnId
+	6,  // 28: frontend.v1.HeldSessionAct.model:type_name -> frontend.v1.HeldSessionActModel
+	7,  // 29: frontend.v1.HeldSessionAct.permission_mode:type_name -> frontend.v1.HeldSessionActPermissionMode
+	9,  // 30: frontend.v1.HeldPromptBadge.classifying:type_name -> frontend.v1.HeldPromptBadgeClassifying
+	10, // 31: frontend.v1.HeldPromptBadge.interject:type_name -> frontend.v1.HeldPromptBadgeInterject
+	11, // 32: frontend.v1.HeldPromptBadge.after_tool_call:type_name -> frontend.v1.HeldPromptBadgeAfterToolCall
+	12, // 33: frontend.v1.HeldPromptBadge.hold_for_turn_end:type_name -> frontend.v1.HeldPromptBadgeHoldForTurnEnd
+	13, // 34: frontend.v1.HeldPromptBadge.uninterruptible_turn:type_name -> frontend.v1.HeldPromptBadgeUninterruptibleTurn
+	14, // 35: frontend.v1.HeldPromptBadge.classification_error:type_name -> frontend.v1.HeldPromptBadgeClassificationError
+	15, // 36: frontend.v1.HeldPromptBadge.editing:type_name -> frontend.v1.HeldPromptBadgeEditing
+	16, // 37: frontend.v1.HeldPromptBadge.shutdown:type_name -> frontend.v1.HeldPromptBadgeShutdown
+	17, // 38: frontend.v1.HeldPromptBadge.build_refresh:type_name -> frontend.v1.HeldPromptBadgeBuildRefresh
+	18, // 39: frontend.v1.HeldPromptBadge.reconnect:type_name -> frontend.v1.HeldPromptBadgeReconnect
+	19, // 40: frontend.v1.HeldPromptBadge.merge:type_name -> frontend.v1.HeldPromptBadgeMerge
+	20, // 41: frontend.v1.HeldPromptBadge.cold_gate:type_name -> frontend.v1.HeldPromptBadgeColdGate
+	21, // 42: frontend.v1.HeldPromptBadge.awaiting_delivery:type_name -> frontend.v1.HeldPromptBadgeAwaitingDelivery
+	22, // 43: frontend.v1.HeldPromptBadge.cold_gate_answered:type_name -> frontend.v1.HeldPromptBadgeColdGateAnswered
+	52, // 44: frontend.v1.HeldPromptUninterruptibleTurn.command:type_name -> conversation.v1.SessionCommand
+	51, // 45: frontend.v1.HeldIngressPrompt.said:type_name -> conversation.v1.UserSaid
+	41, // 46: frontend.v1.HeldIngressPrompt.queued_at:type_name -> frontend.v1.HeldIngressPromptQueuedAt
+	42, // 47: frontend.v1.HeldIngressPrompt.badge:type_name -> frontend.v1.HeldIngressPromptBadge
+	43, // 48: frontend.v1.HeldIngressPromptBadge.awaiting_intake:type_name -> frontend.v1.HeldIngressPromptBadgeAwaitingIntake
+	44, // 49: frontend.v1.HeldIngressPromptBadge.no_session:type_name -> frontend.v1.HeldIngressPromptBadgeNoSession
+	45, // 50: frontend.v1.HeldIngressPromptBadge.merge:type_name -> frontend.v1.HeldIngressPromptBadgeMerge
+	46, // 51: frontend.v1.HeldIngressPromptBadge.cold_gate:type_name -> frontend.v1.HeldIngressPromptBadgeColdGate
+	47, // 52: frontend.v1.HeldIngressPromptBadge.moved_away:type_name -> frontend.v1.HeldIngressPromptBadgeMovedAway
+	48, // 53: frontend.v1.HeldIngressPromptBadge.refused:type_name -> frontend.v1.HeldIngressPromptBadgeRefused
+	54, // [54:54] is the sub-list for method output_type
+	54, // [54:54] is the sub-list for method input_type
+	54, // [54:54] is the sub-list for extension type_name
+	54, // [54:54] is the sub-list for extension extendee
+	0,  // [0:54] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_feed_held_proto_init() }
@@ -2815,6 +3413,7 @@ func file_frontend_v1_feed_held_proto_init() {
 	file_frontend_v1_feed_proto_init()
 	file_frontend_v1_feed_held_proto_msgTypes[1].OneofWrappers = []any{
 		(*FeedHeldItem_Prompt)(nil),
+		(*FeedHeldItem_Ingress)(nil),
 	}
 	file_frontend_v1_feed_held_proto_msgTypes[2].OneofWrappers = []any{
 		(*HeldPrompt_Classifying)(nil),
@@ -2852,13 +3451,21 @@ func file_frontend_v1_feed_held_proto_init() {
 		(*HeldPromptBadge_AwaitingDelivery)(nil),
 		(*HeldPromptBadge_ColdGateAnswered)(nil),
 	}
+	file_frontend_v1_feed_held_proto_msgTypes[42].OneofWrappers = []any{
+		(*HeldIngressPromptBadge_AwaitingIntake)(nil),
+		(*HeldIngressPromptBadge_NoSession)(nil),
+		(*HeldIngressPromptBadge_Merge)(nil),
+		(*HeldIngressPromptBadge_ColdGate)(nil),
+		(*HeldIngressPromptBadge_MovedAway)(nil),
+		(*HeldIngressPromptBadge_Refused)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_feed_held_proto_rawDesc), len(file_frontend_v1_feed_held_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   40,
+			NumMessages:   49,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

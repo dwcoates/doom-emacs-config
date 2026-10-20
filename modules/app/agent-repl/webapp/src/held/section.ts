@@ -31,6 +31,14 @@
  * (`installClickExpand`) on its own host, with the same has-more refresh after
  * each toggle.
  *
+ * WHO DRAWS A PROMPT WAITING IN THE HELD-PROMPT INGRESS (feed_held.proto
+ * HeldIngressPrompt). While the root feed is LIVE (an OpenFeed answer applied,
+ * its tail not ended since) the daemon's section is the only source, and it
+ * lists the ingress entries it has not accepted. While the feed is out of
+ * reach the daemon's ingress items are left out of its last section and the
+ * editor's own list is drawn in their place (held/editor-ingress.ts). The one
+ * flag is this page's own, so the two sources are never drawn at once.
+ *
  * A FOLD IS SEEN (owner request, 2026-10-15). A change that folded a held
  * prompt into the entry ahead of it names the fold (WatchFeedHeldChange.folds).
  * The entry folded into flashes once, and the folded prompt's card, when this
@@ -39,7 +47,8 @@
  * no held item: it carries `FOLDING_ATTRIBUTE` instead of the item's id, so
  * no reader of the held entries counts it.
  */
-import type { FeedHeld, FeedHeldItem } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
+import { create } from "@bufbuild/protobuf";
+import { FeedHeldSchema, type FeedHeld, type FeedHeldItem } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import type { WatchFeedHeldFold } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
@@ -47,6 +56,8 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MalformedView } from "../rpc/malformed.js";
 import type { HeldContext } from "./context.js";
 import { drawHeldPrompt } from "./held-prompt.js";
+import { drawEditorIngressEntry, drawHeldIngressPrompt } from "./ingress-prompt.js";
+import type { EditorIngressEntry, EditorIngressView } from "./editor-ingress.js";
 import { ClassifierUpdateForms } from "./classifier-update.js";
 import { childrenMatching, placeChildren, queryAll } from "../dom.js";
 import { installClickExpand } from "../expand.js";
@@ -61,6 +72,8 @@ export interface HeldSectionDeps {
    * feed at its tail and follow (`promptHeld`, scroll.ts).
    */
   promptHeld(turn: string): void;
+  /** The editor's own ingress entries, drawn while the feed is out of reach. */
+  editorIngress: EditorIngressView;
 }
 
 /** The root feed's held section, as the feed drives it. */
@@ -71,8 +84,22 @@ export interface HeldSection {
    * section served whole by OpenFeed.
    */
   apply(section: FeedHeld, folds?: readonly WatchFeedHeldFold[]): void;
+  /**
+   * The root feed was OPENED: SECTION is the daemon's, whole, and the feed is
+   * live from now, so the daemon is the only source of what is held.
+   */
+  opened(section: FeedHeld): void;
+  /**
+   * The root feed's tail ended: the daemon is out of reach until the next
+   * open, so the editor's own ingress entries are drawn in place of the
+   * daemon's.
+   */
+  unreachable(): void;
   dispose(): void;
 }
+
+/** The id prefix of an editor ingress card, which no daemon FeedId carries. */
+export const EDITOR_INGRESS_ID_PREFIX = "editor-ingress:";
 
 /** The section region's class, and its list's. */
 const SECTION_REGION_CLASS = "held-section";
@@ -126,6 +153,8 @@ export function mountHeldSection(host: HTMLElement, ctx: AppContext, deps: HeldS
   /** The section last applied, which a leaving card's departure redraws. */
   let last: FeedHeld | null = null;
   let disposed = false;
+  /** Whether the root feed is live: opened, and its tail not ended since. */
+  let live = false;
 
   /**
    * Take FOLDS in: each folded card this section draws starts leaving, and
@@ -179,9 +208,11 @@ export function mountHeldSection(host: HTMLElement, ctx: AppContext, deps: HeldS
       classifierForms,
     };
     const before = heldTurns(host);
+    const editorBefore = editorKeys(host);
     const current = host.firstElementChild instanceof HTMLElement ? host.firstElementChild : null;
     const intos = startFolds(section, folds);
-    const drawn = drawSection(section, tc, current, leaving);
+    const editor = live ? [] : deps.editorIngress.entries();
+    const drawn = drawSection(live ? section : withoutIngress(section), tc, current, leaving, editor);
     if (current !== null && current !== drawn) stopTicking(current);
     // AN EMPTY SECTION DRAWS NOTHING (owner ruling 3, 2026-09-13), so the host
     // is emptied rather than given a region: `#hold-tray:empty` is what
@@ -202,8 +233,13 @@ export function mountHeldSection(host: HTMLElement, ctx: AppContext, deps: HeldS
       flashFoldedInto(card, into);
     }
     // Only a FIRST draw parks, and only once it is placed; one park covers
-    // every card the push landed, since each parks at the same tail.
-    const landed = heldTurns(host).filter((turn) => !before.includes(turn));
+    // every card the push landed, since each parks at the same tail. An
+    // editor ingress card is the prompt the person just sent while the daemon
+    // was out of reach, so it parks as a held prompt does.
+    const landed = [
+      ...heldTurns(host).filter((turn) => !before.includes(turn)),
+      ...editorKeys(host).filter((key) => !editorBefore.includes(key)),
+    ];
     if (landed.length === 0) return;
     log.debug("a held prompt landed in the held section", {
       operation: "held.held-prompt-landed",
@@ -212,11 +248,39 @@ export function mountHeldSection(host: HTMLElement, ctx: AppContext, deps: HeldS
     deps.promptHeld(landed[landed.length - 1]);
   };
 
+  const redraw = (): void => {
+    apply(last ?? EMPTY_SECTION);
+  };
+  const unsubscribeEditor = deps.editorIngress.subscribe(() => {
+    if (disposed || live) return;
+    redraw();
+  });
+
   return {
     apply,
+    opened(section) {
+      if (!live) {
+        log.info("the root feed opened; the daemon is the held section's only source", {
+          operation: "held.source-daemon",
+          context: { editor_entries: deps.editorIngress.entries().length },
+        });
+      }
+      live = true;
+      apply(section);
+    },
+    unreachable() {
+      if (!live) return;
+      live = false;
+      log.info("the root feed's tail ended; the editor's own ingress entries are drawn until it opens again", {
+        operation: "held.source-editor",
+        context: { editor_entries: deps.editorIngress.entries().length },
+      });
+      redraw();
+    },
     dispose(): void {
       log.debug("disposing the held section", { operation: "held.dispose" });
       disposed = true;
+      unsubscribeEditor();
       leaving.clear();
       clear();
       uninstallExpand();
@@ -242,14 +306,15 @@ export function drawSection(
   tc: HeldContext,
   previous: HTMLElement | null,
   leaving: ReadonlyMap<string, LeavingCard> = new Map(),
+  editor: readonly EditorIngressEntry[] = [],
 ): HTMLElement | null {
   const path = "FeedHeld";
   log.debug("drawing the held section", {
     operation: "held.draw",
-    context: { items: u.items.length, leaving: leaving.size, in_place: previous !== null },
+    context: { items: u.items.length, editor: editor.length, leaving: leaving.size, in_place: previous !== null },
   });
 
-  if (u.items.length === 0 && leaving.size === 0) return null;
+  if (u.items.length === 0 && editor.length === 0 && leaving.size === 0) return null;
 
   // THE PREVIOUS DRAWING IS REUSED, region and list alike, so an item updated
   // in place never leaves the document (see the file header).
@@ -270,6 +335,12 @@ export function drawSection(
   const items = u.items.map((item, index) =>
     drawHeldItem(item, tc, `${path}.items[${index.toString()}]`, cards),
   );
+  for (const entry of editor) {
+    const id = `${EDITOR_INGRESS_ID_PREFIX}${entry.key}`;
+    const card = drawEditorIngressEntry(entry, tc, cards.get(id));
+    card.setAttribute(HELD_ITEM_ATTRIBUTE, id);
+    items.push(card);
+  }
   for (const { card, into } of leaving.values()) {
     const at = items.findIndex((item) => item.getAttribute(HELD_ITEM_ATTRIBUTE) === into);
     if (at === -1) items.push(card);
@@ -289,6 +360,21 @@ function heldCard(host: HTMLElement, id: string): HTMLElement | null {
     if (card.getAttribute(HELD_ITEM_ATTRIBUTE) === id) return card;
   }
   return null;
+}
+
+/** The section with nothing held: what a redraw before any section draws over. */
+const EMPTY_SECTION: FeedHeld = create(FeedHeldSchema, {});
+
+/** SECTION without its ingress items, which the editor's own list replaces. */
+function withoutIngress(section: FeedHeld): FeedHeld {
+  return create(FeedHeldSchema, { items: section.items.filter((item) => item.item.case !== "ingress") });
+}
+
+/** The keys of every editor ingress card HOST currently holds, in order. */
+function editorKeys(host: HTMLElement): string[] {
+  return [...queryAll(host, `.${SECTION_LIST_CLASS} > [${HELD_ITEM_ATTRIBUTE}^="${EDITOR_INGRESS_ID_PREFIX}"]`)].map(
+    (card) => (card.getAttribute(HELD_ITEM_ATTRIBUTE) ?? "").slice(EDITOR_INGRESS_ID_PREFIX.length),
+  );
 }
 
 /**
@@ -328,6 +414,9 @@ export function drawHeldItem(
     case "prompt":
       // This item's card from the last drawing, updated in place.
       element = drawHeldPrompt(item.value, tc, cards.get(id.value));
+      break;
+    case "ingress":
+      element = drawHeldIngressPrompt(item.value, tc, cards.get(id.value));
       break;
     default: {
       const other: { case: string } = item;

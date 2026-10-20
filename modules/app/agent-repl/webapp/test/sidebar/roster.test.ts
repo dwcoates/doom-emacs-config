@@ -285,7 +285,7 @@ describe("a section holding the current workspace never collapses", () => {
     );
 
     // Act
-    await click(drawn.querySelectorAll(".sb-subsection [data-section-fold]")[1] as Element);
+    await click(drawn.querySelectorAll(".sb-subsection [data-section-fold]")[1]);
 
     // Assert
     const change = asked[0]?.change;

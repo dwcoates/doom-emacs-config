@@ -2729,6 +2729,23 @@ export const heldPromptItem = (init?: Parameters<typeof heldPrompt>[0]): HeldIte
   item: { case: "prompt", value: heldPrompt(init) },
 });
 
+/** The arms an ingress prompt's badge can stand for. */
+export const INGRESS_BADGE_ARMS = ["awaitingIntake", "noSession", "merge", "coldGate", "movedAway", "refused"] as const;
+export type IngressBadgeArm = (typeof INGRESS_BADGE_ARMS)[number];
+
+/** A held item for an unaccepted ingress entry under KEY, its badge standing for ARM. */
+export const heldIngressItem = (init?: { key?: string; arm?: IngressBadgeArm; text?: string }): HeldItemInit => ({
+  id: { value: `held:ingress:${init?.key ?? "k-1"}` },
+  item: {
+    case: "ingress",
+    value: {
+      said: { content: { blocks: [{ block: { case: "text", value: { text: init?.text ?? "sent while the daemon was down" } } }] } },
+      queuedAt: { atMs: 0n },
+      badge: { label: `badge ${init?.arm ?? "noSession"}`, standsFor: { case: init?.arm ?? "noSession", value: {} } },
+    },
+  },
+});
+
 export function heldSection(init?: { items?: HeldItemInit[] }): FeedHeld {
   return create(FeedHeldSchema, {
     items: init?.items ?? [heldPromptItem()],

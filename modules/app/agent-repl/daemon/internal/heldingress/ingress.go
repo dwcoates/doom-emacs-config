@@ -13,9 +13,11 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/flock"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/intakegate"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
 )
 
@@ -40,6 +42,9 @@ type retry struct {
 	// recorded names every kind of refusal this entry was already recorded
 	// under. A kind is stated once at its own level; its repeats are DEBUG.
 	recorded map[string]bool
+	// wait is what the entry's last refusal says it waits on, drawn on its
+	// held-section card until the next attempt answers otherwise.
+	wait holds.IngressWait
 }
 
 // The kinds of deferral an entry can meet. Each is recorded at its own level
@@ -68,6 +73,10 @@ type ingress struct {
 	retries map[string]retry
 	// gate answers whether this daemon takes the intake at all.
 	gate *intakegate.Gate
+	// stated names the workspaces whose unaccepted entries the last sweep
+	// stated to the held section, so a sweep that finds none of a workspace's
+	// entries left states the empty list once.
+	stated map[ids.WorkspaceID]bool
 }
 
 func removeFile(path string) error { return os.Remove(path) }
@@ -147,25 +156,85 @@ func (i *ingress) Sweep(ctx context.Context) error {
 	}
 	sort.Strings(matches)
 	present := make(map[string]bool, len(matches))
-	waiting := map[string]bool{}
+	sw := &sweep{waiting: map[string]bool{}, lookups: map[string]lookup{}, pending: map[ids.WorkspaceID][]holds.IngressEntry{}}
 	for _, path := range matches {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		present[path] = true
-		i.ingest(ctx, path, waiting)
+		i.ingest(ctx, path, sw)
 	}
 	for path := range i.retries {
 		if !present[path] {
 			delete(i.retries, path)
 		}
 	}
+	i.statePending(sw.pending)
 	return nil
 }
 
-// ingest handles one entry file. waiting names the project directories with an
-// entry left for a later sweep in this one.
-func (i *ingress) ingest(ctx context.Context, path string, waiting map[string]bool) {
+// sweep is one sweep's working state.
+type sweep struct {
+	// waiting names the project directories with an entry left for a later
+	// sweep in this one.
+	waiting map[string]bool
+	// lookups are this sweep's workspace lookups, by project directory, so a
+	// workspace's entries are resolved once per sweep.
+	lookups map[string]lookup
+	// pending are the entries this sweep left unaccepted, by workspace, in
+	// name order.
+	pending map[ids.WorkspaceID][]holds.IngressEntry
+}
+
+// lookup is one project directory's workspace lookup.
+type lookup struct {
+	record wsm.Workspace
+	err    error
+}
+
+// workspaceOf resolves DIR's workspace once per sweep.
+func (i *ingress) workspaceOf(ctx context.Context, sw *sweep, dir string) (wsm.Workspace, error) {
+	if got, ok := sw.lookups[dir]; ok {
+		return got.record, got.err
+	}
+	record, err := i.deps.WorkspaceByDir(ctx, dir)
+	sw.lookups[dir] = lookup{record: record, err: err}
+	return record, err
+}
+
+// statePending tells the held section every workspace's unaccepted entries:
+// each workspace this sweep left an entry of, and once more, empty, each one
+// the previous sweep stated and this one left none of.
+func (i *ingress) statePending(pending map[ids.WorkspaceID][]holds.IngressEntry) {
+	for ws, entries := range pending {
+		i.deps.Pending.SetIngressPending(ws, entries)
+	}
+	for ws := range i.stated {
+		if _, still := pending[ws]; !still {
+			i.deps.Pending.SetIngressPending(ws, nil)
+		}
+	}
+	i.stated = make(map[ids.WorkspaceID]bool, len(pending))
+	for ws := range pending {
+		i.stated[ws] = true
+	}
+}
+
+// leavePending records that ENTRY of workspace WS stays for a later sweep,
+// waiting on WAIT.
+func leavePending(sw *sweep, ws ids.WorkspaceID, entry decoded, wait holds.IngressWait) {
+	sw.pending[ws] = append(sw.pending[ws], holds.IngressEntry{
+		Key: entry.IdempotencyKey, Said: entry.said, QueuedAt: entry.queuedAt, Wait: wait,
+	})
+}
+
+// behindEarlier is the wait of an entry left because an earlier entry of its
+// workspace is still waiting.
+var behindEarlier = holds.IngressWait{Kind: holds.IngressAwaitingIntake, Detail: "waits behind an earlier prompt of this workspace"}
+
+// ingest handles one entry file. An entry of a registered workspace that the
+// queue does not accept in this sweep is left in SW's pending entries.
+func (i *ingress) ingest(ctx context.Context, path string, sw *sweep) {
 	log := i.deps.Log.Global().With(dlog.Context{"path": path})
 	data, err := os.ReadFile(path)
 	switch {
@@ -185,24 +254,30 @@ func (i *ingress) ingest(ctx context.Context, path string, waiting map[string]bo
 	}
 	dir := entry.ProjectDir
 	log = log.With(dlog.Context{"project_dir": dir, "idempotency_key": entry.IdempotencyKey})
-	if waiting[dir] {
+	record, lookupErr := i.workspaceOf(ctx, sw, dir)
+	if sw.waiting[dir] {
 		log.Debug(opDefer, "an earlier entry for this workspace is still waiting, so this one waits behind it", nil)
+		if lookupErr == nil {
+			leavePending(sw, record.ID, entry, behindEarlier)
+		}
 		return
 	}
 	if standing, ok := i.retries[path]; ok && i.deps.Now().Before(standing.next) {
-		waiting[dir] = true
+		sw.waiting[dir] = true
 		log.Debug(opDefer, "the entry's retry is not due yet", dlog.Context{"next": standing.next.Format(time.RFC3339Nano)})
+		if lookupErr == nil {
+			leavePending(sw, record.ID, entry, standing.wait)
+		}
 		return
 	}
 
-	record, err := i.deps.WorkspaceByDir(ctx, dir)
-	if err != nil {
-		waiting[dir] = true
+	if lookupErr != nil {
+		sw.waiting[dir] = true
 		level, kind := log.Error, kindLookupFailed
-		if errors.Is(err, wsm.ErrNotFound) {
+		if errors.Is(lookupErr, wsm.ErrNotFound) {
 			level, kind = log.Warn, kindUnregistered
 		}
-		i.deferEntry(log, level, path, kind, "no workspace is registered at the entry's directory", err)
+		i.deferEntry(log, level, path, kind, "no workspace is registered at the entry's directory", lookupErr)
 		return
 	}
 	wlog := i.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{
@@ -216,13 +291,14 @@ func (i *ingress) ingest(ctx context.Context, path string, waiting map[string]bo
 	case errors.Is(err, prompthandler.ErrDuplicateSubmission):
 		wlog.Info(opDedupe, "the held prompt was already accepted under its idempotency key, so it is not delivered twice", nil)
 	case err != nil:
-		waiting[dir] = true
+		sw.waiting[dir] = true
 		kind := refusalKind(err)
 		level := wlog.Error
 		if kind != kindFault {
 			level = wlog.Info
 		}
 		i.deferEntry(wlog, level, path, kind, "the queue did not accept the held prompt; it stays for a later sweep", err)
+		leavePending(sw, record.ID, entry, i.retries[path].wait)
 		return
 	default:
 		wlog.Info(opIngest, "ingested a held prompt into the queue", dlog.Context{
@@ -236,6 +312,9 @@ func (i *ingress) ingest(ctx context.Context, path string, waiting map[string]bo
 		})
 	}
 	delete(i.retries, path)
+	// The queue answered the entry, so the held section stops drawing it now
+	// rather than at the end of the sweep.
+	i.deps.Pending.DropIngress(record.ID, entry.IdempotencyKey)
 	if err := i.deps.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		// The prompt IS in the queue. The file left behind is resubmitted by
 		// the next sweep under the same key and answered as a duplicate, so
@@ -243,6 +322,25 @@ func (i *ingress) ingest(ctx context.Context, path string, waiting map[string]bo
 		wlog.Error(opRemove, "could not remove an ingested held-prompt entry", dlog.Context{"cause": err.Error()})
 	}
 	i.deps.PublishHost(record.ID)
+}
+
+// waitOf is what an entry the queue refused under KIND waits on, as its card
+// draws it.
+func waitOf(kind string) holds.IngressWait {
+	switch kind {
+	case kindNoSession:
+		return holds.IngressWait{Kind: holds.IngressNoSession}
+	case kindMerging:
+		return holds.IngressWait{Kind: holds.IngressMerge}
+	case kindColdGate:
+		return holds.IngressWait{Kind: holds.IngressColdGate}
+	case kindMovedAway:
+		return holds.IngressWait{Kind: holds.IngressMovedAway}
+	case kindFault:
+		return holds.IngressWait{Kind: holds.IngressRefused, Detail: "the daemon could not queue this prompt and keeps trying"}
+	}
+	// The lookup kinds name no workspace, so no card is drawn for them.
+	return holds.IngressWait{Kind: holds.IngressAwaitingIntake}
 }
 
 // refusalKind names the queue's ANSWER about a standing condition — a merge
@@ -280,6 +378,7 @@ func (i *ingress) deferEntry(log dlog.Logger, level func(string, string, dlog.Co
 		delay = i.deps.RetryCeiling
 	}
 	standing.next = i.deps.Now().Add(delay)
+	standing.wait = waitOf(kind)
 	first := !standing.recorded[kind]
 	if first {
 		if standing.recorded == nil {

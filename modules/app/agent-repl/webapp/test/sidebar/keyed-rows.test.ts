@@ -41,14 +41,14 @@ describe("keyed rows", () => {
     const kept: KeyedRows = { entries: [] };
     const numbered = (n: number) => ({ tab: { case: "numbered" as const, value: { number: n } } });
     const first = rows(row({ id: "a", children: [row({ id: "a1" })] }), row({ id: "b" }));
-    first.rows[0]!.tab = create(RosterOpenRowTabSchema, numbered(1));
-    first.rows[0]!.children[0]!.tab = create(RosterOpenRowTabSchema, numbered(2));
-    first.rows[1]!.tab = create(RosterOpenRowTabSchema, numbered(3));
+    first.rows[0].tab = create(RosterOpenRowTabSchema, numbered(1));
+    first.rows[0].children[0].tab = create(RosterOpenRowTabSchema, numbered(2));
+    first.rows[1].tab = create(RosterOpenRowTabSchema, numbered(3));
     const box = drawKeyedRows(first, rail, "r", "grouping", kept);
     const before = ["a", "a1", "b"].map((id) => elementOf(box, id));
     const next = rows(row({ id: "a", children: [row({ id: "a1" })] }), row({ id: "b" }));
-    next.rows[0]!.tab = create(RosterOpenRowTabSchema, numbered(4));
-    next.rows[0]!.children[0]!.tab = create(RosterOpenRowTabSchema, numbered(5));
+    next.rows[0].tab = create(RosterOpenRowTabSchema, numbered(4));
+    next.rows[0].children[0].tab = create(RosterOpenRowTabSchema, numbered(5));
 
     // Act
     const patched = patchKeyedRows(kept, next, rail, "r", "grouping");
