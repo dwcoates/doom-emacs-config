@@ -71,6 +71,7 @@ import { drawFeedResponse } from "../../src/feed/cards/response.js";
 import { resetLoggingForTests } from "../../src/log.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { createPresence } from "../../src/presence.js";
+import { boxRect } from "../dom-rect.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -95,17 +96,7 @@ function mount(h: Harness = harness(), clickZones?: readonly HTMLElement[]) {
 }
 
 /** A viewport rect at TOP, HEIGHT tall, since jsdom lays out nothing. */
-const domRect = (top: number, height: number) => (): DOMRect => ({
-  top,
-  height,
-  bottom: top + height,
-  left: 0,
-  right: 0,
-  width: 0,
-  x: 0,
-  y: top,
-  toJSON: () => ({}),
-});
+const domRect = (top: number, height: number) => (): DOMRect => boxRect({ top, height });
 
 /**
  * Script the feed's scroll box as a 300px viewport at the page's top over

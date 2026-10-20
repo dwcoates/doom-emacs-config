@@ -44,6 +44,7 @@ import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-captu
 import { fireResize } from "./resize-observer.js";
 import { expandedSectionAt, installClickExpand } from "../src/expand.js";
 import { frameQueue } from "./frame-queue.js";
+import { boxRect } from "./dom-rect.js";
 
 /** An `ExpandedSectionAt` for a feed with no open section. */
 const noneOpen = (): HTMLElement | null => null;
@@ -1529,8 +1530,7 @@ describe("TailFollow's latest-visible latch", () => {
 describe("revealGeometry", () => {
   it("reads the box and the node off their live rects", () => {
     // Arrange — jsdom lays nothing out, so each rect is scripted.
-    const rect = (top: number, height: number): (() => DOMRect) => () =>
-      ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
+    const rect = (top: number, height: number): (() => DOMRect) => () => boxRect({ top, height });
     const box = document.createElement("div");
     const node = document.createElement("div");
     box.getBoundingClientRect = rect(40, 300);

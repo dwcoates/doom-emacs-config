@@ -31,6 +31,7 @@ import {
   responseRow,
   subagentUnit,
 } from "./fixtures";
+import { boxRect } from "../dom-rect.js";
 
 let harness: Harness;
 
@@ -48,17 +49,7 @@ const CONTENT_HEIGHT = 1000;
 
 /** A DOMRect, as far as the reveal reads one. */
 function rect(top: number, height: number): DOMRect {
-  return {
-    top,
-    height,
-    bottom: top + height,
-    left: 0,
-    right: 0,
-    width: 0,
-    x: 0,
-    y: top,
-    toJSON: () => ({}),
-  };
+  return boxRect({ top, height });
 }
 
 /**

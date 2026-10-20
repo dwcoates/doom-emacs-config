@@ -56,6 +56,7 @@ import { createSidebarView } from "../../src/sidebar/view.js";
 import { SELECTION_NUMBER_RISE, SELECTION_NUMBER_RISE_MS, createSelectionFade } from "../../src/sidebar/selection-fade.js";
 import stylesheet from "../../src/styles.css?raw";
 import { cascadedValue, inRail, rulesOf } from "../stylesheet.js";
+import { boxRect } from "../dom-rect.js";
 
 /** The markup the DOM holds once glyph NAME's shared picture is drawn into a mark. */
 function drawnPicture(name: string): string {
@@ -1669,18 +1670,7 @@ describe("the detail panel leaves the rail and stays inside the window", () => {
   const rects = new Map<Element, DOMRect>();
   let original: typeof Element.prototype.getBoundingClientRect;
 
-  const rect = (init: { left: number; top: number; width: number; height: number }): DOMRect =>
-    ({
-      left: init.left,
-      top: init.top,
-      right: init.left + init.width,
-      bottom: init.top + init.height,
-      width: init.width,
-      height: init.height,
-      x: init.left,
-      y: init.top,
-      toJSON: () => ({}),
-    });
+  const rect = boxRect;
 
   beforeEach(() => {
     rects.clear();

@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { listAt, swallowTheNextClick } from "../../src/sidebar/drag.js";
 import { settleOwedDragClick } from "./harness.js";
+import { boxRect } from "../dom-rect.js";
 
 /** A second window, in an iframe of this page. */
 function otherWindow(): Window {
@@ -77,7 +78,7 @@ describe("the click guard", () => {
 function spanning(top: number, bottom: number): HTMLElement {
   const el = document.createElement("div");
   Object.defineProperty(el, "getBoundingClientRect", {
-    value: () => ({ top, bottom, height: bottom - top, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) }),
+    value: () => boxRect({ top, height: bottom - top, width: 100 }),
   });
   return el;
 }

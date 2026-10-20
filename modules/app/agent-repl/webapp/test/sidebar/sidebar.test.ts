@@ -49,6 +49,7 @@ import { MERGED_DRAWN_AT_ONCE } from "../../src/sidebar/roster.js";
 import { STAND_IN_ATTRIBUTE } from "../../src/sidebar/row.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { recordingFailures } from "../failure-sink.js";
+import { boxRect } from "../dom-rect.js";
 
 /** A storage a test can inspect, and one that throws on every access. */
 function memoryStorage(seed: Record<string, string> = {}): Storage {
@@ -769,18 +770,7 @@ describe("an open row's detail panel, placed by the rail", () => {
   let original: typeof Element.prototype.getBoundingClientRect;
   const rects = new Map<Element, DOMRect>();
 
-  const rect = (init: { left: number; top: number; width: number; height: number }): DOMRect =>
-    ({
-      left: init.left,
-      top: init.top,
-      right: init.left + init.width,
-      bottom: init.top + init.height,
-      width: init.width,
-      height: init.height,
-      x: init.left,
-      y: init.top,
-      toJSON: () => ({}),
-    });
+  const rect = boxRect;
 
   beforeEach(() => {
     rects.clear();
@@ -1501,8 +1491,7 @@ function layOpenSection(host: HTMLElement): { scrollTop(): number } {
   const LINE = 20;
   const offsets = new WeakMap<Element, number>();
   const regionOf = (el: Element): HTMLElement | null => el.closest<HTMLElement>(".sb-sections");
-  const rect = (top: number, height: number): DOMRect =>
-    ({ top, bottom: top + height, height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  const rect = (top: number, height: number): DOMRect => boxRect({ top, height });
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     if (this.classList.contains("sb-sections")) return rect(0, 2 * LINE);
     const region = regionOf(this);

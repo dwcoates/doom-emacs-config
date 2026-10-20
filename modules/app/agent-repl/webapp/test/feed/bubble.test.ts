@@ -36,6 +36,7 @@ import { TailFollow } from "../../src/scroll.js";
 import { DEFAULT_BACKOFF_INITIAL_MS, DEFAULT_BACKOFF_MAX_MS } from "../../src/rpc/streams.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { orderFor } from "../feed-order.js";
+import { boxRect } from "../dom-rect.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -1621,8 +1622,7 @@ describe("mountBubble: the caret's own view rule", () => {
 
   /** A DOMRect, as far as a reveal reads one. */
   function rect(top: number, height: number): DOMRect {
-    return { top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top,
-      toJSON: () => ({}) };
+    return boxRect({ top, height });
   }
 
   /** Click the caret and let the open settle. */
@@ -1885,7 +1885,7 @@ describe("mountBubble: the reader's fold asks the feed to bring a last bubble in
 describe("mountBubble: a collapse moves nothing the reader is looking at", () => {
   /** A rect, scripted since jsdom lays nothing out. */
   const rect = (top: number, height: number) => (): DOMRect =>
-    ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
+    boxRect({ top, height });
 
   /** Expand a bubble on a scroll box scrolled to 1000, its sub-feed at SUBTOP. */
   async function expandedAt(subTop: number, subHeight: number) {

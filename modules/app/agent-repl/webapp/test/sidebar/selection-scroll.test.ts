@@ -9,11 +9,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { resetLoggingForTests } from "../../src/log.js";
 import { createSelectionScroll, scrollLineIntoBand } from "../../src/sidebar/selection-scroll.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { boxRect } from "../dom-rect.js";
 
 const ROW = 20;
 
 function rect(top: number, height: number): DOMRect {
-  return { top, bottom: top + height, height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+  return boxRect({ top, height });
 }
 
 /** A band of LINES rows (ids `ws-0`..), VIEW lines tall, CLS its section, CURRENT the highlighted ids. */
