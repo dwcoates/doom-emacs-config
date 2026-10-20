@@ -157,7 +157,7 @@ describe("shim runtime logging", () => {
       mockedWriteSync.mockImplementation(((...args: unknown[]) => {
         now += log.SLOW_SYNC_WRITE_MS + 50;
         return args[3] as number;
-      }) as typeof writeSync);
+      }));
       const before = logSinkMark();
 
       // Act.
