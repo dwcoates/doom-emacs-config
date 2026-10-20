@@ -241,7 +241,6 @@ owner's delegation.
   they travel different streams; both waits are bounded.
 - Decided under the owner's delegation; additive, so no consumer breaks.
 
-
 ### 9. Emacs reports its startup milestones in the latency batch
 
 - What:
@@ -256,3 +255,12 @@ owner's delegation.
   - `ReportLatenciesRecorded.recorded` keeps counting latencies only, since a milestone names no workspace and is never dropped.
   - The daemon's `server.LatencyRecorder` gains the restart recorder, and Emacs gains its first `ReportLatencies` client (call 8 said Emacs reports nothing yet; that call is superseded for the startup).
 - Decided under the owner's delegation; additive, so no consumer breaks.
+
+### 10. Emacs states its pid on its WatchDaemon stream
+
+- What: `agentrepl.v1.WatchDaemonEmacs` gains `optional EditorProcess process = 4`, carrying the pid of the Emacs that holds the stream.
+- Why: the process collector found Emacs as the macOS responsible process of the daemon itself, which holds only while the daemon is one this Emacs spawned. A daemon outlives Emacs (deploys hand it to successors, and Emacs restarts link to the running one), so from the first Emacs restart on the `emacs` and `webkit_*` groups reported nothing (observed 2026-10-20: silent from 14:59 UTC, the Emacs relaunched at 15:36 UTC).
+- Why on the stream: the daemon already scopes Emacs's facts to its WatchDaemon stream (its focus), so the measured Emacs is the one connected, released when the stream ends, and a reconnect supersedes it (`streamslot.Slot`, shared with the focus).
+- Why optional and not refused when absent: the field is metrics only, and refusing a stream from an Emacs whose elisp predates it would shut that Emacs out of the daemon that must push it the reload.
+- Consequences: the daemon's process collector reads the pid from the server's stream-scoped holder instead of its own ancestry, and Emacs sends `(emacs-pid)`.
+- Decided under the owner's delegation; additive.

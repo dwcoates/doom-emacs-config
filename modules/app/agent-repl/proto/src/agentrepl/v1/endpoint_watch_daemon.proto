@@ -63,12 +63,28 @@ message WatchDaemonEmacs {
   // without it is refused. The daemon uses a new value to redisplay the day's
   // news digest even if it was dismissed.
   EditorInstance instance = 3;
+  // THE OPERATING-SYSTEM PROCESS THAT HOLDS THIS STREAM, so the daemon's
+  // process metrics measure this Emacs and the WebKit processes it is
+  // responsible for (the `emacs` and `webkit_*` groups) for as long as the
+  // stream stands. The daemon cannot find it from its own ancestry: a daemon
+  // outlives the Emacs that spawned it, and a restarted Emacs links to it.
+  // OPTIONAL: an Emacs whose elisp predates the field connects without it and
+  // is simply not measured, never refused, so a rolling deploy can never shut
+  // an Emacs out of its daemon.
+  optional EditorProcess process = 4;
 }
 
 // One Emacs process's identity.
 message EditorInstance {
   // Opaque, minted by Emacs at startup.
   string value = 1;
+}
+
+// The operating-system process an Emacs runs as.
+message EditorProcess {
+  // Its pid on the daemon's host, which is Emacs's host: Emacs only ever
+  // dials a daemon on loopback. Positive; anything else is InvalidArgument.
+  int32 pid = 1;
 }
 
 // A webview is connecting. Presence is the fact: a webview reports its build
