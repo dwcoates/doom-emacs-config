@@ -1015,6 +1015,38 @@ A hand-rolled list decoder would skip the shared helper and fail here."
            #'agent-repl-wire-decode-roster-subsection-expanded
            "{\"collapsible\":{},\"pinned\":{}}")))
 
+;;;; ---- The shared expanded-fold decoder ----
+
+(ert-deftest agent-repl-test-wire-roster-expanded-collapse-hands-each-arm-its-decoder ()
+  "Each set arm is decoded by the decoder handed for it, under its keyword."
+  (should (equal (list (agent-repl-test-wire-roster--decode
+                        (lambda (v) (agent-repl-wire--decode-expanded-collapse
+                                     "Probe" v (lambda (_) 'c) (lambda (_) 'h)))
+                        "{\"collapsible\":{}}")
+                       (agent-repl-test-wire-roster--decode
+                        (lambda (v) (agent-repl-wire--decode-expanded-collapse
+                                     "Probe" v (lambda (_) 'c) (lambda (_) 'h)))
+                        "{\"holdsCurrent\":{}}"))
+                 '((:collapse (:arm :collapsible :value c))
+                   (:collapse (:arm :holds-current :value h))))))
+
+(ert-deftest agent-repl-test-wire-roster-expanded-collapse-names-its-message-in-a-breach ()
+  "A breach names the message the helper was handed."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  (lambda (v) (agent-repl-wire--decode-expanded-collapse "Probe" v #'ignore #'ignore))
+                  "{}")
+                 '("Probe" collapse "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-every-expanded-fold-decodes-through-the-helper ()
+  "Both expanded folds share the one decoder, so neither can drift."
+  (let (names)
+    (cl-letf* ((shared (symbol-function 'agent-repl-wire--decode-expanded-collapse))
+               ((symbol-function 'agent-repl-wire--decode-expanded-collapse)
+                (lambda (name &rest args) (push name names) (apply shared name args))))
+      (agent-repl-test-wire-roster--decode #'agent-repl-wire-decode-roster-repo-section-expanded "{\"collapsible\":{}}")
+      (agent-repl-test-wire-roster--decode #'agent-repl-wire-decode-roster-subsection-expanded "{\"collapsible\":{}}"))
+    (should (equal (nreverse names) '("RosterRepoSectionExpanded" "RosterSubsectionExpanded")))))
+
 ;;;; ---- Repository divergence ----
 
 (defconst agent-repl-test-wire-roster--section-without-divergence
