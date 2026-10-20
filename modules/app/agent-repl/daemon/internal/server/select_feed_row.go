@@ -310,7 +310,26 @@ func (s *server) selectBubble(log dlog.Logger, ws ids.WorkspaceID, row *frontend
 		return nil, true, err
 	}
 	log.Info(opSelectFeedRow, "selected a clicked bubble", dlog.Context{"kind": kind.String(), "row": row.GetValue()})
+	if kind == selectionResponse {
+		s.finalResponseClicked(log, ws, row)
+	}
 	return selectedSuccess(sel), true, nil
+}
+
+// finalResponseClicked pushes final_response_clicked onto the workspace's host
+// stream: the reader's click selected a final response, the one the next
+// prompt replies to, so Emacs puts the keyboard in the composer in insert
+// state. It rides the host EVENT stream, never a topic, because a topic
+// replays its latest value to a late subscriber and a reconnect would focus
+// the composer again for a click made long before.
+func (s *server) finalResponseClicked(log dlog.Logger, ws ids.WorkspaceID, row *frontendv1.FeedId) {
+	log.Info(opSelectFeedRow, "a click selected a final response; asked the host to focus the composer",
+		dlog.Context{"row": row.GetValue()})
+	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_FinalResponseClicked{
+			FinalResponseClicked: &agentreplv1.HostWorkspaceFinalResponseClicked{},
+		},
+	})
 }
 
 // stepIndex is the index a step lands on among N rows (oldest first) from AT,

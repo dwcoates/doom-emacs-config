@@ -131,6 +131,7 @@
 (declare-function agent-repl-held-ingress-write "held-ingress" (ws said origin key &optional delivery))
 (declare-function agent-repl--kickoff-prompt-summary "agent-repl-prompt-summary" (ws raw))
 (declare-function evil-insert-state "evil" (&optional arg))
+(declare-function agent-repl-window--panel-window "window" (kind &optional ws frame))
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
 (declare-function agent-repl-bind-feed-zoom-keys "core" (map))
 (declare-function evil-normalize-keymaps "evil-core" (&optional state))
@@ -671,6 +672,24 @@ the selection.  A workspace with no composer has nothing to follow."
         (when (fboundp 'evil-normalize-keymaps) (evil-normalize-keymaps))))
     (when active
       (agent-repl--response-view-refresh ws (agent-repl-host-selection-markdown ws)))))
+
+(defun agent-repl-input-focus-for-reply (ws)
+  "Select WS's composer window in insert state, to type a reply.
+Called when the reader's click in the webview selected a final response
+\(the host watch's `final_response_clicked').  Only a composer already on
+the selected frame is focused: a gated workspace has none, and mounting
+panels from a click would move the layout, so either is recorded and left
+alone.  Returns the composer window when it took the keyboard, else nil."
+  (let ((win (agent-repl-window--panel-window :input ws)))
+    (if (not win)
+        (progn
+          (agent-repl--info ws "elisp.input.focus-for-reply ws=%s outcome=no-composer-window" ws)
+          nil)
+      (select-window win)
+      (with-current-buffer (window-buffer win)
+        (when (fboundp 'evil-insert-state) (evil-insert-state)))
+      (agent-repl--info ws "elisp.input.focus-for-reply ws=%s outcome=focused window=%S" ws win)
+      win)))
 
 ;;;; ---- The response view: the selected bubble, searched with real Evil ----
 

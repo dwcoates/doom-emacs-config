@@ -90,7 +90,7 @@
 (defvar agent-repl-roster-following)
 
 (declare-function agent-repl--notification-activate "notifications" (ws))
-(declare-function agent-repl--notification-activate "notifications" (ws))
+(declare-function agent-repl-input-focus-for-reply "input" (ws))
 
 ;; W2-B's surfaces.  NAMED HERE, NEVER DEFINED HERE: status.el owns the
 ;; blink (whose cadence is frontend.v1 `RosterRowAttention''s), frontend.el
@@ -1240,6 +1240,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:host (agent-repl-host--apply-state ws value))
     (:notification-clicked (agent-repl-host--notification-clicked ws))
     (:selection (agent-repl-host--apply-selection ws value))
+    (:final-response-clicked (agent-repl-host--final-response-clicked ws))
     (:transferred (agent-repl-host--transferred ws value))
     (:reload-webapp (agent-repl-host--reload-webapp ws value))
     (:open-in-editor (agent-repl-host--open-in-editor ws value))
@@ -1336,6 +1337,17 @@ nothing selected."
   "Return the text of the bubble WS's feed has selected, or nil.
 Nil exactly while nothing is selected (or no push has arrived yet)."
   (plist-get (agent-repl-host--entry ws) :selection-markdown))
+
+;;;; ---- The final-response click ----
+
+(defun agent-repl-host--final-response-clicked (ws)
+  "Focus WS's composer: the reader clicked a final response in its webview.
+The click selected the response, so the next prompt replies to it; the
+keyboard is still in the webview, and the composer takes it in insert
+state (`agent-repl-input-focus-for-reply').  An event, never replayed, so
+a reconnect never moves the keyboard."
+  (agent-repl--info ws "elisp.host.final-response-clicked ws=%s" ws)
+  (agent-repl-input-focus-for-reply ws))
 
 ;;;; ---- The notification click ----
 

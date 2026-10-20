@@ -346,7 +346,8 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"openCommitLog\":{\"repositoryDir\":\"/r\",\"branch\":\"master\",\"commit\":\"abc\"}}"
                             :open-commit-log)
                       (list "{\"selection\":{\"none\":{}}}" :selection)
-                      (list "{\"evaluate\":{\"token\":{\"value\":\"t-1\"},\"text\":\"(+ 1 2)\"}}" :evaluate)))
+                      (list "{\"evaluate\":{\"token\":{\"value\":\"t-1\"},\"text\":\"(+ 1 2)\"}}" :evaluate)
+                      (list "{\"finalResponseClicked\":{}}" :final-response-clicked)))
     (should (equal (plist-get (agent-repl-test-wire-host--decode
                                #'agent-repl-wire-decode-watch-host-workspace-response
                                (nth 0 case))
@@ -610,6 +611,22 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                         "HostWorkspaceSelection")
                        #'string<)
                  '("bubble" "none" "prompt" "response"))))
+
+;;;; ---- The final-response click push ----
+
+(ert-deftest agent-repl-test-wire-host-final-response-clicked-decodes-empty ()
+  "The click push is empty: presence is the fact, and the stream names the workspace."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-host-workspace-response
+                  "{\"finalResponseClicked\":{}}")
+                 '(:arm :final-response-clicked :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-final-response-clicked-refuses-a-field ()
+  "A field on the empty click message is refused, not ignored."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-final-response-clicked
+                  "{\"row\":\"r\"}")
+                 '("HostWorkspaceFinalResponseClicked" row "unknown field"))))
 
 ;;;; ---- The notification click push ----
 
@@ -1475,7 +1492,8 @@ opens are OpenTabs streams."
                         "WatchHostWorkspaceResponse")
                        #'string<)
                  (sort (list "evaluate" "host" "transferred" "reloadWebapp"
-                             "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection")
+                             "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection"
+                             "finalResponseClicked")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()
