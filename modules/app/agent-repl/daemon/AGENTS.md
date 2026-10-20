@@ -1832,6 +1832,13 @@ ERROR: nothing is handed over or restarted on a guess.
   them (the file is copied aside first, as every migration is), closes it, and
   opens read-only. The incumbent keeps serving across the step, because its
   statements name their columns.
+- **Only the newest pre-migration copy is kept, and only for three days.**
+  Every writing or joining open that succeeds removes every
+  `wsm.db.layout<N>.bak-<date>` copy but the newest, and the newest too once it
+  is `wsm.MigrationCopyRetention` old (`internal/wsm/migrationcopies.go`): an
+  older copy predates a migration that already succeeded, and a stale one
+  would throw away days of state. A refused open removes nothing, since its
+  refusal names the copy.
 - **A breaking step, or an older fresh layout, goes to
   `rollout.Controller.Restart`** (`deploy.RestartingAcrossLayout`; shim and
   webapp deferred to the replacement). A handed-over successor could not make

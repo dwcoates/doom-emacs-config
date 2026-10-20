@@ -211,6 +211,7 @@ func (s *store) finishWritingOpen(ctx context.Context, load func(context.Context
 		s.db().Close()
 		return nil, err
 	}
+	pruneMigrationCopies(s.path, time.Now(), s.log)
 	// THE BOOT-TIME INVARIANT CHECK. The schema and the foreign_keys pragma
 	// above make a workspace whose repository is unregistered impossible to
 	// WRITE; this reports one that was already there, which only a handle
@@ -269,7 +270,12 @@ func OpenJoining(ctx context.Context, path string, opts ...Option) (DB, error) {
 	if err := migrateAdditiveWhileJoining(ctx, path, opts); err != nil {
 		return nil, err
 	}
-	return OpenReadOnly(ctx, path, opts...)
+	db, err := OpenReadOnly(ctx, path, opts...)
+	if err != nil {
+		return nil, err
+	}
+	pruneMigrationCopies(path, time.Now(), db.(*store).log)
+	return db, nil
 }
 
 // migrateAdditiveWhileJoining applies the additive steps that carry an older
