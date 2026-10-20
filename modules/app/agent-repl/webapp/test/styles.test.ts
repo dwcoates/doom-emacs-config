@@ -2053,13 +2053,46 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(fill).toBe(want);
   });
 
-  it("fills a selected response with the grey selection token, never the prompt's blue", () => {
+  it("fills a selected interim response with the grey selection token, never the prompt's blue", () => {
+    // Arrange
+    const bubble = selectedBubble("bubble interim-response entry-selected", "response", "response");
+    // Act
+    const fill = inDocument(bubble, (el) => cascadedValue(el, "--bubble-bg"));
+    // Assert
+    expect(fill).toBe("var(--selected-bubble-bg)");
+  });
+
+  it("fills a selected final response with its dimmed selection token", () => {
     // Arrange
     const bubble = selectedBubble("bubble final-response entry-selected", "response", "response");
     // Act
     const fill = inDocument(bubble, (el) => cascadedValue(el, "--bubble-bg"));
     // Assert
-    expect(fill).toBe("var(--selected-bubble-bg)");
+    expect(fill).toBe("var(--selected-final-response-bg)");
+  });
+
+  it("sets the selected final response's fill alone, so selecting it never reflows it", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".bubble.final-response.entry-selected") ?? "";
+
+    // Assert
+    expect(rule.trim()).toBe("--bubble-bg: var(--selected-final-response-bg) !important;");
+  });
+
+  it("dims the selected final response's fill halfway from the selected grey to its own fill", () => {
+    // Arrange / Act — declared once on :root, so each theme mixes its own two tokens.
+    const declaration = themeValueOf(declarationsOf(":root") ?? "", "--selected-final-response-bg");
+
+    // Assert — color-mix with no percentages splits the two evenly.
+    expect(declaration).toBe("color-mix(in srgb, var(--selected-bubble-bg), var(--assistant))");
+  });
+
+  it("never overrides the dimmed final response fill in the dark theme", () => {
+    // Arrange / Act
+    const declaration = themeValueOf(darkThemeBlock(), "--selected-final-response-bg");
+
+    // Assert
+    expect(declaration).toBeUndefined();
   });
 
   it("sets the selected prompt's fill alone, so selecting a prompt never reflows it", () => {
@@ -3438,11 +3471,13 @@ describe("the one bubble rule set", () => {
     // so do the owner-named fills: the held variant's (2026-09-23), the
     // page-colored thinking and interim fill (2026-10-08), the selected
     // bubble's grey (2026-10-11), the agent-to-agent bubbles' final-response
-    // fill (2026-10-17) and the selected prompt's darker blue (2026-10-19).
+    // fill (2026-10-17), the selected prompt's darker blue (2026-10-19) and
+    // the selected final response's dimmed grey (2026-10-20).
     expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
       [
         ".bubble",
         ".bubble.entry-selected",
+        ".bubble.final-response.entry-selected",
         '.bubble[data-role="prompt"]:not([data-variant="held"]).entry-selected',
         '.bubble[data-role="prompt"]',
         '.bubble[data-role="response"]',
