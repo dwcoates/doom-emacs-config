@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -2278,5 +2279,77 @@ func TestAnInvalidArgumentTheShimAnsweredIsNeverItsDeath(t *testing.T) {
 	}
 	if !hasRecordAt(log, "error", "daemon.shimclient.watch_bash") {
 		t.Fatalf("the shim's own refusal was not recorded at error: %+v", log.Records())
+	}
+}
+
+// leaveStaleSocket binds a listener at path and closes it WITHOUT unlinking,
+// which is what a shim's death leaves behind.
+func leaveStaleSocket(t *testing.T, path string) {
+	t.Helper()
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listen %q: %v", path, err)
+	}
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close %q: %v", path, err)
+	}
+}
+
+// TestPublishExitUnlinksTheGoneShimsSocket: a dead shim's socket file is
+// never reclaimed by the kernel, and every relaunch mints a fresh generation,
+// so the exit is where the file goes.
+func TestPublishExitUnlinksTheGoneShimsSocket(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange leaves what the shim left at path, and readies the client.
+		arrange func(t *testing.T, c *client, path string)
+		// wantKept says the path must still exist after the exit.
+		wantKept bool
+		// wantError says the exit must record the unlink's failure at ERROR.
+		wantError bool
+	}{
+		{name: "a stale socket is unlinked", arrange: func(t *testing.T, _ *client, path string) {
+			leaveStaleSocket(t, path)
+		}},
+		{name: "an absent socket needs nothing", arrange: func(*testing.T, *client, string) {}},
+		{name: "a socket something still listens on is kept", wantKept: true, arrange: func(t *testing.T, _ *client, path string) {
+			ln, err := net.Listen("unix", path)
+			if err != nil {
+				t.Fatalf("listen %q: %v", path, err)
+			}
+			t.Cleanup(func() { _ = ln.Close() })
+		}},
+		{name: "a detached client's socket stays with the shim it handed on", wantKept: true, arrange: func(t *testing.T, c *client, path string) {
+			leaveStaleSocket(t, path)
+			c.detached = true
+		}},
+		{name: "a path that is no socket is kept and the refusal recorded", wantKept: true, wantError: true, arrange: func(t *testing.T, _ *client, path string) {
+			if err := os.WriteFile(path, []byte("not a socket"), 0o600); err != nil {
+				t.Fatalf("write %q: %v", path, err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			path := filepath.Join(shortDir(t), "ws-1.n2.sock")
+			c := newClient(log, ids.WorkspaceID("ws-1"), path, defaultBackoff, nil, nil)
+			c.standDown.Store(true)
+			tt.arrange(t, c, path)
+
+			// Act
+			c.publishExit(ExitInfo{PID: 4242, Code: 0})
+
+			// Assert
+			_, statErr := os.Lstat(path)
+			if kept := statErr == nil; kept != tt.wantKept {
+				t.Fatalf("socket kept = %v (stat: %v), want %v", kept, statErr, tt.wantKept)
+			}
+			if got := hasRecordAt(log, "error", "daemon.shimclient.exit"); got != tt.wantError {
+				t.Fatalf("unlink failure recorded at ERROR = %v, want %v", got, tt.wantError)
+			}
+		})
 	}
 }

@@ -947,6 +947,25 @@ func (c *client) publishExit(info ExitInfo) {
 		c.log.Error("daemon.shimclient.exit", "shim died", ctx)
 	}
 
+	// A GONE SHIM'S SOCKET GOES WITH IT. An AF_UNIX path outlives its
+	// listener, and every relaunch mints a fresh generation
+	// (shimsocket.NextGeneration), so a socket nobody unlinks is never reused
+	// and never reclaimed: 31,413 of them stood in the state root's sock
+	// directory on 2026-10-20. It is unlinked before the supervisor lets go,
+	// so no replacement waiting on `dead` can have bound the path yet. A
+	// detached client never reaches here: its shim lives on under the daemon
+	// it was handed to, and so does its socket. A path something still
+	// listens on is not the gone shim's to unlink: it is left, and said so.
+	if state, err := shimsocket.Probe(c.udsPath); err == nil && state == shimsocket.StateLive {
+		c.log.Info("daemon.shimclient.exit", "the gone shim's socket still answers; it is left to whatever listens on it", dlog.Context{
+			"workspace_id": string(c.ws), "uds": c.udsPath,
+		})
+	} else if err := shimsocket.ClearStale(c.log, c.udsPath); err != nil {
+		c.log.Error("daemon.shimclient.exit", "could not unlink the gone shim's socket", dlog.Context{
+			"workspace_id": string(c.ws), "uds": c.udsPath, "error": err.Error(),
+		})
+	}
+
 	// THE SUPERVISOR LETS GO BEFORE ANY WAITER IS WOKEN. `Kill` returns on
 	// `dead`, and its contract is that the process is gone AND this daemon no
 	// longer owns one; released afterwards, the registry still held this
