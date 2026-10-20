@@ -704,7 +704,10 @@ func TestALandedHandBackLeavesTheMergeWorkspaceHidden(t *testing.T) {
 	}
 }
 
-func TestAFailedOrAbandonedHandBackRevealsTheMergeWorkspace(t *testing.T) {
+func TestAFailedOrAbandonedHandBackLeavesTheMergeWorkspaceHidden(t *testing.T) {
+	// Owner ruling, 2026-10-20: a merge workspace is never auto-revealed on
+	// any outcome; the bubble's own "open merge workspace" button is the one
+	// way in.
 	tests := []struct {
 		name string
 		kind DetachedOutcomeKind
@@ -722,8 +725,8 @@ func TestAFailedOrAbandonedHandBackRevealsTheMergeWorkspace(t *testing.T) {
 			h.o.handBack(context.Background(), theMergeWorkspace, DetachedOutcome{Kind: tt.kind, Summary: "it stopped"})
 
 			// Assert
-			if revealed := h.detached.revealed(); len(revealed) != 1 || revealed[0] != theMergeWorkspace {
-				t.Fatalf("reveals = %v, want the merge workspace revealed", revealed)
+			if revealed := h.detached.revealed(); len(revealed) != 0 {
+				t.Fatalf("reveals = %v, want none; the bubble's own button reveals it on demand", revealed)
 			}
 		})
 	}

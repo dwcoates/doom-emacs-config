@@ -222,8 +222,9 @@ func TestAPickThatDoesNotLeaveItsChangesPickedFailsTheMerge(t *testing.T) {
 			runThePick(t, h, context.Background(), false)
 
 			// Assert: the tab and the head fail, the request leaves the
-			// queue, and the requester is told while the workspace is
-			// revealed.
+			// queue, the requester is told, and the workspace is left hidden
+			// (owner ruling, 2026-10-20: the bubble's own button reveals it
+			// on demand, never an automatic reveal).
 			tabs := pickTabs(h)
 			if failed := tabs[len(tabs)-1].GetSettled().GetFailed(); failed == nil || !strings.Contains(failed.GetSummary(), tt.why) {
 				t.Fatalf("last pick tab = %+v, want failed for %q", tabs[len(tabs)-1], tt.why)
@@ -239,8 +240,8 @@ func TestAPickThatDoesNotLeaveItsChangesPickedFailsTheMerge(t *testing.T) {
 			if len(sent) != 1 || sent[0].outcome.Kind != DetachedFailed {
 				t.Fatalf("handbacks = %+v, want the failure told to the requester", sent)
 			}
-			if revealed := h.detached.revealed(); len(revealed) != 1 || revealed[0] != theMergeWorkspace {
-				t.Fatalf("reveals = %v, want the merge workspace revealed", revealed)
+			if revealed := h.detached.revealed(); len(revealed) != 0 {
+				t.Fatalf("reveals = %v, want none; the bubble's own button reveals it on demand", revealed)
 			}
 		})
 	}
@@ -367,8 +368,8 @@ func TestAFailedPickEndsTheMergeEvenThoughEndingItWithdrawsItsOwnWait(t *testing
 	if sent := h.detached.sent(); len(sent) != 1 || sent[0].outcome.Kind != DetachedFailed {
 		t.Fatalf("handbacks = %+v, want the failure told", sent)
 	}
-	if revealed := h.detached.revealed(); len(revealed) != 1 {
-		t.Fatalf("reveals = %v, want the merge workspace revealed", revealed)
+	if revealed := h.detached.revealed(); len(revealed) != 0 {
+		t.Fatalf("reveals = %v, want none; the bubble's own button reveals it on demand", revealed)
 	}
 }
 
