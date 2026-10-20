@@ -30,7 +30,8 @@ func (r *run) setStep(ctx context.Context, step footer.MergeStep, apply func(*fo
 	}
 	now := r.o.deps.Now()
 	r.mu.Lock()
-	changed := r.facts.Step != step
+	left, leftAt := r.facts.Step, r.stepAt
+	changed := left != step
 	facts := footer.MergeFacts{State: StateMerging, QueuedAt: time.UnixMilli(r.queuedMS), Step: step, LineAt: now}
 	if apply != nil {
 		apply(&facts)
@@ -40,6 +41,9 @@ func (r *run) setStep(ctx context.Context, step footer.MergeStep, apply func(*fo
 		r.stepAt = now
 	}
 	r.mu.Unlock()
+	if changed {
+		r.timeStep(left, leftAt, now)
+	}
 	r.o.publish(r.repo, r.ws, facts)
 	if changed && step != footer.StepEnqueued {
 		if err := r.o.republishQueue(ctx, r.repo); err != nil {
@@ -48,6 +52,16 @@ func (r *run) setStep(ctx context.Context, step footer.MergeStep, apply func(*fo
 				dlog.Context{"workspace": string(r.ws), "step": string(step)}, err)
 		}
 	}
+}
+
+// timeStep records how long the run spent on step, which it left at now. A
+// step with no start (the run's first, or one a resumed run never saw begin)
+// is not timed.
+func (r *run) timeStep(step footer.MergeStep, began, now time.Time) {
+	if step == "" || began.IsZero() {
+		return
+	}
+	r.o.deps.Timings.ObserveMergeStep(string(step), now.Sub(began))
 }
 
 // updateFacts changes the standing step's facts in place -- a rebase's

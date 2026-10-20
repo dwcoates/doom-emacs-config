@@ -2275,3 +2275,52 @@ func TestALandedHeadNamesWhereItsCommitLanded(t *testing.T) {
 		})
 	}
 }
+
+func TestALandedMergeTimesEveryStepItLeftAndItsSpans(t *testing.T) {
+	// Arrange: a landing merge.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert: steps were timed as the run left them, and the spans landed.
+	got := h.timings.all()
+	steps := 0
+	for _, g := range got {
+		if strings.HasPrefix(g, "step:") {
+			steps++
+		}
+	}
+	if steps == 0 {
+		t.Fatalf("timings = %v, want the steps the run left", got)
+	}
+	tail := strings.Join(got[len(got)-3:], ",")
+	if tail != "queued:landed,running:landed,total:landed" {
+		t.Fatalf("timings end %q, want the queued, running and total spans of a landing", tail)
+	}
+}
+
+func TestAFailedMergeTimesItsSpansAsFailed(t *testing.T) {
+	// Arrange: a merge whose before-action fails.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.configureActions([]string{"before"}, nil)
+	h.briefs["before"] = nil
+	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
+	enqueue(t, h)
+
+	// Act.
+	_ = h.admit(context.Background())
+
+	// Assert.
+	if !slices.Contains(h.timings.all(), "total:failed") {
+		t.Fatalf("timings = %v, want the total span as failed", h.timings.all())
+	}
+}

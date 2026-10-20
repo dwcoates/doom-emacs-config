@@ -362,3 +362,31 @@ func TestAFailedPickEndsTheMergeEvenThoughEndingItWithdrawsItsOwnWait(t *testing
 		t.Fatalf("reveals = %v, want the merge workspace revealed", revealed)
 	}
 }
+
+func TestAPickIsTimedByHowItEnded(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		want    string
+	}{
+		{name: "a pick that leaves its changes committed", arrange: func(*harness) {}, want: "pick:ok"},
+		{name: "a pick whose turn failed", arrange: func(h *harness) { h.turnCloses = []wsm.TurnClose{wsm.CloseFailed} }, want: "pick:failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := pickHarness(t)
+			tt.arrange(h)
+			requestPick(t, h)
+
+			// Act
+			runThePick(t, h, context.Background(), false)
+
+			// Assert
+			got := h.timings.all()
+			if len(got) == 0 || got[0] != tt.want {
+				t.Fatalf("timings = %v, want %s first", got, tt.want)
+			}
+		})
+	}
+}

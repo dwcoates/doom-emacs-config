@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"fmt"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -270,7 +271,13 @@ func (o *orchestrator) settlePick(p *pick, failure string) {
 	o.mu.Lock()
 	delete(o.picks, p.ws)
 	o.mu.Unlock()
-	o.publishRoundTab(p.ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, settled: true, endedMS: o.nowMS(), failure: failure}))
+	endedMS := o.nowMS()
+	o.publishRoundTab(p.ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, settled: true, endedMS: endedMS, failure: failure}))
+	result := OutcomeOK
+	if failure != "" {
+		result = OutcomeFailed
+	}
+	o.deps.Timings.ObserveMergeSpan(SpanPick, result, time.Duration(endedMS-p.startedMS)*time.Millisecond)
 }
 
 // pickFailed ends an async merge whose pick failed: the pick tab and the head

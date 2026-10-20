@@ -2167,6 +2167,8 @@ func (h *harness) power(p cpugov.Power) {
 
 // harness is one orchestrator with every fake it was built from.
 type harness struct {
+	// timings keeps every merge stage the orchestrator timed.
+	timings *fakeTimings
 	t *testing.T
 
 	// asks are the workspace sessions' open asks, as the watcher reports them.
@@ -2407,6 +2409,7 @@ func newHarness(t *testing.T) *harness {
 		policy:    map[string]string{},
 		policyErr: map[string]error{},
 		freeness:  &fakeFreeness{},
+		timings:   &fakeTimings{},
 	}
 	h.detached = &fakeDetached{h: h}
 	h.events = &fakeQueueEvents{}
@@ -2466,6 +2469,7 @@ func newHarness(t *testing.T) *harness {
 // deps assembles the dependency set from the harness's fakes.
 func (h *harness) deps() Deps {
 	return Deps{
+		Timings:     h.timings,
 		QueueEvents: h.events,
 		DB:          h.db, Git: h.git, Queue: h.queue, Feed: h.feed, Footer: h.footer,
 		Sidebar: h.sidebar, Asks: h.asks, Banners: h.banners, PromptsDir: "prompts",
@@ -3089,4 +3093,29 @@ func (f *fakeDB) RequireNoOpenChildren(_ context.Context, ws ...ids.WorkspaceID)
 	defer f.mu.Unlock()
 	f.openChildrenAsked = append(f.openChildrenAsked, ws...)
 	return f.openChildrenErr
+}
+
+// fakeTimings records every merge stage timing: a step as "step:<name>", a
+// span as "<span>:<outcome>".
+type fakeTimings struct {
+	mu  sync.Mutex
+	got []string
+}
+
+func (f *fakeTimings) ObserveMergeStep(step string, took time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "step:"+step)
+}
+
+func (f *fakeTimings) ObserveMergeSpan(span, outcome string, took time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, span+":"+outcome)
+}
+
+func (f *fakeTimings) all() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.got...)
 }

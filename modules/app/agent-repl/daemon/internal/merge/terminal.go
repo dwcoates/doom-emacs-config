@@ -59,8 +59,31 @@ func (r *run) finish(ctx context.Context, out outcome) error {
 		r.teardown(ctx, out, nil)
 		return nil
 	}
+	r.timeEnd(out, endedMS)
 	r.teardown(ctx, out, func() { r.concludedTerminal(ctx, log, op, out, endedMS) })
 	return nil
+}
+
+// timeEnd records a concluded run's last step and its spans, by how it ended.
+func (r *run) timeEnd(out outcome, endedMS int64) {
+	ended := time.UnixMilli(endedMS)
+	r.mu.Lock()
+	step, began := r.facts.Step, r.stepAt
+	r.mu.Unlock()
+	r.timeStep(step, began, ended)
+	result := OutcomeLanded
+	switch {
+	case out.failed != "":
+		result = OutcomeFailed
+	case out.alreadyOn != "":
+		result = OutcomeAlreadyOn
+	}
+	t := r.o.deps.Timings
+	if r.startedMS > 0 {
+		t.ObserveMergeSpan(SpanQueued, result, time.Duration(r.startedMS-r.queuedMS)*time.Millisecond)
+		t.ObserveMergeSpan(SpanRunning, result, time.Duration(endedMS-r.startedMS)*time.Millisecond)
+	}
+	t.ObserveMergeSpan(SpanTotal, result, time.Duration(endedMS-r.queuedMS)*time.Millisecond)
 }
 
 // concludedTerminal publishes a concluded run's terminal: failed with its area,
