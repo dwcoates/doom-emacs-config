@@ -71,13 +71,13 @@
     {
       "name": "workspace_open",
       "description": "workspace open (tab opened to session up)",
-      "start": "Emacs opens the tab (elisp.roster.tab-open)",
-      "end": "the daemon's session is up (daemon.workspace.bring_up)",
-      "measured_by": "profile",
+      "start": "Emacs opens the tab (elisp.roster.tab-open); live, the daemon receives its OpenWorkspace",
+      "end": "the daemon's session is up (daemon.workspace.bring_up); live, OpenWorkspace answers success",
+      "measured_by": "daemon",
       "threshold_ms": 300,
       "reason": "the workspace is visible but not usable meanwhile",
-      "reported_as": null,
-      "buckets_seconds": null
+      "reported_as": "DAEMON_WORKSPACE_OPEN",
+      "buckets_seconds": [0.1, 0.25, 0.5, 1, 2, 3, 5, 8, 13, 30]
     },
     {
       "name": "prompt_first_output",

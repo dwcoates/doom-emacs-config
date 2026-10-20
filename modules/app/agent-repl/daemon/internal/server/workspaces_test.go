@@ -2268,3 +2268,36 @@ func TestOpenWorkspaceAnswersTheRevertRefusalsByTheirArms(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenWorkspaceIsTimedOnlyWhenTheSessionComesUp(t *testing.T) {
+	tests := []struct {
+		name    string
+		openErr error
+		want    int
+	}{
+		{name: "a successful open is one workspace_open", want: 1},
+		{name: "a refused open is none", openErr: errors.New("the worktree is gone"), want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Verbs.openErr = tt.openErr
+
+			// Act.
+			_, _ = h.Client.OpenWorkspace(context.Background(),
+				connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ref()}))
+
+			// Assert.
+			opens := 0
+			for _, l := range h.Latencies.all() {
+				if l.kind == "workspace_open" && l.workspace == testWorkspaceID {
+					opens++
+				}
+			}
+			if opens != tt.want {
+				t.Fatalf("workspace_open latencies = %d (%+v), want %d", opens, h.Latencies.all(), tt.want)
+			}
+		})
+	}
+}
