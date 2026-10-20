@@ -484,17 +484,17 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
   (add-hook 'kill-emacs-hook #'agent-repl-input-save-all-on-shutdown -50)
   (agent-repl--boot-info "shutdown: registered composer save on kill-emacs-hook"))
 
-;; ORPHANED LOG TARGETS.  Every Emacs instance before 2026-09-11 minted its
-;; own temporary-root log target, and 22,112 of them had accumulated by the
-;; time the standing-target rule landed.  The sweep that removes the
-;; unreferenced, day-old ones is armed on an IDLE timer, never run from the
-;; startup hook: unlinking files before the first redisplay would hold the
-;; frame off screen to tidy a directory.  Batch runs arm nothing.
+;; LOG RETENTION.  Every log file Emacs writes is deleted once its last write
+;; is `agent-repl-log-retention-seconds' (three days) old, the retention every
+;; agent-repl runtime keeps.  The first sweep is armed on an IDLE timer, never
+;; run from the startup hook: unlinking files before the first redisplay would
+;; hold the frame off screen to tidy a directory.  Then it repeats hourly.
+;; Batch runs arm nothing.
 (if noninteractive
-    (agent-repl--boot-info "cold-start: orphan log sweep NOT registered batch=%s"
+    (agent-repl--boot-info "cold-start: log retention sweep NOT registered batch=%s"
                            noninteractive)
-  (add-hook 'emacs-startup-hook #'agent-repl-schedule-orphan-log-sweep)
-  (agent-repl--boot-info "cold-start: registered orphan log sweep on emacs-startup-hook"))
+  (add-hook 'emacs-startup-hook #'agent-repl-schedule-log-retention-sweep)
+  (agent-repl--boot-info "cold-start: registered log retention sweep on emacs-startup-hook"))
 
 (provide 'agent-repl)
 ;;; config.el ends here

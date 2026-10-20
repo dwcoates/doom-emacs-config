@@ -357,7 +357,30 @@ func openLogger(socketPath, dbPath, logPath string) (*logging.Logger, func(), er
 	log := logging.NewDurableOnlyWindow(lf, os.Stderr, sharedlogging.NewWindow(selection, time.Now))
 	log = log.With(logging.Fields{Component: "store", DatabasePath: dbPath, Socket: socketPath})
 	log.NoteLevelSelection(selection)
-	return log, func() { _ = lf.Close() }, nil
+	stopExpiring := sharedlogging.StartExpiring(lf, reportLogExpiry(log, logPath))
+	return log, func() {
+		stopExpiring()
+		_ = lf.Close()
+	}, nil
+}
+
+// reportLogExpiry records one hourly aging of the store's own log
+// (agentrepl/logging retention.go): a failure at error, and anything it rolled
+// or removed at info. A pass that found nothing to age writes nothing.
+func reportLogExpiry(log *logging.Logger, logPath string) func(sharedlogging.ExpireResult, error) {
+	return func(result sharedlogging.ExpireResult, err error) {
+		if err != nil {
+			log.Log(logging.Fields{Operation: "store.log.retention_failed", Level: "error", Path: logPath, ErrorCause: err.Error()},
+				"the store's log could not be aged by the %s retention: %v", sharedlogging.DefaultRetention, err)
+			return
+		}
+		if !result.Changed() {
+			return
+		}
+		log.Log(logging.Fields{Operation: "store.log.retention", Path: logPath},
+			"aged the store's log by the %s retention: rolled_current=%t removed=%d %v",
+			sharedlogging.DefaultRetention, result.RolledCurrent, len(result.Removed), result.Removed)
+	}
 }
 
 // bootstrapError marks the only failures that may be reported before the

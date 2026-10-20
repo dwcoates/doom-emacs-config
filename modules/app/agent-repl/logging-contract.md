@@ -23,8 +23,7 @@ person is asked to read must not sit where the operating system may sweep it
 or where a per-launcher `TMPDIR` moves it. Emacs targets minted into the
 operating system's temporary directory before that rule are appended to
 wherever a canonical link still names one, under the standing-target rule
-below; nothing is renamed, and a bounded idle sweep removes only the
-unreferenced ones left behind there. The runtime must never follow a workspace-provided
+below; nothing is renamed, and they age out under the retention rule below. The runtime must never follow a workspace-provided
 regular file or symlink as its durable sink. Link replacement is atomic. An
 owned target is reused from the runtime's in-memory workspace map during that
 runtime lifetime. After a runtime restart, the runtime APPENDS to the target
@@ -69,7 +68,7 @@ path and its open descriptor is never renamed and reopened underneath it.
 A cap-maintenance failure is a workspace-attributed JSON error and poisons the
 affected sink. Reaching a cap is ordinary rotation state, not poison.
 
-Every global durable sink follows the same 64 MiB, five-generation retention
+Every global durable sink follows the same 64 MiB, five-generation rotation
 rule. Long-lived services append on open and rotate only at the byte cap, so a
 bounce loop cannot evict history merely by restarting. The daemon run log may
 start a fresh current generation at a run boundary and also rotates on size.
@@ -124,6 +123,49 @@ Other modes summarize sink findings on stderr.
 `scripts/agent-repl-log-discovery.sh` remains the focused identity and latency
 diagnostic for callers that need its session, process, span, or gap queries;
 it is not the canonical whole-system reader.
+
+## Retention
+
+Every log file agent-repl writes is removed once its LAST WRITE is three days
+old (`logging.DefaultRetention`, `agent-repl-log-retention-seconds`): every
+generation of every sink, every workspace target whether or not a canonical
+link still names it, the stdio log, and every merge's test log. The age is
+the last write, not the oldest record: a slowly written current generation
+may hold older records until it reaches the cap, and the generation it rolls
+into goes three days after that roll. Only a file's own writer, or a pruner
+that has proved no writer is left, renames or removes it:
+
+- A Go runtime ages the family it holds (`RotatingFile.Expire`) hourly: the
+  daemon for every open sink, the run log and the stdio log; the store and
+  the sidecar for their own logs. An expired daemon-written current target is
+  rolled and its link re-pointed exactly as the cap rolls it; an expired
+  `shim.log` is marked to roll with the workspace's next shim process.
+- A family nobody holds is pruned by the daemon's hourly pass
+  (`logging.PruneDirectory`) over the state root's `logs/` directory and every
+  directory registered with `Surfaces.RetainDirectory` (`merge-logs/`). Every
+  Go writer holds a SHARED `flock` on its current file for as long as it has
+  it open (a child that inherits the descriptor, such as the shim's fd 3,
+  holds it too), and the pruner removes a family only under the EXCLUSIVE
+  lock, so a held family is never touched. A roll renames the current file
+  while it is still open and locked, so a family is never unlocked mid-roll,
+  and an opener that loses a race with the pruner re-opens the path.
+- Emacs ages its own files (`emacs.central.log`, `agent-repl-<id>-emacs-*`,
+  the temporary-root `agent-repl-emacs-*` targets) with a bounded sweep, once
+  at first idle and then hourly. Emacs opens per write, so a removed target
+  is created afresh by the next record, and a canonical link left naming
+  nothing is retired on the next roster push. The daemon's pass never matches
+  an Emacs file, and the Emacs sweep never matches a daemon file.
+
+The daemon's stdout and stderr, which the Emacs detacher points at
+`<state>/logs/daemon.stdio.log`, are taken over at boot: the daemon re-opens
+the path as a rotating file and duplicates it onto fds 1 and 2, so the file
+rotates at the cap and ages like every other daemon log while Emacs keeps
+reading its last line.
+
+The launchd services' `*.out.log` and `*.err.log` files and
+`victoriametrics.log` are held open by launchd, which takes no lock, so no
+pruner may remove them; their services log to their own rotating files, and
+these carry only what escapes before the canonical logger exists.
 
 ## Daemon address advertisement
 

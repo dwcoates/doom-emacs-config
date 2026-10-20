@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	sharedlogging "agentrepl/logging"
 	"agentrepl/shim-store/internal/db"
 	"agentrepl/shim-store/internal/logging"
 	"agentrepl/shim-store/internal/pprofsurface"
@@ -438,4 +439,63 @@ func TestOpenLoggerRejectsAMalformedLevelWindow(t *testing.T) {
 	if !isBootstrapError(err) {
 		t.Fatalf("error %T = %v, want a bootstrap error", err, err)
 	}
+}
+
+func TestReportLogExpiry(t *testing.T) {
+	cases := []struct {
+		name      string
+		result    sharedlogging.ExpireResult
+		err       error
+		wantOp    string
+		wantLevel string
+	}{
+		{name: "a failure is recorded at error", err: errors.New("remove refused"), wantOp: "store.log.retention_failed", wantLevel: "error"},
+		{name: "a removal is recorded at info", result: sharedlogging.ExpireResult{Removed: []string{"/l/shim-store.log.5"}}, wantOp: "store.log.retention", wantLevel: "info"},
+		{name: "nothing aged records nothing"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			var sink bytes.Buffer
+			log := logging.New(&sink, &bytes.Buffer{}, true)
+
+			// Act.
+			reportLogExpiry(log, "/l/shim-store.log")(tc.result, tc.err)
+
+			// Assert.
+			records := rawStoreRecords(t, &sink)
+			if tc.wantOp == "" {
+				if len(records) != 0 {
+					t.Fatalf("records = %v, want none", records)
+				}
+				return
+			}
+			if len(records) != 1 || records[0]["operation"] != tc.wantOp || records[0]["level"] != tc.wantLevel {
+				t.Fatalf("records = %v, want one %s at %s", records, tc.wantOp, tc.wantLevel)
+			}
+			ctx, _ := records[0]["context"].(map[string]any)
+			if ctx["path"] != "/l/shim-store.log" {
+				t.Errorf("context %v, want the log's path", ctx)
+			}
+			if tc.err != nil && ctx["error"] != tc.err.Error() {
+				t.Errorf("context %v, want the cause", ctx)
+			}
+		})
+	}
+}
+
+func rawStoreRecords(t *testing.T, sink *bytes.Buffer) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(sink.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("parse %q: %v", line, err)
+		}
+		out = append(out, rec)
+	}
+	return out
 }

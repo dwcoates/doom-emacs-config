@@ -73,6 +73,7 @@ func (f *fakeSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return n
 func (f *fakeSurfaces) BindRecordTee(dlog.RecordTee) {}
 
 func (f *fakeSurfaces) BindRecordCounter(dlog.RecordCounter) {}
+func (f *fakeSurfaces) RetainDirectory(string, func(string) bool) {}
 
 func (f *fakeSurfaces) DetachDir(string) error { return nil }
 

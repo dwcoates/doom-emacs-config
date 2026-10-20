@@ -173,6 +173,7 @@ func (s testSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return ni
 func (s testSurfaces) BindRecordTee(dlog.RecordTee) {}
 
 func (s testSurfaces) BindRecordCounter(dlog.RecordCounter) {}
+func (s testSurfaces) RetainDirectory(string, func(string) bool) {}
 
 func (s testSurfaces) DetachDir(string) error { return nil }
 

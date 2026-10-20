@@ -927,16 +927,16 @@ func TestTheExpiryClock(t *testing.T) {
 	}{
 		{
 			name:   "a tree younger than the expiry is kept",
-			born:   daysAgo(10),
+			born:   daysAgo(5),
 			active: func(w *world, repo string) { w.activeEvery(repo, daysAgo(20), now.Add(-time.Hour), 12*time.Hour) },
 		},
 		{
 			name: "a full idle day restarts the clock",
 			born: daysAgo(30),
 			active: func(w *world, repo string) {
-				// Steady work, then a 36-hour break ending 10 days ago.
-				w.activeEvery(repo, daysAgo(20), daysAgo(11.5), 12*time.Hour)
-				w.activeEvery(repo, daysAgo(10), now.Add(-time.Hour), 12*time.Hour)
+				// Steady work, then a 36-hour break ending 5 days ago.
+				w.activeEvery(repo, daysAgo(20), daysAgo(6.5), 12*time.Hour)
+				w.activeEvery(repo, daysAgo(5), now.Add(-time.Hour), 12*time.Hour)
 			},
 		},
 		{

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	sharedlogging "agentrepl/logging"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/stale"
 )
@@ -805,5 +806,44 @@ func TestOpenLoggerRejectsAMalformedLevelWindow(t *testing.T) {
 	var bootstrap bootstrapError
 	if !errors.As(err, &bootstrap) {
 		t.Fatalf("error %T = %v, want a bootstrap error", err, err)
+	}
+}
+
+func TestReportLogExpiry(t *testing.T) {
+	cases := []struct {
+		name      string
+		result    sharedlogging.ExpireResult
+		err       error
+		wantOp    string
+		wantLevel string
+	}{
+		{name: "a failure is recorded at error", err: errors.New("remove refused"), wantOp: "sidecar.log.retention_failed", wantLevel: "error"},
+		{name: "a rolled current is recorded at info", result: sharedlogging.ExpireResult{RolledCurrent: true}, wantOp: "sidecar.log.retention", wantLevel: "info"},
+		{name: "nothing aged records nothing"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			logf, durable := buildReportTestLogger()
+
+			// Act.
+			reportLogExpiry(logf, "/l/shim-claude-sidecar.log")(tc.result, tc.err)
+
+			// Assert.
+			records := parseLogLines(t, strings.Split(durable.String(), "\n"))
+			if tc.wantOp == "" {
+				if len(records) != 0 {
+					t.Fatalf("records = %v, want none", records)
+				}
+				return
+			}
+			rec := requireOnceIn(t, records, tc.wantOp, tc.wantLevel)
+			if got := ctxString(t, rec, "path"); got != "/l/shim-claude-sidecar.log" {
+				t.Errorf("path = %q, want the log's path", got)
+			}
+			if tc.err != nil && !strings.Contains(rec.Message, tc.err.Error()) {
+				t.Errorf("message %q, want the cause", rec.Message)
+			}
+		})
 	}
 }

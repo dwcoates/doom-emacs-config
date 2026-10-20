@@ -6462,97 +6462,181 @@ restores them afterwards."
       (delete-file foreign)
       (delete-directory project t))))
 
-(ert-deftest agent-repl-test-log-sweep-deletes-only-unreferenced-old-targets ()
-  "The sweep deletes an old orphan and spares a referenced one and a young one."
-  (agent-repl-test--with-clean-state
+;;;; ---- Tests: log retention sweep ----
+
+(defmacro agent-repl-test--with-sweep-dir (dir &rest body)
+  "Run BODY with DIR bound to a fresh directory the sweep is pointed at."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (let ((,dir (make-temp-file "agent-repl-sweep-" t)))
+       (unwind-protect (progn ,@body)
+         (delete-directory ,dir t)))))
+
+(defun agent-repl-test--sweep-file (dir name &optional age-seconds)
+  "Write NAME in DIR, last written AGE-SECONDS ago (default: now); return its path."
+  (let ((path (expand-file-name name dir)))
+    (write-region "x" nil path nil 'silent)
+    (when age-seconds
+      (set-file-times path (time-subtract (current-time) age-seconds)))
+    path))
+
+(defun agent-repl-test--expired-age ()
+  "Seconds one hour past `agent-repl-log-retention-seconds'."
+  (+ agent-repl-log-retention-seconds 3600))
+
+(ert-deftest agent-repl-test-log-sweep-deletes-an-expired-legacy-temp-target ()
+  "A target minted into the temporary root and past the retention is deleted."
+  (agent-repl-test--with-sweep-dir dir
     ;; Arrange
-    (let* ((dir (make-temp-file "agent-repl-sweep-" t))
-           (orphan (expand-file-name "agent-repl-emacs-orphan.log" dir))
-           (referenced (expand-file-name "agent-repl-emacs-referenced.log" dir))
-           (young (expand-file-name "agent-repl-emacs-young.log" dir))
-           (unrelated (expand-file-name "somebody-elses.log" dir))
-           (old (time-subtract (current-time) (* 3 86400)))
+    (let ((path (agent-repl-test--sweep-file dir "agent-repl-emacs-old.log" (agent-repl-test--expired-age))))
+      ;; Act
+      (agent-repl--sweep-expired-log-files (list dir))
+      ;; Assert
+      (should-not (file-exists-p path)))))
+
+(ert-deftest agent-repl-test-log-sweep-deletes-an-expired-durable-target ()
+  "A durable workspace target past the retention is deleted."
+  (agent-repl-test--with-sweep-dir dir
+    ;; Arrange
+    (let ((path (agent-repl-test--sweep-file dir "agent-repl-0054899b8c24410e-emacs-9A8fUl.log"
+                                             (agent-repl-test--expired-age))))
+      ;; Act
+      (agent-repl--sweep-expired-log-files (list dir))
+      ;; Assert
+      (should-not (file-exists-p path)))))
+
+(ert-deftest agent-repl-test-log-sweep-deletes-an-expired-target-this-runtime-names ()
+  "Being named by a sink no longer keeps a target past the retention."
+  (agent-repl-test--with-sweep-dir dir
+    ;; Arrange
+    (let* ((path (agent-repl-test--sweep-file dir "agent-repl-emacs-named.log" (agent-repl-test--expired-age)))
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
-      (unwind-protect
-          (progn
-            (dolist (path (list orphan referenced young unrelated))
-              (write-region "x" nil path nil 'silent))
-            (dolist (path (list orphan referenced unrelated))
-              (set-file-times path old))
-            (puthash "key" (list :target referenced) agent-repl--workspace-log-targets)
-            ;; Act
-            (let ((result (agent-repl--sweep-orphan-log-targets dir)))
-              ;; Assert
-              (should (equal (plist-get result :deleted) 1))
-              (should-not (file-exists-p orphan))
-              (should (file-exists-p referenced))
-              (should (file-exists-p young))
-              (should (file-exists-p unrelated))))
-        (delete-directory dir t)))))
+      (puthash "key" (list :target path) agent-repl--workspace-log-targets)
+      ;; Act
+      (agent-repl--sweep-expired-log-files (list dir))
+      ;; Assert
+      (should-not (file-exists-p path)))))
+
+(ert-deftest agent-repl-test-log-sweep-keeps-a-file-inside-the-retention ()
+  "A file written inside the retention is kept."
+  (agent-repl-test--with-sweep-dir dir
+    ;; Arrange
+    (let ((path (agent-repl-test--sweep-file dir "agent-repl-emacs-young.log")))
+      ;; Act
+      (let ((result (agent-repl--sweep-expired-log-files (list dir))))
+        ;; Assert
+        (should (file-exists-p path))
+        (should (equal (plist-get result :kept-young) 1))))))
+
+(ert-deftest agent-repl-test-log-sweep-never-touches-a-daemon-target ()
+  "The daemon's targets share the durable directory and are the daemon's to age."
+  (agent-repl-test--with-sweep-dir dir
+    ;; Arrange
+    (let ((path (agent-repl-test--sweep-file dir "agent-repl-0054899b8c24410e-daemon-1.log"
+                                             (agent-repl-test--expired-age))))
+      ;; Act
+      (agent-repl--sweep-expired-log-files (list dir))
+      ;; Assert
+      (should (file-exists-p path)))))
+
+(ert-deftest agent-repl-test-log-sweep-never-touches-an-unrelated-file ()
+  "A file whose name Emacs never mints is left alone however old."
+  (agent-repl-test--with-sweep-dir dir
+    ;; Arrange
+    (let ((path (agent-repl-test--sweep-file dir "somebody-elses.log" (agent-repl-test--expired-age))))
+      ;; Act
+      (agent-repl--sweep-expired-log-files (list dir))
+      ;; Assert
+      (should (file-exists-p path)))))
+
+(ert-deftest agent-repl-test-log-sweep-never-deletes-a-symlink ()
+  "A symlink with an owned name is not a log file and is kept."
+  (agent-repl-test--with-sweep-dir dir
+    ;; Arrange
+    (let ((link (expand-file-name "agent-repl-emacs-link.log" dir)))
+      (make-symbolic-link (expand-file-name "nowhere" dir) link)
+      ;; Act
+      (agent-repl--sweep-expired-log-files (list dir))
+      ;; Assert
+      (should (file-symlink-p link)))))
 
 (ert-deftest agent-repl-test-log-sweep-is-bounded-per-tick ()
-  "One sweep tick deletes at most `agent-repl-log-sweep-max-files' targets."
-  (agent-repl-test--with-clean-state
+  "One sweep tick deletes at most `agent-repl-log-sweep-max-files' files."
+  (agent-repl-test--with-sweep-dir dir
     ;; Arrange
-    (let* ((dir (make-temp-file "agent-repl-sweep-bound-" t))
-           (old (time-subtract (current-time) (* 3 86400)))
-           (agent-repl-log-sweep-max-files 2)
-           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
-      (unwind-protect
-          (progn
-            (dotimes (i 5)
-              (let ((path (expand-file-name (format "agent-repl-emacs-%d.log" i) dir)))
-                (write-region "x" nil path nil 'silent)
-                (set-file-times path old)))
-            ;; Act
-            (let ((result (agent-repl--sweep-orphan-log-targets dir)))
-              ;; Assert
-              (should (equal (plist-get result :deleted) 2))
-              (should (equal (plist-get result :remaining) 3))
-              (should (equal (length (directory-files dir nil "\\.log\\'")) 3))))
-        (delete-directory dir t)))))
+    (let ((agent-repl-log-sweep-max-files 2))
+      (dotimes (i 5)
+        (agent-repl-test--sweep-file dir (format "agent-repl-emacs-%d.log" i) (agent-repl-test--expired-age)))
+      ;; Act
+      (let ((result (agent-repl--sweep-expired-log-files (list dir))))
+        ;; Assert
+        (should (equal (plist-get result :deleted) 2))
+        (should (equal (plist-get result :remaining) 3))
+        (should (equal (length (directory-files dir nil "\\.log\\'")) 3))))))
 
-(ert-deftest agent-repl-test-log-sweep-deletes-a-swept-target-s-generations ()
-  "A swept target's `.N' generations are orphans too and go with it."
-  (agent-repl-test--with-clean-state
+(ert-deftest agent-repl-test-log-sweep-records-a-failed-delete ()
+  "A file that cannot be deleted is counted and recorded with its path and cause."
+  (agent-repl-test--with-sweep-dir dir
     ;; Arrange
-    (let* ((dir (make-temp-file "agent-repl-sweep-gen-" t))
-           (base (expand-file-name "agent-repl-emacs-gen.log" dir))
-           (generation (concat base ".1"))
-           (old (time-subtract (current-time) (* 3 86400)))
-           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
-      (unwind-protect
-          (progn
-            (dolist (path (list base generation))
-              (write-region "x" nil path nil 'silent)
-              (set-file-times path old))
-            ;; Act
-            (agent-repl--sweep-orphan-log-targets dir)
-            ;; Assert
-            (should-not (file-exists-p generation)))
-        (delete-directory dir t)))))
+    (let ((path (agent-repl-test--sweep-file dir "agent-repl-emacs-stuck.log" (agent-repl-test--expired-age)))
+          (warnings nil))
+      (cl-letf (((symbol-function 'delete-file)
+                 (lambda (&rest _) (signal 'file-error (list "Removing old name" "permission denied"))))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+        ;; Act
+        (let ((result (agent-repl--sweep-expired-log-files (list dir))))
+          ;; Assert
+          (should (equal (plist-get result :failed) 1))
+          (should (file-exists-p path))
+          (should (equal (length warnings) 1))
+          (should (string-match-p "elisp.core.log-sweep-delete-failed: path=.*stuck\\.log" (car warnings)))
+          (should (string-match-p "permission denied" (car warnings))))))))
 
-(ert-deftest agent-repl-test-log-sweep-spares-a-referenced-target-s-generations ()
-  "A live target's retained generations are not swept out from under a reader."
+(ert-deftest agent-repl-test-log-sweep-deletes-an-expired-central-generation ()
+  "A central sink generation past the retention is deleted, under the sink's own name."
+  (agent-repl-test--with-sweep-dir dir
+    ;; Arrange
+    (let* ((agent-repl-log-file-name (expand-file-name "my-central.log" dir))
+           (path (agent-repl-test--sweep-file dir "my-central.log.1" (agent-repl-test--expired-age))))
+      ;; Act
+      (agent-repl--sweep-expired-log-files (list dir))
+      ;; Assert
+      (should-not (file-exists-p path)))))
+
+(ert-deftest agent-repl-test-log-sweep-arms-an-idle-sweep-and-an-hourly-one ()
+  "Scheduling arms the startup idle sweep and the repeating sweep."
   (agent-repl-test--with-clean-state
     ;; Arrange
-    (let* ((dir (make-temp-file "agent-repl-sweep-live-gen-" t))
-           (base (expand-file-name "agent-repl-emacs-live.log" dir))
-           (generation (concat base ".1"))
-           (old (time-subtract (current-time) (* 3 86400)))
-           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
-      (unwind-protect
-          (progn
-            (dolist (path (list base generation))
-              (write-region "x" nil path nil 'silent)
-              (set-file-times path old))
-            (puthash "key" (list :target base) agent-repl--workspace-log-targets)
-            ;; Act
-            (agent-repl--sweep-orphan-log-targets dir)
-            ;; Assert
-            (should (file-exists-p generation))
-            (should (file-exists-p base)))
-        (delete-directory dir t)))))
+    (let ((agent-repl--log-sweep-timer nil)
+          (idle nil) (repeating nil))
+      (cl-letf (((symbol-function 'run-with-idle-timer)
+                 (lambda (secs repeat fn) (push (list secs repeat fn) idle) 'idle-timer))
+                ((symbol-function 'run-with-timer)
+                 (lambda (secs repeat fn) (push (list secs repeat fn) repeating) (timer-create))))
+        ;; Act
+        (agent-repl-schedule-log-retention-sweep)
+        ;; Assert
+        (should (equal idle (list (list agent-repl-log-sweep-idle-seconds nil
+                                        #'agent-repl--sweep-expired-log-files))))
+        (should (equal repeating (list (list agent-repl-log-sweep-interval-seconds
+                                             agent-repl-log-sweep-interval-seconds
+                                             #'agent-repl--sweep-expired-log-files))))))))
+
+(ert-deftest agent-repl-test-log-sweep-rescheduling-cancels-the-earlier-timer ()
+  "A second scheduling cancels the repeating timer the first armed."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--log-sweep-timer nil)
+          (cancelled nil))
+      (cl-letf (((symbol-function 'run-with-idle-timer) (lambda (&rest _) 'idle-timer))
+                ((symbol-function 'run-with-timer) (lambda (&rest _) (timer-create)))
+                ((symbol-function 'cancel-timer) (lambda (timer) (push timer cancelled))))
+        (let ((first (agent-repl-schedule-log-retention-sweep)))
+          ;; Act
+          (agent-repl-schedule-log-retention-sweep)
+          ;; Assert
+          (should (equal cancelled (list first))))))))
 
 (defmacro agent-repl-test--with-roster-dirs (dirs &rest body)
   "Run BODY with the last roster push naming exactly DIRS, closed or not."
@@ -6570,26 +6654,6 @@ restores them afterwards."
     (make-directory (file-name-directory canonical) t)
     (make-symbolic-link target canonical)
     canonical))
-
-(ert-deftest agent-repl-test-log-sweep-spares-a-target-a-closed-workspace-s-link-names ()
-  "A closed workspace has no tab; the roster's directory is what names its link."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let* ((dir (make-temp-file "agent-repl-sweep-closed-" t))
-           (workspace (make-temp-file "agent-repl-closed-ws-" t))
-           (target (expand-file-name "agent-repl-emacs-closed.log" dir))
-           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
-      (unwind-protect
-          (agent-repl-test--with-roster-dirs (list workspace)
-            (write-region "x" nil target nil 'silent)
-            (set-file-times target (time-subtract (current-time) (* 3 86400)))
-            (agent-repl-test--plant-emacs-log-link workspace target)
-            ;; Act
-            (agent-repl--sweep-orphan-log-targets dir)
-            ;; Assert
-            (should (file-exists-p target)))
-        (delete-directory dir t)
-        (delete-directory workspace t)))))
 
 (ert-deftest agent-repl-test-a-dangling-owned-log-link-is-retired ()
   "A roster workspace's link naming a removed target of ours is removed."
@@ -6639,51 +6703,6 @@ restores them afterwards."
               ;; Assert
               (should (equal (file-symlink-p canonical) foreign))))
         (delete-directory workspace t)))))
-
-(ert-deftest agent-repl-test-the-orphan-sweep-waits-for-the-first-roster-push ()
-  "With no roster yet, scheduling arms no timer and defers to the first push."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((agent-repl-roster-view nil)
-          (agent-repl-roster-update-functions nil)
-          (armed 0))
-      (cl-letf (((symbol-function 'run-with-idle-timer)
-                 (lambda (&rest _) (setq armed (1+ armed)) 'timer)))
-        ;; Act
-        (agent-repl-schedule-orphan-log-sweep)
-        ;; Assert
-        (should (equal armed 0))
-        (should (memq #'agent-repl--arm-orphan-log-sweep-on-first-roster
-                      agent-repl-roster-update-functions))))))
-
-(ert-deftest agent-repl-test-the-orphan-sweep-arms-at-once-when-a-roster-is-held ()
-  "With a roster already pushed, scheduling arms the idle timer immediately."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((agent-repl-roster-view '(:pushed t))
-          (agent-repl-roster-update-functions nil)
-          (armed 0))
-      (cl-letf (((symbol-function 'run-with-idle-timer)
-                 (lambda (&rest _) (setq armed (1+ armed)) 'timer)))
-        ;; Act
-        (agent-repl-schedule-orphan-log-sweep)
-        ;; Assert
-        (should (equal armed 1))))))
-
-(ert-deftest agent-repl-test-the-first-roster-push-arms-the-deferred-sweep-once ()
-  "The deferred arming runs on the first push and removes itself."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((agent-repl-roster-update-functions
-           (list #'agent-repl--arm-orphan-log-sweep-on-first-roster))
-          (armed 0))
-      (cl-letf (((symbol-function 'run-with-idle-timer)
-                 (lambda (&rest _) (setq armed (1+ armed)) 'timer)))
-        ;; Act
-        (run-hook-with-args 'agent-repl-roster-update-functions '(:pushed t))
-        (run-hook-with-args 'agent-repl-roster-update-functions '(:pushed t))
-        ;; Assert
-        (should (equal armed 1))))))
 
 (ert-deftest agent-repl-test-core-every-registered-boundary-is-defined ()
   "Every external-boundary registry entry names a function some source defines.

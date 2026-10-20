@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -272,16 +271,13 @@ func (r *run) gateNothing(ctx context.Context, round tabRound, paths []string, s
 	r.setStep(ctx, footer.StepTesting, nil)
 	// THE RUN IS A SUBTAB OF THE ONE TESTS TAB, which stands live again for it.
 	r.openTesting(round)
-	if err := os.MkdirAll(filepath.Dir(log.path), 0o755); err != nil {
-		return gateVerdict{}, fmt.Errorf("merge: creating the test log directory %s: %w", filepath.Dir(log.path), err)
-	}
 	body := fmt.Sprintf("no suite selected: %s\nchanged paths (%d):\n", selection.Reason, len(paths))
 	for _, path := range paths {
 		body += "  " + path + "\n"
 	}
 	body += "nothing ran.\n"
-	if err := os.WriteFile(log.path, []byte(body), 0o644); err != nil {
-		return gateVerdict{}, fmt.Errorf("merge: writing the test log %s: %w", log.path, err)
+	if err := writeTestLog(log, body); err != nil {
+		return gateVerdict{}, err
 	}
 	r.endRun(ctx, round, "", nil, r.o.testLogLink(log), "succeeded")
 	r.o.log(ctx, r.ws).Info("daemon.merge.tests", "no suite is selected for the merge's change; the gate passes without starting the runner", dlog.Context{
@@ -329,12 +325,9 @@ func (g *gateRun) link() *frontendv1.FeedMergeTestLog {
 // result. An error means the run could not be CLASSIFIED: the script could not
 // be spawned, or its log could not be written.
 func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) (GateResult, error) {
-	if err := os.MkdirAll(filepath.Dir(g.log.path), 0o755); err != nil {
-		return GateResult{}, fmt.Errorf("merge: creating the test log directory %s: %w", filepath.Dir(g.log.path), err)
-	}
-	file, err := os.Create(g.log.path)
+	file, err := createTestLog(g.log)
 	if err != nil {
-		return GateResult{}, fmt.Errorf("merge: creating the test log %s: %w", g.log.path, err)
+		return GateResult{}, err
 	}
 	g.written = true
 	writer := bufio.NewWriter(file)

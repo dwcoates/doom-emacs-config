@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
+	"agentrepl/logging"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -41,8 +43,48 @@ type testLog struct {
 func (o *orchestrator) testLog(lease ids.LeaseID, round int) testLog {
 	return testLog{
 		token: fmt.Sprintf("%s/%d", lease, round),
-		path:  filepath.Join(o.deps.StateDir, mergeLogsDir, fmt.Sprintf("%s-tests-%d.log", lease, round)),
+		path:  filepath.Join(TestLogsDir(o.deps.StateDir), fmt.Sprintf("%s-tests-%d.log", lease, round)),
 	}
+}
+
+// TestLogsDir is the directory every merge's test logs are written to, under
+// the state root stateDir. The daemon's log retention pass prunes it
+// (dlog.Surfaces.RetainDirectory) by IsTestLog.
+func TestLogsDir(stateDir string) string { return filepath.Join(stateDir, mergeLogsDir) }
+
+// testLogName matches the basename testLog gives a round's log.
+var testLogName = regexp.MustCompile(`^[0-9a-f]+-tests-[0-9]+\.log$`)
+
+// IsTestLog answers whether base names a round's test log.
+func IsTestLog(base string) bool { return testLogName.MatchString(base) }
+
+// createTestLog creates (or truncates) one round's log, its directory first,
+// under the shared lock the log retention pass honors, so a log is never
+// pruned while it is being written.
+func createTestLog(log testLog) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(log.path), 0o755); err != nil {
+		return nil, fmt.Errorf("merge: creating the test log directory %s: %w", filepath.Dir(log.path), err)
+	}
+	file, err := logging.CreateLocked(log.path)
+	if err != nil {
+		return nil, fmt.Errorf("merge: creating the test log %s: %w", log.path, err)
+	}
+	return file, nil
+}
+
+// writeTestLog writes one round's whole log at once.
+func writeTestLog(log testLog, body string) error {
+	file, err := createTestLog(log)
+	if err != nil {
+		return err
+	}
+	if _, err := file.WriteString(body); err != nil {
+		return errors.Join(fmt.Errorf("merge: writing the test log %s: %w", log.path, err), file.Close())
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("merge: writing the test log %s: %w", log.path, err)
+	}
+	return nil
 }
 
 // testLogLink is the tests tab's link to one log: the token, and the path with
@@ -71,7 +113,10 @@ func tildePath(path, home string) string {
 // TestLogPath resolves a token the tests tab served to the log's path, for
 // one workspace. A token that is malformed, names a merge that is not the
 // workspace's own, or names a log that is no longer there is REFUSED
-// (unknown_merge_test_log) and recorded at WARN.
+// (unknown_merge_test_log). The first two are recorded at WARN. A log of the
+// workspace's own merge that is gone is recorded at INFO: the log retention
+// pass removes every test log three days after its last write, so a link the
+// feed drew before then outliving its file is the ordinary course.
 func (o *orchestrator) TestLogPath(ctx context.Context, ws ids.WorkspaceID, token string) (string, error) {
 	const op = "daemon.merge.test_log"
 	log := o.log(ctx, ws)
@@ -103,7 +148,10 @@ func (o *orchestrator) TestLogPath(ctx context.Context, ws ids.WorkspaceID, toke
 	path := o.testLog(ids.LeaseID(lease), round).path
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", refusal(fmt.Sprintf("the log %s is no longer there", path))
+			why := fmt.Sprintf("the log %s is no longer there", path)
+			log.Info(op, "refused a test log token whose log aged out of the log retention", dlog.Context{
+				"workspace": string(ws), "token": token, "why": why, "retention": logging.DefaultRetention.String()})
+			return "", &RefusalError{Arm: ArmUnknownMergeTestLog, Workspace: ws, Reason: why}
 		}
 		log.Error(op, "could not read a test log's file", dlog.Context{"workspace": string(ws), "path": path, "error": err.Error()})
 		return "", err

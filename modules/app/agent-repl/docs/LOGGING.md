@@ -121,6 +121,9 @@ Emacs (lisp) — closed
   generations (`.1` newest through `.5` oldest) while the canonical
   `<workspace>/.claude/emacs/emacs.log` symlink continues to name the active
   target path. Oversized single records remain whole.
+- Every log file is deleted three days after its last write, by its own
+  writer or by a pruner that proves no writer holds it (`logging-contract.md`
+  "Retention").
 - `agent-repl--log-verbose` emits `level=debug`, `verbosity=verbose` and is
   durably governed by `AGENT_REPL_LOG_LEVEL` like every other Emacs record.
   The load-time default is `info`; `agent-repl-log-file-level` remains the

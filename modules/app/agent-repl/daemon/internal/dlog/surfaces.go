@@ -12,6 +12,8 @@ import (
 
 	"agent-repld/internal/dirpath"
 	"agentrepl/logging"
+
+	"golang.org/x/sys/unix"
 )
 
 // scanInterval is how often the periodic cap scan runs. The daemon's own
@@ -29,6 +31,13 @@ type surfaces struct {
 	// where every workspace sink's daemon-owned target is minted.
 	logsDir string
 	mirror  *mirror
+	// stdio is the daemon's stdout and stderr when Emacs's detacher pointed
+	// them at the stdio log, taken over so it rotates and ages like every
+	// other daemon log; nil when they are anything else (see adoptStdio).
+	stdio *stdioLog
+	// retained are the directories besides logsDir the retention pass
+	// prunes (RetainDirectory), under mu.
+	retained []retainedDir
 	// window is the process's live level: a level other than info reverts to
 	// info by itself when its window ends (see admits).
 	window *logging.Window
@@ -94,10 +103,13 @@ type surfaces struct {
 	counter atomic.Pointer[counterBox]
 
 	scanEvery time.Duration
-	stop      chan struct{}
-	stopOnce  sync.Once
-	scanDone  chan struct{}
-	shimRolls chan ShimRollRequest
+	// retainFirst and retainEvery schedule the retention pass (retention.go).
+	retainFirst time.Duration
+	retainEvery time.Duration
+	stop        chan struct{}
+	stopOnce    sync.Once
+	scanDone    chan struct{}
+	shimRolls   chan ShimRollRequest
 }
 
 // workspaceSinks are one workspace's durable sinks, opened lazily: a
@@ -143,7 +155,35 @@ func OpenSurfaces(runLog string) (Surfaces, *logging.Window, error) {
 	if message, ok := sel.Note(); ok {
 		s.Global().Info(levelWindowOperation, message, Context(sel.Context()))
 	}
+	if err := s.adoptStdio(os.Stderr, []int{1, 2}, unix.Dup2); err != nil {
+		return nil, nil, errors.Join(err, s.Close())
+	}
 	return s, window, nil
+}
+
+// adoptStdio takes over the stdio log when std is it, and ages it at once: a
+// stdio log that grew past the cap before this daemon is rolled at boot rather
+// than an hour into the run.
+func (s *surfaces) adoptStdio(std *os.File, fds []int, dup func(oldfd, newfd int) error) error {
+	l, err := adoptStdio(s.logsDir, std, fds, dup)
+	if err != nil {
+		return fmt.Errorf("take over the daemon's stdio log (boot fatal): %w", err)
+	}
+	if l == nil {
+		s.Global().Debug("daemon.dlog.stdio_not_adopted", "the daemon's stderr is not the stdio log, so nothing takes it over", Context{
+			"stdio_log": filepath.Join(s.logsDir, StdioLogName),
+		})
+		return nil
+	}
+	s.mu.Lock()
+	s.stdio = l
+	s.mu.Unlock()
+	var pass retentionPass
+	retainStdio(s, l, s.now(), &pass)
+	s.Global().Info("daemon.dlog.stdio_adopted", "took over the stdio log so it rotates and ages like every other daemon log", Context{
+		"stdio_log": l.path, "rolled": pass.stdioRolled, "removed": pass.removed,
+	})
+	return nil
 }
 
 // mirrorsErrorsOnly answers whether F, the daemon's stderr, gets ERROR records
@@ -182,21 +222,23 @@ func openSurfacesWindow(runLogPath string, window *logging.Window, terminal inte
 		return nil, fmt.Errorf("open the daemon run log (boot fatal): %w", err)
 	}
 	s := &surfaces{
-		runLog:     rl,
-		logsDir:    filepath.Dir(runLogPath),
-		mirror:     newMirror(terminal, mirrorDepth, errorsOnly),
-		window:     window,
-		pid:        os.Getpid(),
-		now:        time.Now,
-		workspaces: make(map[string]*workspaceSinks),
-		targets:    make(map[string]string),
-		detached:   make(map[string]struct{}),
-		keys:       make(map[string]string),
-		canonical:  dirpath.Canonical,
-		scanEvery:  scanInterval,
-		stop:       make(chan struct{}),
-		scanDone:   make(chan struct{}),
-		shimRolls:  make(chan ShimRollRequest, 128),
+		runLog:      rl,
+		logsDir:     filepath.Dir(runLogPath),
+		mirror:      newMirror(terminal, mirrorDepth, errorsOnly),
+		window:      window,
+		pid:         os.Getpid(),
+		now:         time.Now,
+		workspaces:  make(map[string]*workspaceSinks),
+		targets:     make(map[string]string),
+		detached:    make(map[string]struct{}),
+		keys:        make(map[string]string),
+		canonical:   dirpath.Canonical,
+		scanEvery:   scanInterval,
+		retainFirst: retentionFirst,
+		retainEvery: retentionEvery,
+		stop:        make(chan struct{}),
+		scanDone:    make(chan struct{}),
+		shimRolls:   make(chan ShimRollRequest, 128),
 	}
 	go s.scanLoop()
 	return s, nil
@@ -712,6 +754,14 @@ func (s *surfaces) Close() error {
 	if err := s.runLog.close(); err != nil && firstErr == nil {
 		firstErr = err
 	}
+	s.mu.Lock()
+	stdio := s.stdio
+	s.mu.Unlock()
+	if stdio != nil {
+		if err := stdio.close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
 	s.mirror.close()
 	return firstErr
 }
@@ -869,38 +919,51 @@ func (s *surfaces) reportSinkOpened(ws *workspaceSinks, name string, sk *sink, r
 	})
 }
 
-// scanLoop runs the periodic cap scan until Close.
+// scanLoop runs the periodic cap scan and the retention pass until Close.
 func (s *surfaces) scanLoop() {
 	defer close(s.scanDone)
 	t := time.NewTicker(s.scanEvery)
 	defer t.Stop()
+	retain := time.NewTimer(s.retainFirst)
+	defer retain.Stop()
 	for {
 		select {
 		case <-t.C:
 			s.scanOnce()
+		case <-retain.C:
+			s.retainOnce(s.now())
+			retain.Reset(s.retainEvery)
 		case <-s.stop:
 			return
 		}
 	}
 }
 
+// sinkEntry is one open sink with the workspace and name it is held under.
+type sinkEntry struct {
+	ws   *workspaceSinks
+	name string
+	sk   *sink
+}
+
+// openSinks snapshots every open sink under mu, so a periodic pass can work
+// through them without holding mu while it touches files.
+func (s *surfaces) openSinks() []sinkEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries := make([]sinkEntry, 0, len(s.workspaces)*len(SinkNames))
+	for _, ws := range s.workspaces {
+		for name, sk := range ws.sinks {
+			entries = append(entries, sinkEntry{ws: ws, name: name, sk: sk})
+		}
+	}
+	return entries
+}
+
 // scanOnce enforces the cap on every open sink from the file's real size,
 // which is the only way the shim's fd-3 writes are ever counted.
 func (s *surfaces) scanOnce() {
-	type entry struct {
-		ws   *workspaceSinks
-		name string
-		sk   *sink
-	}
-	s.mu.Lock()
-	entries := make([]entry, 0, len(s.workspaces)*len(SinkNames))
-	for _, ws := range s.workspaces {
-		for name, sk := range ws.sinks {
-			entries = append(entries, entry{ws: ws, name: name, sk: sk})
-		}
-	}
-	s.mu.Unlock()
-	for _, e := range entries {
+	for _, e := range s.openSinks() {
 		result, err := e.sk.scan()
 		if err != nil {
 			s.reportSinkFailure(e.ws, e.name, err)

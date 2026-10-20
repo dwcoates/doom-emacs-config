@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"agentrepl/logging"
 )
@@ -385,6 +386,72 @@ func (s *sink) scan() (scanResult, error) {
 		}
 	}
 	return result, nil
+}
+
+// sinkExpiry is what one sink's expiry did.
+type sinkExpiry struct {
+	// rolled says a daemon-written target was past the retention and was
+	// rolled, so its next record starts a fresh file.
+	rolled bool
+	// marked says a shim target was past the retention and was marked to roll
+	// with the workspace's next shim process: the shim's inherited descriptor
+	// cannot be swapped beneath it.
+	marked bool
+	// removed are the generations removed.
+	removed []string
+}
+
+// expire ages this sink's family by logging.DefaultRetention. A target past
+// it is rolled exactly as the cap rolls it -- the link verified first and
+// re-pointed after -- or, for the shim, marked to roll at the next process
+// boundary; then every generation past it is removed.
+//
+// A failed roll poisons the sink exactly as a failed cap roll does. A failed
+// generation removal does not: the sink still holds a sound current file, and
+// the failure is returned for the caller to record.
+func (s *sink) expire(now time.Time) (sinkExpiry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.poison != nil {
+		return sinkExpiry{}, s.poison
+	}
+	if s.closed {
+		// A released handle holds no lock, so the directory prune ages it.
+		return sinkExpiry{}, nil
+	}
+	expired, err := s.file.CurrentExpired(now)
+	if err != nil {
+		s.poisonLocked(fmt.Errorf("age log target %q: %w", s.target, err))
+		return sinkExpiry{}, s.poison
+	}
+	var out sinkExpiry
+	if expired {
+		if s.name == "shim" {
+			if !s.rotatePending {
+				s.rotatePending = true
+				out.marked = true
+			}
+		} else {
+			if err := s.verifyLinkLocked("age rotation"); err != nil {
+				return sinkExpiry{}, err
+			}
+			if err := s.file.Roll(); err != nil {
+				s.poisonLocked(fmt.Errorf("roll the expired log target %q: %w", s.target, err))
+				return sinkExpiry{}, s.poison
+			}
+			if err := s.repointAfterRollLocked(); err != nil {
+				return sinkExpiry{}, err
+			}
+			s.size = 0
+			out.rolled = true
+		}
+	}
+	removed, err := s.file.ExpireGenerations(now)
+	out.removed = removed
+	if err != nil {
+		return out, fmt.Errorf("expire the generations of log target %q: %w", s.target, err)
+	}
+	return out, nil
 }
 
 // retryHardReport lets the next cap scan retry the canonical error record and

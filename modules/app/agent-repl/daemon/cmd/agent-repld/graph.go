@@ -1179,6 +1179,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the merge orchestrator: %w", err)
 	}
+	// Every merge's test log is aged by the daemon's log retention pass, like
+	// every other log the daemon writes.
+	p.Surfaces.RetainDirectory(merge.TestLogsDir(p.Layout.Dir()), merge.IsTestLog)
 	mergeMover.bind(mergeOrchestrator)
 	ejectCold = func(ws ids.WorkspaceID) {
 		const op = "daemon.merge.cold_gate"
