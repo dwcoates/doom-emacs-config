@@ -856,6 +856,43 @@ decision is recorded at INFO, as the roster's follow records its own."
         (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=moved from=%s page=%s"
                           ws shown (if page "shown" "none")))))))
 
+(defun agent-repl-host--send-subject-verb (ws op rpc on-success on-not-sent)
+  "Send workspace WS\='s ref through the workspace-subject verb RPC.
+OP is the verb\='s record slug (`elisp.host.<op>\=', `<op>-skipped\=',
+`<op>-refused\=', `<op>-unknown-arm\=', `<op>-failed\=').  ON-SUCCESS is
+called with no argument once the daemon answers success, and ON-NOT-SENT
+with no argument on every other outcome: no ref or no connection yet (WS
+is not sent), a refusal (recorded by `agent-repl-host--on-refused\='), an
+arm the verb does not know, or a transport failure (both at ERROR).
+Answers t when the call was made, nil when it was not."
+  (let ((ref (agent-repl-host-ref ws))
+        (conn (agent-repl-host-conn-or-primary ws)))
+    (cond
+     ((or (null ref) (null conn))
+      (agent-repl--log ws (format "elisp.host.%s-skipped ws=%%s reason=%%s" op)
+                       ws (if ref "no-connection" "no-ref"))
+      (funcall on-not-sent)
+      nil)
+     (t
+      (agent-repl--log ws (format "elisp.host.%s ws=%%s id=%%S" op) ws (plist-get ref :id))
+      (funcall
+       rpc conn (list :workspace ref)
+       :on-response
+       (lambda (response)
+         (pcase (plist-get response :arm)
+           (:success (funcall on-success))
+           (:error
+            (agent-repl-host--on-refused ws op (plist-get response :value))
+            (funcall on-not-sent))
+           (arm
+            (agent-repl--error ws (format "elisp.host.%s-unknown-arm ws=%%s arm=%%S" op) ws arm)
+            (funcall on-not-sent))))
+       :on-failure
+       (lambda (detail)
+         (agent-repl--error ws (format "elisp.host.%s-failed ws=%%s detail=%%S" op) ws detail)
+         (funcall on-not-sent)))
+      t))))
+
 (defun agent-repl-host-report-page-unloading (ws on-reported on-not-reported)
   "Tell the daemon Emacs is about to unload workspace WS\='s page on purpose.
 ON-REPORTED is called with no argument once the daemon has answered
@@ -864,37 +901,13 @@ of the page\='s web stream is deliberate before it can end
 \(endpoint_report_page_unloading.proto).  Any other outcome calls
 ON-NOT-REPORTED with no argument and the page stays loaded: unloading is a
 performance measure, and a page kept loaded costs nothing the user sees.
-
-A refusal is recorded by `agent-repl-host--on-refused', a transport
-failure at ERROR.  WS with no ref or no connection yet is not reported and
-calls ON-NOT-REPORTED at once."
-  (let ((ref (agent-repl-host-ref ws))
-        (conn (agent-repl-host-conn-or-primary ws)))
-    (cond
-     ((or (null ref) (null conn))
-      (agent-repl--log ws "elisp.host.page-unloading-skipped ws=%s reason=%s"
-                       ws (if ref "no-connection" "no-ref"))
-      (funcall on-not-reported))
-     (t
-      (agent-repl--log ws "elisp.host.page-unloading ws=%s id=%S" ws (plist-get ref :id))
-      (agent-repl-rpc-report-page-unloading
-       conn (list :workspace ref)
-       :on-response
-       (lambda (response)
-         (pcase (plist-get response :arm)
-           (:success
-            (agent-repl--log ws "elisp.host.page-unloading-reported ws=%s" ws)
-            (funcall on-reported))
-           (:error
-            (agent-repl-host--on-refused ws "page-unloading" (plist-get response :value))
-            (funcall on-not-reported))
-           (arm
-            (agent-repl--error ws "elisp.host.page-unloading-unknown-arm ws=%s arm=%S" ws arm)
-            (funcall on-not-reported))))
-       :on-failure
-       (lambda (detail)
-         (agent-repl--error ws "elisp.host.page-unloading-failed ws=%s detail=%S" ws detail)
-         (funcall on-not-reported)))))))
+The outcomes are recorded by `agent-repl-host--send-subject-verb\='."
+  (agent-repl-host--send-subject-verb
+   ws "page-unloading" #'agent-repl-rpc-report-page-unloading
+   (lambda ()
+     (agent-repl--log ws "elisp.host.page-unloading-reported ws=%s" ws)
+     (funcall on-reported))
+   on-not-reported))
 
 (defun agent-repl-host-mark-viewed (ws)
   "Tell the daemon the user has now SEEN workspace WS.
@@ -911,34 +924,10 @@ there is no local state to roll back to.
 
 Answers nil without calling anything when WS has no ref or no connection
 yet: an unregistered workspace has no row to mark."
-  (let ((ref (agent-repl-host-ref ws))
-        (conn (agent-repl-host-conn-or-primary ws)))
-    (cond
-     ((null ref)
-      (agent-repl--log ws "elisp.host.mark-viewed-skipped ws=%s reason=no-ref" ws)
-      nil)
-     ((null conn)
-      (agent-repl--log ws "elisp.host.mark-viewed-skipped ws=%s reason=no-connection" ws)
-      nil)
-     (t
-      (agent-repl--log ws "elisp.host.mark-viewed ws=%s id=%S" ws (plist-get ref :id))
-      (agent-repl-rpc-mark-workspace-viewed
-       conn (list :workspace ref)
-       :on-response
-       (lambda (response)
-         (pcase (plist-get response :arm)
-           (:success
-            (agent-repl--log ws "elisp.host.marked-viewed ws=%s" ws))
-           (:error
-            (agent-repl-host--on-refused ws "mark-viewed" (plist-get response :value)))
-           (arm
-            (agent-repl--error ws "elisp.host.mark-viewed-unknown-arm ws=%s arm=%S"
-                               ws arm))))
-       :on-failure
-       (lambda (detail)
-         (agent-repl--error ws "elisp.host.mark-viewed-failed ws=%s detail=%S"
-                            ws detail)))
-      t))))
+  (agent-repl-host--send-subject-verb
+   ws "mark-viewed" #'agent-repl-rpc-mark-workspace-viewed
+   (lambda () (agent-repl--log ws "elisp.host.marked-viewed ws=%s" ws))
+   #'ignore))
 
 (defun agent-repl-host--on-workspace-activated (&rest _)
   "Tell the daemon about a perspective activation Emacs made on its own.

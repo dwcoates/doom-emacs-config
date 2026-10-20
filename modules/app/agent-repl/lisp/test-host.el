@@ -579,6 +579,48 @@ looked at."
     ;; Assert
     (should (agent-repl-test-host--logged-p :error "elisp.host.mark-viewed-failed"))))
 
+;;;; ---- The workspace-subject verbs' one sender ----
+
+(ert-deftest agent-repl-test-host-subject-verb-skip-records-its-reason ()
+  "A workspace with no ref is not sent, records why, and runs ON-NOT-SENT."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let (not-sent)
+      ;; Act
+      (let ((sent (agent-repl-host--send-subject-verb
+                   "ws-unknown" "some-verb" #'agent-repl-rpc-mark-workspace-viewed
+                   #'ignore (lambda () (setq not-sent t)))))
+        ;; Assert
+        (should (equal (list sent not-sent) '(nil t)))
+        (should (null agent-repl-test-host--calls))))))
+
+(ert-deftest agent-repl-test-host-subject-verb-success-runs-on-success-alone ()
+  "A success answer runs ON-SUCCESS and never ON-NOT-SENT."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let (ran)
+      ;; Act
+      (agent-repl-host--send-subject-verb
+       "ws-1" "some-verb" #'agent-repl-rpc-mark-workspace-viewed
+       (lambda () (push 'success ran)) (lambda () (push 'not-sent ran)))
+      ;; Assert
+      (should (equal ran '(success))))))
+
+(ert-deftest agent-repl-test-host-every-subject-verb-shares-the-one-sender ()
+  "MarkWorkspaceViewed and ReportPageUnloading both send through the one sender.
+A hand-rolled copy of either would not be recorded here."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let (ops)
+      (cl-letf (((symbol-function 'agent-repl-host--send-subject-verb)
+                 (lambda (_ws op &rest _) (push op ops) t)))
+        ;; Act
+        (agent-repl-host-mark-viewed "ws-1")
+        (agent-repl-host-report-page-unloading "ws-1" #'ignore #'ignore))
+      ;; Assert
+      (should (equal (reverse ops) '("mark-viewed" "page-unloading"))))))
+
 ;;;; ---- Report page unloading ----
 
 (defun agent-repl-test-host--report-unloading (ws)
