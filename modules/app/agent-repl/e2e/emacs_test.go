@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -85,7 +86,7 @@ import (
 // 987ms one, and still well under the 5s command-loop block this exists to
 // catch.
 //
-// KEPT ON THE GRANTED CLOCK since 2026-10-20 (grantedclock_test.go): a probe
+// KEPT ON THE GRANTED CLOCK since 2026-10-20 (the grantedclock package): a probe
 // is charged only the time the container was not starved. On wall time a
 // merge gate failed TestEmacsUnknownRosterArmIsRefusedLoudly as EMACS WEDGED
 // at 3.196s while the container was throttled in 32 of 32 periods and Emacs
@@ -357,8 +358,8 @@ type Emacs struct {
 	proc sandboxProc
 
 	// cpuStall reads the container's cumulative CPU stall, which every
-	// server call's granted clock is kept on (grantedclock_test.go).
-	// StartEmacs sets it to containerCPUStall.
+	// server call's granted clock is kept on (the grantedclock package).
+	// StartEmacs sets it to grantedclock.CgroupCPUStall.
 	cpuStall func() (time.Duration, error)
 
 	// evalSeq names each eval's request/response file pair uniquely.
@@ -446,7 +447,7 @@ func (e *Emacs) record(name string, took time.Duration) {
 }
 
 // recordGranted notes a phase measured on the granted clock.
-func (e *Emacs) recordGranted(name string, span grantedSpan) {
+func (e *Emacs) recordGranted(name string, span grantedclock.Span) {
 	e.phasesMu.Lock()
 	defer e.phasesMu.Unlock()
 	e.phases = append(e.phases, phase{name: name, took: span.Granted(), wall: span.Wall})
@@ -569,7 +570,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		MultiRepoRoot:      filepath.Join(root, "multi-repo"),
 		wedged:             make(chan struct{}),
 		stopDaemon:         opts.StopDaemon,
-		cpuStall:           containerCPUStall,
+		cpuStall:           grantedclock.CgroupCPUStall,
 	}
 	// EVERY SERVER CALL'S BOUND IS KEPT ON THE CONTAINER'S CPU STALL, so a
 	// container that cannot report it cannot run this layer: refused here,
@@ -2603,7 +2604,7 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 
 // emacsclient asks this Emacs's server to evaluate FORM and answers what it
 // printed, giving up once the call has been GRANTED more than BOUND (see
-// grantedclock_test.go) or CTX ends. SPAN is how long the call took on the
+// the grantedclock package) or CTX ends. SPAN is how long the call took on the
 // granted clock, which is what the layer's bounds are measured in.
 //
 // It is the ONE way this layer reaches the server socket: the heartbeat, the
@@ -2611,10 +2612,10 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 // and the stall evidence all ride it, so what counts against a call's bound
 // is decided here once rather than at each site -- and it is never the time
 // the container spent with no CPU to give the call.
-func (e *Emacs) emacsclient(ctx context.Context, bound time.Duration, form string) (out string, span grantedSpan, err error) {
+func (e *Emacs) emacsclient(ctx context.Context, bound time.Duration, form string) (out string, span grantedclock.Span, err error) {
 	clock, err := e.startGrantedClock()
 	if err != nil {
-		return "", grantedSpan{}, err
+		return "", grantedclock.Span{}, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -2629,7 +2630,7 @@ func (e *Emacs) emacsclient(ctx context.Context, bound time.Duration, form strin
 	}()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
-	r, answered, span, waitErr := awaitGranted(replies, ticker.C, clock, bound)
+	r, answered, span, waitErr := grantedclock.Await(replies, ticker.C, clock, bound)
 	if answered {
 		if waitErr != nil {
 			return r.out, span, waitErr
@@ -2643,7 +2644,7 @@ func (e *Emacs) emacsclient(ctx context.Context, bound time.Duration, form strin
 		// It answered in the instant between the clock's last reading and
 		// the kill, so the bound was beaten after all.
 		return r.out, span, nil
-	case errors.Is(waitErr, errGrantedBoundRunOut):
+	case errors.Is(waitErr, grantedclock.ErrBoundRunOut):
 		return r.out, span, &unansweredError{bound: bound, span: span, err: r.err}
 	default:
 		return r.out, span, fmt.Errorf("%w (emacsclient, stopped for it: %v)", waitErr, r.err)
@@ -2651,15 +2652,15 @@ func (e *Emacs) emacsclient(ctx context.Context, bound time.Duration, form strin
 }
 
 // startGrantedClock starts a granted clock on this container's CPU stall.
-func (e *Emacs) startGrantedClock() (*grantedClock, error) {
-	return startGrantedClock(time.Now, e.cpuStall)
+func (e *Emacs) startGrantedClock() (*grantedclock.Clock, error) {
+	return grantedclock.Start(time.Now, e.cpuStall)
 }
 
 // unansweredError is an emacsclient call the granted clock gave more than
 // its bound without an answer.
 type unansweredError struct {
 	bound time.Duration
-	span  grantedSpan
+	span  grantedclock.Span
 	err   error
 }
 
@@ -3085,7 +3086,7 @@ func (e *Emacs) AwaitEvalFor(bound time.Duration, what, form string, pred func(j
 	defer ticker.Stop()
 	var lastValue, satisfied json.RawMessage
 	var lastErr error
-	span, err := pollUntilGranted(ticker.C, clock, bound, func() bool {
+	span, err := grantedclock.PollUntil(ticker.C, clock, bound, func() bool {
 		if e.isWedged() {
 			e.t.Fatalf("await %s: emacs wedged: %s", what, e.wedgeCauseString())
 		}
@@ -3113,7 +3114,7 @@ func (e *Emacs) AwaitEvalFor(bound time.Duration, what, form string, pred func(j
 	case err == nil:
 		e.recordGranted("await "+what, span)
 		return satisfied
-	case !errors.Is(err, errGrantedBoundRunOut):
+	case !errors.Is(err, grantedclock.ErrBoundRunOut):
 		e.t.Fatalf("await %s: %v", what, err)
 	case lastErr != nil:
 		e.t.Fatalf("await %s: never satisfied within %s granted (%s); last attempt failed: %v", what, bound, span, lastErr)
