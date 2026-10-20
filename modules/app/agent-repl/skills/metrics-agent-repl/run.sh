@@ -220,8 +220,12 @@ case "${1:-}" in
     days="${3:-30}"
     [[ "$days" =~ ^[0-9]+$ ]] || die "days must be a whole number, not $days"
     range_args $((days * 24)) 1d
-    cpu="$(promql_data query_range "sum(increase_pure(agentrepl_process_cpu_seconds_total{process=\"$2\"}[1d])) / 86400" "${RANGE_ARGS[@]}")" || exit 2
-    mem="$(promql_data query_range "sum(avg_over_time(agentrepl_process_footprint_bytes{process=\"$2\"}[1d]))" "${RANGE_ARGS[@]}")" || exit 2
+    # THE GROUP IS SUMMED AT EACH INSTANT, THEN AVERAGED OVER THE DAY: summing
+    # per-series daily averages would add every daemon run's own average
+    # (each run is its own series), and dividing a day's increase by a whole
+    # day would understate a day the store saw only part of.
+    cpu="$(promql_data query_range "avg_over_time((sum(increase_pure(agentrepl_process_cpu_seconds_total{process=\"$2\"}[5m])) / 300)[1d:5m])" "${RANGE_ARGS[@]}")" || exit 2
+    mem="$(promql_data query_range "avg_over_time(sum(agentrepl_process_footprint_bytes{process=\"$2\"})[1d:5m])" "${RANGE_ARGS[@]}")" || exit 2
     lines="$(jq -rn --argjson cpu "$cpu" --argjson mem "$mem" '
       ([$cpu[0].values // [] | .[] | {key: (.[0] | tostring), value: .[1]}] | from_entries) as $c
       | ([$mem[0].values // [] | .[] | {key: (.[0] | tostring), value: .[1]}] | from_entries) as $m
