@@ -907,6 +907,65 @@ func TestYieldMergeHeadRefusesAWinnerNotAdmitted(t *testing.T) {
 	}
 }
 
+func TestYieldMergeHeadAnswersAHeadThatLeftTheQueue(t *testing.T) {
+	// Arrange: the head left its queue (it failed, landed or was abandoned)
+	// before the merge behind it could record the race it won.
+	s, log := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	loser, winner := testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, loser.ID, instant)
+	queued(t, s, repo, winner.ID, instant.Add(time.Minute))
+	for _, id := range []WorkspaceID{loser.ID, winner.ID} {
+		if err := s.AdmitMerge(ctx, repo, id); err != nil {
+			t.Fatalf("AdmitMerge: %v", err)
+		}
+	}
+	if err := s.RemoveMergeQueueEntry(ctx, repo, loser.ID, "failed"); err != nil {
+		t.Fatalf("RemoveMergeQueueEntry: %v", err)
+	}
+
+	// Act
+	err := s.YieldMergeHead(ctx, repo, loser.ID, winner.ID)
+
+	// Assert
+	if !errors.Is(err, ErrMergeHeadLeft) {
+		t.Fatalf("YieldMergeHead = %v, want ErrMergeHeadLeft", err)
+	}
+	for _, rec := range log.Records() {
+		if rec.Level == "error" {
+			t.Fatalf("a head that left its queue was recorded at ERROR: %v", rec)
+		}
+	}
+	got, readErr := s.MergeQueue(ctx, repo)
+	if readErr != nil {
+		t.Fatalf("MergeQueue: %v", readErr)
+	}
+	if len(got) != 1 || got[0].Workspace != winner.ID || got[0].State != MergeAdmitted {
+		t.Fatalf("queue = %+v, want the winner alone, admitted", got)
+	}
+}
+
+func TestYieldMergeHeadRefusesAWinnerNotInLineAsNoHeadThatLeft(t *testing.T) {
+	// Arrange: the head is in line; the merge claiming to overtake it is not.
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	loser, winner := testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, loser.ID, instant)
+	if err := s.AdmitMerge(ctx, repo, loser.ID); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+
+	// Act
+	err := s.YieldMergeHead(ctx, repo, loser.ID, winner.ID)
+
+	// Assert
+	if err == nil || errors.Is(err, ErrMergeHeadLeft) {
+		t.Fatalf("YieldMergeHead = %v, want a refusal that is not ErrMergeHeadLeft", err)
+	}
+}
+
 func TestRemoveMergeQueueEntryRenumbersTheRest(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

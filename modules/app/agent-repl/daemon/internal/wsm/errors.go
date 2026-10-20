@@ -46,6 +46,14 @@ var ErrRepositoryInUse = errors.New("wsm: repository still has an open workspace
 // closes, so the prompt must take the path a workspace with no merge takes.
 var ErrMergeLeaseGone = errors.New("wsm: no merge lease stands to hold the prompt")
 
+// ErrMergeHeadLeft answers a race to land whose head left its queue -- it
+// landed, failed or was abandoned -- before the race could be recorded. The
+// head's leaving and the yield are decided by one transaction each, so one of
+// them commits first; this is the answer when the leaving did, and the race
+// is then no race: the merge behind simply heads the queue. It wraps
+// ErrNotFound, because the head's entry is what is not there.
+var ErrMergeHeadLeft = fmt.Errorf("wsm: the head a race to land overtakes has left its queue: %w", ErrNotFound)
+
 // LayoutError refuses a database file whose layout version this build cannot
 // interpret. It is NOT the ordinary answer to a version mismatch: a file
 // stamped OLDER is migrated forward (see migrate.go), because the workspace

@@ -666,6 +666,9 @@ func (f *fakeDB) YieldMergeHead(_ context.Context, repo wsm.RepoKey, loser, winn
 			wi = i
 		}
 	}
+	if li < 0 {
+		return fmt.Errorf("yield %s to %s: %w", loser, winner, wsm.ErrMergeHeadLeft)
+	}
 	if li < 0 || wi < 0 || li >= wi || queue[li].State != wsm.MergeAdmitted || queue[wi].State != wsm.MergeAdmitted {
 		return fmt.Errorf("yield %s to %s: not two admitted entries in that order", loser, winner)
 	}

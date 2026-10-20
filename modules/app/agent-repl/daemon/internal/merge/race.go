@@ -35,9 +35,16 @@ import (
 // (resumeAttempt).
 //
 // THE DECISION IS ATOMIC UNDER THE ORCHESTRATOR'S LOCK. A head that has begun
-// committing (beginLanding) is never overtaken, and a head being overtaken
-// never begins committing: it waits for the stop, or, if the overtaking could
-// not be recorded, goes on.
+// committing (beginLanding), or has entered its terminal, is never overtaken,
+// and a head being overtaken never begins committing: it waits for the stop,
+// or, if the overtaking could not be recorded, goes on.
+//
+// THE HEAD'S LEAVING AND THE YIELD ARE DECIDED BY THE STORE. A head that is
+// not committing can still fail or be abandoned after the race was claimed,
+// and its queue entry then goes in a transaction of its own. Whichever of
+// that removal and YieldMergeHead commits first decides: a yield that finds
+// the head gone answers wsm.ErrMergeHeadLeft, and there is no race -- the
+// merge behind it simply heads the queue.
 
 // raceLost is the cause a head that lost the race to land is stopped with.
 type raceLost struct{ winner ids.WorkspaceID }
@@ -136,6 +143,12 @@ func (o *orchestrator) claimRace(ctx context.Context, r *run, base string) {
 			"workspace": string(r.ws), "head": string(head.ws)})
 		return
 	}
+	if _, ending := o.terminals[head.ws]; ending {
+		o.mu.Unlock()
+		log.Debug(op, "the head is already ending; the merge behind it heads the queue once it has left", dlog.Context{
+			"workspace": string(r.ws), "head": string(head.ws)})
+		return
+	}
 	ot := &overtaking{head: head, done: make(chan struct{})}
 	o.overtakings[r.repo] = ot
 	o.mu.Unlock()
@@ -145,7 +158,19 @@ func (o *orchestrator) claimRace(ctx context.Context, r *run, base string) {
 		o.mu.Unlock()
 		close(ot.done)
 	}()
-	if err := o.deps.DB.YieldMergeHead(context.WithoutCancel(ctx), r.repo, head.ws, r.ws); err != nil {
+	// THE TEST SEAM, NIL IN PRODUCTION: the window between the race's claim
+	// and its record, where the head can still leave the queue.
+	if o.onRaceClaimed != nil {
+		o.onRaceClaimed(head.ws)
+	}
+	err = o.deps.DB.YieldMergeHead(context.WithoutCancel(ctx), r.repo, head.ws, r.ws)
+	if errors.Is(err, wsm.ErrMergeHeadLeft) {
+		log.Info(op, "the head left the queue before the race to land was recorded; there is no race, and the merge behind it heads the queue", dlog.Context{
+			"workspace": string(r.ws), "head": string(head.ws), "tip": tip})
+		o.kick(r.repo)
+		return
+	}
+	if err != nil {
 		log.Error(op, "could not record the race to land the merge won; the head goes on and lands first", dlog.Context{
 			"workspace": string(r.ws), "head": string(head.ws), "error": err.Error()})
 		return
