@@ -107,7 +107,7 @@ func TestKinfoIdentityNamesTheProcessWithoutItsArgv(t *testing.T) {
 func TestMayBeThisRunsStray(t *testing.T) {
 	// Arrange: the test binary (100) runs a daemon (110) that runs a shim
 	// (120); 130 is an orphan; another run's binary (200) runs a child (210).
-	parents := map[int]int{100: 50, 50: 1, 110: 100, 120: 110, 130: 1, 200: 60, 60: 1, 210: 200}
+	parents := map[int]int{100: 50, 50: 1, 110: 100, 120: 110, 130: 1, 140: 4242, 200: 60, 60: 1, 210: 200}
 	tests := []struct {
 		name string
 		pid  int
@@ -117,6 +117,7 @@ func TestMayBeThisRunsStray(t *testing.T) {
 		{"its daemon", 110, true},
 		{"the daemon's shim", 120, true},
 		{"an orphan reparented to launchd", 130, true},
+		{"one whose parent has just exited", 140, true},
 		{"another run's live child", 210, false},
 		{"another run's binary", 200, false},
 		{"a process the table does not hold", 999, false},
