@@ -54,7 +54,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/feed_held.proto.
  */
 export const file_frontend_v1_feed_held: GenFile = /*@__PURE__*/
-  fileDesc("Chtmcm9udGVuZC92MS9mZWVkX2hlbGQucHJvdG8SC2Zyb250ZW5kLnYxIjQKCEZlZWRIZWxkEigKBWl0ZW1zGAEgAygLMhkuZnJvbnRlbmQudjEuRmVlZEhlbGRJdGVtInwKDEZlZWRIZWxkSXRlbRIfCgJpZBgBIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZBIpCgZwcm9tcHQYAyABKAsyFy5mcm9udGVuZC52MS5IZWxkUHJvbXB0SABCBgoEaXRlbUoECAIQA0oECAQQBVIFbWVyZ2VSBW9mZmVyIoALCgpIZWxkUHJvbXB0EiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEicKBHNhaWQYAiABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSMgoJcXVldWVkX2F0GAMgASgLMh8uZnJvbnRlbmQudjEuSGVsZFByb21wdFF1ZXVlZEF0EjkKC2NsYXNzaWZ5aW5nGAQgASgLMiIuZnJvbnRlbmQudjEuSGVsZFByb21wdENsYXNzaWZ5aW5nSAASNQoJaW50ZXJqZWN0GAUgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEludGVyamVjdEgAEkIKEWhvbGRfZm9yX3R1cm5fZW5kGAYgASgLMiUuZnJvbnRlbmQudjEuSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kSAASPwoPYWZ0ZXJfdG9vbF9jYWxsGBEgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdEFmdGVyVG9vbENhbGxIABJKChR1bmludGVycnVwdGlibGVfdHVybhgHIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRVbmludGVycnVwdGlibGVUdXJuSAASSgoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvckgAEjgKC2RhZW1vbl9oZWxkGBMgASgLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdERhZW1vbkhlbGRIABJEChFhd2FpdGluZ19kZWxpdmVyeRgXIAEoCzInLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRBd2FpdGluZ0RlbGl2ZXJ5SAASNwoIc2h1dGRvd24YCSABKAsyIy5mcm9udGVuZC52MS5IZWxkUHJvbXB0U2h1dGRvd25Ib2xkSAESOQoJcmVjb25uZWN0GAsgASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdFJlY29ubmVjdEhvbGRIARJACg1idWlsZF9yZWZyZXNoGAwgASgLMicuZnJvbnRlbmQudjEuSGVsZFByb21wdEJ1aWxkUmVmcmVzaEhvbGRIARIxCgVtZXJnZRgUIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRNZXJnZUhvbGRIARI4Cgljb2xkX2dhdGUYGCABKAsyIy5mcm9udGVuZC52MS5IZWxkUHJvbXB0Q29sZEdhdGVIb2xkSAESSQoSY29sZF9nYXRlX2Fuc3dlcmVkGBkgASgLMisuZnJvbnRlbmQudjEuSGVsZFByb21wdENvbGRHYXRlQW5zd2VyZWRIb2xkSAESLwoHZWRpdGluZxgNIAEoCzIeLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRFZGl0aW5nEisKBWJhZGdlGBUgASgLMhwuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlEjAKBW5vdGVzGBYgAygLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdFN0YXR1c05vdGUSMwoJY29hbGVzY2VkGA8gASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdENvYWxlc2NlZBIoCgNhY3QYECABKAsyGy5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdBI5Cgpmb2xkX2Fib3ZlGBIgASgLMiAuZnJvbnRlbmQudjEuSGVsZFByb21wdEZvbGRBYm92ZUgCiAEBQhAKDmNsYXNzaWZpY2F0aW9uQgYKBGhvbGRCDQoLX2ZvbGRfYWJvdmVKBAgKEAtKBAgOEA9SCmtlZXBfYWxpdmVSBmJhZGdlcyI9ChNIZWxkUHJvbXB0Rm9sZEFib3ZlEiYKBWFib3ZlGAEgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZCIVChNIZWxkUHJvbXB0Q29hbGVzY2VkIpABCg5IZWxkU2Vzc2lvbkFjdBIxCgVtb2RlbBgBIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRTZXNzaW9uQWN0TW9kZWxIABJECg9wZXJtaXNzaW9uX21vZGUYAiABKAsyKS5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdFBlcm1pc3Npb25Nb2RlSABCBQoDYWN0IiQKE0hlbGRTZXNzaW9uQWN0TW9kZWwSDQoFbW9kZWwYASABKAkiLAocSGVsZFNlc3Npb25BY3RQZXJtaXNzaW9uTW9kZRIMCgRtb2RlGAEgASgJIvIHCg9IZWxkUHJvbXB0QmFkZ2USDQoFbGFiZWwYASABKAkSEwoGZGV0YWlsGAIgASgJSAGIAQESPgoLY2xhc3NpZnlpbmcYAyABKAsyJy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VDbGFzc2lmeWluZ0gAEjoKCWludGVyamVjdBgEIAEoCzIlLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUludGVyamVjdEgAEkQKD2FmdGVyX3Rvb2xfY2FsbBgFIAEoCzIpLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUFmdGVyVG9vbENhbGxIABJHChFob2xkX2Zvcl90dXJuX2VuZBgGIAEoCzIqLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUhvbGRGb3JUdXJuRW5kSAASTwoUdW5pbnRlcnJ1cHRpYmxlX3R1cm4YByABKAsyLy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VVbmludGVycnVwdGlibGVUdXJuSAASTwoUY2xhc3NpZmljYXRpb25fZXJyb3IYCCABKAsyLy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VDbGFzc2lmaWNhdGlvbkVycm9ySAASNgoHZWRpdGluZxgJIAEoCzIjLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUVkaXRpbmdIABI4CghzaHV0ZG93bhgKIAEoCzIkLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZVNodXRkb3duSAASQQoNYnVpbGRfcmVmcmVzaBgLIAEoCzIoLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUJ1aWxkUmVmcmVzaEgAEjoKCXJlY29ubmVjdBgMIAEoCzIlLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZVJlY29ubmVjdEgAEjIKBW1lcmdlGA0gASgLMiEuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlTWVyZ2VIABI5Cgljb2xkX2dhdGUYDiABKAsyJC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VDb2xkR2F0ZUgAEkkKEWF3YWl0aW5nX2RlbGl2ZXJ5GA8gASgLMiwuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlQXdhaXRpbmdEZWxpdmVyeUgAEkoKEmNvbGRfZ2F0ZV9hbnN3ZXJlZBgQIAEoCzIsLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUNvbGRHYXRlQW5zd2VyZWRIAEIMCgpzdGFuZHNfZm9yQgkKB19kZXRhaWwiHAoaSGVsZFByb21wdEJhZGdlQ2xhc3NpZnlpbmciGgoYSGVsZFByb21wdEJhZGdlSW50ZXJqZWN0Ih4KHEhlbGRQcm9tcHRCYWRnZUFmdGVyVG9vbENhbGwiHwodSGVsZFByb21wdEJhZGdlSG9sZEZvclR1cm5FbmQiJAoiSGVsZFByb21wdEJhZGdlVW5pbnRlcnJ1cHRpYmxlVHVybiIkCiJIZWxkUHJvbXB0QmFkZ2VDbGFzc2lmaWNhdGlvbkVycm9yIhgKFkhlbGRQcm9tcHRCYWRnZUVkaXRpbmciGQoXSGVsZFByb21wdEJhZGdlU2h1dGRvd24iHQobSGVsZFByb21wdEJhZGdlQnVpbGRSZWZyZXNoIhoKGEhlbGRQcm9tcHRCYWRnZVJlY29ubmVjdCIWChRIZWxkUHJvbXB0QmFkZ2VNZXJnZSIZChdIZWxkUHJvbXB0QmFkZ2VDb2xkR2F0ZSIhCh9IZWxkUHJvbXB0QmFkZ2VBd2FpdGluZ0RlbGl2ZXJ5IiEKH0hlbGRQcm9tcHRCYWRnZUNvbGRHYXRlQW5zd2VyZWQiKAoUSGVsZFByb21wdFN0YXR1c05vdGUSEAoIc2VudGVuY2UYASABKAkiEwoRSGVsZFByb21wdEVkaXRpbmciIwoSSGVsZFByb21wdFF1ZXVlZEF0Eg0KBWF0X21zGAEgASgDIhcKFUhlbGRQcm9tcHRDbGFzc2lmeWluZyIoChNIZWxkUHJvbXB0SW50ZXJqZWN0EhEKCXJhdGlvbmFsZRgBIAEoCSIsChdIZWxkUHJvbXB0QWZ0ZXJUb29sQ2FsbBIRCglyYXRpb25hbGUYASABKAkiPQoYSGVsZFByb21wdEhvbGRGb3JUdXJuRW5kEhEKCXJhdGlvbmFsZRgBIAEoCUoECAIQA1IIYWNjZXB0ZWQiUQodSGVsZFByb21wdFVuaW50ZXJydXB0aWJsZVR1cm4SMAoHY29tbWFuZBgBIAEoDjIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tbWFuZCIvCh1IZWxkUHJvbXB0Q2xhc3NpZmljYXRpb25FcnJvchIOCgZkZXRhaWwYASABKAkiLQoWSGVsZFByb21wdFNodXRkb3duSG9sZBITCgtzY2hlZHVsZV9pZBgBIAEoCSIZChdIZWxkUHJvbXB0UmVjb25uZWN0SG9sZCIVChNIZWxkUHJvbXB0TWVyZ2VIb2xkIhYKFEhlbGRQcm9tcHREYWVtb25IZWxkIhgKFkhlbGRQcm9tcHRDb2xkR2F0ZUhvbGQiIAoeSGVsZFByb21wdENvbGRHYXRlQW5zd2VyZWRIb2xkIhwKGkhlbGRQcm9tcHRBd2FpdGluZ0RlbGl2ZXJ5IhwKGkhlbGRQcm9tcHRCdWlsZFJlZnJlc2hIb2xkQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_conversation_v1_slash_command, file_conversation_v1_turn, file_conversation_v1_user, file_frontend_v1_feed]);
+  fileDesc("Chtmcm9udGVuZC92MS9mZWVkX2hlbGQucHJvdG8SC2Zyb250ZW5kLnYxIjQKCEZlZWRIZWxkEigKBWl0ZW1zGAEgAygLMhkuZnJvbnRlbmQudjEuRmVlZEhlbGRJdGVtIq8BCgxGZWVkSGVsZEl0ZW0SHwoCaWQYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQSKQoGcHJvbXB0GAMgASgLMhcuZnJvbnRlbmQudjEuSGVsZFByb21wdEgAEjEKB2luZ3Jlc3MYBSABKAsyHi5mcm9udGVuZC52MS5IZWxkSW5ncmVzc1Byb21wdEgAQgYKBGl0ZW1KBAgCEANKBAgEEAVSBW1lcmdlUgVvZmZlciKACwoKSGVsZFByb21wdBIlCgR0dXJuGAEgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZBInCgRzYWlkGAIgASgLMhkuY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkEjIKCXF1ZXVlZF9hdBgDIAEoCzIfLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRRdWV1ZWRBdBI5CgtjbGFzc2lmeWluZxgEIAEoCzIiLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRDbGFzc2lmeWluZ0gAEjUKCWludGVyamVjdBgFIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRJbnRlcmplY3RIABJCChFob2xkX2Zvcl90dXJuX2VuZBgGIAEoCzIlLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRIb2xkRm9yVHVybkVuZEgAEj8KD2FmdGVyX3Rvb2xfY2FsbBgRIAEoCzIkLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRBZnRlclRvb2xDYWxsSAASSgoUdW5pbnRlcnJ1cHRpYmxlX3R1cm4YByABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0VW5pbnRlcnJ1cHRpYmxlVHVybkgAEkoKFGNsYXNzaWZpY2F0aW9uX2Vycm9yGAggASgLMiouZnJvbnRlbmQudjEuSGVsZFByb21wdENsYXNzaWZpY2F0aW9uRXJyb3JIABI4CgtkYWVtb25faGVsZBgTIAEoCzIhLmZyb250ZW5kLnYxLkhlbGRQcm9tcHREYWVtb25IZWxkSAASRAoRYXdhaXRpbmdfZGVsaXZlcnkYFyABKAsyJy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QXdhaXRpbmdEZWxpdmVyeUgAEjcKCHNodXRkb3duGAkgASgLMiMuZnJvbnRlbmQudjEuSGVsZFByb21wdFNodXRkb3duSG9sZEgBEjkKCXJlY29ubmVjdBgLIAEoCzIkLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRSZWNvbm5lY3RIb2xkSAESQAoNYnVpbGRfcmVmcmVzaBgMIAEoCzInLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCdWlsZFJlZnJlc2hIb2xkSAESMQoFbWVyZ2UYFCABKAsyIC5mcm9udGVuZC52MS5IZWxkUHJvbXB0TWVyZ2VIb2xkSAESOAoJY29sZF9nYXRlGBggASgLMiMuZnJvbnRlbmQudjEuSGVsZFByb21wdENvbGRHYXRlSG9sZEgBEkkKEmNvbGRfZ2F0ZV9hbnN3ZXJlZBgZIAEoCzIrLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRDb2xkR2F0ZUFuc3dlcmVkSG9sZEgBEi8KB2VkaXRpbmcYDSABKAsyHi5mcm9udGVuZC52MS5IZWxkUHJvbXB0RWRpdGluZxIrCgViYWRnZRgVIAEoCzIcLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZRIwCgVub3RlcxgWIAMoCzIhLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRTdGF0dXNOb3RlEjMKCWNvYWxlc2NlZBgPIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRDb2FsZXNjZWQSKAoDYWN0GBAgASgLMhsuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3QSOQoKZm9sZF9hYm92ZRgSIAEoCzIgLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRGb2xkQWJvdmVIAogBAUIQCg5jbGFzc2lmaWNhdGlvbkIGCgRob2xkQg0KC19mb2xkX2Fib3ZlSgQIChALSgQIDhAPUgprZWVwX2FsaXZlUgZiYWRnZXMiPQoTSGVsZFByb21wdEZvbGRBYm92ZRImCgVhYm92ZRgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiFQoTSGVsZFByb21wdENvYWxlc2NlZCKQAQoOSGVsZFNlc3Npb25BY3QSMQoFbW9kZWwYASABKAsyIC5mcm9udGVuZC52MS5IZWxkU2Vzc2lvbkFjdE1vZGVsSAASRAoPcGVybWlzc2lvbl9tb2RlGAIgASgLMikuZnJvbnRlbmQudjEuSGVsZFNlc3Npb25BY3RQZXJtaXNzaW9uTW9kZUgAQgUKA2FjdCIkChNIZWxkU2Vzc2lvbkFjdE1vZGVsEg0KBW1vZGVsGAEgASgJIiwKHEhlbGRTZXNzaW9uQWN0UGVybWlzc2lvbk1vZGUSDAoEbW9kZRgBIAEoCSLyBwoPSGVsZFByb21wdEJhZGdlEg0KBWxhYmVsGAEgASgJEhMKBmRldGFpbBgCIAEoCUgBiAEBEj4KC2NsYXNzaWZ5aW5nGAMgASgLMicuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlQ2xhc3NpZnlpbmdIABI6CglpbnRlcmplY3QYBCABKAsyJS5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VJbnRlcmplY3RIABJECg9hZnRlcl90b29sX2NhbGwYBSABKAsyKS5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VBZnRlclRvb2xDYWxsSAASRwoRaG9sZF9mb3JfdHVybl9lbmQYBiABKAsyKi5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VIb2xkRm9yVHVybkVuZEgAEk8KFHVuaW50ZXJydXB0aWJsZV90dXJuGAcgASgLMi8uZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlVW5pbnRlcnJ1cHRpYmxlVHVybkgAEk8KFGNsYXNzaWZpY2F0aW9uX2Vycm9yGAggASgLMi8uZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlQ2xhc3NpZmljYXRpb25FcnJvckgAEjYKB2VkaXRpbmcYCSABKAsyIy5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VFZGl0aW5nSAASOAoIc2h1dGRvd24YCiABKAsyJC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VTaHV0ZG93bkgAEkEKDWJ1aWxkX3JlZnJlc2gYCyABKAsyKC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VCdWlsZFJlZnJlc2hIABI6CglyZWNvbm5lY3QYDCABKAsyJS5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VSZWNvbm5lY3RIABIyCgVtZXJnZRgNIAEoCzIhLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZU1lcmdlSAASOQoJY29sZF9nYXRlGA4gASgLMiQuZnJvbnRlbmQudjEuSGVsZFByb21wdEJhZGdlQ29sZEdhdGVIABJJChFhd2FpdGluZ19kZWxpdmVyeRgPIAEoCzIsLmZyb250ZW5kLnYxLkhlbGRQcm9tcHRCYWRnZUF3YWl0aW5nRGVsaXZlcnlIABJKChJjb2xkX2dhdGVfYW5zd2VyZWQYECABKAsyLC5mcm9udGVuZC52MS5IZWxkUHJvbXB0QmFkZ2VDb2xkR2F0ZUFuc3dlcmVkSABCDAoKc3RhbmRzX2ZvckIJCgdfZGV0YWlsIhwKGkhlbGRQcm9tcHRCYWRnZUNsYXNzaWZ5aW5nIhoKGEhlbGRQcm9tcHRCYWRnZUludGVyamVjdCIeChxIZWxkUHJvbXB0QmFkZ2VBZnRlclRvb2xDYWxsIh8KHUhlbGRQcm9tcHRCYWRnZUhvbGRGb3JUdXJuRW5kIiQKIkhlbGRQcm9tcHRCYWRnZVVuaW50ZXJydXB0aWJsZVR1cm4iJAoiSGVsZFByb21wdEJhZGdlQ2xhc3NpZmljYXRpb25FcnJvciIYChZIZWxkUHJvbXB0QmFkZ2VFZGl0aW5nIhkKF0hlbGRQcm9tcHRCYWRnZVNodXRkb3duIh0KG0hlbGRQcm9tcHRCYWRnZUJ1aWxkUmVmcmVzaCIaChhIZWxkUHJvbXB0QmFkZ2VSZWNvbm5lY3QiFgoUSGVsZFByb21wdEJhZGdlTWVyZ2UiGQoXSGVsZFByb21wdEJhZGdlQ29sZEdhdGUiIQofSGVsZFByb21wdEJhZGdlQXdhaXRpbmdEZWxpdmVyeSIhCh9IZWxkUHJvbXB0QmFkZ2VDb2xkR2F0ZUFuc3dlcmVkIigKFEhlbGRQcm9tcHRTdGF0dXNOb3RlEhAKCHNlbnRlbmNlGAEgASgJIhMKEUhlbGRQcm9tcHRFZGl0aW5nIiMKEkhlbGRQcm9tcHRRdWV1ZWRBdBINCgVhdF9tcxgBIAEoAyIXChVIZWxkUHJvbXB0Q2xhc3NpZnlpbmciKAoTSGVsZFByb21wdEludGVyamVjdBIRCglyYXRpb25hbGUYASABKAkiLAoXSGVsZFByb21wdEFmdGVyVG9vbENhbGwSEQoJcmF0aW9uYWxlGAEgASgJIj0KGEhlbGRQcm9tcHRIb2xkRm9yVHVybkVuZBIRCglyYXRpb25hbGUYASABKAlKBAgCEANSCGFjY2VwdGVkIlEKHUhlbGRQcm9tcHRVbmludGVycnVwdGlibGVUdXJuEjAKB2NvbW1hbmQYASABKA4yHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbW1hbmQiLwodSGVsZFByb21wdENsYXNzaWZpY2F0aW9uRXJyb3ISDgoGZGV0YWlsGAEgASgJIi0KFkhlbGRQcm9tcHRTaHV0ZG93bkhvbGQSEwoLc2NoZWR1bGVfaWQYASABKAkiGQoXSGVsZFByb21wdFJlY29ubmVjdEhvbGQiFQoTSGVsZFByb21wdE1lcmdlSG9sZCIWChRIZWxkUHJvbXB0RGFlbW9uSGVsZCIYChZIZWxkUHJvbXB0Q29sZEdhdGVIb2xkIiAKHkhlbGRQcm9tcHRDb2xkR2F0ZUFuc3dlcmVkSG9sZCIcChpIZWxkUHJvbXB0QXdhaXRpbmdEZWxpdmVyeSIcChpIZWxkUHJvbXB0QnVpbGRSZWZyZXNoSG9sZCKrAQoRSGVsZEluZ3Jlc3NQcm9tcHQSJwoEc2FpZBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBI5CglxdWV1ZWRfYXQYAiABKAsyJi5mcm9udGVuZC52MS5IZWxkSW5ncmVzc1Byb21wdFF1ZXVlZEF0EjIKBWJhZGdlGAMgASgLMiMuZnJvbnRlbmQudjEuSGVsZEluZ3Jlc3NQcm9tcHRCYWRnZSIqChlIZWxkSW5ncmVzc1Byb21wdFF1ZXVlZEF0Eg0KBWF0X21zGAEgASgDIucDChZIZWxkSW5ncmVzc1Byb21wdEJhZGdlEg0KBWxhYmVsGAEgASgJEhMKBmRldGFpbBgCIAEoCUgBiAEBEkwKD2F3YWl0aW5nX2ludGFrZRgDIAEoCzIxLmZyb250ZW5kLnYxLkhlbGRJbmdyZXNzUHJvbXB0QmFkZ2VBd2FpdGluZ0ludGFrZUgAEkIKCm5vX3Nlc3Npb24YBCABKAsyLC5mcm9udGVuZC52MS5IZWxkSW5ncmVzc1Byb21wdEJhZGdlTm9TZXNzaW9uSAASOQoFbWVyZ2UYBSABKAsyKC5mcm9udGVuZC52MS5IZWxkSW5ncmVzc1Byb21wdEJhZGdlTWVyZ2VIABJACgljb2xkX2dhdGUYBiABKAsyKy5mcm9udGVuZC52MS5IZWxkSW5ncmVzc1Byb21wdEJhZGdlQ29sZEdhdGVIABJCCgptb3ZlZF9hd2F5GAcgASgLMiwuZnJvbnRlbmQudjEuSGVsZEluZ3Jlc3NQcm9tcHRCYWRnZU1vdmVkQXdheUgAEj0KB3JlZnVzZWQYCCABKAsyKi5mcm9udGVuZC52MS5IZWxkSW5ncmVzc1Byb21wdEJhZGdlUmVmdXNlZEgAQgwKCnN0YW5kc19mb3JCCQoHX2RldGFpbCImCiRIZWxkSW5ncmVzc1Byb21wdEJhZGdlQXdhaXRpbmdJbnRha2UiIQofSGVsZEluZ3Jlc3NQcm9tcHRCYWRnZU5vU2Vzc2lvbiIdChtIZWxkSW5ncmVzc1Byb21wdEJhZGdlTWVyZ2UiIAoeSGVsZEluZ3Jlc3NQcm9tcHRCYWRnZUNvbGRHYXRlIiEKH0hlbGRJbmdyZXNzUHJvbXB0QmFkZ2VNb3ZlZEF3YXkiHwodSGVsZEluZ3Jlc3NQcm9tcHRCYWRnZVJlZnVzZWRCKFomYWdlbnRyZXBsL3Byb3RvL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_conversation_v1_slash_command, file_conversation_v1_turn, file_conversation_v1_user, file_frontend_v1_feed]);
 
 /**
  * The held section of one workspace's root feed, resolved by the daemon and
@@ -65,7 +65,8 @@ export const file_frontend_v1_feed_held: GenFile = /*@__PURE__*/
  */
 export type FeedHeld = Message<"frontend.v1.FeedHeld"> & {
   /**
-   * The held items, in display order: the held prompts in queue order. The
+   * The held items, in display order: the held prompts in queue order, then
+   * the ingress prompts the queue has not yet accepted, oldest first. The
    * prompt that settles first sits nearest the settled rows.
    *
    * @generated from field: repeated frontend.v1.FeedHeldItem items = 1;
@@ -110,6 +111,15 @@ export type FeedHeldItem = Message<"frontend.v1.FeedHeldItem"> & {
      */
     value: HeldPrompt;
     case: "prompt";
+  } | {
+    /**
+     * A prompt waiting in the held-prompt ingress that the daemon has read
+     * and not yet accepted into its queue.
+     *
+     * @generated from field: frontend.v1.HeldIngressPrompt ingress = 5;
+     */
+    value: HeldIngressPrompt;
+    case: "ingress";
   } | { case: undefined; value?: undefined };
 };
 
@@ -1308,4 +1318,261 @@ export type HeldPromptBuildRefreshHold = Message<"frontend.v1.HeldPromptBuildRef
  */
 export const HeldPromptBuildRefreshHoldSchema: GenMessage<HeldPromptBuildRefreshHold> = /*@__PURE__*/
   messageDesc(file_frontend_v1_feed_held, 39);
+
+/**
+ * A prompt the editor wrote to the durable held-prompt ingress
+ * (`$AGENT_REPL_STATE_DIR/held-prompts/`) because no daemon answered its
+ * submission, which this daemon has read and not yet accepted into its
+ * queue.
+ *
+ * WHY IT IS DRAWN. A prompt in the ingress is the user's, taken and kept,
+ * but it is in no queue yet: without this card a prompt sent during an outage
+ * is drawn nowhere until it is accepted, and a person who sees nothing sends
+ * it again. While the daemon is down the page draws the editor's own list of
+ * these entries; once this daemon serves the root feed it is the one source,
+ * through this arm.
+ *
+ * ONE PROMPT, ONE PLACE. The item leaves the section in the SAME publication
+ * that draws the prompt as a held prompt (the `prompt` arm) or as a settled
+ * prompt row, so no reader sees it in both places or in neither. Its FeedId is
+ * the ingress entry's own (its idempotency key), not the prompt row's: the
+ * turn the prompt will run as does not exist until it is accepted.
+ *
+ * NO ACTIONS. Nothing can force, cancel, edit or fold an entry the queue has
+ * not accepted; the card draws the prompt and why it waits, and nothing else.
+ *
+ * @generated from message frontend.v1.HeldIngressPrompt
+ */
+export type HeldIngressPrompt = Message<"frontend.v1.HeldIngressPrompt"> & {
+  /**
+   * What the user said, WHOLE: the very payload the daemon will submit once
+   * the queue accepts it, so the card shows exactly what will land.
+   *
+   * @generated from field: conversation.v1.UserSaid said = 1;
+   */
+  said?: UserSaid | undefined;
+
+  /**
+   * When the editor wrote the entry.
+   *
+   * @generated from field: frontend.v1.HeldIngressPromptQueuedAt queued_at = 2;
+   */
+  queuedAt?: HeldIngressPromptQueuedAt | undefined;
+
+  /**
+   * Why the entry still waits. ALWAYS SET: an entry with no badge is a
+   * malformed frame and is rejected loudly.
+   *
+   * @generated from field: frontend.v1.HeldIngressPromptBadge badge = 3;
+   */
+  badge?: HeldIngressPromptBadge | undefined;
+};
+
+/**
+ * Describes the message frontend.v1.HeldIngressPrompt.
+ * Use `create(HeldIngressPromptSchema)` to create a new message.
+ */
+export const HeldIngressPromptSchema: GenMessage<HeldIngressPrompt> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_feed_held, 40);
+
+/**
+ * When an ingress entry was written, as the editor stamped it.
+ *
+ * @generated from message frontend.v1.HeldIngressPromptQueuedAt
+ */
+export type HeldIngressPromptQueuedAt = Message<"frontend.v1.HeldIngressPromptQueuedAt"> & {
+  /**
+   * Epoch milliseconds.
+   *
+   * @generated from field: int64 at_ms = 1;
+   */
+  atMs: bigint;
+};
+
+/**
+ * Describes the message frontend.v1.HeldIngressPromptQueuedAt.
+ * Use `create(HeldIngressPromptQueuedAtSchema)` to create a new message.
+ */
+export const HeldIngressPromptQueuedAtSchema: GenMessage<HeldIngressPromptQueuedAt> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_feed_held, 41);
+
+/**
+ * The one status badge on an ingress prompt's card, composed daemon-side from
+ * what the daemon's last attempt to accept the entry met.
+ *
+ * @generated from message frontend.v1.HeldIngressPromptBadge
+ */
+export type HeldIngressPromptBadge = Message<"frontend.v1.HeldIngressPromptBadge"> & {
+  /**
+   * The badge's words, one to three ("waiting for the session"), drawn
+   * verbatim. REQUIRED AND NEVER EMPTY.
+   *
+   * @generated from field: string label = 1;
+   */
+  label: string;
+
+  /**
+   * The reason said in full, drawn verbatim in the card's expand-only
+   * details. Absent when the full sentence would only repeat the label.
+   *
+   * @generated from field: optional string detail = 2;
+   */
+  detail?: string | undefined;
+
+  /**
+   * WHAT THE ENTRY WAITS ON. A frontend keys the badge's color by this arm
+   * and never by the words. ALWAYS SET; an unset arm is a malformed frame.
+   *
+   * @generated from oneof frontend.v1.HeldIngressPromptBadge.stands_for
+   */
+  standsFor: {
+    /**
+     * Nothing refused the entry: it has not been offered to the queue yet,
+     * waits behind an earlier entry of the same workspace, or waits for its
+     * next attempt.
+     *
+     * @generated from field: frontend.v1.HeldIngressPromptBadgeAwaitingIntake awaiting_intake = 3;
+     */
+    value: HeldIngressPromptBadgeAwaitingIntake;
+    case: "awaitingIntake";
+  } | {
+    /**
+     * The queue refused it because the workspace has no session to submit to.
+     *
+     * @generated from field: frontend.v1.HeldIngressPromptBadgeNoSession no_session = 4;
+     */
+    value: HeldIngressPromptBadgeNoSession;
+    case: "noSession";
+  } | {
+    /**
+     * The queue refused it because a merge of the workspace is in flight.
+     *
+     * @generated from field: frontend.v1.HeldIngressPromptBadgeMerge merge = 5;
+     */
+    value: HeldIngressPromptBadgeMerge;
+    case: "merge";
+  } | {
+    /**
+     * The queue refused it because the session is parked at its cold gate.
+     *
+     * @generated from field: frontend.v1.HeldIngressPromptBadgeColdGate cold_gate = 6;
+     */
+    value: HeldIngressPromptBadgeColdGate;
+    case: "coldGate";
+  } | {
+    /**
+     * The queue refused it because the workspace is moving to another daemon.
+     *
+     * @generated from field: frontend.v1.HeldIngressPromptBadgeMovedAway moved_away = 7;
+     */
+    value: HeldIngressPromptBadgeMovedAway;
+    case: "movedAway";
+  } | {
+    /**
+     * The queue refused it for a reason that is a fault, not a standing
+     * condition; the daemon has logged it and keeps retrying.
+     *
+     * @generated from field: frontend.v1.HeldIngressPromptBadgeRefused refused = 8;
+     */
+    value: HeldIngressPromptBadgeRefused;
+    case: "refused";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message frontend.v1.HeldIngressPromptBadge.
+ * Use `create(HeldIngressPromptBadgeSchema)` to create a new message.
+ */
+export const HeldIngressPromptBadgeSchema: GenMessage<HeldIngressPromptBadge> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_feed_held, 42);
+
+/**
+ * The badge shows an entry not yet offered to the queue, or waiting its turn.
+ *
+ * @generated from message frontend.v1.HeldIngressPromptBadgeAwaitingIntake
+ */
+export type HeldIngressPromptBadgeAwaitingIntake = Message<"frontend.v1.HeldIngressPromptBadgeAwaitingIntake"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldIngressPromptBadgeAwaitingIntake.
+ * Use `create(HeldIngressPromptBadgeAwaitingIntakeSchema)` to create a new message.
+ */
+export const HeldIngressPromptBadgeAwaitingIntakeSchema: GenMessage<HeldIngressPromptBadgeAwaitingIntake> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_feed_held, 43);
+
+/**
+ * The badge shows the workspace has no session to take the entry.
+ *
+ * @generated from message frontend.v1.HeldIngressPromptBadgeNoSession
+ */
+export type HeldIngressPromptBadgeNoSession = Message<"frontend.v1.HeldIngressPromptBadgeNoSession"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldIngressPromptBadgeNoSession.
+ * Use `create(HeldIngressPromptBadgeNoSessionSchema)` to create a new message.
+ */
+export const HeldIngressPromptBadgeNoSessionSchema: GenMessage<HeldIngressPromptBadgeNoSession> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_feed_held, 44);
+
+/**
+ * The badge shows a merge of the workspace holds the entry back.
+ *
+ * @generated from message frontend.v1.HeldIngressPromptBadgeMerge
+ */
+export type HeldIngressPromptBadgeMerge = Message<"frontend.v1.HeldIngressPromptBadgeMerge"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldIngressPromptBadgeMerge.
+ * Use `create(HeldIngressPromptBadgeMergeSchema)` to create a new message.
+ */
+export const HeldIngressPromptBadgeMergeSchema: GenMessage<HeldIngressPromptBadgeMerge> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_feed_held, 45);
+
+/**
+ * The badge shows the session's cold gate holds the entry back.
+ *
+ * @generated from message frontend.v1.HeldIngressPromptBadgeColdGate
+ */
+export type HeldIngressPromptBadgeColdGate = Message<"frontend.v1.HeldIngressPromptBadgeColdGate"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldIngressPromptBadgeColdGate.
+ * Use `create(HeldIngressPromptBadgeColdGateSchema)` to create a new message.
+ */
+export const HeldIngressPromptBadgeColdGateSchema: GenMessage<HeldIngressPromptBadgeColdGate> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_feed_held, 46);
+
+/**
+ * The badge shows the workspace moving to another daemon holds it back.
+ *
+ * @generated from message frontend.v1.HeldIngressPromptBadgeMovedAway
+ */
+export type HeldIngressPromptBadgeMovedAway = Message<"frontend.v1.HeldIngressPromptBadgeMovedAway"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldIngressPromptBadgeMovedAway.
+ * Use `create(HeldIngressPromptBadgeMovedAwaySchema)` to create a new message.
+ */
+export const HeldIngressPromptBadgeMovedAwaySchema: GenMessage<HeldIngressPromptBadgeMovedAway> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_feed_held, 47);
+
+/**
+ * The badge shows the queue refused the entry by a fault.
+ *
+ * @generated from message frontend.v1.HeldIngressPromptBadgeRefused
+ */
+export type HeldIngressPromptBadgeRefused = Message<"frontend.v1.HeldIngressPromptBadgeRefused"> & {
+};
+
+/**
+ * Describes the message frontend.v1.HeldIngressPromptBadgeRefused.
+ * Use `create(HeldIngressPromptBadgeRefusedSchema)` to create a new message.
+ */
+export const HeldIngressPromptBadgeRefusedSchema: GenMessage<HeldIngressPromptBadgeRefused> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_feed_held, 48);
 
