@@ -24,9 +24,16 @@ import {
   type FooterPanel,
 } from "../../src/footer/expanded.js";
 import {
+  AGENT_ROW,
+  CRON_ROW,
+  FOOTER_TEST_NOW,
+  MERGE_ROW,
+  MONITOR_ROW,
+  SHELL_ROW,
+  TASK_ROW,
   expanded,
-  feedId,
   harness,
+  toEntry,
   type ExpandedInit,
   type Harness,
 } from "./harness.js";
@@ -38,7 +45,7 @@ import stylesheet from "../../src/styles.css?raw";
 import expandedSource from "../../src/footer/expanded.ts?raw";
 import type { ClientLogRecord } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 
-const NOW = 1_800_000_000_000;
+const NOW = FOOTER_TEST_NOW;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -87,9 +94,6 @@ function drawPanel(
 }
 
 /** A jump to a known entry. */
-function toEntry(id: string) {
-  return { target: { case: "entry" as const, value: feedId(id) } };
-}
 
 /** A jump the daemon could not resolve, for REASON. */
 function unresolvedFor(reason: "notDrawn") {
@@ -215,9 +219,6 @@ describe("drawFooterUsageRows: what the strip could not fit", () => {
     expect(drawPanel("tokens").panel.querySelector("[data-usage]")).toBeNull();
   });
 });
-
-/** One tracker task, so the tasks panel has an entry. */
-const TASK_ROW = { status: { status: { case: "pending" as const, value: {} } }, subject: { text: "x" } };
 
 /** The smallest view content that gives PANEL one entry. */
 function oneEntryOf(panel: FooterPanel): ExpandedInit {
@@ -647,14 +648,6 @@ describe("the tokens panel's per-agent spend", () => {
 
 // ---- the agents panel ------------------------------------------------------
 
-const AGENT_ROW = {
-  work: { value: "work-a" },
-  jump: toEntry("bubble-1"),
-  label: { text: "Explore" },
-  description: { text: "sweep the repo" },
-  tokens: { text: "12.4k" },
-  runtime: { startedAtMs: BigInt(NOW - 65_000) },  state: { case: "running" as const, value: {} },
-};
 
 describe("the agents panel", () => {
   it("carries the fan-wide stop in its header", () => {
@@ -1037,12 +1030,6 @@ describe("the tasks panel", () => {
 
 // ---- the shells panel ------------------------------------------------------
 
-const SHELL_ROW = {
-  work: { value: "work-s" },
-  jump: toEntry("shell-1"),
-  command: { text: "npm run build" },
-  runtime: { startedAtMs: BigInt(NOW - 5000) },
-};
 
 describe("the shells panel", () => {
   it("draws the command verbatim", () => {
@@ -1078,12 +1065,6 @@ describe("the shells panel", () => {
 
 // ---- the monitors panel ----------------------------------------------------
 
-const MONITOR_ROW = {
-  work: { value: "work-m" },
-  jump: toEntry("monitor-card"),
-  description: { text: "watching the deploy" },
-  runtime: { startedAtMs: BigInt(NOW - 90_000) },
-};
 
 describe("the monitors panel", () => {
   it("draws what is being watched verbatim", () => {
@@ -1122,12 +1103,6 @@ describe("the monitors panel", () => {
 
 // ---- the merges panel ------------------------------------------------------
 
-const MERGE_ROW = {
-  work: { value: "lease-1" },
-  jump: toEntry("merge-head"),
-  label: { text: "fix-flaky → master" },
-  runtime: { startedAtMs: BigInt(NOW - 90_000) },
-};
 
 describe("the merges panel", () => {
   it("draws the bubble head's branch line verbatim", () => {
@@ -1188,10 +1163,6 @@ describe("the merges panel", () => {
 
 // ---- the crons panel -------------------------------------------------------
 
-const CRON_ROW = {
-  schedule: { text: "every 5 min" },
-  prompt: { text: "check the queue" },
-};
 
 describe("the crons panel", () => {
   it("draws the vendor's schedule verbatim", () => {

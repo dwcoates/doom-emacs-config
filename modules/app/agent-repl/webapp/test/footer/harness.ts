@@ -304,3 +304,59 @@ export function footerView(init: { strip?: FooterStrip; expanded?: FooterExpande
 export function pushView(view: FooterView): WatchFooterResponse {
   return create(WatchFooterResponseSchema, { footer: view });
 }
+
+// ---- the panels' row fixtures, shared by the footer suites ---------------
+
+/** The instant every footer suite fakes as now; the fixtures' clocks hang off it. */
+export const FOOTER_TEST_NOW = 1_800_000_000_000;
+const NOW = FOOTER_TEST_NOW;
+
+/** A jump resolving to the bubble ID. */
+export function toEntry(id: string) {
+  return { target: { case: "entry" as const, value: feedId(id) } };
+}
+
+/** One live subagent row. */
+export const AGENT_ROW = {
+  work: { value: "work-a" },
+  jump: toEntry("bubble-1"),
+  label: { text: "Explore" },
+  description: { text: "sweep the repo" },
+  tokens: { text: "12.4k" },
+  runtime: { startedAtMs: BigInt(NOW - 65_000) },
+  state: { case: "running" as const, value: {} },
+};
+
+/** One live shell row. */
+export const SHELL_ROW = {
+  work: { value: "work-s" },
+  jump: toEntry("shell-1"),
+  command: { text: "npm run build" },
+  runtime: { startedAtMs: BigInt(NOW - 5000) },
+};
+
+/** One live monitor row. */
+export const MONITOR_ROW = {
+  work: { value: "work-m" },
+  jump: toEntry("monitor-card"),
+  description: { text: "watching the deploy" },
+  runtime: { startedAtMs: BigInt(NOW - 90_000) },
+};
+
+/** One async merge row. */
+export const MERGE_ROW = {
+  work: { value: "lease-1" },
+  jump: toEntry("merge-head"),
+  label: { text: "fix-flaky → master" },
+  runtime: { startedAtMs: BigInt(NOW - 90_000) },
+};
+
+/** One scheduled job row. */
+export const CRON_ROW = {
+  schedule: { text: "every 5 min" },
+  prompt: { text: "check the queue" },
+};
+
+/** One tracker task, so the tasks panel has an entry. */
+export const TASK_ROW = { status: { status: { case: "pending" as const, value: {} } }, subject: { text: "x" } };
+

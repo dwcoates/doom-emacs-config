@@ -21,6 +21,11 @@ import {
   writeSelection,
 } from "../../src/footer/footer.js";
 import {
+  AGENT_ROW,
+  CRON_ROW,
+  FOOTER_TEST_NOW,
+  MONITOR_ROW,
+  SHELL_ROW,
   WORKSPACE,
   expanded,
   footerView,
@@ -40,7 +45,7 @@ import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { enduringLine } from "./enduring-line.js";
 import { pagePresence } from "../../src/presence.js";
 
-const NOW = 1_800_000_000_000;
+const NOW = FOOTER_TEST_NOW;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -78,39 +83,9 @@ function mount(
   return { host, h, footer };
 }
 
-/** One live agent row, so the agents panel has something to draw and does not
- * fold away. The daemon ships the chip count and the expanded rows together,
- * so a chip count rides with a matching row. */
-const AGENT_ROW = {
-  work: { value: "work-1" },
-  jump: { target: { case: "entry" as const, value: { value: "bubble-1" } } },
-  label: { text: "Explore" },
-  tokens: { text: "0 tok" },
-  runtime: { startedAtMs: BigInt(NOW) },
-  state: { case: "running" as const, value: {} },
-};
 
-/** One live shell row, for the shells panel. */
-const SHELL_ROW = {
-  work: { value: "shell-work-1" },
-  jump: { target: { case: "entry" as const, value: { value: "shell-bubble-1" } } },
-  command: { text: "npm run build" },
-  runtime: { startedAtMs: BigInt(NOW) },
-};
 
-/** One live monitor row, for the monitors panel. */
-const MONITOR_ROW = {
-  work: { value: "monitor-work-1" },
-  jump: { target: { case: "entry" as const, value: { value: "monitor-bubble-1" } } },
-  description: { text: "watching the deploy" },
-  runtime: { startedAtMs: BigInt(NOW) },
-};
 
-/** One scheduled job row, for the crons panel. */
-const CRON_ROW = {
-  schedule: { text: "*/5 * * * *" },
-  prompt: { text: "check the deploy" },
-};
 
 /** A view whose shells chip and expanded panel both carry one live shell. */
 function withShells(): ReturnType<typeof footerView> {
