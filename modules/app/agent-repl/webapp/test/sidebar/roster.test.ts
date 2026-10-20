@@ -2043,6 +2043,6 @@ describe("the tab number's stylesheet", () => {
     const value = inRail(drawn, (rail) => cascadedValue(rail, "--tab-number-color"));
 
     // Assert
-    expect(value.replace(/\s+/g, "")).toBe("color-mix(insrgb,var(--muted)75%,black)");
+    expect(value.replace(/\s+/g, "")).toBe("color-mix(insrgb,var(--muted)85%,black)");
   });
 });
