@@ -19,6 +19,7 @@ import {
   RosterMergedRepoGroupSchema,
   RosterMergedSectionSchema,
   RosterRepoSectionSchema,
+  RosterSubsectionSchema,
   WorkspaceRosterSchema,
   type RosterHiddenSection,
   type RosterOpenSection,
@@ -281,22 +282,40 @@ export function repoSection(init: {
   count?: number;
   /** The label hover's measurement; pending unless said. */
   divergence?: MessageInitShape<typeof RosterRepoSectionSchema>["divergence"];
+  /** Whether the expanded section holds the current workspace; not unless said. */
+  holdsCurrent?: boolean;
   /** The repository's subsections, in order; none unless said. */
-  subsections?: Array<{ id: string; label?: string; rows?: RosterRow[]; collapsed?: boolean }>;
+  subsections?: Array<{ id: string; label?: string; rows?: RosterRow[]; collapsed?: boolean; holdsCurrent?: boolean }>;
 }): RosterRepoSection {
   return create(RosterRepoSectionSchema, {
     key: { repository: { id: init.id, dir: `/repo/${init.id}` } },
     header: { label: { text: init.label ?? init.id }, count: { workspaces: init.count ?? init.rows?.length ?? 0 } },
     openRows: { rows: (init.rows ?? []).map(openRow) },
-    fold: init.collapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+    fold: sectionFold(init.collapsed, init.holdsCurrent),
     divergence: init.divergence ?? { state: { case: "pending", value: {} } },
     subsections: (init.subsections ?? []).map((sub) => ({
       key: { subsectionId: sub.id },
       header: { label: { text: sub.label ?? sub.id }, count: { workspaces: sub.rows?.length ?? 0 } },
       openRows: { rows: (sub.rows ?? []).map(openRow) },
-      fold: sub.collapsed === true ? ({ case: "collapsed", value: {} } as const) : ({ case: "expanded", value: {} } as const),
+      fold: sectionFold(sub.collapsed, sub.holdsCurrent),
     })),
   });
+}
+
+/**
+ * A repository section's or subsection's fold: collapsed when COLLAPSED, or
+ * expanded and holding the current workspace when HOLDS_CURRENT. The two
+ * messages spell the fold alike, so one shape builds both.
+ */
+function sectionFold(
+  collapsed = false,
+  holdsCurrent = false,
+): MessageInitShape<typeof RosterRepoSectionSchema>["fold"] & MessageInitShape<typeof RosterSubsectionSchema>["fold"] {
+  if (collapsed) return { case: "collapsed", value: {} };
+  return {
+    case: "expanded",
+    value: { collapse: holdsCurrent ? { case: "holdsCurrent", value: {} } : { case: "collapsible", value: {} } },
+  };
 }
 
 /**

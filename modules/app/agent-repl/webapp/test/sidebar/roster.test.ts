@@ -33,9 +33,11 @@ import {
   mergedTodayCommitsText,
   OPEN_COUNT_CLASS,
   OPEN_SECTION_CLASS,
+  paintRepoHoldsCurrent,
   SECTION_LABEL_CLASS,
   todaysMerges,
 } from "../../src/sidebar/roster.js";
+import { HOLDS_CURRENT_ATTRIBUTE } from "../../src/sidebar/section-fold.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import {
@@ -243,6 +245,69 @@ const FOLDING_SECTIONS = [
     id: "",
   },
 ] as const;
+
+describe("a section holding the current workspace never collapses", () => {
+  it("asks nothing when the repository's header is clicked", async () => {
+    // Arrange
+    const { asked, sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1", holdsCurrent: true })] }), sc);
+
+    // Act
+    await click(drawn.querySelector(".repo-section > .repo-head") as Element);
+
+    // Assert
+    expect([asked.length, drawn.querySelector(".repo-section")?.classList.contains("folded")]).toEqual([0, false]);
+  });
+
+  it("asks nothing when a subsection's triangle is clicked", async () => {
+    // Arrange
+    const { asked, sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1", holdsCurrent: true, subsections: [{ id: "s1", holdsCurrent: true }] })] }),
+      sc,
+    );
+
+    // Act
+    await click(drawn.querySelector(".sb-subsection [data-section-fold]") as Element);
+
+    // Assert
+    expect([asked.length, drawn.querySelector(".sb-subsection")?.classList.contains("folded")]).toEqual([0, false]);
+  });
+
+  it("still collapses a sibling subsection that does not hold it", async () => {
+    // Arrange
+    const { asked, sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(
+      roster({
+        repos: [repoSection({ id: "repo-1", holdsCurrent: true, subsections: [{ id: "s1", holdsCurrent: true }, { id: "s2" }] })],
+      }),
+      sc,
+    );
+
+    // Act
+    await click(drawn.querySelectorAll(".sb-subsection [data-section-fold]")[1] as Element);
+
+    // Assert
+    const change = asked[0]?.change;
+    expect(change?.case === "foldSection" ? [change.value.section.case, change.value.fold.case] : change?.case).toEqual([
+      "subsection",
+      "collapse",
+    ]);
+  });
+});
+
+describe("paintRepoHoldsCurrent", () => {
+  it("refuses a drawn section whose subsections are not the wire's", () => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "a", subsections: [{ id: "s1" }] })] }), sidebarContext());
+    const element = drawn.querySelector(".repo-section") as HTMLElement;
+
+    // Act / Assert
+    expect(() => paintRepoHoldsCurrent(element, repoSection({ id: "a", subsections: [{ id: "s2" }] }), "section")).toThrow(
+      /s2 is not the one drawn/,
+    );
+  });
+});
 
 describe("folding a section is the daemon's view, shared by every page", () => {
   it.each(FOLDING_SECTIONS.flatMap((s) => [
@@ -639,7 +704,7 @@ describe("a malformed roster", () => {
     const malformed = create(RosterRepoSectionSchema, {
       header: { label: { text: "doom" } },
       openRows: { rows: [] },
-      fold: { case: "expanded", value: {} },
+      fold: { case: "expanded", value: { collapse: { case: "collapsible", value: {} } } },
     });
     expect(() =>
       drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
@@ -661,7 +726,7 @@ describe("a malformed roster", () => {
     const malformed = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo" } },
       openRows: { rows: [] },
-      fold: { case: "expanded", value: {} },
+      fold: { case: "expanded", value: { collapse: { case: "collapsible", value: {} } } },
     });
     expect(() =>
       drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
@@ -672,7 +737,7 @@ describe("a malformed roster", () => {
     const malformed = create(RosterRepoSectionSchema, {
       key: { repository: { id: "repo-1", dir: "/repo" } },
       header: { label: { text: "doom" } },
-      fold: { case: "expanded", value: {} },
+      fold: { case: "expanded", value: { collapse: { case: "collapsible", value: {} } } },
     });
     expect(() =>
       drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
@@ -684,7 +749,7 @@ describe("a malformed roster", () => {
       key: { repository: { id: "repo-1", dir: "/repo" } },
       header: {},
       openRows: { rows: [] },
-      fold: { case: "expanded", value: {} },
+      fold: { case: "expanded", value: { collapse: { case: "collapsible", value: {} } } },
     });
     expect(() =>
       drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
@@ -1292,7 +1357,7 @@ describe("the repository label's divergence hover", () => {
       key: { repository: { id: "repo-1", dir: "/repo/repo-1" } },
       header: { label: { text: "repo-1" }, count: { workspaces: 0 } },
       openRows: { rows: [] },
-      fold: { case: "expanded", value: {} },
+      fold: { case: "expanded", value: { collapse: { case: "collapsible", value: {} } } },
     });
     const wire = roster({ repos: [] });
     wire.repository = { $typeName: "frontend.v1.RosterRepositoryView", sections: [section] };
@@ -1514,6 +1579,57 @@ describe("the roster drawer: a push redraws only what it changed", () => {
     // Assert
     expect([...second.querySelectorAll(".repo-section")]).toEqual(sections);
     expect(second.querySelector("[data-current]")?.getAttribute("data-roster-row")).toBe("y");
+  });
+
+  it("keeps both sections and moves the holds-current mark when a switch crosses repositories", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const at = (current: string) =>
+      roster({
+        repos: [
+          repoSection({ id: "a", holdsCurrent: current === "x", rows: [row({ id: "x", current: current === "x" })] }),
+          repoSection({ id: "b", holdsCurrent: current === "y", rows: [row({ id: "y", current: current === "y" })] }),
+        ],
+      });
+    const first = drawer.draw(at("x"));
+    const sections = [...first.querySelectorAll(".repo-section")];
+
+    // Act
+    const second = drawer.draw(at("y"));
+
+    // Assert
+    const now = [...second.querySelectorAll(".repo-section")];
+    expect([now[0] === sections[0], now[1] === sections[1], now.map((el) => el.hasAttribute(HOLDS_CURRENT_ATTRIBUTE))]).toEqual([
+      true,
+      true,
+      [false, true],
+    ]);
+  });
+
+  it("moves the holds-current mark between subsections on a switch, keeping the section", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const at = (current: string) =>
+      roster({
+        repos: [
+          repoSection({
+            id: "a",
+            holdsCurrent: true,
+            subsections: [
+              { id: "s1", holdsCurrent: current === "x", rows: [row({ id: "x", current: current === "x" })] },
+              { id: "s2", holdsCurrent: current === "y", rows: [row({ id: "y", current: current === "y" })] },
+            ],
+          }),
+        ],
+      });
+    const section = drawer.draw(at("x")).querySelector(".repo-section");
+
+    // Act
+    const second = drawer.draw(at("y"));
+
+    // Assert
+    const marks = [...second.querySelectorAll(".sb-subsection")].map((el) => el.hasAttribute(HOLDS_CURRENT_ATTRIBUTE));
+    expect([second.querySelector(".repo-section") === section, marks]).toEqual([true, [false, true]]);
   });
 
   it("redraws a section whose rows changed order", () => {

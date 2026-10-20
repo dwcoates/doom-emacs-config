@@ -49,6 +49,7 @@ import {
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { clone, equals, type MessageInitShape } from "@bufbuild/protobuf";
 import { placeChildren } from "./children.js";
+import { queryAll } from "../dom.js";
 import { disposeKeyedRows, drawKeyedRows, patchKeyedRegions, remarkKeyedRows, type KeyedRows } from "./keyed-rows.js";
 import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -68,11 +69,14 @@ import {
   drawRosterSubsections,
   installArrangeDrag,
   REPOSITORY_ATTRIBUTE,
+  SUBSECTION_CLASS,
   type ArrangeRefs,
 } from "./subsections.js";
 import {
   drawFoldToggle,
+  drawRosterHoldsCurrent,
   drawRosterSectionFold,
+  paintHoldsCurrent,
   sectionFold,
   trackDaemonFold,
   type FoldGesture,
@@ -234,6 +238,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
               remarkKeyedRows(rows, rail.attention);
             });
             kept.wire = section;
+            paintRepoHoldsCurrent(kept.drawn.element, section, sectionPath);
             kept.scope.remark(rail.attention);
             nextRepos.set(key, kept);
             continue;
@@ -337,9 +342,38 @@ function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
   const right = clone(RosterRepoSectionSchema, b);
   for (const section of [left, right]) {
     section.openRows = undefined;
-    for (const sub of section.subsections) sub.openRows = undefined;
+    // WHETHER A SECTION HOLDS THE CURRENT WORKSPACE moves with every switch
+    // between repositories, and the patch repaints it
+    // (`paintRepoHoldsCurrent`), so it is no reason to redraw the section.
+    if (section.fold.case === "expanded") section.fold.value.collapse = { case: undefined };
+    for (const sub of section.subsections) {
+      sub.openRows = undefined;
+      if (sub.fold.case === "expanded") sub.fold.value.collapse = { case: undefined };
+    }
   }
   return equals(RosterRepoSectionSchema, left, right);
+}
+
+/**
+ * Say on a drawn repository section ELEMENT, and on each of its subsections,
+ * whether the wire U says it holds the current workspace. A drawn section
+ * whose subsections differ from U's is a broken invariant: a section whose
+ * subsections changed is drawn anew, never patched.
+ */
+export function paintRepoHoldsCurrent(element: HTMLElement, u: RosterRepoSection, path: string): void {
+  paintHoldsCurrent(element, drawRosterHoldsCurrent(u.fold, `${path}.fold`));
+  const drawn = queryAll<HTMLElement>(element, `.${SUBSECTION_CLASS}`);
+  if (drawn.length !== u.subsections.length) {
+    throw new Error(`${path}: ${drawn.length} subsections drawn for ${u.subsections.length} on the wire`);
+  }
+  u.subsections.forEach((sub, index) => {
+    const subPath = `${path}.subsections[${index}]`;
+    const id = requireMessage(sub.key, `${subPath}.key`).subsectionId;
+    if (drawn[index].getAttribute(BUCKET_ATTRIBUTE) !== id) {
+      throw new Error(`${subPath}: subsection ${id} is not the one drawn in its place`);
+    }
+    paintHoldsCurrent(drawn[index], drawRosterHoldsCurrent(sub.fold, `${subPath}.fold`));
+  });
 }
 
 /**
@@ -497,6 +531,7 @@ export function drawRosterRepoSection(
     drawRows(rows, rowsPath, "grouping", index + 1),
   );
   if (subsections !== null) section.appendChild(subsections);
+  paintRepoHoldsCurrent(section, u, path);
   return section;
 }
 
