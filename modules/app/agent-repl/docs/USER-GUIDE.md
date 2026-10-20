@@ -731,9 +731,13 @@ An event that is not a message is drawn in the feed as an **outcome marker**: a 
   - **resend this prompt** appears when the turn produced nothing; it sends the same prompt again as a new turn.
   - A refused resend says why beside the button.
 - **The workspace status carries the fault too.** Until the next turn starts, the footer reads `vendor fault · vendor error` (or the account block's own step) or `agent repl fault · turn died`, with the cause on its activity line, and the sidebar dot and the tab take the same color. The composer stays open, so the next prompt is what clears it.
-- **A turn the vendor gave up on is retried for you:**
-  - When the vendor retried a failed call itself and then gave up, agent-repl asks the agent to continue every 5 minutes, for up to 2 hours from the vendor's first retry.
-  - When your session or weekly usage allowance is exhausted, it waits instead until that allowance resets, as the footer's usage figures report it, and then asks the agent to continue. If the vendor still refuses, it asks again every 5 minutes for 30 minutes.
+- **A turn the vendor failed is retried for you:**
+  - When a turn ends on an API failure that waiting can cure (an overload, the API's own error, a lost connection), agent-repl asks the agent to continue every 30 seconds, for up to 2 hours from the first failure. The vendor makes no retries of its own.
+  - When your session or weekly usage allowance is exhausted, it waits instead until that allowance resets, as the footer's usage figures report it, and then asks the agent to continue. If the vendor still refuses, it asks again every 30 seconds for 30 minutes.
+  - While a retry is due, the footer reads `vendor fault · api retrying` (or the usage limit's own step) and its activity line counts down: `retry #2 · next try in 24s · Overloaded`. The countdown holds at `0s`; it never counts up.
+  - Press `RET` in the composer to retry now instead of waiting for the countdown:
+    - With the composer empty, the retry is made at once, and nothing is sent as content.
+    - With words in the composer, your prompt is sent at once and is itself the retry.
   - Each retry appears in the feed as a turn the agent started on its own.
   - Sending a prompt of your own stops the retrying.
 

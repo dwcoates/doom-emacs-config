@@ -2577,9 +2577,25 @@ exactly ONE of three domains, named for whose services are failing.
   and never sent; nothing is classified while it sits there. When the block
   stops standing (the footer's vendor-serves edge: a session start, a
   rate-limit verdict that is not rejected, a new turn, the retried call
-  answered, the retried turn ending) the held prompts are popped in order and
-  classified THEN, each against what is ahead of it, and delivered per the
-  verdict (`daemon/internal/promptqueue/vendorblock.go`).
+  answered, the retried turn ending, agent-repl scheduling its own retry) the
+  held prompts are popped in order and classified THEN, each against what is
+  ahead of it, and delivered per the verdict
+  (`daemon/internal/promptqueue/vendorblock.go`).
+- **A turn the vendor failed is retried by agent-repl, and a prompt sent
+  meanwhile is the retry** (owner ruling, 2026-10-20). The vendor runs with
+  its own API retries off (`CLAUDE_CODE_MAX_RETRIES=0`); the shim retries a
+  turn that failed retryably every 30 seconds, or at an exhausted usage
+  window's reset, and states the schedule on the session stream
+  (`conversation.v1.SessionVendorErrorRetry`). While a retry is scheduled the
+  footer stands `vendor_fault · api_retrying` (or the usage limit's own step)
+  and its `retrying` line counts down to the shim's instant, holding at `0s`,
+  never counting up; and NO PROMPT IS HELD (`footer.Resolver.VendorBlock`
+  answers none): a prompt sent then goes at once and is itself the retry.
+  `RET` in an empty composer asks for the retry now
+  (`agentrepl.v1.RetryVendorError` → `shim.v1.RetryVendorErrorNow`), with
+  nothing sent as content. The rule lives in
+  `agent-shim/claude/shim/src/engine/vendor-error-retry.ts`; the footer's
+  half in `daemon/internal/resolve/footer/vendorretry.go`.
 - **`network_unreachable` is recorded at INFO**, in the shim and the daemon:
   the machine being offline is the environment, not an agent-repl defect.
 
