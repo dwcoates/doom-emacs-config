@@ -228,12 +228,6 @@
   (set-popup-rule! "\\.*doom:vterm\\.*"
     :actions '(agent-repl-sibling-popup-display-fn)
     :size 0.4 :side 'right :select t :quit nil :ttl nil)
-  (defun +dwc/vterm-toggle (ARG)
-    (interactive "P")
-    (if (and (s-contains-p  "vterm" (buffer-name)) (= (length (window-list)) 1))
-        (+dwc/toggle-window-fullscreen))
-    (+vterm/toggle ARG))
-  (map! :leader :desc "Toggle vterm popup" "o t" #'+dwc/vterm-toggle)
 
   ;; `evil-collection-vterm' plants `C-k' -> `vterm--self-insert' on the
   ;; insert-state aux map of `vterm-mode-map', so the key is sent to the
