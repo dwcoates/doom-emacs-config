@@ -2455,6 +2455,13 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			VendorSessionId: src.VendorSessionID,
 			ColdRemediation: src.ColdRemediation,
 		}
+		// THE WORKSPACE'S MODEL, NOT THE TRANSCRIPT'S: a switch nobody has
+		// prompted on yet is in no response, so the shim is told the recorded
+		// choice. Only a workspace with none recorded leaves the shim to read
+		// the transcript's last model back.
+		if session.Model != "" {
+			resume.Model = &conversationv1.AgentModel{Name: session.Model}
+		}
 		// A ROLLED-BACK TURN STAYS ROLLED BACK ACROSS A RESTART: the vendor's
 		// transcript still ends on the dropped branch until the next prompt
 		// appends past the cut, so the shim is told every rolled-back turn and
@@ -2844,7 +2851,7 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		// the row fresh, so a selected root left out here would be erased by
 		// the very bring-up it asked for and the next one would re-route.
 		SelectedConfigDir: previous.SelectedConfigDir,
-		Model:             started.GetEffectiveModel().GetName(),
+		Model:             recordedModel(previous.Model, started),
 		PermissionMode:    permissionModeName(started.GetPermissionMode()),
 		StartedAt:         previous.StartedAt,
 		LastEngagementAt:  now,
@@ -2868,6 +2875,21 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		"shim_build_sha":    started.GetRuntime().GetShimBuildSha(),
 	})
 	return nil
+}
+
+// recordedModel answers the model a start leaves recorded as the workspace's.
+//
+// A RECORDED CHOICE IS NEVER REPLACED BY A START. Every start names it
+// (StartSessionFresh.model, StartSessionResume.model), so the model in effect
+// is the recorded one, and only SetModel changes it (sender.SetModel). A
+// workspace with none recorded takes what the start put in effect: the
+// default a fresh start launched under, or the model a resume read back from
+// the transcript.
+func recordedModel(previous string, started *conversationv1.SessionStarted) string {
+	if previous != "" {
+		return previous
+	}
+	return started.GetEffectiveModel().GetName()
 }
 
 // noteSDKVersion keeps the Agent SDK version a session start reported as the

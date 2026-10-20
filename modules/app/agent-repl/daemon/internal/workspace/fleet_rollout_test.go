@@ -653,6 +653,45 @@ func TestResumeKeepsTheVendorIdWhenTheTranscriptIsFound(t *testing.T) {
 	}
 }
 
+// TestResumeRunsOnTheWorkspacesRecordedModel covers the model a restart brings
+// the session back on: the one wsm records for the workspace, which the start
+// leaves recorded whatever the shim reports in effect. Only a workspace with
+// none recorded leaves the shim to read the transcript back, and records what
+// it put in effect.
+func TestResumeRunsOnTheWorkspacesRecordedModel(t *testing.T) {
+	tests := []struct {
+		name         string
+		recorded     string
+		wantResume   string
+		wantRecorded string
+	}{
+		{name: "a recorded model is named and kept", recorded: "haiku", wantResume: "haiku", wantRecorded: "haiku"},
+		{name: "no recorded model names none and records the effective one", wantResume: "", wantRecorded: "opus"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", Model: tt.recorded}
+
+			// Act.
+			if _, err := f.fleet.Resume(context.Background(), ws.ID, f.client); err != nil {
+				t.Fatalf("Resume: %v", err)
+			}
+
+			// Assert.
+			resume := f.client.requests[0].GetResume()
+			if resume == nil || resume.GetModel().GetName() != tt.wantResume || (tt.wantResume == "") != (resume.Model == nil) {
+				t.Fatalf("StartSession request = %v, want a resume naming model %q", f.client.requests[0], tt.wantResume)
+			}
+			if got := f.db.sessions[ws.ID].Model; got != tt.wantRecorded {
+				t.Fatalf("recorded model = %q, want %q", got, tt.wantRecorded)
+			}
+		})
+	}
+}
+
 // TestResumePropagatesTheUnknownSessionArm covers a GENUINELY vanished
 // transcript reaching the shim: the arm is named, never a generic sentence.
 func TestResumePropagatesTheUnknownSessionArm(t *testing.T) {

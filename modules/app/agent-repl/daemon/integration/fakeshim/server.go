@@ -545,7 +545,7 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 			Session: &conversationv1.SessionStarted{
 				VendorSessionId: vendorID,
 				Runtime:         &conversationv1.SessionRuntime{ShimBuildSha: s.buildSHA(), SdkVersion: SDKVersion},
-				EffectiveModel:  &conversationv1.AgentModel{Name: DefaultModel},
+				EffectiveModel:  &conversationv1.AgentModel{Name: startedModel(req.Msg)},
 				// THE REAL SHIM'S UNSTATED MODE, which is `auto` (owner
 				// ruling 2026-09-14) and no longer the vendor's `default`.
 				PermissionMode: &conversationv1.AgentPermissionMode{
@@ -1671,4 +1671,18 @@ func (s *server) takeVendorStartFailure() bool {
 	}
 	s.vendorFailures++
 	return true
+}
+
+// startedModel is the model a start puts in effect, as the real shim answers
+// it: the model the request names (StartSessionFresh.model or
+// StartSessionResume.model), and DefaultModel when it names none.
+func startedModel(req *shimv1.StartSessionRequest) string {
+	named := req.GetFresh().GetModel().GetName()
+	if resume := req.GetResume(); resume != nil {
+		named = resume.GetModel().GetName()
+	}
+	if named == "" {
+		return DefaultModel
+	}
+	return named
 }

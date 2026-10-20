@@ -1131,6 +1131,45 @@ func TestSetModelWithACatalogTokenSendsSetSessionModelAndUpdatesTheTopbarOnlyOnM
 	})
 }
 
+// TestAModelSwitchSurvivesAWorkspaceRestart pins the model a restart brings
+// the session back on: the one the user last switched to, recorded in wsm,
+// even though no prompt has run on it. The transcript the shim would
+// otherwise read holds only the model the user left.
+func TestAModelSwitchSurvivesAWorkspaceRestart(t *testing.T) {
+	t.Parallel()
+	// Arrange: a live session switched to sonnet.
+	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.watch_session",
+		"daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.shimclient.exit", "daemon.shimclient.kill_session")
+	topbar := f.d.WatchTopbar(f.ws)
+	awaitTopbar(t, f, topbar, "the initial model", func(v *frontendv1.TopbarView) bool {
+		return v.GetModelSelector().GetSelected().GetModel().GetName() != ""
+	})
+	resp, err := f.d.Client().SetModel(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetModelRequest{
+		Workspace: f.ws,
+		Model:     &conversationv1.AgentModel{Name: "sonnet"},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("SetModel(sonnet) = %v, %v, want a success", resp, err)
+	}
+	f.shim.ExpectSetSessionModel()
+
+	// Act
+	restarted, err := f.d.Client().RestartWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
+	if err != nil || restarted.Msg.GetSuccess() == nil {
+		t.Fatalf("RestartWorkspace = %v, %v, want a success", restarted, err)
+	}
+
+	// Assert: the restarted session resumes on sonnet. READ FROM THE SHIM'S
+	// DURABLE LOG: the restart answers once it happened, and a live dial of
+	// the new shim races its bring-up.
+	started := &shimv1.StartSessionRequest{}
+	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartSession,
+		"the restarted session's StartSession naming sonnet", started,
+		func() bool { return started.GetResume().GetModel().GetName() == "sonnet" })
+}
+
 func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdatesOnlyOnThePush(t *testing.T) {
 	t.Parallel()
 	// Arrange: the served set is topbar.SwitchableModes, a FIXED five-mode set
