@@ -44,19 +44,27 @@ import { log } from "./log.js";
 import { selectedText } from "./selection.js";
 
 /**
+ * Write TEXT onto the `copy` EVENT's clipboard in place of what the browser
+ * would have written, and answer whether it could: an event with no writable
+ * `clipboardData` is left untouched. The one way this module answers a copy.
+ */
+export function writeCopyEvent(event: Event, text: string): boolean {
+  const clipboardData = (event as ClipboardEvent).clipboardData;
+  if (clipboardData === null || clipboardData === undefined) return false;
+  clipboardData.setData("text/plain", text);
+  event.preventDefault();
+  return true;
+}
+
+/**
  * Install the document-level `copy` fallback, and answer a teardown that
  * removes it.
  */
 export function installCopyFallback(doc: Document): () => void {
   const onCopy = (event: Event): void => {
-    const clipboardData = (event as ClipboardEvent).clipboardData;
-    if (clipboardData === null || clipboardData === undefined) return;
-
     const text = selectedText(doc);
     if (text === "") return;
-
-    clipboardData.setData("text/plain", text);
-    event.preventDefault();
+    if (!writeCopyEvent(event, text)) return;
     log.debug("the copy fallback wrote the selection to the clipboard", {
       operation: "copy.fallback",
       context: { characters: text.length },
@@ -126,10 +134,7 @@ export function writeClipboardText(
 ): boolean {
   let written = false;
   const onCopy = (event: Event): void => {
-    const clipboardData = (event as ClipboardEvent).clipboardData;
-    if (clipboardData === null || clipboardData === undefined) return;
-    clipboardData.setData("text/plain", text);
-    event.preventDefault();
+    if (!writeCopyEvent(event, text)) return;
     event.stopImmediatePropagation();
     written = true;
   };
