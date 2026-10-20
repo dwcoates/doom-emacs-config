@@ -93,10 +93,7 @@ func (s *surfaces) retainOnce(now time.Time) {
 	s.retainSinks(now, &pass)
 
 	if result, err := s.runLog.file.Expire(now); err != nil {
-		pass.failures++
-		s.Global().Error("daemon.dlog.retention_failed", "the run log could not be aged", Context{
-			"log": s.runLog.path, "cause": err.Error(),
-		})
+		s.retentionFailed(&pass, "the run log could not be aged", Context{"log": s.runLog.path, "cause": err.Error()})
 	} else {
 		pass.runLogRolled = result.RolledCurrent
 		pass.noteRemoved(result.Removed)
@@ -151,11 +148,16 @@ func (s *surfaces) pruneDirectory(d retainedDir, now time.Time, pass *retentionP
 	pass.kept += report.Kept
 	pass.noteRemoved(report.Removed)
 	if err != nil {
-		pass.failures++
-		s.Global().Error("daemon.dlog.retention_failed", "a logs directory could not be fully pruned", Context{
+		s.retentionFailed(pass, "a logs directory could not be fully pruned", Context{
 			"logs_dir": d.dir, "removed": len(report.Removed), "cause": err.Error(),
 		})
 	}
+}
+
+// retentionFailed counts one failure of the pass and records it in the run log.
+func (s *surfaces) retentionFailed(pass *retentionPass, message string, ctx Context) {
+	pass.failures++
+	s.Global().Error("daemon.dlog.retention_failed", message, ctx)
 }
 
 // retainSinks ages every sink the daemon holds open.
@@ -189,9 +191,6 @@ func retainStdio(s *surfaces, stdio *stdioLog, now time.Time, pass *retentionPas
 	pass.stdioRolled = result.RolledCurrent
 	pass.noteRemoved(result.Removed)
 	if err != nil {
-		pass.failures++
-		s.Global().Error("daemon.dlog.retention_failed", "the stdio log could not be aged", Context{
-			"log": stdio.path, "cause": err.Error(),
-		})
+		s.retentionFailed(pass, "the stdio log could not be aged", Context{"log": stdio.path, "cause": err.Error()})
 	}
 }

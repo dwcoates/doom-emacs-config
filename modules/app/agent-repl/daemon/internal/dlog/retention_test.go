@@ -10,6 +10,8 @@ import (
 
 	"agentrepl/logging"
 
+	"agent-repld/internal/sourcescan"
+
 	"golang.org/x/sys/unix"
 )
 
@@ -318,5 +320,16 @@ func TestEveryMintedTargetIsADaemonLogFamily(t *testing.T) {
 				t.Fatalf("minted target %q is not a daemon log family, so the retention pass would never prune it", filepath.Base(target))
 			}
 		})
+	}
+}
+
+func TestEveryRunLogRetentionFailureGoesThroughRetentionFailed(t *testing.T) {
+	// Act.
+	viaHelper := sourcescan.Count(t, "s.retentionFailed(")
+	byHand := sourcescan.Count(t, `Global().Error("daemon.dlog.retention_failed"`)
+
+	// Assert: the run log, a directory and the stdio log call the helper, and the only hand-written record is the helper's own.
+	if viaHelper != 3 || byHand != 1 {
+		t.Fatalf("s.retentionFailed( appears %d times and a hand-rolled record %d times; want 3 and 1 (the helper's own record)", viaHelper, byHand)
 	}
 }
