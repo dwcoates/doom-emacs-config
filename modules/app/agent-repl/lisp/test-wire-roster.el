@@ -79,7 +79,7 @@ status arm and whatever else the case is about."
                    :status (:arm :ready :value nil)
                    :current (:current nil)
                    :when (:arm :no-turn-running :value nil)
-                   :detail (:branch nil :parent-branch nil :summary nil :commits nil)
+                   :detail (:branch nil :parent-branch nil :summary nil :commits nil :children nil)
                    :closed (:closed nil)))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-one-shot-mark ()
@@ -751,7 +751,7 @@ message."
   "Each detail line is PRESENT OR ABSENT BY MESSAGE PRESENCE."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-row-detail "{}")
-                 '(:branch nil :parent-branch nil :summary nil :commits nil))))
+                 '(:branch nil :parent-branch nil :summary nil :commits nil :children nil))))
 
 (ert-deftest agent-repl-test-wire-roster-detail-present-lines-decode ()
   "A present line decodes to its own plist, an absent sibling to nil."
@@ -761,7 +761,8 @@ message."
                  '(:branch (:name "proto/wire")
                    :parent-branch nil
                    :summary (:text "codec")
-                   :commits nil))))
+                   :commits nil
+                   :children nil))))
 
 (ert-deftest agent-repl-test-wire-roster-detail-commits-decode ()
   "A present commit count decodes to its plist."
@@ -792,6 +793,59 @@ message."
                              "{\"branch\":{}}")
                             :branch)
                  '(:name ""))))
+
+;; RosterRowDetail.children (proto field 5): every workspace whose
+;; recorded parent is the row's.
+
+(ert-deftest agent-repl-test-wire-roster-detail-children-decode-in-order ()
+  "Present children decode in wire order, each with its ref and name."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row-detail
+                             (concat "{\"children\":["
+                                     "{\"workspace\":{\"id\":\"c1\",\"dir\":\"/w/c1\"},\"name\":\"one\"},"
+                                     "{\"workspace\":{\"id\":\"c2\",\"dir\":\"/w/c2\"},\"name\":\"two\"}]}"))
+                            :children)
+                 '((:workspace (:id "c1" :dir "/w/c1") :name "one" :receded nil)
+                   (:workspace (:id "c2" :dir "/w/c2") :name "two" :receded nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-detail-child-receded-is-present ()
+  "A child carrying the empty `receded' marker decodes it as PRESENT."
+  (should (eq (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-row-detail-child
+                      "{\"workspace\":{\"id\":\"c1\",\"dir\":\"/w/c1\"},\"name\":\"one\",\"receded\":{}}")
+                         :receded)
+              t)))
+
+(ert-deftest agent-repl-test-wire-roster-detail-empty-children-array-is-nil ()
+  "An explicit empty children array decodes to nil, as an omitted one does."
+  (should-not (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-row-detail
+                          "{\"children\":[]}")
+                         :children)))
+
+(ert-deftest agent-repl-test-wire-roster-detail-children-not-an-array-is-a-breach ()
+  "A children field that is not an array is refused."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-detail "{\"children\":\"c1\"}")
+                 '("RosterRowDetail" children "expected an array"))))
+
+(ert-deftest agent-repl-test-wire-roster-detail-child-without-workspace-is-a-breach ()
+  "A child's workspace ref is required."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-detail-child "{\"name\":\"one\"}")
+                 '("RosterRowDetailChild" workspace "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-detail-child-refuses-an-unknown-field ()
+  "An unmodeled child field is refused as an unknown field."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-detail-child
+                  "{\"workspace\":{\"id\":\"c1\"},\"status\":{}}")
+                 '("RosterRowDetailChild" status "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-detail-child-receded-refuses-a-payload ()
+  "The receded marker is EMPTY BY DESIGN; a payload is refused."
+  (should (car (agent-repl-test-wire-roster--breach
+                #'agent-repl-wire-decode-roster-row-detail-child-receded "{\"why\":1}"))))
 
 (ert-deftest agent-repl-test-wire-roster-detail-refuses-an-unknown-line ()
   "An unmodeled detail line is refused as an unknown field."

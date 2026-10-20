@@ -460,14 +460,39 @@ omits."
      (list :count (agent-repl-wire--decode-uint32
                    "RosterRowDetailCommits" 'count object)))))
 
+(defun agent-repl-wire-decode-roster-row-detail-child-receded (value)
+  "Decode VALUE as `RosterRowDetailChildReceded' and return t.
+EMPTY, and PRESENCE IS THE FACT: the child's own row recedes."
+  (agent-repl-wire--decode-empty "RosterRowDetailChildReceded" value)
+  t)
+
+(defun agent-repl-wire-decode-roster-row-detail-child (value)
+  "Decode VALUE as `RosterRowDetailChild', a plist `(:workspace :name :receded)'.
+The workspace ref is required; `receded' is PRESENT OR ABSENT, presence
+being the fact that the child's own row recedes."
+  (let ((object (agent-repl-wire--object "RosterRowDetailChild" value)))
+    (agent-repl-wire--check-keys "RosterRowDetailChild" object '(workspace name receded))
+    (agent-repl-wire--decoded
+     "RosterRowDetailChild"
+     (list :workspace (agent-repl-wire--decode-message
+                       "RosterRowDetailChild" 'workspace object
+                       #'agent-repl-wire-decode-workspace-ref)
+           :name (agent-repl-wire--decode-string
+                  "RosterRowDetailChild" 'name object)
+           :receded (agent-repl-wire--decode-optional-message
+                     "RosterRowDetailChild" 'receded object
+                     #'agent-repl-wire-decode-roster-row-detail-child-receded)))))
+
 (defun agent-repl-wire-decode-roster-row-detail (value)
   "Decode VALUE as `RosterRowDetail', a plist of its lines.
 Each line is PRESENT OR ABSENT BY MESSAGE PRESENCE rather than by an empty
 string — the proto says so at the message — so an absent line decodes to
 nil and is omitted, never rendered blank.  This is the one place in the
-roster where an absent message field is not a breach."
+roster where an absent message field is not a breach.  `children' is a
+repeated field: absent (protojson omits an empty list) decodes to nil."
   (let ((object (agent-repl-wire--object "RosterRowDetail" value)))
-    (agent-repl-wire--check-keys "RosterRowDetail" object '(branch parentBranch summary commits))
+    (agent-repl-wire--check-keys "RosterRowDetail" object
+                                 '(branch parentBranch summary commits children))
     (agent-repl-wire--decoded
      "RosterRowDetail"
      (list :branch (agent-repl-wire--decode-optional-message
@@ -481,7 +506,10 @@ roster where an absent message field is not a breach."
                      #'agent-repl-wire-decode-roster-row-detail-summary)
            :commits (agent-repl-wire--decode-optional-message
                      "RosterRowDetail" 'commits object
-                     #'agent-repl-wire-decode-roster-row-detail-commits)))))
+                     #'agent-repl-wire-decode-roster-row-detail-commits)
+           :children (agent-repl-wire--decode-repeated
+                      "RosterRowDetail" 'children object
+                      #'agent-repl-wire-decode-roster-row-detail-child)))))
 
 ;;;; ---- The 23 status arms ----
 ;;
