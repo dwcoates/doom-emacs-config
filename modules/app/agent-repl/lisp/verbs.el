@@ -136,7 +136,6 @@
 (declare-function agent-repl-roster-row-ref "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-name "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-closed-p "agent-repl-roster" (row))
-(declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-host-request-switch "agent-repl-host" (ws trigger))
 (defvar agent-repl-roster-view)
 (defvar agent-repl-metaprompt-file)
@@ -1031,21 +1030,18 @@ roster stream.  The echo says how each one went."
 
 (defun agent-repl-verbs--land-after-visibility (ws hidden)
   "Request the switch an accepted visibility change of WS lands on.
-A HIDE lands on the FIRST tab the bar draws other than WS: the hidden tab
-is off the bar, so staying on it would leave the frame on a workspace the
-picture no longer offers.  WS is excluded BY NAME rather than trusted to
-be gone already, so the landing is the same whether the roster push that
-takes WS off the bar arrives before this ack or after it.  A SHOW lands on
-WS itself, which is what bringing a workspace back is for.
+A SHOW lands on WS itself, which is what bringing a workspace back is for.
 
-A hide that leaves no other drawn tab has nowhere to land, and stays put
-with a record saying so."
-  (if (not hidden)
-      (agent-repl-host-request-switch ws 'show)
-    (let ((target (car (remove ws (agent-repl-roster-drawn-tab-order)))))
-      (if target
-          (agent-repl-host-request-switch target 'hide)
-        (agent-repl--info ws "elisp.verbs.hide-landing-none ws=%s" ws)))))
+A HIDE REQUESTS NOTHING: the daemon owns its landing.  Hiding the
+workspace the user stands on selects the most recently selected
+workspace the bar still draws (the daemon's SetWorkspaceHidden), and the
+frame follows that selection off the roster push
+\(`agent-repl-roster-apply-current').  A second landing requested here
+raced the daemon's and won, so a hide always ended on the first tab --
+and hiding a workspace the user did NOT stand on moved them too."
+  (if hidden
+      (agent-repl--info ws "elisp.verbs.hide-landing ws=%s owner=daemon" ws)
+    (agent-repl-host-request-switch ws 'show)))
 
 (defun agent-repl-verb-swap (ws target)
   "Exchange the places of WS and TARGET in the registry order.
