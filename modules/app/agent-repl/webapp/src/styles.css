@@ -998,10 +998,13 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .repo.repo-section > .repo-head .tri { font-size: 0.98rem; }
 #ws-sidebar .repo.repo-section.folded > .repo-head { color: var(--repo-head-collapsed); }
 
-/* A REPOSITORY'S SUBSECTIONS (src/sidebar/subsections.ts) sit below its own
-   rows, each a small header over its rows, and fold away with the
-   repository. An empty subsection draws a slot to drag workspaces into. */
-#ws-sidebar .repo.folded > .sb-subsections { display: none; }
+/* A REPOSITORY'S SUBSECTIONS (src/sidebar/subsections.ts) stand among its
+   rows wherever they were arranged, each a small header over its rows, and
+   fold away with the repository (their list is the section's .rows). An
+   empty subsection draws a slot to drag workspaces into. A subsection's rows
+   are INDENTED under its header (owner request, 2026-10-20), so a row in it
+   reads apart from the repository's own rows around it. */
+#ws-sidebar .sb-subsection > .rows { margin-left: 0.9rem; }
 #ws-sidebar .sb-subsection-head {
   display: flex;
   align-items: center;
@@ -1041,6 +1044,13 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .sb-subsection-head,
 #ws-sidebar .rows[data-subsection] > [data-roster-row] > .row { touch-action: none; }
 #ws-sidebar .sb-drag-slot { opacity: 0.35; outline: 1px dashed var(--border); outline-offset: -1px; }
+/* THE SUBSECTION A DRAGGED ROW WOULD JOIN lights up, subtly, while the row
+   is over it (owner request, 2026-10-20): the rail's lifted grey, half
+   strength, behind its header and rows. */
+#ws-sidebar .sb-subsection.sb-drop-target {
+  background-color: color-mix(in srgb, var(--card) 50%, transparent);
+  border-radius: 4px;
+}
 #ws-sidebar .sb-drag-ghost {
   position: fixed;
   z-index: 1000;

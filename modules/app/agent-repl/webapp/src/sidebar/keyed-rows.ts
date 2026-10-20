@@ -17,8 +17,9 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { AttentionMarks, RailContext } from "./context.js";
 import { openScope, type DrawScope } from "./scope.js";
-import { drawRosterFamily, drawRosterRowWorkspace, pathedFamilies, type RowPlace } from "./row.js";
+import { drawRosterFamily, drawRosterRowWorkspace, type RowPlace } from "./row.js";
 import { requireMessage } from "../rpc/strict.js";
+import { pathedOpenRows, type PathedOpenRow } from "./entries.js";
 
 /** One drawn row: the wire it was drawn from, its element, and its scope. */
 interface KeyedRow {
@@ -54,11 +55,11 @@ export interface KeyedRows {
 }
 
 /** The top-level open rows the region draws, each with its path and workspace id. */
-function visible(u: RosterOpenRows, path: string): Array<{ row: RosterOpenRow; path: string; id: string }> {
-  return pathedFamilies(u.rows, `${path}.rows`).map((entry, index) => {
-    const row = requireMessage(u.rows[index].row, `${entry.path}.row`);
+function visible(rows: readonly PathedOpenRow[]): Array<{ row: RosterOpenRow; path: string; id: string }> {
+  return rows.map((entry) => {
+    const row = requireMessage(entry.row.row, `${entry.path}.row`);
     return {
-      row: u.rows[index],
+      row: entry.row,
       path: entry.path,
       id: drawRosterRowWorkspace(requireMessage(row.workspace, `${entry.path}.row.workspace`), `${entry.path}.row.workspace`).id,
     };
@@ -71,6 +72,16 @@ function drawKeyed(entry: { row: RosterOpenRow; path: string; id: string }, rail
   return { id: entry.id, row: entry.row, element: drawRosterFamily(entry.row, scope.context, entry.path, place), scope };
 }
 
+/**
+ * Draw ROWS, each under a scope of its own, recording each into INTO, and
+ * answer their elements in order for the caller to place: a section's top
+ * list stands its subsections among them.
+ */
+export function drawKeyedEntries(rows: readonly PathedOpenRow[], rail: RailContext, place: RowPlace, into: KeyedRows): HTMLElement[] {
+  into.entries = visible(rows).map((entry) => drawKeyed(entry, rail, place));
+  return into.entries.map((entry) => entry.element);
+}
+
 /** Draw U's rows into a fresh box, recording each into INTO. */
 export function drawKeyedRows(
   u: RosterOpenRows,
@@ -81,16 +92,14 @@ export function drawKeyedRows(
 ): HTMLElement {
   const box = document.createElement("div");
   box.className = "rows";
-  into.entries = visible(u, path).map((entry) => drawKeyed(entry, rail, place));
-  for (const entry of into.entries) box.appendChild(entry.element);
+  box.append(...drawKeyedEntries(pathedOpenRows(u, path), rail, place, into));
   return box;
 }
 
-/** One region of a section to bring in place: the rows drawn, and the wire to bring them to. */
+/** One region of a section to bring in place: the rows drawn, and the wire's rows to bring them to. */
 export interface KeyedRegion {
   kept: KeyedRows;
-  rows: RosterOpenRows;
-  path: string;
+  rows: readonly PathedOpenRow[];
 }
 
 /**
@@ -105,7 +114,7 @@ export function patchKeyedRows(
   path: string,
   place: RowPlace,
 ): boolean {
-  return patchKeyedRegions([{ kept, rows: u, path }], rail, place);
+  return patchKeyedRegions([{ kept, rows: pathedOpenRows(u, path) }], rail, place);
 }
 
 /**
@@ -119,7 +128,7 @@ export function patchKeyedRegions(
   rail: RailContext,
   place: RowPlace,
 ): boolean {
-  const next = regions.map((region) => visible(region.rows, region.path));
+  const next = regions.map((region) => visible(region.rows));
   const matches = regions.every(
     (region, r) =>
       next[r].length === region.kept.entries.length && next[r].every((entry, i) => entry.id === region.kept.entries[i].id),

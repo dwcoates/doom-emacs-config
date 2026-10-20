@@ -15,6 +15,7 @@
  * drawn, kept sections included.
  */
 import type { RosterOpenRow, RosterRepositoryView } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { repoEntries } from "./entries.js";
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -54,12 +55,14 @@ export function tabNumbers(u: RosterRepositoryView, path: string): Map<string, n
     row.children.forEach((child, index) => visit(child, `${rowPath}.children[${index}]`));
   };
   u.sections.forEach((section, s) => {
-    const sectionPath = `${path}.sections[${s}]`;
-    requireMessage(section.openRows, `${sectionPath}.open_rows`).rows.forEach((row, i) => visit(row, `${sectionPath}.open_rows.rows[${i}]`));
-    section.subsections.forEach((sub, b) => {
-      const subPath = `${sectionPath}.subsections[${b}]`;
-      requireMessage(sub.openRows, `${subPath}.open_rows`).rows.forEach((row, i) => visit(row, `${subPath}.open_rows.rows[${i}]`));
-    });
+    for (const entry of repoEntries(section, `${path}.sections[${s}]`)) {
+      if (entry.case === "row") {
+        visit(entry.row, entry.path);
+        continue;
+      }
+      const rows = requireMessage(entry.subsection.openRows, `${entry.path}.open_rows`);
+      rows.rows.forEach((row, i) => visit(row, `${entry.path}.open_rows.rows[${i}]`));
+    }
   });
   return numbers;
 }

@@ -3,11 +3,14 @@
  * adds one, and the drags that arrange the repository grouping.
  *
  * A SUBSECTION IS A SEPARATION INSIDE ONE REPOSITORY'S SECTION
- * (frontend.v1.RosterSubsection), drawn below the section's own rows in the
- * daemon's order. A workspace is put in one by dragging its row there, and
- * the Emacs tab bar follows: a repository's unsectioned workspaces, then each
- * subsection's (`arrange.ts`). An empty subsection still draws its header,
- * and a row dropped onto it lands in its (empty) rows list.
+ * (frontend.v1.RosterSubsection), standing among the section's rows wherever
+ * it was arranged: the section's body is ONE LIST of its rows in no
+ * subsection and its subsections, in the daemon's order (`entries.ts`). A
+ * workspace is put in one by dragging its row there, and the Emacs tab bar
+ * follows: entry by entry, a subsection's workspaces where it stands
+ * (`arrange.ts`). Its rows are indented under its header. An empty
+ * subsection still draws its header, and a row dropped onto it lands in its
+ * (empty) rows list.
  *
  * A SUBSECTION FOLDS AS A REPOSITORY SECTION DOES (`section-fold.ts`): its
  * triangle asks UpdateSidebarView for the other fold, a collapsed
@@ -19,9 +22,12 @@
  * ones whose order the tab bar walks:
  *
  *   - a workspace row at the top of its list (a nested row moves with its
- *     parent), among its own repository's lists: the section's own rows and
- *     each subsection's;
- *   - a subsection, by its header, among its repository's subsections;
+ *     parent), among its own repository's lists: the section's list, where
+ *     it may stand just above a subsection, and each subsection's rows. Over
+ *     a subsection (its header or its rows) it lands in that subsection,
+ *     which lights up (`DROP_TARGET_CLASS`) while it would;
+ *   - a subsection, by its header, among its repository's rows and
+ *     subsections: dropped onto a row's line it stands just above that row;
  *   - a repository, by its header, among the repositories.
  *
  * ONE LISTENER FOR EVERY DRAG (`installArrangeDrag`). A push redraws only the
@@ -35,9 +41,9 @@
  * so a status change elsewhere cannot throw away what is being typed.
  */
 import { CONTROL_SELECTOR, createControl, type Control } from "../control.js";
-import type { RosterOpenRows, RosterRepoSection, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterOpenRows, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { childrenMatching, queryAll, windowOf } from "../dom.js";
+import { queryAll, windowOf } from "../dom.js";
 import { EMPTY_SUBSECTION_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
 import { log } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
@@ -46,8 +52,7 @@ import { subsectionFoldKey, type SidebarContext } from "./context.js";
 import { drawFoldToggle, drawRosterSectionFold, sectionFold, trackDaemonFold } from "./section-fold.js";
 import { pressToDrag, type DragSpec } from "./drag.js";
 
-/** The class of a repository section's subsections box, and of one subsection. */
-export const SUBSECTIONS_CLASS = "sb-subsections";
+/** The class of one subsection. */
 export const SUBSECTION_CLASS = "sb-subsection";
 
 /** The class of a subsection's header: its drag handle. */
@@ -66,28 +71,6 @@ export const REPOSITORY_ATTRIBUTE = "data-repository";
 export interface DrawnSubsection {
   element: HTMLElement;
   rows: HTMLElement;
-}
-
-/**
- * A repository's subsections, each drawn by DRAW_ROWS (the rail's one row
- * drawer, handed the subsection's index), or null when the repository has
- * none, so a repository without subsections keeps the one headed shape every
- * section shares.
- */
-export function drawRosterSubsections(
-  u: RosterRepoSection,
-  sc: SidebarContext,
-  path: string,
-  drawRows: (rows: RosterOpenRows, path: string, index: number) => HTMLElement,
-): HTMLElement | null {
-  if (u.subsections.length === 0) return null;
-  const box = document.createElement("div");
-  box.className = SUBSECTIONS_CLASS;
-  u.subsections.forEach((sub, index) => {
-    const subPath = `${path}.subsections[${index}]`;
-    box.appendChild(drawRosterSubsection(sub, sc, subPath, (rows, rowsPath) => drawRows(rows, rowsPath, index)).element);
-  });
-  return box;
 }
 
 /** One subsection: its header (fold, name, count, delete) and its rows. */
@@ -267,42 +250,55 @@ export function installArrangeDrag(sc: SidebarContext, root: HTMLElement, refs: 
     // delete button and a text field are not grips.
     if (target.closest(`${CONTROL_SELECTOR}, button, input, textarea, select, a`) !== null) return;
     if (target.closest(`.${OPEN_REGION_CLASS}`) === null) return;
-    const spec = subsectionDrag(sc, target) ?? rowDrag(sc, target, refs) ?? repositoryDrag(sc, target, refs);
+    const spec = subsectionDrag(sc, target, refs) ?? rowDrag(sc, target, refs) ?? repositoryDrag(sc, target, refs);
     if (spec !== null) pressToDrag(sc.arrange, spec, event);
   };
   root.addEventListener("pointerdown", press);
   return () => root.removeEventListener("pointerdown", press);
 }
 
-/** A press on a subsection's header drags it among its repository's subsections. */
-function subsectionDrag(sc: SidebarContext, target: Element): DragSpec | null {
+/**
+ * A press on a subsection's header drags it among its repository's entries:
+ * dropped above a row it stands just before that row, above another
+ * subsection just before that one, below them all at the bottom.
+ */
+function subsectionDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSpec | null {
   const head = target.closest<HTMLElement>(`.${SUBSECTION_HEAD_CLASS}`);
   if (head === null) return null;
   const sub = head.parentElement;
-  const box = sub?.parentElement ?? null;
+  const list = sub?.parentElement ?? null;
   const section = sub?.closest<HTMLElement>(`[${REPOSITORY_ATTRIBUTE}]`) ?? null;
-  if (sub === null || box === null || section === null) {
-    throw new Error("invariant: a subsection's header sits in its subsection, in its repository's section");
+  if (sub === null || list === null || section === null) {
+    throw new Error("invariant: a subsection's header sits in its subsection, in its repository's list");
   }
   return {
     kind: "subsection",
     item: sub,
     box: section,
     scroller: openRegion(section),
-    lists: () => [box],
-    itemsOf: (l) => childrenMatching<HTMLElement>(l, `.${SUBSECTION_CLASS}`),
+    lists: () => [list],
+    itemsOf: entryItems,
     dropped: (_l, before) =>
       void sendArrangement(sc, sc.arrange.status, {
         case: "moveSubsection",
         value: {
           subsection: { id: bucketOf(sub) },
-          to: before === null ? { case: "end", value: {} } : { case: "before", value: { id: bucketOf(before) } },
+          to:
+            before === null
+              ? { case: "end", value: {} }
+              : isSubsection(before)
+                ? { case: "before", value: { id: bucketOf(before) } }
+                : { case: "beforeWorkspace", value: refs.workspace(rowId(before)) },
         },
       }),
   };
 }
 
-/** A press on a top-level row's line drags it among its repository's lists. */
+/**
+ * A press on a top-level row's line drags it among its repository's lists:
+ * the section's list (its rows in no subsection and its subsections) and
+ * each subsection's rows, the subsection it is over lit as the one it joins.
+ */
 function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSpec | null {
   const line = target.closest<HTMLElement>(".row");
   const row = line?.parentElement ?? null;
@@ -314,14 +310,15 @@ function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSp
   const section = row.closest<HTMLElement>(`[${REPOSITORY_ATTRIBUTE}]`);
   if (section === null) throw new Error("invariant: a bucketed row sits in its repository's section");
   const workspace = refs.workspace(rowId(row));
-  const rowsOf = (l: HTMLElement): HTMLElement[] => [...l.children].filter((el): el is HTMLElement => el.hasAttribute("data-roster-row"));
   return {
     kind: "workspace",
     item: row,
     box: section,
     scroller: openRegion(section),
     lists: () => queryAll<HTMLElement>(section, `.rows[${BUCKET_ATTRIBUTE}]`),
-    itemsOf: rowsOf,
+    itemsOf: entryItems,
+    zoneOf: (l) => subsectionOf(l) ?? l,
+    targetOf: subsectionOf,
     dropped: (l, before) => {
       const bucket = bucketOf(l);
       void sendArrangement(sc, sc.arrange.status, {
@@ -329,11 +326,36 @@ function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSp
         value: {
           workspace,
           into: bucket === "" ? { case: "noSubsection", value: {} } : { case: "subsection", value: { id: bucket } },
-          at: before === null ? { case: "end", value: {} } : { case: "before", value: refs.workspace(rowId(before)) },
+          at:
+            before === null
+              ? { case: "end", value: {} }
+              : isSubsection(before)
+                ? { case: "beforeSubsection", value: { id: bucketOf(before) } }
+                : { case: "before", value: refs.workspace(rowId(before)) },
         },
       });
     },
   };
+}
+
+/** A list's entries, in order: its top-level rows and, in a section's list, its subsections. */
+function entryItems(list: HTMLElement): HTMLElement[] {
+  return [...list.children].filter(
+    (el): el is HTMLElement => el.hasAttribute("data-roster-row") || el.classList.contains(SUBSECTION_CLASS),
+  );
+}
+
+/** Whether ITEM is a subsection rather than a row. */
+function isSubsection(item: HTMLElement): boolean {
+  return item.classList.contains(SUBSECTION_CLASS);
+}
+
+/** The subsection whose rows LIST is, null for the section's own list. */
+function subsectionOf(list: HTMLElement): HTMLElement | null {
+  if (bucketOf(list) === "") return null;
+  const sub = list.parentElement;
+  if (sub === null || !isSubsection(sub)) throw new Error("invariant: a subsection's rows list sits in its subsection");
+  return sub;
 }
 
 /** A press on a repository section's header drags it among the repositories. */

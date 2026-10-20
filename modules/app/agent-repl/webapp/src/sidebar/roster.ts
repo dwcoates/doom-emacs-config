@@ -40,7 +40,6 @@ import {
   type RosterRepoDivergence,
   type RosterRepoKey,
   type RosterRepoSection,
-  type RosterOpenRow,
   type RosterOpenRows,
   type RosterSectionCount,
   type RosterSectionHeader,
@@ -50,7 +49,8 @@ import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspac
 import { clone, equals } from "@bufbuild/protobuf";
 import { placeChildren } from "./children.js";
 import { queryAll } from "../dom.js";
-import { disposeKeyedRows, drawKeyedRows, patchKeyedRegions, remarkKeyedRows, type KeyedRows } from "./keyed-rows.js";
+import { disposeKeyedRows, drawKeyedEntries, drawKeyedRows, patchKeyedRegions, remarkKeyedRows, type KeyedRows } from "./keyed-rows.js";
+import { repoEntries, repoSectionRegions, sectionOpenRows, sectionSubsections, unsectionedRows, type PathedOpenRow } from "./entries.js";
 import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -66,7 +66,7 @@ import { REARRANGED_ATTRIBUTE } from "./drag.js";
 import {
   BUCKET_ATTRIBUTE,
   drawCreateSubsectionControl,
-  drawRosterSubsections,
+  drawRosterSubsection,
   installArrangeDrag,
   REPOSITORY_ATTRIBUTE,
   SUBSECTION_CLASS,
@@ -231,7 +231,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
           const regions = kept.drawn.regions;
           const before = regions.map((rows) => rows.entries.map((entry) => entry.element));
           const wires = repoSectionRegions(section, sectionPath);
-          if (patchKeyedRegions(regions.map((rows, r) => ({ kept: rows, ...wires[r] })), rail, "grouping")) {
+          if (patchKeyedRegions(regions.map((rows, r) => ({ kept: rows, rows: wires[r] })), rail, "grouping")) {
             regions.forEach((rows, r) => {
               patchedRows += rows.entries.filter((entry, i) => entry.element !== before[r][i]).length;
               remarkKeyedRows(rows, rail.attention);
@@ -248,13 +248,14 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
           section,
           (a, b) => equals(RosterRepoSectionSchema, a, b),
           (scoped) => {
-            // The section's own rows, then each subsection's.
-            const regions: KeyedRows[] = [{ entries: [] }, ...section.subsections.map(() => ({ entries: [] }))];
+            // The section's rows in no subsection, then each subsection's.
+            const regions: KeyedRows[] = repoSectionRegions(section, sectionPath).map(() => ({ entries: [] }));
             // The rows' scopes go down with the section's.
             scoped.onDispose(() => regions.forEach(disposeKeyedRows));
-            const element = drawRosterRepoSection(section, scoped, sectionPath, (r, p, pl, region) =>
-              drawKeyedRows(r, rail, p, pl, regions[region]),
-            );
+            const element = drawRosterRepoSection(section, scoped, sectionPath, {
+              own: (rows) => drawKeyedEntries(rows, rail, "grouping", regions[0]),
+              subsection: (rows, p, region) => drawKeyedRows(rows, rail, p, "grouping", regions[region]),
+            });
             return { element, regions };
           },
           discarded,
@@ -332,25 +333,32 @@ interface DrawnRepoSection extends Drawn {
 }
 
 /**
- * Whether two repository sections differ in their rows at most: their own
- * rows and their subsections' rows, with the same subsections under the same
- * headers.
+ * Whether two repository sections differ in their rows at most: the same
+ * entries in the same order (each row the same workspace, each subsection
+ * the same one under the same header), only the rows' drawings changed.
  */
 function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
+  const shape = (section: RosterRepoSection): string[] =>
+    repoEntries(section, "RosterRepoSection").map((entry) =>
+      entry.case === "row" ? `row:${entry.row.row?.workspace?.workspace?.id ?? ""}` : "subsection",
+    );
   const left = clone(RosterRepoSectionSchema, a);
   const right = clone(RosterRepoSectionSchema, b);
   for (const section of [left, right]) {
-    section.openRows = undefined;
     // WHETHER A SECTION HOLDS THE CURRENT WORKSPACE moves with every switch
     // between repositories, and the patch repaints it
     // (`paintRepoHoldsCurrent`), so it is no reason to redraw the section.
     if (section.fold.case === "expanded") section.fold.value.collapse = { case: undefined };
-    for (const sub of section.subsections) {
+    section.entries = section.entries.filter((entry) => entry.entry.case === "subsection");
+    for (const entry of section.entries) {
+      if (entry.entry.case !== "subsection") continue;
+      const sub = entry.entry.value;
       sub.openRows = undefined;
       if (sub.fold.case === "expanded") sub.fold.value.collapse = { case: undefined };
     }
   }
-  return equals(RosterRepoSectionSchema, left, right);
+  const sameShape = shape(a).join("\n") === shape(b).join("\n");
+  return sameShape && equals(RosterRepoSectionSchema, left, right);
 }
 
 /**
@@ -362,36 +370,17 @@ function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
 export function paintRepoHoldsCurrent(element: HTMLElement, u: RosterRepoSection, path: string): void {
   paintHoldsCurrent(element, drawRosterHoldsCurrent(u.fold, `${path}.fold`));
   const drawn = queryAll<HTMLElement>(element, `.${SUBSECTION_CLASS}`);
-  if (drawn.length !== u.subsections.length) {
-    throw new Error(`${path}: ${drawn.length} subsections drawn for ${u.subsections.length} on the wire`);
+  const wire = sectionSubsections(u, path);
+  if (drawn.length !== wire.length) {
+    throw new Error(`${path}: ${drawn.length} subsections drawn for ${wire.length} on the wire`);
   }
-  u.subsections.forEach((sub, index) => {
-    const subPath = `${path}.subsections[${index}]`;
+  wire.forEach(({ subsection: sub, path: subPath }, index) => {
     const id = requireMessage(sub.key, `${subPath}.key`).subsectionId;
     if (drawn[index].getAttribute(BUCKET_ATTRIBUTE) !== id) {
       throw new Error(`${subPath}: subsection ${id} is not the one drawn in its place`);
     }
     paintHoldsCurrent(drawn[index], drawRosterHoldsCurrent(sub.fold, `${subPath}.fold`));
   });
-}
-
-/**
- * A repository section's rows regions, in the order the section draws them:
- * its own rows, then each subsection's (`rosterwalk.RepoSectionRegions`).
- */
-export function repoSectionRegions(u: RosterRepoSection, path: string): Array<{ rows: RosterOpenRows; path: string }> {
-  return [
-    { rows: requireMessage(u.openRows, `${path}.open_rows`), path: `${path}.open_rows` },
-    ...u.subsections.map((sub, index) => {
-      const subPath = `${path}.subsections[${index}].open_rows`;
-      return { rows: requireMessage(sub.openRows, subPath), path: subPath };
-    }),
-  ];
-}
-
-/** OPEN and every open row of its family, depth-first. */
-function flattenOpen(open: readonly RosterOpenRow[]): RosterOpenRow[] {
-  return open.flatMap((row) => [row, ...flattenOpen(row.children)]);
 }
 
 /**
@@ -403,11 +392,9 @@ function drawnRefs(sections: () => Iterable<DrawnSection<RosterRepoSection, Draw
   return {
     workspace(id: string): WorkspaceRef {
       for (const { wire } of sections()) {
-        for (const region of repoSectionRegions(wire, "WorkspaceRoster.repository.sections[]")) {
-          for (const open of flattenOpen(region.rows.rows)) {
-            const workspace = open.row?.workspace?.workspace;
-            if (workspace?.id === id) return workspace;
-          }
+        for (const open of sectionOpenRows(wire, "WorkspaceRoster.repository.sections[]")) {
+          const workspace = open.row.row?.workspace?.workspace;
+          if (workspace?.id === id) return workspace;
         }
       }
       throw new Error(`invariant: a dragged row's workspace ${id} is in the roster drawn`);
@@ -481,28 +468,37 @@ export function drawRosterOpenSection(
 }
 
 /**
- * How a repository section's rows regions are drawn: REGION is 0 for the
- * section's own rows and 1 + the subsection's index for a subsection's.
+ * How a repository section's rows are drawn: OWN draws its rows in no
+ * subsection (region 0) as elements, in order, for the section to stand its
+ * subsections among; SUBSECTION draws one subsection's rows box (REGION is 1
+ * + the subsection's index).
  */
-export type DrawRepoRows = (rows: RosterOpenRows, path: string, place: RowPlace, region: number) => HTMLElement;
+export interface DrawRepoRows {
+  own: (rows: readonly PathedOpenRow[]) => HTMLElement[];
+  subsection: (rows: RosterOpenRows, path: string, region: number) => HTMLElement;
+}
 
 /**
- * One repository's section: its key, its header, its own rows, and below
- * them its subsections (`subsections.ts`), each rows region drawn by
- * DRAW_ROWS (`drawRosterRows` under the section's scope unless said).
+ * One repository's section: its key, its header, and its body, ONE LIST of
+ * its entries in drawn order (`entries.ts`): its rows in no subsection and
+ * its subsections (`subsections.ts`), interleaved as arranged, each rows
+ * region drawn by DRAW_ROWS (`drawRosterRows` under the section's scope
+ * unless said).
  */
 export function drawRosterRepoSection(
   u: RosterRepoSection,
   sc: SidebarContext,
   path: string,
-  drawRows: DrawRepoRows = (r, p, pl) => drawRosterRows(r, sc, p, pl),
+  drawRows: DrawRepoRows = {
+    own: (rows) => rows.map((open) => drawRosterFamily(open.row, sc, open.path, "grouping")),
+    subsection: (r, p) => drawRosterRows(r, sc, p, "grouping"),
+  },
 ): HTMLElement {
   const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
   const divergence = drawRosterRepoDivergence(
     requireMessage(u.divergence, `${path}.divergence`),
     `${path}.divergence`,
   );
-  const [own] = repoSectionRegions(u, path);
   // THE FOLD IS THE DAEMON'S: the Emacs tab bar hides a collapsed
   // repository's workspaces off the same pushed arm, so the two can never
   // disagree.
@@ -520,16 +516,26 @@ export function drawRosterRepoSection(
       },
     },
     () => {
-      const rows = drawRows(own.rows, own.path, "grouping", 0);
-      rows.setAttribute(BUCKET_ATTRIBUTE, "");
-      return rows;
+      const body = document.createElement("div");
+      body.className = "rows";
+      body.setAttribute(BUCKET_ATTRIBUTE, "");
+      const own = drawRows.own(unsectionedRows(u, path));
+      let rows = 0;
+      let subsections = 0;
+      for (const entry of repoEntries(u, path)) {
+        if (entry.case === "row") {
+          body.appendChild(own[rows++]);
+          continue;
+        }
+        const region = 1 + subsections++;
+        body.appendChild(
+          drawRosterSubsection(entry.subsection, sc, entry.path, (r, p) => drawRows.subsection(r, p, region)).element,
+        );
+      }
+      return body;
     },
   );
   section.setAttribute(REPOSITORY_ATTRIBUTE, key.id);
-  const subsections = drawRosterSubsections(u, sc, path, (rows, rowsPath, index) =>
-    drawRows(rows, rowsPath, "grouping", index + 1),
-  );
-  if (subsections !== null) section.appendChild(subsections);
   paintRepoHoldsCurrent(section, u, path);
   return section;
 }

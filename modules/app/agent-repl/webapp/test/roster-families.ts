@@ -14,9 +14,11 @@ import {
   RosterHiddenRowSchema,
   RosterOpenRowSchema,
   RosterOpenRowTabSchema,
+  RosterRepoEntrySchema,
   type RosterHiddenRow,
   type RosterOpenRow,
-  type RosterOpenRows,
+  type RosterRepoEntry,
+  type RosterRepoSection,
   type RosterRow,
 } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
 
@@ -46,10 +48,28 @@ export function hiddenRow(row: RosterRow): RosterHiddenRow {
   return create(RosterHiddenRowSchema, { row, children: (familyOf.get(row) ?? []).map(hiddenRow) });
 }
 
-/** One repository's open-row regions, its own first, and whether its fold withholds them. */
+/** ROWS as a repository section's row entries, one each, in order (frontend.v1.RosterRepoEntry). */
+export function rowEntries(rows: readonly RosterRow[]): RosterRepoEntry[] {
+  return rows.map((row) => create(RosterRepoEntrySchema, { entry: { case: "row", value: openRow(row) } }));
+}
+
+/** One repository's open-row regions, in drawn order, and whether its fold withholds them. */
 export interface TabRegions {
-  regions: ReadonlyArray<RosterOpenRows | undefined>;
+  regions: ReadonlyArray<{ readonly rows: readonly RosterOpenRow[] } | undefined>;
   folded: boolean;
+}
+
+/**
+ * SECTION's tab regions in drawn order, entry by entry: a row in no
+ * subsection alone, a subsection's rows where it stands.
+ */
+export function sectionTabRegions(section: RosterRepoSection): TabRegions {
+  return {
+    regions: section.entries.map((entry) =>
+      entry.entry.case === "row" ? { rows: [entry.entry.value] } : entry.entry.case === "subsection" ? entry.entry.value.openRows : undefined,
+    ),
+    folded: section.fold.case === "collapsed",
+  };
 }
 
 /**

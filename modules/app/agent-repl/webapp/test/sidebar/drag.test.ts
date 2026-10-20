@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The drag's click guard. See src/sidebar/drag.ts.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { swallowTheNextClick } from "../../src/sidebar/drag.js";
+import { listAt, swallowTheNextClick } from "../../src/sidebar/drag.js";
 import { settleOwedDragClick } from "./harness.js";
 
 /** A second window, in an iframe of this page. */
@@ -72,3 +72,53 @@ describe("the click guard", () => {
   });
 });
 
+
+/** A list element whose box spans TOP to BOTTOM. */
+function spanning(top: number, bottom: number): HTMLElement {
+  const el = document.createElement("div");
+  Object.defineProperty(el, "getBoundingClientRect", {
+    value: () => ({ top, bottom, height: bottom - top, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) }),
+  });
+  return el;
+}
+
+describe("listAt", () => {
+  const own = (list: HTMLElement): HTMLElement => list;
+
+  it("lands in the innermost of the zones the pointer is over", () => {
+    // Arrange -- a section's list (0 to 100) holding a subsection (40 to 80).
+    const outer = spanning(0, 100);
+    const inner = spanning(40, 80);
+
+    // Act / Assert
+    expect([listAt([outer, inner], 50, own), listAt([outer, inner], 20, own)]).toEqual([inner, outer]);
+  });
+
+  it("lands in a list through the zone it claims", () => {
+    // Arrange -- the subsection's rows (60 to 80) claim the whole subsection (40 to 80).
+    const outer = spanning(0, 100);
+    const rows = spanning(60, 80);
+    const subsection = spanning(40, 80);
+
+    // Act
+    const got = listAt([outer, rows], 45, (list) => (list === rows ? subsection : list));
+
+    // Assert
+    expect(got).toBe(rows);
+  });
+
+  it("lands in the nearest zone when the pointer is over none, the earlier on a tie", () => {
+    // Arrange
+    const first = spanning(0, 50);
+    const second = spanning(0, 50);
+    const far = spanning(100, 150);
+
+    // Act / Assert
+    expect([listAt([first, second, far], 70, own), listAt([first, far], 90, own)]).toEqual([first, far]);
+  });
+
+  it("refuses a drag with no list to land in", () => {
+    // Act / Assert
+    expect(() => listAt([], 10, own)).toThrow(/invariant/);
+  });
+});

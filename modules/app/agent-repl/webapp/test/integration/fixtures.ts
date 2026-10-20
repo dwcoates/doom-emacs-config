@@ -98,7 +98,7 @@ import {
 import { orderFor } from "../feed-order.js";
 import { ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { enduringLine } from "../footer/enduring-line.js";
-import { hiddenRow, numberTabs, openRow, withFamily } from "../roster-families.js";
+import { hiddenRow, numberTabs, rowEntries, sectionTabRegions, withFamily } from "../roster-families.js";
 import { sentTo } from "../feed/addresses.js";
 
 // ---------------------------------------------------------------------------
@@ -2555,14 +2555,14 @@ export function roster(init?: {
       sections: init?.repositorySections?.map((section) => ({
         key: { repository: repositoryRef(section.repositoryId) },
         header: { label: { text: section.label }, count: { workspaces: section.rows.length } },
-        openRows: { rows: section.rows.map(openRow) },
+        entries: rowEntries(section.rows),
         fold: repositoryFold(section.collapsed === true),
         divergence: PENDING_DIVERGENCE,
       })) ?? [
         {
           key: { repository: repositoryRef() },
           header: { label: { text: "doom" }, count: { workspaces: rows.length } },
-          openRows: { rows: rows.map(openRow) },
+          entries: rowEntries(rows),
           fold: repositoryFold(false),
           divergence: PENDING_DIVERGENCE,
         },
@@ -2603,7 +2603,7 @@ export function roster(init?: {
   });
   // THE DAEMON NUMBERS EVERY OPEN ROW'S TAB, in the Open section's walk.
   numberTabs(
-    (built.repository?.sections ?? []).map((section) => ({ regions: [section.openRows], folded: section.fold.case === "collapsed" })),
+    (built.repository?.sections ?? []).map(sectionTabRegions),
   );
   return built;
 }

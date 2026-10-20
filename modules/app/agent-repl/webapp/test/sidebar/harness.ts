@@ -18,6 +18,7 @@ import {
   RosterOpenSectionSchema,
   RosterMergedRepoGroupSchema,
   RosterMergedSectionSchema,
+  RosterRepoEntrySchema,
   RosterRepoSectionSchema,
   RosterSubsectionSchema,
   WorkspaceRosterSchema,
@@ -30,7 +31,7 @@ import {
   type WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { hiddenRow, numberTabs, openRow, withFamily } from "../roster-families.js";
+import { hiddenRow, numberTabs, openRow, rowEntries, sectionTabRegions, withFamily } from "../roster-families.js";
 
 export { hiddenRow, openRow };
 import type { Ticker } from "../../src/clock.js";
@@ -287,21 +288,36 @@ export function repoSection(init: {
   divergence?: MessageInitShape<typeof RosterRepoSectionSchema>["divergence"];
   /** Whether the expanded section holds the current workspace; not unless said. */
   holdsCurrent?: boolean;
-  /** The repository's subsections, in order; none unless said. */
-  subsections?: Array<{ id: string; label?: string; rows?: RosterRow[]; collapsed?: boolean; holdsCurrent?: boolean }>;
+  /**
+   * The repository's subsections, in order; none unless said. Each stands
+   * just before the row BEFORE names, or after every row unless said.
+   */
+  subsections?: Array<{ id: string; label?: string; rows?: RosterRow[]; collapsed?: boolean; holdsCurrent?: boolean; before?: string }>;
 }): RosterRepoSection {
+  const rows = init.rows ?? [];
+  const entries = rowEntries(rows);
+  for (const sub of init.subsections ?? []) {
+    const entry = create(RosterRepoEntrySchema, {
+      entry: {
+        case: "subsection",
+        value: {
+          key: { subsectionId: sub.id },
+          header: { label: { text: sub.label ?? sub.id }, count: { workspaces: sub.rows?.length ?? 0 } },
+          openRows: { rows: (sub.rows ?? []).map(openRow) },
+          fold: sectionFold(sub.collapsed, sub.holdsCurrent),
+        },
+      },
+    });
+    const at = sub.before === undefined ? -1 : entries.findIndex((e) => e.entry.case === "row" && e.entry.value.row?.workspace?.workspace?.id === sub.before);
+    if (sub.before !== undefined && at < 0) throw new Error(`harness: no row ${sub.before} for subsection ${sub.id} to stand before`);
+    entries.splice(at < 0 ? entries.length : at, 0, entry);
+  }
   return create(RosterRepoSectionSchema, {
     key: { repository: { id: init.id, dir: `/repo/${init.id}` } },
-    header: { label: { text: init.label ?? init.id }, count: { workspaces: init.count ?? init.rows?.length ?? 0 } },
-    openRows: { rows: (init.rows ?? []).map(openRow) },
+    header: { label: { text: init.label ?? init.id }, count: { workspaces: init.count ?? rows.length } },
     fold: sectionFold(init.collapsed, init.holdsCurrent),
     divergence: init.divergence ?? { state: { case: "pending", value: {} } },
-    subsections: (init.subsections ?? []).map((sub) => ({
-      key: { subsectionId: sub.id },
-      header: { label: { text: sub.label ?? sub.id }, count: { workspaces: sub.rows?.length ?? 0 } },
-      openRows: { rows: (sub.rows ?? []).map(openRow) },
-      fold: sectionFold(sub.collapsed, sub.holdsCurrent),
-    })),
+    entries,
   });
 }
 
@@ -415,10 +431,7 @@ export function roster(init: {
   const repos = init.repos ?? [];
   const counted = repos.reduce((sum, section) => sum + (section.header?.count?.workspaces ?? 0), 0);
   numberTabs(
-    repos.map((section) => ({
-      regions: [section.openRows, ...section.subsections.map((sub) => sub.openRows)],
-      folded: section.fold.case === "collapsed",
-    })),
+    repos.map(sectionTabRegions),
     init.tabs?.filter((tab) => (tab.drawn ?? "drawn") === "drawn").map((tab) => tab.id),
   );
   return create(WorkspaceRosterSchema, {
@@ -450,4 +463,11 @@ export function settleOwedDragClick(): void {
  */
 export function primaryPointer(type: string, target: EventTarget, y: number): void {
   target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, isPrimary: true, button: 0, clientX: 10, clientY: y }));
+}
+
+/** The drawn entries of a repository section's list, in order: a row by its id, a subsection as [id]. */
+export function drawnEntries(list: Element): string[] {
+  return [...list.children].map((el) =>
+    el.classList.contains("sb-subsection") ? `[${el.getAttribute("data-subsection")}]` : (el.getAttribute("data-roster-row") ?? "?"),
+  );
 }
