@@ -115,6 +115,22 @@
                      '(:workspace (:id "ws-7" :dir "/w/fix")))))
                  "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}")))
 
+(ert-deftest agent-repl-test-wire-host-select-request-carries-keep-selection-history ()
+  "A recency-walk step spells `keepSelectionHistory' true."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-select-workspace-request
+                     '(:workspace (:id "ws-7" :dir "/w/fix") :keep-selection-history t))))
+                 "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"},\"keepSelectionHistory\":true}")))
+
+(ert-deftest agent-repl-test-wire-host-select-request-omits-a-false-keep-selection-history ()
+  "A choice leaves `keepSelectionHistory' at proto3's omitted false."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-select-workspace-request
+                     '(:workspace (:id "ws-7" :dir "/w/fix") :keep-selection-history nil))))
+                 "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}")))
+
 (ert-deftest agent-repl-test-wire-host-select-request-without-a-ref-is-refused ()
   "An incomplete request errors before send, never on the wire."
   (should (equal (agent-repl-test-wire-host--quiet

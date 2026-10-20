@@ -734,6 +734,40 @@ order a close lands by."
 
 ;;;; ---- The log target every recency jump shares ----
 
+(ert-deftest agent-repl-test-commands-gesture-log-ws-is-the-shown-log-name ()
+  "A gesture from a workspace logs under that workspace's own log name."
+  (cl-letf (((symbol-function 'agent-repl--ws-log-name) (lambda (ws) (concat "log-" ws))))
+    (should (equal (agent-repl--gesture-log-ws "here" "probe") "log-here"))))
+
+(ert-deftest agent-repl-test-commands-gesture-log-ws-from-a-placeholder-names-the-gesture ()
+  "A gesture from a placeholder logs under a context naming the gesture."
+  (cl-letf (((symbol-function 'agent-repl--ws-log-name) (lambda (_) nil)))
+    (should (equal (agent-repl--gesture-log-ws nil "probe")
+                   '(:agent-repl-context "a probe from a placeholder names no workspace")))))
+
+(ert-deftest agent-repl-test-commands-navigation-gestures-share-the-gesture-log-ws ()
+  "Every navigation gesture names its log target through `agent-repl--gesture-log-ws'."
+  ;; Arrange
+  (let ((gestures nil))
+    (cl-letf (((symbol-function 'agent-repl--gesture-log-ws)
+               (lambda (_shown gesture) (push gesture gestures) "log"))
+              ((symbol-function 'agent-repl--drawn-tab-names) (lambda () '("a" "b")))
+              ((symbol-function 'agent-repl-roster-tab-order) (lambda () '("a" "b")))
+              ((symbol-function 'agent-repl-roster-selection-recency-order) (lambda (names) names))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
+              ((symbol-function 'agent-repl-host-pending-selection) (lambda () nil))
+              ((symbol-function 'agent-repl-host-request-switch) (lambda (&rest _) t))
+              ((symbol-function 'agent-repl--roster-recent-names) (lambda () '("a" "b")))
+              ((symbol-function 'agent-repl--info) #'ignore)
+              ((symbol-function 'message) #'ignore))
+      ;; Act
+      (agent-repl-switch-right)
+      (agent-repl-switch-older)
+      (agent-repl-switch-to-previous-workspace)
+      (agent-repl--act-on-tab-slot 2 "swap" #'ignore)
+      ;; Assert
+      (should (equal (reverse gestures) '("cycle" "recency-walk" "jump" "swap"))))))
+
 (ert-deftest agent-repl-test-commands-jump-log-ws-is-the-shown-log-name ()
   "A jump from a workspace logs under that workspace's log name."
   (cl-letf (((symbol-function 'agent-repl--ws-log-name) (lambda (ws) (concat "log-" ws))))
@@ -963,6 +997,194 @@ highlighted. The drawn order cannot carry either name."
   (agent-repl-test-commands--with-bar '("first" "second") "elsewhere"
     (agent-repl-switch-right)
     (should-not agent-repl-test-commands--switched)))
+
+;;;; ---- The one step helper every adjacent-tab gesture shares ----
+
+(defmacro agent-repl-test-commands--with-step (drawn shown pending &rest body)
+  "Run BODY with DRAWN tabs, SHOWN on screen and PENDING requested.
+Binds `requests' to the (WS TRIGGER) pairs requested and `records' to the
+formatted `info' records, newest first."
+  (declare (indent 3))
+  `(let ((requests nil) (records nil))
+     (cl-letf (((symbol-function 'agent-repl--drawn-tab-names) (lambda () ,drawn))
+               ((symbol-function 'agent-repl--ws-current-name) (lambda () ,shown))
+               ((symbol-function 'agent-repl-host-pending-selection) (lambda () ,pending))
+               ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+               ((symbol-function 'agent-repl-host-request-switch)
+                (lambda (ws trigger) (push (list ws trigger) requests) t))
+               ((symbol-function 'agent-repl--info)
+                (lambda (_scope fmt &rest args) (push (apply #'format fmt args) records))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-commands-step-hands-the-ring-the-pending-start ()
+  "The ring is built from the pending request, not the tab shown."
+  ;; Arrange
+  (let ((seen nil))
+    (agent-repl-test-commands--with-step '("a" "b" "c") "a" "b"
+      ;; Act
+      (agent-repl--step-workspace 1 (lambda (from) (setq seen from) '("a" "b" "c"))
+                                  "probe" 'probe)
+      ;; Assert
+      (should (equal seen "b"))
+      (should (equal requests '(("c" probe)))))))
+
+(ert-deftest agent-repl-test-commands-step-records-under-its-op ()
+  "A landing records `elisp.commands.OP' with the step, start and target."
+  (agent-repl-test-commands--with-step '("a" "b") "a" nil
+    ;; Act
+    (agent-repl--step-workspace 1 (lambda (_) '("a" "b")) "probe" 'probe)
+    ;; Assert
+    (should (member "elisp.commands.probe n=1 from=a target=b" records))))
+
+(ert-deftest agent-repl-test-commands-step-off-the-ring-is-a-logged-no-op ()
+  "A start the ring does not hold requests nothing and records its op's no-position."
+  (agent-repl-test-commands--with-step '("a" "b") "elsewhere" nil
+    ;; Act
+    (agent-repl--step-workspace -1 (lambda (_) '("a" "b")) "probe" 'probe)
+    ;; Assert
+    (should-not requests)
+    (should (member "elisp.commands.probe-no-position n=-1 tabs=2 from=elsewhere" records))))
+
+(ert-deftest agent-repl-test-commands-step-from-a-placeholder-names-its-op-scope ()
+  "A step from a placeholder records under a scope naming its gesture."
+  ;; Arrange
+  (let ((scopes nil))
+    (cl-letf (((symbol-function 'agent-repl--drawn-tab-names) (lambda () nil))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "main"))
+              ((symbol-function 'agent-repl-host-pending-selection) (lambda () nil))
+              ((symbol-function 'agent-repl--ws-log-name) (lambda (_) nil))
+              ((symbol-function 'agent-repl--info) (lambda (scope &rest _) (push scope scopes))))
+      ;; Act
+      (agent-repl--step-workspace 1 (lambda (_) nil) "probe" 'probe)
+      ;; Assert
+      (should (equal scopes '((:agent-repl-context "a probe from a placeholder names no workspace")))))))
+
+(ert-deftest agent-repl-test-commands-cycle-steps-through-the-shared-helper ()
+  "`s-{' / `s-}' go through `agent-repl--step-workspace', never a hand-rolled walk."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl--step-workspace)
+               (lambda (n _ring op trigger) (push (list n op trigger) calls))))
+      ;; Act
+      (agent-repl-switch-left)
+      (agent-repl-switch-right)
+      ;; Assert
+      (should (equal calls '((1 "cycle" cycle) (-1 "cycle" cycle)))))))
+
+;;;; ---- s-[ / s-] walk the selection history ----
+
+(defmacro agent-repl-test-commands--with-history (tabs hidden history current &rest body)
+  "Run BODY with TABS on the roster, HIDDEN undrawn, HISTORY most recent first.
+CURRENT is shown.  Binds `requests' to the (WS TRIGGER) pairs requested."
+  (declare (indent 4))
+  `(let ((requests nil)
+         (agent-repl--workspace-history ,history))
+     (cl-letf (((symbol-function 'agent-repl-roster-drawn-tab-order)
+                (lambda () (cl-remove-if (lambda (name) (member name ,hidden)) ,tabs)))
+               ((symbol-function 'agent-repl-roster-last-selected-ms) (lambda (_) nil))
+               ((symbol-function 'agent-repl--ws-current-name) (lambda () ,current))
+               ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+               ((symbol-function 'agent-repl-host-pending-selection)
+                (lambda () agent-repl-test-commands--pending))
+               ((symbol-function 'agent-repl-host-request-switch)
+                (lambda (ws trigger) (push (list ws trigger) requests) t)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-commands-switch-older-lands-on-the-previously-viewed ()
+  "`s-[' from the most recent goes to the workspace viewed before it."
+  (agent-repl-test-commands--with-history '("a" "b" "c") nil '("c" "a" "b") "c"
+    ;; Act
+    (agent-repl-switch-older)
+    ;; Assert
+    (should (equal requests '(("a" recency-walk))))))
+
+(ert-deftest agent-repl-test-commands-switch-older-again-goes-further-back ()
+  "From a walk's landing, `s-[' steps one older along the unchanged history."
+  (agent-repl-test-commands--with-history '("a" "b" "c") nil '("c" "a" "b") "a"
+    ;; Act
+    (agent-repl-switch-older)
+    ;; Assert
+    (should (equal requests '(("b" recency-walk))))))
+
+(ert-deftest agent-repl-test-commands-switch-newer-walks-back-toward-the-most-recent ()
+  "`s-]' steps toward the most recently viewed."
+  (agent-repl-test-commands--with-history '("a" "b" "c") nil '("c" "a" "b") "b"
+    ;; Act
+    (agent-repl-switch-newer)
+    ;; Assert
+    (should (equal requests '(("a" recency-walk))))))
+
+(ert-deftest agent-repl-test-commands-switch-older-wraps-past-the-oldest ()
+  "`s-[' off the oldest wraps to the most recent, as `s-{' wraps."
+  (agent-repl-test-commands--with-history '("a" "b" "c") nil '("c" "a" "b") "b"
+    ;; Act
+    (agent-repl-switch-older)
+    ;; Assert
+    (should (equal requests '(("c" recency-walk))))))
+
+(ert-deftest agent-repl-test-commands-switch-newer-wraps-past-the-most-recent ()
+  "`s-]' off the most recent wraps to the oldest."
+  (agent-repl-test-commands--with-history '("a" "b" "c") nil '("c" "a" "b") "c"
+    ;; Act
+    (agent-repl-switch-newer)
+    ;; Assert
+    (should (equal requests '(("b" recency-walk))))))
+
+(ert-deftest agent-repl-test-commands-recency-walk-steps-from-the-pending-request ()
+  "A second press before the roster catches up steps from the first press's target."
+  (let ((agent-repl-test-commands--pending "a"))
+    (agent-repl-test-commands--with-history '("a" "b" "c") nil '("c" "a" "b") "c"
+      ;; Act
+      (agent-repl-switch-older)
+      ;; Assert
+      (should (equal requests '(("b" recency-walk)))))))
+
+(ert-deftest agent-repl-test-commands-recency-walk-passes-over-a-hidden-tab ()
+  "A tab the bar does not draw is never a walk's landing."
+  (agent-repl-test-commands--with-history '("a" "hidden" "c") '("hidden") '("c" "hidden" "a") "c"
+    ;; Act
+    (agent-repl-switch-older)
+    ;; Assert
+    (should (equal requests '(("a" recency-walk))))))
+
+(ert-deftest agent-repl-test-commands-recency-walk-from-a-hidden-current-keeps-its-place ()
+  "A current workspace whose tab is hidden still steps from its place in the history."
+  (agent-repl-test-commands--with-history '("a" "hidden" "c") '("hidden") '("c" "hidden" "a") "hidden"
+    ;; Act
+    (agent-repl-switch-older)
+    ;; Assert
+    (should (equal requests '(("a" recency-walk))))))
+
+(ert-deftest agent-repl-test-commands-recency-walk-orders-unvisited-tabs-by-the-daemon ()
+  "Tabs this session never visited follow by the daemon's last-selected instant."
+  (agent-repl-test-commands--with-history '("a" "b" "c") nil '("c") "c"
+    (cl-letf (((symbol-function 'agent-repl-roster-last-selected-ms)
+               (lambda (ws) (pcase ws ("a" 100) ("b" 200)))))
+      ;; Act
+      (agent-repl-switch-older)
+      ;; Assert
+      (should (equal requests '(("b" recency-walk)))))))
+
+(ert-deftest agent-repl-test-commands-recency-walk-on-an-empty-bar-is-a-no-op ()
+  "With no tabs drawn there is nowhere to walk."
+  (agent-repl-test-commands--with-history nil nil nil "c"
+    ;; Act
+    (agent-repl-switch-older)
+    ;; Assert
+    (should-not requests)))
+
+(ert-deftest agent-repl-test-commands-recency-walk-steps-through-the-shared-helper ()
+  "`s-[' / `s-]' go through `agent-repl--step-workspace' over the recency ring."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl--step-workspace)
+               (lambda (n ring op trigger) (push (list n ring op trigger) calls))))
+      ;; Act
+      (agent-repl-switch-older)
+      (agent-repl-switch-newer)
+      ;; Assert
+      (should (equal calls '((-1 agent-repl--recency-ring "recency-walk" recency-walk)
+                             (1 agent-repl--recency-ring "recency-walk" recency-walk)))))))
 
 ;;;; ---- A switch is a REQUEST; the roster moves the frame ----
 

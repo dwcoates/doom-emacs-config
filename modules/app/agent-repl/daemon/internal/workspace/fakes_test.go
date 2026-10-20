@@ -196,7 +196,12 @@ type fakeDB struct {
 	priorities   map[ids.WorkspaceID]*wsm.Priority
 	attention    map[ids.WorkspaceID]bool
 	currentAt    time.Time
-	forgotten    []ids.WorkspaceID
+	// keptHistorySelects are the selections SetCurrentKeepingLastSelected
+	// recorded, in order.
+	keptHistorySelects []ids.WorkspaceID
+	// keepSelectedErr fails SetCurrentKeepingLastSelected.
+	keepSelectedErr error
+	forgotten          []ids.WorkspaceID
 	// forgetReport is what Forget answers, and forgetErr makes it fail; the
 	// fake's own map cannot do either on its own.
 	forgetReport wsm.ForgetReport
@@ -680,6 +685,15 @@ func (d *fakeDB) SetCurrent(_ context.Context, id ids.WorkspaceID, at time.Time)
 	return nil
 }
 
+func (d *fakeDB) SetCurrentKeepingLastSelected(_ context.Context, id ids.WorkspaceID) error {
+	if d.keepSelectedErr != nil {
+		return d.keepSelectedErr
+	}
+	d.current = &id
+	d.keptHistorySelects = append(d.keptHistorySelects, id)
+	return nil
+}
+
 func (d *fakeDB) SetAttention(_ context.Context, id ids.WorkspaceID, on bool) error {
 	d.attention[id] = on
 	return nil
@@ -1002,8 +1016,8 @@ type fakeGit struct {
 	// fetched records each Fetch as "dir remote"; fetchErr fails every one.
 	fetched  []string
 	fetchErr error
-	nuked     []nukedWorktree
-	nukeErr   error
+	nuked    []nukedWorktree
+	nukeErr  error
 
 	// gitCalls records the restore path's git, in order, so a test can tell
 	// a prune that came BEFORE the add from one that came after it.
@@ -3027,7 +3041,7 @@ func (f *fixture) gateStarts(buffer int) (entered <-chan ids.WorkspaceID, releas
 // selectAsync runs Select on its own goroutine and answers its outcome.
 func (f *fixture) selectAsync(ctx context.Context, ws ids.WorkspaceID) <-chan error {
 	done := make(chan error, 1)
-	go func() { done <- f.verbs.Select(ctx, ws) }()
+	go func() { done <- f.verbs.Select(ctx, ws, RecordSelection) }()
 	return done
 }
 

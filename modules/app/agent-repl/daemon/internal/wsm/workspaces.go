@@ -901,11 +901,28 @@ func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at t
 // shim's fresh projection, never the one that stood before the selection. A
 // CLOSED workspace keeps its lapse: it lapses whether or not it is selected.
 func (s *store) SetCurrent(ctx context.Context, id WorkspaceID, at time.Time) error {
-	return s.write(ctx, "daemon.wsm.set_current", dlog.Context{"workspace": string(id), "at": at}, func(ctx context.Context, tx *sql.Tx) error {
+	return s.setCurrent(ctx, "daemon.wsm.set_current", id, &at)
+}
+
+// SetCurrentKeepingLastSelected is SetCurrent for a step of a walk through the
+// selection history: the workspace becomes current, and its last-selected
+// instant stands, so the walk never reorders the history it walks.
+func (s *store) SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceID) error {
+	return s.setCurrent(ctx, "daemon.wsm.set_current_keeping_last_selected", id, nil)
+}
+
+// setCurrent is SetCurrent's and SetCurrentKeepingLastSelected's one write.
+// A nil STAMP leaves last_selected_at as it stands.
+func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp *time.Time) error {
+	fields := dlog.Context{"workspace": string(id)}
+	if stamp != nil {
+		fields["at"] = *stamp
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 0 WHERE is_current = 1`); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 1, last_selected_at = ?, cache_lapses_at = CASE WHEN closed = 1 THEN cache_lapses_at END, cache_lapse_gated_tokens = CASE WHEN closed = 1 THEN cache_lapse_gated_tokens END WHERE id = ?`, nanos(at), id)
+		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 1, last_selected_at = COALESCE(?, last_selected_at), cache_lapses_at = CASE WHEN closed = 1 THEN cache_lapses_at END, cache_lapse_gated_tokens = CASE WHEN closed = 1 THEN cache_lapse_gated_tokens END WHERE id = ?`, nullNanos(stamp), id)
 		if err != nil {
 			return err
 		}

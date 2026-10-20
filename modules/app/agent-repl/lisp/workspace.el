@@ -164,6 +164,16 @@ Maintained by `agent-repl--record-workspace-history' on every workspace
 activation.  Read by `agent-repl--teardown-landing-target': closing the
 workspace the user stands on selects the one selected before it.")
 
+(defvar agent-repl--recency-walk-landing nil
+  "The workspace a recency-walk step moved the frame to, or nil.
+Set by `agent-repl-host-request-switch' for the `recency-walk' trigger
+\(`agent-repl-switch-older', `agent-repl-switch-newer') and cleared by
+every other request.  While the frame stands on it its activations are NOT
+visits (`agent-repl--record-workspace-history'): the walk steps along
+`agent-repl--workspace-history', and recording its own landings would
+reorder the very list it is stepping along.  An activation of any other
+workspace ends the walk and clears it.")
+
 (defvar agent-repl--workspace-log-targets)
 
 (defun agent-repl--ws-forget-emacs-log-target (ws reason)
@@ -2553,7 +2563,8 @@ most-recently-visited-first with no duplicates.  No-op when there is no
 current workspace.  Registered on the persp activation hook below.
 
 Also stamps `:last-viewed-at' with `current-time' on the activated
-workspace's plist.  This is the single view chokepoint every
+workspace's plist.  A step of the recency walk records nothing
+\(`agent-repl--recency-walk-landing').  This is the single view chokepoint every
 perspective activation funnels through, so the project picker
 \(`agent-repl-switch-to-project') can sort by most-recently-viewed and
 `agent-repl--state-save' can persist the stamp for dead workspaces."
@@ -2567,7 +2578,15 @@ perspective activation funnels through, so the project picker
                            '(:agent-repl-context "perspective activation can name no agent workspace"))
                         "record-workspace-history: suppressed (eager-open in progress)")
     (let ((name (agent-repl--ws-current-name)))
-      (when name
+      (cond
+       ((null name))
+       ((equal name agent-repl--recency-walk-landing)
+        (agent-repl--info name "elisp.workspace.history-kept ws=%s reason=recency-walk" name))
+       (t
+        (when agent-repl--recency-walk-landing
+          (agent-repl--info name "elisp.workspace.recency-walk-ended ws=%s landing=%s"
+                            name agent-repl--recency-walk-landing)
+          (setq agent-repl--recency-walk-landing nil))
         ;; Stamp only known agent-repl workspaces; a foreign persp (the main
         ;; persp, a non-agent-repl one) has no hash entry, and `--ws-put'
         ;; would otherwise STUB-CREATE a spurious :project-dir-less entry.
@@ -2575,7 +2594,7 @@ perspective activation funnels through, so the project picker
           (agent-repl--ws-put name :last-viewed-at (current-time)))
         (setq agent-repl--workspace-history
               (cons name (cl-remove name agent-repl--workspace-history
-                                    :test #'string=)))))))
+                                    :test #'string=))))))))
 
 (agent-repl--ws-add-activated-hook #'agent-repl--record-workspace-history)
 

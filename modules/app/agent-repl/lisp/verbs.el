@@ -56,6 +56,7 @@
 (declare-function agent-repl--panels-note-arrival-reason "agent-repl-panels"
                   (id reason))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
+(declare-function agent-repl--main-worktree-for-dir "agent-repl-workspace" (dir))
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl--meta-wrap "agent-repl-core" (text))
 (declare-function agent-repl--repo-key-for-dir "agent-repl-workspace" (dir))

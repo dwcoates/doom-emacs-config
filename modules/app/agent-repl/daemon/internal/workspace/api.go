@@ -367,8 +367,9 @@ type Verbs interface {
 	// refused as unknown_workspace.
 	Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.WorkspaceStatus, error)
 	// Select records the user's switch to this workspace and clears its
-	// attention marker. Idempotent.
-	Select(ctx context.Context, ws ids.WorkspaceID) error
+	// attention marker. Idempotent. HISTORY says whether the switch stamps
+	// the selection instant or, as a step of a recency walk, leaves it.
+	Select(ctx context.Context, ws ids.WorkspaceID, history SelectionHistory) error
 	// FollowStoredSelection brings the roster's selection in line with the one
 	// WSM stores, when ANOTHER daemon sharing the state file stamped it (a
 	// handover's predecessor and successor each serve a roster, and a select
@@ -1024,4 +1025,30 @@ func New(deps Deps) (Verbs, error) {
 		stopBound = DefaultRestartStopBound
 	}
 	return &verbs{deps: deps, load: load, splice: splice, now: now, restartStopBound: stopBound}, nil
+}
+
+// SelectionHistory says what a select does to the durable selection history
+// (wsm.Workspace.LastSelectedAt, the roster row's last-selected instant).
+type SelectionHistory int
+
+const (
+	// RecordSelection stamps the selection instant: the user chose the
+	// workspace.
+	RecordSelection SelectionHistory = iota
+	// KeepSelectionHistory leaves the instant standing: the switch is a step
+	// of Emacs's walk through the selection history (agentrepl.v1
+	// SelectWorkspaceRequest.keep_selection_history), which must not reorder
+	// the history it walks.
+	KeepSelectionHistory
+)
+
+// String names the history for the log.
+func (h SelectionHistory) String() string {
+	switch h {
+	case RecordSelection:
+		return "record"
+	case KeepSelectionHistory:
+		return "keep"
+	}
+	panic(fmt.Sprintf("workspace: unknown SelectionHistory %d", int(h)))
 }

@@ -837,7 +837,11 @@ func (s *server) SelectWorkspace(
 			return nil, fail(subject.Log, rpc, err)
 		}
 	}
-	if err := s.deps.Verbs.Select(ctx, subject.Record.ID); err != nil {
+	history := workspace.RecordSelection
+	if req.Msg.GetKeepSelectionHistory() {
+		history = workspace.KeepSelectionHistory
+	}
+	if err := s.deps.Verbs.Select(ctx, subject.Record.ID, history); err != nil {
 		// A CALLER THAT LEFT IS NOT A FAILURE. A user switching workspaces
 		// quickly cancels the select of the one they switched away from while
 		// its revival runs; the revival goes on without it, and the answer

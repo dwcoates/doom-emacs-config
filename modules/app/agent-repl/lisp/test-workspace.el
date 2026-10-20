@@ -1852,6 +1852,28 @@ transiently activated workspace while eager-open is in progress."
         (agent-repl--record-workspace-history)
         (should-not (agent-repl--ws-get "generated" :last-viewed-at))))))
 
+(ert-deftest agent-repl-test-record-workspace-history-keeps-a-walk-landing-out ()
+  "The workspace a recency-walk step landed on is not recorded as a visit."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history '("a" "b" "c"))
+          (agent-repl--recency-walk-landing "b"))
+      (agent-repl--ws-put "b" :project-dir "/tmp/b")
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "b")))
+        (agent-repl--record-workspace-history)
+        (should (equal agent-repl--workspace-history '("a" "b" "c")))
+        (should-not (agent-repl--ws-get "b" :last-viewed-at))
+        (should (equal agent-repl--recency-walk-landing "b"))))))
+
+(ert-deftest agent-repl-test-record-workspace-history-another-activation-ends-the-walk ()
+  "Activating any other workspace clears the walk mark and records the visit."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history '("a" "b" "c"))
+          (agent-repl--recency-walk-landing "b"))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "c")))
+        (agent-repl--record-workspace-history)
+        (should (equal agent-repl--workspace-history '("c" "a" "b")))
+        (should-not agent-repl--recency-walk-landing)))))
+
 ;;;; ---- Tests: --ws-new ----
 
 ;;;; ---- Tests: --ws-persp-kill ----

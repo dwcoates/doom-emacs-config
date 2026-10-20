@@ -72,6 +72,10 @@ type DB interface {
 	Reopen(ctx context.Context, id WorkspaceID) error
 	// SetCurrent records the user's selection of a workspace at an instant.
 	SetCurrent(ctx context.Context, id WorkspaceID, at time.Time) error
+	// SetCurrentKeepingLastSelected records a workspace as current and leaves
+	// its last-selected instant as it stands: a step of a walk through the
+	// selection history, which must not reorder the history it walks.
+	SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceID) error
 	// Current reports the currently selected workspace, nil when none is.
 	Current(ctx context.Context) (*WorkspaceID, error)
 	// DataVersion answers SQLite's `PRAGMA data_version` on this handle's one

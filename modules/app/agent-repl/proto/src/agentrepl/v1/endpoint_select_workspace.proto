@@ -21,6 +21,12 @@ message SelectWorkspaceRequest {
   // feed (FeedMergeQueueBubble), so the click opens that bubble rather than
   // the hidden merge workspace (owner ruling, 2026-10-17).
   optional frontend.v1.FeedId reveal = 2;
+  // A STEP OF A WALK THROUGH THE SELECTION HISTORY, not a choice: the daemon
+  // stamps `current` but leaves the row's last-selected instant as it stands.
+  // Emacs's recency walk (`s-[` / `s-]`) sets it, so the walk never reorders
+  // the history it walks: each press lands one place further along the same
+  // order (owner request, 2026-10-20).
+  bool keep_selection_history = 3;
 }
 
 // THE ARM IS THE OUTCOME.

@@ -41,12 +41,12 @@ import (
 // with no session is exactly the state the revival exists to abolish and
 // answering success would hide it. The selection it already made stands: the
 // user did switch, and the error says what did not come up.
-func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID) error {
+func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID, history SelectionHistory) error {
 	_, log, err := v.owned(ctx, "SelectWorkspace", ws)
 	if err != nil {
 		return err
 	}
-	if _, err := v.selectCurrent(ctx, log, ws, nil); err != nil {
+	if _, err := v.selectCurrent(ctx, log, ws, nil, history); err != nil {
 		return err
 	}
 	return v.reviveSelected(ctx, log, ws)
@@ -88,7 +88,11 @@ func (v *verbs) reviveSelected(ctx context.Context, log dlog.Logger, ws ids.Work
 // still the current workspace, read under the same lock, so a select made on
 // the user's behalf (the landing after a hide) can never undo a switch the
 // user made meanwhile. It answers whether the select applied.
-func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, from *ids.WorkspaceID) (bool, error) {
+//
+// HISTORY says whether the switch stamps the selection instant
+// (RecordSelection) or leaves it standing (KeepSelectionHistory, a step of
+// Emacs's recency walk).
+func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, from *ids.WorkspaceID, history SelectionHistory) (bool, error) {
 	v.selection.Lock()
 	defer v.selection.Unlock()
 
@@ -112,18 +116,28 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 	// "when did the user last switch to this", and the user did not switch.
 	reselected := current != nil && *current == ws
 
-	if !reselected {
+	switch {
+	case reselected:
+		log.Info(opSelect, "the workspace was already current; the selection instant stands", nil)
+	case history == KeepSelectionHistory:
+		// A STEP OF A RECENCY WALK is not a choice: stamping the instant
+		// would move the workspace to the front of the history the walk is
+		// stepping along, and the next step would land somewhere else.
+		if err := v.deps.DB.SetCurrentKeepingLastSelected(ctx, ws); err != nil {
+			log.Error(opSelect, "could not record the walk's selection", dlog.Context{"cause": err.Error(), "history": history.String()})
+			return false, fmt.Errorf("select %q: %w", ws, err)
+		}
+		log.Info(opSelect, "selected the workspace as a step of a recency walk; the selection instant stands", dlog.Context{"history": history.String()})
+	default:
 		at := v.now()
 		if err := v.deps.DB.SetCurrent(ctx, ws, at); err != nil {
-			log.Error(opSelect, "could not record the selection", dlog.Context{"cause": err.Error()})
+			log.Error(opSelect, "could not record the selection", dlog.Context{"cause": err.Error(), "history": history.String()})
 			return false, fmt.Errorf("select %q: %w", ws, err)
 		}
 		// A WORKSPACE SWITCH IS A PRODUCTION-VISIBLE ACTION, so its receipt
 		// stands at info: an info-level log that carried no trace of a switch
 		// left the roster/tab-bar divergence bug with nothing to read.
 		log.Info(opSelect, "selected the workspace", dlog.Context{"at": at.UTC()})
-	} else {
-		log.Info(opSelect, "the workspace was already current; the selection instant stands", nil)
 	}
 	if err := v.deps.DB.SetAttention(ctx, ws, false); err != nil {
 		log.Error(opSelect, "could not clear the attention marker", dlog.Context{"cause": err.Error()})
@@ -312,7 +326,7 @@ func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, hidden ids
 		return err
 	}
 	targetLog = targetLog.With(dlog.Context{"hidden": string(hidden)})
-	applied, err := v.selectCurrent(ctx, targetLog, target.ID, &hidden)
+	applied, err := v.selectCurrent(ctx, targetLog, target.ID, &hidden, RecordSelection)
 	if err != nil {
 		return fmt.Errorf("land after hiding %q: %w", hidden, err)
 	}
