@@ -1021,6 +1021,19 @@ func (w *watcher) Close() error {
 	// bounce registry otherwise would take a bounce over live work.
 	var departed *Departure
 	_, reaped := w.client.Reaped()
+	// A REAPED SHIM'S LINK IS DEAD, WHOEVER HEARS IT FIRST. The client
+	// publishes the death on the connectivity feed, but `runLink` stops
+	// reading once the fleet is closed, so a close that beats the feed --
+	// a prompt sent right after the death closes this fleet to revive the
+	// session -- never applied the dead link, and the death's `shim_died`
+	// fault was never recorded. MEASURED, merge-queue run 2026-10-20: the
+	// revival's close landed 3.5ms after `daemon.shimclient.exit`, and
+	// TestAPromptSentRightAfterAShimDiesIsDelivered found no
+	// `daemon.health.open_fault`. The transition is applied here the same
+	// way the feed would have; a repeat of a state already held is none.
+	if reaped {
+		w.setLinkLocked(shimclient.LinkDead)
+	}
 	if w.endingLocked() || reaped {
 		departed = w.departLocked(DepartureClosed)
 	}
