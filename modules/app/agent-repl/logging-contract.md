@@ -112,8 +112,11 @@ central records or every daemon-known workspace; includes all retained
 generations; merges records by timestamp; filters by time, minimum level, and
 runtime; follows active current generations; and emits either compact local
 time lines or original JSONL. A malformed selected line is reported with its
-file and line number and aborts the read. An absent or unreadable sink and a
-workspace sink that is not a symlink are findings rather than read failures:
+file and line number and aborts the read. A workspace with no canonical link for
+a runtime never had that sink, and a canonical link older than the retention
+whose target is gone was pruned on purpose (see "Retention"); neither is
+reported. A younger link naming nothing, an unreadable sink, and a workspace
+sink that is not a symlink are findings rather than read failures:
 the reader reports each one, continues through every other sink, and exits
 nonzero only when no selected sink can be read. `--harvest <from> <to>` reads
 every workspace and central sink and groups every warning, error, and sink
