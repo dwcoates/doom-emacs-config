@@ -29,6 +29,11 @@ const (
 	HeadingResponse = "⟢ Replying to an earlier response of yours"
 	// HeadingPrompt names a quoted PROMPT: it was not the agent's response.
 	HeadingPrompt = "⟢ Replying to an earlier prompt in this conversation"
+	// LabelResponse is how a prompt bubble NAMES a quoted response of the
+	// agent's (owner request, 2026-10-20): shorter than HeadingResponse, which
+	// stays what the agent is told, so the bubble's label can change without
+	// changing the model's prompt or the quotes already recorded.
+	LabelResponse = "⟢ Replying to earlier response"
 	// ClosingMarker introduces the person's own words.
 	ClosingMarker = "⟢ My message"
 
@@ -84,8 +89,9 @@ func Block(markdown string, prompt bool) *conversationv1.UserContentBlock {
 	}
 }
 
-// Parts is a composed quote taken apart again: the heading naming what is
-// quoted (HeadingResponse or HeadingPrompt, without its colon), the quoted
+// Parts is a composed quote taken apart again: the heading a bubble draws
+// naming what is quoted (LabelResponse or HeadingPrompt, without its colon),
+// the quoted
 // markdown unfenced, and the marker introducing the person's words
 // (ClosingMarker, without its colon). A client draws each part in its own
 // place, so it never parses the composed text itself.
@@ -106,7 +112,7 @@ func Split(text string) (Parts, error) {
 	var heading, rest string
 	switch {
 	case strings.HasPrefix(text, openingResponse):
-		heading, rest = HeadingResponse, text[len(openingResponse):]
+		heading, rest = LabelResponse, text[len(openingResponse):]
 	case strings.HasPrefix(text, openingPrompt):
 		heading, rest = HeadingPrompt, text[len(openingPrompt):]
 	default:

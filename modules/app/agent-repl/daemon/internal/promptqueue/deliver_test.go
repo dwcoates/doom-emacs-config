@@ -133,7 +133,7 @@ func TestDeliverMirrorsAReplysQuoteAsItsOwnBlock(t *testing.T) {
 	if len(blocks) != 2 {
 		t.Fatalf("the mirrored row carries %d blocks, want the quote and the words: %v", len(blocks), blocks)
 	}
-	want := &frontendv1.FeedQuoteBlock{Heading: replyquote.HeadingResponse, Quoted: "Paris.", Closing: replyquote.ClosingMarker}
+	want := &frontendv1.FeedQuoteBlock{Heading: replyquote.LabelResponse, Quoted: "Paris.", Closing: replyquote.ClosingMarker}
 	if got := blocks[0].GetQuote(); !proto.Equal(got, want) {
 		t.Fatalf("the mirrored quote = %v, want %v", got, want)
 	}

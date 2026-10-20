@@ -7941,8 +7941,9 @@ export const FeedUnsupportedBlockSchema: GenMessage<FeedUnsupportedBlock> = /*@_
  */
 export type FeedQuoteBlock = Message<"frontend.v1.FeedQuoteBlock"> & {
   /**
-   * What is quoted, as the agent was told it, without its trailing colon:
-   * e.g. "⟢ Replying to an earlier response of yours". Never empty.
+   * The label naming what is quoted, without its trailing colon: e.g.
+   * "⟢ Replying to earlier response". It may be shorter than the heading the
+   * agent was told. Never empty.
    *
    * @generated from field: string heading = 2;
    */

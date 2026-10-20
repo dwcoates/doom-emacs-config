@@ -909,7 +909,7 @@ func TestAQuotedPromptDrawsItsQuoteAsItsOwnBlock(t *testing.T) {
 	if len(blocks) != 2 {
 		t.Fatalf("drawn blocks = %v, want the quote then the words", blocks)
 	}
-	want := &frontendv1.FeedQuoteBlock{Heading: replyquote.HeadingResponse, Quoted: "Paris.", Closing: replyquote.ClosingMarker}
+	want := &frontendv1.FeedQuoteBlock{Heading: replyquote.LabelResponse, Quoted: "Paris.", Closing: replyquote.ClosingMarker}
 	if got := blocks[0].GetQuote(); !proto.Equal(got, want) {
 		t.Errorf("first block's quote = %v, want %v", got, want)
 	}
@@ -992,7 +992,7 @@ func TestAReplayedQuotedPromptStillDrawsItsQuoteApart(t *testing.T) {
 // rather than dropping it.
 func TestAgentBlocksCarryAQuote(t *testing.T) {
 	// Arrange.
-	quote := &frontendv1.FeedQuoteBlock{Heading: replyquote.HeadingResponse, Quoted: "the quote", Closing: replyquote.ClosingMarker}
+	quote := &frontendv1.FeedQuoteBlock{Heading: replyquote.LabelResponse, Quoted: "the quote", Closing: replyquote.ClosingMarker}
 	blocks := []*frontendv1.FeedUserPromptBlock{{Block: &frontendv1.FeedUserPromptBlock_Quote{Quote: quote}}}
 
 	// Act.
