@@ -176,11 +176,16 @@ unary rpc can produce, which the contract never collapses into one."
   (let ((call (pop agent-repl-test-host--held)))
     (funcall (car call) response)))
 
-(defun agent-repl-test-host--selected-ids ()
-  "The ref ids SelectWorkspace was sent for, oldest first."
-  (mapcar (lambda (call) (plist-get (plist-get (nth 2 call) :workspace) :id))
+(defun agent-repl-test-host--select-requests ()
+  "The request plists of every SelectWorkspace sent, oldest first."
+  (mapcar (lambda (call) (nth 2 call))
           (reverse (cl-remove-if-not (lambda (call) (equal (car call) "SelectWorkspace"))
                                      agent-repl-test-host--calls))))
+
+(defun agent-repl-test-host--selected-ids ()
+  "The ref ids SelectWorkspace was sent for, oldest first."
+  (mapcar (lambda (request) (plist-get (plist-get request :workspace) :id))
+          (agent-repl-test-host--select-requests)))
 
 (defmacro agent-repl-test-host--with-harness (&rest body)
   "Run BODY with host.el's whole world faked and its state reset."
@@ -1085,9 +1090,20 @@ says now rather than wait for a push that will never come."
 
 (defun agent-repl-test-host--selected-keeps ()
   "The `:keep-selection-history' of each SelectWorkspace sent, oldest first."
-  (mapcar (lambda (call) (plist-get (nth 2 call) :keep-selection-history))
-          (reverse (cl-remove-if-not (lambda (call) (equal (car call) "SelectWorkspace"))
-                                     agent-repl-test-host--calls))))
+  (mapcar (lambda (request) (plist-get request :keep-selection-history))
+          (agent-repl-test-host--select-requests)))
+
+(ert-deftest agent-repl-test-host-select-requests-are-oldest-first-and-selects-only ()
+  "The shared reader keeps only SelectWorkspace calls, in the order sent."
+  ;; Arrange
+  (let ((agent-repl-test-host--calls
+         (list (list "SelectWorkspace" nil '(:workspace (:id "b")))
+               (list "MarkWorkspaceViewed" nil '(:workspace (:id "x")))
+               (list "SelectWorkspace" nil '(:workspace (:id "a"))))))
+    ;; Act / Assert
+    (should (equal (agent-repl-test-host--select-requests)
+                   '((:workspace (:id "a")) (:workspace (:id "b")))))
+    (should (equal (agent-repl-test-host--selected-ids) '("a" "b")))))
 
 (ert-deftest agent-repl-test-host-a-recency-walk-request-keeps-the-selection-history ()
   "A `recency-walk' step asks the daemon to leave the last-selected instant."
