@@ -120,7 +120,7 @@ are the hidden section's rows."
                (or sections
                    (list (list :key (list :repository (agent-repl-test-verbs--repo-ref))
                                :header (list :label (list :text "repo-one"))
-                               :open-rows (agent-repl-test--open-rows
+                               :entries (agent-repl-test--row-entries
                                            (seq-remove #'agent-repl-roster-row-closed-p rows)))))))
         :hidden (list :header (list :label (list :text "Hidden"))
                       :hidden-rows (agent-repl-test--hidden-rows hidden-rows))
@@ -1976,10 +1976,10 @@ current workspace is the forked context, and the topology is primary."
   (let* ((other (list :key (list :repository (agent-repl-test-verbs--repo-ref
                                               "other-id" "/tmp/other"))
                       :header (list :label (list :text "other-repo"))
-                      :open-rows (agent-repl-test--open-rows nil)))
+                      :entries (agent-repl-test--row-entries nil)))
          (mine (list :key (list :repository (agent-repl-test-verbs--repo-ref))
                      :header (list :label (list :text "repo-one"))
-                     :open-rows (agent-repl-test--open-rows (list (agent-repl-test-verbs--row)))))
+                     :entries (agent-repl-test--row-entries (list (agent-repl-test-verbs--row)))))
          (agent-repl-roster-view
           (agent-repl-test-verbs--roster nil nil (list other mine))))
     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
@@ -2541,10 +2541,10 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
   (list (list :key (list :repository (agent-repl-test-verbs--repo-ref
                                        "ee-repo" "/tmp/agent-repl-test/work/explanation-engine"))
               :header (list :label (list :text "explanation-engine"))
-              :open-rows (agent-repl-test--open-rows nil))
+              :entries (agent-repl-test--row-entries nil))
         (list :key (list :repository (agent-repl-test-verbs--repo-ref))
               :header (list :label (list :text "repo-one"))
-              :open-rows (agent-repl-test--open-rows (list (agent-repl-test-verbs--row))))))
+              :entries (agent-repl-test--row-entries (list (agent-repl-test-verbs--row))))))
 
 (defmacro agent-repl-test-verbs--with-ee (root &rest body)
   "Run BODY with `MULTI_REPO_ROOT\=' at ROOT and the explanation-engine roster.
@@ -2652,7 +2652,7 @@ directories need not exist."
           nil nil
           (list (list :key (list :repository (agent-repl-test-verbs--repo-ref "slash" "/tmp/agent-repl-test/x/"))
                       :header (list :label (list :text "x"))
-                      :open-rows (agent-repl-test--open-rows nil))))))
+                      :entries (agent-repl-test--row-entries nil))))))
     (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
       ;; Act / Assert.
       (should (equal (plist-get (agent-repl-verbs--roster-repository-at "/tmp/agent-repl-test/x") :id)
@@ -3045,10 +3045,10 @@ trailing-slash removal alone, so the fixture directories need not exist."
   (list (list :key (list :repository (agent-repl-test-verbs--repo-ref
                                        "agent-repl-repo" "/tmp/agent-repl-test/doom"))
               :header (list :label (list :text "doom"))
-              :open-rows (agent-repl-test--open-rows nil))
+              :entries (agent-repl-test--row-entries nil))
         (list :key (list :repository (agent-repl-test-verbs--repo-ref))
               :header (list :label (list :text "repo-one"))
-              :open-rows (agent-repl-test--open-rows (list (agent-repl-test-verbs--row))))))
+              :entries (agent-repl-test--row-entries (list (agent-repl-test-verbs--row))))))
 
 ;;;; ---- Create: no creation moves the user ----
 
@@ -4706,8 +4706,8 @@ name or closed flag is roster.el's, so the two files cannot disagree."
   ;; Arrange
   (let* ((row (list :workspace (list :workspace (list :id "ws-sub" :dir "/w/sub"))))
          (section (list :key (list :repository (list :id "repo-1" :dir "/r/1"))
-                        :open-rows (agent-repl-test--open-rows nil)
-                        :subsections (list (list :open-rows (agent-repl-test--open-rows (list row))))))
+                        :entries (list (agent-repl-test--subsection-entry
+                                        (list :open-rows (agent-repl-test--open-rows (list row)))))))
          (roster (list :repository (list :sections (list section)))))
     (cl-letf (((symbol-function 'agent-repl-host-ref)
                (lambda (_ws) (list :id "ws-sub" :dir "/w/sub"))))

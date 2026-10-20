@@ -1187,6 +1187,22 @@ daemon numbers it."
   "Return fixture ROWS as a decoded `RosterOpenRows'."
   (list :rows (mapcar #'agent-repl-test--open-row rows)))
 
+(defun agent-repl-test--row-entries (rows)
+  "Return fixture ROWS as decoded `RosterRepoEntry's, one row entry each."
+  (mapcar (lambda (open) (list :entry (list :arm :row :value open)))
+          (plist-get (agent-repl-test--open-rows rows) :rows)))
+
+(defun agent-repl-test--subsection-entry (subsection)
+  "Return decoded `RosterSubsection' SUBSECTION as a `RosterRepoEntry'."
+  (list :entry (list :arm :subsection :value subsection)))
+
+(defun agent-repl-test--section-subsections (section)
+  "Return decoded repository SECTION's subsections, in drawn order."
+  (delq nil (mapcar (lambda (entry)
+                      (let ((arm (plist-get entry :entry)))
+                        (and (eq (plist-get arm :arm) :subsection) (plist-get arm :value))))
+                    (plist-get section :entries))))
+
 (defun agent-repl-test--hidden-rows (rows)
   "Return fixture ROWS as a decoded `RosterHiddenRows', families nested."
   (cl-labels ((wrap (row) (list :row row :children (mapcar #'wrap (gethash row agent-repl-test--families)))))
@@ -1202,10 +1218,10 @@ daemon numbers it."
 
 (defun agent-repl-test--number-tabs (sections)
   "Number the tabs of SECTIONS' open rows in the Open section's walk.
-Repository by repository, its own rows then each subsection's, each row
-before its family: 1, 2, ... for every row of an unfolded region, a folded
-tab for a collapsed repository's or a collapsed subsection's, exactly as
-the daemon numbers them.  Answers SECTIONS."
+Repository by repository, entry by entry, a subsection's rows where it
+stands, each row before its family: 1, 2, ... for every row of an
+unfolded region, a folded tab for a collapsed repository's or a collapsed
+subsection's, exactly as the daemon numbers them.  Answers SECTIONS."
   (let ((next 0))
     (cl-labels ((visit (open folded)
                   (plist-put open :tab
@@ -1216,10 +1232,13 @@ the daemon numbers them.  Answers SECTIONS."
                 (collapsed-p (box) (eq (plist-get (plist-get box :fold) :arm) :collapsed)))
       (dolist (section sections)
         (let ((folded (collapsed-p section)))
-          (dolist (open (plist-get (plist-get section :open-rows) :rows)) (visit open folded))
-          (dolist (sub (plist-get section :subsections))
-            (dolist (open (plist-get (plist-get sub :open-rows) :rows))
-              (visit open (or folded (collapsed-p sub)))))))))
+          (dolist (entry (plist-get section :entries))
+            (let ((arm (plist-get entry :entry)))
+              (if (eq (plist-get arm :arm) :row)
+                  (visit (plist-get arm :value) folded)
+                (let ((sub (plist-get arm :value)))
+                  (dolist (open (plist-get (plist-get sub :open-rows) :rows))
+                    (visit open (or folded (collapsed-p sub))))))))))))
   sections)
 
 (provide 'test-helpers)

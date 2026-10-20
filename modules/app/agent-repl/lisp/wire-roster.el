@@ -1115,16 +1115,27 @@ fold."
                   '((expanded :expanded agent-repl-wire-decode-roster-subsection-expanded)
                     (collapsed :collapsed agent-repl-wire-decode-roster-subsection-collapsed)))))))
 
-(defun agent-repl-wire-decode-roster-repo-section-subsections (value)
-  "Decode one element of `RosterRepoSection''s repeated `subsections'."
-  (agent-repl-wire-decode-roster-subsection value))
+(defun agent-repl-wire-decode-roster-repo-entry (value)
+  "Decode VALUE as `RosterRepoEntry', a plist `(:entry ARM)'.
+THE ARM IS WHAT STANDS AT THIS POINT OF THE SECTION: `:row', a top-level
+open row in no subsection, or `:subsection'.  It is never unset."
+  (let ((object (agent-repl-wire--object "RosterRepoEntry" value)))
+    (agent-repl-wire--check-keys "RosterRepoEntry" object '(row subsection))
+    (agent-repl-wire--decoded
+     "RosterRepoEntry"
+     (list :entry (agent-repl-wire--decode-oneof
+                   "RosterRepoEntry" 'entry object
+                   '((row :row agent-repl-wire-decode-roster-open-row)
+                     (subsection :subsection agent-repl-wire-decode-roster-subsection)))))))
 
 (defun agent-repl-wire-decode-roster-repo-section (value)
   "Decode VALUE as `RosterRepoSection'.
-A plist `(:key :header :open-rows :fold :divergence :subsections)'."
+A plist `(:key :header :fold :divergence :entries)'.  ENTRIES is the
+section's body in drawn order: its rows in no subsection and its
+subsections, interleaved (`agent-repl-wire-decode-roster-repo-entry')."
   (let ((object (agent-repl-wire--object "RosterRepoSection" value)))
     (agent-repl-wire--check-keys "RosterRepoSection" object
-                                 '(key header openRows expanded collapsed divergence subsections))
+                                 '(key header expanded collapsed divergence entries))
     (agent-repl-wire--decoded
      "RosterRepoSection"
      (list :key (agent-repl-wire--decode-message
@@ -1133,16 +1144,13 @@ A plist `(:key :header :open-rows :fold :divergence :subsections)'."
            :header (agent-repl-wire--decode-message
                     "RosterRepoSection" 'header object
                     #'agent-repl-wire-decode-roster-repo-section-header)
-           :open-rows (agent-repl-wire--decode-message
-                       "RosterRepoSection" 'openRows object
-                       #'agent-repl-wire-decode-roster-open-rows)
            :fold (agent-repl-wire-decode-roster-repo-section-fold object)
            :divergence (agent-repl-wire--decode-message
                         "RosterRepoSection" 'divergence object
                         #'agent-repl-wire-decode-roster-repo-divergence)
-           :subsections (agent-repl-wire--decode-repeated
-                         "RosterRepoSection" 'subsections object
-                         #'agent-repl-wire-decode-roster-repo-section-subsections)))))
+           :entries (agent-repl-wire--decode-repeated
+                     "RosterRepoSection" 'entries object
+                     #'agent-repl-wire-decode-roster-repo-entry)))))
 
 (defun agent-repl-wire-decode-roster-merged-section-header (value)
   "Decode `RosterMergedSection''s `header' field VALUE."
