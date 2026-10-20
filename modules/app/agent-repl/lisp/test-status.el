@@ -3571,7 +3571,9 @@ called and verifies the advice runs cleanly."
         (tab-bar-auto-width t)
         (tab-bar-format nil)
         (default-frame-alist nil)
-        (frame-inhibit-implied-resize t))
+        (frame-inhibit-implied-resize t)
+        (window-setup-hook nil)
+        (window-configuration-change-hook nil))
     (cl-letf (((symbol-function 'frame-list) (lambda () nil))
               ((symbol-function 'display-graphic-p) (lambda (_frame) nil))
               ((symbol-function 'tab-bar-mode)
@@ -3596,6 +3598,8 @@ called and verifies the advice runs cleanly."
                   (tab-bar-lines-keep-state)))
         (applied nil))
     (cl-letf (((symbol-function 'selected-frame) (lambda () 'frame-a))
+              ((symbol-function 'agent-repl--tabbar-webview-shown-p)
+               (lambda (_frame) nil))
               ((symbol-function 'framep-on-display) (lambda (_frame) 'ns))
               ((symbol-function 'frame-parameter)
                (lambda (_frame parameter) (alist-get parameter params)))
@@ -3646,12 +3650,16 @@ called and verifies the advice runs cleanly."
 PARAMS is evaluated to an alist of frame parameters, bound in BODY as
 `frame-params'; reads and writes go through it.  BODY also sees
 `pinned', which collects each `agent-repl--tabbar-pin-frame' call so a
-test can assert the re-assertion left an already-correct frame alone."
+test can assert the re-assertion left an already-correct frame alone, and
+`webview-shown', which BODY sets non-nil to put the webview on `frame-a'."
   (declare (indent 1))
   `(let ((frame-params ,params)
-         (pinned nil))
+         (pinned nil)
+         (webview-shown nil))
      (cl-letf (((symbol-function 'frame-list) (lambda () '(frame-a)))
                ((symbol-function 'display-graphic-p) (lambda (_frame) t))
+               ((symbol-function 'agent-repl--tabbar-webview-shown-p)
+                (lambda (_frame) webview-shown))
                ((symbol-function 'frame-parameter)
                 (lambda (_frame parameter) (alist-get parameter frame-params)))
                ((symbol-function 'agent-repl--tabbar-pin-frame)
@@ -3674,7 +3682,8 @@ test can assert the re-assertion left an already-correct frame alone."
       ;; Act
       (let ((repinned (agent-repl--tabbar-reassert-row-count)))
         ;; Assert
-        (should (equal repinned '(frame-a)))
+        (should (equal repinned
+                       (list (list 'frame-a agent-repl--tabline-row-count))))
         (should (= agent-repl--tabline-row-count
                    (alist-get 'tab-bar-lines frame-params)))))))
 
@@ -3719,6 +3728,7 @@ test can assert the re-assertion left an already-correct frame alone."
         (default-frame-alist nil)
         (frame-inhibit-implied-resize t)
         (window-setup-hook nil)
+        (window-configuration-change-hook nil)
         (persp-activated-functions (list '+workspaces-load-tab-bar-data-h)))
     (cl-letf (((symbol-function 'frame-list) (lambda () nil))
               ((symbol-function 'display-graphic-p) (lambda (_frame) nil))
@@ -3734,6 +3744,178 @@ test can assert the re-assertion left an already-correct frame alone."
       (should (equal persp-activated-functions
                      '(+workspaces-load-tab-bar-data-h
                        agent-repl--tabbar-reassert-row-count))))))
+
+(ert-deftest agent-repl-test-fixed-height-tab-bar-hooks-window-changes ()
+  "Installation puts the re-assertion on `window-configuration-change-hook'."
+  ;; Arrange
+  (defvar persp-activated-functions)
+  (let ((auto-resize-tab-bars t)
+        (tab-bar-auto-width t)
+        (default-frame-alist nil)
+        (frame-inhibit-implied-resize t)
+        (window-setup-hook nil)
+        (window-configuration-change-hook nil)
+        (persp-activated-functions nil))
+    (cl-letf (((symbol-function 'frame-list) (lambda () nil))
+              ((symbol-function 'display-graphic-p) (lambda (_frame) nil))
+              ((symbol-function 'tab-bar-mode) #'ignore)
+              ((symbol-function 'agent-repl--retire-redisplay-storm-watchdog)
+               (lambda () '(:timer-cancelled nil :hook-present nil)))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (agent-repl--install-fixed-height-tab-bar)
+      ;; Assert
+      (should (equal window-configuration-change-hook
+                     '(agent-repl--tabbar-reassert-row-count))))))
+
+(ert-deftest agent-repl-test-fixed-height-tab-bar-hides-on-webview-frame ()
+  "Installation pins a frame already showing the webview to zero rows."
+  ;; Arrange
+  (let ((auto-resize-tab-bars t)
+        (tab-bar-auto-width t)
+        (default-frame-alist nil)
+        (frame-inhibit-implied-resize t)
+        (window-setup-hook nil)
+        (window-configuration-change-hook nil)
+        (pinned nil))
+    (cl-letf (((symbol-function 'frame-list) (lambda () '(frame-a)))
+              ((symbol-function 'display-graphic-p) (lambda (_frame) t))
+              ((symbol-function 'frame-parameter) (lambda (_frame _param) nil))
+              ((symbol-function 'agent-repl--tabbar-webview-shown-p)
+               (lambda (_frame) t))
+              ((symbol-function 'agent-repl--tabbar-pin-frame)
+               (lambda (frame rows) (push (list frame rows) pinned) rows))
+              ((symbol-function 'tab-bar-mode) #'ignore)
+              ((symbol-function 'agent-repl--retire-redisplay-storm-watchdog)
+               (lambda () '(:timer-cancelled nil :hook-present nil)))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (agent-repl--install-fixed-height-tab-bar)
+      ;; Assert
+      (should (equal pinned '((frame-a 0))))
+      (should (= agent-repl--tabline-row-count
+                 (alist-get 'tab-bar-lines default-frame-alist))))))
+
+(ert-deftest agent-repl-test-tabbar-reassert-hides-bar-when-webview-shown ()
+  "A two-row frame that now shows the webview is re-pinned to zero rows."
+  ;; Arrange
+  (let ((default-frame-alist
+         (list (cons 'tab-bar-lines agent-repl--tabline-row-count)
+               (cons 'tab-bar-lines-keep-state t))))
+    (agent-repl-test-status--with-tabbar-frame
+        (list (cons 'tab-bar-lines agent-repl--tabline-row-count)
+              (cons 'tab-bar-lines-keep-state t))
+      (setq webview-shown t)
+      ;; Act
+      (let ((repinned (agent-repl--tabbar-reassert-row-count)))
+        ;; Assert
+        (should (equal repinned '((frame-a 0))))
+        (should (= 0 (alist-get 'tab-bar-lines frame-params)))))))
+
+(ert-deftest agent-repl-test-tabbar-reassert-shows-bar-when-webview-leaves ()
+  "A hidden frame whose webview went off screen gets the fixed rows back."
+  ;; Arrange: the webview was closed (`SPC o c') or a file took the frame.
+  (let ((default-frame-alist
+         (list (cons 'tab-bar-lines agent-repl--tabline-row-count)
+               (cons 'tab-bar-lines-keep-state t))))
+    (agent-repl-test-status--with-tabbar-frame
+        '((tab-bar-lines . 0) (tab-bar-lines-keep-state . t))
+      ;; Act
+      (let ((repinned (agent-repl--tabbar-reassert-row-count)))
+        ;; Assert
+        (should (equal repinned
+                       (list (list 'frame-a agent-repl--tabline-row-count))))
+        (should (= agent-repl--tabline-row-count
+                   (alist-get 'tab-bar-lines frame-params)))))))
+
+(ert-deftest agent-repl-test-tabbar-reassert-leaves-hidden-webview-frame-alone ()
+  "A zero-row frame still showing the webview is not re-pinned."
+  ;; Arrange
+  (let ((default-frame-alist
+         (list (cons 'tab-bar-lines agent-repl--tabline-row-count)
+               (cons 'tab-bar-lines-keep-state t))))
+    (agent-repl-test-status--with-tabbar-frame
+        '((tab-bar-lines . 0) (tab-bar-lines-keep-state . t))
+      (setq webview-shown t)
+      ;; Act
+      (let ((repinned (agent-repl--tabbar-reassert-row-count)))
+        ;; Assert
+        (should-not repinned)
+        (should-not pinned)))))
+
+(ert-deftest agent-repl-test-tabbar-reassert-keeps-default-rows-while-hidden ()
+  "A hidden frame never writes zero rows into `default-frame-alist'."
+  ;; Arrange: new frames start without the webview, so they need the bar.
+  (let ((default-frame-alist '((tab-bar-lines . 1)
+                               (tab-bar-lines-keep-state . t))))
+    (agent-repl-test-status--with-tabbar-frame
+        '((tab-bar-lines . 0) (tab-bar-lines-keep-state . t))
+      (setq webview-shown t)
+      ;; Act
+      (agent-repl--tabbar-reassert-row-count)
+      ;; Assert
+      (should (= agent-repl--tabline-row-count
+                 (alist-get 'tab-bar-lines default-frame-alist))))))
+
+(ert-deftest agent-repl-test-tabbar-apply-row-count-keeps-webview-frame-hidden ()
+  "The manual repair applies zero rows to a frame showing the webview."
+  ;; Arrange
+  (let ((params '((tab-bar-lines . 1) (tab-bar-lines-keep-state)))
+        (pinned nil))
+    (cl-letf (((symbol-function 'selected-frame) (lambda () 'frame-a))
+              ((symbol-function 'agent-repl--tabbar-webview-shown-p)
+               (lambda (_frame) t))
+              ((symbol-function 'frame-parameter)
+               (lambda (_frame parameter) (alist-get parameter params)))
+              ((symbol-function 'agent-repl--tabbar-pin-frame)
+               (lambda (frame rows) (push (list frame rows) pinned) rows))
+              ((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'message) #'ignore))
+      ;; Act
+      (let ((result (agent-repl-tabbar-apply-row-count)))
+        ;; Assert
+        (should (= 0 result))
+        (should (equal pinned '((frame-a 0))))))))
+
+(ert-deftest agent-repl-test-tabbar-target-rows-zero-with-webview ()
+  "A frame showing the webview targets zero tab-bar rows."
+  (cl-letf (((symbol-function 'agent-repl--tabbar-webview-shown-p)
+             (lambda (_frame) t)))
+    (should (= 0 (agent-repl--tabbar-target-rows 'frame-a)))))
+
+(ert-deftest agent-repl-test-tabbar-target-rows-fixed-without-webview ()
+  "A frame without the webview targets the fixed row count."
+  (cl-letf (((symbol-function 'agent-repl--tabbar-webview-shown-p)
+             (lambda (_frame) nil)))
+    (should (= agent-repl--tabline-row-count
+               (agent-repl--tabbar-target-rows 'frame-a)))))
+
+(defmacro agent-repl-test-status--with-sole-window-buffer (name &rest body)
+  "Run BODY with the selected frame's layout reduced to one window on NAME.
+The buffer and the prior window configuration are both restored after."
+  (declare (indent 1))
+  `(let ((buf (get-buffer-create ,name)))
+     (unwind-protect
+         (save-window-excursion
+           (delete-other-windows)
+           (set-window-buffer (selected-window) buf)
+           ,@body)
+       (kill-buffer buf))))
+
+(ert-deftest agent-repl-test-tabbar-webview-shown-p-sees-webview-window ()
+  "A window on the frame showing an agent webview buffer counts as shown."
+  (agent-repl-test-status--with-sole-window-buffer "*agent-frontend-tabbar-ws*"
+    (should (agent-repl--tabbar-webview-shown-p (selected-frame)))))
+
+(ert-deftest agent-repl-test-tabbar-webview-shown-p-ignores-file-window ()
+  "A frame whose only window shows an ordinary buffer has no webview."
+  (agent-repl-test-status--with-sole-window-buffer "tabbar-plain-file.el"
+    (should-not (agent-repl--tabbar-webview-shown-p (selected-frame)))))
+
+(ert-deftest agent-repl-test-tabbar-webview-shown-p-ignores-input-panel ()
+  "The input composer alone is not the webapp, so the bar stays shown."
+  (agent-repl-test-status--with-sole-window-buffer "*agent-panel-input-tabbar-ws*"
+    (should-not (agent-repl--tabbar-webview-shown-p (selected-frame)))))
 
 ;;;; ---- The hibernation split --------------------------------------------
 

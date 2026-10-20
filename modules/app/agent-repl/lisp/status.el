@@ -2245,7 +2245,9 @@ two full-width lines and the tab-bar's pixel height never varies.
 
 The height contract is carried by `tab-bar-lines', which
 `agent-repl--install-fixed-height-tab-bar' pins to this value on every
-current graphical frame and in `default-frame-alist'.  The installer
+current graphical frame and in `default-frame-alist'.  The one exception
+is a frame showing the agent webview, which hides the bar entirely
+\(zero rows, see `agent-repl--tabbar-target-rows').  The installer
 first adds `tab-bar-lines' to `frame-inhibit-implied-resize', so changing
 a live frame consumes text-area height instead of requesting an outer
 NSWindow resize.")
@@ -3144,6 +3146,25 @@ fix into an older live process does not leave its timer or hook behind."
         (setq hook-present (not (eq prior-hook pre-redisplay-function)))))
     (list :timer-cancelled timer-cancelled :hook-present hook-present)))
 
+(defun agent-repl--tabbar-webview-shown-p (frame)
+  "Return non-nil when a window on FRAME shows a workspace's agent webview.
+Walks FRAME's live windows (minibuffer excluded) and asks
+`agent-repl--agent-view-buffer-p' of each one's buffer, so the answer is
+the frame's own layout, independent of which frame is selected."
+  (cl-some (lambda (window)
+             (agent-repl--agent-view-buffer-p (window-buffer window)))
+           (window-list frame 'never)))
+
+(defun agent-repl--tabbar-target-rows (frame)
+  "Return the `tab-bar-lines' FRAME should carry right now.
+The tab bar shows if and only if the agent webview is NOT on screen: a
+frame showing the webview gets 0 rows (the webapp draws its own
+workspace context), every other frame gets the fixed
+`agent-repl--tabline-row-count'."
+  (if (agent-repl--tabbar-webview-shown-p frame)
+      0
+    agent-repl--tabline-row-count))
+
 (defun agent-repl--tabbar-pin-frame (frame rows)
   "Pin FRAME's tab bar to ROWS and preserve that explicit line count.
 
@@ -3208,10 +3229,11 @@ the outer window.  Returns ROWS after logging the complete transition."
 `agent-repl--install-fixed-height-tab-bar' normally pins every graphical
 frame automatically.  This interactive command reasserts the same
 contract for manual recovery after external code has changed the selected
-frame.  Returns the applied row count."
+frame: the row count `agent-repl--tabbar-target-rows' picks for it, so a
+frame showing the webview stays hidden.  Returns the applied row count."
   (interactive)
-  (let* ((rows agent-repl--tabline-row-count)
-         (frame (selected-frame))
+  (let* ((frame (selected-frame))
+         (rows (agent-repl--tabbar-target-rows frame))
          (prior-lines (frame-parameter frame 'tab-bar-lines))
          (prior-keep-state
           (frame-parameter frame 'tab-bar-lines-keep-state)))
@@ -3230,8 +3252,8 @@ frame.  Returns the applied row count."
 (defun agent-repl--install-fixed-height-tab-bar ()
   "Install agent-repl's fixed-height tab bar without native auto-resizing.
 Sets the global formatter, disables `auto-resize-tab-bars', and pins
-`agent-repl--tabline-row-count' on every current graphical frame plus
-`default-frame-alist'.  Both scopes also receive
+every current graphical frame to `agent-repl--tabbar-target-rows' and
+`default-frame-alist' to `agent-repl--tabline-row-count'.  Both scopes also receive
 `tab-bar-lines-keep-state', so Emacs's native one-line recalculation
 cannot overwrite the explicit two-line contract.
 
@@ -3244,7 +3266,9 @@ watchdog is removed after a hot reload.
 Finally registers `agent-repl--tabbar-reassert-row-count' on
 `window-setup-hook' and `persp-activated-functions', because the pin
 above does not survive on its own: see that function for which resets
-undo it and why hook ordering, not advice, is the fix.
+undo it and why hook ordering, not advice, is the fix.  It also goes on
+`window-configuration-change-hook', which is where the webview appears
+and disappears, so the bar hides and shows with it.
 
 Logs every before/after value needed to diagnose a future regression:
 row count, auto-resize value, default frame parameters, current frame
@@ -3291,7 +3315,7 @@ parameters, and the watchdog cleanup result."
     (setf (alist-get 'tab-bar-lines default-frame-alist) rows
           (alist-get 'tab-bar-lines-keep-state default-frame-alist) t)
     (dolist (frame frames)
-      (agent-repl--tabbar-pin-frame frame rows))
+      (agent-repl--tabbar-pin-frame frame (agent-repl--tabbar-target-rows frame)))
     ;; Both hooks are APPENDED, and both registrations happen after
     ;; `tab-bar-mode' above: that is what puts the re-assertion after Doom's
     ;; `+workspaces-load-tab-bar-data-h' (which `tab-bar-mode-hook' installs
@@ -3301,6 +3325,11 @@ parameters, and the watchdog cleanup result."
     (add-hook 'window-setup-hook #'agent-repl--tabbar-reassert-row-count t)
     (add-hook 'persp-activated-functions
               #'agent-repl--tabbar-reassert-row-count t)
+    ;; The webview coming on or off screen is a window-configuration change
+    ;; (a split, a close, `SPC o c', a file taking the whole frame), and
+    ;; that is what flips the bar's visibility.
+    (add-hook 'window-configuration-change-hook
+              #'agent-repl--tabbar-reassert-row-count)
     (agent-repl--log
      (agent-repl--status-log-scope
       "tab-bar installation runs before workspace activation")
@@ -3320,7 +3349,7 @@ parameters, and the watchdog cleanup result."
      watchdog-cleanup)))
 
 (defun agent-repl--tabbar-reassert-row-count (&rest _)
-  "Re-pin the fixed two-row tab-bar contract in both scopes Emacs reads.
+  "Re-pin the tab-bar row contract in both scopes Emacs reads.
 
 Two resets undo `agent-repl--install-fixed-height-tab-bar' after it has
 already run, and neither is stopped by `tab-bar-lines-keep-state':
@@ -3345,10 +3374,18 @@ immediately after `frame-notice-user-settings' in `command-line', and
 appending to `persp-activated-functions' places this after Doom's
 handler.  `agent-repl--install-fixed-height-tab-bar' registers both.
 
+Each frame's contract is `agent-repl--tabbar-target-rows': zero rows
+while it shows the agent webview, the fixed count otherwise.
+`default-frame-alist' always carries the fixed count, since a new frame
+starts without the webview.  This is also why the function sits on
+`window-configuration-change-hook': the webview coming on or off screen
+changes the target, and this repins the frame to it.
+
 Repair is conditional: a scope already carrying the contract is left
-untouched, so a workspace switch does not push a correct frame through
-`agent-repl--tabbar-pin-frame''s NS zero-transition on every activation.
-Returns the list of graphical frames that were actually re-pinned."
+untouched, so a workspace switch or a window change does not push a
+correct frame through `agent-repl--tabbar-pin-frame''s NS zero-transition
+on every call.  Returns a (FRAME ROWS) entry per graphical frame actually
+re-pinned, in `frame-list' order."
   (let* ((rows agent-repl--tabline-row-count)
          (prior-default-lines (alist-get 'tab-bar-lines default-frame-alist))
          (prior-default-keep-state
@@ -3361,10 +3398,11 @@ Returns the list of graphical frames that were actually re-pinned."
       (setf (alist-get 'tab-bar-lines default-frame-alist) rows
             (alist-get 'tab-bar-lines-keep-state default-frame-alist) t))
     (dolist (frame (cl-remove-if-not #'display-graphic-p (frame-list)))
-      (unless (and (equal (frame-parameter frame 'tab-bar-lines) rows)
-                   (eq t (frame-parameter frame 'tab-bar-lines-keep-state)))
-        (agent-repl--tabbar-pin-frame frame rows)
-        (push frame repinned)))
+      (let ((target (agent-repl--tabbar-target-rows frame)))
+        (unless (and (equal (frame-parameter frame 'tab-bar-lines) target)
+                     (eq t (frame-parameter frame 'tab-bar-lines-keep-state)))
+          (agent-repl--tabbar-pin-frame frame target)
+          (push (list frame target) repinned))))
     (setq repinned (nreverse repinned))
     (when (or default-repaired repinned)
       (agent-repl--log
