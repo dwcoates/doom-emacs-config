@@ -283,8 +283,10 @@ func refuseTombstoned(ctx context.Context, tx *sql.Tx, turn TurnID) error {
 }
 
 // requireStandingHold refuses an update to a hold that does not exist or has
-// been retired.
-func requireStandingHold(ctx context.Context, tx *sql.Tx, turn TurnID) error {
+// been retired. retired is what a retired hold answers: ErrTombstoned, or
+// ErrHoldRetired for the writes that run against a standing hold while a
+// retirement may race them (a verdict, a hold change).
+func requireStandingHold(ctx context.Context, tx *sql.Tx, turn TurnID, retired error) error {
 	var kind sql.NullString
 	err := tx.QueryRowContext(ctx, `SELECT tombstone_kind FROM held_prompts WHERE turn_id = ?`, turn).Scan(&kind)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -294,7 +296,7 @@ func requireStandingHold(ctx context.Context, tx *sql.Tx, turn TurnID) error {
 		return err
 	}
 	if kind.Valid {
-		return fmt.Errorf("wsm: held prompt %s retired as %q: %w", turn, kind.String, ErrTombstoned)
+		return fmt.Errorf("wsm: held prompt %s retired as %q: %w", turn, kind.String, retired)
 	}
 	return nil
 }
@@ -309,7 +311,7 @@ func (s *store) UpdateHeldPromptClassification(ctx context.Context, turn TurnID,
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		if err := requireStandingHold(ctx, tx, turn); err != nil {
+		if err := requireStandingHold(ctx, tx, turn, ErrHoldRetired); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx,
@@ -351,7 +353,7 @@ func (s *store) UpdateHeldPromptHold(ctx context.Context, turn TurnID, h *HoldKi
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		if err := requireStandingHold(ctx, tx, turn); err != nil {
+		if err := requireStandingHold(ctx, tx, turn, ErrHoldRetired); err != nil {
 			return err
 		}
 		if h != nil && *h == HoldMerge {
@@ -387,7 +389,7 @@ func (s *store) TombstoneHeldPrompts(ctx context.Context, turns []TurnID, why To
 			return errors.New("wsm: a tombstone names at least one held prompt")
 		}
 		for _, turn := range turns {
-			if err := requireStandingHold(ctx, tx, turn); err != nil {
+			if err := requireStandingHold(ctx, tx, turn, ErrTombstoned); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE held_prompts SET tombstone_kind = ?, tombstone_at = ? WHERE turn_id = ?`,
@@ -427,7 +429,7 @@ func (s *store) ReplaceHeldPromptSaid(ctx context.Context, turn TurnID, said *co
 		return wrapped
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		if err := requireStandingHold(ctx, tx, turn); err != nil {
+		if err := requireStandingHold(ctx, tx, turn, ErrTombstoned); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx,
@@ -463,10 +465,10 @@ func (s *store) CoalesceHeldPrompts(ctx context.Context, c Coalescence) error {
 		return wrapped
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		if err := requireStandingHold(ctx, tx, c.Into); err != nil {
+		if err := requireStandingHold(ctx, tx, c.Into, ErrTombstoned); err != nil {
 			return err
 		}
-		if err := requireStandingHold(ctx, tx, c.From); err != nil {
+		if err := requireStandingHold(ctx, tx, c.From, ErrTombstoned); err != nil {
 			return err
 		}
 		if err := requireSameWorkspace(ctx, tx, c.Into, c.From); err != nil {

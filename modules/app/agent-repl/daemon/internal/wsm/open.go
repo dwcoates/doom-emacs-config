@@ -591,6 +591,16 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 			s.log.Debug(op, "the merge lease is gone; the merge hold was refused", withError(fields, err))
 			return err
 		}
+		// AN UPDATE TO A HOLD RETIRED MEANWHILE is the store answering that
+		// the prompt is gone: the write raced its drop, delivery or clear (a
+		// classifier's verdict landing after the user dropped the prompt), an
+		// ordinary schedule, and every caller states what it means at its own
+		// level. Resurrecting a retired hold is a different refusal and stays
+		// an ERROR below.
+		if errors.Is(err, ErrHoldRetired) {
+			s.log.Debug(op, "the held prompt was retired; the write was refused", withError(fields, err))
+			return err
+		}
 		// A REPOSITORY STILL IN USE is the retirement refusing to discard
 		// what a user can act on; its caller (the boot) states the kept
 		// repository at its own level.
