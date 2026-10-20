@@ -3,9 +3,20 @@ package ramdisk
 import (
 	"errors"
 	"strings"
-	"syscall"
 	"testing"
+
+	"agentrepl/testrun/internal/seats"
 )
+
+// free reports whether seat i of p can be taken right now.
+func free(t *testing.T, p seats.Pool, i int) bool {
+	t.Helper()
+	held, err := p.Held(i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return !held
+}
 
 func TestMemorySeats(t *testing.T) {
 	cases := []struct {
@@ -55,24 +66,6 @@ func TestParseMemsize(t *testing.T) {
 	}
 }
 
-// seatFree reports whether memory seat i under registry can be locked now.
-func seatFree(t *testing.T, registry string, i int) bool {
-	t.Helper()
-	f, err := seatPool(registry, i+1).Open(i)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-	if errors.Is(err, syscall.EWOULDBLOCK) {
-		return false
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	return true
-}
-
 // The memory seats keep the paths every run on the host already shares: a
 // run built before the seats were shared with the core pool and one built
 // after must still contend for the same files.
@@ -94,7 +87,7 @@ func TestAReleasedRAMDiskGivesItsSeatBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
-	if seatFree(t, m.Registry, 0) {
+	if free(t, seatPool(m.Registry, 1), 0) {
 		t.Fatal("seat 0 reads free while the run's disk holds it")
 	}
 
@@ -102,8 +95,8 @@ func TestAReleasedRAMDiskGivesItsSeatBack(t *testing.T) {
 	err = v.Release()
 
 	// Assert
-	if err != nil || !seatFree(t, m.Registry, 0) {
-		t.Fatalf("Release = %v, seat free %v; want the seat given back", err, seatFree(t, m.Registry, 0))
+	if err != nil || !free(t, seatPool(m.Registry, 1), 0) {
+		t.Fatalf("Release = %v, seat free %v; want the seat given back", err, free(t, seatPool(m.Registry, 1), 0))
 	}
 }
 

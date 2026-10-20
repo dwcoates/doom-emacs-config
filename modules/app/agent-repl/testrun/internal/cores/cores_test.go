@@ -1,12 +1,12 @@
 package cores
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
+
+	"agentrepl/testrun/internal/seats"
 )
 
 type recLog struct {
@@ -30,6 +30,16 @@ func (l *recLog) text() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return strings.Join(l.lines, "\n")
+}
+
+// free reports whether seat i of p can be taken right now.
+func free(t *testing.T, p seats.Pool, i int) bool {
+	t.Helper()
+	held, err := p.Held(i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return !held
 }
 
 func TestBudget(t *testing.T) {
@@ -87,24 +97,6 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-// seatFree reports whether core seat i of h can be locked right now.
-func seatFree(t *testing.T, h Host, i int) bool {
-	t.Helper()
-	f, err := h.Pool.Open(i)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-	if errors.Is(err, syscall.EWOULDBLOCK) {
-		return false
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	return true
-}
-
 func TestHoldTakesTheUnitsWidthAndGivesItBack(t *testing.T) {
 	// Arrange
 	log := &recLog{}
@@ -117,13 +109,13 @@ func TestHoldTakesTheUnitsWidthAndGivesItBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Hold = %v", err)
 	}
-	if seatFree(t, h, 0) || seatFree(t, h, 1) || !seatFree(t, h, 2) {
+	if free(t, h.Pool, 0) || free(t, h.Pool, 1) || !free(t, h.Pool, 2) {
 		t.Fatal("want seats 0 and 1 held for the two-wide unit and seat 2 free")
 	}
 	if err := release(); err != nil {
 		t.Fatal(err)
 	}
-	if !seatFree(t, h, 0) || !seatFree(t, h, 1) {
+	if !free(t, h.Pool, 0) || !free(t, h.Pool, 1) {
 		t.Fatal("the unit's seats are still held after release")
 	}
 	if log.text() != "" {

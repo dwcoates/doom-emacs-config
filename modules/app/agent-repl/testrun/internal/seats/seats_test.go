@@ -1,7 +1,6 @@
 package seats
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,22 +21,14 @@ func hold(t *testing.T, p Pool, i int) *os.File {
 	return f
 }
 
-// Free reports whether seat i of p can be locked right now.
+// free reports whether seat i of p can be taken right now.
 func free(t *testing.T, p Pool, i int) bool {
 	t.Helper()
-	f, err := p.Open(i)
+	held, err := p.Held(i)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-	if errors.Is(err, syscall.EWOULDBLOCK) {
-		return false
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	return true
+	return !held
 }
 
 func TestPathNamesTheSeatByPrefixAndIndex(t *testing.T) {
@@ -391,5 +382,66 @@ func TestTakeNLetsItsLaneGoOnceItHasItsSeats(t *testing.T) {
 	above, err := p.waiterAbove(2)
 	if err != nil || above != -1 {
 		t.Fatalf("waiterAbove(2) = %d, %v; want -1: the holder left its lane", above, err)
+	}
+}
+
+func TestHeld(t *testing.T) {
+	cases := []struct {
+		name string
+		take bool
+		want bool
+	}{
+		{name: "an untaken seat is not held", want: false},
+		{name: "a taken seat is held", take: true, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			p := Pool{Dir: t.TempDir(), Prefix: "seat", N: 1, What: "test"}
+			if tc.take {
+				defer hold(t, p, 0).Close()
+			}
+
+			// Act
+			got, err := p.Held(0)
+
+			// Assert
+			if err != nil || got != tc.want {
+				t.Fatalf("Held = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestHeldNeverHoldsTheSeatItself(t *testing.T) {
+	// Arrange
+	p := Pool{Dir: t.TempDir(), Prefix: "seat", N: 1, What: "test"}
+
+	// Act
+	if _, err := p.Held(0); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: a taker gets the seat at once.
+	f, _, err := p.Take(func(int) { t.Fatal("the probe left the seat held") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+}
+
+func TestHeldSurfacesAnUnopenableSeat(t *testing.T) {
+	// Arrange: seat 0's path is a directory.
+	p := Pool{Dir: t.TempDir(), Prefix: "seat", N: 1, What: "test"}
+	if err := os.Mkdir(p.Path(0), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err := p.Held(0)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "open the test seat") {
+		t.Fatalf("Held = %v; want the open's failure", err)
 	}
 }

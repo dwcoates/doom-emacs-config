@@ -254,3 +254,21 @@ func (p Pool) gather(n int, wait func()) (Held, error) {
 	}
 	return held, nil
 }
+
+// Held reports whether seat i is held right now, by any taker on the host. It
+// probes with a lock it lets go at once, so it never holds the seat itself.
+func (p Pool) Held(i int) (bool, error) {
+	f, err := p.Open(i)
+	if err != nil {
+		return false, err
+	}
+	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	closeErr := f.Close()
+	if errors.Is(err, syscall.EWOULDBLOCK) {
+		return true, closeErr
+	}
+	if err != nil {
+		return false, errors.Join(fmt.Errorf("probe the %s seat %s: %w", p.What, p.Path(i), err), closeErr)
+	}
+	return false, closeErr
+}
