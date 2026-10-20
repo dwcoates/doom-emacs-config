@@ -4,8 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -95,5 +97,68 @@ func TestTildePathShortensTheHomeDirectory(t *testing.T) {
 				t.Fatalf("tildePath = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCreateTestLogMakesItsDirectoryAndTruncates(t *testing.T) {
+	// Arrange: a log path whose directory does not exist yet.
+	log := testLog{path: filepath.Join(t.TempDir(), mergeLogsDir, "lease-tests-1.log")}
+
+	// Act.
+	file, err := createTestLog(log)
+	if err != nil {
+		t.Fatalf("createTestLog: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert.
+	info, err := os.Stat(log.path)
+	if err != nil || info.Size() != 0 {
+		t.Fatalf("stat = (%v, %v), want an empty log", info, err)
+	}
+}
+
+func TestCreateTestLogRefusesWhenItsDirectoryCannotBeMade(t *testing.T) {
+	// Arrange: a regular file where the log directory must be.
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, mergeLogsDir), nil, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	log := testLog{path: filepath.Join(root, mergeLogsDir, "lease-tests-1.log")}
+
+	// Act.
+	_, err := createTestLog(log)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "creating the test log directory") {
+		t.Fatalf("createTestLog = %v, want the directory refusal", err)
+	}
+}
+
+func TestWriteTestLogWritesTheWholeBody(t *testing.T) {
+	// Arrange.
+	log := testLog{path: filepath.Join(t.TempDir(), mergeLogsDir, "lease-tests-2.log")}
+
+	// Act.
+	err := writeTestLog(log, "nothing ran.\n")
+
+	// Assert.
+	got, readErr := os.ReadFile(log.path)
+	if err != nil || readErr != nil || string(got) != "nothing ran.\n" {
+		t.Fatalf("writeTestLog = %v, file = (%q, %v), want the body", err, got, readErr)
+	}
+}
+
+func TestEveryTestLogIsCreatedThroughCreateTestLog(t *testing.T) {
+	// Act: the production sites that open a test log.
+	viaHelper := sourcescan.Count(t, "createTestLog(")
+	byHand := sourcescan.Count(t, "os.Create(") + sourcescan.Count(t, "os.WriteFile(log.path")
+
+	// Assert: the gate run, writeTestLog and the helper's own definition, and
+	// the one os.Create inside the helper.
+	if viaHelper != 3 || byHand != 1 {
+		t.Fatalf("createTestLog( appears %d times and a hand-rolled create %d times; want 3 and 1", viaHelper, byHand)
 	}
 }

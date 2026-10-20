@@ -45,6 +45,33 @@ func (o *orchestrator) testLog(lease ids.LeaseID, round int) testLog {
 	}
 }
 
+// createTestLog creates (or truncates) one round's log, its directory first.
+func createTestLog(log testLog) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(log.path), 0o755); err != nil {
+		return nil, fmt.Errorf("merge: creating the test log directory %s: %w", filepath.Dir(log.path), err)
+	}
+	file, err := os.Create(log.path)
+	if err != nil {
+		return nil, fmt.Errorf("merge: creating the test log %s: %w", log.path, err)
+	}
+	return file, nil
+}
+
+// writeTestLog writes one round's whole log at once.
+func writeTestLog(log testLog, body string) error {
+	file, err := createTestLog(log)
+	if err != nil {
+		return err
+	}
+	if _, err := file.WriteString(body); err != nil {
+		return errors.Join(fmt.Errorf("merge: writing the test log %s: %w", log.path, err), file.Close())
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("merge: writing the test log %s: %w", log.path, err)
+	}
+	return nil
+}
+
 // testLogLink is the tests tab's link to one log: the token, and the path with
 // the home directory shortened to ~.
 func (o *orchestrator) testLogLink(log testLog) *frontendv1.FeedMergeTestLog {
