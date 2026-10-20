@@ -253,6 +253,15 @@ Clicking a link to a file (not a web address) in a prompt or response bubble ope
   - The question quotes the bubble you clicked in, as a reply to a selected bubble does.
   - The agent is also asked to propose an agent-repl change that avoids such links or teaches the resolver a further fallback.
 
+## Copying a code block
+
+Every code block in the feed has a small copy icon at its top right.
+
+- **Clicking the icon copies the block's code to the clipboard.**
+  - The icon turns into a green check mark for a moment.
+  - The click never selects, expands or folds the bubble the block sits in.
+- **The icon adds no text to the block, so a drag-select across the block copies only its code.**
+
 ## Background work in the expanded footer
 
 The expanded footer lists the running background agents, shells and monitors, one row each.
