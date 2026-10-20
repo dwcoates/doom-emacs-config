@@ -79,3 +79,35 @@ func TestEveryTestRunSeamRefusesThroughRequireTestRun(t *testing.T) {
 		t.Fatalf("%v hand-roll a test-run seam's refusal; call envc.Contracts.RequireTestRun", offenders)
 	}
 }
+
+func TestRequireTestMetricsRoot(t *testing.T) {
+	tests := []struct {
+		name      string
+		testRun   bool
+		root      string
+		wantError bool
+	}{
+		{name: "a live daemon keeps any root", root: "/Users/someone/.cache/agent-repl/metrics"},
+		{name: "a test run with no root", testRun: true},
+		{name: "a test run's root inside its temporary directory", testRun: true, root: "/tmp/run/T/metrics"},
+		{name: "a test run's root outside it", testRun: true, root: "/Users/someone/.cache/agent-repl/metrics", wantError: true},
+		{name: "a sibling that shares the prefix", testRun: true, root: "/tmp/run/Tother/metrics", wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			c := Contracts{forbidVendorCalls: tt.testRun}
+
+			// Act
+			err := c.RequireTestMetricsRoot(tt.root, "/tmp/run/T")
+
+			// Assert
+			if (err != nil) != tt.wantError {
+				t.Fatalf("RequireTestMetricsRoot = %v, want error %v", err, tt.wantError)
+			}
+			if err != nil && !strings.Contains(err.Error(), "never writes the live metrics store") {
+				t.Fatalf("err = %v, want it to say why", err)
+			}
+		})
+	}
+}

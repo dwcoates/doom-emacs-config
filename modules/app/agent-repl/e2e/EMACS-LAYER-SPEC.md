@@ -446,6 +446,7 @@ So the Go side does NOT call `harness.StartDaemon` for this layer:
   | `agent-repl-daemon-default-config-dir` | a scratch account root |
   | `agent-repl-daemon-multi-repo-config-dir` | a second scratch account root |
   | `agent-repl-daemon-multi-repo-root` | a scratch multi-repo tree |
+  | `agent-repl-daemon-metrics-root` | nil: a scenario's daemon runs with no metrics surface, and a test daemon is refused the live root |
   | `agent-repl-daemon-build-script` | a scripted no-op (the binaries are prebuilt) |
   | `AGENT_REPL_STATE_DIR` (env) | the scratch state root |
 

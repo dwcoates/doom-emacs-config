@@ -1696,3 +1696,23 @@ func TestABootThatCannotListItsWorkspacesSaysWhy(t *testing.T) {
 		t.Fatalf("expectBootReconnects = %v, want the read's failure", err)
 	}
 }
+
+// TestATestRunRefusesTheLiveMetricsRoot pins that a test-run daemon handed a
+// metrics root outside its temporary directory refuses to boot rather than
+// advertise itself to, and push into, the live metrics store.
+func TestATestRunRefusesTheLiveMetricsRoot(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+	live := filepath.Join(string(filepath.Separator), "nonexistent-live-home", ".cache", "agent-repl", "metrics")
+
+	// Act.
+	err := runIn(t, root, func(o *options) { o.metricsRoot = live })
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "never writes the live metrics store") {
+		t.Fatalf("run = %v, want the live metrics root refused", err)
+	}
+	if _, statErr := os.Stat(live); !os.IsNotExist(statErr) {
+		t.Fatalf("the refused root was created (stat err = %v)", statErr)
+	}
+}

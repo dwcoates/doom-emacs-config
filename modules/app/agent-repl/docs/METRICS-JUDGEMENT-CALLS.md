@@ -233,3 +233,19 @@ Each entry says what was decided, why, and what it departs from.
   no reconnect to time) and Emacs's own launch before it reaches the daemon
   (call 9).
 
+## 15. A test run never writes the live metrics store
+
+- Found 2026-10-20: between 15:17 and 15:40 UTC, 37 to 87 daemon runs
+  reported at once and their shim counts summed to 2,523. They were e2e
+  scenario daemons: Emacs passed them `agent-repl-daemon-metrics-root`'s
+  default, the live root, so each advertised itself in the live targets
+  directory (the store then scraped it instead of the person's daemon) and
+  pushed its last values into the live history at exit.
+- Decided: a daemon under the vendor guard (every test run, never a person's
+  daemon, `envc.RequireTestRun`'s marker) refuses to boot with a metrics root
+  outside its own temporary directory (`envc.RequireTestMetricsRoot`), so a
+  test daemon writing the live store is impossible rather than merely
+  unconfigured. The e2e Emacs settings set the root to nil.
+- The polluted half hour stays in the store's history unless its series are
+  deleted by run.
+
