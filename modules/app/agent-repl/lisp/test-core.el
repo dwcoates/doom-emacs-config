@@ -2413,29 +2413,122 @@ post-mortem breadcrumb."
       (should (string-match-p "git" logged))
       (should (string-match-p "fetch" logged)))))
 
-;;;; ---- Tests: async-gh terminal outcomes ----
+;;;; ---- Tests: async-command terminal outcomes ----
 
-(ert-deftest agent-repl-test-async-gh-calls-callback-after-abnormal-exit ()
-  "An abnormal gh exit is a completed command, not a silently dropped callback."
+(ert-deftest agent-repl-test-async-command-calls-callback-after-abnormal-exit ()
+  "An abnormal exit is a completed command, not a silently dropped callback."
   (let ((buf nil)
         (callback-result nil)
         (agent-repl-log-to-file nil))
     (unwind-protect
         (progn
-          (setq buf (generate-new-buffer " *agent-repl-test-async-gh*"))
+          (setq buf (generate-new-buffer " *agent-repl-test-async-command*"))
           (cl-letf (((symbol-function 'process-live-p) (lambda (_proc) nil))
                   ((symbol-function 'process-buffer) (lambda (_proc) buf))
                   ((symbol-function 'process-exit-status) (lambda (_proc) 1))
                   ((symbol-function 'agent-repl--kill-buffer-safely)
                    (lambda (buffer) (kill-buffer buffer))))
             (with-current-buffer buf (insert "network unavailable"))
-            (agent-repl--async-gh-handle-completion
+            (agent-repl--async-command-handle-completion
              "failed-pr-poll"
              (lambda (ok output) (setq callback-result (list ok output)))
-             'fake-gh-process "exited abnormally with code 1\n"))
+             'fake-process "exited abnormally with code 1\n"))
           (should (equal callback-result '(nil "network unavailable"))))
       (when (buffer-live-p buf)
         (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-async-command-calls-callback-after-clean-exit ()
+  "A zero exit hands the callback ok=t and the program's whole output."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-async-command*"))
+        (callback-result nil)
+        (agent-repl-log-to-file nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'process-live-p) (lambda (_proc) nil))
+                  ((symbol-function 'process-buffer) (lambda (_proc) buf))
+                  ((symbol-function 'process-exit-status) (lambda (_proc) 0))
+                  ((symbol-function 'agent-repl--kill-buffer-safely)
+                   (lambda (buffer) (kill-buffer buffer))))
+          (with-current-buffer buf (insert "pushed\n"))
+          ;; Act
+          (agent-repl--async-command-handle-completion
+           "push" (lambda (ok output) (setq callback-result (list ok output)))
+           'fake-process "finished\n")
+          ;; Assert
+          (should (equal callback-result '(t "pushed\n")))
+          (should-not (buffer-live-p buf)))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-async-command-ignores-a-nonterminal-event ()
+  "A sentinel event on a live process never reaches the callback."
+  ;; Arrange
+  (let ((called nil)
+        (agent-repl-log-to-file nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_proc) t)))
+      ;; Act
+      (agent-repl--async-command-handle-completion
+       "push" (lambda (&rest _) (setq called t)) 'fake-process "stopped\n"))
+    ;; Assert
+    (should-not called)))
+
+(ert-deftest agent-repl-test-async-command-spawns-the-command-in-dir ()
+  "The real wrapper runs COMMAND from DIR and routes its sentinel to completion."
+  ;; Arrange: the real wrapper, captured before the harness guarded it.
+  (let ((real (cdr (assq 'agent-repl--async-command
+                         agent-repl-test--external-original-functions)))
+        (spawned nil)
+        (completed nil)
+        (agent-repl-log-to-file nil))
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (name buffer &rest command)
+                 (setq spawned (list name default-directory command))
+                 (kill-buffer buffer)
+                 'fake-process))
+              ((symbol-function 'set-process-query-on-exit-flag) #'ignore)
+              ((symbol-function 'set-process-sentinel)
+               (lambda (_proc sentinel) (funcall sentinel 'fake-process "finished\n")))
+              ((symbol-function 'agent-repl--async-command-handle-completion)
+               (lambda (label _cb proc event) (setq completed (list label proc event)))))
+      ;; Act
+      (funcall real "push" "/tmp/repo" '("/bin/tool" "--flag") #'ignore))
+    ;; Assert
+    (should (equal spawned '("agent-repl-push" "/tmp/repo/" ("/bin/tool" "--flag"))))
+    (should (equal completed '("push" fake-process "finished\n")))))
+
+(ert-deftest agent-repl-test-async-gh-runs-through-async-command ()
+  "`gh' shares the one async runner, with `gh' prepended to its arguments."
+  ;; Arrange: the real `gh' wrapper, captured before the harness guarded it.
+  (let ((real (cdr (assq 'agent-repl--async-gh
+                         agent-repl-test--external-original-functions)))
+        (ran nil))
+    (cl-letf (((symbol-function 'agent-repl--async-command)
+               (lambda (label dir command callback)
+                 (setq ran (list label dir command callback)))))
+      ;; Act
+      (funcall real "pr-view" "/tmp/repo" '("pr" "view") #'ignore))
+    ;; Assert
+    (should (equal ran '("pr-view" "/tmp/repo" ("gh" "pr" "view") ignore)))))
+
+(ert-deftest agent-repl-test-async-command-is-the-only-async-start-process ()
+  "Only the async runners call `start-process', so a new spawn reuses them."
+  ;; Arrange
+  (let ((offenders nil))
+    (dolist (file (agent-repl-test--production-lisp-files))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        ;; Act
+        (while (re-search-forward "#'start-process" nil t)
+          (let ((defun-name (save-excursion
+                              (beginning-of-defun)
+                              (and (looking-at "(defun \\(\\_<.+?\\_>\\)")
+                                   (match-string 1)))))
+            (unless (member defun-name '("agent-repl--async-command"
+                                         "agent-repl--async-git"))
+              (push (cons (file-name-nondirectory file) defun-name) offenders))))))
+    ;; Assert
+    (should (equal offenders nil))))
 
 (ert-deftest agent-repl-test-capture-process-output-uses-make-process-when-suppress-stderr ()
   "When SUPPRESS-STDERR is non-nil, `--capture-process-output' uses
