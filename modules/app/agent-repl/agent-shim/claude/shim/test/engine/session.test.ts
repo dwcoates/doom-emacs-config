@@ -16692,3 +16692,316 @@ describe("the vendor-error retry", () => {
     expect(h.retryScheduler.pendingTimeout()?.delayMs).toBe(76 * 60_000);
   });
 });
+
+/**
+ * AN AGENT'S PROMPT IS DELIVERED AS ANOTHER SESSION'S MESSAGE (2026-10-20).
+ *
+ * A StartTurn naming its sender (`sent_by`) pushes the prompt in the vendor's
+ * cross-session envelope, marked as a peer message from `agent-repl:<sender>`
+ * declaring the SENDER's class. It is accepted once the vendor queued it and
+ * refused when the vendor held it; its turn, which the vendor echoes nothing
+ * for, is matched by the vendor's `command_lifecycle` frames.
+ */
+describe("an agent's prompt delivered as a peer message", () => {
+  const modeOf = (arm: "auto" | "bypass"): conversationv1.AgentPermissionMode =>
+    create(conversationv1.AgentPermissionModeSchema, { mode: { case: arm, value: {} } as never });
+  const SENDER = create(shimv1.StartTurnSentBySchema, { workspaceId: "ws-sender", workspaceName: "parser-fix", permissionMode: modeOf("auto") });
+
+  /** A StartTurn of an agent's prompt from SENTBY, left pending. */
+  const agentPrompt = (
+    h: Harness,
+    turnId: string,
+    options: { join?: boolean; sentBy?: shimv1.StartTurnSentBy } = {},
+  ): Promise<shimv1.StartTurnResponse> =>
+    h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: turnId }),
+        said: textSaid("please review the parser"),
+        origin: conversationv1.PromptOrigin.AGENT_SENT,
+        sentBy: options.sentBy ?? SENDER,
+        joinRunningTurn: options.join ?? false,
+      }),
+    );
+
+  const lifecycle = (state: string, uuid: string): SdkMessage =>
+    ({ type: "command_lifecycle", command_uuid: uuid, state, uuid: `lifecycle-${state}`, session_id: "s" }) as unknown as SdkMessage;
+
+  const held = (uuid: string): SdkMessage =>
+    ({
+      type: "system",
+      subtype: "peer_message_hold",
+      state: "held",
+      message_uuid: uuid,
+      lane: "stdin",
+      from: "agent-repl:parser-fix",
+      cause: "mode-mismatch",
+      uuid: "hold-uuid",
+      session_id: "s",
+    }) as unknown as SdkMessage;
+
+  /** Wait until the send of `turnId` has reached the vendor's input; answer its client uuid. */
+  async function untilSent(sends: SdkUserMessage[], turnId: string): Promise<string> {
+    const uuid = promptVendorUuid(turnId);
+    for (let attempt = 0; attempt < 50 && !sends.some((send) => send.uuid === uuid); attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    if (!sends.some((send) => send.uuid === uuid)) throw new Error(`turn ${turnId}'s send never reached the vendor`);
+    return uuid;
+  }
+
+  /** An agent's prompt the vendor queued: its StartTurn's answer and its client uuid. */
+  async function admitted(
+    h: Harness,
+    sends: SdkUserMessage[],
+    turnId: string,
+    options: { join?: boolean; sentBy?: shimv1.StartTurnSentBy } = {},
+  ): Promise<{ response: shimv1.StartTurnResponse; uuid: string }> {
+    const starting = agentPrompt(h, turnId, options);
+    const uuid = await untilSent(sends, turnId);
+    await h.engine.onSdkMessage(lifecycle("queued", uuid));
+    return { response: await starting, uuid };
+  }
+
+  /** Every prompt row written, as [turn, folded_into], in order. */
+  const promptRows = (h: Harness): [string, string | undefined][] =>
+    [...h.persistence.durable, ...h.persistence.buffered].flatMap((entry) =>
+      entry.item.kind === "prompt"
+        ? [[entry.item.prompt.id?.value ?? "", entry.item.prompt.foldedInto?.value] as [string, string | undefined]]
+        : [],
+    );
+
+  it("sends the prompt in the vendor's cross-session envelope", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+
+    // Act
+    const { uuid } = await admitted(h, sends, "turn-1");
+
+    // Assert
+    expect(sends.find((send) => send.uuid === uuid)?.message.content).toBe(
+      '<cross-session-message from="agent-repl:parser-fix" from-name="parser-fix">\nplease review the parser\n</cross-session-message>',
+    );
+  });
+
+  it("marks the send a peer message from agent-repl, declaring the sender's class", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+
+    // Act
+    const { uuid } = await admitted(h, sends, "turn-1");
+
+    // Assert
+    expect(sends.find((send) => send.uuid === uuid)?.origin).toEqual({ kind: "peer", from: "agent-repl:parser-fix", fromMode: "prompting" });
+  });
+
+  it("declares a bypassing sender's own class, never this session's", async () => {
+    // Arrange: this session prompts; the sender bypasses.
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    const sentBy = create(shimv1.StartTurnSentBySchema, { workspaceId: "ws-sender", workspaceName: "parser-fix", permissionMode: modeOf("bypass") });
+
+    // Act
+    const { uuid } = await admitted(h, sends, "turn-1", { sentBy });
+
+    // Assert
+    expect(sends.find((send) => send.uuid === uuid)?.origin).toMatchObject({ fromMode: "bypass" });
+  });
+
+  it("sends a user's prompt as before: no envelope, no origin", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+
+    // Act
+    await realPrompt(h, "turn-1");
+    const uuid = await untilSent(sends, "turn-1");
+
+    // Assert
+    const send = sends.find((candidate) => candidate.uuid === uuid);
+    expect([send?.message.content, send?.origin]).toEqual(["go", undefined]);
+  });
+
+  it("accepts the StartTurn once the vendor queued the message", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+
+    // Act
+    const { response } = await admitted(h, sends, "turn-1");
+
+    // Assert
+    expect(response.result.case).toBe("success");
+  });
+
+  it("does not answer the StartTurn before the vendor said it queued the message", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+
+    // Act
+    const starting = agentPrompt(h, "turn-1");
+    await untilSent(sends, "turn-1");
+
+    // Assert
+    expect(await settledSoon(starting)).toBe(false);
+  });
+
+  it("refuses the StartTurn vendor_refused when the vendor held the message, naming why", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    const starting = agentPrompt(h, "turn-1");
+    const uuid = await untilSent(sends, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(held(uuid));
+
+    // Assert
+    const response = await starting;
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    expect([failure?.kind.case, /HELD.*permission class is not this session's/.test(failure?.detail ?? "")]).toEqual(["vendorRefused", true]);
+  });
+
+  it("frees the send slot after a held message, so the next prompt starts", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    const starting = agentPrompt(h, "turn-1");
+    await h.engine.onSdkMessage(held(await untilSent(sends, "turn-1")));
+    await starting;
+
+    // Act
+    const next = await startDuring(h, "turn-2");
+
+    // Assert
+    expect(next.result.case).toBe("success");
+  });
+
+  it("refuses a waiting agent's prompt when the query dies", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    const starting = agentPrompt(h, "turn-1");
+    await untilSent(sends, "turn-1");
+
+    // Act
+    h.queries[0]?.query.end();
+
+    // Assert
+    const response = await starting;
+    expect(response.result.case === "failure" ? response.result.value.kind.case : "accepted").toBe("vendorRefused");
+  });
+
+  it("charges the peer turn's unstamped replies to its own turn, adopting no vendor turn", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    const { uuid } = await admitted(h, sends, "turn-1");
+    const mark = h.fold.contexts.length;
+
+    // Act
+    await h.engine.onSdkMessage(lifecycle("started", uuid));
+    await h.engine.onSdkMessage(assistantMessage("peer-reply"));
+    await h.engine.onSdkMessage(resultMessage("peer-result"));
+
+    // Assert
+    const adopted = h.persistence.buffered.filter(
+      (entry) => entry.item.kind === "prompt" && entry.item.prompt.origin === conversationv1.PromptOrigin.VENDOR_STARTED,
+    );
+    expect([h.fold.contexts.slice(mark).map((context) => context.turnId?.value), adopted.length]).toEqual([
+      ["turn-1", "turn-1", "turn-1"],
+      0,
+    ]);
+  });
+
+  it("closes the peer turn on its unstamped result, freeing the slot", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    const { uuid } = await admitted(h, sends, "turn-1");
+    await h.engine.onSdkMessage(lifecycle("started", uuid));
+    await h.engine.onSdkMessage(assistantMessage("peer-reply"));
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("peer-result"));
+
+    // Assert
+    expect((await startDuring(h, "turn-2")).result.case).toBe("success");
+  });
+
+  it("writes a peer join the vendor folded into the running turn as folded into it", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = await untilSent(sends, "turn-1");
+    await h.engine.onSdkMessage({ ...assistantMessage("turn-1-reply"), user_message_uuid: running, user_message_uuids: [running] } as SdkMessage);
+    const { uuid } = await admitted(h, sends, "turn-2", { join: true });
+
+    // Act
+    await h.engine.onSdkMessage(lifecycle("started", uuid));
+
+    // Assert
+    expect(promptRows(h)).toEqual([
+      ["turn-1", undefined],
+      ["turn-2", "turn-1"],
+    ]);
+  });
+
+  it("takes back a peer join the vendor held: it never opens as its own turn", async () => {
+    // Arrange
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = await untilSent(sends, "turn-1");
+    const joining = agentPrompt(h, "turn-2", { join: true });
+    await h.engine.onSdkMessage(held(await untilSent(sends, "turn-2")));
+    const refused = await joining;
+
+    // Act
+    await h.engine.onSdkMessage({ ...resultMessage("turn-1-result"), user_message_uuid: running, user_message_uuids: [running] } as SdkMessage);
+
+    // Assert
+    const next = await startDuring(h, "turn-3");
+    expect([refused.result.case, next.result.case, promptRows(h)]).toEqual([
+      "failure",
+      "success",
+      [["turn-1", undefined], ["turn-3", undefined]],
+    ]);
+  });
+
+  it("re-delivers a peer send the refused rewind was carrying still as a peer message", async () => {
+    // Arrange: a keep-alive ran, so the agent's prompt rides a rewind.
+    const sends: SdkUserMessage[] = [];
+    const h = harness({ drainSends: sends });
+    await started(h);
+    await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
+    await keepaliveTurn(h, []);
+    const { uuid } = await admitted(h, sends, "turn-1");
+
+    // Act
+    await h.engine.onSdkMessage(errorResultMessage({ errors: ["No message found with message.uuid of: assistant-uuid"] }));
+    for (let attempt = 0; attempt < 50 && sends.filter((send) => send.uuid === uuid).length < 2; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    // Assert
+    const deliveries = sends.filter((send) => send.uuid === uuid);
+    expect(deliveries.map((send) => send.origin?.kind)).toEqual(["peer", "peer"]);
+  });
+});

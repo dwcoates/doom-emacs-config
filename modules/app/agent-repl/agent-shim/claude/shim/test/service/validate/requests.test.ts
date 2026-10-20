@@ -328,6 +328,33 @@ describe("validateStartTurnRequest", () => {
   });
 });
 
+describe("validateStartTurnRequest sent_by", () => {
+  it("refuses an agent's prompt that names no sender", () => {
+    // Arrange.
+    const request = create(shimv1.StartTurnRequestSchema, {
+      turn: create(conversationv1.TurnIdSchema, { value: "t" }),
+      said: requests.said(),
+      origin: conversationv1.PromptOrigin.AGENT_SENT,
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartTurnRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("accepts an agent's prompt that names its sender", () => {
+    // Arrange.
+    const request = create(shimv1.StartTurnRequestSchema, {
+      turn: create(conversationv1.TurnIdSchema, { value: "t" }),
+      said: requests.said(),
+      origin: conversationv1.PromptOrigin.AGENT_SENT,
+      sentBy: create(shimv1.StartTurnSentBySchema, { workspaceId: "ws-sender", workspaceName: "parser-fix" }),
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartTurnRequest(request))).toBeUndefined();
+  });
+});
+
 describe("validateStartTurnRequest tail_only", () => {
   it("accepts a tail_only opening, which carries nothing to check", () => {
     // Arrange.

@@ -27,6 +27,7 @@ import {
   validateHistoryPointer,
   validatePromptOrigin,
   validateSessionColdRemediation,
+  validateStartTurnSentBy,
   validateTurnId,
   validateUserSaid,
   unsetOneof,
@@ -172,6 +173,7 @@ export function validateStartTurnRequest(request: shimv1.StartTurnRequest): void
     validateTurnId(request.turn, "start_turn.turn");
     validateUserSaid(request.said, "start_turn.said");
     validatePromptOrigin(request.origin, "start_turn.origin");
+    validateStartTurnSentBy(request.sentBy, request.origin, "start_turn.sent_by");
     // THE OPENING IS OPTIONAL — unset is the repaint, and tail_only carries
     // nothing to check — but a known_through mark must be a real pointer.
     if (request.opening.case === "knownThrough") {

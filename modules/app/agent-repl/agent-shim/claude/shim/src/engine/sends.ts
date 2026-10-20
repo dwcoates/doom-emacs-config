@@ -59,6 +59,28 @@
  * to the batch's first send while that send is named beside it, and every
  * other member the frame names is ABSORBED, as a fold is.
  *
+ * A PEER SEND IS MATCHED BY ITS LIFECYCLE, NOT BY AN ECHO. An agent's prompt
+ * delivered as another session's message (engine/peer-send.ts) is stamped
+ * like every send, but the vendor echoes no `user_message_uuid` on the turn a
+ * peer message drives. What names it is the vendor's `command_lifecycle`
+ * frame, whose `command_uuid` is the uuid the shim stamped: `started` is the
+ * moment the message drains into a turn. So for a send marked `peer`, and
+ * only for one, that frame is a second matching path beside the echo:
+ *   - between turns, `started` makes the running vendor turn that send's, and
+ *     the unstamped replies that follow belong to it rather than opening a
+ *     vendor-started turn;
+ *   - while a vendor-started turn runs, `started` is a fold: the turn answers
+ *     the peer send from there, and the vendor turn is ABSORBED, as an echo's
+ *     fold is;
+ *   - while another send's turn runs, `started` is the peer send folded INTO
+ *     it: the peer send is ABSORBED, and the running turn goes on;
+ *   - `started` for a peer send already RETIRED (one whose StartTurn was
+ *     refused, which the vendor ran anyway) between turns opens a
+ *     vendor-started turn, recorded at ERROR, since nothing of ours stands
+ *     behind it any more.
+ * Every other lifecycle state, and a lifecycle frame about any other send,
+ * attributes nothing: an ordinary send is still matched by its echo alone.
+ *
  * CONSTANT SIZE. The open sends are bounded by the session's own turn slots
  * (one daemon or network-resume turn, or one keep-alive) and the prompts
  * waiting to join it, enforced here as an invariant
@@ -67,6 +89,7 @@
  */
 import { bindLog } from "../log.js";
 import type { SdkMessage } from "../sdk/types.js";
+import { commandLifecycleOf, type CommandLifecycle } from "./peer-send.js";
 
 const LOGGER = bindLog({ component: "shim-engine-sends", operation: "shim.engine.sends" });
 
@@ -99,6 +122,12 @@ export interface Send {
   readonly turnId: string;
   /** True for the shim's own keep-alive. */
   readonly keepalive: boolean;
+  /**
+   * True for a send delivered as another session's message: its turn is
+   * matched by the vendor's `command_lifecycle`, which names it, since the
+   * vendor echoes nothing for it (see the file comment).
+   */
+  readonly peer?: true;
 }
 
 /** The vendor turn a message belongs to, as the echoes have stated it. */
@@ -306,6 +335,8 @@ export class SendLedger {
 
   /** Attribute one vendor message. Called ONCE per message, in arrival order. */
   attribute(message: SdkMessage): SendVerdict {
+    const lifecycle = commandLifecycleOf(message);
+    if (lifecycle !== undefined) return this.lifecycle(lifecycle);
     const stamps = stampedSends(message);
     const absorbed: AbsorbedTurn[] = [];
     let openedVendorTurn = false;
@@ -357,6 +388,9 @@ export class SendLedger {
       }
       this.running = next;
       if (next.kind === "send" && isTopLevelReply(message)) this.repliedTo(next.send);
+    } else if (this.running.kind === "send" && this.running.send.peer === true && isTopLevelReply(message)) {
+      // A PEER SEND'S REPLIES ARE NEVER STAMPED; its first is timed here.
+      this.repliedTo(this.running.send);
     } else if (this.running.kind === "unstated" && (isTopLevelReply(message) || message.type === "result")) {
       // THE FIRST REPLY OF A TURN A STAMPED SEND STARTED IS ALWAYS STAMPED
       // (sdk.d.ts). One that names nothing opens a turn no send of ours
@@ -374,6 +408,75 @@ export class SendLedger {
     this.running = UNSTATED;
     if (turn.kind === "send" && this.open.delete(turn.send.uuid)) this.retire(turn.send);
     return { turn, openedVendorTurn, absorbed, ended: true };
+  }
+
+  /**
+   * A `command_lifecycle` frame: the second matching path, for peer sends
+   * only (see the file comment).
+   */
+  private lifecycle(lifecycle: CommandLifecycle): SendVerdict {
+    const unchanged: SendVerdict = { turn: this.running, openedVendorTurn: false, absorbed: [], ended: false };
+    if (lifecycle.state !== "started") return unchanged;
+    const open = this.open.get(lifecycle.commandUuid);
+    if (open === undefined) {
+      const retired = this.retired.get(lifecycle.commandUuid);
+      if (retired?.peer !== true) return unchanged;
+      return this.retiredPeerStarted(retired);
+    }
+    if (open.peer !== true) return unchanged;
+    switch (this.running.kind) {
+      case "send": {
+        if (this.running.send.uuid === open.uuid) return unchanged;
+        // FOLDED INTO THE RUNNING TURN: the peer send is consumed by it, and
+        // its own turn will never come.
+        this.open.delete(open.uuid);
+        this.retire(open);
+        LOGGER.info(
+          { turn_id: open.turnId, running_turn_id: this.running.send.turnId, client_uuid: open.uuid },
+          "the vendor folded a peer send into the running turn; the peer send is concluded",
+        );
+        return { ...unchanged, absorbed: [{ kind: "send", send: open }] };
+      }
+      case "vendor": {
+        this.running = { kind: "send", send: open, retired: false };
+        LOGGER.info(
+          { turn_id: open.turnId, client_uuid: open.uuid },
+          "a vendor-started turn folded a peer send in; the turn answers that send from here",
+        );
+        return { turn: this.running, openedVendorTurn: false, absorbed: [{ kind: "vendor" }], ended: false };
+      }
+      case "unstated":
+      case "unknown":
+        this.running = { kind: "send", send: open, retired: false };
+        LOGGER.debug(
+          { turn_id: open.turnId, client_uuid: open.uuid },
+          "the vendor started a peer send's turn; the running vendor turn is attributed by its lifecycle",
+        );
+        return { ...unchanged, turn: this.running };
+    }
+  }
+
+  /**
+   * The vendor started a peer send the shim already retired: its StartTurn
+   * was refused (a hold, a lost admission), and the vendor ran it anyway.
+   * Between turns it opens a turn no send of ours stands behind; while a turn
+   * runs it is that turn's, which goes on.
+   */
+  private retiredPeerStarted(retired: Send): SendVerdict {
+    LOGGER.error(
+      {
+        turn_id: retired.turnId,
+        client_uuid: retired.uuid,
+        running: describe(this.running),
+        detail: "a refused peer send never reaches the agent; the vendor ran one anyway",
+      },
+      "the vendor started a peer send whose StartTurn was refused",
+    );
+    if (this.running.kind !== "unstated") {
+      return { turn: this.running, openedVendorTurn: false, absorbed: [], ended: false };
+    }
+    this.running = { kind: "vendor" };
+    return { turn: this.running, openedVendorTurn: true, absorbed: [], ended: false };
   }
 
   /**

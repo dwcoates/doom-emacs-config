@@ -25,6 +25,22 @@ import { bookFor } from "./fold-context.js";
 
 const LOGGER = bindLog({ component: "shim-convert-peer", operation: "shim.convert.peer" });
 
+/**
+ * THE ADDRESS AGENT-REPL'S OWN PEER MESSAGES ARE SENT FROM: an agent's prompt
+ * to another workspace is delivered as `agent-repl:<sending workspace>`
+ * (engine/peer-send.ts). Shared with the sidecar by contract
+ * (`shim-sidecar/internal/convert/user.go` agentReplPeerPrefix).
+ */
+export const AGENT_REPL_PEER_PREFIX = "agent-repl:";
+
+/**
+ * Whether a peer message's `from` is agent-repl's own: an agent's prompt the
+ * daemon already drew as its prompt row, which no reader draws again.
+ */
+export function isOwnPeerAddress(from: string | undefined): boolean {
+  return from !== undefined && from.startsWith(AGENT_REPL_PEER_PREFIX);
+}
+
 /** The vendor's message origin, read loosely: an observed shape, not a declared type. */
 export interface RawPeerOrigin {
   readonly kind?: string;
@@ -140,6 +156,17 @@ export function convertPeerMessage(
   const record = message as unknown as Record<string, unknown>;
   const facts = peerFacts(record, userRecordText(message.message));
   if (facts === undefined) return undefined;
+  // AGENT-REPL'S OWN PEER MESSAGE IS ITS PROMPT, ALREADY WRITTEN. An agent's
+  // prompt to this workspace reaches the vendor as a peer message, and its
+  // prompt row is the shim's (R15), so the vendor's copy of it is left to the
+  // ordinary path, which draws no prompt it already wrote.
+  if (isOwnPeerAddress((record.origin as RawPeerOrigin).from)) {
+    LOGGER.logVerbose(
+      { uuid: record.uuid ?? "", sender: facts.sender },
+      "agent-repl's own peer message is the prompt the shim already wrote; it is not drawn again as a peer message",
+    );
+    return undefined;
+  }
 
   // The SDK types a user record's uuid as always-present, but the audit records
   // it as OPTIONAL on the real surface, so it is read loosely and guarded.

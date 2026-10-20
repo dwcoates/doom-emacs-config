@@ -175,6 +175,7 @@ import {
   type RewindObligation,
 } from "./keepalive.js";
 import { SendLedger, type AbsorbedTurn, type Send, type SendVerdict, type VendorTurn } from "./sends.js";
+import { PEER_ADMISSION_BUDGET_MS, PeerAdmissions, peerDeclarationOf, peerEnvelope, type PeerDeclaration } from "./peer-send.js";
 import {
   DEFAULT_PERMISSION_MODE,
   fromVendorPermissionMode,
@@ -374,6 +375,12 @@ interface EngineDeps {
    * to reach the bound's refusal; production always uses the constant.
    */
   readonly keepaliveYieldBudgetMs?: number;
+  /**
+   * How long an agent's prompt waits for the vendor to say it queued or held
+   * it, when something overrode {@link PEER_ADMISSION_BUDGET_MS}. A suite
+   * shortens it to reach the bound's refusal; production uses the constant.
+   */
+  readonly peerAdmissionBudgetMs?: number;
   /**
    * The teardown's per-tail conclusion budget, when something overrode the
    * module constant.
@@ -785,6 +792,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * that uuid, once, in {@link onSdkMessage}. Arrival order attributes nothing.
    */
   const sends = new SendLedger((_send, seconds) => measurements.observeFirstOutput(seconds));
+  /**
+   * The peer sends awaiting the vendor's word that it queued them
+   * (engine/peer-send.ts): an agent's prompt is accepted only once the vendor
+   * has queued it, and refused when the vendor holds it.
+   */
+  const peerAdmissions = new PeerAdmissions(deps.peerAdmissionBudgetMs ?? PEER_ADMISSION_BUDGET_MS);
   /** The minter of the keep-alive send's client uuid, which the vendor echoes back. */
   const newUuid = deps.newUuid ?? randomUUID;
   /** The minter of a fresh conversation's vendor session id. */
@@ -1043,6 +1056,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         readonly keepalive: boolean;
         /** The send's client uuid, which a re-delivery must carry too: it is the same send. */
         readonly clientUuid: string;
+        /** The peer declaration the send carried, which a re-delivery carries too. */
+        readonly peer: PeerDeclaration | undefined;
       }
     | undefined;
   /**
@@ -2498,6 +2513,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // prompt alive. A recovered message is consumed: the query it arrived on is
     // already closed and the prompt already re-delivered on its replacement.
     if (await noteRewindOutcome(message)) return;
+    // WHAT IT SAYS OF A PEER SEND AWAITING ADMISSION: queued, or held.
+    peerAdmissions.observe(message);
     // THE SEND IT ANSWERS, BY ITS ECHO, TAKEN ONCE (engine/sends.ts). Every
     // turn attribution below reads this one verdict, never what is "open".
     const verdict = sends.attribute(message);
@@ -3422,7 +3439,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /** Push a join while the send slot's turn runs; see SessionContext.joinRunningTurn. */
-  function joinRunningTurn(prompt: conversationv1.AgentPrompt, turn: OpenTurn, into: OpenTurn): void {
+  function joinRunningTurn(
+    prompt: conversationv1.AgentPrompt,
+    turn: OpenTurn,
+    into: OpenTurn,
+    sentBy?: shimv1.StartTurnSentBy,
+  ): Promise<void> {
     if (open !== into) {
       throw new Error(`shim session: turn ${turn.id.value} was sent to join ${into.id.value}, which is not the send slot's turn`);
     }
@@ -3447,11 +3469,39 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       throw new Error(`shim session: turn ${astray.turn.id.value} waits to join ${astray.into.id.value}, not the send slot's ${into.id.value}`);
     }
     joins = [...joins, join];
+    const peer = sentBy === undefined ? undefined : peerDeclarationOf(sentBy);
+    let admitted: Promise<void>;
     try {
-      pushSend(queue, saidText(said), { uuid: promptUuid(turn.id.value), turnId: turn.id.value, keepalive: false }, true);
+      admitted = pushPeerSend(queue, saidText(said), { uuid: promptUuid(turn.id.value), turnId: turn.id.value, keepalive: false }, true, peer);
     } catch (err) {
       joins = joins.filter((waiting) => waiting !== join);
       throw err;
+    }
+    return admitted.catch((err: unknown) => {
+      withdrawRefusedJoin(join, err instanceof Error ? err.message : String(err));
+      throw err;
+    });
+  }
+
+  /**
+   * A join the vendor would not queue (a held peer message) is taken back:
+   * it waits on no turn, and its send is retired. One the running turn's end
+   * already opened as its own turn is released from the slot, recorded at
+   * ERROR, since its prompt row is already written for a turn that runs
+   * nothing.
+   */
+  function withdrawRefusedJoin(join: Join, why: string): void {
+    if (joins.includes(join)) {
+      joins = joins.filter((waiting) => waiting !== join);
+      sends.forget(join.turn.id.value, `the vendor did not queue the join: ${why}`);
+      return;
+    }
+    if (open === join.turn) {
+      LOGGER.error(
+        { turn_id: join.turn.id.value, cause: why, detail: "the running turn ended before the vendor said it held the join" },
+        "a join the vendor did not queue had already opened as its own turn; the turn is released",
+      );
+      releaseTurn(join.turn);
     }
   }
 
@@ -3843,6 +3893,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // moment the query it was waiting on ends, and the teardown below would
     // otherwise run while the verb sat out the rest of its bound.
     settleStartOnQueryEnd(detail);
+    peerAdmissions.abandonAll(detail);
     gate.standDown(`the vendor query died: ${detail}`);
     // NOTHING THE DEAD QUERY ANNOUNCED CAN SETTLE, so the fold lets go of it.
     deps.fold.endQuery(`the vendor query died: ${detail}`);
@@ -3877,24 +3928,50 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * send ledger before the push, so the vendor's echo of it is what attributes
    * the reply, never the order the reply arrives in.
    */
-  async function submit(said: conversationv1.UserSaid, turn: OpenTurn): Promise<void> {
+  async function submit(said: conversationv1.UserSaid, turn: OpenTurn, sentBy?: shimv1.StartTurnSentBy): Promise<void> {
     const text = saidText(said);
     const uuid = turn.keepalive ? pendingKeepaliveUuid(turn) : promptUuid(turn.id.value);
+    // AN AGENT'S PROMPT IS ANOTHER SESSION'S MESSAGE (engine/peer-send.ts).
+    const peer = sentBy === undefined ? undefined : peerDeclarationOf(sentBy);
     // THE ROLLBACK PRECEDES A KEEP-ALIVE TOO, not only a real prompt. The anchor
     // never advances past the last real record, so the same obligation a real
     // prompt owes is owed by the next keep-alive beat, and discharging it here
     // keeps at most one keep-alive in the transcript (engine/keepalive.ts). The
     // real-prompt path is byte-for-byte the same rollback; nothing about it
     // changes.
-    await yieldObligation(said, turn.keepalive, uuid);
+    await yieldObligation(said, turn.keepalive, uuid, peer);
     const queue = prompts;
     if (queue === undefined) throw new Error("shim session: no query is accepting prompts");
     cadence?.pause();
-    pushSend(queue, text, { uuid, turnId: turn.id.value, keepalive: turn.keepalive });
+    const admitted = pushPeerSend(queue, text, { uuid, turnId: turn.id.value, keepalive: turn.keepalive }, false, peer);
     LOGGER.debug(
-      { keepalive: turn.keepalive, turn_id: turn.id.value, client_uuid: uuid, characters: text.length },
+      { keepalive: turn.keepalive, turn_id: turn.id.value, client_uuid: uuid, characters: text.length, peer: peer?.from ?? "" },
       "submitted a prompt to the vendor",
     );
+    // A PEER SEND IS ACCEPTED ONCE THE VENDOR QUEUED IT, and a hold refuses
+    // it here, which refuses the StartTurn (engine/turn.ts).
+    await admitted;
+  }
+
+  /**
+   * {@link pushSend} for a send that may be a peer message: its admission is
+   * awaited from BEFORE the push, so no frame about it can go unheard, and
+   * answered as a promise that settles when the vendor queued it (at once for
+   * any other send). A push the queue refuses withdraws the wait.
+   */
+  function pushPeerSend(queue: PromptQueue, text: string, send: Send, join: boolean, peer: PeerDeclaration | undefined): Promise<void> {
+    if (peer === undefined) {
+      pushSend(queue, text, send, join);
+      return Promise.resolve();
+    }
+    const admitted = peerAdmissions.expect(send.uuid, send.turnId, peer.from);
+    try {
+      pushSend(queue, text, { ...send, peer: true }, join, peer);
+    } catch (err) {
+      peerAdmissions.withdraw(send.uuid);
+      throw err;
+    }
+    return admitted;
   }
 
   /** The keep-alive send's client uuid, minted when its scope opened. */
@@ -3911,10 +3988,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * A push the queue refuses retires the send it had just registered, so the
    * ledger never holds open a send the vendor never received.
    */
-  function pushSend(queue: PromptQueue, text: string, send: Send, join = false): void {
+  function pushSend(queue: PromptQueue, text: string, send: Send, join = false, peer?: PeerDeclaration): void {
     sends.sent(send);
     try {
-      queue.push(userMessage(text, send.uuid));
+      queue.push(userMessage(text, send.uuid, peer));
     } catch (err) {
       sends.forget(send.turnId, `the push was refused: ${err instanceof Error ? err.message : String(err)}`);
       throw err;
@@ -3930,13 +4007,26 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /**
    * One streaming-input send, carrying the client uuid the vendor echoes on
    * every reply to it (engine/sends.ts).
+   *
+   * A PEER SEND (an agent's prompt, engine/peer-send.ts) goes in the vendor's
+   * cross-session envelope and carries the peer origin: the address it is
+   * from, and the SENDER's own permission class when the daemon declared one.
    */
-  function userMessage(text: string, clientUuid: string): SdkUserMessage {
+  function userMessage(text: string, clientUuid: string, peer?: PeerDeclaration): SdkUserMessage {
+    if (peer === undefined) {
+      return {
+        type: "user",
+        message: { role: "user", content: text },
+        parent_tool_use_id: null,
+        uuid: clientUuid as SdkUserMessage["uuid"],
+      };
+    }
     return {
       type: "user",
-      message: { role: "user", content: text },
+      message: { role: "user", content: peerEnvelope(text, peer) },
       parent_tool_use_id: null,
       uuid: clientUuid as SdkUserMessage["uuid"],
+      origin: { kind: "peer", from: peer.from, ...(peer.fromMode === undefined ? {} : { fromMode: peer.fromMode }) },
     };
   }
 
@@ -4003,7 +4093,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * resumes only THROUGH that record (`resumeSessionAt`), via the shared
    * {@link collapseToAnchor}.
    */
-  async function yieldObligation(said: conversationv1.UserSaid, keepalive: boolean, clientUuid: string): Promise<void> {
+  async function yieldObligation(
+    said: conversationv1.UserSaid,
+    keepalive: boolean,
+    clientUuid: string,
+    peer?: PeerDeclaration,
+  ): Promise<void> {
     const owed = rewind.obligation();
     if (owed === undefined) return;
     const current = identity;
@@ -4047,6 +4142,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       said,
       keepalive,
       clientUuid,
+      peer,
     };
   }
 
@@ -4237,7 +4333,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     // THE SAME SEND, uuid and all: a re-delivered send is still that send,
     // still open in the ledger, and its answer must still be matched to it.
-    queue.push(userMessage(saidText(watch.said), watch.clientUuid));
+    queue.push(userMessage(saidText(watch.said), watch.clientUuid, watch.peer));
     LOGGER.info(
       { resume_session_at: watch.anchorUuid, anchor_turn_id: watch.anchorTurnId },
       "the prompt the refused rewind was carrying was RE-DELIVERED on a plain resume; it was not lost",

@@ -48,7 +48,7 @@ interface Harness {
   readonly live: LiveWorkTable;
   readonly gate: PermissionGate;
   readonly foreground: ForegroundUnitTable;
-  readonly submitted: { said: conversationv1.UserSaid; keepalive: boolean }[];
+  readonly submitted: { said: conversationv1.UserSaid; keepalive: boolean; sentBy: shimv1.StartTurnSentBy | undefined }[];
   open: OpenTurn | undefined;
   /** What `SessionContext.adoptedTurn()` answers: a turn the vendor started beside the slot. */
   adopted: OpenTurn | undefined;
@@ -62,6 +62,10 @@ interface Harness {
   readonly joins: { prompt: conversationv1.AgentPrompt; turn: string; into: string }[];
   /** When set, `SessionContext.joinRunningTurn` throws it, as a refused push does. */
   joinRejects: Error | undefined;
+  /** When set, `SessionContext.joinRunningTurn`'s admission rejects with it, as a held peer message's does. */
+  joinAdmissionRejects: Error | undefined;
+  /** The sender every join was pushed with, in order. */
+  readonly joinSentBys: (shimv1.StartTurnSentBy | undefined)[];
   /** Every store_unreachable the turn verbs reported to the session. */
   readonly storeFaults: string[];
   /** How many reads this shim SERVED, which is what lifts a store fault. */
@@ -133,6 +137,8 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     submitRejects: undefined,
     joins: [],
     joinRejects: undefined,
+    joinAdmissionRejects: undefined,
+    joinSentBys: [],
     storeFaults: [] as string[],
     storeRecoveries: [] as number[],
     knows: true,
@@ -177,17 +183,19 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     knowsAgent: () => state.knows,
     reportStoreUnreachable: (detail: string) => state.storeFaults.push(detail),
     reportStoreReadable: () => state.storeRecoveries.push(1),
-    submit: (said, turn) => {
+    submit: (said, turn, sentBy) => {
       if (state.submitRejects !== undefined) return Promise.reject(state.submitRejects);
-      state.submitted.push({ said, keepalive: turn.keepalive });
+      state.submitted.push({ said, keepalive: turn.keepalive, sentBy });
       return Promise.resolve();
     },
     setOpenTurn: (turn) => {
       state.open = turn;
     },
-    joinRunningTurn: (prompt, turn, into) => {
+    joinRunningTurn: (prompt, turn, into, sentBy) => {
       if (state.joinRejects !== undefined) throw state.joinRejects;
       state.joins.push({ prompt, turn: turn.id.value, into: into.id.value });
+      state.joinSentBys.push(sentBy);
+      return state.joinAdmissionRejects === undefined ? Promise.resolve() : Promise.reject(state.joinAdmissionRejects);
     },
     releaseTurn: (turn) => {
       if (state.open === turn) state.open = undefined;
@@ -4212,3 +4220,98 @@ function pageWithHead(headPointer: string): conversationv1.HistoryPage {
     ],
   });
 }
+
+/**
+ * AN AGENT'S PROMPT names its sender (StartTurnRequest.sent_by), and the turn
+ * verbs hand that sender to the session, which delivers the prompt as another
+ * session's message and refuses it when the vendor holds it.
+ */
+describe("an agent's prompt", () => {
+  const SENDER = create(shimv1.StartTurnSentBySchema, { workspaceId: "ws-sender", workspaceName: "parser-fix" });
+
+  /** REQUEST as an agent's prompt from SENDER. */
+  const fromAgent = (request: shimv1.StartTurnRequest): shimv1.StartTurnRequest => {
+    request.origin = conversationv1.PromptOrigin.AGENT_SENT;
+    request.sentBy = SENDER;
+    return request;
+  };
+
+  it("hands its sender to the session's submit", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    await h.turns.startTurn(fromAgent(startTurn()));
+
+    // Assert
+    expect(h.submitted.map((entry) => entry.sentBy?.workspaceName)).toEqual(["parser-fix"]);
+  });
+
+  it("hands no sender for a user's prompt", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(h.submitted.map((entry) => entry.sentBy)).toEqual([undefined]);
+  });
+
+  it("is refused vendor_refused when the session's submit says the vendor held it", async () => {
+    // Arrange
+    const h = await harness();
+    h.submitRejects = new Error("the vendor HELD turn turn-1's message");
+
+    // Act
+    const response = await h.turns.startTurn(fromAgent(startTurn()));
+
+    // Assert
+    const detail = response.result.case === "failure" ? response.result.value.detail : "";
+    expect([failureKind(response), detail, h.open]).toEqual(["vendorRefused", "the vendor HELD turn turn-1's message", undefined]);
+  });
+
+  it("hands its sender to the session's join", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+
+    // Act
+    await h.turns.startTurn(fromAgent(joinTurn()));
+
+    // Assert
+    expect(h.joinSentBys.map((sentBy) => sentBy?.workspaceName)).toEqual(["parser-fix"]);
+  });
+
+  it("refuses a join the vendor held as vendor_refused, and logs it", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+    h.joinAdmissionRejects = new Error("the vendor HELD turn turn-2's message");
+    const mark = logSinkMark();
+
+    // Act
+    const response = await h.turns.startTurn(fromAgent(joinTurn()));
+
+    // Assert
+    const logged = logRecordsSince(mark).find(
+      (record: LogRecord) => record.message === "the vendor did not queue the prompt sent to join the running turn",
+    );
+    expect([failureKind(response), logged?.level]).toEqual(["vendorRefused", "error"]);
+  });
+
+  it("does not remember a held join as started, so its retry is a first start", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+    h.joinAdmissionRejects = new Error("the vendor HELD turn turn-2's message");
+    await h.turns.startTurn(fromAgent(joinTurn()));
+    h.joinAdmissionRejects = undefined;
+
+    // Act
+    const response = await h.turns.startTurn(fromAgent(joinTurn()));
+
+    // Assert
+    expect([response.result.case, h.joins.length]).toEqual(["success", 2]);
+  });
+});

@@ -7,7 +7,7 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { describe, expect, it } from "vitest";
-import { conversationv1 } from "../../../src/proto.js";
+import { conversationv1, shimv1 } from "../../../src/proto.js";
 import * as fields from "../../../src/service/validate/fields.js";
 
 function codeOf(act: () => void): Code | undefined {
@@ -335,5 +335,41 @@ describe("validateUserContent", () => {
   it("refuses UNSET content, which is not the same as an empty utterance", () => {
     // Arrange, Act, Assert.
     expect(codeOf(() => fields.validateUserContent(undefined, "p"))).toBe(Code.InvalidArgument);
+  });
+});
+
+describe("validateStartTurnSentBy", () => {
+  const auto = (): conversationv1.AgentPermissionMode =>
+    create(conversationv1.AgentPermissionModeSchema, { mode: { case: "auto", value: create(conversationv1.AgentPermissionModeAutoSchema, {}) } });
+  const sender = (fields: Partial<shimv1.StartTurnSentBy> = {}): shimv1.StartTurnSentBy =>
+    create(shimv1.StartTurnSentBySchema, { workspaceId: "ws-sender", workspaceName: "parser-fix", permissionMode: auto(), ...fields });
+
+  it.each([
+    ["a named sender with its mode", sender()],
+    ["a sender the daemon cannot name", sender({ workspaceName: undefined })],
+    ["a sender whose mode the daemon does not hold", sender({ permissionMode: undefined })],
+  ])("accepts an agent's prompt naming %s", (_name, sentBy) => {
+    // Arrange, Act, Assert.
+    expect(codeOf(() => fields.validateStartTurnSentBy(sentBy, conversationv1.PromptOrigin.AGENT_SENT, "p"))).toBeUndefined();
+  });
+
+  it("accepts a user's prompt naming no sender", () => {
+    // Arrange, Act, Assert.
+    expect(codeOf(() => fields.validateStartTurnSentBy(undefined, conversationv1.PromptOrigin.USER_SENT, "p"))).toBeUndefined();
+  });
+
+  it.each([
+    ["an agent's prompt naming no sender", undefined, conversationv1.PromptOrigin.AGENT_SENT],
+    ["a sender on a prompt no agent sent", sender(), conversationv1.PromptOrigin.USER_SENT],
+    ["a sender with an empty workspace id", sender({ workspaceId: "" }), conversationv1.PromptOrigin.AGENT_SENT],
+    ["a sender whose name is set but empty", sender({ workspaceName: "" }), conversationv1.PromptOrigin.AGENT_SENT],
+    [
+      "a sender whose mode names no mode",
+      sender({ permissionMode: create(conversationv1.AgentPermissionModeSchema, {}) }),
+      conversationv1.PromptOrigin.AGENT_SENT,
+    ],
+  ])("refuses %s", (_name, sentBy, origin) => {
+    // Arrange, Act, Assert.
+    expect(codeOf(() => fields.validateStartTurnSentBy(sentBy, origin, "p"))).toBe(Code.InvalidArgument);
   });
 });
