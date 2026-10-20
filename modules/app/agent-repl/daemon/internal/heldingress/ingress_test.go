@@ -106,6 +106,41 @@ func TestSweepPublishesTheHostOnlyAfterTheEntryIsRemoved(t *testing.T) {
 	}
 }
 
+func TestSweepRecordsAnAnsweredEntryOnlyOnceItIsRemoved(t *testing.T) {
+	tests := []struct {
+		name      string
+		accepted  bool
+		operation string
+	}{
+		{name: "an ingested entry", operation: opIngest},
+		{name: "a deduplicated entry", accepted: true, operation: opDedupe},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the removal notes how many answer records already stand.
+			w := newWorld(t)
+			w.handler.accepted["k-1"] = tt.accepted
+			w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
+			recordedAtRemoval := -1
+			w.remove = func(path string) error {
+				recordedAtRemoval = len(w.records("info", tt.operation))
+				return removeFile(path)
+			}
+
+			// Act
+			w.sweep(w.ingress())
+
+			// Assert: a reader waiting on the record finds the entry gone.
+			if recordedAtRemoval != 0 {
+				t.Fatalf("INFO %s records at the removal = %d, want 0 (the record follows the removal)", tt.operation, recordedAtRemoval)
+			}
+			if got := len(w.records("info", tt.operation)); got != 1 {
+				t.Fatalf("INFO %s records = %d, want 1", tt.operation, got)
+			}
+		})
+	}
+}
+
 func TestSweepDoesNotDeliverAPromptTheDaemonAlreadyAcceptedUnderItsKey(t *testing.T) {
 	// Arrange: the SubmitPrompt the client gave up on DID land.
 	w := newWorld(t)

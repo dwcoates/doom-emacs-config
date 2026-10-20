@@ -287,9 +287,14 @@ func (i *ingress) ingest(ctx context.Context, path string, sw *sweep) {
 	// The submission RE-DRIVES the attempt the client gave up on, so an
 	// already-accepted key is the expected answer, not an anomaly.
 	outcome, err := i.deps.Prompts.Submit(prompthandler.WithRedrive(ctx), record.ID, entry.said, entry.IdempotencyKey, entry.origin, nil, entry.delivery, nil)
+	// THE ANSWER IS RECORDED ONCE THE ENTRY IS GONE (announce, below): a
+	// reader that waits on the record finds the ingress already without it.
+	var announce func()
 	switch {
 	case errors.Is(err, prompthandler.ErrDuplicateSubmission):
-		wlog.Info(opDedupe, "the held prompt was already accepted under its idempotency key, so it is not delivered twice", nil)
+		announce = func() {
+			wlog.Info(opDedupe, "the held prompt was already accepted under its idempotency key, so it is not delivered twice", nil)
+		}
 	case err != nil:
 		sw.waiting[dir] = true
 		kind := refusalKind(err)
@@ -301,15 +306,17 @@ func (i *ingress) ingest(ctx context.Context, path string, sw *sweep) {
 		leavePending(sw, record.ID, entry, i.retries[path].wait)
 		return
 	default:
-		wlog.Info(opIngest, "ingested a held prompt into the queue", dlog.Context{
-			"turn":        string(outcome.Turn),
-			"recognition": int(outcome.Recognition),
-			"delivered":   outcome.Disposition.Delivered,
-			"held":        outcome.Disposition.Parked(),
-			"origin":      entry.origin.String(),
-			"delivery":    entry.delivery.String(),
-			"queued_at":   entry.QueuedAt,
-		})
+		announce = func() {
+			wlog.Info(opIngest, "ingested a held prompt into the queue", dlog.Context{
+				"turn":        string(outcome.Turn),
+				"recognition": int(outcome.Recognition),
+				"delivered":   outcome.Disposition.Delivered,
+				"held":        outcome.Disposition.Parked(),
+				"origin":      entry.origin.String(),
+				"delivery":    entry.delivery.String(),
+				"queued_at":   entry.QueuedAt,
+			})
+		}
 	}
 	delete(i.retries, path)
 	// The queue answered the entry, so the held section stops drawing it now
@@ -321,6 +328,7 @@ func (i *ingress) ingest(ctx context.Context, path string, sw *sweep) {
 		// the failure costs a record, never a second delivery.
 		wlog.Error(opRemove, "could not remove an ingested held-prompt entry", dlog.Context{"cause": err.Error()})
 	}
+	announce()
 	i.deps.PublishHost(record.ID)
 }
 
