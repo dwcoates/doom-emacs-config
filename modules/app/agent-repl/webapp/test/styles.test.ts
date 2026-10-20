@@ -5426,21 +5426,21 @@ describe("the stylesheet's real-height contract", () => {
  * prompt's and an interim's rungs move the horizontal token, so no other
  * bubble's sides move with the vertical ladder. Every prompt but a held one,
  * and the green answer, then sit 30% wider top and bottom (owner request,
- * 2026-10-17).
+ * 2026-10-17), and 10% wider again (owner request, 2026-10-20).
  */
 describe("the padding ladder", () => {
   const RESPONSE = "calc(var(--bubble-pad-y-base)*0.7)";
-  const PROMPT_Y = "calc(var(--bubble-pad-y-base)*0.49*1.3)";
+  const PROMPT_Y = "calc(var(--bubble-pad-y-base)*0.49*1.3*1.1)";
   const HELD_Y = "calc(var(--bubble-pad-y-base)*0.49)";
   const THINKING = "calc(var(--bubble-pad-y-base)*0.35)";
   const BASE = "var(--bubble-pad-y-base)";
   const PROMPT_X = "calc(var(--bubble-pad-x-base)*0.7)";
-  const USER_Y = "calc(var(--bubble-pad-y-base)*0.49*1.15*1.3)";
+  const USER_Y = "calc(var(--bubble-pad-y-base)*0.49*1.15*1.3*1.1)";
   const USER_X = "calc(var(--bubble-pad-x-base)*0.7*1.15)";
   const INTERIM_Y = "calc(var(--bubble-pad-y-base)*0.49*var(--bubble-font-rem)/var(--bubble-base-font-rem))";
   const INTERIM_X = "calc(var(--bubble-pad-x-base)*var(--bubble-font-rem)/var(--bubble-base-font-rem))";
   const BASE_X = "var(--bubble-pad-x-base)";
-  const ANSWER_Y = "calc(var(--bubble-pad-y-base)*0.7*1.25*1.3)";
+  const ANSWER_Y = "calc(var(--bubble-pad-y-base)*0.7*1.25*1.3*1.1)";
 
   /** The PROPERTY the cascade hands a bubble of VARIANT, wearing CLASSES. */
   function tokenOf(property: string, variant: string, classes: readonly string[] = []): string {
@@ -5486,7 +5486,7 @@ describe("the padding ladder", () => {
     expect(got).toEqual([USER_Y, USER_X, PROMPT_Y, PROMPT_X]);
   });
 
-  it("leaves a held prompt out of the 30% wider top and bottom the other prompts got", () => {
+  it("leaves a held prompt out of the wider top and bottom the other prompts got", () => {
     // Arrange / Act
     const got = [tokenOf("--bubble-pad-y", "held"), tokenOf("--bubble-pad-y", "agent")];
 
@@ -5494,7 +5494,7 @@ describe("the padding ladder", () => {
     expect(got).toEqual([HELD_Y, PROMPT_Y]);
   });
 
-  it("gives the green answer 1.25 then 1.3 times a plain response's top and bottom", () => {
+  it("gives the green answer 1.25 then 1.3 then 1.1 times a plain response's top and bottom", () => {
     // Arrange / Act
     const got = [tokenOf("--bubble-pad-y", "response", ["final-response"]), tokenOf("--bubble-pad-y", "response")];
 
