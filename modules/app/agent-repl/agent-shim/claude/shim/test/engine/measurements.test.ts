@@ -8,11 +8,17 @@ import { describe, expect, it } from "vitest";
 import {
   MEASUREMENTS_INTERVAL_MS,
   Measurements,
+  EVENT_LOOP_DELAY_BUCKETS,
+  EVENT_LOOP_SAMPLE_INTERVAL_MS,
   VENDOR_FIRST_OUTPUT_BUCKETS,
+  sampleEventLoop,
   withMeasurements,
   type Wait,
 } from "../../src/engine/measurements.js";
 import { conversationv1, shimv1 } from "../../src/proto.js";
+
+/** A heap reader answering one fixed reading. */
+const fixedHeap = (): { heapUsed: number; heapTotal: number; external: number } => ({ heapUsed: 10, heapTotal: 20, external: 3 });
 
 const VOCAB = new URL("../../../../../proto/vocab/latencies.json", import.meta.url);
 
@@ -132,7 +138,7 @@ describe("Measurements", () => {
 
   it("states cumulative buckets, count and sum since its counting instant", () => {
     // Arrange
-    const m = new Measurements(() => 1_700_000_000_000);
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
 
     // Act
     m.observeFirstOutput(0.4);
@@ -154,7 +160,7 @@ describe("Measurements", () => {
 
   it("states no histogram before its first observation", () => {
     // Act
-    const snapshot = new Measurements(() => 1_700_000_000_000).snapshot();
+    const snapshot = new Measurements(() => 1_700_000_000_000, fixedHeap).snapshot();
 
     // Assert
     expect(snapshot.latencies).toEqual([]);
@@ -162,8 +168,8 @@ describe("Measurements", () => {
 
   it("gives every run a counting instant later than the run before, even within one millisecond", () => {
     // Act
-    const first = new Measurements(() => 1_700_000_000_000);
-    const second = new Measurements(() => 1_700_000_000_000);
+    const first = new Measurements(() => 1_700_000_000_000, fixedHeap);
+    const second = new Measurements(() => 1_700_000_000_000, fixedHeap);
 
     // Assert
     expect(second.countedSinceMs).toBeGreaterThan(first.countedSinceMs);
@@ -174,7 +180,7 @@ describe("Measurements", () => {
     ["a non-finite duration", Number.NaN],
   ])("refuses %s", (_name, seconds) => {
     // Arrange
-    const m = new Measurements(() => 1_700_000_000_000);
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
 
     // Act / Assert
     expect(() => m.observeFirstOutput(seconds)).toThrow("is not a duration");
@@ -187,7 +193,7 @@ describe("withMeasurements", () => {
     // Arrange
     const feed = new Feed();
     const ticks = new Ticks();
-    const m = new Measurements(() => 1_700_000_000_000);
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
     m.observeFirstOutput(1);
     const stream = withMeasurements(feed, m, ticks.wait);
 
@@ -210,7 +216,7 @@ describe("withMeasurements", () => {
     // Arrange
     const feed = new Feed();
     const ticks = new Ticks();
-    const m = new Measurements(() => 1_700_000_000_000);
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
     const stream = withMeasurements(feed, m, ticks.wait);
     feed.push(frame("opening"));
     await stream.next();
@@ -232,7 +238,7 @@ describe("withMeasurements", () => {
   it("ends when the inner stream ends", async () => {
     // Arrange
     const feed = new Feed();
-    const stream = withMeasurements(feed, new Measurements(() => 1), new Ticks().wait);
+    const stream = withMeasurements(feed, new Measurements(() => 1, fixedHeap), new Ticks().wait);
 
     // Act
     feed.end();
@@ -245,7 +251,7 @@ describe("withMeasurements", () => {
   it("rethrows the inner stream's failure", async () => {
     // Arrange
     const feed = new Feed();
-    const stream = withMeasurements(feed, new Measurements(() => 1), new Ticks().wait);
+    const stream = withMeasurements(feed, new Measurements(() => 1, fixedHeap), new Ticks().wait);
     const pending = stream.next();
 
     // Act
@@ -259,7 +265,7 @@ describe("withMeasurements", () => {
     // Arrange
     const feed = new Feed();
     const ticks = new Ticks();
-    const stream = withMeasurements(feed, new Measurements(() => 1), ticks.wait);
+    const stream = withMeasurements(feed, new Measurements(() => 1, fixedHeap), ticks.wait);
     feed.push(frame("opening"));
     await stream.next();
 
@@ -269,5 +275,83 @@ describe("withMeasurements", () => {
     // Assert
     expect(ticks.signal?.aborted).toBe(true);
     expect(feed.returned).toBe(true);
+  });
+});
+
+describe("the event loop and the heap", () => {
+  it("holds shim_event_loop_delay's buckets exactly as the vocabulary states them", () => {
+    // Arrange
+    const vocab = JSON.parse(readFileSync(VOCAB, "utf8")) as {
+      latencies: { name: string; reported_as: string | null; buckets_seconds: number[] | null }[];
+    };
+
+    // Act
+    const entry = vocab.latencies.find((l) => l.name === "shim_event_loop_delay");
+
+    // Assert
+    expect(entry?.reported_as).toBe("SHIM_LATENCY_KIND_EVENT_LOOP_DELAY");
+    expect(entry?.buckets_seconds).toEqual([...EVENT_LOOP_DELAY_BUCKETS]);
+  });
+
+  it("states an event-loop delay as its own cumulative histogram", () => {
+    // Arrange
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
+
+    // Act
+    m.observeEventLoopDelay(0.02);
+    const h = m.snapshot().latencies.find((l) => l.kind === shimv1.ShimLatencyKind.EVENT_LOOP_DELAY);
+
+    // Assert
+    expect(h?.count).toBe(1n);
+    expect(h?.buckets.find((b) => b.upperBoundSeconds === 0.025)?.cumulativeCount).toBe(1n);
+    expect(h?.buckets.find((b) => b.upperBoundSeconds === 0.01)?.cumulativeCount).toBe(0n);
+    expect(m.version).toBe(1);
+  });
+
+  it("refuses an event-loop delay that is not a duration", () => {
+    // Arrange
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
+
+    // Act and assert
+    expect(() => m.observeEventLoopDelay(-1)).toThrow("is not a duration");
+  });
+
+  it("carries the heap read as the frame is built", () => {
+    // Arrange
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
+
+    // Act
+    const heap = m.snapshot().heap;
+
+    // Assert
+    expect(heap?.usedBytes).toBe(10n);
+    expect(heap?.totalBytes).toBe(20n);
+    expect(heap?.externalBytes).toBe(3n);
+  });
+
+  it("samples how late each steady timer ran, until its lifetime ends", async () => {
+    // Arrange: the timer is due 500ms on; it runs 20ms late, then on time.
+    const m = new Measurements(() => 1_700_000_000_000, fixedHeap);
+    const ticks = new Ticks();
+    let mono = 0;
+    const life = new AbortController();
+    const sampling = sampleEventLoop(m, ticks.wait, () => mono, life.signal);
+
+    // Act
+    mono = EVENT_LOOP_SAMPLE_INTERVAL_MS + 20;
+    ticks.tick();
+    await settled();
+    mono += EVENT_LOOP_SAMPLE_INTERVAL_MS;
+    ticks.tick();
+    await settled();
+    life.abort();
+    ticks.tick();
+    await sampling;
+
+    // Assert
+    const h = m.snapshot().latencies.find((l) => l.kind === shimv1.ShimLatencyKind.EVENT_LOOP_DELAY);
+    expect(h?.count).toBe(2n);
+    expect(h?.sumSeconds).toBeCloseTo(0.02, 6);
+    expect(ticks.intervals.every((ms) => ms === EVENT_LOOP_SAMPLE_INTERVAL_MS)).toBe(true);
   });
 });

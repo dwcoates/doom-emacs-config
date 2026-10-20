@@ -2169,7 +2169,7 @@ func (h *harness) power(p cpugov.Power) {
 type harness struct {
 	// timings keeps every merge stage the orchestrator timed.
 	timings *fakeTimings
-	t *testing.T
+	t       *testing.T
 
 	// asks are the workspace sessions' open asks, as the watcher reports them.
 	asks *Asks

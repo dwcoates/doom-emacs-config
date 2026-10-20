@@ -181,7 +181,7 @@ import {
   PermissionGate,
   toVendorPermissionMode,
 } from "./permission-gate.js";
-import { Measurements, withMeasurements, type Wait } from "./measurements.js";
+import { Measurements, processHeap, sampleEventLoop, withMeasurements, type Wait } from "./measurements.js";
 import { SessionPushes } from "./pushes.js";
 import { probeVendorFact } from "./vendor-probe.js";
 import { VendorCadence } from "./vendor-cadence.js";
@@ -283,6 +283,17 @@ interface EngineDeps {
    * Unset is the process's own timer; a test supplies one it releases by hand.
    */
   readonly measurementsWait?: Wait;
+  /**
+   * The event-loop sampler's clock and lifetime (engine/measurements.ts,
+   * sampleEventLoop): main.ts always supplies the process's own, for the
+   * process's whole life. Unset samples nothing, which is what a suite that
+   * drives no clock wants.
+   */
+  readonly eventLoopSampling?: {
+    readonly wait: Wait;
+    readonly monoMs: () => number;
+    readonly signal: AbortSignal;
+  };
   /**
    * Mints the client uuid a keep-alive send carries, the one the vendor echoes
    * on every reply to it (engine/keepalive.ts, `KeepaliveScope`). Injected so a
@@ -756,7 +767,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * first vendor reply is timed by the send ledger below, and every watch
    * carries the figures as its measurements frames.
    */
-  const measurements = new Measurements(deps.nowMs);
+  const measurements = new Measurements(deps.nowMs, processHeap);
+  if (deps.eventLoopSampling !== undefined) {
+    const { wait, monoMs, signal } = deps.eventLoopSampling;
+    void sampleEventLoop(measurements, wait, monoMs, signal);
+  }
   /**
    * WHICH SEND EACH VENDOR TURN ANSWERS (engine/sends.ts, ruled 2026-09-28).
    * Every send is registered here under the client uuid it carries before it

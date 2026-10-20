@@ -60,6 +60,25 @@ message ShimMeasurements {
   // One cumulative histogram per shim-measured latency kind, each kind at
   // most once. A kind with no observation yet is absent.
   repeated ShimLatencyHistogram latencies = 3;
+  // The shim's JavaScript heap at the moment this frame was built: a
+  // snapshot, not a figure since the counting instant, so the daemon
+  // publishes it as a gauge. UNSET only on a frame built before the first
+  // heap read; every frame after it carries one.
+  optional ShimHeap heap = 4;
+}
+
+// The shim process's JavaScript heap, as Node's process.memoryUsage() reads
+// it. Resident memory is not here: the daemon's process collector reads it
+// from the kernel for every process, shims included.
+message ShimHeap {
+  // Bytes of the V8 heap in use by live objects (heapUsed).
+  uint64 used_bytes = 1;
+  // Bytes V8 has reserved for its heap (heapTotal); `used_bytes` never
+  // exceeds it, and the gap is what V8 can still fill before it grows.
+  uint64 total_bytes = 2;
+  // Bytes of memory held outside the V8 heap by objects it manages, buffers
+  // included (external).
+  uint64 external_bytes = 3;
 }
 
 // The shim's traffic with the vendor API, counted in memory where the shim
@@ -82,6 +101,11 @@ enum ShimLatencyKind {
   // From a prompt handed to the vendor to the first response text arriving:
   // what the vendor's first token costs, plus the shim's own share.
   SHIM_LATENCY_KIND_FIRST_OUTPUT = 1;
+  // How late a timer the shim arms on a steady cadence runs: the time the
+  // shim's event loop was busy elsewhere when the timer was due. A stuck
+  // loop delays every frame the shim sends and every call it answers, so a
+  // shim that feels stuck shows here first.
+  SHIM_LATENCY_KIND_EVENT_LOOP_DELAY = 2;
 }
 
 // One latency kind's distribution since the counting instant, in the shape of

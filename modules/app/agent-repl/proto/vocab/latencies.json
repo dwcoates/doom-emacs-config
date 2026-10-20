@@ -100,6 +100,17 @@
       "reason": "the vendor's first token; the part of prompt_first_output the vendor owns",
       "reported_as": "SHIM_LATENCY_KIND_FIRST_OUTPUT",
       "buckets_seconds": [0.5, 1, 2, 3, 5, 8, 13, 21, 34, 60]
+    },
+    {
+      "name": "shim_event_loop_delay",
+      "description": "how late the shim's steady sampling timer ran",
+      "start": "the moment the shim's sampling timer was due",
+      "end": "the moment its callback ran",
+      "measured_by": "shim",
+      "threshold_ms": 50,
+      "reason": "a busy event loop delays every frame the shim sends and every call it answers",
+      "reported_as": "SHIM_LATENCY_KIND_EVENT_LOOP_DELAY",
+      "buckets_seconds": [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]
     }
   ]
 }

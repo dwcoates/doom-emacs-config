@@ -372,3 +372,58 @@ func TestTheOffSurfaceObservesNothingAndWrapsNothing(t *testing.T) {
 		t.Fatalf("the off surface wrapped the registry or reports itself enabled")
 	}
 }
+
+func TestAShimsHeapIsServedAsItsLastSnapshot(t *testing.T) {
+	// Arrange
+	s, _ := openSurface(t)
+	first := frame(100, 0, 0, nil, 0, 0)
+	first.Heap = &shimv1.ShimHeap{UsedBytes: 10, TotalBytes: 20, ExternalBytes: 3}
+	second := frame(100, 0, 0, nil, 0, 0)
+	second.Heap = &shimv1.ShimHeap{UsedBytes: 15, TotalBytes: 20, ExternalBytes: 4}
+
+	// Act
+	s.FoldShimMeasurements("ws1", first)
+	s.FoldShimMeasurements("ws1", second)
+	body := scrape(t, s)
+
+	// Assert
+	mustContain(t, body,
+		`agentrepl_shim_heap_bytes{kind="used",workspace="ws1"} 15`,
+		`agentrepl_shim_heap_bytes{kind="total",workspace="ws1"} 20`,
+		`agentrepl_shim_heap_bytes{kind="external",workspace="ws1"} 4`,
+	)
+}
+
+func TestANewShimRunWithNoHeapYetDropsTheOldHeap(t *testing.T) {
+	// Arrange
+	s, _ := openSurface(t)
+	old := frame(100, 0, 0, nil, 0, 0)
+	old.Heap = &shimv1.ShimHeap{UsedBytes: 10, TotalBytes: 20}
+	s.FoldShimMeasurements("ws1", old)
+
+	// Act: a restarted shim's first frame, no heap read yet.
+	s.FoldShimMeasurements("ws1", frame(200, 0, 0, nil, 0, 0))
+	body := scrape(t, s)
+
+	// Assert
+	if strings.Contains(body, "agentrepl_shim_heap_bytes{") {
+		t.Fatalf("the old process's heap outlived its run:\n%s", body)
+	}
+}
+
+func TestAForgottenWorkspaceLosesItsShimHeap(t *testing.T) {
+	// Arrange
+	s, _ := openSurface(t)
+	f := frame(100, 0, 0, nil, 0, 0)
+	f.Heap = &shimv1.ShimHeap{UsedBytes: 10}
+	s.FoldShimMeasurements("ws1", f)
+
+	// Act
+	s.ForgetWorkspace("ws1")
+	body := scrape(t, s)
+
+	// Assert
+	if strings.Contains(body, "agentrepl_shim_heap_bytes{") {
+		t.Fatalf("a forgotten workspace's heap was still served:\n%s", body)
+	}
+}
