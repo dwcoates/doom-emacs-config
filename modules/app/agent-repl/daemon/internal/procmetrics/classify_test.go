@@ -240,4 +240,3 @@ func TestClassifyWithNoEmacsStreamHasNoEmacsAndNoWebKit(t *testing.T) {
 		t.Fatalf("groups = %v, want %v", got.groups, want)
 	}
 }
-
