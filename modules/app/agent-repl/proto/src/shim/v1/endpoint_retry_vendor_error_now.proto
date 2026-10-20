@@ -1,0 +1,55 @@
+// endpoint_retry_vendor_error_now.proto — RetryVendorErrorNow: make the
+// scheduled vendor-error retry at once. SESSION section.
+//
+// THE USER ASKING FOR THE RETRY NOW (owner ruling, 2026-10-20). A main turn
+// the vendor ended on a retryable failure is retried by the shim on
+// agent-repl's cadence (conversation.v1.SessionVendorErrorRetry); pressing RET
+// in an empty composer asks for that retry now instead of at the end of the
+// countdown. NOTHING IS SENT AS CONTENT by the caller: the retry is the
+// shim's own continue prompt, exactly as a scheduled one is.
+//
+// THE NEW SCHEDULE FOLLOWS ON THE SESSION STREAM, never in this answer.
+
+syntax = "proto3";
+
+package shim.v1;
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// DELIBERATELY EMPTY: the call is the request. The retry is the one session
+// this shim serves.
+message RetryVendorErrorNowRequest {}
+
+// THE ARM IS WHAT HAPPENED. Every arm is an answer, never a failure of the
+// request: whether a retry was due is the shim's to judge.
+message RetryVendorErrorNowResponse {
+  oneof outcome {
+    // The retry was delivered: the main agent is continuing the failed turn.
+    RetryVendorErrorNowRetried retried = 1;
+    // No retry is scheduled, so none was made.
+    RetryVendorErrorNowNothingScheduled nothing_scheduled = 2;
+    // The main agent's slot is taken; the retry asks again shortly.
+    RetryVendorErrorNowBusy busy = 3;
+    // The retry could not be made and the chain ended: the failed turn keeps
+    // its failure.
+    RetryVendorErrorNowEnded ended = 4;
+  }
+}
+
+// The retry opened a turn. DELIBERATELY EMPTY: the arm is the outcome.
+message RetryVendorErrorNowRetried {}
+
+// No retry was scheduled. DELIBERATELY EMPTY: the arm is the outcome.
+message RetryVendorErrorNowNothingScheduled {}
+
+// The main agent is busy.
+message RetryVendorErrorNowBusy {
+  // What holds the slot, composed by the shim for the records.
+  string detail = 1;
+}
+
+// The chain ended instead of retrying.
+message RetryVendorErrorNowEnded {
+  // Why, composed by the shim for the records.
+  string detail = 1;
+}

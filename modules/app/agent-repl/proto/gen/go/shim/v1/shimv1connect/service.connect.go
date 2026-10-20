@@ -56,6 +56,9 @@ const (
 	ShimSetKeepaliveProcedure = "/shim.v1.Shim/SetKeepalive"
 	// ShimSendKeepaliveProcedure is the fully-qualified name of the Shim's SendKeepalive RPC.
 	ShimSendKeepaliveProcedure = "/shim.v1.Shim/SendKeepalive"
+	// ShimRetryVendorErrorNowProcedure is the fully-qualified name of the Shim's RetryVendorErrorNow
+	// RPC.
+	ShimRetryVendorErrorNowProcedure = "/shim.v1.Shim/RetryVendorErrorNow"
 	// ShimKillSessionProcedure is the fully-qualified name of the Shim's KillSession RPC.
 	ShimKillSessionProcedure = "/shim.v1.Shim/KillSession"
 	// ShimStartTurnProcedure is the fully-qualified name of the Shim's StartTurn RPC.
@@ -108,6 +111,7 @@ var (
 	shimHibernateMethodDescriptor                = shimServiceDescriptor.Methods().ByName("Hibernate")
 	shimSetKeepaliveMethodDescriptor             = shimServiceDescriptor.Methods().ByName("SetKeepalive")
 	shimSendKeepaliveMethodDescriptor            = shimServiceDescriptor.Methods().ByName("SendKeepalive")
+	shimRetryVendorErrorNowMethodDescriptor      = shimServiceDescriptor.Methods().ByName("RetryVendorErrorNow")
 	shimKillSessionMethodDescriptor              = shimServiceDescriptor.Methods().ByName("KillSession")
 	shimStartTurnMethodDescriptor                = shimServiceDescriptor.Methods().ByName("StartTurn")
 	shimWatchAgentMethodDescriptor               = shimServiceDescriptor.Methods().ByName("WatchAgent")
@@ -161,6 +165,9 @@ type ShimClient interface {
 	// Send one keep-alive now, leaving the cadence as it is (the user keeping a
 	// hidden workspace's cache warm). See endpoint_send_keepalive.proto.
 	SendKeepalive(context.Context, *connect.Request[v1.SendKeepaliveRequest]) (*connect.Response[v1.SendKeepaliveResponse], error)
+	// Make the scheduled vendor-error retry at once (the user pressed RET in an
+	// empty composer). See endpoint_retry_vendor_error_now.proto.
+	RetryVendorErrorNow(context.Context, *connect.Request[v1.RetryVendorErrorNowRequest]) (*connect.Response[v1.RetryVendorErrorNowResponse], error)
 	// END: the session and EVERYTHING live in it — the turn if one is open and
 	// every live task, whichever turn spawned it. Refuses while anything is
 	// live unless forced; names what it killed.
@@ -285,6 +292,12 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			httpClient,
 			baseURL+ShimSendKeepaliveProcedure,
 			connect.WithSchema(shimSendKeepaliveMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		retryVendorErrorNow: connect.NewClient[v1.RetryVendorErrorNowRequest, v1.RetryVendorErrorNowResponse](
+			httpClient,
+			baseURL+ShimRetryVendorErrorNowProcedure,
+			connect.WithSchema(shimRetryVendorErrorNowMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		killSession: connect.NewClient[v1.KillSessionRequest, v1.KillSessionResponse](
@@ -414,6 +427,7 @@ type shimClient struct {
 	hibernate                *connect.Client[v1.HibernateRequest, v1.HibernateResponse]
 	setKeepalive             *connect.Client[v1.SetKeepaliveRequest, v1.SetKeepaliveResponse]
 	sendKeepalive            *connect.Client[v1.SendKeepaliveRequest, v1.SendKeepaliveResponse]
+	retryVendorErrorNow      *connect.Client[v1.RetryVendorErrorNowRequest, v1.RetryVendorErrorNowResponse]
 	killSession              *connect.Client[v1.KillSessionRequest, v1.KillSessionResponse]
 	startTurn                *connect.Client[v1.StartTurnRequest, v1.StartTurnResponse]
 	watchAgent               *connect.Client[v1.WatchAgentRequest, v1.WatchAgentResponse]
@@ -473,6 +487,11 @@ func (c *shimClient) SetKeepalive(ctx context.Context, req *connect.Request[v1.S
 // SendKeepalive calls shim.v1.Shim.SendKeepalive.
 func (c *shimClient) SendKeepalive(ctx context.Context, req *connect.Request[v1.SendKeepaliveRequest]) (*connect.Response[v1.SendKeepaliveResponse], error) {
 	return c.sendKeepalive.CallUnary(ctx, req)
+}
+
+// RetryVendorErrorNow calls shim.v1.Shim.RetryVendorErrorNow.
+func (c *shimClient) RetryVendorErrorNow(ctx context.Context, req *connect.Request[v1.RetryVendorErrorNowRequest]) (*connect.Response[v1.RetryVendorErrorNowResponse], error) {
+	return c.retryVendorErrorNow.CallUnary(ctx, req)
 }
 
 // KillSession calls shim.v1.Shim.KillSession.
@@ -602,6 +621,9 @@ type ShimHandler interface {
 	// Send one keep-alive now, leaving the cadence as it is (the user keeping a
 	// hidden workspace's cache warm). See endpoint_send_keepalive.proto.
 	SendKeepalive(context.Context, *connect.Request[v1.SendKeepaliveRequest]) (*connect.Response[v1.SendKeepaliveResponse], error)
+	// Make the scheduled vendor-error retry at once (the user pressed RET in an
+	// empty composer). See endpoint_retry_vendor_error_now.proto.
+	RetryVendorErrorNow(context.Context, *connect.Request[v1.RetryVendorErrorNowRequest]) (*connect.Response[v1.RetryVendorErrorNowResponse], error)
 	// END: the session and EVERYTHING live in it — the turn if one is open and
 	// every live task, whichever turn spawned it. Refuses while anything is
 	// live unless forced; names what it killed.
@@ -722,6 +744,12 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		ShimSendKeepaliveProcedure,
 		svc.SendKeepalive,
 		connect.WithSchema(shimSendKeepaliveMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	shimRetryVendorErrorNowHandler := connect.NewUnaryHandler(
+		ShimRetryVendorErrorNowProcedure,
+		svc.RetryVendorErrorNow,
+		connect.WithSchema(shimRetryVendorErrorNowMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	shimKillSessionHandler := connect.NewUnaryHandler(
@@ -856,6 +884,8 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimSetKeepaliveHandler.ServeHTTP(w, r)
 		case ShimSendKeepaliveProcedure:
 			shimSendKeepaliveHandler.ServeHTTP(w, r)
+		case ShimRetryVendorErrorNowProcedure:
+			shimRetryVendorErrorNowHandler.ServeHTTP(w, r)
 		case ShimKillSessionProcedure:
 			shimKillSessionHandler.ServeHTTP(w, r)
 		case ShimStartTurnProcedure:
@@ -933,6 +963,10 @@ func (UnimplementedShimHandler) SetKeepalive(context.Context, *connect.Request[v
 
 func (UnimplementedShimHandler) SendKeepalive(context.Context, *connect.Request[v1.SendKeepaliveRequest]) (*connect.Response[v1.SendKeepaliveResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.SendKeepalive is not implemented"))
+}
+
+func (UnimplementedShimHandler) RetryVendorErrorNow(context.Context, *connect.Request[v1.RetryVendorErrorNowRequest]) (*connect.Response[v1.RetryVendorErrorNowResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.RetryVendorErrorNow is not implemented"))
 }
 
 func (UnimplementedShimHandler) KillSession(context.Context, *connect.Request[v1.KillSessionRequest]) (*connect.Response[v1.KillSessionResponse], error) {

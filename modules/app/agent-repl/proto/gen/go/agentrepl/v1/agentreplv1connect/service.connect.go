@@ -66,6 +66,9 @@ const (
 	AgentReplLoadFeedThroughProcedure = "/agentrepl.v1.AgentRepl/LoadFeedThrough"
 	// AgentReplInterruptProcedure is the fully-qualified name of the AgentRepl's Interrupt RPC.
 	AgentReplInterruptProcedure = "/agentrepl.v1.AgentRepl/Interrupt"
+	// AgentReplRetryVendorErrorProcedure is the fully-qualified name of the AgentRepl's
+	// RetryVendorError RPC.
+	AgentReplRetryVendorErrorProcedure = "/agentrepl.v1.AgentRepl/RetryVendorError"
 	// AgentReplInspectChessBoardSquareProcedure is the fully-qualified name of the AgentRepl's
 	// InspectChessBoardSquare RPC.
 	AgentReplInspectChessBoardSquareProcedure = "/agentrepl.v1.AgentRepl/InspectChessBoardSquare"
@@ -323,6 +326,7 @@ var (
 	agentReplGetFeedPageMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("GetFeedPage")
 	agentReplLoadFeedThroughMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("LoadFeedThrough")
 	agentReplInterruptMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("Interrupt")
+	agentReplRetryVendorErrorMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("RetryVendorError")
 	agentReplInspectChessBoardSquareMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("InspectChessBoardSquare")
 	agentReplPlanRollbackMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("PlanRollback")
 	agentReplRollBackMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("RollBack")
@@ -451,6 +455,10 @@ type AgentReplClient interface {
 	// "Stop that": the running turn, or a detached bubble's work — the arm is
 	// the target. See endpoint_interrupt.proto.
 	Interrupt(context.Context, *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error)
+	// Retry the turn the vendor failed now, rather than at the end of the
+	// footer's countdown (RET in an empty composer). See
+	// endpoint_retry_vendor_error.proto.
+	RetryVendorError(context.Context, *connect.Request[v1.RetryVendorErrorRequest]) (*connect.Response[v1.RetryVendorErrorResponse], error)
 	// A reader clicked a piece on a feed chess board: the daemon asks the
 	// board's CEE backend what the engine says about the square and hands the
 	// answer back whole. See endpoint_inspect_chess_board_square.proto.
@@ -799,6 +807,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplInterruptProcedure,
 			connect.WithSchema(agentReplInterruptMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		retryVendorError: connect.NewClient[v1.RetryVendorErrorRequest, v1.RetryVendorErrorResponse](
+			httpClient,
+			baseURL+AgentReplRetryVendorErrorProcedure,
+			connect.WithSchema(agentReplRetryVendorErrorMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		inspectChessBoardSquare: connect.NewClient[v1.InspectChessBoardSquareRequest, v1.InspectChessBoardSquareResponse](
@@ -1358,6 +1372,7 @@ type agentReplClient struct {
 	getFeedPage                *connect.Client[v1.GetFeedPageRequest, v1.GetFeedPageResponse]
 	loadFeedThrough            *connect.Client[v1.LoadFeedThroughRequest, v1.LoadFeedThroughResponse]
 	interrupt                  *connect.Client[v1.InterruptRequest, v1.InterruptResponse]
+	retryVendorError           *connect.Client[v1.RetryVendorErrorRequest, v1.RetryVendorErrorResponse]
 	inspectChessBoardSquare    *connect.Client[v1.InspectChessBoardSquareRequest, v1.InspectChessBoardSquareResponse]
 	planRollback               *connect.Client[v1.PlanRollbackRequest, v1.PlanRollbackResponse]
 	rollBack                   *connect.Client[v1.RollBackRequest, v1.RollBackResponse]
@@ -1497,6 +1512,11 @@ func (c *agentReplClient) LoadFeedThrough(ctx context.Context, req *connect.Requ
 // Interrupt calls agentrepl.v1.AgentRepl.Interrupt.
 func (c *agentReplClient) Interrupt(ctx context.Context, req *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error) {
 	return c.interrupt.CallUnary(ctx, req)
+}
+
+// RetryVendorError calls agentrepl.v1.AgentRepl.RetryVendorError.
+func (c *agentReplClient) RetryVendorError(ctx context.Context, req *connect.Request[v1.RetryVendorErrorRequest]) (*connect.Response[v1.RetryVendorErrorResponse], error) {
+	return c.retryVendorError.CallUnary(ctx, req)
 }
 
 // InspectChessBoardSquare calls agentrepl.v1.AgentRepl.InspectChessBoardSquare.
@@ -1981,6 +2001,10 @@ type AgentReplHandler interface {
 	// "Stop that": the running turn, or a detached bubble's work — the arm is
 	// the target. See endpoint_interrupt.proto.
 	Interrupt(context.Context, *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error)
+	// Retry the turn the vendor failed now, rather than at the end of the
+	// footer's countdown (RET in an empty composer). See
+	// endpoint_retry_vendor_error.proto.
+	RetryVendorError(context.Context, *connect.Request[v1.RetryVendorErrorRequest]) (*connect.Response[v1.RetryVendorErrorResponse], error)
 	// A reader clicked a piece on a feed chess board: the daemon asks the
 	// board's CEE backend what the engine says about the square and hands the
 	// answer back whole. See endpoint_inspect_chess_board_square.proto.
@@ -2325,6 +2349,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplInterruptProcedure,
 		svc.Interrupt,
 		connect.WithSchema(agentReplInterruptMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplRetryVendorErrorHandler := connect.NewUnaryHandler(
+		AgentReplRetryVendorErrorProcedure,
+		svc.RetryVendorError,
+		connect.WithSchema(agentReplRetryVendorErrorMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplInspectChessBoardSquareHandler := connect.NewUnaryHandler(
@@ -2891,6 +2921,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplLoadFeedThroughHandler.ServeHTTP(w, r)
 		case AgentReplInterruptProcedure:
 			agentReplInterruptHandler.ServeHTTP(w, r)
+		case AgentReplRetryVendorErrorProcedure:
+			agentReplRetryVendorErrorHandler.ServeHTTP(w, r)
 		case AgentReplInspectChessBoardSquareProcedure:
 			agentReplInspectChessBoardSquareHandler.ServeHTTP(w, r)
 		case AgentReplPlanRollbackProcedure:
@@ -3116,6 +3148,10 @@ func (UnimplementedAgentReplHandler) LoadFeedThrough(context.Context, *connect.R
 
 func (UnimplementedAgentReplHandler) Interrupt(context.Context, *connect.Request[v1.InterruptRequest]) (*connect.Response[v1.InterruptResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.Interrupt is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RetryVendorError(context.Context, *connect.Request[v1.RetryVendorErrorRequest]) (*connect.Response[v1.RetryVendorErrorResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RetryVendorError is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) InspectChessBoardSquare(context.Context, *connect.Request[v1.InspectChessBoardSquareRequest]) (*connect.Response[v1.InspectChessBoardSquareResponse], error) {

@@ -309,7 +309,36 @@ message SessionUpdate {
     // fork point after answering; this states, once, how that restart
     // settled. See SessionRollbackSettled.
     SessionRollbackSettled rollback_settled = 37;
+    // THE RETRY AGENT-REPL HAS SCHEDULED for a main turn the vendor ended on
+    // a retryable API failure or an exhausted usage allowance. A STANDING
+    // LEVEL: every statement is the whole truth, the shim states it whenever
+    // it changes and restates it on every WatchSession open once it has been
+    // stated. See SessionVendorErrorRetry.
+    SessionVendorErrorRetry vendor_error_retry = 38;
   }
+}
+
+// THE VENDOR-ERROR RETRY AGENT-REPL OWNS (owner ruling, 2026-10-20). The shim
+// runs the vendor with its own in-process API retries OFF, so a main turn
+// whose API call fails retryably ends at once, and the shim retries it on
+// agent-repl's cadence: every 30 seconds, or at the reset of an exhausted
+// usage window. Each retry asks the main agent to continue, as a turn the
+// shim opens on its own. shim.v1.RetryVendorErrorNow makes the scheduled
+// retry at once.
+message SessionVendorErrorRetry {
+  // The retry the shim makes next. UNSET when none is scheduled: no failed
+  // turn is being retried, or the latest retry is running as a turn.
+  optional SessionVendorErrorRetryScheduled scheduled = 1;
+}
+
+// One scheduled retry.
+message SessionVendorErrorRetryScheduled {
+  // Which retry of the chain this is, 1 for the first after the failure.
+  uint32 attempt = 1;
+  // When the shim makes it, epoch ms.
+  int64 next_attempt_at_ms = 2;
+  // The failure being retried, in the vendor's own words.
+  string status = 3;
 }
 
 // HOW A ROLLBACK'S RESTART SETTLED. shim.v1.RollBackSession answers once the
