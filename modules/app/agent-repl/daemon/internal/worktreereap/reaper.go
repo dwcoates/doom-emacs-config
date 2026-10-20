@@ -62,7 +62,7 @@ const (
 	// DefaultExpireAfter is how long a worktree that never lands may exist,
 	// counted over unbroken repository activity (see expiry.go), before it
 	// is preserved and removed.
-	DefaultExpireAfter = 14 * 24 * time.Hour
+	DefaultExpireAfter = 7 * 24 * time.Hour
 )
 
 // ErrSweepRunning is Sweep's refusal while another sweep of this reaper is in

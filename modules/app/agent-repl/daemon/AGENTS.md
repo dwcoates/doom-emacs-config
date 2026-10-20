@@ -529,7 +529,7 @@ ending row, live and on replay.
 | `AGENT_REPL_HOLDOUT_WARN_EVERY` | test only | compresses the rollout's never-free holdout warning cadence (a Go duration; the default is ten minutes). A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
 | `AGENT_REPL_HANDOVER_FACTS_BOUND` | test only | bounds a successor's wait, on a mid-work adoption, for the adopted shim to re-announce its session facts (a Go duration; the default is 10s). A malformed or non-positive value is a BOOT REFUSAL |
 | `AGENT_REPL_WORKTREE_REAP_IDLE` | operator | the landed-worktree reaper's idle threshold (a Go duration; default `24h`): a worktree with any sign of activity newer than this is never judged. A malformed or non-positive value is a BOOT REFUSAL. See "The landed-worktree reaper" |
-| `AGENT_REPL_WORKTREE_REAP_EXPIRE` | operator | the reaper's expiry (a Go duration; default `336h`, 14 days): how long a worktree that never lands may exist over unbroken repository activity before it is preserved and removed. A malformed or non-positive value is a BOOT REFUSAL. See "The landed-worktree reaper" |
+| `AGENT_REPL_WORKTREE_REAP_EXPIRE` | operator | the reaper's expiry (a Go duration; default `168h`, 7 days): how long a worktree that never lands may exist over unbroken repository activity before it is preserved and removed. A malformed or non-positive value is a BOOT REFUSAL. See "The landed-worktree reaper" |
 | `AGENT_REPL_WORKTREE_REAP_START_DELAY` / `AGENT_REPL_WORKTREE_REAP_EVERY` | test only | compress the reaper's schedule (defaults `5m` after start, then `24h`). Same refusal rule |
 | `AGENT_REPL_NEWS_DIGEST_SOURCES` | test only | a JSON file of sources (`[{key, name, url, home, format}]`, format one of `atom`, `rss`, `npm`, `changelog`, `page`) that REPLACES the news digest's real sources; they are fetched unguarded, the real ones only when `AGENT_REPL_FORBID_VENDOR_CALLS` is unset. A missing or malformed file is a BOOT REFUSAL. See "The news digest" |
 | `AGENT_REPL_NEWS_DIGEST_START_DELAY` / `AGENT_REPL_NEWS_DIGEST_EVERY` / `AGENT_REPL_NEWS_DIGEST_RECHECK` | test only | compress the news digest's schedule (defaults `2m` after start, `24h` from the previous run's end, a `15m` longest wait). A malformed or non-positive value is a BOOT REFUSAL |
@@ -2821,7 +2821,7 @@ needs git >= 2.38.
    files do not count);
 7. the landed rule (`merge_conflicts`, `unlanded`);
 8. **the expiry rule** (`expiry.go`): a tree kept by 6 or 7 is EXPIRED once it
-   has existed for `AGENT_REPL_WORKTREE_REAP_EXPIRE` (default 14 days) of
+   has existed for `AGENT_REPL_WORKTREE_REAP_EXPIRE` (default 7 days) of
    UNBROKEN REPOSITORY ACTIVITY. Its clock starts at the later of its birth
    (the mtime of `<git dir>/worktrees/<name>/commondir`, which `worktree add`
    writes once) and the end of the repository's most recent full idle day
