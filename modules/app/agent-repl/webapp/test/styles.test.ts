@@ -3526,10 +3526,14 @@ describe("the one bubble rule set", () => {
             // page's own --bg; its own suite below pins it.
             !(prop === "box-shadow" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))) &&
             // AN INTERIM GROWS TO THE RIGHT ON HOVER (owner request,
-            // 2026-10-13): its bubble transitions its cap, and reads the
-            // corner's geometry tokens from the one shared token rule. Its own
-            // suite pins both.
-            !(prop === "transition" && rule.selectors.length === 1 && rule.selectors[0] === ".bubble.interim-response") &&
+            // 2026-10-13): its bubble's cap reads the one animated open width
+            // its transition eases, and reads the corner's geometry tokens from
+            // the one shared token rule. Its own suite pins all three.
+            !(
+              (prop === "transition" || prop === "max-width") &&
+              rule.selectors.length === 1 &&
+              rule.selectors[0] === ".bubble.interim-response"
+            ) &&
             // THE BLUE PROMPT'S CODE (owner request, 2026-10-19): the user
             // prompt feeds the two code fills their darker blue; the suite
             // "code in a blue prompt bubble" pins both.
@@ -5807,19 +5811,64 @@ describe("the interim corner's shared tokens", () => {
     expect(margins).toEqual(["var(--usage-corner-margin-right)", "var(--usage-corner-margin-right)"]);
   });
 
-  it("opens the cap, the slider and the open body by the one reveal width", () => {
+  /** PROP's value in the rules whose selector list is SELECTOR alone, wherever one declares it. */
+  function ownValueOf(selector: string, prop: string): string | undefined {
+    const declares = new RegExp(`(?:^|;)\\s*${prop}:\\s*([^;]+);`);
+    return rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.length === 1 && rule.selectors[0] === selector)
+      .map((rule) => declares.exec(rule.declarations)?.[1])
+      .find((value) => value !== undefined);
+  }
+
+  it("opens the one animated width to the reveal width on the reveal, and no width or margin of its own", () => {
     // Arrange / Act
-    const sites = rulesOf(stylesheet)
-      .filter((rule) => rule.selectors.some((sel) => sel.startsWith(".bubble.interim-response:hover")))
-      .map((rule) => /(?:max-width|width|margin-right):\s*([^;]+);/.exec(rule.declarations)?.[1])
-      .filter((value) => value !== undefined);
+    const reveal = rulesOf(stylesheet).filter((rule) =>
+      rule.selectors.some((sel) => /^\.bubble\.interim-response:(?:hover|focus-within)/.test(sel)),
+    );
+    const opening = reveal.filter((rule) => /--usage-open:/.test(rule.declarations)).map((rule) => rule.declarations.trim());
+    const sizing = reveal.filter((rule) => /(?:^|;)\s*(?:max-width|width|margin-right):/.test(rule.declarations));
 
     // Assert
-    expect(sites).toEqual([
-      "calc(var(--bubble-max-width) + var(--usage-reveal-w))",
-      "var(--usage-reveal-w)",
-      "var(--usage-reveal-w)",
-    ]);
+    expect([opening, sizing]).toEqual([["--usage-open: var(--usage-reveal-w);"], []]);
+  });
+
+  it.each([
+    [".bubble.interim-response", "max-width", "calc(var(--bubble-max-width) + var(--usage-open))"],
+    [".bubble.interim-response > .bubble-scroll > .usage-corner > .usage-slider", "width", "var(--usage-open)"],
+    [".bubble.interim-response > .bubble-scroll.expanded > .usage-corner + .bubble-body", "margin-right", "var(--usage-open)"],
+  ])("has %s read the one animated width as its %s", (selector, prop, value) => {
+    // Arrange / Act
+    const declared = ownValueOf(selector, prop);
+
+    // Assert
+    expect(declared).toBe(value);
+  });
+
+  it("animates the open width on the bubble's one transition", () => {
+    // Arrange / Act
+    const transition = ownValueOf(".bubble.interim-response", "transition");
+
+    // Assert
+    expect(transition).toBe("--usage-open var(--usage-grow) ease");
+  });
+
+  it("transitions none of the three open sites on its own, so a click that opens a revealed interim starts at the width already open", () => {
+    // Arrange / Act: every interim rule that transitions a width or a margin.
+    const own = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.some((sel) => sel.startsWith(".bubble.interim-response")))
+      .filter((rule) => /transition:[^;]*\b(?:max-width|width|margin-right)\b/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors);
+
+    // Assert
+    expect(own).toEqual([]);
+  });
+
+  it("registers the open width as an inherited length that rests at 0", () => {
+    // Arrange / Act
+    const registered = /@property --usage-open\s*\{([^}]*)\}/.exec(stylesheet)?.[1]?.replace(/\s+/g, " ").trim();
+
+    // Assert
+    expect(registered).toBe('syntax: "<length>"; inherits: true; initial-value: 0px;');
   });
 
   it("never hand-rolls the reveal width outside its token", () => {

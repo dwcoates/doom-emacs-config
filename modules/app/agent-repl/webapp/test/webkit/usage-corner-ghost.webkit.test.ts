@@ -144,9 +144,13 @@ async function draw(
   );
 }
 
-/** A headless WebKit page holding an empty feed over the real stylesheet, transitions off, with the ghost switch. */
-async function openFeed(): Promise<FeedPage> {
-  const { browser, page } = await openFeedPage({ width: 1100, height: 900, styles: [NO_TRANSITIONS] });
+/**
+ * A headless WebKit page holding an empty feed over the real stylesheet, with
+ * the ghost switch: transitions off, so a reveal is measured at its end state,
+ * unless TRANSITIONS keeps the stylesheet's own.
+ */
+async function openFeed(transitions = false): Promise<FeedPage> {
+  const { browser, page } = await openFeedPage({ width: 1100, height: 900, styles: transitions ? [] : [NO_TRANSITIONS] });
   await page.evaluate(() => {
     const sw = document.createElement("style");
     sw.id = "ghost-switch";
@@ -453,5 +457,101 @@ describe("an interim's growing corner in WebKit", () => {
 
     // Assert: its left edge sits past the bubble's right edge, and it is faded out.
     expect([rest.ago.right + (rest.fromLeft.ago.right - rest.fromLeft.ago.left) <= 0, rest.ago.opacity]).toEqual([true, "0"]);
+  });
+});
+
+/**
+ * AN INTERIM OPENED UNDER ITS REVEAL STAYS OPEN, IN EVERY FRAME (2026-10-20).
+ * A click that opens an interim lands while the pointer reveals its corner, so
+ * the open body's right margin starts to apply mid-reveal. That margin used to
+ * ease in from 0 on its own transition while the corner stood fully open: the
+ * first line lost the reveal width for the transition's length, wrapped, and
+ * unwrapped, so the bubble grew a line and shrank back as if it had closed
+ * again. The cap, the slider and the open margin now read the one animated
+ * `--usage-open` (styles.css "ONE ANIMATED WIDTH"). These run with the
+ * stylesheet's transitions ON, frame by frame.
+ */
+describe("an interim opened under its reveal in WebKit", () => {
+  let browser: Browser;
+  let page: Page;
+
+  beforeAll(async () => {
+    ({ browser, page } = await openFeed(true));
+  });
+
+  afterAll(async () => {
+    await browser.close();
+  });
+
+  /** Let every transition the page is running finish. */
+  async function rest(): Promise<void> {
+    await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+  }
+
+  /** Draw a closed interim of N words, reveal its corner, and let it rest. */
+  async function revealedClosed(n: number): Promise<void> {
+    await draw(page, { text: prose(n), ghost: true, ellipsis: "closed", revealed: true });
+    await rest();
+  }
+
+  /**
+   * Make CHANGE to the drawn interim (open its box, or reveal its corner) and
+   * answer READ (its box's height, or its bubble's width) before the change and
+   * in every frame after it until no animation runs: the transition's own end,
+   * not a frame count, says when the bubble has rested.
+   */
+  async function framesOf(change: "open" | "reveal", read: "height" | "width"): Promise<number[]> {
+    return page.evaluate(
+      async ({ change, read }) => {
+        const measured = document.querySelector<HTMLElement>(read === "height" ? ".bubble-scroll" : ".bubble")!;
+        const size = (): number => measured.getBoundingClientRect()[read];
+        const frames = [size()];
+        if (change === "open") document.querySelector(".bubble-scroll")!.classList.add("expanded");
+        else document.querySelector<HTMLElement>(".usage-corner")!.focus();
+        let rested = false;
+        while (!rested) {
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          frames.push(size());
+          rested = document.getAnimations().length === 0;
+        }
+        return frames;
+      },
+      { change, read },
+    );
+  }
+
+  it.each([4, 10, 16])("never grows a %i-word interim a line it then gives back", async (n) => {
+    // Arrange
+    await revealedClosed(n);
+
+    // Act
+    const [closed, ...open] = await framesOf("open", "height");
+
+    // Assert: one open height from the first frame to the last.
+    expect([open.length > 0, new Set(open).size, closed <= open[0]]).toEqual([true, 1, true]);
+  });
+
+  it("opens an overflowing interim to its whole text and holds it", async () => {
+    // Arrange
+    await revealedClosed(40);
+
+    // Act
+    const [closed, ...open] = await framesOf("open", "height");
+
+    // Assert: taller than the closed line in the first frame, and never smaller after.
+    expect([open[0] > closed, open.every((h) => h === open[0])]).toEqual([true, true]);
+  });
+
+  it("still eases a closed interim open on its reveal", async () => {
+    // Arrange
+    await draw(page, { text: prose(6), ghost: true, ellipsis: "closed" });
+    await rest();
+
+    // Act
+    const widths = await framesOf("reveal", "width");
+
+    // Assert: some frame stands strictly between the rest and the open width.
+    const [resting, open] = [widths[0], widths[widths.length - 1]];
+    expect([open > resting, widths.some((w) => w > resting + 0.5 && w < open - 0.5)]).toEqual([true, true]);
   });
 });

@@ -5543,8 +5543,10 @@ bubble-body.bubble-body { display: block; }
    ON HOVER the bubble opens to the right by exactly the duration and its gap,
    `--usage-ago-w` (the duration's drawn width, which the corner measures and
    sets on the bubble, src/feed/cards/response.ts `measureUsageAgo`) plus
-   `--usage-pair-gap`. Three things grow by that one width, on the one
-   `--usage-grow` transition, so the line beside the corner never moves:
+   `--usage-pair-gap`. That width is `--usage-reveal-w`, and how much of it is
+   open at this instant is `--usage-open`: 0 at rest, `--usage-reveal-w` under
+   the hover, and the ONE value the `--usage-grow` transition animates. Three
+   things grow by it, so the line beside the corner never moves:
      - the slider's width, which widens the corner's float;
      - the bubble's cap, so a line truncated at the cap keeps its width and
        the bubble passes the cap rather than squeezing the line;
@@ -5557,7 +5559,22 @@ bubble-body.bubble-body { display: block; }
 
    THE MARKUP is the corner's own, restyled: the slider is in flow after the
    token's slot, so the token (anchored to the slider's left edge) sits on that
-   slot, and the duration hangs off the slider at its natural width. */
+   slot, and the duration hangs off the slider at its natural width.
+
+   ONE ANIMATED WIDTH, NEVER THREE TRANSITIONS. The three sites read
+   `--usage-open` rather than each transitioning its own property, so they
+   agree in every frame whatever starts or stops matching. A click that opens
+   a hovered interim starts the body's margin rule mid-hover: with a transition
+   of its own, that margin eased in from 0 while the corner stood fully open,
+   the first line lost the reveal width for the transition's length, wrapped,
+   and unwrapped, so the bubble grew a line and shrank back as if it had closed
+   again (2026-10-20). Read from the one value, the margin starts at the width
+   already open. */
+@property --usage-open {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
 /* The corner's left margin reaches back over the body's inset, so the text
    ends `--usage-text-gap` from the token rather than the inset plus the gap. */
 .bubble.interim-response > .bubble-scroll > .usage-corner {
@@ -5586,9 +5603,8 @@ bubble-body.bubble-body { display: block; }
   position: relative;
   top: auto;
   right: auto;
-  width: 0;
+  width: var(--usage-open);
   transform: none;
-  transition: width var(--usage-grow) ease;
 }
 .bubble.interim-response > .bubble-scroll > .usage-corner .usage-ago {
   width: max-content;
@@ -5614,25 +5630,18 @@ bubble-body.bubble-body { display: block; }
   margin-right: var(--usage-corner-margin-right);
 }
 .bubble.interim-response > .bubble-scroll.expanded > .usage-corner + .bubble-body {
-  transition: margin-right var(--usage-grow) ease;
+  margin-right: var(--usage-open);
 }
 .bubble.interim-response {
-  transition: max-width var(--usage-grow) ease;
+  max-width: calc(var(--bubble-max-width) + var(--usage-open));
+  transition: --usage-open var(--usage-grow) ease;
 }
 /* The reveal, under the one trigger every reveal reads: the bubble hovered or
    holding focus (the corner's own triggers are inside it). An arriving corner
    has no duration, so nothing opens for it. */
 .bubble.interim-response:hover:has(> .bubble-scroll > .usage-corner:not([data-arriving])),
 .bubble.interim-response:focus-within:has(> .bubble-scroll > .usage-corner:not([data-arriving])) {
-  max-width: calc(var(--bubble-max-width) + var(--usage-reveal-w));
-}
-.bubble.interim-response:hover > .bubble-scroll > .usage-corner:not([data-arriving]) > .usage-slider,
-.bubble.interim-response:focus-within > .bubble-scroll > .usage-corner:not([data-arriving]) > .usage-slider {
-  width: var(--usage-reveal-w);
-}
-.bubble.interim-response:hover > .bubble-scroll.expanded > .usage-corner:not([data-arriving]) + .bubble-body,
-.bubble.interim-response:focus-within > .bubble-scroll.expanded > .usage-corner:not([data-arriving]) + .bubble-body {
-  margin-right: var(--usage-reveal-w);
+  --usage-open: var(--usage-reveal-w);
 }
 .bubble.interim-response:hover > .bubble-scroll > .usage-corner .usage-ago,
 .bubble.interim-response:focus-within > .bubble-scroll > .usage-corner .usage-ago {
@@ -5643,9 +5652,7 @@ bubble-body.bubble-body { display: block; }
   .bubble.interim-response {
     transition: none;
   }
-  .bubble.interim-response > .bubble-scroll > .usage-corner > .usage-slider,
-  .bubble.interim-response > .bubble-scroll > .usage-corner .usage-ago,
-  .bubble.interim-response > .bubble-scroll.expanded > .usage-corner + .bubble-body {
+  .bubble.interim-response > .bubble-scroll > .usage-corner .usage-ago {
     transition: none;
   }
 }
