@@ -226,30 +226,20 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 	fields["lease"] = string(r.lease.ID)
 	bound := o.terminalDrainBound()
 	if abandoned {
-		select {
-		case <-r.finished:
-		case <-time.After(bound):
-			err := fmt.Errorf("merge: the abandoned merge of %s did not end within %s", ws, bound)
-			log.Error(op, "an abandoned merge did not end before the suspension's bound; the suspension is refused", withField(fields, "error", err.Error()))
-			return err
-		}
-		o.forgetMoved(ws)
-		log.Info(op, "the merge was abandoned before the suspension took it; nothing is left to suspend", withField(fields, "cause", string(r.abandonedFor())))
-		return nil
+		return o.awaitOwnEnd(log, op, ws, withField(fields, "cause", string(r.abandonedFor())), r.finished, ownEnd{
+			refusal: "merge: the abandoned merge of %s did not end within %s",
+			late:    "an abandoned merge did not end before the suspension's bound; the suspension is refused",
+			ended:   "the merge was abandoned before the suspension took it; nothing is left to suspend",
+		})
 	}
 	if terminal {
 		// A RUN IN ITS TERMINAL FINISHES HERE: its teardown is short and
 		// local, and what it releases is the merge's end, not a step to move.
-		select {
-		case <-mark.done:
-		case <-time.After(bound):
-			err := fmt.Errorf("merge: the merge of %s did not finish its terminal within %s", ws, bound)
-			log.Error(op, "a merge in its terminal did not finish before the transfer's bound; the transfer is refused", withField(fields, "error", err.Error()))
-			return err
-		}
-		o.forgetMoved(ws)
-		log.Info(op, "a merge finished its terminal before its workspace moved", fields)
-		return nil
+		return o.awaitOwnEnd(log, op, ws, fields, mark.done, ownEnd{
+			refusal: "merge: the merge of %s did not finish its terminal within %s",
+			late:    "a merge in its terminal did not finish before the transfer's bound; the transfer is refused",
+			ended:   "a merge finished its terminal before its workspace moved",
+		})
 	}
 	if atBoundary {
 		// NO TIMER: the boundary comes when the step in flight ends, however
@@ -296,6 +286,29 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 		return ctx.Err()
 	}
 	o.forgetMoved(ws)
+	return nil
+}
+
+// ownEnd is what awaitOwnEnd says of one way a run ends by itself: the
+// refusal's error (formatted with the workspace and the bound), the record of
+// a run that outlived the bound, and the record of one that ended.
+type ownEnd struct{ refusal, late, ended string }
+
+// awaitOwnEnd waits, within the terminal drain's bound, for a run a
+// suspension leaves to end by itself -- one in its terminal, or abandoned --
+// and forgets what this daemon remembers of its merges once it has. A run
+// still going at the bound refuses the suspension, recorded at ERROR.
+func (o *orchestrator) awaitOwnEnd(log dlog.Logger, op string, ws ids.WorkspaceID, fields dlog.Context, done <-chan struct{}, says ownEnd) error {
+	bound := o.terminalDrainBound()
+	select {
+	case <-done:
+	case <-time.After(bound):
+		err := fmt.Errorf(says.refusal, ws, bound)
+		log.Error(op, says.late, withField(fields, "error", err.Error()))
+		return err
+	}
+	o.forgetMoved(ws)
+	log.Info(op, says.ended, fields)
 	return nil
 }
 

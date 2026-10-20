@@ -9,6 +9,8 @@ import (
 
 	"google.golang.org/protobuf/encoding/prototext"
 
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -482,5 +484,86 @@ func TestATakeBackWhoseHeldAbandonmentFailsAnswersTheFailure(t *testing.T) {
 	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.adopt", text: "an abandonment that reached the merge while a suspension held it",
 		context: map[string]string{"workspace": string(theWorkspace), "cause": string(CauseUserDrop)}}) {
 		t.Fatalf("no record of the abandonment applied: %v", h.logs.Records())
+	}
+}
+
+func TestAwaitOwnEnd(t *testing.T) {
+	says := ownEnd{refusal: "merge: %s outlived %s", late: "the run outlived the bound", ended: "the run ended"}
+	tests := []struct {
+		name    string
+		ended   bool
+		wantErr bool
+		level   string
+		message string
+	}{
+		{name: "a run that ends is forgotten", ended: true, level: "info", message: says.ended},
+		{name: "a run that outlives the bound refuses the suspension", wantErr: true, level: "error", message: says.late},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.o.drainBound = time.Millisecond
+			h.o.mu.Lock()
+			h.o.ledgerOf[theWorkspace] = "lease-own-end"
+			h.o.mu.Unlock()
+			done := make(chan struct{})
+			if tc.ended {
+				close(done)
+			}
+
+			// Act.
+			err := h.o.awaitOwnEnd(h.logs.Global(), "daemon.merge.pause", theWorkspace, dlog.Context{"workspace": string(theWorkspace)}, done, says)
+
+			// Assert.
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("awaitOwnEnd = %v, want an error %v", err, tc.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), string(theWorkspace)+" outlived "+time.Millisecond.String()) {
+				t.Fatalf("the refusal %q does not name the workspace and the bound", err)
+			}
+			h.o.mu.Lock()
+			_, remembered := h.o.ledgerOf[theWorkspace]
+			h.o.mu.Unlock()
+			if remembered == tc.ended {
+				t.Fatalf("the merge's ledger identity remembered = %v, want it forgotten only once the run ended", remembered)
+			}
+			want := map[string]string{"workspace": string(theWorkspace)}
+			if err != nil {
+				want["error"] = err.Error()
+			}
+			if !loggedLike(h, logLike{level: tc.level, op: "daemon.merge.pause", text: tc.message, context: want}) {
+				t.Fatalf("no %s record %q: %v", tc.level, tc.message, h.logs.Records())
+			}
+		})
+	}
+}
+
+// TestASuspensionAwaitsEveryOwnEndThroughAwaitOwnEnd holds suspendFor's runs
+// that end by themselves -- in their terminal, or abandoned -- to the one
+// bounded wait, so neither drifts into a hand-rolled copy.
+func TestASuspensionAwaitsEveryOwnEndThroughAwaitOwnEnd(t *testing.T) {
+	// Arrange.
+	var body string
+	for _, f := range sourcescan.Production(t) {
+		src := string(f.Source)
+		start := strings.Index(src, "\nfunc (o *orchestrator) suspendFor(")
+		if start < 0 {
+			continue
+		}
+		end := strings.Index(src[start+1:], "\nfunc ")
+		body = src[start : start+1+end]
+	}
+	if body == "" {
+		t.Fatal("suspendFor was not found")
+	}
+
+	// Act.
+	calls := strings.Count(body, "o.awaitOwnEnd(")
+	handRolled := strings.Count(body, "case <-mark.done") + strings.Count(body, "o.forgetMoved(ws)\n\t\tlog.Info(op, \"the merge was abandoned")
+
+	// Assert.
+	if calls != 2 || handRolled != 0 {
+		t.Fatalf("suspendFor waits through awaitOwnEnd %d times with %d hand-rolled waits, want 2 and none", calls, handRolled)
 	}
 }
