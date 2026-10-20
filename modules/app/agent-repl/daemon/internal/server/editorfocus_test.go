@@ -132,11 +132,7 @@ func TestNotificationClickedReachesTheHostStream(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, err := h.Client.WatchHostWorkspace(ctx,
-		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
-	if err != nil {
-		t.Fatalf("open the host stream: %v", err)
-	}
+	stream := dialHostStream(t, h, ctx)
 
 	// Act
 	h.Server.NotificationClicked(testWorkspaceID)

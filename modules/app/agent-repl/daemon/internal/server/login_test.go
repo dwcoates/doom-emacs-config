@@ -183,11 +183,7 @@ func TestOpenInEditorRelaysOntoTheHostStream(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, err := h.Client.WatchHostWorkspace(ctx,
-		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
-	if err != nil {
-		t.Fatalf("open the host stream: %v", err)
-	}
+	stream := dialHostStream(t, h, ctx)
 
 	// Act: the verbs relay through the server's own relay face.
 	line := uint32(42)
@@ -209,11 +205,7 @@ func TestOpenInEditorRelaysTheSameClickTwice(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, err := h.Client.WatchHostWorkspace(ctx,
-		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
-	if err != nil {
-		t.Fatalf("open the host stream: %v", err)
-	}
+	stream := dialHostStream(t, h, ctx)
 
 	// Act.
 	h.Server.Relay().OpenInEditor(testWorkspaceID, "lisp/core.el", nil)
@@ -237,11 +229,7 @@ func TestOpenInEditorIsNotReplayedToALateHostStream(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	h.Server.Relay().OpenInEditor(testWorkspaceID, "lisp/old.el", nil)
-	stream, err := h.Client.WatchHostWorkspace(ctx,
-		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
-	if err != nil {
-		t.Fatalf("open the host stream: %v", err)
-	}
+	stream := dialHostStream(t, h, ctx)
 
 	// Act.
 	h.Server.Relay().OpenInEditor(testWorkspaceID, "lisp/new.el", nil)
@@ -288,11 +276,7 @@ func TestOpenCommitLogRelaysOntoTheHostStream(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, err := h.Client.WatchHostWorkspace(ctx,
-		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
-	if err != nil {
-		t.Fatalf("open the host stream: %v", err)
-	}
+	stream := dialHostStream(t, h, ctx)
 
 	// Act.
 	h.Server.Relay().OpenCommitLog(testWorkspaceID, &agentreplv1.OpenInEditorCommitLog{RepositoryDir: "/repo", Branch: "master", Commit: "abc123"})
