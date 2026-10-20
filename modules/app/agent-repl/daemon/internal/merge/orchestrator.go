@@ -240,6 +240,9 @@ type orchestrator struct {
 	// suspended run's git gate, immediately before it waits for the commands
 	// in flight: a test releases a held command from inside that wait.
 	onGitStopWait func()
+	// onRaceClaimed, when set, is called with the head once the merge behind
+	// it claimed the race to land, before the race is recorded (race.go).
+	onRaceClaimed func(head ids.WorkspaceID)
 	// onBoundaryAsk, when set, is called once a restart has asked a running
 	// merge to stop at its next step boundary, before the restart waits for
 	// it. Nil in production; tests release the step in flight from it.

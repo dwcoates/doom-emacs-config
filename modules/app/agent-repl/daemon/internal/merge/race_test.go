@@ -10,6 +10,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/wsm"
 )
@@ -274,5 +275,92 @@ func TestAHeadOvertakenBeforeItBeginsItsRebaseLandsOnceResumed(t *testing.T) {
 	}
 	if tree := c.git.tree("master"); tree != "a1+b1+base+m1" {
 		t.Fatalf("master holds %s, want a1+b1+base+m1", tree)
+	}
+}
+
+func TestAHeadThatLeavesBetweenTheRacesClaimAndItsRecordLeavesNoRace(t *testing.T) {
+	// Arrange: the head waits to ask for its test turn, so the merge behind
+	// it passes first and claims the race; between that claim and its record,
+	// the head is abandoned and its queue entry goes.
+	c := newChain(t)
+	releaseHeadTurn := c.parkTurn(theWorkspace)
+	defer releaseHeadTurn()
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	evicted := make(chan error, 1)
+	c.h.o.onRaceClaimed = func(head ids.WorkspaceID) {
+		evicted <- c.h.o.Evict(context.Background(), head)
+	}
+
+	// Act: the claim's record finds the head gone; the merge behind it then
+	// heads the queue and lands.
+	done := admitAsync(c.h, context.Background())
+	if err := <-done; err != nil {
+		t.Fatalf("the abandoned head's admission ended on: %v", err)
+	}
+	if err := <-evicted; err != nil {
+		t.Fatalf("evicting the head: %v", err)
+	}
+	c.drain(t)
+
+	// Assert.
+	for _, rec := range c.h.logs.Records() {
+		if rec.Level == "error" {
+			t.Fatalf("a head that left before the race's record left an ERROR: %v", rec)
+		}
+	}
+	rec, found := dlog.FindRecord(c.h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.race",
+		Message: "the head left the queue before the race to land was recorded; there is no race, and the merge behind it heads the queue"})
+	if !found || rec.Context["head"] != string(theWorkspace) || rec.Context["workspace"] != "ws-b" {
+		t.Fatalf("no-race record = %v (found %v), want the merge behind and the head that left", rec.Context, found)
+	}
+	if c.recorded("info", "daemon.merge.race", "the merge that lost the race to land is suspended at the step it recorded") {
+		t.Fatal("a head that had left the queue was suspended as the race's loser")
+	}
+	if got := c.git.landedOwn(); len(got) != 1 || !slices.Equal(got[0], []string{"b1"}) {
+		t.Fatalf("landings brought %v, want [b1] alone", got)
+	}
+	if tree := c.git.tree("master"); tree != "b1+base" {
+		t.Fatalf("master holds %s, want b1+base", tree)
+	}
+}
+
+func TestAHeadAlreadyInItsTerminalIsNotOvertaken(t *testing.T) {
+	// Arrange: the head has entered its terminal (it is failing or being
+	// abandoned) when the merge behind it claims the race.
+	c := newChain(t)
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	head := &run{o: c.h.o, ws: theWorkspace, repo: c.h.repoKey()}
+	behind := &run{o: c.h.o, ws: "ws-b", repo: c.h.repoKey(), git: newGatedGit(c.git, c.h.o.deps.Now)}
+	c.h.o.mu.Lock()
+	c.h.o.running[head.repo] = head
+	c.h.o.mu.Unlock()
+	head.enterTerminal(terminalOwedFailed)
+	t.Cleanup(func() {
+		c.h.o.mu.Lock()
+		delete(c.h.o.running, head.repo)
+		delete(c.h.o.terminals, head.ws)
+		c.h.o.mu.Unlock()
+	})
+	claimed := 0
+	c.h.o.onRaceClaimed = func(ids.WorkspaceID) { claimed++ }
+	tip := c.git.ref("master")
+
+	// Act
+	c.h.o.claimRace(context.Background(), behind, tip)
+
+	// Assert.
+	if claimed != 0 {
+		t.Fatalf("the race was claimed %d times against a head in its terminal, want none", claimed)
+	}
+	c.h.o.mu.Lock()
+	_, contended := c.h.o.overtakings[head.repo]
+	c.h.o.mu.Unlock()
+	if contended {
+		t.Fatal("a head in its terminal was left marked as being overtaken")
+	}
+	if !c.recorded("debug", "daemon.merge.race", "the head is already ending; the merge behind it heads the queue once it has left") {
+		t.Fatal("the merge behind did not record why it claimed no race")
 	}
 }
