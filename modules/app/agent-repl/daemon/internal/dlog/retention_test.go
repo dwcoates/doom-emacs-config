@@ -300,3 +300,23 @@ func TestRetainDirectoryRefusesANilPredicate(t *testing.T) {
 	// Act.
 	f.s.RetainDirectory(t.TempDir(), nil)
 }
+
+func TestEveryMintedTargetIsADaemonLogFamily(t *testing.T) {
+	for _, name := range SinkNames {
+		t.Run(name, func(t *testing.T) {
+			// Arrange.
+			logsDir := t.TempDir()
+
+			// Act.
+			target, err := createTarget(logsDir, "0054899b8c24410e", name)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("createTarget: %v", err)
+			}
+			if !isDaemonLogFamily(filepath.Base(target)) {
+				t.Fatalf("minted target %q is not a daemon log family, so the retention pass would never prune it", filepath.Base(target))
+			}
+		})
+	}
+}
