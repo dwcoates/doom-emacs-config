@@ -575,18 +575,19 @@ unreachable from a live process.
     from the leak check until the record names the new device.
   - A LEAK OR A WEDGED DISK MANAGER STOPS THE ATTACH (owner ruling,
     2026-10-12; one stuck run once led to 13 leaked 8 GiB disks).
-    - First, `diskutil list` and `hdiutil info`, each within 1s: just over
-      2x the slowest healthy read of the disk manager the runs record at
-      their own priority (`diskutil info` in the acquire, 471ms). The bounds
-      cover the run's own wait for a CPU at nice 19, not only the disk
-      manager's answer: bounds of 175ms and 120ms refused seven runs at load
-      6.6 to 281 whose disk manager was idle.
-    - A PROBE THAT MISSES ITS BOUND IS WATCHED TO ITS OWN ANSWER, for at most
-      `ramdisk.CommandBound`: an answer is logged at INFO ("answered ...
-      late, after ..., so it was slow, not wedged"), a failure at ERROR
-      ("never answered"), and one still out when the run ends at INFO. So a
-      refusal says from the log alone whether the disk manager was slow or
-      wedged, and the bounds can be set again from uncut times.
+    - First, `diskutil list` and `hdiutil info`, each with a 1s bound: just
+      over 2x the slowest healthy read of the disk manager the runs record at
+      their own priority (`diskutil info` in the acquire, 471ms).
+    - A PROBE THAT MISSES ITS BOUND IS WAITED FOR TO ITS OWN ANSWER, for at
+      most `ramdisk.CommandBound`, and only its failure refuses the attach. A
+      run at nice 19 on a loaded host waits for a CPU before it even asks, so
+      no short bound tells that from a wedged disk manager: healthy answers
+      reached 985ms, and every refusal of 100 runs on 2026-10-20 (load around
+      15) was a probe that answered 1.09s to 3.54s late.
+    - At the bound the host's state is read and logged at INFO while the
+      probe still runs; the outcome is logged at INFO ("answered ... late,
+      after ..., so it was slow, not wedged", or "never answered"). A refusal
+      is the run's one ERROR.
     - A leak is a `ram://` disk the runner made (named by a record, or
       mounted at an `artr-<pid>` mount point) that no live run's record names.
     - Either finding puts the run on `/tmp` with a `RAM DISK REFUSED` ERROR
