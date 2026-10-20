@@ -659,8 +659,8 @@ export function drawFooterTokensCellVerdict(u: FooterTokensCellVerdict, path: st
  * the whole decision.
  */
 export function drawFooterLiveWorkChips(u: FooterLiveWorkChips, deps: StripDeps): HTMLElement | null {
-  // THE CHIPS ARE DRAWN IN `CHIP_PANELS` ORDER, the chip panels' one
-  // precedence.
+  // THE CHIPS ARE DRAWN IN `CHIP_PANELS` ORDER, the one precedence the
+  // expanded section also falls back along (`shownPanel`).
   const chips = CHIP_PANELS.flatMap((panel) => {
     const el = LIVE_WORK_CHIPS[panel](u, deps);
     return el === null ? [] : [el];

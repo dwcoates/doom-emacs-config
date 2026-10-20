@@ -112,7 +112,8 @@ export class Channel<T> {
 
 /** What the scripted daemon answers with. */
 export interface FooterScript {
-  interrupt?: (req: InterruptRequest) => InterruptResponse;
+  /** May answer late, so a case can land a push before the answer does. */
+  interrupt?: (req: InterruptRequest) => InterruptResponse | Promise<InterruptResponse>;
 }
 
 /** Every request the scripted daemon received, in order. */
@@ -139,9 +140,9 @@ export function harness(script: FooterScript = {}): Harness {
         calls.watchFooter.push(req);
         yield* tail.iterate();
       },
-      interrupt: (req) => {
+      interrupt: async (req) => {
         calls.interrupt.push(req);
-        return script.interrupt?.(req) ?? interruptSuccess("interruptedTurn");
+        return (await script.interrupt?.(req)) ?? interruptSuccess("interruptedTurn");
       },
     });
   });
