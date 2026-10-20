@@ -157,7 +157,9 @@ whose calls are the observation."
            (agent-repl-test-roster--following-at-switch :unset)
            ;; A STANDING ROSTER STREAM, the ordinary state: a view is only
            ;; followed while the stream that served it stands.
-           (agent-repl-roster--stream 'agent-repl-test-roster--standing-stream))
+           (agent-repl-roster--stream 'agent-repl-test-roster--standing-stream)
+           ;; A view seeded directly is the standing stream's, as one pushed is.
+           (agent-repl-roster--view-stream 'agent-repl-test-roster--standing-stream))
        (cl-letf (((symbol-function 'agent-repl--ws-create)
                   (lambda (ws &optional dir)
                     (push ws agent-repl-test-roster--created)
@@ -204,7 +206,7 @@ whose calls are the observation."
     (cl-letf (((symbol-function 'agent-repl--next-log-request-id)
                (lambda () "roster-1"))
               ((symbol-function 'agent-repl-roster-apply)
-               (lambda (roster)
+               (lambda (roster &optional _stream)
                  (setq seen (list roster
                                   agent-repl--log-context-workspace
                                   agent-repl--log-context-request-id)))))
@@ -2526,7 +2528,7 @@ LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
   "A push arm this consumer does not hold is recorded at ERROR, never applied."
   ;; Arrange
   (let ((logs nil) (applied nil))
-    (cl-letf (((symbol-function 'agent-repl-roster-apply) (lambda (_) (setq applied t))))
+    (cl-letf (((symbol-function 'agent-repl-roster-apply) (lambda (&rest _) (setq applied t))))
       (agent-repl-test-roster--capturing 'agent-repl--error
         ;; Act
         (agent-repl-roster-on-push '(:arm :teleport :value nil))))
@@ -3568,6 +3570,145 @@ workspace is the daemon's newer word, and is followed."
     (agent-repl-roster-on-close '(:cancelled))
     ;; Assert
     (should (null agent-repl-host--confirming))))
+
+;;;; ---- Only the standing stream's view is the daemon's word ----
+
+(ert-deftest agent-repl-test-roster-held-revision-is-nil-before-any-view ()
+  "No view held, no revision to judge by."
+  (agent-repl-test-roster--with-editor
+    (should (null (agent-repl-roster--held-revision)))))
+
+(ert-deftest agent-repl-test-roster-held-revision-is-nil-with-no-stream-standing ()
+  "A view whose stream ended carries no revision of the live daemon."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (setq agent-repl-roster-view '(:revision 9)
+          agent-repl-roster--stream nil)
+    ;; Act + Assert
+    (should (null (agent-repl-roster--held-revision)))))
+
+(ert-deftest agent-repl-test-roster-held-revision-is-nil-for-another-streams-view ()
+  "A view a replaced stream served is another daemon's count."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (setq agent-repl-roster-view '(:revision 9)
+          agent-repl-roster--view-stream 'old-stream)
+    ;; Act + Assert
+    (should (null (agent-repl-roster--held-revision)))))
+
+(ert-deftest agent-repl-test-roster-held-revision-is-the-standing-streams-view-revision ()
+  "The standing stream's view answers its revision."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (setq agent-repl-roster-view '(:revision 9))
+    ;; Act + Assert
+    (should (equal (agent-repl-roster--held-revision) 9))))
+
+(ert-deftest agent-repl-test-roster-held-revision-is-zero-for-a-view-with-no-revision ()
+  "proto3 omits a zero revision, so a served view without one is at 0."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (setq agent-repl-roster-view '(:repository nil))
+    ;; Act + Assert
+    (should (equal (agent-repl-roster--held-revision) 0))))
+
+(ert-deftest agent-repl-test-roster-apply-records-the-stream-that-served-the-view ()
+  "A push applied from a named stream marks the view as that stream's."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "a") 'old-stream)
+    ;; Assert
+    (should (eq agent-repl-roster--view-stream 'old-stream))))
+
+(ert-deftest agent-repl-test-roster-apply-without-a-stream-records-the-standing-one ()
+  "A push applied with no stream named is the standing stream's."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (setq agent-repl-roster--view-stream nil)
+    ;; Act
+    (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "a"))
+    ;; Assert
+    (should (eq agent-repl-roster--view-stream 'agent-repl-test-roster--standing-stream))))
+
+(ert-deftest agent-repl-test-roster-on-push-applies-the-roster-as-its-streams ()
+  "The push handler hands its stream to the apply."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-on-push (list :arm :roster :value (agent-repl-test-roster--two-tabs "a"))
+                               'old-stream)
+    ;; Assert
+    (should (eq agent-repl-roster--view-stream 'old-stream))))
+
+(ert-deftest agent-repl-test-roster-a-replaced-streams-view-does-not-release-an-answered-selection ()
+  "2026-10-20: a rollout's daemon pushed a field Emacs refused, so the old
+daemon's view stood, at a revision past the new daemon's.  It released the
+selection the new daemon answered at revision 3."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "two"
+          agent-repl-host--confirming (cons "two" 3)
+          agent-repl-roster-view (agent-repl-test-roster--at-revision
+                                  (agent-repl-test-roster--two-tabs "a") 50)
+          agent-repl-roster--view-stream 'old-stream)
+    ;; Act
+    (agent-repl-roster-apply-current)
+    ;; Assert
+    (should (equal agent-repl-host--confirming '("two" . 3)))))
+
+(ert-deftest agent-repl-test-roster-a-replaced-streams-current-is-not-followed ()
+  "The old daemon's `current' does not move the frame back to the
+workspace the user left."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "two"
+          agent-repl-roster-view (agent-repl-test-roster--at-revision
+                                  (agent-repl-test-roster--two-tabs "a") 50)
+          agent-repl-roster--view-stream 'old-stream)
+    ;; Act
+    (agent-repl-roster-apply-current)
+    ;; Assert
+    (should (null agent-repl-test-roster--switched))))
+
+(ert-deftest agent-repl-test-roster-a-replaced-streams-current-is-recorded-at-info ()
+  "The ignored `current' is said, so the frame staying put is visible."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "two"
+          agent-repl-roster-view (agent-repl-test-roster--two-tabs "a")
+          agent-repl-roster--view-stream 'old-stream)
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl-roster-apply-current))
+      ;; Assert
+      (should (cl-find-if (lambda (line) (string-prefix-p "elisp.roster.current: unserved id=a" line))
+                          logged)))))
+
+(ert-deftest agent-repl-test-roster-the-standing-streams-first-push-is-followed ()
+  "The new stream's first accepted push replaces the kept view and is
+judged as any roster is."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (setq agent-repl-test-roster--current-name "one"
+          agent-repl-roster-view (agent-repl-test-roster--two-tabs "a")
+          agent-repl-roster--view-stream 'old-stream)
+    ;; Act
+    (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
+    ;; Assert
+    (should (equal agent-repl-test-roster--switched '("two")))))
+
+(ert-deftest agent-repl-test-roster-note-row-indexes-a-row-over-a-replaced-streams-view ()
+  "An answer row is not kept out by another daemon's higher revision."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (let ((row (agent-repl-test-roster--row "a" "one" :thinking)))
+      (setq agent-repl-roster-view '(:revision 50)
+            agent-repl-roster--view-stream 'old-stream)
+      ;; Act
+      (agent-repl-roster-note-row row 3)
+      ;; Assert
+      (should (eq (gethash "a" agent-repl-roster--rows-by-id) row)))))
 
 ;;;; ---- The open workspaces' names ----
 
