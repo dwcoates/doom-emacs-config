@@ -19,6 +19,10 @@ import {
   KillWorkspaceResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
 import {
+  SetWorkspaceHiddenErrorSchema,
+  SetWorkspaceHiddenResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+import {
   MergeWorkspaceErrorSchema,
   MergeWorkspaceResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_merge_workspace_pb";
@@ -44,6 +48,8 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   buildCloseWorkspaceRequest,
   buildKillWorkspaceRequest,
+  killWorkspaceRefusal,
+  setWorkspaceHiddenRefusal,
   buildMergeWorkspaceRequest,
   buildNukeWorkspaceRequest,
   buildOpenWorkspaceRequest,
@@ -266,6 +272,8 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   },
   gitFailed: { detail: "worktree is dirty" },
   briefMissing: { detail: "the workspace-merge-revert brief is unreadable" },
+  hasOpenChildren: { parent: { id: "p", dir: "/w/parent" }, children: [{ id: "c", dir: "/w/child" }] },
+  parentNotOpen: { parent: { id: "p", dir: "/w/parent" }, state: { case: "hidden", value: {} } },
 };
 
 /** One verb, enough to issue it and to enumerate what it can refuse with. */
@@ -312,6 +320,21 @@ const VERBS: readonly VerbUnderTest[] = [
         rpc: "KillWorkspace",
         call: (client) => client.killWorkspace(buildKillWorkspaceRequest(TARGET_WS)),
         schema: KillWorkspaceResponseSchema,
+        refusalText: (cause) => killWorkspaceRefusal(cause as never),
+      }),
+  },
+  {
+    rpc: "SetWorkspaceHidden",
+    method: "setWorkspaceHidden",
+    responseSchema: SetWorkspaceHiddenResponseSchema,
+    errorSchema: SetWorkspaceHiddenErrorSchema,
+    call: (t, control) =>
+      runVerb(control, {
+        sc: t.sc,
+        rpc: "SetWorkspaceHidden",
+        call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(TARGET_WS, true)),
+        schema: SetWorkspaceHiddenResponseSchema,
+        refusalText: (cause) => setWorkspaceHiddenRefusal(cause as never),
       }),
   },
   {
@@ -405,6 +428,13 @@ async function refuseWith(verb: VerbUnderTest, arm: string): Promise<Element | n
   return host.querySelector(".refusal[data-arm]");
 }
 
+/** The verb under test whose rpc is RPC; the table's order is not relied on. */
+function verbNamed(rpc: string): VerbUnderTest {
+  const verb = VERBS.find((candidate) => candidate.rpc === rpc);
+  if (verb === undefined) throw new Error(`no verb under test is ${rpc}`);
+  return verb;
+}
+
 describe.each(VERBS.map((verb) => [verb.rpc, verb] as const))(
   "%s's typed refusal",
   (_rpc, verb) => {
@@ -450,29 +480,29 @@ describe("an expected answer", () => {
 
 describe("the cross-cutting causes, worded once", () => {
   it("names the registry's directory on a mismatch", async () => {
-    const refusal = await refuseWith(VERBS[0], "workspaceRefMismatch");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "workspaceRefMismatch");
     expect(refusal?.textContent).toContain("/w/registry");
   });
 
   it("names the successor daemon on a transfer", async () => {
-    const refusal = await refuseWith(VERBS[0], "transferringAway");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "transferringAway");
     expect(refusal?.textContent).toContain("127.0.0.1:7777");
   });
 });
 
 describe("the per-rpc causes, worded at their own site", () => {
   it("points a blocked close at the footer, which carries the reasons", async () => {
-    const refusal = await refuseWith(VERBS[1], "blocked");
+    const refusal = await refuseWith(verbNamed("CloseWorkspace"), "blocked");
     expect(refusal?.textContent).toBe("close refused: work in flight (see the footer)");
   });
 
   it("names the session a missing transcript belongs to", async () => {
-    const refusal = await refuseWith(VERBS[0], "transcriptMissing");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "transcriptMissing");
     expect(refusal?.textContent).toContain("vs-1");
   });
 
   it("lists the paths a missing transcript was searched for in", async () => {
-    const refusal = await refuseWith(VERBS[0], "transcriptMissing");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "transcriptMissing");
     expect([...(refusal?.querySelectorAll("[data-searched-paths] li") ?? [])].map((li) => li.textContent)).toEqual([
       "/a",
       "/b",
@@ -480,22 +510,22 @@ describe("the per-rpc causes, worded at their own site", () => {
   });
 
   it("counts no paths in the sentence, because a count is not actionable", async () => {
-    const refusal = await refuseWith(VERBS[0], "transcriptMissing");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "transcriptMissing");
     expect(refusal?.textContent).not.toContain("2 searched");
   });
 
   it("carries the spawn failure's own detail", async () => {
-    const refusal = await refuseWith(VERBS[0], "spawnFailed");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "spawnFailed");
     expect(refusal?.textContent).toContain("exec format error");
   });
 
   it("names the vendor as what failed to start the session", async () => {
-    const refusal = await refuseWith(VERBS[0], "vendorStartFailed");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "vendorStartFailed");
     expect(refusal?.textContent).toContain("the vendor failed to start the session");
   });
 
   it("appends the shim's own detail to a vendor start failure", async () => {
-    const refusal = await refuseWith(VERBS[0], "vendorStartFailed");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "vendorStartFailed");
     expect(refusal?.textContent).toContain("(the sdk threw before its first message)");
   });
 
@@ -510,26 +540,26 @@ describe("the per-rpc causes, worded at their own site", () => {
   });
 
   it("draws the daemon's own sentence for an unrestorable workspace", async () => {
-    const refusal = await refuseWith(VERBS[0], "worktreeUnrestorable");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "worktreeUnrestorable");
     expect(refusal?.textContent).toContain(
       "the workspace's directory /w/gone is gone and its branch feature/gone no longer exists in /w; there is nothing to restore it from",
     );
   });
 
   it("says a revert asked of a workspace with no landed merge", async () => {
-    const refusal = await refuseWith(VERBS[0], "notMerged");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "notMerged");
     expect(refusal?.textContent).toContain("this workspace has no landed merge to revert");
   });
 
   it("draws the daemon's own sentence for a revert brief that would not compose", async () => {
-    const refusal = await refuseWith(VERBS[0], "briefMissing");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "briefMissing");
     expect(refusal?.textContent).toContain(
       "the merge could not be reverted: the workspace-merge-revert brief is unreadable",
     );
   });
 
   it("says the shim's lock helper failed and how, naming the binary", async () => {
-    const refusal = await refuseWith(VERBS[0], "lockHolderUnavailable");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "lockHolderUnavailable");
     expect(refusal?.textContent).toContain(
       "the shim's lock helper /b/shim-lock exited with code 1 before taking the lock (EACCES)",
     );
@@ -567,17 +597,17 @@ describe("the per-rpc causes, worded at their own site", () => {
   });
 
   it("never words an unavailable lock helper as another owner", async () => {
-    const refusal = await refuseWith(VERBS[0], "lockHolderUnavailable");
+    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "lockHolderUnavailable");
     expect(refusal?.textContent).toContain("no other process owns this conversation");
   });
 
   it("carries git's own detail when a nuke fails", async () => {
-    const refusal = await refuseWith(VERBS[3], "gitFailed");
+    const refusal = await refuseWith(verbNamed("NukeWorkspace"), "gitFailed");
     expect(refusal?.textContent).toContain("worktree is dirty");
   });
 
   it("says a merge is already queued", async () => {
-    const refusal = await refuseWith(VERBS[4], "alreadyQueued");
+    const refusal = await refuseWith(verbNamed("MergeWorkspace"), "alreadyQueued");
     expect(refusal?.textContent).toContain("already in the merge queue");
   });
 

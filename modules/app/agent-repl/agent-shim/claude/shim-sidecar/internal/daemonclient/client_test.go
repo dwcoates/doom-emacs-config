@@ -429,9 +429,9 @@ func TestForwardTakesTransportPathWhenRosterStreamErrors(t *testing.T) {
 func rosterResponse(ref *workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRosterResponse {
 	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
-			Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{{
+			OpenRows: &frontendv1.RosterOpenRows{Rows: []*frontendv1.RosterOpenRow{{Row: &frontendv1.RosterRow{
 				Workspace: &frontendv1.RosterRowWorkspace{Workspace: copyWorkspaceRef(ref)},
-			}}},
+			}}}},
 		}}},
 	}}}
 }
@@ -943,15 +943,15 @@ func startRosterDaemon(t *testing.T, stateDir string) *rosterDaemon {
 // rosterResponseFor replays a whole snapshot, which is what the roster topic
 // hands a fresh subscriber: one row per registered workspace, or none at all.
 func rosterResponseFor(refs []*workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRosterResponse {
-	rows := make([]*frontendv1.RosterRow, 0, len(refs))
+	rows := make([]*frontendv1.RosterOpenRow, 0, len(refs))
 	for _, ref := range refs {
-		rows = append(rows, &frontendv1.RosterRow{
+		rows = append(rows, &frontendv1.RosterOpenRow{Row: &frontendv1.RosterRow{
 			Workspace: &frontendv1.RosterRowWorkspace{Workspace: copyWorkspaceRef(ref)},
-		})
+		}})
 	}
 	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
-			Rows: &frontendv1.RosterRows{Rows: rows},
+			OpenRows: &frontendv1.RosterOpenRows{Rows: rows},
 		}}},
 	}}}
 }

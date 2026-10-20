@@ -56,10 +56,13 @@ import "agentrepl/v1/endpoint_set_effort.proto";
 import "agentrepl/v1/endpoint_set_permission_mode.proto";
 import "agentrepl/v1/endpoint_fold_repository.proto";
 import "agentrepl/v1/endpoint_update_sidebar_view.proto";
+import "agentrepl/v1/endpoint_arrange_sidebar.proto";
+import "agentrepl/v1/endpoint_get_sidebar_arrangement.proto";
 import "agentrepl/v1/endpoint_set_workspace_hidden.proto";
 import "agentrepl/v1/endpoint_send_hidden_keepalives.proto";
 import "agentrepl/v1/endpoint_set_workspace_parent.proto";
 import "agentrepl/v1/endpoint_set_workspace_priority.proto";
+import "agentrepl/v1/endpoint_move_workspace.proto";
 import "agentrepl/v1/endpoint_swap_workspaces.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
@@ -232,11 +235,22 @@ service AgentRepl {
   // Exchange two workspaces' places in the registry order. See
   // endpoint_swap_workspaces.proto.
   rpc SwapWorkspaces(SwapWorkspacesRequest) returns (SwapWorkspacesResponse);
+  // Move one workspace onto another's tab, the tabs between shifting over. See
+  // endpoint_move_workspace.proto.
+  rpc MoveWorkspace(MoveWorkspaceRequest) returns (MoveWorkspaceResponse);
   rpc FoldRepository(FoldRepositoryRequest) returns (FoldRepositoryResponse);
   // Change one piece of the sidebar's view state (a fold, the grouping),
   // pushed to every page on the roster stream. See
   // endpoint_update_sidebar_view.proto.
   rpc UpdateSidebarView(UpdateSidebarViewRequest) returns (UpdateSidebarViewResponse);
+  // Change how the repository grouping is ARRANGED: the repositories' order,
+  // a repository's subsections, and which subsection a workspace sits in and
+  // where. The tab bar follows the arrangement. See
+  // endpoint_arrange_sidebar.proto.
+  rpc ArrangeSidebar(ArrangeSidebarRequest) returns (ArrangeSidebarResponse);
+  // Read the repository grouping's arrangement, for an agent organizing it.
+  // See endpoint_get_sidebar_arrangement.proto.
+  rpc GetSidebarArrangement(GetSidebarArrangementRequest) returns (GetSidebarArrangementResponse);
 
   // A new user task; the roster's task view renders it. See
   // endpoint_create_task.proto.

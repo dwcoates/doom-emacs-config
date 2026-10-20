@@ -329,23 +329,55 @@ its branch is in flight.  The tab bar paints its [N] run purple from it
 
 ;;;; ---- The walk ---------------------------------------------------------
 
-(defun agent-repl-roster--walk-rows (rows label section acc &optional collapsed)
-  "Walk ROWS depth-first under section LABEL, pushing entries onto ACC.
-Each entry is `(:row ROW :label LABEL :section SECTION :collapsed
-COLLAPSED)'.  SECTION names which of the roster's sections the row sits
-in -- `:repository', `:hidden' or `:merged' -- so a reader that treats
-them differently asks the walk rather than re-deriving membership from
-a row's own fields.  COLLAPSED is non-nil when the section's repository
-is folded.  A row precedes its children, which is the render order the
-contract's nesting states."
-  (dolist (row rows)
-    (push (list :row row :label label :section section :collapsed collapsed) (car acc))
-    (agent-repl-roster--walk-rows (plist-get row :children) label section acc collapsed))
+(defun agent-repl-roster--walk-rows (rows label section acc collapsed)
+  "Walk the list rows ROWS depth-first under LABEL, pushing entries onto ACC.
+ROWS are one list's own row type (`RosterOpenRow', `RosterHiddenRow',
+`RosterMergedRow', `RosterClosedRow'), each a plist carrying the shared
+`:row' and, for the lists that nest, its family as `:children'.  Each entry
+is `(:row ROW :label LABEL :section SECTION :collapsed C :tab TAB)'.
+SECTION names which list the row sits in -- `:repository' (the Open
+section), `:hidden', `:merged' or `:closed' -- so a reader that treats them
+differently asks the walk rather than re-deriving membership from a row's
+own fields.  COLLAPSED is called with each list row and answers whether its
+workspace is off the bar's drawing, numbering and navigation.  TAB is an
+open row's own tab, nil in the other lists.  A row precedes its children,
+which is the render order the contract's nesting states."
+  (dolist (wrapped rows)
+    (push (list :row (plist-get wrapped :row) :label label :section section
+                :collapsed (funcall collapsed wrapped) :tab (plist-get wrapped :tab))
+          (car acc))
+    (agent-repl-roster--walk-rows (plist-get wrapped :children) label section acc collapsed))
   acc)
 
-(defun agent-repl-roster--section-collapsed-p (section)
-  "Return non-nil when the daemon holds repository SECTION collapsed."
-  (eq (plist-get (plist-get section :fold) :arm) :collapsed))
+(defun agent-repl-roster-flatten (rows)
+  "Return the shared rows of the list rows ROWS and their families, depth-first.
+ROWS are one list's own row type (`agent-repl-roster--walk-rows'); the
+answer is the `RosterRow's they carry, each before its family."
+  (let ((acc (list nil)))
+    (agent-repl-roster--walk-rows rows nil nil acc #'ignore)
+    (mapcar (lambda (entry) (plist-get entry :row)) (nreverse (car acc)))))
+
+(defun agent-repl-roster-section-rows (section)
+  "Return repository SECTION's top-level open rows in drawn order.
+Its own unsectioned rows, then each subsection's in turn
+\(`frontend.v1.RosterRepoSection.subsections').  A reader that took only
+the section's own `open_rows' would miss every workspace in a subsection."
+  (apply #'append
+         (plist-get (plist-get section :open-rows) :rows)
+         (mapcar (lambda (sub) (plist-get (plist-get sub :open-rows) :rows))
+                 (plist-get section :subsections))))
+
+(defun agent-repl-roster-tab-number (tab)
+  "Return the number open row TAB is drawn at, or nil for a folded tab."
+  (let ((arm (plist-get tab :tab)))
+    (when (eq (plist-get arm :arm) :numbered)
+      (plist-get (plist-get arm :value) :number))))
+
+(defun agent-repl-roster--open-row-folded-p (open)
+  "Return non-nil when open row OPEN's tab is folded off the bar.
+THE DAEMON DECIDES IT (`frontend.v1.RosterOpenRow.tab'): a collapsed
+repository's or subsection's rows carry a folded tab."
+  (null (agent-repl-roster-tab-number (plist-get open :tab))))
 
 (defun agent-repl-roster--merged-group-collapsed-p (group)
   "Return non-nil when recently-merged GROUP's repository is collapsed.
@@ -355,51 +387,53 @@ so its workspaces leave the bar exactly as that repository's others do."
 
 (defun agent-repl-roster-walk (roster)
   "Return ROSTER's rows in tab order, as `agent-repl-roster--walk-rows' entries.
-Repository sections in the resolver's order, each section's rows
-depth-first, then the hidden section's rows, then the recently-merged
-band's rows, group by group.  THE TASK VIEW IS IGNORED — it is the same
-workspaces regrouped, and walking it too would give every workspace a
-second tab.
+THE ROSTER IS ONE LISTING (`frontend.v1.WorkspaceRoster'): every workspace
+sits in exactly one list.  The Open section first -- repository sections in
+the resolver's order, each section's rows (its subsections' included,
+`agent-repl-roster-section-rows') depth-first, each open row's `:collapsed'
+read off its own folded tab -- then the hidden section's rows, then the
+recently-merged band's rows, group by group, then the closed list.
 
-A HIDDEN WORKSPACE IS WALKED AS A COLLAPSED REPOSITORY'S IS: it keeps its
-tab (its session is untouched), and `:collapsed' takes it off the bar's
-drawing, numbering and navigation by the one hiding machinery there is.
-The hidden section's own fold folds sidebar rows only, so its rows are
-hidden from the bar whichever way it is folded."
+THE OPEN SECTION IS THE TAB BAR, so its walk is the bar's order and its
+numbers are the bar's (`agent-repl-roster--misnumbered').  A HIDDEN
+WORKSPACE IS WALKED AS A FOLDED ONE IS: it keeps an undrawn tab (its session
+is untouched, so its perspective stays), `:collapsed' taking it off the
+bar's drawing, numbering and navigation by the one hiding machinery there
+is.  Merged and closed rows have no tab; they are walked for the readers
+that reach every workspace (the switcher, the log retention)."
   (let ((acc (list nil)))
     (dolist (section (plist-get (plist-get roster :repository) :sections))
       (agent-repl-roster--walk-rows
-       (plist-get (plist-get section :rows) :rows)
+       (agent-repl-roster-section-rows section)
        (plist-get (plist-get (plist-get section :header) :label) :text)
        :repository
        acc
-       (agent-repl-roster--section-collapsed-p section)))
+       #'agent-repl-roster--open-row-folded-p))
     (let ((hidden (plist-get roster :hidden)))
       (agent-repl-roster--walk-rows
-       (plist-get (plist-get hidden :rows) :rows)
+       (plist-get (plist-get hidden :hidden-rows) :rows)
        (plist-get (plist-get (plist-get hidden :header) :label) :text)
        :hidden
        acc
-       t))
+       (lambda (_) t)))
     (let* ((merged (plist-get roster :recently-merged))
            (label (plist-get (plist-get (plist-get merged :header) :label) :text)))
       (dolist (group (plist-get merged :groups))
-        (agent-repl-roster--walk-rows
-         (plist-get (plist-get group :rows) :rows)
-         label
-         :merged
-         acc
-         (agent-repl-roster--merged-group-collapsed-p group))))
+        (let ((collapsed (agent-repl-roster--merged-group-collapsed-p group)))
+          (agent-repl-roster--walk-rows
+           (plist-get (plist-get group :merged-rows) :rows)
+           label
+           :merged
+           acc
+           (lambda (_) collapsed)))))
+    (agent-repl-roster--walk-rows
+     (plist-get (plist-get roster :closed) :rows) nil :closed acc (lambda (_) t))
     (nreverse (car acc))))
 
 (defun agent-repl-roster--section-holds-id-p (section id)
   "Return non-nil when SECTION's rows include the workspace ID."
-  (let ((acc (list nil)))
-    (agent-repl-roster--walk-rows
-     (plist-get (plist-get section :rows) :rows) nil :repository acc)
-    (seq-some (lambda (entry)
-                (equal (agent-repl-roster-row-id (plist-get entry :row)) id))
-              (car acc))))
+  (seq-some (lambda (row) (equal (agent-repl-roster-row-id row) id))
+            (agent-repl-roster-flatten (agent-repl-roster-section-rows section))))
 
 (defun agent-repl-roster-repository-of (id &optional roster)
   "Return the `RepositoryRef' of the section holding workspace ID, or nil.
@@ -456,37 +490,33 @@ with the repo label rather than resolved by dropping a tab."
              counts)
     collisions))
 
-(defun agent-repl-roster--tab-bar-entries (roster walked)
-  "Return the WALKED entries ROSTER's tab bar names, in the tab bar's order.
-THE DAEMON ORDERS THE TABS (`frontend.v1.WorkspaceRoster.tab_bar', the
-registry order) and Emacs draws them as sent: the walk only supplies each
-tab's row and label.  A tab whose visibility is not `:drawn' -- its
-repository is collapsed or the user hid it -- carries `:collapsed', which
-takes it off the bar's drawing, numbering and navigation exactly as before.
+(defun agent-repl-roster--tab-bar-entries (walked)
+  "Return the WALKED entries that have a tab, in the tab bar's order.
+THE OPEN SECTION IS THE TAB BAR (`agent-repl-roster-walk'): every open row
+is a tab, drawn at its number or folded, and every hidden workspace keeps
+an undrawn one.  Merged and closed rows have none."
+  (seq-filter (lambda (entry) (memq (plist-get entry :section) '(:repository :hidden)))
+              walked))
 
-A TAB WITH NO ROW is a broken roster (every open workspace has a row in some
-grouping), so it is recorded at ERROR and given no tab rather than invented."
-  (let ((by-id (make-hash-table :test #'equal)))
-    (dolist (entry walked)
-      (puthash (agent-repl-roster-row-id (plist-get entry :row)) entry by-id))
-    (delq nil
-          (mapcar
-           (lambda (tab)
-             (let* ((id (plist-get (plist-get tab :workspace) :id))
-                    (entry (gethash id by-id)))
-               (if entry
-                   (append (list :collapsed
-                                 (not (eq (plist-get (plist-get tab :visibility) :arm) :drawn)))
-                           entry)
-                 (agent-repl--error '(:agent-repl-central "a tab with no row owns no workspace sink")
-                                    "elisp.roster.tab-without-row: id=%s" id)
-                 nil)))
-           (plist-get (plist-get roster :tab-bar) :tabs)))))
+(defun agent-repl-roster--misnumbered (entries)
+  "Return the first of ENTRIES whose tab number is not its place, or nil.
+The daemon numbers the Open section's tabs 1..N in the very walk Emacs
+draws them in, so the Nth drawn tab carries N.  A tab that disagrees means
+the bar and the sidebar would number one workspace two ways: the push is
+unusable and is dropped rather than drawn."
+  (let ((next 0))
+    (seq-find (lambda (entry)
+                (let ((number (agent-repl-roster-tab-number (plist-get entry :tab))))
+                  (when number
+                    (setq next (1+ next))
+                    (/= number next))))
+              (seq-filter (lambda (entry) (eq (plist-get entry :section) :repository)) entries))))
 
 (defun agent-repl-roster-desired-tabs (roster)
   "Return the tabs ROSTER asks for, in order: plists `(:id :name :ref)'.
-The tab bar's list is the order and the membership (an open workspace has
-a tab; the daemon leaves closed ones out), so a closed row gets no tab.
+The Open section's walk is the order and the membership (an open workspace
+has a tab, a hidden one an undrawn tab), so a merged or closed row gets
+none.
 
 THE ROWS IT REFUSES A TAB ARE RECORDED.  This predicate is the whole
 answer to \"why is there no tab for that workspace\", and it used to give
@@ -494,7 +524,7 @@ it silently: a register whose row came back CLOSED produced no tab, and
 nothing anywhere said the roster had been asked for one and declined.
 Once per push over every closed row, which is why it is DEBUG."
   (let* ((all (agent-repl-roster-walk roster))
-         (entries (agent-repl-roster--tab-bar-entries roster all))
+         (entries (agent-repl-roster--tab-bar-entries all))
          (collisions (agent-repl-roster--colliding-names entries)))
     (dolist (entry all)
       (let ((row (plist-get entry :row)))
@@ -929,24 +959,6 @@ navigation index THIS list, so a hidden tab takes no number and no stop."
   (cl-remove-if (lambda (name) (member name agent-repl-roster--hidden-tabs))
                 agent-repl-roster--tab-order))
 
-(defun agent-repl-roster-move-tab-to-back (ws)
-  "Move WS to the LAST slot of the tab order and return the new order.
-Returns nil, leaving the order untouched, when WS is not on the tab bar
-at all — a workspace with no tab has no slot to vacate.
-
-This is the roster-side half of the deprio close (`SPC o C'): the roster
-owns the tab order, so the shuffle is applied HERE and the persp-mode
-names cache is brought in line by the caller
-\=`agent-repl-workspace-push-to-back\=' (panels.el).  The next accepted
-roster push re-derives the order from the daemon's walk, exactly as it
-does for every other local paint."
-  (when (and ws (member ws agent-repl-roster--tab-order))
-    (let ((reordered (append (remove ws agent-repl-roster--tab-order)
-                             (list ws))))
-      (setq agent-repl-roster--tab-order reordered)
-      (agent-repl--log ws "elisp.roster.tab-to-back: ws=%s order=%S" ws reordered)
-      reordered)))
-
 ;;;; ---- The current workspace (R8) ---------------------------------------
 
 (defun agent-repl-roster--current-id (roster)
@@ -1324,20 +1336,30 @@ would roll a status back, so it is kept out.  Answers t when indexed."
 (defun agent-repl-roster-apply (roster)
   "Apply ROSTER: index it, reconcile the tabs, fire the edges, run the hooks.
 A push that DECODES but violates an invariant this file relies on — two
-rows sharing one ref id — is logged at ERROR and DROPPED whole: the tab
-identity would be ambiguous, and half-applying it would be worse than
-ignoring it.  Malformed pushes never reach here at all; rpc.el drops
-those.  Returns the tab names in order, or nil when the push was
-dropped."
+rows sharing one ref id, or a tab numbered out of its place
+\(`agent-repl-roster--misnumbered') — is logged at ERROR and DROPPED
+whole: the tab identity or its number would be ambiguous, and
+half-applying it would be worse than ignoring it.  Malformed pushes
+never reach here at all; rpc.el drops those.  Returns the tab names in
+order, or nil when the push was dropped."
   (let* ((entries (agent-repl-roster-walk roster))
-         (duplicate (agent-repl-roster--duplicate-id entries)))
-    (if duplicate
-        (progn
-          (agent-repl--error '(:agent-repl-central
-                               "duplicate roster identity is ambiguous across workspaces")
-                             "elisp.roster.push: dropped reason=duplicate-ref-id id=%s rows=%d"
-                             duplicate (length entries))
-          nil)
+         (duplicate (agent-repl-roster--duplicate-id entries))
+         (misnumbered (and (not duplicate) (agent-repl-roster--misnumbered entries))))
+    (cond
+     (duplicate
+      (agent-repl--error '(:agent-repl-central
+                           "duplicate roster identity is ambiguous across workspaces")
+                         "elisp.roster.push: dropped reason=duplicate-ref-id id=%s rows=%d"
+                         duplicate (length entries))
+      nil)
+     (misnumbered
+      (agent-repl--error '(:agent-repl-central
+                           "a tab numbered out of its place would number one workspace two ways")
+                         "elisp.roster.push: dropped reason=misnumbered-tab id=%s number=%s"
+                         (agent-repl-roster-row-id (plist-get misnumbered :row))
+                         (agent-repl-roster-tab-number (plist-get misnumbered :tab)))
+      nil)
+     (t
       (agent-repl-roster--index entries)
       (setq agent-repl-roster-view roster
             agent-repl-roster--pushed-at (float-time))
@@ -1359,7 +1381,7 @@ dropped."
         (agent-repl--log '(:agent-repl-central "a roster push spans every workspace")
                          "elisp.roster.push: applied rows=%d tabs=%d"
                          (length entries) (length order))
-        order))))
+        order)))))
 
 (defvar agent-repl-roster--ending-stream nil
   "The roster stream that carried the planned ending, or nil.

@@ -376,7 +376,7 @@ func TestReconcileSetsTheCadenceToMatchTheVisibility(t *testing.T) {
 	}{
 		{name: "a hidden workspace holds", rec: hidden(), want: "hold"},
 		{name: "a visible workspace runs", rec: visible(), want: "run"},
-		{name: "a merged workspace runs", rec: merged, want: "run"},
+		{name: "a reopened merged workspace the user hid holds", rec: merged, want: "hold"},
 		{name: "a closed workspace gets its last round", rec: closed(), want: "last_round"},
 		{name: "a closed hidden workspace holds", rec: closedHidden, want: "hold"},
 		{name: "a reopened workspace runs", rec: reopened, want: "run"},

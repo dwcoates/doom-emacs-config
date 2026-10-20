@@ -44,7 +44,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
 	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -82,8 +82,9 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		closedAt      sql.NullInt64
 		closedBy      sql.NullString
 		statusChanged sql.NullInt64
+		subsection    sql.NullString
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &ws.OneShot, &ws.MergePending, &ended); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OneShot, &ws.MergePending, &ended); err != nil {
 		return Workspace{}, err
 	}
 	if mergeOf.Valid != request.Valid {
@@ -137,6 +138,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		id := TaskID(task.String)
 		ws.Task = &id
 	}
+	ws.Subsection = nullSubsection(subsection)
 	ws.LastSelectedAt = optTime(selected)
 	ws.LastActivityAt = optTime(activity)
 	ws.LastTurnEndedAt = optTime(ended)
@@ -170,7 +172,9 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 
 // RegisterWorkspace records a workspace, idempotent by normalized dir. It mints
 // the WorkspaceID and, on first sight of the repository, the RepoID. The bool
-// reports whether the record was created.
+// reports whether the record was created. A new workspace whose parent is not
+// open is refused with ParentNotOpenError, nothing written (family.go); a
+// merge workspace is exempt, being drawn nowhere until it is revealed.
 func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts RegisterFacts) (Workspace, bool, error) {
 	const op = "daemon.wsm.register_workspace"
 	normalized, err := normalizeDir(dir)
@@ -205,6 +209,14 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			return nil
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
+		}
+		// A NEW CHILD IS ONLY EVER MADE UNDER AN OPEN PARENT (family.go). A
+		// merge workspace is exempt: it is drawn nowhere until revealed, so it
+		// is no open child of the requester it forks.
+		if facts.Parent != nil && facts.MergeOf == nil {
+			if err := requireOpenParent(ctx, tx, *facts.Parent); err != nil {
+				return err
+			}
 		}
 		repoDir, err := normalizeDir(facts.RepoDir)
 		if err != nil {
@@ -260,6 +272,13 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		if err != nil {
 			return err
 		}
+		// A CHILD SITS WHEREVER ITS PARENT DOES (arrange.go): the record
+		// answered reads its subsection the way every read does.
+		var sub sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT `+rootSubsectionColumn+` FROM workspaces WHERE id = ?`, out.ID).Scan(&sub); err != nil {
+			return err
+		}
+		out.Subsection = nullSubsection(sub)
 		created = true
 		return nil
 	})
@@ -376,7 +395,8 @@ func ensureRepo(ctx context.Context, tx *sql.Tx, repoDir, defaultBranch string) 
 		return "", err
 	}
 	id = NewRepoID()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO repositories (id, dir, name, default_branch) VALUES (?, ?, ?, ?)`, id, repoDir, filepath.Base(repoDir), defaultBranch); err != nil {
+	// A NEW REPOSITORY LANDS AFTER EVERY OTHER ONE (arrange.go).
+	if _, err := tx.ExecContext(ctx, `INSERT INTO repositories (id, dir, name, default_branch, place) VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(place), 0) + 1 FROM repositories))`, id, repoDir, filepath.Base(repoDir), defaultBranch); err != nil {
 		return "", err
 	}
 	return id, nil
@@ -420,24 +440,9 @@ func (s *store) WorkspaceByDir(ctx context.Context, dir string) (Workspace, erro
 func (s *store) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	var out []Workspace
 	err := s.read(ctx, "daemon.wsm.list_workspaces", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces ORDER BY created_at, id`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var loaded []Workspace
-		for rows.Next() {
-			ws, err := scanWorkspace(rows)
-			if err != nil {
-				return err
-			}
-			loaded = append(loaded, ws)
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
+		loaded, err := listWorkspaces(ctx, s.db())
 		out = loaded
-		return nil
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -445,14 +450,19 @@ func (s *store) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	return out, nil
 }
 
+// listWorkspaces loads every workspace through Q, all-or-nothing.
+func listWorkspaces(ctx context.Context, q querier) ([]Workspace, error) {
+	return listRows(ctx, q, `SELECT `+workspaceColumns+` FROM workspaces ORDER BY created_at, id`, scanWorkspace)
+}
+
 // repositoryColumns is every column a Repository is read from, in
 // scanRepository's order: the ONE column list both reads share.
-const repositoryColumns = `id, dir, name, default_branch, folded`
+const repositoryColumns = `id, dir, name, default_branch, folded, place`
 
 // scanRepository reads one Repository from a row of repositoryColumns.
 func scanRepository(row interface{ Scan(...any) error }) (Repository, error) {
 	var repo Repository
-	err := row.Scan(&repo.ID, &repo.Dir, &repo.Name, &repo.DefaultBranch, &repo.Folded)
+	err := row.Scan(&repo.ID, &repo.Dir, &repo.Name, &repo.DefaultBranch, &repo.Folded, &repo.Place)
 	return repo, err
 }
 
@@ -474,29 +484,20 @@ func (s *store) SetRepositoryFolded(ctx context.Context, id RepoID, folded bool)
 func (s *store) ListRepositories(ctx context.Context) ([]Repository, error) {
 	var out []Repository
 	err := s.read(ctx, "daemon.wsm.list_repositories", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `SELECT `+repositoryColumns+` FROM repositories ORDER BY dir`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var loaded []Repository
-		for rows.Next() {
-			repo, err := scanRepository(rows)
-			if err != nil {
-				return err
-			}
-			loaded = append(loaded, repo)
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
+		loaded, err := listRepositories(ctx, s.db())
 		out = loaded
-		return nil
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// listRepositories loads every repository through Q, in their stored order,
+// all-or-nothing.
+func listRepositories(ctx context.Context, q querier) ([]Repository, error) {
+	return listRows(ctx, q, `SELECT `+repositoryColumns+` FROM repositories ORDER BY place`, scanRepository)
 }
 
 // setWorkspaceField is the one write path for a single workspace column: it
@@ -563,6 +564,10 @@ func requireOneRow(res sql.Result, what string) error {
 // missing-directory close) can leave a closed row a later handover transfers.
 // This is the one helper every close goes through.
 //
+// A GESTURE NEVER CLOSES A PARENT OVER ITS OPEN CHILDREN: a close by the user
+// or an agent (CloseCause.isGesture) of a workspace with an open descendant is
+// refused with HasOpenChildrenError, nothing written (family.go).
+//
 // THE FIRST CLOSE IS THE ONE RECORDED: a row already closed keeps its record
 // (a kill marks the row closed before its teardown and again after it, and a
 // boot re-closes a row to release its serving ownership), except that a USER
@@ -581,9 +586,18 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 		subscriptions int64
 	)
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		err := scanWorkspaceRow(ctx, tx, id, "serving_instance", &released)
+		var closed bool
+		err := scanWorkspaceRow(ctx, tx, id, "serving_instance, closed", &released, &closed)
 		if err != nil {
 			return err
+		}
+		// A USER'S OR AN AGENT'S CLOSE OF A WORKSPACE WITH OPEN CHILDREN IS
+		// REFUSED (family.go). The daemon's own closes record what already
+		// happened, and a row already closed is no close at all.
+		if !closed && closure.By.isGesture() {
+			if err := refuseOpenChildren(ctx, tx, id); err != nil {
+				return err
+			}
 		}
 		// `restamp` is evaluated against the row as it stood BEFORE this
 		// update: SQLite reads every right-hand side off the old row.
@@ -636,6 +650,9 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 // merge workspace the user opened is revealed, never drawn nowhere. A row that
 // is not merged keeps every one of those columns as it stands.
 //
+// A CLOSED WORKSPACE WHOSE PARENT IS NOT OPEN IS NOT RE-OPENED: the family
+// rules refuse it with ParentNotOpenError, and nothing is written (family.go).
+//
 // A REOPENED WORKSPACE KEEPS ITS CACHE WARM AGAIN, so the same statement
 // clears the projected cache lapse its close left (cachelapse.Keeper), unless
 // the row is still hidden, whose projection is the hide's.
@@ -644,9 +661,17 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID) error {
 	return s.write(ctx, "daemon.wsm.reopen", fields, func(ctx context.Context, tx *sql.Tx) error {
 		var merged sql.NullInt64
 		var mergeOf sql.NullString
-		var hidden bool
-		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of, hidden", &merged, &mergeOf, &hidden); err != nil {
+		var hidden, closed bool
+		if err := scanWorkspaceRow(ctx, tx, id, "merged_at, merge_of, hidden, closed", &merged, &mergeOf, &hidden, &closed); err != nil {
 			return err
+		}
+		// A CLOSED CHILD IS RE-OPENED ONLY UNDER AN OPEN PARENT (family.go).
+		// A workspace already open is no re-open, so a legacy open child is
+		// never refused for a parent it already outlived.
+		if closed {
+			if err := requireOpenParentOf(ctx, tx, id); err != nil {
+				return err
+			}
 		}
 		fields["was_merged"] = merged.Valid
 		columns := []workspaceColumn{
@@ -791,18 +816,41 @@ func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) er
 // waits for the shim's own projection rather than reading an old one. Hiding a workspace already hidden re-stamps it, so
 // the instant is always the latest hide. An unknown workspace is refused
 // (ErrNotFound), never a write that touched nothing.
+//
+// A WORKSPACE WITH OPEN CHILDREN IS NOT HIDDEN, and a hidden child is not
+// shown under a parent that is not open: both are refused by the family rules,
+// nothing written (family.go).
 func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at time.Time) error {
 	var hiddenAt any
-	fields := dlog.Context{"hidden": hidden}
+	fields := dlog.Context{"workspace": string(id), "hidden": hidden}
 	if hidden {
 		hiddenAt = nanos(at)
 		fields["hidden_at"] = at
 	}
-	return s.setWorkspaceColumns(ctx, "daemon.wsm.set_hidden", id, fields,
-		workspaceColumn{name: "hidden", value: hidden},
-		workspaceColumn{name: "hidden_at", value: hiddenAt},
-		workspaceColumn{name: "cache_lapses_at", value: nil},
-		workspaceColumn{name: "cache_lapse_gated_tokens", value: nil})
+	return s.write(ctx, "daemon.wsm.set_hidden", fields, func(ctx context.Context, tx *sql.Tx) error {
+		var was bool
+		if err := scanWorkspaceRow(ctx, tx, id, "hidden", &was); err != nil {
+			return err
+		}
+		// A FAMILY IS HIDDEN CHILD FIRST AND SHOWN PARENT FIRST (family.go).
+		// Only a change is judged: a re-stamp of a hide, or a show of a shown
+		// workspace, moves nothing between lists.
+		switch {
+		case hidden && !was:
+			if err := refuseOpenChildren(ctx, tx, id); err != nil {
+				return err
+			}
+		case !hidden && was:
+			if err := requireOpenParentOf(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		return updateWorkspaceColumns(ctx, tx, id,
+			workspaceColumn{name: "hidden", value: hidden},
+			workspaceColumn{name: "hidden_at", value: hiddenAt},
+			workspaceColumn{name: "cache_lapses_at", value: nil},
+			workspaceColumn{name: "cache_lapse_gated_tokens", value: nil})
+	})
 }
 
 // SetCurrent records the user's selection of a workspace at an instant. At most

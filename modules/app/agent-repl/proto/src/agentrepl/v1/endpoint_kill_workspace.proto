@@ -10,6 +10,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/family.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -60,6 +61,9 @@ message KillWorkspaceError {
     KillWorkspaceTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     KillWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // The workspace has open children (hidden ones included), and killing it
+    // would leave them without their parent in the Open section.
+    WorkspaceHasOpenChildren has_open_children = 5;
   }
 }
 message KillWorkspaceUnknownWorkspace {}

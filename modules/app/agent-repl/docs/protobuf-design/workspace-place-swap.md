@@ -276,3 +276,131 @@ sidebar's walk" and the create-landing rule above. Not yet implemented.
   (`agent-repl-workspace-swap`) are renamed the same way. Log operations
   become `daemon.wsm.swap_places`, `daemon.workspace.swap` and
   `elisp.commands.swap*`.
+
+## `SPC TAB P` moves, beside the swap on `SPC TAB p` (owner, 2026-10-18)
+
+- **Ruling:** the move (`SPC TAB p` before 2026-10-17) comes back on
+  `SPC TAB P`, and `SPC TAB p` stays the swap.
+- **Why:** the sidebar's arrangement now groups the tab bar by repository,
+  then each repository's unsectioned workspaces and each subsection's, each
+  family depth-first (`endpoint_arrange_sidebar.proto`). A swap of two
+  workspaces of different repositories or different families exchanges their
+  stored places but moves no tab, so the owner asked for the insert form
+  beside it.
+
+### MoveWorkspace returns, judged against the grouped tab bar (2026-10-18)
+
+- **What:** `agentrepl.v1.MoveWorkspace` (`endpoint_move_workspace.proto`),
+  listed in `service.proto` beside `SwapWorkspaces`. Same two roster-served
+  refs as before; two new error arms, `other_repository` and `not_siblings`.
+- **Semantics (implementer's, carried through under the owner's 2026-10-13
+  standing approval of contract changes, reported to the owner):**
+  - two top-level workspaces of one repository: the mover joins the target's
+    subsection (or none), just before the target when it comes from a later
+    tab, just after the target's whole family when it comes from an earlier
+    one;
+  - two children of one parent: the same rule among the siblings;
+  - every other pairing is refused, because no tab of the target is a place
+    the mover can occupy: different repositories never interleave
+    (`other_repository`), and a child always follows its parent's family
+    (`not_siblings`).
+- **Why the direction rule:** it is the old move's rule ("moving right shifts
+  the tabs it passes left") lifted from single tabs to families, so the mover
+  ends exactly where the target's family stood.
+- **Why the store judges it in one transaction:** the direction and the anchor
+  ("after the target's family" is "before the next root in the target's
+  bucket") are read and written in the same write, so an arrangement landing
+  between a read and the write cannot misplace the mover.
+- **Rejected:** composing the move in the editor from `ArrangeSidebar
+  place_workspace`. That needs a read of the arrangement before the write, and
+  `place_workspace` places only top-level workspaces, so siblings could not
+  move at all.
+
+## A swap stays inside one repository (owner, 2026-10-19)
+
+- **Ruling:** `SPC TAB p` must not work across repositories. This supersedes
+  "any two workspaces can swap" (2026-10-17) for pairs of different
+  repositories.
+- **What:** `agentrepl.v1.SwapWorkspacesError.other_repository`, an empty
+  arm; the request comment states the one-repository rule.
+- **Why:** the tab bar groups by repository, so a swap across repositories
+  exchanged stored places and moved no tab.
+- **Consequences:** `wsm.SwapPlaces` reads both repositories in its
+  transaction and refuses `ErrOtherRepository` before writing; the workspace
+  verb answers `other_repository`; Emacs says so in words at info.
+- **Still open:** a swap of a child with a workspace outside its family
+  exchanges places and moves no tab; whether it is refused too (as
+  `MoveWorkspace` refuses `not_siblings`) is put to the owner.
+
+## One roster listing, three states, and family rules (owner, 2026-10-19)
+
+### Core design principles
+
+- **The roster is one listing the tab bar and the sidebar share.** Every
+  workspace the roster draws is in exactly one of three lists: OPEN (the
+  repository sections), HIDDEN, MERGED. The tab bar is the Open list's
+  depth-first walk; nothing else orders tabs.
+  - Consequences: `frontend.v1.WorkspaceRoster.tab_bar` is retired; each open
+    row states its own tab (`RosterOpenRow.tab`: numbered or folded).
+  - Does not claim: that a folded repository's workspaces are closed. They
+    stay open, folded out of both the sidebar and the tab bar.
+- **Ordering conditions** (each lives in the implementation's docstrings):
+  numbers match position (tab N immediately before N+1, in both surfaces);
+  the order runs unbroken across sections, repositories and families; a
+  subtree is one unbroken run at every depth; a subsection never spans
+  repositories; a family never splits across subsections; every workspace
+  is in one list; a workspace is in Open iff it has a tab (folding aside);
+  hidden workspaces have no tab and merged workspaces are never open (OPEN
+  BEATS MERGED: a reopened merged workspace returns to Open); numbers run
+  1..N with no gap; only the daemon holds the order and no client reorders
+  locally; only an explicit request changes the order; a request that would
+  break a condition is refused and changes nothing; the order survives
+  restarts.
+- **Family rules.** A workspace with open children (hidden children count as
+  open) cannot be hidden, closed, killed, nuked, or merged by a merge that
+  closes it; the merge refusal names the children, to be resolved and
+  closed first. A workspace cannot be created, re-parented, reopened or
+  shown as the open child of a hidden, closed or CLOSING parent (one a
+  merge waiting in its queue closes once it lands). A hidden merge
+  workspace is no open child: it is the merge's machinery, drawn nowhere.
+  Every rule is checked in the same wsm transaction as the write it guards,
+  so no race between a parent's close and a child's creation can leave an
+  open child under a closed parent. Families that
+  already break the rule keep drawing by the old rule: an open workspace
+  whose parent is not open takes its parent's place.
+
+### Landed changes (2026-10-19)
+
+- **What:** `RosterOpenRow`/`RosterOpenRows`, `RosterOpenRowTab` (numbered,
+  folded), `RosterHiddenRow`/`RosterHiddenRows`, `RosterMergedRow`/
+  `RosterMergedRows`; the sections' `rows` fields become `open_rows`,
+  `hidden_rows`, `merged_rows` under new field numbers (the old ones
+  reserved); `RosterRow.children` retired (families nest in their list's row
+  type); `RosterRows`, `RosterTabBar`, `RosterTab` and its arms removed.
+  `agentrepl.v1.family.proto`: `WorkspaceHasOpenChildren` (on CloseWorkspace,
+  KillWorkspace, NukeWorkspace, SetWorkspaceHidden, MergeWorkspace) and
+  `WorkspaceParentNotOpen` (on SetWorkspaceHidden, SetWorkspaceParent,
+  CreateWorkspace, OpenWorkspace). `SwapWorkspacesError.not_siblings`.
+- **Added after (2026-10-19):** `WorkspaceParentNotOpen.closing` (a merge
+  queued to close the parent would otherwise strand a child created while
+  it waits) and `RegisterWorkspaceError.parent_not_open` (an editor
+  announcing a closed workspace re-opens it, which the family rules govern
+  as they govern OpenWorkspace).
+- **Subsection folds (owner, 2026-10-19):** `RosterSubsection.fold`
+  (expanded, collapsed) and `SidebarViewFoldSection.subsection`, with
+  `UpdateSidebarViewError.unknown_subsection`. A collapsed subsection has
+  the effect a collapsed repository has: its rows are hidden in the
+  sidebar, its workspaces' tabs are folded off the tab bar, and collapsing
+  stands their sessions down.
+- **Why the new field numbers:** a rolling deploy can pair a new daemon with
+  an old client for a moment; a reused number with a new type would decode
+  as garbage, while a new number decodes as an unknown field.
+- **Why shared family messages:** the same two refusals reach nine
+  endpoints; one definition keeps their facts identical.
+- **Kept on RosterRow, deliberately:** `closed` and `closure` (the editor's
+  switcher reads who closed a merged row) and the when-column's `merged` and
+  `hidden` arms; moving them was not needed for any condition.
+- **Consequences:** the daemon hoists (an open workspace whose parent is not
+  open takes its place), which clients used to do; Emacs builds its tabs
+  from the Open walk, plus an undrawn entry per hidden workspace so a hidden
+  workspace keeps its perspective; the webapp paints each row's own number.

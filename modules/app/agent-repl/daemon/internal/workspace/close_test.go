@@ -269,3 +269,19 @@ func TestCloseRefusesAMergeWaitingInLine(t *testing.T) {
 		t.Fatalf("footer reason = %q, want merge_queued", f.footer.closing["w1"].Reason)
 	}
 }
+
+func TestCloseAnswersAParentWithOpenChildren(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.setClosedErr = errOpenChildren
+
+	// Act.
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
+
+	// Assert.
+	requireFamilyAnswer(t, f, err, errOpenChildren, opClose)
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a refused close", len(f.sidebar.registries))
+	}
+}

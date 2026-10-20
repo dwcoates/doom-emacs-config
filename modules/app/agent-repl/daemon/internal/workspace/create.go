@@ -216,6 +216,16 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 			global.Error(opCreate, "could not read the parent workspace", dlog.Context{"parent": string(*parent), "cause": err.Error()})
 			return wsm.Workspace{}, fmt.Errorf("create %q: parent workspace %q: %w", branch, *parent, err)
 		}
+		// A CHILD IS MADE ONLY UNDER AN OPEN PARENT (wsm/family.go). Asked
+		// before the worktree is materialized, so a refused create leaves
+		// nothing behind; registration checks again in its own transaction,
+		// which is the guarantee. A merge workspace is no open child, so its
+		// requester is not asked.
+		if origin == nil {
+			if err := v.requireOpenParent(ctx, global, opCreate, *parent); err != nil {
+				return wsm.Workspace{}, fmt.Errorf("create %q: %w", branch, err)
+			}
+		}
 		if baseRef == "" {
 			baseRef = parentRecord.Branch
 		}

@@ -499,3 +499,82 @@ func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T
 		})
 	}
 }
+
+func TestARequestThatWouldCloseAParentWithOpenChildrenIsRefusedBeforeItFlushes(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.inFlight = "turn-asking"
+	h.db.openChildrenErr = &wsm.HasOpenChildrenError{
+		Parent:   wsm.FamilyRef{ID: theWorkspace, Dir: "/w/parent"},
+		Children: []wsm.FamilyRef{{ID: "ws-child", Dir: "/w/child"}},
+	}
+
+	// Act.
+	err := h.request(t, ownBranch, RequestedByAgent)
+
+	// Assert.
+	if !wsm.IsFamilyRefusal(err) {
+		t.Fatalf("Enqueue = %v, want the family refusal", err)
+	}
+	if got := h.queue.flushes(); len(got) != 0 {
+		t.Fatalf("flushed = %v, want nothing flushed for a refused merge", got)
+	}
+	if _, ok := h.entryState(); ok {
+		t.Fatal("a refused merge was recorded")
+	}
+	if !slices.Equal(h.db.openChildrenAsked, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("asked about %v, want the requester the merge closes", h.db.openChildrenAsked)
+	}
+	if _, logged := h.recordFor("info", "daemon.merge.enqueue"); !logged {
+		t.Fatalf("the refusal was not recorded at INFO: %+v", h.logs.Records())
+	}
+}
+
+func TestARequestAsksAboutEveryWorkspaceItsLandingCloses(t *testing.T) {
+	tests := []struct {
+		name string
+		req  Request
+		want []ids.WorkspaceID
+	}{
+		{name: "an in-place merge closes its requester", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByUser}, want: []ids.WorkspaceID{theWorkspace}},
+		{name: "an async merge closes nothing in place", req: Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Detached: &DetachedRun{Name: "ask-async"}}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.inFlight = "turn-asking"
+
+			// Act.
+			if err := h.o.Enqueue(context.Background(), tt.req); err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+
+			// Assert.
+			if !slices.Equal(h.db.openChildrenAsked, tt.want) {
+				t.Fatalf("asked about %v, want %v", h.db.openChildrenAsked, tt.want)
+			}
+		})
+	}
+}
+
+func TestARequestWhoseFamilyReadFailsIsRefusedWithNothingRecorded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.inFlight = "turn-asking"
+	h.db.openChildrenErr = errors.New("disk I/O error")
+
+	// Act.
+	err := h.request(t, ownBranch, RequestedByAgent)
+
+	// Assert.
+	if !errors.Is(err, h.db.openChildrenErr) {
+		t.Fatalf("Enqueue = %v, want the read's error", err)
+	}
+	if _, ok := h.entryState(); ok {
+		t.Fatal("a request whose family read failed was recorded")
+	}
+	if _, logged := h.recordFor("error", "daemon.merge.enqueue"); !logged {
+		t.Fatalf("the failed read was not recorded at ERROR: %+v", h.logs.Records())
+	}
+}

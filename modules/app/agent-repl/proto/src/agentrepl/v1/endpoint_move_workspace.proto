@@ -1,0 +1,100 @@
+// endpoint_move_workspace.proto — MoveWorkspace: move one workspace onto
+// another's tab in the sidebar's arrangement, the tabs between shifting over.
+// SIDEBAR section. The sidebar and the editor's tab bar both walk the one
+// arrangement, so one move shows on both; the new order arrives on the roster
+// stream.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Move `workspace` onto `target`'s tab. The tab bar walks repository by
+// repository, then each repository's unsectioned workspaces and each
+// subsection's, each family depth-first, so a workspace can only take the tab
+// of a workspace it sits beside in that walk:
+//   - two TOP-LEVEL workspaces of ONE repository: `workspace` joins
+//     `target`'s subsection (or none), just before `target` when it comes
+//     from a later tab and just after `target`'s whole family when it comes
+//     from an earlier one;
+//   - two CHILDREN of ONE parent: `workspace` moves among its siblings, just
+//     before `target` when it comes from a later tab and just after
+//     `target`'s family when it comes from an earlier one.
+// Either way the tabs between the two shift one family toward the tab
+// `workspace` left, and `workspace` carries its own children with it. Every
+// other pairing has no tab `workspace` could take and is refused.
+message MoveWorkspaceRequest {
+  // The workspace to move, as the roster served it; the editor sends the
+  // current workspace here. Must differ from `target` by id
+  // (InvalidArgument otherwise).
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The workspace whose tab `workspace` takes, as the roster served it; the
+  // editor sends the workspace on the tab the user named.
+  workspace.v1.WorkspaceRef target = 2;
+}
+
+// The set arm is the outcome.
+message MoveWorkspaceResponse {
+  // Exactly one arm is set: the move was made, or it was refused with nothing
+  // written.
+  oneof result {
+    MoveWorkspaceSuccess success = 1;
+    MoveWorkspaceError error = 2;
+  }
+}
+
+// The workspace moved; the roster push carries the new order.
+message MoveWorkspaceSuccess {}
+
+// Why the move was not made. No place and no subsection changes on any arm.
+message MoveWorkspaceError {
+  // The one reason the daemon could not serve the move.
+  oneof cause {
+    // A ref's id is not in the daemon's registry.
+    MoveWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // A ref's dir disagrees with the registry's dir for its id.
+    MoveWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released a workspace to a successor; dial `address`.
+    MoveWorkspaceTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting a workspace yet.
+    MoveWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // The two workspaces belong to different repositories, whose tabs never
+    // interleave, so no tab of one is a place for the other.
+    MoveWorkspaceOtherRepository other_repository = 5;
+    // The two workspaces are not siblings: one is top-level and the other a
+    // child, or they are children of different parents. A child's tab always
+    // follows its parent's family, so it cannot take the tab of a workspace
+    // outside its own family's level.
+    MoveWorkspaceNotSiblings not_siblings = 6;
+  }
+}
+// Names the ref the registry does not hold.
+message MoveWorkspaceUnknownWorkspace {
+  // The request's ref whose id the registry does not hold, echoed as sent.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// Names the mismatched ref and the dir the registry holds for its id.
+message MoveWorkspaceWorkspaceRefMismatch {
+  // The request's ref whose dir disagrees with the registry, echoed as sent.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The dir the registry holds for that ref's id.
+  string registry_dir = 2;
+}
+// The successor daemon now owns the workspace; the caller re-dials it.
+message MoveWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`.
+  string address = 1;
+}
+// Adoption of a named workspace is still in progress; the caller retries once
+// the roster shows it adopted.
+message MoveWorkspaceNotYetAdopted {}
+// The two workspaces belong to different repositories. DELIBERATELY EMPTY:
+// the arm is the fact, and the request already names both workspaces.
+message MoveWorkspaceOtherRepository {}
+// The two workspaces are not children of one parent, nor both top-level.
+// DELIBERATELY EMPTY: the arm is the fact, and the request already names both
+// workspaces.
+message MoveWorkspaceNotSiblings {}

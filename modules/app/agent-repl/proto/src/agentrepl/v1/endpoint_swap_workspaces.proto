@@ -13,9 +13,14 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 // Exchange two workspaces' places in the registry order: `workspace` takes
 // `target`'s place and `target` takes `workspace`'s, and every other workspace
-// keeps its own. Any two workspaces may swap, whatever their repositories or
-// parents. The sidebar and the tab bar both redraw from the registry, so the
-// swap shows on both.
+// keeps its own. Two top-level workspaces of one repository also exchange
+// their subsections, so each takes the other's tab across subsections. The
+// two must belong to ONE repository: the tab bar never interleaves
+// repositories, so no tab of one is a place for a workspace of another
+// (`other_repository`). They must also be SIBLINGS, both top-level or children
+// of one parent: a child stays in its parent's run of tabs (`not_siblings`).
+// The sidebar and the tab bar both redraw from the registry, so the swap
+// shows on both.
 message SwapWorkspacesRequest {
   // One of the two workspaces, as the roster served it; the editor sends the
   // current workspace here. Must differ from `target` by id (InvalidArgument
@@ -51,6 +56,13 @@ message SwapWorkspacesError {
     SwapWorkspacesTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting a workspace yet.
     SwapWorkspacesNotYetAdopted not_yet_adopted = 4;
+    // The two workspaces belong to different repositories, whose tabs never
+    // interleave, so neither can take the other's place.
+    SwapWorkspacesOtherRepository other_repository = 5;
+    // The two workspaces are not siblings: one is top-level and the other a
+    // child, or they are children of different parents. A child stays in its
+    // parent's run of tabs, so it cannot trade places outside it.
+    SwapWorkspacesNotSiblings not_siblings = 6;
   }
 }
 // Names the ref the registry does not hold.
@@ -73,3 +85,9 @@ message SwapWorkspacesTransferringAway {
 // Adoption of a named workspace is still in progress; the caller retries once
 // the roster shows it adopted.
 message SwapWorkspacesNotYetAdopted {}
+// The two workspaces belong to different repositories. DELIBERATELY EMPTY:
+// the arm is the fact, and the request already names both workspaces.
+message SwapWorkspacesOtherRepository {}
+// The two workspaces are not siblings. DELIBERATELY EMPTY: the arm is the
+// fact, and the request already names both workspaces.
+message SwapWorkspacesNotSiblings {}

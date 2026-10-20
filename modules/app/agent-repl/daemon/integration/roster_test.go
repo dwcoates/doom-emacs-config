@@ -4,6 +4,7 @@ package integration
 
 import (
 	"agentrepl/protohelpers/oneofarm"
+	"agentrepl/protohelpers/rosterwalk"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -86,11 +87,12 @@ func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
 	f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "daemon.sidebar.result_read")
 }
 
-// tabBarIDs lists the roster's tab bar, first tab first.
+// tabBarIDs lists the roster's tabs -- its open rows in the Open section's
+// walk, folded ones included -- first tab first.
 func tabBarIDs(r *frontendv1.WorkspaceRoster) []string {
 	var out []string
-	for _, tab := range r.GetTabBar().GetTabs() {
-		out = append(out, tab.GetWorkspace().GetId())
+	for _, open := range rosterwalk.OpenRows(r) {
+		out = append(out, open.GetRow().GetWorkspace().GetWorkspace().GetId())
 	}
 	return out
 }
@@ -171,21 +173,199 @@ func TestSwapWorkspacesExchangesTheTwoPlaces(t *testing.T) {
 	})
 }
 
-func TestSwapWorkspacesCrossesRepositories(t *testing.T) {
+func TestMoveWorkspaceTakesTheTargetsTabAndShiftsTheTabsBetween(t *testing.T) {
+	t.Parallel()
+	// Arrange: the bar is a, c, b.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	roster := d.WatchRoster()
+	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
+	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
+	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
+	awaitRoster(t, d, roster, "the bar a, c, b", func(r *frontendv1.WorkspaceRoster) bool {
+		return sameOrder(tabBarIDs(r), []string{a.GetId(), c.GetId(), b.GetId()})
+	})
+
+	// Act: a moves onto b's tab, two tabs to its right.
+	resp, err := d.Client().MoveWorkspace(d.Ctx(), connect.NewRequest(
+		&agentreplv1.MoveWorkspaceRequest{Workspace: a, Target: b}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("MoveWorkspace = (%v, %v), want success", resp, err)
+	}
+
+	// Assert: c and b shift left and a takes the last tab.
+	awaitRoster(t, d, roster, "the bar c, b, a", func(r *frontendv1.WorkspaceRoster) bool {
+		return sameOrder(tabBarIDs(r), []string{c.GetId(), b.GetId(), a.GetId()})
+	})
+}
+
+func TestSwapWorkspacesIsRefusedAcrossRepositories(t *testing.T) {
 	t.Parallel()
 	// Arrange: one workspace in each of two repositories.
 	d := newDaemon(t, harness.Opts{})
-	roster := d.WatchRoster()
 	one := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
 	two := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
 
 	// Act.
-	swapWorkspaces(t, d, two, one)
+	resp, err := d.Client().SwapWorkspaces(d.Ctx(), connect.NewRequest(
+		&agentreplv1.SwapWorkspacesRequest{Workspace: two, Target: one}))
+
+	// Assert: the tab bar keeps each repository's workspaces together.
+	if err != nil || resp.Msg.GetError().GetOtherRepository() == nil {
+		t.Fatalf("SwapWorkspaces = (%v, %v), want other_repository", resp, err)
+	}
+}
+
+func TestMoveWorkspaceIsRefusedAcrossRepositories(t *testing.T) {
+	t.Parallel()
+	// Arrange: one workspace in each of two repositories.
+	d := newDaemon(t, harness.Opts{})
+	one := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
+	two := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
+
+	// Act.
+	resp, err := d.Client().MoveWorkspace(d.Ctx(), connect.NewRequest(
+		&agentreplv1.MoveWorkspaceRequest{Workspace: two, Target: one}))
+
+	// Assert: the tab bar keeps each repository's workspaces together.
+	if err != nil || resp.Msg.GetError().GetOtherRepository() == nil {
+		t.Fatalf("MoveWorkspace = (%v, %v), want other_repository", resp, err)
+	}
+}
+
+// arrange sends one ArrangeSidebar change and requires its success.
+func arrange(t *testing.T, d *harness.Daemon, req *agentreplv1.ArrangeSidebarRequest) *agentreplv1.ArrangeSidebarSuccess {
+	t.Helper()
+	resp, err := d.Client().ArrangeSidebar(d.Ctx(), connect.NewRequest(req))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ArrangeSidebar = (%v, %v), want success", resp, err)
+	}
+	return resp.Msg.GetSuccess()
+}
+
+func TestTheFirstWorkspaceFiledInANewSubsectionBecomesItsRepositorysLastTab(t *testing.T) {
+	t.Parallel()
+	// Arrange: the owner's example, a, b, c in one repository.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	roster := d.WatchRoster()
+	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
+	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
+	c := harness.Register(t, d, worktreeOf(t, repo, "c"))
+	first := awaitRoster(t, d, roster, "three tabs", func(r *frontendv1.WorkspaceRoster) bool { return len(tabBarIDs(r)) == 3 })
+	head := tabBarIDs(first)[0]
+	section := first.GetRepository().GetSections()[0]
+	created := arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_CreateSubsection{
+		CreateSubsection: &agentreplv1.ArrangeCreateSubsection{Repository: section.GetKey().GetRepository(), Name: "later"}}}).GetCreated()
+
+	// Act.
+	var headRef *workspacev1.WorkspaceRef
+	for _, ws := range []*workspacev1.WorkspaceRef{a, b, c} {
+		if ws.GetId() == head {
+			headRef = ws
+		}
+	}
+	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{
+		PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
+			Workspace: headRef,
+			Into:      &agentreplv1.ArrangePlaceWorkspace_Subsection{Subsection: created},
+			At:        &agentreplv1.ArrangePlaceWorkspace_End{End: &agentreplv1.ArrangeEnd{}},
+		}}})
 
 	// Assert.
-	awaitRoster(t, d, roster, "the bar two, one", func(r *frontendv1.WorkspaceRoster) bool {
-		return sameOrder(tabBarIDs(r), []string{two.GetId(), one.GetId()})
+	awaitRoster(t, d, roster, "the first tab now last", func(r *frontendv1.WorkspaceRoster) bool {
+		ids := tabBarIDs(r)
+		return len(ids) == 3 && ids[2] == head && len(r.GetRepository().GetSections()[0].GetSubsections()) == 1
 	})
+}
+
+func TestFoldingASubsectionFoldsItsWorkspacesTabs(t *testing.T) {
+	t.Parallel()
+	// Arrange: a and b in one repository, b filed in a subsection.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	roster := d.WatchRoster()
+	harness.Register(t, d, worktreeOf(t, repo, "a"))
+	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
+	first := awaitRoster(t, d, roster, "two tabs", func(r *frontendv1.WorkspaceRoster) bool { return len(tabBarIDs(r)) == 2 })
+	created := arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_CreateSubsection{
+		CreateSubsection: &agentreplv1.ArrangeCreateSubsection{Repository: first.GetRepository().GetSections()[0].GetKey().GetRepository(), Name: "later"}}}).GetCreated()
+	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{
+		PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
+			Workspace: b,
+			Into:      &agentreplv1.ArrangePlaceWorkspace_Subsection{Subsection: created},
+			At:        &agentreplv1.ArrangePlaceWorkspace_End{End: &agentreplv1.ArrangeEnd{}},
+		}}})
+
+	// Act.
+	resp, err := d.Client().UpdateSidebarView(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateSidebarViewRequest{
+		Change: &agentreplv1.UpdateSidebarViewRequest_FoldSection{FoldSection: &agentreplv1.SidebarViewFoldSection{
+			Section: &agentreplv1.SidebarViewFoldSection_Subsection{Subsection: created},
+			Fold:    &agentreplv1.SidebarViewFoldSection_Collapse{Collapse: &agentreplv1.SidebarViewCollapse{}},
+		}}}))
+
+	// Assert: the subsection is collapsed and b's tab folded, a numbered 1.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateSidebarView = (%v, %v), want success", resp, err)
+	}
+	awaitRoster(t, d, roster, "the subsection collapsed and b's tab folded", func(r *frontendv1.WorkspaceRoster) bool {
+		subs := r.GetRepository().GetSections()[0].GetSubsections()
+		if len(subs) != 1 || subs[0].GetCollapsed() == nil {
+			return false
+		}
+		for _, open := range rosterwalk.OpenRows(r) {
+			id := open.GetRow().GetWorkspace().GetWorkspace().GetId()
+			if id == b.GetId() && open.GetTab().GetFolded() == nil {
+				return false
+			}
+			if id != b.GetId() && open.GetTab().GetNumbered().GetNumber() != 1 {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func TestMovingARepositoryMovesAllItsTabs(t *testing.T) {
+	t.Parallel()
+	// Arrange: one workspace in each of two repositories.
+	d := newDaemon(t, harness.Opts{})
+	roster := d.WatchRoster()
+	harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
+	harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
+	r := awaitRoster(t, d, roster, "two sections", func(r *frontendv1.WorkspaceRoster) bool {
+		return len(r.GetRepository().GetSections()) == 2 && len(tabBarIDs(r)) == 2
+	})
+	firstRepo := r.GetRepository().GetSections()[0].GetKey().GetRepository()
+	before := tabBarIDs(r)
+
+	// Act.
+	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveRepository{
+		MoveRepository: &agentreplv1.ArrangeMoveRepository{Repository: firstRepo, To: &agentreplv1.ArrangeMoveRepository_End{End: &agentreplv1.ArrangeEnd{}}}}})
+
+	// Assert.
+	awaitRoster(t, d, roster, "the tabs swapped with their repositories", func(r *frontendv1.WorkspaceRoster) bool {
+		return sameOrder(tabBarIDs(r), []string{before[1], before[0]})
+	})
+}
+
+func TestGetSidebarArrangementListsTheRepositoriesAndTheirWorkspaces(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	d := newDaemon(t, harness.Opts{})
+	ws := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
+
+	// Act.
+	resp, err := d.Client().GetSidebarArrangement(d.Ctx(), connect.NewRequest(&agentreplv1.GetSidebarArrangementRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetSidebarArrangement: %v", err)
+	}
+	repos := resp.Msg.GetRepositories()
+	if len(repos) != 1 || len(repos[0].GetWorkspaces()) != 1 || repos[0].GetWorkspaces()[0].GetWorkspace().GetId() != ws.GetId() {
+		t.Fatalf("arrangement = %v, want the one workspace in its repository", resp.Msg)
+	}
 }
 
 func TestClearingAPriorityRemovesTheBadge(t *testing.T) {

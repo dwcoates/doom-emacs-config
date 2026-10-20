@@ -618,8 +618,7 @@ No-op unless the caller's buffer is in `magit-status-mode' and both
 panels are currently visible.  Routes through `agent-repl--hide-panels'
 so `:repl-state'/`:agent-state' are left untouched — the panels simply
 become hidden, matching the behavior of other non-user-initiated close
-paths (see `agent-repl--on-close' for the user-initiated path that
-transitions `:repl-state' to :inactive)."
+paths (see `agent-repl--on-simple-close' for the user-initiated close)."
   (let* ((ws (agent-repl--ws-current-name))
          (in-status (eq major-mode 'magit-status-mode))
          (panels-visible (and in-status (agent-repl--panels-visible-p))))

@@ -38,6 +38,7 @@ const (
 	opSetHidden            = "daemon.workspace.set_hidden"
 	opRevealMergeWorkspace = "daemon.workspace.reveal_merge_workspace"
 	opSwap                 = "daemon.workspace.swap"
+	opMove                 = "daemon.workspace.move"
 	opCreateTask           = "daemon.workspace.create_task"
 	opUpdateTask           = "daemon.workspace.update_task"
 	opAssignTask           = "daemon.workspace.assign_task"
@@ -142,7 +143,7 @@ func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operatio
 // recorded here and answers false; a cancelled context is this daemon going
 // away and is recorded at info.
 func (v *verbs) readRegistry(ctx context.Context, log dlog.Logger, operation string) (sidebar.Registry, bool) {
-	workspaces, err := v.deps.DB.ListWorkspaces(ctx)
+	arrangement, err := v.deps.DB.ReadArrangement(ctx)
 	if err != nil {
 		// A CANCELLED CONTEXT IS THIS DAEMON GOING AWAY, not a read that
 		// broke: the exit cancels the serving context under whatever was in
@@ -150,12 +151,7 @@ func (v *verbs) readRegistry(ctx context.Context, log dlog.Logger, operation str
 		// other refusal keeps its ERROR. The precedent is the state client's
 		// own read, which has always answered a cancellation at info.
 		ctxend.Log(err, log.Info, log.Error, operation, "the roster read ended when its context was cancelled",
-			"could not list the workspaces for the roster", dlog.Context{"cause": err.Error()})
-		return sidebar.Registry{}, false
-	}
-	repositories, err := v.deps.DB.ListRepositories(ctx)
-	if err != nil {
-		log.Error(operation, "could not list the repositories for the roster", dlog.Context{"cause": err.Error()})
+			"could not read the workspaces, repositories and subsections for the roster", dlog.Context{"cause": err.Error()})
 		return sidebar.Registry{}, false
 	}
 	tasks, err := v.deps.DB.Tasks(ctx)
@@ -173,12 +169,12 @@ func (v *verbs) readRegistry(ctx context.Context, log dlog.Logger, operation str
 		log.Error(operation, "could not read the sidebar's view state for the roster", dlog.Context{"cause": err.Error()})
 		return sidebar.Registry{}, false
 	}
-	sessions, err := sessionRecords(ctx, v.deps.DB, workspaces)
+	sessions, err := sessionRecords(ctx, v.deps.DB, arrangement.Workspaces)
 	if err != nil {
 		log.Error(operation, "could not read the session records for the roster", dlog.Context{"cause": err.Error()})
 		return sidebar.Registry{}, false
 	}
-	return sidebarRegistry(log, workspaces, repositories, tasks, sessions, current, view), true
+	return sidebarRegistry(log, arrangement, tasks, sessions, current, view), true
 }
 
 // logRepublished records a registry republish.
@@ -189,8 +185,8 @@ func (v *verbs) readRegistry(ctx context.Context, log dlog.Logger, operation str
 // roster mutation, never a per-frame push, so it informs without spamming.
 func logRepublished(log dlog.Logger, operation string, reg sidebar.Registry) {
 	log.Info(operation, "republished the roster registry", dlog.Context{
-		"workspaces": len(reg.Workspaces), "repositories": len(reg.Repositories), "tasks": len(reg.Tasks),
-		"sessions": len(reg.Sessions),
+		"workspaces": len(reg.Workspaces), "repositories": len(reg.Repositories), "subsections": len(reg.Subsections),
+		"tasks": len(reg.Tasks), "sessions": len(reg.Sessions),
 	})
 }
 

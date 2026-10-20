@@ -34,6 +34,9 @@ func (v *verbs) SetParent(ctx context.Context, ws ids.WorkspaceID, parent *ids.W
 	if refused, ok := wsm.AsParentRefused(err); ok {
 		return wsm.ParentChange{}, parentRefusal(log, refused)
 	}
+	if refusedByFamily(log, opSetParent, err) {
+		return wsm.ParentChange{}, err
+	}
 	if errors.Is(err, wsm.ErrNotFound) {
 		// owned() read the record a moment ago: a forget raced the retarget.
 		return wsm.ParentChange{}, refuse(log, rpcSetParent, ArmUnknownWorkspace,

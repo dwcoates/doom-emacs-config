@@ -20,6 +20,7 @@ package agentrepl.v1;
 
 import "agentrepl/v1/workspace_priority.proto";
 import "conversation/v1/user.proto";
+import "agentrepl/v1/family.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -269,6 +270,9 @@ message CreateWorkspaceError {
     CreateWorkspaceNameReserved name_reserved = 18;
     // The one-shot's context workspace is not in the daemon's registry.
     CreateWorkspaceUnknownContextWorkspace unknown_context_workspace = 19;
+    // The named parent is hidden or closed, and creating a child of it
+    // would make an open child of a parent outside the Open section.
+    WorkspaceParentNotOpen parent_not_open = 20;
   }
 }
 message CreateWorkspaceUngatedWithoutConsent {}

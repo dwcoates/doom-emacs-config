@@ -7,6 +7,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
@@ -197,9 +198,9 @@ func TestRosterOrdersChildrenTheSameWayWithinTheirParent(t *testing.T) {
 	r.SetRegistry(registry(parent, childLate, childEarly))
 
 	// Assert: the same rule applies inside the family as outside it.
-	rows := repoRows(t, latest(t, r))
+	rows := repoOpen(t, latest(t, r))
 	want := []string{"zzz-child", "aaa-child"}
-	if got := rowNames(rows[0].GetChildren()); !equal(got, want) {
+	if got := rowNames(innerRows(rows[0].GetChildren())); !equal(got, want) {
 		t.Fatalf("children order = %v, want %v", got, want)
 	}
 }
@@ -268,8 +269,10 @@ func TestRecentlyMergedOrdersByMergeTimeNewestFirst(t *testing.T) {
 	r, _ := newResolver(t)
 	older := placed(workspace("w-older", "older"), 1)
 	older.MergedAt = at(0)
+	older.Closed = true
 	newer := placed(workspace("w-newer", "newer"), 2)
 	newer.MergedAt = at(time.Hour)
+	newer.Closed = true
 
 	// Act.
 	r.SetRegistry(registry(older, newer))
@@ -338,23 +341,24 @@ func TestSortMergedNewestFirstRefusesARowWithNoMergeInstant(t *testing.T) {
 // withMergedAt stamps WS merged at AT.
 func withMergedAt(ws wsm.Workspace, at *time.Time) wsm.Workspace {
 	ws.MergedAt = at
+	ws.Closed = true
 	return ws
 }
 
-func TestRosterOrdersRepositorySectionsByName(t *testing.T) {
-	// Arrange.
+func TestRosterOrdersRepositorySectionsByPlace(t *testing.T) {
+	// Arrange: the name and the slice would both put alpha first.
 	r, _ := newResolver(t)
-	second := wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main"}
+	first := wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main", Place: 0}
 	reg := registry(workspace("w1", "one"))
-	reg.Repositories = []wsm.Repository{second, repo}
+	reg.Repositories = []wsm.Repository{repo, first}
 
 	// Act.
 	r.SetRegistry(reg)
 
 	// Assert.
 	sections := latest(t, r).GetRepository().GetSections()
-	if len(sections) != 2 || sections[0].GetHeader().GetLabel().GetText() != "alpha" {
-		t.Fatal("repository sections did not order by name")
+	if len(sections) != 2 || sections[0].GetHeader().GetLabel().GetText() != "beta" {
+		t.Fatal("repository sections did not order by place")
 	}
 }
 
@@ -374,41 +378,38 @@ func equal(a, b []string) bool {
 // tabIDsOf is the published tab bar's workspace ids and their visibility arm.
 func tabIDsOf(roster *frontendv1.WorkspaceRoster) []string {
 	out := []string{}
-	for _, tab := range roster.GetTabBar().GetTabs() {
+	for _, open := range rosterwalk.OpenRows(roster) {
 		arm := "drawn"
 		switch {
-		case tab.GetWithheldHidden() != nil:
-			arm = "hidden"
-		case tab.GetWithheldCollapsed() != nil:
+		case open.GetTab().GetFolded() != nil:
 			arm = "collapsed"
-		case tab.GetDrawn() == nil:
+		case open.GetTab().GetNumbered() == nil:
 			arm = "unset"
 		}
-		out = append(out, tab.GetWorkspace().GetId()+":"+arm)
+		out = append(out, open.GetRow().GetWorkspace().GetWorkspace().GetId()+":"+arm)
 	}
 	return out
 }
 
-func TestTheTabBarFollowsRegistryOrderAcrossRepositories(t *testing.T) {
+func TestTheTabBarKeepsEachRepositorysWorkspacesTogether(t *testing.T) {
 	// Arrange: two repositories whose workspaces interleave in the registry.
 	r, _ := newResolver(t)
-	second := wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main"}
 	other := placed(workspace("w-b", "b"), 2)
-	other.Repo = second.ID
+	other.Repo = otherRepo.ID
 	reg := registry(placed(workspace("w-a", "a"), 1), other, placed(workspace("w-c", "c"), 3))
-	reg.Repositories = append(reg.Repositories, second)
+	reg.Repositories = append(reg.Repositories, otherRepo)
 
 	// Act.
 	r.SetRegistry(reg)
 
-	// Assert.
-	want := []string{"w-a:drawn", "w-b:drawn", "w-c:drawn"}
+	// Assert: every tab of the first repository precedes the second's.
+	want := []string{"w-a:drawn", "w-c:drawn", "w-b:drawn"}
 	if got := tabIDsOf(latest(t, r)); !equal(got, want) {
 		t.Fatalf("tab bar = %v, want %v", got, want)
 	}
 }
 
-func TestTheTabBarPutsAChildWhereTheRegistryDoes(t *testing.T) {
+func TestTheTabBarPutsAChildRightOfItsParent(t *testing.T) {
 	// Arrange: a child placed after its parent's sibling.
 	r, _ := newResolver(t)
 	parent := placed(workspace("w-p", "parent"), 1)
@@ -419,8 +420,8 @@ func TestTheTabBarPutsAChildWhereTheRegistryDoes(t *testing.T) {
 	// Act.
 	r.SetRegistry(registry(parent, child, sibling))
 
-	// Assert: the sidebar nests the child, the tab bar does not.
-	want := []string{"w-p:drawn", "w-s:drawn", "w-k:drawn"}
+	// Assert: the tab bar walks the family as the sidebar draws it.
+	want := []string{"w-p:drawn", "w-k:drawn", "w-s:drawn"}
 	if got := tabIDsOf(latest(t, r)); !equal(got, want) {
 		t.Fatalf("tab bar = %v, want %v", got, want)
 	}
@@ -441,7 +442,7 @@ func TestTheTabBarLeavesOutClosedWorkspaces(t *testing.T) {
 	}
 }
 
-func TestTheTabBarWithholdsAHiddenWorkspace(t *testing.T) {
+func TestAHiddenWorkspaceHasNoTab(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 	hidden := placed(hiddenWorkspace("w-h", "hidden"), 1)
@@ -450,8 +451,8 @@ func TestTheTabBarWithholdsAHiddenWorkspace(t *testing.T) {
 	r.SetRegistry(registry(hidden))
 
 	// Assert.
-	if got := tabIDsOf(latest(t, r)); !equal(got, []string{"w-h:hidden"}) {
-		t.Fatalf("tab bar = %v, want the hidden tab withheld", got)
+	if got := tabIDsOf(latest(t, r)); !equal(got, []string{}) {
+		t.Fatalf("tab bar = %v, want no tab for the hidden workspace", got)
 	}
 }
 
@@ -470,44 +471,45 @@ func TestTheTabBarWithholdsAWorkspaceOfACollapsedRepository(t *testing.T) {
 	}
 }
 
-func TestTheTabBarDrawsAMergedWorkspaceEvenWhenHidden(t *testing.T) {
-	// Arrange: a merged workspace files under recently merged whatever its
-	// hidden flag, so its tab is drawn.
+func TestAMergedWorkspaceHasNoTab(t *testing.T) {
+	// Arrange: merged and closed, so it is listed under Recently Merged and
+	// is never open.
 	r, _ := newResolver(t)
 	merged := placed(workspace("w-m", "merged"), 1)
 	merged.MergedAt = at(0)
-	merged = hiddenAt(merged, 0)
+	merged.Closed = true
 
 	// Act.
-	r.SetRegistry(registry(merged))
+	r.SetRegistry(registry(merged, placed(workspace("w-a", "a"), 2)))
 
 	// Assert.
-	if got := tabIDsOf(latest(t, r)); !equal(got, []string{"w-m:drawn"}) {
-		t.Fatalf("tab bar = %v, want the merged tab drawn", got)
+	if got := tabIDsOf(latest(t, r)); !equal(got, []string{"w-a:drawn"}) {
+		t.Fatalf("tab bar = %v, want only the open workspace's tab", got)
 	}
 }
 
-func TestTheTabBarWithholdsAMergedWorkspaceOfACollapsedRepository(t *testing.T) {
-	// Arrange: its merged group follows the repository's fold, so its tab does.
+func TestAReopenedMergedWorkspaceIsOpenWithATab(t *testing.T) {
+	// Arrange: OPEN BEATS MERGED.
 	r, _ := newResolver(t)
-	merged := placed(workspace("w-m", "merged"), 1)
-	merged.MergedAt = at(0)
-	reg := registry(merged)
-	reg.Repositories[0].Folded = true
+	reopened := placed(workspace("w-m", "merged"), 1)
+	reopened.MergedAt = at(0)
 
 	// Act.
-	r.SetRegistry(reg)
+	r.SetRegistry(registry(reopened))
 
 	// Assert.
-	if got := tabIDsOf(latest(t, r)); !equal(got, []string{"w-m:collapsed"}) {
-		t.Fatalf("tab bar = %v, want the merged tab withheld", got)
+	if got := tabIDsOf(latest(t, r)); !equal(got, []string{"w-m:drawn"}) {
+		t.Fatalf("tab bar = %v, want the reopened workspace's tab", got)
+	}
+	if len(rosterwalk.MergedRows(latest(t, r))) != 0 {
+		t.Fatal("a reopened merged workspace is still under Recently Merged")
 	}
 }
 
 // tabsRegistry is one registry holding every kind of tab: drawn, hidden,
 // collapsed, closed and hidden-merge, placed out of slice order.
 func tabsRegistry() sidebar.Registry {
-	folded := wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main", Folded: true}
+	folded := wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main", Folded: true, Place: 2}
 	collapsed := placed(workspace("w-c", "collapsed"), 2)
 	collapsed.Repo = folded.ID
 	closed := placed(workspace("w-x", "closed"), 4)
@@ -524,13 +526,13 @@ func TestTabs(t *testing.T) {
 	reg := tabsRegistry()
 
 	// Act
-	got := sidebar.Tabs(reg)
+	got := sidebar.Tabs(reg, dlog.NewTestLogger())
 
-	// Assert: registry order, closed and hidden-merge workspaces have no tab.
+	// Assert: repository by repository; a folded repository's tab withheld as
+	// collapsed; hidden, closed and hidden-merge workspaces have no tab.
 	want := []sidebar.Tab{
-		{Workspace: reg.Workspaces[4], Withheld: wsm.WithheldHidden},
-		{Workspace: reg.Workspaces[1], Withheld: wsm.WithheldCollapsed},
 		{Workspace: reg.Workspaces[0], Withheld: wsm.Drawn},
+		{Workspace: reg.Workspaces[1], Withheld: wsm.WithheldCollapsed},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("Tabs = %+v, want %+v", got, want)
@@ -547,7 +549,7 @@ func TestTheTabBarIsDrawnFromTabs(t *testing.T) {
 	r, _ := newResolver(t)
 	reg := tabsRegistry()
 	var want []string
-	for _, tab := range sidebar.Tabs(reg) {
+	for _, tab := range sidebar.Tabs(reg, dlog.NewTestLogger()) {
 		want = append(want, string(tab.Workspace.ID)+":"+tab.Withheld.String())
 	}
 
@@ -605,7 +607,7 @@ func TestTheHiddenSectionListsTheLatestHideFirst(t *testing.T) {
 	))
 
 	// Assert.
-	got := rowNames(latest(t, r).GetHidden().GetRows().GetRows())
+	got := rowNames(topHidden(latest(t, r)))
 	if !equal(got, []string{"late", "early"}) {
 		t.Fatalf("hidden rows = %v, want the latest hide first", got)
 	}

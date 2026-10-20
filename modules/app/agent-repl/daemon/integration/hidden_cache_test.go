@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"agentrepl/protohelpers/rosterwalk"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ import (
 
 // hiddenRow finds a workspace's row in the hidden section.
 func hiddenRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.RosterRow {
-	for _, r := range roster.GetHidden().GetRows().GetRows() {
+	for _, r := range rosterwalk.HiddenRows(roster) {
 		if r.GetWorkspace().GetWorkspace().GetId() == id {
 			return r
 		}

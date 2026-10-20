@@ -118,6 +118,7 @@
 (declare-function agent-repl-rpc-set-workspace-priority "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-set-workspace-hidden "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-swap-workspaces "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-move-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-deploy "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-shutdown-schedule "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-update-merge-queue "agent-repl-rpc" (conn request &rest keys))
@@ -128,6 +129,8 @@
 ;; Defined by roster.el.  Declared, never defined here.
 (declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
 (declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
+(declare-function agent-repl-roster-section-rows "agent-repl-roster" (section))
+(declare-function agent-repl-roster-flatten "agent-repl-roster" (rows))
 (declare-function agent-repl-roster-row-ref "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-name "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-closed-p "agent-repl-roster" (row))
@@ -311,6 +314,44 @@ sentence the shim and the daemon word it with."
   "Return STDERR as a parenthesized suffix, or the empty string when empty."
   (if (string-empty-p stderr) "" (format " (%s)" stderr)))
 
+;; A FAMILY STAYS IN ONE LIST OF THE ROSTER (agentrepl.v1 family.proto): a
+;; workspace with open children is not closed, killed, nuked, hidden or
+;; merged closed, and no open child is made, re-opened or shown under a parent
+;; that is hidden, closed or closing.  Both refusals are ANSWERS, not faults,
+;; and every verb that can meet one words it here, naming the workspaces in
+;; the way, as the sidebar words it (webapp `rpc/family-refusal.ts').
+
+(defun agent-repl-verbs--ref-label (ref)
+  "Name the `WorkspaceRef' REF in words: its directory's last part, else its id."
+  (let ((dir (plist-get ref :dir)))
+    (if (and (stringp dir) (not (string-empty-p dir)))
+        (file-name-nondirectory (directory-file-name dir))
+      (plist-get ref :id))))
+
+(defun agent-repl-verbs-family-sentence (op keyword fields)
+  "Word the family refusal KEYWORD of verb OP from its FIELDS, or nil.
+KEYWORD `:has-open-children' names the parent's open children, and for a
+merge (OP \"merge\") asks for them to be resolved and closed before a
+one-shot merge; `:parent-not-open' names the parent and what to do about
+it.  Nil for any other arm, which is not a family refusal."
+  (pcase keyword
+    (:has-open-children
+     (let* ((children (plist-get fields :children))
+            (names (mapconcat #'agent-repl-verbs--ref-label children ", "))
+            (one (null (cdr children))))
+       (if (equal op "merge")
+           (format "%s still has open child workspaces (%s); resolve and close all of them before a one-shot merge"
+                   (agent-repl-verbs--ref-label (plist-get fields :parent)) names)
+         (format "%s refused: %s %s still open under this workspace; close %s first"
+                 op names (if one "is" "are") (if one "it" "them")))))
+    (:parent-not-open
+     (let ((parent (agent-repl-verbs--ref-label (plist-get fields :parent))))
+       (pcase (plist-get (plist-get fields :state) :arm)
+         (:hidden (format "%s refused: its parent %s is hidden; show the parent first" op parent))
+         (:closed (format "%s refused: its parent %s is closed; reopen the parent first" op parent))
+         (:closing (format "%s refused: its parent %s closes once its queued merge lands" op parent))
+         (state (error "agent-repl-verbs: parent_not_open state %S has no wording" state)))))))
+
 (defun agent-repl-verbs--on-refusal (ws op value)
   "Report a daemon-authored refusal of OP for WS, or route it to the handover.
 The two handover arms are silent by design.  `worktree_unrestorable' is an
@@ -334,6 +375,11 @@ keyword, and the fields."
         (agent-repl--info ws (format "elisp.verbs.%s-unrestorable ws=%%s dir=%%S branch=%%S" op)
                           ws (plist-get fields :dir) (plist-get fields :branch))
         (message "%s refused: %s" op (plist-get fields :detail))))
+     ((memq keyword '(:has-open-children :parent-not-open))
+      ;; A FAMILY RULE ANSWERED: recorded at INFO, said in words.
+      (agent-repl--info ws (format "elisp.verbs.%s-family-refused ws=%%s arm=%%S fields=%%S" op)
+                        ws keyword (plist-get arm :value))
+      (message "agent-repl: %s" (agent-repl-verbs-family-sentence op keyword (plist-get arm :value))))
      ((eq keyword :lock-holder-unavailable)
       ;; THE ONE ARM WHOSE KEYWORD WOULD MISLEAD ON ITS OWN.  Nobody owns
       ;; the conversation: the shim's own lock helper failed, and the binary
@@ -474,13 +520,6 @@ must leave the other a no-op."
 ;; (`agent-repl-roster-row-ref', `agent-repl-roster-row-name',
 ;; `agent-repl-roster-row-closed-p'), never a second spelling here.
 
-(defun agent-repl-verbs--flatten-rows (rows)
-  "Return ROWS and every descendant, depth-first, in walk order."
-  (apply #'append
-         (mapcar (lambda (row)
-                   (cons row (agent-repl-verbs--flatten-rows (plist-get row :children))))
-                 rows)))
-
 (defun agent-repl-verbs--roster-or-view (roster)
   "Return ROSTER, or `agent-repl-roster-view' when ROSTER is nil.
 THE ONE DEFAULTING every roster reader here shares: a nil ROSTER means the
@@ -524,8 +563,8 @@ obvious answer is the repo the user is already working in."
          (cl-find-if (lambda (row)
                        (equal (plist-get (agent-repl-roster-row-ref row) :id)
                               (plist-get ref :id)))
-                     (agent-repl-verbs--flatten-rows
-                      (plist-get (plist-get section :rows) :rows))))
+                     (agent-repl-roster-flatten
+                      (agent-repl-roster-section-rows section))))
        (agent-repl-verbs--repo-sections roster)))))
 
 ;;;; ---- The workspace verbs ----------------------------------------------
@@ -976,16 +1015,55 @@ with a record saying so."
 (defun agent-repl-verb-swap (ws target)
   "Exchange the places of WS and TARGET in the registry order.
 WS takes TARGET's place and TARGET takes WS's; every other workspace keeps
-its own.  The tab bar and the sidebar are both views of the registry, and
-the new order arrives on the roster stream, so success changes no editor
-state."
+its own.  The two must be siblings of one repository (both top-level, or
+children of one parent); any other tab is refused and said in words
+\(`agent-repl-verbs--no-tab-to-take').  The tab bar and the sidebar are
+both views of the registry, and the new order arrives on the roster
+stream, so success changes no editor state."
   (agent-repl-verbs--send
    #'agent-repl-rpc-swap-workspaces (agent-repl-verbs--conn ws)
    (list :workspace (agent-repl-verbs--ref ws) :target (agent-repl-verbs--ref target))
    :ws ws :op "swap"
    :on-success
    (lambda (_)
-     (message "agent-repl: swapped %s with %s" ws target))))
+     (message "agent-repl: swapped %s with %s" ws target))
+   :on-error
+   (lambda (value) (agent-repl-verbs--no-tab-to-take "swap" ws target value))))
+
+(defun agent-repl-verbs--no-tab-to-take (op ws target value)
+  "Claim refusal VALUE of tab-slot gesture OP when it says no tab can be taken.
+NO TAB TO TAKE IS AN ANSWER, NOT A FAULT: the user pressed the tab of a
+workspace of another repository (`:other-repository') or another family
+\(`:not-siblings', a child's tab always following its parent's), and the
+daemon said why WS cannot take TARGET's tab.
+Recorded at INFO and said in words, answering non-nil; every other arm is
+left to the arm-generic report."
+  (let ((arm (plist-get (agent-repl-verbs--refusal-arm value) :arm)))
+    (when (memq arm '(:other-repository :not-siblings))
+      (agent-repl--info ws (format "elisp.verbs.%s-no-tab ws=%%s target=%%s arm=%%S" op) ws target arm)
+      (if (eq arm :other-repository)
+          (message "agent-repl: %s and %s are in different repositories, so %s cannot take that tab"
+                   ws target ws)
+        (message "agent-repl: %s and %s are not siblings, so %s cannot take that tab"
+                 ws target ws))
+      t)))
+
+(defun agent-repl-verb-move (ws target)
+  "Move WS onto TARGET's tab, the tabs between shifting over.
+The daemon places WS just before TARGET when it comes from a later tab and
+just after TARGET's family when it comes from an earlier one; the two must
+be siblings in the sidebar's arrangement, and any other pair is refused.
+The new order arrives on the roster stream, so success changes no editor
+state."
+  (agent-repl-verbs--send
+   #'agent-repl-rpc-move-workspace (agent-repl-verbs--conn ws)
+   (list :workspace (agent-repl-verbs--ref ws) :target (agent-repl-verbs--ref target))
+   :ws ws :op "move"
+   :on-success
+   (lambda (_)
+     (message "agent-repl: moved %s onto %s's tab" ws target))
+   :on-error
+   (lambda (value) (agent-repl-verbs--no-tab-to-take "move" ws target value))))
 
 (cl-defun agent-repl-verb-create (repository form
                                              &key initial-prompt base-ref name
@@ -1202,6 +1280,7 @@ is named by its keyword and fields rather than dropped."
       (:inside-temporary-directory
        (agent-repl-verbs-temporary-directory-sentence (plist-get arm :value)))
       (:not-a-worktree (format "%s is not a git worktree" dir))
+      (:parent-not-open (agent-repl-verbs-family-sentence "register" keyword (plist-get arm :value)))
       (_ (format "the daemon refused %s: %s%s" dir
                  (if keyword (substring (symbol-name keyword) 1) "unstated")
                  (agent-repl-verbs--refusal-fields arm))))))
@@ -1889,13 +1968,13 @@ row in that section, or picking it from `SPC TAB H', shows it again."
   (agent-repl-verb-set-hidden (agent-repl-verbs--target-ws ws "Hide workspace: ") t))
 
 (defun agent-repl-verbs--hidden-rows (&optional roster)
-  "Return the OPEN rows of ROSTER's hidden section, in walk order.
-ROSTER defaults to `agent-repl-roster-view'.  A closed row has no tab to
-switch to, so only open rows are offered back."
-  (let* ((roster (agent-repl-verbs--roster-or-view roster))
-         (rows (plist-get (plist-get (plist-get roster :hidden) :rows) :rows)))
-    (cl-remove-if #'agent-repl-roster-row-closed-p
-                  (agent-repl-verbs--flatten-rows rows))))
+  "Return the rows of ROSTER's hidden section, in walk order.
+ROSTER defaults to `agent-repl-roster-view'.  The hidden list holds open
+workspaces only (a closed one is in the closed list), so every row is one
+to switch back to."
+  (let ((roster (agent-repl-verbs--roster-or-view roster)))
+    (agent-repl-roster-flatten
+     (plist-get (plist-get (plist-get roster :hidden) :hidden-rows) :rows))))
 
 (defun agent-repl-show-hidden-workspace ()
   "Show a hidden workspace again and switch to it (`SPC TAB H').

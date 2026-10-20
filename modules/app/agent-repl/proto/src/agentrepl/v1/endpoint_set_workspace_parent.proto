@@ -24,6 +24,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/family.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -103,6 +104,9 @@ message SetWorkspaceParentError {
     // prompt until the gate is answered, so the notice cannot be queued and
     // the retarget is not made. Answer the gate, then retarget.
     SetWorkspaceParentColdGate cold_gate = 10;
+    // The named parent is hidden or closed, and moving the workspace under
+    // it would make an open child of a parent outside the Open section.
+    WorkspaceParentNotOpen parent_not_open = 11;
   }
 }
 

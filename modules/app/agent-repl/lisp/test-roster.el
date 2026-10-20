@@ -28,13 +28,15 @@
 
 (defun agent-repl-test-roster--row (id name status &rest overrides)
   "Return a decoded `RosterRow' plist for ID, NAME and STATUS.
-OVERRIDES is a plist merged over the defaults: `:closed', `:children',
+OVERRIDES is a plist merged over the defaults: `:closed', `:children' (the
+row's family, recorded through `agent-repl-test--with-family'),
 `:attention', `:priority', `:viewed', `:detached-live', `:one-shot'
 \(non-nil for a one-shot), `:async-merging' (non-nil while the branch
 merges async), `:current', `:dir', `:availability' (an arm keyword,
 default `:available')."
   (let ((dir (or (plist-get overrides :dir) (concat "/w/" id))))
-    (list :workspace (list :workspace (list :id id :dir dir))
+    (agent-repl-test--with-family
+     (list :workspace (list :workspace (list :id id :dir dir))
           :attention (plist-get overrides :attention)
           :priority (plist-get overrides :priority)
           :viewed (plist-get overrides :viewed)
@@ -46,19 +48,19 @@ default `:available')."
           :name (list :text name)
           :status (list :arm status :value nil)
           :current (list :current (or (plist-get overrides :current) :false))
-          :children (plist-get overrides :children)
           :when (list :arm nil :value nil)
           :detail (list :branch nil :parent-branch nil :summary nil)
           :closed (list :closed (if (plist-member overrides :closed)
                                     (plist-get overrides :closed)
-                                  :false)))))
+                                  :false)))
+     (plist-get overrides :children))))
 
 (defun agent-repl-test-roster--section (label rows &optional collapsed)
   "Return a decoded `RosterRepoSection' plist labelled LABEL carrying ROWS.
 COLLAPSED non-nil makes the daemon hold the section collapsed."
   (list :key (list :repository (list :id (concat "repo-" label) :dir (concat "/r/" label)))
         :header (list :label (list :text label))
-        :rows (list :rows rows)
+        :open-rows (agent-repl-test--open-rows rows)
         :fold (list :arm (if collapsed :collapsed :expanded) :value nil)))
 
 (defun agent-repl-test-roster--merged-group (label rows &optional collapsed)
@@ -66,23 +68,22 @@ COLLAPSED non-nil makes the daemon hold the section collapsed."
 COLLAPSED non-nil puts it on the `repository_collapsed' arm."
   (list :key (list :repository (list :id (concat "r-" label) :dir (concat "/r/" label)))
         :header (list :label (list :text label))
-        :rows (list :rows rows)
+        :merged-rows (agent-repl-test--merged-rows rows)
         :drawn (list :arm (if collapsed :repository-collapsed :shown) :value nil)))
 
-(cl-defun agent-repl-test-roster--roster (&key sections hidden merged merged-groups current tab-bar)
+(cl-defun agent-repl-test-roster--roster (&key sections hidden merged merged-groups closed current)
   "Return a decoded `WorkspaceRoster' plist from SECTIONS, HIDDEN, MERGED and CURRENT.
-HIDDEN is the hidden section's rows; the section itself is always there,
-expanded, as the daemon always sends it.  MERGED is the recently-merged
-rows, carried in one shown group; MERGED-GROUPS, when given, is the band's
-groups instead.  TAB-BAR is the daemon's tab bar, defaulting to the
-fixture's rows in the order it lists them (`agent-repl-test--tab-bar-of'),
-a collapsed merged group's rows withheld."
-  (list :repository (list :sections sections)
-        :tab-bar (or tab-bar (agent-repl-test--tab-bar-of
-                              sections hidden merged merged-groups))
+SECTIONS' open rows get their tabs numbered as the daemon numbers them
+\(`agent-repl-test--number-tabs').  HIDDEN is the hidden section's rows;
+the section itself is always there, expanded, as the daemon always sends
+it.  MERGED is the recently-merged rows, carried in one shown group;
+MERGED-GROUPS, when given, is the band's groups instead.  CLOSED is the
+closed list's rows."
+  (list :repository (list :sections (agent-repl-test--number-tabs sections))
         :hidden (list :header (list :label (list :text "Hidden"))
-                      :rows (list :rows hidden)
+                      :hidden-rows (agent-repl-test--hidden-rows hidden)
                       :fold (list :arm :expanded :value nil))
+        :closed (agent-repl-test--closed-rows closed)
         :recently-merged (list :header (list :label (list :text "Recently Merged"))
                                :groups (or merged-groups
                                            (and merged
@@ -227,6 +228,73 @@ whose calls are the observation."
                        (agent-repl-roster-walk roster))))
       ;; Assert
       (should (equal ids '("b" "a"))))))
+
+(defun agent-repl-test-roster--with-subsections (section &rest subsection-rows)
+  "Return SECTION carrying one subsection per list of SUBSECTION-ROWS."
+  (append section
+          (list :subsections
+                (seq-map-indexed (lambda (rows i)
+                                   (list :key (list :subsection-id (format "sub-%d" i))
+                                         :header (list :label (list :text (format "sub %d" i)))
+                                         :open-rows (agent-repl-test--open-rows rows)
+                                         :fold (list :arm :expanded :value nil)))
+                                 subsection-rows))))
+
+(ert-deftest agent-repl-test-roster-section-rows-follow-the-sections-own-with-its-subsections ()
+  "A section's rows are its unsectioned rows, then each subsection's in turn."
+  ;; Arrange
+  (let ((section (agent-repl-test-roster--with-subsections
+                  (agent-repl-test-roster--section
+                   "alpha" (list (agent-repl-test-roster--row "a" "a-row" :ready)))
+                  (list (agent-repl-test-roster--row "s" "s-row" :ready))
+                  nil
+                  (list (agent-repl-test-roster--row "t" "t-row" :ready)))))
+    ;; Act
+    (let ((ids (mapcar #'agent-repl-roster-row-id
+                       (agent-repl-roster-flatten (agent-repl-roster-section-rows section)))))
+      ;; Assert
+      (should (equal ids '("a" "s" "t"))))))
+
+(ert-deftest agent-repl-test-roster-flatten-answers-each-row-before-its-family ()
+  "Flattening list rows answers the shared rows, each before its children."
+  ;; Arrange
+  (let ((rows (plist-get (agent-repl-test--open-rows
+                          (list (agent-repl-test-roster--row
+                                 "p" "p" :ready
+                                 :children (list (agent-repl-test-roster--row "c" "c" :ready)))
+                                (agent-repl-test-roster--row "q" "q" :ready)))
+                         :rows)))
+    ;; Act
+    (let ((ids (mapcar #'agent-repl-roster-row-id (agent-repl-roster-flatten rows))))
+      ;; Assert
+      (should (equal ids '("p" "c" "q"))))))
+
+(ert-deftest agent-repl-test-roster-walk-visits-a-sections-subsections ()
+  "The walk finds a workspace in a subsection, after the section's own rows."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--with-subsections
+                                  (agent-repl-test-roster--section
+                                   "alpha" (list (agent-repl-test-roster--row "a" "a-row" :ready)))
+                                  (list (agent-repl-test-roster--row "s" "s-row" :ready)))
+                                 (agent-repl-test-roster--section
+                                  "beta" (list (agent-repl-test-roster--row "b" "b-row" :ready)))))))
+    ;; Act
+    (let ((ids (mapcar (lambda (e) (agent-repl-roster-row-id (plist-get e :row)))
+                       (agent-repl-roster-walk roster))))
+      ;; Assert
+      (should (equal ids '("a" "s" "b"))))))
+
+(ert-deftest agent-repl-test-roster-repository-of-finds-a-workspace-in-a-subsection ()
+  "A workspace in a subsection belongs to its section's repository."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--with-subsections
+                                  (agent-repl-test-roster--section "alpha" nil)
+                                  (list (agent-repl-test-roster--row "s" "s-row" :ready)))))))
+    ;; Act / Assert
+    (should (equal (plist-get (agent-repl-roster-repository-of "s" roster) :id)
+                   "repo-alpha"))))
 
 (ert-deftest agent-repl-test-roster-repository-of-answers-the-section-key ()
   "A workspace's repository is ITS SECTION'S OWN key, the imported join token."
@@ -408,13 +476,11 @@ the rest of its life."
       (should (equal agent-repl-test-roster--subscribed '("fix-login"))))))
 
 (ert-deftest agent-repl-test-roster-a-closed-row-gets-no-tab ()
-  "A row with closed=true has no tab: merged, closed and killed rows carry it."
+  "A row of the closed list has no tab: the Open section is the tab bar."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let ((roster (agent-repl-test-roster--roster
-                   :sections (list (agent-repl-test-roster--section
-                                    "repo" (list (agent-repl-test-roster--row
-                                                  "a" "gone" :dead :closed t)))))))
+                   :closed (list (agent-repl-test-roster--row "a" "gone" :dead :closed t)))))
       ;; Act
       (agent-repl-roster-apply roster)
       ;; Assert
@@ -431,9 +497,7 @@ the rest of its life."
     ;; Act
     (agent-repl-roster-apply
      (agent-repl-test-roster--roster
-      :sections (list (agent-repl-test-roster--section
-                       "repo" (list (agent-repl-test-roster--row
-                                     "a" "fix-login" :merged :closed t))))))
+      :closed (list (agent-repl-test-roster--row "a" "fix-login" :ready :closed t))))
     ;; Assert
     (should (equal (agent-repl-test-roster--tabs) nil))))
 
@@ -1187,16 +1251,17 @@ that follows must not care which of the two got there first."
     ;; Assert
     (should (equal (agent-repl-test-roster--tabs) '("fix" "other")))))
 
-(ert-deftest agent-repl-test-roster-a-recently-merged-row-still-open-keeps-its-tab ()
-  "closed=false is the whole membership rule, recently-merged included."
+(ert-deftest agent-repl-test-roster-a-recently-merged-row-has-no-tab ()
+  "A merged workspace is never open, so its row has no tab: OPEN BEATS MERGED.
+A merged workspace that is reopened is listed in the Open section instead."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     ;; Act
     (agent-repl-roster-apply
      (agent-repl-test-roster--roster
-      :merged (list (agent-repl-test-roster--row "m" "landed" :merged :closed :false))))
+      :merged (list (agent-repl-test-roster--row "m" "landed" :merged :closed t))))
     ;; Assert
-    (should (equal (agent-repl-test-roster--tabs) '("landed")))))
+    (should (equal (agent-repl-test-roster--tabs) nil))))
 
 ;;;; ---- The current workspace (R8) ----
 
@@ -2619,37 +2684,6 @@ is the finish edge (owner ruling, 2026-10-06)."
 
 ;;; test-roster.el ends here
 
-;;;; ---- Tests: move-tab-to-back ----
-
-(ert-deftest agent-repl-test-roster-move-tab-to-back-puts-ws-last ()
-  "The deprio shuffle moves WS to the last slot of the roster tab order."
-  ;; Arrange
-  (agent-repl-test-roster--with-editor
-    (let ((agent-repl-roster--tab-order '("a" "b" "c")))
-      ;; Act
-      (agent-repl-roster-move-tab-to-back "a")
-      ;; Assert
-      (should (equal agent-repl-roster--tab-order '("b" "c" "a"))))))
-
-(ert-deftest agent-repl-test-roster-move-tab-to-back-returns-the-new-order ()
-  "The shuffle returns the order it installed, so the caller can mirror it."
-  ;; Arrange
-  (agent-repl-test-roster--with-editor
-    (let ((agent-repl-roster--tab-order '("a" "b" "c")))
-      ;; Act
-      (let ((got (agent-repl-roster-move-tab-to-back "b")))
-        ;; Assert
-        (should (equal got '("a" "c" "b")))))))
-
-(ert-deftest agent-repl-test-roster-move-tab-to-back-unknown-ws-is-nil ()
-  "A workspace with no tab returns nil and leaves the order alone."
-  ;; Arrange
-  (let ((agent-repl-roster--tab-order '("a" "b")))
-    ;; Act
-    (let ((got (agent-repl-roster-move-tab-to-back "nope")))
-      ;; Assert
-      (should (and (null got) (equal agent-repl-roster--tab-order '("a" "b")))))))
-
 
 ;;;; ---- The bring-up publication (a startup paints nothing) ----
 
@@ -2841,64 +2875,89 @@ saying the roster had been asked for one and declined."
       (should-not (seq-some (lambda (text) (string-search "elisp.roster.no-tab:" text))
                             logs)))))
 
-;;;; ---- The tab bar's order is the daemon's ----
+;;;; ---- The Open section is the tab bar ----
 
-(defun agent-repl-test-roster--tab (id &optional arm)
-  "Return a decoded `RosterTab' for workspace ID with visibility ARM."
-  (list :workspace (list :id id :dir (concat "/w/" id))
-        :visibility (list :arm (or arm :drawn) :value nil)))
-
-(ert-deftest agent-repl-test-roster-desired-tabs-follow-the-tab-bar-not-the-sections ()
-  "The tabs come in the daemon's tab-bar order, whatever order the sections walk."
-  ;; Arrange: the sections walk a, b, c; the registry puts c first.
-  (agent-repl-test-roster--with-editor
-    (let ((roster (agent-repl-test-roster--roster
-                   :sections (list (agent-repl-test-roster--section
-                                    "repo" (list (agent-repl-test-roster--row "a" "a" :ready)
-                                                 (agent-repl-test-roster--row "b" "b" :ready)
-                                                 (agent-repl-test-roster--row "c" "c" :ready))))
-                   :tab-bar (list :tabs (list (agent-repl-test-roster--tab "c")
-                                              (agent-repl-test-roster--tab "a")
-                                              (agent-repl-test-roster--tab "b"))))))
-      ;; Act
-      (let ((ids (mapcar (lambda (tab) (plist-get tab :id))
-                         (agent-repl-roster-desired-tabs roster))))
-        ;; Assert
-        (should (equal ids '("c" "a" "b")))))))
-
-(ert-deftest agent-repl-test-roster-a-withheld-tab-is-collapsed ()
-  "A tab the daemon withholds keeps its tab but comes back `:collapsed'."
+(ert-deftest agent-repl-test-roster-desired-tabs-follow-the-open-walk-then-the-hidden ()
+  "The tabs are the Open section's rows in its walk, then each hidden workspace's."
   ;; Arrange
   (agent-repl-test-roster--with-editor
     (let ((roster (agent-repl-test-roster--roster
                    :sections (list (agent-repl-test-roster--section
                                     "repo" (list (agent-repl-test-roster--row "a" "a" :ready)
-                                                 (agent-repl-test-roster--row "h" "h" :ready))))
-                   :tab-bar (list :tabs (list (agent-repl-test-roster--tab "a")
-                                              (agent-repl-test-roster--tab "h" :withheld-hidden))))))
+                                                 (agent-repl-test-roster--row "b" "b" :ready))))
+                   :hidden (list (agent-repl-test-roster--row "h" "h" :ready)))))
       ;; Act
-      (let ((collapsed (mapcar (lambda (tab) (cons (plist-get tab :id) (plist-get tab :collapsed)))
-                               (agent-repl-roster-desired-tabs roster))))
-        ;; Assert
-        (should (equal collapsed '(("a") ("h" . t))))))))
+      (let ((tabs (mapcar (lambda (tab) (cons (plist-get tab :id) (plist-get tab :collapsed)))
+                          (agent-repl-roster-desired-tabs roster))))
+        ;; Assert: a hidden workspace keeps an undrawn tab.
+        (should (equal tabs '(("a") ("b") ("h" . t))))))))
 
-(ert-deftest agent-repl-test-roster-a-tab-with-no-row-is-recorded-at-error ()
-  "A tab naming a workspace no grouping draws is a broken roster, said loudly."
+(ert-deftest agent-repl-test-roster-a-folded-tab-is-collapsed ()
+  "An open row whose tab the daemon folds keeps its tab but comes back `:collapsed'."
   ;; Arrange
   (agent-repl-test-roster--with-editor
-    (let (errors)
+    (let ((roster (agent-repl-test-roster--roster
+                   :sections (list (agent-repl-test-roster--section
+                                    "shown" (list (agent-repl-test-roster--row "a" "a" :ready)))
+                                   (agent-repl-test-roster--with-subsections
+                                    (agent-repl-test-roster--section
+                                     "folded" (list (agent-repl-test-roster--row "f" "f" :ready)) t))))))
+      ;; Act
+      (let ((tabs (mapcar (lambda (tab) (cons (plist-get tab :id) (plist-get tab :collapsed)))
+                          (agent-repl-roster-desired-tabs roster))))
+        ;; Assert
+        (should (equal tabs '(("a") ("f" . t))))))))
+
+(ert-deftest agent-repl-test-roster-a-collapsed-subsections-tabs-are-collapsed ()
+  "A collapsed subsection's rows carry folded tabs, so their tabs come back `:collapsed'."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let* ((section (agent-repl-test-roster--with-subsections
+                     (agent-repl-test-roster--section
+                      "repo" (list (agent-repl-test-roster--row "a" "a" :ready)))
+                     (list (agent-repl-test-roster--row "s" "s" :ready))))
+           (_ (plist-put (car (plist-get section :subsections)) :fold (list :arm :collapsed :value nil)))
+           (roster (agent-repl-test-roster--roster :sections (list section))))
+      ;; Act
+      (let ((tabs (mapcar (lambda (tab) (cons (plist-get tab :id) (plist-get tab :collapsed)))
+                          (agent-repl-roster-desired-tabs roster))))
+        ;; Assert
+        (should (equal tabs '(("a") ("s" . t))))))))
+
+(ert-deftest agent-repl-test-roster-a-misnumbered-push-is-dropped-at-error ()
+  "A tab numbered out of its place is a broken roster: dropped whole, said loudly."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let* ((roster (agent-repl-test-roster--roster
+                    :sections (list (agent-repl-test-roster--section
+                                     "repo" (list (agent-repl-test-roster--row "a" "a" :ready)
+                                                  (agent-repl-test-roster--row "b" "b" :ready))))))
+           (second (cadr (plist-get (plist-get (car (plist-get (plist-get roster :repository) :sections))
+                                               :open-rows)
+                                    :rows)))
+           errors)
+      (plist-put second :tab (list :tab (list :arm :numbered :value (list :number 5))))
       (cl-letf (((symbol-function 'agent-repl--error)
                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
         ;; Act
-        (let ((tabs (agent-repl-roster-desired-tabs
-                     (agent-repl-test-roster--roster
-                      :sections (list (agent-repl-test-roster--section
-                                       "repo" (list (agent-repl-test-roster--row "a" "a" :ready))))
-                      :tab-bar (list :tabs (list (agent-repl-test-roster--tab "ghost")
-                                                 (agent-repl-test-roster--tab "a")))))))
+        (let ((applied (agent-repl-roster-apply roster)))
           ;; Assert
-          (should (equal (mapcar (lambda (tab) (plist-get tab :id)) tabs) '("a")))))
-      (should (member "elisp.roster.tab-without-row: id=ghost" errors)))))
+          (should (null applied))
+          (should (null (agent-repl-test-roster--tabs)))
+          (should (member "elisp.roster.push: dropped reason=misnumbered-tab id=b number=5" errors)))))))
+
+(ert-deftest agent-repl-test-roster-misnumbered-answers-nil-for-the-daemons-numbers ()
+  "The daemon's own numbering is in place, so nothing is misnumbered."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--section
+                                  "one" (list (agent-repl-test-roster--row "a" "a" :ready)))
+                                 (agent-repl-test-roster--section
+                                  "two" (list (agent-repl-test-roster--row "b" "b" :ready)) t)
+                                 (agent-repl-test-roster--section
+                                  "three" (list (agent-repl-test-roster--row "c" "c" :ready)))))))
+    ;; Act / Assert
+    (should (null (agent-repl-roster--misnumbered (agent-repl-roster-walk roster))))))
 
 ;;;; ---- Opening a workspace opens its panels (owner ruling 2026-09-13, #6) ----
 

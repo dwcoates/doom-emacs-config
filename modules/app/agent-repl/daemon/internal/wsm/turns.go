@@ -319,31 +319,9 @@ func (s *store) HasTurns(ctx context.Context, id WorkspaceID) (bool, error) {
 	return has, nil
 }
 
-// querier is what openTurns needs: the handle or a transaction, so the orphan
-// close reads the same rows through the same decoder inside its transaction.
-type querier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
 // openTurns loads the turns with no terminal, all-or-nothing.
 func openTurns(ctx context.Context, q querier, id WorkspaceID) ([]Turn, error) {
-	rows, err := q.QueryContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE workspace_id = ? AND closed_at IS NULL ORDER BY started_at, id`, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var loaded []Turn
-	for rows.Next() {
-		t, err := scanTurn(rows)
-		if err != nil {
-			return nil, err
-		}
-		loaded = append(loaded, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return loaded, nil
+	return listRows(ctx, q, `SELECT `+turnColumns+` FROM turns WHERE workspace_id = ? AND closed_at IS NULL ORDER BY started_at, id`, scanTurn, id)
 }
 
 // ClaimIdempotencyKey binds a client's key to a turn, in ONE transaction that
@@ -578,24 +556,9 @@ func (s *store) CloseOrphans(ctx context.Context, id WorkspaceID, at time.Time) 
 func (s *store) AllDisplacedTurns(ctx context.Context) ([]Turn, error) {
 	var out []Turn
 	err := s.read(ctx, "daemon.wsm.all_displaced_turns", nil, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE displaced = 1 ORDER BY started_at, id`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var loaded []Turn
-		for rows.Next() {
-			t, err := scanTurn(rows)
-			if err != nil {
-				return err
-			}
-			loaded = append(loaded, t)
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
+		loaded, err := listRows(ctx, s.db(), `SELECT `+turnColumns+` FROM turns WHERE displaced = 1 ORDER BY started_at, id`, scanTurn)
 		out = loaded
-		return nil
+		return err
 	})
 	if err != nil {
 		return nil, err

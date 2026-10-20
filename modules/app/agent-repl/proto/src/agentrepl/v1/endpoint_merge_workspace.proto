@@ -24,6 +24,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/endpoint_create_workspace.proto";
+import "agentrepl/v1/family.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -231,6 +232,11 @@ message MergeWorkspaceError {
     // agent-repl's master. Nothing was recorded; the caller re-sends
     // without one.
     MergeWorkspaceVersionIncrementUnexpected version_increment_unexpected = 14;
+    // The workspace this merge would close (a one-shot's requester, or the
+    // workspace an async merge's one-shot names) has open children, hidden
+    // ones included. Every open child must be resolved and closed before a
+    // merge that closes their parent is asked for.
+    WorkspaceHasOpenChildren has_open_children = 15;
   }
 }
 message MergeWorkspaceUnknownWorkspace {}

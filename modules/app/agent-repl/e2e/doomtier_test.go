@@ -149,8 +149,8 @@ func TestDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft(t *testing.T) {
 
 // TestDoomPlainCloseHidesPanelsAndLeavesTheTabAlone: `SPC o c' -- the
 // module's `map!' leader form, live only in a booted Doom -- is the plain
-// close, which hides the panel windows and leaves the tab order alone (only
-// the deprioritizing close may touch it).
+// close, which hides the panel windows and leaves the tab order alone, as
+// every close does: only the daemon orders the tabs.
 func TestDoomPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -177,6 +177,6 @@ func TestDoomPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
 		})
 	if orderAfter := e.EvalStrings(emacsTabOrderForm); strings.Join(orderBefore, "\x00") != strings.Join(orderAfter, "\x00") {
-		t.Fatalf("the plain close moved the tab order: %q -> %q; only the deprio close may touch it", orderBefore, orderAfter)
+		t.Fatalf("the plain close moved the tab order: %q -> %q; no close reorders the tabs", orderBefore, orderAfter)
 	}
 }

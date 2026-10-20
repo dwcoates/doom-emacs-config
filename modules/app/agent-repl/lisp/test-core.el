@@ -317,15 +317,15 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("commands.el" agent-repl-switch-to-workspace
      "[agent-repl] No workspace tab %d -- the bar draws %d"
      "explains why the requested interactive switch did nothing")
-    ("commands.el" agent-repl-workspace-swap
-     "[agent-repl] The current workspace has no tab to swap"
-     "explains why the requested interactive swap did nothing")
-    ("commands.el" agent-repl-workspace-swap
+    ("commands.el" agent-repl--act-on-tab-slot
+     "[agent-repl] The current workspace has no tab to %s"
+     "explains why the requested interactive swap or move did nothing")
+    ("commands.el" agent-repl--act-on-tab-slot
      "[agent-repl] No workspace tab %d -- the bar draws %d"
-     "explains why the requested interactive swap did nothing")
-    ("commands.el" agent-repl-workspace-swap
+     "explains why the requested interactive swap or move did nothing")
+    ("commands.el" agent-repl--act-on-tab-slot
      "[agent-repl] %s is already tab %d"
-     "explains why the requested interactive swap did nothing")
+     "explains why the requested interactive swap or move did nothing")
     ("core.el" agent-repl--migrate-legacy-state
      "[agent-repl] migrated state %s -> %s"
      "announces an on-disk state migration")
@@ -461,11 +461,6 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("magit.el" agent-repl-magit-log-commit
      "agent-repl: %s is not among the commits %s's log shows"
      "tells the user the commit they clicked is not in the log that opened")
-    ("panels.el" agent-repl-workspace-push-to-back
-     "Pushed '%s' to the back; switched to '%s'."
-     "confirms the interactive tab reorder and selection")
-    ("panels.el" agent-repl-workspace-push-to-back "Pushed '%s' to the back."
-     "confirms the interactive tab reorder")
     ("persistent-wifi.el" agent-repl-persistent-wifi-handle "agent-repl: %s"
      "tells the user the machine's persistent-wifi standing changed")
     ("persistent-wifi.el" agent-repl-persistent-wifi--on-success "agent-repl: %s · %s · %s · %s"
@@ -484,6 +479,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "confirms the interactive tab-bar layout command")
     ("verbs.el" agent-repl-verbs--on-refusal "%s refused: %s"
      "tells the user why a workspace with nothing left to restore it from cannot be opened")
+    ("verbs.el" agent-repl-verbs--on-refusal "agent-repl: %s"
+     "tells the user which workspace of the family stands in the way of their command")
     ("verbs.el" agent-repl-verbs--on-refusal
      "%s refused: the shim's lock helper %s %s; no other process owns this conversation"
      "tells the user the shim's lock helper failed, with its binary and how it failed")
@@ -524,6 +521,14 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "reports how the user's keep-alive to the hidden workspaces went")
     ("verbs.el" agent-repl-verb-swap "agent-repl: swapped %s with %s"
      "confirms the user's swap command")
+    ("verbs.el" agent-repl-verbs--no-tab-to-take
+     "agent-repl: %s and %s are in different repositories, so %s cannot take that tab"
+     "explains why the daemon refused the user's swap or move command")
+    ("verbs.el" agent-repl-verbs--no-tab-to-take
+     "agent-repl: %s and %s are not siblings, so %s cannot take that tab"
+     "explains why the daemon refused the user's swap or move command")
+    ("verbs.el" agent-repl-verb-move "agent-repl: moved %s onto %s's tab"
+     "confirms the user's move command")
     ("verbs.el" agent-repl-verbs-select-minted
      "agent-repl: the new workspace carries no directory to switch to"
      "reports why the requested new workspace cannot be selected")

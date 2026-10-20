@@ -270,6 +270,12 @@ func answered(err error) bool {
 	if errors.As(err, &coldGate) {
 		return true
 	}
+	// A FAMILY RULE REFUSING (a close of a parent with open children, a
+	// child under a parent that is not open) is the store's answer, which the
+	// rpc route answers on its has_open_children or parent_not_open arm.
+	if wsm.IsFamilyRefusal(err) {
+		return true
+	}
 	_, ok := merge.Refused(err)
 	return ok
 }

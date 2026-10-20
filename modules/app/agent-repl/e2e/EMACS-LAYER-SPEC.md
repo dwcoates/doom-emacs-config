@@ -750,9 +750,10 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
 15. **PlainCloseHidesPanelsAndLeavesTheTabAlone** -- `agent-repl-simple` --
     panel buffers are no longer displayed, `agent-repl-roster--tab-order` is
     byte-identical to before.
-16. **DeprioCloseShufflesTheTab** -- `agent-repl` -- the workspace plist's
-    `:saved-tab-index` is recorded and the tab order changed. The two close
-    variants differing is the whole reason both commands exist.
+16. **KillCloseLeavesTheTabOrderAlone** -- `agent-repl` -- the panel
+    buffers are no longer displayed and the workspace keeps its place in
+    `agent-repl-roster--tab-order` or is gone from it once the kill lands:
+    no close reorders the tabs, only the daemon orders them.
 17. **FocusInputSelectsTheComposer** -- `agent-repl-focus-input` --
     `(window-buffer (selected-window))` is the workspace's input buffer.
 18. **FullscreenTogglesAndRestores** -- `agent-repl-fullscreen-and-focus`

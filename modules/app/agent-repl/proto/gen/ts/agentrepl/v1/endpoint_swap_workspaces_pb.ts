@@ -17,14 +17,19 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_swap_workspaces.proto.
  */
 export const file_agentrepl_v1_endpoint_swap_workspaces: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3dhcF93b3Jrc3BhY2VzLnByb3RvEgxhZ2VudHJlcGwudjEicgoVU3dhcFdvcmtzcGFjZXNSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSKgoGdGFyZ2V0GAIgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKOAQoWU3dhcFdvcmtzcGFjZXNSZXNwb25zZRI2CgdzdWNjZXNzGAEgASgLMiMuYWdlbnRyZXBsLnYxLlN3YXBXb3Jrc3BhY2VzU3VjY2Vzc0gAEjIKBWVycm9yGAIgASgLMiEuYWdlbnRyZXBsLnYxLlN3YXBXb3Jrc3BhY2VzRXJyb3JIAEIICgZyZXN1bHQiFwoVU3dhcFdvcmtzcGFjZXNTdWNjZXNzIs4CChNTd2FwV29ya3NwYWNlc0Vycm9yEkkKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiwuYWdlbnRyZXBsLnYxLlN3YXBXb3Jrc3BhY2VzVW5rbm93bldvcmtzcGFjZUgAElIKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMC5hZ2VudHJlcGwudjEuU3dhcFdvcmtzcGFjZXNXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkkKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiwuYWdlbnRyZXBsLnYxLlN3YXBXb3Jrc3BhY2VzVHJhbnNmZXJyaW5nQXdheUgAEkQKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIpLmFnZW50cmVwbC52MS5Td2FwV29ya3NwYWNlc05vdFlldEFkb3B0ZWRIAEIHCgVjYXVzZSJPCh5Td2FwV29ya3NwYWNlc1Vua25vd25Xb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiJpCiJTd2FwV29ya3NwYWNlc1dvcmtzcGFjZVJlZk1pc21hdGNoEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSFAoMcmVnaXN0cnlfZGlyGAIgASgJIjEKHlN3YXBXb3Jrc3BhY2VzVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh0KG1N3YXBXb3Jrc3BhY2VzTm90WWV0QWRvcHRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3dhcF93b3Jrc3BhY2VzLnByb3RvEgxhZ2VudHJlcGwudjEicgoVU3dhcFdvcmtzcGFjZXNSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSKgoGdGFyZ2V0GAIgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKOAQoWU3dhcFdvcmtzcGFjZXNSZXNwb25zZRI2CgdzdWNjZXNzGAEgASgLMiMuYWdlbnRyZXBsLnYxLlN3YXBXb3Jrc3BhY2VzU3VjY2Vzc0gAEjIKBWVycm9yGAIgASgLMiEuYWdlbnRyZXBsLnYxLlN3YXBXb3Jrc3BhY2VzRXJyb3JIAEIICgZyZXN1bHQiFwoVU3dhcFdvcmtzcGFjZXNTdWNjZXNzItgDChNTd2FwV29ya3NwYWNlc0Vycm9yEkkKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiwuYWdlbnRyZXBsLnYxLlN3YXBXb3Jrc3BhY2VzVW5rbm93bldvcmtzcGFjZUgAElIKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMC5hZ2VudHJlcGwudjEuU3dhcFdvcmtzcGFjZXNXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkkKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiwuYWdlbnRyZXBsLnYxLlN3YXBXb3Jrc3BhY2VzVHJhbnNmZXJyaW5nQXdheUgAEkQKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIpLmFnZW50cmVwbC52MS5Td2FwV29ya3NwYWNlc05vdFlldEFkb3B0ZWRIABJHChBvdGhlcl9yZXBvc2l0b3J5GAUgASgLMisuYWdlbnRyZXBsLnYxLlN3YXBXb3Jrc3BhY2VzT3RoZXJSZXBvc2l0b3J5SAASPwoMbm90X3NpYmxpbmdzGAYgASgLMicuYWdlbnRyZXBsLnYxLlN3YXBXb3Jrc3BhY2VzTm90U2libGluZ3NIAEIHCgVjYXVzZSJPCh5Td2FwV29ya3NwYWNlc1Vua25vd25Xb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiJpCiJTd2FwV29ya3NwYWNlc1dvcmtzcGFjZVJlZk1pc21hdGNoEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSFAoMcmVnaXN0cnlfZGlyGAIgASgJIjEKHlN3YXBXb3Jrc3BhY2VzVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh0KG1N3YXBXb3Jrc3BhY2VzTm90WWV0QWRvcHRlZCIfCh1Td2FwV29ya3NwYWNlc090aGVyUmVwb3NpdG9yeSIbChlTd2FwV29ya3NwYWNlc05vdFNpYmxpbmdzQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * Exchange two workspaces' places in the registry order: `workspace` takes
  * `target`'s place and `target` takes `workspace`'s, and every other workspace
- * keeps its own. Any two workspaces may swap, whatever their repositories or
- * parents. The sidebar and the tab bar both redraw from the registry, so the
- * swap shows on both.
+ * keeps its own. Two top-level workspaces of one repository also exchange
+ * their subsections, so each takes the other's tab across subsections. The
+ * two must belong to ONE repository: the tab bar never interleaves
+ * repositories, so no tab of one is a place for a workspace of another
+ * (`other_repository`). They must also be SIBLINGS, both top-level or children
+ * of one parent: a child stays in its parent's run of tabs (`not_siblings`).
+ * The sidebar and the tab bar both redraw from the registry, so the swap
+ * shows on both.
  *
  * @generated from message agentrepl.v1.SwapWorkspacesRequest
  */
@@ -146,6 +151,25 @@ export type SwapWorkspacesError = Message<"agentrepl.v1.SwapWorkspacesError"> & 
      */
     value: SwapWorkspacesNotYetAdopted;
     case: "notYetAdopted";
+  } | {
+    /**
+     * The two workspaces belong to different repositories, whose tabs never
+     * interleave, so neither can take the other's place.
+     *
+     * @generated from field: agentrepl.v1.SwapWorkspacesOtherRepository other_repository = 5;
+     */
+    value: SwapWorkspacesOtherRepository;
+    case: "otherRepository";
+  } | {
+    /**
+     * The two workspaces are not siblings: one is top-level and the other a
+     * child, or they are children of different parents. A child stays in its
+     * parent's run of tabs, so it cannot trade places outside it.
+     *
+     * @generated from field: agentrepl.v1.SwapWorkspacesNotSiblings not_siblings = 6;
+     */
+    value: SwapWorkspacesNotSiblings;
+    case: "notSiblings";
   } | { case: undefined; value?: undefined };
 };
 
@@ -241,4 +265,36 @@ export type SwapWorkspacesNotYetAdopted = Message<"agentrepl.v1.SwapWorkspacesNo
  */
 export const SwapWorkspacesNotYetAdoptedSchema: GenMessage<SwapWorkspacesNotYetAdopted> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_swap_workspaces, 7);
+
+/**
+ * The two workspaces belong to different repositories. DELIBERATELY EMPTY:
+ * the arm is the fact, and the request already names both workspaces.
+ *
+ * @generated from message agentrepl.v1.SwapWorkspacesOtherRepository
+ */
+export type SwapWorkspacesOtherRepository = Message<"agentrepl.v1.SwapWorkspacesOtherRepository"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SwapWorkspacesOtherRepository.
+ * Use `create(SwapWorkspacesOtherRepositorySchema)` to create a new message.
+ */
+export const SwapWorkspacesOtherRepositorySchema: GenMessage<SwapWorkspacesOtherRepository> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_swap_workspaces, 8);
+
+/**
+ * The two workspaces are not siblings. DELIBERATELY EMPTY: the arm is the
+ * fact, and the request already names both workspaces.
+ *
+ * @generated from message agentrepl.v1.SwapWorkspacesNotSiblings
+ */
+export type SwapWorkspacesNotSiblings = Message<"agentrepl.v1.SwapWorkspacesNotSiblings"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SwapWorkspacesNotSiblings.
+ * Use `create(SwapWorkspacesNotSiblingsSchema)` to create a new message.
+ */
+export const SwapWorkspacesNotSiblingsSchema: GenMessage<SwapWorkspacesNotSiblings> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_swap_workspaces, 9);
 

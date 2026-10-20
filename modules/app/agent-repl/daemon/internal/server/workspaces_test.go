@@ -887,6 +887,66 @@ func TestSetWorkspaceHiddenMapsTheVerbsRefusal(t *testing.T) {
 	}
 }
 
+// TestFamilyRefusalsReachEveryRpcThatCarriesThem pins that a family rule's
+// refusal, wrapped by whichever verb carried it up, answers on the rpc's own
+// shared arm.
+func TestFamilyRefusalsReachEveryRpcThatCarriesThem(t *testing.T) {
+	parentNotOpen := &wsm.ParentNotOpenError{Parent: wsm.FamilyRef{ID: "ws-parent", Dir: "/w/parent"}, State: wsm.ParentHidden}
+	tests := []struct {
+		name  string
+		setUp func(h *harness)
+		call  func(h *harness) (bool, error)
+	}{
+		{
+			name:  "CloseWorkspace has_open_children",
+			setUp: func(h *harness) { h.Verbs.closeErr = fmt.Errorf("close: %w", familyChildren) },
+			call: func(h *harness) (bool, error) {
+				resp, err := h.Client.CloseWorkspace(context.Background(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ref()}))
+				return err == nil && resp.Msg.GetError().GetHasOpenChildren() != nil, err
+			},
+		},
+		{
+			name:  "SetWorkspaceHidden has_open_children",
+			setUp: func(h *harness) { h.Verbs.setHiddenErr = fmt.Errorf("hide: %w", familyChildren) },
+			call: func(h *harness) (bool, error) {
+				resp, err := h.Client.SetWorkspaceHidden(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref(), Visibility: hideArm()}))
+				return err == nil && resp.Msg.GetError().GetHasOpenChildren() != nil, err
+			},
+		},
+		{
+			name:  "SetWorkspaceHidden parent_not_open",
+			setUp: func(h *harness) { h.Verbs.setHiddenErr = fmt.Errorf("show: %w", parentNotOpen) },
+			call: func(h *harness) (bool, error) {
+				resp, err := h.Client.SetWorkspaceHidden(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceHiddenRequest{Workspace: ref(), Visibility: hideArm()}))
+				return err == nil && resp.Msg.GetError().GetParentNotOpen().GetHidden() != nil, err
+			},
+		},
+		{
+			name:  "OpenWorkspace parent_not_open",
+			setUp: func(h *harness) { h.Verbs.openErr = fmt.Errorf("open: %w", parentNotOpen) },
+			call: func(h *harness) (bool, error) {
+				resp, err := h.Client.OpenWorkspace(context.Background(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ref()}))
+				return err == nil && resp.Msg.GetError().GetParentNotOpen() != nil, err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tt.setUp(h)
+
+			// Act.
+			ok, err := tt.call(h)
+
+			// Assert.
+			if err != nil || !ok {
+				t.Fatalf("answered %v (err %v), want the family arm", ok, err)
+			}
+		})
+	}
+}
+
 // TestSetWorkspaceHiddenRefusesAMissingVisibility pins an unset arm as a
 // malformed request that reaches no verb.
 func TestSetWorkspaceHiddenRefusesAMissingVisibility(t *testing.T) {
@@ -1725,6 +1785,42 @@ func TestSwapWorkspacesNamesTheMismatchedRef(t *testing.T) {
 	}
 }
 
+func TestSwapWorkspacesAnswersOtherRepository(t *testing.T) {
+	// Arrange.
+	h, target := swapHarness(t)
+	h.Verbs.swapErr = &workspace.Refusal{Rpc: "SwapWorkspaces", Arm: workspace.ArmOtherRepository, Reason: "two repositories"}
+
+	// Act.
+	resp, err := h.Client.SwapWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacesRequest{Workspace: ref(), Target: target}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SwapWorkspaces: %v", err)
+	}
+	if resp.Msg.GetError().GetOtherRepository() == nil {
+		t.Fatalf("result = %v, want other_repository", resp.Msg.GetResult())
+	}
+}
+
+func TestSwapWorkspacesAnswersNotSiblings(t *testing.T) {
+	// Arrange.
+	h, target := swapHarness(t)
+	h.Verbs.swapErr = &workspace.Refusal{Rpc: "SwapWorkspaces", Arm: workspace.ArmNotSiblings, Reason: "a child and a root"}
+
+	// Act.
+	resp, err := h.Client.SwapWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.SwapWorkspacesRequest{Workspace: ref(), Target: target}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SwapWorkspaces: %v", err)
+	}
+	if resp.Msg.GetError().GetNotSiblings() == nil {
+		t.Fatalf("result = %v, want not_siblings", resp.Msg.GetResult())
+	}
+}
+
 func TestSwapWorkspacesFailsAVerbError(t *testing.T) {
 	// Arrange.
 	h, target := swapHarness(t)
@@ -1740,7 +1836,96 @@ func TestSwapWorkspacesFailsAVerbError(t *testing.T) {
 	}
 }
 
-// ---- CreateWorkspace: fork into the primary branch ---------------------------
+// ---- MoveWorkspace ---------------------------------------------------------
+
+func TestMoveWorkspaceHandsBothResolvedIdsToTheVerb(t *testing.T) {
+	// Arrange.
+	h, target := swapHarness(t)
+
+	// Act.
+	resp, err := h.Client.MoveWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: target}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("MoveWorkspace: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+	if want := [][2]ids.WorkspaceID{{testWorkspaceID, "ws-2"}}; !slices.Equal(h.Verbs.moves, want) {
+		t.Fatalf("moves = %v, want %v", h.Verbs.moves, want)
+	}
+}
+
+func TestMoveWorkspaceNamesTheUnknownRef(t *testing.T) {
+	// Arrange.
+	h, _ := swapHarness(t)
+	missing := &workspacev1.WorkspaceRef{Id: "ws-nope"}
+
+	// Act.
+	resp, err := h.Client.MoveWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: missing}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("MoveWorkspace: %v", err)
+	}
+	got := resp.Msg.GetError().GetUnknownWorkspace()
+	if got == nil || got.GetWorkspace().GetId() != "ws-nope" {
+		t.Fatalf("result = %v, want unknown_workspace naming ws-nope", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.moves) != 0 {
+		t.Fatalf("moves = %v, want none for an unknown workspace", h.Verbs.moves)
+	}
+}
+
+func TestMoveWorkspaceAnswersTheVerbsRefusals(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  string
+		set  func(*agentreplv1.MoveWorkspaceError) bool
+	}{
+		{name: "other repository", arm: workspace.ArmOtherRepository,
+			set: func(e *agentreplv1.MoveWorkspaceError) bool { return e.GetOtherRepository() != nil }},
+		{name: "not siblings", arm: workspace.ArmNotSiblings,
+			set: func(e *agentreplv1.MoveWorkspaceError) bool { return e.GetNotSiblings() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h, target := swapHarness(t)
+			h.Verbs.moveErr = &workspace.Refusal{Rpc: "MoveWorkspace", Arm: tt.arm, Reason: "no tab to take"}
+
+			// Act.
+			resp, err := h.Client.MoveWorkspace(context.Background(),
+				connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: target}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("MoveWorkspace: %v", err)
+			}
+			if !tt.set(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.arm)
+			}
+		})
+	}
+}
+
+func TestMoveWorkspaceFailsAVerbError(t *testing.T) {
+	// Arrange.
+	h, target := swapHarness(t)
+	h.Verbs.moveErr = errors.New("disk I/O error")
+
+	// Act.
+	_, err := h.Client.MoveWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.MoveWorkspaceRequest{Workspace: ref(), Target: target}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("MoveWorkspace = %v, want an internal failure", err)
+	}
+}
 
 func TestCreateWorkspaceMapsAForkSourceToAForkIntoThePrimaryBranch(t *testing.T) {
 	// Arrange.

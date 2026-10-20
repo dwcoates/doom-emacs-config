@@ -53,7 +53,7 @@ import type {
   RosterRowWorkspace,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
-import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+import { SetWorkspaceHiddenResponseSchema, type SetWorkspaceHiddenError } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { formatTickedAge } from "../duration.js";
 import { sameLocalDate } from "../clock.js";
@@ -74,6 +74,8 @@ import { clampBeside } from "../topbar/clamp.js";
 import {
   buildSelectWorkspaceRequest,
   buildSetWorkspaceHiddenRequest,
+  setWorkspaceHiddenRefusal,
+  type CauseOf,
   buildOpenWorkspaceRequest,
   buildRevertMergeRequest,
   drawRowMenu,
@@ -84,52 +86,36 @@ import {
 import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../rpc/refusal.js";
 import { queryAll } from "../dom.js";
 
-/** A row that survived the closed filter, carrying its own message path. */
-export interface VisibleRow {
-  row: RosterRow;
+/**
+ * ONE ROW OF A LIST AND ITS FAMILY, as each list of the roster spells it: an
+ * open row (frontend.v1.RosterOpenRow), a hidden row (RosterHiddenRow) or a
+ * merged row (RosterMergedRow, which has no family). The list a row sits in is
+ * its state, and every member of its family is in the same list, so a row
+ * draws its family exactly as the wire nests it: the daemon has already put an
+ * open workspace whose parent is not open in its parent's place, and no list
+ * carries a closed row for a client to drop.
+ */
+export interface RowFamily {
+  /** The row as every list draws it. */
+  row?: RosterRow;
+  /** The row's family in the same list, in drawn order. */
+  children?: readonly RowFamily[];
+}
+
+/** One family of a rows region, with its message path. */
+export interface PathedFamily {
+  family: RowFamily;
   path: string;
 }
 
-/** Whether a row is CLOSED on the wire — closed, killed, or merged all read here. */
-export function rowIsClosed(u: RosterRow, path: string): boolean {
-  return drawRosterRowClosed(requireMessage(u.closed, `${path}.closed`), `${path}.closed`);
+/** The families of a rows region ROWS at PATH, in drawn order, each with its message path. */
+export function pathedFamilies(rows: readonly RowFamily[], path: string): PathedFamily[] {
+  return rows.map((family, index) => ({ family, path: `${path}[${index}]` }));
 }
 
-/**
- * The rows to actually draw from a received list, with CLOSED rows dropped.
- *
- * A closed, killed or nuked workspace never appears in the rail (owner ruling,
- * 2026-09-14): the daemon still EMITS a closed row because Emacs reconciles its
- * tab set from the `closed` flag, so the omission is this renderer's, applied
- * where a section's rows are laid out. Merged rows are also `closed = true` and
- * are the whole point of the recently-merged band, so that band draws its rows
- * directly and never through this filter.
- *
- * A dropped row's NON-CLOSED descendants are HOISTED into its place rather than
- * vanishing with it: a live child cut from a killed parent's branch is still a
- * live workspace and keeps its row, one level up.
- */
-/**
- * The rows a section draws from U, in order: every row, or, when HIDE_CLOSED,
- * the open rows with each closed row's family promoted in its place
- * (`expandVisibleRows`). The one answer the plain and the keyed drawing
- * (`drawRosterRows`, `keyed-rows.ts`) both draw from.
- */
-export function drawnRowEntries(rows: readonly RosterRow[], basePath: string, hideClosed: boolean): VisibleRow[] {
-  return hideClosed ? expandVisibleRows(rows, basePath) : rows.map((row, index) => ({ row, path: `${basePath}[${index}]` }));
-}
-
-export function expandVisibleRows(rows: readonly RosterRow[], basePath: string): VisibleRow[] {
-  const out: VisibleRow[] = [];
-  rows.forEach((row, index) => {
-    const path = `${basePath}[${index}]`;
-    if (rowIsClosed(row, path)) {
-      out.push(...expandVisibleRows(row.children, `${path}.children`));
-      return;
-    }
-    out.push({ row, path });
-  });
-  return out;
+/** Draw FAMILY, a row of one list and its family, at PATH (`drawRosterRow`). */
+export function drawRosterFamily(family: RowFamily, sc: SidebarContext, path: string, place: RowPlace = "grouping"): HTMLElement {
+  return drawRosterRow(requireMessage(family.row, `${path}.row`), sc, `${path}.row`, place, family.children ?? [], path);
 }
 
 /**
@@ -149,19 +135,20 @@ export function expandVisibleRows(rows: readonly RosterRow[], basePath: string):
 export type RowPlace = "grouping" | "merged" | "hidden";
 
 /**
- * One roster row, with its family nested under it.
+ * One roster row, with CHILDREN, its family in its list, nested under it.
  *
  * Returns the WHOLE subtree — the row line, the detail panel and the children
- * — because a row IS its family in this view: nesting is the message's own
- * `children`, and a child is drawn by this same function, one generation down.
- * A row's CLOSED children are hoisted away by `expandVisibleRows`, so a killed
- * child never draws while its live siblings do.
+ * — because a row IS its family in this view: a child is drawn by this same
+ * function, one generation down. FAMILY_PATH is the list row's path, the one
+ * the children's paths hang off.
  */
 export function drawRosterRow(
   u: RosterRow,
   sc: SidebarContext,
   path: string,
   place: RowPlace = "grouping",
+  children: readonly RowFamily[] = [],
+  familyPath: string = path,
 ): HTMLElement {
   const merged = place === "merged";
   const hidden = place === "hidden";
@@ -186,7 +173,7 @@ export function drawRosterRow(
       status: status.case,
       current,
       closed,
-      children: u.children.length,
+      children: children.length,
     },
   });
 
@@ -346,7 +333,7 @@ export function drawRosterRow(
   // the row into it without it closing.
   installHoverPanel(ws, line, duration, detail, sc, workspace.id);
 
-  appendRowKids(ws, u, path, (child, childPath) => drawRosterRow(child, sc, childPath, place));
+  appendRowKids(ws, children, familyPath, (child, childPath) => drawRosterFamily(child, sc, childPath, place));
   return ws;
 }
 
@@ -361,7 +348,9 @@ export const STAND_IN_ATTRIBUTE = "data-stand-in";
  * neither can tell it from the row. Only the parts it reads are validated;
  * the rest of the row is validated when it is drawn.
  */
-export function drawRosterRowStandIn(u: RosterRow, path: string): HTMLElement {
+export function drawRosterRowStandIn(family: RowFamily, familyPath: string): HTMLElement {
+  const path = `${familyPath}.row`;
+  const u = requireMessage(family.row, path);
   const workspace = drawRosterRowWorkspace(requireMessage(u.workspace, `${path}.workspace`), `${path}.workspace`);
   const ws = document.createElement("div");
   ws.className = "ws";
@@ -374,26 +363,25 @@ export function drawRosterRowStandIn(u: RosterRow, path: string): HTMLElement {
   label.textContent = drawRosterRowName(requireMessage(u.name, `${path}.name`), `${path}.name`);
   line.appendChild(label);
   ws.appendChild(line);
-  appendRowKids(ws, u, path, drawRosterRowStandIn);
+  appendRowKids(ws, family.children ?? [], familyPath, drawRosterRowStandIn);
   return ws;
 }
 
 /**
- * Append U's visible children to its box WS, each drawn by DRAW, in the one
- * `.kids` box the search and the stylesheet look for a nested row in. A row
- * with no visible child draws no box.
+ * Append CHILDREN, the family of the list row at FAMILY_PATH, to its box WS,
+ * each drawn by DRAW, in the one `.kids` box the search and the stylesheet
+ * look for a nested row in. A row with no child draws no box.
  */
 export function appendRowKids(
   ws: HTMLElement,
-  u: RosterRow,
-  path: string,
-  draw: (child: RosterRow, childPath: string) => HTMLElement,
+  children: readonly RowFamily[],
+  familyPath: string,
+  draw: (child: RowFamily, childPath: string) => HTMLElement,
 ): void {
-  const visibleChildren = expandVisibleRows(u.children, `${path}.children`);
-  if (visibleChildren.length === 0) return;
+  if (children.length === 0) return;
   const kids = document.createElement("div");
   kids.className = "kids";
-  for (const child of visibleChildren) kids.appendChild(draw(child.row, child.path));
+  for (const child of pathedFamilies(children, `${familyPath}.children`)) kids.appendChild(draw(child.family, child.path));
   ws.appendChild(kids);
 }
 
@@ -404,13 +392,13 @@ export function appendRowKids(
  */
 export function drawRosterRowWhenShown(
   region: HTMLElement,
-  u: RosterRow,
+  family: RowFamily,
   sc: SidebarContext,
   path: string,
   place: RowPlace,
   finish: (row: HTMLElement) => void,
 ): void {
-  const standIn = drawRosterRowStandIn(u, path);
+  const standIn = drawRosterRowStandIn(family, path);
   finish(standIn);
   region.appendChild(standIn);
   sc.onDispose(
@@ -418,7 +406,7 @@ export function drawRosterRowWhenShown(
       // The push that carried the row was drawn frames ago, so a row found
       // malformed now is filed here (`guardMalformedNow`).
       guardMalformedNow(sc.ctx, "sidebar.row.reveal", () => {
-        const row = drawRosterRow(u, sc, path, place);
+        const row = drawRosterFamily(family, sc, path, place);
         finish(row);
         standIn.replaceWith(row);
       });
@@ -957,6 +945,7 @@ export const BAND_RETURNS: Readonly<Record<Exclude<RowPlace, "grouping">, readon
           rpc: "SetWorkspaceHidden",
           call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(workspace, false)),
           schema: SetWorkspaceHiddenResponseSchema,
+          refusalText: (cause) => setWorkspaceHiddenRefusal(cause as CauseOf<SetWorkspaceHiddenError>),
         }),
     },
   ],

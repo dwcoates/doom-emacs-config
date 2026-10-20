@@ -118,10 +118,10 @@ func TestAHiddenWorkspacesSessionStartsHeld(t *testing.T) {
 	}{
 		{name: "a visible workspace", edit: func(*wsm.Workspace) {}, held: false},
 		{name: "a hidden workspace", edit: func(ws *wsm.Workspace) { ws.Hidden = true }, held: true},
-		{name: "a merged hidden workspace", edit: func(ws *wsm.Workspace) {
+		{name: "a reopened merged hidden workspace", edit: func(ws *wsm.Workspace) {
 			merged := time.Unix(100, 0)
 			ws.Hidden, ws.MergedAt = true, &merged
-		}, held: false},
+		}, held: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

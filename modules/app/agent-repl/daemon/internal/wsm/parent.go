@@ -110,7 +110,9 @@ type ParentChange struct {
 // merge target the parent's checkout (or, for nil, the repository's main
 // checkout), in one transaction. The new parent must be a registered
 // workspace of the same repository, and neither the workspace nor one of its
-// descendants; a workspace with no creation job has no merge to retarget.
+// descendants; a workspace with no creation job has no merge to retarget. A
+// new parent that is hidden, closed or closing is refused with
+// ParentNotOpenError (family.go).
 // Every check runs inside the transaction, so a retarget racing another cannot
 // close a cycle the check did not see. An unknown workspace is ErrNotFound.
 func (s *store) SetParent(ctx context.Context, id WorkspaceID, parent *WorkspaceID) (ParentChange, error) {
@@ -191,6 +193,11 @@ func setParent(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *Workspac
 		if err != nil {
 			return ParentChange{}, err
 		}
+		// A WORKSPACE IS NEVER MOVED UNDER A PARENT THAT IS NOT OPEN
+		// (family.go).
+		if err := requireOpenParent(ctx, tx, *parent); err != nil {
+			return ParentChange{}, err
+		}
 		if repo != current.repo {
 			otherDir, _, err := repositoryTarget(ctx, tx, repo)
 			if err != nil {
@@ -243,8 +250,16 @@ func readTarget(ctx context.Context, tx *sql.Tx, id WorkspaceID) (storedTarget, 
 
 // writeTarget writes both stored target facts. Each statement must touch
 // exactly one row: the caller read both rows inside this transaction.
+//
+// THE FAMILY'S SUBSECTION FOLLOWS THE PARENT (arrange.go): a workspace given a
+// parent stops storing a subsection and sits wherever the parent does; one
+// left with no parent stores the subsection it sat in until now, so it stays
+// where it was drawn. Both in the same statement as the parent, evaluated
+// against the row as it stood.
 func writeTarget(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *WorkspaceID, targetDir string) error {
-	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET parent_id = ? WHERE id = ?`, nullWorkspace(parent), id)
+	res, err := tx.ExecContext(ctx,
+		`UPDATE workspaces SET parent_id = ?, subsection_id = CASE WHEN ? IS NULL THEN `+rootSubsectionColumn+` ELSE NULL END WHERE id = ?`,
+		nullWorkspace(parent), nullWorkspace(parent), id)
 	if err != nil {
 		return err
 	}

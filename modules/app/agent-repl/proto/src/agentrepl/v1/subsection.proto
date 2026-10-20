@@ -1,0 +1,17 @@
+// subsection.proto — the repository subsection vocabulary. A subsection is a
+// daemon-owned, user-named separation inside one repository's section of the
+// repository grouping (created, renamed, deleted and reordered through
+// ArrangeSidebar); a workspace sits in at most one, and only in one of its
+// own repository's.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The daemon-minted subsection identity — an opaque echo token, compared
+// byte-wise, handed back verbatim.
+message SubsectionRef {
+  string id = 1;
+}

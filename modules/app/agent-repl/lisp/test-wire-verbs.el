@@ -698,7 +698,114 @@ declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_swap_workspaces.pb.go" "SwapWorkspacesError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "otherRepository" "notSiblings")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-swap-error-other-repository-arm ()
+  "SwapWorkspacesError's `other_repository' arm decodes empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-swap-workspaces-error
+                    (agent-repl-test-wire-verbs--parse "{\"otherRepository\":{}}"))
+                   '(:cause (:arm :other-repository :value nil))))))
+
+
+;;;; ---- MoveWorkspace ---------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-move-request ()
+  "A move request carries both refs through the WorkspaceRef codec."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-move-workspace-request
+                    (list :workspace agent-repl-test-wire-verbs--ref
+                          :target '(:id "ws-2" :dir "/w/two")))
+                   '((workspace . ((id . "ws-1") (dir . "/w/one")))
+                     (target . ((id . "ws-2") (dir . "/w/two"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-move-without-target ()
+  "A move with no target is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-move-workspace-request
+                   (list :workspace agent-repl-test-wire-verbs--ref))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-move-without-workspace ()
+  "A move with no workspace is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-move-workspace-request
+                   '(:other (:id "ws-2" :dir "/w/two")))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-move-response-success ()
+  "A made move decodes to the empty success arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-move-workspace-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                   '(:arm :success :value nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-move-error-unknown-workspace-arm ()
+  "MoveWorkspaceError's `unknown_workspace' arm decodes with the ref it
+names."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-move-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
+                   '(:cause (:arm :unknown-workspace :value (:workspace (:id "ws-2" :dir "/w/two"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-move-error-workspace-ref-mismatch-arm ()
+  "MoveWorkspaceError's `workspace_ref_mismatch' arm decodes with the ref
+and the registry dir."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-move-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/stale\"},\"registryDir\":\"/w/two\"}}"))
+                   '(:cause (:arm :workspace-ref-mismatch
+                             :value (:workspace (:id "ws-2" :dir "/w/stale") :registry-dir "/w/two")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-move-error-transferring-away-arm ()
+  "MoveWorkspaceError's `transferring_away' arm decodes with its address."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-move-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
+                   '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-move-error-not-yet-adopted-arm ()
+  "MoveWorkspaceError's `not_yet_adopted' arm decodes empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-move-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
+                   '(:cause (:arm :not-yet-adopted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-move-error-other-repository-arm ()
+  "MoveWorkspaceError's `other_repository' arm decodes empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-move-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"otherRepository\":{}}"))
+                   '(:cause (:arm :other-repository :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-move-error-not-siblings-arm ()
+  "MoveWorkspaceError's `not_siblings' arm decodes empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-move-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"notSiblings\":{}}"))
+                   '(:cause (:arm :not-siblings :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-move-error-unset-cause-is-a-breach ()
+  "MoveWorkspaceError with no arm set is a breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-move-workspace-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-move-error-unknown-arm-is-a-breach ()
+  "An arm MoveWorkspaceError does not declare is refused."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-move-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-move-error-arms-pinned ()
+  "MoveWorkspaceError's arm set is exactly what the frozen schema
+declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_move_workspace.pb.go" "MoveWorkspaceError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "otherRepository" "notSiblings")
                        #'string<))))
 
 
@@ -1585,7 +1692,7 @@ the form is its prompt and nothing else."
                         "agentrepl/v1/endpoint_close_workspace.pb.go"
                         "CloseWorkspaceError")
                        #'string<)
-                 '("blocked" "notYetAdopted" "transferringAway"
+                 '("blocked" "hasOpenChildren" "notYetAdopted" "transferringAway"
                    "unknownWorkspace" "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-outcome-arms-pinned ()
@@ -1862,7 +1969,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "baseRefOffPrimaryBranch" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "unknownContextWorkspace")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "baseRefOffPrimaryBranch" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "unknownContextWorkspace" "parentNotOpen")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-base-ref-off-primary-branch-arm ()
@@ -2075,7 +2182,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed" "vendorStartFailed" "lockHolderUnavailable" "worktreeUnrestorable" "notMerged" "briefMissing")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed" "vendorStartFailed" "lockHolderUnavailable" "worktreeUnrestorable" "notMerged" "briefMissing" "parentNotOpen")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-close-error-blocked-arm ()
@@ -2167,7 +2274,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_close_workspace.pb.go" "CloseWorkspaceError")
                        #'string<)
-                 (sort (list "blocked" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                 (sort (list "blocked" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "hasOpenChildren")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-kill-error-unknown-workspace-arm ()
@@ -2222,7 +2329,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_kill_workspace.pb.go" "KillWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "hasOpenChildren")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-nuke-error-unknown-workspace-arm ()
@@ -2284,7 +2391,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_nuke_workspace.pb.go" "NukeWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "gitFailed")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "gitFailed" "hasOpenChildren")
                        #'string<))))
 
 ;;;; ---- MergeWorkspaceRequest ----------------------------------------
@@ -2558,7 +2665,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "unknownOneShotWorkspace" "unknownBranch" "nameTaken" "branchCheckedOutInRequester" "versionIncrementRequired" "versionIncrementUnexpected")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "unknownOneShotWorkspace" "unknownBranch" "nameTaken" "branchCheckedOutInRequester" "versionIncrementRequired" "versionIncrementUnexpected" "hasOpenChildren")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-mode-arms-pinned ()
@@ -5359,3 +5466,70 @@ instead diverges from it unseen."
                        #'string<)
                  '("askNotStanding" "noSession" "noStandingOffer" "notYetAdopted"
                    "transferringAway" "unknownWorkspace" "workspaceRefMismatch"))))
+
+;;;; ---- The family refusals (agentrepl.v1 family.proto) ----
+
+(defconst agent-repl-test-wire-verbs--open-children-json
+  "{\"hasOpenChildren\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/parent\"},\"children\":[{\"id\":\"c\",\"dir\":\"/w/child\"}]}}"
+  "A `has_open_children' cause naming one parent and one child.")
+
+(defconst agent-repl-test-wire-verbs--open-children-decoded
+  '(:cause (:arm :has-open-children
+            :value (:parent (:id "p" :dir "/w/parent") :children ((:id "c" :dir "/w/child")))))
+  "What `agent-repl-test-wire-verbs--open-children-json' decodes to.")
+
+(ert-deftest agent-repl-test-wire-verbs-every-has-open-children-arm-decodes-alike ()
+  "Close, kill, nuke, merge and hide decode `has_open_children' with its parent and children."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (decoder '(agent-repl-wire-decode-close-workspace-error
+                       agent-repl-wire-decode-kill-workspace-error
+                       agent-repl-wire-decode-nuke-workspace-error
+                       agent-repl-wire-decode-merge-workspace-error
+                       agent-repl-wire-decode-set-workspace-hidden-error))
+      (should (equal (funcall decoder (agent-repl-test-wire-verbs--parse agent-repl-test-wire-verbs--open-children-json))
+                     agent-repl-test-wire-verbs--open-children-decoded)))))
+
+(ert-deftest agent-repl-test-wire-verbs-has-open-children-naming-no-child-is-a-breach ()
+  "The contract says the children are never empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-close-workspace-error
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"hasOpenChildren\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/p\"},\"children\":[]}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-every-parent-not-open-arm-decodes-each-state ()
+  "Open, create and show decode `parent_not_open' with its parent and state."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (decoder '(agent-repl-wire-decode-open-workspace-error
+                       agent-repl-wire-decode-create-workspace-error
+                       agent-repl-wire-decode-set-workspace-hidden-error))
+      (dolist (state '(("hidden" . :hidden) ("closed" . :closed) ("closing" . :closing)))
+        (should (equal (funcall decoder (agent-repl-test-wire-verbs--parse
+                                         (format "{\"parentNotOpen\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/p\"},\"%s\":{}}}"
+                                                 (car state))))
+                       (list :cause (list :arm :parent-not-open
+                                          :value (list :parent '(:id "p" :dir "/w/p")
+                                                       :state (list :arm (cdr state) :value nil))))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-parent-not-open-without-a-state-is-a-breach ()
+  "The parent's state is never unset."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-open-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"parentNotOpen\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/p\"}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-swap-error-not-siblings-arm ()
+  "SwapWorkspacesError's `not_siblings' arm decodes, carrying nothing."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-swap-workspaces-error
+                    (agent-repl-test-wire-verbs--parse "{\"notSiblings\":{}}"))
+                   '(:cause (:arm :not-siblings :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-hidden-error-arms-pinned ()
+  "SetWorkspaceHiddenError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_set_workspace_hidden.pb.go" "SetWorkspaceHiddenError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted"
+                             "hasOpenChildren" "parentNotOpen")
+                       #'string<))))

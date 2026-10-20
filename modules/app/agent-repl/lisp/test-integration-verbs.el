@@ -532,6 +532,26 @@ model as the webapp."
           (should (equal (agent-repl-itest--body-field body 'workspace 'id) (plist-get ref :id)))
           (should (equal (agent-repl-itest--body-field body 'target 'id) "ws-itest-other")))))))
 
+;;;; ---- MoveWorkspace ----
+
+(ert-deftest agent-repl-itest-verbs-move-sends-both-refs ()
+  "A move sends the workspace's ref and the target's over the wire."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (let ((host-ref (symbol-function 'agent-repl-host-ref))
+            (other '(:id "ws-itest-other" :dir "/tmp/itest-other")))
+        (cl-letf (((symbol-function 'agent-repl-host-ref)
+                   (lambda (ws) (if (equal ws "itest-other") other (funcall host-ref ws))))
+                  ((symbol-function 'agent-repl--ws-require-known) (lambda (&rest _) nil)))
+          ;; Act.
+          (agent-repl-verb-move agent-repl-itest-verbs--ws "itest-other")
+          (agent-repl-itest--await-call daemon "MoveWorkspace"))
+        ;; Assert.
+        (let ((body (agent-repl-itest-verbs--body daemon "MoveWorkspace")))
+          (should (equal (agent-repl-itest--body-field body 'workspace 'id) (plist-get ref :id)))
+          (should (equal (agent-repl-itest--body-field body 'target 'id) "ws-itest-other")))))))
+
 ;;;; ---- Daemon-admin verbs ----
 
 (ert-deftest agent-repl-itest-verbs-shutdown-schedule-sends-a-reason ()
@@ -1746,7 +1766,7 @@ schema the rest of the suite does."
            (agent-repl-itest--await-subscriber ,daemon "roster")
            (agent-repl-itest--push
             ,daemon "roster"
-            (list (cons 'roster (agent-repl-itest--with-tab-bar
+            (list (cons 'roster (agent-repl-itest--listed
                                  (agent-repl-itest-verbs--roster ,rows)))))
            (agent-repl-itest--wait-until (lambda () agent-repl-roster-view) nil
                                          "the roster push to reach the view")

@@ -1856,3 +1856,61 @@ func TestCreateRejectsAContextWorkspaceOutsideAOneShot(t *testing.T) {
 		t.Fatal("the contradictory spec was not logged at error")
 	}
 }
+
+func TestCreateRefusesAChildOfAParentThatIsNotOpenBeforeMaterializingIt(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	parent := f.workspace("parent", t.TempDir())
+	spec := standardSpec(t, f)
+	id := parent.ID
+	spec.Parent = &id
+	f.db.openParentErr = errParentNotOpen
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if !errors.Is(err, errParentNotOpen) {
+		t.Fatalf("Create = %v, want the family refusal", err)
+	}
+	if len(f.git.created) != 0 || len(f.db.putJobs) != 0 {
+		t.Fatalf("worktrees = %v, jobs = %v; want nothing materialized or recorded", f.git.created, f.db.putJobs)
+	}
+}
+
+func TestCreateAsksWhetherTheParentIsOpen(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	parent := f.workspace("parent", t.TempDir())
+	spec := standardSpec(t, f)
+	id := parent.ID
+	spec.Parent = &id
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if len(f.db.openParentAsked) != 1 || f.db.openParentAsked[0] != parent.ID {
+		t.Fatalf("parents asked = %v, want [%s]", f.db.openParentAsked, parent.ID)
+	}
+}
+
+func TestCreateFailsWhenTheParentCannotBeRead(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	parent := f.workspace("parent", t.TempDir())
+	spec := standardSpec(t, f)
+	id := parent.ID
+	spec.Parent = &id
+	f.db.openParentErr = errors.New("disk I/O error")
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil || !loggedAtError(f, opCreate) || len(f.git.created) != 0 {
+		t.Fatalf("Create = %v (worktrees %v), want a failure at ERROR materializing nothing", err, f.git.created)
+	}
+}

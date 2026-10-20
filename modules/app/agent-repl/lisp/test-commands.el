@@ -538,27 +538,31 @@ AT-MS, or 0 when neither is given: every row states one."
         :name (list :text name)
         :status (list :arm :ready :value nil)
         :current (list :current nil)
-        :children nil
         :when '(:arm :no-turn-running :value nil)
         :detail (list :branch nil :parent-branch nil :summary nil)
         :closed (list :closed (and closed t))))
 
 (defun agent-repl-test-commands--roster (rows &optional hidden merged)
-  "Return a decoded roster carrying ROWS in one repo section.
-HIDDEN is the hidden section's rows and MERGED the recently-merged band's,
-in one group."
-  (list :repository
-        (list :sections (list (list :key (list :repository (list :id "r" :dir "/tmp"))
-                                    :header (list :label (list :text "repo"))
-                                    :rows (list :rows rows))))
-        :hidden (list :header (list :label (list :text "Hidden"))
-                      :rows (list :rows hidden))
-        :recently-merged (list :header (list :label (list :text "m"))
-                               :groups (and merged
-                                            (list (list :header (list :label (list :text "repo"))
-                                                        :rows (list :rows merged)
-                                                        :drawn '(:arm :shown :value nil)))))
-        :current nil))
+  "Return a decoded roster carrying ROWS: the open ones in one repo section.
+A closed one of ROWS is listed in the closed list, as the daemon lists
+it.  HIDDEN is the hidden section's rows and MERGED the recently-merged
+band's, in one group."
+  (let ((open (seq-remove #'agent-repl-roster-row-closed-p rows))
+        (closed (seq-filter #'agent-repl-roster-row-closed-p rows)))
+    (list :repository
+          (list :sections (agent-repl-test--number-tabs
+                           (list (list :key (list :repository (list :id "r" :dir "/tmp"))
+                                       :header (list :label (list :text "repo"))
+                                       :open-rows (agent-repl-test--open-rows open)))))
+          :hidden (list :header (list :label (list :text "Hidden"))
+                        :hidden-rows (agent-repl-test--hidden-rows hidden))
+          :recently-merged (list :header (list :label (list :text "m"))
+                                 :groups (and merged
+                                              (list (list :header (list :label (list :text "repo"))
+                                                          :merged-rows (agent-repl-test--merged-rows merged)
+                                                          :drawn '(:arm :shown :value nil)))))
+          :closed (agent-repl-test--closed-rows closed)
+          :current nil)))
 
 (defun agent-repl-test-commands--closed-row (name by at-ms)
   "Return a decoded CLOSED roster row for NAME, closed BY (an arm) at AT-MS.
@@ -1060,6 +1064,9 @@ scope, never nil: a nil scope is refused by the ladder as a routing error
                       (agent-repl-test-commands--info-messages))))))
 
 ;;;; ---- SPC TAB p: swap with a drawn tab ----
+;;
+;; The slot checks live in `agent-repl--act-on-tab-slot', which the swap and
+;; the move (SPC TAB P) share; the swap's tests exercise it through the swap.
 
 (defvar agent-repl-test-commands--swapped nil
   "The (WS TARGET) pair a swap command requested, bound by `--placing'.")
@@ -1076,25 +1083,26 @@ of the daemon, nil when none was."
                ((symbol-function 'message) (lambda (&rest _) nil)))
        (agent-repl-test-commands--with-hidden-bar ,tabs ,hidden ,current ,@body))))
 
-(ert-deftest agent-repl-test-commands-swap-slot-maps-digits ()
+(ert-deftest agent-repl-test-commands-tab-slot-maps-digits ()
   "Digits 1-9 name slots 1-9 and 0 names slot 10."
-  (should (equal (mapcar #'agent-repl--swap-slot '(?1 ?5 ?9 ?0))
+  (should (equal (mapcar #'agent-repl--tab-slot '(?1 ?5 ?9 ?0))
                  '(1 5 9 10))))
 
-(ert-deftest agent-repl-test-commands-read-swap-slot-reads-one-digit-key ()
+(ert-deftest agent-repl-test-commands-read-tab-slot-reads-one-digit-key ()
   "The slot is read as ONE keystroke among the ten digits, needing no RET."
   ;; Arrange.
-  (let (offered)
+  (let (offered asked)
     (cl-letf (((symbol-function 'read-char-choice)
-               (lambda (_prompt chars &rest _) (setq offered chars) ?0)))
+               (lambda (prompt chars &rest _) (setq offered chars asked prompt) ?0)))
       ;; Act / Assert.
-      (should (= (agent-repl--read-swap-slot) 10))
-      (should (equal offered (number-sequence ?0 ?9))))))
+      (should (= (agent-repl--read-tab-slot "Swap with tab") 10))
+      (should (equal offered (number-sequence ?0 ?9)))
+      (should (equal asked "Swap with tab (1-9, 0 = 10): ")))))
 
 (ert-deftest agent-repl-test-commands-swap-reads-its-slot-interactively ()
   "The command's interactive spec is the one-digit reader."
   (should (equal (cadr (interactive-form 'agent-repl-workspace-swap))
-                 '(list (agent-repl--read-swap-slot)))))
+                 '(list (agent-repl--read-tab-slot "Swap with tab")))))
 
 (ert-deftest agent-repl-test-commands-swap-targets-the-nth-drawn-tab ()
   "Slot N counts the DRAWN tabs, and the current workspace swaps with it."
@@ -1972,11 +1980,10 @@ only ever disagree with the pushed one."
 
 (ert-deftest agent-repl-test-commands-defines-no-tab-ordering ()
   "Client-authored tab ordering and hiding are gone: tabs follow the roster.
-`agent-repl-workspace-push-to-back' is deliberately NOT in this list any
-more: the deprio close (`SPC o C') calls it, so it is live production
-API.  It lives in panels.el beside its caller and shuffles the ROSTER's
-order, which is why commands.el still defines no tab ordering of its own."
+Only the daemon orders tabs (`SPC TAB p', `SPC TAB P', the sidebar's drag),
+so no close pushes a tab to the back any more."
   (dolist (sym '(agent-repl-workspace-pull-to-front
+                 agent-repl-workspace-push-to-back
                  agent-repl-workspace-switch-to-0
                  agent-repl-workspace-switch-to-final))
     (should-not (fboundp sym))))
@@ -2040,3 +2047,44 @@ order, which is why commands.el still defines no tab ordering of its own."
 (ert-deftest agent-repl-test-commands-cycle-target-is-nil-when-nothing-is-drawn ()
   "Every tab hidden leaves no landing."
   (should-not (agent-repl--cycle-target '("a" "b") nil "a" 1)))
+
+(ert-deftest agent-repl-test-commands-tab-slot-gestures-share-one-helper ()
+  "Every tab-slot gesture command goes through `agent-repl--act-on-tab-slot'.
+A command that re-implemented the slot checks would drift from the others."
+  ;; Arrange.
+  (let ((body (lambda (fn) (format "%S" (symbol-function fn)))))
+    ;; Act / Assert.
+    (dolist (command '(agent-repl-workspace-swap agent-repl-workspace-move))
+      (should (string-match-p "agent-repl--act-on-tab-slot" (funcall body command))))))
+
+;;;; ---- SPC TAB P: move onto a drawn tab ----
+
+(ert-deftest agent-repl-test-commands-move-reads-its-slot-interactively ()
+  "The move's interactive spec is the one-digit reader, worded for a move."
+  (should (equal (cadr (interactive-form 'agent-repl-workspace-move))
+                 '(list (agent-repl--read-tab-slot "Move onto tab")))))
+
+(ert-deftest agent-repl-test-commands-move-targets-the-nth-drawn-tab ()
+  "Slot N counts the DRAWN tabs, and the current workspace moves onto it."
+  ;; Arrange.
+  (let (moved)
+    (cl-letf (((symbol-function 'agent-repl-verb-move)
+               (lambda (ws target) (setq moved (list ws target))))
+              ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (agent-repl-test-commands--with-hidden-bar '("first" "hidden" "third") '("hidden") "first"
+        ;; Act.
+        (agent-repl-workspace-move 2)))
+    ;; Assert.
+    (should (equal moved '("first" "third")))))
+
+(ert-deftest agent-repl-test-commands-move-records-under-its-own-word ()
+  "A move request records `elisp.commands.move slot=N ws=<ws> target=<ws>'."
+  (agent-repl-test-commands--capturing-info
+    (cl-letf (((symbol-function 'agent-repl-verb-move) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      (agent-repl-test-commands--with-hidden-bar '("first" "second") nil "first"
+        (agent-repl-workspace-move 2)))
+    (should (member "elisp.commands.move slot=2 ws=first target=second"
+                    (agent-repl-test-commands--info-messages)))))

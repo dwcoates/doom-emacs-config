@@ -10,6 +10,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
 
@@ -181,5 +182,69 @@ func TestUpdateSidebarViewRefusesAnInvalidRequestBeforeTheVerb(t *testing.T) {
 	}
 	if len(h.Verbs.sectionFolds) != 0 {
 		t.Fatalf("section folds = %+v, want none for an invalid request", h.Verbs.sectionFolds)
+	}
+}
+
+func subsectionSection(id string) *agentreplv1.SidebarViewFoldSection_Subsection {
+	return &agentreplv1.SidebarViewFoldSection_Subsection{Subsection: &agentreplv1.SubsectionRef{Id: id}}
+}
+
+func TestUpdateSidebarViewHandsASubsectionFoldToTheVerb(t *testing.T) {
+	tests := []struct {
+		name string
+		fold *agentreplv1.SidebarViewFoldSection
+		want string
+	}{
+		{"collapse", &agentreplv1.SidebarViewFoldSection{Section: subsectionSection("sub-1"), Fold: collapseFold()}, "FoldSubsection sub-1 true"},
+		{"expand", &agentreplv1.SidebarViewFoldSection{Section: subsectionSection("sub-1"), Fold: expandFold()}, "FoldSubsection sub-1 false"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			sent(t, h, foldChange(tt.fold))
+
+			// Assert
+			if len(h.Verbs.arrangements) != 1 || h.Verbs.arrangements[0] != tt.want {
+				t.Fatalf("verb calls = %v, want [%s]", h.Verbs.arrangements, tt.want)
+			}
+		})
+	}
+}
+
+func TestUpdateSidebarViewAnswersAnUnknownSubsection(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Verbs.arrangeErr = &workspace.Refusal{Rpc: "UpdateSidebarView", Arm: workspace.ArmUnknownSubsection, Reason: "gone", NotFound: true}
+
+	// Act
+	resp, err := h.Client.UpdateSidebarView(context.Background(), connect.NewRequest(
+		foldChange(&agentreplv1.SidebarViewFoldSection{Section: subsectionSection("gone"), Fold: collapseFold()})))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("UpdateSidebarView: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownSubsection() == nil {
+		t.Fatalf("result = %v, want unknown_subsection", resp.Msg.GetResult())
+	}
+}
+
+func TestUpdateSidebarViewRefusesASubsectionFoldWithNoId(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, err := h.Client.UpdateSidebarView(context.Background(), connect.NewRequest(
+		foldChange(&agentreplv1.SidebarViewFoldSection{Section: subsectionSection(""), Fold: collapseFold()})))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("UpdateSidebarView = %v, want InvalidArgument", err)
+	}
+	if len(h.Verbs.arrangements) != 0 {
+		t.Fatalf("verb calls = %v, want none for a malformed request", h.Verbs.arrangements)
 	}
 }

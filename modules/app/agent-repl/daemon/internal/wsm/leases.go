@@ -167,24 +167,9 @@ func (s *store) AdoptMergeLease(ctx context.Context, id WorkspaceID, lease Lease
 func (s *store) ForeignLeases(ctx context.Context) ([]Lease, error) {
 	var all []Lease
 	err := s.read(ctx, "daemon.wsm.foreign_leases", nil, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `SELECT `+leaseColumns+` FROM leases ORDER BY acquired_at, id`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var out []Lease
-		for rows.Next() {
-			l, err := scanLease(rows)
-			if err != nil {
-				return err
-			}
-			out = append(out, l)
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
+		out, err := listRows(ctx, s.db(), `SELECT `+leaseColumns+` FROM leases ORDER BY acquired_at, id`, scanLease)
 		all = out
-		return nil
+		return err
 	})
 	if err != nil {
 		return nil, err

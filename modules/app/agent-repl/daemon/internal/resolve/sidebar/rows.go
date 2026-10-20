@@ -20,13 +20,12 @@ type rowContext struct {
 	sessions map[ids.WorkspaceID]*wsm.Session
 	// selected is the current selection, nil when none is.
 	selected *ids.WorkspaceID
-	// tree is the section's nesting, empty for a flat section.
-	tree forest
 	// cause is the operation whose fact is being rendered.
 	cause string
 }
 
-// row composes one workspace's row, and its family below it.
+// row composes one workspace's row, as every list draws it. Its family is
+// its list's own row type's (openRow, hiddenRow).
 func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRow {
 	s := r.state.workspace(rec.ID)
 	session := rc.sessions[rec.ID]
@@ -146,9 +145,6 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// THE UPDATE RECENCY, for ordering only: the editor's switcher offers
 	// workspaces most-recently-updated first. Always set.
 	out.LastUpdated = lastUpdated(rec, s.statusChangedAt)
-	for _, child := range rc.tree.children[rec.ID] {
-		out.Children = append(out.Children, r.row(child, rc, rowLog))
-	}
 	return out
 }
 
@@ -258,13 +254,15 @@ func attention(rec wsm.Workspace, current bool) bool {
 	return rec.Attention && !current
 }
 
-// recedes reports whether the row draws GREYED. Three settled ends recede a
-// row and they are deliberately one field rather than three: the workspace was
-// MERGED, its editor state was CLOSED, or its session was KILLED. Receding is
-// orthogonal to the lifecycle — a receded workspace still has one — which is
-// why it is not a status arm.
+// recedes reports whether the row draws GREYED. Two settled ends recede a row
+// and they are deliberately one field rather than two: its editor state was
+// CLOSED (a settled merge is closed too), or its session was KILLED. A merge
+// time alone recedes nothing: OPEN BEATS MERGED, so a merged workspace that
+// was reopened is drawn like any open one. Receding is orthogonal to the
+// lifecycle — a receded workspace still has one — which is why it is not a
+// status arm.
 func recedes(rec wsm.Workspace, session *wsm.Session) bool {
-	if rec.Closed || rec.MergedAt != nil {
+	if rec.Closed {
 		return true
 	}
 	return session != nil && session.Terminal != nil && session.Terminal.Kind == "killed"

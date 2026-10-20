@@ -29,6 +29,9 @@ import {
   type WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { hiddenRow, numberTabs, openRow, withFamily } from "../roster-families.js";
+
+export { hiddenRow, openRow };
 import type { Ticker } from "../../src/clock.js";
 import { createDrawnStatusLog } from "../../src/drawn-status.js";
 import type { FailureSink } from "../../src/failure/sink.js";
@@ -40,6 +43,7 @@ import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { createSidebarView, type DrawnView, type SidebarView } from "../../src/sidebar/view.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 import { createRowHover } from "../../src/sidebar/row-hover.js";
+import { createArrangeHold } from "../../src/sidebar/arrange.js";
 import type { RowReveal } from "../../src/sidebar/reveal.js";
 import { createSelectionFade } from "../../src/sidebar/selection-fade.js";
 
@@ -176,7 +180,6 @@ export function sidebarContext(
   const own = view.scope();
   return {
     ctx,
-    parentWorkspace: () => ctx.workspace,
     view: {
       track: (key, wire, paint) => own.track(key, wire, paint),
       ask: (key, value) => view.ask(key, value),
@@ -191,6 +194,11 @@ export function sidebarContext(
     reveal,
     selectionFade: createSelectionFade(document),
     shownAhead: () => null,
+    arrange: {
+      hold: createArrangeHold(() => undefined),
+      layer: document.createElement("div"),
+      status: document.createElement("div"),
+    },
     disposers,
     onDispose: (fn) => {
       disposers.push(fn);
@@ -241,7 +249,7 @@ export function row(init: {
   detail?: MessageInitShape<typeof RosterRowDetailSchema>;
   children?: RosterRow[];
 }): RosterRow {
-  return create(RosterRowSchema, {
+  const built = create(RosterRowSchema, {
     workspace: { workspace: { id: init.id, dir: init.dir ?? `/w/${init.id}` } },
     name: { text: init.name ?? init.id },
     status: init.status ?? { case: "ready", value: {} },
@@ -249,7 +257,6 @@ export function row(init: {
     closed: { closed: init.closed ?? false },
     when: { shown: init.when ?? { case: "noTurnRunning", value: {} } },
     detail: init.detail ?? {},
-    children: init.children ?? [],
     ...(init.attention === true ? { attention: {} } : {}),
     ...(init.viewed === true ? { viewed: {} } : {}),
     ...(init.reviving === true ? { reviving: {} } : {}),
@@ -260,6 +267,7 @@ export function row(init: {
     ...(init.lastSelectedAtMs === undefined ? {} : { lastSelected: { atMs: init.lastSelectedAtMs } }),
     ...(init.priority === undefined ? {} : { priority: { label: init.priority } }),
   });
+  return withFamily(built, init.children ?? []);
 }
 
 /** One repository section. */
@@ -273,13 +281,21 @@ export function repoSection(init: {
   count?: number;
   /** The label hover's measurement; pending unless said. */
   divergence?: MessageInitShape<typeof RosterRepoSectionSchema>["divergence"];
+  /** The repository's subsections, in order; none unless said. */
+  subsections?: Array<{ id: string; label?: string; rows?: RosterRow[]; collapsed?: boolean }>;
 }): RosterRepoSection {
   return create(RosterRepoSectionSchema, {
     key: { repository: { id: init.id, dir: `/repo/${init.id}` } },
     header: { label: { text: init.label ?? init.id }, count: { workspaces: init.count ?? init.rows?.length ?? 0 } },
-    rows: { rows: init.rows ?? [] },
+    openRows: { rows: (init.rows ?? []).map(openRow) },
     fold: init.collapsed === true ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
     divergence: init.divergence ?? { state: { case: "pending", value: {} } },
+    subsections: (init.subsections ?? []).map((sub) => ({
+      key: { subsectionId: sub.id },
+      header: { label: { text: sub.label ?? sub.id }, count: { workspaces: sub.rows?.length ?? 0 } },
+      openRows: { rows: (sub.rows ?? []).map(openRow) },
+      fold: sub.collapsed === true ? ({ case: "collapsed", value: {} } as const) : ({ case: "expanded", value: {} } as const),
+    })),
   });
 }
 
@@ -298,7 +314,7 @@ export function mergedSection(
 /** The recently-merged band carrying GROUPS, its count and its fold stated. */
 export function mergedBand(
   groups: RosterMergedRepoGroup[],
-  count: number = groups.filter((g) => g.drawn.case === "shown").reduce((sum, g) => sum + (g.rows?.rows.length ?? 0), 0),
+  count: number = groups.filter((g) => g.drawn.case === "shown").reduce((sum, g) => sum + (g.mergedRows?.rows.length ?? 0), 0),
   collapsed: boolean = true,
 ): RosterMergedSection {
   return create(RosterMergedSectionSchema, {
@@ -324,7 +340,7 @@ export function mergedGroup(init: { id: string; label?: string; rows?: RosterRow
   return create(RosterMergedRepoGroupSchema, {
     key: { repository: { id: init.id, dir: `/r/${init.id}` } },
     header: { label: { text: init.label ?? init.id } },
-    rows: { rows },
+    mergedRows: { rows: rows.map((row) => ({ row })) },
     drawn: init.repositoryCollapsed === true ? { case: "repositoryCollapsed", value: {} } : { case: "shown", value: {} },
   });
 }
@@ -341,7 +357,7 @@ export function hiddenSection(
 ): RosterHiddenSection {
   return create(RosterHiddenSectionSchema, {
     header: { label: { text: "Hidden" }, count: { workspaces: count } },
-    rows: { rows },
+    hiddenRows: { rows: rows.map(hiddenRow) },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
   });
 }
@@ -366,24 +382,50 @@ export function roster(init: {
   /** The daemon-resolved open count; unless said, the sum of the sections' counts. */
   openCount?: number;
   current?: string;
-  /** The Emacs tab bar, first tab first; unless said, no tabs. */
-  tabs?: Array<{ id: string; drawn?: "drawn" | "withheldCollapsed" | "withheldHidden" }>;
+  /**
+   * Which open rows have a numbered tab, first tab first: each listed DRAWN
+   * row is numbered by its place among them, and every other open row is
+   * folded. Unless said, every open row of an unfolded repository is
+   * numbered in the Open section's walk, as the daemon numbers it.
+   */
+  tabs?: Array<{ id: string; drawn?: "drawn" | "withheldCollapsed" }>;
 } = {}): WorkspaceRoster {
   const repos = init.repos ?? [];
   const counted = repos.reduce((sum, section) => sum + (section.header?.count?.workspaces ?? 0), 0);
+  numberTabs(
+    repos.map((section) => ({
+      regions: [section.openRows, ...section.subsections.map((sub) => sub.openRows)],
+      folded: section.fold.case === "collapsed",
+    })),
+    init.tabs?.filter((tab) => (tab.drawn ?? "drawn") === "drawn").map((tab) => tab.id),
+  );
   return create(WorkspaceRosterSchema, {
     repository: { sections: repos, openCount: { workspaces: init.openCount ?? counted } },
     open: init.open ?? openSection(),
     recentlyMerged: init.merged ?? mergedSection(),
     hidden: init.hidden ?? hiddenSection(),
-    tabBar: {
-      tabs: (init.tabs ?? []).map((tab) => ({
-        workspace: { id: tab.id, dir: `/w/${tab.id}` },
-        visibility: { case: tab.drawn ?? "drawn", value: {} },
-      })),
-    },
+    closed: {},
     ...(init.current === undefined
       ? {}
       : { current: { workspace: { id: init.current, dir: `/w/${init.current}` } } }),
   });
+}
+
+/**
+ * Take down the click guard a drag left owed (`src/sidebar/drag.ts`). A drag
+ * owes its window one swallowed click until a press comes; a test that ends
+ * mid-gesture or with no click after its release would hand that debt to the
+ * next test, or the next file sharing the window. Every file that drags calls
+ * this after each test: it is the press the user's next gesture begins with.
+ */
+export function settleOwedDragClick(): void {
+  window.dispatchEvent(new PointerEvent("pointerdown"));
+}
+
+/**
+ * Dispatch a primary, left-button pointer event of TYPE at TARGET, at height
+ * Y: the one pointer a drag test drives (`src/sidebar/drag.ts`).
+ */
+export function primaryPointer(type: string, target: EventTarget, y: number): void {
+  target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, isPrimary: true, button: 0, clientX: 10, clientY: y }));
 }

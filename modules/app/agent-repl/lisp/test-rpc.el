@@ -111,6 +111,9 @@ would abort the very branch a test is asserting."
     ("SwapWorkspaces" agent-repl-rpc-swap-workspaces
      agent-repl-wire-encode-swap-workspaces-request
      agent-repl-wire-decode-swap-workspaces-response)
+    ("MoveWorkspace" agent-repl-rpc-move-workspace
+     agent-repl-wire-encode-move-workspace-request
+     agent-repl-wire-decode-move-workspace-response)
     ("SubmitPrompt" agent-repl-rpc-submit-prompt
      agent-repl-wire-encode-submit-prompt-request
      agent-repl-wire-decode-submit-prompt-response)

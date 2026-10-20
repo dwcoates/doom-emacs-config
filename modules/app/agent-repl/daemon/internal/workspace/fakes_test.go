@@ -59,6 +59,15 @@ type fakeDB struct {
 	// swaps is every SwapPlaces call, in order; swapErr fails it.
 	swaps   [][2]ids.WorkspaceID
 	swapErr error
+	// moves is every MoveWorkspace call, in order; moveErr fails it.
+	moves   [][2]ids.WorkspaceID
+	moveErr error
+	// subsections are what ReadArrangement answers beside the workspaces and
+	// repositories; arrangements is every arrangement write, spelled
+	// "<method> <args>", in order; arrangeErr fails each of them.
+	subsections  []wsm.Subsection
+	arrangements []string
+	arrangeErr   error
 
 	// rolledBack is each workspace's rolled-back turns; rolledBackErr fails
 	// the read.
@@ -124,6 +133,11 @@ type fakeDB struct {
 	setLandedErr error
 	// setMergedErr fails SetMergedAt.
 	setMergedErr error
+
+	// openParentErr is what every RequireOpenParent answers; openParentAsked
+	// records each parent it was asked about.
+	openParentErr   error
+	openParentAsked []ids.WorkspaceID
 
 	registerErr error
 	registered  []wsm.RegisterFacts
@@ -507,6 +521,59 @@ func (d *fakeDB) Current(context.Context) (*ids.WorkspaceID, error) {
 		return nil, d.currentErr
 	}
 	return d.current, nil
+}
+
+func (d *fakeDB) ReadArrangement(ctx context.Context) (wsm.Arrangement, error) {
+	workspaces, err := d.ListWorkspaces(ctx)
+	if err != nil {
+		return wsm.Arrangement{}, err
+	}
+	repositories, err := d.ListRepositories(ctx)
+	if err != nil {
+		return wsm.Arrangement{}, err
+	}
+	return wsm.Arrangement{Workspaces: workspaces, Repositories: repositories, Subsections: d.subsections}, nil
+}
+
+// arrange records one arrangement write, or fails it with arrangeErr.
+func (d *fakeDB) arrange(call string) error {
+	if d.arrangeErr != nil {
+		return d.arrangeErr
+	}
+	d.arrangements = append(d.arrangements, call)
+	return nil
+}
+
+func (d *fakeDB) CreateSubsection(_ context.Context, repo ids.RepoID, name string) (wsm.Subsection, error) {
+	return wsm.Subsection{ID: "sub-new", Repo: repo, Name: name, Place: 1}, d.arrange("CreateSubsection " + string(repo) + " " + name)
+}
+
+func (d *fakeDB) RenameSubsection(_ context.Context, id ids.SubsectionID, name string) error {
+	return d.arrange("RenameSubsection " + string(id) + " " + name)
+}
+
+func (d *fakeDB) DeleteSubsection(_ context.Context, id ids.SubsectionID) error {
+	return d.arrange("DeleteSubsection " + string(id))
+}
+
+func (d *fakeDB) MoveSubsection(_ context.Context, id ids.SubsectionID, before *ids.SubsectionID) error {
+	return d.arrange("MoveSubsection " + string(id) + " " + ids.Optional(before))
+}
+
+func (d *fakeDB) MoveRepository(_ context.Context, id ids.RepoID, before *ids.RepoID) error {
+	return d.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
+}
+
+func (d *fakeDB) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
+	return d.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), ids.Optional(before)))
+}
+
+func (d *fakeDB) MoveWorkspace(_ context.Context, ws, target ids.WorkspaceID) error {
+	if d.moveErr != nil {
+		return d.moveErr
+	}
+	d.moves = append(d.moves, [2]ids.WorkspaceID{ws, target})
+	return nil
 }
 
 func (d *fakeDB) SwapPlaces(_ context.Context, ws, target ids.WorkspaceID) error {
@@ -2937,3 +3004,45 @@ func (s *fakeSummaries) Restore(_ context.Context, ws ids.WorkspaceID) error {
 type visibilityFunc func(ws ids.WorkspaceID)
 
 func (f visibilityFunc) VisibilityChanged(ws ids.WorkspaceID) { f(ws) }
+
+// RequireOpenParent answers openParentErr, recording the parent asked about.
+func (f *fakeDB) RequireOpenParent(_ context.Context, parent ids.WorkspaceID) error {
+	f.openParentAsked = append(f.openParentAsked, parent)
+	return f.openParentErr
+}
+
+// errOpenChildren is a family rule refusing a parent with an open child.
+var errOpenChildren = &wsm.HasOpenChildrenError{
+	Parent:   wsm.FamilyRef{ID: "w1", Dir: "/w/w1"},
+	Children: []wsm.FamilyRef{{ID: "w2", Dir: "/w/w2"}},
+}
+
+// errParentNotOpen is a family rule refusing a child of a closed parent.
+var errParentNotOpen = &wsm.ParentNotOpenError{Parent: wsm.FamilyRef{ID: "parent", Dir: "/w/parent"}, State: wsm.ParentClosed}
+
+// requireFamilyAnswer fails unless ERR is WANT, recorded under OPERATION at
+// INFO and never at ERROR: a family refusal is an answer, not a failure.
+func requireFamilyAnswer(t *testing.T, f *fixture, err, want error, operation string) {
+	t.Helper()
+	if !errors.Is(err, want) {
+		t.Fatalf("error = %v, want the family refusal %v", err, want)
+	}
+	if loggedAtError(f, operation) {
+		t.Fatalf("the family refusal was recorded at ERROR under %s", operation)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: operation}); !ok {
+		t.Fatalf("the family refusal was not recorded at INFO under %s", operation)
+	}
+}
+
+// SetSubsectionFolded records the fold on the fake's subsection, as WSM does;
+// an unknown subsection is WSM's UnknownSubsectionError.
+func (d *fakeDB) SetSubsectionFolded(_ context.Context, id ids.SubsectionID, folded bool) error {
+	for i := range d.subsections {
+		if d.subsections[i].ID == id {
+			d.subsections[i].Folded = folded
+			return nil
+		}
+	}
+	return &wsm.UnknownSubsectionError{ID: id}
+}

@@ -68,6 +68,8 @@ export function updateSidebarViewRefusal(
   switch (cause.case) {
     case "unknownRepository":
       return "the daemon no longer has that repository";
+    case "unknownSubsection":
+      return "the daemon no longer has that subsection";
     default: {
       const other: { case: string } = cause;
       return unreachableArm("UpdateSidebarViewError.cause", other.case);

@@ -81,6 +81,7 @@
 (declare-function agent-repl-verbs--land-on-tab "agent-repl-verbs" (ref why ws))
 (declare-function agent-repl-verb-open "agent-repl-verbs" (ref))
 (declare-function agent-repl-verb-swap "agent-repl-verbs" (ws target))
+(declare-function agent-repl-verb-move "agent-repl-verbs" (ws target))
 (declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-verbs--all-rows "agent-repl-verbs" (&optional roster))
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
@@ -1339,55 +1340,79 @@ afterwards is a logging defect."
                           index target)
         (agent-repl-host-request-switch target 'slot))))))
 
-(defun agent-repl--swap-slot (char)
+(defun agent-repl--tab-slot (char)
   "Return the tab slot the digit CHAR names: `1'..`9' are slots 1-9 and
 `0' is slot 10, the digit row's own order."
   (if (eq char ?0) 10 (- char ?0)))
 
-(defun agent-repl--read-swap-slot ()
-  "Read ONE digit and return the tab slot it names.
+(defun agent-repl--read-tab-slot (prompt)
+  "Read ONE digit after PROMPT and return the tab slot it names.
 `read-char-choice' returns on the keystroke itself, so the digit needs no
 RET to send, and any other key is refused in place."
-  (agent-repl--swap-slot
-   (read-char-choice "Swap with tab (1-9, 0 = 10): "
+  (agent-repl--tab-slot
+   (read-char-choice (concat prompt " (1-9, 0 = 10): ")
                      (number-sequence ?0 ?9))))
 
-(defun agent-repl-workspace-swap (slot)
-  "Swap the current workspace's place in the registry order with tab SLOT's.
-Interactively SLOT is read as one digit, `0' naming slot 10.  SLOT counts
-the DRAWN tabs (`agent-repl--drawn-tab-names'), exactly as the numeral
-chords do, so the digit names the tab the user is looking at.  The current
-workspace ends up as that tab, the workspace that was there takes the
-current workspace's old tab, and every other tab stays where it was.
-
-The daemon owns the registry order, so the swap is REQUESTED of it
-\(`agent-repl-verb-swap') and the bar redraws from the next roster push.
-The sidebar follows the same order within each of its lists.
+(defun agent-repl--act-on-tab-slot (slot op verb)
+  "Ask VERB to act on the current workspace and tab SLOT's workspace.
+SLOT counts the DRAWN tabs (`agent-repl--drawn-tab-names'), exactly as the
+numeral chords do, so the digit names the tab the user is looking at.  OP
+is the gesture's word (\"swap\", \"move\"), naming its log records and its
+messages; VERB is called with the current workspace and the tab's.
 
 A current workspace with no tab, a slot past the end of the bar, and the
 current workspace's own slot are REPORTED no-ops, recorded at `info' like
 every other navigation gesture."
-  (interactive (list (agent-repl--read-swap-slot)))
   (let* ((names (agent-repl--drawn-tab-names))
          (current (agent-repl--ws-current-name))
          (log-ws (or (agent-repl--ws-log-name current)
-                     '(:agent-repl-context "a swap from a placeholder names no workspace")))
+                     (list :agent-repl-context
+                           (format "a %s from a placeholder names no workspace" op))))
          (target (and (<= 1 slot (length names)) (nth (1- slot) names))))
     (cond
      ((not (member current names))
-      (agent-repl--info log-ws "elisp.commands.swap-no-tab current=%s slot=%d" current slot)
-      (message "[agent-repl] The current workspace has no tab to swap"))
+      (agent-repl--info log-ws (format "elisp.commands.%s-no-tab current=%%s slot=%%d" op) current slot)
+      (message "[agent-repl] The current workspace has no tab to %s" op))
      ((null target)
-      (agent-repl--info log-ws "elisp.commands.swap-out-of-range slot=%d tabs=%d"
+      (agent-repl--info log-ws (format "elisp.commands.%s-out-of-range slot=%%d tabs=%%d" op)
                         slot (length names))
       (message "[agent-repl] No workspace tab %d -- the bar draws %d" slot (length names)))
      ((equal target current)
-      (agent-repl--info log-ws "elisp.commands.swap-own-slot slot=%d ws=%s" slot current)
+      (agent-repl--info log-ws (format "elisp.commands.%s-own-slot slot=%%d ws=%%s" op) slot current)
       (message "[agent-repl] %s is already tab %d" current slot))
      (t
-      (agent-repl--info log-ws "elisp.commands.swap slot=%d ws=%s target=%s"
+      (agent-repl--info log-ws (format "elisp.commands.%s slot=%%d ws=%%s target=%%s" op)
                         slot current target)
-      (agent-repl-verb-swap current target)))))
+      (funcall verb current target)))))
+
+(defun agent-repl-workspace-swap (slot)
+  "Swap the current workspace's place in the registry order with tab SLOT's.
+Interactively SLOT is read as one digit, `0' naming slot 10, and counts
+the drawn tabs (`agent-repl--act-on-tab-slot').  The current workspace
+ends up as that tab, the workspace that was there takes the current
+workspace's old tab, and every other tab stays where it was.
+
+The daemon owns the registry order, so the swap is REQUESTED of it
+\(`agent-repl-verb-swap') and the bar redraws from the next roster push.
+The sidebar follows the same order within each of its lists."
+  (interactive (list (agent-repl--read-tab-slot "Swap with tab")))
+  (agent-repl--act-on-tab-slot slot "swap" #'agent-repl-verb-swap))
+
+(defun agent-repl-workspace-move (slot)
+  "Move the current workspace onto tab SLOT, the tabs between shifting over.
+Interactively SLOT is read as one digit, `0' naming slot 10, and counts
+the drawn tabs (`agent-repl--act-on-tab-slot').  Moving right shifts the
+tabs it passes left and moving left shifts them right, so the current
+workspace takes the pressed tab's number; it carries its own children
+with it.
+
+The tab must be a sibling's in the sidebar's arrangement: another top-level
+workspace of the same repository, or another child of the same parent.  A
+top-level workspace also joins that tab's subsection.  The daemon owns the
+arrangement, so the move is REQUESTED of it (`agent-repl-verb-move') and
+the bar redraws from the next roster push."
+  (interactive (list (agent-repl--read-tab-slot "Move onto tab")))
+  (agent-repl--act-on-tab-slot slot "move" #'agent-repl-verb-move))
 
 (eval-and-compile
   ;; The count is needed at EXPANSION time by the macro below and at RUN time

@@ -287,6 +287,9 @@ type fakeVerbs struct {
 	// swaps records every Swap pair; swapErr is what it answers.
 	swaps   [][2]ids.WorkspaceID
 	swapErr error
+	// moves records every Move pair; moveErr is what it answers.
+	moves   [][2]ids.WorkspaceID
+	moveErr error
 
 	// editorOpens records every relayed open, a workspace file's path or a
 	// daemon file's.
@@ -325,6 +328,15 @@ type fakeVerbs struct {
 	opens, selects atomic.Int32
 	// registeredPaths records every RegisterRepository path the verb received.
 	registeredPaths []string
+	// arrangements records every ArrangeSidebar verb call, spelled
+	// "<method> <args>", and arrangeErr is what each answers instead.
+	arrangements []string
+	arrangeErr   error
+	// arrangement is what SidebarArrangement answers, arrangementErr its
+	// failure instead.
+	arrangement    []sidebar.ArrangedRepository
+	arrangementErr error
+
 	// folds records every FoldRepository the handler resolved onto the verb,
 	// and foldErr is what the verb answers instead.
 	folds   []repositoryFold
@@ -1742,9 +1754,48 @@ type repositoryFold struct {
 	folded bool
 }
 
+func (v *fakeVerbs) Move(_ context.Context, ws, target ids.WorkspaceID) error {
+	v.moves = append(v.moves, [2]ids.WorkspaceID{ws, target})
+	return v.moveErr
+}
+
 func (v *fakeVerbs) Swap(_ context.Context, ws, target ids.WorkspaceID) error {
 	v.swaps = append(v.swaps, [2]ids.WorkspaceID{ws, target})
 	return v.swapErr
+}
+
+// arrange records one arrangement verb call and answers arrangeErr.
+func (v *fakeVerbs) arrange(call string) error {
+	v.arrangements = append(v.arrangements, call)
+	return v.arrangeErr
+}
+
+func (v *fakeVerbs) CreateSubsection(_ context.Context, repo ids.RepoID, name string) (wsm.Subsection, error) {
+	return wsm.Subsection{ID: "sub-new", Repo: repo, Name: name, Place: 1}, v.arrange("CreateSubsection " + string(repo) + " " + name)
+}
+
+func (v *fakeVerbs) RenameSubsection(_ context.Context, id ids.SubsectionID, name string) error {
+	return v.arrange("RenameSubsection " + string(id) + " " + name)
+}
+
+func (v *fakeVerbs) DeleteSubsection(_ context.Context, id ids.SubsectionID) error {
+	return v.arrange("DeleteSubsection " + string(id))
+}
+
+func (v *fakeVerbs) MoveSubsection(_ context.Context, id ids.SubsectionID, before *ids.SubsectionID) error {
+	return v.arrange("MoveSubsection " + string(id) + " " + ids.Optional(before))
+}
+
+func (v *fakeVerbs) MoveRepository(_ context.Context, id ids.RepoID, before *ids.RepoID) error {
+	return v.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
+}
+
+func (v *fakeVerbs) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error {
+	return v.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), ids.Optional(before)))
+}
+
+func (v *fakeVerbs) SidebarArrangement(context.Context) ([]sidebar.ArrangedRepository, error) {
+	return v.arrangement, v.arrangementErr
 }
 
 func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bool) error {
@@ -2006,4 +2057,10 @@ func (f *fakeLatencies) all() []observedLatency {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]observedLatency(nil), f.observed...)
+}
+
+// FoldSubsection records the subsection fold as an arrangement call and
+// answers arrangeErr.
+func (v *fakeVerbs) FoldSubsection(_ context.Context, sub ids.SubsectionID, folded bool) error {
+	return v.arrange(fmt.Sprintf("FoldSubsection %s %v", sub, folded))
 }

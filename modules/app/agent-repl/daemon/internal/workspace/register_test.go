@@ -928,3 +928,35 @@ func TestBindViewsWritesNothing(t *testing.T) {
 		t.Fatalf("BindViews closed workspace %v; it must write nothing", record.ID)
 	}
 }
+
+func TestRegisterAnswersARefusedReopen(t *testing.T) {
+	// Arrange: a closed workspace whose parent is not open.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	first, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+	closed := first
+	closed.Closed = true
+	f.db.with(closed)
+	f.db.setClosedErr = errParentNotOpen
+
+	// Act.
+	_, err = f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+
+	// Assert.
+	requireFamilyAnswer(t, f, err, errParentNotOpen, opRegister)
+}
+
+func TestRegisterAnswersARefusedChild(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.db.registerErr = errParentNotOpen
+
+	// Act.
+	_, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+
+	// Assert.
+	requireFamilyAnswer(t, f, err, errParentNotOpen, opRegister)
+}

@@ -369,6 +369,7 @@ type SetWorkspaceParentError struct {
 	//	*SetWorkspaceParentError_Cycle
 	//	*SetWorkspaceParentError_NoMergeLayout
 	//	*SetWorkspaceParentError_ColdGate
+	//	*SetWorkspaceParentError_ParentNotOpen
 	Cause         isSetWorkspaceParentError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -501,6 +502,15 @@ func (x *SetWorkspaceParentError) GetColdGate() *SetWorkspaceParentColdGate {
 	return nil
 }
 
+func (x *SetWorkspaceParentError) GetParentNotOpen() *WorkspaceParentNotOpen {
+	if x != nil {
+		if x, ok := x.Cause.(*SetWorkspaceParentError_ParentNotOpen); ok {
+			return x.ParentNotOpen
+		}
+	}
+	return nil
+}
+
 type isSetWorkspaceParentError_Cause interface {
 	isSetWorkspaceParentError_Cause()
 }
@@ -563,6 +573,12 @@ type SetWorkspaceParentError_ColdGate struct {
 	ColdGate *SetWorkspaceParentColdGate `protobuf:"bytes,10,opt,name=cold_gate,json=coldGate,proto3,oneof"`
 }
 
+type SetWorkspaceParentError_ParentNotOpen struct {
+	// The named parent is hidden or closed, and moving the workspace under
+	// it would make an open child of a parent outside the Open section.
+	ParentNotOpen *WorkspaceParentNotOpen `protobuf:"bytes,11,opt,name=parent_not_open,json=parentNotOpen,proto3,oneof"`
+}
+
 func (*SetWorkspaceParentError_UnknownWorkspace) isSetWorkspaceParentError_Cause() {}
 
 func (*SetWorkspaceParentError_WorkspaceRefMismatch) isSetWorkspaceParentError_Cause() {}
@@ -582,6 +598,8 @@ func (*SetWorkspaceParentError_Cycle) isSetWorkspaceParentError_Cause() {}
 func (*SetWorkspaceParentError_NoMergeLayout) isSetWorkspaceParentError_Cause() {}
 
 func (*SetWorkspaceParentError_ColdGate) isSetWorkspaceParentError_Cause() {}
+
+func (*SetWorkspaceParentError_ParentNotOpen) isSetWorkspaceParentError_Cause() {}
 
 // The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
 type SetWorkspaceParentUnknownWorkspace struct {
@@ -997,7 +1015,7 @@ var File_agentrepl_v1_endpoint_set_workspace_parent_proto protoreflect.FileDescr
 
 const file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc = "" +
 	"\n" +
-	"0agentrepl/v1/endpoint_set_workspace_parent.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\xec\x01\n" +
+	"0agentrepl/v1/endpoint_set_workspace_parent.proto\x12\fagentrepl.v1\x1a\x19agentrepl/v1/family.proto\x1a\x1cworkspace/v1/workspace.proto\"\xec\x01\n" +
 	"\x19SetWorkspaceParentRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12B\n" +
 	"\bchild_of\x18\x02 \x01(\v2%.agentrepl.v1.SetWorkspaceParentChildH\x00R\achildOf\x12G\n" +
@@ -1010,7 +1028,7 @@ const file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2'.agentrepl.v1.SetWorkspaceParentSuccessH\x00R\asuccess\x12=\n" +
 	"\x05error\x18\x02 \x01(\v2%.agentrepl.v1.SetWorkspaceParentErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1b\n" +
-	"\x19SetWorkspaceParentSuccess\"\xc1\a\n" +
+	"\x19SetWorkspaceParentSuccess\"\x91\b\n" +
 	"\x17SetWorkspaceParentError\x12_\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v20.agentrepl.v1.SetWorkspaceParentUnknownWorkspaceH\x00R\x10unknownWorkspace\x12l\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v24.agentrepl.v1.SetWorkspaceParentWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12_\n" +
@@ -1022,7 +1040,8 @@ const file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc = "" +
 	"\x05cycle\x18\b \x01(\v2%.agentrepl.v1.SetWorkspaceParentCycleH\x00R\x05cycle\x12W\n" +
 	"\x0fno_merge_layout\x18\t \x01(\v2-.agentrepl.v1.SetWorkspaceParentNoMergeLayoutH\x00R\rnoMergeLayout\x12G\n" +
 	"\tcold_gate\x18\n" +
-	" \x01(\v2(.agentrepl.v1.SetWorkspaceParentColdGateH\x00R\bcoldGateB\a\n" +
+	" \x01(\v2(.agentrepl.v1.SetWorkspaceParentColdGateH\x00R\bcoldGate\x12N\n" +
+	"\x0fparent_not_open\x18\v \x01(\v2$.agentrepl.v1.WorkspaceParentNotOpenH\x00R\rparentNotOpenB\a\n" +
 	"\x05cause\"$\n" +
 	"\"SetWorkspaceParentUnknownWorkspace\"K\n" +
 	"&SetWorkspaceParentWorkspaceRefMismatch\x12!\n" +
@@ -1070,6 +1089,7 @@ var file_agentrepl_v1_endpoint_set_workspace_parent_proto_goTypes = []any{
 	(*SetWorkspaceParentNoMergeLayout)(nil),           // 14: agentrepl.v1.SetWorkspaceParentNoMergeLayout
 	(*SetWorkspaceParentColdGate)(nil),                // 15: agentrepl.v1.SetWorkspaceParentColdGate
 	(*v1.WorkspaceRef)(nil),                           // 16: workspace.v1.WorkspaceRef
+	(*WorkspaceParentNotOpen)(nil),                    // 17: agentrepl.v1.WorkspaceParentNotOpen
 }
 var file_agentrepl_v1_endpoint_set_workspace_parent_proto_depIdxs = []int32{
 	16, // 0: agentrepl.v1.SetWorkspaceParentRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -1088,11 +1108,12 @@ var file_agentrepl_v1_endpoint_set_workspace_parent_proto_depIdxs = []int32{
 	13, // 13: agentrepl.v1.SetWorkspaceParentError.cycle:type_name -> agentrepl.v1.SetWorkspaceParentCycle
 	14, // 14: agentrepl.v1.SetWorkspaceParentError.no_merge_layout:type_name -> agentrepl.v1.SetWorkspaceParentNoMergeLayout
 	15, // 15: agentrepl.v1.SetWorkspaceParentError.cold_gate:type_name -> agentrepl.v1.SetWorkspaceParentColdGate
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	17, // 16: agentrepl.v1.SetWorkspaceParentError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_set_workspace_parent_proto_init() }
@@ -1100,6 +1121,7 @@ func file_agentrepl_v1_endpoint_set_workspace_parent_proto_init() {
 	if File_agentrepl_v1_endpoint_set_workspace_parent_proto != nil {
 		return
 	}
+	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[0].OneofWrappers = []any{
 		(*SetWorkspaceParentRequest_ChildOf)(nil),
 		(*SetWorkspaceParentRequest_TopLevel)(nil),
@@ -1119,6 +1141,7 @@ func file_agentrepl_v1_endpoint_set_workspace_parent_proto_init() {
 		(*SetWorkspaceParentError_Cycle)(nil),
 		(*SetWorkspaceParentError_NoMergeLayout)(nil),
 		(*SetWorkspaceParentError_ColdGate)(nil),
+		(*SetWorkspaceParentError_ParentNotOpen)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

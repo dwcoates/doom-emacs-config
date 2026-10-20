@@ -1,20 +1,20 @@
 /**
  * tab-numbers — each open row's Emacs tab number, drawn left of its mark.
  *
- * THE SAME NUMERALS AS THE EMACS TAB BAR (owner request, 2026-10-17). The bar
- * numbers its DRAWN tabs from 1 in `WorkspaceRoster.tab_bar` order
- * (`frontend.v1.RosterTabDrawn`: "numbered by its position among drawn tabs"),
- * and `M-1`… reach exactly those slots. A withheld tab (its repository
- * collapsed, or the workspace hidden) takes no number and does not count.
+ * THE SAME NUMERALS AS THE EMACS TAB BAR (owner request, 2026-10-17). The
+ * daemon numbers every open row's tab (`frontend.v1.RosterOpenRow.tab`) in the
+ * Open section's walk, which IS the tab bar, so `M-1`… reach exactly the rows
+ * these numbers sit beside, and the numbers read 1, 2, 3… down the section. A
+ * folded repository's rows take no number.
  *
  * PAINTED AFTER EVERY DRAW, NOT DRAWN WITH THE ROW. A number belongs to the
- * whole bar, not to one row's wire: a tab opened in another repository shifts
- * every later number while this row's section is kept unchanged
+ * whole bar, not to one row's drawing: a tab opened in another repository
+ * shifts every later number while this row's section is kept unchanged
  * (`roster.ts`, "A PUSH REDRAWS ONLY WHAT IT CHANGED"). So a row draws an
- * empty slot, and the roster drawer fills every slot from the push's tab bar
- * once the push is drawn, kept sections included.
+ * empty slot, and the roster drawer fills every slot from the push once it is
+ * drawn, kept sections included.
  */
-import type { RosterTabBar } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterOpenRow, RosterRepositoryView } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -26,30 +26,40 @@ export const TAB_NUMBER_CLASS = "sb-num";
 /** The attribute a filled slot carries its number in, for the hook contract and tests. */
 export const TAB_NUMBER_ATTRIBUTE = "data-tab-number";
 
-/** Each drawn tab's number, by `WorkspaceRef.id`, counting drawn tabs from 1. */
-export function tabNumbers(u: RosterTabBar, path: string): Map<string, number> {
+/**
+ * Each numbered tab's number, by `WorkspaceRef.id`, read off the Open
+ * section's open rows (U) exactly as the daemon numbered them. A workspace
+ * with two rows, or a row with no tab, is malformed.
+ */
+export function tabNumbers(u: RosterRepositoryView, path: string): Map<string, number> {
   const numbers = new Map<string, number>();
   const seen = new Set<string>();
-  let next = 1;
-  u.tabs.forEach((tab, index) => {
-    const tabPath = `${path}.tabs[${index}]`;
-    const id = requireMessage(tab.workspace, `${tabPath}.workspace`).id;
-    if (seen.has(id)) throw new MalformedView(`${tabPath}.workspace`, `workspace ${id} has two tabs`);
+  const visit = (row: RosterOpenRow, rowPath: string): void => {
+    const id = requireMessage(requireMessage(row.row, `${rowPath}.row`).workspace, `${rowPath}.row.workspace`).workspace?.id;
+    if (id === undefined) throw new MalformedView(`${rowPath}.row.workspace.workspace`, "an open row names no workspace");
+    if (seen.has(id)) throw new MalformedView(`${rowPath}.row.workspace`, `workspace ${id} has two open rows`);
     seen.add(id);
-    const visibility = requireCase(tab.visibility, `${tabPath}.visibility`);
-    switch (visibility.case) {
-      case "drawn":
-        numbers.set(id, next);
-        next += 1;
-        return;
-      case "withheldCollapsed":
-      case "withheldHidden":
-        return;
+    const tab = requireCase(requireMessage(row.tab, `${rowPath}.tab`).tab, `${rowPath}.tab.tab`);
+    switch (tab.case) {
+      case "numbered":
+        numbers.set(id, tab.value.number);
+        break;
+      case "folded":
+        break;
       default: {
-        const other: { case: string } = visibility;
-        unreachableArm(`${tabPath}.visibility`, other.case);
+        const other: { case: string } = tab;
+        unreachableArm(`${rowPath}.tab.tab`, other.case);
       }
     }
+    row.children.forEach((child, index) => visit(child, `${rowPath}.children[${index}]`));
+  };
+  u.sections.forEach((section, s) => {
+    const sectionPath = `${path}.sections[${s}]`;
+    requireMessage(section.openRows, `${sectionPath}.open_rows`).rows.forEach((row, i) => visit(row, `${sectionPath}.open_rows.rows[${i}]`));
+    section.subsections.forEach((sub, b) => {
+      const subPath = `${sectionPath}.subsections[${b}]`;
+      requireMessage(sub.openRows, `${subPath}.open_rows`).rows.forEach((row, i) => visit(row, `${subPath}.open_rows.rows[${i}]`));
+    });
   });
   return numbers;
 }

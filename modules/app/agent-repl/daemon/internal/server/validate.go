@@ -57,6 +57,17 @@ func validateRepositoryRef(field string, ref *workspacev1.RepositoryRef) *connec
 	return nil
 }
 
+// validateSubsectionRef is SubsectionRef's base function.
+func validateSubsectionRef(field string, ref *agentreplv1.SubsectionRef) *connect.Error {
+	if ref == nil {
+		return invalid(field, "a subsection ref is required")
+	}
+	if ref.GetId() == "" {
+		return invalid(field+".id", "a subsection id is required")
+	}
+	return nil
+}
+
 // validateTaskRef is TaskRef's base function.
 func validateTaskRef(field string, ref *agentreplv1.TaskRef) *connect.Error {
 	if ref == nil {
@@ -649,14 +660,27 @@ func validateSetWorkspaceParentRequest(req *agentreplv1.SetWorkspaceParentReques
 // validateSwapWorkspacesRequest is SwapWorkspacesRequest's base function: two
 // refs naming two different workspaces.
 func validateSwapWorkspacesRequest(req *agentreplv1.SwapWorkspacesRequest) *connect.Error {
-	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+	return validateWorkspacePair(req.GetWorkspace(), req.GetTarget(), "a workspace cannot swap with itself")
+}
+
+// validateMoveWorkspaceRequest is MoveWorkspaceRequest's base function: two
+// refs naming two different workspaces.
+func validateMoveWorkspaceRequest(req *agentreplv1.MoveWorkspaceRequest) *connect.Error {
+	return validateWorkspacePair(req.GetWorkspace(), req.GetTarget(), "a workspace cannot move onto its own tab")
+}
+
+// validateWorkspacePair is the base of a request naming two different
+// workspaces in its `workspace' and `target' fields; SAME is the refusal of
+// one workspace named twice.
+func validateWorkspacePair(workspace, target *workspacev1.WorkspaceRef, same string) *connect.Error {
+	if err := validateWorkspaceRef("workspace", workspace); err != nil {
 		return err
 	}
-	if err := validateWorkspaceRef("target", req.GetTarget()); err != nil {
+	if err := validateWorkspaceRef("target", target); err != nil {
 		return err
 	}
-	if req.GetWorkspace().GetId() == req.GetTarget().GetId() {
-		return invalid("target", "a workspace cannot swap with itself")
+	if workspace.GetId() == target.GetId() {
+		return invalid("target", same)
 	}
 	return nil
 }
@@ -694,9 +718,140 @@ func validateSidebarViewFoldSection(fold *agentreplv1.SidebarViewFoldSection) *c
 		if err := validateRepositoryRef("fold_section.repository", section.Repository); err != nil {
 			return err
 		}
+	case *agentreplv1.SidebarViewFoldSection_Subsection:
+		if err := validateSubsectionRef("fold_section.subsection", section.Subsection); err != nil {
+			return err
+		}
 	}
 	if fold.GetFold() == nil {
 		return invalid("fold_section.fold", "a fold arm is required")
+	}
+	return nil
+}
+
+// validateArrangeSidebarRequest is ArrangeSidebarRequest's base function: a
+// change arm, every ref and arm it names, and nothing placed relative to
+// itself. A blank NAME is a refusal arm (blank_name), not a validation
+// failure, as a blank task title is. Two repository refs naming one
+// repository by different spellings are caught after resolution (the
+// server's ArrangeSidebar).
+func validateArrangeSidebarRequest(req *agentreplv1.ArrangeSidebarRequest) *connect.Error {
+	switch change := req.GetChange().(type) {
+	case nil:
+		return invalid("change", "a change arm is required")
+	case *agentreplv1.ArrangeSidebarRequest_CreateSubsection:
+		return validateRepositoryRef("create_subsection.repository", change.CreateSubsection.GetRepository())
+	case *agentreplv1.ArrangeSidebarRequest_RenameSubsection:
+		return validateSubsectionRef("rename_subsection.subsection", change.RenameSubsection.GetSubsection())
+	case *agentreplv1.ArrangeSidebarRequest_DeleteSubsection:
+		return validateSubsectionRef("delete_subsection.subsection", change.DeleteSubsection.GetSubsection())
+	case *agentreplv1.ArrangeSidebarRequest_MoveSubsection:
+		return validateArrangeMoveSubsection(change.MoveSubsection)
+	case *agentreplv1.ArrangeSidebarRequest_MoveRepository:
+		return validateArrangeMoveRepository(change.MoveRepository)
+	case *agentreplv1.ArrangeSidebarRequest_PlaceWorkspace:
+		return validateArrangePlaceWorkspace(change.PlaceWorkspace)
+	case *agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces:
+		return validateArrangePlaceWorkspaces(change.PlaceWorkspaces)
+	}
+	return nil
+}
+
+// validateArrangeMoveSubsection is ArrangeMoveSubsection's base function.
+func validateArrangeMoveSubsection(move *agentreplv1.ArrangeMoveSubsection) *connect.Error {
+	if err := validateSubsectionRef("move_subsection.subsection", move.GetSubsection()); err != nil {
+		return err
+	}
+	switch to := move.GetTo().(type) {
+	case nil:
+		return invalid("move_subsection.to", "a place arm is required")
+	case *agentreplv1.ArrangeMoveSubsection_Before:
+		if err := validateSubsectionRef("move_subsection.before", to.Before); err != nil {
+			return err
+		}
+		if to.Before.GetId() == move.GetSubsection().GetId() {
+			return invalid("move_subsection.before", "a subsection cannot move before itself")
+		}
+	}
+	return nil
+}
+
+// validateArrangeMoveRepository is ArrangeMoveRepository's base function.
+func validateArrangeMoveRepository(move *agentreplv1.ArrangeMoveRepository) *connect.Error {
+	if err := validateRepositoryRef("move_repository.repository", move.GetRepository()); err != nil {
+		return err
+	}
+	switch to := move.GetTo().(type) {
+	case nil:
+		return invalid("move_repository.to", "a place arm is required")
+	case *agentreplv1.ArrangeMoveRepository_Before:
+		return validateRepositoryRef("move_repository.before", to.Before)
+	}
+	return nil
+}
+
+// validateArrangePlaceWorkspace is ArrangePlaceWorkspace's base function.
+func validateArrangePlaceWorkspace(place *agentreplv1.ArrangePlaceWorkspace) *connect.Error {
+	if err := validateWorkspaceRef("place_workspace.workspace", place.GetWorkspace()); err != nil {
+		return err
+	}
+	switch into := place.GetInto().(type) {
+	case nil:
+		return invalid("place_workspace.into", "a destination arm is required")
+	case *agentreplv1.ArrangePlaceWorkspace_Subsection:
+		if err := validateSubsectionRef("place_workspace.subsection", into.Subsection); err != nil {
+			return err
+		}
+	}
+	switch at := place.GetAt().(type) {
+	case nil:
+		return invalid("place_workspace.at", "a place arm is required")
+	case *agentreplv1.ArrangePlaceWorkspace_Before:
+		if err := validateWorkspaceRef("place_workspace.before", at.Before); err != nil {
+			return err
+		}
+		if at.Before.GetId() == place.GetWorkspace().GetId() {
+			return invalid("place_workspace.before", "a workspace cannot be placed before itself")
+		}
+	}
+	return nil
+}
+
+// validateArrangePlaceWorkspaces is ArrangePlaceWorkspaces' base function: at
+// least one workspace, none twice, a destination and a place, and an anchor
+// that is none of the placed workspaces.
+func validateArrangePlaceWorkspaces(place *agentreplv1.ArrangePlaceWorkspaces) *connect.Error {
+	if len(place.GetWorkspaces()) == 0 {
+		return invalid("place_workspaces.workspaces", "at least one workspace is required")
+	}
+	seen := map[string]bool{}
+	for i, ref := range place.GetWorkspaces() {
+		if err := validateWorkspaceRef(fmt.Sprintf("place_workspaces.workspaces[%d]", i), ref); err != nil {
+			return err
+		}
+		if seen[ref.GetId()] {
+			return invalid(fmt.Sprintf("place_workspaces.workspaces[%d]", i), "a workspace is placed once")
+		}
+		seen[ref.GetId()] = true
+	}
+	switch into := place.GetInto().(type) {
+	case nil:
+		return invalid("place_workspaces.into", "a destination arm is required")
+	case *agentreplv1.ArrangePlaceWorkspaces_Subsection:
+		if err := validateSubsectionRef("place_workspaces.subsection", into.Subsection); err != nil {
+			return err
+		}
+	}
+	switch at := place.GetAt().(type) {
+	case nil:
+		return invalid("place_workspaces.at", "a place arm is required")
+	case *agentreplv1.ArrangePlaceWorkspaces_Before:
+		if err := validateWorkspaceRef("place_workspaces.before", at.Before); err != nil {
+			return err
+		}
+		if seen[at.Before.GetId()] {
+			return invalid("place_workspaces.before", "the workspaces cannot be placed before one of themselves")
+		}
 	}
 	return nil
 }

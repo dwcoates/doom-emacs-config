@@ -268,6 +268,11 @@ func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) 
 // answered cold gate (AnswerColdGate) both reach it.
 func (v *verbs) recordHidden(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, hidden bool) error {
 	if err := v.deps.DB.SetHidden(ctx, ws, hidden, v.now()); err != nil {
+		// A FAMILY IS HIDDEN CHILD FIRST AND SHOWN PARENT FIRST
+		// (wsm/family.go): the refusal is the answer.
+		if refusedByFamily(log, opSetHidden, err) {
+			return err
+		}
 		log.Error(opSetHidden, "could not record whether the workspace is hidden", dlog.Context{"hidden": hidden, "cause": err.Error()})
 		return fmt.Errorf("set hidden on %q: %w", ws, err)
 	}
@@ -291,7 +296,10 @@ func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, hidden ids
 	if !ok {
 		return fmt.Errorf("land after hiding %q: the registry could not be read", hidden)
 	}
-	target, found := hideLandingTarget(sidebar.Tabs(reg), hidden)
+	// THE NEIGHBOUR IS THE ONE THE USER SAW: a hidden workspace's tab follows
+	// its run's drawn tabs, so its neighbours are read off the bar as it stood
+	// with the workspace still shown.
+	target, found := hideLandingTarget(sidebar.Tabs(asShown(reg, hidden), log), hidden)
 	if !found {
 		log.Info(opSetHidden, "the tab bar draws no other workspace beside the hidden one; the selection stays", nil)
 		return nil
@@ -314,6 +322,20 @@ func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, hidden ids
 	targetLog.Info(opSetHidden, "landed the user on the hidden workspace's neighbour in the tab bar",
 		dlog.Context{"place": target.Place})
 	return v.reviveSelected(ctx, targetLog, target.ID)
+}
+
+// asShown answers REG with workspace WS not hidden, for the bar as it stood
+// before WS was hidden. It copies the workspaces: the slice is the
+// registry's.
+func asShown(reg sidebar.Registry, ws ids.WorkspaceID) sidebar.Registry {
+	reg.Workspaces = slices.Clone(reg.Workspaces)
+	for i := range reg.Workspaces {
+		if reg.Workspaces[i].ID == ws {
+			reg.Workspaces[i].Hidden = false
+			reg.Workspaces[i].HiddenAt = nil
+		}
+	}
+	return reg
 }
 
 // hideLandingTarget picks where hiding HIDDEN lands the user among TABS, the
@@ -372,25 +394,74 @@ func (v *verbs) SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Prio
 	return nil
 }
 
+// ownedPair refuses RPC unless this daemon serves both ws and target, as
+// `owned' does for one workspace, and answers ws's logger naming target.
+func (v *verbs) ownedPair(ctx context.Context, rpc string, ws, target ids.WorkspaceID) (dlog.Logger, error) {
+	_, log, err := v.owned(ctx, rpc, ws)
+	if err != nil {
+		return nil, err
+	}
+	if _, _, err := v.owned(ctx, rpc, target); err != nil {
+		return nil, err
+	}
+	return log.With(dlog.Context{"target": string(target)}), nil
+}
+
 // Swap exchanges the places of workspaces ws and target in the registry order,
 // every other workspace keeping its own (wsm's SwapPlaces). The sidebar and the
-// tab bar are both views of the registry, so one swap shows on both; any two
-// workspaces can swap.
+// tab bar are both views of the registry, so one swap shows on both; two
+// workspaces of different repositories are refused other_repository, and two
+// that are not siblings not_siblings.
 func (v *verbs) Swap(ctx context.Context, ws, target ids.WorkspaceID) error {
-	const rpc = "SwapWorkspaces"
-	_, log, err := v.owned(ctx, rpc, ws)
+	log, err := v.ownedPair(ctx, "SwapWorkspaces", ws, target)
 	if err != nil {
 		return err
 	}
-	if _, _, err := v.owned(ctx, rpc, target); err != nil {
-		return err
-	}
-	log = log.With(dlog.Context{"target": string(target)})
 	if err := v.deps.DB.SwapPlaces(ctx, ws, target); err != nil {
+		if refused := placeRefusal(log, "SwapWorkspaces", err); refused != nil {
+			return refused
+		}
 		log.Error(opSwap, "could not swap the workspaces' places", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("swap %q with %q: %w", ws, target, err)
 	}
 	log.Info(opSwap, "swapped the workspace's place with the target's", nil)
 	v.republishRegistry(ctx, log, opSwap)
+	return nil
+}
+
+// placeRefusal answers RPC's refusal for a store error that refuses taking
+// another workspace's place (two repositories, two workspaces that are not
+// siblings), nil for any other error. Swap and Move share it, so the two
+// verbs answer one condition with one arm.
+func placeRefusal(log dlog.Logger, rpc string, err error) *Refusal {
+	switch {
+	case errors.Is(err, wsm.ErrOtherRepository):
+		return refuse(log, rpc, ArmOtherRepository, err.Error(), false)
+	case errors.Is(err, wsm.ErrNotSiblings):
+		return refuse(log, rpc, ArmNotSiblings, err.Error(), false)
+	}
+	return nil
+}
+
+// Move puts workspace ws onto target's tab in the arrangement's walk, the
+// tabs between shifting one family toward the tab ws left (wsm's
+// MoveWorkspace). The two must be siblings there: two workspaces of
+// different repositories are refused other_repository, and any other
+// pairing not_siblings.
+func (v *verbs) Move(ctx context.Context, ws, target ids.WorkspaceID) error {
+	const rpc = "MoveWorkspace"
+	log, err := v.ownedPair(ctx, rpc, ws, target)
+	if err != nil {
+		return err
+	}
+	if err := v.deps.DB.MoveWorkspace(ctx, ws, target); err != nil {
+		if refused := placeRefusal(log, rpc, err); refused != nil {
+			return refused
+		}
+		log.Error(opMove, "could not move the workspace onto the target's tab", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("move %q onto %q: %w", ws, target, err)
+	}
+	log.Info(opMove, "moved the workspace onto the target's tab", nil)
+	v.republishRegistry(ctx, log, opMove)
 	return nil
 }

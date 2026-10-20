@@ -5764,3 +5764,30 @@ describe("the interim corner's shared tokens", () => {
     expect(rolled).toBe(1);
   });
 });
+
+/**
+ * A REPOSITORY'S SUBSECTIONS and THE DRAG that arranges them
+ * (src/sidebar/subsections.ts, src/sidebar/drag.ts).
+ */
+describe("the repository's subsections and the drag", () => {
+  it("folds a repository's subsections away with it", () => {
+    expect(declarationsOf("#ws-sidebar .repo.folded > .sb-subsections")).toMatch(/display:\s*none/);
+  });
+
+  it("draws the drop slot only while the subsection has no rows", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection > .rows:not(:empty) + .sb-subsection-empty")).toMatch(/display:\s*none/);
+  });
+
+  it("lifts the drag's copy above the rail and out of the pointer's way", () => {
+    const ghost = declarationsOf("#ws-sidebar .sb-drag-ghost") ?? "";
+    expect([/position:\s*fixed/.test(ghost), /pointer-events:\s*none/.test(ghost)]).toEqual([true, true]);
+  });
+
+  it("dims the dragged item's slot", () => {
+    expect(declarationsOf("#ws-sidebar .sb-drag-slot")).toMatch(/opacity:\s*0\.35/);
+  });
+
+  it("floats the name popup over the rail", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-popup")).toMatch(/position:\s*fixed/);
+  });
+});

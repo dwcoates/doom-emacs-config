@@ -150,10 +150,19 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - a workspace with a live session reports `ready` after readiness, `thinking`
   during a turn, `done` after the turn concludes, `permission` while a
   permission is open, `idle_async` with detached work live and no turn
+- family rules: a parent with an open child is refused CloseWorkspace,
+  KillWorkspace and a hide (has_open_children, naming the child), and the
+  family stays open and nested; a parent whose child is closed closes; a
+  child of a hidden parent is refused CreateWorkspace (parent_not_open)
+- subsection folds: collapsing a subsection (UpdateSidebarView) draws it
+  collapsed and folds its workspaces' tabs, the rest numbered 1..N
 - registry ordering: a new workspace lands second-to-last on the tab bar;
   setting a priority moves it second-to-last among the rest; a re-opened
-  workspace keeps its place; SwapWorkspaces exchanges any two workspaces'
-  places, across repositories too; the roster's tab bar lists open workspaces in
+  workspace keeps its place; SwapWorkspaces exchanges two workspaces'
+  places within one repository and refuses two repositories (other_repository)
+  and a child with a workspace outside its siblings (not_siblings); MoveWorkspace puts one workspace onto a
+  sibling's tab, the tabs between shifting over, and refuses two repositories
+  (other_repository); the roster's tab bar lists open workspaces in
   that order; clearing a priority removes the badge
 - attention marker set on a notification push, cleared by SelectWorkspace and
   by the last open ask settling

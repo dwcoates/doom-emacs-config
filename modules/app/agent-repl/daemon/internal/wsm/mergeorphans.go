@@ -43,25 +43,12 @@ func (s *store) SweepOrphanedMergeState(ctx context.Context, at time.Time) (Orph
 	fields := dlog.Context{}
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		out = OrphanedMergeState{}
-		rows, err := tx.QueryContext(ctx, `SELECT `+leaseColumns+` FROM leases
-			WHERE holder = ? AND workspace_id NOT IN (SELECT workspace_id FROM merge_queue) ORDER BY acquired_at, id`, int(HolderMerge))
+		released, err := listRows(ctx, tx, `SELECT `+leaseColumns+` FROM leases
+			WHERE holder = ? AND workspace_id NOT IN (SELECT workspace_id FROM merge_queue) ORDER BY acquired_at, id`, scanLease, int(HolderMerge))
 		if err != nil {
 			return err
 		}
-		for rows.Next() {
-			l, err := scanLease(rows)
-			if err != nil {
-				_ = rows.Close()
-				return err
-			}
-			out.ReleasedLeases = append(out.ReleasedLeases, l)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
+		out.ReleasedLeases = released
 		for _, l := range out.ReleasedLeases {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM leases WHERE id = ?`, l.ID); err != nil {
 				return err

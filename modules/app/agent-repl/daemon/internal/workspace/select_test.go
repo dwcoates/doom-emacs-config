@@ -219,7 +219,7 @@ func TestSelectWithAnUnreadableRegistryStillTellsTheRosterTheSelection(t *testin
 	if want := []string{"selected"}; !slices.Equal(f.sidebar.calls, want) {
 		t.Fatalf("roster calls = %v, want %v", f.sidebar.calls, want)
 	}
-	if got := recordLevel(f, "could not list the workspaces for the roster"); got != "error" {
+	if got := recordLevel(f, "could not read the workspaces, repositories and subsections for the roster"); got != "error" {
 		t.Fatalf("the failed registry read was recorded at %q, want error", got)
 	}
 }
@@ -1218,6 +1218,46 @@ func TestSwapRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
 	}
 }
 
+func TestSwapRefusesTwoWorkspacesThatAreNotSiblings(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	f.db.swapErr = wsm.ErrNotSiblings
+
+	// Act.
+	err := f.verbs.Swap(context.Background(), "w1", "w2")
+
+	// Assert.
+	asRefusal(t, err, ArmNotSiblings)
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("a refused swap republished %d times", len(f.sidebar.registries))
+	}
+	if loggedAtError(f, opSwap) {
+		t.Fatal("a refused swap was logged at error")
+	}
+}
+
+func TestSwapRefusesTwoRepositories(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	f.db.swapErr = wsm.ErrOtherRepository
+
+	// Act.
+	err := f.verbs.Swap(context.Background(), "w1", "w2")
+
+	// Assert.
+	asRefusal(t, err, ArmOtherRepository)
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("a refused swap republished %d times", len(f.sidebar.registries))
+	}
+	if loggedAtError(f, opSwap) {
+		t.Fatal("a refused swap was logged at error")
+	}
+}
+
 func TestSwapSurfacesAStoreFailure(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -1236,6 +1276,132 @@ func TestSwapSurfacesAStoreFailure(t *testing.T) {
 		t.Fatalf("a failed swap republished %d times", len(f.sidebar.registries))
 	}
 	if !loggedAtError(f, opSwap) {
+		t.Fatal("the store failure was not logged at error")
+	}
+}
+
+func TestOwnedPairNamesTheTargetOnTheWorkspacesLogger(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+
+	// Act.
+	log, err := f.verbs.(*verbs).ownedPair(context.Background(), "MoveWorkspace", "w1", "w2")
+	log.Info(opMove, "probe", nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ownedPair: %v", err)
+	}
+	rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Operation: opMove})
+	if !ok || rec.Context["target"] != "w2" {
+		t.Fatalf("probe record = %+v (found %v), want it to name target w2", rec, ok)
+	}
+}
+
+func TestOwnedPairRefusesATargetThisDaemonDoesNotKnow(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	_, err := f.verbs.(*verbs).ownedPair(context.Background(), "MoveWorkspace", "w1", "absent")
+
+	// Assert.
+	asRefusal(t, err, ArmUnknownWorkspace)
+}
+
+func TestMoveMovesTheWorkspaceAndRepublishes(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Move(context.Background(), "w1", "w2"); err != nil {
+		t.Fatalf("Move: %v", err)
+	}
+
+	// Assert.
+	if want := [][2]ids.WorkspaceID{{"w1", "w2"}}; !slices.Equal(f.db.moves, want) {
+		t.Fatalf("moves = %v, want %v", f.db.moves, want)
+	}
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+	}
+	if !hasRecord(f, dlog.LevelInfo, opMove) {
+		t.Fatal("the move was not recorded at info")
+	}
+}
+
+func TestMoveRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	f.owner.standing = StandingTransferringAway
+
+	// Act.
+	err := f.verbs.Move(context.Background(), "w1", "w2")
+
+	// Assert.
+	asRefusal(t, err, ArmTransferringAway)
+	if len(f.db.moves) != 0 {
+		t.Fatalf("a refused move wrote %v", f.db.moves)
+	}
+}
+
+func TestMoveTurnsTheStoresRefusalsIntoArms(t *testing.T) {
+	tests := []struct {
+		name  string
+		store error
+		arm   string
+	}{
+		{name: "two repositories", store: wsm.ErrOtherRepository, arm: ArmOtherRepository},
+		{name: "not siblings", store: wsm.ErrNotSiblings, arm: ArmNotSiblings},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.workspace("w2", t.TempDir())
+			f.db.moveErr = tt.store
+
+			// Act.
+			err := f.verbs.Move(context.Background(), "w1", "w2")
+
+			// Assert.
+			asRefusal(t, err, tt.arm)
+			if len(f.sidebar.registries) != 0 {
+				t.Fatalf("a refused move republished %d times", len(f.sidebar.registries))
+			}
+			if loggedAtError(f, opMove) {
+				t.Fatal("a refused move was logged at error")
+			}
+		})
+	}
+}
+
+func TestMoveSurfacesAStoreFailure(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	f.db.moveErr = errors.New("disk on fire")
+
+	// Act.
+	err := f.verbs.Move(context.Background(), "w1", "w2")
+
+	// Assert.
+	if err == nil || !errors.Is(err, f.db.moveErr) {
+		t.Fatalf("error = %v, want the store's failure", err)
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("a failed move republished %d times", len(f.sidebar.registries))
+	}
+	if !loggedAtError(f, opMove) {
 		t.Fatal("the store failure was not logged at error")
 	}
 }
@@ -1494,5 +1660,94 @@ func TestAFailedCurrentReadFailsTheLandingLoudly(t *testing.T) {
 	}
 	if !loggedAtError(f, opSetHidden) {
 		t.Fatalf("the failed read was not recorded at error: err=%v records=%+v", err, f.log.logger.Records())
+	}
+}
+func TestHidingLandsOnTheNeighbourTheUserSawBeforeTheHide(t *testing.T) {
+	// Arrange: w2 is current between w1 and w3; once hidden, its tab follows
+	// the drawn ones, but the landing is read off the bar as it stood.
+	f := newFixture(t)
+	for i, id := range []ids.WorkspaceID{"w1", "w2", "w3"} {
+		ws := f.workspace(id, t.TempDir())
+		ws.Place = int64(i + 1)
+		f.db.with(ws)
+	}
+	f.db.current = &[]ids.WorkspaceID{"w2"}[0]
+
+	// Act.
+	if err := f.verbs.SetHidden(context.Background(), "w2", true); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+
+	// Assert.
+	if f.db.current == nil || *f.db.current != "w1" {
+		t.Fatalf("current = %v, want w1, the left neighbour the user saw", f.db.current)
+	}
+}
+
+func TestSetHiddenAnswersAFamilyRefusal(t *testing.T) {
+	tests := []struct {
+		name   string
+		hidden bool
+		err    error
+	}{
+		{name: "a hide of a parent with open children", hidden: true, err: errOpenChildren},
+		{name: "a show under a parent that is not open", hidden: false, err: errParentNotOpen},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.db.setHiddenErr = tt.err
+
+			// Act
+			err := f.verbs.SetHidden(context.Background(), "w1", tt.hidden)
+
+			// Assert
+			requireFamilyAnswer(t, f, err, tt.err, opSetHidden)
+			if len(f.visibilityEdges) != 0 {
+				t.Fatalf("visibility edges = %v, want none for a refused write", f.visibilityEdges)
+			}
+		})
+	}
+}
+
+func TestPlaceRefusal(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		arm  string
+	}{
+		{name: "two repositories", err: fmt.Errorf("swap: %w", wsm.ErrOtherRepository), arm: ArmOtherRepository},
+		{name: "not siblings", err: fmt.Errorf("swap: %w", wsm.ErrNotSiblings), arm: ArmNotSiblings},
+		{name: "any other error", err: errors.New("disk I/O error")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := placeRefusal(dlog.NewTestLogger(), "MoveWorkspace", tt.err)
+
+			// Assert.
+			if tt.arm == "" {
+				if got != nil {
+					t.Fatalf("placeRefusal = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil || got.Arm != tt.arm || got.Rpc != "MoveWorkspace" {
+				t.Fatalf("placeRefusal = %+v, want MoveWorkspace's %s", got, tt.arm)
+			}
+		})
+	}
+}
+
+func TestSwapAndMoveShareThePlaceRefusal(t *testing.T) {
+	// Act.
+	shared := sourcescan.Count(t, "placeRefusal(log, ")
+	byHand := sourcescan.Count(t, "ArmNotSiblings, err.Error()")
+
+	// Assert.
+	if shared != 2 || byHand != 1 {
+		t.Fatalf("placeRefusal calls = %d and hand-spelled not_siblings arms = %d, want Swap and Move sharing the one helper", shared, byHand)
 	}
 }

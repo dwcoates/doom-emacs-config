@@ -89,38 +89,48 @@ current workspace's row sits in, so a create test hands them this."
   (car (agent-repl-verbs--repo-sections (agent-repl-test-verbs--roster nil))))
 
 (defun agent-repl-test-verbs--row (&rest overrides)
-  "Return a decoded `RosterRow' with OVERRIDES applied at the top level."
+  "Return a decoded `RosterRow' with OVERRIDES applied at the top level.
+A `:children' override is the row's family, recorded through
+`agent-repl-test--with-family': the shared row carries none."
   (let ((row (list :workspace (list :workspace (agent-repl-test-verbs--ref))
                    :attention nil
                    :priority nil
                    :name (list :text "row-one")
                    :status (list :arm :ready :value nil)
                    :current (list :current nil)
-                   :children nil
                    :when '(:arm :no-turn-running :value nil)
                    :detail (list :branch nil :parent-branch nil :summary nil)
-                   :closed (list :closed nil))))
+                   :closed (list :closed nil)))
+        (children nil))
     (while overrides
-      (setq row (plist-put row (pop overrides) (pop overrides))))
-    row))
+      (let ((key (pop overrides)) (value (pop overrides)))
+        (if (eq key :children)
+            (setq children value)
+          (setq row (plist-put row key value)))))
+    (agent-repl-test--with-family row children)))
 
 (defun agent-repl-test-verbs--roster (rows &optional merged-rows sections hidden-rows)
-  "Return a decoded `WorkspaceRoster' carrying ROWS in one repo section.
-HIDDEN-ROWS, when given, are the hidden section's rows."
+  "Return a decoded `WorkspaceRoster' carrying ROWS: the open ones in one repo section.
+A closed one of ROWS is listed in the closed list, as the daemon lists it.
+SECTIONS, when given, replace the one section.  HIDDEN-ROWS, when given,
+are the hidden section's rows."
   (list :repository
         (list :sections
-              (or sections
-                  (list (list :key (list :repository (agent-repl-test-verbs--repo-ref))
-                              :header (list :label (list :text "repo-one"))
-                              :rows (list :rows rows)))))
+              (agent-repl-test--number-tabs
+               (or sections
+                   (list (list :key (list :repository (agent-repl-test-verbs--repo-ref))
+                               :header (list :label (list :text "repo-one"))
+                               :open-rows (agent-repl-test--open-rows
+                                           (seq-remove #'agent-repl-roster-row-closed-p rows)))))))
         :hidden (list :header (list :label (list :text "Hidden"))
-                      :rows (list :rows hidden-rows))
+                      :hidden-rows (agent-repl-test--hidden-rows hidden-rows))
         :recently-merged (list :header (list :label (list :text "Recently Merged"))
                                :groups (and merged-rows
                                             (list (list :key (list :repository (agent-repl-test-verbs--repo-ref))
                                                         :header (list :label (list :text "repo-one"))
-                                                        :rows (list :rows merged-rows)
+                                                        :merged-rows (agent-repl-test--merged-rows merged-rows)
                                                         :drawn (list :arm :shown :value nil)))))
+        :closed (agent-repl-test--closed-rows (seq-filter #'agent-repl-roster-row-closed-p rows))
         :current nil))
 
 (defmacro agent-repl-test-verbs--with (answers &rest body)
@@ -223,6 +233,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :set-hidden))
                 ((symbol-function 'agent-repl-rpc-swap-workspaces)
                  (agent-repl-test-verbs--stub :swap))
+                ((symbol-function 'agent-repl-rpc-move-workspace)
+                 (agent-repl-test-verbs--stub :move))
                 ((symbol-function 'agent-repl-rpc-update-shutdown-schedule)
                  (agent-repl-test-verbs--stub :shutdown-schedule))
                 ((symbol-function 'agent-repl-rpc-update-merge-queue)
@@ -956,19 +968,17 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
     ;; Assert.
     (should (equal agent-repl-test-verbs--switch-requests '("ws-one")))))
 
-(ert-deftest agent-repl-verbs-hidden-rows-flattens-and-drops-closed ()
-  "The hidden section's open rows, children included; closed rows are dropped."
+(ert-deftest agent-repl-verbs-hidden-rows-flattens-the-family ()
+  "The hidden section's rows, children included, each before its family.
+The hidden list holds open workspaces only: a closed one is in the closed
+list, so there is nothing to drop."
   ;; Arrange.
   (let* ((child (agent-repl-test-verbs--row
                  :workspace (list :workspace (agent-repl-test-verbs--ref "kid" "/tmp/k"))
                  :name (list :text "child")))
          (parent (agent-repl-test-verbs--row :name (list :text "parent")
                                              :children (list child)))
-         (closed (agent-repl-test-verbs--row
-                  :workspace (list :workspace (agent-repl-test-verbs--ref "cid" "/tmp/c"))
-                  :name (list :text "closed")
-                  :closed (list :closed t)))
-         (roster (agent-repl-test-verbs--roster nil nil nil (list parent closed))))
+         (roster (agent-repl-test-verbs--roster nil nil nil (list parent))))
     ;; Act.
     (let ((rows (agent-repl-verbs--hidden-rows roster)))
       ;; Assert.
@@ -1061,6 +1071,100 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
       (agent-repl-verb-swap "ws-one" "ws-two")
       ;; Assert.
       (should (agent-repl-test-verbs--messaged-p "swap refused: unknown-workspace")))))
+
+;;;; ---- No tab to take: the answer a swap or a move may get ----
+
+(ert-deftest agent-repl-verbs-no-tab-to-take-claims-the-two-arms ()
+  "`other_repository' and `not_siblings' are claimed; any other arm is not."
+  (cl-letf (((symbol-function 'agent-repl--info) #'ignore)
+            ((symbol-function 'message) #'ignore))
+    (should (agent-repl-verbs--no-tab-to-take "move" "a" "b" '(:cause (:arm :other-repository :value nil))))
+    (should (agent-repl-verbs--no-tab-to-take "move" "a" "b" '(:cause (:arm :not-siblings :value nil))))
+    (should-not (agent-repl-verbs--no-tab-to-take "move" "a" "b" '(:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-verbs-no-tab-to-take-records-under-its-gestures-word ()
+  "The record names the gesture, so a swap's and a move's are told apart."
+  (let (infos)
+    (cl-letf (((symbol-function 'agent-repl--info)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos)))
+              ((symbol-function 'message) #'ignore))
+      (agent-repl-verbs--no-tab-to-take "swap" "a" "b" '(:cause (:arm :other-repository :value nil))))
+    (should (equal infos '("elisp.verbs.swap-no-tab ws=a target=b arm=:other-repository")))))
+
+(ert-deftest agent-repl-verbs-swap-to-another-repository-is-said-in-words ()
+  "An `other_repository' answer to a swap names why the tab cannot be taken."
+  (agent-repl-test-verbs--with
+      '((:swap . (:response (:arm :error :value (:cause (:arm :other-repository :value nil))))))
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-swap "ws-one" "ws-two")
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p "ws-one and ws-two are in different repositories")))))
+
+(ert-deftest agent-repl-verbs-tab-slot-verbs-share-the-no-tab-answer ()
+  "The swap and the move both answer no tab to take through one helper."
+  (dolist (verb '(agent-repl-verb-swap agent-repl-verb-move))
+    (should (string-match-p "agent-repl-verbs--no-tab-to-take" (format "%S" (symbol-function verb))))))
+
+;;;; ---- MoveWorkspace ----
+
+(ert-deftest agent-repl-verbs-move-carries-both-refs ()
+  "MoveWorkspace names the moved workspace and the target by ref."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-move "ws-one" "ws-two")
+      ;; Assert.
+      (let ((request (agent-repl-test-verbs--request :move)))
+        (should (equal (plist-get request :workspace) (agent-repl-test-verbs--ref "id-ws-one" "/w/ws-one")))
+        (should (equal (plist-get request :target) (agent-repl-test-verbs--ref "id-ws-two" "/w/ws-two")))))))
+
+(ert-deftest agent-repl-verbs-move-success-says-so ()
+  "A move the daemon made is reported to the user."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-move "ws-one" "ws-two")
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p "moved ws-one onto ws-two's tab")))))
+
+(ert-deftest agent-repl-verbs-move-to-another-repository-is-said-in-words-at-info ()
+  "An `other_repository' answer is an answer: said in words and recorded at INFO."
+  (let (infos warns)
+    (agent-repl-test-verbs--with
+        '((:move . (:response (:arm :error :value (:cause (:arm :other-repository :value nil))))))
+      (agent-repl-test-verbs--with-two-refs
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos)))
+                  ((symbol-function 'agent-repl--warn)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warns))))
+          ;; Act.
+          (agent-repl-verb-move "ws-one" "ws-two")
+          ;; Assert.
+          (should (agent-repl-test-verbs--messaged-p "ws-one and ws-two are in different repositories")))))
+    (should (member "elisp.verbs.move-no-tab ws=ws-one target=ws-two arm=:other-repository" infos))
+    (should-not warns)))
+
+(ert-deftest agent-repl-verbs-move-to-a-non-sibling-is-said-in-words ()
+  "A `not_siblings' answer names why the tab cannot be taken."
+  (agent-repl-test-verbs--with
+      '((:move . (:response (:arm :error :value (:cause (:arm :not-siblings :value nil))))))
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-move "ws-one" "ws-two")
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p "ws-one and ws-two are not siblings")))))
+
+(ert-deftest agent-repl-verbs-move-other-refusals-take-the-generic-path ()
+  "Any other refused move is reported by the generic refusal path."
+  (agent-repl-test-verbs--with
+      '((:move . (:response (:arm :error :value (:cause (:arm :unknown-workspace
+                                                              :value (:workspace (:id "id-ws-two" :dir "/w/ws-two"))))))))
+    (agent-repl-test-verbs--with-two-refs
+      ;; Act.
+      (agent-repl-verb-move "ws-one" "ws-two")
+      ;; Assert.
+      (should (agent-repl-test-verbs--messaged-p "move refused: unknown-workspace")))))
 
 ;;;; ---- Ack handling: one test per outcome ----
 
@@ -1864,10 +1968,10 @@ current workspace rides as the fork source, and no parent is sent."
   (let* ((other (list :key (list :repository (agent-repl-test-verbs--repo-ref
                                               "other-id" "/tmp/other"))
                       :header (list :label (list :text "other-repo"))
-                      :rows (list :rows nil)))
+                      :open-rows (agent-repl-test--open-rows nil)))
          (mine (list :key (list :repository (agent-repl-test-verbs--repo-ref))
                      :header (list :label (list :text "repo-one"))
-                     :rows (list :rows (list (agent-repl-test-verbs--row)))))
+                     :open-rows (agent-repl-test--open-rows (list (agent-repl-test-verbs--row)))))
          (agent-repl-roster-view
           (agent-repl-test-verbs--roster nil nil (list other mine))))
     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
@@ -2426,10 +2530,10 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
   (list (list :key (list :repository (agent-repl-test-verbs--repo-ref
                                        "ee-repo" "/tmp/agent-repl-test/work/explanation-engine"))
               :header (list :label (list :text "explanation-engine"))
-              :rows (list :rows nil))
+              :open-rows (agent-repl-test--open-rows nil))
         (list :key (list :repository (agent-repl-test-verbs--repo-ref))
               :header (list :label (list :text "repo-one"))
-              :rows (list :rows (list (agent-repl-test-verbs--row))))))
+              :open-rows (agent-repl-test--open-rows (list (agent-repl-test-verbs--row))))))
 
 (defmacro agent-repl-test-verbs--with-ee (root &rest body)
   "Run BODY with `MULTI_REPO_ROOT\=' at ROOT and the explanation-engine roster.
@@ -2537,7 +2641,7 @@ directories need not exist."
           nil nil
           (list (list :key (list :repository (agent-repl-test-verbs--repo-ref "slash" "/tmp/agent-repl-test/x/"))
                       :header (list :label (list :text "x"))
-                      :rows (list :rows nil))))))
+                      :open-rows (agent-repl-test--open-rows nil))))))
     (cl-letf (((symbol-function 'agent-repl--path-canonical) #'directory-file-name))
       ;; Act / Assert.
       (should (equal (plist-get (agent-repl-verbs--roster-repository-at "/tmp/agent-repl-test/x") :id)
@@ -2949,10 +3053,10 @@ trailing-slash removal alone, so the fixture directories need not exist."
   (list (list :key (list :repository (agent-repl-test-verbs--repo-ref
                                        "agent-repl-repo" "/tmp/agent-repl-test/doom"))
               :header (list :label (list :text "doom"))
-              :rows (list :rows nil))
+              :open-rows (agent-repl-test--open-rows nil))
         (list :key (list :repository (agent-repl-test-verbs--repo-ref))
               :header (list :label (list :text "repo-one"))
-              :rows (list :rows (list (agent-repl-test-verbs--row))))))
+              :open-rows (agent-repl-test--open-rows (list (agent-repl-test-verbs--row))))))
 
 ;;;; ---- Create: no creation moves the user ----
 
@@ -3953,13 +4057,11 @@ persp-mode perspective such as \"main\" appears in the registry."
   (agent-repl-test-verbs--with nil
     (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
       (let ((agent-repl-roster-view
-             (list :repository
-                   (list :sections
-                         (list (list :rows
-                                     (list :rows
-                                           (list (list :workspace (list :workspace '(:id "id-1" :dir "/tmp/ws-one"))
-                                                       :name '(:text "ws-one")
-                                                       :closed '(:closed t))))))))))
+             (list :repository (list :sections nil)
+                   :closed (agent-repl-test--closed-rows
+                            (list (list :workspace (list :workspace '(:id "id-1" :dir "/tmp/ws-one"))
+                                        :name '(:text "ws-one")
+                                        :closed '(:closed t)))))))
         (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
           (should (equal (agent-repl-verbs--ref "ws-one") '(:id "id-1" :dir "/tmp/ws-one"))))))))
 
@@ -3968,13 +4070,11 @@ persp-mode perspective such as \"main\" appears in the registry."
   (agent-repl-test-verbs--with nil
     (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
       (let ((agent-repl-roster-view
-             (list :repository
-                   (list :sections
-                         (list (list :rows
-                                     (list :rows
-                                           (list (list :workspace (list :workspace '(:id "id-2" :dir "/other/ws-one"))
-                                                       :name '(:text "ws-one")
-                                                       :closed '(:closed t))))))))))
+             (list :repository (list :sections nil)
+                   :closed (agent-repl-test--closed-rows
+                            (list (list :workspace (list :workspace '(:id "id-2" :dir "/other/ws-one"))
+                                        :name '(:text "ws-one")
+                                        :closed '(:closed t)))))))
         (should-not (agent-repl-verbs--roster-ref "ws-one"))))))
 
 (ert-deftest agent-repl-verbs-kill-with-an-empty-registry-refuses ()
@@ -4695,3 +4795,90 @@ name or closed flag is roster.el's, so the two files cannot disagree."
                   (buffer-string))))
     ;; Act / Assert
     (should-not (string-match-p "(defun agent-repl-verbs--row-\\(ref\\|name\\|closed-p\\) " source))))
+
+(ert-deftest agent-repl-verbs-section-of-ws-finds-a-workspace-in-a-subsection ()
+  "A workspace whose row sits in a subsection is in its section's repository."
+  ;; Arrange
+  (let* ((row (list :workspace (list :workspace (list :id "ws-sub" :dir "/w/sub"))))
+         (section (list :key (list :repository (list :id "repo-1" :dir "/r/1"))
+                        :open-rows (agent-repl-test--open-rows nil)
+                        :subsections (list (list :open-rows (agent-repl-test--open-rows (list row))))))
+         (roster (list :repository (list :sections (list section)))))
+    (cl-letf (((symbol-function 'agent-repl-host-ref)
+               (lambda (_ws) (list :id "ws-sub" :dir "/w/sub"))))
+      ;; Act / Assert
+      (should (eq (agent-repl-verbs--section-of-ws "ws-sub" roster) section)))))
+
+;;;; ---- The family refusals (agentrepl.v1 family.proto) ----
+
+(ert-deftest agent-repl-verbs-family-sentence-names-the-open-children ()
+  "A refusal for open children names each of them, and what to close."
+  (should (equal (agent-repl-verbs-family-sentence
+                  "close" :has-open-children
+                  '(:parent (:id "p" :dir "/w/parent") :children ((:id "a" :dir "/w/child-a"))))
+                 "close refused: child-a is still open under this workspace; close it first"))
+  (should (equal (agent-repl-verbs-family-sentence
+                  "hide" :has-open-children
+                  '(:parent (:id "p" :dir "/w/parent")
+                    :children ((:id "a" :dir "/w/child-a") (:id "b" :dir ""))))
+                 "hide refused: child-a, b are still open under this workspace; close them first")))
+
+(ert-deftest agent-repl-verbs-family-sentence-asks-a-merge-to-resolve-the-children-first ()
+  "A merge refused for open children asks them resolved and closed before a one-shot merge."
+  (should (equal (agent-repl-verbs-family-sentence
+                  "merge" :has-open-children
+                  '(:parent (:id "p" :dir "/w/parent") :children ((:id "a" :dir "/w/child-a"))))
+                 "parent still has open child workspaces (child-a); resolve and close all of them before a one-shot merge")))
+
+(ert-deftest agent-repl-verbs-family-sentence-names-the-parent-and-its-state ()
+  "A refusal for a parent that is not open says which parent and what to do."
+  (dolist (spec '((:hidden "open refused: its parent parent is hidden; show the parent first")
+                  (:closed "open refused: its parent parent is closed; reopen the parent first")
+                  (:closing "open refused: its parent parent closes once its queued merge lands")))
+    (should (equal (agent-repl-verbs-family-sentence
+                    "open" :parent-not-open
+                    (list :parent '(:id "p" :dir "/w/parent") :state (list :arm (car spec) :value nil)))
+                   (cadr spec)))))
+
+(ert-deftest agent-repl-verbs-family-sentence-refuses-a-state-it-cannot-word ()
+  "A parent state this build does not know is an error, never a guess."
+  (should-error (agent-repl-verbs-family-sentence
+                 "open" :parent-not-open '(:parent (:id "p" :dir "/w/p") :state (:arm :frozen :value nil)))))
+
+(ert-deftest agent-repl-verbs-family-sentence-is-nil-for-any-other-arm ()
+  "Only the two family refusals are worded here."
+  (should-not (agent-repl-verbs-family-sentence "close" :blocked nil)))
+
+(ert-deftest agent-repl-verbs-a-family-refusal-is-said-in-words-at-info ()
+  "The refusal reporter records a family refusal at INFO and says it in words."
+  ;; Arrange
+  (let (infos warns said)
+    (cl-letf (((symbol-function 'agent-repl-host-route-handover) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--info) (lambda (_ws fmt &rest _) (push fmt infos)))
+              ((symbol-function 'agent-repl--warn) (lambda (_ws fmt &rest _) (push fmt warns)))
+              ((symbol-function 'message) (lambda (fmt &rest args) (setq said (apply #'format fmt args)))))
+      ;; Act
+      (agent-repl-verbs--on-refusal
+       "ws" "close"
+       '(:cause (:arm :has-open-children
+                 :value (:parent (:id "p" :dir "/w/parent") :children ((:id "a" :dir "/w/child-a")))))))
+    ;; Assert
+    (should (equal said "agent-repl: close refused: child-a is still open under this workspace; close it first"))
+    (should (seq-some (lambda (fmt) (string-prefix-p "elisp.verbs.close-family-refused" fmt)) infos))
+    (should (null warns))))
+
+(ert-deftest agent-repl-verbs-register-words-a-parent-not-open ()
+  "An announcement refused for a closed parent names the parent."
+  (should (equal (agent-repl-verbs-register-refusal-sentence
+                  "/w/child"
+                  '(:cause (:arm :parent-not-open
+                            :value (:parent (:id "p" :dir "/w/parent") :state (:arm :closed :value nil)))))
+                 "register refused: its parent parent is closed; reopen the parent first")))
+
+(ert-deftest agent-repl-verbs-a-swap-of-two-workspaces-that-are-not-siblings-is-said-in-words ()
+  "A swap refused not_siblings is an answer, said in words."
+  (let (said)
+    (cl-letf (((symbol-function 'agent-repl--info) #'ignore)
+              ((symbol-function 'message) (lambda (fmt &rest args) (setq said (apply #'format fmt args)))))
+      (should (agent-repl-verbs--no-tab-to-take "swap" "kid" "root" '(:cause (:arm :not-siblings :value nil)))))
+    (should (equal said "agent-repl: kid and root are not siblings, so kid cannot take that tab"))))

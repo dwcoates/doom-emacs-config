@@ -884,6 +884,7 @@ type CreateWorkspaceError struct {
 	//	*CreateWorkspaceError_ForkSourceHasNoConversation
 	//	*CreateWorkspaceError_NameReserved
 	//	*CreateWorkspaceError_UnknownContextWorkspace
+	//	*CreateWorkspaceError_ParentNotOpen
 	Cause         isCreateWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1079,6 +1080,15 @@ func (x *CreateWorkspaceError) GetUnknownContextWorkspace() *CreateWorkspaceUnkn
 	return nil
 }
 
+func (x *CreateWorkspaceError) GetParentNotOpen() *WorkspaceParentNotOpen {
+	if x != nil {
+		if x, ok := x.Cause.(*CreateWorkspaceError_ParentNotOpen); ok {
+			return x.ParentNotOpen
+		}
+	}
+	return nil
+}
+
 type isCreateWorkspaceError_Cause interface {
 	isCreateWorkspaceError_Cause()
 }
@@ -1177,6 +1187,12 @@ type CreateWorkspaceError_UnknownContextWorkspace struct {
 	UnknownContextWorkspace *CreateWorkspaceUnknownContextWorkspace `protobuf:"bytes,19,opt,name=unknown_context_workspace,json=unknownContextWorkspace,proto3,oneof"`
 }
 
+type CreateWorkspaceError_ParentNotOpen struct {
+	// The named parent is hidden or closed, and creating a child of it
+	// would make an open child of a parent outside the Open section.
+	ParentNotOpen *WorkspaceParentNotOpen `protobuf:"bytes,20,opt,name=parent_not_open,json=parentNotOpen,proto3,oneof"`
+}
+
 func (*CreateWorkspaceError_UngatedWithoutConsent) isCreateWorkspaceError_Cause() {}
 
 func (*CreateWorkspaceError_NoSlug) isCreateWorkspaceError_Cause() {}
@@ -1210,6 +1226,8 @@ func (*CreateWorkspaceError_ForkSourceHasNoConversation) isCreateWorkspaceError_
 func (*CreateWorkspaceError_NameReserved) isCreateWorkspaceError_Cause() {}
 
 func (*CreateWorkspaceError_UnknownContextWorkspace) isCreateWorkspaceError_Cause() {}
+
+func (*CreateWorkspaceError_ParentNotOpen) isCreateWorkspaceError_Cause() {}
 
 type CreateWorkspaceUngatedWithoutConsent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2032,7 +2050,7 @@ var File_agentrepl_v1_endpoint_create_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_create_workspace.proto\x12\fagentrepl.v1\x1a%agentrepl/v1/workspace_priority.proto\x1a\x1aconversation/v1/user.proto\x1a\x1cworkspace/v1/workspace.proto\"\x92\x05\n" +
+	",agentrepl/v1/endpoint_create_workspace.proto\x12\fagentrepl.v1\x1a%agentrepl/v1/workspace_priority.proto\x1a\x1aconversation/v1/user.proto\x1a\x19agentrepl/v1/family.proto\x1a\x1cworkspace/v1/workspace.proto\"\x92\x05\n" +
 	"\x16CreateWorkspaceRequest\x12;\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefR\n" +
@@ -2091,7 +2109,7 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x17CreateWorkspaceAccepted\x12\x13\n" +
 	"\x05op_id\x18\x01 \x01(\tR\x04opId\"R\n" +
 	"\x16CreateWorkspaceSuccess\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x82\x0e\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xd2\x0e\n" +
 	"\x14CreateWorkspaceError\x12l\n" +
 	"\x17ungated_without_consent\x18\x01 \x01(\v22.agentrepl.v1.CreateWorkspaceUngatedWithoutConsentH\x00R\x15ungatedWithoutConsent\x12>\n" +
 	"\ano_slug\x18\x02 \x01(\v2#.agentrepl.v1.CreateWorkspaceNoSlugH\x00R\x06noSlug\x12\x80\x01\n" +
@@ -2110,7 +2128,8 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x13unknown_fork_source\x18\x10 \x01(\v2..agentrepl.v1.CreateWorkspaceUnknownForkSourceH\x00R\x11unknownForkSource\x12\x80\x01\n" +
 	"\x1ffork_source_has_no_conversation\x18\x11 \x01(\v28.agentrepl.v1.CreateWorkspaceForkSourceHasNoConversationH\x00R\x1bforkSourceHasNoConversation\x12P\n" +
 	"\rname_reserved\x18\x12 \x01(\v2).agentrepl.v1.CreateWorkspaceNameReservedH\x00R\fnameReserved\x12r\n" +
-	"\x19unknown_context_workspace\x18\x13 \x01(\v24.agentrepl.v1.CreateWorkspaceUnknownContextWorkspaceH\x00R\x17unknownContextWorkspaceB\a\n" +
+	"\x19unknown_context_workspace\x18\x13 \x01(\v24.agentrepl.v1.CreateWorkspaceUnknownContextWorkspaceH\x00R\x17unknownContextWorkspace\x12N\n" +
+	"\x0fparent_not_open\x18\x14 \x01(\v2$.agentrepl.v1.WorkspaceParentNotOpenH\x00R\rparentNotOpenB\a\n" +
 	"\x05causeJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05R\x0ffinish_requiredR\x13finish_not_one_shot\"&\n" +
 	"$CreateWorkspaceUngatedWithoutConsent\"\x17\n" +
 	"\x15CreateWorkspaceNoSlug\",\n" +
@@ -2198,6 +2217,7 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_goTypes = []any{
 	(*WorkspacePriority)(nil),                          // 31: agentrepl.v1.WorkspacePriority
 	(*v1.WorkspaceRef)(nil),                            // 32: workspace.v1.WorkspaceRef
 	(*v11.UserSaid)(nil),                               // 33: conversation.v1.UserSaid
+	(*WorkspaceParentNotOpen)(nil),                     // 34: agentrepl.v1.WorkspaceParentNotOpen
 }
 var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	30, // 0: agentrepl.v1.CreateWorkspaceRequest.repository:type_name -> workspace.v1.RepositoryRef
@@ -2238,14 +2258,15 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	23, // 35: agentrepl.v1.CreateWorkspaceError.fork_source_has_no_conversation:type_name -> agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation
 	25, // 36: agentrepl.v1.CreateWorkspaceError.name_reserved:type_name -> agentrepl.v1.CreateWorkspaceNameReserved
 	24, // 37: agentrepl.v1.CreateWorkspaceError.unknown_context_workspace:type_name -> agentrepl.v1.CreateWorkspaceUnknownContextWorkspace
-	32, // 38: agentrepl.v1.CreateWorkspaceUnknownForkSource.workspace:type_name -> workspace.v1.WorkspaceRef
-	32, // 39: agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation.workspace:type_name -> workspace.v1.WorkspaceRef
-	32, // 40: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	41, // [41:41] is the sub-list for method output_type
-	41, // [41:41] is the sub-list for method input_type
-	41, // [41:41] is the sub-list for extension type_name
-	41, // [41:41] is the sub-list for extension extendee
-	0,  // [0:41] is the sub-list for field type_name
+	34, // 38: agentrepl.v1.CreateWorkspaceError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
+	32, // 39: agentrepl.v1.CreateWorkspaceUnknownForkSource.workspace:type_name -> workspace.v1.WorkspaceRef
+	32, // 40: agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation.workspace:type_name -> workspace.v1.WorkspaceRef
+	32, // 41: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	42, // [42:42] is the sub-list for method output_type
+	42, // [42:42] is the sub-list for method input_type
+	42, // [42:42] is the sub-list for extension type_name
+	42, // [42:42] is the sub-list for extension extendee
+	0,  // [0:42] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_create_workspace_proto_init() }
@@ -2254,6 +2275,7 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 		return
 	}
 	file_agentrepl_v1_workspace_priority_proto_init()
+	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[0].OneofWrappers = []any{
 		(*CreateWorkspaceRequest_Standard)(nil),
 		(*CreateWorkspaceRequest_OneShot)(nil),
@@ -2285,6 +2307,7 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 		(*CreateWorkspaceError_ForkSourceHasNoConversation)(nil),
 		(*CreateWorkspaceError_NameReserved)(nil),
 		(*CreateWorkspaceError_UnknownContextWorkspace)(nil),
+		(*CreateWorkspaceError_ParentNotOpen)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

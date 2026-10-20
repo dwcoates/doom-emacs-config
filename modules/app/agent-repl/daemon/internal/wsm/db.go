@@ -55,9 +55,18 @@ type DB interface {
 	// SetRepositoryFolded records whether a repository's roster section is
 	// collapsed; an unknown repository is ErrNotFound.
 	SetRepositoryFolded(ctx context.Context, id RepoID, folded bool) error
+	// SetSubsectionFolded records whether a subsection is collapsed; an
+	// unknown subsection is UnknownSubsectionError (subsectionfolds.go).
+	SetSubsectionFolded(ctx context.Context, id SubsectionID, folded bool) error
 	// MarkClosed records that a workspace's editor state is torn down, when,
 	// and by whom; the first close's record stands (see the store's doc).
 	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error
+	// RequireOpenParent answers ParentNotOpenError when the parent is hidden,
+	// closed or closing, nil when it is open (family.go).
+	RequireOpenParent(ctx context.Context, parent WorkspaceID) error
+	// RequireNoOpenChildren answers HasOpenChildrenError for the first of ids
+	// with an open descendant, nil when none has (family.go).
+	RequireNoOpenChildren(ctx context.Context, ids ...WorkspaceID) error
 	// Reopen records that a workspace's editor state stands again, clearing
 	// its close record and, for a merged workspace, the merge's settlement.
 	Reopen(ctx context.Context, id WorkspaceID) error
@@ -99,6 +108,31 @@ type DB interface {
 	// registry order, every other workspace keeping its own; an unknown id is
 	// ErrNotFound and nothing is written.
 	SwapPlaces(ctx context.Context, ws, target WorkspaceID) error
+	// MoveWorkspace moves ws onto target's tab in the arrangement's walk,
+	// the two being siblings there (arrange.go).
+	MoveWorkspace(ctx context.Context, ws, target WorkspaceID) error
+	// ListSubsections loads every subsection, by repository and then in each
+	// repository's stored order (arrange.go).
+	ListSubsections(ctx context.Context) ([]Subsection, error)
+	// ReadArrangement reads the workspaces, repositories and subsections as
+	// ONE snapshot (arrange.go).
+	ReadArrangement(ctx context.Context) (Arrangement, error)
+	// CreateSubsection records a named subsection after REPO's others.
+	CreateSubsection(ctx context.Context, repo RepoID, name string) (Subsection, error)
+	// RenameSubsection relabels one subsection.
+	RenameSubsection(ctx context.Context, id SubsectionID, name string) error
+	// DeleteSubsection removes one subsection, its workspaces returning to
+	// none.
+	DeleteSubsection(ctx context.Context, id SubsectionID) error
+	// MoveSubsection moves one subsection before another of its repository's
+	// (nil: last).
+	MoveSubsection(ctx context.Context, id SubsectionID, before *SubsectionID) error
+	// MoveRepository moves one repository before another (nil: last).
+	MoveRepository(ctx context.Context, id RepoID, before *RepoID) error
+	// PlaceWorkspaces puts root workspaces, with their families, into a
+	// subsection of their repository (nil: none) as one block before a root
+	// there (nil: last).
+	PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, before *WorkspaceID) error
 	// SetAttention sets or clears the roster's attention marker.
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.

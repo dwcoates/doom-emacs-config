@@ -545,3 +545,31 @@ func TestBeginFailsLoudlyWhenTheCloseCannotBeRecorded(t *testing.T) {
 		})
 	}
 }
+
+func TestAKillOrNukeOfAParentWithOpenChildrenLeavesItsMergeQueued(t *testing.T) {
+	tests := []struct {
+		name  string
+		op    string
+		begin func(f *fixture) error
+	}{
+		{name: "kill", op: opKill, begin: func(f *fixture) error { _, err := f.verbs.BeginKill(context.Background(), "w1"); return err }},
+		{name: "nuke", op: opNuke, begin: func(f *fixture) error { _, err := f.verbs.BeginNuke(context.Background(), "w1"); return err }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.db.setClosedErr = errOpenChildren
+
+			// Act.
+			err := tt.begin(f)
+
+			// Assert.
+			requireFamilyAnswer(t, f, err, errOpenChildren, tt.op)
+			if len(f.merge.closed) != 0 {
+				t.Fatalf("merges dropped = %v, want the queued merge left standing", f.merge.closed)
+			}
+		})
+	}
+}

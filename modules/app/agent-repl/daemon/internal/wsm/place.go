@@ -134,8 +134,12 @@ func reland(ctx context.Context, tx *sql.Tx, id WorkspaceID, p *Priority) (int64
 
 // SwapPlaces exchanges the places of workspaces ws and target in one
 // transaction: ws takes target's place, target takes ws's, and every other
-// workspace keeps its own. An unknown id is refused (ErrNotFound) with nothing
-// written.
+// workspace keeps its own. An unknown id is refused (ErrNotFound), two
+// workspaces of different repositories (ErrOtherRepository), and two that are
+// not siblings (ErrNotSiblings: neither both top-level nor children of one
+// parent), with nothing written. A CHILD NEVER LEAVES ITS PARENT'S RUN: its
+// tab follows its parent's, so the only places it can take are its
+// siblings'.
 func (s *store) SwapPlaces(ctx context.Context, ws, target WorkspaceID) error {
 	const op = "daemon.wsm.swap_places"
 	fields := dlog.Context{"workspace": string(ws), "target": string(target)}
@@ -146,11 +150,32 @@ func (s *store) SwapPlaces(ctx context.Context, ws, target WorkspaceID) error {
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var from, to int64
-		if err := scanWorkspaceRow(ctx, tx, ws, "place", &from); err != nil {
+		var fromRepo, toRepo RepoID
+		var fromParent, toParent, fromSubsection, toSubsection sql.NullString
+		if err := scanWorkspaceRow(ctx, tx, ws, "place, repo_id, parent_id, subsection_id", &from, &fromRepo, &fromParent, &fromSubsection); err != nil {
 			return err
 		}
-		if err := scanWorkspaceRow(ctx, tx, target, "place", &to); err != nil {
+		if err := scanWorkspaceRow(ctx, tx, target, "place, repo_id, parent_id, subsection_id", &to, &toRepo, &toParent, &toSubsection); err != nil {
 			return err
+		}
+		// THE TAB BAR NEVER INTERLEAVES REPOSITORIES, so a workspace of one has
+		// no tab of another to take (owner ruling, 2026-10-19).
+		if fromRepo != toRepo {
+			return ErrOtherRepository
+		}
+		if fromParent != toParent {
+			return ErrNotSiblings
+		}
+		// TWO ROOTS EXCHANGE THEIR SUBSECTIONS TOO (arrange.go), so each lands
+		// on the tab the other held even across subsections. Two children of
+		// one parent exchange places alone: a child sits wherever its root
+		// does.
+		if !fromParent.Valid {
+			for id, sub := range map[WorkspaceID]sql.NullString{ws: toSubsection, target: fromSubsection} {
+				if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET subsection_id = ? WHERE id = ?`, sub, id); err != nil {
+					return err
+				}
+			}
 		}
 		fields["from"], fields["to"] = from, to
 		// ws steps onto the parking slot first, so the unique index never sees

@@ -23,6 +23,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/family.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -58,6 +59,9 @@ message CloseWorkspaceError {
     CloseWorkspaceTransferringAway transferring_away = 4;
     // A joining daemon has not finished adopting this workspace yet.
     CloseWorkspaceNotYetAdopted not_yet_adopted = 5;
+    // The workspace has open children (hidden ones included), and closing it
+    // would leave them without their parent in the Open section.
+    WorkspaceHasOpenChildren has_open_children = 6;
   }
 }
 // WHY the close is blocked — the same evidence the footer's close-blocked

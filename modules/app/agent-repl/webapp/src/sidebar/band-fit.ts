@@ -35,12 +35,15 @@
  *     `BAND_MORE_ATTRIBUTE` and the stylesheet fades the viewport's last
  *     strip; scrolled to its end, the mark drops and the last row shows whole.
  *
- * A LINE IS ONE `.row`, a nested family member included, or a folded
- * repository's header, and a viewport of K lines is exactly as tall as the
+ * A LINE IS ONE `.row`, a nested family member included, a folded
+ * repository's header, a folded subsection's header, or an empty
+ * subsection's drop slot (a subsection with
+ * no rows draws the slot in their place, so it is a line as a folded
+ * repository's header is), and a viewport of K lines is exactly as tall as the
  * first K lines are drawn, the header above a line (a repository section's,
- * a Recently Merged repository group's) riding with it, so no line is cut
- * through but the lowest section's last. A folded section shows no lines and
- * takes no room.
+ * a subsection's, a Recently Merged repository group's) riding with it, so no
+ * line is cut through but the lowest section's last. A folded section shows no
+ * lines and takes no room.
  *
  * THE COUNT IS THE DAEMON'S. Every row is reachable by scrolling, so the
  * folded "(N)" stays the number of rows the section holds.
@@ -98,8 +101,17 @@ const SECTION_REGIONS = [
   [MERGED_SECTION_CLASS, "rows"],
 ] as const;
 
-/** What one line is: a row, or a folded repository section's header. */
-const LINE_SELECTOR = ".row, .repo.folded > .repo-head";
+/**
+ * The class of an empty subsection's drop slot (`subsections.ts`), which the
+ * stylesheet draws only while the subsection has no rows.
+ */
+export const SUBSECTION_SLOT_CLASS = "sb-subsection-empty";
+
+/**
+ * What one line is: a row, a folded repository section's header, a folded
+ * subsection's header, or an empty subsection's slot.
+ */
+const LINE_SELECTOR = `.row, .repo.folded > .repo-head, .sb-subsection.folded > .sb-subsection-head, .${SUBSECTION_SLOT_CLASS}`;
 
 /** How many lines each section's viewport shows. */
 export interface SectionLines {

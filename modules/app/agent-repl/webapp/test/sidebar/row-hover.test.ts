@@ -7,9 +7,9 @@ import {
   type DrawnRow,
   type RowHover,
 } from "../../src/sidebar/row-hover.js";
-import { drawRosterRow } from "../../src/sidebar/row.js";
+import { drawRosterFamily, drawRosterRow } from "../../src/sidebar/row.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-import { row, sidebarContext } from "./harness.js";
+import { openRow, row, sidebarContext } from "./harness.js";
 
 /** A drawn copy of a row, in the document so focus can land in it. */
 function drawnRow(): DrawnRow {
@@ -421,7 +421,7 @@ describe("the rows that report to the gesture", () => {
     const sc = sidebarContext();
     const drawn = vi.spyOn(sc.rowHover, "drawn");
     // ACT
-    drawRosterRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] }), sc, "R");
+    drawRosterFamily(openRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] })), sc, "R");
     // ASSERT
     expect(drawn.mock.calls.map(([id]) => id)).toEqual(["ws-1", "ws-2"]);
   });

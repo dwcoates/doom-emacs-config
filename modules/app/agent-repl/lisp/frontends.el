@@ -382,8 +382,8 @@ window-change layout repair, and `agent-repl-focus-input')."
 (defun agent-repl--frontend-dispatch-hide (ws)
   "Put WS's view away through its frontend, leaving the session running.
 Pure view teardown.  The `:repl-state' bookkeeping that goes with a close
-is NOT a frontend concern — it belongs to the close commands
-\(`agent-repl--on-simple-close' and `agent-repl--on-close'), which own it
+is NOT a frontend concern — it belongs to the close command
+\(`agent-repl--on-simple-close'), which owns it
 once for every frontend rather than leaving each frontend to remember it.
 Leaving that to the frontends is exactly how the gui came to close without
 ever marking itself `:inactive', which in turn left the sidebar showing a

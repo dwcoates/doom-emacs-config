@@ -21,6 +21,9 @@ import (
 // BY says who asked for the close (the user's CloseWorkspace, an agent's
 // command file), and the close record keeps it (wsm.MarkClosed).
 //
+// A WORKSPACE WITH OPEN CHILDREN IS NOT CLOSED: the close is refused with the
+// children named (wsm.HasOpenChildrenError, has_open_children).
+//
 // Closing leaves the SESSION alone: Close is view-level, Kill is what ends a
 // session, and the worktree is untouched either way.
 func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause) error {
@@ -59,6 +62,11 @@ func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause
 	}
 
 	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: by}); err != nil {
+		// A PARENT WITH OPEN CHILDREN STAYS OPEN (wsm/family.go): the refusal
+		// is the answer, mapped onto has_open_children.
+		if refusedByFamily(log, opClose, err) {
+			return err
+		}
 		log.Error(opClose, "could not record the close", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("close %q: %w", ws, err)
 	}

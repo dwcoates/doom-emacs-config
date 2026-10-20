@@ -30,6 +30,7 @@ import { watchStream } from "../rpc/streams.js";
 import { AttentionRegistry, type BlinkTimers } from "./attention.js";
 import { createDropdowns } from "./dropdowns.js";
 import { createRowHover } from "./row-hover.js";
+import { createArrangeHold } from "./arrange.js";
 import { createSidebarView } from "./view.js";
 import type { RailContext } from "./context.js";
 import { disposeWorkspaceRoster, drawWorkspaceRoster } from "./roster.js";
@@ -150,9 +151,8 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
  * Mount the ONE sidebar the webhost draws for every workspace page.
  *
  * It owns no workspace, so there is no page of its own to be seen or switched
- * to: every push is drawn, the stream always stands (the webhost is on screen
- * whenever any page is), and a child created from the form is a child of the
- * roster's `current`, the workspace Emacs is standing in.
+ * to: every push is drawn, and the stream always stands (the webhost is on
+ * screen whenever any page is).
  */
 export function mountWebhostSidebar(
   host: HTMLElement,
@@ -193,7 +193,7 @@ function mountSidebarIn(
     placement.case !== "page" || deps.workspaceSelected === undefined
       ? null
       : createSelectionEdge(placement.ctx.workspace.id, deps.workspaceSelected);
-  /** The workspace the roster last named current, for the webhost's create form. */
+  /** The workspace the roster last named current. */
   let current: WorkspaceRef | null = null;
   /**
    * THE PAGE ON SCREEN, AHEAD OF THE ROSTER. A switch reaches the webhost's
@@ -218,9 +218,15 @@ function mountSidebarIn(
   });
   const body = document.createElement("div");
   body.className = "sb-scroll";
+  // THE ARRANGEMENT'S OWN ELEMENTS OUTLIVE EVERY PUSH (arrange.ts): the layer
+  // a drag's copy and a name popup are drawn in, and the slot a refused
+  // arrangement is said in.
+  const arrangeLayer = document.createElement("div");
+  arrangeLayer.className = "sb-arrange-layer";
+  const arrangeStatus = document.createElement("div");
+  arrangeStatus.className = "sb-arrange-status";
   const rail: RailContext = {
     ctx,
-    parentWorkspace: () => (placement.case === "page" ? placement.ctx.workspace : current),
     view,
     openDetails,
     drawnStatus: createDrawnStatusLog("sidebar row", "sidebar.drawn-status"),
@@ -230,6 +236,7 @@ function mountSidebarIn(
     reveal,
     selectionFade: createSelectionFade(body),
     shownAhead: () => shownAhead,
+    arrange: { hold: createArrangeHold((roster) => drawRoster(roster)), layer: arrangeLayer, status: arrangeStatus },
   };
   // THE BAND FIT (band-fit.ts): the Open, Hidden Workspaces and Recently
   // Merged viewports, re-fitted after every draw, on every resize of the rail
@@ -247,7 +254,7 @@ function mountSidebarIn(
     bandFit.refit();
   });
   const head = drawRailHead(search);
-  host.replaceChildren(head.element, search.bar, body);
+  host.replaceChildren(head.element, search.bar, arrangeStatus, body, arrangeLayer);
   // THE RAIL'S LOOPS RUN ON THE WALL CLOCK (wall-phase.ts), so neither a
   // redraw nor a switch to another workspace's page restarts one.
   const wallPhase = installWallPhase(host, deps.wallPhase);
@@ -283,7 +290,7 @@ function mountSidebarIn(
   // ONLY A PAGE'S OWN SIDEBAR IS GATED: the webhost's is the one on screen.
   const unseen =
     placement.case === "page"
-      ? createUnseenGate(placement.ctx.workspace.id, drawRoster, deps.unseen ?? unseenEnv(placement.ctx.seen))
+      ? createUnseenGate(placement.ctx.workspace.id, (roster) => rail.arrange.hold.offer(roster), deps.unseen ?? unseenEnv(placement.ctx.seen))
       : null;
   const stream = watchStream(ctx, {
     name: "WatchWorkspaceRoster",
@@ -292,7 +299,10 @@ function mountSidebarIn(
     plannedEnding: (response) => response.push.case === "ending",
     // A run that ended forgets what `current` was: the next run's first push
     // is a baseline, so a reconnect restating it is never taken for a switch.
-    onEnd: () => selectionEdge?.reset(),
+    onEnd: () => {
+      selectionEdge?.reset();
+      rail.arrange.hold.reset();
+    },
     onPush: (response) => {
       const push = requireCase(response.push, "WatchWorkspaceRosterResponse.push");
       if (push.case !== "roster") {
@@ -316,7 +326,10 @@ function mountSidebarIn(
       }
       // ONLY A SEEN PAGE DRAWS (unseen.ts): an unseen one keeps the newest
       // roster and draws it once when it is seen again.
-      if (unseen === null) drawRoster(roster);
+      // A PUSH WAITS WHILE THE PAGE HOLDS ITS OWN DRAWING of an arrangement
+      // it dragged or asked for (arrange.ts), so the moved item is never put
+      // back for an instant.
+      if (unseen === null) rail.arrange.hold.offer(roster);
       else unseen.offer(roster);
       // EVERY push moves the selection edge, drawn or held, so the edge's
       // baseline is the roster the daemon last stated, not the last one drawn.

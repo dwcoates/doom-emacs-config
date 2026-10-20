@@ -61,6 +61,7 @@ func TestSendHiddenKeepalivesAsksEveryHiddenWorkspaceAndNoOther(t *testing.T) {
 	// Arrange
 	merged := workspaceNamed("c-merged")
 	merged.MergedAt = merged.HiddenAt
+	merged.Closed = true
 	shown := workspaceNamed("b-shown")
 	shown.Hidden, shown.HiddenAt = false, nil
 	shims := map[ids.WorkspaceID]*fakeShim{}

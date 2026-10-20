@@ -10,7 +10,7 @@
  */
 import type { DrawnStatusLog } from "../drawn-status.js";
 import type { DaemonContext } from "../rpc/context.js";
-import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import type { ArrangeHold } from "./arrange.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowHover } from "./row-hover.js";
 import type { RowReveal } from "./reveal.js";
@@ -34,13 +34,6 @@ export interface AttentionMarks {
 export interface RailContext {
   /** What talking to the daemon takes: client, stream, ticker, failures. */
   ctx: DaemonContext;
-  /**
-   * The workspace a new workspace created "as a child" is a child of: the
-   * page's own workspace when the sidebar is drawn in a page on its own, and
-   * the roster's `current` (the workspace Emacs stands in) when it is drawn in
-   * the webhost. Null when there is none to name.
-   */
-  parentWorkspace(): WorkspaceRef | null;
   /** The daemon-held view state, with this page's asks still in flight. */
   view: SidebarView;
   /**
@@ -71,6 +64,22 @@ export interface RailContext {
    * and not `RosterRowCurrent.current` decides which row is highlighted.
    */
   shownAhead(): string | null;
+  /** What arranging the repository grouping needs (`arrange.ts`). */
+  arrange: ArrangeContext;
+}
+
+/**
+ * What arranging the repository grouping needs, all of it OUTSIDE the drawing
+ * a push replaces, so a drag, a name being typed or a refusal outlives every
+ * push.
+ */
+export interface ArrangeContext {
+  /** The page's hold on its own drawing while an arrangement is dragged or asked. */
+  hold: ArrangeHold;
+  /** Where a drag's floating copy and a subsection's name popup are drawn. */
+  layer: HTMLElement;
+  /** The element an arrangement's refusal is drawn beside. */
+  status: HTMLElement;
 }
 
 /** What one drawn section of the rail is handed: the rail's context, bound to the section's scope. */
@@ -84,6 +93,11 @@ export interface SidebarContext extends Omit<RailContext, "view"> {
 /** The key a repository section is identified by on this page. */
 export function repoFoldKey(repositoryId: string): string {
   return `repo:${repositoryId}`;
+}
+
+/** The key a subsection is identified by on this page. */
+export function subsectionFoldKey(subsectionId: string): string {
+  return `subsection:${subsectionId}`;
 }
 
 /**

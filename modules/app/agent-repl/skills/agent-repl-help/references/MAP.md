@@ -44,6 +44,12 @@ standing instructions are `metaprompt.md`.
 - `.claude/skills/merge-queue/SKILL.md` at the repository root — how work lands on master.
 - `daemon/internal/workspace/` and `daemon/internal/merge/` — the daemon side.
 
+### The sidebar's arrangement: subsections, drag order, the tab bar's order
+
+- `proto/src/agentrepl/v1/endpoint_arrange_sidebar.proto` and `endpoint_get_sidebar_arrangement.proto` — the contract: repositories' order, subsections, and which subsection a workspace sits in, which the Emacs tab bar walks.
+- `webapp/src/sidebar/subsections.ts`, `drag.ts` and `arrange.ts` — the "+" that names a subsection, the drags, and the hold that keeps a drop on screen.
+- `daemon/internal/wsm/arrange.go` and `daemon/internal/resolve/sidebar/arrangement.go` — the stored arrangement and the one order both surfaces draw.
+
 ### How it works inside: architecture and design
 
 - `AGENTS.md` — the module's rules and vocabulary, and the first read for any design question.

@@ -166,7 +166,7 @@ func TestARepublishLevelsACancelledRosterReadAtInfo(t *testing.T) {
 			// Assert.
 			var level string
 			for _, r := range f.log.logger.Records() {
-				if strings.Contains(r.Message, "the workspaces for the roster") ||
+				if strings.Contains(r.Message, "subsections for the roster") ||
 					strings.Contains(r.Message, "roster read ended") {
 					level = r.Level
 				}

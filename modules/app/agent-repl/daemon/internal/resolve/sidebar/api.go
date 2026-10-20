@@ -35,6 +35,10 @@ type Registry struct {
 	Workspaces []wsm.Workspace
 	// Repositories are every repository, for the repo grouping.
 	Repositories []wsm.Repository
+	// Subsections are every repository's subsections, for the repo grouping
+	// and the tab bar's order (arrangement.go). Read in one snapshot with
+	// Workspaces and Repositories (wsm.ReadArrangement).
+	Subsections []wsm.Subsection
 	// Tasks are every task, for the task grouping.
 	Tasks []wsm.Task
 	// Sessions are the durable session records, one per workspace that has

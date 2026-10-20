@@ -63,11 +63,12 @@ func (v *verbs) Resolve(ctx context.Context, ref *workspacev1.WorkspaceRef) (wsm
 // sidebarRegistry composes the roster's durable half. It lives beside Resolve
 // because both are pure translations of WSM facts into another package's
 // vocabulary.
-func sidebarRegistry(log dlog.Logger, workspaces []wsm.Workspace, repositories []wsm.Repository, tasks []wsm.Task, sessions []wsm.Session, current *ids.WorkspaceID, view wsm.SidebarView) sidebar.Registry {
-	repositories, workspaces, sessions = withoutGoneRepositories(log, repositories, workspaces, sessions)
+func sidebarRegistry(log dlog.Logger, arrangement wsm.Arrangement, tasks []wsm.Task, sessions []wsm.Session, current *ids.WorkspaceID, view wsm.SidebarView) sidebar.Registry {
+	repositories, workspaces, subsections, sessions := withoutGoneRepositories(log, arrangement, sessions)
 	return sidebar.Registry{
 		Workspaces:   workspaces,
 		Repositories: repositories,
+		Subsections:  subsections,
 		Tasks:        tasks,
 		Sessions:     sessions,
 		Current:      current,
@@ -95,7 +96,8 @@ func sidebarRegistry(log dlog.Logger, workspaces []wsm.Workspace, repositories [
 // Open and the boot reconciliation already apply. "Could not tell" is not an
 // answer, and dropping a repository on it would hide a whole tree behind a
 // transient filesystem error.
-func withoutGoneRepositories(log dlog.Logger, repositories []wsm.Repository, workspaces []wsm.Workspace, sessions []wsm.Session) ([]wsm.Repository, []wsm.Workspace, []wsm.Session) {
+func withoutGoneRepositories(log dlog.Logger, arrangement wsm.Arrangement, sessions []wsm.Session) ([]wsm.Repository, []wsm.Workspace, []wsm.Subsection, []wsm.Session) {
+	repositories, workspaces, subsections := arrangement.Repositories, arrangement.Workspaces, arrangement.Subsections
 	gone := map[ids.RepoID]bool{}
 	kept := make([]wsm.Repository, 0, len(repositories))
 	for _, repo := range repositories {
@@ -109,7 +111,7 @@ func withoutGoneRepositories(log dlog.Logger, repositories []wsm.Repository, wor
 		kept = append(kept, repo)
 	}
 	if len(gone) == 0 {
-		return repositories, workspaces, sessions
+		return repositories, workspaces, subsections, sessions
 	}
 	dropped := map[ids.WorkspaceID]bool{}
 	keptWorkspaces := make([]wsm.Workspace, 0, len(workspaces))
@@ -131,7 +133,13 @@ func withoutGoneRepositories(log dlog.Logger, repositories []wsm.Repository, wor
 		}
 		keptSessions = append(keptSessions, session)
 	}
-	return kept, keptWorkspaces, keptSessions
+	keptSubsections := make([]wsm.Subsection, 0, len(subsections))
+	for _, sub := range subsections {
+		if !gone[sub.Repo] {
+			keptSubsections = append(keptSubsections, sub)
+		}
+	}
+	return kept, keptWorkspaces, keptSubsections, keptSessions
 }
 
 // sessionRecords reads one durable session record per registered workspace.

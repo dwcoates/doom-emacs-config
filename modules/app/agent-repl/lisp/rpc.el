@@ -101,6 +101,8 @@
 (declare-function agent-repl-wire-decode-set-workspace-priority-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-swap-workspaces-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-swap-workspaces-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-move-workspace-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-move-workspace-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-submit-prompt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-submit-prompt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-select-feed-row-request "wire-verbs" (request))
@@ -426,6 +428,12 @@ follows takes its tab off the bar's drawing, numbering and navigation.")
   agent-repl-wire-encode-swap-workspaces-request
   agent-repl-wire-decode-swap-workspaces-response
   "Exchange two workspaces' places in the registry order.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-move-workspace
+  "MoveWorkspace"
+  agent-repl-wire-encode-move-workspace-request
+  agent-repl-wire-decode-move-workspace-response
+  "Move one workspace onto another's tab, the tabs between shifting over.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-submit-prompt
   "SubmitPrompt"

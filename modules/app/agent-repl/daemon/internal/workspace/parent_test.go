@@ -224,3 +224,20 @@ func TestUnknownParentRefusalIsTheUnknownParentArmAtInfo(t *testing.T) {
 		t.Fatalf("records = %+v, want the refusal recorded at info", f.log.logger.Records())
 	}
 }
+
+func TestSetParentAnswersAParentThatIsNotOpen(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.setParentErr = errParentNotOpen
+	parent := ids.WorkspaceID("parent")
+
+	// Act
+	_, err := f.verbs.SetParent(context.Background(), "w1", &parent)
+
+	// Assert
+	requireFamilyAnswer(t, f, err, errParentNotOpen, opSetParent)
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a refused retarget", len(f.sidebar.registries))
+	}
+}

@@ -107,7 +107,6 @@
 (declare-function agent-repl--force-tab-bar-redraw "status" ())
 (declare-function agent-repl-roster-tab-order "roster" ())
 (declare-function agent-repl-roster-drawn-tab-order "roster" ())
-(declare-function agent-repl-roster-move-tab-to-back "roster" (ws))
 
 (defun agent-repl--foreign-perspective-p (ws)
   "Return non-nil when WS is a persp-mode perspective agent-repl never touched.
@@ -1071,28 +1070,6 @@ finds it complete.  Answers non-nil when it laid WS out."
                       (agent-repl--safe-buffer-name frontend-buf))
     (agent-repl--close-buffer-windows input-buf frontend-buf)))
 
-(defun agent-repl--save-tab-index (ws)
-  "Persist WS's current tab-bar index to its plist as `:saved-tab-index'.
-Reads positions from `persp-names-current-frame-fast-ordered'; no-op
-when that helper is unavailable (e.g. test envs without persp-mode).
-
-Also writes the index to disk via `--state-save'.
-
-NOTE: this was historically read back on reopen by
-`agent-repl--restore-tab-index', which restored the workspace to its
-prior tab-bar slot after a close-deprio cycle.  That reader was reached
-only through the vterm panel-show path and was deleted as dead code
-along with it, so `:saved-tab-index' is currently write-only — nothing
-restores the position it records.  Left in place (rather than deleted
-too) because a future frontend-agnostic re-show path may want to
-consume it again; flagging here so the asymmetry isn't mistaken for an
-oversight."
-  (when-let ((idx (cl-position ws (agent-repl--ws-frame-ordered-names)
-                               :test #'string=)))
-    (agent-repl--log ws "save-tab-index ws=%s index=%d" ws idx)
-    (agent-repl--ws-put ws :saved-tab-index idx)
-    (agent-repl--state-save ws)))
-
 (defun agent-repl--close-view (ws direct-teardown)
   "Put WS's view away as part of a close, dispatching through its frontend.
 
@@ -1101,8 +1078,8 @@ registry's hide capability.  A nil WS — which has no frontend to resolve
 at all — runs DIRECT-TEARDOWN, a thunk, instead.
 
 The thunk parameter is what gives a resolvable-frontend workspace the
-close BOOKKEEPING every frontend shares (see the callers,
-`agent-repl--on-simple-close' and `agent-repl--on-close'), while still
+close BOOKKEEPING every frontend shares (see the caller,
+`agent-repl--on-simple-close'), while still
 leaving a ws-less close somewhere safe to land rather than erroring on
 a frontend that cannot be resolved."
   (if (and ws (agent-repl--ws-gui-frontend-p ws))
@@ -1113,11 +1090,13 @@ a frontend that cannot be resolved."
     (funcall direct-teardown)))
 
 (defun agent-repl--on-simple-close (&optional ws)
-  "Bookkeep + hide the view; do NOT touch tab-bar order.
+  "Bookkeep + hide the view; the tab order is the daemon's and is untouched.
 Writes no state on WS (its lifecycle is the roster's, and an
 in-flight :thinking / :permission survives the close), then puts the view
-away through WS's own frontend.  No save-tab-index, no push-to-back, no
-this is the simple-close audit point that `SPC o c' is bound to.
+away through WS's own frontend.  THE ONE CLOSE OF THE PANELS: `SPC o c',
+`SPC o C' (which then kills the session) and `agent-repl-send-and-hide'
+all put the view away through here.  No close reorders the tabs: only the
+daemon orders them (`SPC TAB p', `SPC TAB P', the sidebar's drag).
 
 The teardown is frontend-dispatched rather than hard-wired to a single
 mechanism, so a gui workspace closes its actual view AND records that it
@@ -1140,89 +1119,6 @@ did."
     (agent-repl--close-view ws (lambda ()
                                   (agent-repl--restore-fullscreen-config ws)
                                   (agent-repl--hide-panels)))))
-
-(defun agent-repl-workspace-push-to-back (&optional keep-focus)
-  "Push the current workspace's tab to the BACK of the tab order.
-The back is the LAST slot: a deprioritized workspace must stop being the
-next tab the user lands on, and any slot short of last would leave it
-ahead of some other workspace it was just ranked below.
-
-The roster owns the order, so the shuffle goes through
-`agent-repl-roster-move-tab-to-back' and the persp-mode names cache is
-then set to the SAME list — the two must agree, or the tab bar renders
-one order while every roster-driven lookup uses another.
-
-By default focus moves to the workspace that now occupies the vacated
-slot, which is the point of the deprio gesture: the user said they are done
-here and want to move on.  With KEEP-FOCUS non-nil focus stays on the moved
-workspace.
-
-No-op when there is no current workspace, or when it holds no tab."
-  (interactive)
-  (let* ((current (agent-repl--ws-current-name))
-         (order (agent-repl-roster-tab-order))
-         (old-index (and current (cl-position current order :test #'string=))))
-    (if (null old-index)
-        (agent-repl--log current
-                         "workspace-push-to-back: ws=%s branch=no-tab" current)
-      (let* ((without (remove current order))
-             (reordered (agent-repl-roster-move-tab-to-back current))
-             ;; THE VACATED SLOT'S DRAWN OCCUPANT: a tab of a collapsed
-             ;; repository is never a landing, so the first drawn tab at or
-             ;; after the slot, else the last drawn one before it.
-             (drawn (agent-repl-roster-drawn-tab-order))
-             (drawn-p (lambda (name) (member name drawn)))
-             (next (and without
-                        (or (cl-find-if drawn-p (nthcdr old-index without))
-                            (car (last (cl-remove-if-not drawn-p without)))))))
-        (agent-repl--log current
-                         "workspace-push-to-back: ws=%s old-index=%s next=%s keep-focus=%s"
-                         current old-index next keep-focus)
-        (agent-repl--ws-update-names-cache reordered)
-        (agent-repl--force-tab-bar-redraw)
-        (if (and next (not keep-focus))
-            (progn
-              (agent-repl--ws-switch next)
-              (message "Pushed '%s' to the back; switched to '%s'." current next))
-          (message "Pushed '%s' to the back." current))))))
-
-(defun agent-repl--on-close (&optional ws)
-  "Full close: restore the pre-panel layout, hide panels, save the tab index.
-Writes no state, exactly like the simple-close path — a closed workspace
-stays listed, and only the roster takes a workspace off the tab bar.
-Restores the pre-panel layout via
-`agent-repl--restore-fullscreen-config' before hiding so the
-frame-filling panels go away cleanly (same contract as
-`agent-repl--on-simple-close').  Then hides panels and pushes WS to the
-LAST tab position via
-`agent-repl-workspace-push-to-back', snapshotting the tab index
-first via `agent-repl--save-tab-index' so a future reopen can
-restore the position.
-
-Bound to `SPC o C' (the deprio toggle); also fires from
-`agent-repl-send-and-hide' since send-and-hide is semantically
-\"I'm done with this prompt, move on\".
-
-WS defaults to the current workspace; when WS is nil the function still
-hides panels but skips the bookkeeping write and the tab shuffle."
-  (let ((ws (or ws (agent-repl--ws-current-name))))
-    (agent-repl--log ws "on-close: CALLED this-command=%s last-command=%s"
-                      this-command last-command)
-    (when ws
-      ;; NO LIFECYCLE STATE IS WRITTEN — see `agent-repl--on-simple-close'.
-      ;; Records the one local preference an explicit close carries so the
-      ;; panels-open default does not re-show on the next switch.
-      (agent-repl--note-panels-closed-by-user ws)
-      (agent-repl--log ws "elisp.panels.close: ws=%s panels=hidden" ws))
-    (agent-repl--close-view
-     ws
-     (lambda ()
-       (agent-repl--restore-fullscreen-config ws)
-       (agent-repl--hide-panels)))
-    (when (and ws (equal ws (agent-repl--ws-current-name)))
-      (agent-repl--save-tab-index ws)
-      (agent-repl--log ws "on-close: pushing ws=%s to the back" ws)
-      (agent-repl-workspace-push-to-back))))
 
 ;;;; Window synchronization
 
@@ -1490,27 +1386,26 @@ side-window skip explicit and parameter-independent."
     deleted))
 
 (defun agent-repl--hide-and-preserve-status ()
-  "Close-and-KILL with full deprio + tab-bar shuffle (the `SPC o C' path).
-Runs `agent-repl--on-close' (restore layout, hide, deprio bookkeeping)
-and then KILLS the session through the workspace's frontend registry —
-`SPC o C' means \"done with this session\", unlike the plain-close
-`SPC o c' which only puts the view away.  No state is written: the
-workspace's lifecycle is the roster's.
+  "Close-and-KILL (the `SPC o C' path).
+Puts the view away (`agent-repl--on-simple-close') and then KILLS the
+session through the workspace's frontend registry — `SPC o C' means
+\"done with this session\", unlike the plain-close `SPC o c' which only
+puts the view away.  No state is written, and the tab keeps its place:
+the workspace's lifecycle and its order are the daemon's.
 
-Deliberately NOT folded into `agent-repl--on-close': its other callers
-(e.g. `agent-repl-send-and-hide') hide a session that must keep
-running."
+The kill is deliberately not part of the close itself: its other caller,
+`agent-repl-send-and-hide', hides a session that must keep running."
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws (error "agent-repl--hide-and-preserve-status: no active workspace"))
-    (agent-repl--on-close ws)
+    (agent-repl--on-simple-close ws)
     (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)))
 
 (defun agent-repl--simple-hide-and-preserve-status ()
   "Hide agent panels with NO tab-bar update (the `SPC o c' path).
 Thin wrapper around `agent-repl--on-simple-close' that enforces the
 invariant that a workspace is active.  See
-`agent-repl--hide-and-preserve-status' for the deprio variant
-bound to `SPC o C'."
+`agent-repl--hide-and-preserve-status' for the variant bound to `SPC o C',
+which kills the session too."
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws (error "agent-repl--simple-hide-and-preserve-status: no active workspace"))
     (agent-repl--on-simple-close ws)))
@@ -1554,15 +1449,15 @@ gesture over a fact that is seconds away."
 
 (cl-defun agent-repl--toggle (close-fn &key always-close)
   "Generic toggle for a workspace's gui view.  CLOSE-FN handles the
-visible-view case.  Used by both `agent-repl' (deprio close) and
+visible-view case.  Used by both `agent-repl' (close and kill) and
 `agent-repl-simple' (plain close).
 
 When ALWAYS-CLOSE is non-nil, every non-selection branch routes to
 CLOSE-FN regardless of running / visibility state — the workspace is
 hidden even if its view isn't visible (or isn't running at all).  This
 is the `SPC o C' contract: pressing it again on a workspace that is
-already closed / never-started should still mark it `:inactive' and
-push it to the back, not re-show or launch the agent."
+already closed / never-started still kills it, never re-shows or
+launches the agent."
   (let* ((ws (agent-repl--ws-current-name))
          (selection (when (use-region-p)
                      (buffer-substring-no-properties (region-beginning) (region-end)))))
@@ -2013,8 +1908,8 @@ restoring the landing over the user's own work.
 
 `:fullscreen-config' is the window layout captured the moment the
 frame-filling panels were opened (fullscreen is the sole display
-format).  The close paths (`agent-repl--on-simple-close' for `SPC o c' and
-`agent-repl--on-close' for `SPC o C') restore it before hiding so the
+format).  The close (`agent-repl--on-simple-close', behind both `SPC o c'
+and `SPC o C') restores it before hiding so the
 work windows the panels covered come back rather than the close
 stranding a panel onscreen.  Only the saved-config case is handled: a
 frame with no `:fullscreen-config' has no layout to restore to."

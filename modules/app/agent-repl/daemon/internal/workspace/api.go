@@ -365,10 +365,16 @@ type Verbs interface {
 	// Swap exchanges the places of workspaces ws and target in the registry
 	// order, every other workspace keeping its own.
 	Swap(ctx context.Context, ws, target ids.WorkspaceID) error
+	// Move puts workspace ws onto target's tab in the arrangement's walk,
+	// the tabs between shifting over; the two must be siblings there.
+	Move(ctx context.Context, ws, target ids.WorkspaceID) error
 	// FoldRepository records whether a repository's roster section is
 	// collapsed and republishes the roster. An unknown repository is refused
 	// with ArmUnknownRepository.
 	FoldRepository(ctx context.Context, repo ids.RepoID, folded bool) error
+	// FoldSubsection records whether a subsection is collapsed, republishes
+	// the roster, and on a collapse stands its open workspaces down.
+	FoldSubsection(ctx context.Context, sub ids.SubsectionID, folded bool) error
 	// FoldMergedSection records whether the recently-merged band is collapsed
 	// and republishes the roster.
 	FoldMergedSection(ctx context.Context, folded bool) error
@@ -378,6 +384,27 @@ type Verbs interface {
 	// FoldOpenSection records whether the open-workspaces section is
 	// collapsed and republishes the roster.
 	FoldOpenSection(ctx context.Context, folded bool) error
+	// CreateSubsection adds a named subsection at the bottom of a
+	// repository's section and republishes the roster (arrange.go).
+	CreateSubsection(ctx context.Context, repo ids.RepoID, name string) (wsm.Subsection, error)
+	// RenameSubsection relabels one subsection and republishes the roster.
+	RenameSubsection(ctx context.Context, id ids.SubsectionID, name string) error
+	// DeleteSubsection removes one subsection, its workspaces returning to
+	// none, and republishes the roster.
+	DeleteSubsection(ctx context.Context, id ids.SubsectionID) error
+	// MoveSubsection moves one subsection before another of its
+	// repository's (nil: last) and republishes the roster.
+	MoveSubsection(ctx context.Context, id ids.SubsectionID, before *ids.SubsectionID) error
+	// MoveRepository moves one repository before another (nil: last) and
+	// republishes the roster.
+	MoveRepository(ctx context.Context, id ids.RepoID, before *ids.RepoID) error
+	// PlaceWorkspaces puts root workspaces, with their families, into a
+	// subsection of their repository (nil: none) as one block before a root
+	// there (nil: last), and republishes the roster.
+	PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, before *ids.WorkspaceID) error
+	// SidebarArrangement reads the repository grouping's arrangement, for an
+	// agent organizing it (GetSidebarArrangement).
+	SidebarArrangement(ctx context.Context) ([]sidebar.ArrangedRepository, error)
 	// CreateTask records a new task.
 	CreateTask(ctx context.Context, title string) (wsm.Task, error)
 	// UpdateTask retitles, completes or reopens a task.

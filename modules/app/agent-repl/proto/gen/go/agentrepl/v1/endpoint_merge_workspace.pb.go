@@ -846,6 +846,7 @@ type MergeWorkspaceError struct {
 	//	*MergeWorkspaceError_BranchCheckedOutInRequester
 	//	*MergeWorkspaceError_VersionIncrementRequired
 	//	*MergeWorkspaceError_VersionIncrementUnexpected
+	//	*MergeWorkspaceError_HasOpenChildren
 	Cause         isMergeWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1014,6 +1015,15 @@ func (x *MergeWorkspaceError) GetVersionIncrementUnexpected() *MergeWorkspaceVer
 	return nil
 }
 
+func (x *MergeWorkspaceError) GetHasOpenChildren() *WorkspaceHasOpenChildren {
+	if x != nil {
+		if x, ok := x.Cause.(*MergeWorkspaceError_HasOpenChildren); ok {
+			return x.HasOpenChildren
+		}
+	}
+	return nil
+}
+
 type isMergeWorkspaceError_Cause interface {
 	isMergeWorkspaceError_Cause()
 }
@@ -1097,6 +1107,14 @@ type MergeWorkspaceError_VersionIncrementUnexpected struct {
 	VersionIncrementUnexpected *MergeWorkspaceVersionIncrementUnexpected `protobuf:"bytes,14,opt,name=version_increment_unexpected,json=versionIncrementUnexpected,proto3,oneof"`
 }
 
+type MergeWorkspaceError_HasOpenChildren struct {
+	// The workspace this merge would close (a one-shot's requester, or the
+	// workspace an async merge's one-shot names) has open children, hidden
+	// ones included. Every open child must be resolved and closed before a
+	// merge that closes their parent is asked for.
+	HasOpenChildren *WorkspaceHasOpenChildren `protobuf:"bytes,15,opt,name=has_open_children,json=hasOpenChildren,proto3,oneof"`
+}
+
 func (*MergeWorkspaceError_UnknownWorkspace) isMergeWorkspaceError_Cause() {}
 
 func (*MergeWorkspaceError_WorkspaceRefMismatch) isMergeWorkspaceError_Cause() {}
@@ -1124,6 +1142,8 @@ func (*MergeWorkspaceError_BranchCheckedOutInRequester) isMergeWorkspaceError_Ca
 func (*MergeWorkspaceError_VersionIncrementRequired) isMergeWorkspaceError_Cause() {}
 
 func (*MergeWorkspaceError_VersionIncrementUnexpected) isMergeWorkspaceError_Cause() {}
+
+func (*MergeWorkspaceError_HasOpenChildren) isMergeWorkspaceError_Cause() {}
 
 type MergeWorkspaceUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1846,7 +1866,7 @@ var File_agentrepl_v1_endpoint_merge_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"\n" +
-	"+agentrepl/v1/endpoint_merge_workspace.proto\x12\fagentrepl.v1\x1a,agentrepl/v1/endpoint_create_workspace.proto\x1a\x1cworkspace/v1/workspace.proto\"\xcc\x02\n" +
+	"+agentrepl/v1/endpoint_merge_workspace.proto\x12\fagentrepl.v1\x1a,agentrepl/v1/endpoint_create_workspace.proto\x1a\x19agentrepl/v1/family.proto\x1a\x1cworkspace/v1/workspace.proto\"\xcc\x02\n" +
 	"\x15MergeWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12@\n" +
 	"\bone_shot\x18\x02 \x01(\v2#.agentrepl.v1.MergeWorkspaceOneShotH\x00R\aoneShot\x129\n" +
@@ -1885,8 +1905,7 @@ const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.MergeWorkspaceSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.MergeWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15MergeWorkspaceSuccess\"\xf1\n" +
-	"\n" +
+	"\x15MergeWorkspaceSuccess\"\xc7\v\n" +
 	"\x13MergeWorkspaceError\x12[\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2,.agentrepl.v1.MergeWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v20.agentrepl.v1.MergeWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
@@ -1903,7 +1922,8 @@ const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"name_taken\x18\v \x01(\v2%.agentrepl.v1.MergeWorkspaceNameTakenH\x00R\tnameTaken\x12\x7f\n" +
 	"\x1fbranch_checked_out_in_requester\x18\f \x01(\v27.agentrepl.v1.MergeWorkspaceBranchCheckedOutInRequesterH\x00R\x1bbranchCheckedOutInRequester\x12t\n" +
 	"\x1aversion_increment_required\x18\r \x01(\v24.agentrepl.v1.MergeWorkspaceVersionIncrementRequiredH\x00R\x18versionIncrementRequired\x12z\n" +
-	"\x1cversion_increment_unexpected\x18\x0e \x01(\v26.agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedH\x00R\x1aversionIncrementUnexpectedB\a\n" +
+	"\x1cversion_increment_unexpected\x18\x0e \x01(\v26.agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedH\x00R\x1aversionIncrementUnexpected\x12T\n" +
+	"\x11has_open_children\x18\x0f \x01(\v2&.agentrepl.v1.WorkspaceHasOpenChildrenH\x00R\x0fhasOpenChildrenB\a\n" +
 	"\x05cause\" \n" +
 	"\x1eMergeWorkspaceUnknownWorkspace\"G\n" +
 	"\"MergeWorkspaceWorkspaceRefMismatch\x12!\n" +
@@ -1975,6 +1995,7 @@ var file_agentrepl_v1_endpoint_merge_workspace_proto_goTypes = []any{
 	(*MergeWorkspaceVersionIncrementUnexpectedMergedUpstream)(nil),    // 28: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedMergedUpstream
 	(*v1.WorkspaceRef)(nil),                                           // 29: workspace.v1.WorkspaceRef
 	(*CreateWorkspaceMergeActions)(nil),                               // 30: agentrepl.v1.CreateWorkspaceMergeActions
+	(*WorkspaceHasOpenChildren)(nil),                                  // 31: agentrepl.v1.WorkspaceHasOpenChildren
 }
 var file_agentrepl_v1_endpoint_merge_workspace_proto_depIdxs = []int32{
 	29, // 0: agentrepl.v1.MergeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -2004,14 +2025,15 @@ var file_agentrepl_v1_endpoint_merge_workspace_proto_depIdxs = []int32{
 	21, // 24: agentrepl.v1.MergeWorkspaceError.branch_checked_out_in_requester:type_name -> agentrepl.v1.MergeWorkspaceBranchCheckedOutInRequester
 	24, // 25: agentrepl.v1.MergeWorkspaceError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
 	25, // 26: agentrepl.v1.MergeWorkspaceError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	26, // 27: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.foreign_repository:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedForeignRepository
-	27, // 28: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.not_default_branch:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch
-	28, // 29: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.merged_upstream:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedMergedUpstream
-	30, // [30:30] is the sub-list for method output_type
-	30, // [30:30] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	30, // [30:30] is the sub-list for extension extendee
-	0,  // [0:30] is the sub-list for field type_name
+	31, // 27: agentrepl.v1.MergeWorkspaceError.has_open_children:type_name -> agentrepl.v1.WorkspaceHasOpenChildren
+	26, // 28: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.foreign_repository:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedForeignRepository
+	27, // 29: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.not_default_branch:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch
+	28, // 30: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.merged_upstream:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpectedMergedUpstream
+	31, // [31:31] is the sub-list for method output_type
+	31, // [31:31] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_merge_workspace_proto_init() }
@@ -2020,6 +2042,7 @@ func file_agentrepl_v1_endpoint_merge_workspace_proto_init() {
 		return
 	}
 	file_agentrepl_v1_endpoint_create_workspace_proto_init()
+	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[0].OneofWrappers = []any{
 		(*MergeWorkspaceRequest_OneShot)(nil),
 		(*MergeWorkspaceRequest_Async)(nil),
@@ -2052,6 +2075,7 @@ func file_agentrepl_v1_endpoint_merge_workspace_proto_init() {
 		(*MergeWorkspaceError_BranchCheckedOutInRequester)(nil),
 		(*MergeWorkspaceError_VersionIncrementRequired)(nil),
 		(*MergeWorkspaceError_VersionIncrementUnexpected)(nil),
+		(*MergeWorkspaceError_HasOpenChildren)(nil),
 	}
 	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[25].OneofWrappers = []any{
 		(*MergeWorkspaceVersionIncrementUnexpected_ForeignRepository)(nil),

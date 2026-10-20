@@ -24,7 +24,7 @@ func hiddenLapsing(d time.Duration, gated bool) wsm.Workspace {
 // onlyHiddenRow is the one row the hidden section carries.
 func onlyHiddenRow(t *testing.T, r sidebarResolver) *frontendv1.RosterRow {
 	t.Helper()
-	rows := latest(t, r).GetHidden().GetRows().GetRows()
+	rows := topHidden(latest(t, r))
 	if len(rows) != 1 {
 		t.Fatalf("the hidden section carried %d rows, want exactly 1", len(rows))
 	}

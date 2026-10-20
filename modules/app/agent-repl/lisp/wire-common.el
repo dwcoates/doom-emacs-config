@@ -378,6 +378,54 @@ at INFO and reattaches to the live daemon rather than calling it lost."
      (list :id (agent-repl-wire--decode-string "WorkspaceRef" 'id object)
            :dir (agent-repl-wire--decode-string "WorkspaceRef" 'dir object)))))
 
+;;;; ---- agentrepl.v1 family.proto ----
+;;
+;; THE TWO FAMILY REFUSALS, one decoder each, which every error that can
+;; carry them (CloseWorkspace, KillWorkspace, NukeWorkspace, MergeWorkspace,
+;; SetWorkspaceHidden, OpenWorkspace, CreateWorkspace, RegisterWorkspace)
+;; decodes its arm through.
+
+(defun agent-repl-wire-decode-workspace-has-open-children (value)
+  "Decode VALUE as `WorkspaceHasOpenChildren'.
+A plist `(:parent REF :children REFS)'.  PARENT is the workspace the
+request would have taken out of the Open section, CHILDREN every one of
+its open descendants.  The contract says CHILDREN is never empty, so an
+empty list is refused as malformed."
+  (let ((object (agent-repl-wire--object "WorkspaceHasOpenChildren" value)))
+    (agent-repl-wire--check-keys "WorkspaceHasOpenChildren" object '(parent children))
+    (let ((children (agent-repl-wire--decode-repeated
+                     "WorkspaceHasOpenChildren" 'children object
+                     #'agent-repl-wire-decode-workspace-ref)))
+      (unless children
+        (agent-repl-wire--fail "WorkspaceHasOpenChildren" 'children "names no child"))
+      (agent-repl-wire--decoded
+       "WorkspaceHasOpenChildren"
+       (list :parent (agent-repl-wire--decode-message
+                      "WorkspaceHasOpenChildren" 'parent object
+                      #'agent-repl-wire-decode-workspace-ref)
+             :children children)))))
+
+(defun agent-repl-wire-decode-workspace-parent-not-open-state (value)
+  "Decode VALUE as one empty `WorkspaceParentNotOpen' state arm."
+  (agent-repl-wire--decode-empty "WorkspaceParentNotOpenState" value))
+
+(defun agent-repl-wire-decode-workspace-parent-not-open (value)
+  "Decode VALUE as `WorkspaceParentNotOpen', a plist `(:parent REF :state ARM)'.
+The arm is `:hidden', `:closed' or `:closing' (a queued merge closes the
+parent once it lands); it is never unset."
+  (let ((object (agent-repl-wire--object "WorkspaceParentNotOpen" value)))
+    (agent-repl-wire--check-keys "WorkspaceParentNotOpen" object '(parent hidden closed closing))
+    (agent-repl-wire--decoded
+     "WorkspaceParentNotOpen"
+     (list :parent (agent-repl-wire--decode-message
+                    "WorkspaceParentNotOpen" 'parent object
+                    #'agent-repl-wire-decode-workspace-ref)
+           :state (agent-repl-wire--decode-oneof
+                   "WorkspaceParentNotOpen" 'state object
+                   '((hidden :hidden agent-repl-wire-decode-workspace-parent-not-open-state)
+                     (closed :closed agent-repl-wire-decode-workspace-parent-not-open-state)
+                     (closing :closing agent-repl-wire-decode-workspace-parent-not-open-state)))))))
+
 (defun agent-repl-wire-encode-workspace-ref (value)
   "Encode the WorkspaceRef plist VALUE as a protojson alist.
 The ref is a daemon-minted echo token: both halves travel back verbatim."

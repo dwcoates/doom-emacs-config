@@ -275,11 +275,32 @@ func (s *requestLoggingServer) SetWorkspaceHidden(
 	return serveUnary(s, ctx, "SetWorkspaceHidden", req, s.server.SetWorkspaceHidden)
 }
 
+func (s *requestLoggingServer) MoveWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.MoveWorkspaceRequest],
+) (*connect.Response[agentreplv1.MoveWorkspaceResponse], error) {
+	return serveUnary(s, ctx, "MoveWorkspace", req, s.server.MoveWorkspace)
+}
+
 func (s *requestLoggingServer) SwapWorkspaces(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SwapWorkspacesRequest],
 ) (*connect.Response[agentreplv1.SwapWorkspacesResponse], error) {
 	return serveUnary(s, ctx, "SwapWorkspaces", req, s.server.SwapWorkspaces)
+}
+
+func (s *requestLoggingServer) ArrangeSidebar(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ArrangeSidebarRequest],
+) (*connect.Response[agentreplv1.ArrangeSidebarResponse], error) {
+	return serveUnary(s, ctx, "ArrangeSidebar", req, s.server.ArrangeSidebar)
+}
+
+func (s *requestLoggingServer) GetSidebarArrangement(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.GetSidebarArrangementRequest],
+) (*connect.Response[agentreplv1.GetSidebarArrangementResponse], error) {
+	return serveUnary(s, ctx, "GetSidebarArrangement", req, s.server.GetSidebarArrangement)
 }
 
 func (s *requestLoggingServer) CreateTask(

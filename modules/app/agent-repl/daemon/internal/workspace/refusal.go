@@ -1,10 +1,12 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/tempdirs"
 	"agent-repld/internal/wsm"
 )
@@ -53,6 +55,25 @@ const (
 	// directory lies inside a temporary root (owner ruling, 2026-10-06). The
 	// arm carries `dir` and `temporary_root`.
 	ArmInsideTemporaryDirectory = "inside_temporary_directory"
+	// ArmUnknownSubsection is an arrangement naming a subsection no
+	// subsection carries (ArrangeSidebarError.unknown_subsection). The arm
+	// carries `subsection`.
+	ArmUnknownSubsection = "unknown_subsection"
+	// ArmBlankName is a subsection named nothing but whitespace
+	// (ArrangeSidebarError.blank_name).
+	ArmBlankName = "blank_name"
+	// ArmOtherRepository is an arrangement relating two things of different
+	// repositories (ArrangeSidebarError.other_repository).
+	ArmOtherRepository = "other_repository"
+	// ArmAnchorElsewhere is a workspace placed before one that does not sit
+	// in the destination (ArrangeSidebarError.anchor_elsewhere).
+	ArmAnchorElsewhere = "anchor_elsewhere"
+	// ArmHasParent is a workspace with a recorded parent placed on its own
+	// (ArrangeSidebarError.has_parent): it sits wherever its parent does.
+	ArmHasParent = "has_parent"
+	// ArmNotSiblings is a move between two workspaces that are not siblings
+	// in the arrangement's walk (MoveWorkspaceError.not_siblings).
+	ArmNotSiblings = "not_siblings"
 	// ArmNotInARepository is a RegisterRepository whose path is readable but
 	// lies inside no git repository with a main worktree. It is DISTINCT from
 	// ArmNotAWorktree, which is about the announced directory being a worktree
@@ -354,6 +375,31 @@ func temporaryRefusal(log dlog.Logger, rpc string, err error) *Refusal {
 // package goes through here, so every verb's refusal is recorded the same way.
 func refuse(log dlog.Logger, rpc, arm, reason string, notFound bool) *Refusal {
 	return refuseWith(log, rpc, arm, reason, notFound, nil)
+}
+
+// refusedByFamily reports whether ERR is a family rule refusing the write
+// (wsm/family.go), recording it at INFO under OP when it is. Such a refusal is
+// an ANSWER, never a failure: the server maps it onto the rpc's shared arm
+// (has_open_children, parent_not_open), and nothing was written.
+func refusedByFamily(log dlog.Logger, op string, err error) bool {
+	if !wsm.IsFamilyRefusal(err) {
+		return false
+	}
+	log.Info(op, "a family rule refused the request; nothing was written", dlog.Context{"cause": err.Error()})
+	return true
+}
+
+// requireOpenParent asks the family rules whether PARENT is open, ahead of
+// work a refused request must not have done (wsm.DB.RequireOpenParent). It
+// answers the rule's refusal (recorded at INFO under OP), a read that failed
+// (recorded at ERROR under OP), or nil for an open parent.
+func (v *verbs) requireOpenParent(ctx context.Context, log dlog.Logger, op string, parent ids.WorkspaceID) error {
+	err := v.deps.DB.RequireOpenParent(ctx, parent)
+	if err == nil || refusedByFamily(log, op, err) {
+		return err
+	}
+	log.Error(op, "could not read whether the parent is open", dlog.Context{"parent": string(parent), "cause": err.Error()})
+	return fmt.Errorf("read whether parent %q is open: %w", parent, err)
 }
 
 // refuseUnrestorable refuses RPC with ArmWorktreeUnrestorable for RECORD:

@@ -25,6 +25,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { WorkspaceHasOpenChildren, WorkspaceParentNotOpen } from "./family_pb";
+import { file_agentrepl_v1_family } from "./family_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -33,7 +35,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_set_workspace_hidden.proto.
  */
 export const file_agentrepl_v1_endpoint_set_workspace_hidden: GenFile = /*@__PURE__*/
-  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9oaWRkZW4ucHJvdG8SDGFnZW50cmVwbC52MSLEAQoZU2V0V29ya3NwYWNlSGlkZGVuUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjQKBGhpZGUYAiABKAsyJC5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlSGlkZGVuSGlkZUgAEjQKBHNob3cYAyABKAsyJC5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlSGlkZGVuU2hvd0gAQgwKCnZpc2liaWxpdHkiGAoWU2V0V29ya3NwYWNlSGlkZGVuSGlkZSIYChZTZXRXb3Jrc3BhY2VIaWRkZW5TaG93IpoBChpTZXRXb3Jrc3BhY2VIaWRkZW5SZXNwb25zZRI6CgdzdWNjZXNzGAEgASgLMicuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZUhpZGRlblN1Y2Nlc3NIABI2CgVlcnJvchgCIAEoCzIlLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VIaWRkZW5FcnJvckgAQggKBnJlc3VsdCIbChlTZXRXb3Jrc3BhY2VIaWRkZW5TdWNjZXNzIuICChdTZXRXb3Jrc3BhY2VIaWRkZW5FcnJvchJNChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIwLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VIaWRkZW5Vbmtub3duV29ya3NwYWNlSAASVgoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzI0LmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VIaWRkZW5Xb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEk0KEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMjAuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZUhpZGRlblRyYW5zZmVycmluZ0F3YXlIABJICg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyLS5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlSGlkZGVuTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIiQKIlNldFdvcmtzcGFjZUhpZGRlblVua25vd25Xb3Jrc3BhY2UiPgomU2V0V29ya3NwYWNlSGlkZGVuV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjUKIlNldFdvcmtzcGFjZUhpZGRlblRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIhCh9TZXRXb3Jrc3BhY2VIaWRkZW5Ob3RZZXRBZG9wdGVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9oaWRkZW4ucHJvdG8SDGFnZW50cmVwbC52MSLEAQoZU2V0V29ya3NwYWNlSGlkZGVuUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjQKBGhpZGUYAiABKAsyJC5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlSGlkZGVuSGlkZUgAEjQKBHNob3cYAyABKAsyJC5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlSGlkZGVuU2hvd0gAQgwKCnZpc2liaWxpdHkiGAoWU2V0V29ya3NwYWNlSGlkZGVuSGlkZSIYChZTZXRXb3Jrc3BhY2VIaWRkZW5TaG93IpoBChpTZXRXb3Jrc3BhY2VIaWRkZW5SZXNwb25zZRI6CgdzdWNjZXNzGAEgASgLMicuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZUhpZGRlblN1Y2Nlc3NIABI2CgVlcnJvchgCIAEoCzIlLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VIaWRkZW5FcnJvckgAQggKBnJlc3VsdCIbChlTZXRXb3Jrc3BhY2VIaWRkZW5TdWNjZXNzIugDChdTZXRXb3Jrc3BhY2VIaWRkZW5FcnJvchJNChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIwLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VIaWRkZW5Vbmtub3duV29ya3NwYWNlSAASVgoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzI0LmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VIaWRkZW5Xb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEk0KEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMjAuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZUhpZGRlblRyYW5zZmVycmluZ0F3YXlIABJICg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyLS5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlSGlkZGVuTm90WWV0QWRvcHRlZEgAEkMKEWhhc19vcGVuX2NoaWxkcmVuGAUgASgLMiYuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUhhc09wZW5DaGlsZHJlbkgAEj8KD3BhcmVudF9ub3Rfb3BlbhgGIAEoCzIkLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQYXJlbnROb3RPcGVuSABCBwoFY2F1c2UiJAoiU2V0V29ya3NwYWNlSGlkZGVuVW5rbm93bldvcmtzcGFjZSI+CiZTZXRXb3Jrc3BhY2VIaWRkZW5Xb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiNQoiU2V0V29ya3NwYWNlSGlkZGVuVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIiEKH1NldFdvcmtzcGFjZUhpZGRlbk5vdFlldEFkb3B0ZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_family, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SetWorkspaceHiddenRequest
@@ -196,6 +198,24 @@ export type SetWorkspaceHiddenError = Message<"agentrepl.v1.SetWorkspaceHiddenEr
      */
     value: SetWorkspaceHiddenNotYetAdopted;
     case: "notYetAdopted";
+  } | {
+    /**
+     * The workspace has open children (hidden ones included), and hiding it
+     * would leave them without their parent in the Open section.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceHasOpenChildren has_open_children = 5;
+     */
+    value: WorkspaceHasOpenChildren;
+    case: "hasOpenChildren";
+  } | {
+    /**
+     * The workspace's parent is hidden or closed, and showing it would make an
+     * open child of a parent outside the Open section.
+     *
+     * @generated from field: agentrepl.v1.WorkspaceParentNotOpen parent_not_open = 6;
+     */
+    value: WorkspaceParentNotOpen;
+    case: "parentNotOpen";
   } | { case: undefined; value?: undefined };
 };
 

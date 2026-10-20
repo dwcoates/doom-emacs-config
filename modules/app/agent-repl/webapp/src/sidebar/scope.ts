@@ -33,7 +33,6 @@ export function openScope(rail: RailContext): DrawScope {
   const marks: Array<{ id: string; element: HTMLElement }> = [];
   const context: SidebarContext = {
     ctx: rail.ctx,
-    parentWorkspace: () => rail.parentWorkspace(),
     openDetails: rail.openDetails,
     drawnStatus: rail.drawnStatus,
     dropdowns: rail.dropdowns,
@@ -41,6 +40,7 @@ export function openScope(rail: RailContext): DrawScope {
     reveal: rail.reveal,
     selectionFade: rail.selectionFade,
     shownAhead: () => rail.shownAhead(),
+    arrange: rail.arrange,
     view: {
       track: (key, wire, paint) => viewScope.track(key, wire, paint),
       ask: (key, value) => rail.view.ask(key, value),

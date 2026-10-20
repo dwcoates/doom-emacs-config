@@ -38,6 +38,7 @@ import {
   scopeName,
   workspaceVerbFromGate,
 } from "../../../src/feed/asks/cold-gate.js";
+import { KILL_WORKSPACE_SENTENCES } from "../../../src/sidebar/verbs.js";
 import {
   publishCompactionProgress,
   resetCompactionProgress,
@@ -1547,6 +1548,7 @@ describe("workspaceVerbFromGate", () => {
       rpc: "KillWorkspace",
       call: async () => answer,
       schema: KillWorkspaceResponseSchema,
+      own: KILL_WORKSPACE_SENTENCES,
     };
   }
 

@@ -9,6 +9,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/family.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -41,6 +42,10 @@ message RegisterWorkspaceError {
     RegisterWorkspaceNotAWorktree not_a_worktree = 1;
     // The dir lies inside a temporary directory.
     RegisterWorkspaceInsideTemporaryDirectory inside_temporary_directory = 2;
+    // The dir is a closed workspace's, and announcing it would re-open it as
+    // the open child of a parent that is not open (agentrepl.v1 family.proto).
+    // The workspace stays closed; the user opens its parent first.
+    WorkspaceParentNotOpen parent_not_open = 3;
   }
 }
 message RegisterWorkspaceNotAWorktree {}

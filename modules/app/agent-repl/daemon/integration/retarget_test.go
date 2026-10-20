@@ -152,14 +152,14 @@ func TestARetargetEntryRetargetsAndTellsExactlyLikeSetWorkspaceParent(t *testing
 }
 
 func TestRosterNestsReadsOnlyTheParentsChildren(t *testing.T) {
-	row := func(id string, children ...*frontendv1.RosterRow) *frontendv1.RosterRow {
-		return &frontendv1.RosterRow{
-			Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: id}},
-			Children:  children,
+	row := func(id string, children ...*frontendv1.RosterOpenRow) *frontendv1.RosterOpenRow {
+		return &frontendv1.RosterOpenRow{
+			Row:      &frontendv1.RosterRow{Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: id}}},
+			Children: children,
 		}
 	}
 	roster := &frontendv1.WorkspaceRoster{Repository: &frontendv1.RosterRepositoryView{
-		Sections: []*frontendv1.RosterRepoSection{{Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{
+		Sections: []*frontendv1.RosterRepoSection{{OpenRows: &frontendv1.RosterOpenRows{Rows: []*frontendv1.RosterOpenRow{
 			row("p", row("c")), row("top"),
 		}}}},
 	}}

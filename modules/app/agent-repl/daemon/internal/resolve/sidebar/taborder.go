@@ -2,60 +2,190 @@ package sidebar
 
 import (
 	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
-// Tab is one tab of the editor's tab bar: its workspace, and whether the bar
-// withholds it.
+// THE OPEN SECTION IS THE TAB BAR. One tree, built here (openTree), is drawn
+// by the sidebar's Open section (repositoryView) and walked by the editor's
+// tab bar (each RosterOpenRow states its own tab), and the daemon's own tab
+// reading (Tabs) walks the very same tree, so none of them can disagree. The
+// conditions it holds, each by construction:
+//
+//   - EVERY WORKSPACE IS IN ONE LIST. A workspace is OPEN (here), HIDDEN
+//     (hiddenSection) or MERGED (mergedSection), never two: open is neither
+//     closed nor hidden, and OPEN BEATS MERGED, so a merged workspace that was
+//     reopened is open and listed here.
+//   - IN OPEN IF AND ONLY IF IT HAS A TAB. Every open row carries a tab, and
+//     nothing else does. A folded repository's rows, and a folded
+//     subsection's, keep a FOLDED tab: open, but drawn by neither surface and
+//     given no number (openRegion.folded).
+//   - NUMBERS MATCH POSITION. Tabs are numbered 1..N with no gap in the
+//     tree's depth-first walk, numbered tabs only, so tab N is always the row
+//     drawn immediately before tab N+1, in the sidebar and on the bar.
+//   - THE ORDER RUNS UNBROKEN across repositories (repository by repository),
+//     subsections (a repository's own rows, then each subsection's: one
+//     subsection never spans repositories, arrange) and families (a subtree is
+//     one run at every depth: a child follows its parent, its siblings in their
+//     order, and a family never splits across subsections, because a child sits
+//     in its root's subsection).
+//   - A WORKSPACE WHOSE PARENT IS NOT OPEN TAKES ITS PARENT'S PLACE. The rules
+//     against hiding or closing a parent with open children keep this from
+//     arising; a family that predates them is still drawn, its open members
+//     where the closed or hidden ancestor stood.
+
+// openNode is one open workspace of the Open section and its open family.
+type openNode struct {
+	ws       wsm.Workspace
+	children []openNode
+}
+
+// openRegion is one rows region of a repository's Open section: its own rows
+// (subsection nil) or one subsection's.
+type openRegion struct {
+	subsection *wsm.Subsection
+	rows       []openNode
+}
+
+// folded reports whether the region's tabs are folded off the tab bar: its
+// repository is collapsed, or it is a subsection that is. The one statement
+// of a folded tab, which the sidebar's numbering and the tab bar read alike.
+func (r openRegion) folded(repo wsm.Repository) bool {
+	return repo.Folded || (r.subsection != nil && r.subsection.Folded)
+}
+
+// openRepo is one repository's Open section, its own region first.
+type openRepo struct {
+	repo    wsm.Repository
+	regions []openRegion
+}
+
+// isOpen reports whether WS is listed in the Open section: neither closed nor
+// hidden (OPEN BEATS MERGED, so a merge time alone does not take it out), and
+// not a merge workspace still withheld by its async merge.
+func isOpen(ws wsm.Workspace) bool {
+	return !ws.Closed && !ws.Hidden && !ws.MergeHidden()
+}
+
+// openTree builds the Open section from REG: every open workspace, filed by
+// the arrangement and nested by family, and the workspaces REG's open ones
+// descend from that are not open themselves, which are TRANSPARENT (their open
+// descendants take their place). Open workspaces of a repository REG does not
+// carry are answered as orphans.
+func openTree(reg Registry, log dlog.Logger) ([]openRepo, map[ids.RepoID][]wsm.Workspace) {
+	byID := map[ids.WorkspaceID]wsm.Workspace{}
+	for _, ws := range reg.Workspaces {
+		byID[ws.ID] = ws
+	}
+	// THE TRANSPARENT ANCESTORS: every not-open ancestor of an open workspace,
+	// so a legacy child is drawn where its parent stood. Ancestors of nothing
+	// open are left out, which keeps a long history of closed workspaces out of
+	// every render.
+	placed := map[ids.WorkspaceID]bool{}
+	for _, ws := range reg.Workspaces {
+		if !isOpen(ws) {
+			continue
+		}
+		placed[ws.ID] = true
+		for parent := ws.Parent; parent != nil; {
+			ancestor, ok := byID[*parent]
+			if !ok || placed[ancestor.ID] {
+				break
+			}
+			placed[ancestor.ID] = true
+			parent = ancestor.Parent
+		}
+	}
+	var members []wsm.Workspace
+	for _, ws := range reg.Workspaces {
+		if placed[ws.ID] {
+			members = append(members, ws)
+		}
+	}
+	arranged, orphaned := arrange(reg, members)
+	var out []openRepo
+	for _, placedRepo := range arranged {
+		repo := openRepo{repo: placedRepo.repo}
+		for _, b := range placedRepo.buckets {
+			tree := nest(b.workspaces, log)
+			repo.regions = append(repo.regions, openRegion{subsection: b.subsection, rows: openNodes(tree, tree.roots)})
+		}
+		out = append(out, repo)
+	}
+	orphans := map[ids.RepoID][]wsm.Workspace{}
+	for repo, workspaces := range orphaned {
+		for _, ws := range workspaces {
+			if isOpen(ws) {
+				orphans[repo] = append(orphans[repo], ws)
+			}
+		}
+	}
+	return out, orphans
+}
+
+// openNodes answers the open nodes of LIST and their families in TREE, each
+// not-open workspace replaced in place by its own open descendants.
+func openNodes(tree forest, list []wsm.Workspace) []openNode {
+	var out []openNode
+	for _, ws := range list {
+		children := openNodes(tree, tree.children[ws.ID])
+		if !isOpen(ws) {
+			out = append(out, children...)
+			continue
+		}
+		out = append(out, openNode{ws: ws, children: children})
+	}
+	return out
+}
+
+// walkOpen visits every open workspace of NODES depth-first, in drawn order,
+// each before its family.
+func walkOpen(nodes []openNode, visit func(wsm.Workspace)) {
+	for _, node := range nodes {
+		visit(node.ws)
+		walkOpen(node.children, visit)
+	}
+}
+
+// Tab is one tab of the editor's tab bar: an open workspace, and whether its
+// repository's fold keeps it from being drawn.
 type Tab struct {
 	Workspace wsm.Workspace
 	Withheld  wsm.Withholding
 }
 
-// Tabs answers the editor's tab bar: every open workspace in REGISTRY ORDER
-// (sortWorkspaces), independent of the groupings, so repositories interleave
-// and a child need not follow its parent. A closed workspace has no tab. A tab
-// is withheld, not dropped, when the user hid its workspace or its
-// repository's section is collapsed, so a client cycling from a withheld
-// current workspace still knows its neighbours. A merged workspace files under
-// recently merged whatever its hidden flag (wsm.Workspace.Withheld, the one
-// statement of visibility the daemon also runs sessions by). A hidden merge
-// workspace has no tab at all until it is revealed
-// (wsm.Workspace.MergeHidden). It is THE ONE STATEMENT of the tab bar: the
-// roster draws it (tabBar), and hiding the current workspace lands the user
-// on its neighbour in it.
-func Tabs(reg Registry) []Tab {
-	folded := map[ids.RepoID]bool{}
-	for _, repo := range reg.Repositories {
-		folded[repo.ID] = repo.Folded
-	}
+// Tabs answers the editor's tab bar: every open workspace in the Open
+// section's walk (openTree), a folded region's withheld as collapsed. It
+// is the same walk the roster numbers its open rows by, so hiding the current
+// workspace lands the user on the neighbour the bar actually draws.
+func Tabs(reg Registry, log dlog.Logger) []Tab {
+	repos, _ := openTree(reg, log)
 	var out []Tab
-	for _, ws := range sortWorkspaces(reg.Workspaces) {
-		if ws.Closed || ws.MergeHidden() {
-			continue
+	for _, repo := range repos {
+		for _, region := range repo.regions {
+			withheld := wsm.Drawn
+			if region.folded(repo.repo) {
+				withheld = wsm.WithheldCollapsed
+			}
+			walkOpen(region.rows, func(ws wsm.Workspace) { out = append(out, Tab{Workspace: ws, Withheld: withheld}) })
 		}
-		out = append(out, Tab{Workspace: ws, Withheld: ws.Withheld(folded[ws.Repo])})
 	}
 	return out
 }
 
-// tabBar resolves the editor's tab bar from Tabs.
-func (r *resolver) tabBar() *frontendv1.RosterTabBar {
-	out := &frontendv1.RosterTabBar{}
-	for _, t := range Tabs(r.state.reg) {
-		tab := &frontendv1.RosterTab{Workspace: &workspacev1.WorkspaceRef{Id: string(t.Workspace.ID), Dir: t.Workspace.Dir}}
-		switch t.Withheld {
-		case wsm.WithheldHidden:
-			tab.Visibility = &frontendv1.RosterTab_WithheldHidden{WithheldHidden: &frontendv1.RosterTabWithheldHidden{}}
-		case wsm.WithheldCollapsed:
-			tab.Visibility = &frontendv1.RosterTab_WithheldCollapsed{WithheldCollapsed: &frontendv1.RosterTabWithheldCollapsed{}}
-		default:
-			tab.Visibility = &frontendv1.RosterTab_Drawn{Drawn: &frontendv1.RosterTabDrawn{}}
-		}
-		out.Tabs = append(out.Tabs, tab)
+// tabNumberer hands out tab numbers in the Open section's walk: 1, 2, ... to
+// every tab of an unfolded region, none to a folded one's.
+type tabNumberer struct {
+	next uint32
+}
+
+// tab answers the next open row's tab, given whether its region is folded.
+func (n *tabNumberer) tab(folded bool) *frontendv1.RosterOpenRowTab {
+	if folded {
+		return &frontendv1.RosterOpenRowTab{Tab: &frontendv1.RosterOpenRowTab_Folded{Folded: &frontendv1.RosterOpenRowTabFolded{}}}
 	}
-	return out
+	n.next++
+	return &frontendv1.RosterOpenRowTab{Tab: &frontendv1.RosterOpenRowTab_Numbered{Numbered: &frontendv1.RosterOpenRowTabNumbered{Number: n.next}}}
 }

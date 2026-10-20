@@ -58,6 +58,9 @@ func NewHostSessionID() string { return mint() }
 // NewTaskID mints a task identity.
 func NewTaskID() ids.TaskID { return ids.TaskID(mint()) }
 
+// NewSubsectionID mints a subsection identity.
+func NewSubsectionID() ids.SubsectionID { return ids.SubsectionID(mint()) }
+
 // NewFaultID mints a fault identity.
 func NewFaultID() ids.FaultID { return ids.FaultID(mint()) }
 

@@ -25,6 +25,7 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // TestSetResponseErrorSetsTheNamedArm pins the mapping's core: an arm the rpc's
@@ -839,5 +840,74 @@ func TestSetResponseErrorFillsTheOpenWorktreeUnrestorableEvidence(t *testing.T) 
 	got := resp.GetError().GetWorktreeUnrestorable()
 	if !ok || got.GetDir() != "/w/gone" || got.GetBranch() != "feature/gone" || got.GetDetail() != "both gone" {
 		t.Fatalf("setResponseError = %v, resp = %v, want worktree_unrestorable carrying dir, branch and detail", ok, resp)
+	}
+}
+
+// familyChildren is a family rule's refusal of a parent with two open children.
+var familyChildren = &wsm.HasOpenChildrenError{
+	Parent:   wsm.FamilyRef{ID: "ws-parent", Dir: "/w/parent"},
+	Children: []wsm.FamilyRef{{ID: "ws-a", Dir: "/w/a"}, {ID: "ws-b", Dir: "/w/b"}},
+}
+
+// TestFamilyRefusalMapsOpenChildrenOntoItsArm pins has_open_children's
+// evidence: the parent and every child, as the wire names workspaces.
+func TestFamilyRefusalMapsOpenChildrenOntoItsArm(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.CloseWorkspaceResponse{}
+	r, ok := familyRefusal(fmt.Errorf("close: %w", familyChildren))
+
+	// Act.
+	set := ok && setResponseError(resp, r.Arm, r.Fields)
+
+	// Assert.
+	got := resp.GetError().GetHasOpenChildren()
+	if !set || got == nil {
+		t.Fatalf("result = %v, want has_open_children", resp.GetResult())
+	}
+	if got.GetParent().GetId() != "ws-parent" || got.GetParent().GetDir() != "/w/parent" {
+		t.Fatalf("parent = %v, want ws-parent at /w/parent", got.GetParent())
+	}
+	var children []string
+	for _, child := range got.GetChildren() {
+		children = append(children, child.GetId()+"@"+child.GetDir())
+	}
+	if strings.Join(children, ",") != "ws-a@/w/a,ws-b@/w/b" {
+		t.Fatalf("children = %v, want ws-a and ws-b with their dirs", children)
+	}
+}
+
+// TestFamilyRefusalMapsEachParentStateOntoItsArm pins parent_not_open's
+// nested state for every state the store names.
+func TestFamilyRefusalMapsEachParentStateOntoItsArm(t *testing.T) {
+	tests := []struct {
+		state wsm.ParentState
+		want  func(*agentreplv1.WorkspaceParentNotOpen) bool
+	}{
+		{wsm.ParentHidden, func(m *agentreplv1.WorkspaceParentNotOpen) bool { return m.GetHidden() != nil }},
+		{wsm.ParentClosed, func(m *agentreplv1.WorkspaceParentNotOpen) bool { return m.GetClosed() != nil }},
+		{wsm.ParentClosing, func(m *agentreplv1.WorkspaceParentNotOpen) bool { return m.GetClosing() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.state.String(), func(t *testing.T) {
+			// Arrange.
+			resp := &agentreplv1.OpenWorkspaceResponse{}
+			r, ok := familyRefusal(&wsm.ParentNotOpenError{Parent: wsm.FamilyRef{ID: "ws-parent", Dir: "/w/parent"}, State: tt.state})
+
+			// Act.
+			set := ok && setResponseError(resp, r.Arm, r.Fields)
+
+			// Assert.
+			got := resp.GetError().GetParentNotOpen()
+			if !set || got == nil || !tt.want(got) || got.GetParent().GetId() != "ws-parent" {
+				t.Fatalf("result = %v, want parent_not_open %s naming ws-parent", resp.GetResult(), tt.state)
+			}
+		})
+	}
+}
+
+// TestFamilyRefusalPassesAnyOtherError pins that only the family rules map here.
+func TestFamilyRefusalPassesAnyOtherError(t *testing.T) {
+	if _, ok := familyRefusal(errors.New("disk on fire")); ok {
+		t.Fatal("an ordinary error was mapped as a family refusal")
 	}
 }

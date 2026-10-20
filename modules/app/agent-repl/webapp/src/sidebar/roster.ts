@@ -40,16 +40,16 @@ import {
   type RosterRepoDivergence,
   type RosterRepoKey,
   type RosterRepoSection,
-  type RosterRows,
+  type RosterOpenRow,
+  type RosterOpenRows,
   type RosterSectionCount,
   type RosterSectionHeader,
   type WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import type { RepositoryRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { clone, equals, type MessageInitShape } from "@bufbuild/protobuf";
 import { placeChildren } from "./children.js";
-import { disposeKeyedRows, drawKeyedRows, patchKeyedRows, remarkKeyedRows, type KeyedRows } from "./keyed-rows.js";
-import type { SidebarViewFoldSectionSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
+import { disposeKeyedRows, drawKeyedRows, patchKeyedRegions, remarkKeyedRows, type KeyedRows } from "./keyed-rows.js";
 import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -61,16 +61,34 @@ import {
   type RailContext,
   type SidebarContext,
 } from "./context.js";
-import { drawCreateWorkspaceControl } from "./create.js";
-import { changeView } from "./view-change.js";
+import { REARRANGED_ATTRIBUTE } from "./drag.js";
+import {
+  BUCKET_ATTRIBUTE,
+  drawCreateSubsectionControl,
+  drawRosterSubsections,
+  installArrangeDrag,
+  REPOSITORY_ATTRIBUTE,
+  type ArrangeRefs,
+} from "./subsections.js";
+import {
+  drawFoldToggle,
+  drawRosterSectionFold,
+  sectionFold,
+  trackDaemonFold,
+  type FoldGesture,
+  type FoldTarget,
+  type RosterSectionFold,
+} from "./section-fold.js";
 import { openScope, type DrawScope } from "./scope.js";
-import { foldViewKey, paintSectionFold, paintTriangle } from "./view.js";
+import { foldViewKey } from "./view.js";
 import {
   drawRosterRow,
   drawRosterRowDetailCommits,
   drawRosterRowWhenMerged,
   drawRosterRowWhenShown,
-  drawnRowEntries,
+  drawRosterFamily,
+  type RowFamily,
+  pathedFamilies,
   mergedToday,
   tickPaint,
   type RowPlace,
@@ -143,7 +161,11 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   const pane = document.createElement("div");
   pane.className = "sb-pane";
   roster.appendChild(pane);
-  let repos = new Map<string, DrawnSection<RosterRepoSection, Drawn & { rows: KeyedRows }>>();
+  let repos = new Map<string, DrawnSection<RosterRepoSection, DrawnRepoSection>>();
+  // THE GROUPING'S DRAGS (subsections.ts) are found from the press, under one
+  // listener for the drawer's life, and name the refs of the roster drawn.
+  const dragScope = openScope(rail);
+  const removeDrag = installArrangeDrag(dragScope.context, roster, drawnRefs(() => repos.values()));
   /** The open section, and the box its repository sections are placed in. */
   let open: DrawnSection<{ open: RosterOpenSection; count: number }, Drawn & { body: HTMLElement }> | null = null;
   let hidden: DrawnSection<RosterHiddenSection> | null = null;
@@ -183,7 +205,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       );
       const discarded: Array<DrawnSection<unknown>> = [];
 
-      const nextRepos = new Map<string, DrawnSection<RosterRepoSection, Drawn & { rows: KeyedRows }>>();
+      const nextRepos = new Map<string, DrawnSection<RosterRepoSection, DrawnRepoSection>>();
       let patchedRows = 0;
       for (const [index, section] of repository.sections.entries()) {
         const sectionPath = `${path}.repository.sections[${index}]`;
@@ -191,18 +213,28 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
         if (nextRepos.has(key)) {
           throw new MalformedView(`${sectionPath}.key`, `repository ${key} has two sections`);
         }
-        const kept = repos.get(key) ?? null;
+        let kept = repos.get(key) ?? null;
         repos.delete(key);
+        // A SECTION A DRAG REARRANGED IS DRAWN ANEW (drag.ts): its DOM no
+        // longer matches the wire it was drawn from.
+        if (kept !== null && kept.drawn.element.hasAttribute(REARRANGED_ATTRIBUTE)) {
+          discarded.push(kept);
+          kept = null;
+        }
         // A SECTION WHOSE ROWS ALONE CHANGED KEEPS ITS BOX and redraws only
         // the rows that changed (`keyed-rows.ts`): a switch changes the two
         // rows it moves the highlight between, never their sections.
         if (kept !== null && !equals(RosterRepoSectionSchema, kept.wire, section) && sameButRows(kept.wire, section)) {
-          const before = kept.drawn.rows.entries.map((entry) => entry.element);
-          if (patchKeyedRows(kept.drawn.rows, requireMessage(section.rows, `${sectionPath}.rows`), rail, `${sectionPath}.rows`, true, "grouping")) {
-            patchedRows += kept.drawn.rows.entries.filter((entry, i) => entry.element !== before[i]).length;
+          const regions = kept.drawn.regions;
+          const before = regions.map((rows) => rows.entries.map((entry) => entry.element));
+          const wires = repoSectionRegions(section, sectionPath);
+          if (patchKeyedRegions(regions.map((rows, r) => ({ kept: rows, ...wires[r] })), rail, "grouping")) {
+            regions.forEach((rows, r) => {
+              patchedRows += rows.entries.filter((entry, i) => entry.element !== before[r][i]).length;
+              remarkKeyedRows(rows, rail.attention);
+            });
             kept.wire = section;
             kept.scope.remark(rail.attention);
-            remarkKeyedRows(kept.drawn.rows, rail.attention);
             nextRepos.set(key, kept);
             continue;
           }
@@ -212,17 +244,18 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
           section,
           (a, b) => equals(RosterRepoSectionSchema, a, b),
           (scoped) => {
-            const rows: KeyedRows = { entries: [] };
+            // The section's own rows, then each subsection's.
+            const regions: KeyedRows[] = [{ entries: [] }, ...section.subsections.map(() => ({ entries: [] }))];
             // The rows' scopes go down with the section's.
-            scoped.onDispose(() => disposeKeyedRows(rows));
-            const element = drawRosterRepoSection(section, scoped, sectionPath, (r, p, h, pl) =>
-              drawKeyedRows(r, rail, p, h, pl, rows),
+            scoped.onDispose(() => regions.forEach(disposeKeyedRows));
+            const element = drawRosterRepoSection(section, scoped, sectionPath, (r, p, pl, region) =>
+              drawKeyedRows(r, rail, p, pl, regions[region]),
             );
-            return { element, rows };
+            return { element, regions };
           },
           discarded,
         );
-        if (drawnSection === kept) remarkKeyedRows(kept.drawn.rows, rail.attention);
+        if (drawnSection === kept) kept.drawn.regions.forEach((rows) => remarkKeyedRows(rows, rail.attention));
         nextRepos.set(key, drawnSection);
       }
       for (const gone of repos.values()) discarded.push(gone);
@@ -242,7 +275,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       placeChildren(open.drawn.body, [...repos.values()].map((section) => section.drawn.element));
       // EVERY PUSH RENUMBERS EVERY OPEN ROW, kept sections too: a tab opened
       // anywhere shifts the numbers of rows whose own wire did not change.
-      paintTabNumbers(open.drawn.body, tabNumbers(requireMessage(u.tabBar, `${path}.tab_bar`), `${path}.tab_bar`));
+      paintTabNumbers(open.drawn.body, tabNumbers(repository, `${path}.repository`));
 
       hidden = keepOrDraw(
         hidden,
@@ -268,7 +301,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
         context: {
           repo_sections: repository.sections.length,
           merged_groups: mergedWire.groups.length,
-          hidden_rows: hiddenWire.rows?.rows.length ?? 0,
+          hidden_rows: hiddenWire.hiddenRows?.rows.length ?? 0,
           redrawn_sections: discarded.length,
           redrawn_rows: patchedRows,
           current,
@@ -277,6 +310,8 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       return roster;
     },
     dispose(): void {
+      removeDrag();
+      dragScope.dispose(roster);
       const drawn: Array<DrawnSection<unknown>> = [...repos.values()];
       for (const section of [open, hidden, merged]) if (section !== null) drawn.push(section);
       for (const section of drawn) section.scope.dispose(section.drawn.element);
@@ -287,13 +322,71 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   };
 }
 
-/** Whether two repository sections differ in their rows at most. */
+/** A drawn repository section: its element, and its rows, its own first, then each subsection's. */
+interface DrawnRepoSection extends Drawn {
+  regions: KeyedRows[];
+}
+
+/**
+ * Whether two repository sections differ in their rows at most: their own
+ * rows and their subsections' rows, with the same subsections under the same
+ * headers.
+ */
 function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
   const left = clone(RosterRepoSectionSchema, a);
   const right = clone(RosterRepoSectionSchema, b);
-  left.rows = undefined;
-  right.rows = undefined;
+  for (const section of [left, right]) {
+    section.openRows = undefined;
+    for (const sub of section.subsections) sub.openRows = undefined;
+  }
   return equals(RosterRepoSectionSchema, left, right);
+}
+
+/**
+ * A repository section's rows regions, in the order the section draws them:
+ * its own rows, then each subsection's (`rosterwalk.RepoSectionRegions`).
+ */
+export function repoSectionRegions(u: RosterRepoSection, path: string): Array<{ rows: RosterOpenRows; path: string }> {
+  return [
+    { rows: requireMessage(u.openRows, `${path}.open_rows`), path: `${path}.open_rows` },
+    ...u.subsections.map((sub, index) => {
+      const subPath = `${path}.subsections[${index}].open_rows`;
+      return { rows: requireMessage(sub.openRows, subPath), path: subPath };
+    }),
+  ];
+}
+
+/** OPEN and every open row of its family, depth-first. */
+function flattenOpen(open: readonly RosterOpenRow[]): RosterOpenRow[] {
+  return open.flatMap((row) => [row, ...flattenOpen(row.children)]);
+}
+
+/**
+ * The refs a drag names, read from SECTIONS, the repository sections drawn.
+ * A drag holds the drawing (`arrange.ts`), so the sections drawn are the ones
+ * the press found its rows in.
+ */
+function drawnRefs(sections: () => Iterable<DrawnSection<RosterRepoSection, DrawnRepoSection>>): ArrangeRefs {
+  return {
+    workspace(id: string): WorkspaceRef {
+      for (const { wire } of sections()) {
+        for (const region of repoSectionRegions(wire, "WorkspaceRoster.repository.sections[]")) {
+          for (const open of flattenOpen(region.rows.rows)) {
+            const workspace = open.row?.workspace?.workspace;
+            if (workspace?.id === id) return workspace;
+          }
+        }
+      }
+      throw new Error(`invariant: a dragged row's workspace ${id} is in the roster drawn`);
+    },
+    repository(id: string): RepositoryRef {
+      for (const { wire } of sections()) {
+        const repository = wire.key?.repository;
+        if (repository?.id === id) return repository;
+      }
+      throw new Error(`invariant: a dragged section's repository ${id} is in the roster drawn`);
+    },
+  };
 }
 
 /** The open workspaces' drawn repository sections and the count of the rows they list. */
@@ -354,31 +447,57 @@ export function drawRosterOpenSection(
   return section;
 }
 
-/** One repository's section: its key, its header, its rows. */
+/**
+ * How a repository section's rows regions are drawn: REGION is 0 for the
+ * section's own rows and 1 + the subsection's index for a subsection's.
+ */
+export type DrawRepoRows = (rows: RosterOpenRows, path: string, place: RowPlace, region: number) => HTMLElement;
+
+/**
+ * One repository's section: its key, its header, its own rows, and below
+ * them its subsections (`subsections.ts`), each rows region drawn by
+ * DRAW_ROWS (`drawRosterRows` under the section's scope unless said).
+ */
 export function drawRosterRepoSection(
   u: RosterRepoSection,
   sc: SidebarContext,
   path: string,
-  drawRows?: HeadedSectionShape["drawRows"],
+  drawRows: DrawRepoRows = (r, p, pl) => drawRosterRows(r, sc, p, pl),
 ): HTMLElement {
   const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
   const divergence = drawRosterRepoDivergence(
     requireMessage(u.divergence, `${path}.divergence`),
     `${path}.divergence`,
   );
+  const [own] = repoSectionRegions(u, path);
   // THE FOLD IS THE DAEMON'S: the Emacs tab bar hides a collapsed
   // repository's workspaces off the same pushed arm, so the two can never
   // disagree.
-  return drawHeadedSection(u, sc, path, {
-    foldKey: repoFoldKey(key.id),
-    className: "repo-section",
-    target: { case: "repository", value: key },
-    drawRows,
-    decorateHeader: (header, section) => {
-      headerLabel(header).title = divergence;
-      header.appendChild(drawCreateWorkspaceControl(key, section, sc));
+  const section = drawHeadedBox(
+    u,
+    sc,
+    path,
+    {
+      foldKey: repoFoldKey(key.id),
+      className: "repo-section",
+      target: { case: "repository", value: key },
+      decorateHeader: (header) => {
+        headerLabel(header).title = divergence;
+        header.appendChild(drawCreateSubsectionControl(key, sc));
+      },
     },
-  });
+    () => {
+      const rows = drawRows(own.rows, own.path, "grouping", 0);
+      rows.setAttribute(BUCKET_ATTRIBUTE, "");
+      return rows;
+    },
+  );
+  section.setAttribute(REPOSITORY_ATTRIBUTE, key.id);
+  const subsections = drawRosterSubsections(u, sc, path, (rows, rowsPath, index) =>
+    drawRows(rows, rowsPath, "grouping", index + 1),
+  );
+  if (subsections !== null) section.appendChild(subsections);
+  return section;
 }
 
 /**
@@ -418,11 +537,6 @@ export interface HeadedBoxWire {
   fold: RosterSectionFold;
 }
 
-/** What a live grouping's section shares with the others: header, rows, fold. */
-export interface HeadedSectionWire extends HeadedBoxWire {
-  rows?: RosterRows;
-}
-
 /** How one kind of headed section is identified and decorated. */
 export interface HeadedBoxShape {
   /** The page key its fold is held under (`view.ts`). */
@@ -430,7 +544,7 @@ export interface HeadedBoxShape {
   /** The class naming the section's kind. */
   className: string;
   /** The section UpdateSidebarView folds. */
-  target: MessageInitShape<typeof SidebarViewFoldSectionSchema>["section"];
+  target: FoldTarget;
   /** Anything the kind adds to its header, after the folded count. */
   decorateHeader?: (header: HTMLElement, section: HTMLElement) => void;
   /**
@@ -443,24 +557,14 @@ export interface HeadedBoxShape {
 
 /** How a rows-bodied headed section is identified, decorated and drawn. */
 export interface HeadedSectionShape extends HeadedBoxShape {
-  /**
-   * Whether closed rows are dropped (`drawRosterRows`); they are unless said.
-   */
-  hideClosed?: boolean;
   /** Which kind of section the rows sit in (`RowPlace`); a grouping's unless said. */
   place?: RowPlace;
-  /**
-   * How the rows are drawn: `drawRosterRows` under the section's own scope
-   * unless said. The roster drawer draws a repository's rows keyed, each under
-   * a scope of its own (`keyed-rows.ts`).
-   */
-  drawRows?: (rows: RosterRows, path: string, hideClosed: boolean, place: RowPlace) => HTMLElement;
 }
 
 /**
- * A live grouping's section under the shared `RosterSectionHeader`: the box
- * folded as the daemon says, the label-and-count header whose gesture asks
- * for the other fold, and the rows with closed workspaces dropped.
+ * A section under the shared `RosterSectionHeader`: the box folded as the
+ * daemon says, the label-and-count header whose gesture asks for the other
+ * fold, and ROWS (at ROWS_PATH) below it, each with its family.
  *
  * THE ONE SHAPE every folding section but the merged band
  * draws — repository, hidden workspaces — through
@@ -468,16 +572,15 @@ export interface HeadedSectionShape extends HeadedBoxShape {
  * another on how a header folds.
  */
 export function drawHeadedSection(
-  u: HeadedSectionWire,
+  u: HeadedBoxWire,
   sc: SidebarContext,
   path: string,
   shape: HeadedSectionShape,
+  rows: { rows: readonly RowFamily[] },
+  rowsPath: string,
 ): HTMLElement {
-  const rows = requireMessage(u.rows, `${path}.rows`);
-  const hideClosed = shape.hideClosed ?? true;
   const place = shape.place ?? "grouping";
-  const drawRows = shape.drawRows ?? ((r, p, h, pl) => drawRosterRows(r, sc, p, h, pl));
-  return drawHeadedBox(u, sc, path, shape, () => drawRows(rows, `${path}.rows`, hideClosed, place));
+  return drawHeadedBox(u, sc, path, shape, () => drawRosterRows(rows, sc, rowsPath, place));
 }
 
 /**
@@ -510,30 +613,6 @@ export function drawHeadedBox(
   section.appendChild(head);
   section.appendChild(drawnBody);
   return section;
-}
-
-/**
- * A section's two-arm fold oneof, as every folding section spells it: the arm
- * IS the fold, each a dedicated empty message.
- */
-export type RosterSectionFold =
-  | { case: "expanded"; value: unknown }
-  | { case: "collapsed"; value: unknown }
-  | { case: undefined; value?: undefined };
-
-/** Whether a section is collapsed. EVERY arm is named; unset is malformed. */
-export function drawRosterSectionFold(fold: RosterSectionFold, path: string): boolean {
-  const arm = requireCase(fold, path);
-  switch (arm.case) {
-    case "expanded":
-      return false;
-    case "collapsed":
-      return true;
-    default: {
-      const other: { case: string } = arm;
-      return unreachableArm(path, other.case);
-    }
-  }
 }
 
 /** A repository's stable identity — the fold key and the create echo token. */
@@ -651,15 +730,17 @@ export function drawRosterMergedRepoGroup(
   drawnNow: { left: number },
 ): DrawnMergedRepoGroup {
   const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
-  const rows = requireMessage(u.rows, `${path}.rows`);
-  const merges = rows.rows.map((row, i): MergedRowFacts => {
-    const when = requireMessage(row.when, `${path}.rows.rows[${i}].when`);
-    const arm = requireCase(when.shown, `${path}.rows.rows[${i}].when.shown`);
-    if (arm.case !== "merged") return unreachableArm(`${path}.rows.rows[${i}].when.shown`, arm.case);
-    const commits = requireMessage(row.detail, `${path}.rows.rows[${i}].detail`).commits;
+  const rows = requireMessage(u.mergedRows, `${path}.merged_rows`);
+  const merges = rows.rows.map((merged, i): MergedRowFacts => {
+    const rowPath = `${path}.merged_rows.rows[${i}].row`;
+    const row = requireMessage(merged.row, rowPath);
+    const when = requireMessage(row.when, `${rowPath}.when`);
+    const arm = requireCase(when.shown, `${rowPath}.when.shown`);
+    if (arm.case !== "merged") return unreachableArm(`${rowPath}.when.shown`, arm.case);
+    const commits = requireMessage(row.detail, `${rowPath}.detail`).commits;
     return {
-      atMs: drawRosterRowWhenMerged(arm.value, `${path}.rows.rows[${i}].when.merged`),
-      commits: commits === undefined ? undefined : drawRosterRowDetailCommits(commits, `${path}.rows.rows[${i}].detail.commits`),
+      atMs: drawRosterRowWhenMerged(arm.value, `${rowPath}.when.merged`),
+      commits: commits === undefined ? undefined : drawRosterRowDetailCommits(commits, `${rowPath}.detail.commits`),
     };
   });
   const wireCollapsed = drawRosterMergedRepoGroupDrawn(u.drawn, `${path}.drawn`);
@@ -670,11 +751,11 @@ export function drawRosterMergedRepoGroup(
   const region = document.createElement("div");
   region.className = "rows";
   rows.rows.forEach((row, i) => {
-    const rowPath = `${path}.rows.rows[${i}]`;
+    const rowPath = `${path}.merged_rows.rows[${i}]`;
     const stamp = (drawn: HTMLElement): void => drawn.setAttribute(MERGED_AT_ATTRIBUTE, String(merges[i].atMs));
     if (drawnNow.left > 0) {
       drawnNow.left -= 1;
-      const drawn = drawRosterRow(row, sc, rowPath, "merged");
+      const drawn = drawRosterFamily(row, sc, rowPath, "merged");
       stamp(drawn);
       region.appendChild(drawn);
       return;
@@ -798,17 +879,24 @@ export function drawRosterHiddenSection(
   sc: SidebarContext,
   path: string,
 ): HTMLElement {
-  return drawHeadedSection(u, sc, path, {
-    foldKey: HIDDEN_FOLD_KEY,
-    className: HIDDEN_SECTION_CLASS,
-    target: { case: "hidden", value: {} },
-    place: "hidden",
-    leftOut: {
-      when: (header, headerPath) =>
-        drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
-      attribute: "data-hidden-empty",
+  return drawHeadedSection(
+    u,
+    sc,
+    path,
+    {
+      foldKey: HIDDEN_FOLD_KEY,
+      className: HIDDEN_SECTION_CLASS,
+      target: { case: "hidden", value: {} },
+      place: "hidden",
+      leftOut: {
+        when: (header, headerPath) =>
+          drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,
+        attribute: "data-hidden-empty",
+      },
     },
-  });
+    requireMessage(u.hiddenRows, `${path}.hidden_rows`),
+    `${path}.hidden_rows`,
+  );
 }
 
 /** The header repos and the merged band share: a label and a fold toggle. */
@@ -856,35 +944,6 @@ export function drawRosterSectionCount(u: RosterSectionCount, path: string): num
   return u.workspaces;
 }
 
-/**
- * What a section header's fold gesture does, handed the section and the
- * control the gesture landed on.
- */
-export type FoldGesture = (section: HTMLElement, control: HTMLElement) => void;
-
-/**
- * A section's fold gesture: the other fold, painted on every copy of the
- * section at once and asked of the daemon, whose push carries it to every
- * page (`view-change.ts`).
- */
-function sectionFold(sc: SidebarContext, foldKey: string, target: MessageInitShape<typeof SidebarViewFoldSectionSchema>["section"]): FoldGesture {
-  return (section, control) => {
-    const collapse = !section.classList.contains("folded");
-    void changeView(sc, {
-      key: foldViewKey(foldKey),
-      value: collapse,
-      control,
-      change: {
-        case: "foldSection",
-        value: {
-          section: target,
-          fold: collapse ? { case: "collapse", value: {} } : { case: "expand", value: {} },
-        },
-      },
-    });
-  };
-}
-
 /** The class every section header's label is drawn with. */
 export const SECTION_LABEL_CLASS = "sb-label";
 
@@ -906,25 +965,23 @@ export function drawRosterLabel(u: RosterLabel, path: string): string {
 }
 
 /**
- * The rows region of a section, in the resolver's render order.
- *
- * `hideClosed` drops closed, killed and nuked workspaces from a live grouping
- * (owner ruling, 2026-09-14) and hoists their live descendants up in their
- * place. The recently-merged band leaves it OFF: its rows are `closed = true`
- * by design and are exactly what that band exists to show. `place` is which
- * kind of section the rows sit in (`RowPlace`).
+ * The rows region of a section at PATH, in the resolver's render order, each
+ * row with its family. The daemon lists each state on its own (open, hidden,
+ * merged), so every row it sends is drawn: a closed workspace is in none of
+ * these lists, and an open workspace whose parent is not open already stands
+ * in its parent's place. `place` is which kind of section the rows sit in
+ * (`RowPlace`).
  */
 export function drawRosterRows(
-  u: RosterRows,
+  u: { rows: readonly RowFamily[] },
   sc: SidebarContext,
   path: string,
-  hideClosed = false,
   place: RowPlace = "grouping",
 ): HTMLElement {
   const rows = document.createElement("div");
   rows.className = "rows";
-  for (const entry of drawnRowEntries(u.rows, `${path}.rows`, hideClosed)) {
-    rows.appendChild(drawRosterRow(entry.row, sc, entry.path, place));
+  for (const entry of pathedFamilies(u.rows, `${path}.rows`)) {
+    rows.appendChild(drawRosterFamily(entry.family, sc, entry.path, place));
   }
   return rows;
 }
@@ -935,8 +992,7 @@ export function drawRosterRows(
  */
 function daemonFoldedBox(foldKey: string, wireFolded: boolean, sc: SidebarContext): HTMLElement {
   const section = foldedBox(foldKey, false);
-  const folded = sc.view.track(foldViewKey(foldKey), wireFolded, (value) => paintSectionFold(section, value));
-  section.classList.toggle("folded", folded);
+  trackDaemonFold(section, foldKey, wireFolded, sc);
   return section;
 }
 
@@ -949,16 +1005,4 @@ function foldedBox(foldKey: string, folded: boolean): HTMLElement {
   return section;
 }
 
-/** The ▸/▾ fold triangle, drawn the way its section stands. */
-function drawFoldToggle(section: HTMLElement, gesture: FoldGesture): HTMLElement {
-  const triangle = document.createElement("span");
-  triangle.className = "tri";
-  triangle.setAttribute("data-section-fold", "");
-  triangle.addEventListener("click", (event) => {
-    event.stopPropagation();
-    gesture(section, triangle);
-  });
-  paintTriangle(triangle, section.classList.contains("folded"));
-  return triangle;
-}
 

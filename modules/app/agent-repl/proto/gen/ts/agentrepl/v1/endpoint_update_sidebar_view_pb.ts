@@ -26,6 +26,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { SubsectionRef } from "./subsection_pb";
+import { file_agentrepl_v1_subsection } from "./subsection_pb";
 import type { RepositoryRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -34,7 +36,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_sidebar_view.proto.
  */
 export const file_agentrepl_v1_endpoint_update_sidebar_view: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3NpZGViYXJfdmlldy5wcm90bxIMYWdlbnRyZXBsLnYxIncKGFVwZGF0ZVNpZGViYXJWaWV3UmVxdWVzdBI8Cgxmb2xkX3NlY3Rpb24YASABKAsyJC5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdGb2xkU2VjdGlvbkgAQggKBmNoYW5nZUoECAIQA1INc2hvd19ncm91cGluZyKYAwoWU2lkZWJhclZpZXdGb2xkU2VjdGlvbhIxCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIABJCCg9yZWNlbnRseV9tZXJnZWQYAyABKAsyJy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdSZWNlbnRseU1lcmdlZEgAEjEKBmhpZGRlbhgHIAEoCzIfLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0hpZGRlbkgAEi0KBG9wZW4YCSABKAsyHS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdPcGVuSAASMQoGZXhwYW5kGAQgASgLMh8uYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3RXhwYW5kSAESNQoIY29sbGFwc2UYBSABKAsyIS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdDb2xsYXBzZUgBQgkKB3NlY3Rpb25CBgoEZm9sZEoECAIQA0oECAYQB0oECAgQCVIGdmlld2VkUgR0YXNrUghtYXR1cml0eSIbChlTaWRlYmFyVmlld1JlY2VudGx5TWVyZ2VkIhMKEVNpZGViYXJWaWV3SGlkZGVuIhEKD1NpZGViYXJWaWV3T3BlbiITChFTaWRlYmFyVmlld0V4cGFuZCIVChNTaWRlYmFyVmlld0NvbGxhcHNlIpcBChlVcGRhdGVTaWRlYmFyVmlld1Jlc3BvbnNlEjkKB3N1Y2Nlc3MYASABKAsyJi5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdTdWNjZXNzSAASNQoFZXJyb3IYAiABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdFcnJvckgAQggKBnJlc3VsdCIaChhVcGRhdGVTaWRlYmFyVmlld1N1Y2Nlc3MihQEKFlVwZGF0ZVNpZGViYXJWaWV3RXJyb3ISTgoSdW5rbm93bl9yZXBvc2l0b3J5GAEgASgLMjAuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93blJlcG9zaXRvcnlIAEIHCgVjYXVzZUoECAIQA1IMdW5rbm93bl90YXNrIiQKIlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93blJlcG9zaXRvcnlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3NpZGViYXJfdmlldy5wcm90bxIMYWdlbnRyZXBsLnYxIncKGFVwZGF0ZVNpZGViYXJWaWV3UmVxdWVzdBI8Cgxmb2xkX3NlY3Rpb24YASABKAsyJC5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdGb2xkU2VjdGlvbkgAQggKBmNoYW5nZUoECAIQA1INc2hvd19ncm91cGluZyLLAwoWU2lkZWJhclZpZXdGb2xkU2VjdGlvbhIxCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIABJCCg9yZWNlbnRseV9tZXJnZWQYAyABKAsyJy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdSZWNlbnRseU1lcmdlZEgAEjEKBmhpZGRlbhgHIAEoCzIfLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0hpZGRlbkgAEi0KBG9wZW4YCSABKAsyHS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdPcGVuSAASMQoKc3Vic2VjdGlvbhgKIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASMQoGZXhwYW5kGAQgASgLMh8uYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3RXhwYW5kSAESNQoIY29sbGFwc2UYBSABKAsyIS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdDb2xsYXBzZUgBQgkKB3NlY3Rpb25CBgoEZm9sZEoECAIQA0oECAYQB0oECAgQCVIGdmlld2VkUgR0YXNrUghtYXR1cml0eSIbChlTaWRlYmFyVmlld1JlY2VudGx5TWVyZ2VkIhMKEVNpZGViYXJWaWV3SGlkZGVuIhEKD1NpZGViYXJWaWV3T3BlbiITChFTaWRlYmFyVmlld0V4cGFuZCIVChNTaWRlYmFyVmlld0NvbGxhcHNlIpcBChlVcGRhdGVTaWRlYmFyVmlld1Jlc3BvbnNlEjkKB3N1Y2Nlc3MYASABKAsyJi5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdTdWNjZXNzSAASNQoFZXJyb3IYAiABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdFcnJvckgAQggKBnJlc3VsdCIaChhVcGRhdGVTaWRlYmFyVmlld1N1Y2Nlc3Mi1QEKFlVwZGF0ZVNpZGViYXJWaWV3RXJyb3ISTgoSdW5rbm93bl9yZXBvc2l0b3J5GAEgASgLMjAuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93blJlcG9zaXRvcnlIABJOChJ1bmtub3duX3N1YnNlY3Rpb24YAyABKAsyMC5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdVbmtub3duU3Vic2VjdGlvbkgAQgcKBWNhdXNlSgQIAhADUgx1bmtub3duX3Rhc2siJAoiVXBkYXRlU2lkZWJhclZpZXdVbmtub3duU3Vic2VjdGlvbiIkCiJVcGRhdGVTaWRlYmFyVmlld1Vua25vd25SZXBvc2l0b3J5QipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.UpdateSidebarViewRequest
@@ -122,6 +124,18 @@ export type SidebarViewFoldSection = Message<"agentrepl.v1.SidebarViewFoldSectio
      */
     value: SidebarViewOpen;
     case: "open";
+  } | {
+    /**
+     * One subsection of a repository's section, echoed from
+     * frontend.v1.RosterSubsectionKey. Its fold has the repository fold's two
+     * readers and the same effect on its workspaces: the Emacs tab bar hides
+     * them, and COLLAPSING STANDS THEIR SESSIONS DOWN as a repository's
+     * collapse does. EXPANDING starts nothing by itself.
+     *
+     * @generated from field: agentrepl.v1.SubsectionRef subsection = 10;
+     */
+    value: SubsectionRef;
+    case: "subsection";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -295,6 +309,14 @@ export type UpdateSidebarViewError = Message<"agentrepl.v1.UpdateSidebarViewErro
      */
     value: UpdateSidebarViewUnknownRepository;
     case: "unknownRepository";
+  } | {
+    /**
+     * No subsection matches the ref: it was deleted, or never existed.
+     *
+     * @generated from field: agentrepl.v1.UpdateSidebarViewUnknownSubsection unknown_subsection = 3;
+     */
+    value: UpdateSidebarViewUnknownSubsection;
+    case: "unknownSubsection";
   } | { case: undefined; value?: undefined };
 };
 
@@ -304,6 +326,22 @@ export type UpdateSidebarViewError = Message<"agentrepl.v1.UpdateSidebarViewErro
  */
 export const UpdateSidebarViewErrorSchema: GenMessage<UpdateSidebarViewError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 9);
+
+/**
+ * No subsection matches the ref. DELIBERATELY EMPTY: the arm is the cause,
+ * and the request names the subsection.
+ *
+ * @generated from message agentrepl.v1.UpdateSidebarViewUnknownSubsection
+ */
+export type UpdateSidebarViewUnknownSubsection = Message<"agentrepl.v1.UpdateSidebarViewUnknownSubsection"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateSidebarViewUnknownSubsection.
+ * Use `create(UpdateSidebarViewUnknownSubsectionSchema)` to create a new message.
+ */
+export const UpdateSidebarViewUnknownSubsectionSchema: GenMessage<UpdateSidebarViewUnknownSubsection> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 10);
 
 /**
  * No registered repository matches the ref. DELIBERATELY EMPTY: the arm is
@@ -319,5 +357,5 @@ export type UpdateSidebarViewUnknownRepository = Message<"agentrepl.v1.UpdateSid
  * Use `create(UpdateSidebarViewUnknownRepositorySchema)` to create a new message.
  */
 export const UpdateSidebarViewUnknownRepositorySchema: GenMessage<UpdateSidebarViewUnknownRepository> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 10);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 11);
 
