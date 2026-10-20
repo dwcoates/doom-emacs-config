@@ -81,40 +81,14 @@ export interface MarkerContext {
 export function drawOutcomeMarker(m: FeedOutcomeMarker, mc: MarkerContext, path: string): HTMLElement {
   const family = requireCase(m.family, `${path}.family`);
   const label = requireMessage(m.label, `${path}.label`);
-  const glyphName = feedOutcomeMarkerGlyph(family.case);
-  const glyphChar = MARKER_GLYPH_CHARS[glyphName];
-  if (glyphChar === undefined) {
-    return unreachableArm(`${path}.family (glyph '${glyphName}')`, family.case);
-  }
-
-  const root = document.createElement("div");
-  root.className = `${OUTCOME_MARKER_CLASS} ${toneClass(feedOutcomeMarkerColor(family.case))}`;
-  root.setAttribute(OUTCOME_MARKER_ATTRIBUTE, family.case);
-  root.setAttribute("data-family", family.case);
+  const root = markerRoot(m, path);
 
   const fault = family.case !== "neutral";
   // A FAULT'S PILL IS A CONTROL (the one control, never a <button>); a
   // neutral pill is plain text with nothing to open.
   const pill = fault ? createControl() : document.createElement("span");
   pill.className = "outcome-marker-pill";
-
-  const glyph = document.createElement("span");
-  glyph.className = "outcome-marker-glyph";
-  glyph.setAttribute("data-glyph", glyphName);
-  glyph.textContent = glyphChar;
-  const text = document.createElement("span");
-  text.className = "outcome-marker-text";
-  const labelEl = document.createElement("span");
-  labelEl.className = "outcome-marker-label";
-  labelEl.textContent = label.text;
-  text.append(labelEl);
-  if (m.detail !== undefined) {
-    const detail = document.createElement("span");
-    detail.className = "outcome-marker-detail";
-    detail.textContent = ` · ${m.detail.text}`;
-    text.append(detail);
-  }
-  pill.append(glyph, text);
+  pill.append(...markerHead(m, path));
   root.append(pill);
 
   switch (family.case) {
@@ -144,6 +118,44 @@ export function drawOutcomeMarker(m: FeedOutcomeMarker, mc: MarkerContext, path:
     context: { family: family.case, label: label.text },
   });
   return root;
+}
+
+/** The root every marker drawing shares: its family's tone and attributes. */
+function markerRoot(m: FeedOutcomeMarker, path: string): HTMLElement {
+  const family = requireCase(m.family, `${path}.family`);
+  const root = document.createElement("div");
+  root.className = `${OUTCOME_MARKER_CLASS} ${toneClass(feedOutcomeMarkerColor(family.case))}`;
+  root.setAttribute(OUTCOME_MARKER_ATTRIBUTE, family.case);
+  root.setAttribute("data-family", family.case);
+  return root;
+}
+
+/** The head every marker drawing shares: glyph, label, then the detail. */
+function markerHead(m: FeedOutcomeMarker, path: string): HTMLElement[] {
+  const family = requireCase(m.family, `${path}.family`);
+  const label = requireMessage(m.label, `${path}.label`);
+  const glyphName = feedOutcomeMarkerGlyph(family.case);
+  const glyphChar = MARKER_GLYPH_CHARS[glyphName];
+  if (glyphChar === undefined) {
+    return unreachableArm(`${path}.family (glyph '${glyphName}')`, family.case);
+  }
+  const glyph = document.createElement("span");
+  glyph.className = "outcome-marker-glyph";
+  glyph.setAttribute("data-glyph", glyphName);
+  glyph.textContent = glyphChar;
+  const text = document.createElement("span");
+  text.className = "outcome-marker-text";
+  const labelEl = document.createElement("span");
+  labelEl.className = "outcome-marker-label";
+  labelEl.textContent = label.text;
+  text.append(labelEl);
+  if (m.detail !== undefined) {
+    const detail = document.createElement("span");
+    detail.className = "outcome-marker-detail";
+    detail.textContent = ` · ${m.detail.text}`;
+    text.append(detail);
+  }
+  return [glyph, text];
 }
 
 /**
