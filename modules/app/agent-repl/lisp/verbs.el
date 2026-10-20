@@ -125,6 +125,7 @@
 (declare-function agent-repl-rpc-update-merge-queue "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-daemon-health "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-send-hidden-keepalives "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-retry-vendor-error "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-session-health "agent-repl-rpc" (conn request &rest keys))
 
 ;; Defined by roster.el.  Declared, never defined here.
@@ -942,6 +943,37 @@ of its own beyond the echo: the push is the new state."
      (lambda (_)
        (message "agent-repl: %s %s" ws (if hidden "hidden" "shown"))
        (agent-repl-verbs--land-after-visibility ws hidden)))))
+
+(defun agent-repl-verbs--retry-outcome-text (outcome)
+  "Return the echo for a decoded vendor-error retry OUTCOME, or nil for none.
+A retry that was not scheduled says nothing: RET in an empty composer is
+the ordinary no-op then, as it always was."
+  (let ((v (plist-get outcome :value)))
+    (pcase (plist-get outcome :arm)
+      (:retried "agent-repl: retrying now")
+      (:nothing-scheduled nil)
+      (:busy (format "agent-repl: the session is busy (%s); the retry follows shortly"
+                     (plist-get v :detail)))
+      (:ended (format "agent-repl: the retry could not be made (%s)" (plist-get v :detail)))
+      (arm (error "agent-repl-verbs: retry outcome arm %S has no wording" arm)))))
+
+(defun agent-repl-verb-retry-vendor-error (ws)
+  "Retry the turn the vendor failed in WS now, rather than at the countdown.
+RET in an empty composer sends it (owner ruling, 2026-10-20): nothing goes
+out as content, the shim's own continue prompt is the retry, and the
+footer's countdown follows on the footer stream.  The echo says what the
+shim did; a retry that was not scheduled is logged and says nothing."
+  (agent-repl-verbs--send
+   #'agent-repl-rpc-retry-vendor-error (agent-repl-verbs--conn ws)
+   (list :workspace (agent-repl-verbs--ref ws))
+   :ws ws :op "retry-vendor-error"
+   :on-success
+   (lambda (success)
+     (let* ((outcome (plist-get success :outcome))
+            (text (agent-repl-verbs--retry-outcome-text outcome)))
+       (agent-repl--info ws "elisp.verbs.retry-vendor-error ws=%s outcome=%S"
+                         ws (plist-get outcome :arm))
+       (when text (message "%s" text))))))
 
 (defun agent-repl-verbs--keepalive-outcome-text (outcome)
   "Return the words for one hidden workspace's decoded keep-alive OUTCOME."

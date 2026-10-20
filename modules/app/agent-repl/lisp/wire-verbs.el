@@ -5236,6 +5236,63 @@ family rules a hide and a show keep."
    #'agent-repl-wire-decode-set-workspace-hidden-success
    #'agent-repl-wire-decode-set-workspace-hidden-error))
 
+;;;; ---- RetryVendorError -----------------------------------------------
+;;
+;; RET in an empty composer: retry the turn the vendor failed now, rather
+;; than at the end of the footer's countdown.  See
+;; endpoint_retry_vendor_error.proto.
+
+(defun agent-repl-wire-encode-retry-vendor-error-request (request)
+  "Encode RetryVendorErrorRequest from plist REQUEST (:workspace REF)."
+  (let ((message "RetryVendorErrorRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-workspace-ref
+                 (agent-repl-wire-verbs--require message "workspace"
+                                                  (plist-get request :workspace)))))))
+
+(defun agent-repl-wire-verbs--decode-retry-detail (message json)
+  "Decode MESSAGE, a retry answer carrying only `detail', from JSON."
+  (agent-repl-wire-verbs--check-keys message json '(detail))
+  (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)))
+
+(defun agent-repl-wire-decode-retry-vendor-error-success (json)
+  "Decode RetryVendorErrorSuccess from JSON into (:outcome (:arm ARM :value V)).
+THE ARM IS WHAT HAPPENED: `:retried', `:nothing-scheduled', `:busy' or
+`:ended', the last two carrying the shim's `:detail'."
+  (let ((message "RetryVendorErrorSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(retried nothingScheduled busy ended))
+    (list :outcome
+          (agent-repl-wire-verbs--decode-oneof
+           message "outcome" json
+           (list (list 'retried :retried (agent-repl-wire-verbs--empty-arm "RetryVendorErrorRetried"))
+                 (list 'nothingScheduled :nothing-scheduled
+                       (agent-repl-wire-verbs--empty-arm "RetryVendorErrorNothingScheduled"))
+                 (list 'busy :busy
+                       (lambda (value) (agent-repl-wire-verbs--decode-retry-detail "RetryVendorErrorBusy" value)))
+                 (list 'ended :ended
+                       (lambda (value) (agent-repl-wire-verbs--decode-retry-detail "RetryVendorErrorEnded" value))))))))
+
+(defun agent-repl-wire-decode-retry-vendor-error-error (json)
+  "Decode RetryVendorErrorError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL: the four cross-cutting ownership arms, and
+`no_session'."
+  (let ((message "RetryVendorErrorError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noSession))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (append (agent-repl-wire-verbs--handover-arms "RetryVendorError")
+                   (list (list 'noSession :no-session
+                               (agent-repl-wire-verbs--empty-arm "RetryVendorErrorNoSession"))))))))
+
+(defun agent-repl-wire-decode-retry-vendor-error-response (json)
+  "Decode RetryVendorErrorResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "RetryVendorErrorResponse" json
+   #'agent-repl-wire-decode-retry-vendor-error-success
+   #'agent-repl-wire-decode-retry-vendor-error-error))
+
 ;;;; ---- SendHiddenKeepalives ------------------------------------------
 
 (defun agent-repl-wire-encode-send-hidden-keepalives-request (&optional _request)

@@ -104,6 +104,7 @@
 (defvar agent-repl--history-discard-entry)
 (declare-function agent-repl--on-simple-close "agent-repl-panels" (&optional ws))
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
+(declare-function agent-repl-verb-retry-vendor-error "verbs" (ws))
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-command-completion-at-point "command-completion" ())
 (declare-function agent-repl--command-completion-on-change "command-completion" (beg end len))
@@ -2074,6 +2075,10 @@ read-directive.
 While the composer is editing a held prompt, a from-buffer send COMMITS
 the edit instead (`agent-repl-held-edit-commit') and returns nil.
 
+An EMPTY from-buffer send asks the workspace's shim for its scheduled
+vendor-error retry now (`agent-repl-verb-retry-vendor-error'); nothing is
+sent as content.
+
 Returns the submission's idempotency key, or nil when nothing was sent."
   (interactive (list :user-sent))
   (unless (memq origin agent-repl--input-origins)
@@ -2092,6 +2097,12 @@ Returns the submission's idempotency key, or nil when nothing was sent."
           (progn
             (agent-repl--info ws "elisp.input.send-empty ws=%s origin=%S -- nothing to send"
                               ws origin)
+            ;; RET IN AN EMPTY COMPOSER RETRIES A FAILED TURN NOW (owner
+            ;; ruling, 2026-10-20): the shim makes its scheduled retry at
+            ;; once, with nothing sent as content.  With no retry scheduled
+            ;; the shim answers so and nothing happens, as before.
+            (when (null prompt)
+              (agent-repl-verb-retry-vendor-error ws))
             nil)
         (let* ((from-buffer (null prompt))
                (text (agent-repl--prepare-input ws raw force-metaprompt))

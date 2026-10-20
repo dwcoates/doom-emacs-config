@@ -50,6 +50,8 @@
 
 ;; The codec.  Defined in wire-*.el; named, never implemented, here.
 (declare-function agent-repl-wire-encode-register-workspace-request "wire-host" (request))
+(declare-function agent-repl-wire-encode-retry-vendor-error-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-retry-vendor-error-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-send-hidden-keepalives-request "wire-verbs" (&optional request))
 (declare-function agent-repl-wire-decode-send-hidden-keepalives-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-update-persistent-wifi-mode-request "wire-verbs" (request))
@@ -436,6 +438,15 @@ answer, not as a failure.")
   agent-repl-wire-decode-set-workspace-priority-response
   "Set or clear a workspace's priority.
 Clearing is the ABSENCE of the priority field, never a sentinel value.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-retry-vendor-error
+  "RetryVendorError"
+  agent-repl-wire-encode-retry-vendor-error-request
+  agent-repl-wire-decode-retry-vendor-error-response
+  "Ask the workspace's shim for its scheduled vendor-error retry now.
+RET in an empty composer sends it: nothing goes out as content, and the
+shim's own continue prompt is the retry.  The answer's arm is what the
+shim judged: retried, nothing scheduled, busy or ended.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-send-hidden-keepalives
   "SendHiddenKeepalives"
