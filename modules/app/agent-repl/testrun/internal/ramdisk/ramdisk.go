@@ -54,6 +54,10 @@ const DefaultRegistry = "/tmp/agent-repl-test-ramdisks"
 // DefaultMountParent is where every run's volume is mounted.
 const DefaultMountParent = "/tmp"
 
+// DefaultVolumesParent is where `diskutil eraseDisk` mounts the volume it
+// makes, before Acquire moves it under the mount parent.
+const DefaultVolumesParent = "/Volumes"
+
 // EnvShortBase names, to every unit of a run on a RAM disk, the volume's mount:
 // the short base the daemon's integration harness and unit-test roots make
 // their directories in instead of /tmp, so they land on the RAM disk too.
@@ -244,6 +248,9 @@ type Manager struct {
 	Registry string
 	// MountParent is the directory the volume is mounted in.
 	MountParent string
+	// VolumesParent is where `diskutil eraseDisk` first mounts the volume
+	// (DefaultVolumesParent).
+	VolumesParent string
 	// Pid is this run's pid: it names the record, the volume and the mount.
 	Pid int
 	// Reap is the one reap (reap.Reap): it freezes, kills and confirms gone
@@ -291,7 +298,7 @@ type Volume struct {
 // Default is the Manager a real run uses.
 func Default(log Logger) Manager {
 	return Manager{
-		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, Pid: os.Getpid(),
+		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, VolumesParent: DefaultVolumesParent, Pid: os.Getpid(),
 		Reap:  reap.OSReap(log),
 		Probe: RunBounded, Watch: RunWatched, Alive: ProcessAlive, Mounted: IsMountPoint, Log: log, Now: time.Now,
 		LockBound: LockBound, Memory: HostMemory,
@@ -372,12 +379,16 @@ func (m Manager) Acquire(sizeMiB int) (_ *Volume, err error) {
 	}
 	formatted := m.Now()
 	// eraseDisk mounted the volume in /Volumes; it moves under /tmp.
-	info, err := m.Run("diskutil", "info", "/Volumes/"+name)
+	first := filepath.Join(m.VolumesParent, name)
+	info, err := m.Run("diskutil", "info", first)
 	if err != nil {
 		return v, fmt.Errorf("find the RAM disk's volume: %w", err)
 	}
 	volume, err := deviceIdentifier(info)
 	if err != nil {
+		return v, err
+	}
+	if err := writeFSEventsNoLog(first); err != nil {
 		return v, err
 	}
 	if _, err := m.Run("diskutil", "unmount", volume); err != nil {
@@ -399,6 +410,31 @@ func (m Manager) Acquire(sizeMiB int) (_ *Volume, err error) {
 	m.Log.Infof("RAM disk acquire: %s mounted at %s in %s (attach %s, format %s, mount %s)",
 		v.Device, v.Mount, end.Sub(start), attached.Sub(start), formatted.Sub(attached), end.Sub(formatted))
 	return v, nil
+}
+
+// writeFSEventsNoLog writes .fseventsd/no_log at the root of the volume
+// mounted at root, so fseventsd keeps no event log on it from its next mount.
+//
+// FSEVENTSD HELD THE VOLUME BUSY AT ITS DETACH. fseventsd, a root daemon,
+// writes each mounted volume's event log into its .fseventsd directory (two
+// pages a run on every run's RAM disk, 2026-10-20). A run's last act on the
+// volume, removing its whole temp root, is a burst of events whose log
+// fseventsd was still writing when the detach came: the kernel refused the
+// unmount with EBUSY, no approver dissented, and `lsof`, which as this user
+// sees no root process, named no holder (4 of about 100 runs on 2026-10-20,
+// each detaching only when forced). fseventsd reads no_log when the volume
+// mounts, so it is written while eraseDisk's mount stands, before the volume
+// is mounted under /tmp: there fseventsd writes no page at all (measured on
+// scratch RAM disks the same day), so it never holds a file on the volume.
+func writeFSEventsNoLog(root string) error {
+	dir := filepath.Join(root, ".fseventsd")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("make the RAM disk's %s, to keep fseventsd's log off it: %w", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "no_log"), nil, 0o600); err != nil {
+		return fmt.Errorf("write the RAM disk's %s/no_log, to keep fseventsd's log off it: %w", dir, err)
+	}
+	return nil
 }
 
 // attach makes this run's record and attaches its RAM disk, all under the
@@ -553,7 +589,9 @@ func (v *Volume) Release() error {
 
 // holders names the processes with a file open on the volume, as
 // `lsof +f -- <mount>` lists them: "command[pid]" per process, in lsof's order.
-// lsof answers exit 1 and no output when nothing is open there, which is said
+// lsof answers exit 1 and no output when nothing it can see is open there
+// (run as this user, it sees no root process: fseventsd once held a volume
+// it named no holder of, see writeFSEventsNoLog), which is said
 // as such; any other failure of lsof is named in place of the holders, never
 // dropped.
 func (v *Volume) holders() string {
@@ -563,11 +601,11 @@ func (v *Volume) holders() string {
 	case len(names) > 0:
 		return strings.Join(names, ", ")
 	case err != nil && strings.TrimSpace(out) == "":
-		return "no process lsof could see"
+		return "no process of this user lsof could see, and it sees no root process"
 	case err != nil:
 		return fmt.Sprintf("unknown, lsof failed: %v", err)
 	default:
-		return "no process lsof could see"
+		return "no process of this user lsof could see, and it sees no root process"
 	}
 }
 
