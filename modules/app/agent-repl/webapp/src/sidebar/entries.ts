@@ -8,6 +8,7 @@
  */
 import type { RosterOpenRow, RosterOpenRows, RosterRepoSection, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import { pathedFamilies } from "./row.js";
 
 /** One open row and its message path. */
 export interface PathedOpenRow {
@@ -52,7 +53,7 @@ export function sectionSubsections(u: RosterRepoSection, path: string): Array<{ 
 
 /** ROWS' top-level rows, each with its path under PATH. */
 export function pathedOpenRows(rows: RosterOpenRows, path: string): PathedOpenRow[] {
-  return rows.rows.map((row, index) => ({ row, path: `${path}.rows[${index}]` }));
+  return pathedFamilies(rows.rows, `${path}.rows`).map((entry, index) => ({ row: rows.rows[index], path: entry.path }));
 }
 
 /**
