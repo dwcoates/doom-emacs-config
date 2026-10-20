@@ -91,22 +91,14 @@ type foldTabsSpec struct {
 // down as hiding it would, so only visible workspaces run. Expanding starts
 // nothing: the editor asks with OpenTabs.
 func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec) error {
-	if err := spec.write(); err != nil {
-		if refused := spec.unknown(err); refused != nil {
-			return refused
-		}
-		log.Error(spec.op, "could not record the "+spec.what+"'s fold", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("fold %s %q: %w", spec.what, spec.target, err)
+	workspaces, err := v.recordFold(ctx, log, spec)
+	if err != nil {
+		return err
 	}
 	log.Info(spec.op, "recorded the "+spec.what+"'s fold", nil)
 	v.republishRegistry(ctx, log, spec.op)
 	if !spec.folded {
 		return nil
-	}
-	workspaces, err := v.deps.DB.ListWorkspaces(ctx)
-	if err != nil {
-		log.Error(spec.op, "could not list the collapsed "+spec.what+"'s workspaces; their sessions were not stood down", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("fold %s %q: list its workspaces: %w", spec.what, spec.target, err)
 	}
 	var withheld []string
 	for _, ws := range workspaces {
@@ -118,4 +110,42 @@ func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec
 	}
 	log.Info(spec.op, "the collapsed "+spec.what+"'s open workspaces are stood down", dlog.Context{"workspaces": withheld})
 	return nil
+}
+
+// recordFold writes the fold, answering the workspaces as they stood for a
+// collapse to stand down (nil for an expand).
+//
+// A COLLAPSE NEVER STANDS DOWN THE CURRENT WORKSPACE. A collapse of a section
+// holding it is refused holds_current and nothing is written. The check and
+// the write run under the selection lock, which every select holds while it
+// moves the selection (selectCurrent), so a switch racing the collapse lands
+// wholly before the check or wholly after the write: no interleaving records
+// a collapse over the workspace the user has just switched to.
+func (v *verbs) recordFold(ctx context.Context, log dlog.Logger, spec foldTabsSpec) ([]wsm.Workspace, error) {
+	var workspaces []wsm.Workspace
+	if spec.folded {
+		v.selection.Lock()
+		defer v.selection.Unlock()
+		listed, err := v.deps.DB.ListWorkspaces(ctx)
+		if err != nil {
+			log.Error(spec.op, "could not list the "+spec.what+"'s workspaces; the collapse was not recorded", dlog.Context{"cause": err.Error()})
+			return nil, fmt.Errorf("fold %s %q: list its workspaces: %w", spec.what, spec.target, err)
+		}
+		for _, ws := range listed {
+			if ws.Current && spec.members.HoldsCurrent(&ws) {
+				return nil, refuse(log, "UpdateSidebarView", ArmHoldsCurrent,
+					fmt.Sprintf("the %s holds the current workspace %q; collapsing it would stand that workspace down", spec.what, ws.ID),
+					false)
+			}
+		}
+		workspaces = listed
+	}
+	if err := spec.write(); err != nil {
+		if refused := spec.unknown(err); refused != nil {
+			return nil, refused
+		}
+		log.Error(spec.op, "could not record the "+spec.what+"'s fold", dlog.Context{"cause": err.Error()})
+		return nil, fmt.Errorf("fold %s %q: %w", spec.what, spec.target, err)
+	}
+	return workspaces, nil
 }

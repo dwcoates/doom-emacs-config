@@ -59,6 +59,10 @@ const (
 	// subsection carries (ArrangeSidebarError.unknown_subsection). The arm
 	// carries `subsection`.
 	ArmUnknownSubsection = "unknown_subsection"
+	// ArmHoldsCurrent is a collapse of a repository's section or a
+	// subsection that holds the current workspace
+	// (UpdateSidebarViewError.holds_current, FoldRepositoryError.holds_current).
+	ArmHoldsCurrent = "holds_current"
 	// ArmBlankName is a subsection named nothing but whitespace
 	// (ArrangeSidebarError.blank_name).
 	ArmBlankName = "blank_name"

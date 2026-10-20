@@ -1609,6 +1609,27 @@ func TestFoldRepositoryMapsTheVerbsRefusal(t *testing.T) {
 	}
 }
 
+func TestFoldRepositoryAnswersACollapseThatHoldsTheCurrentWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.DB.repositories = append(h.DB.repositories, wsm.Repository{ID: "repo-1", Dir: "/repos/one"})
+	h.Verbs.foldErr = &workspace.Refusal{Arm: workspace.ArmHoldsCurrent, Reason: "holds the current workspace"}
+
+	// Act
+	resp, err := h.Client.FoldRepository(context.Background(), connect.NewRequest(&agentreplv1.FoldRepositoryRequest{
+		Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
+		Fold:       &agentreplv1.FoldRepositoryRequest_Collapse{Collapse: &agentreplv1.FoldRepositoryCollapse{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldRepository: %v", err)
+	}
+	if resp.Msg.GetError().GetHoldsCurrent() == nil {
+		t.Fatalf("result = %v, want holds_current", resp.Msg.GetResult())
+	}
+}
+
 func TestFoldRepositoryFailsAVerbError(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
