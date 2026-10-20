@@ -4089,6 +4089,14 @@ html[data-page-unshown] *::after {
   overflow-wrap: anywhere;
 }
 
+/* A SENT PROMPT'S ROW CLIPS ITS BOTTOM WHILE ITS BUBBLE GLIDES UP INTO PLACE
+   (src/feed/send-glide.ts). `clip` rather than a paint-only clip, so the
+   translated bubble never counts toward #feed-scroll's scrollHeight and no
+   follow lands at a tail the glide inflated. `overflow-x` stays visible. */
+.feed-item[data-send-glide] {
+  overflow-y: clip;
+}
+
 /* ---- The login terminal ----------------------------------------------------
 
    The Claude login is a full-screen TUI, gated behind stateful prompts
