@@ -238,3 +238,65 @@ func TestSurfacesAdoptStdio(t *testing.T) {
 		})
 	}
 }
+
+func TestRetainOncePrunesARegisteredDirectory(t *testing.T) {
+	// Arrange: a registered directory holding an expired owned file and an
+	// expired file it does not own.
+	f := newRetentionFixture(t)
+	dir := t.TempDir()
+	f.s.RetainDirectory(dir, func(base string) bool { return filepath.Ext(base) == ".log" })
+	owned := filepath.Join(dir, "lease-tests-1.log")
+	other := filepath.Join(dir, "notes.txt")
+	for _, path := range []string{owned, other} {
+		if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		age(t, path, f.stale())
+	}
+
+	// Act.
+	f.s.retainOnce(f.now)
+
+	// Assert.
+	if _, err := os.Lstat(owned); !os.IsNotExist(err) {
+		t.Errorf("the expired owned file survived the pass")
+	}
+	if _, err := os.Lstat(other); err != nil {
+		t.Errorf("the file the predicate does not own was removed: %v", err)
+	}
+	if ctx := f.passRecord(t)["context"].(map[string]any); ctx["directories"] != float64(2) {
+		t.Errorf("pass context %v, want two directories", ctx)
+	}
+}
+
+func TestRetainOnceAnAbsentRegisteredDirectoryIsNotAFailure(t *testing.T) {
+	// Arrange.
+	f := newRetentionFixture(t)
+	absent := filepath.Join(t.TempDir(), "merge-logs")
+	f.s.RetainDirectory(absent, func(string) bool { return true })
+
+	// Act.
+	f.s.retainOnce(f.now)
+
+	// Assert.
+	if ctx := f.passRecord(t)["context"].(map[string]any); ctx["failures"] != float64(0) {
+		t.Fatalf("pass context %v, want no failures", ctx)
+	}
+	if !hasOperation(readRecords(t, f.runLog), "daemon.dlog.retention_dir_absent") {
+		t.Errorf("no daemon.dlog.retention_dir_absent record")
+	}
+}
+
+func TestRetainDirectoryRefusesANilPredicate(t *testing.T) {
+	// Arrange.
+	f := newRetentionFixture(t)
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("RetainDirectory accepted a nil predicate")
+		}
+	}()
+
+	// Act.
+	f.s.RetainDirectory(t.TempDir(), nil)
+}

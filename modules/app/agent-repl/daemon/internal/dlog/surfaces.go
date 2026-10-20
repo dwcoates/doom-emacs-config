@@ -35,6 +35,9 @@ type surfaces struct {
 	// them at the stdio log, taken over so it rotates and ages like every
 	// other daemon log; nil when they are anything else (see adoptStdio).
 	stdio *stdioLog
+	// retained are the directories besides logsDir the retention pass
+	// prunes (RetainDirectory), under mu.
+	retained []retainedDir
 	// window is the process's live level: a level other than info reverts to
 	// info by itself when its window ends (see admits).
 	window *logging.Window

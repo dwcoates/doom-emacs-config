@@ -263,6 +263,9 @@ func (s *TestSurfaces) BindRecordTee(tee RecordTee) {
 // BindRecordCounter implements Surfaces: the double counts nothing.
 func (s *TestSurfaces) BindRecordCounter(RecordCounter) {}
 
+// RetainDirectory implements Surfaces: the double runs no retention pass.
+func (s *TestSurfaces) RetainDirectory(string, func(string) bool) {}
+
 // WorkspaceOrCentral implements Surfaces with the production semantics: the
 // workspace's logger when it resolves, and otherwise the global logger with
 // the workspace named on every record.

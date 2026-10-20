@@ -108,6 +108,13 @@ type Surfaces interface {
 	// counted: the daemon's own, of any logger, and every client record it
 	// writes for Emacs or the webapp. A nil counter unbinds it.
 	BindRecordCounter(counter RecordCounter)
+	// RetainDirectory adds dir to the hourly retention pass: every log family
+	// in it that owned names and no writer holds is pruned by
+	// logging.DefaultRetention. owned must name only files written under the
+	// shared lock agentrepl/logging takes (a RotatingFile or CreateLocked). A
+	// directory that does not exist yet is an ordinary state: it has nothing
+	// to prune.
+	RetainDirectory(dir string, owned func(base string) bool)
 	// Close flushes and closes every sink the daemon opened.
 	Close() error
 }

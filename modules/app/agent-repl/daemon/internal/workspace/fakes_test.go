@@ -2475,6 +2475,7 @@ func (s *fakeSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return n
 func (s *fakeSurfaces) BindRecordTee(dlog.RecordTee) {}
 
 func (s *fakeSurfaces) BindRecordCounter(dlog.RecordCounter) {}
+func (s *fakeSurfaces) RetainDirectory(string, func(string) bool) {}
 
 func (s *fakeSurfaces) DetachDir(string) error { return nil }
 

@@ -2,6 +2,8 @@ package dlog
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"regexp"
 	"time"
 
@@ -41,6 +43,22 @@ var daemonLogFamily = regexp.MustCompile(`^(daemon\.run\.log|daemon\.stdio\.log|
 
 // isDaemonLogFamily answers whether base names a daemon-written log family.
 func isDaemonLogFamily(base string) bool { return daemonLogFamily.MatchString(base) }
+
+// retainedDir is one directory RetainDirectory added to the pass.
+type retainedDir struct {
+	dir   string
+	owned func(base string) bool
+}
+
+// RetainDirectory implements Surfaces.
+func (s *surfaces) RetainDirectory(dir string, owned func(base string) bool) {
+	if owned == nil {
+		panic("dlog: RetainDirectory with a nil owned predicate")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retained = append(s.retained, retainedDir{dir: dir, owned: owned})
+}
 
 // retentionPass is what one pass did, summed for its one record.
 type retentionPass struct {
@@ -92,20 +110,16 @@ func (s *surfaces) retainOnce(now time.Time) {
 		retainStdio(s, stdio, now, &pass)
 	}
 
-	report, err := logging.PruneDirectory(s.logsDir, now, logging.DefaultRetention, isDaemonLogFamily)
-	pass.families = report.Families
-	pass.held = len(report.Held)
-	pass.kept = report.Kept
-	pass.noteRemoved(report.Removed)
-	if err != nil {
-		pass.failures++
-		s.Global().Error("daemon.dlog.retention_failed", "the logs directory could not be fully pruned", Context{
-			"logs_dir": s.logsDir, "removed": len(report.Removed), "cause": err.Error(),
-		})
+	s.mu.Lock()
+	dirs := append([]retainedDir{{dir: s.logsDir, owned: isDaemonLogFamily}}, s.retained...)
+	s.mu.Unlock()
+	for _, d := range dirs {
+		s.pruneDirectory(d, now, &pass)
 	}
 
 	s.Global().Info("daemon.dlog.retention_pass", "aged every log the daemon writes", Context{
 		"logs_dir":       s.logsDir,
+		"directories":    len(dirs),
 		"retention":      logging.DefaultRetention.String(),
 		"sinks_rolled":   pass.sinksRolled,
 		"shims_marked":   pass.shimsMarked,
@@ -119,6 +133,29 @@ func (s *surfaces) retainOnce(now time.Time) {
 		"removed_sample": pass.removedSample,
 		"failures":       pass.failures,
 	})
+}
+
+// pruneDirectory prunes one directory's unheld families. The logs directory
+// always exists (the run log lives in it); a registered directory may not
+// exist yet, which leaves nothing to prune.
+func (s *surfaces) pruneDirectory(d retainedDir, now time.Time, pass *retentionPass) {
+	if _, err := os.Stat(d.dir); errors.Is(err, fs.ErrNotExist) {
+		s.Global().Debug("daemon.dlog.retention_dir_absent", "a retained log directory does not exist yet, so it has nothing to prune", Context{
+			"logs_dir": d.dir,
+		})
+		return
+	}
+	report, err := logging.PruneDirectory(d.dir, now, logging.DefaultRetention, d.owned)
+	pass.families += report.Families
+	pass.held += len(report.Held)
+	pass.kept += report.Kept
+	pass.noteRemoved(report.Removed)
+	if err != nil {
+		pass.failures++
+		s.Global().Error("daemon.dlog.retention_failed", "a logs directory could not be fully pruned", Context{
+			"logs_dir": d.dir, "removed": len(report.Removed), "cause": err.Error(),
+		})
+	}
 }
 
 // retainSinks ages every sink the daemon holds open.
