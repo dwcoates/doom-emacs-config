@@ -506,38 +506,32 @@ export class TailFollow {
 
   /** A prompt this client sent was drawn: park at the tail and follow. */
   promptSent(): void {
-    this.supersedeClick("promptSent");
-    this.park("promptSent");
+    this.parkSuperseding("promptSent");
   }
 
   /** A held prompt's card was drawn for the first time: park at the tail and follow. */
   promptHeld(): void {
-    this.supersedeClick("promptHeld");
-    this.park("promptHeld");
+    this.parkSuperseding("promptHeld");
   }
 
   /** A feed's first paint: land at the tail and follow. */
   initialPlacement(): void {
-    this.supersedeClick("initialPlacement");
-    this.park("initialPlacement");
+    this.parkSuperseding("initialPlacement");
   }
 
   /** A page replace (re-open after reconnect or handover): land at the tail and follow. */
   replaceRestore(): void {
-    this.supersedeClick("replaceRestore");
-    this.park("replaceRestore");
+    this.parkSuperseding("replaceRestore");
   }
 
   /** A row was removed because its turn is being rolled back: land at the tail and follow. */
   rolledBack(): void {
-    this.supersedeClick("rolledBack");
-    this.park("rolledBack");
+    this.parkSuperseding("rolledBack");
   }
 
   /** The user switched to this page's workspace: land at the tail and follow. */
   workspaceSelected(): void {
-    this.supersedeClick("workspaceSelected");
-    this.park("workspaceSelected");
+    this.parkSuperseding("workspaceSelected");
   }
 
   /** The reader cleared the selection: return to the tail and follow. */
@@ -669,8 +663,7 @@ export class TailFollow {
       });
       return;
     }
-    this.supersedeClick(cause);
-    this.park(cause);
+    this.parkSuperseding(cause);
   }
 
   /** The feed's last root row that draws a box, or null with no rows to read. */
@@ -792,6 +785,17 @@ export class TailFollow {
         row: heldRowName(this.clickedRow),
       },
     });
+  }
+
+  /**
+   * THE ONE PARK A NAMED CAUSE MAKES: the cause supersedes the reader's click
+   * hold, then the feed lands at its tail and follows. Every parking method
+   * goes through here but `selectionCleared`, which names itself to the hold
+   * and ends the selection between the two.
+   */
+  private parkSuperseding(cause: Exclude<ParkCause, "latestVisible">): void {
+    this.supersedeClick(cause);
+    this.park(cause);
   }
 
   /**

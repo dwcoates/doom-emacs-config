@@ -3685,6 +3685,32 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     expect(record.context).toMatchObject({ by: "workspaceSelected", held_top: 700 });
   });
 
+  it.each<[string, (tail: TailFollow) => void]>([
+    ["promptSent", (tail) => tail.promptSent()],
+    ["promptHeld", (tail) => tail.promptHeld()],
+    ["initialPlacement", (tail) => tail.initialPlacement()],
+    ["replaceRestore", (tail) => tail.replaceRestore()],
+    ["rolledBack", (tail) => tail.rolledBack()],
+    ["workspaceSelected", (tail) => tail.workspaceSelected()],
+  ])("ends a standing hold under %s and parks at the tail", async (cause, act) => {
+    // Arrange
+    const f = floored(700);
+    f.tail.readerClicked(document.createElement("div"));
+    const capture = captureLogRecords("info");
+    // Act
+    act(f.tail);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-hold-ended");
+    expect([record.context, f.tail.isFollowing()]).toMatchObject([{ by: cause }, true]);
+  });
+
+  it("hand-rolls no click supersede followed by a park outside parkSuperseding", () => {
+    // Arrange + Act
+    const pairs = scrollSource.match(/this\.supersedeClick\((\w+|"\w+")\);\s*this\.park\(\1\)/g) ?? [];
+    // Assert -- the one pair left is parkSuperseding's own body.
+    expect(pairs).toEqual(["this.supersedeClick(cause);\n    this.park(cause)"]);
+  });
+
   it("records no hold ending when no hold stands", async () => {
     // Arrange
     const f = floored(700);
