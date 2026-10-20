@@ -486,10 +486,11 @@ func TestASynthesizedNoticeIsDrawnAsANoticeAndNotAsTheAgentsAnswer(t *testing.T)
 			},
 		}, nil), nil, nil)
 
-	// Assert: the authorship is stated in the bubble's notice field.
-	heading := h.response().GetNotice().GetHeading()
-	if want := "Notice — your allowance is exhausted."; !contains(heading, want) {
-		t.Fatalf("heading = %q, want it to state %q", heading, want)
+	// Assert: the authorship is stated in the bubble's notice field, whose
+	// card head is the neutral family naming the subject.
+	marker := h.response().GetNotice().GetMarker()
+	if marker.GetNeutral() == nil || marker.GetLabel().GetText() != "vendor notice" || marker.GetDetail().GetText() != "allowance exhausted" {
+		t.Fatalf("notice marker = %v, want the neutral \"vendor notice · allowance exhausted\" head", marker)
 	}
 	if !h.hasRecord("debug", "daemon.feed.response_synthesized_notice") {
 		t.Fatalf("records = %+v, want the synthesized-notice branch recorded", h.records())

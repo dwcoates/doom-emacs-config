@@ -1002,7 +1002,8 @@ func (r *resolver) outputPlacement(s *wsState, turn *ids.TurnID) placement {
 // feed its placement names; nothing copies it onto another.
 func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, durable bool) {
 	f := r.feed(s, at.feed)
-	if r.rolledBackRow(s, f, row) || r.withheldRollingBack(s, f, at, row, durable) || r.signedInRow(s, f, row) {
+	if r.rolledBackRow(s, f, row) || r.withheldRollingBack(s, f, at, row, durable) || r.signedInRow(s, f, row) ||
+		r.noticeFoldedIntoEnding(s, f, at, row) {
 		return
 	}
 	id := row.GetId().GetValue()
@@ -1045,6 +1046,11 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	// gains it on the publication that settles it and no producer can publish
 	// a row whose selectability disagrees with the one rule (selection.go).
 	stampSelectable(at.feed, snapshot)
+	// A FAULT ENDING TAKES ITS TURN'S VENDOR NOTICES, whose rows are retired
+	// after this row's own publication (notice.go).
+	for _, notice := range r.foldNoticesIntoEnding(s, f, id, snapshot) {
+		defer r.retire(s, at.feed, notice)
+	}
 	existing, seen := f.rows[id]
 	// THE ROW'S ORDER KEY IS FIXED AT ITS FIRST DRAW and stated on every
 	// publication of it (order.go), so it is settled before the snapshot is

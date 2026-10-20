@@ -29,41 +29,11 @@
       }
     },
     {
-      "activity": {
-        "response": {
-          "notice": {
-            "heading": "Notice from the vendor's tooling, not the agent's answer."
-          },
-          "success": {
-            "prose": {
-              "markdown": "The response hit the max output tokens."
-            }
-          },
-          "usage": {
-            "atMs": "1800000000004",
-            "heat": {
-              "position": 0.03593333333333334
-            },
-            "text": "3.2k"
-          }
-        }
-      },
       "id": {
         "value": "${ROW_2}"
       },
       "order": {
         "key": "${ORDER_2}"
-      },
-      "turn": {
-        "value": "${TURN}"
-      }
-    },
-    {
-      "id": {
-        "value": "${ROW_3}"
-      },
-      "order": {
-        "key": "${ORDER_3}"
       },
       "turn": {
         "value": "${TURN}"
