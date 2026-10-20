@@ -4995,6 +4995,30 @@ three arms its own way."
     (should (= (agent-repl-test-wire-verbs--occurrences "(cons 'opId" source) 1))
     (should (= (agent-repl-test-wire-verbs--occurrences "'(success error accepted)" source) 1))))
 
+;;;; ---- The lone-`detail' decoder ----------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-decode-detail-carries-the-sentence ()
+  "A message carrying only `detail' decodes to (:detail SENTENCE)."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-verbs--decode-detail
+                    "Anything" (agent-repl-test-wire-verbs--parse "{\"detail\":\"it broke\"}"))
+                   '(:detail "it broke")))))
+
+(ert-deftest agent-repl-test-wire-verbs-decode-detail-refuses-another-field ()
+  "A field beside `detail' is refused as unknown, never dropped."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-verbs--decode-detail
+                   "Anything" (agent-repl-test-wire-verbs--parse "{\"detail\":\"x\",\"cause\":\"y\"}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-no-codec-hand-rolls-a-lone-detail ()
+  "Every message carrying only `detail' decodes through the one helper.
+A hand-rolled site is a second spelling of the same shape, which drifts."
+  (let* ((file (file-name-with-extension
+                (symbol-file 'agent-repl-wire-verbs--decode-detail 'defun) "el"))
+         (source (with-temp-buffer (insert-file-contents file) (buffer-string))))
+    (should (= (agent-repl-test-wire-verbs--occurrences "'(detail))" source) 1))))
+
 ;;;; ---- KillWorkspace / NukeWorkspace: the immediate ack --------------
 
 (ert-deftest agent-repl-test-wire-verbs-kill-and-nuke-requests-carry-the-op-id ()

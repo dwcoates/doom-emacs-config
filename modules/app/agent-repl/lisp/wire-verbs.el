@@ -656,20 +656,14 @@ workspace has not been created yet; BRANCH is what the name resolves to."
   "Decode CreateWorkspaceWorktreeCreationFailed from JSON into a plist
 (`:detail').
 Creating the worktree failed."
-  (let ((message "CreateWorkspaceWorktreeCreationFailed"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string
-                       message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "CreateWorkspaceWorktreeCreationFailed" json))
 
 (defun agent-repl-wire-decode-create-workspace-spawn-failed (json)
   "Decode CreateWorkspaceSpawnFailed from JSON into a plist (`:detail\').
 The created workspace's bring-up could not start a shim.  The SAME daemon
 refusal `OpenWorkspaceSpawnFailed\' carries, and deliberately the same
 shape: a create and an open raise it from one site."
-  (let ((message "CreateWorkspaceSpawnFailed"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string
-                       message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "CreateWorkspaceSpawnFailed" json))
 
 (defun agent-repl-wire-decode-create-workspace-one-shot-policy-missing (json)
   "Decode CreateWorkspaceOneShotPolicyMissing from JSON into a plist
@@ -902,10 +896,7 @@ The vendor transcript to resume from is nowhere on disk."
 (defun agent-repl-wire-decode-open-workspace-spawn-failed (json)
   "Decode OpenWorkspaceSpawnFailed from JSON into a plist (`:detail').
 Spawning the session's shim failed."
-  (let ((message "OpenWorkspaceSpawnFailed"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string
-                       message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "OpenWorkspaceSpawnFailed" json))
 
 (defun agent-repl-wire-decode-open-workspace-worktree-unrestorable (json)
   "Decode OpenWorkspaceWorktreeUnrestorable from JSON into a plist
@@ -926,18 +917,12 @@ was asked of a workspace with no landed merge, and nothing was opened."
   "Decode OpenWorkspaceBriefMissing from JSON into a plist (`:detail').
 A revert of the merge was asked and its brief could not be composed;
 nothing was opened."
-  (let ((message "OpenWorkspaceBriefMissing"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string
-                       message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "OpenWorkspaceBriefMissing" json))
 
 (defun agent-repl-wire-decode-open-workspace-vendor-start-failed (json)
   "Decode OpenWorkspaceVendorStartFailed from JSON into a plist (`:detail\').
 The shim came up but the VENDOR failed to start the session."
-  (let ((message "OpenWorkspaceVendorStartFailed"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string
-                       message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "OpenWorkspaceVendorStartFailed" json))
 
 (defun agent-repl-wire-decode-open-workspace-lock-holder-unavailable-failure (json)
   "Decode OpenWorkspaceLockHolderUnavailable's `failure' field from JSON."
@@ -1294,17 +1279,13 @@ interrupt."
 
 (defun agent-repl-wire-decode-bind-workspace-session-stop-failed (json)
   "Decode BindWorkspaceSessionStopFailed from JSON (`:detail')."
-  (let ((message "BindWorkspaceSessionStopFailed"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "BindWorkspaceSessionStopFailed" json))
 
 (defun agent-repl-wire-decode-bind-workspace-session-start-failed (json)
   "Decode BindWorkspaceSessionStartFailed from JSON (`:detail').
 THE BINDING STANDS: the record names the conversation the user chose, and
 the ordinary open path is what brings it up next."
-  (let ((message "BindWorkspaceSessionStartFailed"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "BindWorkspaceSessionStartFailed" json))
 
 (defun agent-repl-wire-decode-bind-workspace-session-error-unknown-workspace (json)
   "Decode BindWorkspaceSessionError's `unknown_workspace' cause arm from JSON."
@@ -1674,10 +1655,7 @@ not finished adopting this workspace yet."
 (defun agent-repl-wire-decode-nuke-workspace-git-failed (json)
   "Decode NukeWorkspaceGitFailed from JSON into a plist (`:detail').
 A git operation failed mid-delete."
-  (let ((message "NukeWorkspaceGitFailed"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string
-                       message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "NukeWorkspaceGitFailed" json))
 
 (defun agent-repl-wire-decode-nuke-workspace-error-unknown-workspace (json)
   "Decode NukeWorkspaceError's `unknown_workspace' cause arm from JSON."
@@ -2028,10 +2006,7 @@ not finished adopting this workspace yet."
 (defun agent-repl-wire-decode-restart-workspace-relaunch-failed (json)
   "Decode RestartWorkspaceRelaunchFailed from JSON into a plist (`:detail').
 The relaunch was attempted and failed: the workspace was not restarted."
-  (let ((message "RestartWorkspaceRelaunchFailed"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string
-                   message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "RestartWorkspaceRelaunchFailed" json))
 
 (defun agent-repl-wire-decode-restart-workspace-error-relaunch-failed (json)
   "Decode RestartWorkspaceError's `relaunch_failed' cause arm from JSON."
@@ -2842,9 +2817,7 @@ is serving, and it takes no prompt until the gate is answered in the
 panel.  `detail' is the gate's own account of what was refused cold --
 the same sentence the gate card and the footer carry -- and is never
 switched on."
-  (let ((message "SubmitPromptColdGate"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "SubmitPromptColdGate" json))
 
 (defun agent-repl-wire-decode-submit-prompt-error-cold-gate (json)
   "Decode SubmitPromptError's `cold_gate' reason arm from JSON."
@@ -2855,9 +2828,7 @@ switched on."
 A `/model' act named a model the session's catalog does not hold; the act
 was not applied.  `detail' is the shim's own sentence naming the model,
 and is never switched on."
-  (let ((message "SubmitPromptModelNotInCatalog"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "SubmitPromptModelNotInCatalog" json))
 
 (defun agent-repl-wire-decode-submit-prompt-error-model-not-in-catalog (json)
   "Decode SubmitPromptError's `model_not_in_catalog' reason arm from JSON."
@@ -2867,9 +2838,7 @@ and is never switched on."
   "Decode SubmitPromptModelRefused from JSON into (`:detail').
 The vendor refused the model change a `/model' act asked for.  `detail'
 is the vendor's own sentence, never switched on."
-  (let ((message "SubmitPromptModelRefused"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "SubmitPromptModelRefused" json))
 
 (defun agent-repl-wire-decode-submit-prompt-error-model-refused (json)
   "Decode SubmitPromptError's `model_refused' reason arm from JSON."
@@ -3802,9 +3771,7 @@ Which sink."
 (defun agent-repl-wire-decode-daemon-fault-successor-spawn-failed (json)
   "Decode DaemonFaultSuccessorSpawnFailed from JSON into (:detail).
 The spawn's own account of the failure."
-  (let ((message "DaemonFaultSuccessorSpawnFailed"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "DaemonFaultSuccessorSpawnFailed" json))
 
 (defun agent-repl-wire-decode-daemon-fault-prompts-dir-missing (json)
   "Decode DaemonFaultPromptsDirMissing from JSON into (:path).
@@ -4443,10 +4410,7 @@ interrupt."
 (defun agent-repl-wire-decode-interrupt-shim-refused (json)
   "Decode InterruptShimRefused from JSON into a plist (`:detail').
 DETAIL is the shim's own account of the refusal."
-  (let ((message "InterruptShimRefused"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail
-          (agent-repl-wire-verbs--decode-string message 'detail json))))
+  (agent-repl-wire-verbs--decode-detail "InterruptShimRefused" json))
 
 (defun agent-repl-wire-decode-interrupt-error (json)
   "Decode InterruptError from JSON into (:cause (:arm ARM :value V)).
@@ -4824,6 +4788,11 @@ ARM is `:plan' (V the plan plist) or `:nothing-to-roll-back' (V nil)."
                  (list 'nothingToRollBack :nothing-to-roll-back
                        (lambda (v) (agent-repl-wire-verbs--decode-empty
                                     "PlanRollbackNothingToRollBack" v))))))))
+
+(defun agent-repl-wire-verbs--decode-detail (message json)
+  "Decode MESSAGE, which carries only its `detail' sentence, from JSON into (:detail)."
+  (agent-repl-wire-verbs--check-keys message json '(detail))
+  (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)))
 
 (defun agent-repl-wire-verbs--decode-registry-dir (message json)
   "Decode the workspace-ref-mismatch MESSAGE from JSON into (:registry-dir)."
@@ -5250,11 +5219,6 @@ family rules a hide and a show keep."
                  (agent-repl-wire-verbs--require message "workspace"
                                                   (plist-get request :workspace)))))))
 
-(defun agent-repl-wire-verbs--decode-retry-detail (message json)
-  "Decode MESSAGE, a retry answer carrying only `detail', from JSON."
-  (agent-repl-wire-verbs--check-keys message json '(detail))
-  (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)))
-
 (defun agent-repl-wire-decode-retry-vendor-error-success (json)
   "Decode RetryVendorErrorSuccess from JSON into (:outcome (:arm ARM :value V)).
 THE ARM IS WHAT HAPPENED: `:retried', `:nothing-scheduled', `:busy' or
@@ -5268,9 +5232,9 @@ THE ARM IS WHAT HAPPENED: `:retried', `:nothing-scheduled', `:busy' or
                  (list 'nothingScheduled :nothing-scheduled
                        (agent-repl-wire-verbs--empty-arm "RetryVendorErrorNothingScheduled"))
                  (list 'busy :busy
-                       (lambda (value) (agent-repl-wire-verbs--decode-retry-detail "RetryVendorErrorBusy" value)))
+                       (lambda (value) (agent-repl-wire-verbs--decode-detail "RetryVendorErrorBusy" value)))
                  (list 'ended :ended
-                       (lambda (value) (agent-repl-wire-verbs--decode-retry-detail "RetryVendorErrorEnded" value))))))))
+                       (lambda (value) (agent-repl-wire-verbs--decode-detail "RetryVendorErrorEnded" value))))))))
 
 (defun agent-repl-wire-decode-retry-vendor-error-error (json)
   "Decode RetryVendorErrorError from JSON into (:cause (:arm ARM :value V)).
