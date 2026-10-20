@@ -54,6 +54,10 @@ type ExpireResult struct {
 	Removed []string
 }
 
+// Changed answers whether the expiry rolled or removed anything: the outcome a
+// holder records, where an expiry that found nothing to age records nothing.
+func (r ExpireResult) Changed() bool { return r.RolledCurrent || len(r.Removed) > 0 }
+
 // CurrentExpired answers whether the current generation's last write is older
 // than the retention. An empty current file is never expired: there is
 // nothing in it to age, and rolling it would only mint an empty generation.
@@ -152,6 +156,26 @@ func ExpireOn(ctx context.Context, r *RotatingFile, ticks <-chan time.Time, now 
 		case at := <-ticks:
 			report(r.Expire(at))
 		}
+	}
+}
+
+// StartExpiring ages r once at once and again every DefaultExpireInterval on
+// a goroutine of its own, handing every outcome to report. It is how a
+// long-lived service that holds one RotatingFile (the store, the sidecar) ages
+// it. The returned stop ends the goroutine and waits for it, and must run
+// before r is closed.
+func StartExpiring(r *RotatingFile, report func(ExpireResult, error)) (stop func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ticker := time.NewTicker(DefaultExpireInterval)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ExpireOn(ctx, r, ticker.C, time.Now, report)
+	}()
+	return func() {
+		cancel()
+		ticker.Stop()
+		<-done
 	}
 }
 

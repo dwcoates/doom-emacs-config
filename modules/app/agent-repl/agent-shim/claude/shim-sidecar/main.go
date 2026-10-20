@@ -476,13 +476,34 @@ func openLoggerTo(terminal io.Writer, storeSocket, stateDir, logPath string) (*l
 		With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
 	logf.NoteLevelSelection(selection)
 	forwarder.SetRefReplacedObserver(refReplacedObserver(logf))
+	stopExpiring := sharedlogging.StartExpiring(file, reportLogExpiry(logf, logPath))
 	return logf, func() {
+		stopExpiring()
 		// BOUNDED, BECAUSE LAUNCHD IS WAITING. The drain dials the daemon once
 		// per queued record; with the daemon gone and a boot's backlog queued,
 		// an unbounded wait held one stop past three minutes.
 		logf.CloseWithin(logging.DefaultShutdownDrain)
 		_ = file.Close()
 	}, nil
+}
+
+// reportLogExpiry records one hourly aging of the sidecar's own log
+// (agentrepl/logging retention.go): a failure at error, and anything it rolled
+// or removed at info. A pass that found nothing to age writes nothing.
+func reportLogExpiry(logf *logging.Bound, logPath string) func(sharedlogging.ExpireResult, error) {
+	return func(result sharedlogging.ExpireResult, err error) {
+		if err != nil {
+			logf.With(logging.Context{Operation: "sidecar.log.retention_failed", Level: "error", Path: logPath}).
+				Log("the sidecar's log could not be aged by the %s retention: %v", sharedlogging.DefaultRetention, err)
+			return
+		}
+		if !result.Changed() {
+			return
+		}
+		logf.With(logging.Context{Operation: "sidecar.log.retention", Path: logPath}).
+			Log("aged the sidecar's log by the %s retention: rolled_current=%t removed=%d %v",
+				sharedlogging.DefaultRetention, result.RolledCurrent, len(result.Removed), result.Removed)
+	}
 }
 
 // refReplacedObserver states, ONCE PER REPLACEMENT, that the daemon roster

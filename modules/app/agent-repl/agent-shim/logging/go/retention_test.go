@@ -481,3 +481,46 @@ func sorted(names []string) []string {
 	}
 	return out
 }
+
+func TestStartExpiringAgesAtOnceAndStopsWhenAsked(t *testing.T) {
+	// Arrange: a generation already past the retention.
+	path := filepath.Join(t.TempDir(), "svc.log")
+	w := openForTest(t, path, 1<<20, 5)
+	writeAged(t, path+".1", "old\n", time.Now().Add(-DefaultRetention-time.Hour))
+	reports := make(chan ExpireResult, 1)
+
+	// Act.
+	stop := StartExpiring(w, func(r ExpireResult, err error) {
+		if err != nil {
+			t.Errorf("Expire reported %v", err)
+		}
+		reports <- r
+	})
+	first := <-reports
+	stop()
+
+	// Assert.
+	if !reflect.DeepEqual(first.Removed, []string{path + ".1"}) {
+		t.Fatalf("the immediate expiry removed %v, want .1", first.Removed)
+	}
+}
+
+func TestExpireResultChanged(t *testing.T) {
+	cases := []struct {
+		name   string
+		result ExpireResult
+		want   bool
+	}{
+		{name: "nothing aged", result: ExpireResult{}, want: false},
+		{name: "the current rolled", result: ExpireResult{RolledCurrent: true}, want: true},
+		{name: "a generation removed", result: ExpireResult{Removed: []string{"svc.log.1"}}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act / Assert.
+			if got := tc.result.Changed(); got != tc.want {
+				t.Fatalf("Changed() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
