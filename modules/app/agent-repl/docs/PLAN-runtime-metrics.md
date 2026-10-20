@@ -272,6 +272,7 @@ for metrics that show where restart time goes and when it regressed):
 | `workspace_start` | `start`, `wake` | `boot`, `takeover`, `editor_open` | the bring-up, per workspace |
 | `shim_restart` | `wait`, `prelaunch`, `stand_down`, `resume`, `run` | the relaunch reason (`build_stale`, `restart_verb`, `query_died`, `shim_log_hard_ceiling`) | the rollout's bounce engine, per workspace |
 | `handover_transfer` | `wait`, `run` | | the outgoing daemon, per workspace |
+| `workspace_reconnect` | `host`, `web` | `cold`, `successor`, `webapp_reload` | the daemon, per workspace: from a boot's start, a handover's manifest or a webview reload's push until the workspace's Emacs host or webview stream opens on it |
 
 Not built, each recorded with its reason:
 
