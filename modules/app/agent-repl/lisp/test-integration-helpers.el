@@ -1384,7 +1384,7 @@ is."
                                              (let ((sub-rows (open-rows (rows-of sub) (or folded (assq 'collapsed sub)))))
                                                (append (relist sub 'openRows sub-rows)
                                                        (unless (or (assq 'expanded sub) (assq 'collapsed sub))
-                                                         '((expanded . ()))))))
+                                                         '((expanded . ((collapsible . ()))))))))
                                            (or (alist-get 'subsections section) [])))))
                       (cons (cons 'subsections subs)
                             (assq-delete-all 'subsections (relist section 'openRows own)))))
