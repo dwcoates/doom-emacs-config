@@ -121,20 +121,25 @@ waits for the answer (a bounded deadline answers `timed_out`).
 ## Arranging the sidebar
 
 The daemon's `GetSidebarArrangement` and `ArrangeSidebar` order the sidebar and
-the tab bar, which follows it repository by repository: the unsectioned
-workspaces, then each subsection, each family kept together. They run through
-`run.sh --call` (a typed `agent-repld` verb comes once they land on master):
+the tab bar, which follows it repository by repository: inside each repository
+its entries in drawn order (unsectioned workspaces and subsections interleaved,
+a subsection's workspaces where it stands), each family kept together. They run
+through `run.sh --call` (a typed `agent-repld` verb comes once they land on master):
 
 - `run.sh --call GetSidebarArrangement '{}'` reads every repository in order,
-  its unsectioned workspaces and its subsections' workspaces, as trees.
+  its `entries` in drawn order (each a `workspace` family or a `subsection`
+  holding its families), as trees.
 - `run.sh --call ArrangeSidebar '<protojson>'` applies ONE change:
   `createSubsection {repository, name}` (answers the new subsection's ref under
   `created`), `renameSubsection {subsection, name}`, `deleteSubsection
-  {subsection}` (its workspaces return to the repository), `moveSubsection
-  {subsection, before|end}`, `moveRepository {repository, before|end}`,
-  `placeWorkspace {workspace, noSubsection|subsection, before|end}`, or the
-  all-or-nothing `placeWorkspaces {workspaces: [...], ...}`, which keeps the
-  given order.
+  {subsection}` (its workspaces return to the repository where it stood),
+  `moveSubsection {subsection, before|beforeWorkspace|end}` (`beforeWorkspace`:
+  a root in no subsection of the same repository), `moveRepository
+  {repository, before|end}`, `placeWorkspace {workspace,
+  noSubsection|subsection, before|beforeSubsection|end}` (`beforeSubsection`
+  only into `noSubsection`; `end` into `noSubsection` is the bottom of the
+  repository), or the all-or-nothing `placeWorkspaces {workspaces: [...],
+  ...}`, which keeps the given order.
 - Copy every ref verbatim from `GetSidebarArrangement`'s answer. Only a ROOT
   workspace (one with no parent) is placed; its children always sit with it
   (`has_parent`), and a workspace moves only within its own repository
