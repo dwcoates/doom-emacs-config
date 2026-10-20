@@ -104,9 +104,17 @@ export type FooterPanel =
   | "crons"
   | "merges";
 
-/** Every panel name, for the suite and for the persisted-selection check. */
-export const FOOTER_PANELS: readonly FooterPanel[] = [
-  "tokens",
+/** The panels a live-work chip opens: every panel but the tokens cell's. */
+export type FooterChipPanel = Exclude<FooterPanel, "tokens">;
+
+/**
+ * THE CHIP PANELS IN THEIR ONE PRECEDENCE. The strip draws its chips in this
+ * order (`drawFooterLiveWorkChips`), and `shownPanel` falls back along it, so
+ * the panel the section shows in place of an emptied one is always the
+ * leftmost live chip. It agrees with the daemon's focus order (agents, then
+ * shells, then monitors), which it extends with the kinds that never focus.
+ */
+export const CHIP_PANELS: readonly FooterChipPanel[] = [
   "agents",
   "tasks",
   "shells",
@@ -114,6 +122,9 @@ export const FOOTER_PANELS: readonly FooterPanel[] = [
   "crons",
   "merges",
 ];
+
+/** Every panel name, for the suite and for the persisted-selection check. */
+export const FOOTER_PANELS: readonly FooterPanel[] = ["tokens", ...CHIP_PANELS];
 
 /**
  * How many rows the section shows before it scrolls its own content (owner
@@ -192,68 +203,123 @@ export interface ExpandedDeps {
 }
 
 /**
- * The selected panel, or nothing.
+ * Whether PANEL has anything to show in U.
+ *
+ * THE TOKENS PANEL ALWAYS HAS: its figure lines are required. A chip panel has
+ * entries exactly when it carries rows (the ◷ panel's pending wakeup is one),
+ * and the agents panel also while its fan-wide stop holds an answer: "stop all"
+ * empties the live set, so the push it causes carries no rows, and that push is
+ * exactly when the control is carrying its outcome ("stopped 4 agents"), the
+ * one statement of that count anywhere (see `stop.ts`, G51). The answer lapses
+ * on its own timer, which redraws the footer (`createStopControls`).
+ */
+export function panelHasEntries(u: FooterExpanded, panel: FooterPanel, stops: StopControls): boolean {
+  const path = "FooterExpanded";
+  switch (panel) {
+    case "tokens":
+      requireMessage(u.tokens, `${path}.tokens`);
+      return true;
+    case "agents":
+      return (
+        requireMessage(u.agents, `${path}.agents`).rows.length > 0 ||
+        stopControlHasAnswer(stops.allAgents)
+      );
+    case "tasks":
+      return requireMessage(u.tasks, `${path}.tasks`).rows.length > 0;
+    case "shells":
+      return requireMessage(u.shells, `${path}.shells`).rows.length > 0;
+    case "monitors":
+      return requireMessage(u.monitors, `${path}.monitors`).rows.length > 0;
+    case "crons": {
+      const crons = requireMessage(u.crons, `${path}.crons`);
+      return crons.rows.length > 0 || crons.wakeup !== undefined;
+    }
+    case "merges":
+      return requireMessage(u.merges, `${path}.merges`).rows.length > 0;
+    default:
+      return unreachableArm(`${path}.panel`, panel);
+  }
+}
+
+/**
+ * The panel the section SHOWS for the reader's WANTED one, or null for no
+ * section at all.
+ *
+ * THE SECTION IS NEVER DRAWN EMPTY (owner ruling, 2026-10-20). Closed stays
+ * closed. An open section shows the wanted panel while it has entries; once it
+ * has none, the section shows the first chip panel in `CHIP_PANELS` that does,
+ * and with none at all the section is not expanded. The wanted panel is the
+ * reader's (or the daemon's focus) and is not rewritten here, so the section
+ * returns to it the moment it has entries again. Resolved from the view on
+ * every draw, so every push, every redraw and every remount answers alike.
+ */
+export function shownPanel(
+  u: FooterExpanded,
+  wanted: FooterPanel | null,
+  stops: StopControls,
+): FooterPanel | null {
+  if (wanted === null) return null;
+  if (panelHasEntries(u, wanted, stops)) return wanted;
+  return CHIP_PANELS.find((panel) => panelHasEntries(u, panel, stops)) ?? null;
+}
+
+/**
+ * The panel `shownPanel` resolved, or nothing.
  *
  * A null selection is the ordinary state — the strip stands alone — and is
  * answered with `null` rather than an empty element, so the footer appends
  * nothing at all and the dock keeps exactly the height it had.
+ *
+ * SHOWN MUST HAVE ENTRIES. The caller resolves it with `shownPanel`, so an
+ * empty panel here is this client's own bug, and it throws rather than draw
+ * the empty section that rule exists to prevent.
  */
 export function drawFooterExpanded(
   u: FooterExpanded,
-  selection: FooterPanel | null,
+  shown: FooterPanel | null,
   deps: ExpandedDeps,
   previous: HTMLElement | null = null,
 ): HTMLElement | null {
-  if (selection === null) return null;
+  if (shown === null) return null;
   const panel = (name: FooterPanel, content: readonly HTMLElement[]): HTMLElement =>
     drawSection(name, content, previous);
   const path = "FooterExpanded";
-  log.debug(`drawing the expanded footer panel: ${selection}`, {
+  if (!panelHasEntries(u, shown, deps.stops)) {
+    log.error(`the expanded footer was asked to draw the empty ${shown} panel`, {
+      operation: "footer.expanded.empty-panel",
+      context: { panel: shown },
+    });
+    throw new Error(`footer: the ${shown} panel has no entries to draw`);
+  }
+  log.debug(`drawing the expanded footer panel: ${shown}`, {
     operation: "footer.expanded",
-    context: { panel: selection },
+    context: { panel: shown },
   });
 
-  switch (selection) {
+  switch (shown) {
     case "tokens":
-      return panel(selection, [
+      return panel(shown, [
         ...drawFooterExpandedTokens(requireMessage(u.tokens, `${path}.tokens`), `${path}.tokens`),
         ...drawFooterUsageRows(deps.activity, deps.ctx, "FooterStatus.activity"),
       ]);
-    case "agents": {
-      // THE AGENTS PANEL FOLDS AWAY WHEN NOTHING IS RUNNING. Its header carries
-      // the fan-wide "stop all" control, so drawing the panel with an empty row
-      // list left a "stop all" (and an empty expanded region) standing after
-      // every subagent had resolved — a control for work that no longer exists.
-      // The daemon ships an empty `rows` exactly when no unresolved, non-lost
-      // subagent is live (the agents chip is unset in the same view), so an
-      // empty list is the fold signal: the expanded region collapses rather than
-      // offering a stop for nothing. The panel returns the instant a live agent
-      // is back in `rows`.
-      //
-      // THE ONE EXCEPTION IS A STOP THAT JUST ANSWERED. "stop all" empties the
-      // live set, so the push it causes carries no rows — and that push is
-      // exactly when the fan-wide control is carrying its outcome ("stopped 4
-      // agents"), the one statement of that count anywhere (see `stop.ts`,
-      // G51). Folding on empty would erase it the instant it landed, so the
-      // panel stays drawn while the control holds an answer; the answer expires
-      // on its own timer (`expireOutcome`), and the next push then folds.
-      const agents = requireMessage(u.agents, `${path}.agents`);
-      if (agents.rows.length === 0 && !stopControlHasAnswer(deps.stops.allAgents)) return null;
-      return panel(selection, drawFooterExpandedAgents(agents, deps, `${path}.agents`));
-    }
+    case "agents":
+      return panel(
+        shown,
+        drawFooterExpandedAgents(requireMessage(u.agents, `${path}.agents`), deps, `${path}.agents`),
+      );
     case "tasks":
       return panel(
-        selection,
+        shown,
         drawFooterExpandedTasks(requireMessage(u.tasks, `${path}.tasks`), `${path}.tasks`),
       );
     case "shells":
       return panel(
-        selection,
+        shown,
         drawFooterExpandedShells(requireMessage(u.shells, `${path}.shells`), deps, `${path}.shells`),
       );
     case "monitors":
       return panel(
-        selection,
+        shown,
         drawFooterExpandedMonitors(
           requireMessage(u.monitors, `${path}.monitors`),
           deps,
@@ -262,16 +328,16 @@ export function drawFooterExpanded(
       );
     case "crons":
       return panel(
-        selection,
+        shown,
         drawFooterExpandedCrons(requireMessage(u.crons, `${path}.crons`), deps, `${path}.crons`),
       );
     case "merges":
       return panel(
-        selection,
+        shown,
         drawFooterExpandedMerges(requireMessage(u.merges, `${path}.merges`), deps, `${path}.merges`),
       );
     default:
-      return unreachableArm(`${path}.selection`, selection);
+      return unreachableArm(`${path}.selection`, shown);
   }
 }
 
@@ -660,7 +726,6 @@ export function drawFooterAgentRowRuntime(
  * fraction is this list's summary.
  */
 export function drawFooterExpandedTasks(u: FooterExpandedTasks, path: string): HTMLElement[] {
-  if (u.rows.length === 0) return [emptyRow("the task tracker is empty")];
   return u.rows.map((row, index) => drawFooterTaskRow(row, `${path}.rows[${index}]`));
 }
 
@@ -732,7 +797,6 @@ export function drawFooterExpandedShells(
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement[] {
-  if (u.rows.length === 0) return [emptyRow("no live shells")];
   return u.rows.map((row, index) => drawFooterShellRow(row, deps, `${path}.rows[${index}]`));
 }
 
@@ -779,7 +843,6 @@ export function drawFooterExpandedMonitors(
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement[] {
-  if (u.rows.length === 0) return [emptyRow("no live monitors")];
   return u.rows.map((row, index) => drawFooterMonitorRow(row, deps, `${path}.rows[${index}]`));
 }
 
@@ -830,7 +893,6 @@ export function drawFooterExpandedMerges(
   deps: ExpandedDeps,
   path: string,
 ): HTMLElement[] {
-  if (u.rows.length === 0) return [emptyRow("no merges in flight")];
   return u.rows.map((row, index) => drawFooterMergeRow(row, deps, `${path}.rows[${index}]`));
 }
 
@@ -888,7 +950,6 @@ export function drawFooterExpandedCrons(
 ): HTMLElement[] {
   const rows = u.rows.map((row, index) => drawFooterCronRow(row, deps, `${path}.rows[${index}]`));
   if (u.wakeup !== undefined) rows.unshift(drawFooterWakeupRow(u.wakeup, deps, `${path}.wakeup`));
-  if (rows.length === 0) return [emptyRow("nothing scheduled")];
   return rows;
 }
 
@@ -1143,7 +1204,10 @@ function plainRow(panelName: FooterPanel): HTMLElement {
   return row;
 }
 
-/** The line an empty panel draws. Unreachable in practice: its chip is unset. */
+/**
+ * The agents panel's line while its rows are empty: drawn only while the
+ * fan-wide stop holds the answer that emptied them (see `panelHasEntries`).
+ */
 function emptyRow(text: string): HTMLElement {
   const empty = document.createElement("div");
   empty.className = "pfooter-sheet-empty footer-row-empty";

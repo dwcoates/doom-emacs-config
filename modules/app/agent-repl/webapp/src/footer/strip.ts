@@ -77,7 +77,7 @@ import { MalformedView } from "../rpc/malformed.js";
 import { heatColor } from "../heat.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { drawFooterStatusActivity, type ActivityDeps, type FooterActivity } from "./activity.js";
-import type { FooterPanel } from "./expanded.js";
+import { CHIP_PANELS, type FooterChipPanel, type FooterPanel } from "./expanded.js";
 import { grabber, statusWords, textLine } from "./parts.js";
 import { activityDatumClass, statusArmClass, type ActivityDatum } from "./tones.js";
 import type { StopControls } from "./stop.js";
@@ -659,26 +659,31 @@ export function drawFooterTokensCellVerdict(u: FooterTokensCellVerdict, path: st
  * the whole decision.
  */
 export function drawFooterLiveWorkChips(u: FooterLiveWorkChips, deps: StripDeps): HTMLElement | null {
-  if (
-    u.agents === undefined &&
-    u.tasks === undefined &&
-    u.shells === undefined &&
-    u.monitors === undefined &&
-    u.crons === undefined &&
-    u.merges === undefined
-  ) {
-    return null;
-  }
+  // THE CHIPS ARE DRAWN IN `CHIP_PANELS` ORDER, the one precedence the
+  // expanded section also falls back along (`shownPanel`).
+  const chips = CHIP_PANELS.flatMap((panel) => {
+    const el = LIVE_WORK_CHIPS[panel](u, deps);
+    return el === null ? [] : [el];
+  });
+  if (chips.length === 0) return null;
   const cell = document.createElement("div");
   cell.className = "pfooter-cell pfooter-counters footer-chips";
-  if (u.agents !== undefined) cell.appendChild(drawFooterChipAgents(u.agents, deps));
-  if (u.tasks !== undefined) cell.appendChild(drawFooterChipTasks(u.tasks, deps));
-  if (u.shells !== undefined) cell.appendChild(drawFooterChipShells(u.shells, deps));
-  if (u.monitors !== undefined) cell.appendChild(drawFooterChipMonitors(u.monitors, deps));
-  if (u.crons !== undefined) cell.appendChild(drawFooterChipCrons(u.crons, deps));
-  if (u.merges !== undefined) cell.appendChild(drawFooterChipMerges(u.merges, deps));
+  for (const el of chips) cell.appendChild(el);
   return cell;
 }
+
+/** Each chip panel's chip, or null while the daemon leaves it unset. */
+const LIVE_WORK_CHIPS: Readonly<
+  Record<FooterChipPanel, (u: FooterLiveWorkChips, deps: StripDeps) => HTMLElement | null>
+> = {
+  agents: (u, deps) => (u.agents === undefined ? null : drawFooterChipAgents(u.agents, deps)),
+  tasks: (u, deps) => (u.tasks === undefined ? null : drawFooterChipTasks(u.tasks, deps)),
+  shells: (u, deps) => (u.shells === undefined ? null : drawFooterChipShells(u.shells, deps)),
+  monitors: (u, deps) =>
+    u.monitors === undefined ? null : drawFooterChipMonitors(u.monitors, deps),
+  crons: (u, deps) => (u.crons === undefined ? null : drawFooterChipCrons(u.crons, deps)),
+  merges: (u, deps) => (u.merges === undefined ? null : drawFooterChipMerges(u.merges, deps)),
+};
 
 /**
  * ⚙ N — the agent-spawned subagents with work ahead of them, and, while any

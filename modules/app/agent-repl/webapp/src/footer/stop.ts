@@ -108,10 +108,20 @@ export interface StopControls {
   readonly allAgents: HTMLElement;
 }
 
-/** Build the pair. One call per footer mount. */
-export function createStopControls(ctx: AppContext): StopControls {
+/**
+ * Build the pair. One call per footer mount.
+ *
+ * ON_ANSWER_CHANGED redraws the footer whenever a control's answer is drawn
+ * or lapses. The agents panel stays open on an empty live set only while its
+ * control holds an answer (`panelHasEntries`), and no push announces either
+ * edge: the push the fan-wide stop causes may land BEFORE its answer does, and
+ * a note's lapse is the client's own clock. Without the redraw the panel would
+ * fold away before the count was drawn, or stand emptied until the next push.
+ */
+export function createStopControls(ctx: AppContext, onAnswerChanged: () => void): StopControls {
   return {
     turn: interruptControl(ctx, {
+      onAnswerChanged,
       target: "turn",
       className: "footer-stop footer-stop-turn",
       label: "stop",
@@ -119,6 +129,7 @@ export function createStopControls(ctx: AppContext): StopControls {
       operation: "footer.stop.turn",
     }),
     allAgents: interruptControl(ctx, {
+      onAnswerChanged,
       target: "allAgents",
       className: "footer-stop footer-stop-all",
       label: "stop all",
@@ -129,6 +140,8 @@ export function createStopControls(ctx: AppContext): StopControls {
 }
 
 interface ControlSpec {
+  /** Called once the control's answer has been drawn, and once its note lapsed. */
+  onAnswerChanged: () => void;
   target: InterruptTarget;
   className: string;
   label: string;
@@ -216,6 +229,9 @@ async function issue(
       operation: `${spec.operation}-failed`,
       context: { target: spec.target, cause: err },
     });
+  } finally {
+    // Whatever the control now carries, the footer redraws around it.
+    spec.onAnswerChanged();
   }
 }
 
@@ -302,16 +318,17 @@ function drawOutcome(
   // it is a statement about a click, not standing state, and the same span the
   // detached bubble's stop uses is the one it gets. Without this the note would
   // sit on the control until the next stop replaced it.
-  expireOutcome(ctx, note);
+  expireOutcome(ctx, note, spec.onAnswerChanged);
 }
 
 /** Clear a stop's answer once its say has been had. */
-function expireOutcome(ctx: AppContext, note: HTMLElement): void {
+function expireOutcome(ctx: AppContext, note: HTMLElement, onChanged: () => void): void {
   const deadline = ctx.ticker.now() + INTERRUPT_OUTCOME_MS;
   tick(note, ctx.ticker, (nowMs) => {
     if (nowMs < deadline) return;
     stopTicking(note);
     note.remove();
+    onChanged();
   });
 }
 
@@ -387,8 +404,8 @@ function clearAnswer(wrapper: HTMLElement): void {
  * The agents panel reads this to decide whether it may fold: the fan-wide stop
  * empties the live set, so the push it causes has no rows, and folding then
  * would erase the outcome the control just drew. While the control holds an
- * answer the panel stays; the answer expires on its own and the next push
- * folds.
+ * answer the panel stays; the answer expires on its own, and the redraw its
+ * lapse asks for folds it.
  */
 export function stopControlHasAnswer(wrapper: HTMLElement): boolean {
   return wrapper.querySelector(STOP_ANSWER_SELECTOR) !== null;

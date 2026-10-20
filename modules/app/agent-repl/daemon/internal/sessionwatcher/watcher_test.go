@@ -2032,6 +2032,71 @@ func TestADeadLinkWithNoStandDownStillRaisesItsFault(t *testing.T) {
 	}
 }
 
+// linkFaultsIn counts the link faults among EVENTS.
+func linkFaultsIn(events []event) []LinkFault {
+	var out []LinkFault
+	for _, e := range events {
+		if e.name() == "lifecycle.OnLinkFault" {
+			out = append(out, *e.linkFault)
+		}
+	}
+	return out
+}
+
+// TestACloseThatBeatsTheDeadLinkStillRaisesTheDeathsFault: a revival closes
+// the fleet of a shim that died before the connectivity feed told the watcher,
+// and the death's fault is raised all the same.
+func TestACloseThatBeatsTheDeadLinkStillRaisesTheDeathsFault(t *testing.T) {
+	// Arrange: the shim is reaped, and the feed has not delivered its death.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 3})
+
+	// Act.
+	closeWatcher(t, h)
+
+	// Assert.
+	faults := linkFaultsIn(h.rec.drain())
+	if len(faults) != 1 || faults[0].Kind != LinkFaultDead || faults[0].ExitCode == nil || *faults[0].ExitCode != 3 {
+		t.Fatalf("link faults after closing a reaped shim's fleet = %+v, want one dead fault with exit code 3", faults)
+	}
+}
+
+// TestACloseAfterTheDeadLinkRaisesNoSecondFault: one death is one fault,
+// whichever of the feed and the close applied it first.
+func TestACloseAfterTheDeadLinkRaisesNoSecondFault(t *testing.T) {
+	// Arrange: the feed has delivered the death.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 3})
+	h.client.links <- shimclient.LinkDead
+	h.awaitLinkFault(t)
+
+	// Act.
+	closeWatcher(t, h)
+
+	// Assert.
+	if faults := linkFaultsIn(h.rec.drain()); len(faults) != 0 {
+		t.Fatalf("link faults raised by the close = %+v, want none", faults)
+	}
+}
+
+// TestClosingTheWatchOfARunningShimRaisesNoLinkFault: a close that only stops
+// watching a live shim says nothing about its link.
+func TestClosingTheWatchOfARunningShimRaisesNoLinkFault(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	closeWatcher(t, h)
+
+	// Assert.
+	if faults := linkFaultsIn(h.rec.drain()); len(faults) != 0 {
+		t.Fatalf("link faults raised by closing a running shim's watch = %+v, want none", faults)
+	}
+}
+
 // ---- a severing states what the daemon knows about the peer ----
 
 // TestASeveringNamesALivingShim covers the case the log could not previously

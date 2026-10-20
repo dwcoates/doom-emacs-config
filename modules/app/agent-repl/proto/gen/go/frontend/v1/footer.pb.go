@@ -13894,7 +13894,11 @@ func (x *FooterChipShells) GetCount() uint32 {
 // One panel per selectable strip element. ALL panels arrive populated on
 // every push; the webview-local selection picks which one is drawn. A panel
 // whose subject is empty (no live shells, say) still arrives — as an empty
-// row list — because its chip is then unset and nothing can select it.
+// row list — and its chip is then unset.
+//
+// THE CLIENT NEVER DRAWS AN EMPTY PANEL. A selected panel with no rows gives
+// way to the first chip panel, in the strip's chip order, that has rows; with
+// none the section is not expanded at all.
 type FooterExpanded struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The turn's token breakdown — the tokens cell's expansion.
@@ -14013,8 +14017,9 @@ func (x *FooterExpanded) GetMerges() *FooterExpandedMerges {
 // as it would any unapplied generation.
 //
 // Nothing here closes the section: when the detached work ends, the panel's
-// chip goes unset exactly as before, and the existing rules for an emptied
-// panel apply.
+// chip goes unset exactly as before, and the client's rule for an emptied
+// panel applies (see `FooterExpanded`) — to a focus whose panel emptied before
+// the client applied it, too.
 type FooterExpandedFocus struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// THE ARM IS THE PANEL.
@@ -14244,8 +14249,7 @@ func (*FooterFocusMonitors) Descriptor() ([]byte, []int) {
 // (`rows`) and the session's pending self-scheduled wakeup (`wakeup`). The
 // chip's count is exactly the number of rows drawn here, so a chip never opens
 // onto an empty panel. The client draws the wakeup row first, then the cron
-// rows; "nothing scheduled" is drawn only when both are absent, which is never
-// reachable while the chip is set.
+// rows; with both absent the panel is never drawn (see `FooterExpanded`).
 type FooterExpandedCrons struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The cron rows, in the daemon's order. Empty when no cron job is

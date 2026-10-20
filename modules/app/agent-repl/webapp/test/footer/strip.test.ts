@@ -23,7 +23,7 @@ import {
   footerStatusActivity,
   subStatusWords,
 } from "../../src/footer/strip.js";
-import type { FooterPanel } from "../../src/footer/expanded.js";
+import { CHIP_PANELS, type FooterPanel } from "../../src/footer/expanded.js";
 import {
   STATUS_COLOR_CYCLE_MS,
   STATUS_WAVE_CYCLE_MS,
@@ -61,7 +61,7 @@ interface Drawn {
 /** Draw a strip, recording every panel the user's clicks would open. */
 function drawStrip(init: StripInit = {}, selection: FooterPanel | null = null, h = harness()): Drawn {
   const selected: FooterPanel[] = [];
-  const row = drawFooterStrip(strip(init), { ctx: h.ctx, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY,
+  const row = drawFooterStrip(strip(init), { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY,
     selection,
     onSelect: (panel) => selected.push(panel),
   });
@@ -154,7 +154,7 @@ describe("drawFooterStatus: every arm the contract declares", () => {
     });
     const h = harness();
     expect(() =>
-      drawFooterStrip(bare, { ctx: h.ctx, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY, selection: null, onSelect: () => {} }),
+      drawFooterStrip(bare, { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
   });
 });
@@ -452,7 +452,7 @@ describe("drawFooterTokensCell", () => {
   it("refuses a verdict badge whose oneof sets no arm", () => {
     const h = harness();
     expect(() =>
-      drawFooterStrip(strip({ tokens: { input: { text: "x" }, verdict: {} } }), { ctx: h.ctx, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY,
+      drawFooterStrip(strip({ tokens: { input: { text: "x" }, verdict: {} } }), { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY,
         selection: null,
         onSelect: () => {},
       }),
@@ -483,7 +483,7 @@ describe("drawFooterTokensCell", () => {
   it("refuses a heat outside the gradient", () => {
     const h = harness();
     expect(() =>
-      drawFooterStrip(strip({ tokens: { input: { text: "x", heat: { position: 1.5 } } } }), { ctx: h.ctx, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY,
+      drawFooterStrip(strip({ tokens: { input: { text: "x", heat: { position: 1.5 } } } }), { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY,
         selection: null,
         onSelect: () => {},
       }),
@@ -654,6 +654,22 @@ describe("drawFooterLiveWorkChips", () => {
     expect(row.querySelector('[data-chip="mergeTests"]')).toBeNull();
   });
 
+  it("draws every chip in CHIP_PANELS order, the chip panels' one precedence", () => {
+    const { row } = drawStrip({
+      liveWork: {
+        merges: { count: 1 },
+        crons: { count: 1 },
+        monitors: { count: 1 },
+        shells: { count: 1 },
+        tasks: { done: 0, total: 1 },
+        agents: { count: 1 },
+      },
+    });
+    expect([...row.querySelectorAll("[data-chip]")].map((el) => el.getAttribute("data-chip"))).toEqual([
+      ...CHIP_PANELS,
+    ]);
+  });
+
   it("omits an unset chip entirely", () => {
     const { row } = drawStrip({ liveWork: { agents: { count: 1 } } });
     expect(row.querySelector('[data-chip="shells"]')).toBeNull();
@@ -709,7 +725,7 @@ describe("an arm this build has no case for", () => {
     };
     // ACT / ASSERT
     expect(() =>
-      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY, selection: null, onSelect: () => {} }),
+      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
   });
 
@@ -722,7 +738,7 @@ describe("an arm this build has no case for", () => {
       view.tokens as unknown as { verdict: { verdict: { case: string; value: unknown } } }
     ).verdict.verdict = { case: "unaudited", value: {} };
     expect(() =>
-      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY, selection: null, onSelect: () => {} }),
+      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY, selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
   });
 });
@@ -771,7 +787,7 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
     const h = harness();
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
       strip: strip({}),
-      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY },
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY },
     });
     expect(row.querySelector(".footer-chips")).toBeNull();
   });
@@ -780,7 +796,7 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
     const h = harness();
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
       strip: strip({ liveWork: { shells: { count: 1 } } }),
-      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY },
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY },
     });
     expect(row.querySelector('.footer-chips [data-chip="shells"]')).not.toBeNull();
   });
@@ -789,7 +805,7 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
     const h = harness();
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable", {
       strip: strip({ tokens: { input: { text: "12.3k in" } } }),
-      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx), expiry: IGNORED_EXPIRY },
+      deps: { ctx: h.ctx, selection: null, onSelect: () => {}, stops: createStopControls(h.ctx, () => undefined), expiry: IGNORED_EXPIRY },
     });
     expect(row.querySelector(".footer-tokens")?.textContent).toContain("12.3k in");
   });

@@ -57,6 +57,7 @@ import {
   createJumpNotices,
   drawFooterExpanded,
   FOOTER_PANELS,
+  shownPanel,
   WORK_ID_ATTRIBUTE,
   type FooterPanel,
 } from "./expanded.js";
@@ -107,14 +108,21 @@ export function mountFooter(
   const statusListeners = new Set<
     (statusCase: string, substatusCase?: string) => void
   >();
+  // THE READER'S WANTED PANEL, or null for a closed section. What the section
+  // SHOWS is resolved from it on every draw (`shownPanel`), so a wanted panel
+  // with no entries is never drawn empty; `shown` is the last draw's answer,
+  // and it is what the strip highlights and what a chip click toggles.
   let selection: FooterPanel | null = readSelection(ctx);
+  let shown: FooterPanel | null = null;
   // THE SECOND PIECE OF LOCAL STATE, and for the same reason as the first: it
   // is the reader's, not the daemon's. A stop's answer -- the note, the
   // refusal, the confirm challenge -- is drawn at the control that made the
   // call, and this view is rebuilt on EVERY push. Building the controls here
   // and appending the same elements each draw is what lets an answer survive
   // the push the stop itself caused. See `StopControls`.
-  const stops = createStopControls(ctx);
+  const stops = createStopControls(ctx, () => {
+    redraw("footer.stop-answer-redraw-undecodable");
+  });
   // THE THIRD: each detached-work row's click outcome, for the same reason.
   // A notice drawn onto the clicked element was gone with the next push; held
   // here, every draw paints it (see `JumpNotices`).
@@ -234,18 +242,27 @@ export function mountFooter(
       host.replaceChildren(bare);
       dock = null;
       section = null;
+      shown = null;
       drawnStatus.note(ctx.workspace.id, verdictDrawnStatus(verdict));
       return;
     }
     const strip = requireMessage(view.strip, "FooterView.strip");
     const expanded = requireMessage(view.expanded, "FooterView.expanded");
 
+    const resolved = shownPanel(expanded, selection, stops);
+    if (resolved !== shown) {
+      log.debug(`the footer shows ${resolved ?? "no"} panel for the wanted ${selection ?? "none"}`, {
+        operation: "footer.shown-panel",
+        context: { wanted: selection, shown: resolved, previous: shown },
+      });
+    }
+    shown = resolved;
     // THE SHEET IS HANDED THE STRIP'S OWN ACTIVITY. The tokens sheet expands
     // the usage line the strip is drawing, and handing the message across is
     // what keeps the two from disagreeing about a figure.
     const panel = drawFooterExpanded(
       expanded,
-      selection,
+      shown,
       {
         ctx,
         stops,
@@ -260,7 +277,7 @@ export function mountFooter(
     );
     section = panel;
     notices.prune(drawnRowKeys(panel));
-    const stripDeps = { ctx, selection, onSelect: select, stops, expiry };
+    const stripDeps = { ctx, selection: shown, onSelect: select, stops, expiry };
     const stripEl =
       verdict === null
         ? drawFooterStrip(strip, stripDeps)
@@ -335,13 +352,15 @@ export function mountFooter(
   }
 
   /**
-   * Open a panel, or close it when it is already open.
+   * Open a panel, or close it when it is already shown.
    *
-   * A second click on the open chip closes the section: the chip is the only
+   * A second click on the shown chip closes the section: the chip is the only
    * affordance the strip has, so it has to be both the opener and the closer.
+   * It is the SHOWN panel that is compared, so a click on the chip the section
+   * fell back to closes it, as it reads.
    */
   function select(panel: FooterPanel): void {
-    selection = selection === panel ? null : panel;
+    selection = shown === panel ? null : panel;
     log.debug(`the footer panel selection is now ${selection ?? "none"}`, {
       operation: "footer.select-panel",
       context: { panel: selection },

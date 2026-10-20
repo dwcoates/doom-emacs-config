@@ -10,8 +10,11 @@ import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { FooterActivity } from "../../src/footer/activity.js";
 import {
+  CHIP_PANELS,
   EXPANDED_FOOTER_MAX_ROWS,
   FOOTER_PANELS,
+  panelHasEntries,
+  shownPanel,
   countdownClock,
   createJumpNotices,
   rowFigures,
@@ -21,9 +24,16 @@ import {
   type FooterPanel,
 } from "../../src/footer/expanded.js";
 import {
+  AGENT_ROW,
+  CRON_ROW,
+  FOOTER_TEST_NOW,
+  MERGE_ROW,
+  MONITOR_ROW,
+  SHELL_ROW,
+  TASK_ROW,
   expanded,
-  feedId,
   harness,
+  toEntry,
   type ExpandedInit,
   type Harness,
 } from "./harness.js";
@@ -35,7 +45,7 @@ import stylesheet from "../../src/styles.css?raw";
 import expandedSource from "../../src/footer/expanded.ts?raw";
 import type { ClientLogRecord } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 
-const NOW = 1_800_000_000_000;
+const NOW = FOOTER_TEST_NOW;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -68,7 +78,7 @@ function drawPanel(
   let panel: HTMLElement | null = null;
   const deps: ExpandedDeps = {
     ctx: h.ctx,
-    stops: createStopControls(h.ctx),
+    stops: createStopControls(h.ctx, () => undefined),
     notices: createJumpNotices(),
     redraw: () => {
       panel = drawFooterExpanded(u, selection, deps, panel);
@@ -84,9 +94,6 @@ function drawPanel(
 }
 
 /** A jump to a known entry. */
-function toEntry(id: string) {
-  return { target: { case: "entry" as const, value: feedId(id) } };
-}
 
 /** A jump the daemon could not resolve, for REASON. */
 function unresolvedFor(reason: "notDrawn") {
@@ -121,7 +128,7 @@ function pinned(): FooterActivity {
 /** The tokens panel, drawn with ACTIVITY standing on the strip. */
 function drawTokensPanelWith(kind: FooterActivity): HTMLElement {
   const h = harness();
-  const panel = drawFooterExpanded(expanded(), "tokens", { ctx: h.ctx, stops: createStopControls(h.ctx), notices: createJumpNotices(), redraw: () => undefined,
+  const panel = drawFooterExpanded(expanded(), "tokens", { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), notices: createJumpNotices(), redraw: () => undefined,
     selectDetachedWork: async () => true,
     activity: kind,
   });
@@ -213,6 +220,106 @@ describe("drawFooterUsageRows: what the strip could not fit", () => {
   });
 });
 
+/** The smallest view content that gives PANEL one entry. */
+function oneEntryOf(panel: FooterPanel): ExpandedInit {
+  switch (panel) {
+    case "tokens":
+      return {};
+    case "agents":
+      return { agents: [AGENT_ROW] };
+    case "tasks":
+      return { tasks: [TASK_ROW] };
+    case "shells":
+      return { shells: [SHELL_ROW] };
+    case "monitors":
+      return { monitors: [MONITOR_ROW] };
+    case "crons":
+      return { crons: [CRON_ROW] };
+    case "merges":
+      return { merges: [MERGE_ROW] };
+  }
+}
+
+/** A stop pair whose fan-wide control holds a success note. */
+function stopsHoldingAnswer(h: Harness) {
+  const stops = createStopControls(h.ctx, () => undefined);
+  const note = document.createElement("span");
+  note.className = "footer-stop-note";
+  stops.allAgents.appendChild(note);
+  return stops;
+}
+
+describe("panelHasEntries: whether a panel has anything to show", () => {
+  it("answers true for the tokens panel, whose figure lines are required", () => {
+    const h = harness();
+    expect(panelHasEntries(expanded(), "tokens", createStopControls(h.ctx, () => undefined))).toBe(true);
+  });
+
+  it.each(CHIP_PANELS.map((panel) => [panel]))("answers false for the %s panel with no rows", (panel) => {
+    const h = harness();
+    expect(panelHasEntries(expanded(), panel, createStopControls(h.ctx, () => undefined))).toBe(false);
+  });
+
+  it.each(CHIP_PANELS.map((panel) => [panel]))("answers true for the %s panel with one row", (panel) => {
+    const h = harness();
+    expect(panelHasEntries(expanded(oneEntryOf(panel)), panel, createStopControls(h.ctx, () => undefined))).toBe(true);
+  });
+
+  it("answers true for the crons panel holding only a pending wakeup", () => {
+    const h = harness();
+    expect(panelHasEntries(expanded({ wakeup: {} }), "crons", createStopControls(h.ctx, () => undefined))).toBe(true);
+  });
+
+  it("answers true for the emptied agents panel while its fan-wide stop holds an answer", () => {
+    const h = harness();
+    expect(panelHasEntries(expanded(), "agents", stopsHoldingAnswer(h))).toBe(true);
+  });
+
+  it("refuses a view whose asked panel message is unset", () => {
+    const h = harness();
+    expect(() =>
+      panelHasEntries(create(FooterExpandedSchema, {}), "shells", createStopControls(h.ctx, () => undefined)),
+    ).toThrow(MalformedView);
+  });
+});
+
+describe("shownPanel: the panel an open section shows", () => {
+  const shown = (wanted: FooterPanel | null, init: ExpandedInit) => {
+    const h = harness();
+    return shownPanel(expanded(init), wanted, createStopControls(h.ctx, () => undefined));
+  };
+
+  it("shows nothing while the section is closed, whatever has entries", () => {
+    expect(shown(null, { shells: [SHELL_ROW] })).toBeNull();
+  });
+
+  it("shows the wanted panel while it has entries", () => {
+    expect(shown("shells", { agents: [AGENT_ROW], shells: [SHELL_ROW] })).toBe("shells");
+  });
+
+  it("shows nothing when no chip panel has entries, never falling back onto the tokens panel", () => {
+    expect(shown("shells", {})).toBeNull();
+  });
+
+  it.each([
+    ["agents", "tasks", { tasks: [TASK_ROW], shells: [SHELL_ROW] }],
+    ["tasks", "agents", { agents: [AGENT_ROW], merges: [MERGE_ROW] }],
+    ["merges", "shells", { shells: [SHELL_ROW], monitors: [MONITOR_ROW], crons: [CRON_ROW] }],
+    ["shells", "monitors", { monitors: [MONITOR_ROW], crons: [CRON_ROW] }],
+    ["agents", "merges", { merges: [MERGE_ROW] }],
+  ] as const)(
+    "falls back from the empty %s panel to %s, the first chip panel with entries",
+    (wanted, expected, init) => {
+      expect(shown(wanted, init)).toBe(expected);
+    },
+  );
+
+  it("keeps the emptied agents panel while its fan-wide stop holds an answer", () => {
+    const h = harness();
+    expect(shownPanel(expanded({ shells: [SHELL_ROW] }), "agents", stopsHoldingAnswer(h))).toBe("agents");
+  });
+});
+
 /** Every promise the click chain queued. */
 async function settle(): Promise<void> {
   for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
@@ -222,25 +329,42 @@ describe("drawFooterExpanded: the selection picks the panel", () => {
   it("draws NOTHING when no strip element is selected", () => {
     const h = harness();
     expect(
-      drawFooterExpanded(expanded(), null, { ctx: h.ctx, stops: createStopControls(h.ctx), notices: createJumpNotices(), redraw: () => undefined, selectDetachedWork: async () => true }),
+      drawFooterExpanded(expanded(), null, { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), notices: createJumpNotices(), redraw: () => undefined, selectDetachedWork: async () => true }),
     ).toBeNull();
   });
 
   it.each(FOOTER_PANELS.map((panel) => [panel]))("draws the %s panel when selected", (panel) => {
-    // The agents panel folds away with no rows, so it needs a row to draw at
-    // all; every other panel draws its own empty state.
-    const init: ExpandedInit = panel === "agents" ? { agents: [AGENT_ROW] } : {};
-    expect(drawPanel(panel, init).panel.getAttribute("data-panel")).toBe(panel);
+    expect(drawPanel(panel, oneEntryOf(panel)).panel.getAttribute("data-panel")).toBe(panel);
   });
 
   it("wears the shared list-delimiter class every panel and dropdown uses", () => {
-    expect(drawPanel("tasks").panel.classList.contains("list-rows")).toBe(true);
+    expect(drawPanel("tasks", oneEntryOf("tasks")).panel.classList.contains("list-rows")).toBe(true);
+  });
+
+  it.each(CHIP_PANELS.map((panel) => [panel]))(
+    "refuses to draw the %s panel with no entries, the empty section never being drawn",
+    (panel) => {
+      expect(() => drawPanel(panel)).toThrow(`the ${panel} panel has no entries to draw`);
+    },
+  );
+
+  it("records the refused empty panel at error with its name", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+
+    // Act
+    expect(() => drawPanel("shells")).toThrow();
+
+    // Assert
+    const record = await forwardedRecord(capture, "footer.expanded.empty-panel");
+    expect(record.level.case).toBe("error");
+    expect(field(record, "panel")).toBe("shells");
   });
 
   it("refuses a view whose selected panel message is unset", () => {
     const h = harness();
     expect(() =>
-      drawFooterExpanded(create(FooterExpandedSchema, {}), "agents", { ctx: h.ctx, stops: createStopControls(h.ctx), notices: createJumpNotices(), redraw: () => undefined,
+      drawFooterExpanded(create(FooterExpandedSchema, {}), "agents", { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), notices: createJumpNotices(), redraw: () => undefined,
         selectDetachedWork: async () => true,
       }),
     ).toThrow(MalformedView);
@@ -524,14 +648,6 @@ describe("the tokens panel's per-agent spend", () => {
 
 // ---- the agents panel ------------------------------------------------------
 
-const AGENT_ROW = {
-  work: { value: "work-a" },
-  jump: toEntry("bubble-1"),
-  label: { text: "Explore" },
-  description: { text: "sweep the repo" },
-  tokens: { text: "12.4k" },
-  runtime: { startedAtMs: BigInt(NOW - 65_000) },  state: { case: "running" as const, value: {} },
-};
 
 describe("the agents panel", () => {
   it("carries the fan-wide stop in its header", () => {
@@ -607,17 +723,10 @@ describe("the agents panel", () => {
     expect(panel.querySelector(".footer-row-unreachable")).toBeNull();
   });
 
-  it("folds away entirely when nothing is live, rather than drawing a bare stop-all", () => {
+  it("refuses to draw a bare stop-all when nothing is live", () => {
     // The header carries the fan-wide "stop all"; with no rows there is nothing
-    // to stop, so the whole panel collapses (null) instead of standing empty.
-    const h = harness();
-    expect(
-      drawFooterExpanded(expanded({ agents: [] }), "agents", {
-        ctx: h.ctx,
-        stops: createStopControls(h.ctx), notices: createJumpNotices(), redraw: () => undefined,
-        selectDetachedWork: async () => true,
-      }),
-    ).toBeNull();
+    // to stop, so the panel has no entries and is never drawn.
+    expect(() => drawPanel("agents", { agents: [] })).toThrow("the agents panel has no entries");
   });
 
   it("stays drawn while the fan-wide stop is holding its outcome, even with no rows", () => {
@@ -625,7 +734,7 @@ describe("the agents panel", () => {
     // that is exactly when the control carries "stopped N agents". Folding then
     // would erase the count, so the panel stays until the answer clears.
     const h = harness();
-    const stops = createStopControls(h.ctx);
+    const stops = createStopControls(h.ctx, () => undefined);
     const note = document.createElement("span");
     note.className = "footer-stop-note";
     note.textContent = "stopped 4 agents";
@@ -917,20 +1026,10 @@ describe("the tasks panel", () => {
     ).toThrow(MalformedView);
   });
 
-  it("draws its empty line when the tracker is empty", () => {
-    const { panel } = drawPanel("tasks");
-    expect(panel.querySelector("[data-empty]")?.textContent).toBe("the task tracker is empty");
-  });
 });
 
 // ---- the shells panel ------------------------------------------------------
 
-const SHELL_ROW = {
-  work: { value: "work-s" },
-  jump: toEntry("shell-1"),
-  command: { text: "npm run build" },
-  runtime: { startedAtMs: BigInt(NOW - 5000) },
-};
 
 describe("the shells panel", () => {
   it("draws the command verbatim", () => {
@@ -962,20 +1061,10 @@ describe("the shells panel", () => {
     expect(panel.querySelector("[data-unreachable]")).not.toBeNull();
   });
 
-  it("draws its empty line when nothing is running", () => {
-    const { panel } = drawPanel("shells");
-    expect(panel.querySelector("[data-empty]")?.textContent).toBe("no live shells");
-  });
 });
 
 // ---- the monitors panel ----------------------------------------------------
 
-const MONITOR_ROW = {
-  work: { value: "work-m" },
-  jump: toEntry("monitor-card"),
-  description: { text: "watching the deploy" },
-  runtime: { startedAtMs: BigInt(NOW - 90_000) },
-};
 
 describe("the monitors panel", () => {
   it("draws what is being watched verbatim", () => {
@@ -1010,20 +1099,10 @@ describe("the monitors panel", () => {
     expect(panel.querySelector("[data-jump-unresolved]")?.getAttribute("data-jump-unresolved")).toBe("notDrawn");
   });
 
-  it("draws its empty line when nothing is live", () => {
-    const { panel } = drawPanel("monitors");
-    expect(panel.querySelector("[data-empty]")?.textContent).toBe("no live monitors");
-  });
 });
 
 // ---- the merges panel ------------------------------------------------------
 
-const MERGE_ROW = {
-  work: { value: "lease-1" },
-  jump: toEntry("merge-head"),
-  label: { text: "fix-flaky → master" },
-  runtime: { startedAtMs: BigInt(NOW - 90_000) },
-};
 
 describe("the merges panel", () => {
   it("draws the bubble head's branch line verbatim", () => {
@@ -1066,10 +1145,6 @@ describe("the merges panel", () => {
     expect(panel.querySelector('[data-glyph="merges"]')?.textContent).toBe("⇄");
   });
 
-  it("draws its empty line when no merge is in flight", () => {
-    const { panel } = drawPanel("merges");
-    expect(panel.querySelector("[data-empty]")?.textContent).toBe("no merges in flight");
-  });
 
   it("refuses a row with no label", () => {
     const view = expanded({ merges: [MERGE_ROW] });
@@ -1088,10 +1163,6 @@ describe("the merges panel", () => {
 
 // ---- the crons panel -------------------------------------------------------
 
-const CRON_ROW = {
-  schedule: { text: "every 5 min" },
-  prompt: { text: "check the queue" },
-};
 
 describe("the crons panel", () => {
   it("draws the vendor's schedule verbatim", () => {
@@ -1129,10 +1200,6 @@ describe("the crons panel", () => {
     expect(panel.querySelector("[data-jump]")).toBeNull();
   });
 
-  it("draws its empty line when nothing is scheduled", () => {
-    const { panel } = drawPanel("crons");
-    expect(panel.querySelector("[data-empty]")?.textContent).toBe("nothing scheduled");
-  });
 
   it("draws a pending wakeup alone as a row, not the empty line", () => {
     const { panel } = drawPanel("crons", { wakeup: {} });
@@ -1231,7 +1298,7 @@ describe("an arm this build has no case for", () => {
     const h = harness();
     // ACT / ASSERT
     expect(() =>
-      drawFooterExpanded(expanded(), "sessions" as FooterPanel, { ctx: h.ctx, stops: createStopControls(h.ctx), notices: createJumpNotices(), redraw: () => undefined,
+      drawFooterExpanded(expanded(), "sessions" as FooterPanel, { ctx: h.ctx, stops: createStopControls(h.ctx, () => undefined), notices: createJumpNotices(), redraw: () => undefined,
         selectDetachedWork: async () => true,
       }),
     ).toThrow(MalformedView);
@@ -1617,7 +1684,7 @@ describe("the section keeps the reader's scroll", () => {
     const h = harness();
     const deps: ExpandedDeps = {
       ctx: h.ctx,
-      stops: createStopControls(h.ctx),
+      stops: createStopControls(h.ctx, () => undefined),
       notices: createJumpNotices(),
       redraw: () => undefined,
       selectDetachedWork: async () => true,
@@ -1636,7 +1703,7 @@ describe("the section keeps the reader's scroll", () => {
     const h = harness();
     const deps: ExpandedDeps = {
       ctx: h.ctx,
-      stops: createStopControls(h.ctx),
+      stops: createStopControls(h.ctx, () => undefined),
       notices: createJumpNotices(),
       redraw: () => undefined,
       selectDetachedWork: async () => true,
@@ -1659,7 +1726,7 @@ describe("the section keeps the reader's scroll", () => {
     const h = harness();
     const deps: ExpandedDeps = {
       ctx: h.ctx,
-      stops: createStopControls(h.ctx),
+      stops: createStopControls(h.ctx, () => undefined),
       notices: createJumpNotices(),
       redraw: () => undefined,
       selectDetachedWork: async () => true,

@@ -13,6 +13,7 @@ import {
   drawInterruptSuccess,
 } from "../../src/footer/stop.js";
 import { INTERRUPT_ERROR_ARMS } from "../../src/interrupt-error.js";
+import { INTERRUPT_OUTCOME_MS } from "../../src/feed/stop-control.js";
 import {
   WORKSPACE,
   confirmRequired,
@@ -26,9 +27,9 @@ import {
 // answer has to survive the redraw the stop itself causes (see StopControls).
 // These two keep every test below reading as one control per call.
 const turnStop = (ctx: Parameters<typeof createStopControls>[0]): HTMLElement =>
-  createStopControls(ctx).turn;
+  createStopControls(ctx, () => undefined).turn;
 const allAgentsStop = (ctx: Parameters<typeof createStopControls>[0]): HTMLElement =>
-  createStopControls(ctx).allAgents;
+  createStopControls(ctx, () => undefined).allAgents;
 
 
 beforeEach(() => {
@@ -332,5 +333,62 @@ describe("an outcome arm this build has no case for", () => {
     };
     // ACT / ASSERT
     expect(() => drawInterruptSuccess(success, "InterruptSuccess")).toThrow(MalformedView);
+  });
+});
+
+// THE FOOTER REDRAWS AROUND A STOP'S ANSWER: the emptied agents panel stays
+// open only while its control holds one, and no push announces either edge.
+describe("createStopControls: the answer-changed callback", () => {
+  /** The fan-wide control, attached, counting its answer-changed calls. */
+  function counted(h: Harness): { control: HTMLElement; changes: () => number } {
+    let changes = 0;
+    const control = createStopControls(h.ctx, () => {
+      changes += 1;
+    }).allAgents;
+    document.body.replaceChildren(control);
+    return { control, changes: () => changes };
+  }
+
+  it("is called once the success answer is drawn, with the note in place", async () => {
+    // Arrange
+    const h = harness({ interrupt: () => interruptSuccess("interruptedDetached", 2n) });
+    let noted: boolean | null = null;
+    const control = createStopControls(h.ctx, () => {
+      noted ??= control.querySelector("[data-stop-outcome]") !== null;
+    }).allAgents;
+
+    // Act
+    press(control);
+    await settle();
+
+    // Assert
+    expect(noted).toBe(true);
+  });
+
+  it("is called once a refusal is drawn", async () => {
+    // Arrange
+    const h = harness({ interrupt: () => interruptRefused("notMergeTab") });
+    const { control, changes } = counted(h);
+
+    // Act
+    press(control);
+    await settle();
+
+    // Assert
+    expect(changes()).toBe(1);
+  });
+
+  it("is called again when the success note lapses", async () => {
+    // Arrange
+    const h = harness({ interrupt: () => interruptSuccess("interruptedDetached", 2n) });
+    const { control, changes } = counted(h);
+    press(control);
+    await settle();
+
+    // Act
+    await vi.advanceTimersByTimeAsync(INTERRUPT_OUTCOME_MS + 1_000);
+
+    // Assert
+    expect([changes(), control.querySelector("[data-stop-outcome]")]).toEqual([2, null]);
   });
 });

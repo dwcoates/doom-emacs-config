@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { captureLogRecords, type LogCapture } from "../log-capture.js";
+import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
+import { INTERRUPT_OUTCOME_MS } from "../../src/feed/stop-control.js";
 import { create } from "@bufbuild/protobuf";
 import { WatchFooterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
 import {
@@ -20,10 +21,16 @@ import {
   writeSelection,
 } from "../../src/footer/footer.js";
 import {
+  AGENT_ROW,
+  CRON_ROW,
+  FOOTER_TEST_NOW,
+  MONITOR_ROW,
+  SHELL_ROW,
   WORKSPACE,
   expanded,
   footerView,
   harness,
+  interruptSuccess,
   pushView,
   quietActivity,
   strip,
@@ -38,7 +45,7 @@ import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { enduringLine } from "./enduring-line.js";
 import { pagePresence } from "../../src/presence.js";
 
-const NOW = 1_800_000_000_000;
+const NOW = FOOTER_TEST_NOW;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -76,17 +83,17 @@ function mount(
   return { host, h, footer };
 }
 
-/** One live agent row, so the agents panel has something to draw and does not
- * fold away. The daemon ships the chip count and the expanded rows together,
- * so a chip count rides with a matching row. */
-const AGENT_ROW = {
-  work: { value: "work-1" },
-  jump: { target: { case: "entry" as const, value: { value: "bubble-1" } } },
-  label: { text: "Explore" },
-  tokens: { text: "0 tok" },
-  runtime: { startedAtMs: BigInt(NOW) },
-  state: { case: "running" as const, value: {} },
-};
+
+
+
+
+/** A view whose shells chip and expanded panel both carry one live shell. */
+function withShells(): ReturnType<typeof footerView> {
+  return footerView({
+    strip: strip({ liveWork: { shells: { count: 1 } } }),
+    expanded: expanded({ shells: [SHELL_ROW] }),
+  });
+}
 
 /** A view whose agents chip and expanded panel both carry `count` live agents. */
 function withAgents(count = 1): ReturnType<typeof footerView> {
@@ -366,11 +373,7 @@ describe("mountFooter: the panel selection", () => {
   it("remembers the open panel per workspace", async () => {
     const { host, h } = mount();
     await settle();
-    h.tail.push(
-      pushView(
-        footerView({ strip: strip({ liveWork: { shells: { count: 1 } } }) }),
-      ),
-    );
+    h.tail.push(pushView(withShells()));
     await settle();
     host
       .querySelector<HTMLElement>('[data-chip="shells"]')
@@ -381,11 +384,7 @@ describe("mountFooter: the panel selection", () => {
   it("forgets the panel when it is closed", async () => {
     const { host, h } = mount();
     await settle();
-    h.tail.push(
-      pushView(
-        footerView({ strip: strip({ liveWork: { shells: { count: 1 } } }) }),
-      ),
-    );
+    h.tail.push(pushView(withShells()));
     await settle();
     const chip = host.querySelector<HTMLElement>('[data-chip="shells"]');
     chip?.dispatchEvent(new MouseEvent("click"));
@@ -399,22 +398,253 @@ describe("mountFooter: the panel selection", () => {
     window.localStorage.setItem(panelStorageKey("ws-1"), "crons");
     const { host, h } = mount();
     await settle();
-    h.tail.push(pushView(footerView()));
+    h.tail.push(
+      pushView(
+        footerView({
+          strip: strip({ liveWork: { crons: { count: 1 } } }),
+          expanded: expanded({ crons: [CRON_ROW] }),
+        }),
+      ),
+    );
     await settle();
     expect(
       host.querySelector('.footer-expanded[data-panel="crons"]'),
     ).not.toBeNull();
   });
+});
 
-  it("draws the empty panel's line for a remembered panel with nothing in it", async () => {
+// THE EXPANDED SECTION IS NEVER DRAWN EMPTY (owner ruling, 2026-10-20): a
+// wanted panel with no entries gives way to the first chip panel, in the
+// strip's order, that has some, and with none the section is not expanded.
+describe("mountFooter: the section is never drawn empty", () => {
+  /** Mount, push VIEW, and click PANEL's chip open. */
+  async function openOn(panel: string, view: FooterView, h: Harness = harness()) {
+    const m = mount(h);
+    await settle();
+    m.h.tail.push(pushView(view));
+    await settle();
+    m.host
+      .querySelector<HTMLElement>(`[data-chip="${panel}"]`)
+      ?.dispatchEvent(new MouseEvent("click"));
+    expect(openPanel(m.host), "the arrangement did not open the panel").toBe(panel);
+    return m;
+  }
+
+  it("does not expand for a remembered panel with nothing in it", async () => {
+    // Arrange
     window.localStorage.setItem(panelStorageKey("ws-1"), "crons");
     const { host, h } = mount();
     await settle();
+
+    // Act
     h.tail.push(pushView(footerView()));
     await settle();
-    expect(host.querySelector("[data-empty]")?.textContent).toBe(
-      "nothing scheduled",
+
+    // Assert
+    expect([openPanel(host), host.querySelector("[data-empty]"), host.querySelector(".footer-divider")]).toEqual([null, null, null]);
+  });
+
+  it("shows the first live chip panel for a remembered panel with nothing in it", async () => {
+    // Arrange
+    window.localStorage.setItem(panelStorageKey("ws-1"), "crons");
+    const { host, h } = mount();
+    await settle();
+
+    // Act
+    h.tail.push(pushView(withShells()));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("shells");
+  });
+
+  it("moves onto the next live chip panel when the open one empties", async () => {
+    // Arrange: the agents panel is open beside a live shell.
+    const both = withShells();
+    both.strip = strip({ liveWork: { agents: { count: 1 }, shells: { count: 1 } } });
+    both.expanded = expanded({ agents: [AGENT_ROW], shells: [SHELL_ROW] });
+    const { host, h } = await openOn("agents", both);
+
+    // Act: the agent resolves.
+    h.tail.push(pushView(withShells()));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("shells");
+  });
+
+  it("highlights the chip of the panel it moved onto", async () => {
+    // Arrange
+    const both = withShells();
+    both.strip = strip({ liveWork: { agents: { count: 1 }, shells: { count: 1 } } });
+    both.expanded = expanded({ agents: [AGENT_ROW], shells: [SHELL_ROW] });
+    const { host, h } = await openOn("agents", both);
+
+    // Act
+    h.tail.push(pushView(withShells()));
+    await settle();
+
+    // Assert
+    expect(host.querySelector('[data-chip="shells"]')?.getAttribute("data-selected")).toBe("true");
+  });
+
+  it("returns to the wanted panel once it has entries again", async () => {
+    // Arrange: agents open, then emptied onto shells.
+    const both = (): FooterView => {
+      const view = withShells();
+      view.strip = strip({ liveWork: { agents: { count: 1 }, shells: { count: 1 } } });
+      view.expanded = expanded({ agents: [AGENT_ROW], shells: [SHELL_ROW] });
+      return view;
+    };
+    const { host, h } = await openOn("agents", both());
+    h.tail.push(pushView(withShells()));
+    await settle();
+
+    // Act: an agent is live again.
+    h.tail.push(pushView(both()));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("agents");
+  });
+
+  it("collapses when every panel empties", async () => {
+    // Arrange
+    const { host, h } = await openOn("shells", withShells());
+
+    // Act
+    h.tail.push(pushView(footerView()));
+    await settle();
+
+    // Assert
+    expect([openPanel(host), host.querySelector(".footer-divider")]).toEqual([null, null]);
+  });
+
+  it("closes the section on a click of the chip it moved onto", async () => {
+    // Arrange: agents emptied onto shells.
+    const both = withShells();
+    both.strip = strip({ liveWork: { agents: { count: 1 }, shells: { count: 1 } } });
+    both.expanded = expanded({ agents: [AGENT_ROW], shells: [SHELL_ROW] });
+    const { host, h } = await openOn("agents", both);
+    h.tail.push(pushView(withShells()));
+    await settle();
+
+    // Act
+    host
+      .querySelector<HTMLElement>('[data-chip="shells"]')
+      ?.dispatchEvent(new MouseEvent("click"));
+
+    // Assert
+    expect([openPanel(host), window.localStorage.getItem(panelStorageKey("ws-1"))]).toEqual([null, null]);
+  });
+
+  it("stays closed when the reader closed it, though panels have entries", async () => {
+    // Arrange
+    const { host, h } = await openOn("shells", withShells());
+    host
+      .querySelector<HTMLElement>('[data-chip="shells"]')
+      ?.dispatchEvent(new MouseEvent("click"));
+
+    // Act
+    h.tail.push(pushView(withShells()));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("does not expand for a focus whose panel emptied before this page attached", async () => {
+    // Arrange
+    const { host, h } = mount();
+    await settle();
+
+    // Act: the standing focus names shells, but nothing is live any more.
+    h.tail.push(pushView(focused(footerView(), "shells", 1n)));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("shows the first live chip panel for a focus whose panel emptied", async () => {
+    // Arrange
+    const { host, h } = mount();
+    await settle();
+
+    // Act
+    h.tail.push(pushView(focused(withAgents(), "shells", 1n)));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("agents");
+  });
+
+  it("records the panel it shows in place of the wanted one", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    window.localStorage.setItem(panelStorageKey("ws-1"), "crons");
+    const { h } = mount();
+    await settle();
+
+    // Act
+    h.tail.push(pushView(withShells()));
+    await settle();
+
+    // Assert
+    const record = await forwardedRecord(capture, "footer.shown-panel");
+    expect(record.context).toMatchObject({ wanted: "crons", shown: "shells" });
+  });
+
+  it("folds the emptied agents panel once the stop-all answer lapses, with no push", async () => {
+    // Arrange: one live agent, the agents panel open, and "stop all" answered.
+    const { host, h } = await openOn(
+      "agents",
+      withAgents(),
+      harness({ interrupt: () => interruptSuccess("interruptedDetached", 1n) }),
     );
+    host
+      .querySelector<HTMLElement>(".footer-stop-all [data-interrupt]")
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    expect(
+      host.querySelector(".footer-stop-all [data-stop-outcome]")?.textContent,
+      "the arrangement did not keep the answered panel open",
+    ).toBe("stopped 1 agent");
+
+    // Act: the note lapses on the client's clock.
+    await vi.advanceTimersByTimeAsync(INTERRUPT_OUTCOME_MS + 1_000);
+
+    // Assert
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("keeps the agents panel open for a stop-all answer that lands after its push", async () => {
+    // Arrange: the answer is held until the emptying push has been drawn.
+    let answer: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const h = harness({
+      interrupt: async () => {
+        await gate;
+        return interruptSuccess("interruptedDetached", 1n);
+      },
+    });
+    const { host } = await openOn("agents", withAgents(), h);
+    host
+      .querySelector<HTMLElement>(".footer-stop-all [data-interrupt]")
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    h.tail.push(pushView(footerView()));
+    await settle();
+
+    // Act
+    answer();
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("agents");
   });
 });
 
@@ -440,6 +670,11 @@ function withLiveWork(): FooterView {
       shells: { count: 1 },
       monitors: { count: 1 },
     },
+  });
+  view.expanded = expanded({
+    agents: [AGENT_ROW],
+    shells: [SHELL_ROW],
+    monitors: [MONITOR_ROW],
   });
   return view;
 }
