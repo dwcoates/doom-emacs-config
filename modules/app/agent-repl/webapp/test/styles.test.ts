@@ -5774,8 +5774,13 @@ describe("the repository's subsections and the drag", () => {
     expect(declarationsOf("#ws-sidebar .repo.folded > .sb-subsections")).toMatch(/display:\s*none/);
   });
 
-  it("draws the drop slot only while the subsection has no rows", () => {
-    expect(declarationsOf("#ws-sidebar .sb-subsection > .rows:not(:empty) + .sb-subsection-empty")).toMatch(/display:\s*none/);
+  it("draws a subsection's name in the one purple", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-label")).toMatch(/color:\s*var\(--blocked\)/);
+  });
+
+  it("draws the name popup's input with a hairline border and no focus ring", () => {
+    const input = declarationsOf("#ws-sidebar .sb-subsection-name") ?? "";
+    expect([/border:\s*1px solid var\(--border\)/.test(input), /outline:\s*none/.test(input)]).toEqual([true, true]);
   });
 
   it("lifts the drag's copy above the rail and out of the pointer's way", () => {

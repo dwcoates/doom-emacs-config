@@ -1006,6 +1006,9 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   font-weight: 600;
 }
 #ws-sidebar .sb-subsection-head .sb-count { font-size: 0.85em; }
+/* A SUBSECTION'S NAME IS THE ONE PURPLE (owner request, 2026-10-20), the
+   purple status --blocked the bands' headers wear. */
+#ws-sidebar .sb-subsection-label { color: var(--blocked); }
 #ws-sidebar .sb-subsection-delete {
   margin-left: auto;
   border: 0;
@@ -1017,20 +1020,10 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 }
 #ws-sidebar .sb-subsection-head:hover .sb-subsection-delete { visibility: visible; }
 #ws-sidebar .sb-subsection-delete:hover { color: var(--fg); }
-#ws-sidebar .sb-subsection-empty {
-  margin: 0.1rem 0.7rem 0.2rem 1.55rem;
-  padding: 0.2rem 0.5rem;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 0.7rem;
-}
-#ws-sidebar .sb-subsection > .rows:not(:empty) + .sb-subsection-empty { display: none; }
 /* A COLLAPSED SUBSECTION (its triangle, src/sidebar/subsections.ts) shows its
-   header alone: its rows and its drop slot are hidden, and its header greys
-   as a collapsed repository's does. */
-#ws-sidebar .sb-subsection.folded > .rows,
-#ws-sidebar .sb-subsection.folded > .sb-subsection-empty { display: none; }
+   header alone: its rows are hidden, and its header greys as a collapsed
+   repository's does. */
+#ws-sidebar .sb-subsection.folded > .rows { display: none; }
 #ws-sidebar .sb-subsection.folded > .sb-subsection-head { color: var(--repo-head-collapsed); }
 
 /* THE DRAG (src/sidebar/drag.ts): the item stays in its list as a dimmed
@@ -1053,19 +1046,36 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
 
 /* THE SUBSECTION NAME POPUP, under the control that asked for it. */
+/* THE NAME POPUP is quiet (owner request, 2026-10-20): one hairline box, a
+   soft shadow, and an input drawn as the rail's other inputs are, its border
+   only brightening on focus rather than a browser focus ring. */
 #ws-sidebar .sb-subsection-popup {
   position: fixed;
   z-index: 1001;
   display: flex;
-  gap: 0.35rem;
+  align-items: center;
+  gap: 0.3rem;
   width: 220px;
-  padding: 0.4rem;
+  padding: 0.3rem;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
-#ws-sidebar .sb-subsection-name { flex: 1 1 auto; min-width: 0; }
+#ws-sidebar .sb-subsection-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.75rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.15rem 0.4rem;
+  outline: none;
+}
+#ws-sidebar .sb-subsection-name:focus { border-color: color-mix(in srgb, var(--fg) 30%, var(--border)); }
+#ws-sidebar .sb-subsection-popup .sb-form-go { align-self: center; }
 #ws-sidebar .sb-arrange-status:empty { display: none; }
 
 /* Workspace rows. Children nest inside .kids, which draws the family guide

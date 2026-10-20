@@ -36,10 +36,9 @@
  *     strip; scrolled to its end, the mark drops and the last row shows whole.
  *
  * A LINE IS ONE `.row`, a nested family member included, a folded
- * repository's header, a folded subsection's header, or an empty
- * subsection's drop slot (a subsection with
- * no rows draws the slot in their place, so it is a line as a folded
- * repository's header is), and a viewport of K lines is exactly as tall as the
+ * repository's header, or the header of a subsection that is folded or empty
+ * (a subsection with no rows to show draws its header alone, so it is a line
+ * as a folded repository's header is), and a viewport of K lines is exactly as tall as the
  * first K lines are drawn, the header above a line (a repository section's,
  * a subsection's, a Recently Merged repository group's) riding with it, so no
  * line is cut through but the lowest section's last. A folded section shows no
@@ -102,16 +101,17 @@ const SECTION_REGIONS = [
 ] as const;
 
 /**
- * The class of an empty subsection's drop slot (`subsections.ts`), which the
- * stylesheet draws only while the subsection has no rows.
+ * The attribute an EMPTY subsection (`subsections.ts`) wears: it draws its
+ * header alone, so its header is a line as a folded subsection's is.
  */
-export const SUBSECTION_SLOT_CLASS = "sb-subsection-empty";
+export const EMPTY_SUBSECTION_ATTRIBUTE = "data-empty";
+
 
 /**
- * What one line is: a row, a folded repository section's header, a folded
- * subsection's header, or an empty subsection's slot.
+ * What one line is: a row, a folded repository section's header, or the
+ * header of a subsection that is folded or empty.
  */
-const LINE_SELECTOR = `.row, .repo.folded > .repo-head, .sb-subsection.folded > .sb-subsection-head, .${SUBSECTION_SLOT_CLASS}`;
+const LINE_SELECTOR = `.row, .repo.folded > .repo-head, .sb-subsection.folded > .sb-subsection-head, .sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}] > .sb-subsection-head`;
 
 /** How many lines each section's viewport shows. */
 export interface SectionLines {

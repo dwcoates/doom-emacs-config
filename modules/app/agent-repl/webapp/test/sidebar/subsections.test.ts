@@ -112,10 +112,22 @@ describe("a repository's subsections", () => {
     ]).toEqual(["sub-1", "later", "(1)", true]);
   });
 
-  it("draw a slot to drop into when empty", () => {
+  it("draw an empty one as its header alone, marked empty, with no drop hint", () => {
     const pane = mount(roster({ repos: [repoSection({ id: "repo-1", subsections: [{ id: "sub-1" }] })] }), sidebarContext());
-    expect(pane.querySelector(".sb-subsection > .rows")?.children.length).toBe(0);
-    expect(pane.querySelector(".sb-subsection > .sb-subsection-empty")).not.toBeNull();
+    const sub = pane.querySelector(".sb-subsection") as HTMLElement;
+    expect([sub.hasAttribute("data-empty"), sub.querySelector(":scope > .rows")?.children.length, sub.textContent?.includes("drag")]).toEqual([
+      true,
+      0,
+      false,
+    ]);
+  });
+
+  it("do not mark a subsection with rows empty", () => {
+    const pane = mount(
+      roster({ repos: [repoSection({ id: "repo-1", subsections: [{ id: "sub-1", rows: [row({ id: "ws-1" })] }] })] }),
+      sidebarContext(),
+    );
+    expect(pane.querySelector(".sb-subsection")?.hasAttribute("data-empty")).toBe(false);
   });
 
   it("delete through the header's remove control", async () => {

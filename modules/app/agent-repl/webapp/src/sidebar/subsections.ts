@@ -6,8 +6,8 @@
  * (frontend.v1.RosterSubsection), drawn below the section's own rows in the
  * daemon's order. A workspace is put in one by dragging its row there, and
  * the Emacs tab bar follows: a repository's unsectioned workspaces, then each
- * subsection's (`arrange.ts`). An empty subsection still draws, with a slot to
- * drop into.
+ * subsection's (`arrange.ts`). An empty subsection still draws its header,
+ * and a row dropped onto it lands in its (empty) rows list.
  *
  * A SUBSECTION FOLDS AS A REPOSITORY SECTION DOES (`section-fold.ts`): its
  * triangle asks UpdateSidebarView for the other fold, a collapsed
@@ -38,7 +38,7 @@ import { CONTROL_SELECTOR, createControl, type Control } from "../control.js";
 import type { RosterOpenRows, RosterRepoSection, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { childrenMatching, queryAll } from "../dom.js";
-import { OPEN_REGION_CLASS, SUBSECTION_SLOT_CLASS } from "./band-fit.js";
+import { EMPTY_SUBSECTION_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
 import { log } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
 import { sendArrangement, type ArrangeChange } from "./arrange.js";
@@ -142,10 +142,7 @@ export function drawRosterSubsection(
   const rows = drawRows(requireMessage(u.openRows, `${path}.open_rows`), `${path}.open_rows`);
   rows.setAttribute(BUCKET_ATTRIBUTE, id);
   element.appendChild(rows);
-  const empty = document.createElement("div");
-  empty.className = SUBSECTION_SLOT_CLASS;
-  empty.textContent = "drag workspaces here";
-  element.appendChild(empty);
+  if (rows.children.length === 0) element.setAttribute(EMPTY_SUBSECTION_ATTRIBUTE, "");
   return { element, rows };
 }
 
