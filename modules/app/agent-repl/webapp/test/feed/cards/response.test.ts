@@ -2867,7 +2867,7 @@ describe("the data-driven final-answer green", () => {
     expect(el.classList.contains(THINKING_BUBBLE_CLASS)).toBe(true);
   });
 
-  it("keeps the green border on a selected final answer and greys its fill", () => {
+  it("keeps the green border on a selected final answer and dims its fill", () => {
     // Arrange — a green final answer that is also the selected reply target, so
     // both classes ride the same bubble.
     const el = drawFeedResponse(
@@ -2881,8 +2881,8 @@ describe("the data-driven final-answer green", () => {
     // jsdom; selector + the declaration is the deterministic proof, mirrored
     // from styles.test.ts.)
     expect(el.matches('.bubble.final-response:not([data-variant="thinking"])')).toBe(true);
-    expect(el.matches(".bubble.entry-selected")).toBe(true);
-    expect(stylesheet).toMatch(/\.bubble\.entry-selected\s*\{\s*--bubble-bg:\s*var\(--selected-bubble-bg\)\s*!important;\s*\}/);
+    expect(el.matches(".bubble.final-response.entry-selected")).toBe(true);
+    expect(stylesheet).toMatch(/\.bubble\.final-response\.entry-selected\s*\{\s*--bubble-bg:\s*var\(--selected-final-response-bg\)\s*!important;\s*\}/);
   });
 });
 
