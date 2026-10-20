@@ -197,6 +197,36 @@
                   #'agent-repl-wire-decode-mark-workspace-viewed-response "{}")
                  '("MarkWorkspaceViewedResponse" result "oneof is unset"))))
 
+;;;; ---- The workspace-subject verbs' one shape ----
+
+(ert-deftest agent-repl-test-wire-host-subject-response-names-its-messages-by-the-rpc ()
+  "A breach names the rpc's own message, so the shared codec reads as the verb's."
+  (should (equal (seq-take (agent-repl-test-wire-host--breach
+                            (lambda (v) (agent-repl-wire--decode-subject-response "SomeVerb" v))
+                            "{\"error\":{\"workspaceRefMismatch\":{\"registryDir\":5}}}")
+                           2)
+                 '("SomeVerbWorkspaceRefMismatch" registryDir))))
+
+(ert-deftest agent-repl-test-wire-host-subject-response-refuses-an-unknown-cause ()
+  "A refusal arm the shape does not know is an unknown field, never dropped."
+  (should (equal (car (agent-repl-test-wire-host--breach
+                       (lambda (v) (agent-repl-wire--decode-subject-response "SomeVerb" v))
+                       "{\"error\":{\"mystery\":{}}}"))
+                 "SomeVerbError")))
+
+(ert-deftest agent-repl-test-wire-host-every-subject-verb-shares-the-one-codec ()
+  "MarkWorkspaceViewed and ReportPageUnloading decode every answer identically.
+A hand-rolled copy of either would drift from the shared shape and fail here."
+  (dolist (json '("{\"success\":{}}"
+                  "{\"error\":{\"unknownWorkspace\":{}}}"
+                  "{\"error\":{\"workspaceRefMismatch\":{\"registryDir\":\"/w\"}}}"
+                  "{\"error\":{\"transferringAway\":{\"address\":\"a\"}}}"
+                  "{\"error\":{\"notYetAdopted\":{}}}"))
+    (should (equal (agent-repl-test-wire-host--decode
+                    #'agent-repl-wire-decode-mark-workspace-viewed-response json)
+                   (agent-repl-test-wire-host--decode
+                    #'agent-repl-wire-decode-report-page-unloading-response json)))))
+
 ;;;; ---- ReportPageUnloading ----
 
 (ert-deftest agent-repl-test-wire-host-page-unloading-request-echoes-the-ref ()
