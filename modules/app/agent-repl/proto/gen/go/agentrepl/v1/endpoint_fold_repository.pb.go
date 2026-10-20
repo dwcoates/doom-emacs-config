@@ -326,6 +326,7 @@ type FoldRepositoryError struct {
 	// Types that are valid to be assigned to Cause:
 	//
 	//	*FoldRepositoryError_UnknownRepository
+	//	*FoldRepositoryError_HoldsCurrent
 	Cause         isFoldRepositoryError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -377,6 +378,15 @@ func (x *FoldRepositoryError) GetUnknownRepository() *FoldRepositoryUnknownRepos
 	return nil
 }
 
+func (x *FoldRepositoryError) GetHoldsCurrent() *FoldRepositoryHoldsCurrent {
+	if x != nil {
+		if x, ok := x.Cause.(*FoldRepositoryError_HoldsCurrent); ok {
+			return x.HoldsCurrent
+		}
+	}
+	return nil
+}
+
 type isFoldRepositoryError_Cause interface {
 	isFoldRepositoryError_Cause()
 }
@@ -386,7 +396,14 @@ type FoldRepositoryError_UnknownRepository struct {
 	UnknownRepository *FoldRepositoryUnknownRepository `protobuf:"bytes,1,opt,name=unknown_repository,json=unknownRepository,proto3,oneof"`
 }
 
+type FoldRepositoryError_HoldsCurrent struct {
+	// A collapse of the repository the current workspace sits in.
+	HoldsCurrent *FoldRepositoryHoldsCurrent `protobuf:"bytes,2,opt,name=holds_current,json=holdsCurrent,proto3,oneof"`
+}
+
 func (*FoldRepositoryError_UnknownRepository) isFoldRepositoryError_Cause() {}
+
+func (*FoldRepositoryError_HoldsCurrent) isFoldRepositoryError_Cause() {}
 
 type FoldRepositoryUnknownRepository struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -424,6 +441,46 @@ func (*FoldRepositoryUnknownRepository) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_fold_repository_proto_rawDescGZIP(), []int{6}
 }
 
+// A collapse asked of the repository the current workspace sits in, refused
+// as agentrepl.v1.UpdateSidebarViewError.holds_current refuses it: nothing is
+// recorded and the section stands expanded. DELIBERATELY EMPTY: the arm is
+// the cause, and the request names the repository.
+type FoldRepositoryHoldsCurrent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FoldRepositoryHoldsCurrent) Reset() {
+	*x = FoldRepositoryHoldsCurrent{}
+	mi := &file_agentrepl_v1_endpoint_fold_repository_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FoldRepositoryHoldsCurrent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FoldRepositoryHoldsCurrent) ProtoMessage() {}
+
+func (x *FoldRepositoryHoldsCurrent) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_fold_repository_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FoldRepositoryHoldsCurrent.ProtoReflect.Descriptor instead.
+func (*FoldRepositoryHoldsCurrent) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_fold_repository_proto_rawDescGZIP(), []int{7}
+}
+
 var File_agentrepl_v1_endpoint_fold_repository_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_fold_repository_proto_rawDesc = "" +
@@ -442,11 +499,13 @@ const file_agentrepl_v1_endpoint_fold_repository_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.FoldRepositorySuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.FoldRepositoryErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15FoldRepositorySuccess\"~\n" +
+	"\x15FoldRepositorySuccess\"\xcf\x01\n" +
 	"\x13FoldRepositoryError\x12^\n" +
-	"\x12unknown_repository\x18\x01 \x01(\v2-.agentrepl.v1.FoldRepositoryUnknownRepositoryH\x00R\x11unknownRepositoryB\a\n" +
+	"\x12unknown_repository\x18\x01 \x01(\v2-.agentrepl.v1.FoldRepositoryUnknownRepositoryH\x00R\x11unknownRepository\x12O\n" +
+	"\rholds_current\x18\x02 \x01(\v2(.agentrepl.v1.FoldRepositoryHoldsCurrentH\x00R\fholdsCurrentB\a\n" +
 	"\x05cause\"!\n" +
-	"\x1fFoldRepositoryUnknownRepositoryB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1fFoldRepositoryUnknownRepository\"\x1c\n" +
+	"\x1aFoldRepositoryHoldsCurrentB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_fold_repository_proto_rawDescOnce sync.Once
@@ -460,7 +519,7 @@ func file_agentrepl_v1_endpoint_fold_repository_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_fold_repository_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_fold_repository_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_agentrepl_v1_endpoint_fold_repository_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agentrepl_v1_endpoint_fold_repository_proto_goTypes = []any{
 	(*FoldRepositoryRequest)(nil),           // 0: agentrepl.v1.FoldRepositoryRequest
 	(*FoldRepositoryExpand)(nil),            // 1: agentrepl.v1.FoldRepositoryExpand
@@ -469,20 +528,22 @@ var file_agentrepl_v1_endpoint_fold_repository_proto_goTypes = []any{
 	(*FoldRepositorySuccess)(nil),           // 4: agentrepl.v1.FoldRepositorySuccess
 	(*FoldRepositoryError)(nil),             // 5: agentrepl.v1.FoldRepositoryError
 	(*FoldRepositoryUnknownRepository)(nil), // 6: agentrepl.v1.FoldRepositoryUnknownRepository
-	(*v1.RepositoryRef)(nil),                // 7: workspace.v1.RepositoryRef
+	(*FoldRepositoryHoldsCurrent)(nil),      // 7: agentrepl.v1.FoldRepositoryHoldsCurrent
+	(*v1.RepositoryRef)(nil),                // 8: workspace.v1.RepositoryRef
 }
 var file_agentrepl_v1_endpoint_fold_repository_proto_depIdxs = []int32{
-	7, // 0: agentrepl.v1.FoldRepositoryRequest.repository:type_name -> workspace.v1.RepositoryRef
+	8, // 0: agentrepl.v1.FoldRepositoryRequest.repository:type_name -> workspace.v1.RepositoryRef
 	1, // 1: agentrepl.v1.FoldRepositoryRequest.expand:type_name -> agentrepl.v1.FoldRepositoryExpand
 	2, // 2: agentrepl.v1.FoldRepositoryRequest.collapse:type_name -> agentrepl.v1.FoldRepositoryCollapse
 	4, // 3: agentrepl.v1.FoldRepositoryResponse.success:type_name -> agentrepl.v1.FoldRepositorySuccess
 	5, // 4: agentrepl.v1.FoldRepositoryResponse.error:type_name -> agentrepl.v1.FoldRepositoryError
 	6, // 5: agentrepl.v1.FoldRepositoryError.unknown_repository:type_name -> agentrepl.v1.FoldRepositoryUnknownRepository
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	7, // 6: agentrepl.v1.FoldRepositoryError.holds_current:type_name -> agentrepl.v1.FoldRepositoryHoldsCurrent
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_fold_repository_proto_init() }
@@ -500,6 +561,7 @@ func file_agentrepl_v1_endpoint_fold_repository_proto_init() {
 	}
 	file_agentrepl_v1_endpoint_fold_repository_proto_msgTypes[5].OneofWrappers = []any{
 		(*FoldRepositoryError_UnknownRepository)(nil),
+		(*FoldRepositoryError_HoldsCurrent)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -507,7 +569,7 @@ func file_agentrepl_v1_endpoint_fold_repository_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_fold_repository_proto_rawDesc), len(file_agentrepl_v1_endpoint_fold_repository_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -562,8 +562,31 @@ message RosterSubsection {
   }
 }
 
-// An expanded subsection. DELIBERATELY EMPTY: the arm is the fact.
-message RosterSubsectionExpanded {}
+// An expanded subsection, and whether its header's fold gesture may collapse
+// it.
+message RosterSubsectionExpanded {
+  // WHETHER A COLLAPSE MAY BE ASKED FOR. A collapse stands down the sessions
+  // of the workspaces the subsection holds and hides their tabs, so the
+  // subsection holding the CURRENT workspace never collapses: the daemon
+  // refuses the ask (agentrepl.v1.UpdateSidebarViewError.holds_current), and
+  // the sidebar's fold gesture asks nothing while this arm says so. The
+  // daemon resolves the arm on every push from its own selection, so it
+  // follows every switch. Never unset on a wire subsection.
+  oneof collapse {
+    // No current workspace sits in the subsection: the gesture collapses it.
+    RosterSubsectionCollapsible collapsible = 1;
+    // The current workspace sits in the subsection: the gesture does nothing.
+    RosterSubsectionHoldsCurrent holds_current = 2;
+  }
+}
+
+// An expanded subsection the fold gesture may collapse. DELIBERATELY EMPTY:
+// the arm is the fact.
+message RosterSubsectionCollapsible {}
+
+// An expanded subsection holding the current workspace, which the fold
+// gesture leaves expanded. DELIBERATELY EMPTY: the arm is the fact.
+message RosterSubsectionHoldsCurrent {}
 
 // A collapsed subsection. DELIBERATELY EMPTY: the arm is the fact.
 message RosterSubsectionCollapsed {}
@@ -573,8 +596,32 @@ message RosterSubsectionKey {
   string subsection_id = 1;
 }
 
-// An expanded repository section. DELIBERATELY EMPTY: the arm is the fact.
-message RosterRepoSectionExpanded {}
+// An expanded repository section, and whether its header's fold gesture may
+// collapse it.
+message RosterRepoSectionExpanded {
+  // WHETHER A COLLAPSE MAY BE ASKED FOR. A collapse stands down the sessions
+  // of the repository's open workspaces and hides their tabs, so the
+  // repository holding the CURRENT workspace never collapses: the daemon
+  // refuses the ask (agentrepl.v1.UpdateSidebarViewError.holds_current), and
+  // the sidebar's fold gesture asks nothing while this arm says so. The
+  // daemon resolves the arm on every push from its own selection, so it
+  // follows every switch. Never unset on a wire section.
+  oneof collapse {
+    // No current workspace sits in the repository: the gesture collapses it.
+    RosterRepoSectionCollapsible collapsible = 1;
+    // The current workspace sits in the repository, in a subsection or not:
+    // the gesture does nothing.
+    RosterRepoSectionHoldsCurrent holds_current = 2;
+  }
+}
+
+// An expanded repository section the fold gesture may collapse. DELIBERATELY
+// EMPTY: the arm is the fact.
+message RosterRepoSectionCollapsible {}
+
+// An expanded repository section holding the current workspace, which the
+// fold gesture leaves expanded. DELIBERATELY EMPTY: the arm is the fact.
+message RosterRepoSectionHoldsCurrent {}
 
 // A collapsed repository section. DELIBERATELY EMPTY: the arm is the fact.
 message RosterRepoSectionCollapsed {}
