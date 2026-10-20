@@ -276,8 +276,9 @@ for metrics that show where restart time goes and when it regressed):
 
 Not built, each recorded with its reason:
 
-- `prompt_echo`, `workspace_open`, `prompt_first_output` stay profile-only
-  (`docs/protobuf-design/runtime-metrics.md`, entry 3).
+- `prompt_first_output` stays profile-only. `prompt_echo` is reported by
+  the webapp (`docs/protobuf-design/runtime-metrics.md`, entry 8) and
+  `workspace_open` is measured by the daemon (judgement call 16).
 - Vendor bytes: no shim counts them (judgement call 6).
 - Emacs reports no latency of its own (judgement call 8), so Emacs's own
   restart (its launch, an elisp reload) is not timed (judgement call 9).

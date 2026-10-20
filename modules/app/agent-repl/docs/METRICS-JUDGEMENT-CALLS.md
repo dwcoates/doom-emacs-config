@@ -249,3 +249,15 @@ Each entry says what was decided, why, and what it departs from.
 - The polluted half hour stays in the store's history unless its series are
   deleted by run.
 
+## 16. Workspace open and prompt echo are live latencies
+
+- Asked (2026-10-20): fix `prompt_echo` and `workspace_open`, both profile-only.
+- `workspace_open` is measured by the daemon, from `OpenWorkspace` arriving
+  to it answering success with the session up. The editor's tab opening
+  before the call reaches the daemon is not part of it: that span is
+  Emacs's, and Emacs reports no latency of its own (call 8).
+- `prompt_echo` is measured by the webapp from the instant Emacs stamps at
+  the send, which the daemon hands back on the web stream once the prompt's
+  row is drawn (`docs/protobuf-design/runtime-metrics.md`, entry 8). A held
+  prompt is not timed: it draws when delivered, so its time is the hold.
+
