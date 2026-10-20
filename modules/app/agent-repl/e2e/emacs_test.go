@@ -450,7 +450,7 @@ func (e *Emacs) record(name string, took time.Duration) {
 func (e *Emacs) recordGranted(name string, span grantedclock.Span) {
 	e.phasesMu.Lock()
 	defer e.phasesMu.Unlock()
-	e.phases = append(e.phases, phase{name: name, took: span.Granted(), wall: span.Wall})
+	e.phases = append(e.phases, phase{name: name, took: span.Granted, wall: span.Wall})
 }
 
 // reportPhases logs every measured duration, ALWAYS -- a passing run is
@@ -1612,7 +1612,7 @@ func (e *Emacs) armHeartbeat() {
 			cpuBefore, cpuBeforeErr := readCgroupCPUStat(cgroupCPUStatPath)
 			out, span, err := e.emacsclient(ctx, HeartbeatBound, heartbeatProbe)
 			if err == nil {
-				if took := int64(span.Granted()); took > e.heartbeatMax.Load() {
+				if took := int64(span.Granted); took > e.heartbeatMax.Load() {
 					e.heartbeatMax.Store(took)
 				}
 				prompt := heartbeatPrompt(out)
@@ -2570,7 +2570,7 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 
 	call := fmt.Sprintf("(agent-repl-e2e--eval %q %q)", in, out)
 	_, span, err := e.emacsclient(context.Background(), evalBound, call)
-	e.recordEvalMax(span.Granted())
+	e.recordEvalMax(span.Granted)
 	if err != nil {
 		// THE FORM IS STILL RUNNING. Killing emacsclient closes one socket;
 		// it does not unwind the elisp underneath, and Emacs answers a fresh

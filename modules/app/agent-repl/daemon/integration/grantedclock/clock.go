@@ -16,6 +16,7 @@ package grantedclock
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -23,34 +24,36 @@ import (
 // sat runnable without a CPU, since some fixed origin.
 type Stall func() (time.Duration, error)
 
-// Span is one interval read on the granted clock: its wall time, and how much
-// of it the covered processes sat runnable without a CPU.
+// Span is one interval read on the granted clock: its wall time, how long
+// the covered processes sat runnable without a CPU in it, and how much of it
+// was granted.
+//
+// STALLED CAN EXCEED WALL. A source that sums its processes' stalls (the
+// darwin process tree) counts two processes starved at once twice, so Granted
+// is never derived from the interval's two totals: it is accrued reading by
+// reading, each reading granting its own wall time less its own stall and
+// never less than nothing. A starved stretch therefore grants nothing without
+// also cancelling the granted time around it.
 type Span struct {
-	Wall, Stalled time.Duration
-}
-
-// Granted is the interval's wall time less its stall. The two are read from
-// different clocks (CLOCK_MONOTONIC and the scheduler's), so a fully stalled
-// interval can read a few microseconds negative; that skew reads as zero.
-func (s Span) Granted() time.Duration {
-	if g := s.Wall - s.Stalled; g > 0 {
-		return g
-	}
-	return 0
+	Wall, Stalled, Granted time.Duration
 }
 
 func (s Span) String() string {
-	return fmt.Sprintf("%s granted of %s wall, %s of it with a container task waiting for a CPU",
-		s.Granted().Round(time.Millisecond), s.Wall.Round(time.Millisecond), s.Stalled.Round(time.Millisecond))
+	return fmt.Sprintf("%s granted of %s wall, the processes it covers waiting %s for a CPU",
+		s.Granted.Round(time.Millisecond), s.Wall.Round(time.Millisecond), s.Stalled.Round(time.Millisecond))
 }
 
 // Clock measures one interval on the granted clock from the instant it was
-// started.
+// started. It is safe for concurrent readers: a bound context reads it on its
+// own goroutine while its waiter may read it too.
 type Clock struct {
-	now     func() time.Time
-	stall   Stall
-	started time.Time
-	stall0  time.Duration
+	now   func() time.Time
+	stall Stall
+
+	mu        sync.Mutex
+	lastWall  time.Time
+	lastStall time.Duration
+	span      Span
 }
 
 // Start starts a clock reading wall time from NOW and the cumulative stall
@@ -58,18 +61,34 @@ type Clock struct {
 func Start(now func() time.Time, stall Stall) (*Clock, error) {
 	stall0, err := stall()
 	if err != nil {
-		return nil, fmt.Errorf("read the container's CPU stall to start a granted clock: %w", err)
+		return nil, fmt.Errorf("read the CPU stall to start a granted clock: %w", err)
 	}
-	return &Clock{now: now, stall: stall, started: now(), stall0: stall0}, nil
+	return &Clock{now: now, stall: stall, lastWall: now(), lastStall: stall0}, nil
 }
 
-// Span reads the interval since the clock started.
+// Span reads the interval since the clock started, accruing the granted time
+// since the last reading.
+//
+// A CUMULATIVE STALL NEVER SHRINKS. A reading below the last one is a source
+// that lost count, and granting on it would hand the bound time the processes
+// never had, so it fails the reading.
 func (c *Clock) Span() (Span, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	stall, err := c.stall()
 	if err != nil {
-		return Span{}, fmt.Errorf("read the container's CPU stall: %w", err)
+		return c.span, fmt.Errorf("read the CPU stall: %w", err)
 	}
-	return Span{Wall: c.now().Sub(c.started), Stalled: stall - c.stall0}, nil
+	if stall < c.lastStall {
+		return c.span, fmt.Errorf("the CPU stall went backwards, from %s to %s", c.lastStall, stall)
+	}
+	now := c.now()
+	wall, stalled := now.Sub(c.lastWall), stall-c.lastStall
+	c.span.Wall += wall
+	c.span.Stalled += stalled
+	c.span.Granted += max(wall-stalled, 0)
+	c.lastWall, c.lastStall = now, stall
+	return c.span, nil
 }
 
 // Reader is what Await and PollUntil read their clock through.
@@ -102,7 +121,7 @@ func Await[T any](answer <-chan T, poll <-chan time.Time, clock Reader, bound ti
 		if span, err = clock.Span(); err != nil {
 			return a, false, span, err
 		}
-		if span.Granted() > bound {
+		if span.Granted > bound {
 			return a, false, span, ErrBoundRunOut
 		}
 	}
@@ -122,7 +141,7 @@ func PollUntil(poll <-chan time.Time, clock Reader, bound time.Duration, attempt
 		if err != nil {
 			return span, err
 		}
-		if span.Granted() > bound {
+		if span.Granted > bound {
 			return span, ErrBoundRunOut
 		}
 		<-poll

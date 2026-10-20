@@ -7,41 +7,15 @@ import (
 	"time"
 )
 
-func TestSpanChargesOnlyUnstalledTime(t *testing.T) {
-	tests := []struct {
-		name string
-		span Span
-		want time.Duration
-	}{
-		{name: "an unstalled interval is granted its wall time", span: Span{Wall: 3 * time.Second}, want: 3 * time.Second},
-		{name: "a stalled interval is granted only the rest", span: Span{Wall: 3196 * time.Millisecond, Stalled: 2900 * time.Millisecond}, want: 296 * time.Millisecond},
-		{name: "a fully stalled interval is granted nothing", span: Span{Wall: time.Second, Stalled: time.Second}, want: 0},
-		{name: "clock skew past a full stall reads as nothing", span: Span{Wall: time.Second, Stalled: time.Second + time.Microsecond}, want: 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: tt.span.
-
-			// Act
-			got := tt.span.Granted()
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("Granted() = %s, want %s", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestSpanStringNamesAllThreeTimes(t *testing.T) {
 	// Arrange
-	span := Span{Wall: 3196 * time.Millisecond, Stalled: 2900 * time.Millisecond}
+	span := Span{Wall: 3196 * time.Millisecond, Stalled: 2900 * time.Millisecond, Granted: 296 * time.Millisecond}
 
 	// Act
 	got := span.String()
 
 	// Assert
-	want := "296ms granted of 3.196s wall, 2.9s of it with a container task waiting for a CPU"
+	want := "296ms granted of 3.196s wall, the processes it covers waiting 2.9s for a CPU"
 	if got != want {
 		t.Fatalf("String() = %q, want %q", got, want)
 	}
@@ -58,19 +32,36 @@ func (f *fakeClockSource) stalled() (time.Duration, error) {
 	return f.stall, f.err
 }
 
-func TestClockMeasuresFromItsStart(t *testing.T) {
+// reading is one step a test moves a fakeClockSource by before reading the
+// clock.
+type reading struct {
+	wall, stall time.Duration
+}
+
+func TestClockAccruesGrantedTimeReadingByReading(t *testing.T) {
 	tests := []struct {
-		name          string
-		advanceWall   time.Duration
-		advanceStall  time.Duration
-		failLater     error
-		wantSpan      Span
-		wantErrSubstr string
+		name     string
+		readings []reading
+		want     Span
 	}{
-		{name: "the span counts only what happened after the start", advanceWall: 2 * time.Second, advanceStall: 500 * time.Millisecond,
-			wantSpan: Span{Wall: 2 * time.Second, Stalled: 500 * time.Millisecond}},
-		{name: "a stall that cannot be read later fails the reading", advanceWall: time.Second, failLater: errors.New("EIO"),
-			wantErrSubstr: "read the container's CPU stall: EIO"},
+		{name: "an unstalled interval is granted its wall time",
+			readings: []reading{{wall: 3 * time.Second}},
+			want:     Span{Wall: 3 * time.Second, Granted: 3 * time.Second}},
+		{name: "a stalled interval is granted only the rest",
+			readings: []reading{{wall: 3196 * time.Millisecond, stall: 2900 * time.Millisecond}},
+			want:     Span{Wall: 3196 * time.Millisecond, Stalled: 2900 * time.Millisecond, Granted: 296 * time.Millisecond}},
+		{name: "a fully stalled interval is granted nothing",
+			readings: []reading{{wall: time.Second, stall: time.Second}},
+			want:     Span{Wall: time.Second, Stalled: time.Second}},
+		{name: "clock skew past a full stall reads as nothing",
+			readings: []reading{{wall: time.Second, stall: time.Second + time.Microsecond}},
+			want:     Span{Wall: time.Second, Stalled: time.Second + time.Microsecond}},
+		{name: "a summed stall past wall grants nothing without cancelling the granted time after it",
+			readings: []reading{{wall: time.Second, stall: 4 * time.Second}, {wall: 2 * time.Second}},
+			want:     Span{Wall: 3 * time.Second, Stalled: 4 * time.Second, Granted: 2 * time.Second}},
+		{name: "a summed stall past wall grants nothing without cancelling the granted time before it",
+			readings: []reading{{wall: 2 * time.Second}, {wall: time.Second, stall: 4 * time.Second}},
+			want:     Span{Wall: 3 * time.Second, Stalled: 4 * time.Second, Granted: 2 * time.Second}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -80,7 +71,51 @@ func TestClockMeasuresFromItsStart(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Start() = %v", err)
 			}
-			src.wall += tt.advanceWall
+
+			// Act
+			var span Span
+			for _, r := range tt.readings {
+				src.wall += r.wall
+				src.stall += r.stall
+				if span, err = clock.Span(); err != nil {
+					t.Fatalf("Span() = %v", err)
+				}
+			}
+
+			// Assert
+			if span != tt.want {
+				t.Fatalf("Span() = %+v, want %+v", span, tt.want)
+			}
+		})
+	}
+}
+
+func TestClockRefusesAReadingItCannotTrust(t *testing.T) {
+	tests := []struct {
+		name          string
+		advanceStall  time.Duration
+		failLater     error
+		wantErrSubstr string
+	}{
+		{name: "a stall that cannot be read later fails the reading", failLater: errors.New("EIO"),
+			wantErrSubstr: "read the CPU stall: EIO"},
+		{name: "a stall that went backwards fails the reading", advanceStall: -time.Millisecond,
+			wantErrSubstr: "the CPU stall went backwards, from 40m0s to 39m59.999s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: one good reading, then the bad one.
+			src := &fakeClockSource{wall: time.Hour, stall: 40 * time.Minute}
+			clock, err := Start(src.now, src.stalled)
+			if err != nil {
+				t.Fatalf("Start() = %v", err)
+			}
+			src.wall += time.Second
+			good, err := clock.Span()
+			if err != nil {
+				t.Fatalf("Span() = %v", err)
+			}
+			src.wall += time.Second
 			src.stall += tt.advanceStall
 			src.err = tt.failLater
 
@@ -88,14 +123,11 @@ func TestClockMeasuresFromItsStart(t *testing.T) {
 			span, err := clock.Span()
 
 			// Assert
-			if tt.wantErrSubstr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErrSubstr) {
-					t.Fatalf("Span() = %v, %v, want an error naming %q", span, err, tt.wantErrSubstr)
-				}
-				return
+			if err == nil || !strings.Contains(err.Error(), tt.wantErrSubstr) {
+				t.Fatalf("Span() = %v, %v, want an error naming %q", span, err, tt.wantErrSubstr)
 			}
-			if err != nil || span != tt.wantSpan {
-				t.Fatalf("Span() = %+v, %v, want %+v", span, err, tt.wantSpan)
+			if span != good {
+				t.Fatalf("Span() = %+v after a refused reading, want the last good one %+v", span, good)
 			}
 		})
 	}
@@ -138,9 +170,9 @@ func (c *scriptedClock) Span() (Span, error) {
 }
 
 func TestAwaitGivesUpOnlyOnGrantedTime(t *testing.T) {
-	over := Span{Wall: 4 * time.Second}
-	starved := Span{Wall: 30 * time.Second, Stalled: 29 * time.Second}
-	under := Span{Wall: time.Second}
+	over := Span{Wall: 4 * time.Second, Granted: 4 * time.Second}
+	starved := Span{Wall: 30 * time.Second, Stalled: 29 * time.Second, Granted: time.Second}
+	under := Span{Wall: time.Second, Granted: time.Second}
 	tests := []struct {
 		name         string
 		clock        *scriptedClock
@@ -204,9 +236,9 @@ func TestAwaitGivesUpOnlyOnGrantedTime(t *testing.T) {
 }
 
 func TestPollUntilGivesUpOnlyOnGrantedTime(t *testing.T) {
-	over := Span{Wall: 6 * time.Second}
-	starved := Span{Wall: 60 * time.Second, Stalled: 58 * time.Second}
-	under := Span{Wall: time.Second}
+	over := Span{Wall: 6 * time.Second, Granted: 6 * time.Second}
+	starved := Span{Wall: 60 * time.Second, Stalled: 58 * time.Second, Granted: 2 * time.Second}
+	under := Span{Wall: time.Second, Granted: time.Second}
 	tests := []struct {
 		name         string
 		clock        *scriptedClock
