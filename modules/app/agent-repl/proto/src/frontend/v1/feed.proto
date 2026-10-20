@@ -357,7 +357,19 @@ message FeedRow {
 // the fact; the row's `turn` names the turn.
 message FeedTurnEarlierSteps {}
 
-message FeedRowRemoved {}
+message FeedRowRemoved {
+  // PRESENT EXACTLY WHEN THE ROW WAS REMOVED BECAUSE ITS TURN IS BEING ROLLED
+  // BACK (agentrepl.v1.RollBack): withheld when the cut is made, or retired
+  // for good when the rollback settles. The client parks the ROOT feed at its
+  // tail on one, so the reader lands where the conversation now ends (owner
+  // request, 2026-10-20). Every other retirement leaves it UNSET and moves
+  // nothing.
+  optional FeedRowRolledBack rolled_back = 1;
+}
+
+// The removed row's turn is being rolled back. DELIBERATELY EMPTY: the field's
+// presence is the fact.
+message FeedRowRolledBack {}
 
 // A ROW'S PLACE IN ITS FEED: an opaque key the daemon mints at the row's first
 // draw. The daemon owns the order; a client draws a feed's rows in ascending
