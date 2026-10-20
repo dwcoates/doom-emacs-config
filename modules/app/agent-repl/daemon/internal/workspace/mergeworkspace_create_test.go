@@ -43,7 +43,7 @@ var theLanding = wsm.MergeOrigin{TargetDir: "/decided/target", ParentBranch: "de
 // theLanding.
 func landedOrigin(requester ids.WorkspaceID) wsm.MergeOrigin {
 	origin := theLanding
-	origin.Requester, origin.Request = requester, "request-1"
+	origin.Requester, origin.Request, origin.Maker = requester, "request-1", requester
 	return origin
 }
 
@@ -56,7 +56,9 @@ func mergeWorkspaceSpec(t *testing.T, f *fixture, requester ids.WorkspaceID) Cre
 	return CreateSpec{
 		RepoDir:   mainWorktree(t, f),
 		BaseRef:   "ABC/sample",
+		Parent:    &requester,
 		ForkFrom:  &requester,
+		Requester: &requester,
 		MergeOf:   &origin,
 		MergeName: "reconnect-fix",
 	}
@@ -400,5 +402,28 @@ func TestStartMergeWorkspace(t *testing.T) {
 				t.Fatalf("start calls = %v, want started %v", f.fleet.startCalls, tt.wantStarted)
 			}
 		})
+	}
+}
+
+func TestCreateLeavesAMergeWorkspacesSessionForItsFirstTurn(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester, _ := mergeRequester(t, f)
+	spec := mergeWorkspaceSpec(t, f, requester.ID)
+	f.db.sessions[requester.ID] = wsm.Session{Workspace: requester.ID, VendorSessionID: "vendor-requester"}
+
+	// Act
+	created, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert: the fork is owed and nothing is started; the first turn's
+	// bring-up makes the fork from the maker as it then stands.
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(f.fleet.started) != 0 {
+		t.Fatalf("sessions started = %v, want none until the merge needs a turn", f.fleet.started)
+	}
+	if got := f.db.pendingForks[created.ID]; got.Parent != requester.ID {
+		t.Fatalf("pending fork = %+v, want a fork of the maker %s owed", got, requester.ID)
 	}
 }

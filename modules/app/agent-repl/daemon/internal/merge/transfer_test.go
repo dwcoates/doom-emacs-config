@@ -320,7 +320,7 @@ func TestAMergeThatCannotBePutInLineHoldsNoBubble(t *testing.T) {
 	h.db.queueErr = errors.New("disk full")
 
 	// Act.
-	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
+	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
 
 	// Assert.
 	if err == nil {

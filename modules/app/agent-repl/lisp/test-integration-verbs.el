@@ -356,7 +356,7 @@ round-trip exists."
                        "fix the flake"))))))
 
 (ert-deftest agent-repl-itest-verbs-create-one-shot-sends-its-prompt-alone ()
-  "The one-shot form rides the request as its prompt and nothing else.
+  "The one-shot form rides the request as its prompt and its topology alone.
 ONE-SHOTS ride the wire now: Emacs supplies {prompt, model, parentage}
 and the DAEMON owns naming, worktree and decoration.  There is no finish
 choice at all -- completion is the repository's own directive."
@@ -372,53 +372,51 @@ choice at all -- completion is the repository's own directive."
       (let ((one-shot (agent-repl-itest--body-field
                        (agent-repl-itest-verbs--body daemon "CreateWorkspace") 'oneShot)))
         (should (assq 'prompt one-shot))
-        (should (equal (mapcar #'car one-shot) '(prompt)))))))
+        (should (equal (mapcar #'car one-shot) '(prompt topology)))))))
 
-(ert-deftest agent-repl-itest-verbs-create-parent-carries-the-parents-ref ()
-  "A child workspace names its parent by ref.
-Parentage is a creation fact the daemon derives everything else from; the
+(ert-deftest agent-repl-itest-verbs-create-owner-carries-the-owners-ref ()
+  "A child workspace names its owner by ref, inside its topology.
+Ownership is a creation fact the daemon derives everything else from; the
 ref is echoed, never rebuilt from a path."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
       (agent-repl-verb-create agent-repl-itest-verbs--repo :standard
-                              :parent ref)
+                              :owner ref :fork-of ref)
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
       (should (equal (agent-repl-itest--body-field
                       (agent-repl-itest-verbs--body daemon "CreateWorkspace")
-                      'parent 'workspace 'id)
+                      'standard 'topology 'child 'owner 'id)
                      (plist-get ref :id))))))
 
-(ert-deftest agent-repl-itest-verbs-create-fork-is-a-presence-only-fact ()
-  "`fork' is presence-only: set as an empty message, absent otherwise.
-An empty message says the fact is TRUE by being there; there is no
-boolean to get backwards."
+(ert-deftest agent-repl-itest-verbs-create-fork-names-its-context ()
+  "A forked context names the workspace whose conversation it copies."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
       (agent-repl-verb-create agent-repl-itest-verbs--repo :standard
-                              :parent ref :fork t)
-      (agent-repl-itest--await-call daemon "CreateWorkspace")
-      ;; Assert: `{}' — present and empty.
-      (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
-        (should (assq 'fork (agent-repl-itest--body-field body 'parent)))))))
-
-(ert-deftest agent-repl-itest-verbs-create-without-fork-omits-it ()
-  "Without a fork, the field is ABSENT — never an empty-but-present marker.
-PRESENCE, NEVER SENTINELS: the absence is the whole statement."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-workspace daemon ref
-      ;; Act.
-      (agent-repl-verb-create agent-repl-itest-verbs--repo :standard
-                              :parent ref)
+                              :fork-of ref)
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
-        (should-not (assq 'fork (agent-repl-itest--body-field body 'parent)))))))
+        (should (equal (agent-repl-itest--body-field body 'contextOrigin 'fork 'workspace 'id)
+                       (plist-get ref :id)))))))
+
+(ert-deftest agent-repl-itest-verbs-create-without-fork-is-fresh ()
+  "Without a fork, the context origin says FRESH: nothing is implied."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      ;; Act.
+      (ignore ref)
+      (agent-repl-verb-create agent-repl-itest-verbs--repo :standard)
+      (agent-repl-itest--await-call daemon "CreateWorkspace")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
+        (should (assq 'fresh (agent-repl-itest--body-field body 'contextOrigin)))))))
 
 (ert-deftest agent-repl-itest-verbs-create-priority-rides-as-an-arm ()
   "A creation priority rides as the WorkspacePriority level ARM.
@@ -902,23 +900,6 @@ presence itself is the consent, never a boolean to get backwards."
       ;; Assert: present, and empty (`{}').
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
         (should (assq 'allowUngated body))))))
-
-(ert-deftest agent-repl-itest-verbs-create-standard-sends-the-base-ref ()
-  "The standard form's base ref rides `standard.baseRef'.
-Pins \"CreateWorkspaceRequest ... standard.base_ref\" (elisp-fanout.md
-§5): an absent base ref means the repo's default resolution, so a SET
-one must actually reach the daemon to be honored."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-primary daemon conn
-      (ignore conn)
-      ;; Act.
-      (agent-repl-verb-create agent-repl-itest-verbs--repo
-                              :standard :base-ref "main")
-      (agent-repl-itest--await-call daemon "CreateWorkspace")
-      ;; Assert.
-      (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
-        (should (equal (agent-repl-itest--body-field body 'standard 'baseRef) "main"))))))
 
 (ert-deftest agent-repl-itest-verbs-create-standard-sends-the-name ()
   "The standard form's user-supplied name rides `standard.name'.
@@ -1535,29 +1516,6 @@ and logs the same fields in the context, so both are asserted."
                  messages))
         (should (seq-some (lambda (m) (string-match-p "/x" m)) messages))))))
 
-;; audit-2 #26
-(ert-deftest agent-repl-itest-verbs-fork-without-a-parent-refuses-before-send ()
-  "A fork with NO parent is refused before send, with ZERO daemon calls.
-`endpoint_create_workspace.proto': \"a fork without a parent is
-unrepresentable\" — the fact lives INSIDE the parent by construction.
-Silently dropping the fork would create an ordinary workspace where the
-caller asked for a forked conversation, which is worse than a refusal.
-
-The signal is `user-error', the kind fanout §9 gives every verbs-layer
-pre-send guard (\"nil -> `user-error'\" for a missing ref, and see
-`agent-repl-itest-verbs-unregistered-workspace-refuses-before-send').  The
-neighbouring `agent-repl-wire-error' refusals are raised one layer down, by
-the codec, on a request the verb did build; this one never reaches it."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-primary daemon conn
-      (ignore conn)
-      ;; Act / Assert.
-      (should-error
-       (agent-repl-verb-create agent-repl-itest-verbs--repo :standard :fork t)
-       :type 'user-error)
-      (should (null (agent-repl-itest--calls daemon "CreateWorkspace"))))))
-
 ;; audit-2 #27
 (ert-deftest agent-repl-itest-verbs-shutdown-now-without-a-reason-refuses-before-send ()
   "An immediate shutdown with NO reason is refused before send.
@@ -1906,8 +1864,8 @@ Mirrors pause's refusal exactly, on the other admin verb."
 ;;;; ---- #53: the interactive create family
 
 ;; audit-3 #53(a)
-(ert-deftest agent-repl-itest-verbs-create-workspace-interactive-omits-parent ()
-  "`agent-repl-create-workspace' omits `parent' entirely.
+(ert-deftest agent-repl-itest-verbs-create-workspace-interactive-is-primary ()
+  "`agent-repl-create-workspace' states a PRIMARY topology.
 Pins fanout §9 \"the interactive create family\": a
 plain create is a TOP-LEVEL workspace, never implicitly parented onto the
 workspace the command was invoked from.  No git/gh boundary is reached by
@@ -1936,12 +1894,14 @@ are stubbed."
           (agent-repl-create-workspace)
           (agent-repl-itest--await-call daemon "CreateWorkspace")
           ;; Assert.
-          (should-not (assq 'parent (agent-repl-itest-verbs--body daemon "CreateWorkspace"))))))))
+          (should (assq 'primary (agent-repl-itest--body-field
+                                  (agent-repl-itest-verbs--body daemon "CreateWorkspace")
+                                  'standard 'topology))))))))
 
-(ert-deftest agent-repl-itest-verbs-fork-into-primary-sends-the-fork-source-and-no-parent ()
+(ert-deftest agent-repl-itest-verbs-fork-into-primary-forks-the-context-of-a-primary ()
   "`agent-repl-fork-workspace-into-primary' copies the conversation into a
-TOP-LEVEL workspace: `forkSource.workspace.id' echoes the CURRENT
-workspace's ref verbatim, and no `parent' rides beside it."
+PRIMARY workspace: `contextOrigin.fork.workspace.id' echoes the CURRENT
+workspace's ref verbatim, and the topology is primary."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
@@ -1966,15 +1926,14 @@ workspace's ref verbatim, and no `parent' rides beside it."
           (agent-repl-itest--await-call daemon "CreateWorkspace")
           ;; Assert.
           (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
-            (should (equal (agent-repl-itest--body-field body 'forkSource 'workspace 'id)
+            (should (equal (agent-repl-itest--body-field body 'contextOrigin 'fork 'workspace 'id)
                            (plist-get ref :id)))
-            (should-not (assq 'parent body))))))))
+            (should (assq 'primary (agent-repl-itest--body-field body 'standard 'topology)))))))))
 
 ;; audit-3 #53(c)
-(ert-deftest agent-repl-itest-verbs-fork-workspace-interactive-sends-parent-and-fork ()
-  "`agent-repl-fork-workspace' names the parent AND sets the presence-only fork.
-A fork without a parent is unrepresentable by construction, so this
-command's whole contract is that BOTH facts ride together."
+(ert-deftest agent-repl-itest-verbs-fork-workspace-interactive-sends-owner-and-fork ()
+  "`agent-repl-fork-workspace' names the current workspace as owner AND as
+the forked context: a child forked from its owner, which lands itself."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
@@ -2000,9 +1959,10 @@ command's whole contract is that BOTH facts ride together."
           (agent-repl-itest--await-call daemon "CreateWorkspace")
           ;; Assert.
           (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
-            (should (equal (agent-repl-itest--body-field body 'parent 'workspace 'id)
+            (should (equal (agent-repl-itest--body-field body 'standard 'topology 'child 'owner 'id)
                            (plist-get ref :id)))
-            (should (assq 'fork (agent-repl-itest--body-field body 'parent)))))))))
+            (should (equal (agent-repl-itest--body-field body 'contextOrigin 'fork 'workspace 'id)
+                           (plist-get ref :id)))))))))
 
 ;; audit-3 #53(e)
 (ert-deftest agent-repl-itest-verbs-create-oneshot-with-a-model-prefix-sends-the-chosen-model ()

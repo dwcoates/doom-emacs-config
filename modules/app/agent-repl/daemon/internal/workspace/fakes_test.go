@@ -178,6 +178,14 @@ type fakeDB struct {
 	resolvedForks    []resolvedFork
 	bindSessionCalls []wsm.Session
 	closedFlags      map[ids.WorkspaceID]bool
+	// onMarkSelfClose runs once a self-close mark is written, for a test that
+	// moves the session between the mark and the recheck; markSelfCloseErr
+	// fails the mark and takeSelfCloseErr the take.
+	onMarkSelfClose  func()
+	setOneShotErr    error
+	setAwaitingErr   error
+	markSelfCloseErr error
+	takeSelfCloseErr error
 	// reopened records every Reopen, in order.
 	reopened []ids.WorkspaceID
 	// closures is every close record MarkClosed was handed, in order, per
@@ -584,6 +592,64 @@ func (d *fakeDB) SwapPlaces(_ context.Context, ws, target ids.WorkspaceID) error
 	return nil
 }
 
+// SetOneShot marks the fake's creation job; a workspace with none is
+// wsm.ErrNotFound, as the store answers. setOneShotErr fails it.
+func (d *fakeDB) SetOneShot(_ context.Context, id ids.WorkspaceID, oneShot bool) error {
+	if d.setOneShotErr != nil {
+		return d.setOneShotErr
+	}
+	job, ok := d.jobs[id]
+	if !ok {
+		return fmt.Errorf("fake: no creation job for %s: %w", id, wsm.ErrNotFound)
+	}
+	job.OneShot = oneShot
+	d.jobs[id] = job
+	ws := d.workspaces[id]
+	ws.OneShot = oneShot
+	d.workspaces[id] = ws
+	return nil
+}
+
+// SetAwaiting marks the fake's record; setAwaitingErr fails it.
+func (d *fakeDB) SetAwaiting(_ context.Context, id ids.WorkspaceID, awaited *ids.WorkspaceID) error {
+	if d.setAwaitingErr != nil {
+		return d.setAwaitingErr
+	}
+	ws := d.workspaces[id]
+	ws.Awaiting = awaited
+	d.workspaces[id] = ws
+	return nil
+}
+
+// MarkCloseWhenTurnEnds marks the fake's record.
+func (d *fakeDB) MarkCloseWhenTurnEnds(_ context.Context, id ids.WorkspaceID, at time.Time) error {
+	if d.markSelfCloseErr != nil {
+		return d.markSelfCloseErr
+	}
+	ws, ok := d.workspaces[id]
+	if !ok {
+		return fmt.Errorf("fake: no such workspace %s: %w", id, wsm.ErrNotFound)
+	}
+	ws.CloseWhenTurnEnds = &at
+	d.workspaces[id] = ws
+	if d.onMarkSelfClose != nil {
+		d.onMarkSelfClose()
+	}
+	return nil
+}
+
+// TakeCloseWhenTurnEnds clears the fake's mark, answering whether one stood.
+func (d *fakeDB) TakeCloseWhenTurnEnds(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	if d.takeSelfCloseErr != nil {
+		return false, d.takeSelfCloseErr
+	}
+	ws := d.workspaces[id]
+	taken := ws.CloseWhenTurnEnds != nil
+	ws.CloseWhenTurnEnds = nil
+	d.workspaces[id] = ws
+	return taken, nil
+}
+
 func (d *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.Closure) error {
 	if d.setClosedErr != nil {
 		return d.setClosedErr
@@ -933,6 +999,9 @@ type fakeGit struct {
 
 	created   []createdWorktree
 	createErr error
+	// fetched records each Fetch as "dir remote"; fetchErr fails every one.
+	fetched  []string
+	fetchErr error
 	nuked     []nukedWorktree
 	nukeErr   error
 
@@ -1040,6 +1109,11 @@ func (g *fakeGit) CurrentBranch(context.Context, string) (string, error) {
 
 func (g *fakeGit) DefaultBranch(context.Context, string) (string, error) {
 	return g.defaultBranch, g.defaultErr
+}
+
+func (g *fakeGit) Fetch(_ context.Context, dir, remote string) error {
+	g.fetched = append(g.fetched, dir+" "+remote)
+	return g.fetchErr
 }
 
 func (g *fakeGit) CreateWorktree(_ context.Context, repoDir, branch, baseRef, worktreeDir string) error {
@@ -1358,13 +1432,13 @@ func (m *fakeMerge) OnWorkspaceClosed(_ context.Context, ws ids.WorkspaceID) {
 	m.closed = append(m.closed, ws)
 }
 
-func (m *fakeMerge) Enqueue(_ context.Context, req merge.Request) error {
+func (m *fakeMerge) Enqueue(_ context.Context, req merge.Request) (merge.Enqueued, error) {
 	ws := req.Workspace
 	if m.enqueueErr != nil {
-		return m.enqueueErr
+		return merge.Enqueued{}, m.enqueueErr
 	}
 	m.enqueued = append(m.enqueued, ws)
-	return nil
+	return merge.Enqueued{}, nil
 }
 
 // fakeRollout is a rollout.Controller.
@@ -1593,6 +1667,11 @@ func (f *fakeFeed) UpsertSynthesized(_ ids.WorkspaceID, _ feedid.Feed, row *fron
 // fakeFooter is a footer.Resolver.
 type fakeFooter struct {
 	footer.Resolver
+
+	// statuses is the status each workspace's strip answers.
+	statuses map[ids.WorkspaceID]*frontendv1.FooterStatus
+	// awaiting is the awaited name each workspace's strip was last told.
+	awaiting map[ids.WorkspaceID]string
 
 	// mainAgents is every main agent the footer was told, and historyPages the
 	// entry count of every page it was handed, in order.
@@ -2303,6 +2382,17 @@ func (c *fakeCards) ColdGate(ids.WorkspaceID) (ServedColdGate, bool) {
 	return *c.coldGate, true
 }
 
+// SetAwaiting records the awaited name the strip was told.
+func (f *fakeFooter) SetAwaiting(ws ids.WorkspaceID, name string) {
+	if f.awaiting == nil {
+		f.awaiting = map[ids.WorkspaceID]string{}
+	}
+	f.awaiting[ws] = name
+}
+
+// Status answers the status seeded for WS, nil when none was.
+func (f *fakeFooter) Status(ws ids.WorkspaceID) *frontendv1.FooterStatus { return f.statuses[ws] }
+
 // EndColdGate records the remediated gate retired.
 func (c *fakeCards) EndColdGate(_ ids.WorkspaceID, vendorSessionID string) {
 	c.ended = append(c.ended, vendorSessionID)
@@ -2526,10 +2616,25 @@ type fixture struct {
 	running Running
 	// hasSession gates both the freeness probe and the shim resolver.
 	hasSession bool
+	// derived is every derived-workspace event the verbs reported.
+	derived *fakeDerived
 	// briefs is what the injected prompt loader answers, by brief name.
 	briefs map[string]prompts.Prompt
 	// briefErr fails every brief load.
 	briefErr error
+}
+
+// derivedEvent is one reported creation of a derived workspace.
+type derivedEvent struct {
+	workspace   ids.WorkspaceID
+	ownerNotice string
+}
+
+// fakeDerived records every reported creation.
+type fakeDerived struct{ events []derivedEvent }
+
+func (d *fakeDerived) ReportCreated(ws wsm.Workspace, ownerNotice string) {
+	d.events = append(d.events, derivedEvent{workspace: ws.ID, ownerNotice: ownerNotice})
 }
 
 // newFixture arranges a verb surface with a live session, an owned workspace
@@ -2559,6 +2664,7 @@ func newFixture(t *testing.T) *fixture {
 		log:       newFakeSurfaces(),
 		headless:  &fakeHeadless{answers: []headlessAnswer{{text: FixtureMintedName}}},
 		briefs:    map[string]prompts.Prompt{},
+		derived:   &fakeDerived{},
 	}
 	f.queue.db = f.db
 	// EVERY UNNAMED CREATE NAMES THROUGH THE MODEL, so the naming brief is part
@@ -2575,7 +2681,7 @@ func newFixture(t *testing.T) *fixture {
 	f.hasSession = true
 
 	verbs, err := New(Deps{
-		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
+		DB: f.db, Derived: f.derived, Git: f.git, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings}, Browser: f.browser,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet,
 		Headless:   f.headless,
@@ -2712,6 +2818,25 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 	// whose main worktree is gone (`withoutGoneRepositories'). The workspace's
 	// own parent is one the caller's `t.TempDir()' already made.
 	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Dir: filepath.Dir(dir)})
+	return ws
+}
+
+// workspaceInRepo registers workspace ID at a fresh directory, in the
+// repository whose main worktree is repoDir (as mainWorktree registered it),
+// so a create in that repository may name it as owner, fork source or
+// requester.
+func (f *fixture) workspaceInRepo(t *testing.T, id ids.WorkspaceID, repoDir string) wsm.Workspace {
+	t.Helper()
+	repo, found := wsm.RepositoryAt(f.db.repositories, repoDir)
+	if !found {
+		t.Fatalf("no repository is registered at %s", repoDir)
+	}
+	dir, err := normalizeDir(t.TempDir())
+	if err != nil {
+		t.Fatalf("normalizeDir: %v", err)
+	}
+	ws := wsm.Workspace{ID: id, Dir: dir, Repo: repo.ID, Name: string(id), Branch: "ABC/" + string(id)}
+	f.db.with(ws)
 	return ws
 }
 

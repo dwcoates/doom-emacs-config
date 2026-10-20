@@ -27,7 +27,7 @@ func registerMergeWorkspace(t *testing.T, s *store, requester WorkspaceID, reque
 // requestDetached records a detached own-branch request for ws in repo.
 func requestDetached(t *testing.T, s *store, repo RepoKey, ws WorkspaceID, request DetachedMergeID) {
 	t.Helper()
-	source := MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature", Detach: request, DetachName: "sample"}
+	source := MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature", Detach: request, DetachMaker: "maker", DetachName: "sample"}
 	if err := s.RequestMerge(context.Background(), repo, ws, source, time.Unix(100, 0)); err != nil {
 		t.Fatalf("RequestMerge: %v", err)
 	}
@@ -138,9 +138,9 @@ func TestADetachedSourceMergesANamedBranchAndNeverKeepsTheRequesterOpen(t *testi
 		name   string
 		source MergeSource
 	}{
-		{name: "keep open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true, Detach: "d", DetachName: "n"}},
-		{name: "another workspace", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "w", Detach: "d", DetachName: "n"}},
-		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream, Detach: "d", DetachName: "n"}},
+		{name: "keep open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true, Detach: "d", DetachMaker: "maker", DetachName: "n"}},
+		{name: "another workspace", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "w", Detach: "d", DetachMaker: "maker", DetachName: "n"}},
+		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream, Detach: "d", DetachMaker: "maker", DetachName: "n"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -159,10 +159,10 @@ func TestADetachedSourceOfANamedBranchIsValid(t *testing.T) {
 		name   string
 		source MergeSource
 	}{
-		{name: "a named branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "n"}},
-		{name: "a named branch with an instruction", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "n", Pick: "rebase it"}},
-		{name: "a named branch with landing effects", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "n", CloseOnLanding: "w", CleanupWorktree: true, CleanupDir: "/x"}},
-		{name: "a request an earlier layout recorded on the requester's own branch", source: MergeSource{Kind: MergeSourceOwnBranch, Branch: "b", Detach: "d", DetachName: "n"}},
+		{name: "a named branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachMaker: "maker", DetachName: "n"}},
+		{name: "a named branch with an instruction", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachMaker: "maker", DetachName: "n", Pick: "rebase it"}},
+		{name: "a named branch with landing effects", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachMaker: "maker", DetachName: "n", CloseOnLanding: "w", CleanupWorktree: true, CleanupDir: "/x"}},
+		{name: "a request an earlier layout recorded on the requester's own branch", source: MergeSource{Kind: MergeSourceOwnBranch, Branch: "b", Detach: "d", DetachMaker: "maker", DetachName: "n"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -184,7 +184,7 @@ func TestLandingEffectsRideADetachedRequestAlone(t *testing.T) {
 	}{
 		{name: "closing another workspace in place", source: MergeSource{Kind: MergeSourceOwnBranch, CloseOnLanding: "w"}, want: "async merge's ask"},
 		{name: "cleaning up in place", source: MergeSource{Kind: MergeSourceOwnBranch, CleanupWorktree: true}, want: "async merge's ask"},
-		{name: "a cleanup directory without cleanup", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "n", CleanupDir: "/x"}, want: "only for a request that cleans up"},
+		{name: "a cleanup directory without cleanup", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachMaker: "maker", DetachName: "n", CleanupDir: "/x"}, want: "only for a request that cleans up"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -203,7 +203,7 @@ func TestADetachedRequestKeepsItsLandingEffectsInTheQueue(t *testing.T) {
 	s, _ := testStore(t)
 	requester := testWorkspace(t, s)
 	repo := RepoKey(t.TempDir())
-	source := MergeSource{Kind: MergeSourceBranch, Branch: "fix", Detach: "d", DetachName: "n", Pick: "rebase it",
+	source := MergeSource{Kind: MergeSourceBranch, Branch: "fix", Detach: "d", DetachMaker: "maker", DetachName: "n", Pick: "rebase it",
 		CloseOnLanding: "child", CleanupWorktree: true, CleanupDir: "/wt/fix"}
 
 	// Act
@@ -253,7 +253,7 @@ func TestHandOffDetachedMergeCarriesAFrontRequestToTheMergeWorkspace(t *testing.
 	requester := testWorkspace(t, s)
 	repo := RepoKey(t.TempDir())
 	request := NewDetachedMergeID()
-	source := MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature", Detach: request, DetachName: "sample-merge", Front: true}
+	source := MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature", Detach: request, DetachMaker: "maker", DetachName: "sample-merge", Front: true}
 	if err := s.RequestMerge(context.Background(), repo, requester.ID, source, time.Unix(100, 0)); err != nil {
 		t.Fatalf("RequestMerge: %v", err)
 	}

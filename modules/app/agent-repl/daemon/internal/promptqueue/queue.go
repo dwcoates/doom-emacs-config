@@ -246,6 +246,8 @@ func newQueue(deps Deps) (*queue, error) {
 		return nil, fmt.Errorf("the prompt queue needs the footer resolver")
 	case deps.Sidebar == nil:
 		return nil, fmt.Errorf("the prompt queue needs the roster resolver")
+	case deps.Edges == nil:
+		return nil, fmt.Errorf("the prompt queue needs the turn edges' observer")
 	case deps.Holds == nil:
 		return nil, fmt.Errorf("the prompt queue needs the holds resolver")
 	case deps.Client == nil:

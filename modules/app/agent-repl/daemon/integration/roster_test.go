@@ -140,7 +140,7 @@ func TestReopeningAWorkspaceRestoresItsPlace(t *testing.T) {
 	b := harness.Register(t, d, worktreeOf(t, repo, "b"))
 	cDir := worktreeOf(t, repo, "c")
 	c := harness.Register(t, d, cDir)
-	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: c})); err != nil {
+	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: c})); err != nil {
 		t.Fatalf("CloseWorkspace = error %v, want a success with nothing live", err)
 	}
 	dd := harness.Register(t, d, worktreeOf(t, repo, "d"))
@@ -456,7 +456,7 @@ func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
 	roster := d.WatchRoster()
 
 	// Act
-	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: closed})); err != nil {
+	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: closed})); err != nil {
 		t.Fatalf("CloseWorkspace = error %v, want a success with nothing live", err)
 	}
 	if _, err := d.Client().NukeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.NukeWorkspaceRequest{Workspace: nuked})); err != nil {

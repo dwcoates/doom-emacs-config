@@ -94,8 +94,8 @@ not "stop".
 5. **Consolidation sweep** over `git diff master..HEAD`; extractions as their
    own behavior-preserving commits with tests (done so far: percent gradient,
    token heat, visibility-fake test helper).
-6. **Land through the merge queue** (`/merge-queue`,
-   `.claude/skills/merge-queue/SKILL.md`), NOT cherry-pick (owner,
+6. **Land through the merge queue** (`/agent-repl-merge-queue`,
+   `.claude/skills/agent-repl-merge-queue/SKILL.md`), NOT cherry-pick (owner,
    2026-09-30). On park/fail/refusal report and stop.
 7. **Bounce all systems**: `bin/build-frontend.sh` + restart agent-repld;
    build shim-store and shim-claude-sidecar into `~/.cache/agent-repl/bin` +

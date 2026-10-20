@@ -86,6 +86,8 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	if err := v.validateCreate(global, spec); err != nil {
 		return wsm.Workspace{}, err
 	}
+	global = global.With(dlog.Context{"owner": ids.Optional(spec.Parent), "fork_from": ids.Optional(spec.ForkFrom),
+		"requester": ids.Optional(spec.Requester), "owner_lands": spec.OwnerLands()})
 
 	repoDir, err := normalizeDir(spec.RepoDir)
 	if err != nil {
@@ -149,6 +151,13 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 			fmt.Sprintf("no repository is registered at %q", repoDir), true)
 	}
 
+	// THE DERIVATION IS CHECKED BEFORE ANYTHING IS SPENT: an owner, a fork
+	// source or a requester this repository does not hold is refused before
+	// the naming call and before git is touched.
+	if err := v.checkDerivation(ctx, global, spec, repoDir); err != nil {
+		return wsm.Workspace{}, err
+	}
+
 	// A ONE-SHOT RUNS THE REPOSITORY'S OWN POLICY, so the policy is resolved
 	// and required HERE — before the id is minted, before the NAMING CALL is
 	// made, before the creation job is recorded, before git is touched. A
@@ -201,12 +210,8 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		return wsm.Workspace{}, fmt.Errorf("create %q: default branch: %w", branch, err)
 	}
 	// A WORKSPACE IS CUT FROM WHAT IT MERGES INTO. A child starts from its
-	// parent's tip and inherits the parent's priority; a top-level workspace
-	// starts from the primary branch, or from an explicit base already on it.
-	spec, err = v.settleParentAndBase(ctx, global, spec, repoDir, defaultBranch, origin)
-	if err != nil {
-		return wsm.Workspace{}, err
-	}
+	// owner's tip and inherits the owner's priority; a top-level workspace
+	// starts from the primary branch's tip.
 	parent := spec.parentWorkspace()
 	priority := spec.Priority
 	baseRef := spec.BaseRef
@@ -236,16 +241,25 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	if baseRef == "" {
 		baseRef = defaultBranch
 	}
+	// A WORKSPACE CUT FROM ORIGIN starts at origin's primary branch, fetched
+	// now, and lands onto the local primary branch like any primary
+	// workspace.
+	if spec.FromOrigin {
+		if parent != nil {
+			panic(fmt.Sprintf("workspace: create %q is a child of %q and cut from origin; only a primary workspace is cut from the primary branch", branch, *parent))
+		}
+		if err := v.deps.Git.Fetch(ctx, repoDir, originRemote); err != nil {
+			return wsm.Workspace{}, refuseWith(global, "CreateWorkspace", ArmOriginFetchFailed,
+				fmt.Sprintf("origin's primary branch could not be fetched in %s", repoDir), false,
+				map[string]any{"detail": err.Error()})
+		}
+		baseRef = originRemote + "/" + defaultBranch
+	}
 	// A base ref that does not resolve is REFUSED before anything is recorded
 	// or materialized: git would otherwise fail halfway through `worktree add`
 	// and leave the creation job standing for a workspace that cannot exist.
 	if _, err := v.resolveBase(ctx, global, repoDir, baseRef); err != nil {
 		return wsm.Workspace{}, err
-	}
-	if parent == nil && spec.BaseRef != "" {
-		if err := v.requireOnPrimary(ctx, global, repoDir, baseRef, defaultBranch); err != nil {
-			return wsm.Workspace{}, fmt.Errorf("create %q: %w", branch, err)
-		}
 	}
 
 	// A MERGE WORKSPACE RUNS ONLY THE ACTIONS ITS REQUEST NAMED (owner
@@ -325,6 +339,9 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		RepoDir:       repoDir,
 		DefaultBranch: defaultBranch,
 		MergeOf:       spec.MergeOf,
+		OwnerLands:    spec.OwnerLands(),
+		ContextFrom:   (*wsm.WorkspaceID)(spec.ForkFrom),
+		RequestedBy:   (*wsm.WorkspaceID)(spec.Requester),
 		// The priority rides the insert, because it decides the place the
 		// workspace lands on.
 		Priority: priority,
@@ -391,9 +408,19 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		}
 	}
 
-	if err := v.deps.Sessions.Start(ctx, record.ID); err != nil {
-		log.Error(opCreate, "the session did not come up", dlog.Context{"cause": err.Error()})
-		return wsm.Workspace{}, fmt.Errorf("create %q: start the session: %w", branch, err)
+	// A MERGE WORKSPACE'S SESSION COMES UP ONLY WHEN A TURN FIRST NEEDS IT
+	// (its pick at the head of the queue, or a repair): the bring-up is what
+	// makes the fork it owes, so its context is its maker's as it stands when
+	// the merge has started, never as it stood when the merge was asked for.
+	// A merge that needs no turn never forks at all.
+	if spec.MergeOf == nil {
+		if err := v.deps.Sessions.Start(ctx, record.ID); err != nil {
+			log.Error(opCreate, "the session did not come up", dlog.Context{"cause": err.Error()})
+			return wsm.Workspace{}, fmt.Errorf("create %q: start the session: %w", branch, err)
+		}
+	} else {
+		log.Info(opCreate, "created a merge workspace whose session comes up when its merge first needs a turn", dlog.Context{
+			"requester": string(spec.MergeOf.Requester), "maker": string(spec.MergeOf.Maker)})
 	}
 
 	if err := v.submitInitialPrompt(ctx, log, record, spec, policy); err != nil {
@@ -404,6 +431,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		"branch": branch, "dir": record.Dir, "one_shot": spec.OneShot,
 	})
 	v.republishRegistry(ctx, log, opCreate)
+	v.deps.Derived.ReportCreated(record, spec.OwnerNotice)
 	return record, nil
 }
 
@@ -422,11 +450,17 @@ func mintedPermissionMode(requested string) string {
 // validateCreate refuses the forms that cannot be built, before anything is
 // minted or written.
 func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
+	// A BASE IS A MERGE WORKSPACE'S ALONE: every other workspace is cut from
+	// its source's tip, which no request names.
+	if spec.BaseRef != "" && spec.MergeOf == nil {
+		log.Error(opCreate, "a create spec names a base outside a merge workspace", dlog.Context{"base_ref": spec.BaseRef})
+		return fmt.Errorf("create: only a merge workspace is cut from a named base, and this create is not one (base %q)", spec.BaseRef)
+	}
 	// A MERGE WORKSPACE IS ONLY EVER ASKED FOR BY THE DAEMON'S OWN DETACHED
 	// MERGE, so a spec that contradicts itself is a defect in that caller, not
-	// a request to refuse.
-	if spec.MergeOf != nil && (spec.ForkFrom == nil || *spec.ForkFrom != spec.MergeOf.Requester ||
-		(spec.Parent != nil && *spec.Parent != spec.MergeOf.Requester) || spec.MergeOf.ForkHead == "" ||
+	// a request to refuse. It nests under its requester and forks its maker.
+	if spec.MergeOf != nil && (spec.ForkFrom == nil || spec.Parent == nil || *spec.Parent != spec.MergeOf.Requester || spec.MergeOf.ForkHead == "" ||
+		spec.OwnerNotice != "" ||
 		spec.OneShot || strings.TrimSpace(spec.InitialPrompt) != "" || strings.TrimSpace(spec.Name) != "") {
 		log.Error(opCreate, "a merge workspace's create spec contradicts itself", dlog.Context{
 			"requester": string(spec.MergeOf.Requester), "request": string(spec.MergeOf.Request), "fork_head": spec.MergeOf.ForkHead,
@@ -653,26 +687,30 @@ func (v *verbs) mergeTargetDir(ctx context.Context, repoDir string, parent *ids.
 }
 
 // forkRefusalArm is the arm a fork whose source has no conversation is refused
-// on: the child fork's, or the fork into the primary branch's.
+// on, whichever workspace the fork names.
 func (s CreateSpec) forkRefusalArm() string {
-	if s.ForkIntoPrimary {
-		return ArmForkSourceHasNoConversation
-	}
-	return ArmForkParentHasNoConversation
+	return ArmForkSourceHasNoConversation
 }
 
-// parentWorkspace answers the workspace this create was spawned from, nil when
-// it was spawned from none. A child fork names its parent by construction, so a
-// spec carrying only ForkFrom still has one, unless it is a fork into the
-// primary branch, which has no parent at all.
+// parentWorkspace answers the workspace this create's branch is cut from and
+// lands into, nil for the primary branch. It is Parent alone: a fork never
+// decides the branch.
 func (s CreateSpec) parentWorkspace() *ids.WorkspaceID {
-	if s.Parent != nil {
-		return s.Parent
-	}
-	if s.ForkIntoPrimary {
-		return nil
-	}
-	return s.ForkFrom
+	return s.Parent
+}
+
+// OwnerLands reports whether this create is a child whose context is not
+// forked from its owner, which only the owner (or the user) lands. A merge
+// workspace never is: its landing is the queue's.
+func (s CreateSpec) OwnerLands() bool {
+	return s.MergeOf == nil && s.Parent != nil && (s.ForkFrom == nil || *s.ForkFrom != *s.Parent)
+}
+
+// forkedElsewhere reports whether the conversation is forked from a workspace
+// other than the branch source, which the first message's note names. A merge
+// workspace's own brief says what it is, so it carries no note.
+func (s CreateSpec) forkedElsewhere() bool {
+	return s.MergeOf == nil && s.ForkFrom != nil && (s.Parent == nil || *s.ForkFrom != *s.Parent)
 }
 
 // submitInitialPrompt sends the workspace's first message down the ONE delivery
@@ -685,8 +723,8 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 		return nil
 	}
 	text := spec.InitialPrompt
-	if spec.ForkIntoPrimary && spec.ForkFrom != nil {
-		decorated, err := v.decorateForkIntoPrimary(ctx, log, text, *spec.ForkFrom)
+	if spec.forkedElsewhere() {
+		decorated, err := v.decorateForkedElsewhere(ctx, log, text, *spec.ForkFrom, spec.Parent)
 		if err != nil {
 			return refuse(log, "CreateWorkspace", ArmBriefMissing, err.Error(), false)
 		}
@@ -760,11 +798,21 @@ func (v *verbs) CreateMergeWorkspace(ctx context.Context, requester wsm.Workspac
 		return wsm.Workspace{}, fmt.Errorf("create the merge workspace of %s: resolve %s: %w", requester.ID, base, err)
 	}
 	origin.ForkHead = head
-	from := requester.ID
+	// THE MERGE WORKSPACE NESTS UNDER ITS REQUESTER and forks its MAKER: the
+	// workspace whose context the work was done in (the subagent's spawning
+	// workspace, or the workspace that cut the branch).
+	if origin.Maker == "" {
+		v.deps.Log.Global().Error(opCreate, "a merge workspace's origin names no maker to fork", dlog.Context{
+			"requester": string(requester.ID), "request": string(origin.Request)})
+		return wsm.Workspace{}, fmt.Errorf("create the merge workspace of %s: its origin names no maker", requester.ID)
+	}
+	parent, maker := requester.ID, origin.Maker
 	return v.Create(ctx, CreateSpec{
 		RepoDir:   repoDir,
 		BaseRef:   base,
-		ForkFrom:  &from,
+		Parent:    &parent,
+		ForkFrom:  &maker,
+		Requester: &parent,
 		MergeOf:   &origin,
 		MergeName: name,
 	})
@@ -797,14 +845,31 @@ func (v *verbs) StartMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) err
 // the conversation came from another workspace, the worktree did not.
 const BriefForkIntoPrimary = "workspace-fork-into-primary-preamble"
 
-// decorateForkIntoPrimary opens a fork into the primary branch's first message
-// with the BriefForkIntoPrimary note naming the workspace the conversation came
-// from, meta-wrapped so the drawn bubble is the user's words alone. A brief that
-// will not load or splice fails the create loudly rather than sending the
-// prompt undecorated.
-func (v *verbs) decorateForkIntoPrimary(ctx context.Context, log dlog.Logger, raw string, from ids.WorkspaceID) (string, error) {
-	return v.decorateWithWorkspaceNote(ctx, log, raw, BriefForkIntoPrimary, from,
-		func(origin wsm.Workspace) map[string]string { return map[string]string{"origin": origin.Name} })
+// BriefForkedElsewhere is the note a workspace whose conversation was forked
+// from a workspace other than its branch source opens with: the conversation
+// came from that workspace, the worktree did not.
+const BriefForkedElsewhere = "workspace-forked-elsewhere-preamble"
+
+// decorateForkedElsewhere opens the first message with the BriefForkedElsewhere
+// note naming the workspace the conversation came from and what the worktree
+// was cut from instead (the primary branch, or the owner's branch),
+// meta-wrapped so the drawn bubble is the user's words alone. A brief that will
+// not load or splice fails the create loudly rather than sending the prompt
+// undecorated.
+func (v *verbs) decorateForkedElsewhere(ctx context.Context, log dlog.Logger, raw string, from ids.WorkspaceID, owner *ids.WorkspaceID) (string, error) {
+	source := "the primary branch"
+	if owner != nil {
+		record, err := v.deps.DB.Workspace(ctx, *owner)
+		if err != nil {
+			log.Error(opCreate, "could not read the owner a forked child's note names", dlog.WithCause(dlog.Context{"owner": string(*owner)}, err))
+			return "", fmt.Errorf("read the owner %q the forked-elsewhere note names: %w", *owner, err)
+		}
+		source = "the branch of the workspace `" + record.Name + "`"
+	}
+	return v.decorateWithWorkspaceNote(ctx, log, raw, BriefForkedElsewhere, from,
+		func(origin wsm.Workspace) map[string]string {
+			return map[string]string{"origin": origin.Name, "source": source}
+		})
 }
 
 // BriefOneShotContext is the note a one-shot asked for from inside another
@@ -854,83 +919,123 @@ func (v *verbs) decorateWithWorkspaceNote(
 	return prompts.Wrap(note) + raw, nil
 }
 
-// settleParentAndBase resolves a create that names BOTH a parent and an
-// explicit base ref, which only the command-file ingress sends (the rpc refuses
-// it as InvalidArgument, and a merge workspace keeps its own pair). A workspace
-// is cut from what it merges into, so the pair decides which one it is:
-//   - a base at the parent's tip is a child: the base is dropped and the child
-//     starts from the parent's tip as every child does;
-//   - a base on the primary branch is a TOP-LEVEL workspace: the parent is
-//     dropped, and a fork from it becomes a fork into the primary branch;
-//   - any other base is refused (ArmBaseRefOffPrimaryBranch), because it is
-//     neither of the two shapes a workspace can have.
-func (v *verbs) settleParentAndBase(ctx context.Context, log dlog.Logger, spec CreateSpec, repoDir, defaultBranch string, origin *wsm.MergeOrigin) (CreateSpec, error) {
-	parent := spec.parentWorkspace()
-	if origin != nil || parent == nil || spec.BaseRef == "" {
-		return spec, nil
+// checkDerivation refuses a create whose owner, forked workspace or requester
+// the registry does not hold in this repository, before anything is minted,
+// and REOPENS a closed owner that is to arbitrate the child, so the work it
+// must land has a session to land it. A merge workspace's derivation is the
+// queue's, decided at hand-off, and is not re-checked here.
+func (v *verbs) checkDerivation(ctx context.Context, log dlog.Logger, spec CreateSpec, repoDir string) error {
+	if spec.MergeOf != nil {
+		return nil
 	}
-	fields := dlog.Context{"parent": string(*parent), "base_ref": spec.BaseRef, "primary_branch": defaultBranch}
-	parentRecord, err := v.deps.DB.Workspace(ctx, *parent)
-	if err != nil {
-		log.Error(opCreate, "could not read the parent workspace", dlog.WithCause(fields, err))
-		return CreateSpec{}, fmt.Errorf("create: parent workspace %q: %w", *parent, err)
+	if spec.Requester != nil {
+		if _, err := v.deps.DB.Workspace(ctx, *spec.Requester); err != nil {
+			if errors.Is(err, wsm.ErrNotFound) {
+				return refuseWith(log, "CreateWorkspace", ArmUnknownRequester,
+					fmt.Sprintf("no workspace %q is registered to have asked", *spec.Requester), true,
+					map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(*spec.Requester)}})
+			}
+			log.Error(opCreate, "could not read the create's requester", dlog.WithCause(dlog.Context{"requester": string(*spec.Requester)}, err))
+			return fmt.Errorf("create: requester %q: %w", *spec.Requester, err)
+		}
 	}
-	base, err := v.resolveBase(ctx, log, repoDir, spec.BaseRef)
-	if err != nil {
-		return CreateSpec{}, err
+	if spec.Parent != nil {
+		owner, err := v.inRepository(ctx, log, *spec.Parent, repoDir, "owner")
+		if err != nil {
+			return err
+		}
+		if owner == nil {
+			return refuseWith(log, "CreateWorkspace", ArmUnknownOwner,
+				fmt.Sprintf("no workspace %q of this repository owns a branch to cut from", *spec.Parent), true,
+				map[string]any{"owner": &workspacev1.WorkspaceRef{Id: string(*spec.Parent)}})
+		}
 	}
-	tip, err := v.deps.Git.ResolveRef(ctx, repoDir, parentRecord.Branch)
-	if err != nil {
-		log.Error(opCreate, "could not resolve the parent's tip", dlog.WithCause(fields, err))
-		return CreateSpec{}, fmt.Errorf("create: resolve the tip of %q: %w", parentRecord.Branch, err)
+	if spec.ForkFrom != nil {
+		source, err := v.inRepository(ctx, log, *spec.ForkFrom, repoDir, "fork source")
+		if err != nil {
+			return err
+		}
+		if source == nil {
+			return refuseWith(log, "CreateWorkspace", ArmUnknownForkSource,
+				fmt.Sprintf("no workspace %q of this repository holds a conversation to fork", *spec.ForkFrom), true,
+				map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(*spec.ForkFrom)}})
+		}
 	}
-	if base == tip {
-		log.Info(opCreate, "the base is the parent's tip, so the workspace is the parent's child", fields)
-		spec.BaseRef = ""
-		return spec, nil
+	// WHO LANDS A CHILD: a child that does not carry its owner's context is
+	// the owner's to land, so it must tell the owner what is coming, and it
+	// cannot be a one-shot, which lands itself.
+	if spec.OwnerLands() && spec.OneShot {
+		return refuseWith(log, "CreateWorkspace", ArmOneShotOwnerLands,
+			"a one-shot lands itself, and a child that does not fork its owner's context is landed by its owner", false,
+			map[string]any{"owner": &workspacev1.WorkspaceRef{Id: string(*spec.Parent)}})
 	}
-	if err := v.requireOnPrimary(ctx, log, repoDir, spec.BaseRef, defaultBranch); err != nil {
-		return CreateSpec{}, fmt.Errorf("create: %w", err)
+	if spec.OwnerLands() && strings.TrimSpace(spec.OwnerNotice) == "" {
+		return refuse(log, "CreateWorkspace", ArmOwnerNoticeRequired,
+			"a child that does not fork its owner's context must carry a notice to its owner", false)
 	}
-	log.Info(opCreate, "the base is on the primary branch, so the workspace is top-level and merges into it", fields)
-	spec.Parent = nil
-	spec.ForkIntoPrimary = spec.ForkFrom != nil
-	return spec, nil
+	if !spec.OwnerLands() && spec.OwnerNotice != "" {
+		return refuse(log, "CreateWorkspace", ArmOwnerNoticeUnexpected,
+			"only a child its owner lands carries a notice to its owner", false)
+	}
+	// THE OWNER IS REOPENED ONLY ONCE THE CREATE IS KNOWN TO BE BUILDABLE, so
+	// a refused create never opens anything.
+	if spec.OwnerLands() {
+		owner, err := v.deps.DB.Workspace(ctx, *spec.Parent)
+		if err != nil {
+			log.Error(opCreate, "could not read the owner that is to land the child", dlog.WithCause(dlog.Context{"owner": string(*spec.Parent)}, err))
+			return fmt.Errorf("create: owner %q: %w", *spec.Parent, err)
+		}
+		if owner.Closed {
+			log.Info(opCreate, "reopening the closed owner that is to land the child", dlog.Context{"owner": string(owner.ID)})
+			if err := v.Open(ctx, owner.ID, nil); err != nil {
+				log.Error(opCreate, "could not reopen the owner that is to land the child", dlog.WithCause(dlog.Context{"owner": string(owner.ID)}, err))
+				return fmt.Errorf("create: reopen the owner %q: %w", owner.ID, err)
+			}
+		}
+	}
+	return nil
 }
 
-// resolveBase answers the commit baseRef names, or the ArmBaseRefUnresolved
-// refusal. A base that does not resolve is refused before anything is
-// recorded or materialized: git would otherwise fail halfway through
-// `worktree add` and leave the creation job standing for a workspace that
-// cannot exist. The arm spells `ref`, so the ref TRAVELS AS THE FIELD and not
-// only inside the sentence.
+// inRepository answers the registered workspace ID when it belongs to the
+// repository at repoDir, nil when it is unregistered or of another
+// repository, and an error recorded at ERROR when the registry cannot say.
+func (v *verbs) inRepository(ctx context.Context, log dlog.Logger, id ids.WorkspaceID, repoDir, role string) (*wsm.Workspace, error) {
+	fields := dlog.Context{"role": role, "workspace": string(id), "repo_dir": repoDir}
+	record, err := v.deps.DB.Workspace(ctx, id)
+	if errors.Is(err, wsm.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		log.Error(opCreate, "could not read a workspace the create names", dlog.WithCause(fields, err))
+		return nil, fmt.Errorf("create: %s %q: %w", role, id, err)
+	}
+	dir, err := v.repoDirOf(ctx, record)
+	if err != nil {
+		log.Error(opCreate, "could not resolve the repository of a workspace the create names", dlog.WithCause(fields, err))
+		return nil, fmt.Errorf("create: %s %q: %w", role, id, err)
+	}
+	if !samePath(dir, repoDir) {
+		fields["its_repo_dir"] = dir
+		log.Info(opCreate, "a workspace the create names is of another repository", fields)
+		return nil, nil
+	}
+	return &record, nil
+}
+
+// originRemote is the remote a workspace cut from origin is fetched from.
+const originRemote = "origin"
+
+// resolveBase answers the commit baseRef names. Every base is the owner's
+// branch, the default branch, or a merge workspace's branch its hand-off just
+// read, so one that does not resolve is a failure recorded at ERROR before
+// anything is recorded or materialized: git would otherwise fail halfway
+// through `worktree add` and leave the creation job standing for a workspace
+// that cannot exist.
 func (v *verbs) resolveBase(ctx context.Context, log dlog.Logger, repoDir, baseRef string) (string, error) {
 	commit, err := v.deps.Git.ResolveRef(ctx, repoDir, baseRef)
 	if err != nil {
-		return "", refuseWith(log, "CreateWorkspace", ArmBaseRefUnresolved,
-			fmt.Sprintf("the base ref %q does not resolve in %q: %v", baseRef, repoDir, err), false,
-			map[string]any{"ref": baseRef})
+		log.Error(opCreate, "the base a workspace is cut from does not resolve", dlog.WithCause(dlog.Context{"base_ref": baseRef, "repo_dir": repoDir}, err))
+		return "", fmt.Errorf("create: the base %q does not resolve in %q: %w", baseRef, repoDir, err)
 	}
 	return commit, nil
-}
-
-// requireOnPrimary answers nil when baseRef already lies on the primary
-// branch (an ancestor of it, or its tip), the ArmBaseRefOffPrimaryBranch
-// refusal when it does not, and an error recorded at ERROR when git cannot
-// tell. A workspace that merges into the primary branch must be cut from it,
-// or it would carry another branch's unmerged commits in.
-func (v *verbs) requireOnPrimary(ctx context.Context, log dlog.Logger, repoDir, baseRef, defaultBranch string) error {
-	onPrimary, err := v.deps.Git.IsAncestor(ctx, repoDir, baseRef, defaultBranch)
-	if err != nil {
-		log.Error(opCreate, "could not check the base ref against the primary branch", dlog.Context{
-			"base_ref": baseRef, "primary_branch": defaultBranch, "cause": err.Error(),
-		})
-		return fmt.Errorf("check base ref %q: %w", baseRef, err)
-	}
-	if !onPrimary {
-		return refuseWith(log, "CreateWorkspace", ArmBaseRefOffPrimaryBranch,
-			fmt.Sprintf("the base ref %q is not on the primary branch %q, which the workspace would merge into", baseRef, defaultBranch), false,
-			map[string]any{"ref": baseRef, "primary_branch": defaultBranch})
-	}
-	return nil
 }

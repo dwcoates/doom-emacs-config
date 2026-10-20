@@ -6,8 +6,7 @@
 ;;   AGENT_REPL_FORBID_VENDOR_CALLS=1 emacs -batch -Q -l ert \
 ;;     -l lisp/test-worktree.el -f ert-run-tests-batch-and-exit
 ;;
-;; WHAT IS LEFT TO TEST is what is left of the file: the eval helpers the
-;; /runtime-eval-code skill reaches over emacsclient, the read-only branch
+;; WHAT IS LEFT TO TEST is what is left of the file: the read-only branch
 ;; readers, the async-git boundary, and the workspace-directory reverse
 ;; lookup.  Everything else worktree.el used to hold -- every creation
 ;; flavor, the headless name generation, the one-shot suffix composition,
@@ -23,102 +22,6 @@
 (load (expand-file-name "test-helpers.el" (file-name-directory
                                            (or load-file-name buffer-file-name)))
       nil t)
-
-;;;; ---- The eval helpers ----
-
-(ert-deftest agent-repl-test-worktree-eval-returns-the-last-value ()
-  "The value is that of the LAST form: the caller asked for one answer."
-  (should (equal (plist-get (agent-repl--eval-code-string "(+ 1 1) (* 3 4)")
-                            :value-string)
-                 "12")))
-
-(ert-deftest agent-repl-test-worktree-eval-captures-princ-output ()
-  "`princ' output is captured rather than vanishing."
-  (should (equal (plist-get (agent-repl--eval-code-string "(princ \"hello\")") :printed)
-                 "hello")))
-
-(ert-deftest agent-repl-test-worktree-eval-traps-an-error ()
-  "A trapped error populates `:error' instead of escaping to the caller."
-  (should (string-match-p "arith-error\\|Arithmetic"
-                          (plist-get (agent-repl--eval-code-string "(/ 1 0)") :error))))
-
-(ert-deftest agent-repl-test-worktree-eval-error-leaves-no-value ()
-  "An error means there is no return value to report."
-  (should-not (plist-get (agent-repl--eval-code-string "(/ 1 0)") :value-string)))
-
-(ert-deftest agent-repl-test-worktree-eval-reports-partial-output-on-error ()
-  "Side effects from earlier forms are reported: pretending otherwise misleads."
-  (should (equal (plist-get (agent-repl--eval-code-string "(princ \"before\") (/ 1 0)")
-                            :printed)
-                 "before")))
-
-(ert-deftest agent-repl-test-worktree-eval-whitespace-only-yields-nil ()
-  "A whitespace-only code string is not an error; it evaluates to nil."
-  (let ((result (agent-repl--eval-code-string "   \n  ")))
-    (should (equal (plist-get result :value-string) "nil"))
-    (should-not (plist-get result :error))))
-
-(ert-deftest agent-repl-test-worktree-eval-empty-string-yields-nil ()
-  "Neither is an empty code string."
-  (should (equal (plist-get (agent-repl--eval-code-string "") :value-string) "nil")))
-
-(ert-deftest agent-repl-test-worktree-eval-truncate-keeps-short-text ()
-  "Text inside the cap is returned unchanged."
-  (let ((agent-repl-eval-output-max-chars 100))
-    (should (equal (agent-repl--eval-truncate "short") "short"))))
-
-(ert-deftest agent-repl-test-worktree-eval-truncate-clips-long-text ()
-  "Text over the cap is clipped and SAYS it was clipped."
-  (let ((agent-repl-eval-output-max-chars 10))
-    (let ((out (agent-repl--eval-truncate (make-string 50 ?x))))
-      (should (string-prefix-p (make-string 10 ?x) out))
-      (should (string-match-p "truncated to 10 chars" out)))))
-
-(ert-deftest agent-repl-test-worktree-eval-truncate-zero-cap-disables-clipping ()
-  "A zero cap disables truncation entirely."
-  (let ((agent-repl-eval-output-max-chars 0))
-    (should (equal (length (agent-repl--eval-truncate (make-string 50 ?x))) 50))))
-
-(ert-deftest agent-repl-test-worktree-eval-truncate-tolerates-nil ()
-  "Nil text is the empty string, not a crash."
-  (should (equal (agent-repl--eval-truncate nil) "")))
-
-(ert-deftest agent-repl-test-worktree-eval-format-labels-the-result ()
-  "A successful eval is labeled `result' so a reader can match on it."
-  (let ((out (agent-repl--eval-format-prompt "(+ 1 1)" nil nil "2" nil)))
-    (should (string-match-p ";; result:" out))
-    (should (string-match-p "Elisp eval result" out))))
-
-(ert-deftest agent-repl-test-worktree-eval-format-labels-the-error ()
-  "A failed eval is labeled `error' and headed as an ERROR."
-  (let ((out (agent-repl--eval-format-prompt "(/ 1 0)" nil nil nil "boom")))
-    (should (string-match-p ";; error:" out))
-    (should (string-match-p "Elisp eval ERROR" out))))
-
-(ert-deftest agent-repl-test-worktree-eval-format-omits-empty-printed ()
-  "An empty `printed' section is omitted rather than drawn blank."
-  (should-not (string-match-p ";; printed:"
-                             (agent-repl--eval-format-prompt "(+ 1 1)" nil "" "2" nil))))
-
-(ert-deftest agent-repl-test-worktree-eval-format-includes-printed-output ()
-  "Captured output is included when there is any."
-  (should (string-match-p ";; printed:"
-                          (agent-repl--eval-format-prompt "(princ 1)" nil "1" "1" nil))))
-
-(ert-deftest agent-repl-test-worktree-eval-format-carries-the-note ()
-  "A note is echoed in the header so the reader knows what was asked."
-  (should (string-match-p "note: dump the roster"
-                          (agent-repl--eval-format-prompt
-                           "(+ 1 1)" "dump the roster" nil "2" nil))))
-
-(ert-deftest agent-repl-test-worktree-eval-format-includes-the-code ()
-  "The source is embedded so the answer is self-contained."
-  (should (string-match-p ";; code:"
-                          (agent-repl--eval-format-prompt "(+ 1 1)" nil nil "2" nil))))
-
-(ert-deftest agent-repl-test-worktree-eval-snippet-labels-its-block ()
-  "A snippet is its label followed by the text."
-  (should (equal (agent-repl--eval-snippet "code" "(+ 1 1)") ";; code:\n(+ 1 1)\n")))
 
 ;;;; ---- Branch readers ----
 
@@ -305,6 +208,14 @@
         (should-not opened)))))
 
 ;;;; ---- What is deliberately gone ----
+
+(ert-deftest agent-repl-test-worktree-the-old-evaluator-is-gone ()
+  "The editor evaluates an agent's elisp in ONE handler, evaluate.el; the
+emacsclient-reached evaluator it replaced is gone."
+  (dolist (sym '(agent-repl--eval-code-string agent-repl--eval-format-prompt
+                 agent-repl--eval-truncate agent-repl--eval-snippet))
+    (should-not (fboundp sym)))
+  (should-not (boundp 'agent-repl-eval-output-max-chars)))
 
 (ert-deftest agent-repl-test-worktree-defines-no-creation-command ()
   "Workspace CREATION is the daemon's: no creation flavor survives here.

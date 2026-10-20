@@ -40,7 +40,7 @@ const postBound = ClickTimeout + 10*time.Second
 // IT BOUNDS THE PLATFORM'S PROGRAM, NOT A STAND-IN. The integration suite's
 // banner program is a recorder that appends each run to its record on the
 // run's RAM disk, where a small write at background I/O priority costs up to
-// 330ms under load (skills/write-tests pitfall 6), so it passed this bound
+// 330ms under load (skills/agent-repl-tests pitfall 6), so it passed this bound
 // with nothing hung (merge gate 2026-10-16,
 // TestAFocusGainClaimsTheBannerThePlatformStillHolds). That suite sets its own
 // bound through the daemon's knob (NewBackend's deliveredBound), sized for its

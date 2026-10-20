@@ -720,14 +720,12 @@ export function mergeWorkspaceRefusal(cause: CauseOf<MergeWorkspaceError>): stri
       return "this workspace is already in the merge queue";
     case "alreadyMerging":
       return "this workspace is already merging";
-    case "unknownOneShotWorkspace":
-      return "the workspace to close once the merge lands is not open in this repository";
-    case "unknownBranch":
-      return "that branch does not exist in this repository";
-    case "nameTaken":
-      return `the merge workspace name ${cause.value.branch} is already taken`;
-    case "branchCheckedOutInRequester":
-      return "that branch is checked out in this workspace";
+    case "ownerLands":
+      return `this child is its parent's to land: ${cause.value.owner?.dir ?? "the parent"} merges it`;
+    case "requesterMayNotLand":
+      return "only this workspace, its parent or the user may land it";
+    case "noBranchCheckedOut":
+      return `${cause.value.dir} has no branch checked out to land`;
     case "versionIncrementRequired":
       return "a merge onto agent-repl's master names how it moves the version";
     case "versionIncrementUnexpected":
@@ -816,9 +814,12 @@ export function buildRevertMergeRequest(workspace: WorkspaceRef): OpenWorkspaceR
   return create(OpenWorkspaceRequestSchema, { workspace, revertMerge: {} });
 }
 
-/** CloseWorkspace: the soft close, which refuses while work is in flight. */
+/** CloseWorkspace: the user's soft close, which refuses while work is in flight. */
 export function buildCloseWorkspaceRequest(workspace: WorkspaceRef): CloseWorkspaceRequest {
-  return create(CloseWorkspaceRequestSchema, { workspace });
+  return create(CloseWorkspaceRequestSchema, {
+    workspace,
+    requester: { asker: { case: "user", value: {} } },
+  });
 }
 
 /** KillWorkspace: forced session death; the worktree survives. */
@@ -834,15 +835,17 @@ export function buildNukeWorkspaceRequest(workspace: WorkspaceRef): NukeWorkspac
 /**
  * MergeWorkspace: enqueue; the merge's life thereafter is the feed's.
  *
- * The rail's Merge verb is "merge this workspace": a ONE-SHOT of the row's
- * own branch, run in place and closing the workspace once it lands. An async
- * merge names a branch and is an agent's to ask for; the rail has no such
- * affordance.
+ * The rail's Merge verb is "merge this workspace": the user's ONE-SHOT of the
+ * row's own branch at the back of the queue, run in place and closing the
+ * workspace once it lands. An async merge names a branch and is an agent's to
+ * ask for; the rail has no such affordance.
  */
 export function buildMergeWorkspaceRequest(workspace: WorkspaceRef): MergeWorkspaceRequest {
   return create(MergeWorkspaceRequestSchema, {
     workspace,
+    requester: { asker: { case: "user", value: {} } },
     mode: { case: "oneShot", value: { landing: { case: "ownBranch", value: {} } } },
+    placement: { place: { case: "back", value: {} } },
   });
 }
 

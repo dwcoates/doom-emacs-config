@@ -988,3 +988,211 @@ func TestASessionUpDuringASuccessfulCallDeliversThePromptOnce(t *testing.T) {
 		t.Fatalf("StartTurn attempts = %d, want 1", h.sender.attempts)
 	}
 }
+
+func TestDeliverRecordsTheSenderOnTheTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	record, ok := h.db.startedTurn("t1")
+	if !ok || record.SentBy == nil || *record.SentBy != theSender {
+		t.Fatalf("turn = (%+v, %v), want it recorded with sender %s", record, ok, theSender)
+	}
+}
+
+func TestDeliverHandsTheSenderToTheFeed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	sender, ok := h.feed.turnSender("t1")
+	if !ok || sender == nil || *sender != theSender {
+		t.Fatalf("feed's turn sender = (%v, %v), want %s", sender, ok, theSender)
+	}
+}
+
+func TestDeliverHandsNoSenderToTheFeedForAUsersPrompt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if sender, ok := h.feed.turnSender("t1"); !ok || sender != nil {
+		t.Fatalf("feed's turn sender = (%v, %v), want the turn handed over with none", sender, ok)
+	}
+}
+
+func TestDeliverMirrorsAnAgentSentPromptUnderItsSender(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	rows := h.feed.mirrored()
+	if len(rows) != 1 {
+		t.Fatalf("mirrored rows = %d, want 1", len(rows))
+	}
+	prompt := rows[0].GetAgentPrompt()
+	if prompt.GetAddress().GetReceived().GetWorkspace() == nil || prompt.GetAddress().GetName().GetText() != string(theSender) {
+		t.Fatalf("row = %v, want an agent prompt received from %s", rows[0], theSender)
+	}
+}
+
+func TestAHeldAgentSentPromptIsDeliveredWithItsSender(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	held, ok, err := h.db.HeldPromptByTurn(context.Background(), "t1")
+	if err != nil || !ok || held.SentBy == nil || *held.SentBy != theSender {
+		t.Fatalf("hold = (%+v, %v, %v), want it held with sender %s", held, ok, err, theSender)
+	}
+
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
+	// Assert
+	record, ok := h.db.startedTurn("t1")
+	if !ok || record.SentBy == nil || *record.SentBy != theSender {
+		t.Fatalf("turn = (%+v, %v), want it delivered with sender %s", record, ok, theSender)
+	}
+}
+
+// registerSender records theSender as a workspace named NAME whose session
+// runs in MODE.
+func registerSender(h *harness, name, mode string) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	h.db.workspaces[theSender] = wsm.Workspace{ID: theSender, Name: name, Dir: "/tmp/ws-sender"}
+	h.db.sessions[theSender] = wsm.Session{Workspace: theSender, PermissionMode: mode}
+}
+
+// TestDeliverDeclaresTheSender covers what the shim is told of an agent's
+// prompt's sender: its name and its OWN permission mode as the daemon holds
+// them when the turn starts, each left unstated when the daemon holds none.
+func TestDeliverDeclaresTheSender(t *testing.T) {
+	tests := []struct {
+		name    string
+		sub     Submission
+		arrange func(h *harness)
+		want    *SentBy
+	}{
+		{
+			name: "a user's prompt declares no sender",
+			sub:  submission("t1", "hello"),
+		},
+		{
+			name:    "a registered sender in bypass declares its name and its own mode",
+			sub:     agentSubmission("t1", "hello"),
+			arrange: func(h *harness) { registerSender(h, "parser-fix", "bypassPermissions") },
+			want:    &SentBy{Workspace: theSender, Name: "parser-fix", PermissionMode: "bypassPermissions"},
+		},
+		{
+			name:    "a registered sender in auto declares auto",
+			sub:     agentSubmission("t1", "hello"),
+			arrange: func(h *harness) { registerSender(h, "parser-fix", "auto") },
+			want:    &SentBy{Workspace: theSender, Name: "parser-fix", PermissionMode: "auto"},
+		},
+		{
+			name: "a sender forgotten since it sent goes unnamed",
+			sub:  agentSubmission("t1", "hello"),
+			arrange: func(h *harness) {
+				h.db.sessions[theSender] = wsm.Session{Workspace: theSender, PermissionMode: "auto"}
+			},
+			want: &SentBy{Workspace: theSender, PermissionMode: "auto"},
+		},
+		{
+			name: "a sender with no session record declares no mode",
+			sub:  agentSubmission("t1", "hello"),
+			arrange: func(h *harness) {
+				h.db.workspaces[theSender] = wsm.Workspace{ID: theSender, Name: "parser-fix"}
+			},
+			want: &SentBy{Workspace: theSender, Name: "parser-fix"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			if tt.arrange != nil {
+				tt.arrange(h)
+			}
+
+			// Act
+			if _, err := h.q.Submit(context.Background(), tt.sub); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+
+			// Assert
+			handed := h.sender.handedSentBys()
+			if len(handed) != 1 {
+				t.Fatalf("turn-opening calls = %d, want 1", len(handed))
+			}
+			if got := handed[0]; (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
+				t.Fatalf("sent by = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDeliverRefusesAnAgentsPromptWhoseSenderCannotBeRead covers the reads
+// that fail outright: the start fails, and the shim is asked nothing, rather
+// than the prompt being delivered with its sender misstated.
+func TestDeliverRefusesAnAgentsPromptWhoseSenderCannotBeRead(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{name: "the sender's workspace read fails", arrange: func(h *harness) {
+			h.db.workspaceErrFor = map[ids.WorkspaceID]error{theSender: errors.New("the state store is gone")}
+		}},
+		{name: "the sender's session read fails", arrange: func(h *harness) {
+			registerSender(h, "parser-fix", "auto")
+			h.db.sessionErr = errors.New("the state store is gone")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(h)
+
+			// Act
+			_, err := h.q.Submit(context.Background(), agentSubmission("t1", "hello"))
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), "the state store is gone") {
+				t.Fatalf("Submit = %v, want the failed read surfaced", err)
+			}
+			if attempts := len(h.sender.handedSentBys()); attempts != 0 {
+				t.Fatalf("turn-opening calls = %d, want none", attempts)
+			}
+			if _, recorded := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opSentBy}); !recorded {
+				t.Fatalf("no ERROR record of the failed sender read: %+v", h.log.Records())
+			}
+		})
+	}
+}

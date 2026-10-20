@@ -793,55 +793,6 @@ func TestTheHostsVendorConversationIsUnchangedByATurn(t *testing.T) {
 
 // ---- critique 5: account-switch transcript porting ----
 
-func TestAForkedChildOutsideTheMultiRepoRootDoesNotInheritTheParentsAccount(t *testing.T) {
-	t.Parallel()
-	// Arrange: a parent workspace INSIDE the multi-repo root, opened so it has
-	// a vendor conversation to fork.
-	d := harness.StartDaemon(t, harness.Opts{})
-	parentRepo := harness.NewRepoAt(t, filepath.Join(d.MultiRepoRoot, "fork-parent"))
-	parentWS := harness.Register(t, d, parentRepo.Dir)
-	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: parentWS})); err != nil {
-		t.Fatalf("OpenWorkspace(parent) = error %v, want a success", err)
-	}
-	parentShim := d.Shim(parentWS)
-	parentShim.ExpectStartSession()
-	if parentShim.Info().VendorSessionID == "" {
-		t.Fatal("the fake shim reports no vendor session id for the parent after StartSession(fresh)")
-	}
-
-	// A child repository OUTSIDE the multi-repo root -- a different repository
-	// entirely, since a fork's child worktree is always adjacent to ITS OWN
-	// repository directory and never to the parent's.
-	childRepo := harness.NewRepo(t)
-	childRepoRef := mergeRepositoryRef(t, d, childRepo)
-
-	// Act: create the child as a FORK of the parent.
-	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: childRepoRef,
-		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Name: strPtr("forked-child-outside-root"),
-		}},
-		Parent: &agentreplv1.CreateWorkspaceParent{
-			Workspace: parentWS,
-			Fork:      &agentreplv1.CreateWorkspaceFork{},
-		},
-	}))
-	if err != nil {
-		t.Fatalf("CreateWorkspace(fork) = error %v, want a success", err)
-	}
-	childWS := resp.Msg.GetSuccess().GetWorkspace()
-	if childWS.GetId() == "" {
-		t.Fatalf("CreateWorkspace(fork) = %v, want a success carrying a workspace ref", resp.Msg)
-	}
-
-	// Assert: the child spawns with the DEFAULT root -- its own directory
-	// decides its account, never the parent's.
-	childShim := d.Shim(childWS)
-	if got := childShim.Info().Env["CLAUDE_CONFIG_DIR"]; got != d.DefaultConfigDir {
-		t.Fatalf("CLAUDE_CONFIG_DIR = %q for a forked child outside MULTI_REPO_ROOT, want the default account root %q (no inheritance from a parent inside the root)", got, d.DefaultConfigDir)
-	}
-}
-
 func TestAccountSwitchPortsTheTranscriptAcrossADaemonBoot(t *testing.T) {
 	t.Parallel()
 	// Arrange: a workspace OUTSIDE the multi-repo root, opened so it has a
@@ -963,7 +914,7 @@ func TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence(t *testing.T) {
 	f.submit("do the thing", "k-close-evidence", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
 	// Act
-	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws}))
+	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws}))
 
 	// Assert
 	if err != nil {
@@ -1277,7 +1228,7 @@ func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
 	}
 
 	// Act
-	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws}))
+	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws}))
 
 	// Assert: the landed blocked arm.
 	if err != nil {

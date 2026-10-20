@@ -421,7 +421,7 @@ func TestRequestMergeRefusesAMergeThatClosesAParentWithOpenChildren(t *testing.T
 	}{
 		{name: "the parent's own in-place merge", requester: f.parent.ID, source: MergeSource{Kind: MergeSourceOwnBranch}},
 		{name: "an async merge whose one-shot is the parent", requester: other.ID, source: MergeSource{
-			Kind: MergeSourceBranch, Branch: "feature", Detach: NewDetachedMergeID(), DetachName: "m", CloseOnLanding: f.parent.ID}},
+			Kind: MergeSourceBranch, Branch: "feature", Detach: NewDetachedMergeID(), DetachMaker: "maker", DetachName: "m", CloseOnLanding: f.parent.ID}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -543,7 +543,7 @@ func TestClosingSQLAgreesWithMergeSourceCloses(t *testing.T) {
 		}},
 		{name: "branch", source: func(_, _ WorkspaceID) MergeSource { return MergeSource{Kind: MergeSourceBranch, Branch: "b"} }},
 		{name: "detached with a one-shot", source: func(_, oneShot WorkspaceID) MergeSource {
-			return MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: NewDetachedMergeID(), DetachName: "m", CloseOnLanding: oneShot}
+			return MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: NewDetachedMergeID(), DetachMaker: "maker", DetachName: "m", CloseOnLanding: oneShot}
 		}},
 		{name: "a merge workspace's own branch", merge: true, source: func(_, _ WorkspaceID) MergeSource { return MergeSource{Kind: MergeSourceOwnBranch} }},
 	}

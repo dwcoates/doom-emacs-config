@@ -189,10 +189,17 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 // the footer draws the same composed sentence, so the check answers the whole
 // picture and the ORDER below only decides which one the sentence leads with.
 func (v *verbs) closeBlocker(ctx context.Context, ws ids.WorkspaceID) (*footer.CloseBlocked, error) {
+	return v.blockedClose(ctx, ws, false)
+}
+
+// blockedClose is closeBlocker's judgment. OWNTURN discounts the turn in
+// flight: a workspace closing itself asks from inside that turn, so the turn
+// is never what blocks its close (CloseSelf).
+func (v *verbs) blockedClose(ctx context.Context, ws ids.WorkspaceID, ownTurn bool) (*footer.CloseBlocked, error) {
 	blocked := footer.CloseBlocked{}
 	var liveDetail string
 	if running, live := v.deps.Freeness(ws); live {
-		blocked.TurnInFlight = running.Turn != nil
+		blocked.TurnInFlight = running.Turn != nil && !ownTurn
 		agents, shells := len(running.LiveWork.Agents), len(running.LiveWork.Shells)
 		blocked.LiveWork = uint32(agents + shells)
 		liveDetail = fmt.Sprintf("%d detached agents and %d detached shells are still live", agents, shells)

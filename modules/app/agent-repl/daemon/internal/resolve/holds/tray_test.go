@@ -854,6 +854,16 @@ func TestTrayOffersFoldAbove(t *testing.T) {
 			want:  []string{"", ""},
 		},
 		{
+			name: "nothing is offered behind a prompt with another author",
+			holds: []wsm.HeldPrompt{hold("t1", "first"), func() wsm.HeldPrompt {
+				h := queuedSecond("t2", "second")
+				sender := wsm.WorkspaceID("ws-sender")
+				h.Origin, h.SentBy = "PROMPT_ORIGIN_AGENT_SENT", &sender
+				return h
+			}()},
+			want: []string{"", ""},
+		},
+		{
 			name:    "nothing is offered while the entry ahead is being edited",
 			holds:   []wsm.HeldPrompt{hold("t1", "first"), queuedSecond("t2", "second")},
 			editing: "t1",

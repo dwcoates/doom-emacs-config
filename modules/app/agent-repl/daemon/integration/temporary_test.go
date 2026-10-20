@@ -89,27 +89,3 @@ func TestRegisterWorkspaceRefusesAWorktreeInsideATemporaryFolder(t *testing.T) {
 	}
 	awaitTypedRefusal(t, d)
 }
-
-// The 2026-09-02 path: a command file's create naming a scratch folder as its
-// git_root is refused BY NAME and the file quarantined, with nothing built.
-func TestACreateEntryNamingATemporaryRepositoryIsQuarantined(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	repo, _ := scratchRepo(t)
-	d := newDaemon(t, harness.Opts{})
-
-	// Act
-	path := commandfileWrite(t, d, "workspace_commands_scratch.json",
-		`[{"type":"create","git_root":"`+repo.Dir+`","name":"scratch-ws","prompt":"build it"}]`)
-
-	// Assert
-	d.AwaitFileGone(path)
-	d.AwaitFileExists(filepath.Join(d.StateDir, "output", "quarantine", "workspace_commands_scratch.json"))
-	awaitTypedRefusal(t, d)
-	d.AwaitLogRecord(d.RunLogPath(), "the quarantine at INFO", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.commandfile.quarantine" && r.Level == "info"
-	})
-	if repo.HasBranch("scratch-ws") {
-		t.Fatalf("branches = %v, want nothing materialized for the refused create", repo.Branches())
-	}
-}

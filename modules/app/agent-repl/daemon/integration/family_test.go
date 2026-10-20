@@ -37,13 +37,26 @@ func requireStillNested(t *testing.T, f *retargetFamily) {
 	})
 }
 
+// settleOwnerNotice ends the Nth owner notice F's parent receives (the child's
+// creation is the first, its close the second) and waits for the turn's
+// durable close: the parent owns the child, so each notice opens a turn on
+// it, and a close is refused while a turn runs.
+func settleOwnerNotice(t *testing.T, f *retargetFamily, unit string, n int) {
+	t.Helper()
+	shim := f.d.Shim(f.parent)
+	shim.ExpectStartTurn()
+	pushConcludedTurn(shim, mainAgent, unit)
+	f.d.AwaitWorkspaceLogOperationCount(f.parent.GetDir(), harness.OpTurnEnded, n)
+}
+
 func TestAParentWithAnOpenChildIsNotClosed(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newRetargetFamily(t, harness.Opts{}, harness.NewRepo(t))
+	settleOwnerNotice(t, f, "created-notice", 1)
 
 	// Act
-	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.parent}))
+	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.parent}))
 
 	// Assert
 	if err != nil {
@@ -92,10 +105,7 @@ func TestAChildOfAHiddenParentIsNotCreated(t *testing.T) {
 	// Arrange: a parent with no children, hidden.
 	d := newDaemon(t, harness.Opts{})
 	repository := createRepositoryRef(t, d, harness.NewRepo(t))
-	created, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
-		Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
-	}))
+	created, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(harness.Create(repository)))
 	if err != nil || created.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(parent) = (%v, %v), want a success", created, err)
 	}
@@ -103,11 +113,8 @@ func TestAChildOfAHiddenParentIsNotCreated(t *testing.T) {
 	hide(t, d, parent)
 
 	// Act
-	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
-		Parent:     &agentreplv1.CreateWorkspaceParent{Workspace: parent},
-		Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
-	}))
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(harness.Create(repository,
+		harness.Standard(func(s *agentreplv1.CreateWorkspaceStandard) { s.Topology = harness.ChildOf(parent, "the child's work") }))))
 
 	// Assert
 	if err != nil {
@@ -136,14 +143,17 @@ func TestAChildDoesNotSwapPlacesWithItsParent(t *testing.T) {
 
 func TestAParentWhoseChildIsClosedIsClosed(t *testing.T) {
 	t.Parallel()
-	// Arrange: the child closed first, as the rules ask.
+	// Arrange: the child closed first, as the rules ask, and both owner
+	// notices settled.
 	f := newRetargetFamily(t, harness.Opts{}, harness.NewRepo(t))
-	if resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.child})); err != nil || resp.Msg.GetSuccess() == nil {
+	settleOwnerNotice(t, f, "created-notice", 1)
+	if resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.child})); err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("CloseWorkspace(child) = (%v, %v), want a success", resp, err)
 	}
+	settleOwnerNotice(t, f, "closed-notice", 2)
 
 	// Act
-	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.parent}))
+	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.parent}))
 
 	// Assert
 	if err != nil || resp.Msg.GetSuccess() == nil {

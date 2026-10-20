@@ -149,6 +149,29 @@ export function validatePromptOrigin(value: conversationv1.PromptOrigin, path: s
   }
 }
 
+/**
+ * `shim.v1.StartTurnSentBy` against the prompt's ORIGIN: a sender is named
+ * EXACTLY when the origin is PROMPT_ORIGIN_AGENT_SENT. Its name and its mode
+ * are each unset when the daemon holds none, and never empty when set.
+ */
+export function validateStartTurnSentBy(
+  value: shimv1.StartTurnSentBy | undefined,
+  origin: conversationv1.PromptOrigin,
+  path: string,
+): void {
+  const agentSent = origin === conversationv1.PromptOrigin.AGENT_SENT;
+  if (value === undefined) {
+    if (agentSent) throw invalidArgument(`${path} is unset; a prompt an agent sent names the workspace that sent it`);
+    return;
+  }
+  if (!agentSent) {
+    throw invalidArgument(`${path} is set on a prompt of origin ${conversationv1.PromptOrigin[origin]}; only an agent's prompt names a sender`);
+  }
+  if (value.workspaceId === "") throw emptyIdentity(`${path}.workspace_id`);
+  if (value.workspaceName === "") throw invalidArgument(`${path}.workspace_name is set but empty; a name is stated or unset`);
+  if (value.permissionMode !== undefined) validateAgentPermissionMode(value.permissionMode, `${path}.permission_mode`);
+}
+
 /** `conversation.v1.UserContentBlock` — one arm per block kind. */
 function validateUserContentBlock(
   value: conversationv1.UserContentBlock,

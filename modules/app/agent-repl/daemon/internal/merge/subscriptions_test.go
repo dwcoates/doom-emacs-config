@@ -472,7 +472,7 @@ func TestAFailedWriteReportsNothing(t *testing.T) {
 	h.db.queueErr = errors.New("the queue write failed")
 
 	// Act.
-	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
+	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
 
 	// Assert.
 	if err == nil {
@@ -767,5 +767,26 @@ func TestUnsubscribeRecordsAStoreFailure(t *testing.T) {
 	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.unsubscribe", text: "could not end a merge queue subscription",
 		context: map[string]string{"error": "the store is gone"}}) {
 		t.Fatalf("no error record: %+v", h.logs.Records())
+	}
+}
+
+// recordingObserver records the kinds it is told.
+type recordingObserver struct{ kinds []QueueChangeKind }
+
+func (r *recordingObserver) QueueChanged(change QueueChange) { r.kinds = append(r.kinds, change.Kind) }
+
+func TestQueueObserversTellEveryObserverEachChange(t *testing.T) {
+	// Arrange
+	a, b := &recordingObserver{}, &recordingObserver{}
+	observers := QueueObservers{a, b}
+
+	// Act
+	observers.QueueChanged(QueueChange{Kind: QueueChangeLanded})
+	observers.QueueChanged(QueueChange{Kind: QueueChangePaused})
+
+	// Assert
+	want := []QueueChangeKind{QueueChangeLanded, QueueChangePaused}
+	if !reflect.DeepEqual(a.kinds, want) || !reflect.DeepEqual(b.kinds, want) {
+		t.Fatalf("told %v and %v, want both %v", a.kinds, b.kinds, want)
 	}
 }

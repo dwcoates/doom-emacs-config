@@ -89,14 +89,6 @@ func (l Layout) IntentDir() string { return filepath.Join(l.dir, "intent") }
 // session, written by the outgoing daemon, reconciled by the incoming one.
 func (l Layout) IntentManifest() string { return filepath.Join(l.IntentDir(), "manifest.json") }
 
-// OutputDir holds the command-file ingress.
-func (l Layout) OutputDir() string { return filepath.Join(l.dir, "output") }
-
-// CommandFileGlob matches every command file in the ingress directory.
-func (l Layout) CommandFileGlob() string {
-	return filepath.Join(l.OutputDir(), "workspace_commands_*.json")
-}
-
 // HeldPromptDir holds the held-prompt ingress: one file per prompt a client
 // could not hand to a live daemon, ingested into the prompt queue once one
 // serves (internal/heldingress).
@@ -118,5 +110,5 @@ func (l Layout) CheckSocketPathBudget() error {
 
 // Dirs is every directory the daemon creates under the state root at boot.
 func (l Layout) Dirs() []string {
-	return []string{l.dir, l.LogsDir(), l.SockDir(), l.IntentDir(), l.OutputDir()}
+	return []string{l.dir, l.LogsDir(), l.SockDir(), l.IntentDir()}
 }

@@ -5,7 +5,9 @@ import (
 	"sync"
 )
 
-// noticeLifetime runs the merge queue subscriptions' delivery loop on a
+// noticeLifetime runs the notifiers' delivery loops (the merge queue's
+// subscriptions, the derived-workspace notices, the workspace subscriptions,
+// the self-closes) on a
 // lifetime of its own, which the exit ends only AFTER the merge drain: a merge
 // landing inside the drain reports its landing, and the loop, once ended,
 // delivers every change still pending before it returns. A background loop
@@ -51,4 +53,18 @@ func (l *noticeLifetime) Stop() {
 	l.mu.Unlock()
 	cancel()
 	<-done
+}
+
+// runNotifiers runs every notifier's loop on CTX, and returns once each has
+// returned: each delivers what was pending before it does.
+func runNotifiers(ctx context.Context, runs ...func(ctx context.Context)) {
+	var wg sync.WaitGroup
+	for _, run := range runs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			run(ctx)
+		}()
+	}
+	wg.Wait()
 }

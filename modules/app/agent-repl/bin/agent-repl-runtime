@@ -40,7 +40,7 @@
 #
 # The implementations stay where their other callers reach them (Emacs's cold
 # start and the daemon's deploy run build-frontend.sh directly); a person or an
-# agent reaches them through this door. The /manage-agent-repl-runtime skill
+# agent reaches them through this door. The /agent-repl-runtime skill
 # documents every verb; a new verb, or a change to what one does, updates that
 # skill and agent-repl AGENTS.md in the same commit.
 #

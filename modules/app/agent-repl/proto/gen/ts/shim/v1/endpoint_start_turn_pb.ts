@@ -11,6 +11,8 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { HistoryPage, HistoryPointer } from "../../conversation/v1/history_pb";
 import { file_conversation_v1_history } from "../../conversation/v1/history_pb";
+import type { AgentPermissionMode } from "../../conversation/v1/permission_pb";
+import { file_conversation_v1_permission } from "../../conversation/v1/permission_pb";
 import type { AgentPrompt, TurnId } from "../../conversation/v1/turn_pb";
 import { file_conversation_v1_turn } from "../../conversation/v1/turn_pb";
 import type { UserSaid } from "../../conversation/v1/user_pb";
@@ -23,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_start_turn.proto.
  */
 export const file_shim_v1_endpoint_start_turn: GenFile = /*@__PURE__*/
-  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEi3QIKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEjgKDWtub3duX3Rocm91Z2gYBSABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXJIABIvCgl0YWlsX29ubHkYCCABKAsyGi5zaGltLnYxLlN0YXJ0VHVyblRhaWxPbmx5SAASGQoRam9pbl9ydW5uaW5nX3R1cm4YBiABKAgSGAoLdmVuZG9yX25vdGUYByABKAlIAYgBAUIJCgdvcGVuaW5nQg4KDF92ZW5kb3Jfbm90ZUoECAQQBVIJcGFnZV9zaXplInkKEVN0YXJ0VHVyblJlc3BvbnNlEiwKB3N1Y2Nlc3MYASABKAsyGS5zaGltLnYxLlN0YXJ0VHVyblN1Y2Nlc3NIABIsCgdmYWlsdXJlGAIgASgLMhkuc2hpbS52MS5TdGFydFR1cm5GYWlsdXJlSABCCAoGcmVzdWx0ImwKEFN0YXJ0VHVyblN1Y2Nlc3MSLAoGcHJvbXB0GAEgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50UHJvbXB0EioKBHBhZ2UYAiABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBhZ2UiiwIKEFN0YXJ0VHVybkZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEj4KEXR1cm5fYWxyZWFkeV9vcGVuGAIgASgLMiEuc2hpbS52MS5TdGFydFR1cm5UdXJuQWxyZWFkeU9wZW5IABIxCgpub19zZXNzaW9uGAMgASgLMhsuc2hpbS52MS5TdGFydFR1cm5Ob1Nlc3Npb25IABI5Cg52ZW5kb3JfcmVmdXNlZBgEIAEoCzIfLnNoaW0udjEuU3RhcnRUdXJuVmVuZG9yUmVmdXNlZEgAEjEKCnF1ZXJ5X2RlYWQYBSABKAsyGy5zaGltLnYxLlN0YXJ0VHVyblF1ZXJ5RGVhZEgAQgYKBGtpbmQiKwoYU3RhcnRUdXJuVHVybkFscmVhZHlPcGVuSgQIARACUglrZWVwYWxpdmUiFAoSU3RhcnRUdXJuTm9TZXNzaW9uIhgKFlN0YXJ0VHVyblZlbmRvclJlZnVzZWQiFAoSU3RhcnRUdXJuUXVlcnlEZWFkIhMKEVN0YXJ0VHVyblRhaWxPbmx5QiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_history, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
+  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEiiAMKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEjgKDWtub3duX3Rocm91Z2gYBSABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXJIABIvCgl0YWlsX29ubHkYCCABKAsyGi5zaGltLnYxLlN0YXJ0VHVyblRhaWxPbmx5SAASGQoRam9pbl9ydW5uaW5nX3R1cm4YBiABKAgSGAoLdmVuZG9yX25vdGUYByABKAlIAYgBARIpCgdzZW50X2J5GAkgASgLMhguc2hpbS52MS5TdGFydFR1cm5TZW50QnlCCQoHb3BlbmluZ0IOCgxfdmVuZG9yX25vdGVKBAgEEAVSCXBhZ2Vfc2l6ZSKWAQoPU3RhcnRUdXJuU2VudEJ5EhQKDHdvcmtzcGFjZV9pZBgBIAEoCRIbCg53b3Jrc3BhY2VfbmFtZRgCIAEoCUgAiAEBEj0KD3Blcm1pc3Npb25fbW9kZRgDIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlQhEKD193b3Jrc3BhY2VfbmFtZSJ5ChFTdGFydFR1cm5SZXNwb25zZRIsCgdzdWNjZXNzGAEgASgLMhkuc2hpbS52MS5TdGFydFR1cm5TdWNjZXNzSAASLAoHZmFpbHVyZRgCIAEoCzIZLnNoaW0udjEuU3RhcnRUdXJuRmFpbHVyZUgAQggKBnJlc3VsdCJsChBTdGFydFR1cm5TdWNjZXNzEiwKBnByb21wdBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdBIqCgRwYWdlGAIgASgLMhwuY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQYWdlIosCChBTdGFydFR1cm5GYWlsdXJlEg4KBmRldGFpbBgBIAEoCRI+ChF0dXJuX2FscmVhZHlfb3BlbhgCIAEoCzIhLnNoaW0udjEuU3RhcnRUdXJuVHVybkFscmVhZHlPcGVuSAASMQoKbm9fc2Vzc2lvbhgDIAEoCzIbLnNoaW0udjEuU3RhcnRUdXJuTm9TZXNzaW9uSAASOQoOdmVuZG9yX3JlZnVzZWQYBCABKAsyHy5zaGltLnYxLlN0YXJ0VHVyblZlbmRvclJlZnVzZWRIABIxCgpxdWVyeV9kZWFkGAUgASgLMhsuc2hpbS52MS5TdGFydFR1cm5RdWVyeURlYWRIAEIGCgRraW5kIisKGFN0YXJ0VHVyblR1cm5BbHJlYWR5T3BlbkoECAEQAlIJa2VlcGFsaXZlIhQKElN0YXJ0VHVybk5vU2Vzc2lvbiIYChZTdGFydFR1cm5WZW5kb3JSZWZ1c2VkIhQKElN0YXJ0VHVyblF1ZXJ5RGVhZCITChFTdGFydFR1cm5UYWlsT25seUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_history, file_conversation_v1_permission, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
 
 /**
  * The prompt the daemon is handing over NOW. Nothing here is a queue entry:
@@ -146,6 +148,32 @@ export type StartTurnRequest = Message<"shim.v1.StartTurnRequest"> & {
    * @generated from field: optional string vendor_note = 7;
    */
   vendorNote?: string | undefined;
+
+  /**
+   * THE WORKSPACE WHOSE AGENT SENT THIS PROMPT (agentrepl.v1
+   * SubmitPromptRequest.sent_by). SET EXACTLY WHEN `origin` IS
+   * PROMPT_ORIGIN_AGENT_SENT, and unset for every other origin; a request
+   * breaking either half is refused as InvalidArgument.
+   *
+   * SUCH A PROMPT REACHES THE AGENT AS ANOTHER SESSION'S MESSAGE, not as words
+   * the user typed: the shim delivers it in the vendor's own cross-session
+   * envelope, marked as a peer message from `agent-repl:<the sender's name>`
+   * and declaring the SENDER's permission class (`permission_mode`). The
+   * prompt row still carries `said` exactly, under this request's id and
+   * origin, as every prompt's does; the shim's transcript readers never draw
+   * the vendor's copy of it a second time.
+   *
+   * A PEER MESSAGE THE VENDOR HOLDS IS REFUSED, never waited on. The vendor
+   * parks a peer message instead of running it when the sender's declared
+   * class is not the recipient's, or when the recipient's settings hold
+   * cross-session messages, and a parked message is dropped unread minutes
+   * later. The shim waits for the vendor to say whether it queued the message
+   * or held it, and answers a hold with `vendor_refused`, its `detail`
+   * naming the cause. The same holds for `join_running_turn`.
+   *
+   * @generated from field: shim.v1.StartTurnSentBy sent_by = 9;
+   */
+  sentBy?: StartTurnSentBy | undefined;
 };
 
 /**
@@ -154,6 +182,51 @@ export type StartTurnRequest = Message<"shim.v1.StartTurnRequest"> & {
  */
 export const StartTurnRequestSchema: GenMessage<StartTurnRequest> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_start_turn, 0);
+
+/**
+ * The workspace whose agent sent a prompt, as the shim declares it to the
+ * vendor.
+ *
+ * @generated from message shim.v1.StartTurnSentBy
+ */
+export type StartTurnSentBy = Message<"shim.v1.StartTurnSentBy"> & {
+  /**
+   * The sending workspace's id (workspace.v1.WorkspaceRef.id). Never empty.
+   * It is the vendor envelope's address only when `workspace_name` is unset.
+   *
+   * @generated from field: string workspace_id = 1;
+   */
+  workspaceId: string;
+
+  /**
+   * The sending workspace's name, as the roster names it: the address the
+   * agent reads (`agent-repl:<name>`) and the one it answers through
+   * `agent-repld workspace prompt`. UNSET when the daemon can no longer name
+   * the sender (one forgotten since it sent), never a stand-in; the address
+   * is then `agent-repl:<workspace_id>`. Never empty when set.
+   *
+   * @generated from field: optional string workspace_name = 2;
+   */
+  workspaceName?: string | undefined;
+
+  /**
+   * THE SENDER'S OWN permission mode, as the daemon holds it when it starts
+   * the turn: the sender's honest declaration, which the shim maps to the
+   * vendor's permission class (bypass for `bypass`, prompting for every other
+   * mode). Never the recipient's. UNSET when the daemon holds no session
+   * record for the sender, and the shim then declares no class.
+   *
+   * @generated from field: conversation.v1.AgentPermissionMode permission_mode = 3;
+   */
+  permissionMode?: AgentPermissionMode | undefined;
+};
+
+/**
+ * Describes the message shim.v1.StartTurnSentBy.
+ * Use `create(StartTurnSentBySchema)` to create a new message.
+ */
+export const StartTurnSentBySchema: GenMessage<StartTurnSentBy> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_turn, 1);
 
 /**
  * THE ARM IS THE OUTCOME OF THE CALL — whether the prompt was ACCEPTED.
@@ -185,7 +258,7 @@ export type StartTurnResponse = Message<"shim.v1.StartTurnResponse"> & {
  * Use `create(StartTurnResponseSchema)` to create a new message.
  */
 export const StartTurnResponseSchema: GenMessage<StartTurnResponse> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_turn, 1);
+  messageDesc(file_shim_v1_endpoint_start_turn, 2);
 
 /**
  * The prompt was accepted and the turn is open. The turn's frames are
@@ -220,7 +293,7 @@ export type StartTurnSuccess = Message<"shim.v1.StartTurnSuccess"> & {
  * Use `create(StartTurnSuccessSchema)` to create a new message.
  */
 export const StartTurnSuccessSchema: GenMessage<StartTurnSuccess> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_turn, 2);
+  messageDesc(file_shim_v1_endpoint_start_turn, 3);
 
 /**
  * Not accepted. THE ARM IS WHY.
@@ -295,7 +368,7 @@ export type StartTurnFailure = Message<"shim.v1.StartTurnFailure"> & {
  * Use `create(StartTurnFailureSchema)` to create a new message.
  */
 export const StartTurnFailureSchema: GenMessage<StartTurnFailure> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_turn, 3);
+  messageDesc(file_shim_v1_endpoint_start_turn, 4);
 
 /**
  * @generated from message shim.v1.StartTurnTurnAlreadyOpen
@@ -308,7 +381,7 @@ export type StartTurnTurnAlreadyOpen = Message<"shim.v1.StartTurnTurnAlreadyOpen
  * Use `create(StartTurnTurnAlreadyOpenSchema)` to create a new message.
  */
 export const StartTurnTurnAlreadyOpenSchema: GenMessage<StartTurnTurnAlreadyOpen> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_turn, 4);
+  messageDesc(file_shim_v1_endpoint_start_turn, 5);
 
 /**
  * @generated from message shim.v1.StartTurnNoSession
@@ -321,7 +394,7 @@ export type StartTurnNoSession = Message<"shim.v1.StartTurnNoSession"> & {
  * Use `create(StartTurnNoSessionSchema)` to create a new message.
  */
 export const StartTurnNoSessionSchema: GenMessage<StartTurnNoSession> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_turn, 5);
+  messageDesc(file_shim_v1_endpoint_start_turn, 6);
 
 /**
  * @generated from message shim.v1.StartTurnVendorRefused
@@ -334,7 +407,7 @@ export type StartTurnVendorRefused = Message<"shim.v1.StartTurnVendorRefused"> &
  * Use `create(StartTurnVendorRefusedSchema)` to create a new message.
  */
 export const StartTurnVendorRefusedSchema: GenMessage<StartTurnVendorRefused> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_turn, 6);
+  messageDesc(file_shim_v1_endpoint_start_turn, 7);
 
 /**
  * @generated from message shim.v1.StartTurnQueryDead
@@ -347,7 +420,7 @@ export type StartTurnQueryDead = Message<"shim.v1.StartTurnQueryDead"> & {
  * Use `create(StartTurnQueryDeadSchema)` to create a new message.
  */
 export const StartTurnQueryDeadSchema: GenMessage<StartTurnQueryDead> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_turn, 7);
+  messageDesc(file_shim_v1_endpoint_start_turn, 8);
 
 /**
  * Open the turn's page with no history. DELIBERATELY EMPTY: the arm's
@@ -363,5 +436,5 @@ export type StartTurnTailOnly = Message<"shim.v1.StartTurnTailOnly"> & {
  * Use `create(StartTurnTailOnlySchema)` to create a new message.
  */
 export const StartTurnTailOnlySchema: GenMessage<StartTurnTailOnly> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_turn, 8);
+  messageDesc(file_shim_v1_endpoint_start_turn, 9);
 

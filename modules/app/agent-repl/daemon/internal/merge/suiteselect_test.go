@@ -133,11 +133,6 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"background-harness", "testrun"},
 		},
 		{
-			name:  "the merge-queue skill selects its harness, the worktrees library's and testrun",
-			paths: []string{".claude/skills/merge-queue/run.sh"},
-			want:  []string{"merge-queue-skill-harness", "worktrees-lib-harness", "testrun"},
-		},
-		{
 			name:  "the safe test runner selects its harness, the background scan and the worktrees library's",
 			paths: []string{".claude/safe-test-run.sh"},
 			want:  []string{"safe-test-run-harness", "background-harness", "worktrees-lib-harness"},

@@ -125,13 +125,20 @@ func (o *orchestrator) pauseScope(ctx context.Context, op string, scope *Reposit
 // repository two ways. A ref naming nothing, or no registered repository, is
 // the unknown_repository refusal, recorded under OP as WHAT was refused.
 func (o *orchestrator) queueKeyOf(ctx context.Context, op, what string, scope RepositoryScope) (wsm.RepoKey, error) {
+	_, key, err := o.scopedRepository(ctx, op, what, scope)
+	return key, err
+}
+
+// scopedRepository is queueKeyOf's resolution, answering the registered
+// repository SCOPE names as well as its queue key.
+func (o *orchestrator) scopedRepository(ctx context.Context, op, what string, scope RepositoryScope) (wsm.Repository, wsm.RepoKey, error) {
 	if scope.ID == "" && scope.Dir == "" {
 		o.deps.Log.Global().Warn(op, "refused "+what+" scoped by an empty repository ref", dlog.Context{"arm": ArmUnknownRepository})
-		return "", &RefusalError{Arm: ArmUnknownRepository, Reason: "the request's repository ref names neither an id nor a dir"}
+		return wsm.Repository{}, "", &RefusalError{Arm: ArmUnknownRepository, Reason: "the request's repository ref names neither an id nor a dir"}
 	}
 	repos, err := o.deps.DB.ListRepositories(ctx)
 	if err != nil {
-		return "", err
+		return wsm.Repository{}, "", err
 	}
 	for _, repo := range repos {
 		if scope.ID != "" && repo.ID != scope.ID {
@@ -146,12 +153,12 @@ func (o *orchestrator) queueKeyOf(ctx context.Context, op, what string, scope Re
 		// never saw what an unscoped one had done.
 		common, err := o.deps.Git.CommonDir(ctx, repo.Dir)
 		if err != nil {
-			return "", fmt.Errorf("merge: resolving the repository of %s: %w", repo.Dir, err)
+			return wsm.Repository{}, "", fmt.Errorf("merge: resolving the repository of %s: %w", repo.Dir, err)
 		}
-		return wsm.RepoKey(common), nil
+		return repo, wsm.RepoKey(common), nil
 	}
 	o.deps.Log.Global().Warn(op, "refused "+what+" for a repository the registry does not hold", dlog.Context{"arm": ArmUnknownRepository, "repository": string(scope.ID), "dir": scope.Dir})
-	return "", &RefusalError{Arm: ArmUnknownRepository, Reason: "no registered repository matches the request's repository ref"}
+	return wsm.Repository{}, "", &RefusalError{Arm: ArmUnknownRepository, Reason: "no registered repository matches the request's repository ref"}
 }
 
 // AbandonCause names WHY a queued merge left its queue before it ever ran.
@@ -1042,6 +1049,25 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	}
 	if !taken {
 		o.deps.Log.Global().Warn(op, "another daemon holds this repository's merge queue", dlog.Context{"repo": string(repo)})
+		return "", nil, false, nil
+	}
+	// A MERGE WORKSPACE'S PICK RUNS AT THE HEAD, holding the slot: the merge
+	// has STARTED, so its pick -- and the fork its first turn brings up -- sees
+	// the maker as it stands now. Nothing is admitted until the pick settles:
+	// a pick that succeeds clears itself and kicks the pump, which then admits
+	// the merge; one that fails takes the merge off the queue.
+	if front.Source.Pick != "" {
+		o.mu.Lock()
+		_, picking := o.picks[front.Workspace]
+		o.mu.Unlock()
+		if !picking && front.Source.PickStartedAt == nil {
+			if err := o.startPick(ctx, front.Workspace, repo, front); err != nil {
+				o.releaseRepoLockIfIdle(ctx, repo)
+				return "", nil, false, err
+			}
+		}
+		o.deps.Log.Global().Debug(op, "the queue front is a merge workspace whose pick runs at the head; it is admitted once the pick succeeds",
+			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace), "picking": picking})
 		return "", nil, false, nil
 	}
 	if err := o.deps.DB.AdmitMerge(ctx, repo, front.Workspace); err != nil {

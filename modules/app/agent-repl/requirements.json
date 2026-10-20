@@ -230,43 +230,43 @@
       "doc": "docs/USER-GUIDE.md#setup"
     },
     {
-      "id": "skill-profile-agent-repl",
+      "id": "skill-agent-repl-profile",
       "kind": "skill_link",
-      "why": "the /profile-agent-repl skill",
+      "why": "the /agent-repl-profile skill",
       "profile": "run",
-      "name": "profile-agent-repl",
+      "name": "agent-repl-profile",
       "source": {
-        "repo": "modules/app/agent-repl/skills/profile-agent-repl"
+        "repo": "modules/app/agent-repl/skills/agent-repl-profile"
       }
     },
     {
-      "id": "skill-metrics-agent-repl",
+      "id": "skill-agent-repl-metrics",
       "kind": "skill_link",
-      "why": "the /metrics-agent-repl skill",
+      "why": "the /agent-repl-metrics skill",
       "profile": "run",
-      "name": "metrics-agent-repl",
+      "name": "agent-repl-metrics",
       "source": {
-        "repo": "modules/app/agent-repl/skills/metrics-agent-repl"
+        "repo": "modules/app/agent-repl/skills/agent-repl-metrics"
       }
     },
     {
-      "id": "skill-write-tests",
+      "id": "skill-agent-repl-tests",
       "kind": "skill_link",
-      "why": "the /write-tests skill",
+      "why": "the /agent-repl-tests skill",
       "profile": "run",
-      "name": "write-tests",
+      "name": "agent-repl-tests",
       "source": {
-        "repo": "modules/app/agent-repl/skills/write-tests"
+        "repo": "modules/app/agent-repl/skills/agent-repl-tests"
       }
     },
     {
-      "id": "skill-runtime-eval-code",
+      "id": "skill-agent-repl-runtime",
       "kind": "skill_link",
-      "why": "the /runtime-eval-code skill",
+      "why": "the /agent-repl-runtime skill",
       "profile": "run",
-      "name": "runtime-eval-code",
+      "name": "agent-repl-runtime",
       "source": {
-        "repo": "modules/app/agent-repl/skills/runtime-eval-code"
+        "repo": "modules/app/agent-repl/skills/agent-repl-runtime"
       }
     },
     {
@@ -281,9 +281,30 @@
       }
     },
     {
+      "id": "skill-agent-repl-merge-queue",
+      "kind": "skill_link",
+      "why": "the /agent-repl-merge-queue skill, the only path into master",
+      "profile": "run",
+      "name": "agent-repl-merge-queue",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/agent-repl-merge-queue"
+      }
+    },
+    {
+      "id": "skill-agent-repl-workspaces",
+      "kind": "skill_link",
+      "why": "the /agent-repl-workspaces skill, which creates, prompts, marks, lands and follows workspaces through the agent API",
+      "profile": "run",
+      "name": "agent-repl-workspaces",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/agent-repl-workspaces"
+      }
+    },
+    {
       "id": "skill-merge-queue",
       "kind": "skill_link",
-      "why": "the /merge-queue skill, the only path into master",
+      "why": "retired: /agent-repl-merge-queue replaces it, so every machine's old link comes out",
+      "retired": true,
       "profile": "run",
       "name": "merge-queue",
       "source": {
@@ -291,9 +312,76 @@
       }
     },
     {
+      "id": "skill-manage-agent-repl-runtime",
+      "kind": "skill_link",
+      "why": "retired: /agent-repl-runtime replaces it, so every machine's old link comes out",
+      "retired": true,
+      "profile": "run",
+      "name": "manage-agent-repl-runtime",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/manage-agent-repl-runtime"
+      }
+    },
+    {
+      "id": "skill-metrics-agent-repl",
+      "kind": "skill_link",
+      "why": "retired: /agent-repl-metrics replaces it, so every machine's old link comes out",
+      "retired": true,
+      "profile": "run",
+      "name": "metrics-agent-repl",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/metrics-agent-repl"
+      }
+    },
+    {
+      "id": "skill-profile-agent-repl",
+      "kind": "skill_link",
+      "why": "retired: /agent-repl-profile replaces it, so every machine's old link comes out",
+      "retired": true,
+      "profile": "run",
+      "name": "profile-agent-repl",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/profile-agent-repl"
+      }
+    },
+    {
+      "id": "skill-write-tests",
+      "kind": "skill_link",
+      "why": "retired: /agent-repl-tests replaces it, so every machine's old link comes out",
+      "retired": true,
+      "profile": "run",
+      "name": "write-tests",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/write-tests"
+      }
+    },
+    {
+      "id": "skill-runtime-eval-code",
+      "kind": "skill_link",
+      "why": "retired: /agent-repl-runtime's editor eval replaces it, so every machine's old link comes out",
+      "retired": true,
+      "profile": "run",
+      "name": "runtime-eval-code",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/runtime-eval-code"
+      }
+    },
+    {
+      "id": "skill-debug-emacs-agent-repl",
+      "kind": "skill_link",
+      "why": "retired: /agent-repl-debug replaces it, so every machine's old link comes out",
+      "retired": true,
+      "profile": "run",
+      "name": "debug-emacs-agent-repl",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/debug-emacs-agent-repl"
+      }
+    },
+    {
       "id": "skill-emit-workspace-commands",
       "kind": "skill_link",
-      "why": "the command-file writer the workspace skills call",
+      "why": "retired: the command-file ingress is gone, so every machine's old link comes out",
+      "retired": true,
       "profile": "run",
       "name": "emit-workspace-commands.sh",
       "source": {
@@ -303,7 +391,8 @@
     {
       "id": "skill-create-or-update-workspace",
       "kind": "skill_link",
-      "why": "the /create-or-update-workspace skill, which lives in the explanation-engine repository",
+      "why": "retired: /agent-repl-workspaces replaces it, so every machine's old link comes out",
+      "retired": true,
       "profile": "run",
       "optional": true,
       "name": "create-or-update-workspace",

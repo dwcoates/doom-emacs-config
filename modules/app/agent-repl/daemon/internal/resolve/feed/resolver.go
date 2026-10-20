@@ -113,6 +113,10 @@ type wsState struct {
 	// prompt queue recorded it (MirrorTurn) or a replay read it back
 	// (Deps.TurnMirrors). See turnmirror.go.
 	turnMirrors map[ids.TurnID]*wsm.MirrorAddress
+	// turnSenders is the workspace whose agent sent each agent-sent turn's
+	// prompt, as the prompt queue recorded it (SenderTurn) or a replay read it
+	// back (Deps.TurnSenders). See turnsender.go.
+	turnSenders map[ids.TurnID]ids.WorkspaceID
 	// outlivedReported records each addressed turn whose frame was drawn after
 	// the address it was recorded at stopped standing, so that is said once.
 	outlivedReported map[ids.TurnID]bool
@@ -743,6 +747,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		promptSaid:           map[ids.TurnID]*conversationv1.UserSaid{},
 		turnAddresses:        map[ids.TurnID]*sessionwatcher.OutputAddress{},
 		turnMirrors:          map[ids.TurnID]*wsm.MirrorAddress{},
+		turnSenders:          map[ids.TurnID]ids.WorkspaceID{},
 		outlivedReported:     map[ids.TurnID]bool{},
 		endedTurns:           map[ids.TurnID]bool{},
 		answerMarkdown:       map[string]string{},

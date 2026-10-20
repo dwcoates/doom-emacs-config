@@ -15,30 +15,26 @@ import (
 
 // subscribeDepletes subscribes WS's agent to every repository's merge queue,
 // told only when a queue runs out of merges.
-func subscribeDepletes(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueResponse {
+func subscribeDepletes(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) *agentreplv1.SubscribeMergeQueueResponse {
 	t.Helper()
-	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
-		Action: &agentreplv1.UpdateMergeQueueRequest_Subscribe{Subscribe: &agentreplv1.UpdateMergeQueueSubscribe{
-			Subscriber: ws,
-			Detail: &agentreplv1.UpdateMergeQueueSubscribeDetail{
-				Level: &agentreplv1.UpdateMergeQueueSubscribeDetail_Depletes{Depletes: &agentreplv1.UpdateMergeQueueSubscribeDepletes{}},
-			},
-		}},
+	resp, err := d.Client().SubscribeMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.SubscribeMergeQueueRequest{
+		Subscriber: ws,
+		Detail: &agentreplv1.SubscribeMergeQueueDetail{
+			Level: &agentreplv1.SubscribeMergeQueueDetail_Depletes{Depletes: &agentreplv1.SubscribeMergeQueueDepletes{}},
+		},
 	}))
 	if err != nil {
-		t.Fatalf("UpdateMergeQueue(subscribe) = error %v", err)
+		t.Fatalf("SubscribeMergeQueue = error %v", err)
 	}
 	return resp.Msg
 }
 
 // unsubscribeEvery ends WS's every-repository subscription.
-func unsubscribeEvery(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueResponse {
+func unsubscribeEvery(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) *agentreplv1.UnsubscribeMergeQueueResponse {
 	t.Helper()
-	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
-		Action: &agentreplv1.UpdateMergeQueueRequest_Unsubscribe{Unsubscribe: &agentreplv1.UpdateMergeQueueUnsubscribe{Subscriber: ws}},
-	}))
+	resp, err := d.Client().UnsubscribeMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UnsubscribeMergeQueueRequest{Subscriber: ws}))
 	if err != nil {
-		t.Fatalf("UpdateMergeQueue(unsubscribe) = error %v", err)
+		t.Fatalf("UnsubscribeMergeQueue = error %v", err)
 	}
 	return resp.Msg
 }
@@ -62,10 +58,10 @@ func TestAMergeQueueSubscriptionSurvivesADaemonRestart(t *testing.T) {
 	second := unsubscribeEvery(t, nd, ws)
 
 	// Assert: the subscription was still standing, and only once.
-	if first.GetSuccess() == nil {
-		t.Fatalf("unsubscribe after the restart = %v, want success: the subscription survived", first)
+	if first.GetSuccess().GetUnsubscribed() == nil {
+		t.Fatalf("unsubscribe after the restart = %v, want unsubscribed: the subscription survived", first)
 	}
-	if second.GetError().GetNotSubscribed() == nil {
+	if second.GetSuccess().GetNotSubscribed() == nil {
 		t.Fatalf("second unsubscribe = %v, want not_subscribed", second)
 	}
 }
@@ -83,12 +79,12 @@ func TestClosingAWorkspaceEndsItsMergeQueueSubscription(t *testing.T) {
 	}
 
 	// Act.
-	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ws})); err != nil {
+	if _, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: ws})); err != nil {
 		t.Fatalf("CloseWorkspace: %v", err)
 	}
 
 	// Assert.
-	if got := unsubscribeEvery(t, d, ws); got.GetError().GetNotSubscribed() == nil {
+	if got := unsubscribeEvery(t, d, ws); got.GetSuccess().GetNotSubscribed() == nil {
 		t.Fatalf("unsubscribe after the close = %v, want not_subscribed: the close ended it", got)
 	}
 	if got := subscribeDepletes(t, d, ws); got.GetError().GetSubscriberClosed() == nil {

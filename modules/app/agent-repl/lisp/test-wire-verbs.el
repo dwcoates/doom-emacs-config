@@ -109,8 +109,10 @@ names its source as well, so the request tests read
   ;; A third element, when present, is the arm set this codec decodes instead of
   ;; the usual two: CreateWorkspaceResponse carries the option-B `accepted' ack
   ;; beside success and error.
+  ;; CreateWorkspaceResponse's `async_merge_accepted' answers only an async
+  ;; merge, which is an agent's request and never the editor's.
   '(("agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceResponse"
-     ("accepted" "error" "success"))
+     ("accepted" "asyncMergeAccepted" "error" "success"))
     ("agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceResponse")
     ("agentrepl/v1/endpoint_list_workspace_transcripts.pb.go" "ListWorkspaceTranscriptsResponse")
     ("agentrepl/v1/endpoint_bind_workspace_session.pb.go" "BindWorkspaceSessionResponse")
@@ -133,15 +135,34 @@ names its source as well, so the request tests read
 
 ;;;; ---- CreateWorkspaceRequest: the standard form ----------------------
 
+(defun agent-repl-test-wire-verbs--encode-create (request)
+  "Encode the CreateWorkspaceRequest REQUEST with its required facts filled.
+A test about one fact names only that fact: an absent requester is the
+user, an absent context origin is fresh, and a form value without a
+topology is primary."
+  (let* ((form (plist-get request :form))
+         (value (plist-get form :value)))
+    (when (and form (not (plist-member value :topology)))
+      (setq request (plist-put (copy-sequence request) :form
+                               (list :arm (plist-get form :arm)
+                                     :value (append value (list :topology '(:arm :primary)))))))
+    (agent-repl-wire-encode-create-workspace-request
+     (append request
+             (unless (plist-member request :requester) (list :requester '(:arm :user)))
+             (unless (plist-member request :context-origin) (list :context-origin '(:arm :fresh)))))))
+
 (ert-deftest agent-repl-test-wire-verbs-create-standard-minimal ()
-  "A standard create with no optional facts carries repository and an empty
-form."
+  "A standard create with no optional facts carries its repository, its
+topology, its requester and its context origin, and nothing else."
   (agent-repl-test-wire-verbs--with-common
     (let* ((request (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard :value nil)))
-           (encoded (agent-repl-wire-encode-create-workspace-request request)))
+           (encoded (agent-repl-test-wire-verbs--encode-create request)))
       (should (equal (json-serialize encoded)
-                     "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},\"standard\":{}}")))))
+                     (concat "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},"
+                             "\"standard\":{\"topology\":{\"primary\":{}}},"
+                             "\"requester\":{\"user\":{}},"
+                             "\"contextOrigin\":{\"fresh\":{}}}"))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-standard-initial-prompt ()
   "A standard create's initial prompt encodes through the UserSaid codec."
@@ -149,34 +170,27 @@ form."
     (let* ((request (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard
                                   :value (:initial-prompt (:text "go")))))
-           (encoded (agent-repl-wire-encode-create-workspace-request request)))
+           (encoded (agent-repl-test-wire-verbs--encode-create request)))
       (should (equal (cdr (assq 'initialPrompt (cdr (assq 'standard encoded))))
                      '((said . "go")))))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-standard-base-ref ()
-  "A standard create's base ref rides as the lowerCamel `baseRef' key."
-  (agent-repl-test-wire-verbs--with-common
-    (let* ((request (list :repository agent-repl-test-wire-verbs--repo
-                          :form '(:arm :standard :value (:base-ref "origin/main"))))
-           (encoded (agent-repl-wire-encode-create-workspace-request request)))
-      (should (equal (cdr (assq 'baseRef (cdr (assq 'standard encoded)))) "origin/main")))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-standard-name ()
   "A caller-supplied workspace name rides the standard form."
   (agent-repl-test-wire-verbs--with-common
     (let* ((request (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard :value (:name "wire-b"))))
-           (encoded (agent-repl-wire-encode-create-workspace-request request)))
+           (encoded (agent-repl-test-wire-verbs--encode-create request)))
       (should (equal (cdr (assq 'name (cdr (assq 'standard encoded)))) "wire-b")))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-standard-absent-optionals ()
-  "Absent standard-form optionals are OMITTED, never spelled as sentinels."
+  "Absent standard-form optionals are OMITTED, never spelled as sentinels:
+the required topology is all the form carries."
   (agent-repl-test-wire-verbs--with-common
     (let* ((request (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard :value nil)))
            (standard (cdr (assq 'standard
-                                (agent-repl-wire-encode-create-workspace-request request)))))
-      (should (null standard)))))
+                                (agent-repl-test-wire-verbs--encode-create request)))))
+      (should (equal standard '((topology . ((primary)))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-merge-actions-before ()
   "A configured pre-merge action rides as `beforeWsMerge'."
@@ -187,7 +201,7 @@ form."
                                           (:before-ws-merge (:text "lint"))))))
            (actions (cdr (assq 'mergeActions
                                (cdr (assq 'standard
-                                          (agent-repl-wire-encode-create-workspace-request
+                                          (agent-repl-test-wire-verbs--encode-create
                                            request)))))))
       (should (equal actions '((beforeWsMerge . ((said . "lint")))))))))
 
@@ -200,7 +214,7 @@ form."
                                           (:postprocessing-prompt (:text "tidy"))))))
            (actions (cdr (assq 'mergeActions
                                (cdr (assq 'standard
-                                          (agent-repl-wire-encode-create-workspace-request
+                                          (agent-repl-test-wire-verbs--encode-create
                                            request)))))))
       (should (equal actions '((postprocessingPrompt . ((said . "tidy")))))))))
 
@@ -214,9 +228,9 @@ form."
                           :form '(:arm :one-shot
                                   :value (:prompt (:text "ship it")))))
            (one-shot (cdr (assq 'oneShot
-                                (agent-repl-wire-encode-create-workspace-request request)))))
+                                (agent-repl-test-wire-verbs--encode-create request)))))
       (should (equal (json-serialize one-shot)
-                     "{\"prompt\":{\"said\":\"ship it\"}}")))))
+                     "{\"prompt\":{\"said\":\"ship it\"},\"topology\":{\"primary\":{}}}")))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-one-shot-carries-its-context-workspace ()
   "A one-shot's context workspace encodes inside the one-shot arm, beside the prompt."
@@ -226,15 +240,16 @@ form."
                                   :value (:prompt (:text "fix its feed")
                                           :context (:id "ws-2" :dir "/w/two")))))
            (one-shot (cdr (assq 'oneShot
-                                (agent-repl-wire-encode-create-workspace-request request)))))
+                                (agent-repl-test-wire-verbs--encode-create request)))))
       (should (equal (json-serialize one-shot)
-                     "{\"prompt\":{\"said\":\"fix its feed\"},\"context\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}")))))
+                     (concat "{\"prompt\":{\"said\":\"fix its feed\"},\"topology\":{\"primary\":{}},"
+                             "\"context\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-one-shot-without-prompt-refused ()
   "A one-shot IS its prompt: a one-shot without one never reaches the wire."
   (agent-repl-test-wire-verbs--with-common
     (should-error
-     (agent-repl-wire-encode-create-workspace-request
+     (agent-repl-test-wire-verbs--encode-create
       (list :repository agent-repl-test-wire-verbs--repo
             :form '(:arm :one-shot :value nil)))
      :type 'agent-repl-wire-error)))
@@ -246,7 +261,7 @@ form."
   "The form arm IS the creation form, so a request without one is refused."
   (agent-repl-test-wire-verbs--with-common
     (should-error
-     (agent-repl-wire-encode-create-workspace-request
+     (agent-repl-test-wire-verbs--encode-create
       (list :repository agent-repl-test-wire-verbs--repo))
      :type 'agent-repl-wire-error)))
 
@@ -254,56 +269,125 @@ form."
   "A create with no repository is incomplete and errors before send."
   (agent-repl-test-wire-verbs--with-common
     (should-error
-     (agent-repl-wire-encode-create-workspace-request '(:form (:arm :standard :value nil)))
+     (agent-repl-test-wire-verbs--encode-create '(:form (:arm :standard :value nil)))
      :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-create-unknown-form-arm-refused ()
   "An arm keyword the form oneof does not declare is refused."
   (agent-repl-test-wire-verbs--with-common
     (should-error
-     (agent-repl-wire-encode-create-workspace-request
+     (agent-repl-test-wire-verbs--encode-create
       (list :repository agent-repl-test-wire-verbs--repo
             :form '(:arm :rehydrate :value nil)))
      :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-create-parent-without-fork ()
-  "A parent without a fork nests the child but starts a fresh conversation."
-  (agent-repl-test-wire-verbs--with-common
-    (let* ((request (list :repository agent-repl-test-wire-verbs--repo
-                          :form '(:arm :standard :value nil)
-                          :parent (list :workspace agent-repl-test-wire-verbs--ref)))
-           (parent (cdr (assq 'parent
-                              (agent-repl-wire-encode-create-workspace-request request)))))
-      (should (equal (json-serialize parent)
-                     "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}")))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-parent-with-fork ()
-  "Presence IS the fork fact, so a set fork is the empty message."
-  (agent-repl-test-wire-verbs--with-common
-    (let* ((request (list :repository agent-repl-test-wire-verbs--repo
-                          :form '(:arm :standard :value nil)
-                          :parent (list :workspace agent-repl-test-wire-verbs--ref
-                                        :fork t)))
-           (parent (cdr (assq 'parent
-                              (agent-repl-wire-encode-create-workspace-request request)))))
-      (should (equal (json-serialize parent)
-                     (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                             "\"fork\":{}}"))))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-parent-without-workspace-refused ()
-  "A parent block with no parent workspace is incomplete and refused."
+(ert-deftest agent-repl-test-wire-verbs-create-standard-without-topology-refused ()
+  "Nothing is implied: a standard form without a topology never reaches the wire."
   (agent-repl-test-wire-verbs--with-common
     (should-error
      (agent-repl-wire-encode-create-workspace-request
       (list :repository agent-repl-test-wire-verbs--repo
             :form '(:arm :standard :value nil)
-            :parent '(:fork t)))
+            :requester '(:arm :user) :context-origin '(:arm :fresh)))
      :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-create-one-shot-without-topology-refused ()
+  "Nothing is implied: a one-shot form without a topology never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error
+     (agent-repl-wire-encode-create-workspace-request
+      (list :repository agent-repl-test-wire-verbs--repo
+            :form '(:arm :one-shot :value (:prompt (:text "go")))
+            :requester '(:arm :user) :context-origin '(:arm :fresh)))
+     :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-create-without-requester-refused ()
+  "Nothing is implied: a create without a requester never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error
+     (agent-repl-wire-encode-create-workspace-request
+      (list :repository agent-repl-test-wire-verbs--repo
+            :form '(:arm :standard :value (:topology (:arm :primary)))
+            :context-origin '(:arm :fresh)))
+     :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-create-without-context-origin-refused ()
+  "Nothing is implied: a create without a context origin never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error
+     (agent-repl-wire-encode-create-workspace-request
+      (list :repository agent-repl-test-wire-verbs--repo
+            :form '(:arm :standard :value (:topology (:arm :primary)))
+            :requester '(:arm :user)))
+     :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-create-child-topology ()
+  "A child topology names its owner inside the form."
+  (agent-repl-test-wire-verbs--with-common
+    (let* ((request (list :repository agent-repl-test-wire-verbs--repo
+                          :form (list :arm :standard
+                                      :value (list :topology
+                                                   (list :arm :child
+                                                         :value (list :owner agent-repl-test-wire-verbs--ref))))))
+           (standard (cdr (assq 'standard (agent-repl-test-wire-verbs--encode-create request)))))
+      (should (equal (json-serialize standard)
+                     "{\"topology\":{\"child\":{\"owner\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}}")))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-child-topology-owner-notice ()
+  "A child's owner notice rides beside its owner as `ownerNotice'."
+  (agent-repl-test-wire-verbs--with-common
+    (let* ((request (list :repository agent-repl-test-wire-verbs--repo
+                          :form (list :arm :standard
+                                      :value (list :topology
+                                                   (list :arm :child
+                                                         :value (list :owner agent-repl-test-wire-verbs--ref
+                                                                      :owner-notice "coming your way"))))))
+           (child (cdr (assq 'child (cdr (assq 'topology (cdr (assq 'standard (agent-repl-test-wire-verbs--encode-create request)))))))))
+      (should (equal (cdr (assq 'ownerNotice child)) '((text . "coming your way")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-child-without-owner-refused ()
+  "A child topology IS its owner, so one without an owner never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error
+     (agent-repl-test-wire-verbs--encode-create
+      (list :repository agent-repl-test-wire-verbs--repo
+            :form '(:arm :standard :value (:topology (:arm :child :value nil)))))
+     :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-create-context-origin-fork ()
+  "A forked context names the workspace whose conversation is copied."
+  (agent-repl-test-wire-verbs--with-common
+    (let ((encoded (agent-repl-test-wire-verbs--encode-create
+                    (list :repository agent-repl-test-wire-verbs--repo
+                          :form '(:arm :standard :value nil)
+                          :context-origin (list :arm :fork :value agent-repl-test-wire-verbs--ref)))))
+      (should (equal (json-serialize (cdr (assq 'contextOrigin encoded)))
+                     "{\"fork\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}")))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-context-origin-fork-without-workspace-refused ()
+  "A fork IS its source, so one without a workspace never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error
+     (agent-repl-test-wire-verbs--encode-create
+      (list :repository agent-repl-test-wire-verbs--repo
+            :form '(:arm :standard :value nil)
+            :context-origin '(:arm :fork :value nil)))
+     :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-create-requester-workspace ()
+  "A workspace requester names the asking workspace."
+  (agent-repl-test-wire-verbs--with-common
+    (let ((encoded (agent-repl-test-wire-verbs--encode-create
+                    (list :repository agent-repl-test-wire-verbs--repo
+                          :form '(:arm :standard :value nil)
+                          :requester (list :arm :workspace :value agent-repl-test-wire-verbs--ref)))))
+      (should (equal (json-serialize (cdr (assq 'requester encoded)))
+                     "{\"workspace\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}")))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-model-present ()
   "A chosen session model rides the request."
   (agent-repl-test-wire-verbs--with-common
-    (let ((encoded (agent-repl-wire-encode-create-workspace-request
+    (let ((encoded (agent-repl-test-wire-verbs--encode-create
                     (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard :value nil)
                           :model "opus"))))
@@ -312,7 +396,7 @@ form."
 (ert-deftest agent-repl-test-wire-verbs-create-model-absent-omitted ()
   "An absent model omits the key: the daemon's default, not an empty string."
   (agent-repl-test-wire-verbs--with-common
-    (let ((encoded (agent-repl-wire-encode-create-workspace-request
+    (let ((encoded (agent-repl-test-wire-verbs--encode-create
                     (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard :value nil)))))
       (should-not (assq 'model encoded)))))
@@ -320,7 +404,7 @@ form."
 (ert-deftest agent-repl-test-wire-verbs-create-priority-present ()
   "A creation-time priority delegates to the WorkspacePriority codec."
   (agent-repl-test-wire-verbs--with-common
-    (let ((encoded (agent-repl-wire-encode-create-workspace-request
+    (let ((encoded (agent-repl-test-wire-verbs--encode-create
                     (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard :value nil)
                           :priority '(:arm :p1 :value nil)))))
@@ -329,7 +413,7 @@ form."
 (ert-deftest agent-repl-test-wire-verbs-create-priority-absent-omitted ()
   "An absent priority omits the key: unprioritized, never a sentinel level."
   (agent-repl-test-wire-verbs--with-common
-    (let ((encoded (agent-repl-wire-encode-create-workspace-request
+    (let ((encoded (agent-repl-test-wire-verbs--encode-create
                     (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard :value nil)))))
       (should-not (assq 'priority encoded)))))
@@ -337,7 +421,7 @@ form."
 (ert-deftest agent-repl-test-wire-verbs-create-allow-ungated-present ()
   "Presence IS the ungated consent, so it rides as the empty message."
   (agent-repl-test-wire-verbs--with-common
-    (let ((encoded (agent-repl-wire-encode-create-workspace-request
+    (let ((encoded (agent-repl-test-wire-verbs--encode-create
                     (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard :value nil)
                           :allow-ungated t))))
@@ -347,7 +431,7 @@ form."
 (ert-deftest agent-repl-test-wire-verbs-create-allow-ungated-absent-omitted ()
   "Absent consent omits the key entirely: no consent was given."
   (agent-repl-test-wire-verbs--with-common
-    (let ((encoded (agent-repl-wire-encode-create-workspace-request
+    (let ((encoded (agent-repl-test-wire-verbs--encode-create
                     (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard :value nil)))))
       (should-not (assq 'allowUngated encoded)))))
@@ -466,8 +550,18 @@ THE ARM IS THE REFUSAL, so a bare error says nothing the caller can act on."
   "CloseWorkspaceRequest echoes the WorkspaceRef verbatim."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-encode-close-workspace-request
-                    (list :workspace agent-repl-test-wire-verbs--ref))
-                   '((workspace . ((id . "ws-1") (dir . "/w/one"))))))))
+                    (list :workspace agent-repl-test-wire-verbs--ref :requester '(:arm :user)))
+                   '((workspace . ((id . "ws-1") (dir . "/w/one")))
+                     (requester . ((user))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-request-without-requester-refused ()
+  "A close naming no requester is refused before the send: nothing is implied."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (cdr (should-error
+                         (agent-repl-wire-encode-close-workspace-request
+                          (list :workspace agent-repl-test-wire-verbs--ref))
+                         :type 'agent-repl-wire-error))
+                   '("CloseWorkspaceRequest" "requester" "required field is unset")))))
 
 (ert-deftest agent-repl-test-wire-verbs-close-response-blocked ()
   "A blocked close decodes to the cause arm; the reasons ride the footer."
@@ -493,11 +587,34 @@ THE ARM IS THE REFUSAL, so a bare error says nothing the caller can act on."
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-close-response-success ()
-  "A quiet close decodes to the empty success arm."
+  "A done close decodes to the success arm's `closed' outcome."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-close-workspace-response
-                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
-                   '(:arm :success :value nil)))))
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"closed\":{}}}"))
+                   '(:arm :success :value (:outcome (:arm :closed :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-response-success-without-outcome ()
+  "A close success naming no outcome is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-close-workspace-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-close-response-closes-when-turn-ends-is-a-breach ()
+  "Only a workspace closing itself is told its close waits for its turn, so
+that outcome answering the editor\='s close is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-close-workspace-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{\"closesWhenTurnEnds\":{}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-close-success-outcome-arms-pinned ()
+  "CloseWorkspaceSuccess's outcome is `closed\', decoded here, and
+`closes_when_turn_ends\', which answers only a workspace closing itself."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_close_workspace.pb.go" "CloseWorkspaceSuccess")
+                       #'string<)
+                 '("closed" "closesWhenTurnEnds"))))
 
 
 ;;;; ---- RestartWorkspace ------------------------------------------------
@@ -1472,20 +1589,6 @@ never sent as an empty ref, because unset is what means every queue."
                                     '(:action (:arm :enable-racing :value nil))))
                    "{\"enableRacing\":{}}"))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-hold-rollouts ()
-  "A hold of the rollouts is daemon-wide, so its message is empty."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
-                                    '(:action (:arm :hold-rollouts :value nil))))
-                   "{\"holdRollouts\":{}}"))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-release-rollouts ()
-  "A release of the rollouts is daemon-wide, so its message is empty."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
-                                    '(:action (:arm :release-rollouts :value nil))))
-                   "{\"releaseRollouts\":{}}"))))
-
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-workspace-arm-encodes-the-ref ()
   "The shared workspace-arm encoder hands the required ref to its use site."
   (agent-repl-test-wire-verbs--with-common
@@ -1699,12 +1802,13 @@ logging rung returns normally, and the typed signal follows it."
                      (sort (copy-sequence want) #'string<))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-form-arms-pinned ()
-  "CreateWorkspaceRequest's form oneof has exactly the two arms encoded here."
+  "CreateWorkspaceRequest's form oneof is the two arms encoded here and the
+async merge, which is an agent\='s request and never the editor\='s."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go"
                         "CreateWorkspaceRequest")
                        #'string<)
-                 '("oneShot" "standard"))))
+                 '("asyncMerge" "oneShot" "standard"))))
 
 (ert-deftest agent-repl-test-wire-verbs-one-shot-has-no-oneof-at-all ()
   "CreateWorkspaceOneShot carries no oneof: the finish choice is retired, so
@@ -1741,7 +1845,9 @@ here."
                  '("agents" "context" "help" "mcp" "status" "todos"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-reason-arms-pinned ()
-  "SubmitPromptError's reason oneof has exactly the arms this codec decodes."
+  "SubmitPromptError's reason oneof is the arms this codec decodes and
+`slash_command_from_agent' and `unknown_sender', which refuse only an
+agent\='s prompt and so never answer the editor\='s."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptError")
@@ -1749,8 +1855,8 @@ here."
                  '("askNotStanding" "bubbleRefused" "coldGate" "duplicateSubmission"
                    "feedNotInWorkspace" "feedUndecodable" "merging"
                    "modelNotInCatalog" "modelRefused" "noSession"
-                   "notYetAdopted" "transferringAway" "unknownWorkspace"
-                   "workspaceRefMismatch"))))
+                   "notYetAdopted" "slashCommandFromAgent" "transferringAway"
+                   "unknownSender" "unknownWorkspace" "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-action-arms-pinned ()
   "UpdateShutdownScheduleRequest's action oneof has exactly the three arms
@@ -1762,75 +1868,13 @@ encoded here."
                  '("cancel" "now" "schedule"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-arms-pinned ()
-  "UpdateMergeQueueRequest's action oneof has exactly the eleven arms encoded
+  "UpdateMergeQueueRequest's action oneof has exactly the seven arms encoded
 here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
                        #'string<)
-                 '("disableRacing" "enableRacing" "evict" "holdRollouts" "moveDown" "moveUp" "pause" "releaseRollouts" "resume" "subscribe" "unsubscribe"))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-subscribe-detail-arms-pinned ()
-  "UpdateMergeQueueSubscribeDetail's level oneof has exactly the three arms
-encoded here."
-  (should (equal (sort (agent-repl-test--generated-oneof-arms
-                        "agentrepl/v1/endpoint_update_merge_queue.pb.go"
-                        "UpdateMergeQueueSubscribeDetail")
-                       #'string<)
-                 '("advances" "depletes" "everyChange"))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-subscribe-every-repository ()
-  "A subscription with no repository is every repository's; it carries its
-subscriber and its level."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (json-serialize
-                    (agent-repl-wire-encode-update-merge-queue-request
-                     (list :action (list :arm :subscribe
-                                         :value (list :subscriber agent-repl-test-wire-verbs--ref
-                                                      :detail '(:arm :every-change))))))
-                   "{\"subscribe\":{\"subscriber\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"detail\":{\"everyChange\":{}}}}"))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-subscribe-one-repository ()
-  "A subscription scoped to a repository carries its ref."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (json-serialize
-                    (agent-repl-wire-encode-update-merge-queue-request
-                     (list :action (list :arm :subscribe
-                                         :value (list :subscriber agent-repl-test-wire-verbs--ref
-                                                      :repository agent-repl-test-wire-verbs--repo
-                                                      :detail '(:arm :depletes))))))
-                   "{\"subscribe\":{\"subscriber\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},\"detail\":{\"depletes\":{}}}}"))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-subscribe-without-detail ()
-  "A subscription with no detail is incomplete and errors before send."
-  (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-wire-encode-update-merge-queue-request
-                   (list :action (list :arm :subscribe :value (list :subscriber agent-repl-test-wire-verbs--ref))))
-                  :type 'agent-repl-wire-error)))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-subscribe-without-subscriber ()
-  "A subscription with no subscriber is incomplete and errors before send."
-  (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-wire-encode-update-merge-queue-request
-                   '(:action (:arm :subscribe :value (:detail (:arm :advances)))))
-                  :type 'agent-repl-wire-error)))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-unsubscribe ()
-  "An unsubscribe with no repository ends the every-repository subscription."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (json-serialize
-                    (agent-repl-wire-encode-update-merge-queue-request
-                     (list :action (list :arm :unsubscribe
-                                         :value (list :subscriber agent-repl-test-wire-verbs--ref)))))
-                   "{\"unsubscribe\":{\"subscriber\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-scoped-subscriber-arms-share-one-encoder ()
-  "Both subscription arms encode their subscriber and scope through one helper."
-  (dolist (fn '(agent-repl-wire-encode-update-merge-queue-subscribe
-                agent-repl-wire-encode-update-merge-queue-unsubscribe))
-    (should (string-match-p
-             "agent-repl-wire-verbs--encode-merge-queue-scoped-subscriber"
-             (prin1-to-string (symbol-function fn))))))
+                 '("disableRacing" "enableRacing" "evict" "moveDown" "moveUp" "pause" "resume"))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
   "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded
@@ -1872,14 +1916,6 @@ it carries."
                     (agent-repl-test-wire-verbs--parse "{\"noSlug\":{}}"))
                    '(:cause (:arm :no-slug :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-create-error-fork-parent-has-no-conversation-arm ()
-  "CreateWorkspaceError's `fork_parent_has_no_conversation' arm decodes with
-everything it carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-create-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"forkParentHasNoConversation\":{}}"))
-                   '(:cause (:arm :fork-parent-has-no-conversation :value nil))))))
-
 (ert-deftest agent-repl-test-wire-verbs-create-error-brief-missing-arm ()
   "CreateWorkspaceError's `brief_missing' arm decodes with everything it
 carries."
@@ -1895,22 +1931,6 @@ carries."
     (should (equal (agent-repl-wire-decode-create-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"unknownRepository\":{}}"))
                    '(:cause (:arm :unknown-repository :value nil))))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-error-unknown-parent-arm ()
-  "CreateWorkspaceError's `unknown_parent' arm decodes with everything it
-carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-create-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"unknownParent\":{}}"))
-                   '(:cause (:arm :unknown-parent :value nil))))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-error-base-ref-unresolved-arm ()
-  "CreateWorkspaceError's `base_ref_unresolved' arm decodes with everything it
-carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-create-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"baseRefUnresolved\":{\"ref\":\"origin/main\"}}"))
-                   '(:cause (:arm :base-ref-unresolved :value (:ref "origin/main")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-worktree-creation-failed-arm ()
   "CreateWorkspaceError's `worktree_creation_failed' arm decodes with
@@ -1997,18 +2017,8 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "baseRefOffPrimaryBranch" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "unknownContextWorkspace" "parentNotOpen")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed")
                        #'string<))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-error-base-ref-off-primary-branch-arm ()
-  "CreateWorkspaceError's `base_ref_off_primary_branch' arm decodes the ref
-and the primary branch."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-create-workspace-error
-                    (agent-repl-test-wire-verbs--parse
-                     "{\"baseRefOffPrimaryBranch\":{\"ref\":\"feature-tip\",\"primaryBranch\":\"main\"}}"))
-                   '(:cause (:arm :base-ref-off-primary-branch
-                             :value (:ref "feature-tip" :primary-branch "main")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-fork-source-arm ()
   "CreateWorkspaceError's `unknown_fork_source' arm decodes the ref it names."
@@ -2038,23 +2048,57 @@ ref it names."
                    '(:cause (:arm :fork-source-has-no-conversation
                              :value (:workspace (:id "ws-2" :dir "/w/two"))))))))
 
+(ert-deftest agent-repl-test-wire-verbs-create-error-unknown-owner-arm ()
+  "CreateWorkspaceError's `unknown_owner' arm decodes the owner it names."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"unknownOwner\":{\"owner\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
+                   '(:cause (:arm :unknown-owner :value (:owner (:id "ws-2" :dir "/w/two"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-owner-notice-required-arm ()
+  "CreateWorkspaceError's `owner_notice_required' arm is empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"ownerNoticeRequired\":{}}"))
+                   '(:cause (:arm :owner-notice-required :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-owner-notice-unexpected-arm ()
+  "CreateWorkspaceError's `owner_notice_unexpected' arm is empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"ownerNoticeUnexpected\":{}}"))
+                   '(:cause (:arm :owner-notice-unexpected :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-one-shot-owner-lands-arm ()
+  "CreateWorkspaceError's `one_shot_owner_lands' arm decodes the owner that lands."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"oneShotOwnerLands\":{\"owner\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
+                   '(:cause (:arm :one-shot-owner-lands :value (:owner (:id "ws-2" :dir "/w/two"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-unknown-requester-arm ()
+  "CreateWorkspaceError's `unknown_requester' arm decodes the requester it names."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"unknownRequester\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
+                   '(:cause (:arm :unknown-requester :value (:workspace (:id "ws-2" :dir "/w/two"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-async-merge-arm-is-a-breach ()
+  "No editor create is an async merge, so an async-merge refusal is a breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-create-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"asyncMergeNameTaken\":{\"name\":\"x\"}}"))
+                  :type 'agent-repl-wire-error)))
+
 (ert-deftest agent-repl-test-wire-verbs-create-error-name-reserved-arm ()
   "CreateWorkspaceError's `name_reserved' arm decodes the branch the name resolves to."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-create-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"nameReserved\":{\"branch\":\"agent-1/fix\"}}"))
                    '(:cause (:arm :name-reserved :value (:branch "agent-1/fix")))))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-encodes-a-fork-source ()
-  "A fork into the primary branch rides `forkSource', never beside a parent."
-  (agent-repl-test-wire-verbs--with-common
-    (let ((encoded (agent-repl-wire-encode-create-workspace-request
-                    (list :repository '(:id "repo-1" :dir "/r/one")
-                          :form '(:arm :standard :value nil)
-                          :fork-source agent-repl-test-wire-verbs--ref))))
-      (should (equal (alist-get 'forkSource encoded)
-                     '((workspace . ((id . "ws-1") (dir . "/w/one"))))))
-      (should-not (assq 'parent encoded)))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-spawn-failed-arm ()
   "CreateWorkspaceError's `spawn_failed' arm decodes with everything it
@@ -2425,9 +2469,13 @@ at."
 ;;;; ---- MergeWorkspaceRequest ----------------------------------------
 
 (defun agent-repl-test-wire-verbs--merge-json (mode)
-  "Encode a MergeWorkspaceRequest for the fixture ref in MODE, as JSON."
+  "Encode a user\='s back-of-queue MergeWorkspaceRequest for the fixture ref
+in MODE, as JSON."
   (json-serialize (agent-repl-wire-encode-merge-workspace-request
-                   (list :workspace agent-repl-test-wire-verbs--ref :mode mode))))
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :requester '(:arm :user)
+                         :mode mode
+                         :placement '(:arm :back)))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-request-one-shot-own-branch ()
   "A one-shot of the requester's own branch spells the empty `ownBranch' landing."
@@ -2435,7 +2483,9 @@ at."
     (should (equal (agent-repl-test-wire-verbs--merge-json
                     '(:arm :one-shot :value (:landing (:arm :own-branch :value nil))))
                    (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"oneShot\":{\"ownBranch\":{}}}")))))
+                           "\"requester\":{\"user\":{}},"
+                           "\"oneShot\":{\"ownBranch\":{}},"
+                           "\"placement\":{\"back\":{}}}")))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-request-one-shot-merged-upstream ()
   "A one-shot already merged upstream spells the empty `mergedUpstream' landing."
@@ -2443,7 +2493,9 @@ at."
     (should (equal (agent-repl-test-wire-verbs--merge-json
                     '(:arm :one-shot :value (:landing (:arm :merged-upstream :value nil))))
                    (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"oneShot\":{\"mergedUpstream\":{}}}")))))
+                           "\"requester\":{\"user\":{}},"
+                           "\"oneShot\":{\"mergedUpstream\":{}},"
+                           "\"placement\":{\"back\":{}}}")))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-request-one-shot-with-no-landing-is-refused ()
   "A one-shot naming no landing is refused before it is sent."
@@ -2453,70 +2505,48 @@ at."
                          :type 'agent-repl-wire-error))
                    '("MergeWorkspaceOneShot" "landing" "oneof is unset")))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-async-minimal ()
-  "An async merge spells its name and its branch, and nothing it was not given."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :async :value (:name "reconnect-fix" :branch "agent-1/fix")))
-                   (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"async\":{\"name\":\"reconnect-fix\",\"branch\":\"agent-1/fix\"}}")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-async-with-everything ()
-  "An async merge spells its instruction, its one-shot workspace, its cleanup
-and its compaction when given."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :async :value (:name "reconnect-fix" :branch "agent-1/fix"
-                                          :instruction "rebase it"
-                                          :one-shot (:workspace (:id "ws-2" :dir "/w/two"))
-                                          :cleanup-worktree t :compact-after t)))
-                   (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"async\":{\"name\":\"reconnect-fix\",\"branch\":\"agent-1/fix\","
-                           "\"instruction\":\"rebase it\","
-                           "\"oneShot\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}},"
-                           "\"cleanupWorktree\":true,\"compactAfter\":true}}")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-async-with-merge-actions ()
-  "An async merge spells its own merge actions as `mergeActions'."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :async :value (:name "reconnect-fix" :branch "agent-1/fix"
-                                          :merge-actions (:before-ws-merge (:text "lint")
-                                                          :postprocessing-prompt (:text "tidy")))))
-                   (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"async\":{\"name\":\"reconnect-fix\",\"branch\":\"agent-1/fix\","
-                           "\"mergeActions\":{\"beforeWsMerge\":{\"said\":\"lint\"},"
-                           "\"postprocessingPrompt\":{\"said\":\"tidy\"}}}}")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-async-merge-actions-share-the-create-encoder ()
-  "The async use site encodes merge actions exactly as the create's does."
-  (agent-repl-test-wire-verbs--with-common
-    (let ((actions '(:before-ws-merge (:text "lint"))))
-      (should (equal (agent-repl-wire-encode-merge-workspace-async-merge-actions actions)
-                     (agent-repl-wire-encode-create-workspace-standard-merge-actions actions))))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-async-refuses-what-it-lacks ()
-  "An async merge missing its name or its branch, or with a blank
-instruction, or a one-shot naming no workspace, is refused before it is sent."
-  (agent-repl-test-wire-verbs--with-common
-    (dolist (case '(((:branch "b") "MergeWorkspaceAsync" "name" "required field is unset")
-                    ((:name "fix") "MergeWorkspaceAsync" "branch" "required field is unset")
-                    ((:name "fix" :branch "b" :instruction "") "MergeWorkspaceAsync" "instruction" "required string is empty")
-                    ((:name "fix" :branch "b" :one-shot (:workspace nil)) "MergeWorkspaceAsyncOneShot" "workspace" "required field is unset")))
-      (pcase-let ((`(,value . ,want) case))
-        (should (equal (cdr (should-error
-                             (agent-repl-test-wire-verbs--merge-json (list :arm :async :value value))
-                             :type 'agent-repl-wire-error))
-                       want))))))
-
 (ert-deftest agent-repl-test-wire-verbs-merge-request-without-mode ()
   "A merge request naming no mode is refused: the mode is REQUIRED."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (cdr (should-error
                          (agent-repl-wire-encode-merge-workspace-request
-                          (list :workspace agent-repl-test-wire-verbs--ref))
+                          (list :workspace agent-repl-test-wire-verbs--ref
+                                :requester '(:arm :user) :placement '(:arm :back)))
                          :type 'agent-repl-wire-error))
                    '("MergeWorkspaceRequest" "mode" "required field is unset")))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-request-without-requester ()
+  "A merge request naming no requester is refused: nothing is implied."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (cdr (should-error
+                         (agent-repl-wire-encode-merge-workspace-request
+                          (list :workspace agent-repl-test-wire-verbs--ref
+                                :mode '(:arm :one-shot :value (:landing (:arm :own-branch :value nil)))
+                                :placement '(:arm :back)))
+                         :type 'agent-repl-wire-error))
+                   '("MergeWorkspaceRequest" "requester" "required field is unset")))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-request-without-placement ()
+  "A merge request naming no placement is refused: nothing is implied."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (cdr (should-error
+                         (agent-repl-wire-encode-merge-workspace-request
+                          (list :workspace agent-repl-test-wire-verbs--ref
+                                :requester '(:arm :user)
+                                :mode '(:arm :one-shot :value (:landing (:arm :own-branch :value nil)))))
+                         :type 'agent-repl-wire-error))
+                   '("MergeWorkspaceRequest" "placement" "required field is unset")))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-request-front-placement ()
+  "A front placement spells the empty `front' arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (cdr (assq 'placement
+                              (agent-repl-wire-encode-merge-workspace-request
+                               (list :workspace agent-repl-test-wire-verbs--ref
+                                     :requester '(:arm :user)
+                                     :mode '(:arm :one-shot :value (:landing (:arm :own-branch :value nil)))
+                                     :placement '(:arm :front)))))
+                   '((front))))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-request-unknown-mode-arm ()
   "A mode arm the contract does not declare is refused."
@@ -2531,7 +2561,9 @@ instruction, or a one-shot naming no workspace, is refused before it is sent."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (cdr (should-error
                          (agent-repl-wire-encode-merge-workspace-request
-                          (list :mode '(:arm :one-shot :value (:landing (:arm :own-branch :value nil)))))
+                          (list :requester '(:arm :user)
+                                :mode '(:arm :one-shot :value (:landing (:arm :own-branch :value nil)))
+                                :placement '(:arm :back)))
                          :type 'agent-repl-wire-error))
                    '("MergeWorkspaceRequest" "workspace" "required field is unset")))))
 
@@ -2593,13 +2625,6 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"alreadyQueued\":{}}"))
                    '(:cause (:arm :already-queued :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-name-taken-arm ()
-  "MergeWorkspaceError's `name_taken' arm decodes the branch the name resolves to."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"nameTaken\":{\"branch\":\"agent-1/fix\"}}"))
-                   '(:cause (:arm :name-taken :value (:branch "agent-1/fix")))))))
-
 (ert-deftest agent-repl-test-wire-verbs-merge-error-already-merging-arm ()
   "MergeWorkspaceError's `already_merging' arm decodes with everything it
 carries."
@@ -2608,28 +2633,27 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"alreadyMerging\":{}}"))
                    '(:cause (:arm :already-merging :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-unknown-one-shot-workspace-arm ()
-  "MergeWorkspaceError's `unknown_one_shot_workspace' arm decodes with everything
-it carries."
+(ert-deftest agent-repl-test-wire-verbs-merge-error-owner-lands-arm ()
+  "MergeWorkspaceError's `owner_lands' arm decodes the owner that lands."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-merge-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"unknownOneShotWorkspace\":{}}"))
-                   '(:cause (:arm :unknown-one-shot-workspace :value nil))))))
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"ownerLands\":{\"owner\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
+                   '(:cause (:arm :owner-lands :value (:owner (:id "ws-2" :dir "/w/two"))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-branch-checked-out-in-requester-arm ()
-  "MergeWorkspaceError's `branch_checked_out_in_requester' arm decodes."
+(ert-deftest agent-repl-test-wire-verbs-merge-error-requester-may-not-land-arm ()
+  "MergeWorkspaceError's `requester_may_not_land' arm is empty."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-merge-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"branchCheckedOutInRequester\":{}}"))
-                   '(:cause (:arm :branch-checked-out-in-requester :value nil))))))
+                    (agent-repl-test-wire-verbs--parse "{\"requesterMayNotLand\":{}}"))
+                   '(:cause (:arm :requester-may-not-land :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-unknown-branch-arm ()
-  "MergeWorkspaceError's `unknown_branch' arm decodes with everything it
-carries."
+(ert-deftest agent-repl-test-wire-verbs-merge-error-no-branch-checked-out-arm ()
+  "MergeWorkspaceError's `no_branch_checked_out' arm decodes the dir it names."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-merge-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"unknownBranch\":{}}"))
-                   '(:cause (:arm :unknown-branch :value nil))))))
+                    (agent-repl-test-wire-verbs--parse "{\"noBranchCheckedOut\":{\"dir\":\"/w/one\"}}"))
+                   '(:cause (:arm :no-branch-checked-out :value (:dir "/w/one")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-error-version-increment-required-arm ()
   "MergeWorkspaceError's `version_increment_required' arm decodes."
@@ -2669,7 +2693,7 @@ merged-upstream reason."
   "MergeWorkspaceVersionIncrementUnexpected's reason arm set is exactly what
 the frozen schema declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
-                        "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceVersionIncrementUnexpected")
+                        "agentrepl/v1/merge_version_increment.pb.go" "MergeWorkspaceVersionIncrementUnexpected")
                        #'string<)
                  (sort (list "foreignRepository" "notDefaultBranch" "mergedUpstream") #'string<))))
 
@@ -2693,7 +2717,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "unknownOneShotWorkspace" "unknownBranch" "nameTaken" "branchCheckedOutInRequester" "versionIncrementRequired" "versionIncrementUnexpected" "hasOpenChildren")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "versionIncrementRequired" "versionIncrementUnexpected" "ownerLands" "requesterMayNotLand" "noBranchCheckedOut" "hasOpenChildren")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-mode-arms-pinned ()
@@ -2701,7 +2725,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceRequest")
                        #'string<)
-                 (sort (list "oneShot" "async") #'string<))))
+                 (list "oneShot"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-one-shot-landing-arms-pinned ()
   "MergeWorkspaceOneShot's landing arm set is exactly what the frozen schema declares."
@@ -3061,7 +3085,7 @@ decodes."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptError")
                        #'string<)
-                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused" "askNotStanding")
+                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused" "askNotStanding" "slashCommandFromAgent" "unknownSender")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-error-nothing-scheduled-arm ()
@@ -3151,14 +3175,6 @@ it carries."
                     (agent-repl-test-wire-verbs--parse "{\"noSuchQueuedMerge\":{}}"))
                    '(:cause (:arm :no-such-queued-merge :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-rollouts-already-held-arm ()
-  "UpdateMergeQueueError's `rollouts_already_held' arm decodes with everything
-it carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-update-merge-queue-error
-                    (agent-repl-test-wire-verbs--parse "{\"rolloutsAlreadyHeld\":{}}"))
-                   '(:cause (:arm :rollouts-already-held :value nil))))))
-
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-racing-already-disabled-arm ()
   "UpdateMergeQueueError's `racing_already_disabled' arm decodes with
 everything it carries."
@@ -3174,30 +3190,6 @@ it carries."
     (should (equal (agent-repl-wire-decode-update-merge-queue-error
                     (agent-repl-test-wire-verbs--parse "{\"racingNotDisabled\":{}}"))
                    '(:cause (:arm :racing-not-disabled :value nil))))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-rollouts-not-held-arm ()
-  "UpdateMergeQueueError's `rollouts_not_held' arm decodes with everything it
-carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-update-merge-queue-error
-                    (agent-repl-test-wire-verbs--parse "{\"rolloutsNotHeld\":{}}"))
-                   '(:cause (:arm :rollouts-not-held :value nil))))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-not-subscribed-arm ()
-  "UpdateMergeQueueError's `not_subscribed' arm decodes with everything it
-carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-update-merge-queue-error
-                    (agent-repl-test-wire-verbs--parse "{\"notSubscribed\":{}}"))
-                   '(:cause (:arm :not-subscribed :value nil))))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-subscriber-closed-arm ()
-  "UpdateMergeQueueError's `subscriber_closed' arm decodes with everything it
-carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-update-merge-queue-error
-                    (agent-repl-test-wire-verbs--parse "{\"subscriberClosed\":{}}"))
-                   '(:cause (:arm :subscriber-closed :value nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-unset-cause-is-a-breach ()
   "UpdateMergeQueueError with no arm set says nothing actionable, so it is a
@@ -3219,7 +3211,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "rolloutsAlreadyHeld" "rolloutsNotHeld" "racingAlreadyDisabled" "racingNotDisabled" "notSubscribed" "subscriberClosed")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "racingAlreadyDisabled" "racingNotDisabled")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-session-health-error-unknown-workspace-arm ()
@@ -5643,3 +5635,32 @@ instead diverges from it unseen."
                  (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted"
                              "hasOpenChildren" "parentNotOpen")
                        #'string<))))
+
+;;;; ---- The one-ref refusal decoder ------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-decode-ref-arm-keys-the-field ()
+  "A one-ref arm decodes to its field's keyword over the ref."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-verbs--decode-ref-arm
+                    "M" 'owner (agent-repl-test-wire-verbs--parse
+                                "{\"owner\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}"))
+                   '(:owner (:id "ws-2" :dir "/w/two"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-decode-ref-arm-refuses-another-field ()
+  "A one-ref arm carrying any other field is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-verbs--decode-ref-arm
+                   "M" 'owner (agent-repl-test-wire-verbs--parse "{\"workspace\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-one-ref-arms-share-the-decoder ()
+  "Every refusal arm naming one workspace decodes through the one helper."
+  (dolist (fn '(agent-repl-wire-decode-create-workspace-unknown-fork-source
+                agent-repl-wire-decode-create-workspace-unknown-context-workspace
+                agent-repl-wire-decode-create-workspace-fork-source-has-no-conversation
+                agent-repl-wire-decode-create-workspace-error-unknown-owner
+                agent-repl-wire-decode-create-workspace-error-one-shot-owner-lands
+                agent-repl-wire-decode-create-workspace-error-unknown-requester
+                agent-repl-wire-decode-merge-workspace-error-owner-lands))
+    (should (string-match-p "agent-repl-wire-verbs--decode-ref-arm"
+                            (prin1-to-string (symbol-function fn))))))

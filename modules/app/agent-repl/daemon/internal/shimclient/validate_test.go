@@ -61,33 +61,40 @@ func TestValidateStartSessionRequest(t *testing.T) {
 	}{
 		{
 			name:  "no source arm",
-			req:   &shimv1.StartSessionRequest{},
+			req:   &shimv1.StartSessionRequest{WorkspaceName: "parser-fix"},
 			field: "StartSessionRequest.source",
 		},
 		{
-			name: "fresh with a model whose name is empty",
+			name: "no workspace name",
 			req: &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Fresh{
+				Fresh: &shimv1.StartSessionFresh{Model: validModel(), PermissionMode: validMode()},
+			}},
+			field: "StartSessionRequest.workspace_name",
+		},
+		{
+			name: "fresh with a model whose name is empty",
+			req: &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Fresh{
 				Fresh: &shimv1.StartSessionFresh{Model: &conversationv1.AgentModel{}, PermissionMode: validMode()},
 			}},
 			field: "StartSessionRequest.fresh.model.name",
 		},
 		{
 			name: "fresh without a permission mode",
-			req: &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Fresh{
+			req: &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Fresh{
 				Fresh: &shimv1.StartSessionFresh{Model: validModel()},
 			}},
 			field: "StartSessionRequest.fresh.permission_mode",
 		},
 		{
 			name: "resume without a vendor id",
-			req: &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Resume{
+			req: &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Resume{
 				Resume: &shimv1.StartSessionResume{},
 			}},
 			field: "StartSessionRequest.resume.vendor_session_id",
 		},
 		{
 			name: "cold remediation with no arm",
-			req: &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Resume{
+			req: &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Resume{
 				Resume: &shimv1.StartSessionResume{
 					VendorSessionId: "vendor-1",
 					ColdRemediation: &conversationv1.SessionColdRemediation{},
@@ -110,7 +117,7 @@ func TestValidateStartSessionRequest(t *testing.T) {
 // TestValidateStartSessionRequestAccepts asserts a legal fresh start passes.
 func TestValidateStartSessionRequestAccepts(t *testing.T) {
 	// Arrange.
-	req := &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Fresh{
+	req := &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Fresh{
 		Fresh: &shimv1.StartSessionFresh{Model: validModel(), PermissionMode: validMode()},
 	}}
 
@@ -146,6 +153,27 @@ func TestValidateStartTurnRequest(t *testing.T) {
 		{name: "empty known-through", mut: func(r *shimv1.StartTurnRequest) {
 			r.Opening = &shimv1.StartTurnRequest_KnownThrough{KnownThrough: &conversationv1.HistoryPointer{}}
 		}, field: "StartTurnRequest.known_through.value"},
+		{name: "a sender on a prompt no agent sent", mut: func(r *shimv1.StartTurnRequest) {
+			r.SentBy = validSentBy()
+		}, field: "StartTurnRequest.sent_by"},
+		{name: "an agent's prompt naming no sender", mut: func(r *shimv1.StartTurnRequest) {
+			r.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+		}, field: "StartTurnRequest.sent_by"},
+		{name: "a sender with no workspace id", mut: func(r *shimv1.StartTurnRequest) {
+			r.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+			r.SentBy = validSentBy()
+			r.SentBy.WorkspaceId = ""
+		}, field: "StartTurnRequest.sent_by.workspace_id"},
+		{name: "a sender's name set but empty", mut: func(r *shimv1.StartTurnRequest) {
+			r.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+			r.SentBy = validSentBy()
+			r.SentBy.WorkspaceName = new(string)
+		}, field: "StartTurnRequest.sent_by.workspace_name"},
+		{name: "a sender's mode naming no mode", mut: func(r *shimv1.StartTurnRequest) {
+			r.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+			r.SentBy = validSentBy()
+			r.SentBy.PermissionMode = &conversationv1.AgentPermissionMode{}
+		}, field: "StartTurnRequest.sent_by.permission_mode.mode"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -158,6 +186,48 @@ func TestValidateStartTurnRequest(t *testing.T) {
 
 			// Assert.
 			assertInvalidField(t, err, tc.field)
+		})
+	}
+}
+
+// validSentBy is the fullest legal sender: named, with its mode.
+func validSentBy() *shimv1.StartTurnSentBy {
+	name := "sender"
+	return &shimv1.StartTurnSentBy{
+		WorkspaceId:   "ws-sender",
+		WorkspaceName: &name,
+		PermissionMode: &conversationv1.AgentPermissionMode{
+			Mode: &conversationv1.AgentPermissionMode_Auto{Auto: &conversationv1.AgentPermissionModeAuto{}},
+		},
+	}
+}
+
+// TestValidateStartTurnRequestAcceptsASender: an agent's prompt naming its
+// sender is legal, named or not, with its mode or without one.
+func TestValidateStartTurnRequestAcceptsASender(t *testing.T) {
+	tests := []struct {
+		name string
+		mut  func(*shimv1.StartTurnSentBy)
+	}{
+		{name: "named, with its mode", mut: func(*shimv1.StartTurnSentBy) {}},
+		{name: "a sender the daemon cannot name", mut: func(s *shimv1.StartTurnSentBy) { s.WorkspaceName = nil }},
+		{name: "a sender whose mode the daemon does not hold", mut: func(s *shimv1.StartTurnSentBy) { s.PermissionMode = nil }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			req := validStartTurnRequest()
+			req.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+			req.SentBy = validSentBy()
+			tc.mut(req.SentBy)
+
+			// Act.
+			err := validateStartTurnRequest(req)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("validateStartTurnRequest = %v, want nil", err)
+			}
 		})
 	}
 }
@@ -529,7 +599,7 @@ func assertInvalidField(t *testing.T, err error, field string) {
 // rather than a missing required field.
 func TestValidateStartSessionFreshAcceptsAnUnsetModel(t *testing.T) {
 	// Arrange.
-	req := &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Fresh{
+	req := &shimv1.StartSessionRequest{WorkspaceName: "parser-fix", Source: &shimv1.StartSessionRequest_Fresh{
 		Fresh: &shimv1.StartSessionFresh{PermissionMode: validMode()},
 	}}
 

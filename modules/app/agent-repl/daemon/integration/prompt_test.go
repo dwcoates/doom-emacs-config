@@ -1879,3 +1879,120 @@ func TestAReplyToASelectedPromptCarriesItsQuoteAsItsOwnBlock(t *testing.T) {
 		t.Fatalf("drawn blocks = %v, want the quote arm taken apart (%v) then the words", drawn, want)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// An agent-sent prompt is headed by the workspace that sent it
+// ---------------------------------------------------------------------------
+
+func TestAnAgentSentPromptIsDrawnUnderTheSendingWorkspace(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	sender := harness.Register(t, f.d, worktreeOf(t, f.repo, "parser-fix"))
+	feed := f.watchRootFeed()
+
+	// Act
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("please review the parser"), IdempotencyKey: "k-agent",
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender,
+	})
+
+	// Assert
+	turn := resp.GetSuccess().GetTurn().GetTurn().GetValue()
+	if turn == "" {
+		t.Fatalf("SubmitPrompt = %v, want a minted turn", resp)
+	}
+	row := awaitRow(t, f, feed, "the agent prompt headed by its sender", func(r *frontendv1.FeedRow) bool {
+		return r.GetAgentPrompt().GetAddress().GetReceived().GetWorkspace().GetNamed() != nil
+	})
+	if row.GetTurn().GetValue() != turn || row.GetUserPrompt() != nil {
+		t.Fatalf("row = %v, want the agent prompt of turn %s", row, turn)
+	}
+	if name := row.GetAgentPrompt().GetAddress().GetName().GetText(); !strings.Contains(name, "parser-fix") {
+		t.Fatalf("header names %q, want the sending workspace", name)
+	}
+	if req := f.shim.ExpectStartTurn(); req.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT {
+		t.Fatalf("StartTurn.origin = %v, want the agent-sent origin", req.GetOrigin())
+	}
+}
+
+// TestAnAgentSentPromptsStartTurnNamesItsSender: the shim is told which
+// workspace sent the prompt (StartTurnRequest.sent_by), by id and name, so it
+// can deliver the prompt as that workspace's message. A sender that never
+// started a session has no recorded mode, so none is declared.
+func TestAnAgentSentPromptsStartTurnNamesItsSender(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	sender := harness.Register(t, f.d, worktreeOf(t, f.repo, "parser-fix"))
+
+	// Act
+	f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("please review the parser"), IdempotencyKey: "k-agent-sender",
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender,
+	})
+
+	// Assert
+	sentBy := f.shim.ExpectStartTurn().GetSentBy()
+	if sentBy.GetWorkspaceId() != sender.GetId() || !strings.Contains(sentBy.GetWorkspaceName(), "parser-fix") {
+		t.Fatalf("StartTurn.sent_by = %v, want workspace %s named parser-fix", sentBy, sender.GetId())
+	}
+	if sentBy.PermissionMode != nil {
+		t.Fatalf("StartTurn.sent_by.permission_mode = %v, want none for a sender with no session", sentBy.GetPermissionMode())
+	}
+}
+
+// TestAUsersPromptsStartTurnNamesNoSender: a prompt no agent sent carries no
+// sender, so the shim delivers it as words the user typed.
+func TestAUsersPromptsStartTurnNamesNoSender(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+
+	// Act
+	f.submit("please review the parser", "k-user-no-sender", origin)
+
+	// Assert
+	if sentBy := f.shim.ExpectStartTurn().GetSentBy(); sentBy != nil {
+		t.Fatalf("StartTurn.sent_by = %v, want none for a user's prompt", sentBy)
+	}
+}
+
+func TestAnAgentSentPromptFromNoOtherWorkspaceIsRefused(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+
+	// Act
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("hello"), IdempotencyKey: "k-self",
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: f.ws,
+	})
+
+	// Assert
+	if resp.GetError().GetUnknownSender().GetSentBy().GetId() != f.ws.GetId() {
+		t.Fatalf("SubmitPrompt = %v, want unknown_sender naming the workspace itself", resp)
+	}
+}
+
+func TestAnAgentSentPromptIsDrawnInTheSendersFeedUnderTheRecipient(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	sender := &fixture{d: f.d, repo: f.repo, ws: harness.Register(t, f.d, worktreeOf(t, f.repo, "parser-fix")), t: t}
+	feed := sender.watchRootFeed()
+
+	// Act
+	f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("please review the parser"), IdempotencyKey: "k-sent",
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender.ws,
+	})
+
+	// Assert
+	row := awaitRow(t, sender, feed, "the sent row headed by the recipient", func(r *frontendv1.FeedRow) bool {
+		return r.GetAgentPrompt().GetAddress().GetSent().GetPeerSession().GetWorkspace() != nil
+	})
+	if got := promptText(row); got != "please review the parser" {
+		t.Fatalf("sent row body = %q, want the prompt's text", got)
+	}
+}

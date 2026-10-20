@@ -1,0 +1,47 @@
+// endpoint_get_workspace_status.proto — GetWorkspaceStatus: one workspace's
+// status, now. AGENT API section. A pull, answered inside the caller's turn:
+// for decisions made on the spot (is this workspace open before I notice it?)
+// and for checking an act took effect. Following a workspace's changes is
+// SubscribeWorkspace, which answers with the same status and then sends a
+// notice on each change, so nothing slips between a read and a subscription.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_status.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message GetWorkspaceStatusRequest {
+  // The workspace to read, open or closed.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message GetWorkspaceStatusResponse {
+  oneof result {
+    GetWorkspaceStatusSuccess success = 1;
+    GetWorkspaceStatusError error = 2;
+  }
+}
+// The workspace's status.
+message GetWorkspaceStatusSuccess {
+  WorkspaceStatus status = 1;
+}
+// Validation failures (unset field, blank string) are Connect InvalidArgument,
+// never an arm.
+message GetWorkspaceStatusError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    GetWorkspaceStatusUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    GetWorkspaceStatusWorkspaceRefMismatch workspace_ref_mismatch = 2;
+  }
+}
+message GetWorkspaceStatusUnknownWorkspace {}
+message GetWorkspaceStatusWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}

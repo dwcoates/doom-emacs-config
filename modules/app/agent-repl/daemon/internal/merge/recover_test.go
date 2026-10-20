@@ -183,7 +183,7 @@ func TestRecoverNeverLeavesAMergeInFlight(t *testing.T) {
 // enqueueWorkspace queues one named workspace's merge.
 func enqueueWorkspace(t *testing.T, h *harness, ws ids.WorkspaceID) {
 	t.Helper()
-	if err := h.o.Enqueue(context.Background(), Request{Workspace: ws, By: RequestedByUser}); err != nil {
+	if _, err := h.o.Enqueue(context.Background(), Request{Workspace: ws, By: RequestedByUser}); err != nil {
 		t.Fatalf("enqueueing %s: %v", ws, err)
 	}
 }
@@ -753,6 +753,9 @@ func TestRecoverReArmsADetachedPickTheRestartCaughtBeforeItsHandOff(t *testing.T
 	h.runWait(t)
 	if forks := h.detached.forks; len(forks) != 1 || forks[0] != string(theWorkspace)+":reconnect-fix:"+asyncBranch {
 		t.Fatalf("forks after the wait = %v, want the request handed off once", forks)
+	}
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("admit: %v", err)
 	}
 	if entry, ok := h.entryOf(theMergeWorkspace); !ok || entry.Source.PickStartedAt == nil {
 		t.Fatalf("merge workspace entry = %+v, %v; want its pick begun", entry, ok)

@@ -21,6 +21,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/stateroot"
@@ -121,7 +122,7 @@ func (d *standingDaemon) WatchFooter(ctx context.Context, _ *connect.Request[age
 // verb dials, and answers it and its loopback address.
 func serveStandingDaemon(t *testing.T, roster *frontendv1.WorkspaceRoster) (*standingDaemon, string) {
 	t.Helper()
-	daemon := &standingDaemon{roster: roster, footer: failedFooter("tests"), ended: make(chan struct{})}
+	daemon := &standingDaemon{roster: roster, footer: &frontendv1.FooterView{}, ended: make(chan struct{})}
 	path, handler := agentreplv1connect.NewAgentReplHandler(daemon)
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
@@ -142,6 +143,42 @@ func serveStandingDaemon(t *testing.T, roster *frontendv1.WorkspaceRoster) (*sta
 func assertStreamEnded(t *testing.T, daemon *standingDaemon) {
 	t.Helper()
 	<-daemon.ended
+}
+
+// rosterRow is the row of workspace ws-1 at DIR, named NAME.
+func rosterRow(dir, name string) *frontendv1.RosterRow {
+	return &frontendv1.RosterRow{
+		Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: "ws-1", Dir: dir}},
+		Name:      &frontendv1.RosterRowName{Text: name},
+	}
+}
+
+// roster is a roster of ROWS, each a top-level open row, in one repository
+// section.
+func roster(rows ...*frontendv1.RosterRow) *frontendv1.WorkspaceRoster {
+	open := make([]*frontendv1.RosterOpenRow, 0, len(rows))
+	for _, row := range rows {
+		open = append(open, &frontendv1.RosterOpenRow{Row: row})
+	}
+	return &frontendv1.WorkspaceRoster{Repository: &frontendv1.RosterRepositoryView{
+		Sections: []*frontendv1.RosterRepoSection{{OpenRows: &frontendv1.RosterOpenRows{Rows: open}}},
+	}}
+}
+
+func TestReadRosterReturnsFromAStandingRosterStream(t *testing.T) {
+	// Arrange.
+	dir := canonicalDir(t.TempDir())
+	daemon, address := serveStandingDaemon(t, roster(rosterRow(dir, "one")))
+	ctx := t.Context()
+
+	// Act.
+	got, err := readRoster(ctx, newDaemonClient(address))
+
+	// Assert.
+	if err != nil || findRosterRow(got, dir) == nil {
+		t.Fatalf("readRoster = %v, %v; want the roster holding ws-1", got, err)
+	}
+	assertStreamEnded(t, daemon)
 }
 
 func TestDaemonStreamCloseEndsAStandingStream(t *testing.T) {

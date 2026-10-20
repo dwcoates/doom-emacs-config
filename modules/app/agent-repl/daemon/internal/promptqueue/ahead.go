@@ -161,6 +161,15 @@ func (q *queue) settleQueuedLocked(ctx context.Context, sub Submission, ahead ws
 	// it is read as started, as it is the moment its call settles.
 	claimed := found && current.Tombstone == nil && q.claimedByCall(sub.WS, ahead.Turn)
 	switch {
+	case found && current.Tombstone == nil && !claimed && !holdfold.SameAuthor(sub.SentBy, current.SentBy):
+		// A PROMPT NEVER FOLDS INTO ANOTHER AUTHOR'S: the merged prompt is drawn
+		// under the one ahead's author, so the user's words would be headed by a
+		// workspace, or a workspace's by the user.
+		state.verdicts.Unlock()
+		log.Info(opClassify, "the prompt ahead has another author, so the prompt is not folded into it and waits its turn", dlog.Context{
+			"turn": string(sub.Turn), "ahead_turn": string(ahead.Turn), "origin": sub.Origin.String(), "ahead_origin": current.Origin,
+		})
+		q.recordWaiting(ctx, sub, "the prompt ahead has another author, so it is not folded into it and waits its turn", log)
 	case found && current.Tombstone == nil && !claimed:
 		err := q.coalesce(ctx, sub, current, log)
 		state.verdicts.Unlock()

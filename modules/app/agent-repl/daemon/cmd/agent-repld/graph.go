@@ -26,7 +26,6 @@ import (
 	"agent-repld/internal/classifierupdate"
 	"agent-repld/internal/clock"
 	"agent-repld/internal/commandcatalog"
-	"agent-repld/internal/commandfile"
 	"agent-repld/internal/cpugov"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
@@ -72,10 +71,14 @@ import (
 	"agent-repld/internal/signin"
 	"agent-repld/internal/stallbeat"
 	"agent-repld/internal/startslots"
+	"agent-repld/internal/subagentmaker"
 	"agent-repld/internal/titlesynth"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/webfootprint"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/workspacenotice"
+	"agent-repld/internal/workspacesubs"
+	"agent-repld/internal/wsedges"
 	"agent-repld/internal/wsm"
 )
 
@@ -97,8 +100,7 @@ import (
 //  4. the prompt queue, which delivers through the fleet;
 //  5. the rollout and drain controllers, whose server halves are forwarders;
 //  6. the merge orchestrator, the workspace verbs, the health reporter, the
-//     login manager, the prompt handler, the command-file ingress and the
-//     held-prompt ingress;
+//     login manager, the prompt handler, and the held-prompt ingress;
 //  7. the boot sequence's dependencies and the server's, returned together
 //     with the late bindings and the background loops.
 //
@@ -224,6 +226,7 @@ func (l backgroundLoop) run(ctx context.Context, log dlog.Logger) {
 // buildGraph builds the component graph from the resolved process facts.
 func buildGraph(ctx context.Context, p process) (*graph, error) {
 	log := p.Surfaces.Global()
+	verbsRef := &verbsForwarder{}
 	if len(unwired) > 0 {
 		return nil, fmt.Errorf(
 			"agent-repld: the component graph has %d collaborators with no landed source, and cmd substitutes none:\n  - %s",
@@ -313,6 +316,30 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		"bin":    headlessClient.Bin(),
 		"source": headless.BinSource(""),
 	})
+	// ---- the lifecycle edges, before anything holds the state client ----
+	//
+	// EVERY CLOSE IS AN EDGE: the state client every component below holds is
+	// the one whose MarkClosed tells the edges (wsedges.ReportingCloses), so
+	// no close path can close a workspace untold. Each observer only appends;
+	// its loop runs on the notice lifetime, handed the prompt handler built
+	// below.
+	derivedNotices := workspacenotice.New(workspacenotice.Deps{
+		Workspaces: p.DB,
+		Briefs:     merge.BriefsFrom(paths.PromptsDir),
+		MintKey:    prompthandler.MintKey,
+		Log:        p.Surfaces,
+	})
+	followNotices := workspacesubs.New(workspacesubs.Deps{
+		Subscribers: p.DB,
+		Status:      verbsRef.status,
+		Briefs:      merge.BriefsFrom(paths.PromptsDir),
+		MintKey:     prompthandler.MintKey,
+		Log:         p.Surfaces,
+	})
+	selfCloses := workspace.NewSelfCloses(verbsRef.carryOutSelfClose, log)
+	edges := wsedges.New(derivedNotices, followNotices, selfCloses)
+	p.DB = wsedges.ReportingCloses(p.DB, edges, log)
+
 	judge, err := buildJudge(p.Contracts, guard, headlessClient, paths.PromptsDir)
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the classifier: %w", err)
@@ -558,6 +585,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		TurnCloses:    p.DB.TurnCloses,
 		TurnAddresses: p.DB.TurnAddresses,
 		TurnMirrors:   p.DB.TurnMirrors,
+		TurnSenders:   p.DB.TurnSenders,
 		// A MERGE'S BUBBLE is drawn again by a new daemon from this record.
 		DurableRows: p.DB,
 		Faults:      p.DB,
@@ -594,7 +622,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	pushes := &serverForwarder{}
 	relay := &relayForwarder{}
-	verbsRef := &verbsForwarder{}
 
 	var queue promptqueue.Service
 	healthRef := &healthForwarder{}
@@ -714,6 +741,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Merge:      mergeAsks,
 			Commands:   slashCommands,
 			CacheLapse: cacheKeeper,
+			Asks:       edges,
 			Stalls:     stalls,
 			// The shim's measurements frames land in the metrics surface.
 			Measurements: p.Metrics,
@@ -823,6 +851,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Feed:           feedResolver,
 		Footer:         footerResolver,
 		Sidebar:        sidebarResolver,
+		Edges:          edges,
 		Holds:          feedResolver,
 		Client:         fleet.Sender,
 		Revive:         fleet.Start,
@@ -1107,7 +1136,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	})
 	mergeOrchestrator, err := merge.New(merge.Deps{
 		Timings:       p.Metrics,
-		QueueEvents:   queueNotices,
+		QueueEvents:   merge.QueueObservers{queueNotices, edges},
 		Detached:      detachedRef,
 		Names:         verbsRef,
 		InterruptTurn: verbsRef.interruptTurn,
@@ -1191,6 +1220,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	verbs, err := workspace.New(workspace.Deps{
 		Instance:     p.Instance,
+		Derived:      derivedNotices,
 		DB:           p.DB,
 		Git:          git,
 		Accounts:     accounts,
@@ -1258,36 +1288,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	})
 	detachedRef.bind(detached)
 	// THE RETARGET pairs the verb that records a new merge target with the
-	// notice queued through the same handler every prompt takes, so the rpc
-	// and the command file share one operation.
+	// notice queued through the same handler every prompt takes, as one
+	// operation.
 	retargeter := retarget.New(retarget.Deps{
 		Verbs:   verbs,
 		Prompts: handler,
 		Briefs:  merge.BriefsFrom(paths.PromptsDir),
 		Log:     p.Surfaces,
 	})
-	ingress, err := commandfile.New(commandfile.Deps{
-		Dir: p.Layout.OutputDir(),
-		// The ingress joins the pattern onto its own directory, so it takes
-		// the NAME pattern: the layout's CommandFileGlob is the whole path,
-		// and joining that onto the directory again yields a pattern that
-		// matches nothing at all.
-		Glob:     filepath.Base(p.Layout.CommandFileGlob()),
-		Verbs:    verbs,
-		DB:       p.DB,
-		Merge:    mergeOrchestrator,
-		Prompts:  handler,
-		Retarget: retargeter,
-		Home:     paths.Home,
-		// ONLY THE DAEMON THAT SERVES TAKES INTAKE (internal/intakegate): not
-		// a successor still joining, not an incumbent handing over.
-		Serves: rolloutController.ServesIntake,
-		Log:    p.Surfaces,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("agent-repld: build the command-file ingress: %w", err)
-	}
-
 	// THE HELD-PROMPT INGRESS is where a client leaves a prompt it could not
 	// hand to a live daemon. It submits through the same handler the rpc
 	// does, under the prompt's own idempotency key, so a prompt this daemon
@@ -1386,7 +1394,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			gateGovernor.Run(ctx)
 			return nil
 		}},
-		{Name: "command_file_ingress", Run: ingress.Run},
 		{Name: "held_prompt_ingress", Run: held.Run},
 		{Name: "shim_log_roll", Run: func(ctx context.Context) error {
 			return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)
@@ -1422,7 +1429,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	return &graph{
 		Server: server.Deps{
-			Instance:          p.Instance,
+			Instance: p.Instance,
+			SubagentMakers: subagentmaker.New(subagentmaker.Deps{
+				Workspaces: p.DB.ListWorkspaces,
+				Session:    p.DB.Session,
+				Transcript: accounts.FindTranscript,
+				Stat:       os.Stat,
+				Log:        log,
+			}),
 			SessionFacts:      hostSessionFacts{fleet: fleet},
 			SlashCommands:     slashCommands,
 			DB:                p.DB,
@@ -1436,7 +1450,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Deploy:            deployer,
 			Health:            healthReporter,
 			Login:             loginManager,
-			Commands:          ingress,
 			Ownership:         ownership,
 			SuccessorAddress:  rolloutController.SuccessorAddress,
 			Feed:              feedResolver,
@@ -1530,9 +1543,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DrainStarts:         fleet.DrainStarts,
 		DrainLandings:       deployer.DrainLandings,
 		DrainMerges:         mergeOrchestrator.Drain,
-		Notices:             newNoticeLifetime(func(ctx context.Context) { queueNotices.Run(ctx, handler) }),
-		StopShims:           stopEveryShim(fleet, supervisor, rootLossShimStopBound),
-		SettleBoot:          freshBootSettle(p.Opts.joining != "", rolloutController),
+		Notices: newNoticeLifetime(func(ctx context.Context) {
+			runNotifiers(ctx,
+				func(ctx context.Context) { queueNotices.Run(ctx, handler) },
+				func(ctx context.Context) { derivedNotices.Run(ctx, handler) },
+				func(ctx context.Context) { followNotices.Run(ctx, handler) },
+				selfCloses.Run)
+		}),
+		StopShims:  stopEveryShim(fleet, supervisor, rootLossShimStopBound),
+		SettleBoot: freshBootSettle(p.Opts.joining != "", rolloutController),
 	}, nil
 }
 

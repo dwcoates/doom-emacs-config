@@ -30,8 +30,11 @@ func TestCreateWorkspaceStandardDerivesTheSlugCreatesTheBranchAndSubmitsTheIniti
 
 	// Act
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Topology:      harness.Primary(),
 			InitialPrompt: said("fix the flaky reconnect test"),
 		}},
 	}))
@@ -75,67 +78,6 @@ func TestCreateWorkspaceStandardDerivesTheSlugCreatesTheBranchAndSubmitsTheIniti
 	}
 }
 
-func TestCreateWorkspaceHonorsAnExplicitBaseRef(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	repo := harness.NewRepo(t)
-	repository := createRepositoryRef(t, d, repo)
-	repo.Branch("release")
-	repo.Checkout(harness.DefaultBranch)
-	baseRef := "release"
-
-	// Act
-	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
-		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			BaseRef: &baseRef,
-		}},
-	}))
-
-	// Assert: the worktree was cut from the named base ref, not the default.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(base_ref=%q) = (%v, %v), want a success", baseRef, resp, err)
-	}
-	found := false
-	for _, c := range d.Git.Calls() {
-		if createArgsContainAll(c.Args, "worktree", "add") && createArgsContain(c.Args, baseRef) {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("git calls = %v, want a `worktree add` naming the base ref %q", d.Git.Calls(), baseRef)
-	}
-}
-
-func TestCreateWorkspaceWithABadBaseRefIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := newDaemon(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of the bad base ref the test stages.
-	d.ExpectWarnings("daemon.gitclient.resolve_ref")
-	repo := harness.NewRepo(t)
-	repository := createRepositoryRef(t, d, repo)
-	bad := "does-not-exist"
-
-	// Act
-	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
-		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			BaseRef: &bad,
-		}},
-	}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("CreateWorkspace(bad base_ref) = error %v, want a typed base_ref_unresolved answer", err)
-	}
-	unresolved := resp.Msg.GetError().GetBaseRefUnresolved()
-	if unresolved == nil || unresolved.GetRef() != bad {
-		t.Fatalf("CreateWorkspace(bad base_ref) = %v, want error.base_ref_unresolved naming %q", resp.Msg, bad)
-	}
-}
-
 func TestCreateWorkspaceWithASuppliedNameWinsOverTheDerivedSlug(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -146,8 +88,11 @@ func TestCreateWorkspaceWithASuppliedNameWinsOverTheDerivedSlug(t *testing.T) {
 
 	// Act
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Topology:      harness.Primary(),
 			InitialPrompt: said("something entirely different"),
 			Name:          &name,
 		}},
@@ -184,8 +129,10 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 	})
 	repository := createRepositoryRef(t, d, repo)
 	parentResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
-		Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
+		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: harness.Primary()}},
 	}))
 	if err != nil || parentResp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(parent) = (%v, %v), want a success", parentResp, err)
@@ -195,9 +142,10 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 
 	// Act: a child spawned from it.
 	childResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
-		Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
-		Parent:     &agentreplv1.CreateWorkspaceParent{Workspace: parent},
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
+		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: harness.ChildOf(parent, "the child's work")}},
 	}))
 	if err != nil || childResp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(parent=%s) = (%v, %v), want a success", parent.GetId(), childResp, err)
@@ -289,9 +237,12 @@ func TestCreateWorkspaceOneShotCarriesTheRepositorysOwnDirective(t *testing.T) {
 
 	// Act
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Prompt: said("ship the fix"),
+			Topology: harness.Primary(),
+			Prompt:   said("ship the fix"),
 		}},
 	}))
 
@@ -322,9 +273,12 @@ func TestCreateWorkspaceOneShotRefusesARepositoryThatStatesNoPolicy(t *testing.T
 
 	// Act.
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Prompt: said("ship the fix"),
+			Topology: harness.Primary(),
+			Prompt:   said("ship the fix"),
 		}},
 	}))
 
@@ -357,9 +311,12 @@ func TestCreateWorkspaceOneShotRefusesARepositoryMissingOnlyTheDirective(t *test
 
 	// Act.
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Prompt: said("ship the fix"),
+			Topology: harness.Primary(),
+			Prompt:   said("ship the fix"),
 		}},
 	}))
 
@@ -385,9 +342,12 @@ func TestCreateWorkspaceOneShotTakesNoFinishActionOnCompletion(t *testing.T) {
 	repo := harness.NewRepo(t)
 	repository := createRepositoryRef(t, d, repo)
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Prompt: said("ship the fix"),
+			Topology: harness.Primary(),
+			Prompt:   said("ship the fix"),
 		}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
@@ -425,8 +385,11 @@ func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testi
 	repo := harness.NewRepo(t)
 	repository := createRepositoryRef(t, d, repo)
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Topology: harness.Primary(),
 			MergeActions: &agentreplv1.CreateWorkspaceMergeActions{
 				BeforeWsMerge: said("run the pre-merge checklist"),
 			},
@@ -571,7 +534,7 @@ func TestCloseWorkspaceBlockedByLiveDetachedWorkWithNoTurnOpenAnswersBlocked(t *
 	awaitLiveWork(t, f, 1)
 
 	// Act
-	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws}))
+	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws}))
 
 	// Assert: the exact refusal arm the proto contracts.
 	if err != nil {
@@ -672,8 +635,11 @@ func TestCreateWorkspaceUnderTheVendorGuardAloneSpawnsAFakeShim(t *testing.T) {
 
 	// Act
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Topology:      harness.Primary(),
 			InitialPrompt: said("fix the flaky reconnect test"),
 			// A NAME IS SUPPLIED SO THE SUBJECT STAYS THE SHIM. This daemon is
 			// started without AGENT_REPL_CLAUDE_BIN on purpose, so the
@@ -710,8 +676,11 @@ func TestCreateWorkspaceUnderTheVendorGuardAloneStartsTheSession(t *testing.T) {
 
 	// Act
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Topology:      harness.Primary(),
 			InitialPrompt: said("fix the flaky reconnect test"),
 			// See the sibling test: the name is supplied so the guarded
 			// naming call is never made and the subject stays the session.
@@ -764,8 +733,11 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testin
 
 	// Act
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Topology:      harness.Primary(),
 			InitialPrompt: said("fix the flaky reconnect test"),
 		}},
 	}))

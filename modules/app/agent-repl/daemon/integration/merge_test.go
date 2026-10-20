@@ -477,16 +477,19 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoDeploysOnce(t *testing.T) {
 	}
 }
 
-// holdRollouts asks d to hold, or (release) to release, the queue's rollouts.
-func holdRollouts(t *testing.T, d *harness.Daemon, release bool) *agentreplv1.UpdateMergeQueueResponse {
+// holdRollouts asks d to hold, or (release) to release, the runtime's
+// rollouts.
+func holdRollouts(t *testing.T, d *harness.Daemon, release bool) *agentreplv1.UpdateRolloutsResponse {
 	t.Helper()
-	req := &agentreplv1.UpdateMergeQueueRequest{
-		Action: &agentreplv1.UpdateMergeQueueRequest_HoldRollouts{HoldRollouts: &agentreplv1.UpdateMergeQueueHoldRollouts{}},
-	}
+	req := &agentreplv1.UpdateRolloutsRequest{Action: &agentreplv1.UpdateRolloutsRequest_Hold{Hold: &agentreplv1.UpdateRolloutsHold{}}}
 	if release {
-		req.Action = &agentreplv1.UpdateMergeQueueRequest_ReleaseRollouts{ReleaseRollouts: &agentreplv1.UpdateMergeQueueReleaseRollouts{}}
+		req.Action = &agentreplv1.UpdateRolloutsRequest_Release{Release: &agentreplv1.UpdateRolloutsRelease{}}
 	}
-	return askMergeQueue(t, d, req)
+	resp, err := d.Client().UpdateRollouts(d.Ctx(), connect.NewRequest(req))
+	if err != nil {
+		t.Fatalf("UpdateRollouts(%v) = error %v, want an answer", req.GetAction(), err)
+	}
+	return resp.Msg
 }
 
 // askMergeQueue sends d one UpdateMergeQueue request and answers its reply,
@@ -506,15 +509,51 @@ func askMergeQueue(t *testing.T, d *harness.Daemon, req *agentreplv1.UpdateMerge
 // telling the deploy.
 func TestAHoldTakenBeforeARestartKeepsTheSuccessorsLandingFromDeploying(t *testing.T) {
 	t.Parallel()
-	// Arrange: hold the rollouts, then stop the daemon that took the hold.
+	// Arrange, Act
+	d2 := heldLanding(t)
+
+	// Assert: the held landing is recorded, and the deploy never built.
+	d2.AwaitLogRecord(d2.RunLogPath(), "the held landing", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.merge.self_reload" &&
+			r.Message == "a merge landed in this daemon's own checkout while the rollouts are held; the deploy is not told"
+	})
+	if got := len(d2.Deploy.Invocations()); got != 0 {
+		t.Fatalf("deploy builds = %d, want none while the rollouts are held", got)
+	}
+}
+
+// TestReleasingTheRolloutsDeploysWhatLandedDuringTheHold covers a release:
+// the landing the hold kept undeployed is rolled out at once.
+func TestReleasingTheRolloutsDeploysWhatLandedDuringTheHold(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d2 := heldLanding(t)
+
+	// Act
+	resp := holdRollouts(t, d2, true)
+
+	// Assert: the release ran a deploy, whose build the harness's own
+	// checkout answers current.
+	if resp.GetSuccess().GetReleased().GetDeploy() == nil {
+		t.Fatalf("release = %v, want released with the deploy's outcome", resp)
+	}
+	if got := len(d2.Deploy.Invocations()); got == 0 {
+		t.Fatal("the release built nothing, want what landed during the hold deployed")
+	}
+}
+
+// heldLanding holds the rollouts, stops the daemon that took the hold, and
+// lands a merge into its successor's own checkout, answering the successor.
+func heldLanding(t *testing.T) *harness.Daemon {
+	t.Helper()
 	repo := harness.NewRepo(t)
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	env := []string{harness.TestAllScriptEnv(script.Path)}
 	d1 := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: env})
-	if resp := holdRollouts(t, d1, false); resp.GetSuccess() == nil {
-		t.Fatalf("hold_rollouts = %v, want a success", resp)
+	if resp := holdRollouts(t, d1, false); resp.GetSuccess().GetHeld() == nil {
+		t.Fatalf("hold = %v, want held", resp)
 	}
 	d1.Stop()
 	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d1.StateDir, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout,
@@ -526,23 +565,13 @@ func TestAHoldTakenBeforeARestartKeepsTheSuccessorsLandingFromDeploying(t *testi
 	f := mergeCreateChild(t, d2, repoRef, "held", "do the held thing", nil)
 	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/cmd/agent-repld/main.go", "landed while held\n")
 	root := f.watchRootFeed()
-
-	// Act
 	if _, err := d2.Client().MergeWorkspace(d2.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
-
-	// Assert: the held landing is recorded, and the deploy never built.
-	d2.AwaitLogRecord(d2.RunLogPath(), "the held landing", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.merge.self_reload" &&
-			r.Message == "a merge landed in this daemon's own checkout while the rollouts are held; the deploy is not told"
-	})
-	if got := len(d2.Deploy.Invocations()); got != 0 {
-		t.Fatalf("deploy builds = %d, want none while the rollouts are held", got)
-	}
+	return d2
 }
 
 // ---------------------------------------------------------------------------
@@ -577,15 +606,17 @@ func TestASiblingWorktreeOfTheSelfRepoRunsTheEmacsMethodButNeverTriggersTheDeplo
 	parent := mergeCreateChild(t, d, repoRef, "sibling7a-parent", "the parent work", nil)
 
 	childResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repoRef,
+		Repository:    repoRef,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		// The child carries an initial prompt: the arrangement below waits for
 		// its StartTurn and terminates it, and a promptless create opens no
 		// turn to wait for at all.
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Topology:      harness.ChildOf(parent.ws, "the child's work"),
 			InitialPrompt: said("the child work"),
 			Name:          strPtr("sibling7a-child"),
 		}},
-		Parent: &agentreplv1.CreateWorkspaceParent{Workspace: parent.ws},
 	}))
 	if err != nil || childResp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(child) = (%v, %v), want a success", childResp, err)
@@ -638,9 +669,12 @@ func TestAOneShotMergeOnANonSelfRepoNeverTriggersTheDeploy(t *testing.T) {
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: selfRepo.Dir})
 	repository := createRepositoryRef(t, d, repo)
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repository,
+		Repository:    repository,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Prompt: said("ship the fix"),
+			Topology: harness.Primary(),
+			Prompt:   said("ship the fix"),
 		}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
@@ -1149,8 +1183,11 @@ func mergeFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.Re
 func mergeCreateChild(t *testing.T, d *harness.Daemon, repoRef *workspacev1.RepositoryRef, name, prompt string, actions *agentreplv1.CreateWorkspaceMergeActions) *fixture {
 	t.Helper()
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repoRef,
+		Repository:    repoRef,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Topology:      harness.Primary(),
 			InitialPrompt: said(prompt),
 			Name:          strPtr(name),
 			MergeActions:  actions,

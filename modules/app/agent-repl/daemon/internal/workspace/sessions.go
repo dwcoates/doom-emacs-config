@@ -851,6 +851,19 @@ type source struct {
 	// reads (cachelapse.Keeper). A hide or a show after that read is the
 	// keeper's to apply, once the session it starts comes up.
 	HoldKeepalive bool
+	// WorkspaceName is the workspace's name, which the session's system prompt
+	// states (shim.v1.StartSessionRequest.workspace_name).
+	WorkspaceName string
+}
+
+// withRecord answers SRC with the facts every bring-up takes from the
+// workspace's RECORD, as the record the bring-up started from reads: whether
+// its keep-alives are held, and its name. It is the one place a bring-up copies the record
+// onto its source, so no path can start a session missing one of them.
+func (src source) withRecord(record wsm.Workspace) source {
+	src.HoldKeepalive = record.KeepaliveHeld()
+	src.WorkspaceName = record.Name
+	return src
 }
 
 // classifySource makes the FRESH-CONVERSATION decision, and it is the ONE
@@ -1456,7 +1469,7 @@ func (f *Fleet) timedStart(
 	if !src.Fresh {
 		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepResuming})
 	}
-	src.HoldKeepalive = record.KeepaliveHeld()
+	src = src.withRecord(record)
 	started, err := f.startSession(runCtx, log, ws, client, src, session, configDir, timing)
 	if errors.Is(err, errSessionAlreadyRunning) {
 		finishRun()
@@ -1673,8 +1686,7 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 	started, err := f.startSession(runCtx, log, ws, session.client, source{
 		VendorSessionID: resume.VendorSessionID,
 		ColdRemediation: resume.Remediation,
-		HoldKeepalive:   record.KeepaliveHeld(),
-	}, previous, configDir, f.timing(ws, restarttiming.SessionColdAnswer))
+	}.withRecord(record), previous, configDir, f.timing(ws, restarttiming.SessionColdAnswer))
 	finishRun()
 	stopPhases()
 	if err != nil {
@@ -2431,7 +2443,7 @@ const DefaultStartSessionBound = 60 * time.Second
 // LABELED (startLabel) with the shim's verdict on whether asking again can
 // help; startSession owns what follows from it.
 func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string) (*conversationv1.SessionStarted, error) {
-	req := &shimv1.StartSessionRequest{}
+	req := &shimv1.StartSessionRequest{WorkspaceName: src.WorkspaceName}
 	if src.Fresh {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "src.Fresh"})
 		req.Source = &shimv1.StartSessionRequest_Fresh{Fresh: &shimv1.StartSessionFresh{

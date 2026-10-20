@@ -311,7 +311,7 @@ the canonical log record), and keep the tracked suites green.
   `merge-queue-rework`, and the failure never reached this session. Owner-approved fixes:
   1. DONE (`29aa8c782`, `866fc7f0e`, skill `959b3cfa6`): own-branch, workspace and pr-merged
      requests record the branch CHECKED OUT in the worktree at request time; a detached HEAD is
-     refused at once (`unknown_branch`); the `/merge-queue` skill says so and forbids requesting
+     refused at once (`unknown_branch`); the `/agent-repl-merge-queue` skill says so and forbids requesting
      a branch that is not checked out.
   2. TODO, FIRST after compaction: a merge that fails (any area, including before its first
      step) automatically prompts the requesting workspace to analyze the failure.

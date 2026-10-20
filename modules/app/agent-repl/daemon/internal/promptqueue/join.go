@@ -59,6 +59,7 @@ type joiningPrompt struct {
 	// folded into a turn that then fails can be resubmitted as it was sent.
 	said   *conversationv1.UserSaid
 	origin conversationv1.PromptOrigin
+	sentBy *ids.WorkspaceID
 }
 
 // joining answers the oldest prompt waiting to join the running turn, if one
@@ -177,14 +178,14 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 	}
 	text := saidText(sub.Said)
 	if err := q.recordTurn(ctx, wsm.Turn{
-		ID: sub.Turn, Workspace: sub.WS, Text: text, Origin: sub.Origin.String(), StartedAt: q.deps.Now(),
+		ID: sub.Turn, Workspace: sub.WS, Text: text, Origin: sub.Origin.String(), SentBy: sub.SentBy, StartedAt: q.deps.Now(),
 	}, log); err != nil {
 		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
 		log.Error(opJoin, "could not record the turn before sending the prompt to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
 		q.recordWaiting(ctx, sub, "the prompt's turn could not be recorded, so it waits for the running turn to end", log)
 		return joinWaiting
 	}
-	q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
+	q.mirrorAccepted(sub)
 	// THE JOIN IS RECORDED BEFORE THE PROMPT IS SENT. The shim's answer and
 	// the vendor's fold travel on different streams: the session watcher can
 	// read the prompt folded into the running turn (or the running turn
@@ -193,10 +194,13 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 	// a turn the queue never sent to join" (integration
 	// TestAFoldedJoinRunsNoTurnOfItsOwn under load, 2026-10-03). A refused
 	// send withdraws it.
-	q.addJoin(sub.WS, joiningPrompt{turn: sub.Turn, into: running, said: sub.Said, origin: sub.Origin})
+	q.addJoin(sub.WS, joiningPrompt{turn: sub.Turn, into: running, said: sub.Said, origin: sub.Origin, sentBy: sub.SentBy})
 	var success *shimv1.StartTurnSuccess
 	d.outside(shimCall{what: "join", turn: sub.Turn, holds: []ids.TurnID{sub.Turn}}, log, func() {
-		success, err = sender.JoinRunningTurn(ctx, sub.Turn, sub.Said, sub.Origin)
+		var sentBy *SentBy
+		if sentBy, err = q.sentByOf(ctx, sub, log); err == nil {
+			success, err = sender.JoinRunningTurn(ctx, sub.Turn, sub.Said, sub.Origin, sentBy)
+		}
 	})
 	if err != nil {
 		q.withdrawJoining(sub.WS, sub.Turn)
@@ -374,7 +378,7 @@ func (q *queue) resubmitFolded(ws ids.WorkspaceID, failed ids.TurnID, folded []j
 	for _, prompt := range folded {
 		fields := dlog.Context{"failed_turn": string(failed), "folded_turn": string(prompt.turn)}
 		disposition, err := q.Submit(context.Background(), Submission{
-			WS: ws, Turn: wsm.NewTurnID(), Said: prompt.said, Origin: prompt.origin,
+			WS: ws, Turn: wsm.NewTurnID(), Said: prompt.said, Origin: prompt.origin, SentBy: prompt.sentBy,
 			// DEFERRED: it runs as its own turn and never interrupts one the
 			// failed turn's end delivered ahead of it.
 			Delivery: wsm.DeliveryDeferred,

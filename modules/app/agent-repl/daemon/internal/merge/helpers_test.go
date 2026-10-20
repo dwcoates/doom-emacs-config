@@ -293,6 +293,16 @@ func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 	return ws, nil
 }
 
+func (f *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]wsm.Workspace, 0, len(f.workspaces))
+	for _, ws := range f.workspaces {
+		out = append(out, ws)
+	}
+	return out, nil
+}
+
 func (f *fakeDB) CreationJob(_ context.Context, id ids.WorkspaceID) (wsm.CreationJob, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -700,13 +710,31 @@ func (f *fakeDB) StartMergePick(_ context.Context, repo wsm.RepoKey, id ids.Work
 		if entry.Workspace != id {
 			continue
 		}
-		if entry.State != wsm.MergeRequested || entry.Source.Pick == "" || entry.Source.PickStartedAt != nil {
-			return fmt.Errorf("the merge of %s is no requested pick that has not begun", id)
+		if (entry.State != wsm.MergeRequested && entry.State != wsm.MergeQueued) || entry.Source.Pick == "" || entry.Source.PickStartedAt != nil {
+			return fmt.Errorf("the merge of %s is no requested or queued pick that has not begun", id)
 		}
 		started := at
 		f.queues[repo][i].Ledger = ledger
 		f.queues[repo][i].Source.PickStartedAt = &started
 		f.queues[repo][i].Source.PickTurn = turn
+		return nil
+	}
+	return fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
+}
+
+// ClearMergePick stands for the durable record of a pick's success at the
+// head: the queued merge workspace's begun pick leaves its row.
+func (f *fakeDB) ClearMergePick(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, _ time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, entry := range f.queues[repo] {
+		if entry.Workspace != id {
+			continue
+		}
+		if entry.State != wsm.MergeQueued || entry.Source.Pick == "" || entry.Source.PickStartedAt == nil {
+			return fmt.Errorf("the merge of %s is no queued pick that began: %w", id, wsm.ErrNotFound)
+		}
+		f.queues[repo][i].Source.Pick, f.queues[repo][i].Source.PickStartedAt, f.queues[repo][i].Source.PickTurn = "", nil, ""
 		return nil
 	}
 	return fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
@@ -2723,7 +2751,7 @@ func (h *harness) leaseID(t *testing.T) wsm.LeaseID {
 // test if it is refused.
 func enqueue(t *testing.T, h *harness) {
 	t.Helper()
-	if err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser}); err != nil {
+	if _, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser}); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
 }
@@ -2921,7 +2949,7 @@ func (h *harness) registerOther(ws ids.WorkspaceID, name, branch string) string 
 // request records the harness workspace's merge of one source, as asked by.
 func (h *harness) request(t *testing.T, source wsm.MergeSource, by Requester) error {
 	t.Helper()
-	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: by})
+	return enqueueErr(h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: by, Asker: askerFor(by)}))
 }
 
 // requestOneShot asks for the harness workspace's one-shot merge, as an agent.
@@ -2929,9 +2957,9 @@ func (h *harness) requestOneShot(t *testing.T, source wsm.MergeSource, detached 
 	t.Helper()
 	var run *DetachedRun
 	if detached {
-		run = &DetachedRun{Name: "reconnect-fix"}
+		run = &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix"}
 	}
-	return h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: RequestedByAgent, Detached: run, OneShot: true})
+	return enqueueErr(h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: RequestedByAgent, Asker: theWorkspace, Detached: run, OneShot: true}))
 }
 
 // publishes answers how many times the roster's durable half was republished.
@@ -3085,6 +3113,19 @@ func (f *fakeQueueEvents) kinds() []QueueChangeKind {
 		out = append(out, change.Kind)
 	}
 	return out
+}
+
+// enqueueErr drops what a recorded request reserved, for the helpers that
+// assert only on whether Enqueue refused.
+func enqueueErr(_ Enqueued, err error) error { return err }
+
+// askerFor is the asking workspace a test request names for BY: the harness
+// workspace when its agent asked, none when the user did.
+func askerFor(by Requester) ids.WorkspaceID {
+	if by == RequestedByAgent {
+		return theWorkspace
+	}
+	return ""
 }
 
 // RequireNoOpenChildren answers openChildrenErr, recording what it was asked.

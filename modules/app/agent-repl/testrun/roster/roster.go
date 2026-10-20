@@ -188,14 +188,13 @@ var Suites = []Suite{
 	{Name: "push-release-harness", Kind: Script, Path: "bin/test-push-release.sh", Harness: true},
 	{Name: "worktrees-lib-harness", Kind: Script, Path: "bin/test-lib-worktrees.sh", Harness: true},
 	{Name: "fake-git-fixture-lib-harness", Kind: Script, Path: "bin/test-lib-fake-git-fixture.sh", Harness: true},
-	{Name: "emit-commands-harness", Kind: Script, Path: "bin/test-emit-workspace-commands.sh", Harness: true},
 	{Name: "runtime-harness", Kind: Script, Path: "bin/test-agent-repl-runtime.sh", Harness: true},
 	{Name: "contract-check-harness", Kind: Script, Path: "bin/test-daemon-contract-current.sh", Harness: true},
 	{Name: "readiness-harness", Kind: SplitScript, Path: "bin/test-readiness-report.sh", Harness: true},
 	{Name: "test-split-harness", Kind: Script, Path: "bin/test-lib-test-split.sh", Harness: true},
 	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh", Harness: true},
 	{Name: "profile-agent-repl-harness", Kind: Script, Path: "bin/test-profile-agent-repl.sh", Harness: true},
-	{Name: "metrics-skill-harness", Kind: Script, Path: "skills/metrics-agent-repl/test-run.sh"},
+	{Name: "metrics-skill-harness", Kind: Script, Path: "skills/agent-repl-metrics/test-run.sh"},
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true},
 	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true},
 	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true},
@@ -208,7 +207,6 @@ var Suites = []Suite{
 	{Name: "safe-test-run-harness", Kind: Script, Path: "/.claude/test-safe-test-run.sh"},
 	{Name: "merge-queue-hook-harness", Kind: Script, Path: "/.githooks/test-reference-transaction.sh"},
 	{Name: "release-tag-hook-harness", Kind: Script, Path: "/.githooks/test-pre-push.sh"},
-	{Name: "merge-queue-skill-harness", Kind: Script, Path: "/.claude/skills/merge-queue/test-run.sh"},
 	{Name: "install-harness", Kind: Script, Path: "/.claude/test-install.sh"},
 	{Name: "workspace-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace.sh"},
 	{Name: "workspace-open-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace_open.sh"},
@@ -232,8 +230,9 @@ var Suites = []Suite{
 			// Source scans walk the daemon's own tree; the briefs and the
 			// vocabulary are read as data.
 			"daemon/", "prompts/", "proto/vocab/",
-			// The command-file tests run the emitter script.
-			"skills/emit-workspace-commands.sh",
+			// The agent CLI's tests check every command a skill names, and that
+			// each API skill links the front door.
+			"skills/", "bin/agent-repld",
 			// gitclient pins the markers the merge queue's hook spells.
 			"/.githooks/reference-transaction",
 			// The daemon half of every mocked-vendor scenario

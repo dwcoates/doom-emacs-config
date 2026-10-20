@@ -435,54 +435,83 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			},
 			field: "target",
 		},
-		{
-			name: "create of a child with a base ref",
-			check: func() *connect.Error {
-				base := "main"
-				return validateCreateWorkspaceRequest(&agentreplv1.CreateWorkspaceRequest{
-					Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
-					Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{BaseRef: &base}},
-					Parent:     &agentreplv1.CreateWorkspaceParent{Workspace: ref()},
-				})
-			},
-			field: "standard.base_ref",
-		},
-		{
-			name: "create with both a parent and a fork source",
-			check: func() *connect.Error {
-				return validateCreateWorkspaceRequest(&agentreplv1.CreateWorkspaceRequest{
-					Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
-					Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
-					Parent:     &agentreplv1.CreateWorkspaceParent{Workspace: ref()},
-					ForkSource: &agentreplv1.CreateWorkspaceForkSource{Workspace: ref()},
-				})
-			},
-			field: "fork_source",
-		},
-		{
-			name: "create with a fork source naming no workspace",
-			check: func() *connect.Error {
-				return validateCreateWorkspaceRequest(&agentreplv1.CreateWorkspaceRequest{
-					Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
-					Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}},
-					ForkSource: &agentreplv1.CreateWorkspaceForkSource{},
-				})
-			},
-			field: "fork_source.workspace",
-		},
-		{
-			name: "create of a one-shot whose context names no workspace",
-			check: func() *connect.Error {
-				return validateCreateWorkspaceRequest(&agentreplv1.CreateWorkspaceRequest{
-					Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
-					Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-						Prompt:  workspace.SaidText("fix the feed"),
-						Context: &agentreplv1.CreateWorkspaceOneShotContext{},
-					}},
-				})
-			},
-			field: "one_shot.context.workspace",
-		},
+		{name: "create with no requester", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) { r.Requester = nil }))
+		}, field: "requester"},
+		{name: "create with a requesting workspace naming nothing", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.Requester = workspaceRequester(&workspacev1.WorkspaceRef{})
+			}))
+		}, field: "requester.workspace.workspace.id"},
+		{name: "create with no context origin", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) { r.ContextOrigin = nil }))
+		}, field: "context_origin"},
+		{name: "create forking no workspace", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.ContextOrigin = forkContext(&workspacev1.WorkspaceRef{})
+			}))
+		}, field: "context_origin.fork.workspace.id"},
+		{name: "create with no topology", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}}
+			}))
+		}, field: "standard.topology"},
+		{name: "create of a child naming no owner", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: childTopology(&workspacev1.WorkspaceRef{}, "")}}
+			}))
+		}, field: "standard.topology.child.owner.id"},
+		{name: "create of a child with a blank owner notice", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				topology := childTopology(ref(), "")
+				topology.GetChild().OwnerNotice = &agentreplv1.WorkspaceTopologyChildOwnerNotice{Text: " "}
+				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: topology}}
+			}))
+		}, field: "standard.topology.child.owner_notice.text"},
+		{name: "create of a one-shot whose context names no workspace", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.Form = &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+					Prompt: workspace.SaidText("fix the feed"), Topology: primaryTopology(), Context: &agentreplv1.CreateWorkspaceOneShotContext{}}}
+			}))
+		}, field: "one_shot.context.workspace"},
+		{name: "an async merge the user asks for", check: func() *connect.Error {
+			req := validAsyncMerge(nil)
+			req.Requester = userRequester()
+			return validateCreateWorkspaceRequest(req)
+		}, field: "requester"},
+		{name: "an async merge naming a model", check: func() *connect.Error {
+			req := validAsyncMerge(nil)
+			req.Model = strPtr("opus")
+			return validateCreateWorkspaceRequest(req)
+		}, field: "model"},
+		{name: "an async merge with no name", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Name = " " }))
+		}, field: "async_merge.name"},
+		{name: "an async merge with no branch", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Source.Branch = "" }))
+		}, field: "async_merge.source.branch"},
+		{name: "an async merge with no maker", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Source.Maker = nil }))
+		}, field: "async_merge.source.maker"},
+		{name: "an async merge of a subagent naming none", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) {
+				a.Source.Maker = &agentreplv1.CreateWorkspaceAsyncMergeMaker{Maker: &agentreplv1.CreateWorkspaceAsyncMergeMaker_Subagent{Subagent: &agentreplv1.CreateWorkspaceAsyncMergeMakerSubagent{}}}
+			}))
+		}, field: "async_merge.source.maker.subagent.agent_id"},
+		{name: "an async merge with no target", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Target = nil }))
+		}, field: "async_merge.target"},
+		{name: "an async merge with a blank instruction", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Instruction = strPtr(" ") }))
+		}, field: "async_merge.instruction"},
+		{name: "an async merge closing a workspace with no ref", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) {
+				a.CloseAfter = &agentreplv1.CreateWorkspaceAsyncMergeCloseAfter{}
+			}))
+		}, field: "async_merge.close_after.workspace"},
+		{name: "an async merge with no placement", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validAsyncMerge(func(a *agentreplv1.CreateWorkspaceAsyncMerge) { a.Placement = nil }))
+		}, field: "async_merge.placement"},
 		{
 			name: "set priority with no workspace",
 			check: func() *connect.Error {
@@ -569,37 +598,26 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			check: func() *connect.Error { return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{}) },
 			field: "workspace",
 		},
-		{
-			name: "merge with no source",
-			check: func() *connect.Error {
-				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref()})
-			},
-			field: "mode",
-		},
-		{
-			name: "merge of a one-shot with no landing",
-			check: func() *connect.Error {
-				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
-					Mode: &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{}}})
-			},
-			field: "one_shot.landing",
-		},
-		{
-			name: "merge async with no branch",
-			check: func() *connect.Error {
-				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
-					Mode: &agentreplv1.MergeWorkspaceRequest_Async{Async: &agentreplv1.MergeWorkspaceAsync{Name: "fix"}}})
-			},
-			field: "async.branch",
-		},
-		{
-			name: "merge async closing a workspace with no ref",
-			check: func() *connect.Error {
-				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
-					Mode: &agentreplv1.MergeWorkspaceRequest_Async{Async: &agentreplv1.MergeWorkspaceAsync{Name: "fix", Branch: "b", OneShot: &agentreplv1.MergeWorkspaceAsyncOneShot{}}}})
-			},
-			field: "async.one_shot.workspace",
-		},
+		{name: "merge with no requester", check: func() *connect.Error {
+			req := oneShotRequest()
+			req.Requester = nil
+			return validateMergeWorkspaceRequest(req)
+		}, field: "requester"},
+		{name: "merge with no placement", check: func() *connect.Error {
+			req := oneShotRequest()
+			req.Placement = nil
+			return validateMergeWorkspaceRequest(req)
+		}, field: "placement"},
+		{name: "merge with no mode", check: func() *connect.Error {
+			req := oneShotRequest()
+			req.Mode = nil
+			return validateMergeWorkspaceRequest(req)
+		}, field: "mode"},
+		{name: "merge of a one-shot with no landing", check: func() *connect.Error {
+			req := oneShotRequest()
+			req.Mode = &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{}}
+			return validateMergeWorkspaceRequest(req)
+		}, field: "one_shot.landing"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -714,20 +732,15 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 					Target: &agentreplv1.OpenInEditorRequest_MergeTestLog{MergeTestLog: &frontendv1.FeedMergeTestLogToken{Value: "lease/1"}}})
 			},
 		},
-		{
-			name: "merge as a one-shot",
-			check: func() *connect.Error {
-				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
-					Mode: &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{Landing: &agentreplv1.MergeWorkspaceOneShot_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceOneShotOwnBranch{}}}}})
-			},
-		},
-		{
-			name: "merge async",
-			check: func() *connect.Error {
-				return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(),
-					Mode: &agentreplv1.MergeWorkspaceRequest_Async{Async: &agentreplv1.MergeWorkspaceAsync{Name: "fix", Branch: "b"}}})
-			},
-		},
+		{name: "merge as a one-shot", check: func() *connect.Error { return validateMergeWorkspaceRequest(oneShotRequest()) }},
+		{name: "create a standard workspace", check: func() *connect.Error { return validateCreateWorkspaceRequest(validCreate(nil)) }},
+		{name: "create a child that forks another workspace", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: childTopology(ref(), "the parser fix")}}
+				r.ContextOrigin = forkContext(&workspacev1.WorkspaceRef{Id: "ws-other"})
+			}))
+		}},
+		{name: "create an async merge", check: func() *connect.Error { return validateCreateWorkspaceRequest(validAsyncMerge(nil)) }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

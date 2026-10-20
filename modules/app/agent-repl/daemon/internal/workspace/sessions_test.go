@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -34,6 +35,7 @@ import (
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimsocket"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -847,7 +849,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 
 // workspace records one workspace in the fleet fixture's registry.
 func (f *fleetFixture) workspace(id ids.WorkspaceID) wsm.Workspace {
-	ws := wsm.Workspace{ID: id, Dir: "/tree/" + string(id), Repo: "repo-1"}
+	ws := wsm.Workspace{ID: id, Dir: "/tree/" + string(id), Repo: "repo-1", Name: "name-" + string(id)}
 	f.db.with(ws)
 	return ws
 }
@@ -1629,6 +1631,23 @@ func TestFreshModel(t *testing.T) {
 				t.Fatalf("freshModel(%q, %v) = %q, want %q", tc.recorded, tc.workAccount, got.GetName(), tc.want)
 			}
 		})
+	}
+}
+
+func TestStartNamesTheWorkspaceToTheShim(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if got := f.client.requests[0].GetWorkspaceName(); got != "name-w1" {
+		t.Fatalf("StartSession.workspace_name = %q, want the workspace's name", got)
 	}
 }
 
@@ -3830,6 +3849,28 @@ func TestStartTimesEachStepOfTheSessionsStart(t *testing.T) {
 	}
 }
 
+func TestWithRecordTakesTheRecordsFacts(t *testing.T) {
+	tests := []struct {
+		name   string
+		record wsm.Workspace
+		want   bool
+	}{
+		{name: "a shown workspace runs its keep-alives", record: wsm.Workspace{ID: "w1", Name: "parser-fix"}, want: false},
+		{name: "a hidden workspace not selected holds them", record: wsm.Workspace{ID: "w1", Name: "parser-fix", Hidden: true}, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := source{VendorSessionID: "vendor-1"}.withRecord(tc.record)
+
+			// Assert.
+			if got.HoldKeepalive != tc.want || got.WorkspaceName != "parser-fix" || got.VendorSessionID != "vendor-1" {
+				t.Fatalf("withRecord = %+v, want HoldKeepalive %v, the record's name, and the source otherwise as it was", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResumeColdTimesItsVendorStartAsAColdAnswer(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
@@ -3847,5 +3888,28 @@ func TestResumeColdTimesItsVendorStartAsAColdAnswer(t *testing.T) {
 	got := sessionSteps(&f.restarts)[before:]
 	if fmt.Sprint(got) != fmt.Sprint([]string{"slot_wait/cold_answer/ok", "vendor/cold_answer/ok"}) {
 		t.Fatalf("steps = %v, want the cold answer's slot wait and vendor start", got)
+	}
+}
+
+// EVERY BRING-UP TAKES THE RECORD'S FACTS THROUGH withRecord: no other code
+// in the package sets a source's record facts, so a path that hand-copied one
+// and forgot another fails here.
+func TestEveryBringUpTakesTheRecordThroughWithRecord(t *testing.T) {
+	// Arrange.
+	handCopied := regexp.MustCompile(`(HoldKeepalive|WorkspaceName)\s*[:=]\s*record\.`)
+	helperBody := regexp.MustCompile(`(?s)func \(src source\) withRecord\(.*?\n}\n`)
+
+	// Act.
+	var found []string
+	for _, file := range sourcescan.Production(t) {
+		// withRecord's own body is the one copy there is meant to be.
+		if handCopied.Match(helperBody.ReplaceAll(file.Source, nil)) {
+			found = append(found, file.Name)
+		}
+	}
+
+	// Assert.
+	if len(found) > 0 {
+		t.Fatalf("these files copy the record onto a source by hand instead of withRecord: %v", found)
 	}
 }

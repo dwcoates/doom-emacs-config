@@ -58,6 +58,7 @@ func (q *queue) deliver(ctx context.Context, d *delivery, sub Submission, sender
 		Workspace: sub.WS,
 		Text:      saidText(sub.Said),
 		Origin:    sub.Origin.String(),
+		SentBy:    sub.SentBy,
 		StartedAt: q.deps.Now(),
 	}
 	if err := q.recordTurn(ctx, record, log); err != nil {
@@ -71,7 +72,7 @@ func (q *queue) deliver(ctx context.Context, d *delivery, sub Submission, sender
 	// for the round trip otherwise. The row carries the same FeedId the main
 	// watch's own history entry will carry, so the two upsert onto one row
 	// rather than drawing the prompt twice.
-	q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
+	q.mirrorAccepted(sub)
 
 	// THE TURN FACT IS THE DAEMON'S OWN, AND IT IS PUBLISHED ON RECEIPT — before
 	// the shim is asked. Nothing on the shim's streams says a turn was accepted —
@@ -202,6 +203,7 @@ func (q *queue) recordTurn(ctx context.Context, t wsm.Turn, log dlog.Logger) err
 	}
 	q.deps.Feed.AddressTurn(t.Workspace, t.ID, t.Address)
 	q.deps.Feed.MirrorTurn(t.Workspace, t.ID, t.Mirror)
+	q.deps.Feed.SenderTurn(t.Workspace, t.ID, t.SentBy)
 	return nil
 }
 
@@ -298,11 +300,14 @@ func (q *queue) touchEngagement(ctx context.Context, ws ids.WorkspaceID, log dlo
 // mirrorAccepted draws an accepted prompt's user_prompt row. The sentinel
 // spans are STRIPPED from the drawn text; the full text stays on the record and
 // on what the shim received.
-func (q *queue) mirrorAccepted(ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) {
+func (q *queue) mirrorAccepted(sub Submission) {
+	ws, turn, said, origin := sub.WS, sub.Turn, sub.Said, sub.Origin
 	if feed.PromptRowHidden(origin) {
 		return
 	}
-	row := feed.PromptRow(origin, said, q.mirrorBlocks(said))
+	// THE HEADER IS THE FEED'S, read off the sender recordTurn just handed it,
+	// so this row and the resolver's own draw of the prompt name one sender.
+	row := feed.PromptRow(origin, q.deps.Feed.PromptHeader(ws, turn, origin), said, q.mirrorBlocks(said))
 	row.Turn = &conversationv1.TurnId{Value: string(turn)}
 	// THE ACCEPTED PROMPT LANDS WHERE ITS TURN DRAWS (recordTurn), never
 	// unconditionally on the root feed: a merge's own prompt belongs in its
@@ -331,11 +336,15 @@ const interruptionNote = "The work you were doing was interrupted to deliver thi
 // startTurn opens SUB's turn: with the interruption note when the prompt
 // interrupted the running turn, as an ordinary start otherwise.
 func (q *queue) startTurn(ctx context.Context, sender Sender, sub Submission, log dlog.Logger) (*shimv1.StartTurnSuccess, error) {
+	sentBy, err := q.sentByOf(ctx, sub, log)
+	if err != nil {
+		return nil, err
+	}
 	if !sub.interjected {
-		return sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin)
+		return sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin, sentBy)
 	}
 	log.Info(opDeliver, "the prompt interrupted the running turn; it is delivered with a note telling the agent why", nil)
-	return sender.StartInterjection(ctx, sub.Turn, sub.Said, sub.Origin, interruptionNote)
+	return sender.StartInterjection(ctx, sub.Turn, sub.Said, sub.Origin, sentBy, interruptionNote)
 }
 
 // holdForReconnect parks a delivery the SHIM refused because it holds no
@@ -373,6 +382,7 @@ func (q *queue) holdForReconnect(ctx context.Context, sub Submission, cause erro
 func (q *queue) ackTurn(ws ids.WorkspaceID) {
 	q.deps.Footer.AckTurn(ws)
 	q.deps.Sidebar.AckTurn(ws)
+	q.deps.Edges.TurnStarted(ws)
 }
 
 // setTurn tells both status surfaces the turn the daemon accepted, nil when

@@ -70,7 +70,7 @@ Owner rule, 2026-10-14. A table test runs the cases that reach distinct behavior
   - per-arm e2e and integration tables re-proving mappings that ms unit tables already pin.
 - This rule decides only how many cases a table runs. Which tier a test belongs at is the tier rule's question ("A test lives at the cheapest tier that can prove it").
 - Whether cases may share one expensive fixture is the shared-setup rule's question ("A case may share an expensive fixture, never a slice another case reads").
-- Removing a row from an existing table follows the coverage rule in `skills/write-tests/SKILL.md`: the remaining rows must kill every mutant the removed one killed.
+- Removing a row from an existing table follows the coverage rule in `skills/agent-repl-tests/SKILL.md`: the remaining rows must kill every mutant the removed one killed.
 
 ## Elisp layout
 
@@ -593,20 +593,20 @@ unreachable from a live process.
       line naming the devices, their pids and whether those live, and the
       probes' answers or timeouts; the run's result is unaffected.
     - It also opens ONE workspace, `ramdisk-leak-investigation`, through the
-      `/create-or-update-workspace` skill's `run.sh --emit-commands`
-      (`AGENT_REPL_TEST_WORKSPACE_DISPATCH` overrides the script), its prompt
-      naming the evidence and the run's log (`AGENT_REPL_TEST_RUN_LOG`, set by
-      `bin/test-all.sh`).
-    - No other is created while a worktree on a branch of that name exists or
-      its create waits in the daemon's ingress; no daemon, no CLI or a failed
-      dispatch is an ERROR line too.
+      installed agent CLI (`~/.claude/skills/agent-repl-workspaces/agent-repld
+      workspace create ... -as-user`; `AGENT_REPL_TEST_WORKSPACE_DISPATCH`
+      overrides the CLI), its prompt naming the evidence and the run's log
+      (`AGENT_REPL_TEST_RUN_LOG`, set by `bin/test-all.sh`).
+    - No other is created while a worktree on a branch of that name exists,
+      and two runs never open two: the daemon refuses a second create of the
+      branch, and the refused run finds the other's worktree open. No daemon,
+      no CLI or a failed create is an ERROR line too.
   - THE REGISTRY LOCK WAIT IS BOUNDED at 2s (`ramdisk.LockBound`), just
     over 2x the longest healthy hold: an acquire holds it for its listing
-    and its attach, about 800ms at their slowest healthy times, an
-    investigation's dispatch about 700ms. Past the bound the run is treated
-    like one facing a wedged disk manager: on `/tmp`, an ERROR naming the lock
-    and who has it open (`lsof`), and the investigation, deduplicated without
-    the lock.
+    and its attach, about 800ms at their slowest healthy times. The
+    investigation takes no lock. Past the bound the run is treated like one
+    facing a wedged disk manager: on `/tmp`, an ERROR naming the lock and who
+    has it open (`lsof`), and the investigation.
   - The acquire and release edges are logged at INFO with their timings, so
     a stall shows as a begin line with no end. The check and both begin lines
     carry the wall-clock time, so one run's probes line up against another
@@ -1031,30 +1031,13 @@ kill -SIGUSR2 <pid>
 
 For any current or historical agent-repl behavior, use the complete controller
 at
-`<current-repository-root>/modules/app/agent-repl/skills/debug-emacs-agent-repl/SKILL.md`
-through `/debug-emacs-agent-repl`. The skill
+`<current-repository-root>/modules/app/agent-repl/skills/agent-repl-debug/SKILL.md`
+through `/agent-repl-debug`. The skill
 derives the relevant evidence playbooks and owns operational procedures for
 health, readiness, identity correlation, structured logs, SSM and store SQL,
 testing and coverage, and observability-gap reporting. Keep implementation
 mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
 skill.
-
-## Questions about agent-repl go through one skill, and its map is kept current
-
-`SPC o h` opens a help workspace whose agent answers with `/agent-repl-help`
-(`skills/agent-repl-help/`). The skill is mostly static. `SKILL.md` holds the
-answering procedure, and `references/MAP.md` holds a short picture of the
-system and the map of where each kind of answer lives: the user guide, the
-architecture and developer documents, the contract, and the code by system.
-
-- **A change that adds an entirely new feature or documentation set updates
-  `references/MAP.md` in the same change.**
-  - That covers a new system or service, a new `AGENTS.md` or top-level
-    document, a new docs directory, and a feature with no home among the
-    map's existing entries.
-  - A change inside an area the map already points to needs no map edit.
-- A change that moves or renames a path the map names updates the map too.
-  `test-verbs.el` checks that the skill the help preamble names exists.
 
 ## A diagnosis is evidenced in the logs, end to end (owner SOP, 2026-10-06)
 
@@ -1083,7 +1066,7 @@ feature branch.
 
 - Commit the instrumentation (with its tests) on a branch of its own, cut from
   the investigation's branch or from master, and request an `async` merge of
-  it through `/merge-queue`. The investigating workspace stays open and keeps
+  it through `/agent-repl-merge-queue`. The investigating workspace stays open and keeps
   working while the merge runs.
 - The queue's landing deploys the build, and the async merge's report arrives
   in the investigating session only once the running runtime carries it.
@@ -1096,7 +1079,7 @@ feature branch.
 - A report saying the rollouts are held or the deploy failed means the
   runtime does NOT carry the records yet; it is not the cue.
 - Elisp instrumentation needs no merge: it is hot-loaded through
-  `/runtime-eval-code`, as the debug skill's observability loop says.
+  `/agent-repl-runtime`, as the debug skill's observability loop says.
 
 ## The sidebar's arrangement is the tab bar's order
 
@@ -1123,8 +1106,8 @@ that stores a subsection of its own.
 Building, bouncing, hard bouncing, deploying, hot-reloading, health checks,
 logs and one-off daemon requests all go through `bin/agent-repl-runtime <verb>`
 (`help` lists the verbs; `call METHOD` reaches any unary AgentRepl rpc through
-`agent-repld call`), and agents operate it through `/manage-agent-repl-runtime`
-(`skills/manage-agent-repl-runtime/`), whose terminology table fixes what
+`agent-repld call`), and agents operate it through `/agent-repl-runtime`
+(`skills/agent-repl-runtime/`), whose terminology table fixes what
 "hard bounce", "bounce", "deploy", "workspace restart" and "hot reload" mean.
 The scripts behind the verbs stay where their other callers reach them, but a
 person or an agent uses the door.
@@ -1136,17 +1119,46 @@ runs from, so a handover's leftover incumbent or successor never outlives it.
 
 **Any change to build, deploy, bounce or daemon-request infrastructure updates
 `bin/agent-repl-runtime`, its harness (`bin/test-agent-repl-runtime.sh`), the
-`/manage-agent-repl-runtime` skill and this section in the same commit.** Only
+`/agent-repl-runtime` skill and this section in the same commit.** Only
 the lead session runs `bounce`, `bounce --hard` or `deploy`; subagents never do.
+
+## The agent API is agent-repld's CLI, and the skills say when to use it
+
+Design record: `docs/protobuf-design/agent-repld-api.md`. Every operation an
+agent performs on agent-repl is one `agent-repld <noun> <verb>` command over
+the serving daemon's RPCs (`daemon/cmd/agent-repld/agentcli.go`). No agent
+operation writes a command file; that ingress is retired.
+
+- **The daemon owns each command's meaning, flags and refusals.** A skill says
+  WHEN and WHY to use a command and points at it; it never restates the
+  command's rules, so two skills naming one command cannot disagree.
+- **Skills are organized by the agent's task**, and named `agent-repl-*`:
+  `/agent-repl-workspaces`, `/agent-repl-merge-queue`, `/agent-repl-runtime`,
+  `/agent-repl-debug`, `/agent-repl-profile`, `/agent-repl-tests` and
+  `/agent-repl-install`.
+- **Every skill that calls the CLI carries a relative symlink to
+  `bin/agent-repld`**, and names the INSTALLED link
+  (`~/.claude/skills/<skill>/agent-repld`). The installed skill links into
+  the main checkout, so a call always runs the main checkout's build of the
+  daemon. The daemon's briefs (`prompts/`) name commands the same way.
+- **A workspace that asked another for an update once a condition is met is
+  sent that update when the condition is met, without asking the user.** The
+  asking workspace's request is the authorization (`/agent-repl-workspaces`).
+- **`daemon/cmd/agent-repld/skillsurface_test.go` keeps the surface whole**:
+  every command a skill or a brief names exists, every agent command is
+  reachable from a skill, and every skill that calls the CLI carries the
+  front door. A command added, renamed or retired updates its skill in the
+  same change.
 
 ## Master moves only through the merge queue
 
 Owner plan, 2026-09-28 (`docs/investigations/2026-09-28-merge-queue-plan.md`,
 fixes 6-8). Every agent merges into master ONLY through the merge-queue skill
-(`.claude/skills/merge-queue/SKILL.md`): its own workspace's branch, another
-workspace, and every subagent's branch alike. The skill enqueues through the
-daemon (`agent-repld merge-queue`) and reports landed, parked or failed; on a
-park, failure or refusal it reports and stops, and never merges by hand.
+(`skills/agent-repl-merge-queue/SKILL.md`): its own workspace's branch, another
+workspace, and every subagent's branch alike. The skill lands work through the
+daemon (`agent-repld workspace merge`, `agent-repld workspace async-merge`)
+and reports landed, parked or failed; on a park, failure or refusal it reports
+and stops, and never merges by hand.
 
 - The metaprompt carries the same rule, so every session has it loaded.
 - A workspace's own merge lands in the target recorded at its creation: master
@@ -1287,7 +1299,7 @@ IMMEDIATELY by whoever receives the report, as a `--no-ff` merge commit.
 ## A generated workspace cleans up after itself, and its dispatcher never does
 
 Owner ruling (2026-10-14). A workspace generated through
-`/create-or-update-workspace` owns its own end. Its landing closes it, removes
+`/agent-repl-workspaces` (`agent-repld workspace create`) owns its own end. Its landing closes it, removes
 its worktree and deletes its branch: the "deleted and removed in the same
 breath" bullet of the section above, carried out by the landing itself.
 
@@ -1301,8 +1313,7 @@ breath" bullet of the section above, carried out by the landing itself.
   is fixed THERE, never patched by hand from the dispatcher.
 - **Separate work starts in a generated workspace.** Work meant to be handed
   off or landed separately goes into a generated workspace from the start,
-  never into a worktree an agent cuts by hand (the skill's `create.md`
-  already forbids hand-made worktrees and branches). A hand-cut worktree is
+  never into a worktree an agent cuts by hand. A hand-cut worktree is
   exactly what leaves the dispatcher holding the cleanup.
 - **A failed one-shot stays open, and is still not the dispatcher's.** A
   one-shot whose merge FAILS is left open by design, so the user can see it
@@ -1492,7 +1503,7 @@ with `AskUserQuestion` before it merges.
   memory, battery, disk or log volume, or test-run time: a new per-event or
   per-workspace cost, a new watcher, poll or timer, a wider scan, a lost cache,
   a blocking call on a hot path, a larger frame or payload, a slower or heavier
-  test tier. The perf-sensitive areas listed by `/profile-agent-repl` always
+  test tier. The perf-sensitive areas listed by `/agent-repl-profile` always
   count. A cost that is constant, one-off and small does not.
 - **What the question carries.** The impact itself, measured where it can be
   and estimated with its basis where it cannot. Then the options: one or more
@@ -1730,7 +1741,7 @@ GNS, ever, by any agent, at any scope (personal, team, org or public).
 Everything agent-repl needs on a machine is an entry in a requirement
 manifest, and `bin/requirements.sh` is the one program that reads them.
 `.claude/install.sh` runs it, `doom doctor` reports from it, and the
-`/install-agent-repl` skill drives it on a new machine.
+`/agent-repl-install` skill drives it on a new machine.
 
 - **Where entries live.**
   - `requirements.json` at the module root holds agent-repl-wide entries: Emacs, Doom, the Claude CLI, the banner program, environment variables, skills, the pre-commit hook, and module-wide dev tools.
@@ -1762,7 +1773,7 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
 ### A run that finds a manifest inadequate fixes it, generically
 
 An agent running `bin/requirements.sh` (directly, through `.claude/install.sh`,
-or through `/install-agent-repl`) that hits a failure the manifests should have
+or through `/agent-repl-install`) that hits a failure the manifests should have
 prevented fixes the manifests or the runner, not the machine.
 
 - The fix is generic: it holds for every machine and every person.
@@ -3416,8 +3427,8 @@ THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
 about agent-repl as a whole is found -- at runtime or in its tests -- add or update an entry
 here: what was slow or heavy, the evidence with numbers and the date, the fix
 and its commit (or the open item). Test-performance lessons also go into the
-`/write-tests` skill; runtime profiling and the perf-sensitive list live in
-`/profile-agent-repl`.
+`/agent-repl-tests` skill; runtime profiling and the perf-sensitive list live in
+`/agent-repl-profile`.
 
 - Test runs share the machine with no host gate (owner ruling, 2026-10-14); every run is at nice 19. Run targeted tests while developing and one full run per complete change.
 - Direct pushes to master outside the merge queue move the target under gates that already passed, and that work is thrown away; master that is red makes every gate inherit the failure (same report). Land only what was rebased onto master and tested there.

@@ -10,6 +10,7 @@
 package sessioncommand
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"unicode"
@@ -67,6 +68,18 @@ func Specs() map[string]Spec {
 		}
 	})
 	return specs
+}
+
+// Literal is COMMAND's canonical spelling, as the schema carries it and the
+// vendor's CLI answers it ("/compact"). A command the schema carries no spec
+// for names nothing to send, and fails hard.
+func Literal(command conversationv1.SessionCommand) string {
+	for _, spec := range Specs() {
+		if spec.Command == command {
+			return spec.Literal
+		}
+	}
+	panic(fmt.Sprintf("sessioncommand: %s carries no spec", command))
 }
 
 // Parsed is what Parse made of a submission's text.

@@ -146,23 +146,6 @@ func TestCreateDefaultsTheBaseRefToTheRepositoryDefaultBranch(t *testing.T) {
 	}
 }
 
-func TestCreateKeepsAnExplicitBaseRef(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	spec := standardSpec(t, f)
-	spec.BaseRef = "release/1.2"
-
-	// Act.
-	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// Assert.
-	if f.git.created[0].BaseRef != "release/1.2" {
-		t.Fatalf("base ref = %q, want release/1.2", f.git.created[0].BaseRef)
-	}
-}
-
 func TestCreateRecordsTheCreationJobBeforeMaterialization(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -212,11 +195,10 @@ func TestCreateRecordsTheMergeLayoutAtCreation(t *testing.T) {
 func TestCreateTargetsTheParentWorktreeWhenCutFromOne(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	parentDir := t.TempDir()
-	parent := f.workspace("parent", parentDir)
 	spec := standardSpec(t, f)
+	parent := f.workspaceInRepo(t, "parent", spec.RepoDir)
 	id := parent.ID
-	spec.ForkFrom = &id
+	spec.Parent, spec.ForkFrom = &id, &id
 	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
 	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
 
@@ -234,10 +216,11 @@ func TestCreateTargetsTheParentWorktreeWhenCutFromOne(t *testing.T) {
 func TestCreateRecordsTheSpawningParentOnTheWorkspace(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	parent := f.workspace("parent", t.TempDir())
 	spec := standardSpec(t, f)
+	parent := f.workspaceInRepo(t, "parent", spec.RepoDir)
 	id := parent.ID
 	spec.Parent = &id
+	spec.OwnerNotice = "the owner lands this child"
 
 	// Act.
 	record, err := f.verbs.Create(context.Background(), spec)
@@ -566,12 +549,12 @@ func TestCreateRecordsTheOneShotFormInTheCreationJob(t *testing.T) {
 func forkFixture(t *testing.T, parentPrompts []wsm.ConversationPrompt) (*fixture, ids.WorkspaceID, CreateSpec) {
 	t.Helper()
 	f := newFixture(t)
-	parent := f.workspace("parent", t.TempDir())
+	spec := standardSpec(t, f)
+	parent := f.workspaceInRepo(t, "parent", spec.RepoDir)
 	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
 	f.db.conversations = map[ids.WorkspaceID][]wsm.ConversationPrompt{parent.ID: parentPrompts}
-	spec := standardSpec(t, f)
 	id := parent.ID
-	spec.ForkFrom = &id
+	spec.Parent, spec.ForkFrom = &id, &id
 	return f, parent.ID, spec
 }
 
@@ -620,8 +603,8 @@ func TestCreateFailsAForkWhoseOwedForkCannotBeRecorded(t *testing.T) {
 func TestCreateRefusesAForkOfAParentWithNoConversation(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	parent := f.workspace("parent", t.TempDir())
 	spec := standardSpec(t, f)
+	parent := f.workspaceInRepo(t, "parent", spec.RepoDir)
 	id := parent.ID
 	spec.ForkFrom = &id
 
@@ -629,7 +612,7 @@ func TestCreateRefusesAForkOfAParentWithNoConversation(t *testing.T) {
 	_, err := f.verbs.Create(context.Background(), spec)
 
 	// Assert.
-	asRefusal(t, err, ArmForkParentHasNoConversation)
+	asRefusal(t, err, ArmForkSourceHasNoConversation)
 }
 
 func TestCreateRecordsThePriority(t *testing.T) {
@@ -710,14 +693,15 @@ func TestMergeTargetDirRefusesAnUnknownParent(t *testing.T) {
 	f := newFixture(t)
 	spec := standardSpec(t, f)
 	unknown := ids.WorkspaceID("nope")
-	spec.ForkFrom = &unknown
+	spec.Parent = &unknown
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
 
 	// Assert.
-	if err == nil {
-		t.Fatal("Create(unknown parent) = nil error, want the lookup failure surfaced")
+	asRefusal(t, err, ArmUnknownOwner)
+	if len(f.git.created) != 0 {
+		t.Fatalf("created worktrees = %+v, want none for an unknown owner", f.git.created)
 	}
 }
 
@@ -758,43 +742,6 @@ func TestCreateWithNeitherANameNorAPromptNamesTheBranchAfterTheWorkspaceID(t *te
 	branch := f.git.created[0].Branch
 	if !strings.HasPrefix(branch, "ABC/"+UnnamedSlugPrefix) {
 		t.Fatalf("branch = %q, want it named after the minted workspace id", branch)
-	}
-}
-
-func TestCreateWithAnUnresolvableBaseRefIsRefused(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.git.resolveErr = errors.New("fatal: invalid reference: does-not-exist")
-	spec := standardSpec(t, f)
-	spec.BaseRef = "does-not-exist"
-
-	// Act.
-	_, err := f.verbs.Create(context.Background(), spec)
-
-	// Assert.
-	asRefusal(t, err, ArmBaseRefUnresolved)
-	if len(f.git.created) != 0 {
-		t.Fatalf("created worktrees = %+v, want none for an unresolvable base ref", f.git.created)
-	}
-}
-
-func TestCreateBaseRefRefusalNamesTheRefAsTheArmsField(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.git.resolveErr = errors.New("fatal: invalid reference: does-not-exist")
-	spec := standardSpec(t, f)
-	spec.BaseRef = "does-not-exist"
-
-	// Act.
-	_, err := f.verbs.Create(context.Background(), spec)
-
-	// Assert.
-	refusal, ok := AsRefusal(err)
-	if !ok {
-		t.Fatalf("Create = %v, want the base_ref_unresolved refusal", err)
-	}
-	if got := refusal.Fields["ref"]; got != "does-not-exist" {
-		t.Fatalf("the arm's ref field = %v, want the base ref that did not resolve", got)
 	}
 }
 
@@ -1151,8 +1098,8 @@ func TestCreateRefusesAForkWhoseNamingAnswerIsNotAName(t *testing.T) {
 func TestCreateRefusesAForkOfAConversationlessParentBeforeTheNamingCall(t *testing.T) {
 	// Arrange: a parent with no session at all.
 	f := newFixture(t)
-	parent := f.workspace("parent", t.TempDir())
 	spec := standardSpec(t, f)
+	parent := f.workspaceInRepo(t, "parent", spec.RepoDir)
 	id := parent.ID
 	spec.ForkFrom = &id
 
@@ -1160,7 +1107,7 @@ func TestCreateRefusesAForkOfAConversationlessParentBeforeTheNamingCall(t *testi
 	_, err := f.verbs.Create(context.Background(), spec)
 
 	// Assert.
-	asRefusal(t, err, ArmForkParentHasNoConversation)
+	asRefusal(t, err, ArmForkSourceHasNoConversation)
 	if len(f.headless.calls) != 0 {
 		t.Fatalf("naming calls = %+v, want none paid for a fork that cannot happen", f.headless.calls)
 	}
@@ -1214,76 +1161,15 @@ func TestCreateHandsAPlainCreatesNamingCallNoConversation(t *testing.T) {
 	}
 }
 
-func TestCreateChecksAnExplicitTopLevelBaseRefAgainstThePrimaryBranch(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.git.defaultBranch = "main"
-	spec := standardSpec(t, f)
-	spec.BaseRef = "origin/main"
-
-	// Act.
-	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// Assert.
-	if want := []string{"origin/main..main"}; !slices.Equal(f.git.ancestorChecks, want) {
-		t.Fatalf("ancestry checks = %v, want %v", f.git.ancestorChecks, want)
-	}
-}
-
-func TestCreateRefusesATopLevelBaseRefOffThePrimaryBranch(t *testing.T) {
-	// Arrange: the base is another branch's unmerged commit.
-	f := newFixture(t)
-	f.git.defaultBranch = "main"
-	f.git.offPrimary = map[string]bool{"feature-tip": true}
-	spec := standardSpec(t, f)
-	spec.BaseRef = "feature-tip"
-
-	// Act.
-	_, err := f.verbs.Create(context.Background(), spec)
-
-	// Assert.
-	refusal := asRefusal(t, err, ArmBaseRefOffPrimaryBranch)
-	if refusal.Fields["ref"] != "feature-tip" || refusal.Fields["primary_branch"] != "main" {
-		t.Fatalf("refusal fields = %v, want the ref and the primary branch", refusal.Fields)
-	}
-	if len(f.git.created) != 0 {
-		t.Fatalf("worktrees created = %v, want none", f.git.created)
-	}
-}
-
-func TestCreateFailsLoudlyWhenTheAncestryCheckFails(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.git.defaultBranch = "main"
-	f.git.ancestorErr = errors.New("git exploded")
-	spec := standardSpec(t, f)
-	spec.BaseRef = "origin/main"
-
-	// Act.
-	_, err := f.verbs.Create(context.Background(), spec)
-
-	// Assert.
-	if err == nil || !errors.Is(err, f.git.ancestorErr) {
-		t.Fatalf("Create error = %v, want the check's failure", err)
-	}
-	if len(f.git.created) != 0 {
-		t.Fatalf("worktrees created = %v, want none", f.git.created)
-	}
-	if !loggedAtError(f, opCreate) {
-		t.Fatal("the failed ancestry check was not logged at error")
-	}
-}
-
 func TestCreateCutsAChildFromItsParentsTip(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.git.defaultBranch = "main"
-	parent := f.workspace("parent", t.TempDir())
 	spec := standardSpec(t, f)
+	parent := f.workspaceInRepo(t, "parent", spec.RepoDir)
 	id := parent.ID
 	spec.Parent = &id
+	spec.OwnerNotice = "the owner lands this child"
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -1302,14 +1188,15 @@ func TestCreateCutsAChildFromItsParentsTip(t *testing.T) {
 func TestCreateChildInheritsItsParentsPriority(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	parent := f.workspace("parent", t.TempDir())
+	spec := standardSpec(t, f)
+	parent := f.workspaceInRepo(t, "parent", spec.RepoDir)
 	p1 := wsm.PriorityP1
 	record := f.db.byDir[parent.Dir]
 	record.Priority = &p1
 	f.db.with(record)
-	spec := standardSpec(t, f)
 	id := parent.ID
 	spec.Parent = &id
+	spec.OwnerNotice = "the owner lands this child"
 
 	// Act.
 	created, err := f.verbs.Create(context.Background(), spec)
@@ -1326,14 +1213,15 @@ func TestCreateChildInheritsItsParentsPriority(t *testing.T) {
 func TestCreateChildKeepsAPriorityItWasGiven(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	parent := f.workspace("parent", t.TempDir())
+	spec := standardSpec(t, f)
+	parent := f.workspaceInRepo(t, "parent", spec.RepoDir)
 	p1, p3 := wsm.PriorityP1, wsm.PriorityP3
 	record := f.db.byDir[parent.Dir]
 	record.Priority = &p1
 	f.db.with(record)
-	spec := standardSpec(t, f)
 	id := parent.ID
 	spec.Parent = &id
+	spec.OwnerNotice = "the owner lands this child"
 	spec.Priority = &p3
 
 	// Act.
@@ -1364,117 +1252,108 @@ func TestCreateATopLevelWorkspaceInheritsNoPriority(t *testing.T) {
 	}
 }
 
-// forkIntoPrimarySpec is a fork of `source` into the primary branch.
-func forkIntoPrimarySpec(t *testing.T, f *fixture, source ids.WorkspaceID) CreateSpec {
+// ---- Derivation: the owner, the forked context and the requester ----
+
+// forkedElsewhereBrief arranges the forked-elsewhere note's brief.
+func forkedElsewhereBrief(f *fixture) {
+	f.briefs[BriefForkedElsewhere] = prompts.Prompt{Name: BriefForkedElsewhere, Body: "FORK OF {{origin}} ON {{source}}\n", Placeholders: []string{"origin", "source"}}
+}
+
+// firstSubmittedText is the text of the first prompt the create submitted.
+func firstSubmittedText(t *testing.T, f *fixture) string {
 	t.Helper()
-	spec := standardSpec(t, f)
-	spec.ForkFrom = &source
-	spec.ForkIntoPrimary = true
-	return spec
+	if len(f.queue.submissions) == 0 {
+		t.Fatal("the create submitted no prompt")
+	}
+	return f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
 }
 
-func TestCreateForkIntoPrimaryHasNoParentAndStartsFromThePrimaryBranch(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.git.defaultBranch = "main"
-	f.briefs[BriefForkIntoPrimary] = prompts.Prompt{Name: BriefForkIntoPrimary, Body: "FORK OF {{origin}}\n", Placeholders: []string{"origin"}}
-	source := f.workspace("source", t.TempDir())
-	f.db.sessions[source.ID] = wsm.Session{Workspace: source.ID, VendorSessionID: "vendor-1"}
-	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
-
-	// Act.
-	if _, err := f.verbs.Create(context.Background(), forkIntoPrimarySpec(t, f, source.ID)); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// Assert.
-	if got := f.git.created[0].BaseRef; got != "main" {
-		t.Fatalf("base ref = %q, want the primary branch", got)
-	}
-	if facts := f.db.registered[len(f.db.registered)-1]; facts.Parent != nil {
-		t.Fatalf("registered parent = %v, want none", *facts.Parent)
-	}
-	if len(f.db.pendingForks) != 1 {
-		t.Fatalf("pending forks = %+v, want the source's conversation owed once", f.db.pendingForks)
-	}
-	for _, fork := range f.db.pendingForks {
-		if fork.Parent != source.ID {
-			t.Fatalf("pending fork = %+v, want one from the source %s", fork, source.ID)
-		}
-	}
-}
-
-func TestCreateForkIntoPrimaryOpensWithTheNoteNamingTheSource(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.briefs[BriefForkIntoPrimary] = prompts.Prompt{Name: BriefForkIntoPrimary, Body: "FORK OF {{origin}}\n", Placeholders: []string{"origin"}}
-	source := f.workspace("source", t.TempDir())
-	f.db.sessions[source.ID] = wsm.Session{Workspace: source.ID, VendorSessionID: "vendor-1"}
-	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
-
-	// Act.
-	if _, err := f.verbs.Create(context.Background(), forkIntoPrimarySpec(t, f, source.ID)); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// Assert.
-	sent := f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
-	if want := prompts.Wrap("FORK OF "+source.Name+"\n") + "fix the login bug"; sent != want {
-		t.Fatalf("first message = %q, want %q", sent, want)
-	}
-}
-
-func TestCreateForkIntoPrimaryWithoutItsBriefIsRefused(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	source := f.workspace("source", t.TempDir())
-	f.db.sessions[source.ID] = wsm.Session{Workspace: source.ID, VendorSessionID: "vendor-1"}
-	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
-
-	// Act.
-	_, err := f.verbs.Create(context.Background(), forkIntoPrimarySpec(t, f, source.ID))
-
-	// Assert.
-	asRefusal(t, err, ArmBriefMissing)
-	if !loggedAtError(f, opCreate) {
-		t.Fatal("the missing brief was not logged at error")
-	}
-}
-
-func TestCreateRefusesAForkIntoPrimaryOfASourceWithNoConversation(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	source := f.workspace("source", t.TempDir())
-
-	// Act.
-	_, err := f.verbs.Create(context.Background(), forkIntoPrimarySpec(t, f, source.ID))
-
-	// Assert.
-	asRefusal(t, err, ArmForkSourceHasNoConversation)
-	if len(f.git.created) != 0 {
-		t.Fatalf("worktrees created = %v, want none", f.git.created)
-	}
-}
-
-// parentAndBaseSpec is a create naming the fixture's parent and an explicit
-// base, as the command-file ingress sends one.
-func parentAndBaseSpec(t *testing.T, f *fixture, base string) (CreateSpec, wsm.Workspace) {
+// derivationFixture is a repository with an owner and a third workspace,
+// both holding a conversation, and a create spec in that repository.
+func derivationFixture(t *testing.T) (*fixture, CreateSpec, wsm.Workspace, wsm.Workspace) {
 	t.Helper()
-	parent := f.workspace("parent", t.TempDir())
+	f := newFixture(t)
+	forkedElsewhereBrief(f)
 	spec := standardSpec(t, f)
-	id := parent.ID
-	spec.Parent = &id
-	spec.BaseRef = base
-	return spec, parent
+	owner := f.workspaceInRepo(t, "owner", spec.RepoDir)
+	other := f.workspaceInRepo(t, "other", spec.RepoDir)
+	for _, ws := range []wsm.Workspace{owner, other} {
+		f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-" + string(ws.ID)}
+	}
+	return f, spec, owner, other
 }
 
-func TestCreateWithAParentAndItsTipAsTheBaseMakesAChild(t *testing.T) {
-	// Arrange: the fake resolves a ref to "sha-of-<ref>", so naming the
-	// parent's branch is naming its tip.
-	f := newFixture(t)
-	f.git.defaultBranch = "main"
-	spec, parent := parentAndBaseSpec(t, f, "")
-	spec.BaseRef = parent.Branch
+func TestCreateDerivations(t *testing.T) {
+	tests := []struct {
+		name string
+		// parent and fork name the owner ("owner"), the third workspace
+		// ("other"), or nothing ("").
+		parent, fork string
+		notice       string
+		wantLands    bool
+		wantBase     string
+		wantNote     string
+	}{
+		{name: "a fresh top-level workspace", wantBase: "master"},
+		{name: "a top-level fork notes its source and the primary branch", fork: "other", wantBase: "master",
+			wantNote: "FORK OF other ON the primary branch"},
+		{name: "a child forked from its owner lands itself, with no note", parent: "owner", fork: "owner", wantBase: "ABC/owner"},
+		{name: "a fresh child is its owner's to land", parent: "owner", notice: "fix the parser", wantLands: true, wantBase: "ABC/owner"},
+		{name: "a child forked from another workspace is its owner's to land and notes both", parent: "owner", fork: "other", notice: "use other's plan",
+			wantLands: true, wantBase: "ABC/owner", wantNote: "FORK OF other ON the branch of the workspace `owner`"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f, spec, owner, other := derivationFixture(t)
+			byName := map[string]ids.WorkspaceID{"owner": owner.ID, "other": other.ID}
+			if tc.parent != "" {
+				id := byName[tc.parent]
+				spec.Parent = &id
+			}
+			if tc.fork != "" {
+				id := byName[tc.fork]
+				spec.ForkFrom = &id
+			}
+			spec.OwnerNotice = tc.notice
+
+			// Act.
+			created, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			facts := f.db.registered[len(f.db.registered)-1]
+			if facts.OwnerLands != tc.wantLands {
+				t.Errorf("OwnerLands = %v, want %v", facts.OwnerLands, tc.wantLands)
+			}
+			if (facts.ContextFrom == nil) != (tc.fork == "") || (tc.fork != "" && *facts.ContextFrom != byName[tc.fork]) {
+				t.Errorf("ContextFrom = %v, want %q", facts.ContextFrom, tc.fork)
+			}
+			if got := f.git.created[0].BaseRef; got != tc.wantBase {
+				t.Errorf("base = %q, want %q", got, tc.wantBase)
+			}
+			first := firstSubmittedText(t, f)
+			if tc.wantNote == "" && strings.Contains(first, "FORK OF") {
+				t.Errorf("first message = %q, want no forked-elsewhere note", first)
+			}
+			if tc.wantNote != "" && !strings.Contains(first, tc.wantNote) {
+				t.Errorf("first message = %q, want the note %q", first, tc.wantNote)
+			}
+			want := []derivedEvent{{workspace: created.ID, ownerNotice: tc.notice}}
+			if !reflect.DeepEqual(f.derived.events, want) {
+				t.Errorf("derived events = %+v, want %+v", f.derived.events, want)
+			}
+		})
+	}
+}
+
+func TestCreateRecordsTheRequester(t *testing.T) {
+	// Arrange.
+	f, spec, _, other := derivationFixture(t)
+	id := other.ID
+	spec.Requester = &id
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -1482,74 +1361,108 @@ func TestCreateWithAParentAndItsTipAsTheBaseMakesAChild(t *testing.T) {
 	}
 
 	// Assert.
-	if facts := f.db.registered[len(f.db.registered)-1]; facts.Parent == nil || *facts.Parent != parent.ID {
-		t.Fatalf("registered parent = %v, want %s", facts.Parent, parent.ID)
-	}
-	if got := f.git.created[0].BaseRef; got != parent.Branch {
-		t.Fatalf("base ref = %q, want the parent's branch", got)
+	if facts := f.db.registered[len(f.db.registered)-1]; facts.RequestedBy == nil || *facts.RequestedBy != other.ID {
+		t.Fatalf("RequestedBy = %v, want %s", facts.RequestedBy, other.ID)
 	}
 }
 
-func TestCreateWithAParentAndABaseOnThePrimaryBranchIsTopLevel(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.git.defaultBranch = "main"
-	spec, _ := parentAndBaseSpec(t, f, "origin/main")
-
-	// Act.
-	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
-		t.Fatalf("Create: %v", err)
+func TestCreateRefusesADerivationItCannotBuild(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture, spec *CreateSpec, owner, other wsm.Workspace)
+		wantArm string
+	}{
+		{name: "a child its owner lands with no notice", wantArm: ArmOwnerNoticeRequired,
+			arrange: func(_ *fixture, spec *CreateSpec, owner, _ wsm.Workspace) { id := owner.ID; spec.Parent = &id }},
+		{name: "a notice on a child forked from its owner", wantArm: ArmOwnerNoticeUnexpected,
+			arrange: func(_ *fixture, spec *CreateSpec, owner, _ wsm.Workspace) {
+				id := owner.ID
+				spec.Parent, spec.ForkFrom, spec.OwnerNotice = &id, &id, "unneeded"
+			}},
+		{name: "a notice on a top-level workspace", wantArm: ArmOwnerNoticeUnexpected,
+			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) { spec.OwnerNotice = "nobody to tell" }},
+		{name: "a one-shot child its owner would land", wantArm: ArmOneShotOwnerLands,
+			arrange: func(f *fixture, spec *CreateSpec, owner, _ wsm.Workspace) {
+				oneShotBriefs(f)
+				id := owner.ID
+				spec.Parent, spec.OneShot, spec.OwnerNotice = &id, true, "fix it"
+			}},
+		{name: "an owner the registry does not hold", wantArm: ArmUnknownOwner,
+			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
+				id := ids.WorkspaceID("nope")
+				spec.Parent = &id
+			}},
+		{name: "an owner of another repository", wantArm: ArmUnknownOwner,
+			arrange: func(f *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
+				elsewhere := f.workspaceInRepo(t, "elsewhere", mainWorktree(t, f))
+				spec.Parent, spec.ForkFrom = &elsewhere.ID, &elsewhere.ID
+			}},
+		{name: "a fork source the registry does not hold", wantArm: ArmUnknownForkSource,
+			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
+				id := ids.WorkspaceID("nope")
+				spec.ForkFrom = &id
+			}},
+		{name: "a fork source of another repository", wantArm: ArmUnknownForkSource,
+			arrange: func(f *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
+				elsewhere := f.workspaceInRepo(t, "elsewhere", mainWorktree(t, f))
+				spec.ForkFrom = &elsewhere.ID
+			}},
+		{name: "a requester the registry does not hold", wantArm: ArmUnknownRequester,
+			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
+				id := ids.WorkspaceID("nope")
+				spec.Requester = &id
+			}},
 	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f, spec, owner, other := derivationFixture(t)
+			tc.arrange(f, &spec, owner, other)
 
-	// Assert.
-	if facts := f.db.registered[len(f.db.registered)-1]; facts.Parent != nil {
-		t.Fatalf("registered parent = %v, want none for a base on the primary branch", *facts.Parent)
-	}
-	if got := f.git.created[0].BaseRef; got != "origin/main" {
-		t.Fatalf("base ref = %q, want origin/main", got)
+			// Act.
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert.
+			asRefusal(t, err, tc.wantArm)
+			if len(f.git.created) != 0 || len(f.db.registered) != 0 || len(f.derived.events) != 0 {
+				t.Fatalf("worktrees %v, registrations %v, events %v: want nothing built for a refused create", f.git.created, f.db.registered, f.derived.events)
+			}
+		})
 	}
 }
 
-func TestCreateWithAParentAndABaseElsewhereIsRefused(t *testing.T) {
+func TestCreateRefusesABaseOutsideAMergeWorkspace(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	f.git.defaultBranch = "main"
-	f.git.offPrimary = map[string]bool{"elsewhere": true}
-	spec, _ := parentAndBaseSpec(t, f, "elsewhere")
+	spec := standardSpec(t, f)
+	spec.BaseRef = "some-branch"
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
 
 	// Assert.
-	asRefusal(t, err, ArmBaseRefOffPrimaryBranch)
-	if len(f.git.created) != 0 {
-		t.Fatalf("worktrees created = %v, want none", f.git.created)
+	if err == nil || !strings.Contains(err.Error(), "only a merge workspace is cut from a named base") {
+		t.Fatalf("Create = %v, want the invariant's failure", err)
+	}
+	if !loggedAtError(f, opCreate) || len(f.git.created) != 0 {
+		t.Fatalf("records %+v, worktrees %v: want the failure logged at error and nothing built", f.log.logger.Records(), f.git.created)
 	}
 }
 
-func TestCreateWithAParentForkAndABaseOnThePrimaryBranchForksIntoIt(t *testing.T) {
+func TestCreateWithAnUnresolvableSourceTipFailsBeforeBuilding(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	f.git.defaultBranch = "main"
-	f.briefs[BriefForkIntoPrimary] = prompts.Prompt{Name: BriefForkIntoPrimary, Body: "FORK OF {{origin}}\n", Placeholders: []string{"origin"}}
-	spec, parent := parentAndBaseSpec(t, f, "origin/main")
-	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
-	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
-	id := parent.ID
-	spec.ForkFrom = &id
+	f.git.resolveErr = errors.New("fatal: invalid reference: master")
 
 	// Act.
-	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
 
-	// Assert: no parent, the note in the first message.
-	if facts := f.db.registered[len(f.db.registered)-1]; facts.Parent != nil {
-		t.Fatalf("registered parent = %v, want none", *facts.Parent)
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "does not resolve") {
+		t.Fatalf("Create = %v, want the unresolved base's failure", err)
 	}
-	sent := f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
-	if !strings.HasPrefix(sent, prompts.Wrap("FORK OF "+parent.Name+"\n")) {
-		t.Fatalf("first message = %q, want it to open with the fork note", sent)
+	if !loggedAtError(f, opCreate) || len(f.git.created) != 0 {
+		t.Fatalf("records %+v, worktrees %v: want the failure logged at error and nothing built", f.log.logger.Records(), f.git.created)
 	}
 }
 
@@ -1566,63 +1479,12 @@ func TestResolveBaseAnswersTheCommit(t *testing.T) {
 	}
 }
 
-func TestResolveBaseRefusesAnUnresolvableRef(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.git.resolveErr = errors.New("no such ref")
-
-	// Act.
-	_, err := f.verbs.(*verbs).resolveBase(context.Background(), f.log.logger, "/repo", "nope")
-
-	// Assert.
-	refusal := asRefusal(t, err, ArmBaseRefUnresolved)
-	if refusal.Fields["ref"] != "nope" {
-		t.Fatalf("refusal fields = %v, want the ref", refusal.Fields)
-	}
-}
-
-func TestRequireOnPrimary(t *testing.T) {
-	tests := []struct {
-		name       string
-		offPrimary bool
-		gitErr     error
-		wantArm    string
-		wantErr    bool
-	}{
-		{name: "a base on the primary branch passes"},
-		{name: "a base off the primary branch is refused", offPrimary: true, wantArm: ArmBaseRefOffPrimaryBranch, wantErr: true},
-		{name: "a check git cannot answer fails", gitErr: errors.New("git exploded"), wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			f := newFixture(t)
-			f.git.offPrimary = map[string]bool{"base": tt.offPrimary}
-			f.git.ancestorErr = tt.gitErr
-
-			// Act.
-			err := f.verbs.(*verbs).requireOnPrimary(context.Background(), f.log.logger, "/repo", "base", "main")
-
-			// Assert.
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("requireOnPrimary = %v, want error %v", err, tt.wantErr)
-			}
-			if tt.wantArm != "" {
-				asRefusal(t, err, tt.wantArm)
-			}
-			if tt.gitErr != nil && !loggedAtError(f, opCreate) {
-				t.Fatal("the failed check was not logged at error")
-			}
-		})
-	}
-}
-
-// TestEveryAncestryCheckGoesThroughRequireOnPrimary pins that no create path
-// asks git whether a base is on the primary branch by hand. The package's one
-// other ancestry question is a different one -- whether a reopened merged
-// workspace's branch lies inside its parent (advanceMerged, open.go) -- and is
-// pinned to its own file, so neither site can grow a sibling unseen.
-func TestEveryAncestryCheckGoesThroughRequireOnPrimary(t *testing.T) {
+// TestNoCreatePathAsksAboutAncestry pins that a create never asks git whether
+// a base lies on the primary branch: a workspace is always cut from its
+// source's tip. The package's one ancestry question -- whether a reopened
+// merged workspace's branch lies inside its parent (advanceMerged, open.go) --
+// is pinned to its own file, so no create path grows one unseen.
+func TestNoCreatePathAsksAboutAncestry(t *testing.T) {
 	// Act.
 	perFile := map[string]int{}
 	for _, file := range sourcescan.Production(t) {
@@ -1631,8 +1493,8 @@ func TestEveryAncestryCheckGoesThroughRequireOnPrimary(t *testing.T) {
 		}
 	}
 
-	// Assert: requireOnPrimary's own call, and advanceMerged's.
-	want := map[string]int{"create.go": 1, "open.go": 1}
+	// Assert: advanceMerged's call alone; no create path asks it.
+	want := map[string]int{"open.go": 1}
 	if !reflect.DeepEqual(perFile, want) {
 		t.Fatalf("Git.IsAncestor( calls per file = %v, want %v", perFile, want)
 	}
@@ -1714,17 +1576,19 @@ func TestDecorateWithWorkspaceNote(t *testing.T) {
 }
 
 func TestCreateNotesShareTheWorkspaceNoteComposition(t *testing.T) {
-	// Arrange: the fork-into-primary note is the shared composition with its
+	// Arrange: the forked-elsewhere note is the shared composition with its
 	// own brief and values, so the two agree byte for byte.
 	f := newFixture(t)
-	f.briefs[BriefForkIntoPrimary] = prompts.Prompt{Name: BriefForkIntoPrimary, Body: "FORK OF {{origin}}\n", Placeholders: []string{"origin"}}
+	forkedElsewhereBrief(f)
 	source := f.workspace("source", t.TempDir())
 	v := f.mutable(t)
 
 	// Act.
-	fork, forkErr := v.decorateForkIntoPrimary(context.Background(), f.log.logger, "raw", source.ID)
-	shared, sharedErr := v.decorateWithWorkspaceNote(context.Background(), f.log.logger, "raw", BriefForkIntoPrimary, source.ID,
-		func(ws wsm.Workspace) map[string]string { return map[string]string{"origin": ws.Name} })
+	fork, forkErr := v.decorateForkedElsewhere(context.Background(), f.log.logger, "raw", source.ID, nil)
+	shared, sharedErr := v.decorateWithWorkspaceNote(context.Background(), f.log.logger, "raw", BriefForkedElsewhere, source.ID,
+		func(ws wsm.Workspace) map[string]string {
+			return map[string]string{"origin": ws.Name, "source": "the primary branch"}
+		})
 
 	// Assert.
 	if forkErr != nil || sharedErr != nil || fork != shared {
@@ -1859,11 +1723,9 @@ func TestCreateRejectsAContextWorkspaceOutsideAOneShot(t *testing.T) {
 
 func TestCreateRefusesAChildOfAParentThatIsNotOpenBeforeMaterializingIt(t *testing.T) {
 	// Arrange.
-	f := newFixture(t)
-	parent := f.workspace("parent", t.TempDir())
-	spec := standardSpec(t, f)
+	f, spec, parent, _ := derivationFixture(t)
 	id := parent.ID
-	spec.Parent = &id
+	spec.Parent, spec.ForkFrom = &id, &id
 	f.db.openParentErr = errParentNotOpen
 
 	// Act.
@@ -1880,11 +1742,9 @@ func TestCreateRefusesAChildOfAParentThatIsNotOpenBeforeMaterializingIt(t *testi
 
 func TestCreateAsksWhetherTheParentIsOpen(t *testing.T) {
 	// Arrange.
-	f := newFixture(t)
-	parent := f.workspace("parent", t.TempDir())
-	spec := standardSpec(t, f)
+	f, spec, parent, _ := derivationFixture(t)
 	id := parent.ID
-	spec.Parent = &id
+	spec.Parent, spec.ForkFrom = &id, &id
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -1899,11 +1759,9 @@ func TestCreateAsksWhetherTheParentIsOpen(t *testing.T) {
 
 func TestCreateFailsWhenTheParentCannotBeRead(t *testing.T) {
 	// Arrange.
-	f := newFixture(t)
-	parent := f.workspace("parent", t.TempDir())
-	spec := standardSpec(t, f)
+	f, spec, parent, _ := derivationFixture(t)
 	id := parent.ID
-	spec.Parent = &id
+	spec.Parent, spec.ForkFrom = &id, &id
 	f.db.openParentErr = errors.New("disk I/O error")
 
 	// Act.
@@ -1914,3 +1772,128 @@ func TestCreateFailsWhenTheParentCannotBeRead(t *testing.T) {
 		t.Fatalf("Create = %v (worktrees %v), want a failure at ERROR materializing nothing", err, f.git.created)
 	}
 }
+
+func TestCreateReopensAClosedOwnerThatIsToLandTheChild(t *testing.T) {
+	tests := []struct {
+		name      string
+		ownerLand bool
+		wantOpen  bool
+	}{
+		{name: "an owner that lands the child is reopened", ownerLand: true, wantOpen: true},
+		{name: "an owner whose child lands itself is left closed", ownerLand: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f, spec, owner, _ := derivationFixture(t)
+			owner.Closed = true
+			f.db.with(owner)
+			id := owner.ID
+			spec.Parent = &id
+			if tc.ownerLand {
+				spec.OwnerNotice = "the owner lands this child"
+			} else {
+				spec.ForkFrom = &id
+			}
+
+			// Act.
+			if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// Assert.
+			opened := slices.Contains(f.fleet.started, owner.ID)
+			if opened != tc.wantOpen {
+				t.Fatalf("owner started = %v (sessions started %v), want %v", opened, f.fleet.started, tc.wantOpen)
+			}
+		})
+	}
+}
+
+func TestCreateFailsWhenTheOwnerItMustReopenWillNotOpen(t *testing.T) {
+	// Arrange.
+	f, spec, owner, _ := derivationFixture(t)
+	owner.Closed = true
+	f.db.with(owner)
+	f.fleet.startErr = errors.New("shim would not spawn")
+	id := owner.ID
+	spec.Parent, spec.OwnerNotice = &id, "the owner lands this child"
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "reopen the owner") {
+		t.Fatalf("Create = %v, want the owner's reopening failure", err)
+	}
+	if len(f.git.created) != 0 || len(f.derived.events) != 0 {
+		t.Fatalf("worktrees %v, events %v: want nothing built", f.git.created, f.derived.events)
+	}
+	if !loggedAtError(f, opCreate) {
+		t.Fatalf("records = %+v, want the failure logged at error", f.log.logger.Records())
+	}
+}
+
+func TestCreateFromOriginCutsFromOriginsPrimaryBranch(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.defaultBranch = "main"
+	spec := standardSpec(t, f)
+	spec.FromOrigin = true
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if len(f.git.fetched) != 1 || f.git.fetched[0] != spec.RepoDir+" origin" {
+		t.Fatalf("fetched %v, want origin fetched once in %s", f.git.fetched, spec.RepoDir)
+	}
+	if f.git.created[0].BaseRef != "origin/main" {
+		t.Fatalf("base ref = %q, want origin/main", f.git.created[0].BaseRef)
+	}
+}
+
+func TestCreateNotFromOriginFetchesNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if len(f.git.fetched) != 0 {
+		t.Fatalf("fetched %v, want nothing fetched", f.git.fetched)
+	}
+}
+
+func TestCreateFromOriginWhoseFetchFailsIsRefusedAndBuildsNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.fetchErr = errors.New("could not resolve host")
+	spec := standardSpec(t, f)
+	spec.FromOrigin = true
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	refusal, ok := AsRefusal(err)
+	if !ok || refusal.Arm != ArmOriginFetchFailed || refusal.Fields["detail"] != "could not resolve host" {
+		t.Fatalf("Create = %v, want origin_fetch_failed naming git's failure", err)
+	}
+	if len(f.git.created) != 0 || len(f.db.putJobs) != 0 {
+		t.Fatalf("worktrees %v, jobs %d: want nothing built or recorded", f.git.created, len(f.db.putJobs))
+	}
+	logged := false
+	for _, r := range f.log.logger.Records() {
+		logged = logged || (r.Context["arm"] == ArmOriginFetchFailed && r.Context["arm_detail"] == "could not resolve host")
+	}
+	if !logged {
+		t.Fatalf("records = %+v, want the refusal recorded with git's failure", f.log.logger.Records())
+	}
+}
+

@@ -80,7 +80,7 @@ func TestSenderStartTurnCarriesTheDaemonsMintedTurn(t *testing.T) {
 	s := newTestSender(client)
 
 	// Act
-	if _, err := s.StartTurn(context.Background(), ids.TurnID("turn-1"), nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+	if _, err := s.StartTurn(context.Background(), ids.TurnID("turn-1"), nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil); err != nil {
 		t.Fatalf("StartTurn: %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestSenderStartTurnNeverAsksForHistory(t *testing.T) {
 			s := &sender{client: client, watcher: watching(&fakeMainWatch{known: tt.known})}
 
 			// Act.
-			if _, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT); err != nil {
+			if _, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil); err != nil {
 				t.Fatalf("StartTurn: %v", err)
 			}
 
@@ -147,7 +147,7 @@ func TestSenderStartTurnReturnsTheSuccessWhole(t *testing.T) {
 	}})
 
 	// Act
-	got, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	got, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
 
 	// Assert
 	if err != nil {
@@ -170,7 +170,7 @@ func TestSenderStartTurnCarriesTheRefusalArm(t *testing.T) {
 	}})
 
 	// Act
-	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
 
 	// Assert
 	refusal, ok := AsShimRefusal(err)
@@ -188,7 +188,7 @@ func TestSenderStartTurnMarksAShimThatDiedUnderTheCallForTheQueue(t *testing.T) 
 	s := newTestSender(&fakeSenderClient{startTurnErr: died})
 
 	// Act
-	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
 
 	// Assert
 	if !errors.Is(err, promptqueue.ErrShimDied) || !errors.Is(err, shimclient.ErrShimDied) {
@@ -211,7 +211,7 @@ func TestSenderStartTurnLeavesADaemonDoubleSubmitTerminal(t *testing.T) {
 	}})
 
 	// Act
-	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
 
 	// Assert
 	refusal, ok := AsShimRefusal(err)
@@ -230,7 +230,7 @@ func TestSenderStartTurnRefusesAnEmptyResponse(t *testing.T) {
 	s := newTestSender(&fakeSenderClient{startTurn: &shimv1.StartTurnResponse{}})
 
 	// Act
-	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
 
 	// Assert
 	if err == nil {
@@ -533,10 +533,10 @@ func TestSenderJoinsOrStartsTheTurnAsItsVerbSays(t *testing.T) {
 		want bool
 	}{
 		{name: "StartTurn waits for no running turn", call: func(s *sender) (*shimv1.StartTurnSuccess, error) {
-			return s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+			return s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
 		}, want: false},
 		{name: "JoinRunningTurn joins it", call: func(s *sender) (*shimv1.StartTurnSuccess, error) {
-			return s.JoinRunningTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+			return s.JoinRunningTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
 		}, want: true},
 	}
 	for _, tt := range tests {
@@ -574,7 +574,7 @@ func TestSenderJoinRunningTurnCarriesTheRefusalArm(t *testing.T) {
 	}})
 
 	// Act
-	_, err := s.JoinRunningTurn(context.Background(), "turn-3", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+	_, err := s.JoinRunningTurn(context.Background(), "turn-3", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
 
 	// Assert
 	refusal, ok := AsShimRefusal(err)
@@ -593,10 +593,10 @@ func TestSenderStartsAnInterjectionWithItsVendorNote(t *testing.T) {
 		wantNote *string
 	}{
 		{name: "StartTurn carries no note", call: func(s *sender) (*shimv1.StartTurnSuccess, error) {
-			return s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+			return s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
 		}},
 		{name: "StartInterjection carries its note", call: func(s *sender) (*shimv1.StartTurnSuccess, error) {
-			return s.StartInterjection(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, "why the work was cut")
+			return s.StartInterjection(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, "why the work was cut")
 		}, wantNote: proto.String("why the work was cut")},
 	}
 	for _, tt := range tests {
@@ -720,7 +720,7 @@ func TestSenderStartTurnWaitsForTheMainWatch(t *testing.T) {
 
 	// Act
 	go func() {
-		_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+		_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
 		done <- err
 	}()
 	<-watch.waiting
@@ -763,7 +763,7 @@ func TestSenderStartTurnSendsNothingUnwatched(t *testing.T) {
 			s := &sender{client: client, watcher: tt.watcher}
 
 			// Act
-			_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+			_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
 
 			// Assert
 			if !errors.Is(err, promptqueue.ErrSessionNotWatched) || client.startTurnReq != nil {
@@ -786,7 +786,7 @@ func TestSenderStartTurnGivesUpWithItsCaller(t *testing.T) {
 
 	// Act
 	go func() {
-		_, err := s.StartTurn(ctx, "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT)
+		_, err := s.StartTurn(ctx, "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
 		done <- err
 	}()
 	<-watch.waiting
@@ -796,5 +796,98 @@ func TestSenderStartTurnGivesUpWithItsCaller(t *testing.T) {
 	// Assert
 	if !errors.Is(err, context.Canceled) || errors.Is(err, promptqueue.ErrSessionNotWatched) || client.startTurnReq != nil {
 		t.Fatalf("StartTurn = %v, sent %v; want the caller's cancellation and nothing sent", err, client.startTurnReq)
+	}
+}
+
+// TestSenderStartTurnDeclaresTheSender covers the wire form of an agent's
+// prompt's sender (StartTurnRequest.sent_by): what the daemon holds of the
+// sender is stated, and what it does not hold is left unset, never filled in.
+func TestSenderStartTurnDeclaresTheSender(t *testing.T) {
+	named := "parser-fix"
+	bypass := &conversationv1.AgentPermissionMode{Mode: &conversationv1.AgentPermissionMode_Bypass{Bypass: &conversationv1.AgentPermissionModeBypass{}}}
+	auto := &conversationv1.AgentPermissionMode{Mode: &conversationv1.AgentPermissionMode_Auto{Auto: &conversationv1.AgentPermissionModeAuto{}}}
+	tests := []struct {
+		name   string
+		sentBy *promptqueue.SentBy
+		want   *shimv1.StartTurnSentBy
+	}{
+		{
+			name: "a prompt no agent sent names no sender",
+		},
+		{
+			name:   "a named sender in bypass declares its own mode",
+			sentBy: &promptqueue.SentBy{Workspace: "ws-sender", Name: named, PermissionMode: "bypassPermissions"},
+			want:   &shimv1.StartTurnSentBy{WorkspaceId: "ws-sender", WorkspaceName: &named, PermissionMode: bypass},
+		},
+		{
+			name:   "a named sender in auto declares auto",
+			sentBy: &promptqueue.SentBy{Workspace: "ws-sender", Name: named, PermissionMode: "auto"},
+			want:   &shimv1.StartTurnSentBy{WorkspaceId: "ws-sender", WorkspaceName: &named, PermissionMode: auto},
+		},
+		{
+			name:   "a sender the daemon cannot name goes unnamed",
+			sentBy: &promptqueue.SentBy{Workspace: "ws-sender", PermissionMode: "auto"},
+			want:   &shimv1.StartTurnSentBy{WorkspaceId: "ws-sender", PermissionMode: auto},
+		},
+		{
+			name:   "a sender with no session record declares no mode",
+			sentBy: &promptqueue.SentBy{Workspace: "ws-sender", Name: named},
+			want:   &shimv1.StartTurnSentBy{WorkspaceId: "ws-sender", WorkspaceName: &named},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			client := &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+				Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{}},
+			}}
+			s := newTestSender(client)
+
+			// Act.
+			if _, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, tt.sentBy); err != nil {
+				t.Fatalf("StartTurn: %v", err)
+			}
+
+			// Assert.
+			if got := client.startTurnReq.GetSentBy(); !proto.Equal(got, tt.want) {
+				t.Fatalf("sent_by = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSenderEveryTurnVerbCarriesTheSender: a join and an interjection declare
+// the sender exactly as a plain start does.
+func TestSenderEveryTurnVerbCarriesTheSender(t *testing.T) {
+	sentBy := &promptqueue.SentBy{Workspace: "ws-sender", Name: "parser-fix", PermissionMode: "auto"}
+	tests := []struct {
+		name string
+		call func(s *sender) (*shimv1.StartTurnSuccess, error)
+	}{
+		{name: "join", call: func(s *sender) (*shimv1.StartTurnSuccess, error) {
+			return s.JoinRunningTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, sentBy)
+		}},
+		{name: "interjection", call: func(s *sender) (*shimv1.StartTurnSuccess, error) {
+			return s.StartInterjection(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, sentBy, "why the work was cut")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			client := &fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+				Result: &shimv1.StartTurnResponse_Success{Success: &shimv1.StartTurnSuccess{}},
+			}}
+			s := newTestSender(client)
+
+			// Act.
+			if _, err := tt.call(s); err != nil {
+				t.Fatalf("%s: %v", tt.name, err)
+			}
+
+			// Assert.
+			if got := client.startTurnReq.GetSentBy().GetWorkspaceName(); got != "parser-fix" {
+				t.Fatalf("sent_by.workspace_name = %q, want parser-fix", got)
+			}
+		})
 	}
 }

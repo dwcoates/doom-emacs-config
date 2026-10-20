@@ -5,7 +5,7 @@
     {
       "id": "victoria-metrics",
       "kind": "program",
-      "why": "stores 30 days of agent-repl's runtime metrics for agents to query (the metrics-agent-repl skill)",
+      "why": "stores 30 days of agent-repl's runtime metrics for agents to query (the agent-repl-metrics skill)",
       "profile": "run",
       "platforms": [
         "darwin"

@@ -2531,3 +2531,55 @@ describe("RollBackSession", () => {
     );
   });
 });
+
+/**
+ * AN AGENT'S PROMPT (`sent_by`) reaches the mocked vendor as another
+ * session's message: queued when the sender's class is this session's, its
+ * turn matched by its lifecycle, and refused when the vendor holds it.
+ */
+describe("StartTurn of an agent's prompt", () => {
+  /** An agent's prompt from parser-fix, whose session runs in MODE. */
+  const fromAgent = (turn: string, mode: "auto" | "bypass"): shimv1.StartTurnRequest => {
+    const request = startTurnRequest({ turn, text: "!md", origin: conversationv1.PromptOrigin.AGENT_SENT });
+    request.sentBy = create(shimv1.StartTurnSentBySchema, {
+      workspaceId: "ws-sender",
+      workspaceName: "parser-fix",
+      permissionMode: create(conversationv1.AgentPermissionModeSchema, { mode: { case: mode, value: {} } as never }),
+    });
+    return request;
+  };
+
+  test("a sender of this session's class is accepted, and its turn runs to its own terminal", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) => shim.clients.h1.watchAgent(watchAgentRequest(), options));
+    await watch.next();
+
+    const prompt = turnStarted(await shim.clients.h1.startTurn(fromAgent("t-agent", "auto")));
+    const terminal = await untilTerminal(watch);
+
+    expect([prompt.origin, entryFrame(terminal)?.result.case]).toEqual([conversationv1.PromptOrigin.AGENT_SENT, "success"]);
+  });
+
+  test("the vendor files the prompt as a peer message from agent-repl", async () => {
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const watch = openStream((options) => shim.clients.h1.watchAgent(watchAgentRequest(), options));
+    await watch.next();
+
+    await shim.clients.h1.startTurn(fromAgent("t-agent", "auto"));
+    await untilTerminal(watch);
+
+    const record = readTranscript(shim.dirs, started.vendorSessionId).find((line) => line.uuid === promptVendorUuid("t-agent"));
+    expect(record?.origin).toMatchObject({ kind: "peer", from: "agent-repl:parser-fix", fromMode: "prompting" });
+  });
+
+  test("a sender whose class is not this session's is refused vendor_refused, not left to stall", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+
+    const response = await shim.clients.h1.startTurn(fromAgent("t-agent", "bypass"));
+
+    expect(startTurnKind(response)).toBe("vendorRefused");
+  });
+});

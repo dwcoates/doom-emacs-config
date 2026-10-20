@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/sessioncommand"
 	"agent-repld/internal/wsm"
 )
 
@@ -285,7 +286,8 @@ func (q *queue) runContextCut(ctx context.Context, d *delivery, act Act, sender 
 	var success *shimv1.StartTurnSuccess
 	var err error
 	d.outside(shimCall{what: "context_cut", turn: turn, opensTurn: true, holds: claims}, log, func() {
-		success, err = sender.StartTurn(ctx, turn, said, origin)
+		// A CONTEXT CUT IS THE SESSION'S OWN ACT: no agent sent it.
+		success, err = sender.StartTurn(ctx, turn, said, origin, nil)
 	})
 	if err != nil {
 		if watching {
@@ -392,8 +394,9 @@ func actKindOf(command conversationv1.SessionCommand) string {
 // contextCutCommand names the session command an act kind is, and the literal
 // the vendor's CLI answers.
 func contextCutCommand(kind string) (conversationv1.SessionCommand, string) {
+	command := conversationv1.SessionCommand_SESSION_COMMAND_CLEAR
 	if kind == ActCompact {
-		return conversationv1.SessionCommand_SESSION_COMMAND_COMPACT, "/compact"
+		command = conversationv1.SessionCommand_SESSION_COMMAND_COMPACT
 	}
-	return conversationv1.SessionCommand_SESSION_COMMAND_CLEAR, "/clear"
+	return command, sessioncommand.Literal(command)
 }

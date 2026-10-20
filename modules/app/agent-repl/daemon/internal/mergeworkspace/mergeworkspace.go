@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/sessioncommand"
 	"agent-repld/internal/standdown"
 	"agent-repld/internal/wsm"
 )
@@ -64,7 +65,7 @@ type Workspaces interface {
 // CompactCommand is what a requester whose detached merge landed and asked to
 // compact after it is sent (MergeOrigin.CompactAfter): the vendor's own
 // /compact, recognized by the prompt handler as the context cut it is.
-const CompactCommand = "/compact"
+var CompactCommand = sessioncommand.Literal(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
 
 // Prompts submits the handback, and a compaction asked for after a landing, to
 // the requester's session.
@@ -214,7 +215,7 @@ func (s *Service) submit(ctx context.Context, requester ids.WorkspaceID, label, 
 		return err
 	}
 	outcome, err := s.deps.Prompts.Submit(ctx, requester, feed.SaidText(text), key,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, wsm.DeliveryDeferred, nil)
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
 		failedUnlessStoodDown(ctx, log, log.Error, "handback", "could not submit a detached merge's handback to its requester", fields, err)
 		return err
@@ -298,7 +299,7 @@ func (s *Service) compactAfter(ctx context.Context, requester ids.WorkspaceID, h
 		return err
 	}
 	outcome, err := s.deps.Prompts.Submit(ctx, requester, feed.SaidText(CompactCommand), key,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER, wsm.DeliveryDeferred, nil)
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
 		log.Error(op, "could not submit the compaction a landed merge asked for; its requester is not compacted", dlog.WithCause(fields, err))
 		return err

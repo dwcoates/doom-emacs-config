@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -664,6 +665,23 @@ func TestSubmitSessionActRecordsAStandingRefusalAtItsLevelOrDebugForARedrive(t *
 			}
 			if transfer != nil {
 				transfer.finish(h, nil)
+			}
+		})
+	}
+}
+
+// TestAContextCutIsSpelledOnlyBySessionCommand pins that the queue spells no
+// context cut's literal by hand: sessioncommand.Literal reads it off the
+// schema, so the queue and the vendor's CLI cannot disagree on it.
+func TestAContextCutIsSpelledOnlyBySessionCommand(t *testing.T) {
+	for _, literal := range []string{`"/compact"`, `"/clear"`} {
+		t.Run(literal, func(t *testing.T) {
+			// Act
+			n := sourcescan.Count(t, literal)
+
+			// Assert
+			if n != 0 {
+				t.Errorf("the queue's sources spell %s by hand %d times", literal, n)
 			}
 		})
 	}

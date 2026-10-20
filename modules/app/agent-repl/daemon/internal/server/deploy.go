@@ -45,18 +45,27 @@ func (s *server) Deploy(
 			Result: &agentreplv1.DeployResponse_Error{Error: cause},
 		}), nil
 	}
-	success := &agentreplv1.DeploySuccess{}
-	for _, o := range result.Outcomes {
-		out, err := deployOutcome(o)
-		if err != nil {
-			return nil, fail(s.log, "Deploy", err)
-		}
-		success.Components = append(success.Components, out)
+	success, err := deploySuccessOf(result)
+	if err != nil {
+		return nil, fail(s.log, "Deploy", err)
 	}
 	s.log.Info(opDeployRPC, "answered the deploy's decisions", dlog.Merge(fields, dlog.Context{"components": len(success.Components)}))
 	return connect.NewResponse(&agentreplv1.DeployResponse{
 		Result: &agentreplv1.DeployResponse_Success{Success: success},
 	}), nil
+}
+
+// deploySuccessOf renders a deploy's decisions, one per component.
+func deploySuccessOf(result deploy.Result) (*agentreplv1.DeploySuccess, error) {
+	success := &agentreplv1.DeploySuccess{}
+	for _, o := range result.Outcomes {
+		out, err := deployOutcome(o)
+		if err != nil {
+			return nil, err
+		}
+		success.Components = append(success.Components, out)
+	}
+	return success, nil
 }
 
 // deployError maps the deploy's typed refusals onto their arms. An error with

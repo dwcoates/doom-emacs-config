@@ -540,3 +540,137 @@ describe("SendLedger first-reply timing", () => {
     expect(replies).toEqual([]);
   });
 });
+
+/**
+ * A PEER SEND IS MATCHED BY ITS LIFECYCLE. The vendor echoes nothing on the
+ * turn a peer message drives; its `command_lifecycle` names the send instead,
+ * and that path is taken for a send marked `peer` alone.
+ */
+describe("the send ledger's lifecycle path, for peer sends", () => {
+  const PEER: Send = { uuid: "00000000-0000-4000-8000-0000000000pe", turnId: "peer-turn", keepalive: false, peer: true };
+
+  const lifecycle = (state: string, uuid: string): SdkMessage =>
+    ({ type: "command_lifecycle", command_uuid: uuid, state, uuid: "frame-uuid", session_id: "vendor-1" }) as unknown as SdkMessage;
+
+  /** The verdict's absorbed turns, rendered for a table's expectation. */
+  const absorbedOf = (verdict: SendVerdict): string[] =>
+    verdict.absorbed.map((turn) => (turn.kind === "send" ? `send:${turn.send.turnId}` : turn.kind));
+
+  it.each<[string, Send[], SdkMessage[], string]>([
+    ["a peer send's start between turns makes the running turn its own", [PEER], [lifecycle("started", PEER.uuid)], "send:peer-turn"],
+    ["a peer send's unstamped reply belongs to its turn", [PEER], [lifecycle("started", PEER.uuid), reply()], "send:peer-turn"],
+    ["a peer send's unstamped result ends its turn", [PEER], [lifecycle("started", PEER.uuid), reply(), result()], "send:peer-turn"],
+    ["a peer send's queued frame says nothing", [PEER], [lifecycle("queued", PEER.uuid)], "unstated"],
+    ["an ordinary send's start says nothing: it is matched by its echo", [FIRST], [lifecycle("started", FIRST.uuid)], "unstated"],
+    ["a start naming a uuid never sent says nothing", [PEER], [lifecycle("started", STRANGER)], "unstated"],
+  ])("attributes: %s", (_name, sends, messages, expected) => {
+    // Arrange
+    const ledger = ledgerWith(...sends);
+    for (const message of messages.slice(0, -1)) ledger.attribute(message);
+
+    // Act
+    const verdict = ledger.attribute(messages.at(-1) as SdkMessage);
+
+    // Assert
+    expect(turnOf(verdict)).toBe(expected);
+  });
+
+  it("opens no vendor-started turn for a peer send's unstamped first reply", () => {
+    // Arrange
+    const ledger = ledgerWith(PEER);
+    ledger.attribute(lifecycle("started", PEER.uuid));
+
+    // Act
+    const verdict = ledger.attribute(reply());
+
+    // Assert
+    expect(verdict.openedVendorTurn).toBe(false);
+  });
+
+  it("retires a peer send on its turn's result, so the next unstamped reply is the vendor's own", () => {
+    // Arrange
+    const ledger = ledgerWith(PEER);
+    for (const message of [lifecycle("started", PEER.uuid), reply(), result()]) ledger.attribute(message);
+
+    // Act
+    const verdict = ledger.attribute(reply());
+
+    // Assert
+    expect([turnOf(verdict), verdict.openedVendorTurn, ledger.openSendOf("peer-turn")]).toEqual(["vendor", true, undefined]);
+  });
+
+  it("folds a peer send started inside another send's turn into that turn, concluding the peer send", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, PEER);
+    ledger.attribute(reply(stamp(FIRST.uuid)));
+
+    // Act
+    const verdict = ledger.attribute(lifecycle("started", PEER.uuid));
+
+    // Assert
+    expect([turnOf(verdict), absorbedOf(verdict), ledger.openSendOf("peer-turn")]).toEqual([
+      "send:turn-1",
+      ["send:peer-turn"],
+      undefined,
+    ]);
+  });
+
+  it("takes a vendor-started turn over for a peer send folded into it, absorbing the vendor turn", () => {
+    // Arrange
+    const ledger = ledgerWith(PEER);
+    ledger.attribute(reply());
+
+    // Act
+    const verdict = ledger.attribute(lifecycle("started", PEER.uuid));
+
+    // Assert
+    expect([turnOf(verdict), absorbedOf(verdict)]).toEqual(["send:peer-turn", ["vendor"]]);
+  });
+
+  it("opens a vendor-started turn, at ERROR, for a refused peer send the vendor ran anyway", () => {
+    // Arrange
+    const ledger = ledgerWith(PEER);
+    ledger.forget("peer-turn", "the vendor held it");
+    const mark = logSinkMark();
+
+    // Act
+    const verdict = ledger.attribute(lifecycle("started", PEER.uuid));
+
+    // Assert
+    expect([turnOf(verdict), verdict.openedVendorTurn, logRecordsSince(mark).some((record) => record.level === "error")]).toEqual([
+      "vendor",
+      true,
+      true,
+    ]);
+  });
+
+  it("leaves the running turn as it is when a refused peer send starts inside it", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, PEER);
+    ledger.forget("peer-turn", "the vendor held it");
+    ledger.attribute(reply(stamp(FIRST.uuid)));
+
+    // Act
+    const verdict = ledger.attribute(lifecycle("started", PEER.uuid));
+
+    // Assert
+    expect([turnOf(verdict), verdict.openedVendorTurn]).toEqual(["send:turn-1", false]);
+  });
+
+  it("times a peer send's first reply from its registration", () => {
+    // Arrange
+    let now = 0;
+    const replies: [string, number][] = [];
+    const ledger = new SendLedger((send, seconds) => replies.push([send.turnId, seconds]), () => now);
+    ledger.sent(PEER);
+    ledger.attribute(lifecycle("started", PEER.uuid));
+    now = 1_500;
+
+    // Act
+    ledger.attribute(reply());
+    ledger.attribute(reply());
+
+    // Assert
+    expect(replies).toEqual([["peer-turn", 1.5]]);
+  });
+});

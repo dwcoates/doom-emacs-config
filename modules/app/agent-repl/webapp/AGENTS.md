@@ -924,8 +924,8 @@ THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
 about the webapp is found -- at runtime or in its tests -- add or update an entry
 here: what was slow or heavy, the evidence with numbers and the date, the fix
 and its commit (or the open item). Test-performance lessons also go into the
-`/write-tests` skill; runtime profiling and the perf-sensitive list live in
-`/profile-agent-repl`.
+`/agent-repl-tests` skill; runtime profiling and the perf-sensitive list live in
+`/agent-repl-profile`.
 
 - A hidden page rebuilt the rail on every roster push; it now holds only the newest roster and draws it once on show (55a22a48e). jsdom, 139-row roster: 23 queued pushes 2,513ms -> ~600ms, 153 pushes 13,365ms -> ~880ms; per push ~83ms -> ~2ms.
 - Each live page costs about 89MB in its WebKit process: 32 processes held 2.85GB RSS and used 28.5% CPU in one snapshot (2026-10-12). Footer, topbar and feed streams are not coalesced for hidden pages yet.

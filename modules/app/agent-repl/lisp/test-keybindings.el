@@ -116,9 +116,10 @@
   "The SPC TAB O one-shot in the explanation-engine repository exists."
   (should (commandp 'agent-repl-create-explanation-engine-oneshot)))
 
-(ert-deftest agent-repl-test-keybindings-help-workspace-command-is-defined ()
-  "The SPC o h help-workspace command exists."
-  (should (commandp 'agent-repl-create-help-workspace)))
+(ert-deftest agent-repl-test-keybindings-help-workspace-is-gone ()
+  "The SPC o h help workspace died with the /agent-repl-help skill."
+  (should-not (fboundp 'agent-repl-create-help-workspace))
+  (should-not (boundp 'agent-repl-help-preamble)))
 
 (ert-deftest agent-repl-test-keybindings-oneshot-finish-commands-are-gone ()
   "The per-finish one-shot commands died with the finish choice."

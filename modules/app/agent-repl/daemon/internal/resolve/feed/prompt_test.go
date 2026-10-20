@@ -1340,3 +1340,49 @@ func TestIsTurnPromptPicksOnlyThePromptsOfTheTurn(t *testing.T) {
 		})
 	}
 }
+
+func TestPromptRowDrawsAnAgentSentPromptUnderItsHeader(t *testing.T) {
+	// Arrange
+	header := receivedFromWorkspace("parser-fix", true)
+	blocks := []*frontendv1.FeedUserPromptBlock{{Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: "hello"}}}}
+
+	// Act
+	row := PromptRow(conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, header, SaidText("hello"), blocks)
+
+	// Assert
+	if row.GetUserPrompt() != nil || addressLine(row.GetAgentPrompt().GetAddress()) != "← workspace parser-fix" {
+		t.Fatalf("row = %v, want an agent prompt headed by the sender", row)
+	}
+	if got := agentPromptTexts(row.GetAgentPrompt()); len(got) != 1 || got[0] != "hello" {
+		t.Fatalf("body = %q, want the prompt's text", got)
+	}
+}
+
+func TestPromptRowRefusesAHeaderThatDisagreesWithTheOrigin(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		header bool
+	}{
+		{name: "an agent-sent prompt with no header", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT},
+		{name: "a user's prompt with a header", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, header: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var header *frontendv1.FeedAgentPromptAddress
+			if tt.header {
+				header = receivedFromWorkspace("parser-fix", true)
+			}
+			defer func() {
+				// Assert
+				if recover() == nil {
+					t.Fatal("PromptRow must panic on a header that disagrees with the origin")
+				}
+			}()
+
+			// Act
+			PromptRow(tt.origin, header, SaidText("hello"), nil)
+		})
+	}
+}

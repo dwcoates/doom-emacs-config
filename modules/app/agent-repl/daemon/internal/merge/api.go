@@ -102,14 +102,19 @@ type Orchestrator interface {
 	// The request is DURABLE from here, and it is put in line -- and reported
 	// to any client -- only once the turn that asked for it has ended (a
 	// merge the USER asked for over an rpc has no requesting turn and is put
-	// in line at once).
-	Enqueue(ctx context.Context, req Request) error
+	// in line at once). It answers what the request reserved.
+	Enqueue(ctx context.Context, req Request) (Enqueued, error)
 	// Pause stops the queue from starting new merges; an in-flight merge runs
 	// on. A nil scope is the daemon-wide switch (UpdateMergeQueuePause with an
 	// UNSET repository); a scope names ONE repository's queue.
 	Pause(ctx context.Context, scope *RepositoryScope) error
 	// Unpause resumes starting merges, with the same scoping as Pause.
 	Unpause(ctx context.Context, scope *RepositoryScope) error
+	// Status answers each registered repository's queue as it stands, its
+	// started merges' steps filled in: the one repository a scope names (an
+	// unknown one refused as unknown_repository), or every registered one for
+	// a nil scope.
+	Status(ctx context.Context, scope *RepositoryScope) ([]QueueStatus, error)
 	// HoldRollouts holds the queue's rollouts, daemon-wide and durably:
 	// merges keep running and landing, but a landing in the daemon's own
 	// checkout no longer tells the deploy, so a hand-deployed build is kept.
@@ -230,6 +235,11 @@ type Request struct {
 	// By says who asked, which decides whether the admission may displace the
 	// requester's turn in flight (see Requester).
 	By Requester
+	// Asker is the workspace whose agent asked, set exactly when By is
+	// RequestedByAgent (agentrepl.v1.WorkspaceRequesterWorkspace). An
+	// in-place merge lands only on the ask of the workspace itself (unless
+	// its owner lands it), of its owner, or of the user (checkAsker).
+	Asker ids.WorkspaceID
 	// Detached runs a named branch's merge ASYNC, in a hidden MERGE WORKSPACE
 	// forked from the requester instead of in the requester
 	// (agentrepl.v1.MergeWorkspaceAsync); nil runs it SYNC, in place. It is
@@ -242,6 +252,15 @@ type Request struct {
 	// from. It is legal on an in-place own-branch source that does not keep
 	// the requester open, alone.
 	OneShot bool
+}
+
+// Enqueued is what a recorded request reserved.
+type Enqueued struct {
+	// MergeBranch is the branch an ASYNC request's merge workspace will be
+	// created under, reserved from now until it exists
+	// (agentrepl.v1.CreateWorkspaceAsyncMergeAccepted.merge_workspace_branch).
+	// Empty for an in-place merge.
+	MergeBranch string
 }
 
 // DetachedRun is what an async request says about its merge workspace.
@@ -268,16 +287,21 @@ type DetachedRun struct {
 	// runs: it never inherits its requester's. Empty when the request names
 	// none.
 	Actions wsm.MergeActions
+	// Maker is the workspace the merged work was done in: the merge workspace
+	// forks its conversation, and it is the one target besides the primary
+	// branch the branch may land in (agentrepl.v1.CreateWorkspaceAsyncMerge).
+	Maker ids.WorkspaceID
+	// IntoMaker lands the branch into the maker's branch instead of on the
+	// primary branch.
+	IntoMaker bool
 }
 
-// NewDetachedRun is the async run an ingress reads off a request: the merge
+// NewDetachedRun is the async run the rpc reads off a request: the merge
 // workspace's name and the instruction with their surrounding space trimmed,
-// and the landing asks and merge actions as given. Every ingress builds its
-// run here, so the rpc and the command file cannot read the same request
-// apart.
-func NewDetachedRun(name, instruction string, compactAfter bool, closeOnLanding ids.WorkspaceID, cleanupWorktree bool, actions wsm.MergeActions) *DetachedRun {
+// and the landing asks, merge actions, maker and target as given.
+func NewDetachedRun(name, instruction string, compactAfter bool, closeOnLanding ids.WorkspaceID, cleanupWorktree bool, actions wsm.MergeActions, maker ids.WorkspaceID, intoMaker bool) *DetachedRun {
 	return &DetachedRun{Name: strings.TrimSpace(name), Pick: strings.TrimSpace(instruction), CompactAfter: compactAfter,
-		CloseOnLanding: closeOnLanding, CleanupWorktree: cleanupWorktree, Actions: actions}
+		CloseOnLanding: closeOnLanding, CleanupWorktree: cleanupWorktree, Actions: actions, Maker: maker, IntoMaker: intoMaker}
 }
 
 // DetachedMerges forks the merge workspace a detached request runs in, and
@@ -435,12 +459,13 @@ func (k DetachedOutcomeKind) String() string {
 type Requester int
 
 const (
-	// RequestedByAgent is a merge an agent's turn asked for through the
-	// command-file ingress. It is the zero value on purpose: a merge whose
+	// RequestedByAgent is a merge an agent's turn asked for over the agent
+	// API (agentrepl.v1.WorkspaceRequesterWorkspace). It is the zero value on purpose: a merge whose
 	// requester is not known (one the boot recovery put back) never
 	// displaces anything either.
 	RequestedByAgent Requester = iota
-	// RequestedByUser is a merge the user asked for over an rpc.
+	// RequestedByUser is a merge the user asked for
+	// (agentrepl.v1.WorkspaceRequesterUser).
 	RequestedByUser
 )
 
@@ -547,8 +572,9 @@ type Deps struct {
 	// Painter turns the gate's ANSI output into paint spans. The client never
 	// parses an escape.
 	Painter paint.Painter
-	// StartSession starts a session for a workspace that has none, under the
-	// lease, because a configured prompt needs one (revival-is-implicit).
+	// StartSession brings a workspace's session up when none is live, under
+	// the lease, because a merge prompt needs one (revival-is-implicit). It
+	// answers at once for a live session.
 	StartSession StartSessionFunc
 	// StopSession ends and reaps a merged workspace's session before its
 	// worktree is removed. The process must lose its working directory only

@@ -20,7 +20,21 @@ export function sentTo(name: string): FeedAgentPromptAddress {
 export function receivedFrom(name: string): FeedAgentPromptAddress {
   return create(FeedAgentPromptAddressSchema, {
     name: { text: name },
-    direction: { case: "received", value: { agent: { identity: { case: "mainAgent", value: {} } } } },
+    direction: {
+      case: "received",
+      value: { sender: { case: "agent", value: { identity: { case: "mainAgent", value: {} } } } },
+    },
+  });
+}
+
+/** A prompt another agent-repl workspace NAME's agent sent, through the agent API. */
+export function receivedFromWorkspace(name: string): FeedAgentPromptAddress {
+  return create(FeedAgentPromptAddressSchema, {
+    name: { text: name },
+    direction: {
+      case: "received",
+      value: { sender: { case: "workspace", value: { identity: { case: "named", value: {} } } } },
+    },
   });
 }
 

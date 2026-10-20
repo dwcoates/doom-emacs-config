@@ -113,7 +113,6 @@ daemon/
                    forget, restart{force}, select, priority), task verbs, cold gate answer,
                    SetModel/SetPermissionMode/SetEffort
     health/        DaemonHealth / SessionHealth answers (unhealthy is an answer) + fault records
-    commandfile/   the command-file ingress ($AGENT_REPL_STATE_DIR/output/workspace_commands_*.json)
                    mapped onto the same internal paths as the rpcs
     heldingress/   the held-prompt ingress ($AGENT_REPL_STATE_DIR/held-prompts/held_*.json): prompts a
                    client could not hand to a live daemon, submitted through the prompt handler under
@@ -132,7 +131,7 @@ below it in this list): proto gen, dlog, envc, stateroot, vocab, paint,
 feedid, prompts, publish, apiresponses, flock, clock, sessioncommand, runecap  <  wsm, sessionlock, shimclient, gitclient,
 account, externalbrowser, login  <  sessionwatcher, resolve/*, bringup, opentabs  <
 prompthandler, promptqueue, classifier, merge, drain, rollout, workspace,
-health, intakegate  <  commandfile, heldingress, worktreereap, newsdigest, agentreplsession  <  server, boot  <  cmd. The shim client and git
+health, intakegate  <  heldingress, worktreereap, newsdigest, agentreplsession  <  server, boot  <  cmd. The shim client and git
 client know no other daemon package. The prompt queue, merge orchestrator
 and drain controller never import each other; they meet at wsm (the
 lease) and at the shim client.
@@ -149,7 +148,6 @@ lease) and at the shim client.
   refuses at boot if `sock/` plus a 16-char name would overflow, loudly.
 - `intent/manifest.json` — the stand-down intent manifest (pid + intent per
   session), written by the outgoing daemon, reconciled by the incoming one.
-- `output/workspace_commands_*.json` — the command-file ingress.
 - `held-prompts/held_*.json` — the held-prompt ingress ("heldingress" below);
   `held-prompts/quarantine/` keeps a malformed entry where a person can read it.
 - `logs/agent-repl-<workspace-log-id>-<sink>-*.log` — the per-workspace durable
@@ -443,7 +441,7 @@ INFO.
 
 ```go
 type Orchestrator interface {
-  Enqueue(ctx, ws, by Requester) error           // MergeWorkspace (RequestedByUser) + command-file merge (RequestedByAgent); refuses pre-state (no layout facts, deleted session, already queued/merging)
+  Enqueue(ctx, req Request) (Enqueued, error)    // MergeWorkspace and the async-merge create; the asker is checked (owner_lands, requester_may_not_land); refuses pre-state (no layout facts, deleted session, already queued/merging)
   Pause(ctx, scope) error; Unpause(ctx, scope) error
   Evict(ctx, ws) error                           // a waiting merge leaves the queue; a RUNNING or PARKED one is abandoned
   AnswerQueueOffer(ctx, ws, answer) error        // AnswerMergeQueueOffer: evict | prioritize | cancel
@@ -580,8 +578,8 @@ no queued merge; refusal manifests in the footer), `Kill`, `Nuke`, `Forget`
 (registration's undo: the record goes, and its repository's record with it when
 nothing else references that repository; NO files are touched. Refuses an open
 workspace, a workspace that is not quiet, and one others were spawned from.
-Reachable today only through the command-file ingress -- the rpc is unlanded,
-see ERROR-ARMS.md), `Restart`
+Reachable through the ForgetWorkspace rpc, which no agent command offers),
+`Restart`
 (delegates to rollout.RelaunchShim; force = KillSession{force:true} first;
 owns the reload_webapp push when needed), `Select`, `SetPriority`, tasks,
 `AnswerColdGate`, `SetModel`/`SetPermissionMode` (through the queue's
@@ -934,100 +932,11 @@ topbar swap imports):
 - Suffixes composed by the call site ("18.2k in", "12.4k tok") wrap this
   value; the formatter emits only the figure.
 
-## commandfile
+## Retargeting a workspace's merge
 
-The command-file ingress sweeps `$AGENT_REPL_STATE_DIR/output/workspace_commands_*.json`
-and maps every entry onto the same internal path as the equivalent rpc. A file
-is ONE request: an entry that does not validate, or whose directory cannot be
-resolved, applies nothing from the whole file, which retires to `quarantine/`
-at WARN `daemon.commandfile.quarantine` with the refused entry and field in its
-cause.
-
-EVERY DIRECTORY FIELD (`git_root`, `project_dir`, `dir`, `source_dir`,
-`evict_dir`, `repository_dir`, `parent`) goes through
-`dirpath.Absolute` before anything reads it. A leading `~` expands to the home
-directory the daemon resolved at boot, because the `/create-or-update-workspace`
-skill's contract says a leading `~` is expanded downstream. `~user` and any path
-still relative afterwards are refused. None is resolved against the daemon's
-working directory, which is wherever launchd started it:
-`filepath.Abs("~/.config/doom")` once named `/Users/me/~/.config/doom`, and
-the create that carried it was quarantined as an unknown repository
-(2026-09-28).
-
-THE DECODE IS STRICT: a field this reader does not declare quarantines the
-file. `encoding/json` drops one without a word, and for a month that dropped
-every create field the `/create-or-update-workspace` skill writes beyond
-`name`, `git_root` and `prompt`. A create-only field on any other verb is
-refused for the same reason. A create maps onto the `CreateSpec` the
-`CreateWorkspace` rpc fills for the same request:
-
-| field | `CreateSpec` |
-|---|---|
-| `git_root` | `RepoDir`: a registered repository's main checkout, or the repository of the registered workspace whose worktree it is (the skill's default `git_root` is the source workspace's own path); anything else is left for the verb to refuse as `unknown_repository` |
-| `source_ws` `{name, path}` | `Parent`: none when `path` is the repository's main checkout, else the registered workspace at `path`, which must be of the same repository; `name` is display only |
-| `fork_from` | `ForkFrom` and `Parent`: the ONE open workspace of the repository with that name. A fork is always from the parent (`CreateWorkspaceParent.fork`), so a `source_ws` naming a different workspace is refused, and so is a base beside it |
-| `base_commit`, `base_ref` | `BaseRef`; the two spellings are refused together |
-| `model` | `Model`, blank as unset |
-| `priority` | `Priority`: `p05`, `p1`, `p2`, `p3` |
-| `before_ws_merge`, `postprocessing_prompt` | `MergeActions.Before`, `MergeActions.After` |
-
-### The merge queue's controls
-
-The entry types mirror `UpdateMergeQueue`'s arms (all but `front`) and call
-the same orchestrator entry points (`merge.Orchestrator.Evict`, `Move`,
-`Pause`, `Unpause`, `HoldRollouts`, `ReleaseRollouts`, `Subscribe`,
-`Unsubscribe`).
-Each names its REQUESTER by `project_dir` (or `dir`, or a `workspace` id), as
-a `merge` entry does; that is the workspace whose agent wrote it.
-
-| type | fields | maps onto |
-|---|---|---|
-| `merge_evict` | `evict_dir` optional: another workspace's worktree root | `Evict` of the workspace at `evict_dir`, else of the requester |
-| `merge_pause` | `repository_dir` optional: a repository's main checkout | `Pause` of that repository's queue, else of every repository |
-| `merge_resume` | `repository_dir` optional, as for a pause | `Unpause`, scoped as a pause is |
-| `merge_hold_rollouts` | none: the hold is daemon-wide | `HoldRollouts`: merges still land, but a landing in the daemon's own checkout no longer tells the deploy; durable (wsm `merge_rollout_hold`) until released |
-| `merge_release_rollouts` | none | `ReleaseRollouts`: the next landing tells the deploy again; nothing is deployed retroactively |
-| `merge_disable_racing` | none: the switch is daemon-wide | `DisableRacing`: every queue works its head alone whatever the power source (the gate governor's window narrows to one); durable (wsm `merge_racing_disabled`) until enabled, and the governor is born with it at boot |
-| `merge_enable_racing` | none | `EnableRacing`: on AC power each queue works its top two merges again, the merge behind each head starting at once |
-| `merge_subscribe` | `detail` required (`every_change`, `advances`, `depletes`); `repository_dir` optional, as for a pause | `Subscribe` of the requester at that detail, to that repository's queue, else every repository's |
-| `merge_unsubscribe` | `repository_dir` optional, as for a subscribe | `Unsubscribe` of the requester in that scope |
-
-`evict_dir` is refused on any other type, `repository_dir` on any but a
-pause, a resume, a subscribe or an unsubscribe, and `detail` on any but a
-subscribe. The OUTCOME is the file's fate plus one INFO
-`daemon.commandfile.merge_queue` record whose `path` is the file and whose
-`outcome` is `evicted`, `not_queued`, `paused`, `resumed`, `held`,
-`released`, `subscribed`, `resubscribed`, `unsubscribed` or `not_subscribed`
-(an unsubscribe of nothing is applied, as an evict of nothing is). EVICTING A
-WORKSPACE WITH NOTHING ON THE QUEUE IS AN ANSWER, NOT A FAILURE: the rpc's
-`no_such_queued_merge` applies the file with `outcome: not_queued`. Every other
-refusal (`already_paused`, `not_paused`, `unknown_repository`,
-`rollouts_already_held`, `rollouts_not_held`, an unregistered
-requester or `evict_dir`) quarantines the file at WARN
-`daemon.commandfile.entry` with the arm in its `cause`.
-
-### Retargeting a workspace's merge
-
-A `retarget` entry is `SetWorkspaceParent` for an agent, and calls the same
-operation (`internal/retarget`), so a file's retarget TELLS THE WORKSPACE'S
-SESSION exactly as the rpc's does:
-
-```json
-{"type": "retarget", "workspace": "<display name>", "project_dir": "/abs/worktree", "parent": "/abs/parent/worktree"}
-```
-
-| field | meaning |
-|---|---|
-| `project_dir` | the retargeted workspace, keyed by its worktree root like every entry that targets an existing workspace; `workspace` beside it is display only |
-| `parent` | REQUIRED KEY. A registered workspace's worktree root makes the workspace its CHILD: the merge lands in that checkout. `null`, or the repository's own main checkout, makes it TOP-LEVEL: the merge lands in the main checkout on the default branch. An absent key is refused, because clearing a parent changes where work lands. `parent` is refused on any other type |
-
-The parent directory is resolved through the same read as a create's
-`source_ws` (`parentAt`). A directory no workspace is registered at is the
-`unknown_parent` refusal; every other refusal is the operation's own
-(`parent_in_other_repository`, `cycle`, `no_merge_layout`, `cold_gate`, the
-ownership arms). Each refusal quarantines the file at INFO
-`daemon.commandfile.entry`, and nothing is changed or sent; a retarget that
-FAILED (rather than refused) quarantines it at WARN.
+`SetWorkspaceParent` (the editor, and `agent-repld workspace set -parent` or
+`-top-level`) calls `internal/retarget`, which re-applies the ownership and
+landing rules.
 
 THE RETARGET AND ITS NOTICE ARE ONE OPERATION. `retarget.Service.Retarget`
 records the new parent and merge target (`workspace` `SetParent`, one `wsm`
@@ -1118,9 +1027,7 @@ waits on disk. A sweep is also EXCLUSIVE across daemons, under the kernel lock
 `held-prompts/.sweep.lock` (`flock`), because a sweep the incumbent began before
 its handover can still be submitting when the successor's gate opens, and an
 entry submitted by both before either accepted its key would be delivered
-twice. The command-file ingress takes the same gate; its per-file exclusivity is
-the claim rename, and a claim lost to the other daemon is DEBUG, never an
-ERROR.
+twice.
 
 ## The editor opens workspaces with OpenTabs; only visible ones run
 

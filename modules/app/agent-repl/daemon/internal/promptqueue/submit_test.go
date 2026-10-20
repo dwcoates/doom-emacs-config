@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
@@ -713,6 +714,9 @@ var gateWaitingOrigins = []conversationv1.PromptOrigin{
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE,
 }
 
 // gateWaitingSubmission is a deferred submission of ORIGIN.
@@ -785,6 +789,11 @@ func TestWhichPromptsWaitOutAColdGate(t *testing.T) {
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, false},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED, false},
@@ -1474,5 +1483,47 @@ func TestAwaitTurnStartedWithNoCallStandingAnswersAtOnce(t *testing.T) {
 	// Assert
 	if err != nil {
 		t.Fatalf("AwaitTurnStarted() = %v, want nil with no call standing", err)
+	}
+}
+
+func TestSubmitRefusesASenderThatDisagreesWithTheOrigin(t *testing.T) {
+	other := theSender
+	tests := []struct {
+		name string
+		sub  Submission
+	}{
+		{name: "an agent-sent prompt naming no sender", sub: func() Submission {
+			sub := agentSubmission("t1", "hello")
+			sub.SentBy = nil
+			return sub
+		}()},
+		{name: "a user's prompt naming a sender", sub: func() Submission {
+			sub := submission("t1", "hello")
+			sub.SentBy = &other
+			return sub
+		}()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			_, err := h.q.Submit(context.Background(), tt.sub)
+
+			// Assert
+			if !errors.Is(err, promptorigin.ErrSenderMismatch) {
+				t.Fatalf("Submit = %v, want ErrSenderMismatch", err)
+			}
+			if started := h.sender.started(); len(started) != 0 {
+				t.Fatalf("started = %v, want nothing delivered", started)
+			}
+			if _, recorded := h.db.startedTurn("t1"); recorded {
+				t.Fatal("a refused submission recorded a turn")
+			}
+			if !logged(h.log.Records(), "error", opSubmit, "a submission reached the queue with a sender that disagrees with its origin") {
+				t.Fatalf("records = %+v, want the mismatch recorded at error", h.log.Records())
+			}
+		})
 	}
 }

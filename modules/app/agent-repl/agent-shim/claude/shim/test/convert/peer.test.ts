@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { SdkMessage } from "../../src/sdk/types.js";
-import { convertPeerMessage, interSessionOf, peerFacts, userRecordText } from "../../src/convert/peer.js";
+import { convertPeerMessage, interSessionOf, isOwnPeerAddress, peerFacts, userRecordText } from "../../src/convert/peer.js";
 import { convertUserRecord } from "../../src/convert/tool-results.js";
 import { createTaskKindRegistry } from "../../src/convert/detached.js";
 import { createCallRegistry } from "../../src/convert/tool-calls.js";
@@ -212,6 +212,13 @@ describe("convertPeerMessage", () => {
     expect(convertPeerMessage(message, foldContext())).toBeUndefined();
   });
 
+  it("returns undefined for agent-repl's own peer message, whose prompt row the shim already wrote", () => {
+    // Arrange
+    const message = peerRecord({ from: "agent-repl:parser-fix", fromMode: "prompting", hostInjected: true });
+    // Act & Assert
+    expect(convertPeerMessage(message, foldContext())).toBeUndefined();
+  });
+
   it("returns undefined for a peer record with no uuid, leaving it to the ordinary path", () => {
     // Arrange
     const message = peerRecord({ from: "Explore" }, { uuid: "" });
@@ -270,10 +277,29 @@ describe("convertUserRecord routing", () => {
     expect(entries.map((e) => e.item.kind)).toEqual(["peer"]);
   });
 
+  it("drops agent-repl's own peer message under R15, as its own prompt", () => {
+    // Arrange
+    const message = peerRecord({ from: "agent-repl:parser-fix", hostInjected: true });
+    // Act & Assert
+    expect(convert(message)).toEqual([]);
+  });
+
   it("still drops a genuine (non-peer) prompt echo under R15 (regression)", () => {
     // Arrange
     const message = userRecord({ message: { role: "user", content: "hello" } });
     // Act & Assert
     expect(convert(message)).toEqual([]);
+  });
+});
+
+describe("isOwnPeerAddress", () => {
+  it.each([
+    ["agent-repl's own address", "agent-repl:parser-fix", true],
+    ["another session's socket address", "uds:/tmp/cc-socks/5398.sock", false],
+    ["an in-session sender's name", "Explore", false],
+    ["no address at all", undefined, false],
+  ])("answers %s", (_name, from, want) => {
+    // Arrange, Act, Assert
+    expect(isOwnPeerAddress(from)).toBe(want);
   });
 });

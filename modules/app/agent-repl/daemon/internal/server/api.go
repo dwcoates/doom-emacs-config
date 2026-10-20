@@ -23,7 +23,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/chessboard"
-	"agent-repld/internal/commandfile"
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
@@ -69,6 +68,9 @@ type Deps struct {
 	Retarget retarget.Retargeter
 	// Merge backs MergeWorkspace, UpdateMergeQueue and AnswerMergeQueueOffer.
 	Merge merge.Orchestrator
+	// SubagentMakers answers the workspace that spawned a subagent, the maker
+	// of an async merge of its branch (CreateWorkspaceAsyncMergeMakerSubagent).
+	SubagentMakers SubagentMakers
 	// Drain backs UpdateShutdownSchedule.
 	Drain drain.Controller
 	// Rollout backs AdoptHostWorkspace and AdoptWebWorkspace.
@@ -88,9 +90,6 @@ type Deps struct {
 	// Login backs the four login verbs; WatchLoginTerminal is a SERVER stream
 	// and SendLoginInput is unary.
 	Login login.Manager
-	// Commands is the command-file ingress, wired here so the two ingresses
-	// share one dependency graph.
-	Commands commandfile.Ingress
 
 	// Ownership answers a workspace's SERVING STANDING, which is what every
 	// per-workspace rpc refuses on before it delegates.
@@ -320,6 +319,12 @@ type server struct {
 	// (participantHops). Scoped to the host stream: the last host close
 	// forgets it.
 	webSeen map[ids.WorkspaceID]bool
+	// evals correlates the evaluations pushed to editors with their answers
+	// (evaluate.go).
+	evals *editorEvals
+	// evalDeadline is how long EvaluateInEditor waits for its answer
+	// (evaluationDeadline).
+	evalDeadline time.Duration
 	// daemonWatchers are the live WatchDaemon streams whose subscription
 	// already exists. The stand-down announcement is flushed onto every one of
 	// them BEFORE the orderly exit cancels serving, so a client learns the
@@ -426,6 +431,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the retarget operation")
 	case deps.Merge == nil:
 		return nil, missing("a merge orchestrator")
+	case deps.SubagentMakers == nil:
+		return nil, missing("a subagent maker finder")
 	case deps.Drain == nil:
 		return nil, missing("a drain controller")
 	case deps.Rollout == nil:
@@ -511,6 +518,8 @@ func New(deps Deps) (Server, error) {
 		daemonWatchers:      make(map[*daemonWatcher]struct{}),
 		webBuilds:           make(map[ids.WorkspaceID]map[string]string),
 		hostHeld:            make(map[ids.WorkspaceID]int),
+		evals:               newEditorEvals("eval-" + string(deps.Instance)),
+		evalDeadline:        evaluationDeadline,
 		webHeld:             make(map[ids.WorkspaceID]int),
 		webSeen:             make(map[ids.WorkspaceID]bool),
 		watchTokens:         make(map[string]tokenTarget),

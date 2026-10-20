@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/ids"
 	"agent-repld/internal/semver"
 	"agent-repld/internal/wsm"
 )
@@ -456,8 +455,8 @@ func TestAnAsyncMergeFromTheMainCheckoutOntoAgentReplsMasterNeedsAnIncrement(t *
 			source.Version = tt.version
 
 			// Act
-			err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: RequestedByAgent,
-				Detached: &DetachedRun{Name: "n"}})
+			_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: source, By: RequestedByAgent, Asker: theWorkspace,
+				Detached: &DetachedRun{Maker: theWorkspace, Name: "n"}})
 
 			// Assert
 			refusal, refused := Refused(err)
@@ -468,112 +467,47 @@ func TestAnAsyncMergeFromTheMainCheckoutOntoAgentReplsMasterNeedsAnIncrement(t *
 	}
 }
 
-func TestAnAsyncRequestLandsWhereItsRequestersCreationSays(t *testing.T) {
+func TestAnAsyncRequestLandsWhereItsRequestNamed(t *testing.T) {
 	tests := []struct {
-		name    string
-		withJob bool
-		want    func(h *harness) string
+		name       string
+		intoMaker  bool
+		wantDir    func(h *harness) string
+		wantBranch func(h *harness) string
 	}{
-		{name: "a created requester lands at its creation job's target", withJob: true, want: func(h *harness) string { return h.db.jobs[theWorkspace].Layout.TargetDir }},
-		{name: "a main checkout with no creation job lands in its main worktree", want: func(h *harness) string { return "/repo/main" }},
+		{name: "onto the primary branch in the main worktree",
+			wantDir: func(h *harness) string { return h.db.workspaces[theWorkspace].Dir }, wantBranch: func(h *harness) string { return h.git.defaultBranch }},
+		{name: "into the maker's branch in its worktree", intoMaker: true,
+			wantDir:    func(h *harness) string { return h.db.workspaces[otherWorkspace].Dir },
+			wantBranch: func(h *harness) string { return h.db.workspaces[otherWorkspace].Branch }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
-			requester := h.db.workspaces[theWorkspace]
-			h.git.mu.Lock()
-			h.git.mainWorktrees = map[string]string{requester.Dir: "/repo/main"}
-			h.git.mu.Unlock()
-			if !tt.withJob {
-				requester.Dir = "/repo/main"
-				h.db.workspaces[theWorkspace] = requester
-				h.git.mu.Lock()
-				h.git.mainWorktrees["/repo/main"] = "/repo/main"
-				h.git.mu.Unlock()
-				delete(h.db.jobs, theWorkspace)
-			}
-			want := tt.want(h)
+			h.registerOther(otherWorkspace, "ws-two", "maker-branch")
+			source := wsm.MergeSource{DetachMaker: otherWorkspace, DetachTargetMaker: tt.intoMaker}
 
 			// Act
-			got, err := h.o.detachedTarget(context.Background(), requester)
+			dir, branch, err := h.o.detachedLanding(context.Background(), h.db.workspaces[theWorkspace], source)
 
 			// Assert
-			if err != nil || got != want {
-				t.Fatalf("detachedTarget = %q, %v; want %q", got, err, want)
+			if err != nil || dir != tt.wantDir(h) || branch != tt.wantBranch(h) {
+				t.Fatalf("detachedLanding = %q, %q, %v; want %q, %q", dir, branch, err, tt.wantDir(h), tt.wantBranch(h))
 			}
 		})
 	}
 }
 
-func TestAnUnreadableCreationJobFailsTheAsyncLanding(t *testing.T) {
+func TestAnAsyncLandingIntoAMakerTheRegistryLostFails(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.db.mu.Lock()
-	h.db.jobDecodeErrs = map[ids.WorkspaceID]error{theWorkspace: errors.New("disk on fire")}
-	h.db.mu.Unlock()
+	source := wsm.MergeSource{DetachMaker: "ws-gone", DetachTargetMaker: true}
 
 	// Act
-	_, err := h.o.detachedTarget(context.Background(), h.db.workspaces[theWorkspace])
+	dir, _, err := h.o.detachedLanding(context.Background(), h.db.workspaces[theWorkspace], source)
 
 	// Assert
-	if err == nil {
-		t.Fatal("detachedTarget = nil error, want the read failure")
-	}
-}
-
-// joblessLinkedWorktree makes the requester a workspace with no creation job
-// whose directory is NOT its repository's main worktree: the impossible state.
-func joblessLinkedWorktree(h *harness) wsm.Workspace {
-	requester := h.db.workspaces[theWorkspace]
-	h.git.mu.Lock()
-	h.git.mainWorktrees = map[string]string{requester.Dir: "/repo/main"}
-	h.git.mu.Unlock()
-	h.db.mu.Lock()
-	delete(h.db.jobs, theWorkspace)
-	h.db.mu.Unlock()
-	return requester
-}
-
-func TestAJoblessRequesterThatIsNoMainCheckoutFailsHardWithItsRecord(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	requester := joblessLinkedWorktree(h)
-
-	// Act
-	got, err := h.o.detachedTarget(context.Background(), requester)
-
-	// Assert
-	if err == nil || got != "" {
-		t.Fatalf("detachedTarget = %q, %v; want refused", got, err)
-	}
-	record, ok := h.recordFor(dlog.LevelError, opDetachedTarget)
-	if !ok {
-		t.Fatalf("no ERROR %s record", opDetachedTarget)
-	}
-	want := map[string]any{"workspace": string(theWorkspace), "dir": requester.Dir, "main_worktree": "/repo/main"}
-	for key, value := range want {
-		if record.Context[key] != value {
-			t.Errorf("record %s = %v, want %v", key, record.Context[key], value)
-		}
-	}
-}
-
-func TestAnAsyncRequestFromAJoblessLinkedWorktreeRecordsNothing(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	joblessLinkedWorktree(h)
-	h.inFlight = "turn-asking"
-
-	// Act
-	err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent,
-		Detached: &DetachedRun{Name: "n"}})
-
-	// Assert
-	if err == nil {
-		t.Fatal("Enqueue = nil, want the invariant violation")
-	}
-	if _, recorded := h.entryState(); recorded {
-		t.Fatal("the refused request was recorded")
+	if err == nil || dir != "" {
+		t.Fatalf("detachedLanding = %q, %v; want the maker's read failure", dir, err)
 	}
 }

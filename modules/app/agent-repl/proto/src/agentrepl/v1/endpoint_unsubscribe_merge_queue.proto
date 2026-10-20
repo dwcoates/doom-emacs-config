@@ -1,0 +1,56 @@
+// endpoint_unsubscribe_merge_queue.proto — UnsubscribeMergeQueue: end one
+// workspace's merge-queue subscription in one scope (SubscribeMergeQueue).
+// AGENT API section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Ends one subscription. A workspace with no subscription in that scope is
+// answered `not_subscribed`. An unscoped unsubscribe ends ONLY the unscoped
+// subscription, never the workspace's repository-scoped ones, so each scope
+// is ended exactly as it was begun.
+message UnsubscribeMergeQueueRequest {
+  // The workspace whose subscription ends.
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The scope of the subscription that ends: UNSET is the every-repository
+  // subscription, set is the named repository's.
+  optional workspace.v1.RepositoryRef repository = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message UnsubscribeMergeQueueResponse {
+  oneof result {
+    UnsubscribeMergeQueueSuccess success = 1;
+    UnsubscribeMergeQueueError error = 2;
+  }
+}
+// The request was served. Holding no subscription in the scope is an answer,
+// not a failure: either way the subscriber now holds none there.
+message UnsubscribeMergeQueueSuccess {
+  // THE ARM IS WHAT WAS FOUND.
+  oneof ended {
+    // The subscription ended.
+    UnsubscribeMergeQueueSuccessUnsubscribed unsubscribed = 1;
+    // There was no subscription in the scope to end.
+    UnsubscribeMergeQueueSuccessNotSubscribed not_subscribed = 2;
+  }
+}
+// Ended. No fields.
+message UnsubscribeMergeQueueSuccessUnsubscribed {}
+// None held in the scope. No fields.
+message UnsubscribeMergeQueueSuccessNotSubscribed {}
+message UnsubscribeMergeQueueError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    UnsubscribeMergeQueueUnknownSubscriber unknown_subscriber = 1;
+    // `repository` names a RepositoryRef the daemon's registry does not hold.
+    UnsubscribeMergeQueueUnknownRepository unknown_repository = 2;
+  }
+}
+message UnsubscribeMergeQueueUnknownSubscriber {}
+message UnsubscribeMergeQueueUnknownRepository {}

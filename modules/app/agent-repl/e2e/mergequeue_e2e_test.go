@@ -117,9 +117,12 @@ func mqFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.Repos
 func mqCreateTopLevelChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repoRef,
+		Repository:    repoRef,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Name: mqStrPtr(name),
+			Topology: harness.Primary(),
+			Name:     mqStrPtr(name),
 		}},
 	}))
 	if err != nil {
@@ -718,8 +721,11 @@ const mqMarkedAction = "run the release checks before landing (e2e-fail-this-tur
 func mqCreateChildWithActions(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string, actions *agentreplv1.CreateWorkspaceMergeActions) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repoRef,
+		Repository:    repoRef,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Topology:     harness.Primary(),
 			Name:         mqStrPtr(name),
 			MergeActions: actions,
 		}},

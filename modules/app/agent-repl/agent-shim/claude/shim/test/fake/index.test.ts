@@ -201,6 +201,85 @@ describe("the echo of the send a turn answers", () => {
   });
 });
 
+/**
+ * A PEER MESSAGE ON STDIN (an agent's prompt the shim delivers as another
+ * session's message): the CLI decides at once whether it queues or holds it,
+ * and a queued one's turn echoes no client uuid, its lifecycle naming it.
+ */
+describe("a peer message on the input", () => {
+  const PEER = { from: "agent-repl:parser-fix", fromMode: "prompting" };
+  const lifecycles = (driven: { messages: readonly unknown[] }): string[] =>
+    (driven.messages as Record<string, unknown>[])
+      .filter((message) => message.type === "command_lifecycle")
+      .map((message) => `${String(message.command_uuid)}:${String(message.state)}`);
+
+  it("queues a peer message of this session's class, then starts and completes it", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"], { clientUuids: ["peer-send-1"], peerOrigins: [PEER] });
+
+    // Assert
+    expect(lifecycles(driven)).toEqual(["peer-send-1:queued", "peer-send-1:started", "peer-send-1:completed"]);
+  });
+
+  it("echoes no client uuid on a peer message's turn", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"], { clientUuids: ["peer-send-1"], peerOrigins: [PEER] });
+
+    // Assert
+    expect((driven.messages as Record<string, unknown>[]).filter((message) => "user_message_uuid" in message)).toEqual([]);
+  });
+
+  it("runs the envelope's body as the turn's prompt", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"], { clientUuids: ["peer-send-1"], peerOrigins: [PEER] });
+
+    // Assert
+    expect(recordsOfType(driven.transcript(), "user")[0]?.origin).toMatchObject({ kind: "peer", hostInjected: true, body: "hello" });
+  });
+
+  it("files the record whole, meta, under the client uuid", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"], { clientUuids: ["peer-send-1"], peerOrigins: [PEER] });
+
+    // Assert
+    expect(recordsOfType(driven.transcript(), "user")[0]).toMatchObject({ uuid: "peer-send-1", isMeta: true });
+  });
+
+  it("HOLDS a peer message whose sender's class is not this session's, and runs nothing", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"], {
+      clientUuids: ["peer-send-1"],
+      peerOrigins: [{ from: "agent-repl:parser-fix", fromMode: "bypass" }],
+    });
+
+    // Assert
+    expect([ofType(driven, "system", "peer_message_hold"), ofType(driven, "result")]).toEqual([
+      [expect.objectContaining({ state: "held", message_uuid: "peer-send-1", lane: "stdin", cause: "mode-mismatch" })],
+      [],
+    ]);
+  });
+
+  it("HOLDS an undeclared sender's message while this session bypasses", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"], {
+      clientUuids: ["peer-send-1"],
+      peerOrigins: [{ from: "agent-repl:parser-fix" }],
+      opts: { permissionMode: "bypassPermissions" },
+    });
+
+    // Assert
+    expect(ofType(driven, "system", "peer_message_hold")).toEqual([expect.objectContaining({ cause: "no-mode-asserted" })]);
+  });
+
+  it("emits no lifecycle for an ordinary send", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"], { clientUuids: ["client-send-1"] });
+
+    // Assert
+    expect(lifecycles(driven)).toEqual([]);
+  });
+});
+
 describe("the block split", () => {
   it("emits one assistant message per block, all sharing the message id", async () => {
     // Arrange + Act

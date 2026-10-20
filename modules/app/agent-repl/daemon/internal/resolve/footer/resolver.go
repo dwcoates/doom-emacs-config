@@ -789,6 +789,13 @@ func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
 		dlog.Context{"parked": parked}, func(s *wsState) { s.parked = parked })
 }
 
+// SetAwaiting installs, or lifts with an empty name, the workspace this one
+// awaits correspondence from.
+func (r *resolver) SetAwaiting(ws ids.WorkspaceID, awaitedName string) {
+	r.mutate(ws, "daemon.footer.set_awaiting", "the footer took what the workspace awaits",
+		dlog.Context{"awaited": awaitedName}, func(s *wsState) { s.awaiting = awaitedName })
+}
+
 // SetStateUnreported installs, or lifts, the fact that a shim taken back after
 // a failed handover has not re-reported its session state. A session start
 // lifts it too (OnSessionStarted), which is the re-report it waits for.

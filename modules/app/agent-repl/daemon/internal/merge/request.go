@@ -1,6 +1,7 @@
 package merge
 
 import (
+	workspacev1 "agentrepl/proto/workspace/v1"
 	"context"
 	"errors"
 	"fmt"
@@ -24,12 +25,13 @@ import (
 // queue tab can list it) until QueueMerge moves it into line.
 
 // Enqueue records a merge request and, once the requesting turn has ended,
-// puts it in line.
+// puts it in line. It answers what the request reserved: an async request's
+// merge workspace branch.
 //
 // IT REFUSES PRE-STATE. An unmergeable request leaves no trail: nothing is
 // recorded before the refusal, so there is no state to stamp and nothing to
 // clean up.
-func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
+func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, error) {
 	const op = "daemon.merge.enqueue"
 	ws := req.Workspace
 	log := o.log(ctx, ws)
@@ -41,17 +43,33 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		err := fmt.Errorf("merge: a one-shot merge of %s must be an in-place own-branch merge that closes the requester, not %s (keep_open %v, detached %v)",
 			ws, req.Source.Kind, req.Source.KeepOpen, req.Detached != nil)
 		log.Error(op, "a one-shot merge request contradicts itself", withField(fields, "error", err.Error()))
-		return err
+		return Enqueued{}, err
+	}
+	// WHO ASKED IS NAMED EXACTLY WHEN AN AGENT ASKED: the boundary that
+	// builds the request guarantees it.
+	if (req.By == RequestedByAgent) != (req.Asker != "") {
+		err := fmt.Errorf("merge: a merge of %s asked by %s names the asking workspace %q", ws, req.By, req.Asker)
+		log.Error(op, "a merge request contradicts itself about who asked", withField(fields, "error", err.Error()))
+		return Enqueued{}, err
+	}
+	if req.Asker != "" {
+		fields["asker"] = string(req.Asker)
 	}
 	record, err := o.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		log.Error(op, "could not read the requesting workspace", withField(fields, "error", err.Error()))
-		return err
+		return Enqueued{}, err
+	}
+	if req.Detached == nil {
+		if err := checkAsker(record, req.Asker); err != nil {
+			log.Warn(op, "refused a merge its asker may not ask for", withField(fields, "error", err.Error()))
+			return Enqueued{}, err
+		}
 	}
 	source, err := o.checkSource(ctx, record, req.Source)
 	if err != nil {
 		log.Warn(op, "refused a merge request", withField(fields, "error", err.Error()))
-		return err
+		return Enqueued{}, err
 	}
 	if v := req.Source.Version; v != nil {
 		fields["version_part"] = v.Part.String()
@@ -64,10 +82,11 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		} else {
 			log.Error(op, "could not decide whether the merge moves agent-repl's version", withField(fields, "error", err.Error()))
 		}
-		return err
+		return Enqueued{}, err
 	}
 	// releaseName lets go of an async request's name claim; a no-op for every
 	// other request. It runs once the request is recorded or refused.
+	var enqueued Enqueued
 	releaseName := func() {}
 	defer func() { releaseName() }()
 	if req.Detached != nil {
@@ -77,11 +96,11 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		if source.Kind != wsm.MergeSourceBranch || req.Detached.Name == "" {
 			err := fmt.Errorf("merge: an async merge of %s must name its branch and its merge workspace, not %s (name %q)", ws, source.Kind, req.Detached.Name)
 			log.Error(op, "an async merge request contradicts itself", withField(fields, "error", err.Error()))
-			return err
+			return Enqueued{}, err
 		}
 		if source, err = o.checkAsync(ctx, record, source, req.Detached); err != nil {
 			log.Warn(op, "refused an async merge request", withField(fields, "error", err.Error()))
-			return err
+			return Enqueued{}, err
 		}
 		// THE NAME IS CLAIMED BEFORE THE REQUEST IS RECORDED, and the record is
 		// its durable reservation, so between the two nothing else can take
@@ -90,18 +109,21 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		branch, release, taken, err := o.deps.Names.ClaimMergeName(ctx, record.Dir, req.Detached.Name)
 		if err != nil {
 			log.Error(op, "could not check an async merge's name", withField(fields, "error", err.Error()))
-			return err
+			return Enqueued{}, err
 		}
 		if taken {
 			refusal := refuse(ArmNameTaken, ws, "the async merge's name %q resolves to %s, which is already a workspace, a branch or another merge's reservation", req.Detached.Name, branch)
 			refusal.Fields = map[string]any{"branch": branch}
 			log.Warn(op, "refused an async merge whose name is taken", withField(fields, "error", refusal.Error()))
-			return refusal
+			return Enqueued{}, refusal
 		}
 		releaseName = release
+		enqueued.MergeBranch = branch
 		source.Detach = wsm.NewDetachedMergeID()
 		source.DetachName = req.Detached.Name
 		source.Pick = req.Detached.Pick
+		source.DetachMaker = req.Detached.Maker
+		source.DetachTargetMaker = req.Detached.IntoMaker
 		source.CompactAfter = req.Detached.CompactAfter
 		source.Actions = req.Detached.Actions
 		fields["actions_before"] = len(source.Actions.Before)
@@ -112,6 +134,8 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 		fields["detach"] = string(source.Detach)
 		fields["name"] = source.DetachName
 		fields["pick"] = source.Pick != ""
+		fields["maker"] = string(source.DetachMaker)
+		fields["into_maker"] = source.DetachTargetMaker
 		fields["compact_after"] = source.CompactAfter
 	}
 	if source.Branch != "" {
@@ -124,30 +148,30 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 	if err := o.deps.DB.RequireNoOpenChildren(ctx, source.Closes(ws, record.MergeOf)...); err != nil {
 		if wsm.IsFamilyRefusal(err) {
 			log.Info(op, "refused a merge that would close a workspace with open children", withField(fields, "error", err.Error()))
-			return err
+			return Enqueued{}, err
 		}
 		log.Error(op, "could not read whether the merge closes a workspace with open children", withField(fields, "error", err.Error()))
-		return err
+		return Enqueued{}, err
 	}
 	session, found, err := o.deps.DB.Session(ctx, ws)
 	if err != nil {
 		log.Error(op, "could not read the requesting workspace's session", withField(fields, "error", err.Error()))
-		return err
+		return Enqueued{}, err
 	}
 	if found && session.Terminal != nil && session.Terminal.Kind == "deleted" {
 		err := refuse(ArmSessionDeleted, ws, "the session was deleted, so the merge's prompts and repairs can never run")
 		log.Warn(op, "refused a merge for a deleted session", withField(fields, "error", err.Error()))
-		return err
+		return Enqueued{}, err
 	}
 	repo, err := o.repoKeyFor(ctx, record.Dir)
 	if err != nil {
 		log.Error(op, "could not resolve the requesting workspace's repository", withField(fields, "error", err.Error()))
-		return err
+		return Enqueued{}, err
 	}
 	if _, running := o.runFor(ws); running {
 		err := refuse(ArmAlreadyMerging, ws, "this workspace's merge is already in flight")
 		log.Warn(op, "refused a merge request while the workspace's merge runs", withField(fields, "error", err.Error()))
-		return err
+		return Enqueued{}, err
 	}
 	// AN IN-PLACE MERGE THE AGENT'S TURN ASKED FOR FLUSHES THE HELD QUEUE
 	// (owner ruling, 2026-10-12): the merge runs in this session once the
@@ -161,7 +185,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 	// records why.
 	if req.By == RequestedByAgent && req.Detached == nil {
 		if err := o.deps.Queue.FlushHeld(ctx, ws); err != nil {
-			return fmt.Errorf("merge: flushing the held prompts of %s before its in-place merge: %w", ws, err)
+			return Enqueued{}, fmt.Errorf("merge: flushing the held prompts of %s before its in-place merge: %w", ws, err)
 		}
 	}
 	requestMerge := o.deps.DB.RequestMerge
@@ -180,14 +204,14 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 			}
 			refusal := refuse(arm, ws, "the merge already stands %s in its repository's queue", queued.State)
 			log.Warn(op, "refused a duplicate merge request", withField(fields, "repo", string(repo)))
-			return refusal
+			return Enqueued{}, refusal
 		}
 		if wsm.IsFamilyRefusal(err) {
 			log.Info(op, "refused a merge that would close a workspace with open children", withField(fields, "error", err.Error()))
-			return err
+			return Enqueued{}, err
 		}
 		log.Error(op, "could not record the merge request", withField(fields, "error", err.Error()))
-		return err
+		return Enqueued{}, err
 	}
 	o.mu.Lock()
 	o.repoOf[ws] = repo
@@ -207,10 +231,26 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) error {
 	}
 	if req.By == RequestedByUser {
 		// THE USER'S ASK HAS NO REQUESTING TURN: it is put in line at once.
-		return o.queueRequest(ctx, ws, repo)
+		return enqueued, o.queueRequest(ctx, ws, repo)
 	}
 	o.awaitRequestingTurn(ws, repo)
-	return nil
+	return enqueued, nil
+}
+
+// checkAsker refuses an in-place merge of WS asked by a workspace that may not
+// land it. The user (an empty ASKER) lands anything. WS itself lands itself,
+// unless it is a child its owner lands (owner_lands); its owner lands it; any
+// other workspace is refused (requester_may_not_land).
+func checkAsker(ws wsm.Workspace, asker ids.WorkspaceID) error {
+	switch {
+	case asker == ws.ID && ws.OwnerLands:
+		refusal := refuse(ArmOwnerLands, ws.ID, "the workspace's context was not forked from its owner %s, which lands it", *ws.Parent)
+		refusal.Fields = map[string]any{"owner": &workspacev1.WorkspaceRef{Id: string(*ws.Parent)}}
+		return refusal
+	case ws.MayAct(asker):
+		return nil
+	}
+	return refuse(ArmRequesterMayNotLand, ws.ID, "workspace %s is neither the workspace nor its owner", asker)
 }
 
 // checkSource refuses a request whose source cannot be merged -- a requester
@@ -236,7 +276,9 @@ func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace,
 			return wsm.MergeSource{}, fmt.Errorf("merge: asking whether branch %q exists: %w", source.Branch, err)
 		}
 		if !exists {
-			return wsm.MergeSource{}, refuse(ArmUnknownBranch, ws, "no branch %q exists in the repository", source.Branch)
+			refusal := refuse(ArmUnknownBranch, ws, "no branch %q exists in the repository", source.Branch)
+			refusal.Fields = map[string]any{"branch": source.Branch}
+			return wsm.MergeSource{}, refusal
 		}
 		return source, nil
 	default:
@@ -247,45 +289,64 @@ func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace,
 // checkAsync refuses an async request the daemon cannot run as asked, and
 // answers its source carrying the request's landing effects:
 //
-//   - THE BRANCH MUST NOT BE THE ONE THE REQUESTER HAS CHECKED OUT: the
-//     requester keeps working on it while the merge rebases it, so the
-//     request is refused (branch_checked_out_in_requester) rather than
-//     merging a branch under its own author.
-//   - THE ONE-SHOT WORKSPACE must be registered, open, in the requester's
+//   - A BRANCH A REGISTERED WORKSPACE OWNS is that workspace's to land, the
+//     requester's own included (async_merge_branch_owned).
+//   - THE MAKER must be registered in the requester's repository
+//     (async_merge_unknown_maker).
+//   - THE CLOSE-AFTER WORKSPACE must be registered, open, in the requester's
 //     repository and not the requester, which an async merge never closes
-//     (unknown_one_shot_workspace).
+//     (async_merge_unknown_close_after).
 //   - THE CLEANUP DIRECTORY is the worktree that has the branch checked out
 //     now, found by branch name (git checks a branch out in at most one
 //     worktree, so the match is exact). It is recorded only when it is no
 //     workspace's worktree, not the requester's and not the repository's
 //     main worktree: those are never removed by a merge's cleanup.
-//
-// THE REQUESTER'S BRANCH IS READ OFF ITS OWN WORKTREE, never off a creation
-// job: the main checkout, which is the workspace that always merges async, was
-// never created by the daemon and records no merge geometry.
 func (o *orchestrator) checkAsync(ctx context.Context, requester wsm.Workspace, source wsm.MergeSource, run *DetachedRun) (wsm.MergeSource, error) {
 	ws := requester.ID
-	own, err := o.deps.Git.CurrentBranch(ctx, requester.Dir)
+	// A BRANCH A WORKSPACE OWNS LANDS ONLY THROUGH THAT WORKSPACE, so a branch
+	// any registered workspace of the repository is on -- the requester's own
+	// included -- is refused here.
+	workspaces, err := o.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
-		return wsm.MergeSource{}, fmt.Errorf("merge: reading the branch checked out in %s: %w", requester.Dir, err)
+		return wsm.MergeSource{}, fmt.Errorf("merge: reading the registry to find who owns branch %q: %w", source.Branch, err)
 	}
-	if own != "" && own == source.Branch {
-		return wsm.MergeSource{}, refuse(ArmBranchCheckedOutInRequester, ws, "branch %q is checked out in the requesting worktree %s", source.Branch, requester.Dir)
+	for _, other := range workspaces {
+		if other.Repo == requester.Repo && other.Branch == source.Branch {
+			refusal := refuse(ArmBranchOwned, ws, "branch %q is the workspace %s's own, which lands it itself", source.Branch, other.ID)
+			refusal.Fields = map[string]any{"branch": source.Branch, "owner": &workspacev1.WorkspaceRef{Id: string(other.ID), Dir: other.Dir}}
+			return wsm.MergeSource{}, refusal
+		}
+	}
+	maker, err := o.deps.DB.Workspace(ctx, run.Maker)
+	unknownMaker := func(format string) error {
+		refusal := refuse(ArmUnknownMaker, ws, format, run.Maker)
+		refusal.Fields = map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(run.Maker)}}
+		return refusal
+	}
+	switch {
+	case run.Maker == "":
+		return wsm.MergeSource{}, fmt.Errorf("merge: the async merge of %s names no maker", ws)
+	case errors.Is(err, wsm.ErrNotFound):
+		return wsm.MergeSource{}, unknownMaker("no workspace %s is registered to have made the branch")
+	case err != nil:
+		return wsm.MergeSource{}, fmt.Errorf("merge: reading the maker %s: %w", run.Maker, err)
+	case maker.Repo != requester.Repo:
+		return wsm.MergeSource{}, unknownMaker("the maker %s is in another repository")
 	}
 	if run.CloseOnLanding != "" {
 		if run.CloseOnLanding == ws {
-			return wsm.MergeSource{}, refuse(ArmUnknownOneShotWorkspace, ws, "an async merge never closes the workspace that asked for it")
+			return wsm.MergeSource{}, refuse(ArmUnknownCloseAfter, ws, "an async merge never closes the workspace that asked for it")
 		}
 		other, err := o.deps.DB.Workspace(ctx, run.CloseOnLanding)
 		switch {
 		case errors.Is(err, wsm.ErrNotFound):
-			return wsm.MergeSource{}, refuse(ArmUnknownOneShotWorkspace, ws, "no workspace %s is registered", run.CloseOnLanding)
+			return wsm.MergeSource{}, refuse(ArmUnknownCloseAfter, ws, "no workspace %s is registered", run.CloseOnLanding)
 		case err != nil:
-			return wsm.MergeSource{}, fmt.Errorf("merge: reading the one-shot workspace %s: %w", run.CloseOnLanding, err)
+			return wsm.MergeSource{}, fmt.Errorf("merge: reading the close-after workspace %s: %w", run.CloseOnLanding, err)
 		case other.Closed:
-			return wsm.MergeSource{}, refuse(ArmUnknownOneShotWorkspace, ws, "workspace %s is closed", run.CloseOnLanding)
+			return wsm.MergeSource{}, refuse(ArmUnknownCloseAfter, ws, "workspace %s is closed", run.CloseOnLanding)
 		case other.Repo != requester.Repo:
-			return wsm.MergeSource{}, refuse(ArmUnknownOneShotWorkspace, ws, "workspace %s is in another repository", run.CloseOnLanding)
+			return wsm.MergeSource{}, refuse(ArmUnknownCloseAfter, ws, "workspace %s is in another repository", run.CloseOnLanding)
 		}
 		source.CloseOnLanding = run.CloseOnLanding
 	}
@@ -353,7 +414,9 @@ func (o *orchestrator) checkedOutBranch(ctx context.Context, ws ids.WorkspaceID,
 		return "", fmt.Errorf("merge: reading the branch checked out in %s: %w", dir, err)
 	}
 	if branch == "" {
-		return "", refuse(ArmUnknownBranch, ws, "the worktree %s has no branch checked out (its HEAD is detached), so there is no branch to merge", dir)
+		refusal := refuse(ArmNoBranchCheckedOut, ws, "the worktree %s has no branch checked out (its HEAD is detached), so there is no branch to merge", dir)
+		refusal.Fields = map[string]any{"dir": dir}
+		return "", refusal
 	}
 	return branch, nil
 }
@@ -538,18 +601,19 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 	}
 	base := source.Branch
 	fields["base"] = base
-	target, err := o.detachedTarget(ctx, record)
+	target, parentBranch, err := o.detachedLanding(ctx, record, source)
 	if err != nil {
 		log.Error(op, "could not decide where a detached merge lands; the request is dropped and the requester told", withField(fields, "error", err.Error()))
 		return o.dropDetached(ctx, requester, repo, source, fmt.Sprintf("where the merge lands could not be decided: %v", err))
 	}
 	fields["target_dir"] = target
-	fields["parent_branch"] = record.ParentBranch
+	fields["parent_branch"] = parentBranch
+	fields["maker"] = string(source.DetachMaker)
 	fields["actions_before"] = len(source.Actions.Before)
 	fields["actions_after"] = len(source.Actions.After)
-	origin := wsm.MergeOrigin{Requester: requester, Request: source.Detach, CompactAfter: source.CompactAfter,
+	origin := wsm.MergeOrigin{Requester: requester, Request: source.Detach, Maker: source.DetachMaker, CompactAfter: source.CompactAfter,
 		CloseOnLanding: source.CloseOnLanding, CleanupWorktree: source.CleanupWorktree, CleanupDir: source.CleanupDir,
-		TargetDir: target, ParentBranch: record.ParentBranch, Actions: source.Actions}
+		TargetDir: target, ParentBranch: parentBranch, Actions: source.Actions}
 	forked, err := o.deps.Detached.Fork(ctx, record, origin, source.DetachName, base)
 	if err != nil {
 		log.Error(op, "could not fork the merge workspace for a detached merge; the request is dropped and the requester told", withField(fields, "error", err.Error()))
@@ -565,19 +629,37 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 	o.repoOf[forked.ID] = repo
 	o.mu.Unlock()
 	log.Info(op, "handed a detached merge to its merge workspace", fields)
-	if source.Pick == "" {
-		return o.queueRequest(ctx, forked.ID, repo)
+	// THE MERGE WORKSPACE JOINS THE LINE NOW, its pick (when it has one)
+	// still pending: the pick begins only once the merge heads its queue
+	// (admitFront), and its session -- whose bring-up makes the fork -- comes
+	// up only when a turn first needs it. So the merge workspace's context is
+	// the maker's as it stands when the merge STARTS, carrying every landing
+	// that happened while it waited.
+	return o.queueRequest(ctx, forked.ID, repo)
+}
+
+// detachedLanding answers where an async request lands and the branch it
+// lands on: the maker's worktree and branch when it lands into the maker, the
+// repository's main worktree and default branch otherwise. It is the one place
+// the rule is decided, asked by the request's version check (requestTarget)
+// and by the hand-off.
+func (o *orchestrator) detachedLanding(ctx context.Context, requester wsm.Workspace, source wsm.MergeSource) (string, string, error) {
+	if source.DetachTargetMaker {
+		maker, err := o.deps.DB.Workspace(ctx, source.DetachMaker)
+		if err != nil {
+			return "", "", fmt.Errorf("merge: reading the maker %s an async merge lands into: %w", source.DetachMaker, err)
+		}
+		return maker.Dir, maker.Branch, nil
 	}
-	entry, found, err := o.requestOf(ctx, repo, forked.ID)
+	main, err := o.deps.Git.MainWorktree(ctx, requester.Dir)
 	if err != nil {
-		return err
+		return "", "", fmt.Errorf("merge: resolving the main worktree an async merge lands in: %w", err)
 	}
-	if !found {
-		err := fmt.Errorf("merge: the merge workspace %s has no request after its hand-off", forked.ID)
-		log.Error(op, "the handed-off request is not on the merge workspace's row", withField(fields, "error", err.Error()))
-		return err
+	primary, err := o.deps.Git.DefaultBranch(ctx, main)
+	if err != nil {
+		return "", "", fmt.Errorf("merge: resolving the primary branch an async merge lands on: %w", err)
 	}
-	return o.startPick(ctx, forked.ID, repo, entry)
+	return main, primary, nil
 }
 
 // dropDetached ends a detached request that could not be handed off: it leaves

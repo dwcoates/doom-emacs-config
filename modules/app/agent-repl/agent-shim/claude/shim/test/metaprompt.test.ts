@@ -9,6 +9,7 @@ import {
   metapromptPath,
   readMetaprompt,
   systemPromptOption,
+  workspaceSection,
 } from "../src/metaprompt.js";
 
 const homes: string[] = [];
@@ -120,23 +121,44 @@ describe("this repository's committed metaprompt", () => {
 });
 
 describe("systemPromptOption", () => {
-  it("appends the canonical metaprompt to the claude_code preset", () => {
+  it("appends the canonical metaprompt, then the workspace's section, to the claude_code preset", () => {
     // Arrange
     const home = makeHome("Be terse.\n");
     // Act
-    const option = systemPromptOption(home);
+    const option = systemPromptOption("parser-fix", home);
     // Assert
-    expect(option).toEqual({ type: "preset", preset: "claude_code", append: "Be terse." });
+    expect(option).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: `Be terse.\n\n${workspaceSection("parser-fix")}`,
+    });
   });
 
-  it("keeps the bare preset when the machine carries no doom checkout", () => {
+  it("appends the workspace's section alone when the machine carries no doom checkout", () => {
     // Arrange
     const home = makeHome();
     // Act
-    const option = systemPromptOption(home);
+    const option = systemPromptOption("parser-fix", home);
     // Assert — the preset itself is never dropped: it carries the
     // environment block the model needs to resolve `~`.
-    expect(option).toEqual({ type: "preset", preset: "claude_code" });
+    expect(option).toEqual({ type: "preset", preset: "claude_code", append: workspaceSection("parser-fix") });
+  });
+
+  it("refuses a workspace with no name", () => {
+    // Arrange
+    const home = makeHome("Be terse.\n");
+    // Act, Assert
+    expect(() => systemPromptOption("", home)).toThrow("the workspace name is empty");
+  });
+});
+
+describe("workspaceSection", () => {
+  it("says the session runs in an agent-repl workspace, and names it", () => {
+    // Act
+    const section = workspaceSection("parser-fix");
+    // Assert
+    expect(section).toContain("You are running in an agent-repl IDE workspace");
+    expect(section).toContain("your workspace's name is `parser-fix`");
   });
 });
 

@@ -12,7 +12,7 @@ the state of every stream are written down; it is updated at every landing.
 - The merge queue is bypassed for this program's own work (owner permission:
   the work is on the queue's speed and the runtime it deploys).
 - Every complete change landed is followed by a FULL hard bounce of
-  agent-repl, Emacs included (`/manage-agent-repl-runtime hard-bounce`).
+  agent-repl, Emacs included (`/agent-repl-runtime hard-bounce`).
 - Every bounce is a perf checkpoint: measure workspace startup time, webapp
   load time per workspace (first and repeat switch), and the other UX
   latencies in the perceptibility table below; remediate regressions and the
@@ -59,7 +59,7 @@ Status values: queued, running, landed (commit), blocked (reason).
   `rollouts_already_held`, `rollouts_not_held`); the hold is durable across
   restarts and handovers; while held a landing logs "rollout held" at INFO and
   tells no deploy.
-- `/merge-queue hold-rollouts` / `release-rollouts` + awareness note.
+- `/agent-repl-merge-queue hold-rollouts` / `release-rollouts` + awareness note.
 - Also fixes the master-red elisp pin `merge-queue-action-arms-pinned`.
 - After landing: hard bounce, then HOLD rollouts for the profiling program.
 - The queue's existing `pause` / `resume` stay as they are (kept, unused).
@@ -90,7 +90,7 @@ Status values: queued, running, landed (commit), blocked (reason).
   investigating workspace (10727f9c4). Other levers await the owner.
 
 ### H. Test-writing guidance (owner, 2026-10-12) — running (branch `write-tests-skill`)
-- `/write-tests` skill: test-perf pitfalls and how to avoid them without any
+- `/agent-repl-tests` skill: test-perf pitfalls and how to avoid them without any
   coverage loss; a living document updated at every important perf finding.
 - A performance-lessons section in each agent-repl system's AGENTS.md, also a
   living document.
@@ -101,7 +101,7 @@ Status values: queued, running, landed (commit), blocked (reason).
   (4e5d4c563): the one collector in the test process is the bottleneck
   under load, even with non-blocking daemon writes (logpipe-v2: 5-8 failures
   per copy against master's 1 in three under three-copy load). Recorded in
-  /write-tests pitfall 2 (abbddd6e9). Cut record volume instead.
+  /agent-repl-tests pitfall 2 (abbddd6e9). Cut record volume instead.
 - B3 in-memory SQLite for test daemons that never restart on the same state;
   restart/handover tests keep the file, enforced at runtime — done on
   `perf-memstate` (570 of 790 integration daemon starts on memory; rollout
@@ -124,7 +124,7 @@ Status values: queued, running, landed (commit), blocked (reason).
   RSS sampling, top frames per runtime, and the UX-latency table from INFO log
   edges ranked against the budgets above; a `--startup` mode for the startup
   assessment (D2).
-- `/profile` deleted; `/profile-agent-repl` created with the living list of
+- `/profile` deleted; `/agent-repl-profile` created with the living list of
   perf-sensitive areas (standard entry format) and the rule to add or update
   an entry whenever the owner shows interest in an area.
 
@@ -213,10 +213,10 @@ Status values: queued, running, landed (commit), blocked (reason).
 | 2026-10-12 | db277cff6 | merge pump reads a run's lease/chain base under the run's lock (data race) |
 | 2026-10-12 | 8e28c0471 | merge queue window 3 -> 2 (head + one behind) |
 | 2026-10-12 | 55a22a48e | hidden pages hold the newest roster instead of redrawing per push |
-| 2026-10-12 | (11 picks) | rollout hold endpoint + /merge-queue hold-rollouts, release-rollouts |
+| 2026-10-12 | (11 picks) | rollout hold endpoint + /agent-repl-merge-queue hold-rollouts, release-rollouts |
 | 2026-10-12 | (3 picks) | daemon test logs over a pipe, in memory |
 | 2026-10-12 | (5 picks) | in-memory test state (DurableState opt-in) |
-| 2026-10-12 | (17 picks) | profiling in every runtime + /profile-agent-repl |
+| 2026-10-12 | (17 picks) | profiling in every runtime + /agent-repl-profile |
 | 2026-10-12 | 5b362ef54, 10727f9c4 | repair brief: failing tests only, until they pass; unrunnable-alone fallback |
 | 2026-10-12 | dcec14621, fb7b94832 | Serving regression fix; under-the-hood resume of cut turns |
 | 2026-10-12 | 578ea375c | a paused queue advances nothing |

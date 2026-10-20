@@ -410,7 +410,7 @@ func TestMergeSourceValidateRefusesInconsistentAsyncAndPickFields(t *testing.T) 
 		name   string
 		source MergeSource
 	}{
-		{name: "detached with no name", source: MergeSource{Kind: MergeSourceOwnBranch, Detach: "d"}},
+		{name: "detached with no name", source: MergeSource{Kind: MergeSourceOwnBranch, Detach: "d", DetachMaker: "maker"}},
 		{name: "a name with no detach", source: MergeSource{Kind: MergeSourceOwnBranch, DetachName: "n"}},
 		{name: "a pick on a branch source", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Pick: "p"}},
 		{name: "a pick kept open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true, Pick: "p"}},

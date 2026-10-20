@@ -1,0 +1,77 @@
+// endpoint_compact_workspace.proto — CompactWorkspace: compact a workspace's
+// conversation. SIDEBAR section. The daemon submits the vendor's compaction
+// through the workspace's prompt queue as a deferred prompt of origin
+// conversation.v1.PromptOrigin.PROMPT_ORIGIN_WORKSPACE_COMPACT: it waits
+// behind a running turn, and the feed draws the context cut it produces as
+// any compaction's. Success means SUBMITTED; the cut arrives on the feed. A
+// merge running in the workspace HOLDS the compaction until it ends, as it
+// holds any prompt (frontend.v1.HeldPrompt's `merge` hold arm).
+//
+// COMPACTING IS AN ACT OF ITS OWN, NOT A PROMPT. An agent never sends a slash
+// command as a prompt (SubmitPromptError.slash_command_from_agent), so the
+// acts an agent may perform on a conversation are exactly the ones this
+// service names. Clearing a conversation is not one of them.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_topology.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message CompactWorkspaceRequest {
+  // The workspace whose conversation is compacted. Must be open.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Who asked: the workspace itself, another workspace, or the user. A
+  // requesting workspace other than the compacted one is told nothing more
+  // than this rpc's answer. REQUIRED.
+  WorkspaceRequester requester = 2;
+  // What the summary should keep, in the requester's words, handed to the
+  // vendor's compaction as its instructions. UNSET = the vendor's own
+  // summary with no instructions.
+  optional CompactWorkspaceInstructions instructions = 3;
+}
+// Instructions for the compaction's summary.
+message CompactWorkspaceInstructions {
+  // Plain text. REQUIRED: blank is refused as invalid.
+  string text = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message CompactWorkspaceResponse {
+  oneof result {
+    CompactWorkspaceSuccess success = 1;
+    CompactWorkspaceError error = 2;
+  }
+}
+// Submitted to the prompt queue.
+message CompactWorkspaceSuccess {}
+message CompactWorkspaceError {
+  // Tag 4 (`merging`) is RETIRED: a merge holds the compaction instead.
+  reserved 4;
+  reserved "merging";
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    CompactWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    CompactWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // The workspace is closed: no session runs to compact.
+    CompactWorkspaceClosed closed = 3;
+    // The workspace has no session to submit to.
+    CompactWorkspaceNoSession no_session = 5;
+    // The session is parked at its cold gate. Compacting there is a gate
+    // answer (AnswerColdGate's `compact` or `compact_and_resume`), which the
+    // user must ask for or approve; nothing was submitted.
+    CompactWorkspaceColdGate cold_gate = 6;
+  }
+}
+message CompactWorkspaceUnknownWorkspace {}
+message CompactWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message CompactWorkspaceClosed {}
+message CompactWorkspaceNoSession {}
+message CompactWorkspaceColdGate {}

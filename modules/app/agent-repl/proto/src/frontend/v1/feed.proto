@@ -2728,8 +2728,10 @@ message FeedAgentPromptAddress {
     // It went OUT from the agent whose feed draws it: the sender's end.
     FeedAgentPromptAddressSent sent = 3;
     // It came IN to the agent whose feed draws it: an agent of this session
-    // prompted it. A message IN from another Claude session is a
-    // FeedPeerMessage, never this.
+    // prompted it, or another agent-repl workspace's agent did through the
+    // agent API (agentrepl.v1.SubmitPromptRequest.sent_by). A message IN from
+    // another Claude session by the vendor's own messaging is a
+    // FeedPeerMessage, never this: it opens no turn, while a prompt does.
     FeedAgentPromptAddressReceived received = 4;
   }
 }
@@ -2753,12 +2755,34 @@ message FeedAgentPromptAddressSent {
     FeedAgentPromptAddressUnclassified unclassified = 3;
   }
 }
-// The prompt came in from an agent of this session. Drawn as a left arrow,
-// then the name.
+// The prompt came in. Drawn as a left arrow, then the name.
 message FeedAgentPromptAddressReceived {
-  // The agent that sent it.
-  FeedAgentPromptAddressAgent agent = 1;
+  // WHO SENT IT. THE ARM IS WHICH KIND OF SENDER.
+  oneof sender {
+    // An agent of this session.
+    FeedAgentPromptAddressAgent agent = 1;
+    // Another agent-repl workspace's agent, through the agent API
+    // (`agent-repld workspace prompt`). See FeedAgentPromptAddressWorkspace.
+    FeedAgentPromptAddressWorkspace workspace = 2;
+  }
 }
+// An agent-repl workspace at the other end: WHAT `name` IS.
+message FeedAgentPromptAddressWorkspace {
+  // THE ARM IS HOW FAR THE WORKSPACE IS NAMED.
+  oneof identity {
+    // `name` is its workspace name, the one the sidebar draws.
+    FeedAgentPromptAddressWorkspaceNamed named = 1;
+    // The daemon recorded which workspace sent the prompt but cannot name it
+    // now (its record could not be read, or it is gone); `name` is the
+    // daemon's stand-in for another workspace. An identity is never invented
+    // to fill it, and the failed read is in the daemon's log.
+    FeedAgentPromptAddressWorkspaceUnnamed unnamed = 2;
+  }
+}
+// The workspace named by its workspace name.
+message FeedAgentPromptAddressWorkspaceNamed {}
+// A workspace the daemon cannot name.
+message FeedAgentPromptAddressWorkspaceUnnamed {}
 // An agent of this session at the other end: WHAT `name` IS.
 message FeedAgentPromptAddressAgent {
   // THE ARM IS WHAT THE NAME IS, so a reader of the schema knows a subagent
@@ -3550,7 +3574,7 @@ message FeedMergeTabQueue {
 
 // AGENTIC: an async merge's resolving turn -- the first turn of its merge
 // workspace, carrying out the requester's instruction
-// (agentrepl.v1.MergeWorkspaceAsync.instruction) on the merge's branch and
+// (agentrepl.v1.CreateWorkspaceAsyncMerge.instruction) on the merge's branch and
 // resolving whatever does not apply on its own. Present only on a merge that
 // carries an instruction, as its first tab, left of queue. Live while the
 // turn runs; settled succeeded when the turn ended with at least one commit

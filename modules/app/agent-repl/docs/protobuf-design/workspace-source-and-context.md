@@ -35,7 +35,7 @@ Three binary dimensions, each against the main branch:
   what is wanted, so it is its own value, not a variant of forking from self.
 
 Scope: THE AGENT API only, which is what an agent can ask for: the
-`/create-or-update-workspace` command file and `/merge-queue`. The editor's and
+`/create-or-update-workspace` command file and `/agent-repl-merge-queue`. The editor's and
 the webapp's create commands are out of scope here.
 
 Each cell says whether the agent API supports it today (from
@@ -55,7 +55,7 @@ Context forked from the requester itself:
 | branches from \ merges into | main | another branch |
 |---|---|---|
 | **main** | no (`fork_from` forces the forked workspace as parent and refuses a base) | no |
-| **another branch** | only as `/merge-queue` async's own merge workspace (the requester's branch tip, into its merge target), never as a `create` | yes, the requester's own branch (`create` with `fork_from` naming the requester: a forked child of itself) |
+| **another branch** | only as `/agent-repl-merge-queue` async's own merge workspace (the requester's branch tip, into its merge target), never as a `create` | yes, the requester's own branch (`create` with `fork_from` naming the requester: a forked child of itself) |
 
 Context forked from another workspace X:
 
@@ -132,7 +132,7 @@ What "merges into" means for each landing path:
     source (today always the requester). An async merge is then a create with
     those three fields plus "land this when done", and needs no separate shape.
 - SKILL AND API: `/create-or-update-workspace` writes a command file the daemon
-  reads, and `/merge-queue` enqueues through the same ingress; neither calls the
+  reads, and `/agent-repl-merge-queue` enqueues through the same ingress; neither calls the
   daemon's RPCs directly. Every supported cell should be expressible the same
   way at both levels, with the skill a thin caller of the API, so the skill
   cannot refuse a mode the API supports (as the command file's fork-to-parent
@@ -143,11 +143,11 @@ What "merges into" means for each landing path:
 1. Which cells should the API support, and which should it refuse? Give the
    reason for each refusal (a real invariant, not cost).
 2. What should each supported cell be called?
-3. What are the agent API's defaults (`create`, and `/merge-queue` async's merge
+3. What are the agent API's defaults (`create`, and `/agent-repl-merge-queue` async's merge
    workspace)? The owner's principles above say: branch from and merge into
    main, with the context forked from the requester.
 4. Which invariants change? For example the merge target is always the source,
    a fork child's inherited priority, and the merge workspace's `MergeOf` check.
 5. Against the owner's target above: what the agent API (the create skill and
-   `/merge-queue`, one-shot and async) must change to support each cell, where
+   `/agent-repl-merge-queue`, one-shot and async) must change to support each cell, where
    the merge target is decided, and how the async merge workspace fits.

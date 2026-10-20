@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"agent-repld/internal/wsm"
 )
@@ -117,7 +118,7 @@ type fakePrompts struct {
 	keys []string
 }
 
-func (f *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (f *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, _ *ids.WorkspaceID, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	text := said.GetContent().GetBlocks()[0].GetText().GetText()
@@ -1523,5 +1524,18 @@ func TestAHandBackCutShortByAStandDownSaysSoAtInfo(t *testing.T) {
 	}
 	if _, ok := f.recordWith(dlog.LevelInfo, "the daemon stood down mid-handback"); !ok {
 		t.Fatalf("records = %+v, want the cut-short handback at INFO", f.logs.Records())
+	}
+}
+
+// TestTheCompactionIsSpelledOnlyBySessionCommand pins that the merge
+// workspace service spells no /compact by hand: sessioncommand.Literal reads
+// it off the schema.
+func TestTheCompactionIsSpelledOnlyBySessionCommand(t *testing.T) {
+	// Act
+	n := sourcescan.Count(t, `"/compact"`)
+
+	// Assert
+	if n != 0 {
+		t.Errorf("the service's sources spell /compact by hand %d times", n)
 	}
 }

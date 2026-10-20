@@ -3559,7 +3559,7 @@ func TestAnAskOpenAtAttachStandsOnTheGateViews(t *testing.T) {
 			var asks []string
 			for _, ev := range seen {
 				switch ev.method {
-				case "OnPermission", "OnQuestion", "OnNotification":
+				case "OnPermission", "OnQuestion", "OnNotification", "NeedsInput":
 					asks = append(asks, ev.name())
 				}
 			}

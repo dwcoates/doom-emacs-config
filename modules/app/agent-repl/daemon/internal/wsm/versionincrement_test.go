@@ -50,7 +50,7 @@ func TestHandOffDetachedMergeCarriesTheVersionIncrementToTheMergeWorkspace(t *te
 	repo := RepoKey(t.TempDir())
 	request := NewDetachedMergeID()
 	version := &VersionIncrement{Part: semver.Minor, ChangelogLine: "Merges record a version"}
-	source := MergeSource{Kind: MergeSourceBranch, Branch: "feature", Detach: request, DetachName: "sample-merge", Version: version}
+	source := MergeSource{Kind: MergeSourceBranch, Branch: "feature", Detach: request, DetachMaker: "maker", DetachName: "sample-merge", Version: version}
 	if err := s.RequestMerge(context.Background(), repo, requester.ID, source, time.Unix(100, 0)); err != nil {
 		t.Fatalf("RequestMerge: %v", err)
 	}

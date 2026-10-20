@@ -3,7 +3,12 @@ package wsm
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1538,5 +1543,116 @@ func TestTurnAnswersNotFoundForAnotherWorkspacesTurn(t *testing.T) {
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Turn() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestTurnFactsAnswersOnlyTheFactsItPicks(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	other := testWorkspace(t, s)
+	kept, dropped, theirs := NewTurnID(), NewTurnID(), NewTurnID()
+	for _, turn := range []Turn{
+		{ID: kept, Workspace: ws.ID, Text: "keep", Origin: "emacs", StartedAt: instant},
+		{ID: dropped, Workspace: ws.ID, Text: "drop", Origin: "emacs", StartedAt: instant},
+		{ID: theirs, Workspace: other.ID, Text: "keep", Origin: "emacs", StartedAt: instant},
+	} {
+		if err := s.PutTurn(context.Background(), turn); err != nil {
+			t.Fatalf("PutTurn: %v", err)
+		}
+	}
+
+	// Act
+	got, err := turnFacts(context.Background(), s, "daemon.wsm.test_facts", ws.ID, []TurnID{kept, dropped, theirs, "never-recorded"},
+		func(t Turn) (string, bool) { return t.Text, t.Text == "keep" })
+
+	// Assert
+	if err != nil || len(got) != 1 || got[kept] != "keep" {
+		t.Fatalf("turnFacts = (%v, %v), want only this workspace's picked turn", got, err)
+	}
+}
+
+func TestTurnFactsOfNoTurnsIsEmpty(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	got, err := turnFacts(context.Background(), s, "daemon.wsm.test_facts", ws.ID, nil,
+		func(Turn) (string, bool) { t.Fatal("pick ran with no turns"); return "", false })
+
+	// Assert
+	if err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("turnFacts = (%v, %v), want an empty answer", got, err)
+	}
+}
+
+func TestTurnFactsSurfacesAFailedReadUnderItsOperation(t *testing.T) {
+	// Arrange: a row no write of this build produces, which fails the decode.
+	s, logs := testStore(t)
+	ws := testWorkspace(t, s)
+	if _, err := s.db().ExecContext(context.Background(),
+		`INSERT INTO turns (id, workspace_id, text, origin, displaced, started_at, close_kind) VALUES ('t1', ?, 'x', 'emacs', 0, 1, 0)`, ws.ID); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// Act
+	got, err := turnFacts(context.Background(), s, "daemon.wsm.test_facts", ws.ID, []TurnID{"t1"},
+		func(t Turn) (string, bool) { return t.Text, true })
+
+	// Assert
+	if err == nil || got != nil {
+		t.Fatalf("turnFacts = (%v, %v), want the failure and no answer", got, err)
+	}
+	if !loggedAt(logs, "daemon.wsm.test_facts") {
+		t.Fatal("the failed read was not recorded under its operation")
+	}
+}
+
+// THE PER-TURN REPLAY READS SHARE ONE BODY: each is a turnFacts call and
+// scans no turn of its own, so a hand-rolled read that drifts from it fails
+// here.
+func TestThePerTurnReadsAreTurnFactsCalls(t *testing.T) {
+	// Arrange
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
+	if err != nil {
+		t.Fatalf("parse the package: %v", err)
+	}
+	want := map[string]bool{"TurnAddresses": false, "TurnMirrors": false, "TurnSenders": false}
+
+	// Act
+	for _, pkg := range pkgs {
+		for _, file := range pkg.Files {
+			for _, decl := range file.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Recv == nil {
+					continue
+				}
+				if _, named := want[fn.Name.Name]; !named {
+					continue
+				}
+				calls := map[string]bool{}
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					if call, ok := n.(*ast.CallExpr); ok {
+						if id, ok := call.Fun.(*ast.Ident); ok {
+							calls[id.Name] = true
+						}
+					}
+					return true
+				})
+				if !calls["turnFacts"] || calls["scanTurn"] {
+					t.Errorf("%s does not read through turnFacts alone (calls %v)", fn.Name.Name, calls)
+				}
+				want[fn.Name.Name] = true
+			}
+		}
+	}
+
+	// Assert
+	for name, found := range want {
+		if !found {
+			t.Errorf("%s was not found in the package", name)
+		}
 	}
 }

@@ -2094,8 +2094,8 @@ THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
 about the sidecar is found -- at runtime or in its tests -- add or update an entry
 here: what was slow or heavy, the evidence with numbers and the date, the fix
 and its commit (or the open item). Test-performance lessons also go into the
-`/write-tests` skill; runtime profiling and the perf-sensitive list live in
-`/profile-agent-repl`.
+`/agent-repl-tests` skill; runtime profiling and the perf-sensitive list live in
+`/agent-repl-profile`.
 
 - The spool glob `/tmp/*/*/tasks/*.output` listed the children of every /tmp entry, including a dead RAM-disk mount, and hung the live sidecar uninterruptibly (state U); its restart then cost launchd's 20s ExitTimeOut. Spools are globbed only below a uid dir (741051189, 02afdccf7's spelling fix).
 - Two integration tests booted a full sidecar with no AGENT_REPL_LOCK_DIR and overwrote the live sidecar's build report, so every boot read the live sidecar as stale and restarted it; a test's sidecar reports into its own run directory (496a17d14).

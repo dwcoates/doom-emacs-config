@@ -85,8 +85,23 @@ interface SystemPromptOption {
 }
 
 /**
+ * The section naming the workspace the session runs in, appended after the
+ * metaprompt. It is composed HERE, from the name the daemon states at
+ * StartSession (`shim.v1.StartSessionRequest.workspace_name`), and is never
+ * part of `metaprompt.md`: the file is one policy every session shares, and
+ * the name is this session's own.
+ */
+export function workspaceSection(workspaceName: string): string {
+  return (
+    `You are running in an agent-repl IDE workspace, and your workspace's name is \`${workspaceName}\`. ` +
+    "The user, other workspaces, and the agent API (`agent-repld workspace ...`) refer to this workspace by that name."
+  );
+}
+
+/**
  * The session's `systemPrompt` option: the `claude_code` preset with the
- * metaprompt appended.
+ * metaprompt appended, then the section naming WORKSPACENAME, the workspace
+ * the session runs in (workspaceSection).
  *
  * The PRESET STAYS. It carries the environment block (cwd, platform, home)
  * that interactive-CLI parity depends on — replacing it with the metaprompt
@@ -94,11 +109,15 @@ interface SystemPromptOption {
  * The metaprompt is additional guidelines, not a replacement for knowing where
  * it is running.
  */
-export function systemPromptOption(home: string = homedir()): SystemPromptOption {
+export function systemPromptOption(workspaceName: string, home: string = homedir()): SystemPromptOption {
+  if (workspaceName === "") {
+    throw new Error("shim: the system prompt names its workspace, and the workspace name is empty");
+  }
   const metaprompt = readMetaprompt(home);
+  const sections = [...(metaprompt !== undefined ? [metaprompt] : []), workspaceSection(workspaceName)];
   return {
     type: "preset",
     preset: "claude_code",
-    ...(metaprompt !== undefined ? { append: metaprompt } : {}),
+    append: sections.join("\n\n"),
   };
 }

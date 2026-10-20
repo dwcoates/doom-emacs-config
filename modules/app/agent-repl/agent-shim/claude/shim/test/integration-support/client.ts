@@ -323,6 +323,7 @@ export function freshSession(
   mode: PermissionModeArm = "default",
 ): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
+    workspaceName: "parser-fix",
     source: {
       case: "fresh",
       value: create(shimv1.StartSessionFreshSchema, {
@@ -340,6 +341,7 @@ export function resumeSession(
   rolledBackTurns: readonly string[] = [],
 ): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
+    workspaceName: "parser-fix",
     source: {
       case: "resume",
       value: create(shimv1.StartSessionResumeSchema, {

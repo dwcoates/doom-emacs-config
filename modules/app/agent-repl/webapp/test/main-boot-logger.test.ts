@@ -36,6 +36,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { resetLoggingForTests } from "../src/log.js";
 import { shellHTML } from "./shell-html.js";
 
@@ -61,6 +64,22 @@ import { shellHTML } from "./shell-html.js";
  * its subject at run time, and the global stays sized for what it covers.
  */
 const BOOT_IMPORT_TIMEOUT_MS = 12_000;
+
+/**
+ * Every module `src/main.ts` imports for its value, as specifiers this file
+ * can import: its relative, non-type, non-stylesheet imports, read from the
+ * entry point's own source.
+ */
+export function bootImports(source = readFileSync(resolve(process.cwd(), "src/main.ts"), "utf8")): string[] {
+  const out: string[] = [];
+  for (const m of source.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)";/gms)) {
+    const [, typeOnly, path] = m;
+    if (typeOnly !== undefined || !path.startsWith(".")) continue;
+    // Relative to this file, which sits one level beside src/.
+    out.push(`../src/${path}`);
+  }
+  return out;
+}
 
 /** The page address a workspace-addressed page is loaded with. */
 const PAGE_ADDRESS = "/?workspace=w-boot-logger&dir=/tmp/w-boot-logger";
@@ -137,28 +156,26 @@ function captureTheReRaise(): void {
 // Compile the composition root's dependency graph during file collection,
 // outside every behavioral timeout. The timed import below still evaluates a
 // fresh real entry point; this only keeps Vite's transform cost from consuming
-// that bound when the coverage run is contending with its worker pool.
-await Promise.all([
-  import("../src/clock.js"),
-  import("../src/composer/composer.js"),
-  import("../src/feed/renderers.js"),
-  import("../src/feed/feed.js"),
-  import("../src/footer/footer.js"),
-  import("../src/lifecycle/lifecycle.js"),
-  import("../src/login/login.js"),
-  import("../src/panels/panels.js"),
-  import("../src/sidebar/sidebar.js"),
-  import("../src/topbar/topbar.js"),
-  import("../src/held/section.js"),
-  import("../src/failure/sink.js"),
-  import("../src/failure/local.js"),
-  import("../src/rpc/client.js"),
-  import("../src/rpc/context.js"),
-  import("../src/rpc/page-address.js"),
-  import("../src/rpc/transport.js"),
-  import("../src/rpc/workspace-ref.js"),
-  import("../src/shell.js"),
-]);
+// that bound when the run is contending with its worker pool.
+//
+// THE WARM SET IS READ OFF `main.ts` ITSELF (`bootImports`), never listed by
+// hand: a hand list drifted behind the entry point's imports, and every module
+// it missed was compiled inside the first test's bound, which a contended full
+// run then exhausted.
+await Promise.all(bootImports().map((specifier) => import(/* @vite-ignore */ specifier)));
+
+describe("the boot's warm set", () => {
+  it("is every value import of the entry point", () => {
+    const got = bootImports(
+      'import { a } from "./a.js";\nimport type { B } from "./b.js";\nimport "./c.css";\nimport { d } from "../../e/d.js";\n',
+    );
+    expect(got).toEqual(["../src/./a.js", "../src/../../e/d.js"]);
+  });
+
+  it("finds the entry point's own imports", () => {
+    expect(bootImports()).toContain("../src/./sidebar/sidebar.js");
+  });
+});
 
 describe("the webapp's boot against a real page", () => {
   let realFetch: typeof globalThis.fetch;

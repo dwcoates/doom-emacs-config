@@ -91,8 +91,14 @@ type fakeDB struct {
 	// coalesceErr fails a coalescence whole; coalescences counts attempts.
 	coalesceErr  error
 	coalescences int
-	// workspaceErr fails the workspace read when set.
-	workspaceErr error
+	// workspaceErr fails the workspace read when set, and workspaceErrFor
+	// fails the read of one workspace only.
+	workspaceErr    error
+	workspaceErrFor map[ids.WorkspaceID]error
+	// sessions is each workspace's recorded session, and sessionErr fails
+	// every session read when set.
+	sessions   map[ids.WorkspaceID]wsm.Session
+	sessionErr error
 	// holdErr fails every hold restamp (UpdateHeldPromptHold).
 	holdErr error
 	// beforeHoldWrite, when set, runs under the fake's lock as a held prompt
@@ -120,6 +126,7 @@ func newFakeDB() *fakeDB {
 		held:        map[ids.TurnID]*wsm.HeldPrompt{},
 		turns:       map[ids.TurnID]*wsm.Turn{},
 		closedTurns: map[ids.TurnID]wsm.TurnClose{},
+		sessions:    map[ids.WorkspaceID]wsm.Session{},
 	}
 }
 
@@ -138,11 +145,25 @@ func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 	if d.workspaceErr != nil {
 		return wsm.Workspace{}, d.workspaceErr
 	}
+	if err := d.workspaceErrFor[id]; err != nil {
+		return wsm.Workspace{}, err
+	}
 	record, ok := d.workspaces[id]
 	if !ok {
-		return wsm.Workspace{}, errors.New("no such workspace")
+		return wsm.Workspace{}, fmt.Errorf("wsm: workspace %s: %w", id, wsm.ErrNotFound)
 	}
 	return record, nil
+}
+
+// Session answers a workspace's recorded session, as wsm does.
+func (d *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.sessionErr != nil {
+		return wsm.Session{}, false, d.sessionErr
+	}
+	session, ok := d.sessions[id]
+	return session, ok, nil
 }
 
 func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
@@ -561,6 +582,9 @@ type fakeSender struct {
 	notes []string
 	// joinErr, when set, refuses every JoinRunningTurn.
 	joinErr error
+	// sentBys is the sender every StartTurn, StartInterjection and
+	// JoinRunningTurn was handed, nil for none, in call order.
+	sentBys []*SentBy
 	// rollBacks is every turn RollBackTurn was asked to cut, in order.
 	rollBacks []ids.TurnID
 	// rollBackErr, when set, is every RollBackTurn's answer.
@@ -587,6 +611,13 @@ func (s *fakeSender) rolledBack() []ids.TurnID {
 
 func newFakeSender() *fakeSender { return &fakeSender{mainAgent: "main-agent"} }
 
+// handedSentBys answers the sender every turn-opening call was handed.
+func (s *fakeSender) handedSentBys() []*SentBy {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*SentBy(nil), s.sentBys...)
+}
+
 // hookFor reads the call hook under the sender's lock, for the calls that run
 // their hook before taking it.
 func (s *fakeSender) hookFor() func(string) {
@@ -595,22 +626,23 @@ func (s *fakeSender) hookFor() func(string) {
 	return s.callHook
 }
 
-func (s *fakeSender) StartInterjection(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, note string) (*shimv1.StartTurnSuccess, error) {
+func (s *fakeSender) StartInterjection(ctx context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *SentBy, note string) (*shimv1.StartTurnSuccess, error) {
 	if hook := s.hookFor(); hook != nil {
 		hook("StartInterjection")
 	}
 	s.mu.Lock()
 	s.notes = append(s.notes, note)
 	s.mu.Unlock()
-	return s.StartTurn(ctx, turn, said, origin)
+	return s.StartTurn(ctx, turn, said, origin, sentBy)
 }
 
-func (s *fakeSender) JoinRunningTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, _ conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
+func (s *fakeSender) JoinRunningTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, _ conversationv1.PromptOrigin, sentBy *SentBy) (*shimv1.StartTurnSuccess, error) {
 	if hook := s.hookFor(); hook != nil {
 		hook("JoinRunningTurn")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.sentBys = append(s.sentBys, sentBy)
 	if s.joinErr != nil {
 		return nil, s.joinErr
 	}
@@ -626,10 +658,11 @@ func (s *fakeSender) JoinRunningTurn(_ context.Context, turn ids.TurnID, said *c
 	}, nil
 }
 
-func (s *fakeSender) StartTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
+func (s *fakeSender) StartTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *SentBy) (*shimv1.StartTurnSuccess, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.attempts++
+	s.sentBys = append(s.sentBys, sentBy)
 	if s.startHook != nil {
 		s.startHook()
 	}
@@ -999,8 +1032,11 @@ type fakeFeed struct {
 	turnAddrs map[ids.TurnID]*sessionwatcher.OutputAddress
 	// mirror is the standing output mirror; turnMirrors are the mirrors
 	// MirrorTurn handed over, by turn.
-	mirror          *wsm.MirrorAddress
-	turnMirrors     map[ids.TurnID]*wsm.MirrorAddress
+	mirror      *wsm.MirrorAddress
+	turnMirrors map[ids.TurnID]*wsm.MirrorAddress
+	// turnSenders are the senders SenderTurn handed over, by turn; nil entries
+	// are turns handed over with no sender.
+	turnSenders     map[ids.TurnID]*ids.WorkspaceID
 	clearReceived   []ids.TurnID
 	compactReceived []ids.TurnID
 	cutAborted      []ids.TurnID
@@ -1204,6 +1240,43 @@ func (f *fakeFeed) SetOutputAddress(_ ids.WorkspaceID, addr *sessionwatcher.Outp
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.address = addr
+}
+
+func (f *fakeFeed) SenderTurn(_ ids.WorkspaceID, turn ids.TurnID, sender *ids.WorkspaceID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.turnSenders == nil {
+		f.turnSenders = map[ids.TurnID]*ids.WorkspaceID{}
+	}
+	f.turnSenders[turn] = sender
+}
+
+// turnSender answers the sender SenderTurn handed over for TURN, and whether
+// it handed one over at all.
+func (f *fakeFeed) turnSender(turn ids.TurnID) (*ids.WorkspaceID, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sender, ok := f.turnSenders[turn]
+	return sender, ok
+}
+
+// PromptHeader heads an agent-sent turn's prompt by the sender SenderTurn
+// handed over, named by its id, as the resolver heads it by its name.
+func (f *fakeFeed) PromptHeader(_ ids.WorkspaceID, turn ids.TurnID, origin conversationv1.PromptOrigin) *frontendv1.FeedAgentPromptAddress {
+	if origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT {
+		return nil
+	}
+	sender, _ := f.turnSender(turn)
+	name := "no sender"
+	if sender != nil {
+		name = string(*sender)
+	}
+	return &frontendv1.FeedAgentPromptAddress{
+		Name: &frontendv1.FeedAgentPromptAddressName{Text: name},
+		Direction: &frontendv1.FeedAgentPromptAddress_Received{Received: &frontendv1.FeedAgentPromptAddressReceived{
+			Sender: &frontendv1.FeedAgentPromptAddressReceived_Workspace{Workspace: &frontendv1.FeedAgentPromptAddressWorkspace{}},
+		}},
+	}
 }
 
 func (f *fakeFeed) mirrored() []*frontendv1.FeedRow {
@@ -1529,6 +1602,7 @@ type harness struct {
 	feed    *fakeFeed
 	footer  *fakeFooter
 	sidebar *fakeSidebar
+	edges   *fakeEdges
 	holds   *fakeHolds
 	judge   *scriptedJudge
 	drain   *noteRecorder
@@ -1584,6 +1658,7 @@ func newHarness(t *testing.T) *harness {
 		feed:    &fakeFeed{},
 		footer:  &fakeFooter{},
 		sidebar: &fakeSidebar{},
+		edges:   &fakeEdges{},
 		holds:   &fakeHolds{},
 		judge:   &scriptedJudge{},
 		drain:   &noteRecorder{},
@@ -1605,6 +1680,7 @@ func newHarness(t *testing.T) *harness {
 		Feed:    h.feed,
 		Footer:  h.footer,
 		Sidebar: h.sidebar,
+		Edges:   h.edges,
 		Holds:   h.holds,
 		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession && !h.clientReaped },
 		Revive: func(context.Context, ids.WorkspaceID) error {
@@ -1701,6 +1777,18 @@ func submission(turn ids.TurnID, text string) Submission {
 	}
 }
 
+// theSender is the workspace agentSubmission's prompts are sent by.
+const theSender ids.WorkspaceID = "ws-sender"
+
+// agentSubmission is submission's prompt as theSender's agent sent it.
+func agentSubmission(turn ids.TurnID, text string) Submission {
+	sub := submission(turn, text)
+	sub.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT
+	sender := theSender
+	sub.SentBy = &sender
+	return sub
+}
+
 // userSaid composes a one-block text submission.
 func userSaid(text string) *conversationv1.UserSaid {
 	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{
@@ -1727,3 +1815,28 @@ func userSaidWithImage(text, path string) *conversationv1.UserSaid {
 // idsTurn spells a turn id in tests, so a subject reads as prose rather than as
 // a conversion.
 func idsTurn(v string) ids.TurnID { return ids.TurnID(v) }
+
+// fakeEdges records every turn edge, as "<edge>:<workspace>".
+type fakeEdges struct {
+	mu  sync.Mutex
+	got []string
+}
+
+func (e *fakeEdges) TurnStarted(ws ids.WorkspaceID) { e.record("started:" + string(ws)) }
+func (e *fakeEdges) TurnEnded(ws ids.WorkspaceID)   { e.record("ended:" + string(ws)) }
+func (e *fakeEdges) TurnEndedUnobserved(ws ids.WorkspaceID) {
+	e.record("ended_unobserved:" + string(ws))
+}
+
+func (e *fakeEdges) record(edge string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.got = append(e.got, edge)
+}
+
+// edgesTold answers every turn edge told so far.
+func (e *fakeEdges) edgesTold() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]string(nil), e.got...)
+}

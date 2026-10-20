@@ -25,13 +25,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/noticeloop"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/wsm"
@@ -68,90 +68,32 @@ type Deps struct {
 // Service is the subscriptions' notifier. It implements merge.QueueObserver.
 type Service struct {
 	deps Deps
-
-	mu sync.Mutex
-	// pending are the changes reported and not yet delivered, oldest first.
-	pending []merge.QueueChange
-	// stopped is set once Run has delivered its last pending change: a
-	// change reported after it is never told, and is recorded as such.
-	stopped bool
-	// wake is signalled, without blocking, whenever a change is appended.
-	wake chan struct{}
+	loop *noticeloop.Loop[merge.QueueChange]
 }
 
 var _ merge.QueueObserver = (*Service)(nil)
 
 // New builds the service.
 func New(deps Deps) *Service {
-	return &Service{deps: deps, wake: make(chan struct{}, 1)}
+	s := &Service{deps: deps}
+	s.loop = noticeloop.New(s.untold)
+	return s
 }
 
 // QueueChanged implements merge.QueueObserver: it appends CHANGE for the loop
 // and never blocks.
 func (s *Service) QueueChanged(change merge.QueueChange) {
-	s.mu.Lock()
-	if s.stopped {
-		s.mu.Unlock()
-		s.untold(change)
-		return
-	}
-	s.pending = append(s.pending, change)
-	s.mu.Unlock()
-	select {
-	case s.wake <- struct{}{}:
-	default:
-	}
+	s.loop.Report(change)
 }
 
 // Run delivers every reported change, in order, through PROMPTS until ctx
-// ends, and then delivers every change still pending before it returns:
-// ctx ending is the signal to stop taking new work, never to drop what was
-// reported. The daemon ends it only after its merge drain, so a merge landing
-// inside the drain is still told. A change reported after Run has returned
-// is never told (stopped).
+// ends, and then delivers every change still pending before it returns. The
+// daemon ends it only after its merge drain, so a merge landing inside the
+// drain is still told. A change reported after Run has returned is never
+// told (untold).
 func (s *Service) Run(ctx context.Context, prompts prompthandler.Submitter) {
-	deliveries := context.WithoutCancel(ctx)
-	for {
-		for _, change := range s.take() {
-			s.deliver(deliveries, prompts, change)
-		}
-		select {
-		case <-ctx.Done():
-			s.finish(deliveries, prompts)
-			return
-		case <-s.wake:
-		}
-	}
-}
-
-// take answers every pending change, leaving none.
-func (s *Service) take() []merge.QueueChange {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	batch := s.pending
-	s.pending = nil
-	return batch
-}
-
-// finish delivers every change still pending and marks the service stopped,
-// with no change able to slip between the last take and the mark: the mark
-// is set under the same lock that finds nothing pending.
-func (s *Service) finish(ctx context.Context, prompts prompthandler.Submitter) {
-	for {
-		s.mu.Lock()
-		if len(s.pending) == 0 {
-			s.stopped = true
-			s.mu.Unlock()
-			s.deps.Log.Global().Debug(op, "the notifier delivered every pending merge queue change and stopped", nil)
-			return
-		}
-		batch := s.pending
-		s.pending = nil
-		s.mu.Unlock()
-		for _, change := range batch {
-			s.deliver(ctx, prompts, change)
-		}
-	}
+	s.loop.Run(ctx, func(ctx context.Context, change merge.QueueChange) { s.deliver(ctx, prompts, change) })
+	s.deps.Log.Global().Debug(op, "the notifier delivered every pending merge queue change and stopped", nil)
 }
 
 // untold records a change reported after the notifier stopped. The daemon is
@@ -240,7 +182,7 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, t
 		log.Error(op, "could not mint a merge queue notice's idempotency key; the subscriber is not told of the change", dlog.WithCause(fields, err))
 		return
 	}
-	outcome, err := prompts.Submit(ctx, told.Subscriber, feed.SaidText(text), key, Origin, wsm.DeliveryDeferred, nil)
+	outcome, err := prompts.Submit(ctx, told.Subscriber, feed.SaidText(text), key, Origin, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
 		log.Error(op, "could not submit a merge queue notice to its subscriber", dlog.WithCause(fields, err))
 		return

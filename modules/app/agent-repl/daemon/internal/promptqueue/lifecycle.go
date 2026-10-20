@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
@@ -44,6 +45,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		q.onFolded(ctx, ws, turn, log)
 		return
 	}
+	q.deps.Edges.TurnEnded(ws)
 
 	// SERIALIZED AGAINST A LEASE CHANGE. The turn end that frees a workspace
 	// and the handover's quiesce arrive together, and both deliver from the
@@ -198,8 +200,21 @@ func (q *queue) earnsBanner(ctx context.Context, ws ids.WorkspaceID, turn ids.Tu
 			"turn": string(turn), "origin": record.Origin,
 		})
 		return false
+	case causedByDaemonNotice(record.Origin):
+		log.Info(opTurnEnded, "a turn a daemon notice or an agent's compaction caused ended; no desktop banner", dlog.Context{
+			"turn": string(turn), "origin": record.Origin,
+		})
+		return false
 	}
 	return true
+}
+
+// causedByDaemonNotice reports whether a recorded origin is one of a turn the
+// user had no part in beyond what the merge queue causes: an unseen daemon
+// notice (promptorigin.Unseen) answered, or a compaction an agent asked for.
+// Such a turn ends with no banner, as a merge queue notice's does.
+func causedByDaemonNotice(origin string) bool {
+	return promptorigin.UnseenNamed(origin) || origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT.String()
 }
 
 // OnTurnAdopted is the LifecycleSink's vendor-started turn: a turn the vendor
@@ -261,6 +276,9 @@ func (q *queue) OnTurnsEndedUnobserved(ws ids.WorkspaceID, turns []ids.TurnID) {
 			continue
 		}
 		log.Info(opTurnEnded, "closed a turn that ended while no daemon was watching", fields)
+	}
+	if len(turns) > 0 {
+		q.deps.Edges.TurnEndedUnobserved(ws)
 	}
 }
 

@@ -76,7 +76,7 @@ THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
 about the launchd jobs is found -- at runtime or in its tests -- add or update an entry
 here: what was slow or heavy, the evidence with numbers and the date, the fix
 and its commit (or the open item). Test-performance lessons also go into the
-`/write-tests` skill; runtime profiling and the perf-sensitive list live in
-`/profile-agent-repl`.
+`/agent-repl-tests` skill; runtime profiling and the perf-sensitive list live in
+`/agent-repl-profile`.
 
 - A job's process stuck in uninterruptible I/O cannot take SIGTERM, so launchd waits out ExitTimeOut (20s for the sidecar) before killing it; the sidecar's 29s restart came from a spool glob that stat'ed a dead RAM-disk mount (741051189). Never let a service's hot path stat paths outside what it owns.

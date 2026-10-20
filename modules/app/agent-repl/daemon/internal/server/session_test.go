@@ -628,6 +628,8 @@ func TestFoldHeldPromptMapsEveryRefusal(t *testing.T) {
 			}},
 		{"above not a prompt", promptqueue.ErrAboveNotAPrompt,
 			func(e *agentreplv1.FoldHeldPromptError) bool { return e.GetAboveNotAPrompt() != nil }},
+		{"above another author's", promptqueue.ErrAboveOtherAuthor,
+			func(e *agentreplv1.FoldHeldPromptError) bool { return e.GetAboveOtherAuthor() != nil }},
 		{"being edited", &promptqueue.BeingEditedError{Turn: "turn-1"},
 			func(e *agentreplv1.FoldHeldPromptError) bool {
 				return e.GetBeingEdited().GetEditingTurn().GetValue() == "turn-1"

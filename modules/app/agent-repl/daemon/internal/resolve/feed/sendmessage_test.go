@@ -67,7 +67,20 @@ func addressLine(address *frontendv1.FeedAgentPromptAddress) string {
 			return "sent with no recipient arm"
 		}
 	case *frontendv1.FeedAgentPromptAddress_Received:
-		return "← " + agentIdentity(direction.Received.GetAgent()) + " " + name
+		switch sender := direction.Received.GetSender().(type) {
+		case *frontendv1.FeedAgentPromptAddressReceived_Agent:
+			return "← " + agentIdentity(sender.Agent) + " " + name
+		case *frontendv1.FeedAgentPromptAddressReceived_Workspace:
+			if sender.Workspace.GetNamed() != nil {
+				return "← workspace " + name
+			}
+			if sender.Workspace.GetUnnamed() != nil {
+				return "← unnamed workspace " + name
+			}
+			return "← workspace with no identity arm"
+		default:
+			return "received with no sender arm"
+		}
 	default:
 		return "no direction arm"
 	}

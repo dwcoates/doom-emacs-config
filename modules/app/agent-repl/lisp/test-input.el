@@ -1330,11 +1330,13 @@ cleared would be silently lost user intent."
 
 ;;;; ---- Input preparation ----
 
-(ert-deftest agent-repl-input-wor-command-gets-a-source-tag ()
-  "A /wor command is tagged with the workspace that initiated it."
+(ert-deftest agent-repl-input-workspace-command-gets-no-source-tag ()
+  "A workspace command is sent as typed: the agent API finds the asking
+workspace from the working directory, so no source tag rides it."
   (agent-repl-test-input--with
-    (should (string-suffix-p " [source-ws:ws-one path:/tmp/agent-repl-test/ws-1]"
-                             (agent-repl--prepare-input "ws-one" "/workspace create")))))
+    (should (equal (agent-repl--prepare-input "ws-one" "/agent-repl-workspaces create")
+                   "/agent-repl-workspaces create"))
+    (should-not (fboundp 'agent-repl--maybe-inject-source-ws))))
 
 (ert-deftest agent-repl-input-non-wor-command-gets-no-tag ()
   "An ordinary prompt is not tagged."

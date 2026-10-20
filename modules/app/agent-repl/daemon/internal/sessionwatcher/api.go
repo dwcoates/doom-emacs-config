@@ -518,6 +518,11 @@ type LinkFault struct {
 	Detail string
 }
 
+// AsksSink is told that an ask of a workspace opened. It returns at once.
+type AsksSink interface {
+	NeedsInput(ws ids.WorkspaceID)
+}
+
 // Sinks is the set a watcher routes into.
 type Sinks struct {
 	Feed      FeedSink
@@ -546,6 +551,12 @@ type Sinks struct {
 	// merge whose conflict resolution or fixing asks the user draws its tab
 	// waiting on the user.
 	Merge MergeSink
+	// Asks is told each ask that opens LIVE, a question or a permission
+	// (wsedges.Hub): the one origin of the needs-input edge agents are told
+	// of. An ask restated at attach opened while no daemon watched, and is no
+	// edge. OPTIONAL: nil tells no one, which is what every test that does
+	// not exercise it leaves it. Production always wires it.
+	Asks AsksSink
 	// Stalls is the lock stall watchdog the watcher registers its mutex with
 	// for as long as it is open. OPTIONAL: nil leaves the mutex unwatched,
 	// which is what every test that does not exercise it leaves it.

@@ -149,6 +149,14 @@ func (o *orchestrator) extendChain(ctx context.Context, repo wsm.RepoKey) {
 	}
 }
 
+// racable reports whether ENTRY may start racing behind its queue's head: it
+// waits in line, lands something (a branch merged upstream lands nothing),
+// and is no merge workspace whose pick has yet to succeed -- that pick runs
+// at the head (admitFront).
+func racable(entry wsm.MergeQueueEntry) bool {
+	return entry.State == wsm.MergeQueued && entry.Source.Kind != wsm.MergeSourceMergedUpstream && entry.Source.Pick == ""
+}
+
 // extendOnce makes at most one chain start, and reports whether it started a
 // resumed run (after which the chain may grow again at once). It never waits
 // on the progress of the run ahead (race.go): every member stands on the
@@ -219,7 +227,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	case o.runsByWorkspace[next.Workspace] != nil, o.transferred[next.Workspace], o.inChainLocked(repo, next.Workspace):
 		o.mu.Unlock()
 		return false
-	case paused || next.State != wsm.MergeQueued || next.Source.Kind == wsm.MergeSourceMergedUpstream:
+	case paused || !racable(next):
 		o.mu.Unlock()
 		return false
 	}

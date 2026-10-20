@@ -3513,3 +3513,32 @@ workspace is the daemon's newer word, and is followed."
     (agent-repl-roster-on-close '(:cancelled))
     ;; Assert
     (should (null agent-repl-host--confirming))))
+
+;;;; ---- The open workspaces' names ----
+
+(defmacro agent-repl-test-roster--with-rows (rows &rest body)
+  "Run BODY with the last accepted push carrying ROWS."
+  (declare (indent 1))
+  `(let ((agent-repl-roster--rows-by-id (make-hash-table :test 'equal)))
+     (dolist (row ,rows)
+       (puthash (agent-repl-roster-row-id row) row agent-repl-roster--rows-by-id))
+     ,@body))
+
+(ert-deftest agent-repl-test-roster-open-workspace-names-answers-every-open-row ()
+  "Every row not closed is named, hidden or not."
+  (agent-repl-test-roster--with-rows
+      (list (agent-repl-test-roster--row "a" "alpha" :ready)
+            (agent-repl-test-roster--row "b" "beta" :thinking))
+    (should (equal (sort (agent-repl-roster-open-workspace-names) #'string<) '("alpha" "beta")))))
+
+(ert-deftest agent-repl-test-roster-open-workspace-names-leaves-out-a-closed-row ()
+  "A closed row's name is not an open workspace's."
+  (agent-repl-test-roster--with-rows
+      (list (agent-repl-test-roster--row "a" "alpha" :ready)
+            (agent-repl-test-roster--row "b" "beta" :ready :closed t))
+    (should (equal (agent-repl-roster-open-workspace-names) '("alpha")))))
+
+(ert-deftest agent-repl-test-roster-open-workspace-names-is-empty-before-any-push ()
+  "No push carried, no names."
+  (agent-repl-test-roster--with-rows nil
+    (should-not (agent-repl-roster-open-workspace-names))))

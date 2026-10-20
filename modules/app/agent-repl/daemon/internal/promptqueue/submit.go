@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
@@ -30,6 +31,10 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	if sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
 		log.Error(opSubmit, "a submission reached the queue with no origin", nil)
 		return Disposition{}, fmt.Errorf("submit to %q: the prompt origin is required", sub.WS)
+	}
+	if err := promptorigin.CheckSender(sub.Origin, sub.SentBy != nil); err != nil {
+		log.Error(opSubmit, "a submission reached the queue with a sender that disagrees with its origin", dlog.Context{"sender_named": sub.SentBy != nil})
+		return Disposition{}, fmt.Errorf("submit to %q: %w", sub.WS, err)
 	}
 
 	disposition, handled, err := q.applyLeasePolicy(ctx, sub, log)
@@ -289,13 +294,21 @@ func exemptFromLease(lease wsm.Lease, origin conversationv1.PromptOrigin) bool {
 //     what became of its merges. Refused, the handback was retried at every
 //     deploy and the notice was lost, each at ERROR (2026-10-17: the parked
 //     `doom` workspace, every landing for an hour).
+//   - A workspace subscription's notice, a derived workspace's notice and a
+//     child's notice to its owner tell a workspace what another workspace
+//     did, for the same reason: the daemon composed them, so nobody is there
+//     to send them again.
 //
-// A prompt the user types is still refused, so the user knows it did not go.
+// A prompt the user types is still refused, so the user knows it did not go,
+// and so is one an agent sent, whose refusal its command prints.
 func waitsOutColdGate(origin conversationv1.PromptOrigin) bool {
 	switch origin {
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE:
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE:
 		return true
 	}
 	return false

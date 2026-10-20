@@ -317,6 +317,7 @@ func submissionOf(held wsm.HeldPrompt) Submission {
 		Turn:     held.Turn,
 		Said:     held.Said,
 		Origin:   conversationv1.PromptOrigin(conversationv1.PromptOrigin_value[held.Origin]),
+		SentBy:   held.SentBy,
 		Target:   held.Target,
 		Delivery: held.Delivery,
 		Act:      held.Act,

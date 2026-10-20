@@ -168,9 +168,11 @@ func (r *resolver) workspaceOfSession(session string) ids.WorkspaceID {
 	return ""
 }
 
-// workspaceName is WS's display name, the one the sidebar draws. A name that
-// cannot be read is recorded against FROM, the workspace drawing the row, and
-// the row draws the end unresolved. Called with r.mu held.
+// workspaceName is WS's display name, the one the sidebar draws: the other end
+// of a cross-session message, or the workspace that sent an agent-sent prompt
+// (turnsender.go). A name that cannot be read is recorded against FROM, the
+// workspace drawing the row, and the row draws that end unresolved. Called
+// with r.mu held.
 func (r *resolver) workspaceName(ws, from ids.WorkspaceID) (string, bool) {
 	if r.deps.WorkspaceName == nil {
 		return "", false
@@ -178,13 +180,13 @@ func (r *resolver) workspaceName(ws, from ids.WorkspaceID) (string, bool) {
 	name, err := r.deps.WorkspaceName(ws)
 	if err != nil {
 		r.logger(from).Error("daemon.feed.peer_workspace_name_failed",
-			"the workspace at the other end of a cross-session message could not be named; its row draws that end unresolved",
+			"the workspace at the other end of an agent-to-agent message could not be named; its row draws that end unresolved",
 			dlog.Context{"other_workspace": string(ws), "cause": err.Error()})
 		return "", false
 	}
 	if name == "" {
 		r.logger(from).Error("daemon.feed.peer_workspace_name_empty",
-			"the workspace at the other end of a cross-session message has an empty name; its row draws that end unresolved",
+			"the workspace at the other end of an agent-to-agent message has an empty name; its row draws that end unresolved",
 			dlog.Context{"other_workspace": string(ws)})
 		return "", false
 	}

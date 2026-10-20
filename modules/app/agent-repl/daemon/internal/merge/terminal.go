@@ -179,9 +179,11 @@ func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out DetachedOutcome) {
 
 // handBack reports how a merge ended to the workspace whose feed carries the
 // bubble: an ASYNC merge's requester whether it landed or not, and a SYNC
-// merge's own workspace when it did not land (one that landed closed it). A
-// merge that FAILED or was ABANDONED also reveals an async merge's merge
-// workspace: it needs the user now.
+// merge's own workspace when it did not land (one that landed closed it). The
+// bubble's own "open merge workspace" button (SelectWorkspace's own reveal,
+// internal/server/workspaces.go) is the one way in from here, by owner
+// ruling (2026-10-20): a merge workspace is never auto-revealed in the tab
+// bar or sidebar on its own, on any outcome.
 //
 // THE HANDBACK'S OWN FAILURE IS RECORDED BY ITS OWNER (DetachedMerges.HandBack);
 // the merge's terminal stands either way, so it is only noted here.
@@ -192,15 +194,12 @@ func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out Det
 		return
 	}
 	// AN END SOMEBODY ASKED FOR IS NOT A FAILURE: the bubble and the roster
-	// say the merge ended, and neither is the merge workspace revealed nor the
-	// requester's agent prompted to deal with it.
+	// say the merge ended, and the requester's agent is not prompted to deal
+	// with it.
 	if out.Requested {
 		o.log(ctx, ws).Info("daemon.merge.detached", "an async merge was taken off at an explicit request; its requester is not handed it back", dlog.Context{
 			"workspace": string(ws), "requester": string(requester), "outcome": out.Kind.String(), "summary": out.Summary})
 		return
-	}
-	if out.Kind != DetachedLanded {
-		o.reveal(ctx, ws, "its merge "+out.Kind.String())
 	}
 	record, err := o.deps.DB.Workspace(ctx, ws)
 	if err != nil {

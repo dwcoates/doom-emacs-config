@@ -135,6 +135,11 @@ type QueueMember struct {
 	Mode MergeMode
 	// Started reports whether the merge has started (been admitted).
 	Started bool
+	// Front reports that the merge asked to be put at the front of its queue.
+	Front bool
+	// Requester is the workspace that asked for an ASYNC merge, empty for
+	// every other mode.
+	Requester ids.WorkspaceID
 	// Step is a started merge's step, empty while it waits and before its
 	// first step is published.
 	Step footer.MergeStep
@@ -173,6 +178,16 @@ type QueueChange struct {
 // own writes.
 type QueueObserver interface {
 	QueueChanged(change QueueChange)
+}
+
+// QueueObservers tells every observer each change, in order.
+type QueueObservers []QueueObserver
+
+// QueueChanged implements QueueObserver.
+func (o QueueObservers) QueueChanged(change QueueChange) {
+	for _, observer := range o {
+		observer.QueueChanged(change)
+	}
 }
 
 // queueEvents serializes every reported write of every queue with its reads,
@@ -439,13 +454,21 @@ func memberOf(entry wsm.MergeQueueEntry, record wsm.Workspace) QueueMember {
 	if branch == "" && entry.Source.Kind.ClosesRequester() {
 		branch = record.Branch
 	}
-	return QueueMember{
+	member := QueueMember{
 		Workspace: entry.Workspace,
 		Name:      record.Name,
 		Branch:    branch,
 		Mode:      modeOf(entry.Source, record),
 		Started:   entry.State == wsm.MergeAdmitted,
+		Front:     entry.Source.Front,
 	}
+	switch {
+	case record.MergeOf != nil:
+		member.Requester = record.MergeOf.Requester
+	case entry.Source.Detach != "":
+		member.Requester = entry.Workspace
+	}
+	return member
 }
 
 // modeOf names how a merge in line was asked for: async when it runs in a

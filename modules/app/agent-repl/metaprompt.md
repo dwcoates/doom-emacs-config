@@ -25,7 +25,7 @@
 
 ### Master moves only through the merge queue
 
-- Merge into master only through the merge-queue skill (`.claude/skills/merge-queue/SKILL.md`, `/merge-queue`).
+- Merge into master only through the merge-queue skill (`modules/app/agent-repl/skills/agent-repl-merge-queue/SKILL.md`, `/agent-repl-merge-queue`).
   - This covers my own workspace's branch and every subagent's branch alike.
   - Never merge, commit, cherry-pick, rebase, reset, or push onto master by hand.
   - On a parked, failed, or refused merge, report the reason and stop rather than landing the work some other way.
@@ -227,7 +227,7 @@
 
 ### A requirements failure is fixed in the manifests, generically, and only the user's own choices go to the user
 
-- When running `bin/requirements.sh` (directly, via `.claude/install.sh`, or via `/install-agent-repl`) hits a failure the manifests should have prevented, fix the manifests or the runner.
+- When running `bin/requirements.sh` (directly, via `.claude/install.sh`, or via `/agent-repl-install`) hits a failure the manifests should have prevented, fix the manifests or the runner.
   - Never only repair the machine in front of you, because the next machine then fails the same way.
   - The contract is the Requirements section of `modules/app/agent-repl/AGENTS.md`.
 - Every such fix is generic.

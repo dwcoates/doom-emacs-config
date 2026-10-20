@@ -399,6 +399,11 @@ type Resolver interface {
 	// `disconnected · dead`. It is lifted by the next link state of any kind,
 	// which belongs to the revival's own spawn.
 	SetParked(ws ids.WorkspaceID, parked bool)
+	// SetAwaiting states the workspace this one awaits correspondence from by
+	// its drawn name, empty when it awaits none
+	// (agentrepl.v1.SetWorkspaceCorrespondence). While it stands and no turn
+	// runs, the strip shows the background arm with `awaiting` set.
+	SetAwaiting(ws ids.WorkspaceID, awaitedName string)
 	// SetBringingUp raises (true) or lowers (false) the fact that a bring-up
 	// of the workspace's session is under way, beside the roster's own
 	// SetBringingUp. On a route never seen it is the bring-up window

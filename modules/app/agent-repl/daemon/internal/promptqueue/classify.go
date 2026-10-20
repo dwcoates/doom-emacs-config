@@ -27,6 +27,7 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 		Turn:      sub.Turn,
 		Said:      sub.Said,
 		Origin:    sub.Origin.String(),
+		SentBy:    sub.SentBy,
 		Target:    sub.Target,
 		QueuedAt:  q.deps.Now(),
 		Delivery:  sub.Delivery,

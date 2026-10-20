@@ -154,10 +154,20 @@ export interface SessionContext {
    * The session writes the prompt's row once the vendor decides its fate:
    * folded into `into` at a tool boundary, or run once `into` leaves the slot
    * (the first waiting prompt as its own turn, the rest folded into it as the
-   * vendor's prompt batch). Synchronous, so nothing can take the slot between
-   * the caller's check of it and the push.
+   * vendor's prompt batch). The push is synchronous, so nothing can take the
+   * slot between the caller's check of it and the push.
+   *
+   * `sentBy` (StartTurnRequest.sent_by) makes the push another session's
+   * message (engine/peer-send.ts). The answer settles once the vendor queued
+   * the prompt, at once for any other; it REJECTS when the vendor held it, and
+   * the session has then taken the join back.
    */
-  joinRunningTurn(prompt: conversationv1.AgentPrompt, turn: OpenTurn, into: OpenTurn): void;
+  joinRunningTurn(
+    prompt: conversationv1.AgentPrompt,
+    turn: OpenTurn,
+    into: OpenTurn,
+    sentBy: shimv1.StartTurnSentBy | undefined,
+  ): Promise<void>;
   /**
    * Deliver a prompt to the vendor as the send of `turn`, under a client uuid
    * the vendor echoes on its reply (engine/sends.ts).
@@ -165,8 +175,12 @@ export interface SessionContext {
    * The session owns this because the yield obligation may have to REPLACE the
    * query (a rewind is a fresh `resume` + `resumeSessionAt`), and the query is
    * the session's.
+   *
+   * `sentBy` (StartTurnRequest.sent_by) delivers the prompt as another
+   * session's message (engine/peer-send.ts): it settles only once the vendor
+   * queued it, and REJECTS when the vendor held it instead.
    */
-  submit(said: conversationv1.UserSaid, turn: OpenTurn): Promise<void>;
+  submit(said: conversationv1.UserSaid, turn: OpenTurn, sentBy: shimv1.StartTurnSentBy | undefined): Promise<void>;
   /** Put `turn` in the send slot. */
   setOpenTurn(turn: OpenTurn): void;
   /**
@@ -728,7 +742,7 @@ export class TurnEngine {
     const opened: OpenTurn = { id: turn, keepalive: false, startedAtMs: this.session.nowMs() };
     this.session.setOpenTurn(opened);
     try {
-      await this.session.submit(vendorSaid(said, request.vendorNote), opened);
+      await this.session.submit(vendorSaid(said, request.vendorNote), opened, request.sentBy);
     } catch (err) {
       this.session.releaseTurn(opened);
       const detail = err instanceof Error ? err.message : String(err);
@@ -770,13 +784,26 @@ export class TurnEngine {
     }
     const prompt = buildPrompt(turn, agentId, said, request.origin);
     const joining: OpenTurn = { id: turn, keepalive: false, startedAtMs: this.session.nowMs() };
+    let admitted: Promise<void>;
     try {
-      this.session.joinRunningTurn(prompt, joining, running);
+      admitted = this.session.joinRunningTurn(prompt, joining, running, request.sentBy);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       LOGGER.error(
         { turn_id: turn.value, running_turn: running.id.value, cause: detail },
         "the vendor refused the prompt sent to join the running turn",
+      );
+      return startTurnRefused({ kind: "vendorRefused" }, detail);
+    }
+    // AN AGENT'S PROMPT IS ACCEPTED ONCE THE VENDOR QUEUED IT: one it held
+    // instead is refused, and the session has taken the join back.
+    try {
+      await admitted;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      LOGGER.error(
+        { turn_id: turn.value, running_turn: running.id.value, cause: detail },
+        "the vendor did not queue the prompt sent to join the running turn",
       );
       return startTurnRefused({ kind: "vendorRefused" }, detail);
     }

@@ -4,7 +4,7 @@
   store (docs/PLAN-runtime-metrics.md). VictoriaMetrics scrapes the daemon,
   the store and the sidecar every 15 seconds through the targets they
   advertise under ~/.cache/agent-repl/metrics/targets/, keeps 30 days, and
-  answers PromQL on 127.0.0.1:8428 (the metrics-agent-repl skill).
+  answers PromQL on 127.0.0.1:8428 (the agent-repl-metrics skill).
 
   TEMPLATE: like the store's and the sidecar's, this copy uses ~-relative
   paths that bin/requirements.sh (rendered_plist) makes absolute when it

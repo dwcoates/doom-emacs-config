@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -17,7 +16,6 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/envc"
@@ -39,7 +37,7 @@ import (
 // client never derives an id from a path.
 //
 // Server-streaming rpcs are refused by name: a stream has no single answer to
-// print, and the verbs that need one (merge-queue) own their own reading.
+// print.
 
 // callVerb is the verb's name on the command line.
 const callVerb = "call"
@@ -218,27 +216,16 @@ func invokeUnaryOver(ctx context.Context, client *http.Client, base string, meth
 	return resp.Msg, nil
 }
 
-// errRosterFound ends the roster read once the first roster has been looked
-// at; it never escapes lookupWorkspaceRef.
-var errRosterFound = errors.New("roster read")
-
 // lookupWorkspaceRef reads the daemon's roster once and answers the row whose
 // canonical directory is DIR.
 func lookupWorkspaceRef(ctx context.Context, address, dir string) (*workspacev1.WorkspaceRef, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var ref *workspacev1.WorkspaceRef
-	err := dialMergeQueueDaemon(address).WatchRoster(ctx, func(roster *frontendv1.WorkspaceRoster) error {
-		if row := findRosterRow(roster, dir); row != nil {
-			ref = row.GetWorkspace().GetWorkspace()
-		}
-		return errRosterFound
-	})
-	if err != nil && !errors.Is(err, errRosterFound) {
+	roster, err := readRoster(ctx, newDaemonClient(address))
+	if err != nil {
 		return nil, fmt.Errorf("read the daemon's roster: %w", err)
 	}
-	if ref == nil {
+	row := findRosterRow(roster, dir)
+	if row == nil {
 		return nil, fmt.Errorf("the daemon's roster holds no workspace at %s", dir)
 	}
-	return ref, nil
+	return row.GetWorkspace().GetWorkspace(), nil
 }

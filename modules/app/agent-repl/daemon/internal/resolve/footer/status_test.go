@@ -406,6 +406,48 @@ func TestBackgroundStandsWhileDetachedWorkRunsWithNoTurn(t *testing.T) {
 	}
 }
 
+func TestAwaitingCorrespondenceStandsTheBackgroundArm(t *testing.T) {
+	tests := []struct {
+		name       string
+		arrange    func(h *harness)
+		wantStatus string
+		wantNamed  string
+	}{
+		{name: "awaiting with nothing running", arrange: func(h *harness) { h.r.SetAwaiting(testWS, "planner") },
+			wantStatus: "background", wantNamed: "planner"},
+		{name: "awaiting beside detached work", arrange: func(h *harness) {
+			h.r.OnDetachedWork(testWS, mainAgent, createdShell("work-1", "npm test"))
+			h.r.SetAwaiting(testWS, "planner")
+		}, wantStatus: "background", wantNamed: "planner"},
+		{name: "a turn outranks awaiting", arrange: func(h *harness) {
+			h.r.SetAwaiting(testWS, "planner")
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+		}, wantStatus: "working"},
+		{name: "awaiting lifted", arrange: func(h *harness) {
+			h.r.SetAwaiting(testWS, "planner")
+			h.r.SetAwaiting(testWS, "")
+		}, wantStatus: "idle"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			tt.arrange(h)
+
+			// Assert
+			if got := h.status(t); got != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tt.wantStatus)
+			}
+			if got := h.view(t).GetStrip().GetStatus().GetBackground().GetAwaiting().GetAwaitedName(); got != tt.wantNamed {
+				t.Errorf("awaited = %q, want %q", got, tt.wantNamed)
+			}
+		})
+	}
+}
+
 func TestATurnOutranksBackground(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -1847,5 +1889,31 @@ func TestAVendorBlockOutranksApiRetrying(t *testing.T) {
 	// Assert
 	if h.view(t).GetStrip().GetStatus().GetVendorFault().GetUsageLimit() == nil {
 		t.Fatalf("status = %v, want blocked · usage_limit over the retry", h.view(t).GetStrip().GetStatus())
+	}
+}
+
+func TestStatusWordsNamesTheArmAndItsSubstatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		status *frontendv1.FooterStatus
+		want   string
+	}{
+		{name: "an arm with no substatus", status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Idle{Idle: &frontendv1.FooterStatusIdle{}}}, want: "idle"},
+		{name: "an arm stating its substatus",
+			status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Waiting{Waiting: &frontendv1.FooterStatusWaiting{
+				Substatus: &frontendv1.FooterStatusWaiting_ColdGate{ColdGate: &frontendv1.FooterSubStatusWaitingColdGate{}}}}},
+			want: "waiting · cold gate"},
+		{name: "an arm whose substatus is unset", status: &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Waiting{Waiting: &frontendv1.FooterStatusWaiting{}}}, want: "waiting"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := StatusWords(tt.status)
+
+			// Assert
+			if got != tt.want {
+				t.Errorf("StatusWords = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

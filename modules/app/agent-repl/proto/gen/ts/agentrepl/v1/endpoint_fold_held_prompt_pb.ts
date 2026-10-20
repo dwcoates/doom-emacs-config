@@ -45,7 +45,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_fold_held_prompt.proto.
  */
 export const file_agentrepl_v1_endpoint_fold_held_prompt: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZm9sZF9oZWxkX3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIpUBChVGb2xkSGVsZFByb21wdFJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIlCgR0dXJuGAIgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZBImCgVhYm92ZRgDIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQijgEKFkZvbGRIZWxkUHJvbXB0UmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdFN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdEVycm9ySABCCAoGcmVzdWx0IhcKFUZvbGRIZWxkUHJvbXB0U3VjY2VzcyKZBgoTRm9sZEhlbGRQcm9tcHRFcnJvchJJChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIsLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdFVua25vd25Xb3Jrc3BhY2VIABJSChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjAuYWdlbnRyZXBsLnYxLkZvbGRIZWxkUHJvbXB0V29ya3NwYWNlUmVmTWlzbWF0Y2hIABJJChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIsLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdFRyYW5zZmVycmluZ0F3YXlIABJECg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKS5hZ2VudHJlcGwudjEuRm9sZEhlbGRQcm9tcHROb3RZZXRBZG9wdGVkSAASPgoMbm9fc3VjaF9ob2xkGAUgASgLMiYuYWdlbnRyZXBsLnYxLkZvbGRIZWxkUHJvbXB0Tm9TdWNoSG9sZEgAEjcKCG5vdF9oZWxkGAYgASgLMiMuYWdlbnRyZXBsLnYxLkZvbGRIZWxkUHJvbXB0Tm90SGVsZEgAEj4KDG5vdF9hX3Byb21wdBgHIAEoCzImLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdE5vdEFQcm9tcHRIABI9CgthYm92ZV9tb3ZlZBgIIAEoCzImLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdEFib3ZlTW92ZWRIABJJChJhYm92ZV9ub3RfYV9wcm9tcHQYCSABKAsyKy5hZ2VudHJlcGwudjEuRm9sZEhlbGRQcm9tcHRBYm92ZU5vdEFQcm9tcHRIABI/CgxiZWluZ19lZGl0ZWQYCiABKAsyJy5hZ2VudHJlcGwudjEuRm9sZEhlbGRQcm9tcHRCZWluZ0VkaXRlZEgAEkUKD2JlaW5nX2RlbGl2ZXJlZBgLIAEoCzIqLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdEJlaW5nRGVsaXZlcmVkSABCBwoFY2F1c2UiIAoeRm9sZEhlbGRQcm9tcHRVbmtub3duV29ya3NwYWNlIjoKIkZvbGRIZWxkUHJvbXB0V29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjEKHkZvbGRIZWxkUHJvbXB0VHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh0KG0ZvbGRIZWxkUHJvbXB0Tm90WWV0QWRvcHRlZCIaChhGb2xkSGVsZFByb21wdE5vU3VjaEhvbGQiFwoVRm9sZEhlbGRQcm9tcHROb3RIZWxkIhoKGEZvbGRIZWxkUHJvbXB0Tm90QVByb21wdCJhChhGb2xkSGVsZFByb21wdEFib3ZlTW92ZWQSMwoNY3VycmVudF9hYm92ZRgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAIgBAUIQCg5fY3VycmVudF9hYm92ZSIfCh1Gb2xkSGVsZFByb21wdEFib3ZlTm90QVByb21wdCJKChlGb2xkSGVsZFByb21wdEJlaW5nRWRpdGVkEi0KDGVkaXRpbmdfdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiHgocRm9sZEhlbGRQcm9tcHRCZWluZ0RlbGl2ZXJlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_conversation_v1_turn]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZm9sZF9oZWxkX3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIpUBChVGb2xkSGVsZFByb21wdFJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIlCgR0dXJuGAIgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZBImCgVhYm92ZRgDIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQijgEKFkZvbGRIZWxkUHJvbXB0UmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdFN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdEVycm9ySABCCAoGcmVzdWx0IhcKFUZvbGRIZWxkUHJvbXB0U3VjY2VzcyLlBgoTRm9sZEhlbGRQcm9tcHRFcnJvchJJChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIsLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdFVua25vd25Xb3Jrc3BhY2VIABJSChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjAuYWdlbnRyZXBsLnYxLkZvbGRIZWxkUHJvbXB0V29ya3NwYWNlUmVmTWlzbWF0Y2hIABJJChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIsLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdFRyYW5zZmVycmluZ0F3YXlIABJECg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKS5hZ2VudHJlcGwudjEuRm9sZEhlbGRQcm9tcHROb3RZZXRBZG9wdGVkSAASPgoMbm9fc3VjaF9ob2xkGAUgASgLMiYuYWdlbnRyZXBsLnYxLkZvbGRIZWxkUHJvbXB0Tm9TdWNoSG9sZEgAEjcKCG5vdF9oZWxkGAYgASgLMiMuYWdlbnRyZXBsLnYxLkZvbGRIZWxkUHJvbXB0Tm90SGVsZEgAEj4KDG5vdF9hX3Byb21wdBgHIAEoCzImLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdE5vdEFQcm9tcHRIABI9CgthYm92ZV9tb3ZlZBgIIAEoCzImLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdEFib3ZlTW92ZWRIABJJChJhYm92ZV9ub3RfYV9wcm9tcHQYCSABKAsyKy5hZ2VudHJlcGwudjEuRm9sZEhlbGRQcm9tcHRBYm92ZU5vdEFQcm9tcHRIABI/CgxiZWluZ19lZGl0ZWQYCiABKAsyJy5hZ2VudHJlcGwudjEuRm9sZEhlbGRQcm9tcHRCZWluZ0VkaXRlZEgAEkUKD2JlaW5nX2RlbGl2ZXJlZBgLIAEoCzIqLmFnZW50cmVwbC52MS5Gb2xkSGVsZFByb21wdEJlaW5nRGVsaXZlcmVkSAASSgoSYWJvdmVfb3RoZXJfYXV0aG9yGAwgASgLMiwuYWdlbnRyZXBsLnYxLkZvbGRIZWxkUHJvbXB0QWJvdmVPdGhlckF1dGhvckgAQgcKBWNhdXNlIiAKHkZvbGRIZWxkUHJvbXB0QWJvdmVPdGhlckF1dGhvciIgCh5Gb2xkSGVsZFByb21wdFVua25vd25Xb3Jrc3BhY2UiOgoiRm9sZEhlbGRQcm9tcHRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMQoeRm9sZEhlbGRQcm9tcHRUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHQobRm9sZEhlbGRQcm9tcHROb3RZZXRBZG9wdGVkIhoKGEZvbGRIZWxkUHJvbXB0Tm9TdWNoSG9sZCIXChVGb2xkSGVsZFByb21wdE5vdEhlbGQiGgoYRm9sZEhlbGRQcm9tcHROb3RBUHJvbXB0ImEKGEZvbGRIZWxkUHJvbXB0QWJvdmVNb3ZlZBIzCg1jdXJyZW50X2Fib3ZlGAEgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZEgAiAEBQhAKDl9jdXJyZW50X2Fib3ZlIh8KHUZvbGRIZWxkUHJvbXB0QWJvdmVOb3RBUHJvbXB0IkoKGUZvbGRIZWxkUHJvbXB0QmVpbmdFZGl0ZWQSLQoMZWRpdGluZ190dXJuGAEgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZCIeChxGb2xkSGVsZFByb21wdEJlaW5nRGVsaXZlcmVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_conversation_v1_turn]);
 
 /**
  * Fold one held prompt into the held prompt directly ahead of it.
@@ -253,6 +253,17 @@ export type FoldHeldPromptError = Message<"agentrepl.v1.FoldHeldPromptError"> & 
      */
     value: FoldHeldPromptBeingDelivered;
     case: "beingDelivered";
+  } | {
+    /**
+     * The entry directly ahead of `turn` has another author: one was sent by a
+     * workspace's agent (SubmitPromptRequest.sent_by) and the other was not, or
+     * two workspaces sent them. The merged prompt would be drawn under one
+     * author, so the other's words would be attributed to it.
+     *
+     * @generated from field: agentrepl.v1.FoldHeldPromptAboveOtherAuthor above_other_author = 12;
+     */
+    value: FoldHeldPromptAboveOtherAuthor;
+    case: "aboveOtherAuthor";
   } | { case: undefined; value?: undefined };
 };
 
@@ -262,6 +273,22 @@ export type FoldHeldPromptError = Message<"agentrepl.v1.FoldHeldPromptError"> & 
  */
 export const FoldHeldPromptErrorSchema: GenMessage<FoldHeldPromptError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 3);
+
+/**
+ * The entry ahead has another author. DELIBERATELY EMPTY: the arm's presence
+ * is the whole fact.
+ *
+ * @generated from message agentrepl.v1.FoldHeldPromptAboveOtherAuthor
+ */
+export type FoldHeldPromptAboveOtherAuthor = Message<"agentrepl.v1.FoldHeldPromptAboveOtherAuthor"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.FoldHeldPromptAboveOtherAuthor.
+ * Use `create(FoldHeldPromptAboveOtherAuthorSchema)` to create a new message.
+ */
+export const FoldHeldPromptAboveOtherAuthorSchema: GenMessage<FoldHeldPromptAboveOtherAuthor> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 4);
 
 /**
  * The workspace id is not in the daemon's registry. DELIBERATELY EMPTY: the
@@ -277,7 +304,7 @@ export type FoldHeldPromptUnknownWorkspace = Message<"agentrepl.v1.FoldHeldPromp
  * Use `create(FoldHeldPromptUnknownWorkspaceSchema)` to create a new message.
  */
 export const FoldHeldPromptUnknownWorkspaceSchema: GenMessage<FoldHeldPromptUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 4);
+  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 5);
 
 /**
  * The echoed workspace dir disagrees with the registry's.
@@ -298,7 +325,7 @@ export type FoldHeldPromptWorkspaceRefMismatch = Message<"agentrepl.v1.FoldHeldP
  * Use `create(FoldHeldPromptWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const FoldHeldPromptWorkspaceRefMismatchSchema: GenMessage<FoldHeldPromptWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 5);
+  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 6);
 
 /**
  * The workspace now belongs to a successor daemon.
@@ -319,7 +346,7 @@ export type FoldHeldPromptTransferringAway = Message<"agentrepl.v1.FoldHeldPromp
  * Use `create(FoldHeldPromptTransferringAwaySchema)` to create a new message.
  */
 export const FoldHeldPromptTransferringAwaySchema: GenMessage<FoldHeldPromptTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 6);
+  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 7);
 
 /**
  * A joining daemon has not finished adopting the workspace. DELIBERATELY
@@ -335,7 +362,7 @@ export type FoldHeldPromptNotYetAdopted = Message<"agentrepl.v1.FoldHeldPromptNo
  * Use `create(FoldHeldPromptNotYetAdoptedSchema)` to create a new message.
  */
 export const FoldHeldPromptNotYetAdoptedSchema: GenMessage<FoldHeldPromptNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 7);
+  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 8);
 
 /**
  * No hold was ever recorded under `turn`. DELIBERATELY EMPTY: the arm's
@@ -351,7 +378,7 @@ export type FoldHeldPromptNoSuchHold = Message<"agentrepl.v1.FoldHeldPromptNoSuc
  * Use `create(FoldHeldPromptNoSuchHoldSchema)` to create a new message.
  */
 export const FoldHeldPromptNoSuchHoldSchema: GenMessage<FoldHeldPromptNoSuchHold> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 8);
+  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 9);
 
 /**
  * The folded prompt is no longer held. DELIBERATELY EMPTY: the held section's next
@@ -368,7 +395,7 @@ export type FoldHeldPromptNotHeld = Message<"agentrepl.v1.FoldHeldPromptNotHeld"
  * Use `create(FoldHeldPromptNotHeldSchema)` to create a new message.
  */
 export const FoldHeldPromptNotHeldSchema: GenMessage<FoldHeldPromptNotHeld> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 9);
+  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 10);
 
 /**
  * The entry under `turn` is a session act. DELIBERATELY EMPTY: the arm's
@@ -384,7 +411,7 @@ export type FoldHeldPromptNotAPrompt = Message<"agentrepl.v1.FoldHeldPromptNotAP
  * Use `create(FoldHeldPromptNotAPromptSchema)` to create a new message.
  */
 export const FoldHeldPromptNotAPromptSchema: GenMessage<FoldHeldPromptNotAPrompt> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 10);
+  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 11);
 
 /**
  * `above` is not the entry directly ahead of `turn` any more.
@@ -408,7 +435,7 @@ export type FoldHeldPromptAboveMoved = Message<"agentrepl.v1.FoldHeldPromptAbove
  * Use `create(FoldHeldPromptAboveMovedSchema)` to create a new message.
  */
 export const FoldHeldPromptAboveMovedSchema: GenMessage<FoldHeldPromptAboveMoved> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 11);
+  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 12);
 
 /**
  * The entry directly ahead of `turn` is a session act. DELIBERATELY EMPTY:
@@ -424,7 +451,7 @@ export type FoldHeldPromptAboveNotAPrompt = Message<"agentrepl.v1.FoldHeldPrompt
  * Use `create(FoldHeldPromptAboveNotAPromptSchema)` to create a new message.
  */
 export const FoldHeldPromptAboveNotAPromptSchema: GenMessage<FoldHeldPromptAboveNotAPrompt> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 12);
+  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 13);
 
 /**
  * One of the two entries is being edited.
@@ -445,7 +472,7 @@ export type FoldHeldPromptBeingEdited = Message<"agentrepl.v1.FoldHeldPromptBein
  * Use `create(FoldHeldPromptBeingEditedSchema)` to create a new message.
  */
 export const FoldHeldPromptBeingEditedSchema: GenMessage<FoldHeldPromptBeingEdited> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 13);
+  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 14);
 
 /**
  * The prompt's delivery call is in flight. See the `being_delivered` arm.
@@ -460,5 +487,5 @@ export type FoldHeldPromptBeingDelivered = Message<"agentrepl.v1.FoldHeldPromptB
  * Use `create(FoldHeldPromptBeingDeliveredSchema)` to create a new message.
  */
 export const FoldHeldPromptBeingDeliveredSchema: GenMessage<FoldHeldPromptBeingDelivered> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 14);
+  messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 15);
 

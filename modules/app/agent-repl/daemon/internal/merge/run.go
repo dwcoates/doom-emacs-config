@@ -1116,15 +1116,13 @@ func (r *run) ensureSession(ctx context.Context) error {
 	return r.o.ensureSession(ctx, r.ws)
 }
 
-// ensureSession starts WS's session when it has none, so a merge prompt has a
-// session to run in.
+// ensureSession brings WS's session up when none is LIVE, so a merge prompt
+// has a session to run in. A recorded session is not a live one: a merge
+// workspace records its session when it is created and brings it up only
+// when its merge first needs a turn, so the bring-up -- which answers at once
+// for a live session -- is asked every time rather than gated on the record.
 func (o *orchestrator) ensureSession(ctx context.Context, ws ids.WorkspaceID) error {
-	if _, found, err := o.deps.DB.Session(ctx, ws); err != nil {
-		return err
-	} else if !found {
-		return o.deps.StartSession(ctx, ws)
-	}
-	return nil
+	return o.deps.StartSession(ctx, ws)
 }
 
 // submit sends one prompt down the queue's ONE delivery path, to the

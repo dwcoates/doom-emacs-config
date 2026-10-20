@@ -973,6 +973,8 @@ export function foldHeldPromptRefusal(cause: FoldHeldPromptCause): string {
       return "the entry above has changed; nothing was folded";
     case "aboveNotAPrompt":
       return "the entry above is a session change, which takes no prompt";
+    case "aboveOtherAuthor":
+      return "the entry above has another author; folding would draw one author's words under the other's";
     case "beingEdited":
       return `a held prompt being edited cannot be folded (turn ${cause.value.editingTurn?.value ?? ""})`;
     case "beingDelivered":

@@ -895,6 +895,9 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 			w.sinks.Merge.OnQuestion(w.ws, agent, question)
 		}
 		w.notifyQuestionLocked(question)
+		if w.sinks.Asks != nil {
+			w.sinks.Asks.NeedsInput(w.ws)
+		}
 
 	case update.GetPermission() != nil:
 		permission := update.GetPermission()
@@ -908,6 +911,9 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 			w.sinks.Merge.OnPermission(w.ws, agent, permission)
 		}
 		w.notifyPermissionLocked(permission)
+		if w.sinks.Asks != nil {
+			w.sinks.Asks.NeedsInput(w.ws)
+		}
 
 	case update.GetContextCut() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetContextCut() != nil"})

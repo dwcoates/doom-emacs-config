@@ -270,6 +270,10 @@ type DB interface {
 	// rows were drawn (an async merge workspace's merge turn, in the
 	// requester's bubble). A feed replay mirrors each such turn by it.
 	TurnMirrors(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]*MirrorAddress, error)
+	// TurnSenders answers the workspace whose agent sent each named turn's
+	// prompt, for the turns that have one (sentby.go). A feed replay heads each
+	// such turn's prompt by it.
+	TurnSenders(ctx context.Context, id WorkspaceID, turns []TurnID) (map[TurnID]WorkspaceID, error)
 	// RecordedTurns answers which of the named turns this workspace recorded,
 	// open or closed: the durable statement of which turns are the
 	// workspace's OWN work. A fork's feed reads it to tell the conversation it
@@ -446,6 +450,10 @@ type DB interface {
 	// StartMergePick records that a merge workspace's pick began as a turn,
 	// with its bubble's ledger identity, before the turn is submitted.
 	StartMergePick(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID, turn TurnID, at time.Time) error
+	// ClearMergePick records that a queued merge workspace's begun pick
+	// succeeded: its instruction leaves the row, so its next admission
+	// admits the merge itself.
+	ClearMergePick(ctx context.Context, repo RepoKey, id WorkspaceID, at time.Time) error
 	// RecordMergeWorkspaceRemoved records that the inactivity sweep is
 	// removing a merge workspace, before its records are deleted.
 	RecordMergeWorkspaceRemoved(ctx context.Context, ws WorkspaceID, requester WorkspaceID, at time.Time) error
@@ -500,6 +508,27 @@ type DB interface {
 	UnsubscribeMergeQueue(ctx context.Context, subscriber WorkspaceID, repo RepoKey) (bool, error)
 	// MergeQueueSubscriptions loads every merge queue subscription.
 	MergeQueueSubscriptions(ctx context.Context) ([]MergeQueueSubscription, error)
+	// MarkCloseWhenTurnEnds marks a workspace to close when its running turn
+	// ends (selfclose.go).
+	MarkCloseWhenTurnEnds(ctx context.Context, id WorkspaceID, at time.Time) error
+	// TakeCloseWhenTurnEnds clears a workspace's self-close mark in one
+	// statement, answering whether one stood.
+	TakeCloseWhenTurnEnds(ctx context.Context, id WorkspaceID) (bool, error)
+	// SetAwaiting marks a workspace awaiting correspondence from another, or
+	// clears the mark with nil (standings.go).
+	SetAwaiting(ctx context.Context, id WorkspaceID, awaited *WorkspaceID) error
+	// SetOneShot marks a workspace's creation a one-shot or unmarks it; a
+	// workspace with no creation job is ErrNotFound (standings.go).
+	SetOneShot(ctx context.Context, id WorkspaceID, oneShot bool) error
+	// SubscribeWorkspace records a workspace subscription, replacing the
+	// events of one its subscriber holds to the same workspace, and answers
+	// whether it replaced one (workspacesubscriptions.go).
+	SubscribeWorkspace(ctx context.Context, sub WorkspaceSubscription) (bool, error)
+	// UnsubscribeWorkspace ends a subscriber's subscription to a workspace,
+	// answering whether one stood.
+	UnsubscribeWorkspace(ctx context.Context, subscriber, followed WorkspaceID) (bool, error)
+	// WorkspaceSubscribers loads every subscription following a workspace.
+	WorkspaceSubscribers(ctx context.Context, followed WorkspaceID) ([]WorkspaceSubscription, error)
 
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)

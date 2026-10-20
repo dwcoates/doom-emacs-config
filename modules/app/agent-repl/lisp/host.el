@@ -64,6 +64,8 @@
 (declare-function agent-repl-rpc-mark-workspace-viewed "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-report-page-unloading "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-adopt-host-workspace "rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-answer-editor-evaluation "rpc" (conn request &rest keys))
+(declare-function agent-repl-evaluate-text "evaluate" (text))
 (declare-function agent-repl-link-dial-successor "daemon-link" (address))
 (declare-function agent-repl-connect-connection-address "connect" (conn))
 (declare-function agent-repl-rpc-watch-host-workspace "rpc"
@@ -1223,6 +1225,8 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:reload-webapp (agent-repl-host--reload-webapp ws value))
     (:open-in-editor (agent-repl-host--open-in-editor ws value))
     (:open-commit-log (agent-repl-host--open-commit-log ws value))
+
+    (:evaluate (agent-repl-host--evaluate ws value))
     (:ending (agent-repl-host--note-ending ws stream))
     (_ (agent-repl--error ws "elisp.host.unknown-push ws=%s arm=%S value=%S"
                           ws arm value))))
@@ -1795,6 +1799,50 @@ The click on a landed merge's commit; a fact, not a command, exactly as
     (agent-repl--info ws "elisp.host.open-commit-log ws=%s dir=%S branch=%S commit=%S"
                       ws dir branch commit)
     (agent-repl-magit-log-commit ws dir branch commit)))
+
+;;;; ---- Editor evaluation ----
+
+(defun agent-repl-host--evaluate (ws request)
+  "Evaluate REQUEST's elisp for an agent and answer the daemon with its token.
+REQUEST is the decoded `HostEvaluate' plist (:token TOKEN :text TEXT).
+The text is evaluated by the editor\='s one handler
+\(`agent-repl-evaluate-text') with WS\='s composer current when it is live,
+the buffer the agent\='s workspace types into; a workspace whose composer
+has not been created evaluates in whatever buffer is current, and the
+record says which.  The answer goes to WS\='s own connection, the daemon
+that minted the token."
+  (let* ((token (plist-get request :token))
+         (composer (agent-repl--ws-get ws :input-buffer))
+         (buffer (if (buffer-live-p composer) composer (current-buffer)))
+         (outcome (with-current-buffer buffer
+                    (agent-repl-evaluate-text (plist-get request :text))))
+         (arm (plist-get (plist-get outcome :outcome) :arm))
+         (conn (agent-repl-host-conn ws)))
+    (agent-repl--info ws "elisp.host.evaluate ws=%s token=%s buffer=%S composer=%s outcome=%s messages=%d"
+                      ws (plist-get token :value) (buffer-name buffer)
+                      (eq buffer composer) arm (length (plist-get outcome :messages)))
+    (unless conn
+      (agent-repl--fatal ws "elisp.host.evaluate-no-connection ws=%s token=%s"
+                         ws (plist-get token :value)))
+    (agent-repl-rpc-answer-editor-evaluation
+     conn (list :workspace (agent-repl-host-ref ws) :token token :outcome outcome)
+     :on-response
+     (lambda (response)
+       (pcase (plist-get response :arm)
+         (:success
+          (agent-repl--log ws "elisp.host.evaluation-answered ws=%s token=%s"
+                           ws (plist-get token :value)))
+         (:error
+          (agent-repl--error ws "elisp.host.evaluation-answer-refused ws=%s token=%s cause=%S"
+                             ws (plist-get token :value)
+                             (plist-get (plist-get (plist-get response :value) :cause) :arm)))
+         (other
+          (agent-repl--error ws "elisp.host.evaluation-answer-unknown-arm ws=%s token=%s arm=%S"
+                             ws (plist-get token :value) other))))
+     :on-failure
+     (lambda (detail)
+       (agent-repl--error ws "elisp.host.evaluation-answer-failed ws=%s token=%s detail=%S"
+                          ws (plist-get token :value) detail)))))
 
 ;;;; ---- Link lifecycle ----
 

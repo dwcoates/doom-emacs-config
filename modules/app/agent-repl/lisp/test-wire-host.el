@@ -329,7 +329,8 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"openInEditor\":{\"path\":\"/w/a.el\"}}" :open-in-editor)
                       (list "{\"openCommitLog\":{\"repositoryDir\":\"/r\",\"branch\":\"master\",\"commit\":\"abc\"}}"
                             :open-commit-log)
-                      (list "{\"selection\":{\"none\":{}}}" :selection)))
+                      (list "{\"selection\":{\"none\":{}}}" :selection)
+                      (list "{\"evaluate\":{\"token\":{\"value\":\"t-1\"},\"text\":\"(+ 1 2)\"}}" :evaluate)))
     (should (equal (plist-get (agent-repl-test-wire-host--decode
                                #'agent-repl-wire-decode-watch-host-workspace-response
                                (nth 0 case))
@@ -417,6 +418,117 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   #'agent-repl-wire-decode-open-in-editor-commit-log
                   "{\"repositoryDir\":\"/r\",\"branch\":\"master\",\"commit\":\"abc\",\"line\":3}")
                  '("OpenInEditorCommitLog" line "unknown field"))))
+
+;;;; ---- HostEvaluate and AnswerEditorEvaluation ----
+
+(ert-deftest agent-repl-test-wire-host-evaluate-decodes-token-and-text ()
+  "An evaluation push decodes its token and its text."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-evaluate
+                  "{\"token\":{\"value\":\"eval-1-3\"},\"text\":\"(+ 1 2)\"}")
+                 '(:token (:value "eval-1-3") :text "(+ 1 2)"))))
+
+(ert-deftest agent-repl-test-wire-host-evaluate-without-token-is-a-breach ()
+  "An evaluation that could never be answered is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-evaluate "{\"text\":\"1\"}")
+                 '("HostEvaluate" token "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-evaluate-refuses-an-unknown-field ()
+  "An unknown key on the evaluation push is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-evaluate
+                  "{\"token\":{\"value\":\"t\"},\"deadline\":1}")
+                 '("HostEvaluate" deadline "unknown field"))))
+
+(defun agent-repl-test-wire-host--answer-json (outcome)
+  "Encode an AnswerEditorEvaluationRequest carrying OUTCOME, as JSON."
+  (agent-repl-test-wire-host--quiet
+    (json-serialize
+     (agent-repl-wire-encode-answer-editor-evaluation-request
+      (list :workspace '(:id "ws-7" :dir "/w/fix")
+            :token '(:value "t-1")
+            :outcome outcome)))))
+
+(ert-deftest agent-repl-test-wire-host-answer-encodes-a-readable-value ()
+  "A readable value spells its print and `readable'."
+  (should (equal (agent-repl-test-wire-host--answer-json
+                  '(:outcome (:arm :value :value (:printed "3" :readable t)) :messages nil))
+                 (concat "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"},"
+                         "\"token\":{\"value\":\"t-1\"},"
+                         "\"outcome\":{\"value\":{\"printed\":\"3\",\"readable\":true}}}"))))
+
+(ert-deftest agent-repl-test-wire-host-answer-omits-readable-for-an-unreadable-value ()
+  "An unreadable value omits `readable', its proto3 default."
+  (should (string-match-p
+           "\"value\":{\"printed\":\"#<buffer x>\"}"
+           (agent-repl-test-wire-host--answer-json
+            '(:outcome (:arm :value :value (:printed "#<buffer x>" :readable nil)))))))
+
+(ert-deftest agent-repl-test-wire-host-answer-encodes-a-read-error ()
+  "A read error spells the reader's message."
+  (should (string-match-p
+           "\"outcome\":{\"readError\":{\"message\":\"End of file during parsing\"}}"
+           (agent-repl-test-wire-host--answer-json
+            '(:outcome (:arm :read-error :value (:message "End of file during parsing")))))))
+
+(ert-deftest agent-repl-test-wire-host-answer-encodes-an-eval-error ()
+  "An evaluation error spells its symbol, its data and its message."
+  (should (string-match-p
+           (regexp-quote "\"evalError\":{\"errorSymbol\":\"void-variable\",\"dataPrinted\":\"(x)\",\"message\":\"Wrong type argument: x\"}")
+           (agent-repl-test-wire-host--answer-json
+            '(:outcome (:arm :eval-error
+                        :value (:error-symbol "void-variable" :data-printed "(x)"
+                                :message "Wrong type argument: x")))))))
+
+(ert-deftest agent-repl-test-wire-host-answer-encodes-the-messages ()
+  "The `*Messages*' lines ride as `messages', oldest first."
+  (should (string-match-p
+           (regexp-quote "\"messages\":[\"one\",\"two\"]")
+           (agent-repl-test-wire-host--answer-json
+            '(:outcome (:arm :value :value (:printed "nil" :readable t))
+              :messages ("one" "two"))))))
+
+(ert-deftest agent-repl-test-wire-host-answer-without-outcome-arm-is-refused ()
+  "An outcome naming no arm never leaves Emacs."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-editor-evaluation-outcome '(:messages ("x")))
+                 '("EditorEvaluationOutcome" outcome "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-answer-requires-every-field ()
+  "The workspace, the token and the outcome are each REQUIRED."
+  (dolist (case '((:token . workspace) (:workspace . token) (:workspace . outcome)))
+    (let ((value (list :workspace '(:id "w" :dir "/w") :token '(:value "t")
+                       :outcome '(:outcome (:arm :value :value (:printed "1" :readable t))))))
+      (setq value (plist-put value (intern (concat ":" (symbol-name (cdr case)))) nil))
+      (should (equal (agent-repl-test-wire-host--encode-breach
+                      #'agent-repl-wire-encode-answer-editor-evaluation-request value)
+                     (list "AnswerEditorEvaluationRequest" (cdr case)
+                           "required message field is absent"))))))
+
+(ert-deftest agent-repl-test-wire-host-answer-decodes-success ()
+  "The success arm is empty."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-answer-editor-evaluation-response "{\"success\":{}}")
+                 '(:arm :success :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-answer-decodes-unknown-token ()
+  "The refusal names its cause: the token names no pushed evaluation."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-answer-editor-evaluation-response
+                  "{\"error\":{\"unknownToken\":{}}}")
+                 '(:arm :error :value (:cause (:arm :unknown-token :value nil))))))
+
+(ert-deftest agent-repl-test-wire-host-evaluation-arms-pinned ()
+  "The evaluation messages' oneofs are exactly the arms this codec handles."
+  (dolist (case '(("agentrepl/v1/editor_evaluation.pb.go" "EditorEvaluationOutcome"
+                   ("evalError" "readError" "value"))
+                  ("agentrepl/v1/endpoint_answer_editor_evaluation.pb.go" "AnswerEditorEvaluationError"
+                   ("unknownToken"))
+                  ("agentrepl/v1/endpoint_answer_editor_evaluation.pb.go" "AnswerEditorEvaluationResponse"
+                   ("error" "success"))))
+    (should (equal (sort (agent-repl-test--generated-oneof-arms (nth 0 case) (nth 1 case)) #'string<)
+                   (nth 2 case)))))
 
 ;;;; ---- The selection push ----
 
@@ -1346,7 +1458,7 @@ opens are OpenTabs streams."
                         "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
                         "WatchHostWorkspaceResponse")
                        #'string<)
-                 (sort (list "host" "transferred" "reloadWebapp"
+                 (sort (list "evaluate" "host" "transferred" "reloadWebapp"
                              "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection")
                        #'string<))))
 

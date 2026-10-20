@@ -1,0 +1,56 @@
+// endpoint_evaluate_in_editor.proto — EvaluateInEditor: evaluate elisp in the
+// running editor and answer with the result. EDITOR section.
+//
+// ONE ROUND TRIP. The daemon pushes the text to the editor serving the named
+// workspace (agentrepl.v1.WatchHostWorkspaceResponse.evaluate, carrying a fresh
+// EditorEvaluationToken), the editor evaluates it in its one handler with the
+// workspace's buffer current, answers with AnswerEditorEvaluation, and this
+// rpc returns that answer. An editor that does not answer within the
+// evaluation deadline is `timed_out`; its late answer is discarded.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/editor_evaluation.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message EvaluateInEditorRequest {
+  // The workspace the evaluation is for: its buffer is current while the
+  // text runs, so operations like "create a buffer" land in it.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The elisp to read and evaluate, one or more forms; the value of the last
+  // form is answered. REQUIRED: blank is refused as invalid.
+  string text = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message EvaluateInEditorResponse {
+  oneof result {
+    EvaluateInEditorSuccess success = 1;
+    EvaluateInEditorError error = 2;
+  }
+}
+// The editor evaluated the text; how that went is the outcome.
+message EvaluateInEditorSuccess {
+  EditorEvaluationOutcome outcome = 1;
+}
+message EvaluateInEditorError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    EvaluateInEditorUnknownWorkspace unknown_workspace = 1;
+    // No editor serves the workspace, so nothing can evaluate the text.
+    EvaluateInEditorNoEditor no_editor = 2;
+    // The editor did not answer within the evaluation deadline.
+    EvaluateInEditorTimedOut timed_out = 3;
+  }
+}
+message EvaluateInEditorUnknownWorkspace {}
+message EvaluateInEditorNoEditor {}
+// How long the daemon waited.
+message EvaluateInEditorTimedOut {
+  // The deadline, in milliseconds.
+  uint32 deadline_ms = 1;
+}

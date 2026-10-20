@@ -116,18 +116,27 @@ func (s *server) CreateWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	dir := repository.Dir
+	if async := req.Msg.GetAsyncMerge(); async != nil {
+		return s.createAsyncMerge(ctx, rpc, resp, repository, req.Msg)
+	}
 
-	spec := workspace.CreateSpec{RepoDir: dir}
+	spec := workspace.CreateSpec{
+		RepoDir:   repository.Dir,
+		Requester: requesterID(req.Msg.GetRequester()),
+		ForkFrom:  forkSourceID(req.Msg.GetContextOrigin()),
+	}
 	if standard := req.Msg.GetStandard(); standard != nil {
 		spec.InitialPrompt = s.saidText(s.log, "standard.initial_prompt", standard.GetInitialPrompt())
-		spec.BaseRef = standard.GetBaseRef()
 		spec.Name = standard.GetName()
 		spec.MergeActions = s.mergeActions(standard.GetMergeActions())
+		spec.Parent, spec.OwnerNotice = topologyOwner(standard.GetTopology())
+		spec.FromOrigin = standard.GetTopology().GetPrimary().GetFromOrigin() != nil
 	}
 	if oneShot := req.Msg.GetOneShot(); oneShot != nil {
 		spec.OneShot = true
 		spec.InitialPrompt = s.saidText(s.log, "one_shot.prompt", oneShot.GetPrompt())
+		spec.Parent, spec.OwnerNotice = topologyOwner(oneShot.GetTopology())
+		spec.FromOrigin = oneShot.GetTopology().GetPrimary().GetFromOrigin() != nil
 		if about := oneShot.GetContext(); about != nil {
 			// The context must be a registered workspace this daemon serves; a
 			// refusal names it on the create's own arm.
@@ -139,25 +148,6 @@ func (s *server) CreateWorkspace(
 			id := subject.Record.ID
 			spec.ContextWorkspace = &id
 		}
-	}
-	if parent := req.Msg.GetParent(); parent != nil {
-		id := ids.WorkspaceID(parent.GetWorkspace().GetId())
-		spec.Parent = &id
-		if parent.GetFork() != nil {
-			spec.ForkFrom = &id
-		}
-	}
-	if source := req.Msg.GetForkSource(); source != nil {
-		// The source must be a registered workspace this daemon serves; a
-		// refusal names it on the create's own arm.
-		subject, refused, done := s.resolveNaming(ctx, rpc, resp, source.GetWorkspace(),
-			map[string]string{workspace.ArmUnknownWorkspace: "unknown_fork_source"})
-		if done {
-			return answer(resp, refused)
-		}
-		id := subject.Record.ID
-		spec.ForkFrom = &id
-		spec.ForkIntoPrimary = true
 	}
 	if req.Msg.Model != nil {
 		spec.Model = req.Msg.GetModel()
@@ -213,6 +203,42 @@ func (s *server) CreateWorkspace(
 		Success: &agentreplv1.CreateWorkspaceSuccess{Workspace: refOf(created)},
 	}
 	return connect.NewResponse(resp), nil
+}
+
+// requesterID is the requesting workspace's id, nil when the user asked.
+// Whether it is registered is the create's to judge (unknown_requester).
+func requesterID(r *agentreplv1.WorkspaceRequester) *ids.WorkspaceID {
+	asker := r.GetWorkspace()
+	if asker == nil {
+		return nil
+	}
+	id := ids.WorkspaceID(asker.GetWorkspace().GetId())
+	return &id
+}
+
+// forkSourceID is the workspace whose conversation is forked, nil for a fresh
+// one. Whether it is a workspace of the repository is the create's to judge
+// (unknown_fork_source).
+func forkSourceID(c *agentreplv1.WorkspaceContextOrigin) *ids.WorkspaceID {
+	fork := c.GetFork()
+	if fork == nil {
+		return nil
+	}
+	id := ids.WorkspaceID(fork.GetWorkspace().GetId())
+	return &id
+}
+
+// topologyOwner is a child's owner and its notice to the owner, nil and empty
+// for a workspace cut from the primary branch. Whether the owner is a
+// workspace of the repository, and whether the notice is required, is the
+// create's to judge.
+func topologyOwner(t *agentreplv1.WorkspaceTopology) (*ids.WorkspaceID, string) {
+	child := t.GetChild()
+	if child == nil {
+		return nil, ""
+	}
+	id := ids.WorkspaceID(child.GetOwner().GetId())
+	return &id, child.GetOwnerNotice().GetText()
 }
 
 // runBackgroundCreate performs an option-B create to completion and publishes
@@ -485,20 +511,38 @@ func (s *server) CloseWorkspace(
 	req *connect.Request[agentreplv1.CloseWorkspaceRequest],
 ) (*connect.Response[agentreplv1.CloseWorkspaceResponse], error) {
 	const rpc = "CloseWorkspace"
+	if err := validateWorkspaceRequester("requester", req.Msg.GetRequester()); err != nil {
+		return nil, err
+	}
 	resp := &agentreplv1.CloseWorkspaceResponse{}
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
 	}
-	if err := s.deps.Verbs.Close(ctx, subject.Record.ID, wsm.CloseByUser); err != nil {
-		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	ws := subject.Record.ID
+	success := &agentreplv1.CloseWorkspaceSuccess{Outcome: &agentreplv1.CloseWorkspaceSuccess_Closed{Closed: &agentreplv1.CloseWorkspaceSuccessClosed{}}}
+	switch by, asker := askerOf(req.Msg.GetRequester()); {
+	case by == merge.RequestedByUser:
+		if err := s.deps.Verbs.Close(ctx, ws, wsm.CloseByUser); err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
+	case asker == ws:
+		later, err := s.deps.Verbs.CloseSelf(ctx, ws)
+		if err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
+		if later {
+			success.Outcome = &agentreplv1.CloseWorkspaceSuccess_ClosesWhenTurnEnds{ClosesWhenTurnEnds: &agentreplv1.CloseWorkspaceSuccessClosesWhenTurnEnds{}}
+		}
+	default:
+		if err := s.deps.Verbs.Close(ctx, ws, wsm.CloseByAgent); err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
 	}
 	// The verb moved the session's standing or the composer's gate; the host
 	// view is recomposed from what the change left behind.
-	s.PublishHostWorkspace(ctx, subject.Record.ID)
-	resp.Result = &agentreplv1.CloseWorkspaceResponse_Success{
-		Success: &agentreplv1.CloseWorkspaceSuccess{},
-	}
+	s.PublishHostWorkspace(ctx, ws)
+	resp.Result = &agentreplv1.CloseWorkspaceResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
 
@@ -688,11 +732,11 @@ func (s *server) MergeWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	request, err := s.mergeRequest(ctx, subject.Record.ID, req.Msg)
+	request, err := mergeRequest(subject.Record.ID, req.Msg)
 	if err != nil {
-		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		return nil, fail(subject.Log, rpc, err)
 	}
-	if err := s.deps.Merge.Enqueue(ctx, request); err != nil {
+	if _, err := s.deps.Merge.Enqueue(ctx, request); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	// The verb moved the session's standing or the composer's gate; the host
@@ -704,23 +748,38 @@ func (s *server) MergeWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
-// mergeRequest reads the request's mode into the orchestrator's request. A
-// one-shot merges the requester's own branch in place and closes it once it
-// lands; an async merge lands the named branch in a merge workspace. An async
-// one-shot workspace is named by its ref, and a ref that names no workspace is
-// the unknown_one_shot_workspace refusal; whether it is open and in the
-// requester's repository is the orchestrator's to judge.
-func (s *server) mergeRequest(ctx context.Context, requester ids.WorkspaceID, req *agentreplv1.MergeWorkspaceRequest) (merge.Request, error) {
-	out, err := s.mergeRequestMode(ctx, requester, req)
-	if err != nil {
-		return merge.Request{}, err
+// mergeRequest reads the request into the orchestrator's request: the
+// workspace's own branch, in place, asked by the requester and placed as the
+// request says. A one-shot's own branch closes it once it lands; a branch
+// already merged upstream only updates the default branch.
+func mergeRequest(ws ids.WorkspaceID, req *agentreplv1.MergeWorkspaceRequest) (merge.Request, error) {
+	out := merge.Request{Workspace: ws}
+	out.By, out.Asker = askerOf(req.GetRequester())
+	switch req.GetOneShot().GetLanding().(type) {
+	case *agentreplv1.MergeWorkspaceOneShot_OwnBranch:
+		out.Source = wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}
+	case *agentreplv1.MergeWorkspaceOneShot_MergedUpstream:
+		out.Source = wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}
+	default:
+		// validateMergeWorkspaceRequest refused an unset arm before this.
+		return merge.Request{}, fmt.Errorf("server: MergeWorkspace landing arm %T is unknown", req.GetOneShot().GetLanding())
 	}
+	out.Source.Front = req.GetPlacement().GetFront() != nil
 	out.Source.Version = versionIncrement(req.GetVersionIncrement())
 	return out, nil
 }
 
+// askerOf is who asked, as the merge queue reads it: the user, or a
+// workspace's agent and that workspace.
+func askerOf(r *agentreplv1.WorkspaceRequester) (merge.Requester, ids.WorkspaceID) {
+	if id := requesterID(r); id != nil {
+		return merge.RequestedByAgent, *id
+	}
+	return merge.RequestedByUser, ""
+}
+
 // versionIncrement reads the request's version increment, nil when it carries
-// none. validateMergeWorkspaceRequest refused a malformed one before this.
+// none. The request's validation refused a malformed one before this.
 func versionIncrement(v *agentreplv1.MergeWorkspaceVersionIncrement) *wsm.VersionIncrement {
 	if v == nil {
 		return nil
@@ -733,46 +792,6 @@ func versionIncrement(v *agentreplv1.MergeWorkspaceVersionIncrement) *wsm.Versio
 		out.Part = semver.Patch
 	}
 	return out
-}
-
-// mergeRequestMode reads the request's mode arm.
-func (s *server) mergeRequestMode(ctx context.Context, requester ids.WorkspaceID, req *agentreplv1.MergeWorkspaceRequest) (merge.Request, error) {
-	out := merge.Request{Workspace: requester, By: merge.RequestedByUser}
-	switch mode := req.GetMode().(type) {
-	case *agentreplv1.MergeWorkspaceRequest_OneShot:
-		switch mode.OneShot.GetLanding().(type) {
-		case *agentreplv1.MergeWorkspaceOneShot_OwnBranch:
-			out.Source = wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}
-		case *agentreplv1.MergeWorkspaceOneShot_MergedUpstream:
-			out.Source = wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}
-		default:
-			// validateMergeWorkspaceRequest refused an unset arm before this.
-			return merge.Request{}, fmt.Errorf("server: MergeWorkspace one-shot landing arm %T is unknown", mode.OneShot.GetLanding())
-		}
-		return out, nil
-	case *agentreplv1.MergeWorkspaceRequest_Async:
-		async := mode.Async
-		var closes ids.WorkspaceID
-		if async.OneShot != nil {
-			id := ids.WorkspaceID(async.GetOneShot().GetWorkspace().GetId())
-			_, ended, err := s.registryWorkspace(ctx, id)
-			switch {
-			case ended:
-				return merge.Request{}, connect.NewError(connect.CodeUnavailable, fmt.Errorf("MergeWorkspace: one-shot workspace %q: %w", id, errServingEnded))
-			case errors.Is(err, wsm.ErrNotFound):
-				return merge.Request{}, &merge.RefusalError{Arm: merge.ArmUnknownOneShotWorkspace, Workspace: requester,
-					Reason: fmt.Sprintf("no workspace %q is registered", id)}
-			case err != nil:
-				return merge.Request{}, fmt.Errorf("MergeWorkspace: reading one-shot workspace %q: %w", id, err)
-			}
-			closes = id
-		}
-		out.Source = wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: strings.TrimSpace(async.GetBranch())}
-		out.Detached = merge.NewDetachedRun(async.GetName(), async.GetInstruction(), async.GetCompactAfter(), closes, async.GetCleanupWorktree(), s.mergeActions(async.GetMergeActions()))
-		return out, nil
-	}
-	// validateMergeWorkspaceRequest refused an unset arm before this.
-	return merge.Request{}, fmt.Errorf("server: MergeWorkspace mode arm %T is unknown", req.GetMode())
 }
 
 // RestartWorkspace bounces the workspace's shim and reloads its webapp page,
@@ -1041,6 +1060,36 @@ func (s *server) resolveNaming(
 	rename map[string]string,
 ) (resolved, *connect.Error, bool) {
 	subject, r, err := s.resolveRef(ctx, rpc, ref)
+	return s.answerResolution(rpc, resp, ref, rename, subject, r, err)
+}
+
+// resolveRegisteredNaming is resolveNaming for a ref resolved against the
+// registry alone (resolveRegistered): a workspace named as what is read or
+// followed, whichever daemon serves it.
+func (s *server) resolveRegisteredNaming(
+	ctx context.Context,
+	rpc string,
+	resp proto.Message,
+	ref *workspacev1.WorkspaceRef,
+	rename map[string]string,
+) (resolved, *connect.Error, bool) {
+	subject, r, err := s.resolveRegistered(ctx, rpc, ref)
+	return s.answerResolution(rpc, resp, ref, rename, subject, r, err)
+}
+
+// answerResolution is the one answer of a ref's resolution for resolveNaming
+// and resolveRegisteredNaming: the subject, or the refusal encoded onto RESP
+// with the refused ref on the arm's `workspace` field and the arm renamed
+// through RENAME.
+func (s *server) answerResolution(
+	rpc string,
+	resp proto.Message,
+	ref *workspacev1.WorkspaceRef,
+	rename map[string]string,
+	subject resolved,
+	r *refusal,
+	err error,
+) (resolved, *connect.Error, bool) {
 	if err != nil {
 		return resolved{}, failResolution(s.log, rpc, err), true
 	}

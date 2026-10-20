@@ -7,8 +7,11 @@ import (
 	"slices"
 	"testing"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
+
+	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
 var ownBranch = wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}
@@ -257,12 +260,12 @@ func TestARequestIsRefusedWhenItsSourceCannotBeMerged(t *testing.T) {
 			h.git.mu.Lock()
 			h.git.branches[h.sourceD] = ""
 			h.git.mu.Unlock()
-		}, source: ownBranch, arm: ArmUnknownBranch},
+		}, source: ownBranch, arm: ArmNoBranchCheckedOut},
 		{name: "merged upstream whose worktree has a detached HEAD", arrange: func(h *harness) {
 			h.git.mu.Lock()
 			h.git.branches[h.sourceD] = ""
 			h.git.mu.Unlock()
-		}, source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, arm: ArmUnknownBranch},
+		}, source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, arm: ArmNoBranchCheckedOut},
 		{name: "a deleted session", arrange: func(h *harness) {
 			h.db.mu.Lock()
 			h.db.sessions[theWorkspace] = wsm.Session{Workspace: theWorkspace, Terminal: &wsm.SessionTerminal{Kind: "deleted"}}
@@ -426,9 +429,9 @@ func TestOnlyAnAgentsInPlaceRequestFlushesTheHeldPrompts(t *testing.T) {
 		req  Request
 		want []ids.WorkspaceID
 	}{
-		{name: "an agent's in-place request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent}, want: []ids.WorkspaceID{theWorkspace}},
-		{name: "an agent's one-shot", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, OneShot: true}, want: []ids.WorkspaceID{theWorkspace}},
-		{name: "an agent's async request", req: Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Detached: &DetachedRun{Name: "flush-async"}}, want: nil},
+		{name: "an agent's in-place request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, Asker: theWorkspace}, want: []ids.WorkspaceID{theWorkspace}},
+		{name: "an agent's one-shot", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByAgent, Asker: theWorkspace, OneShot: true}, want: []ids.WorkspaceID{theWorkspace}},
+		{name: "an agent's async request", req: Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Asker: theWorkspace, Detached: &DetachedRun{Maker: theWorkspace, Name: "flush-async"}}, want: nil},
 		{name: "the user's request", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByUser}, want: nil},
 	}
 	for _, tt := range tests {
@@ -438,7 +441,7 @@ func TestOnlyAnAgentsInPlaceRequestFlushesTheHeldPrompts(t *testing.T) {
 			h.inFlight = "turn-asking"
 
 			// Act.
-			if err := h.o.Enqueue(context.Background(), tt.req); err != nil {
+			if _, err := h.o.Enqueue(context.Background(), tt.req); err != nil {
 				t.Fatalf("Enqueue: %v", err)
 			}
 
@@ -476,8 +479,11 @@ func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T
 		closeOnLanding   ids.WorkspaceID
 		cleanupWorktree  bool
 		actions          wsm.MergeActions
+		maker            ids.WorkspaceID
+		intoMaker        bool
 		want             DetachedRun
 	}{
+		{name: "its maker and its target", inName: "reconnect-fix", maker: "maker", intoMaker: true, want: DetachedRun{Name: "reconnect-fix", Maker: "maker", IntoMaker: true}},
 		{name: "a branch as it is", inName: " reconnect-fix ", want: DetachedRun{Name: "reconnect-fix"}},
 		{name: "an instruction", inName: "reconnect-fix", instruct: "\tthe fix \n", want: DetachedRun{Name: "reconnect-fix", Pick: "the fix"}},
 		{name: "a blank instruction", inName: "reconnect-fix", instruct: "   ", want: DetachedRun{Name: "reconnect-fix"}},
@@ -490,11 +496,92 @@ func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := NewDetachedRun(tt.inName, tt.instruct, tt.compactAfter, tt.closeOnLanding, tt.cleanupWorktree, tt.actions)
+			got := NewDetachedRun(tt.inName, tt.instruct, tt.compactAfter, tt.closeOnLanding, tt.cleanupWorktree, tt.actions, tt.maker, tt.intoMaker)
 
 			// Assert
 			if got == nil || !reflect.DeepEqual(*got, tt.want) {
 				t.Fatalf("NewDetachedRun = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnInPlaceMergeLandsOnlyOnTheAskOfWhoMayLandIt(t *testing.T) {
+	owner := ids.WorkspaceID("ws-owner")
+	tests := []struct {
+		name       string
+		ownerLands bool
+		by         Requester
+		asker      ids.WorkspaceID
+		arm        string
+	}{
+		{name: "the user lands any workspace", ownerLands: true, by: RequestedByUser},
+		{name: "a workspace lands itself", by: RequestedByAgent, asker: theWorkspace},
+		{name: "a child its owner lands may not land itself", ownerLands: true, by: RequestedByAgent, asker: theWorkspace, arm: ArmOwnerLands},
+		{name: "the owner lands its child", ownerLands: true, by: RequestedByAgent, asker: owner},
+		{name: "the owner lands a child that forked it", by: RequestedByAgent, asker: owner},
+		{name: "any other workspace may not land it", by: RequestedByAgent, asker: "ws-stranger", arm: ArmRequesterMayNotLand},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.db.mu.Lock()
+			w := h.db.workspaces[theWorkspace]
+			w.Parent, w.OwnerLands = &owner, tt.ownerLands
+			h.db.workspaces[theWorkspace] = w
+			h.db.mu.Unlock()
+
+			// Act
+			_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: ownBranch, By: tt.by, Asker: tt.asker})
+
+			// Assert
+			if tt.arm == "" {
+				if err != nil {
+					t.Fatalf("Enqueue = %v, want accepted", err)
+				}
+				return
+			}
+			refusal, ok := Refused(err)
+			if !ok || refusal.Arm != tt.arm {
+				t.Fatalf("Enqueue = %v, want the %s refusal", err, tt.arm)
+			}
+			if _, queued := h.entryOf(theWorkspace); queued {
+				t.Error("a refused merge was recorded")
+			}
+			if record, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "warn", Operation: "daemon.merge.enqueue", Message: "refused a merge its asker may not ask for"}); !found || record.Context["asker"] != string(tt.asker) {
+				t.Errorf("no warn record naming the asker: %+v", h.logs.Records())
+			}
+			if tt.arm == ArmOwnerLands && refusal.Fields["owner"].(*workspacev1.WorkspaceRef).GetId() != string(owner) {
+				t.Errorf("owner_lands fields = %+v, want the owner", refusal.Fields)
+			}
+		})
+	}
+}
+
+func TestAMergeRequestThatContradictsWhoAskedFailsHard(t *testing.T) {
+	tests := []struct {
+		name  string
+		by    Requester
+		asker ids.WorkspaceID
+	}{
+		{name: "an agent's ask naming no workspace", by: RequestedByAgent},
+		{name: "the user's ask naming a workspace", by: RequestedByUser, asker: theWorkspace},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: ownBranch, By: tt.by, Asker: tt.asker})
+
+			// Assert
+			if _, refused := Refused(err); err == nil || refused {
+				t.Fatalf("Enqueue = %v, want a hard failure", err)
+			}
+			if _, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.enqueue", Message: "a merge request contradicts itself about who asked"}); !found {
+				t.Errorf("no error record: %+v", h.logs.Records())
 			}
 		})
 	}
@@ -537,7 +624,7 @@ func TestARequestAsksAboutEveryWorkspaceItsLandingCloses(t *testing.T) {
 		want []ids.WorkspaceID
 	}{
 		{name: "an in-place merge closes its requester", req: Request{Workspace: theWorkspace, Source: ownBranch, By: RequestedByUser}, want: []ids.WorkspaceID{theWorkspace}},
-		{name: "an async merge closes nothing in place", req: Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Detached: &DetachedRun{Name: "ask-async"}}, want: nil},
+		{name: "an async merge closes nothing in place", req: Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Asker: theWorkspace, Detached: &DetachedRun{Maker: theWorkspace, Name: "ask-async"}}, want: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -546,7 +633,7 @@ func TestARequestAsksAboutEveryWorkspaceItsLandingCloses(t *testing.T) {
 			h.inFlight = "turn-asking"
 
 			// Act.
-			if err := h.o.Enqueue(context.Background(), tt.req); err != nil {
+			if _, err := h.o.Enqueue(context.Background(), tt.req); err != nil {
 				t.Fatalf("Enqueue: %v", err)
 			}
 

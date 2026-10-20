@@ -88,7 +88,7 @@ func TestAsyncMergesOnTheQueue(t *testing.T) {
 		{
 			name: "a sync merge names nobody",
 			act: func(t *testing.T, h *harness) {
-				if err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, By: RequestedByUser}); err != nil {
+				if _, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, By: RequestedByUser}); err != nil {
 					t.Fatalf("Enqueue: %v", err)
 				}
 			},

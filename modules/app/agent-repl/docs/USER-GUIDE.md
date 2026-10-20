@@ -7,7 +7,7 @@ user guide"). Controls that predate this guide are not all listed yet.
 ## Setup
 
 Run `bash .claude/install.sh` from this repository, or ask an agent to run
-`/install-agent-repl`. It installs everything agent-repl needs that is missing:
+`/agent-repl-install`. It installs everything agent-repl needs that is missing:
 Emacs with xwidgets, the Go and Node toolchains, `terminal-notifier`,
 `hunspell` and the input window's spelling dictionary, the Claude Code skills, the git hook, and the store, sidecar and metrics-store (VictoriaMetrics) services. It then
 lists what only you can provide. `bash .claude/install.sh check` reports the
@@ -26,20 +26,8 @@ and the daemon Emacs starts, see them.
 | A Chrome profile per account | Sign each account's email in to its own Chrome profile. | Links clicked in a workspace open in the profile signed in as that workspace's account. A logged-out workspace opens links with no profile chosen. | The click fails with `launch_failed`, naming the email that no profile is signed in as. |
 | `AGENT_REPL_PERSISTENT_WIFI_HOTSPOT` | Your phone hotspot's name, in your shell profile. Either apostrophe spelling joins. | Persistent-wifi mode, which joins the hotspot when it turns on and leaves it when it turns off. While the mode is on, a lost Wi-Fi connection is answered by joining the hotspot within five seconds, and the join is tried again every five seconds until it takes. | Turning the mode on or off still changes the power settings. The hotspot step fails, naming the variable. A lost connection is recorded as an error and nothing is joined. |
 | A passwordless `sudo` grant for `pmset` | A file under `/etc/sudoers.d/` granting you `NOPASSWD` on exactly these invocations of `/usr/bin/pmset -a`: `disablesleep 1`, `disablesleep 0`, `networkoversleep 1`, `networkoversleep 0`, `womp 1`, `womp 0`, `powermode 1`, `powermode 2`. Edit it with `sudo visudo -f`. | Persistent-wifi mode, which disables sleep and switches to Low Power Mode when it turns on, and enables sleep and switches to High Power Mode when it turns off. | Without the sleep lines, turning the mode on or off fails with `power_settings_refused`. Without the `powermode` lines, the mode still changes and the energy step fails, naming the refusal. |
-| `MULTI_REPO_ROOT` | Optional. The directory holding your work repositories, including the `explanation-engine` checkout, in your shell profile. | The installer, which links the `/create-or-update-workspace` and `/create-or-update-skill` skills from `$MULTI_REPO_ROOT/explanation-engine`, workspaces worked under the work account, and `SPC TAB O`, which makes its one-shot in `$MULTI_REPO_ROOT/explanation-engine`. | Those two skills are not linked, and the installer reports it. `SPC TAB O` refuses, naming the variable. |
+| `MULTI_REPO_ROOT` | Optional. The directory holding your work repositories, including the `explanation-engine` checkout, in your shell profile. | The installer, which links the `/create-or-update-skill` skill from `$MULTI_REPO_ROOT/explanation-engine`, workspaces worked under the work account, and `SPC TAB O`, which makes its one-shot in `$MULTI_REPO_ROOT/explanation-engine`. | That skill is not linked, and the installer reports it. `SPC TAB O` refuses, naming the variable. |
 | `AGENT_WORKSPACE_PREFIX` | Optional. A prefix for new workspace branches, such as your initials, in your shell profile. The older `CLAUDE_WORKSPACE_PREFIX` is still read when this one is unset. | Workspace creation, which names a branch `<prefix>/<name>`. | Branches get no prefix. |
-
-## Asking about agent-repl
-
-`SPC o h` asks a question about agent-repl in a new help workspace.
-
-- It asks for the question alone, and the composer's text is the default.
-- The workspace is made in the repository agent-repl's own source lives in, whichever workspace you ask from.
-  - That repository must be on the roster. If it is not, the command says so. Add it with `SPC TAB C-n`.
-- The agent answers with the `/agent-repl-help` skill, which maps agent-repl's user, architecture and developer documentation and its code.
-- The agent changes nothing without your explicit approval, in that turn or any later one.
-  - The help workspace is not a one-shot. Nothing merges when the answer is done, and you can keep asking.
-- The opening instruction the agent receives is `agent-repl-help-preamble`. It is hidden from the drawn prompt.
 
 ## Selecting a bubble
 
@@ -165,6 +153,33 @@ These clicks jump to an entry in the feed:
 - **If a subagent's feed cannot be opened, the jump still scrolls to its bubble.**
   - The failure is listed under the warning chip in the top bar.
 
+## What agents can do with workspaces
+
+Every agent knows which workspace it runs in.
+- Its system prompt ends by saying it runs in an agent-repl workspace, and gives that workspace's name.
+- That part is added when the session starts, after `metaprompt.md`, and is not in the file.
+
+Agents work with agent-repl through the `agent-repld` command line and four skills:
+
+- `/agent-repl-workspaces` creates workspaces, prompts them, reads their status, closes and compacts them, and follows them.
+  - A prompt one workspace's agent sends another is drawn in the receiving feed with a left arrow, then the sending workspace's name, as every agent-to-agent prompt is.
+  - The sending feed draws it too, with the receiving workspace's name, then a right arrow, and says when the prompt was held or refused.
+  - A held prompt from another workspace never folds into one of yours, or yours into it.
+    - The held section offers no fold between them, and the classifier never folds them together.
+  - Every create states where the new workspace is cut from and lands, and whether it starts fresh or forks a conversation.
+  - A child that does not fork its parent's conversation is announced to the parent, and only the parent lands it.
+  - An agent kills a workspace, or answers its cold gate, only when you asked for it or approved it.
+- `/agent-repl-merge-queue` lands work and controls the queue.
+- `/agent-repl-runtime` builds, deploys and checks the runtime, holds the queue's rollouts, evaluates elisp in this Emacs, and arranges the sidebar.
+- `/agent-repl-debug`, `/agent-repl-profile`, `/agent-repl-tests` and `/agent-repl-install` investigate, profile, test and set up.
+
+Two marks an agent sets on its own workspace show on every surface:
+
+- **One-shot.** An agent that commits to finishing the rest of its work unattended marks its workspace a one-shot, which draws the one-shot mark, and lands it when done.
+- **Awaiting another workspace.** An agent that ends its turn to wait for another workspace's answer marks its workspace awaiting it.
+  - The workspace is drawn in the background status (yellow) while no turn runs, and the footer names the workspace it waits for.
+  - The agent clears the mark when the answer arrives.
+
 ## Sync and async merges
 
 - **A merge is a ONE-SHOT or ASYNC.**
@@ -174,21 +189,21 @@ These clicks jump to an entry in the feed:
     - A one-shot that fails leaves your workspace open, and the agent is told why.
   - An async merge lands a named branch in a hidden merge workspace forked from yours, and your workspace stays free; the agent is told how it ended.
   - "Sync" and "in place" mean the same thing, and so do "async" and "detached".
-- **An agent uses `/merge-queue one-shot` only when your workspace is done once the merge lands.**
+- **An agent merges its own workspace (`agent-repld workspace merge here`, through `/agent-repl-merge-queue`) only when your workspace is done once the merge lands.**
   - The workspace is marked a one-shot at once, so its tab and its sidebar row show the one-shot mark (a red-and-white target) while the agent keeps working.
   - When the turn ends, the workspace's branch merges in place, and the workspace closes once the merge lands.
   - Work left uncommitted when the turn ends fails the merge, and the workspace stays open.
   - `SPC TAB M` and the sidebar's Merge are the same one-shot.
   - The main workspace (the repository's own checkout) never one-shots.
-- **Every other merge is `/merge-queue async <name> <branch>`.**
+- **Every other merge is an async merge (`agent-repld workspace async-merge -name <name> -branch <branch>`).**
   - It is for a fix beside the point of what remains, an attempt landed so you can test it on master, or the main workspace landing its subagents' branches.
   - The agent names the merge workspace; a name that is already a workspace, a branch or another merge's reservation is refused, and the agent asks again with another.
-  - The branch is never the one checked out in the asking workspace; the daemon refuses it.
-  - `instruction <text>` has the merge workspace prepare the branch first, for example rebasing it onto master or combining branches; that work is the bubble's first tab, `resolving`, and the merge joins the queue once it ends.
-  - `close <worktree-dir>` closes another workspace once the merge lands, such as the subagent workspace the work came from.
-  - `cleanup` removes the worktree that had the branch checked out once the merge lands; branches are kept.
-  - `before-merge <prompt>` and `after-merge <prompt>` are prompts the merge workspace runs before the landing and after it.
-    - A failed `before-merge` prompt fails the merge, and `after-merge` never does.
+  - The branch is never one a workspace owns, the asking workspace's included; the daemon refuses it.
+  - `-instruction <text>` has the merge workspace prepare the branch first, for example rebasing it onto master or combining branches; that work is the bubble's first tab, `resolving`, and the merge joins the queue once it ends.
+  - `-close-after <workspace>` closes another workspace once the merge lands, such as the subagent workspace the work came from.
+  - `-cleanup-worktree` removes the worktree that had the branch checked out once the merge lands; branches are kept.
+  - `-before-merge <prompt>` and `-after-merge <prompt>` are prompts the merge workspace runs before the landing and after it.
+    - A failed `-before-merge` prompt fails the merge, and `-after-merge` never does.
     - The merge workspace runs only the prompts its request names, never the ones the asking workspace was created with.
   - The main workspace can ask for an async merge; it lands in the repository's own checkout.
 - **An async merge workspace is hidden from the tab bar and the sidebar's open rows.**
@@ -355,6 +370,14 @@ The input window underlines misspelled words as you type.
   - The agent-repl log names what is missing, once.
   - `bash .claude/install.sh` installs both.
 
+## Completing workspace names in the input window
+
+- A word you type in the input window completes to the name of any open workspace it begins.
+  - Typing `agent-repl-ski` offers `agent-repl-skill-migration` while that workspace is open.
+  - Closed workspaces are never offered.
+- A word matches a name only from the name's start, so ordinary prose doesn't offer workspaces.
+- A word that begins with `/` completes against slash commands instead.
+
 ## A one-shot in agent-repl
 
 `SPC TAB o` makes a one-shot in agent-repl's own repository, whichever workspace you press it in.
@@ -409,7 +432,7 @@ The one-shot commission prompt (`SPC TAB o` and `SPC TAB C-o`) saves what you ty
 
 No way of creating a workspace switches you to it.
 
-- This covers `SPC TAB n`, `SPC TAB N`, the forks (`SPC TAB c`, `SPC TAB C`, `SPC TAB f`, `SPC TAB F`), `SPC TAB o` and `SPC o h`.
+- This covers `SPC TAB n`, `SPC TAB N`, the forks (`SPC TAB c`, `SPC TAB C`, `SPC TAB f`, `SPC TAB F`) and `SPC TAB o`.
   - The new workspace's tab appears on the bar, and you switch to it when you want.
 - Nothing agent-repl does on its own takes you out of a minibuffer prompt.
   - While you type, a workspace's panels being built, a switch made from the sidebar or by an agent, and the landing on a registered or reopened workspace all wait.
@@ -424,7 +447,7 @@ A workspace that fails to be created is reported in two places.
   - It is opened first if it was closed.
   - The request names what the create asked for and the failure, and asks the agent to analyze it without changing anything until you answer.
   - It waits behind a turn the main worktree is already running, and never interrupts it.
-- This holds however the workspace was asked for: an Emacs key, an agent's `/create-or-update-workspace`, or a support workspace.
+- This holds however the workspace was asked for: an Emacs key, an agent's `agent-repld workspace create` (`/agent-repl-workspaces`), or a support workspace.
 - Nothing is reported for a create handed to a new daemon during a restart, or for the hidden workspace an async merge runs in.
   - The merge queue reports that one's failure back to the workspace that asked for the merge.
 - The request's wording is `prompts/workspace-create-failed.md`.

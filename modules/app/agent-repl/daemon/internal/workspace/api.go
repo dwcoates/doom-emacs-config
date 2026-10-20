@@ -49,33 +49,42 @@ type CreateSpec struct {
 	InitialPrompt string
 	// OneShot marks the one-shot form: created, prompted, merged, closed.
 	OneShot bool
+	// FromOrigin cuts a primary workspace from origin's primary branch,
+	// fetched as the create runs, rather than from the local primary branch
+	// (agentrepl.v1.WorkspaceTopologyPrimary.from_origin). Never set with a
+	// Parent: only a primary workspace is cut from the primary branch.
+	FromOrigin bool
 	// ContextWorkspace, set only on a one-shot, is the registered workspace
 	// the commission is about: the one-shot's first message opens with the
 	// one-shot context note naming it as the workspace the cited issue
 	// corresponds to. It is no parent and no fork source; nothing of it is
 	// carried into the one-shot but its identity.
 	ContextWorkspace *ids.WorkspaceID
-	// BaseRef is the base to cut from. Empty is the repository's default
-	// branch for a top-level workspace and the parent's tip for a child. A
-	// top-level workspace's base must already lie on the primary branch
-	// (ArmBaseRefOffPrimaryBranch otherwise).
+	// BaseRef is the base a MERGE WORKSPACE is cut from (its branch), set only
+	// with MergeOf. Every other workspace is cut from its source's tip: the
+	// parent's branch for a child, the repository's default branch otherwise
+	// (agentrepl.v1.WorkspaceTopology), so no request names a base.
 	BaseRef string
-	// Parent, when set, is the workspace this create was SPAWNED FROM: the
+	// Parent, when set, is the workspace this create's branch is cut from and
+	// lands into: its OWNER (agentrepl.v1.WorkspaceTopologyChild). The
 	// child's merge target is the parent's worktree, and the roster nests the
-	// child under it. It is recorded on the workspace at creation, so the
-	// nesting is a stated fact rather than one derived from the branch
-	// lineage.
+	// child under it. Nil cuts from and lands on the primary branch.
 	Parent *ids.WorkspaceID
-	// ForkFrom, when set, is the parent workspace whose transcript the daemon
-	// PORTS into the child's config root before StartSession(resume). A fork
-	// is always FROM the spawning parent, so a spec that sets it and leaves
-	// Parent unset names the same workspace for both.
+	// ForkFrom, when set, is the workspace whose conversation is forked into
+	// this one (agentrepl.v1.WorkspaceContextOrigin.fork). It is INDEPENDENT
+	// of Parent: a child may fork its owner, another workspace, or nothing,
+	// and a top-level workspace may fork any workspace. When it is not the
+	// branch source (forkedElsewhere), the first message opens with the note
+	// naming it.
 	ForkFrom *ids.WorkspaceID
-	// ForkIntoPrimary makes ForkFrom a TOP-LEVEL fork: the conversation is
-	// ForkFrom's, but the workspace has no parent, is cut from the primary
-	// branch and merges into it, and its first message opens with the
-	// fork-into-primary preamble naming ForkFrom. Parent must be unset.
-	ForkIntoPrimary bool
+	// Requester is the workspace whose agent asked for the create, nil when
+	// the user asked (agentrepl.v1.WorkspaceRequester). Recorded on the
+	// workspace; it is never told about its own act.
+	Requester *ids.WorkspaceID
+	// OwnerNotice is the requester's notice to the owner of a child that does
+	// not carry the owner's context (OwnerLands): set exactly then, delivered
+	// with the daemon's addendum.
+	OwnerNotice string
 	// ConsentedUngatedMode is the permission mode the user consented to at
 	// creation. An ungated mode with no consent recorded is REFUSED.
 	ConsentedUngatedMode string
@@ -308,6 +317,21 @@ type Verbs interface {
 	// manifests in the footer, not only in the answer. BY is who asked for it,
 	// which the close record keeps.
 	Close(ctx context.Context, ws ids.WorkspaceID, by wsm.CloseCause) error
+	// SetOneShot marks a workspace a one-shot, or unmarks it, as the asker
+	// (nil for the user) asks, answering the completion directive a marked
+	// workspace follows (standings.go).
+	SetOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, oneShot bool) (string, error)
+	// SetCorrespondence marks a workspace awaiting another, or clears the mark
+	// with nil, as the asker (nil for the user) asks (standings.go).
+	SetCorrespondence(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, awaited *ids.WorkspaceID) error
+	// CloseSelf is the workspace's own agent closing it: the asking turn is
+	// never a blocker, and a workspace whose turn still runs is marked to
+	// close when that turn ends, answering true (close.go). A workspace with
+	// no turn running closes now, answering false.
+	CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// CarryOutSelfClose carries out the close a workspace asked of itself,
+	// when one is marked (SelfCloses calls it at each turn's end).
+	CarryOutSelfClose(ctx context.Context, ws ids.WorkspaceID) error
 	// Kill is the big red button: forced session death, never blocks, data
 	// survives. It is BeginKill and its Teardown, run in one call.
 	Kill(ctx context.Context, ws ids.WorkspaceID) error
@@ -338,6 +362,10 @@ type Verbs interface {
 	// the bounce is done. A workspace with no session is restarted by the
 	// bounce bringing one up.
 	Restart(ctx context.Context, ws ids.WorkspaceID) error
+	// Status answers the workspace's status as an agent reads it, open or
+	// closed (agentrepl.v1.WorkspaceStatus). An unregistered workspace is
+	// refused as unknown_workspace.
+	Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.WorkspaceStatus, error)
 	// Select records the user's switch to this workspace and clears its
 	// attention marker. Idempotent.
 	Select(ctx context.Context, ws ids.WorkspaceID) error
@@ -549,6 +577,14 @@ type Banners interface {
 	Raise(ws ids.WorkspaceID, kind, text string)
 }
 
+// DerivedReporter tells the workspaces a new workspace was derived from -- its
+// owner and its context source -- that it was created
+// (internal/workspacenotice); its landing and its close reach them as
+// lifecycle edges (internal/wsedges). It never blocks.
+type DerivedReporter interface {
+	ReportCreated(ws wsm.Workspace, ownerNotice string)
+}
+
 // Deps are the verbs' collaborators.
 type Deps struct {
 	// Instance is THIS DAEMON's identity. Registration claims serving
@@ -568,11 +604,13 @@ type Deps struct {
 	Rollout   rollout.Controller
 	Drain     drain.Controller
 	Health    health.Reporter
-	Feed      feed.Resolver
-	Footer    footer.Resolver
-	Topbar    topbar.Resolver
-	Sidebar   sidebar.Resolver
-	Host      HostRelay
+	// Derived tells a created, landed or closed workspace's sources about it.
+	Derived DerivedReporter
+	Feed    feed.Resolver
+	Footer  footer.Resolver
+	Topbar  topbar.Resolver
+	Sidebar sidebar.Resolver
+	Host    HostRelay
 	// Banners raises the desktop banner an agent notification earns.
 	Banners Banners
 	// Sessions brings sessions up and down; injected so the verbs do not own
@@ -908,6 +946,8 @@ func New(deps Deps) (Verbs, error) {
 	switch {
 	case deps.DB == nil:
 		return nil, missing("a state client")
+	case deps.Derived == nil:
+		return nil, missing("a derived-workspace reporter")
 	case deps.Git == nil:
 		return nil, missing("a git client")
 	case deps.Accounts == nil:

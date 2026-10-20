@@ -2295,3 +2295,68 @@ func TestSetMergeQueueIsLogged(t *testing.T) {
 		t.Fatalf("record context = %v, want paused on %s", ctx, theRepo)
 	}
 }
+
+// awaitCorrespondence marks theWS awaiting correspondence from AWAITED on
+// the footer the roster projects, as the daemon's standing verb does; an
+// empty name clears it.
+func awaitCorrespondence(t *testing.T, r sidebarResolver, awaited string) {
+	t.Helper()
+	f, ok := r.Resolver.(*fanned)
+	if !ok {
+		t.Fatalf("the resolver is %T, not the fanned pair", r.Resolver)
+	}
+	f.footer.SetAwaiting(theWS, awaited)
+}
+
+func TestRowIsIdleAsyncWhileAwaitingCorrespondence(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, r sidebarResolver)
+		want    string
+	}{
+		{
+			name:    "awaiting with no turn is the background",
+			arrange: func(t *testing.T, r sidebarResolver) { awaitCorrespondence(t, r, "planner") },
+			want:    "idle_async",
+		},
+		{
+			name: "a cleared mark is ready again",
+			arrange: func(t *testing.T, r sidebarResolver) {
+				awaitCorrespondence(t, r, "planner")
+				awaitCorrespondence(t, r, "")
+			},
+			want: "ready",
+		},
+		{
+			name: "a running turn outranks the awaiting",
+			arrange: func(t *testing.T, r sidebarResolver) {
+				awaitCorrespondence(t, r, "planner")
+				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			},
+			want: "submitting",
+		},
+		{
+			name: "the awaiting outranks an unread turn end",
+			arrange: func(t *testing.T, r sidebarResolver) {
+				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+				r.SetTurnEnded(theWS, wsm.CloseCompleted)
+				awaitCorrespondence(t, r, "planner")
+			},
+			want: "idle_async",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+
+			// Act.
+			tc.arrange(t, r)
+
+			// Assert.
+			if got := statusName(onlyRow(t, r)); got != tc.want {
+				t.Fatalf("status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -108,8 +108,17 @@ message FoldHeldPromptError {
     // raced. Once the call settles the prompt is either delivered, or (if the
     // call failed) back in the held section and open to this request again.
     FoldHeldPromptBeingDelivered being_delivered = 11;
+    // The entry directly ahead of `turn` has another author: one was sent by a
+    // workspace's agent (SubmitPromptRequest.sent_by) and the other was not, or
+    // two workspaces sent them. The merged prompt would be drawn under one
+    // author, so the other's words would be attributed to it.
+    FoldHeldPromptAboveOtherAuthor above_other_author = 12;
   }
 }
+
+// The entry ahead has another author. DELIBERATELY EMPTY: the arm's presence
+// is the whole fact.
+message FoldHeldPromptAboveOtherAuthor {}
 
 // The workspace id is not in the daemon's registry. DELIBERATELY EMPTY: the
 // arm's presence is the whole fact.

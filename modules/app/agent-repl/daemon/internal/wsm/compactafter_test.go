@@ -61,7 +61,7 @@ func TestADetachedRequestKeepsItsCompactAfterAsk(t *testing.T) {
 			s, _ := testStore(t)
 			ws := testWorkspace(t, s)
 			repo := RepoKey(t.TempDir())
-			source := MergeSource{Kind: MergeSourceOwnBranch, Detach: NewDetachedMergeID(), DetachName: "reconnect-fix", CompactAfter: tt.compactAfter}
+			source := MergeSource{Kind: MergeSourceOwnBranch, Detach: NewDetachedMergeID(), DetachMaker: "maker", DetachName: "reconnect-fix", CompactAfter: tt.compactAfter}
 
 			// Act
 			if err := s.RequestMerge(context.Background(), repo, ws.ID, source, time.Unix(100, 0)); err != nil {

@@ -318,7 +318,7 @@ log says what is missing and how to install it, once per Emacs."
           (agent-repl--warn-once
            ws (format "spell-unmet:%S" unmet)
            "elisp.spell.enable ws=%s outcome=unavailable unmet=%S fix=%s"
-           ws unmet "run bin/requirements.sh install (or /install-agent-repl)")
+           ws unmet "run bin/requirements.sh install (or /agent-repl-install)")
         (let ((name (plist-get dictionary :name))
               (dir (plist-get dictionary :dir)))
           (agent-repl--spell-configure-ispell ws program name dir)

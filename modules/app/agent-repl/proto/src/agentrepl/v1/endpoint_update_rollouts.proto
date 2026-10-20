@@ -1,0 +1,93 @@
+// endpoint_update_rollouts.proto — UpdateRollouts: hold or release the
+// runtime's ROLLOUTS. RUNTIME section. A rollout is the redeploy a landing in
+// the daemon's own checkout triggers: rebuilding and restarting the running
+// daemon, shims and editor code onto what landed.
+//
+// HOLDING stops those redeploys daemon-wide while merges keep running and
+// landing exactly as they do: for an operator running a hand-deployed build (a
+// profiling build) that a landing would otherwise replace. DURABLE: a hold
+// survives a daemon restart and a handover until it is released.
+//
+// RELEASING DEPLOYS WHAT LANDED. Releasing ends the hold and, when the daemon's
+// checkout holds landings the running build does not carry, rolls them out at
+// once, so no landing is left undeployed by a hold.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/endpoint_deploy.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateRolloutsRequest {
+  // THE ARM IS THE ACTION. REQUIRED.
+  oneof action {
+    // Hold the rollouts.
+    UpdateRolloutsHold hold = 1;
+    // Release them, deploying what landed meanwhile.
+    UpdateRolloutsRelease release = 2;
+  }
+}
+// Hold. No fields: one hold covers every repository, since the deploy it
+// stops is the daemon's own.
+message UpdateRolloutsHold {}
+// Release. No fields.
+message UpdateRolloutsRelease {}
+
+// THE ARM IS THE OUTCOME.
+message UpdateRolloutsResponse {
+  oneof result {
+    UpdateRolloutsSuccess success = 1;
+    UpdateRolloutsError error = 2;
+  }
+}
+// The action is applied.
+message UpdateRolloutsSuccess {
+  // THE ARM IS WHAT WAS DONE.
+  oneof applied {
+    // The rollouts are held.
+    UpdateRolloutsSuccessHeld held = 1;
+    // The rollouts are released.
+    UpdateRolloutsSuccessReleased released = 2;
+  }
+}
+// Held. No fields.
+message UpdateRolloutsSuccessHeld {}
+// Released, and whether that started a rollout.
+message UpdateRolloutsSuccessReleased {
+  // THE ARM IS WHETHER ANYTHING WAS DEPLOYED.
+  oneof deploy {
+    // The running build already carries every landing: nothing to roll out.
+    UpdateRolloutsSuccessReleasedUpToDate up_to_date = 1;
+    // A rollout of what landed during the hold has started; its progress
+    // rides the daemon's deploy reporting as any rollout's does.
+    UpdateRolloutsSuccessReleasedRollingOut rolling_out = 2;
+    // The hold is ended, but the rollout could not start; the next landing
+    // or a deploy by hand rolls out what landed. The release itself stands.
+    UpdateRolloutsSuccessReleasedStartFailed start_failed = 3;
+  }
+}
+// Nothing to roll out. No fields.
+message UpdateRolloutsSuccessReleasedUpToDate {}
+// A rollout started.
+message UpdateRolloutsSuccessReleasedRollingOut {
+  // The deploy's decisions, one per component, exactly as the Deploy rpc
+  // answers them.
+  DeploySuccess deploy = 1;
+}
+message UpdateRolloutsError {
+  oneof cause {
+    // `hold` while the rollouts are already held.
+    UpdateRolloutsAlreadyHeld already_held = 1;
+    // `release` while the rollouts are not held.
+    UpdateRolloutsNotHeld not_held = 2;
+  }
+}
+message UpdateRolloutsAlreadyHeld {}
+message UpdateRolloutsNotHeld {}
+// Why the rollout could not start.
+message UpdateRolloutsSuccessReleasedStartFailed {
+  // The deploy's own account of the failure.
+  string detail = 1;
+}

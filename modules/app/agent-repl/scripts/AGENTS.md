@@ -105,8 +105,8 @@ THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
 about the scripts is found -- at runtime or in its tests -- add or update an entry
 here: what was slow or heavy, the evidence with numbers and the date, the fix
 and its commit (or the open item). Test-performance lessons also go into the
-`/write-tests` skill; runtime profiling and the perf-sensitive list live in
-`/profile-agent-repl`.
+`/agent-repl-tests` skill; runtime profiling and the perf-sensitive list live in
+`/agent-repl-profile`.
 
 - Every hdiutil, diskutil and lsof call testrun makes is bounded at 60s (7c18e136e): a wedged diskarbitrationd once hung a full run 36 minutes in `diskutil unmount` with nothing printed. A wedged disk manager also leaves dead mounts under /tmp that hang anything that stats them.
 - Units run at `taskpolicy -d default` on the run's RAM disk (2026-10-14): the throttled tiers made SSD reads of build caches and binaries 2.5-5x slower and starved units past their bounds (docs/investigations/2026-10-14-test-suite-runtime-remediation.md).

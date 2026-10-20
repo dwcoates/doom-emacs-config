@@ -1425,7 +1425,7 @@ THIS SECTION IS A LIVING DOCUMENT. Whenever an important performance lesson
 about the store is found -- at runtime or in its tests -- add or update an entry
 here: what was slow or heavy, the evidence with numbers and the date, the fix
 and its commit (or the open item). Test-performance lessons also go into the
-`/write-tests` skill; runtime profiling and the perf-sensitive list live in
-`/profile-agent-repl`.
+`/agent-repl-tests` skill; runtime profiling and the perf-sensitive list live in
+`/agent-repl-profile`.
 
 - The store's own db tests already use the in-memory store in 357 of 394 constructions; the checkpoint tests that write ~209MB are file-subject on purpose (their subject is the WAL). The store is not mocked where it is the subject.

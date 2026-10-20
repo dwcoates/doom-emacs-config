@@ -96,6 +96,18 @@ import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
 import "agentrepl/v1/endpoint_watch_page.proto";
 import "agentrepl/v1/endpoint_open_tabs.proto";
 import "agentrepl/v1/endpoint_report_page_drawn.proto";
+import "agentrepl/v1/endpoint_get_workspace_status.proto";
+import "agentrepl/v1/endpoint_get_merge_queue_status.proto";
+import "agentrepl/v1/endpoint_subscribe_workspace.proto";
+import "agentrepl/v1/endpoint_unsubscribe_workspace.proto";
+import "agentrepl/v1/endpoint_subscribe_merge_queue.proto";
+import "agentrepl/v1/endpoint_unsubscribe_merge_queue.proto";
+import "agentrepl/v1/endpoint_update_rollouts.proto";
+import "agentrepl/v1/endpoint_evaluate_in_editor.proto";
+import "agentrepl/v1/endpoint_answer_editor_evaluation.proto";
+import "agentrepl/v1/endpoint_compact_workspace.proto";
+import "agentrepl/v1/endpoint_set_workspace_correspondence.proto";
+import "agentrepl/v1/endpoint_set_workspace_one_shot.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -159,7 +171,10 @@ service AgentRepl {
   rpc RollBack(RollBackRequest) returns (RollBackResponse);
   // The prompts a rollback can reach, newest first, for a frontend to offer
   // as a choice; changes nothing. See endpoint_list_rollback_prompts.proto.
-  rpc ListRollbackPrompts(ListRollbackPromptsRequest) returns (ListRollbackPromptsResponse);
+  rpc ListRollbackPrompts(ListRollbackPromptsRequest) returns (ListRollbackPromptsResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // The permission card's verdicts and the question card's answers. See
   // endpoint_answer_permission.proto.
@@ -178,7 +193,10 @@ service AgentRepl {
 
   // The one global stream: the roster, whole, for every webview alike. See
   // endpoint_watch_workspace_roster.proto.
-  rpc WatchWorkspaceRoster(WatchWorkspaceRosterRequest) returns (stream WatchWorkspaceRosterResponse);
+  rpc WatchWorkspaceRoster(WatchWorkspaceRosterRequest) returns (stream WatchWorkspaceRosterResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // A new workspace in a repository; the daemon names and creates everything.
   // See endpoint_create_workspace.proto.
@@ -195,7 +213,10 @@ service AgentRepl {
   // Every vendor conversation filed under the workspace's directory, with
   // what each would cost to resume. A pull: the set changes only when a
   // conversation is started or cleared.
-  rpc ListWorkspaceTranscripts(ListWorkspaceTranscriptsRequest) returns (ListWorkspaceTranscriptsResponse);
+  rpc ListWorkspaceTranscripts(ListWorkspaceTranscriptsRequest) returns (ListWorkspaceTranscriptsResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
   // Point the workspace at one of those conversations. A session swap, so a
   // cold one comes up parked at its cold gate.
   rpc BindWorkspaceSession(BindWorkspaceSessionRequest) returns (BindWorkspaceSessionResponse);
@@ -210,8 +231,19 @@ service AgentRepl {
   // undo for a registration. See endpoint_forget_workspace.proto.
   rpc ForgetWorkspace(ForgetWorkspaceRequest) returns (ForgetWorkspaceResponse);
 
-  // Enqueue this workspace's merge; its life from there is the feed's bubble.
+  // Land this workspace's own branch in the target fixed at its creation;
+  // its life from there is the feed's bubble. See
+  // endpoint_merge_workspace.proto.
   rpc MergeWorkspace(MergeWorkspaceRequest) returns (MergeWorkspaceResponse);
+  // Compact a workspace's conversation through its prompt queue. See
+  // endpoint_compact_workspace.proto.
+  rpc CompactWorkspace(CompactWorkspaceRequest) returns (CompactWorkspaceResponse);
+  // Mark a workspace a one-shot after its creation, or unmark it. See
+  // endpoint_set_workspace_one_shot.proto.
+  rpc SetWorkspaceOneShot(SetWorkspaceOneShotRequest) returns (SetWorkspaceOneShotResponse);
+  // Mark a workspace as awaiting correspondence from another, or clear the
+  // mark. See endpoint_set_workspace_correspondence.proto.
+  rpc SetWorkspaceCorrespondence(SetWorkspaceCorrespondenceRequest) returns (SetWorkspaceCorrespondenceResponse);
 
 
 
@@ -332,14 +364,23 @@ service AgentRepl {
   // Operator control of the merge queue. See
   // endpoint_update_merge_queue.proto.
   rpc UpdateMergeQueue(UpdateMergeQueueRequest) returns (UpdateMergeQueueResponse);
+  // Hold or release the runtime's rollouts; releasing deploys what landed
+  // during the hold. See endpoint_update_rollouts.proto.
+  rpc UpdateRollouts(UpdateRolloutsRequest) returns (UpdateRolloutsResponse);
 
   // Is the daemon itself healthy? Unhealthy is an ANSWER. See
   // endpoint_daemon_health.proto.
-  rpc DaemonHealth(DaemonHealthRequest) returns (DaemonHealthResponse);
+  rpc DaemonHealth(DaemonHealthRequest) returns (DaemonHealthResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // Is this workspace's session healthy? Unhealthy is an ANSWER. See
   // endpoint_session_health.proto.
-  rpc SessionHealth(SessionHealthRequest) returns (SessionHealthResponse);
+  rpc SessionHealth(SessionHealthRequest) returns (SessionHealthResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // A console-less client's diagnostic record, into the durable log. See
   // endpoint_client_log.proto.
@@ -405,7 +446,10 @@ service AgentRepl {
 
   // Every slash command the workspace's agent runtime answers, for the
   // composer's completion. See endpoint_list_slash_commands.proto.
-  rpc ListSlashCommands(ListSlashCommandsRequest) returns (ListSlashCommandsResponse);
+  rpc ListSlashCommands(ListSlashCommandsRequest) returns (ListSlashCommandsResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // ---- WEB LINK ----
   // The webview's connection surface: neither host-natured nor a drawn
@@ -468,4 +512,35 @@ service AgentRepl {
   // Makes a digest now instead of at the daily cadence. See
   // endpoint_refresh_news_digest.proto.
   rpc RefreshNewsDigest(RefreshNewsDigestRequest) returns (RefreshNewsDigestResponse);
+
+  // ---- AGENT API: what an agent reads and follows ----
+  // One workspace's status, now. See endpoint_get_workspace_status.proto.
+  rpc GetWorkspaceStatus(GetWorkspaceStatusRequest) returns (GetWorkspaceStatusResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Merge queues' status, now. See endpoint_get_merge_queue_status.proto.
+  rpc GetMergeQueueStatus(GetMergeQueueStatusRequest) returns (GetMergeQueueStatusResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Tell one workspace's agent when another workspace changes, answering with
+  // its status now. See endpoint_subscribe_workspace.proto.
+  rpc SubscribeWorkspace(SubscribeWorkspaceRequest) returns (SubscribeWorkspaceResponse);
+  // End a workspace subscription. See endpoint_unsubscribe_workspace.proto.
+  rpc UnsubscribeWorkspace(UnsubscribeWorkspaceRequest) returns (UnsubscribeWorkspaceResponse);
+  // Tell one workspace's agent about a merge queue's changes, answering with
+  // the queue now. See endpoint_subscribe_merge_queue.proto.
+  rpc SubscribeMergeQueue(SubscribeMergeQueueRequest) returns (SubscribeMergeQueueResponse);
+  // End a merge-queue subscription. See
+  // endpoint_unsubscribe_merge_queue.proto.
+  rpc UnsubscribeMergeQueue(UnsubscribeMergeQueueRequest) returns (UnsubscribeMergeQueueResponse);
+
+  // ---- EDITOR: elisp evaluated in the running editor ----
+  // Evaluate elisp in the running editor and answer with the result. See
+  // endpoint_evaluate_in_editor.proto.
+  rpc EvaluateInEditor(EvaluateInEditorRequest) returns (EvaluateInEditorResponse);
+  // The editor's answer to a pushed evaluation. See
+  // endpoint_answer_editor_evaluation.proto.
+  rpc AnswerEditorEvaluation(AnswerEditorEvaluationRequest) returns (AnswerEditorEvaluationResponse);
 }

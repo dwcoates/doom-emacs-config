@@ -19,6 +19,15 @@ function codeOf(act: () => void): Code | undefined {
 }
 
 describe("validateStartSessionRequest", () => {
+  it("refuses a start that names no workspace", () => {
+    // Arrange
+    const request = requests.startSessionRequest();
+    request.workspaceName = "";
+
+    // Act, Assert
+    expect(codeOf(() => validate.validateStartSessionRequest(request))).toBe(Code.InvalidArgument);
+  });
+
   it("accepts a fresh start naming a model and a mode", () => {
     // Arrange, Act, Assert.
     expect(
@@ -29,6 +38,7 @@ describe("validateStartSessionRequest", () => {
   it("accepts a resume naming a vendor session", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
+      workspaceName: "parser-fix",
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "v-1" }),
@@ -50,6 +60,7 @@ describe("validateStartSessionRequest", () => {
   it("accepts a resume naming its rolled-back turns", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
+      workspaceName: "parser-fix",
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, {
@@ -66,6 +77,7 @@ describe("validateStartSessionRequest", () => {
   it("refuses a rolled-back turn with an empty id", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
+      workspaceName: "parser-fix",
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, {
@@ -82,6 +94,7 @@ describe("validateStartSessionRequest", () => {
   it("refuses a resume naming no vendor session", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
+      workspaceName: "parser-fix",
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "" }),
@@ -97,6 +110,7 @@ describe("validateStartSessionRequest", () => {
     // the SDK chose.
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
+      workspaceName: "parser-fix",
       source: {
         case: "fresh",
         value: create(shimv1.StartSessionFreshSchema, {
@@ -113,6 +127,7 @@ describe("validateStartSessionRequest", () => {
     // Saying nothing and meaning to say something are different requests.
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
+      workspaceName: "parser-fix",
       source: {
         case: "fresh",
         value: create(shimv1.StartSessionFreshSchema, {
@@ -129,6 +144,7 @@ describe("validateStartSessionRequest", () => {
   it("refuses a fresh start with an unset permission mode", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
+      workspaceName: "parser-fix",
       source: {
         case: "fresh",
         value: create(shimv1.StartSessionFreshSchema, {
@@ -309,6 +325,33 @@ describe("validateStartTurnRequest", () => {
 
     // Act, Assert.
     expect(codeOf(() => validate.validateStartTurnRequest(request))).toBe(Code.InvalidArgument);
+  });
+});
+
+describe("validateStartTurnRequest sent_by", () => {
+  it("refuses an agent's prompt that names no sender", () => {
+    // Arrange.
+    const request = create(shimv1.StartTurnRequestSchema, {
+      turn: create(conversationv1.TurnIdSchema, { value: "t" }),
+      said: requests.said(),
+      origin: conversationv1.PromptOrigin.AGENT_SENT,
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartTurnRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("accepts an agent's prompt that names its sender", () => {
+    // Arrange.
+    const request = create(shimv1.StartTurnRequestSchema, {
+      turn: create(conversationv1.TurnIdSchema, { value: "t" }),
+      said: requests.said(),
+      origin: conversationv1.PromptOrigin.AGENT_SENT,
+      sentBy: create(shimv1.StartTurnSentBySchema, { workspaceId: "ws-sender", workspaceName: "parser-fix" }),
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartTurnRequest(request))).toBeUndefined();
   });
 });
 
@@ -520,6 +563,7 @@ describe("validateStartSessionRequest cold remediation", () => {
     coldRemediation: conversationv1.SessionColdRemediation | undefined,
   ): shimv1.StartSessionRequest {
     return create(shimv1.StartSessionRequestSchema, {
+      workspaceName: "parser-fix",
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, {

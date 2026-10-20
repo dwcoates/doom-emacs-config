@@ -17,7 +17,7 @@ import {
   type SpawnChild,
   type VendorChildExit,
 } from "../../src/sdk/real-query.js";
-import { METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH } from "../../src/metaprompt.js";
+import { METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH, workspaceSection } from "../../src/metaprompt.js";
 
 /** The servers argument of a test that is not about agent-repl's own MCP server. */
 const NO_SERVERS = {};
@@ -33,6 +33,7 @@ function homeWithMetaprompt(text: string): string {
 function spec(overrides: Partial<RealQuerySpec> = {}): RealQuerySpec {
   return {
     cwd: "/ws",
+    workspaceName: "parser-fix",
     claudeConfigDir: "/accounts/primary",
     binding: { kind: "fresh", sessionId: "vendor-1" },
     permissionMode: "default",
@@ -63,12 +64,12 @@ describe("realQueryOptions", () => {
     expect(options.allowedTools).toEqual(["mcp__agent-repl__show_chess_board"]);
   });
 
-  it("keeps the claude_code preset so the model can resolve ~", () => {
+  it("keeps the claude_code preset so the model can resolve ~, naming the workspace", () => {
     // Arrange, Act.
     const options = realQueryOptions(spec(), NO_SERVERS);
 
     // Assert.
-    expect(options.systemPrompt).toEqual({ type: "preset", preset: "claude_code" });
+    expect(options.systemPrompt).toEqual({ type: "preset", preset: "claude_code", append: workspaceSection("parser-fix") });
   });
 
   it("appends the canonical metaprompt to the preset", () => {
@@ -82,7 +83,7 @@ describe("realQueryOptions", () => {
     expect(options.systemPrompt).toEqual({
       type: "preset",
       preset: "claude_code",
-      append: "BE EXCELLENT",
+      append: `BE EXCELLENT\n\n${workspaceSection("parser-fix")}`,
     });
   });
 

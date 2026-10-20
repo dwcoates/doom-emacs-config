@@ -315,11 +315,88 @@ ENCODER).  An unset oneof and an unrecognized arm are contract breaches."
                       message field keyword)
     (cons (nth 1 arm) (funcall (nth 2 arm) (plist-get value :value)))))
 
-;;;; ---- CreateWorkspace: encode ----------------------------------------
+;;;; ---- The agent API's choices (workspace_topology.proto) -------------
+;;
+;; NOTHING IS IMPLIED: every create names its requester, its context origin
+;; and its topology, and every merge its requester and its placement, so
+;; each is a REQUIRED oneof here and an unset one is refused before it can
+;; be sent.
 
-(defun agent-repl-wire-encode-create-workspace-fork (_present)
-  "Encode CreateWorkspaceFork.  Empty: presence IS the fork fact."
+(defun agent-repl-wire-encode-workspace-requester-user (_value)
+  "Encode WorkspaceRequesterUser.  Empty: the arm IS the fact."
   nil)
+
+(defun agent-repl-wire-encode-workspace-requester-workspace (ref)
+  "Encode WorkspaceRequesterWorkspace from the asking workspace\='s REF."
+  (list (cons 'workspace
+              (agent-repl-wire-encode-workspace-ref
+               (agent-repl-wire-verbs--require "WorkspaceRequesterWorkspace" "workspace" ref)))))
+
+(defun agent-repl-wire-encode-workspace-requester (value)
+  "Encode WorkspaceRequester from oneof VALUE.
+VALUE is (:arm :user) or (:arm :workspace :value REF)."
+  (list (agent-repl-wire-verbs--encode-oneof
+         "WorkspaceRequester" "asker" value
+         (list (list :user 'user #'agent-repl-wire-encode-workspace-requester-user)
+               (list :workspace 'workspace #'agent-repl-wire-encode-workspace-requester-workspace)))))
+
+(defun agent-repl-wire-encode-workspace-context-origin-fresh (_value)
+  "Encode WorkspaceContextOriginFresh.  Empty: the arm IS the fact."
+  nil)
+
+(defun agent-repl-wire-encode-workspace-context-origin-fork (ref)
+  "Encode WorkspaceContextOriginFork from the forked workspace\='s REF."
+  (list (cons 'workspace
+              (agent-repl-wire-encode-workspace-ref
+               (agent-repl-wire-verbs--require "WorkspaceContextOriginFork" "workspace" ref)))))
+
+(defun agent-repl-wire-encode-workspace-context-origin (value)
+  "Encode WorkspaceContextOrigin from oneof VALUE.
+VALUE is (:arm :fresh) or (:arm :fork :value REF)."
+  (list (agent-repl-wire-verbs--encode-oneof
+         "WorkspaceContextOrigin" "origin" value
+         (list (list :fresh 'fresh #'agent-repl-wire-encode-workspace-context-origin-fresh)
+               (list :fork 'fork #'agent-repl-wire-encode-workspace-context-origin-fork)))))
+
+(defun agent-repl-wire-encode-workspace-topology-primary (_value)
+  "Encode WorkspaceTopologyPrimary.  Empty: the arm IS the fact."
+  nil)
+
+(defun agent-repl-wire-encode-workspace-topology-child (value)
+  "Encode WorkspaceTopologyChild from plist VALUE (:owner REF :owner-notice TEXT).
+The owner is required; the notice rides only when given."
+  (let ((message "WorkspaceTopologyChild"))
+    (append
+     (list (cons 'owner (agent-repl-wire-encode-workspace-ref
+                         (agent-repl-wire-verbs--require message "owner" (plist-get value :owner)))))
+     (when (plist-get value :owner-notice)
+       (list (cons 'ownerNotice (list (cons 'text (plist-get value :owner-notice)))))))))
+
+(defun agent-repl-wire-encode-workspace-topology (value)
+  "Encode WorkspaceTopology from oneof VALUE.
+VALUE is (:arm :primary) or
+\(:arm :child :value (:owner REF :owner-notice TEXT))."
+  (list (agent-repl-wire-verbs--encode-oneof
+         "WorkspaceTopology" "shape" value
+         (list (list :primary 'primary #'agent-repl-wire-encode-workspace-topology-primary)
+               (list :child 'child #'agent-repl-wire-encode-workspace-topology-child)))))
+
+(defun agent-repl-wire-encode-merge-queue-placement-back (_value)
+  "Encode MergeQueuePlacementBack.  Empty: the arm IS the fact."
+  nil)
+
+(defun agent-repl-wire-encode-merge-queue-placement-front (_value)
+  "Encode MergeQueuePlacementFront.  Empty: the arm IS the fact."
+  nil)
+
+(defun agent-repl-wire-encode-merge-queue-placement (value)
+  "Encode MergeQueuePlacement from oneof VALUE: (:arm :back) or (:arm :front)."
+  (list (agent-repl-wire-verbs--encode-oneof
+         "MergeQueuePlacement" "place" value
+         (list (list :back 'back #'agent-repl-wire-encode-merge-queue-placement-back)
+               (list :front 'front #'agent-repl-wire-encode-merge-queue-placement-front)))))
+
+;;;; ---- CreateWorkspace: encode ----------------------------------------
 
 (defun agent-repl-wire-encode-create-workspace-ungated-consent (_present)
   "Encode CreateWorkspaceUngatedConsent.  Empty: presence IS the consent."
@@ -341,7 +418,8 @@ ENCODER).  An unset oneof and an unrecognized arm are contract breaches."
 
 (defun agent-repl-wire-encode-create-workspace-one-shot (value)
   "Encode CreateWorkspaceOneShot from plist VALUE.
-VALUE is (:prompt SAID :context WORKSPACE-REF).  A one-shot IS its prompt,
+VALUE is (:prompt SAID :topology TOPOLOGY :context WORKSPACE-REF).  The
+topology is required.  A one-shot IS its prompt,
 so the prompt is required: there is no finish choice, because what
 happens on completion is the REPOSITORY\='s own directive, which the daemon
 appends to the commission and the agent carries out.  CONTEXT, when
@@ -351,7 +429,10 @@ commission with a note naming it."
     (append
      (list (cons 'prompt
                  (agent-repl-wire-encode-create-workspace-one-shot-prompt
-                  (agent-repl-wire-verbs--require message "prompt" (plist-get value :prompt)))))
+                  (agent-repl-wire-verbs--require message "prompt" (plist-get value :prompt))))
+           (cons 'topology
+                 (agent-repl-wire-encode-workspace-topology
+                  (agent-repl-wire-verbs--require message "topology" (plist-get value :topology)))))
      (when (plist-get value :context)
        (list (cons 'context
                    (agent-repl-wire-encode-create-workspace-one-shot-context
@@ -393,17 +474,19 @@ never an empty UserSaid."
 
 (defun agent-repl-wire-encode-create-workspace-standard (value)
   "Encode CreateWorkspaceStandard from plist VALUE.
-Every field is optional: an absent initial prompt is an empty workspace,
-an absent base ref is the repo's default resolution, an absent name means
-the daemon mints one, and absent merge actions mean none are configured."
-  (let (out)
+The TOPOLOGY is required: where the workspace is cut from and lands.
+Every other field is optional: an absent initial prompt is an empty
+workspace, an absent name means the daemon mints one, and absent merge
+actions mean none are configured."
+  (let ((out (list (cons 'topology
+                         (agent-repl-wire-encode-workspace-topology
+                          (agent-repl-wire-verbs--require "CreateWorkspaceStandard" "topology"
+                                                           (plist-get value :topology)))))))
     (when (plist-get value :initial-prompt)
       (push (cons 'initialPrompt
                   (agent-repl-wire-encode-create-workspace-standard-initial-prompt
                    (plist-get value :initial-prompt)))
             out))
-    (when (plist-get value :base-ref)
-      (push (cons 'baseRef (plist-get value :base-ref)) out))
     (when (plist-get value :name)
       (push (cons 'name (plist-get value :name)) out))
     (when (plist-get value :merge-actions)
@@ -412,30 +495,6 @@ the daemon mints one, and absent merge actions mean none are configured."
                    (plist-get value :merge-actions)))
             out))
     (nreverse out)))
-
-(defun agent-repl-wire-encode-create-workspace-parent-workspace (ref)
-  "Encode CreateWorkspaceParent's `workspace' use site from REF."
-  (agent-repl-wire-encode-workspace-ref ref))
-
-(defun agent-repl-wire-encode-create-workspace-parent-fork (present)
-  "Encode CreateWorkspaceParent's `fork' use site from PRESENT."
-  (agent-repl-wire-encode-create-workspace-fork present))
-
-(defun agent-repl-wire-encode-create-workspace-parent (value)
-  "Encode CreateWorkspaceParent from plist VALUE.
-VALUE is (:workspace REF :fork PRESENT-FLAG).  The parent workspace is
-required; the fork flag lives HERE by construction, which is exactly why a
-fork without a parent is unrepresentable."
-  (let ((out (list (cons 'workspace
-                         (agent-repl-wire-encode-create-workspace-parent-workspace
-                          (agent-repl-wire-verbs--require
-                           "CreateWorkspaceParent" "workspace"
-                           (plist-get value :workspace)))))))
-    (when (plist-get value :fork)
-      (setq out (append out (list (cons 'fork
-                                        (agent-repl-wire-encode-create-workspace-parent-fork
-                                         (plist-get value :fork)))))))
-    out))
 
 (defun agent-repl-wire-encode-create-workspace-request-repository (ref)
   "Encode CreateWorkspaceRequest's `repository' use site from REF."
@@ -449,24 +508,6 @@ fork without a parent is unrepresentable."
   "Encode CreateWorkspaceRequest's `one_shot' form arm from VALUE."
   (agent-repl-wire-encode-create-workspace-one-shot value))
 
-(defun agent-repl-wire-encode-create-workspace-request-parent (value)
-  "Encode CreateWorkspaceRequest's `parent' use site from VALUE."
-  (agent-repl-wire-encode-create-workspace-parent value))
-
-(defun agent-repl-wire-encode-create-workspace-fork-source-workspace (ref)
-  "Encode CreateWorkspaceForkSource's `workspace' use site from REF."
-  (agent-repl-wire-encode-workspace-ref ref))
-
-(defun agent-repl-wire-encode-create-workspace-fork-source (ref)
-  "Encode CreateWorkspaceForkSource from the source workspace's REF."
-  (list (cons 'workspace
-              (agent-repl-wire-encode-create-workspace-fork-source-workspace
-               (agent-repl-wire-verbs--require "CreateWorkspaceForkSource" "workspace" ref)))))
-
-(defun agent-repl-wire-encode-create-workspace-request-fork-source (ref)
-  "Encode CreateWorkspaceRequest's `fork_source' use site from REF."
-  (agent-repl-wire-encode-create-workspace-fork-source ref))
-
 (defun agent-repl-wire-encode-create-workspace-request-priority (priority)
   "Encode CreateWorkspaceRequest's `priority' use site from PRIORITY."
   (agent-repl-wire-encode-workspace-priority priority))
@@ -477,15 +518,13 @@ fork without a parent is unrepresentable."
 
 (defun agent-repl-wire-encode-create-workspace-request (request)
   "Encode CreateWorkspaceRequest from plist REQUEST.
-REQUEST is (:repository REPO-REF :form ONEOF :parent PARENT
-:fork-source WORKSPACE-REF :model STRING :priority PRIORITY :allow-ungated
-FLAG).  FORK-SOURCE is the workspace whose conversation a fork into the
-primary branch copies; it never rides beside a parent.  The repository
-and the form arm
-are required — the arm IS the creation form, so a request without one is
+REQUEST is (:repository REPO-REF :form ONEOF :requester REQUESTER
+:context-origin ORIGIN :model STRING :priority PRIORITY :allow-ungated
+FLAG).  The repository, the form arm, the requester and the context
+origin are required -- nothing is implied, so a request without one is
 refused before it can be sent.  Everything else is optional and absent
 means what the proto says absence means: the daemon's default model, an
-unprioritized workspace, a top-level workspace, no ungated consent."
+unprioritized workspace, no ungated consent."
   (let ((message "CreateWorkspaceRequest")
         out)
     (push (cons 'repository
@@ -500,14 +539,14 @@ unprioritized workspace, a top-level workspace, no ungated consent."
                  (list :one-shot 'oneShot
                        #'agent-repl-wire-encode-create-workspace-request-one-shot)))
           out)
-    (when (plist-get request :parent)
-      (push (cons 'parent (agent-repl-wire-encode-create-workspace-request-parent
-                           (plist-get request :parent)))
-            out))
-    (when (plist-get request :fork-source)
-      (push (cons 'forkSource (agent-repl-wire-encode-create-workspace-request-fork-source
-                               (plist-get request :fork-source)))
-            out))
+    (push (cons 'requester
+                (agent-repl-wire-encode-workspace-requester
+                 (agent-repl-wire-verbs--require message "requester" (plist-get request :requester))))
+          out)
+    (push (cons 'contextOrigin
+                (agent-repl-wire-encode-workspace-context-origin
+                 (agent-repl-wire-verbs--require message "context_origin" (plist-get request :context-origin))))
+          out)
     (when (plist-get request :model)
       (push (cons 'model (plist-get request :model)) out))
     (when (plist-get request :priority)
@@ -553,11 +592,6 @@ permission mode was asked for without the explicit consent."
 the workspace's branch and dir."
   (agent-repl-wire-verbs--decode-empty "CreateWorkspaceNoSlug" json))
 
-(defun agent-repl-wire-decode-create-workspace-fork-parent-has-no-conversation (json)
-  "Decode CreateWorkspaceForkParentHasNoConversation from JSON.  Empty: A fork
-was asked for from a parent that has no conversation to fork."
-  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceForkParentHasNoConversation" json))
-
 (defun agent-repl-wire-decode-create-workspace-brief-missing (json)
   "Decode CreateWorkspaceBriefMissing from JSON into a plist (`:name').
 The named brief file is absent."
@@ -571,53 +605,23 @@ The named brief file is absent."
 the form names is not one the daemon knows."
   (agent-repl-wire-verbs--decode-empty "CreateWorkspaceUnknownRepository" json))
 
-(defun agent-repl-wire-decode-create-workspace-unknown-parent (json)
-  "Decode CreateWorkspaceUnknownParent from JSON.  Empty: The parent workspace
-is not in the daemon's registry."
-  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceUnknownParent" json))
-
-(defun agent-repl-wire-decode-create-workspace-base-ref-unresolved (json)
-  "Decode CreateWorkspaceBaseRefUnresolved from JSON into a plist (`:ref').
-The base ref does not resolve in the repository."
-  (let ((message "CreateWorkspaceBaseRefUnresolved"))
-    (agent-repl-wire-verbs--check-keys message json '(ref))
-    (list :ref (agent-repl-wire-verbs--decode-string
-                       message 'ref json))))
-
-(defun agent-repl-wire-decode-create-workspace-base-ref-off-primary-branch (json)
-  "Decode CreateWorkspaceBaseRefOffPrimaryBranch from JSON into a plist
-\(`:ref' `:primary-branch').
-A top-level workspace's base ref is not on the primary branch."
-  (let ((message "CreateWorkspaceBaseRefOffPrimaryBranch"))
-    (agent-repl-wire-verbs--check-keys message json '(ref primaryBranch))
-    (list :ref (agent-repl-wire-verbs--decode-string message 'ref json)
-          :primary-branch (agent-repl-wire-verbs--decode-string message 'primaryBranch json))))
-
-(defun agent-repl-wire-decode-create-workspace-fork-source-ref (json)
-  "Decode a fork-source arm's `workspace' use site from JSON."
-  (agent-repl-wire-decode-workspace-ref json))
+(defun agent-repl-wire-verbs--decode-ref-arm (message field json)
+  "Decode MESSAGE, whose one FIELD names a `WorkspaceRef\', from JSON.
+Returns (KEYWORD REF), KEYWORD being FIELD\'s keyword."
+  (agent-repl-wire-verbs--check-keys message json (list field))
+  (list (intern (concat ":" (symbol-name field)))
+        (agent-repl-wire-verbs--decode-optional-message
+         message field json #'agent-repl-wire-decode-workspace-ref)))
 
 (defun agent-repl-wire-decode-create-workspace-unknown-fork-source (json)
   "Decode CreateWorkspaceUnknownForkSource from JSON into (:workspace REF).
 The fork source workspace is not in the daemon's registry."
-  (let ((message "CreateWorkspaceUnknownForkSource"))
-    (agent-repl-wire-verbs--check-keys message json '(workspace))
-    (list :workspace (agent-repl-wire-verbs--decode-optional-message
-                      message 'workspace json
-                      #'agent-repl-wire-decode-create-workspace-fork-source-ref))))
-
-(defun agent-repl-wire-decode-create-workspace-unknown-context-workspace-ref (json)
-  "Decode CreateWorkspaceUnknownContextWorkspace's `workspace' use site from JSON."
-  (agent-repl-wire-decode-workspace-ref json))
+  (agent-repl-wire-verbs--decode-ref-arm "CreateWorkspaceUnknownForkSource" 'workspace json))
 
 (defun agent-repl-wire-decode-create-workspace-unknown-context-workspace (json)
   "Decode CreateWorkspaceUnknownContextWorkspace from JSON into (:workspace REF).
 The one-shot\='s context workspace is not in the daemon\='s registry."
-  (let ((message "CreateWorkspaceUnknownContextWorkspace"))
-    (agent-repl-wire-verbs--check-keys message json '(workspace))
-    (list :workspace (agent-repl-wire-verbs--decode-optional-message
-                      message 'workspace json
-                      #'agent-repl-wire-decode-create-workspace-unknown-context-workspace-ref))))
+  (agent-repl-wire-verbs--decode-ref-arm "CreateWorkspaceUnknownContextWorkspace" 'workspace json))
 
 (defun agent-repl-wire-decode-create-workspace-error-unknown-context-workspace (json)
   "Decode CreateWorkspaceError's `unknown_context_workspace' cause arm."
@@ -626,11 +630,7 @@ The one-shot\='s context workspace is not in the daemon\='s registry."
 (defun agent-repl-wire-decode-create-workspace-fork-source-has-no-conversation (json)
   "Decode CreateWorkspaceForkSourceHasNoConversation from JSON into
 \(:workspace REF).  The fork source workspace has no conversation to copy."
-  (let ((message "CreateWorkspaceForkSourceHasNoConversation"))
-    (agent-repl-wire-verbs--check-keys message json '(workspace))
-    (list :workspace (agent-repl-wire-verbs--decode-optional-message
-                      message 'workspace json
-                      #'agent-repl-wire-decode-create-workspace-fork-source-ref))))
+  (agent-repl-wire-verbs--decode-ref-arm "CreateWorkspaceForkSourceHasNoConversation" 'workspace json))
 
 (defun agent-repl-wire-decode-create-workspace-name-reserved (json)
   "Decode CreateWorkspaceNameReserved from JSON into (:branch BRANCH).
@@ -643,10 +643,6 @@ workspace has not been created yet; BRANCH is what the name resolves to."
 (defun agent-repl-wire-decode-create-workspace-error-name-reserved (json)
   "Decode CreateWorkspaceError's `name_reserved' cause arm."
   (agent-repl-wire-decode-create-workspace-name-reserved json))
-
-(defun agent-repl-wire-decode-create-workspace-error-base-ref-off-primary-branch (json)
-  "Decode CreateWorkspaceError's `base_ref_off_primary_branch' cause arm."
-  (agent-repl-wire-decode-create-workspace-base-ref-off-primary-branch json))
 
 (defun agent-repl-wire-decode-create-workspace-error-unknown-fork-source (json)
   "Decode CreateWorkspaceError's `unknown_fork_source' cause arm."
@@ -716,11 +712,6 @@ the last thing the model said, when it said anything at all."
   "Decode CreateWorkspaceError's `no_slug' cause arm from JSON."
   (agent-repl-wire-decode-create-workspace-no-slug json))
 
-(defun agent-repl-wire-decode-create-workspace-error-fork-parent-has-no-conversation (json)
-  "Decode CreateWorkspaceError's `fork_parent_has_no_conversation' cause arm
-from JSON."
-  (agent-repl-wire-decode-create-workspace-fork-parent-has-no-conversation json))
-
 (defun agent-repl-wire-decode-create-workspace-error-brief-missing (json)
   "Decode CreateWorkspaceError's `brief_missing' cause arm from JSON."
   (agent-repl-wire-decode-create-workspace-brief-missing json))
@@ -728,14 +719,6 @@ from JSON."
 (defun agent-repl-wire-decode-create-workspace-error-unknown-repository (json)
   "Decode CreateWorkspaceError's `unknown_repository' cause arm from JSON."
   (agent-repl-wire-decode-create-workspace-unknown-repository json))
-
-(defun agent-repl-wire-decode-create-workspace-error-unknown-parent (json)
-  "Decode CreateWorkspaceError's `unknown_parent' cause arm from JSON."
-  (agent-repl-wire-decode-create-workspace-unknown-parent json))
-
-(defun agent-repl-wire-decode-create-workspace-error-base-ref-unresolved (json)
-  "Decode CreateWorkspaceError's `base_ref_unresolved' cause arm from JSON."
-  (agent-repl-wire-decode-create-workspace-base-ref-unresolved json))
 
 (defun agent-repl-wire-decode-create-workspace-error-worktree-creation-failed (json)
   "Decode CreateWorkspaceError's `worktree_creation_failed' cause arm from
@@ -761,32 +744,64 @@ temporary directory; JSON carries the canonical `dir' and `temporary_root'."
   (agent-repl-wire-decode-inside-temporary-directory
    "CreateWorkspaceInsideTemporaryDirectory" json))
 
+(defun agent-repl-wire-decode-create-workspace-error-unknown-owner (json)
+  "Decode CreateWorkspaceError's `unknown_owner' arm into (:owner REF).
+The child\='s owner is not in the registry, or is in another repository."
+  (agent-repl-wire-verbs--decode-ref-arm
+   "CreateWorkspaceUnknownOwner" 'owner json))
+
+(defun agent-repl-wire-decode-create-workspace-error-owner-notice-required (json)
+  "Decode CreateWorkspaceError's `owner_notice_required' arm.  Empty: a
+child not forked from its owner carries no owner notice."
+  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceOwnerNoticeRequired" json))
+
+(defun agent-repl-wire-decode-create-workspace-error-owner-notice-unexpected (json)
+  "Decode CreateWorkspaceError's `owner_notice_unexpected' arm.  Empty: a
+child forked from its owner carries a notice it may not carry."
+  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceOwnerNoticeUnexpected" json))
+
+(defun agent-repl-wire-decode-create-workspace-error-one-shot-owner-lands (json)
+  "Decode CreateWorkspaceError's `one_shot_owner_lands' arm into (:owner REF).
+Only the owner lands such a child, and a one-shot lands itself."
+  (agent-repl-wire-verbs--decode-ref-arm
+   "CreateWorkspaceOneShotOwnerLands" 'owner json))
+
+(defun agent-repl-wire-decode-create-workspace-error-unknown-requester (json)
+  "Decode CreateWorkspaceError's `unknown_requester' arm into (:workspace REF).
+The requesting workspace is not in the daemon\='s registry."
+  (agent-repl-wire-verbs--decode-ref-arm
+   "CreateWorkspaceUnknownRequester" 'workspace json))
+
 (defun agent-repl-wire-decode-create-workspace-error (json)
   "Decode CreateWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
-arm this codec does not know is refused as an unknown field."
+arm this codec does not know is refused as an unknown field.  The
+async-merge arms and `origin_fetch_failed' are not decoded: an async
+merge and a create cut from origin are an agent\='s requests, never the
+editor\='s, so one answering an editor create is a breach."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory baseRefOffPrimaryBranch unknownForkSource forkSourceHasNoConversation nameReserved unknownContextWorkspace parentNotOpen))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation nameReserved unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected oneShotOwnerLands unknownRequester parentNotOpen))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
            (list (list 'ungatedWithoutConsent :ungated-without-consent #'agent-repl-wire-decode-create-workspace-error-ungated-without-consent)
          (list 'noSlug :no-slug #'agent-repl-wire-decode-create-workspace-error-no-slug)
-         (list 'forkParentHasNoConversation :fork-parent-has-no-conversation #'agent-repl-wire-decode-create-workspace-error-fork-parent-has-no-conversation)
          (list 'briefMissing :brief-missing #'agent-repl-wire-decode-create-workspace-error-brief-missing)
          (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-create-workspace-error-unknown-repository)
-         (list 'unknownParent :unknown-parent #'agent-repl-wire-decode-create-workspace-error-unknown-parent)
-         (list 'baseRefUnresolved :base-ref-unresolved #'agent-repl-wire-decode-create-workspace-error-base-ref-unresolved)
          (list 'worktreeCreationFailed :worktree-creation-failed #'agent-repl-wire-decode-create-workspace-error-worktree-creation-failed)
          (list 'spawnFailed :spawn-failed #'agent-repl-wire-decode-create-workspace-error-spawn-failed)
          (list 'oneShotPolicyMissing :one-shot-policy-missing #'agent-repl-wire-decode-create-workspace-error-one-shot-policy-missing)
          (list 'namingFailed :naming-failed #'agent-repl-wire-decode-create-workspace-error-naming-failed)
          (list 'insideTemporaryDirectory :inside-temporary-directory #'agent-repl-wire-decode-create-workspace-error-inside-temporary-directory)
-         (list 'baseRefOffPrimaryBranch :base-ref-off-primary-branch #'agent-repl-wire-decode-create-workspace-error-base-ref-off-primary-branch)
          (list 'unknownForkSource :unknown-fork-source #'agent-repl-wire-decode-create-workspace-error-unknown-fork-source)
          (list 'forkSourceHasNoConversation :fork-source-has-no-conversation #'agent-repl-wire-decode-create-workspace-error-fork-source-has-no-conversation)
          (list 'nameReserved :name-reserved #'agent-repl-wire-decode-create-workspace-error-name-reserved)
          (list 'unknownContextWorkspace :unknown-context-workspace #'agent-repl-wire-decode-create-workspace-error-unknown-context-workspace)
+         (list 'unknownOwner :unknown-owner #'agent-repl-wire-decode-create-workspace-error-unknown-owner)
+         (list 'ownerNoticeRequired :owner-notice-required #'agent-repl-wire-decode-create-workspace-error-owner-notice-required)
+         (list 'ownerNoticeUnexpected :owner-notice-unexpected #'agent-repl-wire-decode-create-workspace-error-owner-notice-unexpected)
+         (list 'oneShotOwnerLands :one-shot-owner-lands #'agent-repl-wire-decode-create-workspace-error-one-shot-owner-lands)
+         (list 'unknownRequester :unknown-requester #'agent-repl-wire-decode-create-workspace-error-unknown-requester)
          agent-repl-wire-verbs--parent-not-open-arm)))))
 
 (defun agent-repl-wire-decode-create-workspace-response-success (json)
@@ -1375,17 +1390,32 @@ the ordinary open path is what brings it up next."
   (agent-repl-wire-encode-workspace-ref ref))
 
 (defun agent-repl-wire-encode-close-workspace-request (request)
-  "Encode CloseWorkspaceRequest from plist REQUEST (:workspace REF)."
+  "Encode CloseWorkspaceRequest from plist REQUEST (:workspace REF
+:requester REQUESTER).  Both are required: nothing is implied."
   (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-close-workspace-request")
-  (list (cons 'workspace
-              (agent-repl-wire-encode-close-workspace-request-workspace
-               (agent-repl-wire-verbs--require "CloseWorkspaceRequest" "workspace"
-                                                (plist-get request :workspace))))))
+  (let ((message "CloseWorkspaceRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-close-workspace-request-workspace
+                 (agent-repl-wire-verbs--require message "workspace" (plist-get request :workspace))))
+          (cons 'requester
+                (agent-repl-wire-encode-workspace-requester
+                 (agent-repl-wire-verbs--require message "requester" (plist-get request :requester)))))))
+
+(defun agent-repl-wire-decode-close-workspace-success-closed (json)
+  "Decode CloseWorkspaceSuccessClosed from JSON.  Empty: the close happened."
+  (agent-repl-wire-verbs--decode-empty "CloseWorkspaceSuccessClosed" json))
 
 (defun agent-repl-wire-decode-close-workspace-success (json)
-  "Decode CloseWorkspaceSuccess from JSON.  Empty: quiet, so the close
-happened."
-  (agent-repl-wire-verbs--decode-empty "CloseWorkspaceSuccess" json))
+  "Decode CloseWorkspaceSuccess from JSON into (:outcome (:arm :closed)).
+`closes_when_turn_ends\' is not decoded: it answers only a workspace
+closing itself mid-turn, and every close the editor sends is the user\='s,
+so one answering the editor is a breach."
+  (let ((message "CloseWorkspaceSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(closed))
+    (list :outcome
+          (agent-repl-wire-verbs--decode-oneof
+           message "outcome" json
+           (list (list 'closed :closed #'agent-repl-wire-decode-close-workspace-success-closed))))))
 
 (defun agent-repl-wire-decode-close-workspace-blocked (json)
   "Decode CloseWorkspaceBlocked from JSON into a plist.
@@ -1741,67 +1771,29 @@ unset landing and an unknown arm are both refused."
            (:merged-upstream mergedUpstream
                              agent-repl-wire-encode-merge-workspace-one-shot-merged-upstream)))))
 
-(defun agent-repl-wire-encode-merge-workspace-async-one-shot (value)
-  "Encode MergeWorkspaceAsyncOneShot from plist VALUE (:workspace REF).
-The workspace an async merge closes once it lands; its ref is required."
-  (list (cons 'workspace
-              (agent-repl-wire-encode-workspace-ref
-               (agent-repl-wire-verbs--require "MergeWorkspaceAsyncOneShot" "workspace"
-                                                (plist-get value :workspace))))))
-
-(defun agent-repl-wire-encode-merge-workspace-async-merge-actions (value)
-  "Encode MergeWorkspaceAsync's `merge_actions' use site from VALUE.
-The same CreateWorkspaceMergeActions a create configures, encoded by the
-create's own encoder, so the two use sites cannot spell it apart."
-  (agent-repl-wire-encode-create-workspace-merge-actions value))
-
-(defun agent-repl-wire-encode-merge-workspace-async (value)
-  "Encode MergeWorkspaceAsync from plist VALUE (:name STRING :branch STRING
-:instruction STRING :one-shot ONE-SHOT :cleanup-worktree BOOL
-:compact-after BOOL :merge-actions ACTIONS).  An ASYNC merge of BRANCH in
-a hidden merge workspace named NAME, both required and non-blank.
-INSTRUCTION, when given, must be non-blank; ONE-SHOT (:workspace REF)
-names another workspace to close once the merge lands.  ACTIONS
-\(:before-ws-merge SAID :postprocessing-prompt SAID) are the merge
-actions the MERGE WORKSPACE runs, and the only ones: it never inherits
-the requester\='s."
-  (let* ((message "MergeWorkspaceAsync")
-         (instruction (plist-get value :instruction))
-         (one-shot (plist-get value :one-shot))
-         (merge-actions (plist-get value :merge-actions)))
-    (append
-     (list (cons 'name (agent-repl-wire-verbs--require-string message "name" (plist-get value :name)))
-           (cons 'branch (agent-repl-wire-verbs--require-string message "branch" (plist-get value :branch))))
-     (when instruction
-       (list (cons 'instruction (agent-repl-wire-verbs--require-string message "instruction" instruction))))
-     (when one-shot
-       (list (cons 'oneShot (agent-repl-wire-encode-merge-workspace-async-one-shot one-shot))))
-     (when (plist-get value :cleanup-worktree)
-       (list (cons 'cleanupWorktree t)))
-     (when (plist-get value :compact-after)
-       (list (cons 'compactAfter t)))
-     (when merge-actions
-       (list (cons 'mergeActions
-                   (agent-repl-wire-encode-merge-workspace-async-merge-actions merge-actions)))))))
-
 (defun agent-repl-wire-encode-merge-workspace-request (request)
-  "Encode MergeWorkspaceRequest from plist REQUEST (:workspace REF :mode MODE).
-`workspace' is the REQUESTING workspace; MODE is the oneof plist
-\(:arm ARM :value V) with ARM `:one-shot'
-\(`agent-repl-wire-encode-merge-workspace-one-shot') or `:async'
-\(`agent-repl-wire-encode-merge-workspace-async').  Both are required,
-and an unknown mode arm is refused."
+  "Encode MergeWorkspaceRequest from plist REQUEST.
+REQUEST is (:workspace REF :requester REQUESTER :mode MODE :placement
+PLACEMENT).  `workspace\' is the workspace whose own branch lands; MODE is
+the oneof plist (:arm :one-shot :value V)
+\(`agent-repl-wire-encode-merge-workspace-one-shot\').  All four are
+required -- nothing is implied -- and an unknown mode arm is refused."
   (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-merge-workspace-request mode=%S"
                    (plist-get (plist-get request :mode) :arm))
-  (cons (cons 'workspace
-              (agent-repl-wire-encode-merge-workspace-request-workspace
-               (agent-repl-wire-verbs--require "MergeWorkspaceRequest" "workspace"
-                                                (plist-get request :workspace))))
-        (list (agent-repl-wire-verbs--encode-oneof
-               "MergeWorkspaceRequest" "mode"
-               (agent-repl-wire-verbs--require "MergeWorkspaceRequest" "mode" (plist-get request :mode))
-               '((:one-shot oneShot agent-repl-wire-encode-merge-workspace-one-shot)
-                 (:async async agent-repl-wire-encode-merge-workspace-async))))))
+  (let ((message "MergeWorkspaceRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-merge-workspace-request-workspace
+                 (agent-repl-wire-verbs--require message "workspace" (plist-get request :workspace))))
+          (cons 'requester
+                (agent-repl-wire-encode-workspace-requester
+                 (agent-repl-wire-verbs--require message "requester" (plist-get request :requester))))
+          (agent-repl-wire-verbs--encode-oneof
+           message "mode"
+           (agent-repl-wire-verbs--require message "mode" (plist-get request :mode))
+           '((:one-shot oneShot agent-repl-wire-encode-merge-workspace-one-shot)))
+          (cons 'placement
+                (agent-repl-wire-encode-merge-queue-placement
+                 (agent-repl-wire-verbs--require message "placement" (plist-get request :placement)))))))
 
 (defun agent-repl-wire-decode-merge-workspace-success (json)
   "Decode MergeWorkspaceSuccess from JSON.  Empty: success means ENQUEUED."
@@ -1854,30 +1846,6 @@ is already in the queue."
 merge is already in flight."
   (agent-repl-wire-verbs--decode-empty "MergeWorkspaceAlreadyMerging" json))
 
-(defun agent-repl-wire-decode-merge-workspace-unknown-one-shot-workspace (json)
-  "Decode MergeWorkspaceUnknownOneShotWorkspace from JSON.  Empty: the async
-one-shot\='s workspace is not open, is in another repository, or is the
-requester itself."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceUnknownOneShotWorkspace" json))
-
-(defun agent-repl-wire-decode-merge-workspace-branch-checked-out-in-requester (json)
-  "Decode MergeWorkspaceBranchCheckedOutInRequester from JSON.  Empty: the
-async merge\='s branch is the one the requester has checked out."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceBranchCheckedOutInRequester" json))
-
-(defun agent-repl-wire-decode-merge-workspace-unknown-branch (json)
-  "Decode MergeWorkspaceUnknownBranch from JSON.  Empty: the named branch does
-not exist in the requester's repository."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceUnknownBranch" json))
-
-(defun agent-repl-wire-decode-merge-workspace-name-taken (json)
-  "Decode MergeWorkspaceNameTaken from JSON into (:branch BRANCH).
-An async merge\='s name is already a workspace, a branch, or another
-pending merge\='s reservation; BRANCH is what the name resolves to."
-  (let ((message "MergeWorkspaceNameTaken"))
-    (agent-repl-wire-verbs--check-keys message json '(branch))
-    (list :branch (agent-repl-wire-verbs--decode-string message 'branch json))))
-
 (defun agent-repl-wire-decode-merge-workspace-version-increment-required (json)
   "Decode MergeWorkspaceVersionIncrementRequired from JSON.  Empty: a merge
 onto agent-repl\='s master carries no version increment."
@@ -1919,10 +1887,6 @@ on the merge."
   "Decode MergeWorkspaceError's `version_increment_unexpected' cause arm from JSON."
   (agent-repl-wire-decode-merge-workspace-version-increment-unexpected json))
 
-(defun agent-repl-wire-decode-merge-workspace-error-name-taken (json)
-  "Decode MergeWorkspaceError's `name_taken' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-name-taken json))
-
 (defun agent-repl-wire-decode-merge-workspace-error-unknown-workspace (json)
   "Decode MergeWorkspaceError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-merge-workspace-unknown-workspace json))
@@ -1955,25 +1919,32 @@ on the merge."
   "Decode MergeWorkspaceError's `already_merging' cause arm from JSON."
   (agent-repl-wire-decode-merge-workspace-already-merging json))
 
-(defun agent-repl-wire-decode-merge-workspace-error-unknown-one-shot-workspace (json)
-  "Decode MergeWorkspaceError's `unknown_one_shot_workspace' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-unknown-one-shot-workspace json))
+(defun agent-repl-wire-decode-merge-workspace-error-owner-lands (json)
+  "Decode MergeWorkspaceError's `owner_lands' arm into (:owner REF).
+The workspace is a child whose context was not forked from its owner, so
+only that owner lands it."
+  (agent-repl-wire-verbs--decode-ref-arm
+   "MergeWorkspaceOwnerLands" 'owner json))
 
-(defun agent-repl-wire-decode-merge-workspace-error-branch-checked-out-in-requester (json)
-  "Decode MergeWorkspaceError's `branch_checked_out_in_requester' cause arm.
-JSON is the arm's value."
-  (agent-repl-wire-decode-merge-workspace-branch-checked-out-in-requester json))
+(defun agent-repl-wire-decode-merge-workspace-error-requester-may-not-land (json)
+  "Decode MergeWorkspaceError's `requester_may_not_land' arm.  Empty: the
+requester is neither the workspace, its owner, nor the user."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceRequesterMayNotLand" json))
 
-(defun agent-repl-wire-decode-merge-workspace-error-unknown-branch (json)
-  "Decode MergeWorkspaceError's `unknown_branch' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-unknown-branch json))
+(defun agent-repl-wire-decode-merge-workspace-error-no-branch-checked-out (json)
+  "Decode MergeWorkspaceError's `no_branch_checked_out' arm into (:dir DIR).
+The workspace\='s worktree has no branch checked out, so it has no branch
+of its own to land."
+  (let ((message "MergeWorkspaceNoBranchCheckedOut"))
+    (agent-repl-wire-verbs--check-keys message json '(dir))
+    (list :dir (agent-repl-wire-verbs--decode-string message 'dir json))))
 
 (defun agent-repl-wire-decode-merge-workspace-error (json)
   "Decode MergeWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "MergeWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyMerging unknownOneShotWorkspace unknownBranch nameTaken branchCheckedOutInRequester versionIncrementRequired versionIncrementUnexpected hasOpenChildren))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyMerging versionIncrementRequired versionIncrementUnexpected ownerLands requesterMayNotLand noBranchCheckedOut hasOpenChildren))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -1985,12 +1956,11 @@ arm this codec does not know is refused as an unknown field."
          (list 'sessionDeleted :session-deleted #'agent-repl-wire-decode-merge-workspace-error-session-deleted)
          (list 'alreadyQueued :already-queued #'agent-repl-wire-decode-merge-workspace-error-already-queued)
          (list 'alreadyMerging :already-merging #'agent-repl-wire-decode-merge-workspace-error-already-merging)
-         (list 'unknownOneShotWorkspace :unknown-one-shot-workspace #'agent-repl-wire-decode-merge-workspace-error-unknown-one-shot-workspace)
-         (list 'unknownBranch :unknown-branch #'agent-repl-wire-decode-merge-workspace-error-unknown-branch)
-         (list 'nameTaken :name-taken #'agent-repl-wire-decode-merge-workspace-error-name-taken)
-         (list 'branchCheckedOutInRequester :branch-checked-out-in-requester #'agent-repl-wire-decode-merge-workspace-error-branch-checked-out-in-requester)
          (list 'versionIncrementRequired :version-increment-required #'agent-repl-wire-decode-merge-workspace-error-version-increment-required)
          (list 'versionIncrementUnexpected :version-increment-unexpected #'agent-repl-wire-decode-merge-workspace-error-version-increment-unexpected)
+         (list 'ownerLands :owner-lands #'agent-repl-wire-decode-merge-workspace-error-owner-lands)
+         (list 'requesterMayNotLand :requester-may-not-land #'agent-repl-wire-decode-merge-workspace-error-requester-may-not-land)
+         (list 'noBranchCheckedOut :no-branch-checked-out #'agent-repl-wire-decode-merge-workspace-error-no-branch-checked-out)
          agent-repl-wire-verbs--has-open-children-arm)))))
 
 (defun agent-repl-wire-decode-merge-workspace-response-success (json)
@@ -2962,7 +2932,10 @@ logs, and is never switched on."
 (defun agent-repl-wire-decode-submit-prompt-error (json)
   "Decode SubmitPromptError from JSON into (:reason (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset reason is a contract breach and an
-arm this codec does not know is refused as an unknown field."
+arm this codec does not know is refused as an unknown field.
+`slash_command_from_agent\' and `unknown_sender\' are not decoded: they
+refuse only an agent\='s prompt, and every prompt the editor sends is the
+user\='s."
   (let ((message "SubmitPromptError"))
     (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused coldGate modelNotInCatalog modelRefused askNotStanding))
     (list :reason
@@ -3615,14 +3588,6 @@ required: an arm without one is incomplete and errors before send."
   (agent-repl-wire-verbs--encode-merge-queue-workspace-arm
    "UpdateMergeQueueMoveDown" value #'agent-repl-wire-encode-update-merge-queue-move-down-workspace))
 
-(defun agent-repl-wire-encode-update-merge-queue-hold-rollouts (_value)
-  "Encode UpdateMergeQueueHoldRollouts.  Empty: the hold is daemon-wide."
-  nil)
-
-(defun agent-repl-wire-encode-update-merge-queue-release-rollouts (_value)
-  "Encode UpdateMergeQueueReleaseRollouts.  Empty: the hold is daemon-wide."
-  nil)
-
 (defun agent-repl-wire-encode-update-merge-queue-disable-racing (_value)
   "Encode UpdateMergeQueueDisableRacing.  Empty: the switch is daemon-wide."
   nil)
@@ -3630,47 +3595,6 @@ required: an arm without one is incomplete and errors before send."
 (defun agent-repl-wire-encode-update-merge-queue-enable-racing (_value)
   "Encode UpdateMergeQueueEnableRacing.  Empty: the switch is daemon-wide."
   nil)
-
-(defun agent-repl-wire-encode-update-merge-queue-subscriber (ref)
-  "Encode the `subscriber' use site of UpdateMergeQueueSubscribe and
-UpdateMergeQueueUnsubscribe from REF."
-  (agent-repl-wire-encode-workspace-ref ref))
-
-(defun agent-repl-wire-encode-update-merge-queue-subscribe-detail (value)
-  "Encode UpdateMergeQueueSubscribeDetail from VALUE (:arm LEVEL :value nil).
-THE ARM IS THE LEVEL: `:every-change', `:advances' or `:depletes', each an
-empty message."
-  (list (agent-repl-wire-verbs--encode-oneof
-         "UpdateMergeQueueSubscribeDetail" "level" value
-         (list (list :every-change 'everyChange #'ignore)
-               (list :advances 'advances #'ignore)
-               (list :depletes 'depletes #'ignore)))))
-
-(defun agent-repl-wire-verbs--encode-merge-queue-scoped-subscriber (message value)
-  "Encode MESSAGE's `subscriber' and optional `repository' from plist VALUE
-\(:subscriber REF :repository REF).  The subscriber is required; an absent
-repository is every repository's queue and is omitted."
-  (let ((ref (plist-get value :repository)))
-    (append
-     (list (cons 'subscriber
-                 (agent-repl-wire-encode-update-merge-queue-subscriber
-                  (agent-repl-wire-verbs--require message "subscriber" (plist-get value :subscriber)))))
-     (when ref
-       (list (cons 'repository (agent-repl-wire-encode-repository-ref ref)))))))
-
-(defun agent-repl-wire-encode-update-merge-queue-subscribe (value)
-  "Encode UpdateMergeQueueSubscribe from plist VALUE (:subscriber REF
-:repository REF :detail (:arm LEVEL)).  The detail is required."
-  (append (agent-repl-wire-verbs--encode-merge-queue-scoped-subscriber "UpdateMergeQueueSubscribe" value)
-          (list (cons 'detail
-                      (agent-repl-wire-encode-update-merge-queue-subscribe-detail
-                       (agent-repl-wire-verbs--require "UpdateMergeQueueSubscribe" "detail"
-                                                        (plist-get value :detail)))))))
-
-(defun agent-repl-wire-encode-update-merge-queue-unsubscribe (value)
-  "Encode UpdateMergeQueueUnsubscribe from plist VALUE (:subscriber REF
-:repository REF)."
-  (agent-repl-wire-verbs--encode-merge-queue-scoped-subscriber "UpdateMergeQueueUnsubscribe" value))
 
 (defun agent-repl-wire-encode-update-merge-queue-request-pause (value)
   "Encode UpdateMergeQueueRequest's `pause' action arm from VALUE."
@@ -3692,14 +3616,6 @@ repository is every repository's queue and is omitted."
   "Encode UpdateMergeQueueRequest's `move_down' action arm from VALUE."
   (agent-repl-wire-encode-update-merge-queue-move-down value))
 
-(defun agent-repl-wire-encode-update-merge-queue-request-hold-rollouts (value)
-  "Encode UpdateMergeQueueRequest's `hold_rollouts' action arm from VALUE."
-  (agent-repl-wire-encode-update-merge-queue-hold-rollouts value))
-
-(defun agent-repl-wire-encode-update-merge-queue-request-release-rollouts (value)
-  "Encode UpdateMergeQueueRequest's `release_rollouts' action arm from VALUE."
-  (agent-repl-wire-encode-update-merge-queue-release-rollouts value))
-
 (defun agent-repl-wire-encode-update-merge-queue-request-disable-racing (value)
   "Encode UpdateMergeQueueRequest's `disable_racing' action arm from VALUE."
   (agent-repl-wire-encode-update-merge-queue-disable-racing value))
@@ -3717,12 +3633,8 @@ repository is every repository's queue and is omitted."
                (list :evict 'evict #'agent-repl-wire-encode-update-merge-queue-request-evict)
                (list :move-up 'moveUp #'agent-repl-wire-encode-update-merge-queue-request-move-up)
                (list :move-down 'moveDown #'agent-repl-wire-encode-update-merge-queue-request-move-down)
-               (list :hold-rollouts 'holdRollouts #'agent-repl-wire-encode-update-merge-queue-request-hold-rollouts)
-               (list :release-rollouts 'releaseRollouts #'agent-repl-wire-encode-update-merge-queue-request-release-rollouts)
                (list :disable-racing 'disableRacing #'agent-repl-wire-encode-update-merge-queue-request-disable-racing)
-               (list :enable-racing 'enableRacing #'agent-repl-wire-encode-update-merge-queue-request-enable-racing)
-               (list :subscribe 'subscribe #'agent-repl-wire-encode-update-merge-queue-subscribe)
-               (list :unsubscribe 'unsubscribe #'agent-repl-wire-encode-update-merge-queue-unsubscribe)))))
+               (list :enable-racing 'enableRacing #'agent-repl-wire-encode-update-merge-queue-request-enable-racing)))))
 
 (defun agent-repl-wire-decode-update-merge-queue-success (json)
   "Decode UpdateMergeQueueSuccess from JSON.  Empty: the bubbles reflect it."
@@ -3774,16 +3686,6 @@ for that workspace."
 named a RepositoryRef the daemon's registry does not hold."
   (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueUnknownRepository" json))
 
-(defun agent-repl-wire-decode-update-merge-queue-rollouts-already-held (json)
-  "Decode UpdateMergeQueueRolloutsAlreadyHeld from JSON.  Empty: the rollouts
-are already held."
-  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueRolloutsAlreadyHeld" json))
-
-(defun agent-repl-wire-decode-update-merge-queue-rollouts-not-held (json)
-  "Decode UpdateMergeQueueRolloutsNotHeld from JSON.  Empty: the rollouts are
-not held."
-  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueRolloutsNotHeld" json))
-
 (defun agent-repl-wire-decode-update-merge-queue-racing-already-disabled (json)
   "Decode UpdateMergeQueueRacingAlreadyDisabled from JSON.  Empty: racing is
 already disabled."
@@ -3793,16 +3695,6 @@ already disabled."
   "Decode UpdateMergeQueueRacingNotDisabled from JSON.  Empty: racing is not
 disabled."
   (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueRacingNotDisabled" json))
-
-(defun agent-repl-wire-decode-update-merge-queue-not-subscribed (json)
-  "Decode UpdateMergeQueueNotSubscribed from JSON.  Empty: the subscriber holds
-no subscription in the scope the unsubscribe named."
-  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNotSubscribed" json))
-
-(defun agent-repl-wire-decode-update-merge-queue-subscriber-closed (json)
-  "Decode UpdateMergeQueueSubscriberClosed from JSON.  Empty: a closed
-workspace cannot subscribe."
-  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueSubscriberClosed" json))
 
 (defun agent-repl-wire-decode-update-merge-queue-error-unknown-workspace (json)
   "Decode UpdateMergeQueueError's `unknown_workspace' cause arm from JSON."
@@ -3836,14 +3728,6 @@ workspace cannot subscribe."
   "Decode UpdateMergeQueueError's `unknown_repository' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-unknown-repository json))
 
-(defun agent-repl-wire-decode-update-merge-queue-error-rollouts-already-held (json)
-  "Decode UpdateMergeQueueError's `rollouts_already_held' cause arm from JSON."
-  (agent-repl-wire-decode-update-merge-queue-rollouts-already-held json))
-
-(defun agent-repl-wire-decode-update-merge-queue-error-rollouts-not-held (json)
-  "Decode UpdateMergeQueueError's `rollouts_not_held' cause arm from JSON."
-  (agent-repl-wire-decode-update-merge-queue-rollouts-not-held json))
-
 (defun agent-repl-wire-decode-update-merge-queue-error-racing-already-disabled (json)
   "Decode UpdateMergeQueueError's `racing_already_disabled' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-racing-already-disabled json))
@@ -3857,7 +3741,7 @@ workspace cannot subscribe."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository rolloutsAlreadyHeld rolloutsNotHeld racingAlreadyDisabled racingNotDisabled notSubscribed subscriberClosed))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository racingAlreadyDisabled racingNotDisabled))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -3869,12 +3753,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'notPaused :not-paused #'agent-repl-wire-decode-update-merge-queue-error-not-paused)
          (list 'noSuchQueuedMerge :no-such-queued-merge #'agent-repl-wire-decode-update-merge-queue-error-no-such-queued-merge)
          (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-update-merge-queue-error-unknown-repository)
-         (list 'rolloutsAlreadyHeld :rollouts-already-held #'agent-repl-wire-decode-update-merge-queue-error-rollouts-already-held)
-         (list 'rolloutsNotHeld :rollouts-not-held #'agent-repl-wire-decode-update-merge-queue-error-rollouts-not-held)
          (list 'racingAlreadyDisabled :racing-already-disabled #'agent-repl-wire-decode-update-merge-queue-error-racing-already-disabled)
-         (list 'racingNotDisabled :racing-not-disabled #'agent-repl-wire-decode-update-merge-queue-error-racing-not-disabled)
-         (list 'notSubscribed :not-subscribed #'agent-repl-wire-decode-update-merge-queue-not-subscribed)
-         (list 'subscriberClosed :subscriber-closed #'agent-repl-wire-decode-update-merge-queue-subscriber-closed))))))
+         (list 'racingNotDisabled :racing-not-disabled #'agent-repl-wire-decode-update-merge-queue-error-racing-not-disabled))))))
 
 (defun agent-repl-wire-decode-update-merge-queue-response-success (json)
   "Decode UpdateMergeQueueResponse's `success' arm from JSON."

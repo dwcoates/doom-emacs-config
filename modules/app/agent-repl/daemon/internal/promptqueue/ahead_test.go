@@ -3,12 +3,14 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"regexp"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/holdfold"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -241,5 +243,56 @@ func TestTheQueueReadsSessionActsThroughHoldfold(t *testing.T) {
 				t.Fatalf("holdfold.SessionAct = %v, want it to agree with the queue's cut reading %v", got, cut)
 			}
 		})
+	}
+}
+
+func TestAPromptIsNotCoalescedIntoAnotherAuthorsPrompt(t *testing.T) {
+	// Arrange: the user's prompt is queued, and an agent's prompt is ruled to
+	// interrupt it.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the queued prompt"}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), agentSubmission("later", "do it the other way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert: both stand, each as it was, and the agent's waits its turn.
+	standing, err := h.db.HeldPrompts(context.Background(), theWorkspace)
+	if err != nil || len(standing) != 2 || standing[0].Coalesced || saidText(standing[0].Said) != "an earlier question" {
+		t.Fatalf("standing = (%+v, %v), want both prompts standing apart", standing, err)
+	}
+	if got := verdictOf(t, h, "later"); got.Arm != wsm.ArmHoldForTurnEnd {
+		t.Fatalf("verdict = %v, want the agent's prompt waiting its turn", got.Arm)
+	}
+	if !logged(h.log.Records(), "info", opClassify, "the prompt ahead has another author, so the prompt is not folded into it and waits its turn") {
+		t.Fatalf("records = %+v, want the refused fold said at info", h.log.Records())
+	}
+}
+
+// THE CLASSIFIER'S FOLD ASKS holdfold.SameAuthor: no file of the queue
+// compares two prompts' senders by hand.
+func TestTheQueueAsksHoldfoldWhetherTwoPromptsShareAnAuthor(t *testing.T) {
+	// Arrange
+	handRolled := regexp.MustCompile(`SentBy\s*==\s*\*|\*[a-z.]*SentBy\s*==`)
+
+	// Act
+	var found []string
+	for _, file := range sourcescan.Production(t) {
+		if handRolled.Match(file.Source) {
+			found = append(found, file.Name)
+		}
+	}
+
+	// Assert
+	if len(found) > 0 {
+		t.Fatalf("these files compare senders by hand instead of holdfold.SameAuthor: %v", found)
 	}
 }

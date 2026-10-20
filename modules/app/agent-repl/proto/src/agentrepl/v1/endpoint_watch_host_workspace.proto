@@ -11,6 +11,7 @@ package agentrepl.v1;
 
 import "workspace/v1/workspace.proto";
 import "agentrepl/v1/daemon_stream_ending.proto";
+import "agentrepl/v1/editor_evaluation.proto";
 import "agentrepl/v1/endpoint_open_in_editor.proto";
 import "agentrepl/v1/endpoint_session_health.proto";
 import "conversation/v1/turn.proto";
@@ -70,6 +71,13 @@ message WatchHostWorkspaceResponse {
     // OpenInEditor's `commit_log` target: open the branch's log with point on
     // the commit. A fact, not a command, exactly as `open_in_editor` is.
     OpenInEditorCommitLog open_commit_log = 9;
+    // EVALUATE THIS ELISP for an agent (EvaluateInEditor), with this
+    // workspace's buffer current, inside the editor's one error-catching
+    // handler, and answer with AnswerEditorEvaluation carrying the token. A
+    // request, unlike every other arm: the agent's call waits on the answer.
+    // An event, never replayed to a late subscriber: an evaluation not
+    // answered in time has already been answered `timed_out`.
+    HostEvaluate evaluate = 10;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -84,6 +92,14 @@ message HostOpenInEditor {
   string path = 1;
   // The 1-indexed line. UNSET = the file's top (or a directory).
   optional uint32 line = 2;
+}
+
+// One evaluation to perform.
+message HostEvaluate {
+  // The token to echo back in AnswerEditorEvaluation.
+  EditorEvaluationToken token = 1;
+  // The elisp to read and evaluate, verbatim from the agent's request.
+  string text = 2;
 }
 
 message HostWorkspaceTransferred {}

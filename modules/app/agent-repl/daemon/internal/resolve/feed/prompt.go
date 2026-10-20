@@ -202,7 +202,7 @@ func (r *resolver) userPromptRow(
 	said *conversationv1.UserSaid,
 	blocks []*frontendv1.FeedUserPromptBlock,
 ) *frontendv1.FeedRow {
-	row := PromptRow(origin, said, blocks)
+	row := PromptRow(origin, r.promptHeader(s, ids.TurnID(prompt.GetValue()), origin), said, blocks)
 	row.Id = r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPrompt, ID: prompt.GetValue()})
 	row.Turn = turn
 	return row
@@ -210,16 +210,27 @@ func (r *resolver) userPromptRow(
 
 // PromptRow is what a delivered prompt's row DRAWS, before its identity and
 // turn are stamped on: a user-prompt bubble carrying the drawn blocks under its
-// author, or, for a detached merge's handback (PROMPT_ORIGIN_MERGE_HANDBACK),
-// the handback badge alone.
+// author; for a detached merge's handback (PROMPT_ORIGIN_MERGE_HANDBACK), the
+// handback badge alone; and for a prompt another workspace's agent sent
+// (PROMPT_ORIGIN_AGENT_SENT), the agent-prompt bubble under HEADER, the
+// sending workspace (PromptHeader). HEADER is nil for every other origin.
 //
 // It is EXPORTED because the prompt queue's mirror of an accepted prompt draws
 // the same row under the same FeedId; the two draws compose the row here, so
 // they can never disagree about what a prompt is drawn as.
-func PromptRow(origin conversationv1.PromptOrigin, said *conversationv1.UserSaid, blocks []*frontendv1.FeedUserPromptBlock) *frontendv1.FeedRow {
+func PromptRow(origin conversationv1.PromptOrigin, header *frontendv1.FeedAgentPromptAddress, said *conversationv1.UserSaid, blocks []*frontendv1.FeedUserPromptBlock) *frontendv1.FeedRow {
 	if origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK {
 		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_MergeHandback{MergeHandback: &frontendv1.FeedMergeHandbackBadge{
 			Label: &frontendv1.FeedMergeHandbackBadgeLabel{Text: MergeHandbackLabel(said)},
+		}}}
+	}
+	if err := promptorigin.CheckSender(origin, header != nil); err != nil {
+		panic(fmt.Sprintf("feed.PromptRow: a prompt drawn under the wrong header: %v", err))
+	}
+	if header != nil {
+		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
+			Address: header,
+			Body:    &frontendv1.FeedAgentPromptBody{Blocks: agentBlocks(blocks)},
 		}}}
 	}
 	return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
@@ -398,6 +409,14 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 		// promptorigin.Unseen: no row is drawn for it; the label only keeps
 		// any other reader from naming the user as its author.
 		return "Merge queue"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE:
+		// promptorigin.Unseen, as the merge queue's notice is.
+		return "Workspace notice"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE:
+		return "Owner notice"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT:
+		return "Agent"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED:
 		return "Workspace brief"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED:

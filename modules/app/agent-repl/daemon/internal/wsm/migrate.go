@@ -150,6 +150,12 @@ var migrations = []migration{
 	{To: 57, Name: "cold_read_payments", Kind: MigrationAdditive, DDL: coldReadPaymentsDDL},
 	{To: 58, Name: "sidebar_arrangement", Kind: MigrationAdditive, DDL: arrangementDDL},
 	{To: 59, Name: "subsection_folds", Kind: MigrationAdditive, DDL: subsectionFoldsDDL},
+	{To: 60, Name: "workspace_derivation", Kind: MigrationAdditive, DDL: derivationDDL},
+	{To: 61, Name: "async_merge_maker", Kind: MigrationAdditive, DDL: asyncMergeMakerDDL},
+	{To: 62, Name: "workspace_subscriptions", Kind: MigrationAdditive, DDL: workspaceSubscriptionsDDL},
+	{To: 63, Name: "self_close", Kind: MigrationAdditive, DDL: selfCloseDDL},
+	{To: 64, Name: "standings", Kind: MigrationAdditive, DDL: standingsDDL},
+	{To: 65, Name: "prompt_sent_by", Kind: MigrationAdditive, DDL: sentByDDL},
 }
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its

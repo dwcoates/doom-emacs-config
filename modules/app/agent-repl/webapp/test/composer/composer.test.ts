@@ -5,6 +5,7 @@ import { create } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { oneofArms } from "../arms.js";
+import { userRefusalArms } from "../agent-only-arms.js";
 import {
   SubmitPromptErrorSchema,
   SubmitPromptResponseSchema,
@@ -534,6 +535,9 @@ describe("the outcomes", () => {
   });
 });
 
+/** The `SubmitPromptError` arms a user's prompt can be refused with. */
+const USER_REASONS = userRefusalArms("submitPrompt", oneofArms(SubmitPromptErrorSchema, "reason"));
+
 describe("the refusals", () => {
   it("draws the merging refusal inline at the composer", async () => {
     const h = mount(mergingError);
@@ -549,7 +553,7 @@ describe("the refusals", () => {
     h.handle.dispose();
   });
 
-  it.each(oneofArms(SubmitPromptErrorSchema, "reason"))(
+  it.each(USER_REASONS)(
     "labels the %s arm and says something about it",
     async (arm) => {
       const h = mount(refusalError(arm));
@@ -560,7 +564,7 @@ describe("the refusals", () => {
     },
   );
 
-  it.each(oneofArms(SubmitPromptErrorSchema, "reason"))(
+  it.each(USER_REASONS)(
     "keeps the words in the box through a %s refusal",
     async (arm) => {
       const h = mount(refusalError(arm));
@@ -909,6 +913,20 @@ describe("a command panel that sets no arm", () => {
 // build has no descriptor for, so the wording is reached directly with the
 // shape a future schema would produce.
 // ---------------------------------------------------------------------------
+
+describe("submitPromptRefusal: the agent-only arm", () => {
+  it("refuses slashCommandFromAgent, which never answers a user's prompt", () => {
+    expect(() =>
+      submitPromptRefusal({ case: "slashCommandFromAgent", value: { command: "/clear" } } as never),
+    ).toThrow(MalformedView);
+  });
+
+  it("refuses unknownSender, which never answers a user's prompt", () => {
+    expect(() =>
+      submitPromptRefusal({ case: "unknownSender", value: {} } as never),
+    ).toThrow(MalformedView);
+  });
+});
 
 describe("submitPromptRefusal: the unknown arm", () => {
   it("refuses a refusal reason this build cannot word", () => {

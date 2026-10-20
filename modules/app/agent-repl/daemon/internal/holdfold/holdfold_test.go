@@ -147,6 +147,10 @@ func TestFoldable(t *testing.T) {
 		{name: "a folded context cut is refused", folded: cut, ahead: prompt("a"), want: ErrNotAPrompt},
 		{name: "an act ahead is refused", folded: prompt("b"), ahead: act, want: ErrAboveNotAPrompt},
 		{name: "a context cut ahead is refused", folded: prompt("b"), ahead: cut, want: ErrAboveNotAPrompt},
+		{name: "an agent's prompt into the user's is refused", folded: sentBy(prompt("b"), "ws-sender"), ahead: prompt("a"), want: ErrOtherAuthor},
+		{name: "the user's prompt into an agent's is refused", folded: prompt("b"), ahead: sentBy(prompt("a"), "ws-sender"), want: ErrOtherAuthor},
+		{name: "two workspaces' prompts are refused", folded: sentBy(prompt("b"), "ws-other"), ahead: sentBy(prompt("a"), "ws-sender"), want: ErrOtherAuthor},
+		{name: "one workspace's two prompts fold", folded: sentBy(prompt("b"), "ws-sender"), ahead: sentBy(prompt("a"), "ws-sender"), want: nil},
 		{name: "the folded entry being edited is refused", folded: prompt("b"), ahead: prompt("a"), editing: "b", want: ErrEdited},
 		{name: "the entry ahead being edited is refused", folded: prompt("b"), ahead: prompt("a"), editing: "a", want: ErrEdited},
 	}
@@ -168,4 +172,37 @@ func quoteBlock() *conversationv1.UserContentBlock {
 	return &conversationv1.UserContentBlock{Block: &conversationv1.UserContentBlock_Quote{
 		Quote: &conversationv1.UserQuoteBlock{Text: "⟢ Replying to an earlier response of yours:\n\n```\nParis.\n```\n\n⟢ My message:\n"},
 	}}
+}
+
+func TestSameAuthor(t *testing.T) {
+	sender, other := wsm.WorkspaceID("ws-sender"), wsm.WorkspaceID("ws-other")
+	tests := []struct {
+		name string
+		a, b *wsm.WorkspaceID
+		want bool
+	}{
+		{name: "no workspace sent either", want: true},
+		{name: "one workspace sent both", a: &sender, b: &sender, want: true},
+		{name: "two workspaces sent them", a: &sender, b: &other, want: false},
+		{name: "a workspace sent the first alone", a: &sender, want: false},
+		{name: "a workspace sent the second alone", b: &sender, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := SameAuthor(tt.a, tt.b)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("SameAuthor = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// sentBy answers H as a prompt the workspace SENDER's agent sent.
+func sentBy(h wsm.HeldPrompt, sender wsm.WorkspaceID) wsm.HeldPrompt {
+	h.Origin = "PROMPT_ORIGIN_AGENT_SENT"
+	h.SentBy = &sender
+	return h
 }

@@ -90,12 +90,24 @@ const (
 	// ArmUngatedWithoutConsent is a model/mode combination that disables the
 	// permission gate with no consent recorded.
 	ArmUngatedWithoutConsent = "ungated_without_consent"
-	// ArmBaseRefUnresolved is a creation whose base ref does not resolve in
-	// the repository it is cut from.
-	ArmBaseRefUnresolved = "base_ref_unresolved"
-	// ArmBaseRefOffPrimaryBranch refuses a top-level create whose explicit
-	// base ref is not on the primary branch it would merge into.
-	ArmBaseRefOffPrimaryBranch = "base_ref_off_primary_branch"
+	// ArmUnknownOwner is a create whose child topology names an owner the
+	// registry does not hold in the create's repository.
+	ArmUnknownOwner = "unknown_owner"
+	// ArmOriginFetchFailed is a primary create cut from origin whose fetch of
+	// origin's primary branch failed.
+	ArmOriginFetchFailed = "origin_fetch_failed"
+	// ArmUnknownForkSource is a create whose context forks a workspace the
+	// registry does not hold in the create's repository.
+	ArmUnknownForkSource = "unknown_fork_source"
+	// ArmUnknownRequester is a create whose requesting workspace the registry
+	// does not hold.
+	ArmUnknownRequester = "unknown_requester"
+	// ArmOwnerNoticeRequired is a child its owner lands with no notice to it.
+	ArmOwnerNoticeRequired = "owner_notice_required"
+	// ArmOwnerNoticeUnexpected is a notice on a child that lands itself.
+	ArmOwnerNoticeUnexpected = "owner_notice_unexpected"
+	// ArmOneShotOwnerLands is a one-shot child its owner would have to land.
+	ArmOneShotOwnerLands = "one_shot_owner_lands"
 	// ArmUnknownRepository is a creation naming a repository the daemon
 	// cannot act in. The registry may still hold the row -- what it names is
 	// gone from disk, which is the same answer to the client as a ref that
@@ -114,8 +126,6 @@ const (
 	// or one another allocation is claiming (CreateWorkspaceError
 	// .name_reserved). Its `branch` field names the branch.
 	ArmNameReserved = "name_reserved"
-	// ArmForkParentHasNoConversation is a fork whose parent never had one.
-	ArmForkParentHasNoConversation = "fork_parent_has_no_conversation"
 	// ArmForkSourceHasNoConversation is a fork into the primary branch whose
 	// source never had a conversation.
 	ArmForkSourceHasNoConversation = "fork_source_has_no_conversation"

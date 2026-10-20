@@ -58,6 +58,22 @@ type Workspace struct {
 	// registered by Emacs (never created through the daemon) carries none, and
 	// the roster falls back to the branch lineage for it.
 	Parent *WorkspaceID
+	// OwnerLands marks a child whose context was not forked from its owner
+	// (Parent): only the owner, or the user, lands it. Recorded at creation;
+	// never set without Parent.
+	OwnerLands bool
+	// ContextFrom is the workspace whose conversation was forked into this
+	// one at its creation, nil for a fresh context or a registered workspace.
+	ContextFrom *WorkspaceID
+	// RequestedBy is the workspace whose agent asked for this one's creation,
+	// nil when the user asked or the workspace was registered.
+	RequestedBy *WorkspaceID
+	// CloseWhenTurnEnds is when the workspace asked to close itself, set while
+	// it waits for that asking turn to end (selfclose.go); nil otherwise.
+	CloseWhenTurnEnds *time.Time
+	// Awaiting is the workspace this one awaits correspondence from
+	// (standings.go), nil while it awaits none.
+	Awaiting *WorkspaceID
 	// Closed reports whether the workspace's editor state has been torn down.
 	Closed bool
 	// Closure is when the workspace was closed and by whom (MarkClosed); nil
@@ -285,6 +301,11 @@ type RegisterFacts struct {
 	// MergeOf marks a MERGE WORKSPACE at its creation, nil for every other
 	// workspace. Only the creation path supplies it.
 	MergeOf *MergeOrigin
+	// OwnerLands, ContextFrom and RequestedBy are Workspace's derivation
+	// facts, supplied only by the creation path.
+	OwnerLands  bool
+	ContextFrom *WorkspaceID
+	RequestedBy *WorkspaceID
 	// Priority is the priority a minted workspace is created with, nil for
 	// none. It is recorded in the insert itself because it decides the place
 	// the workspace lands on. An announcement of an already-registered
@@ -499,6 +520,9 @@ type HeldPrompt struct {
 	Said *conversationv1.UserSaid
 	// Origin is the prompt's origin, as conversation.v1.PromptOrigin names it.
 	Origin string
+	// SentBy is the workspace whose agent sent the prompt, set exactly when
+	// Origin is PROMPT_ORIGIN_AGENT_SENT (sentby.go).
+	SentBy *WorkspaceID
 	// Target, when set, is the bubble composer's addressed row.
 	Target *feedid.Ref
 	// Hold is the daemon-side condition holding the prompt, nil when no
@@ -665,6 +689,9 @@ type Turn struct {
 	Text string
 	// Origin is the prompt's origin.
 	Origin string
+	// SentBy is the workspace whose agent sent the turn's prompt, set exactly
+	// when Origin is PROMPT_ORIGIN_AGENT_SENT (sentby.go).
+	SentBy *WorkspaceID
 	// Address is where the turn's output lands, nil for the root feed.
 	Address *OutputAddress
 	// Mirror is where the turn is ALSO drawn, in another workspace's feed: an
@@ -991,6 +1018,13 @@ type MergeSource struct {
 	// a recovery finds the one workspace forked for THIS request. Empty for an
 	// in-place merge.
 	Detach DetachedMergeID
+	// DetachMaker is the workspace a DETACHED request's merge workspace forks:
+	// the one the merged work was done in (a subagent's spawning workspace,
+	// or the workspace that cut the branch). Set iff Detach is.
+	DetachMaker WorkspaceID
+	// DetachTargetMaker lands a DETACHED request into its maker's branch
+	// instead of on the primary branch. Only a detached request carries it.
+	DetachTargetMaker bool
 	// DetachName is a detached request's merge workspace name, as the
 	// requesting agent supplied it (unprefixed): RESERVED from the moment the
 	// request is recorded until the merge workspace exists under it. Set iff
@@ -1056,6 +1090,12 @@ type MergeOrigin struct {
 	Requester WorkspaceID
 	// Request is the detached request the merge workspace was forked for.
 	Request DetachedMergeID
+	// Maker is the workspace whose conversation the merge workspace forks:
+	// the one the merged work was done in (a subagent's spawning workspace,
+	// or the workspace that cut the branch). TRANSPORT-ONLY, like the landing
+	// fields below: the create records it as the merge workspace's
+	// ContextFrom.
+	Maker WorkspaceID
 	// ForkHead is the commit the merge workspace was cut at: the requester's
 	// branch tip when the merge was handed off, which is exactly what the
 	// merge lands. Empty only on a merge workspace forked before layout 41

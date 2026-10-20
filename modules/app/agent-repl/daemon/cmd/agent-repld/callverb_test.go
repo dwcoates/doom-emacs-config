@@ -216,7 +216,7 @@ func TestInvokeUnaryOverSendsADynamicRequestAndDecodesTheAnswer(t *testing.T) {
 func TestLookupWorkspaceRefReturnsFromAStandingRosterStream(t *testing.T) {
 	// Arrange.
 	dir := canonicalDir(t.TempDir())
-	daemon, address := serveStandingDaemon(t, roster(rosterRow(dir, "done", 0)))
+	daemon, address := serveStandingDaemon(t, roster(rosterRow(dir, "one")))
 	ctx := t.Context()
 
 	// Act.
@@ -232,7 +232,7 @@ func TestLookupWorkspaceRefReturnsFromAStandingRosterStream(t *testing.T) {
 func TestCallVerbFillsTheWorkspaceFromAStandingRosterStream(t *testing.T) {
 	// Arrange.
 	dir := canonicalDir(t.TempDir())
-	daemon, address := serveStandingDaemon(t, roster(rosterRow(dir, "done", 0)))
+	daemon, address := serveStandingDaemon(t, roster(rosterRow(dir, "one")))
 	ctx := t.Context()
 	fake := &callFake{answer: `{}`}
 	deps := fake.deps()

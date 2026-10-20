@@ -49,6 +49,7 @@ import (
 	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/runtimemetrics"
+	"agent-repld/internal/subagentmaker"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -126,8 +127,16 @@ func (f *fakeSurfaces) CentralClientLog(rec dlog.ClientRecord) error {
 // fakeDB answers the registry lookups the handlers make.
 type fakeDB struct {
 	wsm.DB
-	workspaces   map[ids.WorkspaceID]wsm.Workspace
-	repositories []wsm.Repository
+	// subscribed records every workspace subscription; replacesSub,
+	// subscribeErr, endsSub and unsubscribeErr answer them.
+	subscribed     []wsm.WorkspaceSubscription
+	replacesSub    bool
+	subscribeErr   error
+	unsubscribed   [][2]ids.WorkspaceID
+	endsSub        bool
+	unsubscribeErr error
+	workspaces     map[ids.WorkspaceID]wsm.Workspace
+	repositories   []wsm.Repository
 	// listRepositoriesErr fails the repository read, which the slice cannot.
 	listRepositoriesErr error
 	drainPut            []wsm.DrainSchedule
@@ -148,6 +157,8 @@ type fakeDB struct {
 	// workspaceErr fails every registry read, standing in for the closed
 	// state client an exiting daemon leaves behind.
 	workspaceErr error
+	// workspaceErrs fails Workspace for the one workspace each names.
+	workspaceErrs map[ids.WorkspaceID]error
 	// turnStarted answers Turn's start by turn; turnStartedErr fails every
 	// read instead (wsm.ErrNotFound for a turn the workspace never recorded).
 	turnStarted    map[ids.TurnID]time.Time
@@ -186,6 +197,9 @@ func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 	}
 	if f.workspaceErr != nil {
 		return wsm.Workspace{}, f.workspaceErr
+	}
+	if err := f.workspaceErrs[id]; err != nil {
+		return wsm.Workspace{}, err
 	}
 	record, ok := f.workspaces[id]
 	if !ok {
@@ -279,6 +293,8 @@ func (v *fakeVerbs) AnswerColdGate(_ context.Context, _ ids.WorkspaceID, answer 
 // fakeVerbs answers whatever the test wired, and records the calls made.
 type fakeVerbs struct {
 	workspace.Verbs
+	// api answers the agent API's verbs.
+	api agentAPI
 
 	// coldGateAnswers records every AnswerColdGate request the handler handed
 	// the verb, in order.
@@ -595,6 +611,57 @@ func (f *fakeVerbs) MarkViewed(_ context.Context, ws ids.WorkspaceID) error {
 	return f.markViewedErr
 }
 
+// agentAPI is what the fake verbs answer, and record, for the agent API's
+// verbs.
+type agentAPI struct {
+	status       *agentreplv1.WorkspaceStatus
+	statusErr    error
+	selfCloses   []ids.WorkspaceID
+	closesLater  bool
+	closeSelfErr error
+	oneShots     []fakeOneShot
+	directive    string
+	oneShotErr   error
+	awaits       []fakeAwait
+	awaitErr     error
+}
+
+// fakeOneShot is one SetOneShot the fake verbs were asked for.
+type fakeOneShot struct {
+	ws      ids.WorkspaceID
+	asker   *ids.WorkspaceID
+	oneShot bool
+}
+
+// fakeAwait is one SetCorrespondence the fake verbs were asked for.
+type fakeAwait struct {
+	ws      ids.WorkspaceID
+	asker   *ids.WorkspaceID
+	awaited *ids.WorkspaceID
+}
+
+func (f *fakeVerbs) Status(context.Context, ids.WorkspaceID) (*agentreplv1.WorkspaceStatus, error) {
+	return f.api.status, f.api.statusErr
+}
+
+func (f *fakeVerbs) CloseSelf(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	f.api.selfCloses = append(f.api.selfCloses, ws)
+	return f.api.closesLater, f.api.closeSelfErr
+}
+
+func (f *fakeVerbs) SetOneShot(_ context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, oneShot bool) (string, error) {
+	f.api.oneShots = append(f.api.oneShots, fakeOneShot{ws: ws, asker: asker, oneShot: oneShot})
+	if oneShot {
+		return f.api.directive, f.api.oneShotErr
+	}
+	return "", f.api.oneShotErr
+}
+
+func (f *fakeVerbs) SetCorrespondence(_ context.Context, ws ids.WorkspaceID, asker, awaited *ids.WorkspaceID) error {
+	f.api.awaits = append(f.api.awaits, fakeAwait{ws: ws, asker: asker, awaited: awaited})
+	return f.api.awaitErr
+}
+
 func (f *fakeVerbs) Close(_ context.Context, _ ids.WorkspaceID, by wsm.CloseCause) error {
 	f.closedBy = append(f.closedBy, by)
 	return f.closeErr
@@ -633,12 +700,15 @@ type fakePrompts struct {
 	lastDelivery wsm.Delivery
 	// lastOrigin is the origin the last submission was handed with.
 	lastOrigin conversationv1.PromptOrigin
+	// lastSentBy is the sender the last submission was handed with.
+	lastSentBy *ids.WorkspaceID
 	// submits counts the submissions.
 	submits int
 }
 
-func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
 	f.lastSaid = said
+	f.lastSentBy = sentBy
 	f.lastDelivery = delivery
 	f.lastOrigin = origin
 	f.submits++
@@ -808,6 +878,17 @@ type fakeMerge struct {
 	unsubscriptions []fakeSubscription
 	subscribeErr    error
 	unsubscribeErr  error
+	// replaced is what Subscribe answers; statuses and statusErr answer
+	// Status, whose scopes are recorded in statusScopes.
+	replaced     bool
+	statuses     []merge.QueueStatus
+	statusErr    error
+	statusScopes []*merge.RepositoryScope
+}
+
+func (f *fakeMerge) Status(_ context.Context, scope *merge.RepositoryScope) ([]merge.QueueStatus, error) {
+	f.statusScopes = append(f.statusScopes, scope)
+	return f.statuses, f.statusErr
 }
 
 // fakeSubscription is one Subscribe or Unsubscribe the fake was asked for.
@@ -819,7 +900,7 @@ type fakeSubscription struct {
 
 func (f *fakeMerge) Subscribe(_ context.Context, ws ids.WorkspaceID, scope *merge.RepositoryScope, detail wsm.MergeQueueDetail) (bool, error) {
 	f.subscriptions = append(f.subscriptions, fakeSubscription{ws: ws, scope: scope, detail: detail})
-	return false, f.subscribeErr
+	return f.replaced, f.subscribeErr
 }
 
 func (f *fakeMerge) Unsubscribe(_ context.Context, ws ids.WorkspaceID, scope *merge.RepositoryScope) error {
@@ -837,10 +918,16 @@ func (f *fakeMerge) InterruptTab(_ context.Context, _ ids.WorkspaceID, tab feedi
 	return f.tabRunning, f.tabErr
 }
 
-func (f *fakeMerge) Enqueue(_ context.Context, req merge.Request) error {
+func (f *fakeMerge) Enqueue(_ context.Context, req merge.Request) (merge.Enqueued, error) {
 	f.enqueuedBy = append(f.enqueuedBy, req.By)
 	f.requests = append(f.requests, req)
-	return f.enqueueErr
+	if f.enqueueErr != nil {
+		return merge.Enqueued{}, f.enqueueErr
+	}
+	if req.Detached != nil {
+		return merge.Enqueued{MergeBranch: "agent/" + req.Detached.Name}, nil
+	}
+	return merge.Enqueued{}, nil
 }
 
 func (v *fakeVerbs) OpenInEditor(_ context.Context, _ ids.WorkspaceID, path string, _ *uint32) error {
@@ -946,6 +1033,23 @@ type fakeRollout struct {
 	adoptWebErr  error
 }
 
+// fakeMakers answers which workspace spawned a subagent: the workspace
+// seeded for its id, subagentmaker.ErrNotFound for any other, or err.
+type fakeMakers struct {
+	spawners map[string]wsm.Workspace
+	err      error
+}
+
+func (f *fakeMakers) Find(_ context.Context, _ wsm.RepoID, agentID string) (wsm.Workspace, error) {
+	if f.err != nil {
+		return wsm.Workspace{}, f.err
+	}
+	if ws, ok := f.spawners[agentID]; ok {
+		return ws, nil
+	}
+	return wsm.Workspace{}, subagentmaker.ErrNotFound
+}
+
 // fakeDeployer answers the Deploy rpc with a scripted result.
 type fakeDeployer struct {
 	mu     sync.Mutex
@@ -1049,6 +1153,9 @@ func (f *fakeLogin) Close(context.Context, ids.WorkspaceID) error { return f.clo
 // fakeFeed answers the page and tail seams.
 type fakeFeed struct {
 	feed.Resolver
+	// sent are the sent rows SentPrompt drew, in order.
+	sentMu sync.Mutex
+	sent   []sentRow
 	// hostAsks is each workspace's standing ask HostAsk answers, and
 	// askMoves the stream WatchHostAsks hands the server.
 	hostAsksMu sync.Mutex
@@ -1457,6 +1564,7 @@ type harness struct {
 	Prompts   *fakePrompts
 	Queue     *fakeQueue
 	Merge     *fakeMerge
+	Makers    *fakeMakers
 	Drain     *fakeDrain
 	Rollout   *fakeRollout
 	Deployer  *fakeDeployer
@@ -1557,6 +1665,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Prompts:    &fakePrompts{},
 		Queue:      &fakeQueue{},
 		Merge:      &fakeMerge{},
+		Makers:     &fakeMakers{},
 		Drain:      &fakeDrain{},
 		Rollout:    &fakeRollout{},
 		Deployer:   &fakeDeployer{},
@@ -1594,6 +1703,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 	h.Opens = opens
 
 	deps := Deps{
+		SubagentMakers:    h.Makers,
 		DB:                h.DB,
 		Prompts:           h.Prompts,
 		Queue:             h.Queue,
@@ -2109,6 +2219,19 @@ func (f *fakeLatencies) startups() []string {
 	return out
 }
 
+func (f *fakeDB) SubscribeWorkspace(_ context.Context, sub wsm.WorkspaceSubscription) (bool, error) {
+	if f.subscribeErr != nil {
+		return false, f.subscribeErr
+	}
+	f.subscribed = append(f.subscribed, sub)
+	return f.replacesSub, nil
+}
+
+func (f *fakeDB) UnsubscribeWorkspace(_ context.Context, subscriber, followed ids.WorkspaceID) (bool, error) {
+	f.unsubscribed = append(f.unsubscribed, [2]ids.WorkspaceID{subscriber, followed})
+	return f.endsSub, f.unsubscribeErr
+}
+
 // FoldSubsection records the subsection fold as an arrangement call and
 // answers arrangeErr.
 func (v *fakeVerbs) FoldSubsection(_ context.Context, sub ids.SubsectionID, folded bool) error {
@@ -2122,4 +2245,25 @@ func (h *harness) reconnects() *restarttiming.Reconnects {
 		h.Reconnects = restarttiming.NewReconnects(h.ReconnectRecords, time.Now)
 	}
 	return h.Reconnects
+}
+
+// sentRow is one SentPrompt the server asked the feed for.
+type sentRow struct {
+	sender    ids.WorkspaceID
+	recipient string
+	key       string
+	fate      feed.SentFate
+}
+
+func (f *fakeFeed) SentPrompt(sender ids.WorkspaceID, recipient, key string, _ *conversationv1.UserSaid, fate feed.SentFate) {
+	f.sentMu.Lock()
+	defer f.sentMu.Unlock()
+	f.sent = append(f.sent, sentRow{sender: sender, recipient: recipient, key: key, fate: fate})
+}
+
+// sentRows answers the sent rows drawn so far.
+func (f *fakeFeed) sentRows() []sentRow {
+	f.sentMu.Lock()
+	defer f.sentMu.Unlock()
+	return append([]sentRow(nil), f.sent...)
 }

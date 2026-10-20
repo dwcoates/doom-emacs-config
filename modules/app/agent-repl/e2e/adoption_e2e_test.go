@@ -281,8 +281,11 @@ func adAwaitAnyTurnEnded(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 func adCreateAndFinishChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
-		Repository: repoRef,
+		Repository:    repoRef,
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Topology:      harness.Primary(),
 			InitialPrompt: adSaidText("!prose-streamed"),
 			Name:          adStrPtr(name),
 		}},

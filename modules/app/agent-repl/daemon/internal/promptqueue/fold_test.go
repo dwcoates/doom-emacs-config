@@ -282,6 +282,19 @@ func TestFoldRefuses(t *testing.T) {
 			message: "the fold is refused: the entry ahead is a session act, not a prompt",
 		},
 		{
+			name: "an agent's prompt into the user's",
+			arrange: func(t *testing.T, h *harness) (string, string) {
+				queuedPrompts(t, h, [2]string{"t1", "the user's words"})
+				if _, err := h.q.Submit(context.Background(), agentSubmission("t2", "an agent's words")); err != nil {
+					t.Fatalf("Submit(t2): %v", err)
+				}
+				h.q.waitForClassifications()
+				return "t2", "t1"
+			},
+			wantErr: ErrAboveOtherAuthor,
+			message: "the fold is refused: the entry ahead has another author",
+		},
+		{
 			name: "the entry ahead being edited",
 			arrange: func(t *testing.T, h *harness) (string, string) {
 				twoQueued(t, h)

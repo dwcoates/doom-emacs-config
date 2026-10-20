@@ -290,6 +290,9 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; time, so it loads after BOTH.  The W2-B surfaces it calls (the tab
 ;; blink, the webview reload, the editor popup) resolve at call time, long
 ;; after every module is loaded.
+;; WHY: evaluate.el is the editor's one evaluation handler, which host.el's
+;; `evaluate' push arm calls at push time.  It needs nothing but Emacs itself.
+(agent-repl--load-module "evaluate")
 (agent-repl--load-module "host")
 ;; WHY: verbs.el is the workspace and daemon-admin verbs as thin wrappers.
 ;; It sits directly on rpc.el, host.el (for the ref and the per-workspace
@@ -331,6 +334,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; rpc.el and resolves the workspace's ref and connection through host.el,
 ;; both loaded above.
 (agent-repl--load-module "command-completion")
+;; WHY: workspace-completion.el is the composer's workspace-name completion
+;; (`agent-repl-input-mode' installs its capf).  It reads the open workspaces
+;; out of roster.el, loaded above.
+(agent-repl--load-module "workspace-completion")
 ;; WHY: clipboard-image.el binds `agent-repl-attach-clipboard-image' into
 ;; `agent-repl-input-mode-map' (input.el) and writes captured images under
 ;; the workspace dir via `agent-repl--ws-dir' (status.el) -- both already

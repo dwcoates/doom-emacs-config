@@ -197,32 +197,27 @@ export function drawFeedMergeLabel(label: FeedMergeLabel): HTMLElement {
   return el;
 }
 
-/** The terminal failure arms: why it did not land. */
+/**
+ * The terminal failure arms: why it did not land. This draws the bubble's
+ * HEAD, always visible whether folded or expanded, so it carries only the
+ * badge — the daemon's full resolved sentence is long and belongs in the
+ * expanded body alone (each tab's own outcome summary, drawSummary in
+ * tab-set.ts/tab-row.ts/tab-panels.ts), never duplicated in the collapsed row.
+ */
 export function drawFeedMergeError(error: FeedMergeError): HTMLElement {
   const reason = requireCase(error.reason, `${PATH}.error.reason`);
   const el = document.createElement("span");
   el.className = "merge-error";
   switch (reason.case) {
     case "failed":
-      el.append(badge("failed", "is-failed"), summaryOf(reason.value.summary));
+      el.append(badge("failed", "is-failed"));
       return el;
     case "abandoned":
-      // Landing 7: `abandoned` carries the daemon's resolved sentence too (the
-      // cause — a user drop, a closed workspace, a shutdown — otherwise lives
-      // only in the daemon's log), and it is drawn exactly as `failed`'s is.
-      el.append(badge("abandoned", "is-abandoned"), summaryOf(reason.value.summary));
+      el.append(badge("abandoned", "is-abandoned"));
       return el;
     default:
       return unreachableArm(`${PATH}.error.reason`, armName(reason));
   }
-}
-
-/** The daemon's resolved sentence for a settled merge, drawn verbatim. */
-function summaryOf(summary: string): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "merge-summary";
-  el.textContent = summary;
-  return el;
 }
 
 /**

@@ -37,7 +37,7 @@ func TestPromptRowDrawsAMergeHandbackAsItsBadge(t *testing.T) {
 	said := SaidText("merge of feature landed\n\nA merge you asked for ran detached.")
 
 	// Act
-	row := PromptRow(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, said, nil)
+	row := PromptRow(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, nil, said, nil)
 
 	// Assert
 	if row.GetUserPrompt() != nil || row.GetMergeHandback().GetLabel().GetText() != "merge of feature landed" {
@@ -50,7 +50,7 @@ func TestPromptRowDrawsEveryOtherOriginAsAUserPrompt(t *testing.T) {
 	blocks := []*frontendv1.FeedUserPromptBlock{{}}
 
 	// Act
-	row := PromptRow(conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT, SaidText("hello"), blocks)
+	row := PromptRow(conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT, nil, SaidText("hello"), blocks)
 
 	// Assert
 	if row.GetMergeHandback() != nil || row.GetUserPrompt().GetAuthor().GetLabel() != "You" ||

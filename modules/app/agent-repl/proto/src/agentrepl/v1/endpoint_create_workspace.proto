@@ -6,21 +6,37 @@
 // exists. Callers learn the identity from the response; everything else
 // (roster row, status) arrives on the roster stream.
 //
-// TWO CREATION FORMS, one request: the form arm IS the kind of create. A
-// STANDARD create is the ordinary workspace; a ONE-SHOT is a
-// fire-and-forget workspace whose whole sequence the daemon owns — naming,
-// worktree, and prompt decoration. THERE IS NO FINISH CHOICE: what happens
-// on completion is the REPOSITORY'S, stated once in its own completion
-// directive, which the daemon appends to the commission and the agent
-// carries out itself.
+// THREE CREATION FORMS, one request: the form arm IS the kind of create.
+//   - A STANDARD create is the ordinary workspace; it lands when it, its
+//     owner or the user asks (MergeWorkspace).
+//   - A ONE-SHOT is a fire-and-forget workspace that lands itself when its
+//     work is done: the daemon appends the repository's own completion
+//     directive to the commission, and the agent carries it out.
+//   - An ASYNC MERGE lands a branch no workspace owns -- a subagent's, or one
+//     an agent cut by hand -- through a hidden merge workspace the queue
+//     creates when the merge starts.
+//
+// NOTHING IS IMPLIED. Every form names where its work is cut from and lands
+// (WorkspaceTopology, or the async merge's own source and target), every
+// request names its context origin and its requester, and no field stands in
+// for an unstated choice.
+//
+// THE WORKSPACES A CREATE DERIVES FROM ARE TOLD. When a workspace is created
+// from another's branch, or with another's conversation forked, each such
+// workspace gets a brief notice (conversation.v1.PromptOrigin
+// .PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE) when the new workspace is created,
+// when it lands, and when it closes without landing -- one combined notice
+// when a workspace is both. The requester is never told about its own act.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/workspace_priority.proto";
-import "conversation/v1/user.proto";
 import "agentrepl/v1/family.proto";
+import "agentrepl/v1/merge_version_increment.proto";
+import "agentrepl/v1/workspace_priority.proto";
+import "agentrepl/v1/workspace_topology.proto";
+import "conversation/v1/user.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -29,27 +45,41 @@ message CreateWorkspaceRequest {
   // The repository to create in.
   workspace.v1.RepositoryRef repository = 1;
 
-  // THE ARM IS THE CREATION FORM.
+  // THE ARM IS THE CREATION FORM. REQUIRED.
   oneof form {
     CreateWorkspaceStandard standard = 2;
     CreateWorkspaceOneShot one_shot = 3;
+    CreateWorkspaceAsyncMerge async_merge = 10;
   }
 
-  // The parent workspace, when this create is spawned FROM one. UNSET = a
-  // TOP-LEVEL workspace: cut from the primary branch, its merge target is
-  // the repo's MAIN worktree and default branch. PRESENT = a child: cut from
-  // the parent's tip, its merge target is the PARENT's worktree and branch,
-  // and the roster nests it under the parent. A workspace is never cut from
-  // one branch and merged into another. The choice is recorded into the
-  // merge layout facts at creation.
-  optional CreateWorkspaceParent parent = 4;
+  // Who asked. Notices about the new workspace and an async merge's report go
+  // to a requesting workspace, never to the user. REQUIRED. An async merge's
+  // requester is a workspace: the merge waits in that workspace's queue row
+  // until its turn ends, and its report goes to that workspace, so a user
+  // requester beside `async_merge` is refused as invalid.
+  WorkspaceRequester requester = 11;
+
+  // The conversation the new workspace starts with. REQUIRED: a fresh one, or
+  // a fork of a workspace of this repository. An async merge's context is
+  // forked when its merge STARTS, not when it is requested, so it carries every
+  // landing that happened while the merge waited; an async merge must fork the
+  // workspace its branch was made by (`async_merge_context_not_maker`).
+  WorkspaceContextOrigin context_origin = 12;
+
+  // Tag 4 (`parent`) and tag 9 (`fork_source`) are RETIRED: the branch a
+  // workspace is cut from and lands in is its form's topology, and its
+  // conversation is `context_origin`, chosen independently.
+  reserved 4, 9;
+  reserved "parent", "fork_source";
 
   // The session model at creation. UNSET = the daemon's default; presence,
-  // never an empty-string sentinel.
+  // never an empty-string sentinel. Refused as invalid beside `async_merge`,
+  // whose workspace forks its maker's session under the maker's model;
+  // `priority` and `allow_ungated` are refused beside it likewise.
   optional string model = 5;
 
   // The workspace's priority. UNSET = unprioritized, except that a child
-  // inherits its parent's priority. A new workspace lands second-to-last among
+  // inherits its owner's priority. A new workspace lands second-to-last among
   // the open workspaces of its priority, or second-to-last among all open
   // workspaces when it has none or none share it; changeable later via
   // SetWorkspacePriority.
@@ -67,31 +97,14 @@ message CreateWorkspaceRequest {
   // DETACHED FROM THIS REQUEST'S CONTEXT so a client deadline or cancellation
   // can never kill git mid-`worktree add`; every stage and the terminal
   // outcome then ride WatchDaemon's `mutation_progress` push, keyed on this
-  // id (workspace_mutation_progress.proto). UNSET = the legacy synchronous
-  // form: the rpc blocks until the work finishes and answers success/error
-  // itself, with no progress pushed. The pre-detach refusals (validation, an
-  // unknown repository) are answered synchronously on `error` in BOTH forms;
-  // only the outcomes that can arrive after the ack — naming, worktree, spawn,
-  // and success — ride progress.
+  // id (workspace_mutation_progress.proto). UNSET = the synchronous form: the
+  // rpc blocks until the work finishes and answers success/error itself, with
+  // no progress pushed. The pre-detach refusals (validation, an unknown
+  // repository) are answered synchronously on `error` in BOTH forms; only the
+  // outcomes that can arrive after the ack — naming, worktree, spawn, and
+  // success — ride progress. Refused beside `async_merge`, whose workspace is
+  // created later by the queue (`op_id_with_async_merge`).
   optional string op_id = 8;
-
-  // Copy this workspace's conversation into a new TOP-LEVEL workspace: the
-  // worktree is cut from the primary branch and merges into it, and only the
-  // conversation comes from `fork_source`. Set only when `parent` is unset
-  // (InvalidArgument otherwise): a child fork is `parent.fork`. UNSET = the
-  // new workspace starts a fresh conversation, or forks its parent's.
-  //
-  // THE CONVERSATION DESCRIBES EDITS THE WORKTREE DOES NOT HAVE. The daemon
-  // prefixes the commission with a note naming `fork_source`, so the agent
-  // can tell the user, when a later request relies on that workspace's
-  // changes, that they were not carried over.
-  optional CreateWorkspaceForkSource fork_source = 9;
-}
-
-// The workspace whose conversation a top-level fork copies.
-message CreateWorkspaceForkSource {
-  // The workspace to copy the conversation from, as the roster served it.
-  workspace.v1.WorkspaceRef workspace = 1;
 }
 
 // The ordinary workspace create.
@@ -100,14 +113,13 @@ message CreateWorkspaceStandard {
   // empty workspace; presence, never an empty UserSaid. Also the naming
   // input: the daemon derives the slug from it when no name is supplied.
   optional conversation.v1.UserSaid initial_prompt = 1;
-  // The ref to branch from. UNSET = the repo's default branch resolution for
-  // a top-level workspace, and the parent's tip for a child. A child ALWAYS
-  // starts from its parent's tip, so a base ref beside a `parent` is refused
-  // (InvalidArgument). A top-level workspace merges into the primary branch,
-  // so its base ref must already lie on that branch (an ancestor of it, or
-  // its tip); anything else is refused with `base_ref_off_primary_branch`.
-  // Presence, not an empty-string sentinel.
-  optional string base_ref = 2;
+  // Where the workspace is cut from and where it lands. REQUIRED. It is cut
+  // from the TIP of its source branch, read when the create runs.
+  WorkspaceTopology topology = 5;
+  // Tag 2 (`base_ref`) is RETIRED: a workspace is always cut from its source
+  // branch's tip, which the topology names.
+  reserved 2;
+  reserved "base_ref";
   // A user-supplied workspace name. UNSET = the daemon mints the name
   // (slug from the initial prompt when present).
   optional string name = 3;
@@ -137,16 +149,21 @@ message CreateWorkspaceOneShot {
   // The one-shot's commission. A one-shot IS its prompt — always set.
   conversation.v1.UserSaid prompt = 1;
 
+  // Where the one-shot is cut from and where it lands. REQUIRED. A one-shot
+  // lands itself, so a child whose context is not forked from its owner --
+  // which only its owner may land -- is refused as a one-shot
+  // (`one_shot_owner_lands`).
+  WorkspaceTopology topology = 5;
+
   // The workspace the commission is ABOUT, when the one-shot was asked for
   // from inside another workspace to fix something wrong with it (a defect in
   // its feed, its state, its behavior). UNSET = the commission stands on its
   // own words. PRESENT = the daemon opens the commission with a note naming
   // this workspace — its name, worktree and branch — as the one the cited
   // issue corresponds to, so the agent investigates that workspace's logs and
-  // records rather than its own. The context workspace is NOT the one-shot's
-  // parent: the one-shot is still top-level, cut from and merging into the
-  // primary branch, and nothing of the context workspace's conversation or
-  // worktree is carried over.
+  // records rather than its own. The context workspace is neither the
+  // one-shot's owner nor its context origin: nothing of its conversation or
+  // worktree is carried over by naming it here.
   optional CreateWorkspaceOneShotContext context = 4;
 }
 
@@ -159,24 +176,138 @@ message CreateWorkspaceOneShotContext {
   workspace.v1.WorkspaceRef workspace = 1;
 }
 
-// The spawning parent and, optionally, a conversation fork from it.
-message CreateWorkspaceParent {
-  // The parent workspace. The child's merge target is this workspace's
-  // worktree and branch.
-  workspace.v1.WorkspaceRef workspace = 1;
-  // Fork the parent's conversation into the new workspace's session
-  // (resume the parent's transcript in the new worktree). UNSET = the new
-  // workspace starts a fresh conversation. A fork into a TOP-LEVEL workspace
-  // is CreateWorkspaceRequest.fork_source instead.
-  optional CreateWorkspaceFork fork = 2;
-}
-
-// Presence is the fact: fork the parent's conversation.
-message CreateWorkspaceFork {
-}
-
 // Presence is the fact: the caller consents to an ungated session.
 message CreateWorkspaceUngatedConsent {
+}
+
+// AN ASYNC MERGE: land a branch NO WORKSPACE OWNS -- a subagent's, or one an
+// agent cut by hand -- without holding the requester. When the requesting
+// turn ends the merge is put in line; when it STARTS, the queue creates a
+// HIDDEN MERGE WORKSPACE cut from the branch's tip, with the maker's
+// conversation forked as it then stands, runs `instruction` as its first
+// turn (drawn as the bubble's resolving tab), and lands it. The merge's
+// bubble is placed in the requester's feed, its turns stream into the
+// bubble's agentic tabs, and how it ended -- landed or failed -- is handed
+// back to the requester's conversation
+// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_HANDBACK). The merge
+// workspace stays hidden until it needs the user: revealed when its merge
+// fails, when its agent asks a permission or a question, when the user
+// interrupts it from the bubble, or when the user selects it.
+//
+// A BRANCH A WORKSPACE OWNS IS NEVER ASYNC-MERGED: landing a workspace's
+// branch is that workspace's own act (MergeWorkspace), so such a branch is
+// refused (`async_merge_branch_owned`).
+message CreateWorkspaceAsyncMerge {
+  // The merge workspace's name, chosen by the calling agent: a short slug
+  // naming what is merged ("reconnect-fix"). Prefixed and validated as a
+  // supplied workspace name is, and RESERVED from acceptance until the merge
+  // workspace exists; a taken name is refused as `async_merge_name_taken`.
+  // REQUIRED: blank is refused as invalid.
+  string name = 1;
+  // The branch that lands, and who made it. REQUIRED.
+  CreateWorkspaceAsyncMergeSource source = 2;
+  // Where it lands. REQUIRED.
+  CreateWorkspaceAsyncMergeTarget target = 3;
+  // How the merge workspace prepares the branch before it joins the queue, in
+  // free text written by the requesting agent: anything from "rebase onto the
+  // target, dropping every commit the requester's branch shares with it" to
+  // "fail the merge if you cannot tell which commits are the fix". The merge
+  // joins the queue once that turn settles succeeded, and a failed turn fails
+  // the merge. UNSET: the branch lands as it is, with no resolving turn.
+  optional string instruction = 4;
+  // Another workspace to CLOSE once this merge lands. It must be open, in the
+  // requester's repository, and not the requester; otherwise refused as
+  // `async_merge_unknown_close_after`. A merge that fails closes nothing.
+  // UNSET: no workspace is closed.
+  optional CreateWorkspaceAsyncMergeCloseAfter close_after = 5;
+  // TRUE removes worktrees once the merge lands, to keep disk use bounded:
+  // the merge workspace's own worktree, and the worktree that had the branch
+  // checked out when the request was accepted. Never removed: the requester's
+  // worktree, the repository's main worktree, any registered workspace's
+  // worktree, or a worktree with uncommitted changes (git's own refusal
+  // stands and is logged). Branches are never deleted. A merge that fails
+  // removes nothing.
+  bool cleanup_worktree = 6;
+  // TRUE compacts the REQUESTER's conversation once the branch lands, right
+  // after the landed handback, through the prompt queue
+  // (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER). A merge
+  // that fails compacts nothing.
+  bool compact_after = 7;
+  // The merge actions THIS merge runs, in the MERGE WORKSPACE under its merge
+  // lease -- never in the requester: before_ws_merge runs before the landing,
+  // and its failure fails the merge; postprocessing_prompt runs after the
+  // branch lands, and can never fail it. UNSET, or set with neither action:
+  // the merge runs no merge action.
+  optional CreateWorkspaceMergeActions merge_actions = 8;
+  // Where the merge joins its queue once it is put in line. REQUIRED.
+  MergeQueuePlacement placement = 9;
+  // How this merge moves agent-repl's version, and its changelog line; see
+  // merge_version_increment.proto for which merges must, may, and must not
+  // carry one (`version_increment_required`, `version_increment_unexpected`).
+  optional MergeWorkspaceVersionIncrement version_increment = 10;
+}
+
+// The branch an async merge lands, and who made it. The maker matters
+// because it holds the context the work was done in: the merge workspace
+// forks the maker's conversation, and the maker's branch is the one target
+// besides the primary branch the work may land in.
+message CreateWorkspaceAsyncMergeSource {
+  // The branch, as git spells it in the requester's repository. REQUIRED:
+  // blank is refused as invalid; a branch that does not exist is
+  // `async_merge_unknown_branch`; a branch a registered workspace owns is
+  // `async_merge_branch_owned`.
+  string branch = 1;
+  // Who made the branch. REQUIRED.
+  CreateWorkspaceAsyncMergeMaker maker = 2;
+}
+// Who made an async merge's branch.
+message CreateWorkspaceAsyncMergeMaker {
+  // THE ARM IS THE MAKER.
+  oneof maker {
+    // A subagent: the daemon finds the workspace that spawned it by locating
+    // the subagent's transcript under that workspace's session, so the
+    // spawning workspace is a fact read from disk, never stated a second time.
+    // A subagent found under no workspace's session is
+    // `async_merge_unknown_subagent`.
+    CreateWorkspaceAsyncMergeMakerSubagent subagent = 1;
+    // A workspace's own agent, which cut the branch by hand (to land a
+    // tangential fix while its own branch carries other work). Asserted by
+    // the request; the daemon checks only that the workspace is registered in
+    // the repository.
+    CreateWorkspaceAsyncMergeMakerWorkspace workspace = 2;
+  }
+}
+// The subagent that made the branch.
+message CreateWorkspaceAsyncMergeMakerSubagent {
+  // The vendor's id for the subagent, as its spawning session reported it
+  // ("a6e95de73147f1ce5"). Opaque. REQUIRED: blank is refused as invalid.
+  string agent_id = 1;
+}
+// The workspace whose agent made the branch.
+message CreateWorkspaceAsyncMergeMakerWorkspace {
+  // The maker, as the roster served it.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// Where an async merge lands.
+message CreateWorkspaceAsyncMergeTarget {
+  // THE ARM IS THE TARGET.
+  oneof target {
+    // The repository's primary branch, in its main worktree.
+    CreateWorkspaceAsyncMergeTargetPrimary primary = 1;
+    // The maker's own branch, in the maker's worktree: subagents' pieces of a
+    // workspace's work landing into it as each finishes. For a subagent the
+    // maker is the workspace that spawned it.
+    CreateWorkspaceAsyncMergeTargetMaker maker = 2;
+  }
+}
+// Onto the primary branch. No fields.
+message CreateWorkspaceAsyncMergeTargetPrimary {}
+// Into the maker's branch. No fields: the source names the maker.
+message CreateWorkspaceAsyncMergeTargetMaker {}
+// The workspace an async merge closes once it lands.
+message CreateWorkspaceAsyncMergeCloseAfter {
+  // The workspace to close.
+  workspace.v1.WorkspaceRef workspace = 1;
 }
 
 // The configured merge actions. Both run under the merge lease for EVERY
@@ -202,7 +333,19 @@ message CreateWorkspaceResponse {
     // same id. It carries nothing but the echoed id: the workspace has no
     // identity yet (naming has not run), so there is nothing else to hand back.
     CreateWorkspaceAccepted accepted = 3;
+    // THE ASYNC MERGE IS ACCEPTED. Answered -- instead of `success` -- for
+    // every `async_merge` the daemon accepts: the merge is put in line once
+    // the requesting turn ends, and its merge workspace does not exist until
+    // the merge starts, so there is no workspace identity to return.
+    CreateWorkspaceAsyncMergeAccepted async_merge_accepted = 4;
   }
+}
+
+// An accepted async merge, named as its merge workspace will be.
+message CreateWorkspaceAsyncMergeAccepted {
+  // The branch the merge workspace's name resolves to once prefixed, which is
+  // the name its bubble and its eventual merge workspace carry.
+  string merge_workspace_branch = 1;
 }
 
 // The option-B acknowledgement: the create was accepted and detached to the
@@ -223,9 +366,13 @@ message CreateWorkspaceSuccess {
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message CreateWorkspaceError {
-  // Tags 3-4 retired with the finish oneof (see the oneof comment).
-  reserved 3, 4;
-  reserved "finish_required", "finish_not_one_shot";
+  // Tags 3-4 retired with the finish oneof (see the oneof comment). Tags 5,
+  // 8, 9 and 15 are RETIRED with `parent` and `base_ref`: a child's owner is
+  // `unknown_owner`, a forked workspace without a conversation is
+  // `fork_source_has_no_conversation`, and a workspace is always cut from its
+  // source branch's tip.
+  reserved 3, 4, 5, 8, 9, 15;
+  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch";
   oneof cause {
     // An ungated permission mode was asked for without the explicit consent.
     CreateWorkspaceUngatedWithoutConsent ungated_without_consent = 1;
@@ -235,16 +382,10 @@ message CreateWorkspaceError {
     // (owner ruling, 2026-09-12): both refused a badly-placed finish
     // action, and a one-shot no longer carries one — completion is the
     // repository's own directive, so neither fault is representable.
-    // A fork was asked for from a parent that has no conversation to fork.
-    CreateWorkspaceForkParentHasNoConversation fork_parent_has_no_conversation = 5;
     // The named brief file is absent.
     CreateWorkspaceBriefMissing brief_missing = 6;
     // The repository the form names is not one the daemon knows.
     CreateWorkspaceUnknownRepository unknown_repository = 7;
-    // The parent workspace is not in the daemon's registry.
-    CreateWorkspaceUnknownParent unknown_parent = 8;
-    // The base ref does not resolve in the repository.
-    CreateWorkspaceBaseRefUnresolved base_ref_unresolved = 9;
     // Creating the worktree failed.
     CreateWorkspaceWorktreeCreationFailed worktree_creation_failed = 10;
     // Spawning the created workspace's shim failed.
@@ -257,27 +398,80 @@ message CreateWorkspaceError {
     // The repository, or the worktree the create would register, lies inside
     // a temporary directory.
     CreateWorkspaceInsideTemporaryDirectory inside_temporary_directory = 14;
-    // A top-level workspace's base ref is not on the primary branch, so the
-    // workspace would carry another branch's unmerged commits into it.
-    CreateWorkspaceBaseRefOffPrimaryBranch base_ref_off_primary_branch = 15;
-    // The fork source workspace is not in the daemon's registry.
+    // The forked workspace (context_origin.fork) is not in the daemon's
+    // registry, or is in another repository.
     CreateWorkspaceUnknownForkSource unknown_fork_source = 16;
-    // The fork source workspace has no conversation to copy.
+    // The forked workspace has no conversation to fork.
     CreateWorkspaceForkSourceHasNoConversation fork_source_has_no_conversation = 17;
     // The supplied name is reserved by a pending async merge, whose merge
-    // workspace will be created under it when the requesting turn ends
-    // (agentrepl.v1.MergeWorkspaceAsync.name).
+    // workspace will be created under it when the merge starts
+    // (agentrepl.v1.CreateWorkspaceAsyncMerge.name).
     CreateWorkspaceNameReserved name_reserved = 18;
     // The one-shot's context workspace is not in the daemon's registry.
     CreateWorkspaceUnknownContextWorkspace unknown_context_workspace = 19;
     // The named parent is hidden or closed, and creating a child of it
     // would make an open child of a parent outside the Open section.
     WorkspaceParentNotOpen parent_not_open = 20;
+    // The child's owner is not in the daemon's registry, or is in another
+    // repository.
+    CreateWorkspaceUnknownOwner unknown_owner = 21;
+    // A child whose context is not forked from its owner carries no owner
+    // notice; its owner must be told what is coming before it arbitrates it.
+    CreateWorkspaceOwnerNoticeRequired owner_notice_required = 22;
+    // A child forked from its own owner carries an owner notice; it lands
+    // itself, so there is nothing for its owner to arbitrate.
+    CreateWorkspaceOwnerNoticeUnexpected owner_notice_unexpected = 23;
+    // A one-shot child whose context is not forked from its owner: only the
+    // owner lands such a child, and a one-shot lands itself.
+    CreateWorkspaceOneShotOwnerLands one_shot_owner_lands = 24;
+    // The requesting workspace is not in the daemon's registry.
+    CreateWorkspaceUnknownRequester unknown_requester = 25;
+    // The async merge's branch does not exist in the repository.
+    CreateWorkspaceAsyncMergeUnknownBranch async_merge_unknown_branch = 26;
+    // The async merge's branch is owned by a registered workspace, which lands
+    // it itself.
+    CreateWorkspaceAsyncMergeBranchOwned async_merge_branch_owned = 27;
+    // No workspace's session holds the named subagent.
+    CreateWorkspaceAsyncMergeUnknownSubagent async_merge_unknown_subagent = 28;
+    // The maker workspace is not in the daemon's registry, or is in another
+    // repository.
+    CreateWorkspaceAsyncMergeUnknownMaker async_merge_unknown_maker = 29;
+    // The async merge's context origin is not a fork of its maker.
+    CreateWorkspaceAsyncMergeContextNotMaker async_merge_context_not_maker = 30;
+    // The async merge's name is already a workspace, a branch, or another
+    // pending async merge's reservation. Nothing was recorded; the caller
+    // retries with another name.
+    CreateWorkspaceAsyncMergeNameTaken async_merge_name_taken = 31;
+    // The async merge's close-after workspace is not open, is in another
+    // repository, or is the requester itself.
+    CreateWorkspaceAsyncMergeUnknownCloseAfter async_merge_unknown_close_after = 32;
+    // An `op_id` beside an async merge, whose workspace the queue creates
+    // later and whose progress therefore never rides this create's channel.
+    CreateWorkspaceOpIdWithAsyncMerge op_id_with_async_merge = 33;
+    // The merge lands on agent-repl's master, was asked for by an agent, and
+    // carries no version increment. Nothing was recorded.
+    MergeWorkspaceVersionIncrementRequired version_increment_required = 34;
+    // The merge carries a version increment but does not land on agent-repl's
+    // master. Nothing was recorded.
+    MergeWorkspaceVersionIncrementUnexpected version_increment_unexpected = 35;
+    // The requester's merge queue row is taken: an async merge it asked for
+    // earlier in the same turn, or a merge of its own branch, is still
+    // waiting. A requester holds one queue row, and an async merge moves to
+    // its own merge workspace's row only when the requesting turn ends.
+    // Nothing was recorded; the caller asks again in a later turn.
+    CreateWorkspaceAsyncMergeRequesterQueued async_merge_requester_queued = 36;
+    // The requester's own merge is running. Nothing was recorded.
+    CreateWorkspaceAsyncMergeRequesterMerging async_merge_requester_merging = 37;
+    // The requester's session was deleted, so the merge's report could never
+    // reach it. Nothing was recorded.
+    CreateWorkspaceAsyncMergeRequesterSessionDeleted async_merge_requester_session_deleted = 38;
+    // A primary create cut from origin (WorkspaceTopologyPrimary.from_origin)
+    // could not fetch origin's primary branch. Nothing was created.
+    CreateWorkspaceOriginFetchFailed origin_fetch_failed = 39;
   }
 }
 message CreateWorkspaceUngatedWithoutConsent {}
 message CreateWorkspaceNoSlug {}
-message CreateWorkspaceForkParentHasNoConversation {}
 message CreateWorkspaceBriefMissing {
   // The brief's name, as asked for.
   string name = 1;
@@ -294,23 +488,11 @@ message CreateWorkspaceInsideTemporaryDirectory {
   // temporary directory, `/tmp`, `/var/tmp` or `/var/folders`.
   string temporary_root = 2;
 }
-message CreateWorkspaceUnknownParent {}
-message CreateWorkspaceBaseRefUnresolved {
-  // The ref that did not resolve.
-  string ref = 1;
-}
-// Names the base ref and the primary branch it does not lie on.
-message CreateWorkspaceBaseRefOffPrimaryBranch {
-  // The base ref the request named.
-  string ref = 1;
-  // The repository's primary branch.
-  string primary_branch = 2;
-}
-// Names the fork source the registry does not hold.
+// Names the forked workspace the registry does not hold.
 message CreateWorkspaceUnknownForkSource {
   workspace.v1.WorkspaceRef workspace = 1;
 }
-// Names the fork source that has no conversation.
+// Names the forked workspace that has no conversation.
 message CreateWorkspaceForkSourceHasNoConversation {
   workspace.v1.WorkspaceRef workspace = 1;
 }
@@ -327,6 +509,65 @@ message CreateWorkspaceNameReserved {
   // The branch the supplied name resolves to.
   string branch = 1;
 }
+// Names the owner the registry does not hold for this repository.
+message CreateWorkspaceUnknownOwner {
+  // The owner as the request named it.
+  workspace.v1.WorkspaceRef owner = 1;
+}
+// The owner notice a child not forked from its owner must carry is missing.
+message CreateWorkspaceOwnerNoticeRequired {}
+// A child forked from its owner carries a notice it may not carry.
+message CreateWorkspaceOwnerNoticeUnexpected {}
+// Names the owner that must land the refused one-shot child.
+message CreateWorkspaceOneShotOwnerLands {
+  // The child's owner, which alone lands it.
+  workspace.v1.WorkspaceRef owner = 1;
+}
+// Names the requester the registry does not hold.
+message CreateWorkspaceUnknownRequester {
+  // The requester as the request named it.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// Names the async merge branch that does not exist.
+message CreateWorkspaceAsyncMergeUnknownBranch {
+  // The branch as the request named it.
+  string branch = 1;
+}
+// Names the async merge branch and the workspace that owns it.
+message CreateWorkspaceAsyncMergeBranchOwned {
+  // The branch as the request named it.
+  string branch = 1;
+  // The workspace whose branch it is, which lands it with MergeWorkspace.
+  workspace.v1.WorkspaceRef owner = 2;
+}
+// Names the subagent no workspace's session holds.
+message CreateWorkspaceAsyncMergeUnknownSubagent {
+  // The subagent id as the request named it.
+  string agent_id = 1;
+}
+// Names the maker workspace the registry does not hold for this repository.
+message CreateWorkspaceAsyncMergeUnknownMaker {
+  // The maker as the request named it.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// Names the maker the async merge's context must fork.
+message CreateWorkspaceAsyncMergeContextNotMaker {
+  // The maker: the subagent's spawning workspace, or the named maker
+  // workspace.
+  workspace.v1.WorkspaceRef maker = 1;
+}
+// The refused name, as the branch it resolves to once prefixed.
+message CreateWorkspaceAsyncMergeNameTaken {
+  // The branch the name resolves to ("agent-1a2b/reconnect-fix").
+  string branch = 1;
+}
+// The async merge's close-after workspace cannot be closed by this merge.
+message CreateWorkspaceAsyncMergeUnknownCloseAfter {}
+message CreateWorkspaceAsyncMergeRequesterQueued {}
+message CreateWorkspaceAsyncMergeRequesterMerging {}
+message CreateWorkspaceAsyncMergeRequesterSessionDeleted {}
+// An op id was set beside an async merge.
+message CreateWorkspaceOpIdWithAsyncMerge {}
 message CreateWorkspaceWorktreeCreationFailed {
   // Git's own account of the failure.
   string detail = 1;
@@ -378,4 +619,10 @@ message CreateWorkspaceNamingFailed {
   // The last answer the model gave, when there was one. Empty when the call
   // never answered.
   string answer = 4;
+}
+
+// Origin's primary branch could not be fetched.
+message CreateWorkspaceOriginFetchFailed {
+  // The fetch's own failure, as git stated it.
+  string detail = 1;
 }
