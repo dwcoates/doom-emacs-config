@@ -89,6 +89,9 @@ type surfaces struct {
 	// without taking mu: a record can be emitted by a caller that the tee's
 	// own consumer is waiting on, so the read must never contend.
 	tee atomic.Pointer[teeBox]
+	// counter is the bound record counter, read on every Warn and Error
+	// record without taking mu, as tee is.
+	counter atomic.Pointer[counterBox]
 
 	scanEvery time.Duration
 	stop      chan struct{}
@@ -332,6 +335,26 @@ func (s *surfaces) BindRecordTee(tee RecordTee) {
 	s.tee.Store(&teeBox{tee: tee})
 }
 
+// counterBox holds the bound record counter so it can be swapped atomically.
+type counterBox struct{ counter RecordCounter }
+
+// BindRecordCounter implements Surfaces.
+func (s *surfaces) BindRecordCounter(counter RecordCounter) {
+	s.counter.Store(&counterBox{counter: counter})
+}
+
+// count hands a durable Warn or Error record to the bound counter.
+func (s *surfaces) count(runtime, level, operation string) {
+	if level != LevelWarn && level != LevelError {
+		return
+	}
+	box := s.counter.Load()
+	if box == nil || box.counter == nil {
+		return
+	}
+	box.counter.CountRecord(runtime, level, operation)
+}
+
 // WorkspaceOrCentral answers the logger for a workspace's records and is
 // TOTAL: it always returns a logger.
 //
@@ -524,6 +547,7 @@ func (s *surfaces) writeClient(dest interface{ write([]byte) error }, p prepared
 	if err := dest.write(line); err != nil {
 		return err
 	}
+	s.count(p.runtime, p.rec.Level, p.rec.Operation)
 	s.mirror.enqueue(out.Level, line)
 	return nil
 }

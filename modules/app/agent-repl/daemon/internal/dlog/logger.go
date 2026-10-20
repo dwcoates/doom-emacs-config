@@ -61,6 +61,7 @@ func (l *logger) emit(level, operation, message string, ctx Context) {
 	}
 	rec := newRecord(l.s.now(), l.runtime, level, operation, message, merge(l.base, ctx), l.s.pid)
 	l.deliver(rec)
+	l.s.count(l.runtime, level, operation)
 	l.tee(level, operation, message)
 }
 

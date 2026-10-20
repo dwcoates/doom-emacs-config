@@ -210,6 +210,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		return fmt.Errorf("agent-repld: open the metrics surface: %w", err)
 	}
 	defer metricsSurface.Close()
+	surfaces.BindRecordCounter(metricsSurface)
 	bootRestarts := h.Restarts
 	if bootRestarts == nil {
 		bootRestarts = metricsSurface

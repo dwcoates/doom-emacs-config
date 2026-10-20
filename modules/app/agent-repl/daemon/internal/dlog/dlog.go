@@ -104,8 +104,19 @@ type Surfaces interface {
 	// footer shows the daemon's warnings and errors about a workspace without
 	// a hook beside each call site. A nil tee unbinds it.
 	BindRecordTee(tee RecordTee)
+	// BindRecordCounter installs the ONE place every Warn and Error record is
+	// counted: the daemon's own, of any logger, and every client record it
+	// writes for Emacs or the webapp. A nil counter unbinds it.
+	BindRecordCounter(counter RecordCounter)
 	// Close flushes and closes every sink the daemon opened.
 	Close() error
+}
+
+// RecordCounter counts Warn and Error records by the runtime that wrote them,
+// their level and their operation (runtimemetrics.Surface). It is called after
+// the record is durable and must not block.
+type RecordCounter interface {
+	CountRecord(runtime, level, operation string)
 }
 
 // WorkspaceRecord is one Warn or Error record a WORKSPACE logger emitted, as
