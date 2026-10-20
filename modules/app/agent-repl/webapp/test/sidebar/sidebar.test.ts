@@ -49,6 +49,7 @@ import { MERGED_DRAWN_AT_ONCE } from "../../src/sidebar/roster.js";
 import { STAND_IN_ATTRIBUTE } from "../../src/sidebar/row.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { recordingFailures } from "../failure-sink.js";
+import { boxRect } from "../dom-rect.js";
 
 /** A storage a test can inspect, and one that throws on every access. */
 function memoryStorage(seed: Record<string, string> = {}): Storage {
@@ -769,18 +770,7 @@ describe("an open row's detail panel, placed by the rail", () => {
   let original: typeof Element.prototype.getBoundingClientRect;
   const rects = new Map<Element, DOMRect>();
 
-  const rect = (init: { left: number; top: number; width: number; height: number }): DOMRect =>
-    ({
-      left: init.left,
-      top: init.top,
-      right: init.left + init.width,
-      bottom: init.top + init.height,
-      width: init.width,
-      height: init.height,
-      x: init.left,
-      y: init.top,
-      toJSON: () => ({}),
-    });
+  const rect = boxRect;
 
   beforeEach(() => {
     rects.clear();
@@ -1476,5 +1466,111 @@ describe("the rail holds its drawing while a row is dragged", () => {
     expect([whileHeld, nameOf(host)]).toEqual(["before", "after"]);
     sidebar.dispose();
     host.remove();
+  });
+});
+
+/** A roster of rows ws-0..ws-5 in one repository, CURRENT the one the daemon names current. */
+function sixRows(current: string): WorkspaceRoster {
+  return roster({
+    current,
+    repos: [
+      repoSection({
+        id: "repo-1",
+        rows: Array.from({ length: 6 }, (_, i) => row({ id: `ws-${i}`, current: current === `ws-${i}` })),
+      }),
+    ],
+  });
+}
+
+/**
+ * Lay HOST's Open section out as the engine would: a viewport two lines
+ * tall over lines of 20px, scrolling. jsdom lays nothing out and keeps no
+ * scroll offset, so both are stated per element.
+ */
+function layOpenSection(host: HTMLElement): { scrollTop(): number } {
+  const LINE = 20;
+  const offsets = new WeakMap<Element, number>();
+  const regionOf = (el: Element): HTMLElement | null => el.closest<HTMLElement>(".sb-sections");
+  const rect = (top: number, height: number): DOMRect => boxRect({ top, height });
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (this.classList.contains("sb-sections")) return rect(0, 2 * LINE);
+    const region = regionOf(this);
+    if (!this.classList.contains("row") || region === null) return rect(0, 0);
+    const index = [...region.querySelectorAll(".row")].indexOf(this);
+    return rect(index * LINE - (offsets.get(region) ?? 0), LINE);
+  });
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains("sb-sections") ? 2 * LINE : 0;
+  });
+  vi.spyOn(HTMLElement.prototype, "scrollTop", "get").mockImplementation(function (this: HTMLElement) {
+    return offsets.get(this) ?? 0;
+  });
+  vi.spyOn(HTMLElement.prototype, "scrollTop", "set").mockImplementation(function (this: HTMLElement, v: number) {
+    offsets.set(this, Math.max(0, Math.min(v, 4 * LINE)));
+  });
+  return {
+    scrollTop: () => {
+      const region = host.querySelector(".sb-sections");
+      if (region === null) throw new Error("the rail drew no Open section");
+      return offsets.get(region) ?? 0;
+    },
+  };
+}
+
+describe("the rail scrolls the selected row into its section's view", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("scrolls the Open section to a row a push names current", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const stream = pushedRosters();
+    const sidebar = mountWebhostSidebar(host, ctxFor([], stream.impl), { storage: null, timers: fakeTimers() });
+    const laid = layOpenSection(host);
+    stream.push(sixRows("ws-0"));
+    await settle();
+
+    // Act
+    stream.push(sixRows("ws-5"));
+    await settle();
+
+    // Assert
+    expect(laid.scrollTop()).toBe(80);
+    sidebar.dispose();
+  });
+
+  it("scrolls the Open section to the row the webhost shows ahead of the roster", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const sidebar = mountWebhostSidebar(host, ctxFor([sixRows("ws-0")]), { storage: null, timers: fakeTimers() });
+    const laid = layOpenSection(host);
+    await settle();
+
+    // Act
+    sidebar.markShown("ws-4");
+
+    // Assert
+    expect(laid.scrollTop()).toBe(70);
+    sidebar.dispose();
+  });
+
+  it("leaves the Open section where the reader scrolled it on a push restating the selection", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const stream = pushedRosters();
+    const sidebar = mountWebhostSidebar(host, ctxFor([], stream.impl), { storage: null, timers: fakeTimers() });
+    const laid = layOpenSection(host);
+    stream.push(sixRows("ws-5"));
+    await settle();
+    (host.querySelector(".sb-sections") as HTMLElement).scrollTop = 0;
+
+    // Act
+    stream.push(sixRows("ws-5"));
+    await settle();
+
+    // Assert
+    expect(laid.scrollTop()).toBe(0);
+    sidebar.dispose();
   });
 });

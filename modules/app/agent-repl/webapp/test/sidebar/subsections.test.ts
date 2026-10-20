@@ -29,6 +29,7 @@ import {
   settleOwedDragClick,
   sidebarContext,
 } from "./harness.js";
+import { boxRect } from "../dom-rect.js";
 
 /** Every ArrangeSidebar request the daemon received, and a context over it. */
 function arranged(): { sc: RailContext & SidebarContext; sent: ArrangeSidebarRequest[] } {
@@ -83,7 +84,7 @@ function layOut(list: HTMLElement, top: number): void {
     }
     return y;
   };
-  const box = (y: number, h: number): DOMRect => ({ top: y, bottom: y + h, height: h, left: 0, right: 200, width: 200, x: 0, y, toJSON: () => ({}) });
+  const box = (y: number, h: number): DOMRect => boxRect({ top: y, height: h, width: 200 });
   for (const el of [list, ...queryAll<HTMLElement>(list, ".rows, [data-roster-row], [data-repository], .sb-subsection, .sb-subsection-head")]) {
     Object.defineProperty(el, "getBoundingClientRect", {
       configurable: true,
@@ -507,7 +508,7 @@ describe("dragging near the Open region's edge", () => {
     const pane = mount(roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a" }), row({ id: "b" })] })] }), sc);
     const scroller = pane;
     Object.defineProperty(scroller, "getBoundingClientRect", {
-      value: () => ({ top: 0, bottom: 200, height: 200, left: 0, right: 200, width: 200, x: 0, y: 0, toJSON: () => ({}) }),
+      value: () => boxRect({ height: 200, width: 200 }),
     });
     scroller.scrollTop = 0;
     layOut(pane.querySelector(".repo-section > .rows") as HTMLElement, 100);

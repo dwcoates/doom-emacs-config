@@ -32,6 +32,7 @@
  */
 import { afterEach, beforeEach } from "vitest";
 import { visibleWidth } from "../src/metaprompt-tree.js";
+import { boxRect } from "./dom-rect.js";
 
 /** The geometry a staged tree measurement reads. */
 export interface TreeLayout {
@@ -70,7 +71,7 @@ const LENGTHS = new Set([
 ]);
 
 function rect(width: number): DOMRect {
-  return { width, height: 0, top: 0, left: 0, right: width, bottom: 0, x: 0, y: 0, toJSON: () => ({}) };
+  return boxRect({ width });
 }
 
 /**

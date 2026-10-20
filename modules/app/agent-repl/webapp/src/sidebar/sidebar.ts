@@ -46,6 +46,7 @@ import { createUnseenGate, unseenEnv, type UnseenEnv } from "./unseen.js";
 import { placeChildren } from "./children.js";
 import { queryAll } from "../dom.js";
 import { createSelectionFade } from "./selection-fade.js";
+import { createSelectionScroll } from "./selection-scroll.js";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 /** What every mount answers with. */
@@ -206,6 +207,11 @@ function mountSidebarIn(
    * select never moves it back.
    */
   let shownAhead: string | null = null;
+
+  // THE SELECTED ROW IS SCROLLED INTO ITS SECTION'S VIEW (selection-scroll.ts),
+  // once per selection, after a draw has fitted the bands and whenever the
+  // webhost moves the highlight ahead of the roster.
+  const selectionScroll = createSelectionScroll();
 
   const openDetails = new Set<string>();
   const dropdowns = createDropdowns();
@@ -389,6 +395,8 @@ function mountSidebarIn(
     }
     // Fitted once the rail is shown, so the band measures the rail it is in.
     bandFit.refit();
+    // Followed once the bands are fitted, so it scrolls the viewport they drew.
+    selectionScroll.follow(body);
     // Seeked once the draw is in the document, where its animations run.
     wallPhase.seek();
     mark("hooks");
@@ -409,6 +417,7 @@ function mountSidebarIn(
         }
       }
       rail.selectionFade.highlight(id);
+      selectionScroll.follow(body);
       log.debug("the webhost showed a page; the rail highlights its row ahead of the roster", {
         operation: "sidebar.shown-ahead",
         context: { workspace: id, rows },

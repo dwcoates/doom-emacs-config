@@ -40,6 +40,7 @@ import {
   startOfToday,
   startOfTomorrow,
 } from "./harness.js";
+import { boxRect } from "../dom-rect.js";
 
 const ROW = 20;
 
@@ -90,7 +91,7 @@ function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {} }: Dra
 
 /** A DOMRect at TOP, HEIGHT tall. */
 function rect(top: number, height: number): DOMRect {
-  return { top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) };
+  return boxRect({ top, height });
 }
 
 /** Each section's class and its rows region's selector. */

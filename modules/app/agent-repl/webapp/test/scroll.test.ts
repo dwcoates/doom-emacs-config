@@ -11,6 +11,7 @@ import {
   armedWheelAction,
   collapseClicked,
   dragEdgeScroll,
+  selectionRowScroll,
   installIntentScroll,
   innerScrollerAt,
   TailFollow,
@@ -43,6 +44,7 @@ import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-captu
 import { fireResize } from "./resize-observer.js";
 import { expandedSectionAt, installClickExpand } from "../src/expand.js";
 import { frameQueue } from "./frame-queue.js";
+import { boxRect } from "./dom-rect.js";
 
 /** An `ExpandedSectionAt` for a feed with no open section. */
 const noneOpen = (): HTMLElement | null => null;
@@ -1528,8 +1530,7 @@ describe("TailFollow's latest-visible latch", () => {
 describe("revealGeometry", () => {
   it("reads the box and the node off their live rects", () => {
     // Arrange — jsdom lays nothing out, so each rect is scripted.
-    const rect = (top: number, height: number): (() => DOMRect) => () =>
-      ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
+    const rect = (top: number, height: number): (() => DOMRect) => () => boxRect({ top, height });
     const box = document.createElement("div");
     const node = document.createElement("div");
     box.getBoundingClientRect = rect(40, 300);
@@ -1559,7 +1560,8 @@ describe("collapseClicked", () => {
  * shift -- and a hit fails here, so an implicit mover cannot come back quietly.
  * Inside scroll.ts, the writes are held to the named list: the tail owner's
  * two primitives, the reader's own wheel redirect, the reader's own
- * collapse click, and the reader's own drag at the rail's edge. A bubble's
+ * collapse click, the reader's own drag at the rail's edge, and the
+ * reader's own switch to a workspace whose rail row is out of view. A bubble's
  * scroll box has no other writer.
  */
 describe("no scroll write outside scroll.ts", () => {
@@ -1624,6 +1626,7 @@ describe("no scroll write outside scroll.ts", () => {
       "feed.scrollTop += delta;",
       "section.scrollTop = 0;",
       "scroller.scrollTop += step;",
+      "region.scrollTop += delta;",
     ]);
   });
 
@@ -4059,5 +4062,16 @@ describe("dragEdgeScroll", () => {
     dragEdgeScroll(scroller, -8);
     // Assert
     expect(scroller.scrollTop).toBe(32);
+  });
+});
+
+describe("selectionRowScroll", () => {
+  it("moves the section by the delta the selection asks for", () => {
+    // Arrange
+    const region = { scrollTop: 40 };
+    // Act
+    selectionRowScroll(region, 60);
+    // Assert
+    expect(region.scrollTop).toBe(100);
   });
 });

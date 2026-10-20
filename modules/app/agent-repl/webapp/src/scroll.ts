@@ -1767,3 +1767,15 @@ export function collapseClicked(section: { scrollTop: number }): void {
 export function dragEdgeScroll(scroller: { scrollTop: number }, step: number): void {
   scroller.scrollTop += step;
 }
+
+/**
+ * THE READER SELECTED A WORKSPACE WHOSE RAIL ROW SITS OUTSIDE ITS SECTION'S
+ * VIEWPORT: scroll the section by DELTA pixels so the row shows
+ * (src/sidebar/selection-scroll.ts, owner request 2026-10-20). Like the drag
+ * at the rail's edge, this carries the reader's own act, the switch, to the
+ * section it lands in: it runs once per selection, never on a push that
+ * restates one, so it never undoes the reader's own scrolling of the section.
+ */
+export function selectionRowScroll(region: { scrollTop: number }, delta: number): void {
+  region.scrollTop += delta;
+}
