@@ -40,6 +40,7 @@ import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, isOwnRule, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
+import { createControl } from "../src/control.js";
 import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
 
 /** The selectors on which any `user-select`/`-webkit-user-select` is `none`. */
@@ -4509,6 +4510,28 @@ describe("the tool card's command grey", () => {
 
     // Assert
     expect(got).toBe("#181817");
+  });
+});
+
+/**
+ * A QUESTION OPTION IS NEVER INDENTED: the base control (`:where(ar-button)`)
+ * centers its text, so an option whose label and description wrap drew its
+ * first `1. label description` line pushed in from the left edge.
+ */
+describe("the question option's alignment", () => {
+  it("aligns an option's text to the start rather than the control's center", () => {
+    // Arrange
+    const list = document.createElement("div");
+    list.className = "q-opts";
+    const option = createControl();
+    option.className = "q-opt";
+    list.append(option);
+
+    // Act
+    const align = inDocument(list, () => cascadedValue(option, "text-align"));
+
+    // Assert
+    expect(align).toBe("start");
   });
 });
 

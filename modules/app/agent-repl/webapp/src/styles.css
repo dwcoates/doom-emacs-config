@@ -3846,6 +3846,9 @@ html[data-page-unshown] *::after {
   padding: 0.25em 0.85em;
   cursor: pointer;
   font-size: 0.9em;
+  /* AN OPTION READS FLUSH LEFT, NEVER INDENTED: the base control centers its
+     text, so an option long enough to wrap drew its first line pushed in. */
+  text-align: start;
 }
 .q-opt:hover { border-color: var(--accent); }
 .q-opt.selected {
