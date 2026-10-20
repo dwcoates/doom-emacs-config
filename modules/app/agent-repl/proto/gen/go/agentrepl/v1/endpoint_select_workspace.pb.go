@@ -37,9 +37,15 @@ type SelectWorkspaceRequest struct {
 	// entry for an async merge sets it to the merge's bubble in its requester's
 	// feed (FeedMergeQueueBubble), so the click opens that bubble rather than
 	// the hidden merge workspace (owner ruling, 2026-10-17).
-	Reveal        *v11.FeedId `protobuf:"bytes,2,opt,name=reveal,proto3,oneof" json:"reveal,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Reveal *v11.FeedId `protobuf:"bytes,2,opt,name=reveal,proto3,oneof" json:"reveal,omitempty"`
+	// A STEP OF A WALK THROUGH THE SELECTION HISTORY, not a choice: the daemon
+	// stamps `current` but leaves the row's last-selected instant as it stands.
+	// Emacs's recency walk (`s-[` / `s-]`) sets it, so the walk never reorders
+	// the history it walks: each press lands one place further along the same
+	// order (owner request, 2026-10-20).
+	KeepSelectionHistory bool `protobuf:"varint,3,opt,name=keep_selection_history,json=keepSelectionHistory,proto3" json:"keep_selection_history,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *SelectWorkspaceRequest) Reset() {
@@ -84,6 +90,13 @@ func (x *SelectWorkspaceRequest) GetReveal() *v11.FeedId {
 		return x.Reveal
 	}
 	return nil
+}
+
+func (x *SelectWorkspaceRequest) GetKeepSelectionHistory() bool {
+	if x != nil {
+		return x.KeepSelectionHistory
+	}
+	return false
 }
 
 // THE ARM IS THE OUTCOME.
@@ -567,10 +580,11 @@ var File_agentrepl_v1_endpoint_select_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_select_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_select_workspace.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x8f\x01\n" +
+	",agentrepl/v1/endpoint_select_workspace.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\xc5\x01\n" +
 	"\x16SelectWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x120\n" +
-	"\x06reveal\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x06reveal\x88\x01\x01B\t\n" +
+	"\x06reveal\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x06reveal\x88\x01\x01\x124\n" +
+	"\x16keep_selection_history\x18\x03 \x01(\bR\x14keepSelectionHistoryB\t\n" +
 	"\a_reveal\"\xa1\x01\n" +
 	"\x17SelectWorkspaceResponse\x12@\n" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.SelectWorkspaceSuccessH\x00R\asuccess\x12:\n" +

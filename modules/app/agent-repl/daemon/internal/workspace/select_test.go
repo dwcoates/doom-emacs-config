@@ -24,7 +24,7 @@ func TestSelectRecordsTheSelectionInstant(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -41,7 +41,7 @@ func TestSelectClearsTheAttentionMarker(t *testing.T) {
 	f.db.attention["w1"] = true
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -57,7 +57,7 @@ func TestSelectTellsTheRoster(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -89,7 +89,7 @@ func TestSelectRaisesTheCacheKeepersVisibilityEdges(t *testing.T) {
 			}
 
 			// Act.
-			if err := f.verbs.Select(context.Background(), "w2"); err != nil {
+			if err := f.verbs.Select(context.Background(), "w2", RecordSelection); err != nil {
 				t.Fatalf("Select: %v", err)
 			}
 
@@ -107,10 +107,10 @@ func TestSelectIsIdempotent(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("first Select: %v", err)
 	}
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("second Select: %v", err)
 	}
 
@@ -125,7 +125,7 @@ func TestSelectRefusesAnUnknownWorkspace(t *testing.T) {
 	f := newFixture(t)
 
 	// Act.
-	err := f.verbs.Select(context.Background(), "nope")
+	err := f.verbs.Select(context.Background(), "nope", RecordSelection)
 
 	// Assert.
 	asRefusal(t, err, ArmUnknownWorkspace)
@@ -193,7 +193,7 @@ func TestSelectTellsTheRosterAsOnePush(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestSelectWithAnUnreadableRegistryStillTellsTheRosterTheSelection(t *testin
 	f.db.listWorkspacesErr = errFake
 
 	// Act.
-	_ = f.verbs.Select(context.Background(), "w1")
+	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
 
 	// Assert.
 	if want := []string{"selected"}; !slices.Equal(f.sidebar.calls, want) {
@@ -232,7 +232,7 @@ func TestSelectPublishesARegistryCarryingTheSelection(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -255,7 +255,7 @@ func TestSelectPublishesARegistryCarryingTheSelectionInstant(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -283,13 +283,13 @@ func TestReselectingDoesNotRestampTheSelectionInstant(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("first Select: %v", err)
 	}
 	f.db.currentAt = fixedNow.Add(-time.Hour)
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("second Select: %v", err)
 	}
 
@@ -306,13 +306,13 @@ func TestReselectingStillClearsTheAttentionMarker(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("first Select: %v", err)
 	}
 	f.db.attention["w1"] = true
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("second Select: %v", err)
 	}
 
@@ -329,7 +329,7 @@ func TestSelectRevivesAndUnparksAHibernatedWorkspace(t *testing.T) {
 	f.hibernate("w1")
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -349,7 +349,7 @@ func TestSelectStartsNothingForALiveWorkspace(t *testing.T) {
 	f.fleet.live["w1"] = true
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -368,7 +368,7 @@ func TestSelectFailsWhenTheRevivalFails(t *testing.T) {
 	f.fleet.startErr = errors.New("boom")
 
 	// Act.
-	err := f.verbs.Select(context.Background(), "w1")
+	err := f.verbs.Select(context.Background(), "w1", RecordSelection)
 
 	// Assert.
 	if err == nil {
@@ -389,7 +389,7 @@ func TestSelectLogsTheSwitchReceiptAtInfo(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -403,12 +403,12 @@ func TestSelectLogsTheReselectionReceiptAtInfo(t *testing.T) {
 	// Arrange: the workspace is already current, so the next select re-selects it.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("first Select: %v", err)
 	}
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("second Select: %v", err)
 	}
 
@@ -631,7 +631,7 @@ func TestSelectTellsTheRosterInOrder(t *testing.T) {
 			f.fleet.startErr = tc.startErr
 
 			// Act.
-			_ = f.verbs.Select(context.Background(), "w1")
+			_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
 
 			// Assert: the selection lands whole before the revival begins, and
 			// the marker is lowered however the revival ended.
@@ -695,7 +695,7 @@ func TestSelectLowersTheRevivingMarkerWhenTheRevivalFails(t *testing.T) {
 	f.fleet.startErr = errFake
 
 	// Act.
-	_ = f.verbs.Select(context.Background(), "w1")
+	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
 
 	// Assert: a failed bring-up is not still "coming back".
 	_, _, reviving := f.sidebar.snapshot()
@@ -713,7 +713,7 @@ func TestSelectAnswersTheRevivalFailureToTheCaller(t *testing.T) {
 	f.fleet.startErr = errFake
 
 	// Act.
-	err := f.verbs.Select(context.Background(), "w1")
+	err := f.verbs.Select(context.Background(), "w1", RecordSelection)
 
 	// Assert.
 	if !errors.Is(err, errFake) {
@@ -729,7 +729,7 @@ func TestAFailedRevivalLeavesTheSelectionStanding(t *testing.T) {
 	f.fleet.startErr = errFake
 
 	// Act.
-	_ = f.verbs.Select(context.Background(), "w1")
+	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
 
 	// Assert: the user DID switch; the error says what did not come up.
 	if f.db.current == nil || *f.db.current != "w1" {
@@ -744,7 +744,7 @@ func TestSelectRaisesNoRevivingMarkerForALiveWorkspace(t *testing.T) {
 	f.fleet.live["w1"] = true
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -767,7 +767,7 @@ func arrangeSwitchDuringRevival(t *testing.T) (*fixture, chan struct{}, <-chan e
 	entered, release := f.gateStarts(1)
 	slow := f.selectAsync(context.Background(), "slow")
 	receive(t, entered, "the slow revival's Start")
-	if err := f.verbs.Select(context.Background(), "fast"); err != nil {
+	if err := f.verbs.Select(context.Background(), "fast", RecordSelection); err != nil {
 		t.Fatalf("Select(fast): %v", err)
 	}
 	return f, release, slow
@@ -943,12 +943,12 @@ func TestSelectReturnsTheFeedToItsTailOnASwitch(t *testing.T) {
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.workspace("w2", t.TempDir())
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("Select w1: %v", err)
 	}
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w2"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w2", RecordSelection); err != nil {
 		t.Fatalf("Select w2: %v", err)
 	}
 
@@ -962,12 +962,12 @@ func TestReselectingLeavesTheFeedWhereItIs(t *testing.T) {
 	// Arrange: a re-selection is Emacs re-asserting, never a switch.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("first Select: %v", err)
 	}
 
 	// Act.
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("second Select: %v", err)
 	}
 
@@ -983,7 +983,7 @@ func TestSelectStartsAnOpenWorkspaceWithNoSession(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act
-	if err := f.verbs.Select(context.Background(), "w1"); err != nil {
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
 		t.Fatalf("Select: %v", err)
 	}
 
@@ -1008,7 +1008,7 @@ func TestSelectOnADaemonStandingDownAnswersTheStandingDownArm(t *testing.T) {
 	f.fleet.startErr = standingDownStart()
 
 	// Act.
-	err := f.verbs.Select(context.Background(), "w1")
+	err := f.verbs.Select(context.Background(), "w1", RecordSelection)
 
 	// Assert: SelectWorkspaceError's own arm, never the open's spawn_failed.
 	asRefusal(t, err, ArmStandingDown)
@@ -1022,7 +1022,7 @@ func TestSelectOnADaemonStandingDownLeavesTheSelectionStanding(t *testing.T) {
 	f.fleet.startErr = standingDownStart()
 
 	// Act.
-	_ = f.verbs.Select(context.Background(), "w1")
+	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
 
 	// Assert: the next daemon serves this selection.
 	if f.db.current == nil || *f.db.current != "w1" {
@@ -1626,7 +1626,7 @@ func TestAConditionalSelectStandsWhenTheUserMovedOff(t *testing.T) {
 	v := f.verbs.(*verbs)
 
 	// Act
-	applied, err := v.selectCurrent(context.Background(), f.log.logger, "w3", &from)
+	applied, err := v.selectCurrent(context.Background(), f.log.logger, "w3", &from, RecordSelection)
 
 	// Assert
 	if err != nil || applied {
@@ -1750,4 +1750,118 @@ func TestSwapAndMoveShareThePlaceRefusal(t *testing.T) {
 	if shared != 2 || byHand != 1 {
 		t.Fatalf("placeRefusal calls = %d and hand-spelled not_siblings arms = %d, want Swap and Move sharing the one helper", shared, byHand)
 	}
+}
+
+func TestSelectAsARecencyWalkStepLeavesTheSelectionInstant(t *testing.T) {
+	// Arrange: w1 was last chosen an hour ago; the walk steps onto it now.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	earlier := fixedNow.Add(-time.Hour)
+	ws := f.db.workspaces["w1"]
+	ws.LastSelectedAt = &earlier
+	f.db.workspaces["w1"] = ws
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1", KeepSelectionHistory); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert: current moved, the history did not.
+	if f.db.current == nil || *f.db.current != "w1" {
+		t.Fatalf("current = %v, want w1", f.db.current)
+	}
+	if !slices.Equal(f.db.keptHistorySelects, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("kept-history selects = %v, want w1 once", f.db.keptHistorySelects)
+	}
+	if got := f.db.workspaces["w1"].LastSelectedAt; got == nil || !got.Equal(earlier) {
+		t.Fatalf("last selected = %v, want the standing %v", got, earlier)
+	}
+}
+
+func TestSelectAsARecencyWalkStepStillTellsTheRoster(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1", KeepSelectionHistory); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert.
+	if len(f.sidebar.selected) != 1 || f.sidebar.selected[0] != "w1" {
+		t.Fatalf("roster selections = %v, want w1 once", f.sidebar.selected)
+	}
+}
+
+func TestSelectAsARecencyWalkStepLogsItsReceiptAtInfo(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1", KeepSelectionHistory); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert.
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
+		Message: "selected the workspace as a step of a recency walk; the selection instant stands"})
+	if !ok || r.Level != "info" || r.Context["history"] != "keep" {
+		t.Fatalf("walk receipt = %+v (found %v), want info with history=keep", r, ok)
+	}
+}
+
+func TestSelectAsARecencyWalkStepThatCannotRecordFailsLoudly(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.keepSelectedErr = errors.New("disk gone")
+
+	// Act.
+	err := f.verbs.Select(context.Background(), "w1", KeepSelectionHistory)
+
+	// Assert: the error reaches the caller, is logged once with its cause,
+	// and the roster was told nothing.
+	if err == nil || !strings.Contains(err.Error(), "disk gone") {
+		t.Fatalf("Select = %v, want the store's failure", err)
+	}
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Message: "could not record the walk's selection"})
+	if !ok || r.Level != "error" || r.Context["cause"] != "disk gone" || r.Context["history"] != "keep" {
+		t.Fatalf("failure record = %+v (found %v), want error with cause and history", r, ok)
+	}
+	if len(f.sidebar.selected) != 0 {
+		t.Fatalf("roster selections = %v, want none after a failed record", f.sidebar.selected)
+	}
+}
+
+func TestSelectionHistoryNamesEachValue(t *testing.T) {
+	tests := []struct {
+		history SelectionHistory
+		want    string
+	}{
+		{RecordSelection, "record"},
+		{KeepSelectionHistory, "keep"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			// Act / Assert.
+			if got := tt.history.String(); got != tt.want {
+				t.Fatalf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectionHistoryPanicsOnAnUnknownValue(t *testing.T) {
+	// Arrange.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("String() on an unknown value did not panic")
+		}
+	}()
+
+	// Act.
+	_ = SelectionHistory(99).String()
 }

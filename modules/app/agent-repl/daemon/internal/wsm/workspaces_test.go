@@ -894,6 +894,82 @@ func TestSetCurrentStampsLastSelected(t *testing.T) {
 	}
 }
 
+func TestSetCurrentKeepingLastSelectedLeavesTheInstant(t *testing.T) {
+	tests := []struct {
+		name  string
+		prior *time.Time
+	}{
+		{"a stamped workspace keeps its instant", &instant},
+		{"a never-selected workspace stays unstamped", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			other := testWorkspace(t, s)
+			if tt.prior != nil {
+				if err := s.SetCurrent(context.Background(), ws.ID, *tt.prior); err != nil {
+					t.Fatalf("SetCurrent: %v", err)
+				}
+			}
+			if err := s.SetCurrent(context.Background(), other.ID, instant.Add(time.Hour)); err != nil {
+				t.Fatalf("SetCurrent: %v", err)
+			}
+
+			// Act
+			if err := s.SetCurrentKeepingLastSelected(context.Background(), ws.ID); err != nil {
+				t.Fatalf("SetCurrentKeepingLastSelected: %v", err)
+			}
+
+			// Assert
+			got, err := s.Workspace(context.Background(), ws.ID)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if !got.Current {
+				t.Fatal("the walked-onto workspace is not current")
+			}
+			switch {
+			case tt.prior == nil && got.LastSelectedAt != nil:
+				t.Fatalf("last selected = %v, want unstamped", got.LastSelectedAt)
+			case tt.prior != nil && (got.LastSelectedAt == nil || !got.LastSelectedAt.Equal(*tt.prior)):
+				t.Fatalf("last selected = %v, want the standing %v", got.LastSelectedAt, *tt.prior)
+			}
+			if n := scalar[int](t, s, `SELECT count(*) FROM workspaces WHERE is_current = 1`); n != 1 {
+				t.Fatalf("%d workspaces are current, want exactly 1", n)
+			}
+		})
+	}
+}
+
+func TestSetCurrentKeepingLastSelectedRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	kept := testWorkspace(t, s)
+	if err := s.SetCurrent(context.Background(), kept.ID, instant); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+
+	// Act
+	err := s.SetCurrentKeepingLastSelected(context.Background(), WorkspaceID("absent"))
+
+	// Assert — the refusal rolls back the clear, and is recorded under its own operation.
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetCurrentKeepingLastSelected = %v, want ErrNotFound", err)
+	}
+	got, err := s.Current(context.Background())
+	if err != nil {
+		t.Fatalf("Current: %v", err)
+	}
+	if got == nil || *got != kept.ID {
+		t.Fatalf("current = %v after the refusal, want %q", got, kept.ID)
+	}
+	if !loggedOperation(log, "daemon.wsm.set_current_keeping_last_selected", "debug") {
+		t.Fatalf("the missed write was not recorded under its operation: %v", log.Records())
+	}
+}
+
 func TestSetCurrentRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

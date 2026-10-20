@@ -163,3 +163,31 @@ func TestARefusedSelectWorkspaceLetsGoOfNoBanner(t *testing.T) {
 		t.Fatalf("forgets = %q, want none for a refused selection", got)
 	}
 }
+
+func TestSelectWorkspaceCarriesTheSelectionHistoryToTheVerb(t *testing.T) {
+	tests := []struct {
+		name string
+		keep bool
+		want workspace.SelectionHistory
+	}{
+		{"a choice records the selection", false, workspace.RecordSelection},
+		{"a recency walk step keeps the history", true, workspace.KeepSelectionHistory},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			if _, err := h.Client.SelectWorkspace(context.Background(),
+				connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ref(), KeepSelectionHistory: tt.keep})); err != nil {
+				t.Fatalf("SelectWorkspace: %v", err)
+			}
+
+			// Assert.
+			if got := workspace.SelectionHistory(h.Verbs.lastSelectHistory.Load()); got != tt.want {
+				t.Fatalf("history = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

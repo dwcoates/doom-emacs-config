@@ -344,6 +344,9 @@ type fakeVerbs struct {
 	// opens and selects count every Open and Select the handlers made: the
 	// two verbs that bring a workspace up.
 	opens, selects atomic.Int32
+	// lastSelectHistory is the workspace.SelectionHistory the newest Select
+	// was asked for.
+	lastSelectHistory atomic.Int32
 	// registeredPaths records every RegisterRepository path the verb received.
 	registeredPaths []string
 	// arrangements records every ArrangeSidebar verb call, spelled
@@ -574,8 +577,9 @@ func (f *fakeVerbs) CreateTask(context.Context, string) (wsm.Task, error) {
 	return f.createTask, f.createTaskErr
 }
 
-func (f *fakeVerbs) Select(ctx context.Context, _ ids.WorkspaceID) error {
+func (f *fakeVerbs) Select(ctx context.Context, _ ids.WorkspaceID, history workspace.SelectionHistory) error {
 	f.selects.Add(1)
+	f.lastSelectHistory.Store(int32(history))
 	if f.selectEntered != nil {
 		close(f.selectEntered)
 		<-ctx.Done()
