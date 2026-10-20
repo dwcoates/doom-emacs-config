@@ -469,12 +469,18 @@ const FIELD_STRIPPERS: Partial<Record<RpcName, { path: string; strip(message: ob
             repository: {
               ...repository,
               sections: sections.map((section) => {
-                const held = section as { rows?: { rows?: readonly object[] } };
-                const rows = required(held.rows, "RosterSection.rows");
-                const list = required(rows.rows, "RosterRows.rows");
+                const held = section as { openRows?: { rows?: readonly { row?: object }[] } };
+                const openRows = required(held.openRows, "RosterRepoSection.open_rows");
+                const list = required(openRows.rows, "RosterOpenRows.rows");
                 return {
                   ...held,
-                  rows: { ...rows, rows: list.map((row) => ({ ...row, status: { case: undefined } })) },
+                  openRows: {
+                    ...openRows,
+                    rows: list.map((open) => ({
+                      ...open,
+                      row: { ...required(open.row, "RosterOpenRow.row"), status: { case: undefined } },
+                    })),
+                  },
                 };
               }),
             },
@@ -604,18 +610,32 @@ function completeInit(desc: DescMessage, depth = 0): Record<string, unknown> {
   return init;
 }
 
-/** A complete value for one field, by its kind. */
+/**
+ * A complete value for one field, by its kind. A list holds ONE element of its
+ * kind: an arm whose contract says its list is never empty
+ * (agentrepl.v1.WorkspaceHasOpenChildren.children) is refused by the client
+ * when it arrives empty, and one element is complete for every list.
+ */
 function fieldValue(field: DescField, depth: number): unknown {
-  if (field.fieldKind === "list") return [];
+  if (field.fieldKind === "list") {
+    if (field.listKind === "message") return [completeInit(field.message, depth + 1)];
+    if (field.listKind === "enum") return [(field.enum.values.find((v) => v.number !== 0) ?? field.enum.values[0])?.number ?? 0];
+    return [scalarValue(field.scalar, field.localName)];
+  }
   if (field.fieldKind === "map") return {};
   if (field.fieldKind === "message") return completeInit(field.message, depth + 1);
   if (field.fieldKind === "enum") {
     const values = field.enum.values;
     return (values.find((v) => v.number !== 0) ?? values[0])?.number ?? 0;
   }
-  switch (field.scalar) {
+  return scalarValue(field.scalar, field.localName);
+}
+
+/** A complete value for a scalar of type SCALAR, the field named NAME. */
+function scalarValue(scalar: ScalarType, name: string): unknown {
+  switch (scalar) {
     case ScalarType.STRING:
-      return refusalString(field.localName);
+      return refusalString(name);
     case ScalarType.BOOL:
       return true;
     case ScalarType.BYTES:
