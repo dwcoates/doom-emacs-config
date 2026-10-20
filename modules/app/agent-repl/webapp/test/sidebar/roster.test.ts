@@ -1294,7 +1294,7 @@ describe("recently merged rows", () => {
   });
 
   it("pads every rail row with the shared vertical padding", () => {
-    expect(css).toContain("  padding: var(--row-pad-y) 0.7rem var(--row-pad-y) 0.9rem;");
+    expect(css).toContain("  padding: var(--row-pad-y) 0.7rem var(--row-pad-y) calc(0.9rem + var(--row-indent));");
   });
 
   it("builds a merged row's height out of the shared vertical padding", () => {
@@ -1309,7 +1309,7 @@ describe("recently merged rows", () => {
     const bar = (selector: string): string | undefined =>
       css.split(`${selector} {\n`)[1]?.split("}")[0];
     expect([bar("#ws-sidebar .ws.current > .row"), bar("#ws-sidebar .row.merged-today")].map((b) =>
-      b?.includes("border-left: var(--row-gutter-w) solid") && b.includes("padding-left: calc(0.9rem - var(--row-gutter-w))"),
+      b?.includes("border-left: var(--row-gutter-w) solid") && b.includes("padding-left: calc(0.9rem - var(--row-gutter-w)"),
     )).toEqual([true, true]);
   });
 
@@ -2072,8 +2072,8 @@ describe("the tab number's stylesheet", () => {
   it.each([
     ["color", "var(--tab-number-color)"],
     ["font-size", "0.62rem"],
-    ["margin-left", "-0.4rem"],
-    ["margin-right", "0.1rem"],
+    ["margin-left", "calc(-0.4rem - var(--row-indent))"],
+    ["margin-right", "calc(0.1rem + var(--row-indent))"],
     ["text-align", "right"],
     ["width", "var(--tab-number-w)"],
   ])("draws the number with %s %s", (property, want) => {

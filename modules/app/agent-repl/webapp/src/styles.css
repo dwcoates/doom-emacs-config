@@ -1003,8 +1003,10 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    fold away with the repository (their list is the section's .rows). An
    empty subsection draws a slot to drag workspaces into. A subsection's rows
    are INDENTED under its header (owner request, 2026-10-20), so a row in it
-   reads apart from the repository's own rows around it. */
-#ws-sidebar .sb-subsection > .rows { margin-left: 0.9rem; }
+   reads apart from the repository's own rows around it: one --row-indent
+   step (see "THE ROW INDENT" below). */
+#ws-sidebar .sb-subsection > .rows { --row-indent-parent: var(--row-indent); }
+#ws-sidebar .sb-subsection > .rows > .ws { --row-indent: calc(var(--row-indent-parent) + 0.9rem); }
 #ws-sidebar .sb-subsection-head {
   display: flex;
   align-items: center;
@@ -1016,9 +1018,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   font-weight: 600;
 }
 #ws-sidebar .sb-subsection-head .sb-count { font-size: 0.85em; }
-/* A SUBSECTION'S NAME IS THE ONE PURPLE (owner request, 2026-10-20), the
-   purple status --blocked the bands' headers wear. */
-#ws-sidebar .sb-subsection-label { color: var(--blocked); }
+/* A SUBSECTION'S NAME IS IN THE REPOSITORY HEADERS' COLOUR (owner request,
+   2026-10-20, superseding the purple it first wore), and greys with them
+   when folded. */
+#ws-sidebar .sb-subsection-label { color: var(--repo-head-expanded); }
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label { color: var(--repo-head-collapsed); }
 #ws-sidebar .sb-subsection-delete {
   margin-left: auto;
   border: 0;
@@ -1099,7 +1103,7 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
 #ws-sidebar .sb-arrange-status:empty { display: none; }
 
 /* Workspace rows. Children nest inside .kids, which draws the family guide
-   line; indentation therefore compounds per generation. */
+   line; indentation compounds per generation (THE ROW INDENT, below). */
 /* ONE GUTTER WIDTH for every bar a rail row draws on its left (the
    selection's accent, a merge-today's off-white), so the two never drift. */
 #ws-sidebar { --row-gutter-w: 3px; }
@@ -1107,11 +1111,19 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
    built out of it (Recently Merged's --merged-row-h), so the two never drift.
    Halved from 0.28rem so the rows sit closer (owner request, 2026-10-19). */
 #ws-sidebar { --row-pad-y: 0.14rem; }
+/* THE ROW INDENT (owner request, 2026-10-20): a nested row -- a child
+   workspace, or a row in a subsection -- indents only its status mark and
+   name. Its tab number, its gutter bar and its highlight start at the
+   section's left edge at every depth, so the numbers read as one column.
+   No container is indented: each row's line pads by --row-indent, which
+   every .ws inherits and each nesting adds one step to, through
+   --row-indent-parent (a property may not read itself). */
+#ws-sidebar { --row-indent: 0rem; }
 #ws-sidebar .row {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  padding: var(--row-pad-y) 0.7rem var(--row-pad-y) 0.9rem;
+  padding: var(--row-pad-y) 0.7rem var(--row-pad-y) calc(0.9rem + var(--row-indent));
   cursor: pointer;
   min-width: 0;
 }
@@ -1142,11 +1154,13 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
   --tab-number-w: 0.85rem;
   --tab-number-color: color-mix(in srgb, var(--muted) 85%, black);
 }
+/* The number takes back the row's indent on its left and hands it to the
+   mark on its right, so it stands in one column whatever the depth. */
 #ws-sidebar .sb-num {
   flex: 0 0 auto;
   width: var(--tab-number-w);
-  margin-left: -0.4rem;
-  margin-right: 0.1rem;
+  margin-left: calc(-0.4rem - var(--row-indent));
+  margin-right: calc(0.1rem + var(--row-indent));
   text-align: right;
   color: var(--tab-number-color);
   font-size: 0.62rem;
@@ -1307,8 +1321,20 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
    for a chevron to show the dropdown on hover." The row opens its own panel
    the moment the pointer reaches its duration; `row-hover.ts` owns the
    gesture. */
-#ws-sidebar .kids { margin-left: 1.55rem; border-left: 1px solid var(--border); }
-#ws-sidebar .kids .row { padding-left: 0.55rem; }
+/* A generation is one --row-indent step, and the family guide is drawn
+   where the generation's box once began, 1.55rem in from its parent's
+   indent. */
+#ws-sidebar .kids { --row-indent-parent: var(--row-indent); position: relative; }
+#ws-sidebar .kids > .ws { --row-indent: calc(var(--row-indent-parent) + 1.2rem); }
+#ws-sidebar .kids::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--row-indent-parent) + 1.55rem);
+  border-left: 1px solid var(--border);
+  pointer-events: none;
+}
 
 /* The workspace Emacs is currently showing. NEUTRAL, WITH A MUTED GUTTER
    (owner ruling, 2026-10-17, superseding the accent-blue gutter and tint):
@@ -1331,9 +1357,8 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
 #ws-sidebar .ws.current > .row {
   background-color: var(--row-current-tint);
   border-left: var(--row-gutter-w) solid var(--row-current-gutter);
-  padding-left: calc(0.9rem - var(--row-gutter-w));
+  padding-left: calc(0.9rem - var(--row-gutter-w) + var(--row-indent));
 }
-#ws-sidebar .kids .ws.current > .row { padding-left: calc(0.55rem - var(--row-gutter-w)); }
 /* THE HIGHLIGHTED ROW'S TAB NUMBER IS WHITE (owner request, 2026-10-18): it
    rises from its own grey into white over half a second (owner request,
    2026-10-20: twice as fast as the second it first took) when the highlight
@@ -1371,14 +1396,12 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
    act on may not hide behind the detail panel. */
 #ws-sidebar .ws-merge,
 #ws-sidebar .ws-merge-note {
-  margin: 0 0.7rem 0.1rem 2rem;
+  margin: 0 0.7rem 0.1rem calc(2rem + var(--row-indent));
   font-size: 0.72rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-#ws-sidebar .kids .ws-merge,
-#ws-sidebar .kids .ws-merge-note { margin-left: 1.6rem; }
 /* The in-flight band spends no color, exactly as the merge dot does not. */
 #ws-sidebar .ws-merge.muted,
 #ws-sidebar .ws-merge-note.muted { color: var(--muted); }
