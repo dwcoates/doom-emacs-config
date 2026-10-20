@@ -492,7 +492,9 @@ func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey,
 // stands right behind it, still admitted: it is suspended at the step it was
 // on, and resumes there once the winner is done. Both must be admitted, with
 // loser ahead of winner; anything else is a refusal, because it means the
-// caller lost track of the queue.
+// caller lost track of the queue -- except a loser whose entry is gone, which
+// answers ErrMergeHeadLeft: the head left the queue first, and there is no
+// race left to record.
 func (s *store) YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner WorkspaceID) error {
 	const op = "daemon.wsm.yield_merge_head"
 	key, err := normalizeRepoKey(repo)
@@ -513,6 +515,9 @@ func (s *store) YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner 
 			return seq, nil
 		}
 		loserSeq, err := seqOf(loser)
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("wsm: workspace %s in repo %q: %w", loser, key, ErrMergeHeadLeft)
+		}
 		if err != nil {
 			return err
 		}
