@@ -152,7 +152,8 @@ defect the same batch would only repeat, so it is recorded and dropped."
   (agent-repl-startup--report))
 
 (defun agent-repl-startup--report-failed (batch detail)
-  "The report of BATCH did not reach the daemon (DETAIL): keep it for the next link-up."
+  "The report of BATCH did not reach the daemon (DETAIL).
+It is kept for the next link-up."
   (setq agent-repl-startup--report-in-flight nil)
   (agent-repl--info agent-repl-startup--central
                     "elisp.startup.report deferred milestones=%d detail=%S" (length batch) detail))
