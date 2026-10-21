@@ -556,6 +556,9 @@ type feedState struct {
 	// book is the feed's loaded history when it is an agent's book (book.go):
 	// the pages a reader's request loaded, and what the next one reads.
 	book bookState
+	// served is the feed's newest row that showed the vendor serving, which
+	// answers every outage card before it (vendorrecovery.go).
+	served servedEvidence
 }
 
 // walk is one request's page position: the order key of the OLDEST row the
@@ -1128,6 +1131,9 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 		}
 	}
 	f.rows[id] = snapshot
+	// A VENDOR SERVING AGAIN ANSWERS THE OUTAGE CARDS BEFORE IT, settled after
+	// this row's own publication (vendorrecovery.go).
+	defer r.settleVendorRecovery(s, at.feed, id)
 	s.noteProduced(snapshot)
 	// A MERGE BUBBLE ROW IS TOLD TO THE FOOTER as it now stands (mergerows.go).
 	r.announceMergeRow(s, at.feed, snapshot)
