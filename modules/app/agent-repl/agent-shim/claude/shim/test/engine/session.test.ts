@@ -7001,9 +7001,24 @@ describe("the session-started record", () => {
     // Assert.
     const record = logRecordsSince(mark).find((entry) => entry.message === "session started");
     const context = record?.context ?? {};
-    for (const step of ["mcp_status_ms", "live_work_ms", "context_usage_ms"]) {
+    for (const step of ["mcp_status_ms", "live_work_ms"]) {
       expect(typeof context[step]).toBe("number");
     }
+  });
+
+  it("is not held back by a context reading the vendor has not answered", async () => {
+    // Arrange: the vendor never answers getContextUsage.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.getContextUsage = () => new Promise<ContextUsageLike>(() => undefined);
+      },
+    });
+
+    // Act.
+    const response = await started(h);
+
+    // Assert.
+    expect(response.result.case).toBe("success");
   });
 });
 

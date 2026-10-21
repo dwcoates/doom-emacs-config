@@ -5475,9 +5475,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     pushModel();
     pushPermissionMode();
     await pushAppliedEffort();
-    const contextUsageFrom = deps.nowMs();
-    await pushContextUsage();
-    const contextUsageMs = deps.nowMs() - contextUsageFrom;
+    // THE CONTEXT READING IS NOT AWAITED EITHER. `getContextUsage` is a vendor
+    // round-trip whose time is the API's: 571ms at the median, 44s at p99, and
+    // 225s on 2026-10-20 21:50, when a start that had already proven its child
+    // live waited it out until the daemon's StartSession bound gave up on the
+    // start and left the workspace start_failed. The reading reaches every
+    // watch through the push table whenever the vendor answers it.
+    void pushContextUsage();
     pushSessionTitle();
     void pushAccountUsage();
     // THE COMMAND CATALOG IS NOT AWAITED: the opening owes nobody the list,
@@ -5521,7 +5525,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         live_work: liveWork.length,
         mcp_status_ms: mcpStatusMs,
         live_work_ms: liveWorkMs,
-        context_usage_ms: contextUsageMs,
       },
       "session started",
     );
