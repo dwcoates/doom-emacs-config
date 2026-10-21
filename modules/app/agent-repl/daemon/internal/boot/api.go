@@ -222,6 +222,12 @@ type Deps struct {
 	// the footer, and a footer record for an unbound workspace is an invariant
 	// violation. Required.
 	BindViews func(ctx context.Context) error
+	// EnsureMainWorktrees registers, born closed, the main worktree of every
+	// repository the registry holds without one
+	// (workspace.Verbs.EnsureMainWorktrees). It runs after the gone
+	// repositories are retired, so only a repository still on disk is asked
+	// for one. Required.
+	EnsureMainWorktrees func(ctx context.Context) error
 	// RestoreMissingWorktree recreates an open workspace's deleted worktree
 	// from its recorded branch (workspace.Verbs.RestoreMissingWorktree). It
 	// answers true when it restored the tree, false with a nil error when
@@ -383,6 +389,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a bring-up marker")
 	case deps.BindViews == nil:
 		return nil, missing("a view binder")
+	case deps.EnsureMainWorktrees == nil:
+		return nil, missing("a main-worktree ensurer")
 	case deps.RestoreMissingWorktree == nil:
 		return nil, missing("a missing-worktree restorer")
 	case deps.RunDir == "":

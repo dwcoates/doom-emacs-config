@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -69,16 +70,17 @@ func TestRegisterIsIdempotentByDirectory(t *testing.T) {
 func TestRegisterDerivesTheRepositoryFromGitsMainWorktree(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	f.git.mainWorktree = "/canonical/repo"
-	f.git.commonDir = "/canonical/repo/.git"
+	main := worktreeDir(t)
+	f.git.mainWorktree = main
+	f.git.commonDir = filepath.Join(main, ".git")
 
 	// Act.
 	if _, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
-	// Assert.
-	if len(f.db.registered) != 1 || f.db.registered[0].RepoDir != "/canonical/repo" {
+	// Assert: the main worktree's own registration, then the linked one's.
+	if len(f.db.registered) != 2 || f.db.registered[1].RepoDir != main {
 		t.Fatalf("registered facts = %+v, want the repository's main worktree", f.db.registered)
 	}
 }
@@ -119,17 +121,18 @@ func TestRegisterKeepsTheSuppliedFacts(t *testing.T) {
 	// Arrange: supplied facts are never re-derived, because the announcer knows
 	// its own tree.
 	f := newFixture(t)
+	given := worktreeDir(t)
 
 	// Act.
 	if _, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{
-		Name: "given", Branch: "given-branch", ParentBranch: "given-parent", RepoDir: "/given",
+		Name: "given", Branch: "given-branch", ParentBranch: "given-parent", RepoDir: given,
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
 	// Assert.
-	got := f.db.registered[0]
-	if got.Name != "given" || got.Branch != "given-branch" || got.ParentBranch != "given-parent" || got.RepoDir != "/given" {
+	got := f.db.registered[len(f.db.registered)-1]
+	if got.Name != "given" || got.Branch != "given-branch" || got.ParentBranch != "given-parent" || got.RepoDir != given {
 		t.Fatalf("registered facts = %+v, want the supplied ones kept", got)
 	}
 }
@@ -137,7 +140,7 @@ func TestRegisterKeepsTheSuppliedFacts(t *testing.T) {
 func TestRegisterDerivesTheDisplayNameFromTheDirectory(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	dir := worktreeDir(t)
+	dir := f.git.mainWorktree
 
 	// Act.
 	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
@@ -813,7 +816,7 @@ func TestRegisterRestoresTheWorkspaceSummary(t *testing.T) {
 	f := newFixture(t)
 
 	// Act.
-	record, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+	record, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -841,7 +844,7 @@ func TestRegisterSurfacesAFailedSummaryRestore(t *testing.T) {
 func TestPublishRegistryRestoresEveryInheritedWorkspacesSummary(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	record, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+	record, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{})
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -959,4 +962,341 @@ func TestRegisterAnswersARefusedChild(t *testing.T) {
 
 	// Assert.
 	requireFamilyAnswer(t, f, err, errParentNotOpen, opRegister)
+}
+
+// registeredAt answers the workspace the fake registry holds at dir.
+func registeredAt(f *fixture, dir string) (wsm.Workspace, bool) {
+	ws, ok := f.db.byDir[dir]
+	return ws, ok
+}
+
+func TestRegisteringALinkedWorktreeRegistersTheMainWorktreeFirst(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.defaultBranch = "trunk"
+	linked := worktreeDir(t)
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), linked, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Assert.
+	if len(f.db.registered) != 2 {
+		t.Fatalf("registrations = %+v, want the main worktree's and then the linked one's", f.db.registered)
+	}
+	if main := f.db.registered[0]; main.RepoDir != f.git.mainWorktree || main.DefaultBranch != "trunk" {
+		t.Fatalf("first registration = %+v, want the main worktree of %s with its default branch", main, f.git.mainWorktree)
+	}
+	if f.db.registerDir != linked {
+		t.Fatalf("last registered dir = %q, want the linked worktree %q", f.db.registerDir, linked)
+	}
+}
+
+func TestTheEnsuredMainWorktreeIsBornClosedByTheDaemon(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Assert.
+	main, ok := registeredAt(f, f.git.mainWorktree)
+	if !ok {
+		t.Fatalf("no workspace is registered at the main worktree %s", f.git.mainWorktree)
+	}
+	if !main.Closed || main.Closure == nil || main.Closure.By != wsm.CloseByDaemon {
+		t.Fatalf("main worktree workspace = closed %v closure %+v, want born closed by the daemon", main.Closed, main.Closure)
+	}
+}
+
+func TestTheEnsuredMainWorktreeClaimsNoServingAndStartsNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.verbs.(*verbs).deps.Instance = "instance-1"
+
+	// Act.
+	linked, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Assert.
+	if len(f.db.claims) != 1 || f.db.claims[0].ws != linked.ID {
+		t.Fatalf("serving claims = %+v, want the linked worktree's alone", f.db.claims)
+	}
+	if got := f.fleet.started; len(got) != 0 {
+		t.Fatalf("sessions started = %v, want none", got)
+	}
+}
+
+func TestRegisteringALinkedWorktreePublishesOneRosterCarryingBothRows(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Assert.
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+	}
+	if _, ok := registeredAt(f, f.git.mainWorktree); !ok {
+		t.Fatalf("the roster was published without the main worktree registered")
+	}
+}
+
+func TestAnAlreadyRegisteredMainWorktreeIsLeftAsItStands(t *testing.T) {
+	tests := []struct {
+		name   string
+		closed bool
+	}{
+		{name: "an open main worktree", closed: false},
+		{name: "a closed main worktree stays closed", closed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			main := wsm.Workspace{ID: "ws-main", Dir: f.git.mainWorktree, Repo: "repo-1", Closed: tt.closed}
+			f.db.with(main)
+
+			// Act.
+			if _, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{}); err != nil {
+				t.Fatalf("Register: %v", err)
+			}
+
+			// Assert.
+			if len(f.db.registered) != 1 {
+				t.Fatalf("registrations = %+v, want the linked worktree's alone", f.db.registered)
+			}
+			if len(f.db.reopened) != 0 {
+				t.Fatalf("reopened = %v, want the main worktree left as it stands", f.db.reopened)
+			}
+		})
+	}
+}
+
+func TestRegisteringTheMainWorktreeItselfRegistersItOnce(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	record, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if len(f.db.registered) != 1 || record.Closed {
+		t.Fatalf("registrations = %+v, closed = %v; want the main worktree registered once, open", f.db.registered, record.Closed)
+	}
+}
+
+func TestABornClosedRegistrationOfAClosedRowReopensNothing(t *testing.T) {
+	// Arrange: the row appeared between the lookup and the registration.
+	f := newFixture(t)
+	f.db.with(wsm.Workspace{ID: "ws-main", Dir: f.git.mainWorktree, Repo: "repo-1", Closed: true})
+
+	// Act.
+	_, _, err := f.verbs.(*verbs).register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{
+		RepoDir: f.git.mainWorktree, Closure: &wsm.Closure{At: time.Unix(1, 0), By: wsm.CloseByDaemon},
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if len(f.db.reopened) != 0 {
+		t.Fatalf("reopened = %v, want nothing reopened", f.db.reopened)
+	}
+}
+
+func TestAMainWorktreeThatCannotBeRegisteredRegistersNoLinkedWorktree(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.branchErr = errors.New("git: HEAD is unreadable")
+
+	// Act.
+	_, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+
+	// Assert.
+	if !errors.Is(err, f.git.branchErr) {
+		t.Fatalf("Register = %v, want the main worktree's failure", err)
+	}
+	if len(f.db.registered) != 0 {
+		t.Fatalf("registrations = %+v, want none", f.db.registered)
+	}
+	if n := countRecords(f, "error", opRegister); n != 1 {
+		t.Fatalf("ERROR records under %s = %d, want the failure recorded once", opRegister, n)
+	}
+}
+
+func TestAMainWorktreeLookupFailureIsSurfacedAndRecorded(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.db.workspaceByDirErr = errors.New("sql: database is locked")
+
+	// Act.
+	_, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+
+	// Assert.
+	if !errors.Is(err, f.db.workspaceByDirErr) {
+		t.Fatalf("Register = %v, want the lookup's failure", err)
+	}
+	if len(f.db.registered) != 0 {
+		t.Fatalf("registrations = %+v, want none", f.db.registered)
+	}
+	rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opRegister})
+	if !ok || rec.Context["repo_dir"] != f.git.mainWorktree {
+		t.Fatalf("ERROR record = %+v, want one naming the main worktree", rec)
+	}
+}
+
+func TestARefusedMainWorktreeIsAnsweredAndNotRecordedAtError(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.db.registerErr = insideTemp
+
+	// Act.
+	_, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
+
+	// Assert.
+	assertTemporaryRefusal(t, f, err, "RegisterWorkspace")
+}
+
+func TestEnsureMainWorktreesRegistersEveryMissingOneBornClosed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	missing := worktreeDir(t)
+	held := worktreeDir(t)
+	f.db.repositories = append(f.db.repositories,
+		wsm.Repository{ID: "repo-missing", Dir: missing, DefaultBranch: "trunk"},
+		wsm.Repository{ID: "repo-held", Dir: held, DefaultBranch: "master"})
+	f.db.with(wsm.Workspace{ID: "ws-held", Dir: held, Repo: "repo-held"})
+
+	// Act.
+	if err := f.verbs.EnsureMainWorktrees(context.Background()); err != nil {
+		t.Fatalf("EnsureMainWorktrees: %v", err)
+	}
+
+	// Assert.
+	if len(f.db.registered) != 1 || f.db.registerDir != missing || f.db.registered[0].DefaultBranch != "trunk" {
+		t.Fatalf("registrations = %+v at %q, want the missing main worktree's alone", f.db.registered, f.db.registerDir)
+	}
+	if ws, _ := registeredAt(f, missing); !ws.Closed {
+		t.Fatalf("the ensured main worktree is open, want it born closed")
+	}
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+	}
+}
+
+func TestEnsureMainWorktreesPublishesNothingWhenNothingWasMissing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	held := worktreeDir(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-held", Dir: held})
+	f.db.with(wsm.Workspace{ID: "ws-held", Dir: held, Repo: "repo-held"})
+
+	// Act.
+	if err := f.verbs.EnsureMainWorktrees(context.Background()); err != nil {
+		t.Fatalf("EnsureMainWorktrees: %v", err)
+	}
+
+	// Assert.
+	if len(f.db.registered) != 0 || len(f.sidebar.registries) != 0 {
+		t.Fatalf("registrations %+v, publications %d; want neither", f.db.registered, len(f.sidebar.registries))
+	}
+}
+
+func TestEnsureMainWorktreesPassesOverAGoneRepository(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	gone := filepath.Join(t.TempDir(), "gone")
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-gone", Dir: gone})
+
+	// Act.
+	if err := f.verbs.EnsureMainWorktrees(context.Background()); err != nil {
+		t.Fatalf("EnsureMainWorktrees: %v", err)
+	}
+
+	// Assert.
+	if len(f.db.registered) != 0 {
+		t.Fatalf("registrations = %+v, want none for a gone repository", f.db.registered)
+	}
+}
+
+func TestEnsureMainWorktreesSurfacesAnUnreadableRepositoryDirectory(t *testing.T) {
+	// Arrange: a path through a FILE stats as "not a directory", which is not
+	// "not exist" and is never read as gone.
+	f := newFixture(t)
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatalf("write %s: %v", file, err)
+	}
+	unreadable := filepath.Join(file, "repo")
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-unreadable", Dir: unreadable})
+
+	// Act.
+	err := f.verbs.EnsureMainWorktrees(context.Background())
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), unreadable) {
+		t.Fatalf("EnsureMainWorktrees = %v, want the stat failure naming %s", err, unreadable)
+	}
+	if !hasRecord(f, "error", opRegister) || len(f.db.registered) != 0 {
+		t.Fatalf("want the failure recorded at ERROR and nothing registered (registrations %+v)", f.db.registered)
+	}
+}
+
+func TestEnsureMainWorktreesSurfacesAnUnreadableRegistry(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.db.listRepositoriesErr = errors.New("the state database is unreachable")
+
+	// Act.
+	err := f.verbs.EnsureMainWorktrees(context.Background())
+
+	// Assert.
+	if !errors.Is(err, f.db.listRepositoriesErr) {
+		t.Fatalf("EnsureMainWorktrees = %v, want the registry's failure", err)
+	}
+	if !hasRecord(f, "error", opRegister) {
+		t.Fatal("the failure was not recorded at ERROR")
+	}
+}
+
+func TestEnsureMainWorktreesSurfacesARegistrationThatFailed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	missing := worktreeDir(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-missing", Dir: missing})
+	f.db.registerErr = errFake
+
+	// Act.
+	err := f.verbs.EnsureMainWorktrees(context.Background())
+
+	// Assert.
+	if !errors.Is(err, errFake) {
+		t.Fatalf("EnsureMainWorktrees = %v, want the registration's failure", err)
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a failed walk", len(f.sidebar.registries))
+	}
+}
+
+// countRecords counts the fixture's captured records at level under operation.
+func countRecords(f *fixture, level, operation string) int {
+	n := 0
+	for _, rec := range f.log.logger.Records() {
+		if rec.Level == level && rec.Operation == operation {
+			n++
+		}
+	}
+	return n
 }

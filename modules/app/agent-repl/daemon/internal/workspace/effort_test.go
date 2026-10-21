@@ -316,7 +316,7 @@ func TestRegistrationReadsTheConfigRootsEffortSettings(t *testing.T) {
 	f.effortSettings = claudesettings.Effort{Path: "/config/settings.json", Default: effortHigh}
 
 	// Act.
-	if _, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{}); err != nil {
+	if _, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
@@ -337,7 +337,7 @@ func TestAnUnreadableSettingsFileIsStatedAndTheRootNamesNoLevel(t *testing.T) {
 	f.effortErr = errors.New("unexpected end of JSON input")
 
 	// Act.
-	if _, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{}); err != nil {
+	if _, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 

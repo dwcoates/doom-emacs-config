@@ -35,6 +35,7 @@ func newParentFamily(t *testing.T, s *store, names ...string) parentFamily {
 // creation job targeting the main checkout when withJob is set.
 func registerInRepo(t *testing.T, s *store, repoDir, name string, withJob bool) Workspace {
 	t.Helper()
+	registerMain(t, s, repoDir)
 	ctx := context.Background()
 	dir := filepath.Join(canonicalTemp(t), name)
 	ws, _, err := s.RegisterWorkspace(ctx, mkdir(t, dir), RegisterFacts{

@@ -1486,6 +1486,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Boot: boot.Deps{
 			Restarts:               p.Metrics,
 			BindViews:              verbs.BindViews,
+			EnsureMainWorktrees:    verbs.EnsureMainWorktrees,
 			RestoreMissingWorktree: verbs.RestoreMissingWorktree,
 			Layout:                 p.Layout,
 			DB:                     p.DB,

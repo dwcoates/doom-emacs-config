@@ -14,7 +14,8 @@ import (
 // repositories(id)` (schema.go), every handle Open hands out carries
 // `_pragma=foreign_keys(1)` (open.go) so SQLite refuses the write at the
 // engine, and the one INSERT — RegisterWorkspace — mints the repository row
-// through ensureRepo FIRST, inside the same transaction as the workspace row.
+// through ensureRepo FIRST, inside the same transaction as the workspace row,
+// and only when that workspace is the repository's main worktree.
 //
 // What no schema can prevent is a row that was ALREADY there. Foreign keys are
 // a per-connection pragma, so any handle opened without it — the `sqlite3` CLI,

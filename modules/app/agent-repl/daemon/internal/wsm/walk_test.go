@@ -77,7 +77,8 @@ func TestWalk(t *testing.T) {
 }
 
 // walkShape spells REPO's stored walk: an unsectioned root by its name, a
-// subsection as [name: member member].
+// subsection as [name: member member]. The repository's main worktree is left
+// out (withoutMainWorktrees).
 func walkShape(t *testing.T, s *store, repo RepoID) []string {
 	t.Helper()
 	tx, err := s.db().BeginTx(context.Background(), nil)
@@ -99,6 +100,9 @@ func walkShape(t *testing.T, s *store, repo RepoID) []string {
 	var out []string
 	for _, step := range walk {
 		if step.sub == nil {
+			if isMainWorktree(t, s, step.root) {
+				continue
+			}
 			out = append(out, name(step.root))
 			continue
 		}

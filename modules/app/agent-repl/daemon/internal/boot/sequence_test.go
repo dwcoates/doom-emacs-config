@@ -711,10 +711,12 @@ func TestRunRefusesWhenAClientLessWorkspacesTurnsCannotBeClosed(t *testing.T) {
 // a lease that could not be read is never guessed at.
 func TestRunRefusesWhenAWorkspacesLeaseCannotBeRead(t *testing.T) {
 	// Arrange.
+	var only wsm.WorkspaceID
 	h := newHarness(t, func(d *Deps, h *harness) {
-		d.DB = failingLease{DB: h.db, err: errBoom}
+		d.DB = failingLease{DB: h.db, err: errBoom, only: &only}
 	})
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	only = ws.ID
 
 	// Act.
 	_, err := h.seq.Run(context.Background())
@@ -733,10 +735,11 @@ func TestRunRefusesWhenAWorkspacesLeaseCannotBeRead(t *testing.T) {
 // merge whose in-flight set is unknown is worse than refusing the boot.
 func TestRunDoesNotRecoverMergesAfterAnUnreadableLease(t *testing.T) {
 	// Arrange.
+	var only wsm.WorkspaceID
 	h := newHarness(t, func(d *Deps, h *harness) {
-		d.DB = failingLease{DB: h.db, err: errBoom}
+		d.DB = failingLease{DB: h.db, err: errBoom, only: &only}
 	})
-	h.register(t, t.TempDir(), sessionlock.StateFree)
+	only = h.register(t, t.TempDir(), sessionlock.StateFree).ID
 
 	// Act.
 	if _, err := h.seq.Run(context.Background()); err == nil {
@@ -2351,6 +2354,87 @@ func TestAViewBindingFailureFailsTheBoot(t *testing.T) {
 	// Assert
 	if !errors.Is(err, h.bindErr) {
 		t.Fatalf("Run = %v, want the binding failure", err)
+	}
+}
+
+func TestTheBootEnsuresTheMainWorktreesOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, err := h.seq.Run(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := h.mainEnsures.Load(); got != 1 {
+		t.Fatalf("EnsureMainWorktrees calls = %d, want 1", got)
+	}
+}
+
+func TestTheMainWorktreesAreEnsuredAfterTheGoneRepositoriesAreRetired(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	gone := t.TempDir()
+	main := h.registerMain(t, gone)
+	mustRemove(t, gone)
+
+	// Act
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert
+	if _, found := wsm.RepositoryWithID(h.reposAtMainEnsure, main.Repo); found {
+		t.Fatalf("EnsureMainWorktrees ran while the gone repository %s was still registered", main.Repo)
+	}
+}
+
+func TestAMainWorktreeEnsureFailureFailsTheBoot(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.mainEnsureErr = errors.New("git could not read the main worktree's branch")
+
+	// Act
+	_, err := h.seq.Run(context.Background())
+
+	// Assert
+	if !errors.Is(err, h.mainEnsureErr) {
+		t.Fatalf("Run = %v, want the main-worktree failure", err)
+	}
+	if !h.hasRecord("error", "daemon.boot.run") {
+		t.Fatal("the failed main-worktree ensure was not recorded at ERROR")
+	}
+}
+
+func TestAJoiningDaemonEnsuresNoMainWorktree(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps, _ *harness) { d.JoiningAddress = "127.0.0.1:41111" })
+
+	// Act
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert
+	if got := h.mainEnsures.Load(); got != 0 {
+		t.Fatalf("EnsureMainWorktrees calls = %d on a joining daemon, want 0", got)
+	}
+}
+
+func TestNewRefusesASequenceWithNoMainWorktreeEnsurer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	deps := h.deps
+	deps.EnsureMainWorktrees = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("New accepted a sequence that cannot ensure the main worktrees")
 	}
 }
 

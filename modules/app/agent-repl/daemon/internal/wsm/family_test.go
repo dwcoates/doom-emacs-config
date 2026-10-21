@@ -369,8 +369,8 @@ func TestRegisterWorkspaceRefusesAChildOfAParentThatIsNotOpen(t *testing.T) {
 
 			// Assert
 			requireParentNotOpen(t, err, parent, tt.state)
-			if all, _ := s.ListWorkspaces(context.Background()); len(all) != 1 {
-				t.Fatalf("workspaces = %d after a refused registration, want only the parent", len(all))
+			if all, _ := s.ListWorkspaces(context.Background()); len(withoutMainWorktrees(t, s, all)) != 1 {
+				t.Fatalf("workspaces = %d after a refused registration, want only the main worktree and the parent", len(all))
 			}
 		})
 	}

@@ -36,7 +36,7 @@ func mainWorktree(t *testing.T, f *fixture) string {
 		t.Fatalf("normalizeDir: %v", err)
 	}
 	f.db.repositories = append(f.db.repositories, wsm.Repository{
-		ID:            ids.RepoID("repo-" + filepath.Base(normalized)),
+		ID:            ids.RepoID("repo-" + normalized),
 		Dir:           normalized,
 		Name:          filepath.Base(normalized),
 		DefaultBranch: "master",

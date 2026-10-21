@@ -52,7 +52,7 @@ func TestRegisterRepositoryAnswersTheRegistrysTemporaryRefusalByArm(t *testing.T
 	f := newFixture(t)
 	dir := worktreeDir(t)
 	f.git.mainWorktree = dir
-	f.db.registerRepoErr = insideTemp
+	f.db.registerErr = insideTemp
 
 	// Act.
 	_, err := f.verbs.RegisterRepository(context.Background(), dir)

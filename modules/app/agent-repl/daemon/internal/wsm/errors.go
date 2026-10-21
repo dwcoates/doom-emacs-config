@@ -41,6 +41,13 @@ var ErrHoldRetired = fmt.Errorf("wsm: the held prompt was retired before the upd
 // names what kept it.
 var ErrRepositoryInUse = errors.New("wsm: repository still has an open workspace or live state")
 
+// ErrMainWorktreeUnregistered refuses a workspace registration that would mint
+// its repository from a LINKED worktree. A repository is known exactly as long
+// as its main worktree is a registered workspace, so the main worktree is
+// registered first and is the only registration that mints the repository
+// row; a mint from anywhere else is the invariant broken by the caller.
+var ErrMainWorktreeUnregistered = errors.New("wsm: a repository is minted only by registering its main worktree")
+
 // ErrMergeLeaseGone refuses a merge hold recorded after the merge it waits on
 // released its lease: the merge has already decided whether its requester
 // closes, so the prompt must take the path a workspace with no merge takes.

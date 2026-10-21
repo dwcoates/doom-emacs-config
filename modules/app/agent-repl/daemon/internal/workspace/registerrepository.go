@@ -22,9 +22,9 @@ const opRegisterRepository = "daemon.repository.register"
 // the MAIN-WORKTREE WORKSPACE registered under it.
 //
 // The two already-known bools are INDEPENDENT and neither implies the other. A
-// repository minted by an earlier RegisterWorkspace is already known while its
-// workspace is too; a repository registered before the workspace half of this
-// verb existed is already known while its workspace is freshly minted.
+// repository minted by an earlier registration is already known while its
+// workspace is too; a repository a registry written before the main-worktree
+// guarantee holds is already known while its workspace is freshly minted.
 type RegisteredRepository struct {
 	// Repository is the repository's record, keyed by its main-worktree dir.
 	Repository wsm.Repository
@@ -109,37 +109,46 @@ func (v *verbs) RegisterRepository(ctx context.Context, path string) (Registered
 		return RegisteredRepository{}, fmt.Errorf("register repository %q: default branch: %w", path, err)
 	}
 
-	// THE REPOSITORY ROW IS WRITTEN FIRST, and on its own, for the one thing
-	// the workspace registration cannot answer: whether the REPOSITORY was
-	// already known. Registration mints the repository as a side effect and
-	// says nothing about which it did, and that bool is half of what the user
-	// is told.
-	record, created, err := v.deps.DB.RegisterRepository(ctx, normalized, defaultBranch)
-	if refused := temporaryRefusal(global, "RegisterRepository", err); refused != nil {
-		return RegisteredRepository{}, refused
-	}
+	// WHETHER THE REPOSITORY WAS ALREADY KNOWN is read before the
+	// registration, because the registration mints the repository as part of
+	// registering its main worktree and says nothing about which it did --
+	// and that bool is half of what the user is told. The repository is never
+	// written on its own: it is known exactly as long as its main worktree is
+	// a registered workspace, so that registration is its one mint.
+	known, err := v.repositoryRegisteredAt(ctx, normalized)
 	if err != nil {
-		global.Error(opRegisterRepository, "could not record the repository", dlog.Context{
+		global.Error(opRegisterRepository, "could not read whether the repository is already registered", dlog.Context{
 			"dir": normalized, "cause": err.Error(),
 		})
 		return RegisteredRepository{}, fmt.Errorf("register repository %q: %w", path, err)
 	}
-	global.Info(opRegisterRepository, "registered a repository", dlog.Context{
-		"path": path, "dir": record.Dir, "repository": string(record.ID),
-		"already_known": !created, "default_branch": record.DefaultBranch,
-	})
 
-	workspace, workspaceCreated, err := v.register(ctx, record.Dir, wsm.RegisterFacts{})
+	workspace, workspaceCreated, err := v.register(ctx, normalized, wsm.RegisterFacts{
+		RepoDir: normalized, DefaultBranch: defaultBranch,
+	})
 	if err != nil {
-		// THE REPOSITORY STILL LANDED, so the roster is republished before the
-		// failure is surfaced: the row is a durable fact the sidebar must
-		// show, and `register' republishes only on the path it completes.
-		v.republishRegistry(ctx, global, opRegisterRepository)
-		global.Error(opRegisterRepository, "the repository's main worktree could not be registered as a workspace", dlog.Context{
-			"dir": record.Dir, "repository": string(record.ID), "cause": err.Error(),
-		})
+		// `register' recorded the failure itself (a fault at ERROR, a refusal
+		// at INFO), so it is surfaced and not recorded again.
 		return RegisteredRepository{}, namedRefusal(err, "RegisterRepository")
 	}
+	repositories, err := v.deps.DB.ListRepositories(ctx)
+	if err != nil {
+		global.Error(opRegisterRepository, "could not read the registered repository back", dlog.Context{
+			"dir": normalized, "cause": err.Error(),
+		})
+		return RegisteredRepository{}, fmt.Errorf("register repository %q: read it back: %w", path, err)
+	}
+	record, found := wsm.RepositoryWithID(repositories, workspace.Repo)
+	if !found {
+		global.Error(opRegisterRepository, "the main worktree's registration names a repository the registry does not hold", dlog.Context{
+			"dir": normalized, "workspace": string(workspace.ID), "repository": string(workspace.Repo),
+		})
+		return RegisteredRepository{}, fmt.Errorf("register repository %q: repository %q of workspace %q is not registered", path, workspace.Repo, workspace.ID)
+	}
+	global.Info(opRegisterRepository, "registered a repository", dlog.Context{
+		"path": path, "dir": record.Dir, "repository": string(record.ID),
+		"already_known": known, "default_branch": record.DefaultBranch,
+	})
 	global.Info(opRegisterRepository, "registered the repository's main worktree as a workspace", dlog.Context{
 		"dir": workspace.Dir, "repository": string(record.ID), "workspace": string(workspace.ID),
 		"workspace_already_known": !workspaceCreated,
@@ -150,7 +159,7 @@ func (v *verbs) RegisterRepository(ctx context.Context, path string) (Registered
 	// twice for one gesture.
 	return RegisteredRepository{
 		Repository:             record,
-		RepositoryAlreadyKnown: !created,
+		RepositoryAlreadyKnown: known,
 		Workspace:              workspace,
 		WorkspaceAlreadyKnown:  !workspaceCreated,
 	}, nil
