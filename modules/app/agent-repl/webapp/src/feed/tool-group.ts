@@ -80,9 +80,19 @@ export const GROUP_TAB_MEMBER_ATTRIBUTE = "data-group-tab-member";
  * response, a prompt, a thinking fold, a merge bubble, a plan/findings/artifact
  * card, an ask (question/permission/cold-gate) or any other row returns null and
  * so BREAKS a run rather than joining it.
+ *
+ * ONE KIND IS NOT A TOOL CARD: a turn's vendor-fault ending, the "vendor
+ * error" outcome card, groups with the vendor-fault endings beside it under
+ * {@link VENDOR_FAULT_KIND}, so an outage's endings stack as one card. Every
+ * other ending (a conclusion, a stop, an agent-repl fault) breaks a run.
  */
 export function groupKindOf(row: FeedRow): string | null {
   switch (row.row.case) {
+    case "turnEnded":
+      // A turn's VENDOR-FAULT ending — the "vendor error" outcome card. A
+      // vendor outage ends turn after turn (agent-repl retries every failed
+      // turn), so its cards stack exactly as a run of tool cards does.
+      return isVendorFaultEnding(row) ? VENDOR_FAULT_KIND : null;
     case "shellHead":
       // A detached shell's collapsed head bubble — "bash/shell".
       return "shell";
@@ -111,6 +121,27 @@ export function groupKindOf(row: FeedRow): string | null {
   }
 }
 
+/** The kind a turn's vendor-fault ending groups by. */
+export const VENDOR_FAULT_KIND = "vendor-fault";
+
+/** Whether ROW is a turn ending whose outcome marker is the vendor-fault family. */
+function isVendorFaultEnding(row: FeedRow): boolean {
+  if (row.row.case !== "turnEnded") return false;
+  const outcome = row.row.value.outcome;
+  return outcome.case === "errored" && outcome.value.marker?.family.case === "vendorFault";
+}
+
+/**
+ * Whether a run of KIND may span turns.
+ *
+ * A RUN NEVER SPANS TWO TURNS (owner-approved, 2026-09-24) — except a run of
+ * vendor-fault endings, which only ever spans turns: each ending IS its own
+ * turn's last row, so one turn never holds two of them.
+ */
+export function groupSpansTurns(kind: string): boolean {
+  return kind === VENDOR_FAULT_KIND;
+}
+
 /** The glyphs a few well-known tools tab with. Glyphs, never emojis. */
 const TOOL_GLYPHS: Readonly<Record<string, string>> = {
   Bash: "$",
@@ -132,6 +163,8 @@ const KIND_GLYPHS: Readonly<Record<string, string>> = {
   skill: "★",
   subagent: "◆",
   hook: "⎇",
+  // The vendor-fault marker's own glyph (marker.ts MARKER_GLYPH_CHARS.diamond).
+  [VENDOR_FAULT_KIND]: "◆",
 };
 
 /** What the tab of an unrecognized kind draws. */

@@ -80,6 +80,7 @@ import {
   type FeedRow,
   type FeedSelection,
   type FeedToolCardClock,
+  FeedOutcomeMarkerSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { createTicker, type Ticker } from "../../src/clock.js";
@@ -547,6 +548,45 @@ export function turnEndedRow(
                   case: "concluded",
                   value: answer === undefined ? {} : { answer: feedId(answer) },
                 },
+      }),
+    },
+  });
+}
+
+/**
+ * A turn's FAULT ending for TURN: the errored terminal whose outcome marker is
+ * FAMILY's, the "vendor error" card for `vendorFault` (an overload) and the
+ * "agent-repl" card for `agentReplFault` (a query death).
+ */
+export function faultEndingRow(id: string, turn: string, family: "vendorFault" | "agentReplFault" = "vendorFault"): FeedRow {
+  const marker: MessageInitShape<typeof FeedOutcomeMarkerSchema> =
+    family === "vendorFault"
+      ? {
+          label: { text: "vendor error" },
+          detail: { text: "overloaded" },
+          family: { case: "vendorFault" as const, value: { expansion: { errorType: { text: "overloaded" } } } },
+        }
+      : {
+          label: { text: "agent-repl" },
+          detail: { text: "the query died" },
+          family: { case: "agentReplFault" as const, value: { expansion: {} } },
+        };
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    order: orderFor(id),
+    turn: create(TurnIdSchema, { value: turn }),
+    row: {
+      case: "turnEnded",
+      value: create(FeedTurnEndedSchema, {
+        endedAtMs: 0n,
+        outcome: {
+          case: "errored",
+          value: {
+            headline: { text: family === "vendorFault" ? "the API is overloaded" : "the query died" },
+            error: family === "vendorFault" ? { case: "overloaded", value: {} } : { case: "queryDied", value: {} },
+            marker,
+          },
+        },
       }),
     },
   });

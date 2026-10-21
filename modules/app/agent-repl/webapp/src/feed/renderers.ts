@@ -42,6 +42,7 @@ import { stopTicking } from "./ticking.js";
 import {
   createToolGroupStore,
   groupKindOf,
+  groupSpansTurns,
   memberClockOf,
   groupKey,
   type GroupMember,
@@ -301,7 +302,9 @@ export function drawFeedBreadcrumb(crumb: FeedBreadcrumb, rc: RowContext): HTMLE
  * sequence — and so adjacency — is known. A run of >=2 consecutive TOP-LEVEL
  * same-specific-kind tool cards (see `groupKindOf`) OF ONE TURN collapses into
  * one tabbed container; a lone card, a non-groupable row, a kind change, a
- * turn change or a parented row breaks the run and renders unchanged. Callers with no `groups` store (a fixture
+ * turn change or a parented row breaks the run and renders unchanged. A run
+ * of vendor-fault endings stacks across turns (`groupSpansTurns`), since each
+ * is its own turn's. Callers with no `groups` store (a fixture
  * exercising the arranger alone) get the plain per-row layout.
  */
 export function arrangeSubfeedRows(
@@ -334,14 +337,16 @@ export function arrangeSubfeedRows(
     if (kind !== null) {
       // A RUN NEVER SPANS TWO TURNS (owner-approved, 2026-09-24): its cards
       // share one `turn`, both unset or equal, so a turn boundary with no row
-      // between the two turns' cards still breaks it.
+      // between the two turns' cards still breaks it. The one exception is a
+      // kind whose cards are each their own turn's (`groupSpansTurns`).
       const turn = row.turn?.value;
+      const spansTurns = groupSpansTurns(kind);
       let j = i + 1;
       while (
         j < rows.length &&
         rows[j].parent?.row === undefined &&
         groupKindOf(rows[j]) === kind &&
-        rows[j].turn?.value === turn
+        (spansTurns || rows[j].turn?.value === turn)
       ) {
         j += 1;
       }

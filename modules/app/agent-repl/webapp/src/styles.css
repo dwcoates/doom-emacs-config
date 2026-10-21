@@ -8743,6 +8743,16 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   margin-right: 0;
   padding-top: calc(0.3rem + var(--feed-group-tabline-h) + 0.3rem);
 }
+/* A VENDOR-FAULT ENDING STACKS TOO (tool-group.ts `VENDOR_FAULT_KIND`): its
+   outcome card sits one level deeper, inside the turn-ended row, which fills
+   the panel rather than taking its own cap again, and the card grows by the
+   strip exactly as a tool card member does. */
+.feed-group-panel > .feed-item > .turn-ended {
+  width: auto;
+}
+.feed-group-panel > .feed-item > .turn-ended > .tool-card {
+  padding-top: calc(0.3rem + var(--feed-group-tabline-h) + 0.3rem);
+}
 /* The shown member's clock is on the group's tabline, so the clock its own
    head draws is not shown twice. */
 .feed-group-panel > .feed-item > .tool-card > .tool-head > .tool-clock {
