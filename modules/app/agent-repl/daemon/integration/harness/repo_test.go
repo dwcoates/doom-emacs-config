@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"agent-repld/integration/fakegit"
 )
 
 func TestReflogEntriesWritesOneGitShapedEntryPerInstant(t *testing.T) {
@@ -72,5 +74,22 @@ func TestConcurrentMintsNeverShareARepositoryName(t *testing.T) {
 	}
 	if len(seen) != n {
 		t.Fatalf("minted %d names, want %d", len(seen), n)
+	}
+}
+
+func TestAddFakeRepoStatesOneCommitOnTheDefaultBranch(t *testing.T) {
+	// Arrange
+	s := fakegit.NewState()
+
+	// Act
+	repo := addFakeRepo(s, "/fake/repo", "first", []string{"a.txt"})
+
+	// Assert
+	if s.Repo("/fake/repo") != repo {
+		t.Fatal("the fixture does not answer the recorded repository for its dir")
+	}
+	head := repo.Worktree("/fake/repo").Head
+	if head == "" || repo.BranchHeads[DefaultBranch] != head {
+		t.Fatalf("head = %q, branch %s = %q, want the one commit on both", head, DefaultBranch, repo.BranchHeads[DefaultBranch])
 	}
 }

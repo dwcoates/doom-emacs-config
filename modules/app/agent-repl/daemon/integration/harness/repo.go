@@ -95,17 +95,7 @@ func NewRepoAt(t testing.TB, dir string) *Repo {
 		if s.Repo(dir) != nil {
 			t.Fatalf("harness: %s is already a fake repository", dir)
 		}
-		repo := &fakegit.Repo{
-			Dir:           dir,
-			CommonDir:     filepath.Join(fakegit.Canon(dir), ".git"),
-			DefaultBranch: DefaultBranch,
-			BranchHeads:   map[string]string{},
-		}
-		repo.Worktrees = []*fakegit.Worktree{{Dir: dir, Branch: DefaultBranch}}
-		repo.AddBranch(DefaultBranch, "")
-		s.Repos = append(s.Repos, repo)
-		c := s.AddCommit(repo, DefaultBranch, "add README.md", nil, []string{"README.md"})
-		repo.Worktrees[0].Head = c.SHA
+		addFakeRepo(s, dir, "add README.md", []string{"README.md"})
 	})
 	writeFile(t, filepath.Join(dir, "README.md"), "fake repository\n")
 	// EVERY REPOSITORY STATES ITS OWN ONE-SHOT POLICY. A repository that
@@ -114,6 +104,23 @@ func NewRepoAt(t testing.TB, dir string) *Repo {
 	// as its policy exactly as a real repository's author would write one.
 	CopyPrompts(t, r.PolicyDir())
 	return r
+}
+
+// addFakeRepo records a fake repository whose main worktree is dir, on the
+// default branch at one commit of subject touching paths, and answers it.
+func addFakeRepo(s *fakegit.State, dir, subject string, paths []string) *fakegit.Repo {
+	repo := &fakegit.Repo{
+		Dir:           dir,
+		CommonDir:     filepath.Join(fakegit.Canon(dir), ".git"),
+		DefaultBranch: DefaultBranch,
+		BranchHeads:   map[string]string{},
+	}
+	repo.Worktrees = []*fakegit.Worktree{{Dir: dir, Branch: DefaultBranch}}
+	repo.AddBranch(DefaultBranch, "")
+	s.Repos = append(s.Repos, repo)
+	c := s.AddCommit(repo, DefaultBranch, subject, nil, paths)
+	repo.Worktrees[0].Head = c.SHA
+	return repo
 }
 
 // PolicyDir is the repository's own `.agent-repl/prompts`, where it states its
