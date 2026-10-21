@@ -17,7 +17,7 @@ import (
 // BOOT REFUSAL. newsdigest.EnvSources (a sources file replacing the real
 // sources) is the third.
 const (
-	envNewsDigestStartDelay = "AGENT_REPL_NEWS_DIGEST_START_DELAY"
+	envNewsDigestStartDelay = newsdigest.EnvStartDelay
 	envNewsDigestEvery      = "AGENT_REPL_NEWS_DIGEST_EVERY"
 	envNewsDigestRecheck    = "AGENT_REPL_NEWS_DIGEST_RECHECK"
 )

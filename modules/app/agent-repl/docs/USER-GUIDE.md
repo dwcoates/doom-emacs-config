@@ -562,6 +562,13 @@ The top bar's effort selector sits between the model selector and the permission
   - The tab must belong to another workspace of the same repository, or to another child of the same parent.
   - Moving onto a tab in a subsection also files the workspace into that subsection.
 
+## The agent-repl version
+
+- **The top right of the sidebar's header shows the running agent-repl version, in small grey text.**
+  - It is the version the daemon deploys from, and it updates after each deploy.
+  - Between two landings it shows the last landing's version.
+  - It is absent until the daemon has read the version, or while it cannot.
+
 ## Searching the sidebar
 
 - **The magnifier left of "Workspaces" opens a search bar under the sidebar's header.**

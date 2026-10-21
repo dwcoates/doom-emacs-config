@@ -27,6 +27,7 @@ import (
 	"agent-repld/internal/clock"
 	"agent-repld/internal/commandcatalog"
 	"agent-repld/internal/cpugov"
+	"agent-repld/internal/deployedversion"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
@@ -1022,9 +1023,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the deploy ----
 
 	clients := &deployClientsForwarder{}
-	// THE DEPLOYED VERSION is resolved by its own background loop, off the
-	// boot path and off the deploy's: once at start, again after each deploy.
-	deployedVersion := p.Metrics.DeployedVersionLoop(git, paths.Checkout)
+	// THE DEPLOYED VERSION is resolved once by Prime, before anything is
+	// served, so the first roster any client receives already states it; then
+	// by its own background loop after each deploy, off the deploy's path.
+	// The metrics surface's version series and the rail's header state it.
+	deployedVersion := deployedversion.NewLoop(git, paths.Checkout, log, p.Metrics, sidebarResolver)
 	deployer, restarter, err := buildDeployer(ctx, deployerParams{
 		Surfaces:   p.Surfaces,
 		Checkout:   paths.Checkout,
@@ -1507,6 +1510,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// bounce has to be announced again by the process that inherited it —
 		// after the push surface is bound and before anything is served.
 		Prime: func(ctx context.Context) error {
+			// Before the registry, so the roster it publishes first already
+			// states the version.
+			deployedVersion.Prime(ctx)
 			if err := verbs.PublishRegistry(ctx); err != nil {
 				return err
 			}

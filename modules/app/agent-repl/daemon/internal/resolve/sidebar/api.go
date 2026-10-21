@@ -18,6 +18,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/deployedversion"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
@@ -180,6 +181,11 @@ type Resolver interface {
 	// FooterStatusChanged redraws the roster because the footer's status for
 	// the workspace moved: the row's status is a projection of it.
 	FooterStatusChanged(ws ids.WorkspaceID)
+	// DeployedVersion installs the agent-repl version the daemon deploys
+	// from, drawn in the rail's header as its bare release
+	// (frontend.v1.WorkspaceRoster.version); nil withdraws it. The deployed
+	// version's loop is the one caller.
+	deployedversion.Sink
 	// Topic is the one editor-global roster publication.
 	Topic() *publish.Topic[*frontendv1.WorkspaceRoster]
 }

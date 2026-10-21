@@ -112,6 +112,17 @@ message WorkspaceRoster {
   // The selected workspace — the last SelectWorkspace the daemon received.
   // UNSET when there is none.
   optional RosterCurrentWorkspace current = 4;
+  // THE AGENT-REPL VERSION the daemon deploys from, drawn small and receded
+  // at the right of the rail's header. UNSET until the daemon has resolved
+  // it, and while it cannot (the failure is the daemon's to log).
+  optional RosterVersion version = 15;
+}
+
+// The agent-repl release the daemon's checkout is at: the highest version tag
+// reachable from its HEAD, so a commit between landings states the last
+// landing's version. A bare semver (`0.129.0`), never carrying build metadata.
+message RosterVersion {
+  string text = 1;
 }
 
 // ---- The three lists' rows -------------------------------------------------

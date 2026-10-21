@@ -7,6 +7,7 @@ import (
 	"agent-repld/internal/repodivergence"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/ladder"
+	"agent-repld/internal/semver"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -412,6 +413,9 @@ type rosterState struct {
 	// (SetMergeQueue). Each repository's queue is replaced WHOLE, so a merge
 	// that left the queue, or a pause that was lifted, can never linger.
 	queues map[wsm.RepoKey]mergeQueue
+	// version is the agent-repl release the rail's header states
+	// (DeployedVersion), nil while none is resolved.
+	version *semver.Version
 }
 
 // mergeQueue is one repository's merge queue, indexed for the row lookups.

@@ -420,6 +420,8 @@ export function roster(init: {
   /** The daemon-resolved open count; unless said, the sum of the sections' counts. */
   openCount?: number;
   current?: string;
+  /** The daemon-resolved agent-repl version; omitted = unset. */
+  version?: string;
   /**
    * Which open rows have a numbered tab, first tab first: each listed DRAWN
    * row is numbered by its place among them, and every other open row is
@@ -443,6 +445,7 @@ export function roster(init: {
     ...(init.current === undefined
       ? {}
       : { current: { workspace: { id: init.current, dir: `/w/${init.current}` } } }),
+    ...(init.version === undefined ? {} : { version: { text: init.version } }),
   });
 }
 

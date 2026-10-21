@@ -11,6 +11,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/deployedversion"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/protoarm"
@@ -18,6 +19,7 @@ import (
 	"agent-repld/internal/repodivergence"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/ladder"
+	"agent-repld/internal/semver"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/vocab"
@@ -290,6 +292,9 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 	if cur := r.currentWorkspace(); cur != nil {
 		out.Current = cur
 	}
+	if v := r.state.version; v != nil {
+		out.Version = &frontendv1.RosterVersion{Text: v.String()}
+	}
 	return out
 }
 
@@ -442,6 +447,21 @@ func (r *resolver) SetRepoDivergence(repo ids.RepoID, measure repodivergence.Mea
 	r.mutate("daemon.sidebar.set_repo_divergence", "the roster took a repository's divergence measure",
 		dlog.Context{"repo_id": string(repo), "measure": fmt.Sprintf("%T", measure)}, r.log.Global(),
 		func() { r.state.divergence[repo] = measure })
+}
+
+// DeployedVersion installs the release the rail's header states. Only the
+// release is drawn: a build between landings states the last landing's
+// version, so the commit it is past by is not the roster's to carry.
+func (r *resolver) DeployedVersion(v *deployedversion.Version) {
+	ctx := dlog.Context{}
+	var release *semver.Version
+	if v != nil {
+		own := v.Release
+		release = &own
+		ctx["version"] = own.String()
+	}
+	r.mutate("daemon.sidebar.set_version", "the roster took the deployed version", ctx, r.log.Global(),
+		func() { r.state.version = release })
 }
 
 // SetSelected records the user's selection.

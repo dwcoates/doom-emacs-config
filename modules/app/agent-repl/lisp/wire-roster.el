@@ -1393,6 +1393,17 @@ name, which is not unique."
                        "RosterCurrentWorkspace" 'workspace object
                        #'agent-repl-wire-decode-roster-current-workspace-workspace)))))
 
+(defun agent-repl-wire-decode-roster-version (value)
+  "Decode VALUE as `RosterVersion', a plist `(:text)'.
+The agent-repl release the webview draws in the rail's header; the tab
+bar reads nothing off it.  Decoded because the codec refuses unknown
+fields."
+  (let ((object (agent-repl-wire--object "RosterVersion" value)))
+    (agent-repl-wire--check-keys "RosterVersion" object '(text))
+    (agent-repl-wire--decoded
+     "RosterVersion"
+     (list :text (agent-repl-wire--decode-string "RosterVersion" 'text object)))))
+
 (defun agent-repl-wire-decode-workspace-roster-repository (value)
   "Decode `WorkspaceRoster''s `repository' field VALUE."
   (agent-repl-wire-decode-roster-repository-view value))
@@ -1417,15 +1428,19 @@ name, which is not unique."
   "Decode `WorkspaceRoster''s optional `current' field VALUE."
   (agent-repl-wire-decode-roster-current-workspace value))
 
+(defun agent-repl-wire-decode-workspace-roster-version (value)
+  "Decode `WorkspaceRoster''s optional `version' field VALUE."
+  (agent-repl-wire-decode-roster-version value))
+
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
 Returns `(:repository V :open O :hidden H :recently-merged S :closed C
-:current C-or-nil :revision N)'.  THERE IS NO TAB BAR MESSAGE: the Open
+:current C-or-nil :revision N :version V-or-nil)'.  THERE IS NO TAB BAR MESSAGE: the Open
 section's rows are the tab bar, each stating its own tab."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object
-     '(repository open hidden recentlyMerged closed current revision))
+     '(repository open hidden recentlyMerged closed current revision version))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
      (list :repository (agent-repl-wire--decode-message
@@ -1446,7 +1461,10 @@ section's rows are the tab bar, each stating its own tab."
            :current (agent-repl-wire--decode-optional-message
                      "WorkspaceRoster" 'current object
                      #'agent-repl-wire-decode-workspace-roster-current)
-           :revision (agent-repl-wire--decode-uint64 "WorkspaceRoster" 'revision object)))))
+           :revision (agent-repl-wire--decode-uint64 "WorkspaceRoster" 'revision object)
+           :version (agent-repl-wire--decode-optional-message
+                     "WorkspaceRoster" 'version object
+                     #'agent-repl-wire-decode-workspace-roster-version)))))
 
 ;;;; ---- The rpc ----
 

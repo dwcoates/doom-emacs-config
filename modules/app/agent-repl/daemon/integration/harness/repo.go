@@ -95,17 +95,7 @@ func NewRepoAt(t testing.TB, dir string) *Repo {
 		if s.Repo(dir) != nil {
 			t.Fatalf("harness: %s is already a fake repository", dir)
 		}
-		repo := &fakegit.Repo{
-			Dir:           dir,
-			CommonDir:     filepath.Join(fakegit.Canon(dir), ".git"),
-			DefaultBranch: DefaultBranch,
-			BranchHeads:   map[string]string{},
-		}
-		repo.Worktrees = []*fakegit.Worktree{{Dir: dir, Branch: DefaultBranch}}
-		repo.AddBranch(DefaultBranch, "")
-		s.Repos = append(s.Repos, repo)
-		c := s.AddCommit(repo, DefaultBranch, "add README.md", nil, []string{"README.md"})
-		repo.Worktrees[0].Head = c.SHA
+		addFakeRepo(s, dir, "add README.md", []string{"README.md"})
 	})
 	writeFile(t, filepath.Join(dir, "README.md"), "fake repository\n")
 	// EVERY REPOSITORY STATES ITS OWN ONE-SHOT POLICY. A repository that
@@ -114,6 +104,45 @@ func NewRepoAt(t testing.TB, dir string) *Repo {
 	// as its policy exactly as a real repository's author would write one.
 	CopyPrompts(t, r.PolicyDir())
 	return r
+}
+
+// addFakeRepo records a fake repository whose main worktree is dir, on the
+// default branch at one commit of subject touching paths, and answers it.
+func addFakeRepo(s *fakegit.State, dir, subject string, paths []string) *fakegit.Repo {
+	repo := &fakegit.Repo{
+		Dir:           dir,
+		CommonDir:     filepath.Join(fakegit.Canon(dir), ".git"),
+		DefaultBranch: DefaultBranch,
+		BranchHeads:   map[string]string{},
+	}
+	repo.Worktrees = []*fakegit.Worktree{{Dir: dir, Branch: DefaultBranch}}
+	repo.AddBranch(DefaultBranch, "")
+	s.Repos = append(s.Repos, repo)
+	c := s.AddCommit(repo, DefaultBranch, subject, nil, paths)
+	repo.Worktrees[0].Head = c.SHA
+	return repo
+}
+
+// PinnedVersion is the version tag the pinned checkout's head carries, so
+// the daemon resolves the version it deploys from as it does from a real
+// checkout (internal/deployedversion).
+const PinnedVersion = "0.1.0"
+
+// tagPinnedCheckout states dir, the pinned checkout the daemon deploys from,
+// as a fake repository whose head carries PinnedVersion. It touches only the
+// fixture file, never dir, which every test of the process shares; the
+// daemons of one test share its world, so the first one records it.
+func (w *GitWorld) tagPinnedCheckout(dir string) {
+	w.t.Helper()
+	w.edit(func(s *fakegit.State) {
+		if s.Repo(dir) != nil {
+			return
+		}
+		repo := addFakeRepo(s, dir, "the pinned checkout", nil)
+		repo.Tags = map[string]*fakegit.Tag{
+			PinnedVersion: {Commit: repo.Worktree(dir).Head, Message: "seed " + PinnedVersion},
+		}
+	})
 }
 
 // PolicyDir is the repository's own `.agent-repl/prompts`, where it states its
