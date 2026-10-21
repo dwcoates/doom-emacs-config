@@ -246,6 +246,8 @@ func apiKindName(failed *conversationv1.ApiRequestFailed) string {
 		return "max_output_tokens"
 	case failed.GetUnmodeled() != nil:
 		return "unmodeled"
+	case failed.GetUnreachable() != nil:
+		return "unreachable"
 	default:
 		return "UNSET"
 	}

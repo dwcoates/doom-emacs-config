@@ -63,6 +63,10 @@ func TestApiErrorKindsTable(t *testing.T) {
 		{name: "max output tokens", detail: `{"type":"max_output_tokens","message":"ceiling"}`, wantArm: "max_output_tokens"},
 		{name: "a type the schema does not model", detail: `{"type":"brand_new_error","message":"?"}`, wantArm: "unmodeled"},
 		{name: "a transport failure has no vendor type", detail: `{"message":"Connection error.","connection":{"code":"StreamSuspended"}}`, wantArm: "unmodeled"},
+		{name: "a dropped connection never reached the API", detail: `{"message":"Connection error.","connection":{"code":"ECONNRESET"}}`, wantArm: "unreachable"},
+		{name: "an unresolved host never reached the API", detail: `{"message":"Connection error.","connection":{"code":"ENOTFOUND"},"isNetworkDown":true}`, wantArm: "unreachable"},
+		{name: "a connection the vendor says the network downed", detail: `{"message":"Connection error.","connection":{"code":"EPIPE"},"isNetworkDown":true}`, wantArm: "unreachable"},
+		{name: "a request that got no first byte reached a connection", detail: `{"message":"Connection error.","connection":{"code":"StreamNoResponse"},"isNetworkDown":false}`, wantArm: "unmodeled"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -126,6 +130,21 @@ func TestUnmodeledApiErrorKeepsTheVendorsTypeName(t *testing.T) {
 	unmodeled := frameOf(entryByKey(t, entries, SessionKey("api_error", "e1"))).GetUpdate().GetApiError().GetUnmodeled()
 	if got := unmodeled.GetType(); got != "brand_new_error" {
 		t.Fatalf("type = %q, want the vendor's own name", got)
+	}
+}
+
+func TestUnreachableConnectionCarriesTheSocketCode(t *testing.T) {
+	// Arrange
+	c := newTestConverter(t)
+	detail := `{"message":"Connection error.","connection":{"code":"ECONNRESET"}}`
+
+	// Act
+	entries := convertLines(t, c, apiErrorLine("e1", detail, ""))
+
+	// Assert
+	unreachable := frameOf(entryByKey(t, entries, SessionKey("api_error", "e1"))).GetUpdate().GetApiError().GetUnreachable()
+	if got := unreachable.GetCode(); got != "ECONNRESET" {
+		t.Fatalf("code = %q, want the socket's own code", got)
 	}
 }
 

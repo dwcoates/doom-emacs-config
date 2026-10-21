@@ -130,14 +130,38 @@ func apiErrorKind(detail, record map[string]any) apiKind {
 		return &conversationv1.ApiRequestFailed_MaxOutputTokens{MaxOutputTokens: &conversationv1.ApiMaxOutputTokens{}}
 	default:
 		// A CONNECTION failure has no vendor type at all — the vendor records a
-		// `connection` object instead. It is the API's own internal failure from
-		// this reader's side, but claiming a modeled kind for it would be a
-		// classification nobody made, so it is named rather than guessed.
+		// `connection` object instead. One the socket itself failed (a network
+		// code, or the vendor's own isNetworkDown) never reached the API: it is
+		// `unreachable`, the one arm the vendor does not name. Any other
+		// connection code (a stream the vendor suspended, one that got no first
+		// byte) is named rather than guessed.
 		if kind == "" {
+			if code, down := unreachableConnection(detail); down {
+				return &conversationv1.ApiRequestFailed_Unreachable{Unreachable: &conversationv1.ApiUnreachable{Code: code}}
+			}
 			kind = connectionKind(detail)
 		}
 		return &conversationv1.ApiRequestFailed_Unmodeled{Unmodeled: &conversationv1.ApiUnmodeledError{Type: kind}}
 	}
+}
+
+// networkConnectionCodes are the socket errors that mean the API host could not
+// be reached at all: the shim's NETWORK_ERROR_CODES (engine/network-resume.ts),
+// so the two readers of one failure never disagree.
+var networkConnectionCodes = map[string]bool{
+	"ENOTFOUND": true, "EAI_AGAIN": true, "ECONNREFUSED": true, "ECONNRESET": true,
+	"ETIMEDOUT": true, "ENETUNREACH": true, "EHOSTUNREACH": true, "ENETDOWN": true,
+}
+
+// unreachableConnection reports whether a connection failure never reached the
+// API, and the socket code that failed it ("" when the vendor named none).
+func unreachableConnection(detail map[string]any) (string, bool) {
+	connection := obj(detail["connection"])
+	if connection == nil {
+		return "", false
+	}
+	code := str(connection["code"])
+	return code, networkConnectionCodes[code] || boolean(detail["isNetworkDown"])
 }
 
 // connectionKind names a transport failure by the vendor's own connection code.
@@ -235,6 +259,8 @@ func setAPIKind(failed *conversationv1.ApiRequestFailed, kind apiKind) {
 	case *conversationv1.ApiRequestFailed_MaxOutputTokens:
 		failed.Kind = k
 	case *conversationv1.ApiRequestFailed_Unmodeled:
+		failed.Kind = k
+	case *conversationv1.ApiRequestFailed_Unreachable:
 		failed.Kind = k
 	default:
 		panic("convert: unhandled api error kind")
