@@ -42,8 +42,8 @@ message UpdateMergeQueueRequest {
   // The retired move-to-front action (2026-10-12): one-place moves replaced it.
   reserved 4;
   reserved "front";
-  // Tags 5-6 are RETIRED: holding rollouts controls the runtime's deploy,
-  // not the queue (UpdateRollouts). Tags 11-12 are RETIRED: subscriptions
+  // Tags 5-6 are RETIRED: holding a repository's deploy stage is
+  // UpdateDeployHold. Tags 11-12 are RETIRED: subscriptions
   // are SubscribeMergeQueue and UnsubscribeMergeQueue.
   reserved 5, 6, 11, 12;
   reserved "hold_rollouts", "release_rollouts", "subscribe", "unsubscribe";

@@ -45,7 +45,7 @@ PROTOC_GEN_ES := ./node_modules/.bin/protoc-gen-es
 BACKGROUND := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../bin/background.sh)
 
 # The proto set is DISCOVERED from src/ so the Makefile can never hold a
-# stale hand-maintained list: every .proto under the six surface roots is
+# stale hand-maintained list: every .proto under the seven surface roots is
 # compiled, and a deleted file leaves the build the moment it leaves disk.
 #
 # EACH ROOT IS TESTED BEFORE IT IS SEARCHED, which is what keeps the discovery
@@ -54,7 +54,7 @@ BACKGROUND := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../bin/background.sh)
 # the surface roots under it, and the unguarded `find` reported one "No such
 # file or directory" per root on every such run. The set comes out identical in
 # the real tree; the guard only stops the empty case from saying so.
-PROTOS := $(shell cd src 2>/dev/null && for root in conversation frontend agentrepl workspace shim store; do \
+PROTOS := $(shell cd src 2>/dev/null && for root in conversation frontend agentrepl workspace shim store repoconfig; do \
 	  [ -d "$$root" ] && find "$$root" -name '*.proto'; \
 	done | sort)
 

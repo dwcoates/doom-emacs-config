@@ -38,6 +38,7 @@ package agentreplv1
 
 import (
 	v11 "agentrepl/proto/conversation/v1"
+	v12 "agentrepl/proto/repoconfig/v1"
 	v1 "agentrepl/proto/workspace/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -259,9 +260,9 @@ type CreateWorkspaceStandard struct {
 	// A user-supplied workspace name. UNSET = the daemon mints the name
 	// (slug from the initial prompt when present).
 	Name *string `protobuf:"bytes,3,opt,name=name,proto3,oneof" json:"name,omitempty"`
-	// Configured merge actions, recorded in WSM at creation and read back by
-	// EVERY merge of this workspace on every ingress.
-	MergeActions  *CreateWorkspaceMergeActions `protobuf:"bytes,4,opt,name=merge_actions,json=mergeActions,proto3,oneof" json:"merge_actions,omitempty"`
+	// Deploy hooks recorded at creation and run by EVERY deploy of this
+	// workspace, in place of its repository's hooks for the same stage.
+	DeployHooks   *CreateWorkspaceDeployHooks `protobuf:"bytes,6,opt,name=deploy_hooks,json=deployHooks,proto3,oneof" json:"deploy_hooks,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -317,9 +318,9 @@ func (x *CreateWorkspaceStandard) GetName() string {
 	return ""
 }
 
-func (x *CreateWorkspaceStandard) GetMergeActions() *CreateWorkspaceMergeActions {
+func (x *CreateWorkspaceStandard) GetDeployHooks() *CreateWorkspaceDeployHooks {
 	if x != nil {
-		return x.MergeActions
+		return x.DeployHooks
 	}
 	return nil
 }
@@ -547,12 +548,11 @@ type CreateWorkspaceAsyncMerge struct {
 	// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER). A merge
 	// that fails compacts nothing.
 	CompactAfter bool `protobuf:"varint,7,opt,name=compact_after,json=compactAfter,proto3" json:"compact_after,omitempty"`
-	// The merge actions THIS merge runs, in the MERGE WORKSPACE under its merge
-	// lease -- never in the requester: before_ws_merge runs before the landing,
-	// and its failure fails the merge; postprocessing_prompt runs after the
-	// branch lands, and can never fail it. UNSET, or set with neither action:
-	// the merge runs no merge action.
-	MergeActions *CreateWorkspaceMergeActions `protobuf:"bytes,8,opt,name=merge_actions,json=mergeActions,proto3,oneof" json:"merge_actions,omitempty"`
+	// Deploy hooks THIS deploy runs, in place of its repository's hooks for the
+	// same stage, in the MERGE WORKSPACE under its lease -- never in the
+	// requester. UNSET, or a stage left empty: that stage runs the repository's
+	// own hooks.
+	DeployHooks *CreateWorkspaceDeployHooks `protobuf:"bytes,11,opt,name=deploy_hooks,json=deployHooks,proto3,oneof" json:"deploy_hooks,omitempty"`
 	// Where the merge joins its queue once it is put in line. REQUIRED.
 	Placement *MergeQueuePlacement `protobuf:"bytes,9,opt,name=placement,proto3" json:"placement,omitempty"`
 	// How this merge moves agent-repl's version, and its changelog line; see
@@ -642,9 +642,9 @@ func (x *CreateWorkspaceAsyncMerge) GetCompactAfter() bool {
 	return false
 }
 
-func (x *CreateWorkspaceAsyncMerge) GetMergeActions() *CreateWorkspaceMergeActions {
+func (x *CreateWorkspaceAsyncMerge) GetDeployHooks() *CreateWorkspaceDeployHooks {
 	if x != nil {
-		return x.MergeActions
+		return x.DeployHooks
 	}
 	return nil
 }
@@ -1120,34 +1120,37 @@ func (x *CreateWorkspaceAsyncMergeCloseAfter) GetWorkspace() *v1.WorkspaceRef {
 	return nil
 }
 
-// The configured merge actions. Both run under the merge lease for EVERY
-// merge of this workspace: before_ws_merge BEFORE the landing (its failure
-// fails the run); postprocessing_prompt AFTER every commit lands (can
-// never fail the run; its error rides the terminal status).
-type CreateWorkspaceMergeActions struct {
+// Deploy hooks a request supplies. A stage given here REPLACES the
+// repository's own hooks for that stage (repoconfig.v1.DeployConfig) for the
+// deploys the request covers; a stage left empty runs the repository's. Each
+// hook is a script or a prompt, exactly as in the repository's config, and a
+// failed one fails the deploy. The `deploy` stage is the repository's alone.
+type CreateWorkspaceDeployHooks struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The pre-merge prompt. UNSET = no configured pre-merge action.
-	BeforeWsMerge *v11.UserSaid `protobuf:"bytes,1,opt,name=before_ws_merge,json=beforeWsMerge,proto3,oneof" json:"before_ws_merge,omitempty"`
-	// The post-merge prompt. UNSET = no configured post-merge action.
-	PostprocessingPrompt *v11.UserSaid `protobuf:"bytes,2,opt,name=postprocessing_prompt,json=postprocessingPrompt,proto3,oneof" json:"postprocessing_prompt,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Run in place of the repository's `pre_deploy` hooks, before the local
+	// merge.
+	PreDeploy []*v12.DeployHook `protobuf:"bytes,1,rep,name=pre_deploy,json=preDeploy,proto3" json:"pre_deploy,omitempty"`
+	// Run in place of the repository's `post_deploy` hooks, after the deploy
+	// stage.
+	PostDeploy    []*v12.DeployHook `protobuf:"bytes,2,rep,name=post_deploy,json=postDeploy,proto3" json:"post_deploy,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CreateWorkspaceMergeActions) Reset() {
-	*x = CreateWorkspaceMergeActions{}
+func (x *CreateWorkspaceDeployHooks) Reset() {
+	*x = CreateWorkspaceDeployHooks{}
 	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CreateWorkspaceMergeActions) String() string {
+func (x *CreateWorkspaceDeployHooks) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CreateWorkspaceMergeActions) ProtoMessage() {}
+func (*CreateWorkspaceDeployHooks) ProtoMessage() {}
 
-func (x *CreateWorkspaceMergeActions) ProtoReflect() protoreflect.Message {
+func (x *CreateWorkspaceDeployHooks) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1159,21 +1162,21 @@ func (x *CreateWorkspaceMergeActions) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CreateWorkspaceMergeActions.ProtoReflect.Descriptor instead.
-func (*CreateWorkspaceMergeActions) Descriptor() ([]byte, []int) {
+// Deprecated: Use CreateWorkspaceDeployHooks.ProtoReflect.Descriptor instead.
+func (*CreateWorkspaceDeployHooks) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_create_workspace_proto_rawDescGZIP(), []int{14}
 }
 
-func (x *CreateWorkspaceMergeActions) GetBeforeWsMerge() *v11.UserSaid {
+func (x *CreateWorkspaceDeployHooks) GetPreDeploy() []*v12.DeployHook {
 	if x != nil {
-		return x.BeforeWsMerge
+		return x.PreDeploy
 	}
 	return nil
 }
 
-func (x *CreateWorkspaceMergeActions) GetPostprocessingPrompt() *v11.UserSaid {
+func (x *CreateWorkspaceDeployHooks) GetPostDeploy() []*v12.DeployHook {
 	if x != nil {
-		return x.PostprocessingPrompt
+		return x.PostDeploy
 	}
 	return nil
 }
@@ -1484,6 +1487,8 @@ type CreateWorkspaceError struct {
 	//	*CreateWorkspaceError_AsyncMergeRequesterMerging
 	//	*CreateWorkspaceError_AsyncMergeRequesterSessionDeleted
 	//	*CreateWorkspaceError_OriginFetchFailed
+	//	*CreateWorkspaceError_AsyncMergeNoDeployConfig
+	//	*CreateWorkspaceError_AsyncMergeDeployConfigInvalid
 	Cause         isCreateWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1823,6 +1828,24 @@ func (x *CreateWorkspaceError) GetOriginFetchFailed() *CreateWorkspaceOriginFetc
 	return nil
 }
 
+func (x *CreateWorkspaceError) GetAsyncMergeNoDeployConfig() *DeployConfigMissing {
+	if x != nil {
+		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeNoDeployConfig); ok {
+			return x.AsyncMergeNoDeployConfig
+		}
+	}
+	return nil
+}
+
+func (x *CreateWorkspaceError) GetAsyncMergeDeployConfigInvalid() *DeployConfigInvalid {
+	if x != nil {
+		if x, ok := x.Cause.(*CreateWorkspaceError_AsyncMergeDeployConfigInvalid); ok {
+			return x.AsyncMergeDeployConfigInvalid
+		}
+	}
+	return nil
+}
+
 type isCreateWorkspaceError_Cause interface {
 	isCreateWorkspaceError_Cause()
 }
@@ -2020,6 +2043,18 @@ type CreateWorkspaceError_OriginFetchFailed struct {
 	OriginFetchFailed *CreateWorkspaceOriginFetchFailed `protobuf:"bytes,39,opt,name=origin_fetch_failed,json=originFetchFailed,proto3,oneof"`
 }
 
+type CreateWorkspaceError_AsyncMergeNoDeployConfig struct {
+	// The async merge's repository has no `.agent-repl/deploy.yaml`, so
+	// nothing says what its deploy does. Nothing was recorded.
+	AsyncMergeNoDeployConfig *DeployConfigMissing `protobuf:"bytes,40,opt,name=async_merge_no_deploy_config,json=asyncMergeNoDeployConfig,proto3,oneof"`
+}
+
+type CreateWorkspaceError_AsyncMergeDeployConfigInvalid struct {
+	// The async merge's repository's `.agent-repl/deploy.yaml` is unusable.
+	// Nothing was recorded.
+	AsyncMergeDeployConfigInvalid *DeployConfigInvalid `protobuf:"bytes,41,opt,name=async_merge_deploy_config_invalid,json=asyncMergeDeployConfigInvalid,proto3,oneof"`
+}
+
 func (*CreateWorkspaceError_UngatedWithoutConsent) isCreateWorkspaceError_Cause() {}
 
 func (*CreateWorkspaceError_NoSlug) isCreateWorkspaceError_Cause() {}
@@ -2085,6 +2120,10 @@ func (*CreateWorkspaceError_AsyncMergeRequesterMerging) isCreateWorkspaceError_C
 func (*CreateWorkspaceError_AsyncMergeRequesterSessionDeleted) isCreateWorkspaceError_Cause() {}
 
 func (*CreateWorkspaceError_OriginFetchFailed) isCreateWorkspaceError_Cause() {}
+
+func (*CreateWorkspaceError_AsyncMergeNoDeployConfig) isCreateWorkspaceError_Cause() {}
+
+func (*CreateWorkspaceError_AsyncMergeDeployConfigInvalid) isCreateWorkspaceError_Cause() {}
 
 type CreateWorkspaceUngatedWithoutConsent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -3461,7 +3500,7 @@ var File_agentrepl_v1_endpoint_create_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_create_workspace.proto\x12\fagentrepl.v1\x1a\x19agentrepl/v1/family.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_priority.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x1aconversation/v1/user.proto\x1a\x1cworkspace/v1/workspace.proto\"\xe0\x05\n" +
+	",agentrepl/v1/endpoint_create_workspace.proto\x12\fagentrepl.v1\x1a(agentrepl/v1/deploy_config_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_priority.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x1aconversation/v1/user.proto\x1a!repoconfig/v1/deploy_config.proto\x1a\x1cworkspace/v1/workspace.proto\"\xe0\x05\n" +
 	"\x16CreateWorkspaceRequest\x12;\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefR\n" +
@@ -3482,15 +3521,15 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\t_priorityB\x10\n" +
 	"\x0e_allow_ungatedB\b\n" +
 	"\x06_op_idJ\x04\b\x04\x10\x05J\x04\b\t\x10\n" +
-	"R\x06parentR\vfork_source\"\xc9\x02\n" +
+	"R\x06parentR\vfork_source\"\xda\x02\n" +
 	"\x17CreateWorkspaceStandard\x12E\n" +
 	"\x0einitial_prompt\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidH\x00R\rinitialPrompt\x88\x01\x01\x12;\n" +
 	"\btopology\x18\x05 \x01(\v2\x1f.agentrepl.v1.WorkspaceTopologyR\btopology\x12\x17\n" +
-	"\x04name\x18\x03 \x01(\tH\x01R\x04name\x88\x01\x01\x12S\n" +
-	"\rmerge_actions\x18\x04 \x01(\v2).agentrepl.v1.CreateWorkspaceMergeActionsH\x02R\fmergeActions\x88\x01\x01B\x11\n" +
+	"\x04name\x18\x03 \x01(\tH\x01R\x04name\x88\x01\x01\x12P\n" +
+	"\fdeploy_hooks\x18\x06 \x01(\v2(.agentrepl.v1.CreateWorkspaceDeployHooksH\x02R\vdeployHooks\x88\x01\x01B\x11\n" +
 	"\x0f_initial_promptB\a\n" +
-	"\x05_nameB\x10\n" +
-	"\x0e_merge_actionsJ\x04\b\x02\x10\x03R\bbase_ref\"\x81\x02\n" +
+	"\x05_nameB\x0f\n" +
+	"\r_deploy_hooksJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\bbase_refR\rmerge_actions\"\x81\x02\n" +
 	"\x16CreateWorkspaceOneShot\x121\n" +
 	"\x06prompt\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidR\x06prompt\x12;\n" +
 	"\btopology\x18\x05 \x01(\v2\x1f.agentrepl.v1.WorkspaceTopologyR\btopology\x12J\n" +
@@ -3500,7 +3539,7 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"self_mergeR\aopen_pr\"Y\n" +
 	"\x1dCreateWorkspaceOneShotContext\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x1f\n" +
-	"\x1dCreateWorkspaceUngatedConsent\"\xcb\x05\n" +
+	"\x1dCreateWorkspaceUngatedConsent\"\xdc\x05\n" +
 	"\x19CreateWorkspaceAsyncMerge\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12E\n" +
 	"\x06source\x18\x02 \x01(\v2-.agentrepl.v1.CreateWorkspaceAsyncMergeSourceR\x06source\x12E\n" +
@@ -3509,15 +3548,15 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\vclose_after\x18\x05 \x01(\v21.agentrepl.v1.CreateWorkspaceAsyncMergeCloseAfterH\x01R\n" +
 	"closeAfter\x88\x01\x01\x12)\n" +
 	"\x10cleanup_worktree\x18\x06 \x01(\bR\x0fcleanupWorktree\x12#\n" +
-	"\rcompact_after\x18\a \x01(\bR\fcompactAfter\x12S\n" +
-	"\rmerge_actions\x18\b \x01(\v2).agentrepl.v1.CreateWorkspaceMergeActionsH\x02R\fmergeActions\x88\x01\x01\x12?\n" +
+	"\rcompact_after\x18\a \x01(\bR\fcompactAfter\x12P\n" +
+	"\fdeploy_hooks\x18\v \x01(\v2(.agentrepl.v1.CreateWorkspaceDeployHooksH\x02R\vdeployHooks\x88\x01\x01\x12?\n" +
 	"\tplacement\x18\t \x01(\v2!.agentrepl.v1.MergeQueuePlacementR\tplacement\x12^\n" +
 	"\x11version_increment\x18\n" +
 	" \x01(\v2,.agentrepl.v1.MergeWorkspaceVersionIncrementH\x03R\x10versionIncrement\x88\x01\x01B\x0e\n" +
 	"\f_instructionB\x0e\n" +
-	"\f_close_afterB\x10\n" +
-	"\x0e_merge_actionsB\x14\n" +
-	"\x12_version_increment\"}\n" +
+	"\f_close_afterB\x0f\n" +
+	"\r_deploy_hooksB\x14\n" +
+	"\x12_version_incrementJ\x04\b\b\x10\tR\rmerge_actions\"}\n" +
 	"\x1fCreateWorkspaceAsyncMergeSource\x12\x16\n" +
 	"\x06branch\x18\x01 \x01(\tR\x06branch\x12B\n" +
 	"\x05maker\x18\x02 \x01(\v2,.agentrepl.v1.CreateWorkspaceAsyncMergeMakerR\x05maker\"\xd4\x01\n" +
@@ -3536,12 +3575,12 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"&CreateWorkspaceAsyncMergeTargetPrimary\"&\n" +
 	"$CreateWorkspaceAsyncMergeTargetMaker\"_\n" +
 	"#CreateWorkspaceAsyncMergeCloseAfter\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xe8\x01\n" +
-	"\x1bCreateWorkspaceMergeActions\x12F\n" +
-	"\x0fbefore_ws_merge\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidH\x00R\rbeforeWsMerge\x88\x01\x01\x12S\n" +
-	"\x15postprocessing_prompt\x18\x02 \x01(\v2\x19.conversation.v1.UserSaidH\x01R\x14postprocessingPrompt\x88\x01\x01B\x12\n" +
-	"\x10_before_ws_mergeB\x18\n" +
-	"\x16_postprocessing_prompt\"\xcb\x02\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x92\x01\n" +
+	"\x1aCreateWorkspaceDeployHooks\x128\n" +
+	"\n" +
+	"pre_deploy\x18\x01 \x03(\v2\x19.repoconfig.v1.DeployHookR\tpreDeploy\x12:\n" +
+	"\vpost_deploy\x18\x02 \x03(\v2\x19.repoconfig.v1.DeployHookR\n" +
+	"postDeploy\"\xcb\x02\n" +
 	"\x17CreateWorkspaceResponse\x12@\n" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.CreateWorkspaceSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.CreateWorkspaceErrorH\x00R\x05error\x12C\n" +
@@ -3553,7 +3592,7 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x17CreateWorkspaceAccepted\x12\x13\n" +
 	"\x05op_id\x18\x01 \x01(\tR\x04opId\"R\n" +
 	"\x16CreateWorkspaceSuccess\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x88\x1d\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xdc\x1e\n" +
 	"\x14CreateWorkspaceError\x12l\n" +
 	"\x17ungated_without_consent\x18\x01 \x01(\v22.agentrepl.v1.CreateWorkspaceUngatedWithoutConsentH\x00R\x15ungatedWithoutConsent\x12>\n" +
 	"\ano_slug\x18\x02 \x01(\v2#.agentrepl.v1.CreateWorkspaceNoSlugH\x00R\x06noSlug\x12P\n" +
@@ -3588,7 +3627,9 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x1casync_merge_requester_queued\x18$ \x01(\v26.agentrepl.v1.CreateWorkspaceAsyncMergeRequesterQueuedH\x00R\x19asyncMergeRequesterQueued\x12|\n" +
 	"\x1dasync_merge_requester_merging\x18% \x01(\v27.agentrepl.v1.CreateWorkspaceAsyncMergeRequesterMergingH\x00R\x1aasyncMergeRequesterMerging\x12\x92\x01\n" +
 	"%async_merge_requester_session_deleted\x18& \x01(\v2>.agentrepl.v1.CreateWorkspaceAsyncMergeRequesterSessionDeletedH\x00R!asyncMergeRequesterSessionDeleted\x12`\n" +
-	"\x13origin_fetch_failed\x18' \x01(\v2..agentrepl.v1.CreateWorkspaceOriginFetchFailedH\x00R\x11originFetchFailedB\a\n" +
+	"\x13origin_fetch_failed\x18' \x01(\v2..agentrepl.v1.CreateWorkspaceOriginFetchFailedH\x00R\x11originFetchFailed\x12c\n" +
+	"\x1casync_merge_no_deploy_config\x18( \x01(\v2!.agentrepl.v1.DeployConfigMissingH\x00R\x18asyncMergeNoDeployConfig\x12m\n" +
+	"!async_merge_deploy_config_invalid\x18) \x01(\v2!.agentrepl.v1.DeployConfigInvalidH\x00R\x1dasyncMergeDeployConfigInvalidB\a\n" +
 	"\x05causeJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\b\x10\tJ\x04\b\t\x10\n" +
 	"J\x04\b\x0f\x10\x10R\x0ffinish_requiredR\x13finish_not_one_shotR\x1ffork_parent_has_no_conversationR\x0eunknown_parentR\x13base_ref_unresolvedR\x1bbase_ref_off_primary_branch\"&\n" +
 	"$CreateWorkspaceUngatedWithoutConsent\"\x17\n" +
@@ -3678,7 +3719,7 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_goTypes = []any{
 	(*CreateWorkspaceAsyncMergeTargetPrimary)(nil),           // 11: agentrepl.v1.CreateWorkspaceAsyncMergeTargetPrimary
 	(*CreateWorkspaceAsyncMergeTargetMaker)(nil),             // 12: agentrepl.v1.CreateWorkspaceAsyncMergeTargetMaker
 	(*CreateWorkspaceAsyncMergeCloseAfter)(nil),              // 13: agentrepl.v1.CreateWorkspaceAsyncMergeCloseAfter
-	(*CreateWorkspaceMergeActions)(nil),                      // 14: agentrepl.v1.CreateWorkspaceMergeActions
+	(*CreateWorkspaceDeployHooks)(nil),                       // 14: agentrepl.v1.CreateWorkspaceDeployHooks
 	(*CreateWorkspaceResponse)(nil),                          // 15: agentrepl.v1.CreateWorkspaceResponse
 	(*CreateWorkspaceAsyncMergeAccepted)(nil),                // 16: agentrepl.v1.CreateWorkspaceAsyncMergeAccepted
 	(*CreateWorkspaceAccepted)(nil),                          // 17: agentrepl.v1.CreateWorkspaceAccepted
@@ -3723,9 +3764,12 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_goTypes = []any{
 	(*v1.WorkspaceRef)(nil),                                  // 56: workspace.v1.WorkspaceRef
 	(*MergeQueuePlacement)(nil),                              // 57: agentrepl.v1.MergeQueuePlacement
 	(*MergeWorkspaceVersionIncrement)(nil),                   // 58: agentrepl.v1.MergeWorkspaceVersionIncrement
-	(*WorkspaceParentNotOpen)(nil),                           // 59: agentrepl.v1.WorkspaceParentNotOpen
-	(*MergeWorkspaceVersionIncrementRequired)(nil),           // 60: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	(*MergeWorkspaceVersionIncrementUnexpected)(nil),         // 61: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
+	(*v12.DeployHook)(nil),                                   // 59: repoconfig.v1.DeployHook
+	(*WorkspaceParentNotOpen)(nil),                           // 60: agentrepl.v1.WorkspaceParentNotOpen
+	(*MergeWorkspaceVersionIncrementRequired)(nil),           // 61: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
+	(*MergeWorkspaceVersionIncrementUnexpected)(nil),         // 62: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
+	(*DeployConfigMissing)(nil),                              // 63: agentrepl.v1.DeployConfigMissing
+	(*DeployConfigInvalid)(nil),                              // 64: agentrepl.v1.DeployConfigInvalid
 }
 var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	50, // 0: agentrepl.v1.CreateWorkspaceRequest.repository:type_name -> workspace.v1.RepositoryRef
@@ -3738,7 +3782,7 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	4,  // 7: agentrepl.v1.CreateWorkspaceRequest.allow_ungated:type_name -> agentrepl.v1.CreateWorkspaceUngatedConsent
 	54, // 8: agentrepl.v1.CreateWorkspaceStandard.initial_prompt:type_name -> conversation.v1.UserSaid
 	55, // 9: agentrepl.v1.CreateWorkspaceStandard.topology:type_name -> agentrepl.v1.WorkspaceTopology
-	14, // 10: agentrepl.v1.CreateWorkspaceStandard.merge_actions:type_name -> agentrepl.v1.CreateWorkspaceMergeActions
+	14, // 10: agentrepl.v1.CreateWorkspaceStandard.deploy_hooks:type_name -> agentrepl.v1.CreateWorkspaceDeployHooks
 	54, // 11: agentrepl.v1.CreateWorkspaceOneShot.prompt:type_name -> conversation.v1.UserSaid
 	55, // 12: agentrepl.v1.CreateWorkspaceOneShot.topology:type_name -> agentrepl.v1.WorkspaceTopology
 	3,  // 13: agentrepl.v1.CreateWorkspaceOneShot.context:type_name -> agentrepl.v1.CreateWorkspaceOneShotContext
@@ -3746,7 +3790,7 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	6,  // 15: agentrepl.v1.CreateWorkspaceAsyncMerge.source:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeSource
 	10, // 16: agentrepl.v1.CreateWorkspaceAsyncMerge.target:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeTarget
 	13, // 17: agentrepl.v1.CreateWorkspaceAsyncMerge.close_after:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeCloseAfter
-	14, // 18: agentrepl.v1.CreateWorkspaceAsyncMerge.merge_actions:type_name -> agentrepl.v1.CreateWorkspaceMergeActions
+	14, // 18: agentrepl.v1.CreateWorkspaceAsyncMerge.deploy_hooks:type_name -> agentrepl.v1.CreateWorkspaceDeployHooks
 	57, // 19: agentrepl.v1.CreateWorkspaceAsyncMerge.placement:type_name -> agentrepl.v1.MergeQueuePlacement
 	58, // 20: agentrepl.v1.CreateWorkspaceAsyncMerge.version_increment:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrement
 	7,  // 21: agentrepl.v1.CreateWorkspaceAsyncMergeSource.maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeMaker
@@ -3756,8 +3800,8 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	11, // 25: agentrepl.v1.CreateWorkspaceAsyncMergeTarget.primary:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeTargetPrimary
 	12, // 26: agentrepl.v1.CreateWorkspaceAsyncMergeTarget.maker:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeTargetMaker
 	56, // 27: agentrepl.v1.CreateWorkspaceAsyncMergeCloseAfter.workspace:type_name -> workspace.v1.WorkspaceRef
-	54, // 28: agentrepl.v1.CreateWorkspaceMergeActions.before_ws_merge:type_name -> conversation.v1.UserSaid
-	54, // 29: agentrepl.v1.CreateWorkspaceMergeActions.postprocessing_prompt:type_name -> conversation.v1.UserSaid
+	59, // 28: agentrepl.v1.CreateWorkspaceDeployHooks.pre_deploy:type_name -> repoconfig.v1.DeployHook
+	59, // 29: agentrepl.v1.CreateWorkspaceDeployHooks.post_deploy:type_name -> repoconfig.v1.DeployHook
 	18, // 30: agentrepl.v1.CreateWorkspaceResponse.success:type_name -> agentrepl.v1.CreateWorkspaceSuccess
 	19, // 31: agentrepl.v1.CreateWorkspaceResponse.error:type_name -> agentrepl.v1.CreateWorkspaceError
 	17, // 32: agentrepl.v1.CreateWorkspaceResponse.accepted:type_name -> agentrepl.v1.CreateWorkspaceAccepted
@@ -3776,7 +3820,7 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	26, // 45: agentrepl.v1.CreateWorkspaceError.fork_source_has_no_conversation:type_name -> agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation
 	28, // 46: agentrepl.v1.CreateWorkspaceError.name_reserved:type_name -> agentrepl.v1.CreateWorkspaceNameReserved
 	27, // 47: agentrepl.v1.CreateWorkspaceError.unknown_context_workspace:type_name -> agentrepl.v1.CreateWorkspaceUnknownContextWorkspace
-	59, // 48: agentrepl.v1.CreateWorkspaceError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
+	60, // 48: agentrepl.v1.CreateWorkspaceError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
 	29, // 49: agentrepl.v1.CreateWorkspaceError.unknown_owner:type_name -> agentrepl.v1.CreateWorkspaceUnknownOwner
 	30, // 50: agentrepl.v1.CreateWorkspaceError.owner_notice_required:type_name -> agentrepl.v1.CreateWorkspaceOwnerNoticeRequired
 	31, // 51: agentrepl.v1.CreateWorkspaceError.owner_notice_unexpected:type_name -> agentrepl.v1.CreateWorkspaceOwnerNoticeUnexpected
@@ -3790,26 +3834,28 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	39, // 59: agentrepl.v1.CreateWorkspaceError.async_merge_name_taken:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeNameTaken
 	40, // 60: agentrepl.v1.CreateWorkspaceError.async_merge_unknown_close_after:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeUnknownCloseAfter
 	44, // 61: agentrepl.v1.CreateWorkspaceError.op_id_with_async_merge:type_name -> agentrepl.v1.CreateWorkspaceOpIdWithAsyncMerge
-	60, // 62: agentrepl.v1.CreateWorkspaceError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	61, // 63: agentrepl.v1.CreateWorkspaceError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
+	61, // 62: agentrepl.v1.CreateWorkspaceError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
+	62, // 63: agentrepl.v1.CreateWorkspaceError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
 	41, // 64: agentrepl.v1.CreateWorkspaceError.async_merge_requester_queued:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeRequesterQueued
 	42, // 65: agentrepl.v1.CreateWorkspaceError.async_merge_requester_merging:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeRequesterMerging
 	43, // 66: agentrepl.v1.CreateWorkspaceError.async_merge_requester_session_deleted:type_name -> agentrepl.v1.CreateWorkspaceAsyncMergeRequesterSessionDeleted
 	49, // 67: agentrepl.v1.CreateWorkspaceError.origin_fetch_failed:type_name -> agentrepl.v1.CreateWorkspaceOriginFetchFailed
-	56, // 68: agentrepl.v1.CreateWorkspaceUnknownForkSource.workspace:type_name -> workspace.v1.WorkspaceRef
-	56, // 69: agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation.workspace:type_name -> workspace.v1.WorkspaceRef
-	56, // 70: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	56, // 71: agentrepl.v1.CreateWorkspaceUnknownOwner.owner:type_name -> workspace.v1.WorkspaceRef
-	56, // 72: agentrepl.v1.CreateWorkspaceOneShotOwnerLands.owner:type_name -> workspace.v1.WorkspaceRef
-	56, // 73: agentrepl.v1.CreateWorkspaceUnknownRequester.workspace:type_name -> workspace.v1.WorkspaceRef
-	56, // 74: agentrepl.v1.CreateWorkspaceAsyncMergeBranchOwned.owner:type_name -> workspace.v1.WorkspaceRef
-	56, // 75: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker.workspace:type_name -> workspace.v1.WorkspaceRef
-	56, // 76: agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker.maker:type_name -> workspace.v1.WorkspaceRef
-	77, // [77:77] is the sub-list for method output_type
-	77, // [77:77] is the sub-list for method input_type
-	77, // [77:77] is the sub-list for extension type_name
-	77, // [77:77] is the sub-list for extension extendee
-	0,  // [0:77] is the sub-list for field type_name
+	63, // 68: agentrepl.v1.CreateWorkspaceError.async_merge_no_deploy_config:type_name -> agentrepl.v1.DeployConfigMissing
+	64, // 69: agentrepl.v1.CreateWorkspaceError.async_merge_deploy_config_invalid:type_name -> agentrepl.v1.DeployConfigInvalid
+	56, // 70: agentrepl.v1.CreateWorkspaceUnknownForkSource.workspace:type_name -> workspace.v1.WorkspaceRef
+	56, // 71: agentrepl.v1.CreateWorkspaceForkSourceHasNoConversation.workspace:type_name -> workspace.v1.WorkspaceRef
+	56, // 72: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	56, // 73: agentrepl.v1.CreateWorkspaceUnknownOwner.owner:type_name -> workspace.v1.WorkspaceRef
+	56, // 74: agentrepl.v1.CreateWorkspaceOneShotOwnerLands.owner:type_name -> workspace.v1.WorkspaceRef
+	56, // 75: agentrepl.v1.CreateWorkspaceUnknownRequester.workspace:type_name -> workspace.v1.WorkspaceRef
+	56, // 76: agentrepl.v1.CreateWorkspaceAsyncMergeBranchOwned.owner:type_name -> workspace.v1.WorkspaceRef
+	56, // 77: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker.workspace:type_name -> workspace.v1.WorkspaceRef
+	56, // 78: agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker.maker:type_name -> workspace.v1.WorkspaceRef
+	79, // [79:79] is the sub-list for method output_type
+	79, // [79:79] is the sub-list for method input_type
+	79, // [79:79] is the sub-list for extension type_name
+	79, // [79:79] is the sub-list for extension extendee
+	0,  // [0:79] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_create_workspace_proto_init() }
@@ -3817,6 +3863,7 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_create_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_deploy_config_refusal_proto_init()
 	file_agentrepl_v1_family_proto_init()
 	file_agentrepl_v1_merge_version_increment_proto_init()
 	file_agentrepl_v1_workspace_priority_proto_init()
@@ -3837,7 +3884,6 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 		(*CreateWorkspaceAsyncMergeTarget_Primary)(nil),
 		(*CreateWorkspaceAsyncMergeTarget_Maker)(nil),
 	}
-	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[14].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_create_workspace_proto_msgTypes[15].OneofWrappers = []any{
 		(*CreateWorkspaceResponse_Success)(nil),
 		(*CreateWorkspaceResponse_Error)(nil),
@@ -3878,6 +3924,8 @@ func file_agentrepl_v1_endpoint_create_workspace_proto_init() {
 		(*CreateWorkspaceError_AsyncMergeRequesterMerging)(nil),
 		(*CreateWorkspaceError_AsyncMergeRequesterSessionDeleted)(nil),
 		(*CreateWorkspaceError_OriginFetchFailed)(nil),
+		(*CreateWorkspaceError_AsyncMergeNoDeployConfig)(nil),
+		(*CreateWorkspaceError_AsyncMergeDeployConfigInvalid)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

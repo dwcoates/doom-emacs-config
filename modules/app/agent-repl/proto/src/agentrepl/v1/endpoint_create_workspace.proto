@@ -32,11 +32,13 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/deploy_config_refusal.proto";
 import "agentrepl/v1/family.proto";
 import "agentrepl/v1/merge_version_increment.proto";
 import "agentrepl/v1/workspace_priority.proto";
 import "agentrepl/v1/workspace_topology.proto";
 import "conversation/v1/user.proto";
+import "repoconfig/v1/deploy_config.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -123,9 +125,13 @@ message CreateWorkspaceStandard {
   // A user-supplied workspace name. UNSET = the daemon mints the name
   // (slug from the initial prompt when present).
   optional string name = 3;
-  // Configured merge actions, recorded in WSM at creation and read back by
-  // EVERY merge of this workspace on every ingress.
-  optional CreateWorkspaceMergeActions merge_actions = 4;
+  // Deploy hooks recorded at creation and run by EVERY deploy of this
+  // workspace, in place of its repository's hooks for the same stage.
+  optional CreateWorkspaceDeployHooks deploy_hooks = 6;
+  // Tag 4 (`merge_actions`) is RETIRED: a creation's hooks are deploy hooks,
+  // scripts or prompts.
+  reserved 4;
+  reserved "merge_actions";
 }
 
 // A one-shot: repo-pinned, off the repo's default branch, daemon-named —
@@ -233,12 +239,15 @@ message CreateWorkspaceAsyncMerge {
   // (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_COMPACT_AFTER). A merge
   // that fails compacts nothing.
   bool compact_after = 7;
-  // The merge actions THIS merge runs, in the MERGE WORKSPACE under its merge
-  // lease -- never in the requester: before_ws_merge runs before the landing,
-  // and its failure fails the merge; postprocessing_prompt runs after the
-  // branch lands, and can never fail it. UNSET, or set with neither action:
-  // the merge runs no merge action.
-  optional CreateWorkspaceMergeActions merge_actions = 8;
+  // Deploy hooks THIS deploy runs, in place of its repository's hooks for the
+  // same stage, in the MERGE WORKSPACE under its lease -- never in the
+  // requester. UNSET, or a stage left empty: that stage runs the repository's
+  // own hooks.
+  optional CreateWorkspaceDeployHooks deploy_hooks = 11;
+  // Tag 8 (`merge_actions`) is RETIRED: a request's hooks are deploy hooks,
+  // scripts or prompts.
+  reserved 8;
+  reserved "merge_actions";
   // Where the merge joins its queue once it is put in line. REQUIRED.
   MergeQueuePlacement placement = 9;
   // How this merge moves agent-repl's version, and its changelog line; see
@@ -310,15 +319,18 @@ message CreateWorkspaceAsyncMergeCloseAfter {
   workspace.v1.WorkspaceRef workspace = 1;
 }
 
-// The configured merge actions. Both run under the merge lease for EVERY
-// merge of this workspace: before_ws_merge BEFORE the landing (its failure
-// fails the run); postprocessing_prompt AFTER every commit lands (can
-// never fail the run; its error rides the terminal status).
-message CreateWorkspaceMergeActions {
-  // The pre-merge prompt. UNSET = no configured pre-merge action.
-  optional conversation.v1.UserSaid before_ws_merge = 1;
-  // The post-merge prompt. UNSET = no configured post-merge action.
-  optional conversation.v1.UserSaid postprocessing_prompt = 2;
+// Deploy hooks a request supplies. A stage given here REPLACES the
+// repository's own hooks for that stage (repoconfig.v1.DeployConfig) for the
+// deploys the request covers; a stage left empty runs the repository's. Each
+// hook is a script or a prompt, exactly as in the repository's config, and a
+// failed one fails the deploy. The `deploy` stage is the repository's alone.
+message CreateWorkspaceDeployHooks {
+  // Run in place of the repository's `pre_deploy` hooks, before the local
+  // merge.
+  repeated repoconfig.v1.DeployHook pre_deploy = 1;
+  // Run in place of the repository's `post_deploy` hooks, after the deploy
+  // stage.
+  repeated repoconfig.v1.DeployHook post_deploy = 2;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -468,6 +480,12 @@ message CreateWorkspaceError {
     // A primary create cut from origin (WorkspaceTopologyPrimary.from_origin)
     // could not fetch origin's primary branch. Nothing was created.
     CreateWorkspaceOriginFetchFailed origin_fetch_failed = 39;
+    // The async merge's repository has no `.agent-repl/deploy.yaml`, so
+    // nothing says what its deploy does. Nothing was recorded.
+    DeployConfigMissing async_merge_no_deploy_config = 40;
+    // The async merge's repository's `.agent-repl/deploy.yaml` is unusable.
+    // Nothing was recorded.
+    DeployConfigInvalid async_merge_deploy_config_invalid = 41;
   }
 }
 message CreateWorkspaceUngatedWithoutConsent {}

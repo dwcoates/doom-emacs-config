@@ -39,7 +39,7 @@ import "agentrepl/v1/endpoint_close_workspace.proto";
 import "agentrepl/v1/endpoint_kill_workspace.proto";
 import "agentrepl/v1/endpoint_forget_workspace.proto";
 import "agentrepl/v1/endpoint_nuke_workspace.proto";
-import "agentrepl/v1/endpoint_merge_workspace.proto";
+import "agentrepl/v1/endpoint_finish_workspace.proto";
 import "agentrepl/v1/endpoint_restart_workspace.proto";
 import "agentrepl/v1/endpoint_watch_topbar.proto";
 import "agentrepl/v1/endpoint_open_external.proto";
@@ -103,7 +103,8 @@ import "agentrepl/v1/endpoint_subscribe_workspace.proto";
 import "agentrepl/v1/endpoint_unsubscribe_workspace.proto";
 import "agentrepl/v1/endpoint_subscribe_merge_queue.proto";
 import "agentrepl/v1/endpoint_unsubscribe_merge_queue.proto";
-import "agentrepl/v1/endpoint_update_rollouts.proto";
+import "agentrepl/v1/endpoint_update_deploy_hold.proto";
+import "agentrepl/v1/endpoint_roll_out_landing.proto";
 import "agentrepl/v1/endpoint_evaluate_in_editor.proto";
 import "agentrepl/v1/endpoint_answer_editor_evaluation.proto";
 import "agentrepl/v1/endpoint_compact_workspace.proto";
@@ -237,10 +238,10 @@ service AgentRepl {
   // undo for a registration. See endpoint_forget_workspace.proto.
   rpc ForgetWorkspace(ForgetWorkspaceRequest) returns (ForgetWorkspaceResponse);
 
-  // Land this workspace's own branch in the target fixed at its creation;
-  // its life from there is the feed's bubble. See
-  // endpoint_merge_workspace.proto.
-  rpc MergeWorkspace(MergeWorkspaceRequest) returns (MergeWorkspaceResponse);
+  // This workspace's work is finished: run its repository's deploy on its own
+  // branch; its life from there is the feed's bubble. See
+  // endpoint_finish_workspace.proto.
+  rpc FinishWorkspace(FinishWorkspaceRequest) returns (FinishWorkspaceResponse);
   // Compact a workspace's conversation through its prompt queue. See
   // endpoint_compact_workspace.proto.
   rpc CompactWorkspace(CompactWorkspaceRequest) returns (CompactWorkspaceResponse);
@@ -370,9 +371,12 @@ service AgentRepl {
   // Operator control of the merge queue. See
   // endpoint_update_merge_queue.proto.
   rpc UpdateMergeQueue(UpdateMergeQueueRequest) returns (UpdateMergeQueueResponse);
-  // Hold or release the runtime's rollouts; releasing deploys what landed
-  // during the hold. See endpoint_update_rollouts.proto.
-  rpc UpdateRollouts(UpdateRolloutsRequest) returns (UpdateRolloutsResponse);
+  // Hold or release one repository's deploy stage; releasing runs a skipped
+  // script deploy hook once. See endpoint_update_deploy_hold.proto.
+  rpc UpdateDeployHold(UpdateDeployHoldRequest) returns (UpdateDeployHoldResponse);
+  // agent-repl's deploy hook asks for the rollout of what a deploy landed. See
+  // endpoint_roll_out_landing.proto.
+  rpc RollOutLanding(RollOutLandingRequest) returns (RollOutLandingResponse);
 
   // Is the daemon itself healthy? Unhealthy is an ANSWER. See
   // endpoint_daemon_health.proto.

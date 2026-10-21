@@ -1,0 +1,72 @@
+// endpoint_roll_out_landing.proto — RollOutLanding: agent-repl's deploy hook
+// asks the daemon to roll out what a deploy landed. RUNTIME section.
+//
+// THE DAEMON OWNS ITS ROLLOUTS. agent-repl's repository describes its deploy
+// stage as a script (`modules/app/agent-repl/bin/deploy-landing.sh`) that
+// calls this rpc; the rollout itself -- build, install, restart what is out of
+// date, the handover -- is the daemon's, exactly as agentrepl.v1.Deploy
+// describes it.
+//
+// WITH A LEDGER, THE ROLLOUT IS REGISTERED, NOT STARTED. The deploy named by
+// `deploy` is still running (its hook is what called), and its report to an
+// async merge's requester is composed only as it ends. So the daemon records
+// that the deploy's landing rolls out, and fires the rollout at the deploy's
+// teardown, after the report is owed to it: the report then arrives only once
+// the build carrying the landing is running. Landings that arrive while a
+// rollout runs are covered by one rollout after it, never one per landing.
+//
+// WITHOUT A LEDGER, THE ROLLOUT STARTS AT ONCE: the script was run by a hold's
+// release (agentrepl.v1.UpdateDeployHold), with no deploy to wait for.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message RollOutLandingRequest {
+  // The deploy whose landing rolls out, as its script hook's
+  // AGENT_REPL_DEPLOY_LEDGER names it. UNSET when no deploy called (a hold's
+  // release ran the script), and the rollout starts at once.
+  optional DeployLedger deploy = 1;
+}
+
+// A deploy's identity, minted by the daemon and handed to the deploy's script
+// hooks in AGENT_REPL_DEPLOY_LEDGER. Echoed back unchanged; a caller never
+// constructs one.
+message DeployLedger {
+  // Opaque to the caller.
+  string ledger = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message RollOutLandingResponse {
+  oneof result {
+    RollOutLandingSuccess success = 1;
+    RollOutLandingError error = 2;
+  }
+}
+// The rollout is registered or started.
+message RollOutLandingSuccess {
+  // THE ARM IS WHEN IT ROLLS OUT.
+  oneof when {
+    // At the named deploy's teardown.
+    RollOutLandingSuccessRegistered registered = 1;
+    // Now: no deploy was named.
+    RollOutLandingSuccessStarted started = 2;
+  }
+}
+// Registered on the deploy. No fields.
+message RollOutLandingSuccessRegistered {}
+// Started. No fields: its decisions ride the daemon's deploy reporting, as
+// any rollout's do.
+message RollOutLandingSuccessStarted {}
+message RollOutLandingError {
+  oneof cause {
+    // `deploy` names no deploy running in this daemon: it ended, or the
+    // ledger was never minted here.
+    RollOutLandingUnknownDeploy unknown_deploy = 1;
+  }
+}
+// Empty: the echoed ledger is the only identity involved.
+message RollOutLandingUnknownDeploy {}

@@ -1,0 +1,157 @@
+// endpoint_finish_workspace.proto — FinishWorkspace. SIDEBAR section. A
+// workspace says its work is FINISHED, and the daemon runs its repository's
+// DEPLOY on the workspace's own branch, in its own worktree, by its own
+// session: the stages `.agent-repl/deploy.yaml` describes
+// (repoconfig.v1.DeployConfig), its feed held and its bubble pinned until the
+// deploy ends, and the workspace closed once the deploy succeeds. Success means
+// ENQUEUED; everything after rides the streams.
+//
+// WHAT HAPPENS IS THE REPOSITORY'S, NEVER THE CALLER'S. The request names no
+// destination, no tests and no hooks: the daemon reads them from the
+// repository's deploy config when the deploy runs. Every one-shot is told to
+// call this when its work is done, whatever its repository.
+//
+// THE REQUEST NAMES NO TARGET. Where a workspace lands was fixed when it was
+// created (agentrepl.v1.WorkspaceTopology): the primary branch, or the
+// workspace that owns the branch it was cut from. The daemon reads it from the
+// workspace's own record, so no request can deploy work anywhere else.
+//
+// WHO MAY ASK. The workspace itself, the user, or -- for a child -- the
+// workspace that owns its branch. A child whose context was not forked from its
+// owner never finishes itself: its owner arbitrates its work and finishes it
+// (`owner_lands`).
+//
+// A DEPLOY THAT FAILS NEVER CLOSES THE WORKSPACE: its feed is released and the
+// failure is handed back to its conversation
+// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_MERGE_HANDBACK), and also to the
+// requesting owner's when its owner asked, which is prompted to investigate.
+//
+// Deploying work that is not a workspace's own branch -- a subagent's branch,
+// or one an agent cut by hand -- is an async merge
+// (agentrepl.v1.CreateWorkspaceAsyncMerge), not this rpc.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/deploy_config_refusal.proto";
+import "agentrepl/v1/family.proto";
+import "agentrepl/v1/merge_version_increment.proto";
+import "agentrepl/v1/workspace_topology.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message FinishWorkspaceRequest {
+  // The workspace whose work is finished; its own branch is what deploys.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Who asked: the workspace itself, its owner, or the user. Any other
+  // workspace is refused (`requester_may_not_land`). REQUIRED.
+  WorkspaceRequester requester = 2;
+  // How this deploy moves its repository's version, and its changelog line;
+  // see merge_version_increment.proto for which deploys must, may, and must
+  // not carry one. Applied when the local merge LANDS: the queue reads the
+  // highest `MAJOR.MINOR.PATCH` tag reachable from the target's tip as it was
+  // before the landing, so deploys reordered in the queue still produce
+  // consecutive versions.
+  optional MergeWorkspaceVersionIncrement version_increment = 3;
+  // Where the deploy joins its queue. REQUIRED.
+  MergeQueuePlacement placement = 4;
+}
+
+// THE ARM IS THE OUTCOME.
+message FinishWorkspaceResponse {
+  oneof result {
+    FinishWorkspaceSuccess success = 1;
+    FinishWorkspaceError error = 2;
+  }
+}
+
+// Enqueued; every visible effect arrives on the streams.
+message FinishWorkspaceSuccess {}
+
+// Why nothing was enqueued. Validation failures (unset field, blank string)
+// are Connect InvalidArgument, never an arm.
+message FinishWorkspaceError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    FinishWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    FinishWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    FinishWorkspaceTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    FinishWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // The daemon holds no layout facts for this workspace to deploy with.
+    FinishWorkspaceNoLayoutFacts no_layout_facts = 5;
+    // The workspace's session has been deleted.
+    FinishWorkspaceSessionDeleted session_deleted = 6;
+    // This workspace's deploy is already in the queue.
+    FinishWorkspaceAlreadyQueued already_queued = 7;
+    // This workspace's deploy is already in flight.
+    FinishWorkspaceAlreadyDeploying already_deploying = 8;
+    // The deploy lands on a versioned repository's main branch, was asked for
+    // by an agent, and carries no version increment. Nothing was recorded; the
+    // caller re-sends with one.
+    MergeWorkspaceVersionIncrementRequired version_increment_required = 9;
+    // The deploy carries a version increment it may not carry. Nothing was
+    // recorded; the caller re-sends without one.
+    MergeWorkspaceVersionIncrementUnexpected version_increment_unexpected = 10;
+    // The workspace has open children, hidden ones included. Every open child
+    // must be resolved and closed before the workspace that is their parent
+    // finishes.
+    WorkspaceHasOpenChildren has_open_children = 11;
+    // The workspace is a child whose context was not forked from its owner,
+    // and only its owner (or the user) finishes it. Nothing was recorded.
+    FinishWorkspaceOwnerLands owner_lands = 12;
+    // The requester is neither the workspace, nor its owner, nor the user.
+    // Nothing was recorded.
+    FinishWorkspaceRequesterMayNotLand requester_may_not_land = 13;
+    // The workspace's worktree has no branch checked out (its HEAD is
+    // detached), so there is no branch of its own to deploy. Nothing was
+    // recorded.
+    FinishWorkspaceNoBranchCheckedOut no_branch_checked_out = 14;
+    // The repository has no `.agent-repl/deploy.yaml`, so nothing says what
+    // finishing does there. Nothing was recorded.
+    DeployConfigMissing no_deploy_config = 15;
+    // The repository's `.agent-repl/deploy.yaml` could not be read or does not
+    // decode as repoconfig.v1.DeployConfig. Nothing was recorded.
+    DeployConfigInvalid deploy_config_invalid = 16;
+  }
+}
+// The id names no workspace the daemon holds.
+message FinishWorkspaceUnknownWorkspace {}
+// The request's ref disagrees with the registry.
+message FinishWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// The workspace moved to a successor daemon.
+message FinishWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// The workspace is still being adopted. Empty: retry once adopted.
+message FinishWorkspaceNotYetAdopted {}
+// No layout facts are recorded for the workspace. Empty.
+message FinishWorkspaceNoLayoutFacts {}
+// The workspace's session is deleted. Empty.
+message FinishWorkspaceSessionDeleted {}
+// A deploy of this workspace is already waiting in the queue. Empty.
+message FinishWorkspaceAlreadyQueued {}
+// A deploy of this workspace is already running. Empty.
+message FinishWorkspaceAlreadyDeploying {}
+// Names the owner that finishes this workspace.
+message FinishWorkspaceOwnerLands {
+  // The workspace whose branch this child was cut from, which arbitrates its
+  // work and finishes it.
+  workspace.v1.WorkspaceRef owner = 1;
+}
+// The requester may not finish this workspace. Empty: the request's own refs
+// are the identities involved.
+message FinishWorkspaceRequesterMayNotLand {}
+// The worktree's HEAD is detached.
+message FinishWorkspaceNoBranchCheckedOut {
+  // The worktree with the detached HEAD.
+  string dir = 1;
+}

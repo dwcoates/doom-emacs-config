@@ -1,0 +1,127 @@
+// endpoint_update_deploy_hold.proto — UpdateDeployHold: hold or release ONE
+// REPOSITORY's deploy stage. RUNTIME section.
+//
+// HOLDING SKIPS THE DEPLOY STAGE, AND ONLY IT. While a repository is held, its
+// deploys run their `pre_deploy` stage exactly as they do (agent-repl's
+// merges keep landing on master), skip their `deploy` hook
+// (repoconfig.v1.DeployConfig.deploy), and run their `post_deploy` hooks; the
+// skip is recorded on the hold and noted in each deploy's report. For
+// agent-repl the deploy hook is the runtime's redeploy, so a hold keeps a
+// hand-deployed build (a profiling build) from being replaced by the next
+// landing. DURABLE: a hold survives a daemon restart and a handover until it is
+// released.
+//
+// RELEASING RUNS WHAT WAS SKIPPED, WHEN IT CAN. Releasing ends the hold and,
+// when a deploy skipped its deploy hook during it and that hook is a script,
+// runs the script once, with no owner (AGENT_REPL_CALLING_WORKSPACE and
+// AGENT_REPL_DEPLOY_LEDGER unset): a deploy hook acts on the repository's
+// current tip, never on one landing, so one run covers every skip. A skipped
+// PROMPT hook is not run at release: a prompt runs in a deploy's owner, and the
+// skipped deploys' owners are gone.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateDeployHoldRequest {
+  // The repository whose deploy stage is held or released. REQUIRED.
+  workspace.v1.RepositoryRef repository = 1;
+  // THE ARM IS THE ACTION. REQUIRED.
+  oneof action {
+    // Hold the repository's deploy stage.
+    UpdateDeployHoldHold hold = 2;
+    // Release it, running a skipped script deploy hook once.
+    UpdateDeployHoldRelease release = 3;
+  }
+}
+// Hold. No fields: the hold covers the request's repository.
+message UpdateDeployHoldHold {}
+// Release. No fields.
+message UpdateDeployHoldRelease {}
+
+// THE ARM IS THE OUTCOME.
+message UpdateDeployHoldResponse {
+  oneof result {
+    UpdateDeployHoldSuccess success = 1;
+    UpdateDeployHoldError error = 2;
+  }
+}
+// The action is applied.
+message UpdateDeployHoldSuccess {
+  // THE ARM IS WHAT WAS DONE.
+  oneof applied {
+    // The repository's deploy stage is held.
+    UpdateDeployHoldSuccessHeld held = 1;
+    // It is released.
+    UpdateDeployHoldSuccessReleased released = 2;
+  }
+}
+// Held. No fields.
+message UpdateDeployHoldSuccessHeld {}
+// Released, and what became of the deploys it skipped.
+message UpdateDeployHoldSuccessReleased {
+  // THE ARM IS WHAT RAN FOR THE SKIPPED DEPLOYS.
+  oneof skipped {
+    // No deploy skipped its deploy hook during the hold: nothing to run.
+    UpdateDeployHoldSuccessReleasedNothingSkipped nothing_skipped = 1;
+    // The repository's script deploy hook was run once for the skipped
+    // deploys, and exited 0.
+    UpdateDeployHoldSuccessReleasedScriptRan script_ran = 2;
+    // The repository's script deploy hook was run once and failed. The release
+    // itself stands; the next deploy runs the hook again.
+    UpdateDeployHoldSuccessReleasedScriptFailed script_failed = 3;
+    // Deploys skipped their deploy hook, but the hook is a prompt, which has
+    // no owner to run in now; nothing ran.
+    UpdateDeployHoldSuccessReleasedPromptNotRun prompt_not_run = 4;
+    // Deploys skipped their deploy hook, but the repository's deploy config no
+    // longer has one, or no longer reads; nothing ran.
+    UpdateDeployHoldSuccessReleasedNoDeployHook no_deploy_hook = 5;
+  }
+  // How many deploys skipped their deploy hook during the hold.
+  uint32 skipped_deploys = 6;
+}
+// Nothing was skipped. No fields.
+message UpdateDeployHoldSuccessReleasedNothingSkipped {}
+// The script ran and succeeded.
+message UpdateDeployHoldSuccessReleasedScriptRan {
+  // The script, relative to the repository's main checkout root.
+  string path = 1;
+  // The log holding the script's standard output and error.
+  string log_path = 2;
+}
+// The script ran and failed.
+message UpdateDeployHoldSuccessReleasedScriptFailed {
+  // The script, relative to the repository's main checkout root.
+  string path = 1;
+  // The log holding the script's standard output and error.
+  string log_path = 2;
+  // How it failed: its exit status, or that it ran past its timeout.
+  string detail = 3;
+}
+// The deploy hook is a prompt. No fields.
+message UpdateDeployHoldSuccessReleasedPromptNotRun {}
+// There is no deploy hook to run.
+message UpdateDeployHoldSuccessReleasedNoDeployHook {
+  // Why: the config has no `deploy`, or why it could not be read.
+  string detail = 1;
+}
+message UpdateDeployHoldError {
+  oneof cause {
+    // `hold` while the repository is already held.
+    UpdateDeployHoldAlreadyHeld already_held = 1;
+    // `release` while the repository is not held.
+    UpdateDeployHoldNotHeld not_held = 2;
+    // `repository` names a RepositoryRef the daemon's registry does not hold.
+    UpdateDeployHoldUnknownRepository unknown_repository = 3;
+  }
+}
+// The repository is already held. Empty.
+message UpdateDeployHoldAlreadyHeld {}
+// The repository is not held. Empty.
+message UpdateDeployHoldNotHeld {}
+// Empty: the echoed ref is the only identity involved.
+message UpdateDeployHoldUnknownRepository {}
