@@ -48,9 +48,9 @@
 //     AdoptHostWorkspace/AdoptWebWorkspace.
 //
 // #49 and #50 fire a REAL self-merge rollout (daemon.md's own blue-green
-// mechanism: the incumbent re-execs itself with --joining) by registering the
-// daemon's own fake-git checkout as its SelfRepo, landing a real (scripted,
-// fake-git) commit through a real CreateWorkspace + MergeWorkspace round
+// mechanism: the incumbent re-execs itself with --joining) by giving a
+// fake-git repository agent-repl's own deploy config (DeploysAsAgentRepl),
+// landing a real (scripted, fake-git) commit through a real CreateWorkspace + FinishWorkspace round
 // trip, and setting AGENT_REPL_TEST_ALL_SCRIPT so the merge gate passes —
 // exactly the mechanism daemon/integration/drain_rollout_test.go's own
 // TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous and
@@ -185,9 +185,9 @@ func adColdBoot(t *testing.T, w *World) *harness.Daemon {
 // #49 — HandoverTransfersAtFreeness, #50 — RefusalOrderingDuringHandover
 // ===========================================================================
 
-// adSelfRepoWorld starts a World whose daemon's own checkout (SelfRepo) is a
-// fresh fake-git repository with a passing merge gate, so a landed commit on
-// it fires a real self-merge rollout (daemon.md "Rollout / handover"). The
+// adSelfRepoWorld starts a World with a fresh fake-git repository that
+// deploys as agent-repl's own, with a passing merge gate, so a landed commit
+// on its main branch fires a real self-merge rollout (daemon.md "Rollout / handover"). The
 // whole handover — the incumbent's own re-exec, the successor's boot, and
 // its adoption of every workspace — runs on this ONE World's context, so it
 // gets HandoverChainTimeout rather than the tighter single-boot default.
@@ -197,9 +197,9 @@ func adSelfRepoWorld(t *testing.T) (*harness.Repo, *World) {
 	script := harness.NewTestAllScript(t, selfRepo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("e2e: passed in 1s\n")
+	selfRepo.DeploysAsAgentRepl()
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
 		DurableState: true,
-		SelfRepo:     selfRepo.Dir,
 		ExtraEnv:     []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
 		Timeout:      HandoverChainTimeout,
 	}})
@@ -323,7 +323,7 @@ func adTriggerDeploy(t *testing.T, w *World, selfRepo *harness.Repo, build harne
 	trigger := adCreateAndFinishChild(t, w, repoRef, "trigger")
 	sha := selfRepo.CommitIn(trigger.GetDir(), path, "trigger\n")
 	selfRepo.SetPaths(sha, path)
-	if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(harness.MergeRequest(trigger, harness.OneShot()))); err != nil {
+	if _, err := w.Client().FinishWorkspace(w.Ctx(), connect.NewRequest(harness.FinishRequest(trigger))); err != nil {
 		t.Fatalf("MergeWorkspace(trigger) = error %v, want the merge enqueued and landed", err)
 	}
 }

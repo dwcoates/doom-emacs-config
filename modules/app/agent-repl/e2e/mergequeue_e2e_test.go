@@ -52,6 +52,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
@@ -145,14 +146,21 @@ func mqBranchOf(ws *workspacev1.WorkspaceRef) string {
 
 func mqStrPtr(s string) *string { return &s }
 
-// mqMerge asks for one workspace's merge in one mode and fails the test unless
-// it is enqueued.
-func mqMerge(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, mode harness.MergeMode) {
+// mqFinish asks for one workspace's deploy and fails the test unless it is
+// enqueued.
+func mqFinish(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
-	resp, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(harness.MergeRequest(ws, mode)))
+	resp, err := w.Client().FinishWorkspace(w.Ctx(), connect.NewRequest(harness.FinishRequest(ws)))
 	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("MergeWorkspace = (%v, %v), want the merge enqueued", resp.Msg.GetResult(), err)
+		t.Fatalf("FinishWorkspace = (%v, %v), want the deploy enqueued", resp.Msg.GetResult(), err)
 	}
+}
+
+// mqPreDeployPrompt is a request's deploy hooks: TEXT as its one pre-deploy
+// prompt.
+func mqPreDeployPrompt(text string) *agentreplv1.CreateWorkspaceDeployHooks {
+	return &agentreplv1.CreateWorkspaceDeployHooks{PreDeploy: []*repoconfigv1.DeployHook{
+		{Hook: &repoconfigv1.DeployHook_Prompt{Prompt: &repoconfigv1.DeployHookPrompt{Text: text}}}}}
 }
 
 // mqConcluded answers whether a root row is a merge bubble's terminal.
@@ -249,7 +257,7 @@ func (fw *mqFeedWatch) AwaitRow(what string, pred func(*frontendv1.FeedRow) bool
 // after a merge began is HELD, never classified, and delivered once the merge
 // ends; holding it keeps the requester open past the landing, so the prompt
 // has a session to run in. The window is HELD, never raced: the workspace's
-// configured before-merge prompt parks on the fake vendor's turn gate (its
+// configured pre-deploy prompt hook parks on the fake vendor's turn gate (its
 // text is submitted verbatim, so it is exactly the gate text), and the
 // submission arrives while it is parked.
 // ---------------------------------------------------------------------------
@@ -269,9 +277,9 @@ func mqSaid(text string) *conversationv1.UserSaid {
 // #40 — MergeBubbleCoalescesIntoOneFeedRow. daemon.md §"Merge
 // (daemon-synthesized)": "the daemon coalesces everything produced during a
 // merge into one feed bubble... a sub-feed (own FeedId, OpenFeed/WatchFeed —
-// the same plumbing as subagent bubbles)." Driven for BOTH of the two
-// methods daemon.md keys on self-repo-or-not: the daemon's own checkout
-// (harness.Opts.SelfRepo) and an ordinary repository. In both cases the
+// the same plumbing as subagent bubbles)." Driven for BOTH kinds of deploy
+// config: agent-repl's own (Repo.DeploysAsAgentRepl, a local merge) and a
+// repository of hooks alone. In both cases the
 // child workspace's ROOT feed carries exactly ONE row for the whole merge
 // (the FeedMerge head); the phase detail (queue/rebasing/tests/... tabs) lives
 // only on that row's OWN sub-feed, never as separate root-feed rows.
@@ -311,7 +319,7 @@ func mqStartConflictedMerge(t *testing.T, name string) *mqConflictedMerge {
 	repo.ScriptRebaseConflict(mqBranchOf(child), 1, "work.txt")
 	root := mqOpenFeedWatch(t, w, child, nil)
 	t.Cleanup(root.Close)
-	mqMerge(t, w, child, harness.OneShot())
+	mqFinish(t, w, child)
 	return &mqConflictedMerge{w: w, repo: repo, child: child, root: root}
 }
 
@@ -402,9 +410,9 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// once, and that resubmission runs to its own ordinary terminal.
 	gatePath := filepath.Join(t.TempDir(), "displaced-turn-gate")
 	repo, _ := mqCleanRepo(t)
+	repo.DeploysAsAgentRepl()
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
 		DurableState: true,
-		SelfRepo:     repo.Dir,
 		ExtraEnv: []string{
 			turnGatePathEnv + "=" + gatePath,
 			turnGateTextEnv + "=" + displacedText,
@@ -429,7 +437,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	turn := SubmitPrompt(t, w, child, displacedText)
 	w.AwaitWorkspaceLogOperationCount(child.GetDir(), harness.OpTurnOpened, 1)
 	harness.CommitWork(t, child.GetDir())
-	mqMerge(t, w, child, harness.OneShot())
+	mqFinish(t, w, child)
 
 	// Assert: the displaced turn is CAPTURED then ENDED — its own terminal
 	// arrives on the feed.
@@ -455,7 +463,6 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// Act: a second real agent-repld boots on the SAME state root, store
 	// socket and lock dir.
 	d2Opts := w.SuccessorOpts(t)
-	d2Opts.SelfRepo = repo.Dir
 	d2 := harness.StartDaemon(t, d2Opts)
 	d2.ExpectWarnings(mqExpectedBounceWarnings...)
 	// Re-point World at the new process: every w.Client()/w.WatchFeed/... call
@@ -505,7 +512,6 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// the turn back is durable, so the boot after it finds nothing owed.
 	w.Kill()
 	d3Opts := w.SuccessorOpts(t)
-	d3Opts.SelfRepo = repo.Dir
 	d3 := harness.StartDaemon(t, d3Opts)
 	d3.ExpectWarnings(mqExpectedBounceWarnings...)
 	w.Daemon = d3
@@ -714,20 +720,19 @@ const mqFailTurnMarker = "e2e-fail-this-turn"
 // carrying the marker — the readable-prose shape the marker exists to allow.
 const mqMarkedAction = "run the release checks before landing (e2e-fail-this-turn)"
 
-// mqCreateChildWithActions is mqCreateTopLevelChild with configured merge
-// actions recorded at creation, which is the only ingress that records them
-// ("recorded in WSM at creation and read back by EVERY merge of this
-// workspace on every ingress", endpoint_create_workspace.proto:66-68).
-func mqCreateChildWithActions(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string, actions *agentreplv1.CreateWorkspaceMergeActions) *workspacev1.WorkspaceRef {
+// mqCreateChildWithHooks is mqCreateTopLevelChild with deploy hooks recorded
+// at creation, which is the only ingress that records them for a workspace's
+// own deploys (agentrepl.v1.CreateWorkspaceDeployHooks).
+func mqCreateChildWithHooks(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string, hooks *agentreplv1.CreateWorkspaceDeployHooks) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
 		Repository:    repoRef,
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology:     harness.Primary(),
-			Name:         mqStrPtr(name),
-			MergeActions: actions,
+			Topology:    harness.Primary(),
+			Name:        mqStrPtr(name),
+			DeployHooks: hooks,
 		}},
 	}))
 	if err != nil {
@@ -740,8 +745,8 @@ func mqCreateChildWithActions(t *testing.T, w *World, repoRef *workspacev1.Repos
 	return ws
 }
 
-// mqSelfRepoWorld mints a self-repo world whose merge test gate passes, so the
-// self-repo method reaches its post-prompt rather than stopping at the gate.
+// mqSelfRepoWorld mints a world whose repository deploys as agent-repl's own
+// with a merge test gate that passes, so a deploy runs past the gate.
 func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *World {
 	t.Helper()
 	script := harness.NewTestAllScript(t, repo.Dir)
@@ -751,14 +756,14 @@ func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *World {
 	// on one wait, as in daemon/integration/merge_test.go; see
 	// harness.MergeChainTimeout. Under a full gate the landing's deploy was
 	// still installing at +4.4s when the 5s DefaultTimeout cut it (2026-10-14).
+	repo.DeploysAsAgentRepl()
 	return NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
-		SelfRepo: repo.Dir,
 		Timeout:  harness.MergeChainTimeout,
 		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
 	}})
 }
 
-func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing.T) {
+func TestFailMarkerFailsAPreDeployHooksDeploy(t *testing.T) {
 	t.Parallel()
 	// A typo in the marker would leave both arms driving PLAIN PROSE, whose
 	// turns conclude — so the before arm would fail with a confusing terminal
@@ -767,9 +772,9 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 		t.Fatalf("the configured action %q does not carry the vendor's marker %q", mqMarkedAction, mqFailTurnMarker)
 	}
 
-	t.Run("before-action failure fails the run", func(t *testing.T) {
+	t.Run("a pre-deploy hook failure fails the deploy", func(t *testing.T) {
 		t.Parallel()
-		// Arrange: a child whose CONFIGURED before-merge action carries the
+		// Arrange: a child whose CONFIGURED pre-deploy prompt hook carries the
 		// marker, so the real shim's fake vendor fails that turn.
 		// harness.NewRepo directly, not mqCleanRepo: mqSelfRepoWorld writes
 		// the passing gate script itself, and writing bin/test-all.sh twice
@@ -777,41 +782,35 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 		repo := harness.NewRepo(t)
 		w := mqSelfRepoWorld(t, repo)
 		repoRef := mqRepositoryRef(t, w, repo)
-		child := mqCreateChildWithActions(t, w, repoRef, "mq-marker-before", &agentreplv1.CreateWorkspaceMergeActions{
-			BeforeWsMerge: mqSaid(mqMarkedAction),
-		})
+		child := mqCreateChildWithHooks(t, w, repoRef, "mq-marker-before", mqPreDeployPrompt(mqMarkedAction))
 		root := mqOpenFeedWatch(t, w, child, nil)
 		defer root.Close()
-		// Warning discipline: this run's own subject produces exactly one
-		// daemon warning -- the failed precondition itself
-		// (daemon.merge.pre_prompt, internal/merge/run.go). The merge failing
-		// and handing the workspace back (daemon.merge.abort) is its outcome,
-		// recorded at INFO.
-		w.ExpectWarnings("daemon.merge.pre_prompt")
+		// Warning discipline: the failed hook (daemon.merge.hook) and the
+		// deploy failing and handing the workspace back are its outcome,
+		// recorded at INFO, so this run produces no daemon warning.
 
 		// Act
 		harness.CommitWork(t, child.GetDir())
-		mqMerge(t, w, child, harness.OneShot())
+		mqFinish(t, w, child)
 		head := root.AwaitRow("the merge bubble's head", func(row *frontendv1.FeedRow) bool {
 			return row.GetActivity().GetMerge() != nil
 		})
 		tabs := mqOpenFeedWatch(t, w, child, head.GetId())
 		defer tabs.Close()
 
-		// Assert: the pre_prompt tab settles FAILED, with the daemon's own
-		// composed account (internal/merge/run.go's prePrompt). Since the
-		// merge rework the summary is plain words for a human reader; the
-		// action's own text is the preprocessing step's footer line, never the
-		// summary.
-		preTab := tabs.AwaitRow("the pre_prompt tab, settled", func(row *frontendv1.FeedRow) bool {
-			return row.GetMergeTab().GetPrePrompt().GetSettled() != nil
-		}).GetMergeTab().GetPrePrompt().GetSettled()
+		// Assert: the pre-deploy hook's tab settles FAILED, with the daemon's
+		// own composed account (internal/merge/deploy.go's runHook): plain
+		// words for a human reader; the hook's own text is the pre-deploy
+		// step's footer line, never the summary.
+		preTab := tabs.AwaitRow("the pre-deploy hook tab, settled", func(row *frontendv1.FeedRow) bool {
+			return row.GetMergeTab().GetHookPrompt().GetSettled() != nil
+		}).GetMergeTab().GetHookPrompt().GetSettled()
 		if preTab.GetFailed() == nil {
-			t.Fatalf("pre_prompt tab settled = %v, want the failed arm (the marked action's turn failed)", preTab)
+			t.Fatalf("pre-deploy hook tab settled = %v, want the failed arm (the marked hook's turn failed)", preTab)
 		}
-		const wantSummary = "the before-merge prompt did not complete"
+		const wantSummary = "its pre-deploy prompt hook did not complete"
 		if got := preTab.GetFailed().GetSummary(); got != wantSummary {
-			t.Errorf("pre_prompt tab failure summary = %q, want %q", got, wantSummary)
+			t.Errorf("pre-deploy hook tab failure summary = %q, want %q", got, wantSummary)
 		}
 
 		// Assert: THE RUN FAILED — the direction this arm exists to pin. The
@@ -830,13 +829,13 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 
 		// Assert the SPECIFIC NEGATIVE that makes "BEFORE the landing" a fact
 		// rather than a word: the run never reached a later phase at all, so
-		// its sub-feed carries no rebasing, tests, committing or post_prompt
+		// its sub-feed carries no rebasing, tests, committing or post-deploy hook
 		// tab. A before-action that failed AFTER the rebase or the merge
 		// commit had already run would satisfy every assertion above and still
 		// have moved work its author's own precondition refused.
 		//
 		// THE SNAPSHOT IS A FRESH PAGE, NOT THE WATCH'S DRAINED PREFIX. The
-		// watch above stopped draining the moment the pre_prompt tab settled,
+		// watch above stopped draining the moment the pre-deploy hook tab settled,
 		// so anything pushed after it would go unread and the negative would
 		// be an artifact of when the reader stopped looking. The run has
 		// reached its terminal by now, so nothing more can be pushed to this
@@ -850,8 +849,8 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 				t.Errorf("the run opened a committing tab after its before-action failed: %v", row)
 			case tab.GetTests() != nil:
 				t.Errorf("the run opened a tests tab after its before-action failed: %v", row)
-			case tab.GetPostPrompt() != nil:
-				t.Errorf("the run opened a post_prompt tab after its before-action failed: %v", row)
+			case tab.GetHookPrompt() != nil && tab.GetLabel().GetText() == "post-deploy":
+				t.Errorf("the run opened a post-deploy hook tab after its pre-deploy hook failed: %v", row)
 			}
 		}
 	})
