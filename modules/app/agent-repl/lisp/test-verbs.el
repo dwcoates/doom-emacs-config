@@ -51,9 +51,6 @@ alone has to be able to tell the two apart.")
   "Workspaces handed to `agent-repl-host-request-switch', oldest first.
 The request is host.el's daemon boundary, so it is RECORDED here.")
 
-(defvar agent-repl-test-verbs--drawn nil
-  "What the stubbed `agent-repl-roster-drawn-tab-order' answers.")
-
 (defun agent-repl-test-verbs--ref (&optional id dir)
   "Return a decoded `WorkspaceRef' plist, echoed verbatim by production."
   (list :id (or id "ws-id-1") :dir (or dir "/tmp/agent-repl-test/ws-1")))
@@ -154,15 +151,12 @@ answers a bare success, which is what almost every verb's success is."
          (agent-repl-test-verbs--selected nil)
          (agent-repl-test-verbs--restart-holds nil)
          (agent-repl-test-verbs--switch-requests nil)
-         (agent-repl-test-verbs--drawn nil)
          (agent-repl-test-verbs--answers ,answers))
      (cl-letf* (((symbol-function 'agent-repl-host-request-switch)
                  (lambda (ws _trigger)
                    (setq agent-repl-test-verbs--switch-requests
                          (append agent-repl-test-verbs--switch-requests (list ws)))
                    t))
-                ((symbol-function 'agent-repl-roster-drawn-tab-order)
-                 (lambda () agent-repl-test-verbs--drawn))
                 ((symbol-function 'agent-repl-host-ref)
                  (lambda (_ws) (agent-repl-test-verbs--ref)))
                 ((symbol-function 'agent-repl--ws-require-known)
@@ -972,47 +966,30 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
       ;; Assert.
       (should (= reads 1)))))
 
-(ert-deftest agent-repl-verbs-hide-lands-on-the-first-drawn-tab ()
-  "An accepted hide switches to the first tab the bar draws."
+(ert-deftest agent-repl-verbs-hide-requests-no-switch-of-its-own ()
+  "An accepted hide requests no switch: the daemon's landing is the only one."
   (agent-repl-test-verbs--with nil
-    ;; Arrange.
-    (setq agent-repl-test-verbs--drawn '("ws-zero" "ws-one" "ws-two"))
     ;; Act.
     (agent-repl-verb-set-hidden "ws-one" t)
     ;; Assert.
-    (should (equal agent-repl-test-verbs--switch-requests '("ws-zero")))))
+    (should-not agent-repl-test-verbs--switch-requests)))
 
-(ert-deftest agent-repl-verbs-hide-of-the-first-tab-lands-on-the-next ()
-  "Hiding the first drawn tab lands on the one after it, whether or not the push removed it yet."
+(ert-deftest agent-repl-verbs-hide-records-that-the-daemon-owns-the-landing ()
+  "An accepted hide records at INFO that the daemon lands the user."
   (agent-repl-test-verbs--with nil
-    ;; Arrange: the push that takes ws-one off the bar has not arrived.
-    (setq agent-repl-test-verbs--drawn '("ws-one" "ws-two"))
-    ;; Act.
-    (agent-repl-verb-set-hidden "ws-one" t)
-    ;; Assert.
-    (should (equal agent-repl-test-verbs--switch-requests '("ws-two")))))
-
-(ert-deftest agent-repl-verbs-hide-of-the-only-tab-stays-and-logs ()
-  "A hide that leaves no other drawn tab requests no switch and records why."
-  (agent-repl-test-verbs--with nil
-    ;; Arrange.
-    (setq agent-repl-test-verbs--drawn '("ws-one"))
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--info)
                  (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) logged))))
         ;; Act.
         (agent-repl-verb-set-hidden "ws-one" t))
       ;; Assert.
-      (should-not agent-repl-test-verbs--switch-requests)
-      (should (member '("ws-one" . "elisp.verbs.hide-landing-none ws=ws-one") logged)))))
+      (should (member '("ws-one" . "elisp.verbs.hide-landing ws=ws-one owner=daemon") logged)))))
 
 (ert-deftest agent-repl-verbs-hide-refused-requests-no-switch ()
   "A refused hide leaves the frame where it is."
   (agent-repl-test-verbs--with
       '((:set-hidden . (:response (:arm :error
                                    :value (:cause (:arm :unknown-workspace :value nil))))))
-    ;; Arrange.
-    (setq agent-repl-test-verbs--drawn '("ws-zero" "ws-one"))
     ;; Act.
     (agent-repl-verb-set-hidden "ws-one" t)
     ;; Assert.
@@ -1021,8 +998,6 @@ A reader that hand-rolls the defaulting reads the view a second time and fails h
 (ert-deftest agent-repl-verbs-show-lands-on-the-shown-workspace ()
   "An accepted show switches to the workspace brought back."
   (agent-repl-test-verbs--with nil
-    ;; Arrange.
-    (setq agent-repl-test-verbs--drawn '("ws-zero"))
     ;; Act.
     (agent-repl-verb-set-hidden "ws-one" nil)
     ;; Assert.
