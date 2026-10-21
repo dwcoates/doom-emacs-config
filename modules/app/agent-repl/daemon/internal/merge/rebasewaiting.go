@@ -252,7 +252,7 @@ func (r *run) standDownBackground(ctx context.Context) {
 func (o *orchestrator) registerBackground(r *run) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.draining || o.runsByWorkspace[r.ws] != nil || o.inChainLocked(r.repo, r.ws) || o.transferred[r.ws] {
+	if o.draining || o.runsByWorkspace[r.ws] != nil || o.inChainLocked(r.repo, r.ws) || o.isTakenAwayLocked(r.ws) {
 		return false
 	}
 	o.runsByWorkspace[r.ws] = r

@@ -1741,3 +1741,117 @@ func TestTheQueueTabIsNotDrawnWhenAnAsyncMergesRequesterCannotBeRead(t *testing.
 		t.Fatal("viewQueue drew a merge whose requester could not be read")
 	}
 }
+
+// TestADequeueDecidesAgainstASuspensionUnderOneLock covers every way an
+// abandonment meets a suspension: decided first it ends the run; after a
+// suspension this daemon takes back, it waits for that take-back; after one
+// that hands the merge on, it is refused.
+func TestADequeueDecidesAgainstASuspensionUnderOneLock(t *testing.T) {
+	tests := []struct {
+		name string
+		// run registers a live run; suspended marks it suspended by it.
+		run       bool
+		suspended *suspension
+		// away marks the workspace taken away by it.
+		away *suspension
+		// abandoned is an abandonment already on the run, recorded is one
+		// already left for the take-back.
+		abandoned, recorded AbandonCause
+		wantErr             bool
+		wantAbandoned       AbandonCause
+		wantRecorded        AbandonCause
+		wantRecord          string
+	}{
+		{name: "a run no suspension took is abandoned", run: true,
+			wantAbandoned: CauseUserDrop, wantRecord: "abandoning a running merge"},
+		{name: "the first abandonment of a run stands", run: true, abandoned: CauseWorkspaceClosed,
+			wantAbandoned: CauseWorkspaceClosed, wantRecord: "abandoning a running merge"},
+		{name: "a run a pause took is ended at its take-back", run: true, suspended: &suspendPause, away: &suspendPause,
+			wantRecorded: CauseUserDrop, wantRecord: "a suspension took the merge first; the abandonment ends it at its take-back"},
+		{name: "a merge whose run let go to a pause is ended at its take-back", away: &suspendPause,
+			wantRecorded: CauseUserDrop, wantRecord: "a suspension took the merge first; the abandonment ends it at its take-back"},
+		{name: "the first abandonment left for a take-back stands", away: &suspendPause, recorded: CauseWorkspaceClosed,
+			wantRecorded: CauseWorkspaceClosed, wantRecord: "a suspension took the merge first; the abandonment ends it at its take-back"},
+		{name: "a run the daemon's exit took is refused", run: true, suspended: &suspendExit,
+			wantErr: true, wantRecord: "refused to abandon a merge a suspension handed on"},
+		{name: "a run a transfer took is refused", run: true, suspended: &suspendTransfer, away: &suspendTransfer,
+			wantErr: true, wantRecord: "refused to abandon a merge a suspension handed on"},
+		{name: "a merge a transfer moved away is refused", away: &suspendTransfer,
+			wantErr: true, wantRecord: "refused to abandon a merge a suspension handed on"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			var r *run
+			if tc.run {
+				r = liveRun(t, h, theWorkspace)
+				close(r.finished)
+			} else {
+				forgetTakeBackAtCleanup(t, h, theWorkspace)
+			}
+			h.o.mu.Lock()
+			if tc.suspended != nil {
+				r.suspendLocked(*tc.suspended)
+			}
+			if tc.away != nil {
+				h.o.takenAway[theWorkspace] = *tc.away
+			}
+			if tc.abandoned != "" {
+				r.abandonedBy = tc.abandoned
+			}
+			if tc.recorded != "" {
+				h.o.abandonsAtTakeBack[theWorkspace] = tc.recorded
+			}
+			h.o.mu.Unlock()
+
+			// Act.
+			err := h.o.dequeue(context.Background(), theWorkspace, CauseUserDrop)
+
+			// Assert.
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("dequeue = %v, want an error %v", err, tc.wantErr)
+			}
+			h.o.mu.Lock()
+			recorded := h.o.abandonsAtTakeBack[theWorkspace]
+			var abandoned AbandonCause
+			if r != nil {
+				abandoned = r.abandonedBy
+			}
+			h.o.mu.Unlock()
+			if abandoned != tc.wantAbandoned || recorded != tc.wantRecorded {
+				t.Fatalf("abandoned %q and left for the take-back %q, want %q and %q", abandoned, recorded, tc.wantAbandoned, tc.wantRecorded)
+			}
+			if !loggedLike(h, logLike{level: "info", op: "daemon.merge.abandon", text: tc.wantRecord, context: map[string]string{"workspace": string(theWorkspace)}}) {
+				t.Fatalf("no info record %q of the workspace: %v", tc.wantRecord, h.logs.Records())
+			}
+		})
+	}
+}
+
+// TestADequeueOfARunSuspendedWithNoTakeBackRecordedPanics covers the
+// invariant every suspension this daemon takes back keeps: it marks the
+// workspace taken away.
+func TestADequeueOfARunSuspendedWithNoTakeBackRecordedPanics(t *testing.T) {
+	// Arrange: a run a pause took, with no take-back mark.
+	h := newHarness(t)
+	r := liveRun(t, h, theWorkspace)
+	h.o.mu.Lock()
+	r.suspendLocked(suspendPause)
+	h.o.mu.Unlock()
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("dequeue coped with a suspended run that has no take-back")
+		}
+		h.o.mu.Lock()
+		_, recorded := h.o.abandonsAtTakeBack[theWorkspace]
+		h.o.mu.Unlock()
+		if recorded {
+			t.Fatal("the violated invariant left an abandonment behind")
+		}
+	}()
+
+	// Act.
+	_ = h.o.dequeue(context.Background(), theWorkspace, CauseUserDrop)
+}

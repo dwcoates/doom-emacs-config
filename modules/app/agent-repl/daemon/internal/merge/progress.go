@@ -408,7 +408,7 @@ func (r *run) withdrawBoundaryStop() bool {
 	default:
 	}
 	r.stopAtBoundary = false
-	delete(r.o.transferred, r.ws)
+	delete(r.o.takenAway, r.ws)
 	return true
 }
 
@@ -420,7 +420,7 @@ func (r *run) withdrawBoundaryStop() bool {
 func (r *run) stopAtStepBoundary() bool {
 	r.o.mu.Lock()
 	defer r.o.mu.Unlock()
-	if !r.stopAtBoundary || r.suspending {
+	if !r.stopAtBoundary || r.suspending || r.abandonedBy != "" {
 		return false
 	}
 	r.suspendLocked(suspendRestart)

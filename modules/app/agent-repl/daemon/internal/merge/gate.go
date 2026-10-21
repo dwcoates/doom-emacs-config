@@ -240,7 +240,7 @@ func (g *gateRun) unrun(ctx context.Context, err error) error {
 		g.cut(ctx, why.by, why.gateRerun)
 	} else if r.o.isDraining() || errors.Is(err, errMergeStopping) {
 		g.cut(ctx, suspendExit.by, suspendExit.gateRerun)
-	} else if cause, abandoned := abandonCauseOf(ctx); abandoned {
+	} else if cause := r.abandonedFor(); cause != "" {
 		g.cut(ctx, "the merge's abandonment ("+string(cause)+")", "the merge ends, so it does not run again")
 	} else if ctx.Err() != nil {
 		g.cut(ctx, "its run's cancellation ("+context.Cause(ctx).Error()+")", "the merge ends, so it does not run again")

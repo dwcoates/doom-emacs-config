@@ -169,10 +169,17 @@ type orchestrator struct {
 	// keyed by workspace: the admission pump runs each from its record, ahead
 	// of anything waiting in its repository's line (Recover, startResumed).
 	resumes map[ids.WorkspaceID]progressDoc
-	// transferred are the workspaces a handover moved to another daemon:
-	// their merges are that daemon's, and this one admits nothing of them
-	// (transfer.go). A take-back clears the mark.
-	transferred map[ids.WorkspaceID]bool
+	// takenAway are the workspaces a suspension took the merges of
+	// (suspendFor), keyed to that suspension: a handover moved them to
+	// another daemon, or a pause, a restart, a race or the power is holding
+	// them until their take-back (AdoptWorkspace) clears the mark. This
+	// daemon admits nothing of them meanwhile (transfer.go).
+	takenAway map[ids.WorkspaceID]suspension
+	// abandonsAtTakeBack are the abandonments that reached a merge after a
+	// suspension took it: the suspension stands, and the take-back that
+	// clears takenAway drops the merge instead of resuming it. Recorded and
+	// consumed under the same lock as takenAway (dequeue, AdoptWorkspace).
+	abandonsAtTakeBack map[ids.WorkspaceID]AbandonCause
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
 	// admissions counts the admission steps in flight -- the store reads and
@@ -288,32 +295,33 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		deps.Home = home
 	}
 	o := &orchestrator{
-		deps:            deps,
-		lockDir:         filepath.Join(deps.StateDir, "merge-locks"),
-		facts:           map[ids.WorkspaceID]MergeFacts{},
-		running:         map[wsm.RepoKey]*run{},
-		chains:          map[wsm.RepoKey][]*run{},
-		chainSignals:    map[wsm.RepoKey]chan struct{}{},
-		targetTips:      map[wsm.RepoKey]string{},
-		overtakings:     map[wsm.RepoKey]*overtaking{},
-		testTurns:       map[wsm.RepoKey]*turnLine{},
-		waitingPass:     map[wsm.RepoKey]bool{},
-		waitingAgain:    map[wsm.RepoKey]bool{},
-		repoLocks:       map[wsm.RepoKey]*repoLock{},
-		kicked:          map[wsm.RepoKey]bool{},
-		displaces:       map[ids.WorkspaceID]bool{},
-		runsByWorkspace: map[ids.WorkspaceID]*run{},
-		requested:       map[ids.WorkspaceID]*requestWait{},
-		ledgerOf:        map[ids.WorkspaceID]ids.LeaseID{},
-		originsOf:       map[ids.WorkspaceID]*mergeOrigin{},
-		heads:           newHeadBook(),
-		picks:           map[ids.WorkspaceID]*pick{},
-		resumes:         map[ids.WorkspaceID]progressDoc{},
-		transferred:     map[ids.WorkspaceID]bool{},
-		offers:          map[ids.WorkspaceID]bool{},
-		repoOf:          map[ids.WorkspaceID]wsm.RepoKey{},
-		pumping:         map[wsm.RepoKey]bool{},
-		events:          newQueueEvents(),
+		deps:               deps,
+		lockDir:            filepath.Join(deps.StateDir, "merge-locks"),
+		facts:              map[ids.WorkspaceID]MergeFacts{},
+		running:            map[wsm.RepoKey]*run{},
+		chains:             map[wsm.RepoKey][]*run{},
+		chainSignals:       map[wsm.RepoKey]chan struct{}{},
+		targetTips:         map[wsm.RepoKey]string{},
+		overtakings:        map[wsm.RepoKey]*overtaking{},
+		testTurns:          map[wsm.RepoKey]*turnLine{},
+		waitingPass:        map[wsm.RepoKey]bool{},
+		waitingAgain:       map[wsm.RepoKey]bool{},
+		repoLocks:          map[wsm.RepoKey]*repoLock{},
+		kicked:             map[wsm.RepoKey]bool{},
+		displaces:          map[ids.WorkspaceID]bool{},
+		runsByWorkspace:    map[ids.WorkspaceID]*run{},
+		requested:          map[ids.WorkspaceID]*requestWait{},
+		ledgerOf:           map[ids.WorkspaceID]ids.LeaseID{},
+		originsOf:          map[ids.WorkspaceID]*mergeOrigin{},
+		heads:              newHeadBook(),
+		picks:              map[ids.WorkspaceID]*pick{},
+		resumes:            map[ids.WorkspaceID]progressDoc{},
+		takenAway:          map[ids.WorkspaceID]suspension{},
+		abandonsAtTakeBack: map[ids.WorkspaceID]AbandonCause{},
+		offers:             map[ids.WorkspaceID]bool{},
+		repoOf:             map[ids.WorkspaceID]wsm.RepoKey{},
+		pumping:            map[wsm.RepoKey]bool{},
+		events:             newQueueEvents(),
 	}
 	// EVERY WRITE THAT ADDS OR REMOVES A QUEUE ROW REPUBLISHES THE ROSTER'S
 	// QUEUE (rosterqueue.go): the orchestrator only ever writes through the

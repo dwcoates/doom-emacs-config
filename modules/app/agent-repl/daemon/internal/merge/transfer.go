@@ -84,10 +84,18 @@ type suspension struct {
 	// stepBoundary asks a run that began its steps to finish the step in
 	// flight and let go at the next boundary, rather than at once.
 	stepBoundary bool
+	// handedOn reports that the suspension hands the merge to whoever owns it
+	// next -- another daemon, or the next boot -- rather than to this
+	// daemon's own take-back (AdoptWorkspace).
+	handedOn bool
 }
 
+// takenBack reports whether this daemon takes a merge the suspension took
+// back itself, so an abandonment arriving after it ends the merge here.
+func (s suspension) takenBack() bool { return !s.handedOn }
+
 var (
-	suspendTransfer = suspension{op: "daemon.merge.transfer", cause: errHandedOver,
+	suspendTransfer = suspension{op: "daemon.merge.transfer", cause: errHandedOver, handedOn: true,
 		moved:     "a merge is suspended at a stopping point for its workspace's transfer; the successor resumes it at the step it recorded",
 		by:        "its workspace's transfer",
 		resumes:   "the successor resumes it at the step it recorded",
@@ -104,7 +112,7 @@ var (
 		gateRerun: "it runs again from its start once the restart finished"}
 	// suspendExit is the daemon's exit (Drain). Its records are the drain's
 	// own, so it is never handed to suspendFor and says nothing on moving.
-	suspendExit = suspension{op: "daemon.merge.drain", cause: errDaemonExiting,
+	suspendExit = suspension{op: "daemon.merge.drain", cause: errDaemonExiting, handedOn: true,
 		by:        "the daemon's exit",
 		resumes:   "the next boot resumes it at the step it recorded",
 		gateRerun: "it runs again from its start when the next boot resumes the merge"}
@@ -178,25 +186,28 @@ var errRestarting = errors.New("merge: the workspace is restarting; the merge is
 func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why suspension) error {
 	op := why.op
 	o.mu.Lock()
-	o.transferred[ws] = true
+	o.takenAway[ws] = why
 	wait := o.requested[ws]
 	delete(o.requested, ws)
 	r, running := o.runsByWorkspace[ws]
 	mark, terminal := o.terminals[ws]
+	// AN ABANDONED RUN IS ENDING (dequeue): no suspension takes it, and it
+	// is waited for as a terminal is.
+	abandoned := running && r.abandonedBy != ""
 	// A RESTART WAITS FOR THE STEP IN FLIGHT (owner ruling, 2026-10-10). A
 	// run that began its steps is asked to stop at its next step boundary and
 	// goes on until it gets there; a transfer, and a run still only waiting
 	// for its workspace, is suspended at once. The ask and the run's own
 	// beginSteps are decided under this one lock, so a run that begins its
 	// steps right now either sees the ask or is seen executing here.
-	atBoundary := running && !terminal && why.stepBoundary
+	atBoundary := running && !terminal && !abandoned && why.stepBoundary
 	if atBoundary {
 		r.stopAtBoundary = true
 		// A RUN IDLING BETWEEN STEPS in its chain stands at a boundary now:
 		// it is suspended at once rather than waited for.
 		atBoundary = r.executing && !r.idling
 	}
-	if running && !terminal && !atBoundary {
+	if running && !terminal && !abandoned && !atBoundary {
 		r.suspendLocked(why)
 	}
 	o.mu.Unlock()
@@ -214,19 +225,21 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 	}
 	fields["lease"] = string(r.lease.ID)
 	bound := o.terminalDrainBound()
+	if abandoned {
+		return o.awaitOwnEnd(log, op, ws, withField(fields, "cause", string(r.abandonedFor())), r.finished, ownEnd{
+			refusal: "merge: the abandoned merge of %s did not end within %s",
+			late:    "an abandoned merge did not end before the suspension's bound; the suspension is refused",
+			ended:   "the merge was abandoned before the suspension took it; nothing is left to suspend",
+		})
+	}
 	if terminal {
 		// A RUN IN ITS TERMINAL FINISHES HERE: its teardown is short and
 		// local, and what it releases is the merge's end, not a step to move.
-		select {
-		case <-mark.done:
-		case <-time.After(bound):
-			err := fmt.Errorf("merge: the merge of %s did not finish its terminal within %s", ws, bound)
-			log.Error(op, "a merge in its terminal did not finish before the transfer's bound; the transfer is refused", withField(fields, "error", err.Error()))
-			return err
-		}
-		o.forgetMoved(ws)
-		log.Info(op, "a merge finished its terminal before its workspace moved", fields)
-		return nil
+		return o.awaitOwnEnd(log, op, ws, fields, mark.done, ownEnd{
+			refusal: "merge: the merge of %s did not finish its terminal within %s",
+			late:    "a merge in its terminal did not finish before the transfer's bound; the transfer is refused",
+			ended:   "a merge finished its terminal before its workspace moved",
+		})
 	}
 	if atBoundary {
 		// NO TIMER: the boundary comes when the step in flight ends, however
@@ -276,6 +289,29 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 	return nil
 }
 
+// ownEnd is what awaitOwnEnd says of one way a run ends by itself: the
+// refusal's error (formatted with the workspace and the bound), the record of
+// a run that outlived the bound, and the record of one that ended.
+type ownEnd struct{ refusal, late, ended string }
+
+// awaitOwnEnd waits, within the terminal drain's bound, for a run a
+// suspension leaves to end by itself -- one in its terminal, or abandoned --
+// and forgets what this daemon remembers of its merges once it has. A run
+// still going at the bound refuses the suspension, recorded at ERROR.
+func (o *orchestrator) awaitOwnEnd(log dlog.Logger, op string, ws ids.WorkspaceID, fields dlog.Context, done <-chan struct{}, says ownEnd) error {
+	bound := o.terminalDrainBound()
+	select {
+	case <-done:
+	case <-time.After(bound):
+		err := fmt.Errorf(says.refusal, ws, bound)
+		log.Error(op, says.late, withField(fields, "error", err.Error()))
+		return err
+	}
+	o.forgetMoved(ws)
+	log.Info(op, says.ended, fields)
+	return nil
+}
+
 // forgetMoved drops what this daemon remembers of a workspace's merges in
 // memory: the successor owns them from here, through their durable rows.
 func (o *orchestrator) forgetMoved(ws ids.WorkspaceID) {
@@ -295,9 +331,6 @@ func (o *orchestrator) forgetMoved(ws ids.WorkspaceID) {
 // that did not land.
 func (o *orchestrator) AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error {
 	const op = "daemon.merge.adopt"
-	o.mu.Lock()
-	delete(o.transferred, ws)
-	o.mu.Unlock()
 	queues, err := o.deps.DB.AllMergeQueues(ctx)
 	if err != nil {
 		o.deps.Log.Global().Error(op, "could not read the merge queues to take the workspace's merges", dlog.Context{
@@ -317,6 +350,22 @@ func (o *orchestrator) AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) e
 		}
 	}
 	sort.Slice(repos, func(i, j int) bool { return repos[i] < repos[j] })
+	// THE MARK CLEARS WITH THE ABANDONMENT IT HELD, in one lock and only once
+	// the merges are back: a dequeue either saw the mark and left its
+	// abandonment here, or finds the merge as it stands now -- resuming, or
+	// waiting in line -- and ends it there itself.
+	o.mu.Lock()
+	delete(o.takenAway, ws)
+	cause, abandoned := o.abandonsAtTakeBack[ws]
+	delete(o.abandonsAtTakeBack, ws)
+	o.mu.Unlock()
+	if abandoned {
+		o.deps.Log.Global().Info(op, "an abandonment that reached the merge while a suspension held it ends the merge at its take-back", dlog.Context{
+			"workspace": string(ws), "cause": string(cause)})
+		if err := o.dequeue(ctx, ws, cause); err != nil {
+			return err
+		}
+	}
 	for _, repo := range repos {
 		if err := o.republishQueue(ctx, repo); err != nil {
 			return err
@@ -333,5 +382,12 @@ func (o *orchestrator) AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) e
 func (o *orchestrator) movedAway(ws ids.WorkspaceID) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.transferred[ws]
+	return o.isTakenAwayLocked(ws)
+}
+
+// isTakenAwayLocked reports whether a suspension took ws's merges and their
+// take-back has not cleared the mark yet. Callers hold o.mu.
+func (o *orchestrator) isTakenAwayLocked(ws ids.WorkspaceID) bool {
+	_, away := o.takenAway[ws]
+	return away
 }

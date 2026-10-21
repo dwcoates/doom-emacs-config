@@ -3163,3 +3163,39 @@ func (f *fakeTimings) all() []string {
 	defer f.mu.Unlock()
 	return append([]string(nil), f.got...)
 }
+
+// liveRun registers a run of ws in the orchestrator, as a running merge
+// stands, without starting it: a test sets the suspension and abandonment
+// state it is about and closes finished where the run would end. The run is
+// unregistered at cleanup.
+func liveRun(t *testing.T, h *harness, ws ids.WorkspaceID) *run {
+	t.Helper()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	r := h.o.buildRun(ctx, cancel, h.repoKey(), ws, h.clock().UnixMilli())
+	h.o.mu.Lock()
+	h.o.runsByWorkspace[ws] = r
+	h.o.repoOf[ws] = r.repo
+	h.o.mu.Unlock()
+	forgetTakeBackAtCleanup(t, h, ws)
+	t.Cleanup(func() {
+		cancel(nil)
+		h.o.mu.Lock()
+		if h.o.runsByWorkspace[ws] == r {
+			delete(h.o.runsByWorkspace, ws)
+		}
+		h.o.mu.Unlock()
+	})
+	return r
+}
+
+// forgetTakeBackAtCleanup drops, at cleanup, the take-back mark and any
+// abandonment left for it that a test set on ws.
+func forgetTakeBackAtCleanup(t *testing.T, h *harness, ws ids.WorkspaceID) {
+	t.Helper()
+	t.Cleanup(func() {
+		h.o.mu.Lock()
+		delete(h.o.takenAway, ws)
+		delete(h.o.abandonsAtTakeBack, ws)
+		h.o.mu.Unlock()
+	})
+}

@@ -634,7 +634,9 @@ func (r *run) enterTerminal(owed string) {
 	// registration that gets in while draining is false is IN the drain's
 	// snapshot and will be waited for, so its durable work is safe; one that
 	// arrives after is not, and nothing holds the state client open for it.
-	r.suspending = r.suspending || o.draining
+	if o.draining {
+		r.suspendLocked(suspendExit)
+	}
 	o.terminals[r.ws] = &terminal{ws: r.ws, done: make(chan struct{}), owed: owed, lease: r.lease.ID}
 }
 
@@ -1279,30 +1281,39 @@ func (a *abandonment) Error() string {
 	return fmt.Sprintf("merge: the merge was abandoned (%s)", a.cause)
 }
 
-// abandonCauseOf answers the abandon cause a run's context was cancelled with,
-// and false when it was not abandoned.
-func abandonCauseOf(ctx context.Context) (AbandonCause, bool) {
-	var a *abandonment
-	if errors.As(context.Cause(ctx), &a) {
-		return a.cause, true
-	}
-	return "", false
+// abandonedFor answers the cause an abandonment ended the run with, empty
+// while none did.
+func (r *run) abandonedFor() AbandonCause {
+	r.o.mu.Lock()
+	defer r.o.mu.Unlock()
+	return r.abandonedBy
 }
 
-// abandonRunning ABANDONS a merge that is running, whatever step it is on. Its context is cancelled
-// with the cause, whatever phase it is in stops, and it ends on the abandoned
-// terminal through the one release path; this returns once that is done, so
-// the caller's answer is the released state.
+// abandonRunning ABANDONS a merge that is running, whatever step it is on,
+// once dequeue recorded the abandonment on it (run.abandonedBy). Its context
+// is cancelled with the cause, whatever phase it is in stops, and it ends on
+// the abandoned terminal through the one release path; this returns once that
+// is done, so the caller's answer is the released state. Only the daemon's
+// exit takes an abandoned run instead, and the abandonment is then refused:
+// the next boot resumes the merge.
 func (o *orchestrator) abandonRunning(ctx context.Context, r *run, cause AbandonCause) error {
-	o.log(ctx, r.ws).Info("daemon.merge.abandon", "abandoning a running merge", dlog.Context{
+	const op = "daemon.merge.abandon"
+	log := o.log(ctx, r.ws)
+	log.Info(op, "abandoning a running merge", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": string(cause), "step": string(r.currentStep())})
 	r.cancel(&abandonment{cause: cause})
 	select {
 	case <-r.finished:
-		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+	if why, suspended := r.suspendedFor(); suspended {
+		err := fmt.Errorf("merge: %s took the merge of %s before it ended; %s", why.by, r.ws, why.resumes)
+		log.Info(op, "the abandoned merge was suspended before it ended; the abandonment is refused", dlog.Context{
+			"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": string(cause), "by": why.by, "error": err.Error()})
+		return err
+	}
+	return nil
 }
 
 // abandonTerminal ends a RUNNING merge that was taken out: the abandoned

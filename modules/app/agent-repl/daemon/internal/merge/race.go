@@ -143,7 +143,7 @@ func (o *orchestrator) claimRace(ctx context.Context, r *run, base string) {
 			"workspace": string(r.ws), "head": string(head.ws)})
 		return
 	}
-	if _, ending := o.terminals[head.ws]; ending {
+	if _, ending := o.terminals[head.ws]; ending || head.abandonedBy != "" {
 		o.mu.Unlock()
 		log.Debug(op, "the head is already ending; the merge behind it heads the queue once it has left", dlog.Context{
 			"workspace": string(r.ws), "head": string(head.ws)})
@@ -181,7 +181,10 @@ func (o *orchestrator) claimRace(ctx context.Context, r *run, base string) {
 		"workspace": string(head.ws), "winner": string(r.ws), "tip": tip})
 	settle := context.WithoutCancel(ctx)
 	lost := suspension{op: op, cause: &raceLost{winner: r.ws},
-		moved: "the merge that lost the race to land is suspended at the step it recorded; it resumes there once it heads the queue again"}
+		moved:     "the merge that lost the race to land is suspended at the step it recorded; it resumes there once it heads the queue again",
+		by:        "the race to land it lost",
+		resumes:   "it resumes at the step it recorded once it heads the queue again",
+		gateRerun: "it runs again from its start once the merge heads the queue again"}
 	if err := o.suspendFor(settle, head.ws, lost); err != nil {
 		log.Error(op, "could not suspend the head that lost the race to land", dlog.Context{
 			"workspace": string(r.ws), "head": string(head.ws), "error": err.Error()})
