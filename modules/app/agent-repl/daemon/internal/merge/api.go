@@ -1,21 +1,25 @@
-// Package merge is the merge orchestrator: a per-repo queue, two methods,
-// tabs, the lease, the test gate, the briefs and the ledger.
+// Package merge is the deploy queue (still spelled "merge" in code and on the
+// wire): a per-repo queue, the stages a repository's deploy config names, tabs,
+// the lease, the test gate, the briefs and the ledger.
 //
-// A MERGE RUNS IN THE WORKSPACE THAT ASKED FOR IT (owner, 2026-09-30). No
-// workspace is ever created for a merge: the requesting workspace's feed
-// carries the bubble, its footer and roster row carry the status, and its own
-// session does the conflict resolution and the test fixing. What it merges is
-// the request's SOURCE: its own branch, another workspace's, a branch that is
-// no workspace, or its own branch already merged upstream.
+// A DEPLOY RUNS IN THE WORKSPACE THAT ASKED FOR IT (owner, 2026-09-30). No
+// workspace is ever created for one: the requesting workspace's feed carries
+// the bubble, its footer and roster row carry the status, and its own session
+// runs the prompt hooks, the conflict resolution and the test fixing. What it
+// deploys is the request's SOURCE: its own branch, another workspace's, or a
+// branch that is no workspace.
 //
-// The two methods are keyed by gitclient.SameRepo(target, daemonCheckout). The
-// Emacs repo runs pre-prompt, rebase (with conflict resolution), tests (with
-// fixing), the non-fast-forward merge commit and post-prompt; EVERY OTHER repo
-// runs pre-prompt and post-prompt. A branch already merged upstream runs
-// updating main and post-prompt. Nothing parks: a merge that gives up FAILS
-// and hands the workspace back. Briefs are read from prompts/ AT USE TIME. The
-// displaced user turn is captured durably and resubmitted EXACTLY ONCE at
-// lease release. See docs/protobuf-design/merge-landing.md.
+// WHAT A DEPLOY DOES IS THE REPOSITORY'S. Its `.agent-repl/deploy.yaml`
+// (repoconfig.v1.DeployConfig, read at every use by deployconfig) names three
+// stages: pre-deploy hooks and, optionally, the built-in local merge (rebase
+// with conflict resolution, tests with fixing, the non-fast-forward merge
+// commit and its version tag); the deploy hook, which a repository's deploy
+// hold skips; and the post-deploy hooks. Every hook is a script, run from the
+// repository's main checkout root, or a prompt, run by the deploying
+// workspace's own session. Any failure FAILS the deploy and hands the
+// workspace back to investigate; nothing parks. The displaced user turn is
+// captured durably and resubmitted EXACTLY ONCE at lease release. See
+// docs/protobuf-design/deploy-queue.md.
 package merge
 
 import (
