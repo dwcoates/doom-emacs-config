@@ -55,8 +55,36 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 		}
 	}
 
+	// A CONTEXT CUT IS A TURN, AND IT MEETS THE SESSION AS A PROMPT DOES: a
+	// standing cold gate refuses it by the gate's own name, and a session that
+	// does not serve yet holds it until the session comes up (Submit). It used
+	// to go to the shim regardless, where its StartTurn waited for a main
+	// watch that a failed start never opens: on 2026-10-20 a /compact sent to
+	// a session whose start had timed out held the workspace's one shim call
+	// with no end, and every stop and restart after it waited behind it.
+	cut := act.Kind == ActClear || act.Kind == ActCompact
+	if cut && q.deps.ColdGate != nil {
+		if detail, gated := q.deps.ColdGate(ws); gated {
+			refusalLevel(ctx, log, log.Info)(opAct, "the session is parked at its cold gate, so the context cut is refused by the gate's own name",
+				dlog.Context{"detail": detail})
+			return &ColdGateRefusal{Detail: detail}
+		}
+	}
+
 	d := q.lockDelivery(ws)
 	defer d.unlock()
+
+	if _, shim := q.deps.Client(ws); cut && shim {
+		if kind, why, waiting := q.sessionWait(ws); waiting {
+			sub := heldActSubmission(ws, act)
+			if _, err := q.hold(ctx, sub, "", &leaseHold{kind: kind}, log); err != nil {
+				return err
+			}
+			log.Info(opAct, "the workspace's session does not serve yet; the context cut is held until it comes up",
+				dlog.Context{"held_turn": string(sub.Turn), "hold": kind.String(), "why": why})
+			return nil
+		}
+	}
 
 	running, ahead, err := q.whatIsAhead(ctx, d, log)
 	if err != nil {
