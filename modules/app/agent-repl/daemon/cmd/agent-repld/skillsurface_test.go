@@ -21,13 +21,26 @@ const moduleDir = "../../.."
 // codeSpan is one markdown inline code span.
 var codeSpan = regexp.MustCompile("`([^`]+)`")
 
+// fencedBlock is one fenced markdown code block, whose own backticks are no
+// inline span's delimiters. Each of its lines is read as a span of its own.
+var fencedBlock = regexp.MustCompile("(?ms)^[ \t]*```[^\n]*\n(.*?)^[ \t]*```[ \t]*$")
+
 // commandMention is a noun and its verb at the start of a code span, or after
 // `agent-repld `.
 var commandMention = regexp.MustCompile(`(?:^|agent-repld )(workspace|merge-queue|editor|runtime) ([a-z][a-z-]*)`)
 
-// mentionedCommands answers the "noun verb" commands TEXT's code spans name.
+// mentionedCommands answers the "noun verb" commands TEXT's code spans and
+// fenced code lines name.
 func mentionedCommands(text string) []string {
 	var out []string
+	for _, block := range fencedBlock.FindAllStringSubmatch(text, -1) {
+		for _, line := range strings.Split(block[1], "\n") {
+			for _, m := range commandMention.FindAllStringSubmatch(strings.TrimSpace(line), -1) {
+				out = append(out, m[1]+" "+m[2])
+			}
+		}
+	}
+	text = fencedBlock.ReplaceAllString(text, "")
 	for _, span := range codeSpan.FindAllStringSubmatch(text, -1) {
 		for _, m := range commandMention.FindAllStringSubmatch(span[1], -1) {
 			out = append(out, m[1]+" "+m[2])
@@ -65,6 +78,8 @@ func TestMentionedCommandsReadsCodeSpans(t *testing.T) {
 		{name: "a noun alone names no command", text: "`agent-repld workspace` prints the usage", want: nil},
 		{name: "a noun inside prose is no command", text: "the workspace merge lands it", want: nil},
 		{name: "a noun mid-span is no command", text: "`-topology child -owner workspace x`", want: nil},
+		{name: "a fenced block's backticks pair no span", text: "```yaml\nkey: x\n```\nthen `workspace kill WS`", want: []string{"workspace kill"}},
+		{name: "a command on a fenced line", text: "```sh\nagent-repld runtime health\n```", want: []string{"runtime health"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1,7 +1,7 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status or list them all, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), hide or show a workspace, set its priority, retarget its parent, merge a workspace, open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended (mark it a one-shot); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever a child created with a note to its owner must be landed or closed by its owner; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
-argument-hint: "create | async-merge | prompt | status | list | set | merge | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe"
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status or list them all, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), hide or show a workspace, set its priority, retarget its parent, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended (mark it a one-shot); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+argument-hint: "create | async-merge | prompt | status | list | set | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 
@@ -50,11 +50,12 @@ Choose the combination from what the work needs:
 - A CHILD THAT DOES NOT FORK ITS OWNER is its owner's to arbitrate and land:
   give `-owner-notice` a plain-English note telling the owner what is coming
   and why. The owner is told with the daemon's addendum, and only the owner
-  lands it (`workspace merge`). Such a child is never a one-shot.
+  lands it (`workspace finished`). Such a child is never a one-shot.
 - A child that forks its owner has the owner's whole context and lands itself;
   it takes no notice.
 - `-one-shot -prompt TEXT` makes a workspace that finishes its commission
-  unattended and lands itself by the repository's own completion directive.
+  unattended and then runs `workspace finished here`, as the daemon's
+  completion directive tells it.
   Without `-one-shot`, `-prompt` is the opening prompt and the workspace stays
   open for the user.
 - **CRITICAL: Separate work ALWAYS starts in a created workspace.** Never cut a
@@ -73,6 +74,11 @@ Choose the combination from what the work needs:
   channel, the person or the thread it came from), with no prefix or suffix of
   your own.
 - Give `-priority` or `-model` only when the user named one.
+- `-pre-deploy-prompt TEXT`, `-pre-deploy-script PATH:SECONDS`,
+  `-post-deploy-prompt TEXT` and `-post-deploy-script PATH:SECONDS` (each
+  repeatable, kept in order) REPLACE the repository's hooks of that stage for
+  every deploy of the workspace; a stage given none runs the repository's.
+  Give them only when the user asked for that workspace's deploys to differ.
 - To hand uncommitted edits to the new workspace, snapshot them with
   `SHA=$(git stash create "<what>")` (which touches neither the working tree
   nor the shared stash stack) and open its prompt with "First, run
@@ -124,7 +130,7 @@ Choose the combination from what the work needs:
 - **ONE-SHOT.** When this workspace commits to finishing the REST of its work
   unattended (the user said "land it when done", or the remaining work needs
   no further input), run `workspace set here -one-shot`. The answer carries
-  the repository's completion directive: follow it when the work is done.
+  the daemon's completion directive: follow it when the work is done.
   `-not-one-shot` takes the mark back when the user re-engages. A child its
   owner lands cannot be marked.
 - **AWAITING CORRESPONDENCE.** When this workspace ends a turn to wait for
@@ -137,19 +143,95 @@ Choose the combination from what the work needs:
 - `-hidden` / `-shown`, `-priority`, and `-parent WS` / `-top-level` (a
   retarget, which re-applies the landing rules) set the rest.
 
-## Landing, opening, closing
+## Finishing, opening, closing
 
-- `workspace merge WS -placement back|front` lands WS's own branch where its
-  topology says. Run it on `here` to land this workspace (see
-  `/agent-repl-merge-queue` for when, and for the version increment a landing
-  on agent-repl's master carries), or on a child whose owner you are, after
-  reviewing its work against yours.
+- `workspace finished WS -placement back|front` says WS's work is done and
+  queues its DEPLOY, which its repository's deploy config decides (below). Run
+  it on `here` when this workspace is done (see `/agent-repl-merge-queue` for
+  when, and for the version increment a deploy onto a versioned main branch
+  carries), or on a child whose owner you are, after reviewing its work
+  against yours. WS closes once its deploy succeeds.
 - `workspace open WS` reopens a closed workspace.
 - `workspace close WS` closes a workspace whose work is done or abandoned; its
   worktree stays. `close here` closes this workspace once the current turn
   ends.
 - `workspace compact WS [-instructions TEXT]` compacts WS's conversation.
   Compact only when the user asked for it.
+
+## Deploying (`.agent-repl/deploy.yaml`)
+
+- **What a finished workspace's deploy does is its repository's, never the
+  caller's.** The repository commits `.agent-repl/deploy.yaml` at its main
+  checkout root. A repository with no such file refuses `workspace finished`
+  and `workspace async-merge` (`no_deploy_config`); a file that does not parse
+  or leaves a required field unset is refused naming the field
+  (`deploy_config_invalid`). The file is read at every deploy, so an edit
+  applies to the next one.
+- A deploy runs THREE STAGES in order, in the deploying workspace's own feed
+  bubble, one tab per hook:
+
+| stage | holds | runs |
+|---|---|---|
+| `pre_deploy` | `hooks` (a list), then the optional built-in `local_merge` | before anything lands |
+| `deploy` | one hook, optional | after the local merge landed |
+| `post_deploy` | `hooks` (a list) | last |
+
+- Every hook entry is `hook:` (exactly one of `script:` or `prompt:`) plus
+  `runs_for:` (`main: {}`, only when the deploy lands on the repository's main
+  branch in its main checkout, or `any_target: {}`, also when it lands in a
+  parent workspace's checkout).
+  - A **script** hook is `path:` (relative to the main checkout root) and
+    `timeout_seconds:`. It runs from the main checkout root, with
+    `AGENT_REPL_CALLING_WORKSPACE` (the deploying workspace's worktree),
+    `AGENT_REPL_DEPLOY_LEDGER` (the deploy's ledger) and
+    `AGENT_REPL_DEPLOY_STAGE` (`pre_deploy`, `deploy` or `post_deploy`) set.
+    Its tab shows the tail of its output, its exit and its log's path.
+  - A **prompt** hook is `text:`. It is sent to the deploying workspace's own
+    session, and to no other workspace, ever; its tab is that turn.
+- `local_merge:` is the built-in local landing: `tests:` names the test
+  runner (`agent_repl_suites: {script_path: ...}`), and `version_tag: {}`
+  makes every agent's deploy onto main carry a version increment and tag the
+  landing. Only a repository with a local merge races its queue.
+- **A failed hook fails the deploy**: a script that exits non-zero, runs past
+  its timeout or cannot start, or a prompt whose turn does not complete. The
+  workspace stays open and is handed the failure to investigate. A failure
+  after the local merge landed keeps the landing.
+- **Hooks act on the repository as it stands when they run** (its current
+  tip), not on a snapshot of the deploy that queued them. A script hook a
+  restart cut short runs again, so a script must bear running twice.
+- **A repository's deploy stage can be HELD** (`/agent-repl-runtime`,
+  `runtime deploy-hold`): its deploys still run `pre_deploy` (agent-repl's
+  merges still land on master) and `post_deploy`, and SKIP their deploy hook.
+  Releasing the hold runs a skipped script deploy hook once.
+- A deploy hook asks the runtime to roll out what landed with
+  `agent-repld runtime roll-out-landing -deploy "$AGENT_REPL_DEPLOY_LEDGER"`.
+- agent-repl's own config:
+
+```yaml
+pre_deploy:
+  local_merge:
+    tests:
+      agent_repl_suites:
+        script_path: modules/app/agent-repl/bin/test-all.sh
+    version_tag: {}
+deploy:
+  hook:
+    script:
+      path: modules/app/agent-repl/bin/deploy-landing.sh
+      timeout_seconds: 60
+  runs_for:
+    main: {}
+```
+
+- WHAT THE CONFIG DECIDES, AND WHAT THE DAEMON ALWAYS DOES:
+
+| configured per repository | fixed in the daemon |
+|---|---|
+| every pre-deploy, deploy and post-deploy hook, and each one's scope | the queue: its order, placement, pause, eviction and racing window |
+| whether a local merge runs, and its test runner | the local merge's own steps: rebase with conflict resolution, the test gate with fixing attempts, the non-fast-forward merge commit |
+| whether the repository is versioned (`version_tag`) | the version arithmetic and the tag's form |
+| the rollout, as a deploy hook calling `roll-out-landing` | when a requested rollout fires (after the deploy's report) |
+| | holding the deploy stage, the hand-back of a failure, closing the workspace on success, the bubble, footer and roster |
 
 ## Restarting, interrupting, selecting
 

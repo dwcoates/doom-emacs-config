@@ -1,7 +1,7 @@
 ---
 name: agent-repl-runtime
-description: 'Operate the agent-repl runtime — build it, bounce its backends, hard bounce everything including Emacs, roll a deploy out, hot-reload elisp into the running Emacs, check health and readiness, read logs, hold or release the merge queue''s rollouts, evaluate elisp in the running Emacs and read the answer back, arrange the sidebar, and send any unary request to the running daemon. Use whenever the user asks to build, deploy, bounce, hard bounce, restart, hot-reload, or poke agent-repl, or names one of the terms in this skill''s terminology table; whenever a hand-deployed build (a profiling build) must not be replaced by the next landing; whenever live editor state must be inspected or changed rather than reasoned about from source; and whenever the sidebar should be organized.'
-argument-hint: "<build|byte-compile|bounce|hard-bounce|deploy|hot-reload FILE...|call [-workspace DIR] METHOD ...|doctor|readiness|logs|rollouts hold|release|eval TEXT|sidebar> or a plain-English request"
+description: 'Operate the agent-repl runtime — build it, bounce its backends, hard bounce everything including Emacs, roll a deploy out, hot-reload elisp into the running Emacs, check health and readiness, read logs, hold or release a repository''s deploys, evaluate elisp in the running Emacs and read the answer back, arrange the sidebar, and send any unary request to the running daemon. Use whenever the user asks to build, deploy, bounce, hard bounce, restart, hot-reload, or poke agent-repl, or names one of the terms in this skill''s terminology table; whenever a hand-deployed build (a profiling build) must not be replaced by the next landing; whenever live editor state must be inspected or changed rather than reasoned about from source; and whenever the sidebar should be organized.'
+argument-hint: "<build|byte-compile|bounce|hard-bounce|deploy|hot-reload FILE...|call [-workspace DIR] METHOD ...|doctor|readiness|logs|deploy-hold hold|release|eval TEXT|sidebar> or a plain-English request"
 allowed-tools: Bash(~/.claude/skills/agent-repl-runtime/run.sh:*), Bash(~/.claude/skills/agent-repl-runtime/agent-repld:*)
 lineage_root: user.dodge.skills.agent-repl-runtime
 ---
@@ -72,12 +72,20 @@ These run through the INSTALLED front door,
 and refusals: `agent-repld runtime` and `agent-repld editor` with no verb print
 the usage.
 
-- `runtime rollouts hold` holds the merge queue's ROLLOUTS, daemon-wide and
-  durably: merges keep landing, but a landing no longer redeploys the running
-  runtime. Hold before hand-deploying a build that must stay running (a
-  profiling build); `runtime rollouts release` ends the hold, and releasing
-  deploys at once when the checkout is ahead of the running build. Whoever
-  holds the rollouts releases them when that work ends.
+- `runtime deploy-hold hold -repository here|DIR` holds ONE repository's
+  deploy stage, durably: its deploys keep running their pre-deploy stage
+  (agent-repl's merges keep landing on master) and their post-deploy hooks,
+  and skip their deploy hook (for agent-repl, the runtime's rollout). Hold
+  agent-repl before hand-deploying a build that must stay running (a
+  profiling build). `runtime deploy-hold release -repository here|DIR` ends
+  the hold and, when deploys skipped their hook meanwhile, runs a script
+  deploy hook once (a prompt deploy hook has no workspace to run in, and is
+  reported as not run). Whoever holds a repository releases it when that work
+  ends.
+- `runtime roll-out-landing [-deploy LEDGER]` is a deploy hook's call: with
+  the deploy's ledger (`$AGENT_REPL_DEPLOY_LEDGER`) the rollout fires once the
+  deploy has reported; with none it starts at once. NEVER run it by hand:
+  `deploy` is the rolling deploy.
 - `runtime health` prints the daemon's health and identity.
 
 ## Evaluating elisp in the running Emacs (`editor eval`)
