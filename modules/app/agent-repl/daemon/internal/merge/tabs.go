@@ -560,4 +560,3 @@ func committingTab(st tabState, subject string) *frontendv1.FeedMergeTab {
 	}
 	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Committing{Committing: inner}}
 }
-

@@ -1,12 +1,12 @@
 package merge
 
 import (
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"errors"
 	"reflect"
 	"slices"
 	"testing"
-	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"

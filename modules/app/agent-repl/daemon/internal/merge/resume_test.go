@@ -77,11 +77,11 @@ func interruptedAt(t *testing.T, h *harness, mutate func(*progressDoc)) {
 	doc := progressDoc{
 		Version: progressVersion, Step: TabQueue, Repo: string(h.repoKey()),
 		QueuedMS: queued, StartedMS: queued + 1,
-		Subject:   subjectDoc{Branch: "feature", Dir: h.sourceD, TargetDir: h.targetD, Closes: string(theWorkspace)},
-		Rounds:    map[string]int{TabQueue: 1},
-		Active:    roundDoc{Kind: TabQueue, N: 1, StartedMS: queued},
-		Open:      []roundDoc{{Kind: TabQueue, N: 1, StartedMS: queued}},
-		Facts:     factsDoc{Step: "enqueued"},
+		Subject: subjectDoc{Branch: "feature", Dir: h.sourceD, TargetDir: h.targetD, Closes: string(theWorkspace)},
+		Rounds:  map[string]int{TabQueue: 1},
+		Active:  roundDoc{Kind: TabQueue, N: 1, StartedMS: queued},
+		Open:    []roundDoc{{Kind: TabQueue, N: 1, StartedMS: queued}},
+		Facts:   factsDoc{Step: "enqueued"},
 	}
 	if mutate != nil {
 		mutate(&doc)

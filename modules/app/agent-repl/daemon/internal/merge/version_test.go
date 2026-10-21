@@ -25,10 +25,10 @@ func withVersion(v *wsm.VersionIncrement) wsm.MergeSource {
 
 func TestAVersionIncrementIsAcceptedExactlyWhereItBelongs(t *testing.T) {
 	tests := []struct {
-		name     string
+		name      string
 		versioned bool
 		by        Requester
-		version  *wsm.VersionIncrement
+		version   *wsm.VersionIncrement
 	}{
 		{name: "an agent's deploy onto a versioned repository's main with one", versioned: true, by: RequestedByAgent, version: aPatch()},
 		{name: "the user's deploy onto a versioned repository's main without one", versioned: true, by: RequestedByUser},

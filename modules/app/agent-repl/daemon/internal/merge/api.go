@@ -29,8 +29,8 @@ import (
 	"time"
 
 	"agent-repld/internal/cpugov"
-	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/deployconfig"
+	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"

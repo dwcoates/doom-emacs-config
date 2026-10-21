@@ -65,7 +65,9 @@ func TestAReleaseAnswersWhatRanForTheSkippedDeploys(t *testing.T) {
 		{name: "a prompt deploy hook", release: merge.DeployRelease{Kind: merge.ReleasePromptNotRun, Skipped: 1},
 			check: func(r *agentreplv1.UpdateDeployHoldSuccessReleased) bool { return r.GetPromptNotRun() != nil }},
 		{name: "no deploy hook", release: merge.DeployRelease{Kind: merge.ReleaseNoDeployHook, Skipped: 1, Detail: "none named"},
-			check: func(r *agentreplv1.UpdateDeployHoldSuccessReleased) bool { return r.GetNoDeployHook().GetDetail() == "none named" }},
+			check: func(r *agentreplv1.UpdateDeployHoldSuccessReleased) bool {
+				return r.GetNoDeployHook().GetDetail() == "none named"
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
