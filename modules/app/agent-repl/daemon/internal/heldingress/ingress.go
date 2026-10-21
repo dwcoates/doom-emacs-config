@@ -286,7 +286,9 @@ func (i *ingress) ingest(ctx context.Context, path string, sw *sweep) {
 
 	// The submission RE-DRIVES the attempt the client gave up on, so an
 	// already-accepted key is the expected answer, not an anomaly.
-	outcome, err := i.deps.Prompts.Submit(prompthandler.WithRedrive(ctx), record.ID, entry.said, entry.IdempotencyKey, entry.origin, nil, entry.delivery, nil)
+	submitCtx, cancel := context.WithTimeout(ctx, i.deps.SubmitBound)
+	outcome, err := i.deps.Prompts.Submit(prompthandler.WithRedrive(submitCtx), record.ID, entry.said, entry.IdempotencyKey, entry.origin, nil, entry.delivery, nil)
+	cancel()
 	// THE ANSWER IS RECORDED ONCE THE ENTRY IS GONE (announce, below): a
 	// reader that waits on the record finds the ingress already without it.
 	var announce func()

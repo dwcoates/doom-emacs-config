@@ -226,6 +226,29 @@ func TestARefusedEntryStaysAndHoldsBackItsWorkspacesLaterEntries(t *testing.T) {
 	}
 }
 
+// A SUBMISSION THAT NEVER ANSWERS ENDS AT ITS BOUND (2026-10-20: a re-driven
+// /compact waited with no end, holding its workspace's one shim call and every
+// sweep after it).
+func TestASubmissionThatNeverAnswersEndsAtItsBoundAndStays(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.submitBound = time.Millisecond
+	w.handler.hang["k-1"] = true
+	w.write("held_20260928T120001_a.json", "/work/one", "k-1", "/compact")
+	w.write("held_20260928T120002_b.json", "/work/two", "k-2", "elsewhere")
+
+	// Act
+	w.sweep(w.ingress())
+
+	// Assert
+	if got := w.keys(); !reflect.DeepEqual(got, []string{"k-1", "k-2"}) {
+		t.Fatalf("submitted keys = %v, want the hung k-1 ended and k-2 of another workspace after it", got)
+	}
+	if left := len(w.entries()); left != 1 {
+		t.Fatalf("entries left = %d, want the hung entry kept for a later sweep", left)
+	}
+}
+
 func TestARefusalIsRecordedOnceAtInfoAndItsRetriesAtDebug(t *testing.T) {
 	tests := []struct {
 		name      string

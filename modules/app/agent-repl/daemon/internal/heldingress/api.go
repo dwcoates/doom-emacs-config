@@ -83,6 +83,9 @@ type Deps struct {
 	// RetryCeiling caps the doubling retry delay of an entry the queue keeps
 	// refusing. Zero means DefaultRetryCeiling.
 	RetryCeiling time.Duration
+	// SubmitBound bounds one entry's submission. Zero means
+	// DefaultSubmitBound.
+	SubmitBound time.Duration
 	// QuarantineDir is where a malformed file is renamed to; empty means
 	// "quarantine" beneath Dir.
 	QuarantineDir string
@@ -107,6 +110,14 @@ const DefaultInterval = 250 * time.Millisecond
 // registered); retrying it every poll would re-run the submission and its
 // records four times a second for as long as the condition stands.
 const DefaultRetryCeiling = 10 * time.Second
+
+// DefaultSubmitBound bounds one entry's submission: the bound the editor
+// gives the same SubmitPrompt (agent-repl-connect-unary-timeout-seconds),
+// whose attempt the entry re-drives. Unbounded, a submission whose delivery
+// never answered held the workspace's one shim call and every sweep after it:
+// on 2026-10-20 a re-driven /compact waited on a session that never came up,
+// and every stop and restart of its workspace waited behind it.
+const DefaultSubmitBound = 10 * time.Second
 
 // Glob matches the entries the ingress ingests. A producer writes a
 // dot-prefixed temporary name and renames it into place, and the dot-prefixed
@@ -140,6 +151,9 @@ func New(deps Deps) (Ingress, error) {
 	}
 	if deps.RetryCeiling <= 0 {
 		deps.RetryCeiling = DefaultRetryCeiling
+	}
+	if deps.SubmitBound <= 0 {
+		deps.SubmitBound = DefaultSubmitBound
 	}
 	if deps.QuarantineDir == "" {
 		deps.QuarantineDir = filepath.Join(deps.Dir, "quarantine")
