@@ -5,7 +5,7 @@
 ;; WHAT IS LEFT, AND WHY SO LITTLE.  Workspace creation, naming, branch and
 ;; worktree management, close, finish and the whole merge machinery are the
 ;; DAEMON's now: `CreateWorkspace' names and creates everything,
-;; `CloseWorkspace' / `KillWorkspace' / `NukeWorkspace' / `MergeWorkspace'
+;; `CloseWorkspace' / `KillWorkspace' / `NukeWorkspace' / `FinishWorkspace'
 ;; own the rest, and `verbs.el' is the thin wrapper that calls them.  Emacs
 ;; runs no `git worktree add', names no branch, preflights no collision and
 ;; holds no merge state.

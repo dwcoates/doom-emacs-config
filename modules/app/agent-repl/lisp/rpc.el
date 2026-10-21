@@ -99,8 +99,8 @@
 (declare-function agent-repl-wire-decode-kill-workspace-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-nuke-workspace-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-nuke-workspace-response "wire-verbs" (alist))
-(declare-function agent-repl-wire-encode-merge-workspace-request "wire-verbs" (request))
-(declare-function agent-repl-wire-decode-merge-workspace-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-finish-workspace-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-finish-workspace-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-restart-workspace-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-restart-workspace-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-set-workspace-priority-request "wire-verbs" (request))
@@ -420,11 +420,11 @@ answer, not as a failure.")
   agent-repl-wire-decode-nuke-workspace-response
   "Destroy a workspace and its worktree.  A nuked row leaves the roster.")
 
-(agent-repl-rpc--defverb agent-repl-rpc-merge-workspace
-  "MergeWorkspace"
-  agent-repl-wire-encode-merge-workspace-request
-  agent-repl-wire-decode-merge-workspace-response
-  "Enqueue a workspace for merge.  Emacs holds no merge state whatsoever.")
+(agent-repl-rpc--defverb agent-repl-rpc-finish-workspace
+  "FinishWorkspace"
+  agent-repl-wire-encode-finish-workspace-request
+  agent-repl-wire-decode-finish-workspace-response
+  "Enqueue a finished workspace's deploy.  Emacs holds no deploy state whatsoever.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-restart-workspace
   "RestartWorkspace"

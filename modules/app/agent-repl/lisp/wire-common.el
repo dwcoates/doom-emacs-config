@@ -381,7 +381,7 @@ at INFO and reattaches to the live daemon rather than calling it lost."
 ;;;; ---- agentrepl.v1 family.proto ----
 ;;
 ;; THE TWO FAMILY REFUSALS, one decoder each, which every error that can
-;; carry them (CloseWorkspace, KillWorkspace, NukeWorkspace, MergeWorkspace,
+;; carry them (CloseWorkspace, KillWorkspace, NukeWorkspace, FinishWorkspace,
 ;; SetWorkspaceHidden, OpenWorkspace, CreateWorkspace, RegisterWorkspace)
 ;; decodes its arm through.
 

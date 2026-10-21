@@ -22,7 +22,7 @@
 ;;   NukeWorkspace    DATA DESTRUCTION: worktree and branch deleted.  The
 ;;                    one verb this file confirms before sending.
 ;;   OpenWorkspace    opens a closed row; any revival is the daemon's.
-;;   MergeWorkspace   success means ENQUEUED.  Emacs holds NO merge state.
+;;   FinishWorkspace  success means ENQUEUED.  Emacs holds NO deploy state.
 ;;                    Emacs merges only a workspace's OWN branch, as a
 ;;                    one-shot (`one_shot.own_branch') that closes it.
 ;;   RestartWorkspace the daemon owns everything the restart entails.
@@ -107,7 +107,7 @@
 (declare-function agent-repl-rpc-kill-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-nuke-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-open-workspace "agent-repl-rpc" (conn request &rest keys))
-(declare-function agent-repl-rpc-merge-workspace "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-finish-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-restart-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-interrupt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-create-workspace "agent-repl-rpc" (conn request &rest keys))
@@ -724,27 +724,25 @@ nothing on the stream would ever retire the registration."
                     (plist-get ref :id) "reopened")
                    (agent-repl-workspace-progress-report :open :completed name)))))
 
-(defun agent-repl-verb-merge (ws)
-  "Enqueue a ONE-SHOT merge of WS's own branch, run in WS.
-Success means ENQUEUED.  The request's mode is `one_shot' with the
-`own_branch' landing, asked by the user and joining the back of the
-queue: WS is the workspace the merge runs in and whose branch lands,
-and WS closes once its branch lands.  A failed merge never closes it,
-and its failure is handed back to WS\='s conversation.
+(defun agent-repl-verb-finish (ws)
+  "Enqueue the deploy of WS\='s finished work, run in WS.
+Success means ENQUEUED.  The request is asked by the user and joins the
+back of the queue; what the deploy does is WS\='s repository\='s own
+`.agent-repl/deploy.yaml\=', and a repository with none refuses it.  WS
+closes once its deploy succeeds.  A failed deploy never closes it, and
+its failure is handed back to WS\='s conversation.
 
-Emacs holds NO merge state whatsoever: the merge's whole life from the
-queue onward is WS's own feed merge bubble, footer and roster row."
+Emacs holds NO deploy state whatsoever: the deploy\='s whole life from the
+queue onward is WS\='s own feed bubble, footer and roster row."
   (let ((ref (agent-repl-verbs--ref ws)))
-    (agent-repl--info ws "elisp.verbs.merge-one-shot ws=%s" ws)
+    (agent-repl--info ws "elisp.verbs.finish ws=%s" ws)
     (agent-repl-verbs--send
-     #'agent-repl-rpc-merge-workspace (agent-repl-verbs--conn ws)
+     #'agent-repl-rpc-finish-workspace (agent-repl-verbs--conn ws)
      (list :workspace ref
            :requester (list :arm :user)
-           :mode (list :arm :one-shot
-                       :value (list :landing (list :arm :own-branch :value nil)))
            :placement (list :arm :back))
-     :ws ws :op "merge"
-     :on-success (lambda (_) (message "merge enqueued")))))
+     :ws ws :op "finish"
+     :on-success (lambda (_) (message "deploy enqueued")))))
 
 (defun agent-repl-verb-restart (ws)
   "Restart WS's backend and webapp page, immediately.
@@ -1098,7 +1096,6 @@ state."
 
 (cl-defun agent-repl-verb-create (repository form
                                              &key initial-prompt name
-                                             merge-actions
                                              prompt context
                                              owner fork-of model priority
                                              allow-ungated)
@@ -1108,18 +1105,16 @@ FORM is the creation form\'s BARE ARM KEYWORD -- `:standard' or
 it, because a caller at a keybinding writes facts, not nested oneofs.
 
   `:standard\' takes INITIAL-PROMPT (plain text, wrapped as `UserSaid\'),
-    NAME and MERGE-ACTIONS; every one of them is optional, and each
-    absence is the statement the proto asks for -- an empty workspace, a
-    daemon-minted name, no configured merge actions.  MERGE-ACTIONS is
-    spelled in plain text too:
-    `(:before-ws-merge TEXT :postprocessing-prompt TEXT)\',
-    either half optional, each wrapped as a `UserSaid\' here.
+    and NAME; both are optional, and each absence is the statement the
+    proto asks for -- an empty workspace, a daemon-minted name.  The
+    editor names no deploy hooks: the workspace deploys by its
+    repository\='s own config.
   `:one-shot\' takes PROMPT (required -- a one-shot IS its prompt) and
     CONTEXT, the optional `WorkspaceRef\' of the workspace the commission
     is about, which the daemon names in a note opening the commission.
-    THERE IS NO FINISH CHOICE: what happens on completion is the
-    repository\='s own directive, which the daemon appends to the
-    commission and the agent carries out.
+    THERE IS NO FINISH CHOICE: on completion the agent finishes the
+    workspace (the daemon\='s completion directive, appended to the
+    commission), and what that does is the repository\='s deploy config.
 
 NOTHING IS IMPLIED: the request names its requester, its topology and
 its context origin, and this function spells each from what the user did.
@@ -1181,7 +1176,6 @@ and the new workspace\'s tab arrives through the roster push."
      (list :repository repository
            :form (agent-repl-verbs--create-form
                   form :initial-prompt initial-prompt :name name
-                  :merge-actions merge-actions
                   :prompt prompt :context context
                   :topology (agent-repl-verbs--topology owner))
            :requester (list :arm :user)
@@ -1565,8 +1559,7 @@ An owner makes a CHILD of it, and no owner a PRIMARY workspace."
     (list :arm :primary)))
 
 (cl-defun agent-repl-verbs--create-form (form &key initial-prompt name
-                                              merge-actions prompt context
-                                              topology)
+                                              prompt context topology)
   "Return the creation-form oneof for the bare arm keyword FORM.
 The two forms take disjoint facts, so each arm reads only its own, and
 both carry TOPOLOGY."
@@ -1576,7 +1569,6 @@ both carry TOPOLOGY."
            :value (list :initial-prompt (and initial-prompt
                                              (agent-repl-verbs--said initial-prompt))
                         :name name
-                        :merge-actions (agent-repl-verbs--merge-actions merge-actions)
                         :topology topology)))
     (:one-shot
      (list :arm :one-shot
@@ -1584,19 +1576,6 @@ both carry TOPOLOGY."
                         :context context
                         :topology topology)))
     (_ (user-error "agent-repl: unknown creation form %S" form))))
-
-(defun agent-repl-verbs--merge-actions (actions)
-  "Return the `CreateWorkspaceMergeActions' plist for the plain-text ACTIONS.
-ACTIONS is `(:before-ws-merge TEXT :postprocessing-prompt TEXT)', either
-half optional; each present half is wrapped as a `UserSaid' here, because
-a caller at a keybinding writes prose rather than content blocks.  Nil
-ACTIONS, and ACTIONS with neither half, are the ABSENCE of any configured
-action -- never an empty message."
-  (let ((before (plist-get actions :before-ws-merge))
-        (post (plist-get actions :postprocessing-prompt)))
-    (when (or before post)
-      (list :before-ws-merge (and before (agent-repl-verbs--said before))
-            :postprocessing-prompt (and post (agent-repl-verbs--said post))))))
 
 ;;;; ---- The daemon-admin verbs -------------------------------------------
 
@@ -1930,11 +1909,11 @@ unrecoverable by design."
       (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership") "elisp.verbs.open-chosen name=%s" choice)
       (agent-repl-verb-open ref))))
 
-(defun agent-repl-merge-workspace (&optional ws)
-  "Enqueue a one-shot merge of the current workspace's own branch (`SPC TAB M').
-The workspace closes once its branch lands."
+(defun agent-repl-finish-workspace (&optional ws)
+  "Enqueue the deploy of the current workspace\='s finished work (`SPC TAB M\=').
+The workspace closes once its deploy succeeds."
   (interactive)
-  (agent-repl-verb-merge (agent-repl-verbs--target-ws ws "Merge workspace: ")))
+  (agent-repl-verb-finish (agent-repl-verbs--target-ws ws "Finish workspace: ")))
 
 (defun agent-repl-restart-workspace (&optional ws)
   "Restart the current workspace's backend and webapp page (`SPC o C-c').

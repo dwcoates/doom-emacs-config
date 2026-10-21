@@ -124,8 +124,8 @@ func (s *fakeServer) ForgetWorkspace(ctx context.Context, req *connect.Request[v
 	return handleUnary[v1.ForgetWorkspaceRequest, v1.ForgetWorkspaceResponse](ctx, s, "ForgetWorkspace", req.Msg)
 }
 
-func (s *fakeServer) MergeWorkspace(ctx context.Context, req *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error) {
-	return handleUnary[v1.MergeWorkspaceRequest, v1.MergeWorkspaceResponse](ctx, s, "MergeWorkspace", req.Msg)
+func (s *fakeServer) FinishWorkspace(ctx context.Context, req *connect.Request[v1.FinishWorkspaceRequest]) (*connect.Response[v1.FinishWorkspaceResponse], error) {
+	return handleUnary[v1.FinishWorkspaceRequest, v1.FinishWorkspaceResponse](ctx, s, "FinishWorkspace", req.Msg)
 }
 
 func (s *fakeServer) RestartWorkspace(ctx context.Context, req *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error) {
@@ -534,6 +534,10 @@ func (s *fakeServer) UnsubscribeWorkspace(ctx context.Context, req *connect.Requ
 	return handleUnary[v1.UnsubscribeWorkspaceRequest, v1.UnsubscribeWorkspaceResponse](ctx, s, "UnsubscribeWorkspace", req.Msg)
 }
 
-func (s *fakeServer) UpdateRollouts(ctx context.Context, req *connect.Request[v1.UpdateRolloutsRequest]) (*connect.Response[v1.UpdateRolloutsResponse], error) {
-	return handleUnary[v1.UpdateRolloutsRequest, v1.UpdateRolloutsResponse](ctx, s, "UpdateRollouts", req.Msg)
+func (s *fakeServer) UpdateDeployHold(ctx context.Context, req *connect.Request[v1.UpdateDeployHoldRequest]) (*connect.Response[v1.UpdateDeployHoldResponse], error) {
+	return handleUnary[v1.UpdateDeployHoldRequest, v1.UpdateDeployHoldResponse](ctx, s, "UpdateDeployHold", req.Msg)
+}
+
+func (s *fakeServer) RollOutLanding(ctx context.Context, req *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error) {
+	return handleUnary[v1.RollOutLandingRequest, v1.RollOutLandingResponse](ctx, s, "RollOutLanding", req.Msg)
 }

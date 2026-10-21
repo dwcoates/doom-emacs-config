@@ -92,16 +92,16 @@ logging rung that never signals, so the stub is a no-op: the typed
     ("NukeWorkspace"
      agent-repl-wire-encode-nuke-workspace-request
      agent-repl-wire-decode-nuke-workspace-response)
-    ("MergeWorkspace"
-     agent-repl-wire-encode-merge-workspace-request
-     agent-repl-wire-decode-merge-workspace-response))
+    ("FinishWorkspace"
+     agent-repl-wire-encode-finish-workspace-request
+     agent-repl-wire-decode-finish-workspace-response))
   "The verbs whose result arms are both empty.
-All but MergeWorkspace also take a {workspace}-only request; MergeWorkspace
-names its source as well, so the request tests read
+All but FinishWorkspace also take a {workspace}-only request; FinishWorkspace
+names its requester and placement as well, so the request tests read
 `agent-repl-test-wire-verbs--simple-request-verbs'.")
 
 (defconst agent-repl-test-wire-verbs--simple-request-verbs
-  (cl-remove "MergeWorkspace" agent-repl-test-wire-verbs--simple-verbs
+  (cl-remove "FinishWorkspace" agent-repl-test-wire-verbs--simple-verbs
              :key #'car :test #'equal)
   "The simple verbs whose request is {workspace} and nothing else.")
 
@@ -121,7 +121,7 @@ names its source as well, so the request tests read
      ("accepted" "error" "success"))
     ("agentrepl/v1/endpoint_nuke_workspace.pb.go" "NukeWorkspaceResponse"
      ("accepted" "error" "success"))
-    ("agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceResponse")
+    ("agentrepl/v1/endpoint_finish_workspace.pb.go" "FinishWorkspaceResponse")
     ("agentrepl/v1/endpoint_restart_workspace.pb.go" "RestartWorkspaceResponse")
     ("agentrepl/v1/endpoint_set_workspace_priority.pb.go" "SetWorkspacePriorityResponse")
     ("agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptResponse")
@@ -191,33 +191,6 @@ the required topology is all the form carries."
            (standard (cdr (assq 'standard
                                 (agent-repl-test-wire-verbs--encode-create request)))))
       (should (equal standard '((topology . ((primary)))))))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-merge-actions-before ()
-  "A configured pre-merge action rides as `beforeWsMerge'."
-  (agent-repl-test-wire-verbs--with-common
-    (let* ((request (list :repository agent-repl-test-wire-verbs--repo
-                          :form '(:arm :standard
-                                  :value (:merge-actions
-                                          (:before-ws-merge (:text "lint"))))))
-           (actions (cdr (assq 'mergeActions
-                               (cdr (assq 'standard
-                                          (agent-repl-test-wire-verbs--encode-create
-                                           request)))))))
-      (should (equal actions '((beforeWsMerge . ((said . "lint")))))))))
-
-(ert-deftest agent-repl-test-wire-verbs-create-merge-actions-postprocessing ()
-  "A configured post-merge action rides as `postprocessingPrompt'."
-  (agent-repl-test-wire-verbs--with-common
-    (let* ((request (list :repository agent-repl-test-wire-verbs--repo
-                          :form '(:arm :standard
-                                  :value (:merge-actions
-                                          (:postprocessing-prompt (:text "tidy"))))))
-           (actions (cdr (assq 'mergeActions
-                               (cdr (assq 'standard
-                                          (agent-repl-test-wire-verbs--encode-create
-                                           request)))))))
-      (should (equal actions '((postprocessingPrompt . ((said . "tidy")))))))))
-
 
 ;;;; ---- CreateWorkspaceRequest: the one-shot form ----------------------
 
@@ -2084,7 +2057,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-fork-source-arm ()
@@ -2533,273 +2506,206 @@ at."
                  (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "gitFailed" "hasOpenChildren")
                        #'string<))))
 
-;;;; ---- MergeWorkspaceRequest ----------------------------------------
+;;;; ---- FinishWorkspaceRequest ---------------------------------------
 
-(defun agent-repl-test-wire-verbs--merge-json (mode)
-  "Encode a user\='s back-of-queue MergeWorkspaceRequest for the fixture ref
-in MODE, as JSON."
-  (json-serialize (agent-repl-wire-encode-merge-workspace-request
-                   (list :workspace agent-repl-test-wire-verbs--ref
-                         :requester '(:arm :user)
-                         :mode mode
-                         :placement '(:arm :back)))))
+(defun agent-repl-test-wire-verbs--finish-request (&rest edits)
+  "A user\='s back-of-queue FinishWorkspaceRequest for the fixture ref, with
+EDITS (a plist) replacing its fields."
+  (let ((request (list :workspace agent-repl-test-wire-verbs--ref
+                       :requester '(:arm :user)
+                       :placement '(:arm :back))))
+    (while edits
+      (setq request (plist-put request (pop edits) (pop edits))))
+    request))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-one-shot-own-branch ()
-  "A one-shot of the requester's own branch spells the empty `ownBranch' landing."
+(ert-deftest agent-repl-test-wire-verbs-finish-request-encodes-its-three-fields ()
+  "A finish request spells its workspace, its requester and its placement."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :one-shot :value (:landing (:arm :own-branch :value nil))))
+    (should (equal (json-serialize (agent-repl-wire-encode-finish-workspace-request
+                                    (agent-repl-test-wire-verbs--finish-request)))
                    (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
                            "\"requester\":{\"user\":{}},"
-                           "\"oneShot\":{\"ownBranch\":{}},"
                            "\"placement\":{\"back\":{}}}")))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-one-shot-merged-upstream ()
-  "A one-shot already merged upstream spells the empty `mergedUpstream' landing."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-test-wire-verbs--merge-json
-                    '(:arm :one-shot :value (:landing (:arm :merged-upstream :value nil))))
-                   (concat "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},"
-                           "\"requester\":{\"user\":{}},"
-                           "\"oneShot\":{\"mergedUpstream\":{}},"
-                           "\"placement\":{\"back\":{}}}")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-one-shot-with-no-landing-is-refused ()
-  "A one-shot naming no landing is refused before it is sent."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (cdr (should-error
-                         (agent-repl-test-wire-verbs--merge-json '(:arm :one-shot :value nil))
-                         :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceOneShot" "landing" "oneof is unset")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-without-mode ()
-  "A merge request naming no mode is refused: the mode is REQUIRED."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (cdr (should-error
-                         (agent-repl-wire-encode-merge-workspace-request
-                          (list :workspace agent-repl-test-wire-verbs--ref
-                                :requester '(:arm :user) :placement '(:arm :back)))
-                         :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceRequest" "mode" "required field is unset")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-without-requester ()
-  "A merge request naming no requester is refused: nothing is implied."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (cdr (should-error
-                         (agent-repl-wire-encode-merge-workspace-request
-                          (list :workspace agent-repl-test-wire-verbs--ref
-                                :mode '(:arm :one-shot :value (:landing (:arm :own-branch :value nil)))
-                                :placement '(:arm :back)))
-                         :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceRequest" "requester" "required field is unset")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-without-placement ()
-  "A merge request naming no placement is refused: nothing is implied."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (cdr (should-error
-                         (agent-repl-wire-encode-merge-workspace-request
-                          (list :workspace agent-repl-test-wire-verbs--ref
-                                :requester '(:arm :user)
-                                :mode '(:arm :one-shot :value (:landing (:arm :own-branch :value nil)))))
-                         :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceRequest" "placement" "required field is unset")))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-request-front-placement ()
+(ert-deftest agent-repl-test-wire-verbs-finish-request-front-placement ()
   "A front placement spells the empty `front' arm."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (cdr (assq 'placement
-                              (agent-repl-wire-encode-merge-workspace-request
-                               (list :workspace agent-repl-test-wire-verbs--ref
-                                     :requester '(:arm :user)
-                                     :mode '(:arm :one-shot :value (:landing (:arm :own-branch :value nil)))
-                                     :placement '(:arm :front)))))
+                              (agent-repl-wire-encode-finish-workspace-request
+                               (agent-repl-test-wire-verbs--finish-request :placement '(:arm :front)))))
                    '((front))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-unknown-mode-arm ()
-  "A mode arm the contract does not declare is refused."
+(ert-deftest agent-repl-test-wire-verbs-finish-request-refuses-an-unset-field ()
+  "A finish request naming no workspace, requester or placement is refused:
+nothing is implied."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (cdr (should-error
-                         (agent-repl-test-wire-verbs--merge-json '(:arm :keep-open :value nil))
-                         :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceRequest" "mode" "unknown oneof arm")))))
+    (dolist (field '(:workspace :requester :placement))
+      (should (equal (cdr (should-error
+                           (agent-repl-wire-encode-finish-workspace-request
+                            (agent-repl-test-wire-verbs--finish-request field nil))
+                           :type 'agent-repl-wire-error))
+                     (list "FinishWorkspaceRequest" (substring (symbol-name field) 1)
+                           "required field is unset"))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-request-without-workspace ()
-  "A merge request naming no requesting workspace is refused."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (cdr (should-error
-                         (agent-repl-wire-encode-merge-workspace-request
-                          (list :requester '(:arm :user)
-                                :mode '(:arm :one-shot :value (:landing (:arm :own-branch :value nil)))
-                                :placement '(:arm :back)))
-                         :type 'agent-repl-wire-error))
-                   '("MergeWorkspaceRequest" "workspace" "required field is unset")))))
+;;;; ---- FinishWorkspaceError -------------------------------------------
 
-;;;; ---- MergeWorkspaceError --------------------------------------------
-
-(ert-deftest agent-repl-test-wire-verbs-merge-error-unknown-workspace-arm ()
-  "MergeWorkspaceError's `unknown_workspace' arm decodes with everything it
+(ert-deftest agent-repl-test-wire-verbs-finish-error-unknown-workspace-arm ()
+  "FinishWorkspaceError's `unknown_workspace' arm decodes with everything it
 carries."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{}}"))
                    '(:cause (:arm :unknown-workspace :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-workspace-ref-mismatch-arm ()
-  "MergeWorkspaceError's `workspace_ref_mismatch' arm decodes with everything
+(ert-deftest agent-repl-test-wire-verbs-finish-error-workspace-ref-mismatch-arm ()
+  "FinishWorkspaceError's `workspace_ref_mismatch' arm decodes with everything
 it carries."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}"))
                    '(:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry")))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-transferring-away-arm ()
-  "MergeWorkspaceError's `transferring_away' arm decodes with everything it
+(ert-deftest agent-repl-test-wire-verbs-finish-error-transferring-away-arm ()
+  "FinishWorkspaceError's `transferring_away' arm decodes with everything it
 carries."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
                    '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-not-yet-adopted-arm ()
-  "MergeWorkspaceError's `not_yet_adopted' arm decodes with everything it
+(ert-deftest agent-repl-test-wire-verbs-finish-error-not-yet-adopted-arm ()
+  "FinishWorkspaceError's `not_yet_adopted' arm decodes with everything it
 carries."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
                    '(:cause (:arm :not-yet-adopted :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-no-layout-facts-arm ()
-  "MergeWorkspaceError's `no_layout_facts' arm decodes with everything it
+(ert-deftest agent-repl-test-wire-verbs-finish-error-no-layout-facts-arm ()
+  "FinishWorkspaceError's `no_layout_facts' arm decodes with everything it
 carries."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"noLayoutFacts\":{}}"))
                    '(:cause (:arm :no-layout-facts :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-session-deleted-arm ()
-  "MergeWorkspaceError's `session_deleted' arm decodes with everything it
+(ert-deftest agent-repl-test-wire-verbs-finish-error-session-deleted-arm ()
+  "FinishWorkspaceError's `session_deleted' arm decodes with everything it
 carries."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"sessionDeleted\":{}}"))
                    '(:cause (:arm :session-deleted :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-already-queued-arm ()
-  "MergeWorkspaceError's `already_queued' arm decodes with everything it
+(ert-deftest agent-repl-test-wire-verbs-finish-error-already-queued-arm ()
+  "FinishWorkspaceError's `already_queued' arm decodes with everything it
 carries."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"alreadyQueued\":{}}"))
                    '(:cause (:arm :already-queued :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-already-merging-arm ()
-  "MergeWorkspaceError's `already_merging' arm decodes with everything it
+(ert-deftest agent-repl-test-wire-verbs-finish-error-already-deploying-arm ()
+  "FinishWorkspaceError's `already_deploying' arm decodes with everything it
 carries."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"alreadyMerging\":{}}"))
-                   '(:cause (:arm :already-merging :value nil))))))
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"alreadyDeploying\":{}}"))
+                   '(:cause (:arm :already-deploying :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-owner-lands-arm ()
-  "MergeWorkspaceError's `owner_lands' arm decodes the owner that lands."
+(ert-deftest agent-repl-test-wire-verbs-finish-error-no-deploy-config-arm ()
+  "FinishWorkspaceError's `no_deploy_config' arm decodes the path looked for."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"noDeployConfig\":{\"path\":\"/r/.agent-repl/deploy.yaml\"}}"))
+                   '(:cause (:arm :no-deploy-config :value (:path "/r/.agent-repl/deploy.yaml")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-finish-error-deploy-config-invalid-arm ()
+  "FinishWorkspaceError's `deploy_config_invalid' arm decodes its path and why."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"deployConfigInvalid\":{\"path\":\"/r/.agent-repl/deploy.yaml\",\"detail\":\"pre_deploy is required\"}}"))
+                   '(:cause (:arm :deploy-config-invalid
+                             :value (:path "/r/.agent-repl/deploy.yaml" :detail "pre_deploy is required")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-finish-error-owner-lands-arm ()
+  "FinishWorkspaceError's `owner_lands' arm decodes the owner that lands."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse
                      "{\"ownerLands\":{\"owner\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
                    '(:cause (:arm :owner-lands :value (:owner (:id "ws-2" :dir "/w/two"))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-requester-may-not-land-arm ()
-  "MergeWorkspaceError's `requester_may_not_land' arm is empty."
+(ert-deftest agent-repl-test-wire-verbs-finish-error-requester-may-not-land-arm ()
+  "FinishWorkspaceError's `requester_may_not_land' arm is empty."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"requesterMayNotLand\":{}}"))
                    '(:cause (:arm :requester-may-not-land :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-no-branch-checked-out-arm ()
-  "MergeWorkspaceError's `no_branch_checked_out' arm decodes the dir it names."
+(ert-deftest agent-repl-test-wire-verbs-finish-error-no-branch-checked-out-arm ()
+  "FinishWorkspaceError's `no_branch_checked_out' arm decodes the dir it names."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"noBranchCheckedOut\":{\"dir\":\"/w/one\"}}"))
                    '(:cause (:arm :no-branch-checked-out :value (:dir "/w/one")))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-version-increment-required-arm ()
-  "MergeWorkspaceError's `version_increment_required' arm decodes."
+(ert-deftest agent-repl-test-wire-verbs-finish-error-version-increment-required-arm ()
+  "FinishWorkspaceError's `version_increment_required' arm decodes."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"versionIncrementRequired\":{}}"))
                    '(:cause (:arm :version-increment-required :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-version-increment-unexpected-foreign-repository ()
-  "MergeWorkspaceError's `version_increment_unexpected' arm decodes its
-foreign-repository reason."
+(ert-deftest agent-repl-test-wire-verbs-finish-error-version-increment-unexpected-unversioned-repository ()
+  "FinishWorkspaceError's `version_increment_unexpected' arm decodes its
+unversioned-repository reason."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"versionIncrementUnexpected\":{\"foreignRepository\":{}}}"))
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"versionIncrementUnexpected\":{\"unversionedRepository\":{}}}"))
                    '(:cause (:arm :version-increment-unexpected
-                             :value (:reason (:arm :foreign-repository :value nil))))))))
+                             :value (:reason (:arm :unversioned-repository :value nil))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-version-increment-unexpected-not-default-branch ()
-  "MergeWorkspaceError's `version_increment_unexpected' arm decodes its
+(ert-deftest agent-repl-test-wire-verbs-finish-error-version-increment-unexpected-not-default-branch ()
+  "FinishWorkspaceError's `version_increment_unexpected' arm decodes its
 not-default-branch reason."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"versionIncrementUnexpected\":{\"notDefaultBranch\":{}}}"))
                    '(:cause (:arm :version-increment-unexpected
                              :value (:reason (:arm :not-default-branch :value nil))))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-version-increment-unexpected-merged-upstream ()
-  "MergeWorkspaceError's `version_increment_unexpected' arm decodes its
-merged-upstream reason."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-merge-workspace-error
-                    (agent-repl-test-wire-verbs--parse "{\"versionIncrementUnexpected\":{\"mergedUpstream\":{}}}"))
-                   '(:cause (:arm :version-increment-unexpected
-                             :value (:reason (:arm :merged-upstream :value nil))))))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-error-version-increment-unexpected-reason-arms-pinned ()
+(ert-deftest agent-repl-test-wire-verbs-finish-error-version-increment-unexpected-reason-arms-pinned ()
   "MergeWorkspaceVersionIncrementUnexpected's reason arm set is exactly what
 the frozen schema declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/merge_version_increment.pb.go" "MergeWorkspaceVersionIncrementUnexpected")
                        #'string<)
-                 (sort (list "foreignRepository" "notDefaultBranch" "mergedUpstream") #'string<))))
+                 (sort (list "unversionedRepository" "notDefaultBranch") #'string<))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-unset-cause-is-a-breach ()
-  "MergeWorkspaceError with no arm set says nothing actionable, so it is a
+(ert-deftest agent-repl-test-wire-verbs-finish-error-unset-cause-is-a-breach ()
+  "FinishWorkspaceError with no arm set says nothing actionable, so it is a
 breach."
   (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-wire-decode-merge-workspace-error (agent-repl-test-wire-verbs--parse "{}"))
+    (should-error (agent-repl-wire-decode-finish-workspace-error (agent-repl-test-wire-verbs--parse "{}"))
                   :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-unknown-arm-is-a-breach ()
-  "An arm MergeWorkspaceError does not declare here is refused, never guessed
+(ert-deftest agent-repl-test-wire-verbs-finish-error-unknown-arm-is-a-breach ()
+  "An arm FinishWorkspaceError does not declare here is refused, never guessed
 at."
   (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-wire-decode-merge-workspace-error
+    (should-error (agent-repl-wire-decode-finish-workspace-error
                    (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
                   :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-error-arms-pinned ()
-  "MergeWorkspaceError's arm set is exactly what the frozen schema declares."
+(ert-deftest agent-repl-test-wire-verbs-finish-error-arms-pinned ()
+  "FinishWorkspaceError's arm set is exactly what the frozen schema declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
-                        "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceError")
+                        "agentrepl/v1/endpoint_finish_workspace.pb.go" "FinishWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging" "versionIncrementRequired" "versionIncrementUnexpected" "ownerLands" "requesterMayNotLand" "noBranchCheckedOut" "hasOpenChildren")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyDeploying" "versionIncrementRequired" "versionIncrementUnexpected" "ownerLands" "requesterMayNotLand" "noBranchCheckedOut" "hasOpenChildren" "noDeployConfig" "deployConfigInvalid")
                        #'string<))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-mode-arms-pinned ()
-  "MergeWorkspaceRequest's mode arm set is exactly what the frozen schema declares."
-  (should (equal (sort (agent-repl-test--generated-oneof-arms
-                        "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceRequest")
-                       #'string<)
-                 (list "oneShot"))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-one-shot-landing-arms-pinned ()
-  "MergeWorkspaceOneShot's landing arm set is exactly what the frozen schema declares."
-  (should (equal (sort (agent-repl-test--generated-oneof-arms
-                        "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceOneShot")
-                       #'string<)
-                 (sort (list "ownBranch" "mergedUpstream") #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-restart-error-unknown-workspace-arm ()
   "RestartWorkspaceError's `unknown_workspace' arm decodes with everything it
@@ -5672,12 +5578,12 @@ instead diverges from it unseen."
   "What `agent-repl-test-wire-verbs--open-children-json' decodes to.")
 
 (ert-deftest agent-repl-test-wire-verbs-every-has-open-children-arm-decodes-alike ()
-  "Close, kill, nuke, merge and hide decode `has_open_children' with its parent and children."
+  "Close, kill, nuke, finish and hide decode `has_open_children' with its parent and children."
   (agent-repl-test-wire-verbs--with-common
     (dolist (decoder '(agent-repl-wire-decode-close-workspace-error
                        agent-repl-wire-decode-kill-workspace-error
                        agent-repl-wire-decode-nuke-workspace-error
-                       agent-repl-wire-decode-merge-workspace-error
+                       agent-repl-wire-decode-finish-workspace-error
                        agent-repl-wire-decode-set-workspace-hidden-error))
       (should (equal (funcall decoder (agent-repl-test-wire-verbs--parse agent-repl-test-wire-verbs--open-children-json))
                      agent-repl-test-wire-verbs--open-children-decoded)))))
@@ -5752,6 +5658,6 @@ instead diverges from it unseen."
                 agent-repl-wire-decode-create-workspace-error-unknown-owner
                 agent-repl-wire-decode-create-workspace-error-one-shot-owner-lands
                 agent-repl-wire-decode-create-workspace-error-unknown-requester
-                agent-repl-wire-decode-merge-workspace-error-owner-lands))
+                agent-repl-wire-decode-finish-workspace-error-owner-lands))
     (should (string-match-p "agent-repl-wire-verbs--decode-ref-arm"
                             (prin1-to-string (symbol-function fn))))))

@@ -500,8 +500,8 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("verbs.el" agent-repl-verbs--send-teardown
      "agent-repl: %s of %s FAILED after its tab closed: %s"
      "tells the user a kill or nuke they ordered failed after its tab had already closed")
-    ("verbs.el" agent-repl-verb-merge "merge enqueued"
-     "confirms the user's merge command")
+    ("verbs.el" agent-repl-verb-finish "deploy enqueued"
+     "confirms the user's finish command")
     ("verbs.el" agent-repl-verb-restart "agent-repl: the restart failed: %s"
      "tells the user their restart failed")
     ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped"

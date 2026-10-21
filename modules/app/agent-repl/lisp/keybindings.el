@@ -141,7 +141,7 @@ the module."
        :desc "Re-open a closed workspace" "C-r" #'agent-repl-open-workspace
        :desc "Hide current workspace (off the tab bar)" "h" #'agent-repl-hide-workspace
        :desc "Show a hidden workspace and switch to it" "H" #'agent-repl-show-hidden-workspace
-       :desc "Merge current workspace (one-shot: closes once it lands)" "M" #'agent-repl-merge-workspace
+       :desc "Finish current workspace (deploys, closes once deployed)" "M" #'agent-repl-finish-workspace
        :desc "Open most recent workspace" "R" #'agent-repl-open-most-recent-workspace
        :desc "Switch to the previously selected workspace" "TAB" #'agent-repl-switch-to-previous-workspace
        :desc "Switch to the workspace that most recently finished" "g" #'agent-repl-switch-to-last-finished-workspace
