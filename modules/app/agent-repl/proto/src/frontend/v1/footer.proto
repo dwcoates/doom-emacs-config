@@ -506,6 +506,12 @@ message FooterStatusWorking {
     FooterSubStatusWorkingFetching fetching = 10;
     // A subagent runs that the main agent waits on.
     FooterSubStatusWorkingDelegating delegating = 11;
+    // An inference call is running and nothing has come back from the vendor
+    // for a while (the daemon's vendor-silence threshold, 45s): no token, no
+    // tool call, no notice from any agent. Where `thinking` would stand, so a
+    // request the API never answered no longer reads as the model thinking
+    // (owner ruling, 2026-10-21). It clears with the vendor's next update.
+    FooterSubStatusWorkingWaiting waiting = 13;
   }
   // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
   // something to draw under every status.
@@ -603,6 +609,8 @@ message FooterSubStatusWorkingSearching {}
 message FooterSubStatusWorkingFetching {}
 // A subagent the main agent waits on is running.
 message FooterSubStatusWorkingDelegating {}
+// The waiting-on-the-vendor step.
+message FooterSubStatusWorkingWaiting {}
 
 // A permission gate stands: a tool call waits on the user's consent. When
 // several consent asks are open, the earliest one is named.
