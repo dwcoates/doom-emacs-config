@@ -27,13 +27,15 @@ type DeployHold struct {
 // any repository had, the daemon's own, so a hold standing at the upgrade is
 // carried onto EVERY registered repository: nothing that was held is deployed
 // by the upgrade, and the operator releases each repository's hold as it
-// wants. IT IS ADDITIVE: the previous build neither reads nor writes these
+// wants. A queue is keyed by its repository's git common dir, which for a
+// registered repository (its main worktree, canonical) is that directory's
+// `.git`. IT IS ADDITIVE: the previous build neither reads nor writes these
 // columns, and merge_rollout_hold stays until a breaking step drops it.
 const deployHoldDDL = `
 ALTER TABLE merge_queue_repos ADD COLUMN deploy_held_at INTEGER;
 ALTER TABLE merge_queue_repos ADD COLUMN deploy_skipped INTEGER NOT NULL DEFAULT 0;
 INSERT INTO merge_queue_repos (repo_key, paused, deploy_held_at)
-  SELECT r.dir, 0, h.held_at FROM repositories r, merge_rollout_hold h WHERE true
+  SELECT r.dir || '/.git', 0, h.held_at FROM repositories r, merge_rollout_hold h WHERE true
   ON CONFLICT(repo_key) DO UPDATE SET deploy_held_at = excluded.deploy_held_at;
 `
 

@@ -2,6 +2,8 @@ package wsm
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -175,7 +177,11 @@ func TestTheMigrationCarriesADaemonWideHoldOntoEveryRepository(t *testing.T) {
 
 			// Assert
 			for _, repo := range []string{a, b} {
-				hold, err := handle.DeployHoldOf(context.Background(), RepoKey(repo))
+				// The queue's key: the repository's git common dir.
+				if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				hold, err := handle.DeployHoldOf(context.Background(), RepoKey(filepath.Join(repo, ".git")))
 				if err != nil || hold.Held != tt.held {
 					t.Fatalf("DeployHoldOf(%s) = %+v, %v; want held %v", repo, hold, err, tt.held)
 				}
