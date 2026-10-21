@@ -833,3 +833,18 @@ func TestRosterBringUpWalkIsMonotoneFromAColdSubmit(t *testing.T) {
 		}
 	}
 }
+
+func TestTheFirstRosterStatesTheDeployedVersion(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+
+	// Act
+	roster := d.WatchRoster()
+	first := harness.AwaitNext(t, d.Ctx(), roster, "the first roster")
+
+	// Assert
+	if got := first.GetVersion().GetText(); got != harness.PinnedVersion {
+		t.Fatalf("the first roster's version = %q, want the pinned checkout's %s", got, harness.PinnedVersion)
+	}
+}

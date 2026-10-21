@@ -137,9 +137,9 @@ func TestVersionString(t *testing.T) {
 	}
 }
 
-// resolveSynchronously drives one resolution on the test goroutine, the way
-// Run does on its own, so assertions need no waiting.
-func resolveSynchronously(l *Loop) { l.resolve(context.Background()) }
+// resolveSynchronously drives one resolution on the test goroutine, as Prime
+// and each Kick do, so assertions need no waiting.
+func resolveSynchronously(l *Loop) { l.Prime(context.Background()) }
 
 func TestTheLoopTellsEverySinkWhatItResolved(t *testing.T) {
 	// Arrange
@@ -231,11 +231,12 @@ func TestAKickReresolvesAfterADeploy(t *testing.T) {
 	sink := &recordingSink{}
 	git := &fakeGit{head: headSHA, at: []string{"0.129.0"}, resolved: make(chan struct{}, 2)}
 	loop := NewLoop(git, "/checkout", dlog.NewTestLogger(), sink)
+	loop.Prime(context.Background())
+	<-git.resolved // the prime's resolution
+	git.set(headSHA, []string{"0.130.0"}, nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- loop.Run(ctx) }()
-	<-git.resolved // the loop's own first resolution began
-	git.set(headSHA, []string{"0.130.0"}, nil, nil)
 
 	// Act
 	loop.Kick()
@@ -263,5 +264,26 @@ func TestKicksCollapseWithoutBlocking(t *testing.T) {
 	// Assert
 	if len(loop.kick) != 1 {
 		t.Fatalf("pending kicks = %d, want them collapsed into one", len(loop.kick))
+	}
+}
+
+func TestRunResolvesOnlyOnAKick(t *testing.T) {
+	// Arrange
+	sink := &recordingSink{}
+	git := &fakeGit{head: headSHA, at: []string{"0.129.0"}}
+	loop := NewLoop(git, "/checkout", dlog.NewTestLogger(), sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	// Act: Run starts and stops with no kick.
+	go func() { done <- loop.Run(ctx) }()
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert
+	if got := sink.strings(); len(got) != 0 {
+		t.Fatalf("sink was told %v, want nothing without a prime or a kick", got)
 	}
 }

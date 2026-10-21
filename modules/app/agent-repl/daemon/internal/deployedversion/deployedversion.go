@@ -85,8 +85,8 @@ type Sink interface {
 	DeployedVersion(v *Version)
 }
 
-// Loop resolves the deployed version once when it starts and again on every
-// Kick, until its context ends, and tells every sink each change.
+// Loop resolves the deployed version on Prime, once before the daemon serves,
+// and again on every Kick while it Runs, and tells every sink each change.
 type Loop struct {
 	git   Git
 	dir   string
@@ -113,9 +113,15 @@ func (l *Loop) Kick() {
 	}
 }
 
-// Run drives the loop until ctx ends.
+// Prime resolves the version once, on the caller's goroutine, before Run
+// starts: the daemon primes it before it serves, so the first view any sink
+// publishes already states it, and no client ever sees it arrive as a push of
+// its own. A version that cannot be resolved is logged, never fatal: the
+// views state none. Prime and Run never run at once.
+func (l *Loop) Prime(ctx context.Context) { l.resolve(ctx) }
+
+// Run re-resolves on every Kick until ctx ends.
 func (l *Loop) Run(ctx context.Context) error {
-	l.resolve(ctx)
 	for {
 		select {
 		case <-ctx.Done():
