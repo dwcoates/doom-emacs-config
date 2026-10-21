@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi, type MockInstance } from "vitest";
 import { createDropdowns, type Dropdowns } from "../../src/sidebar/dropdowns.js";
 import {
   HOVER_CLOSE_GRACE_MS,
@@ -27,6 +27,20 @@ function drawnRow(): DrawnRow {
 
 const isOpen = (copy: DrawnRow): boolean => copy.ws.classList.contains("open");
 
+/**
+ * Spy on the debug log for the current test alone. Restored by itself, never by
+ * `vi.restoreAllMocks()`: the unit run is un-isolated, and restoring every spy
+ * the worker ever made while this file's fake clock is installed took
+ * `setTimeout` away from the tests after it.
+ */
+function spyOnDebug(): MockInstance<typeof log.debug> {
+  const debug = vi.spyOn(log, "debug");
+  onTestFinished(() => {
+    debug.mockRestore();
+  });
+  return debug;
+}
+
 describe("the row hover gesture", () => {
   let dropdowns: Dropdowns;
   let openDetails: Set<string>;
@@ -41,7 +55,6 @@ describe("the row hover gesture", () => {
 
   afterEach(() => {
     hover.dispose();
-    vi.restoreAllMocks();
     vi.useRealTimers();
     document.body.replaceChildren();
   });
@@ -433,7 +446,7 @@ describe("the row hover gesture", () => {
       // ARRANGE
       draw("ws-1");
       openByHover("ws-1");
-      const debug = vi.spyOn(log, "debug");
+      const debug = spyOnDebug();
       // ACT
       hover.dismiss("the selection moved");
       // ASSERT
@@ -462,7 +475,7 @@ describe("the row hover gesture", () => {
       openByHover("ws-1");
       hover.leave("ws-1", "trigger");
       hover.dismiss("the page lost focus");
-      const debug = vi.spyOn(log, "debug");
+      const debug = spyOnDebug();
       // ACT
       vi.runAllTimers();
       // ASSERT
