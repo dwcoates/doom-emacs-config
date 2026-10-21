@@ -320,7 +320,10 @@ RUN set -eux; \
 # ===========================================================================
 # Stage 2: the sandbox image itself
 # ===========================================================================
-FROM apt-base
+# Named `toolchain` up to the Go module cache, so the go-deps-list stage below
+# can read the checkout's Go sources from it without those sources keying any
+# layer of the image itself.
+FROM apt-base AS toolchain
 
 ARG NODE_VERSION=22.14.0
 ARG NODE_SHA256=
@@ -682,6 +685,53 @@ RUN set -eux; \
       (cd "$d" && go mod download) || { echo "sandbox: go mod download failed in $d" >&2; exit 1; }; \
     done; \
     rm -rf /sandbox/go-prime
+
+# --- the Go DEPENDENCY build cache, keyed by the dependency list alone ------
+#
+# The build-cache prime below compiles the checkout's own packages AND every
+# package they import. Done in one layer, that layer is keyed by the Go
+# sources, so each image held its own copy of the whole compiled graph (the
+# prime measured 1.1G) though the dependencies almost never change, and every
+# build recompiled all of it.
+#
+# So the dependencies are compiled first, in a layer of their own whose key
+# is only WHICH packages are imported: this stage reads the sources and
+# writes, per Go module, the standard-library and third-party packages its
+# packages and tests import (never one of ours: every local `replace` target
+# is excluded, and so is each module's own code). Only those lists reach the
+# image. Sources that change and import nothing new give byte-identical
+# lists, so the dependency layer is a cache hit and is shared by every image
+# built since. `-e` lists the imports of a package that does not compile;
+# that package itself still fails loudly in the prime below.
+FROM toolchain AS go-deps-list
+COPY --chown=sandbox:sandbox go-sources/ /work/repo/modules/app/agent-repl/
+COPY --chown=sandbox:sandbox go-manifests/ /work/repo/modules/app/agent-repl/
+RUN set -eux; \
+    cd /work/repo/modules/app/agent-repl; \
+    find . -name go.mod -printf '%h\n' | sort -u | while read -r d; do \
+      mkdir -p "/sandbox/go-deps/$d"; \
+      (cd "$d" && go list -e -deps -test \
+         -f '{{if or .Standard (and .Module (not .Module.Main) (not .Module.Replace))}}{{.ImportPath}}{{end}}' \
+         ./... > /tmp/go-deps.txt) \
+        || { echo "sandbox: listing the Go dependencies of $d failed" >&2; exit 1; }; \
+      awk 'NF' /tmp/go-deps.txt | LC_ALL=C sort -u > "/sandbox/go-deps/$d/deps.txt"; \
+    done
+
+FROM toolchain
+# The manifests sit at the path the tests run at, so `go build` resolves each
+# module's build list exactly as a run does. A dependency's cache key carries
+# its module-cache path, which is the same in every container.
+COPY --from=go-deps-list --chown=sandbox:sandbox /sandbox/go-deps/ /sandbox/go-deps/
+COPY --chown=sandbox:sandbox go-manifests/ /work/repo/modules/app/agent-repl/
+RUN set -eux; \
+    export GOCACHE=/sandbox/cache/go-build; \
+    cd /sandbox/go-deps; \
+    find . -name deps.txt -printf '%h\n' | sort | while read -r d; do \
+      (cd "/work/repo/modules/app/agent-repl/$d" && xargs -r go build < "/sandbox/go-deps/$d/deps.txt") \
+        || { echo "sandbox: compiling the Go dependencies of $d failed" >&2; exit 1; }; \
+    done; \
+    rm -rf /work/repo /sandbox/go-deps; \
+    du -sh /sandbox/cache/go-build
 
 # --- prime the Go BUILD cache, so no run recompiles the dependency graph ---
 #
