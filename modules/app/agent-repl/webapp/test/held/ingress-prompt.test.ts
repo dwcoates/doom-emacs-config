@@ -107,14 +107,33 @@ describe("drawHeldIngressPrompt", () => {
   });
 
   it.each([
-    ["no badge", create(HeldIngressPromptSchema, { said: {}, queuedAt: { atMs: 0n } })],
-    ["no said", create(HeldIngressPromptSchema, { queuedAt: { atMs: 0n }, badge: { label: "x", standsFor: { case: "merge", value: {} } } })],
-    ["no queued instant", create(HeldIngressPromptSchema, { said: {}, badge: { label: "x", standsFor: { case: "merge", value: {} } } })],
-    ["a badge standing for nothing", create(HeldIngressPromptSchema, { said: {}, queuedAt: { atMs: 0n }, badge: { label: "x" } })],
+    ["no badge", create(HeldIngressPromptSchema, { said: {}, body: {}, queuedAt: { atMs: 0n } })],
+    ["no drawn body", create(HeldIngressPromptSchema, { said: {}, queuedAt: { atMs: 0n }, badge: { label: "x", standsFor: { case: "merge", value: {} } } })],
+    ["no queued instant", create(HeldIngressPromptSchema, { said: {}, body: {}, badge: { label: "x", standsFor: { case: "merge", value: {} } } })],
+    ["a badge standing for nothing", create(HeldIngressPromptSchema, { said: {}, body: {}, queuedAt: { atMs: 0n }, badge: { label: "x" } })],
     ["an empty label", ingress("merge", "")],
   ])("refuses an item with %s", (_name, item) => {
     // Act / Assert
     expect(() => drawHeldIngressPrompt(item, heldContext())).toThrow(MalformedView);
+  });
+});
+
+describe("the daemon's ingress card draws the daemon's drawing", () => {
+  it("draws its body rather than its said", () => {
+    // Arrange — the body is an image, the said only words.
+    const card = create(HeldIngressPromptSchema, {
+      said: { content: { blocks: [{ block: { case: "text", value: { text: "the words" } } }] } },
+      body: { blocks: [{ block: { case: "image", value: { src: "https://x/a.png", alt: "" } } }] },
+      queuedAt: { atMs: 0n },
+      badge: { label: "waiting", standsFor: { case: "noSession", value: {} } },
+    });
+    // Act
+    const el = drawHeldIngressPrompt(card, heldContext());
+    // Assert
+    expect([el.querySelector<HTMLImageElement>("img.prompt-block-image")?.src, el.querySelector(".prompt-block-text")]).toEqual([
+      "https://x/a.png",
+      null,
+    ]);
   });
 });
 
