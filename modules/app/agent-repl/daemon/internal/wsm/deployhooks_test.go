@@ -3,8 +3,10 @@ package wsm
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -244,5 +246,90 @@ func TestDeployHooksEqual(t *testing.T) {
 				t.Errorf("Equal = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRewriteRetiredProgress(t *testing.T) {
+	tests := []struct {
+		name        string
+		doc         string
+		wantDrop    bool
+		wantChanged bool
+		want        map[string]any
+	}{
+		{
+			name:        "a record at a configured pre-merge prompt stands at the pre-deploy stage",
+			doc:         `{"step":"pre_prompt","rounds":{"queue":1,"pre_prompt":1},"active":{"kind":"pre_prompt","n":1},"open":[{"kind":"pre_prompt","n":1}],"emacs_repo":true,"self_checkout":false}`,
+			wantChanged: true,
+			want: map[string]any{"step": "pre_deploy", "rounds": map[string]any{"queue": float64(1), "pre_deploy": float64(1)},
+				"active": map[string]any{"kind": "pre_deploy", "n": float64(1)}, "open": []any{map[string]any{"kind": "pre_deploy", "n": float64(1)}},
+				"rollout_requested": false},
+		},
+		{
+			name:        "a landing in the daemon's own checkout still rolls out",
+			doc:         `{"step":"post_prompt","active":{"kind":"post_prompt","n":1},"self_checkout":true}`,
+			wantChanged: true,
+			want:        map[string]any{"step": "post_deploy", "active": map[string]any{"kind": "post_deploy", "n": float64(1)}, "rollout_requested": true},
+		},
+		{name: "a merged-upstream finish's record is dropped", doc: `{"step":"updating_main"}`, wantDrop: true, wantChanged: true},
+		{name: "a record this build wrote is left alone", doc: `{"step":"tests","active":{"kind":"tests","n":1},"rollout_requested":false}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			out, drop, changed, err := rewriteRetiredProgress([]byte(tt.doc))
+
+			// Assert
+			if err != nil || drop != tt.wantDrop || changed != tt.wantChanged {
+				t.Fatalf("rewriteRetiredProgress = drop %v, changed %v, %v; want drop %v, changed %v", drop, changed, err, tt.wantDrop, tt.wantChanged)
+			}
+			if tt.want == nil {
+				return
+			}
+			var got map[string]any
+			if err := json.Unmarshal(out, &got); err != nil || !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("record = %s (%v), want %v", out, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRewriteRetiredProgressRefusesARecordThatIsNoJSON(t *testing.T) {
+	// Act
+	_, _, _, err := rewriteRetiredProgress([]byte("not json"))
+
+	// Assert
+	if err == nil {
+		t.Fatal("rewriteRetiredProgress = nil error, want the record refused")
+	}
+}
+
+func TestTheMigrationCarriesSuspendedMergesIntoTheDeployQueue(t *testing.T) {
+	// Arrange -- a layout-66 file with a merged-upstream entry suspended at
+	// updating main, and an own-branch entry suspended at its post-merge prompt.
+	path := fixtureAt(t, 66)
+	execRaw(t, path, `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_actions_before, source_actions_after)
+	 VALUES ('/repo', 'ws-up', 1, 1, 1, 3, '[]', '[]'), ('/repo', 'ws-own', 2, 1, 1, 0, '[]', '[]')`)
+	execRaw(t, path, `INSERT INTO merge_progress (workspace_id, lease_id, updated_at, document)
+	 VALUES ('ws-up', 'l-up', 1, '{"step":"updating_main"}'), ('ws-own', 'l-own', 1, '{"step":"post_prompt","self_checkout":true}')`)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-66 database: %v", err)
+	}
+	defer handle.Close()
+	s := handle.(*store)
+
+	// Assert
+	if kind := scalar[int](t, s, `SELECT source_kind FROM merge_queue WHERE workspace_id = 'ws-up'`); kind != int(MergeSourceOwnBranch) {
+		t.Fatalf("the merged-upstream entry's kind = %d, want the own branch", kind)
+	}
+	if n := scalar[int](t, s, `SELECT COUNT(*) FROM merge_progress WHERE workspace_id = 'ws-up'`); n != 0 {
+		t.Fatalf("the updating-main record survived (%d), want it dropped", n)
+	}
+	doc := scalar[string](t, s, `SELECT document FROM merge_progress WHERE workspace_id = 'ws-own'`)
+	if doc != `{"rollout_requested":true,"step":"post_deploy"}` {
+		t.Fatalf("the post-prompt record = %s, want it at the post-deploy stage with its rollout requested", doc)
 	}
 }

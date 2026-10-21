@@ -26,7 +26,13 @@ import (
 // wrote reads back as the same prompts it ran. IT IS BREAKING: the previous
 // build writes the old column names, so the step runs only under a sole
 // writer (a stop-then-start restart, never a handover).
+//
+// A queue entry of the retired merged-upstream kind (source_kind 3) becomes
+// the requester's own branch (0): finishing a workspace always runs its
+// repository's deploy, so the entry deploys like any other, and a row this
+// build could not decode never refuses its boot.
 const deployHooksDDL = `
+UPDATE merge_queue SET source_kind = 0 WHERE source_kind = 3;
 ALTER TABLE creation_jobs RENAME COLUMN actions_before TO pre_deploy_hooks;
 ALTER TABLE creation_jobs RENAME COLUMN actions_after TO post_deploy_hooks;
 UPDATE creation_jobs SET
@@ -81,6 +87,138 @@ func decodeHooks(table, row, field, raw string) ([]*repoconfigv1.DeployHook, err
 		out = append(out, hook)
 	}
 	return out, nil
+}
+
+// rewriteDeployQueueRows is layout 68's Go rewrite: the stored merge tabs and
+// the stored progress records a previous build wrote, each read again in the
+// deploy queue's vocabulary.
+func rewriteDeployQueueRows(ctx context.Context, tx *sql.Tx) error {
+	if err := rewriteRetiredMergeTabs(ctx, tx); err != nil {
+		return err
+	}
+	return rewriteRetiredProgressSteps(ctx, tx)
+}
+
+// retiredProgressSteps maps each step and tab kind a progress record of a
+// previous build could name onto the deploy stage that replaced it.
+var retiredProgressSteps = map[string]string{
+	"pre_prompt":  "pre_deploy",
+	"post_prompt": "post_deploy",
+}
+
+// retiredUpdatingMain is the step of a merged-upstream finish, retired with it.
+const retiredUpdatingMain = "updating_main"
+
+// rewriteRetiredProgressSteps is layout 68's progress rewrite. A suspended
+// merge's record (merge_progress.document, the merge package's JSON) names its
+// step and its tab rounds by tab kind, and a previous build's record may name
+// a configured prompt's step, which is now a deploy stage of the same place:
+// it is renamed. Its `self_checkout`, which made the old teardown roll the
+// runtime out, becomes `rollout_requested`, which the deploy hook sets now. A
+// record standing at `updating_main` belongs to a merged-upstream finish, whose
+// entry layout 68 turned into an own-branch deploy: the record is dropped, so
+// recovery puts the entry back in line to deploy afresh. Every other record is
+// left byte for byte as it was.
+func rewriteRetiredProgressSteps(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, document FROM merge_progress`)
+	if err != nil {
+		return err
+	}
+	type rewrite struct {
+		ws   string
+		doc  []byte
+		drop bool
+	}
+	var rewrites []rewrite
+	for rows.Next() {
+		var ws string
+		var raw []byte
+		if err := rows.Scan(&ws, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		out, drop, changed, err := rewriteRetiredProgress(raw)
+		if err != nil {
+			rows.Close()
+			return fmt.Errorf("merge progress of %s: %w", ws, err)
+		}
+		if changed {
+			rewrites = append(rewrites, rewrite{ws: ws, doc: out, drop: drop})
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, rw := range rewrites {
+		if rw.drop {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM merge_progress WHERE workspace_id = ?`, rw.ws); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_progress SET document = ? WHERE workspace_id = ?`, rw.doc, rw.ws); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rewriteRetiredProgress rewrites one progress record: the record anew, or
+// that it is dropped, or that it is unchanged.
+func rewriteRetiredProgress(raw []byte) (out []byte, drop, changed bool, err error) {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, false, false, err
+	}
+	if doc["step"] == retiredUpdatingMain {
+		return nil, true, true, nil
+	}
+	rename := func(kind any) any {
+		if s, ok := kind.(string); ok {
+			if to, retired := retiredProgressSteps[s]; retired {
+				changed = true
+				return to
+			}
+		}
+		return kind
+	}
+	doc["step"] = rename(doc["step"])
+	if rounds, ok := doc["rounds"].(map[string]any); ok {
+		for from, to := range retiredProgressSteps {
+			if n, found := rounds[from]; found {
+				rounds[to] = n
+				delete(rounds, from)
+				changed = true
+			}
+		}
+	}
+	if active, ok := doc["active"].(map[string]any); ok {
+		active["kind"] = rename(active["kind"])
+	}
+	if open, ok := doc["open"].([]any); ok {
+		for _, round := range open {
+			if r, ok := round.(map[string]any); ok {
+				r["kind"] = rename(r["kind"])
+			}
+		}
+	}
+	if self, found := doc["self_checkout"]; found {
+		doc["rollout_requested"] = self
+		delete(doc, "self_checkout")
+		changed = true
+	}
+	if _, found := doc["emacs_repo"]; found {
+		delete(doc, "emacs_repo")
+		changed = true
+	}
+	if !changed {
+		return nil, false, false, nil
+	}
+	out, err = json.Marshal(doc)
+	return out, false, true, err
 }
 
 // The FeedMergeTab.kind tags the deploy queue retired whose stored rows are
