@@ -136,7 +136,7 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 		global.Error(opRegister, "the repository directory cannot be normalized", dlog.Context{"repo_dir": facts.RepoDir, "cause": err.Error()})
 		return wsm.Workspace{}, false, fmt.Errorf("register %q: repository %q: %w", normalized, facts.RepoDir, err)
 	}
-	if repoDir != normalized {
+	if !wsm.IsMainWorktree(normalized, repoDir) {
 		if _, err := v.ensureMainWorktree(ctx, global, repoDir, facts.DefaultBranch); err != nil {
 			return wsm.Workspace{}, false, err
 		}

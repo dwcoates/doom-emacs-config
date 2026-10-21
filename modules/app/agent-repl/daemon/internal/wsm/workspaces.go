@@ -387,7 +387,7 @@ func ensureRepo(ctx context.Context, tx *sql.Tx, repoDir, defaultBranch, workspa
 	case !errors.Is(err, sql.ErrNoRows):
 		return "", err
 	}
-	if workspaceDir != repoDir {
+	if !IsMainWorktree(workspaceDir, repoDir) {
 		return "", fmt.Errorf("register %s under %s: %w", workspaceDir, repoDir, ErrMainWorktreeUnregistered)
 	}
 	id = NewRepoID()
@@ -982,7 +982,7 @@ func (s *store) Forget(ctx context.Context, id WorkspaceID) (ForgetReport, error
 		if err := scanWorkspaceRow(ctx, tx, id, "dir", &dir); err != nil {
 			return err
 		}
-		if dir == repoDir {
+		if IsMainWorktree(dir, repoDir) {
 			var others int
 			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM workspaces WHERE repo_id = ? AND id != ?`, repo, id).Scan(&others); err != nil {
 				return err

@@ -196,7 +196,7 @@ func (v *verbs) othersUnderMainWorktree(ctx context.Context, record wsm.Workspac
 	if err != nil {
 		return 0, err
 	}
-	if repoDir != record.Dir {
+	if !wsm.IsMainWorktree(record.Dir, repoDir) {
 		return 0, nil
 	}
 	workspaces, err := v.deps.DB.ListWorkspaces(ctx)
