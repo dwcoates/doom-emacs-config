@@ -13,6 +13,7 @@ import {
   conversationRecordUuid,
   isKeepalivePrompt,
   KEEPALIVE_INTERVAL_MS,
+  KEEPALIVE_UNANSWERED_RETRY_MS,
   KEEPALIVE_PROMPT_MARKER,
   KeepaliveCadence,
   KeepaliveRewind,
@@ -630,6 +631,44 @@ describe("the cadence, anchored to the conversation's last request", () => {
     scheduler.fireTimeout();
 
     expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
+  });
+
+  it("waits the retry interval after a beat whose turn ended unanswered", () => {
+    // THE 2026-10-20 OUTAGE: the beat's turn failed, so no request moved the
+    // anchor, and the turn's end re-armed a beat already due.
+    const { cadence, scheduler, clock } = cadenceAt(TURN_AT + 52 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    scheduler.fireTimeout();
+    cadence.pause();
+    clock.now += 1000;
+
+    cadence.resume();
+
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_UNANSWERED_RETRY_MS - 1000);
+  });
+
+  it("beats at once again after an unanswered beat once a request answers", () => {
+    const { cadence, scheduler, clock } = cadenceAt(TURN_AT + 52 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    scheduler.fireTimeout();
+    cadence.pause();
+    clock.now += 1000;
+
+    cadence.noteRequest(undefined, 0);
+    cadence.resume();
+
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
+  });
+
+  it("does not hold back a beat a restart finds due after an unanswered one", () => {
+    const { cadence, scheduler, clock } = cadenceAt(TURN_AT + 52 * MINUTE);
+    cadence.start(HOUR_CACHE, "restart");
+    scheduler.fireTimeout();
+    clock.now += 1000;
+
+    cadence.start(HOUR_CACHE, "restart");
+
+    expect(scheduler.pendingTimeout()?.delayMs).toBe(0);
   });
 
   it("re-anchors on a real turn's request: resuming schedules from that request", () => {

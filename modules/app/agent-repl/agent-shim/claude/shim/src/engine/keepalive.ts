@@ -121,6 +121,18 @@ export const KEEPALIVE_PROMPT_MARKER = "<!--agent-repl:keepalive-->";
 export const KEEPALIVE_INTERVAL_MS = 52 * 60 * 1000;
 
 /**
+ * How long after a beat nothing answered the next beat may go out.
+ *
+ * A beat into an unreachable API ends its turn without a request answering,
+ * so the anchor stays where it was and the beat it schedules is already due.
+ * On 2026-10-20 21:30 a DNS outage sent one beat a second, each replacing the
+ * vendor's process, for eight minutes, until the cache lapsed. A failed beat
+ * is retried on this interval instead, so a cache can still be kept warm once
+ * the API answers again.
+ */
+export const KEEPALIVE_UNANSWERED_RETRY_MS = 30 * 1000;
+
+/**
  * The prompt itself.
  *
  * Minimal on purpose: it exists to make an API call that reads the cache back,
@@ -892,6 +904,8 @@ export class KeepaliveCadence {
   private anchor: CacheAnchor | undefined;
   /** The schedule last stated at INFO, so an unchanged reschedule is not restated. */
   private stated: string | undefined;
+  /** When the last beat went out, while no request has answered since. */
+  private unansweredBeatAtMs: number | undefined;
 
   constructor(
     private readonly beat: () => void,
@@ -910,6 +924,7 @@ export class KeepaliveCadence {
    */
   start(anchor: CacheAnchor | undefined, reason: string): void {
     this.anchor = anchor ?? { atMs: this.nowMs(), ttlMs: undefined, contextTokens: 0 };
+    this.unansweredBeatAtMs = undefined;
     this.arm(anchor === undefined ? `${reason}; no request stated, anchored at the start` : reason);
   }
 
@@ -920,6 +935,7 @@ export class KeepaliveCadence {
   noteRequest(writtenTtlMs: number | undefined, contextTokens: number): void {
     if (this.anchor === undefined) return;
     this.anchor = { atMs: this.nowMs(), ttlMs: writtenTtlMs ?? this.anchor.ttlMs, contextTokens };
+    this.unansweredBeatAtMs = undefined;
     this.arm("an API request answered");
   }
 
@@ -1038,8 +1054,16 @@ export class KeepaliveCadence {
       this.spendLastRound(anchor, "no beat can keep the cache warm");
       return;
     }
-    const dueAtMs = anchor.atMs + this.intervalMs;
-    this.schedule(dueAtMs, Math.max(0, dueAtMs - this.nowMs()), reason);
+    let dueAtMs = anchor.atMs + this.intervalMs;
+    let why = reason;
+    if (this.unansweredBeatAtMs !== undefined) {
+      const retryAtMs = this.unansweredBeatAtMs + KEEPALIVE_UNANSWERED_RETRY_MS;
+      if (retryAtMs > dueAtMs) {
+        dueAtMs = retryAtMs;
+        why = `${reason}; the last beat went unanswered, so the next waits the retry interval`;
+      }
+    }
+    this.schedule(dueAtMs, Math.max(0, dueAtMs - this.nowMs()), why);
   }
 
   /**
@@ -1140,6 +1164,7 @@ export class KeepaliveCadence {
       this.spendLastRound(anchor, "no beat can keep the cache warm");
       return;
     }
+    this.unansweredBeatAtMs = this.nowMs();
     this.beat();
     if (this.lastRoundOwed) {
       this.spendLastRound(anchor, "the last round's beat came due");
