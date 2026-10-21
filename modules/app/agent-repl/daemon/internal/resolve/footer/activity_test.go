@@ -506,6 +506,66 @@ func TestTheRetryLineCountsAttemptsAsTheVendorDoes(t *testing.T) {
 	}
 }
 
+func TestTheRetryLineDrawsOnlyALimitTheRetryIsWithin(t *testing.T) {
+	tests := []struct {
+		name           string
+		attempt, max   uint32
+		wantMaxAttempt bool
+	}{
+		// The one retry the vendor makes with its retries off: a request that
+		// got no first byte, retried as retry 1 of 0 (2026-10-21).
+		{name: "a retry past the vendor's limit", attempt: 1, max: 0, wantMaxAttempt: false},
+		{name: "the vendor's last allowed retry", attempt: 10, max: 10, wantMaxAttempt: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+			// Act
+			h.r.OnApiError(testWS, mainAgent, scheduledFailure(tt.attempt, tt.max, instant.Add(32*time.Second)))
+
+			// Assert
+			retry := h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying()
+			if (retry.MaxAttempt != nil) != tt.wantMaxAttempt {
+				t.Fatalf("max attempt = %v, want drawn %v", retry.MaxAttempt, tt.wantMaxAttempt)
+			}
+		})
+	}
+}
+
+func TestTheRetryLineCountsDownOnlyToAnInstantStillAhead(t *testing.T) {
+	tests := []struct {
+		name     string
+		next     time.Time
+		wantNext bool
+	}{
+		// The vendor states a retry it makes at once: its instant is the
+		// failure's own, already passed when the failure arrives.
+		{name: "an instant already passed", next: instant.Add(-500 * time.Millisecond), wantNext: false},
+		{name: "an instant still ahead", next: instant.Add(32 * time.Second), wantNext: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+			// Act
+			h.r.OnApiError(testWS, mainAgent, scheduledFailure(1, 0, tt.next))
+
+			// Assert
+			retry := h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying()
+			if (retry.NextAttempt != nil) != tt.wantNext {
+				t.Fatalf("next attempt = %v, want drawn %v", retry.NextAttempt, tt.wantNext)
+			}
+		})
+	}
+}
+
 func TestTheRetryLineCarriesTheNextAttemptsInstant(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
