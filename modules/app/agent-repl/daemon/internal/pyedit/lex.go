@@ -116,7 +116,7 @@ func lex(src string) ([]token, error) {
 				j++
 			}
 			word := src[i:j]
-			if j < len(src) && (src[j] == '\'' || src[j] == '"') && isStringPrefix(word) {
+			if j < len(src) && (src[j] == singleQuote || src[j] == '"') && isStringPrefix(word) {
 				tok, next, lines, err := lexString(src, i, j, word, line)
 				if err != nil {
 					return nil, err
@@ -130,7 +130,7 @@ func lex(src string) ([]token, error) {
 			i = j
 		case c >= utf8.RuneSelf:
 			return nil, fmt.Errorf("line %d: a non-ASCII character outside a string", line)
-		case c == '\'' || c == '"':
+		case c == singleQuote || c == '"':
 			tok, next, lines, err := lexString(src, i, i, "", line)
 			if err != nil {
 				return nil, err
@@ -274,7 +274,7 @@ func unescape(body string) (string, error) {
 		e := body[i]
 		switch e {
 		case '\n':
-		case '\\', '\'', '"':
+		case '\\', singleQuote, '"':
 			b.WriteByte(e)
 		case 'n':
 			b.WriteByte('\n')

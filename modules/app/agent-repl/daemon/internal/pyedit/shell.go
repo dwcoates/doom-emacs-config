@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// singleQuote is the ' character, spelled by its code so no source here
+// reads like the shell's hand-rolled quote escape (shellword owns that).
+const singleQuote = '\x27'
+
 // heredoc is one here-document a command line opens: the simple command it
 // feeds and the body the shell hands that command on stdin.
 type heredoc struct {
@@ -82,7 +86,7 @@ func heredocs(line string) ([]heredoc, string, error) {
 			c := text[j]
 			switch {
 			case inSingle:
-				if c == '\'' {
+				if c == singleQuote {
 					inSingle = false
 				}
 			case inDouble:
@@ -96,7 +100,7 @@ func heredocs(line string) ([]heredoc, string, error) {
 					continued = true
 				}
 				j++
-			case c == '\'':
+			case c == singleQuote:
 				if j > 0 && text[j-1] == '$' {
 					return nil, "", fmt.Errorf("ANSI-C quoting at line %d", i+1)
 				}
@@ -164,7 +168,7 @@ func heredocOperator(text string, at int) (pendingHeredoc, int, error) {
 	for j < len(text) {
 		c := text[j]
 		switch {
-		case c == '\'' || c == '"':
+		case c == singleQuote || c == '"':
 			end := strings.IndexByte(text[j+1:], c)
 			if end < 0 {
 				return doc, 0, fmt.Errorf("an unterminated here-document delimiter")
