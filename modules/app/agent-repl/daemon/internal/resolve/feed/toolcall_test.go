@@ -3,12 +3,14 @@ package feed
 import (
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	kinds "agent-repld/internal/detachedkindtest"
+	"agent-repld/internal/sourcescan"
 
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -369,6 +371,45 @@ func TestDiffLinesCarryTheirKindAsTheArmAndNotAsAPrefix(t *testing.T) {
 	}
 	if lines[3].GetAdded() == nil || lines[3].GetText() != "new" {
 		t.Fatalf("added line = %+v", lines[3])
+	}
+}
+
+func TestTheDiffLineConstructorsSetTheirArmAndText(t *testing.T) {
+	tests := []struct {
+		name string
+		line *frontendv1.FeedDiffLine
+		arm  func(*frontendv1.FeedDiffLine) bool
+	}{
+		{name: "header", line: headerLine("t"), arm: func(l *frontendv1.FeedDiffLine) bool { return l.GetHeader() != nil }},
+		{name: "added", line: addedLine("t"), arm: func(l *frontendv1.FeedDiffLine) bool { return l.GetAdded() != nil }},
+		{name: "removed", line: removedLine("t"), arm: func(l *frontendv1.FeedDiffLine) bool { return l.GetRemoved() != nil }},
+		{name: "context", line: contextLine("t"), arm: func(l *frontendv1.FeedDiffLine) bool { return l.GetContext() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Assert.
+			if !tt.arm(tt.line) || tt.line.GetText() != "t" {
+				t.Fatalf("line = %+v, want the %s arm with text t", tt.line, tt.name)
+			}
+		})
+	}
+}
+
+func TestEveryDiffLineIsBuiltThroughTheSharedConstructors(t *testing.T) {
+	// Arrange: each arm's literal may appear once, in its constructor.
+	arms := []string{"FeedDiffLine_Header{", "FeedDiffLine_Added{", "FeedDiffLine_Removed{", "FeedDiffLine_Context{"}
+
+	// Act, Assert.
+	for _, arm := range arms {
+		if n := sourcescan.Count(t, arm); n != 1 {
+			var where []string
+			for _, file := range sourcescan.Production(t) {
+				if strings.Contains(string(file.Source), arm) {
+					where = append(where, file.Name)
+				}
+			}
+			t.Fatalf("%s is built %d times (%s), want once, in its constructor", arm, n, strings.Join(where, ", "))
+		}
 	}
 }
 

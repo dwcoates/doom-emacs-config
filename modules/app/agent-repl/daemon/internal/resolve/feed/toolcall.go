@@ -568,10 +568,7 @@ func (r *resolver) drawEdit(s *wsState, at placement, act *conversationv1.AgentA
 func diffForm(hunks []*conversationv1.FilePatchHunk) returnedForm {
 	var lines []*frontendv1.FeedDiffLine
 	for _, hunk := range hunks {
-		lines = append(lines, &frontendv1.FeedDiffLine{
-			Kind: &frontendv1.FeedDiffLine_Header{Header: &frontendv1.FeedDiffLineHeader{}},
-			Text: hunkHeader(hunk),
-		})
+		lines = append(lines, headerLine(hunkHeader(hunk)))
 		for _, line := range hunk.GetLines() {
 			lines = append(lines, diffLine(line))
 		}
@@ -595,36 +592,38 @@ func hunkHeader(hunk *conversationv1.FilePatchHunk) string {
 // carries that fact, so the text must not carry it twice.
 func diffLine(line string) *frontendv1.FeedDiffLine {
 	if line == "" {
-		return &frontendv1.FeedDiffLine{
-			Kind: &frontendv1.FeedDiffLine_Context{Context: &frontendv1.FeedDiffLineContext{}},
-		}
+		return contextLine("")
 	}
 	switch line[0] {
 	case '+':
-		return &frontendv1.FeedDiffLine{
-			Kind: &frontendv1.FeedDiffLine_Added{Added: &frontendv1.FeedDiffLineAdded{}},
-			Text: line[1:],
-		}
+		return addedLine(line[1:])
 	case '-':
-		return &frontendv1.FeedDiffLine{
-			Kind: &frontendv1.FeedDiffLine_Removed{Removed: &frontendv1.FeedDiffLineRemoved{}},
-			Text: line[1:],
-		}
+		return removedLine(line[1:])
 	case ' ':
-		return &frontendv1.FeedDiffLine{
-			Kind: &frontendv1.FeedDiffLine_Context{Context: &frontendv1.FeedDiffLineContext{}},
-			Text: line[1:],
-		}
+		return contextLine(line[1:])
 	case '@':
-		return &frontendv1.FeedDiffLine{
-			Kind: &frontendv1.FeedDiffLine_Header{Header: &frontendv1.FeedDiffLineHeader{}},
-			Text: line,
-		}
+		return headerLine(line)
 	}
-	return &frontendv1.FeedDiffLine{
-		Kind: &frontendv1.FeedDiffLine_Context{Context: &frontendv1.FeedDiffLineContext{}},
-		Text: line,
-	}
+	return contextLine(line)
+}
+
+// The wire diff line of each kind: every diff the feed draws, a producer's
+// patch or a shell command's stated edit, builds its lines through these.
+
+func headerLine(text string) *frontendv1.FeedDiffLine {
+	return &frontendv1.FeedDiffLine{Kind: &frontendv1.FeedDiffLine_Header{Header: &frontendv1.FeedDiffLineHeader{}}, Text: text}
+}
+
+func addedLine(text string) *frontendv1.FeedDiffLine {
+	return &frontendv1.FeedDiffLine{Kind: &frontendv1.FeedDiffLine_Added{Added: &frontendv1.FeedDiffLineAdded{}}, Text: text}
+}
+
+func removedLine(text string) *frontendv1.FeedDiffLine {
+	return &frontendv1.FeedDiffLine{Kind: &frontendv1.FeedDiffLine_Removed{Removed: &frontendv1.FeedDiffLineRemoved{}}, Text: text}
+}
+
+func contextLine(text string) *frontendv1.FeedDiffLine {
+	return &frontendv1.FeedDiffLine{Kind: &frontendv1.FeedDiffLine_Context{Context: &frontendv1.FeedDiffLineContext{}}, Text: text}
 }
 
 // applyDiagnostics folds an injected diagnostics report onto its change card.
