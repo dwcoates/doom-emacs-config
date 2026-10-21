@@ -56,6 +56,11 @@ const (
 	opIpo      = "daemon.newsdigest.ipo"
 )
 
+// EnvStartDelay names the TEST knob that replaces DefaultStartDelay (a Go
+// duration). The harness states it beyond any test's lifetime for every
+// daemon it starts, so no test daemon's schedule ever reaches a source.
+const EnvStartDelay = "AGENT_REPL_NEWS_DIGEST_START_DELAY"
+
 // Production windows.
 const (
 	// DefaultEvery is the cadence: one run a day, from the previous run's end.

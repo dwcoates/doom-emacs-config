@@ -30,6 +30,7 @@ import (
 	"agent-repld/internal/chessboard"
 	"agent-repld/internal/cpugov"
 	"agent-repld/internal/daemonaddr"
+	"agent-repld/internal/newsdigest"
 	"agent-repld/internal/procgroup"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/tempdirs"
@@ -235,6 +236,22 @@ func HostNeutralCheckoutEnv() []string {
 // StartDaemon appends after this.
 func HostNeutralPowerEnv() []string {
 	return []string{cpugov.FixedPowerEnv + "=" + cpugov.PowerAC.String()}
+}
+
+// NeutralNewsDigestStartDelay is the news digest's start delay every test
+// daemon is given: far past any suite's timeout, so a scheduled run never
+// fires inside a test process and no test daemon reads a real source.
+const NeutralNewsDigestStartDelay = 24 * time.Hour
+
+// HostNeutralNewsDigestEnv keeps a test daemon's news digest schedule from
+// ever running (newsdigest.EnvStartDelay). Left at the production two
+// minutes, any test daemon that lives longer -- the e2e suite's shared one --
+// fetches the real sources, which the vendor guard refuses, and logs that no
+// source could be read. A test of the digest drives it through
+// RefreshNewsDigest and sets its own knobs through ExtraEnv, which StartDaemon
+// appends after this.
+func HostNeutralNewsDigestEnv() []string {
+	return []string{newsdigest.EnvStartDelay + "=" + NeutralNewsDigestStartDelay.String()}
 }
 
 // statedEmpty answers each key stated EMPTY, the one form every host-neutral
@@ -826,6 +843,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	env = append(env, HostNeutralNamingEnv()...)
 	env = append(env, HostNeutralCheckoutEnv()...)
 	env = append(env, HostNeutralPowerEnv()...)
+	env = append(env, HostNeutralNewsDigestEnv()...)
 	env = append(env, TemporaryRegistrationEnv(t)...)
 	// The daemon's OWN checkout identity is always overridden, whether or not
 	// a test cares which repository it is. The merge orchestrator's two

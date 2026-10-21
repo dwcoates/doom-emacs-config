@@ -54,7 +54,6 @@ func newsDigestEnv(t *testing.T) []string {
 	script := "#!/bin/sh\ncat > /dev/null\ncase \"$*\" in\n*WebSearch*) " + envelope(newsDigestIpoAnswer) + " ;;\n*) " + envelope(newsDigestAnswer) + " ;;\nesac\n"
 	return []string{
 		"AGENT_REPL_NEWS_DIGEST_SOURCES=" + sources,
-		"AGENT_REPL_NEWS_DIGEST_START_DELAY=24h",
 		scriptedClaudeEnv(t, script),
 	}
 }
