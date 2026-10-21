@@ -64,7 +64,7 @@ func TestPutCreationJobRoundTripsTheDeployHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreationJob: %v", err)
 	}
-	if !sameHooks(got.Hooks, hooks) {
+	if !got.Hooks.Equal(hooks) {
 		t.Fatalf("hooks = %+v, want %+v", got.Hooks, hooks)
 	}
 }

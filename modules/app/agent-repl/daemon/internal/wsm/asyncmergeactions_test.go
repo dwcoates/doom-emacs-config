@@ -11,7 +11,6 @@ import (
 
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
-	"google.golang.org/protobuf/proto"
 )
 
 // promptHook is a prompt hook of TEXT.
@@ -27,22 +26,6 @@ func scriptHook(path string, seconds uint32) *repoconfigv1.DeployHook {
 // someHooks is a pre-deploy prompt and a post-deploy script, as an async
 // request names them.
 var someHooks = DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHook("run the linters")}, PostDeploy: []*repoconfigv1.DeployHook{scriptHook("bin/notify.sh", 30)}}
-
-// sameHooks reports whether two DeployHooks hold equal hooks, stage by stage.
-func sameHooks(a, b DeployHooks) bool {
-	same := func(x, y []*repoconfigv1.DeployHook) bool {
-		if len(x) != len(y) {
-			return false
-		}
-		for i := range x {
-			if !proto.Equal(x[i], y[i]) {
-				return false
-			}
-		}
-		return true
-	}
-	return same(a.PreDeploy, b.PreDeploy) && same(a.PostDeploy, b.PostDeploy)
-}
 
 // detachedSource is an async request for branch feature carrying HOOKS.
 func detachedSource(hooks DeployHooks) MergeSource {
@@ -74,7 +57,7 @@ func TestAnAsyncRequestKeepsItsDeployHooksInTheQueue(t *testing.T) {
 			if err != nil || readErr != nil || len(queue) != 1 {
 				t.Fatalf("RequestMerge = %v, MergeQueue = %+v, %v; want one request", err, queue, readErr)
 			}
-			if got := queue[0].Source.Hooks; !sameHooks(got, tt.hooks) {
+			if got := queue[0].Source.Hooks; !got.Equal(tt.hooks) {
 				t.Fatalf("Hooks = %+v, want %+v", got, tt.hooks)
 			}
 		})
@@ -109,7 +92,7 @@ func TestAnAsyncRequestsDeployHooksSurviveARestartBeforeItsHandOff(t *testing.T)
 	if err != nil || len(queue) != 1 {
 		t.Fatalf("MergeQueue = %+v, %v; want the one request", queue, err)
 	}
-	if got := queue[0].Source.Hooks; !sameHooks(got, someHooks) {
+	if got := queue[0].Source.Hooks; !got.Equal(someHooks) {
 		t.Fatalf("Hooks after the restart = %+v, want %+v", got, someHooks)
 	}
 }

@@ -15,6 +15,8 @@ import (
 
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // The identity newtypes are aliases of internal/ids, the leaf that holds one
@@ -391,6 +393,24 @@ type DeployHooks struct {
 
 // Empty reports whether no stage is given.
 func (h DeployHooks) Empty() bool { return len(h.PreDeploy) == 0 && len(h.PostDeploy) == 0 }
+
+// Equal reports whether o holds equal hooks, stage by stage and in order.
+func (h DeployHooks) Equal(o DeployHooks) bool {
+	return equalHooks(h.PreDeploy, o.PreDeploy) && equalHooks(h.PostDeploy, o.PostDeploy)
+}
+
+// equalHooks reports whether two hook lists are equal hook for hook.
+func equalHooks(a, b []*repoconfigv1.DeployHook) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !proto.Equal(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
 
 // Session is a workspace's session binding plus the facts that outlive one
 // shim process.
