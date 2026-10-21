@@ -453,6 +453,21 @@ No way of creating a workspace switches you to it.
   - While you type, a workspace's panels being built, a switch made from the sidebar or by an agent, and the landing on a registered or reopened workspace all wait.
   - They happen as soon as the prompt closes.
 
+## Every project has its main-worktree workspace
+
+A project agent-repl knows always has a workspace for its main worktree.
+
+- Adding a project by any means registers its main worktree as a workspace.
+  - This covers `SPC TAB C-n` on any of the project's worktrees, `SPC j .`, and creating a workspace in it.
+  - Adding a linked worktree registers the main worktree as well, closed rather than opened.
+    - It is in the switcher (`SPC p p`) as a closed workspace, and opening it is an ordinary open.
+  - Adding the main worktree itself opens it, as before.
+- The main-worktree workspace stays registered as long as the project does.
+  - Closing it is allowed, and it stays registered while closed.
+  - Forgetting it is refused while the project has other workspaces.
+  - Forgetting it as the project's last workspace removes the project.
+- A project registered before this rule existed gets its main-worktree workspace, closed, the next time the daemon starts.
+
 ## When creating a workspace fails
 
 A workspace that fails to be created is reported in two places.
