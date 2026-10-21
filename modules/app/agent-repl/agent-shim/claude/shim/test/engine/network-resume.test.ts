@@ -98,6 +98,8 @@ interface Harness {
   delivery: ResumeDelivery | Error;
   /** Every network-fault recovery the seam resolved, by the probe's detail. */
   readonly recovered: string[];
+  /** Every network fault the seam stood for an unanswered request, by the vendor's words. */
+  readonly unreachable: string[];
 }
 
 function harness(): Harness {
@@ -114,6 +116,7 @@ function harness(): Harness {
     emitted,
     delivery: { kind: "delivered" },
     recovered: [],
+    unreachable: [],
     resume: new NetworkResume({
       probe: probe.probe,
       deliver: (prompt) => {
@@ -125,6 +128,7 @@ function harness(): Harness {
       scheduler,
       emit: (update) => emitted.push(update),
       recovered: (detail) => h.recovered.push(detail),
+      unreachable: (detail) => h.unreachable.push(detail),
     }),
   };
   return h;
@@ -460,6 +464,7 @@ describe("the probe loop", () => {
       nowMs: () => Date.now(),
       scheduler: REAL_SCHEDULER,
       recovered: () => undefined,
+      unreachable: () => undefined,
       emit: () => undefined,
     });
     const start = Date.now();
@@ -491,6 +496,7 @@ describe("the probe loop", () => {
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
       recovered: () => undefined,
+      unreachable: () => undefined,
       emit: () => undefined,
     });
     failWithOutage({ ...h, resume }, "a1", "toolu_spawn");
@@ -528,6 +534,7 @@ describe("the probe loop", () => {
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
       recovered: () => undefined,
+      unreachable: () => undefined,
       emit: () => undefined,
     });
     failWithOutage({ ...h, resume }, "a1", "toolu_spawn");
@@ -1042,6 +1049,7 @@ describe("a wait's outcome on the session stream", () => {
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
       recovered: () => undefined,
+      unreachable: () => undefined,
       emit: (update) => h.emitted.push(update),
     });
     failWithOutage({ ...h, resume }, "a1", "toolu_1");
@@ -1254,6 +1262,7 @@ describe("a delivery that completes after its wait was given up", () => {
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
       recovered: () => undefined,
+      unreachable: () => undefined,
       emit: (update) => h.emitted.push(update),
     });
     const held = { ...h, resume };
@@ -1347,6 +1356,7 @@ describe("a delivery that completes late, after a newer wait of the same agent o
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
       recovered: () => undefined,
+      unreachable: () => undefined,
       emit: (update) => h.emitted.push(update),
     });
     const held = { ...h, resume };
@@ -1518,6 +1528,7 @@ describe("a newer failure of an agent whose wait still stands", () => {
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
       recovered: () => undefined,
+      unreachable: () => undefined,
       emit: (update) => h.emitted.push(update),
     });
     const held = { ...h, resume };
@@ -1632,6 +1643,7 @@ describe("a session stream that cannot take the statement", () => {
       nowMs: () => h.clock.now,
       scheduler: h.scheduler,
       recovered: () => undefined,
+      unreachable: () => undefined,
       emit: () => {
         throw new Error("the fan-out is broken");
       },
@@ -1679,6 +1691,70 @@ describe("a session stream that cannot take the statement", () => {
 
     // Assert
     expect(h.resume.waitingTaskIds()).toEqual(["a1"]);
+  });
+});
+
+describe("a request that got no answer", () => {
+  it("starts the probe loop", () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    h.resume.suspect("No response from API within 224000ms");
+
+    // Assert
+    expect(h.resume.looping()).toBe(true);
+  });
+
+  it("stands the network fault when the probe cannot reach the API", async () => {
+    // Arrange
+    const h = harness();
+    h.probe.reachable = false;
+    h.resume.suspect("No response from API within 224000ms");
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect(h.unreachable).toEqual(["No response from API within 224000ms"]);
+  });
+
+  it("stands nothing and stops probing when the API is reachable", async () => {
+    // Arrange
+    const h = harness();
+    h.resume.suspect("No response from API within 224000ms");
+
+    // Act
+    await h.resume.tick();
+
+    // Assert
+    expect([h.unreachable, h.recovered, h.resume.looping()]).toEqual([[], [], false]);
+  });
+
+  it("stops probing when a request reaches the vendor first", () => {
+    // Arrange
+    const h = harness();
+    h.resume.suspect("No response from API within 224000ms");
+
+    // Act
+    h.resume.faultResolved();
+
+    // Assert
+    expect(h.resume.looping()).toBe(false);
+  });
+
+  it("is not asked about once the network fault already stands", async () => {
+    // Arrange
+    const h = harness();
+    h.probe.reachable = false;
+    h.resume.faultOpened();
+
+    // Act
+    h.resume.suspect("No response from API within 224000ms");
+    await h.resume.tick();
+
+    // Assert
+    expect(h.unreachable).toEqual([]);
   });
 });
 

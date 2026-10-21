@@ -16094,6 +16094,33 @@ describe("the network fault and the start's cause", () => {
     expect(networkFault(h)).toBeUndefined();
   });
 
+  it("stands the network fault when a request got no answer and the probe cannot reach the API", async () => {
+    // Arrange: the vendor retries a request that got no first byte.
+    const h = harness();
+    await started(h);
+    h.probe.reachable = false;
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "api_retry",
+      attempt: 1,
+      max_retries: 0,
+      retry_delay_ms: 0,
+      error_status: null,
+      error: "unknown",
+      no_response: { waited_ms: 224000, retry_wait_ms: 599000 },
+      uuid: "00000000-0000-4000-8000-0000000000a1",
+      session_id: "s",
+    } as unknown as SdkMessage);
+    expect(networkFault(h)).toBeUndefined();
+
+    // Act: the loop's probe cannot reach the API.
+    h.networkScheduler.fire(0);
+    await settledUntil(() => networkFault(h) !== undefined);
+
+    // Assert
+    expect(networkFault(h)).toBe("No response from API within 224000ms");
+  });
+
   it("keeps the network fault while the probe loop finds the API unreachable", async () => {
     // Arrange.
     const h = harness();

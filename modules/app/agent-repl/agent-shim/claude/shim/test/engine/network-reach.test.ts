@@ -57,6 +57,11 @@ describe("networkReach", () => {
     ["an error result with no status and no outage words", result({ is_error: true, subtype: "error_during_execution", errors: ["boom"] }), undefined],
     ["a retry the API answered", apiRetry(529, "overloaded"), { kind: "reached" }],
     ["a retry with no status and no outage class", apiRetry(null, "server_error"), undefined],
+    [
+      "a retry of a request that got no first byte",
+      { ...(apiRetry(null, "unknown") as object), no_response: { waited_ms: 224000, retry_wait_ms: 599000 } } as unknown as SdkMessage,
+      { kind: "unanswered", detail: "No response from API within 224000ms" },
+    ],
     ["an unrelated system message", { type: "system", subtype: "status" } as unknown as SdkMessage, undefined],
   ] as const)("reads %s", (_name, message, want) => {
     // Act

@@ -835,6 +835,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       pushes.resolveComponent(NETWORK_COMPONENT, 0);
       vendorErrorRetry.networkRecovered();
     },
+    // A PROBE THAT CANNOT REACH THE API while a request stands unanswered
+    // stands the network fault, as a request that failed below an answer does.
+    unreachable: (detail) => noteNetworkReach({ kind: "unreachable", detail }),
     ...(deps.networkResumeIntervalMs === undefined ? {} : { intervalMs: deps.networkResumeIntervalMs }),
     ...(deps.networkResumeWindowMs === undefined ? {} : { windowMs: deps.networkResumeWindowMs }),
   });
@@ -5568,6 +5571,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * comes, the network-resume loop's first "reachable" answer does.
    */
   function noteNetworkReach(reach: NetworkReach): void {
+    if (reach.kind === "unanswered") {
+      networkResume.suspect(reach.detail);
+      return;
+    }
     if (reach.kind === "unreachable") {
       pushes.fault(sessionFault({ kind: "networkUnreachable" }, NETWORK_COMPONENT, reach.detail));
       networkResume.faultOpened();
