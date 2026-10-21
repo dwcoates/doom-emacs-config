@@ -1996,6 +1996,9 @@ type fakeSessions struct {
 	// reported. A nil resumeHold runs the re-open inline.
 	resumeHold    chan struct{}
 	resumeSettled chan struct{}
+	// resumeRunCtx is the context a detached re-open reports it ran under;
+	// nil reports a live one.
+	resumeRunCtx context.Context
 	// rebound is every workspace whose start was asked for as a REBIND — the
 	// start that follows a bind, and the only one that tells the shim to adopt
 	// the resumed conversation as the workspace's book.
@@ -2149,7 +2152,11 @@ func (s *fakeSessions) ResumeColdDetached(ws ids.WorkspaceID, resume ColdResume,
 	run := func() {
 		err := s.ResumeCold(context.Background(), ws, resume)
 		if done != nil {
-			done(context.Background(), err)
+			runCtx := s.resumeRunCtx
+			if runCtx == nil {
+				runCtx = context.Background()
+			}
+			done(runCtx, err)
 		}
 	}
 	if s.resumeHold == nil {

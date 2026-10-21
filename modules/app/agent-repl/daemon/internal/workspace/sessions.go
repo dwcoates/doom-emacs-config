@@ -687,18 +687,13 @@ func (f *Fleet) Health(ws ids.WorkspaceID) (bool, bool) {
 //
 // AN ANSWERED GATE IS NOT YET GONE. Its row leaves the feed the moment the
 // answer is taken (owner ruling, 2026-09-29), but until the remediation it
-// chose settles the session is still parked: a prompt is still refused by the
-// gate's own name (ColdGateDetail), and a handover still carries it
-// (ColdGateStanding). Only the menu stops being offered, so a second answer
-// finds nothing to spend.
+// chose settles a handover still carries it (ColdGateStanding). The menu stops
+// being offered, so a second answer finds nothing to spend, and a prompt is no
+// longer refused by the gate's name (ColdGateDetail): it waits for the session
+// the answer is bringing up.
 type coldGate struct {
 	served    ServedColdGate
 	answering bool
-	// remediated is set once the shim ACCEPTED the answer's remediated resume:
-	// the conversation is no longer cold, so a prompt is no longer refused by
-	// the gate's name, though the gate itself retires only when the bring-up
-	// settles (EndColdGate) and a failed bring-up raises it again.
-	remediated bool
 	// configDir is the account root the parked session spends from, kept so
 	// a gate raised again serves the same menu.
 	configDir string
@@ -756,32 +751,6 @@ func (f *Fleet) EndColdGate(ws ids.WorkspaceID, vendorSessionID string) {
 	f.mu.Unlock()
 	if ended {
 		f.logTransition(ws, "cold_gate_answering", true, false, dlog.Context{"reason": "remediated"})
-	}
-}
-
-// remediateColdGate marks the TAKEN gate for VENDORSESSIONID remediated: the
-// shim accepted the answer's resume, so the conversation is warm again and the
-// prompt queue stops refusing by the gate's name (ColdGateDetail).
-//
-// IT RUNS BEFORE THE SESSION IS BROUGHT UP, NOT AFTER IT SETTLES. The bring-up
-// publishes the host view live -- watcher attached, composer open -- and the
-// gate used to retire only once the whole bring-up had returned
-// (coldGateSettled -> EndColdGate). A prompt sent the moment the session
-// showed live was refused `cold_gate: the conversation is cold at ...` for a
-// conversation that had just been paid for (e2e TestColdGate/Pay and /Compact,
-// 2026-10-03: host view live at .760, submit refused at .769, gate ended at
-// .772). From here on the workspace is an ordinary session coming up.
-func (f *Fleet) remediateColdGate(ws ids.WorkspaceID, vendorSessionID string) {
-	f.mu.Lock()
-	held, ok := f.coldGates[ws]
-	marked := ok && held.answering && !held.remediated && held.served.VendorSessionID == vendorSessionID
-	if marked {
-		held.remediated = true
-		f.coldGates[ws] = held
-	}
-	f.mu.Unlock()
-	if marked {
-		f.logTransition(ws, "cold_gate_refusing_prompts", true, false, dlog.Context{"reason": "remediation accepted"})
 	}
 }
 
@@ -1700,9 +1669,6 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 		return refuse(log, "AnswerColdGate", ArmNoSession,
 			fmt.Sprintf("the shim refused the remediated resume of %q as cold again", ws), false)
 	}
-	// THE PROMPT REFUSAL LIFTS BEFORE THE SESSION SHOWS LIVE. See
-	// remediateColdGate.
-	f.remediateColdGate(ws, resume.VendorSessionID)
 	return f.sessionUp(ctx, log, ws, session.client, started, previous, configDir, hostSessionID)
 }
 
@@ -2826,11 +2792,20 @@ func (f *Fleet) ColdGateShown(ws ids.WorkspaceID) bool {
 // when no gate stands. It is the promptqueue's ColdGateFunc: a prompt to a
 // parked session is refused by the gate's OWN name, carrying the gate's own
 // sentence.
+//
+// AN ANSWERED GATE REFUSES NOTHING. Once an answer takes it, the user has
+// chosen and the gate is gone from every surface, so a prompt is the queue's
+// to hold until the session the answer brings up serves (sessionWait), never a
+// refusal by a gate nobody can see. It used to refuse until the shim accepted
+// the remediated resume: on 2026-10-20 that resume ran past the daemon's start
+// bound, and every prompt sent after the payment was refused "the
+// conversation is cold" for a read already paid for. A failed re-open raises
+// the gate again (ReraiseColdGate), and it refuses again from then.
 func (f *Fleet) ColdGateDetail(ws ids.WorkspaceID) (string, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	held, ok := f.coldGates[ws]
-	if !ok || held.remediated {
+	if !ok || held.answering {
 		return "", false
 	}
 	return held.served.Detail, true

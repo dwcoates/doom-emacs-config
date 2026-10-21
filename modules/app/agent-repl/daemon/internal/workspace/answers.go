@@ -8,7 +8,6 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -284,11 +283,17 @@ func (v *verbs) reraiseRefusedColdGate(log dlog.Logger, ws ids.WorkspaceID, vend
 // coldGateSettled is an answered gate's outcome, once its re-open settles.
 //
 // On SUCCESS the session is up, so the footer's and the strip's parked state
-// retire and the session's own facts take them back. A context ending is this
-// daemon standing down, not a fault. Any other failure -- a typed refusal
-// (already recorded where it was raised) or a bring-up that broke -- opens the
-// `cold_gate_reopen_failed` fault, which is the footer's line for it, and
-// stands the gate again so the user can choose again.
+// retire and the session's own facts take them back. The run's own context
+// ending is this daemon standing down, not a fault. Any other failure -- a
+// typed refusal (already recorded where it was raised), a bring-up that broke,
+// or a start that outran its own bound -- opens the `cold_gate_reopen_failed`
+// fault, which is the footer's line for it, and stands the gate again so the
+// user can choose again.
+//
+// THE STAND-DOWN IS READ OFF THE RUN'S CONTEXT, NEVER OFF THE ERROR. A start
+// that outran its bound fails with context.DeadlineExceeded too, and on
+// 2026-10-20 that deadline was read as the daemon standing down: no fault, no
+// gate, and a workspace left neither parked nor up, with nothing to retry it.
 func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, vendorSessionID, choice string, err error) {
 	switch {
 	case err == nil:
@@ -303,7 +308,7 @@ func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.Wor
 		// returns; retiring the gate here is what lets them.
 		v.deps.Topbar.SetColdGate(ws, topbar.ColdGate{Standing: false})
 		log.Info(opColdGate, "answered the cold gate", dlog.Context{"choice": choice})
-	case ctxend.Is(err):
+	case ctx.Err() != nil:
 		v.deps.Footer.SetColdGateAnswer(ws, nil)
 		log.Info(opColdGate, "the answered cold gate's re-open was abandoned as the daemon stood down",
 			dlog.Context{"choice": choice, "cause": err.Error()})

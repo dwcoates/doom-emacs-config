@@ -686,3 +686,47 @@ func TestAContextCutIsSpelledOnlyBySessionCommand(t *testing.T) {
 		})
 	}
 }
+
+// A CONTEXT CUT MEETS THE SESSION AS A PROMPT DOES (2026-10-20: a /compact
+// sent to a session whose start had timed out waited on a main watch that
+// never opened, and every stop and restart waited behind it).
+func TestSubmitSessionActGatesAContextCutOnTheSession(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrange   func(h *harness)
+		wantGate  bool
+		wantHold  bool
+		wantTurns int
+	}{
+		{name: "a standing cold gate refuses it by the gate's name", arrange: func(h *harness) { h.coldGate = "the conversation is cold" }, wantGate: true},
+		{name: "a session not started holds it", arrange: func(h *harness) { h.notStarted = true }, wantHold: true},
+		{name: "a session with no watcher yet holds it", arrange: func(h *harness) { h.noWatcher = true }, wantHold: true},
+		{name: "a serving session runs it", arrange: func(*harness) {}, wantTurns: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(h)
+
+			// Act
+			err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActCompact, Turn: "cut-1"})
+
+			// Assert
+			var gate *ColdGateRefusal
+			if gated := errors.As(err, &gate); gated != tc.wantGate {
+				t.Fatalf("SubmitSessionAct = %v, want a cold gate refusal %t", err, tc.wantGate)
+			}
+			if !tc.wantGate && err != nil {
+				t.Fatalf("SubmitSessionAct = %v, want no error", err)
+			}
+			held := h.db.held["cut-1"]
+			if gotHold := held != nil && held.Hold != nil && *held.Hold == wsm.HoldReconnect; gotHold != tc.wantHold {
+				t.Fatalf("held = %+v, want the reconnect hold %t", held, tc.wantHold)
+			}
+			if got := len(h.sender.turns); got != tc.wantTurns {
+				t.Fatalf("turns started = %d, want %d", got, tc.wantTurns)
+			}
+		})
+	}
+}

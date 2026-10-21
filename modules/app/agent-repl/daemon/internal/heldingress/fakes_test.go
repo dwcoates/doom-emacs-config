@@ -43,14 +43,20 @@ type fakeHandler struct {
 	deliveries map[string]int
 	// refuse answers a Submit of the key with the error, without accepting it.
 	refuse map[string]error
+	// hang makes a Submit of the key answer only when its context ends.
+	hang map[string]bool
 }
 
 func newFakeHandler() *fakeHandler {
-	return &fakeHandler{accepted: map[string]bool{}, deliveries: map[string]int{}, refuse: map[string]error{}}
+	return &fakeHandler{accepted: map[string]bool{}, deliveries: map[string]int{}, refuse: map[string]error{}, hang: map[string]bool{}}
 }
 
-func (h *fakeHandler) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, _ *ids.WorkspaceID, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (h *fakeHandler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, _ *ids.WorkspaceID, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
 	h.calls = append(h.calls, submission{WS: ws, Key: key, Text: said.GetContent().GetBlocks()[0].GetText().GetText(), Origin: origin, Delivery: delivery})
+	if h.hang[key] {
+		<-ctx.Done()
+		return prompthandler.Outcome{}, ctx.Err()
+	}
 	if err, ok := h.refuse[key]; ok {
 		return prompthandler.Outcome{}, err
 	}
@@ -105,13 +111,15 @@ func (f *fakePending) lastSet(ws ids.WorkspaceID) ([]holds.IngressEntry, bool) {
 
 // world is one test's ingress directory, workspace registry and collaborators.
 type world struct {
-	t         *testing.T
-	dir       string
-	handler   *fakeHandler
-	pending   *fakePending
-	log       *dlog.TestSurfaces
-	byDir     map[string]wsm.Workspace
-	published []ids.WorkspaceID
+	t       *testing.T
+	dir     string
+	handler *fakeHandler
+	pending *fakePending
+	log     *dlog.TestSurfaces
+	byDir   map[string]wsm.Workspace
+	// submitBound is the ingress's SubmitBound; zero takes the default.
+	submitBound time.Duration
+	published   []ids.WorkspaceID
 	// publishedSaw records, at each publish, whether the entry files it
 	// followed were already gone.
 	publishedSaw []int
@@ -151,10 +159,11 @@ func (w *world) ingress() Ingress {
 			w.published = append(w.published, ws)
 			w.publishedSaw = append(w.publishedSaw, len(w.entries()))
 		},
-		Serves: func() bool { return w.serves },
-		Log:    w.log,
-		Remove: w.remove,
-		Now:    func() time.Time { return w.now },
+		Serves:      func() bool { return w.serves },
+		Log:         w.log,
+		Remove:      w.remove,
+		Now:         func() time.Time { return w.now },
+		SubmitBound: w.submitBound,
 	})
 	if err != nil {
 		w.t.Fatalf("New = %v", err)
