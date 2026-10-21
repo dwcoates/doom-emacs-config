@@ -1182,6 +1182,37 @@ message FeedSimpleToolCall {
   // start for it; the head then draws no clock rather than one started from
   // the client's own arrival.
   optional FeedToolCardClock clock = 7;
+  // THE FILE EDITS A SHELL COMMAND STATES, drawn as the classic diff below
+  // the input line: an agent that edits through a `python3 - <<'EOF'` script
+  // (read a file, `str.replace` a literal old text with a literal new one,
+  // write it back) states the very edit an Edit call would, and the reader
+  // sees it the same way. The DAEMON reads the command, by a deliberately
+  // narrow rule: a script it cannot read in full states nothing, so a drawn
+  // edit is always one the command literally spells out, never a guess.
+  //
+  // WHAT IT STATES, NOT WHAT IT DID: the edit is the command's own text, so it
+  // is present from the start, while the call runs; whether the script got
+  // that far is the exit chip's and the output's to say. UNSET for every call
+  // whose command states no such edit, for every tool but a shell, and for a
+  // denied call, which never ran.
+  optional FeedToolCallEdits edits = 8;
+}
+// The edits a shell command states, one per file, in the order the command
+// writes them.
+message FeedToolCallEdits {
+  // Never empty: a command stating no edit leaves FeedSimpleToolCall.edits
+  // unset rather than sending an empty list.
+  repeated FeedToolCallFileEdit files = 1;
+}
+// One file's stated edit.
+message FeedToolCallFileEdit {
+  // The path exactly as the command names it (relative to the command's own
+  // working directory when it is relative), drawn verbatim.
+  string path = 1;
+  // The edit's lines, in order: a header line opening each replacement, then
+  // the replaced text's lines as removed, the replacing text's as added, and
+  // the lines the two share as context.
+  repeated FeedDiffLine lines = 2;
 }
 // THE HEAD'S CLOCK, shared by every purple-titled tool card -- a tool call, a
 // question, a permission, a skill, a hook -- so every one of them states its
