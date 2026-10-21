@@ -1416,6 +1416,10 @@ func TestTheChainCheckAgainstItsQueue(t *testing.T) {
 				entries = append(entries, admittedEntry(ws))
 			}
 			h := resumeWorld(t, entries)
+			// A queue races only in a repository whose deploy merges locally.
+			h.mu.Lock()
+			h.config = localMergeConfig()
+			h.mu.Unlock()
 			ctx, cancel := context.WithCancelCause(context.Background())
 			defer cancel(nil)
 			h.o.mu.Lock()

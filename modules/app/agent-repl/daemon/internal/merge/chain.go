@@ -156,26 +156,18 @@ func racable(entry wsm.MergeQueueEntry) bool {
 	return entry.State == wsm.MergeQueued && entry.Source.Pick == ""
 }
 
-// racesIn reports whether REPO's deploy config has a local merge, the one
-// deploy whose queue races. It reads the config through any entry's
-// workspace, since every entry of one queue is a workspace of one repository.
-// A queue whose config cannot be read does not race, which is the queue
-// running its head alone: the head's own deploy reports the config's fault.
-func (o *orchestrator) racesIn(ctx context.Context, repo wsm.RepoKey, entries []wsm.MergeQueueEntry) bool {
+// racesIn reports whether the deploy config HEAD runs by has a local merge,
+// the one deploy whose queue races. It reads the config afresh through the
+// running head, the one member of the queue certain to be a live workspace
+// with a resolved target. A config that cannot be read does not race, which
+// is the queue running its head alone: the head's own deploy reports the
+// config's fault when it next reads it.
+func (o *orchestrator) racesIn(ctx context.Context, repo wsm.RepoKey, head *run) bool {
 	const op = "daemon.merge.chain"
-	if len(entries) == 0 {
-		return false
-	}
-	record, err := o.deps.DB.Workspace(ctx, entries[0].Workspace)
-	if err != nil {
-		o.deps.Log.Global().Error(op, "could not read a queued workspace to read its repository's deploy config; the queue does not race", dlog.Context{
-			"repo": string(repo), "workspace": string(entries[0].Workspace), "error": err.Error()})
-		return false
-	}
-	target, err := o.deployTargetFor(ctx, record.ID, record.Dir)
+	target, err := o.deployTargetFor(ctx, head.ws, head.subject.targetDir)
 	if err != nil {
 		o.deps.Log.Global().Debug(op, "the repository's deploy config cannot be read; the queue does not race", dlog.Context{
-			"repo": string(repo), "cause": err.Error()})
+			"repo": string(repo), "head": string(head.ws), "cause": err.Error()})
 		return false
 	}
 	return target.localMerge() != nil
@@ -204,9 +196,12 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		o.deps.Log.Global().Error(op, "could not read whether the queue is paused to extend its chain", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return false
 	}
+	o.mu.Lock()
+	head := o.running[repo]
+	o.mu.Unlock()
 	// ONLY A LOCAL MERGE RACES: a speculative run rebases and tests ahead of
 	// its turn, which is the local merge's work and no other deploy's.
-	if !o.racesIn(ctx, repo, stored) {
+	if head == nil || !o.racesIn(ctx, repo, head) {
 		return false
 	}
 	o.mu.Lock()
@@ -220,7 +215,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	// until it registers again at the chain's front (register), and the pump
 	// promotes the merge behind a head that ended: until then the chain stands
 	// behind an entry it holds no run for, and nothing joins it.
-	if head := o.running[repo]; head == nil || chain[0] != head {
+	if o.running[repo] != head || chain[0] != head {
 		o.mu.Unlock()
 		return false
 	}
