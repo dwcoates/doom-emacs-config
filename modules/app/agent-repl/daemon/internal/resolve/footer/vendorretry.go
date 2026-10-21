@@ -31,6 +31,28 @@ import (
 // retry naming no instant or no attempt is a producer defect: it is refused
 // at ERROR and the schedule on hand stands, so no half-stated retry is drawn.
 func (r *resolver) observeVendorRetry(ws ids.WorkspaceID, s *wsState, stated *conversationv1.SessionVendorErrorRetry) {
+	// THE RETRY BEING MADE is drawn as "retrying now": the shim states it at
+	// the code point that makes the retry, so the line says the attempt is
+	// happening rather than holding a countdown at zero (owner ruling,
+	// 2026-10-21). One naming no attempt is a producer defect, refused as a
+	// scheduled one is.
+	if attempting := stated.GetAttempting(); attempting != nil {
+		if attempting.GetAttempt() == 0 {
+			r.logOf(ws, s).Error("daemon.footer.vendor_retry_refused",
+				"a vendor-error retry being made names no attempt; the statement is refused and the schedule on hand stands",
+				dlog.Context{"invariant_violation": "a vendor-error retry being made names its attempt"})
+			return
+		}
+		s.vendorRetry = &retryState{
+			attempt: attemptOfRetry(attempting.GetAttempt()),
+			status:  truncate(attempting.GetStatus(), DefaultWarningRowWidth),
+			at:      r.opts.clock.Now(),
+			now:     true,
+		}
+		r.logOf(ws, s).Info("daemon.footer.vendor_retry", "agent-repl is making its vendor-error retry now; the line says so",
+			dlog.Context{"attempt": attempting.GetAttempt()})
+		return
+	}
 	scheduled := stated.GetScheduled()
 	if scheduled == nil {
 		if s.vendorRetry != nil {

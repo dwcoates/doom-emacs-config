@@ -134,6 +134,9 @@ type retryState struct {
 	// maxAttempt is the last attempt the vendor will make, zero when it stated
 	// no schedule.
 	maxAttempt int32
+	// now is agent-repl's own retry being made at this moment, drawn as
+	// "retrying now" in place of a countdown.
+	now bool
 }
 
 // wakeupState is a pending self-scheduled wakeup.

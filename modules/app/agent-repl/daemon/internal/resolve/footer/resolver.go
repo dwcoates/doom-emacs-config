@@ -1559,7 +1559,7 @@ func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 
 // line is the retrying state as the footer's salient line.
 func (rs *retryState) line() *frontendv1.FooterStatusActivityRetrying {
-	out := &frontendv1.FooterStatusActivityRetrying{Attempt: rs.attempt, Status: rs.status}
+	out := &frontendv1.FooterStatusActivityRetrying{Attempt: rs.attempt, Status: rs.status, Now: rs.now}
 	if rs.nextAt != nil {
 		out.NextAttempt = &frontendv1.FooterStatusActivityAt{AtMs: rs.nextAt.UnixMilli()}
 	}

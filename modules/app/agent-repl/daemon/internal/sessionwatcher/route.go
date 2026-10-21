@@ -206,8 +206,9 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		// to draw (its countdown) and to read (a scheduled retry holds no
 		// prompt, footer.Resolver.VendorBlock); no other rule reads it.
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the footer", dlog.Context{
-			"arm":       sessionArm(update),
-			"scheduled": u.VendorErrorRetry.GetScheduled() != nil,
+			"arm":        sessionArm(update),
+			"scheduled":  u.VendorErrorRetry.GetScheduled() != nil,
+			"attempting": u.VendorErrorRetry.GetAttempting() != nil,
 		})
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
