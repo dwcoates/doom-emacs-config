@@ -15,7 +15,7 @@ func textBody(content *conversationv1.UserContent) *frontendv1.FeedUserPromptBod
 	for _, block := range content.GetBlocks() {
 		if text := block.GetText(); text != nil {
 			body.Blocks = append(body.Blocks, &frontendv1.FeedUserPromptBlock{
-				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: "drawn:" + text.GetText()}},
+				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: &frontendv1.ParsedProse{Source: &frontendv1.ProseSource{Markdown: "drawn:" + text.GetText()}}}},
 			})
 		}
 	}
@@ -32,7 +32,7 @@ func TestIngressPromptDrawsTheBodyItsDrawerResolves(t *testing.T) {
 	card := IngressPrompt(IngressEntry{Key: "k-1", Said: said, Wait: IngressWait{Kind: IngressAwaitingIntake}}, textBody)
 
 	// Assert
-	if got := card.GetBody().GetBlocks()[0].GetText().GetText(); got != "drawn:hi" {
+	if got := card.GetBody().GetBlocks()[0].GetText().GetProse().GetSource().GetMarkdown(); got != "drawn:hi" {
 		t.Fatalf("body = %q, want the drawer's resolution of the said", got)
 	}
 }

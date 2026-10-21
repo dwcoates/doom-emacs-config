@@ -1,16 +1,21 @@
 package feed
 
 import (
-	"agent-repld/internal/prose"
 	"context"
+	"os"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/prose"
 	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
@@ -414,6 +419,80 @@ func TestIngressEntriesAreHeldAfterTheStandingHoldsUnderTheirOwnIDs(t *testing.T
 	}
 }
 
+// heldTree is a prompt holding a tree, so its drawing is the daemon's parse
+// of it rather than one plain block.
+const heldTree = "1 🔧 Fixed it\n└── 1.1 a detail"
+
+// onlyDrawnText is the drawn text of BODY's only block, failing unless it has
+// exactly one, a text block.
+func onlyDrawnText(t *testing.T, body *frontendv1.FeedUserPromptBody) *frontendv1.ParsedProse {
+	t.Helper()
+	blocks := body.GetBlocks()
+	if len(blocks) != 1 || blocks[0].GetText() == nil {
+		t.Fatalf("drawn body = %v, want one text block", body)
+	}
+	return blocks[0].GetText().GetProse()
+}
+
+func TestAHeldCardDrawsWhatWasSaidAsTheDaemonsParse(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("turn-1", heldTree, 0)})
+
+	// Assert
+	got := onlyDrawnText(t, h.heldNow().GetItems()[0].GetPrompt().GetBody())
+	if want := prose.ParseForTest(heldTree); !proto.Equal(got, want) {
+		t.Fatalf("held card's drawn text = %v, want the daemon's parse %v", got, want)
+	}
+}
+
+func TestAnIngressCardDrawsWhatWasSaidAsTheDaemonsParse(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.resolver.SetIngressPending(testWorkspace, []holds.IngressEntry{ingressEntry("k-1", heldTree)})
+
+	// Assert
+	got := onlyDrawnText(t, h.heldNow().GetItems()[0].GetIngress().GetBody())
+	if want := prose.ParseForTest(heldTree); !proto.Equal(got, want) {
+		t.Fatalf("ingress card's drawn text = %v, want the daemon's parse %v", got, want)
+	}
+}
+
+func TestAnIngressCardKeepsWhatWasSaidWhole(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	entry := ingressEntry("k-1", heldTree)
+
+	// Act
+	h.resolver.SetIngressPending(testWorkspace, []holds.IngressEntry{entry})
+
+	// Assert
+	if got := h.heldNow().GetItems()[0].GetIngress().GetSaid(); !proto.Equal(got, entry.Said) {
+		t.Fatalf("ingress card's said = %v, want the entry's payload %v", got, entry.Said)
+	}
+}
+
+func TestBothHeldCardsDrawThroughTheOneDrawing(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("held.go")
+	if err != nil {
+		t.Fatalf("read held.go: %v", err)
+	}
+
+	// Act
+	hands, draws := len(regexp.MustCompile(`, draw[,)]`).FindAllString(string(src), -1)), strings.Count(string(src), "r.drawUserBlocks(")
+
+	// Assert: a held prompt's card and an ingress card are each handed the
+	// one draw closure, and it is the only drawing of what was said.
+	if hands != 2 || draws != 1 {
+		t.Fatalf("held.go hands draw %d times and calls drawUserBlocks %d times, want 2 and 1", hands, draws)
+	}
+}
+
 func TestStatingIngressEntriesIsPublishedOnTheRootFeed(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -551,7 +630,7 @@ func TestAHeldCardDrawsItsBodyAsThePromptsRowWill(t *testing.T) {
 
 	// Assert
 	blocks := h.heldNow().GetItems()[0].GetPrompt().GetBody().GetBlocks()
-	if len(blocks) != 2 || blocks[0].GetText().GetText() != "look" || blocks[1].GetImage().GetSrc() != "/feed-images/abc" {
+	if len(blocks) != 2 || blocks[0].GetText().GetProse().GetSource().GetMarkdown() != "look" || blocks[1].GetImage().GetSrc() != "/feed-images/abc" {
 		t.Fatalf("held body = %v, want the words and the resolved image", blocks)
 	}
 }

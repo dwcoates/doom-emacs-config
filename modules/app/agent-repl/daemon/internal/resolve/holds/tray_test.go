@@ -104,7 +104,7 @@ func TestTrayCardCarriesTheBodyItsDrawerResolves(t *testing.T) {
 	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "look at this")})
 
 	// Assert.
-	if got := onlyPrompt(t, latest(t, r)).GetBody().GetBlocks()[0].GetText().GetText(); got != "drawn:look at this" {
+	if got := onlyPrompt(t, latest(t, r)).GetBody().GetBlocks()[0].GetText().GetProse().GetSource().GetMarkdown(); got != "drawn:look at this" {
 		t.Fatalf("body = %q, want the drawer's resolution of the said", got)
 	}
 }
