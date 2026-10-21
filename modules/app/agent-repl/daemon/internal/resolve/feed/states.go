@@ -27,6 +27,13 @@ type unitState struct {
 	input string
 	// inputForm is how that line is drawn.
 	inputForm inputForm
+	// edits is the file edits a shell call's command states, read once per
+	// command (editsRead says they were, editsOf names the command they were
+	// read from), so a running card's every liveness beat does not read the
+	// command again.
+	edits     *frontendv1.FeedToolCallEdits
+	editsOf   string
+	editsRead bool
 	// startHeld records that this process drew the unit's START frame, so a
 	// settled frame that fails to restate what its call named can still be
 	// drawn from what the start said. A replay that serves the unit's latest

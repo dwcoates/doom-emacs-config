@@ -50,6 +50,7 @@ func (r *resolver) toolRow(s *wsState, at placement, unitID, name string, outcom
 			dlog.Context{"unit": unitID})
 		card.Outcome = &frontendv1.FeedSimpleToolCall_Returned{Returned: returned}
 		card.Clock = u.row.GetActivity().GetSimpleToolCall().GetClock()
+		card.Edits = u.row.GetActivity().GetSimpleToolCall().GetEdits()
 	}
 	row := &frontendv1.FeedRow{
 		Id: r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unitID}),
@@ -461,6 +462,9 @@ func (r *resolver) highlight(s *wsState, path, code string) ([]*frontendv1.FeedC
 func deniedOutcome() toolOutcome {
 	return func(card *frontendv1.FeedSimpleToolCall) {
 		card.Outcome = &frontendv1.FeedSimpleToolCall_Denied{Denied: &frontendv1.FeedToolCallDenied{}}
+		// A call that never ran edited nothing, so it states no edits even
+		// when the running card it replaces drew some.
+		card.Edits = nil
 	}
 }
 
@@ -889,11 +893,11 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "u.denied"})
 			return r.toolRow(s, at, unitID, "Bash", deniedOutcome()), nil
 		}
-		return r.toolRow(s, at, unitID, "Bash", runningOutcome(u)), nil
+		return r.toolRow(s, at, unitID, "Bash", withEdits(runningOutcome(u), r.unitBashEdits(s, unitID, u))), nil
 	case *conversationv1.AgentBash_Progress:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Progress"})
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
-		return r.toolRow(s, at, unitID, "Bash", runningOutcome(u)), nil
+		return r.toolRow(s, at, unitID, "Bash", withEdits(runningOutcome(u), r.unitBashEdits(s, unitID, u))), nil
 	case *conversationv1.AgentBash_Tail:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Tail"})
 		// A foreground call reports no growth; a tail here belongs to the
@@ -911,8 +915,8 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 		// number, so the reader was told the command went wrong and never told
 		// how. The two sites must stay parallel; see FeedToolCallReturned.exit.
 		return r.toolRow(s, at, unitID, "Bash",
-			withExit(r.settledOutcome(s, act, u, "bash", ok, form, state.Success.GetSettledAt()),
-				bashExit(state.Success))), nil
+			withEdits(withExit(r.settledOutcome(s, act, u, "bash", ok, form, state.Success.GetSettledAt()),
+				bashExit(state.Success)), r.unitBashEdits(s, unitID, u))), nil
 	case *conversationv1.AgentBash_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawBash", "branch": "case *conversationv1.AgentBash_Failure"})
 		input, err := r.restatedOrHeld(s, act, u, "bash", state.Failure.GetCommand().GetLine(), u.input)
