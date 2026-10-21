@@ -1289,7 +1289,8 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                                      :fold (:arm :collapsed :value nil))
                    :closed (:rows nil)
                    :current (:workspace (:id "ws-1" :dir "/w/1"))
-                   :revision 0))))
+                   :revision 0
+                   :version nil))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-revision ()
   "The roster's revision decodes from protojson's decimal string."
@@ -1299,6 +1300,23 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                                      ",\"revision\":\"9\"}"))
                             :revision)
                  9)))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-version ()
+  "The roster's version decodes to its text."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-workspace-roster
+                             (concat (substring agent-repl-test-wire-roster--roster-json 0 -1)
+                                     ",\"version\":{\"text\":\"0.129.0\"}}"))
+                            :version)
+                 '(:text "0.129.0"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-version-refuses-an-unknown-field ()
+  "The version carries its text and nothing else."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-roster
+                  (concat (substring agent-repl-test-wire-roster--roster-json 0 -1)
+                          ",\"version\":{\"text\":\"0.129.0\",\"build\":\"x\"}}"))
+                 '("RosterVersion" build "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-without-the-closed-list-is-a-breach ()
   "The closed list is always set; a roster without one is a breach."

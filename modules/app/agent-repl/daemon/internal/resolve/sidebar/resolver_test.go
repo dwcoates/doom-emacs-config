@@ -7,10 +7,12 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/deployedversion"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/semver"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/wsm"
@@ -561,4 +563,60 @@ func TestAKindlessDetachmentFailsHardAndChangesNothing(t *testing.T) {
 		}},
 	})
 	t.Fatal("a kindless detachment returned, want a panic")
+}
+
+func TestTheRosterStatesTheDeployedVersion(t *testing.T) {
+	release := semver.Version{Minor: 129, Patch: 2}
+	tests := []struct {
+		name    string
+		version *deployedversion.Version
+		want    *frontendv1.RosterVersion
+	}{
+		{name: "a landing is stated as its release", version: &deployedversion.Version{Release: release}, want: &frontendv1.RosterVersion{Text: "0.129.2"}},
+		{name: "a build past a landing is stated as the last landing's release", version: &deployedversion.Version{Release: release, Past: "0123456789ab"}, want: &frontendv1.RosterVersion{Text: "0.129.2"}},
+		{name: "a withdrawn version is unset", version: nil, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			r.SetRegistry(registry(workspace("w1", "one")))
+			r.DeployedVersion(&deployedversion.Version{Release: semver.Version{Minor: 1}})
+
+			// Act
+			r.DeployedVersion(tt.version)
+
+			// Assert
+			if got := latest(t, r).GetVersion(); !proto.Equal(got, tt.want) {
+				t.Fatalf("version = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheRosterStatesNoVersionBeforeOneIsResolved(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+
+	// Act
+	r.SetRegistry(registry(workspace("w1", "one")))
+
+	// Assert
+	if got := latest(t, r).Version; got != nil {
+		t.Fatalf("version = %v, want unset", got)
+	}
+}
+
+func TestAVersionBeforeAnyRegistryIsDrawnOnceOneArrives(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+	r.DeployedVersion(&deployedversion.Version{Release: semver.Version{Minor: 129}})
+
+	// Act
+	r.SetRegistry(registry(workspace("w1", "one")))
+
+	// Assert
+	if got := latest(t, r).GetVersion().GetText(); got != "0.129.0" {
+		t.Fatalf("version = %q, want 0.129.0", got)
+	}
 }

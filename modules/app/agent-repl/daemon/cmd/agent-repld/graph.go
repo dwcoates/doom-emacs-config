@@ -1025,8 +1025,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	clients := &deployClientsForwarder{}
 	// THE DEPLOYED VERSION is resolved by its own background loop, off the
 	// boot path and off the deploy's: once at start, again after each deploy.
-	// The metrics surface states it as its version series.
-	deployedVersion := deployedversion.NewLoop(git, paths.Checkout, log, p.Metrics)
+	// The metrics surface's version series and the rail's header state it.
+	deployedVersion := deployedversion.NewLoop(git, paths.Checkout, log, p.Metrics, sidebarResolver)
 	deployer, restarter, err := buildDeployer(ctx, deployerParams{
 		Surfaces:   p.Surfaces,
 		Checkout:   paths.Checkout,
