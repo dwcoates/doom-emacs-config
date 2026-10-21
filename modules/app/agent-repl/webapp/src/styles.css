@@ -841,7 +841,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   cursor: pointer;
   padding: 0.1rem;
 }
-#ws-sidebar .sb-search-btn:hover,
+#ws-sidebar:not(.sb-hover-suspended) .sb-search-btn:hover,
 #ws-sidebar .sb-search-btn:focus-visible,
 #ws-sidebar .sb-search-btn.active { opacity: 1; }
 #ws-sidebar .sb-search-glyph {
@@ -913,7 +913,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   padding: 0 0.4rem;
   cursor: pointer;
 }
-#ws-sidebar .sb-add:hover { background: var(--card); }
+#ws-sidebar:not(.sb-hover-suspended) .sb-add:hover { background: var(--card); }
 /* A REPOSITORY'S "+" SITS AT THE RIGHT EDGE (owner request, 2026-10-13): the
    header's right padding is the row's, so the button's right edge lines up
    with the when-column of the rows beneath it. */
@@ -945,7 +945,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   color: var(--info-ws);
   font-weight: 700;
 }
-#ws-sidebar .repo-head:hover { background: var(--card); }
+#ws-sidebar:not(.sb-hover-suspended) .repo-head:hover { background: var(--card); }
 /* THE GLYPH IS THE DIRECTION. `paintTriangle` (sidebar/roster.ts) writes the
    triangle itself -- ▸ folded, ▾ open -- so a CSS rotation on top of it turns
    the folded ▸ a further quarter turn and draws ▲, which reads as "collapse
@@ -1049,8 +1049,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   cursor: pointer;
   visibility: hidden;
 }
-#ws-sidebar .sb-subsection-head:hover .sb-subsection-delete { visibility: visible; }
-#ws-sidebar .sb-subsection-delete:hover { color: var(--fg); }
+#ws-sidebar:not(.sb-hover-suspended) .sb-subsection-head:hover .sb-subsection-delete { visibility: visible; }
+#ws-sidebar:not(.sb-hover-suspended) .sb-subsection-delete:hover { color: var(--fg); }
 /* A COLLAPSED SUBSECTION (its triangle, src/sidebar/subsections.ts) shows its
    header alone: its rows are hidden, and its header greys as a collapsed
    repository's does. */
@@ -1144,7 +1144,10 @@ html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
   cursor: pointer;
   min-width: 0;
 }
-#ws-sidebar .row:hover { background: var(--card); }
+/* EVERY HOVER HIGHLIGHT IN THE RAIL is drawn only while the rail is not
+   `.sb-hover-suspended`: WebKit keeps `:hover` on an element the user left by a
+   focus change, so the rail stops drawing it then (src/sidebar/transients.ts). */
+#ws-sidebar:not(.sb-hover-suspended) .row:hover { background: var(--card); }
 
 /* THE STATUS MARK'S BOX. Every mark, a dot, the merge glyph or an emoji,
    takes this one box, so every mark is centered on one line and every name
@@ -6475,9 +6478,9 @@ bubble-body.bubble-body { display: block; }
   cursor: pointer;
   opacity: 0;
 }
-#ws-sidebar .row:hover .sb-more,
+#ws-sidebar:not(.sb-hover-suspended) .row:hover .sb-more,
 #ws-sidebar .sb-more:focus-visible { opacity: 1; }
-#ws-sidebar .sb-more:hover { color: var(--fg); }
+#ws-sidebar:not(.sb-hover-suspended) .sb-more:hover { color: var(--fg); }
 
 /* THE VERB MENU opens DOWNWARD, inside the row's own box, so it can never
    clip off the top of the rail; it caps its height and scrolls if the rail is
@@ -6505,7 +6508,7 @@ bubble-body.bubble-body { display: block; }
   padding: 0.3rem 0.6rem;
   cursor: pointer;
 }
-#ws-sidebar .sb-menu-item:hover { background: var(--code-bg); }
+#ws-sidebar:not(.sb-hover-suspended) .sb-menu-item:hover { background: var(--code-bg); }
 #ws-sidebar .sb-menu-item[aria-disabled="true"] { color: var(--muted); cursor: default; }
 #ws-sidebar .sb-menu-destructive .sb-menu-item { color: var(--err); }
 #ws-sidebar .sb-confirm { padding: 0.3rem 0.6rem 0.5rem; }
@@ -6590,7 +6593,7 @@ bubble-body.bubble-body { display: block; }
   padding: 0.1rem 0.5rem;
   cursor: pointer;
 }
-#ws-sidebar .sb-form-go:hover { background: var(--code-bg); }
+#ws-sidebar:not(.sb-hover-suspended) .sb-form-go:hover { background: var(--code-bg); }
 #ws-sidebar .sb-task-create { padding: 0.35rem 0.7rem 0; }
 #ws-sidebar .task-rename { font: inherit; font-size: 0.75rem; }
 /* ---- footer (src/footer) ------------------------------------------------

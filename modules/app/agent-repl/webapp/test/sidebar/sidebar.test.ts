@@ -22,6 +22,7 @@ import {
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { createRailSearch } from "../../src/sidebar/search.js";
 import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
+import { HOVER_SUSPENDED_CLASS } from "../../src/sidebar/transients.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
 import type { PhasedAnimation } from "../../src/sidebar/wall-phase.js";
 import type { UnseenEnv } from "../../src/sidebar/unseen.js";
@@ -1572,5 +1573,96 @@ describe("the rail scrolls the selected row into its section's view", () => {
     // Assert
     expect(laid.scrollTop()).toBe(0);
     sidebar.dispose();
+  });
+});
+
+describe("the rail lets go of what the pointer raised when the user leaves it", () => {
+  const mounted: Array<{ dispose(): void }> = [];
+  const hosts: HTMLElement[] = [];
+  afterEach(() => {
+    for (const handle of mounted.splice(0)) handle.dispose();
+    for (const host of hosts.splice(0)) host.remove();
+  });
+
+  /** The webhost's rail, in the document, drawing ws-1 current; and its pushes. */
+  async function mountRail(): Promise<{
+    host: HTMLElement;
+    sidebar: ReturnType<typeof mountWebhostSidebar>;
+    push: (roster: WorkspaceRoster) => Promise<void>;
+  }> {
+    const host = document.createElement("nav");
+    document.body.appendChild(host);
+    hosts.push(host);
+    const stream = pushedRosters();
+    const sidebar = mountWebhostSidebar(host, ctxFor([], stream.impl), { storage: null, timers: fakeTimers() });
+    mounted.push(sidebar);
+    const push = async (next: WorkspaceRoster): Promise<void> => {
+      stream.push(next);
+      await settle();
+    };
+    await push(twoRows("ws-1"));
+    return { host, sidebar, push };
+  }
+
+  const rowOf = (host: HTMLElement, id: string): HTMLElement =>
+    host.querySelector(`.sb-pane [data-roster-row='${id}']`) as HTMLElement;
+
+  /** Open ID's detail popover the way the keyboard does, at once. */
+  const openDetail = (host: HTMLElement, id: string): void => {
+    (rowOf(host, id).querySelector(":scope > .row") as HTMLElement).dispatchEvent(
+      new FocusEvent("focusin", { bubbles: true }),
+    );
+  };
+  const detailOpen = (host: HTMLElement, id: string): boolean => rowOf(host, id).classList.contains("open");
+  const menuOpen = (host: HTMLElement, id: string): boolean =>
+    !(rowOf(host, id).querySelector(":scope > .sb-menu") as HTMLElement).hidden;
+
+  it("closes a row's detail popover when the webhost shows another workspace", async () => {
+    const { host, sidebar } = await mountRail();
+    openDetail(host, "ws-1");
+    sidebar.markShown("ws-2");
+    expect(detailOpen(host, "ws-1")).toBe(false);
+  });
+
+  it("closes a row's menu when a push names another workspace current", async () => {
+    const { host, push } = await mountRail();
+    await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
+    await push(twoRows("ws-2"));
+    expect(menuOpen(host, "ws-1")).toBe(false);
+  });
+
+  it("suspends the hover highlight when the selection moves", async () => {
+    const { host, sidebar } = await mountRail();
+    sidebar.markShown("ws-2");
+    expect(host.classList.contains(HOVER_SUSPENDED_CLASS)).toBe(true);
+  });
+
+  it("keeps a menu opened after the switch through a push from before the daemon took the select", async () => {
+    const { host, sidebar, push } = await mountRail();
+    sidebar.markShown("ws-2");
+    await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
+    await push(twoRows("ws-1"));
+    expect(menuOpen(host, "ws-1")).toBe(true);
+  });
+
+  it("keeps a menu open through a push that restates the selection", async () => {
+    const { host, push } = await mountRail();
+    await click(rowOf(host, "ws-1").querySelector(".sb-more") as Element);
+    await push(twoRows("ws-1"));
+    expect(menuOpen(host, "ws-1")).toBe(true);
+  });
+
+  it("closes a row's detail popover when the page loses focus", async () => {
+    const { host } = await mountRail();
+    openDetail(host, "ws-1");
+    window.dispatchEvent(new FocusEvent("blur"));
+    expect(detailOpen(host, "ws-1")).toBe(false);
+  });
+
+  it("stops dismissing once the rail is disposed", async () => {
+    const { host, sidebar } = await mountRail();
+    sidebar.dispose();
+    window.dispatchEvent(new FocusEvent("blur"));
+    expect(host.classList.contains(HOVER_SUSPENDED_CLASS)).toBe(false);
   });
 });
