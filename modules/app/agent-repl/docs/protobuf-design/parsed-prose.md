@@ -133,3 +133,19 @@ wrong labels). That needs one parse, in one place, that every program reads.
   neither a root, a branch, a blank line nor an interior fence (findTreeRegion's rule,
   ported exactly), so a wrapped line the model wrote never sits inside a tree. The
   error was assuming the region kept continuation lines; it never did.
+
+### 3. `HeldIngressPrompt.body`, the ingress card's drawing
+
+- **What:** no new field. Master gave `HeldIngressPrompt` its `FeedUserPromptBody body = 4`
+  while this change was in flight, drawn by the same call as `HeldPrompt.body`. Its text
+  blocks are `FeedTextBlock`s, so change 1 makes them carry the daemon's parse too.
+- **Why:** an ingress card is a prompt the editor wrote while no daemon answered, and
+  it must draw the same blocks its prompt row will draw.
+- **Consequences:**
+  - The daemon's ingress card draws exactly the blocks its prompt row will draw once
+    the queue accepts the entry.
+  - An entry the EDITOR draws while no daemon is in reach (`EditorIngressEntry`) has
+    no daemon to parse it, so the webapp draws its record: its words as the markdown
+    they were typed as (`webapp/src/bubble/body.ts` `unparsedProse`), a tree in them
+    drawn as markdown rather than as a tree. This is the one place the webapp draws
+    text no daemon served, and it parses nothing there either.
