@@ -25,6 +25,12 @@ const (
 	// AgentReplFailed is a turn agent-repl's own machinery ended: the vendor
 	// query died under it. Its turn raises an AGENT-REPL TURN FAULT.
 	AgentReplFailed
+	// NetworkFailed is a turn whose request never reached the API: the
+	// connection failed below any answer (conversation.v1.ApiUnreachable).
+	// Its turn raises a NETWORK TURN FAULT, which puts nothing on the status:
+	// the session's own network fault, stood from the same failure, carries
+	// it and clears the moment the API answers again.
+	NetworkFailed
 	// ExpectedStop is a stop someone configured or asked for, awaiting the
 	// user: a turn end on the idle rung, drawn exactly as a completion
 	// (`done`, green) and never as a failure.
@@ -42,6 +48,8 @@ func (c FailureClass) String() string {
 		return "vendor_failed"
 	case AgentReplFailed:
 		return "agent_repl_failed"
+	case NetworkFailed:
+		return "network_failed"
 	case ExpectedStop:
 		return "expected_stop"
 	default:
@@ -63,6 +71,10 @@ func (c FailureClass) String() string {
 // AGENT_REPL_FAILED IS THE QUERY DYING under the turn (owner ruling,
 // 2026-10-06): agent-repl's own machinery ended it, never the vendor.
 //
+// NETWORK_FAILED IS A REQUEST THAT NEVER REACHED THE API (owner ruling,
+// 2026-10-21): the vendor neither ended nor refused it, so it is no vendor
+// failure.
+//
 // EVERY OTHER FAILURE IS ONE THE VENDOR ENDED OR REFUSED (owner ruling,
 // 2026-10-06): an overloaded or erroring api, a malformed or oversized
 // request, a model error or refusal, `budget_exhausted` and `max_turns`, an
@@ -78,6 +90,9 @@ func ClassifyFailure(failure *conversationv1.AgentFailure) FailureClass {
 	case *conversationv1.AgentFailure_ApiRequestFailed:
 		if ApiFailureBlocks(item.ApiRequestFailed) {
 			return VendorBlocked
+		}
+		if _, unreachable := item.ApiRequestFailed.GetKind().(*conversationv1.ApiRequestFailed_Unreachable); unreachable {
+			return NetworkFailed
 		}
 		return VendorFailed
 	case *conversationv1.AgentFailure_BlockingLimit,

@@ -95,6 +95,7 @@ func TestResolveTurnFaultReadsEveryCloseAndClass(t *testing.T) {
 		{name: "a vendor-blocked turn is a vendor fault", how: wsm.CloseFailed, class: VendorBlocked, want: VendorTurnFault},
 		{name: "a failed close no terminal explained is a vendor fault", how: wsm.CloseFailed, class: NoFailure, want: VendorTurnFault},
 		{name: "a query death is an agent-repl fault", how: wsm.CloseFailed, class: AgentReplFailed, want: AgentReplTurnFault},
+		{name: "a request that never reached the API is a network fault", how: wsm.CloseFailed, class: NetworkFailed, want: NetworkTurnFault},
 		{name: "an orphaned turn is a vendor fault", how: wsm.CloseOrphaned, class: NoFailure, want: VendorTurnFault},
 		{name: "an agent process death is an agent-repl fault", how: wsm.CloseAgentDied, class: NoFailure, want: AgentReplTurnFault},
 		{name: "an expected stop on a failed close raises no fault", how: wsm.CloseFailed, class: ExpectedStop, want: NoTurnFault},
@@ -134,6 +135,7 @@ func TestTurnFaultNamesItsDomain(t *testing.T) {
 		{fault: NoTurnFault, want: "none"},
 		{fault: VendorTurnFault, want: "vendor"},
 		{fault: AgentReplTurnFault, want: "agent_repl"},
+		{fault: NetworkTurnFault, want: "network"},
 		{fault: TurnFault(99), want: "unknown"},
 	}
 	for _, tc := range cases {

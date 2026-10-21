@@ -25,6 +25,7 @@ func TestClassifyFailurePlacesEveryAgentFailureArm(t *testing.T) {
 		{name: "api_request_failed: not found", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_NotFound{NotFound: &conversationv1.ApiNotFound{}}}), want: VendorFailed},
 		{name: "api_request_failed: internal", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Internal{Internal: &conversationv1.ApiInternal{}}}), want: VendorFailed},
 		{name: "api_request_failed: max output tokens", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_MaxOutputTokens{MaxOutputTokens: &conversationv1.ApiMaxOutputTokens{}}}), want: VendorFailed},
+		{name: "api_request_failed: unreachable", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Unreachable{Unreachable: &conversationv1.ApiUnreachable{Code: "ECONNRESET"}}}), want: NetworkFailed},
 		{name: "api_request_failed: unmodeled", failure: apiFailed(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Unmodeled{Unmodeled: &conversationv1.ApiUnmodeledError{}}}), want: VendorFailed},
 		{name: "blocking_limit", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}}, want: VendorBlocked},
 		{name: "rapid_refill_breaker", failure: &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}}, want: VendorBlocked},
@@ -122,6 +123,7 @@ func TestFailureClassNamesEveryClass(t *testing.T) {
 		{class: VendorBlocked, want: "vendor_blocked"},
 		{class: VendorFailed, want: "vendor_failed"},
 		{class: AgentReplFailed, want: "agent_repl_failed"},
+		{class: NetworkFailed, want: "network_failed"},
 		{class: ExpectedStop, want: "expected_stop"},
 		{class: FailureClass(99), want: "unknown"},
 	}

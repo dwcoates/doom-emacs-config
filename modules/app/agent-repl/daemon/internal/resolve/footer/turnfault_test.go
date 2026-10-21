@@ -40,6 +40,13 @@ func overloaded(wait time.Duration) *conversationv1.AgentFailure {
 	}}
 }
 
+// unreachable is a turn whose request never reached the API.
+func unreachable(code string) *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ApiRequestFailed{
+		ApiRequestFailed: &conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Unreachable{Unreachable: &conversationv1.ApiUnreachable{Code: code}}},
+	}}
+}
+
 // maxTurns is the run stopping at its turn ceiling.
 func maxTurns() *conversationv1.AgentFailure {
 	return &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}
@@ -446,6 +453,22 @@ func TestASignInLiftsAnAccountFailureAndNoOther(t *testing.T) {
 				t.Fatalf("status = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestATurnThatNeverReachedTheAPIRaisesNoVendorFault(t *testing.T) {
+	// Arrange: the session's network fault, stood from the same failure, has
+	// already cleared, so nothing else stands.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	failTurn(h, unreachable("ECONNRESET"))
+
+	// Assert
+	if got := h.status(t); got == "vendor_fault" {
+		t.Fatalf("status = %q, want no vendor fault for a request that never reached the API", got)
 	}
 }
 

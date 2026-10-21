@@ -496,7 +496,7 @@ func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.Age
 			case ladder.VendorBlocked:
 				s.blocked = r.blockFor(failure)
 				return
-			case ladder.VendorFailed, ladder.AgentReplFailed:
+			case ladder.VendorFailed, ladder.AgentReplFailed, ladder.NetworkFailed:
 				return
 			case ladder.ExpectedStop, ladder.NoFailure:
 				// An expected stop reads exactly as a completion: idle·done.
