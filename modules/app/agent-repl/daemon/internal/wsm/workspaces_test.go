@@ -1198,6 +1198,30 @@ func TestForgetDisposesOfTheRepositoryOnlyWithItsMainWorktree(t *testing.T) {
 	}
 }
 
+func TestForgetRefusesTheMainWorktreeWhileTheRepositoryHasOtherWorkspaces(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repoDir := t.TempDir()
+	linked := registerUnder(t, s, repoDir)
+	main := registerMain(t, s, repoDir)
+
+	// Act
+	_, err := s.Forget(context.Background(), main.ID)
+
+	// Assert
+	if !errors.Is(err, ErrMainWorktreeInUse) {
+		t.Fatalf("Forget(main worktree) = %v, want ErrMainWorktreeInUse", err)
+	}
+	for _, kept := range []Workspace{main, linked} {
+		if _, err := s.Workspace(context.Background(), kept.ID); err != nil {
+			t.Fatalf("Workspace(%s) after the refusal: %v, want it kept", kept.Name, err)
+		}
+	}
+	if n := scalar[int](t, s, `SELECT count(*) FROM repositories WHERE id = ?`, main.Repo); n != 1 {
+		t.Fatalf("repository rows = %d after the refusal, want 1", n)
+	}
+}
+
 func TestForgetReportsTheForgottenRepositoryDir(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

@@ -291,6 +291,31 @@ func TestForgetWorkspaceHasChildrenNamesTheChildren(t *testing.T) {
 	}
 }
 
+// TestForgetWorkspaceAnswersTheMainWorktreeArm pins the main_worktree arm and
+// its count: a repository's main worktree stands while other workspaces are
+// registered under it.
+func TestForgetWorkspaceAnswersTheMainWorktreeArm(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.forgetErr = &workspace.Refusal{
+		Rpc: "ForgetWorkspace", Arm: workspace.ArmMainWorktree,
+		Reason: `workspace "ws-1" is its repository's main worktree, and 2 other workspaces are registered under the repository`,
+		Fields: map[string]any{"other_workspaces": uint32(2)},
+	}
+
+	// Act.
+	resp, err := h.Client.ForgetWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.ForgetWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ForgetWorkspace: %v", err)
+	}
+	if got := resp.Msg.GetError().GetMainWorktree(); got == nil || got.GetOtherWorkspaces() != 2 {
+		t.Fatalf("error = %v, want main_worktree with other_workspaces 2", resp.Msg.GetError())
+	}
+}
+
 // TestForgetWorkspaceRefusesAnUnknownWorkspace pins that the shared per-verb
 // resolution refuses before the verb is reached, as it does for every other
 // per-workspace rpc.

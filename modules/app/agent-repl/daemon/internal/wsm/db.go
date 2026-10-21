@@ -151,7 +151,9 @@ type DB interface {
 	SetLiveCommitCount(ctx context.Context, id WorkspaceID, count uint32) (bool, error)
 	// Forget deletes a workspace's every record — the nuke's durable half and
 	// the whole of the forget verb — and, when the workspace was the last one
-	// registered under its repository, that repository's record too. The
+	// registered under its repository, that repository's record too. A main
+	// worktree's workspace is refused with ErrMainWorktreeInUse while other
+	// workspaces are registered under its repository. The
 	// report names the repository that went, empty when one stayed.
 	Forget(ctx context.Context, id WorkspaceID) (ForgetReport, error)
 	// RetireRepository deletes a repository's record together with every

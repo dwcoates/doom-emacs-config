@@ -940,8 +940,13 @@ func deleteRepositoryRows(ctx context.Context, tx *sql.Tx, repo RepoID, repoDir 
 // predates registration and so carries no reference, is deleted here in the
 // same transaction.
 //
+// THE MAIN WORKTREE'S WORKSPACE IS REFUSED (ErrMainWorktreeInUse) while any
+// other workspace is registered under its repository: it stands as long as the
+// repository is known.
+//
 // THE REPOSITORY GOES TOO when the forgotten workspace was the last one
-// registered under it. Registering a directory mints BOTH records and nothing
+// registered under it -- which, the main worktree being refused until then, is
+// always the main worktree's own. Registering a directory mints BOTH records and nothing
 // else ever deleted the repository one, so every register-then-clean-up left a
 // repository row naming a path that may no longer exist — and a row naming a
 // deleted path breaks workspace and sink resolution elsewhere. A repository
@@ -967,6 +972,24 @@ func (s *store) Forget(ctx context.Context, id WorkspaceID) (ForgetReport, error
 			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
 		case err != nil:
 			return err
+		}
+		// THE MAIN WORKTREE GOES ONLY WITH ITS REPOSITORY: its workspace
+		// stands as long as the repository is known, so while any other
+		// workspace is registered under the repository it is refused, nothing
+		// deleted. As the repository's last workspace it takes the repository
+		// with it below, exactly as any last workspace does.
+		var dir string
+		if err := scanWorkspaceRow(ctx, tx, id, "dir", &dir); err != nil {
+			return err
+		}
+		if dir == repoDir {
+			var others int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM workspaces WHERE repo_id = ? AND id != ?`, repo, id).Scan(&others); err != nil {
+				return err
+			}
+			if others > 0 {
+				return fmt.Errorf("wsm: forget %s (%d other workspaces under %s): %w", id, others, repoDir, ErrMainWorktreeInUse)
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM creation_jobs WHERE workspace_id = ?`, id); err != nil {
 			return err

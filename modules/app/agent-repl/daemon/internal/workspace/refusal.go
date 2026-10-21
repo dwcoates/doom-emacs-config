@@ -276,6 +276,12 @@ const (
 	// the forget would silently flatten a fork's lineage. It carries the
 	// children's ids as `children`.
 	ArmHasChildren = "has_children"
+	// ArmMainWorktree is a ForgetWorkspace on a repository's main-worktree
+	// workspace while other workspaces are registered under the repository:
+	// the main worktree's workspace stands as long as its repository is known
+	// (wsm.ErrMainWorktreeInUse). It carries the count of the others as
+	// `other_workspaces`.
+	ArmMainWorktree = "main_worktree"
 )
 
 // Refusal is a state the daemon must refuse for which the contract has no

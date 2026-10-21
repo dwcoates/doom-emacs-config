@@ -170,6 +170,13 @@ field) and the four every per-workspace verb raises through the shared `owned`
 helper. NOTHING IS OWED HERE: the verb's every refusal now has an arm, and the
 command-file route and the rpc reach the same `internal/workspace` Forget.
 
+`main_worktree` landed on 2026-10-21 with the main-worktree guarantee: a
+repository's main worktree is a registered workspace for as long as the
+repository is known, so forgetting it is refused while other workspaces are
+registered under the repository. It carries `other_workspaces`, the count of
+those workspaces. The verb checks before it stands any session down, and the
+registry refuses the same deletion atomically (`wsm.ErrMainWorktreeInUse`).
+
 ## The five armless SESSION fault kinds — LANDED (2026-09-12)
 
 These were never rows in the table above, because they are not RPC refusals:

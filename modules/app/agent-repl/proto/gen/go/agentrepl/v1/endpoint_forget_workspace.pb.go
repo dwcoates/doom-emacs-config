@@ -18,6 +18,10 @@
 // resolves through is about to go, so this is the LAST verb that can address
 // the workspace's shim.
 //
+// A REPOSITORY'S MAIN WORKTREE STANDS while the repository is known: it is
+// forgotten only as the repository's last workspace, taking the repository
+// with it.
+//
 // A FORGET REQUIRES A CLOSED WORKSPACE, and it cannot close one for the
 // caller: the close verb owns the quiet requirement, and a close-then-forget
 // would either duplicate that gate or bypass it — and bypassing it silently
@@ -225,6 +229,7 @@ type ForgetWorkspaceError struct {
 	//	*ForgetWorkspaceError_WorkspaceRefMismatch
 	//	*ForgetWorkspaceError_TransferringAway
 	//	*ForgetWorkspaceError_NotYetAdopted
+	//	*ForgetWorkspaceError_MainWorktree
 	Cause         isForgetWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -330,6 +335,15 @@ func (x *ForgetWorkspaceError) GetNotYetAdopted() *ForgetWorkspaceNotYetAdopted 
 	return nil
 }
 
+func (x *ForgetWorkspaceError) GetMainWorktree() *ForgetWorkspaceMainWorktree {
+	if x != nil {
+		if x, ok := x.Cause.(*ForgetWorkspaceError_MainWorktree); ok {
+			return x.MainWorktree
+		}
+	}
+	return nil
+}
+
 type isForgetWorkspaceError_Cause interface {
 	isForgetWorkspaceError_Cause()
 }
@@ -372,6 +386,15 @@ type ForgetWorkspaceError_NotYetAdopted struct {
 	NotYetAdopted *ForgetWorkspaceNotYetAdopted `protobuf:"bytes,7,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
 }
 
+type ForgetWorkspaceError_MainWorktree struct {
+	// The workspace is its repository's MAIN WORKTREE and other workspaces
+	// are still registered under the repository. A repository's main
+	// worktree is a registered workspace for as long as the repository is
+	// known; forgetting it is forgetting the repository, which only its last
+	// workspace can do.
+	MainWorktree *ForgetWorkspaceMainWorktree `protobuf:"bytes,8,opt,name=main_worktree,json=mainWorktree,proto3,oneof"`
+}
+
 func (*ForgetWorkspaceError_NotClosed) isForgetWorkspaceError_Cause() {}
 
 func (*ForgetWorkspaceError_Blocked) isForgetWorkspaceError_Cause() {}
@@ -385,6 +408,8 @@ func (*ForgetWorkspaceError_WorkspaceRefMismatch) isForgetWorkspaceError_Cause()
 func (*ForgetWorkspaceError_TransferringAway) isForgetWorkspaceError_Cause() {}
 
 func (*ForgetWorkspaceError_NotYetAdopted) isForgetWorkspaceError_Cause() {}
+
+func (*ForgetWorkspaceError_MainWorktree) isForgetWorkspaceError_Cause() {}
 
 type ForgetWorkspaceNotClosed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -717,6 +742,51 @@ func (*ForgetWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_forget_workspace_proto_rawDescGZIP(), []int{10}
 }
 
+type ForgetWorkspaceMainWorktree struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many other workspaces are registered under the repository.
+	OtherWorkspaces uint32 `protobuf:"varint,1,opt,name=other_workspaces,json=otherWorkspaces,proto3" json:"other_workspaces,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ForgetWorkspaceMainWorktree) Reset() {
+	*x = ForgetWorkspaceMainWorktree{}
+	mi := &file_agentrepl_v1_endpoint_forget_workspace_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForgetWorkspaceMainWorktree) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForgetWorkspaceMainWorktree) ProtoMessage() {}
+
+func (x *ForgetWorkspaceMainWorktree) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_forget_workspace_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForgetWorkspaceMainWorktree.ProtoReflect.Descriptor instead.
+func (*ForgetWorkspaceMainWorktree) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_forget_workspace_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ForgetWorkspaceMainWorktree) GetOtherWorkspaces() uint32 {
+	if x != nil {
+		return x.OtherWorkspaces
+	}
+	return 0
+}
+
 var File_agentrepl_v1_endpoint_forget_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_forget_workspace_proto_rawDesc = "" +
@@ -728,7 +798,7 @@ const file_agentrepl_v1_endpoint_forget_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.ForgetWorkspaceSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.ForgetWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x18\n" +
-	"\x16ForgetWorkspaceSuccess\"\xf6\x04\n" +
+	"\x16ForgetWorkspaceSuccess\"\xc8\x05\n" +
 	"\x14ForgetWorkspaceError\x12G\n" +
 	"\n" +
 	"not_closed\x18\x01 \x01(\v2&.agentrepl.v1.ForgetWorkspaceNotClosedH\x00R\tnotClosed\x12@\n" +
@@ -737,7 +807,8 @@ const file_agentrepl_v1_endpoint_forget_workspace_proto_rawDesc = "" +
 	"\x11unknown_workspace\x18\x04 \x01(\v2-.agentrepl.v1.ForgetWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12i\n" +
 	"\x16workspace_ref_mismatch\x18\x05 \x01(\v21.agentrepl.v1.ForgetWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12\\\n" +
 	"\x11transferring_away\x18\x06 \x01(\v2-.agentrepl.v1.ForgetWorkspaceTransferringAwayH\x00R\x10transferringAway\x12T\n" +
-	"\x0fnot_yet_adopted\x18\a \x01(\v2*.agentrepl.v1.ForgetWorkspaceNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
+	"\x0fnot_yet_adopted\x18\a \x01(\v2*.agentrepl.v1.ForgetWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12P\n" +
+	"\rmain_worktree\x18\b \x01(\v2).agentrepl.v1.ForgetWorkspaceMainWorktreeH\x00R\fmainWorktreeB\a\n" +
 	"\x05cause\"\x1a\n" +
 	"\x18ForgetWorkspaceNotClosed\"\xbb\x01\n" +
 	"\x16ForgetWorkspaceBlocked\x12$\n" +
@@ -753,7 +824,9 @@ const file_agentrepl_v1_endpoint_forget_workspace_proto_rawDesc = "" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\";\n" +
 	"\x1fForgetWorkspaceTransferringAway\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1e\n" +
-	"\x1cForgetWorkspaceNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1cForgetWorkspaceNotYetAdopted\"H\n" +
+	"\x1bForgetWorkspaceMainWorktree\x12)\n" +
+	"\x10other_workspaces\x18\x01 \x01(\rR\x0fotherWorkspacesB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_forget_workspace_proto_rawDescOnce sync.Once
@@ -767,7 +840,7 @@ func file_agentrepl_v1_endpoint_forget_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_forget_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_forget_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_agentrepl_v1_endpoint_forget_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_agentrepl_v1_endpoint_forget_workspace_proto_goTypes = []any{
 	(*ForgetWorkspaceRequest)(nil),              // 0: agentrepl.v1.ForgetWorkspaceRequest
 	(*ForgetWorkspaceResponse)(nil),             // 1: agentrepl.v1.ForgetWorkspaceResponse
@@ -780,10 +853,11 @@ var file_agentrepl_v1_endpoint_forget_workspace_proto_goTypes = []any{
 	(*ForgetWorkspaceWorkspaceRefMismatch)(nil), // 8: agentrepl.v1.ForgetWorkspaceWorkspaceRefMismatch
 	(*ForgetWorkspaceTransferringAway)(nil),     // 9: agentrepl.v1.ForgetWorkspaceTransferringAway
 	(*ForgetWorkspaceNotYetAdopted)(nil),        // 10: agentrepl.v1.ForgetWorkspaceNotYetAdopted
-	(*v1.WorkspaceRef)(nil),                     // 11: workspace.v1.WorkspaceRef
+	(*ForgetWorkspaceMainWorktree)(nil),         // 11: agentrepl.v1.ForgetWorkspaceMainWorktree
+	(*v1.WorkspaceRef)(nil),                     // 12: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_forget_workspace_proto_depIdxs = []int32{
-	11, // 0: agentrepl.v1.ForgetWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	12, // 0: agentrepl.v1.ForgetWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2,  // 1: agentrepl.v1.ForgetWorkspaceResponse.success:type_name -> agentrepl.v1.ForgetWorkspaceSuccess
 	3,  // 2: agentrepl.v1.ForgetWorkspaceResponse.error:type_name -> agentrepl.v1.ForgetWorkspaceError
 	4,  // 3: agentrepl.v1.ForgetWorkspaceError.not_closed:type_name -> agentrepl.v1.ForgetWorkspaceNotClosed
@@ -793,11 +867,12 @@ var file_agentrepl_v1_endpoint_forget_workspace_proto_depIdxs = []int32{
 	8,  // 7: agentrepl.v1.ForgetWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.ForgetWorkspaceWorkspaceRefMismatch
 	9,  // 8: agentrepl.v1.ForgetWorkspaceError.transferring_away:type_name -> agentrepl.v1.ForgetWorkspaceTransferringAway
 	10, // 9: agentrepl.v1.ForgetWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.ForgetWorkspaceNotYetAdopted
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	11, // 10: agentrepl.v1.ForgetWorkspaceError.main_worktree:type_name -> agentrepl.v1.ForgetWorkspaceMainWorktree
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_forget_workspace_proto_init() }
@@ -817,6 +892,7 @@ func file_agentrepl_v1_endpoint_forget_workspace_proto_init() {
 		(*ForgetWorkspaceError_WorkspaceRefMismatch)(nil),
 		(*ForgetWorkspaceError_TransferringAway)(nil),
 		(*ForgetWorkspaceError_NotYetAdopted)(nil),
+		(*ForgetWorkspaceError_MainWorktree)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -824,7 +900,7 @@ func file_agentrepl_v1_endpoint_forget_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_forget_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_forget_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
