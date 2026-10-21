@@ -24,6 +24,7 @@ import (
 // The marker labels. One spelling each, read by every builder below.
 const (
 	markerLabelVendor      = "vendor error"
+	markerLabelNetwork     = "connection failed"
 	markerLabelAgentRepl   = "agent-repl"
 	markerLabelInterrupted = "interrupted"
 	markerLabelPlanFailed  = "plan failed"
@@ -135,7 +136,14 @@ func (r *resolver) endingMarker(s *wsState, e ending) *frontendv1.FeedOutcomeMar
 		log.Debug("daemon.feed.outcome_marker", "a turn's ending drew a neutral marker",
 			dlog.Context{"turn": string(e.turn), "cause": e.words.Cause})
 		return neutralMarker(e.words.Detail, "")
-	case ladder.VendorTurnFault:
+	case ladder.VendorTurnFault, ladder.NetworkTurnFault:
+		// A REQUEST THAT NEVER REACHED THE API is drawn in the vendor family
+		// (turquoise: wrong but usable) under its own label, never as the
+		// vendor's error.
+		label := markerLabelVendor
+		if e.fault == ladder.NetworkTurnFault {
+			label = markerLabelNetwork
+		}
 		expansion := &frontendv1.FeedOutcomeVendorFaultExpansion{
 			Time:      &frontendv1.FeedOutcomeTime{AtMs: e.endedAtMs},
 			ErrorType: &frontendv1.FeedOutcomeVendorErrorType{Text: e.words.Cause},
@@ -167,7 +175,7 @@ func (r *resolver) endingMarker(s *wsState, e ending) *frontendv1.FeedOutcomeMar
 				"account": expansion.Account != nil, "sign_in": e.signIn, "resend": expansion.Resend != nil,
 			})
 		return &frontendv1.FeedOutcomeMarker{
-			Label:  &frontendv1.FeedOutcomeMarkerLabel{Text: markerLabelVendor},
+			Label:  &frontendv1.FeedOutcomeMarkerLabel{Text: label},
 			Detail: &frontendv1.FeedOutcomeMarkerDetail{Text: e.words.Detail},
 			Family: &frontendv1.FeedOutcomeMarker_VendorFault{VendorFault: &frontendv1.FeedOutcomeMarkerVendorFault{Expansion: expansion}},
 		}

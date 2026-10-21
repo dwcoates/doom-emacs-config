@@ -431,6 +431,7 @@ func TestTheVendorsErrorTaxonomyIsRespelledArmForArm(t *testing.T) {
 		{name: "oauth org", kind: &conversationv1.ApiOauthOrgNotAllowed{}, want: "oauth_org_not_allowed"},
 		{name: "max output tokens", kind: &conversationv1.ApiMaxOutputTokens{}, want: "max_output_tokens"},
 		{name: "a class we do not model is kept by name", kind: &conversationv1.ApiUnmodeledError{Type: "teapot_error"}, want: "vendor_unmodeled"},
+		{name: "a request that never reached the API", kind: &conversationv1.ApiUnreachable{Code: "ECONNRESET"}, want: "unreachable"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -463,6 +464,8 @@ func TestTheVendorsErrorTaxonomyIsRespelledArmForArm(t *testing.T) {
 				failed.Kind = &conversationv1.ApiRequestFailed_MaxOutputTokens{MaxOutputTokens: k}
 			case *conversationv1.ApiUnmodeledError:
 				failed.Kind = &conversationv1.ApiRequestFailed_Unmodeled{Unmodeled: k}
+			case *conversationv1.ApiUnreachable:
+				failed.Kind = &conversationv1.ApiRequestFailed_Unreachable{Unreachable: k}
 			}
 
 			// Act.
@@ -525,6 +528,8 @@ func erroredArmWord(errored *frontendv1.FeedTurnEndedErrored) string {
 		return "max_output_tokens"
 	case *frontendv1.FeedTurnEndedErrored_VendorUnmodeled:
 		return "vendor_unmodeled"
+	case *frontendv1.FeedTurnEndedErrored_Unreachable:
+		return "unreachable"
 	case *frontendv1.FeedTurnEndedErrored_MaxTokens:
 		return "max_tokens"
 	case *frontendv1.FeedTurnEndedErrored_Refusal:

@@ -93,6 +93,22 @@ func TestAVendorMarkerIsLabelledVendorErrorWithItsCauseAsDetail(t *testing.T) {
 	}
 }
 
+func TestAMarkerForARequestThatNeverReachedTheAPIIsLabelledConnectionFailed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	failure := apiFailure(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Unreachable{Unreachable: &conversationv1.ApiUnreachable{Code: "ECONNRESET"}}})
+
+	// Act
+	h.terminal("turn-1", nil, failure)
+
+	// Assert
+	m := h.markerOf("turn-1")
+	if m.GetLabel().GetText() != "connection failed" || markerFamily(m) != "vendor_fault" {
+		t.Fatalf("marker = %q in %s, want connection failed in the vendor family", m.GetLabel().GetText(), markerFamily(m))
+	}
+}
+
 func TestAStopHookMarkerIsNeutralAndCarriesNoExpansion(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

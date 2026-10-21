@@ -843,6 +843,7 @@ describe("isRetryableApiFailure", () => {
     { name: "an overload", frame: OVERLOADED, expected: true },
     { name: "the API's own error", frame: api({ case: "internal", value: create(conversationv1.ApiInternalSchema, {}) }), expected: true },
     { name: "a rate limit", frame: RATE_LIMITED, expected: true },
+    { name: "a connection that never reached the API", frame: api({ case: "unreachable", value: create(conversationv1.ApiUnreachableSchema, { code: "ECONNRESET" }) }), expected: true },
     { name: "a failure that stated no status", frame: unmodeled("unknown"), expected: true },
     { name: "a 502", frame: unmodeled("http_502"), expected: true },
     { name: "a 408", frame: unmodeled("http_408"), expected: true },

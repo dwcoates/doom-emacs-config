@@ -172,6 +172,10 @@ func TestOfApiFailureWordsEveryClass(t *testing.T) {
 			want: Words{"the request asked for more output than the model will produce", "max_output_tokens", "max output tokens"}},
 		{name: "unmodeled keeps the vendor's class verbatim", kind: &conversationv1.ApiRequestFailed_Unmodeled{Unmodeled: &conversationv1.ApiUnmodeledError{Type: "quota_exceeded_v2"}},
 			want: Words{"the vendor reported an error class we do not model yet", "quota_exceeded_v2", "quota_exceeded_v2"}},
+		{name: "unreachable names the socket's code", kind: &conversationv1.ApiRequestFailed_Unreachable{Unreachable: &conversationv1.ApiUnreachable{Code: "ECONNRESET"}},
+			want: Words{"the connection to the API failed (ECONNRESET)", "unreachable", "unreachable"}},
+		{name: "unreachable with no code", kind: &conversationv1.ApiRequestFailed_Unreachable{Unreachable: &conversationv1.ApiUnreachable{}},
+			want: Words{"the API could not be reached", "unreachable", "unreachable"}},
 		{name: "an unstated class", kind: nil,
 			want: Words{"the vendor reported a failure with no stated class", "unset", "unset"}},
 	}
@@ -220,6 +224,8 @@ func setKind(failed *conversationv1.ApiRequestFailed, kind any) {
 	case *conversationv1.ApiRequestFailed_MaxOutputTokens:
 		failed.Kind = k
 	case *conversationv1.ApiRequestFailed_Unmodeled:
+		failed.Kind = k
+	case *conversationv1.ApiRequestFailed_Unreachable:
 		failed.Kind = k
 	}
 }

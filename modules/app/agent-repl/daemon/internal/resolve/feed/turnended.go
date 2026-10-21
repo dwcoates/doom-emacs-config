@@ -454,6 +454,10 @@ func apiErrorArm(errored *frontendv1.FeedTurnEndedErrored, failed *conversationv
 		errored.Error = &frontendv1.FeedTurnEndedErrored_MaxOutputTokens{
 			MaxOutputTokens: &frontendv1.FeedTurnErrorMaxOutputTokens{},
 		}
+	case *conversationv1.ApiRequestFailed_Unreachable:
+		errored.Error = &frontendv1.FeedTurnEndedErrored_Unreachable{
+			Unreachable: &frontendv1.FeedTurnErrorUnreachable{Code: kind.Unreachable.GetCode()},
+		}
 	case *conversationv1.ApiRequestFailed_Unmodeled:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_VendorUnmodeled{
 			VendorUnmodeled: &frontendv1.FeedTurnErrorVendorUnmodeled{Type: kind.Unmodeled.GetType()},

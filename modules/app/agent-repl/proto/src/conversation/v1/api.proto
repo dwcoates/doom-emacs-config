@@ -64,6 +64,16 @@ message ApiRequestFailed {
     ApiMaxOutputTokens max_output_tokens = 13;
     // A type the API declared that this schema does not model, kept by name.
     ApiUnmodeledError unmodeled = 10;
+    // THE REQUEST GOT NO ANSWER: the connection to the API failed below any
+    // HTTP status -- DNS, a refused, reset or timed-out connection. THE ONE
+    // ARM THE VENDOR DOES NOT NAME: it files these under `server_error` or
+    // states no class, which read as the API's own internal error
+    // (2026-10-21: "Connection dropped (ECONNRESET)" was drawn "the vendor
+    // API hit its own internal error"). The producer recognizes it by the
+    // connection's own code or words, with the same classifier that stands
+    // the session's network fault, so the two never disagree. A failure that
+    // carries an HTTP status is never this arm: the API answered.
+    ApiUnreachable unreachable = 15;
   }
   // THE VENDOR'S RETRY SCHEDULE, when it will retry this request: which
   // attempt failed, how many retries it allows, and when it said the next
@@ -125,6 +135,13 @@ message ApiOauthOrgNotAllowed {}
 
 // The request asked for more output than the model will produce.
 message ApiMaxOutputTokens {}
+
+// The connection to the API failed below any answer.
+message ApiUnreachable {
+  // The socket error that failed it (`ECONNRESET`, `ENOTFOUND`), when one was
+  // named; empty when only the words said the API could not be reached.
+  string code = 1;
+}
 
 // An error type this schema does not model.
 message ApiUnmodeledError {

@@ -80,6 +80,12 @@ const (
 	// vendor query died, the agent process died): the footer's
 	// `agent_repl_fault · turn_died`, the roster's `turn_died`, blue.
 	AgentReplTurnFault
+	// NetworkTurnFault is a turn whose request never reached the API. It
+	// draws no status of its own: the session's network fault, stood from the
+	// same failure, is the footer's `network_fault` and the roster's, and it
+	// clears when the API answers again. The feed's marker reads it in the
+	// vendor family's colour under its own label.
+	NetworkTurnFault
 )
 
 // String names a turn fault, for the record.
@@ -91,6 +97,8 @@ func (f TurnFault) String() string {
 		return "vendor"
 	case AgentReplTurnFault:
 		return "agent_repl"
+	case NetworkTurnFault:
+		return "network"
 	default:
 		return "unknown"
 	}
@@ -124,6 +132,8 @@ func ResolveTurnFault(how wsm.TurnClose, class FailureClass) (TurnFault, bool) {
 		return NoTurnFault, true
 	case how == wsm.CloseAgentDied, class == AgentReplFailed:
 		return AgentReplTurnFault, true
+	case class == NetworkFailed:
+		return NetworkTurnFault, true
 	default:
 		return VendorTurnFault, true
 	}

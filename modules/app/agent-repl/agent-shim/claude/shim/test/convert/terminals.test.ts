@@ -108,7 +108,7 @@ function apiResultMessage(
 
 function apiFailure(
   apiErrorStatus: number | null,
-  vendor: { errorClass?: string; retryAfterMs?: number },
+  vendor: { errorClass?: string; retryAfterMs?: number; sentence?: string },
 ): conversationv1.ApiRequestFailed {
   const output = convertResult(apiResultMessage(apiErrorStatus), foldContext(), undefined, vendor);
   const result = output.turnEnded?.frame?.result;
@@ -233,6 +233,31 @@ describe.each([
 
     // Assert
     expect(failed.kind.case).toBe(expectedKind);
+  });
+});
+
+/**
+ * A CONNECTION THAT NEVER REACHED THE API is `unreachable`, whatever class the
+ * vendor filed it under (2026-10-21: ECONNRESET under `server_error` read as
+ * the API's own internal error). A status means the API answered, so it never
+ * is.
+ */
+describe.each([
+  ["a dropped connection filed as server_error", null, "server_error", "API Error: Connection dropped (ECONNRESET)", "unreachable", "ECONNRESET"],
+  ["an unresolved host with no class", null, undefined, "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)", "unreachable", "ENOTFOUND"],
+  ["the vendor's can't-reach sentence alone", null, "server_error", "API Error: Can't reach the API server", "unreachable", ""],
+  ["a 500 whose words name a socket code", 500, "server_error", "upstream ECONNRESET", "internal", undefined],
+  ["a server_error with no network words", null, "server_error", "API Error: Internal server error", "internal", undefined],
+])("an api_error terminal: %s", (_name, status, errorClass, sentence, expectedKind, expectedCode) => {
+  it(`lands on kind.${expectedKind}`, () => {
+    // Arrange + Act
+    const failed = apiFailure(status, { ...(errorClass === undefined ? {} : { errorClass }), sentence });
+
+    // Assert
+    expect([failed.kind.case, failed.kind.case === "unreachable" ? failed.kind.value.code : undefined]).toEqual([
+      expectedKind,
+      expectedCode,
+    ]);
   });
 });
 

@@ -759,6 +759,7 @@ export const TURN_ERROR_ARMS = [
   "requestTooLarge",
   "notFound",
   "internal",
+  "unreachable",
   "vendorUnmodeled",
   "maxTokens",
   "refusal",
@@ -797,6 +798,7 @@ export const TURN_ERROR_HEADLINES: Record<TurnErrorArm, string> = {
   requestTooLarge: "the request was too large",
   notFound: "the vendor found nothing at that address",
   internal: "the vendor failed internally",
+  unreachable: "the connection to the API failed (ECONNRESET)",
   vendorUnmodeled: "the vendor returned something unmodeled",
   maxTokens: "cut short mid-answer at the context ceiling",
   refusal: "the model declined to answer",
@@ -827,6 +829,7 @@ const turnErrorValue = (arm: TurnErrorArm, retryAfterMs?: bigint) => {
     return { case: arm, value: { retryAfterMs: retryAfterMs ?? 30_000n } };
   }
   if (arm === "vendorUnmodeled") return { case: arm, value: { type: "vendor_teapot" } };
+  if (arm === "unreachable") return { case: arm, value: { code: "ECONNRESET" } };
   // The run's own terminals import failure.proto's evidence messages, so they
   // carry the vendor context rather than being empty (Landing 8).
   if (arm === "turnFailed") {
@@ -879,8 +882,10 @@ export function turnErrorMarker(
   }
   // AN UNMODELED CLASS is named by the vendor's own type, as the daemon names it.
   const cause = arm === "vendorUnmodeled" ? "vendor_teapot" : arm;
+  // A REQUEST THAT NEVER REACHED THE API is drawn in the vendor family under
+  // its own label, never as the vendor's error.
   return {
-    label: { text: "vendor error" },
+    label: { text: arm === "unreachable" ? "connection failed" : "vendor error" },
     detail: { text: cause },
     family: {
       case: "vendorFault",

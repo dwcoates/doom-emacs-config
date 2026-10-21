@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/api.proto.
  */
 export const file_conversation_v1_api: GenFile = /*@__PURE__*/
-  fileDesc("Chljb252ZXJzYXRpb24vdjEvYXBpLnByb3RvEg9jb252ZXJzYXRpb24udjEixgYKEEFwaVJlcXVlc3RGYWlsZWQSDwoHbWVzc2FnZRgBIAEoCRI3CgxyYXRlX2xpbWl0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuQXBpUmF0ZUxpbWl0ZWRIABI0CgpvdmVybG9hZGVkGAMgASgLMh4uY29udmVyc2F0aW9uLnYxLkFwaU92ZXJsb2FkZWRIABJJChVhdXRoZW50aWNhdGlvbl9mYWlsZWQYBCABKAsyKC5jb252ZXJzYXRpb24udjEuQXBpQXV0aGVudGljYXRpb25GYWlsZWRIABJBChFwZXJtaXNzaW9uX2RlbmllZBgFIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BcGlQZXJtaXNzaW9uRGVuaWVkSAASPQoPaW52YWxpZF9yZXF1ZXN0GAYgASgLMiIuY29udmVyc2F0aW9uLnYxLkFwaUludmFsaWRSZXF1ZXN0SAASQAoRcmVxdWVzdF90b29fbGFyZ2UYByABKAsyIy5jb252ZXJzYXRpb24udjEuQXBpUmVxdWVzdFRvb0xhcmdlSAASMQoJbm90X2ZvdW5kGAggASgLMhwuY29udmVyc2F0aW9uLnYxLkFwaU5vdEZvdW5kSAASMAoIaW50ZXJuYWwYCSABKAsyHC5jb252ZXJzYXRpb24udjEuQXBpSW50ZXJuYWxIABI5Cg1iaWxsaW5nX2Vycm9yGAsgASgLMiAuY29udmVyc2F0aW9uLnYxLkFwaUJpbGxpbmdFcnJvckgAEkcKFW9hdXRoX29yZ19ub3RfYWxsb3dlZBgMIAEoCzImLmNvbnZlcnNhdGlvbi52MS5BcGlPYXV0aE9yZ05vdEFsbG93ZWRIABJAChFtYXhfb3V0cHV0X3Rva2VucxgNIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BcGlNYXhPdXRwdXRUb2tlbnNIABI3Cgl1bm1vZGVsZWQYCiABKAsyIi5jb252ZXJzYXRpb24udjEuQXBpVW5tb2RlbGVkRXJyb3JIABItCgVyZXRyeRgOIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5BcGlSZXRyeUgBiAEBQgYKBGtpbmRCCAoGX3JldHJ5IkwKCEFwaVJldHJ5Eg8KB2F0dGVtcHQYASABKA0SEwoLbWF4X3JldHJpZXMYAiABKA0SGgoSbmV4dF9hdHRlbXB0X2F0X21zGAMgASgDIkAKDkFwaVJhdGVMaW1pdGVkEhsKDnJldHJ5X2FmdGVyX21zGAEgASgDSACIAQFCEQoPX3JldHJ5X2FmdGVyX21zIj8KDUFwaU92ZXJsb2FkZWQSGwoOcmV0cnlfYWZ0ZXJfbXMYASABKANIAIgBAUIRCg9fcmV0cnlfYWZ0ZXJfbXMiGQoXQXBpQXV0aGVudGljYXRpb25GYWlsZWQiFQoTQXBpUGVybWlzc2lvbkRlbmllZCITChFBcGlJbnZhbGlkUmVxdWVzdCIUChJBcGlSZXF1ZXN0VG9vTGFyZ2UiDQoLQXBpTm90Rm91bmQiDQoLQXBpSW50ZXJuYWwiEQoPQXBpQmlsbGluZ0Vycm9yIhcKFUFwaU9hdXRoT3JnTm90QWxsb3dlZCIUChJBcGlNYXhPdXRwdXRUb2tlbnMiIQoRQXBpVW5tb2RlbGVkRXJyb3ISDAoEdHlwZRgBIAEoCSIaCgpBZ2VudE1vZGVsEgwKBG5hbWUYASABKAkitAEKC01vZGVsT3B0aW9uEioKBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWwSFAoMZGlzcGxheV9uYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEj0KDGNhcGFiaWxpdGllcxgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Nb2RlbENhcGFiaWxpdGllc0gAiAEBQg8KDV9jYXBhYmlsaXRpZXMi2AIKEU1vZGVsQ2FwYWJpbGl0aWVzEjgKDnJlc29sdmVkX21vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWxIAYgBARJFChJlZmZvcnRfdW5zdXBwb3J0ZWQYAiABKAsyJy5jb252ZXJzYXRpb24udjEuTW9kZWxFZmZvcnRVbnN1cHBvcnRlZEgAEkEKEGVmZm9ydF9zdXBwb3J0ZWQYAyABKAsyJS5jb252ZXJzYXRpb24udjEuTW9kZWxFZmZvcnRTdXBwb3J0ZWRIABIiChpzdXBwb3J0c19hZGFwdGl2ZV90aGlua2luZxgEIAEoCBIaChJzdXBwb3J0c19mYXN0X21vZGUYBSABKAgSGgoSc3VwcG9ydHNfYXV0b19tb2RlGAYgASgIQhAKDmVmZm9ydF9zdXBwb3J0QhEKD19yZXNvbHZlZF9tb2RlbCIYChZNb2RlbEVmZm9ydFVuc3VwcG9ydGVkIkkKFE1vZGVsRWZmb3J0U3VwcG9ydGVkEjEKBmxldmVscxgBIAMoDjIhLmNvbnZlcnNhdGlvbi52MS5BZ2VudEVmZm9ydExldmVsIrEBCgpUb2tlblVzYWdlEjMKCmlucHV0X2hpdHMYASABKAsyHy5jb252ZXJzYXRpb24udjEuVG9rZW5DYWNoZUhpdHMSNwoMaW5wdXRfbWlzc2VzGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlRva2VuQ2FjaGVNaXNzZXMSFQoNb3V0cHV0X3Rva2VucxgDIAEoBBIeChZvdXRwdXRfdGhpbmtpbmdfdG9rZW5zGAQgASgEIh4KDlRva2VuQ2FjaGVIaXRzEgwKBHJlYWQYASABKAQiNgoQVG9rZW5DYWNoZU1pc3NlcxIPCgd3cml0dGVuGAEgASgEEhEKCXVud3JpdHRlbhgCIAEoBCrIAQoQQWdlbnRFZmZvcnRMZXZlbBIiCh5BR0VOVF9FRkZPUlRfTEVWRUxfVU5TUEVDSUZJRUQQABIaChZBR0VOVF9FRkZPUlRfTEVWRUxfTE9XEAESHQoZQUdFTlRfRUZGT1JUX0xFVkVMX01FRElVTRACEhsKF0FHRU5UX0VGRk9SVF9MRVZFTF9ISUdIEAMSHAoYQUdFTlRfRUZGT1JUX0xFVkVMX1hISUdIEAQSGgoWQUdFTlRfRUZGT1JUX0xFVkVMX01BWBAFKlgKC01vZGVsTWFya2VyEhwKGE1PREVMX01BUktFUl9VTlNQRUNJRklFRBAAEisKFk1PREVMX01BUktFUl9TWU5USEVUSUMQARoPiqYdCzxzeW50aGV0aWM+OlUKFG1vZGVsX21hcmtlcl9saXRlcmFsEiEuZ29vZ2xlLnByb3RvYnVmLkVudW1WYWx1ZU9wdGlvbnMY4dQDIAEoCVISbW9kZWxNYXJrZXJMaXRlcmFsQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_google_protobuf_descriptor]);
+  fileDesc("Chljb252ZXJzYXRpb24vdjEvYXBpLnByb3RvEg9jb252ZXJzYXRpb24udjEi/gYKEEFwaVJlcXVlc3RGYWlsZWQSDwoHbWVzc2FnZRgBIAEoCRI3CgxyYXRlX2xpbWl0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuQXBpUmF0ZUxpbWl0ZWRIABI0CgpvdmVybG9hZGVkGAMgASgLMh4uY29udmVyc2F0aW9uLnYxLkFwaU92ZXJsb2FkZWRIABJJChVhdXRoZW50aWNhdGlvbl9mYWlsZWQYBCABKAsyKC5jb252ZXJzYXRpb24udjEuQXBpQXV0aGVudGljYXRpb25GYWlsZWRIABJBChFwZXJtaXNzaW9uX2RlbmllZBgFIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BcGlQZXJtaXNzaW9uRGVuaWVkSAASPQoPaW52YWxpZF9yZXF1ZXN0GAYgASgLMiIuY29udmVyc2F0aW9uLnYxLkFwaUludmFsaWRSZXF1ZXN0SAASQAoRcmVxdWVzdF90b29fbGFyZ2UYByABKAsyIy5jb252ZXJzYXRpb24udjEuQXBpUmVxdWVzdFRvb0xhcmdlSAASMQoJbm90X2ZvdW5kGAggASgLMhwuY29udmVyc2F0aW9uLnYxLkFwaU5vdEZvdW5kSAASMAoIaW50ZXJuYWwYCSABKAsyHC5jb252ZXJzYXRpb24udjEuQXBpSW50ZXJuYWxIABI5Cg1iaWxsaW5nX2Vycm9yGAsgASgLMiAuY29udmVyc2F0aW9uLnYxLkFwaUJpbGxpbmdFcnJvckgAEkcKFW9hdXRoX29yZ19ub3RfYWxsb3dlZBgMIAEoCzImLmNvbnZlcnNhdGlvbi52MS5BcGlPYXV0aE9yZ05vdEFsbG93ZWRIABJAChFtYXhfb3V0cHV0X3Rva2VucxgNIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BcGlNYXhPdXRwdXRUb2tlbnNIABI3Cgl1bm1vZGVsZWQYCiABKAsyIi5jb252ZXJzYXRpb24udjEuQXBpVW5tb2RlbGVkRXJyb3JIABI2Cgt1bnJlYWNoYWJsZRgPIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5BcGlVbnJlYWNoYWJsZUgAEi0KBXJldHJ5GA4gASgLMhkuY29udmVyc2F0aW9uLnYxLkFwaVJldHJ5SAGIAQFCBgoEa2luZEIICgZfcmV0cnkiTAoIQXBpUmV0cnkSDwoHYXR0ZW1wdBgBIAEoDRITCgttYXhfcmV0cmllcxgCIAEoDRIaChJuZXh0X2F0dGVtcHRfYXRfbXMYAyABKAMiQAoOQXBpUmF0ZUxpbWl0ZWQSGwoOcmV0cnlfYWZ0ZXJfbXMYASABKANIAIgBAUIRCg9fcmV0cnlfYWZ0ZXJfbXMiPwoNQXBpT3ZlcmxvYWRlZBIbCg5yZXRyeV9hZnRlcl9tcxgBIAEoA0gAiAEBQhEKD19yZXRyeV9hZnRlcl9tcyIZChdBcGlBdXRoZW50aWNhdGlvbkZhaWxlZCIVChNBcGlQZXJtaXNzaW9uRGVuaWVkIhMKEUFwaUludmFsaWRSZXF1ZXN0IhQKEkFwaVJlcXVlc3RUb29MYXJnZSINCgtBcGlOb3RGb3VuZCINCgtBcGlJbnRlcm5hbCIRCg9BcGlCaWxsaW5nRXJyb3IiFwoVQXBpT2F1dGhPcmdOb3RBbGxvd2VkIhQKEkFwaU1heE91dHB1dFRva2VucyIeCg5BcGlVbnJlYWNoYWJsZRIMCgRjb2RlGAEgASgJIiEKEUFwaVVubW9kZWxlZEVycm9yEgwKBHR5cGUYASABKAkiGgoKQWdlbnRNb2RlbBIMCgRuYW1lGAEgASgJIrQBCgtNb2RlbE9wdGlvbhIqCgVtb2RlbBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCRI9CgxjYXBhYmlsaXRpZXMYBCABKAsyIi5jb252ZXJzYXRpb24udjEuTW9kZWxDYXBhYmlsaXRpZXNIAIgBAUIPCg1fY2FwYWJpbGl0aWVzItgCChFNb2RlbENhcGFiaWxpdGllcxI4Cg5yZXNvbHZlZF9tb2RlbBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsSAGIAQESRQoSZWZmb3J0X3Vuc3VwcG9ydGVkGAIgASgLMicuY29udmVyc2F0aW9uLnYxLk1vZGVsRWZmb3J0VW5zdXBwb3J0ZWRIABJBChBlZmZvcnRfc3VwcG9ydGVkGAMgASgLMiUuY29udmVyc2F0aW9uLnYxLk1vZGVsRWZmb3J0U3VwcG9ydGVkSAASIgoac3VwcG9ydHNfYWRhcHRpdmVfdGhpbmtpbmcYBCABKAgSGgoSc3VwcG9ydHNfZmFzdF9tb2RlGAUgASgIEhoKEnN1cHBvcnRzX2F1dG9fbW9kZRgGIAEoCEIQCg5lZmZvcnRfc3VwcG9ydEIRCg9fcmVzb2x2ZWRfbW9kZWwiGAoWTW9kZWxFZmZvcnRVbnN1cHBvcnRlZCJJChRNb2RlbEVmZm9ydFN1cHBvcnRlZBIxCgZsZXZlbHMYASADKA4yIS5jb252ZXJzYXRpb24udjEuQWdlbnRFZmZvcnRMZXZlbCKxAQoKVG9rZW5Vc2FnZRIzCgppbnB1dF9oaXRzGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLlRva2VuQ2FjaGVIaXRzEjcKDGlucHV0X21pc3NlcxgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5Ub2tlbkNhY2hlTWlzc2VzEhUKDW91dHB1dF90b2tlbnMYAyABKAQSHgoWb3V0cHV0X3RoaW5raW5nX3Rva2VucxgEIAEoBCIeCg5Ub2tlbkNhY2hlSGl0cxIMCgRyZWFkGAEgASgEIjYKEFRva2VuQ2FjaGVNaXNzZXMSDwoHd3JpdHRlbhgBIAEoBBIRCgl1bndyaXR0ZW4YAiABKAQqyAEKEEFnZW50RWZmb3J0TGV2ZWwSIgoeQUdFTlRfRUZGT1JUX0xFVkVMX1VOU1BFQ0lGSUVEEAASGgoWQUdFTlRfRUZGT1JUX0xFVkVMX0xPVxABEh0KGUFHRU5UX0VGRk9SVF9MRVZFTF9NRURJVU0QAhIbChdBR0VOVF9FRkZPUlRfTEVWRUxfSElHSBADEhwKGEFHRU5UX0VGRk9SVF9MRVZFTF9YSElHSBAEEhoKFkFHRU5UX0VGRk9SVF9MRVZFTF9NQVgQBSpYCgtNb2RlbE1hcmtlchIcChhNT0RFTF9NQVJLRVJfVU5TUEVDSUZJRUQQABIrChZNT0RFTF9NQVJLRVJfU1lOVEhFVElDEAEaD4qmHQs8c3ludGhldGljPjpVChRtb2RlbF9tYXJrZXJfbGl0ZXJhbBIhLmdvb2dsZS5wcm90b2J1Zi5FbnVtVmFsdWVPcHRpb25zGOHUAyABKAlSEm1vZGVsTWFya2VyTGl0ZXJhbEIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_google_protobuf_descriptor]);
 
 /**
  * A request to the vendor API failed, and the vendor RECORDED that it did.
@@ -156,6 +156,22 @@ export type ApiRequestFailed = Message<"conversation.v1.ApiRequestFailed"> & {
      */
     value: ApiUnmodeledError;
     case: "unmodeled";
+  } | {
+    /**
+     * THE REQUEST GOT NO ANSWER: the connection to the API failed below any
+     * HTTP status -- DNS, a refused, reset or timed-out connection. THE ONE
+     * ARM THE VENDOR DOES NOT NAME: it files these under `server_error` or
+     * states no class, which read as the API's own internal error
+     * (2026-10-21: "Connection dropped (ECONNRESET)" was drawn "the vendor
+     * API hit its own internal error"). The producer recognizes it by the
+     * connection's own code or words, with the same classifier that stands
+     * the session's network fault, so the two never disagree. A failure that
+     * carries an HTTP status is never this arm: the API answered.
+     *
+     * @generated from field: conversation.v1.ApiUnreachable unreachable = 15;
+     */
+    value: ApiUnreachable;
+    case: "unreachable";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -394,6 +410,28 @@ export const ApiMaxOutputTokensSchema: GenMessage<ApiMaxOutputTokens> = /*@__PUR
   messageDesc(file_conversation_v1_api, 12);
 
 /**
+ * The connection to the API failed below any answer.
+ *
+ * @generated from message conversation.v1.ApiUnreachable
+ */
+export type ApiUnreachable = Message<"conversation.v1.ApiUnreachable"> & {
+  /**
+   * The socket error that failed it (`ECONNRESET`, `ENOTFOUND`), when one was
+   * named; empty when only the words said the API could not be reached.
+   *
+   * @generated from field: string code = 1;
+   */
+  code: string;
+};
+
+/**
+ * Describes the message conversation.v1.ApiUnreachable.
+ * Use `create(ApiUnreachableSchema)` to create a new message.
+ */
+export const ApiUnreachableSchema: GenMessage<ApiUnreachable> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_api, 13);
+
+/**
  * An error type this schema does not model.
  *
  * @generated from message conversation.v1.ApiUnmodeledError
@@ -412,7 +450,7 @@ export type ApiUnmodeledError = Message<"conversation.v1.ApiUnmodeledError"> & {
  * Use `create(ApiUnmodeledErrorSchema)` to create a new message.
  */
 export const ApiUnmodeledErrorSchema: GenMessage<ApiUnmodeledError> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 13);
+  messageDesc(file_conversation_v1_api, 14);
 
 /**
  * A model the vendor API offers for selection.
@@ -443,7 +481,7 @@ export type AgentModel = Message<"conversation.v1.AgentModel"> & {
  * Use `create(AgentModelSchema)` to create a new message.
  */
 export const AgentModelSchema: GenMessage<AgentModel> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 14);
+  messageDesc(file_conversation_v1_api, 15);
 
 /**
  * One model a session may run under, as offered by the vendor for this account.
@@ -494,7 +532,7 @@ export type ModelOption = Message<"conversation.v1.ModelOption"> & {
  * Use `create(ModelOptionSchema)` to create a new message.
  */
 export const ModelOptionSchema: GenMessage<ModelOption> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 15);
+  messageDesc(file_conversation_v1_api, 16);
 
 /**
  * What one model can do, as the vendor declares it.
@@ -565,7 +603,7 @@ export type ModelCapabilities = Message<"conversation.v1.ModelCapabilities"> & {
  * Use `create(ModelCapabilitiesSchema)` to create a new message.
  */
 export const ModelCapabilitiesSchema: GenMessage<ModelCapabilities> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 16);
+  messageDesc(file_conversation_v1_api, 17);
 
 /**
  * The model takes no reasoning-effort level.
@@ -580,7 +618,7 @@ export type ModelEffortUnsupported = Message<"conversation.v1.ModelEffortUnsuppo
  * Use `create(ModelEffortUnsupportedSchema)` to create a new message.
  */
 export const ModelEffortUnsupportedSchema: GenMessage<ModelEffortUnsupported> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 17);
+  messageDesc(file_conversation_v1_api, 18);
 
 /**
  * The model takes a reasoning-effort level.
@@ -602,7 +640,7 @@ export type ModelEffortSupported = Message<"conversation.v1.ModelEffortSupported
  * Use `create(ModelEffortSupportedSchema)` to create a new message.
  */
 export const ModelEffortSupportedSchema: GenMessage<ModelEffortSupported> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 18);
+  messageDesc(file_conversation_v1_api, 19);
 
 /**
  * THE ONE CANONICAL TOKEN SHAPE, and the only representation in which this
@@ -686,7 +724,7 @@ export type TokenUsage = Message<"conversation.v1.TokenUsage"> & {
  * Use `create(TokenUsageSchema)` to create a new message.
  */
 export const TokenUsageSchema: GenMessage<TokenUsage> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 19);
+  messageDesc(file_conversation_v1_api, 20);
 
 /**
  * The prompt input this request did not have to process, because the prompt
@@ -709,7 +747,7 @@ export type TokenCacheHits = Message<"conversation.v1.TokenCacheHits"> & {
  * Use `create(TokenCacheHitsSchema)` to create a new message.
  */
 export const TokenCacheHitsSchema: GenMessage<TokenCacheHits> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 20);
+  messageDesc(file_conversation_v1_api, 21);
 
 /**
  * The prompt input this request processed fresh, split by whether processing it
@@ -742,7 +780,7 @@ export type TokenCacheMisses = Message<"conversation.v1.TokenCacheMisses"> & {
  * Use `create(TokenCacheMissesSchema)` to create a new message.
  */
 export const TokenCacheMissesSchema: GenMessage<TokenCacheMisses> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_api, 21);
+  messageDesc(file_conversation_v1_api, 22);
 
 /**
  * How much reasoning a response was asked to spend before answering.

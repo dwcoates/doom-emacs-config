@@ -14,6 +14,7 @@
 package turnfault
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -126,6 +127,14 @@ func OfApiFailure(failed *conversationv1.ApiRequestFailed) Words {
 		return words("your organization does not allow this OAuth access", "oauth_org_not_allowed")
 	case *conversationv1.ApiRequestFailed_MaxOutputTokens:
 		return words("the request asked for more output than the model will produce", "max_output_tokens")
+	case *conversationv1.ApiRequestFailed_Unreachable:
+		// THE SOCKET'S OWN CODE says how the connection failed, when one was
+		// named: ECONNRESET is a dropped connection, ENOTFOUND an unresolved
+		// host.
+		if code := kind.Unreachable.GetCode(); code != "" {
+			return words(fmt.Sprintf("the connection to the API failed (%s)", code), "unreachable")
+		}
+		return words("the API could not be reached", "unreachable")
 	case *conversationv1.ApiRequestFailed_Unmodeled:
 		// THE VENDOR'S OWN CLASS NAME is the cause, verbatim: it is the only
 		// handle the reader has on what happened.
