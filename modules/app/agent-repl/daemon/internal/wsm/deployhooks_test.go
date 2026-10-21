@@ -1,11 +1,17 @@
 package wsm
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	frontendv1 "agentrepl/proto/frontend/v1"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
+
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestDeployHooksRoundTripEveryHookKind(t *testing.T) {
@@ -116,4 +122,99 @@ func TestTheDeployHooksStepIsBreaking(t *testing.T) {
 		}
 	}
 	t.Fatal("no layout-68 step")
+}
+
+// retiredPromptTabRow is a stored merge tab row as a build before the deploy
+// queue wrote it: its kind the retired arm TAG, carrying a settled state.
+func retiredPromptTabRow(t *testing.T, tag protowire.Number) []byte {
+	t.Helper()
+	state, err := proto.Marshal(&frontendv1.FeedMergeTabHookPrompt{State: &frontendv1.FeedMergeTabHookPrompt_Settled{Settled: &frontendv1.FeedMergeTabSettled{
+		StartedAtMs: 10, EndedAtMs: 20, Outcome: &frontendv1.FeedMergeTabSettled_Succeeded{Succeeded: &frontendv1.FeedMergeTabSucceeded{}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tab := &frontendv1.FeedMergeTab{Label: &frontendv1.FeedMergeTabLabel{Words: &frontendv1.FeedMergeTabLabel_Text{Text: "post-prompt"}, Round: 1}}
+	var unknown []byte
+	unknown = protowire.AppendTag(unknown, tag, protowire.BytesType)
+	unknown = protowire.AppendBytes(unknown, state)
+	tab.ProtoReflect().SetUnknown(unknown)
+	raw, err := proto.Marshal(&frontendv1.FeedRow{Row: &frontendv1.FeedRow_MergeTab{MergeTab: tab}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestRewriteRetiredMergeTabCarriesARetiredPromptTabOntoTheHookTab(t *testing.T) {
+	for _, tag := range []protowire.Number{retiredPrePromptTag, retiredPostPromptTag} {
+		t.Run(fmt.Sprintf("tag %d", tag), func(t *testing.T) {
+			// Act
+			out, changed, err := rewriteRetiredMergeTab(retiredPromptTabRow(t, tag))
+
+			// Assert
+			if err != nil || !changed {
+				t.Fatalf("rewriteRetiredMergeTab = changed %v, %v; want the row rewritten", changed, err)
+			}
+			row := &frontendv1.FeedRow{}
+			if err := proto.Unmarshal(out, row); err != nil {
+				t.Fatal(err)
+			}
+			hook := row.GetMergeTab().GetHookPrompt()
+			if hook.GetSettled().GetEndedAtMs() != 20 || hook.GetSettled().GetSucceeded() == nil {
+				t.Fatalf("hook prompt tab = %v, want the retired tab's settled state", hook)
+			}
+			if row.GetMergeTab().GetLabel().GetText() != "post-prompt" || len(row.GetMergeTab().ProtoReflect().GetUnknown()) != 0 {
+				t.Fatalf("tab = %v, want its label kept and nothing left unknown", row.GetMergeTab())
+			}
+		})
+	}
+}
+
+func TestRewriteRetiredMergeTabLeavesEveryOtherRowAlone(t *testing.T) {
+	tests := []struct {
+		name string
+		row  *frontendv1.FeedRow
+	}{
+		{name: "a row that is no merge tab", row: &frontendv1.FeedRow{}},
+		{name: "a live tab kind", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{
+			Kind: &frontendv1.FeedMergeTab_Committing{Committing: &frontendv1.FeedMergeTabCommitting{}}}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			raw, err := proto.Marshal(tt.row)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			out, changed, err := rewriteRetiredMergeTab(raw)
+
+			// Assert
+			if err != nil || changed || !bytes.Equal(out, raw) {
+				t.Fatalf("rewriteRetiredMergeTab = changed %v, %v; want the row left byte for byte", changed, err)
+			}
+		})
+	}
+}
+
+func TestTheMigrationRewritesStoredRetiredPromptTabs(t *testing.T) {
+	// Arrange -- a layout-66 file holding a stored post-prompt tab row.
+	path := fixtureAt(t, 66)
+	execRaw(t, path, `INSERT INTO durable_feed_rows (workspace_id, row_id, plane, order_key, row) VALUES ('ws-1', 'tab-1', 0, 'k', ?)`,
+		retiredPromptTabRow(t, retiredPostPromptTag))
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-66 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	raw := scalar[[]byte](t, handle.(*store), `SELECT row FROM durable_feed_rows WHERE row_id = 'tab-1'`)
+	row := &frontendv1.FeedRow{}
+	if err := proto.Unmarshal(raw, row); err != nil || row.GetMergeTab().GetHookPrompt() == nil {
+		t.Fatalf("stored row = %v, %v; want it a hook prompt tab", row, err)
+	}
 }

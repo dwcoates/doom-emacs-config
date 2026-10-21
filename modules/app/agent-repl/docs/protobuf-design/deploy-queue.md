@@ -217,9 +217,12 @@ origin) is the next repository to be described this way, and is deferred.
 
 ### 7. The merged-upstream finish is retired
 
-- **What.** `MergeWorkspaceOneShotMergedUpstream`, the bubble's
-  `updating_main` tab, the footer's `updating_main` steps and the version
-  increment's `merged_upstream` refusal are removed.
+- **What.** `MergeWorkspaceOneShotMergedUpstream`, the footer's
+  `updating_main` steps and the version increment's `merged_upstream` refusal
+  are removed. The bubble's `updating_main` tab stays as a history-only arm:
+  no deploy draws it, but bubbles recorded before the deploy queue carry it,
+  and those rows are drawn again from the store, and no new tab is the same
+  fact, so there is nothing to rewrite them into.
 - **Why.** Its only entry point was `MergeWorkspace`'s `merged_upstream` arm,
   which has no home once finishing always runs the repository's deploy;
   explanation-engine's "update main once the PR merged" becomes its
@@ -227,3 +230,17 @@ origin) is the next repository to be described this way, and is deferred.
 - **Consequences.** `wsm.MergeSourceMergedUpstream` and the queue's
   `updateMain` path are dead code and are deleted; the stored source kind's
   number is kept reserved.
+
+### 8. Stored bubbles are rewritten, not read through a second vocabulary
+
+- **What.** The bubble's tab rows are stored encoded
+  (`durable_feed_rows`). Layout 68 rewrites every stored tab whose kind is the
+  retired `pre_prompt` (3) or `post_prompt` (8) arm as `hook_prompt`, whose
+  fields are the same numbers (`state`: live 1, settled 2), so the arm's bytes
+  carry over unchanged. Migration steps gained a Go `Rewrite` beside their DDL
+  for this (`daemon/internal/wsm/migrate.go`).
+- **Why.** Without it, every bubble recorded with a before- or after-merge
+  prompt (every explanation-engine merge has one) would draw with no tab kind,
+  which the webapp refuses as malformed.
+- **Verification.** `TestTheMigrationRewritesStoredRetiredPromptTabs` and the
+  `rewriteRetiredMergeTab` tests in `daemon/internal/wsm/deployhooks_test.go`.

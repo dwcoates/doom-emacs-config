@@ -34,6 +34,7 @@ var classified = map[protoreflect.Name]bool{
 	"tests_run":        false,
 	"tests_run_fixing": true,
 	"committing":       false,
+	"updating_main":    false,
 	"hook_prompt":      true,
 	"hook_script":      false,
 }

@@ -3514,6 +3514,9 @@ message FeedMergeTab {
     FeedMergeTabTestsRunFixing tests_run_fixing = 15;
     FeedMergeTabCommitting committing = 10;
     FeedMergeTabResolving resolving = 12;
+    // HISTORY ONLY: a branch already merged upstream, in a bubble recorded
+    // before the deploy queue. No deploy draws it.
+    FeedMergeTabUpdatingMain updating_main = 11;
     // A prompt hook of any stage: agentic, its content the turn's own rows.
     FeedMergeTabHookPrompt hook_prompt = 16;
     // A script hook of any stage: resolved, its content the script's run.
@@ -3521,16 +3524,15 @@ message FeedMergeTab {
   }
   // Tags 3 (`pre_prompt`) and 8 (`post_prompt`) are RETIRED: every prompt a
   // deploy runs from its repository's config or from its request is a prompt
-  // hook (`hook_prompt`), and which stage it ran in is its label. Tag 11
-  // (`updating_main`, a branch already merged upstream) is RETIRED: finishing a
-  // workspace always runs its repository's deploy.
+  // hook (`hook_prompt`), and which stage it ran in is its label. Stored rows
+  // that carried them were rewritten as `hook_prompt`, the same shape.
   // Tag 4 (`merge`, the no-FF merge made before the gate) is RETIRED: the
   // branch is rebased first and the merge commit is made only after the gate
   // passes, as the committing tab. Tags 5 (`conflicts`) and 7 (`fixes`) are
   // RETIRED: a conflict resolution is part of its commit's subtab, and a
   // fixing attempt is its run's remediation view.
-  reserved 3, 4, 5, 7, 8, 11;
-  reserved "merge", "conflicts", "fixes", "pre_prompt", "post_prompt", "updating_main";
+  reserved 3, 4, 5, 7, 8;
+  reserved "merge", "conflicts", "fixes", "pre_prompt", "post_prompt";
 }
 
 // The tab's drawn label, resolved by the daemon.
@@ -3993,6 +3995,36 @@ message FeedMergeTabCommitting {
 // The merge commit's first line, drawn verbatim.
 message FeedMergeCommitSubject {
   string text = 1;
+}
+
+// RESOLVED, HISTORY ONLY: a branch already merged upstream — the default
+// branch in the repository's main worktree fast-forwarded from upstream. No
+// deploy draws this tab: finishing a workspace always runs its repository's
+// deploy. It stays in the vocabulary because bubbles recorded before the
+// deploy queue carry it, and those rows are drawn again from the store.
+message FeedMergeTabUpdatingMain {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+  // The step it is on.
+  FeedMergeUpdatingMainStep step = 3;
+}
+// The update's step. THE ARM IS THE STEP.
+message FeedMergeUpdatingMainStep {
+  oneof step {
+    // Fetching from upstream.
+    FeedMergeUpdatingMainFetching fetching = 1;
+    // Fast-forwarding the default branch to the fetched tip.
+    FeedMergeUpdatingMainFastForwarding fast_forwarding = 2;
+  }
+}
+// Fetching from upstream.
+message FeedMergeUpdatingMainFetching {}
+// Fast-forwarding to a commit.
+message FeedMergeUpdatingMainFastForwarding {
+  // The short hash of the commit fast-forwarded to.
+  string commit = 1;
 }
 
 // AGENTIC: a PROMPT HOOK (repoconfig.v1.DeployHookPrompt) running as a turn
