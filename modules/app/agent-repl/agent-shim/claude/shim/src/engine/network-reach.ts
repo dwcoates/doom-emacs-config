@@ -20,6 +20,12 @@ import { classifyAgentFailure, noticeText } from "./network-resume.js";
 /** What one message says about the network. */
 export type NetworkReach =
   | { readonly kind: "unreachable"; readonly detail: string }
+  /**
+   * A request got NO ANSWER within the vendor's first-byte window: the
+   * network may be down or the API slow, and only a probe can tell which
+   * (engine/network-resume.ts `suspect`).
+   */
+  | { readonly kind: "unanswered"; readonly detail: string }
   | { readonly kind: "reached" };
 
 /**
@@ -50,6 +56,12 @@ export function networkReach(message: SdkMessage): NetworkReach | undefined {
     case "system":
       if (message.subtype === "api_retry") {
         if (typeof message.error_status === "number") return { kind: "reached" };
+        if (message.no_response !== undefined) {
+          return {
+            kind: "unanswered",
+            detail: `No response from API within ${String(message.no_response.waited_ms)}ms`,
+          };
+        }
         const verdict = classifyAgentFailure({ errorClass: message.error });
         return verdict.network ? { kind: "unreachable", detail: verdict.detail } : undefined;
       }

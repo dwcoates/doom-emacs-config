@@ -29,6 +29,14 @@
  *   request that reaches the vendor first resolves it itself ({@link
  *   NetworkResume.faultResolved}). The fault has no window: it stands for as
  *   long as the API is unreachable.
+ * - A REQUEST THAT GOT NO ANSWER IS PROBED FOR (2026-10-21). The vendor's
+ *   "No response from API" (an `api_retry` with `no_response`) says nothing
+ *   about whether the network or the API is to blame, and was drawn as a
+ *   vendor fault for the 1m50s the retried request then hung. While a
+ *   request stands unanswered ({@link NetworkResume.suspect}) the loop runs,
+ *   and a probe that cannot reach the API stands the network fault through
+ *   {@link NetworkResumeDeps.unreachable}; one that can ends the suspicion,
+ *   since the network is not what failed.
  * - THE WAIT IS BOUNDED. {@link NETWORK_RESUME_WINDOW_MS} from the failure,
  *   after which the wait gives up at ERROR and the agent keeps its failure.
  * - ONE RESUME PER FAILURE EVENT, and the window restarts only when the resumed
@@ -240,6 +248,8 @@ export interface NetworkResumeDeps {
   readonly emit: (update: conversationv1.SessionUpdate) => void;
   /** Resolves the session's standing network fault, once the API answers a probe while it stands. */
   readonly recovered: (detail: string) => void;
+  /** Stands the session's network fault, once a probe cannot reach the API while a request stands unanswered. */
+  readonly unreachable: (detail: string) => void;
   readonly intervalMs?: number;
   readonly windowMs?: number;
 }
@@ -323,6 +333,8 @@ export class NetworkResume {
   private stopped = false;
   /** Whether the session's network fault stands, so the loop runs until the API answers. */
   private faultStanding = false;
+  /** The vendor's words for a request that got no answer, while the probe has yet to say whose fault it is. */
+  private unanswered: string | undefined;
 
   constructor(private readonly deps: NetworkResumeDeps) {
     this.intervalMs = deps.intervalMs ?? NETWORK_RESUME_PROBE_INTERVAL_MS;
@@ -347,6 +359,8 @@ export class NetworkResume {
   /** The session's network fault opened (or was restated): probe until the API answers. */
   faultOpened(): void {
     if (this.stopped) return;
+    // THE FAULT ANSWERS AN UNANSWERED REQUEST'S QUESTION: the network failed.
+    this.unanswered = undefined;
     if (!this.faultStanding) {
       this.faultStanding = true;
       LOGGER.info(
@@ -357,8 +371,29 @@ export class NetworkResume {
     this.ensureLoop();
   }
 
+  /**
+   * A request got no answer within the vendor's first-byte window: probe
+   * whether the API is reachable, and stand the network fault if it is not.
+   */
+  suspect(detail: string): void {
+    if (this.stopped || this.faultStanding) return;
+    if (this.unanswered === undefined) {
+      LOGGER.info(
+        { probe_interval_ms: this.intervalMs, detail },
+        "a request got no answer from the API; the API is probed to tell an unreachable network from a slow vendor",
+      );
+    }
+    this.unanswered = detail;
+    this.ensureLoop();
+  }
+
   /** A request reached the vendor, which resolved the fault itself. */
   faultResolved(): void {
+    if (this.unanswered !== undefined) {
+      this.unanswered = undefined;
+      LOGGER.debug({}, "a request reached the vendor; the unanswered request no longer needs a probe");
+      this.cancelLoopIfIdle();
+    }
     if (!this.faultStanding) return;
     this.faultStanding = false;
     LOGGER.debug({}, "a request reached the vendor while the network fault stood; the probe no longer waits on it");
@@ -583,7 +618,7 @@ export class NetworkResume {
   async tick(): Promise<void> {
     if (this.stopped) return;
     this.expire();
-    if (this.waiting.size === 0 && !this.faultStanding) {
+    if (this.waiting.size === 0 && !this.faultStanding && this.unanswered === undefined) {
       this.cancelLoop();
       return;
     }
@@ -609,8 +644,25 @@ export class NetworkResume {
     }
     if (this.stopped) return;
     if (!answer.reachable) {
+      const unanswered = this.unanswered;
+      if (unanswered !== undefined) {
+        this.unanswered = undefined;
+        LOGGER.info(
+          { detail: answer.detail, unanswered },
+          "the API cannot be reached while a request stands unanswered; the network fault stands",
+        );
+        this.deps.unreachable(unanswered);
+        return;
+      }
       LOGGER.logVerbose({ waiting: this.waiting.size, detail: answer.detail }, "the API is still unreachable");
       return;
+    }
+    if (this.unanswered !== undefined) {
+      LOGGER.info(
+        { detail: answer.detail, unanswered: this.unanswered },
+        "the API is reachable; the request that got no answer is the vendor's, not the network's",
+      );
+      this.unanswered = undefined;
     }
     if (this.faultStanding) {
       this.faultStanding = false;
@@ -865,7 +917,7 @@ export class NetworkResume {
   }
 
   private cancelLoopIfIdle(): void {
-    if (this.waiting.size === 0 && !this.faultStanding) this.cancelLoop();
+    if (this.waiting.size === 0 && !this.faultStanding && this.unanswered === undefined) this.cancelLoop();
   }
 
   /** Drop the run joins and evidence of an agent nothing will resume. */
