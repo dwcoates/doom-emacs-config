@@ -36,6 +36,7 @@ type goneRepository struct {
 // registerUnderRepo registers a workspace at dir under the repository at repoDir.
 func (h *harness) registerUnderRepo(t *testing.T, dir, repoDir string) wsm.Workspace {
 	t.Helper()
+	h.registerMain(t, repoDir)
 	ws, _, err := h.db.RegisterWorkspace(context.Background(), dir, wsm.RegisterFacts{
 		Branch: "feature", ParentBranch: "master", RepoDir: repoDir, DefaultBranch: "master",
 	})
@@ -77,15 +78,12 @@ func TestAGoneRepositoryIsRetiredOrKept(t *testing.T) {
 		wantLevel   string
 	}{
 		{
-			name: "a gone repository with no workspace is retired",
+			name: "a gone repository with only its closed main worktree is retired",
 			arrange: func(t *testing.T, h *harness) goneRepository {
 				repoDir := t.TempDir()
-				repo, _, err := h.db.RegisterRepository(context.Background(), repoDir, "master")
-				if err != nil {
-					t.Fatalf("RegisterRepository: %v", err)
-				}
+				main := h.registerMain(t, repoDir)
 				mustRemove(t, repoDir)
-				return goneRepository{repo: repo.ID}
+				return goneRepository{repo: main.Repo}
 			},
 			wantRetired: true,
 			wantLevel:   "info",
@@ -220,9 +218,7 @@ func TestARetirementTheStoreCannotWriteFailsTheBoot(t *testing.T) {
 	errBoom := errors.New("disk on fire")
 	h := newHarness(t, func(d *Deps, h *harness) { d.DB = failingRetire{DB: h.db, err: errBoom} })
 	repoDir := t.TempDir()
-	if _, _, err := h.db.RegisterRepository(context.Background(), repoDir, "master"); err != nil {
-		t.Fatalf("RegisterRepository: %v", err)
-	}
+	h.registerMain(t, repoDir)
 	mustRemove(t, repoDir)
 
 	// Act.
@@ -241,10 +237,7 @@ func TestAJoiningDaemonRetiresNothing(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, func(d *Deps, _ *harness) { d.JoiningAddress = "127.0.0.1:41111" })
 	repoDir := t.TempDir()
-	repo, _, err := h.db.RegisterRepository(context.Background(), repoDir, "master")
-	if err != nil {
-		t.Fatalf("RegisterRepository: %v", err)
-	}
+	repo := h.registerMain(t, repoDir)
 	mustRemove(t, repoDir)
 
 	// Act.
@@ -254,7 +247,7 @@ func TestAJoiningDaemonRetiresNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if len(report.RetiredRepositories) != 0 || repositoryRows(t, h, repo.ID) != 1 {
+	if len(report.RetiredRepositories) != 0 || repositoryRows(t, h, repo.Repo) != 1 {
 		t.Fatalf("a joining daemon retired %v; it reconciles nothing", report.RetiredRepositories)
 	}
 }

@@ -18,6 +18,10 @@
 // resolves through is about to go, so this is the LAST verb that can address
 // the workspace's shim.
 //
+// A REPOSITORY'S MAIN WORKTREE STANDS while the repository is known: it is
+// forgotten only as the repository's last workspace, taking the repository
+// with it.
+//
 // A FORGET REQUIRES A CLOSED WORKSPACE, and it cannot close one for the
 // caller: the close verb owns the quiet requirement, and a close-then-forget
 // would either duplicate that gate or bypass it — and bypassing it silently
@@ -37,7 +41,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_forget_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_forget_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZm9yZ2V0X3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkcKFkZvcmdldFdvcmtzcGFjZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKRAQoXRm9yZ2V0V29ya3NwYWNlUmVzcG9uc2USNwoHc3VjY2VzcxgBIAEoCzIkLmFnZW50cmVwbC52MS5Gb3JnZXRXb3Jrc3BhY2VTdWNjZXNzSAASMwoFZXJyb3IYAiABKAsyIi5hZ2VudHJlcGwudjEuRm9yZ2V0V29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiGAoWRm9yZ2V0V29ya3NwYWNlU3VjY2VzcyKMBAoURm9yZ2V0V29ya3NwYWNlRXJyb3ISPAoKbm90X2Nsb3NlZBgBIAEoCzImLmFnZW50cmVwbC52MS5Gb3JnZXRXb3Jrc3BhY2VOb3RDbG9zZWRIABI3CgdibG9ja2VkGAIgASgLMiQuYWdlbnRyZXBsLnYxLkZvcmdldFdvcmtzcGFjZUJsb2NrZWRIABJACgxoYXNfY2hpbGRyZW4YAyABKAsyKC5hZ2VudHJlcGwudjEuRm9yZ2V0V29ya3NwYWNlSGFzQ2hpbGRyZW5IABJKChF1bmtub3duX3dvcmtzcGFjZRgEIAEoCzItLmFnZW50cmVwbC52MS5Gb3JnZXRXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgFIAEoCzIxLmFnZW50cmVwbC52MS5Gb3JnZXRXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkoKEXRyYW5zZmVycmluZ19hd2F5GAYgASgLMi0uYWdlbnRyZXBsLnYxLkZvcmdldFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJFCg9ub3RfeWV0X2Fkb3B0ZWQYByABKAsyKi5hZ2VudHJlcGwudjEuRm9yZ2V0V29ya3NwYWNlTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIhoKGEZvcmdldFdvcmtzcGFjZU5vdENsb3NlZCKAAQoWRm9yZ2V0V29ya3NwYWNlQmxvY2tlZBIWCg50dXJuX2luX2ZsaWdodBgBIAEoCBIRCglsaXZlX3dvcmsYAiABKA0SFAoMaGVsZF9wcm9tcHRzGAMgASgNEhQKDG1lcmdlX3F1ZXVlZBgEIAEoCBIPCgdzdW1tYXJ5GAUgASgJIi4KGkZvcmdldFdvcmtzcGFjZUhhc0NoaWxkcmVuEhAKCGNoaWxkcmVuGAEgAygJIiEKH0ZvcmdldFdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiOwojRm9yZ2V0V29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjIKH0ZvcmdldFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIeChxGb3JnZXRXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZm9yZ2V0X3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkcKFkZvcmdldFdvcmtzcGFjZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKRAQoXRm9yZ2V0V29ya3NwYWNlUmVzcG9uc2USNwoHc3VjY2VzcxgBIAEoCzIkLmFnZW50cmVwbC52MS5Gb3JnZXRXb3Jrc3BhY2VTdWNjZXNzSAASMwoFZXJyb3IYAiABKAsyIi5hZ2VudHJlcGwudjEuRm9yZ2V0V29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiGAoWRm9yZ2V0V29ya3NwYWNlU3VjY2VzcyLQBAoURm9yZ2V0V29ya3NwYWNlRXJyb3ISPAoKbm90X2Nsb3NlZBgBIAEoCzImLmFnZW50cmVwbC52MS5Gb3JnZXRXb3Jrc3BhY2VOb3RDbG9zZWRIABI3CgdibG9ja2VkGAIgASgLMiQuYWdlbnRyZXBsLnYxLkZvcmdldFdvcmtzcGFjZUJsb2NrZWRIABJACgxoYXNfY2hpbGRyZW4YAyABKAsyKC5hZ2VudHJlcGwudjEuRm9yZ2V0V29ya3NwYWNlSGFzQ2hpbGRyZW5IABJKChF1bmtub3duX3dvcmtzcGFjZRgEIAEoCzItLmFnZW50cmVwbC52MS5Gb3JnZXRXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgFIAEoCzIxLmFnZW50cmVwbC52MS5Gb3JnZXRXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkoKEXRyYW5zZmVycmluZ19hd2F5GAYgASgLMi0uYWdlbnRyZXBsLnYxLkZvcmdldFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJFCg9ub3RfeWV0X2Fkb3B0ZWQYByABKAsyKi5hZ2VudHJlcGwudjEuRm9yZ2V0V29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEkIKDW1haW5fd29ya3RyZWUYCCABKAsyKS5hZ2VudHJlcGwudjEuRm9yZ2V0V29ya3NwYWNlTWFpbldvcmt0cmVlSABCBwoFY2F1c2UiGgoYRm9yZ2V0V29ya3NwYWNlTm90Q2xvc2VkIoABChZGb3JnZXRXb3Jrc3BhY2VCbG9ja2VkEhYKDnR1cm5faW5fZmxpZ2h0GAEgASgIEhEKCWxpdmVfd29yaxgCIAEoDRIUCgxoZWxkX3Byb21wdHMYAyABKA0SFAoMbWVyZ2VfcXVldWVkGAQgASgIEg8KB3N1bW1hcnkYBSABKAkiLgoaRm9yZ2V0V29ya3NwYWNlSGFzQ2hpbGRyZW4SEAoIY2hpbGRyZW4YASADKAkiIQofRm9yZ2V0V29ya3NwYWNlVW5rbm93bldvcmtzcGFjZSI7CiNGb3JnZXRXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMgofRm9yZ2V0V29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh4KHEZvcmdldFdvcmtzcGFjZU5vdFlldEFkb3B0ZWQiNwobRm9yZ2V0V29ya3NwYWNlTWFpbldvcmt0cmVlEhgKEG90aGVyX3dvcmtzcGFjZXMYASABKA1CKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.ForgetWorkspaceRequest
@@ -172,6 +176,18 @@ export type ForgetWorkspaceError = Message<"agentrepl.v1.ForgetWorkspaceError"> 
      */
     value: ForgetWorkspaceNotYetAdopted;
     case: "notYetAdopted";
+  } | {
+    /**
+     * The workspace is its repository's MAIN WORKTREE and other workspaces
+     * are still registered under the repository. A repository's main
+     * worktree is a registered workspace for as long as the repository is
+     * known; forgetting it is forgetting the repository, which only its last
+     * workspace can do.
+     *
+     * @generated from field: agentrepl.v1.ForgetWorkspaceMainWorktree main_worktree = 8;
+     */
+    value: ForgetWorkspaceMainWorktree;
+    case: "mainWorktree";
   } | { case: undefined; value?: undefined };
 };
 
@@ -333,4 +349,23 @@ export type ForgetWorkspaceNotYetAdopted = Message<"agentrepl.v1.ForgetWorkspace
  */
 export const ForgetWorkspaceNotYetAdoptedSchema: GenMessage<ForgetWorkspaceNotYetAdopted> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_forget_workspace, 10);
+
+/**
+ * @generated from message agentrepl.v1.ForgetWorkspaceMainWorktree
+ */
+export type ForgetWorkspaceMainWorktree = Message<"agentrepl.v1.ForgetWorkspaceMainWorktree"> & {
+  /**
+   * How many other workspaces are registered under the repository.
+   *
+   * @generated from field: uint32 other_workspaces = 1;
+   */
+  otherWorkspaces: number;
+};
+
+/**
+ * Describes the message agentrepl.v1.ForgetWorkspaceMainWorktree.
+ * Use `create(ForgetWorkspaceMainWorktreeSchema)` to create a new message.
+ */
+export const ForgetWorkspaceMainWorktreeSchema: GenMessage<ForgetWorkspaceMainWorktree> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_forget_workspace, 11);
 

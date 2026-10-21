@@ -18,6 +18,10 @@
 // resolves through is about to go, so this is the LAST verb that can address
 // the workspace's shim.
 //
+// A REPOSITORY'S MAIN WORKTREE STANDS while the repository is known: it is
+// forgotten only as the repository's last workspace, taking the repository
+// with it.
+//
 // A FORGET REQUIRES A CLOSED WORKSPACE, and it cannot close one for the
 // caller: the close verb owns the quiet requirement, and a close-then-forget
 // would either duplicate that gate or bypass it — and bypassing it silently
@@ -67,6 +71,12 @@ message ForgetWorkspaceError {
     ForgetWorkspaceTransferringAway transferring_away = 6;
     // A joining daemon has not finished adopting this workspace yet.
     ForgetWorkspaceNotYetAdopted not_yet_adopted = 7;
+    // The workspace is its repository's MAIN WORKTREE and other workspaces
+    // are still registered under the repository. A repository's main
+    // worktree is a registered workspace for as long as the repository is
+    // known; forgetting it is forgetting the repository, which only its last
+    // workspace can do.
+    ForgetWorkspaceMainWorktree main_worktree = 8;
   }
 }
 message ForgetWorkspaceNotClosed {}
@@ -105,3 +115,7 @@ message ForgetWorkspaceTransferringAway {
   string address = 1;
 }
 message ForgetWorkspaceNotYetAdopted {}
+message ForgetWorkspaceMainWorktree {
+  // How many other workspaces are registered under the repository.
+  uint32 other_workspaces = 1;
+}

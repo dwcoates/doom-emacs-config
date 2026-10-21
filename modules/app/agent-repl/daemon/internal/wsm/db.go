@@ -29,8 +29,10 @@ type DB interface {
 	Promote(ctx context.Context) error
 
 	// RegisterWorkspace records a workspace, idempotent by normalized dir,
-	// minting a WorkspaceID and a RepoID on first sight. The bool reports
-	// whether the record was created.
+	// minting a WorkspaceID and, when the workspace is its repository's main
+	// worktree, a RepoID on first sight. A linked worktree whose repository
+	// is not yet known is refused with ErrMainWorktreeUnregistered. The bool
+	// reports whether the record was created.
 	RegisterWorkspace(ctx context.Context, dir string, facts RegisterFacts) (Workspace, bool, error)
 	// Workspace loads one workspace by id.
 	Workspace(ctx context.Context, id WorkspaceID) (Workspace, error)
@@ -38,14 +40,8 @@ type DB interface {
 	WorkspaceByDir(ctx context.Context, dir string) (Workspace, error)
 	// ListWorkspaces loads every workspace, all-or-nothing.
 	ListWorkspaces(ctx context.Context) ([]Workspace, error)
-	// RegisterRepository records a repository ON ITS OWN, with no workspace,
-	// idempotent by normalized main-worktree dir. It mints the RepoID on first
-	// sight; the bool reports whether the record was created. It is the same
-	// mint RegisterWorkspace performs through ensureRepo, reachable without a
-	// workspace to hang it on.
-	RegisterRepository(ctx context.Context, dir, defaultBranch string) (Repository, bool, error)
-	// RefuseTemporary answers the *tempdirs.InsideError RegisterWorkspace and
-	// RegisterRepository would refuse dir with, or nil: the SAME check, for a
+	// RefuseTemporary answers the *tempdirs.InsideError RegisterWorkspace
+	// would refuse dir with, or nil: the SAME check, for a
 	// verb that must refuse a temporary directory before it registers
 	// anything (CreateWorkspace's repository). A dir that cannot be judged is
 	// an ordinary error.
@@ -155,7 +151,9 @@ type DB interface {
 	SetLiveCommitCount(ctx context.Context, id WorkspaceID, count uint32) (bool, error)
 	// Forget deletes a workspace's every record — the nuke's durable half and
 	// the whole of the forget verb — and, when the workspace was the last one
-	// registered under its repository, that repository's record too. The
+	// registered under its repository, that repository's record too. A main
+	// worktree's workspace is refused with ErrMainWorktreeInUse while other
+	// workspaces are registered under its repository. The
 	// report names the repository that went, empty when one stayed.
 	Forget(ctx context.Context, id WorkspaceID) (ForgetReport, error)
 	// RetireRepository deletes a repository's record together with every

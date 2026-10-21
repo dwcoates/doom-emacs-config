@@ -293,7 +293,7 @@ type RegisterFacts struct {
 	// announcement names none. Only the creation path supplies it; a bare
 	// registration has no parent workspace to state.
 	Parent *WorkspaceID
-	// RepoDir is the repository's canonicalized common dir.
+	// RepoDir is the repository's normalized main-worktree directory.
 	RepoDir string
 	// DefaultBranch is the repository's default branch, as the announcing
 	// caller read it off git. It is recorded on FIRST SIGHT of the repository
@@ -315,6 +315,12 @@ type RegisterFacts struct {
 	// the workspace lands on. An announcement of an already-registered
 	// workspace ignores it.
 	Priority *Priority
+	// Closure, when set, makes a MINTED workspace born closed with this close
+	// record: it exists without being open. Only the daemon's own
+	// main-worktree guarantee supplies it (a repository's main worktree is
+	// registered whenever the repository is known, and is not opened by
+	// that). An announcement of an already-registered workspace ignores it.
+	Closure *Closure
 }
 
 // Priority is the roster's ordering priority, mirroring

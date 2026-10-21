@@ -139,6 +139,16 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		if err := s.retireGoneRepositories(ctx, log, &report); err != nil {
 			return Report{}, err
 		}
+		// EVERY REPOSITORY LEFT HOLDS ITS MAIN WORKTREE as a registered
+		// workspace once the gone ones are retired: a repository is known
+		// exactly as long as its main worktree is, and a registry written
+		// before that guarantee is brought under it here.
+		if err := s.deps.EnsureMainWorktrees(ctx); err != nil {
+			log.Error("daemon.boot.run", "the repositories' main worktrees could not be ensured", dlog.Context{
+				"error": err.Error(),
+			})
+			return Report{}, fmt.Errorf("boot: ensure the main worktrees: %w", err)
+		}
 		// What each taken-up carry leaves for after the drain: the re-judged
 		// verdicts and the carried shim replacements.
 		s.deps.Rollout.FinishCarries(ctx)

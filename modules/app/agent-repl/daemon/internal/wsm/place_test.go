@@ -21,6 +21,7 @@ func placeRepo(t *testing.T) string {
 // registerIn registers a workspace named name in repoDir with priority p.
 func registerIn(t *testing.T, s *store, repoDir, name string, p *Priority) Workspace {
 	t.Helper()
+	registerMain(t, s, repoDir)
 	ws, created, err := s.RegisterWorkspace(context.Background(), filepath.Join(t.TempDir(), name), RegisterFacts{
 		Name: name, Branch: name, ParentBranch: "master", RepoDir: repoDir, Priority: p,
 	})
@@ -33,7 +34,7 @@ func registerIn(t *testing.T, s *store, repoDir, name string, p *Priority) Works
 	return ws
 }
 
-// placesByName reads every workspace's stored place, keyed by name.
+// placesByName reads every linked workspace's stored place, keyed by name.
 func placesByName(t *testing.T, s *store) map[string]int64 {
 	t.Helper()
 	all, err := s.ListWorkspaces(context.Background())
@@ -41,7 +42,7 @@ func placesByName(t *testing.T, s *store) map[string]int64 {
 		t.Fatalf("ListWorkspaces: %v", err)
 	}
 	out := map[string]int64{}
-	for _, ws := range all {
+	for _, ws := range withoutMainWorktrees(t, s, all) {
 		out[ws.Name] = ws.Place
 	}
 	return out

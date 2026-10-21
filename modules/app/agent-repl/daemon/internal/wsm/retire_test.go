@@ -18,23 +18,39 @@ func closedUnder(t *testing.T, s *store, repoDir string) Workspace {
 	return ws
 }
 
+// closedMainRepository registers a fresh repository through its main
+// worktree, closed, and answers the repository.
+func closedMainRepository(t *testing.T, s *store) Repository {
+	t.Helper()
+	main := registerMain(t, s, t.TempDir())
+	if err := s.MarkClosed(context.Background(), main.ID, Closure{At: time.Now(), By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+	repos, err := s.ListRepositories(context.Background())
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	repo, found := RepositoryWithID(repos, main.Repo)
+	if !found {
+		t.Fatalf("the main worktree's repository %s is not registered", main.Repo)
+	}
+	return repo
+}
+
 func TestRetireRepositoryRemovesTheRepositoryAndItsClosedWorkspaces(t *testing.T) {
 	tests := []struct {
 		name       string
 		workspaces int
 	}{
-		{name: "a repository registered on its own", workspaces: 0},
-		{name: "a repository with one closed workspace", workspaces: 1},
-		{name: "a repository with two closed workspaces", workspaces: 2},
+		{name: "a repository with only its main worktree", workspaces: 0},
+		{name: "a repository with one closed linked workspace", workspaces: 1},
+		{name: "a repository with two closed linked workspaces", workspaces: 2},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Arrange
 			s, _ := testStore(t)
-			repo, _, err := s.RegisterRepository(context.Background(), t.TempDir(), "main")
-			if err != nil {
-				t.Fatalf("RegisterRepository: %v", err)
-			}
+			repo := closedMainRepository(t, s)
 			for i := 0; i < test.workspaces; i++ {
 				closedUnder(t, s, repo.Dir)
 			}
@@ -52,8 +68,8 @@ func TestRetireRepositoryRemovesTheRepositoryAndItsClosedWorkspaces(t *testing.T
 			if n := scalar[int](t, s, `SELECT count(*) FROM workspaces WHERE repo_id = ?`, repo.ID); n != 0 {
 				t.Fatalf("workspace rows = %d, want 0", n)
 			}
-			if len(report.Workspaces) != test.workspaces {
-				t.Fatalf("report.Workspaces = %v, want %d", report.Workspaces, test.workspaces)
+			if len(report.Workspaces) != test.workspaces+1 {
+				t.Fatalf("report.Workspaces = %v, want the main worktree and %d more", report.Workspaces, test.workspaces)
 			}
 		})
 	}
@@ -62,10 +78,7 @@ func TestRetireRepositoryRemovesTheRepositoryAndItsClosedWorkspaces(t *testing.T
 func TestRetireRepositoryReportsTheRetiredDir(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
-	repo, _, err := s.RegisterRepository(context.Background(), t.TempDir(), "main")
-	if err != nil {
-		t.Fatalf("RegisterRepository: %v", err)
-	}
+	repo := closedMainRepository(t, s)
 
 	// Act
 	report, err := s.RetireRepository(context.Background(), repo.ID)

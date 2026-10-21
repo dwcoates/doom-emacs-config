@@ -29,6 +29,7 @@ func arrangeRepo(t *testing.T, name string) string {
 // parent is PARENT.
 func registerChild(t *testing.T, s *store, repoDir, name string, parent WorkspaceID) Workspace {
 	t.Helper()
+	registerMain(t, s, repoDir)
 	ws, _, err := s.RegisterWorkspace(context.Background(), filepath.Join(t.TempDir(), name), RegisterFacts{
 		Name: name, Branch: name, ParentBranch: "master", RepoDir: repoDir, Parent: &parent,
 	})
@@ -977,7 +978,8 @@ func TestReadArrangementReadsTheWorkspacesRepositoriesAndSubsections(t *testing.
 	if err != nil {
 		t.Fatalf("ReadArrangement: %v", err)
 	}
-	if len(got.Workspaces) != 1 || !sameSubsection(got.Workspaces[0].Subsection, &later.ID) {
+	linked := withoutMainWorktrees(t, s, got.Workspaces)
+	if len(got.Workspaces) != 2 || len(linked) != 1 || !sameSubsection(linked[0].Subsection, &later.ID) {
 		t.Fatalf("workspaces = %+v, want the one workspace in %q", got.Workspaces, later.ID)
 	}
 	if len(got.Repositories) != 1 || got.Repositories[0].ID != ws.Repo {

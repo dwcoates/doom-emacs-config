@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -126,4 +127,27 @@ func isNull(t *testing.T, s *store, query string, args ...any) bool {
 		t.Fatalf("isNull %q: %v", query, err)
 	}
 	return !out.Valid
+}
+
+// withoutMainWorktrees drops every repository's main-worktree row from ALL.
+// Every repository a fixture registers holds its main worktree (registerMain),
+// and a test whose subject is the rows it arranged spells those rows alone.
+func withoutMainWorktrees(t *testing.T, s *store, all []Workspace) []Workspace {
+	t.Helper()
+	repos, err := s.ListRepositories(context.Background())
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	mains := map[string]bool{}
+	for _, repo := range repos {
+		mains[repo.Dir] = true
+	}
+	return slices.DeleteFunc(slices.Clone(all), func(ws Workspace) bool { return mains[ws.Dir] })
+}
+
+// isMainWorktree reports whether the workspace ID is its repository's main
+// worktree.
+func isMainWorktree(t *testing.T, s *store, id WorkspaceID) bool {
+	t.Helper()
+	return scalar[bool](t, s, `SELECT workspaces.dir = repositories.dir FROM workspaces JOIN repositories ON repositories.id = workspaces.repo_id WHERE workspaces.id = ?`, id)
 }

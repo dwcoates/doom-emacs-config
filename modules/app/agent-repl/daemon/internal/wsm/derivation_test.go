@@ -10,6 +10,7 @@ import (
 // registerDerived registers a workspace of repoDir with derivation facts.
 func registerDerived(t *testing.T, s *store, repoDir, name string, facts RegisterFacts) (Workspace, error) {
 	t.Helper()
+	registerMain(t, s, repoDir)
 	facts.Name, facts.Branch, facts.ParentBranch, facts.RepoDir, facts.DefaultBranch = name, name, "master", repoDir, "master"
 	ws, _, err := s.RegisterWorkspace(context.Background(), mkdir(t, filepath.Join(canonicalTemp(t), name)), facts)
 	return ws, err

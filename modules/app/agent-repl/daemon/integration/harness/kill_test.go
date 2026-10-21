@@ -786,13 +786,31 @@ func TestKillGroupKillsALiveGroupAndTakesAGoneOneAsNoFailure(t *testing.T) {
 // the exit event Kill awaits after the files are closed but before the
 // process turns zombie, so a member can be listed as exiting after Kill has
 // rightly returned.
+//
+// THE MEMBER OPENS THE FIFO ITSELF AND NEVER EXECS AFTER: it is a forked
+// subshell holding the write end, waiting on a sleep that closed its copy
+// first. A writer opened before an exec is not one process: Darwin's exec
+// copies the fd table to a new proc (fdt_fork with in_exec, every fileglob
+// referenced again) and leaves the old image a SHADOW proc that holds those
+// references until its own exit finishes. A shadow is invisible to the group
+// listing, to proc_find and to every exit event, so no Kill can await it; the
+// member this test first ran (`/bin/sleep >fifo`) had a shadow still holding
+// the FIFO under the merge gate's load after its new image exited
+// (2026-10-21).
 func TestKillReturnsOnceEveryMemberHasReleasedItsFiles(t *testing.T) {
 	// Arrange
 	fifo := filepath.Join(t.TempDir(), "member")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 		t.Fatalf("mkfifo: %v", err)
 	}
-	d, _ := groupUnderKill(t, "/bin/sleep 100 >"+fifo+" & echo $!; wait")
+	d, member := groupUnderKill(t, "( exec 3>"+fifo+"; /bin/sleep 100 3>&- ) & echo $!; wait")
+	// WHAT KILL COULD SEE OF THE MEMBER is recorded for the failure: the
+	// stopped group's listing, which is the one Kill holds exit events from.
+	var stoppedListing []procgroup.Member
+	var stoppedListingErr error
+	d.afterGroupStopped = func() {
+		stoppedListing, stoppedListingErr = procgroup.UnendedMembers(d.cmd.Process.Pid)
+	}
 	// A blocking open of a FIFO's read end returns once a writer has opened
 	// it: the member holds the file before Kill runs, with no clock.
 	r, err := syscall.Open(fifo, syscall.O_RDONLY, 0)
@@ -810,7 +828,11 @@ func TestKillReturnsOnceEveryMemberHasReleasedItsFiles(t *testing.T) {
 	// Assert
 	n, err := syscall.Read(r, make([]byte, 1))
 	if n != 0 || err != nil {
-		t.Fatalf("read the FIFO after Kill = %d, %v; want end of file: a member still held its write end", n, err)
+		listed := slices.ContainsFunc(stoppedListing, func(m procgroup.Member) bool { return m.Pid == member })
+		state, stateErr := procgroup.ReadState(member)
+		t.Fatalf("read the FIFO after Kill = %d, %v; want end of file: a member still held its write end "+
+			"(member %d: in the stopped group's listing %v (listing %+v, error %v); its state now %+v, error %v)",
+			n, err, member, listed, stoppedListing, stoppedListingErr, state, stateErr)
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agent-repld/internal/wsm"
 )
 
 // repoFile writes a FILE inside a directory and answers its path. It is the
@@ -172,8 +174,8 @@ func TestRegisterRepositoryRecordsTheRepositoryDefaultBranch(t *testing.T) {
 	}
 
 	// Assert.
-	if len(f.db.registeredRepos) != 1 || f.db.registeredRepos[0].DefaultBranch != "trunk" {
-		t.Fatalf("registered repositories = %+v, want one carrying the default branch trunk", f.db.registeredRepos)
+	if len(f.db.registered) != 1 || f.db.registered[0].DefaultBranch != "trunk" {
+		t.Fatalf("registrations = %+v, want one carrying the default branch trunk", f.db.registered)
 	}
 }
 
@@ -208,7 +210,7 @@ func TestRegisterRepositorySurfacesARegistryWriteThatFailed(t *testing.T) {
 	f := newFixture(t)
 	dir := worktreeDir(t)
 	f.git.mainWorktree = dir
-	f.db.registerRepoErr = errFake
+	f.db.registerErr = errFake
 
 	// Act.
 	_, err := f.verbs.RegisterRepository(context.Background(), dir)
@@ -317,18 +319,16 @@ func TestRegisterRepositoryReportsAFreshlyMintedWorkspace(t *testing.T) {
 }
 
 // TestRegisterRepositoryMintsTheWorkspaceForARepositoryItAlreadyHeld is the
-// mixed case the two independent bools exist for: a repository registered
-// before this half of the verb landed is already known while its workspace is
-// minted right now.
+// mixed case the two independent bools exist for: a repository a registry
+// written before the main-worktree guarantee holds is already known while its
+// workspace is minted right now.
 func TestRegisterRepositoryMintsTheWorkspaceForARepositoryItAlreadyHeld(t *testing.T) {
 	// Arrange: the repository row is already in the registry, with no workspace
 	// under it.
 	f := newFixture(t)
 	dir := worktreeDir(t)
 	f.git.mainWorktree = dir
-	if _, _, err := f.db.RegisterRepository(context.Background(), dir, "master"); err != nil {
-		t.Fatalf("seed the repository: %v", err)
-	}
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-seeded", Dir: dir, DefaultBranch: "master"})
 
 	// Act.
 	registered, err := f.verbs.RegisterRepository(context.Background(), dir)
@@ -390,5 +390,65 @@ func TestRegisterRepositorySurfacesTheRegistrationsOwnRefusalUnderItsOwnRpc(t *t
 	// Assert.
 	if refusal := asRefusal(t, err, ArmNotAWorktree); refusal.Rpc != "RegisterRepository" {
 		t.Fatalf("refusal rpc = %q, want RegisterRepository", refusal.Rpc)
+	}
+}
+
+func TestRegisterRepositorySurfacesAnUnreadableRegistry(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	f.git.mainWorktree = dir
+	f.db.listRepositoriesErr = errors.New("the state database is unreachable")
+
+	// Act.
+	_, err := f.verbs.RegisterRepository(context.Background(), dir)
+
+	// Assert.
+	if !errors.Is(err, f.db.listRepositoriesErr) {
+		t.Fatalf("RegisterRepository = %v, want the registry's failure", err)
+	}
+	if !hasRecord(f, "error", opRegisterRepository) || len(f.db.registered) != 0 {
+		t.Fatalf("want the failure recorded at ERROR and nothing registered (registrations %+v)", f.db.registered)
+	}
+}
+
+func TestRegisterRepositoryRefusesAWorkspaceNamingAnUnregisteredRepository(t *testing.T) {
+	// Arrange: a registry whose main-worktree row names a repository it does
+	// not hold.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	f.git.mainWorktree = dir
+	f.db.with(wsm.Workspace{ID: "ws-main", Dir: dir, Repo: "repo-ghost"})
+
+	// Act.
+	_, err := f.verbs.RegisterRepository(context.Background(), dir)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "repo-ghost") {
+		t.Fatalf("RegisterRepository = %v, want the missing repository named", err)
+	}
+	if !hasRecord(f, "error", opRegisterRepository) {
+		t.Fatal("the failure was not recorded at ERROR")
+	}
+}
+
+func TestRegisterRepositoryMintsTheRepositoryThroughItsMainWorktreesRegistration(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	f.git.mainWorktree = dir
+
+	// Act.
+	registered, err := f.verbs.RegisterRepository(context.Background(), dir)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RegisterRepository: %v", err)
+	}
+	if len(f.db.registered) != 1 || f.db.registerDir != dir || f.db.registered[0].RepoDir != dir {
+		t.Fatalf("registrations = %+v at %q, want the main worktree's own alone", f.db.registered, f.db.registerDir)
+	}
+	if registered.Workspace.Repo != registered.Repository.ID || registered.Workspace.Closed {
+		t.Fatalf("answer = %+v, want the open main worktree under the minted repository", registered)
 	}
 }

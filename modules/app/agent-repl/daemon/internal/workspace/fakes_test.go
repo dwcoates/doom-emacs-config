@@ -144,11 +144,6 @@ type fakeDB struct {
 	registerDir string
 	createdNew  bool
 
-	// registeredRepos records every RegisterRepository the verb made, in
-	// order, and registerRepoErr fails the write, which the fake's own slice
-	// cannot.
-	registeredRepos []registeredRepo
-	registerRepoErr error
 	// refuseTemporaryErr is what RefuseTemporary answers.
 	refuseTemporaryErr error
 
@@ -476,9 +471,12 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 		return existing, false, nil
 	}
 	ws := wsm.Workspace{
-		ID: ids.WorkspaceID("ws-" + filepath.Base(dir)), Dir: dir, Repo: "repo-1",
+		ID: ids.WorkspaceID("ws-" + filepath.Base(dir)), Dir: dir, Repo: d.repoFor(dir, facts),
 		Name: facts.Name, Branch: facts.Branch, ParentBranch: facts.ParentBranch,
 		Parent: facts.Parent, Priority: facts.Priority,
+	}
+	if facts.Closure != nil {
+		ws.Closed, ws.Closure = true, facts.Closure
 	}
 	d.with(ws)
 	d.createdNew = true
@@ -488,25 +486,26 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 // RefuseTemporary answers the scripted temporary-directory refusal.
 func (d *fakeDB) RefuseTemporary(string) error { return d.refuseTemporaryErr }
 
-// registeredRepo is one RegisterRepository call, as the fake recorded it.
-type registeredRepo struct{ Dir, DefaultBranch string }
-
-func (d *fakeDB) RegisterRepository(_ context.Context, dir, defaultBranch string) (wsm.Repository, bool, error) {
-	if d.registerRepoErr != nil {
-		return wsm.Repository{}, false, d.registerRepoErr
+// repoFor answers the repository a minted workspace is registered under, as
+// the store does: the repository already held at facts.RepoDir, or one minted
+// by the main worktree's own registration. A fixture that registers a linked
+// worktree of a repository it never states keeps the fixed "repo-1".
+func (d *fakeDB) repoFor(dir string, facts wsm.RegisterFacts) ids.RepoID {
+	if facts.RepoDir == "" {
+		return "repo-1"
 	}
-	d.registeredRepos = append(d.registeredRepos, registeredRepo{Dir: dir, DefaultBranch: defaultBranch})
-	for _, repo := range d.repositories {
-		if repo.Dir == dir {
-			return repo, false, nil
-		}
+	if repo, found := wsm.RepositoryAt(d.repositories, facts.RepoDir); found {
+		return repo.ID
+	}
+	if dir != facts.RepoDir {
+		return "repo-1"
 	}
 	repo := wsm.Repository{
-		ID: ids.RepoID("repo-" + filepath.Base(dir)), Dir: dir,
-		Name: filepath.Base(dir), DefaultBranch: defaultBranch,
+		ID: ids.RepoID("repo-" + dir), Dir: dir,
+		Name: filepath.Base(dir), DefaultBranch: facts.DefaultBranch,
 	}
 	d.repositories = append(d.repositories, repo)
-	return repo, true, nil
+	return repo.ID
 }
 
 func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
@@ -2675,9 +2674,11 @@ func (d *fakeDerived) ReportCreated(ws wsm.Workspace, ownerNotice string) {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{
-		home:      t.TempDir(),
-		db:        newFakeDB(),
-		git:       &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: "/repo"},
+		home: t.TempDir(),
+		db:   newFakeDB(),
+		// The main worktree is a REAL worktree directory: every registration
+		// of a linked worktree registers it first.
+		git:       &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: worktreeDir(t)},
 		account:   &fakeAccounts{configDir: "/config"},
 		queue:     newFakeQueue(),
 		merge:     newFakeMerge(),

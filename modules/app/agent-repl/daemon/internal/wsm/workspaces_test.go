@@ -243,6 +243,7 @@ func TestRegisterWorkspaceSharesOneRepoAcrossWorktrees(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	repo := t.TempDir()
+	main := registerMain(t, s, repo)
 
 	// Act
 	first, _, err := s.RegisterWorkspace(context.Background(), t.TempDir(), RegisterFacts{RepoDir: repo})
@@ -255,8 +256,103 @@ func TestRegisterWorkspaceSharesOneRepoAcrossWorktrees(t *testing.T) {
 	}
 
 	// Assert
-	if first.Repo != second.Repo {
-		t.Fatalf("repo ids = %q and %q, want one shared identity", first.Repo, second.Repo)
+	if first.Repo != main.Repo || second.Repo != main.Repo {
+		t.Fatalf("repo ids = %q, %q and %q, want one shared identity", main.Repo, first.Repo, second.Repo)
+	}
+}
+
+func TestRegisteringTheMainWorktreeMintsTheRepository(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := t.TempDir()
+
+	// Act
+	main, created, err := s.RegisterWorkspace(context.Background(), repo, RegisterFacts{RepoDir: repo, DefaultBranch: "main"})
+
+	// Assert
+	if err != nil || !created {
+		t.Fatalf("RegisterWorkspace(main worktree) = created %v, %v; want a minted workspace", created, err)
+	}
+	if got := scalar[string](t, s, `SELECT default_branch FROM repositories WHERE id = ?`, main.Repo); got != "main" {
+		t.Fatalf("repository default branch = %q, want main", got)
+	}
+}
+
+func TestALinkedWorktreeOfAnUnknownRepositoryIsRefusedWritingNothing(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	_, _, err := s.RegisterWorkspace(context.Background(), t.TempDir(), RegisterFacts{RepoDir: t.TempDir()})
+
+	// Assert
+	if !errors.Is(err, ErrMainWorktreeUnregistered) {
+		t.Fatalf("RegisterWorkspace(linked worktree, unknown repository) = %v, want ErrMainWorktreeUnregistered", err)
+	}
+	if n := scalar[int](t, s, `SELECT count(*) FROM repositories`); n != 0 {
+		t.Fatalf("repository rows = %d after the refusal, want none", n)
+	}
+	if n := scalar[int](t, s, `SELECT count(*) FROM workspaces`); n != 0 {
+		t.Fatalf("workspace rows = %d after the refusal, want none", n)
+	}
+}
+
+func TestAWorkspaceBornClosedCarriesItsCloseRecord(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := t.TempDir()
+	closure := Closure{At: instant, By: CloseByDaemon}
+
+	// Act
+	got, _, err := s.RegisterWorkspace(context.Background(), repo, RegisterFacts{RepoDir: repo, Closure: &closure})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	stored, err := s.Workspace(context.Background(), got.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	for name, ws := range map[string]Workspace{"answered": got, "stored": stored} {
+		if !ws.Closed || ws.Closure == nil || ws.Closure.By != CloseByDaemon || !ws.Closure.At.Equal(instant) {
+			t.Fatalf("%s workspace = closed %v closure %+v, want closed by the daemon at %v", name, ws.Closed, ws.Closure, instant)
+		}
+	}
+}
+
+func TestABornClosedRegistrationWithAnUndeclaredCauseIsRefusedWritingNothing(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := t.TempDir()
+
+	// Act
+	_, _, err := s.RegisterWorkspace(context.Background(), repo, RegisterFacts{RepoDir: repo, Closure: &Closure{At: instant, By: "nobody"}})
+
+	// Assert
+	if err == nil {
+		t.Fatal("RegisterWorkspace with an undeclared close cause succeeded")
+	}
+	if n := scalar[int](t, s, `SELECT count(*) FROM workspaces`); n != 0 {
+		t.Fatalf("workspace rows = %d after the refusal, want none", n)
+	}
+}
+
+func TestAnAnnouncementOfAnOpenWorkspaceIgnoresABornClosedFact(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := t.TempDir()
+	open, _, err := s.RegisterWorkspace(context.Background(), repo, RegisterFacts{RepoDir: repo})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+
+	// Act
+	again, created, err := s.RegisterWorkspace(context.Background(), repo, RegisterFacts{RepoDir: repo, Closure: &Closure{At: instant, By: CloseByDaemon}})
+
+	// Assert
+	if err != nil || created || again.ID != open.ID || again.Closed {
+		t.Fatalf("RegisterWorkspace again = %+v created %v err %v, want the open row answered unchanged", again, created, err)
 	}
 }
 
@@ -412,87 +508,6 @@ func TestListRepositoriesLoadsEveryRecord(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("loaded %d repositories, want 2", len(got))
-	}
-}
-
-func TestRegisterRepositoryMintsARepositoryWithNoWorkspace(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	dir := t.TempDir()
-
-	// Act
-	repo, created, err := s.RegisterRepository(context.Background(), dir, "main")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("RegisterRepository: %v", err)
-	}
-	if !created {
-		t.Fatalf("RegisterRepository reported an existing record for a fresh store")
-	}
-	if repo.ID == "" || repo.DefaultBranch != "main" {
-		t.Fatalf("RegisterRepository = %+v, want a minted id and the default branch main", repo)
-	}
-}
-
-func TestRegisterRepositoryReportsARepositoryItAlreadyHeld(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	dir := t.TempDir()
-	first, _, err := s.RegisterRepository(context.Background(), dir, "main")
-	if err != nil {
-		t.Fatalf("first RegisterRepository: %v", err)
-	}
-
-	// Act
-	again, created, err := s.RegisterRepository(context.Background(), dir, "main")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("second RegisterRepository: %v", err)
-	}
-	if created {
-		t.Fatalf("RegisterRepository minted a second record for %s", dir)
-	}
-	if again.ID != first.ID {
-		t.Fatalf("RegisterRepository = id %q, want the id %q the first mint answered", again.ID, first.ID)
-	}
-}
-
-// TestRegisterRepositoryAdoptsTheRepositoryARegisteredWorkspaceMinted pins the
-// two mint paths on ONE row: a repository RegisterWorkspace minted through
-// ensureRepo is the same repository this verb answers, never a second row for
-// one directory.
-func TestRegisterRepositoryAdoptsTheRepositoryARegisteredWorkspaceMinted(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-
-	// Act
-	repo, created, err := s.RegisterRepository(context.Background(), ws.Dir, "main")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("RegisterRepository: %v", err)
-	}
-	if created {
-		t.Fatalf("RegisterRepository minted a second row for the workspace's own repository")
-	}
-	if repo.ID != ws.Repo {
-		t.Fatalf("RegisterRepository = id %q, want the workspace's repository %q", repo.ID, ws.Repo)
-	}
-}
-
-func TestRegisterRepositoryRefusesABlankDirectory(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-
-	// Act
-	_, _, err := s.RegisterRepository(context.Background(), "", "main")
-
-	// Assert
-	if err == nil {
-		t.Fatalf("RegisterRepository(\"\") = no error, want a refusal")
 	}
 }
 
@@ -1108,8 +1123,26 @@ func TestRegisterWorkspaceKeepsAKnownDefaultBranchWhenNoneIsSupplied(t *testing.
 // repository, which is the arrangement every repository-disposition case needs
 // and testWorkspace cannot make: it registers each workspace as its own
 // repository.
+// registerMain registers repoDir's main worktree, idempotently and born
+// closed: the one registration that mints the repository, made first as the
+// daemon makes it when a linked worktree is announced.
+func registerMain(t *testing.T, s *store, repoDir string) Workspace {
+	t.Helper()
+	ws, _, err := s.RegisterWorkspace(context.Background(), repoDir, RegisterFacts{
+		Branch: "master", ParentBranch: "master", RepoDir: repoDir, DefaultBranch: "master",
+		Closure: &Closure{At: instant, By: CloseByDaemon},
+	})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace(main worktree %s): %v", repoDir, err)
+	}
+	return ws
+}
+
+// registerUnder registers a linked worktree under repoDir, after its main
+// worktree.
 func registerUnder(t *testing.T, s *store, repoDir string) Workspace {
 	t.Helper()
+	registerMain(t, s, repoDir)
 	ws, created, err := s.RegisterWorkspace(context.Background(), t.TempDir(), RegisterFacts{
 		Name: "sample", Branch: "feature", ParentBranch: "master", RepoDir: repoDir,
 	})
@@ -1122,48 +1155,70 @@ func registerUnder(t *testing.T, s *store, repoDir string) Workspace {
 	return ws
 }
 
-func TestForgetDisposesOfTheRepositoryOnlyWhenUnreferenced(t *testing.T) {
+func TestForgetDisposesOfTheRepositoryOnlyWithItsMainWorktree(t *testing.T) {
 	tests := []struct {
 		name string
-		// siblings is how many OTHER workspaces are registered under the same
-		// repository before the forget.
-		siblings int
+		// forgetMain forgets the main worktree's workspace rather than the
+		// linked one, after the linked one is gone.
+		forgetMain bool
 		// wantRepoRows is how many repository rows survive the forget.
 		wantRepoRows int
-		// wantReported is whether the report names the repository it removed.
-		wantReported bool
 	}{
-		{name: "the last workspace takes its repository with it", siblings: 0, wantRepoRows: 0, wantReported: true},
-		{name: "a sibling workspace keeps the repository", siblings: 1, wantRepoRows: 1, wantReported: false},
+		{name: "a linked workspace leaves the repository to its main worktree", forgetMain: false, wantRepoRows: 1},
+		{name: "the main worktree as the last workspace takes its repository with it", forgetMain: true, wantRepoRows: 0},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Arrange
 			s, _ := testStore(t)
 			repoDir := t.TempDir()
-			ws := registerUnder(t, s, repoDir)
-			for i := 0; i < test.siblings; i++ {
-				registerUnder(t, s, repoDir)
+			linked := registerUnder(t, s, repoDir)
+			target := linked
+			if test.forgetMain {
+				if _, err := s.Forget(context.Background(), linked.ID); err != nil {
+					t.Fatalf("Forget(linked): %v", err)
+				}
+				target = registerMain(t, s, repoDir)
 			}
 
 			// Act
-			report, err := s.Forget(context.Background(), ws.ID)
+			report, err := s.Forget(context.Background(), target.ID)
 
 			// Assert
 			if err != nil {
 				t.Fatalf("Forget: %v", err)
 			}
-			if n := scalar[int](t, s, `SELECT count(*) FROM repositories WHERE id = ?`, ws.Repo); n != test.wantRepoRows {
+			if n := scalar[int](t, s, `SELECT count(*) FROM repositories WHERE id = ?`, linked.Repo); n != test.wantRepoRows {
 				t.Fatalf("repository rows = %d, want %d", n, test.wantRepoRows)
 			}
-			reported := report.Repository != ""
-			if reported != test.wantReported {
-				t.Fatalf("report.Repository = %q, want reported = %v", report.Repository, test.wantReported)
-			}
-			if test.wantReported && report.Repository != ws.Repo {
-				t.Fatalf("report.Repository = %q, want %q", report.Repository, ws.Repo)
+			if reported := report.Repository == linked.Repo; reported != test.forgetMain {
+				t.Fatalf("report.Repository = %q, want reported = %v", report.Repository, test.forgetMain)
 			}
 		})
+	}
+}
+
+func TestForgetRefusesTheMainWorktreeWhileTheRepositoryHasOtherWorkspaces(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repoDir := t.TempDir()
+	linked := registerUnder(t, s, repoDir)
+	main := registerMain(t, s, repoDir)
+
+	// Act
+	_, err := s.Forget(context.Background(), main.ID)
+
+	// Assert
+	if !errors.Is(err, ErrMainWorktreeInUse) {
+		t.Fatalf("Forget(main worktree) = %v, want ErrMainWorktreeInUse", err)
+	}
+	for _, kept := range []Workspace{main, linked} {
+		if _, err := s.Workspace(context.Background(), kept.ID); err != nil {
+			t.Fatalf("Workspace(%s) after the refusal: %v, want it kept", kept.Name, err)
+		}
+	}
+	if n := scalar[int](t, s, `SELECT count(*) FROM repositories WHERE id = ?`, main.Repo); n != 1 {
+		t.Fatalf("repository rows = %d after the refusal, want 1", n)
 	}
 }
 
@@ -1171,7 +1226,7 @@ func TestForgetReportsTheForgottenRepositoryDir(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	repoDir := t.TempDir()
-	ws := registerUnder(t, s, repoDir)
+	ws := registerMain(t, s, repoDir)
 	want := scalar[string](t, s, `SELECT dir FROM repositories WHERE id = ?`, ws.Repo)
 
 	// Act
@@ -1233,7 +1288,7 @@ func TestForgetDeletesTheRepositorysMergeQueuePauseRow(t *testing.T) {
 	// key cascade can reach it when the repository record goes.
 	s, _ := testStore(t)
 	repoDir := t.TempDir()
-	ws := registerUnder(t, s, repoDir)
+	ws := registerMain(t, s, repoDir)
 	key := RepoKey(scalar[string](t, s, `SELECT dir FROM repositories WHERE id = ?`, ws.Repo))
 	if err := s.SetMergeQueuePaused(context.Background(), key, true); err != nil {
 		t.Fatalf("SetMergeQueuePaused: %v", err)

@@ -2,10 +2,12 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // Forget removes a workspace from the REGISTRY and touches nothing else. It is
@@ -46,12 +48,16 @@ import (
 // resolves, with no verb left that can address either. So the user closes
 // first, and the refusal says so.
 //
-// THE ORPHAN GUARD is two more refusals on top of that:
+// THE ORPHAN GUARD is three more refusals on top of that:
 //
 //   - The close verb's quiet check is re-run here. A workspace can be recorded
 //     closed and still have held prompts parked against it — a hold outlives a
 //     close when the close raced it — and the forget would destroy them with
 //     the row.
+//   - A repository's MAIN WORKTREE is refused while any other workspace is
+//     registered under the repository: its workspace stands as long as the
+//     repository is known, and forgetting it as the repository's last
+//     workspace is forgetting the repository.
 //   - A workspace another workspace names as its PARENT is refused. The
 //     schema's parent_id is ON DELETE SET NULL, so the forget would silently
 //     flatten a fork's lineage and drop its children out of their roster
@@ -101,6 +107,20 @@ func (v *verbs) Forget(ctx context.Context, ws ids.WorkspaceID) error {
 			false, map[string]any{"children": ids.Strings(children)})
 	}
 
+	// THE MAIN WORKTREE STANDS WHILE ITS REPOSITORY HAS OTHER WORKSPACES. It
+	// is refused here, before the session is stood down, so a refused forget
+	// changes nothing; the registry refuses the same deletion atomically
+	// (wsm.ErrMainWorktreeInUse), which answers a workspace registered under
+	// the repository between this check and the deletion.
+	others, err := v.othersUnderMainWorktree(ctx, record)
+	if err != nil {
+		log.Error(opForget, "could not read the registry for the main-worktree check", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("forget %q: %w", ws, err)
+	}
+	if others > 0 {
+		return refuseMainWorktree(log, ws, others)
+	}
+
 	// THE SESSION GOES BEFORE THE ROW. `kill` is the same stand-down Nuke
 	// takes before it destroys, and for the same reason: once the row is gone
 	// no verb can name this workspace's shim again.
@@ -127,6 +147,9 @@ func (v *verbs) Forget(ctx context.Context, ws ids.WorkspaceID) error {
 	})
 
 	report, err := v.deps.DB.Forget(ctx, ws)
+	if errors.Is(err, wsm.ErrMainWorktreeInUse) {
+		return refuseMainWorktree(log, ws, 1)
+	}
 	if err != nil {
 		log.Error(opForget, "could not forget the workspace record", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("forget %q: %w", ws, err)
@@ -163,4 +186,35 @@ func (v *verbs) childrenOf(ctx context.Context, ws ids.WorkspaceID) ([]ids.Works
 		}
 	}
 	return out, nil
+}
+
+// othersUnderMainWorktree answers how many OTHER workspaces are registered
+// under record's repository when record is that repository's main worktree,
+// and zero for any other workspace.
+func (v *verbs) othersUnderMainWorktree(ctx context.Context, record wsm.Workspace) (int, error) {
+	repoDir, err := v.repositoryRootOf(ctx, record.Repo)
+	if err != nil {
+		return 0, err
+	}
+	if !wsm.IsMainWorktree(record.Dir, repoDir) {
+		return 0, nil
+	}
+	workspaces, err := v.deps.DB.ListWorkspaces(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list the workspaces: %w", err)
+	}
+	others := 0
+	for _, candidate := range workspaces {
+		if candidate.Repo == record.Repo && candidate.ID != record.ID {
+			others++
+		}
+	}
+	return others, nil
+}
+
+// refuseMainWorktree is the main_worktree refusal of a ForgetWorkspace.
+func refuseMainWorktree(log dlog.Logger, ws ids.WorkspaceID, others int) *Refusal {
+	return refuseWith(log, "ForgetWorkspace", ArmMainWorktree,
+		fmt.Sprintf("workspace %q is its repository's main worktree, and %d other workspaces are registered under the repository; it stands as long as the repository is known", ws, others),
+		false, map[string]any{"other_workspaces": uint32(others)})
 }

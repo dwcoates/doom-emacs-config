@@ -272,6 +272,11 @@ type Verbs interface {
 	// workspace is an invariant violation. PublishRegistry binds again, later,
 	// once it has closed the rows whose directory is gone.
 	BindViews(ctx context.Context) error
+	// EnsureMainWorktrees registers, born closed, the main worktree of every
+	// repository the registry holds without one, whose directory is on disk.
+	// The boot calls it once its gone repositories are retired: a repository
+	// is known exactly as long as its main worktree is a registered workspace.
+	EnsureMainWorktrees(ctx context.Context) error
 	// RestoreMissingWorktree recreates a workspace's deleted worktree from its
 	// recorded branch, as an open of it does, for the boot's missing-directory
 	// step. It answers true when it restored the tree, false with a nil error

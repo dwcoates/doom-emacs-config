@@ -83,21 +83,6 @@ func TestRegisterWorkspaceRefusesATemporaryDirectory(t *testing.T) {
 	}
 }
 
-func TestRegisterRepositoryRefusesATemporaryDirectory(t *testing.T) {
-	// Arrange
-	s, log := testStore(t)
-
-	// Act
-	_, _, err := s.RegisterRepository(context.Background(), outsideTheRun, "master")
-
-	// Assert
-	if _, ok := tempdirs.AsInside(err); !ok {
-		t.Fatalf("RegisterRepository = %v, want a temporary-directory refusal", err)
-	}
-	assertNoRows(t, s)
-	assertRefusalRecorded(t, log, "daemon.wsm.register_repository")
-}
-
 func TestRegisterWorkspaceDoesNotHandBackAStandingTemporaryRow(t *testing.T) {
 	// Arrange: a row registered under the run's exempt root, then the same
 	// file opened with the PRODUCTION guard, which exempts nothing.

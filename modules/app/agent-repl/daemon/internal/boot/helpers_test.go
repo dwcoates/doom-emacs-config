@@ -274,6 +274,13 @@ type harness struct {
 	// binds counts the boot's BindViews calls; bindErr is what they answer.
 	binds   atomic.Int32
 	bindErr error
+	// mainEnsures counts the boot's EnsureMainWorktrees calls; mainEnsureErr
+	// is what they answer.
+	mainEnsures   atomic.Int64
+	mainEnsureErr error
+	// reposAtMainEnsure is the registry's repositories as the last
+	// EnsureMainWorktrees call found them.
+	reposAtMainEnsure []wsm.Repository
 	// restore answers the boot's missing-worktree restorer; nil answers
 	// "nothing to restore from", which is what every arrangement that does
 	// not name a branch means. restoreAsked records every workspace it was
@@ -403,6 +410,15 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 			h.binds.Add(1)
 			return h.bindErr
 		},
+		EnsureMainWorktrees: func(ctx context.Context) error {
+			h.mainEnsures.Add(1)
+			repos, err := h.db.ListRepositories(ctx)
+			if err != nil {
+				return err
+			}
+			h.reposAtMainEnsure = repos
+			return h.mainEnsureErr
+		},
 		RestoreMissingWorktree: func(_ context.Context, ws wsm.Workspace) (bool, error) {
 			h.restoreAsked = append(h.restoreAsked, ws.ID)
 			if h.restore == nil {
@@ -477,11 +493,27 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 // register puts one workspace in the registry and scripts its lock state.
 func (h *harness) register(t *testing.T, dir string, state sessionlock.State) wsm.Workspace {
 	t.Helper()
+	h.registerMain(t, h.repoDir)
 	ws, _, err := h.db.RegisterWorkspace(context.Background(), dir, wsm.RegisterFacts{Branch: "feature", ParentBranch: "master", RepoDir: h.repoDir, DefaultBranch: "master"})
 	if err != nil {
 		t.Fatalf("RegisterWorkspace(%s): %v", dir, err)
 	}
 	h.probes[ws.Dir] = state
+	return ws
+}
+
+// registerMain registers repoDir's main worktree, born closed and
+// idempotently: the one registration that mints a repository, made first as
+// the daemon makes it.
+func (h *harness) registerMain(t *testing.T, repoDir string) wsm.Workspace {
+	t.Helper()
+	ws, _, err := h.db.RegisterWorkspace(context.Background(), repoDir, wsm.RegisterFacts{
+		Branch: "master", ParentBranch: "master", RepoDir: repoDir, DefaultBranch: "master",
+		Closure: &wsm.Closure{At: instant, By: wsm.CloseByDaemon},
+	})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace(main worktree %s): %v", repoDir, err)
+	}
 	return ws
 }
 
@@ -546,12 +578,19 @@ func (d failingCloseOrphans) CloseOrphans(context.Context, wsm.WorkspaceID, time
 
 // failingLease is a state client whose occupancy lease cannot be read, which
 // is how a boot fails to tell whether a merge was in flight across the crash.
+// failingLease fails the lease read of the one workspace *only names, every
+// other read going through: the boot reads every workspace's lease, the
+// repository's main worktree among them.
 type failingLease struct {
 	wsm.DB
-	err error
+	err  error
+	only *wsm.WorkspaceID
 }
 
-func (d failingLease) Lease(context.Context, wsm.WorkspaceID) (wsm.Lease, bool, error) {
+func (d failingLease) Lease(ctx context.Context, id wsm.WorkspaceID) (wsm.Lease, bool, error) {
+	if id != *d.only {
+		return d.DB.Lease(ctx, id)
+	}
 	return wsm.Lease{}, false, d.err
 }
 

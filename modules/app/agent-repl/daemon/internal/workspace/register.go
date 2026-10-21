@@ -41,6 +41,22 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 // already held. Register itself has no field to put that in
 // (RegisterWorkspaceSuccess carries the ref and nothing else) and drops it.
 func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFacts) (wsm.Workspace, bool, error) {
+	record, created, err := v.registerRow(ctx, dir, facts)
+	if err != nil {
+		return wsm.Workspace{}, false, err
+	}
+	v.republishRegistry(ctx, v.deps.Log.Global().With(dlog.Context{"dir": dir}), opRegister)
+	return record, created, nil
+}
+
+// registerRow is the whole of a registration but the roster's republication,
+// which is register's. ensureMainWorktree runs it for a linked worktree's main
+// worktree INSIDE that worktree's own registration, whose republication then
+// carries both rows: one gesture, one roster.
+//
+// EVERY FAILURE IS RECORDED HERE, once: a fault at ERROR, a refusal at INFO
+// through its typed refusal. A caller wraps it and records nothing more.
+func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterFacts) (wsm.Workspace, bool, error) {
 	global := v.deps.Log.Global().With(dlog.Context{"dir": dir})
 
 	normalized, err := normalizeDir(dir)
@@ -110,6 +126,21 @@ func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFact
 		facts.Name = filepath.Base(normalized)
 		global.Debug(opRegister, "derived the display name from the directory", dlog.Context{"name": facts.Name})
 	}
+	// THE MAIN WORKTREE IS REGISTERED FIRST. A repository is known exactly as
+	// long as its main worktree is a registered workspace, and the registry
+	// mints a repository only from that registration (wsm.ensureRepo), so a
+	// linked worktree's announcement registers the main worktree before
+	// itself -- born closed, existing without being opened.
+	repoDir, err := normalizeDir(facts.RepoDir)
+	if err != nil {
+		global.Error(opRegister, "the repository directory cannot be normalized", dlog.Context{"repo_dir": facts.RepoDir, "cause": err.Error()})
+		return wsm.Workspace{}, false, fmt.Errorf("register %q: repository %q: %w", normalized, facts.RepoDir, err)
+	}
+	if !wsm.IsMainWorktree(normalized, repoDir) {
+		if _, err := v.ensureMainWorktree(ctx, global, repoDir, facts.DefaultBranch); err != nil {
+			return wsm.Workspace{}, false, err
+		}
+	}
 
 	record, created, err := v.deps.DB.RegisterWorkspace(ctx, normalized, facts)
 	if refused := temporaryRefusal(global, "", err); refused != nil {
@@ -158,7 +189,11 @@ func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFact
 	// It is the FLAG that is cleared here and nothing else: OpenWorkspace's
 	// session bring-up stays OpenWorkspace's, because registration has never
 	// spawned anything and the mount is what spawns.
-	if !created && record.Closed {
+	//
+	// A BORN-CLOSED REGISTRATION RE-OPENS NOTHING (facts.Closure): it is the
+	// daemon's own guarantee that the main worktree exists, never Emacs
+	// meaning to hold it.
+	if !created && record.Closed && facts.Closure == nil {
 		if err := v.deps.DB.Reopen(ctx, record.ID); err != nil {
 			// A CLOSED CHILD OF A PARENT THAT IS NOT OPEN STAYS CLOSED
 			// (wsm/family.go): the announcement is refused parent_not_open.
@@ -202,8 +237,10 @@ func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFact
 	}
 	// THIS DAEMON SERVES IT from here. The claim is what a handover hands
 	// over, and what tells a joining successor which workspaces are still the
-	// incumbent's; a workspace nobody claimed is transferred by nobody.
-	if v.deps.Instance != "" {
+	// incumbent's; a workspace nobody claimed is transferred by nobody. A
+	// closed workspace is served by nobody (MarkClosed releases the claim), so
+	// one born closed claims nothing.
+	if v.deps.Instance != "" && !record.Closed {
 		if err := v.deps.DB.ClaimServing(ctx, record.ID, v.deps.Instance); err != nil {
 			log.Error(opRegister, "could not claim the workspace's serving ownership", dlog.Context{
 				"workspace": string(record.ID), "instance": string(v.deps.Instance), "cause": err.Error(),
@@ -213,9 +250,93 @@ func (v *verbs) register(ctx context.Context, dir string, facts wsm.RegisterFact
 	}
 
 	v.reviveRecordedConversation(ctx, log, record, created)
-
-	v.republishRegistry(ctx, log, opRegister)
 	return record, created, nil
+}
+
+// ensureMainWorktree registers the repository's main worktree at repoDir as a
+// workspace BORN CLOSED, unless the registry already holds a workspace there
+// (open or closed, which is left exactly as it stands). It answers whether it
+// registered one, and publishes no roster: its caller does.
+//
+// It is how a repository is never known without its main worktree's
+// workspace: every registration of a linked worktree runs it first, and so
+// does the boot for every repository it inherits (EnsureMainWorktrees). The
+// lookup and the registration are two steps, and the race between them is
+// harmless: registration is idempotent by directory, and a born-closed
+// registration of a row that appeared meanwhile answers that row untouched.
+func (v *verbs) ensureMainWorktree(ctx context.Context, log dlog.Logger, repoDir, defaultBranch string) (bool, error) {
+	_, err := v.deps.DB.WorkspaceByDir(ctx, repoDir)
+	switch {
+	case err == nil:
+		log.Debug(opRegister, "the repository's main worktree is already a registered workspace", dlog.Context{"repo_dir": repoDir})
+		return false, nil
+	case !errors.Is(err, wsm.ErrNotFound):
+		log.Error(opRegister, "could not look up the repository's main-worktree workspace", dlog.Context{"repo_dir": repoDir, "cause": err.Error()})
+		return false, fmt.Errorf("ensure the main worktree %q: %w", repoDir, err)
+	}
+	// registerRow recorded any failure itself (at ERROR, or a refusal at
+	// INFO), so it is wrapped and not recorded again.
+	main, _, err := v.registerRow(ctx, repoDir, wsm.RegisterFacts{
+		RepoDir:       repoDir,
+		DefaultBranch: defaultBranch,
+		Closure:       &wsm.Closure{At: v.now(), By: wsm.CloseByDaemon},
+	})
+	if err != nil {
+		return true, fmt.Errorf("ensure the main worktree %q: %w", repoDir, err)
+	}
+	log.Info(opRegister, "registered the repository's main worktree as a closed workspace", dlog.Context{
+		"repo_dir": repoDir, "workspace": string(main.ID),
+	})
+	return true, nil
+}
+
+// EnsureMainWorktrees registers, born closed, the main worktree of every
+// repository the registry holds without one. It is the boot's half of the
+// main-worktree guarantee: a registry written before the guarantee existed
+// holds repositories whose main worktree was never registered, and this is
+// the one place they are brought under it.
+//
+// A REPOSITORY WHOSE DIRECTORY IS GONE is passed over: it is no place to
+// register anything, and retiring it is the boot's own step. A stat that does
+// not say "not exist" is never read as gone.
+func (v *verbs) EnsureMainWorktrees(ctx context.Context) error {
+	global := v.deps.Log.Global()
+	repositories, err := v.deps.DB.ListRepositories(ctx)
+	if err != nil {
+		global.Error(opRegister, "could not list the repositories to ensure their main worktrees", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("ensure the main worktrees: list the repositories: %w", err)
+	}
+	ensured := 0
+	for _, repo := range repositories {
+		if _, err := os.Stat(repo.Dir); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				global.Debug(opRegister, "the repository's directory is gone; its main worktree is not ensured", dlog.Context{
+					"repository": string(repo.ID), "dir": repo.Dir,
+				})
+				continue
+			}
+			global.Error(opRegister, "could not stat the repository's directory to ensure its main worktree", dlog.Context{
+				"repository": string(repo.ID), "dir": repo.Dir, "cause": err.Error(),
+			})
+			return fmt.Errorf("ensure the main worktrees: stat %q: %w", repo.Dir, err)
+		}
+		registered, err := v.ensureMainWorktree(ctx, global, repo.Dir, repo.DefaultBranch)
+		if err != nil {
+			return fmt.Errorf("ensure the main worktrees: %w", err)
+		}
+		if registered {
+			ensured++
+		}
+	}
+	// ONE ROSTER for every main worktree the walk registered, and none when it
+	// registered nothing.
+	if ensured > 0 {
+		v.republishRegistry(ctx, global, opRegister)
+	}
+	global.Debug(opRegister, "every repository's main worktree is a registered workspace", dlog.Context{
+		"repositories": len(repositories), "registered": ensured,
+	})
+	return nil
 }
 
 // The session terminals registration reads. `deleted` refuses resurrection

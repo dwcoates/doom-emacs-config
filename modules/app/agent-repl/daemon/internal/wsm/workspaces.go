@@ -244,7 +244,7 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		if err != nil {
 			return err
 		}
-		repo, err := ensureRepo(ctx, tx, repoDir, facts.DefaultBranch)
+		repo, err := ensureRepo(ctx, tx, repoDir, facts.DefaultBranch, normalized)
 		if err != nil {
 			return err
 		}
@@ -293,10 +293,22 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		if err != nil {
 			return err
 		}
+		// A WORKSPACE BORN CLOSED carries its close record from the insert,
+		// so the row is never open for an instant (closure.go: the instant and
+		// the cause stand and fall with `closed`).
+		var closureAt, closureBy any
+		if facts.Closure != nil {
+			if !facts.Closure.By.valid() {
+				return fmt.Errorf("wsm: register %s: unknown close cause %q", normalized, facts.Closure.By)
+			}
+			out.Closed = true
+			out.Closure = facts.Closure
+			closureAt, closureBy = nanos(facts.Closure.At), string(facts.Closure.By)
+		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, place, owner_lands, context_from, requested_by)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place, out.OwnerLands, nullWorkspace(out.ContextFrom), nullWorkspace(out.RequestedBy))
+			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, place, owner_lands, context_from, requested_by, closure_at, closure_by)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), out.Closed, priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place, out.OwnerLands, nullWorkspace(out.ContextFrom), nullWorkspace(out.RequestedBy), closureAt, closureBy)
 		if err != nil {
 			return err
 		}
@@ -316,69 +328,13 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 	return out, created, nil
 }
 
-// RegisterRepository records a repository on its own, with NO workspace under
-// it, idempotent by normalized dir. The bool reports whether the record was
-// minted here.
-//
-// It is ensureRepo reached directly. The repository row was previously
-// reachable only from inside RegisterWorkspace's transaction, so a repository
-// existed only once somebody worked in it; this is the same mint, in its own
-// transaction, for a repository that has no workspace yet. Nothing else about
-// the row differs -- an empty defaultBranch leaves a recorded one alone here
-// exactly as it does there.
-func (s *store) RegisterRepository(ctx context.Context, dir, defaultBranch string) (Repository, bool, error) {
-	const op = "daemon.wsm.register_repository"
-	normalized, err := normalizeDir(dir)
-	if err != nil {
-		s.log.Error(op, "refused a repository dir that cannot be normalized", withError(dlog.Context{"dir": dir}, err))
-		return Repository{}, false, err
-	}
-	fields := dlog.Context{"dir": normalized, "requested_dir": dir}
-	if err := s.refuseTemporary(op, normalized); err != nil {
-		return Repository{}, false, err
-	}
-
-	var (
-		out     Repository
-		created bool
-	)
-	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		var existing RepoID
-		err := tx.QueryRowContext(ctx, `SELECT id FROM repositories WHERE dir = ?`, normalized).Scan(&existing)
-		switch {
-		case err == nil:
-			created = false
-		case errors.Is(err, sql.ErrNoRows):
-			created = true
-		default:
-			return err
-		}
-		id, err := ensureRepo(ctx, tx, normalized, defaultBranch)
-		if err != nil {
-			return err
-		}
-		// READ THE ROW BACK rather than composing it here: the name and the
-		// default branch a mint records are ensureRepo's to decide, and a
-		// second spelling of them in this function is the drift that makes an
-		// answer disagree with the registry it just wrote.
-		var scanErr error
-		out, scanErr = scanRepository(tx.QueryRowContext(ctx, `SELECT `+repositoryColumns+` FROM repositories WHERE id = ?`, id))
-		return scanErr
-	})
-	if err != nil {
-		return Repository{}, false, err
-	}
-	return out, created, nil
-}
-
 // RefuseTemporary is refuseTemporary for a verb that asks before it registers.
 func (s *store) RefuseTemporary(dir string) error {
 	return s.refuseTemporary("daemon.wsm.refuse_temporary", dir)
 }
 
-// refuseTemporary is the registry's ONE temporary-directory check, run by both
-// writes that mint a row (RegisterWorkspace, RegisterRepository) before they
-// touch the database: a directory inside a temporary root never becomes a
+// refuseTemporary is the registry's ONE temporary-directory check, run by the
+// write that mints a row (RegisterWorkspace) before it touches the database: a directory inside a temporary root never becomes a
 // repository or a workspace (owner ruling, 2026-10-06).
 //
 // The refusal is an ANSWER the verb above reports at INFO through its typed
@@ -400,15 +356,24 @@ func (s *store) refuseTemporary(op, dir string) error {
 	return fmt.Errorf("wsm: judge %q: %w", dir, err)
 }
 
-// ensureRepo returns the repository for a canonicalized common dir, minting one
-// on first sight. The display name is the dir's base name; the default branch
-// is the announcing caller's, which is the only party that reads it off git.
+// ensureRepo returns the repository for a normalized main-worktree dir,
+// minting one on first sight. The display name is the dir's base name; the
+// default branch is the announcing caller's, which is the only party that
+// reads it off git.
+//
+// ONLY THE MAIN WORKTREE MINTS ITS REPOSITORY. A repository is known exactly
+// as long as its main worktree is a registered workspace, so the registration
+// minting the row must be that main worktree's own: workspaceDir is the
+// directory being registered, and a mint for any other directory is refused
+// with ErrMainWorktreeUnregistered, nothing written. The daemon registers the
+// main worktree before any linked one (workspace.verbs.ensureMainWorktree),
+// so the refusal is an invariant breach and never an ordinary answer.
 //
 // An EMPTY defaultBranch leaves a recorded one alone: "the caller did not look
 // it up" is not "the repository has no default branch", and overwriting a known
 // value with a blank would silently unset the merge target every later
 // announcement depends on.
-func ensureRepo(ctx context.Context, tx *sql.Tx, repoDir, defaultBranch string) (RepoID, error) {
+func ensureRepo(ctx context.Context, tx *sql.Tx, repoDir, defaultBranch, workspaceDir string) (RepoID, error) {
 	var id RepoID
 	err := tx.QueryRowContext(ctx, `SELECT id FROM repositories WHERE dir = ?`, repoDir).Scan(&id)
 	switch {
@@ -421,6 +386,9 @@ func ensureRepo(ctx context.Context, tx *sql.Tx, repoDir, defaultBranch string) 
 		return id, nil
 	case !errors.Is(err, sql.ErrNoRows):
 		return "", err
+	}
+	if !IsMainWorktree(workspaceDir, repoDir) {
+		return "", fmt.Errorf("register %s under %s: %w", workspaceDir, repoDir, ErrMainWorktreeUnregistered)
 	}
 	id = NewRepoID()
 	// A NEW REPOSITORY LANDS AFTER EVERY OTHER ONE (arrange.go).
@@ -972,8 +940,13 @@ func deleteRepositoryRows(ctx context.Context, tx *sql.Tx, repo RepoID, repoDir 
 // predates registration and so carries no reference, is deleted here in the
 // same transaction.
 //
+// THE MAIN WORKTREE'S WORKSPACE IS REFUSED (ErrMainWorktreeInUse) while any
+// other workspace is registered under its repository: it stands as long as the
+// repository is known.
+//
 // THE REPOSITORY GOES TOO when the forgotten workspace was the last one
-// registered under it. Registering a directory mints BOTH records and nothing
+// registered under it -- which, the main worktree being refused until then, is
+// always the main worktree's own. Registering a directory mints BOTH records and nothing
 // else ever deleted the repository one, so every register-then-clean-up left a
 // repository row naming a path that may no longer exist — and a row naming a
 // deleted path breaks workspace and sink resolution elsewhere. A repository
@@ -999,6 +972,24 @@ func (s *store) Forget(ctx context.Context, id WorkspaceID) (ForgetReport, error
 			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
 		case err != nil:
 			return err
+		}
+		// THE MAIN WORKTREE GOES ONLY WITH ITS REPOSITORY: its workspace
+		// stands as long as the repository is known, so while any other
+		// workspace is registered under the repository it is refused, nothing
+		// deleted. As the repository's last workspace it takes the repository
+		// with it below, exactly as any last workspace does.
+		var dir string
+		if err := scanWorkspaceRow(ctx, tx, id, "dir", &dir); err != nil {
+			return err
+		}
+		if IsMainWorktree(dir, repoDir) {
+			var others int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM workspaces WHERE repo_id = ? AND id != ?`, repo, id).Scan(&others); err != nil {
+				return err
+			}
+			if others > 0 {
+				return fmt.Errorf("wsm: forget %s (%d other workspaces under %s): %w", id, others, repoDir, ErrMainWorktreeInUse)
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM creation_jobs WHERE workspace_id = ?`, id); err != nil {
 			return err
