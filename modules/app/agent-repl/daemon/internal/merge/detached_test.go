@@ -1072,7 +1072,7 @@ func withParentBranch(h *harness, parent string) {
 // detachedRunFor is the "reconnect-fix" request with ACTIONS, landing into the
 // harness's other workspace as its maker when INTOMAKER, else made by the
 // requester and landing on the primary branch.
-func detachedRunFor(intoMaker bool, actions wsm.MergeActions) *DetachedRun {
+func detachedRunFor(intoMaker bool, actions wsm.DeployHooks) *DetachedRun {
 	if intoMaker {
 		return &DetachedRun{Maker: otherWorkspace, IntoMaker: true, Name: "reconnect-fix", Actions: actions}
 	}
@@ -1080,14 +1080,14 @@ func detachedRunFor(intoMaker bool, actions wsm.MergeActions) *DetachedRun {
 }
 
 func TestAnAsyncRequestsHandOffForksWithTheLandingTheQueueDecided(t *testing.T) {
-	actions := wsm.MergeActions{Before: []string{"run the linters"}, After: []string{"post the summary"}}
+	actions := wsm.DeployHooks{Before: []string{"run the linters"}, After: []string{"post the summary"}}
 	tests := []struct {
 		name          string
 		arrange       func(h *harness)
 		wantTarget    func(h *harness) string
 		wantParent    string
-		actions       wsm.MergeActions
-		wantOriginAct wsm.MergeActions
+		actions       wsm.DeployHooks
+		wantOriginAct wsm.DeployHooks
 		intoMaker     bool
 	}{
 		{name: "a request onto the primary branch lands in the main worktree", arrange: func(h *harness) {},
@@ -1128,7 +1128,7 @@ func TestAnAsyncRequestWithNoActionsForksWithNoneEvenWhenItsRequesterHasSome(t *
 	h := newHarness(t)
 	h.db.mu.Lock()
 	job := h.db.jobs[theWorkspace]
-	job.Actions = wsm.MergeActions{Before: []string{"the requester's own before"}, After: []string{"the requester's own after"}}
+	job.Actions = wsm.DeployHooks{Before: []string{"the requester's own before"}, After: []string{"the requester's own after"}}
 	h.db.jobs[theWorkspace] = job
 	h.db.mu.Unlock()
 
@@ -1139,7 +1139,7 @@ func TestAnAsyncRequestWithNoActionsForksWithNoneEvenWhenItsRequesterHasSome(t *
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	if origins := h.detached.origins; len(origins) != 1 || !reflect.DeepEqual(origins[0].Actions, wsm.MergeActions{}) {
+	if origins := h.detached.origins; len(origins) != 1 || !reflect.DeepEqual(origins[0].Actions, wsm.DeployHooks{}) {
 		t.Fatalf("origins = %+v, want one carrying no merge action", origins)
 	}
 }
@@ -1150,7 +1150,7 @@ func TestAnAsyncRequestRecordsItsMergeActionsOnItsEntry(t *testing.T) {
 	h.mu.Lock()
 	h.inFlight = "turn-asking"
 	h.mu.Unlock()
-	actions := wsm.MergeActions{Before: []string{"run the linters"}}
+	actions := wsm.DeployHooks{Before: []string{"run the linters"}}
 
 	// Act: an agent's request, still waiting on the turn that asked.
 	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,

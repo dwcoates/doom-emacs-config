@@ -764,10 +764,10 @@ func TestRequestMergeRefusesASourceThatContradictsItself(t *testing.T) {
 		source MergeSource
 	}{
 		{name: "an undeclared kind", source: MergeSource{Kind: MergeSourceKind(9)}},
+		{name: "the retired merged-upstream kind", source: MergeSource{Kind: MergeSourceKind(3)}},
 		{name: "keep_open off the own branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", KeepOpen: true}},
 		{name: "a workspace source naming no workspace", source: MergeSource{Kind: MergeSourceWorkspace}},
 		{name: "a branch source naming no branch", source: MergeSource{Kind: MergeSourceBranch}},
-		{name: "merged upstream naming a workspace", source: MergeSource{Kind: MergeSourceMergedUpstream, Workspace: "w"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -798,7 +798,6 @@ func TestMergeQueueRoundTripsEverySource(t *testing.T) {
 		{name: "own branch kept open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}},
 		{name: "another workspace", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "0123456789abcdef"}},
 		{name: "a branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "agent-1a2b/fix"}},
-		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1210,7 +1209,6 @@ func TestRequestOneShotMergeRefusesASourceThatIsNoOneShot(t *testing.T) {
 		{name: "kept open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}},
 		{name: "detached", source: MergeSource{Kind: MergeSourceOwnBranch, Detach: NewDetachedMergeID(), DetachMaker: "maker"}},
 		{name: "another branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b"}},
-		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1293,7 +1291,6 @@ func TestIsOneShotAcceptsOnlyAnInPlaceOwnBranchThatClosesTheRequester(t *testing
 		{name: "own branch detached", source: MergeSource{Kind: MergeSourceOwnBranch, Detach: "d", DetachMaker: "maker"}},
 		{name: "another workspace", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "w"}},
 		{name: "a branch", source: MergeSource{Kind: MergeSourceBranch, Branch: "b"}},
-		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -187,3 +187,51 @@ func TestRunsForPanicsOnAnUncheckedEntry(t *testing.T) {
 	}()
 	RunsFor(&repoconfigv1.DeployHookEntry{}, true)
 }
+
+// repoRoot is the repository this package is checked out in: agent-repl's own.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "..", "..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// TestAgentReplsOwnConfigIsTodaysPipeline pins agent-repl's committed
+// `.agent-repl/deploy.yaml` to exactly the steps the queue ran for its own
+// repository before deploys were configured: rebase, agent-repl's suites, the
+// merge commit and the version tag, then the runtime's redeploy on landings
+// into master, and no hook besides.
+func TestAgentReplsOwnConfigIsTodaysPipeline(t *testing.T) {
+	// Arrange
+	root := repoRoot(t)
+
+	// Act
+	cfg, err := OnDisk{}.Load(root)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Load(%s): %v", root, err)
+	}
+	lm := cfg.GetPreDeploy().GetLocalMerge()
+	script := lm.GetTests().GetAgentReplSuites().GetScriptPath()
+	if script != "modules/app/agent-repl/bin/test-all.sh" || lm.GetVersionTag() == nil {
+		t.Fatalf("local merge = %v, want agent-repl's suites and a version tag", lm)
+	}
+	if _, err := os.Stat(filepath.Join(root, script)); err != nil {
+		t.Fatalf("the test script %s: %v", script, err)
+	}
+	if len(cfg.GetPreDeploy().GetHooks()) != 0 || len(cfg.GetPostDeploy()) != 0 {
+		t.Fatalf("hooks = %v / %v, want none: agent-repl's merges ran no configured prompts", cfg.GetPreDeploy().GetHooks(), cfg.GetPostDeploy())
+	}
+	deploy := cfg.GetDeploy()
+	if deploy.GetRunsFor().GetMain() == nil {
+		t.Fatalf("deploy runs for %v, want main alone: only a landing in the main checkout redeploys", deploy.GetRunsFor())
+	}
+	hook := deploy.GetHook().GetScript()
+	info, err := os.Stat(filepath.Join(root, hook.GetPath()))
+	if err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("the deploy script %s = %v, %v; want an executable script", hook.GetPath(), info, err)
+	}
+}

@@ -987,10 +987,8 @@ func (m MergeMove) valid() bool {
 	return m == MergeMoveUp || m == MergeMoveDown
 }
 
-// MergeSourceKind is WHAT a merge lands (agentrepl.v1.MergeWorkspaceSource's
-// arm): the requesting workspace's own branch, another workspace's, a branch
-// that is no workspace, or the requester's own branch already merged
-// upstream.
+// MergeSourceKind is WHAT a merge lands: the requesting workspace's own
+// branch, another workspace's, or a branch that is no workspace.
 type MergeSourceKind int
 
 // The merge sources. The zero value is the requester's own branch, which is
@@ -1002,16 +1000,16 @@ const (
 	MergeSourceWorkspace
 	// MergeSourceBranch is a branch that is no workspace.
 	MergeSourceBranch
-	// MergeSourceMergedUpstream is the requester's own branch, already merged
-	// upstream.
-	MergeSourceMergedUpstream
+	// The fourth value (3), the requester's own branch already merged
+	// upstream, is RETIRED with the merged-upstream finish: finishing always
+	// runs the repository's deploy. A row carrying it fails validation.
 )
 
 // ClosesRequester reports whether a landed merge of this source closes the
 // workspace that asked for it, which is exactly when keeping that workspace
 // open means anything.
 func (k MergeSourceKind) ClosesRequester() bool {
-	return k == MergeSourceOwnBranch || k == MergeSourceMergedUpstream
+	return k == MergeSourceOwnBranch
 }
 
 // MergeSource is one merge's source, stored with its queue entry so a restart

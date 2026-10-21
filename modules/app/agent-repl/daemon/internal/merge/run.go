@@ -17,7 +17,6 @@ import (
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
-	"agent-repld/internal/prompts"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
@@ -35,13 +34,10 @@ import (
 // addressed to r.ws and to nothing else: a run holds no other session address,
 // so there is no second shim for anything to reach.
 //
-// TWO METHODS, keyed by whether the target is the daemon's own repository. The
-// EMACS REPO rebases the branch onto the target's tip, gates the rebased
-// branch, and lands it as a non-fast-forward merge commit (process.go); EVERY
-// OTHER REPO runs its configured prompts and nothing else -- landing, tests
-// and PR work are the prompts' job there. A branch ALREADY MERGED UPSTREAM
-// updates the default branch in the repository's main worktree, in any
-// repository.
+// WHAT A MERGE DOES IS ITS REPOSITORY'S DEPLOY CONFIG (deploy.go): its
+// pre-deploy hooks, then -- when the config has a local merge -- the rebase
+// onto the target's tip, the gate and the non-fast-forward merge commit
+// (process.go), then its deploy hook and its post-deploy hooks.
 
 // run is one merge in flight.
 type run struct {
@@ -55,9 +51,9 @@ type run struct {
 	// to at admission.
 	source  wsm.MergeSource
 	subject subject
-	// job is the requester's creation job: its configured prompts. A requester
-	// with none (a registered checkout nothing created) has no configured
-	// prompts, and its repository's policy decides.
+	// job is the requester's creation job: its deploy hooks. A requester with
+	// none (a registered checkout nothing created) supplies no hooks, and its
+	// repository's config decides.
 	job wsm.CreationJob
 	// repo is the queue this merge was admitted from.
 	repo wsm.RepoKey
@@ -120,18 +116,16 @@ type run struct {
 	// releaseOccupancy drops the shim client's occupancy guard, nil when the
 	// workspace merges sessionless.
 	releaseOccupancy func()
-	// emacsRepo reports whether the target is this daemon's own repository,
-	// which is what selects the method.
-	emacsRepo bool
-	// selfCheckout reports whether the target is the daemon's OWN checkout
-	// rather than a sibling worktree of it. Only the checkout itself triggers
-	// the self-reload.
-	selfCheckout bool
-	// deploy is what the landing does about deploying itself, decided once
-	// (run.landingDeploy) so its report and its deploy cannot disagree.
+	// target is the repository's deploy config and where the merge lands in
+	// it, read once per run (takeSession).
+	target deployTarget
+	// deploy is what the deploy stage decided about the runtime's rollout,
+	// set by the stage (deployStage) or, unset, decided at the terminal
+	// (run.landingDeploy) so the report and the rollout cannot disagree.
 	deploy *LandingDeploy
-	// policy is where the requester's repository states its merge policy.
-	policy prompts.Source
+	// rolloutRequested reports that the deploy hook asked for the rollout of
+	// this deploy's landing (RollOutLanding). Guarded by mu.
+	rolloutRequested bool
 	// agenticMu orders the agentic tab's redraws: the run's own settle and an
 	// ask's change of the waiting state never interleave, so a settled tab is
 	// never drawn live again behind it.
@@ -625,14 +619,6 @@ func (r *run) admit(ctx context.Context) error {
 	r.mu.Lock()
 	r.subject = subject
 	r.mu.Unlock()
-	same, err := r.git.SameRepo(ctx, subject.targetDir, o.deps.SelfRepoDir)
-	if err != nil {
-		r.end(ctx, fmt.Errorf("could not identify the target repository: %w", err))
-		return err
-	}
-	r.emacsRepo = same
-	r.selfCheckout = same && sameDir(subject.targetDir, o.deps.SelfRepoDir)
-
 	if err := r.takeSession(ctx); err != nil {
 		r.end(ctx, err)
 		return err
@@ -682,7 +668,7 @@ func (r *run) admit(ctx context.Context) error {
 	log.Info(op, "admitted a merge; it holds the workspace and starts once the workspace is free", dlog.Context{
 		"workspace": string(ws), "repo": string(r.repo), "lease": string(r.lease.ID),
 		"source": r.source.Kind.String(), "branch": subject.branch, "worktree": subject.dir, "target": subject.targetDir,
-		"method": methodName(r.emacsRepo, r.source), "self_checkout": r.selfCheckout, "displaces": r.displaces,
+		"local_merge": r.target.localMerge() != nil, "to_main": r.target.toMain, "displaces": r.displaces,
 	})
 	if err := r.awaitWorkspacesFree(ctx); err != nil {
 		r.end(ctx, err)
@@ -718,19 +704,18 @@ func (r *run) place(ctx context.Context) error {
 	return nil
 }
 
-// takeSession resolves where the requester's repository states its merge
-// policy and takes the session's occupancy guard: what a run holds of its
-// workspace before its first step, whether admitted fresh or resumed.
+// takeSession reads the target repository's deploy config and takes the
+// session's occupancy guard: what a run holds of its workspace before its
+// first step, whether admitted fresh or resumed.
 //
-// THE REPOSITORY MAY STATE ITS OWN MERGE ACTIONS. Which directory those come
-// from is a fact about the requester's repository, so it is resolved once
-// here rather than re-derived by each step.
+// THE CONFIG IS READ ONCE PER RUN, here, so every stage of one deploy reads
+// the same config; a resumed run reads it again, as a new deploy would.
 func (r *run) takeSession(ctx context.Context) error {
-	policy, err := r.o.policyFor(ctx, r.ws)
+	target, err := r.o.deployTargetFor(ctx, r.ws, r.subject.targetDir)
 	if err != nil {
-		return fmt.Errorf("could not resolve the repository's merge policy: %w", err)
+		return fmt.Errorf("could not read the repository's deploy config: %w", err)
 	}
-	r.policy = policy
+	r.target = target
 	release, ok, err := r.o.deps.Occupy(r.ws, holderMerge)
 	if err != nil {
 		return fmt.Errorf("could not take the session's occupancy: %w", err)
@@ -793,17 +778,6 @@ func (r *run) awaitFree(ctx context.Context, ws ids.WorkspaceID) error {
 
 // roundKey addresses one tab round.
 func roundKey(kind string, round int) string { return fmt.Sprintf("%s/%d", kind, round) }
-
-// methodName names the method a run took, for the log record.
-func methodName(emacsRepo bool, source wsm.MergeSource) string {
-	switch {
-	case source.Kind == wsm.MergeSourceMergedUpstream:
-		return "merged_upstream"
-	case emacsRepo:
-		return "emacs_repo"
-	}
-	return "other_repo"
-}
 
 // sameDir reports whether two directory spellings name one directory. The
 // self-reload fires for the daemon's OWN checkout only: a sibling worktree of
@@ -907,174 +881,45 @@ func failedIn(area footer.MergeFailedArea, summary string) outcome {
 	return outcome{failed: summary, area: area}
 }
 
-// method dispatches to the run's method.
+// method runs the deploy's stages (deploy.go) in order.
 //
-// A RESUMED RUN SKIPS WHAT THE DEAD RUN FINISHED: a step before the recorded
+// A RESUMED RUN SKIPS WHAT THE DEAD RUN FINISHED: a stage before the recorded
 // one is not run again, and the outcome a landing recorded is carried into the
-// post-merge prompts that follow it.
+// stages that follow it.
 func (r *run) method(ctx context.Context) (outcome, error) {
-	if r.source.Kind == wsm.MergeSourceMergedUpstream {
-		// A BRANCH ALREADY MERGED UPSTREAM: updating main, then the after-merge
-		// prompts. There is nothing to prepare, rebase or gate.
-		var out outcome
-		if r.resumingPast(TabUpdatingMain) {
+	if !r.resumingPast(TabPreDeploy) {
+		if out, gaveUp, err := r.preDeploy(ctx); err != nil || gaveUp {
+			return out, err
+		}
+	}
+	var out outcome
+	if r.target.localMerge() != nil {
+		if r.resumingPast(TabCommitting) {
 			var err error
 			if out, err = r.resume.Outcome.outcome(); err != nil {
 				return outcome{}, err
 			}
 		} else {
 			var err error
-			out, err = r.updateMain(ctx)
+			out, err = r.process(ctx)
 			if err != nil || out.failed != "" {
 				return out, err
 			}
 		}
-		if err := r.afterAction(ctx, out); err != nil {
-			return outcome{}, err
-		}
-		return out, nil
 	}
-	if !r.resumingPast(TabPrePrompt) {
-		if out, gaveUp, err := r.prePrompt(ctx); err != nil || gaveUp {
+	if !r.resumingPast(TabDeploy) {
+		var err error
+		if out, err = r.deployStage(ctx, out); err != nil || out.failed != "" {
 			return out, err
 		}
 	}
-	if !r.emacsRepo {
-		// EVERY OTHER REPO: nothing between the two prompts. Landing, tests and
-		// PR work belong to the prompts there.
-		if err := r.afterAction(ctx, outcome{}); err != nil {
-			return outcome{}, err
-		}
-		return outcome{}, nil
-	}
-	var out outcome
-	if r.resumingPast(TabCommitting) {
-		var err error
-		if out, err = r.resume.Outcome.outcome(); err != nil {
-			return outcome{}, err
-		}
-	} else {
-		var err error
-		out, err = r.process(ctx)
-		if err != nil || out.failed != "" {
-			return out, err
-		}
-	}
-	if err := r.afterAction(ctx, out); err != nil {
-		return outcome{}, err
-	}
-	return out, nil
+	return r.postDeploy(ctx, out)
 }
 
-// afterAction runs the after-merge prompts for EITHER method. A FAILURE never
-// fails the run -- every commit has landed by now -- it is surfaced as this
-// WARN, with the failure's own text, and the post-prompt tab has already
-// settled failed with its composed summary.
-//
-// THE DAEMON'S EXIT IS NOT A FAILED PROMPT: a run the exit took away answers
-// the error, so it suspends rather than concluding with the prompts unrun.
-func (r *run) afterAction(ctx context.Context, out outcome) error {
-	if err := r.postPrompt(ctx, out); err != nil {
-		if r.exiting() {
-			return err
-		}
-		r.o.log(ctx, r.ws).Warn("daemon.merge.post_prompt", "the post-merge prompt failed; the merge still landed",
-			dlog.Context{"workspace": string(r.ws), "error": err.Error()})
-	}
-	return nil
-}
-
-// actions answers the prompts one merge step submits: the ones the CREATION
-// recorded, and otherwise the repository's own policy brief when it states
-// one.
-//
-// A WIRE-SUPPLIED ACTION WINS. The repository's file fills an EMPTY slot; it
-// never overrides an action a create configured.
-//
-// An ABSENT policy brief is not an error. A brief that is present and will not
-// load IS one: a stated policy that cannot run is a fault, never a silent skip.
-func (r *run) actions(configured []string, brief string) ([]string, error) {
-	if len(configured) > 0 {
-		return configured, nil
-	}
-	if r.policy.Dir == "" {
-		return nil, nil
-	}
-	if len(r.o.deps.Policy.Missing(r.policy.Dir, []string{brief})) > 0 {
-		return nil, nil
-	}
-	text, err := r.o.deps.Policy.Text(r.policy.Dir, brief)
-	if err != nil {
-		return nil, fmt.Errorf("merge: reading the repository's %s policy in %s: %w", brief, r.policy.Dir, err)
-	}
-	return []string{text}, nil
-}
-
-// prePrompt runs the configured before-merge prompts: the "preprocessing"
-// step. THEIR FAILURE FAILS THE MERGE (area "other"): they are the
-// requester's own precondition for merging, so merging past one would land
-// work its author said was not ready.
-func (r *run) prePrompt(ctx context.Context) (outcome, bool, error) {
-	actions, err := r.actions(r.job.Actions.Before, prompts.PolicyMergeBefore)
-	if err != nil {
-		return outcome{}, false, err
-	}
-	for i, text := range actions {
-		round, close, err := r.configuredPrompt(ctx, TabPrePrompt, footer.StepPreprocessing, i, text,
-			conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION, nil)
-		if round.kind == "" {
-			continue
-		}
-		if err != nil || close.Failed() {
-			summary := "the before-merge prompt did not complete"
-			r.upsert(round, promptTab(TabPrePrompt, round.settled(r.o.nowMS(), summary)))
-			r.closeTab(ctx, round, "failed")
-			if err != nil {
-				return outcome{}, false, err
-			}
-			r.o.log(ctx, r.ws).Warn("daemon.merge.pre_prompt", "the before-merge prompt did not complete; the merge fails",
-				dlog.Context{"workspace": string(r.ws), "close": close.String()})
-			return failedIn(footer.FailedOther, summary), true, nil
-		}
-		r.upsert(round, promptTab(TabPrePrompt, round.settled(r.o.nowMS(), "")))
-		r.closeTab(ctx, round, "succeeded")
-	}
-	return outcome{}, false, nil
-}
-
-// postPrompt runs the configured after-merge prompts: the "postprocessing"
-// step. THEIR FAILURE NEVER FAILS THE RUN -- every commit has landed by now.
-func (r *run) postPrompt(ctx context.Context, out outcome) error {
-	actions, err := r.actions(r.job.Actions.After, prompts.PolicyMergeAfter)
-	if err != nil {
-		return err
-	}
-	landed := toOutcomeDoc(out)
-	for i, text := range actions {
-		round, close, err := r.configuredPrompt(ctx, TabPostPrompt, footer.StepPostprocessing, i, text,
-			conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION, landed)
-		if round.kind == "" {
-			continue
-		}
-		if err != nil || close.Failed() {
-			summary := "the after-merge prompt did not complete"
-			r.upsert(round, promptTab(TabPostPrompt, round.settled(r.o.nowMS(), summary)))
-			r.closeTab(ctx, round, "failed")
-			if err != nil {
-				return err
-			}
-			return fmt.Errorf("merge: %s", summary)
-		}
-		r.upsert(round, promptTab(TabPostPrompt, round.settled(r.o.nowMS(), "")))
-		r.closeTab(ctx, round, "succeeded")
-	}
-	return nil
-}
-
-// configuredPrompt runs configured prompt i of a pre or post step in its own
-// tab round, and answers the round and how its turn ended. A round with no
-// kind means the prompt was finished before the restart this run resumes
-// from, and nothing was run.
+// configuredPrompt runs prompt hook i of a stage in its own tab round, and
+// answers the round and how its turn ended. A round with no kind means the
+// hook was finished before the restart this run resumes from, and nothing was
+// run.
 //
 // A RESUME AT THIS PROMPT REATTACHES TO ITS TURN. The turn lives in the shim,
 // which outlived the daemon: the round it drew in is drawn live again and the
@@ -1161,8 +1006,8 @@ func (o *orchestrator) submit(ctx context.Context, ws ids.WorkspaceID, turn ids.
 
 // drawPrompt stands a configured prompt's round live, in its own tab.
 func (r *run) drawPrompt(ctx context.Context, round tabRound, kind string, step footer.MergeStep, text string) {
-	r.drawLive(ctx, round, step, promptLine(step, text), nil, roundTabKey(kind, round.n), func(bool) {
-		r.upsert(round, promptTab(kind, round.live()))
+	r.drawLive(ctx, round, step, promptLine(kind, text), nil, roundTabKey(kind, round.n), func(bool) {
+		r.upsert(round, hookPromptTab(round.live()))
 	})
 }
 
@@ -1195,27 +1040,6 @@ func (r *run) drawLive(ctx context.Context, round tabRound, step footer.MergeSte
 	defer r.agenticMu.Unlock()
 	r.agentic = &agenticTab{round: round, publish: publish}
 	r.redrawAgentic()
-}
-
-// promptTab builds an agentic prompt tab's kind arm.
-func promptTab(kind string, st tabState) *frontendv1.FeedMergeTab {
-	live, settled := st.badge()
-	if kind == TabPostPrompt {
-		inner := &frontendv1.FeedMergeTabPostPrompt{}
-		if live != nil {
-			inner.State = &frontendv1.FeedMergeTabPostPrompt_Live{Live: live}
-		} else {
-			inner.State = &frontendv1.FeedMergeTabPostPrompt_Settled{Settled: settled}
-		}
-		return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_PostPrompt{PostPrompt: inner}}
-	}
-	inner := &frontendv1.FeedMergeTabPrePrompt{}
-	if live != nil {
-		inner.State = &frontendv1.FeedMergeTabPrePrompt_Live{Live: live}
-	} else {
-		inner.State = &frontendv1.FeedMergeTabPrePrompt_Settled{Settled: settled}
-	}
-	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_PrePrompt{PrePrompt: inner}}
 }
 
 // readEscalation reports whether the fixing agent wrote the escalation record,

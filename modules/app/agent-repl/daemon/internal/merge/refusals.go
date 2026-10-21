@@ -50,12 +50,12 @@ const (
 	// ArmNotPaused refuses an unpause of a queue that is not paused
 	// (UpdateMergeQueueError.not_paused).
 	ArmNotPaused = "not_paused"
-	// ArmRolloutsAlreadyHeld refuses a hold of rollouts that are already held
-	// (UpdateMergeQueueError.rollouts_already_held).
-	ArmRolloutsAlreadyHeld = "rollouts_already_held"
-	// ArmRolloutsNotHeld refuses a release of rollouts that are not held
-	// (UpdateMergeQueueError.rollouts_not_held).
-	ArmRolloutsNotHeld = "rollouts_not_held"
+	// ArmDeploysAlreadyHeld refuses a hold of a repository whose deploy stage
+	// is already held (UpdateDeployHoldError.already_held).
+	ArmDeploysAlreadyHeld = "already_held"
+	// ArmDeploysNotHeld refuses a release of a repository that is not held
+	// (UpdateDeployHoldError.not_held).
+	ArmDeploysNotHeld = "not_held"
 	// ArmRacingAlreadyDisabled refuses a disable of racing that is already
 	// disabled (UpdateMergeQueueError.racing_already_disabled).
 	ArmRacingAlreadyDisabled = "racing_already_disabled"

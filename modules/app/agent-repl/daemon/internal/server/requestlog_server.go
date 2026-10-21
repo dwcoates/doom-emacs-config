@@ -254,11 +254,11 @@ func (s *requestLoggingServer) ForgetWorkspace(
 	return serveUnary(s, ctx, "ForgetWorkspace", req, s.server.ForgetWorkspace)
 }
 
-func (s *requestLoggingServer) MergeWorkspace(
+func (s *requestLoggingServer) FinishWorkspace(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.MergeWorkspaceRequest],
-) (*connect.Response[agentreplv1.MergeWorkspaceResponse], error) {
-	return serveUnary(s, ctx, "MergeWorkspace", req, s.server.MergeWorkspace)
+	req *connect.Request[agentreplv1.FinishWorkspaceRequest],
+) (*connect.Response[agentreplv1.FinishWorkspaceResponse], error) {
+	return serveUnary(s, ctx, "FinishWorkspace", req, s.server.FinishWorkspace)
 }
 
 func (s *requestLoggingServer) RestartWorkspace(
@@ -773,11 +773,18 @@ func (s *requestLoggingServer) UnsubscribeWorkspace(
 	return serveUnary(s, ctx, "UnsubscribeWorkspace", req, s.server.UnsubscribeWorkspace)
 }
 
-func (s *requestLoggingServer) UpdateRollouts(
+func (s *requestLoggingServer) UpdateDeployHold(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.UpdateRolloutsRequest],
-) (*connect.Response[agentreplv1.UpdateRolloutsResponse], error) {
-	return serveUnary(s, ctx, "UpdateRollouts", req, s.server.UpdateRollouts)
+	req *connect.Request[agentreplv1.UpdateDeployHoldRequest],
+) (*connect.Response[agentreplv1.UpdateDeployHoldResponse], error) {
+	return serveUnary(s, ctx, "UpdateDeployHold", req, s.server.UpdateDeployHold)
+}
+
+func (s *requestLoggingServer) RollOutLanding(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RollOutLandingRequest],
+) (*connect.Response[agentreplv1.RollOutLandingResponse], error) {
+	return serveUnary(s, ctx, "RollOutLanding", req, s.server.RollOutLanding)
 }
 
 func (s *requestLoggingServer) SetWorkspaceOneShot(

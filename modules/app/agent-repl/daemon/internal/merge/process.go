@@ -81,7 +81,7 @@ func (r *run) attempt(ctx context.Context) (outcome, bool, error) {
 	if res, ok := r.resumingAt(TabRebasing, TabConflicts, TabTests, TabFixes, TabCommitting); ok {
 		return r.resumeAttempt(ctx, res)
 	}
-	r.doneResumingAt(TabPrePrompt)
+	r.doneResumingAt(TabPreDeploy)
 	target := r.subject.targetDir
 	targetBranch, err := r.git.CurrentBranch(ctx, target)
 	if err != nil {
@@ -1189,103 +1189,6 @@ func (r *run) resumeCommit(ctx context.Context, res *progressDoc) (outcome, bool
 		return outcome{}, false, err
 	}
 	return r.commitIn(ctx, round, res.Tip, head, res.TargetBranch)
-}
-
-// updateMain lands a branch ALREADY MERGED UPSTREAM: the default branch in the
-// repository's main worktree is fetched and fast-forwarded to upstream. The
-// daemon does not re-check the assertion (owner ruling, 2026-09-29); a pull
-// that cannot happen -- a diverged or unchecked-out default branch, no
-// network -- fails the merge (area other).
-//
-// A RESUMED UPDATE RUNS AGAIN in the round it was in: the fetch and the
-// fast-forward are idempotent, and the tip recorded before the first run moved
-// it keeps the account of what landed.
-func (r *run) updateMain(ctx context.Context) (outcome, error) {
-	const op = "daemon.merge.updating_main"
-	main := r.subject.targetDir
-	recordedBefore := ""
-	resumed := false
-	if res, ok := r.resumingAt(TabUpdatingMain); ok {
-		recordedBefore, resumed = res.Before, true
-		r.doneResuming()
-	}
-	defaultBranch, err := r.git.DefaultBranch(ctx, main)
-	if err != nil {
-		return outcome{}, fmt.Errorf("merge: resolving the default branch of %s: %w", main, err)
-	}
-	checkedOut, err := r.git.CurrentBranch(ctx, main)
-	if err != nil {
-		return outcome{}, fmt.Errorf("merge: reading the branch checked out in %s: %w", main, err)
-	}
-	if checkedOut != defaultBranch {
-		return outcome{}, fmt.Errorf("merge: the main worktree %s has %q checked out, not the default branch %s", main, checkedOut, defaultBranch)
-	}
-	var round tabRound
-	if resumed {
-		round = r.activeRound()
-	} else {
-		round = r.openTab(ctx, TabUpdatingMain)
-	}
-	r.setStep(ctx, footer.StepUpdatingMain, func(f *footer.MergeFacts) { f.Line = fetchingLine() })
-	r.upsert(round, updatingMainTab(round.live(), ""))
-	settle := func(commit, failure string) {
-		r.upsert(round, updatingMainTab(round.settled(r.o.nowMS(), failure), commit))
-		outcome := "succeeded"
-		if failure != "" {
-			outcome = "failed"
-		}
-		r.closeTab(ctx, round, outcome)
-	}
-	before, err := r.git.ResolveRef(ctx, main, "HEAD")
-	if err != nil {
-		settle("", "the main worktree's tip could not be read")
-		return outcome{}, fmt.Errorf("merge: resolving %s's tip: %w", main, err)
-	}
-	if recordedBefore != "" {
-		before = recordedBefore
-	}
-	if err := r.checkpoint(ctx, TabUpdatingMain, func(d *progressDoc) { d.Before, d.Turn = before, "" }); err != nil {
-		return outcome{}, err
-	}
-	if err := r.git.Fetch(ctx, main, "origin"); err != nil {
-		settle("", "the fetch from upstream failed")
-		return outcome{}, fmt.Errorf("merge: fetching upstream into %s: %w", main, err)
-	}
-	upstream, err := r.git.ResolveRef(ctx, main, "refs/remotes/origin/"+defaultBranch)
-	if err != nil {
-		settle("", "the upstream default branch could not be read")
-		return outcome{}, fmt.Errorf("merge: resolving origin/%s: %w", defaultBranch, err)
-	}
-	current, err := r.git.ResolveRef(ctx, main, "HEAD")
-	if err != nil {
-		settle("", "the main worktree's tip could not be read")
-		return outcome{}, fmt.Errorf("merge: resolving %s's tip: %w", main, err)
-	}
-	r.updateFacts(func(f *footer.MergeFacts) { f.Line = fastForwardingLine(short(upstream)) })
-	r.upsert(round, updatingMainTab(round.live(), short(upstream)))
-	if err := stillWanted(ctx); err != nil {
-		settle(short(upstream), "the merge was abandoned before the default branch moved")
-		return outcome{}, err
-	}
-	if current != upstream {
-		if err := r.git.FastForward(ctx, main, upstream); err != nil {
-			settle(short(upstream), "the default branch could not be fast-forwarded to upstream")
-			return outcome{}, fmt.Errorf("merge: fast-forwarding %s to origin/%s: %w", defaultBranch, defaultBranch, err)
-		}
-	}
-	settle(short(upstream), "")
-	commits, err := r.git.CommitsBetween(ctx, main, before, upstream)
-	if err != nil && r.stopping(err) {
-		return outcome{}, err
-	}
-	if err != nil {
-		r.o.log(ctx, r.ws).Error(op, "the updated range could not be read; no deploy is told of it", dlog.Context{
-			"workspace": string(r.ws), "from": before, "to": upstream, "error": err.Error()})
-		commits = nil
-	}
-	r.o.log(ctx, r.ws).Info(op, "the default branch was fast-forwarded to upstream", dlog.Context{
-		"workspace": string(r.ws), "main": main, "branch": defaultBranch, "from": before, "to": upstream, "commits": len(commits)})
-	return outcome{landed: upstream, target: defaultBranch, commits: commits}, nil
 }
 
 // stillWanted answers the reason a run must stop -- an abandon, the daemon's

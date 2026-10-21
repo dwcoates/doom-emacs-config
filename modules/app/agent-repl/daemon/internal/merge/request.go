@@ -74,14 +74,22 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	if v := req.Source.Version; v != nil {
 		fields["version_part"] = v.Part.String()
 	}
-	// A MERGE ONTO AGENT-REPL'S MASTER MOVES THE VERSION, and no other merge
-	// does (checkVersion).
-	if err := o.checkVersion(ctx, record, req); err != nil {
+	// THE REPOSITORY'S DEPLOY CONFIG DECIDES WHAT THE DEPLOY DOES, so a
+	// repository that states none, or an unusable one, refuses the request
+	// before anything is recorded.
+	deploy, err := o.requestDeploy(ctx, record, req)
+	if err != nil {
 		if _, refused := Refused(err); refused {
-			log.Warn(op, "refused a merge request for its version increment", withField(fields, "error", err.Error()))
+			log.Warn(op, "refused a deploy request for its repository's deploy config", withField(fields, "error", err.Error()))
 		} else {
-			log.Error(op, "could not decide whether the merge moves agent-repl's version", withField(fields, "error", err.Error()))
+			log.Error(op, "could not read the repository's deploy config", withField(fields, "error", err.Error()))
 		}
+		return Enqueued{}, err
+	}
+	// A DEPLOY ONTO A VERSIONED REPOSITORY'S MAIN BRANCH MOVES ITS VERSION, and
+	// no other deploy does (checkVersion).
+	if err := checkVersion(ws, req, deploy); err != nil {
+		log.Warn(op, "refused a deploy request for its version increment", withField(fields, "error", err.Error()))
 		return Enqueued{}, err
 	}
 	// releaseName lets go of an async request's name claim; a no-op for every
@@ -125,9 +133,9 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 		source.DetachMaker = req.Detached.Maker
 		source.DetachTargetMaker = req.Detached.IntoMaker
 		source.CompactAfter = req.Detached.CompactAfter
-		source.Actions = req.Detached.Actions
-		fields["actions_before"] = len(source.Actions.Before)
-		fields["actions_after"] = len(source.Actions.After)
+		source.Hooks = req.Detached.Hooks
+		fields["pre_deploy_hooks"] = len(source.Hooks.PreDeploy)
+		fields["post_deploy_hooks"] = len(source.Hooks.PostDeploy)
 		fields["close_on_landing"] = string(source.CloseOnLanding)
 		fields["cleanup_worktree"] = source.CleanupWorktree
 		fields["cleanup_dir"] = source.CleanupDir
@@ -268,7 +276,7 @@ func checkAsker(ws wsm.Workspace, asker ids.WorkspaceID) error {
 func (o *orchestrator) checkSource(ctx context.Context, requester wsm.Workspace, source wsm.MergeSource) (wsm.MergeSource, error) {
 	ws := requester.ID
 	switch source.Kind {
-	case wsm.MergeSourceOwnBranch, wsm.MergeSourceMergedUpstream:
+	case wsm.MergeSourceOwnBranch:
 		return o.withCheckedOutBranch(ctx, ws, ws, source)
 	case wsm.MergeSourceBranch:
 		exists, err := o.deps.Git.BranchExists(ctx, requester.Dir, source.Branch)
@@ -609,11 +617,11 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 	fields["target_dir"] = target
 	fields["parent_branch"] = parentBranch
 	fields["maker"] = string(source.DetachMaker)
-	fields["actions_before"] = len(source.Actions.Before)
-	fields["actions_after"] = len(source.Actions.After)
+	fields["pre_deploy_hooks"] = len(source.Hooks.PreDeploy)
+	fields["post_deploy_hooks"] = len(source.Hooks.PostDeploy)
 	origin := wsm.MergeOrigin{Requester: requester, Request: source.Detach, Maker: source.DetachMaker, CompactAfter: source.CompactAfter,
 		CloseOnLanding: source.CloseOnLanding, CleanupWorktree: source.CleanupWorktree, CleanupDir: source.CleanupDir,
-		TargetDir: target, ParentBranch: parentBranch, Actions: source.Actions}
+		TargetDir: target, ParentBranch: parentBranch, Hooks: source.Hooks}
 	forked, err := o.deps.Detached.Fork(ctx, record, origin, source.DetachName, base)
 	if err != nil {
 		log.Error(op, "could not fork the merge workspace for a detached merge; the request is dropped and the requester told", withField(fields, "error", err.Error()))

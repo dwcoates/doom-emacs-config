@@ -26,6 +26,7 @@ import (
 
 	"agent-repld/internal/cpugov"
 	"agent-repld/internal/desktopnotify"
+	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
@@ -115,14 +116,22 @@ type Orchestrator interface {
 	// unknown one refused as unknown_repository), or every registered one for
 	// a nil scope.
 	Status(ctx context.Context, scope *RepositoryScope) ([]QueueStatus, error)
-	// HoldRollouts holds the queue's rollouts, daemon-wide and durably:
-	// merges keep running and landing, but a landing in the daemon's own
-	// checkout no longer tells the deploy, so a hand-deployed build is kept.
-	// A hold of held rollouts is refused (rollouts_already_held).
-	HoldRollouts(ctx context.Context) error
-	// ReleaseRollouts ends the hold; nothing is deployed retroactively. A
-	// release of rollouts that are not held is refused (rollouts_not_held).
-	ReleaseRollouts(ctx context.Context) error
+	// HoldDeploys holds the deploy stage of the repository SCOPE names,
+	// durably: its deploys keep running their pre- and
+	// post-deploy stages and skip their deploy hook. A hold of a held
+	// repository is refused (already_held), and of an unregistered one
+	// (unknown_repository).
+	HoldDeploys(ctx context.Context, scope RepositoryScope) error
+	// ReleaseDeploys ends the hold of the repository SCOPE names, and runs its deploy hook once when a
+	// deploy skipped it and the hook is a script. A release of a repository
+	// that is not held is refused (not_held).
+	ReleaseDeploys(ctx context.Context, scope RepositoryScope) (DeployRelease, error)
+	// RollOutLanding is a deploy hook's ask for the rollout of what its deploy
+	// landed: registered on the running deploy LEDGER names, fired at its
+	// teardown, and answered true; with no ledger, started at once and
+	// answered false. A ledger naming no running deploy is refused
+	// (unknown_deploy).
+	RollOutLanding(ctx context.Context, ledger ids.LeaseID) (bool, error)
 	// DisableRacing disables the queue's racing, daemon-wide and durably:
 	// every queue works its head alone whatever the host's power source, and
 	// a merge racing behind its head is suspended at the step it stands on.
@@ -282,11 +291,10 @@ type DetachedRun struct {
 	// the branch checked out when the request was accepted
 	// (agentrepl.v1.MergeWorkspaceAsync.cleanup_worktree).
 	CleanupWorktree bool
-	// Actions are the merge actions the merge workspace runs
-	// (agentrepl.v1.MergeWorkspaceAsync.merge_actions), and the only ones it
-	// runs: it never inherits its requester's. Empty when the request names
-	// none.
-	Actions wsm.MergeActions
+	// Hooks are the deploy hooks the merge workspace runs in place of its
+	// repository's (agentrepl.v1.CreateWorkspaceAsyncMerge.deploy_hooks), and
+	// it never inherits its requester's. Empty when the request names none.
+	Hooks wsm.DeployHooks
 	// Maker is the workspace the merged work was done in: the merge workspace
 	// forks its conversation, and it is the one target besides the primary
 	// branch the branch may land in (agentrepl.v1.CreateWorkspaceAsyncMerge).
@@ -298,10 +306,10 @@ type DetachedRun struct {
 
 // NewDetachedRun is the async run the rpc reads off a request: the merge
 // workspace's name and the instruction with their surrounding space trimmed,
-// and the landing asks, merge actions, maker and target as given.
-func NewDetachedRun(name, instruction string, compactAfter bool, closeOnLanding ids.WorkspaceID, cleanupWorktree bool, actions wsm.MergeActions, maker ids.WorkspaceID, intoMaker bool) *DetachedRun {
+// and the landing asks, deploy hooks, maker and target as given.
+func NewDetachedRun(name, instruction string, compactAfter bool, closeOnLanding ids.WorkspaceID, cleanupWorktree bool, hooks wsm.DeployHooks, maker ids.WorkspaceID, intoMaker bool) *DetachedRun {
 	return &DetachedRun{Name: strings.TrimSpace(name), Pick: strings.TrimSpace(instruction), CompactAfter: compactAfter,
-		CloseOnLanding: closeOnLanding, CleanupWorktree: cleanupWorktree, Actions: actions, Maker: maker, IntoMaker: intoMaker}
+		CloseOnLanding: closeOnLanding, CleanupWorktree: cleanupWorktree, Hooks: hooks, Maker: maker, IntoMaker: intoMaker}
 }
 
 // DetachedMerges forks the merge workspace a detached request runs in, and
@@ -314,7 +322,7 @@ type DetachedMerges interface {
 	// named NAME (the name the request reserved), its own worktree on BASE as
 	// it stands now — the requester's branch for a whole-branch merge, the
 	// target branch for a pick — landing by ORIGIN's TargetDir and
-	// ParentBranch and running exactly ORIGIN's Actions, which the hand-off
+	// ParentBranch and running exactly ORIGIN's Hooks, which the hand-off
 	// decided, and recording ORIGIN (whose Requester is REQUESTER's id) as
 	// what it was forked for. It is idempotent per request, so a hand-off a restart cut
 	// short finds the workspace already forked.
@@ -375,22 +383,22 @@ type DetachedOutcome struct {
 	Deploy LandingDeploy
 }
 
-// LandingDeploy names what a merge's landing did about deploying itself.
+// LandingDeploy names what a deploy did about the runtime's rollout.
 type LandingDeploy int
 
 const (
-	// LandingNotDeployed is a merge whose end deploys nothing: it did not
-	// land, it landed nothing new, or it landed outside the daemon's own
-	// checkout.
+	// LandingNotDeployed is a deploy whose end rolls nothing out: it failed,
+	// or its deploy hook asked for no rollout.
 	LandingNotDeployed LandingDeploy = iota
-	// LandingDeployOwed is a landing in the daemon's own checkout whose deploy
-	// was told: its report waits until the build that carries it runs.
+	// LandingDeployOwed is a deploy whose deploy hook asked for the rollout
+	// of its landing (RollOutLanding): its report waits until the build that
+	// carries it runs.
 	LandingDeployOwed
-	// LandingRolloutsHeld is a landing in the daemon's own checkout while the
-	// rollouts are held, so nothing deploys it.
+	// LandingRolloutsHeld is a deploy whose repository's deploy stage is
+	// held, so its deploy hook was skipped.
 	LandingRolloutsHeld
-	// LandingHoldUnread is a landing in the daemon's own checkout whose
-	// rollout hold could not be read, so the deploy was not told.
+	// LandingHoldUnread is a deploy whose repository's hold could not be
+	// read, so its deploy hook was not run.
 	LandingHoldUnread
 )
 
@@ -529,22 +537,17 @@ type Deps struct {
 	// Prompts reads the briefs at use time. The field holds the directory,
 	// not a cached brief, because a brief is never cached across a use.
 	PromptsDir string
-	// CheckoutRoot is the agent-repl module checkout the daemon was deployed
-	// from. It decides whether a repository's merge policy is the daemon's
-	// corpus or the repository's own `.agent-repl/prompts`.
-	CheckoutRoot string
-	// Policy probes a repository's policy directory for the `merge-before`
-	// and `merge-after` briefs it may state. nil means the real filesystem
-	// (prompts.OnDisk).
-	Policy prompts.Files
+	// DeployConfig reads a repository's `.agent-repl/deploy.yaml`, at every
+	// deploy. nil means the real filesystem (deployconfig.OnDisk).
+	DeployConfig deployconfig.Files
+	// HookRunner runs a deploy's script hooks. Injected so a hook is
+	// exercised against a scripted runner: nothing in a test spawns the
+	// repository's real scripts.
+	HookRunner HookScriptRunner
 	// Briefs loads and splices one brief by name at USE time. It is injected
 	// rather than called directly so the orchestrator's tests fake a brief
 	// without a prompts directory on disk; the production value is BriefsFrom.
 	Briefs BriefLoader
-	// SelfRepoDir is the daemon's OWN checkout. SameRepo against it is what
-	// selects the Emacs-repo method; AGENT_REPL_SELF_REPO_DIR overrides it in
-	// tests, and the self-reload trigger STAYS ON under that override.
-	SelfRepoDir string
 	// StateDir is the state root, whose merge-logs/ subdirectory archives every
 	// test-gate run's output, and whose merge-trees/ and merge-worktrees/ hold
 	// the queue's own scratch trees and the worktrees it makes for a branch
@@ -553,15 +556,15 @@ type Deps struct {
 	// Home is the user's home directory, which a test log's drawn label
 	// shortens to ~. Empty means os.UserHomeDir.
 	Home string
-	// TestCommand answers the Emacs-repo method's test gate FOR ONE TREE, run
+	// TestCommand answers the local merge's test gate FOR ONE TREE, run
 	// with the selected suites, no flake re-run, output archived. The gate
 	// runs in the worktree checked out on the rebased branch, and a
 	// repository's test entrypoint tests the tree it lives in, so the command is
-	// resolved per tree (TestCommandFor;
+	// resolved per tree from the deploy config's script path (TestCommandFor;
 	// AGENT_REPL_TEST_ALL_SCRIPT overrides the script). Its LAST element is the
 	// script, which the gate checks is there before it runs; `--suites <a,b>`
 	// is appended.
-	TestCommand func(tree string) []string
+	TestCommand func(tree, script string) []string
 	// TestRunner runs the test gate. Injected so the gate is exercised against
 	// a scripted script rather than the repository's real suite: GIT IS NEVER
 	// CALLED DURING TESTING and neither is the real roster.
@@ -701,6 +704,13 @@ type ScriptRunner interface {
 	// each line to onLine as it is written, so the gate follows its suites
 	// live and the governor learns a gate's processor cost.
 	RunLinesMeasured(ctx context.Context, dir string, argv []string, onLine func(string)) (scriptrunner.Run, error)
+}
+
+// HookScriptRunner runs one script hook: argv in dir with the options' added
+// environment and timeout, handing each output line to onLine as it is
+// written (scriptrunner.Runner).
+type HookScriptRunner interface {
+	RunLinesWith(ctx context.Context, dir string, argv []string, opts scriptrunner.Options, onLine func(string)) (scriptrunner.Run, error)
 }
 
 // StartSessionFunc starts a workspace's session under the merge lease, for a

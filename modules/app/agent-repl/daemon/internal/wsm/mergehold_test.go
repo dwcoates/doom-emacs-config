@@ -49,7 +49,6 @@ func TestPutHeldPromptBindsAMergeHoldToItsMerge(t *testing.T) {
 		wantOpen bool
 	}{
 		{"own branch", MergeSource{Kind: MergeSourceOwnBranch}, true},
-		{"merged upstream", MergeSource{Kind: MergeSourceMergedUpstream}, true},
 		{"a branch that is no workspace", MergeSource{Kind: MergeSourceBranch, Branch: "feature"}, false},
 	}
 	for _, tt := range tests {
@@ -217,7 +216,6 @@ func TestClosesRequesterNamesTheSourcesThatCloseTheirRequester(t *testing.T) {
 		{MergeSourceOwnBranch, true},
 		{MergeSourceWorkspace, false},
 		{MergeSourceBranch, false},
-		{MergeSourceMergedUpstream, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.kind.String(), func(t *testing.T) {
@@ -242,7 +240,6 @@ func TestMergeSourceKeepOpenFollowsClosesRequester(t *testing.T) {
 		wantErr bool
 	}{
 		{"own branch", MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}, false},
-		{"merged upstream", MergeSource{Kind: MergeSourceMergedUpstream, KeepOpen: true}, false},
 		{"another workspace", MergeSource{Kind: MergeSourceWorkspace, Workspace: "ws-other", KeepOpen: true}, true},
 		{"a branch", MergeSource{Kind: MergeSourceBranch, Branch: "feature", KeepOpen: true}, true},
 	}

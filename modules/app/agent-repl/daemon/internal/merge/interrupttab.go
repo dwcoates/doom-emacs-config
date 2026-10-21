@@ -23,10 +23,11 @@ import (
 // interrupttab_test.go holds them to.
 var agenticTabs = map[string]bool{
 	TabPick:           true,
-	TabPrePrompt:      true,
+	TabPreDeploy:      true,
 	rowRebaseCommit:   true,
 	rowTestsRunFixing: true,
-	TabPostPrompt:     true,
+	TabDeploy:         true,
+	TabPostDeploy:     true,
 }
 
 // InterruptTab stops the turn a live agentic tab of REQUESTER's feed draws

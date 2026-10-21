@@ -28,7 +28,7 @@ func mergeRequester(t *testing.T, f *fixture) (wsm.Workspace, string) {
 	f.db.jobs[requester.ID] = wsm.CreationJob{
 		Workspace: requester.ID,
 		Layout:    wsm.MergeLayout{SourceBranch: requester.Branch, SourceDir: requester.Dir, TargetDir: targetDir},
-		Actions:   wsm.MergeActions{Before: []string{"the requester's own before"}},
+		Actions:   wsm.DeployHooks{Before: []string{"the requester's own before"}},
 	}
 	return requester, targetDir
 }
@@ -37,7 +37,7 @@ func mergeRequester(t *testing.T, f *fixture) (wsm.Workspace, string) {
 // from everything the requester records, so a create that read the requester
 // instead is caught.
 var theLanding = wsm.MergeOrigin{TargetDir: "/decided/target", ParentBranch: "decided-parent",
-	Actions: wsm.MergeActions{Before: []string{"the request's before"}, After: []string{"the request's after"}}}
+	Actions: wsm.DeployHooks{Before: []string{"the request's before"}, After: []string{"the request's after"}}}
 
 // landedOrigin is the hand-off's origin for REQUESTER's request-1, carrying
 // theLanding.
@@ -150,7 +150,7 @@ func TestCreateGivesAMergeWorkspaceNoActionWhenItsRequestNamedNone(t *testing.T)
 	f := newFixture(t)
 	requester, _ := mergeRequester(t, f)
 	spec := mergeWorkspaceSpec(t, f, requester.ID)
-	spec.MergeOf.Actions = wsm.MergeActions{}
+	spec.MergeOf.Actions = wsm.DeployHooks{}
 
 	// Act
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -158,7 +158,7 @@ func TestCreateGivesAMergeWorkspaceNoActionWhenItsRequestNamedNone(t *testing.T)
 	}
 
 	// Assert
-	if job := f.db.putJobs[len(f.db.putJobs)-1]; !reflect.DeepEqual(job.Actions, wsm.MergeActions{}) {
+	if job := f.db.putJobs[len(f.db.putJobs)-1]; !reflect.DeepEqual(job.Actions, wsm.DeployHooks{}) {
 		t.Fatalf("job actions = %+v, want none: a merge workspace never inherits its requester's", job.Actions)
 	}
 }
@@ -169,7 +169,7 @@ func TestCreateRecordsTheActionsAMergeWorkspacesRequestNamed(t *testing.T) {
 	f := newFixture(t)
 	requester, _ := mergeRequester(t, f)
 	spec := mergeWorkspaceSpec(t, f, requester.ID)
-	named := wsm.MergeActions{Before: []string{"tidy the branch"}, After: []string{"announce the landing"}}
+	named := wsm.DeployHooks{Before: []string{"tidy the branch"}, After: []string{"announce the landing"}}
 	spec.MergeOf.Actions = named
 
 	// Act

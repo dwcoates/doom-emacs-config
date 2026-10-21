@@ -478,7 +478,7 @@ func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T
 		compactAfter     bool
 		closeOnLanding   ids.WorkspaceID
 		cleanupWorktree  bool
-		actions          wsm.MergeActions
+		actions          wsm.DeployHooks
 		maker            ids.WorkspaceID
 		intoMaker        bool
 		want             DetachedRun
@@ -490,8 +490,8 @@ func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T
 		{name: "compacting after", inName: "reconnect-fix", compactAfter: true, want: DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
 		{name: "closing another workspace", inName: "reconnect-fix", closeOnLanding: "child", want: DetachedRun{Name: "reconnect-fix", CloseOnLanding: "child"}},
 		{name: "cleaning up", inName: "reconnect-fix", cleanupWorktree: true, want: DetachedRun{Name: "reconnect-fix", CleanupWorktree: true}},
-		{name: "its own merge actions", inName: "reconnect-fix", actions: wsm.MergeActions{Before: []string{"lint"}, After: []string{"announce"}},
-			want: DetachedRun{Name: "reconnect-fix", Actions: wsm.MergeActions{Before: []string{"lint"}, After: []string{"announce"}}}},
+		{name: "its own merge actions", inName: "reconnect-fix", actions: wsm.DeployHooks{Before: []string{"lint"}, After: []string{"announce"}},
+			want: DetachedRun{Name: "reconnect-fix", Actions: wsm.DeployHooks{Before: []string{"lint"}, After: []string{"announce"}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

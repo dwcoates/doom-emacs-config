@@ -1156,12 +1156,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Sidebar:         sidebarResolver,
 		Banners:         desktopnotify.NewMergeBanners(notifier, time.Now),
 		PromptsDir:      paths.PromptsDir,
-		CheckoutRoot:    paths.Checkout,
 		Briefs:          merge.BriefsFrom(paths.PromptsDir),
-		SelfRepoDir:     paths.SelfRepo,
 		StateDir:        p.Layout.Dir(),
 		TestCommand:     merge.TestCommandFor,
 		TestRunner:      scripts,
+		HookRunner:      scripts,
 		Governor:        gateGovernor,
 		Painter:         painter,
 		StartSession:    fleet.Start,
@@ -1578,10 +1577,6 @@ type paths struct {
 	// ShimMain, WebappDist, PromptsDir and VocabDir are the four locations
 	// beneath it.
 	ShimMain, WebappDist, PromptsDir, VocabDir string
-	// SelfRepo is the daemon's OWN checkout identity, which the merge
-	// orchestrator's two methods key on: the REPOSITORY root containing
-	// Checkout, never Checkout itself (resolveSelfRepo).
-	SelfRepo string
 	// BuiltSHA is daemon/bin/.built-sha, the source-revision stamp the build
 	// writes beside the daemon binary: the version the health and status
 	// surfaces show.
@@ -1596,10 +1591,6 @@ type paths struct {
 	RunDir string
 }
 
-// envSelfRepo overrides the daemon's own-checkout identity for tests. The flag
-// beats it, and it beats the resolved checkout.
-const envSelfRepo = "AGENT_REPL_SELF_REPO_DIR"
-
 // envPromptsDir is the prompts directory's operator contract; the flag beats
 // it, and it beats the checkout's own prompts/.
 const envPromptsDir = "AGENT_REPL_PROMPTS_DIR"
@@ -1612,10 +1603,6 @@ func resolvePaths(opts options) (paths, error) {
 	root, err := checkout.Root(mustExecutable())
 	if err != nil {
 		return paths{}, fmt.Errorf("agent-repld: %w", err)
-	}
-	selfRepo, err := resolveSelfRepo(opts, root)
-	if err != nil {
-		return paths{}, err
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -1631,30 +1618,11 @@ func resolvePaths(opts options) (paths, error) {
 		WebappDist: firstNonEmpty(opts.webapp, checkout.WebappDist(root)),
 		PromptsDir: firstNonEmpty(opts.promptsDir, os.Getenv(envPromptsDir), checkout.PromptsDir(root)),
 		VocabDir:   checkout.VocabDir(root),
-		SelfRepo:   selfRepo,
 		BuiltSHA:   filepath.Join(root, "daemon", "bin", ".built-sha"),
 		Home:       home,
 		RunDir:     runDir,
 	}
 	return out, nil
-}
-
-// resolveSelfRepo answers the daemon's own checkout identity: the flag, then
-// the environment, then the REPOSITORY root containing the module root. The
-// merge orchestrator compares it against a workspace's target worktree root
-// and runs the gate at <it>/modules/app/agent-repl/bin/test-all.sh, so it must
-// be the repository root, never the module root beneath it. The repository
-// root is derived only when nothing overrides it, so an unmarked
-// $AGENT_REPL_CHECKOUT paired with an override still boots.
-func resolveSelfRepo(opts options, root string) (string, error) {
-	if override := firstNonEmpty(opts.selfRepo, os.Getenv(envSelfRepo)); override != "" {
-		return override, nil
-	}
-	repo, err := checkout.RepoRoot(root)
-	if err != nil {
-		return "", fmt.Errorf("agent-repld: resolving the self repository: %w", err)
-	}
-	return repo, nil
 }
 
 // mustExecutable answers this process's binary, falling back to argv[0] when

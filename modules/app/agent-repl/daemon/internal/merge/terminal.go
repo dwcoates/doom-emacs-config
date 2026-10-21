@@ -987,62 +987,40 @@ func withField(fields dlog.Context, name string, value any) dlog.Context {
 	return out
 }
 
-// landingDeploy decides, ONCE per run, what the landing does about deploying
-// itself, and answers the same decision to every later caller: the report
-// (ended) and the deploy (selfReload) read it, so a report never says the
-// landing is owed a deploy that was never told, nor the reverse.
+// landingDeploy decides, ONCE per run, what the deploy does about the
+// runtime's rollout, and answers the same decision to every later caller: the
+// report (ended) and the rollout (selfReload) read it, so a report never says
+// the deploy is owed a rollout that was never fired, nor the reverse.
 //
-// ONLY A LANDING IN THE DAEMON'S OWN CHECKOUT DEPLOYS. A sibling worktree of
-// the same repository is excluded: it shares the common dir but is not the
-// tree the running binary was built from.
-//
-// A HELD ROLLOUT IS READ AT THE LANDING, never cached, so the hold a
-// predecessor took is the one a successor answers (rollouthold.go). A hold
-// that cannot be read does not tell the deploy: a landing not deployed is
-// recovered by a deploy by hand, a hand-deployed build replaced is not.
+// THE DEPLOY HOOK DECIDES. A rollout is owed only when the deploy hook asked
+// for one (RollOutLanding, agent-repl's deploy script) and the deploy did not
+// fail; a deploy stage the repository's hold skipped, or whose hold could not
+// be read, decided that itself (deployStage).
 func (r *run) landingDeploy(ctx context.Context, out outcome) LandingDeploy {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.deploy != nil {
 		return *r.deploy
 	}
-	decided := r.decideLandingDeploy(ctx, out)
+	decided := LandingNotDeployed
+	if out.failed == "" && r.rolloutRequested {
+		decided = LandingDeployOwed
+	}
 	r.deploy = &decided
 	return decided
 }
 
-func (r *run) decideLandingDeploy(ctx context.Context, out outcome) LandingDeploy {
-	const op = "daemon.merge.self_reload"
-	if out.failed != "" || out.landed == "" || !r.selfCheckout || len(out.commits) == 0 {
-		return LandingNotDeployed
-	}
-	hold, err := r.o.deps.DB.MergeRolloutHold(ctx)
-	if err != nil {
-		r.o.deps.Log.Global().Info(op, "a merge landed in this daemon's own checkout, but the rollout hold could not be read; the deploy is not told",
-			dlog.Context{"workspace": string(r.ws), "commit": out.landed, "commits": len(out.commits), "cause": err.Error()})
-		return LandingHoldUnread
-	}
-	if hold.Held {
-		shas := make([]string, 0, len(out.commits))
-		for _, c := range out.commits {
-			shas = append(shas, c.SHA)
-		}
-		r.o.deps.Log.Global().Info(op, "a merge landed in this daemon's own checkout while the rollouts are held; the deploy is not told",
-			dlog.Context{"workspace": string(r.ws), "commit": out.landed, "commits": shas, "held_since": hold.Since})
-		return LandingRolloutsHeld
-	}
-	return LandingDeployOwed
-}
-
-// selfReload fires the daemon's own redeploy for a landing whose decision
-// (landingDeploy) is to deploy. It runs after the landing's report was owed,
-// so the deploy it starts covers that report.
+// selfReload fires the runtime's rollout for a deploy whose decision
+// (landingDeploy) is to roll out. It runs after the deploy's report was owed,
+// so the rollout it starts covers that report.
 func (r *run) selfReload(ctx context.Context, out outcome) {
 	const op = "daemon.merge.self_reload"
 	if r.landingDeploy(ctx, out) != LandingDeployOwed {
 		return
 	}
-	// ONE MERGE IS ONE LANDING, AND ONE DEPLOY: the deploy is told once with
-	// every commit the merge landed, never once per commit.
-	r.o.log(ctx, r.ws).Info(op, "a merge landed in this daemon's own checkout; the deploy is told once",
+	// ONE DEPLOY IS ONE LANDING, AND ONE ROLLOUT: the rollout is told once
+	// with every commit the deploy landed, never once per commit.
+	r.o.log(ctx, r.ws).Info(op, "the deploy hook asked for the rollout of the deploy's landing; it is told once",
 		dlog.Context{"workspace": string(r.ws), "commit": out.landed, "commits": len(out.commits)})
 	r.o.deps.Rollout.Landed(ctx, out.commits)
 }

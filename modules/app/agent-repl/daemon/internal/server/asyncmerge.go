@@ -29,9 +29,11 @@ type SubagentMakers interface {
 // asyncMergeRenames spells the merge queue's refusals of the requester's own
 // row as the create's arms.
 var asyncMergeRenames = map[string]string{
-	merge.ArmAlreadyQueued:  "async_merge_requester_queued",
-	merge.ArmAlreadyMerging: "async_merge_requester_merging",
-	merge.ArmSessionDeleted: "async_merge_requester_session_deleted",
+	merge.ArmAlreadyQueued:       "async_merge_requester_queued",
+	merge.ArmAlreadyMerging:      "async_merge_requester_merging",
+	merge.ArmSessionDeleted:      "async_merge_requester_session_deleted",
+	merge.ArmNoDeployConfig:      "async_merge_no_deploy_config",
+	merge.ArmDeployConfigInvalid: "async_merge_deploy_config_invalid",
 }
 
 // createAsyncMerge records an async merge (agentrepl.v1.CreateWorkspaceAsyncMerge):
@@ -87,7 +89,7 @@ func (s *server) createAsyncMerge(
 			Version: versionIncrement(async.GetVersionIncrement()),
 		},
 		Detached: merge.NewDetachedRun(async.GetName(), async.GetInstruction(), async.GetCompactAfter(), closes,
-			async.GetCleanupWorktree(), s.mergeActions(async.GetMergeActions()), maker, async.GetTarget().GetMaker() != nil),
+			async.GetCleanupWorktree(), deployHooksOf(async.GetDeployHooks()), maker, async.GetTarget().GetMaker() != nil),
 	}
 	enqueued, err := s.deps.Merge.Enqueue(ctx, request)
 	if err != nil {

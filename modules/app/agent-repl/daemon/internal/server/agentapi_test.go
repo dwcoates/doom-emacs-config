@@ -108,7 +108,7 @@ func TestAnAsyncMergeIsEnqueuedWithItsMakerAndAnsweredWithItsBranch(t *testing.T
 	got := h.Merge.requests[0]
 	want := merge.Request{Workspace: testWorkspaceID, By: merge.RequestedByAgent, Asker: testWorkspaceID,
 		Source:   wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix", Front: true},
-		Detached: merge.NewDetachedRun("reconnect-fix", "rebase it", false, "", false, wsm.MergeActions{}, testWorkspaceID, true)}
+		Detached: merge.NewDetachedRun("reconnect-fix", "rebase it", false, "", false, wsm.DeployHooks{}, testWorkspaceID, true)}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("request = %+v, want %+v", got, want)
 	}

@@ -341,8 +341,6 @@ func (k MergeSourceKind) String() string {
 		return "workspace"
 	case MergeSourceBranch:
 		return "branch"
-	case MergeSourceMergedUpstream:
-		return "merged_upstream"
 	default:
 		return fmt.Sprintf("merge_source(%d)", int(k))
 	}
@@ -350,7 +348,7 @@ func (k MergeSourceKind) String() string {
 
 // valid reports whether the source kind is one of the declared arms.
 func (k MergeSourceKind) valid() bool {
-	return k >= MergeSourceOwnBranch && k <= MergeSourceMergedUpstream
+	return k >= MergeSourceOwnBranch && k <= MergeSourceBranch
 }
 
 // IsOneShot reports whether the source is a ONE-SHOT merge's: the requester's
@@ -416,13 +414,10 @@ func (m MergeSource) validate() error {
 		return fmt.Errorf("a %s source names workspace %q", m.Kind, m.Workspace)
 	}
 	// A VERSION INCREMENT moves a declared part and carries its changelog
-	// line, and a branch already merged upstream lands nothing to version.
+	// line.
 	if v := m.Version; v != nil {
 		if err := v.Validate(); err != nil {
 			return err
-		}
-		if m.Kind == MergeSourceMergedUpstream {
-			return fmt.Errorf("a %s source lands nothing, so it carries no version increment", m.Kind)
 		}
 	}
 	// A WORKSPACE'S BRANCH IS RECORDED WITH THE REQUEST (the branch checked out

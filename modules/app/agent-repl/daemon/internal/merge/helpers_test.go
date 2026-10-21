@@ -2726,7 +2726,7 @@ func (h *harness) configureActions(before, after []string) {
 	h.db.mu.Lock()
 	defer h.db.mu.Unlock()
 	job := h.db.jobs[theWorkspace]
-	job.Actions = wsm.MergeActions{Before: before, After: after}
+	job.Actions = wsm.DeployHooks{Before: before, After: after}
 	h.db.jobs[theWorkspace] = job
 }
 

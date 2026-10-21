@@ -118,10 +118,6 @@ type options struct {
 	// startedIn is the directory this process was started in, before main
 	// moved it to stableDir; empty when run is called in-process.
 	startedIn string
-	// selfRepo overrides the daemon's own checkout identity. It is a TEST
-	// HOOK: the merge orchestrator keys its two methods on whether a target is
-	// the same repository as this, and a test needs to say so explicitly.
-	selfRepo string
 	// probeBootClaim asks ONE question and starts no daemon: is the boot claim
 	// of this state root held right now? It is how Emacs watches a daemon
 	// depart -- the claim, not daemon.addr, is what "the previous daemon is
@@ -274,7 +270,6 @@ func newFlagSets(program string, opts *options) (config, boot *flag.FlagSet) {
 	config.IntVar(&opts.feedTailRetention, "feed-tail-retention", 0, "how many published rows one feed retains for a tail's replay (0 uses the built-in default)")
 	config.DurationVar(&opts.footerMomentaryDwell, "footer-momentary-dwell", 0, "how long a momentary footer status stands before its successor push retires it (0 uses the built-in default)")
 	config.BoolVar(&opts.noBrowser, "no-browser", false, "this daemon has no external browser: OpenExternal answers no_browser_configured")
-	config.StringVar(&opts.selfRepo, "self-repo", "", "override the daemon's own checkout identity (test hook)")
 
 	boot = flag.NewFlagSet(program, flag.ContinueOnError)
 	boot.StringVar(&opts.joining, "joining", "", "address of the incumbent daemon to take over from")

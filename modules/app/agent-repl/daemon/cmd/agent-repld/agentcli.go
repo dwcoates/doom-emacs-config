@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -20,6 +21,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"
 
@@ -130,11 +132,11 @@ type cliCommand struct {
 // cliNouns are every noun's subcommands.
 var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
-		"create":      {usage: "create -repository here|DIR -topology primary|child [-origin-master] [-owner WS] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-before-merge TEXT] [-after-merge TEXT] [-as-user]", run: workspaceCreate},
-		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-before-merge TEXT] [-after-merge TEXT] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
+		"create":      {usage: "create -repository here|DIR -topology primary|child [-origin-master] [-owner WS] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-as-user]", run: workspaceCreate},
+		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":      {usage: "prompt WS TEXT", run: workspacePrompt},
 		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-as-user]", run: workspaceSet},
-		"merge":       {usage: "merge WS -placement back|front [-merged-upstream] [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceMerge},
+		"finished":    {usage: "finished WS -placement back|front [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":        {usage: "open WS", run: workspaceOpen},
 		"close":       {usage: "close WS [-as-user]", run: workspaceClose},
 		"kill":        {usage: "kill WS", run: workspaceKill},
@@ -164,8 +166,9 @@ var cliNouns = map[string]map[string]cliCommand{
 		"eval": {usage: "eval [-workspace WS] TEXT", run: editorEval},
 	},
 	runtimeNoun: {
-		"rollouts": {usage: "rollouts hold|release", run: runtimeRollouts},
-		"health":   {usage: "health", run: runtimeHealth},
+		"deploy-hold":      {usage: "deploy-hold hold|release -repository here|DIR", run: runtimeDeployHold},
+		"roll-out-landing": {usage: "roll-out-landing [-deploy LEDGER]", run: runtimeRollOutLanding},
+		"health":           {usage: "health", run: runtimeHealth},
 	},
 }
 
@@ -398,13 +401,59 @@ func optionalSaid(text string) *conversationv1.UserSaid {
 	return feed.SaidText(text)
 }
 
-// mergeActions are the before and after actions a create or an async merge
-// names, nil when it names neither.
-func mergeActions(before, after string) *agentreplv1.CreateWorkspaceMergeActions {
-	if before == "" && after == "" {
+// hookList is one stage's deploy hooks as its flags name them, in the order
+// given: each -<stage>-prompt and -<stage>-script flag appends one hook.
+type hookList struct {
+	hooks []*repoconfigv1.DeployHook
+}
+
+// promptFlag appends a prompt hook to its list.
+type promptFlag struct{ list *hookList }
+
+func (f promptFlag) String() string { return "" }
+func (f promptFlag) Set(text string) error {
+	if strings.TrimSpace(text) == "" {
+		return errors.New("a prompt hook is never blank")
+	}
+	f.list.hooks = append(f.list.hooks, &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Prompt{Prompt: &repoconfigv1.DeployHookPrompt{Text: text}}})
+	return nil
+}
+
+// scriptFlag appends a script hook, PATH:SECONDS, to its list.
+type scriptFlag struct{ list *hookList }
+
+func (f scriptFlag) String() string { return "" }
+func (f scriptFlag) Set(value string) error {
+	path, seconds, found := strings.Cut(value, ":")
+	if !found || strings.TrimSpace(path) == "" {
+		return fmt.Errorf("a script hook is PATH:SECONDS, not %q", value)
+	}
+	timeout, err := strconv.ParseUint(seconds, 10, 32)
+	if err != nil || timeout < 1 {
+		return fmt.Errorf("a script hook's timeout is a whole number of seconds, at least 1, not %q", seconds)
+	}
+	f.list.hooks = append(f.list.hooks, &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Script{Script: &repoconfigv1.DeployHookScript{Path: path, TimeoutSeconds: uint32(timeout)}}})
+	return nil
+}
+
+// hookFlags registers the four deploy-hook flags on FS and answers the two
+// stages' lists they fill.
+func hookFlags(fs *flag.FlagSet) (pre, post *hookList) {
+	pre, post = &hookList{}, &hookList{}
+	fs.Var(promptFlag{pre}, "pre-deploy-prompt", "a prompt hook run before the local merge, in place of the repository's; repeatable")
+	fs.Var(scriptFlag{pre}, "pre-deploy-script", "a script hook PATH:SECONDS run before the local merge, in place of the repository's; repeatable")
+	fs.Var(promptFlag{post}, "post-deploy-prompt", "a prompt hook run after the deploy stage, in place of the repository's; repeatable")
+	fs.Var(scriptFlag{post}, "post-deploy-script", "a script hook PATH:SECONDS run after the deploy stage, in place of the repository's; repeatable")
+	return pre, post
+}
+
+// deployHooks are the hooks a create or an async merge names, nil when it
+// names none.
+func deployHooks(pre, post *hookList) *agentreplv1.CreateWorkspaceDeployHooks {
+	if len(pre.hooks) == 0 && len(post.hooks) == 0 {
 		return nil
 	}
-	return &agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: optionalSaid(before), PostprocessingPrompt: optionalSaid(after)}
+	return &agentreplv1.CreateWorkspaceDeployHooks{PreDeploy: pre.hooks, PostDeploy: post.hooks}
 }
 
 // placement reads a -placement flag; nothing is defaulted.
@@ -452,8 +501,7 @@ func workspaceCreate(c *cliCall, args []string) int {
 	name := fs.String("name", "", "the workspace's name; unset derives it from the prompt")
 	model := fs.String("model", "", "the session's model; unset is the daemon's")
 	priority := fs.String("priority", "", "p05, p1, p2 or p3; unset is unprioritized")
-	before := fs.String("before-merge", "", "the action run before the workspace's merge")
-	after := fs.String("after-merge", "", "the action run after the workspace's merge")
+	pre, post := hookFlags(fs)
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
@@ -515,7 +563,7 @@ func workspaceCreate(c *cliCall, args []string) int {
 		}
 		req.Form = &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{Prompt: feed.SaidText(*prompt), Topology: shape}}
 	} else {
-		standard := &agentreplv1.CreateWorkspaceStandard{InitialPrompt: optionalSaid(*prompt), Topology: shape, MergeActions: mergeActions(*before, *after)}
+		standard := &agentreplv1.CreateWorkspaceStandard{InitialPrompt: optionalSaid(*prompt), Topology: shape, DeployHooks: deployHooks(pre, post)}
 		if *name != "" {
 			standard.Name = name
 		}
@@ -548,8 +596,7 @@ func workspaceAsyncMerge(c *cliCall, args []string) int {
 	closeAfter := fs.String("close-after", "", "a workspace closed once the merge lands")
 	cleanup := fs.Bool("cleanup-worktree", false, "remove the branch's worktree once it lands")
 	compact := fs.Bool("compact-after", false, "compact the calling workspace once it lands")
-	before := fs.String("before-merge", "", "the merge workspace's action before the landing")
-	after := fs.String("after-merge", "", "the merge workspace's action after the landing")
+	pre, post := hookFlags(fs)
 	part := fs.String("version-part", "", "minor or patch, for a merge onto agent-repl's master")
 	line := fs.String("changelog-line", "", "the version tag's changelog line")
 	positionals, ok := c.parse(fs, args)
@@ -568,7 +615,7 @@ func workspaceAsyncMerge(c *cliCall, args []string) int {
 		return c.usageFailed("%v", err)
 	}
 	async := &agentreplv1.CreateWorkspaceAsyncMerge{Name: *name, Placement: where, CleanupWorktree: *cleanup, CompactAfter: *compact,
-		MergeActions: mergeActions(*before, *after), VersionIncrement: version}
+		DeployHooks: deployHooks(pre, post), VersionIncrement: version}
 	switch *target {
 	case "primary":
 		async.Target = &agentreplv1.CreateWorkspaceAsyncMergeTarget{Target: &agentreplv1.CreateWorkspaceAsyncMergeTarget_Primary{Primary: &agentreplv1.CreateWorkspaceAsyncMergeTargetPrimary{}}}
@@ -782,11 +829,10 @@ func priorityOf(text string) (*agentreplv1.WorkspacePriority, error) {
 	return nil, fmt.Errorf("-priority is p05, p1, p2, p3 or none, not %q", text)
 }
 
-func workspaceMerge(c *cliCall, args []string) int {
+func workspaceFinished(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	place := fs.String("placement", "", "back or front")
-	upstream := fs.Bool("merged-upstream", false, "the branch already merged upstream through its pull request")
-	part := fs.String("version-part", "", "minor or patch, for a merge onto agent-repl's master")
+	part := fs.String("version-part", "", "minor or patch, for a deploy onto a versioned repository's main branch")
 	line := fs.String("changelog-line", "", "the version tag's changelog line")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
@@ -808,12 +854,8 @@ func workspaceMerge(c *cliCall, args []string) int {
 	if !ok {
 		return exitFailure
 	}
-	landing := &agentreplv1.MergeWorkspaceOneShot{Landing: &agentreplv1.MergeWorkspaceOneShot_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceOneShotOwnBranch{}}}
-	if *upstream {
-		landing.Landing = &agentreplv1.MergeWorkspaceOneShot_MergedUpstream{MergedUpstream: &agentreplv1.MergeWorkspaceOneShotMergedUpstream{}}
-	}
-	resp, err := c.client.MergeWorkspace(c.ctx, connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref, Requester: requester,
-		Placement: where, VersionIncrement: version, Mode: &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: landing}}))
+	resp, err := c.client.FinishWorkspace(c.ctx, connect.NewRequest(&agentreplv1.FinishWorkspaceRequest{Workspace: ref, Requester: requester,
+		Placement: where, VersionIncrement: version}))
 	return answer(c, resp, err)
 }
 
@@ -1278,28 +1320,55 @@ func editorEval(c *cliCall, args []string) int {
 
 // ---- runtime -------------------------------------------------------------------
 
-func runtimeRollouts(c *cliCall, args []string) int {
+func runtimeDeployHold(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
+	repository := fs.String("repository", "", "here, or a main checkout")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
 		return exitFailure
 	}
-	if len(positionals) != 1 {
-		return c.usageFailed("the command names hold or release")
+	if len(positionals) != 1 || *repository == "" {
+		return c.usageFailed("the command names hold or release, and -repository is required")
 	}
-	req := &agentreplv1.UpdateRolloutsRequest{}
+	req := &agentreplv1.UpdateDeployHoldRequest{}
 	switch positionals[0] {
 	case "hold":
-		req.Action = &agentreplv1.UpdateRolloutsRequest_Hold{Hold: &agentreplv1.UpdateRolloutsHold{}}
+		req.Action = &agentreplv1.UpdateDeployHoldRequest_Hold{Hold: &agentreplv1.UpdateDeployHoldHold{}}
 	case "release":
-		req.Action = &agentreplv1.UpdateRolloutsRequest_Release{Release: &agentreplv1.UpdateRolloutsRelease{}}
+		req.Action = &agentreplv1.UpdateDeployHoldRequest_Release{Release: &agentreplv1.UpdateDeployHoldRelease{}}
 	default:
-		return c.usageFailed("the rollouts are held or released, not %q", positionals[0])
+		return c.usageFailed("a repository's deploys are held or released, not %q", positionals[0])
 	}
 	if !c.dial(*stateDir) {
 		return exitFailure
 	}
-	resp, err := c.client.UpdateRollouts(c.ctx, connect.NewRequest(req))
+	scope, ok := c.scopeFlag(*repository)
+	if !ok {
+		return exitFailure
+	}
+	req.Repository = scope
+	resp, err := c.client.UpdateDeployHold(c.ctx, connect.NewRequest(req))
+	return answer(c, resp, err)
+}
+
+func runtimeRollOutLanding(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	deploy := fs.String("deploy", "", "the deploy's ledger, as AGENT_REPL_DEPLOY_LEDGER names it; unset starts the rollout at once")
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(positionals) != 0 {
+		return c.usageFailed("nothing is positional")
+	}
+	if !c.dial(*stateDir) {
+		return exitFailure
+	}
+	req := &agentreplv1.RollOutLandingRequest{}
+	if *deploy != "" {
+		req.Deploy = &agentreplv1.DeployLedger{Ledger: *deploy}
+	}
+	resp, err := c.client.RollOutLanding(c.ctx, connect.NewRequest(req))
 	return answer(c, resp, err)
 }
 

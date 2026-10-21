@@ -500,7 +500,6 @@ func TestMergeSourceLandingCloses(t *testing.T) {
 		{name: "an own-branch merge closes its requester", source: MergeSource{Kind: MergeSourceOwnBranch}, closes: "ws"},
 		{name: "an own-branch merge kept open closes nothing", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true}},
 		{name: "a merge workspace's merge closes its one-shot too", source: MergeSource{Kind: MergeSourceOwnBranch}, origin: origin, closes: "ws", also: "one-shot"},
-		{name: "a branch merged upstream closes its requester", source: MergeSource{Kind: MergeSourceMergedUpstream}, closes: "ws"},
 		{name: "a workspace source closes that workspace", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "other"}, closes: "other"},
 		{name: "a named branch closes nothing", source: MergeSource{Kind: MergeSourceBranch, Branch: "b"}},
 		{name: "a detached request closes nothing in place", source: MergeSource{Kind: MergeSourceBranch, Branch: "b", Detach: "d", DetachName: "m", CloseOnLanding: "x"}},
@@ -537,7 +536,6 @@ func TestClosingSQLAgreesWithMergeSourceCloses(t *testing.T) {
 	}{
 		{name: "own branch", source: func(_, _ WorkspaceID) MergeSource { return MergeSource{Kind: MergeSourceOwnBranch} }},
 		{name: "own branch kept open", source: func(_, _ WorkspaceID) MergeSource { return MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true} }},
-		{name: "merged upstream", source: func(_, _ WorkspaceID) MergeSource { return MergeSource{Kind: MergeSourceMergedUpstream} }},
 		{name: "workspace", source: func(other, _ WorkspaceID) MergeSource {
 			return MergeSource{Kind: MergeSourceWorkspace, Workspace: other}
 		}},

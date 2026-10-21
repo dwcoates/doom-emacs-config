@@ -82,7 +82,6 @@ func TestAVersionIncrementThatContradictsItsSourceIsInvalid(t *testing.T) {
 		{name: "a blank changelog line", source: MergeSource{Kind: MergeSourceOwnBranch, Version: &VersionIncrement{Part: semver.Patch}}, want: "one non-blank changelog line"},
 		{name: "a changelog line of two lines", source: MergeSource{Kind: MergeSourceOwnBranch, Version: &VersionIncrement{Part: semver.Patch, ChangelogLine: "a\nb"}}, want: "one non-blank changelog line"},
 		{name: "a whitespace changelog line", source: MergeSource{Kind: MergeSourceOwnBranch, Version: &VersionIncrement{Part: semver.Patch, ChangelogLine: "  "}}, want: "one non-blank changelog line"},
-		{name: "a branch merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream, Version: &VersionIncrement{Part: semver.Patch, ChangelogLine: "x"}}, want: "lands nothing"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

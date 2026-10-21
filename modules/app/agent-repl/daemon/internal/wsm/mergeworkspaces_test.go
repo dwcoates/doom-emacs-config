@@ -140,7 +140,6 @@ func TestADetachedSourceMergesANamedBranchAndNeverKeepsTheRequesterOpen(t *testi
 	}{
 		{name: "keep open", source: MergeSource{Kind: MergeSourceOwnBranch, KeepOpen: true, Detach: "d", DetachMaker: "maker", DetachName: "n"}},
 		{name: "another workspace", source: MergeSource{Kind: MergeSourceWorkspace, Workspace: "w", Detach: "d", DetachMaker: "maker", DetachName: "n"}},
-		{name: "merged upstream", source: MergeSource{Kind: MergeSourceMergedUpstream, Detach: "d", DetachMaker: "maker", DetachName: "n"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -118,7 +118,7 @@ func New(deps Deps) *Service {
 func (s *Service) Fork(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
 	log := s.deps.Log.Global()
 	fields := dlog.Context{"requester": string(requester.ID), "request": string(origin.Request), "name": name, "base": base, "compact_after": origin.CompactAfter,
-		"target_dir": origin.TargetDir, "parent_branch": origin.ParentBranch, "actions_before": len(origin.Actions.Before), "actions_after": len(origin.Actions.After)}
+		"target_dir": origin.TargetDir, "parent_branch": origin.ParentBranch, "actions_before": len(origin.Hooks.PreDeploy), "actions_after": len(origin.Hooks.PostDeploy)}
 	if origin.Requester != requester.ID {
 		err := fmt.Errorf("mergeworkspace: a fork for %s names %s as its requester", requester.ID, origin.Requester)
 		log.Error(op, "a detached merge's fork names another requester than the workspace it forks", dlog.WithCause(fields, err))

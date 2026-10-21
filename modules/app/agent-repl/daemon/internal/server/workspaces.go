@@ -128,7 +128,7 @@ func (s *server) CreateWorkspace(
 	if standard := req.Msg.GetStandard(); standard != nil {
 		spec.InitialPrompt = s.saidText(s.log, "standard.initial_prompt", standard.GetInitialPrompt())
 		spec.Name = standard.GetName()
-		spec.MergeActions = s.mergeActions(standard.GetMergeActions())
+		spec.DeployHooks = deployHooksOf(standard.GetDeployHooks())
 		spec.Parent, spec.OwnerNotice = topologyOwner(standard.GetTopology())
 		spec.FromOrigin = standard.GetTopology().GetPrimary().GetFromOrigin() != nil
 	}
@@ -368,23 +368,10 @@ func (r openProgressReporter) Stage(stage workspace.OpenStage) {
 	})
 }
 
-// mergeActions renders the configured merge actions.
-//
-// SEAM MISMATCH (recorded in the report): wsm.MergeActions holds PROMPT NAMES
-// while the contract carries composed UserSaid prompts, so the composed text is
-// carried through as the "name" until the two agree.
-func (s *server) mergeActions(actions *agentreplv1.CreateWorkspaceMergeActions) wsm.MergeActions {
-	out := wsm.MergeActions{}
-	if actions == nil {
-		return out
-	}
-	if before := actions.GetBeforeWsMerge(); before != nil {
-		out.Before = append(out.Before, s.saidText(s.log, "merge_actions.before_ws_merge", before))
-	}
-	if after := actions.GetPostprocessingPrompt(); after != nil {
-		out.After = append(out.After, s.saidText(s.log, "merge_actions.postprocessing_prompt", after))
-	}
-	return out
+// deployHooksOf renders a request's own deploy hooks, which the request's
+// validation held to the config's rules (validateDeployHooks).
+func deployHooksOf(hooks *agentreplv1.CreateWorkspaceDeployHooks) wsm.DeployHooks {
+	return wsm.DeployHooks{PreDeploy: hooks.GetPreDeploy(), PostDeploy: hooks.GetPostDeploy()}
 }
 
 // priorityOf renders a wire priority as the registry's.
@@ -717,56 +704,49 @@ func (s *server) ForgetWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
-// MergeWorkspace enqueues a merge that runs in the requesting workspace. Its
-// life from there is that workspace's merge bubble.
-func (s *server) MergeWorkspace(
+// finishRenames spells the queue's refusals as FinishWorkspace's own arms.
+var finishRenames = map[string]string{
+	merge.ArmAlreadyMerging: "already_deploying",
+}
+
+// FinishWorkspace enqueues the deploy of a finished workspace's own branch,
+// which runs in that workspace by its repository's deploy config. Its life
+// from there is that workspace's bubble.
+func (s *server) FinishWorkspace(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.MergeWorkspaceRequest],
-) (*connect.Response[agentreplv1.MergeWorkspaceResponse], error) {
-	const rpc = "MergeWorkspace"
-	if err := validateMergeWorkspaceRequest(req.Msg); err != nil {
+	req *connect.Request[agentreplv1.FinishWorkspaceRequest],
+) (*connect.Response[agentreplv1.FinishWorkspaceResponse], error) {
+	const rpc = "FinishWorkspace"
+	if err := validateFinishWorkspaceRequest(req.Msg); err != nil {
 		return nil, err
 	}
-	resp := &agentreplv1.MergeWorkspaceResponse{}
+	resp := &agentreplv1.FinishWorkspaceResponse{}
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
 	}
-	request, err := mergeRequest(subject.Record.ID, req.Msg)
-	if err != nil {
-		return nil, fail(subject.Log, rpc, err)
-	}
-	if _, err := s.deps.Merge.Enqueue(ctx, request); err != nil {
-		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	if _, err := s.deps.Merge.Enqueue(ctx, finishRequest(subject.Record.ID, req.Msg)); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, finishRenames))
 	}
 	// The verb moved the session's standing or the composer's gate; the host
 	// view is recomposed from what the change left behind.
 	s.PublishHostWorkspace(ctx, subject.Record.ID)
-	resp.Result = &agentreplv1.MergeWorkspaceResponse_Success{
-		Success: &agentreplv1.MergeWorkspaceSuccess{},
+	resp.Result = &agentreplv1.FinishWorkspaceResponse_Success{
+		Success: &agentreplv1.FinishWorkspaceSuccess{},
 	}
 	return connect.NewResponse(resp), nil
 }
 
-// mergeRequest reads the request into the orchestrator's request: the
+// finishRequest reads the request into the orchestrator's request: the
 // workspace's own branch, in place, asked by the requester and placed as the
-// request says. A one-shot's own branch closes it once it lands; a branch
-// already merged upstream only updates the default branch.
-func mergeRequest(ws ids.WorkspaceID, req *agentreplv1.MergeWorkspaceRequest) (merge.Request, error) {
+// request says. It closes the workspace once its deploy succeeds.
+func finishRequest(ws ids.WorkspaceID, req *agentreplv1.FinishWorkspaceRequest) merge.Request {
 	out := merge.Request{Workspace: ws}
 	out.By, out.Asker = askerOf(req.GetRequester())
-	switch req.GetOneShot().GetLanding().(type) {
-	case *agentreplv1.MergeWorkspaceOneShot_OwnBranch:
-		out.Source = wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}
-	case *agentreplv1.MergeWorkspaceOneShot_MergedUpstream:
-		out.Source = wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}
-	default:
-		// validateMergeWorkspaceRequest refused an unset arm before this.
-		return merge.Request{}, fmt.Errorf("server: MergeWorkspace landing arm %T is unknown", req.GetOneShot().GetLanding())
-	}
+	out.Source = wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}
 	out.Source.Front = req.GetPlacement().GetFront() != nil
 	out.Source.Version = versionIncrement(req.GetVersionIncrement())
-	return out, nil
+	return out
 }
 
 // askerOf is who asked, as the merge queue reads it: the user, or a

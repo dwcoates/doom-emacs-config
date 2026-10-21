@@ -95,12 +95,9 @@ func (r *run) enqueuedLine(name string) (*frontendv1.FooterStatusActivityMergeSt
 }
 
 // promptLine is a configured prompt's line: the prompt's text itself.
-func promptLine(step footer.MergeStep, text string) *frontendv1.FooterStatusActivityMergeStep {
-	prompt := &frontendv1.FooterMergeStepPrompt{Text: firstLine(text)}
-	if step == footer.StepPostprocessing {
-		return &frontendv1.FooterStatusActivityMergeStep{Step: &frontendv1.FooterStatusActivityMergeStep_Postprocessing{Postprocessing: prompt}}
-	}
-	return &frontendv1.FooterStatusActivityMergeStep{Step: &frontendv1.FooterStatusActivityMergeStep_Preprocessing{Preprocessing: prompt}}
+func promptLine(kind string, text string) *frontendv1.FooterStatusActivityMergeStep {
+	return hookLine(stageNamed(kind), &frontendv1.FooterMergeStepHook{Hook: &frontendv1.FooterMergeStepHook_Prompt{
+		Prompt: &frontendv1.FooterMergeStepPrompt{Text: firstLine(text)}}})
 }
 
 // rebaseCommandLine is the rebase's line while a commit is replayed: the
@@ -150,19 +147,6 @@ func fixingLine(suites []string) *frontendv1.FooterStatusActivityMergeStep {
 func committingLine(subject string) *frontendv1.FooterStatusActivityMergeStep {
 	return &frontendv1.FooterStatusActivityMergeStep{Step: &frontendv1.FooterStatusActivityMergeStep_Committing{
 		Committing: &frontendv1.FooterMergeStepCommitting{Subject: subject}}}
-}
-
-// fetchingLine and fastForwardingLine are updating main's lines.
-func fetchingLine() *frontendv1.FooterStatusActivityMergeStep {
-	return &frontendv1.FooterStatusActivityMergeStep{Step: &frontendv1.FooterStatusActivityMergeStep_UpdatingMain{
-		UpdatingMain: &frontendv1.FooterMergeStepUpdatingMain{Step: &frontendv1.FooterMergeStepUpdatingMain_Fetching{
-			Fetching: &frontendv1.FooterMergeStepUpdatingMainFetching{}}}}}
-}
-
-func fastForwardingLine(commit string) *frontendv1.FooterStatusActivityMergeStep {
-	return &frontendv1.FooterStatusActivityMergeStep{Step: &frontendv1.FooterStatusActivityMergeStep_UpdatingMain{
-		UpdatingMain: &frontendv1.FooterMergeStepUpdatingMain{Step: &frontendv1.FooterMergeStepUpdatingMain_FastForwarding{
-			FastForwarding: &frontendv1.FooterMergeStepUpdatingMainFastForwarding{Commit: commit}}}}}
 }
 
 // commitLine names one replayed commit the way the narration does.
