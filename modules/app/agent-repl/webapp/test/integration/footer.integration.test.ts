@@ -402,16 +402,17 @@ describe("the activity cell", () => {
     expect(harness.text(".footer-activity")).toContain("PreToolUse");
   });
 
-  it("colors the commit updating main fast-forwards to as a typed datum", async () => {
+  it("draws the running deploy hook's script under the deploying step", async () => {
     // Arrange / Act
     await withFooter({
       status: "merging",
-      substatus: "updatingMain",
+      substatus: "deploying",
       activity: "mergeStep",
-      activityOverride: { step: { case: "updatingMain", value: MERGE_STEP_LINES.updatingMain.value } },
+      activityOverride: { step: { case: "deploying", value: MERGE_STEP_LINES.deploying.value } },
     });
     // Assert
-    expect(harness.$(".footer-activity [data-datum='sha']")?.textContent).toBe("4f2a1c9");
+    expect(harness.text(".footer-activity")).toContain("bin/deploy-landing.sh");
+    expect(harness.text(".footer-substatus")).toBe("deploying");
   });
 
   it("colors a conflict's file count as a typed datum", async () => {
