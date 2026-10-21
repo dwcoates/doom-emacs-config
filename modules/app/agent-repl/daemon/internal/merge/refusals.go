@@ -85,8 +85,8 @@ const (
 	// (CreateWorkspaceError.async_merge_unknown_branch).
 	ArmUnknownBranch = "async_merge_unknown_branch"
 	// ArmNameTaken refuses an async request whose merge workspace name is
-	// already a workspace, a branch, or another pending async merge's
-	// reservation (CreateWorkspaceError.async_merge_name_taken). Its `branch`
+	// already a workspace, a branch, an occupied worktree directory, or another
+	// pending async merge's reservation (CreateWorkspaceError.async_merge_name_taken). Its `branch`
 	// field names the branch the name resolves to.
 	ArmNameTaken = "async_merge_name_taken"
 	// ArmNoBranchCheckedOut refuses a merge of a workspace's own branch whose

@@ -112,7 +112,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 			return Enqueued{}, err
 		}
 		if taken {
-			refusal := refuse(ArmNameTaken, ws, "the async merge's name %q resolves to %s, which is already a workspace, a branch or another merge's reservation", req.Detached.Name, branch)
+			refusal := refuse(ArmNameTaken, ws, "the async merge's name %q resolves to %s, which is already a workspace, a branch, an occupied worktree directory or another merge's reservation", req.Detached.Name, branch)
 			refusal.Fields = map[string]any{"branch": branch}
 			log.Warn(op, "refused an async merge whose name is taken", withField(fields, "error", refusal.Error()))
 			return Enqueued{}, refusal

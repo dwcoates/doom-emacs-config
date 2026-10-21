@@ -337,7 +337,8 @@ type Names interface {
 	// RELEASE is called: no other name allocation hands it out meanwhile. The
 	// caller releases once the request carrying the name is recorded (which
 	// reserves it durably) or refused. A name that is already a workspace, a
-	// branch, a reservation or a claim answers TAKEN with no claim.
+	// branch, an occupied worktree directory, a reservation or a claim answers
+	// TAKEN with no claim.
 	ClaimMergeName(ctx context.Context, repoDir, name string) (branch string, release func(), taken bool, err error)
 }
 

@@ -2,7 +2,10 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"strings"
 	"sync"
 
@@ -16,7 +19,8 @@ import (
 //
 // A name is taken when it is a registered workspace's, a branch of the
 // repository, a standing async request's reservation (durable, on its queue
-// row), or CLAIMED in this process: a create holds a claim on the name it
+// row), an occupied worktree directory (worktreeOccupied), or CLAIMED in this
+// process: a create holds a claim on the name it
 // chose from the moment it chose it until it is registered or failed, and an
 // async request holds one from its check until its reservation is written.
 // Choosing and claiming happen under one lock, so two allocations can never
@@ -105,6 +109,46 @@ func (v *verbs) ClaimMergeName(ctx context.Context, repoDir, name string) (strin
 		log.Info(opNaming, "an async merge's name is already a branch", fields)
 		return branch, nil, true, nil
 	}
+	main, err := v.deps.Git.MainWorktree(ctx, repoDir)
+	if err != nil {
+		log.Error(opNaming, "could not resolve the repository the async merge's worktree would be cut in", dlog.WithCause(fields, err))
+		return "", nil, false, fmt.Errorf("resolve the main worktree of %q: %w", repoDir, err)
+	}
+	occupied, dir, err := worktreeOccupied(main, branch)
+	if err != nil {
+		log.Error(opNaming, "could not ask whether the async merge's worktree directory is free", dlog.WithCause(fields, err))
+		return "", nil, false, err
+	}
+	if occupied {
+		log.Info(opNaming, "an async merge's name is already an occupied worktree directory", dlog.Merge(fields, dlog.Context{"worktree_dir": dir}))
+		return branch, nil, true, nil
+	}
 	log.Debug(opNaming, "claimed an async merge's name until its request is recorded", fields)
 	return branch, v.claimLocked(branch), false, nil
+}
+
+// worktreeOccupied answers whether the directory BRANCH's worktree would be
+// materialized at in the repository REPODIR names (WorktreeDir, the same
+// derivation Create materializes by) is already on disk, and that directory.
+//
+// A DIRECTORY IS A NAME TOO. The directory is the branch's BARE component, so
+// "fix/outage-recovery" and "outage-recovery" are two branches with one
+// directory: an async merge named after a branch whose worktree still stood
+// passed every branch check, was recorded, and then failed `git worktree add`
+// at the fork after the requesting turn had ended (2026-10-20). Asked when the
+// name is chosen, the name is refused, or passed over, before anything is
+// recorded.
+func worktreeOccupied(repoDir, branch string) (bool, string, error) {
+	dir, err := WorktreeDir(repoDir, branch)
+	if err != nil {
+		return false, "", fmt.Errorf("derive the worktree directory of %q: %w", branch, err)
+	}
+	switch _, err := os.Lstat(dir); {
+	case err == nil:
+		return true, dir, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return false, dir, nil
+	default:
+		return false, dir, fmt.Errorf("stat the worktree directory %q: %w", dir, err)
+	}
 }

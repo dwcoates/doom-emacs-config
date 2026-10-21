@@ -251,6 +251,15 @@ func (v *verbs) freeName(ctx context.Context, log dlog.Logger, repoDir, branch s
 		if exists {
 			continue
 		}
+		// So is a directory: another branch's worktree under the same bare
+		// name stands where this one would be materialized (worktreeOccupied).
+		occupied, _, err := worktreeOccupied(repoDir, candidate)
+		if err != nil {
+			return "", nil, err
+		}
+		if occupied {
+			continue
+		}
 		if suffix > 1 {
 			log.Info(opNaming, "the minted workspace name collided and was disambiguated", dlog.Context{
 				"minted": branch, "chosen": candidate, "suffix": suffix,
