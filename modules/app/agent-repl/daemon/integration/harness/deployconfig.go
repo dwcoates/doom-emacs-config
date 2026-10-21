@@ -63,13 +63,13 @@ func (r *Repo) RemoveDeployConfig() {
 func (r *Repo) DeploysAsAgentRepl() {
 	r.t.Helper()
 	r.WriteDeployConfig(AgentReplDeploy)
-	writeExecutable(r.t, filepath.Join(r.Dir, DeployLandingScript), deployLandingScript(r.t))
+	writeExecutable(r.t, filepath.Join(r.Dir, DeployLandingScript), deployLandingScript(DaemonBinary(r.t)))
 }
 
-// deployLandingScript is the fixture's deploy hook body.
-func deployLandingScript(t testing.TB) string {
-	t.Helper()
-	cli := shellword.Quote(DaemonBinary(t))
+// deployLandingScript is the fixture's deploy hook body, calling the daemon
+// binary at BINARY.
+func deployLandingScript(binary string) string {
+	cli := shellword.Quote(binary)
 	return `#!/bin/sh
 set -eu
 if [ -n "${AGENT_REPL_DEPLOY_LEDGER:-}" ]; then

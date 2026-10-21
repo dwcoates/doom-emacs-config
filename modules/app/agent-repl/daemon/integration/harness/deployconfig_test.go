@@ -24,12 +24,12 @@ func TestAFixtureRepositoryDeploysItsHooksAlone(t *testing.T) {
 	}
 }
 
-func TestDeploysAsAgentReplStatesAgentReplsPipeline(t *testing.T) {
+func TestAgentReplDeployStatesAgentReplsPipeline(t *testing.T) {
 	// Arrange
 	repo := NewRepo(t)
 
 	// Act
-	repo.DeploysAsAgentRepl()
+	repo.WriteDeployConfig(AgentReplDeploy)
 
 	// Assert
 	cfg, err := deployconfig.OnDisk{}.Load(repo.Dir)
@@ -40,14 +40,31 @@ func TestDeploysAsAgentReplStatesAgentReplsPipeline(t *testing.T) {
 		cfg.GetDeploy().GetHook().GetScript().GetPath() != DeployLandingScript {
 		t.Fatalf("config = %v, want a tagged local merge and the deploy script for main", cfg)
 	}
-	script := filepath.Join(repo.Dir, DeployLandingScript)
-	info, err := os.Stat(script)
-	if err != nil || info.Mode()&0o111 == 0 {
-		t.Fatalf("the deploy script %s = %v, %v; want an executable", script, info, err)
+}
+
+func TestTheDeployLandingScriptCallsTheDaemonWithItsDeploy(t *testing.T) {
+	// Act
+	body := deployLandingScript("/built/agent-repld")
+
+	// Assert
+	for _, want := range []string{"'/built/agent-repld' runtime roll-out-landing -deploy \"$AGENT_REPL_DEPLOY_LEDGER\"", "'/built/agent-repld' runtime roll-out-landing\n"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the deploy script reads %q, want %q", body, want)
+		}
 	}
-	body, err := os.ReadFile(script)
-	if err != nil || !strings.Contains(string(body), DaemonBinary(t)) || !strings.Contains(string(body), "runtime roll-out-landing -deploy \"$AGENT_REPL_DEPLOY_LEDGER\"") {
-		t.Fatalf("the deploy script reads %q, want the daemon's roll-out-landing with the ledger", body)
+}
+
+func TestWriteExecutableWritesAnExecutable(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "bin", "hook.sh")
+
+	// Act
+	writeExecutable(t, path, "#!/bin/sh\n")
+
+	// Assert
+	info, err := os.Stat(path)
+	if err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("stat = %v, %v; want an executable", info, err)
 	}
 }
 
