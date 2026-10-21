@@ -16,6 +16,7 @@ import {
   type SubfeedView,
 } from "../../src/feed/renderers.js";
 import {
+  faultEndingRow,
   feedId,
   harness,
   mergeTabRow,
@@ -406,6 +407,51 @@ describe("arrangeSubfeedRows tabbed grouping", () => {
     arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
     // Assert
     expect(host.querySelectorAll(".feed-group-tab")).toHaveLength(2);
+  });
+
+  it("stacks consecutive vendor-fault endings of DIFFERENT turns into one group", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [faultEndingRow("a", "t1"), faultEndingRow("b", "t2"), faultEndingRow("c", "t3")];
+    // Act
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
+    // Assert
+    expect(host.children).toHaveLength(1);
+    expect(host.querySelectorAll(".feed-group-tab")).toHaveLength(3);
+  });
+
+  it("leaves a lone vendor-fault ending ungrouped", () => {
+    // Arrange
+    const host = document.createElement("div");
+    // Act
+    arrangeSubfeedRows(host, viewOf([faultEndingRow("a", "t1")]), createToolGroupStore(createTicker()));
+    // Assert
+    expect(host.querySelector(".feed-group")).toBeNull();
+  });
+
+  it("breaks a vendor-fault stack on an agent-repl fault ending between two", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [
+      faultEndingRow("a", "t1"),
+      faultEndingRow("b", "t2", "agentReplFault"),
+      faultEndingRow("c", "t3"),
+    ];
+    // Act
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
+    // Assert
+    expect(host.querySelector(".feed-group")).toBeNull();
+    expect(host.children).toHaveLength(3);
+  });
+
+  it("breaks a vendor-fault stack on a user prompt between two", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [faultEndingRow("a", "t1"), userPromptRow("p", "again"), faultEndingRow("c", "t2")];
+    // Act
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()));
+    // Assert
+    expect(host.querySelector(".feed-group")).toBeNull();
   });
 
   it("groups a run of subagent bubbles into tabs", () => {

@@ -15,7 +15,9 @@ import {
   groupGlyph,
   groupKey,
   groupKindOf,
+  groupSpansTurns,
   memberClockOf,
+  VENDOR_FAULT_KIND,
   type GroupMember,
 } from "../../src/feed/tool-group.js";
 import { FEED_TABLINE_CLASS, FEED_TABLINE_CLOCK_CLASS } from "../../src/feed/tabs.js";
@@ -23,10 +25,12 @@ import { runningClock, stoppedClock } from "./cards/tool-card-head-shape.js";
 import { countingTicker, tablineShape } from "./harness.js";
 import type { FeedToolCardClock } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
+  faultEndingRow,
   feedId,
   responseRow,
   subagentRow,
   toolCallRow,
+  turnEndedRow,
   userPromptRow,
 } from "./harness.js";
 import { fireResize } from "../resize-observer.js";
@@ -90,6 +94,22 @@ describe("groupKindOf", () => {
 
   it("does not group a response bubble", () => {
     expect(groupKindOf(responseRow("a"))).toBeNull();
+  });
+
+  it("keys a turn's vendor-fault ending as the vendor-fault kind", () => {
+    expect(groupKindOf(faultEndingRow("a", "t1"))).toBe(VENDOR_FAULT_KIND);
+  });
+
+  it("does not group an agent-repl fault ending", () => {
+    expect(groupKindOf(faultEndingRow("a", "t1", "agentReplFault"))).toBeNull();
+  });
+
+  it("does not group a concluded turn ending", () => {
+    expect(groupKindOf(turnEndedRow("a", "t1"))).toBeNull();
+  });
+
+  it("does not group an interrupted turn ending", () => {
+    expect(groupKindOf(turnEndedRow("a", "t1", "interrupted"))).toBeNull();
   });
 
   it("does not group a user prompt", () => {
@@ -537,5 +557,39 @@ describe("the tabline's clock", () => {
     const match = pattern.exec(stylesheet);
     // Assert
     expect(match?.[1]).toMatch(/(^|[;\s])display\s*:\s*none\s*;/);
+  });
+});
+
+describe("groupSpansTurns", () => {
+  it("lets a run of vendor-fault endings span turns", () => {
+    expect(groupSpansTurns(VENDOR_FAULT_KIND)).toBe(true);
+  });
+
+  it("keeps a run of tool cards inside one turn", () => {
+    expect(groupSpansTurns("tool:Bash")).toBe(false);
+  });
+});
+
+describe("the vendor-fault group", () => {
+  it("tabs with the vendor-fault marker's diamond glyph", () => {
+    expect(groupGlyph(VENDOR_FAULT_KIND)).toBe("◆");
+  });
+
+  it("lets a stacked ending's row fill the panel rather than take its own cap", () => {
+    // Arrange
+    const pattern = /\.feed-group-panel > \.feed-item > \.turn-ended\s*\{([^}]*)\}/;
+    // Act
+    const match = pattern.exec(stylesheet);
+    // Assert
+    expect(match?.[1]).toMatch(/(^|[;\s])width\s*:\s*auto\s*;/);
+  });
+
+  it("grows a stacked ending's card by the tabline, as a tool card member's", () => {
+    // Arrange
+    const pattern = /\.feed-group-panel > \.feed-item > \.turn-ended > \.tool-card\s*\{([^}]*)\}/;
+    // Act
+    const match = pattern.exec(stylesheet);
+    // Assert
+    expect(match?.[1]).toContain("var(--feed-group-tabline-h)");
   });
 });
