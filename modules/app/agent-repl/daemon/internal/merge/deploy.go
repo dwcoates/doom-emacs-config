@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"sync"
 	"time"
@@ -425,17 +426,21 @@ func (r *run) runScriptHook(ctx context.Context, stage stageOf, i int, script *r
 	}
 	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "stage": stage.kind, "hook": i,
 		"script": script.GetPath(), "repo_root": r.target.repoRoot, "log": view.logPath, "timeout_seconds": script.GetTimeoutSeconds()}
-	logFile, err := createLog(view.logPath)
+	logFile, err := r.o.openHookLog(view.logPath)
 	if err != nil {
 		r.o.log(ctx, r.ws).Error(op, "could not open the script hook's log; the hook fails", withField(fields, "error", err.Error()))
 		return r.settleScript(ctx, round, view, fmt.Sprintf("its %s script %s could not keep a log: %v", stageWords(stage.kind), script.GetPath(), err)), nil
 	}
-	defer logFile.Close()
+	// A LOG THAT CANNOT BE KEPT FAILS THE HOOK once the script ends: its tab
+	// names the log, so a log cut short would be a promise the tab breaks.
 	var mu sync.Mutex
+	var writeErr error
 	onLine := func(line string) {
 		mu.Lock()
 		defer mu.Unlock()
-		fmt.Fprintln(logFile, line)
+		if writeErr == nil {
+			_, writeErr = io.WriteString(logFile, line+"\n")
+		}
 		view.tail = append(view.tail, line)
 		if len(view.tail) > scriptTailLines {
 			view.tail = view.tail[len(view.tail)-scriptTailLines:]
@@ -447,6 +452,12 @@ func (r *run) runScriptHook(ctx context.Context, stage stageOf, i int, script *r
 	r.o.log(ctx, r.ws).Info(op, "a script hook started", fields)
 	run, err := r.o.deps.HookRunner.RunLinesWith(ctx, r.target.repoRoot, argv,
 		scriptrunner.Options{Env: env, Timeout: time.Duration(script.GetTimeoutSeconds()) * time.Second}, onLine)
+	mu.Lock()
+	defer mu.Unlock()
+	logErr := errors.Join(writeErr, logFile.Close())
+	if logErr != nil {
+		r.o.log(ctx, r.ws).Error(op, "could not keep the script hook's log; the hook fails", withField(fields, "error", logErr.Error()))
+	}
 	if err != nil {
 		if r.exiting() {
 			return "", err
@@ -454,8 +465,6 @@ func (r *run) runScriptHook(ctx context.Context, stage stageOf, i int, script *r
 		r.o.log(ctx, r.ws).Error(op, "a script hook could not be run; the deploy fails", withField(fields, "error", err.Error()))
 		return r.settleScript(ctx, round, view, fmt.Sprintf("its %s script %s could not be run: %v", stageWords(stage.kind), script.GetPath(), err)), nil
 	}
-	mu.Lock()
-	defer mu.Unlock()
 	fields["wall_ms"] = run.Wall.Milliseconds()
 	switch {
 	case run.TimedOut:
@@ -471,6 +480,9 @@ func (r *run) runScriptHook(ctx context.Context, stage stageOf, i int, script *r
 	}
 	view.exit = &frontendv1.FeedMergeHookScriptExit{How: &frontendv1.FeedMergeHookScriptExit_Exited{
 		Exited: &frontendv1.FeedMergeHookScriptExited{Status: 0}}}
+	if logErr != nil {
+		return r.settleScript(ctx, round, view, fmt.Sprintf("its %s script %s could not keep a log: %v", stageWords(stage.kind), script.GetPath(), logErr)), nil
+	}
 	r.o.log(ctx, r.ws).Info(op, "a script hook succeeded", fields)
 	r.upsert(round, hookScriptTab(round.settled(r.o.nowMS(), ""), view))
 	r.closeTab(ctx, round, "succeeded")

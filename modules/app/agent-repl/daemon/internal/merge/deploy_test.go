@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -156,6 +157,47 @@ func TestAFailedScriptHookFailsTheDeploy(t *testing.T) {
 			record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: "daemon.merge.hook", Message: tt.wantMessage})
 			if !ok || record.Context["script"] != checkScript || record.Context["stage"] != TabPreDeploy {
 				t.Fatalf("daemon.merge.hook record = %+v (found %v), want %q naming the script and stage", record, ok, tt.wantMessage)
+			}
+		})
+	}
+}
+
+// brokenLog is a hook log whose every write fails.
+type brokenLog struct{}
+
+func (brokenLog) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+func (brokenLog) Close() error              { return nil }
+
+func TestAScriptHookWhoseLogCannotBeKeptFailsTheDeploy(t *testing.T) {
+	tests := []struct {
+		name string
+		open func(string) (io.WriteCloser, error)
+		want string
+	}{
+		{name: "a log that cannot be opened", open: func(string) (io.WriteCloser, error) { return nil, errors.New("no space") },
+			want: "its pre-deploy script bin/check.sh could not keep a log: no space"},
+		{name: "a log that cannot be written", open: func(string) (io.WriteCloser, error) { return brokenLog{}, nil },
+			want: "its pre-deploy script bin/check.sh could not keep a log: disk full"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.hooksOnly(anyTarget(scriptHookOf(checkScript)))
+			h.hooks.lines = map[string][]string{h.scriptAt(checkScript): {"working"}}
+			h.o.openHookLog = tt.open
+			enqueue(t, h)
+
+			// Act
+			_ = h.admit(context.Background())
+
+			// Assert
+			facts, _ := h.o.Facts(theWorkspace)
+			if facts.State != StateFailed || !strings.Contains(facts.Detail, tt.want) {
+				t.Fatalf("the deploy is %q reading %q, want failed reading %q", facts.State, facts.Detail, tt.want)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.merge.hook"}); !ok {
+				t.Fatalf("no ERROR daemon.merge.hook record: %+v", h.logs.Records())
 			}
 		})
 	}

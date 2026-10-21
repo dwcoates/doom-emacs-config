@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -72,6 +73,9 @@ const holderMerge = "merge"
 // orchestrator is the merge queue's one implementation.
 type orchestrator struct {
 	deps Deps
+	// openHookLog creates a script hook's log: createLog, which a test
+	// replaces to exercise a log that cannot be kept.
+	openHookLog func(path string) (io.WriteCloser, error)
 	// lockDir is where the per-repo queue locks live. It is under the state
 	// root so a test's state root isolates its locks with everything else.
 	lockDir string
@@ -293,6 +297,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 	}
 	o := &orchestrator{
 		deps:               deps,
+		openHookLog:        func(path string) (io.WriteCloser, error) { return createLog(path) },
 		lockDir:            filepath.Join(deps.StateDir, "merge-locks"),
 		facts:              map[ids.WorkspaceID]MergeFacts{},
 		running:            map[wsm.RepoKey]*run{},
