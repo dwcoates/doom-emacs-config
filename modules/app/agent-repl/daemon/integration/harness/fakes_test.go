@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agent-repld/internal/sourcescan"
 )
 
 // runRecorder runs the fake with args and answers its exit status.
@@ -164,25 +166,12 @@ func TestWriteExecutableWritesAnExecutable(t *testing.T) {
 // TestEveryHarnessExecutableIsWrittenThroughWriteExecutable pins that no
 // harness source writes an executable by hand.
 func TestEveryHarnessExecutableIsWrittenThroughWriteExecutable(t *testing.T) {
-	// Arrange
-	paths, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var byHand []string
-
 	// Act
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for i, line := range strings.Split(string(raw), "\n") {
+	var byHand []string
+	for _, f := range sourcescan.Production(t) {
+		for i, line := range strings.Split(string(f.Source), "\n") {
 			if strings.Contains(line, "os.WriteFile(") && strings.Contains(line, "0o755") {
-				byHand = append(byHand, fmt.Sprintf("%s:%d", path, i+1))
+				byHand = append(byHand, fmt.Sprintf("%s:%d", f.Name, i+1))
 			}
 		}
 	}

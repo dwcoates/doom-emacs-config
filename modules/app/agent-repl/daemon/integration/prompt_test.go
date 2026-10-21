@@ -211,6 +211,10 @@ func TestAPromptBeginningWithStopTakesTheFastPathToInterjectAndInterruptsTheRunn
 	f.shim.ExpectStartTurn()
 	footer := f.d.WatchFooter(f.ws)
 	holds := f.d.WatchHolds(f.ws)
+	// THE KILL IS HELD until the footer has been read: answered at once, it
+	// ended the turn within milliseconds, and a footer view read on a loaded
+	// host was already past the interrupting state.
+	f.shim.Hang()
 
 	// Act
 	resp2 := f.submit("stop and rebase instead", "k-stop", origin)
@@ -220,6 +224,7 @@ func TestAPromptBeginningWithStopTakesTheFastPathToInterjectAndInterruptsTheRunn
 	awaitFooter(t, f, footer, "waiting.interrupting the moment the interrupt registers", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetWaiting().GetInterrupting() != nil
 	})
+	f.shim.Unhang()
 	killReq := f.shim.ExpectKillTurn()
 	_ = killReq
 	tray := awaitView(t, f, holds, "the interject verdict", func(tray *frontendv1.FeedHeld) bool {
