@@ -655,6 +655,17 @@ describe("the salient kinds", () => {
     );
   });
 
+  it("draws agent-repl's retry being made as retrying now", () => {
+    const cell = salientCell(
+      "retrying",
+      { attempt: 2, status: "overloaded", now: true },
+      "working",
+    );
+    expect(cell.querySelector(".footer-activity-retrying")?.textContent).toBe(
+      "attempt 2 · retrying now · overloaded",
+    );
+  });
+
   it("re-reads the next-attempt countdown on the shared tick", () => {
     const cell = salientCell(
       "retrying",
