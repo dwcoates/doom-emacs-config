@@ -145,7 +145,7 @@ func TestFreeNameSkipsAReservedName(t *testing.T) {
 	f.db.reserved = map[string]ids.WorkspaceID{"ABC/fix": "ws-other"}
 
 	// Act
-	branch, release, err := f.verbs.(*verbs).freeName(context.Background(), f.log.logger, t.TempDir(), "ABC/fix")
+	branch, release, err := f.verbs.(*verbs).freeName(context.Background(), f.log.logger, claimRepo(t, f), "ABC/fix")
 
 	// Assert
 	if err != nil || branch != "ABC/fix-2" {
@@ -157,7 +157,7 @@ func TestFreeNameSkipsAReservedName(t *testing.T) {
 func TestFreeNameClaimsTheNameItChoseUntilReleased(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	dir := t.TempDir()
+	dir := claimRepo(t, f)
 
 	// Act
 	first, release, err := f.verbs.(*verbs).freeName(context.Background(), f.log.logger, dir, "ABC/fix")
@@ -169,6 +169,39 @@ func TestFreeNameClaimsTheNameItChoseUntilReleased(t *testing.T) {
 	}
 	release()
 	releaseSecond()
+}
+
+func TestFreeNameSkipsAnOccupiedWorktreeDirectory(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	repo := claimRepo(t, f)
+	occupied := filepath.Join(filepath.Dir(repo), filepath.Base(repo)+WorktreeDirSuffix, "fix")
+	if err := os.MkdirAll(occupied, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Act
+	branch, release, err := f.verbs.(*verbs).freeName(context.Background(), f.log.logger, repo, "ABC/fix")
+
+	// Assert
+	if err != nil || branch != "ABC/fix-2" {
+		t.Fatalf("freeName = %q, %v; want the occupied directory skipped", branch, err)
+	}
+	release()
+}
+
+func TestFreeNameFailsWhenTheWorktreeDirectoryCannotBeDerived(t *testing.T) {
+	// Arrange: a directory with no .git, whose worktree directory has no
+	// parent to derive.
+	f := newFixture(t)
+
+	// Act
+	_, release, err := f.verbs.(*verbs).freeName(context.Background(), f.log.logger, t.TempDir(), "ABC/fix")
+
+	// Assert
+	if err == nil || release != nil {
+		t.Fatalf("freeName = %v with a claim, want the failure and no claim", err)
+	}
 }
 
 func TestCreateRefusesASuppliedNameAnAsyncMergeReserved(t *testing.T) {
