@@ -205,41 +205,51 @@ release_build_lock() {
   BUILD_LOCK_HELD=""
 }
 
-# acquire_build_lock — block until this host's sandbox build lock is ours.
+# claim_host_lock DIR NAME HOLDER WHY — block until the host-wide lock DIR is
+# this process's, then return. NAME is the lock as the log names it ("build
+# lock"), HOLDER who a live holder is ("another sandbox build"), and WHY the
+# line that says what the lock is for. The caller records DIR as held and
+# installs the trap that releases it.
 #
 # The order is what makes the takeover safe: the pid is read from a lock that
 # EXISTS, so nobody can be claiming it at that moment (a claim is `mkdir`,
 # which fails on an existing name); only then is the directory moved aside. A
 # lock therefore becomes claimable only by ceasing to exist, never by being
 # emptied under a live holder.
-acquire_build_lock() {
-  local waited=0 announced=0 pid
-  mkdir -p "$(dirname "$BUILD_LOCK_DIR")"
+claim_host_lock() {
+  local dir=$1 name=$2 holder=$3 why=$4 waited=0 announced=0 pid
+  mkdir -p "$(dirname "$dir")"
   while true; do
-    if mkdir "$BUILD_LOCK_DIR" 2>/dev/null; then
-      BUILD_LOCK_HELD=$BUILD_LOCK_DIR
-      printf '%s\n' "$$" > "$BUILD_LOCK_DIR/pid"
-      trap release_build_lock EXIT INT TERM
-      (( waited > 0 )) && log "build lock acquired after ${waited}s"
+    if mkdir "$dir" 2>/dev/null; then
+      printf '%s\n' "$$" > "$dir/pid"
+      (( waited > 0 )) && log "$name acquired after ${waited}s"
       return 0
     fi
-    pid=$(cat "$BUILD_LOCK_DIR/pid" 2>/dev/null || echo "")
+    pid=$(cat "$dir/pid" 2>/dev/null || echo "")
     if [[ -n $pid ]] && ! kill -0 "$pid" 2>/dev/null; then
-      log "reclaiming the build lock from dead pid $pid"
-      mv "$BUILD_LOCK_DIR" "$BUILD_LOCK_DIR.dead.$$" 2>/dev/null && rm -rf "$BUILD_LOCK_DIR.dead.$$"
+      log "reclaiming the $name from dead pid $pid"
+      mv "$dir" "$dir.dead.$$" 2>/dev/null && rm -rf "$dir.dead.$$"
       continue
     fi
     if (( announced == 0 )); then
-      log "WAITING: another sandbox build holds the host build lock${pid:+ (pid $pid)}."
-      log "  This is the build gate, not a hang: $BUILD_LOCK_DIR is the lock."
-      log "  Concurrent builds thrash one buildkit cache."
+      log "WAITING: $holder holds the host $name${pid:+ (pid $pid)}."
+      log "  This is the ${name% lock} gate, not a hang: $dir is the lock."
+      log "  $why"
       announced=1
     elif (( waited % 30 == 0 )); then
-      log "still waiting for the sandbox build lock (${waited}s)"
+      log "still waiting for the sandbox $name (${waited}s)"
     fi
     sleep 2
     waited=$(( waited + 2 ))
   done
+}
+
+# acquire_build_lock — block until this host's sandbox build lock is ours.
+acquire_build_lock() {
+  claim_host_lock "$BUILD_LOCK_DIR" "build lock" "another sandbox build" \
+    "Concurrent builds thrash one buildkit cache."
+  BUILD_LOCK_HELD=$BUILD_LOCK_DIR
+  trap release_build_lock EXIT INT TERM
 }
 
 # require_fresh_image RUNTIME — refuse to RUN an image that is not this
