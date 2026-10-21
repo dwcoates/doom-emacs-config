@@ -607,10 +607,6 @@ func (r *run) admit(ctx context.Context) error {
 	o, ws := r.o, r.ws
 	log := o.log(ctx, ws)
 	o.register(r)
-	// THE MERGE BEHIND A HEAD JOINS AT ONCE (race.go): it races the head from
-	// master's tip, so it waits on none of the head's steps.
-	o.extendChain(context.WithoutCancel(ctx), r.repo)
-
 	subject, err := o.resolveSubject(ctx, r)
 	if err != nil {
 		r.end(ctx, fmt.Errorf("could not resolve what the merge lands: %w", err))
@@ -623,6 +619,11 @@ func (r *run) admit(ctx context.Context) error {
 		r.end(ctx, err)
 		return err
 	}
+	// THE MERGE BEHIND A HEAD JOINS AS SOON AS THE HEAD KNOWS ITS DEPLOY
+	// (race.go): it races the head from master's tip, so it waits on none of
+	// the head's steps, but whether the queue races at all is the deploy
+	// config the head just read (racesIn).
+	o.extendChain(context.WithoutCancel(ctx), r.repo)
 	if err := o.deps.DB.OpenMergeLedger(ctx, ws, r.lease.ID); err != nil {
 		r.end(ctx, fmt.Errorf("could not open the merge ledger: %w", err))
 		return err
@@ -715,7 +716,9 @@ func (r *run) takeSession(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("could not read the repository's deploy config: %w", err)
 	}
+	r.mu.Lock()
 	r.target = target
+	r.mu.Unlock()
 	release, ok, err := r.o.deps.Occupy(r.ws, holderMerge)
 	if err != nil {
 		return fmt.Errorf("could not take the session's occupancy: %w", err)

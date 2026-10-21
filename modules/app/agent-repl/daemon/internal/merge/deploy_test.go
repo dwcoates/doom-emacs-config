@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -210,33 +211,46 @@ func TestAHeldRepositorySkipsTheDeployHookAndCountsTheSkip(t *testing.T) {
 
 func TestOnlyALocalMergeRaces(t *testing.T) {
 	tests := []struct {
-		name   string
-		config func(h *harness)
-		want   bool
+		name string
+		cfg  *repoconfigv1.DeployConfig
+		want bool
 	}{
-		{name: "a local merge", config: func(h *harness) { h.emacsRepo() }, want: true},
-		{name: "hooks alone", config: func(h *harness) { h.hooksOnly(anyTarget(scriptHookOf(checkScript))) }},
-		{name: "a config that cannot be read", config: func(h *harness) {
-			h.mu.Lock()
-			h.configErr = &deployconfig.InvalidError{Path: "deploy.yaml", Detail: "x"}
-			h.mu.Unlock()
-		}},
+		{name: "a local merge", cfg: localMergeConfig(), want: true},
+		{name: "hooks alone", cfg: &repoconfigv1.DeployConfig{PreDeploy: &repoconfigv1.DeployPreDeployStage{}}},
+		{name: "a head that has not read its config yet"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
-			tt.config(h)
-			head := &run{ws: theWorkspace, subject: subject{targetDir: h.targetD}}
+			head := &run{ws: theWorkspace, target: deployTarget{cfg: tt.cfg}}
 
 			// Act
-			got := h.o.racesIn(context.Background(), h.repoKey(), head)
+			got := h.o.racesIn(h.repoKey(), head)
 
 			// Assert
 			if got != tt.want {
 				t.Fatalf("racesIn = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAHeadExtendsItsChainOnlyOnceItKnowsItsDeploy(t *testing.T) {
+	// Arrange: the admission's own chain extension is the one that follows
+	// the head's session; a sourcescan finds it after takeSession.
+	src, err := os.ReadFile("run.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	admit := body[strings.Index(body, "func (r *run) admit("):]
+	admit = admit[:strings.Index(admit, "\n}\n")]
+
+	// Assert
+	take, extend := strings.Index(admit, "r.takeSession(ctx)"), strings.Index(admit, "o.extendChain(")
+	if take < 0 || extend < 0 || extend < take {
+		t.Fatalf("admit extends its chain at %d and takes its session at %d; want the extension after the session", extend, take)
 	}
 }
 

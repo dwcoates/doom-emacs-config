@@ -157,20 +157,19 @@ func racable(entry wsm.MergeQueueEntry) bool {
 }
 
 // racesIn reports whether the deploy config HEAD runs by has a local merge,
-// the one deploy whose queue races. It reads the config afresh through the
-// running head, the one member of the queue certain to be a live workspace
-// with a resolved target. A config that cannot be read does not race, which
-// is the queue running its head alone: the head's own deploy reports the
-// config's fault when it next reads it.
-func (o *orchestrator) racesIn(ctx context.Context, repo wsm.RepoKey, head *run) bool {
-	const op = "daemon.merge.chain"
-	target, err := o.deployTargetFor(ctx, head.ws, head.subject.targetDir)
-	if err != nil {
-		o.deps.Log.Global().Debug(op, "the repository's deploy config cannot be read; the queue does not race", dlog.Context{
-			"repo": string(repo), "head": string(head.ws), "cause": err.Error()})
-		return false
+// the one deploy whose queue races. It is the config the head read when it
+// took its session, so the queue races by the very deploy at its front; a head
+// that has not read it yet does not race, and extends the chain itself once it
+// has (run.admit).
+func (o *orchestrator) racesIn(repo wsm.RepoKey, head *run) bool {
+	head.mu.Lock()
+	resolved, local := head.target.cfg != nil, head.target.localMerge() != nil
+	head.mu.Unlock()
+	if !resolved {
+		o.deps.Log.Global().Debug("daemon.merge.chain", "the queue's head has not read its deploy config yet; the queue does not race until it has", dlog.Context{
+			"repo": string(repo), "head": string(head.ws)})
 	}
-	return target.localMerge() != nil
+	return local
 }
 
 // extendOnce makes at most one chain start, and reports whether it started a
@@ -201,7 +200,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	o.mu.Unlock()
 	// ONLY A LOCAL MERGE RACES: a speculative run rebases and tests ahead of
 	// its turn, which is the local merge's work and no other deploy's.
-	if head == nil || !o.racesIn(ctx, repo, head) {
+	if head == nil || !o.racesIn(repo, head) {
 		return false
 	}
 	o.mu.Lock()
