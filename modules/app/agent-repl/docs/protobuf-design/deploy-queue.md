@@ -244,3 +244,11 @@ origin) is the next repository to be described this way, and is deferred.
   which the webapp refuses as malformed.
 - **Verification.** `TestTheMigrationRewritesStoredRetiredPromptTabs` and the
   `rewriteRetiredMergeTab` tests in `daemon/internal/wsm/deployhooks_test.go`.
+
+### 9. The one-shot mark's `policy_missing` refusal is retired
+
+- **What.** `SetWorkspaceOneShotError.policy_missing` (tag 7) is removed.
+- **Why.** It refused a mark whose repository's policy lacked a completion
+  directive; the directive is now the daemon's own (principle 1), so the
+  refusal cannot arise. A daemon corpus without it is the daemon's fault,
+  answered as an internal error.

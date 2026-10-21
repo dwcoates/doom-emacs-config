@@ -248,7 +248,6 @@ type SetWorkspaceOneShotError struct {
 	//	*SetWorkspaceOneShotError_NoCreationJob
 	//	*SetWorkspaceOneShotError_OwnerLands
 	//	*SetWorkspaceOneShotError_RequesterMayNotSet
-	//	*SetWorkspaceOneShotError_PolicyMissing
 	Cause         isSetWorkspaceOneShotError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -345,15 +344,6 @@ func (x *SetWorkspaceOneShotError) GetRequesterMayNotSet() *SetWorkspaceOneShotR
 	return nil
 }
 
-func (x *SetWorkspaceOneShotError) GetPolicyMissing() *SetWorkspaceOneShotPolicyMissing {
-	if x != nil {
-		if x, ok := x.Cause.(*SetWorkspaceOneShotError_PolicyMissing); ok {
-			return x.PolicyMissing
-		}
-	}
-	return nil
-}
-
 type isSetWorkspaceOneShotError_Cause interface {
 	isSetWorkspaceOneShotError_Cause()
 }
@@ -389,13 +379,6 @@ type SetWorkspaceOneShotError_RequesterMayNotSet struct {
 	RequesterMayNotSet *SetWorkspaceOneShotRequesterMayNotSet `protobuf:"bytes,6,opt,name=requester_may_not_set,json=requesterMayNotSet,proto3,oneof"`
 }
 
-type SetWorkspaceOneShotError_PolicyMissing struct {
-	// The repository's one-shot policy lacks its completion directive, so a
-	// marked workspace could not be told what to do when done. Nothing was
-	// changed.
-	PolicyMissing *SetWorkspaceOneShotPolicyMissing `protobuf:"bytes,7,opt,name=policy_missing,json=policyMissing,proto3,oneof"`
-}
-
 func (*SetWorkspaceOneShotError_UnknownWorkspace) isSetWorkspaceOneShotError_Cause() {}
 
 func (*SetWorkspaceOneShotError_WorkspaceRefMismatch) isSetWorkspaceOneShotError_Cause() {}
@@ -407,8 +390,6 @@ func (*SetWorkspaceOneShotError_NoCreationJob) isSetWorkspaceOneShotError_Cause(
 func (*SetWorkspaceOneShotError_OwnerLands) isSetWorkspaceOneShotError_Cause() {}
 
 func (*SetWorkspaceOneShotError_RequesterMayNotSet) isSetWorkspaceOneShotError_Cause() {}
-
-func (*SetWorkspaceOneShotError_PolicyMissing) isSetWorkspaceOneShotError_Cause() {}
 
 type SetWorkspaceOneShotUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -644,51 +625,6 @@ func (*SetWorkspaceOneShotRequesterMayNotSet) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescGZIP(), []int{9}
 }
 
-type SetWorkspaceOneShotPolicyMissing struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The directory the policy was read from.
-	PolicyDir     string `protobuf:"bytes,1,opt,name=policy_dir,json=policyDir,proto3" json:"policy_dir,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetWorkspaceOneShotPolicyMissing) Reset() {
-	*x = SetWorkspaceOneShotPolicyMissing{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetWorkspaceOneShotPolicyMissing) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetWorkspaceOneShotPolicyMissing) ProtoMessage() {}
-
-func (x *SetWorkspaceOneShotPolicyMissing) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetWorkspaceOneShotPolicyMissing.ProtoReflect.Descriptor instead.
-func (*SetWorkspaceOneShotPolicyMissing) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *SetWorkspaceOneShotPolicyMissing) GetPolicyDir() string {
-	if x != nil {
-		return x.PolicyDir
-	}
-	return ""
-}
-
 var File_agentrepl_v1_endpoint_set_workspace_one_shot_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDesc = "" +
@@ -704,7 +640,7 @@ const file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDesc = "" +
 	"\x06result\"m\n" +
 	"\x1aSetWorkspaceOneShotSuccess\x126\n" +
 	"\x14completion_directive\x18\x01 \x01(\tH\x00R\x13completionDirective\x88\x01\x01B\x17\n" +
-	"\x15_completion_directive\"\xa4\x05\n" +
+	"\x15_completion_directive\"\xe1\x04\n" +
 	"\x18SetWorkspaceOneShotError\x12`\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v21.agentrepl.v1.SetWorkspaceOneShotUnknownWorkspaceH\x00R\x10unknownWorkspace\x12m\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v25.agentrepl.v1.SetWorkspaceOneShotWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12A\n" +
@@ -712,9 +648,8 @@ const file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDesc = "" +
 	"\x0fno_creation_job\x18\x04 \x01(\v2..agentrepl.v1.SetWorkspaceOneShotNoCreationJobH\x00R\rnoCreationJob\x12N\n" +
 	"\vowner_lands\x18\x05 \x01(\v2+.agentrepl.v1.SetWorkspaceOneShotOwnerLandsH\x00R\n" +
 	"ownerLands\x12h\n" +
-	"\x15requester_may_not_set\x18\x06 \x01(\v23.agentrepl.v1.SetWorkspaceOneShotRequesterMayNotSetH\x00R\x12requesterMayNotSet\x12W\n" +
-	"\x0epolicy_missing\x18\a \x01(\v2..agentrepl.v1.SetWorkspaceOneShotPolicyMissingH\x00R\rpolicyMissingB\a\n" +
-	"\x05cause\"%\n" +
+	"\x15requester_may_not_set\x18\x06 \x01(\v23.agentrepl.v1.SetWorkspaceOneShotRequesterMayNotSetH\x00R\x12requesterMayNotSetB\a\n" +
+	"\x05causeJ\x04\b\a\x10\bR\x0epolicy_missing\"%\n" +
 	"#SetWorkspaceOneShotUnknownWorkspace\"L\n" +
 	"'SetWorkspaceOneShotWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"\x1b\n" +
@@ -722,10 +657,7 @@ const file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDesc = "" +
 	" SetWorkspaceOneShotNoCreationJob\"Q\n" +
 	"\x1dSetWorkspaceOneShotOwnerLands\x120\n" +
 	"\x05owner\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x05owner\"'\n" +
-	"%SetWorkspaceOneShotRequesterMayNotSet\"A\n" +
-	" SetWorkspaceOneShotPolicyMissing\x12\x1d\n" +
-	"\n" +
-	"policy_dir\x18\x01 \x01(\tR\tpolicyDirB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"%SetWorkspaceOneShotRequesterMayNotSetB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescOnce sync.Once
@@ -739,7 +671,7 @@ func file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescGZIP() []byt
 	return file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_goTypes = []any{
 	(*SetWorkspaceOneShotRequest)(nil),              // 0: agentrepl.v1.SetWorkspaceOneShotRequest
 	(*SetWorkspaceOneShotResponse)(nil),             // 1: agentrepl.v1.SetWorkspaceOneShotResponse
@@ -751,13 +683,12 @@ var file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_goTypes = []any{
 	(*SetWorkspaceOneShotNoCreationJob)(nil),        // 7: agentrepl.v1.SetWorkspaceOneShotNoCreationJob
 	(*SetWorkspaceOneShotOwnerLands)(nil),           // 8: agentrepl.v1.SetWorkspaceOneShotOwnerLands
 	(*SetWorkspaceOneShotRequesterMayNotSet)(nil),   // 9: agentrepl.v1.SetWorkspaceOneShotRequesterMayNotSet
-	(*SetWorkspaceOneShotPolicyMissing)(nil),        // 10: agentrepl.v1.SetWorkspaceOneShotPolicyMissing
-	(*v1.WorkspaceRef)(nil),                         // 11: workspace.v1.WorkspaceRef
-	(*WorkspaceRequester)(nil),                      // 12: agentrepl.v1.WorkspaceRequester
+	(*v1.WorkspaceRef)(nil),                         // 10: workspace.v1.WorkspaceRef
+	(*WorkspaceRequester)(nil),                      // 11: agentrepl.v1.WorkspaceRequester
 }
 var file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_depIdxs = []int32{
-	11, // 0: agentrepl.v1.SetWorkspaceOneShotRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	12, // 1: agentrepl.v1.SetWorkspaceOneShotRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
+	10, // 0: agentrepl.v1.SetWorkspaceOneShotRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	11, // 1: agentrepl.v1.SetWorkspaceOneShotRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
 	2,  // 2: agentrepl.v1.SetWorkspaceOneShotResponse.success:type_name -> agentrepl.v1.SetWorkspaceOneShotSuccess
 	3,  // 3: agentrepl.v1.SetWorkspaceOneShotResponse.error:type_name -> agentrepl.v1.SetWorkspaceOneShotError
 	4,  // 4: agentrepl.v1.SetWorkspaceOneShotError.unknown_workspace:type_name -> agentrepl.v1.SetWorkspaceOneShotUnknownWorkspace
@@ -766,13 +697,12 @@ var file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_depIdxs = []int32{
 	7,  // 7: agentrepl.v1.SetWorkspaceOneShotError.no_creation_job:type_name -> agentrepl.v1.SetWorkspaceOneShotNoCreationJob
 	8,  // 8: agentrepl.v1.SetWorkspaceOneShotError.owner_lands:type_name -> agentrepl.v1.SetWorkspaceOneShotOwnerLands
 	9,  // 9: agentrepl.v1.SetWorkspaceOneShotError.requester_may_not_set:type_name -> agentrepl.v1.SetWorkspaceOneShotRequesterMayNotSet
-	10, // 10: agentrepl.v1.SetWorkspaceOneShotError.policy_missing:type_name -> agentrepl.v1.SetWorkspaceOneShotPolicyMissing
-	11, // 11: agentrepl.v1.SetWorkspaceOneShotOwnerLands.owner:type_name -> workspace.v1.WorkspaceRef
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	10, // 10: agentrepl.v1.SetWorkspaceOneShotOwnerLands.owner:type_name -> workspace.v1.WorkspaceRef
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_init() }
@@ -793,7 +723,6 @@ func file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_init() {
 		(*SetWorkspaceOneShotError_NoCreationJob)(nil),
 		(*SetWorkspaceOneShotError_OwnerLands)(nil),
 		(*SetWorkspaceOneShotError_RequesterMayNotSet)(nil),
-		(*SetWorkspaceOneShotError_PolicyMissing)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -801,7 +730,7 @@ func file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDesc), len(file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
