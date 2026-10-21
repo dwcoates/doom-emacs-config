@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -698,6 +699,47 @@ func TestAnswerColdGateStandsTheGateAgainWhenTheReopenFailed(t *testing.T) {
 	}
 }
 
+// A START THAT OUTRAN ITS BOUND IS A FAILED RE-OPEN, NOT A STAND-DOWN
+// (2026-10-20: the paid re-open's StartSession deadline was read as the daemon
+// standing down, and the workspace was left with no gate and no session).
+func TestAnswerColdGateTellsAReopenDeadlineFromAStandDown(t *testing.T) {
+	stoodDown, stand := context.WithCancel(context.Background())
+	stand()
+	tests := []struct {
+		name         string
+		runCtx       context.Context
+		wantFault    bool
+		wantReraised bool
+	}{
+		{name: "a deadline while the daemon serves fails the re-open", runCtx: nil, wantFault: true, wantReraised: true},
+		{name: "a deadline as the daemon stands down is no fault", runCtx: stoodDown, wantFault: false, wantReraised: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			standingGate(f)
+			f.fleet.resumeErr = fmt.Errorf("start session for %q: %w", "w1", context.DeadlineExceeded)
+			f.fleet.resumeRunCtx = tc.runCtx
+
+			// Act.
+			err := f.verbs.AnswerColdGate(context.Background(), "w1", payAnswer())
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("AnswerColdGate = %v, want the answer accepted", err)
+			}
+			if got := len(f.health.opened) == 1; got != tc.wantFault {
+				t.Fatalf("faults opened = %d, want a fault %t", len(f.health.opened), tc.wantFault)
+			}
+			if got := len(f.cards.reraised) == 1; got != tc.wantReraised {
+				t.Fatalf("gates stood again = %v, want the gate stood again %t", f.cards.reraised, tc.wantReraised)
+			}
+		})
+	}
+}
+
 func TestAnswerColdGateRetiresTheGateRowAtOnce(t *testing.T) {
 	// Arrange: the re-open is held, so the answer's own effects are read
 	// before it runs.
@@ -753,11 +795,15 @@ func TestAnswerColdGateStatesAGateThatCouldNotStandAgain(t *testing.T) {
 }
 
 func TestAnswerColdGateFilesNoFaultWhenTheDaemonStandsDown(t *testing.T) {
-	// Arrange: the re-open is abandoned by this daemon's own exit.
+	// Arrange: the re-open is abandoned by this daemon's own exit, which ends
+	// the context the re-open runs under.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	standingGate(f)
 	f.fleet.resumeErr = context.Canceled
+	stoodDown, stand := context.WithCancel(context.Background())
+	stand()
+	f.fleet.resumeRunCtx = stoodDown
 	answer := clearAnswer()
 
 	// Act.
