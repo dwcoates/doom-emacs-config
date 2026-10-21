@@ -9,7 +9,7 @@
 // still exactly the change, only drawn without its shared lines.
 package linediff
 
-import "strings"
+import "agent-repld/internal/textline"
 
 // Kind says what one diffed line is.
 type Kind int
@@ -32,18 +32,9 @@ type Line struct {
 // MaxCells bounds the match table (old lines x new lines).
 const MaxCells = 4_000_000
 
-// Lines splits text into its lines. A final newline ends the last line rather
-// than opening an empty one, and the empty text has no lines.
-func Lines(text string) []string {
-	if text == "" {
-		return nil
-	}
-	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-}
-
 // Diff diffs oldText against newText.
 func Diff(oldText, newText string) []Line {
-	a, b := Lines(oldText), Lines(newText)
+	a, b := textline.Lines(oldText), textline.Lines(newText)
 	prefix := 0
 	for prefix < len(a) && prefix < len(b) && a[prefix] == b[prefix] {
 		prefix++

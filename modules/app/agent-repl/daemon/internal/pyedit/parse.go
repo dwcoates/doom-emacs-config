@@ -1,6 +1,9 @@
 package pyedit
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // The python subset's syntax tree. It is WIDER than what the interpreter
 // accepts (any call, any attribute, any subscript), so that a program is first
@@ -307,7 +310,7 @@ func (p *parser) importStatement() (stmt, error) {
 				return nil, err
 			}
 			name := module
-			if i := indexByte(module, '.'); i >= 0 {
+			if i := strings.IndexByte(module, '.'); i >= 0 {
 				name = module[:i]
 			}
 			if p.isName("as") {
@@ -368,15 +371,6 @@ func (p *parser) importStatement() (stmt, error) {
 		}
 	}
 	return s, nil
-}
-
-func indexByte(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
 }
 
 func (p *parser) dotted() (string, error) {

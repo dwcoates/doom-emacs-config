@@ -10,30 +10,6 @@ func ctx(text string) Line { return Line{Kind: Context, Text: text} }
 func del(text string) Line { return Line{Kind: Removed, Text: text} }
 func add(text string) Line { return Line{Kind: Added, Text: text} }
 
-func TestLines(t *testing.T) {
-	tests := []struct {
-		name string
-		text string
-		want []string
-	}{
-		{name: "the empty text has no lines", text: "", want: nil},
-		{name: "a final newline ends the last line", text: "a\nb\n", want: []string{"a", "b"}},
-		{name: "an unterminated last line is still a line", text: "a\nb", want: []string{"a", "b"}},
-		{name: "a lone newline is one empty line", text: "\n", want: []string{""}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act.
-			got := Lines(tt.text)
-
-			// Assert.
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("Lines(%q) = %q, want %q", tt.text, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestDiff(t *testing.T) {
 	tests := []struct {
 		name     string

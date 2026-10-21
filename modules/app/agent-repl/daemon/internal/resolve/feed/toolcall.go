@@ -14,6 +14,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/textline"
 )
 
 // ② THE GREY TOOL-CALL BUBBLE. ONE shared shell — head, input line, output by
@@ -742,7 +743,7 @@ func grepForm(success *conversationv1.AgentGrepSuccess) returnedForm {
 	switch matches := success.GetMatches().(type) {
 	case *conversationv1.AgentGrepSuccess_Content:
 		content := matches.Content
-		out := &frontendv1.FeedToolCallLinesOutput{Lines: splitLines(content.GetContent())}
+		out := &frontendv1.FeedToolCallLinesOutput{Lines: textline.Lines(content.GetContent())}
 		if partial, ok := content.GetExtent().(*conversationv1.AgentGrepContent_Partial); ok {
 			out.Omitted = &frontendv1.FeedToolCallOmitted{
 				Text: formatOmittedExact(uint64(partial.Partial.GetLinesOmitted()), "lines"),
@@ -839,15 +840,6 @@ func linesForm(out *frontendv1.FeedToolCallLinesOutput) returnedForm {
 	return func(returned *frontendv1.FeedToolCallReturned) {
 		returned.Form = &frontendv1.FeedToolCallReturned_Lines{Lines: out}
 	}
-}
-
-// splitLines splits rendered search output into drawn lines without inventing
-// a trailing empty one.
-func splitLines(text string) []string {
-	if text == "" {
-		return nil
-	}
-	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 }
 
 // ---- BASH, in the FOREGROUND ----
