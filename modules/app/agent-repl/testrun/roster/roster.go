@@ -236,8 +236,8 @@ var Suites = []Suite{
 			// gitclient pins the markers the merge queue's hook spells.
 			"/.githooks/reference-transaction",
 			// deployconfig pins the repository's own deploy config to the
-			// pipeline its queue runs.
-			"/.agent-repl/",
+			// pipeline its queue runs, and to the scripts it names.
+			"/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh",
 			// The daemon half of every mocked-vendor scenario
 			// (integration/scenariogoldens_test.go) reads the shim's goldens
 			// and keeps its own feed.json beside them.

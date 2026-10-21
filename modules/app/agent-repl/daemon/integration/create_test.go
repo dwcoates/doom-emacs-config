@@ -222,10 +222,11 @@ func TestCreateWorkspaceForkMakesTheVendorsForkAndResumesIt(t *testing.T) {
 
 // ---- One-shot create ----
 
-func TestCreateWorkspaceOneShotCarriesTheRepositorysOwnDirective(t *testing.T) {
+func TestCreateWorkspaceOneShotCarriesTheDaemonsDirectiveNotTheRepositorys(t *testing.T) {
 	t.Parallel()
-	// Arrange: the repository states its own directive, and the daemon
-	// concatenates THAT text rather than anything of its own.
+	// Arrange: the repository states a directive of its own, which the daemon
+	// no longer reads: the completion directive is the daemon's, and what
+	// finishing does is the repository's deploy config.
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
 	directive := filepath.Join(repo.PolicyDir(), "oneshot-completion-directive.md")
@@ -254,8 +255,8 @@ func TestCreateWorkspaceOneShotCarriesTheRepositorysOwnDirective(t *testing.T) {
 	shim := d.Shim(ws)
 	shim.ExpectStartSession()
 	got := text(shim.ExpectStartTurn().GetSaid())
-	if !strings.Contains(got, "file a report in the ledger.") {
-		t.Fatalf("the one-shot's decorated prompt = %q, want the repository's own directive", got)
+	if strings.Contains(got, "file a report in the ledger.") || !strings.Contains(got, "agent-repld workspace finished here") {
+		t.Fatalf("the one-shot's decorated prompt = %q, want the daemon's directive alone", got)
 	}
 }
 
@@ -293,13 +294,13 @@ func TestCreateWorkspaceOneShotRefusesARepositoryThatStatesNoPolicy(t *testing.T
 	if missing.GetPolicyDir() != repo.PolicyDir() {
 		t.Fatalf("policy_dir = %q, want %q", missing.GetPolicyDir(), repo.PolicyDir())
 	}
-	want := []string{"workspace-autonomous-preamble.md", "oneshot-completion-directive.md"}
+	want := []string{"workspace-autonomous-preamble.md"}
 	if strings.Join(missing.GetMissingFiles(), ",") != strings.Join(want, ",") {
 		t.Fatalf("missing_files = %v, want %v", missing.GetMissingFiles(), want)
 	}
 }
 
-func TestCreateWorkspaceOneShotRefusesARepositoryMissingOnlyTheDirective(t *testing.T) {
+func TestCreateWorkspaceOneShotNeedsNoDirectiveOfTheRepositorys(t *testing.T) {
 	t.Parallel()
 	// Arrange: a policy that states the preamble and no completion directive.
 	d := newDaemon(t, harness.Opts{})
@@ -320,17 +321,14 @@ func TestCreateWorkspaceOneShotRefusesARepositoryMissingOnlyTheDirective(t *test
 		}},
 	}))
 
-	// Assert.
-	if err != nil {
-		t.Fatalf("CreateWorkspace(one_shot) = error %v, want a typed refusal", err)
+	// Assert: the one-shot is made, carrying the daemon's directive.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(one_shot) = (%v, %v), want a success", resp, err)
 	}
-	missing := resp.Msg.GetError().GetOneShotPolicyMissing()
-	if missing == nil {
-		t.Fatalf("CreateWorkspace(one_shot) = %v, want one_shot_policy_missing", resp.Msg)
-	}
-	got := missing.GetMissingFiles()
-	if len(got) != 1 || got[0] != "oneshot-completion-directive.md" {
-		t.Fatalf("missing_files = %v, want only the completion directive", got)
+	shim := d.Shim(resp.Msg.GetSuccess().GetWorkspace())
+	shim.ExpectStartSession()
+	if got := text(shim.ExpectStartTurn().GetSaid()); !strings.Contains(got, "agent-repld workspace finished here") {
+		t.Fatalf("the one-shot's decorated prompt = %q, want the daemon's directive", got)
 	}
 }
 

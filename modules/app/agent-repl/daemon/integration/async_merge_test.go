@@ -260,16 +260,17 @@ func mainCheckoutRequester(t *testing.T) *sourcedRepo {
 	return &sourcedRepo{d: d, repo: repo, script: script, f: f}
 }
 
-// mergeWorkspaceJob answers the merge workspace's own creation job: where it
-// lands and its before-merge actions, as stored.
-func mergeWorkspaceJob(t *testing.T, d *harness.Daemon, mergeWS *workspacev1.WorkspaceRef) (target, before string) {
+// mergeWorkspaceJob answers where the merge workspace's own creation job
+// lands, as stored.
+func mergeWorkspaceJob(t *testing.T, d *harness.Daemon, mergeWS *workspacev1.WorkspaceRef) string {
 	t.Helper()
+	var target string
 	d.WithDB(func(db *sql.DB) {
-		if err := db.QueryRow(`SELECT target_dir, actions_before FROM creation_jobs WHERE workspace_id = ?`, mergeWS.GetId()).Scan(&target, &before); err != nil {
+		if err := db.QueryRow(`SELECT target_dir FROM creation_jobs WHERE workspace_id = ?`, mergeWS.GetId()).Scan(&target); err != nil {
 			t.Fatalf("read the creation job of merge workspace %s: %v", mergeWS.GetId(), err)
 		}
 	})
-	return target, before
+	return target
 }
 
 // sameDir reports whether two spellings name one directory.
@@ -300,7 +301,7 @@ func TestAnAsyncMergeFromTheMainCheckoutLandsInItsMainWorktree(t *testing.T) {
 	if merge.GetActivity().GetMerge().GetSuccess() == nil {
 		t.Fatalf("the main checkout's async merge ended %v, want landed", merge.GetActivity().GetMerge().GetResult())
 	}
-	if target, _ := mergeWorkspaceJob(t, s.d, mergeWS); !sameDir(t, target, s.repo.Dir) {
+	if target := mergeWorkspaceJob(t, s.d, mergeWS); !sameDir(t, target, s.repo.Dir) {
 		t.Fatalf("the merge workspace lands in %q, want the main worktree %q", target, s.repo.Dir)
 	}
 }

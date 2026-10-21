@@ -493,7 +493,7 @@ func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 	// Arrange: register a workspace, then seed its merge geometry and an
 	// ADMITTED queue entry directly (raw SQL, daemon stopped): the boot's
 	// merge recovery reads both without going through the ordinary merge rpc
-	// flow, and CreationJob's own scan validates actions_before/actions_after
+	// flow, and CreationJob's own scan validates pre_deploy_hooks/post_deploy_hooks
 	// as JSON regardless of how the row was written.
 	f := newRegistered(t, harness.Opts{DurableState: true})
 	f.d.Stop()
@@ -503,7 +503,7 @@ func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 	f.d.WithDB(func(db *sql.DB) {
 		now := time.Now().UnixNano()
 		if _, err := db.Exec(
-			`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, actions_before, actions_after, base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at)
+			`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, pre_deploy_hooks, post_deploy_hooks, base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			f.ws.GetId(), "feature/x", f.repo.Dir, f.repo.Dir, "create", "[]", "[]", "main", 1, 0, "", "", now); err != nil {
 			t.Fatalf("seed a creation_jobs row: %v", err)
@@ -514,7 +514,7 @@ func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 			t.Fatalf("seed an admitted merge_queue row: %v", err)
 		}
 	})
-	f.d.CorruptRow("creation_jobs", "actions_before", "workspace_id", f.ws.GetId(), "not valid json")
+	f.d.CorruptRow("creation_jobs", "pre_deploy_hooks", "workspace_id", f.ws.GetId(), "not valid json")
 
 	// Act: restart on the same state root.
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectEarlyExit: true})

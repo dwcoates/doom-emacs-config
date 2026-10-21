@@ -515,7 +515,9 @@ func TestAHoldTakenBeforeARestartKeepsTheSuccessorsLandingFromDeploying(t *testi
 	d2, _ := heldLanding(t)
 
 	// Assert: the skipped deploy hook is recorded, and the deploy never built.
-	d2.AwaitLogRecord(d2.RunLogPath(), "the held deploy", func(r harness.LogRecord) bool {
+	// The deploy records the skip in its workspace's own log, which outlives
+	// the landed workspace's worktree in the state root.
+	d2.AwaitWorkspaceLogRecordInState("the held deploy", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.merge.deploy_stage" && r.Message == "the repository's deploy stage is held; the deploy hook is skipped"
 	})
 	if got := len(d2.Deploy.Invocations()); got != 0 {
