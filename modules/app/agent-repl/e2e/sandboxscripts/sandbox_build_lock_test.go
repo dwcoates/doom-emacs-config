@@ -65,7 +65,8 @@ func newFakeDocker(t *testing.T) *fakeDocker {
 set -u
 printf '%s\n' "$*" >> "` + f.logPath + `"
 case "${1:-}" in
-  info) exit 0 ;;
+  # info: the health probe, and info --format answers from the info file.
+  info) cat "` + f.dir + `/info" 2>/dev/null || true; exit 0 ;;
   version) printf 'arm64\n'; exit 0 ;;
   image)
     # image ls: the IDs in the images file, one "ID CREATED" line per image,

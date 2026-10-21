@@ -2,9 +2,11 @@ package sandboxscripts
 
 import (
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +62,42 @@ func TestTheBuildContextStagesOnlyPackagesElOfTheModule(t *testing.T) {
 	// Assert
 	if !slices.Equal(got, []string{"packages.el"}) {
 		t.Fatalf("module-loader-files = %q, want only packages.el", got)
+	}
+}
+
+// TestSlotBudgetIsOneWhenTheVMMemoryIsUnknown: a gate that could not read the
+// VM's memory opens to one container, never wide.
+func TestSlotBudgetIsOneWhenTheVMMemoryIsUnknown(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		memTotal string
+	}{
+		{name: "no answer", memTotal: ""},
+		{name: "a zero answer", memTotal: "0"},
+		{name: "a non-numeric answer", memTotal: "<no value>"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange
+			f := newFakeDocker(t)
+			if err := os.WriteFile(filepath.Join(f.dir, "info"), []byte(tc.memTotal+"\n"), 0o644); err != nil {
+				t.Fatalf("write info: %v", err)
+			}
+			cmd := exec.Command("bash", "-c", `set -euo pipefail; script=$1; . "$script"; slot_budget docker`, "bash", sandboxScript(t))
+			cmd.Env = sandboxEnv(f, filepath.Join(t.TempDir(), "build.lock"))
+
+			// Act
+			out, err := cmd.Output()
+
+			// Assert
+			if err != nil {
+				t.Fatalf("slot_budget = %v", err)
+			}
+			if got := strings.TrimSpace(string(out)); got != "1" {
+				t.Fatalf("slot_budget = %q, want 1", got)
+			}
+		})
 	}
 }

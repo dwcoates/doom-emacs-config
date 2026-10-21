@@ -669,7 +669,10 @@ slot_budget() {
   local rt=$1 total_bytes total_mb used_mb avail_mb n
 
   total_bytes=$("$rt" info --format '{{.MemTotal}}' 2>/dev/null || echo 0)
-  [[ $total_bytes =~ ^[0-9]+$ ]] && (( total_bytes > 0 )) || { printf '1\n'; return 0; }
+  if [[ ! $total_bytes =~ ^[0-9]+$ ]] || (( total_bytes == 0 )); then
+    printf '1\n'
+    return 0
+  fi
   total_mb=$(( total_bytes / 1024 / 1024 ))
 
   # What the currently running containers hold. `docker stats` reports
