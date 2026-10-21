@@ -64,17 +64,16 @@ stage_context() {
   cp "$here/entrypoint.sh" "$ctx/bin/"
   cp "$sandbox_dir/doom/"*.el "$ctx/doom/"
 
-  # The three files Doom's module loader resolves by exact path.
+  # ONLY packages.el, the one module file the build-time `doom sync` reads.
+  # Nothing else of the module may enter the context: the `doom sync --aot`
+  # layer is keyed by these bytes, and every layer after it (the node trees,
+  # the Go caches) is rebuilt whenever it is. Staging config.el, doctor.el and
+  # lisp/*.el here rebuilt all of that on every elisp edit, for files no
+  # container ever reads -- a run mounts a tmpfs over /sandbox/doom/modules and
+  # links the checkout's own module into it. packages.el is also a sandbox
+  # stamp input, so this layer changes exactly when the image's tag does.
   mkdir -p "$ctx/module-loader-files"
-  local f
-  for f in config.el packages.el doctor.el; do
-    cp "$repo_root/$MODULE_REL/$f" "$ctx/module-loader-files/"
-  done
-  # config.el `load!`s lisp/*, and doctor.el loads three of them; a bare
-  # `doom sync` only reads packages.el, but `doom doctor` and any elisp load
-  # need the sources, so stage them too.
-  mkdir -p "$ctx/module-loader-files/lisp"
-  cp "$repo_root/$MODULE_REL/lisp/"*.el "$ctx/module-loader-files/lisp/"
+  cp "$repo_root/$MODULE_REL/packages.el" "$ctx/module-loader-files/"
 
   # npm lockfiles, for the offline cache prime.
   mkdir -p "$ctx/npm-lockfiles/shim" "$ctx/npm-lockfiles/webapp"
@@ -205,41 +204,62 @@ release_build_lock() {
   BUILD_LOCK_HELD=""
 }
 
-# acquire_build_lock — block until this host's sandbox build lock is ours.
+# reclaim_dead_holder DIR WHAT — take over the pid-recorded lock directory DIR
+# when the process it records is gone: log it as WHAT ("the build lock",
+# "slot slot-1"), move DIR aside and remove it, and succeed. A DIR whose pid is
+# live, or not yet written (a claim in progress), is left alone and fails.
 #
-# The order is what makes the takeover safe: the pid is read from a lock that
-# EXISTS, so nobody can be claiming it at that moment (a claim is `mkdir`,
+# The order is what makes the takeover safe: the pid is read from a directory
+# that EXISTS, so nobody can be claiming it at that moment (a claim is `mkdir`,
 # which fails on an existing name); only then is the directory moved aside. A
 # lock therefore becomes claimable only by ceasing to exist, never by being
 # emptied under a live holder.
-acquire_build_lock() {
-  local waited=0 announced=0 pid
-  mkdir -p "$(dirname "$BUILD_LOCK_DIR")"
+reclaim_dead_holder() {
+  local dir=$1 what=$2 pid
+  pid=$(cat "$dir/pid" 2>/dev/null || echo "")
+  [[ -n $pid ]] || return 1
+  kill -0 "$pid" 2>/dev/null && return 1
+  log "reclaiming $what from dead pid $pid"
+  mv "$dir" "$dir.dead.$$" 2>/dev/null && rm -rf "$dir.dead.$$"
+  return 0
+}
+
+# claim_host_lock DIR NAME HOLDER WHY — block until the host-wide lock DIR is
+# this process's, then return. NAME is the lock as the log names it ("build
+# lock"), HOLDER who a live holder is ("another sandbox build"), and WHY the
+# line that says what the lock is for. The caller records DIR as held and
+# installs the trap that releases it. A dead holder's lock is taken over
+# (reclaim_dead_holder).
+claim_host_lock() {
+  local dir=$1 name=$2 holder=$3 why=$4 waited=0 announced=0 pid
+  mkdir -p "$(dirname "$dir")"
   while true; do
-    if mkdir "$BUILD_LOCK_DIR" 2>/dev/null; then
-      BUILD_LOCK_HELD=$BUILD_LOCK_DIR
-      printf '%s\n' "$$" > "$BUILD_LOCK_DIR/pid"
-      trap release_build_lock EXIT INT TERM
-      (( waited > 0 )) && log "build lock acquired after ${waited}s"
+    if mkdir "$dir" 2>/dev/null; then
+      printf '%s\n' "$$" > "$dir/pid"
+      (( waited > 0 )) && log "$name acquired after ${waited}s"
       return 0
     fi
-    pid=$(cat "$BUILD_LOCK_DIR/pid" 2>/dev/null || echo "")
-    if [[ -n $pid ]] && ! kill -0 "$pid" 2>/dev/null; then
-      log "reclaiming the build lock from dead pid $pid"
-      mv "$BUILD_LOCK_DIR" "$BUILD_LOCK_DIR.dead.$$" 2>/dev/null && rm -rf "$BUILD_LOCK_DIR.dead.$$"
-      continue
-    fi
+    reclaim_dead_holder "$dir" "the $name" && continue
+    pid=$(cat "$dir/pid" 2>/dev/null || echo "")
     if (( announced == 0 )); then
-      log "WAITING: another sandbox build holds the host build lock${pid:+ (pid $pid)}."
-      log "  This is the build gate, not a hang: $BUILD_LOCK_DIR is the lock."
-      log "  Concurrent builds thrash one buildkit cache."
+      log "WAITING: $holder holds the host $name${pid:+ (pid $pid)}."
+      log "  This is the ${name% lock} gate, not a hang: $dir is the lock."
+      log "  $why"
       announced=1
     elif (( waited % 30 == 0 )); then
-      log "still waiting for the sandbox build lock (${waited}s)"
+      log "still waiting for the sandbox $name (${waited}s)"
     fi
     sleep 2
     waited=$(( waited + 2 ))
   done
+}
+
+# acquire_build_lock — block until this host's sandbox build lock is ours.
+acquire_build_lock() {
+  claim_host_lock "$BUILD_LOCK_DIR" "build lock" "another sandbox build" \
+    "Concurrent builds thrash one buildkit cache."
+  BUILD_LOCK_HELD=$BUILD_LOCK_DIR
+  trap release_build_lock EXIT INT TERM
 }
 
 # require_fresh_image RUNTIME — refuse to RUN an image that is not this
@@ -268,6 +288,151 @@ require_fresh_image() {
   log "  Rebuild it:  e2e/sandbox/bin/e2e-sandbox.sh build"
   log "  Or set AGENT_REPL_SANDBOX_ALLOW_STALE=1 to use it anyway, deliberately."
   exit 3
+}
+
+# --- image retention -----------------------------------------------------
+#
+# WHY. Every sandbox stamp names its own image, and nothing ever removed one,
+# so the host kept every image any checkout or merge-queue gate ever built:
+# 226 GB on 2026-10-20, until the disk ran out and a hand prune also emptied
+# the build cache, which cost the next gate a 59-minute cold build. A
+# successful build now removes all but the newest AGENT_REPL_SANDBOX_KEEP_IMAGES
+# sandbox images.
+#
+# NO PRUNE CAN REMOVE AN IMAGE A RUN HAS CHOSEN, structurally: a run checks its
+# image and HOLDS it in one step under the host's image lock, the prune takes
+# the same lock while it decides and removes, and it never removes a held
+# image. The run starts its container from the held image ID, never the tag,
+# so it runs exactly what it checked. A hold is an empty file named
+# <pid>.<image id> in RUN_HOLD_DIR, read by its name alone, and one whose
+# process is gone is reaped by the next prune.
+
+IMAGE_LOCK_DIR=${AGENT_REPL_SANDBOX_IMAGE_LOCK_DIR:-/tmp/agent-repl-sandbox-image.lock}
+RUN_HOLD_DIR=${AGENT_REPL_SANDBOX_HOLD_DIR:-/tmp/agent-repl-sandbox-holds}
+
+# IMAGE_LOCK_HELD and RUN_HOLD are this process's image lock and hold, released
+# by the EXIT trap. Not `local`: the trap runs after the frame is gone.
+IMAGE_LOCK_HELD=""
+RUN_HOLD=""
+# HELD_IMAGE is the ID hold_image held, which the run's container starts from.
+HELD_IMAGE=""
+
+acquire_image_lock() {
+  claim_host_lock "$IMAGE_LOCK_DIR" "image lock" "a sandbox run or prune" \
+    "A prune must not remove an image a run is choosing."
+  IMAGE_LOCK_HELD=$IMAGE_LOCK_DIR
+}
+
+release_image_lock() {
+  [[ -n ${IMAGE_LOCK_HELD:-} ]] || return 0
+  rm -rf "$IMAGE_LOCK_HELD"
+  IMAGE_LOCK_HELD=""
+}
+
+drop_image_hold() {
+  [[ -n ${RUN_HOLD:-} ]] || return 0
+  rm -f "$RUN_HOLD"
+  RUN_HOLD=""
+}
+
+# image_id RUNTIME REF — the full ID of the image REF, without any `sha256:`
+# prefix, so a Docker and a Podman ID compare alike.
+image_id() {
+  local rt=$1 ref=$2 id
+  id=$("$rt" image inspect --format '{{.Id}}' "$ref") \
+    || die "cannot read the ID of the sandbox image '$ref'"
+  id=${id#sha256:}
+  [[ -n $id ]] || die "the runtime reported an empty ID for the sandbox image '$ref'"
+  printf '%s\n' "$id"
+}
+
+# hold_image RUNTIME — check this checkout's image (require_fresh_image) and hold
+# it, as one step under the image lock, then print its ID for the run to start.
+hold_image() {
+  local rt=$1 id
+  acquire_image_lock
+  require_fresh_image "$rt"
+  id=$(image_id "$rt" "$IMAGE")
+  mkdir -p "$RUN_HOLD_DIR"
+  RUN_HOLD="$RUN_HOLD_DIR/$$.$id"
+  : > "$RUN_HOLD"
+  release_image_lock
+  HELD_IMAGE=$id
+}
+
+# live_holds — the image IDs live runs hold, one per line, after
+# removing every hold whose process is gone. Called under the image lock. The
+# directory is read by perl's readdir: this script never expands a glob (see
+# sandbox-image.sh's sandbox_walk).
+live_holds() {
+  [[ -d $RUN_HOLD_DIR ]] || return 0
+  local names name pid
+  names=$(perl -e 'opendir(my $d, $ARGV[0]) or die "e2e-sandbox: cannot read $ARGV[0]: $!\n";
+                   print "$_\n" for sort grep { $_ ne "." && $_ ne ".." } readdir($d)' -- "$RUN_HOLD_DIR") \
+    || die "cannot read the image holds in $RUN_HOLD_DIR"
+  while IFS= read -r name; do
+    [[ -n $name ]] || continue
+    pid=${name%%.*}
+    if [[ $pid =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+      printf '%s\n' "${name#*.}"
+    else
+      log "reaping the image hold $name: its process is gone"
+      rm -f "$RUN_HOLD_DIR/$name"
+    fi
+  done <<<"$names"
+}
+
+# keep_images_count — AGENT_REPL_SANDBOX_KEEP_IMAGES, the number of newest
+# sandbox images a prune keeps; anything but a positive whole number is refused.
+keep_images_count() {
+  local n=${AGENT_REPL_SANDBOX_KEEP_IMAGES:-3}
+  [[ $n =~ ^[1-9][0-9]*$ ]] \
+    || die "AGENT_REPL_SANDBOX_KEEP_IMAGES must be a positive whole number of images, got '$n'"
+  printf '%s\n' "$n"
+}
+
+# prune_images RUNTIME BUILT_ID — remove every sandbox image but the newest
+# keep_images_count, the image just built (BUILT_ID), every image a live run
+# holds, and every image a container still references. Any removal the
+# runtime refuses fails the build loudly: the disk would fill again unseen.
+prune_images() {
+  local rt=$1 built=$2 keep holds ids listing id created n=0 removed=0 kept=0 users
+  keep=$(keep_images_count)
+  acquire_image_lock
+  holds=$(live_holds)
+  ids=$("$rt" image ls --no-trunc --filter "label=$SANDBOX_STAMP_LABEL" --format '{{.ID}}') \
+    || die "cannot list the sandbox images to prune"
+  ids=$(sort -u <<<"$ids")
+  [[ -n $ids ]] || die "no sandbox image is listed right after building '$IMAGE'"
+  # shellcheck disable=SC2086  # one ID per word
+  listing=$("$rt" image inspect --format '{{.Id}} {{.Created}}' $ids) \
+    || die "cannot read the build times of the sandbox images"
+  # Newest first: RFC 3339 UTC timestamps sort as text.
+  while read -r id created; do
+    id=${id#sha256:}
+    n=$(( n + 1 ))
+    if (( n <= keep )) || [[ $id == "$built" ]]; then
+      kept=$(( kept + 1 ))
+      continue
+    fi
+    if grep -qxF -- "$id" <<<"$holds"; then
+      log "keeping sandbox image ${id:0:12} (built $created): a live run holds it"
+      kept=$(( kept + 1 ))
+      continue
+    fi
+    users=$("$rt" ps -a -q --filter "ancestor=$id") \
+      || die "cannot list the containers of sandbox image ${id:0:12}"
+    if [[ -n $users ]]; then
+      log "keeping sandbox image ${id:0:12} (built $created): container(s) $(tr '\n' ' ' <<<"$users")still use it"
+      kept=$(( kept + 1 ))
+      continue
+    fi
+    log "removing sandbox image ${id:0:12} (built $created)"
+    "$rt" image rm "$id" >/dev/null || die "removing sandbox image ${id:0:12} FAILED"
+    removed=$(( removed + 1 ))
+  done < <(sort -k2,2r <<<"$listing")
+  release_image_lock
+  log "sandbox images: kept $kept, removed $removed (AGENT_REPL_SANDBOX_KEEP_IMAGES=$keep)"
 }
 
 do_build() {
@@ -325,10 +490,11 @@ do_build() {
   # replacing the real failure with a shell error. A file-scope name plus a
   # `:-` guard in the trap makes the cleanup correct on every path.
   CTX=$(mktemp -d)
-  # BOTH cleanups in one trap: `trap ... EXIT` REPLACES the handler, so a bare
+  # EVERY cleanup in one trap: `trap ... EXIT` REPLACES the handler, so a bare
   # context-cleanup trap here would silently discard the build lock's
-  # release_build_lock trap and leak the lock to every later build on this host.
-  trap 'rm -rf "${CTX:-}"; release_build_lock' EXIT INT TERM
+  # release_build_lock trap and leak the lock to every later build on this
+  # host. The image lock is the prune's, taken after the build.
+  trap 'rm -rf "${CTX:-}"; release_image_lock; release_build_lock' EXIT INT TERM
   local ctx=$CTX
   stage_context "$ctx"
 
@@ -359,6 +525,9 @@ do_build() {
   fi
   verify_image "$rt"
   log "built $IMAGE (sandbox stamp $stamp)"
+  local built
+  built=$(image_id "$rt" "$IMAGE")
+  prune_images "$rt" "$built"
 }
 
 # --- post-build verification ----------------------------------------------
@@ -511,7 +680,10 @@ slot_budget() {
   local rt=$1 total_bytes total_mb used_mb avail_mb n
 
   total_bytes=$("$rt" info --format '{{.MemTotal}}' 2>/dev/null || echo 0)
-  [[ $total_bytes =~ ^[0-9]+$ ]] && (( total_bytes > 0 )) || { printf '1\n'; return 0; }
+  if [[ ! $total_bytes =~ ^[0-9]+$ ]] || (( total_bytes == 0 )); then
+    printf '1\n'
+    return 0
+  fi
   total_mb=$(( total_bytes / 1024 / 1024 ))
 
   # What the currently running containers hold. `docker stats` reports
@@ -536,29 +708,14 @@ slot_budget() {
   printf '%s\n' "$n"
 }
 
-# reap_dead_slots frees slots whose holder is gone.
-#
-# The order is what makes it safe: the pid is read from a slot that EXISTS, so
-# no one else can be claiming it at that moment (a claim is `mkdir`, which
-# fails on an existing name); only then is the directory moved aside. A slot
-# therefore becomes claimable only by ceasing to exist, never by being emptied
-# while someone holds it.
+# reap_dead_slots frees slots whose holder is gone (reclaim_dead_holder). A
+# slot mid-claim (created, pid not yet written) is left alone: the claimer
+# writes the pid immediately, and reclaiming it here would race a live run.
 reap_dead_slots() {
-  local slot pid
+  local slot
   for slot in "$SLOT_DIR"/slot-*; do
     [[ -d $slot ]] || continue
-    pid=$(cat "$slot/pid" 2>/dev/null || echo "")
-    if [[ -z $pid ]]; then
-      # A slot mid-claim (created, pid not yet written). Leave it: the
-      # claimer writes the pid immediately, and reclaiming it here would
-      # race a live run.
-      continue
-    fi
-    if kill -0 "$pid" 2>/dev/null; then
-      continue
-    fi
-    log "reclaiming slot $(basename "$slot") from dead pid $pid"
-    mv "$slot" "$slot.dead.$$" 2>/dev/null && rm -rf "$slot.dead.$$"
+    reclaim_dead_holder "$slot" "slot $(basename "$slot")" || true
   done
 }
 
@@ -590,7 +747,6 @@ acquire_slot() {
       if mkdir "$SLOT_DIR/slot-$i" 2>/dev/null; then
         SANDBOX_SLOT="$SLOT_DIR/slot-$i"
         printf '%s\n' "$$" > "$SANDBOX_SLOT/pid"
-        trap release_slot EXIT
         (( waited > 0 )) && log "slot $i acquired after ${waited}s"
         return 0
       fi
@@ -797,6 +953,16 @@ remove_container() {
   SANDBOX_CONTAINER=""
 }
 
+# run_cleanup is a run's one EXIT trap, whatever it got as far as holding. The
+# container goes BEFORE the image hold, so the image is never unheld while a
+# container of this run still uses it.
+run_cleanup() {
+  remove_container
+  release_slot
+  drop_image_hold
+  release_image_lock
+}
+
 # --- run -------------------------------------------------------------------
 
 do_run() {
@@ -812,8 +978,10 @@ do_run() {
   rt=$(runtime) || die "no container runtime on PATH; run 'e2e-sandbox.sh preflight' for details"
 
   # BEFORE the preflight, the gate and the webapp build: an image that is not
-  # this checkout's sandbox is refused loudly, never silently used.
-  require_fresh_image "$rt"
+  # this checkout's sandbox is refused loudly, never silently used. Held from
+  # here on, so no build's prune can remove it before the container exists.
+  trap run_cleanup EXIT
+  hold_image "$rt"
 
   preflight >&2 || die "preflight failed; see the message above"
 
@@ -897,11 +1065,10 @@ do_run() {
   done
 
   # THE CONTAINER IS NAMED AND REMOVED HERE, never `--rm`: the failure
-  # artifacts are copied out of it after it exits, and the EXIT trap removes it
+  # artifacts are copied out of it after it exits, and run_cleanup removes it
   # (with its volume) however the run ends.
   SANDBOX_RT=$rt
   SANDBOX_CONTAINER="agent-repl-e2e-$$-$RANDOM"
-  trap 'release_slot; remove_container' EXIT
   args+=(--name "$SANDBOX_CONTAINER")
 
   # FAILURE ARTIFACTS LEAVE THROUGH THE API TOO. They are written to a volume
@@ -918,7 +1085,7 @@ do_run() {
   local module_src=$repo_root/$MODULE_REL status rc=0
   stage_check "$module_src"
   status=$(mktemp)
-  args+=("$IMAGE" "$@")
+  args+=("$HELD_IMAGE" "$@")
   log "running: $*"
   if (( shell )); then
     shell_session "$rt" "$module_src" "$status" "${args[@]}"
