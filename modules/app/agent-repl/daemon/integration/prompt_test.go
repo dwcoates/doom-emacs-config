@@ -762,7 +762,7 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 	// Act
 	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := f.d.Client().FinishWorkspace(f.d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 
 	// Assert: the held entry is unaffected. The read is a FRESH subscription
@@ -1670,7 +1670,7 @@ func TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRe
 		t.Fatalf("the displaced turn's StartTurn.said = %q, want %q", got, "keep going")
 	}
 	// No terminal frame is ever pushed for it: it is still the workspace's
-	// in-flight turn when MergeWorkspace is called below, which is exactly
+	// in-flight turn when FinishWorkspace is called below, which is exactly
 	// what CaptureDisplaced reads (sessionwatcher's TurnInFlight()).
 	beforeMerge := f.shim.Count(harness.RPCStartTurn)
 
@@ -1678,7 +1678,7 @@ func TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRe
 	// lands with no conflict and a passing gate.
 	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	// ExpectStartTurnWithCount BLOCKS for the next request, so this is the
 	// resubmission's own arrival -- not a race against the merge's teardown --

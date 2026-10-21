@@ -306,7 +306,7 @@ func TestAnAsyncMergeFromTheMainCheckoutLandsInItsMainWorktree(t *testing.T) {
 	}
 }
 
-func TestAnAsyncRequestsBeforeMergeActionRunsInItsMergeWorkspace(t *testing.T) {
+func TestAnAsyncRequestsPreDeployHookRunsInItsMergeWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	s := newSourcedRepo(t)

@@ -37,7 +37,7 @@ import (
 // Pre-state refusal
 // ---------------------------------------------------------------------------
 
-func TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused(t *testing.T) {
+func TestFinishWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange: a workspace registered directly, never created, so it carries
 	// no creation job.
@@ -51,10 +51,10 @@ func TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused(t *testing.T) {
 
 	// Assert
 	if err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want a success carrying the no_layout_facts arm", err)
+		t.Fatalf("FinishWorkspace = error %v, want a success carrying the no_layout_facts arm", err)
 	}
 	if resp.Msg.GetError().GetNoLayoutFacts() == nil {
-		t.Fatalf("MergeWorkspace = %v, want MergeWorkspaceError.no_layout_facts", resp.Msg)
+		t.Fatalf("FinishWorkspace = %v, want FinishWorkspaceError.no_layout_facts", resp.Msg)
 	}
 }
 
@@ -381,7 +381,7 @@ func TestALandedMergeIsSeenByEveryObserver(t *testing.T) {
 	// Act
 	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	mergeRow := awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
@@ -453,7 +453,7 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoDeploysOnce(t *testing.T) {
 
 	// Act
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
@@ -745,7 +745,7 @@ func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *tes
 	// Act: enqueue and answer the pre-prompt's own turn.
 	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	req := f.shim.ExpectStartTurn()
 	if req.GetOrigin() != mergeBeforeActionOrigin {
@@ -822,7 +822,7 @@ func TestAFailingPostDeployHookFailsTheDeployAndKeepsTheLanding(t *testing.T) {
 	// Act: land, then answer the post-prompt's turn with a FAILURE.
 	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	req := f.shim.ExpectStartTurn()
 	if req.GetOrigin() != mergeAfterActionOrigin {
@@ -974,7 +974,7 @@ func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv
 	f.shim.ExpectStartTurn()
 	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	d.AwaitFileExists(rendezvous)
 	d.Kill()
@@ -1080,7 +1080,7 @@ func TestTheTestsTabPaintsANSISpansFromTheScriptedOutput(t *testing.T) {
 
 	// Act
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	mergeRow := awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
@@ -1252,7 +1252,7 @@ func TestAMergeOverATurnWithDetachedWorkEndsOnlyTheTurnAndWaitsForTheWork(t *tes
 	// live subagent before the subagent settles.
 	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	killReq := f.shim.ExpectKillTurn()
 	d.AwaitLogRecord(workspaceLog, "the merge waiting for the workspace to fall free", func(r harness.LogRecord) bool {

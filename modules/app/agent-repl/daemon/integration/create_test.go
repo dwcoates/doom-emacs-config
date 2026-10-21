@@ -401,7 +401,7 @@ func TestCreateWorkspaceDeployHooksAreRecordedAndReadBackByALaterDeploy(t *testi
 	// Act: a later merge reads the recorded action back.
 	harness.CommitWork(t, ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 
 	// Assert

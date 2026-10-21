@@ -40,7 +40,7 @@ func TestARestartOverAMergeWaitingForItsWorkspaceRestartsAndTheMergeLands(t *tes
 	})
 	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	f.shim.ExpectKillTurn()
 	d.AwaitLogRecord(workspaceLog, "the merge waiting for the workspace to fall free", func(r harness.LogRecord) bool {

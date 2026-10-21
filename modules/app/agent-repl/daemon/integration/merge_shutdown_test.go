@@ -49,7 +49,7 @@ func TestStoppingTheDaemonInsideAMergesTerminalStampsTheLandingWithNoFailedWrite
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	d.AwaitFileExists(rendezvous)
 
@@ -128,7 +128,7 @@ func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 	f := mergeCreateChild(t, d, repoRef, "resumed", "do the resumed thing", nil)
 	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	d.AwaitFileExists(started)
 	// The target now carries content the merge never wrote.
@@ -230,7 +230,7 @@ func TestAMergeRunningThroughAHandoverResumesInTheSuccessorAndLands(t *testing.T
 	f := mergeCreateChild(t, d, repoRef, "handed", "do the handed thing", nil)
 	harness.CommitWork(t, f.ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	d.AwaitFileExists(started)
 	var lease string

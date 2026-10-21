@@ -44,7 +44,7 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 
 	harness.CommitWork(t, front.ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(front.ws))); err != nil {
-		t.Fatalf("MergeWorkspace(%s front) = error %v, want the merge enqueued", namePrefix, err)
+		t.Fatalf("FinishWorkspace(%s front) = error %v, want the deploy enqueued", namePrefix, err)
 	}
 	// The pre-prompt's turn is started and NEVER answered: the run sits in it
 	// holding the repository lock.
@@ -52,7 +52,7 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 
 	harness.CommitWork(t, behind.ws.GetDir())
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(behind.ws))); err != nil {
-		t.Fatalf("MergeWorkspace(%s behind) = error %v, want the merge enqueued", namePrefix, err)
+		t.Fatalf("FinishWorkspace(%s behind) = error %v, want the deploy enqueued", namePrefix, err)
 	}
 	return front, behind, repo, repoRef
 }
