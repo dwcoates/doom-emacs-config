@@ -1529,11 +1529,24 @@ func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			// THE VENDOR'S OWN SCHEDULE WHEN IT STATED ONE: its retry count,
 			// its limit and the instant its next try starts. Counting failures
 			// here instead ran one ahead of the vendor's own count (2026-09-30).
+			//
+			// A LIMIT THE RETRY ALREADY PASSED IS NOT THE VENDOR'S LIMIT: agent-repl
+			// turns the vendor's retries off (max_retries 0), and the one retry
+			// it still makes, a request that got no first byte, comes as retry
+			// 1 of 0. Drawn, that read "retry #2 of 1" (2026-10-21).
+			//
+			// AN INSTANT ALREADY PASSED WHEN IT ARRIVES IS NOT COUNTED DOWN TO:
+			// the vendor states the retry it is making at once (a zero delay),
+			// and the line held "next try in 0s" for the whole retried request.
 			if retry := failed.GetRetry(); retry != nil {
 				nextAt := time.UnixMilli(retry.GetNextAttemptAtMs())
 				next.attempt = attemptOfRetry(retry.GetAttempt())
-				next.maxAttempt = int32(retry.GetMaxRetries()) + 1
-				next.nextAt = &nextAt
+				if retry.GetAttempt() <= retry.GetMaxRetries() {
+					next.maxAttempt = int32(retry.GetMaxRetries()) + 1
+				}
+				if nextAt.After(next.at) {
+					next.nextAt = &nextAt
+				}
 			} else {
 				next.attempt = 2
 				if s.retrying != nil {

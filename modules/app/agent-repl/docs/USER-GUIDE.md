@@ -741,7 +741,7 @@ An event that is not a message is drawn in the feed as an **outcome marker**: a 
 - **A turn the vendor failed is retried for you:**
   - When a turn ends on an API failure that waiting can cure (an overload, the API's own error, a lost connection), agent-repl asks the agent to continue every 30 seconds, for up to 2 hours from the first failure. The vendor makes no retries of its own.
   - When your session or weekly usage allowance is exhausted, it waits instead until that allowance resets, as the footer's usage figures report it, and then asks the agent to continue. If the vendor still refuses, it asks again every 30 seconds for 30 minutes.
-  - While a retry is due, the footer reads `vendor fault · api retrying` (or the usage limit's own step) and its activity line counts down: `retry #2 · next try in 24s · Overloaded`. The countdown holds at `0s`; it never counts up.
+  - While a retry is due, the footer reads `vendor fault · api retrying` (or the usage limit's own step) and its activity line counts down: `attempt 2 · next try in 24s · Overloaded`. The countdown holds at `0s`; it never counts up.
   - Press `RET` in the composer to retry now instead of waiting for the countdown:
     - With the composer empty, the retry is made at once, and nothing is sent as content.
     - With words in the composer, your prompt is sent at once and is itself the retry.

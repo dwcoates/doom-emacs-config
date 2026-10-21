@@ -810,7 +810,7 @@ unchanged.
     - Counting failures itself had run one ahead of the vendor's count.
   - The retried call's first response ends the line and raises
     `api_restored`.
-  - The webapp draws "retry #9 of 11 · next try in 12s · <status>", the
+  - The webapp draws "attempt 9 of 11 · next try in 12s · <status>", the
     countdown ticking on the shared clock.
     - Once the promised instant passes it reads "next try overdue by 2m",
       so a stalled vendor is visible as a stall.

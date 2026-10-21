@@ -614,7 +614,7 @@ describe("the salient kinds", () => {
       "working",
     );
     expect(cell.querySelector('[data-datum="attempt"]')?.textContent).toBe(
-      "#2",
+      "2",
     );
   });
 
@@ -625,7 +625,7 @@ describe("the salient kinds", () => {
       "working",
     );
     expect(cell.querySelector(".footer-activity-retrying")?.textContent).toBe(
-      "retry #2 · overloaded",
+      "attempt 2 · overloaded",
     );
   });
 
@@ -636,7 +636,7 @@ describe("the salient kinds", () => {
       "working",
     );
     expect(cell.querySelector(".footer-activity-retrying")?.textContent).toBe(
-      "retry #9 of 11 · overloaded",
+      "attempt 9 of 11 · overloaded",
     );
   });
 
@@ -651,7 +651,7 @@ describe("the salient kinds", () => {
       "working",
     );
     expect(cell.querySelector(".footer-activity-retrying")?.textContent).toBe(
-      "retry #9 · next try in 12s · overloaded",
+      "attempt 9 · next try in 12s · overloaded",
     );
   });
 
