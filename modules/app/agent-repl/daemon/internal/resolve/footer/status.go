@@ -449,8 +449,8 @@ func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 	case StepEnqueued:
 		arm.Substatus = &frontendv1.FooterStatusMerging_Enqueued{Enqueued: &frontendv1.FooterSubStatusMergingEnqueued{
 			Place: uint32(m.QueuePlace), Waiting: uint32(m.QueueWaiting)}}
-	case StepPreprocessing:
-		arm.Substatus = &frontendv1.FooterStatusMerging_Preprocessing{Preprocessing: &frontendv1.FooterSubStatusMergingPreprocessing{}}
+	case StepPreDeploy:
+		arm.Substatus = &frontendv1.FooterStatusMerging_PreDeploy{PreDeploy: &frontendv1.FooterSubStatusMergingPreDeploy{}}
 	case StepRebasing:
 		arm.Substatus = &frontendv1.FooterStatusMerging_Rebasing{Rebasing: &frontendv1.FooterSubStatusMergingRebasing{
 			Replayed: uint32(m.Replayed), Total: uint32(m.Total)}}
@@ -463,10 +463,10 @@ func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 			Attempt: uint32(m.Attempt), MaxAttempts: uint32(m.MaxAttempts)}}
 	case StepCommitting:
 		arm.Substatus = &frontendv1.FooterStatusMerging_Committing{Committing: &frontendv1.FooterSubStatusMergingCommitting{}}
-	case StepUpdatingMain:
-		arm.Substatus = &frontendv1.FooterStatusMerging_UpdatingMain{UpdatingMain: &frontendv1.FooterSubStatusMergingUpdatingMain{}}
-	case StepPostprocessing:
-		arm.Substatus = &frontendv1.FooterStatusMerging_Postprocessing{Postprocessing: &frontendv1.FooterSubStatusMergingPostprocessing{}}
+	case StepDeploying:
+		arm.Substatus = &frontendv1.FooterStatusMerging_Deploying{Deploying: &frontendv1.FooterSubStatusMergingDeploying{}}
+	case StepPostDeploy:
+		arm.Substatus = &frontendv1.FooterStatusMerging_PostDeploy{PostDeploy: &frontendv1.FooterSubStatusMergingPostDeploy{}}
 	default:
 		log.Error("daemon.footer.merge_step", "a merge in flight names no step the footer draws; it is drawn with no substatus",
 			dlog.Context{
@@ -551,6 +551,8 @@ func (r *resolver) mergeFailed(s *wsState, log dlog.Logger) *frontendv1.FooterSt
 		arm.Substatus = &frontendv1.FooterStatusMergeFailed_Tests{Tests: &frontendv1.FooterSubStatusMergeFailedTests{}}
 	case FailedOther:
 		arm.Substatus = &frontendv1.FooterStatusMergeFailed_Other{Other: &frontendv1.FooterSubStatusMergeFailedOther{}}
+	case FailedHook:
+		arm.Substatus = &frontendv1.FooterStatusMergeFailed_Hook{Hook: &frontendv1.FooterSubStatusMergeFailedHook{}}
 	default:
 		log.Error("daemon.footer.merge_failed_area", "a failed merge names no area; it is drawn with no substatus",
 			dlog.Context{

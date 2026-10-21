@@ -92,14 +92,14 @@ const (
 	// not placed until it starts, so nothing lands in the feed after it.
 	StepAwaitingFree       MergeStep = "awaiting_free"
 	StepEnqueued           MergeStep = "enqueued"
-	StepPreprocessing      MergeStep = "preprocessing"
+	StepPreDeploy          MergeStep = "pre_deploy"
 	StepRebasing           MergeStep = "rebasing"
 	StepConflictResolution MergeStep = "conflict_resolution"
 	StepTesting            MergeStep = "testing"
 	StepFixing             MergeStep = "fixing"
 	StepCommitting         MergeStep = "committing"
-	StepUpdatingMain       MergeStep = "updating_main"
-	StepPostprocessing     MergeStep = "postprocessing"
+	StepDeploying          MergeStep = "deploying"
+	StepPostDeploy         MergeStep = "post_deploy"
 )
 
 // Words is the step in the footer's plain words, as a person reads it: the
@@ -108,8 +108,10 @@ func (s MergeStep) Words() string {
 	switch s {
 	case StepConflictResolution:
 		return "conflict resolution"
-	case StepUpdatingMain:
-		return "updating main"
+	case StepPreDeploy:
+		return "pre-deploy"
+	case StepPostDeploy:
+		return "post-deploy"
 	case StepAwaitingFree:
 		return "waiting for the workspace to be free"
 	}
@@ -129,6 +131,9 @@ const (
 	FailedTests MergeFailedArea = "tests"
 	// FailedOther is any other step failing.
 	FailedOther MergeFailedArea = "other"
+	// FailedHook is a hook of any stage failing; the workspace is prompted to
+	// investigate it.
+	FailedHook MergeFailedArea = "hook"
 )
 
 // CloseBlocked is why a close was refused: a close requires quiet, and the
