@@ -884,11 +884,11 @@ docs. File-per-area grouping is given in section E.
     vendor knows nothing about" it) — a prompt arriving after a merge began
     is HELD by the merge, never classified, and delivered once it ends; the
     hold keeps the requester open past the landing (owner ruling,
-    2026-10-01). The window is held by a before-merge prompt parked on the
+    2026-10-01). The window is held by a pre-deploy prompt hook parked on the
     fake vendor's turn gate, never raced.
-40. **MergeBubbleCoalescesIntoOneFeedRow** — drives a real merge (self-repo
-    and non-self-repo methods both, per `daemon.md`'s "two methods keyed by
-    self-repo-or-not") — everything produced during the merge lands on ONE
+40. **MergeBubbleCoalescesIntoOneFeedRow** — drives a real deploy (agent-repl's
+    deploy config and a hooks-only one both) — everything produced during the
+    deploy lands on ONE
     feed bubble (own `FeedId`, `OpenFeed`/`WatchFeed`).
 41. **A rebase conflict in the requesting workspace**
     (`docs/protobuf-design/merge-landing.md`, landed change 1; nothing

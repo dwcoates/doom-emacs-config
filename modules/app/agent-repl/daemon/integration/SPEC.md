@@ -385,8 +385,8 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   `disconnected.severed` and the roster to `severed`; the daemon redials
   forever with backoff; the fake exiting flips to `dead` and stops redials
 
-### merge_test.go (self-repo path with fake git; the daemon's own checkout identity is injected via `-self-repo <dir>` or equivalent test hook)
-- MergeWorkspace on a workspace without layout facts is refused pre-state
+### merge_test.go (fake git; each fixture repository commits a `.agent-repl/deploy.yaml`, hooks alone by default and agent-repl's own through `Repo.DeploysAsAgentRepl`)
+- FinishWorkspace on a workspace without layout facts is refused pre-state
 - enqueue: queue tab row on the merge bubble's sub-feed, footer
   `merging.queued{position,depth}`, roster `merge_queued`; a second
   workspace in the same repo queues behind; pause/resume/evict via
@@ -395,7 +395,7 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   `FeedMerge.queue_offer` on the pinned head; AnswerMergeQueueOffer
   {evict} evicts, {prioritize} runs it next, {cancel} keeps it and clears
   the question
-- the emacs-repo method: pre-prompt tab (when configured) runs the session
+- agent-repl's deploy config: a pre-deploy prompt hook's tab (when configured) runs the session
   under the lease with origin MERGE_BEFORE_ACTION and its rows parented to
   the tab (output address); merge tab narrates the no-ff commit; a
   conflicting branch opens a conflict section on its commit's subtab of the
@@ -408,12 +408,12 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   repo records its args and exits per a control file): pass → settled; fail
   → a fixing sub-subtab under the failed run's subtab with the brief, then
   parked on escalation; no re-run on flake
-- post-prompt failure never fails the run (rides the terminal)
+- a post-deploy hook failure fails the deploy and keeps the landing
 - landed: FeedMergeSuccess{commit}, footer `merging.merged`, roster `merged`,
   recently_merged, worktree removed only after the terminal push; the
-  merge ledger holds the tab intervals; a landed range whose target is the
-  self-repo triggers rollout.Trigger (assert via the fake deploy script)
-- the non-emacs repo method runs only pre/post prompts
+  merge ledger holds the tab intervals; a landing on main runs the deploy
+  hook, whose script asks for the rollout (assert via the fake deploy build)
+- a hooks-only config runs only its hooks, and never rolls out
 - a merge in flight across a daemon restart is resumed or loudly failed
   (never a stuck lease)
 - missing brief file fails the step loudly

@@ -1171,7 +1171,7 @@ Owner plan, 2026-09-28 (`docs/investigations/2026-09-28-merge-queue-plan.md`,
 fixes 6-8). Every agent merges into master ONLY through the merge-queue skill
 (`skills/agent-repl-merge-queue/SKILL.md`): its own workspace's branch, another
 workspace, and every subagent's branch alike. The skill lands work through the
-daemon (`agent-repld workspace merge`, `agent-repld workspace async-merge`)
+daemon (`agent-repld workspace finished`, `agent-repld workspace async-merge`)
 and reports landed, parked or failed; on a park, failure or refusal it reports
 and stops, and never merges by hand.
 

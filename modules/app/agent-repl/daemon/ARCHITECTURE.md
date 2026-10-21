@@ -296,7 +296,6 @@ type Git interface {
   CommonDir(ctx, dir string) (string, error)                    // canonicalized (symlinks resolved)
   MainWorktree(ctx, dir string) (string, error)                 // the repository's dir; a bare repo is an error
   RepositoryOf(ctx, dir string) (string, ok bool, err error)    // MainWorktree's PROBE half: outside every repo is an ordinary false, never an error record
-  SameRepo(ctx, a, b string) (bool, error)
   MergeNoFF(ctx, targetDir, sourceBranch, message string) (MergeOutcome, error)  // Landed{Commit} | Conflicted{Files}
   ConflictedFiles(ctx, dir string) ([]string, error); AbortMerge(ctx, dir string) error
   RevertMerge(ctx, targetDir, mergeCommit string) error
@@ -441,7 +440,7 @@ INFO.
 
 ```go
 type Orchestrator interface {
-  Enqueue(ctx, req Request) (Enqueued, error)    // MergeWorkspace and the async-merge create; the asker is checked (owner_lands, requester_may_not_land); refuses pre-state (no layout facts, deleted session, already queued/merging)
+  Enqueue(ctx, req Request) (Enqueued, error)    // FinishWorkspace and the async-merge create; the repository's deploy config is read and refused when missing or unusable; the asker is checked (owner_lands, requester_may_not_land); refuses pre-state (no layout facts, deleted session, already queued/merging)
   Pause(ctx, scope) error; Unpause(ctx, scope) error
   Evict(ctx, ws) error                           // a waiting merge leaves the queue; a RUNNING or PARKED one is abandoned
   AnswerQueueOffer(ctx, ws, answer) error        // AnswerMergeQueueOffer: evict | prioritize | cancel
@@ -453,9 +452,13 @@ type Orchestrator interface {
   Drain(ctx); Recover(ctx) error                 // orderly exit suspends mid-step merges; boot resumes them from their progress record
 }
 ```
-Two methods keyed by `gitclient.SameRepo(target, daemonCheckout)`. Every other
-repo = pre-prompt → post-prompt. The Emacs repo = pre-prompt → ATTEMPTS →
-post-prompt, where one attempt is: a detached scratch tree of the queue's own
+What a deploy runs is its repository's `.agent-repl/deploy.yaml`
+(`repoconfig.v1.DeployConfig`, read by `internal/deployconfig` at every use):
+pre-deploy hooks → the LOCAL MERGE, when the config has one → the deploy hook
+(skipped while the repository is held) → post-deploy hooks. Each hook is a
+script (`internal/scriptrunner`, from the main checkout root) or a prompt to
+the deploying workspace's own session, and a failed one fails the deploy. The
+local merge is ATTEMPTS, where one attempt is: a detached scratch tree of the queue's own
 at the target's tip (`<state>/merge-trees/<lease>-<n>`) → no-ff merge there →
 conflicts (the agent brings ITS OWN branch up to date, once per source tip,
 then parked) → tests (the tree's own `bin/test-all.sh --suites <selected>`,
