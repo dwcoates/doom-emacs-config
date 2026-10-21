@@ -553,22 +553,6 @@ func (c *client) RepositoryOf(ctx context.Context, dir string) (string, bool, er
 	return "", false, nil
 }
 
-// SameRepo reports whether two directories belong to one repository, by the
-// canonicalized common dir and by nothing else. A worktree and its parent
-// checkout are the SAME repository here, which is the answer the merge
-// orchestrator's method split wants.
-func (c *client) SameRepo(ctx context.Context, a, b string) (bool, error) {
-	commonA, err := c.CommonDir(ctx, a)
-	if err != nil {
-		return false, err
-	}
-	commonB, err := c.CommonDir(ctx, b)
-	if err != nil {
-		return false, err
-	}
-	return commonA == commonB, nil
-}
-
 // MergeNoFF merges sourceBranch into targetDir's checkout with --no-ff, and
 // its result is an ANSWER rather than a success-or-failure.
 //

@@ -83,9 +83,6 @@ type Git interface {
 	// resolution for a directory the caller already knows is a worktree; this
 	// is the question "is it one, and whose".
 	RepositoryOf(ctx context.Context, dir string) (string, bool, error)
-	// SameRepo reports whether two directories belong to one repository. The
-	// merge orchestrator keys its two methods on it.
-	SameRepo(ctx context.Context, a, b string) (bool, error)
 	// MergeNoFF merges sourceBranch into targetDir's checkout with --no-ff.
 	// The outcome is an ANSWER: Landed with the merge commit, or Conflicted
 	// with the conflicted files.
