@@ -2,8 +2,6 @@ package harness
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -51,20 +49,6 @@ func TestTheDeployLandingScriptCallsTheDaemonWithItsDeploy(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("the deploy script reads %q, want %q", body, want)
 		}
-	}
-}
-
-func TestWriteExecutableWritesAnExecutable(t *testing.T) {
-	// Arrange
-	path := filepath.Join(t.TempDir(), "bin", "hook.sh")
-
-	// Act
-	writeExecutable(t, path, "#!/bin/sh\n")
-
-	// Assert
-	info, err := os.Stat(path)
-	if err != nil || info.Mode()&0o111 == 0 {
-		t.Fatalf("stat = %v, %v; want an executable", info, err)
 	}
 }
 

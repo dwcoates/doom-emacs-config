@@ -3,7 +3,6 @@ package harness
 import (
 	"os"
 	"path/filepath"
-	"testing"
 
 	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/shellword"
@@ -77,13 +76,4 @@ if [ -n "${AGENT_REPL_DEPLOY_LEDGER:-}" ]; then
 fi
 exec ` + cli + ` runtime roll-out-landing
 `
-}
-
-// writeExecutable writes an executable file at PATH, its directory first.
-func writeExecutable(t testing.TB, path, content string) {
-	t.Helper()
-	writeFile(t, path, content)
-	if err := os.Chmod(path, 0o755); err != nil {
-		t.Fatalf("harness: chmod %s: %v", path, err)
-	}
 }

@@ -161,9 +161,7 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
 fi
 `
 	script := strings.Replace(string(body), `if [ -f "$control.stdout" ]`, staging+`if [ -f "$control.stdout" ]`, 1)
-	if err := os.WriteFile(r.Path, []byte(script), 0o755); err != nil {
-		t.Fatalf("harness: write %s: %v", r.Path, err)
-	}
+	writeExecutable(t, r.Path, script)
 	r.SetStdout(FakeDeployBuildRefusal + "\n")
 	r.SetExitCode(1)
 	return &DeployBuilder{Recorder: r, sources: src}

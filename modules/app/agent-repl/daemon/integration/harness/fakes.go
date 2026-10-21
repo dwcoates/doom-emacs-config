@@ -159,9 +159,7 @@ func NewRecorderExecutable(t testing.TB, dir, name string) *Recorder {
 		"AGENT_REPL_FAKE_CONTROL=" + shellword.Quote(r.Control) + "\n" +
 		"export AGENT_REPL_FAKE_RECORD AGENT_REPL_FAKE_CONTROL\n" +
 		strings.TrimPrefix(recorderScript, "#!/bin/bash\n")
-	if err := os.WriteFile(r.Path, []byte(script), 0o755); err != nil {
-		t.Fatalf("harness: write %s: %v", r.Path, err)
-	}
+	writeExecutable(t, r.Path, script)
 	return r
 }
 
@@ -236,9 +234,7 @@ func NewFakeClaude(t testing.TB, dir string) string {
 		t.Fatalf("harness: mkdir %s: %v", dir, err)
 	}
 	path := filepath.Join(dir, "claude")
-	if err := os.WriteFile(path, []byte(fakeClaudeScript), 0o755); err != nil {
-		t.Fatalf("harness: write %s: %v", path, err)
-	}
+	writeExecutable(t, path, fakeClaudeScript)
 	return path
 }
 
@@ -361,6 +357,15 @@ func writeFile(t testing.TB, path, content string) {
 	}
 }
 
+// writeExecutable writes an executable file at PATH, its directory first.
+func writeExecutable(t testing.TB, path, content string) {
+	t.Helper()
+	writeFile(t, path, content)
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatalf("harness: chmod %s: %v", path, err)
+	}
+}
+
 // FakeHostNetwork is the Wi-Fi network the fake host tools report joined.
 const FakeHostNetwork = "Harness Net"
 
@@ -407,9 +412,7 @@ func NewFakeHostTools(t testing.TB, dir string) string {
 		t.Fatalf("harness: mkdir %s: %v", dir, err)
 	}
 	for name, script := range fakeHostTools {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
-			t.Fatalf("harness: write %s: %v", name, err)
-		}
+		writeExecutable(t, filepath.Join(dir, name), script)
 	}
 	return dir
 }

@@ -2,6 +2,7 @@ package harness
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -143,5 +144,51 @@ func TestNoIntegrationTestSpellsTheTestAllVariableByHand(t *testing.T) {
 	// Assert
 	if len(offenders) != 0 {
 		t.Fatalf("%v spell the test-all variable by hand; use TestAllScriptEnv", offenders)
+	}
+}
+
+func TestWriteExecutableWritesAnExecutable(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "bin", "hook.sh")
+
+	// Act
+	writeExecutable(t, path, "#!/bin/sh\n")
+
+	// Assert
+	info, err := os.Stat(path)
+	if err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("stat = %v, %v; want an executable", info, err)
+	}
+}
+
+// TestEveryHarnessExecutableIsWrittenThroughWriteExecutable pins that no
+// harness source writes an executable by hand.
+func TestEveryHarnessExecutableIsWrittenThroughWriteExecutable(t *testing.T) {
+	// Arrange
+	paths, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var byHand []string
+
+	// Act
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(raw), "\n") {
+			if strings.Contains(line, "os.WriteFile(") && strings.Contains(line, "0o755") {
+				byHand = append(byHand, fmt.Sprintf("%s:%d", path, i+1))
+			}
+		}
+	}
+
+	// Assert
+	if len(byHand) != 0 {
+		t.Fatalf("executables written by hand at %v, want writeExecutable", byHand)
 	}
 }
