@@ -236,7 +236,7 @@ Workspaces — COMPLETE
    The creation keys are the owner's 2026-09-12 ruling, recorded in
    docs/REALTEST-JUDGEMENT-CALLS.md: `n` dynamic create, `N` static create
    (the one mode that asks "Repository: " then "Name: "), `c`/`C` the child
-   variants, `f` fork, `o` one-shot ("One-shot commission: "), `O` re-open.
+   variants, `f` fork, `o` one-shot ("One-shot (<repository>): "), `O` re-open.
    `lisp/keybindings.el` and `lisp/verbs.el` are the truth.
 
 Conversation

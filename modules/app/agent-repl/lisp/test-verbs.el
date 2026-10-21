@@ -2480,7 +2480,7 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
         ;; Act.
         (agent-repl-create-oneshot-for-current-workspace nil)
         ;; Assert.
-        (should (equal prompts '("One-shot fix for ws-one: ")))))))
+        (should (equal prompts '("One-shot fix for ws-one (repo): ")))))))
 
 (ert-deftest agent-repl-verbs-oneshot-sends-no-context ()
   "`SPC TAB o\=' names no context workspace: its commission stands on its own words."
@@ -2492,7 +2492,44 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
         ;; Assert.
         (let ((one-shot (plist-get (plist-get (agent-repl-test-verbs--request :create) :form) :value)))
           (should-not (plist-get one-shot :context))
-          (should (equal prompts '("One-shot commission: "))))))))
+          (should (equal prompts '("One-shot (repo): "))))))))
+
+(ert-deftest agent-repl-verbs-oneshot-prompt-names-a-fixed-repository ()
+  "A one-shot fixed to another repository (`SPC TAB O\=') names it in its prompt."
+  (let (prompts)
+    (agent-repl-test-verbs--with nil
+      (agent-repl-test-verbs--with-oneshot-reads prompts
+        (cl-letf (((symbol-function 'agent-repl-verbs--explanation-engine-repository)
+                   (lambda () (agent-repl-test-verbs--repo-ref
+                               "repo-id-2" "/tmp/agent-repl-test/explanation-engine"))))
+          ;; Act.
+          (agent-repl-create-explanation-engine-oneshot nil)
+          ;; Assert.
+          (should (equal prompts '("One-shot (explanation-engine): "))))))))
+
+(ert-deftest agent-repl-verbs-repository-name-is-the-directory-basename ()
+  "A repository is named by its main checkout\='s basename."
+  (should (equal (agent-repl-verbs--repository-name
+                  (agent-repl-test-verbs--repo-ref "id" "/home/u/.config/doom"))
+                 "doom")))
+
+(ert-deftest agent-repl-verbs-repository-name-ignores-a-trailing-slash ()
+  "A directory written with a trailing slash names the same repository."
+  (should (equal (agent-repl-verbs--repository-name
+                  (agent-repl-test-verbs--repo-ref "id" "/home/u/.config/doom/"))
+                 "doom")))
+
+(ert-deftest agent-repl-verbs-repository-name-without-a-directory-fails-hard ()
+  "A `RepositoryRef\=' without a directory is a bug: logged, then a hard failure."
+  (let (errors)
+    (cl-letf (((symbol-function 'agent-repl--error)
+               (lambda (_scope fmt &rest args) (push (apply #'format fmt args) errors))))
+      ;; Act
+      (let ((err (should-error (agent-repl-verbs--repository-name '(:id "id")))))
+        ;; Assert
+        (should (string-match-p "has no directory" (cadr err)))
+        (should (equal errors
+                       '("elisp.verbs.repository-name repository=(:id \"id\") cause=no-directory")))))))
 
 (ert-deftest agent-repl-verbs-oneshot-for-current-workspace-without-a-ref-sends-nothing ()
   "A current workspace with no daemon identity refuses the create before any send."

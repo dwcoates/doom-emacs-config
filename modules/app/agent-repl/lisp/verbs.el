@@ -2686,19 +2686,23 @@ history, and the model is asked for only under a prefix argument.
 
 ABOUT-CURRENT names the current workspace as the one-shot\='s context, the
 workspace the commission is about; its prompt names that workspace so the
-user knows which one the commission will be read against."
+user knows which one the commission will be read against.  Every prompt
+names the repository the one-shot lands in
+\(`agent-repl-verbs--repository-name\='), so a one-shot fixed to another
+repository says so before the commission is typed."
   (agent-repl-verbs--create-invoked command)
   (let* ((repository (agent-repl-verbs--read-for
                       command 'repository
                       repository-fn))
+         (repository-name (agent-repl-verbs--repository-name repository))
          (about (and about-current (agent-repl--ws-current-name)))
          (prompt (agent-repl-verbs--read-for
                   command 'prompt
                   (lambda ()
                     (agent-repl-verbs--read-required-prompt
                      (if about
-                         (format "One-shot fix for %s: " about)
-                       "One-shot commission: ")
+                         (format "One-shot fix for %s (%s): " about repository-name)
+                       (format "One-shot (%s): " repository-name))
                      "a one-shot IS its prompt"
                      (agent-repl-verbs--oneshot-history-file) 'unseeded))))
          (model (and pick-model
@@ -2715,6 +2719,19 @@ user knows which one the commission will be read against."
      :model model)))
 
 ;;;; ---- A fixed repository on the roster ---------------------------------
+
+(defun agent-repl-verbs--repository-name (repository)
+  "Return the name of REPOSITORY, a `RepositoryRef\=': its main checkout\='s basename.
+Every `RepositoryRef\=' the roster hands out carries its directory, so a
+ref without one is a bug: it is recorded through the canonical error log
+and fails hard."
+  (let ((dir (plist-get repository :dir)))
+    (unless (and (stringp dir) (not (string-empty-p dir)))
+      (agent-repl--error agent-repl-verbs--create-log-scope
+                         "elisp.verbs.repository-name repository=%S cause=no-directory"
+                         repository)
+      (error "agent-repl: RepositoryRef %S has no directory" repository))
+    (file-name-nondirectory (directory-file-name dir))))
 
 (defun agent-repl-verbs--roster-repository-at (main)
   "Return the `RepositoryRef' of the roster section whose directory is MAIN.
