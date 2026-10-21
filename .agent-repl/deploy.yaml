@@ -1,0 +1,17 @@
+# agent-repl's own deploy (repoconfig.v1.DeployConfig, documented in the
+# /agent-repl-workspaces skill). A finished workspace's branch is rebased onto
+# master, tested by agent-repl's suites, landed as a merge commit and tagged;
+# then the running runtime is redeployed by the deploy hook.
+pre_deploy:
+  local_merge:
+    tests:
+      agent_repl_suites:
+        script_path: modules/app/agent-repl/bin/test-all.sh
+    version_tag: {}
+deploy:
+  hook:
+    script:
+      path: modules/app/agent-repl/bin/deploy-landing.sh
+      timeout_seconds: 60
+  runs_for:
+    main: {}
