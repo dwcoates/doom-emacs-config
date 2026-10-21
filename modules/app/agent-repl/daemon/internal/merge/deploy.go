@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -426,7 +425,7 @@ func (r *run) runScriptHook(ctx context.Context, stage stageOf, i int, script *r
 	}
 	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "stage": stage.kind, "hook": i,
 		"script": script.GetPath(), "repo_root": r.target.repoRoot, "log": view.logPath, "timeout_seconds": script.GetTimeoutSeconds()}
-	logFile, err := r.openHookLog(view.logPath)
+	logFile, err := createLog(view.logPath)
 	if err != nil {
 		r.o.log(ctx, r.ws).Error(op, "could not open the script hook's log; the hook fails", withField(fields, "error", err.Error()))
 		return r.settleScript(ctx, round, view, fmt.Sprintf("its %s script %s could not keep a log: %v", stageWords(stage.kind), script.GetPath(), err)), nil
@@ -485,18 +484,10 @@ func (r *run) settleScript(ctx context.Context, round tabRound, view scriptView,
 	return summary
 }
 
-// hookLogPath is where one script hook round's output is kept: under the
-// state root's deploy-logs, by the deploy's ledger, its stage and its round.
+// hookLogPath is where one script hook round's output is kept: among the
+// queue's logs (LogsDir), by the deploy's ledger, its stage and its round.
 func (r *run) hookLogPath(stage stageOf, round tabRound) string {
-	return filepath.Join(r.o.deps.StateDir, "deploy-logs", fmt.Sprintf("%s-%s-%d.log", r.lease.ID, stage.env, round.n))
-}
-
-// openHookLog creates a script hook's log, its directory included.
-func (r *run) openHookLog(path string) (*os.File, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
-	return os.Create(path)
+	return filepath.Join(LogsDir(r.o.deps.StateDir), fmt.Sprintf("%s-%s-%d.log", r.lease.ID, stage.env, round.n))
 }
 
 // setDeploy records what the deploy decided about its rollout, once.

@@ -3,7 +3,6 @@ package merge
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -140,16 +139,11 @@ func (o *orchestrator) ReleaseDeploys(ctx context.Context, scope RepositoryScope
 func (o *orchestrator) runReleasedScript(ctx context.Context, repoDir string, script *repoconfigv1.DeployHookScript, release DeployRelease, fields dlog.Context) DeployRelease {
 	log := o.deps.Log.Global()
 	release.Path = script.GetPath()
-	release.LogPath = filepath.Join(o.deps.StateDir, "deploy-logs", fmt.Sprintf("release-%d.log", o.deps.Now().UnixNano()))
+	release.LogPath = filepath.Join(LogsDir(o.deps.StateDir), fmt.Sprintf("release-%d.log", o.deps.Now().UnixNano()))
 	fields["script"], fields["log"] = release.Path, release.LogPath
-	if err := os.MkdirAll(filepath.Dir(release.LogPath), 0o755); err != nil {
-		release.Kind, release.Detail = ReleaseScriptFailed, err.Error()
-		log.Error(opReleaseDeploys, "could not make the released deploy hook's log directory", withField(fields, "error", err.Error()))
-		return release
-	}
 	run, err := o.deps.HookRunner.RunLinesWith(ctx, repoDir, []string{"bash", filepath.Join(repoDir, script.GetPath())},
 		scriptrunner.Options{Env: []string{EnvDeployStage + "=deploy"}, Timeout: time.Duration(script.GetTimeoutSeconds()) * time.Second}, nil)
-	if writeErr := os.WriteFile(release.LogPath, []byte(run.Output), 0o644); writeErr != nil {
+	if writeErr := writeLog(release.LogPath, run.Output); writeErr != nil {
 		log.Error(opReleaseDeploys, "could not write the released deploy hook's log", withField(fields, "error", writeErr.Error()))
 	}
 	switch {

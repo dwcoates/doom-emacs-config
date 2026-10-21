@@ -29,7 +29,7 @@ import (
 // merges, read off the workspace's durable merge ledger, so a token cannot open
 // another workspace's log.
 
-// mergeLogsDir is where every gate run's output is written, under the state
+// mergeLogsDir is where every log the queue writes lives, under the state
 // root.
 const mergeLogsDir = "merge-logs"
 
@@ -43,46 +43,49 @@ type testLog struct {
 func (o *orchestrator) testLog(lease ids.LeaseID, round int) testLog {
 	return testLog{
 		token: fmt.Sprintf("%s/%d", lease, round),
-		path:  filepath.Join(TestLogsDir(o.deps.StateDir), fmt.Sprintf("%s-tests-%d.log", lease, round)),
+		path:  filepath.Join(LogsDir(o.deps.StateDir), fmt.Sprintf("%s-tests-%d.log", lease, round)),
 	}
 }
 
-// TestLogsDir is the directory every merge's test logs are written to, under
-// the state root stateDir. The daemon's log retention pass prunes it
-// (dlog.Surfaces.RetainDirectory) by IsTestLog.
-func TestLogsDir(stateDir string) string { return filepath.Join(stateDir, mergeLogsDir) }
+// LogsDir is the directory every log the queue writes lives in, under the
+// state root stateDir: each gate run's output, each script hook round's, and
+// each released deploy hook's. The daemon's log retention pass prunes it
+// (dlog.Surfaces.RetainDirectory) by IsLog.
+func LogsDir(stateDir string) string { return filepath.Join(stateDir, mergeLogsDir) }
 
-// testLogName matches the basename testLog gives a round's log.
-var testLogName = regexp.MustCompile(`^[0-9a-f]+-tests-[0-9]+\.log$`)
+// logName matches the basename of every log the queue writes: a tests round's
+// (testLog), a script hook round's (hookLogName) and a released deploy hook's
+// (releaseLogName).
+var logName = regexp.MustCompile(`^(?:[0-9a-f]+-(?:tests|pre_deploy|deploy|post_deploy)-[0-9]+|release-[0-9]+)\.log$`)
 
-// IsTestLog answers whether base names a round's test log.
-func IsTestLog(base string) bool { return testLogName.MatchString(base) }
+// IsLog answers whether base names a log the queue writes.
+func IsLog(base string) bool { return logName.MatchString(base) }
 
-// createTestLog creates (or truncates) one round's log, its directory first,
-// under the shared lock the log retention pass honors, so a log is never
-// pruned while it is being written.
-func createTestLog(log testLog) (*os.File, error) {
-	if err := os.MkdirAll(filepath.Dir(log.path), 0o755); err != nil {
-		return nil, fmt.Errorf("merge: creating the test log directory %s: %w", filepath.Dir(log.path), err)
+// createLog creates (or truncates) one of the queue's logs, its directory
+// first, under the shared lock the log retention pass honors, so a log is
+// never pruned while it is being written.
+func createLog(path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("merge: creating the log directory %s: %w", filepath.Dir(path), err)
 	}
-	file, err := logging.CreateLocked(log.path)
+	file, err := logging.CreateLocked(path)
 	if err != nil {
-		return nil, fmt.Errorf("merge: creating the test log %s: %w", log.path, err)
+		return nil, fmt.Errorf("merge: creating the log %s: %w", path, err)
 	}
 	return file, nil
 }
 
-// writeTestLog writes one round's whole log at once.
-func writeTestLog(log testLog, body string) error {
-	file, err := createTestLog(log)
+// writeLog writes one of the queue's logs whole, at once.
+func writeLog(path, body string) error {
+	file, err := createLog(path)
 	if err != nil {
 		return err
 	}
 	if _, err := file.WriteString(body); err != nil {
-		return errors.Join(fmt.Errorf("merge: writing the test log %s: %w", log.path, err), file.Close())
+		return errors.Join(fmt.Errorf("merge: writing the log %s: %w", path, err), file.Close())
 	}
 	if err := file.Close(); err != nil {
-		return fmt.Errorf("merge: writing the test log %s: %w", log.path, err)
+		return fmt.Errorf("merge: writing the log %s: %w", path, err)
 	}
 	return nil
 }

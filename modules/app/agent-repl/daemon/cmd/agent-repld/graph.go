@@ -1183,7 +1183,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 	// Every merge's test log is aged by the daemon's log retention pass, like
 	// every other log the daemon writes.
-	p.Surfaces.RetainDirectory(merge.TestLogsDir(p.Layout.Dir()), merge.IsTestLog)
+	p.Surfaces.RetainDirectory(merge.LogsDir(p.Layout.Dir()), merge.IsLog)
 	mergeMover.bind(mergeOrchestrator)
 	ejectCold = func(ws ids.WorkspaceID) {
 		const op = "daemon.merge.cold_gate"

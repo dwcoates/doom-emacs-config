@@ -669,7 +669,7 @@ func TestResolvePathsTakesTheLockDirectoryFromSessionlock(t *testing.T) {
 
 func TestTheGraphRegistersMergeTestLogsForRetention(t *testing.T) {
 	// Act.
-	registered := sourcescan.Count(t, "p.Surfaces.RetainDirectory(merge.TestLogsDir(p.Layout.Dir()), merge.IsTestLog)")
+	registered := sourcescan.Count(t, "p.Surfaces.RetainDirectory(merge.LogsDir(p.Layout.Dir()), merge.IsLog)")
 
 	// Assert.
 	if registered != 1 {
