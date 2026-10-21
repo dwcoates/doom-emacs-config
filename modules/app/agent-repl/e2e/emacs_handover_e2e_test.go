@@ -267,7 +267,7 @@ func TestEmacsDaemonDownSurfacesAndReconnects(t *testing.T) {
 // daemon's own checkout is stated as environment the Emacs process carries
 // (`WithEmacsEnv`) and its daemon child inherits, the trigger workspace is
 // created through `agent-repl-create-workspace`, and the merge is enqueued
-// through `agent-repl-merge-workspace`.
+// through `agent-repl-finish-workspace`.
 
 // emHO40SelfMergeTriggerPath is the path the trigger commit touches — the
 // same path `adoption_e2e_test.go` commits for the Go layer's own handover
@@ -444,7 +444,7 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// announces.
 	sha := selfRepo.CommitIn(triggerDir, emHO40SelfMergeTriggerPath, "trigger\n")
 	selfRepo.SetPaths(sha, emHO40SelfMergeTriggerPath)
-	e.Eval(`(agent-repl-merge-workspace ` + elispString(trigger) + `)`)
+	e.Eval(`(agent-repl-finish-workspace ` + elispString(trigger) + `)`)
 
 	// Assert: a successor was ATTACHED, from the announced address. This is
 	// the half no plain bounce can produce — a `shutdown_announced` without
