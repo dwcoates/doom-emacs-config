@@ -252,3 +252,21 @@ origin) is the next repository to be described this way, and is deferred.
   directive; the directive is now the daemon's own (principle 1), so the
   refusal cannot arise. A daemon corpus without it is the daemon's fault,
   answered as an internal error.
+
+### 10. A script hook's log is drawn as its path
+
+- **What.** `frontend.v1.FeedMergeTabHookScript.log` no longer says it opens
+  by a click; the bubble draws the path as text.
+- **Why.** No `agentrepl.v1.OpenInEditorRequest` target opens it: a
+  `workspace_file` must lie inside the worktree, and a `merge_test_log` token
+  names a tests round. Promising a click the contract cannot carry would be a
+  name the design reasons wrongly from.
+
+## Open gaps
+
+- **Opening a hook log.** A script hook's log and a released deploy hook's log
+  live in the state root's `merge-logs/` beside the test logs, and are retained
+  with them. Opening one from the bubble needs an
+  `agentrepl.v1.OpenInEditorRequest` target for it, the way `merge_test_log`
+  names a tests round by token. When that target lands, the bubble's log line
+  becomes a link and change 10's wording is reverted.

@@ -2,8 +2,9 @@
  * tab-panels — what a selected merge tab shows beneath its strip, one panel per
  * kind, at every level of the bubble's nested strips.
  *
- * FIVE SHAPES, ONE FACTORY. RESOLVED tabs (queue, committing, updating main)
- * draw their own row. AGENTIC tabs (the configured prompts, a fixing attempt)
+ * FIVE SHAPES, ONE FACTORY. RESOLVED tabs (queue, committing, a script hook,
+ * and updating main in a bubble recorded before deploys) draw their own row.
+ * AGENTIC tabs (a prompt hook, a conflict resolution, a fixing attempt)
  * are containers: their content is the sub-feed rows parented to them, drawn
  * through `view.drawRow` — the ordinary row path, chrome included — which is
  * what keeps a merge agent's conversation identical to any other agent's.
@@ -55,6 +56,7 @@ import {
   drawFeedMergeTabRebasing,
   drawFeedMergeTabUpdatingMain,
 } from "./step-tabs.js";
+import { drawFeedMergeTabHookScript } from "./hook-tabs.js";
 import { buildInterruptMergeTabRequest } from "../requests.js";
 import { drawStopControl, type StopSite } from "../stop-control.js";
 
@@ -80,9 +82,10 @@ export function mergeTabPanel(tab: MergeTab, view: SubfeedView, rc: RowContext):
       return rowPanel(tab, () => drawFeedMergeTabCommitting(armOf(tab, "committing"), `${PATH}.committing`));
     case "updatingMain":
       return rowPanel(tab, () => drawFeedMergeTabUpdatingMain(armOf(tab, "updatingMain"), `${PATH}.updating_main`));
+    case "hookScript":
+      return rowPanel(tab, () => drawFeedMergeTabHookScript(armOf(tab, "hookScript"), `${PATH}.hook_script`));
     case "resolving":
-    case "prePrompt":
-    case "postPrompt":
+    case "hookPrompt":
       return agenticPanel(tab, view, rc, () => null);
     case "testsRunFixing":
       return agenticPanel(tab, view, rc, (t) =>

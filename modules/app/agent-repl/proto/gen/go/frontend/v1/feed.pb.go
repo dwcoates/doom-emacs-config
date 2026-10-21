@@ -25029,7 +25029,9 @@ type FeedMergeTabHookScript struct {
 	State isFeedMergeTabHookScript_State `protobuf_oneof:"state"`
 	// The script that runs.
 	Path *FeedMergeHookScriptPath `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
-	// The log holding its standard output and error, opened by a click.
+	// The log holding its standard output and error, drawn as its path: no
+	// agentrepl.v1.OpenInEditorRequest target opens a hook log yet (see
+	// docs/protobuf-design/deploy-queue.md, "Open gaps").
 	Log *FeedMergeHookScriptLog `protobuf:"bytes,4,opt,name=log,proto3" json:"log,omitempty"`
 	// The last lines of its output so far, oldest first. Empty until it writes.
 	Tail []*FeedMergeHookScriptLine `protobuf:"bytes,5,rep,name=tail,proto3" json:"tail,omitempty"`
@@ -25187,7 +25189,7 @@ func (x *FeedMergeHookScriptPath) GetText() string {
 // The script's log file on the daemon's host.
 type FeedMergeHookScriptLog struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The log's full path, opened in the editor by a click.
+	// The log's full path.
 	Path          string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

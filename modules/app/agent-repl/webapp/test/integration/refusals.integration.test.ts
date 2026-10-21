@@ -622,9 +622,9 @@ const REFUSAL_SITES: RefusalSite[] = [
     arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
   },
   {
-    name: "MergeWorkspace",
-    rpc: "mergeWorkspace",
-    click: `[data-roster-row="${WORKSPACE_ID}"] [data-verb="merge"]`,
+    name: "FinishWorkspace",
+    rpc: "finishWorkspace",
+    click: `[data-roster-row="${WORKSPACE_ID}"] [data-verb="finish"]`,
     site: `[data-roster-row="${WORKSPACE_ID}"]`,
     arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
   },

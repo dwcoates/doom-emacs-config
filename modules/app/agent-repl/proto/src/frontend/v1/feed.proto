@@ -4051,7 +4051,9 @@ message FeedMergeTabHookScript {
   }
   // The script that runs.
   FeedMergeHookScriptPath path = 3;
-  // The log holding its standard output and error, opened by a click.
+  // The log holding its standard output and error, drawn as its path: no
+  // agentrepl.v1.OpenInEditorRequest target opens a hook log yet (see
+  // docs/protobuf-design/deploy-queue.md, "Open gaps").
   FeedMergeHookScriptLog log = 4;
   // The last lines of its output so far, oldest first. Empty until it writes.
   repeated FeedMergeHookScriptLine tail = 5;
@@ -4065,7 +4067,7 @@ message FeedMergeHookScriptPath {
 }
 // The script's log file on the daemon's host.
 message FeedMergeHookScriptLog {
-  // The log's full path, opened in the editor by a click.
+  // The log's full path.
   string path = 1;
 }
 // One line of the script's output, drawn verbatim.

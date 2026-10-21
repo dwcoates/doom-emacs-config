@@ -24,14 +24,14 @@ function step(stepCase: string, value: Record<string, unknown>): HTMLElement {
 /** A legal value for every arm, so the table below draws each one. */
 const ARM_VALUES: Readonly<Record<string, Record<string, unknown>>> = {
   enqueued: { workspaceName: "fix-reconnect", step: "testing" },
-  preprocessing: { text: "update the changelog" },
+  preDeploy: { hook: { case: "prompt", value: { text: "update the changelog" } } },
   rebasing: { line: { case: "running", value: { text: "git rebase --continue" } } },
   conflictResolution: { commitSubject: "fix the reconnect loop", files: 3 },
   testing: { name: "webapp", edge: { case: "started", value: {} } },
   fixing: { suites: ["webapp"] },
   committing: { subject: "Merge branch 'fix-reconnect'" },
-  updatingMain: { step: { case: "fetching", value: {} } },
-  postprocessing: { text: "deploy it" },
+  deploying: { hook: { case: "script", value: { path: "bin/deploy-landing.sh" } } },
+  postDeploy: { hook: { case: "prompt", value: { text: "deploy it" } } },
 };
 
 describe("drawFooterStatusActivityMergeStep: every arm", () => {
@@ -54,13 +54,17 @@ describe("the enqueued line", () => {
   });
 });
 
-describe("the prompt lines", () => {
-  it("draws the before-merge prompt's text verbatim", () => {
-    expect(step("preprocessing", { text: "update the changelog" }).textContent).toBe("update the changelog");
+describe("the hook lines", () => {
+  it.each([
+    ["preDeploy", { case: "prompt", value: { text: "update the changelog" } }, "update the changelog"],
+    ["deploying", { case: "script", value: { path: "bin/deploy-landing.sh" } }, "bin/deploy-landing.sh"],
+    ["postDeploy", { case: "prompt", value: { text: "deploy it" } }, "deploy it"],
+  ])("draws the %s hook's own words verbatim", (stage, hook, words) => {
+    expect(step(stage, { hook }).textContent).toBe(words);
   });
 
-  it("draws the after-merge prompt's text verbatim", () => {
-    expect(step("postprocessing", { text: "deploy it" }).textContent).toBe("deploy it");
+  it("refuses a hook with no arm", () => {
+    expect(() => step("deploying", { hook: {} })).toThrow(MalformedView);
   });
 });
 
@@ -163,22 +167,3 @@ describe("the committing line", () => {
   });
 });
 
-describe("the updating main line", () => {
-  it("says it is fetching", () => {
-    expect(step("updatingMain", { step: { case: "fetching", value: {} } }).textContent).toBe("fetching");
-  });
-
-  it("says which commit it is fast-forwarding to", () => {
-    const el = step("updatingMain", { step: { case: "fastForwarding", value: { commit: "4f2a1c" } } });
-    expect(el.textContent).toBe("fast-forwarding to 4f2a1c");
-  });
-
-  it("colours the commit as a sha", () => {
-    const el = step("updatingMain", { step: { case: "fastForwarding", value: { commit: "4f2a1c" } } });
-    expect(el.querySelector('[data-datum="sha"]')?.textContent).toBe("4f2a1c");
-  });
-
-  it("refuses an update with no step", () => {
-    expect(() => step("updatingMain", {})).toThrow(MalformedView);
-  });
-});

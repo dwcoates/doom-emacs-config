@@ -86,7 +86,7 @@ import { OpenWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/
 import { CloseWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
 import { KillWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
 import { NukeWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_nuke_workspace_pb";
-import { MergeWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_merge_workspace_pb";
+import { FinishWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_finish_workspace_pb";
 import { RestartWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_restart_workspace_pb";
 import { SetWorkspacePriorityResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_priority_pb";
 import { CreateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_task_pb";
@@ -1320,9 +1320,9 @@ export function createFakeDaemon(): FakeDaemon {
           result: { case: "success", value: {} },
         });
       },
-      mergeWorkspace(request) {
-        record("mergeWorkspace", request);
-        return answerFor("mergeWorkspace", MergeWorkspaceResponseSchema, {
+      finishWorkspace(request) {
+        record("finishWorkspace", request);
+        return answerFor("finishWorkspace", FinishWorkspaceResponseSchema, {
           result: { case: "success", value: {} },
         });
       },

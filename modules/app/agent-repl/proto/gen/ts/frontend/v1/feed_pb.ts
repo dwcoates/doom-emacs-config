@@ -12090,7 +12090,9 @@ export type FeedMergeTabHookScript = Message<"frontend.v1.FeedMergeTabHookScript
   path?: FeedMergeHookScriptPath | undefined;
 
   /**
-   * The log holding its standard output and error, opened by a click.
+   * The log holding its standard output and error, drawn as its path: no
+   * agentrepl.v1.OpenInEditorRequest target opens a hook log yet (see
+   * docs/protobuf-design/deploy-queue.md, "Open gaps").
    *
    * @generated from field: frontend.v1.FeedMergeHookScriptLog log = 4;
    */
@@ -12145,7 +12147,7 @@ export const FeedMergeHookScriptPathSchema: GenMessage<FeedMergeHookScriptPath> 
  */
 export type FeedMergeHookScriptLog = Message<"frontend.v1.FeedMergeHookScriptLog"> & {
   /**
-   * The log's full path, opened in the editor by a click.
+   * The log's full path.
    *
    * @generated from field: string path = 1;
    */

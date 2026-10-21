@@ -6,8 +6,8 @@
  * line can only stand under the step it narrates, and each arm's words are
  * the daemon's: a prompt's text, a rebase command, a commit subject, a suite's
  * name. This module adds only what footer.proto says each arm is DRAWN as —
- * the suite edge's glyph, the "N files" of a conflict, the "fast-forwarding
- * to" of an update — and never decides anything about the merge.
+ * the suite edge's glyph and the "N files" of a conflict — and never decides
+ * anything about the merge.
  *
  * FOOTER TEXT IS FOR A HUMAN USER: every word added here is plain, and no
  * identifier spelling reaches the line.
@@ -21,10 +21,10 @@ import type {
   FooterMergeStepConflict,
   FooterMergeStepEnqueued,
   FooterMergeStepFixing,
+  FooterMergeStepHook,
   FooterMergeStepPrompt,
   FooterMergeStepRebasing,
   FooterMergeStepSuite,
-  FooterMergeStepUpdatingMain,
   FooterStatusActivityMergeStep,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { log } from "../log.js";
@@ -65,9 +65,12 @@ function drawStep(
   switch (step.case) {
     case "enqueued":
       return drawMergeStepEnqueued(step.value);
-    case "preprocessing":
-    case "postprocessing":
-      return drawMergeStepPrompt(step.value);
+    case "preDeploy":
+      return drawMergeStepHook(step.value, `${path}.pre_deploy`);
+    case "deploying":
+      return drawMergeStepHook(step.value, `${path}.deploying`);
+    case "postDeploy":
+      return drawMergeStepHook(step.value, `${path}.post_deploy`);
     case "rebasing":
       return drawMergeStepRebasing(step.value, `${path}.rebasing`);
     case "conflictResolution":
@@ -78,8 +81,6 @@ function drawStep(
       return drawMergeStepFixing(step.value);
     case "committing":
       return textLine("footer-merge-step-committing", step.value.subject);
-    case "updatingMain":
-      return drawMergeStepUpdatingMain(step.value, `${path}.updating_main`);
     default: {
       const other: { case: string } = step;
       return unreachableArm(path, other.case);
@@ -92,7 +93,22 @@ export function drawMergeStepEnqueued(u: FooterMergeStepEnqueued): HTMLElement {
   return textLine("footer-merge-step-enqueued", `${u.workspaceName}: ${u.step}`);
 }
 
-/** A configured prompt's text, verbatim. */
+/** A running hook's line: a prompt hook's text or a script hook's path, verbatim. */
+export function drawMergeStepHook(u: FooterMergeStepHook, path: string): HTMLElement {
+  const hook = requireCase(u.hook, `${path}.hook`);
+  switch (hook.case) {
+    case "prompt":
+      return drawMergeStepPrompt(hook.value);
+    case "script":
+      return textLine("footer-merge-step-script", hook.value.path);
+    default: {
+      const other: { case: string } = hook;
+      return unreachableArm(`${path}.hook`, other.case);
+    }
+  }
+}
+
+/** A prompt hook's text, verbatim. */
 export function drawMergeStepPrompt(u: FooterMergeStepPrompt): HTMLElement {
   return textLine("footer-merge-step-prompt", u.text);
 }
@@ -164,28 +180,3 @@ export function drawMergeStepFixing(u: FooterMergeStepFixing): HTMLElement {
   return textLine("footer-merge-step-fixing", u.suites.join(", "));
 }
 
-/** Updating main: "fetching", then "fast-forwarding to 4f2a1c". */
-export function drawMergeStepUpdatingMain(u: FooterMergeStepUpdatingMain, path: string): HTMLElement {
-  const step = requireCase(u.step, `${path}.step`);
-  const line = document.createElement("span");
-  line.className = "footer-merge-step-updating-main";
-  line.setAttribute("data-update-step", step.case);
-  switch (step.case) {
-    case "fetching":
-      line.textContent = "fetching";
-      return line;
-    case "fastForwarding": {
-      line.appendChild(document.createTextNode("fast-forwarding to "));
-      const commit = document.createElement("span");
-      commit.className = activityDatumClass("sha");
-      commit.setAttribute("data-datum", "sha");
-      commit.textContent = step.value.commit;
-      line.appendChild(commit);
-      return line;
-    }
-    default: {
-      const other: { case: string } = step;
-      return unreachableArm(`${path}.step`, other.case);
-    }
-  }
-}

@@ -210,11 +210,13 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
   it.each([
     ["closing", "blocked", "close blocked"],
     ["merging", "conflictResolution", "conflict resolution"],
-    ["merging", "updatingMain", "updating main"],
-    ["merging", "postprocessing", "postprocessing"],
+    ["merging", "deploying", "deploying"],
+    ["merging", "preDeploy", "pre-deploy"],
+    ["merging", "postDeploy", "post-deploy"],
     ["mergeFailed", "conflicts", "conflicts"],
     ["mergeFailed", "tests", "tests"],
     ["mergeFailed", "other", "merge"],
+    ["mergeFailed", "hook", "hook"],
     ["agentReplFault", "startFailed", "start failed"],
     ["agentReplFault", "daemonImpaired", "daemon impaired"],
     ["networkFault", "offline", "offline"],
@@ -244,14 +246,14 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
 
   it.each([
     ["enqueued", { place: 2, waiting: 5 }, "enqueued 2/5"],
-    ["preprocessing", {}, "preprocessing"],
+    ["preDeploy", {}, "pre-deploy"],
     ["rebasing", { replayed: 3, total: 7 }, "rebasing 3/7"],
     ["conflictResolution", {}, "conflict resolution"],
     ["testing", {}, "testing"],
     ["fixing", { attempt: 2, maxAttempts: 3 }, "fixing attempt 2/3"],
     ["committing", {}, "committing"],
-    ["updatingMain", {}, "updating main"],
-    ["postprocessing", {}, "postprocessing"],
+    ["deploying", {}, "deploying"],
+    ["postDeploy", {}, "post-deploy"],
   ])("draws the merging %s step as '%s'", (subCase, value, words) => {
     const { row } = drawStrip({ status: withSubStatus("merging", subCase, value) });
     expect(row.querySelector(".footer-substatus")?.textContent).toBe(words);

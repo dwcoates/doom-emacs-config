@@ -23,9 +23,9 @@ import {
   SetWorkspaceHiddenResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import {
-  MergeWorkspaceErrorSchema,
-  MergeWorkspaceResponseSchema,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_merge_workspace_pb";
+  FinishWorkspaceErrorSchema,
+  FinishWorkspaceResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_finish_workspace_pb";
 import {
   NukeWorkspaceErrorSchema,
   NukeWorkspaceResponseSchema,
@@ -50,7 +50,7 @@ import {
   buildKillWorkspaceRequest,
   killWorkspaceRefusal,
   setWorkspaceHiddenRefusal,
-  buildMergeWorkspaceRequest,
+  buildFinishWorkspaceRequest,
   buildNukeWorkspaceRequest,
   buildOpenWorkspaceRequest,
   buildRevertMergeRequest,
@@ -63,7 +63,7 @@ import {
   drawNukeConfirm,
   closeWorkspaceRefusal,
   drawRowMenu,
-  mergeWorkspaceRefusal,
+  finishWorkspaceRefusal,
   nukeWorkspaceRefusal,
   lockHolderHowText,
   openWorkspaceRefusal,
@@ -124,13 +124,14 @@ describe("the requests each verb is", () => {
     expect(buildNukeWorkspaceRequest(TARGET_WS).workspace).toEqual(TARGET_WS);
   });
 
-  it("addresses MergeWorkspace with the row's echoed identity", () => {
-    expect(buildMergeWorkspaceRequest(TARGET_WS).workspace).toEqual(TARGET_WS);
+  it("addresses FinishWorkspace with the row's echoed identity", () => {
+    expect(buildFinishWorkspaceRequest(TARGET_WS).workspace).toEqual(TARGET_WS);
   });
 
-  it("asks MergeWorkspace for a one-shot of the row's own branch", () => {
-    const mode = buildMergeWorkspaceRequest(TARGET_WS).mode;
-    expect(mode.case === "oneShot" ? mode.value.landing.case : mode.case).toBe("ownBranch");
+  it("asks FinishWorkspace as the user at the back of the queue", () => {
+    const req = buildFinishWorkspaceRequest(TARGET_WS);
+    expect(req.requester?.asker.case).toBe("user");
+    expect(req.placement?.place.case).toBe("back");
   });
 
   it("echoes the row's workspace on the one-mode restart request", () => {
@@ -168,7 +169,7 @@ describe("the menu", () => {
     expect(verbs).toEqual([
       "open",
       "close",
-      "merge",
+      "finish",
       "restart",
       "priority",
       "priority",
@@ -271,6 +272,8 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
     failure: { binary: "/b/shim-lock", how: { case: "exited", value: { code: 1, stderr: "EACCES" } } },
   },
   gitFailed: { detail: "worktree is dirty" },
+  noDeployConfig: { path: "/r/.agent-repl/deploy.yaml" },
+  deployConfigInvalid: { path: "/r/.agent-repl/deploy.yaml", detail: "pre_deploy is required" },
   briefMissing: { detail: "the workspace-merge-revert brief is unreadable" },
   hasOpenChildren: { parent: { id: "p", dir: "/w/parent" }, children: [{ id: "c", dir: "/w/child" }] },
   parentNotOpen: { parent: { id: "p", dir: "/w/parent" }, state: { case: "hidden", value: {} } },
@@ -352,17 +355,17 @@ const VERBS: readonly VerbUnderTest[] = [
       }),
   },
   {
-    rpc: "MergeWorkspace",
-    method: "mergeWorkspace",
-    responseSchema: MergeWorkspaceResponseSchema,
-    errorSchema: MergeWorkspaceErrorSchema,
+    rpc: "FinishWorkspace",
+    method: "finishWorkspace",
+    responseSchema: FinishWorkspaceResponseSchema,
+    errorSchema: FinishWorkspaceErrorSchema,
     call: (t, control) =>
       runVerb(control, {
         sc: t.sc,
-        rpc: "MergeWorkspace",
-        call: (client) => client.mergeWorkspace(buildMergeWorkspaceRequest(TARGET_WS)),
-        schema: MergeWorkspaceResponseSchema,
-        refusalText: (cause) => mergeWorkspaceRefusal(cause as never),
+        rpc: "FinishWorkspace",
+        call: (client) => client.finishWorkspace(buildFinishWorkspaceRequest(TARGET_WS)),
+        schema: FinishWorkspaceResponseSchema,
+        refusalText: (cause) => finishWorkspaceRefusal(cause as never),
       }),
   },
   {
@@ -606,9 +609,19 @@ describe("the per-rpc causes, worded at their own site", () => {
     expect(refusal?.textContent).toContain("worktree is dirty");
   });
 
-  it("says a merge is already queued", async () => {
-    const refusal = await refuseWith(verbNamed("MergeWorkspace"), "alreadyQueued");
-    expect(refusal?.textContent).toContain("already in the merge queue");
+  it("says a deploy is already queued", async () => {
+    const refusal = await refuseWith(verbNamed("FinishWorkspace"), "alreadyQueued");
+    expect(refusal?.textContent).toContain("already in the queue");
+  });
+
+  it("names the deploy config a repository lacks", async () => {
+    const refusal = await refuseWith(verbNamed("FinishWorkspace"), "noDeployConfig");
+    expect(refusal?.textContent).toContain("the repository states no deploy");
+  });
+
+  it("says why a repository's deploy config is unusable", async () => {
+    const refusal = await refuseWith(verbNamed("FinishWorkspace"), "deployConfigInvalid");
+    expect(refusal?.textContent).toContain("is unusable");
   });
 
 });
@@ -787,33 +800,33 @@ describe("a response with no outcome arm", () => {
 });
 
 describe("the menu's own controls, clicked", () => {
-  it("merges through MergeWorkspace with the row's echoed identity", async () => {
+  it("finishes through FinishWorkspace with the row's echoed identity", async () => {
     // Arrange
     let seen: unknown = null;
     const t = target({
-      mergeWorkspace: (req: unknown) => {
+      finishWorkspace: (req: unknown) => {
         seen = (req as { workspace?: unknown }).workspace;
-        return create(MergeWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+        return create(FinishWorkspaceResponseSchema, { result: { case: "success", value: {} } });
       },
     });
     const menu = drawRowMenu(t);
     // Act
-    await click(menu.querySelector("[data-verb='merge']") as Element);
+    await click(menu.querySelector("[data-verb='finish']") as Element);
     // Assert
     expect(seen).toEqual(TARGET_WS);
   });
 
-  it("draws a merge refusal at the merge control itself", async () => {
+  it("draws a finish refusal at the finish control itself", async () => {
     const t = target({
-      mergeWorkspace: () =>
-        create(MergeWorkspaceResponseSchema, {
-          result: { case: "error", value: { cause: { case: "alreadyMerging", value: {} } } },
+      finishWorkspace: () =>
+        create(FinishWorkspaceResponseSchema, {
+          result: { case: "error", value: { cause: { case: "alreadyDeploying", value: {} } } },
         }),
     });
     const menu = drawRowMenu(t);
-    const button = menu.querySelector("[data-verb='merge']") as HTMLElement;
+    const button = menu.querySelector("[data-verb='finish']") as HTMLElement;
     await click(button);
-    expect(button.nextElementSibling?.textContent).toBe("this workspace is already merging");
+    expect(button.nextElementSibling?.textContent).toBe("this workspace is already deploying");
   });
 
   it("restarts from the one restart entry", async () => {
@@ -969,7 +982,7 @@ describe("an arm no wording table knows", () => {
     ["OpenWorkspaceError.cause", openWorkspaceRefusal],
     ["CloseWorkspaceError.cause", closeWorkspaceRefusal],
     ["NukeWorkspaceError.cause", nukeWorkspaceRefusal],
-    ["MergeWorkspaceError.cause", mergeWorkspaceRefusal],
+    ["FinishWorkspaceError.cause", finishWorkspaceRefusal],
   ];
 
   it.each(WORDINGS)("refuses %s rather than inventing a sentence", (path, word) => {

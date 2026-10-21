@@ -1309,7 +1309,7 @@ export const commandRefusedRow = (
 export const MERGE_TAB_KINDS = [
   "resolving",
   "queue",
-  "prePrompt",
+  "hookPrompt",
   "rebasing",
   "rebaseCommit",
   "tests",
@@ -1317,7 +1317,7 @@ export const MERGE_TAB_KINDS = [
   "testsRunFixing",
   "committing",
   "updatingMain",
-  "postPrompt",
+  "hookScript",
 ] as const;
 export type MergeTabKind = (typeof MERGE_TAB_KINDS)[number];
 
@@ -1500,10 +1500,10 @@ const mergeTabKindValue = (
         case: "testsRunFixing",
         value: { state: agenticState(state), attempt: { attempt: 2, maxAttempts: 3 } },
       };
-    case "prePrompt":
-      return { case: "prePrompt", value: { state: plainState(state) } };
-    case "postPrompt":
-      return { case: "postPrompt", value: { state: plainState(state) } };
+    case "hookPrompt":
+      return { case: "hookPrompt", value: { state: plainState(state) } };
+    case "hookScript":
+      return { case: "hookScript", value: { state: plainState(state), path: { text: "bin/deploy.sh" }, log: { path: "/state/merge-logs/0011aabb-deploy-1.log" }, tail: [] } };
   }
 };
 
@@ -1664,14 +1664,14 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
   interrupted: ["byUser", "hostShutdown"],
   merging: [
     "enqueued",
-    "preprocessing",
+    "preDeploy",
     "rebasing",
     "conflictResolution",
     "testing",
     "fixing",
     "committing",
-    "updatingMain",
-    "postprocessing",
+    "deploying",
+    "postDeploy",
     "waitingOnUser",
   ],
   background: [],
@@ -1695,7 +1695,7 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
   loading: ["memory", "invoked", "discovered", "listing"],
   // A merge that STOPPED is its own arm: a failure, whose substatus is the
   // area it failed in, and a landing.
-  mergeFailed: ["conflicts", "tests", "other"],
+  mergeFailed: ["conflicts", "tests", "other", "hook"],
   merged: [],
   // A failed turn and a degraded view are usable faults (owner ruling,
   // 2026-09-28): each its own turquoise arm.
@@ -1723,23 +1723,23 @@ const substatusValue = (substatus: string): object => {
 export const MERGE_SUBSTATUS_WORDS: Record<string, Record<string, string>> = {
   merging: {
     enqueued: "enqueued 2/5",
-    preprocessing: "preprocessing",
+    preDeploy: "pre-deploy",
     rebasing: "rebasing 3/7",
     conflictResolution: "conflict resolution",
     testing: "testing",
     fixing: "fixing attempt 2/3",
     committing: "committing",
-    updatingMain: "updating main",
-    postprocessing: "postprocessing",
+    deploying: "deploying",
+    postDeploy: "post-deploy",
     waitingOnUser: "waiting on user",
   },
-  mergeFailed: { conflicts: "conflicts", tests: "tests", other: "merge" },
+  mergeFailed: { conflicts: "conflicts", tests: "tests", other: "merge", hook: "hook" },
 };
 
 /** Every merge step line arm, with a complete payload and the words it draws. */
 export const MERGE_STEP_LINES: Record<string, { value: object; words: string }> = {
   enqueued: { value: { workspaceName: "fix-reconnect", step: "testing" }, words: "fix-reconnect: testing" },
-  preprocessing: { value: { text: "update the changelog" }, words: "update the changelog" },
+  preDeploy: { value: { hook: { case: "prompt", value: { text: "update the changelog" } } }, words: "update the changelog" },
   rebasing: {
     value: { line: { case: "running", value: { text: "git rebase --continue" } } },
     words: "git rebase --continue",
@@ -1751,11 +1751,8 @@ export const MERGE_STEP_LINES: Record<string, { value: object; words: string }> 
   testing: { value: { name: "webapp", edge: { case: "passed", value: {} } }, words: "✓ webapp" },
   fixing: { value: { suites: ["daemon unit", "webapp"] }, words: "daemon unit, webapp" },
   committing: { value: { subject: "Merge branch 'ws-1' into master" }, words: "Merge branch 'ws-1' into master" },
-  updatingMain: {
-    value: { step: { case: "fastForwarding", value: { commit: "4f2a1c9" } } },
-    words: "fast-forwarding to 4f2a1c9",
-  },
-  postprocessing: { value: { text: "deploy it" }, words: "deploy it" },
+  deploying: { value: { hook: { case: "script", value: { path: "bin/deploy-landing.sh" } } }, words: "bin/deploy-landing.sh" },
+  postDeploy: { value: { hook: { case: "prompt", value: { text: "deploy it" } } }, words: "deploy it" },
 };
 
 /** The suite edges a testing line draws, with the words and tone each takes. */
