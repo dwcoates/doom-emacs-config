@@ -34,6 +34,7 @@ import {
   TOOL_CALL_INPUT_FORM_ARMS,
   TOOL_CALL_OUTCOME_ARMS,
   TOOL_CALL_VERDICT_ARMS,
+  TOOL_EDIT_CLASS,
   classicDiffLines,
   drawFeedSimpleToolCall,
 } from "../../../src/feed/cards/tool-call.js";
@@ -889,6 +890,84 @@ describe("the links output form", () => {
       rowContext(),
     );
     expect(el.querySelector(".tool-omitted")?.textContent).toBe("9 more not shown");
+  });
+});
+
+describe("the stated edits", () => {
+  /** A wire diff line of KIND. */
+  function line(kind: "header" | "added" | "removed" | "context", text: string) {
+    return create(FeedDiffLineSchema, { kind: { case: kind, value: {} }, text });
+  }
+
+  /** A shell card stating EDITS, running unless an outcome is given. */
+  function editingCard(
+    files: { path: string; lines: ReturnType<typeof line>[] }[],
+    outcome: MessageInitShape<typeof FeedSimpleToolCallSchema>["outcome"] = { case: "running", value: {} },
+  ) {
+    return drawFeedSimpleToolCall(
+      card({
+        input: { text: "python3 - <<'EOF'", form: { case: "command", value: {} } },
+        outcome,
+        edits: { files },
+      }),
+      rowContext(),
+    );
+  }
+
+  /** Each stated edit's drawn lines, as kind:text. */
+  function drawn(el: HTMLElement): string[][] {
+    return [...el.querySelectorAll(`.${TOOL_EDIT_CLASS}`)].map((pre) =>
+      [...pre.querySelectorAll("[data-diff-line]")].map((l) => `${l.getAttribute("data-diff-line")}:${l.textContent}`),
+    );
+  }
+
+  it("draws a file's edit as a classic diff opened by its path", () => {
+    const el = editingCard([
+      { path: "f.go", lines: [line("header", "@@ every occurrence @@"), line("removed", "a"), line("added", "b"), line("context", "c")] },
+    ]);
+    expect(drawn(el)).toEqual([["meta:f.go", "header:@@ every occurrence @@", "removed:a", "added:b", "context:c"]]);
+    expect(el.querySelector(`.${TOOL_EDIT_CLASS}`)?.getAttribute("data-edit-path")).toBe("f.go");
+  });
+
+  it("draws one diff per file, in the order the command writes them", () => {
+    const el = editingCard([
+      { path: "a.go", lines: [line("added", "x")] },
+      { path: "b.go", lines: [line("removed", "y")] },
+    ]);
+    expect(drawn(el)).toEqual([["meta:a.go", "added:x"], ["meta:b.go", "removed:y"]]);
+  });
+
+  it("sits between the input line and the output", () => {
+    const el = editingCard([{ path: "f.go", lines: [line("added", "x")] }], {
+      case: "returned",
+      value: { verdict: { case: "succeeded", value: {} }, form: { case: "text", value: { text: "done" } } },
+    });
+    const children = [...el.children];
+    const edit = children.findIndex((c) => c.classList.contains(TOOL_EDIT_CLASS));
+    const input = children.findIndex((c) => c.getAttribute("data-input-form") === "command");
+    const output = children.findIndex((c) => c.classList.contains("bash-output"));
+    expect([input, edit, output].every((i) => i >= 0)).toBe(true);
+    expect([input < edit, edit < output]).toEqual([true, true]);
+  });
+
+  it("draws no edit for a card that states none", () => {
+    const el = drawFeedSimpleToolCall(card({ outcome: { case: "running", value: {} } }), rowContext());
+    expect(el.querySelector(`.${TOOL_EDIT_CLASS}`)).toBeNull();
+  });
+
+  it("folds away with the output while the card is collapsed", () => {
+    const remove = installStylesheet();
+    try {
+      const el = editingCard([{ path: "f.go", lines: [line("added", "x")] }]);
+      document.body.replaceChildren(el);
+      expect(cascadedValue(el.querySelector(`.${TOOL_EDIT_CLASS}`) as Element, "display")).toBe("none");
+    } finally {
+      remove();
+    }
+  });
+
+  it("refuses a stated edit line with no kind", () => {
+    expect(() => editingCard([{ path: "f.go", lines: [create(FeedDiffLineSchema, { text: "x" })] }])).toThrow(MalformedView);
   });
 });
 
