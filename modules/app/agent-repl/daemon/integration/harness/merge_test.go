@@ -90,3 +90,17 @@ func TestIsLandingDeployedRecognizesOnlyTheLandingsDoneRecord(t *testing.T) {
 		})
 	}
 }
+
+func TestPreAndPostDeployPromptsFillTheirOwnStage(t *testing.T) {
+	// Act
+	pre := PreDeployPrompts("lint", "check")
+	post := PostDeployPrompts("announce")
+
+	// Assert
+	if len(pre.GetPreDeploy()) != 2 || pre.GetPreDeploy()[1].GetPrompt().GetText() != "check" || len(pre.GetPostDeploy()) != 0 {
+		t.Fatalf("PreDeployPrompts = %v, want both prompts in order, pre-deploy alone", pre)
+	}
+	if len(post.GetPostDeploy()) != 1 || post.GetPostDeploy()[0].GetPrompt().GetText() != "announce" || len(post.GetPreDeploy()) != 0 {
+		t.Fatalf("PostDeployPrompts = %v, want the prompt, post-deploy alone", post)
+	}
+}

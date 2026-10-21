@@ -8,11 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
-	"agent-repld/internal/deployconfig"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
@@ -42,7 +39,7 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 	repoRef = mergeRepositoryRef(t, d, repo)
 
 	front = mergeCreateChild(t, d, repoRef, namePrefix+"-front", namePrefix+" front work",
-		preDeployPrompts("hold "+namePrefix+"'s queue open"))
+		harness.PreDeployPrompts("hold "+namePrefix+"'s queue open"))
 	behind = mergeCreateChild(t, d, repoRef, namePrefix+"-behind", namePrefix+" behind work", nil)
 
 	harness.CommitWork(t, front.ws.GetDir())
@@ -58,27 +55,6 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 		t.Fatalf("MergeWorkspace(%s behind) = error %v, want the merge enqueued", namePrefix, err)
 	}
 	return front, behind, repo, repoRef
-}
-
-// promptHooks are TEXTS as prompt hooks, in order.
-func promptHooks(texts ...string) []*repoconfigv1.DeployHook {
-	var out []*repoconfigv1.DeployHook
-	for _, text := range texts {
-		out = append(out, deployconfig.PromptHook(text))
-	}
-	return out
-}
-
-// preDeployPrompts are a request's deploy hooks: TEXTS as its pre-deploy
-// prompts.
-func preDeployPrompts(texts ...string) *agentreplv1.CreateWorkspaceDeployHooks {
-	return &agentreplv1.CreateWorkspaceDeployHooks{PreDeploy: promptHooks(texts...)}
-}
-
-// postDeployPrompts are a request's deploy hooks: TEXTS as its post-deploy
-// prompts.
-func postDeployPrompts(texts ...string) *agentreplv1.CreateWorkspaceDeployHooks {
-	return &agentreplv1.CreateWorkspaceDeployHooks{PostDeploy: promptHooks(texts...)}
 }
 
 // isMergeTerminal reports whether a feed row is a merge bubble's terminal:

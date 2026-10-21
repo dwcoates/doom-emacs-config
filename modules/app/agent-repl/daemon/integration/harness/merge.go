@@ -2,7 +2,10 @@ package harness
 
 import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"agent-repld/internal/deployconfig"
 )
 
 // merge.go holds the merge-request shapes and the landing wait that the daemon
@@ -174,4 +177,25 @@ func IsLandingDeployed(r LogRecord) bool {
 func (d *Daemon) AwaitLandingDeployed() {
 	d.t.Helper()
 	d.AwaitLogRecordWithin(d.RunLogPath(), "the landing's deploy", MergeChainTimeout, IsLandingDeployed)
+}
+
+// PromptHooks are TEXTS as prompt hooks, in order.
+func PromptHooks(texts ...string) []*repoconfigv1.DeployHook {
+	var out []*repoconfigv1.DeployHook
+	for _, text := range texts {
+		out = append(out, deployconfig.PromptHook(text))
+	}
+	return out
+}
+
+// PreDeployPrompts are a request's deploy hooks: TEXTS as its pre-deploy
+// prompts, in place of the repository's.
+func PreDeployPrompts(texts ...string) *agentreplv1.CreateWorkspaceDeployHooks {
+	return &agentreplv1.CreateWorkspaceDeployHooks{PreDeploy: PromptHooks(texts...)}
+}
+
+// PostDeployPrompts are a request's deploy hooks: TEXTS as its post-deploy
+// prompts, in place of the repository's.
+func PostDeployPrompts(texts ...string) *agentreplv1.CreateWorkspaceDeployHooks {
+	return &agentreplv1.CreateWorkspaceDeployHooks{PostDeploy: PromptHooks(texts...)}
 }

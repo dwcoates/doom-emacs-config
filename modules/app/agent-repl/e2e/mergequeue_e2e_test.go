@@ -52,7 +52,6 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
@@ -154,13 +153,6 @@ func mqFinish(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("FinishWorkspace = (%v, %v), want the deploy enqueued", resp.Msg.GetResult(), err)
 	}
-}
-
-// mqPreDeployPrompt is a request's deploy hooks: TEXT as its one pre-deploy
-// prompt.
-func mqPreDeployPrompt(text string) *agentreplv1.CreateWorkspaceDeployHooks {
-	return &agentreplv1.CreateWorkspaceDeployHooks{PreDeploy: []*repoconfigv1.DeployHook{
-		{Hook: &repoconfigv1.DeployHook_Prompt{Prompt: &repoconfigv1.DeployHookPrompt{Text: text}}}}}
 }
 
 // mqConcluded answers whether a root row is a merge bubble's terminal.
@@ -782,7 +774,7 @@ func TestFailMarkerFailsAPreDeployHooksDeploy(t *testing.T) {
 		repo := harness.NewRepo(t)
 		w := mqSelfRepoWorld(t, repo)
 		repoRef := mqRepositoryRef(t, w, repo)
-		child := mqCreateChildWithHooks(t, w, repoRef, "mq-marker-before", mqPreDeployPrompt(mqMarkedAction))
+		child := mqCreateChildWithHooks(t, w, repoRef, "mq-marker-before", harness.PreDeployPrompts(mqMarkedAction))
 		root := mqOpenFeedWatch(t, w, child, nil)
 		defer root.Close()
 		// Warning discipline: the failed hook (daemon.merge.hook) and the

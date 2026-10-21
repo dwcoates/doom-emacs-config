@@ -390,7 +390,7 @@ func TestCreateWorkspaceDeployHooksAreRecordedAndReadBackByALaterDeploy(t *testi
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
 			Topology:    harness.Primary(),
-			DeployHooks: preDeployPrompts("run the pre-merge checklist"),
+			DeployHooks: harness.PreDeployPrompts("run the pre-merge checklist"),
 		}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {

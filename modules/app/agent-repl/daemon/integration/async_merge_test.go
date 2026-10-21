@@ -312,7 +312,7 @@ func TestAnAsyncRequestsBeforeMergeActionRunsInItsMergeWorkspace(t *testing.T) {
 	root := s.f.watchRootFeed()
 	s.repo.AddBranch("agent-fix")
 	withBefore := func(async *agentreplv1.CreateWorkspaceAsyncMerge) {
-		async.DeployHooks = preDeployPrompts("run the request's linters")
+		async.DeployHooks = harness.PreDeployPrompts("run the request's linters")
 	}
 
 	// Act: the merge workspace is handed the request's before-merge prompt,

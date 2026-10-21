@@ -78,9 +78,9 @@ func mergeBlockedQueueFixture(t *testing.T) (front, racer, behind *fixture, repo
 	repoRef := mergeRepositoryRef(t, d, repo)
 
 	front = mergeCreateChild(t, d, repoRef, "front", "front work",
-		preDeployPrompts("hold the queue open"))
+		harness.PreDeployPrompts("hold the queue open"))
 	racer = mergeCreateChild(t, d, repoRef, "racer", "racer work",
-		preDeployPrompts("hold the race open"))
+		harness.PreDeployPrompts("hold the race open"))
 	behind = mergeCreateChild(t, d, repoRef, "behind", "behind work", nil)
 
 	harness.CommitWork(t, front.ws.GetDir())
@@ -737,7 +737,7 @@ func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *tes
 	repo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
 	repoRef := mergeRepositoryRef(t, d, repo)
-	f := mergeCreateChild(t, d, repoRef, "prepromptrepo", "do the feature", preDeployPrompts("run the setup script"))
+	f := mergeCreateChild(t, d, repoRef, "prepromptrepo", "do the feature", harness.PreDeployPrompts("run the setup script"))
 	root := f.watchRootFeed()
 
 	// Act: enqueue and answer the pre-prompt's own turn.
@@ -808,7 +808,7 @@ func TestAFailingPostDeployHookFailsTheDeployAndKeepsTheLanding(t *testing.T) {
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
 	d := harness.StartDaemon(t, harness.Opts{Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
 	repoRef := mergeRepositoryRef(t, d, repo)
-	f := mergeCreateChild(t, d, repoRef, "postpromptfail", "do the clean thing", postDeployPrompts("clean up after landing"))
+	f := mergeCreateChild(t, d, repoRef, "postpromptfail", "do the clean thing", harness.PostDeployPrompts("clean up after landing"))
 
 	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
 	// merged workspace's worktree down, and the feed resolves its log sink by
