@@ -235,3 +235,67 @@ func TestAgentReplsOwnConfigIsTodaysPipeline(t *testing.T) {
 		t.Fatalf("the deploy script %s = %v, %v; want an executable script", hook.GetPath(), info, err)
 	}
 }
+
+func TestPromptHookAndScriptHookAreCheckedHooks(t *testing.T) {
+	tests := []struct {
+		name  string
+		hook  *repoconfigv1.DeployHook
+		check func(*repoconfigv1.DeployHook) bool
+	}{
+		{name: "a prompt", hook: PromptHook("open the pull request"),
+			check: func(h *repoconfigv1.DeployHook) bool { return h.GetPrompt().GetText() == "open the pull request" }},
+		{name: "a script", hook: ScriptHook("bin/deploy.sh", 60),
+			check: func(h *repoconfigv1.DeployHook) bool {
+				return h.GetScript().GetPath() == "bin/deploy.sh" && h.GetScript().GetTimeoutSeconds() == 60
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Assert
+			if !tt.check(tt.hook) {
+				t.Fatalf("hook = %v", tt.hook)
+			}
+			if err := CheckHook("hook", tt.hook); err != nil {
+				t.Fatalf("CheckHook = %v, want the built hook accepted", err)
+			}
+		})
+	}
+}
+
+// TestNoProductionCodeHandBuildsAHook pins that every production site builds a
+// hook through PromptHook or ScriptHook, so one spelling of a hook stands.
+func TestNoProductionCodeHandBuildsAHook(t *testing.T) {
+	// Arrange
+	daemon, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var byHand []string
+
+	// Act
+	err = filepath.WalkDir(daemon, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
+			strings.HasSuffix(path, ".pb.go") || filepath.Dir(path) == filepath.Join(daemon, "internal", "deployconfig") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(raw), "DeployHook_Prompt{") || strings.Contains(string(raw), "DeployHook_Script{") {
+			byHand = append(byHand, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byHand) != 0 {
+		t.Fatalf("hooks built by hand in %v, want PromptHook and ScriptHook", byHand)
+	}
+}

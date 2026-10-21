@@ -11,6 +11,8 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
+
+	"agent-repld/internal/deployconfig"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
@@ -62,7 +64,7 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 func promptHooks(texts ...string) []*repoconfigv1.DeployHook {
 	var out []*repoconfigv1.DeployHook
 	for _, text := range texts {
-		out = append(out, &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Prompt{Prompt: &repoconfigv1.DeployHookPrompt{Text: text}}})
+		out = append(out, deployconfig.PromptHook(text))
 	}
 	return out
 }

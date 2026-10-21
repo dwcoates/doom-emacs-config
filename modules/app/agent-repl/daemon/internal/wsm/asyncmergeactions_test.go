@@ -11,16 +11,17 @@ import (
 
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
+	"agent-repld/internal/deployconfig"
 )
 
 // promptHook is a prompt hook of TEXT.
 func promptHook(text string) *repoconfigv1.DeployHook {
-	return &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Prompt{Prompt: &repoconfigv1.DeployHookPrompt{Text: text}}}
+	return deployconfig.PromptHook(text)
 }
 
 // scriptHook is a script hook of PATH bounded at SECONDS.
 func scriptHook(path string, seconds uint32) *repoconfigv1.DeployHook {
-	return &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Script{Script: &repoconfigv1.DeployHookScript{Path: path, TimeoutSeconds: seconds}}}
+	return deployconfig.ScriptHook(path, seconds)
 }
 
 // someHooks is a pre-deploy prompt and a post-deploy script, as an async

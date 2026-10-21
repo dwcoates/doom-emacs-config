@@ -23,6 +23,7 @@ import (
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/cpugov"
+	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
@@ -972,7 +973,7 @@ type fakeGit struct {
 	commonDirErr error
 	// mainWorktreeErr, when set, fails every MainWorktree.
 	mainWorktreeErr error
-	refs         map[string]string
+	refs            map[string]string
 	// refSeqs are ResolveRef answers scripted per ref, consumed in order with
 	// the last one standing.
 	refSeqs map[string][]string
@@ -2486,12 +2487,12 @@ func (f *fakeHookRunner) ran() []hookRun {
 
 // promptHookOf is a prompt hook of TEXT.
 func promptHookOf(text string) *repoconfigv1.DeployHook {
-	return &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Prompt{Prompt: &repoconfigv1.DeployHookPrompt{Text: text}}}
+	return deployconfig.PromptHook(text)
 }
 
 // scriptHookOf is a script hook of PATH bounded at 30 seconds.
 func scriptHookOf(path string) *repoconfigv1.DeployHook {
-	return &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Script{Script: &repoconfigv1.DeployHookScript{Path: path, TimeoutSeconds: 30}}}
+	return deployconfig.ScriptHook(path, 30)
 }
 
 // entryOf is a hook entry running for every target.

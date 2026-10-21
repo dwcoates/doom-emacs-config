@@ -25,6 +25,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/protohelpers/rosterwalk"
 
+	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/protoarm"
@@ -415,7 +416,7 @@ func (f promptFlag) Set(text string) error {
 	if strings.TrimSpace(text) == "" {
 		return errors.New("a prompt hook is never blank")
 	}
-	f.list.hooks = append(f.list.hooks, &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Prompt{Prompt: &repoconfigv1.DeployHookPrompt{Text: text}}})
+	f.list.hooks = append(f.list.hooks, deployconfig.PromptHook(text))
 	return nil
 }
 
@@ -432,7 +433,7 @@ func (f scriptFlag) Set(value string) error {
 	if err != nil || timeout < 1 {
 		return fmt.Errorf("a script hook's timeout is a whole number of seconds, at least 1, not %q", seconds)
 	}
-	f.list.hooks = append(f.list.hooks, &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Script{Script: &repoconfigv1.DeployHookScript{Path: path, TimeoutSeconds: uint32(timeout)}}})
+	f.list.hooks = append(f.list.hooks, deployconfig.ScriptHook(path, uint32(timeout)))
 	return nil
 }
 

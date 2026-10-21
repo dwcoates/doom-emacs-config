@@ -171,6 +171,17 @@ func CheckHook(at string, hook *repoconfigv1.DeployHook) error {
 	return nil
 }
 
+// PromptHook is a prompt hook of TEXT, the one spelling every builder of a
+// hook uses.
+func PromptHook(text string) *repoconfigv1.DeployHook {
+	return &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Prompt{Prompt: &repoconfigv1.DeployHookPrompt{Text: text}}}
+}
+
+// ScriptHook is a script hook of PATH bounded at TIMEOUT seconds.
+func ScriptHook(path string, timeoutSeconds uint32) *repoconfigv1.DeployHook {
+	return &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Script{Script: &repoconfigv1.DeployHookScript{Path: path, TimeoutSeconds: timeoutSeconds}}}
+}
+
 // RunsFor reports whether a hook entry runs for a deploy whose target is
 // (toMain) or is not the repository's main branch in its main worktree.
 func RunsFor(entry *repoconfigv1.DeployHookEntry, toMain bool) bool {

@@ -10,6 +10,7 @@ import (
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
 	"agent-repld/internal/account"
+	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -434,7 +435,7 @@ func TestCreateLeavesAMergeWorkspacesSessionForItsFirstTurn(t *testing.T) {
 func promptHooks(texts ...string) []*repoconfigv1.DeployHook {
 	var out []*repoconfigv1.DeployHook
 	for _, text := range texts {
-		out = append(out, &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Prompt{Prompt: &repoconfigv1.DeployHookPrompt{Text: text}}})
+		out = append(out, deployconfig.PromptHook(text))
 	}
 	return out
 }
