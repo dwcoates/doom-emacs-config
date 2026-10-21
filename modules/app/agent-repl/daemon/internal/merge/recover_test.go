@@ -481,10 +481,10 @@ func TestRecoverReArmsARequestStillWaitingForItsTurn(t *testing.T) {
 }
 
 func TestRecoverKeepsAResumedMergesSource(t *testing.T) {
-	// Arrange: an admitted merge of a branch already merged upstream, which is
-	// not the default source, interrupted.
+	// Arrange: an admitted merge of the own branch kept open, which is not
+	// the default source, interrupted.
 	h := newHarness(t)
-	if err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, RequestedByUser); err != nil {
+	if err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}, RequestedByUser); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	before, _ := h.db.MergeQueue(context.Background(), h.repoKey())

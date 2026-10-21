@@ -111,19 +111,6 @@ func TestABranchLandsInTheRepositorysMainWorktree(t *testing.T) {
 	}
 }
 
-func TestABranchMergedUpstreamUpdatesTheMainWorktreeAndClosesTheRequester(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-
-	// Act.
-	s := subjectOf(t, h, wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream})
-
-	// Assert.
-	if s.targetDir != h.sourceD || s.closes != theWorkspace || s.dir != "" {
-		t.Fatalf("subject = %+v, want the main worktree, closing the requester, rebasing nowhere", s)
-	}
-}
-
 func TestTheQueuedLabelIsTheOneTheRunningMergeDraws(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -132,7 +119,6 @@ func TestTheQueuedLabelIsTheOneTheRunningMergeDraws(t *testing.T) {
 		{name: "own branch", source: ownBranch},
 		{name: "another workspace", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}},
 		{name: "a branch", source: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}},
-		{name: "merged upstream", source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,8 +154,8 @@ func TestResolveSubjectReadsWhatAMergeClosesFromLandingCloses(t *testing.T) {
 	}
 
 	// Assert.
-	if calls != 3 {
-		t.Fatalf("LandingCloses calls = %d, want one per closing arm (own branch, workspace, merged upstream)", calls)
+	if calls != 2 {
+		t.Fatalf("LandingCloses calls = %d, want one per closing arm (own branch, workspace)", calls)
 	}
 	if len(byHand) != 0 {
 		t.Fatalf("closing workspaces spelled by hand: %v", byHand)

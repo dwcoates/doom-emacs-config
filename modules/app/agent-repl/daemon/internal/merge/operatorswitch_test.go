@@ -158,11 +158,6 @@ var everyOperatorSwitch = []struct {
 	off  func(Orchestrator) error
 }{
 	{
-		name: "the rollout hold", sw: (*orchestrator).rolloutHold,
-		on:  func(o Orchestrator) error { return o.HoldRollouts(context.Background()) },
-		off: func(o Orchestrator) error { return o.ReleaseRollouts(context.Background()) },
-	},
-	{
 		name: "the racing switch", sw: (*orchestrator).racingSwitch,
 		on:  func(o Orchestrator) error { return o.DisableRacing(context.Background()) },
 		off: func(o Orchestrator) error { return o.EnableRacing(context.Background()) },

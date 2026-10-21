@@ -278,7 +278,7 @@ func tabBadgeOf(t *testing.T, tab *frontendv1.FeedMergeTab) (*frontendv1.FeedMer
 func TestEveryTabBuilderShipsTheBadgeItWasGiven(t *testing.T) {
 	builders := map[string]func(tabState) *frontendv1.FeedMergeTab{
 		TabQueue:     func(s tabState) *frontendv1.FeedMergeTab { return queueTab(&frontendv1.FeedMergeQueue{}, s) },
-		TabPrePrompt: func(s tabState) *frontendv1.FeedMergeTab { return promptTab(TabPrePrompt, s) },
+		TabPreDeploy: func(s tabState) *frontendv1.FeedMergeTab { return hookPromptTab(s) },
 		TabRebasing: func(s tabState) *frontendv1.FeedMergeTab {
 			v := rebaseView{Span: spanOf(s)}
 			return v.rebasingTab(false)
@@ -294,8 +294,8 @@ func TestEveryTabBuilderShipsTheBadgeItWasGiven(t *testing.T) {
 		rowTestsRun:       func(s tabState) *frontendv1.FeedMergeTab { return runTab(1, s, nil, nil) },
 		rowTestsRunFixing: func(s tabState) *frontendv1.FeedMergeTab { return fixingTab(s, 1) },
 		TabCommitting:     func(s tabState) *frontendv1.FeedMergeTab { return committingTab(s, "x") },
-		TabUpdatingMain:   func(s tabState) *frontendv1.FeedMergeTab { return updatingMainTab(s, "") },
-		TabPostPrompt:     func(s tabState) *frontendv1.FeedMergeTab { return promptTab(TabPostPrompt, s) },
+		TabDeploy:         func(s tabState) *frontendv1.FeedMergeTab { return hookScriptTab(s, scriptView{path: "bin/deploy.sh"}) },
+		TabPostDeploy:     func(s tabState) *frontendv1.FeedMergeTab { return hookPromptTab(s) },
 	}
 	for kind, build := range builders {
 		t.Run(kind, func(t *testing.T) {
@@ -339,7 +339,8 @@ func TestBranchLabelReadsAsTheMerge(t *testing.T) {
 
 func TestTheNewTabsDrawTheirWords(t *testing.T) {
 	tests := []struct{ kind, want string }{
-		{TabRebasing, "rebasing"}, {TabCommitting, "committing"}, {TabUpdatingMain, "updating main"},
+		{TabRebasing, "rebasing"}, {TabCommitting, "committing"},
+		{TabPreDeploy, "pre-deploy"}, {TabDeploy, "deploy"}, {TabPostDeploy, "post-deploy"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.kind, func(t *testing.T) {
@@ -357,20 +358,6 @@ func spanOf(s tabState) span {
 		return span{StartedMS: s.startedMS, EndedMS: s.endedMS, Failure: s.failure}
 	}
 	return span{StartedMS: s.startedMS}
-}
-
-func TestTheUpdatingMainTabMovesFromFetchingToFastForwarding(t *testing.T) {
-	// Act.
-	fetching := updatingMainTab(tabState{startedMS: 1}, "")
-	forwarding := updatingMainTab(tabState{startedMS: 1, settled: true, endedMS: 9}, "abc")
-
-	// Assert.
-	if fetching.GetUpdatingMain().GetStep().GetFetching() == nil {
-		t.Fatalf("first tab = %+v, want fetching", fetching)
-	}
-	if forwarding.GetUpdatingMain().GetStep().GetFastForwarding().GetCommit() != "abc" || forwarding.GetUpdatingMain().GetSettled() == nil {
-		t.Fatalf("second tab = %+v, want settled fast-forwarding to abc", forwarding)
-	}
 }
 
 func TestTheCommittingTabCarriesTheMergeCommitsSubject(t *testing.T) {

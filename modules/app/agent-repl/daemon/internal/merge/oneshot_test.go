@@ -74,7 +74,6 @@ func TestAOneShotRequestThatContradictsItselfIsAnErrorAndRecordsNothing(t *testi
 		{name: "kept open", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}},
 		{name: "detached", source: ownBranch, detached: true},
 		{name: "another branch", source: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "feature"}},
-		{name: "merged upstream", source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

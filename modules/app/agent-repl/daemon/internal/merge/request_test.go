@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -118,7 +119,7 @@ func TestARequestRecordsItsSource(t *testing.T) {
 	h.git.mu.Lock()
 	h.git.branches[h.sourceD] = "checked-out"
 	h.git.mu.Unlock()
-	source := wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}
+	source := wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}
 	// The request is recorded with the branch checked out in its worktree.
 	recorded := source
 	recorded.Branch = "checked-out"
@@ -147,26 +148,6 @@ func TestAnOwnBranchRequestRecordsTheBranchCheckedOutNotTheCreationBranch(t *tes
 
 	// Act.
 	err := h.request(t, ownBranch, RequestedByAgent)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
-	if len(entries) != 1 || entries[0].Source.Branch != "renamed" {
-		t.Fatalf("queue = %+v, want the checked-out branch recorded", entries)
-	}
-}
-
-func TestAMergedUpstreamRequestRecordsTheBranchCheckedOut(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.git.mu.Lock()
-	h.git.branches[h.sourceD] = "renamed"
-	h.git.mu.Unlock()
-
-	// Act.
-	err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, RequestedByAgent)
 
 	// Assert.
 	if err != nil {
@@ -217,7 +198,6 @@ func TestEveryWorkspaceSourceRecordsTheBranchCheckedOut(t *testing.T) {
 		source wsm.MergeSource
 	}{
 		{name: "own branch", source: ownBranch},
-		{name: "merged upstream", source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -261,11 +241,6 @@ func TestARequestIsRefusedWhenItsSourceCannotBeMerged(t *testing.T) {
 			h.git.branches[h.sourceD] = ""
 			h.git.mu.Unlock()
 		}, source: ownBranch, arm: ArmNoBranchCheckedOut},
-		{name: "merged upstream whose worktree has a detached HEAD", arrange: func(h *harness) {
-			h.git.mu.Lock()
-			h.git.branches[h.sourceD] = ""
-			h.git.mu.Unlock()
-		}, source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, arm: ArmNoBranchCheckedOut},
 		{name: "a deleted session", arrange: func(h *harness) {
 			h.db.mu.Lock()
 			h.db.sessions[theWorkspace] = wsm.Session{Workspace: theWorkspace, Terminal: &wsm.SessionTerminal{Kind: "deleted"}}
@@ -472,13 +447,14 @@ func TestARequestWhoseFlushFailsIsRefusedWithNothingRecorded(t *testing.T) {
 }
 
 func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T) {
+	hooks := wsm.DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHookOf("lint")}, PostDeploy: []*repoconfigv1.DeployHook{scriptHookOf("bin/announce.sh")}}
 	tests := []struct {
 		name             string
 		inName, instruct string
 		compactAfter     bool
 		closeOnLanding   ids.WorkspaceID
 		cleanupWorktree  bool
-		actions          wsm.DeployHooks
+		hooks            wsm.DeployHooks
 		maker            ids.WorkspaceID
 		intoMaker        bool
 		want             DetachedRun
@@ -490,13 +466,12 @@ func TestNewDetachedRunTrimsTheNameAndTheInstructionAndKeepsTheAsks(t *testing.T
 		{name: "compacting after", inName: "reconnect-fix", compactAfter: true, want: DetachedRun{Name: "reconnect-fix", CompactAfter: true}},
 		{name: "closing another workspace", inName: "reconnect-fix", closeOnLanding: "child", want: DetachedRun{Name: "reconnect-fix", CloseOnLanding: "child"}},
 		{name: "cleaning up", inName: "reconnect-fix", cleanupWorktree: true, want: DetachedRun{Name: "reconnect-fix", CleanupWorktree: true}},
-		{name: "its own merge actions", inName: "reconnect-fix", actions: wsm.DeployHooks{Before: []string{"lint"}, After: []string{"announce"}},
-			want: DetachedRun{Name: "reconnect-fix", Actions: wsm.DeployHooks{Before: []string{"lint"}, After: []string{"announce"}}}},
+		{name: "its own deploy hooks", inName: "reconnect-fix", hooks: hooks, want: DetachedRun{Name: "reconnect-fix", Hooks: hooks}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := NewDetachedRun(tt.inName, tt.instruct, tt.compactAfter, tt.closeOnLanding, tt.cleanupWorktree, tt.actions, tt.maker, tt.intoMaker)
+			got := NewDetachedRun(tt.inName, tt.instruct, tt.compactAfter, tt.closeOnLanding, tt.cleanupWorktree, tt.hooks, tt.maker, tt.intoMaker)
 
 			// Assert
 			if got == nil || !reflect.DeepEqual(*got, tt.want) {

@@ -13,11 +13,12 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/prompts"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
@@ -27,7 +28,7 @@ func TestOtherRepoTabSequence(t *testing.T) {
 	// Arrange: a workspace of a repository that is not the daemon's, with both
 	// prompts configured.
 	h := newHarness(t)
-	h.configureActions([]string{"before"}, []string{"after"})
+	h.configurePromptHooks([]string{"before"}, []string{"after"})
 	h.briefs["before"] = nil
 	h.briefs["after"] = nil
 	enqueue(t, h)
@@ -38,7 +39,7 @@ func TestOtherRepoTabSequence(t *testing.T) {
 	}
 
 	// Assert.
-	want := []string{TabQueue, TabPrePrompt, TabPostPrompt}
+	want := []string{TabQueue, TabPreDeploy, TabPostDeploy}
 	if got := h.feed.tabSequence(); !equal(got, want) {
 		t.Fatalf("the tab sequence is %v, want %v", got, want)
 	}
@@ -70,7 +71,7 @@ func TestPrePromptFailureFailsTheRun(t *testing.T) {
 	// Arrange: a before-action whose turn fails.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.configureActions([]string{"before"}, nil)
+	h.configurePromptHooks([]string{"before"}, nil)
 	h.briefs["before"] = nil
 	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
 	enqueue(t, h)
@@ -94,7 +95,7 @@ func TestAPrePromptWhoseAgentProcessDiedFailsTheRun(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.emacsRepo()
-	h.configureActions([]string{"before"}, nil)
+	h.configurePromptHooks([]string{"before"}, nil)
 	h.briefs["before"] = nil
 	h.turnCloses = []wsm.TurnClose{wsm.CloseAgentDied}
 	enqueue(t, h)
@@ -108,14 +109,14 @@ func TestAPrePromptWhoseAgentProcessDiedFailsTheRun(t *testing.T) {
 	}
 }
 
-// TestPostPromptFailureRidesTheTerminal covers the configured after-action:
-// every commit has landed by the time it runs, so there is nothing left to
-// refuse and its failure never fails the run.
-func TestPostPromptFailureRidesTheTerminal(t *testing.T) {
-	// Arrange: a landed merge whose after-action's turn fails.
+// TestAPostDeployHookFailureFailsTheDeployAndKeepsTheLanding covers a hook
+// that fails after the local merge landed: the deploy fails, so the workspace
+// is told to investigate, and its account names the commit that stands.
+func TestAPostDeployHookFailureFailsTheDeployAndKeepsTheLanding(t *testing.T) {
+	// Arrange: a landed merge whose post-deploy prompt hook's turn fails.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.configureActions(nil, []string{"after"})
+	h.configurePromptHooks(nil, []string{"after"})
 	h.briefs["after"] = nil
 	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
@@ -124,13 +125,15 @@ func TestPostPromptFailureRidesTheTerminal(t *testing.T) {
 	enqueue(t, h)
 
 	// Act.
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge reported a failure for a post-prompt: %v", err)
-	}
+	_ = h.admit(context.Background())
 
 	// Assert.
-	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
-		t.Fatalf("the merge is %q, want it to have landed anyway", facts.State)
+	facts, _ := h.o.Facts(theWorkspace)
+	if facts.State != StateFailed || facts.FailedArea != footer.FailedHook {
+		t.Fatalf("the deploy is %q in %q, want %q in %q", facts.State, facts.FailedArea, StateFailed, footer.FailedHook)
+	}
+	if !strings.Contains(facts.Detail, "it landed as commit abc123def4") {
+		t.Fatalf("the failure reads %q, want the landed commit named", facts.Detail)
 	}
 }
 
@@ -140,7 +143,7 @@ func TestPostPromptFailureRidesTheTerminal(t *testing.T) {
 func TestSessionlessWorkspaceWithAConfiguredPromptIsRevived(t *testing.T) {
 	// Arrange: a workspace with no session and a before-action.
 	h := newHarness(t)
-	h.configureActions([]string{"before"}, nil)
+	h.configurePromptHooks([]string{"before"}, nil)
 	h.briefs["before"] = nil
 	h.db.mu.Lock()
 	delete(h.db.sessions, theWorkspace)
@@ -445,88 +448,78 @@ func TestShortRendersACommitTheWayNarrationNamesIt(t *testing.T) {
 	}
 }
 
-// TestPostPromptFailureRidesTheTerminalOutsideTheDaemonsRepo covers the same
-// ruling for EVERY OTHER repository, the case the two methods once spelled
-// differently: an after-action failure there aborted a merge the contract says
-// had already succeeded.
-func TestPostPromptFailureRidesTheTerminalOutsideTheDaemonsRepo(t *testing.T) {
-	// Arrange: a non-self repository whose after-action's turn fails.
+// TestAPostDeployHookFailureFailsADeployWithNoLocalMerge covers the same for
+// a repository whose deploy is hooks alone: nothing landed, so the account
+// names the hook alone.
+func TestAPostDeployHookFailureFailsADeployWithNoLocalMerge(t *testing.T) {
+	// Arrange: a repository with no local merge whose post-deploy hook fails.
 	h := newHarness(t)
-	h.configureActions(nil, []string{"after"})
+	h.configurePromptHooks(nil, []string{"after"})
 	h.briefs["after"] = nil
 	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
 	enqueue(t, h)
 
 	// Act.
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge reported a failure for a post-prompt: %v", err)
-	}
+	_ = h.admit(context.Background())
 
 	// Assert.
-	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
-		t.Fatalf("the merge is %q, want it to have succeeded anyway", facts.State)
+	facts, _ := h.o.Facts(theWorkspace)
+	if facts.State != StateFailed || facts.FailedArea != footer.FailedHook {
+		t.Fatalf("the deploy is %q in %q, want %q in %q", facts.State, facts.FailedArea, StateFailed, footer.FailedHook)
+	}
+	if strings.Contains(facts.Detail, "landed") {
+		t.Fatalf("the failure reads %q, want no landing claimed", facts.Detail)
 	}
 }
 
-// TestPostPromptFailureWarnsOutsideTheDaemonsRepo covers what the swallowed
-// failure becomes: the canonical WARN, carrying the failure's own text, so the
-// run's success is never silent about it.
-func TestPostPromptFailureWarnsOutsideTheDaemonsRepo(t *testing.T) {
-	// Arrange: a non-self repository whose after-action's turn fails.
+// TestAFailedPromptHookIsRecorded covers the failure's canonical record: the
+// stage and the hook's place in it, and how its turn closed.
+func TestAFailedPromptHookIsRecorded(t *testing.T) {
+	// Arrange.
 	h := newHarness(t)
-	h.configureActions(nil, []string{"after"})
+	h.configurePromptHooks(nil, []string{"after"})
 	h.briefs["after"] = nil
 	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
 	enqueue(t, h)
 
 	// Act.
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
-	}
+	_ = h.admit(context.Background())
 
 	// Assert.
-	var warned *dlog.Record
-	for i, rec := range h.logs.Records() {
-		if rec.Operation == "daemon.merge.post_prompt" && rec.Level == "warn" {
-			warned = &h.logs.Records()[i]
-		}
+	record, ok := h.recordFor(dlog.LevelInfo, "daemon.merge.hook")
+	if !ok || record.Message != "a prompt hook did not complete; the deploy fails" {
+		t.Fatalf("daemon.merge.hook record = %+v (found %v), want the failed hook named", record, ok)
 	}
-	if warned == nil {
-		t.Fatal("no daemon.merge.post_prompt WARN records the after-action's failure")
-	}
-	if text, _ := warned.Context["error"].(string); !strings.Contains(text, "after-merge prompt") {
-		t.Fatalf("the WARN's error is %q, want the failure's own text", warned.Context["error"])
+	if record.Context["stage"] != TabPostDeploy || record.Context["hook"] != 0 || record.Context["close"] != wsm.CloseFailed.String() {
+		t.Fatalf("the record's context is %v, want the stage, the hook's index and its close", record.Context)
 	}
 }
 
-// TestPostPromptFailedTabSettlesOutsideTheDaemonsRepo covers the feed's half of
-// the same failure: the post_prompt tab still settles failed with its composed
-// summary even though the run succeeded.
-func TestPostPromptFailedTabSettlesOutsideTheDaemonsRepo(t *testing.T) {
-	// Arrange: a non-self repository whose after-action's turn fails.
+// TestAFailedPromptHooksTabSettlesFailed covers the feed's half of the same
+// failure: the hook's tab settles failed with its composed summary.
+func TestAFailedPromptHooksTabSettlesFailed(t *testing.T) {
+	// Arrange.
 	h := newHarness(t)
-	h.configureActions(nil, []string{"after"})
+	h.configurePromptHooks(nil, []string{"after"})
 	h.briefs["after"] = nil
 	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
 	enqueue(t, h)
 
 	// Act.
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
-	}
+	_ = h.admit(context.Background())
 
 	// Assert.
-	want := []string{TabQueue, TabPostPrompt}
+	want := []string{TabQueue, TabPostDeploy}
 	if got := h.feed.tabSequence(); !equal(got, want) {
 		t.Fatalf("the tab sequence is %v, want %v", got, want)
 	}
-	summary := h.feed.lastTabOfKind(TabPostPrompt).GetPostPrompt().GetSettled().GetFailed().GetSummary()
-	if got := summary; !strings.Contains(got, "after-merge prompt") {
-		t.Fatalf("the settled post-prompt tab reads %q, want the composed summary", got)
+	summary := h.feed.lastTabOfKind(TabPostDeploy).GetHookPrompt().GetSettled().GetFailed().GetSummary()
+	if summary != "its post-deploy prompt hook did not complete" {
+		t.Fatalf("the settled hook tab reads %q, want the composed summary", summary)
 	}
 }
 
-// ---- The repository's own merge policy ----
+// ---- The repository's own deploy hooks ----
 
 // submittedWith answers the texts submitted under one merge origin.
 func submittedWith(h *harness, origin conversationv1.PromptOrigin) []string {
@@ -546,14 +539,13 @@ func submittedWith(h *harness, origin conversationv1.PromptOrigin) []string {
 	return out
 }
 
-// TestRepositoryPolicyFillsTheEmptyBeforeSlot covers the owner's ruling that a
-// repository states its own merge policy in its tree: a workspace that
-// configured no before-action runs the repository's `merge-before` brief.
-func TestRepositoryPolicyFillsTheEmptyBeforeSlot(t *testing.T) {
+// TestTheRepositorysPreDeployHooksRun covers the deploy config's first stage:
+// a workspace that supplied no hooks runs its repository's pre-deploy hooks.
+func TestTheRepositorysPreDeployHooksRun(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.policy[prompts.PolicyMergeBefore] = "run the repository's checklist"
+	h.repoPreHooks("run the repository's checklist")
 	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
@@ -561,23 +553,22 @@ func TestRepositoryPolicyFillsTheEmptyBeforeSlot(t *testing.T) {
 
 	// Act.
 	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
+		t.Fatalf("the deploy failed: %v", err)
 	}
 
 	// Assert.
 	got := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
 	if len(got) != 1 || got[0] != "run the repository's checklist" {
-		t.Fatalf("before-merge submissions = %v, want the repository's own brief", got)
+		t.Fatalf("pre-deploy submissions = %v, want the repository's own hook", got)
 	}
 }
 
-// TestRepositoryPolicyFillsTheEmptyAfterSlot covers the same for the
-// after-merge action.
-func TestRepositoryPolicyFillsTheEmptyAfterSlot(t *testing.T) {
+// TestTheRepositorysPostDeployHooksRun covers the same for the last stage.
+func TestTheRepositorysPostDeployHooksRun(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.policy[prompts.PolicyMergeAfter] = "announce the landing"
+	h.repoPostHooks("announce the landing")
 	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
@@ -585,24 +576,26 @@ func TestRepositoryPolicyFillsTheEmptyAfterSlot(t *testing.T) {
 
 	// Act.
 	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
+		t.Fatalf("the deploy failed: %v", err)
 	}
 
 	// Assert.
 	got := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION)
 	if len(got) != 1 || got[0] != "announce the landing" {
-		t.Fatalf("after-merge submissions = %v, want the repository's own brief", got)
+		t.Fatalf("post-deploy submissions = %v, want the repository's own hook", got)
 	}
 }
 
-// TestConfiguredActionBeatsTheRepositoryPolicy covers the precedence: the file
-// fills an EMPTY slot and never overrides what a create configured.
-func TestConfiguredActionBeatsTheRepositoryPolicy(t *testing.T) {
+// TestARequestsHooksReplaceTheRepositorysForTheirStage covers the precedence:
+// a stage the workspace supplied replaces the repository's hooks for that
+// stage, and a stage it left empty still runs the repository's.
+func TestARequestsHooksReplaceTheRepositorysForTheirStage(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.configureActions([]string{"the workspace's own precondition"}, nil)
-	h.policy[prompts.PolicyMergeBefore] = "the repository's default"
+	h.configurePromptHooks([]string{"the workspace's own precondition"}, nil)
+	h.repoPreHooks("the repository's precondition")
+	h.repoPostHooks("the repository's announcement")
 	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
@@ -610,21 +603,24 @@ func TestConfiguredActionBeatsTheRepositoryPolicy(t *testing.T) {
 
 	// Act.
 	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
+		t.Fatalf("the deploy failed: %v", err)
 	}
 
 	// Assert.
-	got := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
-	if len(got) != 1 || got[0] != "the workspace's own precondition" {
-		t.Fatalf("before-merge submissions = %v, want the configured action alone", got)
+	pre := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
+	post := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION)
+	if len(pre) != 1 || pre[0] != "the workspace's own precondition" {
+		t.Fatalf("pre-deploy submissions = %v, want the workspace's hook alone", pre)
+	}
+	if len(post) != 1 || post[0] != "the repository's announcement" {
+		t.Fatalf("post-deploy submissions = %v, want the repository's hook", post)
 	}
 }
 
-// TestAbsentRepositoryPolicyRunsNothing covers the other half of the ruling:
-// a repository that states no merge policy is what every repository looked
-// like before the policy existed, and that is not an error.
-func TestAbsentRepositoryPolicyRunsNothing(t *testing.T) {
-	// Arrange: a repository whose policy directory holds nothing.
+// TestAConfigWithNoHooksRunsNone covers agent-repl's own config: a local merge
+// and no prompt hook in any stage.
+func TestAConfigWithNoHooksRunsNone(t *testing.T) {
+	// Arrange.
 	h := newHarness(t)
 	h.emacsRepo()
 	h.landsCleanly("abc123def4567")
@@ -634,37 +630,38 @@ func TestAbsentRepositoryPolicyRunsNothing(t *testing.T) {
 
 	// Act.
 	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("the merge failed: %v", err)
+		t.Fatalf("the deploy failed: %v", err)
 	}
 
 	// Assert.
-	before := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
-	after := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION)
-	if len(before) != 0 || len(after) != 0 {
-		t.Fatalf("merge-action submissions = (%v, %v), want none", before, after)
+	pre := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
+	post := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION)
+	if len(pre) != 0 || len(post) != 0 {
+		t.Fatalf("hook submissions = (%v, %v), want none", pre, post)
 	}
 }
 
-// TestAStatedBeforePolicyThatWillNotReadFailsTheRun covers the distinction an
-// absent brief does not: a policy the repository STATED and that cannot be
-// read is a fault, never a silent skip.
-func TestAStatedBeforePolicyThatWillNotReadFailsTheRun(t *testing.T) {
+// TestAConfigThatBreaksAfterEnqueueFailsTheDeploy covers a config edited into
+// an unusable state while its deploy waited: the run reads it again when it
+// starts, and refuses to merge on a config it cannot use.
+func TestAConfigThatBreaksAfterEnqueueFailsTheDeploy(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.policy[prompts.PolicyMergeBefore] = "unreadable"
-	h.policyErr[prompts.PolicyMergeBefore] = errors.New("the header does not parse")
 	enqueue(t, h)
+	h.mu.Lock()
+	h.configErr = &deployconfig.InvalidError{Path: "/repo/.agent-repl/deploy.yaml", Detail: "pre_deploy is required"}
+	h.mu.Unlock()
 
 	// Act.
 	_ = h.admit(context.Background())
 
 	// Assert.
 	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateFailed {
-		t.Fatalf("the merge is %q, want %q", facts.State, StateFailed)
+		t.Fatalf("the deploy is %q, want %q", facts.State, StateFailed)
 	}
 	if h.git.seen("merge_no_ff") {
-		t.Fatal("the merge ran despite an unreadable before-merge policy")
+		t.Fatal("the merge ran on an unusable deploy config")
 	}
 }
 
@@ -1679,150 +1676,6 @@ func TestTheCommittingLineIsTheMergeCommitsSubject(t *testing.T) {
 	}
 	if subject != "merge(master): feature" {
 		t.Fatalf("committing line = %q, want the merge commit's subject", subject)
-	}
-}
-
-// mergedUpstream arranges the harness's merge of its branch already merged
-// upstream: the main worktree on its default branch, upstream ahead.
-func mergedUpstream(h *harness) {
-	h.git.branches[h.sourceD] = "master"
-	h.git.refs["refs/remotes/origin/master"] = "upstream00000"
-	h.git.refs["HEAD"] = "local00000000"
-	h.db.mu.Lock()
-	h.db.queues[h.repoKey()] = nil
-	h.db.mu.Unlock()
-}
-
-func TestABranchMergedUpstreamFetchesAndFastForwardsTheDefaultBranch(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	mergedUpstream(h)
-
-	// Act.
-	if err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("admit: %v", err)
-	}
-
-	// Assert.
-	if len(h.git.fetches) != 1 || h.git.fetches[0] != h.sourceD+"<origin" {
-		t.Fatalf("fetches = %v, want one of origin in the main worktree", h.git.fetches)
-	}
-	if !slices.Equal(h.git.fastForwards, []string{h.sourceD + "@upstream00000"}) {
-		t.Fatalf("fast-forwards = %v, want the default branch to upstream", h.git.fastForwards)
-	}
-	if want := []string{TabQueue, TabUpdatingMain}; !equal(h.feed.tabSequence(), want) {
-		t.Fatalf("tabs = %v, want %v", h.feed.tabSequence(), want)
-	}
-}
-
-func TestABranchMergedUpstreamClosesTheRequester(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	mergedUpstream(h)
-
-	// Act.
-	if err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	if err := h.admit(context.Background()); err != nil {
-		t.Fatalf("admit: %v", err)
-	}
-
-	// Assert.
-	if !h.db.closed[theWorkspace] {
-		t.Fatal("the requester was not closed once its branch was on the default branch")
-	}
-}
-
-func TestUpdatingMainSaysFetchingThenFastForwarding(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	mergedUpstream(h)
-
-	// Act.
-	if err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	_ = h.admit(context.Background())
-
-	// Assert.
-	var steps []string
-	for _, f := range h.footer.all() {
-		switch {
-		case f.Line.GetUpdatingMain().GetFetching() != nil:
-			steps = append(steps, "fetching")
-		case f.Line.GetUpdatingMain().GetFastForwarding() != nil:
-			steps = append(steps, "fast-forwarding "+f.Line.GetUpdatingMain().GetFastForwarding().GetCommit())
-		}
-	}
-	if !slices.Equal(steps, []string{"fetching", "fast-forwarding upstream0000"}) {
-		t.Fatalf("updating main lines = %v", steps)
-	}
-}
-
-func TestUpdatingMainFailsWhenTheFetchFails(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	mergedUpstream(h)
-	h.git.fetchErr = errors.New("could not read from remote")
-
-	// Act.
-	if err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	_ = h.admit(context.Background())
-
-	// Assert.
-	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "other" {
-		t.Fatalf("facts = %+v, want merge failed in other", got)
-	}
-	if h.db.closed[theWorkspace] {
-		t.Fatal("a failed update closed the requester")
-	}
-}
-
-func TestUpdatingMainFailsWhenTheMainWorktreeIsOffItsDefaultBranch(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	mergedUpstream(h)
-	h.git.branches[h.sourceD] = "feature"
-
-	// Act.
-	if err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	_ = h.admit(context.Background())
-
-	// Assert.
-	if h.git.seen("fetch") {
-		t.Fatal("a main worktree off its default branch was fetched into")
-	}
-	if got := h.footer.last(); got.State != StateFailed {
-		t.Fatalf("facts = %+v, want merge failed", got)
-	}
-}
-
-func TestUpdatingMainAlreadyAtUpstreamMovesNothing(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	mergedUpstream(h)
-	h.git.refs["HEAD"] = "upstream00000"
-
-	// Act.
-	if err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
-	}
-	_ = h.admit(context.Background())
-
-	// Assert.
-	if len(h.git.fastForwards) != 0 {
-		t.Fatalf("fast-forwards = %v, want none", h.git.fastForwards)
-	}
-	if got := h.footer.last().State; got != StateMerged {
-		t.Fatalf("state = %q, want merged", got)
 	}
 }
 
