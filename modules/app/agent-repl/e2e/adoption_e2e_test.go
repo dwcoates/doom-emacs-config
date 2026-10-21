@@ -324,7 +324,7 @@ func adTriggerDeploy(t *testing.T, w *World, selfRepo *harness.Repo, build harne
 	sha := selfRepo.CommitIn(trigger.GetDir(), path, "trigger\n")
 	selfRepo.SetPaths(sha, path)
 	if _, err := w.Client().FinishWorkspace(w.Ctx(), connect.NewRequest(harness.FinishRequest(trigger))); err != nil {
-		t.Fatalf("MergeWorkspace(trigger) = error %v, want the merge enqueued and landed", err)
+		t.Fatalf("FinishWorkspace(trigger) = error %v, want the deploy enqueued and landed", err)
 	}
 }
 
