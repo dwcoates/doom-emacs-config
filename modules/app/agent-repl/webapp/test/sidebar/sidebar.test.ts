@@ -627,6 +627,17 @@ describe("the roster stream's planned ending", () => {
   });
 });
 
+/** Workspace ID's row box in HOST's repository sections. */
+const rowOf = (host: HTMLElement, id: string): HTMLElement =>
+  host.querySelector(`.sb-pane [data-roster-row='${id}']`) as HTMLElement;
+
+/** Open ID's detail popover the way the keyboard does, at once. */
+const openDetail = (host: HTMLElement, id: string): void => {
+  (rowOf(host, id).querySelector(":scope > .row") as HTMLElement).dispatchEvent(
+    new FocusEvent("focusin", { bubbles: true }),
+  );
+};
+
 describe("a click in the rail closes its open dropdowns", () => {
   const mounted: Array<{ dispose(): void }> = [];
   const hosts: HTMLElement[] = [];
@@ -655,18 +666,10 @@ describe("a click in the rail closes its open dropdowns", () => {
     return host;
   }
 
-  const rowOf = (host: HTMLElement, id: string): HTMLElement =>
-    host.querySelector(`.sb-pane [data-roster-row='${id}']`) as HTMLElement;
   const rowMenu = (host: HTMLElement, id: string): HTMLElement =>
     rowOf(host, id).querySelector(":scope > .sb-menu") as HTMLElement;
   const emptySpace = (host: HTMLElement): HTMLElement => host.querySelector(".sb-head") as HTMLElement;
 
-  /** Open the row's detail popover the way the keyboard does, at once. */
-  const openDetail = (host: HTMLElement, id: string): void => {
-    (rowOf(host, id).querySelector(":scope > .row") as HTMLElement).dispatchEvent(
-      new FocusEvent("focusin", { bubbles: true }),
-    );
-  };
 
   it("closes a row's menu on a click in empty space", async () => {
     const host = await mountRail();
@@ -1604,15 +1607,7 @@ describe("the rail lets go of what the pointer raised when the user leaves it", 
     return { host, sidebar, push };
   }
 
-  const rowOf = (host: HTMLElement, id: string): HTMLElement =>
-    host.querySelector(`.sb-pane [data-roster-row='${id}']`) as HTMLElement;
 
-  /** Open ID's detail popover the way the keyboard does, at once. */
-  const openDetail = (host: HTMLElement, id: string): void => {
-    (rowOf(host, id).querySelector(":scope > .row") as HTMLElement).dispatchEvent(
-      new FocusEvent("focusin", { bubbles: true }),
-    );
-  };
   const detailOpen = (host: HTMLElement, id: string): boolean => rowOf(host, id).classList.contains("open");
   const menuOpen = (host: HTMLElement, id: string): boolean =>
     !(rowOf(host, id).querySelector(":scope > .sb-menu") as HTMLElement).hidden;
