@@ -151,6 +151,33 @@ over a good image:
 The gate is covered by `e2e/sandboxscripts/sandbox_build_lock_test.go`, which drives the
 script against a fake `docker` on `PATH`; it never needs a real runtime.
 
+### A build prunes the old images
+
+One image per stamp means a new image for every stamp any checkout or
+merge-queue gate builds, and nothing removed them: on 2026-10-20 they held
+226 GB, the disk ran out, and the hand prune that freed it also emptied the
+build cache, so the next gate rebuilt from nothing for 59 minutes. A
+successful `build` now removes every image labelled `org.agent-repl.sandbox-tree`
+except:
+
+* the newest `AGENT_REPL_SANDBOX_KEEP_IMAGES` (default 3), by build time;
+* the image it just built;
+* any image a live run holds;
+* any image a container still uses.
+
+A refused removal fails the build, so the disk never fills again unseen.
+
+**No prune can remove an image a run has chosen.** A run checks its image and
+holds it in one step under a host-wide image lock
+(`/tmp/agent-repl-sandbox-image.lock`, override with
+`AGENT_REPL_SANDBOX_IMAGE_LOCK_DIR`). The prune takes the same lock while it
+decides and removes. A hold is an empty file named `<pid>.<image id>` in
+`/tmp/agent-repl-sandbox-holds` (override with `AGENT_REPL_SANDBOX_HOLD_DIR`),
+dropped when the run exits and reaped by the next prune when its process is
+gone. The run starts its container from the held image ID, never the tag, so
+it runs exactly the image it checked. Covered by
+`e2e/sandboxscripts/sandbox_image_retention_test.go`.
+
 ## Emacs is built FROM SOURCE, not installed from apt
 
 **The webapp panel is an `xwidget-webkit` webview, and no distro Emacs is

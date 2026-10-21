@@ -279,6 +279,151 @@ require_fresh_image() {
   exit 3
 }
 
+# --- image retention -----------------------------------------------------
+#
+# WHY. Every sandbox stamp names its own image, and nothing ever removed one,
+# so the host kept every image any checkout or merge-queue gate ever built:
+# 226 GB on 2026-10-20, until the disk ran out and a hand prune also emptied
+# the build cache, which cost the next gate a 59-minute cold build. A
+# successful build now removes all but the newest AGENT_REPL_SANDBOX_KEEP_IMAGES
+# sandbox images.
+#
+# NO PRUNE CAN REMOVE AN IMAGE A RUN HAS CHOSEN, structurally: a run checks its
+# image and HOLDS it in one step under the host's image lock, the prune takes
+# the same lock while it decides and removes, and it never removes a held
+# image. The run starts its container from the held image ID, never the tag,
+# so it runs exactly what it checked. A hold is an empty file named
+# <pid>.<image id> in RUN_HOLD_DIR, read by its name alone, and one whose
+# process is gone is reaped by the next prune.
+
+IMAGE_LOCK_DIR=${AGENT_REPL_SANDBOX_IMAGE_LOCK_DIR:-/tmp/agent-repl-sandbox-image.lock}
+RUN_HOLD_DIR=${AGENT_REPL_SANDBOX_HOLD_DIR:-/tmp/agent-repl-sandbox-holds}
+
+# IMAGE_LOCK_HELD and RUN_HOLD are this process's image lock and hold, released
+# by the EXIT trap. Not `local`: the trap runs after the frame is gone.
+IMAGE_LOCK_HELD=""
+RUN_HOLD=""
+# HELD_IMAGE is the ID hold_image held, which the run's container starts from.
+HELD_IMAGE=""
+
+acquire_image_lock() {
+  claim_host_lock "$IMAGE_LOCK_DIR" "image lock" "a sandbox run or prune" \
+    "A prune must not remove an image a run is choosing."
+  IMAGE_LOCK_HELD=$IMAGE_LOCK_DIR
+}
+
+release_image_lock() {
+  [[ -n ${IMAGE_LOCK_HELD:-} ]] || return 0
+  rm -rf "$IMAGE_LOCK_HELD"
+  IMAGE_LOCK_HELD=""
+}
+
+drop_image_hold() {
+  [[ -n ${RUN_HOLD:-} ]] || return 0
+  rm -f "$RUN_HOLD"
+  RUN_HOLD=""
+}
+
+# image_id RUNTIME REF — the full ID of the image REF, without any `sha256:`
+# prefix, so a Docker and a Podman ID compare alike.
+image_id() {
+  local rt=$1 ref=$2 id
+  id=$("$rt" image inspect --format '{{.Id}}' "$ref") \
+    || die "cannot read the ID of the sandbox image '$ref'"
+  id=${id#sha256:}
+  [[ -n $id ]] || die "the runtime reported an empty ID for the sandbox image '$ref'"
+  printf '%s\n' "$id"
+}
+
+# hold_image RUNTIME — check this checkout's image (require_fresh_image) and hold
+# it, as one step under the image lock, then print its ID for the run to start.
+hold_image() {
+  local rt=$1 id
+  acquire_image_lock
+  require_fresh_image "$rt"
+  id=$(image_id "$rt" "$IMAGE")
+  mkdir -p "$RUN_HOLD_DIR"
+  RUN_HOLD="$RUN_HOLD_DIR/$$.$id"
+  : > "$RUN_HOLD"
+  release_image_lock
+  HELD_IMAGE=$id
+}
+
+# live_holds — the image IDs live runs hold, one per line, after
+# removing every hold whose process is gone. Called under the image lock. The
+# directory is read by perl's readdir: this script never expands a glob (see
+# sandbox-image.sh's sandbox_walk).
+live_holds() {
+  [[ -d $RUN_HOLD_DIR ]] || return 0
+  local names name pid
+  names=$(perl -e 'opendir(my $d, $ARGV[0]) or die "e2e-sandbox: cannot read $ARGV[0]: $!\n";
+                   print "$_\n" for sort grep { $_ ne "." && $_ ne ".." } readdir($d)' -- "$RUN_HOLD_DIR") \
+    || die "cannot read the image holds in $RUN_HOLD_DIR"
+  while IFS= read -r name; do
+    [[ -n $name ]] || continue
+    pid=${name%%.*}
+    if [[ $pid =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+      printf '%s\n' "${name#*.}"
+    else
+      log "reaping the image hold $name: its process is gone"
+      rm -f "$RUN_HOLD_DIR/$name"
+    fi
+  done <<<"$names"
+}
+
+# keep_images_count — AGENT_REPL_SANDBOX_KEEP_IMAGES, the number of newest
+# sandbox images a prune keeps; anything but a positive whole number is refused.
+keep_images_count() {
+  local n=${AGENT_REPL_SANDBOX_KEEP_IMAGES:-3}
+  [[ $n =~ ^[1-9][0-9]*$ ]] \
+    || die "AGENT_REPL_SANDBOX_KEEP_IMAGES must be a positive whole number of images, got '$n'"
+  printf '%s\n' "$n"
+}
+
+# prune_images RUNTIME BUILT_ID — remove every sandbox image but the newest
+# keep_images_count, the image just built (BUILT_ID), every image a live run
+# holds, and every image a container still references. Any removal the
+# runtime refuses fails the build loudly: the disk would fill again unseen.
+prune_images() {
+  local rt=$1 built=$2 keep holds ids listing id created n=0 removed=0 kept=0 users
+  keep=$(keep_images_count)
+  acquire_image_lock
+  holds=$(live_holds)
+  ids=$("$rt" image ls --no-trunc --filter "label=$SANDBOX_STAMP_LABEL" --format '{{.ID}}') \
+    || die "cannot list the sandbox images to prune"
+  ids=$(sort -u <<<"$ids")
+  [[ -n $ids ]] || die "no sandbox image is listed right after building '$IMAGE'"
+  # shellcheck disable=SC2086  # one ID per word
+  listing=$("$rt" image inspect --format '{{.Id}} {{.Created}}' $ids) \
+    || die "cannot read the build times of the sandbox images"
+  # Newest first: RFC 3339 UTC timestamps sort as text.
+  while read -r id created; do
+    id=${id#sha256:}
+    n=$(( n + 1 ))
+    if (( n <= keep )) || [[ $id == "$built" ]]; then
+      kept=$(( kept + 1 ))
+      continue
+    fi
+    if grep -qxF -- "$id" <<<"$holds"; then
+      log "keeping sandbox image ${id:0:12} (built $created): a live run holds it"
+      kept=$(( kept + 1 ))
+      continue
+    fi
+    users=$("$rt" ps -a -q --filter "ancestor=$id") \
+      || die "cannot list the containers of sandbox image ${id:0:12}"
+    if [[ -n $users ]]; then
+      log "keeping sandbox image ${id:0:12} (built $created): container(s) $(tr '\n' ' ' <<<"$users")still use it"
+      kept=$(( kept + 1 ))
+      continue
+    fi
+    log "removing sandbox image ${id:0:12} (built $created)"
+    "$rt" image rm "$id" >/dev/null || die "removing sandbox image ${id:0:12} FAILED"
+    removed=$(( removed + 1 ))
+  done < <(sort -k2,2r <<<"$listing")
+  release_image_lock
+  log "sandbox images: kept $kept, removed $removed (AGENT_REPL_SANDBOX_KEEP_IMAGES=$keep)"
+}
+
 do_build() {
   local allow_unpinned=0 force=0 extra=()
   while (( $# )); do
@@ -334,10 +479,11 @@ do_build() {
   # replacing the real failure with a shell error. A file-scope name plus a
   # `:-` guard in the trap makes the cleanup correct on every path.
   CTX=$(mktemp -d)
-  # BOTH cleanups in one trap: `trap ... EXIT` REPLACES the handler, so a bare
+  # EVERY cleanup in one trap: `trap ... EXIT` REPLACES the handler, so a bare
   # context-cleanup trap here would silently discard the build lock's
-  # release_build_lock trap and leak the lock to every later build on this host.
-  trap 'rm -rf "${CTX:-}"; release_build_lock' EXIT INT TERM
+  # release_build_lock trap and leak the lock to every later build on this
+  # host. The image lock is the prune's, taken after the build.
+  trap 'rm -rf "${CTX:-}"; release_image_lock; release_build_lock' EXIT INT TERM
   local ctx=$CTX
   stage_context "$ctx"
 
@@ -368,6 +514,9 @@ do_build() {
   fi
   verify_image "$rt"
   log "built $IMAGE (sandbox stamp $stamp)"
+  local built
+  built=$(image_id "$rt" "$IMAGE")
+  prune_images "$rt" "$built"
 }
 
 # --- post-build verification ----------------------------------------------
@@ -599,7 +748,6 @@ acquire_slot() {
       if mkdir "$SLOT_DIR/slot-$i" 2>/dev/null; then
         SANDBOX_SLOT="$SLOT_DIR/slot-$i"
         printf '%s\n' "$$" > "$SANDBOX_SLOT/pid"
-        trap release_slot EXIT
         (( waited > 0 )) && log "slot $i acquired after ${waited}s"
         return 0
       fi
@@ -806,6 +954,16 @@ remove_container() {
   SANDBOX_CONTAINER=""
 }
 
+# run_cleanup is a run's one EXIT trap, whatever it got as far as holding. The
+# container goes BEFORE the image hold, so the image is never unheld while a
+# container of this run still uses it.
+run_cleanup() {
+  remove_container
+  release_slot
+  drop_image_hold
+  release_image_lock
+}
+
 # --- run -------------------------------------------------------------------
 
 do_run() {
@@ -821,8 +979,10 @@ do_run() {
   rt=$(runtime) || die "no container runtime on PATH; run 'e2e-sandbox.sh preflight' for details"
 
   # BEFORE the preflight, the gate and the webapp build: an image that is not
-  # this checkout's sandbox is refused loudly, never silently used.
-  require_fresh_image "$rt"
+  # this checkout's sandbox is refused loudly, never silently used. Held from
+  # here on, so no build's prune can remove it before the container exists.
+  trap run_cleanup EXIT
+  hold_image "$rt"
 
   preflight >&2 || die "preflight failed; see the message above"
 
@@ -906,11 +1066,10 @@ do_run() {
   done
 
   # THE CONTAINER IS NAMED AND REMOVED HERE, never `--rm`: the failure
-  # artifacts are copied out of it after it exits, and the EXIT trap removes it
+  # artifacts are copied out of it after it exits, and run_cleanup removes it
   # (with its volume) however the run ends.
   SANDBOX_RT=$rt
   SANDBOX_CONTAINER="agent-repl-e2e-$$-$RANDOM"
-  trap 'release_slot; remove_container' EXIT
   args+=(--name "$SANDBOX_CONTAINER")
 
   # FAILURE ARTIFACTS LEAVE THROUGH THE API TOO. They are written to a volume
@@ -927,7 +1086,7 @@ do_run() {
   local module_src=$repo_root/$MODULE_REL status rc=0
   stage_check "$module_src"
   status=$(mktemp)
-  args+=("$IMAGE" "$@")
+  args+=("$HELD_IMAGE" "$@")
   log "running: $*"
   if (( shell )); then
     shell_session "$rt" "$module_src" "$status" "${args[@]}"

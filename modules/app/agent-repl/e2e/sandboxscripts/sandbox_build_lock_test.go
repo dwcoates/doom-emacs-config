@@ -68,9 +68,30 @@ case "${1:-}" in
   info) exit 0 ;;
   version) printf 'arm64\n'; exit 0 ;;
   image)
-    # image inspect [--format FMT] IMAGE
-    if [[ ${3:-} == --format ]] || [[ ${2:-} == inspect && ${3:-} == --format ]]; then
-      cat "` + f.labelPth + `" 2>/dev/null || true
+    # image ls: the IDs in the images file, one "ID CREATED" line per image,
+    # or the one fake image when the test wrote none.
+    if [[ ${2:-} == ls ]]; then
+      if [[ -e "` + f.imagesPath() + `" ]]; then awk '{print $1}' "` + f.imagesPath() + `"; else echo sha256:fakeimage; fi
+      exit 0
+    fi
+    # image rm ID: the image leaves the images file.
+    if [[ ${2:-} == rm ]]; then
+      if [[ -e "` + f.dir + `/rm-fails" ]]; then echo "Error response from daemon: conflict" >&2; exit 1; fi
+      grep -v -F -- "${3:-}" "` + f.imagesPath() + `" > "` + f.imagesPath() + `.next" || true
+      mv "` + f.imagesPath() + `.next" "` + f.imagesPath() + `"
+      exit 0
+    fi
+    # image inspect --format FMT IMAGE...: each image's ID and build time, the
+    # image's ID, or (any other FMT) the stamp label.
+    if [[ ${2:-} == inspect && ${3:-} == --format ]]; then
+      case ${4:-} in
+        *.Created*)
+          for ref in "${@:5}"; do
+            if [[ -e "` + f.imagesPath() + `" ]]; then grep -F -- "$ref" "` + f.imagesPath() + `"; else echo "sha256:fakeimage 2026-01-01T00:00:00Z"; fi
+          done ;;
+        '{{.Id}}') echo sha256:fakeimage ;;
+        *) cat "` + f.labelPth + `" 2>/dev/null || true ;;
+      esac
       exit 0
     fi
     # A plain 'image inspect IMAGE' is the existence probe: the tag exists
@@ -78,6 +99,8 @@ case "${1:-}" in
     [[ -e "` + f.dir + `/missing" ]] && exit 1
     exit 0 ;;
   build) exit 0 ;;
+  # ps -a -q --filter ancestor=ID: the containers the test said use ID.
+  ps) cat "` + f.dir + `/users-${5#ancestor=}" 2>/dev/null || true; exit 0 ;;
   # run keeps what arrived on its stdin: the streamed working copy.
   # and says it is staged, as the image's entrypoint does once it extracted it.
   run) cat > "` + f.dir + `/run-stdin"; printf 'sandbox: staged 1 files, 4.0K total\n' >&2; exit 0 ;;
@@ -102,6 +125,41 @@ printf 'fake 209715200 0 %s 1%% /\n' "$free"
 		t.Fatalf("write fake df: %v", err)
 	}
 	return f
+}
+
+// imagesPath is the fake runtime's image list, one "ID CREATED" line each.
+func (f *fakeDocker) imagesPath() string { return filepath.Join(f.dir, "images") }
+
+// setImages makes the runtime list exactly LINES ("ID CREATED") as images.
+func (f *fakeDocker) setImages(t *testing.T, lines ...string) {
+	t.Helper()
+	if err := os.WriteFile(f.imagesPath(), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write images: %v", err)
+	}
+}
+
+// images is the IDs the runtime lists now.
+func (f *fakeDocker) images(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile(f.imagesPath())
+	if err != nil {
+		t.Fatalf("read images: %v", err)
+	}
+	var ids []string
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if id, _, ok := strings.Cut(line, " "); ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// setUsers makes CONTAINERS the containers using image ID.
+func (f *fakeDocker) setUsers(t *testing.T, id string, containers ...string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(f.dir, "users-"+id), []byte(strings.Join(containers, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write users: %v", err)
+	}
 }
 
 // setFreeKB makes the fake df report KB kilobytes available.
@@ -232,16 +290,20 @@ func sandboxLib(t *testing.T, f *fakeDocker, call string, extra ...string) strin
 }
 
 func sandboxEnv(f *fakeDocker, lockDir string, extra ...string) []string {
-	env := make([]string, 0, len(os.Environ())+3+len(extra))
+	env := make([]string, 0, len(os.Environ())+5+len(extra))
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, "AGENT_REPL_SANDBOX_ALLOW_STALE=") {
 			env = append(env, entry)
 		}
 	}
+	// The image lock and the run holds sit beside the build lock, in the
+	// test's own directory, never the host's shared /tmp paths.
 	env = append(env,
 		"PATH="+f.bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"AGENT_REPL_SANDBOX_RUNTIME=docker",
 		"AGENT_REPL_SANDBOX_BUILD_LOCK_DIR="+lockDir,
+		"AGENT_REPL_SANDBOX_IMAGE_LOCK_DIR="+filepath.Join(filepath.Dir(lockDir), "image.lock"),
+		"AGENT_REPL_SANDBOX_HOLD_DIR="+filepath.Join(filepath.Dir(lockDir), "holds"),
 	)
 	return append(env, extra...)
 }
