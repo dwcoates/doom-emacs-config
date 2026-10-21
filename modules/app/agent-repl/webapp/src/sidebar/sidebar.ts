@@ -48,7 +48,7 @@ import { placeChildren } from "./children.js";
 import { queryAll } from "../dom.js";
 import { createSelectionFade } from "./selection-fade.js";
 import { createSelectionScroll } from "./selection-scroll.js";
-import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterVersion, WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -373,6 +373,7 @@ function mountSidebarIn(
     attention.beginPass();
     const drawn = drawWorkspaceRoster(roster, rail);
     attention.endPass();
+    head.showVersion(roster.version);
     mark("build");
     placeChildren(body, [drawn]);
     mark("mount");
@@ -445,9 +446,11 @@ function mountSidebarIn(
 /** The rail's header. */
 export interface RailHead {
   element: HTMLElement;
+  /** State the roster's agent-repl version at the head's right; none hides it. */
+  showVersion(version: RosterVersion | undefined): void;
 }
 
-/** The rail's header: the search toggle and its title. */
+/** The rail's header: the search toggle, its title, and the agent-repl version. */
 export function drawRailHead(search: RailSearch): RailHead {
   const head = document.createElement("div");
   head.className = "sb-head";
@@ -457,5 +460,18 @@ export function drawRailHead(search: RailSearch): RailHead {
   title.className = "sb-title";
   title.textContent = "Workspaces";
   head.appendChild(title);
-  return { element: head };
+
+  // THE VERSION IS THE DAEMON'S (frontend.v1.WorkspaceRoster.version), drawn
+  // verbatim; UNSET until the daemon has resolved one, when nothing is drawn.
+  const version = document.createElement("span");
+  version.className = "sb-version";
+  version.hidden = true;
+  head.appendChild(version);
+  return {
+    element: head,
+    showVersion(next: RosterVersion | undefined): void {
+      version.hidden = next === undefined;
+      version.textContent = next?.text ?? "";
+    },
+  };
 }

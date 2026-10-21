@@ -19,7 +19,7 @@ import {
   type SidebarDeps,
   type WebhostSidebarDeps,
 } from "../../src/sidebar/sidebar.js";
-import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { RosterVersionSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { createRailSearch } from "../../src/sidebar/search.js";
 import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
 import { HOVER_SUSPENDED_CLASS } from "../../src/sidebar/transients.js";
@@ -213,6 +213,60 @@ describe("the rail's header", () => {
     expect(title.previousElementSibling?.hasAttribute("data-search-toggle")).toBe(true);
   });
 
+  it("draws the version last, right of the title", () => {
+    const head = railHead();
+    head.showVersion(create(RosterVersionSchema, { text: "0.129.0" }));
+    const version = head.element.lastElementChild as HTMLElement;
+    expect(version.className).toBe("sb-version");
+    expect(version.previousElementSibling?.className).toBe("sb-title");
+  });
+
+  it("hides the version until the daemon states one", () => {
+    const head = railHead();
+    const version = head.element.querySelector(".sb-version") as HTMLElement;
+    expect(version.hidden).toBe(true);
+    expect(version.textContent).toBe("");
+  });
+
+  it("states the version's text verbatim", () => {
+    const head = railHead();
+    head.showVersion(create(RosterVersionSchema, { text: "0.129.0" }));
+    const version = head.element.querySelector(".sb-version") as HTMLElement;
+    expect(version.hidden).toBe(false);
+    expect(version.textContent).toBe("0.129.0");
+  });
+
+  it("hides a version the daemon withdrew", () => {
+    const head = railHead();
+    head.showVersion(create(RosterVersionSchema, { text: "0.129.0" }));
+    head.showVersion(undefined);
+    const version = head.element.querySelector(".sb-version") as HTMLElement;
+    expect(version.hidden).toBe(true);
+    expect(version.textContent).toBe("");
+  });
+});
+
+describe("mounting the rail: the head's version", () => {
+  it("draws the version each drawn roster states", async () => {
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor([roster({ version: "0.129.0" })]), { timers: fakeTimers() });
+    await settle();
+    expect(host.querySelector(".sb-head .sb-version")?.textContent).toBe("0.129.0");
+  });
+
+  it("follows the newest roster's version", async () => {
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor([roster({ version: "0.129.0" }), roster({ version: "0.130.0" })]), { timers: fakeTimers() });
+    await settle();
+    expect(host.querySelector(".sb-head .sb-version")?.textContent).toBe("0.130.0");
+  });
+
+  it("draws no version for a roster that states none", async () => {
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor([roster()]), { timers: fakeTimers() });
+    await settle();
+    expect((host.querySelector(".sb-head .sb-version") as HTMLElement).hidden).toBe(true);
+  });
 });
 
 describe("mounting the rail: the view is the daemon's", () => {
