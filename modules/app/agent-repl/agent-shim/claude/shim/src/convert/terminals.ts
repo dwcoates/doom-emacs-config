@@ -22,6 +22,7 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
+import { classifyAgentFailure, networkCodeIn } from "../engine/network-resume.js";
 import { terminalEntry } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import type { FoldOutput } from "./fold.js";
@@ -154,8 +155,9 @@ function apiRequestFailed(
   message: string,
   httpStatus: number | undefined,
   vendorError: VendorApiError,
+  wording: string,
 ): conversationv1.ApiRequestFailed {
-  const kind = apiFailureKind(httpStatus, vendorError);
+  const kind = apiFailureKind(httpStatus, vendorError, wording);
   return create(conversationv1.ApiRequestFailedSchema, { message, kind });
 }
 
@@ -172,7 +174,14 @@ function apiRequestFailed(
  *  2. The HTTP STATUS, which is the finer fact for every remaining arm — the
  *     vendor spells both a 403 and a 413 `invalid_request`, and trusting the
  *     class there would collapse two arms into one.
- *  3. The CLASS AGAIN, as the fallback for a failure that stated no status.
+ *  3. A failure NO STATUS ANSWERED whose evidence says the API was never
+ *     reached is `unreachable` -- the one arm the vendor does not name: it
+ *     files a dropped or unresolved connection under `server_error` or no
+ *     class (2026-10-21: "Connection dropped (ECONNRESET)" read as the API's
+ *     own internal error). Read by the same classifier that stands the
+ *     session's network fault (engine/network-resume.ts), so the turn's end
+ *     and the fault never disagree.
+ *  4. The CLASS AGAIN, as the fallback for a failure that stated no status.
  *
  * A CLASS THE VENDOR ADDED LATER falls out of all three and is kept BY NAME as
  * `unmodeled` rather than being silently mishandled.
@@ -180,6 +189,7 @@ function apiRequestFailed(
 function apiFailureKind(
   httpStatus: number | undefined,
   vendor: VendorApiError,
+  wording: string,
 ): conversationv1.ApiRequestFailed["kind"] {
   const vendorError = vendor.errorClass;
   // UNSET IS NOT ZERO: the vendor said nothing about the wait unless it did,
@@ -228,6 +238,16 @@ function apiFailureKind(
       return { case: "overloaded", value: create(conversationv1.ApiOverloadedSchema, wait) };
     default:
       break;
+  }
+
+  if (httpStatus === undefined) {
+    const verdict = classifyAgentFailure({ ...(vendorError === undefined ? {} : { errorClass: vendorError }), text: wording });
+    if (verdict.network) {
+      return {
+        case: "unreachable",
+        value: create(conversationv1.ApiUnreachableSchema, { code: networkCodeIn(wording) ?? "" }),
+      };
+    }
   }
 
   switch (vendorError) {
@@ -525,6 +545,9 @@ export function convertResult(
             vendorMessage === "" ? "the vendor API failed the request" : vendorMessage,
             status,
             vendorApiError,
+            // EVERY WORD THE VENDOR SAID about the failure is the network
+            // evidence: the socket code may be in its notice and not its errors.
+            [vendorApiError.sentence ?? "", ...errors].filter((said) => said !== "").join(" · "),
           ),
         },
       }),

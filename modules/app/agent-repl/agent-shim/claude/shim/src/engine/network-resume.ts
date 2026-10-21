@@ -108,6 +108,11 @@ export const NETWORK_ERROR_CODES: readonly string[] = [
 
 const NETWORK_CODE_PATTERN = new RegExp(`\\b(${NETWORK_ERROR_CODES.join("|")})\\b`, "i");
 
+/** The network socket code TEXT names (`ECONNRESET`), upper-cased, or undefined when it names none. */
+export function networkCodeIn(text: string): string | undefined {
+  return NETWORK_CODE_PATTERN.exec(text)?.[1]?.toUpperCase();
+}
+
 /**
  * The words for "the API could not be reached", read only when nothing
  * structured decided: the vendor's own sentences, the API client's

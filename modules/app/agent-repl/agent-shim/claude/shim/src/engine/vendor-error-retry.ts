@@ -15,8 +15,8 @@
  *   {@link VENDOR_ERROR_RETRY_WINDOW_MS}. It qualifies when the turn's
  *   terminal is `AgentFailure.api_request_failed` of a kind waiting can cure
  *   ({@link isRetryableApiFailure}): an overload, the API's own error, a
- *   failure with no status (the connection), or a status the vendor itself
- *   retries. The window is measured from the chain's first failure; a retry
+ *   connection that never reached the API, a failure with no status, or a
+ *   status the vendor itself retries. The window is measured from the chain's first failure; a retry
  *   that would start past it is not made. A refusal of the request itself (a
  *   400, an auth, permission or billing refusal) is never retried.
  * - AN EXHAUSTED USAGE ALLOWANCE IS NEVER RETRIED ON THAT CADENCE: asking
@@ -515,6 +515,7 @@ export function isRetryableApiFailure(frame: conversationv1.AgentFrame): boolean
     case "overloaded":
     case "internal":
     case "rateLimited":
+    case "unreachable":
       return true;
     case "unmodeled":
       return retryableUnmodeled(kind.value.type);
