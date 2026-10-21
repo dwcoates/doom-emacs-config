@@ -39,6 +39,12 @@
  *   retry is due or the latest is running as a turn.
  * - A RETRY CAN BE MADE AT ONCE ({@link VendorErrorRetry.retryNow}): the
  *   pending one is delivered now instead of at its instant.
+ * - THE API COMING BACK MAKES THE RETRY AT ONCE
+ *   ({@link VendorErrorRetry.networkRecovered}): a vendor-error retry waiting
+ *   out its interval is made the moment the network probe reaches the API
+ *   again, instead of at the interval's end (2026-10-21: the API answered 7s
+ *   after the failure, and the retry waited 23s more). A usage-limit retry is
+ *   not: reaching the API does not reset an allowance.
  * - THE CHAIN ENDS on the first retry turn that ends any other way (answered,
  *   interrupted, a failure neither rule retries), on a prompt someone else
  *   submits (the session is theirs again; a prompt of theirs that fails the
@@ -283,6 +289,24 @@ export class VendorErrorRetry {
     this.cancelTimer();
     LOGGER.info({ chain: chain.id, attempt: chain.retries + 1 }, "a retry was asked for now; agent-repl makes it at once");
     return this.retry(chain);
+  }
+
+  /**
+   * The network probe reached the API again (engine/network-resume.ts
+   * `recovered`). A vendor-error retry waiting out its interval is made now;
+   * a usage-limit retry keeps its instant, and with none pending there is
+   * nothing to make.
+   */
+  networkRecovered(): void {
+    const chain = this.chain;
+    if (this.stopped || chain === undefined || this.handle === undefined) return;
+    if (chain.mode?.kind !== "vendor_error") {
+      LOGGER.debug({ chain: chain.id, mode: chain.mode?.kind ?? "" }, "the API is reachable again; a usage-limit retry keeps its instant");
+      return;
+    }
+    this.cancelTimer();
+    LOGGER.info({ chain: chain.id, attempt: chain.retries + 1 }, "the API is reachable again; agent-repl makes the scheduled retry at once");
+    void this.retry(chain);
   }
 
   private open(failure: Failure): Chain {

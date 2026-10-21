@@ -829,8 +829,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       pushes.push(update);
     },
     // THE SAME LOOP RESOLVES THE NETWORK FAULT once the API answers it, so an
-    // idle session whose last request failed is not faulted until its next.
-    recovered: () => pushes.resolveComponent(NETWORK_COMPONENT, 0),
+    // idle session whose last request failed is not faulted until its next,
+    // and a vendor-error retry waiting out its interval is made at once.
+    recovered: () => {
+      pushes.resolveComponent(NETWORK_COMPONENT, 0);
+      vendorErrorRetry.networkRecovered();
+    },
     ...(deps.networkResumeIntervalMs === undefined ? {} : { intervalMs: deps.networkResumeIntervalMs }),
     ...(deps.networkResumeWindowMs === undefined ? {} : { windowMs: deps.networkResumeWindowMs }),
   });
