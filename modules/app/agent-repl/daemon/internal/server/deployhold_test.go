@@ -8,87 +8,80 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"agent-repld/internal/deploy"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 )
 
-// rolloutsRequest asks UpdateRollouts to hold, or (release) to release.
-func rolloutsRequest(release bool) *connect.Request[agentreplv1.UpdateRolloutsRequest] {
+// theHeldRepository is the repository every deploy-hold request names.
+var theHeldRepository = &workspacev1.RepositoryRef{Id: "repo-1", Dir: "/repos/one/.git"}
+
+// deployHoldRequest asks UpdateDeployHold to hold, or (release) to release,
+// theHeldRepository.
+func deployHoldRequest(release bool) *connect.Request[agentreplv1.UpdateDeployHoldRequest] {
+	req := &agentreplv1.UpdateDeployHoldRequest{Repository: theHeldRepository,
+		Action: &agentreplv1.UpdateDeployHoldRequest_Hold{Hold: &agentreplv1.UpdateDeployHoldHold{}}}
 	if release {
-		return connect.NewRequest(&agentreplv1.UpdateRolloutsRequest{Action: &agentreplv1.UpdateRolloutsRequest_Release{Release: &agentreplv1.UpdateRolloutsRelease{}}})
+		req.Action = &agentreplv1.UpdateDeployHoldRequest_Release{Release: &agentreplv1.UpdateDeployHoldRelease{}}
 	}
-	return connect.NewRequest(&agentreplv1.UpdateRolloutsRequest{Action: &agentreplv1.UpdateRolloutsRequest_Hold{Hold: &agentreplv1.UpdateRolloutsHold{}}})
+	return connect.NewRequest(req)
 }
 
-func TestAHoldHoldsAndDeploysNothing(t *testing.T) {
+func TestAHoldHoldsTheNamedRepository(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
 	// Act
-	resp, err := h.Client.UpdateRollouts(context.Background(), rolloutsRequest(false))
+	resp, err := h.Client.UpdateDeployHold(context.Background(), deployHoldRequest(false))
 
 	// Assert
 	if err != nil || resp.Msg.GetSuccess().GetHeld() == nil {
-		t.Fatalf("UpdateRollouts = %v, %v; want held", resp, err)
+		t.Fatalf("UpdateDeployHold = %v, %v; want held", resp, err)
 	}
-	if h.Merge.holds != 1 || len(h.Deployer.forced) != 0 {
-		t.Fatalf("holds %d, deploys %d; want one hold and no deploy", h.Merge.holds, len(h.Deployer.forced))
+	want := merge.RepositoryScope{ID: "repo-1", Dir: "/repos/one/.git"}
+	if h.Merge.holds != 1 || len(h.Merge.holdScopes) != 1 || h.Merge.holdScopes[0] != want {
+		t.Fatalf("holds %d of %v; want one hold of %v", h.Merge.holds, h.Merge.holdScopes, want)
 	}
 }
 
-func TestAReleaseDeploysWhatLanded(t *testing.T) {
+func TestAReleaseAnswersWhatRanForTheSkippedDeploys(t *testing.T) {
 	tests := []struct {
-		name   string
-		result deploy.Result
-		err    error
-		want   string
+		name    string
+		release merge.DeployRelease
+		check   func(*agentreplv1.UpdateDeployHoldSuccessReleased) bool
 	}{
-		{name: "a build that carries every landing", result: deploy.Result{Outcomes: []deploy.Outcome{
-			{Component: deploy.ComponentDaemon, Kind: deploy.UpToDate}}}, want: "up_to_date"},
-		{name: "a build that is behind", result: deploy.Result{Outcomes: []deploy.Outcome{
-			{Component: deploy.ComponentDaemon, Kind: deploy.UpToDate}, {Component: deploy.ComponentElisp, Kind: deploy.ReloadPushed}}}, want: "rolling_out"},
-		{name: "a deploy that cannot start", err: errors.New("build failed"), want: "start_failed"},
+		{name: "nothing skipped", release: merge.DeployRelease{Kind: merge.ReleaseNothingSkipped},
+			check: func(r *agentreplv1.UpdateDeployHoldSuccessReleased) bool { return r.GetNothingSkipped() != nil }},
+		{name: "the script ran", release: merge.DeployRelease{Kind: merge.ReleaseScriptRan, Skipped: 2, Path: "bin/deploy.sh", LogPath: "/logs/release-1.log"},
+			check: func(r *agentreplv1.UpdateDeployHoldSuccessReleased) bool {
+				return r.GetScriptRan().GetPath() == "bin/deploy.sh" && r.GetScriptRan().GetLogPath() == "/logs/release-1.log" && r.GetSkippedDeploys() == 2
+			}},
+		{name: "the script failed", release: merge.DeployRelease{Kind: merge.ReleaseScriptFailed, Skipped: 1, Path: "bin/deploy.sh", LogPath: "/logs/release-1.log", Detail: "it exited 4"},
+			check: func(r *agentreplv1.UpdateDeployHoldSuccessReleased) bool {
+				return r.GetScriptFailed().GetDetail() == "it exited 4" && r.GetScriptFailed().GetPath() == "bin/deploy.sh"
+			}},
+		{name: "a prompt deploy hook", release: merge.DeployRelease{Kind: merge.ReleasePromptNotRun, Skipped: 1},
+			check: func(r *agentreplv1.UpdateDeployHoldSuccessReleased) bool { return r.GetPromptNotRun() != nil }},
+		{name: "no deploy hook", release: merge.DeployRelease{Kind: merge.ReleaseNoDeployHook, Skipped: 1, Detail: "none named"},
+			check: func(r *agentreplv1.UpdateDeployHoldSuccessReleased) bool { return r.GetNoDeployHook().GetDetail() == "none named" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			log := dlog.NewTestLogger()
-			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
-			h.Deployer.result, h.Deployer.err = tt.result, tt.err
+			h := newHarness(t)
+			h.Merge.release = tt.release
 
 			// Act
-			resp, err := h.Client.UpdateRollouts(context.Background(), rolloutsRequest(true))
+			resp, err := h.Client.UpdateDeployHold(context.Background(), deployHoldRequest(true))
 
 			// Assert
 			if err != nil {
-				t.Fatalf("UpdateRollouts: %v", err)
+				t.Fatalf("UpdateDeployHold: %v", err)
 			}
-			released := resp.Msg.GetSuccess().GetReleased()
-			if h.Merge.releases != 1 || len(h.Deployer.forced) != 1 || h.Deployer.forced[0] {
-				t.Fatalf("releases %d, deploys %v; want one release and one unforced deploy", h.Merge.releases, h.Deployer.forced)
-			}
-			got := ""
-			switch {
-			case released.GetUpToDate() != nil:
-				got = "up_to_date"
-			case released.GetRollingOut() != nil:
-				got = "rolling_out"
-				if len(released.GetRollingOut().GetDeploy().GetComponents()) != 2 {
-					t.Errorf("rolling out = %v, want both components' decisions", released.GetRollingOut())
-				}
-			case released.GetStartFailed() != nil:
-				got = "start_failed"
-				if released.GetStartFailed().GetDetail() != "build failed" {
-					t.Errorf("detail = %q, want the deploy's account", released.GetStartFailed().GetDetail())
-				}
-				if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opUpdateRollouts}); !ok {
-					t.Errorf("no error record of the failed rollout: %+v", log.Records())
-				}
-			}
-			if got != tt.want {
-				t.Fatalf("released = %v, want %s", released, tt.want)
+			if released := resp.Msg.GetSuccess().GetReleased(); h.Merge.releases != 1 || !tt.check(released) {
+				t.Fatalf("released = %v after %d release(s), want the release's own account", released, h.Merge.releases)
 			}
 		})
 	}
@@ -99,12 +92,16 @@ func TestTheHoldRefusalsAreAnswers(t *testing.T) {
 		name    string
 		release bool
 		arm     string
-		got     func(*agentreplv1.UpdateRolloutsError) bool
+		got     func(*agentreplv1.UpdateDeployHoldError) bool
 	}{
-		{name: "a hold of held rollouts", arm: merge.ArmRolloutsAlreadyHeld,
-			got: func(e *agentreplv1.UpdateRolloutsError) bool { return e.GetAlreadyHeld() != nil }},
-		{name: "a release of rollouts not held", release: true, arm: merge.ArmRolloutsNotHeld,
-			got: func(e *agentreplv1.UpdateRolloutsError) bool { return e.GetNotHeld() != nil }},
+		{name: "a hold of a held repository", arm: merge.ArmDeploysAlreadyHeld,
+			got: func(e *agentreplv1.UpdateDeployHoldError) bool { return e.GetAlreadyHeld() != nil }},
+		{name: "a release of a repository not held", release: true, arm: merge.ArmDeploysNotHeld,
+			got: func(e *agentreplv1.UpdateDeployHoldError) bool { return e.GetNotHeld() != nil }},
+		{name: "a hold of an unknown repository", arm: merge.ArmUnknownRepository,
+			got: func(e *agentreplv1.UpdateDeployHoldError) bool { return e.GetUnknownRepository() != nil }},
+		{name: "a release of an unknown repository", release: true, arm: merge.ArmUnknownRepository,
+			got: func(e *agentreplv1.UpdateDeployHoldError) bool { return e.GetUnknownRepository() != nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -114,42 +111,125 @@ func TestTheHoldRefusalsAreAnswers(t *testing.T) {
 			h.Merge.holdErr, h.Merge.releaseErr = refusal, refusal
 
 			// Act
-			resp, err := h.Client.UpdateRollouts(context.Background(), rolloutsRequest(tt.release))
+			resp, err := h.Client.UpdateDeployHold(context.Background(), deployHoldRequest(tt.release))
 
 			// Assert
 			if err != nil || !tt.got(resp.Msg.GetError()) {
-				t.Fatalf("UpdateRollouts = %v, %v; want the %s arm", resp, err, tt.arm)
-			}
-			if len(h.Deployer.forced) != 0 {
-				t.Errorf("a refused release deployed")
+				t.Fatalf("UpdateDeployHold = %v, %v; want the %s arm", resp, err, tt.arm)
 			}
 		})
 	}
 }
 
-func TestUpdateRolloutsRefusesARequestWithNoAction(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
+func TestUpdateDeployHoldRefusesAnIncompleteRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.UpdateDeployHoldRequest
+	}{
+		{name: "no repository", req: &agentreplv1.UpdateDeployHoldRequest{Action: &agentreplv1.UpdateDeployHoldRequest_Hold{Hold: &agentreplv1.UpdateDeployHoldHold{}}}},
+		{name: "no action", req: &agentreplv1.UpdateDeployHoldRequest{Repository: theHeldRepository}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
 
-	// Act
-	_, err := h.Client.UpdateRollouts(context.Background(), connect.NewRequest(&agentreplv1.UpdateRolloutsRequest{}))
+			// Act
+			_, err := h.Client.UpdateDeployHold(context.Background(), connect.NewRequest(tt.req))
 
-	// Assert
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("UpdateRollouts = %v, want InvalidArgument", err)
+			// Assert
+			if connect.CodeOf(err) != connect.CodeInvalidArgument || h.Merge.holds+h.Merge.releases != 0 {
+				t.Fatalf("UpdateDeployHold = %v after %d verb(s), want InvalidArgument and none", err, h.Merge.holds+h.Merge.releases)
+			}
+		})
 	}
 }
 
-func TestARolloutHoldFailureIsATransportError(t *testing.T) {
+func TestADeployHoldStoreFailureIsATransportError(t *testing.T) {
+	tests := []struct {
+		name    string
+		release bool
+	}{
+		{name: "a hold"},
+		{name: "a release", release: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Merge.holdErr, h.Merge.releaseErr = errors.New("state database unreadable"), errors.New("state database unreadable")
+
+			// Act
+			_, err := h.Client.UpdateDeployHold(context.Background(), deployHoldRequest(tt.release))
+
+			// Assert
+			if err == nil {
+				t.Fatal("UpdateDeployHold answered a failed store without an error")
+			}
+		})
+	}
+}
+
+func TestRollOutLandingAnswersWhenTheRolloutRuns(t *testing.T) {
+	tests := []struct {
+		name       string
+		req        *agentreplv1.RollOutLandingRequest
+		registered bool
+		wantLedger ids.LeaseID
+		check      func(*agentreplv1.RollOutLandingSuccess) bool
+	}{
+		{name: "a deploy's ledger registers it", registered: true, wantLedger: "0011aabb",
+			req:   &agentreplv1.RollOutLandingRequest{Deploy: &agentreplv1.DeployLedger{Ledger: "0011aabb"}},
+			check: func(s *agentreplv1.RollOutLandingSuccess) bool { return s.GetRegistered() != nil }},
+		{name: "no deploy starts it", req: &agentreplv1.RollOutLandingRequest{},
+			check: func(s *agentreplv1.RollOutLandingSuccess) bool { return s.GetStarted() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			h.Merge.rollOutRegistered = tt.registered
+
+			// Act
+			resp, err := h.Client.RollOutLanding(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert
+			if err != nil || !tt.check(resp.Msg.GetSuccess()) {
+				t.Fatalf("RollOutLanding = %v, %v; want %s", resp, err, tt.name)
+			}
+			if len(h.Merge.rollOuts) != 1 || h.Merge.rollOuts[0] != tt.wantLedger {
+				t.Fatalf("rollouts asked = %v, want one naming %q", h.Merge.rollOuts, tt.wantLedger)
+			}
+		})
+	}
+}
+
+func TestRollOutLandingAnswersAnUnknownDeploy(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.Merge.holdErr = errors.New("state database unreadable")
+	h.Merge.rollOutErr = &merge.RefusalError{Arm: merge.ArmUnknownDeploy, Reason: "no such deploy"}
 
 	// Act
-	_, err := h.Client.UpdateRollouts(context.Background(), rolloutsRequest(false))
+	resp, err := h.Client.RollOutLanding(context.Background(), connect.NewRequest(&agentreplv1.RollOutLandingRequest{
+		Deploy: &agentreplv1.DeployLedger{Ledger: "0011aabb"}}))
 
 	// Assert
-	if err == nil {
-		t.Fatal("UpdateRollouts answered a failed hold without an error")
+	if err != nil || resp.Msg.GetError().GetUnknownDeploy() == nil {
+		t.Fatalf("RollOutLanding = %v, %v; want unknown_deploy", resp, err)
+	}
+}
+
+func TestRollOutLandingRefusesANamedDeployWithNoLedger(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, err := h.Client.RollOutLanding(context.Background(), connect.NewRequest(&agentreplv1.RollOutLandingRequest{
+		Deploy: &agentreplv1.DeployLedger{Ledger: "  "}}))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.Merge.rollOuts) != 0 {
+		t.Fatalf("RollOutLanding = %v with %d ask(s), want InvalidArgument and none", err, len(h.Merge.rollOuts))
 	}
 }

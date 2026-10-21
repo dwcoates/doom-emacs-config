@@ -32,7 +32,7 @@ import (
 // error message carries is set by NAME.
 func TestSetResponseErrorSetsTheNamedArm(t *testing.T) {
 	// Arrange.
-	resp := &agentreplv1.MergeWorkspaceResponse{}
+	resp := &agentreplv1.FinishWorkspaceResponse{}
 
 	// Act.
 	ok := setResponseError(resp, "already_queued", nil)
@@ -47,14 +47,14 @@ func TestSetResponseErrorSetsTheNamedArm(t *testing.T) {
 // NOT carry falls through, which is what routes it to UnlandedArm.
 func TestSetResponseErrorRefusesAnUnlandedArm(t *testing.T) {
 	// Arrange.
-	resp := &agentreplv1.MergeWorkspaceResponse{}
+	resp := &agentreplv1.FinishWorkspaceResponse{}
 
 	// Act.
 	ok := setResponseError(resp, "duplicate_submission", nil)
 
 	// Assert.
 	if ok {
-		t.Fatal("an arm MergeWorkspaceError does not carry was reported as set")
+		t.Fatal("an arm FinishWorkspaceError does not carry was reported as set")
 	}
 }
 
@@ -62,7 +62,7 @@ func TestSetResponseErrorRefusesAnUnlandedArm(t *testing.T) {
 // filled from the refusal rather than left empty.
 func TestSetResponseErrorFillsTheArmsOwnField(t *testing.T) {
 	// Arrange.
-	resp := &agentreplv1.MergeWorkspaceResponse{}
+	resp := &agentreplv1.FinishWorkspaceResponse{}
 
 	// Act.
 	setResponseError(resp, "transferring_away", map[string]any{"address": "127.0.0.1:1"})

@@ -862,10 +862,18 @@ type fakeMerge struct {
 	evictErr          error
 	holdErr           error
 	releaseErr        error
-	// holds and releases count the rollout-hold verbs.
-	holds, releases  int
-	disableRacingErr error
-	enableRacingErr  error
+	// holds and releases count the deploy-hold verbs, and holdScopes every
+	// repository they named; release is what a release answers.
+	holds, releases int
+	holdScopes      []merge.RepositoryScope
+	release         merge.DeployRelease
+	// rollOuts records every RollOutLanding ledger; rollOutRegistered and
+	// rollOutErr are its answer.
+	rollOuts          []ids.LeaseID
+	rollOutRegistered bool
+	rollOutErr        error
+	disableRacingErr  error
+	enableRacingErr   error
 	// disables and enables count the racing-switch verbs.
 	disables, enables int
 	moveErr           error
@@ -997,14 +1005,24 @@ func (f *fakeMerge) Move(_ context.Context, ws ids.WorkspaceID, move wsm.MergeMo
 	return f.moveErr == nil, f.moveErr
 }
 
-func (f *fakeMerge) HoldRollouts(context.Context) error {
+func (f *fakeMerge) HoldDeploys(_ context.Context, scope merge.RepositoryScope) error {
 	f.holds++
+	f.holdScopes = append(f.holdScopes, scope)
 	return f.holdErr
 }
 
-func (f *fakeMerge) ReleaseRollouts(context.Context) error {
+func (f *fakeMerge) ReleaseDeploys(_ context.Context, scope merge.RepositoryScope) (merge.DeployRelease, error) {
 	f.releases++
-	return f.releaseErr
+	f.holdScopes = append(f.holdScopes, scope)
+	if f.releaseErr != nil {
+		return merge.DeployRelease{}, f.releaseErr
+	}
+	return f.release, nil
+}
+
+func (f *fakeMerge) RollOutLanding(_ context.Context, ledger ids.LeaseID) (bool, error) {
+	f.rollOuts = append(f.rollOuts, ledger)
+	return f.rollOutRegistered, f.rollOutErr
 }
 
 func (f *fakeMerge) DisableRacing(context.Context) error {

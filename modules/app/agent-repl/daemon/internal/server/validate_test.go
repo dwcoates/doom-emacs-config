@@ -594,30 +594,20 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "commit_log.commit",
 		},
 		{
-			name:  "merge with no workspace",
-			check: func() *connect.Error { return validateMergeWorkspaceRequest(&agentreplv1.MergeWorkspaceRequest{}) },
+			name:  "finish with no workspace",
+			check: func() *connect.Error { return validateFinishWorkspaceRequest(&agentreplv1.FinishWorkspaceRequest{}) },
 			field: "workspace",
 		},
-		{name: "merge with no requester", check: func() *connect.Error {
-			req := oneShotRequest()
+		{name: "finish with no requester", check: func() *connect.Error {
+			req := ownFinish()
 			req.Requester = nil
-			return validateMergeWorkspaceRequest(req)
+			return validateFinishWorkspaceRequest(req)
 		}, field: "requester"},
-		{name: "merge with no placement", check: func() *connect.Error {
-			req := oneShotRequest()
+		{name: "finish with no placement", check: func() *connect.Error {
+			req := ownFinish()
 			req.Placement = nil
-			return validateMergeWorkspaceRequest(req)
+			return validateFinishWorkspaceRequest(req)
 		}, field: "placement"},
-		{name: "merge with no mode", check: func() *connect.Error {
-			req := oneShotRequest()
-			req.Mode = nil
-			return validateMergeWorkspaceRequest(req)
-		}, field: "mode"},
-		{name: "merge of a one-shot with no landing", check: func() *connect.Error {
-			req := oneShotRequest()
-			req.Mode = &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{}}
-			return validateMergeWorkspaceRequest(req)
-		}, field: "one_shot.landing"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -732,7 +722,7 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 					Target: &agentreplv1.OpenInEditorRequest_MergeTestLog{MergeTestLog: &frontendv1.FeedMergeTestLogToken{Value: "lease/1"}}})
 			},
 		},
-		{name: "merge as a one-shot", check: func() *connect.Error { return validateMergeWorkspaceRequest(oneShotRequest()) }},
+		{name: "finish a workspace", check: func() *connect.Error { return validateFinishWorkspaceRequest(ownFinish()) }},
 		{name: "create a standard workspace", check: func() *connect.Error { return validateCreateWorkspaceRequest(validCreate(nil)) }},
 		{name: "create a child that forks another workspace", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {

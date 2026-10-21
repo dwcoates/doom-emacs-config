@@ -98,10 +98,10 @@ func TestRepresentativeRPCHandlersRecordRequestBoundaries(t *testing.T) {
 			_, err := client.NukeWorkspace(ctx, req)
 			return err
 		}},
-		{name: "merge workspace", operation: "daemon.server.merge_workspace", invoke: func(ctx context.Context, client agentreplv1connect.AgentReplClient, id string) error {
-			req := connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{})
+		{name: "finish workspace", operation: "daemon.server.finish_workspace", invoke: func(ctx context.Context, client agentreplv1connect.AgentReplClient, id string) error {
+			req := connect.NewRequest(&agentreplv1.FinishWorkspaceRequest{})
 			req.Header().Set(requestIDHeader, id)
-			_, err := client.MergeWorkspace(ctx, req)
+			_, err := client.FinishWorkspace(ctx, req)
 			return err
 		}},
 		{name: "set workspace parent", operation: "daemon.server.set_workspace_parent", invoke: func(ctx context.Context, client agentreplv1connect.AgentReplClient, id string) error {
