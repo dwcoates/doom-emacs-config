@@ -16,7 +16,8 @@ func TestDurableQueueOrderOfAnEmptyQueueIsEmpty(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	repo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir})
+	repo.DeploysAsAgentRepl()
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true})
 
 	// Act
 	order := durableQueueOrder(t, d)

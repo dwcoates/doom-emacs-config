@@ -83,7 +83,7 @@ func NewRepo(t testing.TB) *Repo {
 }
 
 // NewRepoAt mints a fake repository at an exact path, for the tests that care
-// where the workspace lives (the multi-repo root, the daemon's self repo).
+// where the workspace lives (the multi-repo root).
 func NewRepoAt(t testing.TB, dir string) *Repo {
 	t.Helper()
 	w := World(t)
@@ -103,6 +103,7 @@ func NewRepoAt(t testing.TB, dir string) *Repo {
 	// ruling), so a fixture repository carries a copy of the shipped corpus
 	// as its policy exactly as a real repository's author would write one.
 	CopyPrompts(t, r.PolicyDir())
+	r.WriteDeployConfig(HooksOnlyDeploy)
 	return r
 }
 
@@ -415,23 +416,6 @@ func (r *Repo) RebaseInProgress(worktreeDir string) bool {
 func (r *Repo) BranchHead(branch string) string {
 	r.t.Helper()
 	return r.state(r.w.read()).BranchHeads[branch]
-}
-
-// SetUpstream points origin's branch at a new commit on top of the local
-// one, as a pull request merged upstream leaves it, and answers that commit.
-func (r *Repo) SetUpstream(branch string) string {
-	r.t.Helper()
-	var sha string
-	r.edit(func(s *fakegit.State) {
-		repo := r.state(s)
-		c := s.AddCommit(repo, "", "merged upstream", []string{repo.BranchHeads[branch]}, []string{"upstream.txt"})
-		if repo.RemoteHeads == nil {
-			repo.RemoteHeads = map[string]string{}
-		}
-		repo.RemoteHeads[branch] = c.SHA
-		sha = c.SHA
-	})
-	return sha
 }
 
 // AddBranchWorktree adds a branch cut from the default branch, carrying one

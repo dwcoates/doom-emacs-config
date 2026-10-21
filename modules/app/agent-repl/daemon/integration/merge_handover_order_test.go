@@ -28,19 +28,20 @@ func TestAHeadHandedOverAfterTheMergeBehindItResumesAsTheHeadAndAMergeTakenBackI
 	// test turn.
 	repo := harness.NewRepo(t)
 	gate := newTurnGate(t)
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.HandoverChainTimeout,
+	repo.DeploysAsAgentRepl()
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout,
 		ExtraEnv: []string{harness.TestAllScriptEnv(gate.path)}})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	a := mergeCreateChild(t, d, repoRef, "alpha", "the first work", nil)
 	b := mergeCreateChild(t, d, repoRef, "beta", "the second work", nil)
 	harness.CommitWork(t, a.ws.GetDir())
 	harness.CommitWork(t, b.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(a.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(alpha): %v", err)
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(a.ws))); err != nil {
+		t.Fatalf("FinishWorkspace(alpha): %v", err)
 	}
 	gate.awaitStart(d, a.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(b.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(beta): %v", err)
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(b.ws))); err != nil {
+		t.Fatalf("FinishWorkspace(beta): %v", err)
 	}
 	d.AwaitLogRecord(harness.WorkspaceLogPath(b.ws.GetDir(), "daemon"), "beta in line", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.merge.test_turn" && strings.Contains(r.Message, "joined the line")

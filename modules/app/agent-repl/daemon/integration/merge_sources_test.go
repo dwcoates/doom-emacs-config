@@ -44,13 +44,13 @@ func newSourcedRepo(t *testing.T) *sourcedRepo {
 	return &sourcedRepo{d: d, repo: repo, script: script, f: f}
 }
 
-// mergeAs asks for the fixture workspace's merge in one mode, as the user.
-func (s *sourcedRepo) mergeAs(t *testing.T, mode harness.MergeMode) {
+// finish asks for the fixture workspace's deploy, as the user.
+func (s *sourcedRepo) finish(t *testing.T) {
 	t.Helper()
-	resp, err := s.d.Client().MergeWorkspace(s.d.Ctx(), connect.NewRequest(harness.MergeRequest(s.f.ws, mode)))
-	requireRPCAnswered(t, "MergeWorkspace", resp, err)
+	resp, err := s.d.Client().FinishWorkspace(s.d.Ctx(), connect.NewRequest(harness.FinishRequest(s.f.ws)))
+	requireRPCAnswered(t, "FinishWorkspace", resp, err)
 	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("MergeWorkspace = (%v), want the merge enqueued", resp.Msg.GetResult())
+		t.Fatalf("FinishWorkspace = (%v), want the deploy enqueued", resp.Msg.GetResult())
 	}
 }
 
@@ -187,7 +187,7 @@ func TestAConflictIsResolvedByTheRequestersSessionAndTheRebaseContinues(t *testi
 	s.repo.ScriptRebaseConflict(mergeBranchOf(t, s.f.ws), 1, "work.txt")
 
 	// Act: the requester's own session resolves it.
-	s.mergeAs(t, harness.OneShot())
+	s.finish(t)
 	brief := s.awaitStartTurn(t, 2)
 	s.repo.ResolveConflicts(s.f.ws.GetDir())
 	pushConcludedTurn(s.f.shim, mainAgent, "resolved")
@@ -219,9 +219,9 @@ func TestAResolutionThatGivesUpFailsInConflictsLeavesTheRebaseAndLetsTheNextMerg
 	behindRoot := behind.watchRootFeed()
 
 	// Act.
-	s.mergeAs(t, harness.OneShot())
-	if _, err := s.d.Client().MergeWorkspace(s.d.Ctx(), connect.NewRequest(harness.MergeRequest(behind.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(behind): %v", err)
+	s.finish(t)
+	if _, err := s.d.Client().FinishWorkspace(s.d.Ctx(), connect.NewRequest(harness.FinishRequest(behind.ws))); err != nil {
+		t.Fatalf("FinishWorkspace(behind): %v", err)
 	}
 	// The session gives up on every attempt the commit's conflict gets.
 	for attempt := 1; attempt <= merge.MaxConflictAttempts; attempt++ {
@@ -260,7 +260,7 @@ func TestAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn(t *testing
 	s.repo.ScriptRebaseConflict(mergeBranchOf(t, s.f.ws), 1, "work.txt")
 	footer := s.d.WatchFooter(s.f.ws)
 	root := s.f.watchRootFeed()
-	s.mergeAs(t, harness.OneShot())
+	s.finish(t)
 	for attempt := 1; attempt <= merge.MaxConflictAttempts; attempt++ {
 		s.awaitStartTurn(t, 1+attempt)
 		pushConcludedTurn(s.f.shim, mainAgent, "gave-up")
@@ -304,7 +304,7 @@ func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 	root := s.f.watchRootFeed()
 
 	// Act.
-	s.mergeAs(t, harness.OneShot())
+	s.finish(t)
 	s.awaitStartTurn(t, 2)
 	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved while fixing\n")
 	s.script.SetExitCode(0)
@@ -334,28 +334,6 @@ func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 	})
 }
 
-func TestABranchMergedUpstreamUpdatesTheDefaultBranchAndClosesTheRequester(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	s := newSourcedRepo(t)
-	upstream := s.repo.SetUpstream(harness.DefaultBranch)
-	root := s.f.watchRootFeed()
-
-	// Act.
-	s.mergeAs(t, harness.OneShotMergedUpstream())
-	merge := s.awaitConcluded(t, root)
-	s.d.AwaitLandingDeployed()
-
-	// Assert.
-	if merge.GetSuccess() == nil {
-		t.Fatalf("the merge ended %v, want landed", merge.GetResult())
-	}
-	if got := s.repo.BranchHead(harness.DefaultBranch); got != upstream {
-		t.Fatalf("the default branch is at %s, want upstream's %s", got, upstream)
-	}
-	s.d.AwaitFileGone(s.f.ws.GetDir())
-}
-
 func TestNoMergeFactReachesAnyClientBeforeTheRequestingTurnEnds(t *testing.T) {
 	t.Parallel()
 	// Arrange: the workspace's turn is in flight when its agent asks.
@@ -369,15 +347,15 @@ func TestNoMergeFactReachesAnyClientBeforeTheRequestingTurnEnds(t *testing.T) {
 
 	// Act: the agent asks while its turn runs. A merge onto agent-repl's own
 	// master names its version increment.
-	ask := harness.MergeRequest(s.f.ws, harness.OneShot(), func(req *agentreplv1.MergeWorkspaceRequest) {
+	ask := harness.FinishRequest(s.f.ws, func(req *agentreplv1.FinishWorkspaceRequest) {
 		req.Requester = harness.AskedBy(s.f.ws)
 		req.VersionIncrement = &agentreplv1.MergeWorkspaceVersionIncrement{ChangelogLine: "Fix the footer",
 			Increment: &agentreplv1.MergeWorkspaceVersionIncrement_Patch{Patch: &agentreplv1.MergeWorkspaceVersionIncrementPatch{}}}
 	})
-	resp, err := s.d.Client().MergeWorkspace(s.d.Ctx(), connect.NewRequest(ask))
-	requireRPCAnswered(t, "MergeWorkspace", resp, err)
+	resp, err := s.d.Client().FinishWorkspace(s.d.Ctx(), connect.NewRequest(ask))
+	requireRPCAnswered(t, "FinishWorkspace", resp, err)
 	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("MergeWorkspace = (%v), want the merge recorded", resp.Msg.GetResult())
+		t.Fatalf("FinishWorkspace = (%v), want the deploy recorded", resp.Msg.GetResult())
 	}
 
 	// Assert: nothing about the merge on the roster or the feed.
@@ -458,7 +436,7 @@ func TestAMissingConflictBriefFailsTheMergeLoudly(t *testing.T) {
 	s.repo.ScriptRebaseConflict(mergeBranchOf(t, s.f.ws), 1, "work.txt")
 
 	// Act.
-	s.mergeAs(t, harness.OneShot())
+	s.finish(t)
 
 	// Assert.
 	awaitFooter(t, s.f, footer, "merge failed in other", func(v *frontendv1.FooterView) bool {
@@ -475,7 +453,7 @@ func TestALandedMergesLedgerRecordsEachStepsInterval(t *testing.T) {
 	root := s.f.watchRootFeed()
 
 	// Act.
-	s.mergeAs(t, harness.OneShot())
+	s.finish(t)
 	s.awaitConcluded(t, root)
 	s.d.AwaitLandingDeployed()
 	s.d.Stop()
@@ -523,7 +501,7 @@ func TestARelaunchedDaemonReplaysARepairTurnInItsTabAlone(t *testing.T) {
 	s.repo.ScriptRebaseConflict(branch, 1, "work.txt")
 	s.repo.ScriptRebaseConflict(branch, 2, "more.txt")
 	s.d.ExpectWarnings("daemon.gitclient.merge_no_ff")
-	s.mergeAs(t, harness.OneShot())
+	s.finish(t)
 	req := s.f.shim.ExpectStartTurn()
 	s.d.AwaitWorkspaceLogOperationCount(s.f.ws.GetDir(), harness.OpTurnOpened, 2)
 	repair := req.GetTurn().GetValue()

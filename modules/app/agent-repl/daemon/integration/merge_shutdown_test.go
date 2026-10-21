@@ -37,9 +37,9 @@ func TestStoppingTheDaemonInsideAMergesTerminalStampsTheLandingWithNoFailedWrite
 	rendezvous := filepath.Join(t.TempDir(), "merge-terminal")
 	selfRepo := harness.NewRepo(t) // distinct identity; never a target.
 	repo := harness.NewRepo(t)
+	selfRepo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{
 		DurableState: true,
-		SelfRepo:     selfRepo.Dir,
 		// The daemon's own MergeTerminalPauseEnv. It is spelled here rather
 		// than imported: the knob lives in package main, which no test binary
 		// can import.
@@ -48,7 +48,7 @@ func TestStoppingTheDaemonInsideAMergesTerminalStampsTheLandingWithNoFailedWrite
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	d.AwaitFileExists(rendezvous)
@@ -121,12 +121,13 @@ func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 	// and whose every later run passes.
 	repo := harness.NewRepo(t)
 	env, started := firstRunHoldsGate(t)
+	repo.DeploysAsAgentRepl()
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: env})
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.MergeChainTimeout, ExtraEnv: env})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "resumed", "do the resumed thing", nil)
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	d.AwaitFileExists(started)
@@ -142,7 +143,8 @@ func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 	// Act: an orderly stop mid-gate, and a fresh daemon on the same state root.
 	d.Stop()
 	d.AwaitExit()
-	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout,
+	repo.DeploysAsAgentRepl()
+	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, Timeout: harness.MergeChainTimeout,
 		ExtraEnv: append(env, "AGENT_REPL_LOCK_DIR="+d.LockDir)})
 	f.d = d2
 
@@ -221,12 +223,13 @@ func TestAMergeRunningThroughAHandoverResumesInTheSuccessorAndLands(t *testing.T
 	// Arrange: a merge held inside its test gate.
 	repo := harness.NewRepo(t)
 	env, started := firstRunHoldsGate(t)
+	repo.DeploysAsAgentRepl()
 	// The handover chains a second real daemon's boot onto this one's context.
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.HandoverChainTimeout, ExtraEnv: env})
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout, ExtraEnv: env})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "handed", "do the handed thing", nil)
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	d.AwaitFileExists(started)

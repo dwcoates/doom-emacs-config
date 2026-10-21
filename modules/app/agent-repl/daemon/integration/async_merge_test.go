@@ -246,7 +246,8 @@ func mainCheckoutRequester(t *testing.T) *sourcedRepo {
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: starting\ndaemon: passed in 1s\n")
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
+	repo.DeploysAsAgentRepl()
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
 	f := &fixture{d: d, repo: repo, ws: harness.Register(t, d, repo.Dir), t: t}
 	f.open()
 	f.host = d.WatchHost(f.ws)
@@ -311,7 +312,7 @@ func TestAnAsyncRequestsBeforeMergeActionRunsInItsMergeWorkspace(t *testing.T) {
 	root := s.f.watchRootFeed()
 	s.repo.AddBranch("agent-fix")
 	withBefore := func(async *agentreplv1.CreateWorkspaceAsyncMerge) {
-		async.MergeActions = &agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("run the request's linters")}
+		async.DeployHooks = preDeployPrompts("run the request's linters")
 	}
 
 	// Act: the merge workspace is handed the request's before-merge prompt,

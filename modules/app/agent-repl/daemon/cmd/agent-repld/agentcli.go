@@ -34,12 +34,12 @@ import (
 
 // THE AGENT API'S COMMANDS: four nouns over the serving daemon's rpcs.
 //
-//	agent-repld workspace    create | async-merge | prompt | set | merge | open | close | kill
+//	agent-repld workspace    create | async-merge | prompt | set | finished | open | close | kill
 //	                         compact | status | list | subscribe | unsubscribe | gate
 //	agent-repld merge-queue  status | dequeue | move-up | move-down | pause | resume
 //	                         disable-racing | enable-racing | subscribe | unsubscribe
 //	agent-repld editor       eval
-//	agent-repld runtime      rollouts | health
+//	agent-repld runtime      deploy-hold | roll-out-landing | health
 //
 // EVERY COMMAND IS ONE RPC (a `set` with several flags is one rpc per flag,
 // in order), and its answer is printed as protojson. The daemon decides

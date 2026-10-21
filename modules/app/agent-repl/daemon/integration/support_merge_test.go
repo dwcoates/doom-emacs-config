@@ -10,6 +10,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
@@ -39,11 +40,11 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 	repoRef = mergeRepositoryRef(t, d, repo)
 
 	front = mergeCreateChild(t, d, repoRef, namePrefix+"-front", namePrefix+" front work",
-		&agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("hold " + namePrefix + "'s queue open")})
+		preDeployPrompts("hold "+namePrefix+"'s queue open"))
 	behind = mergeCreateChild(t, d, repoRef, namePrefix+"-behind", namePrefix+" behind work", nil)
 
 	harness.CommitWork(t, front.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(front.ws, harness.OneShot()))); err != nil {
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(front.ws))); err != nil {
 		t.Fatalf("MergeWorkspace(%s front) = error %v, want the merge enqueued", namePrefix, err)
 	}
 	// The pre-prompt's turn is started and NEVER answered: the run sits in it
@@ -51,10 +52,31 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 	front.shim.ExpectStartTurn()
 
 	harness.CommitWork(t, behind.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(behind.ws, harness.OneShot()))); err != nil {
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(behind.ws))); err != nil {
 		t.Fatalf("MergeWorkspace(%s behind) = error %v, want the merge enqueued", namePrefix, err)
 	}
 	return front, behind, repo, repoRef
+}
+
+// promptHooks are TEXTS as prompt hooks, in order.
+func promptHooks(texts ...string) []*repoconfigv1.DeployHook {
+	var out []*repoconfigv1.DeployHook
+	for _, text := range texts {
+		out = append(out, &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Prompt{Prompt: &repoconfigv1.DeployHookPrompt{Text: text}}})
+	}
+	return out
+}
+
+// preDeployPrompts are a request's deploy hooks: TEXTS as its pre-deploy
+// prompts.
+func preDeployPrompts(texts ...string) *agentreplv1.CreateWorkspaceDeployHooks {
+	return &agentreplv1.CreateWorkspaceDeployHooks{PreDeploy: promptHooks(texts...)}
+}
+
+// postDeployPrompts are a request's deploy hooks: TEXTS as its post-deploy
+// prompts.
+func postDeployPrompts(texts ...string) *agentreplv1.CreateWorkspaceDeployHooks {
+	return &agentreplv1.CreateWorkspaceDeployHooks{PostDeploy: promptHooks(texts...)}
 }
 
 // isMergeTerminal reports whether a feed row is a merge bubble's terminal:

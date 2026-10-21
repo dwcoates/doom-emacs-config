@@ -705,7 +705,8 @@ func TestAFailedInterjectRevertsToHoldForTurnEndAndFifoOrder(t *testing.T) {
 func promptMergeFixture(t *testing.T) (*fixture, *harness.Repo, string) {
 	t.Helper()
 	selfRepo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: selfRepo.Dir})
+	selfRepo.DeploysAsAgentRepl()
+	d := harness.StartDaemon(t, harness.Opts{})
 	// The workspace is CREATED, never merely registered: a merge runs off the
 	// creation job's recorded geometry and a registered worktree has none, so
 	// a registered one is refused before any lease is ever taken.
@@ -760,7 +761,7 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 
 	// Act
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
+	if _, err := f.d.Client().FinishWorkspace(f.d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
@@ -1676,7 +1677,7 @@ func TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRe
 	// Act: the merge admits, captures the still-open turn as displaced, and
 	// lands with no conflict and a passing gate.
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	// ExpectStartTurnWithCount BLOCKS for the next request, so this is the

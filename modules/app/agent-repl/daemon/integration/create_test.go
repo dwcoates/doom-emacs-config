@@ -121,8 +121,8 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
+	repo.DeploysAsAgentRepl()
 	d := newDaemon(t, harness.Opts{
-		SelfRepo: repo.Dir,
 		ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)},
 		// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
 		Timeout: harness.MergeChainTimeout,
@@ -159,8 +159,8 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 
 	// Assert: the child's merge lands into the parent's worktree, not main.
 	harness.CommitWork(t, child.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(child, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(child) = error %v, want the merge enqueued", err)
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(child))); err != nil {
+		t.Fatalf("FinishWorkspace(child) = error %v, want the merge enqueued", err)
 	}
 	// The merge has to have REACHED ITS TERMINAL before the git calls say
 	// anything: `merge_queued` is published before the run starts, so waiting
@@ -376,9 +376,9 @@ func TestCreateWorkspaceOneShotTakesNoFinishActionOnCompletion(t *testing.T) {
 	}
 }
 
-// ---- Merge actions ----
+// ---- Deploy hooks ----
 
-func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testing.T) {
+func TestCreateWorkspaceDeployHooksAreRecordedAndReadBackByALaterDeploy(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
@@ -389,14 +389,12 @@ func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testi
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology: harness.Primary(),
-			MergeActions: &agentreplv1.CreateWorkspaceMergeActions{
-				BeforeWsMerge: said("run the pre-merge checklist"),
-			},
+			Topology:    harness.Primary(),
+			DeployHooks: preDeployPrompts("run the pre-merge checklist"),
 		}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(merge_actions) = (%v, %v), want a success", resp, err)
+		t.Fatalf("CreateWorkspace(deploy_hooks) = (%v, %v), want a success", resp, err)
 	}
 	ws := resp.Msg.GetSuccess().GetWorkspace()
 	shim := d.Shim(ws)
@@ -404,14 +402,14 @@ func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testi
 
 	// Act: a later merge reads the recorded action back.
 	harness.CommitWork(t, ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(ws, harness.OneShot()))); err != nil {
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(ws))); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
 	// Assert
 	pre := shim.ExpectStartTurn()
 	if text(pre.GetSaid()) != "run the pre-merge checklist" {
-		t.Fatalf("the merge's pre-prompt turn = %q, want the recorded before_ws_merge action read back", text(pre.GetSaid()))
+		t.Fatalf("the merge's pre-prompt turn = %q, want the recorded pre-deploy hook read back", text(pre.GetSaid()))
 	}
 	if pre.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION {
 		t.Fatalf("the pre-prompt's origin = %v, want MERGE_BEFORE_ACTION", pre.GetOrigin())

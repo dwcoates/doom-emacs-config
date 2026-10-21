@@ -134,7 +134,8 @@ func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *
 	// Arrange: two children of one repository, each with work to land.
 	repo := harness.NewRepo(t)
 	gate := newTurnGate(t)
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout,
+	repo.DeploysAsAgentRepl()
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.MergeChainTimeout,
 		ExtraEnv: []string{harness.TestAllScriptEnv(gate.path)}})
 	d.ExpectWarnings("daemon.merge.tests", "daemon.scriptrunner.run")
 	repoRef := mergeRepositoryRef(t, d, repo)
@@ -151,15 +152,15 @@ func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *
 	}
 
 	// Act: A, the head, runs first; B is put in line once A is testing.
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(a.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(alpha): %v", err)
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(a.ws))); err != nil {
+		t.Fatalf("FinishWorkspace(alpha): %v", err)
 	}
 	gate.awaitStart(d, a.ws.GetDir())
 	aBubble := awaitRow(t, a, aRoot, "alpha's merge bubble", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge() != nil
 	})
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(b.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(beta): %v", err)
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(b.ws))); err != nil {
+		t.Fatalf("FinishWorkspace(beta): %v", err)
 	}
 	turnLog(b, "joined the line")
 	// A fails: B's tests run while A fixes.

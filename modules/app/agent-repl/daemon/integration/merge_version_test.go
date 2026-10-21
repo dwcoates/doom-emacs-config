@@ -21,12 +21,12 @@ func TestAnAgentsMergeOntoAgentReplsMasterTagsItsLandingAndDrawsTheVersion(t *te
 	root := s.f.watchRootFeed()
 
 	// Act: the agent asks for a minor increment.
-	resp, err := s.d.Client().MergeWorkspace(s.d.Ctx(), connect.NewRequest(harness.MergeRequest(s.f.ws, harness.OneShot(), func(req *agentreplv1.MergeWorkspaceRequest) {
+	resp, err := s.d.Client().FinishWorkspace(s.d.Ctx(), connect.NewRequest(harness.FinishRequest(s.f.ws, func(req *agentreplv1.FinishWorkspaceRequest) {
 		req.Requester = harness.AskedBy(s.f.ws)
 		req.VersionIncrement = &agentreplv1.MergeWorkspaceVersionIncrement{ChangelogLine: "Merges record a version",
 			Increment: &agentreplv1.MergeWorkspaceVersionIncrement_Minor{Minor: &agentreplv1.MergeWorkspaceVersionIncrementMinor{}}}
 	})))
-	requireRPCAnswered(t, "MergeWorkspace", resp, err)
+	requireRPCAnswered(t, "FinishWorkspace", resp, err)
 	merge := s.awaitConcluded(t, root)
 	s.d.AwaitLandingDeployed()
 

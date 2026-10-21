@@ -127,7 +127,6 @@ func TestTheFlagSetSpellsEveryBindingName(t *testing.T) {
 		"--idle-cutoff", "45m",
 		"--pprof", "/tmp/pprof.sock",
 		"--metrics-root", "/tmp/metrics",
-		"--self-repo", "/checkout",
 		"--feed-tail-retention", "16",
 		"--footer-momentary-dwell", "120ms",
 	}
@@ -164,8 +163,6 @@ func TestTheFlagSetSpellsEveryBindingName(t *testing.T) {
 		t.Fatalf("opts.pprof = %q", opts.pprof)
 	case opts.metricsRoot != "/tmp/metrics":
 		t.Fatalf("opts.metricsRoot = %q", opts.metricsRoot)
-	case opts.selfRepo != "/checkout":
-		t.Fatalf("opts.selfRepo = %q", opts.selfRepo)
 	case opts.feedTailRetention != 16:
 		t.Fatalf("opts.feedTailRetention = %d", opts.feedTailRetention)
 	}
@@ -578,10 +575,10 @@ func TestProbeBootClaimFlagIsParsed(t *testing.T) {
 }
 
 func TestAnswerMigrationKind(t *testing.T) {
-	// The questions are asked of this build's own migration list. Layout 26
-	// (the traffic drop) is a breaking step and every step after it is
-	// additive, so a chain starting past it is additive and one crossing it is
-	// breaking.
+	// The breaking questions are asked of this build's own migration list,
+	// whose layout 26 (the traffic drop) is a breaking step. Whether the
+	// newest step is additive changes with every layout, so the additive
+	// answer is asked of a chain that says so.
 	tests := []struct {
 		name       string
 		from       int
@@ -589,7 +586,8 @@ func TestAnswerMigrationKind(t *testing.T) {
 		wantCode   int
 		wantStdout string
 	}{
-		{name: "an additive chain", from: wsm.LayoutVersion - 1, chainKind: wsm.ChainKind, wantCode: exitSuccess, wantStdout: "additive\n"},
+		{name: "an additive chain", from: wsm.LayoutVersion - 1, chainKind: func(int) (wsm.MigrationKind, error) { return wsm.MigrationAdditive, nil },
+			wantCode: exitSuccess, wantStdout: "additive\n"},
 		{name: "a breaking chain", from: 5, chainKind: wsm.ChainKind, wantCode: exitSuccess, wantStdout: "breaking\n"},
 		{name: "the traffic drop alone is breaking", from: 25, chainKind: wsm.ChainKind, wantCode: exitSuccess, wantStdout: "breaking\n"},
 		{name: "no chain reaches this layout", from: 1, chainKind: wsm.ChainKind, wantCode: exitFailure},

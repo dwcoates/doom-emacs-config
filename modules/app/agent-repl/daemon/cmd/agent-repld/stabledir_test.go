@@ -49,7 +49,7 @@ func TestEnterStableDir(t *testing.T) {
 
 func TestPathFlagsNameEveryPathFlag(t *testing.T) {
 	// Arrange: every path flag set to a relative path.
-	for _, name := range []string{"state-dir", "webapp-dist", "shim-main", "prompts-dir", "multi-repo-config-dir", "default-config-dir", "self-repo"} {
+	for _, name := range []string{"state-dir", "webapp-dist", "shim-main", "prompts-dir", "multi-repo-config-dir", "default-config-dir"} {
 		t.Run(name, func(t *testing.T) {
 			opts, err := parseFlags("agent-repld", []string{"--" + name + "=relative/path"})
 			if err != nil {
