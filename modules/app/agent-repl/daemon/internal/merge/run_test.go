@@ -15,6 +15,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
@@ -51,37 +52,29 @@ func TestSameDirExcludesASiblingWorktree(t *testing.T) {
 	}
 }
 
-// TestPromptTabCannotPark covers the tab family's legality: the prompt tabs have
-// no parked arm, because a pre-prompt failure fails the run and a post-prompt
-// failure rides the terminal.
-func TestPromptTabCannotPark(t *testing.T) {
+// TestHookTabsCannotPark covers the tab family's legality: the hook tabs have
+// no parked arm, because a failed hook fails the deploy.
+func TestHookTabsCannotPark(t *testing.T) {
+	settled := tabRound{kind: TabPreDeploy, n: 1, started: time.UnixMilli(500)}.settled(1000, "")
 	tests := []struct {
-		name string
-		kind string
+		name    string
+		tab     *frontendv1.FeedMergeTab
+		settled func(*frontendv1.FeedMergeTab) bool
 	}{
-		{name: "the pre-prompt tab", kind: TabPrePrompt},
-		{name: "the post-prompt tab", kind: TabPostPrompt},
+		{name: "a prompt hook's tab", tab: hookPromptTab(settled), settled: func(tab *frontendv1.FeedMergeTab) bool {
+			_, ok := tab.GetHookPrompt().GetState().(*frontendv1.FeedMergeTabHookPrompt_Settled)
+			return ok
+		}},
+		{name: "a script hook's tab", tab: hookScriptTab(settled, scriptView{path: "bin/deploy.sh"}), settled: func(tab *frontendv1.FeedMergeTab) bool {
+			_, ok := tab.GetHookScript().GetState().(*frontendv1.FeedMergeTabHookScript_Settled)
+			return ok
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: a settled prompt tab.
-			tab := promptTab(tc.kind, tabRound{kind: tc.kind, n: 1, started: time.UnixMilli(500)}.settled(1000, ""))
-
-			// Act.
-			kind := tabKindOf(tab)
-
-			// Assert.
-			if kind != tc.kind {
-				t.Fatalf("the tab is %q, want %q", kind, tc.kind)
-			}
-			if tc.kind == TabPrePrompt {
-				if _, ok := tab.GetPrePrompt().GetState().(*frontendv1.FeedMergeTabPrePrompt_Settled); !ok {
-					t.Fatalf("the pre-prompt tab is %T, want settled", tab.GetPrePrompt().GetState())
-				}
-			} else {
-				if _, ok := tab.GetPostPrompt().GetState().(*frontendv1.FeedMergeTabPostPrompt_Settled); !ok {
-					t.Fatalf("the post-prompt tab is %T, want settled", tab.GetPostPrompt().GetState())
-				}
+			// Act / Assert: a settled round draws the settled arm.
+			if !tc.settled(tc.tab) {
+				t.Fatalf("the tab is %v, want settled", tc.tab)
 			}
 		})
 	}
@@ -90,14 +83,14 @@ func TestPromptTabCannotPark(t *testing.T) {
 // TestPromptTabCarriesItsFailureSummary covers what a failed prompt tab draws:
 // the daemon's one-line account, with the detail in the tab's own content.
 func TestPromptTabCarriesItsFailureSummary(t *testing.T) {
-	// Arrange: a failed pre-prompt tab.
-	tab := promptTab(TabPrePrompt, tabRound{kind: TabPrePrompt, n: 1, started: time.UnixMilli(500)}.settled(1000, "the before-merge prompt did not complete"))
+	// Arrange: a failed pre-deploy prompt hook's tab.
+	tab := hookPromptTab(tabRound{kind: TabPreDeploy, n: 1, started: time.UnixMilli(500)}.settled(1000, "the pre-deploy prompt did not complete"))
 
 	// Act.
-	settled := tab.GetPrePrompt().GetSettled()
+	settled := tab.GetHookPrompt().GetSettled()
 
 	// Assert.
-	if settled.GetFailed().GetSummary() != "the before-merge prompt did not complete" {
+	if settled.GetFailed().GetSummary() != "the pre-deploy prompt did not complete" {
 		t.Fatalf("the tab reads %q, want the composed summary", settled.GetFailed().GetSummary())
 	}
 }
@@ -205,13 +198,15 @@ func TestNoAdmissionPauseIsCalledWhenTheSeamIsUnwired(t *testing.T) {
 // aborting the run there wrote a merge FAILURE into the log and the bubble for
 // something that never failed.
 func TestACancelledGitAtShutdownRecordsNoAbort(t *testing.T) {
-	// Arrange: the repository identification is the first git a run performs,
+	// Arrange: the main worktree's lookup is the first git a run performs,
 	// and here it reports the cancellation a shutdown causes.
 	h := newHarness(t)
-	h.git.sameRepoErr = &gitclient.Cancelled{
-		Args: []string{"rev-parse", "--git-common-dir"}, Dir: h.targetD, Cause: context.Canceled,
-	}
 	enqueue(t, h)
+	h.git.mu.Lock()
+	h.git.mainWorktreeErr = &gitclient.Cancelled{
+		Args: []string{"worktree", "list", "--porcelain"}, Dir: h.targetD, Cause: context.Canceled,
+	}
+	h.git.mu.Unlock()
 
 	// Act. The pump's own policy decides whether one run's error rides up out
 	// of admit; what this test is about is what the run RECORDED.
@@ -233,10 +228,12 @@ func TestACancelledGitAtShutdownRecordsNoAbort(t *testing.T) {
 func TestACancelledGitAtShutdownIsRecordedOnce(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.git.sameRepoErr = &gitclient.Cancelled{
-		Args: []string{"rev-parse", "--git-common-dir"}, Dir: h.targetD, Cause: context.Canceled,
-	}
 	enqueue(t, h)
+	h.git.mu.Lock()
+	h.git.mainWorktreeErr = &gitclient.Cancelled{
+		Args: []string{"worktree", "list", "--porcelain"}, Dir: h.targetD, Cause: context.Canceled,
+	}
+	h.git.mu.Unlock()
 
 	// Act.
 	_ = h.admit(context.Background())
@@ -252,11 +249,13 @@ func TestACancelledGitAtShutdownIsRecordedOnce(t *testing.T) {
 func TestARealGitFailureStillAborts(t *testing.T) {
 	// Arrange: a git that really failed, with an exit status of its own.
 	h := newHarness(t)
-	h.git.sameRepoErr = &gitclient.Error{
-		Args: []string{"rev-parse", "--git-common-dir"}, Dir: h.targetD, ExitCode: 128,
+	enqueue(t, h)
+	h.git.mu.Lock()
+	h.git.mainWorktreeErr = &gitclient.Error{
+		Args: []string{"worktree", "list", "--porcelain"}, Dir: h.targetD, ExitCode: 128,
 		Stderr: "fatal: not a git repository\n",
 	}
-	enqueue(t, h)
+	h.git.mu.Unlock()
 
 	// Act.
 	_ = h.admit(context.Background())
@@ -756,22 +755,23 @@ func TestTakeSessionHoldsTheOccupancyGuard(t *testing.T) {
 	}
 }
 
-func TestTakeSessionFailsOnAnUnregisteredRepository(t *testing.T) {
-	// Arrange: the workspace names a repository the registry does not hold.
+func TestTakeSessionFailsOnAnUnusableDeployConfig(t *testing.T) {
+	// Arrange: the repository's config was broken after the deploy queued.
 	h := newHarness(t)
 	r := ledgeredRun(t, h)
-	h.db.mu.Lock()
-	ws := h.db.workspaces[theWorkspace]
-	ws.Repo = "repo-gone"
-	h.db.workspaces[theWorkspace] = ws
-	h.db.mu.Unlock()
+	h.mu.Lock()
+	h.configErr = &deployconfig.InvalidError{Path: "/repo/.agent-repl/deploy.yaml", Detail: "pre_deploy is required"}
+	h.mu.Unlock()
 
 	// Act.
 	err := r.takeSession(context.Background())
 
 	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "merge policy") || r.releaseOccupancy != nil {
-		t.Fatalf("takeSession = %v, want the policy failure and no guard taken", err)
+	if err == nil || !strings.Contains(err.Error(), "deploy config") || r.releaseOccupancy != nil {
+		t.Fatalf("takeSession = %v, want the config's failure and no guard taken", err)
+	}
+	if refusal, refused := Refused(err); !refused || refusal.Arm != ArmDeployConfigInvalid {
+		t.Fatalf("takeSession = %v, want the %s refusal", err, ArmDeployConfigInvalid)
 	}
 }
 

@@ -2,7 +2,10 @@ package harness
 
 import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"agent-repld/internal/deployconfig"
 )
 
 // merge.go holds the merge-request shapes and the landing wait that the daemon
@@ -80,40 +83,22 @@ func Standard(edit func(*agentreplv1.CreateWorkspaceStandard)) CreateEdit {
 	return func(req *agentreplv1.CreateWorkspaceRequest) { edit(req.GetStandard()) }
 }
 
-// MergeMode sets a MergeWorkspace request's mode.
-type MergeMode func(*agentreplv1.MergeWorkspaceRequest)
+// FinishEdit changes a FinishWorkspace request.
+type FinishEdit func(*agentreplv1.FinishWorkspaceRequest)
 
-// MergeRequest is a MergeWorkspace request of WS's own branch in MODE, asked
-// by the user at the back of the queue; EDITS change either.
-func MergeRequest(ws *workspacev1.WorkspaceRef, mode MergeMode, edits ...MergeMode) *agentreplv1.MergeWorkspaceRequest {
-	req := &agentreplv1.MergeWorkspaceRequest{Workspace: ws, Requester: User(), Placement: Back()}
-	mode(req)
+// FinishRequest is a FinishWorkspace request of WS's own work, asked by the
+// user at the back of the queue; EDITS change it.
+func FinishRequest(ws *workspacev1.WorkspaceRef, edits ...FinishEdit) *agentreplv1.FinishWorkspaceRequest {
+	req := &agentreplv1.FinishWorkspaceRequest{Workspace: ws, Requester: User(), Placement: Back()}
 	for _, edit := range edits {
 		edit(req)
 	}
 	return req
 }
 
-// OneShot is the SYNC mode: the requester's own branch, merged in place,
-// closing the requester once it lands.
-func OneShot() MergeMode {
-	return func(req *agentreplv1.MergeWorkspaceRequest) {
-		req.Mode = &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{
-			Landing: &agentreplv1.MergeWorkspaceOneShot_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceOneShotOwnBranch{}}}}
-	}
-}
-
-// OneShotMergedUpstream is the one-shot whose branch already merged upstream.
-func OneShotMergedUpstream() MergeMode {
-	return func(req *agentreplv1.MergeWorkspaceRequest) {
-		req.Mode = &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{
-			Landing: &agentreplv1.MergeWorkspaceOneShot_MergedUpstream{MergedUpstream: &agentreplv1.MergeWorkspaceOneShotMergedUpstream{}}}}
-	}
-}
-
-// AtFront places a merge at the front of its queue.
-func AtFront() MergeMode {
-	return func(req *agentreplv1.MergeWorkspaceRequest) { req.Placement = Front() }
+// AtFront places a deploy at the front of its queue.
+func AtFront() FinishEdit {
+	return func(req *agentreplv1.FinishWorkspaceRequest) { req.Placement = Front() }
 }
 
 // AsyncMerge is an async merge in REPOSITORY of BRANCH, asked by REQUESTER's
@@ -192,4 +177,25 @@ func IsLandingDeployed(r LogRecord) bool {
 func (d *Daemon) AwaitLandingDeployed() {
 	d.t.Helper()
 	d.AwaitLogRecordWithin(d.RunLogPath(), "the landing's deploy", MergeChainTimeout, IsLandingDeployed)
+}
+
+// PromptHooks are TEXTS as prompt hooks, in order.
+func PromptHooks(texts ...string) []*repoconfigv1.DeployHook {
+	var out []*repoconfigv1.DeployHook
+	for _, text := range texts {
+		out = append(out, deployconfig.PromptHook(text))
+	}
+	return out
+}
+
+// PreDeployPrompts are a request's deploy hooks: TEXTS as its pre-deploy
+// prompts, in place of the repository's.
+func PreDeployPrompts(texts ...string) *agentreplv1.CreateWorkspaceDeployHooks {
+	return &agentreplv1.CreateWorkspaceDeployHooks{PreDeploy: PromptHooks(texts...)}
+}
+
+// PostDeployPrompts are a request's deploy hooks: TEXTS as its post-deploy
+// prompts, in place of the repository's.
+func PostDeployPrompts(texts ...string) *agentreplv1.CreateWorkspaceDeployHooks {
+	return &agentreplv1.CreateWorkspaceDeployHooks{PostDeploy: PromptHooks(texts...)}
 }

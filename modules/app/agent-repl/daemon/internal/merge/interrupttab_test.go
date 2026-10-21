@@ -220,13 +220,12 @@ func TestTheAgenticTabKindsAreTheAgenticArms(t *testing.T) {
 		rowTestsRun:       runTab(1, tabState{}, nil, nil),
 		rowTestsRunFixing: fixingTab(tabState{}, 1),
 		TabQueue:          {Kind: &frontendv1.FeedMergeTab_Queue{Queue: &frontendv1.FeedMergeTabQueue{}}},
-		TabPrePrompt:      {Kind: &frontendv1.FeedMergeTab_PrePrompt{PrePrompt: &frontendv1.FeedMergeTabPrePrompt{}}},
+		TabPreDeploy:      hookPromptTab(tabState{}),
+		TabDeploy:         hookPromptTab(tabState{}),
 		TabRebasing:       {Kind: &frontendv1.FeedMergeTab_Rebasing{Rebasing: &frontendv1.FeedMergeTabRebasing{}}},
 		TabTests:          {Kind: &frontendv1.FeedMergeTab_Tests{Tests: &frontendv1.FeedMergeTabTests{}}},
 		TabCommitting:     {Kind: &frontendv1.FeedMergeTab_Committing{Committing: &frontendv1.FeedMergeTabCommitting{}}},
-		TabUpdatingMain: {Kind: &frontendv1.FeedMergeTab_UpdatingMain{
-			UpdatingMain: &frontendv1.FeedMergeTabUpdatingMain{}}},
-		TabPostPrompt: {Kind: &frontendv1.FeedMergeTab_PostPrompt{PostPrompt: &frontendv1.FeedMergeTabPostPrompt{}}},
+		TabPostDeploy:     hookPromptTab(tabState{}),
 	}
 	for kind, tab := range built {
 		t.Run(kind, func(t *testing.T) {

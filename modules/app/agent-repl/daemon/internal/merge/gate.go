@@ -122,7 +122,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, adm *g
 		"since_gate_start_seconds": g.since()})
 	r.publishRun(round, round.live(), nil, nil)
 
-	argv := r.o.deps.TestCommand(dir)
+	argv := r.o.deps.TestCommand(dir, r.target.testScript())
 	if len(argv) == 0 {
 		return g.brokenGate(ctx, GateResult{}, "no test command is configured for it"), nil
 	}
@@ -276,7 +276,7 @@ func (r *run) gateNothing(ctx context.Context, round tabRound, paths []string, s
 		body += "  " + path + "\n"
 	}
 	body += "nothing ran.\n"
-	if err := writeTestLog(log, body); err != nil {
+	if err := writeLog(log.path, body); err != nil {
 		return gateVerdict{}, err
 	}
 	r.endRun(ctx, round, "", nil, r.o.testLogLink(log), "succeeded")
@@ -325,7 +325,7 @@ func (g *gateRun) link() *frontendv1.FeedMergeTestLog {
 // result. An error means the run could not be CLASSIFIED: the script could not
 // be spawned, or its log could not be written.
 func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) (GateResult, error) {
-	file, err := createTestLog(g.log)
+	file, err := createLog(g.log.path)
 	if err != nil {
 		return GateResult{}, err
 	}

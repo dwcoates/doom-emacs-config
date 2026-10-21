@@ -250,7 +250,6 @@ environment. Every flag is optional.
 | `--no-browser` | this daemon has NO external browser: `OpenExternal` answers `no_browser_configured` and nothing is launched. Without it the browser is still absent on a host where neither `$AGENT_REPL_BROWSER_CMD` nor the pinned default launcher exists | off |
 | `--feed-tail-retention <rows>` | how many published rows one feed retains for a tail's replay, which is what makes WatchFeed's `token_expired` refusal reachable | `$AGENT_REPL_FEED_TAIL_RETENTION`, else the resolver's `DefaultTailRetention` (4096) |
 | `--footer-momentary-dwell <duration>` | how long a MOMENTARY footer status (`interrupted`, `loading`) stands before the daemon's own successor push retires it | `$AGENT_REPL_FOOTER_MOMENTARY_DWELL`, else the resolver's `DefaultMomentaryDwell` (1.5s) |
-| `--self-repo <dir>` | override the daemon's own checkout identity, which is what the merge orchestrator's two methods key on | the checkout the binary was deployed from |
 | `--layout-version` | print the state layout this binary writes (`wsm.LayoutVersion`) and exit, opening nothing; a deploy asks it of the STAGED binary | off |
 | `--migration-kind-from=N` | print whether the migration steps from layout N to this binary's own are `additive` or `breaking` (`wsm.ChainKind`) and exit, opening nothing; exit 1 with the reason on stderr when no chain reaches this layout; a deploy asks it of the STAGED binary | unset |
 | `--replacing` | this daemon replaces an incumbent restarting across a state layout change: it waits `rollout.ReplacementClaimWait` (1m) for the boot claim instead of `daemonaddr.ClaimWaitBound`; exclusive with `--joining` | off |
@@ -520,7 +519,6 @@ ending row, live and on replay.
 | (shim spawn env) | contract | the daemon's OWN environment passed through, with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED, AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA, AGENT_REPL_SESSION_ID (the HostSessionId, log correlation only) set/overridden; the store socket rides argv — never a curated allowlist |
 | `AGENT_REPL_STORE_SOCKET` | contract | the store socket (a flag beats it) |
 | `MULTI_REPO_ROOT` | contract | a workspace whose main repo is under it uses the multi-repo account root |
-| `AGENT_REPL_SELF_REPO_DIR` | test only | overrides the daemon's own-checkout identity for the merge-method split; a landing still runs its ONE deploy (test safety comes from `AGENT_REPL_DEPLOY_BUILDER` naming the harness's fake build, so landing → deploy is assertable end to end) |
 | `AGENT_REPL_TEMPORARY_REGISTRATION_TEST_ROOT` | test only | the ONE directory beneath which a test-run daemon may register directories inside a temporary root, which the registry otherwise refuses (owner ruling 2026-10-06, `internal/tempdirs`: `os.TempDir()`, `/tmp`, `/var/tmp`, `/var/folders`, canonicalized). It must lie strictly beneath a temporary root and not be one. It is honored ONLY with `AGENT_REPL_FORBID_VENDOR_CALLS` set; set without it, it is a BOOT REFUSAL. The integration harness names its run root and moves the daemon's `TMPDIR` to `<run root>/daemon-tmp`; the e2e-emacs layer names each test's sandbox scratch (Emacs launches the daemon, so it rides Emacs's environment); unit-test binaries that open a real registry run through `tempdirstest.Main`. A test-run daemon that refuses a temporary folder with NO test root records ERROR `daemon.refusal.temporary_seam_missing`, so a launcher that forgot the seam fails its warning sweep instead of passing silently |
 | `AGENT_REPL_FAKE_SHIMS` | test only | forces every shim spawn into the shim's offline scripted SDK WITHOUT putting the whole stack in fake mode, so a suite can exercise a REAL vendor call site (the classifier's headless run) against a live session. It can only turn fake ON. It is NOT needed merely to get fake shims under the vendor guard -- the guard implies them |
 | `AGENT_REPL_TEST_HOLD_FIRST_WATCHER_START` | test only | an absolute unix socket path: the daemon dials it before starting its FIRST session watcher, after the bring-up marked the session started, and holds that start until the test closes the connection (`internal/workspace/watcherhold.go`). It pins open the window a prompt was once refused `no_session` in; the integration harness serves it as `harness.HoldFirstWatcherStart`. It is honored ONLY with `AGENT_REPL_FORBID_VENDOR_CALLS` set; set without it, or relative, it is a BOOT REFUSAL. An unreachable hold, or one that ends in anything but the test's close, fails that watcher start at ERROR `daemon.workspace.watcher_hold` |
@@ -1172,12 +1170,11 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   workspace and a `wsm.MergeSource`: its own branch (`keep_open` or closed on
   landing), another workspace (closed on landing), a branch (in its existing
   worktree, or in a daemon-made one under `<state>/merge-worktrees/<lease>`,
-  removed after the merge), or merged upstream (fetch, fast-forward the
-  default branch in the main worktree, close the requester). An unknown
+  removed after the merge). An unknown
   source refuses with `unknown_source_workspace` / `unknown_branch`. No
   landing workspace is ever made.
 - **A WORKSPACE'S BRANCH IS THE ONE CHECKED OUT NOW** (owner ruling,
-  2026-10-01). For the own-branch, workspace and merged-upstream sources the
+  2026-10-01). For the own-branch and workspace sources the
   request records the branch checked out in that worktree when it is made
   (`wsm.MergeSource.Branch`), never the branch the workspace was created on;
   a detached HEAD is refused at once with `unknown_branch`. A row an older

@@ -53,7 +53,7 @@
                  agent-repl-kill-workspace
                  agent-repl-nuke-workspace
                  agent-repl-open-workspace
-                 agent-repl-merge-workspace
+                 agent-repl-finish-workspace
                  agent-repl-restart-workspace
                  agent-repl-create-workspace
                  agent-repl-create-workspace-static

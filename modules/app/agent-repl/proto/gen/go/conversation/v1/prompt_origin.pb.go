@@ -57,12 +57,18 @@ const (
 	PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_EVAL_RESULT     PromptOrigin = 17
 	PromptOrigin_PROMPT_ORIGIN_EXPLAIN_CONFIG              PromptOrigin = 18
 	// Other producers remain explicit without being mislabeled as Emacs.
-	PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT            PromptOrigin = 19
-	PromptOrigin_PROMPT_ORIGIN_WEBAPP_CARD_ACTION          PromptOrigin = 20
-	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED           PromptOrigin = 21
-	PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR       PromptOrigin = 22
-	PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR           PromptOrigin = 23
-	PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION         PromptOrigin = 24
+	PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT      PromptOrigin = 19
+	PromptOrigin_PROMPT_ORIGIN_WEBAPP_CARD_ACTION    PromptOrigin = 20
+	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED     PromptOrigin = 21
+	PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR PromptOrigin = 22
+	PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR     PromptOrigin = 23
+	// A deploy's `pre_deploy` prompt hook (repoconfig.v1.DeployPreDeployStage
+	// hooks, or a request's own before prompts), run as a turn of the deploy's
+	// owner.
+	PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION PromptOrigin = 24
+	// A deploy's `post_deploy` prompt hook (repoconfig.v1.DeployConfig
+	// post_deploy, or a request's own after prompts), run as a turn of the
+	// deploy's owner.
 	PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION          PromptOrigin = 25
 	PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME PromptOrigin = 26
 	// Daemon-generated re-drive of a turn a planned bounce interrupted.
@@ -209,6 +215,11 @@ const (
 	// The compaction CompactWorkspace submitted. Waits behind a running turn
 	// like any deferred prompt; drawn as the context cut it produces.
 	PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT PromptOrigin = 42
+	// A deploy's `deploy` stage prompt hook (repoconfig.v1.DeployConfig.deploy),
+	// run as a turn of the deploy's owner. Drawn, like the other two hook
+	// origins, inside the deploy bubble's hook tab rather than as a prompt the
+	// user said.
+	PromptOrigin_PROMPT_ORIGIN_DEPLOY_HOOK PromptOrigin = 43
 )
 
 // Enum value maps for PromptOrigin.
@@ -256,6 +267,7 @@ var (
 		40: "PROMPT_ORIGIN_WORKSPACE_NOTICE",
 		41: "PROMPT_ORIGIN_AGENT_SENT",
 		42: "PROMPT_ORIGIN_WORKSPACE_COMPACT",
+		43: "PROMPT_ORIGIN_DEPLOY_HOOK",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -300,6 +312,7 @@ var (
 		"PROMPT_ORIGIN_WORKSPACE_NOTICE":            40,
 		"PROMPT_ORIGIN_AGENT_SENT":                  41,
 		"PROMPT_ORIGIN_WORKSPACE_COMPACT":           42,
+		"PROMPT_ORIGIN_DEPLOY_HOOK":                 43,
 	}
 )
 
@@ -334,7 +347,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xbe\f\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xdd\f\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -378,7 +391,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x1aPROMPT_ORIGIN_OWNER_NOTICE\x10'\x12\"\n" +
 	"\x1ePROMPT_ORIGIN_WORKSPACE_NOTICE\x10(\x12\x1c\n" +
 	"\x18PROMPT_ORIGIN_AGENT_SENT\x10)\x12#\n" +
-	"\x1fPROMPT_ORIGIN_WORKSPACE_COMPACT\x10*B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\x1fPROMPT_ORIGIN_WORKSPACE_COMPACT\x10*\x12\x1d\n" +
+	"\x19PROMPT_ORIGIN_DEPLOY_HOOK\x10+B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

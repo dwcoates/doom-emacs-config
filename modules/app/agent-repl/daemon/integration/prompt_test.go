@@ -211,6 +211,10 @@ func TestAPromptBeginningWithStopTakesTheFastPathToInterjectAndInterruptsTheRunn
 	f.shim.ExpectStartTurn()
 	footer := f.d.WatchFooter(f.ws)
 	holds := f.d.WatchHolds(f.ws)
+	// THE KILL IS HELD until the footer has been read: answered at once, it
+	// ended the turn within milliseconds, and a footer view read on a loaded
+	// host was already past the interrupting state.
+	f.shim.Hang()
 
 	// Act
 	resp2 := f.submit("stop and rebase instead", "k-stop", origin)
@@ -220,6 +224,7 @@ func TestAPromptBeginningWithStopTakesTheFastPathToInterjectAndInterruptsTheRunn
 	awaitFooter(t, f, footer, "waiting.interrupting the moment the interrupt registers", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetWaiting().GetInterrupting() != nil
 	})
+	f.shim.Unhang()
 	killReq := f.shim.ExpectKillTurn()
 	_ = killReq
 	tray := awaitView(t, f, holds, "the interject verdict", func(tray *frontendv1.FeedHeld) bool {
@@ -705,7 +710,8 @@ func TestAFailedInterjectRevertsToHoldForTurnEndAndFifoOrder(t *testing.T) {
 func promptMergeFixture(t *testing.T) (*fixture, *harness.Repo, string) {
 	t.Helper()
 	selfRepo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: selfRepo.Dir})
+	selfRepo.DeploysAsAgentRepl()
+	d := harness.StartDaemon(t, harness.Opts{})
 	// The workspace is CREATED, never merely registered: a merge runs off the
 	// creation job's recorded geometry and a registered worktree has none, so
 	// a registered one is refused before any lease is ever taken.
@@ -760,8 +766,8 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 
 	// Act
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	if _, err := f.d.Client().FinishWorkspace(f.d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 
 	// Assert: the held entry is unaffected. The read is a FRESH subscription
@@ -1669,15 +1675,15 @@ func TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRe
 		t.Fatalf("the displaced turn's StartTurn.said = %q, want %q", got, "keep going")
 	}
 	// No terminal frame is ever pushed for it: it is still the workspace's
-	// in-flight turn when MergeWorkspace is called below, which is exactly
+	// in-flight turn when FinishWorkspace is called below, which is exactly
 	// what CaptureDisplaced reads (sessionwatcher's TurnInFlight()).
 	beforeMerge := f.shim.Count(harness.RPCStartTurn)
 
 	// Act: the merge admits, captures the still-open turn as displaced, and
 	// lands with no conflict and a passing gate.
 	harness.CommitWork(t, f.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 	// ExpectStartTurnWithCount BLOCKS for the next request, so this is the
 	// resubmission's own arrival -- not a race against the merge's teardown --

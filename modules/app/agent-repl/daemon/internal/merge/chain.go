@@ -150,11 +150,26 @@ func (o *orchestrator) extendChain(ctx context.Context, repo wsm.RepoKey) {
 }
 
 // racable reports whether ENTRY may start racing behind its queue's head: it
-// waits in line, lands something (a branch merged upstream lands nothing),
-// and is no merge workspace whose pick has yet to succeed -- that pick runs
-// at the head (admitFront).
+// waits in line, and is no merge workspace whose pick has yet to succeed --
+// that pick runs at the head (admitFront).
 func racable(entry wsm.MergeQueueEntry) bool {
-	return entry.State == wsm.MergeQueued && entry.Source.Kind != wsm.MergeSourceMergedUpstream && entry.Source.Pick == ""
+	return entry.State == wsm.MergeQueued && entry.Source.Pick == ""
+}
+
+// racesIn reports whether the deploy config HEAD runs by has a local merge,
+// the one deploy whose queue races. It is the config the head read when it
+// took its session, so the queue races by the very deploy at its front; a head
+// that has not read it yet does not race, and extends the chain itself once it
+// has (run.admit).
+func (o *orchestrator) racesIn(repo wsm.RepoKey, head *run) bool {
+	head.mu.Lock()
+	resolved, local := head.target.cfg != nil, head.target.localMerge() != nil
+	head.mu.Unlock()
+	if !resolved {
+		o.deps.Log.Global().Debug("daemon.merge.chain", "the queue's head has not read its deploy config yet; the queue does not race until it has", dlog.Context{
+			"repo": string(repo), "head": string(head.ws)})
+	}
+	return local
 }
 
 // extendOnce makes at most one chain start, and reports whether it started a
@@ -181,6 +196,14 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		return false
 	}
 	o.mu.Lock()
+	head := o.running[repo]
+	o.mu.Unlock()
+	// ONLY A LOCAL MERGE RACES: a speculative run rebases and tests ahead of
+	// its turn, which is the local merge's work and no other deploy's.
+	if head == nil || !o.racesIn(repo, head) {
+		return false
+	}
+	o.mu.Lock()
 	chain := o.chains[repo]
 	if len(chain) == 0 || len(chain) >= o.queueWindow() || o.draining {
 		o.mu.Unlock()
@@ -191,7 +214,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	// until it registers again at the chain's front (register), and the pump
 	// promotes the merge behind a head that ended: until then the chain stands
 	// behind an entry it holds no run for, and nothing joins it.
-	if head := o.running[repo]; head == nil || chain[0] != head {
+	if o.running[repo] != head || chain[0] != head {
 		o.mu.Unlock()
 		return false
 	}
@@ -482,7 +505,7 @@ func (r *run) speculate(ctx context.Context) (*outcome, error) {
 			return gaveUp, err
 		}
 	}
-	r.doneResumingAt(TabPrePrompt)
+	r.doneResumingAt(TabPreDeploy)
 	for {
 		if err := stillWanted(ctx); err != nil {
 			return nil, err

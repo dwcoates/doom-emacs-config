@@ -22,8 +22,8 @@ func servedLog(t *testing.T, h *harness, lease wsm.LeaseID, round int) (string, 
 		t.Fatalf("OpenMergeLedger: %v", err)
 	}
 	log := h.o.testLog(lease, round)
-	if err := writeTestLog(log, "run\n"); err != nil {
-		t.Fatalf("writeTestLog: %v", err)
+	if err := writeLog(log.path, "run\n"); err != nil {
+		t.Fatalf("writeLog: %v", err)
 	}
 	return log.token, log.path
 }
@@ -116,58 +116,57 @@ func TestTildePathShortensTheHomeDirectory(t *testing.T) {
 	}
 }
 
-func TestCreateTestLogMakesItsDirectoryAndTruncates(t *testing.T) {
+func TestCreateLogMakesItsDirectoryAndTruncates(t *testing.T) {
 	// Arrange: a log path whose directory does not exist yet.
-	log := testLog{path: filepath.Join(t.TempDir(), mergeLogsDir, "lease-tests-1.log")}
+	path := filepath.Join(t.TempDir(), mergeLogsDir, "lease-tests-1.log")
 
 	// Act.
-	file, err := createTestLog(log)
+	file, err := createLog(path)
 	if err != nil {
-		t.Fatalf("createTestLog: %v", err)
+		t.Fatalf("createLog: %v", err)
 	}
 	if err := file.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
 	// Assert.
-	info, err := os.Stat(log.path)
+	info, err := os.Stat(path)
 	if err != nil || info.Size() != 0 {
 		t.Fatalf("stat = (%v, %v), want an empty log", info, err)
 	}
 }
 
-func TestCreateTestLogRefusesWhenItsDirectoryCannotBeMade(t *testing.T) {
+func TestCreateLogRefusesWhenItsDirectoryCannotBeMade(t *testing.T) {
 	// Arrange: a regular file where the log directory must be.
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, mergeLogsDir), nil, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	log := testLog{path: filepath.Join(root, mergeLogsDir, "lease-tests-1.log")}
 
 	// Act.
-	_, err := createTestLog(log)
+	_, err := createLog(filepath.Join(root, mergeLogsDir, "lease-tests-1.log"))
 
 	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "creating the test log directory") {
-		t.Fatalf("createTestLog = %v, want the directory refusal", err)
+	if err == nil || !strings.Contains(err.Error(), "creating the log directory") {
+		t.Fatalf("createLog = %v, want the directory refusal", err)
 	}
 }
 
-func TestACreatedTestLogIsHeldUntilClosed(t *testing.T) {
+func TestACreatedLogIsHeldUntilClosed(t *testing.T) {
 	// Arrange.
-	log := testLog{path: filepath.Join(t.TempDir(), mergeLogsDir, "00bfb96b635b498a-tests-1.log")}
-	file, err := createTestLog(log)
+	path := filepath.Join(t.TempDir(), mergeLogsDir, "00bfb96b635b498a-tests-1.log")
+	file, err := createLog(path)
 	if err != nil {
-		t.Fatalf("createTestLog: %v", err)
+		t.Fatalf("createLog: %v", err)
 	}
 	t.Cleanup(func() { _ = file.Close() })
 	old := time.Now().Add(-logging.DefaultRetention - time.Hour)
-	if err := os.Chtimes(log.path, old, old); err != nil {
+	if err := os.Chtimes(path, old, old); err != nil {
 		t.Fatalf("Chtimes: %v", err)
 	}
 
 	// Act: a retention pass over the directory while the log is open.
-	report, err := logging.PruneDirectory(filepath.Dir(log.path), time.Now(), logging.DefaultRetention, IsTestLog)
+	report, err := logging.PruneDirectory(filepath.Dir(path), time.Now(), logging.DefaultRetention, IsLog)
 
 	// Assert.
 	if err != nil || len(report.Removed) != 0 || len(report.Held) != 1 {
@@ -175,63 +174,80 @@ func TestACreatedTestLogIsHeldUntilClosed(t *testing.T) {
 	}
 }
 
-func TestIsTestLog(t *testing.T) {
+func TestIsLog(t *testing.T) {
 	cases := []struct {
 		base string
 		want bool
 	}{
 		{"00bfb96b635b498a-tests-1.log", true},
 		{"00bfb96b635b498a-tests-12.log", true},
+		{"00bfb96b635b498a-pre_deploy-1.log", true},
+		{"00bfb96b635b498a-deploy-2.log", true},
+		{"00bfb96b635b498a-post_deploy-3.log", true},
+		{"release-1760000000000000000.log", true},
 		{"00bfb96b635b498a-tests-1.log.1", false},
+		{"00bfb96b635b498a-linting-1.log", false},
+		{"release-.log", false},
 		{"notes.txt", false},
 		{"00bfb96b635b498a-tests-.log", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.base, func(t *testing.T) {
 			// Act / Assert.
-			if got := IsTestLog(tc.base); got != tc.want {
-				t.Fatalf("IsTestLog(%q) = %v, want %v", tc.base, got, tc.want)
+			if got := IsLog(tc.base); got != tc.want {
+				t.Fatalf("IsLog(%q) = %v, want %v", tc.base, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestEveryTestLogLivesInTestLogsDir(t *testing.T) {
-	// Arrange.
+func TestEveryLogTheQueueNamesLivesInLogsDirAndIsRetained(t *testing.T) {
 	h := newHarness(t)
-
-	// Act.
-	log := h.o.testLog("00bfb96b635b498a", 3)
-
-	// Assert.
-	if filepath.Dir(log.path) != TestLogsDir(h.o.deps.StateDir) || !IsTestLog(filepath.Base(log.path)) {
-		t.Fatalf("testLog path %q is not a test log in %q", log.path, TestLogsDir(h.o.deps.StateDir))
+	r := &run{o: h.o, lease: wsm.Lease{ID: "00bfb96b635b498a"}}
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "a tests round's", path: h.o.testLog("00bfb96b635b498a", 3).path},
+		{name: "a pre-deploy script's", path: r.hookLogPath(stagePreDeploy, tabRound{n: 1})},
+		{name: "a deploy script's", path: r.hookLogPath(stageDeploy, tabRound{n: 2})},
+		{name: "a post-deploy script's", path: r.hookLogPath(stagePostDeploy, tabRound{n: 1})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Assert.
+			if filepath.Dir(tt.path) != LogsDir(h.o.deps.StateDir) || !IsLog(filepath.Base(tt.path)) {
+				t.Fatalf("log path %q is not a retained log in %q", tt.path, LogsDir(h.o.deps.StateDir))
+			}
+		})
 	}
 }
 
-func TestWriteTestLogWritesTheWholeBody(t *testing.T) {
+func TestWriteLogWritesTheWholeBody(t *testing.T) {
 	// Arrange.
-	log := testLog{path: filepath.Join(t.TempDir(), mergeLogsDir, "lease-tests-2.log")}
+	path := filepath.Join(t.TempDir(), mergeLogsDir, "lease-tests-2.log")
 
 	// Act.
-	err := writeTestLog(log, "nothing ran.\n")
+	err := writeLog(path, "nothing ran.\n")
 
 	// Assert.
-	got, readErr := os.ReadFile(log.path)
+	got, readErr := os.ReadFile(path)
 	if err != nil || readErr != nil || string(got) != "nothing ran.\n" {
-		t.Fatalf("writeTestLog = %v, file = (%q, %v), want the body", err, got, readErr)
+		t.Fatalf("writeLog = %v, file = (%q, %v), want the body", err, got, readErr)
 	}
 }
 
-func TestEveryTestLogIsCreatedThroughCreateTestLog(t *testing.T) {
-	// Act: the production sites that open a test log.
-	viaHelper := sourcescan.Count(t, "createTestLog(")
-	byHand := sourcescan.Count(t, "os.Create(") + sourcescan.Count(t, "os.WriteFile(log.path")
+func TestEveryLogIsCreatedThroughCreateLog(t *testing.T) {
+	// Act: the production sites that open one of the queue's logs.
+	viaHelper := sourcescan.Count(t, "createLog(")
+	byHand := sourcescan.Count(t, "os.Create(")
+	written := sourcescan.Count(t, "os.WriteFile(")
 
-	// Assert: the gate run, writeTestLog and the helper's own definition, and
-	// no hand-rolled create, which would write a log the retention pass could
-	// prune mid-run.
-	if viaHelper != 3 || byHand != 0 {
-		t.Fatalf("createTestLog( appears %d times and a hand-rolled create %d times; want 3 and 0", viaHelper, byHand)
+	// Assert: the gate run, writeLog, the script hook and the helper's own
+	// definition, and no hand-rolled create, which would write a log the
+	// retention pass could prune mid-run. The one os.WriteFile is the failing
+	// tests file in the worktree (writeFailingTests), which is no log.
+	if viaHelper != 4 || byHand != 0 || written != 1 {
+		t.Fatalf("createLog( appears %d times, os.Create( %d and os.WriteFile( %d; want 4, 0 and 1", viaHelper, byHand, written)
 	}
 }

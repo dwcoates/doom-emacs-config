@@ -11,7 +11,7 @@
  * divergence from the Emacs tab bar is a defect. Fake timers make that
  * assertable rather than a matter of watching it.
  */
-import type { MergeWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_merge_workspace_pb";
+import type { FinishWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_finish_workspace_pb";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RosterRowSchema, RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -462,7 +462,7 @@ const WORKSPACE_VERBS = [
   { verb: "close", rpc: "closeWorkspace" as const },
   { verb: "kill", rpc: "killWorkspace" as const },
   { verb: "nuke", rpc: "nukeWorkspace" as const },
-  { verb: "merge", rpc: "mergeWorkspace" as const },
+  { verb: "finish", rpc: "finishWorkspace" as const },
   { verb: "restart", rpc: "restartWorkspace" as const },
   { verb: "priority", rpc: "setWorkspacePriority" as const },
 ];
@@ -488,16 +488,16 @@ describe.each(WORKSPACE_VERBS)("the $verb verb", ({ verb, rpc }) => {
   });
 });
 
-describe("the merge verb's source", () => {
-  it("asks to merge the row's own branch, closing it once it lands", async () => {
+describe("the finish verb's ask", () => {
+  it("asks as the user at the back of the queue", async () => {
     // Arrange
     await withRoster({ rows: [rosterRow({ id: "ws-target" })] });
     // Act
-    await harness.click('[data-roster-row="ws-target"] [data-verb="merge"]');
+    await harness.click('[data-roster-row="ws-target"] [data-verb="finish"]');
     // Assert
-    const [request] = harness.fake.calls<MergeWorkspaceRequest>("mergeWorkspace");
-    const mode = request.mode;
-    expect(mode.case === "oneShot" ? mode.value.landing.case : mode.case).toBe("ownBranch");
+    const [request] = harness.fake.calls<FinishWorkspaceRequest>("finishWorkspace");
+    expect(request.requester?.asker.case).toBe("user");
+    expect(request.placement?.place.case).toBe("back");
   });
 });
 

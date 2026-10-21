@@ -141,7 +141,7 @@ func TestFailedMergeKeepsItsWorktree(t *testing.T) {
 	// Arrange: a merge whose before-action fails.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.configureActions([]string{"before"}, nil)
+	h.configurePromptHooks([]string{"before"}, nil)
 	h.briefs["before"] = nil
 	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
 	enqueue(t, h)
@@ -262,13 +262,11 @@ func TestSelfReloadSkipsASiblingWorktree(t *testing.T) {
 	}
 }
 
-func TestSelfReloadSkipsAnotherRepository(t *testing.T) {
-	// Arrange: the target sits at the daemon's checkout path, but git says it
-	// is another repository: the path alone never makes a landing the
-	// daemon's own.
+func TestSelfReloadSkipsARepositoryWithNoDeployHook(t *testing.T) {
+	// Arrange: a local merge and no deploy hook: nothing in the repository's
+	// config asks for a rollout, so its landing is never the daemon's own.
 	h := newHarness(t)
-	h.ownCheckout()
-	h.git.sameRepo = false
+	h.emacsRepo()
 	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
@@ -283,7 +281,7 @@ func TestSelfReloadSkipsAnotherRepository(t *testing.T) {
 	h.rollout.mu.Lock()
 	defer h.rollout.mu.Unlock()
 	if h.rollout.fired != 0 {
-		t.Fatal("a merge into another repository triggered the self-reload")
+		t.Fatal("a landing whose repository names no deploy hook triggered the self-reload")
 	}
 }
 
@@ -293,7 +291,7 @@ func TestSelfReloadSkipsAFailedMerge(t *testing.T) {
 	// Arrange: a merge into the daemon's own checkout whose before-action fails.
 	h := newHarness(t)
 	h.ownCheckout()
-	h.configureActions([]string{"before"}, nil)
+	h.configurePromptHooks([]string{"before"}, nil)
 	h.briefs["before"] = nil
 	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
 	enqueue(t, h)
@@ -315,7 +313,7 @@ func TestSelfReloadSkipsAHeldRollout(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ownCheckout()
-	h.db.rolloutHold = wsm.RolloutHold{Held: true, Since: time.Unix(1, 0)}
+	h.db.deployHold = wsm.DeployHold{Held: true, Since: time.Unix(1, 0)}
 	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
@@ -333,9 +331,12 @@ func TestSelfReloadSkipsAHeldRollout(t *testing.T) {
 	if fired != 0 {
 		t.Fatalf("the self-reload fired %d times while the rollouts are held, want none", fired)
 	}
-	record, ok := h.recordFor("info", "daemon.merge.self_reload")
-	if !ok || record.Message != "a merge landed in this daemon's own checkout while the rollouts are held; the deploy is not told" {
-		t.Fatalf("self_reload INFO record = %+v (found %v), want the held landing named", record, ok)
+	record, ok := h.recordFor("info", "daemon.merge.deploy_stage")
+	if !ok || record.Message != "the repository's deploy stage is held; the deploy hook is skipped" {
+		t.Fatalf("deploy_stage INFO record = %+v (found %v), want the held deploy named", record, ok)
+	}
+	if len(h.hooks.ran()) != 0 {
+		t.Fatal("the deploy script ran while the repository is held")
 	}
 }
 
@@ -345,7 +346,7 @@ func TestSelfReloadSkipsAnUnreadableHold(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ownCheckout()
-	h.db.rolloutHoldErr = errors.New("state database unreadable")
+	h.db.deployHoldErr = errors.New("state database unreadable")
 	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
 	h.gatePasses("daemon")
@@ -415,7 +416,7 @@ func TestOutputAddressIsClearedAtTeardown(t *testing.T) {
 	// Arrange: a landing merge with a configured prompt, so an address is set.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.configureActions([]string{"before"}, nil)
+	h.configurePromptHooks([]string{"before"}, nil)
 	h.briefs["before"] = nil
 	h.landsCleanly("abc123def4567")
 	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
@@ -1717,11 +1718,7 @@ func TestAQueuedMergeIsNeverRetiredByTheWorkspaceMovingOn(t *testing.T) {
 // landedAs runs the harness workspace's merge of one source to its landing.
 func landedAs(t *testing.T, h *harness, source wsm.MergeSource) {
 	t.Helper()
-	if source.Kind == wsm.MergeSourceMergedUpstream {
-		mergedUpstream(h)
-	} else {
-		landing(h, 1)
-	}
+	landing(h, 1)
 	if source.Kind == wsm.MergeSourceBranch {
 		h.git.refs["refs/heads/"+source.Branch] = "branch0000head"
 		h.git.mu.Lock()
@@ -1761,7 +1758,6 @@ func TestAPromptHeldDuringTheMergeKeepsTheRequesterOpen(t *testing.T) {
 		source wsm.MergeSource
 	}{
 		{"own branch", wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
-		{"merged upstream", wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2311,7 +2307,7 @@ func TestAFailedMergeTimesItsSpansAsFailed(t *testing.T) {
 	// Arrange: a merge whose before-action fails.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.configureActions([]string{"before"}, nil)
+	h.configurePromptHooks([]string{"before"}, nil)
 	h.briefs["before"] = nil
 	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
 	enqueue(t, h)

@@ -1,7 +1,7 @@
 // Package mergetab names, once, which merge tabs are AGENTIC: the tabs whose
-// content is a session's conversation (frontend.v1.FeedMergeTab — pick,
-// pre-prompt, a commit subtab whose conflict was handed to the session, a
-// fixing sub-subtab, post-prompt). A merge-tab interrupt
+// content is a session's conversation (frontend.v1.FeedMergeTab — the
+// resolving turn, a prompt hook, a commit subtab whose conflict was handed to
+// the session, a fixing sub-subtab). A merge-tab interrupt
 // (agentrepl.v1.InterruptRequest.merge_tab) is honoured only for one of them,
 // so the set of agentic arms is spelled in one place.
 package mergetab
@@ -16,9 +16,8 @@ import (
 func Agentic(tab *frontendv1.FeedMergeTab) bool {
 	switch arm := tab.GetKind().(type) {
 	case *frontendv1.FeedMergeTab_Resolving,
-		*frontendv1.FeedMergeTab_PrePrompt,
-		*frontendv1.FeedMergeTab_TestsRunFixing,
-		*frontendv1.FeedMergeTab_PostPrompt:
+		*frontendv1.FeedMergeTab_HookPrompt,
+		*frontendv1.FeedMergeTab_TestsRunFixing:
 		return true
 	case *frontendv1.FeedMergeTab_RebaseCommit:
 		return arm.RebaseCommit.GetConflict() != nil

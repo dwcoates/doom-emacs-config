@@ -251,14 +251,6 @@ func (g *gatedGit) RepositoryOf(ctx context.Context, dir string) (string, bool, 
 	return g.inner.RepositoryOf(ctx, dir)
 }
 
-func (g *gatedGit) SameRepo(ctx context.Context, a, b string) (bool, error) {
-	if err := g.enter("SameRepo"); err != nil {
-		return false, err
-	}
-	defer g.leave()
-	return g.inner.SameRepo(ctx, a, b)
-}
-
 func (g *gatedGit) MergeNoFF(ctx context.Context, targetDir, sourceBranch, message string) (gitclient.MergeOutcome, error) {
 	if err := g.enter("MergeNoFF"); err != nil {
 		return gitclient.MergeOutcome{}, err

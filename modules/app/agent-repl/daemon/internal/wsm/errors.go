@@ -341,8 +341,6 @@ func (k MergeSourceKind) String() string {
 		return "workspace"
 	case MergeSourceBranch:
 		return "branch"
-	case MergeSourceMergedUpstream:
-		return "merged_upstream"
 	default:
 		return fmt.Sprintf("merge_source(%d)", int(k))
 	}
@@ -350,7 +348,7 @@ func (k MergeSourceKind) String() string {
 
 // valid reports whether the source kind is one of the declared arms.
 func (k MergeSourceKind) valid() bool {
-	return k >= MergeSourceOwnBranch && k <= MergeSourceMergedUpstream
+	return k >= MergeSourceOwnBranch && k <= MergeSourceBranch
 }
 
 // IsOneShot reports whether the source is a ONE-SHOT merge's: the requester's
@@ -403,10 +401,10 @@ func (m MergeSource) validate() error {
 	if m.CompactAfter && m.Detach == "" {
 		return fmt.Errorf("compact_after is a detached merge's ask, not a %s source's that runs in place", m.Kind)
 	}
-	// A REQUEST'S OWN MERGE ACTIONS ride a detached request alone: every other
-	// merge runs the actions its workspace was created with.
-	if m.Detach == "" && (len(m.Actions.Before) > 0 || len(m.Actions.After) > 0) {
-		return fmt.Errorf("merge actions on the request are an async merge's ask, not a %s source's that runs in place", m.Kind)
+	// A REQUEST'S OWN DEPLOY HOOKS ride a detached request alone: every other
+	// deploy runs the hooks its workspace was created with.
+	if m.Detach == "" && !m.Hooks.Empty() {
+		return fmt.Errorf("deploy hooks on the request are an async merge's ask, not a %s source's that runs in place", m.Kind)
 	}
 	// A PICK THAT BEGAN names its turn, and only a pick begins.
 	if (m.PickStartedAt != nil) != (m.PickTurn != "") || (m.PickStartedAt != nil && m.Pick == "") {
@@ -416,13 +414,10 @@ func (m MergeSource) validate() error {
 		return fmt.Errorf("a %s source names workspace %q", m.Kind, m.Workspace)
 	}
 	// A VERSION INCREMENT moves a declared part and carries its changelog
-	// line, and a branch already merged upstream lands nothing to version.
+	// line.
 	if v := m.Version; v != nil {
 		if err := v.Validate(); err != nil {
 			return err
-		}
-		if m.Kind == MergeSourceMergedUpstream {
-			return fmt.Errorf("a %s source lands nothing, so it carries no version increment", m.Kind)
 		}
 	}
 	// A WORKSPACE'S BRANCH IS RECORDED WITH THE REQUEST (the branch checked out

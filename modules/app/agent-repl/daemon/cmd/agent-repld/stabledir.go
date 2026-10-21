@@ -32,7 +32,6 @@ func pathFlags(opts options) map[string]string {
 		"prompts-dir":           opts.promptsDir,
 		"multi-repo-config-dir": opts.multiRepoConfigDir,
 		"default-config-dir":    opts.defaultConfigDir,
-		"self-repo":             opts.selfRepo,
 	}
 }
 

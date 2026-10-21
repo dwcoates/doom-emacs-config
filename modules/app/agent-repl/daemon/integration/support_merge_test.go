@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
@@ -39,20 +39,20 @@ func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (fro
 	repoRef = mergeRepositoryRef(t, d, repo)
 
 	front = mergeCreateChild(t, d, repoRef, namePrefix+"-front", namePrefix+" front work",
-		&agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("hold " + namePrefix + "'s queue open")})
+		harness.PreDeployPrompts("hold "+namePrefix+"'s queue open"))
 	behind = mergeCreateChild(t, d, repoRef, namePrefix+"-behind", namePrefix+" behind work", nil)
 
 	harness.CommitWork(t, front.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(front.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(%s front) = error %v, want the merge enqueued", namePrefix, err)
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(front.ws))); err != nil {
+		t.Fatalf("FinishWorkspace(%s front) = error %v, want the deploy enqueued", namePrefix, err)
 	}
 	// The pre-prompt's turn is started and NEVER answered: the run sits in it
 	// holding the repository lock.
 	front.shim.ExpectStartTurn()
 
 	harness.CommitWork(t, behind.ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(behind.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(%s behind) = error %v, want the merge enqueued", namePrefix, err)
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(behind.ws))); err != nil {
+		t.Fatalf("FinishWorkspace(%s behind) = error %v, want the deploy enqueued", namePrefix, err)
 	}
 	return front, behind, repo, repoRef
 }

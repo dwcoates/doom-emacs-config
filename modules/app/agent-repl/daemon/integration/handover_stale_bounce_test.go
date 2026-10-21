@@ -174,7 +174,7 @@ func coldStartSelfRepoDaemonOn(t *testing.T, first *harness.Daemon, shimMain str
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	opts := first.SuccessorOpts()
-	opts.SelfRepo = selfRepo.Dir
+	selfRepo.DeploysAsAgentRepl()
 	opts.ExtraEnv = []string{harness.TestAllScriptEnv(script.Path)}
 	opts.Timeout = harness.HandoverChainTimeout
 	opts.ShimMain = shimMain

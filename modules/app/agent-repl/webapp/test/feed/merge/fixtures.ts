@@ -29,7 +29,7 @@ export interface TabSpec {
   kind:
     | "resolving"
     | "queue"
-    | "prePrompt"
+    | "hookPrompt"
     | "rebasing"
     | "rebaseCommit"
     | "tests"
@@ -37,7 +37,7 @@ export interface TabSpec {
     | "testsRunFixing"
     | "committing"
     | "updatingMain"
-    | "postPrompt";
+    | "hookScript";
   /**
    * `waitingOnUser` only for the kinds that carry it (resolving, rebasing, a
    * commit, tests, a fixing attempt); `pending` only for a commit;

@@ -337,13 +337,6 @@ type Opts struct {
 	// date and never restarts them. Empty: the world runs no real services,
 	// and the harness states their reports itself.
 	ServiceBinaries ServiceBinaries
-	// SelfRepo names the daemon's own checkout via AGENT_REPL_SELF_REPO_DIR,
-	// so a merge target can be recognized as the emacs repo. The self-reload
-	// deploy stays ON under this override: test safety comes from
-	// AGENT_REPL_DEPLOY_BUILDER naming the fake build, which stages what runs
-	// unless a test stages another (StageDeployBuild), so a landing's one
-	// deploy is assertable end to end and never builds for real.
-	SelfRepo string
 	// MultiRepoRoot is the tree whose workspaces use the multi-repo account.
 	MultiRepoRoot string
 	// DefaultAccountEmail is written into the default config root's
@@ -845,18 +838,6 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	env = append(env, HostNeutralPowerEnv()...)
 	env = append(env, HostNeutralNewsDigestEnv()...)
 	env = append(env, TemporaryRegistrationEnv(t)...)
-	// The daemon's OWN checkout identity is always overridden, whether or not
-	// a test cares which repository it is. The merge orchestrator's two
-	// methods key on it, so it resolves that identity for EVERY merge -- and
-	// left at the real checkout the scripted `git` on PATH knows nothing about
-	// it, refuses, and the merge aborts before it starts. A test that does not
-	// name one gets a fake repository that is deliberately no test repository,
-	// so the comparison resolves and answers "not the self repo".
-	selfRepo := opts.SelfRepo
-	if selfRepo == "" {
-		selfRepo = NewRepoAt(t, filepath.Join(root, "self-repo")).Dir
-	}
-	env = append(env, "AGENT_REPL_SELF_REPO_DIR="+selfRepo)
 	// THE VENDOR BINARY IS THE GUARD'S OTHER HALF. Left unset, the login pty
 	// falls back to the default `claude` and the guard refuses it; naming the
 	// fake claude is what makes the ordinary tests spawn something harmless.

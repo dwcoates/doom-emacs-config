@@ -34,11 +34,11 @@ import {
   type KillWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
 import {
-  MergeWorkspaceRequestSchema,
-  MergeWorkspaceResponseSchema,
-  type MergeWorkspaceError,
-  type MergeWorkspaceRequest,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_merge_workspace_pb";
+  FinishWorkspaceRequestSchema,
+  FinishWorkspaceResponseSchema,
+  type FinishWorkspaceError,
+  type FinishWorkspaceRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_finish_workspace_pb";
 import {
   NukeWorkspaceRequestSchema,
   NukeWorkspaceResponseSchema,
@@ -92,7 +92,7 @@ export type Verb =
   | "close"
   | "kill"
   | "nuke"
-  | "merge"
+  | "finish"
   | "restart"
   | "priority";
 
@@ -114,7 +114,7 @@ const VERB_LABELS: Readonly<Record<Verb, string>> = {
   close: "Close",
   kill: "Kill",
   nuke: "Nuke",
-  merge: "Merge",
+  finish: "Finish",
   restart: "Restart",
   priority: "Priority",
 };
@@ -145,7 +145,7 @@ export function drawRowMenu(target: VerbTarget): HTMLElement {
   menu.hidden = true;
   menu.appendChild(simpleVerbItem("open", target));
   menu.appendChild(simpleVerbItem("close", target));
-  menu.appendChild(simpleVerbItem("merge", target));
+  menu.appendChild(simpleVerbItem("finish", target));
   menu.appendChild(simpleVerbItem("restart", target));
   menu.appendChild(drawPriorityItem(target));
   menu.appendChild(drawKillItem(target));
@@ -155,7 +155,7 @@ export function drawRowMenu(target: VerbTarget): HTMLElement {
 
 /** The verbs whose whole interaction is one click. */
 function simpleVerbItem(
-  verb: "open" | "close" | "merge" | "restart",
+  verb: "open" | "close" | "finish" | "restart",
   target: VerbTarget,
 ): HTMLElement {
   const row = menuRow();
@@ -175,7 +175,7 @@ function simpleVerbItem(
 
 /** Issue one of the plain verbs and say at the button what came back. */
 async function runSimpleVerb(
-  verb: "open" | "close" | "merge" | "restart",
+  verb: "open" | "close" | "finish" | "restart",
   target: VerbTarget,
   button: Control,
 ): Promise<void> {
@@ -192,13 +192,13 @@ async function runSimpleVerb(
         refusalText: (cause) => closeWorkspaceRefusal(cause as CauseOf<CloseWorkspaceError>),
       });
       return;
-    case "merge":
+    case "finish":
       await runVerb(button, {
         sc: target.sc,
-        rpc: "MergeWorkspace",
-        call: (client) => client.mergeWorkspace(buildMergeWorkspaceRequest(target.workspace)),
-        schema: MergeWorkspaceResponseSchema,
-        refusalText: (cause) => mergeWorkspaceRefusal(cause as CauseOf<MergeWorkspaceError>),
+        rpc: "FinishWorkspace",
+        call: (client) => client.finishWorkspace(buildFinishWorkspaceRequest(target.workspace)),
+        schema: FinishWorkspaceResponseSchema,
+        refusalText: (cause) => finishWorkspaceRefusal(cause as CauseOf<FinishWorkspaceError>),
       });
       return;
     case "restart":
@@ -709,31 +709,35 @@ export function setWorkspaceHiddenRefusal(cause: CauseOf<SetWorkspaceHiddenError
   return refusalOf(cause, SET_WORKSPACE_HIDDEN_SENTENCES, "SetWorkspaceHiddenError.cause").text;
 }
 
-/** MergeWorkspace's own arms, including the two that mean "already going". */
-export function mergeWorkspaceRefusal(cause: CauseOf<MergeWorkspaceError>): string {
+/** FinishWorkspace's own arms, in plain words. */
+export function finishWorkspaceRefusal(cause: CauseOf<FinishWorkspaceError>): string {
   switch (cause.case) {
     case "noLayoutFacts":
-      return "the daemon has no layout facts for this workspace to merge from";
+      return "the daemon has no layout facts for this workspace to deploy from";
     case "sessionDeleted":
       return "this workspace's session has been deleted";
     case "alreadyQueued":
-      return "this workspace is already in the merge queue";
-    case "alreadyMerging":
-      return "this workspace is already merging";
+      return "this workspace is already in the queue";
+    case "alreadyDeploying":
+      return "this workspace is already deploying";
     case "ownerLands":
-      return `this child is its parent's to land: ${cause.value.owner?.dir ?? "the parent"} merges it`;
+      return `this child is its parent's to land: ${cause.value.owner?.dir ?? "the parent"} finishes it`;
     case "requesterMayNotLand":
       return "only this workspace, its parent or the user may land it";
     case "noBranchCheckedOut":
       return `${cause.value.dir} has no branch checked out to land`;
     case "versionIncrementRequired":
-      return "a merge onto agent-repl's master names how it moves the version";
+      return "a deploy onto this repository's main branch names how it moves the version";
     case "versionIncrementUnexpected":
-      return "only a merge onto agent-repl's master moves the version";
+      return "this deploy does not move the repository's version";
     case "hasOpenChildren":
-      return mergeHasOpenChildrenSentence(cause.value, "MergeWorkspaceError.has_open_children");
+      return mergeHasOpenChildrenSentence(cause.value, "FinishWorkspaceError.has_open_children");
+    case "noDeployConfig":
+      return `the repository states no deploy: ${cause.value.path} does not exist`;
+    case "deployConfigInvalid":
+      return `the repository's deploy config ${cause.value.path} is unusable: ${cause.value.detail}`;
     default:
-      return unreachableArm("MergeWorkspaceError.cause", cause.case);
+      return unreachableArm("FinishWorkspaceError.cause", cause.case);
   }
 }
 
@@ -833,18 +837,18 @@ export function buildNukeWorkspaceRequest(workspace: WorkspaceRef): NukeWorkspac
 }
 
 /**
- * MergeWorkspace: enqueue; the merge's life thereafter is the feed's.
+ * FinishWorkspace: enqueue; the deploy's life thereafter is the feed's.
  *
- * The rail's Merge verb is "merge this workspace": the user's ONE-SHOT of the
- * row's own branch at the back of the queue, run in place and closing the
- * workspace once it lands. An async merge names a branch and is an agent's to
- * ask for; the rail has no such affordance.
+ * The rail's Finish verb is "this workspace's work is done": the user's ask
+ * at the back of the queue, run in place and closing the workspace once its
+ * deploy succeeds; what the deploy does is the repository's deploy config. An
+ * async merge names a branch and is an agent's to ask for; the rail has no
+ * such affordance.
  */
-export function buildMergeWorkspaceRequest(workspace: WorkspaceRef): MergeWorkspaceRequest {
-  return create(MergeWorkspaceRequestSchema, {
+export function buildFinishWorkspaceRequest(workspace: WorkspaceRef): FinishWorkspaceRequest {
+  return create(FinishWorkspaceRequestSchema, {
     workspace,
     requester: { asker: { case: "user", value: {} } },
-    mode: { case: "oneShot", value: { landing: { case: "ownBranch", value: {} } } },
     placement: { place: { case: "back", value: {} } },
   });
 }

@@ -246,7 +246,8 @@ func mainCheckoutRequester(t *testing.T) *sourcedRepo {
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: starting\ndaemon: passed in 1s\n")
-	d := harness.StartDaemon(t, harness.Opts{DurableState: true, SelfRepo: repo.Dir, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
+	repo.DeploysAsAgentRepl()
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.MergeChainTimeout, ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)}})
 	f := &fixture{d: d, repo: repo, ws: harness.Register(t, d, repo.Dir), t: t}
 	f.open()
 	f.host = d.WatchHost(f.ws)
@@ -259,16 +260,17 @@ func mainCheckoutRequester(t *testing.T) *sourcedRepo {
 	return &sourcedRepo{d: d, repo: repo, script: script, f: f}
 }
 
-// mergeWorkspaceJob answers the merge workspace's own creation job: where it
-// lands and its before-merge actions, as stored.
-func mergeWorkspaceJob(t *testing.T, d *harness.Daemon, mergeWS *workspacev1.WorkspaceRef) (target, before string) {
+// mergeWorkspaceJob answers where the merge workspace's own creation job
+// lands, as stored.
+func mergeWorkspaceJob(t *testing.T, d *harness.Daemon, mergeWS *workspacev1.WorkspaceRef) string {
 	t.Helper()
+	var target string
 	d.WithDB(func(db *sql.DB) {
-		if err := db.QueryRow(`SELECT target_dir, actions_before FROM creation_jobs WHERE workspace_id = ?`, mergeWS.GetId()).Scan(&target, &before); err != nil {
+		if err := db.QueryRow(`SELECT target_dir FROM creation_jobs WHERE workspace_id = ?`, mergeWS.GetId()).Scan(&target); err != nil {
 			t.Fatalf("read the creation job of merge workspace %s: %v", mergeWS.GetId(), err)
 		}
 	})
-	return target, before
+	return target
 }
 
 // sameDir reports whether two spellings name one directory.
@@ -299,19 +301,19 @@ func TestAnAsyncMergeFromTheMainCheckoutLandsInItsMainWorktree(t *testing.T) {
 	if merge.GetActivity().GetMerge().GetSuccess() == nil {
 		t.Fatalf("the main checkout's async merge ended %v, want landed", merge.GetActivity().GetMerge().GetResult())
 	}
-	if target, _ := mergeWorkspaceJob(t, s.d, mergeWS); !sameDir(t, target, s.repo.Dir) {
+	if target := mergeWorkspaceJob(t, s.d, mergeWS); !sameDir(t, target, s.repo.Dir) {
 		t.Fatalf("the merge workspace lands in %q, want the main worktree %q", target, s.repo.Dir)
 	}
 }
 
-func TestAnAsyncRequestsBeforeMergeActionRunsInItsMergeWorkspace(t *testing.T) {
+func TestAnAsyncRequestsPreDeployHookRunsInItsMergeWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	s := newSourcedRepo(t)
 	root := s.f.watchRootFeed()
 	s.repo.AddBranch("agent-fix")
 	withBefore := func(async *agentreplv1.CreateWorkspaceAsyncMerge) {
-		async.MergeActions = &agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("run the request's linters")}
+		async.DeployHooks = harness.PreDeployPrompts("run the request's linters")
 	}
 
 	// Act: the merge workspace is handed the request's before-merge prompt,

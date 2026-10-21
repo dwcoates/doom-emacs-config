@@ -77,12 +77,11 @@ func interruptedAt(t *testing.T, h *harness, mutate func(*progressDoc)) {
 	doc := progressDoc{
 		Version: progressVersion, Step: TabQueue, Repo: string(h.repoKey()),
 		QueuedMS: queued, StartedMS: queued + 1,
-		Subject:   subjectDoc{Branch: "feature", Dir: h.sourceD, TargetDir: h.targetD, Closes: string(theWorkspace)},
-		EmacsRepo: true,
-		Rounds:    map[string]int{TabQueue: 1},
-		Active:    roundDoc{Kind: TabQueue, N: 1, StartedMS: queued},
-		Open:      []roundDoc{{Kind: TabQueue, N: 1, StartedMS: queued}},
-		Facts:     factsDoc{Step: "enqueued"},
+		Subject: subjectDoc{Branch: "feature", Dir: h.sourceD, TargetDir: h.targetD, Closes: string(theWorkspace)},
+		Rounds:  map[string]int{TabQueue: 1},
+		Active:  roundDoc{Kind: TabQueue, N: 1, StartedMS: queued},
+		Open:    []roundDoc{{Kind: TabQueue, N: 1, StartedMS: queued}},
+		Facts:   factsDoc{Step: "enqueued"},
 	}
 	if mutate != nil {
 		mutate(&doc)
@@ -606,11 +605,11 @@ func TestAMergeResumedAtItsCommitWithAMovedBranchFailsNamingIt(t *testing.T) {
 func TestAMergeResumedAtAPrePromptReattachesToItsTurn(t *testing.T) {
 	// Arrange: the dead run was in its before-merge prompt.
 	h := newHarness(t)
-	h.configureActions([]string{"prepare"}, nil)
+	h.configurePromptHooks([]string{"prepare"}, nil)
 	interruptedAt(t, h, func(d *progressDoc) {
-		d.Step, d.PromptIndex, d.Turn = TabPrePrompt, 0, string(deadTurn)
-		d.Rounds = map[string]int{TabQueue: 1, TabPrePrompt: 1}
-		d.Active = roundDoc{Kind: TabPrePrompt, N: 1, StartedMS: d.StartedMS}
+		d.Step, d.PromptIndex, d.Turn = TabPreDeploy, 0, string(deadTurn)
+		d.Rounds = map[string]int{TabQueue: 1, TabPreDeploy: 1}
+		d.Active = roundDoc{Kind: TabPreDeploy, N: 1, StartedMS: d.StartedMS}
 		d.Open = []roundDoc{d.Active}
 	})
 	recordTurn(h, nil)
@@ -624,7 +623,7 @@ func TestAMergeResumedAtAPrePromptReattachesToItsTurn(t *testing.T) {
 	if !slices.Contains(h.awaitedTurns, deadTurn) {
 		t.Fatalf("awaited = %v, want the prompt's turn waited for", h.awaitedTurns)
 	}
-	if rounds := h.feed.roundsOfKind(TabPrePrompt); !slices.Equal(rounds, []int{1}) {
+	if rounds := h.feed.roundsOfKind(TabPreDeploy); !slices.Equal(rounds, []int{1}) {
 		t.Fatalf("pre-prompt rounds = %v, want the one round the dead run drew", rounds)
 	}
 }

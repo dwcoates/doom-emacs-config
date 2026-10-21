@@ -113,7 +113,7 @@ func TestAFailedMergeRaisesTheFailedBannerWithItsSummary(t *testing.T) {
 	// Arrange: a merge whose before-action fails.
 	h := newHarness(t)
 	h.emacsRepo()
-	h.configureActions([]string{"before"}, nil)
+	h.configurePromptHooks([]string{"before"}, nil)
 	h.briefs["before"] = nil
 	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
 	enqueue(t, h)
@@ -379,7 +379,7 @@ func TestAMergesEndIsHandedBackBeforeItsResolvedBanner(t *testing.T) {
 			name: "a sync merge that failed",
 			arrange: func(t *testing.T, h *harness) {
 				h.emacsRepo()
-				h.configureActions([]string{"before"}, nil)
+				h.configurePromptHooks([]string{"before"}, nil)
 				h.briefs["before"] = nil
 				h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
 				enqueue(t, h)

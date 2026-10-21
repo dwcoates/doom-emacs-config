@@ -118,9 +118,9 @@ const (
 	// AgentReplForgetWorkspaceProcedure is the fully-qualified name of the AgentRepl's ForgetWorkspace
 	// RPC.
 	AgentReplForgetWorkspaceProcedure = "/agentrepl.v1.AgentRepl/ForgetWorkspace"
-	// AgentReplMergeWorkspaceProcedure is the fully-qualified name of the AgentRepl's MergeWorkspace
+	// AgentReplFinishWorkspaceProcedure is the fully-qualified name of the AgentRepl's FinishWorkspace
 	// RPC.
-	AgentReplMergeWorkspaceProcedure = "/agentrepl.v1.AgentRepl/MergeWorkspace"
+	AgentReplFinishWorkspaceProcedure = "/agentrepl.v1.AgentRepl/FinishWorkspace"
 	// AgentReplCompactWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// CompactWorkspace RPC.
 	AgentReplCompactWorkspaceProcedure = "/agentrepl.v1.AgentRepl/CompactWorkspace"
@@ -205,9 +205,12 @@ const (
 	// AgentReplUpdateMergeQueueProcedure is the fully-qualified name of the AgentRepl's
 	// UpdateMergeQueue RPC.
 	AgentReplUpdateMergeQueueProcedure = "/agentrepl.v1.AgentRepl/UpdateMergeQueue"
-	// AgentReplUpdateRolloutsProcedure is the fully-qualified name of the AgentRepl's UpdateRollouts
+	// AgentReplUpdateDeployHoldProcedure is the fully-qualified name of the AgentRepl's
+	// UpdateDeployHold RPC.
+	AgentReplUpdateDeployHoldProcedure = "/agentrepl.v1.AgentRepl/UpdateDeployHold"
+	// AgentReplRollOutLandingProcedure is the fully-qualified name of the AgentRepl's RollOutLanding
 	// RPC.
-	AgentReplUpdateRolloutsProcedure = "/agentrepl.v1.AgentRepl/UpdateRollouts"
+	AgentReplRollOutLandingProcedure = "/agentrepl.v1.AgentRepl/RollOutLanding"
 	// AgentReplDaemonHealthProcedure is the fully-qualified name of the AgentRepl's DaemonHealth RPC.
 	AgentReplDaemonHealthProcedure = "/agentrepl.v1.AgentRepl/DaemonHealth"
 	// AgentReplSessionHealthProcedure is the fully-qualified name of the AgentRepl's SessionHealth RPC.
@@ -345,7 +348,7 @@ var (
 	agentReplKillWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("KillWorkspace")
 	agentReplNukeWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("NukeWorkspace")
 	agentReplForgetWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("ForgetWorkspace")
-	agentReplMergeWorkspaceMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("MergeWorkspace")
+	agentReplFinishWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("FinishWorkspace")
 	agentReplCompactWorkspaceMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("CompactWorkspace")
 	agentReplSetWorkspaceOneShotMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceOneShot")
 	agentReplSetWorkspaceCorrespondenceMethodDescriptor = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceCorrespondence")
@@ -377,7 +380,8 @@ var (
 	agentReplUpdateShutdownScheduleMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("UpdateShutdownSchedule")
 	agentReplDeployMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("Deploy")
 	agentReplUpdateMergeQueueMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("UpdateMergeQueue")
-	agentReplUpdateRolloutsMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("UpdateRollouts")
+	agentReplUpdateDeployHoldMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("UpdateDeployHold")
+	agentReplRollOutLandingMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("RollOutLanding")
 	agentReplDaemonHealthMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("DaemonHealth")
 	agentReplSessionHealthMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SessionHealth")
 	agentReplClientLogMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("ClientLog")
@@ -511,10 +515,10 @@ type AgentReplClient interface {
 	// Remove a CLOSED workspace's registry record; every file survives. The
 	// undo for a registration. See endpoint_forget_workspace.proto.
 	ForgetWorkspace(context.Context, *connect.Request[v1.ForgetWorkspaceRequest]) (*connect.Response[v1.ForgetWorkspaceResponse], error)
-	// Land this workspace's own branch in the target fixed at its creation;
-	// its life from there is the feed's bubble. See
-	// endpoint_merge_workspace.proto.
-	MergeWorkspace(context.Context, *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error)
+	// This workspace's work is finished: run its repository's deploy on its own
+	// branch; its life from there is the feed's bubble. See
+	// endpoint_finish_workspace.proto.
+	FinishWorkspace(context.Context, *connect.Request[v1.FinishWorkspaceRequest]) (*connect.Response[v1.FinishWorkspaceResponse], error)
 	// Compact a workspace's conversation through its prompt queue. See
 	// endpoint_compact_workspace.proto.
 	CompactWorkspace(context.Context, *connect.Request[v1.CompactWorkspaceRequest]) (*connect.Response[v1.CompactWorkspaceResponse], error)
@@ -614,9 +618,12 @@ type AgentReplClient interface {
 	// Operator control of the merge queue. See
 	// endpoint_update_merge_queue.proto.
 	UpdateMergeQueue(context.Context, *connect.Request[v1.UpdateMergeQueueRequest]) (*connect.Response[v1.UpdateMergeQueueResponse], error)
-	// Hold or release the runtime's rollouts; releasing deploys what landed
-	// during the hold. See endpoint_update_rollouts.proto.
-	UpdateRollouts(context.Context, *connect.Request[v1.UpdateRolloutsRequest]) (*connect.Response[v1.UpdateRolloutsResponse], error)
+	// Hold or release one repository's deploy stage; releasing runs a skipped
+	// script deploy hook once. See endpoint_update_deploy_hold.proto.
+	UpdateDeployHold(context.Context, *connect.Request[v1.UpdateDeployHoldRequest]) (*connect.Response[v1.UpdateDeployHoldResponse], error)
+	// agent-repl's deploy hook asks for the rollout of what a deploy landed. See
+	// endpoint_roll_out_landing.proto.
+	RollOutLanding(context.Context, *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error)
 	// Is the daemon itself healthy? Unhealthy is an ANSWER. See
 	// endpoint_daemon_health.proto.
 	DaemonHealth(context.Context, *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error)
@@ -926,10 +933,10 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplForgetWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		mergeWorkspace: connect.NewClient[v1.MergeWorkspaceRequest, v1.MergeWorkspaceResponse](
+		finishWorkspace: connect.NewClient[v1.FinishWorkspaceRequest, v1.FinishWorkspaceResponse](
 			httpClient,
-			baseURL+AgentReplMergeWorkspaceProcedure,
-			connect.WithSchema(agentReplMergeWorkspaceMethodDescriptor),
+			baseURL+AgentReplFinishWorkspaceProcedure,
+			connect.WithSchema(agentReplFinishWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		compactWorkspace: connect.NewClient[v1.CompactWorkspaceRequest, v1.CompactWorkspaceResponse](
@@ -1118,10 +1125,16 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUpdateMergeQueueMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		updateRollouts: connect.NewClient[v1.UpdateRolloutsRequest, v1.UpdateRolloutsResponse](
+		updateDeployHold: connect.NewClient[v1.UpdateDeployHoldRequest, v1.UpdateDeployHoldResponse](
 			httpClient,
-			baseURL+AgentReplUpdateRolloutsProcedure,
-			connect.WithSchema(agentReplUpdateRolloutsMethodDescriptor),
+			baseURL+AgentReplUpdateDeployHoldProcedure,
+			connect.WithSchema(agentReplUpdateDeployHoldMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		rollOutLanding: connect.NewClient[v1.RollOutLandingRequest, v1.RollOutLandingResponse](
+			httpClient,
+			baseURL+AgentReplRollOutLandingProcedure,
+			connect.WithSchema(agentReplRollOutLandingMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		daemonHealth: connect.NewClient[v1.DaemonHealthRequest, v1.DaemonHealthResponse](
@@ -1391,7 +1404,7 @@ type agentReplClient struct {
 	killWorkspace              *connect.Client[v1.KillWorkspaceRequest, v1.KillWorkspaceResponse]
 	nukeWorkspace              *connect.Client[v1.NukeWorkspaceRequest, v1.NukeWorkspaceResponse]
 	forgetWorkspace            *connect.Client[v1.ForgetWorkspaceRequest, v1.ForgetWorkspaceResponse]
-	mergeWorkspace             *connect.Client[v1.MergeWorkspaceRequest, v1.MergeWorkspaceResponse]
+	finishWorkspace            *connect.Client[v1.FinishWorkspaceRequest, v1.FinishWorkspaceResponse]
 	compactWorkspace           *connect.Client[v1.CompactWorkspaceRequest, v1.CompactWorkspaceResponse]
 	setWorkspaceOneShot        *connect.Client[v1.SetWorkspaceOneShotRequest, v1.SetWorkspaceOneShotResponse]
 	setWorkspaceCorrespondence *connect.Client[v1.SetWorkspaceCorrespondenceRequest, v1.SetWorkspaceCorrespondenceResponse]
@@ -1423,7 +1436,8 @@ type agentReplClient struct {
 	updateShutdownSchedule     *connect.Client[v1.UpdateShutdownScheduleRequest, v1.UpdateShutdownScheduleResponse]
 	deploy                     *connect.Client[v1.DeployRequest, v1.DeployResponse]
 	updateMergeQueue           *connect.Client[v1.UpdateMergeQueueRequest, v1.UpdateMergeQueueResponse]
-	updateRollouts             *connect.Client[v1.UpdateRolloutsRequest, v1.UpdateRolloutsResponse]
+	updateDeployHold           *connect.Client[v1.UpdateDeployHoldRequest, v1.UpdateDeployHoldResponse]
+	rollOutLanding             *connect.Client[v1.RollOutLandingRequest, v1.RollOutLandingResponse]
 	daemonHealth               *connect.Client[v1.DaemonHealthRequest, v1.DaemonHealthResponse]
 	sessionHealth              *connect.Client[v1.SessionHealthRequest, v1.SessionHealthResponse]
 	clientLog                  *connect.Client[v1.ClientLogRequest, v1.ClientLogResponse]
@@ -1609,9 +1623,9 @@ func (c *agentReplClient) ForgetWorkspace(ctx context.Context, req *connect.Requ
 	return c.forgetWorkspace.CallUnary(ctx, req)
 }
 
-// MergeWorkspace calls agentrepl.v1.AgentRepl.MergeWorkspace.
-func (c *agentReplClient) MergeWorkspace(ctx context.Context, req *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error) {
-	return c.mergeWorkspace.CallUnary(ctx, req)
+// FinishWorkspace calls agentrepl.v1.AgentRepl.FinishWorkspace.
+func (c *agentReplClient) FinishWorkspace(ctx context.Context, req *connect.Request[v1.FinishWorkspaceRequest]) (*connect.Response[v1.FinishWorkspaceResponse], error) {
+	return c.finishWorkspace.CallUnary(ctx, req)
 }
 
 // CompactWorkspace calls agentrepl.v1.AgentRepl.CompactWorkspace.
@@ -1769,9 +1783,14 @@ func (c *agentReplClient) UpdateMergeQueue(ctx context.Context, req *connect.Req
 	return c.updateMergeQueue.CallUnary(ctx, req)
 }
 
-// UpdateRollouts calls agentrepl.v1.AgentRepl.UpdateRollouts.
-func (c *agentReplClient) UpdateRollouts(ctx context.Context, req *connect.Request[v1.UpdateRolloutsRequest]) (*connect.Response[v1.UpdateRolloutsResponse], error) {
-	return c.updateRollouts.CallUnary(ctx, req)
+// UpdateDeployHold calls agentrepl.v1.AgentRepl.UpdateDeployHold.
+func (c *agentReplClient) UpdateDeployHold(ctx context.Context, req *connect.Request[v1.UpdateDeployHoldRequest]) (*connect.Response[v1.UpdateDeployHoldResponse], error) {
+	return c.updateDeployHold.CallUnary(ctx, req)
+}
+
+// RollOutLanding calls agentrepl.v1.AgentRepl.RollOutLanding.
+func (c *agentReplClient) RollOutLanding(ctx context.Context, req *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error) {
+	return c.rollOutLanding.CallUnary(ctx, req)
 }
 
 // DaemonHealth calls agentrepl.v1.AgentRepl.DaemonHealth.
@@ -2057,10 +2076,10 @@ type AgentReplHandler interface {
 	// Remove a CLOSED workspace's registry record; every file survives. The
 	// undo for a registration. See endpoint_forget_workspace.proto.
 	ForgetWorkspace(context.Context, *connect.Request[v1.ForgetWorkspaceRequest]) (*connect.Response[v1.ForgetWorkspaceResponse], error)
-	// Land this workspace's own branch in the target fixed at its creation;
-	// its life from there is the feed's bubble. See
-	// endpoint_merge_workspace.proto.
-	MergeWorkspace(context.Context, *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error)
+	// This workspace's work is finished: run its repository's deploy on its own
+	// branch; its life from there is the feed's bubble. See
+	// endpoint_finish_workspace.proto.
+	FinishWorkspace(context.Context, *connect.Request[v1.FinishWorkspaceRequest]) (*connect.Response[v1.FinishWorkspaceResponse], error)
 	// Compact a workspace's conversation through its prompt queue. See
 	// endpoint_compact_workspace.proto.
 	CompactWorkspace(context.Context, *connect.Request[v1.CompactWorkspaceRequest]) (*connect.Response[v1.CompactWorkspaceResponse], error)
@@ -2160,9 +2179,12 @@ type AgentReplHandler interface {
 	// Operator control of the merge queue. See
 	// endpoint_update_merge_queue.proto.
 	UpdateMergeQueue(context.Context, *connect.Request[v1.UpdateMergeQueueRequest]) (*connect.Response[v1.UpdateMergeQueueResponse], error)
-	// Hold or release the runtime's rollouts; releasing deploys what landed
-	// during the hold. See endpoint_update_rollouts.proto.
-	UpdateRollouts(context.Context, *connect.Request[v1.UpdateRolloutsRequest]) (*connect.Response[v1.UpdateRolloutsResponse], error)
+	// Hold or release one repository's deploy stage; releasing runs a skipped
+	// script deploy hook once. See endpoint_update_deploy_hold.proto.
+	UpdateDeployHold(context.Context, *connect.Request[v1.UpdateDeployHoldRequest]) (*connect.Response[v1.UpdateDeployHoldResponse], error)
+	// agent-repl's deploy hook asks for the rollout of what a deploy landed. See
+	// endpoint_roll_out_landing.proto.
+	RollOutLanding(context.Context, *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error)
 	// Is the daemon itself healthy? Unhealthy is an ANSWER. See
 	// endpoint_daemon_health.proto.
 	DaemonHealth(context.Context, *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error)
@@ -2468,10 +2490,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplForgetWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentReplMergeWorkspaceHandler := connect.NewUnaryHandler(
-		AgentReplMergeWorkspaceProcedure,
-		svc.MergeWorkspace,
-		connect.WithSchema(agentReplMergeWorkspaceMethodDescriptor),
+	agentReplFinishWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplFinishWorkspaceProcedure,
+		svc.FinishWorkspace,
+		connect.WithSchema(agentReplFinishWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplCompactWorkspaceHandler := connect.NewUnaryHandler(
@@ -2660,10 +2682,16 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUpdateMergeQueueMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	agentReplUpdateRolloutsHandler := connect.NewUnaryHandler(
-		AgentReplUpdateRolloutsProcedure,
-		svc.UpdateRollouts,
-		connect.WithSchema(agentReplUpdateRolloutsMethodDescriptor),
+	agentReplUpdateDeployHoldHandler := connect.NewUnaryHandler(
+		AgentReplUpdateDeployHoldProcedure,
+		svc.UpdateDeployHold,
+		connect.WithSchema(agentReplUpdateDeployHoldMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplRollOutLandingHandler := connect.NewUnaryHandler(
+		AgentReplRollOutLandingProcedure,
+		svc.RollOutLanding,
+		connect.WithSchema(agentReplRollOutLandingMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplDaemonHealthHandler := connect.NewUnaryHandler(
@@ -2959,8 +2987,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplNukeWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplForgetWorkspaceProcedure:
 			agentReplForgetWorkspaceHandler.ServeHTTP(w, r)
-		case AgentReplMergeWorkspaceProcedure:
-			agentReplMergeWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplFinishWorkspaceProcedure:
+			agentReplFinishWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplCompactWorkspaceProcedure:
 			agentReplCompactWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspaceOneShotProcedure:
@@ -3023,8 +3051,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplDeployHandler.ServeHTTP(w, r)
 		case AgentReplUpdateMergeQueueProcedure:
 			agentReplUpdateMergeQueueHandler.ServeHTTP(w, r)
-		case AgentReplUpdateRolloutsProcedure:
-			agentReplUpdateRolloutsHandler.ServeHTTP(w, r)
+		case AgentReplUpdateDeployHoldProcedure:
+			agentReplUpdateDeployHoldHandler.ServeHTTP(w, r)
+		case AgentReplRollOutLandingProcedure:
+			agentReplRollOutLandingHandler.ServeHTTP(w, r)
 		case AgentReplDaemonHealthProcedure:
 			agentReplDaemonHealthHandler.ServeHTTP(w, r)
 		case AgentReplSessionHealthProcedure:
@@ -3226,8 +3256,8 @@ func (UnimplementedAgentReplHandler) ForgetWorkspace(context.Context, *connect.R
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ForgetWorkspace is not implemented"))
 }
 
-func (UnimplementedAgentReplHandler) MergeWorkspace(context.Context, *connect.Request[v1.MergeWorkspaceRequest]) (*connect.Response[v1.MergeWorkspaceResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.MergeWorkspace is not implemented"))
+func (UnimplementedAgentReplHandler) FinishWorkspace(context.Context, *connect.Request[v1.FinishWorkspaceRequest]) (*connect.Response[v1.FinishWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.FinishWorkspace is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) CompactWorkspace(context.Context, *connect.Request[v1.CompactWorkspaceRequest]) (*connect.Response[v1.CompactWorkspaceResponse], error) {
@@ -3354,8 +3384,12 @@ func (UnimplementedAgentReplHandler) UpdateMergeQueue(context.Context, *connect.
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateMergeQueue is not implemented"))
 }
 
-func (UnimplementedAgentReplHandler) UpdateRollouts(context.Context, *connect.Request[v1.UpdateRolloutsRequest]) (*connect.Response[v1.UpdateRolloutsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateRollouts is not implemented"))
+func (UnimplementedAgentReplHandler) UpdateDeployHold(context.Context, *connect.Request[v1.UpdateDeployHoldRequest]) (*connect.Response[v1.UpdateDeployHoldResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateDeployHold is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RollOutLanding(context.Context, *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RollOutLanding is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) DaemonHealth(context.Context, *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error) {

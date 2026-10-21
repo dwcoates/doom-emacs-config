@@ -69,11 +69,11 @@ message SetWorkspaceOneShotError {
     SetWorkspaceOneShotOwnerLands owner_lands = 5;
     // The requester is neither the workspace, nor its owner, nor the user.
     SetWorkspaceOneShotRequesterMayNotSet requester_may_not_set = 6;
-    // The repository's one-shot policy lacks its completion directive, so a
-    // marked workspace could not be told what to do when done. Nothing was
-    // changed.
-    SetWorkspaceOneShotPolicyMissing policy_missing = 7;
   }
+  // Tag 7 (`policy_missing`) is RETIRED: the completion directive a marked
+  // workspace is told is the daemon's own, the same for every repository.
+  reserved 7;
+  reserved "policy_missing";
 }
 message SetWorkspaceOneShotUnknownWorkspace {}
 message SetWorkspaceOneShotWorkspaceRefMismatch {
@@ -87,7 +87,3 @@ message SetWorkspaceOneShotOwnerLands {
   workspace.v1.WorkspaceRef owner = 1;
 }
 message SetWorkspaceOneShotRequesterMayNotSet {}
-message SetWorkspaceOneShotPolicyMissing {
-  // The directory the policy was read from.
-  string policy_dir = 1;
-}

@@ -2525,11 +2525,11 @@ describe("a file link in a response bubble", () => {
 });
 
 describe("an agentic merge tab", () => {
-  /** Draw the pre-prompt tab, then push a row parented to it. */
+  /** Draw a prompt hook's tab, then push a row parented to it. */
   const withChild = async (tabId: string): Promise<void> => {
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
-    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, mergeTabRow("prePrompt", "live", { id: feedId(tabId) }));
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, mergeTabRow("hookPrompt", "live", { id: feedId(tabId) }));
     await harness.settle();
     harness.fake.pushRow(
       WORKSPACE_ID,
@@ -2567,7 +2567,7 @@ describe("an agentic merge tab", () => {
     // Arrange / Act
     await withChild("tab-pre");
     // Assert
-    expect(harness.$$("[data-merge-tab]").map((el) => el.dataset.mergeTab)).toEqual(["prePrompt"]);
+    expect(harness.$$("[data-merge-tab]").map((el) => el.dataset.mergeTab)).toEqual(["hookPrompt"]);
   });
 });
 

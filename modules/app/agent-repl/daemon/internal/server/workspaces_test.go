@@ -1326,67 +1326,65 @@ func awaitClosed(t *testing.T, ch <-chan struct{}, what string) {
 	}
 }
 
-// oneShotRequest is the workspace's own branch merged as a one-shot, asked by
-// the user, at the back of the queue.
-func oneShotRequest() *agentreplv1.MergeWorkspaceRequest {
-	return &agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Requester: userRequester(), Placement: backPlacement(),
-		Mode: &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{
-			Landing: &agentreplv1.MergeWorkspaceOneShot_OwnBranch{OwnBranch: &agentreplv1.MergeWorkspaceOneShotOwnBranch{}}}}}
+// ownFinish is the workspace's deploy of its own work, asked by the user,
+// at the back of the queue.
+func ownFinish() *agentreplv1.FinishWorkspaceRequest {
+	return &agentreplv1.FinishWorkspaceRequest{Workspace: ref(), Requester: userRequester(), Placement: backPlacement()}
 }
 
 func strPtr(s string) *string { return &s }
 
-func TestMergeWorkspaceMapsAPreStateRefusalOntoItsArm(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmAlreadyQueued, Reason: "already waiting"}
-
-	// Act.
-	resp, err := h.Client.MergeWorkspace(context.Background(),
-		connect.NewRequest(oneShotRequest()))
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("MergeWorkspace: %v", err)
+func TestFinishWorkspaceMapsTheQueuesRefusalsOntoItsArms(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal *merge.RefusalError
+		got     func(*agentreplv1.FinishWorkspaceError) bool
+	}{
+		{name: "already queued", refusal: &merge.RefusalError{Arm: merge.ArmAlreadyQueued, Reason: "already waiting"},
+			got: func(e *agentreplv1.FinishWorkspaceError) bool { return e.GetAlreadyQueued() != nil }},
+		{name: "already deploying", refusal: &merge.RefusalError{Arm: merge.ArmAlreadyMerging, Reason: "already running"},
+			got: func(e *agentreplv1.FinishWorkspaceError) bool { return e.GetAlreadyDeploying() != nil }},
+		{name: "no deploy config", refusal: &merge.RefusalError{Arm: merge.ArmNoDeployConfig, Reason: "none",
+			Fields: map[string]any{"path": "/repo/.agent-repl/deploy.yaml"}},
+			got: func(e *agentreplv1.FinishWorkspaceError) bool {
+				return e.GetNoDeployConfig().GetPath() == "/repo/.agent-repl/deploy.yaml"
+			}},
+		{name: "an unusable deploy config", refusal: &merge.RefusalError{Arm: merge.ArmDeployConfigInvalid, Reason: "bad",
+			Fields: map[string]any{"path": "/repo/.agent-repl/deploy.yaml", "detail": "pre_deploy is required"}},
+			got: func(e *agentreplv1.FinishWorkspaceError) bool {
+				return e.GetDeployConfigInvalid().GetPath() == "/repo/.agent-repl/deploy.yaml" && e.GetDeployConfigInvalid().GetDetail() == "pre_deploy is required"
+			}},
 	}
-	if resp.Msg.GetError().GetAlreadyQueued() == nil {
-		t.Fatalf("result = %v, want already_queued", resp.Msg.GetResult())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Merge.enqueueErr = tt.refusal
+
+			// Act.
+			resp, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(ownFinish()))
+
+			// Assert.
+			if err != nil || !tt.got(resp.Msg.GetError()) {
+				t.Fatalf("FinishWorkspace = %v, %v; want the %s arm", resp, err, tt.refusal.Arm)
+			}
+		})
 	}
 }
 
-func TestMergeWorkspaceAsksAsTheUser(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-
-	// Act.
-	if _, err := h.Client.MergeWorkspace(context.Background(),
-		connect.NewRequest(oneShotRequest())); err != nil {
-		t.Fatalf("MergeWorkspace: %v", err)
-	}
-
-	// Assert.
-	if len(h.Merge.enqueuedBy) != 1 || h.Merge.enqueuedBy[0] != merge.RequestedByUser {
-		t.Fatalf("the merge was enqueued as %v, want the user's ask", h.Merge.enqueuedBy)
-	}
-}
-
-func TestMergeWorkspaceMapsTheRequest(t *testing.T) {
-	front := oneShotRequest()
+func TestFinishWorkspaceMapsTheRequest(t *testing.T) {
+	front := ownFinish()
 	front.Placement = frontPlacement()
-	upstream := oneShotRequest()
-	upstream.Mode = &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{
-		Landing: &agentreplv1.MergeWorkspaceOneShot_MergedUpstream{MergedUpstream: &agentreplv1.MergeWorkspaceOneShotMergedUpstream{}}}}
-	asked := oneShotRequest()
+	asked := ownFinish()
 	asked.Requester = workspaceRequester(ref())
 	tests := []struct {
 		name      string
-		req       *agentreplv1.MergeWorkspaceRequest
+		req       *agentreplv1.FinishWorkspaceRequest
 		want      wsm.MergeSource
 		wantBy    merge.Requester
 		wantAsker ids.WorkspaceID
 	}{
-		{name: "its own branch, asked by the user", req: oneShotRequest(), want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, wantBy: merge.RequestedByUser},
-		{name: "already merged upstream", req: upstream, want: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, wantBy: merge.RequestedByUser},
+		{name: "asked by the user", req: ownFinish(), want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, wantBy: merge.RequestedByUser},
 		{name: "at the front", req: front, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Front: true}, wantBy: merge.RequestedByUser},
 		{name: "asked by a workspace's agent", req: asked, want: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, wantBy: merge.RequestedByAgent, wantAsker: testWorkspaceID},
 	}
@@ -1396,8 +1394,8 @@ func TestMergeWorkspaceMapsTheRequest(t *testing.T) {
 			h := newHarness(t)
 
 			// Act.
-			if _, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(tt.req)); err != nil {
-				t.Fatalf("MergeWorkspace: %v", err)
+			if _, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(tt.req)); err != nil {
+				t.Fatalf("FinishWorkspace: %v", err)
 			}
 
 			// Assert.
@@ -1412,17 +1410,17 @@ func TestMergeWorkspaceMapsTheRequest(t *testing.T) {
 	}
 }
 
-func TestMergeWorkspaceAnswersWhoMayLandIt(t *testing.T) {
+func TestFinishWorkspaceAnswersWhoMayLandIt(t *testing.T) {
 	tests := []struct {
 		name string
 		arm  string
-		got  func(*agentreplv1.MergeWorkspaceError) bool
+		got  func(*agentreplv1.FinishWorkspaceError) bool
 	}{
-		{name: "a child its owner lands", arm: merge.ArmOwnerLands, got: func(e *agentreplv1.MergeWorkspaceError) bool {
+		{name: "a child its owner lands", arm: merge.ArmOwnerLands, got: func(e *agentreplv1.FinishWorkspaceError) bool {
 			return e.GetOwnerLands().GetOwner().GetId() == "ws-owner"
 		}},
-		{name: "a stranger", arm: merge.ArmRequesterMayNotLand, got: func(e *agentreplv1.MergeWorkspaceError) bool { return e.GetRequesterMayNotLand() != nil }},
-		{name: "a detached head", arm: merge.ArmNoBranchCheckedOut, got: func(e *agentreplv1.MergeWorkspaceError) bool { return e.GetNoBranchCheckedOut().GetDir() == "/wt" }},
+		{name: "a stranger", arm: merge.ArmRequesterMayNotLand, got: func(e *agentreplv1.FinishWorkspaceError) bool { return e.GetRequesterMayNotLand() != nil }},
+		{name: "a detached head", arm: merge.ArmNoBranchCheckedOut, got: func(e *agentreplv1.FinishWorkspaceError) bool { return e.GetNoBranchCheckedOut().GetDir() == "/wt" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1432,24 +1430,24 @@ func TestMergeWorkspaceAnswersWhoMayLandIt(t *testing.T) {
 				"owner": &workspacev1.WorkspaceRef{Id: "ws-owner"}, "dir": "/wt"}}
 
 			// Act.
-			resp, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(oneShotRequest()))
+			resp, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(ownFinish()))
 
 			// Assert.
 			if err != nil || !tt.got(resp.Msg.GetError()) {
-				t.Fatalf("MergeWorkspace = %v, %v; want the %s arm", resp, err, tt.arm)
+				t.Fatalf("FinishWorkspace = %v, %v; want the %s arm", resp, err, tt.arm)
 			}
 		})
 	}
 }
 
-func TestMergeWorkspaceRefusesARequestMissingAChoiceAsInvalid(t *testing.T) {
-	noRequester := oneShotRequest()
+func TestFinishWorkspaceRefusesARequestMissingAChoiceAsInvalid(t *testing.T) {
+	noRequester := ownFinish()
 	noRequester.Requester = nil
-	noPlacement := oneShotRequest()
+	noPlacement := ownFinish()
 	noPlacement.Placement = nil
 	tests := []struct {
 		name string
-		req  *agentreplv1.MergeWorkspaceRequest
+		req  *agentreplv1.FinishWorkspaceRequest
 	}{
 		{name: "no requester", req: noRequester},
 		{name: "no placement", req: noPlacement},
@@ -1460,48 +1458,13 @@ func TestMergeWorkspaceRefusesARequestMissingAChoiceAsInvalid(t *testing.T) {
 			h := newHarness(t)
 
 			// Act.
-			_, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(tt.req))
+			_, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(tt.req))
 
 			// Assert.
 			if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.Merge.requests) != 0 {
-				t.Fatalf("MergeWorkspace = %v, requests %+v; want invalid_argument and none", err, h.Merge.requests)
+				t.Fatalf("FinishWorkspace = %v, requests %+v; want invalid_argument and none", err, h.Merge.requests)
 			}
 		})
-	}
-}
-
-func TestMergeWorkspaceRefusesARequestWithNoModeAsInvalid(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-
-	// Act.
-	_, err := h.Client.MergeWorkspace(context.Background(),
-		connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Requester: userRequester(), Placement: backPlacement()}))
-
-	// Assert.
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("MergeWorkspace = %v, want invalid_argument", err)
-	}
-	if len(h.Merge.requests) != 0 {
-		t.Fatalf("an invalid request reached the queue: %+v", h.Merge.requests)
-	}
-}
-
-func TestMergeWorkspaceRefusesAOneShotWithNoLandingAsInvalid(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	req := &agentreplv1.MergeWorkspaceRequest{Workspace: ref(), Requester: userRequester(), Placement: backPlacement(),
-		Mode: &agentreplv1.MergeWorkspaceRequest_OneShot{OneShot: &agentreplv1.MergeWorkspaceOneShot{}}}
-
-	// Act.
-	_, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(req))
-
-	// Assert.
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("MergeWorkspace = %v, want invalid_argument", err)
-	}
-	if len(h.Merge.requests) != 0 {
-		t.Fatalf("an invalid request reached the queue: %+v", h.Merge.requests)
 	}
 }
 
@@ -2007,14 +1970,14 @@ func TestCreateWorkspaceNamesAnUnknownContextWorkspace(t *testing.T) {
 	}
 }
 
-// versioned is a one-shot request carrying INCREMENT.
-func versioned(increment *agentreplv1.MergeWorkspaceVersionIncrement) *agentreplv1.MergeWorkspaceRequest {
-	req := oneShotRequest()
+// versioned is a finish request carrying INCREMENT.
+func versioned(increment *agentreplv1.MergeWorkspaceVersionIncrement) *agentreplv1.FinishWorkspaceRequest {
+	req := ownFinish()
 	req.VersionIncrement = increment
 	return req
 }
 
-func TestMergeWorkspaceMapsTheVersionIncrement(t *testing.T) {
+func TestFinishWorkspaceMapsTheVersionIncrement(t *testing.T) {
 	tests := []struct {
 		name      string
 		increment *agentreplv1.MergeWorkspaceVersionIncrement
@@ -2034,8 +1997,8 @@ func TestMergeWorkspaceMapsTheVersionIncrement(t *testing.T) {
 			h := newHarness(t)
 
 			// Act
-			if _, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(versioned(tt.increment))); err != nil {
-				t.Fatalf("MergeWorkspace: %v", err)
+			if _, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(versioned(tt.increment))); err != nil {
+				t.Fatalf("FinishWorkspace: %v", err)
 			}
 
 			// Assert
@@ -2050,7 +2013,7 @@ func TestMergeWorkspaceMapsTheVersionIncrement(t *testing.T) {
 	}
 }
 
-func TestMergeWorkspaceRefusesAMalformedVersionIncrementAsInvalid(t *testing.T) {
+func TestFinishWorkspaceRefusesAMalformedVersionIncrementAsInvalid(t *testing.T) {
 	patch := func(line string) *agentreplv1.MergeWorkspaceVersionIncrement {
 		return &agentreplv1.MergeWorkspaceVersionIncrement{
 			Increment: &agentreplv1.MergeWorkspaceVersionIncrement_Patch{Patch: &agentreplv1.MergeWorkspaceVersionIncrementPatch{}}, ChangelogLine: line}
@@ -2069,11 +2032,11 @@ func TestMergeWorkspaceRefusesAMalformedVersionIncrementAsInvalid(t *testing.T) 
 			h := newHarness(t)
 
 			// Act
-			_, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(versioned(tt.increment)))
+			_, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(versioned(tt.increment)))
 
 			// Assert
 			if connect.CodeOf(err) != connect.CodeInvalidArgument {
-				t.Fatalf("MergeWorkspace = %v, want invalid_argument", err)
+				t.Fatalf("FinishWorkspace = %v, want invalid_argument", err)
 			}
 			if len(h.Merge.requests) != 0 {
 				t.Fatalf("requests = %+v, want none", h.Merge.requests)
@@ -2082,28 +2045,23 @@ func TestMergeWorkspaceRefusesAMalformedVersionIncrementAsInvalid(t *testing.T) 
 	}
 }
 
-func TestMergeWorkspaceAnswersTheVersionRefusalsOnTheirArms(t *testing.T) {
+func TestFinishWorkspaceAnswersTheVersionRefusalsOnTheirArms(t *testing.T) {
 	tests := []struct {
 		name  string
 		err   *merge.RefusalError
-		check func(*agentreplv1.MergeWorkspaceError) bool
+		check func(*agentreplv1.FinishWorkspaceError) bool
 	}{
 		{name: "a missing increment", err: &merge.RefusalError{Arm: merge.ArmVersionIncrementRequired, Workspace: testWorkspaceID, Reason: "required"},
-			check: func(e *agentreplv1.MergeWorkspaceError) bool { return e.GetVersionIncrementRequired() != nil }},
-		{name: "an increment in another repository", err: &merge.RefusalError{Arm: merge.ArmVersionIncrementUnexpected, Workspace: testWorkspaceID, Reason: "foreign",
-			Fields: map[string]any{"reason": merge.NestedArm("foreign_repository")}},
-			check: func(e *agentreplv1.MergeWorkspaceError) bool {
-				return e.GetVersionIncrementUnexpected().GetForeignRepository() != nil
+			check: func(e *agentreplv1.FinishWorkspaceError) bool { return e.GetVersionIncrementRequired() != nil }},
+		{name: "an increment in an unversioned repository", err: &merge.RefusalError{Arm: merge.ArmVersionIncrementUnexpected, Workspace: testWorkspaceID, Reason: "unversioned",
+			Fields: map[string]any{"reason": merge.NestedArm("unversioned_repository")}},
+			check: func(e *agentreplv1.FinishWorkspaceError) bool {
+				return e.GetVersionIncrementUnexpected().GetUnversionedRepository() != nil
 			}},
 		{name: "an increment off the default branch", err: &merge.RefusalError{Arm: merge.ArmVersionIncrementUnexpected, Workspace: testWorkspaceID, Reason: "parent",
 			Fields: map[string]any{"reason": merge.NestedArm("not_default_branch")}},
-			check: func(e *agentreplv1.MergeWorkspaceError) bool {
+			check: func(e *agentreplv1.FinishWorkspaceError) bool {
 				return e.GetVersionIncrementUnexpected().GetNotDefaultBranch() != nil
-			}},
-		{name: "an increment on a merge already upstream", err: &merge.RefusalError{Arm: merge.ArmVersionIncrementUnexpected, Workspace: testWorkspaceID, Reason: "upstream",
-			Fields: map[string]any{"reason": merge.NestedArm("merged_upstream")}},
-			check: func(e *agentreplv1.MergeWorkspaceError) bool {
-				return e.GetVersionIncrementUnexpected().GetMergedUpstream() != nil
 			}},
 	}
 	for _, tt := range tests {
@@ -2113,11 +2071,11 @@ func TestMergeWorkspaceAnswersTheVersionRefusalsOnTheirArms(t *testing.T) {
 			h.Merge.enqueueErr = tt.err
 
 			// Act
-			resp, err := h.Client.MergeWorkspace(context.Background(), connect.NewRequest(oneShotRequest()))
+			resp, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(ownFinish()))
 
 			// Assert
 			if err != nil || !tt.check(resp.Msg.GetError()) {
-				t.Fatalf("MergeWorkspace = (%v, %v), want the %s arm", resp.Msg.GetResult(), err, tt.err.Arm)
+				t.Fatalf("FinishWorkspace = (%v, %v), want the %s arm", resp.Msg.GetResult(), err, tt.err.Arm)
 			}
 		})
 	}

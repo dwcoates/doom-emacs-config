@@ -121,8 +121,8 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
+	repo.DeploysAsAgentRepl()
 	d := newDaemon(t, harness.Opts{
-		SelfRepo: repo.Dir,
 		ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)},
 		// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
 		Timeout: harness.MergeChainTimeout,
@@ -159,8 +159,8 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 
 	// Assert: the child's merge lands into the parent's worktree, not main.
 	harness.CommitWork(t, child.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(child, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(child) = error %v, want the merge enqueued", err)
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(child))); err != nil {
+		t.Fatalf("FinishWorkspace(child) = error %v, want the merge enqueued", err)
 	}
 	// The merge has to have REACHED ITS TERMINAL before the git calls say
 	// anything: `merge_queued` is published before the run starts, so waiting
@@ -222,10 +222,11 @@ func TestCreateWorkspaceForkMakesTheVendorsForkAndResumesIt(t *testing.T) {
 
 // ---- One-shot create ----
 
-func TestCreateWorkspaceOneShotCarriesTheRepositorysOwnDirective(t *testing.T) {
+func TestCreateWorkspaceOneShotCarriesTheDaemonsDirectiveNotTheRepositorys(t *testing.T) {
 	t.Parallel()
-	// Arrange: the repository states its own directive, and the daemon
-	// concatenates THAT text rather than anything of its own.
+	// Arrange: the repository states a directive of its own, which the daemon
+	// no longer reads: the completion directive is the daemon's, and what
+	// finishing does is the repository's deploy config.
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
 	directive := filepath.Join(repo.PolicyDir(), "oneshot-completion-directive.md")
@@ -254,8 +255,8 @@ func TestCreateWorkspaceOneShotCarriesTheRepositorysOwnDirective(t *testing.T) {
 	shim := d.Shim(ws)
 	shim.ExpectStartSession()
 	got := text(shim.ExpectStartTurn().GetSaid())
-	if !strings.Contains(got, "file a report in the ledger.") {
-		t.Fatalf("the one-shot's decorated prompt = %q, want the repository's own directive", got)
+	if strings.Contains(got, "file a report in the ledger.") || !strings.Contains(got, "agent-repld workspace finished here") {
+		t.Fatalf("the one-shot's decorated prompt = %q, want the daemon's directive alone", got)
 	}
 }
 
@@ -293,13 +294,13 @@ func TestCreateWorkspaceOneShotRefusesARepositoryThatStatesNoPolicy(t *testing.T
 	if missing.GetPolicyDir() != repo.PolicyDir() {
 		t.Fatalf("policy_dir = %q, want %q", missing.GetPolicyDir(), repo.PolicyDir())
 	}
-	want := []string{"workspace-autonomous-preamble.md", "oneshot-completion-directive.md"}
+	want := []string{"workspace-autonomous-preamble.md"}
 	if strings.Join(missing.GetMissingFiles(), ",") != strings.Join(want, ",") {
 		t.Fatalf("missing_files = %v, want %v", missing.GetMissingFiles(), want)
 	}
 }
 
-func TestCreateWorkspaceOneShotRefusesARepositoryMissingOnlyTheDirective(t *testing.T) {
+func TestCreateWorkspaceOneShotNeedsNoDirectiveOfTheRepositorys(t *testing.T) {
 	t.Parallel()
 	// Arrange: a policy that states the preamble and no completion directive.
 	d := newDaemon(t, harness.Opts{})
@@ -320,17 +321,14 @@ func TestCreateWorkspaceOneShotRefusesARepositoryMissingOnlyTheDirective(t *test
 		}},
 	}))
 
-	// Assert.
-	if err != nil {
-		t.Fatalf("CreateWorkspace(one_shot) = error %v, want a typed refusal", err)
+	// Assert: the one-shot is made, carrying the daemon's directive.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(one_shot) = (%v, %v), want a success", resp, err)
 	}
-	missing := resp.Msg.GetError().GetOneShotPolicyMissing()
-	if missing == nil {
-		t.Fatalf("CreateWorkspace(one_shot) = %v, want one_shot_policy_missing", resp.Msg)
-	}
-	got := missing.GetMissingFiles()
-	if len(got) != 1 || got[0] != "oneshot-completion-directive.md" {
-		t.Fatalf("missing_files = %v, want only the completion directive", got)
+	shim := d.Shim(resp.Msg.GetSuccess().GetWorkspace())
+	shim.ExpectStartSession()
+	if got := text(shim.ExpectStartTurn().GetSaid()); !strings.Contains(got, "agent-repld workspace finished here") {
+		t.Fatalf("the one-shot's decorated prompt = %q, want the daemon's directive", got)
 	}
 }
 
@@ -376,9 +374,9 @@ func TestCreateWorkspaceOneShotTakesNoFinishActionOnCompletion(t *testing.T) {
 	}
 }
 
-// ---- Merge actions ----
+// ---- Deploy hooks ----
 
-func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testing.T) {
+func TestCreateWorkspaceDeployHooksAreRecordedAndReadBackByALaterDeploy(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
@@ -389,14 +387,12 @@ func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testi
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology: harness.Primary(),
-			MergeActions: &agentreplv1.CreateWorkspaceMergeActions{
-				BeforeWsMerge: said("run the pre-merge checklist"),
-			},
+			Topology:    harness.Primary(),
+			DeployHooks: harness.PreDeployPrompts("run the pre-merge checklist"),
 		}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace(merge_actions) = (%v, %v), want a success", resp, err)
+		t.Fatalf("CreateWorkspace(deploy_hooks) = (%v, %v), want a success", resp, err)
 	}
 	ws := resp.Msg.GetSuccess().GetWorkspace()
 	shim := d.Shim(ws)
@@ -404,14 +400,14 @@ func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testi
 
 	// Act: a later merge reads the recorded action back.
 	harness.CommitWork(t, ws.GetDir())
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(ws))); err != nil {
+		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 
 	// Assert
 	pre := shim.ExpectStartTurn()
 	if text(pre.GetSaid()) != "run the pre-merge checklist" {
-		t.Fatalf("the merge's pre-prompt turn = %q, want the recorded before_ws_merge action read back", text(pre.GetSaid()))
+		t.Fatalf("the merge's pre-prompt turn = %q, want the recorded pre-deploy hook read back", text(pre.GetSaid()))
 	}
 	if pre.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION {
 		t.Fatalf("the pre-prompt's origin = %v, want MERGE_BEFORE_ACTION", pre.GetOrigin())

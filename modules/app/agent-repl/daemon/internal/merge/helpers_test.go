@@ -17,16 +17,19 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
+
+	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/cpugov"
+	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/promptqueue"
-	"agent-repld/internal/prompts"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
@@ -79,12 +82,15 @@ type fakeDB struct {
 	// allQueuesErr fails AllMergeQueues, the read a workspace's take-back
 	// (AdoptWorkspace) starts from.
 	allQueuesErr error
-	// rolloutHold is the rollout hold; rolloutHoldErr fails its read.
-	rolloutHold    wsm.RolloutHold
-	rolloutHoldErr error
-	// rolloutHoldOnce, when set, is the hold every read AFTER the first
-	// answers: the first read answers rolloutHold, and the hold then changes.
-	rolloutHoldOnce *wsm.RolloutHold
+	// deployHold is the harness repository's deploy hold; deployHoldErr fails
+	// its read and deploySkipErr its skip record.
+	deployHold    wsm.DeployHold
+	deployHoldErr error
+	deploySkipErr error
+	// deployHoldLater, when set, is the hold every read after the first
+	// answers, so a test sees a second read.
+	deployHoldLater *wsm.DeployHold
+	deployHoldReads int
 	// racing is the racing switch; racingErr fails its read.
 	racing    wsm.RacingSwitch
 	racingErr error
@@ -831,16 +837,29 @@ func (f *fakeDB) SetMergeQueuePaused(_ context.Context, repo wsm.RepoKey, paused
 	return nil
 }
 
-func (f *fakeDB) SetMergeRolloutHold(_ context.Context, held bool, at time.Time) error {
+func (f *fakeDB) SetDeployHold(_ context.Context, _ wsm.RepoKey, held bool, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !held {
-		f.rolloutHold = wsm.RolloutHold{}
+		f.deployHold = wsm.DeployHold{}
 		return nil
 	}
-	if !f.rolloutHold.Held {
-		f.rolloutHold = wsm.RolloutHold{Held: true, Since: at}
+	if !f.deployHold.Held {
+		f.deployHold = wsm.DeployHold{Held: true, Since: at}
 	}
+	return nil
+}
+
+func (f *fakeDB) RecordDeploySkip(context.Context, wsm.RepoKey) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.deploySkipErr != nil {
+		return f.deploySkipErr
+	}
+	if !f.deployHold.Held {
+		return errors.New("fake: a deploy skip on a repository that is not held")
+	}
+	f.deployHold.Skipped++
 	return nil
 }
 
@@ -863,14 +882,14 @@ func (f *fakeDB) MergeRacing(context.Context) (wsm.RacingSwitch, error) {
 	return f.racing, f.racingErr
 }
 
-func (f *fakeDB) MergeRolloutHold(context.Context) (wsm.RolloutHold, error) {
+func (f *fakeDB) DeployHoldOf(context.Context, wsm.RepoKey) (wsm.DeployHold, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	hold := f.rolloutHold
-	if f.rolloutHoldOnce != nil {
-		f.rolloutHold, f.rolloutHoldOnce = *f.rolloutHoldOnce, nil
+	f.deployHoldReads++
+	if f.deployHoldLater != nil && f.deployHoldReads > 1 {
+		return *f.deployHoldLater, f.deployHoldErr
 	}
-	return hold, f.rolloutHoldErr
+	return f.deployHold, f.deployHoldErr
 }
 
 func (f *fakeDB) MergeQueuePaused(_ context.Context, repo wsm.RepoKey) (bool, error) {
@@ -952,9 +971,9 @@ type fakeGit struct {
 	commonDirs    map[string]string
 	// commonDirErr, when set, fails every CommonDir.
 	commonDirErr error
-	sameRepo     bool
-	sameRepoErr  error
-	refs         map[string]string
+	// mainWorktreeErr, when set, fails every MainWorktree.
+	mainWorktreeErr error
+	refs            map[string]string
 	// refSeqs are ResolveRef answers scripted per ref, consumed in order with
 	// the last one standing.
 	refSeqs map[string][]string
@@ -1239,6 +1258,9 @@ func (g *fakeGit) MainWorktree(_ context.Context, dir string) (string, error) {
 	g.record("main_worktree")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.mainWorktreeErr != nil {
+		return "", g.mainWorktreeErr
+	}
 	if main, ok := g.mainWorktrees[dir]; ok {
 		return main, nil
 	}
@@ -1250,11 +1272,6 @@ func (g *fakeGit) MainWorktree(_ context.Context, dir string) (string, error) {
 func (g *fakeGit) RepositoryOf(_ context.Context, dir string) (string, bool, error) {
 	g.record("repository_of")
 	return dir, true, nil
-}
-
-func (g *fakeGit) SameRepo(context.Context, string, string) (bool, error) {
-	g.record("same_repo")
-	return g.sameRepo, g.sameRepoErr
 }
 
 func (g *fakeGit) MergeNoFF(_ context.Context, dir, _, _ string) (gitclient.MergeOutcome, error) {
@@ -2001,14 +2018,12 @@ func tabKindOf(tab *frontendv1.FeedMergeTab) string {
 	switch tab.GetKind().(type) {
 	case *frontendv1.FeedMergeTab_Queue:
 		return TabQueue
-	case *frontendv1.FeedMergeTab_PrePrompt:
-		return TabPrePrompt
+	case *frontendv1.FeedMergeTab_HookPrompt, *frontendv1.FeedMergeTab_HookScript:
+		return stageTabKind(tab.GetLabel().GetText())
 	case *frontendv1.FeedMergeTab_Rebasing:
 		return TabRebasing
 	case *frontendv1.FeedMergeTab_Committing:
 		return TabCommitting
-	case *frontendv1.FeedMergeTab_UpdatingMain:
-		return TabUpdatingMain
 	case *frontendv1.FeedMergeTab_RebaseCommit:
 		return rowRebaseCommit
 	case *frontendv1.FeedMergeTab_Tests:
@@ -2017,8 +2032,16 @@ func tabKindOf(tab *frontendv1.FeedMergeTab) string {
 		return rowTestsRun
 	case *frontendv1.FeedMergeTab_TestsRunFixing:
 		return rowTestsRunFixing
-	case *frontendv1.FeedMergeTab_PostPrompt:
-		return TabPostPrompt
+	}
+	return ""
+}
+
+// stageTabKind is the stage tab kind a hook tab's label words name.
+func stageTabKind(words string) string {
+	for _, kind := range []string{TabPreDeploy, TabDeploy, TabPostDeploy} {
+		if stageWords(kind) == words {
+			return kind
+		}
 	}
 	return ""
 }
@@ -2230,12 +2253,15 @@ type harness struct {
 	// briefs answers the brief loader; a name absent from it is a LOUD failure,
 	// exactly as a missing file is.
 	briefs map[string][]string
-	// policy is what the repository's own `.agent-repl/prompts` holds, by
-	// brief name; policyErr fails one brief's read even though it is present.
-	policy    map[string]string
-	policyErr map[string]error
+	// config is the repository's deploy config every read answers, and
+	// configErr fails the read instead. The default is a repository with no
+	// local merge and no hook: a deploy that runs nothing but its terminal.
+	config    *repoconfigv1.DeployConfig
+	configErr error
+	// hooks is the scripted hook runner, and every script hook it ran.
+	hooks *fakeHookRunner
 	// repoRoot is the harness repository's main checkout root, which is where
-	// its policy directory would live.
+	// its deploy config would live.
 	repoRoot string
 	// pauseAfterCapture stands in for the production-nil admission seam.
 	pauseAfterCapture AdmissionPause
@@ -2386,33 +2412,132 @@ const theWorkspace = ids.WorkspaceID("ws-1")
 // a workspace naming a repository the registry does not hold is a fault.
 const theRepository = ids.RepoID("repo-1")
 
-// harnessPolicy is the harness's policy probe: a repository states exactly the
-// briefs the harness put in `policy`, and nothing touches a disk.
-type harnessPolicy struct{ h *harness }
+// harnessConfig is the harness's deploy config reader: the repository states
+// exactly the config the harness holds, and nothing touches a disk.
+type harnessConfig struct{ h *harness }
 
-func (p harnessPolicy) Missing(_ string, names []string) []string {
-	p.h.mu.Lock()
-	defer p.h.mu.Unlock()
-	var missing []string
-	for _, name := range names {
-		if _, ok := p.h.policy[name]; !ok {
-			missing = append(missing, name+prompts.Suffix)
-		}
+func (c harnessConfig) Load(string) (*repoconfigv1.DeployConfig, error) {
+	c.h.mu.Lock()
+	defer c.h.mu.Unlock()
+	if c.h.configErr != nil {
+		return nil, c.h.configErr
 	}
-	return missing
+	return proto.Clone(c.h.config).(*repoconfigv1.DeployConfig), nil
 }
 
-func (p harnessPolicy) Text(_ string, name string) (string, error) {
-	p.h.mu.Lock()
-	defer p.h.mu.Unlock()
-	text, ok := p.h.policy[name]
-	if !ok {
-		return "", fmt.Errorf("no policy brief %q", name)
+// hookRun is one script hook the fake runner ran.
+type hookRun struct {
+	dir  string
+	argv []string
+	env  []string
+}
+
+// fakeHookRunner is the scripted runner of a deploy's script hooks. A script
+// answers the exit and the timeout scripted for its path (0 and no timeout
+// otherwise), and writes the lines scripted for it. A script whose path ends
+// in deploy-landing.sh does what agent-repl's deploy script does: it asks the
+// orchestrator for the rollout of the deploy its environment names.
+type fakeHookRunner struct {
+	mu       sync.Mutex
+	h        *harness
+	runs     []hookRun
+	exits    map[string]int
+	timeouts map[string]bool
+	lines    map[string][]string
+	err      error
+}
+
+func (f *fakeHookRunner) RunLinesWith(ctx context.Context, dir string, argv []string, opts scriptrunner.Options, onLine func(string)) (scriptrunner.Run, error) {
+	f.mu.Lock()
+	f.runs = append(f.runs, hookRun{dir: dir, argv: argv, env: opts.Env})
+	script := argv[len(argv)-1]
+	exit, timedOut, lines, err := f.exits[script], f.timeouts[script], f.lines[script], f.err
+	f.mu.Unlock()
+	if err != nil {
+		return scriptrunner.Run{}, err
 	}
-	if err := p.h.policyErr[name]; err != nil {
-		return "", err
+	for _, line := range lines {
+		if onLine != nil {
+			onLine(line)
+		}
 	}
-	return text, nil
+	if strings.HasSuffix(script, "deploy-landing.sh") {
+		ledger := ""
+		for _, kv := range opts.Env {
+			if v, ok := strings.CutPrefix(kv, EnvDeployLedger+"="); ok {
+				ledger = v
+			}
+		}
+		if _, err := f.h.o.RollOutLanding(ctx, ids.LeaseID(ledger)); err != nil {
+			return scriptrunner.Run{ExitCode: 1}, nil
+		}
+	}
+	if timedOut {
+		return scriptrunner.Run{ExitCode: -1, TimedOut: true}, nil
+	}
+	return scriptrunner.Run{ExitCode: exit}, nil
+}
+
+// ran answers the script hooks run so far.
+func (f *fakeHookRunner) ran() []hookRun {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]hookRun(nil), f.runs...)
+}
+
+// promptHookOf is a prompt hook of TEXT.
+func promptHookOf(text string) *repoconfigv1.DeployHook {
+	return deployconfig.PromptHook(text)
+}
+
+// scriptHookOf is a script hook of PATH bounded at 30 seconds.
+func scriptHookOf(path string) *repoconfigv1.DeployHook {
+	return deployconfig.ScriptHook(path, 30)
+}
+
+// entryOf is a hook entry running for every target.
+func anyTarget(hook *repoconfigv1.DeployHook) *repoconfigv1.DeployHookEntry {
+	return &repoconfigv1.DeployHookEntry{Hook: hook, RunsFor: &repoconfigv1.DeployHookRunsFor{
+		Scope: &repoconfigv1.DeployHookRunsFor_AnyTarget{AnyTarget: &repoconfigv1.DeployHookRunsForAnyTarget{}}}}
+}
+
+// mainOnly is a hook entry running only for landings on the main branch.
+func mainOnly(hook *repoconfigv1.DeployHook) *repoconfigv1.DeployHookEntry {
+	return &repoconfigv1.DeployHookEntry{Hook: hook, RunsFor: &repoconfigv1.DeployHookRunsFor{
+		Scope: &repoconfigv1.DeployHookRunsFor_Main{Main: &repoconfigv1.DeployHookRunsForMain{}}}}
+}
+
+// localMergeConfig is agent-repl's own config without its deploy hook: the
+// local merge, tested by agent-repl's suites and tagged.
+func localMergeConfig() *repoconfigv1.DeployConfig {
+	return &repoconfigv1.DeployConfig{PreDeploy: &repoconfigv1.DeployPreDeployStage{LocalMerge: &repoconfigv1.DeployLocalMerge{
+		Tests:      &repoconfigv1.DeployLocalMergeTests{Kind: &repoconfigv1.DeployLocalMergeTests_AgentReplSuites{AgentReplSuites: &repoconfigv1.DeployTestsAgentReplSuites{ScriptPath: "modules/app/agent-repl/bin/test-all.sh"}}},
+		VersionTag: &repoconfigv1.DeployVersionTag{},
+	}}}
+}
+
+// deployScript is the path the harness's agent-repl config names for its
+// deploy hook.
+const deployScript = "modules/app/agent-repl/bin/deploy-landing.sh"
+
+// repoPreHooks makes the repository's config state these pre-deploy prompt
+// hooks, for every target.
+func (h *harness) repoPreHooks(texts ...string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, text := range texts {
+		h.config.PreDeploy.Hooks = append(h.config.PreDeploy.Hooks, anyTarget(promptHookOf(text)))
+	}
+}
+
+// repoPostHooks makes the repository's config state these post-deploy prompt
+// hooks, for every target.
+func (h *harness) repoPostHooks(texts ...string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, text := range texts {
+		h.config.PostDeploy = append(h.config.PostDeploy, anyTarget(promptHookOf(text)))
+	}
 }
 
 // newHarness builds an orchestrator whose admission is driven a step at a time,
@@ -2427,22 +2552,22 @@ var asyncSource = wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: asyncBran
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
-		t:         t,
-		asks:      NewAsks(),
-		db:        newFakeDB(),
-		footer:    &fakeFooter{},
-		sidebar:   &fakeSidebar{},
-		runner:    &fakeRunner{},
-		logs:      dlog.NewTestSurfaces(),
-		stateDir:  t.TempDir(),
-		now:       time.Unix(1700000000, 0).UTC(),
-		briefs:    map[string][]string{},
-		policy:    map[string]string{},
-		policyErr: map[string]error{},
-		freeness:  &fakeFreeness{},
-		timings:   &fakeTimings{},
+		t:        t,
+		asks:     NewAsks(),
+		db:       newFakeDB(),
+		footer:   &fakeFooter{},
+		sidebar:  &fakeSidebar{},
+		runner:   &fakeRunner{},
+		logs:     dlog.NewTestSurfaces(),
+		stateDir: t.TempDir(),
+		now:      time.Unix(1700000000, 0).UTC(),
+		briefs:   map[string][]string{},
+		config:   &repoconfigv1.DeployConfig{PreDeploy: &repoconfigv1.DeployPreDeployStage{}},
+		freeness: &fakeFreeness{},
+		timings:  &fakeTimings{},
 	}
 	h.detached = &fakeDetached{h: h}
+	h.hooks = &fakeHookRunner{h: h, exits: map[string]int{}, timeouts: map[string]bool{}, lines: map[string][]string{}}
 	h.events = &fakeQueueEvents{}
 	h.names = &fakeNames{}
 	h.banners = &fakeBanners{told: func() int { return len(h.detached.sent()) }}
@@ -2504,11 +2629,11 @@ func (h *harness) deps() Deps {
 		QueueEvents: h.events,
 		DB:          h.db, Git: h.git, Queue: h.queue, Feed: h.feed, Footer: h.footer,
 		Sidebar: h.sidebar, Asks: h.asks, Banners: h.banners, PromptsDir: "prompts",
-		Policy:      harnessPolicy{h: h},
-		Briefs:      h.loadBrief,
-		SelfRepoDir: "/self/checkout",
-		StateDir:    h.stateDir,
-		TestCommand: func(tree string) []string {
+		DeployConfig: harnessConfig{h: h},
+		HookRunner:   h.hooks,
+		Briefs:       h.loadBrief,
+		StateDir:     h.stateDir,
+		TestCommand: func(tree, _ string) []string {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			h.gateTrees = append(h.gateTrees, tree)
@@ -2702,18 +2827,23 @@ func (h *harness) admit(ctx context.Context) error {
 	return err
 }
 
-// emacsRepo makes the harness's target this daemon's OWN repository, which is
-// what selects the merge-commit method.
+// emacsRepo makes the harness's repository's config agent-repl's own without
+// its deploy hook: a local merge, tested and tagged, which is what selects the
+// merge-commit method.
 func (h *harness) emacsRepo() {
-	h.git.sameRepo = true
+	h.mu.Lock()
+	h.config = localMergeConfig()
+	h.mu.Unlock()
 	h.git.commonDirs[h.targetD] = string(h.repoKey())
 }
 
-// ownCheckout makes the target the daemon's own checkout rather than a sibling
-// worktree of it, which is the extra condition the self-reload requires.
+// ownCheckout makes the config agent-repl's own whole: the local merge and its
+// deploy script, which asks for the runtime's rollout of a landing on main.
 func (h *harness) ownCheckout() {
 	h.emacsRepo()
-	h.o.deps.SelfRepoDir = h.targetD
+	h.mu.Lock()
+	h.config.Deploy = mainOnly(scriptHookOf(deployScript))
+	h.mu.Unlock()
 }
 
 // mergeConflicted scripts a no-ff merge that stopped on conflicts.
@@ -2721,12 +2851,19 @@ func mergeConflicted(files ...string) gitclient.MergeOutcome {
 	return gitclient.MergeOutcome{Conflicted: files}
 }
 
-// configureActions records the workspace's configured before/after prompts.
-func (h *harness) configureActions(before, after []string) {
+// configurePromptHooks records the workspace's creation hooks: pre- and post-deploy prompts.
+func (h *harness) configurePromptHooks(before, after []string) {
 	h.db.mu.Lock()
 	defer h.db.mu.Unlock()
 	job := h.db.jobs[theWorkspace]
-	job.Actions = wsm.MergeActions{Before: before, After: after}
+	hooks := wsm.DeployHooks{}
+	for _, text := range before {
+		hooks.PreDeploy = append(hooks.PreDeploy, promptHookOf(text))
+	}
+	for _, text := range after {
+		hooks.PostDeploy = append(hooks.PostDeploy, promptHookOf(text))
+	}
+	job.Hooks = hooks
 	h.db.jobs[theWorkspace] = job
 }
 

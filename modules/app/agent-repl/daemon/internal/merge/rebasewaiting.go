@@ -99,7 +99,7 @@ func (o *orchestrator) rebaseWaitingPass(ctx context.Context, repo wsm.RepoKey) 
 		if o.isDraining() {
 			return
 		}
-		if entry.State != wsm.MergeQueued || entry.Source.Kind == wsm.MergeSourceMergedUpstream {
+		if entry.State != wsm.MergeQueued {
 			continue
 		}
 		o.rebaseWaitingMember(ctx, repo, entry)

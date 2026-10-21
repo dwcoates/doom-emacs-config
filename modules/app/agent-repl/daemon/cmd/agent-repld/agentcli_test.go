@@ -27,7 +27,7 @@ type cliClient struct {
 	err      error
 	status   *agentreplv1.GetWorkspaceStatusResponse
 	create   *agentreplv1.CreateWorkspaceResponse
-	merge    *agentreplv1.MergeWorkspaceResponse
+	finish   *agentreplv1.FinishWorkspaceResponse
 }
 
 func (c *cliClient) record(req proto.Message) error {
@@ -45,14 +45,14 @@ func (c *cliClient) CreateWorkspace(_ context.Context, req *connect.Request[agen
 	return connect.NewResponse(&agentreplv1.CreateWorkspaceResponse{Result: &agentreplv1.CreateWorkspaceResponse_Success{Success: &agentreplv1.CreateWorkspaceSuccess{}}}), nil
 }
 
-func (c *cliClient) MergeWorkspace(_ context.Context, req *connect.Request[agentreplv1.MergeWorkspaceRequest]) (*connect.Response[agentreplv1.MergeWorkspaceResponse], error) {
+func (c *cliClient) FinishWorkspace(_ context.Context, req *connect.Request[agentreplv1.FinishWorkspaceRequest]) (*connect.Response[agentreplv1.FinishWorkspaceResponse], error) {
 	if err := c.record(req.Msg); err != nil {
 		return nil, err
 	}
-	if c.merge != nil {
-		return connect.NewResponse(c.merge), nil
+	if c.finish != nil {
+		return connect.NewResponse(c.finish), nil
 	}
-	return connect.NewResponse(&agentreplv1.MergeWorkspaceResponse{Result: &agentreplv1.MergeWorkspaceResponse_Success{Success: &agentreplv1.MergeWorkspaceSuccess{}}}), nil
+	return connect.NewResponse(&agentreplv1.FinishWorkspaceResponse{Result: &agentreplv1.FinishWorkspaceResponse_Success{Success: &agentreplv1.FinishWorkspaceSuccess{}}}), nil
 }
 
 func (c *cliClient) GetWorkspaceStatus(_ context.Context, req *connect.Request[agentreplv1.GetWorkspaceStatusRequest]) (*connect.Response[agentreplv1.GetWorkspaceStatusResponse], error) {
@@ -110,8 +110,12 @@ func (c *cliClient) EvaluateInEditor(_ context.Context, req *connect.Request[age
 	return connect.NewResponse(&agentreplv1.EvaluateInEditorResponse{}), c.record(req.Msg)
 }
 
-func (c *cliClient) UpdateRollouts(_ context.Context, req *connect.Request[agentreplv1.UpdateRolloutsRequest]) (*connect.Response[agentreplv1.UpdateRolloutsResponse], error) {
-	return connect.NewResponse(&agentreplv1.UpdateRolloutsResponse{}), c.record(req.Msg)
+func (c *cliClient) UpdateDeployHold(_ context.Context, req *connect.Request[agentreplv1.UpdateDeployHoldRequest]) (*connect.Response[agentreplv1.UpdateDeployHoldResponse], error) {
+	return connect.NewResponse(&agentreplv1.UpdateDeployHoldResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) RollOutLanding(_ context.Context, req *connect.Request[agentreplv1.RollOutLandingRequest]) (*connect.Response[agentreplv1.RollOutLandingResponse], error) {
+	return connect.NewResponse(&agentreplv1.RollOutLandingResponse{}), c.record(req.Msg)
 }
 
 func (c *cliClient) UpdateMergeQueue(_ context.Context, req *connect.Request[agentreplv1.UpdateMergeQueueRequest]) (*connect.Response[agentreplv1.UpdateMergeQueueResponse], error) {
@@ -279,7 +283,7 @@ func TestACommandOutsideAnyWorkspaceIsRefusedUnlessTheUserAsks(t *testing.T) {
 			// Arrange
 			f := newCLIFixture()
 			f.cwd = "/elsewhere"
-			args := []string{"merge", "peer", "-placement", "back"}
+			args := []string{"finished", "peer", "-placement", "back"}
 			if tt.asUser {
 				args = append(args, "-as-user")
 			}
@@ -291,8 +295,8 @@ func TestACommandOutsideAnyWorkspaceIsRefusedUnlessTheUserAsks(t *testing.T) {
 			if code != tt.want {
 				t.Fatalf("exit %d, stderr %q; want %d", code, f.errOut.String(), tt.want)
 			}
-			if tt.asUser && only[*agentreplv1.MergeWorkspaceRequest](t, f).GetRequester().GetUser() == nil {
-				t.Error("the merge was not asked as the user")
+			if tt.asUser && only[*agentreplv1.FinishWorkspaceRequest](t, f).GetRequester().GetUser() == nil {
+				t.Error("the deploy was not asked as the user")
 			}
 		})
 	}
@@ -330,7 +334,7 @@ func TestAWorkspaceIsNamedByNameDirectoryOrHere(t *testing.T) {
 	}
 }
 
-func TestMergeNamesItsPlacement(t *testing.T) {
+func TestFinishedNamesItsPlacement(t *testing.T) {
 	tests := []struct {
 		name  string
 		args  []string
@@ -346,14 +350,14 @@ func TestMergeNamesItsPlacement(t *testing.T) {
 			f := newCLIFixture()
 
 			// Act
-			code := f.run(workspaceNoun, append([]string{"merge"}, tt.args...)...)
+			code := f.run(workspaceNoun, append([]string{"finished"}, tt.args...)...)
 
 			// Assert
 			if code != tt.code {
 				t.Fatalf("exit %d, stderr %q; want %d", code, f.errOut.String(), tt.code)
 			}
-			if tt.front && only[*agentreplv1.MergeWorkspaceRequest](t, f).GetPlacement().GetFront() == nil {
-				t.Error("the merge was not placed at the front")
+			if tt.front && only[*agentreplv1.FinishWorkspaceRequest](t, f).GetPlacement().GetFront() == nil {
+				t.Error("the deploy was not placed at the front")
 			}
 		})
 	}
@@ -366,7 +370,7 @@ func TestARefusedAnswerExitsRefusedAndAFailedCallFails(t *testing.T) {
 		want int
 	}{
 		{name: "a refusal", edit: func(c *cliClient) {
-			c.merge = &agentreplv1.MergeWorkspaceResponse{Result: &agentreplv1.MergeWorkspaceResponse_Error{Error: &agentreplv1.MergeWorkspaceError{}}}
+			c.finish = &agentreplv1.FinishWorkspaceResponse{Result: &agentreplv1.FinishWorkspaceResponse_Error{Error: &agentreplv1.FinishWorkspaceError{}}}
 		}, want: exitRefused},
 		{name: "a failed call", edit: func(c *cliClient) { c.err = errors.New("unavailable") }, want: exitFailure},
 	}
@@ -377,7 +381,7 @@ func TestARefusedAnswerExitsRefusedAndAFailedCallFails(t *testing.T) {
 			tt.edit(f.client)
 
 			// Act
-			code := f.run(workspaceNoun, "merge", "here", "-placement", "back")
+			code := f.run(workspaceNoun, "finished", "here", "-placement", "back")
 
 			// Assert
 			if code != tt.want {
@@ -552,26 +556,127 @@ func TestEvalDefaultsToTheCallingWorkspacesBuffer(t *testing.T) {
 	}
 }
 
-func TestRolloutsHoldOrRelease(t *testing.T) {
+func TestDeployHoldHoldsOrReleasesTheNamedRepository(t *testing.T) {
 	tests := []struct {
-		arg  string
-		code int
+		name    string
+		args    []string
+		code    int
+		release bool
 	}{
-		{arg: "hold", code: exitSuccess},
-		{arg: "release", code: exitSuccess},
-		{arg: "pause", code: exitFailure},
+		{name: "hold", args: []string{"hold", "-repository", "here"}, code: exitSuccess},
+		{name: "release", args: []string{"release", "-repository", "here"}, code: exitSuccess, release: true},
+		{name: "an unknown action", args: []string{"pause", "-repository", "here"}, code: exitFailure},
+		{name: "no repository", args: []string{"hold"}, code: exitFailure},
 	}
 	for _, tt := range tests {
-		t.Run(tt.arg, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newCLIFixture()
 
 			// Act
-			code := f.run(runtimeNoun, "rollouts", tt.arg)
+			code := f.run(runtimeNoun, append([]string{"deploy-hold"}, tt.args...)...)
 
 			// Assert
 			if code != tt.code {
 				t.Fatalf("exit %d, stderr %q; want %d", code, f.errOut.String(), tt.code)
+			}
+			if tt.code != exitSuccess {
+				return
+			}
+			req := only[*agentreplv1.UpdateDeployHoldRequest](t, f)
+			if req.GetRepository().GetId() != "repo-1" || (req.GetRelease() != nil) != tt.release {
+				t.Fatalf("request = %v, want the caller's repository, release %v", req, tt.release)
+			}
+		})
+	}
+}
+
+func TestRollOutLandingNamesItsDeployWhenGivenOne(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "a deploy's ledger", args: []string{"-deploy", "0011aabb"}, want: "0011aabb"},
+		{name: "no deploy", args: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(runtimeNoun, append([]string{"roll-out-landing"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			req := only[*agentreplv1.RollOutLandingRequest](t, f)
+			if (req.GetDeploy() != nil) != (tt.want != "") || req.GetDeploy().GetLedger() != tt.want {
+				t.Fatalf("request = %v, want deploy %q", req, tt.want)
+			}
+		})
+	}
+}
+
+func TestRollOutLandingRefusesAPositional(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(runtimeNoun, "roll-out-landing", "extra")
+
+	// Assert
+	if code != exitFailure || len(f.client.requests) != 0 {
+		t.Fatalf("exit %d with %d request(s), want a usage failure and none", code, len(f.client.requests))
+	}
+}
+
+func TestCreateSendsItsDeployHooksInOrder(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "primary", "-context", "fresh",
+		"-pre-deploy-prompt", "lint it", "-pre-deploy-script", "bin/check.sh:30", "-post-deploy-prompt", "announce it")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+	}
+	hooks := only[*agentreplv1.CreateWorkspaceRequest](t, f).GetStandard().GetDeployHooks()
+	pre, post := hooks.GetPreDeploy(), hooks.GetPostDeploy()
+	if len(pre) != 2 || pre[0].GetPrompt().GetText() != "lint it" || pre[1].GetScript().GetPath() != "bin/check.sh" || pre[1].GetScript().GetTimeoutSeconds() != 30 {
+		t.Fatalf("pre-deploy hooks = %v, want the prompt then the script", pre)
+	}
+	if len(post) != 1 || post[0].GetPrompt().GetText() != "announce it" {
+		t.Fatalf("post-deploy hooks = %v, want the prompt", post)
+	}
+}
+
+func TestAMalformedHookFlagIsAUsageFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		flag []string
+	}{
+		{name: "a script with no timeout", flag: []string{"-pre-deploy-script", "bin/check.sh"}},
+		{name: "a script with a zero timeout", flag: []string{"-post-deploy-script", "bin/check.sh:0"}},
+		{name: "a script with no path", flag: []string{"-pre-deploy-script", ":30"}},
+		{name: "a blank prompt", flag: []string{"-post-deploy-prompt", "  "}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			args := append([]string{"create", "-repository", "here", "-topology", "primary", "-context", "fresh"}, tt.flag...)
+
+			// Act
+			code := f.run(workspaceNoun, args...)
+
+			// Assert
+			if code != exitFailure || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d with %d request(s), want a usage failure and none", code, len(f.client.requests))
 			}
 		})
 	}

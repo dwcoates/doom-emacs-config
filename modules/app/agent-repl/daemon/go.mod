@@ -11,6 +11,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.23.2
+	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/net v0.43.0
 	golang.org/x/sys v0.37.0
 	golang.org/x/text v0.28.0

@@ -890,7 +890,9 @@ func TestChainKind(t *testing.T) {
 		additiveOnly bool
 	}{
 		{name: "the dropped traffic step alone is breaking", from: stepNamed(t, "agent_repl_session_drop_traffic") - 1, want: MigrationBreaking},
-		{name: "the additive step after the dropped traffic is additive", from: stepNamed(t, "agent_repl_session_drop_traffic"), want: MigrationAdditive},
+		{name: "the additive steps after the dropped traffic are additive", from: stepNamed(t, "agent_repl_session_drop_traffic"), want: MigrationAdditive, additiveOnly: true},
+		{name: "the deploy hooks step alone is breaking", from: stepNamed(t, "deploy_hooks") - 1, want: MigrationBreaking},
+		{name: "a chain through the deploy holds crosses the deploy hooks", from: stepNamed(t, "deploy_holds") - 1, want: MigrationBreaking},
 		{name: "a chain through the dropped column is breaking", from: 5, want: MigrationBreaking},
 		{name: "a chain past the dropped column still crosses the dropped traffic", from: 6, want: MigrationBreaking},
 		{name: "a chain of additive steps alone is additive", from: 6, want: MigrationAdditive, additiveOnly: true},
@@ -934,7 +936,10 @@ func TestMigrationKindString(t *testing.T) {
 }
 
 func TestOpenJoiningCarriesAnAdditiveChainForward(t *testing.T) {
-	// Arrange
+	// Arrange: the real list ends in a breaking step (deploy_hooks renames the
+	// columns the previous build writes), so the join is run over it with the
+	// breaking steps marked additive, which is the chain a join takes.
+	markBreakingStepsAdditive(t)
 	path := fixtureAt(t, LayoutVersion-1)
 
 	// Act
@@ -1055,7 +1060,9 @@ func TestOpenJoiningRefusesAMissingFile(t *testing.T) {
 // older layout -- the incumbent's -- still reads and writes through its own
 // statements after the joining successor carried the file forward.
 func TestAnIncumbentHandleKeepsWritingAcrossTheJoiningMigration(t *testing.T) {
-	// Arrange
+	// Arrange: as in TestOpenJoiningCarriesAnAdditiveChainForward, over the
+	// real steps with the breaking ones marked additive.
+	markBreakingStepsAdditive(t)
 	path := fixtureAt(t, LayoutVersion-1)
 	incumbent, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(OFF)")
 	if err != nil {

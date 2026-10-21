@@ -3,65 +3,35 @@ package wsm
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
-	"fmt"
 
 	"agent-repld/internal/dlog"
 )
 
-// encodeActions renders a merge action list as the JSON array the column holds.
-// An absent list and an empty one are both stored as "[]", so a decode never
-// has to guess.
-func encodeActions(names []string) (string, error) {
-	if names == nil {
-		names = []string{}
-	}
-	out, err := json.Marshal(names)
-	if err != nil {
-		return "", fmt.Errorf("wsm: encode merge actions: %w", err)
-	}
-	return string(out), nil
-}
-
-// decodeActions parses one stored action list of TABLE's, failing the whole
-// read when the column is not a JSON array of names.
-func decodeActions(table, row, field, raw string) ([]string, error) {
-	var names []string
-	if err := json.Unmarshal([]byte(raw), &names); err != nil {
-		return nil, &DecodeError{Table: table, Row: row, Field: field, Err: err}
-	}
-	// An empty list is no list, the same as encodeActions stores it.
-	if len(names) == 0 {
-		return nil, nil
-	}
-	return names, nil
-}
-
-// PutCreationJob records a workspace's merge geometry, configured actions and
+// PutCreationJob records a workspace's merge geometry, deploy hooks and
 // materialization state. It replaces the workspace's job wholesale: the record
 // is current state, never an append-only history.
 func (s *store) PutCreationJob(ctx context.Context, job CreationJob) error {
 	const op = "daemon.wsm.put_creation_job"
 	fields := dlog.Context{"workspace": string(job.Workspace), "materialized": job.Materialized, "one_shot": job.OneShot}
-	before, err := encodeActions(job.Actions.Before)
+	before, err := encodeHooks(job.Hooks.PreDeploy)
 	if err != nil {
-		s.log.Error(op, "refused unencodable before-merge actions", withError(fields, err))
+		s.log.Error(op, "refused unencodable pre-deploy hooks", withError(fields, err))
 		return err
 	}
-	after, err := encodeActions(job.Actions.After)
+	after, err := encodeHooks(job.Hooks.PostDeploy)
 	if err != nil {
-		s.log.Error(op, "refused unencodable after-merge actions", withError(fields, err))
+		s.log.Error(op, "refused unencodable post-deploy hooks", withError(fields, err))
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, actions_before, actions_after,
+			`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, pre_deploy_hooks, post_deploy_hooks,
 			   base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(workspace_id) DO UPDATE SET
 			   source_branch = excluded.source_branch, source_dir = excluded.source_dir, target_dir = excluded.target_dir,
-			   layout_origin = excluded.layout_origin, actions_before = excluded.actions_before, actions_after = excluded.actions_after,
+			   layout_origin = excluded.layout_origin, pre_deploy_hooks = excluded.pre_deploy_hooks, post_deploy_hooks = excluded.post_deploy_hooks,
 			   base_ref = excluded.base_ref, materialized = excluded.materialized, one_shot = excluded.one_shot,
 			   initial_prompt = excluded.initial_prompt, consented_ungated_mode = excluded.consented_ungated_mode,
 			   created_at = excluded.created_at`,
@@ -86,7 +56,7 @@ func (s *store) CreationJob(ctx context.Context, id WorkspaceID) (CreationJob, b
 			created       int64
 		)
 		row := s.db().QueryRowContext(ctx,
-			`SELECT workspace_id, source_branch, source_dir, target_dir, layout_origin, actions_before, actions_after,
+			`SELECT workspace_id, source_branch, source_dir, target_dir, layout_origin, pre_deploy_hooks, post_deploy_hooks,
 			        base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at
 			 FROM creation_jobs WHERE workspace_id = ?`, id)
 		err := row.Scan(&job.Workspace, &job.Layout.SourceBranch, &job.Layout.SourceDir, &job.Layout.TargetDir, &job.Layout.Origin,
@@ -98,10 +68,10 @@ func (s *store) CreationJob(ctx context.Context, id WorkspaceID) (CreationJob, b
 		if err != nil {
 			return err
 		}
-		if job.Actions.Before, err = decodeActions("creation_jobs", string(id), "actions_before", before); err != nil {
+		if job.Hooks.PreDeploy, err = decodeHooks("creation_jobs", string(id), "pre_deploy_hooks", before); err != nil {
 			return err
 		}
-		if job.Actions.After, err = decodeActions("creation_jobs", string(id), "actions_after", after); err != nil {
+		if job.Hooks.PostDeploy, err = decodeHooks("creation_jobs", string(id), "post_deploy_hooks", after); err != nil {
 			return err
 		}
 		job.CreatedAt = fromNanos(created)

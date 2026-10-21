@@ -262,11 +262,11 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		return wsm.Workspace{}, err
 	}
 
-	// A MERGE WORKSPACE RUNS ONLY THE ACTIONS ITS REQUEST NAMED (owner
+	// A MERGE WORKSPACE RUNS ONLY THE HOOKS ITS REQUEST NAMED (owner
 	// ruling): never its requester's configured ones.
-	targetDir, actions, parentBranch := "", spec.MergeActions, baseRef
+	targetDir, actions, parentBranch := "", spec.DeployHooks, baseRef
 	if origin != nil {
-		targetDir, actions, parentBranch = origin.TargetDir, origin.Actions, origin.ParentBranch
+		targetDir, actions, parentBranch = origin.TargetDir, origin.Hooks, origin.ParentBranch
 	} else {
 		targetDir, err = v.mergeTargetDir(ctx, repoDir, parent)
 		if err != nil {
@@ -290,7 +290,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 			TargetDir:    targetDir,
 			Origin:       jobOrigin,
 		},
-		Actions:              actions,
+		Hooks:                actions,
 		BaseRef:              baseRef,
 		Materialized:         false,
 		OneShot:              spec.OneShot,

@@ -36,7 +36,6 @@
 //	AGENT_REPL_STORE_SOCKET               the store socket a flag beats
 //	MULTI_REPO_ROOT                       the tree whose workspaces use the multi-repo account
 //	AGENT_REPL_LOCK_DIR                   redirects ~/.cache/agent-repl/run for the kernel locks
-//	AGENT_REPL_SELF_REPO_DIR              the daemon's own-checkout identity for the merge split
 //	AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS   compresses the idle cutoff
 //	AGENT_REPL_BROWSER_CMD                the external browser launcher for OpenExternal
 //	AGENT_REPL_NOTIFIER_CMD               the desktop banner program (a recorder)

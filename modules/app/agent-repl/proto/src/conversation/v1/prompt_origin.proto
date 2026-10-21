@@ -45,7 +45,13 @@ enum PromptOrigin {
   PROMPT_ORIGIN_WORKSPACE_CREATED = 21;
   PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR = 22;
   PROMPT_ORIGIN_MERGE_TEST_REPAIR = 23;
+  // A deploy's `pre_deploy` prompt hook (repoconfig.v1.DeployPreDeployStage
+  // hooks, or a request's own before prompts), run as a turn of the deploy's
+  // owner.
   PROMPT_ORIGIN_MERGE_BEFORE_ACTION = 24;
+  // A deploy's `post_deploy` prompt hook (repoconfig.v1.DeployConfig
+  // post_deploy, or a request's own after prompts), run as a turn of the
+  // deploy's owner.
   PROMPT_ORIGIN_MERGE_AFTER_ACTION = 25;
   PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME = 26;
 
@@ -198,4 +204,9 @@ enum PromptOrigin {
   // The compaction CompactWorkspace submitted. Waits behind a running turn
   // like any deferred prompt; drawn as the context cut it produces.
   PROMPT_ORIGIN_WORKSPACE_COMPACT = 42;
+  // A deploy's `deploy` stage prompt hook (repoconfig.v1.DeployConfig.deploy),
+  // run as a turn of the deploy's owner. Drawn, like the other two hook
+  // origins, inside the deploy bubble's hook tab rather than as a prompt the
+  // user said.
+  PROMPT_ORIGIN_DEPLOY_HOOK = 43;
 }

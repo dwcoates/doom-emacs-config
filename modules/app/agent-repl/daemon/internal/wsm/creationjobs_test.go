@@ -1,6 +1,8 @@
 package wsm
 
 import (
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
+
 	"context"
 	"errors"
 	"testing"
@@ -13,7 +15,7 @@ func TestPutCreationJobRoundTripsTheMergeGeometry(t *testing.T) {
 	job := CreationJob{
 		Workspace:            ws.ID,
 		Layout:               MergeLayout{SourceBranch: "feature", SourceDir: "/src", TargetDir: "/target", Origin: "create"},
-		Actions:              MergeActions{Before: []string{"pre"}, After: []string{"post", "notify"}},
+		Hooks:                DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHook("pre")}, PostDeploy: []*repoconfigv1.DeployHook{promptHook("post"), scriptHook("bin/notify.sh", 5)}},
 		BaseRef:              "master",
 		Materialized:         true,
 		OneShot:              true,
@@ -46,14 +48,14 @@ func TestPutCreationJobRoundTripsTheMergeGeometry(t *testing.T) {
 	}
 }
 
-func TestPutCreationJobRoundTripsTheConfiguredActions(t *testing.T) {
+func TestPutCreationJobRoundTripsTheDeployHooks(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	actions := MergeActions{Before: []string{"a", "b"}, After: []string{"c"}}
+	hooks := DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHook("a"), scriptHook("bin/b.sh", 9)}, PostDeploy: []*repoconfigv1.DeployHook{promptHook("c")}}
 
 	// Act
-	if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: ws.ID, Actions: actions, CreatedAt: instant}); err != nil {
+	if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: ws.ID, Hooks: hooks, CreatedAt: instant}); err != nil {
 		t.Fatalf("PutCreationJob: %v", err)
 	}
 	got, _, err := s.CreationJob(context.Background(), ws.ID)
@@ -62,8 +64,8 @@ func TestPutCreationJobRoundTripsTheConfiguredActions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreationJob: %v", err)
 	}
-	if len(got.Actions.Before) != 2 || got.Actions.Before[1] != "b" || len(got.Actions.After) != 1 {
-		t.Fatalf("actions = %+v, want %+v", got.Actions, actions)
+	if !got.Hooks.Equal(hooks) {
+		t.Fatalf("hooks = %+v, want %+v", got.Hooks, hooks)
 	}
 }
 
@@ -131,15 +133,15 @@ func TestCreationJobFailsWholeOnACorruptActionList(t *testing.T) {
 	if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: ws.ID, CreatedAt: instant}); err != nil {
 		t.Fatalf("PutCreationJob: %v", err)
 	}
-	corrupt(t, s, `UPDATE creation_jobs SET actions_before = 'not json' WHERE workspace_id = ?`, ws.ID)
+	corrupt(t, s, `UPDATE creation_jobs SET pre_deploy_hooks = 'not json' WHERE workspace_id = ?`, ws.ID)
 
 	// Act
 	_, found, err := s.CreationJob(context.Background(), ws.ID)
 
 	// Assert
 	var refusal *DecodeError
-	if !errors.As(err, &refusal) || refusal.Table != "creation_jobs" || refusal.Field != "actions_before" {
-		t.Fatalf("CreationJob = %v, want a *DecodeError naming creation_jobs.actions_before", err)
+	if !errors.As(err, &refusal) || refusal.Table != "creation_jobs" || refusal.Field != "pre_deploy_hooks" {
+		t.Fatalf("CreationJob = %v, want a *DecodeError naming creation_jobs.pre_deploy_hooks", err)
 	}
 	if found {
 		t.Fatalf("found = true alongside the refusal")

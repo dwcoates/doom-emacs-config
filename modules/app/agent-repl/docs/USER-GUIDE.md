@@ -192,11 +192,12 @@ Two marks an agent sets on its own workspace show on every surface:
     - A one-shot that fails leaves your workspace open, and the agent is told why.
   - An async merge lands a named branch in a hidden merge workspace forked from yours, and your workspace stays free; the agent is told how it ended.
   - "Sync" and "in place" mean the same thing, and so do "async" and "detached".
-- **An agent merges its own workspace (`agent-repld workspace merge here`, through `/agent-repl-merge-queue`) only when your workspace is done once the merge lands.**
+- **An agent finishes its own workspace (`agent-repld workspace finished here`, through `/agent-repl-merge-queue`) only when your workspace is done once it deploys.**
+  - What finishing does is the repository's own `.agent-repl/deploy.yaml`: for agent-repl, the branch lands on master and the runtime rolls out. A repository without the file refuses it (see `/agent-repl-workspaces`).
   - The workspace is marked a one-shot at once, so its tab and its sidebar row show the one-shot mark (a red-and-white target) while the agent keeps working.
   - When the turn ends, the workspace's branch merges in place, and the workspace closes once the merge lands.
   - Work left uncommitted when the turn ends fails the merge, and the workspace stays open.
-  - `SPC TAB M` and the sidebar's Merge are the same one-shot.
+  - `SPC TAB M` and the sidebar's Finish are the same.
   - The main workspace (the repository's own checkout) never one-shots.
 - **Every other merge is an async merge (`agent-repld workspace async-merge -name <name> -branch <branch>`).**
   - It is for a fix beside the point of what remains, an attempt landed so you can test it on master, or the main workspace landing its subagents' branches.

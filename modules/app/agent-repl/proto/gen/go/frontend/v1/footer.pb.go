@@ -4033,14 +4033,14 @@ type FooterStatusMerging struct {
 	// Types that are valid to be assigned to Substatus:
 	//
 	//	*FooterStatusMerging_Enqueued
-	//	*FooterStatusMerging_Preprocessing
+	//	*FooterStatusMerging_PreDeploy
 	//	*FooterStatusMerging_Rebasing
 	//	*FooterStatusMerging_ConflictResolution
 	//	*FooterStatusMerging_Testing
 	//	*FooterStatusMerging_Fixing
 	//	*FooterStatusMerging_Committing
-	//	*FooterStatusMerging_UpdatingMain
-	//	*FooterStatusMerging_Postprocessing
+	//	*FooterStatusMerging_Deploying
+	//	*FooterStatusMerging_PostDeploy
 	//	*FooterStatusMerging_WaitingOnUser
 	//	*FooterStatusMerging_AwaitingFree
 	Substatus isFooterStatusMerging_Substatus `protobuf_oneof:"substatus"`
@@ -4097,10 +4097,10 @@ func (x *FooterStatusMerging) GetEnqueued() *FooterSubStatusMergingEnqueued {
 	return nil
 }
 
-func (x *FooterStatusMerging) GetPreprocessing() *FooterSubStatusMergingPreprocessing {
+func (x *FooterStatusMerging) GetPreDeploy() *FooterSubStatusMergingPreDeploy {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusMerging_Preprocessing); ok {
-			return x.Preprocessing
+		if x, ok := x.Substatus.(*FooterStatusMerging_PreDeploy); ok {
+			return x.PreDeploy
 		}
 	}
 	return nil
@@ -4151,19 +4151,19 @@ func (x *FooterStatusMerging) GetCommitting() *FooterSubStatusMergingCommitting 
 	return nil
 }
 
-func (x *FooterStatusMerging) GetUpdatingMain() *FooterSubStatusMergingUpdatingMain {
+func (x *FooterStatusMerging) GetDeploying() *FooterSubStatusMergingDeploying {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusMerging_UpdatingMain); ok {
-			return x.UpdatingMain
+		if x, ok := x.Substatus.(*FooterStatusMerging_Deploying); ok {
+			return x.Deploying
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusMerging) GetPostprocessing() *FooterSubStatusMergingPostprocessing {
+func (x *FooterStatusMerging) GetPostDeploy() *FooterSubStatusMergingPostDeploy {
 	if x != nil {
-		if x, ok := x.Substatus.(*FooterStatusMerging_Postprocessing); ok {
-			return x.Postprocessing
+		if x, ok := x.Substatus.(*FooterStatusMerging_PostDeploy); ok {
+			return x.PostDeploy
 		}
 	}
 	return nil
@@ -4203,9 +4203,9 @@ type FooterStatusMerging_Enqueued struct {
 	Enqueued *FooterSubStatusMergingEnqueued `protobuf:"bytes,13,opt,name=enqueued,proto3,oneof"`
 }
 
-type FooterStatusMerging_Preprocessing struct {
-	// The configured before-merge prompt is running.
-	Preprocessing *FooterSubStatusMergingPreprocessing `protobuf:"bytes,14,opt,name=preprocessing,proto3,oneof"`
+type FooterStatusMerging_PreDeploy struct {
+	// A `pre_deploy` hook is running.
+	PreDeploy *FooterSubStatusMergingPreDeploy `protobuf:"bytes,23,opt,name=pre_deploy,json=preDeploy,proto3,oneof"`
 }
 
 type FooterStatusMerging_Rebasing struct {
@@ -4233,15 +4233,14 @@ type FooterStatusMerging_Committing struct {
 	Committing *FooterSubStatusMergingCommitting `protobuf:"bytes,18,opt,name=committing,proto3,oneof"`
 }
 
-type FooterStatusMerging_UpdatingMain struct {
-	// A branch already merged upstream: the default branch in the
-	// repository's main worktree is being updated from upstream.
-	UpdatingMain *FooterSubStatusMergingUpdatingMain `protobuf:"bytes,19,opt,name=updating_main,json=updatingMain,proto3,oneof"`
+type FooterStatusMerging_Deploying struct {
+	// The repository's `deploy` hook is running.
+	Deploying *FooterSubStatusMergingDeploying `protobuf:"bytes,24,opt,name=deploying,proto3,oneof"`
 }
 
-type FooterStatusMerging_Postprocessing struct {
-	// The configured after-merge prompt is running.
-	Postprocessing *FooterSubStatusMergingPostprocessing `protobuf:"bytes,20,opt,name=postprocessing,proto3,oneof"`
+type FooterStatusMerging_PostDeploy struct {
+	// A `post_deploy` hook is running.
+	PostDeploy *FooterSubStatusMergingPostDeploy `protobuf:"bytes,25,opt,name=post_deploy,json=postDeploy,proto3,oneof"`
 }
 
 type FooterStatusMerging_WaitingOnUser struct {
@@ -4260,7 +4259,7 @@ type FooterStatusMerging_AwaitingFree struct {
 
 func (*FooterStatusMerging_Enqueued) isFooterStatusMerging_Substatus() {}
 
-func (*FooterStatusMerging_Preprocessing) isFooterStatusMerging_Substatus() {}
+func (*FooterStatusMerging_PreDeploy) isFooterStatusMerging_Substatus() {}
 
 func (*FooterStatusMerging_Rebasing) isFooterStatusMerging_Substatus() {}
 
@@ -4272,9 +4271,9 @@ func (*FooterStatusMerging_Fixing) isFooterStatusMerging_Substatus() {}
 
 func (*FooterStatusMerging_Committing) isFooterStatusMerging_Substatus() {}
 
-func (*FooterStatusMerging_UpdatingMain) isFooterStatusMerging_Substatus() {}
+func (*FooterStatusMerging_Deploying) isFooterStatusMerging_Substatus() {}
 
-func (*FooterStatusMerging_Postprocessing) isFooterStatusMerging_Substatus() {}
+func (*FooterStatusMerging_PostDeploy) isFooterStatusMerging_Substatus() {}
 
 func (*FooterStatusMerging_WaitingOnUser) isFooterStatusMerging_Substatus() {}
 
@@ -4440,27 +4439,27 @@ func (x *FooterSubStatusMergingEnqueued) GetWaiting() uint32 {
 	return 0
 }
 
-// The before-merge prompt is running, drawn "preprocessing".
-type FooterSubStatusMergingPreprocessing struct {
+// A `pre_deploy` hook is running, drawn "pre-deploy".
+type FooterSubStatusMergingPreDeploy struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusMergingPreprocessing) Reset() {
-	*x = FooterSubStatusMergingPreprocessing{}
+func (x *FooterSubStatusMergingPreDeploy) Reset() {
+	*x = FooterSubStatusMergingPreDeploy{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusMergingPreprocessing) String() string {
+func (x *FooterSubStatusMergingPreDeploy) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusMergingPreprocessing) ProtoMessage() {}
+func (*FooterSubStatusMergingPreDeploy) ProtoMessage() {}
 
-func (x *FooterSubStatusMergingPreprocessing) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusMergingPreDeploy) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4472,8 +4471,8 @@ func (x *FooterSubStatusMergingPreprocessing) ProtoReflect() protoreflect.Messag
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusMergingPreprocessing.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusMergingPreprocessing) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusMergingPreDeploy.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusMergingPreDeploy) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{54}
 }
 
@@ -4700,27 +4699,27 @@ func (*FooterSubStatusMergingCommitting) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{59}
 }
 
-// Updating the default branch from upstream, drawn "updating main".
-type FooterSubStatusMergingUpdatingMain struct {
+// The repository's `deploy` hook is running, drawn "deploying".
+type FooterSubStatusMergingDeploying struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusMergingUpdatingMain) Reset() {
-	*x = FooterSubStatusMergingUpdatingMain{}
+func (x *FooterSubStatusMergingDeploying) Reset() {
+	*x = FooterSubStatusMergingDeploying{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusMergingUpdatingMain) String() string {
+func (x *FooterSubStatusMergingDeploying) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusMergingUpdatingMain) ProtoMessage() {}
+func (*FooterSubStatusMergingDeploying) ProtoMessage() {}
 
-func (x *FooterSubStatusMergingUpdatingMain) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusMergingDeploying) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4732,32 +4731,32 @@ func (x *FooterSubStatusMergingUpdatingMain) ProtoReflect() protoreflect.Message
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusMergingUpdatingMain.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusMergingUpdatingMain) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusMergingDeploying.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusMergingDeploying) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{60}
 }
 
-// The after-merge prompt is running, drawn "postprocessing".
-type FooterSubStatusMergingPostprocessing struct {
+// A `post_deploy` hook is running, drawn "post-deploy".
+type FooterSubStatusMergingPostDeploy struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FooterSubStatusMergingPostprocessing) Reset() {
-	*x = FooterSubStatusMergingPostprocessing{}
+func (x *FooterSubStatusMergingPostDeploy) Reset() {
+	*x = FooterSubStatusMergingPostDeploy{}
 	mi := &file_frontend_v1_footer_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FooterSubStatusMergingPostprocessing) String() string {
+func (x *FooterSubStatusMergingPostDeploy) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FooterSubStatusMergingPostprocessing) ProtoMessage() {}
+func (*FooterSubStatusMergingPostDeploy) ProtoMessage() {}
 
-func (x *FooterSubStatusMergingPostprocessing) ProtoReflect() protoreflect.Message {
+func (x *FooterSubStatusMergingPostDeploy) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_footer_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4769,8 +4768,8 @@ func (x *FooterSubStatusMergingPostprocessing) ProtoReflect() protoreflect.Messa
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FooterSubStatusMergingPostprocessing.ProtoReflect.Descriptor instead.
-func (*FooterSubStatusMergingPostprocessing) Descriptor() ([]byte, []int) {
+// Deprecated: Use FooterSubStatusMergingPostDeploy.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusMergingPostDeploy) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{61}
 }
 
@@ -4822,6 +4821,7 @@ type FooterStatusMergeFailed struct {
 	//	*FooterStatusMergeFailed_Conflicts
 	//	*FooterStatusMergeFailed_Tests
 	//	*FooterStatusMergeFailed_Other
+	//	*FooterStatusMergeFailed_Hook
 	Substatus isFooterStatusMergeFailed_Substatus `protobuf_oneof:"substatus"`
 	// The activity cell. ALWAYS SET, the same cell a merge in flight carries.
 	Activity      *FooterStatusMergingActivity `protobuf:"bytes,1,opt,name=activity,proto3" json:"activity,omitempty"`
@@ -4893,6 +4893,15 @@ func (x *FooterStatusMergeFailed) GetOther() *FooterSubStatusMergeFailedOther {
 	return nil
 }
 
+func (x *FooterStatusMergeFailed) GetHook() *FooterSubStatusMergeFailedHook {
+	if x != nil {
+		if x, ok := x.Substatus.(*FooterStatusMergeFailed_Hook); ok {
+			return x.Hook
+		}
+	}
+	return nil
+}
+
 func (x *FooterStatusMergeFailed) GetActivity() *FooterStatusMergingActivity {
 	if x != nil {
 		return x.Activity
@@ -4916,9 +4925,15 @@ type FooterStatusMergeFailed_Tests struct {
 }
 
 type FooterStatusMergeFailed_Other struct {
-	// Any other step failed (the rebase itself, the before-merge prompt, the
-	// merge commit, updating main); the merge bubble carries the account.
+	// Any other step failed (the rebase itself, the merge commit); the merge
+	// bubble carries the account.
 	Other *FooterSubStatusMergeFailedOther `protobuf:"bytes,4,opt,name=other,proto3,oneof"`
+}
+
+type FooterStatusMergeFailed_Hook struct {
+	// A hook failed, in whichever stage; the workspace is prompted to
+	// investigate, and the merge bubble's hook tab carries the account.
+	Hook *FooterSubStatusMergeFailedHook `protobuf:"bytes,5,opt,name=hook,proto3,oneof"`
 }
 
 func (*FooterStatusMergeFailed_Conflicts) isFooterStatusMergeFailed_Substatus() {}
@@ -4926,6 +4941,8 @@ func (*FooterStatusMergeFailed_Conflicts) isFooterStatusMergeFailed_Substatus() 
 func (*FooterStatusMergeFailed_Tests) isFooterStatusMergeFailed_Substatus() {}
 
 func (*FooterStatusMergeFailed_Other) isFooterStatusMergeFailed_Substatus() {}
+
+func (*FooterStatusMergeFailed_Hook) isFooterStatusMergeFailed_Substatus() {}
 
 // Drawn "conflicts".
 type FooterSubStatusMergeFailedConflicts struct {
@@ -5038,6 +5055,43 @@ func (*FooterSubStatusMergeFailedOther) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{66}
 }
 
+// Drawn "hook"; the account is the bubble's hook tab.
+type FooterSubStatusMergeFailedHook struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterSubStatusMergeFailedHook) Reset() {
+	*x = FooterSubStatusMergeFailedHook{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[67]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterSubStatusMergeFailedHook) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterSubStatusMergeFailedHook) ProtoMessage() {}
+
+func (x *FooterSubStatusMergeFailedHook) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[67]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterSubStatusMergeFailedHook.ProtoReflect.Descriptor instead.
+func (*FooterSubStatusMergeFailedHook) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{67}
+}
+
 // The merge landed.
 type FooterStatusMerged struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -5050,7 +5104,7 @@ type FooterStatusMerged struct {
 
 func (x *FooterStatusMerged) Reset() {
 	*x = FooterStatusMerged{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[67]
+	mi := &file_frontend_v1_footer_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5062,7 +5116,7 @@ func (x *FooterStatusMerged) String() string {
 func (*FooterStatusMerged) ProtoMessage() {}
 
 func (x *FooterStatusMerged) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[67]
+	mi := &file_frontend_v1_footer_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5075,7 +5129,7 @@ func (x *FooterStatusMerged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterStatusMerged.ProtoReflect.Descriptor instead.
 func (*FooterStatusMerged) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{67}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *FooterStatusMerged) GetActivity() *FooterStatusMergingActivity {
@@ -5103,7 +5157,7 @@ type FooterStatusMergingActivity struct {
 
 func (x *FooterStatusMergingActivity) Reset() {
 	*x = FooterStatusMergingActivity{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[68]
+	mi := &file_frontend_v1_footer_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5115,7 +5169,7 @@ func (x *FooterStatusMergingActivity) String() string {
 func (*FooterStatusMergingActivity) ProtoMessage() {}
 
 func (x *FooterStatusMergingActivity) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[68]
+	mi := &file_frontend_v1_footer_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5128,7 +5182,7 @@ func (x *FooterStatusMergingActivity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterStatusMergingActivity.ProtoReflect.Descriptor instead.
 func (*FooterStatusMergingActivity) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{68}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *FooterStatusMergingActivity) GetTier() isFooterStatusMergingActivity_Tier {
@@ -5199,7 +5253,7 @@ type FooterStatusMergingSalient struct {
 
 func (x *FooterStatusMergingSalient) Reset() {
 	*x = FooterStatusMergingSalient{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[69]
+	mi := &file_frontend_v1_footer_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5211,7 +5265,7 @@ func (x *FooterStatusMergingSalient) String() string {
 func (*FooterStatusMergingSalient) ProtoMessage() {}
 
 func (x *FooterStatusMergingSalient) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[69]
+	mi := &file_frontend_v1_footer_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5224,7 +5278,7 @@ func (x *FooterStatusMergingSalient) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterStatusMergingSalient.ProtoReflect.Descriptor instead.
 func (*FooterStatusMergingSalient) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{69}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *FooterStatusMergingSalient) GetAt() *FooterStatusActivityAt {
@@ -5337,14 +5391,14 @@ type FooterStatusActivityMergeStep struct {
 	// Types that are valid to be assigned to Step:
 	//
 	//	*FooterStatusActivityMergeStep_Enqueued
-	//	*FooterStatusActivityMergeStep_Preprocessing
+	//	*FooterStatusActivityMergeStep_PreDeploy
 	//	*FooterStatusActivityMergeStep_Rebasing
 	//	*FooterStatusActivityMergeStep_ConflictResolution
 	//	*FooterStatusActivityMergeStep_Testing
 	//	*FooterStatusActivityMergeStep_Fixing
 	//	*FooterStatusActivityMergeStep_Committing
-	//	*FooterStatusActivityMergeStep_UpdatingMain
-	//	*FooterStatusActivityMergeStep_Postprocessing
+	//	*FooterStatusActivityMergeStep_Deploying
+	//	*FooterStatusActivityMergeStep_PostDeploy
 	Step          isFooterStatusActivityMergeStep_Step `protobuf_oneof:"step"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5352,7 +5406,7 @@ type FooterStatusActivityMergeStep struct {
 
 func (x *FooterStatusActivityMergeStep) Reset() {
 	*x = FooterStatusActivityMergeStep{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[70]
+	mi := &file_frontend_v1_footer_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5364,7 +5418,7 @@ func (x *FooterStatusActivityMergeStep) String() string {
 func (*FooterStatusActivityMergeStep) ProtoMessage() {}
 
 func (x *FooterStatusActivityMergeStep) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[70]
+	mi := &file_frontend_v1_footer_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5377,7 +5431,7 @@ func (x *FooterStatusActivityMergeStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterStatusActivityMergeStep.ProtoReflect.Descriptor instead.
 func (*FooterStatusActivityMergeStep) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{70}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *FooterStatusActivityMergeStep) GetStep() isFooterStatusActivityMergeStep_Step {
@@ -5396,10 +5450,10 @@ func (x *FooterStatusActivityMergeStep) GetEnqueued() *FooterMergeStepEnqueued {
 	return nil
 }
 
-func (x *FooterStatusActivityMergeStep) GetPreprocessing() *FooterMergeStepPrompt {
+func (x *FooterStatusActivityMergeStep) GetPreDeploy() *FooterMergeStepHook {
 	if x != nil {
-		if x, ok := x.Step.(*FooterStatusActivityMergeStep_Preprocessing); ok {
-			return x.Preprocessing
+		if x, ok := x.Step.(*FooterStatusActivityMergeStep_PreDeploy); ok {
+			return x.PreDeploy
 		}
 	}
 	return nil
@@ -5450,19 +5504,19 @@ func (x *FooterStatusActivityMergeStep) GetCommitting() *FooterMergeStepCommitti
 	return nil
 }
 
-func (x *FooterStatusActivityMergeStep) GetUpdatingMain() *FooterMergeStepUpdatingMain {
+func (x *FooterStatusActivityMergeStep) GetDeploying() *FooterMergeStepHook {
 	if x != nil {
-		if x, ok := x.Step.(*FooterStatusActivityMergeStep_UpdatingMain); ok {
-			return x.UpdatingMain
+		if x, ok := x.Step.(*FooterStatusActivityMergeStep_Deploying); ok {
+			return x.Deploying
 		}
 	}
 	return nil
 }
 
-func (x *FooterStatusActivityMergeStep) GetPostprocessing() *FooterMergeStepPrompt {
+func (x *FooterStatusActivityMergeStep) GetPostDeploy() *FooterMergeStepHook {
 	if x != nil {
-		if x, ok := x.Step.(*FooterStatusActivityMergeStep_Postprocessing); ok {
-			return x.Postprocessing
+		if x, ok := x.Step.(*FooterStatusActivityMergeStep_PostDeploy); ok {
+			return x.PostDeploy
 		}
 	}
 	return nil
@@ -5478,9 +5532,9 @@ type FooterStatusActivityMergeStep_Enqueued struct {
 	Enqueued *FooterMergeStepEnqueued `protobuf:"bytes,1,opt,name=enqueued,proto3,oneof"`
 }
 
-type FooterStatusActivityMergeStep_Preprocessing struct {
-	// Preprocessing: the before-merge prompt's text.
-	Preprocessing *FooterMergeStepPrompt `protobuf:"bytes,2,opt,name=preprocessing,proto3,oneof"`
+type FooterStatusActivityMergeStep_PreDeploy struct {
+	// Pre-deploy: the `pre_deploy` hook running.
+	PreDeploy *FooterMergeStepHook `protobuf:"bytes,10,opt,name=pre_deploy,json=preDeploy,proto3,oneof"`
 }
 
 type FooterStatusActivityMergeStep_Rebasing struct {
@@ -5508,19 +5562,19 @@ type FooterStatusActivityMergeStep_Committing struct {
 	Committing *FooterMergeStepCommitting `protobuf:"bytes,7,opt,name=committing,proto3,oneof"`
 }
 
-type FooterStatusActivityMergeStep_UpdatingMain struct {
-	// Updating main: fetching, then fast-forwarding.
-	UpdatingMain *FooterMergeStepUpdatingMain `protobuf:"bytes,8,opt,name=updating_main,json=updatingMain,proto3,oneof"`
+type FooterStatusActivityMergeStep_Deploying struct {
+	// Deploying: the repository's `deploy` hook running.
+	Deploying *FooterMergeStepHook `protobuf:"bytes,11,opt,name=deploying,proto3,oneof"`
 }
 
-type FooterStatusActivityMergeStep_Postprocessing struct {
-	// Postprocessing: the after-merge prompt's text.
-	Postprocessing *FooterMergeStepPrompt `protobuf:"bytes,9,opt,name=postprocessing,proto3,oneof"`
+type FooterStatusActivityMergeStep_PostDeploy struct {
+	// Post-deploy: the `post_deploy` hook running.
+	PostDeploy *FooterMergeStepHook `protobuf:"bytes,12,opt,name=post_deploy,json=postDeploy,proto3,oneof"`
 }
 
 func (*FooterStatusActivityMergeStep_Enqueued) isFooterStatusActivityMergeStep_Step() {}
 
-func (*FooterStatusActivityMergeStep_Preprocessing) isFooterStatusActivityMergeStep_Step() {}
+func (*FooterStatusActivityMergeStep_PreDeploy) isFooterStatusActivityMergeStep_Step() {}
 
 func (*FooterStatusActivityMergeStep_Rebasing) isFooterStatusActivityMergeStep_Step() {}
 
@@ -5532,9 +5586,9 @@ func (*FooterStatusActivityMergeStep_Fixing) isFooterStatusActivityMergeStep_Ste
 
 func (*FooterStatusActivityMergeStep_Committing) isFooterStatusActivityMergeStep_Step() {}
 
-func (*FooterStatusActivityMergeStep_UpdatingMain) isFooterStatusActivityMergeStep_Step() {}
+func (*FooterStatusActivityMergeStep_Deploying) isFooterStatusActivityMergeStep_Step() {}
 
-func (*FooterStatusActivityMergeStep_Postprocessing) isFooterStatusActivityMergeStep_Step() {}
+func (*FooterStatusActivityMergeStep_PostDeploy) isFooterStatusActivityMergeStep_Step() {}
 
 // The merge ahead in the queue.
 type FooterMergeStepEnqueued struct {
@@ -5549,7 +5603,7 @@ type FooterMergeStepEnqueued struct {
 
 func (x *FooterMergeStepEnqueued) Reset() {
 	*x = FooterMergeStepEnqueued{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[71]
+	mi := &file_frontend_v1_footer_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5561,7 +5615,7 @@ func (x *FooterMergeStepEnqueued) String() string {
 func (*FooterMergeStepEnqueued) ProtoMessage() {}
 
 func (x *FooterMergeStepEnqueued) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[71]
+	mi := &file_frontend_v1_footer_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5574,7 +5628,7 @@ func (x *FooterMergeStepEnqueued) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMergeStepEnqueued.ProtoReflect.Descriptor instead.
 func (*FooterMergeStepEnqueued) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{71}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *FooterMergeStepEnqueued) GetWorkspaceName() string {
@@ -5591,7 +5645,137 @@ func (x *FooterMergeStepEnqueued) GetStep() string {
 	return ""
 }
 
-// A configured prompt's text, drawn verbatim.
+// The hook a stage is running. THE ARM IS THE HOOK'S KIND.
+type FooterMergeStepHook struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Hook:
+	//
+	//	*FooterMergeStepHook_Prompt
+	//	*FooterMergeStepHook_Script
+	Hook          isFooterMergeStepHook_Hook `protobuf_oneof:"hook"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterMergeStepHook) Reset() {
+	*x = FooterMergeStepHook{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[73]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterMergeStepHook) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterMergeStepHook) ProtoMessage() {}
+
+func (x *FooterMergeStepHook) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[73]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterMergeStepHook.ProtoReflect.Descriptor instead.
+func (*FooterMergeStepHook) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{73}
+}
+
+func (x *FooterMergeStepHook) GetHook() isFooterMergeStepHook_Hook {
+	if x != nil {
+		return x.Hook
+	}
+	return nil
+}
+
+func (x *FooterMergeStepHook) GetPrompt() *FooterMergeStepPrompt {
+	if x != nil {
+		if x, ok := x.Hook.(*FooterMergeStepHook_Prompt); ok {
+			return x.Prompt
+		}
+	}
+	return nil
+}
+
+func (x *FooterMergeStepHook) GetScript() *FooterMergeStepScript {
+	if x != nil {
+		if x, ok := x.Hook.(*FooterMergeStepHook_Script); ok {
+			return x.Script
+		}
+	}
+	return nil
+}
+
+type isFooterMergeStepHook_Hook interface {
+	isFooterMergeStepHook_Hook()
+}
+
+type FooterMergeStepHook_Prompt struct {
+	// A prompt hook: its text, drawn verbatim.
+	Prompt *FooterMergeStepPrompt `protobuf:"bytes,1,opt,name=prompt,proto3,oneof"`
+}
+
+type FooterMergeStepHook_Script struct {
+	// A script hook: its path, drawn verbatim.
+	Script *FooterMergeStepScript `protobuf:"bytes,2,opt,name=script,proto3,oneof"`
+}
+
+func (*FooterMergeStepHook_Prompt) isFooterMergeStepHook_Hook() {}
+
+func (*FooterMergeStepHook_Script) isFooterMergeStepHook_Hook() {}
+
+// A script hook's path, relative to the repository's main checkout root.
+type FooterMergeStepScript struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterMergeStepScript) Reset() {
+	*x = FooterMergeStepScript{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[74]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterMergeStepScript) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterMergeStepScript) ProtoMessage() {}
+
+func (x *FooterMergeStepScript) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[74]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterMergeStepScript.ProtoReflect.Descriptor instead.
+func (*FooterMergeStepScript) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{74}
+}
+
+func (x *FooterMergeStepScript) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+// A prompt hook's text, drawn verbatim.
 type FooterMergeStepPrompt struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
@@ -5601,7 +5785,7 @@ type FooterMergeStepPrompt struct {
 
 func (x *FooterMergeStepPrompt) Reset() {
 	*x = FooterMergeStepPrompt{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[72]
+	mi := &file_frontend_v1_footer_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5613,7 +5797,7 @@ func (x *FooterMergeStepPrompt) String() string {
 func (*FooterMergeStepPrompt) ProtoMessage() {}
 
 func (x *FooterMergeStepPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[72]
+	mi := &file_frontend_v1_footer_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5626,7 +5810,7 @@ func (x *FooterMergeStepPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMergeStepPrompt.ProtoReflect.Descriptor instead.
 func (*FooterMergeStepPrompt) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{72}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *FooterMergeStepPrompt) GetText() string {
@@ -5652,7 +5836,7 @@ type FooterMergeStepRebasing struct {
 
 func (x *FooterMergeStepRebasing) Reset() {
 	*x = FooterMergeStepRebasing{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[73]
+	mi := &file_frontend_v1_footer_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5664,7 +5848,7 @@ func (x *FooterMergeStepRebasing) String() string {
 func (*FooterMergeStepRebasing) ProtoMessage() {}
 
 func (x *FooterMergeStepRebasing) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[73]
+	mi := &file_frontend_v1_footer_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5677,7 +5861,7 @@ func (x *FooterMergeStepRebasing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMergeStepRebasing.ProtoReflect.Descriptor instead.
 func (*FooterMergeStepRebasing) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{73}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *FooterMergeStepRebasing) GetLine() isFooterMergeStepRebasing_Line {
@@ -5733,7 +5917,7 @@ type FooterMergeStepRebaseCommand struct {
 
 func (x *FooterMergeStepRebaseCommand) Reset() {
 	*x = FooterMergeStepRebaseCommand{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[74]
+	mi := &file_frontend_v1_footer_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5745,7 +5929,7 @@ func (x *FooterMergeStepRebaseCommand) String() string {
 func (*FooterMergeStepRebaseCommand) ProtoMessage() {}
 
 func (x *FooterMergeStepRebaseCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[74]
+	mi := &file_frontend_v1_footer_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5758,7 +5942,7 @@ func (x *FooterMergeStepRebaseCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMergeStepRebaseCommand.ProtoReflect.Descriptor instead.
 func (*FooterMergeStepRebaseCommand) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{74}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *FooterMergeStepRebaseCommand) GetText() string {
@@ -5778,7 +5962,7 @@ type FooterMergeStepRebaseFailure struct {
 
 func (x *FooterMergeStepRebaseFailure) Reset() {
 	*x = FooterMergeStepRebaseFailure{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[75]
+	mi := &file_frontend_v1_footer_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5790,7 +5974,7 @@ func (x *FooterMergeStepRebaseFailure) String() string {
 func (*FooterMergeStepRebaseFailure) ProtoMessage() {}
 
 func (x *FooterMergeStepRebaseFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[75]
+	mi := &file_frontend_v1_footer_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5803,7 +5987,7 @@ func (x *FooterMergeStepRebaseFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMergeStepRebaseFailure.ProtoReflect.Descriptor instead.
 func (*FooterMergeStepRebaseFailure) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{75}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *FooterMergeStepRebaseFailure) GetText() string {
@@ -5826,7 +6010,7 @@ type FooterMergeStepConflict struct {
 
 func (x *FooterMergeStepConflict) Reset() {
 	*x = FooterMergeStepConflict{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[76]
+	mi := &file_frontend_v1_footer_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5838,7 +6022,7 @@ func (x *FooterMergeStepConflict) String() string {
 func (*FooterMergeStepConflict) ProtoMessage() {}
 
 func (x *FooterMergeStepConflict) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[76]
+	mi := &file_frontend_v1_footer_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5851,7 +6035,7 @@ func (x *FooterMergeStepConflict) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMergeStepConflict.ProtoReflect.Descriptor instead.
 func (*FooterMergeStepConflict) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{76}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *FooterMergeStepConflict) GetCommitSubject() string {
@@ -5887,7 +6071,7 @@ type FooterMergeStepSuite struct {
 
 func (x *FooterMergeStepSuite) Reset() {
 	*x = FooterMergeStepSuite{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[77]
+	mi := &file_frontend_v1_footer_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5899,7 +6083,7 @@ func (x *FooterMergeStepSuite) String() string {
 func (*FooterMergeStepSuite) ProtoMessage() {}
 
 func (x *FooterMergeStepSuite) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[77]
+	mi := &file_frontend_v1_footer_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5912,7 +6096,7 @@ func (x *FooterMergeStepSuite) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMergeStepSuite.ProtoReflect.Descriptor instead.
 func (*FooterMergeStepSuite) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{77}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *FooterMergeStepSuite) GetName() string {
@@ -5987,7 +6171,7 @@ type FooterMergeStepSuiteStarted struct {
 
 func (x *FooterMergeStepSuiteStarted) Reset() {
 	*x = FooterMergeStepSuiteStarted{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[78]
+	mi := &file_frontend_v1_footer_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5999,7 +6183,7 @@ func (x *FooterMergeStepSuiteStarted) String() string {
 func (*FooterMergeStepSuiteStarted) ProtoMessage() {}
 
 func (x *FooterMergeStepSuiteStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[78]
+	mi := &file_frontend_v1_footer_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6012,7 +6196,7 @@ func (x *FooterMergeStepSuiteStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMergeStepSuiteStarted.ProtoReflect.Descriptor instead.
 func (*FooterMergeStepSuiteStarted) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{78}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{81}
 }
 
 // The suite passed.
@@ -6024,7 +6208,7 @@ type FooterMergeStepSuitePassed struct {
 
 func (x *FooterMergeStepSuitePassed) Reset() {
 	*x = FooterMergeStepSuitePassed{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[79]
+	mi := &file_frontend_v1_footer_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6036,7 +6220,7 @@ func (x *FooterMergeStepSuitePassed) String() string {
 func (*FooterMergeStepSuitePassed) ProtoMessage() {}
 
 func (x *FooterMergeStepSuitePassed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[79]
+	mi := &file_frontend_v1_footer_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6049,7 +6233,7 @@ func (x *FooterMergeStepSuitePassed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMergeStepSuitePassed.ProtoReflect.Descriptor instead.
 func (*FooterMergeStepSuitePassed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{79}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{82}
 }
 
 // The suite failed.
@@ -6061,7 +6245,7 @@ type FooterMergeStepSuiteFailed struct {
 
 func (x *FooterMergeStepSuiteFailed) Reset() {
 	*x = FooterMergeStepSuiteFailed{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[80]
+	mi := &file_frontend_v1_footer_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6073,7 +6257,7 @@ func (x *FooterMergeStepSuiteFailed) String() string {
 func (*FooterMergeStepSuiteFailed) ProtoMessage() {}
 
 func (x *FooterMergeStepSuiteFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[80]
+	mi := &file_frontend_v1_footer_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6086,7 +6270,7 @@ func (x *FooterMergeStepSuiteFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMergeStepSuiteFailed.ProtoReflect.Descriptor instead.
 func (*FooterMergeStepSuiteFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{80}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{83}
 }
 
 // The suites a fixing attempt is repairing.
@@ -6100,7 +6284,7 @@ type FooterMergeStepFixing struct {
 
 func (x *FooterMergeStepFixing) Reset() {
 	*x = FooterMergeStepFixing{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[81]
+	mi := &file_frontend_v1_footer_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6112,7 +6296,7 @@ func (x *FooterMergeStepFixing) String() string {
 func (*FooterMergeStepFixing) ProtoMessage() {}
 
 func (x *FooterMergeStepFixing) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[81]
+	mi := &file_frontend_v1_footer_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6125,7 +6309,7 @@ func (x *FooterMergeStepFixing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMergeStepFixing.ProtoReflect.Descriptor instead.
 func (*FooterMergeStepFixing) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{81}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *FooterMergeStepFixing) GetSuites() []string {
@@ -6146,7 +6330,7 @@ type FooterMergeStepCommitting struct {
 
 func (x *FooterMergeStepCommitting) Reset() {
 	*x = FooterMergeStepCommitting{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[82]
+	mi := &file_frontend_v1_footer_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6158,7 +6342,7 @@ func (x *FooterMergeStepCommitting) String() string {
 func (*FooterMergeStepCommitting) ProtoMessage() {}
 
 func (x *FooterMergeStepCommitting) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[82]
+	mi := &file_frontend_v1_footer_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6171,180 +6355,12 @@ func (x *FooterMergeStepCommitting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FooterMergeStepCommitting.ProtoReflect.Descriptor instead.
 func (*FooterMergeStepCommitting) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{82}
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *FooterMergeStepCommitting) GetSubject() string {
 	if x != nil {
 		return x.Subject
-	}
-	return ""
-}
-
-// The update of the default branch from upstream.
-type FooterMergeStepUpdatingMain struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Step:
-	//
-	//	*FooterMergeStepUpdatingMain_Fetching
-	//	*FooterMergeStepUpdatingMain_FastForwarding
-	Step          isFooterMergeStepUpdatingMain_Step `protobuf_oneof:"step"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FooterMergeStepUpdatingMain) Reset() {
-	*x = FooterMergeStepUpdatingMain{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[83]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FooterMergeStepUpdatingMain) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FooterMergeStepUpdatingMain) ProtoMessage() {}
-
-func (x *FooterMergeStepUpdatingMain) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[83]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FooterMergeStepUpdatingMain.ProtoReflect.Descriptor instead.
-func (*FooterMergeStepUpdatingMain) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{83}
-}
-
-func (x *FooterMergeStepUpdatingMain) GetStep() isFooterMergeStepUpdatingMain_Step {
-	if x != nil {
-		return x.Step
-	}
-	return nil
-}
-
-func (x *FooterMergeStepUpdatingMain) GetFetching() *FooterMergeStepUpdatingMainFetching {
-	if x != nil {
-		if x, ok := x.Step.(*FooterMergeStepUpdatingMain_Fetching); ok {
-			return x.Fetching
-		}
-	}
-	return nil
-}
-
-func (x *FooterMergeStepUpdatingMain) GetFastForwarding() *FooterMergeStepUpdatingMainFastForwarding {
-	if x != nil {
-		if x, ok := x.Step.(*FooterMergeStepUpdatingMain_FastForwarding); ok {
-			return x.FastForwarding
-		}
-	}
-	return nil
-}
-
-type isFooterMergeStepUpdatingMain_Step interface {
-	isFooterMergeStepUpdatingMain_Step()
-}
-
-type FooterMergeStepUpdatingMain_Fetching struct {
-	// Fetching from upstream.
-	Fetching *FooterMergeStepUpdatingMainFetching `protobuf:"bytes,1,opt,name=fetching,proto3,oneof"`
-}
-
-type FooterMergeStepUpdatingMain_FastForwarding struct {
-	// Fast-forwarding to a commit.
-	FastForwarding *FooterMergeStepUpdatingMainFastForwarding `protobuf:"bytes,2,opt,name=fast_forwarding,json=fastForwarding,proto3,oneof"`
-}
-
-func (*FooterMergeStepUpdatingMain_Fetching) isFooterMergeStepUpdatingMain_Step() {}
-
-func (*FooterMergeStepUpdatingMain_FastForwarding) isFooterMergeStepUpdatingMain_Step() {}
-
-// Fetching.
-type FooterMergeStepUpdatingMainFetching struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FooterMergeStepUpdatingMainFetching) Reset() {
-	*x = FooterMergeStepUpdatingMainFetching{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[84]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FooterMergeStepUpdatingMainFetching) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FooterMergeStepUpdatingMainFetching) ProtoMessage() {}
-
-func (x *FooterMergeStepUpdatingMainFetching) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[84]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FooterMergeStepUpdatingMainFetching.ProtoReflect.Descriptor instead.
-func (*FooterMergeStepUpdatingMainFetching) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{84}
-}
-
-// Fast-forwarding.
-type FooterMergeStepUpdatingMainFastForwarding struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The short hash fast-forwarded to.
-	Commit        string `protobuf:"bytes,1,opt,name=commit,proto3" json:"commit,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FooterMergeStepUpdatingMainFastForwarding) Reset() {
-	*x = FooterMergeStepUpdatingMainFastForwarding{}
-	mi := &file_frontend_v1_footer_proto_msgTypes[85]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FooterMergeStepUpdatingMainFastForwarding) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FooterMergeStepUpdatingMainFastForwarding) ProtoMessage() {}
-
-func (x *FooterMergeStepUpdatingMainFastForwarding) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_footer_proto_msgTypes[85]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FooterMergeStepUpdatingMainFastForwarding.ProtoReflect.Descriptor instead.
-func (*FooterMergeStepUpdatingMainFastForwarding) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{85}
-}
-
-func (x *FooterMergeStepUpdatingMainFastForwarding) GetCommit() string {
-	if x != nil {
-		return x.Commit
 	}
 	return ""
 }
@@ -18289,26 +18305,28 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x06update\x18\x02 \x01(\v2'.frontend.v1.FooterStatusActivityUpdateH\x00R\x06update\x12S\n" +
 	"\fnotification\x18\x04 \x01(\v2-.frontend.v1.FooterStatusActivityNotificationH\x00R\fnotificationB\x06\n" +
 	"\x04kindJ\x04\b\x05\x10\x06J\x04\b\x03\x10\x04R\x0econtext_budgetR\n" +
-	"rate_limit\"\xa2\t\n" +
+	"rate_limit\"\xc2\t\n" +
 	"\x13FooterStatusMerging\x12I\n" +
-	"\benqueued\x18\r \x01(\v2+.frontend.v1.FooterSubStatusMergingEnqueuedH\x00R\benqueued\x12X\n" +
-	"\rpreprocessing\x18\x0e \x01(\v20.frontend.v1.FooterSubStatusMergingPreprocessingH\x00R\rpreprocessing\x12I\n" +
+	"\benqueued\x18\r \x01(\v2+.frontend.v1.FooterSubStatusMergingEnqueuedH\x00R\benqueued\x12M\n" +
+	"\n" +
+	"pre_deploy\x18\x17 \x01(\v2,.frontend.v1.FooterSubStatusMergingPreDeployH\x00R\tpreDeploy\x12I\n" +
 	"\brebasing\x18\x0f \x01(\v2+.frontend.v1.FooterSubStatusMergingRebasingH\x00R\brebasing\x12h\n" +
 	"\x13conflict_resolution\x18\x10 \x01(\v25.frontend.v1.FooterSubStatusMergingConflictResolutionH\x00R\x12conflictResolution\x12F\n" +
 	"\atesting\x18\x05 \x01(\v2*.frontend.v1.FooterSubStatusMergingTestingH\x00R\atesting\x12C\n" +
 	"\x06fixing\x18\x11 \x01(\v2).frontend.v1.FooterSubStatusMergingFixingH\x00R\x06fixing\x12O\n" +
 	"\n" +
 	"committing\x18\x12 \x01(\v2-.frontend.v1.FooterSubStatusMergingCommittingH\x00R\n" +
-	"committing\x12V\n" +
-	"\rupdating_main\x18\x13 \x01(\v2/.frontend.v1.FooterSubStatusMergingUpdatingMainH\x00R\fupdatingMain\x12[\n" +
-	"\x0epostprocessing\x18\x14 \x01(\v21.frontend.v1.FooterSubStatusMergingPostprocessingH\x00R\x0epostprocessing\x12Z\n" +
+	"committing\x12L\n" +
+	"\tdeploying\x18\x18 \x01(\v2,.frontend.v1.FooterSubStatusMergingDeployingH\x00R\tdeploying\x12P\n" +
+	"\vpost_deploy\x18\x19 \x01(\v2-.frontend.v1.FooterSubStatusMergingPostDeployH\x00R\n" +
+	"postDeploy\x12Z\n" +
 	"\x0fwaiting_on_user\x18\x15 \x01(\v20.frontend.v1.FooterSubStatusMergingWaitingOnUserH\x00R\rwaitingOnUser\x12V\n" +
 	"\rawaiting_free\x18\x16 \x01(\v2/.frontend.v1.FooterSubStatusMergingAwaitingFreeH\x00R\fawaitingFree\x12D\n" +
 	"\bactivity\x18\n" +
 	" \x01(\v2(.frontend.v1.FooterStatusMergingActivityR\bactivityB\v\n" +
 	"\tsubstatusJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x06\x10\aJ\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
-	"J\x04\b\v\x10\fJ\x04\b\f\x10\rR\tenqueuingR\x06queuedR\n" +
-	"pre_promptR\x05mergeR\x06parkedR\vpost_promptR\x06failedR\x06mergedR\x05fixesR\tconflicts\"\xdf\x01\n" +
+	"J\x04\b\v\x10\fJ\x04\b\f\x10\rJ\x04\b\x0e\x10\x0fJ\x04\b\x13\x10\x14J\x04\b\x14\x10\x15R\tenqueuingR\x06queuedR\n" +
+	"pre_promptR\x05mergeR\x06parkedR\vpost_promptR\x06failedR\x06mergedR\x05fixesR\tconflictsR\rpreprocessingR\rupdating_mainR\x0epostprocessing\"\xdf\x01\n" +
 	"\"FooterSubStatusMergingAwaitingFree\x12$\n" +
 	"\x0eturn_in_flight\x18\x01 \x01(\bR\fturnInFlight\x12\x1c\n" +
 	"\tsubagents\x18\x02 \x01(\rR\tsubagents\x12\x16\n" +
@@ -18318,8 +18336,8 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x0fother_workspace\x18\x06 \x01(\tR\x0eotherWorkspace\"P\n" +
 	"\x1eFooterSubStatusMergingEnqueued\x12\x14\n" +
 	"\x05place\x18\x01 \x01(\rR\x05place\x12\x18\n" +
-	"\awaiting\x18\x02 \x01(\rR\awaiting\"%\n" +
-	"#FooterSubStatusMergingPreprocessing\"R\n" +
+	"\awaiting\x18\x02 \x01(\rR\awaiting\"!\n" +
+	"\x1fFooterSubStatusMergingPreDeploy\"R\n" +
 	"\x1eFooterSubStatusMergingRebasing\x12\x1a\n" +
 	"\breplayed\x18\x01 \x01(\rR\breplayed\x12\x14\n" +
 	"\x05total\x18\x02 \x01(\rR\x05total\"*\n" +
@@ -18328,19 +18346,21 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x1cFooterSubStatusMergingFixing\x12\x18\n" +
 	"\aattempt\x18\x01 \x01(\rR\aattempt\x12!\n" +
 	"\fmax_attempts\x18\x02 \x01(\rR\vmaxAttempts\"\"\n" +
-	" FooterSubStatusMergingCommitting\"$\n" +
-	"\"FooterSubStatusMergingUpdatingMain\"&\n" +
-	"$FooterSubStatusMergingPostprocessing\"%\n" +
-	"#FooterSubStatusMergingWaitingOnUser\"\xca\x02\n" +
+	" FooterSubStatusMergingCommitting\"!\n" +
+	"\x1fFooterSubStatusMergingDeploying\"\"\n" +
+	" FooterSubStatusMergingPostDeploy\"%\n" +
+	"#FooterSubStatusMergingWaitingOnUser\"\x8d\x03\n" +
 	"\x17FooterStatusMergeFailed\x12P\n" +
 	"\tconflicts\x18\x02 \x01(\v20.frontend.v1.FooterSubStatusMergeFailedConflictsH\x00R\tconflicts\x12D\n" +
 	"\x05tests\x18\x03 \x01(\v2,.frontend.v1.FooterSubStatusMergeFailedTestsH\x00R\x05tests\x12D\n" +
-	"\x05other\x18\x04 \x01(\v2,.frontend.v1.FooterSubStatusMergeFailedOtherH\x00R\x05other\x12D\n" +
+	"\x05other\x18\x04 \x01(\v2,.frontend.v1.FooterSubStatusMergeFailedOtherH\x00R\x05other\x12A\n" +
+	"\x04hook\x18\x05 \x01(\v2+.frontend.v1.FooterSubStatusMergeFailedHookH\x00R\x04hook\x12D\n" +
 	"\bactivity\x18\x01 \x01(\v2(.frontend.v1.FooterStatusMergingActivityR\bactivityB\v\n" +
 	"\tsubstatus\"%\n" +
 	"#FooterSubStatusMergeFailedConflicts\"!\n" +
 	"\x1fFooterSubStatusMergeFailedTests\"!\n" +
-	"\x1fFooterSubStatusMergeFailedOther\"Z\n" +
+	"\x1fFooterSubStatusMergeFailedOther\" \n" +
+	"\x1eFooterSubStatusMergeFailedHook\"Z\n" +
 	"\x12FooterStatusMerged\x12D\n" +
 	"\bactivity\x18\x01 \x01(\v2(.frontend.v1.FooterStatusMergingActivityR\bactivity\"\xba\x01\n" +
 	"\x1bFooterStatusMergingActivity\x12C\n" +
@@ -18357,23 +18377,33 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x06update\x18\x03 \x01(\v2'.frontend.v1.FooterStatusActivityUpdateH\x00R\x06update\x12S\n" +
 	"\fnotification\x18\x05 \x01(\v2-.frontend.v1.FooterStatusActivityNotificationH\x00R\fnotificationB\x06\n" +
 	"\x04kindJ\x04\b\x06\x10\aJ\x04\b\x04\x10\x05J\x04\b\x02\x10\x03R\x0econtext_budgetR\n" +
-	"rate_limitR\x0emerging_commit\"\xba\x05\n" +
+	"rate_limitR\x0emerging_commit\"\xd9\x05\n" +
 	"\x1dFooterStatusActivityMergeStep\x12B\n" +
-	"\benqueued\x18\x01 \x01(\v2$.frontend.v1.FooterMergeStepEnqueuedH\x00R\benqueued\x12J\n" +
-	"\rpreprocessing\x18\x02 \x01(\v2\".frontend.v1.FooterMergeStepPromptH\x00R\rpreprocessing\x12B\n" +
+	"\benqueued\x18\x01 \x01(\v2$.frontend.v1.FooterMergeStepEnqueuedH\x00R\benqueued\x12A\n" +
+	"\n" +
+	"pre_deploy\x18\n" +
+	" \x01(\v2 .frontend.v1.FooterMergeStepHookH\x00R\tpreDeploy\x12B\n" +
 	"\brebasing\x18\x03 \x01(\v2$.frontend.v1.FooterMergeStepRebasingH\x00R\brebasing\x12W\n" +
 	"\x13conflict_resolution\x18\x04 \x01(\v2$.frontend.v1.FooterMergeStepConflictH\x00R\x12conflictResolution\x12=\n" +
 	"\atesting\x18\x05 \x01(\v2!.frontend.v1.FooterMergeStepSuiteH\x00R\atesting\x12<\n" +
 	"\x06fixing\x18\x06 \x01(\v2\".frontend.v1.FooterMergeStepFixingH\x00R\x06fixing\x12H\n" +
 	"\n" +
 	"committing\x18\a \x01(\v2&.frontend.v1.FooterMergeStepCommittingH\x00R\n" +
-	"committing\x12O\n" +
-	"\rupdating_main\x18\b \x01(\v2(.frontend.v1.FooterMergeStepUpdatingMainH\x00R\fupdatingMain\x12L\n" +
-	"\x0epostprocessing\x18\t \x01(\v2\".frontend.v1.FooterMergeStepPromptH\x00R\x0epostprocessingB\x06\n" +
-	"\x04step\"T\n" +
+	"committing\x12@\n" +
+	"\tdeploying\x18\v \x01(\v2 .frontend.v1.FooterMergeStepHookH\x00R\tdeploying\x12C\n" +
+	"\vpost_deploy\x18\f \x01(\v2 .frontend.v1.FooterMergeStepHookH\x00R\n" +
+	"postDeployB\x06\n" +
+	"\x04stepJ\x04\b\x02\x10\x03J\x04\b\b\x10\tJ\x04\b\t\x10\n" +
+	"R\rpreprocessingR\rupdating_mainR\x0epostprocessing\"T\n" +
 	"\x17FooterMergeStepEnqueued\x12%\n" +
 	"\x0eworkspace_name\x18\x01 \x01(\tR\rworkspaceName\x12\x12\n" +
-	"\x04step\x18\x02 \x01(\tR\x04step\"+\n" +
+	"\x04step\x18\x02 \x01(\tR\x04step\"\x99\x01\n" +
+	"\x13FooterMergeStepHook\x12<\n" +
+	"\x06prompt\x18\x01 \x01(\v2\".frontend.v1.FooterMergeStepPromptH\x00R\x06prompt\x12<\n" +
+	"\x06script\x18\x02 \x01(\v2\".frontend.v1.FooterMergeStepScriptH\x00R\x06scriptB\x06\n" +
+	"\x04hook\"+\n" +
+	"\x15FooterMergeStepScript\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\"+\n" +
 	"\x15FooterMergeStepPrompt\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"\xad\x01\n" +
 	"\x17FooterMergeStepRebasing\x12E\n" +
@@ -18400,13 +18430,6 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\x06suites\x18\x01 \x03(\tR\x06suites\"5\n" +
 	"\x19FooterMergeStepCommitting\x12\x18\n" +
 	"\asubject\x18\x01 \x01(\tR\asubject\"\xd8\x01\n" +
-	"\x1bFooterMergeStepUpdatingMain\x12N\n" +
-	"\bfetching\x18\x01 \x01(\v20.frontend.v1.FooterMergeStepUpdatingMainFetchingH\x00R\bfetching\x12a\n" +
-	"\x0ffast_forwarding\x18\x02 \x01(\v26.frontend.v1.FooterMergeStepUpdatingMainFastForwardingH\x00R\x0efastForwardingB\x06\n" +
-	"\x04step\"%\n" +
-	"#FooterMergeStepUpdatingMainFetching\"C\n" +
-	")FooterMergeStepUpdatingMainFastForwarding\x12\x16\n" +
-	"\x06commit\x18\x01 \x01(\tR\x06commit\"\xd8\x01\n" +
 	"\x16FooterStatusBackground\x12G\n" +
 	"\bactivity\x18\x01 \x01(\v2+.frontend.v1.FooterStatusBackgroundActivityR\bactivity\x12L\n" +
 	"\bawaiting\x18\x03 \x01(\v2+.frontend.v1.FooterStatusBackgroundAwaitingH\x00R\bawaiting\x88\x01\x01B\v\n" +
@@ -19116,38 +19139,38 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterStatusMerging)(nil),                           // 51: frontend.v1.FooterStatusMerging
 	(*FooterSubStatusMergingAwaitingFree)(nil),            // 52: frontend.v1.FooterSubStatusMergingAwaitingFree
 	(*FooterSubStatusMergingEnqueued)(nil),                // 53: frontend.v1.FooterSubStatusMergingEnqueued
-	(*FooterSubStatusMergingPreprocessing)(nil),           // 54: frontend.v1.FooterSubStatusMergingPreprocessing
+	(*FooterSubStatusMergingPreDeploy)(nil),               // 54: frontend.v1.FooterSubStatusMergingPreDeploy
 	(*FooterSubStatusMergingRebasing)(nil),                // 55: frontend.v1.FooterSubStatusMergingRebasing
 	(*FooterSubStatusMergingConflictResolution)(nil),      // 56: frontend.v1.FooterSubStatusMergingConflictResolution
 	(*FooterSubStatusMergingTesting)(nil),                 // 57: frontend.v1.FooterSubStatusMergingTesting
 	(*FooterSubStatusMergingFixing)(nil),                  // 58: frontend.v1.FooterSubStatusMergingFixing
 	(*FooterSubStatusMergingCommitting)(nil),              // 59: frontend.v1.FooterSubStatusMergingCommitting
-	(*FooterSubStatusMergingUpdatingMain)(nil),            // 60: frontend.v1.FooterSubStatusMergingUpdatingMain
-	(*FooterSubStatusMergingPostprocessing)(nil),          // 61: frontend.v1.FooterSubStatusMergingPostprocessing
+	(*FooterSubStatusMergingDeploying)(nil),               // 60: frontend.v1.FooterSubStatusMergingDeploying
+	(*FooterSubStatusMergingPostDeploy)(nil),              // 61: frontend.v1.FooterSubStatusMergingPostDeploy
 	(*FooterSubStatusMergingWaitingOnUser)(nil),           // 62: frontend.v1.FooterSubStatusMergingWaitingOnUser
 	(*FooterStatusMergeFailed)(nil),                       // 63: frontend.v1.FooterStatusMergeFailed
 	(*FooterSubStatusMergeFailedConflicts)(nil),           // 64: frontend.v1.FooterSubStatusMergeFailedConflicts
 	(*FooterSubStatusMergeFailedTests)(nil),               // 65: frontend.v1.FooterSubStatusMergeFailedTests
 	(*FooterSubStatusMergeFailedOther)(nil),               // 66: frontend.v1.FooterSubStatusMergeFailedOther
-	(*FooterStatusMerged)(nil),                            // 67: frontend.v1.FooterStatusMerged
-	(*FooterStatusMergingActivity)(nil),                   // 68: frontend.v1.FooterStatusMergingActivity
-	(*FooterStatusMergingSalient)(nil),                    // 69: frontend.v1.FooterStatusMergingSalient
-	(*FooterStatusActivityMergeStep)(nil),                 // 70: frontend.v1.FooterStatusActivityMergeStep
-	(*FooterMergeStepEnqueued)(nil),                       // 71: frontend.v1.FooterMergeStepEnqueued
-	(*FooterMergeStepPrompt)(nil),                         // 72: frontend.v1.FooterMergeStepPrompt
-	(*FooterMergeStepRebasing)(nil),                       // 73: frontend.v1.FooterMergeStepRebasing
-	(*FooterMergeStepRebaseCommand)(nil),                  // 74: frontend.v1.FooterMergeStepRebaseCommand
-	(*FooterMergeStepRebaseFailure)(nil),                  // 75: frontend.v1.FooterMergeStepRebaseFailure
-	(*FooterMergeStepConflict)(nil),                       // 76: frontend.v1.FooterMergeStepConflict
-	(*FooterMergeStepSuite)(nil),                          // 77: frontend.v1.FooterMergeStepSuite
-	(*FooterMergeStepSuiteStarted)(nil),                   // 78: frontend.v1.FooterMergeStepSuiteStarted
-	(*FooterMergeStepSuitePassed)(nil),                    // 79: frontend.v1.FooterMergeStepSuitePassed
-	(*FooterMergeStepSuiteFailed)(nil),                    // 80: frontend.v1.FooterMergeStepSuiteFailed
-	(*FooterMergeStepFixing)(nil),                         // 81: frontend.v1.FooterMergeStepFixing
-	(*FooterMergeStepCommitting)(nil),                     // 82: frontend.v1.FooterMergeStepCommitting
-	(*FooterMergeStepUpdatingMain)(nil),                   // 83: frontend.v1.FooterMergeStepUpdatingMain
-	(*FooterMergeStepUpdatingMainFetching)(nil),           // 84: frontend.v1.FooterMergeStepUpdatingMainFetching
-	(*FooterMergeStepUpdatingMainFastForwarding)(nil),     // 85: frontend.v1.FooterMergeStepUpdatingMainFastForwarding
+	(*FooterSubStatusMergeFailedHook)(nil),                // 67: frontend.v1.FooterSubStatusMergeFailedHook
+	(*FooterStatusMerged)(nil),                            // 68: frontend.v1.FooterStatusMerged
+	(*FooterStatusMergingActivity)(nil),                   // 69: frontend.v1.FooterStatusMergingActivity
+	(*FooterStatusMergingSalient)(nil),                    // 70: frontend.v1.FooterStatusMergingSalient
+	(*FooterStatusActivityMergeStep)(nil),                 // 71: frontend.v1.FooterStatusActivityMergeStep
+	(*FooterMergeStepEnqueued)(nil),                       // 72: frontend.v1.FooterMergeStepEnqueued
+	(*FooterMergeStepHook)(nil),                           // 73: frontend.v1.FooterMergeStepHook
+	(*FooterMergeStepScript)(nil),                         // 74: frontend.v1.FooterMergeStepScript
+	(*FooterMergeStepPrompt)(nil),                         // 75: frontend.v1.FooterMergeStepPrompt
+	(*FooterMergeStepRebasing)(nil),                       // 76: frontend.v1.FooterMergeStepRebasing
+	(*FooterMergeStepRebaseCommand)(nil),                  // 77: frontend.v1.FooterMergeStepRebaseCommand
+	(*FooterMergeStepRebaseFailure)(nil),                  // 78: frontend.v1.FooterMergeStepRebaseFailure
+	(*FooterMergeStepConflict)(nil),                       // 79: frontend.v1.FooterMergeStepConflict
+	(*FooterMergeStepSuite)(nil),                          // 80: frontend.v1.FooterMergeStepSuite
+	(*FooterMergeStepSuiteStarted)(nil),                   // 81: frontend.v1.FooterMergeStepSuiteStarted
+	(*FooterMergeStepSuitePassed)(nil),                    // 82: frontend.v1.FooterMergeStepSuitePassed
+	(*FooterMergeStepSuiteFailed)(nil),                    // 83: frontend.v1.FooterMergeStepSuiteFailed
+	(*FooterMergeStepFixing)(nil),                         // 84: frontend.v1.FooterMergeStepFixing
+	(*FooterMergeStepCommitting)(nil),                     // 85: frontend.v1.FooterMergeStepCommitting
 	(*FooterStatusBackground)(nil),                        // 86: frontend.v1.FooterStatusBackground
 	(*FooterStatusBackgroundAwaiting)(nil),                // 87: frontend.v1.FooterStatusBackgroundAwaiting
 	(*FooterStatusBackgroundActivity)(nil),                // 88: frontend.v1.FooterStatusBackgroundActivity
@@ -19356,7 +19379,7 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	130, // 15: frontend.v1.FooterStatus.closing:type_name -> frontend.v1.FooterStatusClosing
 	137, // 16: frontend.v1.FooterStatus.loading:type_name -> frontend.v1.FooterStatusLoading
 	63,  // 17: frontend.v1.FooterStatus.merge_failed:type_name -> frontend.v1.FooterStatusMergeFailed
-	67,  // 18: frontend.v1.FooterStatus.merged:type_name -> frontend.v1.FooterStatusMerged
+	68,  // 18: frontend.v1.FooterStatus.merged:type_name -> frontend.v1.FooterStatusMerged
 	9,   // 19: frontend.v1.FooterStatus.turn_failed:type_name -> frontend.v1.FooterStatusTurnFailed
 	10,  // 20: frontend.v1.FooterStatus.degraded:type_name -> frontend.v1.FooterStatusDegraded
 	267, // 21: frontend.v1.FooterStatus.network_fault:type_name -> frontend.v1.FooterStatusNetworkFault
@@ -19432,272 +19455,273 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	104, // 91: frontend.v1.FooterStatusInterruptedSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
 	152, // 92: frontend.v1.FooterStatusInterruptedSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
 	53,  // 93: frontend.v1.FooterStatusMerging.enqueued:type_name -> frontend.v1.FooterSubStatusMergingEnqueued
-	54,  // 94: frontend.v1.FooterStatusMerging.preprocessing:type_name -> frontend.v1.FooterSubStatusMergingPreprocessing
+	54,  // 94: frontend.v1.FooterStatusMerging.pre_deploy:type_name -> frontend.v1.FooterSubStatusMergingPreDeploy
 	55,  // 95: frontend.v1.FooterStatusMerging.rebasing:type_name -> frontend.v1.FooterSubStatusMergingRebasing
 	56,  // 96: frontend.v1.FooterStatusMerging.conflict_resolution:type_name -> frontend.v1.FooterSubStatusMergingConflictResolution
 	57,  // 97: frontend.v1.FooterStatusMerging.testing:type_name -> frontend.v1.FooterSubStatusMergingTesting
 	58,  // 98: frontend.v1.FooterStatusMerging.fixing:type_name -> frontend.v1.FooterSubStatusMergingFixing
 	59,  // 99: frontend.v1.FooterStatusMerging.committing:type_name -> frontend.v1.FooterSubStatusMergingCommitting
-	60,  // 100: frontend.v1.FooterStatusMerging.updating_main:type_name -> frontend.v1.FooterSubStatusMergingUpdatingMain
-	61,  // 101: frontend.v1.FooterStatusMerging.postprocessing:type_name -> frontend.v1.FooterSubStatusMergingPostprocessing
+	60,  // 100: frontend.v1.FooterStatusMerging.deploying:type_name -> frontend.v1.FooterSubStatusMergingDeploying
+	61,  // 101: frontend.v1.FooterStatusMerging.post_deploy:type_name -> frontend.v1.FooterSubStatusMergingPostDeploy
 	62,  // 102: frontend.v1.FooterStatusMerging.waiting_on_user:type_name -> frontend.v1.FooterSubStatusMergingWaitingOnUser
 	52,  // 103: frontend.v1.FooterStatusMerging.awaiting_free:type_name -> frontend.v1.FooterSubStatusMergingAwaitingFree
-	68,  // 104: frontend.v1.FooterStatusMerging.activity:type_name -> frontend.v1.FooterStatusMergingActivity
+	69,  // 104: frontend.v1.FooterStatusMerging.activity:type_name -> frontend.v1.FooterStatusMergingActivity
 	64,  // 105: frontend.v1.FooterStatusMergeFailed.conflicts:type_name -> frontend.v1.FooterSubStatusMergeFailedConflicts
 	65,  // 106: frontend.v1.FooterStatusMergeFailed.tests:type_name -> frontend.v1.FooterSubStatusMergeFailedTests
 	66,  // 107: frontend.v1.FooterStatusMergeFailed.other:type_name -> frontend.v1.FooterSubStatusMergeFailedOther
-	68,  // 108: frontend.v1.FooterStatusMergeFailed.activity:type_name -> frontend.v1.FooterStatusMergingActivity
-	68,  // 109: frontend.v1.FooterStatusMerged.activity:type_name -> frontend.v1.FooterStatusMergingActivity
-	69,  // 110: frontend.v1.FooterStatusMergingActivity.salient:type_name -> frontend.v1.FooterStatusMergingSalient
-	153, // 111: frontend.v1.FooterStatusMergingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	144, // 112: frontend.v1.FooterStatusMergingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	70,  // 113: frontend.v1.FooterStatusMergingSalient.merge_step:type_name -> frontend.v1.FooterStatusActivityMergeStep
-	44,  // 114: frontend.v1.FooterStatusMergingSalient.gated_call:type_name -> frontend.v1.FooterStatusActivityGatedCall
-	45,  // 115: frontend.v1.FooterStatusMergingSalient.question_lead:type_name -> frontend.v1.FooterStatusActivityQuestionLead
-	104, // 116: frontend.v1.FooterStatusMergingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	152, // 117: frontend.v1.FooterStatusMergingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	71,  // 118: frontend.v1.FooterStatusActivityMergeStep.enqueued:type_name -> frontend.v1.FooterMergeStepEnqueued
-	72,  // 119: frontend.v1.FooterStatusActivityMergeStep.preprocessing:type_name -> frontend.v1.FooterMergeStepPrompt
-	73,  // 120: frontend.v1.FooterStatusActivityMergeStep.rebasing:type_name -> frontend.v1.FooterMergeStepRebasing
-	76,  // 121: frontend.v1.FooterStatusActivityMergeStep.conflict_resolution:type_name -> frontend.v1.FooterMergeStepConflict
-	77,  // 122: frontend.v1.FooterStatusActivityMergeStep.testing:type_name -> frontend.v1.FooterMergeStepSuite
-	81,  // 123: frontend.v1.FooterStatusActivityMergeStep.fixing:type_name -> frontend.v1.FooterMergeStepFixing
-	82,  // 124: frontend.v1.FooterStatusActivityMergeStep.committing:type_name -> frontend.v1.FooterMergeStepCommitting
-	83,  // 125: frontend.v1.FooterStatusActivityMergeStep.updating_main:type_name -> frontend.v1.FooterMergeStepUpdatingMain
-	72,  // 126: frontend.v1.FooterStatusActivityMergeStep.postprocessing:type_name -> frontend.v1.FooterMergeStepPrompt
-	74,  // 127: frontend.v1.FooterMergeStepRebasing.running:type_name -> frontend.v1.FooterMergeStepRebaseCommand
-	75,  // 128: frontend.v1.FooterMergeStepRebasing.failed:type_name -> frontend.v1.FooterMergeStepRebaseFailure
-	78,  // 129: frontend.v1.FooterMergeStepSuite.started:type_name -> frontend.v1.FooterMergeStepSuiteStarted
-	79,  // 130: frontend.v1.FooterMergeStepSuite.passed:type_name -> frontend.v1.FooterMergeStepSuitePassed
-	80,  // 131: frontend.v1.FooterMergeStepSuite.failed:type_name -> frontend.v1.FooterMergeStepSuiteFailed
-	84,  // 132: frontend.v1.FooterMergeStepUpdatingMain.fetching:type_name -> frontend.v1.FooterMergeStepUpdatingMainFetching
-	85,  // 133: frontend.v1.FooterMergeStepUpdatingMain.fast_forwarding:type_name -> frontend.v1.FooterMergeStepUpdatingMainFastForwarding
-	88,  // 134: frontend.v1.FooterStatusBackground.activity:type_name -> frontend.v1.FooterStatusBackgroundActivity
-	87,  // 135: frontend.v1.FooterStatusBackground.awaiting:type_name -> frontend.v1.FooterStatusBackgroundAwaiting
-	89,  // 136: frontend.v1.FooterStatusBackgroundActivity.salient:type_name -> frontend.v1.FooterStatusBackgroundSalient
-	153, // 137: frontend.v1.FooterStatusBackgroundActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	144, // 138: frontend.v1.FooterStatusBackgroundSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	104, // 139: frontend.v1.FooterStatusBackgroundSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	152, // 140: frontend.v1.FooterStatusBackgroundSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	91,  // 141: frontend.v1.FooterStatusVendorFault.auth:type_name -> frontend.v1.FooterSubStatusVendorFaultAuth
-	92,  // 142: frontend.v1.FooterStatusVendorFault.usage_limit:type_name -> frontend.v1.FooterSubStatusVendorFaultUsageLimit
-	93,  // 143: frontend.v1.FooterStatusVendorFault.vendor_error:type_name -> frontend.v1.FooterSubStatusVendorFaultVendorError
-	94,  // 144: frontend.v1.FooterStatusVendorFault.billing:type_name -> frontend.v1.FooterSubStatusVendorFaultBilling
-	95,  // 145: frontend.v1.FooterStatusVendorFault.query_died:type_name -> frontend.v1.FooterSubStatusVendorFaultQueryDied
-	124, // 146: frontend.v1.FooterStatusVendorFault.vendor_retry:type_name -> frontend.v1.FooterSubStatusVendorFaultVendorRetry
-	125, // 147: frontend.v1.FooterStatusVendorFault.vendor_rejection:type_name -> frontend.v1.FooterSubStatusVendorFaultVendorRejection
-	126, // 148: frontend.v1.FooterStatusVendorFault.vendor_failed:type_name -> frontend.v1.FooterSubStatusVendorFaultVendorFailed
-	96,  // 149: frontend.v1.FooterStatusVendorFault.api_retrying:type_name -> frontend.v1.FooterSubStatusVendorFaultApiRetrying
-	97,  // 150: frontend.v1.FooterStatusVendorFault.activity:type_name -> frontend.v1.FooterStatusVendorFaultActivity
-	98,  // 151: frontend.v1.FooterStatusVendorFaultActivity.salient:type_name -> frontend.v1.FooterStatusVendorFaultSalient
-	153, // 152: frontend.v1.FooterStatusVendorFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	144, // 153: frontend.v1.FooterStatusVendorFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	149, // 154: frontend.v1.FooterStatusVendorFaultSalient.authenticating:type_name -> frontend.v1.FooterStatusActivityAuthenticating
-	103, // 155: frontend.v1.FooterStatusVendorFaultSalient.fault:type_name -> frontend.v1.FooterStatusActivityFault
-	104, // 156: frontend.v1.FooterStatusVendorFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	152, // 157: frontend.v1.FooterStatusVendorFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	148, // 158: frontend.v1.FooterStatusVendorFaultSalient.retrying:type_name -> frontend.v1.FooterStatusActivityRetrying
-	129, // 159: frontend.v1.FooterStatusVendorFaultSalient.vendor_start:type_name -> frontend.v1.FooterStatusActivityVendorStart
-	100, // 160: frontend.v1.FooterStatusVendorFaultSalient.turn_ended:type_name -> frontend.v1.FooterStatusActivityTurnEnded
-	144, // 161: frontend.v1.FooterStatusActivityTurnEnded.retry_at:type_name -> frontend.v1.FooterStatusActivityAt
-	105, // 162: frontend.v1.FooterStatusActivityUpdate.building:type_name -> frontend.v1.FooterStatusActivityUpdateBuilding
-	106, // 163: frontend.v1.FooterStatusActivityUpdate.installing:type_name -> frontend.v1.FooterStatusActivityUpdateInstalling
-	107, // 164: frontend.v1.FooterStatusActivityUpdate.restarting_services:type_name -> frontend.v1.FooterStatusActivityUpdateRestartingServices
-	108, // 165: frontend.v1.FooterStatusActivityUpdate.handing_over:type_name -> frontend.v1.FooterStatusActivityUpdateHandingOver
-	109, // 166: frontend.v1.FooterStatusActivityUpdate.waiting:type_name -> frontend.v1.FooterStatusActivityUpdateWaiting
-	116, // 167: frontend.v1.FooterStatusActivityUpdate.notes:type_name -> frontend.v1.FooterStatusActivityUpdateNote
-	110, // 168: frontend.v1.FooterStatusActivityUpdateBuilding.components:type_name -> frontend.v1.FooterStatusActivityUpdateComponent
-	110, // 169: frontend.v1.FooterStatusActivityUpdateRestartingServices.services:type_name -> frontend.v1.FooterStatusActivityUpdateComponent
-	111, // 170: frontend.v1.FooterStatusActivityUpdateComponent.store:type_name -> frontend.v1.FooterStatusActivityUpdateComponentStore
-	112, // 171: frontend.v1.FooterStatusActivityUpdateComponent.sidecar:type_name -> frontend.v1.FooterStatusActivityUpdateComponentSidecar
-	113, // 172: frontend.v1.FooterStatusActivityUpdateComponent.daemon:type_name -> frontend.v1.FooterStatusActivityUpdateComponentDaemon
-	114, // 173: frontend.v1.FooterStatusActivityUpdateComponent.shim:type_name -> frontend.v1.FooterStatusActivityUpdateComponentShim
-	115, // 174: frontend.v1.FooterStatusActivityUpdateComponent.webapp:type_name -> frontend.v1.FooterStatusActivityUpdateComponentWebapp
-	117, // 175: frontend.v1.FooterStatusActivityUpdateNote.shim_when_idle:type_name -> frontend.v1.FooterStatusActivityUpdateNoteShimWhenIdle
-	119, // 176: frontend.v1.FooterStatusAgentReplFault.degraded:type_name -> frontend.v1.FooterSubStatusAgentReplFaultDegraded
-	120, // 177: frontend.v1.FooterStatusAgentReplFault.severed:type_name -> frontend.v1.FooterSubStatusAgentReplFaultSevered
-	121, // 178: frontend.v1.FooterStatusAgentReplFault.dead:type_name -> frontend.v1.FooterSubStatusAgentReplFaultDead
-	122, // 179: frontend.v1.FooterStatusAgentReplFault.start_failed:type_name -> frontend.v1.FooterSubStatusAgentReplFaultStartFailed
-	99,  // 180: frontend.v1.FooterStatusAgentReplFault.daemon_impaired:type_name -> frontend.v1.FooterSubStatusAgentReplFaultDaemonImpaired
-	123, // 181: frontend.v1.FooterStatusAgentReplFault.turn_died:type_name -> frontend.v1.FooterSubStatusAgentReplFaultTurnDied
-	127, // 182: frontend.v1.FooterStatusAgentReplFault.activity:type_name -> frontend.v1.FooterStatusAgentReplFaultActivity
-	128, // 183: frontend.v1.FooterStatusAgentReplFaultActivity.salient:type_name -> frontend.v1.FooterStatusAgentReplFaultSalient
-	153, // 184: frontend.v1.FooterStatusAgentReplFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	144, // 185: frontend.v1.FooterStatusAgentReplFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	102, // 186: frontend.v1.FooterStatusAgentReplFaultSalient.start_failed:type_name -> frontend.v1.FooterStatusActivityStartFailed
-	100, // 187: frontend.v1.FooterStatusAgentReplFaultSalient.turn_ended:type_name -> frontend.v1.FooterStatusActivityTurnEnded
-	103, // 188: frontend.v1.FooterStatusAgentReplFaultSalient.fault:type_name -> frontend.v1.FooterStatusActivityFault
-	104, // 189: frontend.v1.FooterStatusAgentReplFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	152, // 190: frontend.v1.FooterStatusAgentReplFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	131, // 191: frontend.v1.FooterStatusClosing.blocked:type_name -> frontend.v1.FooterSubStatusCloseBlocked
-	135, // 192: frontend.v1.FooterStatusClosing.activity:type_name -> frontend.v1.FooterStatusClosingActivity
-	133, // 193: frontend.v1.FooterStatusStarting.activity:type_name -> frontend.v1.FooterStatusStartingActivity
-	134, // 194: frontend.v1.FooterStatusStartingActivity.salient:type_name -> frontend.v1.FooterStatusStartingSalient
-	153, // 195: frontend.v1.FooterStatusStartingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	144, // 196: frontend.v1.FooterStatusStartingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	102, // 197: frontend.v1.FooterStatusStartingSalient.start_failed:type_name -> frontend.v1.FooterStatusActivityStartFailed
-	104, // 198: frontend.v1.FooterStatusStartingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	152, // 199: frontend.v1.FooterStatusStartingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	103, // 200: frontend.v1.FooterStatusStartingSalient.fault:type_name -> frontend.v1.FooterStatusActivityFault
-	136, // 201: frontend.v1.FooterStatusClosingActivity.salient:type_name -> frontend.v1.FooterStatusClosingSalient
-	153, // 202: frontend.v1.FooterStatusClosingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	144, // 203: frontend.v1.FooterStatusClosingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	151, // 204: frontend.v1.FooterStatusClosingSalient.close_blocked:type_name -> frontend.v1.FooterStatusActivityCloseBlocked
-	104, // 205: frontend.v1.FooterStatusClosingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	152, // 206: frontend.v1.FooterStatusClosingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	138, // 207: frontend.v1.FooterStatusLoading.memory:type_name -> frontend.v1.FooterSubStatusLoadingMemory
-	139, // 208: frontend.v1.FooterStatusLoading.invoked:type_name -> frontend.v1.FooterSubStatusLoadingInvoked
-	140, // 209: frontend.v1.FooterStatusLoading.discovered:type_name -> frontend.v1.FooterSubStatusLoadingDiscovered
-	141, // 210: frontend.v1.FooterStatusLoading.listing:type_name -> frontend.v1.FooterSubStatusLoadingListing
-	142, // 211: frontend.v1.FooterStatusLoading.activity:type_name -> frontend.v1.FooterStatusLoadingActivity
-	143, // 212: frontend.v1.FooterStatusLoadingActivity.salient:type_name -> frontend.v1.FooterStatusLoadingSalient
-	153, // 213: frontend.v1.FooterStatusLoadingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	144, // 214: frontend.v1.FooterStatusLoadingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	104, // 215: frontend.v1.FooterStatusLoadingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	152, // 216: frontend.v1.FooterStatusLoadingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	146, // 217: frontend.v1.FooterStatusActivityWakeup.reason:type_name -> frontend.v1.FooterStatusActivityWakeupReason
-	144, // 218: frontend.v1.FooterStatusActivityRetrying.next_attempt:type_name -> frontend.v1.FooterStatusActivityAt
-	154, // 219: frontend.v1.FooterActivityTransientOverEnduring.transient:type_name -> frontend.v1.FooterActivityTransient
-	170, // 220: frontend.v1.FooterActivityTransientOverEnduring.enduring:type_name -> frontend.v1.FooterActivityEnduring
-	144, // 221: frontend.v1.FooterActivityTransient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	161, // 222: frontend.v1.FooterActivityTransient.expiry:type_name -> frontend.v1.FooterActivityTransientExpiry
-	162, // 223: frontend.v1.FooterActivityTransient.agent:type_name -> frontend.v1.FooterActivityTransientAgent
-	163, // 224: frontend.v1.FooterActivityTransient.task:type_name -> frontend.v1.FooterActivityTransientTask
-	164, // 225: frontend.v1.FooterActivityTransient.hook:type_name -> frontend.v1.FooterActivityTransientHook
-	165, // 226: frontend.v1.FooterActivityTransient.context_injected:type_name -> frontend.v1.FooterActivityTransientContextInjected
-	103, // 227: frontend.v1.FooterActivityTransient.fault:type_name -> frontend.v1.FooterStatusActivityFault
-	166, // 228: frontend.v1.FooterActivityTransient.daemon_warning:type_name -> frontend.v1.FooterActivityTransientDaemonWarning
-	167, // 229: frontend.v1.FooterActivityTransient.daemon_error:type_name -> frontend.v1.FooterActivityTransientDaemonError
-	168, // 230: frontend.v1.FooterActivityTransient.session_change:type_name -> frontend.v1.FooterActivityTransientSessionChange
-	169, // 231: frontend.v1.FooterActivityTransient.updated:type_name -> frontend.v1.FooterActivityTransientUpdated
-	156, // 232: frontend.v1.FooterActivityTransient.network_resume:type_name -> frontend.v1.FooterActivityTransientNetworkResume
-	155, // 233: frontend.v1.FooterActivityTransient.compaction_concluded:type_name -> frontend.v1.FooterActivityTransientCompactionConcluded
-	147, // 234: frontend.v1.FooterActivityTransient.api_restored:type_name -> frontend.v1.FooterActivityTransientApiRestored
-	42,  // 235: frontend.v1.FooterActivityTransientCompactionConcluded.parts:type_name -> frontend.v1.FooterColdGateFiguredLine
-	157, // 236: frontend.v1.FooterActivityTransientNetworkResume.waiting:type_name -> frontend.v1.FooterActivityTransientNetworkResumeWaiting
-	158, // 237: frontend.v1.FooterActivityTransientNetworkResume.resumed:type_name -> frontend.v1.FooterActivityTransientNetworkResumeResumed
-	159, // 238: frontend.v1.FooterActivityTransientNetworkResume.gave_up:type_name -> frontend.v1.FooterActivityTransientNetworkResumeGaveUp
-	160, // 239: frontend.v1.FooterActivityTransientNetworkResume.abandoned:type_name -> frontend.v1.FooterActivityTransientNetworkResumeAbandoned
-	116, // 240: frontend.v1.FooterActivityTransientUpdated.notes:type_name -> frontend.v1.FooterStatusActivityUpdateNote
-	174, // 241: frontend.v1.FooterActivityEnduring.usage:type_name -> frontend.v1.FooterActivityEnduringUsage
-	171, // 242: frontend.v1.FooterActivityEnduring.unobserved:type_name -> frontend.v1.FooterActivityEnduringUnobserved
-	172, // 243: frontend.v1.FooterActivityEnduring.seat_spend:type_name -> frontend.v1.FooterActivityEnduringSeatSpend
-	173, // 244: frontend.v1.FooterActivityEnduringSeatSpend.allotment:type_name -> frontend.v1.FooterMoney
-	173, // 245: frontend.v1.FooterActivityEnduringSeatSpend.spent:type_name -> frontend.v1.FooterMoney
-	181, // 246: frontend.v1.FooterActivityEnduringUsage.session:type_name -> frontend.v1.FooterAllowance
-	181, // 247: frontend.v1.FooterActivityEnduringUsage.weekly:type_name -> frontend.v1.FooterAllowance
-	175, // 248: frontend.v1.FooterActivityEnduringUsage.sample:type_name -> frontend.v1.FooterAllowanceSample
-	181, // 249: frontend.v1.FooterActivityEnduringUsage.overage:type_name -> frontend.v1.FooterAllowance
-	176, // 250: frontend.v1.FooterAllowanceSample.available:type_name -> frontend.v1.FooterAllowanceSampleAvailable
-	177, // 251: frontend.v1.FooterAllowanceSample.service_unavailable:type_name -> frontend.v1.FooterAllowanceSampleServiceUnavailable
-	178, // 252: frontend.v1.FooterAllowanceSample.window_unavailable:type_name -> frontend.v1.FooterAllowanceSampleWindowUnavailable
-	179, // 253: frontend.v1.FooterAllowanceSample.utilization_unavailable:type_name -> frontend.v1.FooterAllowanceSampleUtilizationUnavailable
-	180, // 254: frontend.v1.FooterAllowanceSample.sampling_failure:type_name -> frontend.v1.FooterAllowanceSampleSamplingFailure
-	182, // 255: frontend.v1.FooterAllowance.allowed:type_name -> frontend.v1.FooterAllowanceAllowed
-	183, // 256: frontend.v1.FooterAllowance.allowed_warning:type_name -> frontend.v1.FooterAllowanceAllowedWarning
-	184, // 257: frontend.v1.FooterAllowance.rejected:type_name -> frontend.v1.FooterAllowanceRejected
-	187, // 258: frontend.v1.FooterTokensCell.input:type_name -> frontend.v1.FooterTokensCellInput
-	188, // 259: frontend.v1.FooterTokensCell.alarm:type_name -> frontend.v1.FooterTokensCellAlarm
-	189, // 260: frontend.v1.FooterTokensCell.verdict:type_name -> frontend.v1.FooterTokensCellVerdict
-	272, // 261: frontend.v1.FooterTokensCellInput.heat:type_name -> frontend.v1.TokenHeat
-	190, // 262: frontend.v1.FooterTokensCellVerdict.complete:type_name -> frontend.v1.FooterTokensCellVerdictComplete
-	191, // 263: frontend.v1.FooterTokensCellVerdict.incomplete:type_name -> frontend.v1.FooterTokensCellVerdictIncomplete
-	192, // 264: frontend.v1.FooterTokensCellVerdict.invalid:type_name -> frontend.v1.FooterTokensCellVerdictInvalid
-	198, // 265: frontend.v1.FooterLiveWorkChips.agents:type_name -> frontend.v1.FooterChipAgents
-	200, // 266: frontend.v1.FooterLiveWorkChips.tasks:type_name -> frontend.v1.FooterChipTasks
-	201, // 267: frontend.v1.FooterLiveWorkChips.shells:type_name -> frontend.v1.FooterChipShells
-	197, // 268: frontend.v1.FooterLiveWorkChips.monitors:type_name -> frontend.v1.FooterChipMonitors
-	196, // 269: frontend.v1.FooterLiveWorkChips.crons:type_name -> frontend.v1.FooterChipCrons
-	194, // 270: frontend.v1.FooterLiveWorkChips.merges:type_name -> frontend.v1.FooterChipMerges
-	195, // 271: frontend.v1.FooterChipMerges.waiting_on_user:type_name -> frontend.v1.FooterChipMergesWaitingOnUser
-	199, // 272: frontend.v1.FooterChipAgents.waiting_for_api:type_name -> frontend.v1.FooterChipAgentsWaitingForApi
-	228, // 273: frontend.v1.FooterExpanded.tokens:type_name -> frontend.v1.FooterExpandedTokens
-	243, // 274: frontend.v1.FooterExpanded.agents:type_name -> frontend.v1.FooterExpandedAgents
-	251, // 275: frontend.v1.FooterExpanded.tasks:type_name -> frontend.v1.FooterExpandedTasks
-	259, // 276: frontend.v1.FooterExpanded.shells:type_name -> frontend.v1.FooterExpandedShells
-	223, // 277: frontend.v1.FooterExpanded.monitors:type_name -> frontend.v1.FooterExpandedMonitors
-	207, // 278: frontend.v1.FooterExpanded.crons:type_name -> frontend.v1.FooterExpandedCrons
-	217, // 279: frontend.v1.FooterExpanded.merges:type_name -> frontend.v1.FooterExpandedMerges
-	204, // 280: frontend.v1.FooterExpandedFocus.agents:type_name -> frontend.v1.FooterFocusAgents
-	205, // 281: frontend.v1.FooterExpandedFocus.shells:type_name -> frontend.v1.FooterFocusShells
-	206, // 282: frontend.v1.FooterExpandedFocus.monitors:type_name -> frontend.v1.FooterFocusMonitors
-	208, // 283: frontend.v1.FooterExpandedCrons.rows:type_name -> frontend.v1.FooterCronRow
-	214, // 284: frontend.v1.FooterExpandedCrons.wakeup:type_name -> frontend.v1.FooterWakeupRow
-	209, // 285: frontend.v1.FooterCronRow.schedule:type_name -> frontend.v1.FooterCronRowSchedule
-	210, // 286: frontend.v1.FooterCronRow.prompt:type_name -> frontend.v1.FooterCronRowPrompt
-	211, // 287: frontend.v1.FooterCronRow.next_fire:type_name -> frontend.v1.FooterCronRowNextFire
-	212, // 288: frontend.v1.FooterCronRow.recurring:type_name -> frontend.v1.FooterCronRowRecurring
-	213, // 289: frontend.v1.FooterCronRow.durable:type_name -> frontend.v1.FooterCronRowDurable
-	215, // 290: frontend.v1.FooterWakeupRow.reason:type_name -> frontend.v1.FooterWakeupRowReason
-	216, // 291: frontend.v1.FooterWakeupRow.wake_at:type_name -> frontend.v1.FooterWakeupRowWakeAt
-	218, // 292: frontend.v1.FooterExpandedMerges.rows:type_name -> frontend.v1.FooterMergeRow
-	219, // 293: frontend.v1.FooterMergeRow.label:type_name -> frontend.v1.FooterMergeRowLabel
-	220, // 294: frontend.v1.FooterMergeRow.step:type_name -> frontend.v1.FooterMergeRowStep
-	221, // 295: frontend.v1.FooterMergeRow.runtime:type_name -> frontend.v1.FooterMergeRowRuntime
-	261, // 296: frontend.v1.FooterMergeRow.work:type_name -> frontend.v1.FooterWorkId
-	262, // 297: frontend.v1.FooterMergeRow.jump:type_name -> frontend.v1.FooterJump
-	222, // 298: frontend.v1.FooterMergeRow.waiting_on_user:type_name -> frontend.v1.FooterMergeRowWaitingOnUser
-	224, // 299: frontend.v1.FooterExpandedMonitors.rows:type_name -> frontend.v1.FooterMonitorRow
-	225, // 300: frontend.v1.FooterMonitorRow.description:type_name -> frontend.v1.FooterMonitorRowDescription
-	226, // 301: frontend.v1.FooterMonitorRow.runtime:type_name -> frontend.v1.FooterMonitorRowRuntime
-	227, // 302: frontend.v1.FooterMonitorRow.persistent:type_name -> frontend.v1.FooterMonitorRowPersistent
-	261, // 303: frontend.v1.FooterMonitorRow.work:type_name -> frontend.v1.FooterWorkId
-	262, // 304: frontend.v1.FooterMonitorRow.jump:type_name -> frontend.v1.FooterJump
-	232, // 305: frontend.v1.FooterExpandedTokens.input:type_name -> frontend.v1.FooterTokensLineInput
-	233, // 306: frontend.v1.FooterExpandedTokens.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
-	234, // 307: frontend.v1.FooterExpandedTokens.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
-	235, // 308: frontend.v1.FooterExpandedTokens.output:type_name -> frontend.v1.FooterTokensLineOutput
-	236, // 309: frontend.v1.FooterExpandedTokens.thinking:type_name -> frontend.v1.FooterTokensLineThinking
-	237, // 310: frontend.v1.FooterExpandedTokens.first_token:type_name -> frontend.v1.FooterTokensLineFirstToken
-	238, // 311: frontend.v1.FooterExpandedTokens.alarm:type_name -> frontend.v1.FooterTokensLineAlarm
-	239, // 312: frontend.v1.FooterExpandedTokens.verdict:type_name -> frontend.v1.FooterTokensLineVerdict
-	229, // 313: frontend.v1.FooterExpandedTokens.context_growth:type_name -> frontend.v1.FooterTokensLineContextGrowth
-	231, // 314: frontend.v1.FooterExpandedTokens.agents:type_name -> frontend.v1.FooterTokensAgent
-	230, // 315: frontend.v1.FooterTokensLineContextGrowth.since_cut:type_name -> frontend.v1.FooterTokensLineContextGrowthSinceCut
-	232, // 316: frontend.v1.FooterTokensAgent.input:type_name -> frontend.v1.FooterTokensLineInput
-	233, // 317: frontend.v1.FooterTokensAgent.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
-	234, // 318: frontend.v1.FooterTokensAgent.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
-	235, // 319: frontend.v1.FooterTokensAgent.output:type_name -> frontend.v1.FooterTokensLineOutput
-	240, // 320: frontend.v1.FooterTokensLineVerdict.complete:type_name -> frontend.v1.FooterTokensLineVerdictComplete
-	241, // 321: frontend.v1.FooterTokensLineVerdict.incomplete:type_name -> frontend.v1.FooterTokensLineVerdictIncomplete
-	242, // 322: frontend.v1.FooterTokensLineVerdict.invalid:type_name -> frontend.v1.FooterTokensLineVerdictInvalid
-	244, // 323: frontend.v1.FooterExpandedAgents.rows:type_name -> frontend.v1.FooterAgentRow
-	247, // 324: frontend.v1.FooterAgentRow.label:type_name -> frontend.v1.FooterAgentRowLabel
-	248, // 325: frontend.v1.FooterAgentRow.description:type_name -> frontend.v1.FooterAgentRowDescription
-	249, // 326: frontend.v1.FooterAgentRow.tokens:type_name -> frontend.v1.FooterAgentRowTokens
-	250, // 327: frontend.v1.FooterAgentRow.runtime:type_name -> frontend.v1.FooterAgentRowRuntime
-	261, // 328: frontend.v1.FooterAgentRow.work:type_name -> frontend.v1.FooterWorkId
-	262, // 329: frontend.v1.FooterAgentRow.jump:type_name -> frontend.v1.FooterJump
-	245, // 330: frontend.v1.FooterAgentRow.running:type_name -> frontend.v1.FooterAgentRowRunning
-	246, // 331: frontend.v1.FooterAgentRow.waiting_for_api:type_name -> frontend.v1.FooterAgentRowWaitingForApi
-	252, // 332: frontend.v1.FooterExpandedTasks.rows:type_name -> frontend.v1.FooterTaskRow
-	254, // 333: frontend.v1.FooterTaskRow.status:type_name -> frontend.v1.FooterTaskRowStatus
-	253, // 334: frontend.v1.FooterTaskRow.subject:type_name -> frontend.v1.FooterTaskRowSubject
-	255, // 335: frontend.v1.FooterTaskRowStatus.pending:type_name -> frontend.v1.FooterTaskRowPending
-	256, // 336: frontend.v1.FooterTaskRowStatus.running:type_name -> frontend.v1.FooterTaskRowRunning
-	258, // 337: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
-	257, // 338: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
-	260, // 339: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
-	265, // 340: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
-	266, // 341: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
-	261, // 342: frontend.v1.FooterShellRow.work:type_name -> frontend.v1.FooterWorkId
-	262, // 343: frontend.v1.FooterShellRow.jump:type_name -> frontend.v1.FooterJump
-	273, // 344: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
-	263, // 345: frontend.v1.FooterJump.unresolved:type_name -> frontend.v1.FooterJumpUnresolved
-	264, // 346: frontend.v1.FooterJumpUnresolved.not_drawn:type_name -> frontend.v1.FooterJumpNotDrawn
-	268, // 347: frontend.v1.FooterStatusNetworkFault.offline:type_name -> frontend.v1.FooterSubStatusNetworkFaultOffline
-	269, // 348: frontend.v1.FooterStatusNetworkFault.activity:type_name -> frontend.v1.FooterStatusNetworkFaultActivity
-	270, // 349: frontend.v1.FooterStatusNetworkFaultActivity.salient:type_name -> frontend.v1.FooterStatusNetworkFaultSalient
-	153, // 350: frontend.v1.FooterStatusNetworkFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
-	144, // 351: frontend.v1.FooterStatusNetworkFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
-	271, // 352: frontend.v1.FooterStatusNetworkFaultSalient.offline:type_name -> frontend.v1.FooterStatusActivityNetworkOffline
-	104, // 353: frontend.v1.FooterStatusNetworkFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
-	152, // 354: frontend.v1.FooterStatusNetworkFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	355, // [355:355] is the sub-list for method output_type
-	355, // [355:355] is the sub-list for method input_type
-	355, // [355:355] is the sub-list for extension type_name
-	355, // [355:355] is the sub-list for extension extendee
-	0,   // [0:355] is the sub-list for field type_name
+	67,  // 108: frontend.v1.FooterStatusMergeFailed.hook:type_name -> frontend.v1.FooterSubStatusMergeFailedHook
+	69,  // 109: frontend.v1.FooterStatusMergeFailed.activity:type_name -> frontend.v1.FooterStatusMergingActivity
+	69,  // 110: frontend.v1.FooterStatusMerged.activity:type_name -> frontend.v1.FooterStatusMergingActivity
+	70,  // 111: frontend.v1.FooterStatusMergingActivity.salient:type_name -> frontend.v1.FooterStatusMergingSalient
+	153, // 112: frontend.v1.FooterStatusMergingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	144, // 113: frontend.v1.FooterStatusMergingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	71,  // 114: frontend.v1.FooterStatusMergingSalient.merge_step:type_name -> frontend.v1.FooterStatusActivityMergeStep
+	44,  // 115: frontend.v1.FooterStatusMergingSalient.gated_call:type_name -> frontend.v1.FooterStatusActivityGatedCall
+	45,  // 116: frontend.v1.FooterStatusMergingSalient.question_lead:type_name -> frontend.v1.FooterStatusActivityQuestionLead
+	104, // 117: frontend.v1.FooterStatusMergingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	152, // 118: frontend.v1.FooterStatusMergingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	72,  // 119: frontend.v1.FooterStatusActivityMergeStep.enqueued:type_name -> frontend.v1.FooterMergeStepEnqueued
+	73,  // 120: frontend.v1.FooterStatusActivityMergeStep.pre_deploy:type_name -> frontend.v1.FooterMergeStepHook
+	76,  // 121: frontend.v1.FooterStatusActivityMergeStep.rebasing:type_name -> frontend.v1.FooterMergeStepRebasing
+	79,  // 122: frontend.v1.FooterStatusActivityMergeStep.conflict_resolution:type_name -> frontend.v1.FooterMergeStepConflict
+	80,  // 123: frontend.v1.FooterStatusActivityMergeStep.testing:type_name -> frontend.v1.FooterMergeStepSuite
+	84,  // 124: frontend.v1.FooterStatusActivityMergeStep.fixing:type_name -> frontend.v1.FooterMergeStepFixing
+	85,  // 125: frontend.v1.FooterStatusActivityMergeStep.committing:type_name -> frontend.v1.FooterMergeStepCommitting
+	73,  // 126: frontend.v1.FooterStatusActivityMergeStep.deploying:type_name -> frontend.v1.FooterMergeStepHook
+	73,  // 127: frontend.v1.FooterStatusActivityMergeStep.post_deploy:type_name -> frontend.v1.FooterMergeStepHook
+	75,  // 128: frontend.v1.FooterMergeStepHook.prompt:type_name -> frontend.v1.FooterMergeStepPrompt
+	74,  // 129: frontend.v1.FooterMergeStepHook.script:type_name -> frontend.v1.FooterMergeStepScript
+	77,  // 130: frontend.v1.FooterMergeStepRebasing.running:type_name -> frontend.v1.FooterMergeStepRebaseCommand
+	78,  // 131: frontend.v1.FooterMergeStepRebasing.failed:type_name -> frontend.v1.FooterMergeStepRebaseFailure
+	81,  // 132: frontend.v1.FooterMergeStepSuite.started:type_name -> frontend.v1.FooterMergeStepSuiteStarted
+	82,  // 133: frontend.v1.FooterMergeStepSuite.passed:type_name -> frontend.v1.FooterMergeStepSuitePassed
+	83,  // 134: frontend.v1.FooterMergeStepSuite.failed:type_name -> frontend.v1.FooterMergeStepSuiteFailed
+	88,  // 135: frontend.v1.FooterStatusBackground.activity:type_name -> frontend.v1.FooterStatusBackgroundActivity
+	87,  // 136: frontend.v1.FooterStatusBackground.awaiting:type_name -> frontend.v1.FooterStatusBackgroundAwaiting
+	89,  // 137: frontend.v1.FooterStatusBackgroundActivity.salient:type_name -> frontend.v1.FooterStatusBackgroundSalient
+	153, // 138: frontend.v1.FooterStatusBackgroundActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	144, // 139: frontend.v1.FooterStatusBackgroundSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	104, // 140: frontend.v1.FooterStatusBackgroundSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	152, // 141: frontend.v1.FooterStatusBackgroundSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	91,  // 142: frontend.v1.FooterStatusVendorFault.auth:type_name -> frontend.v1.FooterSubStatusVendorFaultAuth
+	92,  // 143: frontend.v1.FooterStatusVendorFault.usage_limit:type_name -> frontend.v1.FooterSubStatusVendorFaultUsageLimit
+	93,  // 144: frontend.v1.FooterStatusVendorFault.vendor_error:type_name -> frontend.v1.FooterSubStatusVendorFaultVendorError
+	94,  // 145: frontend.v1.FooterStatusVendorFault.billing:type_name -> frontend.v1.FooterSubStatusVendorFaultBilling
+	95,  // 146: frontend.v1.FooterStatusVendorFault.query_died:type_name -> frontend.v1.FooterSubStatusVendorFaultQueryDied
+	124, // 147: frontend.v1.FooterStatusVendorFault.vendor_retry:type_name -> frontend.v1.FooterSubStatusVendorFaultVendorRetry
+	125, // 148: frontend.v1.FooterStatusVendorFault.vendor_rejection:type_name -> frontend.v1.FooterSubStatusVendorFaultVendorRejection
+	126, // 149: frontend.v1.FooterStatusVendorFault.vendor_failed:type_name -> frontend.v1.FooterSubStatusVendorFaultVendorFailed
+	96,  // 150: frontend.v1.FooterStatusVendorFault.api_retrying:type_name -> frontend.v1.FooterSubStatusVendorFaultApiRetrying
+	97,  // 151: frontend.v1.FooterStatusVendorFault.activity:type_name -> frontend.v1.FooterStatusVendorFaultActivity
+	98,  // 152: frontend.v1.FooterStatusVendorFaultActivity.salient:type_name -> frontend.v1.FooterStatusVendorFaultSalient
+	153, // 153: frontend.v1.FooterStatusVendorFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	144, // 154: frontend.v1.FooterStatusVendorFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	149, // 155: frontend.v1.FooterStatusVendorFaultSalient.authenticating:type_name -> frontend.v1.FooterStatusActivityAuthenticating
+	103, // 156: frontend.v1.FooterStatusVendorFaultSalient.fault:type_name -> frontend.v1.FooterStatusActivityFault
+	104, // 157: frontend.v1.FooterStatusVendorFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	152, // 158: frontend.v1.FooterStatusVendorFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	148, // 159: frontend.v1.FooterStatusVendorFaultSalient.retrying:type_name -> frontend.v1.FooterStatusActivityRetrying
+	129, // 160: frontend.v1.FooterStatusVendorFaultSalient.vendor_start:type_name -> frontend.v1.FooterStatusActivityVendorStart
+	100, // 161: frontend.v1.FooterStatusVendorFaultSalient.turn_ended:type_name -> frontend.v1.FooterStatusActivityTurnEnded
+	144, // 162: frontend.v1.FooterStatusActivityTurnEnded.retry_at:type_name -> frontend.v1.FooterStatusActivityAt
+	105, // 163: frontend.v1.FooterStatusActivityUpdate.building:type_name -> frontend.v1.FooterStatusActivityUpdateBuilding
+	106, // 164: frontend.v1.FooterStatusActivityUpdate.installing:type_name -> frontend.v1.FooterStatusActivityUpdateInstalling
+	107, // 165: frontend.v1.FooterStatusActivityUpdate.restarting_services:type_name -> frontend.v1.FooterStatusActivityUpdateRestartingServices
+	108, // 166: frontend.v1.FooterStatusActivityUpdate.handing_over:type_name -> frontend.v1.FooterStatusActivityUpdateHandingOver
+	109, // 167: frontend.v1.FooterStatusActivityUpdate.waiting:type_name -> frontend.v1.FooterStatusActivityUpdateWaiting
+	116, // 168: frontend.v1.FooterStatusActivityUpdate.notes:type_name -> frontend.v1.FooterStatusActivityUpdateNote
+	110, // 169: frontend.v1.FooterStatusActivityUpdateBuilding.components:type_name -> frontend.v1.FooterStatusActivityUpdateComponent
+	110, // 170: frontend.v1.FooterStatusActivityUpdateRestartingServices.services:type_name -> frontend.v1.FooterStatusActivityUpdateComponent
+	111, // 171: frontend.v1.FooterStatusActivityUpdateComponent.store:type_name -> frontend.v1.FooterStatusActivityUpdateComponentStore
+	112, // 172: frontend.v1.FooterStatusActivityUpdateComponent.sidecar:type_name -> frontend.v1.FooterStatusActivityUpdateComponentSidecar
+	113, // 173: frontend.v1.FooterStatusActivityUpdateComponent.daemon:type_name -> frontend.v1.FooterStatusActivityUpdateComponentDaemon
+	114, // 174: frontend.v1.FooterStatusActivityUpdateComponent.shim:type_name -> frontend.v1.FooterStatusActivityUpdateComponentShim
+	115, // 175: frontend.v1.FooterStatusActivityUpdateComponent.webapp:type_name -> frontend.v1.FooterStatusActivityUpdateComponentWebapp
+	117, // 176: frontend.v1.FooterStatusActivityUpdateNote.shim_when_idle:type_name -> frontend.v1.FooterStatusActivityUpdateNoteShimWhenIdle
+	119, // 177: frontend.v1.FooterStatusAgentReplFault.degraded:type_name -> frontend.v1.FooterSubStatusAgentReplFaultDegraded
+	120, // 178: frontend.v1.FooterStatusAgentReplFault.severed:type_name -> frontend.v1.FooterSubStatusAgentReplFaultSevered
+	121, // 179: frontend.v1.FooterStatusAgentReplFault.dead:type_name -> frontend.v1.FooterSubStatusAgentReplFaultDead
+	122, // 180: frontend.v1.FooterStatusAgentReplFault.start_failed:type_name -> frontend.v1.FooterSubStatusAgentReplFaultStartFailed
+	99,  // 181: frontend.v1.FooterStatusAgentReplFault.daemon_impaired:type_name -> frontend.v1.FooterSubStatusAgentReplFaultDaemonImpaired
+	123, // 182: frontend.v1.FooterStatusAgentReplFault.turn_died:type_name -> frontend.v1.FooterSubStatusAgentReplFaultTurnDied
+	127, // 183: frontend.v1.FooterStatusAgentReplFault.activity:type_name -> frontend.v1.FooterStatusAgentReplFaultActivity
+	128, // 184: frontend.v1.FooterStatusAgentReplFaultActivity.salient:type_name -> frontend.v1.FooterStatusAgentReplFaultSalient
+	153, // 185: frontend.v1.FooterStatusAgentReplFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	144, // 186: frontend.v1.FooterStatusAgentReplFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	102, // 187: frontend.v1.FooterStatusAgentReplFaultSalient.start_failed:type_name -> frontend.v1.FooterStatusActivityStartFailed
+	100, // 188: frontend.v1.FooterStatusAgentReplFaultSalient.turn_ended:type_name -> frontend.v1.FooterStatusActivityTurnEnded
+	103, // 189: frontend.v1.FooterStatusAgentReplFaultSalient.fault:type_name -> frontend.v1.FooterStatusActivityFault
+	104, // 190: frontend.v1.FooterStatusAgentReplFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	152, // 191: frontend.v1.FooterStatusAgentReplFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	131, // 192: frontend.v1.FooterStatusClosing.blocked:type_name -> frontend.v1.FooterSubStatusCloseBlocked
+	135, // 193: frontend.v1.FooterStatusClosing.activity:type_name -> frontend.v1.FooterStatusClosingActivity
+	133, // 194: frontend.v1.FooterStatusStarting.activity:type_name -> frontend.v1.FooterStatusStartingActivity
+	134, // 195: frontend.v1.FooterStatusStartingActivity.salient:type_name -> frontend.v1.FooterStatusStartingSalient
+	153, // 196: frontend.v1.FooterStatusStartingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	144, // 197: frontend.v1.FooterStatusStartingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	102, // 198: frontend.v1.FooterStatusStartingSalient.start_failed:type_name -> frontend.v1.FooterStatusActivityStartFailed
+	104, // 199: frontend.v1.FooterStatusStartingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	152, // 200: frontend.v1.FooterStatusStartingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	103, // 201: frontend.v1.FooterStatusStartingSalient.fault:type_name -> frontend.v1.FooterStatusActivityFault
+	136, // 202: frontend.v1.FooterStatusClosingActivity.salient:type_name -> frontend.v1.FooterStatusClosingSalient
+	153, // 203: frontend.v1.FooterStatusClosingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	144, // 204: frontend.v1.FooterStatusClosingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	151, // 205: frontend.v1.FooterStatusClosingSalient.close_blocked:type_name -> frontend.v1.FooterStatusActivityCloseBlocked
+	104, // 206: frontend.v1.FooterStatusClosingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	152, // 207: frontend.v1.FooterStatusClosingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	138, // 208: frontend.v1.FooterStatusLoading.memory:type_name -> frontend.v1.FooterSubStatusLoadingMemory
+	139, // 209: frontend.v1.FooterStatusLoading.invoked:type_name -> frontend.v1.FooterSubStatusLoadingInvoked
+	140, // 210: frontend.v1.FooterStatusLoading.discovered:type_name -> frontend.v1.FooterSubStatusLoadingDiscovered
+	141, // 211: frontend.v1.FooterStatusLoading.listing:type_name -> frontend.v1.FooterSubStatusLoadingListing
+	142, // 212: frontend.v1.FooterStatusLoading.activity:type_name -> frontend.v1.FooterStatusLoadingActivity
+	143, // 213: frontend.v1.FooterStatusLoadingActivity.salient:type_name -> frontend.v1.FooterStatusLoadingSalient
+	153, // 214: frontend.v1.FooterStatusLoadingActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	144, // 215: frontend.v1.FooterStatusLoadingSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	104, // 216: frontend.v1.FooterStatusLoadingSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	152, // 217: frontend.v1.FooterStatusLoadingSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	146, // 218: frontend.v1.FooterStatusActivityWakeup.reason:type_name -> frontend.v1.FooterStatusActivityWakeupReason
+	144, // 219: frontend.v1.FooterStatusActivityRetrying.next_attempt:type_name -> frontend.v1.FooterStatusActivityAt
+	154, // 220: frontend.v1.FooterActivityTransientOverEnduring.transient:type_name -> frontend.v1.FooterActivityTransient
+	170, // 221: frontend.v1.FooterActivityTransientOverEnduring.enduring:type_name -> frontend.v1.FooterActivityEnduring
+	144, // 222: frontend.v1.FooterActivityTransient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	161, // 223: frontend.v1.FooterActivityTransient.expiry:type_name -> frontend.v1.FooterActivityTransientExpiry
+	162, // 224: frontend.v1.FooterActivityTransient.agent:type_name -> frontend.v1.FooterActivityTransientAgent
+	163, // 225: frontend.v1.FooterActivityTransient.task:type_name -> frontend.v1.FooterActivityTransientTask
+	164, // 226: frontend.v1.FooterActivityTransient.hook:type_name -> frontend.v1.FooterActivityTransientHook
+	165, // 227: frontend.v1.FooterActivityTransient.context_injected:type_name -> frontend.v1.FooterActivityTransientContextInjected
+	103, // 228: frontend.v1.FooterActivityTransient.fault:type_name -> frontend.v1.FooterStatusActivityFault
+	166, // 229: frontend.v1.FooterActivityTransient.daemon_warning:type_name -> frontend.v1.FooterActivityTransientDaemonWarning
+	167, // 230: frontend.v1.FooterActivityTransient.daemon_error:type_name -> frontend.v1.FooterActivityTransientDaemonError
+	168, // 231: frontend.v1.FooterActivityTransient.session_change:type_name -> frontend.v1.FooterActivityTransientSessionChange
+	169, // 232: frontend.v1.FooterActivityTransient.updated:type_name -> frontend.v1.FooterActivityTransientUpdated
+	156, // 233: frontend.v1.FooterActivityTransient.network_resume:type_name -> frontend.v1.FooterActivityTransientNetworkResume
+	155, // 234: frontend.v1.FooterActivityTransient.compaction_concluded:type_name -> frontend.v1.FooterActivityTransientCompactionConcluded
+	147, // 235: frontend.v1.FooterActivityTransient.api_restored:type_name -> frontend.v1.FooterActivityTransientApiRestored
+	42,  // 236: frontend.v1.FooterActivityTransientCompactionConcluded.parts:type_name -> frontend.v1.FooterColdGateFiguredLine
+	157, // 237: frontend.v1.FooterActivityTransientNetworkResume.waiting:type_name -> frontend.v1.FooterActivityTransientNetworkResumeWaiting
+	158, // 238: frontend.v1.FooterActivityTransientNetworkResume.resumed:type_name -> frontend.v1.FooterActivityTransientNetworkResumeResumed
+	159, // 239: frontend.v1.FooterActivityTransientNetworkResume.gave_up:type_name -> frontend.v1.FooterActivityTransientNetworkResumeGaveUp
+	160, // 240: frontend.v1.FooterActivityTransientNetworkResume.abandoned:type_name -> frontend.v1.FooterActivityTransientNetworkResumeAbandoned
+	116, // 241: frontend.v1.FooterActivityTransientUpdated.notes:type_name -> frontend.v1.FooterStatusActivityUpdateNote
+	174, // 242: frontend.v1.FooterActivityEnduring.usage:type_name -> frontend.v1.FooterActivityEnduringUsage
+	171, // 243: frontend.v1.FooterActivityEnduring.unobserved:type_name -> frontend.v1.FooterActivityEnduringUnobserved
+	172, // 244: frontend.v1.FooterActivityEnduring.seat_spend:type_name -> frontend.v1.FooterActivityEnduringSeatSpend
+	173, // 245: frontend.v1.FooterActivityEnduringSeatSpend.allotment:type_name -> frontend.v1.FooterMoney
+	173, // 246: frontend.v1.FooterActivityEnduringSeatSpend.spent:type_name -> frontend.v1.FooterMoney
+	181, // 247: frontend.v1.FooterActivityEnduringUsage.session:type_name -> frontend.v1.FooterAllowance
+	181, // 248: frontend.v1.FooterActivityEnduringUsage.weekly:type_name -> frontend.v1.FooterAllowance
+	175, // 249: frontend.v1.FooterActivityEnduringUsage.sample:type_name -> frontend.v1.FooterAllowanceSample
+	181, // 250: frontend.v1.FooterActivityEnduringUsage.overage:type_name -> frontend.v1.FooterAllowance
+	176, // 251: frontend.v1.FooterAllowanceSample.available:type_name -> frontend.v1.FooterAllowanceSampleAvailable
+	177, // 252: frontend.v1.FooterAllowanceSample.service_unavailable:type_name -> frontend.v1.FooterAllowanceSampleServiceUnavailable
+	178, // 253: frontend.v1.FooterAllowanceSample.window_unavailable:type_name -> frontend.v1.FooterAllowanceSampleWindowUnavailable
+	179, // 254: frontend.v1.FooterAllowanceSample.utilization_unavailable:type_name -> frontend.v1.FooterAllowanceSampleUtilizationUnavailable
+	180, // 255: frontend.v1.FooterAllowanceSample.sampling_failure:type_name -> frontend.v1.FooterAllowanceSampleSamplingFailure
+	182, // 256: frontend.v1.FooterAllowance.allowed:type_name -> frontend.v1.FooterAllowanceAllowed
+	183, // 257: frontend.v1.FooterAllowance.allowed_warning:type_name -> frontend.v1.FooterAllowanceAllowedWarning
+	184, // 258: frontend.v1.FooterAllowance.rejected:type_name -> frontend.v1.FooterAllowanceRejected
+	187, // 259: frontend.v1.FooterTokensCell.input:type_name -> frontend.v1.FooterTokensCellInput
+	188, // 260: frontend.v1.FooterTokensCell.alarm:type_name -> frontend.v1.FooterTokensCellAlarm
+	189, // 261: frontend.v1.FooterTokensCell.verdict:type_name -> frontend.v1.FooterTokensCellVerdict
+	272, // 262: frontend.v1.FooterTokensCellInput.heat:type_name -> frontend.v1.TokenHeat
+	190, // 263: frontend.v1.FooterTokensCellVerdict.complete:type_name -> frontend.v1.FooterTokensCellVerdictComplete
+	191, // 264: frontend.v1.FooterTokensCellVerdict.incomplete:type_name -> frontend.v1.FooterTokensCellVerdictIncomplete
+	192, // 265: frontend.v1.FooterTokensCellVerdict.invalid:type_name -> frontend.v1.FooterTokensCellVerdictInvalid
+	198, // 266: frontend.v1.FooterLiveWorkChips.agents:type_name -> frontend.v1.FooterChipAgents
+	200, // 267: frontend.v1.FooterLiveWorkChips.tasks:type_name -> frontend.v1.FooterChipTasks
+	201, // 268: frontend.v1.FooterLiveWorkChips.shells:type_name -> frontend.v1.FooterChipShells
+	197, // 269: frontend.v1.FooterLiveWorkChips.monitors:type_name -> frontend.v1.FooterChipMonitors
+	196, // 270: frontend.v1.FooterLiveWorkChips.crons:type_name -> frontend.v1.FooterChipCrons
+	194, // 271: frontend.v1.FooterLiveWorkChips.merges:type_name -> frontend.v1.FooterChipMerges
+	195, // 272: frontend.v1.FooterChipMerges.waiting_on_user:type_name -> frontend.v1.FooterChipMergesWaitingOnUser
+	199, // 273: frontend.v1.FooterChipAgents.waiting_for_api:type_name -> frontend.v1.FooterChipAgentsWaitingForApi
+	228, // 274: frontend.v1.FooterExpanded.tokens:type_name -> frontend.v1.FooterExpandedTokens
+	243, // 275: frontend.v1.FooterExpanded.agents:type_name -> frontend.v1.FooterExpandedAgents
+	251, // 276: frontend.v1.FooterExpanded.tasks:type_name -> frontend.v1.FooterExpandedTasks
+	259, // 277: frontend.v1.FooterExpanded.shells:type_name -> frontend.v1.FooterExpandedShells
+	223, // 278: frontend.v1.FooterExpanded.monitors:type_name -> frontend.v1.FooterExpandedMonitors
+	207, // 279: frontend.v1.FooterExpanded.crons:type_name -> frontend.v1.FooterExpandedCrons
+	217, // 280: frontend.v1.FooterExpanded.merges:type_name -> frontend.v1.FooterExpandedMerges
+	204, // 281: frontend.v1.FooterExpandedFocus.agents:type_name -> frontend.v1.FooterFocusAgents
+	205, // 282: frontend.v1.FooterExpandedFocus.shells:type_name -> frontend.v1.FooterFocusShells
+	206, // 283: frontend.v1.FooterExpandedFocus.monitors:type_name -> frontend.v1.FooterFocusMonitors
+	208, // 284: frontend.v1.FooterExpandedCrons.rows:type_name -> frontend.v1.FooterCronRow
+	214, // 285: frontend.v1.FooterExpandedCrons.wakeup:type_name -> frontend.v1.FooterWakeupRow
+	209, // 286: frontend.v1.FooterCronRow.schedule:type_name -> frontend.v1.FooterCronRowSchedule
+	210, // 287: frontend.v1.FooterCronRow.prompt:type_name -> frontend.v1.FooterCronRowPrompt
+	211, // 288: frontend.v1.FooterCronRow.next_fire:type_name -> frontend.v1.FooterCronRowNextFire
+	212, // 289: frontend.v1.FooterCronRow.recurring:type_name -> frontend.v1.FooterCronRowRecurring
+	213, // 290: frontend.v1.FooterCronRow.durable:type_name -> frontend.v1.FooterCronRowDurable
+	215, // 291: frontend.v1.FooterWakeupRow.reason:type_name -> frontend.v1.FooterWakeupRowReason
+	216, // 292: frontend.v1.FooterWakeupRow.wake_at:type_name -> frontend.v1.FooterWakeupRowWakeAt
+	218, // 293: frontend.v1.FooterExpandedMerges.rows:type_name -> frontend.v1.FooterMergeRow
+	219, // 294: frontend.v1.FooterMergeRow.label:type_name -> frontend.v1.FooterMergeRowLabel
+	220, // 295: frontend.v1.FooterMergeRow.step:type_name -> frontend.v1.FooterMergeRowStep
+	221, // 296: frontend.v1.FooterMergeRow.runtime:type_name -> frontend.v1.FooterMergeRowRuntime
+	261, // 297: frontend.v1.FooterMergeRow.work:type_name -> frontend.v1.FooterWorkId
+	262, // 298: frontend.v1.FooterMergeRow.jump:type_name -> frontend.v1.FooterJump
+	222, // 299: frontend.v1.FooterMergeRow.waiting_on_user:type_name -> frontend.v1.FooterMergeRowWaitingOnUser
+	224, // 300: frontend.v1.FooterExpandedMonitors.rows:type_name -> frontend.v1.FooterMonitorRow
+	225, // 301: frontend.v1.FooterMonitorRow.description:type_name -> frontend.v1.FooterMonitorRowDescription
+	226, // 302: frontend.v1.FooterMonitorRow.runtime:type_name -> frontend.v1.FooterMonitorRowRuntime
+	227, // 303: frontend.v1.FooterMonitorRow.persistent:type_name -> frontend.v1.FooterMonitorRowPersistent
+	261, // 304: frontend.v1.FooterMonitorRow.work:type_name -> frontend.v1.FooterWorkId
+	262, // 305: frontend.v1.FooterMonitorRow.jump:type_name -> frontend.v1.FooterJump
+	232, // 306: frontend.v1.FooterExpandedTokens.input:type_name -> frontend.v1.FooterTokensLineInput
+	233, // 307: frontend.v1.FooterExpandedTokens.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
+	234, // 308: frontend.v1.FooterExpandedTokens.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
+	235, // 309: frontend.v1.FooterExpandedTokens.output:type_name -> frontend.v1.FooterTokensLineOutput
+	236, // 310: frontend.v1.FooterExpandedTokens.thinking:type_name -> frontend.v1.FooterTokensLineThinking
+	237, // 311: frontend.v1.FooterExpandedTokens.first_token:type_name -> frontend.v1.FooterTokensLineFirstToken
+	238, // 312: frontend.v1.FooterExpandedTokens.alarm:type_name -> frontend.v1.FooterTokensLineAlarm
+	239, // 313: frontend.v1.FooterExpandedTokens.verdict:type_name -> frontend.v1.FooterTokensLineVerdict
+	229, // 314: frontend.v1.FooterExpandedTokens.context_growth:type_name -> frontend.v1.FooterTokensLineContextGrowth
+	231, // 315: frontend.v1.FooterExpandedTokens.agents:type_name -> frontend.v1.FooterTokensAgent
+	230, // 316: frontend.v1.FooterTokensLineContextGrowth.since_cut:type_name -> frontend.v1.FooterTokensLineContextGrowthSinceCut
+	232, // 317: frontend.v1.FooterTokensAgent.input:type_name -> frontend.v1.FooterTokensLineInput
+	233, // 318: frontend.v1.FooterTokensAgent.cache_read:type_name -> frontend.v1.FooterTokensLineCacheRead
+	234, // 319: frontend.v1.FooterTokensAgent.cache_write:type_name -> frontend.v1.FooterTokensLineCacheWrite
+	235, // 320: frontend.v1.FooterTokensAgent.output:type_name -> frontend.v1.FooterTokensLineOutput
+	240, // 321: frontend.v1.FooterTokensLineVerdict.complete:type_name -> frontend.v1.FooterTokensLineVerdictComplete
+	241, // 322: frontend.v1.FooterTokensLineVerdict.incomplete:type_name -> frontend.v1.FooterTokensLineVerdictIncomplete
+	242, // 323: frontend.v1.FooterTokensLineVerdict.invalid:type_name -> frontend.v1.FooterTokensLineVerdictInvalid
+	244, // 324: frontend.v1.FooterExpandedAgents.rows:type_name -> frontend.v1.FooterAgentRow
+	247, // 325: frontend.v1.FooterAgentRow.label:type_name -> frontend.v1.FooterAgentRowLabel
+	248, // 326: frontend.v1.FooterAgentRow.description:type_name -> frontend.v1.FooterAgentRowDescription
+	249, // 327: frontend.v1.FooterAgentRow.tokens:type_name -> frontend.v1.FooterAgentRowTokens
+	250, // 328: frontend.v1.FooterAgentRow.runtime:type_name -> frontend.v1.FooterAgentRowRuntime
+	261, // 329: frontend.v1.FooterAgentRow.work:type_name -> frontend.v1.FooterWorkId
+	262, // 330: frontend.v1.FooterAgentRow.jump:type_name -> frontend.v1.FooterJump
+	245, // 331: frontend.v1.FooterAgentRow.running:type_name -> frontend.v1.FooterAgentRowRunning
+	246, // 332: frontend.v1.FooterAgentRow.waiting_for_api:type_name -> frontend.v1.FooterAgentRowWaitingForApi
+	252, // 333: frontend.v1.FooterExpandedTasks.rows:type_name -> frontend.v1.FooterTaskRow
+	254, // 334: frontend.v1.FooterTaskRow.status:type_name -> frontend.v1.FooterTaskRowStatus
+	253, // 335: frontend.v1.FooterTaskRow.subject:type_name -> frontend.v1.FooterTaskRowSubject
+	255, // 336: frontend.v1.FooterTaskRowStatus.pending:type_name -> frontend.v1.FooterTaskRowPending
+	256, // 337: frontend.v1.FooterTaskRowStatus.running:type_name -> frontend.v1.FooterTaskRowRunning
+	258, // 338: frontend.v1.FooterTaskRowStatus.completed:type_name -> frontend.v1.FooterTaskRowCompleted
+	257, // 339: frontend.v1.FooterTaskRowRunning.active_form:type_name -> frontend.v1.FooterTaskRowActiveForm
+	260, // 340: frontend.v1.FooterExpandedShells.rows:type_name -> frontend.v1.FooterShellRow
+	265, // 341: frontend.v1.FooterShellRow.command:type_name -> frontend.v1.FooterShellRowCommand
+	266, // 342: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
+	261, // 343: frontend.v1.FooterShellRow.work:type_name -> frontend.v1.FooterWorkId
+	262, // 344: frontend.v1.FooterShellRow.jump:type_name -> frontend.v1.FooterJump
+	273, // 345: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
+	263, // 346: frontend.v1.FooterJump.unresolved:type_name -> frontend.v1.FooterJumpUnresolved
+	264, // 347: frontend.v1.FooterJumpUnresolved.not_drawn:type_name -> frontend.v1.FooterJumpNotDrawn
+	268, // 348: frontend.v1.FooterStatusNetworkFault.offline:type_name -> frontend.v1.FooterSubStatusNetworkFaultOffline
+	269, // 349: frontend.v1.FooterStatusNetworkFault.activity:type_name -> frontend.v1.FooterStatusNetworkFaultActivity
+	270, // 350: frontend.v1.FooterStatusNetworkFaultActivity.salient:type_name -> frontend.v1.FooterStatusNetworkFaultSalient
+	153, // 351: frontend.v1.FooterStatusNetworkFaultActivity.unpinned:type_name -> frontend.v1.FooterActivityTransientOverEnduring
+	144, // 352: frontend.v1.FooterStatusNetworkFaultSalient.at:type_name -> frontend.v1.FooterStatusActivityAt
+	271, // 353: frontend.v1.FooterStatusNetworkFaultSalient.offline:type_name -> frontend.v1.FooterStatusActivityNetworkOffline
+	104, // 354: frontend.v1.FooterStatusNetworkFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
+	152, // 355: frontend.v1.FooterStatusNetworkFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
+	356, // [356:356] is the sub-list for method output_type
+	356, // [356:356] is the sub-list for method input_type
+	356, // [356:356] is the sub-list for extension type_name
+	356, // [356:356] is the sub-list for extension extendee
+	0,   // [0:356] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_footer_proto_init() }
@@ -19807,14 +19831,14 @@ func file_frontend_v1_footer_proto_init() {
 	}
 	file_frontend_v1_footer_proto_msgTypes[51].OneofWrappers = []any{
 		(*FooterStatusMerging_Enqueued)(nil),
-		(*FooterStatusMerging_Preprocessing)(nil),
+		(*FooterStatusMerging_PreDeploy)(nil),
 		(*FooterStatusMerging_Rebasing)(nil),
 		(*FooterStatusMerging_ConflictResolution)(nil),
 		(*FooterStatusMerging_Testing)(nil),
 		(*FooterStatusMerging_Fixing)(nil),
 		(*FooterStatusMerging_Committing)(nil),
-		(*FooterStatusMerging_UpdatingMain)(nil),
-		(*FooterStatusMerging_Postprocessing)(nil),
+		(*FooterStatusMerging_Deploying)(nil),
+		(*FooterStatusMerging_PostDeploy)(nil),
 		(*FooterStatusMerging_WaitingOnUser)(nil),
 		(*FooterStatusMerging_AwaitingFree)(nil),
 	}
@@ -19822,41 +19846,42 @@ func file_frontend_v1_footer_proto_init() {
 		(*FooterStatusMergeFailed_Conflicts)(nil),
 		(*FooterStatusMergeFailed_Tests)(nil),
 		(*FooterStatusMergeFailed_Other)(nil),
+		(*FooterStatusMergeFailed_Hook)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[68].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[69].OneofWrappers = []any{
 		(*FooterStatusMergingActivity_Salient)(nil),
 		(*FooterStatusMergingActivity_Unpinned)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[69].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[70].OneofWrappers = []any{
 		(*FooterStatusMergingSalient_MergeStep)(nil),
 		(*FooterStatusMergingSalient_GatedCall)(nil),
 		(*FooterStatusMergingSalient_QuestionLead)(nil),
 		(*FooterStatusMergingSalient_Update)(nil),
 		(*FooterStatusMergingSalient_Notification)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[70].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[71].OneofWrappers = []any{
 		(*FooterStatusActivityMergeStep_Enqueued)(nil),
-		(*FooterStatusActivityMergeStep_Preprocessing)(nil),
+		(*FooterStatusActivityMergeStep_PreDeploy)(nil),
 		(*FooterStatusActivityMergeStep_Rebasing)(nil),
 		(*FooterStatusActivityMergeStep_ConflictResolution)(nil),
 		(*FooterStatusActivityMergeStep_Testing)(nil),
 		(*FooterStatusActivityMergeStep_Fixing)(nil),
 		(*FooterStatusActivityMergeStep_Committing)(nil),
-		(*FooterStatusActivityMergeStep_UpdatingMain)(nil),
-		(*FooterStatusActivityMergeStep_Postprocessing)(nil),
+		(*FooterStatusActivityMergeStep_Deploying)(nil),
+		(*FooterStatusActivityMergeStep_PostDeploy)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[73].OneofWrappers = []any{
+		(*FooterMergeStepHook_Prompt)(nil),
+		(*FooterMergeStepHook_Script)(nil),
+	}
+	file_frontend_v1_footer_proto_msgTypes[76].OneofWrappers = []any{
 		(*FooterMergeStepRebasing_Running)(nil),
 		(*FooterMergeStepRebasing_Failed)(nil),
 	}
-	file_frontend_v1_footer_proto_msgTypes[77].OneofWrappers = []any{
+	file_frontend_v1_footer_proto_msgTypes[80].OneofWrappers = []any{
 		(*FooterMergeStepSuite_Started)(nil),
 		(*FooterMergeStepSuite_Passed)(nil),
 		(*FooterMergeStepSuite_Failed)(nil),
-	}
-	file_frontend_v1_footer_proto_msgTypes[83].OneofWrappers = []any{
-		(*FooterMergeStepUpdatingMain_Fetching)(nil),
-		(*FooterMergeStepUpdatingMain_FastForwarding)(nil),
 	}
 	file_frontend_v1_footer_proto_msgTypes[86].OneofWrappers = []any{}
 	file_frontend_v1_footer_proto_msgTypes[88].OneofWrappers = []any{

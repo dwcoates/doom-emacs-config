@@ -90,8 +90,8 @@ func TestSetWorkspaceParentToTopLevelUnnestsTellsTheSessionAndMergesToTheMainChe
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
+	repo.DeploysAsAgentRepl()
 	f := newRetargetFamily(t, harness.Opts{
-		SelfRepo: repo.Dir,
 		ExtraEnv: []string{harness.TestAllScriptEnv(script.Path)},
 		Timeout:  harness.MergeChainTimeout,
 	}, repo)
@@ -108,15 +108,15 @@ func TestSetWorkspaceParentToTopLevelUnnestsTellsTheSessionAndMergesToTheMainChe
 	}
 	awaitRoster(t, f.d, f.roster, "the child at the top level", f.topLevel)
 	notice := f.expectNotice(t)
-	if !strings.Contains(notice, "main checkout at `"+repo.Dir+"`") || !strings.Contains(notice, "`agent-repld workspace merge here -placement back`") {
+	if !strings.Contains(notice, "main checkout at `"+repo.Dir+"`") || !strings.Contains(notice, "`agent-repld workspace finished here -placement back`") {
 		t.Fatalf("notice = %q, want the main checkout named and the merge command", notice)
 	}
 	pushConcludedTurn(f.d.Shim(f.child), mainAgent, "notice-read")
 
 	// Assert: the child's own-branch merge now lands in the main checkout.
 	harness.CommitWork(t, f.child.GetDir())
-	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(harness.MergeRequest(f.child, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(child) = error %v, want the merge enqueued", err)
+	if _, err := f.d.Client().FinishWorkspace(f.d.Ctx(), connect.NewRequest(harness.FinishRequest(f.child))); err != nil {
+		t.Fatalf("FinishWorkspace(child) = error %v, want the merge enqueued", err)
 	}
 	awaitRoster(t, f.d, f.roster, "the child's merge landed", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.child.GetId())

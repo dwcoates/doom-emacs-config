@@ -4,7 +4,7 @@
 
 ;; The protojson CODEC for the agentrepl.v1 WORKSPACE VERBS and DAEMON-ADMIN
 ;; verbs Emacs calls: CreateWorkspace, RegisterRepository, OpenWorkspace,
-;; CloseWorkspace, KillWorkspace, NukeWorkspace, MergeWorkspace,
+;; CloseWorkspace, KillWorkspace, NukeWorkspace, FinishWorkspace,
 ;; RestartWorkspace, SetWorkspacePriority, SetWorkspaceHidden,
 ;; SwapWorkspaces, MoveWorkspace, SubmitPrompt, UpdateShutdownSchedule, Deploy,
 ;; UpdateMergeQueue, DaemonHealth, SessionHealth and ReportLatencies.
@@ -438,46 +438,17 @@ commission with a note naming it."
                    (agent-repl-wire-encode-create-workspace-one-shot-context
                     (plist-get value :context))))))))
 
-(defun agent-repl-wire-encode-create-workspace-merge-actions-before-ws-merge (said)
-  "Encode CreateWorkspaceMergeActions's `before_ws_merge' use site from SAID."
-  (agent-repl-wire-encode-user-said said))
-
-(defun agent-repl-wire-encode-create-workspace-merge-actions-postprocessing-prompt (said)
-  "Encode CreateWorkspaceMergeActions's `postprocessing_prompt' use site from
-SAID."
-  (agent-repl-wire-encode-user-said said))
-
-(defun agent-repl-wire-encode-create-workspace-merge-actions (value)
-  "Encode CreateWorkspaceMergeActions from plist VALUE.
-Both actions are optional; absence is the absence of a configured action,
-never an empty UserSaid."
-  (let (out)
-    (when (plist-get value :before-ws-merge)
-      (push (cons 'beforeWsMerge
-                  (agent-repl-wire-encode-create-workspace-merge-actions-before-ws-merge
-                   (plist-get value :before-ws-merge)))
-            out))
-    (when (plist-get value :postprocessing-prompt)
-      (push (cons 'postprocessingPrompt
-                  (agent-repl-wire-encode-create-workspace-merge-actions-postprocessing-prompt
-                   (plist-get value :postprocessing-prompt)))
-            out))
-    (nreverse out)))
-
 (defun agent-repl-wire-encode-create-workspace-standard-initial-prompt (said)
   "Encode CreateWorkspaceStandard's `initial_prompt' use site from SAID."
   (agent-repl-wire-encode-user-said said))
-
-(defun agent-repl-wire-encode-create-workspace-standard-merge-actions (value)
-  "Encode CreateWorkspaceStandard's `merge_actions' use site from VALUE."
-  (agent-repl-wire-encode-create-workspace-merge-actions value))
 
 (defun agent-repl-wire-encode-create-workspace-standard (value)
   "Encode CreateWorkspaceStandard from plist VALUE.
 The TOPOLOGY is required: where the workspace is cut from and lands.
 Every other field is optional: an absent initial prompt is an empty
-workspace, an absent name means the daemon mints one, and absent merge
-actions mean none are configured."
+workspace, and an absent name means the daemon mints one.  The editor
+names no deploy hooks: a workspace it creates deploys by its
+repository\='s own config."
   (let ((out (list (cons 'topology
                          (agent-repl-wire-encode-workspace-topology
                           (agent-repl-wire-verbs--require "CreateWorkspaceStandard" "topology"
@@ -489,11 +460,6 @@ actions mean none are configured."
             out))
     (when (plist-get value :name)
       (push (cons 'name (plist-get value :name)) out))
-    (when (plist-get value :merge-actions)
-      (push (cons 'mergeActions
-                  (agent-repl-wire-encode-create-workspace-standard-merge-actions
-                   (plist-get value :merge-actions)))
-            out))
     (nreverse out)))
 
 (defun agent-repl-wire-encode-create-workspace-request-repository (ref)
@@ -1721,240 +1687,184 @@ teardown\='s end arrives on the WatchDaemon progress channel."
    #'agent-repl-wire-decode-nuke-workspace-response-accepted))
 
 
-;;;; ---- MergeWorkspace -------------------------------------------------
+;;;; ---- FinishWorkspace ------------------------------------------------
 
-(defun agent-repl-wire-encode-merge-workspace-request-workspace (ref)
-  "Encode MergeWorkspaceRequest's `workspace' use site from REF."
+(defun agent-repl-wire-encode-finish-workspace-request-workspace (ref)
+  "Encode FinishWorkspaceRequest's `workspace' use site from REF."
   (agent-repl-wire-encode-workspace-ref ref))
 
-(defun agent-repl-wire-encode-merge-workspace-one-shot-own-branch (value)
-  "Encode MergeWorkspaceOneShotOwnBranch from VALUE.  Empty: the branch is
-the requester\='s own."
-  (agent-repl-wire--encode-empty "MergeWorkspaceOneShotOwnBranch" value))
-
-(defun agent-repl-wire-encode-merge-workspace-one-shot-merged-upstream (value)
-  "Encode MergeWorkspaceOneShotMergedUpstream from VALUE.  Empty: the
-requester\='s own branch already landed upstream."
-  (agent-repl-wire--encode-empty "MergeWorkspaceOneShotMergedUpstream" value))
-
-(defun agent-repl-wire-encode-merge-workspace-one-shot (value)
-  "Encode MergeWorkspaceOneShot from plist VALUE (:landing LANDING).
-A SYNC merge in the requesting workspace, which closes once its branch
-lands.  LANDING is `:own-branch' (nil) or `:merged-upstream' (nil); an
-unset landing and an unknown arm are both refused."
-  (list (agent-repl-wire-verbs--encode-oneof
-         "MergeWorkspaceOneShot" "landing" (plist-get value :landing)
-         '((:own-branch ownBranch
-                        agent-repl-wire-encode-merge-workspace-one-shot-own-branch)
-           (:merged-upstream mergedUpstream
-                             agent-repl-wire-encode-merge-workspace-one-shot-merged-upstream)))))
-
-(defun agent-repl-wire-encode-merge-workspace-request (request)
-  "Encode MergeWorkspaceRequest from plist REQUEST.
-REQUEST is (:workspace REF :requester REQUESTER :mode MODE :placement
-PLACEMENT).  `workspace\' is the workspace whose own branch lands; MODE is
-the oneof plist (:arm :one-shot :value V)
-\(`agent-repl-wire-encode-merge-workspace-one-shot\').  All four are
-required -- nothing is implied -- and an unknown mode arm is refused."
-  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-merge-workspace-request mode=%S"
-                   (plist-get (plist-get request :mode) :arm))
-  (let ((message "MergeWorkspaceRequest"))
+(defun agent-repl-wire-encode-finish-workspace-request (request)
+  "Encode FinishWorkspaceRequest from plist REQUEST.
+REQUEST is (:workspace REF :requester REQUESTER :placement PLACEMENT).
+`workspace\' is the workspace whose work is finished; what its deploy then
+does is its repository\='s `.agent-repl/deploy.yaml\'.  All three are
+required -- nothing is implied.  The editor carries no version increment:
+the user\='s own deploy needs none."
+  (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-encode-finish-workspace-request")
+  (let ((message "FinishWorkspaceRequest"))
     (list (cons 'workspace
-                (agent-repl-wire-encode-merge-workspace-request-workspace
+                (agent-repl-wire-encode-finish-workspace-request-workspace
                  (agent-repl-wire-verbs--require message "workspace" (plist-get request :workspace))))
           (cons 'requester
                 (agent-repl-wire-encode-workspace-requester
                  (agent-repl-wire-verbs--require message "requester" (plist-get request :requester))))
-          (agent-repl-wire-verbs--encode-oneof
-           message "mode"
-           (agent-repl-wire-verbs--require message "mode" (plist-get request :mode))
-           '((:one-shot oneShot agent-repl-wire-encode-merge-workspace-one-shot)))
           (cons 'placement
                 (agent-repl-wire-encode-merge-queue-placement
                  (agent-repl-wire-verbs--require message "placement" (plist-get request :placement)))))))
 
-(defun agent-repl-wire-decode-merge-workspace-success (json)
-  "Decode MergeWorkspaceSuccess from JSON.  Empty: success means ENQUEUED."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceSuccess" json))
+(defun agent-repl-wire-decode-finish-workspace-success (json)
+  "Decode FinishWorkspaceSuccess from JSON.  Empty: success means ENQUEUED."
+  (agent-repl-wire-verbs--decode-empty "FinishWorkspaceSuccess" json))
 
-(defun agent-repl-wire-decode-merge-workspace-unknown-workspace (json)
-  "Decode MergeWorkspaceUnknownWorkspace from JSON.  Empty: The workspace id is
-not in the daemon's registry."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceUnknownWorkspace" json))
+(defun agent-repl-wire-decode-finish-workspace-unknown-workspace (json)
+  "Decode FinishWorkspaceUnknownWorkspace from JSON.  Empty: The workspace id
+is not in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "FinishWorkspaceUnknownWorkspace" json))
 
-(defun agent-repl-wire-decode-merge-workspace-workspace-ref-mismatch (json)
-  "Decode MergeWorkspaceWorkspaceRefMismatch from JSON into a plist
+(defun agent-repl-wire-decode-finish-workspace-workspace-ref-mismatch (json)
+  "Decode FinishWorkspaceWorkspaceRefMismatch from JSON into a plist
 (`:registry-dir').
 The echoed dir disagrees with the registry's dir for this id."
-  (let ((message "MergeWorkspaceWorkspaceRefMismatch"))
+  (let ((message "FinishWorkspaceWorkspaceRefMismatch"))
     (agent-repl-wire-verbs--check-keys message json '(registryDir))
     (list :registry-dir (agent-repl-wire-verbs--decode-string
                        message 'registryDir json))))
 
-(defun agent-repl-wire-decode-merge-workspace-transferring-away (json)
-  "Decode MergeWorkspaceTransferringAway from JSON into a plist (`:address').
+(defun agent-repl-wire-decode-finish-workspace-transferring-away (json)
+  "Decode FinishWorkspaceTransferringAway from JSON into a plist (`:address').
 This daemon released the workspace to a successor; dial `address'."
-  (let ((message "MergeWorkspaceTransferringAway"))
+  (let ((message "FinishWorkspaceTransferringAway"))
     (agent-repl-wire-verbs--check-keys message json '(address))
     (list :address (agent-repl-wire-verbs--decode-string
                        message 'address json))))
 
-(defun agent-repl-wire-decode-merge-workspace-not-yet-adopted (json)
-  "Decode MergeWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon has
-not finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceNotYetAdopted" json))
+(defun agent-repl-wire-decode-finish-workspace-not-yet-adopted (json)
+  "Decode FinishWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon
+has not finished adopting this workspace yet."
+  (agent-repl-wire-verbs--decode-empty "FinishWorkspaceNotYetAdopted" json))
 
-(defun agent-repl-wire-decode-merge-workspace-no-layout-facts (json)
-  "Decode MergeWorkspaceNoLayoutFacts from JSON.  Empty: The daemon holds no
-layout facts for this workspace to merge with."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceNoLayoutFacts" json))
+(defun agent-repl-wire-decode-finish-workspace-no-layout-facts (json)
+  "Decode FinishWorkspaceNoLayoutFacts from JSON.  Empty: The daemon holds no
+layout facts for this workspace to deploy with."
+  (agent-repl-wire-verbs--decode-empty "FinishWorkspaceNoLayoutFacts" json))
 
-(defun agent-repl-wire-decode-merge-workspace-session-deleted (json)
-  "Decode MergeWorkspaceSessionDeleted from JSON.  Empty: The workspace's
+(defun agent-repl-wire-decode-finish-workspace-session-deleted (json)
+  "Decode FinishWorkspaceSessionDeleted from JSON.  Empty: The workspace's
 session has been deleted."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceSessionDeleted" json))
+  (agent-repl-wire-verbs--decode-empty "FinishWorkspaceSessionDeleted" json))
 
-(defun agent-repl-wire-decode-merge-workspace-already-queued (json)
-  "Decode MergeWorkspaceAlreadyQueued from JSON.  Empty: This workspace's merge
-is already in the queue."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceAlreadyQueued" json))
+(defun agent-repl-wire-decode-finish-workspace-already-queued (json)
+  "Decode FinishWorkspaceAlreadyQueued from JSON.  Empty: This workspace's
+deploy is already in the queue."
+  (agent-repl-wire-verbs--decode-empty "FinishWorkspaceAlreadyQueued" json))
 
-(defun agent-repl-wire-decode-merge-workspace-already-merging (json)
-  "Decode MergeWorkspaceAlreadyMerging from JSON.  Empty: This workspace's
-merge is already in flight."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceAlreadyMerging" json))
+(defun agent-repl-wire-decode-finish-workspace-already-deploying (json)
+  "Decode FinishWorkspaceAlreadyDeploying from JSON.  Empty: This workspace's
+deploy is already in flight."
+  (agent-repl-wire-verbs--decode-empty "FinishWorkspaceAlreadyDeploying" json))
 
-(defun agent-repl-wire-decode-merge-workspace-version-increment-required (json)
-  "Decode MergeWorkspaceVersionIncrementRequired from JSON.  Empty: a merge
-onto agent-repl\='s master carries no version increment."
+(defun agent-repl-wire-decode-finish-workspace-version-increment-required (json)
+  "Decode MergeWorkspaceVersionIncrementRequired from JSON.  Empty: a deploy
+onto a versioned repository\='s main branch carries no version increment."
   (agent-repl-wire-verbs--decode-empty "MergeWorkspaceVersionIncrementRequired" json))
 
-(defun agent-repl-wire-decode-merge-workspace-version-increment-unexpected-foreign-repository (json)
-  "Decode MergeWorkspaceVersionIncrementUnexpectedForeignRepository from JSON.
-Empty: the merge\='s target is not agent-repl\='s repository."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceVersionIncrementUnexpectedForeignRepository" json))
+(defun agent-repl-wire-decode-finish-workspace-version-increment-unexpected-unversioned-repository (json)
+  "Decode MergeWorkspaceVersionIncrementUnexpectedUnversionedRepository from
+JSON.  Empty: the target repository\='s deploy config versions nothing."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceVersionIncrementUnexpectedUnversionedRepository" json))
 
-(defun agent-repl-wire-decode-merge-workspace-version-increment-unexpected-not-default-branch (json)
+(defun agent-repl-wire-decode-finish-workspace-version-increment-unexpected-not-default-branch (json)
   "Decode MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch from JSON.
-Empty: the merge\='s target is a parent workspace\='s checkout."
+Empty: the deploy\='s target is a parent workspace\='s checkout."
   (agent-repl-wire-verbs--decode-empty "MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch" json))
 
-(defun agent-repl-wire-decode-merge-workspace-version-increment-unexpected-merged-upstream (json)
-  "Decode MergeWorkspaceVersionIncrementUnexpectedMergedUpstream from JSON.
-Empty: the one-shot\='s branch already merged upstream."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceVersionIncrementUnexpectedMergedUpstream" json))
-
-(defun agent-repl-wire-decode-merge-workspace-version-increment-unexpected (json)
+(defun agent-repl-wire-decode-finish-workspace-version-increment-unexpected (json)
   "Decode MergeWorkspaceVersionIncrementUnexpected from JSON into (:reason R).
 R is (:arm ARM :value V): why a supplied version increment does not belong
-on the merge."
+on the deploy."
   (let ((message "MergeWorkspaceVersionIncrementUnexpected"))
-    (agent-repl-wire-verbs--check-keys message json '(foreignRepository notDefaultBranch mergedUpstream))
+    (agent-repl-wire-verbs--check-keys message json '(unversionedRepository notDefaultBranch))
     (list :reason
           (agent-repl-wire-verbs--decode-oneof
            message "reason" json
-           (list (list 'foreignRepository :foreign-repository #'agent-repl-wire-decode-merge-workspace-version-increment-unexpected-foreign-repository)
-                 (list 'notDefaultBranch :not-default-branch #'agent-repl-wire-decode-merge-workspace-version-increment-unexpected-not-default-branch)
-                 (list 'mergedUpstream :merged-upstream #'agent-repl-wire-decode-merge-workspace-version-increment-unexpected-merged-upstream))))))
+           (list (list 'unversionedRepository :unversioned-repository #'agent-repl-wire-decode-finish-workspace-version-increment-unexpected-unversioned-repository)
+                 (list 'notDefaultBranch :not-default-branch #'agent-repl-wire-decode-finish-workspace-version-increment-unexpected-not-default-branch))))))
 
-(defun agent-repl-wire-decode-merge-workspace-error-version-increment-required (json)
-  "Decode MergeWorkspaceError's `version_increment_required' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-version-increment-required json))
-
-(defun agent-repl-wire-decode-merge-workspace-error-version-increment-unexpected (json)
-  "Decode MergeWorkspaceError's `version_increment_unexpected' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-version-increment-unexpected json))
-
-(defun agent-repl-wire-decode-merge-workspace-error-unknown-workspace (json)
-  "Decode MergeWorkspaceError's `unknown_workspace' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-unknown-workspace json))
-
-(defun agent-repl-wire-decode-merge-workspace-error-workspace-ref-mismatch (json)
-  "Decode MergeWorkspaceError's `workspace_ref_mismatch' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-workspace-ref-mismatch json))
-
-(defun agent-repl-wire-decode-merge-workspace-error-transferring-away (json)
-  "Decode MergeWorkspaceError's `transferring_away' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-transferring-away json))
-
-(defun agent-repl-wire-decode-merge-workspace-error-not-yet-adopted (json)
-  "Decode MergeWorkspaceError's `not_yet_adopted' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-not-yet-adopted json))
-
-(defun agent-repl-wire-decode-merge-workspace-error-no-layout-facts (json)
-  "Decode MergeWorkspaceError's `no_layout_facts' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-no-layout-facts json))
-
-(defun agent-repl-wire-decode-merge-workspace-error-session-deleted (json)
-  "Decode MergeWorkspaceError's `session_deleted' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-session-deleted json))
-
-(defun agent-repl-wire-decode-merge-workspace-error-already-queued (json)
-  "Decode MergeWorkspaceError's `already_queued' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-already-queued json))
-
-(defun agent-repl-wire-decode-merge-workspace-error-already-merging (json)
-  "Decode MergeWorkspaceError's `already_merging' cause arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-already-merging json))
-
-(defun agent-repl-wire-decode-merge-workspace-error-owner-lands (json)
-  "Decode MergeWorkspaceError's `owner_lands' arm into (:owner REF).
+(defun agent-repl-wire-decode-finish-workspace-error-owner-lands (json)
+  "Decode FinishWorkspaceError's `owner_lands' arm into (:owner REF).
 The workspace is a child whose context was not forked from its owner, so
-only that owner lands it."
+only that owner finishes it."
   (agent-repl-wire-verbs--decode-ref-arm
-   "MergeWorkspaceOwnerLands" 'owner json))
+   "FinishWorkspaceOwnerLands" 'owner json))
 
-(defun agent-repl-wire-decode-merge-workspace-error-requester-may-not-land (json)
-  "Decode MergeWorkspaceError's `requester_may_not_land' arm.  Empty: the
+(defun agent-repl-wire-decode-finish-workspace-error-requester-may-not-land (json)
+  "Decode FinishWorkspaceError's `requester_may_not_land' arm.  Empty: the
 requester is neither the workspace, its owner, nor the user."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceRequesterMayNotLand" json))
+  (agent-repl-wire-verbs--decode-empty "FinishWorkspaceRequesterMayNotLand" json))
 
-(defun agent-repl-wire-decode-merge-workspace-error-no-branch-checked-out (json)
-  "Decode MergeWorkspaceError's `no_branch_checked_out' arm into (:dir DIR).
+(defun agent-repl-wire-decode-finish-workspace-error-no-branch-checked-out (json)
+  "Decode FinishWorkspaceError's `no_branch_checked_out' arm into (:dir DIR).
 The workspace\='s worktree has no branch checked out, so it has no branch
-of its own to land."
-  (let ((message "MergeWorkspaceNoBranchCheckedOut"))
+of its own to deploy."
+  (let ((message "FinishWorkspaceNoBranchCheckedOut"))
     (agent-repl-wire-verbs--check-keys message json '(dir))
     (list :dir (agent-repl-wire-verbs--decode-string message 'dir json))))
 
-(defun agent-repl-wire-decode-merge-workspace-error (json)
-  "Decode MergeWorkspaceError from JSON into (:cause (:arm ARM :value V)).
+(defun agent-repl-wire-decode-deploy-config-missing (json)
+  "Decode DeployConfigMissing from JSON into (:path PATH).
+The repository has no `.agent-repl/deploy.yaml\' at PATH."
+  (let ((message "DeployConfigMissing"))
+    (agent-repl-wire-verbs--check-keys message json '(path))
+    (list :path (agent-repl-wire-verbs--decode-string message 'path json))))
+
+(defun agent-repl-wire-decode-deploy-config-invalid (json)
+  "Decode DeployConfigInvalid from JSON into (:path PATH :detail DETAIL).
+The repository\='s deploy config at PATH could not be used, for DETAIL."
+  (let ((message "DeployConfigInvalid"))
+    (agent-repl-wire-verbs--check-keys message json '(path detail))
+    (list :path (agent-repl-wire-verbs--decode-string message 'path json)
+          :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+
+(defun agent-repl-wire-decode-finish-workspace-error (json)
+  "Decode FinishWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
-  (let ((message "MergeWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyMerging versionIncrementRequired versionIncrementUnexpected ownerLands requesterMayNotLand noBranchCheckedOut hasOpenChildren))
+  (let ((message "FinishWorkspaceError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyDeploying versionIncrementRequired versionIncrementUnexpected ownerLands requesterMayNotLand noBranchCheckedOut hasOpenChildren noDeployConfig deployConfigInvalid))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
-           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-merge-workspace-error-unknown-workspace)
-         (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-merge-workspace-error-workspace-ref-mismatch)
-         (list 'transferringAway :transferring-away #'agent-repl-wire-decode-merge-workspace-error-transferring-away)
-         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-merge-workspace-error-not-yet-adopted)
-         (list 'noLayoutFacts :no-layout-facts #'agent-repl-wire-decode-merge-workspace-error-no-layout-facts)
-         (list 'sessionDeleted :session-deleted #'agent-repl-wire-decode-merge-workspace-error-session-deleted)
-         (list 'alreadyQueued :already-queued #'agent-repl-wire-decode-merge-workspace-error-already-queued)
-         (list 'alreadyMerging :already-merging #'agent-repl-wire-decode-merge-workspace-error-already-merging)
-         (list 'versionIncrementRequired :version-increment-required #'agent-repl-wire-decode-merge-workspace-error-version-increment-required)
-         (list 'versionIncrementUnexpected :version-increment-unexpected #'agent-repl-wire-decode-merge-workspace-error-version-increment-unexpected)
-         (list 'ownerLands :owner-lands #'agent-repl-wire-decode-merge-workspace-error-owner-lands)
-         (list 'requesterMayNotLand :requester-may-not-land #'agent-repl-wire-decode-merge-workspace-error-requester-may-not-land)
-         (list 'noBranchCheckedOut :no-branch-checked-out #'agent-repl-wire-decode-merge-workspace-error-no-branch-checked-out)
-         agent-repl-wire-verbs--has-open-children-arm)))))
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-finish-workspace-unknown-workspace)
+                 (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-finish-workspace-workspace-ref-mismatch)
+                 (list 'transferringAway :transferring-away #'agent-repl-wire-decode-finish-workspace-transferring-away)
+                 (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-finish-workspace-not-yet-adopted)
+                 (list 'noLayoutFacts :no-layout-facts #'agent-repl-wire-decode-finish-workspace-no-layout-facts)
+                 (list 'sessionDeleted :session-deleted #'agent-repl-wire-decode-finish-workspace-session-deleted)
+                 (list 'alreadyQueued :already-queued #'agent-repl-wire-decode-finish-workspace-already-queued)
+                 (list 'alreadyDeploying :already-deploying #'agent-repl-wire-decode-finish-workspace-already-deploying)
+                 (list 'versionIncrementRequired :version-increment-required #'agent-repl-wire-decode-finish-workspace-version-increment-required)
+                 (list 'versionIncrementUnexpected :version-increment-unexpected #'agent-repl-wire-decode-finish-workspace-version-increment-unexpected)
+                 (list 'ownerLands :owner-lands #'agent-repl-wire-decode-finish-workspace-error-owner-lands)
+                 (list 'requesterMayNotLand :requester-may-not-land #'agent-repl-wire-decode-finish-workspace-error-requester-may-not-land)
+                 (list 'noBranchCheckedOut :no-branch-checked-out #'agent-repl-wire-decode-finish-workspace-error-no-branch-checked-out)
+                 agent-repl-wire-verbs--has-open-children-arm
+                 (list 'noDeployConfig :no-deploy-config #'agent-repl-wire-decode-deploy-config-missing)
+                 (list 'deployConfigInvalid :deploy-config-invalid #'agent-repl-wire-decode-deploy-config-invalid))))))
 
-(defun agent-repl-wire-decode-merge-workspace-response-success (json)
-  "Decode MergeWorkspaceResponse's `success' arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-success json))
+(defun agent-repl-wire-decode-finish-workspace-response-success (json)
+  "Decode FinishWorkspaceResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-finish-workspace-success json))
 
-(defun agent-repl-wire-decode-merge-workspace-response-error (json)
-  "Decode MergeWorkspaceResponse's `error' arm from JSON."
-  (agent-repl-wire-decode-merge-workspace-error json))
+(defun agent-repl-wire-decode-finish-workspace-response-error (json)
+  "Decode FinishWorkspaceResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-finish-workspace-error json))
 
-(defun agent-repl-wire-decode-merge-workspace-response (json)
-  "Decode MergeWorkspaceResponse from JSON into (:arm ARM :value V)."
+(defun agent-repl-wire-decode-finish-workspace-response (json)
+  "Decode FinishWorkspaceResponse from JSON into (:arm ARM :value V)."
   (agent-repl-wire-verbs--decode-result
-   "MergeWorkspaceResponse" json
-   #'agent-repl-wire-decode-merge-workspace-response-success
-   #'agent-repl-wire-decode-merge-workspace-response-error))
+   "FinishWorkspaceResponse" json
+   #'agent-repl-wire-decode-finish-workspace-response-success
+   #'agent-repl-wire-decode-finish-workspace-response-error))
 
 
 ;;;; ---- RestartWorkspace -----------------------------------------------

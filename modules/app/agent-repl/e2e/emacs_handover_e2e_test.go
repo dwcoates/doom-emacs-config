@@ -267,7 +267,7 @@ func TestEmacsDaemonDownSurfacesAndReconnects(t *testing.T) {
 // daemon's own checkout is stated as environment the Emacs process carries
 // (`WithEmacsEnv`) and its daemon child inherits, the trigger workspace is
 // created through `agent-repl-create-workspace`, and the merge is enqueued
-// through `agent-repl-merge-workspace`.
+// through `agent-repl-finish-workspace`.
 
 // emHO40SelfMergeTriggerPath is the path the trigger commit touches — the
 // same path `adoption_e2e_test.go` commits for the Go layer's own handover
@@ -377,17 +377,17 @@ func emHO40AddedName(t *testing.T, before, after []string) string {
 // reconnect that happened to find a new address, and not Emacs's own dial.
 func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	t.Parallel()
-	// Arrange: a world whose Emacs — and therefore whose daemon — is told
-	// which checkout is the daemon's OWN, and given a merge gate that
-	// passes, so a commit landing on it runs the daemon's one deploy.
+	// Arrange: a repository that deploys as agent-repl's own does, and a
+	// world whose Emacs — and therefore whose daemon — is given a merge gate
+	// that passes, so a commit landing on its main branch runs the deploy
+	// hook, which rolls the runtime out.
 	box := requireSandbox(t)
 	selfRepo := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "self-repo"))
+	selfRepo.DeploysAsAgentRepl()
 	gate := harness.NewTestAllScript(t, selfRepo.Dir)
 	gate.SetExitCode(0)
 	gate.SetStdout("e2e: passed in 1s\n")
-	w := NewEmacsWorld(t, box,
-		WithEmacsEnv("AGENT_REPL_SELF_REPO_DIR", selfRepo.Dir),
-		WithEmacsEnv("AGENT_REPL_TEST_ALL_SCRIPT", gate.Path))
+	w := NewEmacsWorld(t, box, WithEmacsEnv("AGENT_REPL_TEST_ALL_SCRIPT", gate.Path))
 	// Arrange: the landing's ONE DEPLOY finds the daemon stale. The world's
 	// fake build stages what runs; staged with a daemon binary that is not
 	// the running one, the deploy hands the daemon over blue-green, and that
@@ -444,7 +444,7 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// announces.
 	sha := selfRepo.CommitIn(triggerDir, emHO40SelfMergeTriggerPath, "trigger\n")
 	selfRepo.SetPaths(sha, emHO40SelfMergeTriggerPath)
-	e.Eval(`(agent-repl-merge-workspace ` + elispString(trigger) + `)`)
+	e.Eval(`(agent-repl-finish-workspace ` + elispString(trigger) + `)`)
 
 	// Assert: a successor was ATTACHED, from the announced address. This is
 	// the half no plain bounce can produce — a `shutdown_announced` without

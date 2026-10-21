@@ -3117,7 +3117,7 @@ message FeedWorktreeBranch {
 //
 //   │ ⇄ merge  ABC/fix-flaky → master           6:31  ● merging  ▾      │
 //   │ ┌───────────────────────────────────────────────────────────────┐ │
-//   │ │ queue ✓ │ pre-prompt ✓ │ rebasing ✓ │ tests ● │                │ │
+//   │ │ queue ✓ │ pre-deploy ✓ │ rebasing ✓ │ tests ● │                │ │
 //   │ ├───────────────────────────────────────────────────────────────┤ │
 //   │ │  daemon unit ✓   webapp ● …   log: ~/…/merge-logs/…-tests-2.log│ │
 //   │ └───────────────────────────────────────────────────────────────┘ │
@@ -3436,7 +3436,7 @@ message FeedMergeFoldByReader {}
 // THE TAB FAMILY — one row per drawn tab of a merge bubble's sub-feed, at
 // every level of its strips.
 //
-//   │ queue ✓ │ pre-prompt ✓ │ rebasing ● │ tests │ committing │ post-prompt │
+//   │ queue ✓ │ pre-deploy ✓ │ rebasing ● │ tests │ committing │ deploy │
 //   ├──────────────────────────────────────────────────────────────────────┤
 //   │ replaying 5 commits of ABC/fix onto master at 4f2a1c                 │
 //   │ a1b2c3 fix loop ✓ │ d4e5f6 add retry ❓ │ 778899 tidy │               │
@@ -3463,9 +3463,9 @@ message FeedMergeFoldByReader {}
 // groups nothing itself: every subtab and every agent row names its
 // container.
 //
-// THREE TAB SHAPES. RESOLVED tabs (queue, committing, updating main) carry
+// THREE TAB SHAPES. RESOLVED tabs (queue, committing, hook_script) carry
 // their content in the row, replaced whole per push. AGENTIC tabs
-// (pick, pre_prompt, post_prompt) are containers: their content is the
+// (resolving, hook_prompt) are containers: their content is the
 // sub-feed rows parented to them: the requesting workspace's own session for a
 // sync merge, routed by the daemon's output address, and the hidden merge
 // workspace's session for an async merge, mirrored here from that workspace's
@@ -3485,9 +3485,12 @@ message FeedMergeFoldByReader {}
 // subtabs carry the replay's round) and gates again under the same tests tab
 // (its runs keep counting), and each is drawn live again while it works.
 //
-// The Emacs-repo run is queue | pre-prompt | rebasing | tests | committing |
-// post-prompt, an async merge with an instruction opening with its resolving tab; a branch already merged upstream is queue | updating main |
-// post-prompt; every other repo's run is queue | pre-prompt | post-prompt.
+// A deploy's tabs follow its repository's config (repoconfig.v1.DeployConfig):
+// queue, then one hook tab per `pre_deploy` hook, then rebasing | tests |
+// committing when the config has a local merge, then the `deploy` hook's tab
+// (absent when the repository is held or has none), then one per `post_deploy`
+// hook. An async merge with an instruction opens with its resolving tab.
+// agent-repl's own deploy is queue | rebasing | tests | committing | deploy.
 //
 // NOTHING PARKS. A conflict resolution or a fixing loop that gives up FAILS
 // the merge and hands the workspace back to the user (the bubble's error
@@ -3504,24 +3507,32 @@ message FeedMergeTab {
   // its content is.
   oneof kind {
     FeedMergeTabQueue queue = 2;
-    FeedMergeTabPrePrompt pre_prompt = 3;
     FeedMergeTabRebasing rebasing = 9;
     FeedMergeTabRebaseCommit rebase_commit = 13;
     FeedMergeTabTests tests = 6;
     FeedMergeTabTestsRun tests_run = 14;
     FeedMergeTabTestsRunFixing tests_run_fixing = 15;
     FeedMergeTabCommitting committing = 10;
-    FeedMergeTabUpdatingMain updating_main = 11;
-    FeedMergeTabPostPrompt post_prompt = 8;
     FeedMergeTabResolving resolving = 12;
+    // HISTORY ONLY: a branch already merged upstream, in a bubble recorded
+    // before the deploy queue. No deploy draws it.
+    FeedMergeTabUpdatingMain updating_main = 11;
+    // A prompt hook of any stage: agentic, its content the turn's own rows.
+    FeedMergeTabHookPrompt hook_prompt = 16;
+    // A script hook of any stage: resolved, its content the script's run.
+    FeedMergeTabHookScript hook_script = 17;
   }
+  // Tags 3 (`pre_prompt`) and 8 (`post_prompt`) are RETIRED: every prompt a
+  // deploy runs from its repository's config or from its request is a prompt
+  // hook (`hook_prompt`), and which stage it ran in is its label. Stored rows
+  // that carried them were rewritten as `hook_prompt`, the same shape.
   // Tag 4 (`merge`, the no-FF merge made before the gate) is RETIRED: the
   // branch is rebased first and the merge commit is made only after the gate
   // passes, as the committing tab. Tags 5 (`conflicts`) and 7 (`fixes`) are
   // RETIRED: a conflict resolution is part of its commit's subtab, and a
   // fixing attempt is its run's remediation view.
-  reserved 4, 5, 7;
-  reserved "merge", "conflicts", "fixes";
+  reserved 3, 4, 5, 7, 8;
+  reserved "merge", "conflicts", "fixes", "pre_prompt", "post_prompt";
 }
 
 // The tab's drawn label, resolved by the daemon.
@@ -3612,20 +3623,6 @@ message FeedMergeTabResolving {
     // workspace.
     FeedMergeTabWaitingOnUser waiting_on_user = 3;
   }
-}
-
-// AGENTIC: the configured --before-ws-merge prompt running the
-// workspace's session under the lease. Absent unless configured; its
-// failure FAILS THE RUN. Content: sub-feed rows parented to this row.
-message FeedMergeTabPrePrompt {
-  oneof state {
-    FeedMergeTabLive live = 1;
-    FeedMergeTabSettled settled = 2;
-  }
-  // Tag 3 (`workspace_switch`) is RETIRED: an async merge's agentic work is
-  // streamed into this tab, so there is nothing to link to in its place.
-  reserved 3;
-  reserved "workspace_switch";
 }
 
 // PARENT: the branch being rebased onto the target's tip, in the worktree
@@ -4000,9 +3997,11 @@ message FeedMergeCommitSubject {
   string text = 1;
 }
 
-// RESOLVED: a branch already merged upstream — the default branch in the
-// repository's main worktree fast-forwarded from upstream. Replaced whole per
-// push.
+// RESOLVED, HISTORY ONLY: a branch already merged upstream — the default
+// branch in the repository's main worktree fast-forwarded from upstream. No
+// deploy draws this tab: finishing a workspace always runs its repository's
+// deploy. It stays in the vocabulary because bubbles recorded before the
+// deploy queue carry it, and those rows are drawn again from the store.
 message FeedMergeTabUpdatingMain {
   oneof state {
     FeedMergeTabLive live = 1;
@@ -4028,19 +4027,71 @@ message FeedMergeUpdatingMainFastForwarding {
   string commit = 1;
 }
 
-// AGENTIC: the configured --post-processing-prompt running the
-// workspace's session under the lease. Absent unless configured; its
-// failure never fails the run (it rides the terminal). Content: sub-feed
-// rows parented to this row.
-message FeedMergeTabPostPrompt {
+// AGENTIC: a PROMPT HOOK (repoconfig.v1.DeployHookPrompt) running as a turn
+// of the deploy's owner under the lease, in whichever stage its label names
+// ("pre-deploy", "deploy", "post-deploy"). Present only for a hook the
+// repository's config or the request supplied and the deploy reached. Settled
+// failed when the turn ended in failure or was interrupted, which FAILS the
+// deploy. Content: sub-feed rows parented to this row.
+message FeedMergeTabHookPrompt {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
   }
-  // Tag 3 (`workspace_switch`) is RETIRED: an async merge's agentic work is
-  // streamed into this tab, so there is nothing to link to in its place.
-  reserved 3;
-  reserved "workspace_switch";
+}
+
+// RESOLVED: a SCRIPT HOOK (repoconfig.v1.DeployHookScript) the daemon runs
+// from the repository's main checkout root, in whichever stage its label names.
+// Live while the script runs; settled succeeded on exit 0, failed on any other
+// exit or on its timeout, which FAILS the deploy. Replaced whole per push.
+message FeedMergeTabHookScript {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+  // The script that runs.
+  FeedMergeHookScriptPath path = 3;
+  // The log holding its standard output and error, drawn as its path: no
+  // agentrepl.v1.OpenInEditorRequest target opens a hook log yet (see
+  // docs/protobuf-design/deploy-queue.md, "Open gaps").
+  FeedMergeHookScriptLog log = 4;
+  // The last lines of its output so far, oldest first. Empty until it writes.
+  repeated FeedMergeHookScriptLine tail = 5;
+  // How it ended. UNSET while it runs.
+  optional FeedMergeHookScriptExit exit = 6;
+}
+// The script's path, relative to the repository's main checkout root, drawn
+// verbatim.
+message FeedMergeHookScriptPath {
+  string text = 1;
+}
+// The script's log file on the daemon's host.
+message FeedMergeHookScriptLog {
+  // The log's full path.
+  string path = 1;
+}
+// One line of the script's output, drawn verbatim.
+message FeedMergeHookScriptLine {
+  string text = 1;
+}
+// How the script ended. THE ARM IS HOW.
+message FeedMergeHookScriptExit {
+  oneof how {
+    // It exited with this status; 0 is success.
+    FeedMergeHookScriptExited exited = 1;
+    // It ran past its timeout and was killed.
+    FeedMergeHookScriptTimedOut timed_out = 2;
+  }
+}
+// The script exited.
+message FeedMergeHookScriptExited {
+  // Its exit status.
+  int32 status = 1;
+}
+// The script was killed at its timeout.
+message FeedMergeHookScriptTimedOut {
+  // The timeout it ran past, in seconds.
+  uint32 timeout_seconds = 1;
 }
 
 // The repo queue snapshot the queue tab draws: who is ahead, this

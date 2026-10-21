@@ -25,21 +25,23 @@ func withVersion(v *wsm.VersionIncrement) wsm.MergeSource {
 
 func TestAVersionIncrementIsAcceptedExactlyWhereItBelongs(t *testing.T) {
 	tests := []struct {
-		name     string
-		selfRepo bool
-		by       Requester
-		version  *wsm.VersionIncrement
+		name      string
+		versioned bool
+		by        Requester
+		version   *wsm.VersionIncrement
 	}{
-		{name: "an agent's merge onto agent-repl's master with one", selfRepo: true, by: RequestedByAgent, version: aPatch()},
-		{name: "the user's merge onto agent-repl's master without one", selfRepo: true, by: RequestedByUser},
-		{name: "the user's merge onto agent-repl's master with one", selfRepo: true, by: RequestedByUser, version: aPatch()},
-		{name: "an agent's merge into another repository without one", selfRepo: false, by: RequestedByAgent},
+		{name: "an agent's deploy onto a versioned repository's main with one", versioned: true, by: RequestedByAgent, version: aPatch()},
+		{name: "the user's deploy onto a versioned repository's main without one", versioned: true, by: RequestedByUser},
+		{name: "the user's deploy onto a versioned repository's main with one", versioned: true, by: RequestedByUser, version: aPatch()},
+		{name: "an agent's deploy into an unversioned repository without one", versioned: false, by: RequestedByAgent},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
-			h.git.sameRepo = tt.selfRepo
+			if tt.versioned {
+				h.emacsRepo()
+			}
 
 			// Act
 			err := h.request(t, withVersion(tt.version), tt.by)
@@ -55,7 +57,7 @@ func TestAVersionIncrementIsAcceptedExactlyWhereItBelongs(t *testing.T) {
 	}
 }
 
-func TestAnAgentsMergeOntoAgentReplsMasterWithoutAnIncrementIsRefusedAndRecordsNothing(t *testing.T) {
+func TestAnAgentsDeployOntoAVersionedMainWithoutAnIncrementIsRefusedAndRecordsNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.emacsRepo()
@@ -76,7 +78,7 @@ func TestAnAgentsMergeOntoAgentReplsMasterWithoutAnIncrementIsRefusedAndRecordsN
 	}
 }
 
-func TestAnIncrementOnAMergeOffAgentReplsMasterIsRefusedWithItsReason(t *testing.T) {
+func TestAnIncrementOnADeployOffAVersionedMainIsRefusedWithItsReason(t *testing.T) {
 	tests := []struct {
 		name    string
 		arrange func(h *harness)
@@ -84,10 +86,10 @@ func TestAnIncrementOnAMergeOffAgentReplsMasterIsRefusedWithItsReason(t *testing
 		want    NestedArm
 	}{
 		{
-			name:    "another repository",
-			arrange: func(h *harness) { h.git.sameRepo = false },
+			name:    "an unversioned repository",
+			arrange: func(h *harness) {},
 			source:  withVersion(aPatch()),
-			want:    reasonForeignRepository,
+			want:    reasonUnversionedRepository,
 		},
 		{
 			name: "a parent workspace's checkout",
@@ -97,12 +99,6 @@ func TestAnIncrementOnAMergeOffAgentReplsMasterIsRefusedWithItsReason(t *testing
 			},
 			source: withVersion(aPatch()),
 			want:   reasonNotDefaultBranch,
-		},
-		{
-			name:    "a branch already merged upstream",
-			arrange: func(h *harness) { h.emacsRepo() },
-			source:  wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream, Version: aPatch()},
-			want:    reasonMergedUpstream,
 		},
 	}
 	for _, tt := range tests {
@@ -129,14 +125,14 @@ func TestAnIncrementOnAMergeOffAgentReplsMasterIsRefusedWithItsReason(t *testing
 func TestAnUnreadableRepositoryFailsTheRequestLoudlyAndRecordsNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.git.sameRepoErr = errors.New("git exploded")
+	h.git.mainWorktreeErr = errors.New("git exploded")
 
 	// Act
 	err := h.request(t, withVersion(aPatch()), RequestedByAgent)
 
 	// Assert
 	if err == nil {
-		t.Fatal("Enqueue = nil, want the repository check's failure")
+		t.Fatal("Enqueue = nil, want the main worktree lookup's failure")
 	}
 	if _, refused := Refused(err); refused {
 		t.Fatalf("Enqueue = %v, want a failure, not a refusal", err)

@@ -91,11 +91,11 @@ describe("the tab strip is the sub-feed's tab rows", () => {
 
   it("draws no tab for an ordinary row of the sub-feed", () => {
     const view = new FakeSubfeed([
-      tabRow("t1", { kind: "prePrompt", state: "live" }),
+      tabRow("t1", { kind: "hookPrompt", state: "live" }),
       childRow("r1", "t1"),
     ]);
     const { host } = mount(view);
-    expect(stripKinds(host)).toEqual(["prePrompt"]);
+    expect(stripKinds(host)).toEqual(["hookPrompt"]);
   });
 
   it("decorates a second round on the strip", () => {
@@ -514,13 +514,13 @@ describe("resolved tabs draw the tab row's own content", () => {
 describe("agentic tabs draw the sub-feed rows parented to them", () => {
   it("draws only the rows naming THIS tab as their container", () => {
     const view = new FakeSubfeed([
-      tabRow("t1", { kind: "prePrompt", state: "live" }),
-      tabRow("t2", { kind: "postPrompt", state: "live" }),
+      tabRow("t1", { kind: "hookPrompt", state: "live" }),
+      tabRow("t2", { kind: "hookPrompt", state: "live" }),
       childRow("r1", "t1"),
       childRow("r2", "t2"),
     ]);
     const { host } = mount(view);
-    host.querySelector<HTMLElement>('[data-merge-tab="prePrompt"]')?.click();
+    host.querySelector<HTMLElement>('[data-merge-tab="hookPrompt"]')?.click();
     expect(
       [...host.querySelectorAll("[data-nest] [data-feed-row]")].map((e) =>
         e.getAttribute("data-feed-row"),
@@ -530,7 +530,7 @@ describe("agentic tabs draw the sub-feed rows parented to them", () => {
 
   it("draws them through the ordinary row path, chrome included", () => {
     const view = new FakeSubfeed([
-      tabRow("t1", { kind: "prePrompt", state: "live" }),
+      tabRow("t1", { kind: "hookPrompt", state: "live" }),
       childRow("r1", "t1"),
     ]);
     mount(view);
@@ -539,7 +539,7 @@ describe("agentic tabs draw the sub-feed rows parented to them", () => {
 
   it("draws them in feed order", () => {
     const view = new FakeSubfeed([
-      tabRow("t1", { kind: "postPrompt", state: "live" }),
+      tabRow("t1", { kind: "hookPrompt", state: "live" }),
       childRow("r1", "t1"),
       childRow("r2", "t1"),
     ]);
@@ -553,9 +553,9 @@ describe("agentic tabs draw the sub-feed rows parented to them", () => {
 
   it("draws no row of a tab the reader is not on", () => {
     const view = new FakeSubfeed([
-      tabRow("t1", { kind: "prePrompt", state: "settled", outcome: "succeeded" }),
+      tabRow("t1", { kind: "hookPrompt", state: "settled", outcome: "succeeded" }),
       childRow("r1", "t1"),
-      tabRow("t2", { kind: "postPrompt", state: "live" }),
+      tabRow("t2", { kind: "hookPrompt", state: "live" }),
     ]);
     const { host } = mount(view);
     expect(host.querySelectorAll("[data-nest] [data-feed-row]").length).toBe(0);
@@ -599,7 +599,7 @@ describe("a fixing attempt names its attempt above its rows", () => {
 
 describe("nothing parks, so no tab hosts a composer", () => {
   it("leaves the bubble's composer slot out of the merge body", () => {
-    const view = new FakeSubfeed([tabRow("t1", { kind: "prePrompt", state: "live" })]);
+    const view = new FakeSubfeed([tabRow("t1", { kind: "hookPrompt", state: "live" })]);
     view.composerSlot = document.createElement("div");
     view.composerSlot.className = "bubble-composer";
     const { host } = mount(view);
@@ -765,12 +765,12 @@ describe("a redraw of the tab's content", () => {
         return super.drawRow(row);
       }
     }
-    const view = new Watching([tabRow("t1", { kind: "prePrompt", state: "live" }), childRow("r1", "t1")]);
+    const view = new Watching([tabRow("t1", { kind: "hookPrompt", state: "live" }), childRow("r1", "t1")]);
     host = mount(view).host;
     const standing = host.querySelector(".merge-tab-panel")?.childElementCount;
     seen.length = 0;
     // Act
-    view.push([tabRow("t1", { kind: "prePrompt", state: "live" }), childRow("r1", "t1"), childRow("r2", "t1")]);
+    view.push([tabRow("t1", { kind: "hookPrompt", state: "live" }), childRow("r1", "t1"), childRow("r2", "t1")]);
     // Assert
     expect(seen).toEqual([standing, standing]);
   });
@@ -856,12 +856,12 @@ describe("the body redraws in place", () => {
 
   it("keeps an agentic tab's rows container, and a row that stays is never moved", () => {
     // Arrange
-    const view = new CachingSubfeed([tabRow("t1", { kind: "prePrompt", state: "live" }), childRow("r1", "t1")]);
+    const view = new CachingSubfeed([tabRow("t1", { kind: "hookPrompt", state: "live" }), childRow("r1", "t1")]);
     const { host } = mount(view);
     const container = host.querySelector(".merge-tab-rows");
     const row = host.querySelector('[data-feed-row="r1"]');
     // Act
-    view.push([tabRow("t1", { kind: "prePrompt", state: "live" }), childRow("r1", "t1"), childRow("r2", "t1")]);
+    view.push([tabRow("t1", { kind: "hookPrompt", state: "live" }), childRow("r1", "t1"), childRow("r2", "t1")]);
     // Assert
     expect([host.querySelector(".merge-tab-rows"), host.querySelector('[data-feed-row="r1"]'), host.querySelectorAll(".merge-tab-rows > *").length]).toEqual([
       container,

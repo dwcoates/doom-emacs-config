@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -233,7 +233,6 @@ func TestAnAsyncRequestThatContradictsItselfIsAnErrorWithNothingRecorded(t *test
 		run    *DetachedRun
 	}{
 		{name: "kept open", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}, run: &DetachedRun{Maker: theWorkspace, Name: "n"}},
-		{name: "merged upstream", source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}, run: &DetachedRun{Maker: theWorkspace, Name: "n"}},
 		{name: "no name", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, run: &DetachedRun{Maker: theWorkspace}},
 	}
 	for _, tt := range tests {
@@ -857,7 +856,7 @@ func TestALandingWhileTheRolloutsAreHeldIsHandedBackAsHeld(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ownCheckout()
-	h.db.rolloutHold = wsm.RolloutHold{Held: true, Since: time.Unix(1, 0)}
+	h.db.deployHold = wsm.DeployHold{Held: true, Since: time.Unix(1, 0)}
 
 	// Act
 	sent := landedAsync(t, h)
@@ -872,7 +871,7 @@ func TestALandingWhoseHoldWillNotReadIsHandedBackAsUnread(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ownCheckout()
-	h.db.rolloutHoldErr = errors.New("state database unreadable")
+	h.db.deployHoldErr = errors.New("state database unreadable")
 
 	// Act
 	sent := landedAsync(t, h)
@@ -887,7 +886,7 @@ func TestTheReportAndTheDeployReadTheHoldOnce(t *testing.T) {
 	// Arrange: the hold reads as free for the first read only.
 	h := newHarness(t)
 	h.ownCheckout()
-	h.db.rolloutHoldOnce = &wsm.RolloutHold{Held: true, Since: time.Unix(1, 0)}
+	h.db.deployHoldLater = &wsm.DeployHold{Held: true, Since: time.Unix(1, 0)}
 
 	// Act
 	sent := landedAsync(t, h)
@@ -1069,25 +1068,25 @@ func withParentBranch(h *harness, parent string) {
 	h.db.workspaces[theWorkspace] = requester
 }
 
-// detachedRunFor is the "reconnect-fix" request with ACTIONS, landing into the
+// detachedRunFor is the "reconnect-fix" request with HOOKS, landing into the
 // harness's other workspace as its maker when INTOMAKER, else made by the
 // requester and landing on the primary branch.
-func detachedRunFor(intoMaker bool, actions wsm.MergeActions) *DetachedRun {
+func detachedRunFor(intoMaker bool, hooks wsm.DeployHooks) *DetachedRun {
 	if intoMaker {
-		return &DetachedRun{Maker: otherWorkspace, IntoMaker: true, Name: "reconnect-fix", Actions: actions}
+		return &DetachedRun{Maker: otherWorkspace, IntoMaker: true, Name: "reconnect-fix", Hooks: hooks}
 	}
-	return &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Actions: actions}
+	return &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Hooks: hooks}
 }
 
 func TestAnAsyncRequestsHandOffForksWithTheLandingTheQueueDecided(t *testing.T) {
-	actions := wsm.MergeActions{Before: []string{"run the linters"}, After: []string{"post the summary"}}
+	actions := wsm.DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHookOf("run the linters")}, PostDeploy: []*repoconfigv1.DeployHook{promptHookOf("post the summary")}}
 	tests := []struct {
 		name          string
 		arrange       func(h *harness)
 		wantTarget    func(h *harness) string
 		wantParent    string
-		actions       wsm.MergeActions
-		wantOriginAct wsm.MergeActions
+		actions       wsm.DeployHooks
+		wantOriginAct wsm.DeployHooks
 		intoMaker     bool
 	}{
 		{name: "a request onto the primary branch lands in the main worktree", arrange: func(h *harness) {},
@@ -1115,20 +1114,20 @@ func TestAnAsyncRequestsHandOffForksWithTheLandingTheQueueDecided(t *testing.T) 
 				t.Fatalf("origins = %+v, want one", origins)
 			}
 			got := origins[0]
-			if got.TargetDir != tt.wantTarget(h) || got.ParentBranch != tt.wantParent || !reflect.DeepEqual(got.Actions, tt.wantOriginAct) {
-				t.Fatalf("origin landing = (%q, %q, %+v), want (%q, %q, %+v)", got.TargetDir, got.ParentBranch, got.Actions,
+			if got.TargetDir != tt.wantTarget(h) || got.ParentBranch != tt.wantParent || !got.Hooks.Equal(tt.wantOriginAct) {
+				t.Fatalf("origin landing = (%q, %q, %+v), want (%q, %q, %+v)", got.TargetDir, got.ParentBranch, got.Hooks,
 					tt.wantTarget(h), tt.wantParent, tt.wantOriginAct)
 			}
 		})
 	}
 }
 
-func TestAnAsyncRequestWithNoActionsForksWithNoneEvenWhenItsRequesterHasSome(t *testing.T) {
-	// Arrange: the requester was created with merge actions of its own.
+func TestAnAsyncRequestWithNoHooksForksWithNoneEvenWhenItsRequesterHasSome(t *testing.T) {
+	// Arrange: the requester was created with deploy hooks of its own.
 	h := newHarness(t)
 	h.db.mu.Lock()
 	job := h.db.jobs[theWorkspace]
-	job.Actions = wsm.MergeActions{Before: []string{"the requester's own before"}, After: []string{"the requester's own after"}}
+	job.Hooks = wsm.DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHookOf("the requester's own pre-deploy")}, PostDeploy: []*repoconfigv1.DeployHook{promptHookOf("the requester's own post-deploy")}}
 	h.db.jobs[theWorkspace] = job
 	h.db.mu.Unlock()
 
@@ -1139,29 +1138,29 @@ func TestAnAsyncRequestWithNoActionsForksWithNoneEvenWhenItsRequesterHasSome(t *
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	if origins := h.detached.origins; len(origins) != 1 || !reflect.DeepEqual(origins[0].Actions, wsm.MergeActions{}) {
-		t.Fatalf("origins = %+v, want one carrying no merge action", origins)
+	if origins := h.detached.origins; len(origins) != 1 || !origins[0].Hooks.Empty() {
+		t.Fatalf("origins = %+v, want one carrying no hook", origins)
 	}
 }
 
-func TestAnAsyncRequestRecordsItsMergeActionsOnItsEntry(t *testing.T) {
+func TestAnAsyncRequestRecordsItsDeployHooksOnItsEntry(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.mu.Lock()
 	h.inFlight = "turn-asking"
 	h.mu.Unlock()
-	actions := wsm.MergeActions{Before: []string{"run the linters"}}
+	actions := wsm.DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHookOf("run the linters")}}
 
 	// Act: an agent's request, still waiting on the turn that asked.
 	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource,
-		By: RequestedByAgent, Asker: theWorkspace, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Actions: actions}})
+		By: RequestedByAgent, Asker: theWorkspace, Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Hooks: actions}})
 
 	// Assert
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	if entry, ok := h.entryOf(theWorkspace); !ok || !reflect.DeepEqual(entry.Source.Actions, actions) {
-		t.Fatalf("entry = %+v, %v; want the request's actions recorded", entry, ok)
+	if entry, ok := h.entryOf(theWorkspace); !ok || !entry.Source.Hooks.Equal(actions) {
+		t.Fatalf("entry = %+v, %v; want the request's hooks recorded", entry, ok)
 	}
 }
 

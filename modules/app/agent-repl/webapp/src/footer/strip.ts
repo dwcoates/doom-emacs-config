@@ -800,20 +800,25 @@ export function chipGlyph(name: string, character: string): HTMLElement {
 
 // ---- shared helpers -------------------------------------------------------
 /**
- * The substatus word, with the TWO arms whose bare name would lie or say
- * nothing.
+ * The substatus word, with the arms whose bare name would lie, say nothing or
+ * misspell a stage.
  *
  * `FooterStatusClosing`'s step is spelled `blocked`, which is also a whole
  * STATUS in this same strip — a close that cannot proceed would read exactly
  * like a session the vendor has blocked. The message's own name
  * (`FooterSubStatusCloseBlocked`) is what the schema calls it, so the cell
  * draws that. `FooterStatusMergeFailed`'s catch-all area is spelled `other`,
- * and footer.proto draws it "merge". Both are declared exceptions, not a
- * per-arm label table: every other arm's name is already its label.
+ * and footer.proto draws it "merge". A deploy's first and last stages are
+ * spelled `pre_deploy` and `post_deploy`, and footer.proto draws them
+ * "pre-deploy" and "post-deploy", as a deploy config names them. These are
+ * declared exceptions, not a per-arm label table: every other arm's name is
+ * already its label.
  */
 export function subStatusWords(statusCase: string, subCase: string): string {
   if (statusCase === "closing" && subCase === "blocked") return "close blocked";
   if (statusCase === "merging" && subCase === "awaitingFree") return "waiting for";
+  if (statusCase === "merging" && subCase === "preDeploy") return "pre-deploy";
+  if (statusCase === "merging" && subCase === "postDeploy") return "post-deploy";
   if (statusCase === "mergeFailed" && subCase === "other") return "merge";
   return statusWords(subCase);
 }

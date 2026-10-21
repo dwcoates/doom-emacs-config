@@ -39,9 +39,9 @@ const progressVersion = 1
 // progressDoc is the durable record.
 type progressDoc struct {
 	Version int `json:"version"`
-	// Step is the tab kind the run stands on: TabQueue, TabPrePrompt,
-	// TabRebasing, TabConflicts, TabTests, TabFixes, TabCommitting,
-	// TabUpdatingMain or TabPostPrompt.
+	// Step is the tab kind the run stands on: TabQueue, TabPreDeploy,
+	// TabRebasing, TabConflicts, TabTests, TabFixes, TabCommitting, TabDeploy
+	// or TabPostDeploy.
 	Step string `json:"step"`
 	// Repo is the queue the merge was admitted from.
 	Repo string `json:"repo"`
@@ -53,9 +53,9 @@ type progressDoc struct {
 	// never re-resolves it (a branch worktree the merge made would be made
 	// again).
 	Subject subjectDoc `json:"subject"`
-	// EmacsRepo and SelfCheckout select the method and the self-reload.
-	EmacsRepo    bool `json:"emacs_repo"`
-	SelfCheckout bool `json:"self_checkout"`
+	// RolloutRequested is that the deploy hook asked for the rollout of the
+	// deploy's landing (RollOutLanding), which fires at the teardown.
+	RolloutRequested bool `json:"rollout_requested"`
 	// Rounds, Active and Open are the bubble's tab rounds: how many of each
 	// kind were opened, the one live now, and those whose ledger interval is
 	// still open.
@@ -72,13 +72,13 @@ type progressDoc struct {
 	// merge ends.
 	Displaced *displacedDoc `json:"displaced,omitempty"`
 
-	// PromptIndex is the configured prompt a pre or post step is on, and Turn
-	// the agent turn any agentic step (a prompt, a conflict resolution, a
-	// fixing attempt) submitted.
+	// PromptIndex is the hook a stage is on, its scripts and prompts counted
+	// together, and Turn the agent turn any agentic step (a prompt hook, a
+	// conflict resolution, a fixing attempt) submitted.
 	PromptIndex int    `json:"prompt_index"`
 	Turn        string `json:"turn,omitempty"`
 
-	// The Emacs-repo method's attempt: the target's branch and the tip the
+	// The local merge's attempt: the target's branch and the tip the
 	// branch is rebased onto, the branch's head before the rebase began, the
 	// commits replayed and how many are on the tip, the conflicted files, the fixing attempt and the suites it
 	// fixes, the gated head, the scratch trees made, and the merge commit the
@@ -317,7 +317,7 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 	doc.Repo = string(r.repo)
 	doc.QueuedMS, doc.StartedMS = r.queuedMS, r.startedMS
 	doc.Subject = toSubjectDoc(r.subject)
-	doc.EmacsRepo, doc.SelfCheckout = r.emacsRepo, r.selfCheckout
+	doc.RolloutRequested = r.rolloutRequested
 	doc.Rounds = make(map[string]int, len(r.rounds))
 	for kind, n := range r.rounds {
 		doc.Rounds[kind] = n
@@ -435,7 +435,7 @@ func (r *run) restoreFrom(doc progressDoc) {
 	defer r.mu.Unlock()
 	r.prog = doc
 	r.subject = doc.Subject.subject()
-	r.emacsRepo, r.selfCheckout = doc.EmacsRepo, doc.SelfCheckout
+	r.rolloutRequested = doc.RolloutRequested
 	for kind, n := range doc.Rounds {
 		r.rounds[kind] = n
 	}
@@ -496,8 +496,8 @@ func (r *run) doneResuming() { r.resume = nil }
 // resumeStepOrder is the method's step order, which is how a resume skips the
 // steps the dead run had already finished.
 var resumeStepOrder = map[string]int{
-	TabQueue: 0, TabPrePrompt: 1, TabRebasing: 2, TabConflicts: 2, TabTests: 2, TabFixes: 2,
-	TabCommitting: 2, TabUpdatingMain: 2, TabPostPrompt: 3,
+	TabQueue: 0, TabPreDeploy: 1, TabRebasing: 2, TabConflicts: 2, TabTests: 2, TabFixes: 2,
+	TabCommitting: 2, TabDeploy: 3, TabPostDeploy: 4,
 }
 
 // resumingPast reports whether this run resumes at a step AFTER the one named:

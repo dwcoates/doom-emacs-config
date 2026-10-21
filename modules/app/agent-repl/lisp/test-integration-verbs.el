@@ -28,7 +28,7 @@
 (declare-function agent-repl-verb-kill "verbs")
 (declare-function agent-repl-verb-nuke "verbs")
 (declare-function agent-repl-verb-open "verbs")
-(declare-function agent-repl-verb-merge "verbs")
+(declare-function agent-repl-verb-finish "verbs")
 (declare-function agent-repl-verb-restart "verbs")
 (declare-function agent-repl-verb-create "verbs")
 (declare-function agent-repl-verb-set-priority "verbs")
@@ -281,20 +281,20 @@ learn about a workspace it has no tab for."
                       'workspace 'id)
                      (plist-get ref :id))))))
 
-(ert-deftest agent-repl-itest-verbs-merge-enqueues-and-keeps-no-state ()
-  "MergeWorkspace success means ENQUEUED, and Emacs keeps no merge state.
-The merge's whole life from there is the webapp feed's merge bubble and
-the roster/footer; Emacs's durable merged memory was REMOVED."
+(ert-deftest agent-repl-itest-verbs-finish-enqueues-and-keeps-no-state ()
+  "FinishWorkspace success means ENQUEUED, and Emacs keeps no deploy state.
+The deploy's whole life from there is the webapp feed's bubble and the
+roster/footer; Emacs's durable merged memory was REMOVED."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
-      (agent-repl-verb-merge agent-repl-itest-verbs--ws)
-      (agent-repl-itest--await-call daemon "MergeWorkspace")
+      (agent-repl-verb-finish agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "FinishWorkspace")
       ;; Assert: the request carried the ref, and the tab is untouched — a
       ;; merged tab is neither hidden nor greyed by Emacs.
       (should (equal (agent-repl-itest--body-field
-                      (agent-repl-itest-verbs--body daemon "MergeWorkspace")
+                      (agent-repl-itest-verbs--body daemon "FinishWorkspace")
                       'workspace 'id)
                      (plist-get ref :id)))
       (should (agent-repl--ws-live-p agent-repl-itest-verbs--ws)))))
@@ -678,16 +678,16 @@ daemon could not be reached."
   (agent-repl-itest--with-fake-daemon daemon
     ;; THE ARM IS THE REFUSAL, so the scripted error names one; an unset
     ;; cause would be a contract breach rather than a refusal to report.
-    (agent-repl-itest--script daemon "MergeWorkspace"
+    (agent-repl-itest--script daemon "FinishWorkspace"
                               '((error . ((alreadyQueued . ())))))
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-merge agent-repl-itest-verbs--ws)
-      (agent-repl-itest--await-call daemon "MergeWorkspace")
+      (agent-repl-verb-finish agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "FinishWorkspace")
       ;; Assert.
-      (agent-repl-itest--await-log daemon "elisp.verbs.merge-refused" "warn")
-      (should (agent-repl-itest--logged-p daemon "elisp.verbs.merge-refused" "warn")))))
+      (agent-repl-itest--await-log daemon "elisp.verbs.finish-refused" "warn")
+      (should (agent-repl-itest--logged-p daemon "elisp.verbs.finish-refused" "warn")))))
 
 (ert-deftest agent-repl-itest-verbs-transport-failure-logs-an-error ()
   "A verb whose daemon has gone away logs an ERROR, loudly.
@@ -699,7 +699,7 @@ loudly — no staleness machinery softens it."
       (ignore ref)
       (agent-repl-itest--stop-daemon daemon t)
       ;; Act.
-      (ignore-errors (agent-repl-verb-merge agent-repl-itest-verbs--ws))
+      (ignore-errors (agent-repl-verb-finish agent-repl-itest-verbs--ws))
       ;; Assert.
       (agent-repl-itest--wait-until
        (lambda () (agent-repl-itest--logged-p daemon "elisp.verbs.transport-failure" "error"))
@@ -778,11 +778,10 @@ announced a restart still under way."
            nil "the restart's done record")
           (should (cl-some (lambda (m) (string-match-p "elisp\\.verbs\\.restart-done" m)) messages)))))))
 
-(ert-deftest agent-repl-itest-verbs-merge-success-messages-merge-enqueued ()
-  "A Merge success reports itself as exactly \"merge enqueued\".
-Pins fanout \"Merge success -> `message \"merge enqueued\"'\"
-(elisp-fanout.md §9): Emacs holds no merge state, so this message is the
-whole of what the user learns from the ack."
+(ert-deftest agent-repl-itest-verbs-finish-success-messages-deploy-enqueued ()
+  "A Finish success reports itself as exactly \"deploy enqueued\".
+Emacs holds no deploy state, so this message is the whole of what the
+user learns from the ack."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
@@ -793,20 +792,20 @@ whole of what the user learns from the ack."
                      (push (apply #'format fmt args) messages)
                      nil)))
           ;; Act.
-          (agent-repl-verb-merge agent-repl-itest-verbs--ws)
-          (agent-repl-itest--await-call daemon "MergeWorkspace")
-          ;; Assert: "Merge success -> `message \"merge enqueued\"'" (elisp-fanout.md §9).
+          (agent-repl-verb-finish agent-repl-itest-verbs--ws)
+          (agent-repl-itest--await-call daemon "FinishWorkspace")
+          ;; Assert: "Finish success -> `message \"deploy enqueued\"'".
           ;; WAIT FOR THE MESSAGE THIS TEST IS ABOUT, not for "some message":
           ;; the `elisp.verbs.send' info record `--send' writes on issuing the
           ;; call is already in this list before the daemon has even
           ;; answered (every rung below `agent-repl--error' emits through
           ;; `message', quietly, via `agent-repl--emit-message'), so waiting
           ;; on a non-empty list is satisfied by the send log and races the
-          ;; success ack that produces "merge enqueued" itself.
+          ;; success ack that produces "deploy enqueued" itself.
           (agent-repl-itest--wait-until
-           (lambda () (member "merge enqueued" messages))
-           nil "the merge success message")
-          (should (member "merge enqueued" messages)))))))
+           (lambda () (member "deploy enqueued" messages))
+           nil "the deploy success message")
+          (should (member "deploy enqueued" messages)))))))
 
 ;;;; ---- Close `blocked' messaging, no dialog (audit finding 71) ----
 
@@ -849,19 +848,19 @@ this test loudly rather than hanging a batch run."
 
 ;;;; ---- Raw-wire explicit-false assertions (audit findings 72, 73) ----
 
-(ert-deftest agent-repl-itest-verbs-merge-sends-a-one-shot-of-its-own-branch-on-the-raw-wire ()
-  "Emacs's merge reaches the daemon as a one-shot of its own branch."
+(ert-deftest agent-repl-itest-verbs-finish-sends-the-users-ask-on-the-raw-wire ()
+  "Emacs's finish reaches the daemon as the user's ask at the back of the queue."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-merge agent-repl-itest-verbs--ws)
-      (agent-repl-itest--await-call daemon "MergeWorkspace")
+      (agent-repl-verb-finish agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "FinishWorkspace")
       ;; Assert.
-      (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "MergeWorkspace"))))
+      (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "FinishWorkspace"))))
         (should (string-match-p
-                 (regexp-quote "\"oneShot\":{\"ownBranch\":{}}")
+                 (regexp-quote "\"requester\":{\"user\":{}},\"placement\":{\"back\":{}}")
                  raw))))))
 
 ;;;; ---- CreateWorkspaceRequest fields (audit finding 75) ----
@@ -917,26 +916,6 @@ the wire to override that."
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
         (should (equal (agent-repl-itest--body-field body 'standard 'name) "my-ws"))))))
-
-(ert-deftest agent-repl-itest-verbs-create-standard-merge-actions-before-ws-merge-is-a-usersaid ()
-  "The standard form's pre-merge action rides as a UserSaid, not a bare string.
-Pins \"CreateWorkspaceRequest ... standard.merge_actions\"
-(elisp-fanout.md §5): \"merge-action fields are UserSaid values\"."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-verbs--with-primary daemon conn
-      (ignore conn)
-      ;; Act.
-      (agent-repl-verb-create
-       agent-repl-itest-verbs--repo
-       :standard :merge-actions (list :before-ws-merge "run the linter"))
-      (agent-repl-itest--await-call daemon "CreateWorkspace")
-      ;; Assert.
-      (let* ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace"))
-             (blocks (agent-repl-itest--body-field
-                      body 'standard 'mergeActions 'beforeWsMerge 'content 'blocks)))
-        (should (equal (agent-repl-itest--body-field (car blocks) 'text 'text)
-                       "run the linter"))))))
 
 ;;;; ---- CreateWorkspaceStandard: unset prompt is absence (audit finding 76) ----
 
@@ -1285,22 +1264,22 @@ success ack must be findable in the production log by that op."
          nil "the open success ack log line")
         (should (agent-repl-itest-verbs--ack-logged-p daemon "open"))))))
 
-(ert-deftest agent-repl-itest-verbs-merge-success-logs-its-ack ()
-  "A Merge success logs `elisp.verbs.ack' naming op=merge.
-verbs.el's vocabulary names MergeWorkspace's success as \"ENQUEUED\"; its
+(ert-deftest agent-repl-itest-verbs-finish-success-logs-its-ack ()
+  "A Finish success logs `elisp.verbs.ack' naming op=finish.
+verbs.el's vocabulary names FinishWorkspace's success as \"ENQUEUED\"; its
 success ack must be findable in the production log by that op."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-merge agent-repl-itest-verbs--ws)
-      (agent-repl-itest--await-call daemon "MergeWorkspace")
+      (agent-repl-verb-finish agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "FinishWorkspace")
       ;; Assert.
       (agent-repl-itest--wait-until
-       (lambda () (agent-repl-itest-verbs--ack-logged-p daemon "merge"))
-       nil "the merge success ack log line")
-      (should (agent-repl-itest-verbs--ack-logged-p daemon "merge")))))
+       (lambda () (agent-repl-itest-verbs--ack-logged-p daemon "finish"))
+       nil "the finish success ack log line")
+      (should (agent-repl-itest-verbs--ack-logged-p daemon "finish")))))
 
 (ert-deftest agent-repl-itest-verbs-restart-success-logs-its-ack ()
   "A Restart success logs `elisp.verbs.ack' naming op=restart.
@@ -1398,7 +1377,7 @@ puts dynamic values."
                  (agent-repl-itest--log-entries daemon operation level))))
 
 ;; audit-2 #24
-(ert-deftest agent-repl-itest-verbs-merge-transferring-away-routes-to-the-handover ()
+(ert-deftest agent-repl-itest-verbs-finish-transferring-away-routes-to-the-handover ()
   "`transferring_away' on a verb ack is HANDOVER NEWS, not a refusal to report.
 verbs.el `agent-repl-verbs--handover-arms' + fanout §7 HANDOVER REDIAL.
 Reporting it would be telling the user something went wrong during the
@@ -1411,20 +1390,20 @@ drawn, and the workspace is adopted onto the successor instead."
         (agent-repl-itest--with-second-daemon primary successor
           (let ((messages nil))
             (agent-repl-itest--script
-             primary "MergeWorkspace"
+             primary "FinishWorkspace"
              `((error . ((transferringAway
                           . ((address . ,(agent-repl-itest-daemon-address successor))))))))
             (cl-letf (((symbol-function 'message)
                        (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
               ;; Act.
-              (agent-repl-verb-merge agent-repl-itest-verbs--ws)
-              (agent-repl-itest--await-call primary "MergeWorkspace"))
+              (agent-repl-verb-finish agent-repl-itest-verbs--ws)
+              (agent-repl-itest--await-call primary "FinishWorkspace"))
             ;; Assert.
             (agent-repl-itest--await-log
-             primary "elisp.verbs.merge-handover-refusal" "info")
+             primary "elisp.verbs.finish-handover-refusal" "info")
             (should (null (agent-repl-itest--log-entries
-                           primary "elisp.verbs.merge-refused" "warn")))
-            (should-not (seq-some (lambda (m) (string-match-p "merge refused" m)) messages))
+                           primary "elisp.verbs.finish-refused" "warn")))
+            (should-not (seq-some (lambda (m) (string-match-p "finish refused" m)) messages))
             (agent-repl-itest--await-call successor "AdoptHostWorkspace")
             (should (equal (agent-repl-itest--body-field
                             (car (agent-repl-itest--call-bodies
@@ -1433,7 +1412,7 @@ drawn, and the workspace is adopted onto the successor instead."
                            (plist-get ref :id)))))))))
 
 ;; audit-2 #24
-(ert-deftest agent-repl-itest-verbs-merge-not-yet-adopted-routes-to-the-handover ()
+(ert-deftest agent-repl-itest-verbs-finish-not-yet-adopted-routes-to-the-handover ()
   "`not_yet_adopted' on a verb ack is the OTHER silent handover arm.
 fanout §7: the successor has not finished adopting the workspace yet, so
 the adopt is retried once its `WatchDaemon' is accepted.  Nothing is
@@ -1444,22 +1423,22 @@ drawn here either."
       (agent-repl-itest-verbs--with-workspace primary ref
         (agent-repl-itest--with-second-daemon primary successor
           (let ((messages nil))
-            (agent-repl-itest--script primary "MergeWorkspace"
+            (agent-repl-itest--script primary "FinishWorkspace"
                                       '((error . ((notYetAdopted . ())))))
             (cl-letf (((symbol-function 'message)
                        (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
               ;; Act: the refusal arrives before any successor stands.
-              (agent-repl-verb-merge agent-repl-itest-verbs--ws)
-              (agent-repl-itest--await-call primary "MergeWorkspace")
+              (agent-repl-verb-finish agent-repl-itest-verbs--ws)
+              (agent-repl-itest--await-call primary "FinishWorkspace")
               (agent-repl-itest--await-log
-               primary "elisp.verbs.merge-handover-refusal" "info")
+               primary "elisp.verbs.finish-handover-refusal" "info")
               ;; The successor is announced and accepted only now.
               (agent-repl-itest-verbs--announce
                primary (agent-repl-itest-daemon-address successor)))
             ;; Assert.
             (should (null (agent-repl-itest--log-entries
-                           primary "elisp.verbs.merge-refused" "warn")))
-            (should-not (seq-some (lambda (m) (string-match-p "merge refused" m)) messages))
+                           primary "elisp.verbs.finish-refused" "warn")))
+            (should-not (seq-some (lambda (m) (string-match-p "finish refused" m)) messages))
             (agent-repl-itest--await-call successor "AdoptHostWorkspace")
             (should (equal (agent-repl-itest--body-field
                             (car (agent-repl-itest--call-bodies
@@ -1475,18 +1454,18 @@ fields=%S'.  Asserting only the operation slug would pass with the arm
 never recorded, which is exactly the fact a refusal reader needs."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest--script daemon "MergeWorkspace"
+    (agent-repl-itest--script daemon "FinishWorkspace"
                               '((error . ((alreadyQueued . ())))))
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-merge agent-repl-itest-verbs--ws)
-      (agent-repl-itest--await-log daemon "elisp.verbs.merge-refused" "warn")
+      (agent-repl-verb-finish agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-log daemon "elisp.verbs.finish-refused" "warn")
       ;; Assert.
       (should (seq-some
                (lambda (s) (string-match-p ":already-queued" s))
                (agent-repl-itest-verbs--log-arguments
-                daemon "elisp.verbs.merge-refused" "warn"))))))
+                daemon "elisp.verbs.finish-refused" "warn"))))))
 
 ;; audit-2 #25
 (ert-deftest agent-repl-itest-verbs-refusal-fields-reach-the-context-and-the-message ()
@@ -2171,7 +2150,7 @@ pre-existing suite scripts only `linkSevered'."
 
 ;; audit-3 #56
 (ert-deftest agent-repl-itest-verbs-transport-failure-messages-the-exact-per-op-text ()
-  "A transport failure messages EXACTLY \"merge failed -- the daemon did not
+  "A transport failure messages EXACTLY \"finish failed -- the daemon did not
 answer\", not merely an ERROR log line.
 Pins fanout §9 `agent-repl--error' + `message': the pre-existing
 `agent-repl-itest-verbs-transport-failure-logs-an-error' asserts only the
@@ -2185,19 +2164,19 @@ log side, leaving the user-facing text (`--send''s `:on-failure') unpinned."
         (cl-letf (((symbol-function 'message)
                    (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
           ;; Act.
-          (ignore-errors (agent-repl-verb-merge agent-repl-itest-verbs--ws))
+          (ignore-errors (agent-repl-verb-finish agent-repl-itest-verbs--ws))
           ;; Assert.
           (agent-repl-itest--wait-until
            (lambda ()
              (seq-some (lambda (m)
                          (string-match-p
-                          (regexp-quote "merge failed -- the daemon did not answer") m))
+                          (regexp-quote "finish failed -- the daemon did not answer") m))
                        messages))
-           nil "the exact merge transport-failure message")
+           nil "the exact finish transport-failure message")
           (should (seq-some
                    (lambda (m)
                      (string-match-p
-                      (regexp-quote "merge failed -- the daemon did not answer") m))
+                      (regexp-quote "finish failed -- the daemon did not answer") m))
                    messages)))))))
 
 ;;;; ---- #57: a restart's success says nothing to the user

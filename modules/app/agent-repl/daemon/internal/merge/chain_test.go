@@ -1416,6 +1416,10 @@ func TestTheChainCheckAgainstItsQueue(t *testing.T) {
 				entries = append(entries, admittedEntry(ws))
 			}
 			h := resumeWorld(t, entries)
+			// A queue races only in a repository whose deploy merges locally.
+			h.mu.Lock()
+			h.config = localMergeConfig()
+			h.mu.Unlock()
 			ctx, cancel := context.WithCancelCause(context.Background())
 			defer cancel(nil)
 			h.o.mu.Lock()
@@ -1428,7 +1432,9 @@ func TestTheChainCheckAgainstItsQueue(t *testing.T) {
 			}
 			h.o.chains[h.repoKey()] = chain
 			// The chain extends only behind its running head (extendOnce), so
-			// its first member is the head running.
+			// its first member is the head running, which has read the
+			// repository's deploy config.
+			chain[0].target = deployTarget{cfg: localMergeConfig()}
 			h.o.running[h.repoKey()] = chain[0]
 			h.o.mu.Unlock()
 

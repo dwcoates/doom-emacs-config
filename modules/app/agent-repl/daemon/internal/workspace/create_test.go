@@ -428,7 +428,6 @@ func TestCreateRefusesAOneShotInARepositoryThatStatesNoPolicy(t *testing.T) {
 	f := newFixture(t)
 	oneShotBriefs(f)
 	delete(f.briefs, BriefAutonomousPreamble)
-	delete(f.briefs, BriefOneShotCompletionDirective)
 	spec := standardSpec(t, f)
 	spec.OneShot = true
 
@@ -437,7 +436,7 @@ func TestCreateRefusesAOneShotInARepositoryThatStatesNoPolicy(t *testing.T) {
 
 	// Assert.
 	refusal := asRefusal(t, err, ArmOneShotPolicyMissing)
-	want := []string{BriefAutonomousPreamble + prompts.Suffix, BriefOneShotCompletionDirective + prompts.Suffix}
+	want := []string{BriefAutonomousPreamble + prompts.Suffix}
 	got, _ := refusal.Fields["missing_files"].([]string)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("missing_files = %v, want %v", got, want)

@@ -33,9 +33,6 @@ const (
 	// ArmRequesterMayNotSet is a standing asked by a workspace the rule does
 	// not let set it.
 	ArmRequesterMayNotSet = "requester_may_not_set"
-	// ArmPolicyMissing is a one-shot mark whose repository states no
-	// completion directive.
-	ArmPolicyMissing = "policy_missing"
 	// ArmUnknownAwaited is a correspondence mark naming no registered
 	// workspace, or the marked workspace itself.
 	ArmUnknownAwaited = "unknown_awaited"
@@ -64,16 +61,13 @@ func (v *verbs) SetOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.W
 	}
 	var directive string
 	if oneShot {
-		repoDir, err := v.repoDirOf(ctx, record)
+		// THE DIRECTIVE IS THE DAEMON'S OWN (completionDirective): a corpus
+		// that cannot give it is the daemon's fault, not the repository's.
+		var err error
+		directive, err = v.completionDirective()
 		if err != nil {
-			log.Error(opSetOneShot, "could not resolve the repository whose completion directive a one-shot follows", dlog.WithCause(fields, err))
+			log.Error(opSetOneShot, "could not read the daemon's one-shot completion directive", dlog.WithCause(fields, err))
 			return "", fmt.Errorf("set one-shot on %q: %w", ws, err)
-		}
-		policy := v.policySourceFor(repoDir)
-		directive, err = v.completionDirective(policy)
-		if err != nil {
-			return "", refuseWith(log, rpc, ArmPolicyMissing, fmt.Sprintf("the repository states no usable completion directive: %v", err), false,
-				map[string]any{"policy_dir": policy.Dir})
 		}
 	}
 	err = v.deps.DB.SetOneShot(ctx, ws, oneShot)

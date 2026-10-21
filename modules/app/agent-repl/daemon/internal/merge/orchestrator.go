@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/prompts"
 	"agent-repld/internal/wsm"
 )
 
@@ -44,16 +45,13 @@ const (
 // The tab kinds, in the order a run opens them. They are the ledger's interval
 // kinds, so a replayed ledger names the same step a live bubble drew.
 const (
-	TabQueue        = "queue"
-	TabPick         = "pick"
-	TabPrePrompt    = "pre_prompt"
-	TabRebasing     = "rebasing"
-	TabConflicts    = "conflicts"
-	TabTests        = "tests"
-	TabFixes        = "fixes"
-	TabCommitting   = "committing"
-	TabUpdatingMain = "updating_main"
-	TabPostPrompt   = "post_prompt"
+	TabQueue      = "queue"
+	TabPick       = "pick"
+	TabRebasing   = "rebasing"
+	TabConflicts  = "conflicts"
+	TabTests      = "tests"
+	TabFixes      = "fixes"
+	TabCommitting = "committing"
 )
 
 // MaxFixAttempts is THE ONE BOUND on fixing: the most fixing attempts a merge
@@ -75,6 +73,9 @@ const holderMerge = "merge"
 // orchestrator is the merge queue's one implementation.
 type orchestrator struct {
 	deps Deps
+	// openHookLog creates a script hook's log: createLog, which a test
+	// replaces to exercise a log that cannot be kept.
+	openHookLog func(path string) (io.WriteCloser, error)
 	// lockDir is where the per-repo queue locks live. It is under the state
 	// root so a test's state root isolates its locks with everything else.
 	lockDir string
@@ -284,8 +285,8 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}
-	if deps.Policy == nil {
-		deps.Policy = prompts.OnDisk{}
+	if deps.DeployConfig == nil {
+		deps.DeployConfig = deployconfig.OnDisk{}
 	}
 	if deps.Home == "" {
 		home, err := os.UserHomeDir()
@@ -296,6 +297,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 	}
 	o := &orchestrator{
 		deps:               deps,
+		openHookLog:        func(path string) (io.WriteCloser, error) { return createLog(path) },
 		lockDir:            filepath.Join(deps.StateDir, "merge-locks"),
 		facts:              map[ids.WorkspaceID]MergeFacts{},
 		running:            map[wsm.RepoKey]*run{},
@@ -398,7 +400,7 @@ func (d Deps) validate() error {
 	check(d.QueueEvents != nil, "QueueEvents")
 	check(d.Log != nil, "Log")
 	check(d.StateDir != "", "StateDir")
-	check(d.SelfRepoDir != "", "SelfRepoDir")
+	check(d.HookRunner != nil, "HookRunner")
 	check(d.TestCommand != nil, "TestCommand")
 	if len(missing) > 0 {
 		return fmt.Errorf("merge: the orchestrator is missing %v", missing)
@@ -549,30 +551,6 @@ func (o *orchestrator) repoKeyFor(ctx context.Context, dir string) (wsm.RepoKey,
 	return wsm.RepoKey(common), nil
 }
 
-// policyFor answers where a workspace's repository states its merge policy:
-// the daemon's own corpus for the ONE repository the daemon's checkout lives
-// in, and the repository's own `.agent-repl/prompts` for every other. The
-// corpus is never a fallback for another repository.
-//
-// The repository is the workspace's OWN, read off the registry, not the merge
-// TARGET: a child workspace targets its parent's worktree, and a repository's
-// policy belongs to the repository rather than to whichever tree a particular
-// merge lands in.
-func (o *orchestrator) policyFor(ctx context.Context, ws ids.WorkspaceID) (prompts.Source, error) {
-	record, err := o.deps.DB.Workspace(ctx, ws)
-	if err != nil {
-		return prompts.Source{}, fmt.Errorf("merge: reading %s: %w", ws, err)
-	}
-	repositories, err := o.deps.DB.ListRepositories(ctx)
-	if err != nil {
-		return prompts.Source{}, fmt.Errorf("merge: reading the repository registry: %w", err)
-	}
-	if repository, found := wsm.RepositoryWithID(repositories, record.Repo); found {
-		return prompts.SourceFor(repository.Dir, o.deps.CheckoutRoot, o.deps.PromptsDir), nil
-	}
-	return prompts.Source{}, fmt.Errorf("merge: workspace %s names repository %q, which is not registered", ws, record.Repo)
-}
-
 // layoutFor loads a workspace's recorded merge geometry, refusing the merge
 // when the creation job holds none. Geometry is recorded at creation and NEVER
 // inferred later: a workspace materialized without it can never be merged, and
@@ -592,17 +570,18 @@ func (o *orchestrator) layoutFor(ctx context.Context, ws ids.WorkspaceID) (wsm.C
 }
 
 // TestCommandFor resolves the gate's command line for the tree it tests: the
-// tree's OWN entrypoint, because `bin/test-all.sh` tests the checkout it lives
-// in, so running any other copy of it would test that copy's tree instead of
-// the merge. AGENT_REPL_TEST_ALL_SCRIPT overrides it for tests, and the script
-// is run through bash so a fixture script needs no execute bit. The script is
-// the LAST element, which is what the gate's preflight reads.
-func TestCommandFor(tree string) []string {
-	script := os.Getenv("AGENT_REPL_TEST_ALL_SCRIPT")
-	if script == "" {
-		script = filepath.Join(tree, "modules", "app", "agent-repl", "bin", "test-all.sh")
+// tree's OWN copy of the deploy config's test script (SCRIPT, relative to a
+// checkout's root), because the script tests the checkout it lives in, so
+// running any other copy of it would test that copy's tree instead of the
+// merge. AGENT_REPL_TEST_ALL_SCRIPT overrides it for tests, and the script is
+// run through bash so a fixture script needs no execute bit. The script is the
+// LAST element, which is what the gate's preflight reads.
+func TestCommandFor(tree, script string) []string {
+	path := os.Getenv("AGENT_REPL_TEST_ALL_SCRIPT")
+	if path == "" {
+		path = filepath.Join(tree, script)
 	}
-	return []string{"bash", script}
+	return []string{"bash", path}
 }
 
 // errNoRun is returned when a verb addresses an in-flight merge that is not

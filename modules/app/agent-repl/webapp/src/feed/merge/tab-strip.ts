@@ -55,14 +55,14 @@ export const RESOLVED_KINDS: readonly string[] = [
   "queue",
   "committing",
   "updatingMain",
+  "hookScript",
 ];
 
 /** The kinds whose content is the sub-feed rows parented to them. */
 export const AGENTIC_KINDS: readonly string[] = [
   "resolving",
-  "prePrompt",
+  "hookPrompt",
   "testsRunFixing",
-  "postPrompt",
 ];
 
 /** The kinds whose content is a strip of their own: the tabs parented to them. */
@@ -109,7 +109,7 @@ export interface MergeTab {
   tab: FeedMergeTab;
   /** The label the badge draws: the row's own, unless the strip names it. */
   label: FeedMergeTabLabel;
-  /** The `kind` oneof arm ("queue", "prePrompt", …). */
+  /** The `kind` oneof arm ("queue", "hookPrompt", …). */
   kind: string;
   /** The `state` oneof arm within that kind ("pending", "live", "waitingOnUser", "waitingForTurn", "settled"). */
   state: string;

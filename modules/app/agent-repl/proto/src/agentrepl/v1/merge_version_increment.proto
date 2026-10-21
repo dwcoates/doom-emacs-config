@@ -1,15 +1,16 @@
-// merge_version_increment.proto — how a merge onto agent-repl's own master
-// moves the version, and the refusals about it. Shared by every way a merge is
-// asked for: a workspace landing itself (MergeWorkspace) and an async merge
+// merge_version_increment.proto — how a deploy into a VERSIONED repository
+// moves its version, and the refusals about it. Shared by every way a deploy is
+// asked for: a workspace finishing (FinishWorkspace) and an async merge
 // (CreateWorkspaceAsyncMerge).
 //
-// WHICH MERGES CARRY ONE. A merge that lands on the default branch of the
-// daemon's own repository (agent-repl's master) and was asked for by a
+// WHICH DEPLOYS CARRY ONE. A repository is versioned when its deploy config
+// (repoconfig.v1.DeployLocalMerge.version_tag) says so. A deploy that lands on
+// such a repository's main branch, in its main worktree, and was asked for by a
 // workspace's agent must carry an increment, and is refused as
 // `version_increment_required` without it; one the user asks for may carry it
-// and lands untagged without it. A merge anywhere else WITH one -- another
-// repository, a child landing into its owner, or a one-shot whose branch
-// already merged upstream -- is refused as `version_increment_unexpected`.
+// and lands untagged without it. A deploy anywhere else WITH one -- an
+// unversioned repository, or a child landing into its parent's worktree -- is
+// refused as `version_increment_unexpected`.
 
 syntax = "proto3";
 
@@ -49,19 +50,19 @@ message MergeWorkspaceVersionIncrementRequired {}
 // Why a supplied increment does not belong on this merge. Exactly one is set.
 message MergeWorkspaceVersionIncrementUnexpected {
   oneof reason {
-    // The merge's target is another repository than the daemon's own.
-    MergeWorkspaceVersionIncrementUnexpectedForeignRepository foreign_repository = 1;
-    // The merge's target is a parent workspace's checkout, not the default
-    // branch.
+    // The target repository's deploy config versions nothing: it has no local
+    // merge, or its local merge has no `version_tag`.
+    MergeWorkspaceVersionIncrementUnexpectedUnversionedRepository unversioned_repository = 1;
+    // The deploy's target is a parent workspace's checkout, not the
+    // repository's main branch.
     MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch not_default_branch = 2;
-    // The one-shot's branch already merged upstream, so the queue lands
-    // nothing and tags nothing.
-    MergeWorkspaceVersionIncrementUnexpectedMergedUpstream merged_upstream = 3;
   }
+  // Tag 3 (`merged_upstream`, a one-shot whose branch already merged upstream)
+  // is RETIRED: finishing a workspace always runs its repository's deploy.
+  reserved 3;
+  reserved "merged_upstream";
 }
-// The target repository is not agent-repl's.
-message MergeWorkspaceVersionIncrementUnexpectedForeignRepository {}
+// The target repository's deploy config versions nothing.
+message MergeWorkspaceVersionIncrementUnexpectedUnversionedRepository {}
 // The target is a parent workspace's checkout.
 message MergeWorkspaceVersionIncrementUnexpectedNotDefaultBranch {}
-// Nothing lands, so nothing is versioned.
-message MergeWorkspaceVersionIncrementUnexpectedMergedUpstream {}

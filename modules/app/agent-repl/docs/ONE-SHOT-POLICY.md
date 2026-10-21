@@ -1,27 +1,30 @@
-# A repository's own one-shot and merge policy
+# A repository's own one-shot policy
 
 **Every repository states its own policy, in its own tree.** Owner ruling,
 2026-09-12 (`docs/REALTEST-JUDGEMENT-CALLS.md`, "one-shot policy is the
 repository's").
 
-A one-shot workspace is fire-and-forget: the daemon wraps your prompt in an
-autonomous preamble and appends, behind one literal framing sentence, your
-repository's COMPLETION DIRECTIVE — the one plain-English statement of what is
-to be done when the work is done. What that directive SAYS is a policy decision
-about your repository: what "done" means there, which command finishes the
-work, whether a merge or a pull request lands it.
+A one-shot workspace is fire-and-forget: the daemon wraps your prompt in your
+repository's autonomous preamble and appends, behind one literal framing
+sentence, the daemon's own COMPLETION DIRECTIVE, which tells the agent to run
+`agent-repld workspace finished here` when the work is done. WHAT FINISHING
+DOES is a policy decision about your repository, stated in its
+`.agent-repl/deploy.yaml` (the deploy config `/agent-repl-workspaces`
+documents): whether a local merge lands the work, whether a pull request is
+opened, what runs after.
 
 **There is no finish choice, and the daemon performs no finish action** (owner
 ruling, 2026-09-12). The directive is concatenated to the commission as
 
 ```
-when you're all done, please do the following postprocessing directive: <your directive>
+when you're all done, please do the following postprocessing directive: <the daemon's directive>
 ```
 
 and the AGENT carries it out. Nothing in the daemon merges, opens a pull
-request, or sends a follow-up when the turn concludes.
+request, or sends a follow-up when the turn concludes: the agent's
+`workspace finished` call queues the deploy its repository configured.
 
-So a repository writes them itself, in
+So a repository writes its preamble itself, in
 
 ```
 <repository main checkout root>/.agent-repl/prompts/
@@ -41,35 +44,24 @@ comment, then the text.
 | file | required | what it is |
 | --- | --- | --- |
 | `workspace-autonomous-preamble.md` | every one-shot | the "do not wait for further instructions" preamble the one-shot's first message opens with |
-| `oneshot-completion-directive.md` | every one-shot | the plain-English completion directive, submitted verbatim; it declares NO placeholders |
-| `merge-before.md` | never | runs as the before-merge action of every merge of a workspace in this repository |
-| `merge-after.md` | never | runs as the after-merge action of the same |
 
 The placeholder rules are the corpus's: every placeholder a file declares in
 its header must appear in its body, and none may be invented. Copy the
 corresponding corpus file as a starting point.
 
-`oneshot-completion-directive.md` declares **no** placeholders and is submitted
-verbatim, exactly as the merge briefs are: the daemon has nothing to fill a
-placeholder in your own completion statement from, and one that declares any
-fails the create.
-
-`merge-before.md` and `merge-after.md` declare **no** placeholders — they are
-submitted verbatim — and both are optional. A repository that states neither
-has no configured merge action, which is what every repository had before this
-policy existed.
+The completion directive is the daemon's own
+(`modules/app/agent-repl/prompts/oneshot-completion-directive.md`) and is the
+same for every repository; a repository states none. The prompts a deploy runs
+before or after it lands are prompt hooks in the repository's deploy config,
+not files here.
 
 ## When they run
 
 - **The one-shot briefs** are read at composition time, so an edit takes effect
   on the very next one-shot. Their ABSENCE is detected at create time: the
   create is refused, no branch, worktree, workspace or prompt is made, and the
-  refusal names the directory and the missing files. Both are required of
-  every one-shot; the set does not vary.
-- **The merge briefs** fill an EMPTY slot. A workspace created with explicit
-  merge actions runs those; the repository's file is the default for workspaces
-  that configured none. A brief that is present but will not read fails the
-  merge rather than being skipped.
+  refusal names the directory and the missing file. The preamble is required
+  of every one-shot; the set does not vary.
 
 ## Where to look when it does not behave
 

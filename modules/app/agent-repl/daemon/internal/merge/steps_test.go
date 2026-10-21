@@ -21,10 +21,10 @@ func TestANewStepClearsTheLastStepsLine(t *testing.T) {
 	r.setStep(context.Background(), footer.StepCommitting, func(f *footer.MergeFacts) { f.Line = committingLine("merge(x): y") })
 
 	// Act.
-	r.setStep(context.Background(), footer.StepPostprocessing, nil)
+	r.setStep(context.Background(), footer.StepPostDeploy, nil)
 
 	// Assert.
-	if got := h.footer.last(); got.Line != nil || got.Step != footer.StepPostprocessing {
+	if got := h.footer.last(); got.Line != nil || got.Step != footer.StepPostDeploy {
 		t.Fatalf("facts = %+v, want postprocessing with no line", got)
 	}
 }
@@ -35,7 +35,7 @@ func TestEveryStepCarriesWhenTheMergeWasQueued(t *testing.T) {
 		name string
 		act  func(r *run)
 	}{
-		{name: "a new step", act: func(r *run) { r.setStep(context.Background(), footer.StepPostprocessing, nil) }},
+		{name: "a new step", act: func(r *run) { r.setStep(context.Background(), footer.StepPostDeploy, nil) }},
 		{name: "progress on the standing step", act: func(r *run) { r.updateFacts(func(f *footer.MergeFacts) { f.Replayed = 1 }) }},
 	}
 	for _, tc := range tests {
@@ -91,12 +91,14 @@ func TestTheEnqueuedLineIsDatedWhenTheStepBegan(t *testing.T) {
 
 func TestPromptLinesCarryTheFirstLineOfThePrompt(t *testing.T) {
 	// Act.
-	pre := promptLine(footer.StepPreprocessing, "run the review\nthen more")
-	post := promptLine(footer.StepPostprocessing, "tidy up")
+	pre := promptLine(TabPreDeploy, "run the review\nthen more")
+	deploy := promptLine(TabDeploy, "open the pull request")
+	post := promptLine(TabPostDeploy, "tidy up")
 
 	// Assert.
-	if pre.GetPreprocessing().GetText() != "run the review" || post.GetPostprocessing().GetText() != "tidy up" {
-		t.Fatalf("prompt lines = %+v and %+v", pre, post)
+	if pre.GetPreDeploy().GetPrompt().GetText() != "run the review" || deploy.GetDeploying().GetPrompt().GetText() != "open the pull request" ||
+		post.GetPostDeploy().GetPrompt().GetText() != "tidy up" {
+		t.Fatalf("prompt lines = %+v, %+v and %+v", pre, deploy, post)
 	}
 }
 

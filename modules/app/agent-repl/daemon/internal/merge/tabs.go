@@ -73,18 +73,14 @@ func tabWord(kind string) string {
 		// The ledger keeps the "pick" kind it always recorded; the tab is
 		// drawn as the resolving turn it is (frontend.v1.FeedMergeTabResolving).
 		return "resolving"
-	case TabPrePrompt:
-		return "pre-prompt"
 	case TabRebasing:
 		return "rebasing"
 	case TabTests:
 		return "tests"
 	case TabCommitting:
 		return "committing"
-	case TabUpdatingMain:
-		return "updating main"
-	case TabPostPrompt:
-		return "post-prompt"
+	case TabPreDeploy, TabDeploy, TabPostDeploy:
+		return stageWords(kind)
 	}
 	return kind
 }
@@ -563,21 +559,4 @@ func committingTab(st tabState, subject string) *frontendv1.FeedMergeTab {
 		inner.State = &frontendv1.FeedMergeTabCommitting_Settled{Settled: settled}
 	}
 	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_Committing{Committing: inner}}
-}
-
-// updatingMainTab builds the updating-main tab: fetching until the upstream
-// tip is known, then fast-forwarding to it.
-func updatingMainTab(st tabState, commit string) *frontendv1.FeedMergeTab {
-	inner := &frontendv1.FeedMergeTabUpdatingMain{Step: &frontendv1.FeedMergeUpdatingMainStep{
-		Step: &frontendv1.FeedMergeUpdatingMainStep_Fetching{Fetching: &frontendv1.FeedMergeUpdatingMainFetching{}}}}
-	if commit != "" {
-		inner.Step = &frontendv1.FeedMergeUpdatingMainStep{Step: &frontendv1.FeedMergeUpdatingMainStep_FastForwarding{
-			FastForwarding: &frontendv1.FeedMergeUpdatingMainFastForwarding{Commit: commit}}}
-	}
-	if live, settled := st.badge(); live != nil {
-		inner.State = &frontendv1.FeedMergeTabUpdatingMain_Live{Live: live}
-	} else {
-		inner.State = &frontendv1.FeedMergeTabUpdatingMain_Settled{Settled: settled}
-	}
-	return &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_UpdatingMain{UpdatingMain: inner}}
 }

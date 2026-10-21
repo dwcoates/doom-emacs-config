@@ -531,3 +531,87 @@ func TestRunCores(t *testing.T) {
 		})
 	}
 }
+
+func TestRunLinesWithAddsItsEnvironment(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "env.sh", "echo \"$AGENT_REPL_HOOK_PROBE\"\n")
+	r := newRunner(t)
+
+	// Act.
+	run, err := r.RunLinesWith(context.Background(), dir, []string{script}, Options{Env: []string{"AGENT_REPL_HOOK_PROBE=set-by-caller"}}, nil)
+
+	// Assert.
+	if err != nil || run.ExitCode != 0 {
+		t.Fatalf("RunLinesWith = %+v, %v", run, err)
+	}
+	if !strings.Contains(run.Output, "set-by-caller") {
+		t.Fatalf("output = %q, want the added variable", run.Output)
+	}
+}
+
+func TestRunLinesWithStillScrubsGitVariablesBesideItsOwn(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	t.Setenv("GIT_DIR", "/leaked")
+	script := writeScript(t, dir, "env.sh", "echo \"git=${GIT_DIR:-unset}\"\n")
+	r := newRunner(t)
+
+	// Act.
+	run, err := r.RunLinesWith(context.Background(), dir, []string{script}, Options{Env: []string{"X=1"}}, nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RunLinesWith: %v", err)
+	}
+	if !strings.Contains(run.Output, "git=unset") {
+		t.Fatalf("output = %q, want GIT_DIR scrubbed", run.Output)
+	}
+}
+
+func TestRunLinesWithPastItsTimeoutIsATimedOutAnswer(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "slow.sh", "echo started\nexec sleep 30\n")
+	logger := dlog.NewTestLogger()
+	r, err := New(logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	run, err := r.RunLinesWith(context.Background(), dir, []string{script}, Options{Timeout: 200 * time.Millisecond}, nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RunLinesWith = %v, want the timeout answered, not an error", err)
+	}
+	if !run.TimedOut || run.ExitCode != -1 {
+		t.Fatalf("run = %+v, want TimedOut with exit -1", run)
+	}
+	if !strings.Contains(run.Output, "started") {
+		t.Fatalf("output = %q, want what the script wrote before it was killed", run.Output)
+	}
+	for _, rec := range logger.Records() {
+		if rec.Level == dlog.LevelError || rec.Level == dlog.LevelWarn {
+			t.Fatalf("record %+v: a timeout the caller set is its to judge, never the runner's WARN or ERROR", rec)
+		}
+	}
+}
+
+func TestRunLinesWithCancelledByItsCallerIsStillAnError(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	script := writeScript(t, dir, "slow.sh", "exec sleep 30\n")
+	r := newRunner(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	run, err := r.RunLinesWith(ctx, dir, []string{script}, Options{Timeout: time.Minute}, nil)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) || run.TimedOut {
+		t.Fatalf("RunLinesWith = %+v, %v; want the caller's cancellation, not a timeout", run, err)
+	}
+}

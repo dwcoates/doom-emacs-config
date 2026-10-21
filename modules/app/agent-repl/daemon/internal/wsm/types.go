@@ -11,9 +11,12 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // The identity newtypes are aliases of internal/ids, the leaf that holds one
@@ -342,8 +345,10 @@ type CreationJob struct {
 	Workspace WorkspaceID
 	// Layout is the merge geometry recorded at creation.
 	Layout MergeLayout
-	// Actions are the configured before/after merge actions.
-	Actions MergeActions
+	// Hooks are the deploy hooks the workspace's creation recorded, run by
+	// every deploy of it in place of its repository's hooks for the same
+	// stage.
+	Hooks DeployHooks
 	// BaseRef is the resolved base the branch was cut from.
 	BaseRef string
 	// Materialized reports whether the worktree exists on disk. Registration
@@ -374,16 +379,37 @@ type MergeLayout struct {
 	Origin string
 }
 
-// MergeActions are the configured prompts run in the workspace before and
-// after its merge.
-type MergeActions struct {
-	// Before is the PROMPT TEXT run in the source workspace before the merge.
-	// CreateWorkspaceMergeActions carries the words themselves
-	// (conversation.v1.UserSaid), not the name of a file in the prompts
-	// directory, so this is what is submitted verbatim.
-	Before []string
-	// After is the prompt text run after the merge lands, on the same terms.
-	After []string
+// DeployHooks are the hooks a request or a creation supplies
+// (agentrepl.v1.CreateWorkspaceDeployHooks): each stage given here REPLACES the
+// repository's own hooks for that stage (repoconfig.v1.DeployConfig), and a
+// stage left empty runs the repository's. Each hook is a script or a prompt,
+// checked by deployconfig.CheckHook at the boundary that built it.
+type DeployHooks struct {
+	// PreDeploy runs before the local merge, in order.
+	PreDeploy []*repoconfigv1.DeployHook
+	// PostDeploy runs after the deploy stage, in order.
+	PostDeploy []*repoconfigv1.DeployHook
+}
+
+// Empty reports whether no stage is given.
+func (h DeployHooks) Empty() bool { return len(h.PreDeploy) == 0 && len(h.PostDeploy) == 0 }
+
+// Equal reports whether o holds equal hooks, stage by stage and in order.
+func (h DeployHooks) Equal(o DeployHooks) bool {
+	return equalHooks(h.PreDeploy, o.PreDeploy) && equalHooks(h.PostDeploy, o.PostDeploy)
+}
+
+// equalHooks reports whether two hook lists are equal hook for hook.
+func equalHooks(a, b []*repoconfigv1.DeployHook) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !proto.Equal(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // Session is a workspace's session binding plus the facts that outlive one
@@ -981,10 +1007,8 @@ func (m MergeMove) valid() bool {
 	return m == MergeMoveUp || m == MergeMoveDown
 }
 
-// MergeSourceKind is WHAT a merge lands (agentrepl.v1.MergeWorkspaceSource's
-// arm): the requesting workspace's own branch, another workspace's, a branch
-// that is no workspace, or the requester's own branch already merged
-// upstream.
+// MergeSourceKind is WHAT a merge lands: the requesting workspace's own
+// branch, another workspace's, or a branch that is no workspace.
 type MergeSourceKind int
 
 // The merge sources. The zero value is the requester's own branch, which is
@@ -996,16 +1020,16 @@ const (
 	MergeSourceWorkspace
 	// MergeSourceBranch is a branch that is no workspace.
 	MergeSourceBranch
-	// MergeSourceMergedUpstream is the requester's own branch, already merged
-	// upstream.
-	MergeSourceMergedUpstream
+	// The fourth value (3), the requester's own branch already merged
+	// upstream, is RETIRED with the merged-upstream finish: finishing always
+	// runs the repository's deploy. A row carrying it fails validation.
 )
 
 // ClosesRequester reports whether a landed merge of this source closes the
 // workspace that asked for it, which is exactly when keeping that workspace
 // open means anything.
 func (k MergeSourceKind) ClosesRequester() bool {
-	return k == MergeSourceOwnBranch || k == MergeSourceMergedUpstream
+	return k == MergeSourceOwnBranch
 }
 
 // MergeSource is one merge's source, stored with its queue entry so a restart
@@ -1078,13 +1102,13 @@ type MergeSource struct {
 	// moves none. A detached request's hand-off carries it onto the merge
 	// workspace's own request.
 	Version *VersionIncrement
-	// Actions are the merge actions a DETACHED request names
-	// (agentrepl.v1.MergeWorkspaceAsync.merge_actions), run by its merge
+	// Hooks are the deploy hooks a DETACHED request names
+	// (agentrepl.v1.CreateWorkspaceAsyncMerge.deploy_hooks), run by its merge
 	// workspace and never by the requester; empty when it names none. Only a
 	// detached request carries them: the hand-off moves them onto the merge
-	// workspace's origin (MergeOrigin.Actions), and from there into its
-	// creation job, so the merge workspace's own request row carries none.
-	Actions MergeActions
+	// workspace's origin (MergeOrigin.Hooks), and from there into its creation
+	// job, so the merge workspace's own request row carries none.
+	Hooks DeployHooks
 }
 
 // DetachedMergeID is one detached merge request's identity, minted when the
@@ -1129,7 +1153,7 @@ type MergeOrigin struct {
 	// merge lands ONCE, at hand-off (merge.orchestrator.handOffDetached), and
 	// the merge workspace's create lands by exactly these, reading nothing off
 	// the requester. They are TRANSPORT-ONLY: the create records TargetDir and
-	// Actions in the merge workspace's own creation job and ParentBranch on
+	// Hooks in the merge workspace's own creation job and ParentBranch on
 	// its registry row, which is where they live durably, so the stored origin
 	// (workspaces.merge_*) does not carry them and a read of one answers them
 	// empty.
@@ -1141,10 +1165,10 @@ type MergeOrigin struct {
 	// ParentBranch is the branch the merge workspace lands on: the
 	// requester's own parent branch.
 	ParentBranch string
-	// Actions are the merge actions the async request named
-	// (MergeSource.Actions), and nothing else: a merge workspace never
-	// inherits its requester's configured actions.
-	Actions MergeActions
+	// Hooks are the deploy hooks the async request named (MergeSource.Hooks),
+	// and nothing else: a merge workspace never inherits its requester's
+	// hooks.
+	Hooks DeployHooks
 }
 
 // MergeQueueEntry is one workspace's place in its repository's merge queue. The

@@ -1533,8 +1533,8 @@ func TestEachMergeStepDrawsItsOwnSubstatus(t *testing.T) {
 			func(m *frontendv1.FooterStatusMerging) bool {
 				return m.GetEnqueued().GetPlace() == 2 && m.GetEnqueued().GetWaiting() == 5
 			}},
-		{"preprocessing", MergeFacts{State: "merging", Step: StepPreprocessing},
-			func(m *frontendv1.FooterStatusMerging) bool { return m.GetPreprocessing() != nil }},
+		{"pre-deploy", MergeFacts{State: "merging", Step: StepPreDeploy},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetPreDeploy() != nil }},
 		{"rebasing carries its progress", MergeFacts{State: "merging", Step: StepRebasing, Replayed: 3, Total: 7},
 			func(m *frontendv1.FooterStatusMerging) bool {
 				return m.GetRebasing().GetReplayed() == 3 && m.GetRebasing().GetTotal() == 7
@@ -1549,10 +1549,10 @@ func TestEachMergeStepDrawsItsOwnSubstatus(t *testing.T) {
 			}},
 		{"committing", MergeFacts{State: "merging", Step: StepCommitting},
 			func(m *frontendv1.FooterStatusMerging) bool { return m.GetCommitting() != nil }},
-		{"updating main", MergeFacts{State: "merging", Step: StepUpdatingMain},
-			func(m *frontendv1.FooterStatusMerging) bool { return m.GetUpdatingMain() != nil }},
-		{"postprocessing", MergeFacts{State: "merging", Step: StepPostprocessing},
-			func(m *frontendv1.FooterStatusMerging) bool { return m.GetPostprocessing() != nil }},
+		{"deploying", MergeFacts{State: "merging", Step: StepDeploying},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetDeploying() != nil }},
+		{"post-deploy", MergeFacts{State: "merging", Step: StepPostDeploy},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetPostDeploy() != nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1726,6 +1726,7 @@ func TestAFailedMergeDrawsTheAreaItFailedIn(t *testing.T) {
 		{FailedConflicts, func(m *frontendv1.FooterStatusMergeFailed) bool { return m.GetConflicts() != nil }},
 		{FailedTests, func(m *frontendv1.FooterStatusMergeFailed) bool { return m.GetTests() != nil }},
 		{FailedOther, func(m *frontendv1.FooterStatusMergeFailed) bool { return m.GetOther() != nil }},
+		{FailedHook, func(m *frontendv1.FooterStatusMergeFailed) bool { return m.GetHook() != nil }},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.area), func(t *testing.T) {
@@ -1770,14 +1771,14 @@ func TestMergeStepWordsAreThePlainWordsOfEachStep(t *testing.T) {
 	}{
 		{StepAwaitingFree, "waiting for the workspace to be free"},
 		{StepEnqueued, "enqueued"},
-		{StepPreprocessing, "preprocessing"},
+		{StepPreDeploy, "pre-deploy"},
 		{StepRebasing, "rebasing"},
 		{StepConflictResolution, "conflict resolution"},
 		{StepTesting, "testing"},
 		{StepFixing, "fixing"},
 		{StepCommitting, "committing"},
-		{StepUpdatingMain, "updating main"},
-		{StepPostprocessing, "postprocessing"},
+		{StepDeploying, "deploying"},
+		{StepPostDeploy, "post-deploy"},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.step), func(t *testing.T) {

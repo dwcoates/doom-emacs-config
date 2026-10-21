@@ -2,11 +2,14 @@ package harness
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agent-repld/internal/sourcescan"
 )
 
 // runRecorder runs the fake with args and answers its exit status.
@@ -143,5 +146,38 @@ func TestNoIntegrationTestSpellsTheTestAllVariableByHand(t *testing.T) {
 	// Assert
 	if len(offenders) != 0 {
 		t.Fatalf("%v spell the test-all variable by hand; use TestAllScriptEnv", offenders)
+	}
+}
+
+func TestWriteExecutableWritesAnExecutable(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "bin", "hook.sh")
+
+	// Act
+	writeExecutable(t, path, "#!/bin/sh\n")
+
+	// Assert
+	info, err := os.Stat(path)
+	if err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("stat = %v, %v; want an executable", info, err)
+	}
+}
+
+// TestEveryHarnessExecutableIsWrittenThroughWriteExecutable pins that no
+// harness source writes an executable by hand.
+func TestEveryHarnessExecutableIsWrittenThroughWriteExecutable(t *testing.T) {
+	// Act
+	var byHand []string
+	for _, f := range sourcescan.Production(t) {
+		for i, line := range strings.Split(string(f.Source), "\n") {
+			if strings.Contains(line, "os.WriteFile(") && strings.Contains(line, "0o755") {
+				byHand = append(byHand, fmt.Sprintf("%s:%d", f.Name, i+1))
+			}
+		}
+	}
+
+	// Assert
+	if len(byHand) != 0 {
+		t.Fatalf("executables written by hand at %v, want writeExecutable", byHand)
 	}
 }

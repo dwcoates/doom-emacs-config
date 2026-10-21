@@ -1,6 +1,8 @@
 package server
 
 import (
+	"agent-repld/internal/deployconfig"
+
 	"fmt"
 	"strings"
 
@@ -488,6 +490,9 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 		if err := validateWorkspaceTopology("standard.topology", standard.GetTopology()); err != nil {
 			return err
 		}
+		if err := validateDeployHooks("standard.deploy_hooks", standard.GetDeployHooks()); err != nil {
+			return err
+		}
 	}
 	if oneShot := req.GetOneShot(); oneShot != nil {
 		if err := validateUserSaid("one_shot.prompt", oneShot.GetPrompt()); err != nil {
@@ -629,7 +634,26 @@ func validateCreateWorkspaceAsyncMerge(field string, async *agentreplv1.CreateWo
 	if err := validateMergeQueuePlacement(field+".placement", async.GetPlacement()); err != nil {
 		return err
 	}
+	if err := validateDeployHooks(field+".deploy_hooks", async.GetDeployHooks()); err != nil {
+		return err
+	}
 	return validateMergeWorkspaceVersionIncrement(field+".version_increment", async.GetVersionIncrement())
+}
+
+// validateDeployHooks holds a request's own deploy hooks to the rules a
+// repository's config is held to (deployconfig.CheckHook). Unset is no hooks.
+func validateDeployHooks(field string, hooks *agentreplv1.CreateWorkspaceDeployHooks) *connect.Error {
+	for i, hook := range hooks.GetPreDeploy() {
+		if err := deployconfig.CheckHook(fmt.Sprintf("%s.pre_deploy[%d]", field, i), hook); err != nil {
+			return invalid(fmt.Sprintf("%s.pre_deploy[%d]", field, i), err.Error())
+		}
+	}
+	for i, hook := range hooks.GetPostDeploy() {
+		if err := deployconfig.CheckHook(fmt.Sprintf("%s.post_deploy[%d]", field, i), hook); err != nil {
+			return invalid(fmt.Sprintf("%s.post_deploy[%d]", field, i), err.Error())
+		}
+	}
+	return nil
 }
 
 // validateWorkspacePriority is WorkspacePriority's base function.
@@ -1240,10 +1264,23 @@ func validateSetWorkspaceCorrespondenceRequest(req *agentreplv1.SetWorkspaceCorr
 	return invalid("mark", "a mark arm (awaiting or clear) is required")
 }
 
-// validateUpdateRolloutsRequest is UpdateRolloutsRequest's base function.
-func validateUpdateRolloutsRequest(req *agentreplv1.UpdateRolloutsRequest) *connect.Error {
+// validateUpdateDeployHoldRequest is UpdateDeployHoldRequest's base function:
+// a repository and an action arm.
+func validateUpdateDeployHoldRequest(req *agentreplv1.UpdateDeployHoldRequest) *connect.Error {
+	if req.GetRepository() == nil {
+		return invalid("repository", "the repository whose deploy stage is held or released is required")
+	}
 	if req.GetAction() == nil {
-		return invalid("action", "a rollouts action arm (hold or release) is required")
+		return invalid("action", "a deploy hold action arm (hold or release) is required")
+	}
+	return nil
+}
+
+// validateRollOutLandingRequest is RollOutLandingRequest's base function: a
+// named deploy carries its ledger.
+func validateRollOutLandingRequest(req *agentreplv1.RollOutLandingRequest) *connect.Error {
+	if req.Deploy != nil && strings.TrimSpace(req.GetDeploy().GetLedger()) == "" {
+		return invalid("deploy.ledger", "a named deploy carries its ledger")
 	}
 	return nil
 }
@@ -1360,10 +1397,9 @@ func validateOpenInEditorRequest(req *agentreplv1.OpenInEditorRequest) *connect.
 	return nil
 }
 
-// validateMergeWorkspaceRequest is MergeWorkspaceRequest's base function: the
-// workspace's ref, its requester, its placement, and a mode arm carrying what
-// it names.
-func validateMergeWorkspaceRequest(req *agentreplv1.MergeWorkspaceRequest) *connect.Error {
+// validateFinishWorkspaceRequest is FinishWorkspaceRequest's base function: the
+// workspace's ref, its requester and its placement.
+func validateFinishWorkspaceRequest(req *agentreplv1.FinishWorkspaceRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
@@ -1375,12 +1411,6 @@ func validateMergeWorkspaceRequest(req *agentreplv1.MergeWorkspaceRequest) *conn
 	}
 	if err := validateMergeWorkspaceVersionIncrement("version_increment", req.GetVersionIncrement()); err != nil {
 		return err
-	}
-	if req.GetOneShot() == nil {
-		return invalid("mode", "a mode arm (one_shot) is required")
-	}
-	if req.GetOneShot().GetLanding() == nil {
-		return invalid("one_shot.landing", "a landing arm (own_branch or merged_upstream) is required")
 	}
 	return nil
 }

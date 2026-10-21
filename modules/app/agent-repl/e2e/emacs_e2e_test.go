@@ -58,9 +58,8 @@ type emacsWorldConfig struct {
 
 // WithEmacsEnv threads one `KEY=VALUE` into the Emacs process's environment,
 // and therefore into the daemon Emacs spawns. It is how a scenario states a
-// daemon fact that has no other route in this layer — the daemon's own
-// checkout (`AGENT_REPL_SELF_REPO_DIR`) and its merge gate
-// (`AGENT_REPL_TEST_ALL_SCRIPT`) being the pair scenario 40 needs.
+// daemon fact that has no other route in this layer — its merge gate
+// (`AGENT_REPL_TEST_ALL_SCRIPT`) being the one scenario 40 needs.
 func WithEmacsEnv(key, value string) EmacsWorldOption {
 	return func(c *emacsWorldConfig) { c.extraEnv = append(c.extraEnv, key+"="+value) }
 }

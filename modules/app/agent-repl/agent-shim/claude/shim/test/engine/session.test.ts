@@ -9558,10 +9558,20 @@ describe("a vendor that ENDS the opening instead of announcing it", () => {
   it("records what the vendor DID emit before the start failed", async () => {
     // THE NEXT OCCURRENCE EXPLAINS ITSELF. The grounded failure's only evidence
     // was a store frame decoded by hand, because nothing logged the kinds.
+    // THE BOUND IS FIRED BY THE TEST, after the frame is delivered: on a real
+    // clock a loaded host let the 5ms bound fire before the frame was read,
+    // and the record rightly named no kind.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const h = harness({ initTimeoutMs: 5, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
     const before = logSinkMark();
     const pending = h.engine.startSession(freshRequest());
     (await untilQuery(h, 0)).query.emit(hookResponse({ outcome: "success", output: "" }));
+    // Every microtask the frame's delivery queued runs before this macrotask.
+    await new Promise((resolve) => setImmediate(resolve));
+    vi.advanceTimersByTime(5);
     await pending;
 
     expect(logContextFor(before, "what the vendor emitted before the start failed")?.["pre_init_kinds"]).toBe(

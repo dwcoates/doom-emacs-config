@@ -24,7 +24,7 @@ var unaryResponseTypes = map[string]func() proto.Message{
 	"KillWorkspace":              func() proto.Message { return &v1.KillWorkspaceResponse{} },
 	"NukeWorkspace":              func() proto.Message { return &v1.NukeWorkspaceResponse{} },
 	"ForgetWorkspace":            func() proto.Message { return &v1.ForgetWorkspaceResponse{} },
-	"MergeWorkspace":             func() proto.Message { return &v1.MergeWorkspaceResponse{} },
+	"FinishWorkspace":            func() proto.Message { return &v1.FinishWorkspaceResponse{} },
 	"RestartWorkspace":           func() proto.Message { return &v1.RestartWorkspaceResponse{} },
 	"SetWorkspacePriority":       func() proto.Message { return &v1.SetWorkspacePriorityResponse{} },
 	"SetWorkspaceHidden":         func() proto.Message { return &v1.SetWorkspaceHiddenResponse{} },
@@ -85,7 +85,8 @@ var unaryResponseTypes = map[string]func() proto.Message{
 	"SubscribeWorkspace":         func() proto.Message { return &v1.SubscribeWorkspaceResponse{} },
 	"UnsubscribeMergeQueue":      func() proto.Message { return &v1.UnsubscribeMergeQueueResponse{} },
 	"UnsubscribeWorkspace":       func() proto.Message { return &v1.UnsubscribeWorkspaceResponse{} },
-	"UpdateRollouts":             func() proto.Message { return &v1.UpdateRolloutsResponse{} },
+	"UpdateDeployHold":           func() proto.Message { return &v1.UpdateDeployHoldResponse{} },
+	"RollOutLanding":             func() proto.Message { return &v1.RollOutLandingResponse{} },
 }
 
 // streamResponseTypes is the closed set of stream names the control plane

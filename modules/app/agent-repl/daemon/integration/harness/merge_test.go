@@ -7,23 +7,13 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
-func TestOneShotMergesTheRequestersOwnBranch(t *testing.T) {
+func TestFinishRequestNamesTheWorkspace(t *testing.T) {
 	// Act
-	req := MergeRequest(&workspacev1.WorkspaceRef{Id: "ws"}, OneShot())
+	req := FinishRequest(&workspacev1.WorkspaceRef{Id: "ws"})
 
 	// Assert
-	if req.GetWorkspace().GetId() != "ws" || req.GetOneShot().GetOwnBranch() == nil {
-		t.Fatalf("MergeRequest(OneShot) = %v, want the one-shot own-branch arm for ws", req)
-	}
-}
-
-func TestOneShotMergedUpstreamNamesTheUpstreamLanding(t *testing.T) {
-	// Act
-	req := MergeRequest(&workspacev1.WorkspaceRef{Id: "ws"}, OneShotMergedUpstream())
-
-	// Assert
-	if req.GetOneShot().GetMergedUpstream() == nil {
-		t.Fatalf("MergeRequest(OneShotMergedUpstream) = %v, want the merged-upstream landing", req)
+	if req.GetWorkspace().GetId() != "ws" {
+		t.Fatalf("FinishRequest = %v, want ws", req)
 	}
 }
 
@@ -58,10 +48,10 @@ func TestAsyncPatchMovesTheVersionByAPatch(t *testing.T) {
 	}
 }
 
-func TestMergeRequestIsTheUsersAtTheBackUnlessEdited(t *testing.T) {
+func TestFinishRequestIsTheUsersAtTheBackUnlessEdited(t *testing.T) {
 	// Act
-	plain := MergeRequest(&workspacev1.WorkspaceRef{Id: "ws"}, OneShot())
-	front := MergeRequest(&workspacev1.WorkspaceRef{Id: "ws"}, OneShot(), AtFront())
+	plain := FinishRequest(&workspacev1.WorkspaceRef{Id: "ws"})
+	front := FinishRequest(&workspacev1.WorkspaceRef{Id: "ws"}, AtFront())
 
 	// Assert
 	if plain.GetRequester().GetUser() == nil || plain.GetPlacement().GetBack() == nil || front.GetPlacement().GetFront() == nil {
@@ -98,5 +88,19 @@ func TestIsLandingDeployedRecognizesOnlyTheLandingsDoneRecord(t *testing.T) {
 				t.Fatalf("IsLandingDeployed(%+v) = %v, want %v", tc.record, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestPreAndPostDeployPromptsFillTheirOwnStage(t *testing.T) {
+	// Act
+	pre := PreDeployPrompts("lint", "check")
+	post := PostDeployPrompts("announce")
+
+	// Assert
+	if len(pre.GetPreDeploy()) != 2 || pre.GetPreDeploy()[1].GetPrompt().GetText() != "check" || len(pre.GetPostDeploy()) != 0 {
+		t.Fatalf("PreDeployPrompts = %v, want both prompts in order, pre-deploy alone", pre)
+	}
+	if len(post.GetPostDeploy()) != 1 || post.GetPostDeploy()[0].GetPrompt().GetText() != "announce" || len(post.GetPreDeploy()) != 0 {
+		t.Fatalf("PostDeployPrompts = %v, want the prompt, post-deploy alone", post)
 	}
 }

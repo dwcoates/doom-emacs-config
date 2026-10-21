@@ -93,9 +93,9 @@ would abort the very branch a test is asserting."
     ("NukeWorkspace" agent-repl-rpc-nuke-workspace
      agent-repl-wire-encode-nuke-workspace-request
      agent-repl-wire-decode-nuke-workspace-response)
-    ("MergeWorkspace" agent-repl-rpc-merge-workspace
-     agent-repl-wire-encode-merge-workspace-request
-     agent-repl-wire-decode-merge-workspace-response)
+    ("FinishWorkspace" agent-repl-rpc-finish-workspace
+     agent-repl-wire-encode-finish-workspace-request
+     agent-repl-wire-decode-finish-workspace-response)
     ("RestartWorkspace" agent-repl-rpc-restart-workspace
      agent-repl-wire-encode-restart-workspace-request
      agent-repl-wire-decode-restart-workspace-response)

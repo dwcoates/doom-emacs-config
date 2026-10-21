@@ -494,11 +494,14 @@ type DB interface {
 	SetMergeQueuePaused(ctx context.Context, repo RepoKey, paused bool) error
 	// MergeQueuePaused reports whether one repository's queue is paused.
 	MergeQueuePaused(ctx context.Context, repo RepoKey) (bool, error)
-	// SetMergeRolloutHold holds the merge queue's rollouts daemon-wide from
-	// at, or (held false) ends the hold.
-	SetMergeRolloutHold(ctx context.Context, held bool, at time.Time) error
-	// MergeRolloutHold reports the daemon-wide rollout hold.
-	MergeRolloutHold(ctx context.Context) (RolloutHold, error)
+	// SetDeployHold holds one repository's deploy stage from at, or (held
+	// false) ends the hold and clears its skip count.
+	SetDeployHold(ctx context.Context, repo RepoKey, held bool, at time.Time) error
+	// RecordDeploySkip counts one deploy that skipped its deploy hook while
+	// the repository was held.
+	RecordDeploySkip(ctx context.Context, repo RepoKey) error
+	// DeployHoldOf reports one repository's deploy hold.
+	DeployHoldOf(ctx context.Context, repo RepoKey) (DeployHold, error)
 	// SetMergeRacingDisabled disables the merge queue's racing daemon-wide
 	// from at, or (disabled false) enables it again.
 	SetMergeRacingDisabled(ctx context.Context, disabled bool, at time.Time) error

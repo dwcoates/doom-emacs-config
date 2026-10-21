@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -41,6 +42,10 @@ type migration struct {
 	Kind MigrationKind
 	// DDL is the whole step, run as one script inside the step's transaction.
 	DDL string
+	// Rewrite, when set, runs in the same transaction after DDL: the part of
+	// a step SQL cannot say, such as re-encoding stored protobuf rows. Nil for
+	// a step that is DDL alone.
+	Rewrite func(ctx context.Context, tx *sql.Tx) error
 }
 
 // MigrationKind is what one migration step means for the build before it.
@@ -157,6 +162,8 @@ var migrations = []migration{
 	{To: 64, Name: "standings", Kind: MigrationAdditive, DDL: standingsDDL},
 	{To: 65, Name: "prompt_sent_by", Kind: MigrationAdditive, DDL: sentByDDL},
 	{To: 66, Name: "subsection_slots", Kind: MigrationAdditive, DDL: subsectionSlotsDDL},
+	{To: 67, Name: "deploy_holds", Kind: MigrationAdditive, DDL: deployHoldDDL},
+	{To: 68, Name: "deploy_hooks", Kind: MigrationBreaking, DDL: deployHooksDDL, Rewrite: rewriteDeployQueueRows},
 }
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its
@@ -500,6 +507,11 @@ func (s *store) applyMigration(ctx context.Context, m migration) error {
 	defer s.endTx(tx, "daemon.wsm.open", dlog.Context{"path": s.path, "step_layout": m.To, "migration": m.Name})
 	if _, err := tx.ExecContext(ctx, m.DDL); err != nil {
 		return fmt.Errorf("wsm: apply migration %q to layout %d in %q: %w", m.Name, m.To, s.path, err)
+	}
+	if m.Rewrite != nil {
+		if err := m.Rewrite(ctx, tx); err != nil {
+			return fmt.Errorf("wsm: rewrite rows in migration %q to layout %d in %q: %w", m.Name, m.To, s.path, err)
+		}
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE layout SET version = ? WHERE id = 1`, m.To)
 	if err != nil {

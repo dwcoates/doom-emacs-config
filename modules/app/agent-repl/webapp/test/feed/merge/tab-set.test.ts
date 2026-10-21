@@ -114,7 +114,7 @@ describe("createTabSet", () => {
       tabs(
         ["a", { kind: "queue", state: "settled", outcome: "succeeded" }],
         ["b", { kind: "committing", state: "settled", outcome: "succeeded" }],
-        ["c", { kind: "postPrompt", state: "live" }],
+        ["c", { kind: "hookPrompt", state: "live" }],
       ),
     );
     expect(host.querySelector("[data-panel]")?.getAttribute("data-panel")).toBe("c");

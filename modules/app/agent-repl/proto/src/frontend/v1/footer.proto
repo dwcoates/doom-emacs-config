@@ -883,8 +883,8 @@ message FooterStatusMerging {
   oneof substatus {
     // Waiting in the repository's queue behind the merge being worked on.
     FooterSubStatusMergingEnqueued enqueued = 13;
-    // The configured before-merge prompt is running.
-    FooterSubStatusMergingPreprocessing preprocessing = 14;
+    // A `pre_deploy` hook is running.
+    FooterSubStatusMergingPreDeploy pre_deploy = 23;
     // The branch is being replayed onto the target's tip.
     FooterSubStatusMergingRebasing rebasing = 15;
     // This workspace's session is resolving a rebase conflict.
@@ -895,11 +895,10 @@ message FooterStatusMerging {
     FooterSubStatusMergingFixing fixing = 17;
     // The merge commit into the target is being made.
     FooterSubStatusMergingCommitting committing = 18;
-    // A branch already merged upstream: the default branch in the
-    // repository's main worktree is being updated from upstream.
-    FooterSubStatusMergingUpdatingMain updating_main = 19;
-    // The configured after-merge prompt is running.
-    FooterSubStatusMergingPostprocessing postprocessing = 20;
+    // The repository's `deploy` hook is running.
+    FooterSubStatusMergingDeploying deploying = 24;
+    // A `post_deploy` hook is running.
+    FooterSubStatusMergingPostDeploy post_deploy = 25;
     // Conflict resolution or fixing is held on the user: this workspace's
     // session has a permission ask or a question batch open. It stands until
     // every such ask is answered or withdrawn, and the step's own substatus
@@ -913,8 +912,12 @@ message FooterStatusMerging {
   // post_prompt, failed, merged, fixes, conflicts) are RETIRED: the steps
   // above replace them, nothing parks, and a failed or landed merge is its
   // own status arm.
-  reserved 1, 2, 3, 4, 6, 7, 8, 9, 11, 12;
-  reserved "enqueuing", "queued", "pre_prompt", "merge", "parked", "post_prompt", "failed", "merged", "fixes", "conflicts";
+  // Tags 14 and 20 (`preprocessing`, `postprocessing`) are RETIRED: the
+  // stages a deploy's hooks run in are `pre_deploy`, `deploying` and
+  // `post_deploy`. Tag 19 (`updating_main`, a branch already merged upstream)
+  // is RETIRED: finishing a workspace always runs its repository's deploy.
+  reserved 1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 14, 19, 20;
+  reserved "enqueuing", "queued", "pre_prompt", "merge", "parked", "post_prompt", "failed", "merged", "fixes", "conflicts", "preprocessing", "updating_main", "postprocessing";
   // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
   // something to draw under every status.
   FooterStatusMergingActivity activity = 10;
@@ -956,8 +959,8 @@ message FooterSubStatusMergingEnqueued {
   // How many merges are waiting, this one included. At least `place`.
   uint32 waiting = 2;
 }
-// The before-merge prompt is running, drawn "preprocessing".
-message FooterSubStatusMergingPreprocessing {}
+// A `pre_deploy` hook is running, drawn "pre-deploy".
+message FooterSubStatusMergingPreDeploy {}
 // The replay, drawn "rebasing 3/7".
 message FooterSubStatusMergingRebasing {
   // How many of the branch's commits have been replayed onto the tip.
@@ -980,10 +983,10 @@ message FooterSubStatusMergingFixing {
 }
 // The merge commit, drawn "committing".
 message FooterSubStatusMergingCommitting {}
-// Updating the default branch from upstream, drawn "updating main".
-message FooterSubStatusMergingUpdatingMain {}
-// The after-merge prompt is running, drawn "postprocessing".
-message FooterSubStatusMergingPostprocessing {}
+// The repository's `deploy` hook is running, drawn "deploying".
+message FooterSubStatusMergingDeploying {}
+// A `post_deploy` hook is running, drawn "post-deploy".
+message FooterSubStatusMergingPostDeploy {}
 // The merge's agent waits on the user, drawn "waiting on user". The activity
 // line names the ask: the gated call, or the question batch's lead.
 message FooterSubStatusMergingWaitingOnUser {}
@@ -997,9 +1000,12 @@ message FooterStatusMergeFailed {
     FooterSubStatusMergeFailedConflicts conflicts = 2;
     // The last fixing attempt left suites failing.
     FooterSubStatusMergeFailedTests tests = 3;
-    // Any other step failed (the rebase itself, the before-merge prompt, the
-    // merge commit, updating main); the merge bubble carries the account.
+    // Any other step failed (the rebase itself, the merge commit); the merge
+    // bubble carries the account.
     FooterSubStatusMergeFailedOther other = 4;
+    // A hook failed, in whichever stage; the workspace is prompted to
+    // investigate, and the merge bubble's hook tab carries the account.
+    FooterSubStatusMergeFailedHook hook = 5;
   }
   // The activity cell. ALWAYS SET, the same cell a merge in flight carries.
   FooterStatusMergingActivity activity = 1;
@@ -1010,6 +1016,8 @@ message FooterSubStatusMergeFailedConflicts {}
 message FooterSubStatusMergeFailedTests {}
 // Drawn "merge"; the account is the bubble's.
 message FooterSubStatusMergeFailedOther {}
+// Drawn "hook"; the account is the bubble's hook tab.
+message FooterSubStatusMergeFailedHook {}
 
 // The merge landed.
 message FooterStatusMerged {
@@ -1078,8 +1086,8 @@ message FooterStatusActivityMergeStep {
     // Enqueued: the merge being worked on and its step, "fix-reconnect:
     // testing", replaced only when that merge changes step.
     FooterMergeStepEnqueued enqueued = 1;
-    // Preprocessing: the before-merge prompt's text.
-    FooterMergeStepPrompt preprocessing = 2;
+    // Pre-deploy: the `pre_deploy` hook running.
+    FooterMergeStepHook pre_deploy = 10;
     // Rebasing: the command running for the current commit, or its failure.
     FooterMergeStepRebasing rebasing = 3;
     // Conflict resolution: the commit that conflicted and how many files.
@@ -1090,11 +1098,16 @@ message FooterStatusActivityMergeStep {
     FooterMergeStepFixing fixing = 6;
     // Committing: the merge commit's first line.
     FooterMergeStepCommitting committing = 7;
-    // Updating main: fetching, then fast-forwarding.
-    FooterMergeStepUpdatingMain updating_main = 8;
-    // Postprocessing: the after-merge prompt's text.
-    FooterMergeStepPrompt postprocessing = 9;
+    // Deploying: the repository's `deploy` hook running.
+    FooterMergeStepHook deploying = 11;
+    // Post-deploy: the `post_deploy` hook running.
+    FooterMergeStepHook post_deploy = 12;
   }
+  // Tags 2 (`preprocessing`) and 9 (`postprocessing`) are RETIRED: a running
+  // hook is a script or a prompt (FooterMergeStepHook), in the stage its arm
+  // names. Tag 8 (`updating_main`) is RETIRED with the merged-upstream finish.
+  reserved 2, 8, 9;
+  reserved "preprocessing", "updating_main", "postprocessing";
 }
 // The merge ahead in the queue.
 message FooterMergeStepEnqueued {
@@ -1103,7 +1116,20 @@ message FooterMergeStepEnqueued {
   // Its step, in the footer's plain words ("testing").
   string step = 2;
 }
-// A configured prompt's text, drawn verbatim.
+// The hook a stage is running. THE ARM IS THE HOOK'S KIND.
+message FooterMergeStepHook {
+  oneof hook {
+    // A prompt hook: its text, drawn verbatim.
+    FooterMergeStepPrompt prompt = 1;
+    // A script hook: its path, drawn verbatim.
+    FooterMergeStepScript script = 2;
+  }
+}
+// A script hook's path, relative to the repository's main checkout root.
+message FooterMergeStepScript {
+  string path = 1;
+}
+// A prompt hook's text, drawn verbatim.
 message FooterMergeStepPrompt {
   string text = 1;
 }
@@ -1159,23 +1185,6 @@ message FooterMergeStepCommitting {
   // Its first line, drawn verbatim.
   string subject = 1;
 }
-// The update of the default branch from upstream.
-message FooterMergeStepUpdatingMain {
-  oneof step {
-    // Fetching from upstream.
-    FooterMergeStepUpdatingMainFetching fetching = 1;
-    // Fast-forwarding to a commit.
-    FooterMergeStepUpdatingMainFastForwarding fast_forwarding = 2;
-  }
-}
-// Fetching.
-message FooterMergeStepUpdatingMainFetching {}
-// Fast-forwarding.
-message FooterMergeStepUpdatingMainFastForwarding {
-  // The short hash fast-forwarded to.
-  string commit = 1;
-}
-
 // Detached work runs while the main thread is free.
 message FooterStatusBackground {
   // No substatus: the chips and expanded panels carry the detail, so the

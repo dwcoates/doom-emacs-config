@@ -1,0 +1,30 @@
+// deploy_config_refusal.proto — the refusals every way of asking for a deploy
+// shares when the target repository's `.agent-repl/deploy.yaml`
+// (repoconfig.v1.DeployConfig) is missing or unusable: a workspace finishing
+// (FinishWorkspace) and an async merge (CreateWorkspaceAsyncMerge). The file is
+// read when the deploy is asked for, so a request into a repository that states
+// no usable deploy records nothing.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The repository has no deploy config, so nothing says what a deploy does
+// there.
+message DeployConfigMissing {
+  // The path the daemon looked for: `.agent-repl/deploy.yaml` beneath the
+  // repository's main checkout root.
+  string path = 1;
+}
+
+// The repository's deploy config could not be read, or does not decode as
+// repoconfig.v1.DeployConfig, or leaves a required field unset.
+message DeployConfigInvalid {
+  // The file's path.
+  string path = 1;
+  // Why it was refused, as the reader or the decoder put it: the unknown or
+  // misspelled key, the YAML error, the required field left unset.
+  string detail = 2;
+}

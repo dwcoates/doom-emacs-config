@@ -16,16 +16,6 @@ var everySingletonSwitch = []struct {
 	get  func(*store) (bool, time.Time, error)
 }{
 	{
-		name: "the rollout hold", sw: rolloutHoldSwitch,
-		set: func(s *store, on bool, at time.Time) error {
-			return s.SetMergeRolloutHold(context.Background(), on, at)
-		},
-		get: func(s *store) (bool, time.Time, error) {
-			hold, err := s.MergeRolloutHold(context.Background())
-			return hold.Held, hold.Since, err
-		},
-	},
-	{
 		name: "the racing switch", sw: racingDisabledSwitch,
 		set: func(s *store, on bool, at time.Time) error {
 			return s.SetMergeRacingDisabled(context.Background(), on, at)

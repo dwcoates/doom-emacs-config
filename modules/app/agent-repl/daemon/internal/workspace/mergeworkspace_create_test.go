@@ -7,7 +7,10 @@ import (
 	"slices"
 	"testing"
 
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
+
 	"agent-repld/internal/account"
+	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -15,8 +18,8 @@ import (
 
 // mergeRequester arranges a requester a merge workspace can be forked from: a
 // registered workspace on branch "ABC/sample", landing on "master" in
-// targetDir, with a conversation to fork and a creation job carrying merge
-// actions of ITS OWN, which no merge workspace of it may inherit.
+// targetDir, with a conversation to fork and a creation job carrying deploy
+// hooks of ITS OWN, which no merge workspace of it may inherit.
 func mergeRequester(t *testing.T, f *fixture) (wsm.Workspace, string) {
 	t.Helper()
 	requester := f.workspace("requester", t.TempDir())
@@ -28,7 +31,7 @@ func mergeRequester(t *testing.T, f *fixture) (wsm.Workspace, string) {
 	f.db.jobs[requester.ID] = wsm.CreationJob{
 		Workspace: requester.ID,
 		Layout:    wsm.MergeLayout{SourceBranch: requester.Branch, SourceDir: requester.Dir, TargetDir: targetDir},
-		Actions:   wsm.MergeActions{Before: []string{"the requester's own before"}},
+		Hooks:     wsm.DeployHooks{PreDeploy: promptHooks("the requester's own pre-deploy")},
 	}
 	return requester, targetDir
 }
@@ -37,7 +40,7 @@ func mergeRequester(t *testing.T, f *fixture) (wsm.Workspace, string) {
 // from everything the requester records, so a create that read the requester
 // instead is caught.
 var theLanding = wsm.MergeOrigin{TargetDir: "/decided/target", ParentBranch: "decided-parent",
-	Actions: wsm.MergeActions{Before: []string{"the request's before"}, After: []string{"the request's after"}}}
+	Hooks: wsm.DeployHooks{PreDeploy: promptHooks("the request's pre-deploy"), PostDeploy: promptHooks("the request's post-deploy")}}
 
 // landedOrigin is the hand-off's origin for REQUESTER's request-1, carrying
 // theLanding.
@@ -132,12 +135,12 @@ func TestCreateLandsAMergeWorkspaceByItsOriginsLanding(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Assert: the origin's target and actions on the merge workspace's own
+	// Assert: the origin's target and hooks on the merge workspace's own
 	// job, the requester's branch as its base, the origin's parent branch on
 	// the registration, and the merge origin recorded.
 	job := f.db.putJobs[len(f.db.putJobs)-1]
-	if job.Layout.TargetDir != theLanding.TargetDir || !reflect.DeepEqual(job.Actions, theLanding.Actions) || job.BaseRef != "ABC/sample" {
-		t.Fatalf("job = %+v, want the origin's target and actions and the requester's branch as base", job)
+	if job.Layout.TargetDir != theLanding.TargetDir || !job.Hooks.Equal(theLanding.Hooks) || job.BaseRef != "ABC/sample" {
+		t.Fatalf("job = %+v, want the origin's target and hooks and the requester's branch as base", job)
 	}
 	facts := f.db.registered[len(f.db.registered)-1]
 	if facts.ParentBranch != theLanding.ParentBranch || facts.Parent == nil || *facts.Parent != requester.ID || facts.MergeOf == nil || !reflect.DeepEqual(*facts.MergeOf, *spec.MergeOf) {
@@ -145,12 +148,12 @@ func TestCreateLandsAMergeWorkspaceByItsOriginsLanding(t *testing.T) {
 	}
 }
 
-func TestCreateGivesAMergeWorkspaceNoActionWhenItsRequestNamedNone(t *testing.T) {
-	// Arrange: the requester's creation job carries actions of its own.
+func TestCreateGivesAMergeWorkspaceNoHookWhenItsRequestNamedNone(t *testing.T) {
+	// Arrange: the requester's creation job carries hooks of its own.
 	f := newFixture(t)
 	requester, _ := mergeRequester(t, f)
 	spec := mergeWorkspaceSpec(t, f, requester.ID)
-	spec.MergeOf.Actions = wsm.MergeActions{}
+	spec.MergeOf.Hooks = wsm.DeployHooks{}
 
 	// Act
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -158,19 +161,19 @@ func TestCreateGivesAMergeWorkspaceNoActionWhenItsRequestNamedNone(t *testing.T)
 	}
 
 	// Assert
-	if job := f.db.putJobs[len(f.db.putJobs)-1]; !reflect.DeepEqual(job.Actions, wsm.MergeActions{}) {
-		t.Fatalf("job actions = %+v, want none: a merge workspace never inherits its requester's", job.Actions)
+	if job := f.db.putJobs[len(f.db.putJobs)-1]; !job.Hooks.Empty() {
+		t.Fatalf("job hooks = %+v, want none: a merge workspace never inherits its requester's", job.Hooks)
 	}
 }
 
-func TestCreateRecordsTheActionsAMergeWorkspacesRequestNamed(t *testing.T) {
-	// Arrange: an async request that names a prompt to run before its merge
-	// and one after it lands.
+func TestCreateRecordsTheHooksAMergeWorkspacesRequestNamed(t *testing.T) {
+	// Arrange: an async request that names a pre-deploy prompt hook and a
+	// post-deploy one.
 	f := newFixture(t)
 	requester, _ := mergeRequester(t, f)
 	spec := mergeWorkspaceSpec(t, f, requester.ID)
-	named := wsm.MergeActions{Before: []string{"tidy the branch"}, After: []string{"announce the landing"}}
-	spec.MergeOf.Actions = named
+	named := wsm.DeployHooks{PreDeploy: promptHooks("tidy the branch"), PostDeploy: promptHooks("announce the landing")}
+	spec.MergeOf.Hooks = named
 
 	// Act
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -178,8 +181,8 @@ func TestCreateRecordsTheActionsAMergeWorkspacesRequestNamed(t *testing.T) {
 	}
 
 	// Assert
-	if job := f.db.putJobs[len(f.db.putJobs)-1]; !reflect.DeepEqual(job.Actions, named) {
-		t.Fatalf("job actions = %+v, want the request's own %+v", job.Actions, named)
+	if job := f.db.putJobs[len(f.db.putJobs)-1]; !job.Hooks.Equal(named) {
+		t.Fatalf("job hooks = %+v, want the request's own %+v", job.Hooks, named)
 	}
 }
 
@@ -426,4 +429,13 @@ func TestCreateLeavesAMergeWorkspacesSessionForItsFirstTurn(t *testing.T) {
 	if got := f.db.pendingForks[created.ID]; got.Parent != requester.ID {
 		t.Fatalf("pending fork = %+v, want a fork of the maker %s owed", got, requester.ID)
 	}
+}
+
+// promptHooks are TEXTS as prompt hooks, in order.
+func promptHooks(texts ...string) []*repoconfigv1.DeployHook {
+	var out []*repoconfigv1.DeployHook
+	for _, text := range texts {
+		out = append(out, deployconfig.PromptHook(text))
+	}
+	return out
 }

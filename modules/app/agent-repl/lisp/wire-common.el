@@ -381,7 +381,7 @@ at INFO and reattaches to the live daemon rather than calling it lost."
 ;;;; ---- agentrepl.v1 family.proto ----
 ;;
 ;; THE TWO FAMILY REFUSALS, one decoder each, which every error that can
-;; carry them (CloseWorkspace, KillWorkspace, NukeWorkspace, MergeWorkspace,
+;; carry them (CloseWorkspace, KillWorkspace, NukeWorkspace, FinishWorkspace,
 ;; SetWorkspaceHidden, OpenWorkspace, CreateWorkspace, RegisterWorkspace)
 ;; decodes its arm through.
 
@@ -735,7 +735,8 @@ no client ever sends them.")
     "PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED" "PROMPT_ORIGIN_MERGE_QUEUE_NOTICE"
     "PROMPT_ORIGIN_MERGE_REVERT" "PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE"
     "PROMPT_ORIGIN_OWNER_NOTICE" "PROMPT_ORIGIN_WORKSPACE_NOTICE"
-    "PROMPT_ORIGIN_AGENT_SENT" "PROMPT_ORIGIN_WORKSPACE_COMPACT")
+    "PROMPT_ORIGIN_AGENT_SENT" "PROMPT_ORIGIN_WORKSPACE_COMPACT"
+    "PROMPT_ORIGIN_DEPLOY_HOOK")
   "PromptOrigin values no client ever sends: only the shim or the daemon does.
 VENDOR_STARTED names a turn the vendor began on its own, which the shim
 adopts; an editor submit carrying it would claim the vendor started a
@@ -754,7 +755,8 @@ merge.  DERIVED_WORKSPACE_NOTICE, OWNER_NOTICE and WORKSPACE_NOTICE are the
 daemon's notices to a workspace another was cut or forked from, to a
 child's owner, and to a workspace subscriber.  AGENT_SENT is a prompt an
 agent sent through the agent API, and WORKSPACE_COMPACT the compaction it
-asked for.  None has an elisp spelling at all.")
+asked for.  DEPLOY_HOOK is a deploy's deploy-stage prompt hook.  None has
+an elisp spelling at all.")
 
 (defun agent-repl-wire-encode-prompt-origin (value)
   "Encode the PromptOrigin keyword VALUE as its protojson enum name.

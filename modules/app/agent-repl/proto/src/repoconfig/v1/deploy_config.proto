@@ -1,0 +1,176 @@
+// deploy_config.proto — the schema of `.agent-repl/deploy.yaml`, the file a
+// repository commits at its main checkout root to say what happens when one of
+// its workspaces is FINISHED (agentrepl.v1.FinishWorkspace) or an async merge
+// of one of its branches runs (agentrepl.v1.CreateWorkspaceAsyncMerge).
+//
+// THE FILE IS READ AT EVERY DEPLOY, never cached, so an edit takes effect on
+// the next deploy without a daemon restart. The daemon converts the YAML to
+// JSON and decodes it into DeployConfig with unknown fields REFUSED: a
+// misspelled key is a refused deploy with the key named, never a silent
+// default. Keys are the field names below in snake_case.
+//
+// A REPOSITORY WITHOUT THE FILE HAS NO DEPLOY. `workspace finished` and an
+// async merge in it are refused, naming the file; there is no default
+// destination.
+//
+// A DEPLOY RUNS THREE STAGES, IN ORDER, all inside the repository's queue, one
+// deploy at a time:
+//
+//   pre_deploy   its hooks, then the built-in local merge when configured;
+//                never held
+//   deploy       one hook; the only thing a repository hold
+//                (agentrepl.v1.UpdateDeployHold) skips
+//   post_deploy  its hooks, in order; never held
+//
+// and then the daemon's own last steps, which no config changes: the report to
+// an async merge's requester, closing the deploy's OWNER (the finished
+// workspace, or the async merge's hidden merge workspace) and removing its
+// worktree. A deploy whose hook fails FAILS: its owner is not closed, and the
+// failure is handed back to the workspace that follows it, which is prompted to
+// investigate.
+
+syntax = "proto3";
+
+package repoconfig.v1;
+
+option go_package = "agentrepl/proto/repoconfig/v1;repoconfigv1";
+
+// A repository's deploy: the whole of `.agent-repl/deploy.yaml`.
+message DeployConfig {
+  // The first stage: hooks, then the built-in local merge. Never held.
+  DeployPreDeployStage pre_deploy = 1;
+  // The deploy stage's one hook: what DEPLOYING means for this repository
+  // (agent-repl's runtime redeploying itself, a pull request opened). The only
+  // part of a deploy a repository hold skips. UNSET when the repository's
+  // deploy has no such step.
+  optional DeployHookEntry deploy = 2;
+  // The last stage's hooks, run in order once the deploy stage has finished.
+  // Never held. Empty when the repository has none.
+  repeated DeployHookEntry post_deploy = 3;
+}
+
+// The first stage of a deploy.
+message DeployPreDeployStage {
+  // Hooks run first, in order, before the local merge. A failed hook fails the
+  // deploy before anything lands. Empty when the repository has none. A
+  // request's own before prompts (agentrepl.v1.CreateWorkspaceAsyncMerge
+  // before-merge actions, or those a workspace's creation recorded) REPLACE
+  // these for that deploy.
+  repeated DeployHookEntry hooks = 1;
+  // The built-in local merge: the branch rebased onto its target, tested,
+  // fixed by its owner when a test fails, landed as a merge commit and
+  // optionally tagged. UNSET when nothing lands locally, and the hooks of the
+  // three stages are then the whole deploy.
+  optional DeployLocalMerge local_merge = 2;
+}
+
+// THE BUILT-IN LOCAL MERGE. Its steps are the daemon's own code, in this
+// order: rebase the branch onto the target's tip (its owner resolving any
+// conflict), run the tests (its owner fixing a failure, a bounded number of
+// times), land a non-fast-forward merge commit on the target, and tag the
+// landing when `version_tag` is set. Queued deploys behind the head rebase and
+// test ahead of their turn (racing), which only a local merge does.
+message DeployLocalMerge {
+  // How the rebased branch is tested before it lands. REQUIRED: a local merge
+  // always tests.
+  DeployLocalMergeTests tests = 1;
+  // Present when the repository versions its landings: a landing in the
+  // repository's MAIN worktree carries a `minor` or `patch` increment, which an
+  // agent's request must state (agentrepl.v1.MergeWorkspaceVersionIncrement)
+  // and the landing tags as the next `MAJOR.MINOR.PATCH`. A landing elsewhere
+  // (a child into its parent's worktree) never carries one. UNSET when the
+  // repository is not versioned, and no request may carry an increment.
+  optional DeployVersionTag version_tag = 2;
+}
+
+// Which test step the local merge runs. THE ARM IS THE STEP KIND: each is
+// daemon code that knows how to select, run and read one test runner.
+message DeployLocalMergeTests {
+  oneof kind {
+    // agent-repl's own suites, through its `test-all.sh`.
+    DeployTestsAgentReplSuites agent_repl_suites = 1;
+  }
+}
+
+// agent-repl's test runner: the suites a change touches are selected from the
+// changed paths, run through the named script, read off its pass and skip
+// lines, and a failing case is handed to the owner with the exact command that
+// reruns it.
+message DeployTestsAgentReplSuites {
+  // The runner script, relative to the repository's main checkout root (for
+  // agent-repl, `modules/app/agent-repl/bin/test-all.sh`). It is run from the
+  // checkout being tested, at the same relative path. REQUIRED.
+  string script_path = 1;
+}
+
+// The repository versions its landings. No fields: which increment a landing
+// carries is the request's to state.
+message DeployVersionTag {}
+
+// One hook of a stage, and which landings it runs for.
+message DeployHookEntry {
+  // What the hook does. REQUIRED.
+  DeployHook hook = 1;
+  // Which landings the hook runs for. REQUIRED, with no default: a hook that
+  // only makes sense for the repository's main branch says so.
+  DeployHookRunsFor runs_for = 2;
+}
+
+// A hook: a script the daemon runs, or a prompt it sends to the deploy's
+// OWNER. The two are equal arms: anywhere one may be given, so may the other.
+// A prompt never names a workspace: it always goes to the workspace running
+// the deploy, which outlives every hook because closing it is the deploy's
+// last step.
+message DeployHook {
+  oneof hook {
+    // A script, run by the daemon.
+    DeployHookScript script = 1;
+    // A prompt, run as a turn of the deploy's owner.
+    DeployHookPrompt prompt = 2;
+  }
+}
+
+// A script hook. The daemon runs it with bash, with the repository's MAIN
+// checkout root as its working directory, in an environment carrying:
+//
+//   AGENT_REPL_CALLING_WORKSPACE  the full path of the owner's worktree
+//   AGENT_REPL_DEPLOY_LEDGER      the deploy's ledger, which a script names
+//                                 when it calls back into the daemon about this
+//                                 deploy (agentrepl.v1.RollOutLanding)
+//   AGENT_REPL_DEPLOY_STAGE       pre_deploy, deploy or post_deploy
+//
+// Exit 0 is success; any other exit, or running past the timeout (the script
+// is then killed), fails the hook. Its standard output and error are kept in a
+// log the bubble's tab links, and their last lines are drawn in the tab.
+message DeployHookScript {
+  // The script, relative to the repository's main checkout root. REQUIRED.
+  string path = 1;
+  // How long the script may run, in seconds, before it is killed and the hook
+  // fails. REQUIRED, and at least 1.
+  uint32 timeout_seconds = 2;
+}
+
+// A prompt hook: the text is submitted verbatim as a turn of the deploy's
+// owner, which revives the owner's session when it has none. The turn ending
+// in failure, or being interrupted, fails the hook.
+message DeployHookPrompt {
+  // The prompt, submitted verbatim. REQUIRED, never blank.
+  string text = 1;
+}
+
+// Which landings a hook runs for. THE ARM IS THE SCOPE.
+message DeployHookRunsFor {
+  oneof scope {
+    // Only a deploy whose target is the repository's main branch, in its main
+    // worktree: a child landing into its parent's worktree skips the hook.
+    DeployHookRunsForMain main = 1;
+    // Every deploy, a child's into its parent's worktree included.
+    DeployHookRunsForAnyTarget any_target = 2;
+  }
+}
+
+// The hook runs only for landings on the repository's main branch.
+message DeployHookRunsForMain {}
+
+// The hook runs for every landing, whatever its target.
+message DeployHookRunsForAnyTarget {}

@@ -1057,9 +1057,9 @@ func TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout(t *testing
 	script := harness.NewTestAllScript(t, selfRepo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
+	selfRepo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{
 		DurableState: true,
-		SelfRepo:     selfRepo.Dir,
 		ExtraEnv: []string{
 			harness.TestAllScriptEnv(script.Path),
 			"AGENT_REPL_HOLDOUT_WARN_EVERY=25ms",
@@ -1461,9 +1461,9 @@ func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
 	script := harness.NewTestAllScript(t, selfRepo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
+	selfRepo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{
 		DurableState: true,
-		SelfRepo:     selfRepo.Dir,
 		ExtraEnv:     []string{harness.TestAllScriptEnv(script.Path)},
 		// Every caller of this fixture drives a real self-reload handover
 		// (drainTriggerDeploy): a second real agent-repld boots and adopts
@@ -1490,8 +1490,8 @@ func drainTriggerDeploy(t *testing.T, d *harness.Daemon, selfRepo *harness.Repo,
 	f := mergeCreateChild(t, d, repoRef, "trigger", "trigger work", nil)
 	sha := writeCommit(t, selfRepo, f.ws.GetDir(), path, "trigger\n")
 	selfRepo.SetPaths(sha, path)
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(harness.MergeRequest(f.ws, harness.OneShot()))); err != nil {
-		t.Fatalf("MergeWorkspace(trigger) = error %v, want the merge enqueued and landed", err)
+	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(f.ws))); err != nil {
+		t.Fatalf("FinishWorkspace(trigger) = error %v, want the merge enqueued and landed", err)
 	}
 }
 

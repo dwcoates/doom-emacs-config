@@ -462,7 +462,6 @@ func TestAMergeWorkspaceWhosePickIsPendingNeverJoinsARace(t *testing.T) {
 	}{
 		{name: "an ordinary merge in line", entry: wsm.MergeQueueEntry{State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}}, want: true},
 		{name: "a merge workspace whose pick is pending", entry: wsm.MergeQueueEntry{State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Pick: "rebase it"}}},
-		{name: "a branch merged upstream", entry: wsm.MergeQueueEntry{State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceMergedUpstream}}},
 		{name: "a merge only requested", entry: wsm.MergeQueueEntry{State: wsm.MergeRequested, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}}},
 	}
 	for _, tt := range tests {

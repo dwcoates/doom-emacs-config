@@ -107,21 +107,6 @@ func (o *orchestrator) resolveSubject(ctx context.Context, r *run) (subject, err
 		}, nil
 	case wsm.MergeSourceBranch:
 		return o.branchSubject(ctx, r)
-	case wsm.MergeSourceMergedUpstream:
-		job, err := o.layoutFor(ctx, r.ws)
-		if err != nil {
-			return subject{}, err
-		}
-		main, err := r.git.MainWorktree(ctx, job.Layout.SourceDir)
-		if err != nil {
-			return subject{}, fmt.Errorf("merge: resolving the repository's main worktree: %w", err)
-		}
-		branch, err := o.requestedBranch(ctx, r.ws, r.source, job.Layout.SourceDir)
-		if err != nil {
-			return subject{}, err
-		}
-		closes, _ := r.source.LandingCloses(r.ws, nil)
-		return subject{branch: branch, targetDir: main, closes: closes}, nil
 	default:
 		return subject{}, fmt.Errorf("merge: the undeclared source %s", r.source.Kind)
 	}
@@ -203,20 +188,6 @@ func (o *orchestrator) sourceLabel(ctx context.Context, ws ids.WorkspaceID, sour
 			return "", err
 		}
 		return branchLabel(branch, job.Layout.TargetDir), nil
-	case wsm.MergeSourceMergedUpstream:
-		job, err := o.layoutFor(ctx, ws)
-		if err != nil {
-			return "", err
-		}
-		main, err := o.deps.Git.MainWorktree(ctx, job.Layout.SourceDir)
-		if err != nil {
-			return "", err
-		}
-		branch, err := o.requestedBranch(ctx, ws, source, job.Layout.SourceDir)
-		if err != nil {
-			return "", err
-		}
-		return branchLabel(branch, main), nil
 	case wsm.MergeSourceBranch:
 		record, err := o.deps.DB.Workspace(ctx, ws)
 		if err != nil {

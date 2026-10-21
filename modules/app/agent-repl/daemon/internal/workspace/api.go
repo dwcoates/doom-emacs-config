@@ -88,8 +88,9 @@ type CreateSpec struct {
 	// ConsentedUngatedMode is the permission mode the user consented to at
 	// creation. An ungated mode with no consent recorded is REFUSED.
 	ConsentedUngatedMode string
-	// MergeActions are the configured before/after merge actions.
-	MergeActions wsm.MergeActions
+	// DeployHooks are the deploy hooks the creation supplies, run by every deploy
+	// of the workspace in place of its repository's for the same stage.
+	DeployHooks wsm.DeployHooks
 	// Name is the user-supplied workspace name. Empty derives the slug from
 	// the initial prompt by the naming rule.
 	Name string

@@ -28,7 +28,7 @@ func TestNewRefusesAnIncompleteDependencySet(t *testing.T) {
 		{name: "no freeness", drop: func(d *Deps) { d.Freeness = nil }, want: "Freeness"},
 		{name: "no rollout trigger", drop: func(d *Deps) { d.Rollout = nil }, want: "Rollout"},
 		{name: "no state root", drop: func(d *Deps) { d.StateDir = "" }, want: "StateDir"},
-		{name: "no self repository", drop: func(d *Deps) { d.SelfRepoDir = "" }, want: "SelfRepoDir"},
+		{name: "no hook runner", drop: func(d *Deps) { d.HookRunner = nil }, want: "HookRunner"},
 		{name: "no test command", drop: func(d *Deps) { d.TestCommand = nil }, want: "TestCommand"},
 	}
 	for _, tc := range tests {
@@ -86,7 +86,7 @@ func TestTestCommandPrefersTheScriptOverride(t *testing.T) {
 	t.Setenv("AGENT_REPL_TEST_ALL_SCRIPT", "/fixtures/test-all.sh")
 
 	// Act.
-	got := TestCommandFor("/checkout")
+	got := TestCommandFor("/checkout", "bin/suites.sh")
 
 	// Assert.
 	if len(got) != 2 || got[0] != "bash" || got[1] != "/fixtures/test-all.sh" {
@@ -100,10 +100,10 @@ func TestTestCommandFallsBackToTheRepositoryEntrypoint(t *testing.T) {
 	t.Setenv("AGENT_REPL_TEST_ALL_SCRIPT", "")
 
 	// Act.
-	got := TestCommandFor("/checkout")
+	got := TestCommandFor("/checkout", "bin/suites.sh")
 
-	// Assert.
-	want := "/checkout/modules/app/agent-repl/bin/test-all.sh"
+	// Assert: the config's script, under the tree being tested.
+	want := "/checkout/bin/suites.sh"
 	if len(got) != 2 || got[1] != want {
 		t.Fatalf("TestCommandFor answered %v, want %q", got, want)
 	}

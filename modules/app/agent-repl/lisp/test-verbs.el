@@ -211,8 +211,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :nuke))
                 ((symbol-function 'agent-repl-rpc-open-workspace)
                  (agent-repl-test-verbs--stub :open))
-                ((symbol-function 'agent-repl-rpc-merge-workspace)
-                 (agent-repl-test-verbs--stub :merge))
+                ((symbol-function 'agent-repl-rpc-finish-workspace)
+                 (agent-repl-test-verbs--stub :finish))
                 ((symbol-function 'agent-repl-rpc-restart-workspace)
                  (agent-repl-test-verbs--stub :restart))
                 ((symbol-function 'agent-repl-rpc-interrupt)
@@ -375,20 +375,17 @@ answers a bare success, which is what almost every verb's success is."
       ;; Assert
       (should (agent-repl-test-verbs--messaged-p "nuke refused: blocked")))))
 
-(ert-deftest agent-repl-verbs-merge-sends-a-one-shot-of-its-own-branch ()
-  "MergeWorkspace from Emacs is the user's ONE-SHOT of the workspace's own
-branch at the back of the queue: the mode is `one_shot' with the
-`own_branch' landing, which closes the workspace once it lands."
+(ert-deftest agent-repl-verbs-finish-sends-the-users-ask-at-the-back ()
+  "FinishWorkspace from Emacs is the user\='s ask at the back of the queue,
+naming the workspace and nothing its repository\='s deploy config decides."
   ;; Arrange
   (agent-repl-test-verbs--with nil
     ;; Act
-    (agent-repl-verb-merge "ws-one")
+    (agent-repl-verb-finish "ws-one")
     ;; Assert
-    (should (equal (agent-repl-test-verbs--request :merge)
+    (should (equal (agent-repl-test-verbs--request :finish)
                    (list :workspace (agent-repl-test-verbs--ref)
                          :requester '(:arm :user)
-                         :mode '(:arm :one-shot
-                                 :value (:landing (:arm :own-branch :value nil)))
                          :placement '(:arm :back))))))
 
 (ert-deftest agent-repl-verbs-open-echoes-the-given-ref ()
@@ -1342,11 +1339,11 @@ list, so there is nothing to drop."
                          agent-repl-mutation-progress--pending))
     (should-not agent-repl-test-verbs--torn-down)))
 
-(ert-deftest agent-repl-verbs-merge-success-says-enqueued-only ()
-  "Merge success means ENQUEUED; Emacs holds no further merge state."
+(ert-deftest agent-repl-verbs-finish-success-says-enqueued-only ()
+  "Finish success means ENQUEUED; Emacs holds no further deploy state."
   (agent-repl-test-verbs--with nil
-    (agent-repl-verb-merge "ws-one")
-    (should (agent-repl-test-verbs--messaged-p "merge enqueued"))
+    (agent-repl-verb-finish "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "deploy enqueued"))
     (should-not agent-repl-test-verbs--torn-down)))
 
 (ert-deftest agent-repl-verbs-error-arm-does-not-tear-the-tab-down ()
@@ -1366,10 +1363,10 @@ list, so there is nothing to drop."
 (ert-deftest agent-repl-verbs-refusal-names-the-arm ()
   "A refusal draws the arm keyword, whatever arm the daemon chose."
   (agent-repl-test-verbs--with
-      '((:merge . (:response (:arm :error
+      '((:finish . (:response (:arm :error
                               :value (:cause (:arm :already-queued :value nil))))))
-    (agent-repl-verb-merge "ws-one")
-    (should (agent-repl-test-verbs--messaged-p "merge refused: already-queued"))))
+    (agent-repl-verb-finish "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "finish refused: already-queued"))))
 
 (ert-deftest agent-repl-verbs-refusal-draws-an-unmodelled-arm-too ()
   "An arm this file has never heard of still reaches the user by name.
@@ -1494,19 +1491,19 @@ daemon starts sending it, with no table to update here."
 (ert-deftest agent-repl-verbs-empty-arm-draws-no-empty-fields ()
   "An empty arm is its own whole assertion and renders no trailing payload."
   (agent-repl-test-verbs--with
-      '((:merge . (:response (:arm :error
-                              :value (:cause (:arm :already-merging :value nil))))))
-    (agent-repl-verb-merge "ws-one")
-    (should (agent-repl-test-verbs--messaged-p "merge refused: already-merging"))
-    (should-not (agent-repl-test-verbs--messaged-p "already-merging ("))))
+      '((:finish . (:response (:arm :error
+                              :value (:cause (:arm :already-deploying :value nil))))))
+    (agent-repl-verb-finish "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "finish refused: already-deploying"))
+    (should-not (agent-repl-test-verbs--messaged-p "already-deploying ("))))
 
 (ert-deftest agent-repl-verbs-transferring-away-goes-to-the-handover ()
   "`transferring_away' is the handover's ordering, not a user-facing failure."
   (agent-repl-test-verbs--with
-      '((:merge . (:response (:arm :error
+      '((:finish . (:response (:arm :error
                               :value (:cause (:arm :transferring-away
                                               :value (:address "127.0.0.1:9999")))))))
-    (agent-repl-verb-merge "ws-one")
+    (agent-repl-verb-finish "ws-one")
     (should (equal (length agent-repl-test-verbs--handover) 1))
     (should (equal (car (car agent-repl-test-verbs--handover)) "ws-one"))
     (should (equal (plist-get (nth 1 (car agent-repl-test-verbs--handover)) :value)
@@ -1515,10 +1512,10 @@ daemon starts sending it, with no table to update here."
 (ert-deftest agent-repl-verbs-transferring-away-draws-nothing ()
   "The rollout it belongs to is supposed to be invisible, so it is silent."
   (agent-repl-test-verbs--with
-      '((:merge . (:response (:arm :error
+      '((:finish . (:response (:arm :error
                               :value (:cause (:arm :transferring-away
                                               :value (:address "127.0.0.1:9999")))))))
-    (agent-repl-verb-merge "ws-one")
+    (agent-repl-verb-finish "ws-one")
     (should-not (agent-repl-test-verbs--messaged-p "refused"))))
 
 (ert-deftest agent-repl-verbs-not-yet-adopted-goes-to-the-handover ()
@@ -3857,39 +3854,6 @@ pause sent."
                               :blocks)))
       (should (equal (plist-get (plist-get (car blocks) :value) :text) "fix the flake")))))
 
-(ert-deftest agent-repl-verbs-create-standard-wraps-a-merge-action-as-user-said ()
-  "A standard form's pre-merge action rides as `UserSaid', not as bare text."
-  (agent-repl-test-verbs--with nil
-    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
-                            :merge-actions (list :before-ws-merge "run the linter"))
-    (let* ((form (plist-get (agent-repl-test-verbs--request :create) :form))
-           (blocks (plist-get (plist-get (plist-get (plist-get (plist-get form :value)
-                                                              :merge-actions)
-                                                    :before-ws-merge)
-                                         :content)
-                              :blocks)))
-      (should (equal (plist-get (plist-get (car blocks) :value) :text) "run the linter")))))
-
-(ert-deftest agent-repl-verbs-create-standard-wraps-a-postprocessing-prompt-as-user-said ()
-  "A standard form's postprocessing prompt rides as `UserSaid' too."
-  (agent-repl-test-verbs--with nil
-    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
-                            :merge-actions (list :postprocessing-prompt "tidy up"))
-    (let* ((form (plist-get (agent-repl-test-verbs--request :create) :form))
-           (blocks (plist-get (plist-get (plist-get (plist-get (plist-get form :value)
-                                                              :merge-actions)
-                                                    :postprocessing-prompt)
-                                         :content)
-                              :blocks)))
-      (should (equal (plist-get (plist-get (car blocks) :value) :text) "tidy up")))))
-
-(ert-deftest agent-repl-verbs-create-standard-without-merge-actions-omits-them ()
-  "No merge actions is the ABSENCE of the message, never an empty one."
-  (agent-repl-test-verbs--with nil
-    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
-    (let ((form (plist-get (agent-repl-test-verbs--request :create) :form)))
-      (should-not (plist-get (plist-get form :value) :merge-actions)))))
-
 (ert-deftest agent-repl-verbs-create-owner-makes-a-child ()
   "An OWNER makes the create a child of it, inside the creation form."
   (agent-repl-test-verbs--with nil
@@ -3953,12 +3917,12 @@ pause sent."
   "A refusal's operation slug is `elisp.verbs.<op>-refused'."
   (let ((formats nil))
     (agent-repl-test-verbs--with
-        '((:merge . (:response (:arm :error
+        '((:finish . (:response (:arm :error
                                 :value (:cause (:arm :already-queued :value nil))))))
       (cl-letf (((symbol-function 'agent-repl--warn)
                  (lambda (_ws fmt &rest _args) (push fmt formats))))
-        (agent-repl-verb-merge "ws-one")))
-    (should (cl-find-if (lambda (fmt) (string-prefix-p "elisp.verbs.merge-refused" fmt))
+        (agent-repl-verb-finish "ws-one")))
+    (should (cl-find-if (lambda (fmt) (string-prefix-p "elisp.verbs.finish-refused" fmt))
                         formats))))
 
 ;;;; ---- Current-perspective target resolution ----
@@ -4063,36 +4027,38 @@ persp-mode perspective such as \"main\" appears in the registry."
                      '(user-error "No agent-repl workspaces registered")))
       (should (null agent-repl-test-verbs--sent)))))
 
-(ert-deftest agent-repl-verbs-merge-command-without-prefix-closes-on-landing ()
-  "`SPC TAB M' with no prefix merges the current workspace and closes it."
+(ert-deftest agent-repl-verbs-finish-command-asks-as-the-user-at-the-back ()
+  "`SPC TAB M\=' finishes the current workspace: the user\='s ask, at the back
+of the queue, naming nothing the repository\='s deploy config decides."
   ;; Arrange
   (agent-repl-test-verbs--with nil
     (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
       ;; Act
       (let ((current-prefix-arg nil))
-        (call-interactively #'agent-repl-merge-workspace))
+        (call-interactively #'agent-repl-finish-workspace))
       ;; Assert
-      (should (equal (plist-get (agent-repl-test-verbs--request :merge) :mode)
-                     '(:arm :one-shot :value (:landing (:arm :own-branch :value nil))))))))
+      (let ((request (agent-repl-test-verbs--request :finish)))
+        (should (equal (plist-get request :requester) '(:arm :user)))
+        (should (equal (plist-get request :placement) '(:arm :back)))))))
 
-(ert-deftest agent-repl-verbs-merge-command-ignores-a-prefix ()
-  "`C-u SPC TAB M' is the same one-shot: a merge that leaves its workspace
-working is an async merge, which Emacs does not offer."
+(ert-deftest agent-repl-verbs-finish-command-ignores-a-prefix ()
+  "`C-u SPC TAB M\=' is the same finish: deploying work while its workspace
+goes on is an async merge, which Emacs does not offer."
   ;; Arrange
   (agent-repl-test-verbs--with nil
     (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
       ;; Act
       (let ((current-prefix-arg '(4)))
-        (call-interactively #'agent-repl-merge-workspace))
+        (call-interactively #'agent-repl-finish-workspace))
       ;; Assert
-      (should (equal (plist-get (agent-repl-test-verbs--request :merge) :mode)
-                     '(:arm :one-shot :value (:landing (:arm :own-branch :value nil))))))))
+      (should (equal (plist-get (agent-repl-test-verbs--request :finish) :placement)
+                     '(:arm :back))))))
 
-(ert-deftest agent-repl-verbs-merge-with-an-empty-registry-refuses ()
-  "And merge, which shares the same current-perspective default."
+(ert-deftest agent-repl-verbs-finish-with-an-empty-registry-refuses ()
+  "And finish, which shares the same current-perspective default."
   (agent-repl-test-verbs--with nil
     (agent-repl-test-verbs--with-registry nil nil "main"
-      (should (equal (should-error (agent-repl-merge-workspace) :type 'user-error)
+      (should (equal (should-error (agent-repl-finish-workspace) :type 'user-error)
                      '(user-error "No agent-repl workspaces registered")))
       (should (null agent-repl-test-verbs--sent)))))
 

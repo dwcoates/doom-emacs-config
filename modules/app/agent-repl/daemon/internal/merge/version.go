@@ -12,7 +12,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
-// This file is a merge's VERSION INCREMENT
+// This file is a deploy's VERSION INCREMENT
 // (agentrepl.v1.MergeWorkspaceVersionIncrement): the check that a request
 // carries one exactly where it must, and the annotated version tag the
 // landing creates (docs/protobuf-design/merge-version-increment.md).
@@ -25,64 +25,55 @@ import (
 // which creates the tag if it is still missing. A landed merge therefore never
 // stays without the tag it asked for.
 
-// The version refusals' arms (agentrepl.v1.MergeWorkspaceError).
+// The version refusals' arms (agentrepl.v1.FinishWorkspaceError).
 const (
-	// ArmVersionIncrementRequired is an agent's merge onto agent-repl's master
-	// that carries no increment.
+	// ArmVersionIncrementRequired is an agent's deploy onto a versioned
+	// repository's main branch that carries no increment.
 	ArmVersionIncrementRequired = "version_increment_required"
-	// ArmVersionIncrementUnexpected is an increment on a merge that does not
-	// land on agent-repl's master. Its `reason` field names why.
+	// ArmVersionIncrementUnexpected is an increment on a deploy that may not
+	// carry one. Its `reason` field names why.
 	ArmVersionIncrementUnexpected = "version_increment_unexpected"
 )
 
 // The reasons an increment is unexpected, spelled as the
 // agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.reason arms.
 const (
-	reasonForeignRepository = NestedArm("foreign_repository")
-	reasonNotDefaultBranch  = NestedArm("not_default_branch")
-	reasonMergedUpstream    = NestedArm("merged_upstream")
+	reasonUnversionedRepository = NestedArm("unversioned_repository")
+	reasonNotDefaultBranch      = NestedArm("not_default_branch")
 )
 
 // NestedArm is a refusal field naming an arm of a oneof INSIDE the error arm
 // (the unexpected increment's `reason`). The rpc layer sets that arm by name.
 type NestedArm string
 
+// requestDeploy reads where a request's deploy lands and its repository's
+// deploy config, refusing a repository that states no usable deploy. Nothing
+// is recorded before it answers.
+func (o *orchestrator) requestDeploy(ctx context.Context, requester wsm.Workspace, req Request) (deployTarget, error) {
+	target, err := o.requestTarget(ctx, requester, req)
+	if err != nil {
+		return deployTarget{}, err
+	}
+	return o.deployTargetFor(ctx, requester.ID, target)
+}
+
 // checkVersion refuses a request whose increment does not match where it
-// lands: none on an agent's merge onto agent-repl's master, or one on any
-// other merge. The user's own ask (the rpc) may land on master without one.
-// Nothing is recorded before it answers.
-func (o *orchestrator) checkVersion(ctx context.Context, requester wsm.Workspace, req Request) error {
+// lands (merge_version_increment.proto): none on an agent's deploy onto a
+// versioned repository's main branch, or one on any deploy that is not that.
+// The user's own ask may land on main without one.
+func checkVersion(ws ids.WorkspaceID, req Request, d deployTarget) error {
 	version := req.Source.Version
 	if version == nil && req.By == RequestedByUser {
 		return nil
 	}
-	ws := requester.ID
-	if req.Source.Kind == wsm.MergeSourceMergedUpstream {
-		if version != nil {
-			return unexpectedVersion(ws, reasonMergedUpstream, "the branch already merged upstream, so the queue lands nothing to version")
-		}
-		return nil
-	}
-	target, err := o.requestTarget(ctx, requester, req)
-	if err != nil {
-		return err
-	}
-	selfRepo, err := o.deps.Git.SameRepo(ctx, target, o.deps.SelfRepoDir)
-	if err != nil {
-		return fmt.Errorf("merge: deciding whether %s's merge target %s is agent-repl's repository: %w", ws, target, err)
-	}
-	main, err := o.deps.Git.MainWorktree(ctx, target)
-	if err != nil {
-		return fmt.Errorf("merge: resolving the main worktree of %s's merge target %s: %w", ws, target, err)
-	}
-	defaultBranch := sameDir(target, main)
+	versioned := d.localMerge().GetVersionTag() != nil
 	switch {
-	case version == nil && selfRepo && defaultBranch:
-		return refuse(ArmVersionIncrementRequired, ws, "a merge onto agent-repl's master names how it moves the version (minor or patch) and its changelog line")
-	case version != nil && !selfRepo:
-		return unexpectedVersion(ws, reasonForeignRepository, "the merge lands in %s, which is not agent-repl's repository", target)
-	case version != nil && !defaultBranch:
-		return unexpectedVersion(ws, reasonNotDefaultBranch, "the merge lands in the parent workspace's checkout %s, not on the default branch", target)
+	case version == nil && versioned && d.toMain:
+		return refuse(ArmVersionIncrementRequired, ws, "a deploy onto the main branch of a versioned repository names how it moves the version (minor or patch) and its changelog line")
+	case version != nil && !versioned:
+		return unexpectedVersion(ws, reasonUnversionedRepository, "the repository's deploy config %s versions nothing", d.repoRoot)
+	case version != nil && !d.toMain:
+		return unexpectedVersion(ws, reasonNotDefaultBranch, "the deploy lands in the parent workspace's checkout, not on the repository's main branch")
 	}
 	return nil
 }

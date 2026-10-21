@@ -28,7 +28,6 @@ func tabsOfEveryArm() map[protoreflect.Name]*frontendv1.FeedMergeTab {
 var classified = map[protoreflect.Name]bool{
 	"queue":            false,
 	"resolving":        true,
-	"pre_prompt":       true,
 	"rebasing":         false,
 	"rebase_commit":    false,
 	"tests":            false,
@@ -36,7 +35,8 @@ var classified = map[protoreflect.Name]bool{
 	"tests_run_fixing": true,
 	"committing":       false,
 	"updating_main":    false,
-	"post_prompt":      true,
+	"hook_prompt":      true,
+	"hook_script":      false,
 }
 
 func TestAgenticClassifiesEveryArm(t *testing.T) {

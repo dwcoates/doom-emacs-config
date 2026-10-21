@@ -92,7 +92,7 @@ describe("every rpc answers", () => {
       ["closeWorkspace", client.closeWorkspace({ workspace })],
       ["killWorkspace", client.killWorkspace({ workspace })],
       ["nukeWorkspace", client.nukeWorkspace({ workspace })],
-      ["mergeWorkspace", client.mergeWorkspace({ workspace, mode: { case: "oneShot", value: { landing: { case: "ownBranch", value: {} } } } })],
+      ["finishWorkspace", client.finishWorkspace({ workspace })],
       ["restartWorkspace", client.restartWorkspace({ workspace })],
       ["setWorkspacePriority", client.setWorkspacePriority({ workspace })],
       ["createTask", client.createTask({ title: "t" })],

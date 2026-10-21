@@ -101,6 +101,30 @@ describe("drawRemediationHeading", () => {
 });
 
 describe("mergeTabPanel", () => {
+  it("draws a script hook's tab as its own row: the script, its tail and its exit", () => {
+    const row = tabRow("t1", {
+      kind: "hookScript",
+      state: "settled",
+      outcome: "failed",
+      payload: {
+        path: { text: "bin/deploy-landing.sh" },
+        tail: [{ text: "installing" }],
+        exit: { how: { case: "exited", value: { status: 2 } } },
+      },
+    });
+    const panel = mergeTabPanel(tabOf(row), new FakeSubfeed([row]), rc());
+    const host = document.createElement("div");
+    host.append(...panel.nodes);
+    expect(host.querySelector(".merge-hook-script-path")?.textContent).toBe("bin/deploy-landing.sh");
+    expect(host.querySelector(".merge-hook-script-tail")?.textContent).toBe("installing");
+    expect(host.querySelector(".merge-hook-script-exit")?.textContent).toBe("exited 2");
+  });
+
+  it("asks for a script hook's tab to be drawn afresh when its row changed", () => {
+    const panel = mergeTabPanel(tabOf(tabRow("t1", { kind: "hookScript", state: "live" })), new FakeSubfeed(), rc());
+    expect(panel.update(tabOf(tabRow("t1", { kind: "hookScript", state: "live", payload: { tail: [{ text: "more" }] } })))).toBe(false);
+  });
+
   it("leaves a resolved tab standing while its row is unchanged", () => {
     const row = tabRow("t1", { kind: "committing", state: "live" });
     const panel = mergeTabPanel(tabOf(row), new FakeSubfeed([row]), rc());
@@ -115,12 +139,12 @@ describe("mergeTabPanel", () => {
 
   it("asks for an agentic tab carrying a switch to be drawn afresh when its row changed", () => {
     const view = new FakeSubfeed();
-    const panel = mergeTabPanel(tabOf(tabRow("t1", { kind: "prePrompt", state: "live", payload: SWITCH })), view, rc());
-    expect(panel.update(tabOf(tabRow("t1", { kind: "prePrompt", state: "settled", outcome: "succeeded", payload: SWITCH })))).toBe(false);
+    const panel = mergeTabPanel(tabOf(tabRow("t1", { kind: "hookPrompt", state: "live", payload: SWITCH })), view, rc());
+    expect(panel.update(tabOf(tabRow("t1", { kind: "hookPrompt", state: "settled", outcome: "succeeded", payload: SWITCH })))).toBe(false);
   });
 
   it("places an agentic tab's new rows in the container it already has", () => {
-    const tab = tabRow("t1", { kind: "prePrompt", state: "live" });
+    const tab = tabRow("t1", { kind: "hookPrompt", state: "live" });
     const view = new FakeSubfeed([tab, childRow("r1", "t1")]);
     const panel = mergeTabPanel(tabOf(tab), view, rc());
     const container = panel.nodes.find((node) => node.classList.contains("merge-tab-rows"));

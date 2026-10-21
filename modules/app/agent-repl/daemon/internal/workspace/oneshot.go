@@ -19,19 +19,20 @@ const (
 	// BriefAutonomousPreamble is the "do not wait for further instructions"
 	// preamble every one-shot prompt opens with.
 	BriefAutonomousPreamble = "workspace-autonomous-preamble"
-	// BriefOneShotCompletionDirective is the repository's ONE plain-English
-	// statement of what is to be done when the work is done. The daemon
-	// appends it to the commission and performs nothing itself.
+	// BriefOneShotCompletionDirective is the ONE statement, the same for
+	// every repository and read from the daemon's own corpus, of what a
+	// one-shot does when its work is done: say it is finished
+	// (`agent-repld workspace finished`), after which its repository's deploy
+	// config decides everything (agentrepl.v1.FinishWorkspace).
 	BriefOneShotCompletionDirective = "oneshot-completion-directive"
 	// BriefAddSupport is the add-support brief RequestCommandSupport composes.
 	BriefAddSupport = "add-support-slash-command"
 )
 
 // completionDirectiveLead is the LITERAL sentence that introduces the
-// repository's completion directive. It is a constant because the directive is
-// a plain-English file with no placeholders: the daemon supplies the framing
-// and the repository supplies the instruction, and a drifted framing would
-// leave an agent reading policy prose with no idea it is an instruction.
+// completion directive. It is a constant because the directive is a
+// plain-English file with no placeholders, and a drifted framing would leave
+// an agent reading the directive with no idea it is an instruction.
 const completionDirectiveLead = "when you're all done, please do the following postprocessing directive: "
 
 // decorateOneShot composes a one-shot workspace's first message: the
@@ -57,23 +58,23 @@ func (v *verbs) decorateOneShot(raw string, policy prompts.Source) (string, erro
 		return "", fmt.Errorf("splice the %s brief: %w", BriefAutonomousPreamble, err)
 	}
 
-	directive, err := v.completionDirective(policy)
+	directive, err := v.completionDirective()
 	if err != nil {
 		return "", err
 	}
 	return prompts.Wrap(preambleText) + raw + prompts.Wrap("\n"+directive), nil
 }
 
-// completionDirective is the repository's completion directive behind its
-// framing sentence: what a one-shot is told to do when its work is done,
-// whether it was created one or marked one since (SetOneShot).
+// completionDirective is the completion directive behind its framing
+// sentence: what a one-shot is told to do when its work is done, whether it
+// was created one or marked one since (SetOneShot).
 //
-// THE DIRECTIVE IS PLAIN ENGLISH AND SPLICES NOTHING. It declares no
-// placeholders, so the nil value map is what refuses one that declares any:
-// the daemon has nothing to fill a placeholder in a repository's own
-// completion statement from.
-func (v *verbs) completionDirective(policy prompts.Source) (string, error) {
-	directive, err := v.load(policy.Dir, BriefOneShotCompletionDirective)
+// IT IS THE DAEMON'S OWN, never a repository's: every one-shot says it is
+// finished the same way, and what finishing does is its repository's deploy
+// config. THE DIRECTIVE IS PLAIN ENGLISH AND SPLICES NOTHING; the nil value
+// map is what refuses one that declares a placeholder.
+func (v *verbs) completionDirective() (string, error) {
+	directive, err := v.load(v.deps.PromptsDir, BriefOneShotCompletionDirective)
 	if err != nil {
 		return "", fmt.Errorf("read the %s brief: %w", BriefOneShotCompletionDirective, err)
 	}
@@ -90,11 +91,11 @@ func (v *verbs) completionDirective(policy prompts.Source) (string, error) {
 // a wrongly-decorated one-shot needs.
 const opOneShotPolicySource = "daemon.workspace.oneshot_policy_source"
 
-// oneShotPolicyBriefs are the briefs a one-shot's policy MUST hold. Both ride
-// the opening prompt of EVERY one-shot, so the set is fixed: there is no
-// finish to vary it by.
+// oneShotPolicyBriefs are the briefs a one-shot's repository policy MUST hold.
+// The preamble rides the opening prompt of EVERY one-shot; the completion
+// directive is the daemon's own, so a repository states none.
 func oneShotPolicyBriefs() []string {
-	return []string{BriefAutonomousPreamble, BriefOneShotCompletionDirective}
+	return []string{BriefAutonomousPreamble}
 }
 
 // policySourceFor answers where repoDir's one-shot and merge policy is read
