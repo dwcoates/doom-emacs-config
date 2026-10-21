@@ -157,6 +157,8 @@ var migrations = []migration{
 	{To: 64, Name: "standings", Kind: MigrationAdditive, DDL: standingsDDL},
 	{To: 65, Name: "prompt_sent_by", Kind: MigrationAdditive, DDL: sentByDDL},
 	{To: 66, Name: "subsection_slots", Kind: MigrationAdditive, DDL: subsectionSlotsDDL},
+	{To: 67, Name: "deploy_holds", Kind: MigrationAdditive, DDL: deployHoldDDL},
+	{To: 68, Name: "deploy_hooks", Kind: MigrationBreaking, DDL: deployHooksDDL},
 }
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its

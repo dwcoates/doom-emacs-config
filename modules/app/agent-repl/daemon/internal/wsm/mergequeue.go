@@ -131,16 +131,16 @@ func insertRequest(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID,
 	if err != nil {
 		return err
 	}
-	before, err := encodeActions(source.Actions.Before)
+	before, err := encodeHooks(source.Hooks.PreDeploy)
 	if err != nil {
 		return err
 	}
-	after, err := encodeActions(source.Actions.After)
+	after, err := encodeHooks(source.Hooks.PostDeploy)
 	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_actions_before, source_actions_after, source_detach_maker, source_detach_target_maker)
+		`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		key, id, next, int(MergeRequested), nanos(at),
 		int(source.Kind), source.KeepOpen, nullableText(string(source.Workspace)), nullableText(source.Branch), nullableText(string(source.Detach)), source.Front,
@@ -643,7 +643,7 @@ func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEnt
 // mergeQueueColumns are the merge_queue columns every queue read selects, in
 // the order scanMergeQueue scans them: the one list, so a read cannot select
 // columns its scan does not expect.
-const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_actions_before, source_actions_after, source_detach_maker, source_detach_target_maker`
+const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker`
 
 // scanMergeQueue is the one queue-decoding path, so both readers reject an
 // undeclared state identically and number positions the same way. TAIL is the
@@ -703,10 +703,10 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 			return nil, &DecodeError{Table: "merge_queue", Row: row, Field: "version", Err: err}
 		}
 		entry.Source.Version = version
-		if entry.Source.Actions.Before, err = decodeActions("merge_queue", row, "source_actions_before", before); err != nil {
+		if entry.Source.Hooks.PreDeploy, err = decodeHooks("merge_queue", row, "source_pre_deploy_hooks", before); err != nil {
 			return nil, err
 		}
-		if entry.Source.Actions.After, err = decodeActions("merge_queue", row, "source_actions_after", after); err != nil {
+		if entry.Source.Hooks.PostDeploy, err = decodeHooks("merge_queue", row, "source_post_deploy_hooks", after); err != nil {
 			return nil, err
 		}
 		if err := entry.Source.validate(); err != nil {

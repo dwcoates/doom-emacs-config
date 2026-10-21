@@ -8,25 +8,56 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
+
+	"google.golang.org/protobuf/proto"
 )
 
-// someActions is one before and one after prompt, as an async request names them.
-var someActions = MergeActions{Before: []string{"run the linters"}, After: []string{"post the summary"}}
-
-// detachedSource is an async request for branch feature carrying ACTIONS.
-func detachedSource(actions MergeActions) MergeSource {
-	return MergeSource{Kind: MergeSourceBranch, Branch: "feature", Detach: NewDetachedMergeID(), DetachMaker: "maker", DetachName: "sample-merge", Actions: actions}
+// promptHook is a prompt hook of TEXT.
+func promptHook(text string) *repoconfigv1.DeployHook {
+	return &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Prompt{Prompt: &repoconfigv1.DeployHookPrompt{Text: text}}}
 }
 
-func TestAnAsyncRequestKeepsItsMergeActionsInTheQueue(t *testing.T) {
+// scriptHook is a script hook of PATH bounded at SECONDS.
+func scriptHook(path string, seconds uint32) *repoconfigv1.DeployHook {
+	return &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Script{Script: &repoconfigv1.DeployHookScript{Path: path, TimeoutSeconds: seconds}}}
+}
+
+// someHooks is a pre-deploy prompt and a post-deploy script, as an async
+// request names them.
+var someHooks = DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHook("run the linters")}, PostDeploy: []*repoconfigv1.DeployHook{scriptHook("bin/notify.sh", 30)}}
+
+// sameHooks reports whether two DeployHooks hold equal hooks, stage by stage.
+func sameHooks(a, b DeployHooks) bool {
+	same := func(x, y []*repoconfigv1.DeployHook) bool {
+		if len(x) != len(y) {
+			return false
+		}
+		for i := range x {
+			if !proto.Equal(x[i], y[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	return same(a.PreDeploy, b.PreDeploy) && same(a.PostDeploy, b.PostDeploy)
+}
+
+// detachedSource is an async request for branch feature carrying HOOKS.
+func detachedSource(hooks DeployHooks) MergeSource {
+	return MergeSource{Kind: MergeSourceBranch, Branch: "feature", Detach: NewDetachedMergeID(), DetachMaker: "maker", DetachName: "sample-merge", Hooks: hooks}
+}
+
+func TestAnAsyncRequestKeepsItsDeployHooksInTheQueue(t *testing.T) {
 	tests := []struct {
-		name    string
-		actions MergeActions
+		name  string
+		hooks DeployHooks
 	}{
-		{name: "both actions", actions: someActions},
-		{name: "a before action alone", actions: MergeActions{Before: []string{"run the linters"}}},
-		{name: "an after action alone", actions: MergeActions{After: []string{"post the summary"}}},
-		{name: "no action", actions: MergeActions{}},
+		{name: "both stages", hooks: someHooks},
+		{name: "a pre-deploy hook alone", hooks: DeployHooks{PreDeploy: []*repoconfigv1.DeployHook{promptHook("run the linters")}}},
+		{name: "a post-deploy script alone", hooks: DeployHooks{PostDeploy: []*repoconfigv1.DeployHook{scriptHook("bin/notify.sh", 30)}}},
+		{name: "no hook", hooks: DeployHooks{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -36,21 +67,21 @@ func TestAnAsyncRequestKeepsItsMergeActionsInTheQueue(t *testing.T) {
 			repo := RepoKey(t.TempDir())
 
 			// Act
-			err := s.RequestMerge(context.Background(), repo, ws.ID, detachedSource(tt.actions), time.Unix(100, 0))
+			err := s.RequestMerge(context.Background(), repo, ws.ID, detachedSource(tt.hooks), time.Unix(100, 0))
 			queue, readErr := s.MergeQueue(context.Background(), repo)
 
 			// Assert
 			if err != nil || readErr != nil || len(queue) != 1 {
 				t.Fatalf("RequestMerge = %v, MergeQueue = %+v, %v; want one request", err, queue, readErr)
 			}
-			if got := queue[0].Source.Actions; !reflect.DeepEqual(got, tt.actions) {
-				t.Fatalf("Actions = %+v, want %+v", got, tt.actions)
+			if got := queue[0].Source.Hooks; !sameHooks(got, tt.hooks) {
+				t.Fatalf("Hooks = %+v, want %+v", got, tt.hooks)
 			}
 		})
 	}
 }
 
-func TestAnAsyncRequestsMergeActionsSurviveARestartBeforeItsHandOff(t *testing.T) {
+func TestAnAsyncRequestsDeployHooksSurviveARestartBeforeItsHandOff(t *testing.T) {
 	// Arrange
 	path := filepath.Join(t.TempDir(), "wsm.db")
 	first, err := Open(context.Background(), path, WithUnsyncedWrites())
@@ -59,7 +90,7 @@ func TestAnAsyncRequestsMergeActionsSurviveARestartBeforeItsHandOff(t *testing.T
 	}
 	ws := testWorkspace(t, first.(*store))
 	repo := RepoKey(t.TempDir())
-	if err := first.RequestMerge(context.Background(), repo, ws.ID, detachedSource(someActions), time.Unix(100, 0)); err != nil {
+	if err := first.RequestMerge(context.Background(), repo, ws.ID, detachedSource(someHooks), time.Unix(100, 0)); err != nil {
 		t.Fatalf("RequestMerge: %v", err)
 	}
 	if err := first.Close(); err != nil {
@@ -78,38 +109,38 @@ func TestAnAsyncRequestsMergeActionsSurviveARestartBeforeItsHandOff(t *testing.T
 	if err != nil || len(queue) != 1 {
 		t.Fatalf("MergeQueue = %+v, %v; want the one request", queue, err)
 	}
-	if got := queue[0].Source.Actions; !reflect.DeepEqual(got, someActions) {
-		t.Fatalf("Actions after the restart = %+v, want %+v", got, someActions)
+	if got := queue[0].Source.Hooks; !sameHooks(got, someHooks) {
+		t.Fatalf("Hooks after the restart = %+v, want %+v", got, someHooks)
 	}
 }
 
-func TestMergeActionsOnARequestThatRunsInPlaceAreInvalid(t *testing.T) {
+func TestDeployHooksOnARequestThatRunsInPlaceAreInvalid(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 	repo := RepoKey(t.TempDir())
-	source := MergeSource{Kind: MergeSourceOwnBranch, Actions: someActions}
+	source := MergeSource{Kind: MergeSourceOwnBranch, Hooks: someHooks}
 
 	// Act
 	err := s.RequestMerge(context.Background(), repo, ws.ID, source, time.Unix(100, 0))
 	queue, _ := s.MergeQueue(context.Background(), repo)
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "merge actions on the request") {
-		t.Fatalf("RequestMerge = %v, want the in-place request's actions refused", err)
+	if err == nil || !strings.Contains(err.Error(), "deploy hooks on the request") {
+		t.Fatalf("RequestMerge = %v, want the in-place request's hooks refused", err)
 	}
 	if len(queue) != 0 {
 		t.Fatalf("MergeQueue = %+v, want nothing recorded", queue)
 	}
 }
 
-func TestAStoredMergeActionListThatIsNotAListIsRefused(t *testing.T) {
+func TestAStoredDeployHookListThatIsNotAListIsRefused(t *testing.T) {
 	tests := []struct {
 		name   string
 		column string
 	}{
-		{name: "the before actions", column: "source_actions_before"},
-		{name: "the after actions", column: "source_actions_after"},
+		{name: "the pre-deploy hooks", column: "source_pre_deploy_hooks"},
+		{name: "the post-deploy hooks", column: "source_post_deploy_hooks"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -117,7 +148,7 @@ func TestAStoredMergeActionListThatIsNotAListIsRefused(t *testing.T) {
 			s, _ := testStore(t)
 			ws := testWorkspace(t, s)
 			repo := RepoKey(t.TempDir())
-			if err := s.RequestMerge(context.Background(), repo, ws.ID, detachedSource(someActions), time.Unix(100, 0)); err != nil {
+			if err := s.RequestMerge(context.Background(), repo, ws.ID, detachedSource(someHooks), time.Unix(100, 0)); err != nil {
 				t.Fatalf("RequestMerge: %v", err)
 			}
 			corrupt(t, s, `UPDATE merge_queue SET `+tt.column+` = 'not json' WHERE workspace_id = ?`, ws.ID)
@@ -134,12 +165,12 @@ func TestAStoredMergeActionListThatIsNotAListIsRefused(t *testing.T) {
 	}
 }
 
-func TestHandOffDetachedMergeLeavesTheMergeWorkspacesRequestWithoutActions(t *testing.T) {
+func TestHandOffDetachedMergeLeavesTheMergeWorkspacesRequestWithoutHooks(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	requester := testWorkspace(t, s)
 	repo := RepoKey(t.TempDir())
-	source := detachedSource(someActions)
+	source := detachedSource(someHooks)
 	if err := s.RequestMerge(context.Background(), repo, requester.ID, source, time.Unix(100, 0)); err != nil {
 		t.Fatalf("RequestMerge: %v", err)
 	}
@@ -153,7 +184,7 @@ func TestHandOffDetachedMergeLeavesTheMergeWorkspacesRequestWithoutActions(t *te
 	if err != nil || readErr != nil || len(queue) != 1 || queue[0].Workspace != forked.ID {
 		t.Fatalf("HandOffDetachedMerge = %v, MergeQueue = %+v, %v; want the merge workspace's entry", err, queue, readErr)
 	}
-	if got := queue[0].Source.Actions; !reflect.DeepEqual(got, MergeActions{}) {
+	if got := queue[0].Source.Hooks; !got.Empty() {
 		t.Fatalf("the merge workspace's request carries %+v, want none: its creation job holds them", got)
 	}
 }
@@ -164,7 +195,7 @@ func TestAStoredMergeOriginAnswersNoLandingOfItsOwn(t *testing.T) {
 	requester := testWorkspace(t, s)
 	dir := t.TempDir()
 	origin := MergeOrigin{Requester: requester.ID, Request: NewDetachedMergeID(), ForkHead: "f00d",
-		TargetDir: "/repo/main", ParentBranch: "master", Actions: someActions}
+		TargetDir: "/repo/main", ParentBranch: "master", Hooks: someHooks}
 
 	// Act
 	ws, _, err := s.RegisterWorkspace(context.Background(), dir, RegisterFacts{
