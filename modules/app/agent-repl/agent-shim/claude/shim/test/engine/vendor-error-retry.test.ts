@@ -1010,6 +1010,54 @@ describe("the stated schedule", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The API reachable again
+// ---------------------------------------------------------------------------
+
+describe("networkRecovered", () => {
+  it("makes a vendor-error retry waiting out its interval at once", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+
+    // Act
+    h.retry.networkRecovered();
+    await settle();
+
+    // Assert
+    expect([h.prompts.length, h.scheduler.pendingTimeout()]).toEqual([1, undefined]);
+  });
+
+  it("leaves a usage-limit retry at its window's reset", async () => {
+    // Arrange
+    const h = harness();
+    h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } }) };
+    h.retry.turnEnded("turn-1", BLOCKING_LIMIT);
+    await settle();
+
+    // Act
+    h.retry.networkRecovered();
+    await settle();
+
+    // Assert
+    expect([h.prompts.length, h.scheduler.pendingTimeout()?.delayMs]).toEqual([0, 76 * MINUTE]);
+  });
+
+  it("makes nothing when no retry is pending", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    await fire(h);
+
+    // Act
+    h.retry.networkRecovered();
+    await settle();
+
+    // Assert
+    expect(h.prompts).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The retry asked for now
 // ---------------------------------------------------------------------------
 

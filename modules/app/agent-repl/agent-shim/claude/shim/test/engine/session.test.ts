@@ -16690,6 +16690,24 @@ describe("the vendor-error retry", () => {
     expect(submitted.map((record) => record.context["prompt"])).toEqual([VENDOR_ERROR_RETRY_SOURCE.label]);
   });
 
+  it("makes the scheduled retry at once when the probe finds the API reachable again", async () => {
+    // Arrange: the turn failed below an answer, standing the network fault
+    // and its probe loop, and the retry waits out its interval.
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+    await failedTurn(h, "turn-1", [], OVERLOADED);
+    await h.engine.onSdkMessage(errorResultMessage({ errors: ["TypeError: fetch failed"] }));
+    expect(h.retryScheduler.pendingTimeout()?.delayMs).toBe(VENDOR_ERROR_RETRY_INTERVAL_MS);
+
+    // Act: the API answers the loop's probe.
+    h.networkScheduler.fire(0);
+    await settledUntil(() => delivered.some(isVendorErrorRetryPrompt));
+
+    // Assert
+    expect([delivered.filter(isVendorErrorRetryPrompt).length, h.retryScheduler.pendingTimeout()]).toEqual([1, undefined]);
+  });
+
   it("yields to a prompt submitted before the retry is due", async () => {
     // Arrange
     const h = harness();
