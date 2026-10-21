@@ -725,6 +725,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	// daemon reads comes out of this test's fixture file and the real binary is
 	// never reached.
 	d.Git = World(t)
+	d.Git.tagPinnedCheckout(PinnedCheckout(t))
 	InstallFakeGit(t, fakeBin)
 
 	multiRoot := opts.MultiRepoRoot

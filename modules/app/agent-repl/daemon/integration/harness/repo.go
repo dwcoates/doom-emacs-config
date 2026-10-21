@@ -123,6 +123,28 @@ func addFakeRepo(s *fakegit.State, dir, subject string, paths []string) *fakegit
 	return repo
 }
 
+// PinnedVersion is the version tag the pinned checkout's head carries, so
+// the daemon resolves the version it deploys from as it does from a real
+// checkout (internal/deployedversion).
+const PinnedVersion = "0.1.0"
+
+// tagPinnedCheckout states dir, the pinned checkout the daemon deploys from,
+// as a fake repository whose head carries PinnedVersion. It touches only the
+// fixture file, never dir, which every test of the process shares; the
+// daemons of one test share its world, so the first one records it.
+func (w *GitWorld) tagPinnedCheckout(dir string) {
+	w.t.Helper()
+	w.edit(func(s *fakegit.State) {
+		if s.Repo(dir) != nil {
+			return
+		}
+		repo := addFakeRepo(s, dir, "the pinned checkout", nil)
+		repo.Tags = map[string]*fakegit.Tag{
+			PinnedVersion: {Commit: repo.Worktree(dir).Head, Message: "seed " + PinnedVersion},
+		}
+	})
+}
+
 // PolicyDir is the repository's own `.agent-repl/prompts`, where it states its
 // one-shot and merge policy.
 func (r *Repo) PolicyDir() string {
