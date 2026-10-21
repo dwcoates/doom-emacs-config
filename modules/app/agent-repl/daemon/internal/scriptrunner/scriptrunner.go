@@ -135,6 +135,22 @@ type Run struct {
 	CPU time.Duration
 	// Wall is how long the run took, spawn to exit.
 	Wall time.Duration
+	// TimedOut reports that the run outlived Options.Timeout and its process
+	// group was killed: a classified answer, like a non-zero exit, with
+	// ExitCode -1 and a nil error.
+	TimedOut bool
+}
+
+// Options are what a caller may set beyond the script and its directory.
+type Options struct {
+	// Env is added to the daemon's own environment (scrubbed of every
+	// repository-selecting git variable), each entry "KEY=value"; a key here
+	// overrides the inherited one.
+	Env []string
+	// Timeout bounds the run. Zero is no bound of the runner's own. A run that
+	// outlives it is killed and answered as TimedOut, never as an error: the
+	// caller set the bound, so reaching it is an outcome the caller judges.
+	Timeout time.Duration
 }
 
 // Cores is the run's average processor use, in cores: its CPU time over its
@@ -150,6 +166,12 @@ func (r Run) Cores() float64 {
 // and exit code: what a caller that schedules runs by the processor they take
 // learns that cost from.
 func (r *Runner) RunLinesMeasured(ctx context.Context, dir string, argv []string, onLine func(string)) (Run, error) {
+	return r.RunLinesWith(ctx, dir, argv, Options{}, onLine)
+}
+
+// RunLinesWith is RunLinesMeasured with Options: an environment added to the
+// script's, and a timeout the runner owns.
+func (r *Runner) RunLinesWith(ctx context.Context, dir string, argv []string, opts Options, onLine func(string)) (Run, error) {
 	if len(argv) == 0 {
 		err := fmt.Errorf("scriptrunner: argv is empty")
 		r.log.Error("daemon.scriptrunner.run", "refused an empty argv", dlog.Context{"dir": dir})
@@ -161,6 +183,12 @@ func (r *Runner) RunLinesMeasured(ctx context.Context, dir string, argv []string
 		return Run{}, err
 	}
 
+	caller := ctx
+	if opts.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+		defer cancel()
+	}
 	cmd := childproc.CommandContext(ctx, dir, argv[0], argv[1:]...)
 	// A CANCELLED RUN TAKES ITS CHILDREN WITH IT. The script runs in its own
 	// process group and the context's end kills the whole group: killing the
@@ -171,7 +199,7 @@ func (r *Runner) RunLinesMeasured(ctx context.Context, dir string, argv []string
 	// scripts that had finished and answered.)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
-	cmd.Env = cleanEnv(os.Environ())
+	cmd.Env = append(cleanEnv(os.Environ()), opts.Env...)
 	// stdout and stderr are combined, in order, into one buffer: a caller
 	// painting a test gate's output or a deploy step's log wants what a
 	// terminal would have shown, not two streams it must interleave itself.
@@ -194,6 +222,16 @@ func (r *Runner) RunLinesMeasured(ctx context.Context, dir string, argv []string
 	// that ran and failed with code -1; it is the context ending, and is
 	// classified as that.
 	var exitErr *exec.ExitError
+	// THE RUNNER'S OWN BOUND WAS REACHED: the caller's context still stands,
+	// so it was the timeout the caller set, an outcome rather than an error.
+	if opts.Timeout > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) && caller.Err() == nil {
+		r.log.Debug("daemon.scriptrunner.run", "script ran past its timeout and was killed; its caller judges the timeout", dlog.Context{
+			"script": argv[0], "dir": dir, "timeout_ms": opts.Timeout.Milliseconds(),
+		})
+		measured.ExitCode = -1
+		measured.TimedOut = true
+		return measured, nil
+	}
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == -1 && ctx.Err() != nil {
 		err = fmt.Errorf("%w (%v)", ctx.Err(), err)
 	}
