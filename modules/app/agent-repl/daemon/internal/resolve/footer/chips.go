@@ -29,6 +29,11 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	r.mutate(ws, "daemon.footer.on_activity", "the footer took an activity frame",
 		dlog.Context{"arm": arm, "activity_id": unit}, func(s *wsState) {
 			s.sawActivity = true
+			// ANY AGENT'S FRAME IS THE VENDOR ANSWERING: a step that read
+			// `waiting` reads its own again, and the silence counts afresh.
+			if s.turn != nil {
+				r.heardFromVendor(ws, s)
+			}
 			// FILED BEFORE THE USAGE IS FOLDED IN: the ledger needs to know
 			// whether THIS frame carried usage to decide which API response
 			// the unit belongs to, and folding first would tell it nothing new.

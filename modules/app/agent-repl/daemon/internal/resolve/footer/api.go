@@ -507,6 +507,7 @@ type Option func(*options)
 type options struct {
 	clock           Clock
 	dwell           time.Duration
+	vendorSilence   time.Duration
 	alarmTokens     uint64
 	rateNewsworth   float64
 	transientWindow time.Duration
@@ -553,6 +554,10 @@ func WithClock(c Clock) Option { return func(o *options) { o.clock = c } }
 // `loading`) stands before the R1 successor push retires it.
 func WithMomentaryDwell(d time.Duration) Option { return func(o *options) { o.dwell = d } }
 
+// WithVendorSilence sets how long a turn hears nothing from the vendor before
+// its `thinking` step reads `waiting`.
+func WithVendorSilence(d time.Duration) Option { return func(o *options) { o.vendorSilence = d } }
+
 // WithTransientWindow sets how long a transient line is drawn: its expiry is
 // the event's instant plus this window. The daemon only STAMPS the expiry; the
 // client's clock retires the line, and no daemon timer runs.
@@ -572,6 +577,11 @@ func WithRateLimitNewsworthyThreshold(f float64) Option {
 const (
 	// DefaultMomentaryDwell is how long `interrupted` and `loading` stand.
 	DefaultMomentaryDwell = 1500 * time.Millisecond
+	// DefaultVendorSilence is how long a turn hears nothing from the vendor
+	// before its `thinking` step reads `waiting` (owner ruling, 2026-10-21:
+	// "when this exceeds, say, 45 seconds without an update from the
+	// vendor").
+	DefaultVendorSilence = 45 * time.Second
 	// DefaultTransientWindow is how long a transient line is drawn before the
 	// enduring line beneath it shows again (owner ruling, 2026-09-28: "the
 	// window starts at 10 s").

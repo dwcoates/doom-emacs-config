@@ -58,6 +58,7 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 	o := options{
 		clock:           SystemClock{},
 		dwell:           DefaultMomentaryDwell,
+		vendorSilence:   DefaultVendorSilence,
 		alarmTokens:     DefaultTokenAlarmThreshold,
 		rateNewsworth:   DefaultRateLimitNewsworthyThreshold,
 		transientWindow: DefaultTransientWindow,
@@ -629,7 +630,7 @@ func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 					dlog.Context{"turn_id": string(turn), "saw_activity": s.sawActivity})
 				return
 			}
-			r.applyTurnStarted(s, &TurnStarted{At: r.opts.clock.Now(), Act: ActPrompt})
+			r.applyTurnStarted(ws, s, &TurnStarted{At: r.opts.clock.Now(), Act: ActPrompt})
 		})
 }
 
@@ -639,7 +640,7 @@ func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *TurnStarted) {
 	r.mutate(ws, "daemon.footer.set_turn", "the footer took the accepted turn",
 		dlog.Context{"in_flight": turn != nil}, func(s *wsState) {
-			r.applyTurnStarted(s, turn)
+			r.applyTurnStarted(ws, s, turn)
 			if turn != nil {
 				r.endNotification(ws, s, "daemon.footer.set_turn")
 			}
@@ -694,7 +695,7 @@ func (r *resolver) OnTurnRunningAtAttach(ws ids.WorkspaceID, turn ids.TurnID, st
 			if startedAt != nil {
 				at = *startedAt
 			}
-			r.applyTurnStarted(s, &TurnStarted{At: at, Act: ActPrompt})
+			r.applyTurnStarted(ws, s, &TurnStarted{At: at, Act: ActPrompt})
 			s.sawActivity = true
 		})
 }
@@ -716,11 +717,12 @@ func (s *wsState) endTurn(at time.Time) {
 	s.turn = nil
 }
 
-func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
+func (r *resolver) applyTurnStarted(ws ids.WorkspaceID, s *wsState, turn *TurnStarted) {
 	s.turn = turn
 	if turn == nil {
 		return
 	}
+	r.heardFromVendor(ws, s)
 	s.turnEverRan = true
 	// A NEW TURN ENDS THE LAST ONE'S CLOCK, as its reset ends the last one's
 	// tokens figure.
@@ -930,6 +932,41 @@ func (r *resolver) SetInterrupting(ws ids.WorkspaceID, on bool) {
 			}
 			s.interrupting = on
 		})
+}
+
+// ---- the vendor's silence ---------------------------------------------------
+
+// heardFromVendor records that the vendor was last heard from now (a turn
+// opened, or any agent's activity frame landed) and arms the one timer that
+// republishes the strip once the vendor-silence threshold passes with nothing
+// more, when the `thinking` step reads `waiting` (vendorSilent). Nothing on
+// the wire ticks: the timer's only effect is one more whole-view publication.
+func (r *resolver) heardFromVendor(ws ids.WorkspaceID, s *wsState) {
+	s.heardAt = r.opts.clock.Now()
+	if s.silence != nil {
+		s.silence.Stop()
+	}
+	s.silence = r.opts.clock.AfterFunc(r.opts.vendorSilence, func() { r.vendorSilenceElapsed(ws) })
+}
+
+// vendorSilenceElapsed republishes the strip once the vendor has been silent
+// past the threshold, and records the step turning to `waiting`.
+func (r *resolver) vendorSilenceElapsed(ws ids.WorkspaceID) {
+	r.mutate(ws, "daemon.footer.vendor_silence",
+		"the vendor-silence threshold passed; the footer republished its working step",
+		nil, func(s *wsState) {
+			s.silence = nil
+			if s.turn != nil && r.vendorSilent(s) {
+				r.logOf(ws, s).Info("daemon.footer.vendor_silence",
+					"nothing has come back from the vendor past the silence threshold; the thinking step reads waiting",
+					dlog.Context{"heard_at": s.heardAt, "silence_ms": r.opts.vendorSilence.Milliseconds()})
+			}
+		})
+}
+
+// vendorSilent reports whether the vendor has been silent past the threshold.
+func (r *resolver) vendorSilent(s *wsState) bool {
+	return !r.opts.clock.Now().Before(s.heardAt.Add(r.opts.vendorSilence))
 }
 
 // ---- the R1 dwell ---------------------------------------------------------
