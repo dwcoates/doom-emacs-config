@@ -601,10 +601,12 @@ ENV PATH=/sandbox/emacs.d/bin:${PATH}
 
 # --- the module's own packages.el, for the build-time `doom sync` ----------
 #
-# `doom sync` must resolve `:app agent-repl`, so the module's three
-# loader-path files are COPIED in at build time. At RUN time the entrypoint
-# replaces this directory with the real one from the mounted repo, so tests
-# always exercise the checked-out source, never this snapshot.
+# `doom sync` must resolve `:app agent-repl` and read its packages.el, so that
+# one file is COPIED in at build time, and nothing else of the module: any
+# other file here would rebuild the sync and every layer after it on an edit
+# no container ever sees. At RUN time a tmpfs covers /sandbox/doom/modules and
+# the entrypoint links the checkout's own module into it, so tests always
+# exercise the checked-out source, never this snapshot.
 COPY --chown=sandbox:sandbox module-loader-files/ /sandbox/doom/modules/app/agent-repl/
 
 # --- doom sync at IMAGE BUILD time, so no test ever pays it ----------------

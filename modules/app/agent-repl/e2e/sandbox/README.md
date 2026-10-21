@@ -347,7 +347,7 @@ Mounted / materialized at **run** time:
   cannot be *wrong*, only useless: the cache is content-addressed, so an entry
   compiled from different bytes is simply not found;
 - the Doom module symlink pointing `:app agent-repl` at the checked-out
-  source, replacing the build-time snapshot of the loader files.
+  source, replacing the build-time snapshot of `packages.el`.
 
 ### Nothing writes inside `node_modules`
 
@@ -628,6 +628,6 @@ Verified on the authoring machine:
 - `preflight.sh` produces the exit-`11` message quoted above against the real
   host state.
 - `stage_context` assembles the build context correctly from the live
-  checkout: three loader files, 97 `lisp/*.el` sources, both npm lockfile
+  checkout: the module's `packages.el` (and nothing else of the module), both npm lockfile
   pairs, and all 7 `go.mod` (+ `go.sum`) manifests at their own relative
   paths.

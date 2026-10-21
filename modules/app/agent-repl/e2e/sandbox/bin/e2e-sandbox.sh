@@ -64,17 +64,16 @@ stage_context() {
   cp "$here/entrypoint.sh" "$ctx/bin/"
   cp "$sandbox_dir/doom/"*.el "$ctx/doom/"
 
-  # The three files Doom's module loader resolves by exact path.
+  # ONLY packages.el, the one module file the build-time `doom sync` reads.
+  # Nothing else of the module may enter the context: the `doom sync --aot`
+  # layer is keyed by these bytes, and every layer after it (the node trees,
+  # the Go caches) is rebuilt whenever it is. Staging config.el, doctor.el and
+  # lisp/*.el here rebuilt all of that on every elisp edit, for files no
+  # container ever reads -- a run mounts a tmpfs over /sandbox/doom/modules and
+  # links the checkout's own module into it. packages.el is also a sandbox
+  # stamp input, so this layer changes exactly when the image's tag does.
   mkdir -p "$ctx/module-loader-files"
-  local f
-  for f in config.el packages.el doctor.el; do
-    cp "$repo_root/$MODULE_REL/$f" "$ctx/module-loader-files/"
-  done
-  # config.el `load!`s lisp/*, and doctor.el loads three of them; a bare
-  # `doom sync` only reads packages.el, but `doom doctor` and any elisp load
-  # need the sources, so stage them too.
-  mkdir -p "$ctx/module-loader-files/lisp"
-  cp "$repo_root/$MODULE_REL/lisp/"*.el "$ctx/module-loader-files/lisp/"
+  cp "$repo_root/$MODULE_REL/packages.el" "$ctx/module-loader-files/"
 
   # npm lockfiles, for the offline cache prime.
   mkdir -p "$ctx/npm-lockfiles/shim" "$ctx/npm-lockfiles/webapp"
