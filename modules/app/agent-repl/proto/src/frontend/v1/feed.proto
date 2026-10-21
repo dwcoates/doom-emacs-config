@@ -1633,6 +1633,9 @@ message FeedTurnEndedErrored {
     // daemon and never respelled from a producer's terminal. DISTINCT from
     // query_died: that is the query dying inside a live agent process.
     FeedTurnErrorAgentProcessDied agent_process_died = 24;
+    // The connection to the API failed below any answer
+    // (conversation.v1.ApiUnreachable).
+    FeedTurnErrorUnreachable unreachable = 26;
   }
   // WHAT THE FEED DRAWS for this ending: the OUTCOME MARKER (owner ruling,
   // 2026-10-06), placed where the turn ended, in place of the old red-bordered
@@ -1688,6 +1691,11 @@ message FeedTurnErrorInvalidRequest {}
 message FeedTurnErrorRequestTooLarge {}
 message FeedTurnErrorNotFound {}
 message FeedTurnErrorInternal {}
+// The connection to the API failed below any answer.
+message FeedTurnErrorUnreachable {
+  // The socket error that failed it (`ECONNRESET`), empty when none was named.
+  string code = 1;
+}
 // The unmodeled class, kept by name so it is never silently mishandled.
 message FeedTurnErrorVendorUnmodeled {
   // The vendor's type name, drawn verbatim.

@@ -193,6 +193,7 @@ type ApiRequestFailed struct {
 	//	*ApiRequestFailed_OauthOrgNotAllowed
 	//	*ApiRequestFailed_MaxOutputTokens
 	//	*ApiRequestFailed_Unmodeled
+	//	*ApiRequestFailed_Unreachable
 	Kind isApiRequestFailed_Kind `protobuf_oneof:"kind"`
 	// THE VENDOR'S RETRY SCHEDULE, when it will retry this request: which
 	// attempt failed, how many retries it allows, and when it said the next
@@ -357,6 +358,15 @@ func (x *ApiRequestFailed) GetUnmodeled() *ApiUnmodeledError {
 	return nil
 }
 
+func (x *ApiRequestFailed) GetUnreachable() *ApiUnreachable {
+	if x != nil {
+		if x, ok := x.Kind.(*ApiRequestFailed_Unreachable); ok {
+			return x.Unreachable
+		}
+	}
+	return nil
+}
+
 func (x *ApiRequestFailed) GetRetry() *ApiRetry {
 	if x != nil {
 		return x.Retry
@@ -434,6 +444,19 @@ type ApiRequestFailed_Unmodeled struct {
 	Unmodeled *ApiUnmodeledError `protobuf:"bytes,10,opt,name=unmodeled,proto3,oneof"`
 }
 
+type ApiRequestFailed_Unreachable struct {
+	// THE REQUEST GOT NO ANSWER: the connection to the API failed below any
+	// HTTP status -- DNS, a refused, reset or timed-out connection. THE ONE
+	// ARM THE VENDOR DOES NOT NAME: it files these under `server_error` or
+	// states no class, which read as the API's own internal error
+	// (2026-10-21: "Connection dropped (ECONNRESET)" was drawn "the vendor
+	// API hit its own internal error"). The producer recognizes it by the
+	// connection's own code or words, with the same classifier that stands
+	// the session's network fault, so the two never disagree. A failure that
+	// carries an HTTP status is never this arm: the API answered.
+	Unreachable *ApiUnreachable `protobuf:"bytes,15,opt,name=unreachable,proto3,oneof"`
+}
+
 func (*ApiRequestFailed_RateLimited) isApiRequestFailed_Kind() {}
 
 func (*ApiRequestFailed_Overloaded) isApiRequestFailed_Kind() {}
@@ -457,6 +480,8 @@ func (*ApiRequestFailed_OauthOrgNotAllowed) isApiRequestFailed_Kind() {}
 func (*ApiRequestFailed_MaxOutputTokens) isApiRequestFailed_Kind() {}
 
 func (*ApiRequestFailed_Unmodeled) isApiRequestFailed_Kind() {}
+
+func (*ApiRequestFailed_Unreachable) isApiRequestFailed_Kind() {}
 
 // The vendor's schedule for retrying a failed request.
 type ApiRetry struct {
@@ -950,6 +975,53 @@ func (*ApiMaxOutputTokens) Descriptor() ([]byte, []int) {
 	return file_conversation_v1_api_proto_rawDescGZIP(), []int{12}
 }
 
+// The connection to the API failed below any answer.
+type ApiUnreachable struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The socket error that failed it (`ECONNRESET`, `ENOTFOUND`), when one was
+	// named; empty when only the words said the API could not be reached.
+	Code          string `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApiUnreachable) Reset() {
+	*x = ApiUnreachable{}
+	mi := &file_conversation_v1_api_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApiUnreachable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApiUnreachable) ProtoMessage() {}
+
+func (x *ApiUnreachable) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_api_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApiUnreachable.ProtoReflect.Descriptor instead.
+func (*ApiUnreachable) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ApiUnreachable) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
 // An error type this schema does not model.
 type ApiUnmodeledError struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -961,7 +1033,7 @@ type ApiUnmodeledError struct {
 
 func (x *ApiUnmodeledError) Reset() {
 	*x = ApiUnmodeledError{}
-	mi := &file_conversation_v1_api_proto_msgTypes[13]
+	mi := &file_conversation_v1_api_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -973,7 +1045,7 @@ func (x *ApiUnmodeledError) String() string {
 func (*ApiUnmodeledError) ProtoMessage() {}
 
 func (x *ApiUnmodeledError) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[13]
+	mi := &file_conversation_v1_api_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -986,7 +1058,7 @@ func (x *ApiUnmodeledError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApiUnmodeledError.ProtoReflect.Descriptor instead.
 func (*ApiUnmodeledError) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{13}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ApiUnmodeledError) GetType() string {
@@ -1017,7 +1089,7 @@ type AgentModel struct {
 
 func (x *AgentModel) Reset() {
 	*x = AgentModel{}
-	mi := &file_conversation_v1_api_proto_msgTypes[14]
+	mi := &file_conversation_v1_api_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1029,7 +1101,7 @@ func (x *AgentModel) String() string {
 func (*AgentModel) ProtoMessage() {}
 
 func (x *AgentModel) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[14]
+	mi := &file_conversation_v1_api_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1042,7 +1114,7 @@ func (x *AgentModel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentModel.ProtoReflect.Descriptor instead.
 func (*AgentModel) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{14}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *AgentModel) GetName() string {
@@ -1078,7 +1150,7 @@ type ModelOption struct {
 
 func (x *ModelOption) Reset() {
 	*x = ModelOption{}
-	mi := &file_conversation_v1_api_proto_msgTypes[15]
+	mi := &file_conversation_v1_api_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1090,7 +1162,7 @@ func (x *ModelOption) String() string {
 func (*ModelOption) ProtoMessage() {}
 
 func (x *ModelOption) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[15]
+	mi := &file_conversation_v1_api_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1103,7 +1175,7 @@ func (x *ModelOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelOption.ProtoReflect.Descriptor instead.
 func (*ModelOption) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{15}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ModelOption) GetModel() *AgentModel {
@@ -1163,7 +1235,7 @@ type ModelCapabilities struct {
 
 func (x *ModelCapabilities) Reset() {
 	*x = ModelCapabilities{}
-	mi := &file_conversation_v1_api_proto_msgTypes[16]
+	mi := &file_conversation_v1_api_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1175,7 +1247,7 @@ func (x *ModelCapabilities) String() string {
 func (*ModelCapabilities) ProtoMessage() {}
 
 func (x *ModelCapabilities) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[16]
+	mi := &file_conversation_v1_api_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1188,7 +1260,7 @@ func (x *ModelCapabilities) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCapabilities.ProtoReflect.Descriptor instead.
 func (*ModelCapabilities) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{16}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ModelCapabilities) GetResolvedModel() *AgentModel {
@@ -1272,7 +1344,7 @@ type ModelEffortUnsupported struct {
 
 func (x *ModelEffortUnsupported) Reset() {
 	*x = ModelEffortUnsupported{}
-	mi := &file_conversation_v1_api_proto_msgTypes[17]
+	mi := &file_conversation_v1_api_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1284,7 +1356,7 @@ func (x *ModelEffortUnsupported) String() string {
 func (*ModelEffortUnsupported) ProtoMessage() {}
 
 func (x *ModelEffortUnsupported) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[17]
+	mi := &file_conversation_v1_api_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1297,7 +1369,7 @@ func (x *ModelEffortUnsupported) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelEffortUnsupported.ProtoReflect.Descriptor instead.
 func (*ModelEffortUnsupported) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{17}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{18}
 }
 
 // The model takes a reasoning-effort level.
@@ -1312,7 +1384,7 @@ type ModelEffortSupported struct {
 
 func (x *ModelEffortSupported) Reset() {
 	*x = ModelEffortSupported{}
-	mi := &file_conversation_v1_api_proto_msgTypes[18]
+	mi := &file_conversation_v1_api_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1324,7 +1396,7 @@ func (x *ModelEffortSupported) String() string {
 func (*ModelEffortSupported) ProtoMessage() {}
 
 func (x *ModelEffortSupported) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[18]
+	mi := &file_conversation_v1_api_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1337,7 +1409,7 @@ func (x *ModelEffortSupported) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelEffortSupported.ProtoReflect.Descriptor instead.
 func (*ModelEffortSupported) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{18}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ModelEffortSupported) GetLevels() []AgentEffortLevel {
@@ -1406,7 +1478,7 @@ type TokenUsage struct {
 
 func (x *TokenUsage) Reset() {
 	*x = TokenUsage{}
-	mi := &file_conversation_v1_api_proto_msgTypes[19]
+	mi := &file_conversation_v1_api_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1418,7 +1490,7 @@ func (x *TokenUsage) String() string {
 func (*TokenUsage) ProtoMessage() {}
 
 func (x *TokenUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[19]
+	mi := &file_conversation_v1_api_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1431,7 +1503,7 @@ func (x *TokenUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenUsage.ProtoReflect.Descriptor instead.
 func (*TokenUsage) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{19}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *TokenUsage) GetInputHits() *TokenCacheHits {
@@ -1475,7 +1547,7 @@ type TokenCacheHits struct {
 
 func (x *TokenCacheHits) Reset() {
 	*x = TokenCacheHits{}
-	mi := &file_conversation_v1_api_proto_msgTypes[20]
+	mi := &file_conversation_v1_api_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1487,7 +1559,7 @@ func (x *TokenCacheHits) String() string {
 func (*TokenCacheHits) ProtoMessage() {}
 
 func (x *TokenCacheHits) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[20]
+	mi := &file_conversation_v1_api_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1500,7 +1572,7 @@ func (x *TokenCacheHits) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenCacheHits.ProtoReflect.Descriptor instead.
 func (*TokenCacheHits) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{20}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *TokenCacheHits) GetRead() uint64 {
@@ -1528,7 +1600,7 @@ type TokenCacheMisses struct {
 
 func (x *TokenCacheMisses) Reset() {
 	*x = TokenCacheMisses{}
-	mi := &file_conversation_v1_api_proto_msgTypes[21]
+	mi := &file_conversation_v1_api_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1540,7 +1612,7 @@ func (x *TokenCacheMisses) String() string {
 func (*TokenCacheMisses) ProtoMessage() {}
 
 func (x *TokenCacheMisses) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[21]
+	mi := &file_conversation_v1_api_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1553,7 +1625,7 @@ func (x *TokenCacheMisses) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenCacheMisses.ProtoReflect.Descriptor instead.
 func (*TokenCacheMisses) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{21}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *TokenCacheMisses) GetWritten() uint64 {
@@ -1591,7 +1663,7 @@ var File_conversation_v1_api_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_api_proto_rawDesc = "" +
 	"\n" +
-	"\x19conversation/v1/api.proto\x12\x0fconversation.v1\x1a google/protobuf/descriptor.proto\"\x8a\b\n" +
+	"\x19conversation/v1/api.proto\x12\x0fconversation.v1\x1a google/protobuf/descriptor.proto\"\xcf\b\n" +
 	"\x10ApiRequestFailed\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12D\n" +
 	"\frate_limited\x18\x02 \x01(\v2\x1f.conversation.v1.ApiRateLimitedH\x00R\vrateLimited\x12@\n" +
@@ -1608,7 +1680,8 @@ const file_conversation_v1_api_proto_rawDesc = "" +
 	"\x15oauth_org_not_allowed\x18\f \x01(\v2&.conversation.v1.ApiOauthOrgNotAllowedH\x00R\x12oauthOrgNotAllowed\x12Q\n" +
 	"\x11max_output_tokens\x18\r \x01(\v2#.conversation.v1.ApiMaxOutputTokensH\x00R\x0fmaxOutputTokens\x12B\n" +
 	"\tunmodeled\x18\n" +
-	" \x01(\v2\".conversation.v1.ApiUnmodeledErrorH\x00R\tunmodeled\x124\n" +
+	" \x01(\v2\".conversation.v1.ApiUnmodeledErrorH\x00R\tunmodeled\x12C\n" +
+	"\vunreachable\x18\x0f \x01(\v2\x1f.conversation.v1.ApiUnreachableH\x00R\vunreachable\x124\n" +
 	"\x05retry\x18\x0e \x01(\v2\x19.conversation.v1.ApiRetryH\x01R\x05retry\x88\x01\x01B\x06\n" +
 	"\x04kindB\b\n" +
 	"\x06_retry\"r\n" +
@@ -1631,7 +1704,9 @@ const file_conversation_v1_api_proto_rawDesc = "" +
 	"\vApiInternal\"\x11\n" +
 	"\x0fApiBillingError\"\x17\n" +
 	"\x15ApiOauthOrgNotAllowed\"\x14\n" +
-	"\x12ApiMaxOutputTokens\"'\n" +
+	"\x12ApiMaxOutputTokens\"$\n" +
+	"\x0eApiUnreachable\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\"'\n" +
 	"\x11ApiUnmodeledError\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\" \n" +
 	"\n" +
@@ -1692,7 +1767,7 @@ func file_conversation_v1_api_proto_rawDescGZIP() []byte {
 }
 
 var file_conversation_v1_api_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_conversation_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_conversation_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_conversation_v1_api_proto_goTypes = []any{
 	(AgentEffortLevel)(0),                 // 0: conversation.v1.AgentEffortLevel
 	(ModelMarker)(0),                      // 1: conversation.v1.ModelMarker
@@ -1709,16 +1784,17 @@ var file_conversation_v1_api_proto_goTypes = []any{
 	(*ApiBillingError)(nil),               // 12: conversation.v1.ApiBillingError
 	(*ApiOauthOrgNotAllowed)(nil),         // 13: conversation.v1.ApiOauthOrgNotAllowed
 	(*ApiMaxOutputTokens)(nil),            // 14: conversation.v1.ApiMaxOutputTokens
-	(*ApiUnmodeledError)(nil),             // 15: conversation.v1.ApiUnmodeledError
-	(*AgentModel)(nil),                    // 16: conversation.v1.AgentModel
-	(*ModelOption)(nil),                   // 17: conversation.v1.ModelOption
-	(*ModelCapabilities)(nil),             // 18: conversation.v1.ModelCapabilities
-	(*ModelEffortUnsupported)(nil),        // 19: conversation.v1.ModelEffortUnsupported
-	(*ModelEffortSupported)(nil),          // 20: conversation.v1.ModelEffortSupported
-	(*TokenUsage)(nil),                    // 21: conversation.v1.TokenUsage
-	(*TokenCacheHits)(nil),                // 22: conversation.v1.TokenCacheHits
-	(*TokenCacheMisses)(nil),              // 23: conversation.v1.TokenCacheMisses
-	(*descriptorpb.EnumValueOptions)(nil), // 24: google.protobuf.EnumValueOptions
+	(*ApiUnreachable)(nil),                // 15: conversation.v1.ApiUnreachable
+	(*ApiUnmodeledError)(nil),             // 16: conversation.v1.ApiUnmodeledError
+	(*AgentModel)(nil),                    // 17: conversation.v1.AgentModel
+	(*ModelOption)(nil),                   // 18: conversation.v1.ModelOption
+	(*ModelCapabilities)(nil),             // 19: conversation.v1.ModelCapabilities
+	(*ModelEffortUnsupported)(nil),        // 20: conversation.v1.ModelEffortUnsupported
+	(*ModelEffortSupported)(nil),          // 21: conversation.v1.ModelEffortSupported
+	(*TokenUsage)(nil),                    // 22: conversation.v1.TokenUsage
+	(*TokenCacheHits)(nil),                // 23: conversation.v1.TokenCacheHits
+	(*TokenCacheMisses)(nil),              // 24: conversation.v1.TokenCacheMisses
+	(*descriptorpb.EnumValueOptions)(nil), // 25: google.protobuf.EnumValueOptions
 }
 var file_conversation_v1_api_proto_depIdxs = []int32{
 	4,  // 0: conversation.v1.ApiRequestFailed.rate_limited:type_name -> conversation.v1.ApiRateLimited
@@ -1732,22 +1808,23 @@ var file_conversation_v1_api_proto_depIdxs = []int32{
 	12, // 8: conversation.v1.ApiRequestFailed.billing_error:type_name -> conversation.v1.ApiBillingError
 	13, // 9: conversation.v1.ApiRequestFailed.oauth_org_not_allowed:type_name -> conversation.v1.ApiOauthOrgNotAllowed
 	14, // 10: conversation.v1.ApiRequestFailed.max_output_tokens:type_name -> conversation.v1.ApiMaxOutputTokens
-	15, // 11: conversation.v1.ApiRequestFailed.unmodeled:type_name -> conversation.v1.ApiUnmodeledError
-	3,  // 12: conversation.v1.ApiRequestFailed.retry:type_name -> conversation.v1.ApiRetry
-	16, // 13: conversation.v1.ModelOption.model:type_name -> conversation.v1.AgentModel
-	18, // 14: conversation.v1.ModelOption.capabilities:type_name -> conversation.v1.ModelCapabilities
-	16, // 15: conversation.v1.ModelCapabilities.resolved_model:type_name -> conversation.v1.AgentModel
-	19, // 16: conversation.v1.ModelCapabilities.effort_unsupported:type_name -> conversation.v1.ModelEffortUnsupported
-	20, // 17: conversation.v1.ModelCapabilities.effort_supported:type_name -> conversation.v1.ModelEffortSupported
-	0,  // 18: conversation.v1.ModelEffortSupported.levels:type_name -> conversation.v1.AgentEffortLevel
-	22, // 19: conversation.v1.TokenUsage.input_hits:type_name -> conversation.v1.TokenCacheHits
-	23, // 20: conversation.v1.TokenUsage.input_misses:type_name -> conversation.v1.TokenCacheMisses
-	24, // 21: conversation.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	21, // [21:22] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	16, // 11: conversation.v1.ApiRequestFailed.unmodeled:type_name -> conversation.v1.ApiUnmodeledError
+	15, // 12: conversation.v1.ApiRequestFailed.unreachable:type_name -> conversation.v1.ApiUnreachable
+	3,  // 13: conversation.v1.ApiRequestFailed.retry:type_name -> conversation.v1.ApiRetry
+	17, // 14: conversation.v1.ModelOption.model:type_name -> conversation.v1.AgentModel
+	19, // 15: conversation.v1.ModelOption.capabilities:type_name -> conversation.v1.ModelCapabilities
+	17, // 16: conversation.v1.ModelCapabilities.resolved_model:type_name -> conversation.v1.AgentModel
+	20, // 17: conversation.v1.ModelCapabilities.effort_unsupported:type_name -> conversation.v1.ModelEffortUnsupported
+	21, // 18: conversation.v1.ModelCapabilities.effort_supported:type_name -> conversation.v1.ModelEffortSupported
+	0,  // 19: conversation.v1.ModelEffortSupported.levels:type_name -> conversation.v1.AgentEffortLevel
+	23, // 20: conversation.v1.TokenUsage.input_hits:type_name -> conversation.v1.TokenCacheHits
+	24, // 21: conversation.v1.TokenUsage.input_misses:type_name -> conversation.v1.TokenCacheMisses
+	25, // 22: conversation.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
+	23, // [23:23] is the sub-list for method output_type
+	23, // [23:23] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	22, // [22:23] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_api_proto_init() }
@@ -1768,11 +1845,12 @@ func file_conversation_v1_api_proto_init() {
 		(*ApiRequestFailed_OauthOrgNotAllowed)(nil),
 		(*ApiRequestFailed_MaxOutputTokens)(nil),
 		(*ApiRequestFailed_Unmodeled)(nil),
+		(*ApiRequestFailed_Unreachable)(nil),
 	}
 	file_conversation_v1_api_proto_msgTypes[2].OneofWrappers = []any{}
 	file_conversation_v1_api_proto_msgTypes[3].OneofWrappers = []any{}
-	file_conversation_v1_api_proto_msgTypes[15].OneofWrappers = []any{}
-	file_conversation_v1_api_proto_msgTypes[16].OneofWrappers = []any{
+	file_conversation_v1_api_proto_msgTypes[16].OneofWrappers = []any{}
+	file_conversation_v1_api_proto_msgTypes[17].OneofWrappers = []any{
 		(*ModelCapabilities_EffortUnsupported)(nil),
 		(*ModelCapabilities_EffortSupported)(nil),
 	}
@@ -1782,7 +1860,7 @@ func file_conversation_v1_api_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_api_proto_rawDesc), len(file_conversation_v1_api_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   22,
+			NumMessages:   23,
 			NumExtensions: 1,
 			NumServices:   0,
 		},
