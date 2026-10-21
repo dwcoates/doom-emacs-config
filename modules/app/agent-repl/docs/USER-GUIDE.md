@@ -200,7 +200,7 @@ Two marks an agent sets on its own workspace show on every surface:
   - The main workspace (the repository's own checkout) never one-shots.
 - **Every other merge is an async merge (`agent-repld workspace async-merge -name <name> -branch <branch>`).**
   - It is for a fix beside the point of what remains, an attempt landed so you can test it on master, or the main workspace landing its subagents' branches.
-  - The agent names the merge workspace; a name that is already a workspace, a branch or another merge's reservation is refused, and the agent asks again with another.
+  - The agent names the merge workspace; a name that is already a workspace, a branch, an occupied worktree directory or another merge's reservation is refused, and the agent asks again with another.
   - The branch is never one a workspace owns, the asking workspace's included; the daemon refuses it.
   - `-instruction <text>` has the merge workspace prepare the branch first, for example rebasing it onto master or combining branches; that work is the bubble's first tab, `resolving`, and the merge joins the queue once it ends.
   - `-close-after <workspace>` closes another workspace once the merge lands, such as the subagent workspace the work came from.

@@ -3,11 +3,25 @@ package workspace
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
+
+// claimRepo answers a main worktree on disk that F's git resolves every
+// directory to, so a name's worktree directory can be derived and probed.
+func claimRepo(t *testing.T, f *fixture) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	f.git.mainWorktree = dir
+	return dir
+}
 
 func TestClaimMergeNameClaimsAFreeName(t *testing.T) {
 	// Arrange
@@ -16,7 +30,7 @@ func TestClaimMergeNameClaimsAFreeName(t *testing.T) {
 	t.Setenv(LegacyPrefixEnv, "")
 
 	// Act
-	branch, release, taken, err := f.verbs.ClaimMergeName(context.Background(), t.TempDir(), "reconnect-fix")
+	branch, release, taken, err := f.verbs.ClaimMergeName(context.Background(), claimRepo(t, f), "reconnect-fix")
 
 	// Assert
 	if err != nil || taken || branch != "ABC/reconnect-fix" || release == nil {
@@ -28,13 +42,24 @@ func TestClaimMergeNameClaimsAFreeName(t *testing.T) {
 func TestClaimMergeNameAnswersTakenForWhatIsAlreadyTaken(t *testing.T) {
 	tests := []struct {
 		name    string
-		arrange func(f *fixture)
+		arrange func(t *testing.T, f *fixture)
 	}{
-		{name: "a registered workspace", arrange: func(f *fixture) {
+		{name: "a registered workspace", arrange: func(_ *testing.T, f *fixture) {
 			f.db.with(wsm.Workspace{ID: "ws-other", Name: "ABC/reconnect-fix", Dir: "/tmp/other"})
 		}},
-		{name: "a branch", arrange: func(f *fixture) { f.git.existingBranches = map[string]bool{"ABC/reconnect-fix": true} }},
-		{name: "a reservation", arrange: func(f *fixture) { f.db.reserved = map[string]ids.WorkspaceID{"reconnect-fix": "ws-other"} }},
+		{name: "a branch", arrange: func(_ *testing.T, f *fixture) { f.git.existingBranches = map[string]bool{"ABC/reconnect-fix": true} }},
+		{name: "a reservation", arrange: func(_ *testing.T, f *fixture) {
+			f.db.reserved = map[string]ids.WorkspaceID{"reconnect-fix": "ws-other"}
+		}},
+		// Another branch's worktree under the same bare name: the 2026-10-20
+		// collision, "fix/outage-recovery" standing where "outage-recovery"
+		// would be materialized.
+		{name: "an occupied worktree directory", arrange: func(t *testing.T, f *fixture) {
+			occupied := filepath.Join(filepath.Dir(f.git.mainWorktree), filepath.Base(f.git.mainWorktree)+WorktreeDirSuffix, "reconnect-fix")
+			if err := os.MkdirAll(occupied, 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -42,10 +67,11 @@ func TestClaimMergeNameAnswersTakenForWhatIsAlreadyTaken(t *testing.T) {
 			f := newFixture(t)
 			t.Setenv(PrefixEnv, "ABC")
 			t.Setenv(LegacyPrefixEnv, "")
-			tt.arrange(f)
+			repo := claimRepo(t, f)
+			tt.arrange(t, f)
 
 			// Act
-			branch, release, taken, err := f.verbs.ClaimMergeName(context.Background(), t.TempDir(), "reconnect-fix")
+			branch, release, taken, err := f.verbs.ClaimMergeName(context.Background(), repo, "reconnect-fix")
 
 			// Assert
 			if err != nil || !taken || branch != "ABC/reconnect-fix" || release != nil {
@@ -58,7 +84,7 @@ func TestClaimMergeNameAnswersTakenForWhatIsAlreadyTaken(t *testing.T) {
 func TestClaimMergeNameAnswersTakenWhileAnotherClaimStands(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	dir := t.TempDir()
+	dir := claimRepo(t, f)
 	_, release, _, err := f.verbs.ClaimMergeName(context.Background(), dir, "reconnect-fix")
 	if err != nil {
 		t.Fatalf("first claim: %v", err)
@@ -93,6 +119,23 @@ func TestClaimMergeNameFailsLoudlyWhenTheReservationsCannotBeRead(t *testing.T) 
 	}
 	if !loggedAtError(f, opNaming) {
 		t.Fatal("the failed read was not recorded at ERROR")
+	}
+}
+
+func TestClaimMergeNameFailsLoudlyWhenTheWorktreeDirectoryCannotBeDerived(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.git.commonDirErr = errors.New("not a git repository")
+
+	// Act
+	_, release, _, err := f.verbs.ClaimMergeName(context.Background(), t.TempDir(), "reconnect-fix")
+
+	// Assert
+	if err == nil || release != nil {
+		t.Fatalf("ClaimMergeName = %v with a claim, want the failure and no claim", err)
+	}
+	if !loggedAtError(f, opNaming) {
+		t.Fatal("the failed probe was not recorded at ERROR")
 	}
 }
 
