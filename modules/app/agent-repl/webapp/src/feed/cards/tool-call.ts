@@ -62,7 +62,7 @@ import { renderExternalLink } from "../../link.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { paintSpanClass } from "./paint.js";
-import { drawClassicDiff, parseUnifiedDiff, type ClassicDiffKind } from "./diff-view.js";
+import { drawClassicDiff, parseUnifiedDiff, type ClassicDiffKind, type ClassicDiffLine } from "./diff-view.js";
 import { drawMarkdownOutput, isMarkdownOutput } from "./markdown-output.js";
 import { stopTicking, tick, TICKING_ATTRIBUTE } from "../ticking.js";
 import { foldTitle } from "../title-fold.js";
@@ -658,10 +658,15 @@ export function drawFeedToolCallDiffOutput(
     operation: "feed.cards.tool-call.diff-output",
     context: { path, lines: u.lines.length },
   });
-  return drawClassicDiff(
-    u.lines.map((line, index) => ({ kind: diffLineKind(line, `${path}.lines[${index}]`), text: line.text })),
-    path,
-  );
+  return drawClassicDiff(classicDiffLines(u.lines, `${path}.lines`), path);
+}
+
+/**
+ * Wire diff lines as the classic drawing's lines: each line's kind from its
+ * arm, its text as carried. Every wire diff the card draws goes through here.
+ */
+export function classicDiffLines(lines: readonly FeedDiffLine[], path: string): ClassicDiffLine[] {
+  return lines.map((line, index) => ({ kind: diffLineKind(line, `${path}[${index}]`), text: line.text }));
 }
 
 /** One wire diff line's kind, as the classic drawing names it. */

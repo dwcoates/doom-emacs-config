@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { type Control } from "../../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
@@ -31,6 +34,7 @@ import {
   TOOL_CALL_INPUT_FORM_ARMS,
   TOOL_CALL_OUTCOME_ARMS,
   TOOL_CALL_VERDICT_ARMS,
+  classicDiffLines,
   drawFeedSimpleToolCall,
 } from "../../../src/feed/cards/tool-call.js";
 import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
@@ -757,6 +761,37 @@ describe("the diff output form", () => {
       ["removed", "old"],
       ["added", "new"],
     ]);
+  });
+});
+
+describe("classicDiffLines", () => {
+  it("maps each wire line to its kind and text, in order", () => {
+    const lines = classicDiffLines(
+      [
+        create(FeedDiffLineSchema, { kind: { case: "header", value: {} }, text: "@@" }),
+        create(FeedDiffLineSchema, { kind: { case: "context", value: {} }, text: "c" }),
+        create(FeedDiffLineSchema, { kind: { case: "removed", value: {} }, text: "r" }),
+        create(FeedDiffLineSchema, { kind: { case: "added", value: {} }, text: "a" }),
+      ],
+      "test.lines",
+    );
+    expect(lines).toEqual([
+      { kind: "header", text: "@@" },
+      { kind: "context", text: "c" },
+      { kind: "removed", text: "r" },
+      { kind: "added", text: "a" },
+    ]);
+  });
+
+  it("refuses a wire line with no kind", () => {
+    expect(() => classicDiffLines([create(FeedDiffLineSchema, { text: "x" })], "test.lines")).toThrow(MalformedView);
+  });
+
+  it("is the one site that reads a wire line's kind", () => {
+    const src = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../src/feed/cards/tool-call.ts");
+    const calls = readFileSync(src, "utf8").match(/diffLineKind\(/g) ?? [];
+    // The definition and the one call inside classicDiffLines.
+    expect(calls.length).toBe(2);
   });
 });
 
