@@ -19,7 +19,7 @@ import {
   isRetryableApiFailure,
   retryVendorErrorNowResponse,
   vendorErrorRetryUpdate,
-  type ScheduledRetry,
+  type StatedRetry,
   type UsageReading,
 } from "../../src/engine/vendor-error-retry.js";
 import { isVendorErrorRetryPrompt, vendorErrorRetryPrompt } from "../../src/engine/vendor-error-retry-prompt.js";
@@ -89,7 +89,9 @@ interface Harness {
   readonly clock: { now: number };
   readonly prompts: string[];
   /** Every schedule the chain stated, in order. */
-  readonly states: (ScheduledRetry | undefined)[];
+  readonly states: (StatedRetry | undefined)[];
+  /** The last statement standing when each prompt was delivered. */
+  readonly statedAtDelivery: (StatedRetry | undefined)[];
   delivery: ShimPromptDelivery | Error;
   reading: UsageReading;
   readings: number;
@@ -99,18 +101,21 @@ function harness(): Harness {
   const scheduler = new ManualScheduler();
   const clock = { now: START };
   const prompts: string[] = [];
-  const states: (ScheduledRetry | undefined)[] = [];
+  const states: (StatedRetry | undefined)[] = [];
+  const statedAtDelivery: (StatedRetry | undefined)[] = [];
   const h: Harness = {
     scheduler,
     clock,
     prompts,
     states,
+    statedAtDelivery,
     delivery: { kind: "delivered", turnId: "retry-1" },
     reading: { kind: "sampled", usage: usage({}) },
     readings: 0,
     retry: new VendorErrorRetry({
       deliver: (prompt) => {
         prompts.push(prompt);
+        statedAtDelivery.push(states.at(-1));
         const answer = h.delivery;
         return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
       },
@@ -889,6 +894,59 @@ describe("the stated schedule", () => {
     expect(h.states).toEqual([{ attempt: 1, atMs: START + VENDOR_ERROR_RETRY_INTERVAL_MS, status: "API Error" }]);
   });
 
+  it("states the retry being made just before its prompt is delivered", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+
+    // Act
+    await fire(h);
+
+    // Assert
+    expect(h.statedAtDelivery).toEqual([{ attempting: true, attempt: 1, status: "API Error" }]);
+  });
+
+  it("states the retry being made when it is asked for now", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+
+    // Act
+    await h.retry.retryNow();
+
+    // Assert
+    expect(h.statedAtDelivery).toEqual([{ attempting: true, attempt: 1, status: "API Error" }]);
+  });
+
+  it("states the next schedule after an attempt that found the main agent busy", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    h.delivery = { kind: "busy", detail: "a keep-alive is running" };
+
+    // Act
+    await fire(h);
+
+    // Assert
+    expect(h.states.slice(1)).toEqual([
+      { attempting: true, attempt: 1, status: "API Error" },
+      { attempt: 1, atMs: START + VENDOR_ERROR_RETRY_BUSY_MS, status: "API Error" },
+    ]);
+  });
+
+  it("states that none is due after an attempt the vendor refused", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    h.delivery = new Error("the input stream is closed");
+
+    // Act
+    await fire(h);
+
+    // Assert
+    expect(h.states.slice(1)).toEqual([{ attempting: true, attempt: 1, status: "API Error" }, undefined]);
+  });
+
   it("states that none is due once the retry is delivered", async () => {
     // Arrange
     const h = harness();
@@ -936,7 +994,7 @@ describe("the stated schedule", () => {
     await settle();
 
     // Assert
-    expect(h.states.at(-1)?.atMs).toBe(START + 76 * MINUTE);
+    expect(h.states.at(-1)).toMatchObject({ atMs: START + 76 * MINUTE });
   });
 
   it("states nothing for a failure it does not retry", () => {
@@ -1090,6 +1148,18 @@ describe("vendorErrorRetryUpdate", () => {
     expect(update.update.case === "vendorErrorRetry" ? update.update.value.scheduled : undefined).toEqual(
       create(conversationv1.SessionVendorErrorRetryScheduledSchema, { attempt: 3, nextAttemptAtMs: BigInt(START), status: "Overloaded" }),
     );
+  });
+
+  it("carries a retry being made whole", () => {
+    // Act
+    const update = vendorErrorRetryUpdate({ attempting: true, attempt: 2, status: "Overloaded" });
+
+    // Assert
+    const stated = update.update.case === "vendorErrorRetry" ? update.update.value : undefined;
+    expect([stated?.attempting, stated?.scheduled]).toEqual([
+      create(conversationv1.SessionVendorErrorRetryAttemptingSchema, { attempt: 2, status: "Overloaded" }),
+      undefined,
+    ]);
   });
 
   it("states no schedule when none is due", () => {

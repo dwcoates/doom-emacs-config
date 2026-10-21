@@ -10484,7 +10484,11 @@ type FooterStatusActivityRetrying struct {
 	NextAttempt *FooterStatusActivityAt `protobuf:"bytes,3,opt,name=next_attempt,json=nextAttempt,proto3,oneof" json:"next_attempt,omitempty"`
 	// The last attempt the vendor will make before it gives up. Unset when the
 	// vendor stated no schedule.
-	MaxAttempt    *int32 `protobuf:"varint,4,opt,name=max_attempt,json=maxAttempt,proto3,oneof" json:"max_attempt,omitempty"`
+	MaxAttempt *int32 `protobuf:"varint,4,opt,name=max_attempt,json=maxAttempt,proto3,oneof" json:"max_attempt,omitempty"`
+	// The attempt is being made at this moment: agent-repl's own retry, stated
+	// as it is made (conversation.v1.SessionVendorErrorRetryAttempting). Drawn
+	// as "retrying now" in place of a countdown; next_attempt is then unset.
+	Now           bool `protobuf:"varint,5,opt,name=now,proto3" json:"now,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -10545,6 +10549,13 @@ func (x *FooterStatusActivityRetrying) GetMaxAttempt() int32 {
 		return *x.MaxAttempt
 	}
 	return 0
+}
+
+func (x *FooterStatusActivityRetrying) GetNow() bool {
+	if x != nil {
+		return x.Now
+	}
+	return false
 }
 
 // An auth prompt is up.
@@ -18538,13 +18549,14 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	" FooterStatusActivityWakeupReason\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"M\n" +
 	"\"FooterActivityTransientApiRestored\x12'\n" +
-	"\x0ffailed_attempts\x18\x01 \x01(\x05R\x0efailedAttempts\"\xe4\x01\n" +
+	"\x0ffailed_attempts\x18\x01 \x01(\x05R\x0efailedAttempts\"\xf6\x01\n" +
 	"\x1cFooterStatusActivityRetrying\x12\x18\n" +
 	"\aattempt\x18\x01 \x01(\x05R\aattempt\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12K\n" +
 	"\fnext_attempt\x18\x03 \x01(\v2#.frontend.v1.FooterStatusActivityAtH\x00R\vnextAttempt\x88\x01\x01\x12$\n" +
 	"\vmax_attempt\x18\x04 \x01(\x05H\x01R\n" +
-	"maxAttempt\x88\x01\x01B\x0f\n" +
+	"maxAttempt\x88\x01\x01\x12\x10\n" +
+	"\x03now\x18\x05 \x01(\bR\x03nowB\x0f\n" +
 	"\r_next_attemptB\x0e\n" +
 	"\f_max_attempt\"8\n" +
 	"\"FooterStatusActivityAuthenticating\x12\x12\n" +

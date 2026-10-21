@@ -1211,7 +1211,8 @@ export function drawFooterStatusActivityAuthenticating(
  * THE NEXT ATTEMPT IS SHIPPED AS AN INSTANT and counts down here on the shared
  * ticker. The line is always a countdown (owner ruling, 2026-10-20): once the
  * instant passes with no newer attempt pushed, it holds at "next try in 0s"
- * rather than counting up how late the vendor is.
+ * rather than counting up how late the vendor is. Agent-repl's own retry
+ * reads "retrying now" in its place from the moment it is made.
  */
 export function drawFooterStatusActivityRetrying(
   u: FooterStatusActivityRetrying,
@@ -1229,7 +1230,11 @@ export function drawFooterStatusActivityRetrying(
   if (u.maxAttempt !== undefined) {
     line.appendChild(document.createTextNode(` of ${u.maxAttempt}`));
   }
-  if (u.nextAttempt !== undefined) {
+  // AGENT-REPL'S OWN RETRY BEING MADE says so, stated where the retry is made
+  // (owner ruling, 2026-10-21); it carries no countdown.
+  if (u.now) {
+    line.appendChild(document.createTextNode(" · retrying now"));
+  } else if (u.nextAttempt !== undefined) {
     line.appendChild(document.createTextNode(" · "));
     line.appendChild(
       drawNextAttempt(u.nextAttempt, deps, `${path}.next_attempt`),

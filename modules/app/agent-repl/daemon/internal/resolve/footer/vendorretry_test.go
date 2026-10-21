@@ -21,6 +21,16 @@ func vendorRetryScheduled(attempt uint32, at time.Time, status string) *conversa
 	}}
 }
 
+// vendorRetryAttempting is the shim stating its ATTEMPT-th retry is being made
+// now, retrying a failure worded STATUS.
+func vendorRetryAttempting(attempt uint32, status string) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_VendorErrorRetry{
+		VendorErrorRetry: &conversationv1.SessionVendorErrorRetry{
+			Attempting: &conversationv1.SessionVendorErrorRetryAttempting{Attempt: attempt, Status: status},
+		},
+	}}
+}
+
 // vendorRetryUnscheduled is the shim stating that no retry is due.
 func vendorRetryUnscheduled() *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_VendorErrorRetry{
@@ -55,6 +65,43 @@ func TestAScheduledRetryDrawsTheRetryLineInPlaceOfTheFailedTurnsSentence(t *test
 	line := retryLine(t, h)
 	if line.GetAttempt() != 2 || line.GetNextAttempt().GetAtMs() != next.UnixMilli() || line.GetStatus() != "Overloaded" {
 		t.Fatalf("retry line = %+v, want attempt 2 counting down to the shim's instant", line)
+	}
+}
+
+func TestARetryBeingMadeDrawsRetryingNowInPlaceOfTheCountdown(t *testing.T) {
+	// Arrange: the countdown to the first retry stands.
+	h := newHarness(t)
+	connected(h)
+	overloadFailedTurn(h)
+	h.r.OnSessionUpdate(testWS, vendorRetryScheduled(1, instant.Add(30*time.Second), "Overloaded"))
+
+	// Act
+	h.r.OnSessionUpdate(testWS, vendorRetryAttempting(1, "Overloaded"))
+
+	// Assert
+	line := retryLine(t, h)
+	if !line.GetNow() || line.NextAttempt != nil || line.GetAttempt() != 2 || line.GetStatus() != "Overloaded" {
+		t.Fatalf("retry line = %+v, want attempt 2 retrying now with no countdown", line)
+	}
+}
+
+func TestARetryBeingMadeNamingNoAttemptIsRefusedAndTheScheduleOnHandStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	overloadFailedTurn(h)
+	next := instant.Add(30 * time.Second)
+	h.r.OnSessionUpdate(testWS, vendorRetryScheduled(1, next, "Overloaded"))
+
+	// Act
+	h.r.OnSessionUpdate(testWS, vendorRetryAttempting(0, "Overloaded"))
+
+	// Assert
+	if line := retryLine(t, h); line.GetNow() || line.GetNextAttempt().GetAtMs() != next.UnixMilli() {
+		t.Fatalf("retry line = %+v, want the countdown on hand", line)
+	}
+	if got := countOf(h.log.Records(), dlog.LevelError, "daemon.footer.vendor_retry_refused"); got != 1 {
+		t.Fatalf("vendor_retry_refused ERROR records = %d, want 1", got)
 	}
 }
 

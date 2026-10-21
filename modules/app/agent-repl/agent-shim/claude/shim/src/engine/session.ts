@@ -845,8 +845,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     deliver: (prompt) => deliverShimPrompt(prompt, VENDOR_ERROR_RETRY_SOURCE),
     // THE SCHEDULE RIDES THE SESSION STREAM as a replayed level
     // (engine/pushes.ts), so the footer counts down to the next retry.
-    state: (scheduled) => {
-      pushes.push(vendorErrorRetryUpdate(scheduled));
+    state: (stated) => {
+      pushes.push(vendorErrorRetryUpdate(stated));
     },
     readUsage: () => readUsageForRetry(),
     nowMs: deps.nowMs,
