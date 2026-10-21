@@ -786,18 +786,26 @@ func TestKillGroupKillsALiveGroupAndTakesAGoneOneAsNoFailure(t *testing.T) {
 // the exit event Kill awaits after the files are closed but before the
 // process turns zombie, so a member can be listed as exiting after Kill has
 // rightly returned.
+//
+// THE MEMBER OPENS THE FIFO ITSELF AND NEVER EXECS AFTER: it is a forked
+// subshell holding the write end, waiting on a sleep that closed its copy
+// first. A writer opened before an exec is not one process: Darwin's exec
+// copies the fd table to a new proc (fdt_fork with in_exec, every fileglob
+// referenced again) and leaves the old image a SHADOW proc that holds those
+// references until its own exit finishes. A shadow is invisible to the group
+// listing, to proc_find and to every exit event, so no Kill can await it; the
+// member this test first ran (`/bin/sleep >fifo`) had a shadow still holding
+// the FIFO under the merge gate's load after its new image exited
+// (2026-10-21).
 func TestKillReturnsOnceEveryMemberHasReleasedItsFiles(t *testing.T) {
 	// Arrange
 	fifo := filepath.Join(t.TempDir(), "member")
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 		t.Fatalf("mkfifo: %v", err)
 	}
-	d, member := groupUnderKill(t, "/bin/sleep 100 >"+fifo+" & echo $!; wait")
+	d, member := groupUnderKill(t, "( exec 3>"+fifo+"; /bin/sleep 100 3>&- ) & echo $!; wait")
 	// WHAT KILL COULD SEE OF THE MEMBER is recorded for the failure: the
 	// stopped group's listing, which is the one Kill holds exit events from.
-	// Darwin's listing skips a process whose exec is under way (proc_iterate
-	// passes over SIDL and shadow procs), so a member caught mid-exec is
-	// absent from it.
 	var stoppedListing []procgroup.Member
 	var stoppedListingErr error
 	d.afterGroupStopped = func() {
