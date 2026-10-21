@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDropdowns, toggleHiddenDropdown, type Dropdown } from "../../src/sidebar/dropdowns.js";
+import { log } from "../../src/log.js";
 import { captureLogRecords } from "../log-capture.js";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /** A dropdown whose box and opener are fresh elements, recording its closes. */
 function dropdown(init: { key?: string } = {}): Dropdown & { closes: number; opener: HTMLElement } {
@@ -101,6 +106,54 @@ describe("dismissOutside", () => {
     capture.logger.flush();
     await Promise.resolve();
     expect(capture.sent.filter((r) => r.operation.startsWith("sidebar.dropdowns"))).toEqual([]);
+  });
+});
+
+describe("dismissAll", () => {
+  it("closes every open dropdown", () => {
+    const dropdowns = createDropdowns();
+    const first = dropdown();
+    const second = dropdown({ key: "k" });
+    const copy = dropdown({ key: "k" });
+    dropdowns.opened(first);
+    dropdowns.opened(second);
+    dropdowns.opened(copy);
+    dropdowns.dismissAll("the page lost focus");
+    expect([first.closes, second.closes, copy.closes]).toEqual([1, 1, 1]);
+  });
+
+  it("hands each dropdown why it closed", () => {
+    const dropdowns = createDropdowns();
+    const whys: string[] = [];
+    dropdowns.opened({ ...dropdown(), close: (why) => whys.push(why) });
+    dropdowns.dismissAll("the selection moved");
+    expect(whys).toEqual(["the selection moved"]);
+  });
+
+  it("closes each only once, however many dismissals follow", () => {
+    const dropdowns = createDropdowns();
+    const d = dropdown();
+    dropdowns.opened(d);
+    dropdowns.dismissAll("one");
+    dropdowns.dismissAll("two");
+    dropdowns.dismissOutside(null);
+    expect(d.closes).toBe(1);
+  });
+
+  it("logs each close with its kind and why", () => {
+    const dropdowns = createDropdowns();
+    dropdowns.opened(dropdown());
+    const debug = vi.spyOn(log, "debug");
+    dropdowns.dismissAll("the page was hidden");
+    expect(debug.mock.calls).toEqual([
+      ["closing a sidebar dropdown", { operation: "sidebar.dropdowns.close", context: { kind: "test", why: "the page was hidden" } }],
+    ]);
+  });
+
+  it("does nothing, and logs nothing, with none open", () => {
+    const debug = vi.spyOn(log, "debug");
+    createDropdowns().dismissAll("the page lost focus");
+    expect(debug).not.toHaveBeenCalled();
   });
 });
 
