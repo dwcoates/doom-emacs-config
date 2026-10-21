@@ -188,6 +188,16 @@ func (o *orchestrator) sourceLabel(ctx context.Context, ws ids.WorkspaceID, sour
 			return "", err
 		}
 		return branchLabel(branch, job.Layout.TargetDir), nil
+	case wsm.MergeSourceBranch:
+		record, err := o.deps.DB.Workspace(ctx, ws)
+		if err != nil {
+			return "", err
+		}
+		main, err := o.deps.Git.MainWorktree(ctx, record.Dir)
+		if err != nil {
+			return "", err
+		}
+		return branchLabel(source.Branch, main), nil
 	default:
 		return "", fmt.Errorf("merge: the undeclared source %s", source.Kind)
 	}
