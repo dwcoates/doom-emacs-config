@@ -3180,8 +3180,10 @@ func TestDetachedFleetWorkSharesOneDrain(t *testing.T) {
 	}
 }
 
-func TestATakenColdGateStillRefusesPromptsByItsName(t *testing.T) {
-	// Arrange: the answer is taken and its remediation has not settled.
+func TestATakenColdGateRefusesNoPromptButIsCarried(t *testing.T) {
+	// Arrange: the answer is taken and its remediation has not settled -- the
+	// 2026-10-20 pay, whose re-open outran the start bound while every prompt
+	// sent after it was refused by the answered gate's name.
 	f := newFleetFixture(t)
 	ws := f.workspace("ws-answering")
 	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
@@ -3193,8 +3195,8 @@ func TestATakenColdGateStillRefusesPromptsByItsName(t *testing.T) {
 	_, carried := f.fleet.ColdGateStanding(ws.ID)
 
 	// Assert.
-	if menu || !refused || detail == "" || !carried {
-		t.Fatalf("menu offered = %t, prompts refused = %t (%q), carried by a handover = %t; want no menu, a refusal, and a carry",
+	if menu || refused || detail != "" || !carried {
+		t.Fatalf("menu offered = %t, prompts refused = %t (%q), carried by a handover = %t; want no menu, no refusal, and a carry",
 			menu, refused, detail, carried)
 	}
 }
