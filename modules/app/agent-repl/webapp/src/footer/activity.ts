@@ -1202,9 +1202,11 @@ export function drawFooterStatusActivityAuthenticating(
 }
 
 /**
- * The vendor call being retried: "retry #9 of 11 · next try in 12s ·
- * overloaded". The attempt is the vendor's own count and the limit its own,
- * drawn only when it stated them.
+ * The vendor call being retried: "attempt 9 of 11 · next try in 12s ·
+ * overloaded". The attempt is the request's own count, the first retry its
+ * second attempt, and the limit the vendor's own, drawn only when it stated
+ * one. It read "retry #2" for the first retry until 2026-10-21: an attempt
+ * number under a retry's name.
  *
  * THE NEXT ATTEMPT IS SHIPPED AS AN INSTANT and counts down here on the shared
  * ticker. The line is always a countdown (owner ruling, 2026-10-20): once the
@@ -1218,11 +1220,11 @@ export function drawFooterStatusActivityRetrying(
 ): HTMLElement {
   const line = document.createElement("span");
   line.className = "footer-activity-retrying";
-  line.appendChild(document.createTextNode("retry "));
+  line.appendChild(document.createTextNode("attempt "));
   const attempt = document.createElement("span");
   attempt.className = activityDatumClass("attempt");
   attempt.setAttribute("data-datum", "attempt");
-  attempt.textContent = `#${u.attempt}`;
+  attempt.textContent = String(u.attempt);
   line.appendChild(attempt);
   if (u.maxAttempt !== undefined) {
     line.appendChild(document.createTextNode(` of ${u.maxAttempt}`));
