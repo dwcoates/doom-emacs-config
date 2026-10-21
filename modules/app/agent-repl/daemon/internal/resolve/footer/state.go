@@ -532,6 +532,12 @@ type wsState struct {
 	loading *loadingState
 	// momentary cancels an in-flight R1 dwell when its status is superseded.
 	momentary Timer
+	// heardAt is when the vendor was last heard from in the turn in flight:
+	// its opening, or any agent's activity frame (heardFromVendor).
+	heardAt time.Time
+	// silence republishes the strip once the vendor-silence threshold passes
+	// after heardAt.
+	silence Timer
 
 	// transient is THE NEWEST TRANSIENT: the one slot every transient source
 	// fills, each raise replacing the last (transient.go). It carries its own

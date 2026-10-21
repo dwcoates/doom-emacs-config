@@ -681,13 +681,16 @@ func TestAConcludedCompactionArmsNoTimer(t *testing.T) {
 			connected(h)
 			h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
 			h.r.OnSessionUpdate(testWS, vendorCompacting())
+			// The turn's own vendor-silence timer stands from its opening; it
+			// ends no line, and is not the conclusion's.
+			before := len(h.clock.pending)
 
 			// Act
 			h.r.OnSessionUpdate(testWS, sessionCompactionProgress(progress(tt.phase, 101_600, 12_400, "")))
 
 			// Assert: no timer may end a salient line, and a transient's expiry is the client's.
-			if n := len(h.clock.pending); n != 0 {
-				t.Fatalf("%d timers pending after the conclusion, want none", n)
+			if n := len(h.clock.pending) - before; n != 0 {
+				t.Fatalf("%d timers armed by the conclusion, want none", n)
 			}
 		})
 	}

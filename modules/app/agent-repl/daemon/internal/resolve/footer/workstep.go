@@ -269,8 +269,10 @@ func (r *resolver) leaveTurn(s *wsState, unit string) {
 }
 
 // workingStep resolves the working status's step once the turn has said
-// anything: the latest running tool call's step, else thinking.
-func workingStep(s *wsState) *frontendv1.FooterStatusWorking {
+// anything: the latest running tool call's step, else thinking, or waiting
+// once the vendor has been SILENT past the threshold (owner ruling,
+// 2026-10-21): a request the API never answered is not the model thinking.
+func workingStep(s *wsState, silent bool) *frontendv1.FooterStatusWorking {
 	arm := &frontendv1.FooterStatusWorking{}
 	switch s.motion.step() {
 	case stepExecuting:
@@ -286,6 +288,10 @@ func workingStep(s *wsState) *frontendv1.FooterStatusWorking {
 	case stepDelegating:
 		arm.Substatus = &frontendv1.FooterStatusWorking_Delegating{Delegating: &frontendv1.FooterSubStatusWorkingDelegating{}}
 	default:
+		if silent {
+			arm.Substatus = &frontendv1.FooterStatusWorking_Waiting{Waiting: &frontendv1.FooterSubStatusWorkingWaiting{}}
+			break
+		}
 		arm.Substatus = &frontendv1.FooterStatusWorking_Thinking{Thinking: &frontendv1.FooterSubStatusWorkingThinking{}}
 	}
 	return arm

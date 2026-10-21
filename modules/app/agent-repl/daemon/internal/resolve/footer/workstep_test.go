@@ -344,3 +344,82 @@ func TestAnUnknownItemArmIsRecordedAtError(t *testing.T) {
 		t.Fatalf("step = %q, want thinking: an unread frame opens nothing", got)
 	}
 }
+
+func TestTheWorkingStepReadsWaitingOnlyOnceTheVendorIsSilentPastTheThreshold(t *testing.T) {
+	tests := []struct {
+		name    string
+		silence time.Duration
+		want    string
+	}{
+		{name: "short of the threshold", silence: DefaultVendorSilence - time.Second, want: "thinking"},
+		{name: "at the threshold", silence: DefaultVendorSilence, want: "waiting"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the turn's call landed, and nothing has come back since.
+			h := newHarness(t)
+			inTurn(h)
+			h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "start"))
+			h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "success"))
+
+			// Act
+			h.clock.Advance(tt.silence)
+
+			// Assert
+			if got := stepName(working(t, h)); got != tt.want {
+				t.Fatalf("step = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheVendorsNextFrameEndsTheWaitingStep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "start"))
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "success"))
+	h.clock.Advance(DefaultVendorSilence)
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-2", "response", "start"))
+
+	// Assert
+	if got := stepName(working(t, h)); got != "thinking" {
+		t.Fatalf("step = %q, want thinking once the vendor answered", got)
+	}
+}
+
+func TestARunningCallKeepsItsStepPastTheSilenceThreshold(t *testing.T) {
+	// Arrange: a shell command runs; the vendor owes nothing while it does.
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "bash", "start"))
+
+	// Act
+	h.clock.Advance(2 * DefaultVendorSilence)
+
+	// Assert
+	if got := stepName(working(t, h)); got != "executing" {
+		t.Fatalf("step = %q, want executing: a running call is not the vendor's silence", got)
+	}
+}
+
+func TestTheSilenceThresholdRepublishesTheStripAndRecordsTheWaitingStep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	inTurn(h)
+	h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "response", "start"))
+	before := h.view(t)
+
+	// Act
+	h.clock.Advance(DefaultVendorSilence)
+
+	// Assert
+	if h.view(t) == before {
+		t.Fatal("the threshold published no new view")
+	}
+	if !hasLevel(h.log.Records(), "info", "daemon.footer.vendor_silence") {
+		t.Fatal("no INFO vendor_silence record for the step turning to waiting")
+	}
+}
