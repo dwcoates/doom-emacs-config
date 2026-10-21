@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 // THE SANDBOX BUILD GATE.
@@ -365,80 +364,24 @@ func TestSandboxBuildWaitsForALockHeldByALivePid(t *testing.T) {
 	// Arrange: a live holder (this test process) owns the lock.
 	f := newFakeDocker(t)
 	lock := filepath.Join(t.TempDir(), "build.lock")
-	if err := os.MkdirAll(lock, 0o755); err != nil {
-		t.Fatalf("mkdir lock: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(lock, "pid"), []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o644); err != nil {
-		t.Fatalf("write pid: %v", err)
-	}
-
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("create output pipe: %v", err)
-	}
-	defer reader.Close()
-
+	holdLock(t, lock)
 	cmd := sandboxBuildUnstaged(t)
 	cmd.Env = sandboxEnv(f, lock)
-	cmd.Stdout, cmd.Stderr = writer, writer
-	announced := make(chan struct{}, 1)
-	scanned := make(chan struct{})
-	var output strings.Builder
-	go func() {
-		defer close(scanned)
-		scanner := bufio.NewScanner(reader)
-		for scanner.Scan() {
-			line := scanner.Text()
-			output.WriteString(line)
-			output.WriteByte('\n')
-			if strings.Contains(line, "WAITING: another sandbox build holds the host build lock") {
-				select {
-				case announced <- struct{}{}:
-				default:
-				}
-			}
+
+	// Act: the build waits, and the lock is released.
+	out, err := waitBehindLock(t, cmd, lock, "WAITING: another sandbox build holds the host build lock", func() {
+		// Assert: while it waits, it has NOT built anything.
+		if n := f.buildCount(t); n != 0 {
+			t.Fatalf("a blocked build ran %d build invocation(s)", n)
 		}
-	}()
-
-	// Act.
-	if err := cmd.Start(); err != nil {
-		_ = writer.Close()
-		<-scanned
-		t.Fatalf("start: %v", err)
-	}
-	waitErr := make(chan error, 1)
-	go func() {
-		err := cmd.Wait()
-		_ = writer.Close()
-		waitErr <- err
-	}()
-
-	// Assert: it announces the wait, and it has NOT built anything.
-	select {
-	case <-announced:
-	case <-time.After(20 * time.Second):
-		_ = cmd.Process.Kill()
-		<-waitErr
-		<-scanned
-		t.Fatalf("timed out waiting for the build to announce its wait:\n%s", output.String())
-	}
-	if n := f.buildCount(t); n != 0 {
-		t.Fatalf("a blocked build ran %d build invocation(s)", n)
-	}
-
-	// Act: release the lock.
-	if err := os.RemoveAll(lock); err != nil {
-		t.Fatalf("release lock: %v", err)
-	}
+	})
 
 	// Assert: it then proceeds and builds.
-	if err := <-waitErr; err != nil {
-		<-scanned
-		t.Fatalf("build exited %v\n%s", err, output.String())
+	if err != nil {
+		t.Fatalf("build exited %v\n%s", err, out)
 	}
-	<-scanned
 	if n := f.buildCount(t); n != 1 {
-		t.Fatalf("expected 1 build invocation after release, got %d\n%s", n, output.String())
+		t.Fatalf("expected 1 build invocation after release, got %d\n%s", n, out)
 	}
 }
 

@@ -1,7 +1,6 @@
 package sandboxscripts
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,7 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 )
 
 // claim_host_lock is the one host-wide mkdir lock of e2e-sandbox.sh: the build
@@ -88,70 +86,17 @@ func TestClaimHostLockWaitsForALiveHolder(t *testing.T) {
 	// Arrange: this test process holds the lock.
 	f := newFakeDocker(t)
 	dir := filepath.Join(t.TempDir(), "host.lock")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir lock: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "pid"), fmt.Appendf(nil, "%d\n", os.Getpid()), 0o644); err != nil {
-		t.Fatalf("write pid: %v", err)
-	}
-	reader, writer, err := os.Pipe()
+	holdLock(t, dir)
+
+	// Act: the claim waits, and the holder lets go.
+	out, err := waitBehindLock(t, claimHostLock(t, f, dir), dir, "Tests share it.", func() {})
+
+	// Assert: the wait named the lock and its holder, and the claim went through.
 	if err != nil {
-		t.Fatalf("pipe: %v", err)
+		t.Fatalf("claim_host_lock = %v\n%s", err, out)
 	}
-	defer reader.Close()
-	cmd := claimHostLock(t, f, dir)
-	cmd.Stdout, cmd.Stderr = writer, writer
-	announced := make(chan struct{}, 1)
-	scanned := make(chan struct{})
-	var output strings.Builder
-	go func() {
-		defer close(scanned)
-		sc := bufio.NewScanner(reader)
-		for sc.Scan() {
-			output.WriteString(sc.Text() + "\n")
-			if strings.Contains(sc.Text(), "Tests share it.") {
-				select {
-				case announced <- struct{}{}:
-				default:
-				}
-			}
-		}
-	}()
-
-	// Act
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	waitErr := make(chan error, 1)
-	go func() {
-		err := cmd.Wait()
-		_ = writer.Close()
-		waitErr <- err
-	}()
-
-	// Assert: the wait is announced while the holder lives.
-	select {
-	case <-announced:
-	case <-time.After(20 * time.Second):
-		_ = cmd.Process.Kill()
-		<-waitErr
-		<-scanned
-		t.Fatalf("the wait was never announced:\n%s", output.String())
-	}
-
-	// Act: the holder lets go.
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-
-	// Assert: the claim goes through.
-	err = <-waitErr
-	<-scanned
-	if err != nil {
-		t.Fatalf("claim_host_lock = %v\n%s", err, output.String())
-	}
-	if want := fmt.Sprintf("WAITING: another test holds the host test lock (pid %d).", os.Getpid()); !strings.Contains(output.String(), want) {
-		t.Fatalf("output lacks %q:\n%s", want, output.String())
+	if want := fmt.Sprintf("WAITING: another test holds the host test lock (pid %d).", os.Getpid()); !strings.Contains(out, want) {
+		t.Fatalf("output lacks %q:\n%s", want, out)
 	}
 }
 
