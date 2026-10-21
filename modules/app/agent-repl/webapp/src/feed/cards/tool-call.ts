@@ -38,6 +38,8 @@ import {
   type FeedToolCallDenied,
   type FeedToolCallDiagnostics,
   type FeedToolCallDiffOutput,
+  type FeedToolCallEdits,
+  type FeedToolCallFileEdit,
   type FeedToolCallInput,
   type FeedToolCallInputCommand,
   type FeedToolCallInputLink,
@@ -62,7 +64,7 @@ import { renderExternalLink } from "../../link.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { paintSpanClass } from "./paint.js";
-import { drawClassicDiff, parseUnifiedDiff, type ClassicDiffKind } from "./diff-view.js";
+import { drawClassicDiff, parseUnifiedDiff, type ClassicDiffKind, type ClassicDiffLine } from "./diff-view.js";
 import { drawMarkdownOutput, isMarkdownOutput } from "./markdown-output.js";
 import { stopTicking, tick, TICKING_ATTRIBUTE } from "../ticking.js";
 import { foldTitle } from "../title-fold.js";
@@ -132,6 +134,11 @@ export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): H
 
   const input = drawFeedToolCallInput(callInput, rc, `${path}.input`);
   card.appendChild(input);
+  // THE STATED EDITS sit between the input line and the output: the change
+  // the command makes reads before what the command printed.
+  if (u.edits !== undefined) {
+    for (const element of drawFeedToolCallEdits(u.edits, `${path}.edits`)) card.appendChild(element);
+  }
   for (const element of parts.body) card.appendChild(element);
   // A CARD'S TIMER STOPS THE MOMENT ITS UNIT SETTLES. Every arm but `running`
   // is terminal — the call returned, was denied, or was handed off to a
@@ -658,10 +665,42 @@ export function drawFeedToolCallDiffOutput(
     operation: "feed.cards.tool-call.diff-output",
     context: { path, lines: u.lines.length },
   });
-  return drawClassicDiff(
-    u.lines.map((line, index) => ({ kind: diffLineKind(line, `${path}.lines[${index}]`), text: line.text })),
-    path,
-  );
+  return drawClassicDiff(classicDiffLines(u.lines, `${path}.lines`), path);
+}
+
+/**
+ * The file edits a shell command states (FeedSimpleToolCall.edits): one
+ * classic diff per file, in the order the command writes them.
+ */
+export function drawFeedToolCallEdits(u: FeedToolCallEdits, path: string): readonly HTMLElement[] {
+  log.debug("drawing a shell command's stated edits", {
+    operation: "feed.cards.tool-call.edits",
+    context: { path, files: u.files.length },
+  });
+  return u.files.map((file, index) => drawFeedToolCallFileEdit(file, `${path}.files[${index}]`));
+}
+
+/**
+ * One file's stated edit: the classic diff of its lines, opened by the file's
+ * path as the diff's meta line, as a unified diff names its file above its
+ * hunks.
+ */
+export function drawFeedToolCallFileEdit(u: FeedToolCallFileEdit, path: string): HTMLElement {
+  const pre = drawClassicDiff([{ kind: "meta", text: u.path }, ...classicDiffLines(u.lines, `${path}.lines`)], path);
+  pre.classList.add(TOOL_EDIT_CLASS);
+  pre.setAttribute("data-edit-path", u.path);
+  return pre;
+}
+
+/** The class a stated edit's diff wears beside the classic diff's own. */
+export const TOOL_EDIT_CLASS = "tool-edit";
+
+/**
+ * Wire diff lines as the classic drawing's lines: each line's kind from its
+ * arm, its text as carried. Every wire diff the card draws goes through here.
+ */
+export function classicDiffLines(lines: readonly FeedDiffLine[], path: string): ClassicDiffLine[] {
+  return lines.map((line, index) => ({ kind: diffLineKind(line, `${path}[${index}]`), text: line.text }));
 }
 
 /** One wire diff line's kind, as the classic drawing names it. */
