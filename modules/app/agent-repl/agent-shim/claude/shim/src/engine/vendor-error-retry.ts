@@ -33,7 +33,10 @@
  *   shim's own (engine/session.ts `deliverShimPrompt`).
  * - THE SCHEDULE IS STATED, whole, every time it changes
  *   (conversation.v1.SessionVendorErrorRetry): the retry made next, when, and
- *   the failure it retries; or none, while no retry is due.
+ *   the failure it retries; the retry being made, stated at the code point
+ *   that makes it, just before its prompt is delivered, so "retrying now" is
+ *   the attempt itself and not a countdown reaching zero; or none, while no
+ *   retry is due or the latest is running as a turn.
  * - A RETRY CAN BE MADE AT ONCE ({@link VendorErrorRetry.retryNow}): the
  *   pending one is delivered now instead of at its instant.
  * - THE CHAIN ENDS on the first retry turn that ends any other way (answered,
@@ -82,6 +85,18 @@ export interface ScheduledRetry {
   readonly status: string;
 }
 
+/** The retry being made now, stated just before its prompt is delivered. */
+export interface AttemptingRetry {
+  readonly attempting: true;
+  /** Which retry of the chain it is, 1-based. */
+  readonly attempt: number;
+  /** The failure it retries, in the vendor's words. */
+  readonly status: string;
+}
+
+/** The retry as the session stream states it: scheduled, or being made. */
+export type StatedRetry = ScheduledRetry | AttemptingRetry;
+
 /** What asking for the retry now came to (shim.v1.RetryVendorErrorNow). */
 export type RetryNowOutcome =
   /** The retry was delivered: the main agent continues the failed turn. */
@@ -97,8 +112,8 @@ export type RetryNowOutcome =
 export interface VendorErrorRetryDeps {
   /** Submits the retry prompt as the main agent's next turn. */
   readonly deliver: (prompt: string) => Promise<ShimPromptDelivery>;
-  /** States the schedule on the session stream, whole: the next retry, or none. */
-  readonly state: (scheduled: ScheduledRetry | undefined) => void;
+  /** States the schedule on the session stream, whole: the next retry, the one being made, or none. */
+  readonly state: (stated: StatedRetry | undefined) => void;
   /** A usage sample taken AFTER it is asked for (engine/serial-probe.ts `run`). */
   readonly readUsage: () => Promise<UsageReading>;
   readonly nowMs: () => number;
@@ -184,8 +199,8 @@ export class VendorErrorRetry {
   private chain: Chain | undefined;
   private nextChainId = 1;
   private handle: unknown;
-  /** The retry the timer makes, while one is armed. */
-  private pending: ScheduledRetry | undefined;
+  /** The retry stated: the one the timer makes, or the one being made. */
+  private pending: StatedRetry | undefined;
   private stopped = false;
 
   constructor(private readonly deps: VendorErrorRetryDeps) {}
@@ -373,8 +388,12 @@ export class VendorErrorRetry {
 
   private async retry(chain: Chain): Promise<RetryNowOutcome> {
     if (this.chain !== chain) return { kind: "nothing_scheduled" };
-    this.unschedule();
     const attempt = chain.retries + 1;
+    // THE ATTEMPT IS STATED HERE, where it is made: the footer's "retrying
+    // now" is this statement, not its countdown reaching zero (owner ruling,
+    // 2026-10-21).
+    this.pending = { attempting: true, attempt, status: chain.status };
+    this.deps.state(this.pending);
     let delivery: ShimPromptDelivery;
     try {
       delivery = await this.deps.deliver(vendorErrorRetryPrompt(attempt));
@@ -399,6 +418,7 @@ export class VendorErrorRetry {
       case "delivered":
         chain.retries = attempt;
         chain.awaiting = delivery.turnId;
+        this.unschedule();
         LOGGER.info(
           { chain: chain.id, attempt, turn_id: delivery.turnId, mode: chain.mode?.kind ?? "" },
           "delivered the retry; the main agent continues the failed turn",
@@ -514,21 +534,28 @@ function isUsageLimit(frame: conversationv1.AgentFrame): boolean {
   }
 }
 
-/** The schedule as the session stream states it: the next retry, or none. */
-export function vendorErrorRetryUpdate(scheduled: ScheduledRetry | undefined): conversationv1.SessionUpdate {
+/** The schedule as the session stream states it: the next retry, the one being made, or none. */
+export function vendorErrorRetryUpdate(stated: StatedRetry | undefined): conversationv1.SessionUpdate {
   return create(conversationv1.SessionUpdateSchema, {
     update: {
       case: "vendorErrorRetry",
       value: create(conversationv1.SessionVendorErrorRetrySchema, {
-        ...(scheduled === undefined
+        ...(stated === undefined
           ? {}
-          : {
-              scheduled: create(conversationv1.SessionVendorErrorRetryScheduledSchema, {
-                attempt: scheduled.attempt,
-                nextAttemptAtMs: BigInt(scheduled.atMs),
-                status: scheduled.status,
+          : "attempting" in stated
+            ? {
+                attempting: create(conversationv1.SessionVendorErrorRetryAttemptingSchema, {
+                  attempt: stated.attempt,
+                  status: stated.status,
+                }),
+              }
+            : {
+                scheduled: create(conversationv1.SessionVendorErrorRetryScheduledSchema, {
+                  attempt: stated.attempt,
+                  nextAttemptAtMs: BigInt(stated.atMs),
+                  status: stated.status,
+                }),
               }),
-            }),
       }),
     },
   });
