@@ -22,6 +22,13 @@
  * which forgets any workspace the pointer is no longer over. Focus is read
  * live from `document.activeElement` when a close comes due, so a focused
  * line a redraw removed cannot hold a panel open.
+ *
+ * THE RAIL LOSING THE USER CLOSES EVERY PANEL (`transients.ts`): the page's
+ * focus gone, the page hidden or the selection moved `dismiss`es them, and no
+ * panel opens again until the user is back in the rail (`resume`). Until then
+ * neither a pointer the rail still finds on a trigger (a redraw under it, a
+ * row WebKit re-hovers) nor the focus WebKit hands back to the line it left
+ * reopens one.
  */
 import { log } from "../log.js";
 import type { Dropdowns } from "./dropdowns.js";
@@ -75,6 +82,10 @@ export interface RowHover {
   focusOut(id: string, next: EventTarget | null): void;
   /** The pointer is over TARGET in the rail, or (null) has left it. */
   pointerAt(target: EventTarget | null): void;
+  /** The rail lost the user, for WHY: close every open panel, and open none until `resume`. */
+  dismiss(why: string): void;
+  /** The user is back in the rail: open the panel of the trigger the pointer rests on. */
+  resume(): void;
   /** Cancel every timer: the rail is gone. */
   dispose(): void;
 }
@@ -89,6 +100,8 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
   let copies = new Map<string, DrawnRow[]>();
   const pointers = new Map<string, Pointer>();
   const closeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Set by `dismiss`, cleared by `resume`: no panel opens while it stands. */
+  let suspended = false;
 
   const cancelClose = (id: string): void => {
     const close = closeTimers.get(id);
@@ -173,8 +186,8 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
       const at = pointers.get(id) ?? { trigger: false, panel: false };
       at[part] = true;
       pointers.set(id, at);
-      if (part === "trigger") setOpen(id, true, "hover");
-      else cancelClose(id);
+      if (part === "panel") cancelClose(id);
+      else if (!suspended) setOpen(id, true, "hover");
     },
     leave(id: string, part: HoverPart): void {
       const at = pointers.get(id);
@@ -184,7 +197,7 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
       scheduleClose(id);
     },
     focusIn(id: string): void {
-      setOpen(id, true, "focus");
+      if (!suspended) setOpen(id, true, "focus");
     },
     focusOut(id: string, next: EventTarget | null): void {
       // `focusout` fires BEFORE the next element takes focus, so
@@ -205,6 +218,15 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
         pointers.delete(id);
         scheduleClose(id);
       }
+    },
+    dismiss(why: string): void {
+      suspended = true;
+      for (const id of [...closeTimers.keys()]) cancelClose(id);
+      for (const id of [...openDetails]) setOpen(id, false, why);
+    },
+    resume(): void {
+      suspended = false;
+      for (const [id, at] of pointers) if (at.trigger) setOpen(id, true, "hover");
     },
     dispose(): void {
       for (const id of [...closeTimers.keys()]) cancelClose(id);

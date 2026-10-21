@@ -8,6 +8,7 @@ import {
   type RowHover,
 } from "../../src/sidebar/row-hover.js";
 import { drawRosterFamily, drawRosterRow } from "../../src/sidebar/row.js";
+import { log } from "../../src/log.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { openRow, row, sidebarContext } from "./harness.js";
 
@@ -40,6 +41,7 @@ describe("the row hover gesture", () => {
 
   afterEach(() => {
     hover.dispose();
+    vi.restoreAllMocks();
     vi.useRealTimers();
     document.body.replaceChildren();
   });
@@ -411,6 +413,125 @@ describe("the row hover gesture", () => {
       vi.advanceTimersByTime(HOVER_CLOSE_GRACE_MS);
       // ASSERT
       expect(isOpen(fresh)).toBe(false);
+    });
+  });
+
+  describe("the rail losing the user", () => {
+    it("closes every open panel on a dismiss", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      const b = draw("ws-2");
+      hover.focusIn("ws-1");
+      openByHover("ws-2");
+      // ACT
+      hover.dismiss("the page lost focus");
+      // ASSERT
+      expect([isOpen(a), isOpen(b), [...openDetails]]).toEqual([false, false, []]);
+    });
+
+    it("logs each panel it closes with why", () => {
+      // ARRANGE
+      draw("ws-1");
+      openByHover("ws-1");
+      const debug = vi.spyOn(log, "debug");
+      // ACT
+      hover.dismiss("the selection moved");
+      // ASSERT
+      expect(debug).toHaveBeenCalledWith("toggling a row's detail panel", {
+        operation: "sidebar.row.detail-toggle",
+        context: { workspace: "ws-1", open: false, via: "the selection moved", copies: 1 },
+      });
+    });
+
+    it("lets the page's dropdown registry go of the panel it closed", () => {
+      // ARRANGE
+      draw("ws-1");
+      openByHover("ws-1");
+      hover.dismiss("the page lost focus");
+      const other = { kind: "test", element: document.createElement("div"), openers: [], close: vi.fn() };
+      dropdowns.opened(other);
+      // ACT
+      dropdowns.dismissAll("again");
+      // ASSERT: only the other dropdown is still registered.
+      expect(other.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("cancels a close already pending", () => {
+      // ARRANGE
+      draw("ws-1");
+      openByHover("ws-1");
+      hover.leave("ws-1", "trigger");
+      hover.dismiss("the page lost focus");
+      const debug = vi.spyOn(log, "debug");
+      // ACT
+      vi.runAllTimers();
+      // ASSERT
+      expect(debug).not.toHaveBeenCalled();
+    });
+
+    it("opens no panel for a pointer arriving on a trigger after a dismiss", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.dismiss("the page lost focus");
+      // ACT
+      openByHover("ws-1");
+      // ASSERT
+      expect(isOpen(a)).toBe(false);
+    });
+
+    it("opens no panel for the focus WebKit hands back to a line after a dismiss", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.dismiss("the page lost focus");
+      // ACT
+      hover.focusIn("ws-1");
+      // ASSERT
+      expect(isOpen(a)).toBe(false);
+    });
+
+    it("opens the panel of the trigger the pointer rests on when the user is back", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.dismiss("the page lost focus");
+      openByHover("ws-1");
+      // ACT
+      hover.resume();
+      // ASSERT
+      expect(isOpen(a)).toBe(true);
+    });
+
+    it("opens no panel on resume for a pointer that is on no trigger", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      openByHover("ws-1");
+      hover.dismiss("the page lost focus");
+      hover.pointerAt(document.body);
+      // ACT
+      hover.resume();
+      // ASSERT
+      expect(isOpen(a)).toBe(false);
+    });
+
+    it("answers the pointer again after a resume", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.dismiss("the page lost focus");
+      hover.resume();
+      // ACT
+      openByHover("ws-1");
+      // ASSERT
+      expect(isOpen(a)).toBe(true);
+    });
+
+    it("answers the focus again after a resume", () => {
+      // ARRANGE
+      const a = draw("ws-1");
+      hover.dismiss("the page lost focus");
+      hover.resume();
+      // ACT
+      hover.focusIn("ws-1");
+      // ASSERT
+      expect(isOpen(a)).toBe(true);
     });
   });
 });
