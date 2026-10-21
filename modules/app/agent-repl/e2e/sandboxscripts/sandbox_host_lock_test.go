@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -121,5 +122,74 @@ func TestEveryHostLockClaimsThroughClaimHostLock(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `claim_host_lock "$BUILD_LOCK_DIR"`) {
 		t.Fatalf("acquire_build_lock does not claim through claim_host_lock")
+	}
+}
+
+// TestReclaimDeadHolder: a lock or slot directory is taken over only when the
+// pid it records is gone; a live holder and a claim still writing its pid keep it.
+func TestReclaimDeadHolder(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		pid         string // the recorded pid; "" writes no pid file
+		wantReclaim bool
+	}{
+		{name: "a dead holder's directory is reclaimed", pid: strconv.Itoa(reapedPid(t)), wantReclaim: true},
+		{name: "a live holder's directory is kept", pid: strconv.Itoa(os.Getpid()), wantReclaim: false},
+		{name: "a claim with no pid yet is kept", pid: "", wantReclaim: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange
+			f := newFakeDocker(t)
+			dir := filepath.Join(t.TempDir(), "held")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			if tc.pid != "" {
+				if err := os.WriteFile(filepath.Join(dir, "pid"), []byte(tc.pid+"\n"), 0o644); err != nil {
+					t.Fatalf("write pid: %v", err)
+				}
+			}
+			cmd := exec.Command("bash", "-c", `set -euo pipefail; script=$1; dir=$2; . "$script"; reclaim_dead_holder "$dir" "the test lock"`,
+				"bash", sandboxScript(t), dir)
+			cmd.Env = sandboxEnv(f, filepath.Join(t.TempDir(), "build.lock"))
+
+			// Act
+			out, err := cmd.CombinedOutput()
+
+			// Assert
+			if got := err == nil; got != tc.wantReclaim {
+				t.Fatalf("reclaimed = %v, want %v\n%s", got, tc.wantReclaim, out)
+			}
+			_, statErr := os.Stat(dir)
+			if gone := os.IsNotExist(statErr); gone != tc.wantReclaim {
+				t.Fatalf("directory gone = %v, want %v", gone, tc.wantReclaim)
+			}
+			if logged := strings.Contains(string(out), "reclaiming the test lock from dead pid "+tc.pid); logged != tc.wantReclaim {
+				t.Fatalf("reclaim logged = %v, want %v:\n%s", logged, tc.wantReclaim, out)
+			}
+		})
+	}
+}
+
+// TestEveryTakeoverGoesThroughReclaimDeadHolder: the move-aside that frees a
+// dead holder's directory exists once, in reclaim_dead_holder, so the build
+// lock, the image lock and the slots cannot drift apart in how they reclaim.
+func TestEveryTakeoverGoesThroughReclaimDeadHolder(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	body, err := os.ReadFile(sandboxScript(t))
+	if err != nil {
+		t.Fatalf("read script: %v", err)
+	}
+
+	// Act
+	moves := strings.Count(string(body), `.dead.$$"`)
+
+	// Assert: one `mv ... .dead.$$` and its `rm -rf ... .dead.$$`.
+	if moves != 2 {
+		t.Fatalf("found %d .dead.$$ references, want the 2 of reclaim_dead_holder's one move-aside", moves)
 	}
 }

@@ -204,17 +204,32 @@ release_build_lock() {
   BUILD_LOCK_HELD=""
 }
 
+# reclaim_dead_holder DIR WHAT — take over the pid-recorded lock directory DIR
+# when the process it records is gone: log it as WHAT ("the build lock",
+# "slot slot-1"), move DIR aside and remove it, and succeed. A DIR whose pid is
+# live, or not yet written (a claim in progress), is left alone and fails.
+#
+# The order is what makes the takeover safe: the pid is read from a directory
+# that EXISTS, so nobody can be claiming it at that moment (a claim is `mkdir`,
+# which fails on an existing name); only then is the directory moved aside. A
+# lock therefore becomes claimable only by ceasing to exist, never by being
+# emptied under a live holder.
+reclaim_dead_holder() {
+  local dir=$1 what=$2 pid
+  pid=$(cat "$dir/pid" 2>/dev/null || echo "")
+  [[ -n $pid ]] || return 1
+  kill -0 "$pid" 2>/dev/null && return 1
+  log "reclaiming $what from dead pid $pid"
+  mv "$dir" "$dir.dead.$$" 2>/dev/null && rm -rf "$dir.dead.$$"
+  return 0
+}
+
 # claim_host_lock DIR NAME HOLDER WHY — block until the host-wide lock DIR is
 # this process's, then return. NAME is the lock as the log names it ("build
 # lock"), HOLDER who a live holder is ("another sandbox build"), and WHY the
 # line that says what the lock is for. The caller records DIR as held and
-# installs the trap that releases it.
-#
-# The order is what makes the takeover safe: the pid is read from a lock that
-# EXISTS, so nobody can be claiming it at that moment (a claim is `mkdir`,
-# which fails on an existing name); only then is the directory moved aside. A
-# lock therefore becomes claimable only by ceasing to exist, never by being
-# emptied under a live holder.
+# installs the trap that releases it. A dead holder's lock is taken over
+# (reclaim_dead_holder).
 claim_host_lock() {
   local dir=$1 name=$2 holder=$3 why=$4 waited=0 announced=0 pid
   mkdir -p "$(dirname "$dir")"
@@ -224,12 +239,8 @@ claim_host_lock() {
       (( waited > 0 )) && log "$name acquired after ${waited}s"
       return 0
     fi
+    reclaim_dead_holder "$dir" "the $name" && continue
     pid=$(cat "$dir/pid" 2>/dev/null || echo "")
-    if [[ -n $pid ]] && ! kill -0 "$pid" 2>/dev/null; then
-      log "reclaiming the $name from dead pid $pid"
-      mv "$dir" "$dir.dead.$$" 2>/dev/null && rm -rf "$dir.dead.$$"
-      continue
-    fi
     if (( announced == 0 )); then
       log "WAITING: $holder holds the host $name${pid:+ (pid $pid)}."
       log "  This is the ${name% lock} gate, not a hang: $dir is the lock."
@@ -697,29 +708,14 @@ slot_budget() {
   printf '%s\n' "$n"
 }
 
-# reap_dead_slots frees slots whose holder is gone.
-#
-# The order is what makes it safe: the pid is read from a slot that EXISTS, so
-# no one else can be claiming it at that moment (a claim is `mkdir`, which
-# fails on an existing name); only then is the directory moved aside. A slot
-# therefore becomes claimable only by ceasing to exist, never by being emptied
-# while someone holds it.
+# reap_dead_slots frees slots whose holder is gone (reclaim_dead_holder). A
+# slot mid-claim (created, pid not yet written) is left alone: the claimer
+# writes the pid immediately, and reclaiming it here would race a live run.
 reap_dead_slots() {
-  local slot pid
+  local slot
   for slot in "$SLOT_DIR"/slot-*; do
     [[ -d $slot ]] || continue
-    pid=$(cat "$slot/pid" 2>/dev/null || echo "")
-    if [[ -z $pid ]]; then
-      # A slot mid-claim (created, pid not yet written). Leave it: the
-      # claimer writes the pid immediately, and reclaiming it here would
-      # race a live run.
-      continue
-    fi
-    if kill -0 "$pid" 2>/dev/null; then
-      continue
-    fi
-    log "reclaiming slot $(basename "$slot") from dead pid $pid"
-    mv "$slot" "$slot.dead.$$" 2>/dev/null && rm -rf "$slot.dead.$$"
+    reclaim_dead_holder "$slot" "slot $(basename "$slot")" || true
   done
 }
 
