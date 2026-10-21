@@ -327,8 +327,23 @@ message SessionUpdate {
 // retry at once.
 message SessionVendorErrorRetry {
   // The retry the shim makes next. UNSET when none is scheduled: no failed
-  // turn is being retried, or the latest retry is running as a turn.
+  // turn is being retried, the latest retry is being made (attempting), or
+  // it is running as a turn.
   optional SessionVendorErrorRetryScheduled scheduled = 1;
+  // The retry the shim is making NOW: stated at the code point that makes
+  // it, just before its prompt is delivered, so "retrying now" reflects the
+  // attempt itself and not a countdown reaching zero. At most one of
+  // `scheduled` and `attempting` is set; once the retry is running as a turn,
+  // or was refused, neither is.
+  optional SessionVendorErrorRetryAttempting attempting = 2;
+}
+
+// The retry being made now.
+message SessionVendorErrorRetryAttempting {
+  // Which retry of the chain this is, 1 for the first after the failure.
+  uint32 attempt = 1;
+  // The failure being retried, in the vendor's own words.
+  string status = 2;
 }
 
 // One scheduled retry.

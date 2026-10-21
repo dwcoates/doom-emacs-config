@@ -1859,6 +1859,10 @@ message FooterStatusActivityRetrying {
   // The last attempt the vendor will make before it gives up. Unset when the
   // vendor stated no schedule.
   optional int32 max_attempt = 4;
+  // The attempt is being made at this moment: agent-repl's own retry, stated
+  // as it is made (conversation.v1.SessionVendorErrorRetryAttempting). Drawn
+  // as "retrying now" in place of a countdown; next_attempt is then unset.
+  bool now = 5;
 }
 
 // An auth prompt is up.
