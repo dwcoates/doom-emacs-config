@@ -88,9 +88,6 @@ func TestSetOneShotRefuses(t *testing.T) {
 			ws.OwnerLands = true
 			f.db.with(ws)
 		}, arm: ArmOwnerLands},
-		{name: "a repository with no completion directive", arrange: func(f *fixture) {
-			delete(f.briefs, BriefOneShotCompletionDirective)
-		}, arm: ArmPolicyMissing},
 		{name: "a registered workspace", arrange: func(f *fixture) { delete(f.db.jobs, "w1") }, arm: ArmNoCreationJob},
 	}
 	for _, tt := range tests {
@@ -125,6 +122,27 @@ func TestSetOneShotFailsHardWhenTheMarkCannotBeWritten(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opSetOneShot,
 		Message: "could not record the workspace's one-shot standing"}); !ok {
+		t.Errorf("no error record: %+v", f.log.logger.Records())
+	}
+}
+
+func TestSetOneShotFailsHardWhenTheDaemonsDirectiveCannotBeRead(t *testing.T) {
+	// Arrange: the daemon's own corpus has no completion directive.
+	f := standingWorkspace(t)
+	delete(f.briefs, BriefOneShotCompletionDirective)
+
+	// Act
+	_, err := f.verbs.SetOneShot(context.Background(), "w1", nil, true)
+
+	// Assert
+	if _, refused := AsRefusal(err); err == nil || refused {
+		t.Fatalf("SetOneShot = %v, want a hard failure", err)
+	}
+	if f.db.jobs["w1"].OneShot {
+		t.Error("a failed mark marked the workspace")
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opSetOneShot,
+		Message: "could not read the daemon's one-shot completion directive"}); !ok {
 		t.Errorf("no error record: %+v", f.log.logger.Records())
 	}
 }

@@ -115,9 +115,10 @@ func TestDecorateOneShotRefusesAMisspelledPreamblePlaceholder(t *testing.T) {
 	}
 }
 
-func TestOneShotPolicyBriefsAreTheSameTwoForEveryOneShot(t *testing.T) {
-	// Arrange: there is no finish to vary the required set by.
-	want := []string{BriefAutonomousPreamble, BriefOneShotCompletionDirective}
+func TestOneShotPolicyBriefsAreThePreambleAlone(t *testing.T) {
+	// Arrange: the completion directive is the daemon's own, so a repository
+	// states the preamble alone.
+	want := []string{BriefAutonomousPreamble}
 
 	// Act.
 	got := oneShotPolicyBriefs()
@@ -145,14 +146,14 @@ func TestOneShotMetaSentinelsAreTheCrossSystemLiterals(t *testing.T) {
 	}
 }
 
-func TestTheCompletionDirectiveIsTheLeadAndTheRepositorysDirective(t *testing.T) {
+func TestTheCompletionDirectiveIsTheLeadAndTheDaemonsDirective(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	oneShotBriefs(f)
 	v := f.verbs.(*verbs)
 
 	// Act
-	got, err := v.completionDirective(testPolicy)
+	got, err := v.completionDirective()
 
 	// Assert
 	if err != nil || got != completionDirectiveLead+"DIRECTIVE" {
@@ -168,7 +169,7 @@ func TestTheCompletionDirectiveRefusesAMissingDirective(t *testing.T) {
 	v := f.verbs.(*verbs)
 
 	// Act
-	_, err := v.completionDirective(testPolicy)
+	_, err := v.completionDirective()
 
 	// Assert
 	if err == nil {
@@ -184,7 +185,7 @@ func TestTheDecorationCarriesTheSharedDirective(t *testing.T) {
 	f := newFixture(t)
 	oneShotBriefs(f)
 	v := f.verbs.(*verbs)
-	directive, err := v.completionDirective(testPolicy)
+	directive, err := v.completionDirective()
 	if err != nil {
 		t.Fatalf("completionDirective: %v", err)
 	}
