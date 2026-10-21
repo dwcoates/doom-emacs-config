@@ -4861,7 +4861,7 @@ describe("the rail's search toggle", () => {
 
     // Assert
     expect(rule?.selectors).toEqual([
-      "#ws-sidebar .sb-search-btn:hover",
+      "#ws-sidebar:not(.sb-hover-suspended) .sb-search-btn:hover",
       "#ws-sidebar .sb-search-btn:focus-visible",
       "#ws-sidebar .sb-search-btn.active",
     ]);

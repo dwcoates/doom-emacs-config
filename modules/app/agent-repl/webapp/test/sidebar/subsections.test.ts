@@ -240,10 +240,45 @@ describe("the new-subsection popup", () => {
     expect(sc.arrange.layer.querySelector("[data-subsection-popup]")).toBeNull();
   });
 
-  it("closes when the page loses focus", () => {
+  it("closes when the rail dismisses its dropdowns", () => {
     const { sc } = opened();
-    window.dispatchEvent(new FocusEvent("blur"));
+    sc.dropdowns.dismissAll("the page lost focus");
     expect(sc.arrange.layer.querySelector("[data-subsection-popup]")).toBeNull();
+  });
+
+  it("logs the rail's why when the rail dismisses it", () => {
+    const { sc } = opened();
+    const debug = vi.spyOn(log, "debug");
+    sc.dropdowns.dismissAll("the selection moved");
+    expect(debug).toHaveBeenCalledWith("closing the subsection name popup", {
+      operation: "sidebar.subsection.popup-close",
+      context: { why: "the selection moved" },
+    });
+  });
+
+  it("closes when another dropdown opens", () => {
+    const { sc } = opened();
+    sc.dropdowns.opened({ kind: "test", element: document.createElement("div"), openers: [], close: () => undefined });
+    expect(sc.arrange.layer.querySelector("[data-subsection-popup]")).toBeNull();
+  });
+
+  it("is let go of by the rail once it closed on its own", () => {
+    const { sc, input } = opened();
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    const debug = vi.spyOn(log, "debug");
+    sc.dropdowns.dismissAll("the page lost focus");
+    expect(debug).not.toHaveBeenCalled();
+  });
+
+  it("replaces an open one, which stops listening", () => {
+    const { sc } = opened();
+    (document.querySelector("[data-subsection-create='repo-1']") as HTMLElement).click();
+    const debug = vi.spyOn(log, "debug");
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    expect([
+      sc.arrange.layer.querySelectorAll("[data-subsection-popup]").length,
+      debug.mock.calls.filter(([message]) => message === "closing the subsection name popup").length,
+    ]).toEqual([0, 1]);
   });
 
   it("logs why it closed", () => {
@@ -260,7 +295,6 @@ describe("the new-subsection popup", () => {
     const { input } = opened();
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     const debug = vi.spyOn(log, "debug");
-    window.dispatchEvent(new FocusEvent("blur"));
     document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     expect(debug.mock.calls.filter(([message]) => message === "closing the subsection name popup")).toEqual([]);
   });

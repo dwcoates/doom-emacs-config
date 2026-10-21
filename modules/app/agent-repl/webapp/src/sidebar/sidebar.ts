@@ -30,6 +30,7 @@ import { watchStream } from "../rpc/streams.js";
 import { AttentionRegistry, type BlinkTimers } from "./attention.js";
 import { createDropdowns } from "./dropdowns.js";
 import { createRowHover } from "./row-hover.js";
+import { installTransients } from "./transients.js";
 import { createArrangeHold } from "./arrange.js";
 import { createSidebarView } from "./view.js";
 import type { RailContext } from "./context.js";
@@ -281,17 +282,12 @@ function mountSidebarIn(
     rail.dropdowns.dismissOutside(event.target);
   };
   host.addEventListener("click", dismiss);
-  // THE RAIL SAYS WHERE THE POINTER IS (row-hover.ts): a row drawn under a
-  // resting pointer never sees it leave, but the host, which no draw
-  // replaces, sees every move and the pointer leaving the rail.
-  const pointerMoved = (event: MouseEvent): void => {
-    rail.rowHover.pointerAt(event.target);
-  };
-  const pointerLeft = (): void => {
-    rail.rowHover.pointerAt(null);
-  };
-  host.addEventListener("mousemove", pointerMoved);
-  host.addEventListener("mouseleave", pointerLeft);
+  // THE RAIL LETS GO OF WHAT THE POINTER RAISED (transients.ts) the moment
+  // the user leaves it: the page's focus gone, the page hidden, the selection
+  // moved. The host, which no draw replaces, also says where the pointer is
+  // (row-hover.ts): a row drawn under a resting pointer never sees it leave,
+  // but the host sees every move and the pointer leaving the rail.
+  const transients = installTransients(host, { dropdowns, rowHover: rail.rowHover, win: window });
 
   // ONLY A PAGE'S OWN SIDEBAR IS GATED: the webhost's is the one on screen.
   const unseen =
@@ -330,6 +326,7 @@ function mountSidebarIn(
         });
         shownAhead = null;
       }
+      transients.selected(shownAhead ?? current?.id ?? null);
       // ONLY A SEEN PAGE DRAWS (unseen.ts): an unseen one keeps the newest
       // roster and draws it once when it is seen again.
       // A PUSH WAITS WHILE THE PAGE HOLDS ITS OWN DRAWING of an arrangement
@@ -405,6 +402,7 @@ function mountSidebarIn(
   return {
     markShown(id: string): void {
       shownAhead = id;
+      transients.selected(id);
       let rows = 0;
       for (const row of queryAll<HTMLElement>(body, "[data-roster-row]")) {
         const highlighted = row.getAttribute("data-roster-row") === id;
@@ -433,8 +431,7 @@ function mountSidebarIn(
       window.removeEventListener("resize", replace);
       window.removeEventListener("scroll", replace, true);
       host.removeEventListener("click", dismiss);
-      host.removeEventListener("mousemove", pointerMoved);
-      host.removeEventListener("mouseleave", pointerLeft);
+      transients.dispose();
       rail.rowHover.dispose();
       disposeWorkspaceRoster(rail);
       reveal.dispose();

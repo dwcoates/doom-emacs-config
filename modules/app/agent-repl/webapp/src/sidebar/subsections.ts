@@ -165,13 +165,14 @@ export interface NamePopupSpec {
 /**
  * Open the name popup under ANCHOR, replacing any open one.
  *
- * Enter or the button sends; Escape, a press anywhere outside it, or the page
- * losing focus (a click into Emacs outside the page, which the page never
- * sees as a press) closes it. A blank name is not sent: the contract refuses one, so the popup keeps
- * waiting rather than provoking the refusal.
+ * Enter or the button sends; Escape or a press anywhere outside it closes it.
+ * It is one of the rail's dropdowns (`dropdowns.ts`), so opening another
+ * dropdown closes it, and so does the rail losing the user (`transients.ts`:
+ * the page losing focus, as a click into Emacs outside the page does, which
+ * the page never sees as a press). A blank name is not sent: the contract
+ * refuses one, so the popup keeps waiting rather than provoking the refusal.
  */
 export function openSubsectionNamePopup(sc: SidebarContext, anchor: HTMLElement, spec: NamePopupSpec): HTMLElement {
-  for (const open of queryAll(sc.arrange.layer, `.${SUBSECTION_POPUP_CLASS}`)) open.remove();
   const popup = document.createElement("div");
   popup.className = SUBSECTION_POPUP_CLASS;
   popup.setAttribute("data-subsection-popup", "");
@@ -195,12 +196,11 @@ export function openSubsectionNamePopup(sc: SidebarContext, anchor: HTMLElement,
   const outside = (event: PointerEvent): void => {
     if (!popup.contains(event.target as Node)) close("a press outside it");
   };
-  const blurred = (): void => close("the page lost focus");
   const close = (why: string): void => {
     log.debug("closing the subsection name popup", { operation: "sidebar.subsection.popup-close", context: { why } });
     popup.remove();
     win.document.removeEventListener("pointerdown", outside, true);
-    win.removeEventListener("blur", blurred);
+    sc.dropdowns.released(popup);
   };
   const send = (): void => {
     const name = input.value.trim();
@@ -219,7 +219,9 @@ export function openSubsectionNamePopup(sc: SidebarContext, anchor: HTMLElement,
     if (event.key === "Escape") close("Escape");
   });
   win.document.addEventListener("pointerdown", outside, true);
-  win.addEventListener("blur", blurred);
+  // Registered before it is drawn, so the popup it replaces is closed (and
+  // stops listening) first.
+  sc.dropdowns.opened({ kind: "subsection-popup", element: popup, openers: [anchor], close });
   log.debug("opening the subsection name popup", {
     operation: "sidebar.subsection.popup-open",
     context: { submit: spec.submitLabel },

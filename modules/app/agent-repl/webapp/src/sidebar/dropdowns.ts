@@ -1,12 +1,14 @@
 /**
  * dropdowns — the ONE dismiss mechanism every sidebar dropdown shares (owner
- * ruling, 2026-10-06): a row's "⋯" menu, a task's "⋯" menu and a row's detail
- * popover (the status indicator's dropdown).
+ * ruling, 2026-10-06): a row's "⋯" menu, a task's "⋯" menu, a row's detail
+ * popover (the status indicator's dropdown) and a subsection's name popup.
  *
  * - A click anywhere in the rail outside every open dropdown closes them all;
  *   the user never has to click the opener again.
  * - A click inside an open dropdown, or on its own opener, keeps it open.
  * - Opening one closes whichever other one was open: at most one stands.
+ * - The rail losing the user (`transients.ts`: the page's focus gone, the
+ *   page hidden, the selection moved) closes every one at once.
  *
  * WHY NOT THE TOPBAR'S REVEAL LAYER. `topbar/reveal.ts` answers the same two
  * gestures, but it is a positioned layer that rebuilds its reveals from
@@ -33,8 +35,8 @@ export interface Dropdown {
   element: HTMLElement;
   /** The controls that open it: a click on one is the opener's, not a dismiss. */
   openers: readonly HTMLElement[];
-  /** Close it: hide the box and forget whatever the page remembered of it. */
-  close(): void;
+  /** Close it, for WHY: hide the box and forget whatever the page remembered of it. */
+  close(why: string): void;
 }
 
 export interface Dropdowns {
@@ -46,6 +48,8 @@ export interface Dropdowns {
   released(element: HTMLElement): void;
   /** A click landed on TARGET: close every open dropdown it is outside of. */
   dismissOutside(target: EventTarget | null): void;
+  /** Close every open dropdown, for WHY. */
+  dismissAll(why: string): void;
 }
 
 /** Whether A and B are the same logical dropdown. */
@@ -61,7 +65,7 @@ export function createDropdowns(): Dropdowns {
       operation: "sidebar.dropdowns.close",
       context: { kind: dropdown.kind, why },
     });
-    dropdown.close();
+    dropdown.close(why);
   };
 
   return {
@@ -86,6 +90,11 @@ export function createDropdowns(): Dropdowns {
       const closing = open.filter((d) => !kept.includes(d));
       open = kept;
       for (const dropdown of closing) close(dropdown, "a click outside it");
+    },
+    dismissAll(why: string): void {
+      const closing = open;
+      open = [];
+      for (const dropdown of closing) close(dropdown, why);
     },
   };
 }
