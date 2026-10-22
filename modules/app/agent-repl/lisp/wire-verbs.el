@@ -4735,7 +4735,8 @@ ARM is `:plan' (V the plan plist) or `:nothing-to-roll-back' (V nil)."
                                     "PlanRollbackNothingToRollBack" v))))))))
 
 (defun agent-repl-wire-verbs--decode-detail (message json)
-  "Decode MESSAGE, which carries only its `detail' sentence, from JSON into (:detail)."
+  "Decode MESSAGE, which carries only its `detail' sentence, from JSON.
+Returns (:detail DETAIL)."
   (agent-repl-wire-verbs--check-keys message json '(detail))
   (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)))
 

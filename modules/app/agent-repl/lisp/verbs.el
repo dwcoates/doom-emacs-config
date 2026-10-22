@@ -2721,7 +2721,8 @@ repository says so before the commission is typed."
 ;;;; ---- A fixed repository on the roster ---------------------------------
 
 (defun agent-repl-verbs--repository-name (repository)
-  "Return the name of REPOSITORY, a `RepositoryRef\=': its main checkout\='s basename.
+  "Return the name of REPOSITORY, a `RepositoryRef\='.
+The name is its main checkout\='s basename.
 Every `RepositoryRef\=' the roster hands out carries its directory, so a
 ref without one is a bug: it is recorded through the canonical error log
 and fails hard."
