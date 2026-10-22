@@ -1264,6 +1264,26 @@ func validateSetWorkspaceCorrespondenceRequest(req *agentreplv1.SetWorkspaceCorr
 	return invalid("mark", "a mark arm (awaiting or clear) is required")
 }
 
+// validateSetWorkspacePrincipalLinkRequest is SetWorkspacePrincipalLinkRequest's
+// base function: a workspace and a change arm, and a set names a url. Whether
+// the url is one the browser opens is the verb's invalid_link refusal, not a
+// malformed request.
+func validateSetWorkspacePrincipalLinkRequest(req *agentreplv1.SetWorkspacePrincipalLinkRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	switch change := req.GetChange().(type) {
+	case *agentreplv1.SetWorkspacePrincipalLinkRequest_Set:
+		if strings.TrimSpace(change.Set.GetUrl()) == "" {
+			return invalid("set.url", "a set names its url; clearing is the clear arm")
+		}
+		return nil
+	case *agentreplv1.SetWorkspacePrincipalLinkRequest_Clear:
+		return nil
+	}
+	return invalid("change", "a change arm (set or clear) is required")
+}
+
 // validateUpdateDeployHoldRequest is UpdateDeployHoldRequest's base function:
 // a repository and an action arm.
 func validateUpdateDeployHoldRequest(req *agentreplv1.UpdateDeployHoldRequest) *connect.Error {

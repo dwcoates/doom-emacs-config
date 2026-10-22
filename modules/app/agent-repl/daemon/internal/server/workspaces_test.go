@@ -910,6 +910,91 @@ func TestSetWorkspaceHiddenMapsTheVerbsRefusal(t *testing.T) {
 	}
 }
 
+// ---- SetWorkspacePrincipalLink ---------------------------------------------
+
+// TestSetWorkspacePrincipalLinkHandsTheChangeToTheVerb pins each change arm
+// reaching the verb: a set as its url, a clear as no link.
+func TestSetWorkspacePrincipalLinkHandsTheChangeToTheVerb(t *testing.T) {
+	tests := []struct {
+		name   string
+		change *agentreplv1.SetWorkspacePrincipalLinkRequest
+		want   string
+	}{
+		{"set", &agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref(),
+			Change: &agentreplv1.SetWorkspacePrincipalLinkRequest_Set{Set: &agentreplv1.SetWorkspacePrincipalLinkSet{Url: "https://example.com/pr/1"}}}, "https://example.com/pr/1"},
+		{"clear", &agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref(),
+			Change: &agentreplv1.SetWorkspacePrincipalLinkRequest_Clear{Clear: &agentreplv1.SetWorkspacePrincipalLinkClear{}}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			resp, err := h.Client.SetWorkspacePrincipalLink(context.Background(), connect.NewRequest(tt.change))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetWorkspacePrincipalLink: %v", err)
+			}
+			if resp.Msg.GetSuccess() == nil {
+				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+			}
+			if len(h.Verbs.principalLinks) != 1 || h.Verbs.principalLinks[0] != tt.want {
+				t.Fatalf("links = %q, want [%q]", h.Verbs.principalLinks, tt.want)
+			}
+		})
+	}
+}
+
+// TestSetWorkspacePrincipalLinkRefusesAnUnknownWorkspace pins the
+// unknown_workspace arm, with no verb reached.
+func TestSetWorkspacePrincipalLinkRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	resp, err := h.Client.SetWorkspacePrincipalLink(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspacePrincipalLinkRequest{
+			Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"},
+			Change:    &agentreplv1.SetWorkspacePrincipalLinkRequest_Clear{Clear: &agentreplv1.SetWorkspacePrincipalLinkClear{}},
+		}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetWorkspacePrincipalLink: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.principalLinks) != 0 {
+		t.Fatalf("links = %q, want none for an unknown workspace", h.Verbs.principalLinks)
+	}
+}
+
+// TestSetWorkspacePrincipalLinkMapsAnInvalidLink pins the verb's invalid_link
+// refusal answering its arm with the url and the reason.
+func TestSetWorkspacePrincipalLinkMapsAnInvalidLink(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Verbs.setPrincipalLinkErr = &workspace.Refusal{Arm: workspace.ArmInvalidLink, Reason: "not http",
+		Fields: map[string]any{"url": "ftp://x", "reason": "url must be http or https"}}
+
+	// Act
+	resp, err := h.Client.SetWorkspacePrincipalLink(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref(),
+			Change: &agentreplv1.SetWorkspacePrincipalLinkRequest_Set{Set: &agentreplv1.SetWorkspacePrincipalLinkSet{Url: "ftp://x"}}}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetWorkspacePrincipalLink: %v", err)
+	}
+	got := resp.Msg.GetError().GetInvalidLink()
+	if got.GetUrl() != "ftp://x" || got.GetReason() != "url must be http or https" {
+		t.Fatalf("result = %v, want invalid_link carrying the url and reason", resp.Msg.GetResult())
+	}
+}
+
 // TestFamilyRefusalsReachEveryRpcThatCarriesThem pins that a family rule's
 // refusal, wrapped by whichever verb carried it up, answers on the rpc's own
 // shared arm.

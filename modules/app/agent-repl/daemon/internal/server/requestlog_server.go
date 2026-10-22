@@ -289,6 +289,13 @@ func (s *requestLoggingServer) SetWorkspacePriority(
 	return serveUnary(s, ctx, "SetWorkspacePriority", req, s.server.SetWorkspacePriority)
 }
 
+func (s *requestLoggingServer) SetWorkspacePrincipalLink(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetWorkspacePrincipalLinkRequest],
+) (*connect.Response[agentreplv1.SetWorkspacePrincipalLinkResponse], error) {
+	return serveUnary(s, ctx, "SetWorkspacePrincipalLink", req, s.server.SetWorkspacePrincipalLink)
+}
+
 func (s *requestLoggingServer) SetWorkspaceParent(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetWorkspaceParentRequest],
