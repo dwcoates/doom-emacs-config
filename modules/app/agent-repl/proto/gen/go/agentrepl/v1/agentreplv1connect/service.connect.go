@@ -52,6 +52,11 @@ const (
 	// AgentReplAdjustFeedTextScaleProcedure is the fully-qualified name of the AgentRepl's
 	// AdjustFeedTextScale RPC.
 	AgentReplAdjustFeedTextScaleProcedure = "/agentrepl.v1.AgentRepl/AdjustFeedTextScale"
+	// AgentReplOpenFeedImageProcedure is the fully-qualified name of the AgentRepl's OpenFeedImage RPC.
+	AgentReplOpenFeedImageProcedure = "/agentrepl.v1.AgentRepl/OpenFeedImage"
+	// AgentReplCloseFeedImageProcedure is the fully-qualified name of the AgentRepl's CloseFeedImage
+	// RPC.
+	AgentReplCloseFeedImageProcedure = "/agentrepl.v1.AgentRepl/CloseFeedImage"
 	// AgentReplRequestCommandSupportProcedure is the fully-qualified name of the AgentRepl's
 	// RequestCommandSupport RPC.
 	AgentReplRequestCommandSupportProcedure = "/agentrepl.v1.AgentRepl/RequestCommandSupport"
@@ -323,6 +328,8 @@ var (
 	agentReplSelectFeedRowMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SelectFeedRow")
 	agentReplFoldMergeBubbleMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("FoldMergeBubble")
 	agentReplAdjustFeedTextScaleMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("AdjustFeedTextScale")
+	agentReplOpenFeedImageMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("OpenFeedImage")
+	agentReplCloseFeedImageMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("CloseFeedImage")
 	agentReplRequestCommandSupportMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("RequestCommandSupport")
 	agentReplOpenFeedMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("OpenFeed")
 	agentReplWatchFeedMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("WatchFeed")
@@ -440,6 +447,14 @@ type AgentReplClient interface {
 	// persisted, pushed to every open feed's watch as a FeedTextScale frame. See
 	// endpoint_adjust_feed_text_scale.proto.
 	AdjustFeedTextScale(context.Context, *connect.Request[v1.AdjustFeedTextScaleRequest]) (*connect.Response[v1.AdjustFeedTextScaleResponse], error)
+	// Open one image large over the workspace's feed, from a click on it in the
+	// Emacs input window or the webapp. Daemon-held per workspace, pushed on the
+	// root feed's watch as a FeedImageOverlay frame. See
+	// endpoint_open_feed_image.proto.
+	OpenFeedImage(context.Context, *connect.Request[v1.OpenFeedImageRequest]) (*connect.Response[v1.OpenFeedImageResponse], error)
+	// Close the image open over the workspace's feed. See
+	// endpoint_close_feed_image.proto.
+	CloseFeedImage(context.Context, *connect.Request[v1.CloseFeedImageRequest]) (*connect.Response[v1.CloseFeedImageResponse], error)
 	// The refusal card's "engineer support for it" offer: spawn a support
 	// workspace with a daemon-composed brief. See
 	// endpoint_request_command_support.proto.
@@ -778,6 +793,18 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplAdjustFeedTextScaleProcedure,
 			connect.WithSchema(agentReplAdjustFeedTextScaleMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		openFeedImage: connect.NewClient[v1.OpenFeedImageRequest, v1.OpenFeedImageResponse](
+			httpClient,
+			baseURL+AgentReplOpenFeedImageProcedure,
+			connect.WithSchema(agentReplOpenFeedImageMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		closeFeedImage: connect.NewClient[v1.CloseFeedImageRequest, v1.CloseFeedImageResponse](
+			httpClient,
+			baseURL+AgentReplCloseFeedImageProcedure,
+			connect.WithSchema(agentReplCloseFeedImageMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		requestCommandSupport: connect.NewClient[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse](
@@ -1379,6 +1406,8 @@ type agentReplClient struct {
 	selectFeedRow              *connect.Client[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse]
 	foldMergeBubble            *connect.Client[v1.FoldMergeBubbleRequest, v1.FoldMergeBubbleResponse]
 	adjustFeedTextScale        *connect.Client[v1.AdjustFeedTextScaleRequest, v1.AdjustFeedTextScaleResponse]
+	openFeedImage              *connect.Client[v1.OpenFeedImageRequest, v1.OpenFeedImageResponse]
+	closeFeedImage             *connect.Client[v1.CloseFeedImageRequest, v1.CloseFeedImageResponse]
 	requestCommandSupport      *connect.Client[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse]
 	openFeed                   *connect.Client[v1.OpenFeedRequest, v1.OpenFeedResponse]
 	watchFeed                  *connect.Client[v1.WatchFeedRequest, v1.WatchFeedResponse]
@@ -1496,6 +1525,16 @@ func (c *agentReplClient) FoldMergeBubble(ctx context.Context, req *connect.Requ
 // AdjustFeedTextScale calls agentrepl.v1.AgentRepl.AdjustFeedTextScale.
 func (c *agentReplClient) AdjustFeedTextScale(ctx context.Context, req *connect.Request[v1.AdjustFeedTextScaleRequest]) (*connect.Response[v1.AdjustFeedTextScaleResponse], error) {
 	return c.adjustFeedTextScale.CallUnary(ctx, req)
+}
+
+// OpenFeedImage calls agentrepl.v1.AgentRepl.OpenFeedImage.
+func (c *agentReplClient) OpenFeedImage(ctx context.Context, req *connect.Request[v1.OpenFeedImageRequest]) (*connect.Response[v1.OpenFeedImageResponse], error) {
+	return c.openFeedImage.CallUnary(ctx, req)
+}
+
+// CloseFeedImage calls agentrepl.v1.AgentRepl.CloseFeedImage.
+func (c *agentReplClient) CloseFeedImage(ctx context.Context, req *connect.Request[v1.CloseFeedImageRequest]) (*connect.Response[v1.CloseFeedImageResponse], error) {
+	return c.closeFeedImage.CallUnary(ctx, req)
 }
 
 // RequestCommandSupport calls agentrepl.v1.AgentRepl.RequestCommandSupport.
@@ -2001,6 +2040,14 @@ type AgentReplHandler interface {
 	// persisted, pushed to every open feed's watch as a FeedTextScale frame. See
 	// endpoint_adjust_feed_text_scale.proto.
 	AdjustFeedTextScale(context.Context, *connect.Request[v1.AdjustFeedTextScaleRequest]) (*connect.Response[v1.AdjustFeedTextScaleResponse], error)
+	// Open one image large over the workspace's feed, from a click on it in the
+	// Emacs input window or the webapp. Daemon-held per workspace, pushed on the
+	// root feed's watch as a FeedImageOverlay frame. See
+	// endpoint_open_feed_image.proto.
+	OpenFeedImage(context.Context, *connect.Request[v1.OpenFeedImageRequest]) (*connect.Response[v1.OpenFeedImageResponse], error)
+	// Close the image open over the workspace's feed. See
+	// endpoint_close_feed_image.proto.
+	CloseFeedImage(context.Context, *connect.Request[v1.CloseFeedImageRequest]) (*connect.Response[v1.CloseFeedImageResponse], error)
 	// The refusal card's "engineer support for it" offer: spawn a support
 	// workspace with a daemon-composed brief. See
 	// endpoint_request_command_support.proto.
@@ -2335,6 +2382,18 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplAdjustFeedTextScaleProcedure,
 		svc.AdjustFeedTextScale,
 		connect.WithSchema(agentReplAdjustFeedTextScaleMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplOpenFeedImageHandler := connect.NewUnaryHandler(
+		AgentReplOpenFeedImageProcedure,
+		svc.OpenFeedImage,
+		connect.WithSchema(agentReplOpenFeedImageMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplCloseFeedImageHandler := connect.NewUnaryHandler(
+		AgentReplCloseFeedImageProcedure,
+		svc.CloseFeedImage,
+		connect.WithSchema(agentReplCloseFeedImageMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplRequestCommandSupportHandler := connect.NewUnaryHandler(
@@ -2937,6 +2996,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplFoldMergeBubbleHandler.ServeHTTP(w, r)
 		case AgentReplAdjustFeedTextScaleProcedure:
 			agentReplAdjustFeedTextScaleHandler.ServeHTTP(w, r)
+		case AgentReplOpenFeedImageProcedure:
+			agentReplOpenFeedImageHandler.ServeHTTP(w, r)
+		case AgentReplCloseFeedImageProcedure:
+			agentReplCloseFeedImageHandler.ServeHTTP(w, r)
 		case AgentReplRequestCommandSupportProcedure:
 			agentReplRequestCommandSupportHandler.ServeHTTP(w, r)
 		case AgentReplOpenFeedProcedure:
@@ -3154,6 +3217,14 @@ func (UnimplementedAgentReplHandler) FoldMergeBubble(context.Context, *connect.R
 
 func (UnimplementedAgentReplHandler) AdjustFeedTextScale(context.Context, *connect.Request[v1.AdjustFeedTextScaleRequest]) (*connect.Response[v1.AdjustFeedTextScaleResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AdjustFeedTextScale is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) OpenFeedImage(context.Context, *connect.Request[v1.OpenFeedImageRequest]) (*connect.Response[v1.OpenFeedImageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.OpenFeedImage is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) CloseFeedImage(context.Context, *connect.Request[v1.CloseFeedImageRequest]) (*connect.Response[v1.CloseFeedImageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.CloseFeedImage is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RequestCommandSupport(context.Context, *connect.Request[v1.RequestCommandSupportRequest]) (*connect.Response[v1.RequestCommandSupportResponse], error) {

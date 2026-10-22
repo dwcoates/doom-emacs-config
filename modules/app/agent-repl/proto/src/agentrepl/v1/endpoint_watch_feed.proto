@@ -19,6 +19,7 @@ package agentrepl.v1;
 
 import "frontend/v1/feed.proto";
 import "frontend/v1/feed_held.proto";
+import "frontend/v1/feed_image_overlay.proto";
 import "agentrepl/v1/feed_token.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -35,8 +36,9 @@ message WatchFeedRequest {
 // task bubble another act touched). The client upserts by FeedRow.id.
 //
 // A frame carries EXACTLY ONE of a row upsert (`row`), a response-selection
-// push (`selection`), a feed-text-scale push (`feed_text_scale`), or a
-// held-section change (`held`), never more than one. The selection push is the daemon's per-workspace
+// push (`selection`), a feed-text-scale push (`feed_text_scale`), a
+// held-section change (`held`), or an image-overlay push (`image_overlay`),
+// never more than one. The selection push is the daemon's per-workspace
 // reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
 // the ROOT feed's watch so the webapp recolors the selected final-response
 // bubble, center-scrolls it, and suppresses tail-follow while a selection is
@@ -61,6 +63,11 @@ message WatchFeedResponse {
   // with its rows, so a tail opened at OpenFeed's pin misses no change of the
   // section either.
   optional WatchFeedHeldChange held = 4;
+  // The workspace's image overlay, whole. Set on an image-overlay frame;
+  // unset otherwise. Carried on the ROOT feed's watch only, and the current
+  // overlay is sent the moment a root watch is accepted, so a page that opens
+  // late draws what is open.
+  optional frontend.v1.FeedImageOverlay image_overlay = 5;
 }
 
 // One change of the root feed's held section: the section as it now stands,

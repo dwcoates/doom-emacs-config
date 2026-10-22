@@ -1,0 +1,55 @@
+// feed_image_overlay.proto — THE IMAGE OVERLAY: one image drawn large over
+// the feed's rows, opened by a click on an image anywhere -- a thumbnail in
+// the Emacs input window, a prompt bubble's image, a held card's image, a
+// tool card's image -- and closed by a click on the overlay or Escape.
+//
+//   ┌ feed ─────────────────────────────────────────┐
+//   │ ┌ overlay ──────────────────────────────────┐ │   FeedImageOverlay.open
+//   │ │                                           │ │
+//   │ │              [ the image ]                │ │   FeedImageOverlayOpen.image
+//   │ │                                           │ │
+//   │ └───────────────────────────────────────────┘ │
+//   └───────────────────────────────────────────────┘
+//
+// The overlay sits over the part of the feed the rows stream into, just shy
+// of its width and height, so the rows stay visible around its edge: it is
+// not a full-window viewer.
+//
+// THE DAEMON HOLDS IT, PER WORKSPACE. A click in Emacs and a click in the
+// webapp are two producers of one state, so the state lives where both can
+// reach it: the daemon keeps each workspace's overlay and pushes it on that
+// workspace's ROOT feed watch (WatchFeedResponse.image_overlay). It survives
+// switching away from the workspace and back, and a page that opens late is
+// told what is open the moment its watch is accepted.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// The image overlay of one workspace's feed, whole. Every change replaces it.
+message FeedImageOverlay {
+  // Whether an image is open over the feed. THE ARM IS THE STATE: a closed
+  // overlay is an arm, never an unset image.
+  oneof state {
+    // No image is open; the feed is drawn as usual.
+    FeedImageOverlayClosed closed = 1;
+    // An image is open over the feed's rows.
+    FeedImageOverlayOpen open = 2;
+  }
+}
+
+// No image is open over the feed. Empty: the arm is the whole fact.
+message FeedImageOverlayClosed {}
+
+// An image open over the feed's rows.
+message FeedImageOverlayOpen {
+  // The image, resolved exactly as the feed resolves one it draws: a source
+  // the webview loads and its alt text. The overlay draws it as large as fits
+  // its box, aspect kept; a source that fails to load is drawn as the
+  // feed's "Image no longer available" note in its place.
+  FeedImageBlock image = 1;
+}

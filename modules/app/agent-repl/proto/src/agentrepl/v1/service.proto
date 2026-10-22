@@ -19,6 +19,8 @@ import "agentrepl/v1/endpoint_plan_rollback.proto";
 import "agentrepl/v1/endpoint_list_rollback_prompts.proto";
 import "agentrepl/v1/endpoint_roll_back.proto";
 import "agentrepl/v1/endpoint_adjust_feed_text_scale.proto";
+import "agentrepl/v1/endpoint_open_feed_image.proto";
+import "agentrepl/v1/endpoint_close_feed_image.proto";
 import "agentrepl/v1/endpoint_open_feed.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
 import "agentrepl/v1/endpoint_get_feed_page.proto";
@@ -135,6 +137,16 @@ service AgentRepl {
   // persisted, pushed to every open feed's watch as a FeedTextScale frame. See
   // endpoint_adjust_feed_text_scale.proto.
   rpc AdjustFeedTextScale(AdjustFeedTextScaleRequest) returns (AdjustFeedTextScaleResponse);
+
+  // Open one image large over the workspace's feed, from a click on it in the
+  // Emacs input window or the webapp. Daemon-held per workspace, pushed on the
+  // root feed's watch as a FeedImageOverlay frame. See
+  // endpoint_open_feed_image.proto.
+  rpc OpenFeedImage(OpenFeedImageRequest) returns (OpenFeedImageResponse);
+
+  // Close the image open over the workspace's feed. See
+  // endpoint_close_feed_image.proto.
+  rpc CloseFeedImage(CloseFeedImageRequest) returns (CloseFeedImageResponse);
 
   // The refusal card's "engineer support for it" offer: spawn a support
   // workspace with a daemon-composed brief. See

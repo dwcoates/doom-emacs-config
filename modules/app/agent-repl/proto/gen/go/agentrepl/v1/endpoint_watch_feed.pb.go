@@ -89,8 +89,9 @@ func (x *WatchFeedRequest) GetWatch() *FeedWatchToken {
 // task bubble another act touched). The client upserts by FeedRow.id.
 //
 // A frame carries EXACTLY ONE of a row upsert (`row`), a response-selection
-// push (`selection`), a feed-text-scale push (`feed_text_scale`), or a
-// held-section change (`held`), never more than one. The selection push is the daemon's per-workspace
+// push (`selection`), a feed-text-scale push (`feed_text_scale`), a
+// held-section change (`held`), or an image-overlay push (`image_overlay`),
+// never more than one. The selection push is the daemon's per-workspace
 // reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
 // the ROOT feed's watch so the webapp recolors the selected final-response
 // bubble, center-scrolls it, and suppresses tail-follow while a selection is
@@ -115,7 +116,12 @@ type WatchFeedResponse struct {
 	// otherwise. Carried on the ROOT feed's watch only, in publication order
 	// with its rows, so a tail opened at OpenFeed's pin misses no change of the
 	// section either.
-	Held          *WatchFeedHeldChange `protobuf:"bytes,4,opt,name=held,proto3,oneof" json:"held,omitempty"`
+	Held *WatchFeedHeldChange `protobuf:"bytes,4,opt,name=held,proto3,oneof" json:"held,omitempty"`
+	// The workspace's image overlay, whole. Set on an image-overlay frame;
+	// unset otherwise. Carried on the ROOT feed's watch only, and the current
+	// overlay is sent the moment a root watch is accepted, so a page that opens
+	// late draws what is open.
+	ImageOverlay  *v1.FeedImageOverlay `protobuf:"bytes,5,opt,name=image_overlay,json=imageOverlay,proto3,oneof" json:"image_overlay,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -174,6 +180,13 @@ func (x *WatchFeedResponse) GetFeedTextScale() *v1.FeedTextScale {
 func (x *WatchFeedResponse) GetHeld() *WatchFeedHeldChange {
 	if x != nil {
 		return x.Held
+	}
+	return nil
+}
+
+func (x *WatchFeedResponse) GetImageOverlay() *v1.FeedImageOverlay {
+	if x != nil {
+		return x.ImageOverlay
 	}
 	return nil
 }
@@ -325,18 +338,20 @@ var File_agentrepl_v1_endpoint_watch_feed_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_watch_feed_proto_rawDesc = "" +
 	"\n" +
-	"&agentrepl/v1/endpoint_watch_feed.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1bfrontend/v1/feed_held.proto\x1a\x1dagentrepl/v1/feed_token.proto\"F\n" +
+	"&agentrepl/v1/endpoint_watch_feed.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1bfrontend/v1/feed_held.proto\x1a$frontend/v1/feed_image_overlay.proto\x1a\x1dagentrepl/v1/feed_token.proto\"F\n" +
 	"\x10WatchFeedRequest\x122\n" +
-	"\x05watch\x18\x01 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\"\xaa\x02\n" +
+	"\x05watch\x18\x01 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\"\x85\x03\n" +
 	"\x11WatchFeedResponse\x12&\n" +
 	"\x03row\x18\x01 \x01(\v2\x14.frontend.v1.FeedRowR\x03row\x12=\n" +
 	"\tselection\x18\x02 \x01(\v2\x1a.frontend.v1.FeedSelectionH\x00R\tselection\x88\x01\x01\x12G\n" +
 	"\x0ffeed_text_scale\x18\x03 \x01(\v2\x1a.frontend.v1.FeedTextScaleH\x01R\rfeedTextScale\x88\x01\x01\x12:\n" +
-	"\x04held\x18\x04 \x01(\v2!.agentrepl.v1.WatchFeedHeldChangeH\x02R\x04held\x88\x01\x01B\f\n" +
+	"\x04held\x18\x04 \x01(\v2!.agentrepl.v1.WatchFeedHeldChangeH\x02R\x04held\x88\x01\x01\x12G\n" +
+	"\rimage_overlay\x18\x05 \x01(\v2\x1d.frontend.v1.FeedImageOverlayH\x03R\fimageOverlay\x88\x01\x01B\f\n" +
 	"\n" +
 	"_selectionB\x12\n" +
 	"\x10_feed_text_scaleB\a\n" +
-	"\x05_held\"\xa1\x01\n" +
+	"\x05_heldB\x10\n" +
+	"\x0e_image_overlay\"\xa1\x01\n" +
 	"\x13WatchFeedHeldChange\x12)\n" +
 	"\x04held\x18\x01 \x01(\v2\x15.frontend.v1.FeedHeldR\x04held\x12(\n" +
 	"\x04rows\x18\x02 \x03(\v2\x14.frontend.v1.FeedRowR\x04rows\x125\n" +
@@ -367,8 +382,9 @@ var file_agentrepl_v1_endpoint_watch_feed_proto_goTypes = []any{
 	(*v1.FeedRow)(nil),          // 5: frontend.v1.FeedRow
 	(*v1.FeedSelection)(nil),    // 6: frontend.v1.FeedSelection
 	(*v1.FeedTextScale)(nil),    // 7: frontend.v1.FeedTextScale
-	(*v1.FeedHeld)(nil),         // 8: frontend.v1.FeedHeld
-	(*v1.FeedId)(nil),           // 9: frontend.v1.FeedId
+	(*v1.FeedImageOverlay)(nil), // 8: frontend.v1.FeedImageOverlay
+	(*v1.FeedHeld)(nil),         // 9: frontend.v1.FeedHeld
+	(*v1.FeedId)(nil),           // 10: frontend.v1.FeedId
 }
 var file_agentrepl_v1_endpoint_watch_feed_proto_depIdxs = []int32{
 	4,  // 0: agentrepl.v1.WatchFeedRequest.watch:type_name -> agentrepl.v1.FeedWatchToken
@@ -376,16 +392,17 @@ var file_agentrepl_v1_endpoint_watch_feed_proto_depIdxs = []int32{
 	6,  // 2: agentrepl.v1.WatchFeedResponse.selection:type_name -> frontend.v1.FeedSelection
 	7,  // 3: agentrepl.v1.WatchFeedResponse.feed_text_scale:type_name -> frontend.v1.FeedTextScale
 	2,  // 4: agentrepl.v1.WatchFeedResponse.held:type_name -> agentrepl.v1.WatchFeedHeldChange
-	8,  // 5: agentrepl.v1.WatchFeedHeldChange.held:type_name -> frontend.v1.FeedHeld
-	5,  // 6: agentrepl.v1.WatchFeedHeldChange.rows:type_name -> frontend.v1.FeedRow
-	3,  // 7: agentrepl.v1.WatchFeedHeldChange.folds:type_name -> agentrepl.v1.WatchFeedHeldFold
-	9,  // 8: agentrepl.v1.WatchFeedHeldFold.folded:type_name -> frontend.v1.FeedId
-	9,  // 9: agentrepl.v1.WatchFeedHeldFold.into:type_name -> frontend.v1.FeedId
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	8,  // 5: agentrepl.v1.WatchFeedResponse.image_overlay:type_name -> frontend.v1.FeedImageOverlay
+	9,  // 6: agentrepl.v1.WatchFeedHeldChange.held:type_name -> frontend.v1.FeedHeld
+	5,  // 7: agentrepl.v1.WatchFeedHeldChange.rows:type_name -> frontend.v1.FeedRow
+	3,  // 8: agentrepl.v1.WatchFeedHeldChange.folds:type_name -> agentrepl.v1.WatchFeedHeldFold
+	10, // 9: agentrepl.v1.WatchFeedHeldFold.folded:type_name -> frontend.v1.FeedId
+	10, // 10: agentrepl.v1.WatchFeedHeldFold.into:type_name -> frontend.v1.FeedId
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_feed_proto_init() }
