@@ -102,7 +102,11 @@ func TestProcessExitAwaitWithinBoundsARunningProcess(t *testing.T) {
 	if left {
 		t.Fatal("awaitWithin claimed a still-running process had left")
 	}
-	if span.Granted < budget {
+	// Granted time accrues reading by reading, so this clock, read once,
+	// cannot see the granted time the bound's own clock saw. Granted never
+	// exceeds wall, though, so a budget that ran out has taken at least that
+	// much wall time.
+	if span.Wall < budget {
 		t.Fatalf("awaitWithin returned after %s, short of its %s budget", span, budget)
 	}
 	if span.Granted > DefaultTimeout {
