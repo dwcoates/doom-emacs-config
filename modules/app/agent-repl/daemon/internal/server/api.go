@@ -390,7 +390,7 @@ type server struct {
 	// imageOverlayTopics is one FeedImageOverlay push topic per workspace,
 	// subscribed by that workspace's root feed watch (feed_image.go).
 	imageOverlayTopics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedImageOverlay]
-	selectionTopics map[ids.WorkspaceID]*publish.Topic[*selectionState]
+	selectionTopics    map[ids.WorkspaceID]*publish.Topic[*selectionState]
 
 	// feedTextScaleMu guards the feed text zoom below. It is SEPARATE from mu so
 	// an AdjustFeedTextScale that persists to the state store never blocks a
