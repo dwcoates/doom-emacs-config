@@ -7,8 +7,9 @@
 ;; build; that a failed build is logged at ERROR with the compiler's words
 ;; and calls nothing waiting; and that the composer marks exactly the
 ;; headings the daemon reads as entries (a heading with a marker is a
-;; pasted tree's root, never an entry).  The compiler (`make-process') and
-;; `treesit' are stubbed, so no grammar is built and none is loaded.
+;; pasted tree's root, never an entry).  The compiler's spawn
+;; (`agent-repl--async-command') and `treesit' are stubbed, so no grammar is
+;; built and none is loaded.
 
 ;;; Code:
 
@@ -28,7 +29,7 @@ dir is empty, and no build is in flight or waited on."
   `(let* ((root (make-temp-file "agent-repl-prompt-entries-" t))
           (agent-repl--frontend-root root)
           (agent-repl-prompt-entries--library-dir (expand-file-name "lib" root))
-          (agent-repl-prompt-entries--build nil)
+          (agent-repl-prompt-entries--building nil)
           (agent-repl-prompt-entries--waiting nil)
           (treesit-extra-load-path nil))
      (make-directory (agent-repl-prompt-entries--grammar-dir) t)
@@ -47,12 +48,13 @@ dir is empty, and no build is in flight or waited on."
 
 (defmacro agent-repl-test-prompt-entries--capturing (&rest body)
   "Run BODY recording builds started and log records.
-Binds `builds' to each `make-process' plist, newest first, `errors' and
-`infos' to the formatted records."
+Binds `builds' to each spawn's (:label :dir :command :callback), newest
+first, `errors' and `infos' to the formatted records."
   (declare (indent 0))
   `(let ((builds nil) (errors nil) (infos nil))
-     (cl-letf (((symbol-function 'make-process)
-                (lambda (&rest plist) (push plist builds) 'fake-process))
+     (cl-letf (((symbol-function 'agent-repl--async-command)
+                (lambda (label dir command callback)
+                  (push (list :label label :dir dir :command command :callback callback) builds)))
                ((symbol-function 'agent-repl--error)
                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors)))
                ((symbol-function 'agent-repl--info)
@@ -136,6 +138,7 @@ Binds `builds' to each `make-process' plist, newest first, `errors' and
                              (agent-repl-prompt-entries--library)
                              (list (expand-file-name "parser.c" dir)
                                    (expand-file-name "scanner.c" dir)))))
+        (should (equal (plist-get (car builds) :dir) dir))
         (should (file-directory-p agent-repl-prompt-entries--library-dir))))))
 
 ;;;; ---- A build ending ----
@@ -145,21 +148,18 @@ Binds `builds' to each `make-process' plist, newest first, `errors' and
   (agent-repl-test-prompt-entries--with-grammar
     (agent-repl-test-prompt-entries--capturing
       ;; Arrange
-      (let ((answered nil)
-            (output (generate-new-buffer " *test build*")))
+      (let ((answered nil))
         (agent-repl-prompt-entries-ensure (lambda () (push 'first answered)))
         (agent-repl-prompt-entries-ensure (lambda () (push 'second answered)))
         (with-temp-file (agent-repl-prompt-entries--library) (insert "lib"))
         ;; Act
-        (agent-repl-prompt-entries--build-ended
-         0 (agent-repl-prompt-entries--library) (agent-repl-prompt-entries--source-hash) output)
+        (funcall (plist-get (car builds) :callback) t "")
         ;; Assert
         (should (equal (list (reverse answered)
                              (agent-repl-prompt-entries--fresh-p)
-                             agent-repl-prompt-entries--build
-                             agent-repl-prompt-entries--waiting
-                             (buffer-live-p output))
-                       '((first second) t nil nil nil)))
+                             agent-repl-prompt-entries--building
+                             agent-repl-prompt-entries--waiting)
+                       '((first second) t nil nil)))
         (should (cl-some (lambda (m) (string-match-p "elisp.prompt-entries.built .*waiting=2" m)) infos))))))
 
 (ert-deftest agent-repl-test-prompt-entries-build-failure-is-an-error-and-answers-nothing ()
@@ -167,22 +167,19 @@ Binds `builds' to each `make-process' plist, newest first, `errors' and
   (agent-repl-test-prompt-entries--with-grammar
     (agent-repl-test-prompt-entries--capturing
       ;; Arrange
-      (let ((answered 0)
-            (output (generate-new-buffer " *test build*")))
-        (with-current-buffer output (insert "parser.c:1: error: boom\n"))
+      (let ((answered 0))
         (agent-repl-prompt-entries-ensure (lambda () (cl-incf answered)))
         ;; Act
-        (agent-repl-prompt-entries--build-ended
-         1 (agent-repl-prompt-entries--library) (agent-repl-prompt-entries--source-hash) output)
+        (funcall (plist-get (car builds) :callback) nil "parser.c:1: error: boom\n")
         ;; Assert
         (should (equal (list answered
                              (file-exists-p (agent-repl-prompt-entries--stamp))
-                             agent-repl-prompt-entries--build
+                             agent-repl-prompt-entries--building
                              agent-repl-prompt-entries--waiting
                              treesit-extra-load-path)
                        '(0 nil nil nil nil)))
         (should (cl-some (lambda (m)
-                           (string-match-p "elisp.prompt-entries.build-failed .*status=1 output=\"parser.c:1: error: boom\"" m))
+                           (string-match-p "elisp.prompt-entries.build-failed .*output=\"parser.c:1: error: boom\"" m))
                          errors))))))
 
 (ert-deftest agent-repl-test-prompt-entries-a-failed-build-is-retried-by-the-next-composer ()
@@ -191,32 +188,11 @@ Binds `builds' to each `make-process' plist, newest first, `errors' and
     (agent-repl-test-prompt-entries--capturing
       ;; Arrange
       (agent-repl-prompt-entries-ensure #'ignore)
-      (agent-repl-prompt-entries--build-ended
-       1 (agent-repl-prompt-entries--library) "hash" (generate-new-buffer " *test build*"))
+      (funcall (plist-get (car builds) :callback) nil "boom")
       ;; Act
       (agent-repl-prompt-entries-ensure #'ignore)
       ;; Assert
       (should (= (length builds) 2)))))
-
-(ert-deftest agent-repl-test-prompt-entries-sentinel-ends-the-build-once-the-compiler-exits ()
-  "The build's sentinel finishes it only once the compiler is no longer live."
-  (agent-repl-test-prompt-entries--with-grammar
-    (agent-repl-test-prompt-entries--capturing
-      ;; Arrange
-      (agent-repl-prompt-entries-ensure #'ignore)
-      (let ((sentinel (plist-get (car builds) :sentinel))
-            (live t)
-            (ended nil))
-        (cl-letf (((symbol-function 'process-live-p) (lambda (_p) live))
-                  ((symbol-function 'process-exit-status) (lambda (_p) 0))
-                  ((symbol-function 'agent-repl-prompt-entries--build-ended)
-                   (lambda (status &rest _) (push status ended))))
-          ;; Act
-          (funcall sentinel 'fake-process "run\n")
-          (setq live nil)
-          (funcall sentinel 'fake-process "finished\n"))
-        ;; Assert
-        (should (equal ended '(0)))))))
 
 ;;;; ---- Marking the composer ----
 

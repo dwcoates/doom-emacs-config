@@ -33,6 +33,7 @@
 
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
+(declare-function agent-repl--async-command "core" (label dir command callback))
 (defvar agent-repl--frontend-root)
 
 (defface agent-repl-prompt-entry-label
@@ -96,8 +97,8 @@ It is put on `treesit-extra-load-path', never the user's own grammar dir.")
                 (string-trim (buffer-string)))
               (agent-repl-prompt-entries--source-hash))))
 
-(defvar agent-repl-prompt-entries--build nil
-  "The running build of the grammar library, or nil.")
+(defvar agent-repl-prompt-entries--building nil
+  "Non-nil while the grammar library is being built.")
 
 (defvar agent-repl-prompt-entries--waiting nil
   "What waits for the grammar: functions called once it loads.")
@@ -116,52 +117,43 @@ when none is."
         (agent-repl-prompt-entries--on-load-path)
         (funcall on-ready))
     (push on-ready agent-repl-prompt-entries--waiting)
-    (unless agent-repl-prompt-entries--build
+    (unless agent-repl-prompt-entries--building
       (agent-repl-prompt-entries--start-build))))
 
 (defun agent-repl-prompt-entries--start-build ()
-  "Compile the grammar library, asynchronously, and answer the waiting on its end."
+  "Compile the grammar library, asynchronously, and answer the waiting on its end.
+The compiler runs through `agent-repl--async-command', the one spawn of a
+program that is not git."
   (let* ((dir (agent-repl-prompt-entries--grammar-dir))
          (library (agent-repl-prompt-entries--library))
          (hash (agent-repl-prompt-entries--source-hash))
-         (output (generate-new-buffer " *agent-repl prompt grammar build*"))
          (command (append (list agent-repl-prompt-entries--compiler
                                 "-std=c11" "-fPIC" "-shared" "-O2" "-I" dir "-o" library)
                           (mapcar (lambda (name) (expand-file-name name dir))
                                   agent-repl-prompt-entries--sources))))
     (make-directory agent-repl-prompt-entries--library-dir t)
     (agent-repl--info nil "elisp.prompt-entries.build-started library=%s source=%s" library hash)
-    (setq agent-repl-prompt-entries--build
-          (make-process
-           :name "agent-repl-prompt-grammar"
-           :buffer output
-           :command command
-           :connection-type 'pipe
-           :noquery t
-           :sentinel (lambda (process _event)
-                       (unless (process-live-p process)
-                         (agent-repl-prompt-entries--build-ended
-                          (process-exit-status process) library hash output)))))))
+    (setq agent-repl-prompt-entries--building t)
+    (agent-repl--async-command
+     "prompt-grammar" dir command
+     (lambda (ok output)
+       (agent-repl-prompt-entries--build-ended ok library hash output)))))
 
-(defun agent-repl-prompt-entries--build-ended (status library hash output)
-  "Finish the build that exited STATUS, into LIBRARY from sources HASH.
-OUTPUT is the build's own words.  A success stamps HASH beside LIBRARY and
-calls everything waiting; a failure is recorded at ERROR with the
-compiler's output, and nothing waiting is called."
-  (let ((said (if (buffer-live-p output)
-                  (with-current-buffer output (string-trim (buffer-string)))
-                "")))
-    (when (buffer-live-p output) (kill-buffer output))
-    (setq agent-repl-prompt-entries--build nil)
-    (let ((waiting (nreverse agent-repl-prompt-entries--waiting)))
-      (setq agent-repl-prompt-entries--waiting nil)
-      (if (/= status 0)
-          (agent-repl--error nil "elisp.prompt-entries.build-failed library=%s status=%d output=%S"
-                             library status said)
-        (with-temp-file (agent-repl-prompt-entries--stamp) (insert hash "\n"))
-        (agent-repl-prompt-entries--on-load-path)
-        (agent-repl--info nil "elisp.prompt-entries.built library=%s waiting=%d" library (length waiting))
-        (mapc #'funcall waiting)))))
+(defun agent-repl-prompt-entries--build-ended (ok library hash output)
+  "Finish the build into LIBRARY from sources HASH, which succeeded when OK.
+OUTPUT is the compiler's own words.  A success stamps HASH beside LIBRARY
+and calls everything waiting; a failure is recorded at ERROR with OUTPUT,
+and nothing waiting is called."
+  (setq agent-repl-prompt-entries--building nil)
+  (let ((waiting (nreverse agent-repl-prompt-entries--waiting)))
+    (setq agent-repl-prompt-entries--waiting nil)
+    (if (not ok)
+        (agent-repl--error nil "elisp.prompt-entries.build-failed library=%s output=%S"
+                           library (string-trim output))
+      (with-temp-file (agent-repl-prompt-entries--stamp) (insert hash "\n"))
+      (agent-repl-prompt-entries--on-load-path)
+      (agent-repl--info nil "elisp.prompt-entries.built library=%s waiting=%d" library (length waiting))
+      (mapc #'funcall waiting))))
 
 ;;;; ---- Marking the composer ----
 
