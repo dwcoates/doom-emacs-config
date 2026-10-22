@@ -110,6 +110,7 @@ import { controlPlaneFailed } from "../failure/sink.js";
 import { formatTickedAge } from "../duration.js";
 import { markdownSlot } from "../bubble/body.js";
 import { quoteSlot } from "../bubble/quote.js";
+import { expandedOnly } from "../bubble/expanded-only.js";
 import {
   BUBBLE_MORE_ELLIPSIS,
   ELLIPSIS_CAP_LINES,
@@ -1413,6 +1414,7 @@ export function drawQuoteBlock(u: UserQuoteBlock, path: string): HTMLElement {
  * A URL is fetchable and draws as the picture. A host PATH is not — the daemon
  * runs on that host and the webview does not — so the card names the file
  * rather than drawing a broken image where the user's attachment should be.
+ * Either is drawn only once the card is expanded (src/bubble/expanded-only.ts).
  */
 export function drawImageBlock(u: ImageBlock, path: string): HTMLElement {
   const location = requireCase(u.location, `${path}.location`);
@@ -1424,6 +1426,7 @@ export function drawImageBlock(u: ImageBlock, path: string): HTMLElement {
     case "url": {
       const image = document.createElement("img");
       image.className = "queued-image";
+      expandedOnly(image);
       image.src = location.value.url;
       image.alt = u.mediaType;
       return image;
@@ -1431,6 +1434,7 @@ export function drawImageBlock(u: ImageBlock, path: string): HTMLElement {
     case "path": {
       const named = document.createElement("div");
       named.className = "queued-image-path";
+      expandedOnly(named);
       named.setAttribute("data-host-path", location.value.path);
       named.textContent = location.value.path;
       return named;

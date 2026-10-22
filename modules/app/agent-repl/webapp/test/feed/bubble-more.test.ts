@@ -28,6 +28,7 @@ import {
 } from "../../src/feed/bubble-more.js";
 import { BUBBLE_BODY_CLASS, createBubbleBody } from "../../src/bubble/body.js";
 import { quoteSlot } from "../../src/bubble/quote.js";
+import { expandedOnly } from "../../src/bubble/expanded-only.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { BUBBLE_SCROLL_CLASS, bubbleBox as sharedBubbleBox } from "../../src/feed/bubble-scroll.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
@@ -183,6 +184,15 @@ describe("hidesContentBeyondCap: the body's lines against the collapsed cap", ()
 
     // Act / Assert
     expect(hidesContentBeyondCap(box)).toBe(true);
+  });
+
+  it("finds nothing hidden beside an image when the words fit the cap, as for a quote", () => {
+    // Arrange — one line of words, and an image the collapsed bubble does not draw.
+    const box = bubbleBox({ lines: 1 });
+    box.querySelector(`.${BUBBLE_BODY_CLASS}`)?.append(expandedOnly(document.createElement("img")));
+
+    // Act / Assert
+    expect(hidesContentBeyondCap(box)).toBe(false);
   });
 
   it("refuses a box that holds no body, and records it at error", async () => {

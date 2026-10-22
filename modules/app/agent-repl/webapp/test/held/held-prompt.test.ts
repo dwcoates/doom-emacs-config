@@ -50,6 +50,7 @@ import {
   HELD_STATUS_BADGES,
   HELD_NOTE_CLASS,
   drawHeldPrompt,
+  drawImageBlock,
   drawUnsupportedBlock,
   heldBadgeClasses,
   drawHeldBadgePill,
@@ -984,6 +985,15 @@ describe("the said body", () => {
     expect(card.querySelector(".queued-image-path")?.textContent).toBe(
       "/tmp/a.png",
     );
+  });
+
+  it("draws a held image only once the card is expanded", () => {
+    expect(
+      drawImageBlock(
+        { location: { case: "path", value: { path: "/tmp/a.png" } }, mediaType: "image/png" } as never,
+        "path",
+      ).classList.contains(BUBBLE_EXPANDED_ONLY_CLASS),
+    ).toBe(true);
   });
 
   it("draws nothing for an unmodeled block", () => {

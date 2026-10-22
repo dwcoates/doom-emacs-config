@@ -27,6 +27,7 @@ import { boundCopyText, COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE } from "../../..
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import imageThumbnail from "../../../../proto/vocab/image-thumbnail.json";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../../src/bubble/quote.js";
+import { BUBBLE_EXPANDED_ONLY_CLASS } from "../../../src/bubble/expanded-only.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, createBubbleBody, paintBody } from "../../../src/bubble/body.js";
 
 /** Paint BLOCK through the one bubble body, as a prompt bubble does. */
@@ -212,6 +213,34 @@ describe("drawPromptBlockArm", () => {
       "p",
     );
     expect(el.tagName).toBe("IMG");
+  });
+
+  it("draws a prompt's image only once its bubble is expanded", () => {
+    const el = drawPromptBlockArm(
+      { case: "image", value: create(FeedImageBlockSchema, { src: "/a", alt: "" }) },
+      "p",
+    );
+    expect(el.classList.contains(BUBBLE_EXPANDED_ONLY_CLASS)).toBe(true);
+  });
+
+  it("keeps a lost prompt image's note expanded-only, like the image it replaces", () => {
+    // Arrange
+    const box = document.createElement("div");
+    const el = drawPromptBlockArm(
+      { case: "image", value: create(FeedImageBlockSchema, { src: "/gone", alt: "" }) },
+      "p",
+    );
+    box.appendChild(el);
+
+    // Act
+    el.dispatchEvent(new Event("error"));
+
+    // Assert
+    expect([...(box.firstElementChild?.classList ?? [])]).toEqual([
+      "prompt-block",
+      BUBBLE_EXPANDED_ONLY_CLASS,
+      "prompt-block-image-missing",
+    ]);
   });
 
   it("draws the unsupported arm", () => {

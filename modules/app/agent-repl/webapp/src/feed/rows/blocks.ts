@@ -13,6 +13,7 @@
  * empty paragraph: a prompt that draws nothing where the person typed something
  * is worse than a loud refusal, because the reader cannot tell it happened.
  */
+import { expandedOnly } from "../../bubble/expanded-only.js";
 import { requireCase, unreachableArm } from "../../rpc/strict.js";
 import { log } from "../../log.js";
 import { markdownSlot, type SlotMark } from "../../bubble/body.js";
@@ -89,8 +90,11 @@ export function drawFeedImageBlock(block: FeedImageBlock): HTMLElement {
       operation: "feed.draw-image-block.missing",
       context: { src: block.src, alt: block.alt },
     });
+    // The note takes the image's place AND its classes (an expanded-only
+    // mark included), so it is hidden and shown exactly as the image was.
     const missing = document.createElement("div");
-    missing.className = "prompt-block prompt-block-image-missing";
+    missing.className = [...el.classList].filter((name) => name !== "prompt-block-image").join(" ");
+    missing.classList.add("prompt-block-image-missing");
     missing.textContent = IMAGE_MISSING_TEXT;
     if (block.alt !== "") missing.title = block.alt;
     el.replaceWith(missing);
@@ -161,7 +165,8 @@ export function drawPromptBlockArm(arm: PromptBlockArm, path: string, mark?: Slo
     case "text":
       return drawFeedTextBlock(block.value, mark);
     case "image":
-      return drawFeedImageBlock(block.value);
+      // A prompt's image is drawn only once its bubble is expanded.
+      return expandedOnly(drawFeedImageBlock(block.value));
     case "unsupported":
       return drawFeedUnsupportedBlock(block.value);
     case "quote":
