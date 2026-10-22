@@ -31,12 +31,16 @@ func TestTheReaperRemovesALandedIdleWorktreeAndKeepsTheRest(t *testing.T) {
 	landed := repo.AddWorktree("landed")
 	unlanded := repo.AddWorktree("unlanded")
 	repo.CommitIn(unlanded, "work.txt", "unlanded work\n")
+	// THE OPEN WORKSPACE IS REGISTERED BEFORE ITS TREE IS IDLE: a fresh tree
+	// passes no gate, so no sweep can see this one idle and unregistered and
+	// reap it (2026-10-22: a sweep between the idling and the registration
+	// removed the open checkout as landed).
 	open := repo.AddWorktree("open")
+	harness.Register(t, d, open)
 	idleSince := time.Now().Add(-72 * time.Hour)
 	for _, dir := range []string{landed, unlanded, open} {
 		repo.IdleWorktree(dir, idleSince)
 	}
-	harness.Register(t, d, open)
 
 	// Act.
 	removal := d.AwaitLogRecord(d.RunLogPath(), "the landed worktree's removal", func(r harness.LogRecord) bool {
@@ -83,6 +87,15 @@ func TestTheReaperExpiresAWorktreeThatNeverLanded(t *testing.T) {
 	d := newDaemon(t, harness.Opts{ExtraEnv: reaperEnv})
 	repo := harness.NewRepo(t)
 	now := time.Now()
+	// An open workspace registers the repository with the daemon; its own
+	// checkout is kept by its gate. It is registered FIRST, before any tree
+	// is idle: the sweep awaited below must count it in the same sweep that
+	// expires the stale tree, and a fresh unregistered tree passes no gate,
+	// so no sweep can reap it or expire the stale tree without it
+	// (2026-10-22: a sweep between the idling and the registration removed
+	// the open checkout as landed).
+	open := repo.AddWorktree("open")
+	harness.Register(t, d, open)
 	stale := repo.AddWorktree("stale")
 	staleHead := repo.CommitIn(stale, "stale.txt", "never landed\n")
 	repo.SetDirty(stale, true)
@@ -93,11 +106,7 @@ func TestTheReaperExpiresAWorktreeThatNeverLanded(t *testing.T) {
 		repo.BornWorktree(dir, born)
 	}
 	repo.ActiveEvery(now.Add(-20*24*time.Hour), now.Add(-time.Hour), 12*time.Hour)
-	// An open workspace registers the repository with the daemon; its own
-	// checkout is kept by its gate.
-	open := repo.AddWorktree("open")
 	repo.IdleWorktree(open, now.Add(-72*time.Hour))
-	harness.Register(t, d, open)
 
 	// Act.
 	expiry := d.AwaitLogRecord(d.RunLogPath(), "the stale worktree's expiry", func(r harness.LogRecord) bool {
