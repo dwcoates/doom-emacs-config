@@ -16,6 +16,7 @@ require (
 
 require (
 	agentrepl/tldr v0.0.0 // indirect
+	agentrepl/tldrprompt v0.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -43,3 +44,5 @@ replace agentrepl/logging => ../agent-shim/logging/go
 replace agentrepl/testrun => ../testrun
 
 replace agentrepl/tldr => ../tree-sitter-tldr/tldr/src
+
+replace agentrepl/tldrprompt => ../tree-sitter-tldr/tldr_prompt/src
