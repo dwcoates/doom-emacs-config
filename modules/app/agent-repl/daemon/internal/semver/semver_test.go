@@ -45,6 +45,7 @@ func TestHighestOrdersNumericallyAndIgnoresOtherTags(t *testing.T) {
 		{name: "patch decides last", tags: []string{"0.1.2", "0.1.10"}, want: Version{0, 1, 10}, ok: true},
 		{name: "non-versions ignored", tags: []string{"v9.9.9", "wip-x", "0.0.1"}, want: Version{0, 0, 1}, ok: true},
 		{name: "no version at all", tags: []string{"v1.0.0", "start/x"}},
+		{name: "one version tagged twice", tags: []string{"0.3.1", "0.3.1"}, want: Version{0, 3, 1}, ok: true},
 		{name: "no tags", tags: nil},
 	}
 	for _, tt := range tests {
