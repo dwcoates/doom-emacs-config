@@ -635,6 +635,14 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 			s.log.Debug(op, "the subscriber is closed; the subscription was refused", withError(fields, err))
 			return err
 		}
+		// A WORKSPACE ALREADY IN ITS QUEUE is the store answering what was
+		// asked; the orchestrator turns it into the request's
+		// already-queued arm and records it at its own level.
+		var queued *MergeQueuedError
+		if errors.As(err, &queued) {
+			s.log.Debug(op, "the workspace is already in its merge queue; the request was refused", withError(fields, err))
+			return err
+		}
 		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "refused the write", withError(fields, err))
 		return err
 	}

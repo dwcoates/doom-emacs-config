@@ -703,6 +703,19 @@ func TestWriteRecordsACancelledCallerWithoutAnError(t *testing.T) {
 			wantMsg:   writeCancelledMessage,
 		},
 		{
+			name: "a workspace already in its merge queue",
+			write: func(s *store, id WorkspaceID) error {
+				return s.write(context.Background(), "daemon.wsm.test_write", dlog.Context{}, func(ctx context.Context, tx *sql.Tx) error {
+					if err := rename(ctx, tx, id); err != nil {
+						return err
+					}
+					return &MergeQueuedError{Repo: "/repo/.git", Workspace: id, Position: 1, State: MergeRequested}
+				})
+			},
+			wantLevel: "debug",
+			wantMsg:   "the workspace is already in its merge queue; the request was refused",
+		},
+		{
 			name: "a genuine write failure",
 			write: func(s *store, id WorkspaceID) error {
 				return s.write(context.Background(), "daemon.wsm.test_write", dlog.Context{}, func(ctx context.Context, tx *sql.Tx) error {
