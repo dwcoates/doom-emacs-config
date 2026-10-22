@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic tests for bin/deploy-hook-probe.sh, the deploy hook that only
-# records that it ran.
+# records that it ran, and bin/deploy-hook-probe-fails.sh, its failing sibling.
 
 # shellcheck disable=SC2329
 # SC2329: the tests are found and run by name (declare -F), so shellcheck sees
@@ -38,6 +38,16 @@ test_the_probe_says_it_finished() {
     pass "the probe's last line says it finished"
   else
     fail "the probe's last line says it finished" "$out"
+  fi
+}
+
+test_the_failing_probe_runs_the_probe_and_exits_one() {
+  local out rc=0
+  out="$("$THIS_DIR/deploy-hook-probe-fails.sh" 2>&1)" || rc=$?
+  if [ "$rc" -eq 1 ] && grep -qF "deploy-hook-probe: done" <<<"$out" && [ "$(tail -1 <<<"$out")" = "deploy-hook-probe-fails: exiting 1, as it always does" ]; then
+    pass "the failing probe runs the probe, says it is failing, and exits 1"
+  else
+    fail "the failing probe runs the probe, says it is failing, and exits 1" "rc=$rc" "$out"
   fi
 }
 
