@@ -77,6 +77,10 @@ type Workspace struct {
 	// Awaiting is the workspace this one awaits correspondence from
 	// (standings.go), nil while it awaits none.
 	Awaiting *WorkspaceID
+	// PrincipalLink is the url that best stands for the workspace's task
+	// (principallink.go), which the topbar's summary opens; nil while it has
+	// none.
+	PrincipalLink *string
 	// Closed reports whether the workspace's editor state has been torn down.
 	Closed bool
 	// Closure is when the workspace was closed and by whom (MarkClosed); nil
