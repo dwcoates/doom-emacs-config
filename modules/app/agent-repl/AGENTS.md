@@ -1168,14 +1168,10 @@ operation writes a command file; that ingress is retired.
 ## Master moves only through the merge queue
 
 Owner plan, 2026-09-28 (`docs/investigations/2026-09-28-merge-queue-plan.md`,
-fixes 6-8). Every agent merges into master ONLY through the merge-queue skill
-(`skills/agent-repl-merge-queue/SKILL.md`): its own workspace's branch, another
-workspace, and every subagent's branch alike. The skill lands work through the
-daemon (`agent-repld workspace finished`, `agent-repld workspace async-merge`)
-and reports landed, parked or failed; on a park, failure or refusal it reports
-and stops, and never merges by hand.
+fixes 6-8). The rule that every agent lands only through the queue is the
+metaprompt's ("Master moves only through the merge queue"), and how an agent
+lands is `/agent-repl-merge-queue`'s. This section is the code that holds it.
 
-- The metaprompt carries the same rule, so every session has it loaded.
 - A workspace's own merge lands in the target recorded at its creation: master
   for a workspace made off the main checkout, its PARENT's checkout for a child
   workspace (one created explicitly as a child of another). A child reaches
