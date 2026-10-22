@@ -1073,7 +1073,7 @@ func prewarmTrampolines(t *testing.T, box sandbox) {
                  (not (comp--trampoline-search subr)))
         (comp-trampoline-compile subr)))))`,
 			trampolineCacheDir+"/", strings.Join(prewarmedFunctions(t), " "))
-		ctx, cancel := context.WithTimeout(context.Background(), trampolinePrewarmBound)
+		ctx, cancel := grantedclock.WithBound(context.Background(), trampolinePrewarmBound)
 		defer cancel()
 		out, err := box.Exec(ctx, "env", "EMACSNATIVELOADPATH="+trampolineCacheDir,
 			"emacs", "-Q", "--batch", "--eval", form)
@@ -1250,7 +1250,7 @@ func (e *Emacs) stageEmacsDir() {
 				}
 				continue
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), doomStageBound)
+			ctx, cancel := grantedclock.WithBound(context.Background(), doomStageBound)
 			out, err := e.box.Exec(ctx, "cp", "-a", lFrom, lTo)
 			cancel()
 			if err != nil {
@@ -2152,7 +2152,7 @@ const (
 // strand exactly the tree the stop exists to take down; the failure is
 // reported and the stop is asked anyway.
 func (e *Emacs) daemonLinkState() daemonLink {
-	ctx, cancel := context.WithTimeout(context.Background(), teardownStopBound)
+	ctx, cancel := grantedclock.WithBound(context.Background(), teardownStopBound)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -2716,7 +2716,7 @@ func (e *Emacs) captureNativeBacktrace() string {
 	if err != nil {
 		return fmt.Sprintf("\n  (no native backtrace: gdb is not on PATH here: %v)", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), nativeBacktraceBound)
+	ctx, cancel := grantedclock.WithBound(context.Background(), nativeBacktraceBound)
 	defer cancel()
 	// `-batch` runs the -ex list and quits; `-nx` keeps a stray ~/.gdbinit
 	// out of it. `detach` before `quit` is explicit rather than relied upon:

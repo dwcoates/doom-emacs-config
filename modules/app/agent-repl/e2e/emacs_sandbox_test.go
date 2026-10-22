@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"agent-repld/integration/grantedclock"
 )
 
 // THE SANDBOX SEAM.
@@ -335,7 +337,7 @@ func runHostPreflight(script string, bound time.Duration) string {
 		return fmt.Sprintf("%s not found: %v", sandboxScriptRel, err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	ctx, cancel := grantedclock.WithBound(context.Background(), bound)
 	defer cancel()
 	return hostPreflightUntil(ctx, script, bound)
 }

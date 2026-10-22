@@ -43,13 +43,13 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -74,7 +74,7 @@ func pfNewWorkspace(t *testing.T, w *World) (*workspacev1.WorkspaceRef, string) 
 // gets a hand-picked longer window.
 func pfAwaitView[V any](t *testing.T, w *World, s *harness.Stream[V], what string, pred func(V) bool) V {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	return harness.AwaitView(t, ctx, s, what, pred)
 }

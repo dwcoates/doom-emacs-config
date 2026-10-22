@@ -81,6 +81,7 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -159,7 +160,7 @@ func adAwaitReplayedFeedRow(t *testing.T, d *harness.Daemon, ws *workspacev1.Wor
 	}
 	stream := d.WatchFeedOn(d.Client(), success.GetWatch())
 	defer stream.Close()
-	ctx, cancel := context.WithTimeout(d.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(d.Ctx(), DefaultTimeout)
 	defer cancel()
 	return harness.AwaitView(t, ctx, stream, what, pred)
 }

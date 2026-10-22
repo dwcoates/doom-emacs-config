@@ -33,6 +33,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -361,7 +362,7 @@ func TestEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
 // the daemon delivered is a line of its agent's book.
 func emAwaitBookPrompt(t *testing.T, w *EmacsWorld, agent, text, what string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(context.Background(), DefaultTimeout)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()

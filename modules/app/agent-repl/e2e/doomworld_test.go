@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -123,7 +124,7 @@ func (f *fakeDaemon) post(path string, body any) (json.RawMessage, error) {
 }
 
 func (f *fakeDaemon) do(method, path string, body []byte) (json.RawMessage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(context.Background(), DefaultTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, "http://"+f.addr+path, bytes.NewReader(body))
 	if err != nil {
@@ -192,7 +193,7 @@ func (f *fakeDaemon) Calls(method string) []fakeCall {
 // the last.
 func (f *fakeDaemon) AwaitCall(method string, count int, bound time.Duration) fakeCall {
 	f.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	ctx, cancel := grantedclock.WithBound(context.Background(), bound)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()

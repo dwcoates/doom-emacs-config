@@ -57,6 +57,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -310,7 +311,7 @@ func TestDetachedLostWentSilent(t *testing.T) {
 	initial, stream, ws := dlDriveDetachedLive(t, w)
 	defer stream.Close()
 
-	ctx, cancel := context.WithTimeout(w.Ctx(), dlLostBound)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), dlLostBound)
 	defer cancel()
 
 	// Act: nothing. The scenario's own silence IS the act — the spool exists,

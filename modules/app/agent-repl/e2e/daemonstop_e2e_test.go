@@ -22,7 +22,6 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,6 +32,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
@@ -86,7 +86,7 @@ func TestHostRequestedStopLeavesNoProcessBehind(t *testing.T) {
 	// and 15ms max across 104 runs of this shape, so a `deadline_exceeded` here
 	// on a shared budget names the wrong step. DefaultTimeout is ~330x the
 	// measured max, which is a failure bound for the stop and nothing else.
-	stopCtx, cancelStop := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	stopCtx, cancelStop := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancelStop()
 	resp, err := w.Client().UpdateShutdownSchedule(stopCtx, connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
@@ -245,7 +245,7 @@ func TestAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
 
 	// Act: exactly what Emacs sends, on its own bound for the reason the test
 	// above states.
-	stopCtx, cancelStop := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	stopCtx, cancelStop := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancelStop()
 	started := time.Now()
 	resp, err := w.Client().UpdateShutdownSchedule(stopCtx, connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
@@ -293,7 +293,7 @@ func TestACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding(t *testing.T) {
 
 	// The host's stop is what runs the teardown, and the teardown's book-head
 	// read is the second of the two one-shot reads.
-	stopCtx, cancelStop := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	stopCtx, cancelStop := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancelStop()
 	resp, err := w.Client().UpdateShutdownSchedule(stopCtx, connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{

@@ -14,6 +14,7 @@ package e2e
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 	workspacev1 "agentrepl/proto/workspace/v1"
 )
@@ -216,8 +218,8 @@ func wlLayerServer(t *testing.T, npm, webappDir string) (*wlServer, error) {
 func (s *wlServer) awaitReady(t *testing.T) error {
 	t.Helper()
 	var tail []string
-	deadline := time.NewTimer(wlWarmupBound)
-	defer deadline.Stop()
+	deadline, stop := grantedclock.WithBound(context.Background(), wlWarmupBound)
+	defer stop()
 	for {
 		select {
 		case line, ok := <-s.lines:
@@ -239,8 +241,8 @@ func (s *wlServer) awaitReady(t *testing.T) error {
 			if len(tail) > wlTailLines {
 				tail = tail[len(tail)-wlTailLines:]
 			}
-		case <-deadline.C:
-			return errors.Join(fmt.Errorf("the layer driver did not warm up within %s; last output:\n%s", wlWarmupBound, strings.Join(tail, "\n")), s.killGroup())
+		case <-deadline.Done():
+			return errors.Join(fmt.Errorf("the layer driver did not warm up within %s granted; last output:\n%s", wlWarmupBound, strings.Join(tail, "\n")), s.killGroup())
 		}
 	}
 }

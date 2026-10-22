@@ -44,6 +44,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -289,7 +290,7 @@ func awaitDaemonRoster(t *testing.T, addr string, bound time.Duration, what stri
 	pred func(*frontendv1.WorkspaceRoster) bool) *frontendv1.WorkspaceRoster {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	ctx, cancel := grantedclock.WithBound(context.Background(), bound)
 	defer cancel()
 
 	client := harness.DialAt(t, addr)

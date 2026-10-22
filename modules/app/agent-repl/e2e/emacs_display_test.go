@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -225,7 +226,7 @@ func xvfbArgv(display int, fbDir string) []string {
 // awaitDisplay reads the display number Xvfb reports, or fails loudly.
 func (x *xdisplay) awaitDisplay(numPath string) string {
 	x.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), xvfbReadyBound)
+	ctx, cancel := grantedclock.WithBound(context.Background(), xvfbReadyBound)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()

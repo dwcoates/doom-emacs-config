@@ -49,6 +49,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -895,6 +896,10 @@ func (c *wlChild) Wait() error {
 func (c *wlChild) WaitFor(bound time.Duration) error {
 	c.t.Helper()
 	tail := &c.tailOnly
+	// THE BOUND IS GRANTED TIME (grantedclock): on 2026-10-22 two layer files
+	// ran past their wall bounds on a host carrying a second full run.
+	expired, stop := grantedclock.WithBound(context.Background(), bound)
+	defer stop()
 	select {
 	case waitErr := <-c.done:
 		wall := time.Since(c.started)
@@ -905,7 +910,7 @@ func (c *wlChild) WaitFor(bound time.Duration) error {
 		tail.Lock()
 		defer tail.Unlock()
 		return fmt.Errorf("vitest exited %v; last output:\n%s", waitErr, strings.Join(tail.lines, "\n"))
-	case <-time.After(bound):
+	case <-expired.Done():
 		// The child is killed, not abandoned: a leaked vitest holds this
 		// daemon's streams open and the world's teardown would then observe
 		// state the test never caused. THE WHOLE GROUP GOES, not the npm

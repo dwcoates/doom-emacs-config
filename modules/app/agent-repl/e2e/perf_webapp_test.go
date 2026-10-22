@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -132,7 +133,7 @@ func TestPerfWebappLayer(t *testing.T) {
 	// `disconnected`, the real page closes its composer gate, and every
 	// submission after the first is swallowed by the app itself. Held on THIS
 	// area's own bound, never the harness's.
-	holdCtx, releaseHold := context.WithTimeout(context.Background(), WebappLayerPerfTimeout)
+	holdCtx, releaseHold := grantedclock.WithBound(context.Background(), WebappLayerPerfTimeout)
 	defer releaseHold()
 	host := w.Daemon.WatchHostFor(holdCtx, ws)
 	host.Drain()

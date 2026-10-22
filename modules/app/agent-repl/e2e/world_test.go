@@ -29,6 +29,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -700,10 +701,12 @@ func (p *processExit) status() string {
 // whether it did. Every teardown wait in this file goes through here, so no
 // teardown path can block a test run indefinitely.
 func (p *processExit) awaitWithin(budget time.Duration) bool {
+	expired, stop := grantedclock.WithBound(context.Background(), budget)
+	defer stop()
 	select {
 	case <-p.done:
 		return true
-	case <-time.After(budget):
+	case <-expired.Done():
 		return false
 	}
 }
@@ -855,10 +858,12 @@ func (s *Store) dumpOnStall(bound time.Duration) string {
 		}
 		return fmt.Sprintf("could not ask the store for a goroutine dump: %v", err)
 	}
+	expired, stop := grantedclock.WithBound(context.Background(), bound)
+	defer stop()
 	select {
 	case <-s.exit.done:
 		return "SIGQUIT sent; the Go runtime's goroutine dump of the store is on stderr above"
-	case <-time.After(bound):
+	case <-expired.Done():
 		return fmt.Sprintf("SIGQUIT sent for a goroutine dump, but the store did not exit within %s", bound)
 	}
 }
@@ -879,7 +884,7 @@ func udsHTTPClient(socket string) *http.Client {
 
 func (s *Store) awaitReady() {
 	s.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(context.Background(), DefaultTimeout)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -1409,7 +1414,7 @@ func awaitFeedRowOn(t testing.TB, w *World, client agentreplv1connect.AgentReplC
 // only the caller knows which account root registered the workspace.
 func driveScenarioToCompletion(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, configDir, scenario string) *conversationv1.TurnId {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	before := w.Store.Cursors(t, ctx)
 	baseline := cursorOffsetsUnder(before, harness.ProjectDir(configDir, ws.GetDir()))
@@ -1425,7 +1430,7 @@ func driveScenarioToCompletion(t testing.TB, w *World, ws *workspacev1.Workspace
 // documented invocation is not a bare "!"+scenario (e.g. "!compact [summary]").
 func driveDocumentedPrompt(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, configDir, prompt string) *conversationv1.TurnId {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	before := w.Store.Cursors(t, ctx)
 	baseline := cursorOffsetsUnder(before, harness.ProjectDir(configDir, ws.GetDir()))
@@ -1507,7 +1512,7 @@ func cursorIngested(cursors []*storev1.CursorState, path string, size int64) boo
 // cursor wait in this suite is this loop with its own predicate.
 func awaitCursors(t testing.TB, w *World, bound time.Duration, what string, done func([]*storev1.CursorState) bool) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), bound)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), bound)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
