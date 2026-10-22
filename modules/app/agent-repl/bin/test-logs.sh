@@ -193,7 +193,7 @@ test_central_default_emacs_sink() {
     mkdir -p "$state/logs"
     printf '%s\n' '{"timestamp":"2026-09-10T10:00:16.000000Z","runtime":"emacs","pid":51,"level":"info","verbosity":"normal","operation":"emacs.durable","message":"emacs durable central","context":{}}' \
         >"$state/logs/emacs.central.log"
-    out="$(AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE= run_logs --central --runtime emacs --json)"
+    out="$(AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE='' run_logs --central --runtime emacs --json)"
     rm -f "$state/logs/emacs.central.log"
     if grep_in "$out" -q '"operation":"emacs.durable"'; then
         pass "--central reads the durable <state>/logs/emacs.central.log by default"
