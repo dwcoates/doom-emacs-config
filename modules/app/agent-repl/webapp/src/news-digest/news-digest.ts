@@ -21,6 +21,7 @@
  * re-laid out: its scroll position and its anchoring are exactly where the
  * reader left them when the overlay comes down.
  */
+import { followBox } from "../overlay/follow-box.js";
 import {
   DismissNewsDigestResponseSchema,
   type DismissNewsDigestError,
@@ -108,20 +109,10 @@ export function mountNewsDigest(
   /** The control a dismiss's refusal is drawn beside. */
   let actions: HTMLElement | null = null;
 
-  const follow = (): void => {
-    if (host.hidden) return;
-    const rect = deps.feedScroll.getBoundingClientRect();
-    host.style.top = `${rect.top}px`;
-    host.style.left = `${rect.left}px`;
-    host.style.width = `${rect.width}px`;
-    host.style.height = `${rect.height}px`;
-  };
+  const box = followBox(host, deps.feedScroll);
   // A LINK IN A SUMMARY ROUTES AS ONE IN A RESPONSE BUBBLE: the digest's
   // markdown is drawn by the same renderer, so its anchors take the same route.
   const unrouteLinks = installProseLinkRouting(ctx, host);
-  const observer = new ResizeObserver(follow);
-  observer.observe(deps.feedScroll);
-  window.addEventListener("resize", follow);
 
   const dismiss = (): void => {
     if (drawnId === null || actions === null) return;
@@ -142,7 +133,7 @@ export function mountNewsDigest(
     actions = drawn.actions;
     host.replaceChildren(drawn.panel);
     host.hidden = false;
-    follow();
+    box.follow();
     log.info("the news digest stands; drawing it over the feed", {
       operation: "news-digest.shown",
       context: { sections: overlay.sections.length },
@@ -177,8 +168,7 @@ export function mountNewsDigest(
     dispose(): void {
       log.debug("disposing the news digest overlay", { operation: "news-digest.dispose" });
       unrouteLinks();
-      observer.disconnect();
-      window.removeEventListener("resize", follow);
+      box.dispose();
       document.removeEventListener("keydown", onKeydown);
       drawnId = null;
       actions = null;
