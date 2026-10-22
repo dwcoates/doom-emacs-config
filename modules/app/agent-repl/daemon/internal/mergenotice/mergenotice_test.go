@@ -107,11 +107,36 @@ func (h *fakeHolds) Supersede(_ context.Context, _ ids.WorkspaceID, turn ids.Tur
 	return h.retired, h.err
 }
 
+// fakeUntold is the durable untold-notice store in memory; readErr and
+// recordErr fail its reads and records.
+type fakeUntold struct {
+	rows      map[[2]string]wsm.UntoldMergeNotice
+	readErr   error
+	recordErr error
+}
+
+func (u *fakeUntold) UntoldMergeNotice(_ context.Context, subscriber ids.WorkspaceID, repo wsm.RepoKey) (wsm.UntoldMergeNotice, bool, error) {
+	if u.readErr != nil {
+		return wsm.UntoldMergeNotice{}, false, u.readErr
+	}
+	n, ok := u.rows[[2]string{string(subscriber), string(repo)}]
+	return n, ok, nil
+}
+
+func (u *fakeUntold) RecordUntoldMergeNotice(_ context.Context, n wsm.UntoldMergeNotice) error {
+	if u.recordErr != nil {
+		return u.recordErr
+	}
+	u.rows[[2]string{string(n.Subscriber), string(n.Repo)}] = n
+	return nil
+}
+
 // fixture is one service over fakes.
 type fixture struct {
 	s       *Service
 	prompts *fakePrompts
 	holds   *fakeHolds
+	untold  *fakeUntold
 	logs    *dlog.TestSurfaces
 	keys    int
 }
@@ -120,10 +145,11 @@ type fixture struct {
 // splice the real brief's placeholders into "label|change|queue|detail",
 // and whose keys count up.
 func newFixture(subs fakeSubscriptions) *fixture {
-	f := &fixture{prompts: &fakePrompts{}, holds: &fakeHolds{retired: true}, logs: dlog.NewTestSurfaces()}
+	f := &fixture{prompts: &fakePrompts{}, holds: &fakeHolds{retired: true}, untold: &fakeUntold{rows: map[[2]string]wsm.UntoldMergeNotice{}}, logs: dlog.NewTestSurfaces()}
 	f.s = New(Deps{
 		Subscriptions: subs,
 		Holds:         f.holds,
+		Untold:        f.untold,
 		Briefs: func(name string, values map[string]string) (string, error) {
 			if name != BriefNotice {
 				return "", fmt.Errorf("unknown brief %q", name)
@@ -560,7 +586,7 @@ func TestTheValuesSpliceIntoTheShippedBrief(t *testing.T) {
 	}
 
 	// Act.
-	text, err := brief.Splice(Values(wsm.MergeQueueDetailDepletes, []merge.QueueChange{landedLast}))
+	text, err := brief.Splice(Values(wsm.MergeQueueDetailDepletes, []string{Sentence(landedLast)}, landedLast))
 
 	// Assert.
 	if err != nil {
@@ -742,7 +768,7 @@ func TestEachQueuesNoticesSupersedeOnlyTheirOwn(t *testing.T) {
 
 func TestSentencesStatesOneChangeAsItsSentence(t *testing.T) {
 	// Arrange, Act, Assert.
-	if got := Sentences([]merge.QueueChange{landedLast}); got != Sentence(landedLast) {
+	if got := Sentences([]string{Sentence(landedLast)}); got != Sentence(landedLast) {
 		t.Fatalf("Sentences = %q, want the one sentence", got)
 	}
 }
@@ -756,12 +782,12 @@ func TestValuesFailsHardOnANoticeOfNoChange(t *testing.T) {
 	}()
 
 	// Act.
-	Values(wsm.MergeQueueDetailEveryChange, nil)
+	Values(wsm.MergeQueueDetailEveryChange, nil, landedLast)
 }
 
 func TestSentencesCountsEveryChangeItLists(t *testing.T) {
 	// Arrange.
-	changes := []merge.QueueChange{steppedFix, steppedFix, landedLast}
+	changes := []string{Sentence(steppedFix), Sentence(steppedFix), Sentence(landedLast)}
 
 	// Act.
 	got := Sentences(changes)
@@ -774,7 +800,7 @@ func TestSentencesCountsEveryChangeItLists(t *testing.T) {
 
 func TestSentencesOfTwoChangesCountsThemBoth(t *testing.T) {
 	// Arrange.
-	changes := []merge.QueueChange{steppedFix, landedLast}
+	changes := []string{Sentence(steppedFix), Sentence(landedLast)}
 
 	// Act.
 	got := Sentences(changes)
@@ -782,5 +808,73 @@ func TestSentencesOfTwoChangesCountsThemBoth(t *testing.T) {
 	// Assert.
 	if !strings.HasPrefix(got, "It changed 2 times since the last notice you were told, oldest first:") || strings.Count(got, "\n- ") != 2 {
 		t.Fatalf("Sentences = %q, want both changes counted", got)
+	}
+}
+
+func TestTheUntoldNoticeSurvivesARestartAndIsSuperseded(t *testing.T) {
+	// Arrange: the first daemon tells a change, then a restart builds a new
+	// service over the same durable store.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailEveryChange)}})
+	f.s.deliver(context.Background(), f.prompts, steppedFix)
+	restarted := New(f.s.deps)
+
+	// Act
+	restarted.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert
+	got := f.prompts.submissions()
+	if !reflect.DeepEqual(f.holds.asked, []ids.TurnID{"turn-ws-alice"}) || !strings.Contains(got[len(got)-1].text, Sentence(steppedFix)) {
+		t.Fatalf("superseded = %v, last notice = %q; want the first daemon's notice superseded and said again", f.holds.asked, got[len(got)-1].text)
+	}
+}
+
+func TestEachNoticeIsRecordedAsTheSubscribersUntoldNotice(t *testing.T) {
+	// Arrange
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailEveryChange)}})
+
+	// Act
+	f.s.deliver(context.Background(), f.prompts, steppedFix)
+
+	// Assert
+	n, ok := f.untold.rows[[2]string{string(alice), string(repoDoom)}]
+	if !ok || n.Turn != "turn-ws-alice" || !reflect.DeepEqual(n.Sentences, []string{Sentence(steppedFix)}) {
+		t.Fatalf("untold = %+v (%v), want the notice's turn and its one sentence", n, ok)
+	}
+}
+
+func TestAnUnreadableUntoldNoticeIsRecordedAndTheNextSaysOnlyTheNewChange(t *testing.T) {
+	// Arrange
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailEveryChange)}})
+	f.untold.readErr = errors.New("the store is gone")
+
+	// Act
+	f.s.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert
+	got := f.prompts.submissions()
+	if len(got) != 1 || fieldsOf(t, got[0].text)[1] != Sentence(landedLast) || len(f.holds.asked) != 0 {
+		t.Fatalf("submissions = %+v, superseded %v; want the new change alone and nothing superseded", got, f.holds.asked)
+	}
+	record, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op, Message: "could not read the subscriber's untold notice; the next one says only the new change"})
+	if !ok || record.Context["cause"] != "the store is gone" || record.Context["subscriber"] != string(alice) {
+		t.Fatalf("no error record of the unread notice: %+v", f.logs.Records())
+	}
+}
+
+func TestAnUnrecordableUntoldNoticeIsRecordedAndTheNoticeStillTold(t *testing.T) {
+	// Arrange
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailEveryChange)}})
+	f.untold.recordErr = errors.New("disk full")
+
+	// Act
+	f.s.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert
+	if got := f.prompts.submissions(); len(got) != 1 {
+		t.Fatalf("submissions = %+v, want the notice told", got)
+	}
+	record, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op, Message: "could not record the subscriber's untold notice; the next notice cannot supersede it"})
+	if !ok || record.Context["cause"] != "disk full" {
+		t.Fatalf("no error record of the unrecorded notice: %+v", f.logs.Records())
 	}
 }

@@ -222,6 +222,11 @@ func endSubscriptionsInTx(ctx context.Context, tx *sql.Tx, ws WorkspaceID) (int6
 	if err != nil {
 		return 0, err
 	}
+	// A CLOSED WORKSPACE IS TOLD NOTHING MORE, so its untold notices go with
+	// its subscriptions (mergenotices.go).
+	if _, err := tx.ExecContext(ctx, `DELETE FROM merge_queue_untold_notices WHERE subscriber = ?`, ws); err != nil {
+		return 0, err
+	}
 	return res.RowsAffected()
 }
 

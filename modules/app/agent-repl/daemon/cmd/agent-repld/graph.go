@@ -1141,6 +1141,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	queueNotices := mergenotice.New(mergenotice.Deps{
 		Subscriptions: p.DB,
 		Holds:         queue,
+		Untold:        p.DB,
 		Briefs:        merge.BriefsFrom(paths.PromptsDir),
 		MintKey:       prompthandler.MintKey,
 		Log:           p.Surfaces,

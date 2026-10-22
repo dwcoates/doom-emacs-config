@@ -3215,8 +3215,10 @@ A SUBSCRIBER IS NEVER TOLD A QUEUE THAT NO LONGER STANDS. A deferred notice
 waits behind the subscriber's running turn, so a busy subscriber was once told
 each change as its own turn, long after the queue moved on (a "testing"
 notice arriving twenty minutes after that merge landed, 2026-10-22). Each
-subscriber therefore holds at most ONE untold notice per queue: the next change
-retires it (`promptqueue` `Supersede`, tombstone `superseded`) and the new
+subscriber therefore holds at most ONE untold notice per queue, recorded
+DURABLY (wsm `merge_queue_untold_notices`, layout 69) because every deploy
+restarts the daemon and an in-memory one was forgotten at each restart, which
+piled the stale notices up again: the next change retires it (`promptqueue` `Supersede`, tombstone `superseded`) and the new
 notice lists every change it said, oldest first, then the queue as it now
 stands. The queue's delivery lock decides a supersession racing a delivery,
 so each change is told exactly once; a notice already told (or being
