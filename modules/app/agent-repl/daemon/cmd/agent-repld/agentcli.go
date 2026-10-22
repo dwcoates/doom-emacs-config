@@ -1162,7 +1162,14 @@ func workspaceGate(c *cliCall, args []string) int {
 	}
 	gate := status.Msg.GetSuccess().GetStatus().GetStanding().GetOpen().GetActivity().GetColdGate().GetGate()
 	if gate == nil {
-		c.failed("no cold gate stands on the workspace: %v", status.Msg.GetResult())
+		// THE STANDING, AS THE CLI PRINTS EVERY ANSWER: compact protojson,
+		// never a Go struct dump of the whole response.
+		standing, err := protojson.Marshal(status.Msg.GetSuccess().GetStatus().GetStanding())
+		if err != nil {
+			c.failed("no cold gate stands on the workspace, and its standing could not be printed: %v", err)
+			return exitRefused
+		}
+		c.failed("no cold gate stands on the workspace; it stands %s", standing)
 		return exitRefused
 	}
 	req.Gate = gate
