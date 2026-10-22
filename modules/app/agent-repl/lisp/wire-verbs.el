@@ -4631,7 +4631,7 @@ Beside the four handover arms, `:unservable' (V (:detail STRING)) and
   "Decode OpenFeedImageResponse from JSON into (:arm ARM :value V)."
   (agent-repl-wire-verbs--decode-result
    "OpenFeedImageResponse" json
-   (lambda (v) (agent-repl-wire-verbs--decode-empty "OpenFeedImageSuccess" v))
+   (agent-repl-wire-verbs--empty-arm "OpenFeedImageSuccess")
    #'agent-repl-wire-decode-open-feed-image-error))
 
 ;;;; ---- Rollback: the shared token ------------------------------------
