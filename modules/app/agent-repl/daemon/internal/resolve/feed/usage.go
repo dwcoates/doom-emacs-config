@@ -1,6 +1,8 @@
 package feed
 
 import (
+	"google.golang.org/protobuf/proto"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -198,19 +200,29 @@ func (s *wsState) subagentFigure(created *conversationv1.AgentId) *frontendv1.Fe
 	return &frontendv1.FeedSubagentTokens{Text: stamp + " tok"}
 }
 
-// restampSubagentCard re-pushes the card of the subagent AGENT names with its
-// lifetime fresh input, when the card is drawn and its figure moved. The main
-// agent has no card, so its usage re-stamps nothing here.
+// applyResponseFacts sets what a subagent's card reads off the subagent's OWN
+// API responses rather than off its spawn's frames: its lifetime fresh input.
+// Compose and re-stamp both go through here, so no frame of the spawn can
+// draw another quantity over it.
+func (s *wsState) applyResponseFacts(bubble *frontendv1.FeedSubagent, created *conversationv1.AgentId) {
+	bubble.Tokens = s.subagentFigure(created)
+}
+
+// restampSubagentCard re-pushes the card of the subagent AGENT names with what
+// its responses now state (applyResponseFacts), when the card is drawn and
+// what they state moved. The main agent has no card, so its responses re-stamp
+// nothing here.
 func (r *resolver) restampSubagentCard(s *wsState, agent *conversationv1.AgentId) {
 	for unit, state := range s.subagents {
 		if state.created.GetValue() != agent.GetValue() || state.row == nil {
 			continue
 		}
-		figure := s.subagentFigure(state.created)
-		if figure == nil || figure.GetText() == state.bubble.GetTokens().GetText() {
+		facts := &frontendv1.FeedSubagent{}
+		s.applyResponseFacts(facts, state.created)
+		if proto.Equal(facts.GetTokens(), state.bubble.GetTokens()) {
 			continue
 		}
-		state.bubble.Tokens = figure
+		s.applyResponseFacts(state.bubble, state.created)
 		f := r.feed(s, state.feed.feed)
 		row, ok := f.rows[state.row.GetValue()]
 		if !ok {
@@ -218,14 +230,14 @@ func (r *resolver) restampSubagentCard(s *wsState, agent *conversationv1.AgentId
 		}
 		r.restateRow(s, state.feed, row, true, unclonable{
 			operation: "daemon.feed.row_not_clonable",
-			message:   "a subagent card could not be snapshotted to re-stamp its fresh input",
+			message:   "a subagent card could not be snapshotted to re-stamp what its responses state",
 			context:   dlog.Context{"feed": f.key, "row": state.row.GetValue(), "unit": unit},
 		}, func(restamped *frontendv1.FeedRow) {
 			switch arm := restamped.GetRow().(type) {
 			case *frontendv1.FeedRow_DetachedSubagent:
-				arm.DetachedSubagent.GetSubagent().Tokens = figure
+				s.applyResponseFacts(arm.DetachedSubagent.GetSubagent(), state.created)
 			case *frontendv1.FeedRow_Activity:
-				arm.Activity.GetSubagent().Tokens = figure
+				s.applyResponseFacts(arm.Activity.GetSubagent(), state.created)
 			}
 		})
 	}

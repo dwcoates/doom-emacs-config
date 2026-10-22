@@ -3,6 +3,8 @@ package feed
 import (
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -346,6 +348,62 @@ func TestIsMainAgent(t *testing.T) {
 			// Assert
 			if got != tc.want {
 				t.Fatalf("isMainAgent() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestARecomposedCardKeepsWhatItsResponsesStated(t *testing.T) {
+	// Arrange: one card only re-stamped by its responses, another re-composed
+	// by a later frame of its spawn, so both reach their facts through
+	// applyResponseFacts by the two paths.
+	h := newHarness(t)
+	restamped := &conversationv1.AgentId{Value: "agent-restamped"}
+	recomposed := &conversationv1.AgentId{Value: "agent-recomposed"}
+	h.spawnSubagent("spawn-1", restamped, "Explore", "map the daemon")
+	h.spawnSubagent("spawn-2", recomposed, "Explore", "map the daemon")
+	for _, created := range []*conversationv1.AgentId{restamped, recomposed} {
+		h.subagentSpends(created, "spend-"+created.GetValue(), misses(1_000, 0))
+	}
+
+	// Act.
+	h.progressBeat("spawn-2", 12_400)
+
+	// Assert.
+	a := bubbleOf(h.bubbleRow("spawn-1", restamped))
+	b := bubbleOf(h.bubbleRow("spawn-2", recomposed))
+	if b.GetTokens() == nil || !proto.Equal(a.GetTokens(), b.GetTokens()) {
+		t.Fatalf("re-stamped %v != re-composed %v", a.GetTokens(), b.GetTokens())
+	}
+}
+
+func TestApplyResponseFacts(t *testing.T) {
+	tests := []struct {
+		name       string
+		spend      bool
+		wantTokens *frontendv1.FeedSubagentTokens
+	}{
+		{name: "nothing stated", wantTokens: nil},
+		{name: "usage stated", spend: true, wantTokens: &frontendv1.FeedSubagentTokens{Text: "1k tok"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			created := &conversationv1.AgentId{Value: "agent-explore"}
+			h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+			if test.spend {
+				h.subagentSpends(created, "sub-1", misses(1_000, 0))
+			}
+			s := h.resolver.state(testWorkspace)
+			bubble := &frontendv1.FeedSubagent{Tokens: &frontendv1.FeedSubagentTokens{Text: "stale"}}
+
+			// Act.
+			s.applyResponseFacts(bubble, created)
+
+			// Assert.
+			if !proto.Equal(bubble.GetTokens(), test.wantTokens) {
+				t.Fatalf("tokens = %v, want %v", bubble.GetTokens(), test.wantTokens)
 			}
 		})
 	}

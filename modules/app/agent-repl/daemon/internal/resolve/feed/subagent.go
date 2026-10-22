@@ -329,10 +329,10 @@ func (r *resolver) composeSubagent(s *wsState, at placement, unitID string, stat
 		bubble.Runtime = &frontendv1.FeedSubagentRuntime{}
 	}
 	bubble.Runtime.StartedAtMs = start
-	// THE FIGURE IS THE SUBAGENT'S LIFETIME FRESH INPUT, read off its account
-	// on every compose (usage.go), so no frame of the spawn can draw another
+	// THE FIGURE IS READ OFF THE SUBAGENT'S OWN RESPONSES on every compose
+	// (usage.go applyResponseFacts), so no frame of the spawn can draw another
 	// quantity over it.
-	bubble.Tokens = s.subagentFigure(state.created)
+	s.applyResponseFacts(bubble, state.created)
 	if bubble.Label == nil {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "bubble.Label == nil"})
 		bubble.Label = &frontendv1.FeedSubagentLabel{Text: "Agent"}
