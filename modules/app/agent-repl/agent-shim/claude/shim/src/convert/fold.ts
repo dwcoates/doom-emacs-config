@@ -79,6 +79,7 @@ import { convertAttachment, type AttachmentRecord } from "./attachments.js";
 import {
   convertDetached,
   createTaskKindRegistry,
+  restateTaskMessage,
   taskAgentKnowledge,
   taskAwaitingAgent,
   taskAwaitingKind,
@@ -202,6 +203,12 @@ interface Fold {
    */
   reportDroppedHooks(why: string): void;
   /**
+   * `message` as every reader takes it: a task message's `task_type` restated
+   * by the call that started the task (convert/detached.ts
+   * `restateTaskMessage`), or `message` itself. A read: it records nothing.
+   */
+  restateTaskMessage(message: SdkMessage): SdkMessage;
+  /**
    * The vendor task whose agent the STORE must name before `message` is
    * folded, or `undefined` (convert/detached.ts `taskAwaitingAgent`). A read:
    * it records nothing.
@@ -272,9 +279,13 @@ export function createFold(): Fold {
   return {
     onSdkMessage(message: SdkMessage, context: FoldContext): FoldOutput {
       try {
+        // THE TASK'S KIND IS THE RESTATED ONE here too, so a fold driven
+        // alone reads a task exactly as the engine, which restates ahead of its
+        // live table, does. Restating a restated message changes nothing.
+        const read = restateTaskMessage(message, state.taskKinds, state.calls);
         // EVERY ROW A TIMESTAMPED RECORD PRODUCED IS PLACED BY THAT RECORD,
         // as the file plane places it (convert/place.ts).
-        const output = dispatch(message, context, state);
+        const output = dispatch(read, context, state);
         const placed = placeRecordEntries(message, output.entries);
         return placed === output.entries ? output : { ...output, entries: placed };
       } catch (error) {
@@ -311,6 +322,7 @@ export function createFold(): Fold {
     reportDroppedHooks: (why) => state.hooks.reportDropped(why),
     noteUserDetach: (toolUseId) => state.taskKinds.noteUserDetach(toolUseId),
     retireUserDetach: (toolUseId, why) => state.taskKinds.retireUserDetach(toolUseId, why),
+    restateTaskMessage: (message) => restateTaskMessage(message, state.taskKinds, state.calls),
     taskAwaitingAgent: (message, context) => taskAwaitingAgent(message, context, state.taskKinds, state.calls),
     learnTaskAgent(taskId, answer) {
       if (answer.kind === "found") {

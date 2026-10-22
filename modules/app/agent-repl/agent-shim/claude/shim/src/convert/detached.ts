@@ -43,6 +43,7 @@ import { residueEntry, residueForMessage } from "./residue.js";
 import { TOOL_CONVERTERS } from "./tools/registry.js";
 import { subagentConverter, subagentPrompt } from "./tools/subagent.js";
 import { bashConverter } from "./tools/bash.js";
+import { monitorEndedFor } from "./tools/monitor.js";
 import type { CallRegistry, PendingCall } from "./tool-calls.js";
 import { agentActivity, taskUnitEntry, type TaskUnitTarget } from "./entries.js";
 
@@ -138,15 +139,16 @@ function detachedOutput(path: string, readable: boolean): conversationv1.Detache
 }
 
 // ---------------------------------------------------------------------------
-// WHAT KIND OF WORK IT IS — the vendor's own word, and nothing else.
+// WHAT KIND OF WORK IT IS — the vendor's word, unless the call names the kind.
 // ---------------------------------------------------------------------------
 //
 // Every announcement states its kind (`AgentDetachedWork.kind`), and the
-// vendor's `task_type` is the authority for it. The unit the work detached
-// from is NOT: a subagent RESUMED BY `SendMessage` is detached from the send,
-// and a consumer that read the kind off that unit found no kind at all
-// (daemon.sessionwatcher.detached_kind_unknown, 2026-09-27, the agent never
-// reached the live set or the footer).
+// vendor's `task_type` is the authority for it UNLESS the call that started the
+// task is itself a detachable kind ({@link restatedTaskType}). The unit the work
+// detached from is otherwise NOT: a subagent RESUMED BY `SendMessage` is
+// detached from the send, and a consumer that read the kind off that unit found
+// no kind at all (daemon.sessionwatcher.detached_kind_unknown, 2026-09-27, the
+// agent never reached the live set or the footer).
 
 /** The kinds a detached-work announcement can name. */
 export type DetachedKindName = "subagent" | "bash" | "workflow" | "monitor";
@@ -181,6 +183,35 @@ export function vendorTaskTypeOf(kind: DetachedKindName): string {
 /** The kind a vendor `task_type` names, or `undefined` for a word this shim does not know. */
 export function taskKindOf(taskType: string | undefined): DetachedKindName | undefined {
   return taskType === undefined ? undefined : VENDOR_TASK_KINDS.get(taskType);
+}
+
+/** Whether a tool converter's kind is one a detached-work announcement can name. */
+function isDetachedKindName(kind: string): kind is DetachedKindName {
+  for (const named of VENDOR_TASK_KINDS.values()) {
+    if (named === kind) return true;
+  }
+  return false;
+}
+
+/**
+ * THE VENDOR WORD A TASK IS READ BY, given the call that started it.
+ *
+ * THE VENDOR TYPES A TASK BY WHAT RUNS IT, NOT BY WHAT IT IS: a `Monitor`
+ * call's watch reaches the task stream as `local_bash`, because the watch is a
+ * background shell underneath (observed 2026-10-22 on every monitor of the
+ * overnight playtest). Read as a shell, a monitor waited for a `Bash` result
+ * that never comes, so it was announced only at its end, as a shell, and its
+ * record named no owner the whole time it ran (store.db.live-work.unscoped).
+ *
+ * So a call whose OWN converter is a detachable kind names the task's kind. The
+ * vendor's word stands everywhere else: a `SendMessage` that resumed a subagent
+ * is not itself a detachable kind, and a call this fold never saw states
+ * nothing.
+ */
+export function restatedTaskType(taskType: string | undefined, call: PendingCall | undefined): string | undefined {
+  const named = call === undefined ? undefined : TOOL_CONVERTERS.get(call.toolName)?.kind;
+  if (named === undefined || !isDetachedKindName(named)) return taskType;
+  return vendorTaskTypeOf(named);
 }
 
 /**
@@ -1054,6 +1085,102 @@ export function createTaskKindRegistry(): TaskKindRegistry {
 /** The task subtypes whose conversion names the agent a subagent task runs. */
 const AGENT_NAMING_SUBTYPES: ReadonlySet<string> = new Set(["task_started", "task_updated", "task_notification"]);
 
+/**
+ * A TASK MESSAGE AS EVERY READER TAKES IT: its `task_type` restated by the call
+ * that started the task ({@link restatedTaskType}), or the message itself.
+ *
+ * TAKEN ONCE, AHEAD OF EVERY READER. The engine's live table, the kind
+ * registry, and every branch below read `task_type`, so restating it in one of
+ * them left the others disagreeing about what the work is (the live level
+ * leaves shells out, and a monitor read as a shell there was live nowhere).
+ * The call is the open one, or the one the task's start was seen with.
+ */
+export function restateTaskMessage(
+  message: SdkMessage,
+  taskKinds: TaskKindRegistry,
+  calls: CallRegistry,
+): SdkMessage {
+  if (message.type !== "system") return message;
+  const raw = message as unknown as RawTask;
+  if (raw.subtype === "background_tasks_changed") return restateLevel(message, taskKinds, calls);
+  if (raw.task_type === undefined || raw.subtype === undefined || !AGENT_NAMING_SUBTYPES.has(raw.subtype)) return message;
+  const taskId = raw.task_id;
+  if (typeof taskId !== "string" || taskId === "") return message;
+  const restated = restatedTask(raw.subtype, taskId, raw.task_type, raw.tool_use_id, taskKinds, calls);
+  return restated === raw.task_type ? message : ({ ...message, task_type: restated } as SdkMessage);
+}
+
+/**
+ * THE LEVEL'S TASKS, each restated as its own start was. The live table takes
+ * every named task's `task_type` from the level, so a level left as the vendor
+ * typed it turned a monitor back into a shell on the next change.
+ */
+function restateLevel(message: SdkMessage, taskKinds: TaskKindRegistry, calls: CallRegistry): SdkMessage {
+  const stated: unknown = (message as unknown as { tasks?: unknown }).tasks;
+  if (!Array.isArray(stated)) return message;
+  const tasks = stated as readonly LevelTask[];
+  let changed = false;
+  const restated = tasks.map((task): LevelTask => {
+    if (task.task_type === undefined || typeof task.task_id !== "string" || task.task_id === "") return task;
+    const word = restatedTask("background_tasks_changed", task.task_id, task.task_type, task.tool_use_id, taskKinds, calls);
+    if (word === task.task_type) return task;
+    changed = true;
+    return { ...task, task_type: word };
+  });
+  return changed ? ({ ...message, tasks: restated } as unknown as SdkMessage) : message;
+}
+
+/**
+ * THE CALL A TASK BELONGS TO: the one still open on this stream, else the one
+ * its start was seen with (the registry keeps it past the call's own result,
+ * which a monitor's arming receipt and a shell's launch receipt both are), or
+ * `undefined` for a task whose call this fold never saw. ONE PLACE for every
+ * reader, so no two of them can disagree about which call a task is.
+ */
+export function taskCall(
+  taskId: string,
+  toolUseId: string | undefined,
+  taskKinds: TaskKindRegistry,
+  calls: CallRegistry,
+): PendingCall | undefined {
+  const open = toolUseId === undefined || toolUseId === "" ? undefined : calls.peek(toolUseId);
+  return open ?? taskKinds.callOf(taskId);
+}
+
+/** One task the vendor's level names, read loosely for what a restatement needs. */
+interface LevelTask {
+  readonly task_id?: string;
+  readonly task_type?: string;
+  readonly tool_use_id?: string;
+}
+
+/** One task's `task_type` restated by its call, recording a restatement at INFO. */
+function restatedTask(
+  subtype: string,
+  taskId: string,
+  taskType: string,
+  statedToolUse: string | undefined,
+  taskKinds: TaskKindRegistry,
+  calls: CallRegistry,
+): string | undefined {
+  const toolUseId = statedToolUse ?? taskKinds.toolUseFor(taskId);
+  const call = taskCall(taskId, toolUseId, taskKinds, calls);
+  const restated = restatedTaskType(taskType, call);
+  if (restated === taskType) return taskType;
+  LOGGER.info(
+    {
+      task_id: taskId,
+      subtype,
+      tool_use_id: toolUseId ?? "",
+      tool: call?.toolName ?? "",
+      vendor_task_type: taskType,
+      task_type: restated ?? "",
+    },
+    "the vendor typed a task by what runs it; the call that started it names its kind",
+  );
+  return restated;
+}
+
 /** A task whose kind the STORE must state before its message is folded, and the unit it is asked by. */
 export interface TaskAwaitingKind {
   readonly taskId: string;
@@ -1147,7 +1274,7 @@ export function taskAwaitingAgent(
   if (taskKindOf(taskType) !== "subagent") return undefined;
   const toolUseId = raw.tool_use_id ?? known?.toolUseId ?? taskKinds.toolUseFor(taskId);
   if (toolUseId === undefined || toolUseId === "") return undefined;
-  const call = calls.peek(toolUseId) ?? taskKinds.callOf(taskId);
+  const call = taskCall(taskId, toolUseId, taskKinds, calls);
   // THE SPAWN STATES BOTH: its id is the agent and its input the commission.
   if (call !== undefined && isSpawnCall(call)) return undefined;
   // A CALL THIS FOLD NEVER SAW is read as the spawn by the minting rule, so the
@@ -1237,7 +1364,7 @@ export function convertDetached(
   }
   const owner = openCall?.agentId ?? taskKinds.ownerOf(taskId);
   // Read NOW, before a settling notification forgets the task's facts.
-  const spawnCall = openCall ?? taskKinds.callOf(taskId);
+  const spawnCall = taskCall(taskId, toolUseId, taskKinds, calls);
   // THE VENDOR'S WORD FOR WHAT THE TASK IS: stated on this message, or on the
   // task's start, or on the vendor's live level (which is all a process that
   // started after the task has).
@@ -1508,6 +1635,13 @@ export function convertDetached(
         // same write identity, absorbed if it already landed — so a run
         // concluded before any announcement reached the record still replays
         // its start ahead of the end the sidecar writes.
+        // A MONITOR'S END IS ITS UNIT'S END. Its tool result was only the
+        // arming receipt (convert/tools/monitor.ts), so the watch leaving the
+        // live set is the one record that its unit is over, and the consumer
+        // retires the work by that unit's ended arm.
+        if (taskKindOf(taskType) === "monitor") {
+          entries.push(monitorEndedEntry(context, taskUnitTarget(taskId, toolUseId, owner, taskKinds), uuid, toolUseId, spawnCall));
+        }
         if (taskKindOf(taskType) === "bash") {
           const start = shellRunStartEntry(context, agentId, toolUseId, spawnCall);
           if (start !== undefined) entries.push(start);
@@ -1545,6 +1679,31 @@ export function convertDetached(
       );
       return [residueEntry(context, message, residueForMessage(message), `unknown.${String(raw.subtype)}`)];
   }
+}
+
+/**
+ * A MONITOR'S UNIT SETTLED AS ENDED, restating the watch its call armed so the
+ * settled row stands alone; a call this fold never saw restates no start.
+ */
+export function monitorEndedEntry(
+  context: FoldContext,
+  target: TaskUnitTarget,
+  vendorUuid: string,
+  toolUseId: string,
+  call: PendingCall | undefined,
+): PersistEntry {
+  if (call === undefined) {
+    LOGGER.debug(
+      { tool_use_id: toolUseId },
+      "the fold never saw this monitor's call open; its ended unit restates no start",
+    );
+  }
+  return taskUnitEntry(
+    context,
+    target,
+    { vendorUuid, discriminator: "activity.monitor.ended" },
+    agentActivity(toolCallActivityId(toolUseId), monitorEndedFor(call)),
+  );
 }
 
 /**

@@ -2524,7 +2524,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   // -- the message loop -----------------------------------------------------
 
-  async function onSdkMessage(message: SdkMessage): Promise<void> {
+  async function onSdkMessage(vendorMessage: SdkMessage): Promise<void> {
+    // THE TASK'S KIND, TAKEN ONCE, before anything reads it: the live table
+    // below and the fold read the same restated `task_type`, so a monitor the
+    // vendor typed as a shell is a monitor to both (convert/detached.ts
+    // `restateTaskMessage`).
+    const message = deps.fold.restateTaskMessage(vendorMessage);
     // BEFORE THE FOLD. A rewind the vendor refused reaches us as this message,
     // and recovering here is what keeps the refusal out of the feed and the
     // prompt alive. A recovered message is consumed: the query it arrived on is

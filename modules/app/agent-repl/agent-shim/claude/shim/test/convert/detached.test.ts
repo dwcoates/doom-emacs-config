@@ -30,7 +30,10 @@ import {
   lostAgentEntry,
   lostBashEntry,
   lostSubagentEntry,
+  monitorEndedEntry,
   outputPathFromProse,
+  restatedTaskType,
+  restateTaskMessage,
   patchBackgrounds,
   resultBackgroundTaskId,
   shellRunStartEntry,
@@ -38,6 +41,7 @@ import {
   taskAgentKnowledge,
   taskAwaitingAgent,
   taskAwaitingKind,
+  taskCall,
   taskCommission,
   taskUnitTarget,
   wentSilent,
@@ -3015,5 +3019,318 @@ describe("vendorTaskTypeOf", () => {
   ] as const)("names the $kind kind as $word", ({ kind, word }) => {
     // Arrange, Act, Assert.
     expect(vendorTaskTypeOf(kind)).toBe(word);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE CALL NAMES THE KIND: a monitor the vendor typed by what runs it
+// ---------------------------------------------------------------------------
+
+/** A `Monitor` call the main agent armed, as the fold holds it open. */
+function monitorCall(toolUseId: string): PendingCall {
+  return {
+    toolUseId,
+    toolName: "Monitor",
+    input: { description: "watch the queue", command: "tail -f q.log", timeout_ms: 60000 },
+    startedAtMs: 7,
+    agentId: MAIN_AGENT,
+  };
+}
+
+/** The monitor arm one unit row states. */
+function monitorUnitOf(entry: PersistEntry | undefined): conversationv1.AgentMonitor | undefined {
+  const frame = entry?.item.kind === "frame" ? entry.item.frame : undefined;
+  const update = frame?.result.case === "update" ? frame.result.value.update : undefined;
+  const activity = update?.case === "activity" ? update.value : undefined;
+  return activity?.item.case === "monitor" ? activity.item.value : undefined;
+}
+
+describe("restatedTaskType", () => {
+  it.each([
+    { name: "a Monitor call names the monitor kind over the vendor's shell word", tool: "Monitor", vendor: "local_bash", want: "monitor" },
+    { name: "a Bash call agrees with the vendor's shell word", tool: "Bash", vendor: "local_bash", want: "local_bash" },
+    { name: "an Agent call agrees with the vendor's agent word", tool: "Agent", vendor: "local_agent", want: "local_agent" },
+    { name: "a SendMessage that resumed an agent is no detachable kind, so the vendor's word stands", tool: "SendMessage", vendor: "local_agent", want: "local_agent" },
+    { name: "a Monitor call names the kind the vendor left unstated", tool: "Monitor", vendor: undefined, want: "monitor" },
+  ])("$name", ({ tool, vendor, want }) => {
+    // Arrange.
+    const call: PendingCall = { ...monitorCall("toolu_w"), toolName: tool };
+
+    // Act, Assert.
+    expect(restatedTaskType(vendor, call)).toBe(want);
+  });
+
+  it("keeps the vendor's word for a call this fold never saw", () => {
+    // Arrange, Act, Assert.
+    expect(restatedTaskType("local_bash", undefined)).toBe("local_bash");
+  });
+});
+
+describe("restateTaskMessage", () => {
+  it("restates a task the open Monitor call started as a monitor", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    calls.remember(monitorCall("toolu_w"));
+    const message = taskMessage({ subtype: "task_started", task_id: "bw1", tool_use_id: "toolu_w", task_type: "local_bash" });
+
+    // Act.
+    const read = restateTaskMessage(message, createTaskKindRegistry(), calls) as unknown as { task_type?: string };
+
+    // Assert.
+    expect(read.task_type).toBe("monitor");
+  });
+
+  it("records the restatement at INFO with the vendor's word and the call's tool", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    calls.remember(monitorCall("toolu_w"));
+    const message = taskMessage({ subtype: "task_started", task_id: "bw1", tool_use_id: "toolu_w", task_type: "local_bash" });
+    const mark = logSinkMark();
+
+    // Act.
+    restateTaskMessage(message, createTaskKindRegistry(), calls);
+
+    // Assert.
+    expect(
+      logRecordsSince(mark)
+        .filter((record) => record.message === "the vendor typed a task by what runs it; the call that started it names its kind")
+        .map((record) => [record.level, record.context.tool, record.context.vendor_task_type, record.context.task_type]),
+    ).toEqual([["info", "Monitor", "local_bash", "monitor"]]);
+  });
+
+  it("restates a later message of the task by the call its start was seen with", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    calls.remember(monitorCall("toolu_w"));
+    const started = taskMessage({ subtype: "task_started", task_id: "bw1", tool_use_id: "toolu_w", task_type: "local_bash" });
+    drain(convertDetached(restateTaskMessage(started, registry, calls) as typeof started, foldContext(), registry, calls));
+    const released = createCallRegistry();
+    const notified = taskMessage({ subtype: "task_notification", task_id: "bw1", task_type: "local_bash", status: "completed" });
+
+    // Act.
+    const read = restateTaskMessage(notified, registry, released) as unknown as { task_type?: string };
+
+    // Assert.
+    expect(read.task_type).toBe("monitor");
+  });
+
+  it("restates a monitor the vendor's level names as a shell, by the call its start was seen with", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    calls.remember(monitorCall("toolu_w"));
+    const started = taskMessage({ subtype: "task_started", task_id: "bw1", tool_use_id: "toolu_w", task_type: "local_bash" });
+    drain(convertDetached(restateTaskMessage(started, registry, calls) as typeof started, foldContext(), registry, calls));
+    const level = taskMessage({
+      subtype: "background_tasks_changed",
+      tasks: [
+        { task_id: "bw1", task_type: "local_bash", description: "watch the queue" },
+        { task_id: "bs2", task_type: "local_bash", description: "sleep 600" },
+      ],
+    });
+
+    // Act.
+    const read = restateTaskMessage(level, registry, createCallRegistry()) as unknown as {
+      tasks: { task_id: string; task_type: string }[];
+    };
+
+    // Assert.
+    expect(read.tasks.map((task) => [task.task_id, task.task_type])).toEqual([
+      ["bw1", "monitor"],
+      ["bs2", "local_bash"],
+    ]);
+  });
+
+  it("hands back a level whose every task agrees with its call unchanged", () => {
+    // Arrange.
+    const level = taskMessage({ subtype: "background_tasks_changed", tasks: [{ task_id: "bs2", task_type: "local_bash" }] });
+
+    // Act, Assert.
+    expect(restateTaskMessage(level, createTaskKindRegistry(), createCallRegistry())).toBe(level);
+  });
+
+  it.each([
+    { name: "a message that is not a task message", fields: { subtype: "init" } },
+    { name: "a task message that states no task_type", fields: { subtype: "task_started", task_id: "bw1", tool_use_id: "toolu_w" } },
+    { name: "a task whose call agrees with the vendor", fields: { subtype: "task_started", task_id: "bb1", tool_use_id: "toolu_b", task_type: "local_bash" } },
+  ])("hands back $name unchanged", ({ fields }) => {
+    // Arrange.
+    const calls = createCallRegistry();
+    calls.remember(monitorCall("toolu_w"));
+    calls.remember({ ...monitorCall("toolu_b"), toolName: "Bash" });
+    const message = taskMessage(fields);
+
+    // Act, Assert.
+    expect(restateTaskMessage(message, createTaskKindRegistry(), calls)).toBe(message);
+  });
+});
+
+describe("convertDetached: a monitor the vendor typed local_bash", () => {
+  /** Fold one task message as the fold reads it: restated first. */
+  function folded(
+    fields: Record<string, unknown>,
+    registry: ReturnType<typeof createTaskKindRegistry>,
+    calls: CallRegistry,
+  ): readonly PersistEntry[] {
+    const message = restateTaskMessage(taskMessage(fields), registry, calls) as Extract<SdkMessage, { type: "system" }>;
+    return convertDetached(message, foldContext(), registry, calls);
+  }
+
+  const STARTED = { subtype: "task_started", task_id: "bw1", tool_use_id: "toolu_w", task_type: "local_bash", description: "watch the queue" };
+  const NOTIFIED = {
+    subtype: "task_notification",
+    task_id: "bw1",
+    tool_use_id: "toolu_w",
+    task_type: "local_bash",
+    status: "completed",
+    output_file: "/tmp/tasks/bw1.output",
+  };
+
+  it("announces the monitor at its start, naming the arming agent its owner", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    calls.remember(monitorCall("toolu_w"));
+
+    // Act.
+    const entries = folded(STARTED, createTaskKindRegistry(), calls);
+
+    // Assert.
+    expect(entries.map((entry) => [kindOf(entry).case, announcement(entry).owner?.value])).toEqual([["monitor", MAIN_AGENT.value]]);
+  });
+
+  it("claims no shell spool for the monitor at its start", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    calls.remember(monitorCall("toolu_w"));
+
+    // Act.
+    const entries = folded(STARTED, createTaskKindRegistry(), calls);
+
+    // Assert.
+    expect(entries.filter((entry) => entry.item.kind === "shell_run_claim")).toEqual([]);
+  });
+
+  it("settles the monitor's unit as ended at its notification, restating the watch it armed", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    calls.remember(monitorCall("toolu_w"));
+    drain(folded(STARTED, registry, calls));
+
+    // Act.
+    const entries = folded(NOTIFIED, registry, calls);
+
+    // Assert.
+    const ended = entries.map(monitorUnitOf).find((unit) => unit !== undefined);
+    expect([ended?.result.case, ended?.result.case === "ended" ? ended.result.value.call?.description : undefined]).toEqual([
+      "ended",
+      "watch the queue",
+    ]);
+  });
+
+  it("files the monitor's ended unit on its own call's row", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    calls.remember(monitorCall("toolu_w"));
+    drain(folded(STARTED, registry, calls));
+
+    // Act.
+    const entries = folded(NOTIFIED, registry, calls);
+
+    // Assert.
+    expect(entries.filter((entry) => monitorUnitOf(entry) !== undefined).map((entry) => entry.upsertKey)).toEqual([
+      "activity:toolu_w",
+    ]);
+  });
+
+  it("restates the monitor's conclusion as a monitor, never as a shell", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    calls.remember(monitorCall("toolu_w"));
+    drain(folded(STARTED, registry, calls));
+
+    // Act.
+    const entries = folded(NOTIFIED, registry, calls);
+
+    // Assert.
+    expect(entries.filter((entry) => announcement(entry)?.kind !== undefined).map((entry) => kindOf(entry).case)).toEqual([
+      "monitor",
+    ]);
+  });
+});
+
+describe("monitorEndedEntry", () => {
+  it("restates no start for a monitor whose call this fold never saw", () => {
+    // Arrange.
+    const target = taskUnitTarget("bw1", "toolu_w", MAIN_AGENT, createTaskKindRegistry());
+
+    // Act.
+    const entry = monitorEndedEntry(foldContext(), target, "uuid-task", "toolu_w", undefined);
+
+    // Assert.
+    const unit = monitorUnitOf(entry);
+    expect([unit?.result.case, unit?.result.case === "ended" ? unit.result.value.call : "not ended"]).toEqual(["ended", undefined]);
+  });
+
+  it("records at debug that the ended unit restates no start", () => {
+    // Arrange.
+    const target = taskUnitTarget("bw1", "toolu_w", MAIN_AGENT, createTaskKindRegistry());
+    const mark = logSinkMark();
+
+    // Act.
+    monitorEndedEntry(foldContext(), target, "uuid-task", "toolu_w", undefined);
+
+    // Assert.
+    expect(
+      logRecordsSince(mark)
+        .filter((record) => record.message === "the fold never saw this monitor's call open; its ended unit restates no start")
+        .map((record) => [record.level, record.context.tool_use_id]),
+    ).toEqual([["debug", "toolu_w"]]);
+  });
+});
+
+describe("taskCall", () => {
+  it("answers the call still open on this stream", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    calls.remember(monitorCall("toolu_w"));
+
+    // Act, Assert.
+    expect(taskCall("bw1", "toolu_w", createTaskKindRegistry(), calls)?.toolUseId).toBe("toolu_w");
+  });
+
+  it("answers the call the task's start was seen with once the call is released", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberCall("bw1", monitorCall("toolu_w"));
+
+    // Act, Assert.
+    expect(taskCall("bw1", "toolu_w", registry, createCallRegistry())?.toolName).toBe("Monitor");
+  });
+
+  it.each([
+    { name: "no call id is known", toolUseId: undefined },
+    { name: "the call id is empty", toolUseId: "" },
+    { name: "the call was never seen", toolUseId: "toolu_unseen" },
+  ])("answers nothing when $name and nothing was remembered", ({ toolUseId }) => {
+    // Arrange, Act, Assert.
+    expect(taskCall("bw1", toolUseId, createTaskKindRegistry(), createCallRegistry())).toBeUndefined();
+  });
+
+  it("is the one lookup the restatement, the agent ask and the conversion share", () => {
+    // Arrange: every reader in convert/detached.ts resolves a task's call through it.
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../src/convert/detached.ts"),
+      "utf8",
+    );
+
+    // Act.
+    const handRolled = source.split("\n").filter((line) => line.includes("?? taskKinds.callOf(")).length;
+
+    // Assert.
+    expect([handRolled, (source.match(/taskCall\(taskId, toolUseId, taskKinds, calls\)/g) ?? []).length]).toEqual([1, 3]);
   });
 });

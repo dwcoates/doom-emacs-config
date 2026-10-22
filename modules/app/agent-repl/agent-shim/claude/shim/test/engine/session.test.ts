@@ -16330,6 +16330,38 @@ describe("the live-work level the shim pushes", () => {
     expect(levels.flat()).not.toContain("toolu_shell");
   });
 
+  it("names a monitor the vendor typed as a shell, read as the fold restates it", async () => {
+    // Arrange: the fold restates the vendor's shell word to the monitor its call names.
+    const h = harness();
+    await started(h);
+    h.fold.restateFor = (message) =>
+      (message as { task_type?: string }).task_type === "local_bash"
+        ? ({ ...message, task_type: "monitor" } as SdkMessage)
+        : message;
+
+    // Act
+    const levels = await levelsWhile(h, () => vendorRunsLive(h, "toolu_watch", "local_bash"));
+
+    // Assert
+    expect(levels).toContainEqual(["toolu_watch"]);
+  });
+
+  it("hands the fold the restated task message", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.fold.restateFor = (message) =>
+      (message as { task_type?: string }).task_type === "local_bash"
+        ? ({ ...message, task_type: "monitor" } as SdkMessage)
+        : message;
+
+    // Act
+    await vendorRunsLive(h, "toolu_watch", "local_bash");
+
+    // Assert
+    expect((h.fold.seen.at(-1) as { task_type?: string }).task_type).toBe("monitor");
+  });
+
   it("pushes an unchanged level once", async () => {
     // Arrange
     const h = harness();

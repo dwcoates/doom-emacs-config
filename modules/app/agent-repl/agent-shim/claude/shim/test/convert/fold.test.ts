@@ -2812,6 +2812,28 @@ describe("the calls in flight", () => {
     expect(heldIds(fold)).toEqual([]);
   });
 
+  it("restates a task its open Monitor call started as a monitor, through the fold's own method", () => {
+    // Arrange
+    const fold = foldEach([
+      assistant("msg-mon", [toolUse("toolu_mon", "Monitor", { command: "tail -f log", description: "watch" })]),
+    ]);
+    const started = {
+      type: "system",
+      subtype: "task_started",
+      uuid: "uuid-mon-start",
+      session_id: "session-1",
+      task_id: "m1",
+      tool_use_id: "toolu_mon",
+      task_type: "local_bash",
+    } as unknown as SdkMessage;
+
+    // Act
+    const read = fold.restateTaskMessage(started) as unknown as { task_type?: string };
+
+    // Assert
+    expect(read.task_type).toBe("monitor");
+  });
+
   it("releases a monitor's call at its arming receipt", () => {
     // Arrange, Act
     const fold = foldEach([

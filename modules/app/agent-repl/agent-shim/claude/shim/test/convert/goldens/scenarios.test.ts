@@ -333,3 +333,32 @@ describe("the terminals a capture's turns end on", () => {
   });
 });
 
+
+describe("the detached work a captured monitor announces", () => {
+  /** The kind of every detached-work announcement a run wrote, in order. */
+  function announcedKinds(scenario: string): (string | undefined)[] {
+    return foldScenario(scenario).entries.flatMap((entry) => {
+      const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
+      return frame?.result.case === "detachedWork" ? [frame.result.value.kind?.kind.case] : [];
+    });
+  }
+
+  it.each(["monitor-deadline", "monitor-persistent"])(
+    "%s: the vendor's local_bash task is announced as a monitor from its start",
+    (scenario) => {
+      // Arrange, Act.
+      const kinds = announcedKinds(scenario);
+
+      // Assert.
+      expect([kinds.length > 0, kinds.every((kind) => kind === "monitor")]).toEqual([true, true]);
+    },
+  );
+
+  it.each(["monitor-deadline", "monitor-persistent"])("%s: no shell spool is claimed for the monitor", (scenario) => {
+    // Arrange, Act.
+    const claims = foldScenario(scenario).entries.filter((entry) => entry.item.kind === "shell_run_claim");
+
+    // Assert.
+    expect(claims).toEqual([]);
+  });
+});

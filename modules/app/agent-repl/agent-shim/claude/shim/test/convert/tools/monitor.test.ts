@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { toolResultText } from "../../../src/convert/entries.js";
-import { monitorConverter, monitorEnded } from "../../../src/convert/tools/monitor.js";
+import { monitorConverter, monitorEnded, monitorEndedFor } from "../../../src/convert/tools/monitor.js";
 import type { PendingCall, ToolOutcome } from "../../../src/convert/tool-calls.js";
 import { conversationv1 } from "../../../src/proto.js";
 
@@ -208,5 +208,28 @@ describe("monitorEnded", () => {
 
     // Assert.
     expect((monitor.result.value as conversationv1.AgentMonitorEnded).call).toEqual(armed);
+  });
+});
+
+describe("monitorEndedFor", () => {
+  it("restates the watch the call armed on the ended arm", () => {
+    // Arrange.
+    const call = callWith({ description: "watch the queue", command: "tail -f q.log", timeout_ms: 60000 });
+
+    // Act.
+    const item = monitorEndedFor(call);
+
+    // Assert.
+    const ended = item.case === "monitor" && item.value.result.case === "ended" ? item.value.result.value : undefined;
+    expect([ended?.call?.description, ended?.call?.lifetime.case]).toEqual(["watch the queue", "deadline"]);
+  });
+
+  it("restates no start for a call nothing observed", () => {
+    // Arrange, Act.
+    const item = monitorEndedFor(undefined);
+
+    // Assert.
+    const ended = item.case === "monitor" && item.value.result.case === "ended" ? item.value.result.value : undefined;
+    expect([item.case, ended?.call]).toEqual(["monitor", undefined]);
   });
 });
