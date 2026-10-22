@@ -18,6 +18,9 @@ import (
 // clock charges only the time this binary's processes were not starved,
 // which is the harness's own rule (integration/harness/granted.go).
 //
+// A bound on something OUTSIDE this binary's processes (an external engine
+// answering) is the one exception, declared where it is taken by a comment
+// block directly above it that opens `// wall-clock:` and says why.
 // realtest/ drives the owner's real editor on the host, where wall time is the
 // subject, and is not this package.
 func TestNoE2EWaitIsBoundOnWallTime(t *testing.T) {
@@ -38,15 +41,62 @@ func TestNoE2EWaitIsBoundOnWallTime(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
-		for i, line := range strings.Split(string(b), "\n") {
-			if strings.Contains(line, "context.WithTimeout(") || strings.Contains(line, "context.WithDeadline(") {
-				offenders = append(offenders, f+":"+strconv.Itoa(i+1))
+		lines := strings.Split(string(b), "\n")
+		for i, line := range lines {
+			if !strings.Contains(line, "context.WithTimeout(") && !strings.Contains(line, "context.WithDeadline(") {
+				continue
 			}
+			if wallClockDeclared(lines, i) {
+				continue
+			}
+			offenders = append(offenders, f+":"+strconv.Itoa(i+1))
 		}
 	}
 
 	// Assert
 	if len(offenders) != 0 {
 		t.Fatalf("wall-clock waits at %v; bound them with grantedclock.WithBound", offenders)
+	}
+}
+
+// wallClockDeclared reports whether the comment block directly above line i
+// opens with a `// wall-clock:` declaration of why the bound is wall time.
+func wallClockDeclared(lines []string, i int) bool {
+	for j := i - 1; j >= 0; j-- {
+		trimmed := strings.TrimSpace(lines[j])
+		if !strings.HasPrefix(trimmed, "//") {
+			return false
+		}
+		if strings.HasPrefix(trimmed, "// wall-clock:") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestWallClockDeclaredReadsOnlyTheCommentBlockAboveTheBound pins the one
+// exception's shape: a declaration in the comment block directly above
+// counts, and one separated from the bound by code does not.
+func TestWallClockDeclaredReadsOnlyTheCommentBlockAboveTheBound(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		lines []string
+		want  bool
+	}{
+		{"declared directly above", []string{"\t// wall-clock: an external engine", "\t// answers in wall time", "\tctx, cancel := context.WithTimeout(p, b)"}, true},
+		{"no declaration", []string{"\t// a wait", "\tctx, cancel := context.WithTimeout(p, b)"}, false},
+		{"declaration above unrelated code", []string{"\t// wall-clock: elsewhere", "\tx := 1", "\tctx, cancel := context.WithTimeout(p, b)"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := wallClockDeclared(tt.lines, len(tt.lines)-1)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("wallClockDeclared = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
