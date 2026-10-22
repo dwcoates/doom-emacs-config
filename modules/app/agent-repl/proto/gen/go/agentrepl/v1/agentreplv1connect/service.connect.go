@@ -135,6 +135,9 @@ const (
 	// AgentReplSetWorkspaceCorrespondenceProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspaceCorrespondence RPC.
 	AgentReplSetWorkspaceCorrespondenceProcedure = "/agentrepl.v1.AgentRepl/SetWorkspaceCorrespondence"
+	// AgentReplSetWorkspacePrincipalLinkProcedure is the fully-qualified name of the AgentRepl's
+	// SetWorkspacePrincipalLink RPC.
+	AgentReplSetWorkspacePrincipalLinkProcedure = "/agentrepl.v1.AgentRepl/SetWorkspacePrincipalLink"
 	// AgentReplRestartWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// RestartWorkspace RPC.
 	AgentReplRestartWorkspaceProcedure = "/agentrepl.v1.AgentRepl/RestartWorkspace"
@@ -359,6 +362,7 @@ var (
 	agentReplCompactWorkspaceMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("CompactWorkspace")
 	agentReplSetWorkspaceOneShotMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceOneShot")
 	agentReplSetWorkspaceCorrespondenceMethodDescriptor = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceCorrespondence")
+	agentReplSetWorkspacePrincipalLinkMethodDescriptor  = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePrincipalLink")
 	agentReplRestartWorkspaceMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
 	agentReplSetWorkspacePriorityMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
 	agentReplSetWorkspaceHiddenMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceHidden")
@@ -543,6 +547,9 @@ type AgentReplClient interface {
 	// Mark a workspace as awaiting correspondence from another, or clear the
 	// mark. See endpoint_set_workspace_correspondence.proto.
 	SetWorkspaceCorrespondence(context.Context, *connect.Request[v1.SetWorkspaceCorrespondenceRequest]) (*connect.Response[v1.SetWorkspaceCorrespondenceResponse], error)
+	// Name the link that best stands for a workspace's task, which the topbar's
+	// summary opens, or clear it. See endpoint_set_workspace_principal_link.proto.
+	SetWorkspacePrincipalLink(context.Context, *connect.Request[v1.SetWorkspacePrincipalLinkRequest]) (*connect.Response[v1.SetWorkspacePrincipalLinkResponse], error)
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
 	// See endpoint_restart_workspace.proto.
 	RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error)
@@ -982,6 +989,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplSetWorkspaceCorrespondenceProcedure,
 			connect.WithSchema(agentReplSetWorkspaceCorrespondenceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		setWorkspacePrincipalLink: connect.NewClient[v1.SetWorkspacePrincipalLinkRequest, v1.SetWorkspacePrincipalLinkResponse](
+			httpClient,
+			baseURL+AgentReplSetWorkspacePrincipalLinkProcedure,
+			connect.WithSchema(agentReplSetWorkspacePrincipalLinkMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		restartWorkspace: connect.NewClient[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse](
@@ -1437,6 +1450,7 @@ type agentReplClient struct {
 	compactWorkspace           *connect.Client[v1.CompactWorkspaceRequest, v1.CompactWorkspaceResponse]
 	setWorkspaceOneShot        *connect.Client[v1.SetWorkspaceOneShotRequest, v1.SetWorkspaceOneShotResponse]
 	setWorkspaceCorrespondence *connect.Client[v1.SetWorkspaceCorrespondenceRequest, v1.SetWorkspaceCorrespondenceResponse]
+	setWorkspacePrincipalLink  *connect.Client[v1.SetWorkspacePrincipalLinkRequest, v1.SetWorkspacePrincipalLinkResponse]
 	restartWorkspace           *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
 	setWorkspacePriority       *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
 	setWorkspaceHidden         *connect.Client[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse]
@@ -1680,6 +1694,11 @@ func (c *agentReplClient) SetWorkspaceOneShot(ctx context.Context, req *connect.
 // SetWorkspaceCorrespondence calls agentrepl.v1.AgentRepl.SetWorkspaceCorrespondence.
 func (c *agentReplClient) SetWorkspaceCorrespondence(ctx context.Context, req *connect.Request[v1.SetWorkspaceCorrespondenceRequest]) (*connect.Response[v1.SetWorkspaceCorrespondenceResponse], error) {
 	return c.setWorkspaceCorrespondence.CallUnary(ctx, req)
+}
+
+// SetWorkspacePrincipalLink calls agentrepl.v1.AgentRepl.SetWorkspacePrincipalLink.
+func (c *agentReplClient) SetWorkspacePrincipalLink(ctx context.Context, req *connect.Request[v1.SetWorkspacePrincipalLinkRequest]) (*connect.Response[v1.SetWorkspacePrincipalLinkResponse], error) {
+	return c.setWorkspacePrincipalLink.CallUnary(ctx, req)
 }
 
 // RestartWorkspace calls agentrepl.v1.AgentRepl.RestartWorkspace.
@@ -2136,6 +2155,9 @@ type AgentReplHandler interface {
 	// Mark a workspace as awaiting correspondence from another, or clear the
 	// mark. See endpoint_set_workspace_correspondence.proto.
 	SetWorkspaceCorrespondence(context.Context, *connect.Request[v1.SetWorkspaceCorrespondenceRequest]) (*connect.Response[v1.SetWorkspaceCorrespondenceResponse], error)
+	// Name the link that best stands for a workspace's task, which the topbar's
+	// summary opens, or clear it. See endpoint_set_workspace_principal_link.proto.
+	SetWorkspacePrincipalLink(context.Context, *connect.Request[v1.SetWorkspacePrincipalLinkRequest]) (*connect.Response[v1.SetWorkspacePrincipalLinkResponse], error)
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
 	// See endpoint_restart_workspace.proto.
 	RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error)
@@ -2571,6 +2593,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplSetWorkspaceCorrespondenceProcedure,
 		svc.SetWorkspaceCorrespondence,
 		connect.WithSchema(agentReplSetWorkspaceCorrespondenceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSetWorkspacePrincipalLinkHandler := connect.NewUnaryHandler(
+		AgentReplSetWorkspacePrincipalLinkProcedure,
+		svc.SetWorkspacePrincipalLink,
+		connect.WithSchema(agentReplSetWorkspacePrincipalLinkMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplRestartWorkspaceHandler := connect.NewUnaryHandler(
@@ -3058,6 +3086,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSetWorkspaceOneShotHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspaceCorrespondenceProcedure:
 			agentReplSetWorkspaceCorrespondenceHandler.ServeHTTP(w, r)
+		case AgentReplSetWorkspacePrincipalLinkProcedure:
+			agentReplSetWorkspacePrincipalLinkHandler.ServeHTTP(w, r)
 		case AgentReplRestartWorkspaceProcedure:
 			agentReplRestartWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspacePriorityProcedure:
@@ -3341,6 +3371,10 @@ func (UnimplementedAgentReplHandler) SetWorkspaceOneShot(context.Context, *conne
 
 func (UnimplementedAgentReplHandler) SetWorkspaceCorrespondence(context.Context, *connect.Request[v1.SetWorkspaceCorrespondenceRequest]) (*connect.Response[v1.SetWorkspaceCorrespondenceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspaceCorrespondence is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SetWorkspacePrincipalLink(context.Context, *connect.Request[v1.SetWorkspacePrincipalLinkRequest]) (*connect.Response[v1.SetWorkspacePrincipalLinkResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetWorkspacePrincipalLink is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error) {

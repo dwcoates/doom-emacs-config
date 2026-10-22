@@ -43,6 +43,11 @@ message WorkspaceStatus {
   // create from inside this workspace names to be cut in the same
   // repository (CreateWorkspaceRequest.repository).
   workspace.v1.RepositoryRef repository = 9;
+  // The workspace's principal link (SetWorkspacePrincipalLink), the url the
+  // topbar's summary opens, verbatim. UNSET while the workspace has none. An
+  // agent reads it to judge whether a link it was just given fits the task
+  // better than the one standing.
+  optional string principal_link = 10;
 }
 
 // Where a workspace's branch lands.
