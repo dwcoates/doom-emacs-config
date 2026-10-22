@@ -295,7 +295,7 @@ func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame, at 
 		r.replayTerminal(s, agent, nil, arm.Failure)
 	case *conversationv1.AgentFrame_DetachedWork:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentFrame_DetachedWork"})
-		r.drawDetachedWork(s, agent, arm.DetachedWork)
+		r.drawDetachedWork(s, agent, arm.DetachedWork, detachmentSourceOf(s.plane))
 	default:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "default"})
 		r.logger(s.id).Warn("daemon.feed.history_frame_unset",

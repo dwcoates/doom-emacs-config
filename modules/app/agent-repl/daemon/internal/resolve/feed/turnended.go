@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"fmt"
 	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -144,17 +145,32 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	// A DETACHMENT REPLAYED FROM HISTORY IS NOT ONE. A replay serves the newest
 	// page of a book, and a detachment's own row sits at its LAST upsert while
 	// its call's row can sit further back than the page reaches: the work is
-	// long over, its call simply was not replayed, and nothing was lost. That
-	// is recorded at DEBUG; only a detachment that arrived LIVE is a failure.
+	// long over, its call simply was not replayed, and nothing was lost.
+	//
+	// NOR IS WORK THE SESSION'S OPENING RESTATED. A daemon that attached to a
+	// running session (a handover's adoption) is told what is live NOW, and a
+	// shell started before the attach has its call wherever the conversation
+	// put it, often past the page replayed: on 2026-10-22 a main-agent `gh run
+	// watch` started five minutes before a handover was reported here at ERROR
+	// as a call that never drew. The footer carries the work either way.
+	//
+	// Both are recorded at DEBUG; only a detachment that arrived LIVE is a
+	// failure.
 	for unit, work := range s.detachedUnits {
 		said := s.heldDetachments[unit]
-		if said.plane == planeLive {
+		fields := dlog.Context{"unit": unit, "work": work, "owner": said.owner, "announcer": said.announcer, "turn": string(*turn)}
+		switch said.source {
+		case detachmentLive:
 			r.reportUnplaceableWork(s, work, "unit "+unit, said.owner, said.announcer,
 				"the spawning call was never drawn in any feed, as of the end of turn "+string(*turn))
-		} else {
+		case detachmentReplayed:
 			log.Debug("daemon.feed.replayed_detachment_unclaimed",
-				"a detachment replayed from history named a call the replay never reached; nothing is drawn for it",
-				dlog.Context{"unit": unit, "work": work, "owner": said.owner, "announcer": said.announcer, "turn": string(*turn)})
+				"a detachment replayed from history named a call the replay never reached; nothing is drawn for it", fields)
+		case detachmentStanding:
+			log.Debug("daemon.feed.standing_detachment_unclaimed",
+				"work the session's opening restated as running named a call the loaded pages never reached; nothing is drawn for it, and the footer carries the work", fields)
+		default:
+			panic(fmt.Sprintf("daemon.feed: a held detachment of unit %q has no source (%d)", unit, said.source))
 		}
 		delete(s.detachedUnits, unit)
 		delete(s.heldDetachments, unit)

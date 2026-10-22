@@ -806,6 +806,9 @@ func (s *feedSink) OnMainAgent(_ ids.WorkspaceID, agent *conversationv1.AgentId)
 func (s *feedSink) OnDetachedWork(_ ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	s.rec.emit(event{sink: "feed", method: "OnDetachedWork", agent: agent.GetValue(), detail: work.GetWork().GetValue(), place: place})
 }
+func (s *feedSink) OnStandingWork(_ ids.WorkspaceID, work *conversationv1.AgentDetachedWork) {
+	s.rec.emit(event{sink: "feed", method: "OnStandingWork", detail: work.GetWork().GetValue()})
+}
 
 func (s *feedSink) OnBash(_ ids.WorkspaceID, work *conversationv1.DetachedWorkId, _ *conversationv1.AgentBash) {
 	s.rec.emit(event{sink: "feed", method: "OnBash", detail: work.GetValue()})

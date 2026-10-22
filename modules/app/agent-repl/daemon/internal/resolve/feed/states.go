@@ -511,10 +511,50 @@ type heldDetachment struct {
 	owner string
 	// announcer is the agent whose stream carried the announcement.
 	announcer string
-	// plane is the ordering plane the announcement arrived on. A detachment
-	// REPLAYED from history names a unit that may lie in older history this
-	// daemon never replayed, which is not a unit that failed to draw.
-	plane rowPlane
+	// source is how this view came to hear of the work, which decides what an
+	// unclaimed detachment means when the turn ends.
+	source detachmentSource
+}
+
+// detachmentSource is how a detachment reached the feed.
+type detachmentSource uint8
+
+const (
+	// detachmentLive is work leaving its stream as it happens: its spawning
+	// call is drawn in this session, so a detachment still unclaimed when the
+	// turn ends is a producer fault.
+	detachmentLive detachmentSource = iota
+	// detachmentReplayed is a detachment replayed from history. It names a
+	// unit that may lie in older history than the page reached, which is not
+	// a unit that failed to draw.
+	detachmentReplayed
+	// detachmentStanding is work the session's opening restated as already
+	// running when this view attached (FeedSink.OnStandingWork). Its spawning
+	// call was made before the attach, often further back than the replayed
+	// page reaches, so an unclaimed one is the same fact as a replayed one.
+	detachmentStanding
+)
+
+// detachmentSourceOf is the source of a detachment arriving as a frame on
+// PLANE: replayed when the plane replays settled history, live otherwise.
+func detachmentSourceOf(plane rowPlane) detachmentSource {
+	if plane.replayed() {
+		return detachmentReplayed
+	}
+	return detachmentLive
+}
+
+// String names a source for a log record.
+func (d detachmentSource) String() string {
+	switch d {
+	case detachmentLive:
+		return "live"
+	case detachmentReplayed:
+		return "replayed"
+	case detachmentStanding:
+		return "standing"
+	}
+	return "unknown"
 }
 
 // markDetached remembers that a unit this resolver has not drawn yet has

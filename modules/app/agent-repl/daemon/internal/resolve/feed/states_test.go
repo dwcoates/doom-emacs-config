@@ -79,3 +79,40 @@ func TestSeparateUnitsNeverShareAccumulation(t *testing.T) {
 		t.Fatal("two units resolved to one accumulation")
 	}
 }
+
+func TestADetachmentsSourceFollowsTheReplayednessOfItsPlane(t *testing.T) {
+	for _, tc := range []struct {
+		plane rowPlane
+		want  detachmentSource
+	}{
+		{planeLive, detachmentLive},
+		{planeHistory, detachmentReplayed},
+		{planeInherited, detachmentReplayed},
+	} {
+		t.Run(tc.plane.String(), func(t *testing.T) {
+			// Act / Assert.
+			if got := detachmentSourceOf(tc.plane); got != tc.want {
+				t.Fatalf("source of %s = %s, want %s", tc.plane, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEveryDetachmentSourceHasAName(t *testing.T) {
+	for _, tc := range []struct {
+		source detachmentSource
+		want   string
+	}{
+		{detachmentLive, "live"},
+		{detachmentReplayed, "replayed"},
+		{detachmentStanding, "standing"},
+		{detachmentStanding + 1, "unknown"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			// Act / Assert.
+			if got := tc.source.String(); got != tc.want {
+				t.Fatalf("String() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

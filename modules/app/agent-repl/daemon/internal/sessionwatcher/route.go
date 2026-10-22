@@ -1491,6 +1491,26 @@ func turnCloseOf(success *conversationv1.AgentSuccess, failure *conversationv1.A
 // COUNTED (see admitUnaddressableLocked): the shim announced live work, and the
 // daemon being unable to watch it does not make it any less live.
 func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
+	w.takeDetachedLocked(announcer, work, func() {
+		w.sinks.Feed.OnDetachedWork(w.ws, announcer, work, turn, place)
+	})
+}
+
+// routeStandingWorkLocked routes one item of the session opening's live
+// membership: work already running when this watch attached. Everything a
+// stream's announcement does is done, except that the feed is told the work is
+// STANDING rather than news (FeedSink.OnStandingWork), so a spawning call made
+// before the attach is not read as one that never drew.
+func (w *watcher) routeStandingWorkLocked(work *conversationv1.AgentDetachedWork) {
+	w.takeDetachedLocked(nil, work, func() {
+		w.sinks.Feed.OnStandingWork(w.ws, work)
+	})
+}
+
+// takeDetachedLocked is the one body both announcements of detached work share:
+// it validates WORK, hands it to the feed through TO_FEED and to the footer and
+// sidebar, and admits it to the live set.
+func (w *watcher) takeDetachedLocked(announcer *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, toFeed func()) {
 	kind, agent, ok := w.resolveDetachedLocked(work)
 	if !ok {
 		return
@@ -1502,7 +1522,7 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		}
 		return
 	}
-	w.sinks.Feed.OnDetachedWork(w.ws, announcer, work, turn, place)
+	toFeed()
 	w.sinks.Footer.OnDetachedWork(w.ws, announcer, work)
 	w.sinks.Sidebar.OnDetachedWork(w.ws, announcer, work)
 

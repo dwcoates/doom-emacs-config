@@ -2841,6 +2841,36 @@ func TestACreatedShellIsHeldUntilItsCallDrawsAndThenReplacesIt(t *testing.T) {
 	}
 }
 
+func TestARestatedShellWhoseCallTheReplayReachesDrawsItsHead(t *testing.T) {
+	// Arrange: the opening restated the shell before the page replayed.
+	h := newHarness(t)
+	h.standingShell("toolu_watch", "gh run watch")
+
+	// Act: the replayed page holds the shell's call.
+	h.replay(historyPage(&conversationv1.HistoryMore{}, frameEntry(mainAgent(), &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Activity{Activity: bashCall("toolu_watch", "gh run watch")},
+	})))
+
+	// Assert.
+	if got := h.rowKinds(rootFeed()); !slices.Equal(got, []string{"shell_head"}) {
+		t.Fatalf("root rows = %v, want the head in the call's place", got)
+	}
+}
+
+func TestARestatedShellWhoseCallAlreadyDrewMovesItAtOnce(t *testing.T) {
+	// Arrange: the call's card is on the feed already.
+	h := newHarness(t)
+	h.send(bashCall("toolu_watch", "gh run watch"))
+
+	// Act.
+	h.standingShell("toolu_watch", "gh run watch")
+
+	// Assert.
+	if got := h.rowKinds(rootFeed()); !slices.Equal(got, []string{"shell_head"}) {
+		t.Fatalf("root rows = %v, want the card replaced by the head", got)
+	}
+}
+
 func TestAnUnplacedShellsFramesPublishNothing(t *testing.T) {
 	// Arrange, Act: the run's own stream reports before anything placed it.
 	h := newHarness(t)
