@@ -18,6 +18,13 @@ import {
 import { QUIESCED_MESSAGE, callUnary, type UnaryContext } from "../../src/rpc/unary.js";
 import { beginPage, endPage } from "../../src/page-teardown.js";
 import { settledByNextTask } from "../settled.js";
+import type { FailureSink } from "../../src/failure/sink.js";
+
+/** A sink that holds nothing back: no outage has been announced. */
+const NO_ANNOUNCED_OUTAGE: FailureSink = { report: () => {}, retract: () => {}, suppressing: () => false };
+
+/** A sink inside a daemon's announced outage. */
+const ANNOUNCED_OUTAGE: FailureSink = { report: () => {}, retract: () => {}, suppressing: (arm) => arm === "daemonUnreachable" };
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const UNKNOWN = [{ no: 999, wireType: 0, data: new Uint8Array([1]) }];
@@ -27,7 +34,7 @@ function ctxAnswering(answer: () => OpenExternalResponse): UnaryContext {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, { openExternal: () => answer() });
   });
-  return { client: createAgentReplClient(transport), isQuiesced: () => false };
+  return { client: createAgentReplClient(transport), isQuiesced: () => false, failures: NO_ANNOUNCED_OUTAGE };
 }
 
 /** A context whose client throws THROWN from OpenExternal. */
@@ -39,7 +46,7 @@ function ctxThrowing(thrown: unknown): UnaryContext {
       },
     });
   });
-  return { client: createAgentReplClient(transport), isQuiesced: () => false };
+  return { client: createAgentReplClient(transport), isQuiesced: () => false, failures: NO_ANNOUNCED_OUTAGE };
 }
 
 const call = (ctx: UnaryContext): Promise<OpenExternalResponse> =>
@@ -139,6 +146,14 @@ describe("callUnary", () => {
     expect(errors).toHaveLength(1);
   });
 
+  it("records a transport failure inside an announced outage at info, never at error", async () => {
+    const lines = captureLog();
+    const ctx = { ...ctxThrowing(new ConnectError("transferring_away", Code.FailedPrecondition)), failures: ANNOUNCED_OUTAGE };
+    await expect(call(ctx)).rejects.toBeInstanceOf(ConnectError);
+    const ofCall = lines.filter(([, line]) => line.includes("rpc.unary-failed-announced") || line.includes("rpc.unary-transport-failure"));
+    expect(ofCall.map(([level, line]) => [level, line.includes("rpc.unary-failed-announced")])).toEqual([["info", true]]);
+  });
+
   it("does not log an outcome for a call that never answered", async () => {
     const lines = captureLog();
     const ctx = ctxThrowing(new ConnectError("gone", Code.Unavailable));
@@ -190,6 +205,7 @@ describe("the quiet window", () => {
     const ctx: UnaryContext = {
       client: createAgentReplClient(transport),
       isQuiesced: () => true,
+      failures: NO_ANNOUNCED_OUTAGE,
     };
     // ACT
     await expect(call(ctx)).rejects.toThrow(QUIESCED_MESSAGE);
@@ -212,7 +228,7 @@ describe("the quiet window", () => {
     const base = ctxAnswering(() =>
       create(OpenExternalResponseSchema, { result: { case: "success", value: {} } }),
     );
-    const ctx: UnaryContext = { client: base.client, isQuiesced: () => quiet };
+    const ctx: UnaryContext = { client: base.client, isQuiesced: () => quiet, failures: NO_ANNOUNCED_OUTAGE };
     // ACT
     quiet = false;
     const response = await call(ctx);
@@ -229,6 +245,7 @@ describe("the result oneof lookup", () => {
     const ctx: UnaryContext = {
       client: createAgentReplClient(createRouterTransport(() => {})),
       isQuiesced: () => false,
+      failures: NO_ANNOUNCED_OUTAGE,
     };
     // ACT
     await callUnary(ctx, "Echo", async () => WORKSPACE, WorkspaceRefSchema);

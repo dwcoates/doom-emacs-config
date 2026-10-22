@@ -9,8 +9,11 @@ import {
   frameUndecodable,
   frameUndrawable,
   isClientFailureArm,
+  outageAnnounced,
   staleBundle,
   workspaceGone,
+  type ClientFailureArm,
+  type FailureSink,
 } from "../../src/failure/sink.js";
 
 describe("CLIENT_FAILURE_ARMS", () => {
@@ -121,5 +124,34 @@ describe("RETRACTABLE_ON_RECONNECT", () => {
 
   it("does NOT hold staleBundle, which is deliberately unresolvable", () => {
     expect(RETRACTABLE_ON_RECONNECT).not.toContain("staleBundle");
+  });
+});
+
+describe("outageAnnounced", () => {
+  it.each([
+    { name: "a sink inside the daemon's announced window", suppressing: (arm: ClientFailureArm) => arm === "daemonUnreachable", want: true },
+    { name: "a sink with no window standing", suppressing: () => false, want: false },
+    { name: "a sink that holds only another arm back", suppressing: (arm: ClientFailureArm) => arm === "bootFailed", want: false },
+  ])("answers $want for $name", ({ suppressing, want }) => {
+    // ARRANGE
+    const sink: FailureSink = { report: () => {}, retract: () => {}, suppressing };
+    // ACT, ASSERT
+    expect(outageAnnounced(sink)).toBe(want);
+  });
+
+  it("answers false for a collecting sink that announces nothing", () => {
+    // ARRANGE, ACT, ASSERT
+    expect(outageAnnounced({ report: () => {}, retract: () => {} })).toBe(false);
+  });
+
+  it("is the one question every transport failure asks", async () => {
+    // ARRANGE: a hand-rolled check would read `suppressing` itself.
+    const { readFile } = await import("node:fs/promises");
+    const sources = await Promise.all(["src/rpc/streams.ts", "src/rpc/unary.ts"].map((p) => readFile(p, "utf8")));
+    // ACT, ASSERT
+    expect(sources.map((src) => [src.includes("outageAnnounced(ctx.failures)"), src.includes(".suppressing")])).toEqual([
+      [true, false],
+      [true, false],
+    ]);
   });
 });

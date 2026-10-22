@@ -80,6 +80,8 @@ export type LocalFailures = FailureSink &
   Handle & {
     /** Hold ARM back until UNTILMS. Always implemented here. */
     suppress(arm: ClientFailureArm, untilMs: number): void;
+    /** Whether ARM is held back right now. Always implemented here. */
+    suppressing(arm: ClientFailureArm): boolean;
   };
 
 /**
@@ -229,6 +231,11 @@ export function createLocalFailures(): LocalFailures {
       }
     },
 
+    suppressing(arm: ClientFailureArm): boolean {
+      const until = suppressedUntil.get(arm);
+      return until !== undefined && Date.now() < until;
+    },
+
     suppress(arm: ClientFailureArm, untilMs: number): void {
       log.info(`suppressing the ${arm} failure until an announced instant`, {
         operation: "warning-chip.suppress",
@@ -242,10 +249,12 @@ export function createLocalFailures(): LocalFailures {
     },
 
     retract(arm: ClientFailureArm): void {
-      // Retracting is the filer saying the condition is over, which ends any
-      // window it was inside: a link that came back early must not stay muted
-      // for the remainder of an outage that did not happen.
-      suppressedUntil.delete(arm);
+      // A RETRACT LEAVES AN ANNOUNCED WINDOW STANDING. A deploy's handover
+      // moves the page's streams one at a time, so one stream reading again
+      // is not the outage over: ending the window there filed a
+      // daemonUnreachable card for the next stream the same handover moved
+      // (2026-10-22). The window ends at the instant the daemon announced, and
+      // an outage that overruns it is news again.
       if (!entries.delete(arm)) return;
       log.info(`retracting the ${arm} failure from the warning chip`, {
         operation: "warning-chip.retract",

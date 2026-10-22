@@ -48,6 +48,13 @@ class RecordingSink implements FailureSink {
   }
 }
 
+/** A recording sink inside a daemon's announced outage. */
+class AnnouncedOutageSink extends RecordingSink {
+  suppressing(arm: ClientFailureArm): boolean {
+    return arm === "daemonUnreachable";
+  }
+}
+
 /** A clean footer push. */
 function push(): WatchFooterResponse {
   return create(WatchFooterResponseSchema, { footer: create(FooterViewSchema, {}) });
@@ -794,6 +801,20 @@ describe("watchStream: logging", () => {
     expect(
       lines.some(([level, line]) => level === "error" && line.includes("rpc.stream-transport-failure")),
     ).toBe(true);
+  });
+
+  it("records a stream that ended inside an announced outage at info, never at error", async () => {
+    // ARRANGE: a deploy's handover ends the stream it announced it would.
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
+    const { client } = scriptedClient([[]]);
+    // ACT
+    const handle = open(contextFor(client, new AnnouncedOutageSink()), () => {});
+    await settle();
+    handle.cancel();
+    // ASSERT
+    const ofEnd = lines.filter(([, line]) => line.includes("rpc.stream-ended-announced") || line.includes("rpc.stream-transport-failure"));
+    expect([ofEnd.length > 0, ofEnd.every(([level, line]) => level === "info" && line.includes("rpc.stream-ended-announced"))]).toEqual([true, true]);
   });
 
   it("logs the recovery, so a retraction is traceable", async () => {

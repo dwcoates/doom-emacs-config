@@ -22,6 +22,7 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { log } from "../log.js";
+import { outageAnnounced, type FailureSink } from "../failure/sink.js";
 import { clearClientFailures, reportClientFailure } from "./link.js";
 import { MalformedView } from "./malformed.js";
 import { assertNoUnknownFields, requireCase } from "./strict.js";
@@ -31,6 +32,8 @@ import { abandonedAtPageEnd, pageEnded } from "../page-teardown.js";
 /** The slice of the context a unary call needs; the whole AppContext fits. */
 export interface UnaryContext {
   readonly client: AgentReplClient;
+  /** Where the page's failures go; read for an announced outage. */
+  readonly failures: FailureSink;
   /** Whether the page has gone quiet (the workspace moved to a successor). */
   isQuiesced(): boolean;
 }
@@ -78,10 +81,21 @@ export async function callUnary<Res extends Message>(
     // once, by the layer that owns the call; rethrown as ConnectError so every
     // caller has one type to catch regardless of what the fetch threw.
     const connectError = ConnectError.from(err);
-    log.error(`${name} failed at the transport: ${connectError.message}`, {
-      operation: "rpc.unary-transport-failure",
-      context: { rpc: name, code: connectError.code, cause: connectError.rawMessage },
-    });
+    const context = { rpc: name, code: connectError.code, cause: connectError.rawMessage };
+    // INSIDE AN ANNOUNCED OUTAGE a call the departing daemon could not serve
+    // is the announcement coming true (outageAnnounced): INFO, and the caller
+    // still renders its refusal.
+    if (outageAnnounced(ctx.failures)) {
+      log.info(`${name} failed at the transport inside the daemon's announced outage: ${connectError.message}`, {
+        operation: "rpc.unary-failed-announced",
+        context,
+      });
+    } else {
+      log.error(`${name} failed at the transport: ${connectError.message}`, {
+        operation: "rpc.unary-transport-failure",
+        context,
+      });
+    }
     // THE FOOTER IS TOLD, and this is the one thing the old shape did not do:
     // a verb that never reached the daemon left a `.refusal` span the next
     // upsert destroyed, and nothing durable anywhere (the audit's N2 row 7).
