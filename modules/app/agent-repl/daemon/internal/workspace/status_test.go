@@ -35,13 +35,13 @@ func TestStatusAnswersTheWorkspaceAndWhereItLands(t *testing.T) {
 		{name: "a child its owner lands",
 			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one", Parent: &owner, OwnerLands: true},
 			want: &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Owner{Owner: &agentreplv1.WorkspaceStatusMergeTargetOwner{
-				Owner: &workspacev1.WorkspaceRef{Id: string(owner)}, OwnerLands: true}}}},
+				Owner: &workspacev1.WorkspaceRef{Id: string(owner), Dir: "/wt/owner"}, OwnerLands: true}}}},
 		{name: "a merge workspace landing in its maker",
 			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one", Parent: &owner, MergeOf: &wsm.MergeOrigin{Requester: owner}},
 			job:    &wsm.CreationJob{Workspace: "ws-1", Layout: wsm.MergeLayout{TargetDir: "/wt/maker"}},
 			landIn: &wsm.Workspace{ID: "ws-maker", Dir: "/wt/maker"},
 			want: &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Owner{Owner: &agentreplv1.WorkspaceStatusMergeTargetOwner{
-				Owner: &workspacev1.WorkspaceRef{Id: "ws-maker"}}}}},
+				Owner: &workspacev1.WorkspaceRef{Id: "ws-maker", Dir: "/wt/maker"}}}}},
 		{name: "a merge workspace landing on the primary branch",
 			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one", Parent: &owner, MergeOf: &wsm.MergeOrigin{Requester: owner}},
 			job:    &wsm.CreationJob{Workspace: "ws-1", Layout: wsm.MergeLayout{TargetDir: "/repo"}},
@@ -52,6 +52,7 @@ func TestStatusAnswersTheWorkspaceAndWhereItLands(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
 			f.db.workspaces[tt.record.ID] = tt.record
+			f.db.workspaces[owner] = wsm.Workspace{ID: owner, Dir: "/wt/owner"}
 			if tt.job != nil {
 				f.db.jobs[tt.record.ID] = *tt.job
 			}
@@ -217,6 +218,7 @@ func TestStatusReportsTheWorkspacesStandings(t *testing.T) {
 	f := newFixture(t)
 	awaited := ids.WorkspaceID("ws-planner")
 	f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", Repo: "repo-1", OneShot: true, Awaiting: &awaited}
+	f.db.workspaces[awaited] = wsm.Workspace{ID: awaited, Dir: "/wt/planner"}
 	f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{"ws-1": footerIdle()}
 
 	// Act
@@ -226,10 +228,44 @@ func TestStatusReportsTheWorkspacesStandings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if !got.GetOneShot() || got.GetAwaiting().GetId() != string(awaited) {
+	if !got.GetOneShot() || got.GetAwaiting().GetId() != string(awaited) || got.GetAwaiting().GetDir() != "/wt/planner" {
 		t.Errorf("one-shot %v awaiting %v, want a one-shot awaiting %s", got.GetOneShot(), got.GetAwaiting(), awaited)
 	}
 	if got.GetRepository().GetId() != "repo-1" {
 		t.Errorf("repository = %v, want repo-1", got.GetRepository())
 	}
 }
+
+func TestStatusFailsLoudlyWhenAWorkspaceItNamesCannotBeRead(t *testing.T) {
+	tests := []struct {
+		name    string
+		record  wsm.Workspace
+		message string
+	}{
+		{name: "its owner", record: wsm.Workspace{ID: "ws-1", Parent: ptrTo(ids.WorkspaceID("ws-gone"))},
+			message: "could not read its owner to name it in a workspace's status"},
+		{name: "the workspace it awaits", record: wsm.Workspace{ID: "ws-1", Awaiting: ptrTo(ids.WorkspaceID("ws-gone"))},
+			message: "could not read the workspace it awaits to name it in a workspace's status"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.db.workspaces[tt.record.ID] = tt.record
+			f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{"ws-1": footerIdle()}
+
+			// Act
+			_, err := f.verbs.Status(context.Background(), "ws-1")
+
+			// Assert
+			if err == nil {
+				t.Fatal("Status answered a workspace whose named workspace cannot be read")
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opStatus, Message: tt.message}); !ok {
+				t.Errorf("no error record %q: %+v", tt.message, f.log.logger.Records())
+			}
+		})
+	}
+}
+
+func ptrTo[T any](v T) *T { return &v }
