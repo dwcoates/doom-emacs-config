@@ -66,7 +66,7 @@ func gateFor(path string) (*sync.RWMutex, error) {
 	defer gatesMu.Unlock()
 	info, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		f, cerr := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+		f, cerr := openLockFile(path)
 		if cerr != nil {
 			return nil, cerr
 		}
@@ -104,6 +104,13 @@ func gateLocked(info os.FileInfo, path string) (*sync.RWMutex, error) {
 		gates[key] = gate
 	}
 	return gate, nil
+}
+
+// openLockFile opens the lock file at PATH for reading and writing, creating
+// it when absent: THE one open every lock file of this package goes through,
+// so every descriptor is one a record lock can be taken on.
+func openLockFile(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 }
 
 // wholeFile is a record lock request of TYPE over the whole file.
@@ -165,7 +172,7 @@ func tryExclusive(path string) (*heldRecord, Holder, error) {
 	if !gate.TryLock() {
 		return nil, Holder{PID: os.Getpid()}, errWouldBlock
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := openLockFile(path)
 	if err != nil {
 		gate.Unlock()
 		return nil, Holder{}, err
@@ -236,7 +243,7 @@ func probeShared(path string) (bool, Holder, error) {
 		return true, Holder{PID: os.Getpid()}, nil
 	}
 	defer gate.RUnlock()
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := openLockFile(path)
 	if err != nil {
 		return false, Holder{}, err
 	}
@@ -268,7 +275,7 @@ func holderOf(path string) (Holder, error) {
 		return Holder{PID: os.Getpid()}, nil
 	}
 	defer gate.RUnlock()
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := openLockFile(path)
 	if err != nil {
 		return Holder{}, err
 	}

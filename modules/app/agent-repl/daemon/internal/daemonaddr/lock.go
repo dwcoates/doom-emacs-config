@@ -158,7 +158,7 @@ type bootLock struct {
 // openBootLock opens the lock file without attempting to lock it. Failing to
 // open it is never read as the claim being free: it is an undecided claim.
 func openBootLock(path string) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := openLockFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("open the boot lock %q: %w", path, err)
 	}
@@ -298,7 +298,7 @@ func (l *bootLock) takeServing() error {
 	}
 	path := filepath.Join(filepath.Dir(l.path), ServingName)
 	// Opened with O_CREATE and never unlinked: see ServingName.
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := openLockFile(path)
 	if err != nil {
 		return fmt.Errorf("open the serving lock %q: %w", path, err)
 	}

@@ -298,3 +298,39 @@ func TestAHeldErrorWithNoNamedHolderSaysSo(t *testing.T) {
 		t.Fatalf("Error = %q", got)
 	}
 }
+
+func TestOpenLockFileCreatesAReadWriteFile(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), LockName)
+
+	// Act.
+	f, err := openLockFile(path)
+
+	// Assert: created, and lockable both ways.
+	if err != nil {
+		t.Fatalf("openLockFile: %v", err)
+	}
+	defer f.Close()
+	for _, typ := range []int16{syscall.F_RDLCK, syscall.F_WRLCK} {
+		if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, wholeFile(typ)); err != nil {
+			t.Fatalf("lock type %d on the opened file: %v", typ, err)
+		}
+	}
+}
+
+// Every lock file this package opens goes through openLockFile: a
+// hand-rolled open elsewhere is a drifted copy.
+func TestEveryLockFileOpenGoesThroughOpenLockFile(t *testing.T) {
+	for _, name := range []string{"lock.go", "recordlock.go", "claim.go"} {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		lines := strings.Split(string(body), "\n")
+		for i, line := range lines {
+			if strings.Contains(line, "os.OpenFile(") && !strings.Contains(lines[max(i-1, 0)], "func openLockFile") {
+				t.Errorf("%s:%d opens a file by hand; use openLockFile: %s", name, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}
