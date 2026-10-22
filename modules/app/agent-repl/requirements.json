@@ -352,6 +352,16 @@
       }
     },
     {
+      "id": "skill-gns-auth-renew",
+      "kind": "skill_link",
+      "why": "the /gns-auth-renew skill, which renews an expired GNS token through the work account's Chrome profile from any repository",
+      "profile": "run",
+      "name": "gns-auth-renew",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/gns-auth-renew"
+      }
+    },
+    {
       "id": "skill-merge-queue",
       "kind": "skill_link",
       "why": "retired: /agent-repl-merge-queue replaces it, so every machine's old link comes out",

@@ -26,6 +26,7 @@ Every skill agent-repl ships, and where agents can load it. A GLOBAL skill is li
 | `/agent-repl-tests` | repository | writes and runs agent-repl's own tests, which only work on agent-repl needs |
 | `/agent-repl-update-harness` | global | places every change to the agent harness in its one home |
 | `/agent-repl-workspaces` | global | creates, prompts, marks, lands and follows workspaces from any session |
+| `/gns-auth-renew` | global | renews an expired GNS token in any session |
 | `/show-chess-game` | global | draws a CEE session's game in the feed |
 
 ## Arguments

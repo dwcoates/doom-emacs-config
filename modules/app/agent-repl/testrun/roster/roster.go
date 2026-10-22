@@ -196,6 +196,7 @@ var Suites = []Suite{
 	{Name: "deploy-hook-probe-harness", Kind: Script, Path: "bin/test-deploy-hook-probe.sh", Harness: true},
 	{Name: "profile-agent-repl-harness", Kind: Script, Path: "bin/test-profile-agent-repl.sh", Harness: true},
 	{Name: "metrics-skill-harness", Kind: Script, Path: "skills/agent-repl-metrics/test-run.sh"},
+	{Name: "gns-auth-renew-skill-harness", Kind: Script, Path: "skills/gns-auth-renew/test-run.sh"},
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true},
 	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true},
 	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true},
