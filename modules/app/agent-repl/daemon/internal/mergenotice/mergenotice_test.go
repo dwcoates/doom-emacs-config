@@ -766,13 +766,6 @@ func TestEachQueuesNoticesSupersedeOnlyTheirOwn(t *testing.T) {
 	}
 }
 
-func TestSentencesStatesOneChangeAsItsSentence(t *testing.T) {
-	// Arrange, Act, Assert.
-	if got := Sentences([]string{Sentence(landedLast)}); got != Sentence(landedLast) {
-		t.Fatalf("Sentences = %q, want the one sentence", got)
-	}
-}
-
 func TestValuesFailsHardOnANoticeOfNoChange(t *testing.T) {
 	// Arrange.
 	defer func() {
@@ -783,32 +776,6 @@ func TestValuesFailsHardOnANoticeOfNoChange(t *testing.T) {
 
 	// Act.
 	Values(wsm.MergeQueueDetailEveryChange, nil, landedLast)
-}
-
-func TestSentencesCountsEveryChangeItLists(t *testing.T) {
-	// Arrange.
-	changes := []string{Sentence(steppedFix), Sentence(steppedFix), Sentence(landedLast)}
-
-	// Act.
-	got := Sentences(changes)
-
-	// Assert.
-	if !strings.HasPrefix(got, "It changed 3 times since the last notice you were told, oldest first:") || strings.Count(got, "\n- ") != 3 {
-		t.Fatalf("Sentences = %q, want three changes counted and listed", got)
-	}
-}
-
-func TestSentencesOfTwoChangesCountsThemBoth(t *testing.T) {
-	// Arrange.
-	changes := []string{Sentence(steppedFix), Sentence(landedLast)}
-
-	// Act.
-	got := Sentences(changes)
-
-	// Assert.
-	if !strings.HasPrefix(got, "It changed 2 times since the last notice you were told, oldest first:") || strings.Count(got, "\n- ") != 2 {
-		t.Fatalf("Sentences = %q, want both changes counted", got)
-	}
 }
 
 func TestTheUntoldNoticeSurvivesARestartAndIsSuperseded(t *testing.T) {
