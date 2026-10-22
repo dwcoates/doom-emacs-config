@@ -41,6 +41,7 @@ import {
   taskAgentKnowledge,
   taskAwaitingAgent,
   taskAwaitingKind,
+  taskCall,
   taskCommission,
   taskUnitTarget,
   wentSilent,
@@ -3288,5 +3289,48 @@ describe("monitorEndedEntry", () => {
         .filter((record) => record.message === "the fold never saw this monitor's call open; its ended unit restates no start")
         .map((record) => [record.level, record.context.tool_use_id]),
     ).toEqual([["debug", "toolu_w"]]);
+  });
+});
+
+describe("taskCall", () => {
+  it("answers the call still open on this stream", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    calls.remember(monitorCall("toolu_w"));
+
+    // Act, Assert.
+    expect(taskCall("bw1", "toolu_w", createTaskKindRegistry(), calls)?.toolUseId).toBe("toolu_w");
+  });
+
+  it("answers the call the task's start was seen with once the call is released", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberCall("bw1", monitorCall("toolu_w"));
+
+    // Act, Assert.
+    expect(taskCall("bw1", "toolu_w", registry, createCallRegistry())?.toolName).toBe("Monitor");
+  });
+
+  it.each([
+    { name: "no call id is known", toolUseId: undefined },
+    { name: "the call id is empty", toolUseId: "" },
+    { name: "the call was never seen", toolUseId: "toolu_unseen" },
+  ])("answers nothing when $name and nothing was remembered", ({ toolUseId }) => {
+    // Arrange, Act, Assert.
+    expect(taskCall("bw1", toolUseId, createTaskKindRegistry(), createCallRegistry())).toBeUndefined();
+  });
+
+  it("is the one lookup the restatement, the agent ask and the conversion share", () => {
+    // Arrange: every reader in convert/detached.ts resolves a task's call through it.
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../src/convert/detached.ts"),
+      "utf8",
+    );
+
+    // Act.
+    const handRolled = source.split("\n").filter((line) => line.includes("?? taskKinds.callOf(")).length;
+
+    // Assert.
+    expect([handRolled, (source.match(/taskCall\(taskId, toolUseId, taskKinds, calls\)/g) ?? []).length]).toEqual([1, 3]);
   });
 });

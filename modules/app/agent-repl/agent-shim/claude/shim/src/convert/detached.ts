@@ -1130,6 +1130,23 @@ function restateLevel(message: SdkMessage, taskKinds: TaskKindRegistry, calls: C
   return changed ? ({ ...message, tasks: restated } as unknown as SdkMessage) : message;
 }
 
+/**
+ * THE CALL A TASK BELONGS TO: the one still open on this stream, else the one
+ * its start was seen with (the registry keeps it past the call's own result,
+ * which a monitor's arming receipt and a shell's launch receipt both are), or
+ * `undefined` for a task whose call this fold never saw. ONE PLACE for every
+ * reader, so no two of them can disagree about which call a task is.
+ */
+export function taskCall(
+  taskId: string,
+  toolUseId: string | undefined,
+  taskKinds: TaskKindRegistry,
+  calls: CallRegistry,
+): PendingCall | undefined {
+  const open = toolUseId === undefined || toolUseId === "" ? undefined : calls.peek(toolUseId);
+  return open ?? taskKinds.callOf(taskId);
+}
+
 /** One task the vendor's level names, read loosely for what a restatement needs. */
 interface LevelTask {
   readonly task_id?: string;
@@ -1147,8 +1164,7 @@ function restatedTask(
   calls: CallRegistry,
 ): string | undefined {
   const toolUseId = statedToolUse ?? taskKinds.toolUseFor(taskId);
-  const open = toolUseId === undefined || toolUseId === "" ? undefined : calls.peek(toolUseId);
-  const call = open ?? taskKinds.callOf(taskId);
+  const call = taskCall(taskId, toolUseId, taskKinds, calls);
   const restated = restatedTaskType(taskType, call);
   if (restated === taskType) return taskType;
   LOGGER.info(
@@ -1258,7 +1274,7 @@ export function taskAwaitingAgent(
   if (taskKindOf(taskType) !== "subagent") return undefined;
   const toolUseId = raw.tool_use_id ?? known?.toolUseId ?? taskKinds.toolUseFor(taskId);
   if (toolUseId === undefined || toolUseId === "") return undefined;
-  const call = calls.peek(toolUseId) ?? taskKinds.callOf(taskId);
+  const call = taskCall(taskId, toolUseId, taskKinds, calls);
   // THE SPAWN STATES BOTH: its id is the agent and its input the commission.
   if (call !== undefined && isSpawnCall(call)) return undefined;
   // A CALL THIS FOLD NEVER SAW is read as the spawn by the minting rule, so the
@@ -1348,7 +1364,7 @@ export function convertDetached(
   }
   const owner = openCall?.agentId ?? taskKinds.ownerOf(taskId);
   // Read NOW, before a settling notification forgets the task's facts.
-  const spawnCall = openCall ?? taskKinds.callOf(taskId);
+  const spawnCall = taskCall(taskId, toolUseId, taskKinds, calls);
   // THE VENDOR'S WORD FOR WHAT THE TASK IS: stated on this message, or on the
   // task's start, or on the vendor's live level (which is all a process that
   // started after the task has).
