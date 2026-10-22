@@ -3336,3 +3336,7 @@ func forgetTakeBackAtCleanup(t *testing.T, h *harness, ws ids.WorkspaceID) {
 		h.o.mu.Unlock()
 	})
 }
+
+func (q *fakeQueue) Supersede(context.Context, ids.WorkspaceID, ids.TurnID) (bool, error) {
+	return false, nil
+}

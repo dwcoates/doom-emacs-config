@@ -25,6 +25,9 @@ const (
 	// tombstoneWithdrawn retires the accepted turn a stop withdrew while its
 	// session was still coming up (WithdrawRevivalTurn).
 	tombstoneWithdrawn = "withdrawn"
+	// tombstoneSuperseded retires a daemon-submitted prompt a newer one
+	// carrying everything it said replaced before it was told (Supersede).
+	tombstoneSuperseded = "superseded"
 )
 
 // Release delivers a held prompt NOW, overriding the hold and interrupting the
@@ -171,6 +174,44 @@ func (q *queue) Drop(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) e
 		return err
 	}
 	return q.dropLocked(ctx, d, held, tombstoneDropped, opDrop, log)
+}
+
+// Supersede retires the held prompt TURN because a newer prompt the daemon is
+// about to submit will say everything it said (a merge queue notice the
+// notifier folds into the next one). It answers whether TURN was retired.
+//
+// A PROMPT NO LONGER HELD IS ANSWERED false, NEVER AN ERROR: delivered,
+// being delivered, or never held (an idle agent was handed it at once), it
+// has been or is being told, so the caller's newer prompt must not repeat
+// it. The queue's delivery lock arbitrates the race between this retirement
+// and a delivery, so exactly one of them takes the prompt.
+func (q *queue) Supersede(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (bool, error) {
+	log, err := q.logger(ctx, ws)
+	if err != nil {
+		return false, err
+	}
+	log = log.With(dlog.Context{"turn": string(turn)})
+
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+
+	held, err := q.standingHold(ctx, ws, turn)
+	switch {
+	case errors.Is(err, ErrAlreadyDelivered), errors.Is(err, ErrNoSuchHold):
+		log.Debug(opSupersede, "the prompt is no longer held; it was told, so nothing is superseded", dlog.Context{"cause": err.Error()})
+		return false, nil
+	case err != nil:
+		log.Error(opSupersede, "could not read the holds to supersede a prompt; it stands", dlog.Context{"cause": err.Error()})
+		return false, err
+	}
+	if q.claimedByCall(ws, turn) {
+		log.Debug(opSupersede, "the prompt is being delivered to the shim, so nothing is superseded", nil)
+		return false, nil
+	}
+	if err := q.dropLocked(ctx, d, held, tombstoneSuperseded, opSupersede, log); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // dropLocked retires one standing hold under the delivery lock the caller holds

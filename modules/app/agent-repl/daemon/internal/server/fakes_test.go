@@ -2354,3 +2354,7 @@ func (f *fakeImageSources) Composer(*conversationv1.ImageBlock) (*frontendv1.Fee
 func (f *fakeImageSources) Drawn(*frontendv1.FeedImageBlock) error {
 	return f.drawnErr
 }
+
+func (f *fakeQueue) Supersede(context.Context, ids.WorkspaceID, ids.TurnID) (bool, error) {
+	return false, nil
+}

@@ -277,6 +277,10 @@ type Queue interface {
 	Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
 	// Drop discards a held prompt (UpdateHeldPrompt.drop).
 	Drop(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
+	// Supersede retires a held prompt the daemon submitted, because a newer
+	// one says everything it said, and answers whether it was retired: false
+	// for a prompt already told (holdactions.go).
+	Supersede(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (bool, error)
 	// BeginEdit claims a held prompt as being edited (EditHeldPrompt.begin).
 	// While the claim stands, the prompt and every prompt queued after it are
 	// withheld from delivery. It refuses a turn nothing was held under

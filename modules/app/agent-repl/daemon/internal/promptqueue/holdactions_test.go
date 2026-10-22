@@ -8,6 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/classifier"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -268,5 +269,134 @@ func TestReleaseIsRefusedWhileACutTheWatcherHasNotYetSeenRuns(t *testing.T) {
 	// Assert
 	if !errors.Is(err, ErrReleaseRefused) {
 		t.Fatalf("Release = %v, want ErrReleaseRefused", err)
+	}
+}
+
+func TestSupersedeRetiresAStandingHoldAsSuperseded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Reason: "independent"})
+
+	// Act
+	retired, err := h.q.Supersede(context.Background(), theWorkspace, "t1")
+
+	// Assert
+	if err != nil || !retired {
+		t.Fatalf("Supersede = (%v, %v), want (true, nil)", retired, err)
+	}
+	if tomb := h.db.hold("t1").Tombstone; tomb == nil || tomb.Kind != tombstoneSuperseded {
+		t.Fatalf("tombstone = %+v, want a superseded tombstone", tomb)
+	}
+	if !logged(h.log.Records(), "info", opSupersede, "the held prompt was dropped") {
+		t.Fatalf("records = %+v, want the retirement recorded at info under %s", h.log.Records(), opSupersede)
+	}
+}
+
+func TestSupersedeAnswersFalseForAPromptAlreadyTold(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+	}{
+		{
+			name: "delivered",
+			arrange: func(t *testing.T, h *harness) {
+				running(t, h, "running-turn", "the running work")
+				heldPrompt(t, h, "t1", classifier.Verdict{Reason: "independent"})
+				if err := h.q.Drop(context.Background(), theWorkspace, "t1"); err != nil {
+					t.Fatalf("Drop: %v", err)
+				}
+			},
+		},
+		{
+			name:    "never held",
+			arrange: func(t *testing.T, h *harness) {},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(t, h)
+
+			// Act
+			retired, err := h.q.Supersede(context.Background(), theWorkspace, "t1")
+
+			// Assert
+			if err != nil || retired {
+				t.Fatalf("Supersede = (%v, %v), want (false, nil)", retired, err)
+			}
+			if !logged(h.log.Records(), "debug", opSupersede, "the prompt is no longer held; it was told, so nothing is superseded") {
+				t.Fatalf("records = %+v, want the told prompt recorded at debug", h.log.Records())
+			}
+		})
+	}
+}
+
+func TestSupersedeLeavesAPromptBeingDelivered(t *testing.T) {
+	// Arrange: a rollback claims the hold for its call, as a delivery does.
+	h := newHarness(t)
+	heldByDrainLease(t, h, "t1")
+	var retired bool
+	var supersedeErr error
+
+	// Act
+	err := h.q.RollBack(context.Background(), theWorkspace, instant.Add(-1), []ids.TurnID{"t1"}, func(context.Context) error {
+		retired, supersedeErr = h.q.Supersede(context.Background(), theWorkspace, "t1")
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RollBack: %v", err)
+	}
+	if supersedeErr != nil || retired {
+		t.Fatalf("Supersede during the call = (%v, %v), want (false, nil)", retired, supersedeErr)
+	}
+	if !logged(h.log.Records(), "debug", opSupersede, "the prompt is being delivered to the shim, so nothing is superseded") {
+		t.Fatalf("records = %+v, want the claimed prompt recorded at debug", h.log.Records())
+	}
+}
+
+func TestSupersedeFailsLoudlyAndRetiresNothing(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		message string
+	}{
+		{
+			name:    "the holds cannot be read",
+			arrange: func(h *harness) { h.db.heldErr = errors.New("disk gone") },
+			message: "could not read the holds to supersede a prompt; it stands",
+		},
+		{
+			name:    "the retirement cannot be written",
+			arrange: func(h *harness) { h.db.tombstoneErr = errors.New("the database is read-only") },
+			message: "the drop was refused: the hold could not be retired",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			heldPrompt(t, h, "t1", classifier.Verdict{Reason: "independent"})
+			tt.arrange(h)
+
+			// Act
+			retired, err := h.q.Supersede(context.Background(), theWorkspace, "t1")
+
+			// Assert
+			if err == nil || retired {
+				t.Fatalf("Supersede = (%v, %v), want (false, an error)", retired, err)
+			}
+			h.db.heldErr = nil
+			if tomb := h.db.hold("t1").Tombstone; tomb != nil {
+				t.Fatalf("tombstone = %+v, want the prompt still standing", tomb)
+			}
+			if !logged(h.log.Records(), "error", opSupersede, tt.message) {
+				t.Fatalf("records = %+v, want %q at error", h.log.Records(), tt.message)
+			}
+		})
 	}
 }
