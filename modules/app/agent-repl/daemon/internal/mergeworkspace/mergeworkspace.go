@@ -377,7 +377,10 @@ func handbackText(mergeWS wsm.Workspace, out merge.DetachedOutcome) (string, str
 		return label, report, nil
 	case merge.DetachedFailed:
 		return fmt.Sprintf("merge of %s failed", out.Branch),
-			fmt.Sprintf("It ran detached, in a merge workspace forked from this conversation. It failed: %s. Its merge workspace `%s` is now shown in the tab bar and the sidebar, at %s, exactly where the merge stopped; the user can switch to it to finish the merge.", out.Summary, mergeWS.Name, mergeWS.Dir), nil
+			// NO OUTCOME REVEALS THE MERGE WORKSPACE (owner ruling 2026-10-20,
+			// merge/terminal.go): the report says where it is and how the user
+			// reaches it, never that it is shown.
+			fmt.Sprintf("It ran detached, in a merge workspace forked from this conversation. It failed: %s. Its merge workspace `%s` stays hidden at %s, exactly where the merge stopped, listed among the closed workspaces in the sidebar; the user can select it there to reveal it and finish the merge.", out.Summary, mergeWS.Name, mergeWS.Dir), nil
 	case merge.DetachedAbandoned:
 		return fmt.Sprintf("merge of %s did not run", out.Branch),
 			fmt.Sprintf("It did not run: %s.", out.Summary), nil
