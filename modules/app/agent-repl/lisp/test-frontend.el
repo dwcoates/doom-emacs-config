@@ -1587,9 +1587,24 @@ accessor would not reach the code under test."
               ((symbol-function 'agent-repl--ws-gui-frontend-p) (lambda (_ws) t))
               ((symbol-function 'agent-repl-host-ref)
                (lambda (_ws) '(:id "ws-1" :dir "/w")))
-              ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) t)))
+              ((symbol-function 'agent-repl-open-tabs-withheld-p) (lambda (_ws) t)))
       ;; Act / Assert
       (should (eq (agent-repl--frontend-precreate-refusal "alpha") :hidden)))))
+
+(ert-deftest agent-repl-test-frontend-precreate-accepts-the-hidden-workspace-looked-at ()
+  "A hidden workspace the user stands on is owed its page like any other."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-live-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-gui-frontend-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl-host-ref)
+               (lambda (_ws) '(:id "ws-1" :dir "/w")))
+              ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "alpha"))
+              ((symbol-function 'agent-repl-page-unloaded-p) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t)))
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-precreate-refusal "alpha")))))
 
 (ert-deftest agent-repl-test-frontend-precreate-refuses-an-unloaded-page ()
   "A page unloaded for want of a look is not remade until the switch to it."

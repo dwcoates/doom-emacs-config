@@ -118,6 +118,18 @@ Read from the last roster walk; a workspace it did not meet is not hidden."
          (row (and id (agent-repl-open-tabs--row id))))
     (and row (plist-get row :collapsed) t)))
 
+(defun agent-repl-open-tabs-withheld-p (ws)
+  "Return non-nil when workspace WS holds no page: hidden, and not looked at.
+THE WORKSPACE THE USER IS LOOKING AT IS NEVER WITHHELD (owner ruling,
+2026-10-17), the daemon\='s own rule (`wsm.Workspace.Runs'): selecting a
+hidden workspace, or one in a collapsed repository section, revives its
+session, so its page is made too.  Without it a switch to one (the
+picker, a sidebar row) landed on a perspective with no page, and nothing
+ever made one.  Moving off it withholds it again, and the unload pass
+drops its page (page-unload.el)."
+  (and (agent-repl-open-tabs-hidden-p ws)
+       (not (equal ws (agent-repl--ws-current-name)))))
+
 (defun agent-repl-open-tabs-holds-p (id)
   "Return non-nil while workspace ID's tab is kept out of the tab order.
 Every tab is held until the daemon has answered it open.  A HIDDEN one

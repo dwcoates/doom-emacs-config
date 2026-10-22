@@ -9,7 +9,8 @@
 ;; workspace is in use (owner ruling, 2026-10-17):
 ;;
 ;;   - a HIDDEN workspace (hidden, or in a collapsed repository section) holds
-;;     no page: one made before it was hidden is unloaded;
+;;     no page while the user is not looking at it: one made before it was
+;;     hidden, or while the user stood on it, is unloaded;
 ;;   - a workspace nobody has LOOKED AT for `agent-repl-page-unload-after'
 ;;     seconds of USE is unloaded too.
 ;;
@@ -53,7 +54,7 @@
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--frontend-detach-webview "agent-repl-frontend" (ws buf))
-(declare-function agent-repl-open-tabs-hidden-p "open-tabs" (ws))
+(declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
 (declare-function agent-repl--panels-mount-awaited-view "panels" (ws))
 (declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (defvar agent-repl-link-up-functions)
@@ -167,7 +168,7 @@ stamped as looked at now, so a reload of this module unloads nothing.  A
 page goes unlooked only while the system is in use, and only for the time
 since the later of its look and the start of the present spell of use."
   (cond
-   ((and (fboundp 'agent-repl-open-tabs-hidden-p) (agent-repl-open-tabs-hidden-p ws)) 'hidden)
+   ((and (fboundp 'agent-repl-open-tabs-withheld-p) (agent-repl-open-tabs-withheld-p ws)) 'hidden)
    ((null (agent-repl--ws-get ws :page-looked-at))
     (agent-repl--ws-put ws :page-looked-at now)
     nil)

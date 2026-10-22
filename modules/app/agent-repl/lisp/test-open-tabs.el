@@ -510,6 +510,35 @@ A ref id names the workspace of the same name."
   (agent-repl-test-open-tabs--with
     (should-not (agent-repl-open-tabs-hidden-p "a"))))
 
+(ert-deftest agent-repl-test-open-tabs-withheld-p-answers-for-a-collapsed-row-not-looked-at ()
+  "A collapsed workspace the user stands elsewhere than is withheld."
+  (agent-repl-test-open-tabs--with
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "b")))
+      ;; Act
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" t))
+      ;; Assert
+      (should (agent-repl-open-tabs-withheld-p "a")))))
+
+(ert-deftest agent-repl-test-open-tabs-withheld-p-is-nil-for-the-collapsed-workspace-looked-at ()
+  "The workspace the user stands on is never withheld, collapsed or not.
+2026-10-22: a switch to `definitions', alone in a collapsed repository
+section, landed on a perspective that no page was ever made for."
+  (agent-repl-test-open-tabs--with
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "a")))
+      ;; Act
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" t))
+      ;; Assert
+      (should-not (agent-repl-open-tabs-withheld-p "a")))))
+
+(ert-deftest agent-repl-test-open-tabs-withheld-p-is-nil-for-a-drawn-row ()
+  "A drawn workspace is not withheld, wherever the user stands."
+  (agent-repl-test-open-tabs--with
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "b")))
+      ;; Act
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" nil))
+      ;; Assert
+      (should-not (agent-repl-open-tabs-withheld-p "a")))))
+
 ;;;; ---- Refusals ----
 
 (ert-deftest agent-repl-test-open-tabs-a-refusal-holds-the-tab ()
