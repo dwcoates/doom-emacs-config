@@ -25,7 +25,7 @@
 
 ### Master moves only through the merge queue
 
-- Merge into master only through the merge-queue skill (`modules/app/agent-repl/skills/agent-repl-merge-queue/SKILL.md`, `/agent-repl-merge-queue`).
+- Merge into master only through the merge-queue skill (`/agent-repl-merge-queue`).
   - This covers my own workspace's branch and every subagent's branch alike.
   - Never merge, commit, cherry-pick, rebase, reset, or push onto master by hand.
   - On a parked, failed, or refused merge, report the reason and stop rather than landing the work some other way.
@@ -223,39 +223,17 @@
 - Effort stays at `medium` for every tier.
   - Effort above `medium` is reserved for dispatches the user explicitly asks to run deeper.
 
-## Requirements
+## Tool rejections
 
-### A requirements failure is fixed in the manifests, generically, and only the user's own choices go to the user
+### A rejected tool call stops that call, never the work it served
 
-- When running `bin/requirements.sh` (directly, via `.claude/install.sh`, or via `/agent-repl-install`) hits a failure the manifests should have prevented, fix the manifests or the runner.
-  - Never only repair the machine in front of you, because the next machine then fails the same way.
-  - The contract is the Requirements section of `modules/app/agent-repl/AGENTS.md`.
-- Every such fix is generic.
-  - It holds for every machine and every person.
-  - It never encodes the running user's paths, accounts, names or choices.
-  - A per-person value becomes an `env` entry with its row in the Setup section of `docs/USER-GUIDE.md`, never a literal.
-- Ambiguity only the user can resolve is surfaced, never guessed.
-  - Examples are which account or directory, a value they must supply, or whether to replace a file of theirs.
-  - It goes in the response's dedicated setup branch (see the TLDR spec's content guidelines).
-
-## GNS authentication
-
-### Renew an expired GNS token yourself, only in the work account's Chrome profile
-
-- Whenever a GNS token has expired or is missing, run `gns auth login` (any `--env`, e.g. `production`) and any other needed `gns auth` step yourself.
-  - Do not stop to ask first; an expired token (e.g. an LLM gateway `HTTP 401: Invalid or expired JWT`) is renewed and the work continues.
-- The work account is the `@chess.com` account signed in under `~/.claude-chesscom`.
-  - Its email is `oauthAccount.emailAddress` in `~/.claude-chesscom/.claude.json`.
-  - Its Chrome profile is the `profile.info_cache` key whose `user_name` is that email, in `~/Library/Application Support/Google/Chrome/Local State`.
-  - When either lookup finds nothing, stop and surface it, pointing at the Setup section of `modules/app/agent-repl/docs/USER-GUIDE.md`.
-- Auth pages open ONLY in the work account's Chrome profile.
-  - NEVER any other profile, and never any other browser.
-  - The default `gns auth login` opens the system default browser and profile, so it is not used.
-- Use the device-code flow, which hands over the URL instead of opening a browser.
-  - `gns auth login --env <env> --device` prints the sign-in URL and code.
-  - Open that URL with `open -na "Google Chrome" --args --profile-directory="<work profile>" "<url>"`.
-  - Poll `gns auth login --env <env> --device-poll` until it exits 0 (exit 1 is pending, exit 2 is an error to surface).
-  - Confirm with `gns auth status` that the environment reads authenticated as the work account's email.
+- When I reject a tool call, stop that call and wait for my next message.
+  - The rejection is not a ruling on the act the call served, such as a merge, an edit, or a dispatch.
+  - Never retry the rejected call within the same turn.
+- When my next message does not address the rejected act, ask once whether I still want it.
+  - Ask in the response's questions branch, naming the act.
+  - Then do what my answer says, and never ask the same question again on later turns.
+- This is the one exception to the rules that act without asking, such as landing complete changes.
 
 ## Response behavior
 

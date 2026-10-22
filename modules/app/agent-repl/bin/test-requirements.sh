@@ -155,6 +155,51 @@ test_every_checked_in_hook_has_a_git_hook_entry() {
 }
 
 # ---------------------------------------------------------------------------
+# The skill availability table (skills/agent-repl-install/SKILL.md).
+# ---------------------------------------------------------------------------
+
+# availability_rows AVAILABILITY: the skill names the install skill's table
+# lists with AVAILABILITY (global or repository), one per line, sorted.
+availability_rows() {
+  sed -n 's/^| `\/\([^`]*\)` | '"$1"' | .*/\1/p' "$MODULE/skills/agent-repl-install/SKILL.md" | sort
+}
+
+# live_skill_links: the names of the skills the manifest links globally from
+# this module and has not retired, one per line, sorted.
+live_skill_links() {
+  jq -r '.requirements[] | select(.kind == "skill_link" and (.retired | not) and ((.source.repo // "") | startswith("modules/app/agent-repl/skills/"))) | .name' \
+    "$MODULE/requirements.json" | sort
+}
+
+test_every_global_skill_in_the_table_has_a_live_link_and_no_other() {
+  local table links
+  table="$(availability_rows global)"
+  links="$(live_skill_links)"
+  if [ -n "$table" ] && [ "$table" = "$links" ]; then
+    pass "the availability table's global skills are exactly the manifest's live skill links"
+  else
+    fail "global skills and live skill links differ" "table:" "$table" "links:" "$links"
+  fi
+}
+
+test_no_repository_skill_has_a_live_global_link() {
+  local linked
+  linked="$(comm -12 <(availability_rows repository) <(live_skill_links))"
+  if [ -z "$linked" ]; then pass "no repository-only skill is linked globally"; else fail "repository-only skills linked globally:" "$linked"; fi
+}
+
+test_every_shipped_skill_has_one_availability_row() {
+  local shipped listed
+  shipped="$(find "$MODULE/skills" -mindepth 2 -maxdepth 2 -name SKILL.md | sed 's#.*/skills/\([^/]*\)/SKILL.md#\1#' | sort)"
+  listed="$( { availability_rows global; availability_rows repository; } | sort)"
+  if [ "$shipped" = "$listed" ]; then
+    pass "every skill the module ships has exactly one availability row"
+  else
+    fail "shipped skills and availability rows differ" "shipped:" "$shipped" "listed:" "$listed"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # The manifest contract.
 # ---------------------------------------------------------------------------
 
