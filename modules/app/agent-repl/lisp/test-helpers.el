@@ -516,6 +516,13 @@ file the run made unremovable, which the person reading the run must see."
 (when (and noninteractive (boundp 'agent-repl-input-spellcheck))
   (setq agent-repl-input-spellcheck nil))
 
+;; Composers mark no entries in tests.  Every composer a test creates
+;; through production would otherwise compile the prompt grammar into the
+;; developer's cache with `cc'.  The entries suite (test-prompt-entries.el)
+;; binds this back to t and stubs the build and `treesit'.
+(when (and noninteractive (boundp 'agent-repl-input-entry-marking))
+  (setq agent-repl-input-entry-marking nil))
+
 ;; Disable file-logging during tests so the unconditional file-write path
 ;; (always-on after the core.el log refactor) does not append every
 ;; test-emitted line to the user's real OS-temporary agent-repl logfile.

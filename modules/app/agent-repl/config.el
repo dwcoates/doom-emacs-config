@@ -343,6 +343,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; rpc.el and resolves the workspace's ref and connection through host.el,
 ;; both loaded above.
 (agent-repl--load-module "command-completion")
+;; WHY: prompt-entries.el marks a prompt's entries in the composer
+;; (panels.el enables it on every composer); it reads the module root from
+;; core.el and logs through it, both loaded above.
+(agent-repl--load-module "prompt-entries")
 ;; WHY: workspace-completion.el is the composer's workspace-name completion
 ;; (`agent-repl-input-mode' installs its capf).  It reads the open workspaces
 ;; out of roster.el, loaded above.
