@@ -606,6 +606,47 @@ test_orphan_generations_absent_when_none_minted() {
     fi
 }
 
+# A landed merge's worktree goes, link and all, while its targets stay in the
+# state root's logs directory under its ID: they are still the workspace's.
+test_a_workspace_whose_directory_is_gone_is_read_by_its_id() {
+    local gone="$TMP/workspaces/gone-dir" rows_gone out err
+    cat >"$state/logs/agent-repl-ws-gone-daemon-3333333333.log" <<EOF
+{"timestamp":"2026-09-10T12:03:00.000000Z","runtime":"daemon","pid":93,"level":"info","verbosity":"normal","operation":"daemon.gone.landed","message":"a merge landed","context":{},"workspace_dir":"$gone","workspace_id":"ws-gone"}
+EOF
+    rows_gone="$TMP/gone-workspaces.tsv"
+    cp "$rows" "$rows_gone"
+    printf 'ws-gone\t%s\tgone\n' "$gone" >>"$rows_gone"
+    out="$TMP/gone.out"
+    err="$TMP/gone.err"
+    AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$rows_gone" \
+        run_logs --workspace gone --runtime daemon >"$out" 2>"$err" || true
+    if grep -q 'daemon.gone.landed' "$out" && grep -q 'included 1 orphan generation(s)' "$err"; then
+        pass "a workspace whose directory is gone is still read by its ID from the logs directory"
+    else
+        fail "a workspace whose directory is gone is still read by its ID from the logs directory"
+        sed -n '1,40p' "$out" >&2
+        sed -n '1,40p' "$err" >&2
+    fi
+}
+
+test_a_workspace_with_no_link_and_no_targets_reads_nothing() {
+    local none="$TMP/workspaces/none-dir" rows_none out err
+    rows_none="$TMP/none-workspaces.tsv"
+    cp "$rows" "$rows_none"
+    printf 'ws-none\t%s\tnone\n' "$none" >>"$rows_none"
+    out="$TMP/none.out"
+    err="$TMP/none.err"
+    AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$rows_none" \
+        run_logs --workspace none --runtime daemon >"$out" 2>"$err" || true
+    if [ ! -s "$out" ] && grep -q 'included 0 orphan generation(s)' "$err"; then
+        pass "a workspace with neither a link nor a target reads nothing"
+    else
+        fail "a workspace with neither a link nor a target reads nothing"
+        sed -n '1,40p' "$out" >&2
+        sed -n '1,40p' "$err" >&2
+    fi
+}
+
 test_tally_counts_and_ordering() {
     local out
     out="$(run_logs --workspace "$workspace_a" --tally)"
@@ -948,6 +989,8 @@ test_malformed_line
 test_sink_findings
 test_orphan_generations
 test_orphan_generations_absent_when_none_minted
+test_a_workspace_whose_directory_is_gone_is_read_by_its_id
+test_a_workspace_with_no_link_and_no_targets_reads_nothing
 test_tally_counts_and_ordering
 test_sample_respects_n_and_width
 test_sample_alone_without_tally

@@ -50,6 +50,7 @@ type options struct {
 	baseKinds         repeatedFlag
 	baseFormats       repeatedFlag
 	workspaceNames    repeatedFlag
+	workspaceLogsDir  string
 	harvestFrom       string
 	harvestTo         string
 	sampleN           int
@@ -76,6 +77,10 @@ type sink struct {
 	workspaceID      string
 	workspaceDir     string
 	canonicalSymlink bool
+	// logsDir is the directory every workspace target is written in
+	// (daemon/internal/dlog/sink.go createTarget), read by the workspace's ID
+	// when its canonical link is gone with its directory.
+	logsDir string
 	// format is "jsonl" for the contract's structured records, "stderr" for
 	// unstructured emergency process output (shim-store.err.log and
 	// shim-claude-sidecar.err.log), or "messages" for a captured Emacs
@@ -152,6 +157,7 @@ func run() error {
 	flag.Var(&opts.baseKinds, "base-kind", "base kind: file or symlink")
 	flag.Var(&opts.baseFormats, "base-format", "base content format: jsonl, stderr, or messages")
 	flag.Var(&opts.workspaceNames, "workspace-name", "ID=NAME for one daemon workspace, repeated for every workspace the daemon knows")
+	flag.StringVar(&opts.workspaceLogsDir, "workspace-logs-dir", "", "the directory workspace log targets are written in, read by workspace ID when a workspace's link is gone")
 	flag.IntVar(&opts.sampleN, "sample-n", 0, "representative records per group (0 disables sampling)")
 	flag.StringVar(&opts.fields, "fields", "", "comma-separated field projection")
 	flag.IntVar(&opts.width, "width", 120, "message truncation width for compact renderers")
@@ -286,6 +292,7 @@ func makeSinks(opts options) ([]sink, error) {
 			workspaceID:      workspaceID,
 			workspaceDir:     workspaceDir,
 			canonicalSymlink: kind == "symlink",
+			logsDir:          opts.workspaceLogsDir,
 			format:           format,
 		})
 	}
@@ -401,10 +408,16 @@ func generationFiles(selectedSink sink) ([]string, string, []sinkFinding, int) {
 	if selectedSink.canonicalSymlink {
 		info, err := os.Lstat(selectedSink.base)
 		if os.IsNotExist(err) {
-			// NO LINK IS NO SINK. A workspace whose runtime never wrote this
-			// log (no shim ever ran, no webapp page ever loaded) has no link,
-			// and reporting it named a sink the workspace never had.
-			return nil, "", nil, 0
+			// NO LINK IS NO SINK, UNLESS THE WORKSPACE'S TARGETS OUTLIVED IT.
+			// A workspace whose runtime never wrote this log (no shim ever
+			// ran, no webapp page ever loaded) has no link and no target, and
+			// reporting it named a sink the workspace never had. But a merge
+			// workspace's directory goes with its worktree, link and all,
+			// while its targets stay in the logs directory under its ID
+			// (2026-10-22: --workspace pt3-sentences read nothing after it
+			// landed), so those are read, every one, as orphans.
+			orphans, findings := targetsByID(selectedSink, selectedSink.logsDir, "")
+			return orphans, "", findings, len(orphans)
 		}
 		if err != nil {
 			return nil, "", []sinkFinding{canonicalUnreadableFinding(selectedSink, err)}, 0
@@ -474,7 +487,16 @@ func orphanSiblings(selectedSink sink, current string) ([]string, []sinkFinding)
 	if !selectedSink.canonicalSymlink || selectedSink.workspaceID == "" || current == "" {
 		return nil, nil
 	}
-	dir := filepath.Dir(current)
+	return targetsByID(selectedSink, filepath.Dir(current), current)
+}
+
+// targetsByID answers every target in DIR named for the sink's workspace and
+// runtime ("agent-repl-<workspaceID>-<runtime>-*.log"), but EXCEPT, sorted.
+// An empty DIR or workspace ID names none.
+func targetsByID(selectedSink sink, dir, except string) ([]string, []sinkFinding) {
+	if dir == "" || selectedSink.workspaceID == "" {
+		return nil, nil
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -494,7 +516,7 @@ func orphanSiblings(selectedSink sink, current string) ([]string, []sinkFinding)
 			continue
 		}
 		path := filepath.Join(dir, name)
-		if path == current {
+		if path == except {
 			continue
 		}
 		orphans = append(orphans, path)
