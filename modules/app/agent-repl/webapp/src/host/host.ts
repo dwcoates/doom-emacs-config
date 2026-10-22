@@ -105,7 +105,8 @@ export interface Host {
    * Hold workspace ID's page at URL: create it, re-point it, or leave it.
    * Given a LANE, a page created now loads only once every page loading
    * before it in that lane has drawn (see `createHost`'s pacing), or at once
-   * if it is shown first. Without one it loads at once.
+   * if it is shown first. Without one it loads at once. A page re-pointed
+   * at a new URL loads at once in a fresh frame, whatever LANE says.
    */
   ensure(id: string, url: string, lane?: string): string;
   /**
@@ -483,10 +484,28 @@ export function createHost(env: HostEnv): Host {
         return answer("ensure", id, queued ? "queued" : "created");
       }
       if (frame.url === url) return answer("ensure", id, "unchanged");
-      frame.url = url;
-      resetFacts(frame);
-      frame.attached = false;
-      frame.iframe.src = url;
+      // A RE-POINTED PAGE IS A NEW PAGE, IN A NEW FRAME, LOADED AT ONCE.
+      //
+      // Setting the old frame's `src` left its document running until the new
+      // one committed, so a page re-pointed while it loaded still booted
+      // against the address it was leaving: on the 2026-10-22 11:14 deploy a
+      // page the replay had handed the departing daemon's address booted there
+      // 140ms after Emacs re-pointed it, and adopted there. Removing the frame
+      // ends that document now, so nothing of the old address can run.
+      //
+      // And a re-point is a handover's move, whose adoption waits on this
+      // page calling the successor, so it never waits a lane's turn: the page
+      // loads now, and the lane it held or waited in goes on without it, as
+      // it does for a removed page.
+      frame.iframe.remove();
+      unqueue(id);
+      finishTurn(id);
+      const fresh = create(id, url, undefined);
+      fresh.inputBackground = frame.inputBackground;
+      fresh.gateDock = frame.gateDock;
+      fresh.heldIngress = frame.heldIngress;
+      fresh.gateBand = frame.gateBand;
+      fresh.pendingSwitchStartedAtMs = frame.pendingSwitchStartedAtMs;
       return answer("ensure", id, "navigated");
     },
     show(id, switchStartedAtMs = null) {
