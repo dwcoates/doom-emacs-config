@@ -19,7 +19,6 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -28,6 +27,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -52,7 +52,7 @@ func rlStopAndRelaunch(t *testing.T, w *World) *harness.Daemon {
 	// ON ITS OWN BOUND, NOT ON WHAT THE RUN HAS LEFT: everything before this
 	// has already spent out of w.Ctx(), so handing the remainder to the stop
 	// would make it answer for time it never spent.
-	stopCtx, cancelStop := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	stopCtx, cancelStop := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancelStop()
 	resp, err := w.Client().UpdateShutdownSchedule(stopCtx, connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
@@ -144,7 +144,7 @@ func rlAwaitFooterDone(t *testing.T, d *harness.Daemon, ws *workspacev1.Workspac
 	defer web.Close()
 	stream := d.WatchFooter(ws)
 	defer stream.Close()
-	ctx, cancel := context.WithTimeout(d.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(d.Ctx(), DefaultTimeout)
 	defer cancel()
 	harness.AwaitView(t, ctx, stream, "idle.done after the relaunch", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil

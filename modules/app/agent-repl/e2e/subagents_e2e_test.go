@@ -24,7 +24,6 @@
 package e2e
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -38,6 +37,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -128,7 +128,7 @@ func awaitResponseText(t *testing.T, w *World, page *frontendv1.FeedPage, stream
 	}); row != nil {
 		return row
 	}
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	return harness.AwaitView(t, ctx, stream, "response text "+text, func(row *frontendv1.FeedRow) bool {
 		md, ok := responseMarkdown(row.GetActivity())
@@ -157,7 +157,7 @@ func awaitSubagentSettled(t *testing.T, w *World, page *frontendv1.FeedPage, str
 			return b
 		}
 	}
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	var found *frontendv1.FeedSubagent
 	harness.AwaitView(t, ctx, stream, "subagent "+id.GetValue()+" to settle", func(row *frontendv1.FeedRow) bool {
@@ -515,7 +515,7 @@ func TestSubagentDetachedSurvivesAnInterjection(t *testing.T) {
 	rootStream := w.WatchFeed(rootToken)
 
 	held := SubmitPrompt(t, w, ws, "!subagent-detached-hold")
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	harness.AwaitView(t, ctx, rootStream, "the held turn's waiting prose", func(row *frontendv1.FeedRow) bool {
 		md, ok := responseMarkdown(row.GetActivity())
@@ -692,7 +692,7 @@ func TestADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) 
 	defer web.Close()
 	footer := successor.WatchFooter(ws)
 	defer footer.Close()
-	ctx, cancel := context.WithTimeout(successor.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(successor.Ctx(), DefaultTimeout)
 	defer cancel()
 	harness.AwaitView(t, ctx, footer, "the footer counting no live agent", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 0

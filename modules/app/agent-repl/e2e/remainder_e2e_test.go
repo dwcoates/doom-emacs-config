@@ -120,7 +120,6 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -133,6 +132,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -190,7 +190,7 @@ func rmAwaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what s
 // GetSidecarCursors durability wait.
 func rmOpenAgentBook(t *testing.T, w *World, agent *conversationv1.AgentId) *storev1.AgentSessionPage {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	page, err := readAgentBook(ctx, w.Store.Client, agent)
 	if err != nil {
@@ -218,7 +218,7 @@ func TestCronCreateSetsTheFootersCronsChip(t *testing.T) {
 
 	// Assert: the standing job reached the ONE surface cron is contracted to
 	// reach -- the footer's ⏱ chip.
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	view := harness.AwaitView(t, ctx, footer.Stream, "the footer's crons chip for the standing job", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetLiveWork().GetCrons() != nil

@@ -43,12 +43,12 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -132,7 +132,7 @@ func TestRecoveryAfterStoreRestart(t *testing.T) {
 	w.Store.Stop()
 	SubmitPrompt(t, w, ws, "!prose-streamed")
 
-	openCtx, openCancel := context.WithTimeout(w.Ctx(), StoreOutageWindow)
+	openCtx, openCancel := grantedclock.WithBound(w.Ctx(), StoreOutageWindow)
 	defer openCancel()
 	openedView := harness.AwaitView(t, openCtx, topbar, "an open degraded window from the real store outage", func(v *frontendv1.TopbarView) bool {
 		return findOpenDegradedWindow(v) != nil
@@ -146,7 +146,7 @@ func TestRecoveryAfterStoreRestart(t *testing.T) {
 	w.Store.StartSameDB(t)
 
 	// Assert: the SAME window (identified by component + began_at_ms) closes.
-	closeCtx, closeCancel := context.WithTimeout(w.Ctx(), StoreOutageWindow)
+	closeCtx, closeCancel := grantedclock.WithBound(w.Ctx(), StoreOutageWindow)
 	defer closeCancel()
 	closedView := harness.AwaitView(t, closeCtx, topbar, "the same degraded window closing after the store restarted", func(v *frontendv1.TopbarView) bool {
 		return findClosedDegradedWindow(v, opened) != nil

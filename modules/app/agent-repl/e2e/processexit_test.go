@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"agent-repld/integration/grantedclock"
 )
 
 // TestProcessExitAnswersEveryObserver pins the property whose absence turned
@@ -77,20 +79,38 @@ func TestProcessExitAwaitWithinBoundsARunningProcess(t *testing.T) {
 	p := &processExit{done: make(chan struct{})}
 	budget := 20 * time.Millisecond
 
+	// THE BUDGET IS GRANTED TIME (grantedclock), as every bound this layer
+	// keeps on its own processes is, so it is measured on the granted clock:
+	// on a loaded host a 20ms budget rightly took 12.8s of wall time.
+	stall, err := grantedclock.Source()
+	if err != nil {
+		t.Fatalf("read the granted clock's source: %v", err)
+	}
+	clock, err := grantedclock.Start(time.Now, stall)
+	if err != nil {
+		t.Fatalf("start the granted clock: %v", err)
+	}
+
 	// Act.
-	started := time.Now()
 	left := p.awaitWithin(budget)
-	elapsed := time.Since(started)
+	span, err := clock.Span()
+	if err != nil {
+		t.Fatalf("read the granted clock: %v", err)
+	}
 
 	// Assert.
 	if left {
 		t.Fatal("awaitWithin claimed a still-running process had left")
 	}
-	if elapsed < budget {
-		t.Fatalf("awaitWithin returned after %s, short of its %s budget", elapsed, budget)
+	// Granted time accrues reading by reading, so this clock, read once,
+	// cannot see the granted time the bound's own clock saw. Granted never
+	// exceeds wall, though, so a budget that ran out has taken at least that
+	// much wall time.
+	if span.Wall < budget {
+		t.Fatalf("awaitWithin returned after %s, short of its %s budget", span, budget)
 	}
-	if elapsed > DefaultTimeout {
-		t.Fatalf("awaitWithin took %s, far beyond its %s budget", elapsed, budget)
+	if span.Granted > DefaultTimeout {
+		t.Fatalf("awaitWithin took %s, far beyond its %s budget", span, budget)
 	}
 }
 

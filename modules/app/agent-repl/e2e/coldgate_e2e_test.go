@@ -127,7 +127,6 @@
 package e2e
 
 import (
-	"context"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -142,6 +141,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -465,7 +465,7 @@ func awaitPIDsGone(t *testing.T, pids []int, bound time.Duration) {
 // awaitColdFooter bounds a footer-stream wait at this area's own budget.
 func awaitColdFooter(t *testing.T, w *World, f *FooterWatch, what string, pred func(*frontendv1.FooterView) bool) *frontendv1.FooterView {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), coldGateChainTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), coldGateChainTimeout)
 	defer cancel()
 	return harness.AwaitView(t, ctx, f.Stream, what, pred)
 }
@@ -530,7 +530,7 @@ func assertSessionProceeds(t *testing.T, g *coldGate) {
 	// what this waits on before prompting.
 	host := g.w.WatchHost(g.ws)
 	defer host.Close()
-	ctx, cancel := context.WithTimeout(g.w.Ctx(), coldGateChainTimeout)
+	ctx, cancel := grantedclock.WithBound(g.w.Ctx(), coldGateChainTimeout)
 	defer cancel()
 	harness.AwaitSessionServes(t, ctx, host)
 

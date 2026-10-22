@@ -53,7 +53,6 @@
 package e2e
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"reflect"
@@ -67,6 +66,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 
 	_ "modernc.org/sqlite"
@@ -191,7 +191,7 @@ func sweepRecordSince(records []harness.LogRecord, mark sweepMark, message strin
 // sweep that never ran at all without a second run to find out.
 func awaitHibernateSweepRecordSince(t *testing.T, w *World, workspaceDir string, mark sweepMark, what, message string) harness.LogRecord {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), HibernationChainTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), HibernationChainTimeout)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -495,7 +495,7 @@ func TestRevivalAfterHibernate(t *testing.T) {
 	turn1 := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 	awaitHibernateSweepRecordSince(t, w, ws.GetDir(), mark,
 		"the idle sweep hibernating the session before revival", hibernateSucceededMsg)
-	hostCtx, cancel := context.WithTimeout(w.Ctx(), HibernationChainTimeout)
+	hostCtx, cancel := grantedclock.WithBound(w.Ctx(), HibernationChainTimeout)
 	defer cancel()
 	harness.AwaitView(t, hostCtx, host,
 		"the host reporting the parked workspace with its shim detached before revival", shimDetached)
@@ -660,7 +660,7 @@ func TestRevivalRunsInTheSessionsModeNotTheSummarizers(t *testing.T) {
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 	awaitHibernateSweepRecordSince(t, w, ws.GetDir(), mark,
 		"the idle sweep hibernating the session, which is what compacts it", hibernateSucceededMsg)
-	hostCtx, cancel := context.WithTimeout(w.Ctx(), HibernationChainTimeout)
+	hostCtx, cancel := grantedclock.WithBound(w.Ctx(), HibernationChainTimeout)
 	defer cancel()
 	harness.AwaitView(t, hostCtx, host,
 		"the host reporting the parked workspace with its shim detached before revival", shimDetached)

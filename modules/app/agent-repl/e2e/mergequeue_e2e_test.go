@@ -42,7 +42,6 @@
 package e2e
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +53,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 
 	"connectrpc.com/connect"
@@ -626,7 +626,7 @@ func TestFanWideCancel(t *testing.T) {
 	// three admitted when the interrupt landed). The footer's chips ARE that
 	// set, so the stop is issued once they show all three, as a person's
 	// would be.
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	harness.AwaitView(t, ctx, footer.Stream, "the footer showing two live agents and a live shell", func(v *frontendv1.FooterView) bool {
 		live := v.GetStrip().GetLiveWork()

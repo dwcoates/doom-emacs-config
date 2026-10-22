@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // holdLock makes DIR a host lock this test process holds: the directory, with
@@ -26,13 +25,31 @@ func holdLock(t *testing.T, dir string) {
 // waitBehindLock starts CMD, which must block on the lock DIR this test holds.
 // Once CMD's output carries ANNOUNCE it calls whileBlocked (where the caller
 // asserts CMD has done nothing yet), releases DIR, waits for CMD and returns
-// its error and whole output. The wait is observed through the output, never
-// a timed sleep; the bound only turns a hang into a failure.
+// its error and whole output.
+//
+// THE WAIT HAS NO CLOCK. CMD either announces (it is blocked behind the lock)
+// or exits without announcing (it did not wait, the failure); both are
+// events, and the helper waits for whichever comes first. A bound on the
+// announcement measured only how fast a loaded host reaches the lock: on
+// 2026-10-22 a gate run on a contended host timed out two cases after 20s
+// with no output at all, the script not yet at the lock. A command that does
+// neither is a hang, and the test binary's own -timeout reports it.
 func waitBehindLock(t *testing.T, cmd *exec.Cmd, dir, announce string, whileBlocked func()) (string, error) {
 	t.Helper()
+	out, err, blockErr := runBehindLock(cmd, dir, announce, whileBlocked)
+	if blockErr != nil {
+		t.Fatalf("%v", blockErr)
+	}
+	return out, err
+}
+
+// runBehindLock is waitBehindLock's body. BLOCKERR is set when CMD could not
+// be started, exited before announcing, or the lock could not be released;
+// otherwise OUT and ERR are CMD's whole output and its exit.
+func runBehindLock(cmd *exec.Cmd, dir, announce string, whileBlocked func()) (string, error, error) {
 	reader, writer, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("create output pipe: %v", err)
+		return "", nil, fmt.Errorf("create output pipe: %w", err)
 	}
 	defer reader.Close()
 	cmd.Stdout, cmd.Stderr = writer, writer
@@ -58,7 +75,7 @@ func waitBehindLock(t *testing.T, cmd *exec.Cmd, dir, announce string, whileBloc
 	if err := cmd.Start(); err != nil {
 		_ = writer.Close()
 		<-scanned
-		t.Fatalf("start: %v", err)
+		return "", nil, fmt.Errorf("start: %w", err)
 	}
 	waitErr := make(chan error, 1)
 	go func() {
@@ -69,20 +86,18 @@ func waitBehindLock(t *testing.T, cmd *exec.Cmd, dir, announce string, whileBloc
 
 	select {
 	case <-announced:
-	case <-time.After(20 * time.Second):
-		_ = cmd.Process.Kill()
-		<-waitErr
+	case err := <-waitErr:
 		<-scanned
-		t.Fatalf("timed out waiting for %q:\n%s", announce, output.String())
+		return "", nil, fmt.Errorf("the command exited (%v) without announcing %q, so it never waited behind the lock:\n%s", err, announce, output.String())
 	}
 	whileBlocked()
 
 	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("release lock: %v", err)
+		return "", nil, fmt.Errorf("release lock: %w", err)
 	}
 	err = <-waitErr
 	<-scanned
-	return output.String(), err
+	return output.String(), err, nil
 }
 
 // TestWaitBehindLockReleasesOnlyAfterTheAnnouncement drives the helper with a
@@ -111,6 +126,31 @@ func TestWaitBehindLockReleasesOnlyAfterTheAnnouncement(t *testing.T) {
 	}
 	if !strings.Contains(out, "through") {
 		t.Fatalf("output lacks the command's finish:\n%s", out)
+	}
+}
+
+// TestRunBehindLockFailsACommandThatExitsWithoutWaiting: a command that never
+// blocks on the lock is reported by its exit, with its output, at once.
+func TestRunBehindLockFailsACommandThatExitsWithoutWaiting(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	dir := filepath.Join(t.TempDir(), "held.lock")
+	holdLock(t, dir)
+	cmd := exec.Command("bash", "-c", `echo "went straight through"`)
+	ran := false
+
+	// Act
+	_, _, blockErr := runBehindLock(cmd, dir, "WAITING here", func() { ran = true })
+
+	// Assert
+	if blockErr == nil || !strings.Contains(blockErr.Error(), "without announcing") || !strings.Contains(blockErr.Error(), "went straight through") {
+		t.Fatalf("blockErr = %v, want the exit named with the command's output", blockErr)
+	}
+	if ran {
+		t.Fatalf("whileBlocked ran for a command that never waited")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("the lock was released for a command that never waited: %v", err)
 	}
 }
 

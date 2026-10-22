@@ -62,7 +62,6 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -70,6 +69,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -102,7 +102,7 @@ func TestInterruptAfterTextDelta(t *testing.T) {
 
 	turn := SubmitPrompt(t, w, ws, "!interrupt")
 
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 
 	// Act: wait until the Bash tool call is genuinely live (running, no

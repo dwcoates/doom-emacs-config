@@ -335,6 +335,9 @@ func runHostPreflight(script string, bound time.Duration) string {
 		return fmt.Sprintf("%s not found: %v", sandboxScriptRel, err)
 	}
 
+	// wall-clock: the preflight asks an EXTERNAL engine (Docker) to answer,
+	// and a wedged engine is not this binary's processes being starved; the
+	// bound is the engine's, in wall time.
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
 	return hostPreflightUntil(ctx, script, bound)

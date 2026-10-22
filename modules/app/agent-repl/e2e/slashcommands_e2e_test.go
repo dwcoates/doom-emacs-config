@@ -55,7 +55,6 @@ package e2e
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -68,6 +67,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -137,7 +137,7 @@ func scAnsweringResponseProse(t *testing.T, w *World, ws *workspacev1.WorkspaceR
 // gate's forbidden shapes are os.MkdirAll/os.WriteFile/os.Create, none used).
 func scTranscriptRecordsUnderProject(t *testing.T, w *World, projectDir string) [][]byte {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	var lines [][]byte
 	for _, c := range w.Store.Cursors(t, ctx) {

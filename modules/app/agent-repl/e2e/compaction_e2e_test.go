@@ -41,7 +41,6 @@
 package e2e
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -52,6 +51,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -118,7 +118,7 @@ func cpFindCompactedSeparation(rows []*frontendv1.FeedRow) *frontendv1.FeedRow {
 // publishes idle.
 func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, configDir, prompt string) *conversationv1.TurnId {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	before := w.Store.Cursors(t, ctx)
 	cancel()
 	baseline := cursorOffsetsUnder(before, harness.ProjectDir(configDir, ws.GetDir()))

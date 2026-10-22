@@ -61,6 +61,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -118,7 +119,7 @@ func sfSessionArmRecords(t *testing.T, w *World, workspaceDir, operation, arm st
 // stand on the workspace's daemon sink.
 func sfAwaitSessionArmRecords(t *testing.T, w *World, workspaceDir, operation, arm string, want int) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -195,7 +196,7 @@ func TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance(t *testing.T) {
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "rate-limit-seven-day")
 	sfAwaitConclusion(t, w, ws, turn, "The seven_day window is 91% used.")
 
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	view := sfAwaitSampledAllowance(t, ctx, footer.Stream, "the weekly allowance", (*frontendv1.FooterActivityEnduringUsage).GetWeekly, 0.91)
 

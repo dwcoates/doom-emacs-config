@@ -14,6 +14,7 @@ import (
 
 	"agentrepl/logging/buildreport"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
 )
 
@@ -235,7 +236,7 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		LockDir:  lockDir,
 	})
 	// A deploy reads the sidecar as current only once it has reported.
-	reportCtx, cancelReport := context.WithTimeout(context.Background(), DefaultTimeout)
+	reportCtx, cancelReport := grantedclock.WithBound(context.Background(), DefaultTimeout)
 	awaitBuildReport(t, reportCtx, lockDir, buildreport.ServiceSidecar, sidecar.cmd.Process.Pid)
 	cancelReport()
 
@@ -311,7 +312,7 @@ func requireWebappDist(t *testing.T) string {
 			return
 		}
 		started := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), webappDistCheckBound)
+		ctx, cancel := grantedclock.WithBound(context.Background(), webappDistCheckBound)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, script, "check")
 		out, err := cmd.CombinedOutput()

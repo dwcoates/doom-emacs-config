@@ -18,7 +18,6 @@
 package e2e
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -33,6 +32,8 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"connectrpc.com/connect"
+
+	"agent-repld/integration/grantedclock"
 )
 
 // ===========================================================================
@@ -621,7 +622,7 @@ func perfCalibrate(t *testing.T, w *World) {
 // this phase; the probe had no business being the exception.
 func perfLoopbackProbe(t *testing.T, w *World) time.Duration {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	samples := make([]time.Duration, 0, PerfCalibrationLoopbackProbes)
 	for i := 0; i < PerfCalibrationLoopbackProbes; i++ {
