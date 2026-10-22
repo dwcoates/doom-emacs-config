@@ -603,7 +603,7 @@ export class AdoptionFailed extends Error {
 export async function adoptAtBoot(
   ctx: AppContext,
   backoff: AdoptBackoff = {},
-): Promise<"adopted" | "no-transfer" | "deferred"> {
+): Promise<"adopted" | "no-transfer" | "deferred" | "moved"> {
   const initialMs = backoff.initialMs ?? ADOPT_INITIAL_MS;
   const maxMs = backoff.maxMs ?? ADOPT_MAX_MS;
   const budgetMs = backoff.budgetMs ?? ADOPT_BUDGET_MS;
@@ -658,6 +658,18 @@ export async function adoptAtBoot(
       });
       return "deferred";
     }
+    if (outcome.kind === "moved") {
+      // THIS PAGE BOOTED AGAINST THE DAEMON ITS WORKSPACE LEFT. The web host
+      // replays every page at the address Emacs last gave it, and a handover
+      // re-points each page only as its own transfer arrives, so a page can
+      // boot on the departing daemon in between. Emacs is already moving it,
+      // so the page stops without a failure, as a deferred transfer does.
+      log.info(`this workspace moved to ${outcome.address}; this page stops and is reloaded there`, {
+        operation: "lifecycle.adopt-moved",
+        context: { address: outcome.address },
+      });
+      return "moved";
+    }
     if (outcome.kind === "terminal") {
       log.error(`this page cannot be adopted: ${outcome.detail}`, {
         operation: "lifecycle.adopt-refused",
@@ -686,6 +698,7 @@ export async function adoptAtBoot(
 export type AdoptionOutcome =
   | { kind: "no-transfer" }
   | { kind: "deferred" }
+  | { kind: "moved"; address: string }
   | { kind: "retry"; arm: string }
   | { kind: "terminal"; arm: string; detail: string };
 
@@ -720,12 +733,10 @@ export function classifyAdoptionRefusal(error: AdoptWebWorkspaceError): Adoption
         arm: arm.case,
         detail: `the registry holds ${arm.value.registryDir} for this workspace id`,
       };
+    // The page booted on the daemon that handed the workspace away: Emacs
+    // re-points it at the successor, so the boot stops rather than fails.
     case "transferringAway":
-      return {
-        kind: "terminal",
-        arm: arm.case,
-        detail: `this workspace is transferring to ${arm.value.address}`,
-      };
+      return { kind: "moved", address: arm.value.address };
     case "participantNotExpected":
       return {
         kind: "terminal",

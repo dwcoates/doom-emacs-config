@@ -912,7 +912,7 @@ describe("classifyAdoptionRefusal", () => {
       { case: "workspaceRefMismatch", value: { registryDir: "/x" } },
       "terminal",
     ],
-    ["transferringAway", { case: "transferringAway", value: { address: "a:1" } }, "terminal"],
+    ["transferringAway", { case: "transferringAway", value: { address: "a:1" } }, "moved"],
     ["participantNotExpected", { case: "participantNotExpected", value: {} }, "terminal"],
     ["transferDeferred", { case: "transferDeferred", value: {} }, "deferred"],
   ];
@@ -978,6 +978,47 @@ describe("adoptAtBoot", () => {
     expect(state.adoptCalls).toBe(1);
   });
 
+  it("resolves moved, calling the verb once and reporting nothing, when the page booted on the daemon its workspace left", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client, state } = lifecycleClient({
+      adopt: () => refusal({ case: "transferringAway", value: { address: "127.0.0.1:2" } }),
+    });
+    const ctx = lifecycleContext(client, sink, fakeTicker());
+
+    // ACT
+    const outcome = await adoptAtBoot(ctx);
+
+    // ASSERT
+    expect(outcome).toBe("moved");
+    expect(state.adoptCalls).toBe(1);
+    expect(sink.reported).toEqual([]);
+  });
+
+  it("records a move at info, naming the successor's address", async () => {
+    // ARRANGE
+    const h = captureLogger();
+    const { client } = lifecycleClient({
+      adopt: () => refusal({ case: "transferringAway", value: { address: "127.0.0.1:2" } }),
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+
+    // ACT
+    await adoptAtBoot(ctx);
+
+    // ASSERT
+    const record = forwardedRecord(await forwarded(h), "lifecycle.adopt-moved");
+    expect(record.level.case).toBe("info");
+    expect(record.context).toMatchObject({ address: "127.0.0.1:2" });
+  });
+
+  it("carries the successor's address on a move", () => {
+    const outcome = classifyAdoptionRefusal({
+      cause: { case: "transferringAway", value: { address: "127.0.0.1:2" } },
+    } as never);
+    expect(outcome).toEqual({ kind: "moved", address: "127.0.0.1:2" });
+  });
+
   it("calls the verb exactly once when it is answered at once", async () => {
     const { client, state } = lifecycleClient({});
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
@@ -1029,7 +1070,6 @@ describe("adoptAtBoot", () => {
   const terminal: ReadonlyArray<readonly [string, unknown]> = [
     ["unknownWorkspace", { case: "unknownWorkspace", value: {} }],
     ["workspaceRefMismatch", { case: "workspaceRefMismatch", value: { registryDir: "/x" } }],
-    ["transferringAway", { case: "transferringAway", value: { address: "a:1" } }],
     ["participantNotExpected", { case: "participantNotExpected", value: {} }],
   ];
   for (const [name, cause] of terminal) {

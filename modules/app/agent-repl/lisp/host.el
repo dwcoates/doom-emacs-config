@@ -1391,7 +1391,7 @@ one still waiting on a daemon that has since died, and the older walk\='s
 late answer is dropped rather than moving WS back."
   (let ((token (setq agent-repl-host--reattach-tokens
                      (1+ agent-repl-host--reattach-tokens))))
-    (agent-repl-host--put ws :reattach (list :token token :conn new :trigger trigger))
+    (agent-repl-host--put ws :reattach (list :token token :conn new :claim claim :trigger trigger))
     (agent-repl--info ws "elisp.host.reattach ws=%s address=%S claim=%s trigger=%s"
                       ws (agent-repl-connect-connection-address new) claim trigger)
     (pcase claim
@@ -1399,6 +1399,13 @@ late answer is dropped rather than moving WS back."
       (:register (agent-repl-host--register-onto ws new token trigger on-settled))
       (_ (agent-repl--fatal ws "elisp.host.reattach-unknown-claim ws=%s claim=%S trigger=%s"
                             ws claim trigger)))))
+
+(defun agent-repl-host-adopting-p (ws)
+  "Non-nil while WS\='s reattach walk is an adopt still waiting on its answer.
+Its page is then a participant the successor\='s rendezvous waits on, so
+the web host loads it at once rather than in a lane\='s turn
+\(`agent-repl--webhost-replay')."
+  (eq :adopt (plist-get (plist-get (agent-repl-host--entry ws) :reattach) :claim)))
 
 (defun agent-repl-host--reattach-current-p (ws token)
   "Return non-nil when TOKEN is WS\='s newest reattach walk."

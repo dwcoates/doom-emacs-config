@@ -140,6 +140,7 @@ func TestAsRefusalNormalizesEveryComponentSentinel(t *testing.T) {
 		{"not yet adopted", rollout.ErrNotYetAdopted, "not_yet_adopted"},
 		{"a refused mid-work adoption", fmt.Errorf("rollout: adopt %q: %w", "w1", rollout.ErrMidWorkRefused), "transfer_deferred"},
 		{"participant not expected", rollout.ErrParticipantNotExpected, "participant_not_expected"},
+		{"an adopt call on the daemon that handed the workspace away", rollout.ErrTransferredAway, "transferring_away"},
 		{"moved away by a sealed handover move", fmt.Errorf("restart %q: %w", "w1", bounce.ErrMovedAway), "transferring_away"},
 	}
 

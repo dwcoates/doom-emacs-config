@@ -4402,6 +4402,34 @@ Registering on a daemon that is handing over would only fail."
 ;; workspace onto the successor when the old daemon's stream ended planned,
 ;; and the ending registered it back on the daemon that was leaving.
 
+(ert-deftest agent-repl-test-host-adopting-p-answers-by-the-walk-in-flight ()
+  "Only an adopt walk still waiting on its answer counts as adopting."
+  (dolist (case '((:adopt . t) (:register . nil) (nil . nil)))
+    (agent-repl-test-host--with-harness
+      (cl-letf (((symbol-function 'agent-repl-host--adopt-onto) #'ignore)
+                ((symbol-function 'agent-repl-host--register-onto) #'ignore))
+        ;; Arrange
+        (let ((successor (agent-repl-connect-open "127.0.0.1:58175")))
+          (when (car case)
+            (agent-repl-host--reattach "ws-1" successor (car case) "transferred"))
+          ;; Act / Assert
+          (should (eq (cdr case) (and (agent-repl-host-adopting-p "ws-1") t))))))))
+
+(ert-deftest agent-repl-test-host-adopting-p-ends-with-the-reattach ()
+  "A finished reattach leaves the workspace adopting no longer."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((leaving (agent-repl-connect-open "127.0.0.1:61043"))
+            (successor (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" leaving)
+        (cl-letf (((symbol-function 'agent-repl-host--adopt-onto) #'ignore))
+          (agent-repl-host--reattach "ws-1" successor :adopt "transferred"))
+        ;; Act
+        (agent-repl-host--reattached "ws-1" successor (agent-repl-host-ref "ws-1") "transferred")
+        ;; Assert
+        (should-not (agent-repl-host-adopting-p "ws-1"))))))
+
 (ert-deftest agent-repl-test-host-planned-end-during-an-adopt-registers-nothing ()
   "A planned end while an adopt onto the successor is in flight calls nothing."
   (agent-repl-test-host--with-harness

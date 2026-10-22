@@ -305,6 +305,99 @@ describe("ensure", () => {
     expect(frame("a").src).toBe("http://ws-a.localhost:2/");
   });
 
+  it("re-points a page into a fresh frame, so the old document cannot run on", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/");
+    const old = frame("a");
+
+    // Act
+    host.ensure("a", "http://ws-a.localhost:2/");
+
+    // Assert
+    expect([old.isConnected, frame("a") === old]).toEqual([false, false]);
+  });
+
+  it("keeps the desired state Emacs gave across a re-point", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/");
+    host.setInputBackground("a", "#123456");
+    host.setGateDock("a", 40, "#abcdef");
+
+    // Act
+    host.ensure("a", "http://ws-a.localhost:2/");
+    const posted = postsTo("a");
+    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
+
+    // Assert
+    expect(posted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "inputBackground", background: "#123456" }),
+        expect.objectContaining({ kind: "gateDock", pixels: 40, background: "#abcdef" }),
+      ]),
+    );
+  });
+
+  it("keeps a shown page shown across a re-point", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/");
+    host.show("a");
+
+    // Act
+    host.ensure("a", "http://ws-a.localhost:2/");
+
+    // Assert
+    expect(frame("a").hasAttribute(FRAME_SHOWN_ATTRIBUTE)).toBe(true);
+  });
+
+  it("loads a page re-pointed while it waited in a lane at once, and only once", () => {
+    // Arrange
+    inTurn(host, "p");
+    inTurn(host, "q");
+
+    // Act
+    const answer = parsed(host.ensure("q", "http://ws-q.localhost:2/", "right"));
+    const repointed = frame("q");
+    fromPage("p", { channel: HOST_CHANNEL, kind: "drawn", what: "page" });
+
+    // Assert
+    expect([answer.outcome, repointed.getAttribute("src"), frame("q") === repointed]).toEqual([
+      "navigated",
+      "http://ws-q.localhost:2/",
+      true,
+    ]);
+  });
+
+  // A removed page and a re-pointed one retire their frame the same way.
+  for (const [how, act] of [
+    ["removed", (h: Host) => h.remove("p")],
+    ["re-pointed", (h: Host) => h.ensure("p", "http://ws-p.localhost:2/")],
+  ] as const) {
+    it(`retires a ${how} page's frame and lets the lane it was loading go on`, () => {
+      // Arrange
+      inTurn(host, "p");
+      inTurn(host, "q");
+      const old = frame("p");
+
+      // Act
+      act(host);
+
+      // Assert
+      expect([old.isConnected, loading("q")]).toEqual([false, true]);
+    });
+  }
+
+  it("lets a lane go on when the page it was loading is re-pointed", () => {
+    // Arrange
+    inTurn(host, "p");
+    inTurn(host, "q");
+
+    // Act
+    host.ensure("p", "http://ws-p.localhost:2/");
+
+    // Assert
+    expect(loading("q")).toBe(true);
+  });
+
   it("forgets the drawn mark of a page it re-points", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");

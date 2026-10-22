@@ -488,6 +488,11 @@ order given."
           (setq before (append before (list id)))))
       (cons after before))))
 
+(defun agent-repl--webhost-adopting-p (id)
+  "Non-nil when page ID\='s workspace has an adopt waiting on its page."
+  (let ((ws (and (fboundp 'agent-repl--ws-by-ref-id) (agent-repl--ws-by-ref-id id))))
+    (and ws (fboundp 'agent-repl-host-adopting-p) (agent-repl-host-adopting-p ws))))
+
 (defun agent-repl--webhost-replay-page (id lane)
   "Hand the host page ID and its state.
 Given a LANE, the host loads it once the pages before it in LANE have drawn."
@@ -512,19 +517,31 @@ or the lane before it, nearest first (`agent-repl--webhost-replay-lanes').
 The host loads each lane's next page once its last has drawn (host.ts), so
 the pages a switch is likeliest to reach either way are fresh first, two at
 a time and never piled up.  A switch to a page still waiting loads it at
-once."
+once.
+
+A PAGE WHOSE WORKSPACE IS MID-ADOPT LOADS AT ONCE TOO.  A handover\='s
+first transfer reloads the host onto the successor, and the replay comes
+while other workspaces\' adopts are still waiting on their pages: the
+successor\='s rendezvous completes only once the page has called, inside
+the host\='s own 10s call bound.  Queued behind a lane\='s other pages, two
+such pages missed it on the 2026-10-22 11:14 deploy, and both adopts timed
+out (`agent-repl-host-adopting-p')."
   (let (ids)
     (maphash (lambda (id _url) (push id ids)) agent-repl--webhost-pages)
     (when agent-repl--webhost-shown
       (agent-repl--webhost-replay-page agent-repl--webhost-shown nil)
       (agent-repl--webhost-call "show" agent-repl--webhost-shown))
-    (let ((lanes (agent-repl--webhost-replay-lanes (delete agent-repl--webhost-shown (nreverse ids)))))
+    (let* ((rest (delete agent-repl--webhost-shown (nreverse ids)))
+           (adopting (cl-remove-if-not #'agent-repl--webhost-adopting-p rest))
+           (lanes (agent-repl--webhost-replay-lanes (cl-remove-if #'agent-repl--webhost-adopting-p rest))))
+      (dolist (id adopting)
+        (agent-repl--webhost-replay-page id nil))
       (dolist (id (car lanes))
         (agent-repl--webhost-replay-page id "after"))
       (dolist (id (cdr lanes))
         (agent-repl--webhost-replay-page id "before"))
-      (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn after=%d before=%d"
-                        (length (car lanes)) (length (cdr lanes)))))
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn after=%d before=%d adopting=%d"
+                        (length (car lanes)) (length (cdr lanes)) (length adopting))))
   (when (and agent-repl--webhost-log-level
              (> (cdr agent-repl--webhost-log-level) (agent-repl--now-unix-ms)))
     (agent-repl--webhost-call "setLogLevel" (symbol-name (car agent-repl--webhost-log-level))
