@@ -108,7 +108,9 @@ Either kind:
   running build does NOT carry it.
 - d. A notice that a subscribed queue changed: act only as far as the work the
   subscription was taken for calls for; otherwise report it in one line and
-  STOP. NEVER poll the queue between notices.
+  STOP. NEVER poll the queue between notices. A notice that waited behind your
+  turns lists every change since the last one you were told, oldest first, and
+  its queue is the queue as it stands when it reaches you.
 - e. A landing report for an instrumentation round: reproduce, read the records
   the round added, and either remediate (landing the fix as the next round) or
   add the records still missing and land them as the next async merge. While a

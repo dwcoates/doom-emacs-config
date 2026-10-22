@@ -1140,6 +1140,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// handed the prompt handler built below.
 	queueNotices := mergenotice.New(mergenotice.Deps{
 		Subscriptions: p.DB,
+		Holds:         queue,
 		Briefs:        merge.BriefsFrom(paths.PromptsDir),
 		MintKey:       prompthandler.MintKey,
 		Log:           p.Surfaces,

@@ -72,7 +72,19 @@ func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conver
 	if p.submitted != nil {
 		p.submitted <- sub
 	}
-	return prompthandler.Outcome{Turn: ids.TurnID("turn-" + string(ws))}, nil
+	p.mu.Lock()
+	n := 0
+	for _, s := range p.got {
+		if s.ws == ws {
+			n++
+		}
+	}
+	p.mu.Unlock()
+	turn := "turn-" + string(ws)
+	if n > 1 {
+		turn = fmt.Sprintf("%s-%d", turn, n)
+	}
+	return prompthandler.Outcome{Turn: ids.TurnID(turn)}, nil
 }
 
 // submissions answers every captured submission.
@@ -82,10 +94,24 @@ func (p *fakePrompts) submissions() []submission {
 	return append([]submission(nil), p.got...)
 }
 
+// fakeHolds answers each Supersede with retired (or err) and records the
+// turns it was asked to retire.
+type fakeHolds struct {
+	retired bool
+	err     error
+	asked   []ids.TurnID
+}
+
+func (h *fakeHolds) Supersede(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) (bool, error) {
+	h.asked = append(h.asked, turn)
+	return h.retired, h.err
+}
+
 // fixture is one service over fakes.
 type fixture struct {
 	s       *Service
 	prompts *fakePrompts
+	holds   *fakeHolds
 	logs    *dlog.TestSurfaces
 	keys    int
 }
@@ -94,9 +120,10 @@ type fixture struct {
 // splice the real brief's placeholders into "label|change|queue|detail",
 // and whose keys count up.
 func newFixture(subs fakeSubscriptions) *fixture {
-	f := &fixture{prompts: &fakePrompts{}, logs: dlog.NewTestSurfaces()}
+	f := &fixture{prompts: &fakePrompts{}, holds: &fakeHolds{retired: true}, logs: dlog.NewTestSurfaces()}
 	f.s = New(Deps{
 		Subscriptions: subs,
+		Holds:         f.holds,
 		Briefs: func(name string, values map[string]string) (string, error) {
 			if name != BriefNotice {
 				return "", fmt.Errorf("unknown brief %q", name)
@@ -533,7 +560,7 @@ func TestTheValuesSpliceIntoTheShippedBrief(t *testing.T) {
 	}
 
 	// Act.
-	text, err := brief.Splice(Values(wsm.MergeQueueDetailDepletes, landedLast))
+	text, err := brief.Splice(Values(wsm.MergeQueueDetailDepletes, []merge.QueueChange{landedLast}))
 
 	// Assert.
 	if err != nil {
@@ -545,4 +572,189 @@ func TestTheValuesSpliceIntoTheShippedBrief(t *testing.T) {
 	if !strings.Contains(text, "you asked to be told of the queue emptying") {
 		t.Fatalf("text = %q, want the detail named", text)
 	}
+}
+
+// steppedFix is fix's merge moving to its testing step, still at the front.
+var steppedFix = change(merge.QueueChangeStepped, repoDoom, member("ws-fix", "fix", true, footer.StepTesting),
+	member("ws-fix", "fix", true, footer.StepTesting))
+
+// fieldsOf splits a fixture notice into its label, change, queue and detail.
+func fieldsOf(t *testing.T, text string) []string {
+	t.Helper()
+	parts := strings.Split(text, "|")
+	if len(parts) != 4 {
+		t.Fatalf("notice %q does not split into the brief's four placeholders", text)
+	}
+	return parts
+}
+
+func TestANewChangeSupersedesTheSubscribersUntoldNotice(t *testing.T) {
+	// Arrange.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailEveryChange)}})
+	f.s.deliver(context.Background(), f.prompts, steppedFix)
+
+	// Act.
+	f.s.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert.
+	if !reflect.DeepEqual(f.holds.asked, []ids.TurnID{"turn-ws-alice"}) {
+		t.Fatalf("superseded = %v, want the first notice's turn", f.holds.asked)
+	}
+}
+
+func TestTheSupersedingNoticeSaysEveryChangeOldestFirstThenTheQueueAsItNowStands(t *testing.T) {
+	// Arrange.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailEveryChange)}})
+	f.s.deliver(context.Background(), f.prompts, steppedFix)
+
+	// Act.
+	f.s.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert.
+	got := f.prompts.submissions()
+	fields := fieldsOf(t, got[len(got)-1].text)
+	want := []string{
+		Headline(landedLast),
+		"It changed 2 times since the last notice you were told, oldest first:\n- " + Sentence(steppedFix) + "\n- " + Sentence(landedLast),
+		Queue(landedLast.Queue),
+	}
+	if !reflect.DeepEqual(fields[:3], want) {
+		t.Fatalf("notice = %q, want %q", fields[:3], want)
+	}
+}
+
+func TestASupersessionIsRecordedWithWhatItCarries(t *testing.T) {
+	// Arrange.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailEveryChange)}})
+	f.s.deliver(context.Background(), f.prompts, steppedFix)
+
+	// Act.
+	f.s.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert.
+	record, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "info", Operation: op, Message: "the subscriber's untold notice was superseded; the next one says its changes first"})
+	if !ok || record.Context["superseded_turn"] != "turn-ws-alice" || record.Context["carried"] != 1 || record.Context["subscriber"] != string(alice) {
+		t.Fatalf("no info record naming the superseded turn and what it carried: %+v", f.logs.Records())
+	}
+}
+
+func TestANoticeAfterOneAlreadyToldSaysOnlyTheNewChange(t *testing.T) {
+	// Arrange.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailEveryChange)}})
+	f.holds.retired = false
+	f.s.deliver(context.Background(), f.prompts, steppedFix)
+
+	// Act.
+	f.s.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert.
+	got := f.prompts.submissions()
+	if change := fieldsOf(t, got[len(got)-1].text)[1]; change != Sentence(landedLast) {
+		t.Fatalf("change = %q, want only the new change", change)
+	}
+	if _, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "debug", Operation: op, Message: "the subscriber's last notice was told; the next one says only the new change"}); !ok {
+		t.Fatalf("no debug record of the told notice: %+v", f.logs.Records())
+	}
+}
+
+func TestANoticeThatCannotBeSupersededStandsAndTheNextSaysOnlyTheNewChange(t *testing.T) {
+	// Arrange.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailEveryChange)}})
+	f.holds.err = errors.New("the store is gone")
+	f.s.deliver(context.Background(), f.prompts, steppedFix)
+
+	// Act.
+	f.s.deliver(context.Background(), f.prompts, landedLast)
+
+	// Assert.
+	got := f.prompts.submissions()
+	if change := fieldsOf(t, got[len(got)-1].text)[1]; change != Sentence(landedLast) {
+		t.Fatalf("change = %q, want only the new change", change)
+	}
+	record, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op, Message: "could not supersede the subscriber's untold notice; it stands and is told, and the next one says only the new change"})
+	if !ok || record.Context["cause"] != "the store is gone" || record.Context["superseded_turn"] != "turn-ws-alice" {
+		t.Fatalf("no error record naming the notice and the cause: %+v", f.logs.Records())
+	}
+}
+
+func TestANoticeThatWasNeverSubmittedIsSaidByTheNextWithoutAskingTheQueue(t *testing.T) {
+	tests := []struct {
+		name string
+		fail func(f *fixture)
+		heal func(f *fixture)
+	}{
+		{
+			name: "the submission failed",
+			fail: func(f *fixture) { f.prompts.failFor = map[ids.WorkspaceID]error{alice: errors.New("parked")} },
+			heal: func(f *fixture) { f.prompts.failFor = nil },
+		},
+		{
+			name: "the brief could not be composed",
+			fail: func(f *fixture) {
+				f.s.deps.Briefs = func(string, map[string]string) (string, error) { return "", errors.New("missing") }
+			},
+			heal: func(f *fixture) { f.s.deps.Briefs = newFixture(fakeSubscriptions{}).s.deps.Briefs },
+		},
+		{
+			name: "the key could not be minted",
+			fail: func(f *fixture) {
+				f.s.deps.MintKey = func(string) (string, error) { return "", errors.New("no entropy") }
+			},
+			heal: func(f *fixture) { f.s.deps.MintKey = func(p string) (string, error) { return p + "-ok", nil } },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom, wsm.MergeQueueDetailEveryChange)}})
+			tt.fail(f)
+			f.s.deliver(context.Background(), f.prompts, steppedFix)
+			tt.heal(f)
+
+			// Act.
+			f.s.deliver(context.Background(), f.prompts, landedLast)
+
+			// Assert.
+			got := f.prompts.submissions()
+			if len(got) != 1 || len(f.holds.asked) != 0 {
+				t.Fatalf("submissions = %+v, superseded = %v; want one notice and no supersession", got, f.holds.asked)
+			}
+			if change := fieldsOf(t, got[0].text)[1]; !strings.Contains(change, Sentence(steppedFix)) || !strings.Contains(change, Sentence(landedLast)) {
+				t.Fatalf("change = %q, want both changes said", change)
+			}
+		})
+	}
+}
+
+func TestEachQueuesNoticesSupersedeOnlyTheirOwn(t *testing.T) {
+	// Arrange.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, wsm.EveryRepository, wsm.MergeQueueDetailEveryChange)}})
+	f.s.deliver(context.Background(), f.prompts, steppedFix)
+
+	// Act.
+	f.s.deliver(context.Background(), f.prompts, change(merge.QueueChangeLanded, repoOther, member("ws-o", "o", true, "")))
+
+	// Assert.
+	if len(f.holds.asked) != 0 {
+		t.Fatalf("superseded = %v, want the other queue's notice left alone", f.holds.asked)
+	}
+}
+
+func TestSentencesStatesOneChangeAsItsSentence(t *testing.T) {
+	// Arrange, Act, Assert.
+	if got := Sentences([]merge.QueueChange{landedLast}); got != Sentence(landedLast) {
+		t.Fatalf("Sentences = %q, want the one sentence", got)
+	}
+}
+
+func TestValuesFailsHardOnANoticeOfNoChange(t *testing.T) {
+	// Arrange.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Values of no change must panic")
+		}
+	}()
+
+	// Act.
+	Values(wsm.MergeQueueDetailEveryChange, nil)
 }
