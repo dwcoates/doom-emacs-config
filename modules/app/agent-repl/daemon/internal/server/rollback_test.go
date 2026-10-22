@@ -13,6 +13,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
@@ -1171,11 +1172,19 @@ func wholeResend(text string) *agentreplv1.RollBackResend {
 	}
 }
 
-// entryResend is a resend editing the entry LABEL to say TEXT.
+// entryResend is a resend editing the entry LABEL of the prompt row p1 to say
+// TEXT.
 func entryResend(label, text string) *agentreplv1.RollBackResend {
+	return entryResendOf("p1", label, text)
+}
+
+// entryResendOf is a resend editing the entry LABEL of the prompt ROW to say
+// TEXT.
+func entryResendOf(row, label, text string) *agentreplv1.RollBackResend {
 	return &agentreplv1.RollBackResend{
 		IdempotencyKey: "k-resend", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
-		Edit: &agentreplv1.RollBackResend_Entry{Entry: &agentreplv1.RollBackResendEntry{Label: label, Text: text}},
+		Edit: &agentreplv1.RollBackResend_Entry{Entry: &agentreplv1.RollBackResendEntry{
+			Label: label, Text: text, Row: &frontendv1.FeedId{Value: row}}},
 	}
 }
 
@@ -1259,6 +1268,29 @@ func TestRollBackResendOfAnEntryThePromptDoesNotHoldIsRefusedBeforeRollingBack(t
 	}
 }
 
+// TestRollBackResendOfAnotherPromptsEntryIsRefusedBeforeRollingBack pins
+// that an entry edit made for one prompt is never applied to the prompt the
+// rollback was planned for, though it holds the same label.
+func TestRollBackResendOfAnotherPromptsEntryIsRefusedBeforeRollingBack(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	req := resendRollback(t, h, said("3.1 - old"), entryResendOf("p-other", "3.1", "new"))
+
+	// Act.
+	resp, err := h.Client.RollBack(context.Background(), connect.NewRequest(req))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RollBack: %v", err)
+	}
+	if resp.Msg.GetError().GetEntryNotFound() == nil {
+		t.Fatalf("result = %v, want entry_not_found", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.rollBackReq) != 0 || h.Prompts.submits != 0 {
+		t.Fatalf("%d rollbacks and %d submissions, want none", len(h.Verbs.rollBackReq), h.Prompts.submits)
+	}
+}
+
 // TestRollBackResendIsValidated pins that a malformed resend is refused as
 // InvalidArgument, before the plan is spent.
 func TestRollBackResendIsValidated(t *testing.T) {
@@ -1270,6 +1302,7 @@ func TestRollBackResendIsValidated(t *testing.T) {
 		{name: "no origin", resend: func() *agentreplv1.RollBackResend { r := wholeResend("x"); r.Origin = 0; return r }()},
 		{name: "no edit", resend: func() *agentreplv1.RollBackResend { r := wholeResend("x"); r.Edit = nil; return r }()},
 		{name: "an entry edit with no label", resend: entryResend("", "x")},
+		{name: "an entry edit with no row", resend: entryResendOf("", "3.1", "x")},
 		{name: "a whole edit with no prompt", resend: func() *agentreplv1.RollBackResend {
 			r := wholeResend("x")
 			r.Edit = &agentreplv1.RollBackResend_Whole{Whole: &agentreplv1.RollBackResendWhole{}}

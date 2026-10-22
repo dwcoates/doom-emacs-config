@@ -161,11 +161,12 @@ func (s *server) RollBack(
 	// the whole call while the conversation is still whole.
 	var resend *agentreplv1.SubmitPromptRequest
 	if r := req.Msg.Resend; r != nil {
-		said, ok := resendSaid(r, replyquote.Words(planned.said))
+		said, ok := resendSaid(r, planned.row, replyquote.Words(planned.said))
 		if !ok {
 			return answer(resp, s.refuse(subject.Log, rpc, resp, refusal{
-				Arm:    "entry_not_found",
-				Reason: fmt.Sprintf("no entry of the rolled-back prompt answers %q", r.GetEntry().GetLabel()),
+				Arm: "entry_not_found",
+				Reason: fmt.Sprintf("the rolled-back prompt %q holds no entry answering %q that the resend edits (it edits prompt %q)",
+					planned.row.GetValue(), r.GetEntry().GetLabel(), r.GetEntry().GetRow().GetValue()),
 				Fields: map[string]any{"label": r.GetEntry().GetLabel()},
 				Info:   true,
 			}))
@@ -217,14 +218,17 @@ func (s *server) RollBack(
 }
 
 // resendSaid composes what a rollback's resend R sends: its whole prompt, or
-// WORDS (the rolled-back prompt as the person said it) with the entry R names
-// saying R's text instead. ok is false when WORDS holds no entry answering
-// the label an entry edit names.
-func resendSaid(r *agentreplv1.RollBackResend, words *conversationv1.UserSaid) (*conversationv1.UserSaid, bool) {
+// WORDS (the rolled-back prompt ROW, as the person said it) with the entry R
+// names saying R's text instead. ok is false when an entry edit was made for
+// a prompt other than ROW, or WORDS holds no entry answering its label.
+func resendSaid(r *agentreplv1.RollBackResend, row *frontendv1.FeedId, words *conversationv1.UserSaid) (*conversationv1.UserSaid, bool) {
 	if whole := r.GetWhole(); whole != nil {
 		return whole.GetSaid(), true
 	}
 	edit := r.GetEntry()
+	if edit.GetRow().GetValue() != row.GetValue() {
+		return nil, false
+	}
 	said := proto.Clone(words).(*conversationv1.UserSaid)
 	for _, block := range said.GetContent().GetBlocks() {
 		text := block.GetText()
@@ -258,7 +262,7 @@ func validateRollBackResend(r *agentreplv1.RollBackResend) *connect.Error {
 		if edit.Entry.GetLabel() == "" {
 			return invalid("resend.entry.label", "an entry edit names the entry's label")
 		}
-		return nil
+		return validateFeedID("resend.entry.row", edit.Entry.GetRow())
 	}
 	return invalid("resend.edit", "a resend's edit is required")
 }
