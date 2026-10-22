@@ -318,6 +318,64 @@ func TestTheOrdinaryPageBootIsRecordedAtInfoAndNeverAsAWarning(t *testing.T) {
 	}
 }
 
+func TestAnAdoptCallOnTheDaemonThatHandedTheWorkspaceAwayIsPointedOnwardAtOnce(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(c *controller, ctx context.Context, ws ids.WorkspaceID) error
+		op   string
+	}{
+		{"the page", (*controller).AdoptWeb, opAdoptWeb},
+		{"the host", (*controller).AdoptHost, opAdoptHost},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange: the outgoing daemon's own entry is armed, as the
+			// announcement arms it, and the workspace has been transferred.
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.c.mu.Lock()
+			h.c.rendezvous[ws] = &entry{expected: Participants{Host: true, Web: true}, done: make(chan struct{})}
+			h.c.mu.Unlock()
+			h.c.recordTransfer(ws, "127.0.0.1:7788")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// Act: a parked call would block until ctx ends, which nothing here ends.
+			err := test.call(h.c, ctx, ws)
+
+			// Assert
+			if !errors.Is(err, ErrTransferredAway) {
+				t.Fatalf("answered %v, want ErrTransferredAway", err)
+			}
+			infos := levelRecords(records(h.log, test.op), "info")
+			if len(infos) != 1 || infos[0].Context["successor"] != "127.0.0.1:7788" {
+				t.Fatalf("info records = %+v, want one naming the successor", infos)
+			}
+		})
+	}
+}
+
+func TestAnAdoptCallOnTheDaemonThatHandedTheWorkspaceAwayFillsNoParticipantSlot(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	e := &entry{expected: Participants{Host: true, Web: true}, done: make(chan struct{})}
+	h.c.mu.Lock()
+	h.c.rendezvous[ws] = e
+	h.c.mu.Unlock()
+	h.c.recordTransfer(ws, "127.0.0.1:7788")
+
+	// Act
+	_ = h.c.AdoptWeb(context.Background(), ws)
+
+	// Assert
+	h.c.mu.Lock()
+	defer h.c.mu.Unlock()
+	if e.webCalled || e.hostCalled {
+		t.Fatalf("participants = host %v web %v, want neither filled by a lagging call", e.hostCalled, e.webCalled)
+	}
+}
+
 func TestAnUnexpectedParticipantIsRefused(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

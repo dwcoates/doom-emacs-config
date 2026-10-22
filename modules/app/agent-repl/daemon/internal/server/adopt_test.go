@@ -263,6 +263,32 @@ func TestAdoptWebAnswersTransferDeferredForARefusedMidWorkAdoption(t *testing.T)
 	}
 }
 
+// TestAdoptWebOnTheDaemonThatHandedTheWorkspaceAwayPointsAtTheSuccessor pins
+// the lagging page's answer: a page that booted against the departing daemon
+// is told where its workspace went, with the successor's address, instead of
+// waiting on a rendezvous only the successor completes.
+func TestAdoptWebOnTheDaemonThatHandedTheWorkspaceAwayPointsAtTheSuccessor(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Rollout.adoptWebErr = rollout.ErrTransferredAway
+
+	// Act.
+	resp, err := h.Client.AdoptWebWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AdoptWebWorkspace: %v", err)
+	}
+	away := resp.Msg.GetError().GetTransferringAway()
+	if away == nil {
+		t.Fatalf("result = %v, want transferring_away", resp.Msg.GetResult())
+	}
+	if away.GetAddress() != "127.0.0.1:9999" {
+		t.Fatalf("address = %q, want the successor's 127.0.0.1:9999", away.GetAddress())
+	}
+}
+
 // TestARolloutRefusalOfAnAdoptionIsRecordedAtInfo pins that the rollout's own
 // refusals of an adopt call leave a line at the default verbosity: on
 // 2026-10-11 hundreds of the host's not_yet_adopted answers were recorded only

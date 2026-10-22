@@ -383,6 +383,19 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 	carried, sealedBy, carriedOK := c.carriedParticipants(ws)
 
 	c.mu.Lock()
+	// A CALL ON THE DAEMON THAT HANDED THE WORKSPACE AWAY is a lagging
+	// participant, and it is pointed onward at once. The outgoing daemon arms
+	// an entry of its own at announcement (handover.go) that no participant
+	// completes here, so joining it parked the call until the caller's own
+	// timeout: on 2026-10-22 a page the web host replayed at the departing
+	// daemon's address sat 10s in that entry, failed its boot, and the
+	// successor's rendezvous waited the same 10s for a page that never came.
+	if successor := c.transferred[ws]; successor != "" {
+		c.mu.Unlock()
+		c.log.Info(operation, "this daemon handed the workspace to a successor; the caller is pointed there",
+			dlog.Merge(fields, dlog.Context{"successor": successor}))
+		return ErrTransferredAway
+	}
 	e, armed := c.rendezvous[ws]
 	if armed && carriedOK {
 		c.followCarriedLocked(ws, e, carried, sealedBy)

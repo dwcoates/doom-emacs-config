@@ -645,6 +645,10 @@ var (
 	ErrParticipantNotExpected = errors.New("rollout: this participant's stream was not open at announcement")
 	// ErrNotYetAdopted is answered while adoption is still in progress.
 	ErrNotYetAdopted = errors.New("rollout: this workspace is not adopted yet")
+	// ErrTransferredAway answers an adopt call made on the daemon that HANDED
+	// the workspace to a successor: the rendezvous it joins is the
+	// successor's, so the caller is lagging and is pointed onward at once.
+	ErrTransferredAway = errors.New("rollout: this daemon handed the workspace to a successor; adopt it there")
 	// ErrReclaimed settles a rendezvous whose workspace the incumbent took
 	// back: its adoption window expired, or its transfer failed.
 	ErrReclaimed = errors.New("rollout: the incumbent took this workspace back; it is not being handed over")
