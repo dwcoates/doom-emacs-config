@@ -135,6 +135,19 @@ type gauges struct {
 	threads, fds, count int
 }
 
+// goneSince answers whether the process listed as WAS has gone since: a
+// failed usage read of a process that exited meanwhile is the race of a
+// process exiting, not a failure. The kernel need not answer ESRCH for it (a
+// process mid-exit answered EPERM, 2026-10-22), so the process is asked for
+// again, and gone, or replaced by another process under its pid, is gone.
+func (c *Collector) goneSince(pid int, was Identity) bool {
+	now, err := c.deps.Reader.Identity(pid)
+	if errors.Is(err, ErrGone) {
+		return true
+	}
+	return err == nil && now.StartUnixMicros != was.StartUnixMicros
+}
+
 func (c *Collector) collectProcesses(ch chan<- prometheus.Metric) {
 	pids, err := c.deps.Reader.PIDs()
 	if !c.note("list", err) {
@@ -164,7 +177,7 @@ func (c *Collector) collectProcesses(ch chan<- prometheus.Metric) {
 		switch {
 		case err == nil:
 			live[pid] = pidState{group: group, start: ids[pid].StartUnixMicros, usage: u}
-		case !errors.Is(err, ErrGone):
+		case !errors.Is(err, ErrGone) && !c.goneSince(pid, ids[pid]):
 			usageErr = err
 		}
 	}
