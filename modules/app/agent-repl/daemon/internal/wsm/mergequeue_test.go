@@ -699,8 +699,11 @@ func TestRequestMergeRefusesADuplicate(t *testing.T) {
 			if refusal.Position != 1 || refusal.State != tt.want {
 				t.Fatalf("refusal = %+v, want place 1 in state %s", refusal, tt.want)
 			}
-			if !loggedOperation(log, "daemon.wsm.request_merge", "error") {
-				t.Fatalf("the refusal was not logged at error: %v", log.Records())
+			// The refusal is an answer the orchestrator turns into the
+			// request's already-queued arm, so the store records it at debug
+			// and never as an error.
+			if !loggedOperation(log, "daemon.wsm.request_merge", "debug") || loggedOperation(log, "daemon.wsm.request_merge", "error") {
+				t.Fatalf("the refusal was not logged at debug alone: %v", log.Records())
 			}
 		})
 	}
