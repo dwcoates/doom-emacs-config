@@ -113,36 +113,31 @@ func TestADetachedSubagentCardDrawsTheModelItsResponseNamed(t *testing.T) {
 	}
 }
 
-func TestRecordModel(t *testing.T) {
+func TestSubagentModel(t *testing.T) {
 	tests := []struct {
-		name     string
-		agent    string
-		filed    string
-		model    *conversationv1.AgentModel
-		wantMove bool
-		want     string
+		name    string
+		created string
+		filed   string
+		want    string
 	}{
-		{name: "a first model", agent: "a", model: &conversationv1.AgentModel{Name: "m1"}, wantMove: true, want: "m1"},
-		{name: "a changed model", agent: "a", filed: "m1", model: &conversationv1.AgentModel{Name: "m2"}, wantMove: true, want: "m2"},
-		{name: "the same model", agent: "a", filed: "m1", model: &conversationv1.AgentModel{Name: "m1"}, wantMove: false, want: "m1"},
-		{name: "no model", agent: "a", filed: "m1", model: nil, wantMove: false, want: "m1"},
-		{name: "an empty name", agent: "a", filed: "m1", model: &conversationv1.AgentModel{}, wantMove: false, want: "m1"},
-		{name: "no agent", agent: "", model: &conversationv1.AgentModel{Name: "m1"}, wantMove: false, want: ""},
+		{name: "a filed model", created: "a", filed: "m1", want: "m1"},
+		{name: "no model filed", created: "a", want: ""},
+		{name: "no agent", created: "", want: ""},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Arrange.
 			s := newHarness(t).resolver.state(testWorkspace)
 			if test.filed != "" {
-				s.agentModel[test.agent] = test.filed
+				s.agentModel[test.created] = test.filed
 			}
 
 			// Act.
-			moved := s.recordModel(&conversationv1.AgentId{Value: test.agent}, test.model)
+			got := s.subagentModel(&conversationv1.AgentId{Value: test.created})
 
 			// Assert.
-			if moved != test.wantMove || s.agentModel[test.agent] != test.want {
-				t.Fatalf("moved %v filed %q, want %v %q", moved, s.agentModel[test.agent], test.wantMove, test.want)
+			if got.GetName() != test.want || (test.want == "") != (got == nil) {
+				t.Fatalf("subagentModel = %v, want %q", got, test.want)
 			}
 		})
 	}

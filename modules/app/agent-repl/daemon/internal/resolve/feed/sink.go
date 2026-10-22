@@ -78,7 +78,7 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 	}
 	// THE MODEL rides the same unit usage rides, and the card draws the
 	// subagent's latest one, so a response naming a new model re-pushes it.
-	if s.recordModel(agent, act.GetModel()) {
+	if s.agentModel.Record(agent, act.GetModel()) {
 		r.restampSubagentCard(s, agent)
 	}
 
