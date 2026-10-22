@@ -1353,7 +1353,7 @@ export function createFakeQuery(
       task_id: task.taskId,
       tool_use_id: task.toolUseId,
       description: task.description,
-      task_type: task.kind,
+      task_type: vendorTaskType(task.kind),
       // THE 0.3.280 SHAPE: every flagged kind states which side of the line it
       // began on, and a foreground start says `false`.
       ...(flagged ? { is_backgrounded: live.backgrounded } : {}),
@@ -1370,7 +1370,7 @@ export function createFakeQuery(
     systemMessage("background_tasks_changed", {
       tasks: [...liveTasks.values()].filter((t) => t.backgrounded).map((t) => ({
         task_id: t.taskId,
-        task_type: t.kind,
+        task_type: vendorTaskType(t.kind),
         description: t.description,
       })),
     });
@@ -2110,4 +2110,14 @@ export function createFakeQuery(
       out.end();
     },
   };
+}
+
+/**
+ * THE WORD THE VENDOR TYPES A TASK BY, which is what RUNS it: a monitor's watch
+ * is a background shell underneath, so the `monitor-deadline` and
+ * `monitor-persistent` captures carry `task_type: "local_bash"` on its start
+ * and on the level alike. The mock says what the vendor says.
+ */
+export function vendorTaskType(kind: LiveTask["kind"]): string {
+  return kind === "monitor" ? "local_bash" : kind;
 }

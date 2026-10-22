@@ -25,6 +25,7 @@ import {
   SPOOL_ROOT_ENV,
   TURN_GATE_PATH_ENV,
   TURN_GATE_TEXT_ENV,
+  vendorTaskType,
 } from "../../src/fake/index.js";
 import type { CanUseToolLike, QueryLike, SdkMessage, SdkUserMessage } from "../../src/sdk/types.js";
 
@@ -1500,5 +1501,44 @@ describe("a truncating resume and file checkpointing", () => {
 
     // Assert
     expect(rewind.canRewind).toBe(false);
+  });
+});
+
+describe("the task_type a monitor is typed by", () => {
+  it.each([
+    { kind: "monitor", word: "local_bash" },
+    { kind: "local_bash", word: "local_bash" },
+    { kind: "local_agent", word: "local_agent" },
+    { kind: "local_workflow", word: "local_workflow" },
+  ] as const)("types a $kind task as the vendor does: $word", ({ kind, word }) => {
+    // Arrange, Act, Assert.
+    expect(vendorTaskType(kind)).toBe(word);
+  });
+
+  it.each(["!monitor-deadline", "!monitor-persistent"])(
+    "%s starts its watch as a local_bash task, with no spool, as the captures do",
+    async (prompt) => {
+      // Arrange, Act.
+      const driven = await driveScenario([prompt]);
+
+      // Assert.
+      const started = ofType(driven, "system", "task_started") as unknown as {
+        task_type?: string;
+        output_file?: string;
+        is_backgrounded?: boolean;
+      }[];
+      expect(started.map((m) => [m.task_type, m.output_file, m.is_backgrounded])).toEqual([["local_bash", undefined, undefined]]);
+    },
+  );
+
+  it("names the monitor as a local_bash task on the level", async () => {
+    // Arrange, Act.
+    const driven = await driveScenario(["!monitor-deadline"]);
+
+    // Assert.
+    const levels = ofType(driven, "system", "background_tasks_changed") as unknown as {
+      tasks: { task_type: string }[];
+    }[];
+    expect(levels.flatMap((level) => level.tasks.map((task) => task.task_type))).toEqual(["local_bash"]);
   });
 });
