@@ -385,7 +385,7 @@ func TestHandBackSubmitsADeferredReportLedByItsLabel(t *testing.T) {
 		{name: "landed", outcome: merge.DetachedOutcome{Kind: merge.DetachedLanded, Summary: "it landed as commit abc", Branch: "sample"},
 			wantLabel: "merge of sample landed", wantText: "Recently Merged"},
 		{name: "failed", outcome: merge.DetachedOutcome{Kind: merge.DetachedFailed, Summary: "tests failed", Branch: "sample"},
-			wantLabel: "merge of sample failed", wantText: "now shown in the tab bar and the sidebar, at /w/sample-merge"},
+			wantLabel: "merge of sample failed", wantText: "stays hidden at /w/sample-merge, exactly where the merge stopped, listed among the closed workspaces"},
 		{name: "abandoned", outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the fork failed", Branch: "sample"},
 			wantLabel: "merge of sample did not run", wantText: "the fork failed"},
 	}
@@ -1537,5 +1537,22 @@ func TestTheCompactionIsSpelledOnlyBySessionCommand(t *testing.T) {
 	// Assert
 	if n != 0 {
 		t.Errorf("the service's sources spell /compact by hand %d times", n)
+	}
+}
+
+func TestAFailedHandBackNeverSaysTheMergeWorkspaceIsShown(t *testing.T) {
+	// Arrange: no outcome reveals a merge workspace (owner ruling 2026-10-20).
+	f := newFixture(t)
+	mergeWS := wsm.Workspace{ID: "ws-merge", Name: "sample-merge", Dir: "/w/sample-merge"}
+
+	// Act
+	err := f.svc.HandBack(context.Background(), "ws-requester", mergeWS, merge.DetachedOutcome{Kind: merge.DetachedFailed, Summary: "tests failed", Branch: "sample"})
+
+	// Assert
+	if err != nil || len(f.prompts.sent) != 1 {
+		t.Fatalf("HandBack = %v with %d submissions, want one", err, len(f.prompts.sent))
+	}
+	if text := f.prompts.sent[0].text; strings.Contains(text, "now shown") || strings.Contains(text, "tab bar") {
+		t.Fatalf("text = %q, want no claim that the hidden merge workspace is shown", text)
 	}
 }
