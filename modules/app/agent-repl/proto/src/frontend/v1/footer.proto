@@ -2996,6 +2996,16 @@ message FooterAgentRow {
     // the shim is waiting to resume it once the API answers again.
     FooterAgentRowWaitingForApi waiting_for_api = 9;
   }
+  // The model the subagent's latest API response named, drawn in its own
+  // column at the row's right. UNSET until the subagent has answered once
+  // (conversation.v1.AgentActivity.model); the cell then draws empty, never
+  // a guessed model.
+  optional FooterAgentRowModel model = 10;
+}
+// The model element.
+message FooterAgentRowModel {
+  // The model's id, verbatim ("claude-opus-5").
+  string name = 1;
 }
 // The agent's run is live; the row's clock and tokens are moving.
 message FooterAgentRowRunning {}

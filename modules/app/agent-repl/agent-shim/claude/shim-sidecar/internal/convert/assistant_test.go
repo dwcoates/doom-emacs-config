@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
@@ -143,6 +145,64 @@ func TestEffortRidesTheSameUnitAsUsage(t *testing.T) {
 	second := entryByKey(t, entries, ActivityKey(BlockActivityID("msg_1", 1)))
 	if activityOf(second).Effort != nil {
 		t.Fatal("only one unit per response may carry effort")
+	}
+}
+
+func TestModelRidesTheSameUnitAsUsage(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	line := `{"type":"assistant","uuid":"a1","isSidechain":false,"timestamp":"` + ts1 +
+		`","message":{"id":"msg_1","role":"assistant","model":"claude-sonnet-5","content":[{"type":"text","text":"a"},{"type":"text","text":"b"}]}}`
+
+	// Act.
+	entries := convertLines(t, c, line)
+
+	// Assert.
+	first := entryByKey(t, entries, ActivityKey(BlockActivityID("msg_1", 0)))
+	if got := activityOf(first).GetModel().GetName(); got != "claude-sonnet-5" {
+		t.Fatalf("model = %q, want the record's message.model (claude-sonnet-5)", got)
+	}
+	second := entryByKey(t, entries, ActivityKey(BlockActivityID("msg_1", 1)))
+	if activityOf(second).Model != nil {
+		t.Fatal("only one unit per response may carry the model")
+	}
+}
+
+func TestReadModel(t *testing.T) {
+	tests := []struct {
+		name string
+		in   any
+		want *conversationv1.AgentModel
+	}{
+		{name: "a named model", in: "claude-opus-5", want: &conversationv1.AgentModel{Name: "claude-opus-5"}},
+		{name: "an empty name", in: "", want: nil},
+		{name: "no name at all", in: nil, want: nil},
+		{name: "a name that is not a string", in: 7.0, want: nil},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Act.
+			got := readModel(test.in)
+
+			// Assert.
+			if !proto.Equal(got, test.want) {
+				t.Fatalf("readModel(%v) = %v, want %v", test.in, got, test.want)
+			}
+		})
+	}
+}
+
+func TestUnreportedModelStaysUnset(t *testing.T) {
+	// Arrange. UNSET means the producer reported no model; a consumer draws
+	// nothing rather than guessing one.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, assistantWith("a1", "msg_1", ts1, `{"type":"text","text":"a"}`))
+
+	// Assert.
+	if activityOf(entries[0]).Model != nil {
+		t.Fatal("an absent model must stay UNSET")
 	}
 }
 

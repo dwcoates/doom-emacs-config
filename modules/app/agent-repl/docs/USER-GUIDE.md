@@ -286,8 +286,13 @@ The expanded footer lists the running background agents, shells and monitors, on
   - The jump works as described in "Jumping to an entry".
 - **The agents list has columns.**
   - Its header line starts with the "stop all" button, which stops every running background agent.
-  - The "tokens" and "duration" headers sit above their columns.
+  - The "tokens", "duration" and "model" headers sit above their columns.
   - Every row's figures line up under those headers, so a changing clock never moves the token count.
+  - The "model" column names the model the agent's latest response came from.
+    - It stays empty until the agent has answered once.
+- **A subagent's bubble in the feed names its model after its title, as `Explore (claude-sonnet-5)`.**
+  - Synchronous and background subagents both show it.
+  - It appears once the subagent has answered once, and follows the latest response if the model changes mid-run.
 
 ## Answering a question or permission by number
 

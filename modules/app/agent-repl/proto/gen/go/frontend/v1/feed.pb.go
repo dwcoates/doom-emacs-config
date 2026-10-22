@@ -12205,7 +12205,12 @@ type FeedSubagent struct {
 	// turn's own progress and carries none. The value is the run's
 	// `conversation.v1.DetachedWorkId` exactly as the daemon and the footer hold
 	// it (`FooterWorkId` names the same work by the same string).
-	WorkId        *FeedDetachedWorkId `protobuf:"bytes,7,opt,name=work_id,json=workId,proto3,oneof" json:"work_id,omitempty"`
+	WorkId *FeedDetachedWorkId `protobuf:"bytes,7,opt,name=work_id,json=workId,proto3,oneof" json:"work_id,omitempty"`
+	// The model the subagent's latest API response named, drawn small after
+	// the label ("Explore (claude-sonnet-5)"). UNSET until the subagent has
+	// answered once (conversation.v1.AgentActivity.model); the head then draws
+	// the label alone, never a guessed model.
+	Model         *FeedSubagentModel `protobuf:"bytes,9,opt,name=model,proto3,oneof" json:"model,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -12309,6 +12314,13 @@ func (x *FeedSubagent) GetWorkId() *FeedDetachedWorkId {
 	return nil
 }
 
+func (x *FeedSubagent) GetModel() *FeedSubagentModel {
+	if x != nil {
+		return x.Model
+	}
+	return nil
+}
+
 type isFeedSubagent_State interface {
 	isFeedSubagent_State()
 }
@@ -12334,6 +12346,52 @@ func (*FeedSubagent_Settled) isFeedSubagent_State() {}
 
 func (*FeedSubagent_Settling) isFeedSubagent_State() {}
 
+// The model element.
+type FeedSubagentModel struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The model's id, verbatim ("claude-opus-5").
+	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FeedSubagentModel) Reset() {
+	*x = FeedSubagentModel{}
+	mi := &file_frontend_v1_feed_proto_msgTypes[191]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FeedSubagentModel) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FeedSubagentModel) ProtoMessage() {}
+
+func (x *FeedSubagentModel) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_proto_msgTypes[191]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FeedSubagentModel.ProtoReflect.Descriptor instead.
+func (*FeedSubagentModel) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{191}
+}
+
+func (x *FeedSubagentModel) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 // The detached-work id element: the id a reader uses to refer to one unit of
 // async work. Drawn verbatim; never parsed.
 type FeedDetachedWorkId struct {
@@ -12346,7 +12404,7 @@ type FeedDetachedWorkId struct {
 
 func (x *FeedDetachedWorkId) Reset() {
 	*x = FeedDetachedWorkId{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[191]
+	mi := &file_frontend_v1_feed_proto_msgTypes[192]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12358,7 +12416,7 @@ func (x *FeedDetachedWorkId) String() string {
 func (*FeedDetachedWorkId) ProtoMessage() {}
 
 func (x *FeedDetachedWorkId) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[191]
+	mi := &file_frontend_v1_feed_proto_msgTypes[192]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12371,7 +12429,7 @@ func (x *FeedDetachedWorkId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedDetachedWorkId.ProtoReflect.Descriptor instead.
 func (*FeedDetachedWorkId) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{191}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{192}
 }
 
 func (x *FeedDetachedWorkId) GetText() string {
@@ -12392,7 +12450,7 @@ type FeedSubagentLabel struct {
 
 func (x *FeedSubagentLabel) Reset() {
 	*x = FeedSubagentLabel{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[192]
+	mi := &file_frontend_v1_feed_proto_msgTypes[193]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12404,7 +12462,7 @@ func (x *FeedSubagentLabel) String() string {
 func (*FeedSubagentLabel) ProtoMessage() {}
 
 func (x *FeedSubagentLabel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[192]
+	mi := &file_frontend_v1_feed_proto_msgTypes[193]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12417,7 +12475,7 @@ func (x *FeedSubagentLabel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentLabel.ProtoReflect.Descriptor instead.
 func (*FeedSubagentLabel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{192}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{193}
 }
 
 func (x *FeedSubagentLabel) GetText() string {
@@ -12438,7 +12496,7 @@ type FeedSubagentDescription struct {
 
 func (x *FeedSubagentDescription) Reset() {
 	*x = FeedSubagentDescription{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[193]
+	mi := &file_frontend_v1_feed_proto_msgTypes[194]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12450,7 +12508,7 @@ func (x *FeedSubagentDescription) String() string {
 func (*FeedSubagentDescription) ProtoMessage() {}
 
 func (x *FeedSubagentDescription) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[193]
+	mi := &file_frontend_v1_feed_proto_msgTypes[194]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12463,7 +12521,7 @@ func (x *FeedSubagentDescription) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentDescription.ProtoReflect.Descriptor instead.
 func (*FeedSubagentDescription) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{193}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{194}
 }
 
 func (x *FeedSubagentDescription) GetText() string {
@@ -12484,7 +12542,7 @@ type FeedSubagentTokens struct {
 
 func (x *FeedSubagentTokens) Reset() {
 	*x = FeedSubagentTokens{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[194]
+	mi := &file_frontend_v1_feed_proto_msgTypes[195]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12496,7 +12554,7 @@ func (x *FeedSubagentTokens) String() string {
 func (*FeedSubagentTokens) ProtoMessage() {}
 
 func (x *FeedSubagentTokens) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[194]
+	mi := &file_frontend_v1_feed_proto_msgTypes[195]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12509,7 +12567,7 @@ func (x *FeedSubagentTokens) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentTokens.ProtoReflect.Descriptor instead.
 func (*FeedSubagentTokens) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{194}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{195}
 }
 
 func (x *FeedSubagentTokens) GetText() string {
@@ -12531,7 +12589,7 @@ type FeedSubagentRuntime struct {
 
 func (x *FeedSubagentRuntime) Reset() {
 	*x = FeedSubagentRuntime{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[195]
+	mi := &file_frontend_v1_feed_proto_msgTypes[196]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12543,7 +12601,7 @@ func (x *FeedSubagentRuntime) String() string {
 func (*FeedSubagentRuntime) ProtoMessage() {}
 
 func (x *FeedSubagentRuntime) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[195]
+	mi := &file_frontend_v1_feed_proto_msgTypes[196]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12556,7 +12614,7 @@ func (x *FeedSubagentRuntime) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentRuntime.ProtoReflect.Descriptor instead.
 func (*FeedSubagentRuntime) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{195}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{196}
 }
 
 func (x *FeedSubagentRuntime) GetStartedAtMs() int64 {
@@ -12578,7 +12636,7 @@ type FeedSubagentLive struct {
 
 func (x *FeedSubagentLive) Reset() {
 	*x = FeedSubagentLive{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[196]
+	mi := &file_frontend_v1_feed_proto_msgTypes[197]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12590,7 +12648,7 @@ func (x *FeedSubagentLive) String() string {
 func (*FeedSubagentLive) ProtoMessage() {}
 
 func (x *FeedSubagentLive) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[196]
+	mi := &file_frontend_v1_feed_proto_msgTypes[197]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12603,7 +12661,7 @@ func (x *FeedSubagentLive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentLive.ProtoReflect.Descriptor instead.
 func (*FeedSubagentLive) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{196}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{197}
 }
 
 func (x *FeedSubagentLive) GetLastProgress() *FeedSubagentLastProgress {
@@ -12624,7 +12682,7 @@ type FeedSubagentLastProgress struct {
 
 func (x *FeedSubagentLastProgress) Reset() {
 	*x = FeedSubagentLastProgress{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[197]
+	mi := &file_frontend_v1_feed_proto_msgTypes[198]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12636,7 +12694,7 @@ func (x *FeedSubagentLastProgress) String() string {
 func (*FeedSubagentLastProgress) ProtoMessage() {}
 
 func (x *FeedSubagentLastProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[197]
+	mi := &file_frontend_v1_feed_proto_msgTypes[198]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12649,7 +12707,7 @@ func (x *FeedSubagentLastProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentLastProgress.ProtoReflect.Descriptor instead.
 func (*FeedSubagentLastProgress) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{197}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{198}
 }
 
 func (x *FeedSubagentLastProgress) GetAtMs() int64 {
@@ -12671,7 +12729,7 @@ type FeedSubagentSettling struct {
 
 func (x *FeedSubagentSettling) Reset() {
 	*x = FeedSubagentSettling{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[198]
+	mi := &file_frontend_v1_feed_proto_msgTypes[199]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12683,7 +12741,7 @@ func (x *FeedSubagentSettling) String() string {
 func (*FeedSubagentSettling) ProtoMessage() {}
 
 func (x *FeedSubagentSettling) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[198]
+	mi := &file_frontend_v1_feed_proto_msgTypes[199]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12696,7 +12754,7 @@ func (x *FeedSubagentSettling) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentSettling.ProtoReflect.Descriptor instead.
 func (*FeedSubagentSettling) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{198}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{199}
 }
 
 func (x *FeedSubagentSettling) GetStoppedAtMs() int64 {
@@ -12727,7 +12785,7 @@ type FeedSubagentSettled struct {
 
 func (x *FeedSubagentSettled) Reset() {
 	*x = FeedSubagentSettled{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[199]
+	mi := &file_frontend_v1_feed_proto_msgTypes[200]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12739,7 +12797,7 @@ func (x *FeedSubagentSettled) String() string {
 func (*FeedSubagentSettled) ProtoMessage() {}
 
 func (x *FeedSubagentSettled) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[199]
+	mi := &file_frontend_v1_feed_proto_msgTypes[200]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12752,7 +12810,7 @@ func (x *FeedSubagentSettled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentSettled.ProtoReflect.Descriptor instead.
 func (*FeedSubagentSettled) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{199}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{200}
 }
 
 func (x *FeedSubagentSettled) GetEndedAtMs() int64 {
@@ -12863,7 +12921,7 @@ type FeedSubagentRestarted struct {
 
 func (x *FeedSubagentRestarted) Reset() {
 	*x = FeedSubagentRestarted{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[200]
+	mi := &file_frontend_v1_feed_proto_msgTypes[201]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12875,7 +12933,7 @@ func (x *FeedSubagentRestarted) String() string {
 func (*FeedSubagentRestarted) ProtoMessage() {}
 
 func (x *FeedSubagentRestarted) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[200]
+	mi := &file_frontend_v1_feed_proto_msgTypes[201]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12888,7 +12946,7 @@ func (x *FeedSubagentRestarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentRestarted.ProtoReflect.Descriptor instead.
 func (*FeedSubagentRestarted) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{200}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{201}
 }
 
 type FeedSubagentSucceeded struct {
@@ -12899,7 +12957,7 @@ type FeedSubagentSucceeded struct {
 
 func (x *FeedSubagentSucceeded) Reset() {
 	*x = FeedSubagentSucceeded{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[201]
+	mi := &file_frontend_v1_feed_proto_msgTypes[202]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12911,7 +12969,7 @@ func (x *FeedSubagentSucceeded) String() string {
 func (*FeedSubagentSucceeded) ProtoMessage() {}
 
 func (x *FeedSubagentSucceeded) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[201]
+	mi := &file_frontend_v1_feed_proto_msgTypes[202]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12924,7 +12982,7 @@ func (x *FeedSubagentSucceeded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentSucceeded.ProtoReflect.Descriptor instead.
 func (*FeedSubagentSucceeded) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{201}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{202}
 }
 
 type FeedSubagentFailed struct {
@@ -12935,7 +12993,7 @@ type FeedSubagentFailed struct {
 
 func (x *FeedSubagentFailed) Reset() {
 	*x = FeedSubagentFailed{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[202]
+	mi := &file_frontend_v1_feed_proto_msgTypes[203]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12947,7 +13005,7 @@ func (x *FeedSubagentFailed) String() string {
 func (*FeedSubagentFailed) ProtoMessage() {}
 
 func (x *FeedSubagentFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[202]
+	mi := &file_frontend_v1_feed_proto_msgTypes[203]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12960,7 +13018,7 @@ func (x *FeedSubagentFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentFailed.ProtoReflect.Descriptor instead.
 func (*FeedSubagentFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{202}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{203}
 }
 
 type FeedSubagentCancelled struct {
@@ -12971,7 +13029,7 @@ type FeedSubagentCancelled struct {
 
 func (x *FeedSubagentCancelled) Reset() {
 	*x = FeedSubagentCancelled{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[203]
+	mi := &file_frontend_v1_feed_proto_msgTypes[204]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12983,7 +13041,7 @@ func (x *FeedSubagentCancelled) String() string {
 func (*FeedSubagentCancelled) ProtoMessage() {}
 
 func (x *FeedSubagentCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[203]
+	mi := &file_frontend_v1_feed_proto_msgTypes[204]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12996,7 +13054,7 @@ func (x *FeedSubagentCancelled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentCancelled.ProtoReflect.Descriptor instead.
 func (*FeedSubagentCancelled) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{203}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{204}
 }
 
 // Why the run was lost — the sidecar's own staleness ruling, relayed by name
@@ -13016,7 +13074,7 @@ type FeedSubagentLost struct {
 
 func (x *FeedSubagentLost) Reset() {
 	*x = FeedSubagentLost{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[204]
+	mi := &file_frontend_v1_feed_proto_msgTypes[205]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13028,7 +13086,7 @@ func (x *FeedSubagentLost) String() string {
 func (*FeedSubagentLost) ProtoMessage() {}
 
 func (x *FeedSubagentLost) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[204]
+	mi := &file_frontend_v1_feed_proto_msgTypes[205]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13041,7 +13099,7 @@ func (x *FeedSubagentLost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentLost.ProtoReflect.Descriptor instead.
 func (*FeedSubagentLost) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{204}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{205}
 }
 
 func (x *FeedSubagentLost) GetHow() isFeedSubagentLost_How {
@@ -13127,7 +13185,7 @@ type FeedSubagentLostProcessEnded struct {
 
 func (x *FeedSubagentLostProcessEnded) Reset() {
 	*x = FeedSubagentLostProcessEnded{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[205]
+	mi := &file_frontend_v1_feed_proto_msgTypes[206]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13139,7 +13197,7 @@ func (x *FeedSubagentLostProcessEnded) String() string {
 func (*FeedSubagentLostProcessEnded) ProtoMessage() {}
 
 func (x *FeedSubagentLostProcessEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[205]
+	mi := &file_frontend_v1_feed_proto_msgTypes[206]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13152,7 +13210,7 @@ func (x *FeedSubagentLostProcessEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentLostProcessEnded.ProtoReflect.Descriptor instead.
 func (*FeedSubagentLostProcessEnded) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{205}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{206}
 }
 
 type FeedSubagentLostFileVanished struct {
@@ -13163,7 +13221,7 @@ type FeedSubagentLostFileVanished struct {
 
 func (x *FeedSubagentLostFileVanished) Reset() {
 	*x = FeedSubagentLostFileVanished{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[206]
+	mi := &file_frontend_v1_feed_proto_msgTypes[207]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13175,7 +13233,7 @@ func (x *FeedSubagentLostFileVanished) String() string {
 func (*FeedSubagentLostFileVanished) ProtoMessage() {}
 
 func (x *FeedSubagentLostFileVanished) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[206]
+	mi := &file_frontend_v1_feed_proto_msgTypes[207]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13188,7 +13246,7 @@ func (x *FeedSubagentLostFileVanished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentLostFileVanished.ProtoReflect.Descriptor instead.
 func (*FeedSubagentLostFileVanished) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{206}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{207}
 }
 
 type FeedSubagentLostWentSilent struct {
@@ -13199,7 +13257,7 @@ type FeedSubagentLostWentSilent struct {
 
 func (x *FeedSubagentLostWentSilent) Reset() {
 	*x = FeedSubagentLostWentSilent{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[207]
+	mi := &file_frontend_v1_feed_proto_msgTypes[208]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13211,7 +13269,7 @@ func (x *FeedSubagentLostWentSilent) String() string {
 func (*FeedSubagentLostWentSilent) ProtoMessage() {}
 
 func (x *FeedSubagentLostWentSilent) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[207]
+	mi := &file_frontend_v1_feed_proto_msgTypes[208]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13224,7 +13282,7 @@ func (x *FeedSubagentLostWentSilent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentLostWentSilent.ProtoReflect.Descriptor instead.
 func (*FeedSubagentLostWentSilent) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{207}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{208}
 }
 
 type FeedSubagentLostSweptUp struct {
@@ -13235,7 +13293,7 @@ type FeedSubagentLostSweptUp struct {
 
 func (x *FeedSubagentLostSweptUp) Reset() {
 	*x = FeedSubagentLostSweptUp{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[208]
+	mi := &file_frontend_v1_feed_proto_msgTypes[209]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13247,7 +13305,7 @@ func (x *FeedSubagentLostSweptUp) String() string {
 func (*FeedSubagentLostSweptUp) ProtoMessage() {}
 
 func (x *FeedSubagentLostSweptUp) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[208]
+	mi := &file_frontend_v1_feed_proto_msgTypes[209]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13260,7 +13318,7 @@ func (x *FeedSubagentLostSweptUp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSubagentLostSweptUp.ProtoReflect.Descriptor instead.
 func (*FeedSubagentLostSweptUp) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{208}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{209}
 }
 
 // A SHELL BUBBLE, drawn in two places from this one message. As the HEAD
@@ -13297,7 +13355,7 @@ type FeedShell struct {
 
 func (x *FeedShell) Reset() {
 	*x = FeedShell{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[209]
+	mi := &file_frontend_v1_feed_proto_msgTypes[210]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13309,7 +13367,7 @@ func (x *FeedShell) String() string {
 func (*FeedShell) ProtoMessage() {}
 
 func (x *FeedShell) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[209]
+	mi := &file_frontend_v1_feed_proto_msgTypes[210]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13322,7 +13380,7 @@ func (x *FeedShell) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShell.ProtoReflect.Descriptor instead.
 func (*FeedShell) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{209}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{210}
 }
 
 func (x *FeedShell) GetCommand() *FeedShellCommand {
@@ -13405,7 +13463,7 @@ type FeedShellCommand struct {
 
 func (x *FeedShellCommand) Reset() {
 	*x = FeedShellCommand{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[210]
+	mi := &file_frontend_v1_feed_proto_msgTypes[211]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13417,7 +13475,7 @@ func (x *FeedShellCommand) String() string {
 func (*FeedShellCommand) ProtoMessage() {}
 
 func (x *FeedShellCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[210]
+	mi := &file_frontend_v1_feed_proto_msgTypes[211]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13430,7 +13488,7 @@ func (x *FeedShellCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellCommand.ProtoReflect.Descriptor instead.
 func (*FeedShellCommand) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{210}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{211}
 }
 
 func (x *FeedShellCommand) GetText() string {
@@ -13452,7 +13510,7 @@ type FeedShellRuntime struct {
 
 func (x *FeedShellRuntime) Reset() {
 	*x = FeedShellRuntime{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[211]
+	mi := &file_frontend_v1_feed_proto_msgTypes[212]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13464,7 +13522,7 @@ func (x *FeedShellRuntime) String() string {
 func (*FeedShellRuntime) ProtoMessage() {}
 
 func (x *FeedShellRuntime) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[211]
+	mi := &file_frontend_v1_feed_proto_msgTypes[212]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13477,7 +13535,7 @@ func (x *FeedShellRuntime) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellRuntime.ProtoReflect.Descriptor instead.
 func (*FeedShellRuntime) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{211}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{212}
 }
 
 func (x *FeedShellRuntime) GetStartedAtMs() int64 {
@@ -13501,7 +13559,7 @@ type FeedShellSpool struct {
 
 func (x *FeedShellSpool) Reset() {
 	*x = FeedShellSpool{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[212]
+	mi := &file_frontend_v1_feed_proto_msgTypes[213]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13513,7 +13571,7 @@ func (x *FeedShellSpool) String() string {
 func (*FeedShellSpool) ProtoMessage() {}
 
 func (x *FeedShellSpool) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[212]
+	mi := &file_frontend_v1_feed_proto_msgTypes[213]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13526,7 +13584,7 @@ func (x *FeedShellSpool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellSpool.ProtoReflect.Descriptor instead.
 func (*FeedShellSpool) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{212}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{213}
 }
 
 func (x *FeedShellSpool) GetText() string {
@@ -13554,7 +13612,7 @@ type FeedShellOmitted struct {
 
 func (x *FeedShellOmitted) Reset() {
 	*x = FeedShellOmitted{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[213]
+	mi := &file_frontend_v1_feed_proto_msgTypes[214]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13566,7 +13624,7 @@ func (x *FeedShellOmitted) String() string {
 func (*FeedShellOmitted) ProtoMessage() {}
 
 func (x *FeedShellOmitted) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[213]
+	mi := &file_frontend_v1_feed_proto_msgTypes[214]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13579,7 +13637,7 @@ func (x *FeedShellOmitted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellOmitted.ProtoReflect.Descriptor instead.
 func (*FeedShellOmitted) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{213}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{214}
 }
 
 func (x *FeedShellOmitted) GetText() string {
@@ -13601,7 +13659,7 @@ type FeedShellLive struct {
 
 func (x *FeedShellLive) Reset() {
 	*x = FeedShellLive{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[214]
+	mi := &file_frontend_v1_feed_proto_msgTypes[215]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13613,7 +13671,7 @@ func (x *FeedShellLive) String() string {
 func (*FeedShellLive) ProtoMessage() {}
 
 func (x *FeedShellLive) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[214]
+	mi := &file_frontend_v1_feed_proto_msgTypes[215]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13626,7 +13684,7 @@ func (x *FeedShellLive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellLive.ProtoReflect.Descriptor instead.
 func (*FeedShellLive) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{214}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{215}
 }
 
 func (x *FeedShellLive) GetLastProgress() *FeedShellLastProgress {
@@ -13647,7 +13705,7 @@ type FeedShellLastProgress struct {
 
 func (x *FeedShellLastProgress) Reset() {
 	*x = FeedShellLastProgress{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[215]
+	mi := &file_frontend_v1_feed_proto_msgTypes[216]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13659,7 +13717,7 @@ func (x *FeedShellLastProgress) String() string {
 func (*FeedShellLastProgress) ProtoMessage() {}
 
 func (x *FeedShellLastProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[215]
+	mi := &file_frontend_v1_feed_proto_msgTypes[216]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13672,7 +13730,7 @@ func (x *FeedShellLastProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellLastProgress.ProtoReflect.Descriptor instead.
 func (*FeedShellLastProgress) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{215}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{216}
 }
 
 func (x *FeedShellLastProgress) GetAtMs() int64 {
@@ -13704,7 +13762,7 @@ type FeedShellSettled struct {
 
 func (x *FeedShellSettled) Reset() {
 	*x = FeedShellSettled{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[216]
+	mi := &file_frontend_v1_feed_proto_msgTypes[217]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13716,7 +13774,7 @@ func (x *FeedShellSettled) String() string {
 func (*FeedShellSettled) ProtoMessage() {}
 
 func (x *FeedShellSettled) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[216]
+	mi := &file_frontend_v1_feed_proto_msgTypes[217]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13729,7 +13787,7 @@ func (x *FeedShellSettled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellSettled.ProtoReflect.Descriptor instead.
 func (*FeedShellSettled) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{216}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{217}
 }
 
 func (x *FeedShellSettled) GetEndedAtMs() int64 {
@@ -13819,7 +13877,7 @@ type FeedShellExit struct {
 
 func (x *FeedShellExit) Reset() {
 	*x = FeedShellExit{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[217]
+	mi := &file_frontend_v1_feed_proto_msgTypes[218]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13831,7 +13889,7 @@ func (x *FeedShellExit) String() string {
 func (*FeedShellExit) ProtoMessage() {}
 
 func (x *FeedShellExit) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[217]
+	mi := &file_frontend_v1_feed_proto_msgTypes[218]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13844,7 +13902,7 @@ func (x *FeedShellExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellExit.ProtoReflect.Descriptor instead.
 func (*FeedShellExit) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{217}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{218}
 }
 
 func (x *FeedShellExit) GetCode() int32 {
@@ -13873,7 +13931,7 @@ type FeedShellCompleted struct {
 
 func (x *FeedShellCompleted) Reset() {
 	*x = FeedShellCompleted{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[218]
+	mi := &file_frontend_v1_feed_proto_msgTypes[219]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13885,7 +13943,7 @@ func (x *FeedShellCompleted) String() string {
 func (*FeedShellCompleted) ProtoMessage() {}
 
 func (x *FeedShellCompleted) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[218]
+	mi := &file_frontend_v1_feed_proto_msgTypes[219]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13898,7 +13956,7 @@ func (x *FeedShellCompleted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellCompleted.ProtoReflect.Descriptor instead.
 func (*FeedShellCompleted) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{218}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{219}
 }
 
 func (x *FeedShellCompleted) GetJudgment() isFeedShellCompleted_Judgment {
@@ -13953,7 +14011,7 @@ type FeedShellCompletedSucceeded struct {
 
 func (x *FeedShellCompletedSucceeded) Reset() {
 	*x = FeedShellCompletedSucceeded{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[219]
+	mi := &file_frontend_v1_feed_proto_msgTypes[220]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13965,7 +14023,7 @@ func (x *FeedShellCompletedSucceeded) String() string {
 func (*FeedShellCompletedSucceeded) ProtoMessage() {}
 
 func (x *FeedShellCompletedSucceeded) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[219]
+	mi := &file_frontend_v1_feed_proto_msgTypes[220]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13978,7 +14036,7 @@ func (x *FeedShellCompletedSucceeded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellCompletedSucceeded.ProtoReflect.Descriptor instead.
 func (*FeedShellCompletedSucceeded) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{219}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{220}
 }
 
 // The process exited non-zero or was ended by a signal.
@@ -13990,7 +14048,7 @@ type FeedShellCompletedFailed struct {
 
 func (x *FeedShellCompletedFailed) Reset() {
 	*x = FeedShellCompletedFailed{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[220]
+	mi := &file_frontend_v1_feed_proto_msgTypes[221]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14002,7 +14060,7 @@ func (x *FeedShellCompletedFailed) String() string {
 func (*FeedShellCompletedFailed) ProtoMessage() {}
 
 func (x *FeedShellCompletedFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[220]
+	mi := &file_frontend_v1_feed_proto_msgTypes[221]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14015,7 +14073,7 @@ func (x *FeedShellCompletedFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellCompletedFailed.ProtoReflect.Descriptor instead.
 func (*FeedShellCompletedFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{220}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{221}
 }
 
 type FeedShellCancelled struct {
@@ -14026,7 +14084,7 @@ type FeedShellCancelled struct {
 
 func (x *FeedShellCancelled) Reset() {
 	*x = FeedShellCancelled{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[221]
+	mi := &file_frontend_v1_feed_proto_msgTypes[222]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14038,7 +14096,7 @@ func (x *FeedShellCancelled) String() string {
 func (*FeedShellCancelled) ProtoMessage() {}
 
 func (x *FeedShellCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[221]
+	mi := &file_frontend_v1_feed_proto_msgTypes[222]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14051,7 +14109,7 @@ func (x *FeedShellCancelled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellCancelled.ProtoReflect.Descriptor instead.
 func (*FeedShellCancelled) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{221}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{222}
 }
 
 // Why the run was lost — the sidecar's own staleness ruling, relayed by name
@@ -14071,7 +14129,7 @@ type FeedShellLost struct {
 
 func (x *FeedShellLost) Reset() {
 	*x = FeedShellLost{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[222]
+	mi := &file_frontend_v1_feed_proto_msgTypes[223]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14083,7 +14141,7 @@ func (x *FeedShellLost) String() string {
 func (*FeedShellLost) ProtoMessage() {}
 
 func (x *FeedShellLost) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[222]
+	mi := &file_frontend_v1_feed_proto_msgTypes[223]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14096,7 +14154,7 @@ func (x *FeedShellLost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellLost.ProtoReflect.Descriptor instead.
 func (*FeedShellLost) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{222}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{223}
 }
 
 func (x *FeedShellLost) GetHow() isFeedShellLost_How {
@@ -14182,7 +14240,7 @@ type FeedShellLostFileVanished struct {
 
 func (x *FeedShellLostFileVanished) Reset() {
 	*x = FeedShellLostFileVanished{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[223]
+	mi := &file_frontend_v1_feed_proto_msgTypes[224]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14194,7 +14252,7 @@ func (x *FeedShellLostFileVanished) String() string {
 func (*FeedShellLostFileVanished) ProtoMessage() {}
 
 func (x *FeedShellLostFileVanished) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[223]
+	mi := &file_frontend_v1_feed_proto_msgTypes[224]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14207,7 +14265,7 @@ func (x *FeedShellLostFileVanished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellLostFileVanished.ProtoReflect.Descriptor instead.
 func (*FeedShellLostFileVanished) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{223}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{224}
 }
 
 type FeedShellLostWentSilent struct {
@@ -14218,7 +14276,7 @@ type FeedShellLostWentSilent struct {
 
 func (x *FeedShellLostWentSilent) Reset() {
 	*x = FeedShellLostWentSilent{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[224]
+	mi := &file_frontend_v1_feed_proto_msgTypes[225]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14230,7 +14288,7 @@ func (x *FeedShellLostWentSilent) String() string {
 func (*FeedShellLostWentSilent) ProtoMessage() {}
 
 func (x *FeedShellLostWentSilent) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[224]
+	mi := &file_frontend_v1_feed_proto_msgTypes[225]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14243,7 +14301,7 @@ func (x *FeedShellLostWentSilent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellLostWentSilent.ProtoReflect.Descriptor instead.
 func (*FeedShellLostWentSilent) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{224}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{225}
 }
 
 type FeedShellLostSweptUp struct {
@@ -14254,7 +14312,7 @@ type FeedShellLostSweptUp struct {
 
 func (x *FeedShellLostSweptUp) Reset() {
 	*x = FeedShellLostSweptUp{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[225]
+	mi := &file_frontend_v1_feed_proto_msgTypes[226]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14266,7 +14324,7 @@ func (x *FeedShellLostSweptUp) String() string {
 func (*FeedShellLostSweptUp) ProtoMessage() {}
 
 func (x *FeedShellLostSweptUp) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[225]
+	mi := &file_frontend_v1_feed_proto_msgTypes[226]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14279,7 +14337,7 @@ func (x *FeedShellLostSweptUp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellLostSweptUp.ProtoReflect.Descriptor instead.
 func (*FeedShellLostSweptUp) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{225}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{226}
 }
 
 type FeedShellLostProcessEnded struct {
@@ -14290,7 +14348,7 @@ type FeedShellLostProcessEnded struct {
 
 func (x *FeedShellLostProcessEnded) Reset() {
 	*x = FeedShellLostProcessEnded{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[226]
+	mi := &file_frontend_v1_feed_proto_msgTypes[227]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14302,7 +14360,7 @@ func (x *FeedShellLostProcessEnded) String() string {
 func (*FeedShellLostProcessEnded) ProtoMessage() {}
 
 func (x *FeedShellLostProcessEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[226]
+	mi := &file_frontend_v1_feed_proto_msgTypes[227]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14315,7 +14373,7 @@ func (x *FeedShellLostProcessEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedShellLostProcessEnded.ProtoReflect.Descriptor instead.
 func (*FeedShellLostProcessEnded) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{226}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{227}
 }
 
 // The consent card: the turn blocked on the user's permission for one gated
@@ -14359,7 +14417,7 @@ type FeedPermission struct {
 
 func (x *FeedPermission) Reset() {
 	*x = FeedPermission{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[227]
+	mi := &file_frontend_v1_feed_proto_msgTypes[228]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14371,7 +14429,7 @@ func (x *FeedPermission) String() string {
 func (*FeedPermission) ProtoMessage() {}
 
 func (x *FeedPermission) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[227]
+	mi := &file_frontend_v1_feed_proto_msgTypes[228]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14384,7 +14442,7 @@ func (x *FeedPermission) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermission.ProtoReflect.Descriptor instead.
 func (*FeedPermission) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{227}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{228}
 }
 
 func (x *FeedPermission) GetHeadline() *FeedPermissionHeadline {
@@ -14496,7 +14554,7 @@ type FeedPermissionHeadline struct {
 
 func (x *FeedPermissionHeadline) Reset() {
 	*x = FeedPermissionHeadline{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[228]
+	mi := &file_frontend_v1_feed_proto_msgTypes[229]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14508,7 +14566,7 @@ func (x *FeedPermissionHeadline) String() string {
 func (*FeedPermissionHeadline) ProtoMessage() {}
 
 func (x *FeedPermissionHeadline) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[228]
+	mi := &file_frontend_v1_feed_proto_msgTypes[229]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14521,7 +14579,7 @@ func (x *FeedPermissionHeadline) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionHeadline.ProtoReflect.Descriptor instead.
 func (*FeedPermissionHeadline) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{228}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{229}
 }
 
 func (x *FeedPermissionHeadline) GetText() string {
@@ -14542,7 +14600,7 @@ type FeedPermissionSubtitle struct {
 
 func (x *FeedPermissionSubtitle) Reset() {
 	*x = FeedPermissionSubtitle{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[229]
+	mi := &file_frontend_v1_feed_proto_msgTypes[230]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14554,7 +14612,7 @@ func (x *FeedPermissionSubtitle) String() string {
 func (*FeedPermissionSubtitle) ProtoMessage() {}
 
 func (x *FeedPermissionSubtitle) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[229]
+	mi := &file_frontend_v1_feed_proto_msgTypes[230]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14567,7 +14625,7 @@ func (x *FeedPermissionSubtitle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionSubtitle.ProtoReflect.Descriptor instead.
 func (*FeedPermissionSubtitle) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{229}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{230}
 }
 
 func (x *FeedPermissionSubtitle) GetText() string {
@@ -14590,7 +14648,7 @@ type FeedPermissionTriggerNote struct {
 
 func (x *FeedPermissionTriggerNote) Reset() {
 	*x = FeedPermissionTriggerNote{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[230]
+	mi := &file_frontend_v1_feed_proto_msgTypes[231]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14602,7 +14660,7 @@ func (x *FeedPermissionTriggerNote) String() string {
 func (*FeedPermissionTriggerNote) ProtoMessage() {}
 
 func (x *FeedPermissionTriggerNote) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[230]
+	mi := &file_frontend_v1_feed_proto_msgTypes[231]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14615,7 +14673,7 @@ func (x *FeedPermissionTriggerNote) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionTriggerNote.ProtoReflect.Descriptor instead.
 func (*FeedPermissionTriggerNote) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{230}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{231}
 }
 
 func (x *FeedPermissionTriggerNote) GetText() string {
@@ -14636,7 +14694,7 @@ type FeedPermissionArguments struct {
 
 func (x *FeedPermissionArguments) Reset() {
 	*x = FeedPermissionArguments{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[231]
+	mi := &file_frontend_v1_feed_proto_msgTypes[232]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14648,7 +14706,7 @@ func (x *FeedPermissionArguments) String() string {
 func (*FeedPermissionArguments) ProtoMessage() {}
 
 func (x *FeedPermissionArguments) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[231]
+	mi := &file_frontend_v1_feed_proto_msgTypes[232]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14661,7 +14719,7 @@ func (x *FeedPermissionArguments) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionArguments.ProtoReflect.Descriptor instead.
 func (*FeedPermissionArguments) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{231}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{232}
 }
 
 func (x *FeedPermissionArguments) GetLines() []string {
@@ -14680,7 +14738,7 @@ type FeedPermissionStandingOffered struct {
 
 func (x *FeedPermissionStandingOffered) Reset() {
 	*x = FeedPermissionStandingOffered{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[232]
+	mi := &file_frontend_v1_feed_proto_msgTypes[233]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14692,7 +14750,7 @@ func (x *FeedPermissionStandingOffered) String() string {
 func (*FeedPermissionStandingOffered) ProtoMessage() {}
 
 func (x *FeedPermissionStandingOffered) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[232]
+	mi := &file_frontend_v1_feed_proto_msgTypes[233]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14705,7 +14763,7 @@ func (x *FeedPermissionStandingOffered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionStandingOffered.ProtoReflect.Descriptor instead.
 func (*FeedPermissionStandingOffered) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{232}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{233}
 }
 
 // Open: awaiting the user. Empty -- the head's badge says waiting, and the
@@ -14718,7 +14776,7 @@ type FeedPermissionOpen struct {
 
 func (x *FeedPermissionOpen) Reset() {
 	*x = FeedPermissionOpen{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[233]
+	mi := &file_frontend_v1_feed_proto_msgTypes[234]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14730,7 +14788,7 @@ func (x *FeedPermissionOpen) String() string {
 func (*FeedPermissionOpen) ProtoMessage() {}
 
 func (x *FeedPermissionOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[233]
+	mi := &file_frontend_v1_feed_proto_msgTypes[234]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14743,7 +14801,7 @@ func (x *FeedPermissionOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionOpen.ProtoReflect.Descriptor instead.
 func (*FeedPermissionOpen) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{233}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{234}
 }
 
 // Answered: how, and when.
@@ -14765,7 +14823,7 @@ type FeedPermissionAnswered struct {
 
 func (x *FeedPermissionAnswered) Reset() {
 	*x = FeedPermissionAnswered{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[234]
+	mi := &file_frontend_v1_feed_proto_msgTypes[235]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14777,7 +14835,7 @@ func (x *FeedPermissionAnswered) String() string {
 func (*FeedPermissionAnswered) ProtoMessage() {}
 
 func (x *FeedPermissionAnswered) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[234]
+	mi := &file_frontend_v1_feed_proto_msgTypes[235]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14790,7 +14848,7 @@ func (x *FeedPermissionAnswered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionAnswered.ProtoReflect.Descriptor instead.
 func (*FeedPermissionAnswered) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{234}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{235}
 }
 
 func (x *FeedPermissionAnswered) GetAnswer() isFeedPermissionAnswered_Answer {
@@ -14898,7 +14956,7 @@ type FeedPermissionDeniedUndecidable struct {
 
 func (x *FeedPermissionDeniedUndecidable) Reset() {
 	*x = FeedPermissionDeniedUndecidable{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[235]
+	mi := &file_frontend_v1_feed_proto_msgTypes[236]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14910,7 +14968,7 @@ func (x *FeedPermissionDeniedUndecidable) String() string {
 func (*FeedPermissionDeniedUndecidable) ProtoMessage() {}
 
 func (x *FeedPermissionDeniedUndecidable) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[235]
+	mi := &file_frontend_v1_feed_proto_msgTypes[236]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14923,7 +14981,7 @@ func (x *FeedPermissionDeniedUndecidable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionDeniedUndecidable.ProtoReflect.Descriptor instead.
 func (*FeedPermissionDeniedUndecidable) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{235}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{236}
 }
 
 func (x *FeedPermissionDeniedUndecidable) GetText() string {
@@ -14941,7 +14999,7 @@ type FeedPermissionAllowedOnce struct {
 
 func (x *FeedPermissionAllowedOnce) Reset() {
 	*x = FeedPermissionAllowedOnce{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[236]
+	mi := &file_frontend_v1_feed_proto_msgTypes[237]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14953,7 +15011,7 @@ func (x *FeedPermissionAllowedOnce) String() string {
 func (*FeedPermissionAllowedOnce) ProtoMessage() {}
 
 func (x *FeedPermissionAllowedOnce) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[236]
+	mi := &file_frontend_v1_feed_proto_msgTypes[237]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14966,7 +15024,7 @@ func (x *FeedPermissionAllowedOnce) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionAllowedOnce.ProtoReflect.Descriptor instead.
 func (*FeedPermissionAllowedOnce) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{236}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{237}
 }
 
 type FeedPermissionAllowedStanding struct {
@@ -14977,7 +15035,7 @@ type FeedPermissionAllowedStanding struct {
 
 func (x *FeedPermissionAllowedStanding) Reset() {
 	*x = FeedPermissionAllowedStanding{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[237]
+	mi := &file_frontend_v1_feed_proto_msgTypes[238]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14989,7 +15047,7 @@ func (x *FeedPermissionAllowedStanding) String() string {
 func (*FeedPermissionAllowedStanding) ProtoMessage() {}
 
 func (x *FeedPermissionAllowedStanding) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[237]
+	mi := &file_frontend_v1_feed_proto_msgTypes[238]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15002,7 +15060,7 @@ func (x *FeedPermissionAllowedStanding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionAllowedStanding.ProtoReflect.Descriptor instead.
 func (*FeedPermissionAllowedStanding) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{237}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{238}
 }
 
 // The user said no. A DENIAL IS AN ANSWER, not an error (owner ruling,
@@ -15018,7 +15076,7 @@ type FeedPermissionDeniedByUser struct {
 
 func (x *FeedPermissionDeniedByUser) Reset() {
 	*x = FeedPermissionDeniedByUser{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[238]
+	mi := &file_frontend_v1_feed_proto_msgTypes[239]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15030,7 +15088,7 @@ func (x *FeedPermissionDeniedByUser) String() string {
 func (*FeedPermissionDeniedByUser) ProtoMessage() {}
 
 func (x *FeedPermissionDeniedByUser) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[238]
+	mi := &file_frontend_v1_feed_proto_msgTypes[239]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15043,7 +15101,7 @@ func (x *FeedPermissionDeniedByUser) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionDeniedByUser.ProtoReflect.Descriptor instead.
 func (*FeedPermissionDeniedByUser) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{238}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{239}
 }
 
 func (x *FeedPermissionDeniedByUser) GetMarker() *FeedOutcomeMarker {
@@ -15064,7 +15122,7 @@ type FeedPermissionDeniedByPolicy struct {
 
 func (x *FeedPermissionDeniedByPolicy) Reset() {
 	*x = FeedPermissionDeniedByPolicy{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[239]
+	mi := &file_frontend_v1_feed_proto_msgTypes[240]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15076,7 +15134,7 @@ func (x *FeedPermissionDeniedByPolicy) String() string {
 func (*FeedPermissionDeniedByPolicy) ProtoMessage() {}
 
 func (x *FeedPermissionDeniedByPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[239]
+	mi := &file_frontend_v1_feed_proto_msgTypes[240]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15089,7 +15147,7 @@ func (x *FeedPermissionDeniedByPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionDeniedByPolicy.ProtoReflect.Descriptor instead.
 func (*FeedPermissionDeniedByPolicy) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{239}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{240}
 }
 
 func (x *FeedPermissionDeniedByPolicy) GetText() string {
@@ -15108,7 +15166,7 @@ type FeedPermissionAbandoned struct {
 
 func (x *FeedPermissionAbandoned) Reset() {
 	*x = FeedPermissionAbandoned{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[240]
+	mi := &file_frontend_v1_feed_proto_msgTypes[241]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15120,7 +15178,7 @@ func (x *FeedPermissionAbandoned) String() string {
 func (*FeedPermissionAbandoned) ProtoMessage() {}
 
 func (x *FeedPermissionAbandoned) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[240]
+	mi := &file_frontend_v1_feed_proto_msgTypes[241]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15133,7 +15191,7 @@ func (x *FeedPermissionAbandoned) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedPermissionAbandoned.ProtoReflect.Descriptor instead.
 func (*FeedPermissionAbandoned) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{240}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{241}
 }
 
 // The question card: the turn blocked on a choice the agent posed — a batch
@@ -15166,7 +15224,7 @@ type FeedQuestion struct {
 
 func (x *FeedQuestion) Reset() {
 	*x = FeedQuestion{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[241]
+	mi := &file_frontend_v1_feed_proto_msgTypes[242]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15178,7 +15236,7 @@ func (x *FeedQuestion) String() string {
 func (*FeedQuestion) ProtoMessage() {}
 
 func (x *FeedQuestion) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[241]
+	mi := &file_frontend_v1_feed_proto_msgTypes[242]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15191,7 +15249,7 @@ func (x *FeedQuestion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestion.ProtoReflect.Descriptor instead.
 func (*FeedQuestion) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{241}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{242}
 }
 
 func (x *FeedQuestion) GetQuestions() []*FeedQuestionItem {
@@ -15286,7 +15344,7 @@ type FeedQuestionItem struct {
 
 func (x *FeedQuestionItem) Reset() {
 	*x = FeedQuestionItem{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[242]
+	mi := &file_frontend_v1_feed_proto_msgTypes[243]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15298,7 +15356,7 @@ func (x *FeedQuestionItem) String() string {
 func (*FeedQuestionItem) ProtoMessage() {}
 
 func (x *FeedQuestionItem) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[242]
+	mi := &file_frontend_v1_feed_proto_msgTypes[243]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15311,7 +15369,7 @@ func (x *FeedQuestionItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionItem.ProtoReflect.Descriptor instead.
 func (*FeedQuestionItem) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{242}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{243}
 }
 
 func (x *FeedQuestionItem) GetHeader() *FeedQuestionHeader {
@@ -15380,7 +15438,7 @@ type FeedQuestionHeader struct {
 
 func (x *FeedQuestionHeader) Reset() {
 	*x = FeedQuestionHeader{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[243]
+	mi := &file_frontend_v1_feed_proto_msgTypes[244]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15392,7 +15450,7 @@ func (x *FeedQuestionHeader) String() string {
 func (*FeedQuestionHeader) ProtoMessage() {}
 
 func (x *FeedQuestionHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[243]
+	mi := &file_frontend_v1_feed_proto_msgTypes[244]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15405,7 +15463,7 @@ func (x *FeedQuestionHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionHeader.ProtoReflect.Descriptor instead.
 func (*FeedQuestionHeader) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{243}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{244}
 }
 
 func (x *FeedQuestionHeader) GetText() string {
@@ -15426,7 +15484,7 @@ type FeedQuestionText struct {
 
 func (x *FeedQuestionText) Reset() {
 	*x = FeedQuestionText{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[244]
+	mi := &file_frontend_v1_feed_proto_msgTypes[245]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15438,7 +15496,7 @@ func (x *FeedQuestionText) String() string {
 func (*FeedQuestionText) ProtoMessage() {}
 
 func (x *FeedQuestionText) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[244]
+	mi := &file_frontend_v1_feed_proto_msgTypes[245]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15451,7 +15509,7 @@ func (x *FeedQuestionText) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionText.ProtoReflect.Descriptor instead.
 func (*FeedQuestionText) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{244}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{245}
 }
 
 func (x *FeedQuestionText) GetText() string {
@@ -15472,7 +15530,7 @@ type FeedQuestionSingleSelect struct {
 
 func (x *FeedQuestionSingleSelect) Reset() {
 	*x = FeedQuestionSingleSelect{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[245]
+	mi := &file_frontend_v1_feed_proto_msgTypes[246]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15484,7 +15542,7 @@ func (x *FeedQuestionSingleSelect) String() string {
 func (*FeedQuestionSingleSelect) ProtoMessage() {}
 
 func (x *FeedQuestionSingleSelect) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[245]
+	mi := &file_frontend_v1_feed_proto_msgTypes[246]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15497,7 +15555,7 @@ func (x *FeedQuestionSingleSelect) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionSingleSelect.ProtoReflect.Descriptor instead.
 func (*FeedQuestionSingleSelect) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{245}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{246}
 }
 
 func (x *FeedQuestionSingleSelect) GetOptions() []*FeedQuestionOption {
@@ -15518,7 +15576,7 @@ type FeedQuestionMultiSelect struct {
 
 func (x *FeedQuestionMultiSelect) Reset() {
 	*x = FeedQuestionMultiSelect{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[246]
+	mi := &file_frontend_v1_feed_proto_msgTypes[247]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15530,7 +15588,7 @@ func (x *FeedQuestionMultiSelect) String() string {
 func (*FeedQuestionMultiSelect) ProtoMessage() {}
 
 func (x *FeedQuestionMultiSelect) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[246]
+	mi := &file_frontend_v1_feed_proto_msgTypes[247]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15543,7 +15601,7 @@ func (x *FeedQuestionMultiSelect) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionMultiSelect.ProtoReflect.Descriptor instead.
 func (*FeedQuestionMultiSelect) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{246}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{247}
 }
 
 func (x *FeedQuestionMultiSelect) GetOptions() []*FeedQuestionOption {
@@ -15566,7 +15624,7 @@ type FeedQuestionOption struct {
 
 func (x *FeedQuestionOption) Reset() {
 	*x = FeedQuestionOption{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[247]
+	mi := &file_frontend_v1_feed_proto_msgTypes[248]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15578,7 +15636,7 @@ func (x *FeedQuestionOption) String() string {
 func (*FeedQuestionOption) ProtoMessage() {}
 
 func (x *FeedQuestionOption) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[247]
+	mi := &file_frontend_v1_feed_proto_msgTypes[248]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15591,7 +15649,7 @@ func (x *FeedQuestionOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionOption.ProtoReflect.Descriptor instead.
 func (*FeedQuestionOption) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{247}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{248}
 }
 
 func (x *FeedQuestionOption) GetLabel() *FeedQuestionOptionLabel {
@@ -15619,7 +15677,7 @@ type FeedQuestionOptionLabel struct {
 
 func (x *FeedQuestionOptionLabel) Reset() {
 	*x = FeedQuestionOptionLabel{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[248]
+	mi := &file_frontend_v1_feed_proto_msgTypes[249]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15631,7 +15689,7 @@ func (x *FeedQuestionOptionLabel) String() string {
 func (*FeedQuestionOptionLabel) ProtoMessage() {}
 
 func (x *FeedQuestionOptionLabel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[248]
+	mi := &file_frontend_v1_feed_proto_msgTypes[249]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15644,7 +15702,7 @@ func (x *FeedQuestionOptionLabel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionOptionLabel.ProtoReflect.Descriptor instead.
 func (*FeedQuestionOptionLabel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{248}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{249}
 }
 
 func (x *FeedQuestionOptionLabel) GetText() string {
@@ -15665,7 +15723,7 @@ type FeedQuestionOptionDescription struct {
 
 func (x *FeedQuestionOptionDescription) Reset() {
 	*x = FeedQuestionOptionDescription{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[249]
+	mi := &file_frontend_v1_feed_proto_msgTypes[250]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15677,7 +15735,7 @@ func (x *FeedQuestionOptionDescription) String() string {
 func (*FeedQuestionOptionDescription) ProtoMessage() {}
 
 func (x *FeedQuestionOptionDescription) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[249]
+	mi := &file_frontend_v1_feed_proto_msgTypes[250]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15690,7 +15748,7 @@ func (x *FeedQuestionOptionDescription) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionOptionDescription.ProtoReflect.Descriptor instead.
 func (*FeedQuestionOptionDescription) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{249}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{250}
 }
 
 func (x *FeedQuestionOptionDescription) GetText() string {
@@ -15719,7 +15777,7 @@ type FeedQuestionOpen struct {
 
 func (x *FeedQuestionOpen) Reset() {
 	*x = FeedQuestionOpen{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[250]
+	mi := &file_frontend_v1_feed_proto_msgTypes[251]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15731,7 +15789,7 @@ func (x *FeedQuestionOpen) String() string {
 func (*FeedQuestionOpen) ProtoMessage() {}
 
 func (x *FeedQuestionOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[250]
+	mi := &file_frontend_v1_feed_proto_msgTypes[251]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15744,7 +15802,7 @@ func (x *FeedQuestionOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionOpen.ProtoReflect.Descriptor instead.
 func (*FeedQuestionOpen) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{250}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{251}
 }
 
 func (x *FeedQuestionOpen) GetActive() uint32 {
@@ -15778,7 +15836,7 @@ type FeedQuestionDraft struct {
 
 func (x *FeedQuestionDraft) Reset() {
 	*x = FeedQuestionDraft{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[251]
+	mi := &file_frontend_v1_feed_proto_msgTypes[252]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15790,7 +15848,7 @@ func (x *FeedQuestionDraft) String() string {
 func (*FeedQuestionDraft) ProtoMessage() {}
 
 func (x *FeedQuestionDraft) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[251]
+	mi := &file_frontend_v1_feed_proto_msgTypes[252]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15803,7 +15861,7 @@ func (x *FeedQuestionDraft) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionDraft.ProtoReflect.Descriptor instead.
 func (*FeedQuestionDraft) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{251}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{252}
 }
 
 func (x *FeedQuestionDraft) GetChosen() []string {
@@ -15840,7 +15898,7 @@ type FeedQuestionAnswered struct {
 
 func (x *FeedQuestionAnswered) Reset() {
 	*x = FeedQuestionAnswered{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[252]
+	mi := &file_frontend_v1_feed_proto_msgTypes[253]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15852,7 +15910,7 @@ func (x *FeedQuestionAnswered) String() string {
 func (*FeedQuestionAnswered) ProtoMessage() {}
 
 func (x *FeedQuestionAnswered) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[252]
+	mi := &file_frontend_v1_feed_proto_msgTypes[253]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15865,7 +15923,7 @@ func (x *FeedQuestionAnswered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionAnswered.ProtoReflect.Descriptor instead.
 func (*FeedQuestionAnswered) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{252}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{253}
 }
 
 func (x *FeedQuestionAnswered) GetAnswers() []*FeedQuestionGivenAnswer {
@@ -15891,7 +15949,7 @@ type FeedQuestionGivenAnswer struct {
 
 func (x *FeedQuestionGivenAnswer) Reset() {
 	*x = FeedQuestionGivenAnswer{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[253]
+	mi := &file_frontend_v1_feed_proto_msgTypes[254]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15903,7 +15961,7 @@ func (x *FeedQuestionGivenAnswer) String() string {
 func (*FeedQuestionGivenAnswer) ProtoMessage() {}
 
 func (x *FeedQuestionGivenAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[253]
+	mi := &file_frontend_v1_feed_proto_msgTypes[254]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15916,7 +15974,7 @@ func (x *FeedQuestionGivenAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionGivenAnswer.ProtoReflect.Descriptor instead.
 func (*FeedQuestionGivenAnswer) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{253}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{254}
 }
 
 func (x *FeedQuestionGivenAnswer) GetHeader() *FeedQuestionHeader {
@@ -15951,7 +16009,7 @@ type FeedQuestionOtherText struct {
 
 func (x *FeedQuestionOtherText) Reset() {
 	*x = FeedQuestionOtherText{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[254]
+	mi := &file_frontend_v1_feed_proto_msgTypes[255]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15963,7 +16021,7 @@ func (x *FeedQuestionOtherText) String() string {
 func (*FeedQuestionOtherText) ProtoMessage() {}
 
 func (x *FeedQuestionOtherText) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[254]
+	mi := &file_frontend_v1_feed_proto_msgTypes[255]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15976,7 +16034,7 @@ func (x *FeedQuestionOtherText) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionOtherText.ProtoReflect.Descriptor instead.
 func (*FeedQuestionOtherText) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{254}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{255}
 }
 
 func (x *FeedQuestionOtherText) GetText() string {
@@ -15996,7 +16054,7 @@ type FeedQuestionExpired struct {
 
 func (x *FeedQuestionExpired) Reset() {
 	*x = FeedQuestionExpired{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[255]
+	mi := &file_frontend_v1_feed_proto_msgTypes[256]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16008,7 +16066,7 @@ func (x *FeedQuestionExpired) String() string {
 func (*FeedQuestionExpired) ProtoMessage() {}
 
 func (x *FeedQuestionExpired) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[255]
+	mi := &file_frontend_v1_feed_proto_msgTypes[256]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16021,7 +16079,7 @@ func (x *FeedQuestionExpired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuestionExpired.ProtoReflect.Descriptor instead.
 func (*FeedQuestionExpired) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{255}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{256}
 }
 
 // ① What a person typed — or, nested inside a detached bubble, the prompt
@@ -16092,7 +16150,7 @@ type FeedUserPrompt struct {
 
 func (x *FeedUserPrompt) Reset() {
 	*x = FeedUserPrompt{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[256]
+	mi := &file_frontend_v1_feed_proto_msgTypes[257]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16104,7 +16162,7 @@ func (x *FeedUserPrompt) String() string {
 func (*FeedUserPrompt) ProtoMessage() {}
 
 func (x *FeedUserPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[256]
+	mi := &file_frontend_v1_feed_proto_msgTypes[257]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16117,7 +16175,7 @@ func (x *FeedUserPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedUserPrompt.ProtoReflect.Descriptor instead.
 func (*FeedUserPrompt) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{256}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{257}
 }
 
 func (x *FeedUserPrompt) GetAuthor() *FeedUserPromptAuthor {
@@ -16185,7 +16243,7 @@ type FeedUserPromptCommand struct {
 
 func (x *FeedUserPromptCommand) Reset() {
 	*x = FeedUserPromptCommand{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[257]
+	mi := &file_frontend_v1_feed_proto_msgTypes[258]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16197,7 +16255,7 @@ func (x *FeedUserPromptCommand) String() string {
 func (*FeedUserPromptCommand) ProtoMessage() {}
 
 func (x *FeedUserPromptCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[257]
+	mi := &file_frontend_v1_feed_proto_msgTypes[258]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16210,7 +16268,7 @@ func (x *FeedUserPromptCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedUserPromptCommand.ProtoReflect.Descriptor instead.
 func (*FeedUserPromptCommand) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{257}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{258}
 }
 
 func (x *FeedUserPromptCommand) GetName() string {
@@ -16231,7 +16289,7 @@ type FeedUserPromptSuccess struct {
 
 func (x *FeedUserPromptSuccess) Reset() {
 	*x = FeedUserPromptSuccess{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[258]
+	mi := &file_frontend_v1_feed_proto_msgTypes[259]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16243,7 +16301,7 @@ func (x *FeedUserPromptSuccess) String() string {
 func (*FeedUserPromptSuccess) ProtoMessage() {}
 
 func (x *FeedUserPromptSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[258]
+	mi := &file_frontend_v1_feed_proto_msgTypes[259]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16256,7 +16314,7 @@ func (x *FeedUserPromptSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedUserPromptSuccess.ProtoReflect.Descriptor instead.
 func (*FeedUserPromptSuccess) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{258}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{259}
 }
 
 func (x *FeedUserPromptSuccess) GetBody() *FeedUserPromptBody {
@@ -16276,7 +16334,7 @@ type FeedUserPromptAuthor struct {
 
 func (x *FeedUserPromptAuthor) Reset() {
 	*x = FeedUserPromptAuthor{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[259]
+	mi := &file_frontend_v1_feed_proto_msgTypes[260]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16288,7 +16346,7 @@ func (x *FeedUserPromptAuthor) String() string {
 func (*FeedUserPromptAuthor) ProtoMessage() {}
 
 func (x *FeedUserPromptAuthor) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[259]
+	mi := &file_frontend_v1_feed_proto_msgTypes[260]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16301,7 +16359,7 @@ func (x *FeedUserPromptAuthor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedUserPromptAuthor.ProtoReflect.Descriptor instead.
 func (*FeedUserPromptAuthor) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{259}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{260}
 }
 
 func (x *FeedUserPromptAuthor) GetLabel() string {
@@ -16321,7 +16379,7 @@ type FeedUserPromptBody struct {
 
 func (x *FeedUserPromptBody) Reset() {
 	*x = FeedUserPromptBody{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[260]
+	mi := &file_frontend_v1_feed_proto_msgTypes[261]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16333,7 +16391,7 @@ func (x *FeedUserPromptBody) String() string {
 func (*FeedUserPromptBody) ProtoMessage() {}
 
 func (x *FeedUserPromptBody) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[260]
+	mi := &file_frontend_v1_feed_proto_msgTypes[261]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16346,7 +16404,7 @@ func (x *FeedUserPromptBody) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedUserPromptBody.ProtoReflect.Descriptor instead.
 func (*FeedUserPromptBody) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{260}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{261}
 }
 
 func (x *FeedUserPromptBody) GetBlocks() []*FeedUserPromptBlock {
@@ -16372,7 +16430,7 @@ type FeedUserPromptBlock struct {
 
 func (x *FeedUserPromptBlock) Reset() {
 	*x = FeedUserPromptBlock{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[261]
+	mi := &file_frontend_v1_feed_proto_msgTypes[262]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16384,7 +16442,7 @@ func (x *FeedUserPromptBlock) String() string {
 func (*FeedUserPromptBlock) ProtoMessage() {}
 
 func (x *FeedUserPromptBlock) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[261]
+	mi := &file_frontend_v1_feed_proto_msgTypes[262]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16397,7 +16455,7 @@ func (x *FeedUserPromptBlock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedUserPromptBlock.ProtoReflect.Descriptor instead.
 func (*FeedUserPromptBlock) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{261}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{262}
 }
 
 func (x *FeedUserPromptBlock) GetBlock() isFeedUserPromptBlock_Block {
@@ -16483,7 +16541,7 @@ type FeedTextBlock struct {
 
 func (x *FeedTextBlock) Reset() {
 	*x = FeedTextBlock{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[262]
+	mi := &file_frontend_v1_feed_proto_msgTypes[263]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16495,7 +16553,7 @@ func (x *FeedTextBlock) String() string {
 func (*FeedTextBlock) ProtoMessage() {}
 
 func (x *FeedTextBlock) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[262]
+	mi := &file_frontend_v1_feed_proto_msgTypes[263]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16508,7 +16566,7 @@ func (x *FeedTextBlock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedTextBlock.ProtoReflect.Descriptor instead.
 func (*FeedTextBlock) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{262}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{263}
 }
 
 func (x *FeedTextBlock) GetText() string {
@@ -16532,7 +16590,7 @@ type FeedImageBlock struct {
 
 func (x *FeedImageBlock) Reset() {
 	*x = FeedImageBlock{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[263]
+	mi := &file_frontend_v1_feed_proto_msgTypes[264]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16544,7 +16602,7 @@ func (x *FeedImageBlock) String() string {
 func (*FeedImageBlock) ProtoMessage() {}
 
 func (x *FeedImageBlock) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[263]
+	mi := &file_frontend_v1_feed_proto_msgTypes[264]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16557,7 +16615,7 @@ func (x *FeedImageBlock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedImageBlock.ProtoReflect.Descriptor instead.
 func (*FeedImageBlock) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{263}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{264}
 }
 
 func (x *FeedImageBlock) GetSrc() string {
@@ -16585,7 +16643,7 @@ type FeedUnsupportedBlock struct {
 
 func (x *FeedUnsupportedBlock) Reset() {
 	*x = FeedUnsupportedBlock{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[264]
+	mi := &file_frontend_v1_feed_proto_msgTypes[265]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16597,7 +16655,7 @@ func (x *FeedUnsupportedBlock) String() string {
 func (*FeedUnsupportedBlock) ProtoMessage() {}
 
 func (x *FeedUnsupportedBlock) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[264]
+	mi := &file_frontend_v1_feed_proto_msgTypes[265]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16610,7 +16668,7 @@ func (x *FeedUnsupportedBlock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedUnsupportedBlock.ProtoReflect.Descriptor instead.
 func (*FeedUnsupportedBlock) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{264}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{265}
 }
 
 func (x *FeedUnsupportedBlock) GetKind() string {
@@ -16644,7 +16702,7 @@ type FeedQuoteBlock struct {
 
 func (x *FeedQuoteBlock) Reset() {
 	*x = FeedQuoteBlock{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[265]
+	mi := &file_frontend_v1_feed_proto_msgTypes[266]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16656,7 +16714,7 @@ func (x *FeedQuoteBlock) String() string {
 func (*FeedQuoteBlock) ProtoMessage() {}
 
 func (x *FeedQuoteBlock) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[265]
+	mi := &file_frontend_v1_feed_proto_msgTypes[266]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16669,7 +16727,7 @@ func (x *FeedQuoteBlock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedQuoteBlock.ProtoReflect.Descriptor instead.
 func (*FeedQuoteBlock) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{265}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{266}
 }
 
 func (x *FeedQuoteBlock) GetHeading() string {
@@ -16735,7 +16793,7 @@ type FeedAgentPrompt struct {
 
 func (x *FeedAgentPrompt) Reset() {
 	*x = FeedAgentPrompt{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[266]
+	mi := &file_frontend_v1_feed_proto_msgTypes[267]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16747,7 +16805,7 @@ func (x *FeedAgentPrompt) String() string {
 func (*FeedAgentPrompt) ProtoMessage() {}
 
 func (x *FeedAgentPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[266]
+	mi := &file_frontend_v1_feed_proto_msgTypes[267]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16760,7 +16818,7 @@ func (x *FeedAgentPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPrompt.ProtoReflect.Descriptor instead.
 func (*FeedAgentPrompt) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{266}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{267}
 }
 
 func (x *FeedAgentPrompt) GetAddress() *FeedAgentPromptAddress {
@@ -16866,7 +16924,7 @@ type FeedAgentPromptQueuedToLive struct {
 
 func (x *FeedAgentPromptQueuedToLive) Reset() {
 	*x = FeedAgentPromptQueuedToLive{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[267]
+	mi := &file_frontend_v1_feed_proto_msgTypes[268]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16878,7 +16936,7 @@ func (x *FeedAgentPromptQueuedToLive) String() string {
 func (*FeedAgentPromptQueuedToLive) ProtoMessage() {}
 
 func (x *FeedAgentPromptQueuedToLive) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[267]
+	mi := &file_frontend_v1_feed_proto_msgTypes[268]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16891,7 +16949,7 @@ func (x *FeedAgentPromptQueuedToLive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptQueuedToLive.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptQueuedToLive) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{267}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{268}
 }
 
 type FeedAgentPromptResumedRecipient struct {
@@ -16902,7 +16960,7 @@ type FeedAgentPromptResumedRecipient struct {
 
 func (x *FeedAgentPromptResumedRecipient) Reset() {
 	*x = FeedAgentPromptResumedRecipient{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[268]
+	mi := &file_frontend_v1_feed_proto_msgTypes[269]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16914,7 +16972,7 @@ func (x *FeedAgentPromptResumedRecipient) String() string {
 func (*FeedAgentPromptResumedRecipient) ProtoMessage() {}
 
 func (x *FeedAgentPromptResumedRecipient) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[268]
+	mi := &file_frontend_v1_feed_proto_msgTypes[269]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16927,7 +16985,7 @@ func (x *FeedAgentPromptResumedRecipient) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptResumedRecipient.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptResumedRecipient) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{268}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{269}
 }
 
 // The send was refused. Nothing is implied about a retry: the row records the
@@ -16953,7 +17011,7 @@ type FeedAgentPromptRefused struct {
 
 func (x *FeedAgentPromptRefused) Reset() {
 	*x = FeedAgentPromptRefused{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[269]
+	mi := &file_frontend_v1_feed_proto_msgTypes[270]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16965,7 +17023,7 @@ func (x *FeedAgentPromptRefused) String() string {
 func (*FeedAgentPromptRefused) ProtoMessage() {}
 
 func (x *FeedAgentPromptRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[269]
+	mi := &file_frontend_v1_feed_proto_msgTypes[270]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16978,7 +17036,7 @@ func (x *FeedAgentPromptRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptRefused.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptRefused) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{269}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{270}
 }
 
 func (x *FeedAgentPromptRefused) GetReason() *FeedAgentPromptRefusalReason {
@@ -16999,7 +17057,7 @@ type FeedAgentPromptRefusalReason struct {
 
 func (x *FeedAgentPromptRefusalReason) Reset() {
 	*x = FeedAgentPromptRefusalReason{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[270]
+	mi := &file_frontend_v1_feed_proto_msgTypes[271]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17011,7 +17069,7 @@ func (x *FeedAgentPromptRefusalReason) String() string {
 func (*FeedAgentPromptRefusalReason) ProtoMessage() {}
 
 func (x *FeedAgentPromptRefusalReason) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[270]
+	mi := &file_frontend_v1_feed_proto_msgTypes[271]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17024,7 +17082,7 @@ func (x *FeedAgentPromptRefusalReason) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptRefusalReason.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptRefusalReason) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{270}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{271}
 }
 
 func (x *FeedAgentPromptRefusalReason) GetText() string {
@@ -17060,7 +17118,7 @@ type FeedAgentPromptAddress struct {
 
 func (x *FeedAgentPromptAddress) Reset() {
 	*x = FeedAgentPromptAddress{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[271]
+	mi := &file_frontend_v1_feed_proto_msgTypes[272]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17072,7 +17130,7 @@ func (x *FeedAgentPromptAddress) String() string {
 func (*FeedAgentPromptAddress) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddress) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[271]
+	mi := &file_frontend_v1_feed_proto_msgTypes[272]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17085,7 +17143,7 @@ func (x *FeedAgentPromptAddress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptAddress.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddress) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{271}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{272}
 }
 
 func (x *FeedAgentPromptAddress) GetName() *FeedAgentPromptAddressName {
@@ -17153,7 +17211,7 @@ type FeedAgentPromptAddressName struct {
 
 func (x *FeedAgentPromptAddressName) Reset() {
 	*x = FeedAgentPromptAddressName{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[272]
+	mi := &file_frontend_v1_feed_proto_msgTypes[273]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17165,7 +17223,7 @@ func (x *FeedAgentPromptAddressName) String() string {
 func (*FeedAgentPromptAddressName) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressName) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[272]
+	mi := &file_frontend_v1_feed_proto_msgTypes[273]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17178,7 +17236,7 @@ func (x *FeedAgentPromptAddressName) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptAddressName.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressName) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{272}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{273}
 }
 
 func (x *FeedAgentPromptAddressName) GetText() string {
@@ -17205,7 +17263,7 @@ type FeedAgentPromptAddressSent struct {
 
 func (x *FeedAgentPromptAddressSent) Reset() {
 	*x = FeedAgentPromptAddressSent{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[273]
+	mi := &file_frontend_v1_feed_proto_msgTypes[274]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17217,7 +17275,7 @@ func (x *FeedAgentPromptAddressSent) String() string {
 func (*FeedAgentPromptAddressSent) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressSent) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[273]
+	mi := &file_frontend_v1_feed_proto_msgTypes[274]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17230,7 +17288,7 @@ func (x *FeedAgentPromptAddressSent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptAddressSent.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressSent) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{273}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{274}
 }
 
 func (x *FeedAgentPromptAddressSent) GetRecipient() isFeedAgentPromptAddressSent_Recipient {
@@ -17311,7 +17369,7 @@ type FeedAgentPromptAddressReceived struct {
 
 func (x *FeedAgentPromptAddressReceived) Reset() {
 	*x = FeedAgentPromptAddressReceived{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[274]
+	mi := &file_frontend_v1_feed_proto_msgTypes[275]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17323,7 +17381,7 @@ func (x *FeedAgentPromptAddressReceived) String() string {
 func (*FeedAgentPromptAddressReceived) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressReceived) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[274]
+	mi := &file_frontend_v1_feed_proto_msgTypes[275]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17336,7 +17394,7 @@ func (x *FeedAgentPromptAddressReceived) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptAddressReceived.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressReceived) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{274}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{275}
 }
 
 func (x *FeedAgentPromptAddressReceived) GetSender() isFeedAgentPromptAddressReceived_Sender {
@@ -17399,7 +17457,7 @@ type FeedAgentPromptAddressWorkspace struct {
 
 func (x *FeedAgentPromptAddressWorkspace) Reset() {
 	*x = FeedAgentPromptAddressWorkspace{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[275]
+	mi := &file_frontend_v1_feed_proto_msgTypes[276]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17411,7 +17469,7 @@ func (x *FeedAgentPromptAddressWorkspace) String() string {
 func (*FeedAgentPromptAddressWorkspace) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[275]
+	mi := &file_frontend_v1_feed_proto_msgTypes[276]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17424,7 +17482,7 @@ func (x *FeedAgentPromptAddressWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptAddressWorkspace.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressWorkspace) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{275}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{276}
 }
 
 func (x *FeedAgentPromptAddressWorkspace) GetIdentity() isFeedAgentPromptAddressWorkspace_Identity {
@@ -17482,7 +17540,7 @@ type FeedAgentPromptAddressWorkspaceNamed struct {
 
 func (x *FeedAgentPromptAddressWorkspaceNamed) Reset() {
 	*x = FeedAgentPromptAddressWorkspaceNamed{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[276]
+	mi := &file_frontend_v1_feed_proto_msgTypes[277]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17494,7 +17552,7 @@ func (x *FeedAgentPromptAddressWorkspaceNamed) String() string {
 func (*FeedAgentPromptAddressWorkspaceNamed) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressWorkspaceNamed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[276]
+	mi := &file_frontend_v1_feed_proto_msgTypes[277]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17507,7 +17565,7 @@ func (x *FeedAgentPromptAddressWorkspaceNamed) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use FeedAgentPromptAddressWorkspaceNamed.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressWorkspaceNamed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{276}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{277}
 }
 
 // A workspace the daemon cannot name.
@@ -17519,7 +17577,7 @@ type FeedAgentPromptAddressWorkspaceUnnamed struct {
 
 func (x *FeedAgentPromptAddressWorkspaceUnnamed) Reset() {
 	*x = FeedAgentPromptAddressWorkspaceUnnamed{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[277]
+	mi := &file_frontend_v1_feed_proto_msgTypes[278]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17531,7 +17589,7 @@ func (x *FeedAgentPromptAddressWorkspaceUnnamed) String() string {
 func (*FeedAgentPromptAddressWorkspaceUnnamed) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressWorkspaceUnnamed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[277]
+	mi := &file_frontend_v1_feed_proto_msgTypes[278]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17544,7 +17602,7 @@ func (x *FeedAgentPromptAddressWorkspaceUnnamed) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use FeedAgentPromptAddressWorkspaceUnnamed.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressWorkspaceUnnamed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{277}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{278}
 }
 
 // An agent of this session at the other end: WHAT `name` IS.
@@ -17565,7 +17623,7 @@ type FeedAgentPromptAddressAgent struct {
 
 func (x *FeedAgentPromptAddressAgent) Reset() {
 	*x = FeedAgentPromptAddressAgent{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[278]
+	mi := &file_frontend_v1_feed_proto_msgTypes[279]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17577,7 +17635,7 @@ func (x *FeedAgentPromptAddressAgent) String() string {
 func (*FeedAgentPromptAddressAgent) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[278]
+	mi := &file_frontend_v1_feed_proto_msgTypes[279]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17590,7 +17648,7 @@ func (x *FeedAgentPromptAddressAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptAddressAgent.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressAgent) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{278}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{279}
 }
 
 func (x *FeedAgentPromptAddressAgent) GetIdentity() isFeedAgentPromptAddressAgent_Identity {
@@ -17662,7 +17720,7 @@ type FeedAgentPromptAddressAgentMain struct {
 
 func (x *FeedAgentPromptAddressAgentMain) Reset() {
 	*x = FeedAgentPromptAddressAgentMain{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[279]
+	mi := &file_frontend_v1_feed_proto_msgTypes[280]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17674,7 +17732,7 @@ func (x *FeedAgentPromptAddressAgentMain) String() string {
 func (*FeedAgentPromptAddressAgentMain) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressAgentMain) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[279]
+	mi := &file_frontend_v1_feed_proto_msgTypes[280]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17687,7 +17745,7 @@ func (x *FeedAgentPromptAddressAgentMain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptAddressAgentMain.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressAgentMain) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{279}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{280}
 }
 
 // A subagent named by its requested name.
@@ -17699,7 +17757,7 @@ type FeedAgentPromptAddressAgentNamed struct {
 
 func (x *FeedAgentPromptAddressAgentNamed) Reset() {
 	*x = FeedAgentPromptAddressAgentNamed{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[280]
+	mi := &file_frontend_v1_feed_proto_msgTypes[281]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17711,7 +17769,7 @@ func (x *FeedAgentPromptAddressAgentNamed) String() string {
 func (*FeedAgentPromptAddressAgentNamed) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressAgentNamed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[280]
+	mi := &file_frontend_v1_feed_proto_msgTypes[281]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17724,7 +17782,7 @@ func (x *FeedAgentPromptAddressAgentNamed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptAddressAgentNamed.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressAgentNamed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{280}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{281}
 }
 
 // A subagent with no name, named by its identifier.
@@ -17736,7 +17794,7 @@ type FeedAgentPromptAddressAgentIdentified struct {
 
 func (x *FeedAgentPromptAddressAgentIdentified) Reset() {
 	*x = FeedAgentPromptAddressAgentIdentified{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[281]
+	mi := &file_frontend_v1_feed_proto_msgTypes[282]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17748,7 +17806,7 @@ func (x *FeedAgentPromptAddressAgentIdentified) String() string {
 func (*FeedAgentPromptAddressAgentIdentified) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressAgentIdentified) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[281]
+	mi := &file_frontend_v1_feed_proto_msgTypes[282]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17761,7 +17819,7 @@ func (x *FeedAgentPromptAddressAgentIdentified) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use FeedAgentPromptAddressAgentIdentified.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressAgentIdentified) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{281}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{282}
 }
 
 // The send reached another Claude session.
@@ -17780,7 +17838,7 @@ type FeedAgentPromptAddressPeerSession struct {
 
 func (x *FeedAgentPromptAddressPeerSession) Reset() {
 	*x = FeedAgentPromptAddressPeerSession{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[282]
+	mi := &file_frontend_v1_feed_proto_msgTypes[283]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17792,7 +17850,7 @@ func (x *FeedAgentPromptAddressPeerSession) String() string {
 func (*FeedAgentPromptAddressPeerSession) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressPeerSession) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[282]
+	mi := &file_frontend_v1_feed_proto_msgTypes[283]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17805,7 +17863,7 @@ func (x *FeedAgentPromptAddressPeerSession) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use FeedAgentPromptAddressPeerSession.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressPeerSession) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{282}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{283}
 }
 
 func (x *FeedAgentPromptAddressPeerSession) GetRecipient() isFeedAgentPromptAddressPeerSession_Recipient {
@@ -17865,7 +17923,7 @@ type FeedAgentPromptAddressPeerSessionWorkspace struct {
 
 func (x *FeedAgentPromptAddressPeerSessionWorkspace) Reset() {
 	*x = FeedAgentPromptAddressPeerSessionWorkspace{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[283]
+	mi := &file_frontend_v1_feed_proto_msgTypes[284]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17877,7 +17935,7 @@ func (x *FeedAgentPromptAddressPeerSessionWorkspace) String() string {
 func (*FeedAgentPromptAddressPeerSessionWorkspace) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressPeerSessionWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[283]
+	mi := &file_frontend_v1_feed_proto_msgTypes[284]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17890,7 +17948,7 @@ func (x *FeedAgentPromptAddressPeerSessionWorkspace) ProtoReflect() protoreflect
 
 // Deprecated: Use FeedAgentPromptAddressPeerSessionWorkspace.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressPeerSessionWorkspace) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{283}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{284}
 }
 
 // No agent-repl workspace is known to hold the message.
@@ -17902,7 +17960,7 @@ type FeedAgentPromptAddressPeerSessionUnresolved struct {
 
 func (x *FeedAgentPromptAddressPeerSessionUnresolved) Reset() {
 	*x = FeedAgentPromptAddressPeerSessionUnresolved{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[284]
+	mi := &file_frontend_v1_feed_proto_msgTypes[285]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17914,7 +17972,7 @@ func (x *FeedAgentPromptAddressPeerSessionUnresolved) String() string {
 func (*FeedAgentPromptAddressPeerSessionUnresolved) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressPeerSessionUnresolved) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[284]
+	mi := &file_frontend_v1_feed_proto_msgTypes[285]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17927,7 +17985,7 @@ func (x *FeedAgentPromptAddressPeerSessionUnresolved) ProtoReflect() protoreflec
 
 // Deprecated: Use FeedAgentPromptAddressPeerSessionUnresolved.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressPeerSessionUnresolved) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{284}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{285}
 }
 
 // A send that has not said which kind of agent it reached.
@@ -17939,7 +17997,7 @@ type FeedAgentPromptAddressUnclassified struct {
 
 func (x *FeedAgentPromptAddressUnclassified) Reset() {
 	*x = FeedAgentPromptAddressUnclassified{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[285]
+	mi := &file_frontend_v1_feed_proto_msgTypes[286]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17951,7 +18009,7 @@ func (x *FeedAgentPromptAddressUnclassified) String() string {
 func (*FeedAgentPromptAddressUnclassified) ProtoMessage() {}
 
 func (x *FeedAgentPromptAddressUnclassified) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[285]
+	mi := &file_frontend_v1_feed_proto_msgTypes[286]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -17964,7 +18022,7 @@ func (x *FeedAgentPromptAddressUnclassified) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use FeedAgentPromptAddressUnclassified.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptAddressUnclassified) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{285}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{286}
 }
 
 // The body element.
@@ -17978,7 +18036,7 @@ type FeedAgentPromptBody struct {
 
 func (x *FeedAgentPromptBody) Reset() {
 	*x = FeedAgentPromptBody{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[286]
+	mi := &file_frontend_v1_feed_proto_msgTypes[287]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -17990,7 +18048,7 @@ func (x *FeedAgentPromptBody) String() string {
 func (*FeedAgentPromptBody) ProtoMessage() {}
 
 func (x *FeedAgentPromptBody) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[286]
+	mi := &file_frontend_v1_feed_proto_msgTypes[287]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18003,7 +18061,7 @@ func (x *FeedAgentPromptBody) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptBody.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptBody) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{286}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{287}
 }
 
 func (x *FeedAgentPromptBody) GetBlocks() []*FeedAgentPromptBlock {
@@ -18029,7 +18087,7 @@ type FeedAgentPromptBlock struct {
 
 func (x *FeedAgentPromptBlock) Reset() {
 	*x = FeedAgentPromptBlock{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[287]
+	mi := &file_frontend_v1_feed_proto_msgTypes[288]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18041,7 +18099,7 @@ func (x *FeedAgentPromptBlock) String() string {
 func (*FeedAgentPromptBlock) ProtoMessage() {}
 
 func (x *FeedAgentPromptBlock) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[287]
+	mi := &file_frontend_v1_feed_proto_msgTypes[288]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18054,7 +18112,7 @@ func (x *FeedAgentPromptBlock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedAgentPromptBlock.ProtoReflect.Descriptor instead.
 func (*FeedAgentPromptBlock) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{287}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{288}
 }
 
 func (x *FeedAgentPromptBlock) GetBlock() isFeedAgentPromptBlock_Block {
@@ -18144,7 +18202,7 @@ type FeedColdGate struct {
 
 func (x *FeedColdGate) Reset() {
 	*x = FeedColdGate{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[288]
+	mi := &file_frontend_v1_feed_proto_msgTypes[289]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18156,7 +18214,7 @@ func (x *FeedColdGate) String() string {
 func (*FeedColdGate) ProtoMessage() {}
 
 func (x *FeedColdGate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[288]
+	mi := &file_frontend_v1_feed_proto_msgTypes[289]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18169,7 +18227,7 @@ func (x *FeedColdGate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedColdGate.ProtoReflect.Descriptor instead.
 func (*FeedColdGate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{288}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{289}
 }
 
 func (x *FeedColdGate) GetState() isFeedColdGate_State {
@@ -18250,7 +18308,7 @@ type FeedColdGateStanding struct {
 
 func (x *FeedColdGateStanding) Reset() {
 	*x = FeedColdGateStanding{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[289]
+	mi := &file_frontend_v1_feed_proto_msgTypes[290]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18262,7 +18320,7 @@ func (x *FeedColdGateStanding) String() string {
 func (*FeedColdGateStanding) ProtoMessage() {}
 
 func (x *FeedColdGateStanding) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[289]
+	mi := &file_frontend_v1_feed_proto_msgTypes[290]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18275,7 +18333,7 @@ func (x *FeedColdGateStanding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedColdGateStanding.ProtoReflect.Descriptor instead.
 func (*FeedColdGateStanding) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{289}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{290}
 }
 
 func (x *FeedColdGateStanding) GetContextTokens() *FeedColdGateContextTokens {
@@ -18327,7 +18385,7 @@ type FeedColdGateCompactAndResume struct {
 
 func (x *FeedColdGateCompactAndResume) Reset() {
 	*x = FeedColdGateCompactAndResume{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[290]
+	mi := &file_frontend_v1_feed_proto_msgTypes[291]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18339,7 +18397,7 @@ func (x *FeedColdGateCompactAndResume) String() string {
 func (*FeedColdGateCompactAndResume) ProtoMessage() {}
 
 func (x *FeedColdGateCompactAndResume) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[290]
+	mi := &file_frontend_v1_feed_proto_msgTypes[291]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18352,7 +18410,7 @@ func (x *FeedColdGateCompactAndResume) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedColdGateCompactAndResume.ProtoReflect.Descriptor instead.
 func (*FeedColdGateCompactAndResume) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{290}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{291}
 }
 
 func (x *FeedColdGateCompactAndResume) GetHeldPrompts() uint32 {
@@ -18379,7 +18437,7 @@ type FeedColdGateContextTokens struct {
 
 func (x *FeedColdGateContextTokens) Reset() {
 	*x = FeedColdGateContextTokens{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[291]
+	mi := &file_frontend_v1_feed_proto_msgTypes[292]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18391,7 +18449,7 @@ func (x *FeedColdGateContextTokens) String() string {
 func (*FeedColdGateContextTokens) ProtoMessage() {}
 
 func (x *FeedColdGateContextTokens) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[291]
+	mi := &file_frontend_v1_feed_proto_msgTypes[292]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18404,7 +18462,7 @@ func (x *FeedColdGateContextTokens) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedColdGateContextTokens.ProtoReflect.Descriptor instead.
 func (*FeedColdGateContextTokens) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{291}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{292}
 }
 
 func (x *FeedColdGateContextTokens) GetTokens() int64 {
@@ -18432,7 +18490,7 @@ type FeedColdGateLastRequest struct {
 
 func (x *FeedColdGateLastRequest) Reset() {
 	*x = FeedColdGateLastRequest{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[292]
+	mi := &file_frontend_v1_feed_proto_msgTypes[293]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18444,7 +18502,7 @@ func (x *FeedColdGateLastRequest) String() string {
 func (*FeedColdGateLastRequest) ProtoMessage() {}
 
 func (x *FeedColdGateLastRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[292]
+	mi := &file_frontend_v1_feed_proto_msgTypes[293]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18457,7 +18515,7 @@ func (x *FeedColdGateLastRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedColdGateLastRequest.ProtoReflect.Descriptor instead.
 func (*FeedColdGateLastRequest) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{292}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{293}
 }
 
 func (x *FeedColdGateLastRequest) GetAtMs() int64 {
@@ -18478,7 +18536,7 @@ type FeedColdGateModel struct {
 
 func (x *FeedColdGateModel) Reset() {
 	*x = FeedColdGateModel{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[293]
+	mi := &file_frontend_v1_feed_proto_msgTypes[294]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18490,7 +18548,7 @@ func (x *FeedColdGateModel) String() string {
 func (*FeedColdGateModel) ProtoMessage() {}
 
 func (x *FeedColdGateModel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[293]
+	mi := &file_frontend_v1_feed_proto_msgTypes[294]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18503,7 +18561,7 @@ func (x *FeedColdGateModel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedColdGateModel.ProtoReflect.Descriptor instead.
 func (*FeedColdGateModel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{293}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{294}
 }
 
 func (x *FeedColdGateModel) GetModel() *v1.AgentModel {
@@ -18527,7 +18585,7 @@ type FeedColdGateCompactMenu struct {
 
 func (x *FeedColdGateCompactMenu) Reset() {
 	*x = FeedColdGateCompactMenu{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[294]
+	mi := &file_frontend_v1_feed_proto_msgTypes[295]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18539,7 +18597,7 @@ func (x *FeedColdGateCompactMenu) String() string {
 func (*FeedColdGateCompactMenu) ProtoMessage() {}
 
 func (x *FeedColdGateCompactMenu) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[294]
+	mi := &file_frontend_v1_feed_proto_msgTypes[295]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18552,7 +18610,7 @@ func (x *FeedColdGateCompactMenu) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedColdGateCompactMenu.ProtoReflect.Descriptor instead.
 func (*FeedColdGateCompactMenu) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{294}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{295}
 }
 
 func (x *FeedColdGateCompactMenu) GetModels() []*FeedColdGateModelOption {
@@ -18580,7 +18638,7 @@ type FeedColdGateModelOption struct {
 
 func (x *FeedColdGateModelOption) Reset() {
 	*x = FeedColdGateModelOption{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[295]
+	mi := &file_frontend_v1_feed_proto_msgTypes[296]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18592,7 +18650,7 @@ func (x *FeedColdGateModelOption) String() string {
 func (*FeedColdGateModelOption) ProtoMessage() {}
 
 func (x *FeedColdGateModelOption) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[295]
+	mi := &file_frontend_v1_feed_proto_msgTypes[296]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18605,7 +18663,7 @@ func (x *FeedColdGateModelOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedColdGateModelOption.ProtoReflect.Descriptor instead.
 func (*FeedColdGateModelOption) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{295}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{296}
 }
 
 func (x *FeedColdGateModelOption) GetModel() *v1.AgentModel {
@@ -18634,7 +18692,7 @@ type FeedColdGateResolved struct {
 
 func (x *FeedColdGateResolved) Reset() {
 	*x = FeedColdGateResolved{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[296]
+	mi := &file_frontend_v1_feed_proto_msgTypes[297]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18646,7 +18704,7 @@ func (x *FeedColdGateResolved) String() string {
 func (*FeedColdGateResolved) ProtoMessage() {}
 
 func (x *FeedColdGateResolved) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[296]
+	mi := &file_frontend_v1_feed_proto_msgTypes[297]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18659,7 +18717,7 @@ func (x *FeedColdGateResolved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedColdGateResolved.ProtoReflect.Descriptor instead.
 func (*FeedColdGateResolved) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{296}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{297}
 }
 
 func (x *FeedColdGateResolved) GetAtMs() int64 {
@@ -18734,7 +18792,7 @@ type FeedColdGateResolvedPay struct {
 
 func (x *FeedColdGateResolvedPay) Reset() {
 	*x = FeedColdGateResolvedPay{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[297]
+	mi := &file_frontend_v1_feed_proto_msgTypes[298]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18746,7 +18804,7 @@ func (x *FeedColdGateResolvedPay) String() string {
 func (*FeedColdGateResolvedPay) ProtoMessage() {}
 
 func (x *FeedColdGateResolvedPay) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[297]
+	mi := &file_frontend_v1_feed_proto_msgTypes[298]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18759,7 +18817,7 @@ func (x *FeedColdGateResolvedPay) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedColdGateResolvedPay.ProtoReflect.Descriptor instead.
 func (*FeedColdGateResolvedPay) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{297}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{298}
 }
 
 // Cleared the context.
@@ -18771,7 +18829,7 @@ type FeedColdGateResolvedClear struct {
 
 func (x *FeedColdGateResolvedClear) Reset() {
 	*x = FeedColdGateResolvedClear{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[298]
+	mi := &file_frontend_v1_feed_proto_msgTypes[299]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18783,7 +18841,7 @@ func (x *FeedColdGateResolvedClear) String() string {
 func (*FeedColdGateResolvedClear) ProtoMessage() {}
 
 func (x *FeedColdGateResolvedClear) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[298]
+	mi := &file_frontend_v1_feed_proto_msgTypes[299]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18796,7 +18854,7 @@ func (x *FeedColdGateResolvedClear) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedColdGateResolvedClear.ProtoReflect.Descriptor instead.
 func (*FeedColdGateResolvedClear) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{298}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{299}
 }
 
 // Compacted first.
@@ -18812,7 +18870,7 @@ type FeedColdGateResolvedCompact struct {
 
 func (x *FeedColdGateResolvedCompact) Reset() {
 	*x = FeedColdGateResolvedCompact{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[299]
+	mi := &file_frontend_v1_feed_proto_msgTypes[300]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18824,7 +18882,7 @@ func (x *FeedColdGateResolvedCompact) String() string {
 func (*FeedColdGateResolvedCompact) ProtoMessage() {}
 
 func (x *FeedColdGateResolvedCompact) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[299]
+	mi := &file_frontend_v1_feed_proto_msgTypes[300]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18837,7 +18895,7 @@ func (x *FeedColdGateResolvedCompact) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedColdGateResolvedCompact.ProtoReflect.Descriptor instead.
 func (*FeedColdGateResolvedCompact) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{299}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{300}
 }
 
 func (x *FeedColdGateResolvedCompact) GetModel() *FeedColdGateModel {
@@ -18896,7 +18954,7 @@ type FeedSessionSeparation struct {
 
 func (x *FeedSessionSeparation) Reset() {
 	*x = FeedSessionSeparation{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[300]
+	mi := &file_frontend_v1_feed_proto_msgTypes[301]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -18908,7 +18966,7 @@ func (x *FeedSessionSeparation) String() string {
 func (*FeedSessionSeparation) ProtoMessage() {}
 
 func (x *FeedSessionSeparation) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[300]
+	mi := &file_frontend_v1_feed_proto_msgTypes[301]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -18921,7 +18979,7 @@ func (x *FeedSessionSeparation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSessionSeparation.ProtoReflect.Descriptor instead.
 func (*FeedSessionSeparation) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{300}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{301}
 }
 
 func (x *FeedSessionSeparation) GetLabel() *FeedSessionSeparationLabel {
@@ -19041,7 +19099,7 @@ type FeedSessionSeparationLabel struct {
 
 func (x *FeedSessionSeparationLabel) Reset() {
 	*x = FeedSessionSeparationLabel{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[301]
+	mi := &file_frontend_v1_feed_proto_msgTypes[302]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19053,7 +19111,7 @@ func (x *FeedSessionSeparationLabel) String() string {
 func (*FeedSessionSeparationLabel) ProtoMessage() {}
 
 func (x *FeedSessionSeparationLabel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[301]
+	mi := &file_frontend_v1_feed_proto_msgTypes[302]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19066,7 +19124,7 @@ func (x *FeedSessionSeparationLabel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedSessionSeparationLabel.ProtoReflect.Descriptor instead.
 func (*FeedSessionSeparationLabel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{301}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{302}
 }
 
 func (x *FeedSessionSeparationLabel) GetText() string {
@@ -19091,7 +19149,7 @@ type FeedContextCutTokens struct {
 
 func (x *FeedContextCutTokens) Reset() {
 	*x = FeedContextCutTokens{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[302]
+	mi := &file_frontend_v1_feed_proto_msgTypes[303]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19103,7 +19161,7 @@ func (x *FeedContextCutTokens) String() string {
 func (*FeedContextCutTokens) ProtoMessage() {}
 
 func (x *FeedContextCutTokens) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[302]
+	mi := &file_frontend_v1_feed_proto_msgTypes[303]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19116,7 +19174,7 @@ func (x *FeedContextCutTokens) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedContextCutTokens.ProtoReflect.Descriptor instead.
 func (*FeedContextCutTokens) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{302}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{303}
 }
 
 func (x *FeedContextCutTokens) GetBeforeText() string {
@@ -19143,7 +19201,7 @@ type FeedContextCutCleared struct {
 
 func (x *FeedContextCutCleared) Reset() {
 	*x = FeedContextCutCleared{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[303]
+	mi := &file_frontend_v1_feed_proto_msgTypes[304]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19155,7 +19213,7 @@ func (x *FeedContextCutCleared) String() string {
 func (*FeedContextCutCleared) ProtoMessage() {}
 
 func (x *FeedContextCutCleared) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[303]
+	mi := &file_frontend_v1_feed_proto_msgTypes[304]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19168,7 +19226,7 @@ func (x *FeedContextCutCleared) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedContextCutCleared.ProtoReflect.Descriptor instead.
 func (*FeedContextCutCleared) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{303}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{304}
 }
 
 // The history was COMPRESSED: what came before was replaced by the agent's
@@ -19187,7 +19245,7 @@ type FeedContextCutCompacted struct {
 
 func (x *FeedContextCutCompacted) Reset() {
 	*x = FeedContextCutCompacted{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[304]
+	mi := &file_frontend_v1_feed_proto_msgTypes[305]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19199,7 +19257,7 @@ func (x *FeedContextCutCompacted) String() string {
 func (*FeedContextCutCompacted) ProtoMessage() {}
 
 func (x *FeedContextCutCompacted) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[304]
+	mi := &file_frontend_v1_feed_proto_msgTypes[305]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19212,7 +19270,7 @@ func (x *FeedContextCutCompacted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedContextCutCompacted.ProtoReflect.Descriptor instead.
 func (*FeedContextCutCompacted) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{304}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{305}
 }
 
 func (x *FeedContextCutCompacted) GetSummary() *FeedContextCutSummary {
@@ -19239,7 +19297,7 @@ type FeedContextCutColdRead struct {
 
 func (x *FeedContextCutColdRead) Reset() {
 	*x = FeedContextCutColdRead{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[305]
+	mi := &file_frontend_v1_feed_proto_msgTypes[306]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19251,7 +19309,7 @@ func (x *FeedContextCutColdRead) String() string {
 func (*FeedContextCutColdRead) ProtoMessage() {}
 
 func (x *FeedContextCutColdRead) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[305]
+	mi := &file_frontend_v1_feed_proto_msgTypes[306]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19264,7 +19322,7 @@ func (x *FeedContextCutColdRead) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedContextCutColdRead.ProtoReflect.Descriptor instead.
 func (*FeedContextCutColdRead) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{305}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{306}
 }
 
 func (x *FeedContextCutColdRead) GetEvidence() *FailureCompactionColdRead {
@@ -19284,7 +19342,7 @@ type FeedContextCutSummary struct {
 
 func (x *FeedContextCutSummary) Reset() {
 	*x = FeedContextCutSummary{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[306]
+	mi := &file_frontend_v1_feed_proto_msgTypes[307]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19296,7 +19354,7 @@ func (x *FeedContextCutSummary) String() string {
 func (*FeedContextCutSummary) ProtoMessage() {}
 
 func (x *FeedContextCutSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[306]
+	mi := &file_frontend_v1_feed_proto_msgTypes[307]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19309,7 +19367,7 @@ func (x *FeedContextCutSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedContextCutSummary.ProtoReflect.Descriptor instead.
 func (*FeedContextCutSummary) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{306}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{307}
 }
 
 func (x *FeedContextCutSummary) GetMarkdown() string {
@@ -19334,7 +19392,7 @@ type FeedWorktreeEntered struct {
 
 func (x *FeedWorktreeEntered) Reset() {
 	*x = FeedWorktreeEntered{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[307]
+	mi := &file_frontend_v1_feed_proto_msgTypes[308]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19346,7 +19404,7 @@ func (x *FeedWorktreeEntered) String() string {
 func (*FeedWorktreeEntered) ProtoMessage() {}
 
 func (x *FeedWorktreeEntered) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[307]
+	mi := &file_frontend_v1_feed_proto_msgTypes[308]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19359,7 +19417,7 @@ func (x *FeedWorktreeEntered) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedWorktreeEntered.ProtoReflect.Descriptor instead.
 func (*FeedWorktreeEntered) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{307}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{308}
 }
 
 func (x *FeedWorktreeEntered) GetPath() *FeedWorktreePath {
@@ -19394,7 +19452,7 @@ type FeedWorktreeLeft struct {
 
 func (x *FeedWorktreeLeft) Reset() {
 	*x = FeedWorktreeLeft{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[308]
+	mi := &file_frontend_v1_feed_proto_msgTypes[309]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19406,7 +19464,7 @@ func (x *FeedWorktreeLeft) String() string {
 func (*FeedWorktreeLeft) ProtoMessage() {}
 
 func (x *FeedWorktreeLeft) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[308]
+	mi := &file_frontend_v1_feed_proto_msgTypes[309]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19419,7 +19477,7 @@ func (x *FeedWorktreeLeft) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedWorktreeLeft.ProtoReflect.Descriptor instead.
 func (*FeedWorktreeLeft) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{308}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{309}
 }
 
 func (x *FeedWorktreeLeft) GetOutcome() isFeedWorktreeLeft_Outcome {
@@ -19474,7 +19532,7 @@ type FeedWorktreeKept struct {
 
 func (x *FeedWorktreeKept) Reset() {
 	*x = FeedWorktreeKept{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[309]
+	mi := &file_frontend_v1_feed_proto_msgTypes[310]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19486,7 +19544,7 @@ func (x *FeedWorktreeKept) String() string {
 func (*FeedWorktreeKept) ProtoMessage() {}
 
 func (x *FeedWorktreeKept) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[309]
+	mi := &file_frontend_v1_feed_proto_msgTypes[310]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19499,7 +19557,7 @@ func (x *FeedWorktreeKept) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedWorktreeKept.ProtoReflect.Descriptor instead.
 func (*FeedWorktreeKept) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{309}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{310}
 }
 
 func (x *FeedWorktreeKept) GetPath() *FeedWorktreePath {
@@ -19522,7 +19580,7 @@ type FeedWorktreeRemoved struct {
 
 func (x *FeedWorktreeRemoved) Reset() {
 	*x = FeedWorktreeRemoved{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[310]
+	mi := &file_frontend_v1_feed_proto_msgTypes[311]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19534,7 +19592,7 @@ func (x *FeedWorktreeRemoved) String() string {
 func (*FeedWorktreeRemoved) ProtoMessage() {}
 
 func (x *FeedWorktreeRemoved) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[310]
+	mi := &file_frontend_v1_feed_proto_msgTypes[311]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19547,7 +19605,7 @@ func (x *FeedWorktreeRemoved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedWorktreeRemoved.ProtoReflect.Descriptor instead.
 func (*FeedWorktreeRemoved) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{310}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{311}
 }
 
 func (x *FeedWorktreeRemoved) GetDiscarded() *FeedWorktreeDiscarded {
@@ -19568,7 +19626,7 @@ type FeedWorktreeDiscarded struct {
 
 func (x *FeedWorktreeDiscarded) Reset() {
 	*x = FeedWorktreeDiscarded{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[311]
+	mi := &file_frontend_v1_feed_proto_msgTypes[312]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19580,7 +19638,7 @@ func (x *FeedWorktreeDiscarded) String() string {
 func (*FeedWorktreeDiscarded) ProtoMessage() {}
 
 func (x *FeedWorktreeDiscarded) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[311]
+	mi := &file_frontend_v1_feed_proto_msgTypes[312]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19593,7 +19651,7 @@ func (x *FeedWorktreeDiscarded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedWorktreeDiscarded.ProtoReflect.Descriptor instead.
 func (*FeedWorktreeDiscarded) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{311}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{312}
 }
 
 func (x *FeedWorktreeDiscarded) GetText() string {
@@ -19613,7 +19671,7 @@ type FeedWorktreePath struct {
 
 func (x *FeedWorktreePath) Reset() {
 	*x = FeedWorktreePath{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[312]
+	mi := &file_frontend_v1_feed_proto_msgTypes[313]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19625,7 +19683,7 @@ func (x *FeedWorktreePath) String() string {
 func (*FeedWorktreePath) ProtoMessage() {}
 
 func (x *FeedWorktreePath) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[312]
+	mi := &file_frontend_v1_feed_proto_msgTypes[313]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19638,7 +19696,7 @@ func (x *FeedWorktreePath) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedWorktreePath.ProtoReflect.Descriptor instead.
 func (*FeedWorktreePath) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{312}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{313}
 }
 
 func (x *FeedWorktreePath) GetText() string {
@@ -19659,7 +19717,7 @@ type FeedWorktreeBranch struct {
 
 func (x *FeedWorktreeBranch) Reset() {
 	*x = FeedWorktreeBranch{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[313]
+	mi := &file_frontend_v1_feed_proto_msgTypes[314]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19671,7 +19729,7 @@ func (x *FeedWorktreeBranch) String() string {
 func (*FeedWorktreeBranch) ProtoMessage() {}
 
 func (x *FeedWorktreeBranch) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[313]
+	mi := &file_frontend_v1_feed_proto_msgTypes[314]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19684,7 +19742,7 @@ func (x *FeedWorktreeBranch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedWorktreeBranch.ProtoReflect.Descriptor instead.
 func (*FeedWorktreeBranch) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{313}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{314}
 }
 
 func (x *FeedWorktreeBranch) GetText() string {
@@ -19754,7 +19812,7 @@ type FeedMerge struct {
 
 func (x *FeedMerge) Reset() {
 	*x = FeedMerge{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[314]
+	mi := &file_frontend_v1_feed_proto_msgTypes[315]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19766,7 +19824,7 @@ func (x *FeedMerge) String() string {
 func (*FeedMerge) ProtoMessage() {}
 
 func (x *FeedMerge) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[314]
+	mi := &file_frontend_v1_feed_proto_msgTypes[315]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19779,7 +19837,7 @@ func (x *FeedMerge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMerge.ProtoReflect.Descriptor instead.
 func (*FeedMerge) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{314}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{315}
 }
 
 func (x *FeedMerge) GetHead() *FeedMergeHead {
@@ -19864,7 +19922,7 @@ type FeedMergeQueueOffer struct {
 
 func (x *FeedMergeQueueOffer) Reset() {
 	*x = FeedMergeQueueOffer{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[315]
+	mi := &file_frontend_v1_feed_proto_msgTypes[316]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19876,7 +19934,7 @@ func (x *FeedMergeQueueOffer) String() string {
 func (*FeedMergeQueueOffer) ProtoMessage() {}
 
 func (x *FeedMergeQueueOffer) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[315]
+	mi := &file_frontend_v1_feed_proto_msgTypes[316]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19889,7 +19947,7 @@ func (x *FeedMergeQueueOffer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeQueueOffer.ProtoReflect.Descriptor instead.
 func (*FeedMergeQueueOffer) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{315}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{316}
 }
 
 func (x *FeedMergeQueueOffer) GetHeadline() *FeedMergeQueueOfferHeadline {
@@ -19909,7 +19967,7 @@ type FeedMergeQueueOfferHeadline struct {
 
 func (x *FeedMergeQueueOfferHeadline) Reset() {
 	*x = FeedMergeQueueOfferHeadline{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[316]
+	mi := &file_frontend_v1_feed_proto_msgTypes[317]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19921,7 +19979,7 @@ func (x *FeedMergeQueueOfferHeadline) String() string {
 func (*FeedMergeQueueOfferHeadline) ProtoMessage() {}
 
 func (x *FeedMergeQueueOfferHeadline) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[316]
+	mi := &file_frontend_v1_feed_proto_msgTypes[317]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19934,7 +19992,7 @@ func (x *FeedMergeQueueOfferHeadline) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeQueueOfferHeadline.ProtoReflect.Descriptor instead.
 func (*FeedMergeQueueOfferHeadline) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{316}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{317}
 }
 
 func (x *FeedMergeQueueOfferHeadline) GetText() string {
@@ -19970,7 +20028,7 @@ type FeedMergeHead struct {
 
 func (x *FeedMergeHead) Reset() {
 	*x = FeedMergeHead{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[317]
+	mi := &file_frontend_v1_feed_proto_msgTypes[318]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -19982,7 +20040,7 @@ func (x *FeedMergeHead) String() string {
 func (*FeedMergeHead) ProtoMessage() {}
 
 func (x *FeedMergeHead) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[317]
+	mi := &file_frontend_v1_feed_proto_msgTypes[318]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -19995,7 +20053,7 @@ func (x *FeedMergeHead) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeHead.ProtoReflect.Descriptor instead.
 func (*FeedMergeHead) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{317}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{318}
 }
 
 func (x *FeedMergeHead) GetGlyph() *FeedMergeGlyph {
@@ -20058,7 +20116,7 @@ type FeedMergeMode struct {
 
 func (x *FeedMergeMode) Reset() {
 	*x = FeedMergeMode{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[318]
+	mi := &file_frontend_v1_feed_proto_msgTypes[319]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20070,7 +20128,7 @@ func (x *FeedMergeMode) String() string {
 func (*FeedMergeMode) ProtoMessage() {}
 
 func (x *FeedMergeMode) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[318]
+	mi := &file_frontend_v1_feed_proto_msgTypes[319]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20083,7 +20141,7 @@ func (x *FeedMergeMode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeMode.ProtoReflect.Descriptor instead.
 func (*FeedMergeMode) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{318}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{319}
 }
 
 func (x *FeedMergeMode) GetMode() isFeedMergeMode_Mode {
@@ -20140,7 +20198,7 @@ type FeedMergeModeSync struct {
 
 func (x *FeedMergeModeSync) Reset() {
 	*x = FeedMergeModeSync{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[319]
+	mi := &file_frontend_v1_feed_proto_msgTypes[320]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20152,7 +20210,7 @@ func (x *FeedMergeModeSync) String() string {
 func (*FeedMergeModeSync) ProtoMessage() {}
 
 func (x *FeedMergeModeSync) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[319]
+	mi := &file_frontend_v1_feed_proto_msgTypes[320]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20165,7 +20223,7 @@ func (x *FeedMergeModeSync) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeModeSync.ProtoReflect.Descriptor instead.
 func (*FeedMergeModeSync) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{319}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{320}
 }
 
 // An ASYNC merge: it runs in a hidden merge workspace forked from the
@@ -20187,7 +20245,7 @@ type FeedMergeModeAsync struct {
 
 func (x *FeedMergeModeAsync) Reset() {
 	*x = FeedMergeModeAsync{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[320]
+	mi := &file_frontend_v1_feed_proto_msgTypes[321]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20199,7 +20257,7 @@ func (x *FeedMergeModeAsync) String() string {
 func (*FeedMergeModeAsync) ProtoMessage() {}
 
 func (x *FeedMergeModeAsync) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[320]
+	mi := &file_frontend_v1_feed_proto_msgTypes[321]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20212,7 +20270,7 @@ func (x *FeedMergeModeAsync) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeModeAsync.ProtoReflect.Descriptor instead.
 func (*FeedMergeModeAsync) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{320}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{321}
 }
 
 func (x *FeedMergeModeAsync) GetWorkspaceSwitch() *FeedMergeWorkspaceSwitch {
@@ -20243,7 +20301,7 @@ type FeedMergeVersion struct {
 
 func (x *FeedMergeVersion) Reset() {
 	*x = FeedMergeVersion{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[321]
+	mi := &file_frontend_v1_feed_proto_msgTypes[322]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20255,7 +20313,7 @@ func (x *FeedMergeVersion) String() string {
 func (*FeedMergeVersion) ProtoMessage() {}
 
 func (x *FeedMergeVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[321]
+	mi := &file_frontend_v1_feed_proto_msgTypes[322]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20268,7 +20326,7 @@ func (x *FeedMergeVersion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeVersion.ProtoReflect.Descriptor instead.
 func (*FeedMergeVersion) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{321}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{322}
 }
 
 func (x *FeedMergeVersion) GetLeading() *FeedMergeVersionLeading {
@@ -20302,7 +20360,7 @@ type FeedMergeVersionLeading struct {
 
 func (x *FeedMergeVersionLeading) Reset() {
 	*x = FeedMergeVersionLeading{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[322]
+	mi := &file_frontend_v1_feed_proto_msgTypes[323]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20314,7 +20372,7 @@ func (x *FeedMergeVersionLeading) String() string {
 func (*FeedMergeVersionLeading) ProtoMessage() {}
 
 func (x *FeedMergeVersionLeading) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[322]
+	mi := &file_frontend_v1_feed_proto_msgTypes[323]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20327,7 +20385,7 @@ func (x *FeedMergeVersionLeading) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeVersionLeading.ProtoReflect.Descriptor instead.
 func (*FeedMergeVersionLeading) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{322}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{323}
 }
 
 func (x *FeedMergeVersionLeading) GetText() string {
@@ -20347,7 +20405,7 @@ type FeedMergeVersionIncremented struct {
 
 func (x *FeedMergeVersionIncremented) Reset() {
 	*x = FeedMergeVersionIncremented{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[323]
+	mi := &file_frontend_v1_feed_proto_msgTypes[324]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20359,7 +20417,7 @@ func (x *FeedMergeVersionIncremented) String() string {
 func (*FeedMergeVersionIncremented) ProtoMessage() {}
 
 func (x *FeedMergeVersionIncremented) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[323]
+	mi := &file_frontend_v1_feed_proto_msgTypes[324]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20372,7 +20430,7 @@ func (x *FeedMergeVersionIncremented) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeVersionIncremented.ProtoReflect.Descriptor instead.
 func (*FeedMergeVersionIncremented) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{323}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{324}
 }
 
 func (x *FeedMergeVersionIncremented) GetText() string {
@@ -20392,7 +20450,7 @@ type FeedMergeVersionTrailing struct {
 
 func (x *FeedMergeVersionTrailing) Reset() {
 	*x = FeedMergeVersionTrailing{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[324]
+	mi := &file_frontend_v1_feed_proto_msgTypes[325]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20404,7 +20462,7 @@ func (x *FeedMergeVersionTrailing) String() string {
 func (*FeedMergeVersionTrailing) ProtoMessage() {}
 
 func (x *FeedMergeVersionTrailing) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[324]
+	mi := &file_frontend_v1_feed_proto_msgTypes[325]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20417,7 +20475,7 @@ func (x *FeedMergeVersionTrailing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeVersionTrailing.ProtoReflect.Descriptor instead.
 func (*FeedMergeVersionTrailing) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{324}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{325}
 }
 
 func (x *FeedMergeVersionTrailing) GetText() string {
@@ -20450,7 +20508,7 @@ type FeedMergeWorkspaceSwitch struct {
 
 func (x *FeedMergeWorkspaceSwitch) Reset() {
 	*x = FeedMergeWorkspaceSwitch{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[325]
+	mi := &file_frontend_v1_feed_proto_msgTypes[326]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20462,7 +20520,7 @@ func (x *FeedMergeWorkspaceSwitch) String() string {
 func (*FeedMergeWorkspaceSwitch) ProtoMessage() {}
 
 func (x *FeedMergeWorkspaceSwitch) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[325]
+	mi := &file_frontend_v1_feed_proto_msgTypes[326]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20475,7 +20533,7 @@ func (x *FeedMergeWorkspaceSwitch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeWorkspaceSwitch.ProtoReflect.Descriptor instead.
 func (*FeedMergeWorkspaceSwitch) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{325}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{326}
 }
 
 func (x *FeedMergeWorkspaceSwitch) GetLabel() *FeedMergeWorkspaceSwitchLabel {
@@ -20539,7 +20597,7 @@ type FeedMergeWorkspaceSwitchLabel struct {
 
 func (x *FeedMergeWorkspaceSwitchLabel) Reset() {
 	*x = FeedMergeWorkspaceSwitchLabel{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[326]
+	mi := &file_frontend_v1_feed_proto_msgTypes[327]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20551,7 +20609,7 @@ func (x *FeedMergeWorkspaceSwitchLabel) String() string {
 func (*FeedMergeWorkspaceSwitchLabel) ProtoMessage() {}
 
 func (x *FeedMergeWorkspaceSwitchLabel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[326]
+	mi := &file_frontend_v1_feed_proto_msgTypes[327]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20564,7 +20622,7 @@ func (x *FeedMergeWorkspaceSwitchLabel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeWorkspaceSwitchLabel.ProtoReflect.Descriptor instead.
 func (*FeedMergeWorkspaceSwitchLabel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{326}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{327}
 }
 
 func (x *FeedMergeWorkspaceSwitchLabel) GetText() string {
@@ -20588,7 +20646,7 @@ type FeedMergeWorkspaceSwitchAvailable struct {
 
 func (x *FeedMergeWorkspaceSwitchAvailable) Reset() {
 	*x = FeedMergeWorkspaceSwitchAvailable{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[327]
+	mi := &file_frontend_v1_feed_proto_msgTypes[328]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20600,7 +20658,7 @@ func (x *FeedMergeWorkspaceSwitchAvailable) String() string {
 func (*FeedMergeWorkspaceSwitchAvailable) ProtoMessage() {}
 
 func (x *FeedMergeWorkspaceSwitchAvailable) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[327]
+	mi := &file_frontend_v1_feed_proto_msgTypes[328]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20613,7 +20671,7 @@ func (x *FeedMergeWorkspaceSwitchAvailable) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use FeedMergeWorkspaceSwitchAvailable.ProtoReflect.Descriptor instead.
 func (*FeedMergeWorkspaceSwitchAvailable) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{327}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{328}
 }
 
 func (x *FeedMergeWorkspaceSwitchAvailable) GetTarget() *v11.WorkspaceRef {
@@ -20634,7 +20692,7 @@ type FeedMergeWorkspaceSwitchRemoved struct {
 
 func (x *FeedMergeWorkspaceSwitchRemoved) Reset() {
 	*x = FeedMergeWorkspaceSwitchRemoved{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[328]
+	mi := &file_frontend_v1_feed_proto_msgTypes[329]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20646,7 +20704,7 @@ func (x *FeedMergeWorkspaceSwitchRemoved) String() string {
 func (*FeedMergeWorkspaceSwitchRemoved) ProtoMessage() {}
 
 func (x *FeedMergeWorkspaceSwitchRemoved) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[328]
+	mi := &file_frontend_v1_feed_proto_msgTypes[329]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20659,7 +20717,7 @@ func (x *FeedMergeWorkspaceSwitchRemoved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeWorkspaceSwitchRemoved.ProtoReflect.Descriptor instead.
 func (*FeedMergeWorkspaceSwitchRemoved) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{328}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{329}
 }
 
 func (x *FeedMergeWorkspaceSwitchRemoved) GetRemovedAtMs() int64 {
@@ -20679,7 +20737,7 @@ type FeedMergeGlyph struct {
 
 func (x *FeedMergeGlyph) Reset() {
 	*x = FeedMergeGlyph{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[329]
+	mi := &file_frontend_v1_feed_proto_msgTypes[330]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20691,7 +20749,7 @@ func (x *FeedMergeGlyph) String() string {
 func (*FeedMergeGlyph) ProtoMessage() {}
 
 func (x *FeedMergeGlyph) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[329]
+	mi := &file_frontend_v1_feed_proto_msgTypes[330]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20704,7 +20762,7 @@ func (x *FeedMergeGlyph) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeGlyph.ProtoReflect.Descriptor instead.
 func (*FeedMergeGlyph) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{329}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{330}
 }
 
 func (x *FeedMergeGlyph) GetIcon() string {
@@ -20724,7 +20782,7 @@ type FeedMergeLabel struct {
 
 func (x *FeedMergeLabel) Reset() {
 	*x = FeedMergeLabel{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[330]
+	mi := &file_frontend_v1_feed_proto_msgTypes[331]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20736,7 +20794,7 @@ func (x *FeedMergeLabel) String() string {
 func (*FeedMergeLabel) ProtoMessage() {}
 
 func (x *FeedMergeLabel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[330]
+	mi := &file_frontend_v1_feed_proto_msgTypes[331]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20749,7 +20807,7 @@ func (x *FeedMergeLabel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeLabel.ProtoReflect.Descriptor instead.
 func (*FeedMergeLabel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{330}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{331}
 }
 
 func (x *FeedMergeLabel) GetText() string {
@@ -20773,7 +20831,7 @@ type FeedMergeRuntime struct {
 
 func (x *FeedMergeRuntime) Reset() {
 	*x = FeedMergeRuntime{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[331]
+	mi := &file_frontend_v1_feed_proto_msgTypes[332]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20785,7 +20843,7 @@ func (x *FeedMergeRuntime) String() string {
 func (*FeedMergeRuntime) ProtoMessage() {}
 
 func (x *FeedMergeRuntime) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[331]
+	mi := &file_frontend_v1_feed_proto_msgTypes[332]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20798,7 +20856,7 @@ func (x *FeedMergeRuntime) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeRuntime.ProtoReflect.Descriptor instead.
 func (*FeedMergeRuntime) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{331}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{332}
 }
 
 func (x *FeedMergeRuntime) GetStartedAtMs() int64 {
@@ -20831,7 +20889,7 @@ type FeedMergeUpdate struct {
 
 func (x *FeedMergeUpdate) Reset() {
 	*x = FeedMergeUpdate{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[332]
+	mi := &file_frontend_v1_feed_proto_msgTypes[333]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20843,7 +20901,7 @@ func (x *FeedMergeUpdate) String() string {
 func (*FeedMergeUpdate) ProtoMessage() {}
 
 func (x *FeedMergeUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[332]
+	mi := &file_frontend_v1_feed_proto_msgTypes[333]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20856,7 +20914,7 @@ func (x *FeedMergeUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeUpdate.ProtoReflect.Descriptor instead.
 func (*FeedMergeUpdate) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{332}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{333}
 }
 
 func (x *FeedMergeUpdate) GetStage() isFeedMergeUpdate_Stage {
@@ -20909,7 +20967,7 @@ type FeedMergeUpdateWaiting struct {
 
 func (x *FeedMergeUpdateWaiting) Reset() {
 	*x = FeedMergeUpdateWaiting{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[333]
+	mi := &file_frontend_v1_feed_proto_msgTypes[334]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20921,7 +20979,7 @@ func (x *FeedMergeUpdateWaiting) String() string {
 func (*FeedMergeUpdateWaiting) ProtoMessage() {}
 
 func (x *FeedMergeUpdateWaiting) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[333]
+	mi := &file_frontend_v1_feed_proto_msgTypes[334]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20934,7 +20992,7 @@ func (x *FeedMergeUpdateWaiting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeUpdateWaiting.ProtoReflect.Descriptor instead.
 func (*FeedMergeUpdateWaiting) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{333}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{334}
 }
 
 // The merge is being worked on: admitted off the queue, or resolving its
@@ -20947,7 +21005,7 @@ type FeedMergeUpdateMerging struct {
 
 func (x *FeedMergeUpdateMerging) Reset() {
 	*x = FeedMergeUpdateMerging{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[334]
+	mi := &file_frontend_v1_feed_proto_msgTypes[335]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -20959,7 +21017,7 @@ func (x *FeedMergeUpdateMerging) String() string {
 func (*FeedMergeUpdateMerging) ProtoMessage() {}
 
 func (x *FeedMergeUpdateMerging) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[334]
+	mi := &file_frontend_v1_feed_proto_msgTypes[335]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -20972,7 +21030,7 @@ func (x *FeedMergeUpdateMerging) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeUpdateMerging.ProtoReflect.Descriptor instead.
 func (*FeedMergeUpdateMerging) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{334}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{335}
 }
 
 // It landed: when, and the commit it produced. `ended_at_ms` lives on the
@@ -20992,7 +21050,7 @@ type FeedMergeSuccess struct {
 
 func (x *FeedMergeSuccess) Reset() {
 	*x = FeedMergeSuccess{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[335]
+	mi := &file_frontend_v1_feed_proto_msgTypes[336]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21004,7 +21062,7 @@ func (x *FeedMergeSuccess) String() string {
 func (*FeedMergeSuccess) ProtoMessage() {}
 
 func (x *FeedMergeSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[335]
+	mi := &file_frontend_v1_feed_proto_msgTypes[336]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21017,7 +21075,7 @@ func (x *FeedMergeSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeSuccess.ProtoReflect.Descriptor instead.
 func (*FeedMergeSuccess) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{335}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{336}
 }
 
 func (x *FeedMergeSuccess) GetEndedAtMs() int64 {
@@ -21054,7 +21112,7 @@ type FeedMergeLandedOn struct {
 
 func (x *FeedMergeLandedOn) Reset() {
 	*x = FeedMergeLandedOn{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[336]
+	mi := &file_frontend_v1_feed_proto_msgTypes[337]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21066,7 +21124,7 @@ func (x *FeedMergeLandedOn) String() string {
 func (*FeedMergeLandedOn) ProtoMessage() {}
 
 func (x *FeedMergeLandedOn) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[336]
+	mi := &file_frontend_v1_feed_proto_msgTypes[337]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21079,7 +21137,7 @@ func (x *FeedMergeLandedOn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeLandedOn.ProtoReflect.Descriptor instead.
 func (*FeedMergeLandedOn) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{336}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{337}
 }
 
 func (x *FeedMergeLandedOn) GetRepositoryDir() string {
@@ -21111,7 +21169,7 @@ type FeedMergeError struct {
 
 func (x *FeedMergeError) Reset() {
 	*x = FeedMergeError{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[337]
+	mi := &file_frontend_v1_feed_proto_msgTypes[338]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21123,7 +21181,7 @@ func (x *FeedMergeError) String() string {
 func (*FeedMergeError) ProtoMessage() {}
 
 func (x *FeedMergeError) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[337]
+	mi := &file_frontend_v1_feed_proto_msgTypes[338]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21136,7 +21194,7 @@ func (x *FeedMergeError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeError.ProtoReflect.Descriptor instead.
 func (*FeedMergeError) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{337}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{338}
 }
 
 func (x *FeedMergeError) GetEndedAtMs() int64 {
@@ -21197,7 +21255,7 @@ type FeedMergeFailed struct {
 
 func (x *FeedMergeFailed) Reset() {
 	*x = FeedMergeFailed{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[338]
+	mi := &file_frontend_v1_feed_proto_msgTypes[339]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21209,7 +21267,7 @@ func (x *FeedMergeFailed) String() string {
 func (*FeedMergeFailed) ProtoMessage() {}
 
 func (x *FeedMergeFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[338]
+	mi := &file_frontend_v1_feed_proto_msgTypes[339]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21222,7 +21280,7 @@ func (x *FeedMergeFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeFailed.ProtoReflect.Descriptor instead.
 func (*FeedMergeFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{338}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{339}
 }
 
 func (x *FeedMergeFailed) GetSummary() string {
@@ -21245,7 +21303,7 @@ type FeedMergeAbandoned struct {
 
 func (x *FeedMergeAbandoned) Reset() {
 	*x = FeedMergeAbandoned{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[339]
+	mi := &file_frontend_v1_feed_proto_msgTypes[340]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21257,7 +21315,7 @@ func (x *FeedMergeAbandoned) String() string {
 func (*FeedMergeAbandoned) ProtoMessage() {}
 
 func (x *FeedMergeAbandoned) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[339]
+	mi := &file_frontend_v1_feed_proto_msgTypes[340]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21270,7 +21328,7 @@ func (x *FeedMergeAbandoned) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeAbandoned.ProtoReflect.Descriptor instead.
 func (*FeedMergeAbandoned) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{339}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{340}
 }
 
 func (x *FeedMergeAbandoned) GetSummary() string {
@@ -21300,7 +21358,7 @@ type FeedContextCutCompactionFailed struct {
 
 func (x *FeedContextCutCompactionFailed) Reset() {
 	*x = FeedContextCutCompactionFailed{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[340]
+	mi := &file_frontend_v1_feed_proto_msgTypes[341]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21312,7 +21370,7 @@ func (x *FeedContextCutCompactionFailed) String() string {
 func (*FeedContextCutCompactionFailed) ProtoMessage() {}
 
 func (x *FeedContextCutCompactionFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[340]
+	mi := &file_frontend_v1_feed_proto_msgTypes[341]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21325,7 +21383,7 @@ func (x *FeedContextCutCompactionFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedContextCutCompactionFailed.ProtoReflect.Descriptor instead.
 func (*FeedContextCutCompactionFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{340}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{341}
 }
 
 func (x *FeedContextCutCompactionFailed) GetError() string {
@@ -21377,7 +21435,7 @@ type FeedMergeFold struct {
 
 func (x *FeedMergeFold) Reset() {
 	*x = FeedMergeFold{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[341]
+	mi := &file_frontend_v1_feed_proto_msgTypes[342]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21389,7 +21447,7 @@ func (x *FeedMergeFold) String() string {
 func (*FeedMergeFold) ProtoMessage() {}
 
 func (x *FeedMergeFold) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[341]
+	mi := &file_frontend_v1_feed_proto_msgTypes[342]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21402,7 +21460,7 @@ func (x *FeedMergeFold) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeFold.ProtoReflect.Descriptor instead.
 func (*FeedMergeFold) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{341}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{342}
 }
 
 func (x *FeedMergeFold) GetFolded() bool {
@@ -21467,7 +21525,7 @@ type FeedMergeFoldByDaemon struct {
 
 func (x *FeedMergeFoldByDaemon) Reset() {
 	*x = FeedMergeFoldByDaemon{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[342]
+	mi := &file_frontend_v1_feed_proto_msgTypes[343]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21479,7 +21537,7 @@ func (x *FeedMergeFoldByDaemon) String() string {
 func (*FeedMergeFoldByDaemon) ProtoMessage() {}
 
 func (x *FeedMergeFoldByDaemon) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[342]
+	mi := &file_frontend_v1_feed_proto_msgTypes[343]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21492,7 +21550,7 @@ func (x *FeedMergeFoldByDaemon) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeFoldByDaemon.ProtoReflect.Descriptor instead.
 func (*FeedMergeFoldByDaemon) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{342}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{343}
 }
 
 // `FeedMergeFold.folded` is the reader's own fold, recorded on the durable row.
@@ -21504,7 +21562,7 @@ type FeedMergeFoldByReader struct {
 
 func (x *FeedMergeFoldByReader) Reset() {
 	*x = FeedMergeFoldByReader{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[343]
+	mi := &file_frontend_v1_feed_proto_msgTypes[344]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21516,7 +21574,7 @@ func (x *FeedMergeFoldByReader) String() string {
 func (*FeedMergeFoldByReader) ProtoMessage() {}
 
 func (x *FeedMergeFoldByReader) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[343]
+	mi := &file_frontend_v1_feed_proto_msgTypes[344]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21529,7 +21587,7 @@ func (x *FeedMergeFoldByReader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeFoldByReader.ProtoReflect.Descriptor instead.
 func (*FeedMergeFoldByReader) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{343}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{344}
 }
 
 // THE TAB FAMILY — one row per drawn tab of a merge bubble's sub-feed, at
@@ -21626,7 +21684,7 @@ type FeedMergeTab struct {
 
 func (x *FeedMergeTab) Reset() {
 	*x = FeedMergeTab{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[344]
+	mi := &file_frontend_v1_feed_proto_msgTypes[345]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21638,7 +21696,7 @@ func (x *FeedMergeTab) String() string {
 func (*FeedMergeTab) ProtoMessage() {}
 
 func (x *FeedMergeTab) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[344]
+	mi := &file_frontend_v1_feed_proto_msgTypes[345]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21651,7 +21709,7 @@ func (x *FeedMergeTab) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTab.ProtoReflect.Descriptor instead.
 func (*FeedMergeTab) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{344}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{345}
 }
 
 func (x *FeedMergeTab) GetLabel() *FeedMergeTabLabel {
@@ -21864,7 +21922,7 @@ type FeedMergeTabLabel struct {
 
 func (x *FeedMergeTabLabel) Reset() {
 	*x = FeedMergeTabLabel{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[345]
+	mi := &file_frontend_v1_feed_proto_msgTypes[346]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21876,7 +21934,7 @@ func (x *FeedMergeTabLabel) String() string {
 func (*FeedMergeTabLabel) ProtoMessage() {}
 
 func (x *FeedMergeTabLabel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[345]
+	mi := &file_frontend_v1_feed_proto_msgTypes[346]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21889,7 +21947,7 @@ func (x *FeedMergeTabLabel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabLabel.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabLabel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{345}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{346}
 }
 
 func (x *FeedMergeTabLabel) GetWords() isFeedMergeTabLabel_Words {
@@ -21959,7 +22017,7 @@ type FeedMergeTabLive struct {
 
 func (x *FeedMergeTabLive) Reset() {
 	*x = FeedMergeTabLive{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[346]
+	mi := &file_frontend_v1_feed_proto_msgTypes[347]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -21971,7 +22029,7 @@ func (x *FeedMergeTabLive) String() string {
 func (*FeedMergeTabLive) ProtoMessage() {}
 
 func (x *FeedMergeTabLive) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[346]
+	mi := &file_frontend_v1_feed_proto_msgTypes[347]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -21984,7 +22042,7 @@ func (x *FeedMergeTabLive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabLive.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabLive) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{346}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{347}
 }
 
 func (x *FeedMergeTabLive) GetStartedAtMs() int64 {
@@ -22013,7 +22071,7 @@ type FeedMergeTabSettled struct {
 
 func (x *FeedMergeTabSettled) Reset() {
 	*x = FeedMergeTabSettled{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[347]
+	mi := &file_frontend_v1_feed_proto_msgTypes[348]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22025,7 +22083,7 @@ func (x *FeedMergeTabSettled) String() string {
 func (*FeedMergeTabSettled) ProtoMessage() {}
 
 func (x *FeedMergeTabSettled) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[347]
+	mi := &file_frontend_v1_feed_proto_msgTypes[348]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22038,7 +22096,7 @@ func (x *FeedMergeTabSettled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabSettled.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabSettled) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{347}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{348}
 }
 
 func (x *FeedMergeTabSettled) GetEndedAtMs() int64 {
@@ -22104,7 +22162,7 @@ type FeedMergeTabSucceeded struct {
 
 func (x *FeedMergeTabSucceeded) Reset() {
 	*x = FeedMergeTabSucceeded{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[348]
+	mi := &file_frontend_v1_feed_proto_msgTypes[349]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22116,7 +22174,7 @@ func (x *FeedMergeTabSucceeded) String() string {
 func (*FeedMergeTabSucceeded) ProtoMessage() {}
 
 func (x *FeedMergeTabSucceeded) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[348]
+	mi := &file_frontend_v1_feed_proto_msgTypes[349]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22129,7 +22187,7 @@ func (x *FeedMergeTabSucceeded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabSucceeded.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabSucceeded) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{348}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{349}
 }
 
 // An agentic tab's work is running and held on the user: its agent has a
@@ -22148,7 +22206,7 @@ type FeedMergeTabWaitingOnUser struct {
 
 func (x *FeedMergeTabWaitingOnUser) Reset() {
 	*x = FeedMergeTabWaitingOnUser{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[349]
+	mi := &file_frontend_v1_feed_proto_msgTypes[350]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22160,7 +22218,7 @@ func (x *FeedMergeTabWaitingOnUser) String() string {
 func (*FeedMergeTabWaitingOnUser) ProtoMessage() {}
 
 func (x *FeedMergeTabWaitingOnUser) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[349]
+	mi := &file_frontend_v1_feed_proto_msgTypes[350]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22173,7 +22231,7 @@ func (x *FeedMergeTabWaitingOnUser) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabWaitingOnUser.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabWaitingOnUser) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{349}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{350}
 }
 
 func (x *FeedMergeTabWaitingOnUser) GetStartedAtMs() int64 {
@@ -22194,7 +22252,7 @@ type FeedMergeTabFailed struct {
 
 func (x *FeedMergeTabFailed) Reset() {
 	*x = FeedMergeTabFailed{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[350]
+	mi := &file_frontend_v1_feed_proto_msgTypes[351]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22206,7 +22264,7 @@ func (x *FeedMergeTabFailed) String() string {
 func (*FeedMergeTabFailed) ProtoMessage() {}
 
 func (x *FeedMergeTabFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[350]
+	mi := &file_frontend_v1_feed_proto_msgTypes[351]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22219,7 +22277,7 @@ func (x *FeedMergeTabFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabFailed.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{350}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{351}
 }
 
 func (x *FeedMergeTabFailed) GetSummary() string {
@@ -22246,7 +22304,7 @@ type FeedMergeTabQueue struct {
 
 func (x *FeedMergeTabQueue) Reset() {
 	*x = FeedMergeTabQueue{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[351]
+	mi := &file_frontend_v1_feed_proto_msgTypes[352]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22258,7 +22316,7 @@ func (x *FeedMergeTabQueue) String() string {
 func (*FeedMergeTabQueue) ProtoMessage() {}
 
 func (x *FeedMergeTabQueue) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[351]
+	mi := &file_frontend_v1_feed_proto_msgTypes[352]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22271,7 +22329,7 @@ func (x *FeedMergeTabQueue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabQueue.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabQueue) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{351}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{352}
 }
 
 func (x *FeedMergeTabQueue) GetState() isFeedMergeTabQueue_State {
@@ -22346,7 +22404,7 @@ type FeedMergeTabResolving struct {
 
 func (x *FeedMergeTabResolving) Reset() {
 	*x = FeedMergeTabResolving{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[352]
+	mi := &file_frontend_v1_feed_proto_msgTypes[353]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22358,7 +22416,7 @@ func (x *FeedMergeTabResolving) String() string {
 func (*FeedMergeTabResolving) ProtoMessage() {}
 
 func (x *FeedMergeTabResolving) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[352]
+	mi := &file_frontend_v1_feed_proto_msgTypes[353]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22371,7 +22429,7 @@ func (x *FeedMergeTabResolving) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabResolving.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabResolving) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{352}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{353}
 }
 
 func (x *FeedMergeTabResolving) GetState() isFeedMergeTabResolving_State {
@@ -22463,7 +22521,7 @@ type FeedMergeTabRebasing struct {
 
 func (x *FeedMergeTabRebasing) Reset() {
 	*x = FeedMergeTabRebasing{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[353]
+	mi := &file_frontend_v1_feed_proto_msgTypes[354]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22475,7 +22533,7 @@ func (x *FeedMergeTabRebasing) String() string {
 func (*FeedMergeTabRebasing) ProtoMessage() {}
 
 func (x *FeedMergeTabRebasing) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[353]
+	mi := &file_frontend_v1_feed_proto_msgTypes[354]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22488,7 +22546,7 @@ func (x *FeedMergeTabRebasing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabRebasing.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabRebasing) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{353}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{354}
 }
 
 func (x *FeedMergeTabRebasing) GetState() isFeedMergeTabRebasing_State {
@@ -22579,7 +22637,7 @@ type FeedMergeRebaseProgress struct {
 
 func (x *FeedMergeRebaseProgress) Reset() {
 	*x = FeedMergeRebaseProgress{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[354]
+	mi := &file_frontend_v1_feed_proto_msgTypes[355]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22591,7 +22649,7 @@ func (x *FeedMergeRebaseProgress) String() string {
 func (*FeedMergeRebaseProgress) ProtoMessage() {}
 
 func (x *FeedMergeRebaseProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[354]
+	mi := &file_frontend_v1_feed_proto_msgTypes[355]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22604,7 +22662,7 @@ func (x *FeedMergeRebaseProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeRebaseProgress.ProtoReflect.Descriptor instead.
 func (*FeedMergeRebaseProgress) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{354}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{355}
 }
 
 func (x *FeedMergeRebaseProgress) GetReplayed() uint32 {
@@ -22636,7 +22694,7 @@ type FeedMergeRebaseLine struct {
 
 func (x *FeedMergeRebaseLine) Reset() {
 	*x = FeedMergeRebaseLine{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[355]
+	mi := &file_frontend_v1_feed_proto_msgTypes[356]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22648,7 +22706,7 @@ func (x *FeedMergeRebaseLine) String() string {
 func (*FeedMergeRebaseLine) ProtoMessage() {}
 
 func (x *FeedMergeRebaseLine) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[355]
+	mi := &file_frontend_v1_feed_proto_msgTypes[356]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22661,7 +22719,7 @@ func (x *FeedMergeRebaseLine) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeRebaseLine.ProtoReflect.Descriptor instead.
 func (*FeedMergeRebaseLine) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{355}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{356}
 }
 
 func (x *FeedMergeRebaseLine) GetLine() isFeedMergeRebaseLine_Line {
@@ -22735,7 +22793,7 @@ type FeedMergeRebaseReplaying struct {
 
 func (x *FeedMergeRebaseReplaying) Reset() {
 	*x = FeedMergeRebaseReplaying{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[356]
+	mi := &file_frontend_v1_feed_proto_msgTypes[357]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22747,7 +22805,7 @@ func (x *FeedMergeRebaseReplaying) String() string {
 func (*FeedMergeRebaseReplaying) ProtoMessage() {}
 
 func (x *FeedMergeRebaseReplaying) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[356]
+	mi := &file_frontend_v1_feed_proto_msgTypes[357]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22760,7 +22818,7 @@ func (x *FeedMergeRebaseReplaying) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeRebaseReplaying.ProtoReflect.Descriptor instead.
 func (*FeedMergeRebaseReplaying) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{356}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{357}
 }
 
 func (x *FeedMergeRebaseReplaying) GetCommits() uint32 {
@@ -22817,7 +22875,7 @@ type FeedMergeRebaseTarget struct {
 
 func (x *FeedMergeRebaseTarget) Reset() {
 	*x = FeedMergeRebaseTarget{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[357]
+	mi := &file_frontend_v1_feed_proto_msgTypes[358]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22829,7 +22887,7 @@ func (x *FeedMergeRebaseTarget) String() string {
 func (*FeedMergeRebaseTarget) ProtoMessage() {}
 
 func (x *FeedMergeRebaseTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[357]
+	mi := &file_frontend_v1_feed_proto_msgTypes[358]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22842,7 +22900,7 @@ func (x *FeedMergeRebaseTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeRebaseTarget.ProtoReflect.Descriptor instead.
 func (*FeedMergeRebaseTarget) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{357}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{358}
 }
 
 func (x *FeedMergeRebaseTarget) GetBranch() string {
@@ -22900,7 +22958,7 @@ type FeedMergeTabRebaseCommit struct {
 
 func (x *FeedMergeTabRebaseCommit) Reset() {
 	*x = FeedMergeTabRebaseCommit{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[358]
+	mi := &file_frontend_v1_feed_proto_msgTypes[359]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -22912,7 +22970,7 @@ func (x *FeedMergeTabRebaseCommit) String() string {
 func (*FeedMergeTabRebaseCommit) ProtoMessage() {}
 
 func (x *FeedMergeTabRebaseCommit) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[358]
+	mi := &file_frontend_v1_feed_proto_msgTypes[359]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -22925,7 +22983,7 @@ func (x *FeedMergeTabRebaseCommit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabRebaseCommit.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabRebaseCommit) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{358}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{359}
 }
 
 func (x *FeedMergeTabRebaseCommit) GetState() isFeedMergeTabRebaseCommit_State {
@@ -23028,7 +23086,7 @@ type FeedMergeRebaseCommitPending struct {
 
 func (x *FeedMergeRebaseCommitPending) Reset() {
 	*x = FeedMergeRebaseCommitPending{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[359]
+	mi := &file_frontend_v1_feed_proto_msgTypes[360]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23040,7 +23098,7 @@ func (x *FeedMergeRebaseCommitPending) String() string {
 func (*FeedMergeRebaseCommitPending) ProtoMessage() {}
 
 func (x *FeedMergeRebaseCommitPending) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[359]
+	mi := &file_frontend_v1_feed_proto_msgTypes[360]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23053,7 +23111,7 @@ func (x *FeedMergeRebaseCommitPending) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeRebaseCommitPending.ProtoReflect.Descriptor instead.
 func (*FeedMergeRebaseCommitPending) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{359}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{360}
 }
 
 // The branch commit a subtab replays, as its label draws it.
@@ -23069,7 +23127,7 @@ type FeedMergeRebaseCommitIdentity struct {
 
 func (x *FeedMergeRebaseCommitIdentity) Reset() {
 	*x = FeedMergeRebaseCommitIdentity{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[360]
+	mi := &file_frontend_v1_feed_proto_msgTypes[361]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23081,7 +23139,7 @@ func (x *FeedMergeRebaseCommitIdentity) String() string {
 func (*FeedMergeRebaseCommitIdentity) ProtoMessage() {}
 
 func (x *FeedMergeRebaseCommitIdentity) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[360]
+	mi := &file_frontend_v1_feed_proto_msgTypes[361]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23094,7 +23152,7 @@ func (x *FeedMergeRebaseCommitIdentity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeRebaseCommitIdentity.ProtoReflect.Descriptor instead.
 func (*FeedMergeRebaseCommitIdentity) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{360}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{361}
 }
 
 func (x *FeedMergeRebaseCommitIdentity) GetShortSha() string {
@@ -23131,7 +23189,7 @@ type FeedMergeRebaseCommitConflict struct {
 
 func (x *FeedMergeRebaseCommitConflict) Reset() {
 	*x = FeedMergeRebaseCommitConflict{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[361]
+	mi := &file_frontend_v1_feed_proto_msgTypes[362]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23143,7 +23201,7 @@ func (x *FeedMergeRebaseCommitConflict) String() string {
 func (*FeedMergeRebaseCommitConflict) ProtoMessage() {}
 
 func (x *FeedMergeRebaseCommitConflict) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[361]
+	mi := &file_frontend_v1_feed_proto_msgTypes[362]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23156,7 +23214,7 @@ func (x *FeedMergeRebaseCommitConflict) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeRebaseCommitConflict.ProtoReflect.Descriptor instead.
 func (*FeedMergeRebaseCommitConflict) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{361}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{362}
 }
 
 func (x *FeedMergeRebaseCommitConflict) GetState() isFeedMergeRebaseCommitConflict_State {
@@ -23237,7 +23295,7 @@ type FeedMergeConflictFile struct {
 
 func (x *FeedMergeConflictFile) Reset() {
 	*x = FeedMergeConflictFile{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[362]
+	mi := &file_frontend_v1_feed_proto_msgTypes[363]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23249,7 +23307,7 @@ func (x *FeedMergeConflictFile) String() string {
 func (*FeedMergeConflictFile) ProtoMessage() {}
 
 func (x *FeedMergeConflictFile) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[362]
+	mi := &file_frontend_v1_feed_proto_msgTypes[363]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23262,7 +23320,7 @@ func (x *FeedMergeConflictFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeConflictFile.ProtoReflect.Descriptor instead.
 func (*FeedMergeConflictFile) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{362}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{363}
 }
 
 func (x *FeedMergeConflictFile) GetPath() string {
@@ -23293,7 +23351,7 @@ type FeedMergeTabTests struct {
 
 func (x *FeedMergeTabTests) Reset() {
 	*x = FeedMergeTabTests{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[363]
+	mi := &file_frontend_v1_feed_proto_msgTypes[364]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23305,7 +23363,7 @@ func (x *FeedMergeTabTests) String() string {
 func (*FeedMergeTabTests) ProtoMessage() {}
 
 func (x *FeedMergeTabTests) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[363]
+	mi := &file_frontend_v1_feed_proto_msgTypes[364]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23318,7 +23376,7 @@ func (x *FeedMergeTabTests) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabTests.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabTests) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{363}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{364}
 }
 
 func (x *FeedMergeTabTests) GetState() isFeedMergeTabTests_State {
@@ -23410,7 +23468,7 @@ type FeedMergeTabTestsRun struct {
 
 func (x *FeedMergeTabTestsRun) Reset() {
 	*x = FeedMergeTabTestsRun{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[364]
+	mi := &file_frontend_v1_feed_proto_msgTypes[365]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23422,7 +23480,7 @@ func (x *FeedMergeTabTestsRun) String() string {
 func (*FeedMergeTabTestsRun) ProtoMessage() {}
 
 func (x *FeedMergeTabTestsRun) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[364]
+	mi := &file_frontend_v1_feed_proto_msgTypes[365]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23435,7 +23493,7 @@ func (x *FeedMergeTabTestsRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabTestsRun.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabTestsRun) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{364}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{365}
 }
 
 func (x *FeedMergeTabTestsRun) GetState() isFeedMergeTabTestsRun_State {
@@ -23528,7 +23586,7 @@ type FeedMergeTabTestsRunWaitingForTurn struct {
 
 func (x *FeedMergeTabTestsRunWaitingForTurn) Reset() {
 	*x = FeedMergeTabTestsRunWaitingForTurn{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[365]
+	mi := &file_frontend_v1_feed_proto_msgTypes[366]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23540,7 +23598,7 @@ func (x *FeedMergeTabTestsRunWaitingForTurn) String() string {
 func (*FeedMergeTabTestsRunWaitingForTurn) ProtoMessage() {}
 
 func (x *FeedMergeTabTestsRunWaitingForTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[365]
+	mi := &file_frontend_v1_feed_proto_msgTypes[366]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23553,7 +23611,7 @@ func (x *FeedMergeTabTestsRunWaitingForTurn) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use FeedMergeTabTestsRunWaitingForTurn.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabTestsRunWaitingForTurn) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{365}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{366}
 }
 
 func (x *FeedMergeTabTestsRunWaitingForTurn) GetStartedAtMs() int64 {
@@ -23581,7 +23639,7 @@ type FeedMergeTestTurnHolder struct {
 
 func (x *FeedMergeTestTurnHolder) Reset() {
 	*x = FeedMergeTestTurnHolder{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[366]
+	mi := &file_frontend_v1_feed_proto_msgTypes[367]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23593,7 +23651,7 @@ func (x *FeedMergeTestTurnHolder) String() string {
 func (*FeedMergeTestTurnHolder) ProtoMessage() {}
 
 func (x *FeedMergeTestTurnHolder) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[366]
+	mi := &file_frontend_v1_feed_proto_msgTypes[367]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23606,7 +23664,7 @@ func (x *FeedMergeTestTurnHolder) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestTurnHolder.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestTurnHolder) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{366}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{367}
 }
 
 func (x *FeedMergeTestTurnHolder) GetWorkspaceName() string {
@@ -23630,7 +23688,7 @@ type FeedMergeTestsRunOutput struct {
 
 func (x *FeedMergeTestsRunOutput) Reset() {
 	*x = FeedMergeTestsRunOutput{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[367]
+	mi := &file_frontend_v1_feed_proto_msgTypes[368]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23642,7 +23700,7 @@ func (x *FeedMergeTestsRunOutput) String() string {
 func (*FeedMergeTestsRunOutput) ProtoMessage() {}
 
 func (x *FeedMergeTestsRunOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[367]
+	mi := &file_frontend_v1_feed_proto_msgTypes[368]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23655,7 +23713,7 @@ func (x *FeedMergeTestsRunOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestsRunOutput.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestsRunOutput) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{367}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{368}
 }
 
 func (x *FeedMergeTestsRunOutput) GetSuites() []*FeedMergeTestSuite {
@@ -23696,7 +23754,7 @@ type FeedMergeTabTestsRunFixing struct {
 
 func (x *FeedMergeTabTestsRunFixing) Reset() {
 	*x = FeedMergeTabTestsRunFixing{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[368]
+	mi := &file_frontend_v1_feed_proto_msgTypes[369]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23708,7 +23766,7 @@ func (x *FeedMergeTabTestsRunFixing) String() string {
 func (*FeedMergeTabTestsRunFixing) ProtoMessage() {}
 
 func (x *FeedMergeTabTestsRunFixing) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[368]
+	mi := &file_frontend_v1_feed_proto_msgTypes[369]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23721,7 +23779,7 @@ func (x *FeedMergeTabTestsRunFixing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabTestsRunFixing.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabTestsRunFixing) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{368}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{369}
 }
 
 func (x *FeedMergeTabTestsRunFixing) GetState() isFeedMergeTabTestsRunFixing_State {
@@ -23805,7 +23863,7 @@ type FeedMergeTestLog struct {
 
 func (x *FeedMergeTestLog) Reset() {
 	*x = FeedMergeTestLog{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[369]
+	mi := &file_frontend_v1_feed_proto_msgTypes[370]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23817,7 +23875,7 @@ func (x *FeedMergeTestLog) String() string {
 func (*FeedMergeTestLog) ProtoMessage() {}
 
 func (x *FeedMergeTestLog) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[369]
+	mi := &file_frontend_v1_feed_proto_msgTypes[370]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23830,7 +23888,7 @@ func (x *FeedMergeTestLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestLog.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestLog) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{369}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{370}
 }
 
 func (x *FeedMergeTestLog) GetToken() *FeedMergeTestLogToken {
@@ -23860,7 +23918,7 @@ type FeedMergeTestLogToken struct {
 
 func (x *FeedMergeTestLogToken) Reset() {
 	*x = FeedMergeTestLogToken{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[370]
+	mi := &file_frontend_v1_feed_proto_msgTypes[371]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23872,7 +23930,7 @@ func (x *FeedMergeTestLogToken) String() string {
 func (*FeedMergeTestLogToken) ProtoMessage() {}
 
 func (x *FeedMergeTestLogToken) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[370]
+	mi := &file_frontend_v1_feed_proto_msgTypes[371]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23885,7 +23943,7 @@ func (x *FeedMergeTestLogToken) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestLogToken.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestLogToken) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{370}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{371}
 }
 
 func (x *FeedMergeTestLogToken) GetValue() string {
@@ -23906,7 +23964,7 @@ type FeedMergeTestLogLabel struct {
 
 func (x *FeedMergeTestLogLabel) Reset() {
 	*x = FeedMergeTestLogLabel{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[371]
+	mi := &file_frontend_v1_feed_proto_msgTypes[372]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23918,7 +23976,7 @@ func (x *FeedMergeTestLogLabel) String() string {
 func (*FeedMergeTestLogLabel) ProtoMessage() {}
 
 func (x *FeedMergeTestLogLabel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[371]
+	mi := &file_frontend_v1_feed_proto_msgTypes[372]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23931,7 +23989,7 @@ func (x *FeedMergeTestLogLabel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestLogLabel.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestLogLabel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{371}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{372}
 }
 
 func (x *FeedMergeTestLogLabel) GetText() string {
@@ -23968,7 +24026,7 @@ type FeedMergeTestSuite struct {
 
 func (x *FeedMergeTestSuite) Reset() {
 	*x = FeedMergeTestSuite{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[372]
+	mi := &file_frontend_v1_feed_proto_msgTypes[373]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -23980,7 +24038,7 @@ func (x *FeedMergeTestSuite) String() string {
 func (*FeedMergeTestSuite) ProtoMessage() {}
 
 func (x *FeedMergeTestSuite) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[372]
+	mi := &file_frontend_v1_feed_proto_msgTypes[373]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -23993,7 +24051,7 @@ func (x *FeedMergeTestSuite) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestSuite.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestSuite) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{372}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{373}
 }
 
 func (x *FeedMergeTestSuite) GetName() string {
@@ -24109,7 +24167,7 @@ type FeedMergeTestCounts struct {
 
 func (x *FeedMergeTestCounts) Reset() {
 	*x = FeedMergeTestCounts{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[373]
+	mi := &file_frontend_v1_feed_proto_msgTypes[374]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24121,7 +24179,7 @@ func (x *FeedMergeTestCounts) String() string {
 func (*FeedMergeTestCounts) ProtoMessage() {}
 
 func (x *FeedMergeTestCounts) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[373]
+	mi := &file_frontend_v1_feed_proto_msgTypes[374]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24134,7 +24192,7 @@ func (x *FeedMergeTestCounts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestCounts.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestCounts) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{373}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{374}
 }
 
 func (x *FeedMergeTestCounts) GetPassed() uint32 {
@@ -24174,7 +24232,7 @@ type FeedMergeTestSuiteRunning struct {
 
 func (x *FeedMergeTestSuiteRunning) Reset() {
 	*x = FeedMergeTestSuiteRunning{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[374]
+	mi := &file_frontend_v1_feed_proto_msgTypes[375]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24186,7 +24244,7 @@ func (x *FeedMergeTestSuiteRunning) String() string {
 func (*FeedMergeTestSuiteRunning) ProtoMessage() {}
 
 func (x *FeedMergeTestSuiteRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[374]
+	mi := &file_frontend_v1_feed_proto_msgTypes[375]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24199,7 +24257,7 @@ func (x *FeedMergeTestSuiteRunning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestSuiteRunning.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestSuiteRunning) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{374}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{375}
 }
 
 func (x *FeedMergeTestSuiteRunning) GetSoFar() isFeedMergeTestSuiteRunning_SoFar {
@@ -24270,7 +24328,7 @@ type FeedMergeTestSuiteRunningUnreported struct {
 
 func (x *FeedMergeTestSuiteRunningUnreported) Reset() {
 	*x = FeedMergeTestSuiteRunningUnreported{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[375]
+	mi := &file_frontend_v1_feed_proto_msgTypes[376]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24282,7 +24340,7 @@ func (x *FeedMergeTestSuiteRunningUnreported) String() string {
 func (*FeedMergeTestSuiteRunningUnreported) ProtoMessage() {}
 
 func (x *FeedMergeTestSuiteRunningUnreported) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[375]
+	mi := &file_frontend_v1_feed_proto_msgTypes[376]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24295,7 +24353,7 @@ func (x *FeedMergeTestSuiteRunningUnreported) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use FeedMergeTestSuiteRunningUnreported.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestSuiteRunningUnreported) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{375}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{376}
 }
 
 // Every verdict so far is a pass.
@@ -24307,7 +24365,7 @@ type FeedMergeTestSuiteRunningPassing struct {
 
 func (x *FeedMergeTestSuiteRunningPassing) Reset() {
 	*x = FeedMergeTestSuiteRunningPassing{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[376]
+	mi := &file_frontend_v1_feed_proto_msgTypes[377]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24319,7 +24377,7 @@ func (x *FeedMergeTestSuiteRunningPassing) String() string {
 func (*FeedMergeTestSuiteRunningPassing) ProtoMessage() {}
 
 func (x *FeedMergeTestSuiteRunningPassing) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[376]
+	mi := &file_frontend_v1_feed_proto_msgTypes[377]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24332,7 +24390,7 @@ func (x *FeedMergeTestSuiteRunningPassing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestSuiteRunningPassing.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestSuiteRunningPassing) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{376}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{377}
 }
 
 // At least one verdict is a failure.
@@ -24344,7 +24402,7 @@ type FeedMergeTestSuiteRunningFailing struct {
 
 func (x *FeedMergeTestSuiteRunningFailing) Reset() {
 	*x = FeedMergeTestSuiteRunningFailing{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[377]
+	mi := &file_frontend_v1_feed_proto_msgTypes[378]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24356,7 +24414,7 @@ func (x *FeedMergeTestSuiteRunningFailing) String() string {
 func (*FeedMergeTestSuiteRunningFailing) ProtoMessage() {}
 
 func (x *FeedMergeTestSuiteRunningFailing) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[377]
+	mi := &file_frontend_v1_feed_proto_msgTypes[378]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24369,7 +24427,7 @@ func (x *FeedMergeTestSuiteRunningFailing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestSuiteRunningFailing.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestSuiteRunningFailing) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{377}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{378}
 }
 
 type FeedMergeTestSuitePassed struct {
@@ -24380,7 +24438,7 @@ type FeedMergeTestSuitePassed struct {
 
 func (x *FeedMergeTestSuitePassed) Reset() {
 	*x = FeedMergeTestSuitePassed{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[378]
+	mi := &file_frontend_v1_feed_proto_msgTypes[379]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24392,7 +24450,7 @@ func (x *FeedMergeTestSuitePassed) String() string {
 func (*FeedMergeTestSuitePassed) ProtoMessage() {}
 
 func (x *FeedMergeTestSuitePassed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[378]
+	mi := &file_frontend_v1_feed_proto_msgTypes[379]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24405,7 +24463,7 @@ func (x *FeedMergeTestSuitePassed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestSuitePassed.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestSuitePassed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{378}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{379}
 }
 
 type FeedMergeTestSuiteFailed struct {
@@ -24416,7 +24474,7 @@ type FeedMergeTestSuiteFailed struct {
 
 func (x *FeedMergeTestSuiteFailed) Reset() {
 	*x = FeedMergeTestSuiteFailed{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[379]
+	mi := &file_frontend_v1_feed_proto_msgTypes[380]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24428,7 +24486,7 @@ func (x *FeedMergeTestSuiteFailed) String() string {
 func (*FeedMergeTestSuiteFailed) ProtoMessage() {}
 
 func (x *FeedMergeTestSuiteFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[379]
+	mi := &file_frontend_v1_feed_proto_msgTypes[380]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24441,7 +24499,7 @@ func (x *FeedMergeTestSuiteFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestSuiteFailed.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestSuiteFailed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{379}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{380}
 }
 
 // A suite this gate did not run because its inputs are byte-identical to ones
@@ -24460,7 +24518,7 @@ type FeedMergeTestSuiteReused struct {
 
 func (x *FeedMergeTestSuiteReused) Reset() {
 	*x = FeedMergeTestSuiteReused{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[380]
+	mi := &file_frontend_v1_feed_proto_msgTypes[381]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24472,7 +24530,7 @@ func (x *FeedMergeTestSuiteReused) String() string {
 func (*FeedMergeTestSuiteReused) ProtoMessage() {}
 
 func (x *FeedMergeTestSuiteReused) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[380]
+	mi := &file_frontend_v1_feed_proto_msgTypes[381]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24485,7 +24543,7 @@ func (x *FeedMergeTestSuiteReused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestSuiteReused.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestSuiteReused) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{380}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{381}
 }
 
 func (x *FeedMergeTestSuiteReused) GetSource() *FeedMergeTestSuiteReusedSource {
@@ -24507,7 +24565,7 @@ type FeedMergeTestSuiteReusedSource struct {
 
 func (x *FeedMergeTestSuiteReusedSource) Reset() {
 	*x = FeedMergeTestSuiteReusedSource{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[381]
+	mi := &file_frontend_v1_feed_proto_msgTypes[382]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24519,7 +24577,7 @@ func (x *FeedMergeTestSuiteReusedSource) String() string {
 func (*FeedMergeTestSuiteReusedSource) ProtoMessage() {}
 
 func (x *FeedMergeTestSuiteReusedSource) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[381]
+	mi := &file_frontend_v1_feed_proto_msgTypes[382]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24532,7 +24590,7 @@ func (x *FeedMergeTestSuiteReusedSource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestSuiteReusedSource.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestSuiteReusedSource) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{381}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{382}
 }
 
 func (x *FeedMergeTestSuiteReusedSource) GetText() string {
@@ -24553,7 +24611,7 @@ type FeedMergeTestSpan struct {
 
 func (x *FeedMergeTestSpan) Reset() {
 	*x = FeedMergeTestSpan{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[382]
+	mi := &file_frontend_v1_feed_proto_msgTypes[383]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24565,7 +24623,7 @@ func (x *FeedMergeTestSpan) String() string {
 func (*FeedMergeTestSpan) ProtoMessage() {}
 
 func (x *FeedMergeTestSpan) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[382]
+	mi := &file_frontend_v1_feed_proto_msgTypes[383]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24578,7 +24636,7 @@ func (x *FeedMergeTestSpan) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTestSpan.ProtoReflect.Descriptor instead.
 func (*FeedMergeTestSpan) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{382}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{383}
 }
 
 func (x *FeedMergeTestSpan) GetText() string {
@@ -24609,7 +24667,7 @@ type FeedMergeFixAttempt struct {
 
 func (x *FeedMergeFixAttempt) Reset() {
 	*x = FeedMergeFixAttempt{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[383]
+	mi := &file_frontend_v1_feed_proto_msgTypes[384]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24621,7 +24679,7 @@ func (x *FeedMergeFixAttempt) String() string {
 func (*FeedMergeFixAttempt) ProtoMessage() {}
 
 func (x *FeedMergeFixAttempt) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[383]
+	mi := &file_frontend_v1_feed_proto_msgTypes[384]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24634,7 +24692,7 @@ func (x *FeedMergeFixAttempt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeFixAttempt.ProtoReflect.Descriptor instead.
 func (*FeedMergeFixAttempt) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{383}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{384}
 }
 
 func (x *FeedMergeFixAttempt) GetAttempt() uint32 {
@@ -24670,7 +24728,7 @@ type FeedMergeTabCommitting struct {
 
 func (x *FeedMergeTabCommitting) Reset() {
 	*x = FeedMergeTabCommitting{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[384]
+	mi := &file_frontend_v1_feed_proto_msgTypes[385]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24682,7 +24740,7 @@ func (x *FeedMergeTabCommitting) String() string {
 func (*FeedMergeTabCommitting) ProtoMessage() {}
 
 func (x *FeedMergeTabCommitting) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[384]
+	mi := &file_frontend_v1_feed_proto_msgTypes[385]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24695,7 +24753,7 @@ func (x *FeedMergeTabCommitting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabCommitting.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabCommitting) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{384}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{385}
 }
 
 func (x *FeedMergeTabCommitting) GetState() isFeedMergeTabCommitting_State {
@@ -24756,7 +24814,7 @@ type FeedMergeCommitSubject struct {
 
 func (x *FeedMergeCommitSubject) Reset() {
 	*x = FeedMergeCommitSubject{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[385]
+	mi := &file_frontend_v1_feed_proto_msgTypes[386]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24768,7 +24826,7 @@ func (x *FeedMergeCommitSubject) String() string {
 func (*FeedMergeCommitSubject) ProtoMessage() {}
 
 func (x *FeedMergeCommitSubject) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[385]
+	mi := &file_frontend_v1_feed_proto_msgTypes[386]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24781,7 +24839,7 @@ func (x *FeedMergeCommitSubject) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeCommitSubject.ProtoReflect.Descriptor instead.
 func (*FeedMergeCommitSubject) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{385}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{386}
 }
 
 func (x *FeedMergeCommitSubject) GetText() string {
@@ -24811,7 +24869,7 @@ type FeedMergeTabUpdatingMain struct {
 
 func (x *FeedMergeTabUpdatingMain) Reset() {
 	*x = FeedMergeTabUpdatingMain{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[386]
+	mi := &file_frontend_v1_feed_proto_msgTypes[387]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24823,7 +24881,7 @@ func (x *FeedMergeTabUpdatingMain) String() string {
 func (*FeedMergeTabUpdatingMain) ProtoMessage() {}
 
 func (x *FeedMergeTabUpdatingMain) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[386]
+	mi := &file_frontend_v1_feed_proto_msgTypes[387]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24836,7 +24894,7 @@ func (x *FeedMergeTabUpdatingMain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabUpdatingMain.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabUpdatingMain) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{386}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{387}
 }
 
 func (x *FeedMergeTabUpdatingMain) GetState() isFeedMergeTabUpdatingMain_State {
@@ -24901,7 +24959,7 @@ type FeedMergeUpdatingMainStep struct {
 
 func (x *FeedMergeUpdatingMainStep) Reset() {
 	*x = FeedMergeUpdatingMainStep{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[387]
+	mi := &file_frontend_v1_feed_proto_msgTypes[388]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24913,7 +24971,7 @@ func (x *FeedMergeUpdatingMainStep) String() string {
 func (*FeedMergeUpdatingMainStep) ProtoMessage() {}
 
 func (x *FeedMergeUpdatingMainStep) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[387]
+	mi := &file_frontend_v1_feed_proto_msgTypes[388]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -24926,7 +24984,7 @@ func (x *FeedMergeUpdatingMainStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeUpdatingMainStep.ProtoReflect.Descriptor instead.
 func (*FeedMergeUpdatingMainStep) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{387}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{388}
 }
 
 func (x *FeedMergeUpdatingMainStep) GetStep() isFeedMergeUpdatingMainStep_Step {
@@ -24981,7 +25039,7 @@ type FeedMergeUpdatingMainFetching struct {
 
 func (x *FeedMergeUpdatingMainFetching) Reset() {
 	*x = FeedMergeUpdatingMainFetching{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[388]
+	mi := &file_frontend_v1_feed_proto_msgTypes[389]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -24993,7 +25051,7 @@ func (x *FeedMergeUpdatingMainFetching) String() string {
 func (*FeedMergeUpdatingMainFetching) ProtoMessage() {}
 
 func (x *FeedMergeUpdatingMainFetching) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[388]
+	mi := &file_frontend_v1_feed_proto_msgTypes[389]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25006,7 +25064,7 @@ func (x *FeedMergeUpdatingMainFetching) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeUpdatingMainFetching.ProtoReflect.Descriptor instead.
 func (*FeedMergeUpdatingMainFetching) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{388}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{389}
 }
 
 // Fast-forwarding to a commit.
@@ -25020,7 +25078,7 @@ type FeedMergeUpdatingMainFastForwarding struct {
 
 func (x *FeedMergeUpdatingMainFastForwarding) Reset() {
 	*x = FeedMergeUpdatingMainFastForwarding{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[389]
+	mi := &file_frontend_v1_feed_proto_msgTypes[390]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25032,7 +25090,7 @@ func (x *FeedMergeUpdatingMainFastForwarding) String() string {
 func (*FeedMergeUpdatingMainFastForwarding) ProtoMessage() {}
 
 func (x *FeedMergeUpdatingMainFastForwarding) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[389]
+	mi := &file_frontend_v1_feed_proto_msgTypes[390]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25045,7 +25103,7 @@ func (x *FeedMergeUpdatingMainFastForwarding) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use FeedMergeUpdatingMainFastForwarding.ProtoReflect.Descriptor instead.
 func (*FeedMergeUpdatingMainFastForwarding) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{389}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{390}
 }
 
 func (x *FeedMergeUpdatingMainFastForwarding) GetCommit() string {
@@ -25074,7 +25132,7 @@ type FeedMergeTabHookPrompt struct {
 
 func (x *FeedMergeTabHookPrompt) Reset() {
 	*x = FeedMergeTabHookPrompt{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[390]
+	mi := &file_frontend_v1_feed_proto_msgTypes[391]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25086,7 +25144,7 @@ func (x *FeedMergeTabHookPrompt) String() string {
 func (*FeedMergeTabHookPrompt) ProtoMessage() {}
 
 func (x *FeedMergeTabHookPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[390]
+	mi := &file_frontend_v1_feed_proto_msgTypes[391]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25099,7 +25157,7 @@ func (x *FeedMergeTabHookPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabHookPrompt.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabHookPrompt) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{390}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{391}
 }
 
 func (x *FeedMergeTabHookPrompt) GetState() isFeedMergeTabHookPrompt_State {
@@ -25170,7 +25228,7 @@ type FeedMergeTabHookScript struct {
 
 func (x *FeedMergeTabHookScript) Reset() {
 	*x = FeedMergeTabHookScript{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[391]
+	mi := &file_frontend_v1_feed_proto_msgTypes[392]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25182,7 +25240,7 @@ func (x *FeedMergeTabHookScript) String() string {
 func (*FeedMergeTabHookScript) ProtoMessage() {}
 
 func (x *FeedMergeTabHookScript) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[391]
+	mi := &file_frontend_v1_feed_proto_msgTypes[392]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25195,7 +25253,7 @@ func (x *FeedMergeTabHookScript) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeTabHookScript.ProtoReflect.Descriptor instead.
 func (*FeedMergeTabHookScript) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{391}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{392}
 }
 
 func (x *FeedMergeTabHookScript) GetState() isFeedMergeTabHookScript_State {
@@ -25278,7 +25336,7 @@ type FeedMergeHookScriptPath struct {
 
 func (x *FeedMergeHookScriptPath) Reset() {
 	*x = FeedMergeHookScriptPath{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[392]
+	mi := &file_frontend_v1_feed_proto_msgTypes[393]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25290,7 +25348,7 @@ func (x *FeedMergeHookScriptPath) String() string {
 func (*FeedMergeHookScriptPath) ProtoMessage() {}
 
 func (x *FeedMergeHookScriptPath) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[392]
+	mi := &file_frontend_v1_feed_proto_msgTypes[393]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25303,7 +25361,7 @@ func (x *FeedMergeHookScriptPath) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeHookScriptPath.ProtoReflect.Descriptor instead.
 func (*FeedMergeHookScriptPath) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{392}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{393}
 }
 
 func (x *FeedMergeHookScriptPath) GetText() string {
@@ -25324,7 +25382,7 @@ type FeedMergeHookScriptLog struct {
 
 func (x *FeedMergeHookScriptLog) Reset() {
 	*x = FeedMergeHookScriptLog{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[393]
+	mi := &file_frontend_v1_feed_proto_msgTypes[394]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25336,7 +25394,7 @@ func (x *FeedMergeHookScriptLog) String() string {
 func (*FeedMergeHookScriptLog) ProtoMessage() {}
 
 func (x *FeedMergeHookScriptLog) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[393]
+	mi := &file_frontend_v1_feed_proto_msgTypes[394]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25349,7 +25407,7 @@ func (x *FeedMergeHookScriptLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeHookScriptLog.ProtoReflect.Descriptor instead.
 func (*FeedMergeHookScriptLog) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{393}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{394}
 }
 
 func (x *FeedMergeHookScriptLog) GetPath() string {
@@ -25369,7 +25427,7 @@ type FeedMergeHookScriptLine struct {
 
 func (x *FeedMergeHookScriptLine) Reset() {
 	*x = FeedMergeHookScriptLine{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[394]
+	mi := &file_frontend_v1_feed_proto_msgTypes[395]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25381,7 +25439,7 @@ func (x *FeedMergeHookScriptLine) String() string {
 func (*FeedMergeHookScriptLine) ProtoMessage() {}
 
 func (x *FeedMergeHookScriptLine) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[394]
+	mi := &file_frontend_v1_feed_proto_msgTypes[395]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25394,7 +25452,7 @@ func (x *FeedMergeHookScriptLine) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeHookScriptLine.ProtoReflect.Descriptor instead.
 func (*FeedMergeHookScriptLine) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{394}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{395}
 }
 
 func (x *FeedMergeHookScriptLine) GetText() string {
@@ -25418,7 +25476,7 @@ type FeedMergeHookScriptExit struct {
 
 func (x *FeedMergeHookScriptExit) Reset() {
 	*x = FeedMergeHookScriptExit{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[395]
+	mi := &file_frontend_v1_feed_proto_msgTypes[396]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25430,7 +25488,7 @@ func (x *FeedMergeHookScriptExit) String() string {
 func (*FeedMergeHookScriptExit) ProtoMessage() {}
 
 func (x *FeedMergeHookScriptExit) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[395]
+	mi := &file_frontend_v1_feed_proto_msgTypes[396]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25443,7 +25501,7 @@ func (x *FeedMergeHookScriptExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeHookScriptExit.ProtoReflect.Descriptor instead.
 func (*FeedMergeHookScriptExit) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{395}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{396}
 }
 
 func (x *FeedMergeHookScriptExit) GetHow() isFeedMergeHookScriptExit_How {
@@ -25500,7 +25558,7 @@ type FeedMergeHookScriptExited struct {
 
 func (x *FeedMergeHookScriptExited) Reset() {
 	*x = FeedMergeHookScriptExited{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[396]
+	mi := &file_frontend_v1_feed_proto_msgTypes[397]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25512,7 +25570,7 @@ func (x *FeedMergeHookScriptExited) String() string {
 func (*FeedMergeHookScriptExited) ProtoMessage() {}
 
 func (x *FeedMergeHookScriptExited) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[396]
+	mi := &file_frontend_v1_feed_proto_msgTypes[397]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25525,7 +25583,7 @@ func (x *FeedMergeHookScriptExited) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeHookScriptExited.ProtoReflect.Descriptor instead.
 func (*FeedMergeHookScriptExited) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{396}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{397}
 }
 
 func (x *FeedMergeHookScriptExited) GetStatus() int32 {
@@ -25546,7 +25604,7 @@ type FeedMergeHookScriptTimedOut struct {
 
 func (x *FeedMergeHookScriptTimedOut) Reset() {
 	*x = FeedMergeHookScriptTimedOut{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[397]
+	mi := &file_frontend_v1_feed_proto_msgTypes[398]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25558,7 +25616,7 @@ func (x *FeedMergeHookScriptTimedOut) String() string {
 func (*FeedMergeHookScriptTimedOut) ProtoMessage() {}
 
 func (x *FeedMergeHookScriptTimedOut) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[397]
+	mi := &file_frontend_v1_feed_proto_msgTypes[398]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25571,7 +25629,7 @@ func (x *FeedMergeHookScriptTimedOut) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeHookScriptTimedOut.ProtoReflect.Descriptor instead.
 func (*FeedMergeHookScriptTimedOut) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{397}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{398}
 }
 
 func (x *FeedMergeHookScriptTimedOut) GetTimeoutSeconds() uint32 {
@@ -25599,7 +25657,7 @@ type FeedMergeQueue struct {
 
 func (x *FeedMergeQueue) Reset() {
 	*x = FeedMergeQueue{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[398]
+	mi := &file_frontend_v1_feed_proto_msgTypes[399]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25611,7 +25669,7 @@ func (x *FeedMergeQueue) String() string {
 func (*FeedMergeQueue) ProtoMessage() {}
 
 func (x *FeedMergeQueue) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[398]
+	mi := &file_frontend_v1_feed_proto_msgTypes[399]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25624,7 +25682,7 @@ func (x *FeedMergeQueue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeQueue.ProtoReflect.Descriptor instead.
 func (*FeedMergeQueue) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{398}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{399}
 }
 
 func (x *FeedMergeQueue) GetAhead() []*FeedMergeQueueEntry {
@@ -25672,7 +25730,7 @@ type FeedMergeQueueEntry struct {
 
 func (x *FeedMergeQueueEntry) Reset() {
 	*x = FeedMergeQueueEntry{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[399]
+	mi := &file_frontend_v1_feed_proto_msgTypes[400]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25684,7 +25742,7 @@ func (x *FeedMergeQueueEntry) String() string {
 func (*FeedMergeQueueEntry) ProtoMessage() {}
 
 func (x *FeedMergeQueueEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[399]
+	mi := &file_frontend_v1_feed_proto_msgTypes[400]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25697,7 +25755,7 @@ func (x *FeedMergeQueueEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeQueueEntry.ProtoReflect.Descriptor instead.
 func (*FeedMergeQueueEntry) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{399}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{400}
 }
 
 func (x *FeedMergeQueueEntry) GetWorkspace() *FeedMergeQueueWorkspace {
@@ -25774,7 +25832,7 @@ type FeedMergeQueueBubble struct {
 
 func (x *FeedMergeQueueBubble) Reset() {
 	*x = FeedMergeQueueBubble{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[400]
+	mi := &file_frontend_v1_feed_proto_msgTypes[401]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25786,7 +25844,7 @@ func (x *FeedMergeQueueBubble) String() string {
 func (*FeedMergeQueueBubble) ProtoMessage() {}
 
 func (x *FeedMergeQueueBubble) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[400]
+	mi := &file_frontend_v1_feed_proto_msgTypes[401]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25799,7 +25857,7 @@ func (x *FeedMergeQueueBubble) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeQueueBubble.ProtoReflect.Descriptor instead.
 func (*FeedMergeQueueBubble) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{400}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{401}
 }
 
 func (x *FeedMergeQueueBubble) GetRequester() *v11.WorkspaceRef {
@@ -25826,7 +25884,7 @@ type FeedMergeQueueWorkspace struct {
 
 func (x *FeedMergeQueueWorkspace) Reset() {
 	*x = FeedMergeQueueWorkspace{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[401]
+	mi := &file_frontend_v1_feed_proto_msgTypes[402]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25838,7 +25896,7 @@ func (x *FeedMergeQueueWorkspace) String() string {
 func (*FeedMergeQueueWorkspace) ProtoMessage() {}
 
 func (x *FeedMergeQueueWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[401]
+	mi := &file_frontend_v1_feed_proto_msgTypes[402]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25851,7 +25909,7 @@ func (x *FeedMergeQueueWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeQueueWorkspace.ProtoReflect.Descriptor instead.
 func (*FeedMergeQueueWorkspace) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{401}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{402}
 }
 
 func (x *FeedMergeQueueWorkspace) GetRef() *v11.WorkspaceRef {
@@ -25871,7 +25929,7 @@ type FeedMergeQueueLabel struct {
 
 func (x *FeedMergeQueueLabel) Reset() {
 	*x = FeedMergeQueueLabel{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[402]
+	mi := &file_frontend_v1_feed_proto_msgTypes[403]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25883,7 +25941,7 @@ func (x *FeedMergeQueueLabel) String() string {
 func (*FeedMergeQueueLabel) ProtoMessage() {}
 
 func (x *FeedMergeQueueLabel) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[402]
+	mi := &file_frontend_v1_feed_proto_msgTypes[403]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25896,7 +25954,7 @@ func (x *FeedMergeQueueLabel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeQueueLabel.ProtoReflect.Descriptor instead.
 func (*FeedMergeQueueLabel) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{402}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{403}
 }
 
 func (x *FeedMergeQueueLabel) GetText() string {
@@ -25922,7 +25980,7 @@ type FeedMergeQueueMerging struct {
 
 func (x *FeedMergeQueueMerging) Reset() {
 	*x = FeedMergeQueueMerging{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[403]
+	mi := &file_frontend_v1_feed_proto_msgTypes[404]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25934,7 +25992,7 @@ func (x *FeedMergeQueueMerging) String() string {
 func (*FeedMergeQueueMerging) ProtoMessage() {}
 
 func (x *FeedMergeQueueMerging) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[403]
+	mi := &file_frontend_v1_feed_proto_msgTypes[404]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -25947,7 +26005,7 @@ func (x *FeedMergeQueueMerging) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeQueueMerging.ProtoReflect.Descriptor instead.
 func (*FeedMergeQueueMerging) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{403}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{404}
 }
 
 func (x *FeedMergeQueueMerging) GetActiveTab() *FeedMergeTabLabel {
@@ -25976,7 +26034,7 @@ type FeedMergeQueueWaiting struct {
 
 func (x *FeedMergeQueueWaiting) Reset() {
 	*x = FeedMergeQueueWaiting{}
-	mi := &file_frontend_v1_feed_proto_msgTypes[404]
+	mi := &file_frontend_v1_feed_proto_msgTypes[405]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -25988,7 +26046,7 @@ func (x *FeedMergeQueueWaiting) String() string {
 func (*FeedMergeQueueWaiting) ProtoMessage() {}
 
 func (x *FeedMergeQueueWaiting) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_feed_proto_msgTypes[404]
+	mi := &file_frontend_v1_feed_proto_msgTypes[405]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -26001,7 +26059,7 @@ func (x *FeedMergeQueueWaiting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeedMergeQueueWaiting.ProtoReflect.Descriptor instead.
 func (*FeedMergeQueueWaiting) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{404}
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{405}
 }
 
 func (x *FeedMergeQueueWaiting) GetStageEnteredAtMs() int64 {
@@ -26659,7 +26717,7 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x14FeedDetachedSubagent\x125\n" +
 	"\bsubagent\x18\x01 \x01(\v2\x19.frontend.v1.FeedSubagentR\bsubagent\"A\n" +
 	"\x11FeedDetachedShell\x12,\n" +
-	"\x05shell\x18\x01 \x01(\v2\x16.frontend.v1.FeedShellR\x05shell\"\xae\x04\n" +
+	"\x05shell\x18\x01 \x01(\v2\x16.frontend.v1.FeedShellR\x05shell\"\xf3\x04\n" +
 	"\fFeedSubagent\x124\n" +
 	"\x05label\x18\x01 \x01(\v2\x1e.frontend.v1.FeedSubagentLabelR\x05label\x12K\n" +
 	"\vdescription\x18\x02 \x01(\v2$.frontend.v1.FeedSubagentDescriptionH\x01R\vdescription\x88\x01\x01\x12<\n" +
@@ -26668,12 +26726,16 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x04live\x18\x05 \x01(\v2\x1d.frontend.v1.FeedSubagentLiveH\x00R\x04live\x12<\n" +
 	"\asettled\x18\x06 \x01(\v2 .frontend.v1.FeedSubagentSettledH\x00R\asettled\x12?\n" +
 	"\bsettling\x18\b \x01(\v2!.frontend.v1.FeedSubagentSettlingH\x00R\bsettling\x12=\n" +
-	"\awork_id\x18\a \x01(\v2\x1f.frontend.v1.FeedDetachedWorkIdH\x03R\x06workId\x88\x01\x01B\a\n" +
+	"\awork_id\x18\a \x01(\v2\x1f.frontend.v1.FeedDetachedWorkIdH\x03R\x06workId\x88\x01\x01\x129\n" +
+	"\x05model\x18\t \x01(\v2\x1e.frontend.v1.FeedSubagentModelH\x04R\x05model\x88\x01\x01B\a\n" +
 	"\x05stateB\x0e\n" +
 	"\f_descriptionB\t\n" +
 	"\a_tokensB\n" +
 	"\n" +
-	"\b_work_id\"(\n" +
+	"\b_work_idB\b\n" +
+	"\x06_model\"'\n" +
+	"\x11FeedSubagentModel\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"(\n" +
 	"\x12FeedDetachedWorkId\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"'\n" +
 	"\x11FeedSubagentLabel\x12\x12\n" +
@@ -27391,7 +27453,7 @@ func file_frontend_v1_feed_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_feed_proto_rawDescData
 }
 
-var file_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 405)
+var file_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 406)
 var file_frontend_v1_feed_proto_goTypes = []any{
 	(*FeedId)(nil),                                      // 0: frontend.v1.FeedId
 	(*FeedSelection)(nil),                               // 1: frontend.v1.FeedSelection
@@ -27584,237 +27646,238 @@ var file_frontend_v1_feed_proto_goTypes = []any{
 	(*FeedDetachedSubagent)(nil),                        // 188: frontend.v1.FeedDetachedSubagent
 	(*FeedDetachedShell)(nil),                           // 189: frontend.v1.FeedDetachedShell
 	(*FeedSubagent)(nil),                                // 190: frontend.v1.FeedSubagent
-	(*FeedDetachedWorkId)(nil),                          // 191: frontend.v1.FeedDetachedWorkId
-	(*FeedSubagentLabel)(nil),                           // 192: frontend.v1.FeedSubagentLabel
-	(*FeedSubagentDescription)(nil),                     // 193: frontend.v1.FeedSubagentDescription
-	(*FeedSubagentTokens)(nil),                          // 194: frontend.v1.FeedSubagentTokens
-	(*FeedSubagentRuntime)(nil),                         // 195: frontend.v1.FeedSubagentRuntime
-	(*FeedSubagentLive)(nil),                            // 196: frontend.v1.FeedSubagentLive
-	(*FeedSubagentLastProgress)(nil),                    // 197: frontend.v1.FeedSubagentLastProgress
-	(*FeedSubagentSettling)(nil),                        // 198: frontend.v1.FeedSubagentSettling
-	(*FeedSubagentSettled)(nil),                         // 199: frontend.v1.FeedSubagentSettled
-	(*FeedSubagentRestarted)(nil),                       // 200: frontend.v1.FeedSubagentRestarted
-	(*FeedSubagentSucceeded)(nil),                       // 201: frontend.v1.FeedSubagentSucceeded
-	(*FeedSubagentFailed)(nil),                          // 202: frontend.v1.FeedSubagentFailed
-	(*FeedSubagentCancelled)(nil),                       // 203: frontend.v1.FeedSubagentCancelled
-	(*FeedSubagentLost)(nil),                            // 204: frontend.v1.FeedSubagentLost
-	(*FeedSubagentLostProcessEnded)(nil),                // 205: frontend.v1.FeedSubagentLostProcessEnded
-	(*FeedSubagentLostFileVanished)(nil),                // 206: frontend.v1.FeedSubagentLostFileVanished
-	(*FeedSubagentLostWentSilent)(nil),                  // 207: frontend.v1.FeedSubagentLostWentSilent
-	(*FeedSubagentLostSweptUp)(nil),                     // 208: frontend.v1.FeedSubagentLostSweptUp
-	(*FeedShell)(nil),                                   // 209: frontend.v1.FeedShell
-	(*FeedShellCommand)(nil),                            // 210: frontend.v1.FeedShellCommand
-	(*FeedShellRuntime)(nil),                            // 211: frontend.v1.FeedShellRuntime
-	(*FeedShellSpool)(nil),                              // 212: frontend.v1.FeedShellSpool
-	(*FeedShellOmitted)(nil),                            // 213: frontend.v1.FeedShellOmitted
-	(*FeedShellLive)(nil),                               // 214: frontend.v1.FeedShellLive
-	(*FeedShellLastProgress)(nil),                       // 215: frontend.v1.FeedShellLastProgress
-	(*FeedShellSettled)(nil),                            // 216: frontend.v1.FeedShellSettled
-	(*FeedShellExit)(nil),                               // 217: frontend.v1.FeedShellExit
-	(*FeedShellCompleted)(nil),                          // 218: frontend.v1.FeedShellCompleted
-	(*FeedShellCompletedSucceeded)(nil),                 // 219: frontend.v1.FeedShellCompletedSucceeded
-	(*FeedShellCompletedFailed)(nil),                    // 220: frontend.v1.FeedShellCompletedFailed
-	(*FeedShellCancelled)(nil),                          // 221: frontend.v1.FeedShellCancelled
-	(*FeedShellLost)(nil),                               // 222: frontend.v1.FeedShellLost
-	(*FeedShellLostFileVanished)(nil),                   // 223: frontend.v1.FeedShellLostFileVanished
-	(*FeedShellLostWentSilent)(nil),                     // 224: frontend.v1.FeedShellLostWentSilent
-	(*FeedShellLostSweptUp)(nil),                        // 225: frontend.v1.FeedShellLostSweptUp
-	(*FeedShellLostProcessEnded)(nil),                   // 226: frontend.v1.FeedShellLostProcessEnded
-	(*FeedPermission)(nil),                              // 227: frontend.v1.FeedPermission
-	(*FeedPermissionHeadline)(nil),                      // 228: frontend.v1.FeedPermissionHeadline
-	(*FeedPermissionSubtitle)(nil),                      // 229: frontend.v1.FeedPermissionSubtitle
-	(*FeedPermissionTriggerNote)(nil),                   // 230: frontend.v1.FeedPermissionTriggerNote
-	(*FeedPermissionArguments)(nil),                     // 231: frontend.v1.FeedPermissionArguments
-	(*FeedPermissionStandingOffered)(nil),               // 232: frontend.v1.FeedPermissionStandingOffered
-	(*FeedPermissionOpen)(nil),                          // 233: frontend.v1.FeedPermissionOpen
-	(*FeedPermissionAnswered)(nil),                      // 234: frontend.v1.FeedPermissionAnswered
-	(*FeedPermissionDeniedUndecidable)(nil),             // 235: frontend.v1.FeedPermissionDeniedUndecidable
-	(*FeedPermissionAllowedOnce)(nil),                   // 236: frontend.v1.FeedPermissionAllowedOnce
-	(*FeedPermissionAllowedStanding)(nil),               // 237: frontend.v1.FeedPermissionAllowedStanding
-	(*FeedPermissionDeniedByUser)(nil),                  // 238: frontend.v1.FeedPermissionDeniedByUser
-	(*FeedPermissionDeniedByPolicy)(nil),                // 239: frontend.v1.FeedPermissionDeniedByPolicy
-	(*FeedPermissionAbandoned)(nil),                     // 240: frontend.v1.FeedPermissionAbandoned
-	(*FeedQuestion)(nil),                                // 241: frontend.v1.FeedQuestion
-	(*FeedQuestionItem)(nil),                            // 242: frontend.v1.FeedQuestionItem
-	(*FeedQuestionHeader)(nil),                          // 243: frontend.v1.FeedQuestionHeader
-	(*FeedQuestionText)(nil),                            // 244: frontend.v1.FeedQuestionText
-	(*FeedQuestionSingleSelect)(nil),                    // 245: frontend.v1.FeedQuestionSingleSelect
-	(*FeedQuestionMultiSelect)(nil),                     // 246: frontend.v1.FeedQuestionMultiSelect
-	(*FeedQuestionOption)(nil),                          // 247: frontend.v1.FeedQuestionOption
-	(*FeedQuestionOptionLabel)(nil),                     // 248: frontend.v1.FeedQuestionOptionLabel
-	(*FeedQuestionOptionDescription)(nil),               // 249: frontend.v1.FeedQuestionOptionDescription
-	(*FeedQuestionOpen)(nil),                            // 250: frontend.v1.FeedQuestionOpen
-	(*FeedQuestionDraft)(nil),                           // 251: frontend.v1.FeedQuestionDraft
-	(*FeedQuestionAnswered)(nil),                        // 252: frontend.v1.FeedQuestionAnswered
-	(*FeedQuestionGivenAnswer)(nil),                     // 253: frontend.v1.FeedQuestionGivenAnswer
-	(*FeedQuestionOtherText)(nil),                       // 254: frontend.v1.FeedQuestionOtherText
-	(*FeedQuestionExpired)(nil),                         // 255: frontend.v1.FeedQuestionExpired
-	(*FeedUserPrompt)(nil),                              // 256: frontend.v1.FeedUserPrompt
-	(*FeedUserPromptCommand)(nil),                       // 257: frontend.v1.FeedUserPromptCommand
-	(*FeedUserPromptSuccess)(nil),                       // 258: frontend.v1.FeedUserPromptSuccess
-	(*FeedUserPromptAuthor)(nil),                        // 259: frontend.v1.FeedUserPromptAuthor
-	(*FeedUserPromptBody)(nil),                          // 260: frontend.v1.FeedUserPromptBody
-	(*FeedUserPromptBlock)(nil),                         // 261: frontend.v1.FeedUserPromptBlock
-	(*FeedTextBlock)(nil),                               // 262: frontend.v1.FeedTextBlock
-	(*FeedImageBlock)(nil),                              // 263: frontend.v1.FeedImageBlock
-	(*FeedUnsupportedBlock)(nil),                        // 264: frontend.v1.FeedUnsupportedBlock
-	(*FeedQuoteBlock)(nil),                              // 265: frontend.v1.FeedQuoteBlock
-	(*FeedAgentPrompt)(nil),                             // 266: frontend.v1.FeedAgentPrompt
-	(*FeedAgentPromptQueuedToLive)(nil),                 // 267: frontend.v1.FeedAgentPromptQueuedToLive
-	(*FeedAgentPromptResumedRecipient)(nil),             // 268: frontend.v1.FeedAgentPromptResumedRecipient
-	(*FeedAgentPromptRefused)(nil),                      // 269: frontend.v1.FeedAgentPromptRefused
-	(*FeedAgentPromptRefusalReason)(nil),                // 270: frontend.v1.FeedAgentPromptRefusalReason
-	(*FeedAgentPromptAddress)(nil),                      // 271: frontend.v1.FeedAgentPromptAddress
-	(*FeedAgentPromptAddressName)(nil),                  // 272: frontend.v1.FeedAgentPromptAddressName
-	(*FeedAgentPromptAddressSent)(nil),                  // 273: frontend.v1.FeedAgentPromptAddressSent
-	(*FeedAgentPromptAddressReceived)(nil),              // 274: frontend.v1.FeedAgentPromptAddressReceived
-	(*FeedAgentPromptAddressWorkspace)(nil),             // 275: frontend.v1.FeedAgentPromptAddressWorkspace
-	(*FeedAgentPromptAddressWorkspaceNamed)(nil),        // 276: frontend.v1.FeedAgentPromptAddressWorkspaceNamed
-	(*FeedAgentPromptAddressWorkspaceUnnamed)(nil),      // 277: frontend.v1.FeedAgentPromptAddressWorkspaceUnnamed
-	(*FeedAgentPromptAddressAgent)(nil),                 // 278: frontend.v1.FeedAgentPromptAddressAgent
-	(*FeedAgentPromptAddressAgentMain)(nil),             // 279: frontend.v1.FeedAgentPromptAddressAgentMain
-	(*FeedAgentPromptAddressAgentNamed)(nil),            // 280: frontend.v1.FeedAgentPromptAddressAgentNamed
-	(*FeedAgentPromptAddressAgentIdentified)(nil),       // 281: frontend.v1.FeedAgentPromptAddressAgentIdentified
-	(*FeedAgentPromptAddressPeerSession)(nil),           // 282: frontend.v1.FeedAgentPromptAddressPeerSession
-	(*FeedAgentPromptAddressPeerSessionWorkspace)(nil),  // 283: frontend.v1.FeedAgentPromptAddressPeerSessionWorkspace
-	(*FeedAgentPromptAddressPeerSessionUnresolved)(nil), // 284: frontend.v1.FeedAgentPromptAddressPeerSessionUnresolved
-	(*FeedAgentPromptAddressUnclassified)(nil),          // 285: frontend.v1.FeedAgentPromptAddressUnclassified
-	(*FeedAgentPromptBody)(nil),                         // 286: frontend.v1.FeedAgentPromptBody
-	(*FeedAgentPromptBlock)(nil),                        // 287: frontend.v1.FeedAgentPromptBlock
-	(*FeedColdGate)(nil),                                // 288: frontend.v1.FeedColdGate
-	(*FeedColdGateStanding)(nil),                        // 289: frontend.v1.FeedColdGateStanding
-	(*FeedColdGateCompactAndResume)(nil),                // 290: frontend.v1.FeedColdGateCompactAndResume
-	(*FeedColdGateContextTokens)(nil),                   // 291: frontend.v1.FeedColdGateContextTokens
-	(*FeedColdGateLastRequest)(nil),                     // 292: frontend.v1.FeedColdGateLastRequest
-	(*FeedColdGateModel)(nil),                           // 293: frontend.v1.FeedColdGateModel
-	(*FeedColdGateCompactMenu)(nil),                     // 294: frontend.v1.FeedColdGateCompactMenu
-	(*FeedColdGateModelOption)(nil),                     // 295: frontend.v1.FeedColdGateModelOption
-	(*FeedColdGateResolved)(nil),                        // 296: frontend.v1.FeedColdGateResolved
-	(*FeedColdGateResolvedPay)(nil),                     // 297: frontend.v1.FeedColdGateResolvedPay
-	(*FeedColdGateResolvedClear)(nil),                   // 298: frontend.v1.FeedColdGateResolvedClear
-	(*FeedColdGateResolvedCompact)(nil),                 // 299: frontend.v1.FeedColdGateResolvedCompact
-	(*FeedSessionSeparation)(nil),                       // 300: frontend.v1.FeedSessionSeparation
-	(*FeedSessionSeparationLabel)(nil),                  // 301: frontend.v1.FeedSessionSeparationLabel
-	(*FeedContextCutTokens)(nil),                        // 302: frontend.v1.FeedContextCutTokens
-	(*FeedContextCutCleared)(nil),                       // 303: frontend.v1.FeedContextCutCleared
-	(*FeedContextCutCompacted)(nil),                     // 304: frontend.v1.FeedContextCutCompacted
-	(*FeedContextCutColdRead)(nil),                      // 305: frontend.v1.FeedContextCutColdRead
-	(*FeedContextCutSummary)(nil),                       // 306: frontend.v1.FeedContextCutSummary
-	(*FeedWorktreeEntered)(nil),                         // 307: frontend.v1.FeedWorktreeEntered
-	(*FeedWorktreeLeft)(nil),                            // 308: frontend.v1.FeedWorktreeLeft
-	(*FeedWorktreeKept)(nil),                            // 309: frontend.v1.FeedWorktreeKept
-	(*FeedWorktreeRemoved)(nil),                         // 310: frontend.v1.FeedWorktreeRemoved
-	(*FeedWorktreeDiscarded)(nil),                       // 311: frontend.v1.FeedWorktreeDiscarded
-	(*FeedWorktreePath)(nil),                            // 312: frontend.v1.FeedWorktreePath
-	(*FeedWorktreeBranch)(nil),                          // 313: frontend.v1.FeedWorktreeBranch
-	(*FeedMerge)(nil),                                   // 314: frontend.v1.FeedMerge
-	(*FeedMergeQueueOffer)(nil),                         // 315: frontend.v1.FeedMergeQueueOffer
-	(*FeedMergeQueueOfferHeadline)(nil),                 // 316: frontend.v1.FeedMergeQueueOfferHeadline
-	(*FeedMergeHead)(nil),                               // 317: frontend.v1.FeedMergeHead
-	(*FeedMergeMode)(nil),                               // 318: frontend.v1.FeedMergeMode
-	(*FeedMergeModeSync)(nil),                           // 319: frontend.v1.FeedMergeModeSync
-	(*FeedMergeModeAsync)(nil),                          // 320: frontend.v1.FeedMergeModeAsync
-	(*FeedMergeVersion)(nil),                            // 321: frontend.v1.FeedMergeVersion
-	(*FeedMergeVersionLeading)(nil),                     // 322: frontend.v1.FeedMergeVersionLeading
-	(*FeedMergeVersionIncremented)(nil),                 // 323: frontend.v1.FeedMergeVersionIncremented
-	(*FeedMergeVersionTrailing)(nil),                    // 324: frontend.v1.FeedMergeVersionTrailing
-	(*FeedMergeWorkspaceSwitch)(nil),                    // 325: frontend.v1.FeedMergeWorkspaceSwitch
-	(*FeedMergeWorkspaceSwitchLabel)(nil),               // 326: frontend.v1.FeedMergeWorkspaceSwitchLabel
-	(*FeedMergeWorkspaceSwitchAvailable)(nil),           // 327: frontend.v1.FeedMergeWorkspaceSwitchAvailable
-	(*FeedMergeWorkspaceSwitchRemoved)(nil),             // 328: frontend.v1.FeedMergeWorkspaceSwitchRemoved
-	(*FeedMergeGlyph)(nil),                              // 329: frontend.v1.FeedMergeGlyph
-	(*FeedMergeLabel)(nil),                              // 330: frontend.v1.FeedMergeLabel
-	(*FeedMergeRuntime)(nil),                            // 331: frontend.v1.FeedMergeRuntime
-	(*FeedMergeUpdate)(nil),                             // 332: frontend.v1.FeedMergeUpdate
-	(*FeedMergeUpdateWaiting)(nil),                      // 333: frontend.v1.FeedMergeUpdateWaiting
-	(*FeedMergeUpdateMerging)(nil),                      // 334: frontend.v1.FeedMergeUpdateMerging
-	(*FeedMergeSuccess)(nil),                            // 335: frontend.v1.FeedMergeSuccess
-	(*FeedMergeLandedOn)(nil),                           // 336: frontend.v1.FeedMergeLandedOn
-	(*FeedMergeError)(nil),                              // 337: frontend.v1.FeedMergeError
-	(*FeedMergeFailed)(nil),                             // 338: frontend.v1.FeedMergeFailed
-	(*FeedMergeAbandoned)(nil),                          // 339: frontend.v1.FeedMergeAbandoned
-	(*FeedContextCutCompactionFailed)(nil),              // 340: frontend.v1.FeedContextCutCompactionFailed
-	(*FeedMergeFold)(nil),                               // 341: frontend.v1.FeedMergeFold
-	(*FeedMergeFoldByDaemon)(nil),                       // 342: frontend.v1.FeedMergeFoldByDaemon
-	(*FeedMergeFoldByReader)(nil),                       // 343: frontend.v1.FeedMergeFoldByReader
-	(*FeedMergeTab)(nil),                                // 344: frontend.v1.FeedMergeTab
-	(*FeedMergeTabLabel)(nil),                           // 345: frontend.v1.FeedMergeTabLabel
-	(*FeedMergeTabLive)(nil),                            // 346: frontend.v1.FeedMergeTabLive
-	(*FeedMergeTabSettled)(nil),                         // 347: frontend.v1.FeedMergeTabSettled
-	(*FeedMergeTabSucceeded)(nil),                       // 348: frontend.v1.FeedMergeTabSucceeded
-	(*FeedMergeTabWaitingOnUser)(nil),                   // 349: frontend.v1.FeedMergeTabWaitingOnUser
-	(*FeedMergeTabFailed)(nil),                          // 350: frontend.v1.FeedMergeTabFailed
-	(*FeedMergeTabQueue)(nil),                           // 351: frontend.v1.FeedMergeTabQueue
-	(*FeedMergeTabResolving)(nil),                       // 352: frontend.v1.FeedMergeTabResolving
-	(*FeedMergeTabRebasing)(nil),                        // 353: frontend.v1.FeedMergeTabRebasing
-	(*FeedMergeRebaseProgress)(nil),                     // 354: frontend.v1.FeedMergeRebaseProgress
-	(*FeedMergeRebaseLine)(nil),                         // 355: frontend.v1.FeedMergeRebaseLine
-	(*FeedMergeRebaseReplaying)(nil),                    // 356: frontend.v1.FeedMergeRebaseReplaying
-	(*FeedMergeRebaseTarget)(nil),                       // 357: frontend.v1.FeedMergeRebaseTarget
-	(*FeedMergeTabRebaseCommit)(nil),                    // 358: frontend.v1.FeedMergeTabRebaseCommit
-	(*FeedMergeRebaseCommitPending)(nil),                // 359: frontend.v1.FeedMergeRebaseCommitPending
-	(*FeedMergeRebaseCommitIdentity)(nil),               // 360: frontend.v1.FeedMergeRebaseCommitIdentity
-	(*FeedMergeRebaseCommitConflict)(nil),               // 361: frontend.v1.FeedMergeRebaseCommitConflict
-	(*FeedMergeConflictFile)(nil),                       // 362: frontend.v1.FeedMergeConflictFile
-	(*FeedMergeTabTests)(nil),                           // 363: frontend.v1.FeedMergeTabTests
-	(*FeedMergeTabTestsRun)(nil),                        // 364: frontend.v1.FeedMergeTabTestsRun
-	(*FeedMergeTabTestsRunWaitingForTurn)(nil),          // 365: frontend.v1.FeedMergeTabTestsRunWaitingForTurn
-	(*FeedMergeTestTurnHolder)(nil),                     // 366: frontend.v1.FeedMergeTestTurnHolder
-	(*FeedMergeTestsRunOutput)(nil),                     // 367: frontend.v1.FeedMergeTestsRunOutput
-	(*FeedMergeTabTestsRunFixing)(nil),                  // 368: frontend.v1.FeedMergeTabTestsRunFixing
-	(*FeedMergeTestLog)(nil),                            // 369: frontend.v1.FeedMergeTestLog
-	(*FeedMergeTestLogToken)(nil),                       // 370: frontend.v1.FeedMergeTestLogToken
-	(*FeedMergeTestLogLabel)(nil),                       // 371: frontend.v1.FeedMergeTestLogLabel
-	(*FeedMergeTestSuite)(nil),                          // 372: frontend.v1.FeedMergeTestSuite
-	(*FeedMergeTestCounts)(nil),                         // 373: frontend.v1.FeedMergeTestCounts
-	(*FeedMergeTestSuiteRunning)(nil),                   // 374: frontend.v1.FeedMergeTestSuiteRunning
-	(*FeedMergeTestSuiteRunningUnreported)(nil),         // 375: frontend.v1.FeedMergeTestSuiteRunningUnreported
-	(*FeedMergeTestSuiteRunningPassing)(nil),            // 376: frontend.v1.FeedMergeTestSuiteRunningPassing
-	(*FeedMergeTestSuiteRunningFailing)(nil),            // 377: frontend.v1.FeedMergeTestSuiteRunningFailing
-	(*FeedMergeTestSuitePassed)(nil),                    // 378: frontend.v1.FeedMergeTestSuitePassed
-	(*FeedMergeTestSuiteFailed)(nil),                    // 379: frontend.v1.FeedMergeTestSuiteFailed
-	(*FeedMergeTestSuiteReused)(nil),                    // 380: frontend.v1.FeedMergeTestSuiteReused
-	(*FeedMergeTestSuiteReusedSource)(nil),              // 381: frontend.v1.FeedMergeTestSuiteReusedSource
-	(*FeedMergeTestSpan)(nil),                           // 382: frontend.v1.FeedMergeTestSpan
-	(*FeedMergeFixAttempt)(nil),                         // 383: frontend.v1.FeedMergeFixAttempt
-	(*FeedMergeTabCommitting)(nil),                      // 384: frontend.v1.FeedMergeTabCommitting
-	(*FeedMergeCommitSubject)(nil),                      // 385: frontend.v1.FeedMergeCommitSubject
-	(*FeedMergeTabUpdatingMain)(nil),                    // 386: frontend.v1.FeedMergeTabUpdatingMain
-	(*FeedMergeUpdatingMainStep)(nil),                   // 387: frontend.v1.FeedMergeUpdatingMainStep
-	(*FeedMergeUpdatingMainFetching)(nil),               // 388: frontend.v1.FeedMergeUpdatingMainFetching
-	(*FeedMergeUpdatingMainFastForwarding)(nil),         // 389: frontend.v1.FeedMergeUpdatingMainFastForwarding
-	(*FeedMergeTabHookPrompt)(nil),                      // 390: frontend.v1.FeedMergeTabHookPrompt
-	(*FeedMergeTabHookScript)(nil),                      // 391: frontend.v1.FeedMergeTabHookScript
-	(*FeedMergeHookScriptPath)(nil),                     // 392: frontend.v1.FeedMergeHookScriptPath
-	(*FeedMergeHookScriptLog)(nil),                      // 393: frontend.v1.FeedMergeHookScriptLog
-	(*FeedMergeHookScriptLine)(nil),                     // 394: frontend.v1.FeedMergeHookScriptLine
-	(*FeedMergeHookScriptExit)(nil),                     // 395: frontend.v1.FeedMergeHookScriptExit
-	(*FeedMergeHookScriptExited)(nil),                   // 396: frontend.v1.FeedMergeHookScriptExited
-	(*FeedMergeHookScriptTimedOut)(nil),                 // 397: frontend.v1.FeedMergeHookScriptTimedOut
-	(*FeedMergeQueue)(nil),                              // 398: frontend.v1.FeedMergeQueue
-	(*FeedMergeQueueEntry)(nil),                         // 399: frontend.v1.FeedMergeQueueEntry
-	(*FeedMergeQueueBubble)(nil),                        // 400: frontend.v1.FeedMergeQueueBubble
-	(*FeedMergeQueueWorkspace)(nil),                     // 401: frontend.v1.FeedMergeQueueWorkspace
-	(*FeedMergeQueueLabel)(nil),                         // 402: frontend.v1.FeedMergeQueueLabel
-	(*FeedMergeQueueMerging)(nil),                       // 403: frontend.v1.FeedMergeQueueMerging
-	(*FeedMergeQueueWaiting)(nil),                       // 404: frontend.v1.FeedMergeQueueWaiting
-	(*v1.TurnId)(nil),                                   // 405: conversation.v1.TurnId
-	(*StatusPanelView)(nil),                             // 406: frontend.v1.StatusPanelView
-	(*TodosPanelView)(nil),                              // 407: frontend.v1.TodosPanelView
-	(*McpPanelView)(nil),                                // 408: frontend.v1.McpPanelView
-	(*ContextPanelView)(nil),                            // 409: frontend.v1.ContextPanelView
-	(*FailureHistoryReplayTruncated)(nil),               // 410: frontend.v1.FailureHistoryReplayTruncated
-	(*FeedChessBoard)(nil),                              // 411: frontend.v1.FeedChessBoard
-	(*TokenHeat)(nil),                                   // 412: frontend.v1.TokenHeat
-	(*FailureVendorMaxTurns)(nil),                       // 413: frontend.v1.FailureVendorMaxTurns
-	(*FailureVendorMaxBudget)(nil),                      // 414: frontend.v1.FailureVendorMaxBudget
-	(*FailureVendorExecutionError)(nil),                 // 415: frontend.v1.FailureVendorExecutionError
-	(*FailureVendorTurnFailed)(nil),                     // 416: frontend.v1.FailureVendorTurnFailed
-	(*v1.UserSaid)(nil),                                 // 417: conversation.v1.UserSaid
-	(*v1.AgentModel)(nil),                               // 418: conversation.v1.AgentModel
-	(v1.SessionCompactScope)(0),                         // 419: conversation.v1.SessionCompactScope
-	(*FailureCompactionColdRead)(nil),                   // 420: frontend.v1.FailureCompactionColdRead
-	(*v11.WorkspaceRef)(nil),                            // 421: workspace.v1.WorkspaceRef
+	(*FeedSubagentModel)(nil),                           // 191: frontend.v1.FeedSubagentModel
+	(*FeedDetachedWorkId)(nil),                          // 192: frontend.v1.FeedDetachedWorkId
+	(*FeedSubagentLabel)(nil),                           // 193: frontend.v1.FeedSubagentLabel
+	(*FeedSubagentDescription)(nil),                     // 194: frontend.v1.FeedSubagentDescription
+	(*FeedSubagentTokens)(nil),                          // 195: frontend.v1.FeedSubagentTokens
+	(*FeedSubagentRuntime)(nil),                         // 196: frontend.v1.FeedSubagentRuntime
+	(*FeedSubagentLive)(nil),                            // 197: frontend.v1.FeedSubagentLive
+	(*FeedSubagentLastProgress)(nil),                    // 198: frontend.v1.FeedSubagentLastProgress
+	(*FeedSubagentSettling)(nil),                        // 199: frontend.v1.FeedSubagentSettling
+	(*FeedSubagentSettled)(nil),                         // 200: frontend.v1.FeedSubagentSettled
+	(*FeedSubagentRestarted)(nil),                       // 201: frontend.v1.FeedSubagentRestarted
+	(*FeedSubagentSucceeded)(nil),                       // 202: frontend.v1.FeedSubagentSucceeded
+	(*FeedSubagentFailed)(nil),                          // 203: frontend.v1.FeedSubagentFailed
+	(*FeedSubagentCancelled)(nil),                       // 204: frontend.v1.FeedSubagentCancelled
+	(*FeedSubagentLost)(nil),                            // 205: frontend.v1.FeedSubagentLost
+	(*FeedSubagentLostProcessEnded)(nil),                // 206: frontend.v1.FeedSubagentLostProcessEnded
+	(*FeedSubagentLostFileVanished)(nil),                // 207: frontend.v1.FeedSubagentLostFileVanished
+	(*FeedSubagentLostWentSilent)(nil),                  // 208: frontend.v1.FeedSubagentLostWentSilent
+	(*FeedSubagentLostSweptUp)(nil),                     // 209: frontend.v1.FeedSubagentLostSweptUp
+	(*FeedShell)(nil),                                   // 210: frontend.v1.FeedShell
+	(*FeedShellCommand)(nil),                            // 211: frontend.v1.FeedShellCommand
+	(*FeedShellRuntime)(nil),                            // 212: frontend.v1.FeedShellRuntime
+	(*FeedShellSpool)(nil),                              // 213: frontend.v1.FeedShellSpool
+	(*FeedShellOmitted)(nil),                            // 214: frontend.v1.FeedShellOmitted
+	(*FeedShellLive)(nil),                               // 215: frontend.v1.FeedShellLive
+	(*FeedShellLastProgress)(nil),                       // 216: frontend.v1.FeedShellLastProgress
+	(*FeedShellSettled)(nil),                            // 217: frontend.v1.FeedShellSettled
+	(*FeedShellExit)(nil),                               // 218: frontend.v1.FeedShellExit
+	(*FeedShellCompleted)(nil),                          // 219: frontend.v1.FeedShellCompleted
+	(*FeedShellCompletedSucceeded)(nil),                 // 220: frontend.v1.FeedShellCompletedSucceeded
+	(*FeedShellCompletedFailed)(nil),                    // 221: frontend.v1.FeedShellCompletedFailed
+	(*FeedShellCancelled)(nil),                          // 222: frontend.v1.FeedShellCancelled
+	(*FeedShellLost)(nil),                               // 223: frontend.v1.FeedShellLost
+	(*FeedShellLostFileVanished)(nil),                   // 224: frontend.v1.FeedShellLostFileVanished
+	(*FeedShellLostWentSilent)(nil),                     // 225: frontend.v1.FeedShellLostWentSilent
+	(*FeedShellLostSweptUp)(nil),                        // 226: frontend.v1.FeedShellLostSweptUp
+	(*FeedShellLostProcessEnded)(nil),                   // 227: frontend.v1.FeedShellLostProcessEnded
+	(*FeedPermission)(nil),                              // 228: frontend.v1.FeedPermission
+	(*FeedPermissionHeadline)(nil),                      // 229: frontend.v1.FeedPermissionHeadline
+	(*FeedPermissionSubtitle)(nil),                      // 230: frontend.v1.FeedPermissionSubtitle
+	(*FeedPermissionTriggerNote)(nil),                   // 231: frontend.v1.FeedPermissionTriggerNote
+	(*FeedPermissionArguments)(nil),                     // 232: frontend.v1.FeedPermissionArguments
+	(*FeedPermissionStandingOffered)(nil),               // 233: frontend.v1.FeedPermissionStandingOffered
+	(*FeedPermissionOpen)(nil),                          // 234: frontend.v1.FeedPermissionOpen
+	(*FeedPermissionAnswered)(nil),                      // 235: frontend.v1.FeedPermissionAnswered
+	(*FeedPermissionDeniedUndecidable)(nil),             // 236: frontend.v1.FeedPermissionDeniedUndecidable
+	(*FeedPermissionAllowedOnce)(nil),                   // 237: frontend.v1.FeedPermissionAllowedOnce
+	(*FeedPermissionAllowedStanding)(nil),               // 238: frontend.v1.FeedPermissionAllowedStanding
+	(*FeedPermissionDeniedByUser)(nil),                  // 239: frontend.v1.FeedPermissionDeniedByUser
+	(*FeedPermissionDeniedByPolicy)(nil),                // 240: frontend.v1.FeedPermissionDeniedByPolicy
+	(*FeedPermissionAbandoned)(nil),                     // 241: frontend.v1.FeedPermissionAbandoned
+	(*FeedQuestion)(nil),                                // 242: frontend.v1.FeedQuestion
+	(*FeedQuestionItem)(nil),                            // 243: frontend.v1.FeedQuestionItem
+	(*FeedQuestionHeader)(nil),                          // 244: frontend.v1.FeedQuestionHeader
+	(*FeedQuestionText)(nil),                            // 245: frontend.v1.FeedQuestionText
+	(*FeedQuestionSingleSelect)(nil),                    // 246: frontend.v1.FeedQuestionSingleSelect
+	(*FeedQuestionMultiSelect)(nil),                     // 247: frontend.v1.FeedQuestionMultiSelect
+	(*FeedQuestionOption)(nil),                          // 248: frontend.v1.FeedQuestionOption
+	(*FeedQuestionOptionLabel)(nil),                     // 249: frontend.v1.FeedQuestionOptionLabel
+	(*FeedQuestionOptionDescription)(nil),               // 250: frontend.v1.FeedQuestionOptionDescription
+	(*FeedQuestionOpen)(nil),                            // 251: frontend.v1.FeedQuestionOpen
+	(*FeedQuestionDraft)(nil),                           // 252: frontend.v1.FeedQuestionDraft
+	(*FeedQuestionAnswered)(nil),                        // 253: frontend.v1.FeedQuestionAnswered
+	(*FeedQuestionGivenAnswer)(nil),                     // 254: frontend.v1.FeedQuestionGivenAnswer
+	(*FeedQuestionOtherText)(nil),                       // 255: frontend.v1.FeedQuestionOtherText
+	(*FeedQuestionExpired)(nil),                         // 256: frontend.v1.FeedQuestionExpired
+	(*FeedUserPrompt)(nil),                              // 257: frontend.v1.FeedUserPrompt
+	(*FeedUserPromptCommand)(nil),                       // 258: frontend.v1.FeedUserPromptCommand
+	(*FeedUserPromptSuccess)(nil),                       // 259: frontend.v1.FeedUserPromptSuccess
+	(*FeedUserPromptAuthor)(nil),                        // 260: frontend.v1.FeedUserPromptAuthor
+	(*FeedUserPromptBody)(nil),                          // 261: frontend.v1.FeedUserPromptBody
+	(*FeedUserPromptBlock)(nil),                         // 262: frontend.v1.FeedUserPromptBlock
+	(*FeedTextBlock)(nil),                               // 263: frontend.v1.FeedTextBlock
+	(*FeedImageBlock)(nil),                              // 264: frontend.v1.FeedImageBlock
+	(*FeedUnsupportedBlock)(nil),                        // 265: frontend.v1.FeedUnsupportedBlock
+	(*FeedQuoteBlock)(nil),                              // 266: frontend.v1.FeedQuoteBlock
+	(*FeedAgentPrompt)(nil),                             // 267: frontend.v1.FeedAgentPrompt
+	(*FeedAgentPromptQueuedToLive)(nil),                 // 268: frontend.v1.FeedAgentPromptQueuedToLive
+	(*FeedAgentPromptResumedRecipient)(nil),             // 269: frontend.v1.FeedAgentPromptResumedRecipient
+	(*FeedAgentPromptRefused)(nil),                      // 270: frontend.v1.FeedAgentPromptRefused
+	(*FeedAgentPromptRefusalReason)(nil),                // 271: frontend.v1.FeedAgentPromptRefusalReason
+	(*FeedAgentPromptAddress)(nil),                      // 272: frontend.v1.FeedAgentPromptAddress
+	(*FeedAgentPromptAddressName)(nil),                  // 273: frontend.v1.FeedAgentPromptAddressName
+	(*FeedAgentPromptAddressSent)(nil),                  // 274: frontend.v1.FeedAgentPromptAddressSent
+	(*FeedAgentPromptAddressReceived)(nil),              // 275: frontend.v1.FeedAgentPromptAddressReceived
+	(*FeedAgentPromptAddressWorkspace)(nil),             // 276: frontend.v1.FeedAgentPromptAddressWorkspace
+	(*FeedAgentPromptAddressWorkspaceNamed)(nil),        // 277: frontend.v1.FeedAgentPromptAddressWorkspaceNamed
+	(*FeedAgentPromptAddressWorkspaceUnnamed)(nil),      // 278: frontend.v1.FeedAgentPromptAddressWorkspaceUnnamed
+	(*FeedAgentPromptAddressAgent)(nil),                 // 279: frontend.v1.FeedAgentPromptAddressAgent
+	(*FeedAgentPromptAddressAgentMain)(nil),             // 280: frontend.v1.FeedAgentPromptAddressAgentMain
+	(*FeedAgentPromptAddressAgentNamed)(nil),            // 281: frontend.v1.FeedAgentPromptAddressAgentNamed
+	(*FeedAgentPromptAddressAgentIdentified)(nil),       // 282: frontend.v1.FeedAgentPromptAddressAgentIdentified
+	(*FeedAgentPromptAddressPeerSession)(nil),           // 283: frontend.v1.FeedAgentPromptAddressPeerSession
+	(*FeedAgentPromptAddressPeerSessionWorkspace)(nil),  // 284: frontend.v1.FeedAgentPromptAddressPeerSessionWorkspace
+	(*FeedAgentPromptAddressPeerSessionUnresolved)(nil), // 285: frontend.v1.FeedAgentPromptAddressPeerSessionUnresolved
+	(*FeedAgentPromptAddressUnclassified)(nil),          // 286: frontend.v1.FeedAgentPromptAddressUnclassified
+	(*FeedAgentPromptBody)(nil),                         // 287: frontend.v1.FeedAgentPromptBody
+	(*FeedAgentPromptBlock)(nil),                        // 288: frontend.v1.FeedAgentPromptBlock
+	(*FeedColdGate)(nil),                                // 289: frontend.v1.FeedColdGate
+	(*FeedColdGateStanding)(nil),                        // 290: frontend.v1.FeedColdGateStanding
+	(*FeedColdGateCompactAndResume)(nil),                // 291: frontend.v1.FeedColdGateCompactAndResume
+	(*FeedColdGateContextTokens)(nil),                   // 292: frontend.v1.FeedColdGateContextTokens
+	(*FeedColdGateLastRequest)(nil),                     // 293: frontend.v1.FeedColdGateLastRequest
+	(*FeedColdGateModel)(nil),                           // 294: frontend.v1.FeedColdGateModel
+	(*FeedColdGateCompactMenu)(nil),                     // 295: frontend.v1.FeedColdGateCompactMenu
+	(*FeedColdGateModelOption)(nil),                     // 296: frontend.v1.FeedColdGateModelOption
+	(*FeedColdGateResolved)(nil),                        // 297: frontend.v1.FeedColdGateResolved
+	(*FeedColdGateResolvedPay)(nil),                     // 298: frontend.v1.FeedColdGateResolvedPay
+	(*FeedColdGateResolvedClear)(nil),                   // 299: frontend.v1.FeedColdGateResolvedClear
+	(*FeedColdGateResolvedCompact)(nil),                 // 300: frontend.v1.FeedColdGateResolvedCompact
+	(*FeedSessionSeparation)(nil),                       // 301: frontend.v1.FeedSessionSeparation
+	(*FeedSessionSeparationLabel)(nil),                  // 302: frontend.v1.FeedSessionSeparationLabel
+	(*FeedContextCutTokens)(nil),                        // 303: frontend.v1.FeedContextCutTokens
+	(*FeedContextCutCleared)(nil),                       // 304: frontend.v1.FeedContextCutCleared
+	(*FeedContextCutCompacted)(nil),                     // 305: frontend.v1.FeedContextCutCompacted
+	(*FeedContextCutColdRead)(nil),                      // 306: frontend.v1.FeedContextCutColdRead
+	(*FeedContextCutSummary)(nil),                       // 307: frontend.v1.FeedContextCutSummary
+	(*FeedWorktreeEntered)(nil),                         // 308: frontend.v1.FeedWorktreeEntered
+	(*FeedWorktreeLeft)(nil),                            // 309: frontend.v1.FeedWorktreeLeft
+	(*FeedWorktreeKept)(nil),                            // 310: frontend.v1.FeedWorktreeKept
+	(*FeedWorktreeRemoved)(nil),                         // 311: frontend.v1.FeedWorktreeRemoved
+	(*FeedWorktreeDiscarded)(nil),                       // 312: frontend.v1.FeedWorktreeDiscarded
+	(*FeedWorktreePath)(nil),                            // 313: frontend.v1.FeedWorktreePath
+	(*FeedWorktreeBranch)(nil),                          // 314: frontend.v1.FeedWorktreeBranch
+	(*FeedMerge)(nil),                                   // 315: frontend.v1.FeedMerge
+	(*FeedMergeQueueOffer)(nil),                         // 316: frontend.v1.FeedMergeQueueOffer
+	(*FeedMergeQueueOfferHeadline)(nil),                 // 317: frontend.v1.FeedMergeQueueOfferHeadline
+	(*FeedMergeHead)(nil),                               // 318: frontend.v1.FeedMergeHead
+	(*FeedMergeMode)(nil),                               // 319: frontend.v1.FeedMergeMode
+	(*FeedMergeModeSync)(nil),                           // 320: frontend.v1.FeedMergeModeSync
+	(*FeedMergeModeAsync)(nil),                          // 321: frontend.v1.FeedMergeModeAsync
+	(*FeedMergeVersion)(nil),                            // 322: frontend.v1.FeedMergeVersion
+	(*FeedMergeVersionLeading)(nil),                     // 323: frontend.v1.FeedMergeVersionLeading
+	(*FeedMergeVersionIncremented)(nil),                 // 324: frontend.v1.FeedMergeVersionIncremented
+	(*FeedMergeVersionTrailing)(nil),                    // 325: frontend.v1.FeedMergeVersionTrailing
+	(*FeedMergeWorkspaceSwitch)(nil),                    // 326: frontend.v1.FeedMergeWorkspaceSwitch
+	(*FeedMergeWorkspaceSwitchLabel)(nil),               // 327: frontend.v1.FeedMergeWorkspaceSwitchLabel
+	(*FeedMergeWorkspaceSwitchAvailable)(nil),           // 328: frontend.v1.FeedMergeWorkspaceSwitchAvailable
+	(*FeedMergeWorkspaceSwitchRemoved)(nil),             // 329: frontend.v1.FeedMergeWorkspaceSwitchRemoved
+	(*FeedMergeGlyph)(nil),                              // 330: frontend.v1.FeedMergeGlyph
+	(*FeedMergeLabel)(nil),                              // 331: frontend.v1.FeedMergeLabel
+	(*FeedMergeRuntime)(nil),                            // 332: frontend.v1.FeedMergeRuntime
+	(*FeedMergeUpdate)(nil),                             // 333: frontend.v1.FeedMergeUpdate
+	(*FeedMergeUpdateWaiting)(nil),                      // 334: frontend.v1.FeedMergeUpdateWaiting
+	(*FeedMergeUpdateMerging)(nil),                      // 335: frontend.v1.FeedMergeUpdateMerging
+	(*FeedMergeSuccess)(nil),                            // 336: frontend.v1.FeedMergeSuccess
+	(*FeedMergeLandedOn)(nil),                           // 337: frontend.v1.FeedMergeLandedOn
+	(*FeedMergeError)(nil),                              // 338: frontend.v1.FeedMergeError
+	(*FeedMergeFailed)(nil),                             // 339: frontend.v1.FeedMergeFailed
+	(*FeedMergeAbandoned)(nil),                          // 340: frontend.v1.FeedMergeAbandoned
+	(*FeedContextCutCompactionFailed)(nil),              // 341: frontend.v1.FeedContextCutCompactionFailed
+	(*FeedMergeFold)(nil),                               // 342: frontend.v1.FeedMergeFold
+	(*FeedMergeFoldByDaemon)(nil),                       // 343: frontend.v1.FeedMergeFoldByDaemon
+	(*FeedMergeFoldByReader)(nil),                       // 344: frontend.v1.FeedMergeFoldByReader
+	(*FeedMergeTab)(nil),                                // 345: frontend.v1.FeedMergeTab
+	(*FeedMergeTabLabel)(nil),                           // 346: frontend.v1.FeedMergeTabLabel
+	(*FeedMergeTabLive)(nil),                            // 347: frontend.v1.FeedMergeTabLive
+	(*FeedMergeTabSettled)(nil),                         // 348: frontend.v1.FeedMergeTabSettled
+	(*FeedMergeTabSucceeded)(nil),                       // 349: frontend.v1.FeedMergeTabSucceeded
+	(*FeedMergeTabWaitingOnUser)(nil),                   // 350: frontend.v1.FeedMergeTabWaitingOnUser
+	(*FeedMergeTabFailed)(nil),                          // 351: frontend.v1.FeedMergeTabFailed
+	(*FeedMergeTabQueue)(nil),                           // 352: frontend.v1.FeedMergeTabQueue
+	(*FeedMergeTabResolving)(nil),                       // 353: frontend.v1.FeedMergeTabResolving
+	(*FeedMergeTabRebasing)(nil),                        // 354: frontend.v1.FeedMergeTabRebasing
+	(*FeedMergeRebaseProgress)(nil),                     // 355: frontend.v1.FeedMergeRebaseProgress
+	(*FeedMergeRebaseLine)(nil),                         // 356: frontend.v1.FeedMergeRebaseLine
+	(*FeedMergeRebaseReplaying)(nil),                    // 357: frontend.v1.FeedMergeRebaseReplaying
+	(*FeedMergeRebaseTarget)(nil),                       // 358: frontend.v1.FeedMergeRebaseTarget
+	(*FeedMergeTabRebaseCommit)(nil),                    // 359: frontend.v1.FeedMergeTabRebaseCommit
+	(*FeedMergeRebaseCommitPending)(nil),                // 360: frontend.v1.FeedMergeRebaseCommitPending
+	(*FeedMergeRebaseCommitIdentity)(nil),               // 361: frontend.v1.FeedMergeRebaseCommitIdentity
+	(*FeedMergeRebaseCommitConflict)(nil),               // 362: frontend.v1.FeedMergeRebaseCommitConflict
+	(*FeedMergeConflictFile)(nil),                       // 363: frontend.v1.FeedMergeConflictFile
+	(*FeedMergeTabTests)(nil),                           // 364: frontend.v1.FeedMergeTabTests
+	(*FeedMergeTabTestsRun)(nil),                        // 365: frontend.v1.FeedMergeTabTestsRun
+	(*FeedMergeTabTestsRunWaitingForTurn)(nil),          // 366: frontend.v1.FeedMergeTabTestsRunWaitingForTurn
+	(*FeedMergeTestTurnHolder)(nil),                     // 367: frontend.v1.FeedMergeTestTurnHolder
+	(*FeedMergeTestsRunOutput)(nil),                     // 368: frontend.v1.FeedMergeTestsRunOutput
+	(*FeedMergeTabTestsRunFixing)(nil),                  // 369: frontend.v1.FeedMergeTabTestsRunFixing
+	(*FeedMergeTestLog)(nil),                            // 370: frontend.v1.FeedMergeTestLog
+	(*FeedMergeTestLogToken)(nil),                       // 371: frontend.v1.FeedMergeTestLogToken
+	(*FeedMergeTestLogLabel)(nil),                       // 372: frontend.v1.FeedMergeTestLogLabel
+	(*FeedMergeTestSuite)(nil),                          // 373: frontend.v1.FeedMergeTestSuite
+	(*FeedMergeTestCounts)(nil),                         // 374: frontend.v1.FeedMergeTestCounts
+	(*FeedMergeTestSuiteRunning)(nil),                   // 375: frontend.v1.FeedMergeTestSuiteRunning
+	(*FeedMergeTestSuiteRunningUnreported)(nil),         // 376: frontend.v1.FeedMergeTestSuiteRunningUnreported
+	(*FeedMergeTestSuiteRunningPassing)(nil),            // 377: frontend.v1.FeedMergeTestSuiteRunningPassing
+	(*FeedMergeTestSuiteRunningFailing)(nil),            // 378: frontend.v1.FeedMergeTestSuiteRunningFailing
+	(*FeedMergeTestSuitePassed)(nil),                    // 379: frontend.v1.FeedMergeTestSuitePassed
+	(*FeedMergeTestSuiteFailed)(nil),                    // 380: frontend.v1.FeedMergeTestSuiteFailed
+	(*FeedMergeTestSuiteReused)(nil),                    // 381: frontend.v1.FeedMergeTestSuiteReused
+	(*FeedMergeTestSuiteReusedSource)(nil),              // 382: frontend.v1.FeedMergeTestSuiteReusedSource
+	(*FeedMergeTestSpan)(nil),                           // 383: frontend.v1.FeedMergeTestSpan
+	(*FeedMergeFixAttempt)(nil),                         // 384: frontend.v1.FeedMergeFixAttempt
+	(*FeedMergeTabCommitting)(nil),                      // 385: frontend.v1.FeedMergeTabCommitting
+	(*FeedMergeCommitSubject)(nil),                      // 386: frontend.v1.FeedMergeCommitSubject
+	(*FeedMergeTabUpdatingMain)(nil),                    // 387: frontend.v1.FeedMergeTabUpdatingMain
+	(*FeedMergeUpdatingMainStep)(nil),                   // 388: frontend.v1.FeedMergeUpdatingMainStep
+	(*FeedMergeUpdatingMainFetching)(nil),               // 389: frontend.v1.FeedMergeUpdatingMainFetching
+	(*FeedMergeUpdatingMainFastForwarding)(nil),         // 390: frontend.v1.FeedMergeUpdatingMainFastForwarding
+	(*FeedMergeTabHookPrompt)(nil),                      // 391: frontend.v1.FeedMergeTabHookPrompt
+	(*FeedMergeTabHookScript)(nil),                      // 392: frontend.v1.FeedMergeTabHookScript
+	(*FeedMergeHookScriptPath)(nil),                     // 393: frontend.v1.FeedMergeHookScriptPath
+	(*FeedMergeHookScriptLog)(nil),                      // 394: frontend.v1.FeedMergeHookScriptLog
+	(*FeedMergeHookScriptLine)(nil),                     // 395: frontend.v1.FeedMergeHookScriptLine
+	(*FeedMergeHookScriptExit)(nil),                     // 396: frontend.v1.FeedMergeHookScriptExit
+	(*FeedMergeHookScriptExited)(nil),                   // 397: frontend.v1.FeedMergeHookScriptExited
+	(*FeedMergeHookScriptTimedOut)(nil),                 // 398: frontend.v1.FeedMergeHookScriptTimedOut
+	(*FeedMergeQueue)(nil),                              // 399: frontend.v1.FeedMergeQueue
+	(*FeedMergeQueueEntry)(nil),                         // 400: frontend.v1.FeedMergeQueueEntry
+	(*FeedMergeQueueBubble)(nil),                        // 401: frontend.v1.FeedMergeQueueBubble
+	(*FeedMergeQueueWorkspace)(nil),                     // 402: frontend.v1.FeedMergeQueueWorkspace
+	(*FeedMergeQueueLabel)(nil),                         // 403: frontend.v1.FeedMergeQueueLabel
+	(*FeedMergeQueueMerging)(nil),                       // 404: frontend.v1.FeedMergeQueueMerging
+	(*FeedMergeQueueWaiting)(nil),                       // 405: frontend.v1.FeedMergeQueueWaiting
+	(*v1.TurnId)(nil),                                   // 406: conversation.v1.TurnId
+	(*StatusPanelView)(nil),                             // 407: frontend.v1.StatusPanelView
+	(*TodosPanelView)(nil),                              // 408: frontend.v1.TodosPanelView
+	(*McpPanelView)(nil),                                // 409: frontend.v1.McpPanelView
+	(*ContextPanelView)(nil),                            // 410: frontend.v1.ContextPanelView
+	(*FailureHistoryReplayTruncated)(nil),               // 411: frontend.v1.FailureHistoryReplayTruncated
+	(*FeedChessBoard)(nil),                              // 412: frontend.v1.FeedChessBoard
+	(*TokenHeat)(nil),                                   // 413: frontend.v1.TokenHeat
+	(*FailureVendorMaxTurns)(nil),                       // 414: frontend.v1.FailureVendorMaxTurns
+	(*FailureVendorMaxBudget)(nil),                      // 415: frontend.v1.FailureVendorMaxBudget
+	(*FailureVendorExecutionError)(nil),                 // 416: frontend.v1.FailureVendorExecutionError
+	(*FailureVendorTurnFailed)(nil),                     // 417: frontend.v1.FailureVendorTurnFailed
+	(*v1.UserSaid)(nil),                                 // 418: conversation.v1.UserSaid
+	(*v1.AgentModel)(nil),                               // 419: conversation.v1.AgentModel
+	(v1.SessionCompactScope)(0),                         // 420: conversation.v1.SessionCompactScope
+	(*FailureCompactionColdRead)(nil),                   // 421: frontend.v1.FailureCompactionColdRead
+	(*v11.WorkspaceRef)(nil),                            // 422: workspace.v1.WorkspaceRef
 }
 var file_frontend_v1_feed_proto_depIdxs = []int32{
 	2,   // 0: frontend.v1.FeedSelection.none:type_name -> frontend.v1.FeedSelectionNone
@@ -27834,22 +27897,22 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	6,   // 14: frontend.v1.FeedSelectionBubble.viewport:type_name -> frontend.v1.FeedSelectionRowViewport
 	0,   // 15: frontend.v1.FeedRow.id:type_name -> frontend.v1.FeedId
 	39,  // 16: frontend.v1.FeedRow.parent:type_name -> frontend.v1.FeedRowParent
-	405, // 17: frontend.v1.FeedRow.turn:type_name -> conversation.v1.TurnId
+	406, // 17: frontend.v1.FeedRow.turn:type_name -> conversation.v1.TurnId
 	17,  // 18: frontend.v1.FeedRow.order:type_name -> frontend.v1.FeedRowOrder
-	256, // 19: frontend.v1.FeedRow.user_prompt:type_name -> frontend.v1.FeedUserPrompt
-	266, // 20: frontend.v1.FeedRow.agent_prompt:type_name -> frontend.v1.FeedAgentPrompt
+	257, // 19: frontend.v1.FeedRow.user_prompt:type_name -> frontend.v1.FeedUserPrompt
+	267, // 20: frontend.v1.FeedRow.agent_prompt:type_name -> frontend.v1.FeedAgentPrompt
 	48,  // 21: frontend.v1.FeedRow.activity:type_name -> frontend.v1.FeedTurnActivity
 	135, // 22: frontend.v1.FeedRow.turn_ended:type_name -> frontend.v1.FeedTurnEnded
 	188, // 23: frontend.v1.FeedRow.detached_subagent:type_name -> frontend.v1.FeedDetachedSubagent
 	189, // 24: frontend.v1.FeedRow.detached_shell:type_name -> frontend.v1.FeedDetachedShell
-	227, // 25: frontend.v1.FeedRow.permission:type_name -> frontend.v1.FeedPermission
-	241, // 26: frontend.v1.FeedRow.question:type_name -> frontend.v1.FeedQuestion
-	300, // 27: frontend.v1.FeedRow.separation:type_name -> frontend.v1.FeedSessionSeparation
-	288, // 28: frontend.v1.FeedRow.cold_gate:type_name -> frontend.v1.FeedColdGate
-	344, // 29: frontend.v1.FeedRow.merge_tab:type_name -> frontend.v1.FeedMergeTab
+	228, // 25: frontend.v1.FeedRow.permission:type_name -> frontend.v1.FeedPermission
+	242, // 26: frontend.v1.FeedRow.question:type_name -> frontend.v1.FeedQuestion
+	301, // 27: frontend.v1.FeedRow.separation:type_name -> frontend.v1.FeedSessionSeparation
+	289, // 28: frontend.v1.FeedRow.cold_gate:type_name -> frontend.v1.FeedColdGate
+	345, // 29: frontend.v1.FeedRow.merge_tab:type_name -> frontend.v1.FeedMergeTab
 	33,  // 30: frontend.v1.FeedRow.command_panel:type_name -> frontend.v1.FeedCommandPanel
 	34,  // 31: frontend.v1.FeedRow.command_refused:type_name -> frontend.v1.FeedCommandRefused
-	209, // 32: frontend.v1.FeedRow.shell_head:type_name -> frontend.v1.FeedShell
+	210, // 32: frontend.v1.FeedRow.shell_head:type_name -> frontend.v1.FeedShell
 	15,  // 33: frontend.v1.FeedRow.removed:type_name -> frontend.v1.FeedRowRemoved
 	14,  // 34: frontend.v1.FeedRow.earlier_steps:type_name -> frontend.v1.FeedTurnEarlierSteps
 	19,  // 35: frontend.v1.FeedRow.peer_message:type_name -> frontend.v1.FeedPeerMessage
@@ -27869,10 +27932,10 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	24,  // 49: frontend.v1.FeedPeerMessageFromAgent.unresolved:type_name -> frontend.v1.FeedPeerMessageFromAgentUnresolved
 	30,  // 50: frontend.v1.FeedSubagentHandbackBadge.label:type_name -> frontend.v1.FeedSubagentHandbackBadgeLabel
 	32,  // 51: frontend.v1.FeedMergeHandbackBadge.label:type_name -> frontend.v1.FeedMergeHandbackBadgeLabel
-	406, // 52: frontend.v1.FeedCommandPanel.status:type_name -> frontend.v1.StatusPanelView
-	407, // 53: frontend.v1.FeedCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
-	408, // 54: frontend.v1.FeedCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
-	409, // 55: frontend.v1.FeedCommandPanel.context:type_name -> frontend.v1.ContextPanelView
+	407, // 52: frontend.v1.FeedCommandPanel.status:type_name -> frontend.v1.StatusPanelView
+	408, // 53: frontend.v1.FeedCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
+	409, // 54: frontend.v1.FeedCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
+	410, // 55: frontend.v1.FeedCommandPanel.context:type_name -> frontend.v1.ContextPanelView
 	35,  // 56: frontend.v1.FeedCommandRefused.command:type_name -> frontend.v1.FeedCommandRefusedCommand
 	36,  // 57: frontend.v1.FeedCommandRefused.reason:type_name -> frontend.v1.FeedCommandRefusedReason
 	37,  // 58: frontend.v1.FeedCommandRefused.add_support:type_name -> frontend.v1.FeedCommandAddSupportOffer
@@ -27884,20 +27947,20 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	45,  // 64: frontend.v1.FeedPageSuccess.at_start:type_name -> frontend.v1.FeedPageAtStart
 	46,  // 65: frontend.v1.FeedPageSuccess.breadcrumbs:type_name -> frontend.v1.FeedBreadcrumbs
 	43,  // 66: frontend.v1.FeedPageError.headline:type_name -> frontend.v1.FeedPageErrorHeadline
-	410, // 67: frontend.v1.FeedPageError.history_replay_truncated:type_name -> frontend.v1.FailureHistoryReplayTruncated
+	411, // 67: frontend.v1.FeedPageError.history_replay_truncated:type_name -> frontend.v1.FailureHistoryReplayTruncated
 	47,  // 68: frontend.v1.FeedBreadcrumbs.crumbs:type_name -> frontend.v1.FeedBreadcrumb
 	0,   // 69: frontend.v1.FeedBreadcrumb.target:type_name -> frontend.v1.FeedId
 	79,  // 70: frontend.v1.FeedTurnActivity.response:type_name -> frontend.v1.FeedResponse
 	87,  // 71: frontend.v1.FeedTurnActivity.simple_tool_call:type_name -> frontend.v1.FeedSimpleToolCall
 	121, // 72: frontend.v1.FeedTurnActivity.skill:type_name -> frontend.v1.FeedSkill
-	314, // 73: frontend.v1.FeedTurnActivity.merge:type_name -> frontend.v1.FeedMerge
+	315, // 73: frontend.v1.FeedTurnActivity.merge:type_name -> frontend.v1.FeedMerge
 	190, // 74: frontend.v1.FeedTurnActivity.subagent:type_name -> frontend.v1.FeedSubagent
 	129, // 75: frontend.v1.FeedTurnActivity.hook:type_name -> frontend.v1.FeedHook
 	73,  // 76: frontend.v1.FeedTurnActivity.artifact:type_name -> frontend.v1.FeedArtifact
 	55,  // 77: frontend.v1.FeedTurnActivity.plan:type_name -> frontend.v1.FeedPlan
 	61,  // 78: frontend.v1.FeedTurnActivity.findings:type_name -> frontend.v1.FeedFindings
 	49,  // 79: frontend.v1.FeedTurnActivity.subagent_result:type_name -> frontend.v1.FeedSubagentResult
-	411, // 80: frontend.v1.FeedTurnActivity.chess_board:type_name -> frontend.v1.FeedChessBoard
+	412, // 80: frontend.v1.FeedTurnActivity.chess_board:type_name -> frontend.v1.FeedChessBoard
 	50,  // 81: frontend.v1.FeedSubagentResult.report:type_name -> frontend.v1.FeedSubagentResultReport
 	51,  // 82: frontend.v1.FeedSubagentResult.delivering:type_name -> frontend.v1.FeedSubagentResultDelivering
 	52,  // 83: frontend.v1.FeedSubagentResult.delivered:type_name -> frontend.v1.FeedSubagentResultDelivered
@@ -27937,7 +28000,7 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	83,  // 117: frontend.v1.FeedResponseSuccess.reveal_pace:type_name -> frontend.v1.FeedResponseRevealPace
 	85,  // 118: frontend.v1.FeedResponseError.prose:type_name -> frontend.v1.FeedResponseProse
 	180, // 119: frontend.v1.FeedResponseError.sign_in:type_name -> frontend.v1.FeedOutcomeSignIn
-	412, // 120: frontend.v1.FeedResponseUsageStamp.heat:type_name -> frontend.v1.TokenHeat
+	413, // 120: frontend.v1.FeedResponseUsageStamp.heat:type_name -> frontend.v1.TokenHeat
 	93,  // 121: frontend.v1.FeedSimpleToolCall.name:type_name -> frontend.v1.FeedToolCallName
 	94,  // 122: frontend.v1.FeedSimpleToolCall.input:type_name -> frontend.v1.FeedToolCallInput
 	100, // 123: frontend.v1.FeedSimpleToolCall.running:type_name -> frontend.v1.FeedToolCallRunning
@@ -27956,13 +28019,13 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	101, // 136: frontend.v1.FeedToolCallRunning.last_progress:type_name -> frontend.v1.FeedToolCallLastProgress
 	105, // 137: frontend.v1.FeedToolCallReturned.succeeded:type_name -> frontend.v1.FeedToolCallSucceeded
 	106, // 138: frontend.v1.FeedToolCallReturned.failed:type_name -> frontend.v1.FeedToolCallFailed
-	217, // 139: frontend.v1.FeedToolCallReturned.exit:type_name -> frontend.v1.FeedShellExit
+	218, // 139: frontend.v1.FeedToolCallReturned.exit:type_name -> frontend.v1.FeedShellExit
 	107, // 140: frontend.v1.FeedToolCallReturned.text:type_name -> frontend.v1.FeedToolCallTextOutput
 	108, // 141: frontend.v1.FeedToolCallReturned.code:type_name -> frontend.v1.FeedToolCallCodeOutput
 	109, // 142: frontend.v1.FeedToolCallReturned.diff:type_name -> frontend.v1.FeedToolCallDiffOutput
 	110, // 143: frontend.v1.FeedToolCallReturned.lines:type_name -> frontend.v1.FeedToolCallLinesOutput
 	111, // 144: frontend.v1.FeedToolCallReturned.links:type_name -> frontend.v1.FeedToolCallLinksOutput
-	263, // 145: frontend.v1.FeedToolCallReturned.image:type_name -> frontend.v1.FeedImageBlock
+	264, // 145: frontend.v1.FeedToolCallReturned.image:type_name -> frontend.v1.FeedImageBlock
 	98,  // 146: frontend.v1.FeedToolCallReturned.none:type_name -> frontend.v1.FeedToolCallNoOutput
 	104, // 147: frontend.v1.FeedToolCallReturned.diagnostics:type_name -> frontend.v1.FeedToolCallDiagnostics
 	115, // 148: frontend.v1.FeedToolCallCodeOutput.spans:type_name -> frontend.v1.FeedCodeSpan
@@ -28013,10 +28076,10 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	141, // 193: frontend.v1.FeedTurnEndedErrored.model_not_found:type_name -> frontend.v1.FeedTurnErrorModelNotFound
 	142, // 194: frontend.v1.FeedTurnEndedErrored.oauth_org_not_allowed:type_name -> frontend.v1.FeedTurnErrorOauthOrgNotAllowed
 	143, // 195: frontend.v1.FeedTurnEndedErrored.max_output_tokens:type_name -> frontend.v1.FeedTurnErrorMaxOutputTokens
-	413, // 196: frontend.v1.FeedTurnEndedErrored.max_turns:type_name -> frontend.v1.FailureVendorMaxTurns
-	414, // 197: frontend.v1.FeedTurnEndedErrored.max_budget:type_name -> frontend.v1.FailureVendorMaxBudget
-	415, // 198: frontend.v1.FeedTurnEndedErrored.execution_error:type_name -> frontend.v1.FailureVendorExecutionError
-	416, // 199: frontend.v1.FeedTurnEndedErrored.turn_failed:type_name -> frontend.v1.FailureVendorTurnFailed
+	414, // 196: frontend.v1.FeedTurnEndedErrored.max_turns:type_name -> frontend.v1.FailureVendorMaxTurns
+	415, // 197: frontend.v1.FeedTurnEndedErrored.max_budget:type_name -> frontend.v1.FailureVendorMaxBudget
+	416, // 198: frontend.v1.FeedTurnEndedErrored.execution_error:type_name -> frontend.v1.FailureVendorExecutionError
+	417, // 199: frontend.v1.FeedTurnEndedErrored.turn_failed:type_name -> frontend.v1.FailureVendorTurnFailed
 	139, // 200: frontend.v1.FeedTurnEndedErrored.stop_hook_prevented:type_name -> frontend.v1.FeedTurnErrorStopHookPrevented
 	138, // 201: frontend.v1.FeedTurnEndedErrored.agent_process_died:type_name -> frontend.v1.FeedTurnErrorAgentProcessDied
 	154, // 202: frontend.v1.FeedTurnEndedErrored.unreachable:type_name -> frontend.v1.FeedTurnErrorUnreachable
@@ -28047,280 +28110,281 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	182, // 227: frontend.v1.FeedOutcomeAgentReplFaultExpansion.what_died:type_name -> frontend.v1.FeedOutcomeWhatDied
 	187, // 228: frontend.v1.FeedOutcomeAgentReplFaultExpansion.restarted:type_name -> frontend.v1.FeedOutcomeRestarted
 	181, // 229: frontend.v1.FeedOutcomeAgentReplFaultExpansion.resend:type_name -> frontend.v1.FeedOutcomeResend
-	417, // 230: frontend.v1.FeedOutcomeResend.said:type_name -> conversation.v1.UserSaid
+	418, // 230: frontend.v1.FeedOutcomeResend.said:type_name -> conversation.v1.UserSaid
 	183, // 231: frontend.v1.FeedOutcomeWhatDied.query:type_name -> frontend.v1.FeedOutcomeQueryDied
 	184, // 232: frontend.v1.FeedOutcomeWhatDied.process:type_name -> frontend.v1.FeedOutcomeProcessDied
 	185, // 233: frontend.v1.FeedOutcomeQueryDied.line:type_name -> frontend.v1.FeedOutcomeDeathLine
 	186, // 234: frontend.v1.FeedOutcomeQueryDied.thrown:type_name -> frontend.v1.FeedOutcomeThrown
 	185, // 235: frontend.v1.FeedOutcomeProcessDied.line:type_name -> frontend.v1.FeedOutcomeDeathLine
 	190, // 236: frontend.v1.FeedDetachedSubagent.subagent:type_name -> frontend.v1.FeedSubagent
-	209, // 237: frontend.v1.FeedDetachedShell.shell:type_name -> frontend.v1.FeedShell
-	192, // 238: frontend.v1.FeedSubagent.label:type_name -> frontend.v1.FeedSubagentLabel
-	193, // 239: frontend.v1.FeedSubagent.description:type_name -> frontend.v1.FeedSubagentDescription
-	194, // 240: frontend.v1.FeedSubagent.tokens:type_name -> frontend.v1.FeedSubagentTokens
-	195, // 241: frontend.v1.FeedSubagent.runtime:type_name -> frontend.v1.FeedSubagentRuntime
-	196, // 242: frontend.v1.FeedSubagent.live:type_name -> frontend.v1.FeedSubagentLive
-	199, // 243: frontend.v1.FeedSubagent.settled:type_name -> frontend.v1.FeedSubagentSettled
-	198, // 244: frontend.v1.FeedSubagent.settling:type_name -> frontend.v1.FeedSubagentSettling
-	191, // 245: frontend.v1.FeedSubagent.work_id:type_name -> frontend.v1.FeedDetachedWorkId
-	197, // 246: frontend.v1.FeedSubagentLive.last_progress:type_name -> frontend.v1.FeedSubagentLastProgress
-	201, // 247: frontend.v1.FeedSubagentSettled.succeeded:type_name -> frontend.v1.FeedSubagentSucceeded
-	202, // 248: frontend.v1.FeedSubagentSettled.failed:type_name -> frontend.v1.FeedSubagentFailed
-	203, // 249: frontend.v1.FeedSubagentSettled.cancelled:type_name -> frontend.v1.FeedSubagentCancelled
-	204, // 250: frontend.v1.FeedSubagentSettled.lost:type_name -> frontend.v1.FeedSubagentLost
-	200, // 251: frontend.v1.FeedSubagentSettled.restarted:type_name -> frontend.v1.FeedSubagentRestarted
-	206, // 252: frontend.v1.FeedSubagentLost.file_vanished:type_name -> frontend.v1.FeedSubagentLostFileVanished
-	207, // 253: frontend.v1.FeedSubagentLost.went_silent:type_name -> frontend.v1.FeedSubagentLostWentSilent
-	208, // 254: frontend.v1.FeedSubagentLost.swept_up:type_name -> frontend.v1.FeedSubagentLostSweptUp
-	205, // 255: frontend.v1.FeedSubagentLost.process_ended:type_name -> frontend.v1.FeedSubagentLostProcessEnded
-	210, // 256: frontend.v1.FeedShell.command:type_name -> frontend.v1.FeedShellCommand
-	211, // 257: frontend.v1.FeedShell.runtime:type_name -> frontend.v1.FeedShellRuntime
-	212, // 258: frontend.v1.FeedShell.spool:type_name -> frontend.v1.FeedShellSpool
-	214, // 259: frontend.v1.FeedShell.live:type_name -> frontend.v1.FeedShellLive
-	216, // 260: frontend.v1.FeedShell.settled:type_name -> frontend.v1.FeedShellSettled
-	191, // 261: frontend.v1.FeedShell.work_id:type_name -> frontend.v1.FeedDetachedWorkId
-	213, // 262: frontend.v1.FeedShellSpool.omitted:type_name -> frontend.v1.FeedShellOmitted
-	215, // 263: frontend.v1.FeedShellLive.last_progress:type_name -> frontend.v1.FeedShellLastProgress
-	217, // 264: frontend.v1.FeedShellSettled.exit:type_name -> frontend.v1.FeedShellExit
-	218, // 265: frontend.v1.FeedShellSettled.completed:type_name -> frontend.v1.FeedShellCompleted
-	221, // 266: frontend.v1.FeedShellSettled.cancelled:type_name -> frontend.v1.FeedShellCancelled
-	222, // 267: frontend.v1.FeedShellSettled.lost:type_name -> frontend.v1.FeedShellLost
-	219, // 268: frontend.v1.FeedShellCompleted.succeeded:type_name -> frontend.v1.FeedShellCompletedSucceeded
-	220, // 269: frontend.v1.FeedShellCompleted.failed:type_name -> frontend.v1.FeedShellCompletedFailed
-	223, // 270: frontend.v1.FeedShellLost.file_vanished:type_name -> frontend.v1.FeedShellLostFileVanished
-	224, // 271: frontend.v1.FeedShellLost.went_silent:type_name -> frontend.v1.FeedShellLostWentSilent
-	225, // 272: frontend.v1.FeedShellLost.swept_up:type_name -> frontend.v1.FeedShellLostSweptUp
-	226, // 273: frontend.v1.FeedShellLost.process_ended:type_name -> frontend.v1.FeedShellLostProcessEnded
-	228, // 274: frontend.v1.FeedPermission.headline:type_name -> frontend.v1.FeedPermissionHeadline
-	229, // 275: frontend.v1.FeedPermission.subtitle:type_name -> frontend.v1.FeedPermissionSubtitle
-	230, // 276: frontend.v1.FeedPermission.trigger:type_name -> frontend.v1.FeedPermissionTriggerNote
-	231, // 277: frontend.v1.FeedPermission.arguments:type_name -> frontend.v1.FeedPermissionArguments
-	232, // 278: frontend.v1.FeedPermission.standing_offered:type_name -> frontend.v1.FeedPermissionStandingOffered
-	233, // 279: frontend.v1.FeedPermission.open:type_name -> frontend.v1.FeedPermissionOpen
-	234, // 280: frontend.v1.FeedPermission.answered:type_name -> frontend.v1.FeedPermissionAnswered
-	240, // 281: frontend.v1.FeedPermission.abandoned:type_name -> frontend.v1.FeedPermissionAbandoned
-	90,  // 282: frontend.v1.FeedPermission.clock:type_name -> frontend.v1.FeedToolCardClock
-	236, // 283: frontend.v1.FeedPermissionAnswered.allowed_once:type_name -> frontend.v1.FeedPermissionAllowedOnce
-	237, // 284: frontend.v1.FeedPermissionAnswered.allowed_standing:type_name -> frontend.v1.FeedPermissionAllowedStanding
-	238, // 285: frontend.v1.FeedPermissionAnswered.denied_by_user:type_name -> frontend.v1.FeedPermissionDeniedByUser
-	239, // 286: frontend.v1.FeedPermissionAnswered.denied_by_policy:type_name -> frontend.v1.FeedPermissionDeniedByPolicy
-	235, // 287: frontend.v1.FeedPermissionAnswered.denied_undecidable:type_name -> frontend.v1.FeedPermissionDeniedUndecidable
-	164, // 288: frontend.v1.FeedPermissionDeniedByUser.marker:type_name -> frontend.v1.FeedOutcomeMarker
-	242, // 289: frontend.v1.FeedQuestion.questions:type_name -> frontend.v1.FeedQuestionItem
-	250, // 290: frontend.v1.FeedQuestion.open:type_name -> frontend.v1.FeedQuestionOpen
-	252, // 291: frontend.v1.FeedQuestion.answered:type_name -> frontend.v1.FeedQuestionAnswered
-	255, // 292: frontend.v1.FeedQuestion.expired:type_name -> frontend.v1.FeedQuestionExpired
-	90,  // 293: frontend.v1.FeedQuestion.clock:type_name -> frontend.v1.FeedToolCardClock
-	243, // 294: frontend.v1.FeedQuestionItem.header:type_name -> frontend.v1.FeedQuestionHeader
-	244, // 295: frontend.v1.FeedQuestionItem.text:type_name -> frontend.v1.FeedQuestionText
-	245, // 296: frontend.v1.FeedQuestionItem.single_select:type_name -> frontend.v1.FeedQuestionSingleSelect
-	246, // 297: frontend.v1.FeedQuestionItem.multi_select:type_name -> frontend.v1.FeedQuestionMultiSelect
-	247, // 298: frontend.v1.FeedQuestionSingleSelect.options:type_name -> frontend.v1.FeedQuestionOption
-	247, // 299: frontend.v1.FeedQuestionMultiSelect.options:type_name -> frontend.v1.FeedQuestionOption
-	248, // 300: frontend.v1.FeedQuestionOption.label:type_name -> frontend.v1.FeedQuestionOptionLabel
-	249, // 301: frontend.v1.FeedQuestionOption.description:type_name -> frontend.v1.FeedQuestionOptionDescription
-	251, // 302: frontend.v1.FeedQuestionOpen.drafts:type_name -> frontend.v1.FeedQuestionDraft
-	254, // 303: frontend.v1.FeedQuestionDraft.other_text:type_name -> frontend.v1.FeedQuestionOtherText
-	253, // 304: frontend.v1.FeedQuestionAnswered.answers:type_name -> frontend.v1.FeedQuestionGivenAnswer
-	243, // 305: frontend.v1.FeedQuestionGivenAnswer.header:type_name -> frontend.v1.FeedQuestionHeader
-	254, // 306: frontend.v1.FeedQuestionGivenAnswer.other_text:type_name -> frontend.v1.FeedQuestionOtherText
-	259, // 307: frontend.v1.FeedUserPrompt.author:type_name -> frontend.v1.FeedUserPromptAuthor
-	258, // 308: frontend.v1.FeedUserPrompt.success:type_name -> frontend.v1.FeedUserPromptSuccess
-	257, // 309: frontend.v1.FeedUserPrompt.commands:type_name -> frontend.v1.FeedUserPromptCommand
-	260, // 310: frontend.v1.FeedUserPromptSuccess.body:type_name -> frontend.v1.FeedUserPromptBody
-	261, // 311: frontend.v1.FeedUserPromptBody.blocks:type_name -> frontend.v1.FeedUserPromptBlock
-	262, // 312: frontend.v1.FeedUserPromptBlock.text:type_name -> frontend.v1.FeedTextBlock
-	263, // 313: frontend.v1.FeedUserPromptBlock.image:type_name -> frontend.v1.FeedImageBlock
-	264, // 314: frontend.v1.FeedUserPromptBlock.unsupported:type_name -> frontend.v1.FeedUnsupportedBlock
-	265, // 315: frontend.v1.FeedUserPromptBlock.quote:type_name -> frontend.v1.FeedQuoteBlock
-	271, // 316: frontend.v1.FeedAgentPrompt.address:type_name -> frontend.v1.FeedAgentPromptAddress
-	286, // 317: frontend.v1.FeedAgentPrompt.body:type_name -> frontend.v1.FeedAgentPromptBody
-	267, // 318: frontend.v1.FeedAgentPrompt.queued_to_live:type_name -> frontend.v1.FeedAgentPromptQueuedToLive
-	268, // 319: frontend.v1.FeedAgentPrompt.resumed_recipient:type_name -> frontend.v1.FeedAgentPromptResumedRecipient
-	269, // 320: frontend.v1.FeedAgentPrompt.refused:type_name -> frontend.v1.FeedAgentPromptRefused
-	270, // 321: frontend.v1.FeedAgentPromptRefused.reason:type_name -> frontend.v1.FeedAgentPromptRefusalReason
-	272, // 322: frontend.v1.FeedAgentPromptAddress.name:type_name -> frontend.v1.FeedAgentPromptAddressName
-	273, // 323: frontend.v1.FeedAgentPromptAddress.sent:type_name -> frontend.v1.FeedAgentPromptAddressSent
-	274, // 324: frontend.v1.FeedAgentPromptAddress.received:type_name -> frontend.v1.FeedAgentPromptAddressReceived
-	278, // 325: frontend.v1.FeedAgentPromptAddressSent.agent:type_name -> frontend.v1.FeedAgentPromptAddressAgent
-	282, // 326: frontend.v1.FeedAgentPromptAddressSent.peer_session:type_name -> frontend.v1.FeedAgentPromptAddressPeerSession
-	285, // 327: frontend.v1.FeedAgentPromptAddressSent.unclassified:type_name -> frontend.v1.FeedAgentPromptAddressUnclassified
-	278, // 328: frontend.v1.FeedAgentPromptAddressReceived.agent:type_name -> frontend.v1.FeedAgentPromptAddressAgent
-	275, // 329: frontend.v1.FeedAgentPromptAddressReceived.workspace:type_name -> frontend.v1.FeedAgentPromptAddressWorkspace
-	276, // 330: frontend.v1.FeedAgentPromptAddressWorkspace.named:type_name -> frontend.v1.FeedAgentPromptAddressWorkspaceNamed
-	277, // 331: frontend.v1.FeedAgentPromptAddressWorkspace.unnamed:type_name -> frontend.v1.FeedAgentPromptAddressWorkspaceUnnamed
-	279, // 332: frontend.v1.FeedAgentPromptAddressAgent.main_agent:type_name -> frontend.v1.FeedAgentPromptAddressAgentMain
-	280, // 333: frontend.v1.FeedAgentPromptAddressAgent.named:type_name -> frontend.v1.FeedAgentPromptAddressAgentNamed
-	281, // 334: frontend.v1.FeedAgentPromptAddressAgent.identified:type_name -> frontend.v1.FeedAgentPromptAddressAgentIdentified
-	283, // 335: frontend.v1.FeedAgentPromptAddressPeerSession.workspace:type_name -> frontend.v1.FeedAgentPromptAddressPeerSessionWorkspace
-	284, // 336: frontend.v1.FeedAgentPromptAddressPeerSession.unresolved:type_name -> frontend.v1.FeedAgentPromptAddressPeerSessionUnresolved
-	287, // 337: frontend.v1.FeedAgentPromptBody.blocks:type_name -> frontend.v1.FeedAgentPromptBlock
-	262, // 338: frontend.v1.FeedAgentPromptBlock.text:type_name -> frontend.v1.FeedTextBlock
-	263, // 339: frontend.v1.FeedAgentPromptBlock.image:type_name -> frontend.v1.FeedImageBlock
-	264, // 340: frontend.v1.FeedAgentPromptBlock.unsupported:type_name -> frontend.v1.FeedUnsupportedBlock
-	265, // 341: frontend.v1.FeedAgentPromptBlock.quote:type_name -> frontend.v1.FeedQuoteBlock
-	289, // 342: frontend.v1.FeedColdGate.standing:type_name -> frontend.v1.FeedColdGateStanding
-	296, // 343: frontend.v1.FeedColdGate.resolved:type_name -> frontend.v1.FeedColdGateResolved
-	291, // 344: frontend.v1.FeedColdGateStanding.context_tokens:type_name -> frontend.v1.FeedColdGateContextTokens
-	292, // 345: frontend.v1.FeedColdGateStanding.last_request:type_name -> frontend.v1.FeedColdGateLastRequest
-	293, // 346: frontend.v1.FeedColdGateStanding.model:type_name -> frontend.v1.FeedColdGateModel
-	294, // 347: frontend.v1.FeedColdGateStanding.compact:type_name -> frontend.v1.FeedColdGateCompactMenu
-	290, // 348: frontend.v1.FeedColdGateStanding.compact_and_resume:type_name -> frontend.v1.FeedColdGateCompactAndResume
-	418, // 349: frontend.v1.FeedColdGateModel.model:type_name -> conversation.v1.AgentModel
-	295, // 350: frontend.v1.FeedColdGateCompactMenu.models:type_name -> frontend.v1.FeedColdGateModelOption
-	419, // 351: frontend.v1.FeedColdGateCompactMenu.scopes:type_name -> conversation.v1.SessionCompactScope
-	418, // 352: frontend.v1.FeedColdGateModelOption.model:type_name -> conversation.v1.AgentModel
-	297, // 353: frontend.v1.FeedColdGateResolved.pay:type_name -> frontend.v1.FeedColdGateResolvedPay
-	298, // 354: frontend.v1.FeedColdGateResolved.clear:type_name -> frontend.v1.FeedColdGateResolvedClear
-	299, // 355: frontend.v1.FeedColdGateResolved.compact:type_name -> frontend.v1.FeedColdGateResolvedCompact
-	293, // 356: frontend.v1.FeedColdGateResolvedCompact.model:type_name -> frontend.v1.FeedColdGateModel
-	419, // 357: frontend.v1.FeedColdGateResolvedCompact.scope:type_name -> conversation.v1.SessionCompactScope
-	301, // 358: frontend.v1.FeedSessionSeparation.label:type_name -> frontend.v1.FeedSessionSeparationLabel
-	303, // 359: frontend.v1.FeedSessionSeparation.cleared:type_name -> frontend.v1.FeedContextCutCleared
-	304, // 360: frontend.v1.FeedSessionSeparation.compacted:type_name -> frontend.v1.FeedContextCutCompacted
-	307, // 361: frontend.v1.FeedSessionSeparation.worktree_entered:type_name -> frontend.v1.FeedWorktreeEntered
-	308, // 362: frontend.v1.FeedSessionSeparation.worktree_left:type_name -> frontend.v1.FeedWorktreeLeft
-	340, // 363: frontend.v1.FeedSessionSeparation.compaction_failed:type_name -> frontend.v1.FeedContextCutCompactionFailed
-	302, // 364: frontend.v1.FeedSessionSeparation.tokens:type_name -> frontend.v1.FeedContextCutTokens
-	306, // 365: frontend.v1.FeedContextCutCompacted.summary:type_name -> frontend.v1.FeedContextCutSummary
-	305, // 366: frontend.v1.FeedContextCutCompacted.cold_read:type_name -> frontend.v1.FeedContextCutColdRead
-	420, // 367: frontend.v1.FeedContextCutColdRead.evidence:type_name -> frontend.v1.FailureCompactionColdRead
-	312, // 368: frontend.v1.FeedWorktreeEntered.path:type_name -> frontend.v1.FeedWorktreePath
-	313, // 369: frontend.v1.FeedWorktreeEntered.branch:type_name -> frontend.v1.FeedWorktreeBranch
-	309, // 370: frontend.v1.FeedWorktreeLeft.kept:type_name -> frontend.v1.FeedWorktreeKept
-	310, // 371: frontend.v1.FeedWorktreeLeft.removed:type_name -> frontend.v1.FeedWorktreeRemoved
-	312, // 372: frontend.v1.FeedWorktreeKept.path:type_name -> frontend.v1.FeedWorktreePath
-	311, // 373: frontend.v1.FeedWorktreeRemoved.discarded:type_name -> frontend.v1.FeedWorktreeDiscarded
-	317, // 374: frontend.v1.FeedMerge.head:type_name -> frontend.v1.FeedMergeHead
-	332, // 375: frontend.v1.FeedMerge.update:type_name -> frontend.v1.FeedMergeUpdate
-	335, // 376: frontend.v1.FeedMerge.success:type_name -> frontend.v1.FeedMergeSuccess
-	337, // 377: frontend.v1.FeedMerge.error:type_name -> frontend.v1.FeedMergeError
-	315, // 378: frontend.v1.FeedMerge.queue_offer:type_name -> frontend.v1.FeedMergeQueueOffer
-	316, // 379: frontend.v1.FeedMergeQueueOffer.headline:type_name -> frontend.v1.FeedMergeQueueOfferHeadline
-	329, // 380: frontend.v1.FeedMergeHead.glyph:type_name -> frontend.v1.FeedMergeGlyph
-	330, // 381: frontend.v1.FeedMergeHead.label:type_name -> frontend.v1.FeedMergeLabel
-	331, // 382: frontend.v1.FeedMergeHead.runtime:type_name -> frontend.v1.FeedMergeRuntime
-	341, // 383: frontend.v1.FeedMergeHead.fold:type_name -> frontend.v1.FeedMergeFold
-	321, // 384: frontend.v1.FeedMergeHead.version:type_name -> frontend.v1.FeedMergeVersion
-	318, // 385: frontend.v1.FeedMergeHead.mode:type_name -> frontend.v1.FeedMergeMode
-	319, // 386: frontend.v1.FeedMergeMode.sync:type_name -> frontend.v1.FeedMergeModeSync
-	320, // 387: frontend.v1.FeedMergeMode.async:type_name -> frontend.v1.FeedMergeModeAsync
-	325, // 388: frontend.v1.FeedMergeModeAsync.workspace_switch:type_name -> frontend.v1.FeedMergeWorkspaceSwitch
-	322, // 389: frontend.v1.FeedMergeVersion.leading:type_name -> frontend.v1.FeedMergeVersionLeading
-	323, // 390: frontend.v1.FeedMergeVersion.incremented:type_name -> frontend.v1.FeedMergeVersionIncremented
-	324, // 391: frontend.v1.FeedMergeVersion.trailing:type_name -> frontend.v1.FeedMergeVersionTrailing
-	326, // 392: frontend.v1.FeedMergeWorkspaceSwitch.label:type_name -> frontend.v1.FeedMergeWorkspaceSwitchLabel
-	327, // 393: frontend.v1.FeedMergeWorkspaceSwitch.available:type_name -> frontend.v1.FeedMergeWorkspaceSwitchAvailable
-	328, // 394: frontend.v1.FeedMergeWorkspaceSwitch.removed:type_name -> frontend.v1.FeedMergeWorkspaceSwitchRemoved
-	421, // 395: frontend.v1.FeedMergeWorkspaceSwitchAvailable.target:type_name -> workspace.v1.WorkspaceRef
-	333, // 396: frontend.v1.FeedMergeUpdate.waiting:type_name -> frontend.v1.FeedMergeUpdateWaiting
-	334, // 397: frontend.v1.FeedMergeUpdate.merging:type_name -> frontend.v1.FeedMergeUpdateMerging
-	336, // 398: frontend.v1.FeedMergeSuccess.landed_on:type_name -> frontend.v1.FeedMergeLandedOn
-	338, // 399: frontend.v1.FeedMergeError.failed:type_name -> frontend.v1.FeedMergeFailed
-	339, // 400: frontend.v1.FeedMergeError.abandoned:type_name -> frontend.v1.FeedMergeAbandoned
-	164, // 401: frontend.v1.FeedContextCutCompactionFailed.marker:type_name -> frontend.v1.FeedOutcomeMarker
-	342, // 402: frontend.v1.FeedMergeFold.daemon:type_name -> frontend.v1.FeedMergeFoldByDaemon
-	343, // 403: frontend.v1.FeedMergeFold.reader:type_name -> frontend.v1.FeedMergeFoldByReader
-	345, // 404: frontend.v1.FeedMergeTab.label:type_name -> frontend.v1.FeedMergeTabLabel
-	351, // 405: frontend.v1.FeedMergeTab.queue:type_name -> frontend.v1.FeedMergeTabQueue
-	353, // 406: frontend.v1.FeedMergeTab.rebasing:type_name -> frontend.v1.FeedMergeTabRebasing
-	358, // 407: frontend.v1.FeedMergeTab.rebase_commit:type_name -> frontend.v1.FeedMergeTabRebaseCommit
-	363, // 408: frontend.v1.FeedMergeTab.tests:type_name -> frontend.v1.FeedMergeTabTests
-	364, // 409: frontend.v1.FeedMergeTab.tests_run:type_name -> frontend.v1.FeedMergeTabTestsRun
-	368, // 410: frontend.v1.FeedMergeTab.tests_run_fixing:type_name -> frontend.v1.FeedMergeTabTestsRunFixing
-	384, // 411: frontend.v1.FeedMergeTab.committing:type_name -> frontend.v1.FeedMergeTabCommitting
-	352, // 412: frontend.v1.FeedMergeTab.resolving:type_name -> frontend.v1.FeedMergeTabResolving
-	386, // 413: frontend.v1.FeedMergeTab.updating_main:type_name -> frontend.v1.FeedMergeTabUpdatingMain
-	390, // 414: frontend.v1.FeedMergeTab.hook_prompt:type_name -> frontend.v1.FeedMergeTabHookPrompt
-	391, // 415: frontend.v1.FeedMergeTab.hook_script:type_name -> frontend.v1.FeedMergeTabHookScript
-	360, // 416: frontend.v1.FeedMergeTabLabel.commit:type_name -> frontend.v1.FeedMergeRebaseCommitIdentity
-	348, // 417: frontend.v1.FeedMergeTabSettled.succeeded:type_name -> frontend.v1.FeedMergeTabSucceeded
-	350, // 418: frontend.v1.FeedMergeTabSettled.failed:type_name -> frontend.v1.FeedMergeTabFailed
-	346, // 419: frontend.v1.FeedMergeTabQueue.live:type_name -> frontend.v1.FeedMergeTabLive
-	347, // 420: frontend.v1.FeedMergeTabQueue.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	398, // 421: frontend.v1.FeedMergeTabQueue.queue:type_name -> frontend.v1.FeedMergeQueue
-	346, // 422: frontend.v1.FeedMergeTabResolving.live:type_name -> frontend.v1.FeedMergeTabLive
-	347, // 423: frontend.v1.FeedMergeTabResolving.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	349, // 424: frontend.v1.FeedMergeTabResolving.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
-	346, // 425: frontend.v1.FeedMergeTabRebasing.live:type_name -> frontend.v1.FeedMergeTabLive
-	347, // 426: frontend.v1.FeedMergeTabRebasing.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	349, // 427: frontend.v1.FeedMergeTabRebasing.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
-	354, // 428: frontend.v1.FeedMergeTabRebasing.progress:type_name -> frontend.v1.FeedMergeRebaseProgress
-	355, // 429: frontend.v1.FeedMergeTabRebasing.lines:type_name -> frontend.v1.FeedMergeRebaseLine
-	356, // 430: frontend.v1.FeedMergeRebaseLine.replaying:type_name -> frontend.v1.FeedMergeRebaseReplaying
-	357, // 431: frontend.v1.FeedMergeRebaseReplaying.target:type_name -> frontend.v1.FeedMergeRebaseTarget
-	421, // 432: frontend.v1.FeedMergeRebaseTarget.workspace:type_name -> workspace.v1.WorkspaceRef
-	359, // 433: frontend.v1.FeedMergeTabRebaseCommit.pending:type_name -> frontend.v1.FeedMergeRebaseCommitPending
-	346, // 434: frontend.v1.FeedMergeTabRebaseCommit.live:type_name -> frontend.v1.FeedMergeTabLive
-	349, // 435: frontend.v1.FeedMergeTabRebaseCommit.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
-	347, // 436: frontend.v1.FeedMergeTabRebaseCommit.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	355, // 437: frontend.v1.FeedMergeTabRebaseCommit.lines:type_name -> frontend.v1.FeedMergeRebaseLine
-	361, // 438: frontend.v1.FeedMergeTabRebaseCommit.conflict:type_name -> frontend.v1.FeedMergeRebaseCommitConflict
-	346, // 439: frontend.v1.FeedMergeRebaseCommitConflict.live:type_name -> frontend.v1.FeedMergeTabLive
-	349, // 440: frontend.v1.FeedMergeRebaseCommitConflict.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
-	347, // 441: frontend.v1.FeedMergeRebaseCommitConflict.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	362, // 442: frontend.v1.FeedMergeRebaseCommitConflict.files:type_name -> frontend.v1.FeedMergeConflictFile
-	346, // 443: frontend.v1.FeedMergeTabTests.live:type_name -> frontend.v1.FeedMergeTabLive
-	347, // 444: frontend.v1.FeedMergeTabTests.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	349, // 445: frontend.v1.FeedMergeTabTests.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
-	346, // 446: frontend.v1.FeedMergeTabTestsRun.live:type_name -> frontend.v1.FeedMergeTabLive
-	347, // 447: frontend.v1.FeedMergeTabTestsRun.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	365, // 448: frontend.v1.FeedMergeTabTestsRun.waiting_for_turn:type_name -> frontend.v1.FeedMergeTabTestsRunWaitingForTurn
-	367, // 449: frontend.v1.FeedMergeTabTestsRun.output:type_name -> frontend.v1.FeedMergeTestsRunOutput
-	366, // 450: frontend.v1.FeedMergeTabTestsRunWaitingForTurn.holder:type_name -> frontend.v1.FeedMergeTestTurnHolder
-	372, // 451: frontend.v1.FeedMergeTestsRunOutput.suites:type_name -> frontend.v1.FeedMergeTestSuite
-	369, // 452: frontend.v1.FeedMergeTestsRunOutput.log:type_name -> frontend.v1.FeedMergeTestLog
-	346, // 453: frontend.v1.FeedMergeTabTestsRunFixing.live:type_name -> frontend.v1.FeedMergeTabLive
-	347, // 454: frontend.v1.FeedMergeTabTestsRunFixing.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	349, // 455: frontend.v1.FeedMergeTabTestsRunFixing.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
-	383, // 456: frontend.v1.FeedMergeTabTestsRunFixing.attempt:type_name -> frontend.v1.FeedMergeFixAttempt
-	370, // 457: frontend.v1.FeedMergeTestLog.token:type_name -> frontend.v1.FeedMergeTestLogToken
-	371, // 458: frontend.v1.FeedMergeTestLog.label:type_name -> frontend.v1.FeedMergeTestLogLabel
-	374, // 459: frontend.v1.FeedMergeTestSuite.running:type_name -> frontend.v1.FeedMergeTestSuiteRunning
-	378, // 460: frontend.v1.FeedMergeTestSuite.passed:type_name -> frontend.v1.FeedMergeTestSuitePassed
-	379, // 461: frontend.v1.FeedMergeTestSuite.failed:type_name -> frontend.v1.FeedMergeTestSuiteFailed
-	380, // 462: frontend.v1.FeedMergeTestSuite.reused:type_name -> frontend.v1.FeedMergeTestSuiteReused
-	382, // 463: frontend.v1.FeedMergeTestSuite.output:type_name -> frontend.v1.FeedMergeTestSpan
-	373, // 464: frontend.v1.FeedMergeTestSuite.counts:type_name -> frontend.v1.FeedMergeTestCounts
-	375, // 465: frontend.v1.FeedMergeTestSuiteRunning.unreported:type_name -> frontend.v1.FeedMergeTestSuiteRunningUnreported
-	376, // 466: frontend.v1.FeedMergeTestSuiteRunning.passing:type_name -> frontend.v1.FeedMergeTestSuiteRunningPassing
-	377, // 467: frontend.v1.FeedMergeTestSuiteRunning.failing:type_name -> frontend.v1.FeedMergeTestSuiteRunningFailing
-	381, // 468: frontend.v1.FeedMergeTestSuiteReused.source:type_name -> frontend.v1.FeedMergeTestSuiteReusedSource
-	346, // 469: frontend.v1.FeedMergeTabCommitting.live:type_name -> frontend.v1.FeedMergeTabLive
-	347, // 470: frontend.v1.FeedMergeTabCommitting.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	385, // 471: frontend.v1.FeedMergeTabCommitting.subject:type_name -> frontend.v1.FeedMergeCommitSubject
-	346, // 472: frontend.v1.FeedMergeTabUpdatingMain.live:type_name -> frontend.v1.FeedMergeTabLive
-	347, // 473: frontend.v1.FeedMergeTabUpdatingMain.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	387, // 474: frontend.v1.FeedMergeTabUpdatingMain.step:type_name -> frontend.v1.FeedMergeUpdatingMainStep
-	388, // 475: frontend.v1.FeedMergeUpdatingMainStep.fetching:type_name -> frontend.v1.FeedMergeUpdatingMainFetching
-	389, // 476: frontend.v1.FeedMergeUpdatingMainStep.fast_forwarding:type_name -> frontend.v1.FeedMergeUpdatingMainFastForwarding
-	346, // 477: frontend.v1.FeedMergeTabHookPrompt.live:type_name -> frontend.v1.FeedMergeTabLive
-	347, // 478: frontend.v1.FeedMergeTabHookPrompt.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	346, // 479: frontend.v1.FeedMergeTabHookScript.live:type_name -> frontend.v1.FeedMergeTabLive
-	347, // 480: frontend.v1.FeedMergeTabHookScript.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	392, // 481: frontend.v1.FeedMergeTabHookScript.path:type_name -> frontend.v1.FeedMergeHookScriptPath
-	393, // 482: frontend.v1.FeedMergeTabHookScript.log:type_name -> frontend.v1.FeedMergeHookScriptLog
-	394, // 483: frontend.v1.FeedMergeTabHookScript.tail:type_name -> frontend.v1.FeedMergeHookScriptLine
-	395, // 484: frontend.v1.FeedMergeTabHookScript.exit:type_name -> frontend.v1.FeedMergeHookScriptExit
-	396, // 485: frontend.v1.FeedMergeHookScriptExit.exited:type_name -> frontend.v1.FeedMergeHookScriptExited
-	397, // 486: frontend.v1.FeedMergeHookScriptExit.timed_out:type_name -> frontend.v1.FeedMergeHookScriptTimedOut
-	399, // 487: frontend.v1.FeedMergeQueue.ahead:type_name -> frontend.v1.FeedMergeQueueEntry
-	399, // 488: frontend.v1.FeedMergeQueue.current:type_name -> frontend.v1.FeedMergeQueueEntry
-	399, // 489: frontend.v1.FeedMergeQueue.behind:type_name -> frontend.v1.FeedMergeQueueEntry
-	401, // 490: frontend.v1.FeedMergeQueueEntry.workspace:type_name -> frontend.v1.FeedMergeQueueWorkspace
-	402, // 491: frontend.v1.FeedMergeQueueEntry.label:type_name -> frontend.v1.FeedMergeQueueLabel
-	403, // 492: frontend.v1.FeedMergeQueueEntry.merging:type_name -> frontend.v1.FeedMergeQueueMerging
-	404, // 493: frontend.v1.FeedMergeQueueEntry.waiting:type_name -> frontend.v1.FeedMergeQueueWaiting
-	400, // 494: frontend.v1.FeedMergeQueueEntry.bubble:type_name -> frontend.v1.FeedMergeQueueBubble
-	421, // 495: frontend.v1.FeedMergeQueueBubble.requester:type_name -> workspace.v1.WorkspaceRef
-	0,   // 496: frontend.v1.FeedMergeQueueBubble.row:type_name -> frontend.v1.FeedId
-	421, // 497: frontend.v1.FeedMergeQueueWorkspace.ref:type_name -> workspace.v1.WorkspaceRef
-	345, // 498: frontend.v1.FeedMergeQueueMerging.active_tab:type_name -> frontend.v1.FeedMergeTabLabel
-	499, // [499:499] is the sub-list for method output_type
-	499, // [499:499] is the sub-list for method input_type
-	499, // [499:499] is the sub-list for extension type_name
-	499, // [499:499] is the sub-list for extension extendee
-	0,   // [0:499] is the sub-list for field type_name
+	210, // 237: frontend.v1.FeedDetachedShell.shell:type_name -> frontend.v1.FeedShell
+	193, // 238: frontend.v1.FeedSubagent.label:type_name -> frontend.v1.FeedSubagentLabel
+	194, // 239: frontend.v1.FeedSubagent.description:type_name -> frontend.v1.FeedSubagentDescription
+	195, // 240: frontend.v1.FeedSubagent.tokens:type_name -> frontend.v1.FeedSubagentTokens
+	196, // 241: frontend.v1.FeedSubagent.runtime:type_name -> frontend.v1.FeedSubagentRuntime
+	197, // 242: frontend.v1.FeedSubagent.live:type_name -> frontend.v1.FeedSubagentLive
+	200, // 243: frontend.v1.FeedSubagent.settled:type_name -> frontend.v1.FeedSubagentSettled
+	199, // 244: frontend.v1.FeedSubagent.settling:type_name -> frontend.v1.FeedSubagentSettling
+	192, // 245: frontend.v1.FeedSubagent.work_id:type_name -> frontend.v1.FeedDetachedWorkId
+	191, // 246: frontend.v1.FeedSubagent.model:type_name -> frontend.v1.FeedSubagentModel
+	198, // 247: frontend.v1.FeedSubagentLive.last_progress:type_name -> frontend.v1.FeedSubagentLastProgress
+	202, // 248: frontend.v1.FeedSubagentSettled.succeeded:type_name -> frontend.v1.FeedSubagentSucceeded
+	203, // 249: frontend.v1.FeedSubagentSettled.failed:type_name -> frontend.v1.FeedSubagentFailed
+	204, // 250: frontend.v1.FeedSubagentSettled.cancelled:type_name -> frontend.v1.FeedSubagentCancelled
+	205, // 251: frontend.v1.FeedSubagentSettled.lost:type_name -> frontend.v1.FeedSubagentLost
+	201, // 252: frontend.v1.FeedSubagentSettled.restarted:type_name -> frontend.v1.FeedSubagentRestarted
+	207, // 253: frontend.v1.FeedSubagentLost.file_vanished:type_name -> frontend.v1.FeedSubagentLostFileVanished
+	208, // 254: frontend.v1.FeedSubagentLost.went_silent:type_name -> frontend.v1.FeedSubagentLostWentSilent
+	209, // 255: frontend.v1.FeedSubagentLost.swept_up:type_name -> frontend.v1.FeedSubagentLostSweptUp
+	206, // 256: frontend.v1.FeedSubagentLost.process_ended:type_name -> frontend.v1.FeedSubagentLostProcessEnded
+	211, // 257: frontend.v1.FeedShell.command:type_name -> frontend.v1.FeedShellCommand
+	212, // 258: frontend.v1.FeedShell.runtime:type_name -> frontend.v1.FeedShellRuntime
+	213, // 259: frontend.v1.FeedShell.spool:type_name -> frontend.v1.FeedShellSpool
+	215, // 260: frontend.v1.FeedShell.live:type_name -> frontend.v1.FeedShellLive
+	217, // 261: frontend.v1.FeedShell.settled:type_name -> frontend.v1.FeedShellSettled
+	192, // 262: frontend.v1.FeedShell.work_id:type_name -> frontend.v1.FeedDetachedWorkId
+	214, // 263: frontend.v1.FeedShellSpool.omitted:type_name -> frontend.v1.FeedShellOmitted
+	216, // 264: frontend.v1.FeedShellLive.last_progress:type_name -> frontend.v1.FeedShellLastProgress
+	218, // 265: frontend.v1.FeedShellSettled.exit:type_name -> frontend.v1.FeedShellExit
+	219, // 266: frontend.v1.FeedShellSettled.completed:type_name -> frontend.v1.FeedShellCompleted
+	222, // 267: frontend.v1.FeedShellSettled.cancelled:type_name -> frontend.v1.FeedShellCancelled
+	223, // 268: frontend.v1.FeedShellSettled.lost:type_name -> frontend.v1.FeedShellLost
+	220, // 269: frontend.v1.FeedShellCompleted.succeeded:type_name -> frontend.v1.FeedShellCompletedSucceeded
+	221, // 270: frontend.v1.FeedShellCompleted.failed:type_name -> frontend.v1.FeedShellCompletedFailed
+	224, // 271: frontend.v1.FeedShellLost.file_vanished:type_name -> frontend.v1.FeedShellLostFileVanished
+	225, // 272: frontend.v1.FeedShellLost.went_silent:type_name -> frontend.v1.FeedShellLostWentSilent
+	226, // 273: frontend.v1.FeedShellLost.swept_up:type_name -> frontend.v1.FeedShellLostSweptUp
+	227, // 274: frontend.v1.FeedShellLost.process_ended:type_name -> frontend.v1.FeedShellLostProcessEnded
+	229, // 275: frontend.v1.FeedPermission.headline:type_name -> frontend.v1.FeedPermissionHeadline
+	230, // 276: frontend.v1.FeedPermission.subtitle:type_name -> frontend.v1.FeedPermissionSubtitle
+	231, // 277: frontend.v1.FeedPermission.trigger:type_name -> frontend.v1.FeedPermissionTriggerNote
+	232, // 278: frontend.v1.FeedPermission.arguments:type_name -> frontend.v1.FeedPermissionArguments
+	233, // 279: frontend.v1.FeedPermission.standing_offered:type_name -> frontend.v1.FeedPermissionStandingOffered
+	234, // 280: frontend.v1.FeedPermission.open:type_name -> frontend.v1.FeedPermissionOpen
+	235, // 281: frontend.v1.FeedPermission.answered:type_name -> frontend.v1.FeedPermissionAnswered
+	241, // 282: frontend.v1.FeedPermission.abandoned:type_name -> frontend.v1.FeedPermissionAbandoned
+	90,  // 283: frontend.v1.FeedPermission.clock:type_name -> frontend.v1.FeedToolCardClock
+	237, // 284: frontend.v1.FeedPermissionAnswered.allowed_once:type_name -> frontend.v1.FeedPermissionAllowedOnce
+	238, // 285: frontend.v1.FeedPermissionAnswered.allowed_standing:type_name -> frontend.v1.FeedPermissionAllowedStanding
+	239, // 286: frontend.v1.FeedPermissionAnswered.denied_by_user:type_name -> frontend.v1.FeedPermissionDeniedByUser
+	240, // 287: frontend.v1.FeedPermissionAnswered.denied_by_policy:type_name -> frontend.v1.FeedPermissionDeniedByPolicy
+	236, // 288: frontend.v1.FeedPermissionAnswered.denied_undecidable:type_name -> frontend.v1.FeedPermissionDeniedUndecidable
+	164, // 289: frontend.v1.FeedPermissionDeniedByUser.marker:type_name -> frontend.v1.FeedOutcomeMarker
+	243, // 290: frontend.v1.FeedQuestion.questions:type_name -> frontend.v1.FeedQuestionItem
+	251, // 291: frontend.v1.FeedQuestion.open:type_name -> frontend.v1.FeedQuestionOpen
+	253, // 292: frontend.v1.FeedQuestion.answered:type_name -> frontend.v1.FeedQuestionAnswered
+	256, // 293: frontend.v1.FeedQuestion.expired:type_name -> frontend.v1.FeedQuestionExpired
+	90,  // 294: frontend.v1.FeedQuestion.clock:type_name -> frontend.v1.FeedToolCardClock
+	244, // 295: frontend.v1.FeedQuestionItem.header:type_name -> frontend.v1.FeedQuestionHeader
+	245, // 296: frontend.v1.FeedQuestionItem.text:type_name -> frontend.v1.FeedQuestionText
+	246, // 297: frontend.v1.FeedQuestionItem.single_select:type_name -> frontend.v1.FeedQuestionSingleSelect
+	247, // 298: frontend.v1.FeedQuestionItem.multi_select:type_name -> frontend.v1.FeedQuestionMultiSelect
+	248, // 299: frontend.v1.FeedQuestionSingleSelect.options:type_name -> frontend.v1.FeedQuestionOption
+	248, // 300: frontend.v1.FeedQuestionMultiSelect.options:type_name -> frontend.v1.FeedQuestionOption
+	249, // 301: frontend.v1.FeedQuestionOption.label:type_name -> frontend.v1.FeedQuestionOptionLabel
+	250, // 302: frontend.v1.FeedQuestionOption.description:type_name -> frontend.v1.FeedQuestionOptionDescription
+	252, // 303: frontend.v1.FeedQuestionOpen.drafts:type_name -> frontend.v1.FeedQuestionDraft
+	255, // 304: frontend.v1.FeedQuestionDraft.other_text:type_name -> frontend.v1.FeedQuestionOtherText
+	254, // 305: frontend.v1.FeedQuestionAnswered.answers:type_name -> frontend.v1.FeedQuestionGivenAnswer
+	244, // 306: frontend.v1.FeedQuestionGivenAnswer.header:type_name -> frontend.v1.FeedQuestionHeader
+	255, // 307: frontend.v1.FeedQuestionGivenAnswer.other_text:type_name -> frontend.v1.FeedQuestionOtherText
+	260, // 308: frontend.v1.FeedUserPrompt.author:type_name -> frontend.v1.FeedUserPromptAuthor
+	259, // 309: frontend.v1.FeedUserPrompt.success:type_name -> frontend.v1.FeedUserPromptSuccess
+	258, // 310: frontend.v1.FeedUserPrompt.commands:type_name -> frontend.v1.FeedUserPromptCommand
+	261, // 311: frontend.v1.FeedUserPromptSuccess.body:type_name -> frontend.v1.FeedUserPromptBody
+	262, // 312: frontend.v1.FeedUserPromptBody.blocks:type_name -> frontend.v1.FeedUserPromptBlock
+	263, // 313: frontend.v1.FeedUserPromptBlock.text:type_name -> frontend.v1.FeedTextBlock
+	264, // 314: frontend.v1.FeedUserPromptBlock.image:type_name -> frontend.v1.FeedImageBlock
+	265, // 315: frontend.v1.FeedUserPromptBlock.unsupported:type_name -> frontend.v1.FeedUnsupportedBlock
+	266, // 316: frontend.v1.FeedUserPromptBlock.quote:type_name -> frontend.v1.FeedQuoteBlock
+	272, // 317: frontend.v1.FeedAgentPrompt.address:type_name -> frontend.v1.FeedAgentPromptAddress
+	287, // 318: frontend.v1.FeedAgentPrompt.body:type_name -> frontend.v1.FeedAgentPromptBody
+	268, // 319: frontend.v1.FeedAgentPrompt.queued_to_live:type_name -> frontend.v1.FeedAgentPromptQueuedToLive
+	269, // 320: frontend.v1.FeedAgentPrompt.resumed_recipient:type_name -> frontend.v1.FeedAgentPromptResumedRecipient
+	270, // 321: frontend.v1.FeedAgentPrompt.refused:type_name -> frontend.v1.FeedAgentPromptRefused
+	271, // 322: frontend.v1.FeedAgentPromptRefused.reason:type_name -> frontend.v1.FeedAgentPromptRefusalReason
+	273, // 323: frontend.v1.FeedAgentPromptAddress.name:type_name -> frontend.v1.FeedAgentPromptAddressName
+	274, // 324: frontend.v1.FeedAgentPromptAddress.sent:type_name -> frontend.v1.FeedAgentPromptAddressSent
+	275, // 325: frontend.v1.FeedAgentPromptAddress.received:type_name -> frontend.v1.FeedAgentPromptAddressReceived
+	279, // 326: frontend.v1.FeedAgentPromptAddressSent.agent:type_name -> frontend.v1.FeedAgentPromptAddressAgent
+	283, // 327: frontend.v1.FeedAgentPromptAddressSent.peer_session:type_name -> frontend.v1.FeedAgentPromptAddressPeerSession
+	286, // 328: frontend.v1.FeedAgentPromptAddressSent.unclassified:type_name -> frontend.v1.FeedAgentPromptAddressUnclassified
+	279, // 329: frontend.v1.FeedAgentPromptAddressReceived.agent:type_name -> frontend.v1.FeedAgentPromptAddressAgent
+	276, // 330: frontend.v1.FeedAgentPromptAddressReceived.workspace:type_name -> frontend.v1.FeedAgentPromptAddressWorkspace
+	277, // 331: frontend.v1.FeedAgentPromptAddressWorkspace.named:type_name -> frontend.v1.FeedAgentPromptAddressWorkspaceNamed
+	278, // 332: frontend.v1.FeedAgentPromptAddressWorkspace.unnamed:type_name -> frontend.v1.FeedAgentPromptAddressWorkspaceUnnamed
+	280, // 333: frontend.v1.FeedAgentPromptAddressAgent.main_agent:type_name -> frontend.v1.FeedAgentPromptAddressAgentMain
+	281, // 334: frontend.v1.FeedAgentPromptAddressAgent.named:type_name -> frontend.v1.FeedAgentPromptAddressAgentNamed
+	282, // 335: frontend.v1.FeedAgentPromptAddressAgent.identified:type_name -> frontend.v1.FeedAgentPromptAddressAgentIdentified
+	284, // 336: frontend.v1.FeedAgentPromptAddressPeerSession.workspace:type_name -> frontend.v1.FeedAgentPromptAddressPeerSessionWorkspace
+	285, // 337: frontend.v1.FeedAgentPromptAddressPeerSession.unresolved:type_name -> frontend.v1.FeedAgentPromptAddressPeerSessionUnresolved
+	288, // 338: frontend.v1.FeedAgentPromptBody.blocks:type_name -> frontend.v1.FeedAgentPromptBlock
+	263, // 339: frontend.v1.FeedAgentPromptBlock.text:type_name -> frontend.v1.FeedTextBlock
+	264, // 340: frontend.v1.FeedAgentPromptBlock.image:type_name -> frontend.v1.FeedImageBlock
+	265, // 341: frontend.v1.FeedAgentPromptBlock.unsupported:type_name -> frontend.v1.FeedUnsupportedBlock
+	266, // 342: frontend.v1.FeedAgentPromptBlock.quote:type_name -> frontend.v1.FeedQuoteBlock
+	290, // 343: frontend.v1.FeedColdGate.standing:type_name -> frontend.v1.FeedColdGateStanding
+	297, // 344: frontend.v1.FeedColdGate.resolved:type_name -> frontend.v1.FeedColdGateResolved
+	292, // 345: frontend.v1.FeedColdGateStanding.context_tokens:type_name -> frontend.v1.FeedColdGateContextTokens
+	293, // 346: frontend.v1.FeedColdGateStanding.last_request:type_name -> frontend.v1.FeedColdGateLastRequest
+	294, // 347: frontend.v1.FeedColdGateStanding.model:type_name -> frontend.v1.FeedColdGateModel
+	295, // 348: frontend.v1.FeedColdGateStanding.compact:type_name -> frontend.v1.FeedColdGateCompactMenu
+	291, // 349: frontend.v1.FeedColdGateStanding.compact_and_resume:type_name -> frontend.v1.FeedColdGateCompactAndResume
+	419, // 350: frontend.v1.FeedColdGateModel.model:type_name -> conversation.v1.AgentModel
+	296, // 351: frontend.v1.FeedColdGateCompactMenu.models:type_name -> frontend.v1.FeedColdGateModelOption
+	420, // 352: frontend.v1.FeedColdGateCompactMenu.scopes:type_name -> conversation.v1.SessionCompactScope
+	419, // 353: frontend.v1.FeedColdGateModelOption.model:type_name -> conversation.v1.AgentModel
+	298, // 354: frontend.v1.FeedColdGateResolved.pay:type_name -> frontend.v1.FeedColdGateResolvedPay
+	299, // 355: frontend.v1.FeedColdGateResolved.clear:type_name -> frontend.v1.FeedColdGateResolvedClear
+	300, // 356: frontend.v1.FeedColdGateResolved.compact:type_name -> frontend.v1.FeedColdGateResolvedCompact
+	294, // 357: frontend.v1.FeedColdGateResolvedCompact.model:type_name -> frontend.v1.FeedColdGateModel
+	420, // 358: frontend.v1.FeedColdGateResolvedCompact.scope:type_name -> conversation.v1.SessionCompactScope
+	302, // 359: frontend.v1.FeedSessionSeparation.label:type_name -> frontend.v1.FeedSessionSeparationLabel
+	304, // 360: frontend.v1.FeedSessionSeparation.cleared:type_name -> frontend.v1.FeedContextCutCleared
+	305, // 361: frontend.v1.FeedSessionSeparation.compacted:type_name -> frontend.v1.FeedContextCutCompacted
+	308, // 362: frontend.v1.FeedSessionSeparation.worktree_entered:type_name -> frontend.v1.FeedWorktreeEntered
+	309, // 363: frontend.v1.FeedSessionSeparation.worktree_left:type_name -> frontend.v1.FeedWorktreeLeft
+	341, // 364: frontend.v1.FeedSessionSeparation.compaction_failed:type_name -> frontend.v1.FeedContextCutCompactionFailed
+	303, // 365: frontend.v1.FeedSessionSeparation.tokens:type_name -> frontend.v1.FeedContextCutTokens
+	307, // 366: frontend.v1.FeedContextCutCompacted.summary:type_name -> frontend.v1.FeedContextCutSummary
+	306, // 367: frontend.v1.FeedContextCutCompacted.cold_read:type_name -> frontend.v1.FeedContextCutColdRead
+	421, // 368: frontend.v1.FeedContextCutColdRead.evidence:type_name -> frontend.v1.FailureCompactionColdRead
+	313, // 369: frontend.v1.FeedWorktreeEntered.path:type_name -> frontend.v1.FeedWorktreePath
+	314, // 370: frontend.v1.FeedWorktreeEntered.branch:type_name -> frontend.v1.FeedWorktreeBranch
+	310, // 371: frontend.v1.FeedWorktreeLeft.kept:type_name -> frontend.v1.FeedWorktreeKept
+	311, // 372: frontend.v1.FeedWorktreeLeft.removed:type_name -> frontend.v1.FeedWorktreeRemoved
+	313, // 373: frontend.v1.FeedWorktreeKept.path:type_name -> frontend.v1.FeedWorktreePath
+	312, // 374: frontend.v1.FeedWorktreeRemoved.discarded:type_name -> frontend.v1.FeedWorktreeDiscarded
+	318, // 375: frontend.v1.FeedMerge.head:type_name -> frontend.v1.FeedMergeHead
+	333, // 376: frontend.v1.FeedMerge.update:type_name -> frontend.v1.FeedMergeUpdate
+	336, // 377: frontend.v1.FeedMerge.success:type_name -> frontend.v1.FeedMergeSuccess
+	338, // 378: frontend.v1.FeedMerge.error:type_name -> frontend.v1.FeedMergeError
+	316, // 379: frontend.v1.FeedMerge.queue_offer:type_name -> frontend.v1.FeedMergeQueueOffer
+	317, // 380: frontend.v1.FeedMergeQueueOffer.headline:type_name -> frontend.v1.FeedMergeQueueOfferHeadline
+	330, // 381: frontend.v1.FeedMergeHead.glyph:type_name -> frontend.v1.FeedMergeGlyph
+	331, // 382: frontend.v1.FeedMergeHead.label:type_name -> frontend.v1.FeedMergeLabel
+	332, // 383: frontend.v1.FeedMergeHead.runtime:type_name -> frontend.v1.FeedMergeRuntime
+	342, // 384: frontend.v1.FeedMergeHead.fold:type_name -> frontend.v1.FeedMergeFold
+	322, // 385: frontend.v1.FeedMergeHead.version:type_name -> frontend.v1.FeedMergeVersion
+	319, // 386: frontend.v1.FeedMergeHead.mode:type_name -> frontend.v1.FeedMergeMode
+	320, // 387: frontend.v1.FeedMergeMode.sync:type_name -> frontend.v1.FeedMergeModeSync
+	321, // 388: frontend.v1.FeedMergeMode.async:type_name -> frontend.v1.FeedMergeModeAsync
+	326, // 389: frontend.v1.FeedMergeModeAsync.workspace_switch:type_name -> frontend.v1.FeedMergeWorkspaceSwitch
+	323, // 390: frontend.v1.FeedMergeVersion.leading:type_name -> frontend.v1.FeedMergeVersionLeading
+	324, // 391: frontend.v1.FeedMergeVersion.incremented:type_name -> frontend.v1.FeedMergeVersionIncremented
+	325, // 392: frontend.v1.FeedMergeVersion.trailing:type_name -> frontend.v1.FeedMergeVersionTrailing
+	327, // 393: frontend.v1.FeedMergeWorkspaceSwitch.label:type_name -> frontend.v1.FeedMergeWorkspaceSwitchLabel
+	328, // 394: frontend.v1.FeedMergeWorkspaceSwitch.available:type_name -> frontend.v1.FeedMergeWorkspaceSwitchAvailable
+	329, // 395: frontend.v1.FeedMergeWorkspaceSwitch.removed:type_name -> frontend.v1.FeedMergeWorkspaceSwitchRemoved
+	422, // 396: frontend.v1.FeedMergeWorkspaceSwitchAvailable.target:type_name -> workspace.v1.WorkspaceRef
+	334, // 397: frontend.v1.FeedMergeUpdate.waiting:type_name -> frontend.v1.FeedMergeUpdateWaiting
+	335, // 398: frontend.v1.FeedMergeUpdate.merging:type_name -> frontend.v1.FeedMergeUpdateMerging
+	337, // 399: frontend.v1.FeedMergeSuccess.landed_on:type_name -> frontend.v1.FeedMergeLandedOn
+	339, // 400: frontend.v1.FeedMergeError.failed:type_name -> frontend.v1.FeedMergeFailed
+	340, // 401: frontend.v1.FeedMergeError.abandoned:type_name -> frontend.v1.FeedMergeAbandoned
+	164, // 402: frontend.v1.FeedContextCutCompactionFailed.marker:type_name -> frontend.v1.FeedOutcomeMarker
+	343, // 403: frontend.v1.FeedMergeFold.daemon:type_name -> frontend.v1.FeedMergeFoldByDaemon
+	344, // 404: frontend.v1.FeedMergeFold.reader:type_name -> frontend.v1.FeedMergeFoldByReader
+	346, // 405: frontend.v1.FeedMergeTab.label:type_name -> frontend.v1.FeedMergeTabLabel
+	352, // 406: frontend.v1.FeedMergeTab.queue:type_name -> frontend.v1.FeedMergeTabQueue
+	354, // 407: frontend.v1.FeedMergeTab.rebasing:type_name -> frontend.v1.FeedMergeTabRebasing
+	359, // 408: frontend.v1.FeedMergeTab.rebase_commit:type_name -> frontend.v1.FeedMergeTabRebaseCommit
+	364, // 409: frontend.v1.FeedMergeTab.tests:type_name -> frontend.v1.FeedMergeTabTests
+	365, // 410: frontend.v1.FeedMergeTab.tests_run:type_name -> frontend.v1.FeedMergeTabTestsRun
+	369, // 411: frontend.v1.FeedMergeTab.tests_run_fixing:type_name -> frontend.v1.FeedMergeTabTestsRunFixing
+	385, // 412: frontend.v1.FeedMergeTab.committing:type_name -> frontend.v1.FeedMergeTabCommitting
+	353, // 413: frontend.v1.FeedMergeTab.resolving:type_name -> frontend.v1.FeedMergeTabResolving
+	387, // 414: frontend.v1.FeedMergeTab.updating_main:type_name -> frontend.v1.FeedMergeTabUpdatingMain
+	391, // 415: frontend.v1.FeedMergeTab.hook_prompt:type_name -> frontend.v1.FeedMergeTabHookPrompt
+	392, // 416: frontend.v1.FeedMergeTab.hook_script:type_name -> frontend.v1.FeedMergeTabHookScript
+	361, // 417: frontend.v1.FeedMergeTabLabel.commit:type_name -> frontend.v1.FeedMergeRebaseCommitIdentity
+	349, // 418: frontend.v1.FeedMergeTabSettled.succeeded:type_name -> frontend.v1.FeedMergeTabSucceeded
+	351, // 419: frontend.v1.FeedMergeTabSettled.failed:type_name -> frontend.v1.FeedMergeTabFailed
+	347, // 420: frontend.v1.FeedMergeTabQueue.live:type_name -> frontend.v1.FeedMergeTabLive
+	348, // 421: frontend.v1.FeedMergeTabQueue.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	399, // 422: frontend.v1.FeedMergeTabQueue.queue:type_name -> frontend.v1.FeedMergeQueue
+	347, // 423: frontend.v1.FeedMergeTabResolving.live:type_name -> frontend.v1.FeedMergeTabLive
+	348, // 424: frontend.v1.FeedMergeTabResolving.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	350, // 425: frontend.v1.FeedMergeTabResolving.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	347, // 426: frontend.v1.FeedMergeTabRebasing.live:type_name -> frontend.v1.FeedMergeTabLive
+	348, // 427: frontend.v1.FeedMergeTabRebasing.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	350, // 428: frontend.v1.FeedMergeTabRebasing.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	355, // 429: frontend.v1.FeedMergeTabRebasing.progress:type_name -> frontend.v1.FeedMergeRebaseProgress
+	356, // 430: frontend.v1.FeedMergeTabRebasing.lines:type_name -> frontend.v1.FeedMergeRebaseLine
+	357, // 431: frontend.v1.FeedMergeRebaseLine.replaying:type_name -> frontend.v1.FeedMergeRebaseReplaying
+	358, // 432: frontend.v1.FeedMergeRebaseReplaying.target:type_name -> frontend.v1.FeedMergeRebaseTarget
+	422, // 433: frontend.v1.FeedMergeRebaseTarget.workspace:type_name -> workspace.v1.WorkspaceRef
+	360, // 434: frontend.v1.FeedMergeTabRebaseCommit.pending:type_name -> frontend.v1.FeedMergeRebaseCommitPending
+	347, // 435: frontend.v1.FeedMergeTabRebaseCommit.live:type_name -> frontend.v1.FeedMergeTabLive
+	350, // 436: frontend.v1.FeedMergeTabRebaseCommit.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	348, // 437: frontend.v1.FeedMergeTabRebaseCommit.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	356, // 438: frontend.v1.FeedMergeTabRebaseCommit.lines:type_name -> frontend.v1.FeedMergeRebaseLine
+	362, // 439: frontend.v1.FeedMergeTabRebaseCommit.conflict:type_name -> frontend.v1.FeedMergeRebaseCommitConflict
+	347, // 440: frontend.v1.FeedMergeRebaseCommitConflict.live:type_name -> frontend.v1.FeedMergeTabLive
+	350, // 441: frontend.v1.FeedMergeRebaseCommitConflict.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	348, // 442: frontend.v1.FeedMergeRebaseCommitConflict.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	363, // 443: frontend.v1.FeedMergeRebaseCommitConflict.files:type_name -> frontend.v1.FeedMergeConflictFile
+	347, // 444: frontend.v1.FeedMergeTabTests.live:type_name -> frontend.v1.FeedMergeTabLive
+	348, // 445: frontend.v1.FeedMergeTabTests.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	350, // 446: frontend.v1.FeedMergeTabTests.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	347, // 447: frontend.v1.FeedMergeTabTestsRun.live:type_name -> frontend.v1.FeedMergeTabLive
+	348, // 448: frontend.v1.FeedMergeTabTestsRun.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	366, // 449: frontend.v1.FeedMergeTabTestsRun.waiting_for_turn:type_name -> frontend.v1.FeedMergeTabTestsRunWaitingForTurn
+	368, // 450: frontend.v1.FeedMergeTabTestsRun.output:type_name -> frontend.v1.FeedMergeTestsRunOutput
+	367, // 451: frontend.v1.FeedMergeTabTestsRunWaitingForTurn.holder:type_name -> frontend.v1.FeedMergeTestTurnHolder
+	373, // 452: frontend.v1.FeedMergeTestsRunOutput.suites:type_name -> frontend.v1.FeedMergeTestSuite
+	370, // 453: frontend.v1.FeedMergeTestsRunOutput.log:type_name -> frontend.v1.FeedMergeTestLog
+	347, // 454: frontend.v1.FeedMergeTabTestsRunFixing.live:type_name -> frontend.v1.FeedMergeTabLive
+	348, // 455: frontend.v1.FeedMergeTabTestsRunFixing.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	350, // 456: frontend.v1.FeedMergeTabTestsRunFixing.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	384, // 457: frontend.v1.FeedMergeTabTestsRunFixing.attempt:type_name -> frontend.v1.FeedMergeFixAttempt
+	371, // 458: frontend.v1.FeedMergeTestLog.token:type_name -> frontend.v1.FeedMergeTestLogToken
+	372, // 459: frontend.v1.FeedMergeTestLog.label:type_name -> frontend.v1.FeedMergeTestLogLabel
+	375, // 460: frontend.v1.FeedMergeTestSuite.running:type_name -> frontend.v1.FeedMergeTestSuiteRunning
+	379, // 461: frontend.v1.FeedMergeTestSuite.passed:type_name -> frontend.v1.FeedMergeTestSuitePassed
+	380, // 462: frontend.v1.FeedMergeTestSuite.failed:type_name -> frontend.v1.FeedMergeTestSuiteFailed
+	381, // 463: frontend.v1.FeedMergeTestSuite.reused:type_name -> frontend.v1.FeedMergeTestSuiteReused
+	383, // 464: frontend.v1.FeedMergeTestSuite.output:type_name -> frontend.v1.FeedMergeTestSpan
+	374, // 465: frontend.v1.FeedMergeTestSuite.counts:type_name -> frontend.v1.FeedMergeTestCounts
+	376, // 466: frontend.v1.FeedMergeTestSuiteRunning.unreported:type_name -> frontend.v1.FeedMergeTestSuiteRunningUnreported
+	377, // 467: frontend.v1.FeedMergeTestSuiteRunning.passing:type_name -> frontend.v1.FeedMergeTestSuiteRunningPassing
+	378, // 468: frontend.v1.FeedMergeTestSuiteRunning.failing:type_name -> frontend.v1.FeedMergeTestSuiteRunningFailing
+	382, // 469: frontend.v1.FeedMergeTestSuiteReused.source:type_name -> frontend.v1.FeedMergeTestSuiteReusedSource
+	347, // 470: frontend.v1.FeedMergeTabCommitting.live:type_name -> frontend.v1.FeedMergeTabLive
+	348, // 471: frontend.v1.FeedMergeTabCommitting.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	386, // 472: frontend.v1.FeedMergeTabCommitting.subject:type_name -> frontend.v1.FeedMergeCommitSubject
+	347, // 473: frontend.v1.FeedMergeTabUpdatingMain.live:type_name -> frontend.v1.FeedMergeTabLive
+	348, // 474: frontend.v1.FeedMergeTabUpdatingMain.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	388, // 475: frontend.v1.FeedMergeTabUpdatingMain.step:type_name -> frontend.v1.FeedMergeUpdatingMainStep
+	389, // 476: frontend.v1.FeedMergeUpdatingMainStep.fetching:type_name -> frontend.v1.FeedMergeUpdatingMainFetching
+	390, // 477: frontend.v1.FeedMergeUpdatingMainStep.fast_forwarding:type_name -> frontend.v1.FeedMergeUpdatingMainFastForwarding
+	347, // 478: frontend.v1.FeedMergeTabHookPrompt.live:type_name -> frontend.v1.FeedMergeTabLive
+	348, // 479: frontend.v1.FeedMergeTabHookPrompt.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	347, // 480: frontend.v1.FeedMergeTabHookScript.live:type_name -> frontend.v1.FeedMergeTabLive
+	348, // 481: frontend.v1.FeedMergeTabHookScript.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	393, // 482: frontend.v1.FeedMergeTabHookScript.path:type_name -> frontend.v1.FeedMergeHookScriptPath
+	394, // 483: frontend.v1.FeedMergeTabHookScript.log:type_name -> frontend.v1.FeedMergeHookScriptLog
+	395, // 484: frontend.v1.FeedMergeTabHookScript.tail:type_name -> frontend.v1.FeedMergeHookScriptLine
+	396, // 485: frontend.v1.FeedMergeTabHookScript.exit:type_name -> frontend.v1.FeedMergeHookScriptExit
+	397, // 486: frontend.v1.FeedMergeHookScriptExit.exited:type_name -> frontend.v1.FeedMergeHookScriptExited
+	398, // 487: frontend.v1.FeedMergeHookScriptExit.timed_out:type_name -> frontend.v1.FeedMergeHookScriptTimedOut
+	400, // 488: frontend.v1.FeedMergeQueue.ahead:type_name -> frontend.v1.FeedMergeQueueEntry
+	400, // 489: frontend.v1.FeedMergeQueue.current:type_name -> frontend.v1.FeedMergeQueueEntry
+	400, // 490: frontend.v1.FeedMergeQueue.behind:type_name -> frontend.v1.FeedMergeQueueEntry
+	402, // 491: frontend.v1.FeedMergeQueueEntry.workspace:type_name -> frontend.v1.FeedMergeQueueWorkspace
+	403, // 492: frontend.v1.FeedMergeQueueEntry.label:type_name -> frontend.v1.FeedMergeQueueLabel
+	404, // 493: frontend.v1.FeedMergeQueueEntry.merging:type_name -> frontend.v1.FeedMergeQueueMerging
+	405, // 494: frontend.v1.FeedMergeQueueEntry.waiting:type_name -> frontend.v1.FeedMergeQueueWaiting
+	401, // 495: frontend.v1.FeedMergeQueueEntry.bubble:type_name -> frontend.v1.FeedMergeQueueBubble
+	422, // 496: frontend.v1.FeedMergeQueueBubble.requester:type_name -> workspace.v1.WorkspaceRef
+	0,   // 497: frontend.v1.FeedMergeQueueBubble.row:type_name -> frontend.v1.FeedId
+	422, // 498: frontend.v1.FeedMergeQueueWorkspace.ref:type_name -> workspace.v1.WorkspaceRef
+	346, // 499: frontend.v1.FeedMergeQueueMerging.active_tab:type_name -> frontend.v1.FeedMergeTabLabel
+	500, // [500:500] is the sub-list for method output_type
+	500, // [500:500] is the sub-list for method input_type
+	500, // [500:500] is the sub-list for extension type_name
+	500, // [500:500] is the sub-list for extension extendee
+	0,   // [0:500] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_feed_proto_init() }
@@ -28554,166 +28618,166 @@ func file_frontend_v1_feed_proto_init() {
 		(*FeedSubagent_Settled)(nil),
 		(*FeedSubagent_Settling)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[196].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[199].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[197].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[200].OneofWrappers = []any{
 		(*FeedSubagentSettled_Succeeded)(nil),
 		(*FeedSubagentSettled_Failed)(nil),
 		(*FeedSubagentSettled_Cancelled)(nil),
 		(*FeedSubagentSettled_Lost)(nil),
 		(*FeedSubagentSettled_Restarted)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[204].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[205].OneofWrappers = []any{
 		(*FeedSubagentLost_FileVanished)(nil),
 		(*FeedSubagentLost_WentSilent)(nil),
 		(*FeedSubagentLost_SweptUp)(nil),
 		(*FeedSubagentLost_ProcessEnded)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[209].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[210].OneofWrappers = []any{
 		(*FeedShell_Live)(nil),
 		(*FeedShell_Settled)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[212].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[214].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[216].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[213].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[215].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[217].OneofWrappers = []any{
 		(*FeedShellSettled_Completed)(nil),
 		(*FeedShellSettled_Cancelled)(nil),
 		(*FeedShellSettled_Lost)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[218].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[219].OneofWrappers = []any{
 		(*FeedShellCompleted_Succeeded)(nil),
 		(*FeedShellCompleted_Failed)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[222].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[223].OneofWrappers = []any{
 		(*FeedShellLost_FileVanished)(nil),
 		(*FeedShellLost_WentSilent)(nil),
 		(*FeedShellLost_SweptUp)(nil),
 		(*FeedShellLost_ProcessEnded)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[227].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[228].OneofWrappers = []any{
 		(*FeedPermission_Open)(nil),
 		(*FeedPermission_Answered)(nil),
 		(*FeedPermission_Abandoned)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[234].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[235].OneofWrappers = []any{
 		(*FeedPermissionAnswered_AllowedOnce)(nil),
 		(*FeedPermissionAnswered_AllowedStanding)(nil),
 		(*FeedPermissionAnswered_DeniedByUser)(nil),
 		(*FeedPermissionAnswered_DeniedByPolicy)(nil),
 		(*FeedPermissionAnswered_DeniedUndecidable)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[241].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[242].OneofWrappers = []any{
 		(*FeedQuestion_Open)(nil),
 		(*FeedQuestion_Answered)(nil),
 		(*FeedQuestion_Expired)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[242].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[243].OneofWrappers = []any{
 		(*FeedQuestionItem_SingleSelect)(nil),
 		(*FeedQuestionItem_MultiSelect)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[247].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[251].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[253].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[256].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[248].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[252].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[254].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[257].OneofWrappers = []any{
 		(*FeedUserPrompt_Success)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[261].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[262].OneofWrappers = []any{
 		(*FeedUserPromptBlock_Text)(nil),
 		(*FeedUserPromptBlock_Image)(nil),
 		(*FeedUserPromptBlock_Unsupported)(nil),
 		(*FeedUserPromptBlock_Quote)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[266].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[267].OneofWrappers = []any{
 		(*FeedAgentPrompt_QueuedToLive)(nil),
 		(*FeedAgentPrompt_ResumedRecipient)(nil),
 		(*FeedAgentPrompt_Refused)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[269].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[271].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[270].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[272].OneofWrappers = []any{
 		(*FeedAgentPromptAddress_Sent)(nil),
 		(*FeedAgentPromptAddress_Received)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[273].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[274].OneofWrappers = []any{
 		(*FeedAgentPromptAddressSent_Agent)(nil),
 		(*FeedAgentPromptAddressSent_PeerSession)(nil),
 		(*FeedAgentPromptAddressSent_Unclassified)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[274].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[275].OneofWrappers = []any{
 		(*FeedAgentPromptAddressReceived_Agent)(nil),
 		(*FeedAgentPromptAddressReceived_Workspace)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[275].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[276].OneofWrappers = []any{
 		(*FeedAgentPromptAddressWorkspace_Named)(nil),
 		(*FeedAgentPromptAddressWorkspace_Unnamed)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[278].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[279].OneofWrappers = []any{
 		(*FeedAgentPromptAddressAgent_MainAgent)(nil),
 		(*FeedAgentPromptAddressAgent_Named)(nil),
 		(*FeedAgentPromptAddressAgent_Identified)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[282].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[283].OneofWrappers = []any{
 		(*FeedAgentPromptAddressPeerSession_Workspace)(nil),
 		(*FeedAgentPromptAddressPeerSession_Unresolved)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[287].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[288].OneofWrappers = []any{
 		(*FeedAgentPromptBlock_Text)(nil),
 		(*FeedAgentPromptBlock_Image)(nil),
 		(*FeedAgentPromptBlock_Unsupported)(nil),
 		(*FeedAgentPromptBlock_Quote)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[288].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[289].OneofWrappers = []any{
 		(*FeedColdGate_Standing)(nil),
 		(*FeedColdGate_Resolved)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[289].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[296].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[290].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[297].OneofWrappers = []any{
 		(*FeedColdGateResolved_Pay)(nil),
 		(*FeedColdGateResolved_Clear)(nil),
 		(*FeedColdGateResolved_Compact)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[300].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[301].OneofWrappers = []any{
 		(*FeedSessionSeparation_Cleared)(nil),
 		(*FeedSessionSeparation_Compacted)(nil),
 		(*FeedSessionSeparation_WorktreeEntered)(nil),
 		(*FeedSessionSeparation_WorktreeLeft)(nil),
 		(*FeedSessionSeparation_CompactionFailed)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[304].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[307].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[308].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[305].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[308].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[309].OneofWrappers = []any{
 		(*FeedWorktreeLeft_Kept)(nil),
 		(*FeedWorktreeLeft_Removed)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[310].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[314].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[311].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[315].OneofWrappers = []any{
 		(*FeedMerge_Update)(nil),
 		(*FeedMerge_Success)(nil),
 		(*FeedMerge_Error)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[317].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[318].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[318].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[319].OneofWrappers = []any{
 		(*FeedMergeMode_Sync)(nil),
 		(*FeedMergeMode_Async)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[320].OneofWrappers = []any{}
 	file_frontend_v1_feed_proto_msgTypes[321].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[325].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[322].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[326].OneofWrappers = []any{
 		(*FeedMergeWorkspaceSwitch_Available)(nil),
 		(*FeedMergeWorkspaceSwitch_Removed)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[332].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[333].OneofWrappers = []any{
 		(*FeedMergeUpdate_Waiting)(nil),
 		(*FeedMergeUpdate_Merging)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[335].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[337].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[336].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[338].OneofWrappers = []any{
 		(*FeedMergeError_Failed)(nil),
 		(*FeedMergeError_Abandoned)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[341].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[342].OneofWrappers = []any{
 		(*FeedMergeFold_Daemon)(nil),
 		(*FeedMergeFold_Reader)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[344].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[345].OneofWrappers = []any{
 		(*FeedMergeTab_Queue)(nil),
 		(*FeedMergeTab_Rebasing)(nil),
 		(*FeedMergeTab_RebaseCommit)(nil),
@@ -28726,96 +28790,96 @@ func file_frontend_v1_feed_proto_init() {
 		(*FeedMergeTab_HookPrompt)(nil),
 		(*FeedMergeTab_HookScript)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[345].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[346].OneofWrappers = []any{
 		(*FeedMergeTabLabel_Text)(nil),
 		(*FeedMergeTabLabel_Commit)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[347].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[348].OneofWrappers = []any{
 		(*FeedMergeTabSettled_Succeeded)(nil),
 		(*FeedMergeTabSettled_Failed)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[351].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[352].OneofWrappers = []any{
 		(*FeedMergeTabQueue_Live)(nil),
 		(*FeedMergeTabQueue_Settled)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[352].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[353].OneofWrappers = []any{
 		(*FeedMergeTabResolving_Live)(nil),
 		(*FeedMergeTabResolving_Settled)(nil),
 		(*FeedMergeTabResolving_WaitingOnUser)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[353].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[354].OneofWrappers = []any{
 		(*FeedMergeTabRebasing_Live)(nil),
 		(*FeedMergeTabRebasing_Settled)(nil),
 		(*FeedMergeTabRebasing_WaitingOnUser)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[355].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[356].OneofWrappers = []any{
 		(*FeedMergeRebaseLine_Text)(nil),
 		(*FeedMergeRebaseLine_Replaying)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[357].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[358].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[358].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[359].OneofWrappers = []any{
 		(*FeedMergeTabRebaseCommit_Pending)(nil),
 		(*FeedMergeTabRebaseCommit_Live)(nil),
 		(*FeedMergeTabRebaseCommit_WaitingOnUser)(nil),
 		(*FeedMergeTabRebaseCommit_Settled)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[361].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[362].OneofWrappers = []any{
 		(*FeedMergeRebaseCommitConflict_Live)(nil),
 		(*FeedMergeRebaseCommitConflict_WaitingOnUser)(nil),
 		(*FeedMergeRebaseCommitConflict_Settled)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[363].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[364].OneofWrappers = []any{
 		(*FeedMergeTabTests_Live)(nil),
 		(*FeedMergeTabTests_Settled)(nil),
 		(*FeedMergeTabTests_WaitingOnUser)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[364].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[365].OneofWrappers = []any{
 		(*FeedMergeTabTestsRun_Live)(nil),
 		(*FeedMergeTabTestsRun_Settled)(nil),
 		(*FeedMergeTabTestsRun_WaitingForTurn)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[367].OneofWrappers = []any{}
-	file_frontend_v1_feed_proto_msgTypes[368].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[368].OneofWrappers = []any{}
+	file_frontend_v1_feed_proto_msgTypes[369].OneofWrappers = []any{
 		(*FeedMergeTabTestsRunFixing_Live)(nil),
 		(*FeedMergeTabTestsRunFixing_Settled)(nil),
 		(*FeedMergeTabTestsRunFixing_WaitingOnUser)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[372].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[373].OneofWrappers = []any{
 		(*FeedMergeTestSuite_Running)(nil),
 		(*FeedMergeTestSuite_Passed)(nil),
 		(*FeedMergeTestSuite_Failed)(nil),
 		(*FeedMergeTestSuite_Reused)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[374].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[375].OneofWrappers = []any{
 		(*FeedMergeTestSuiteRunning_Unreported)(nil),
 		(*FeedMergeTestSuiteRunning_Passing)(nil),
 		(*FeedMergeTestSuiteRunning_Failing)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[384].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[385].OneofWrappers = []any{
 		(*FeedMergeTabCommitting_Live)(nil),
 		(*FeedMergeTabCommitting_Settled)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[386].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[387].OneofWrappers = []any{
 		(*FeedMergeTabUpdatingMain_Live)(nil),
 		(*FeedMergeTabUpdatingMain_Settled)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[387].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[388].OneofWrappers = []any{
 		(*FeedMergeUpdatingMainStep_Fetching)(nil),
 		(*FeedMergeUpdatingMainStep_FastForwarding)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[390].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[391].OneofWrappers = []any{
 		(*FeedMergeTabHookPrompt_Live)(nil),
 		(*FeedMergeTabHookPrompt_Settled)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[391].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[392].OneofWrappers = []any{
 		(*FeedMergeTabHookScript_Live)(nil),
 		(*FeedMergeTabHookScript_Settled)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[395].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[396].OneofWrappers = []any{
 		(*FeedMergeHookScriptExit_Exited)(nil),
 		(*FeedMergeHookScriptExit_TimedOut)(nil),
 	}
-	file_frontend_v1_feed_proto_msgTypes[399].OneofWrappers = []any{
+	file_frontend_v1_feed_proto_msgTypes[400].OneofWrappers = []any{
 		(*FeedMergeQueueEntry_Merging)(nil),
 		(*FeedMergeQueueEntry_Waiting)(nil),
 	}
@@ -28825,7 +28889,7 @@ func file_frontend_v1_feed_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_feed_proto_rawDesc), len(file_frontend_v1_feed_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   405,
+			NumMessages:   406,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

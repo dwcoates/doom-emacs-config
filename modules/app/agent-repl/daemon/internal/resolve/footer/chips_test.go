@@ -2052,3 +2052,96 @@ func TestAKindlessDetachmentFailsHardAndChangesNothing(t *testing.T) {
 	})
 	t.Fatal("a kindless detachment returned, want a panic")
 }
+
+// answered is one of an agent's API responses naming MODEL, riding a
+// thinking unit as the vendor's observed shape does.
+func answered(unit, model string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Model:      &conversationv1.AgentModel{Name: model},
+		Item: &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{
+			Result: &conversationv1.AgentThinking_Success{Success: &conversationv1.AgentThinkingSuccess{}},
+		}},
+	}
+}
+
+func TestTheAgentRowDrawsTheModelItsResponseNamed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", "map the resolvers"))
+
+	// Act
+	h.r.OnActivity(testWS, &conversationv1.AgentId{Value: "agent-2"}, answered("sub-1", "claude-sonnet-5"))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if got := rows[0].GetModel().GetName(); got != "claude-sonnet-5" {
+		t.Fatalf("model = %q, want claude-sonnet-5", got)
+	}
+}
+
+func TestTheAgentRowDrawsNoModelBeforeAnyResponseNamesOne(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", "map the resolvers"))
+
+	// Assert: nothing is guessed from the parent or the request.
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if rows[0].Model != nil {
+		t.Fatalf("model = %+v, want UNSET", rows[0].Model)
+	}
+}
+
+func TestTheAgentRowDrawsItsLatestModel(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	created := &conversationv1.AgentId{Value: "agent-2"}
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", "map the resolvers"))
+	h.r.OnActivity(testWS, created, answered("sub-1", "claude-sonnet-5"))
+
+	// Act: the run's model changed mid-way.
+	h.r.OnActivity(testWS, created, answered("sub-2", "claude-opus-5"))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if got := rows[0].GetModel().GetName(); got != "claude-opus-5" {
+		t.Fatalf("model = %q, want the latest, claude-opus-5", got)
+	}
+}
+
+func TestTheMainAgentsModelNeverReachesAnAgentRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", "map the resolvers"))
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, answered("main-1", "claude-opus-5"))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if rows[0].Model != nil {
+		t.Fatalf("model = %+v, want UNSET: the main agent's model is not the subagent's", rows[0].Model)
+	}
+}
+
+func TestADetachedAgentRowDrawsTheModelItsResponseNamed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-2", "agent-2", "Explore"))
+
+	// Act
+	h.r.OnActivity(testWS, &conversationv1.AgentId{Value: "agent-2"}, answered("sub-1", "claude-haiku-4-5"))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if len(rows) != 1 || rows[0].GetModel().GetName() != "claude-haiku-4-5" {
+		t.Fatalf("rows = %+v, want one row drawing claude-haiku-4-5", rows)
+	}
+}

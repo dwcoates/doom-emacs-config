@@ -37,6 +37,7 @@ import type {
   FeedSubagent,
   FeedSubagentLastProgress,
   FeedSubagentLost,
+  FeedSubagentModel,
   FeedSubagentRuntime,
   FeedSubagentSettled,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -117,6 +118,18 @@ export function drawFeedDetachedSubagent(
   );
 }
 
+/**
+ * The model the subagent's latest response named, small after the label:
+ * "Explore (claude-sonnet-5)" (owner request, 2026-10-22). Drawn only once a
+ * response has named one; never a guessed model.
+ */
+export function drawFeedSubagentModel(model: FeedSubagentModel): HTMLElement {
+  const el = document.createElement("span");
+  el.className = "subagent-model";
+  el.textContent = `(${model.name})`;
+  return el;
+}
+
 /** The head line. */
 export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement {
   const state = requireCase(msg.state, `${PATH}.state`);
@@ -137,6 +150,7 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
   label.className = "subagent-label";
   label.textContent = requireMessage(msg.label, `${PATH}.label`).text;
   el.append(label);
+  if (msg.model !== undefined) el.append(drawFeedSubagentModel(msg.model));
 
   let description: HTMLElement | null = null;
   if (msg.description !== undefined) {

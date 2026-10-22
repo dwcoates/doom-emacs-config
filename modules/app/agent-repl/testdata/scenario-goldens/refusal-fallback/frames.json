@@ -365,7 +365,10 @@
               },
               "outputTokens": "36"
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH",
+            "model": {
+              "name": "fake-sonnet-5"
+            }
           }
         },
         "agentId": {

@@ -57,6 +57,7 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 
 	usage := readUsage(obj(message["usage"]))
 	effort := readEffort(pick(record, "effort"))
+	model := readModel(message["model"])
 
 	// The block ordinal continues across every LINE of this response and resets
 	// only when the response changes.
@@ -94,7 +95,7 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 		// block converted, so a block that produced no unit (an exempt tool
 		// call) does not silently take the response's accounting with it.
 		if index == 0 {
-			stampAccounting(entries, usage, effort)
+			stampAccounting(entries, usage, effort, model)
 		}
 		out = append(out, entries...)
 	}
@@ -179,9 +180,9 @@ func (c *Converter) quotedAssistant(record, message map[string]any, at Attributi
 	return []*storev1.StoreEntry{VendorSpecificEntry(at, "assistant/quoted_context", record)}
 }
 
-// stampAccounting puts the response's usage and effort on the FIRST unit the
-// response produced, and on no other.
-func stampAccounting(entries []*storev1.StoreEntry, usage *conversationv1.TokenUsage, effort *conversationv1.AgentEffortLevel) {
+// stampAccounting puts the response's usage, effort and model on the FIRST
+// unit the response produced, and on no other.
+func stampAccounting(entries []*storev1.StoreEntry, usage *conversationv1.TokenUsage, effort *conversationv1.AgentEffortLevel, model *conversationv1.AgentModel) {
 	for _, e := range entries {
 		activity := e.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity()
 		if activity == nil {
@@ -189,6 +190,7 @@ func stampAccounting(entries []*storev1.StoreEntry, usage *conversationv1.TokenU
 		}
 		activity.Usage = usage
 		activity.Effort = effort
+		activity.Model = model
 		return
 	}
 }

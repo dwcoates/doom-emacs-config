@@ -38,6 +38,9 @@
             "text": "general-purpose"
           },
           "live": {},
+          "model": {
+            "name": "fake-sonnet-5"
+          },
           "runtime": {
             "startedAtMs": "1800000000019"
           },
@@ -69,6 +72,9 @@
             "text": "general-purpose"
           },
           "live": {},
+          "model": {
+            "name": "fake-sonnet-5"
+          },
           "runtime": {
             "startedAtMs": "1800000000019"
           },

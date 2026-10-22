@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/latestmodel"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/publish"
@@ -427,6 +428,9 @@ type wsState struct {
 	// accountLanded is each account's tally when its latest response bubble
 	// LANDED: the base the account's next bubble counts its delta from.
 	accountLanded map[string]uint64
+	// agentModel is the model each agent's latest API response named — what a
+	// subagent's card draws after its label (subagentmodel.go).
+	agentModel latestmodel.Ledger
 
 	// contextReadings files, per usage-carrying unit of the MAIN agent, how
 	// full the context was when that API response was made, at the place the
@@ -763,6 +767,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		accountTally:  map[string]uint64{},
 		accountStated: map[string]bool{},
 		accountLanded: map[string]uint64{},
+		agentModel:    latestmodel.Ledger{},
 
 		contextReadings: map[string]contextReading{},
 

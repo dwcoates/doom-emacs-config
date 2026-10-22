@@ -3,7 +3,7 @@
  * request, 2026-10-01).
  *
  * The expanded footer's agents panel is one grid whose header and rows take its
- * columns through `subgrid`, so every row's tokens and duration share one width:
+ * columns through `subgrid`, so every row's tokens, duration and model share one width:
  * at least wide enough for the largest common value ("999.9k", a "5hr 30m 30s"-
  * sized duration), growing when a longer value is drawn and shrinking back to
  * that floor when it goes. jsdom lays nothing out, so this draws the panel as
@@ -20,12 +20,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** One agent row as `drawFooterAgentRow` shapes it. */
-function row(tokens: string, clock: string): string {
+function row(tokens: string, clock: string, model: string): string {
   return `
     <div class="footer-row footer-row-agents footer-row-jump footer-columns" data-row="" data-state="running">
       <span class="footer-row-main"><span class="footer-glyph" data-glyph="agents">⚙</span><span class="footer-row-label">Explore</span><span class="footer-row-description">sweep the repo</span></span>
       <span class="footer-row-tokens">${tokens}</span>
       <span class="footer-row-clock">${clock}</span>
+      <span class="footer-row-model">${model}</span>
       <span class="footer-row-caret">▸</span>
     </div>`;
 }
@@ -36,6 +37,7 @@ const HEADER = `
     <span class="footer-stop footer-stop-all"><ar-button role="button" class="footer-stop-button" data-interrupt="">stop all</ar-button></span>
     <span class="footer-column-header" data-column="tokens">tokens</span>
     <span class="footer-column-header" data-column="duration">duration</span>
+    <span class="footer-column-header" data-column="model">model</span>
     <span></span>
   </div>`;
 
@@ -49,6 +51,7 @@ interface Box {
 interface Columns {
   tokens: Box[];
   duration: Box[];
+  model: Box[];
   /** The width the floor values themselves take, in the cells' own font. */
   floors: { tokens: number; duration: number };
   /** The header's stop control's left edge, against the sheet's content edge. */
@@ -56,8 +59,8 @@ interface Columns {
 }
 
 /** Draw the panel with ROWS and measure its columns. */
-async function measure(page: Page, rows: ReadonlyArray<[string, string]>): Promise<Columns> {
-  const html = HEADER + rows.map(([t, c]) => row(t, c)).join("");
+async function measure(page: Page, rows: ReadonlyArray<[string, string] | [string, string, string]>): Promise<Columns> {
+  const html = HEADER + rows.map(([t, c, m]) => row(t, c, m ?? "claude-sonnet-5")).join("");
   return page.evaluate((markup) => {
     const host = document.getElementById("host");
     if (host === null) throw new Error("the page's host did not mount");
@@ -84,6 +87,7 @@ async function measure(page: Page, rows: ReadonlyArray<[string, string]>): Promi
     return {
       tokens: boxes(".footer-row-tokens, [data-column='tokens']"),
       duration: boxes(".footer-row-clock, [data-column='duration']"),
+      model: boxes(".footer-row-model, [data-column='model']"),
       floors: {
         tokens: textWidth("footer-row-tokens", "999.9k"),
         duration: textWidth("footer-row-clock", "5hr 30m 30s"),
@@ -120,6 +124,16 @@ describe("the agents panel's figure columns in WebKit", () => {
   it("gives every row's duration cell the header's left edge and width", async () => {
     const c = await measure(page, [["1.2k", "5s"], ["12.4k", "4m 59s"], ["900", "1h 5m"]]);
     expect([distinct(c.duration.map((b) => b.left)), distinct(c.duration.map((b) => b.width))].map((d) => d.length)).toEqual([1, 1]);
+  });
+
+  it("gives every row's model cell the header's left edge and width", async () => {
+    const c = await measure(page, [["1.2k", "5s", "claude-opus-5"], ["12.4k", "4m 59s", "claude-haiku-4-5"], ["900", "1h 5m", ""]]);
+    expect([distinct(c.model.map((b) => b.left)), distinct(c.model.map((b) => b.width))].map((d) => d.length)).toEqual([1, 1]);
+  });
+
+  it("puts the model column right of the duration column", async () => {
+    const c = await measure(page, [["1.2k", "5s"]]);
+    expect(c.model[1].left).toBeGreaterThanOrEqual(c.duration[1].left + c.duration[1].width);
   });
 
   it("keeps the token count where it is when a clock goes from '4m 59s' to '5m'", async () => {
