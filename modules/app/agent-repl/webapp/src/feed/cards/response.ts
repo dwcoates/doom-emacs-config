@@ -109,6 +109,7 @@ import type { RowContext } from "./context.js";
 import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 import { easeIntoLook, readBubbleLook } from "../../bubble/collapse-motion.js";
 import { drawOutcomeCard } from "../marker.js";
+import { linkAnswers } from "../entries.js";
 
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";
@@ -249,7 +250,10 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     rc.previous !== undefined && isInterimResponse(u) && !rc.previous.classList.contains(INTERIM_RESPONSE_CLASS)
       ? readBubbleLook(rc.previous)
       : undefined;
-  const prose = markdownSlot(RESPONSE_PROSE_CLASS, served);
+  // A LABEL A LATER PROMPT ANSWERS IS A LINK to that prompt, restated on every
+  // paint of the prose (entries.ts).
+  const answers = u.answers;
+  const prose = markdownSlot(RESPONSE_PROSE_CLASS, served, answers.length === 0 ? undefined : (rendered) => linkAnswers(rendered, answers));
 
   // A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user
   // owns the scroll). The daemon re-pushes the whole row on every fragment of an

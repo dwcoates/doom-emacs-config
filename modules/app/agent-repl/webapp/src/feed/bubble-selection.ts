@@ -45,6 +45,14 @@ import { guardMalformed } from "../rpc/guard.js";
 import { selectedText } from "../selection.js";
 import { unreachableArm } from "../rpc/strict.js";
 import { selectFeedRow } from "./select-feed-row.js";
+import {
+  ANSWER_PROMPT_ATTRIBUTE,
+  ENTRY_ATTRIBUTE,
+  ENTRY_CLASS,
+  ENTRY_LABEL_CLASS,
+  LABEL_LINK_CLASS,
+} from "./entries.js";
+import { TREE_LABEL_ATTRIBUTE } from "../metaprompt-tree.js";
 
 /** The attribute a root-feed row wears while the selection owns its bubble's expansion. */
 export const SELECTION_GOVERNED_ATTRIBUTE = "data-selection-governed";
@@ -121,6 +129,8 @@ export function governedRowAt(target: EventTarget | null, host: HTMLElement): HT
 /** What a click on a governed bubble asks of the daemon. */
 export type BubbleClick =
   | { case: "select"; row: string }
+  | { case: "answer"; prompt: string; label: string }
+  | { case: "entry"; row: string; label: string }
   | { case: "ignore"; reason: "not-landed" | "interactive" | "text-selection" };
 
 /**
@@ -133,8 +143,25 @@ export type BubbleClick =
 export function bubbleClick(opts: { row: HTMLElement; target: Element; selectedText: string }): BubbleClick {
   if (opts.target.closest(CLICK_THROUGH_SELECTOR) !== null) return { case: "ignore", reason: "interactive" };
   if (opts.selectedText.trim() !== "") return { case: "ignore", reason: "text-selection" };
+  // A LINKED LABEL SELECTS THE PROMPT THAT ANSWERED IT, not the response it is
+  // drawn in (entries.ts).
+  const linked = opts.target.closest<HTMLElement>(`.${LABEL_LINK_CLASS}`);
+  if (linked !== null) {
+    return {
+      case: "answer",
+      prompt: linked.getAttribute(ANSWER_PROMPT_ATTRIBUTE) ?? "",
+      label: linked.getAttribute(TREE_LABEL_ATTRIBUTE) ?? "",
+    };
+  }
   if (!opts.row.hasAttribute(SELECTABLE_ATTRIBUTE)) return { case: "ignore", reason: "not-landed" };
-  return { case: "select", row: opts.row.getAttribute("data-feed-row") ?? "" };
+  const row = opts.row.getAttribute("data-feed-row") ?? "";
+  // AN ENTRY'S LABEL EDITS THAT ENTRY: the prompt is selected, and Emacs fills
+  // the composer with what the entry says (entries.ts).
+  if (opts.target.closest(`.${ENTRY_LABEL_CLASS}`) !== null) {
+    const entry = opts.target.closest<HTMLElement>(`.${ENTRY_CLASS}`);
+    return { case: "entry", row, label: entry?.getAttribute(ENTRY_ATTRIBUTE) ?? "" };
+  }
+  return { case: "select", row };
 }
 
 /** Arm click-to-select on the root feed HOST. Answers the uninstall. */
@@ -165,6 +192,28 @@ export function installBubbleSelect(
           selectFeedRow(ctx, { case: "bubble", value: { row: { value: click.row } } }, SELECT_REQUEST),
         );
         return;
+      case "answer":
+        log.info("a click on a linked label selects the prompt that answered it", {
+          operation: "feed.label-click-answer",
+          context: { prompt: click.prompt, label: click.label },
+        });
+        void guardMalformed(
+          ctx,
+          "feed.selection-answer",
+          selectFeedRow(ctx, { case: "answer", value: { row: { value: click.prompt }, label: click.label } }, ANSWER_REQUEST),
+        );
+        return;
+      case "entry":
+        log.info("a click on a prompt's entry selects the prompt to edit the entry", {
+          operation: "feed.entry-click",
+          context: { row: click.row, label: click.label },
+        });
+        void guardMalformed(
+          ctx,
+          "feed.selection-entry",
+          selectFeedRow(ctx, { case: "entry", value: { row: { value: click.row }, label: click.label } }, ENTRY_REQUEST),
+        );
+        return;
       default: {
         const other: { case: string } = click;
         return unreachableArm("BubbleClick", other.case);
@@ -179,3 +228,9 @@ export function installBubbleSelect(
 
 /** What the chip's `request` evidence names a click's selection (or deselection) as. */
 export const SELECT_REQUEST = "select the clicked bubble";
+
+/** What the chip's `request` evidence names a linked label's click as. */
+export const ANSWER_REQUEST = "show the prompt that answered the clicked label";
+
+/** What the chip's `request` evidence names an entry's click as. */
+export const ENTRY_REQUEST = "edit the clicked entry";

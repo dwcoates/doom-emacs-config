@@ -9,6 +9,8 @@ import {
   lineText,
   renderTreeHtml,
   TreeOverflowError,
+  TREE_LABEL_ATTRIBUTE,
+  TREE_LABEL_CLASS,
   visibleWidth,
 } from "../src/metaprompt-tree.js";
 import { ProseTreeSchema, type ProseTree } from "../../proto/gen/ts/frontend/v1/prose_pb";
@@ -363,12 +365,35 @@ describe("wrap engine — inline-code balancing", () => {
   });
 });
 
+describe("a node's label", () => {
+  it("is drawn as its own element naming the label", () => {
+    // Act
+    const html = renderTreeHtml(tree(`${R}\n└── 1.1 Detail`), identity, 100);
+    // Assert
+    expect(html).toContain(`<span class="${TREE_LABEL_CLASS}" ${TREE_LABEL_ATTRIBUTE}="1.1">1.1</span> `);
+  });
+
+  it("is drawn on a root too", () => {
+    // Act
+    const html = renderTreeHtml(tree(`${R}\n└── 1.1 Detail`), identity, 100);
+    // Assert
+    expect(html).toContain(`<span class="${TREE_LABEL_CLASS}" ${TREE_LABEL_ATTRIBUTE}="1">1</span> `);
+  });
+
+  it("is not drawn on a wrapped line's continuation", () => {
+    // Act
+    const html = renderTreeHtml(tree(`${R}\n└── 1.1 foo bar`), identity, 14);
+    // Assert — two labels: the root's and 1.1's head line, none on its wrap.
+    expect(html.split(`class="${TREE_LABEL_CLASS}"`).length - 1).toBe(2);
+  });
+});
+
 describe("renderTreeHtml", () => {
   it("renders a fitting branch as a prefix/content pair with real connectors", () => {
     // Act
     const html = renderTreeHtml(tree(`${R}\n├── 1.1 Detail\n└── 1.2 x`), identity, 100);
     // Assert
-    expect(html).toContain(`<span class="mp-prefix">├── 1.1 </span>`);
+    expect(html).toContain(`<span class="mp-prefix">├── <span class="mp-label" data-label="1.1">1.1</span> </span>`);
     expect(html).toContain(`<span class="mp-content">Detail</span>`);
   });
 
@@ -437,7 +462,7 @@ describe("renderTreeHtml", () => {
     // The fence delimiters themselves never leak as tree lines.
     expect(html).not.toContain("```");
     // Branches around the code still render as tree lines.
-    expect(html).toContain(`<span class="mp-prefix">└── 1.2 </span>`);
+    expect(html).toContain(`<span class="mp-prefix">└── <span class="mp-label" data-label="1.2">1.2</span> </span>`);
   });
 
   it("renders a fence drawn behind its branch's rail as a code block with the rail stripped", () => {
@@ -457,7 +482,7 @@ describe("renderTreeHtml", () => {
     expect(html).toMatch(/<pre class="md-code">(?:(?!<\/pre>).)*<code class="hljs lang-json">/);
     expect(html).not.toContain("```");
     expect(html).not.toMatch(/<code[^>]*>│/);
-    expect(html).toContain(`<span class="mp-prefix">└── 1.2 </span>`);
+    expect(html).toContain(`<span class="mp-prefix">└── <span class="mp-label" data-label="1.2">1.2</span> </span>`);
   });
 
   it("keeps a code body's own rail beyond its fence's indent", () => {

@@ -23,7 +23,7 @@ import {
 } from "../../proto/gen/ts/frontend/v1/prose_pb";
 import fixture from "./fixtures/parsed-prose.json";
 
-type FixtureEntry = { text: string; arriving?: boolean; prose: JsonValue };
+type FixtureEntry = { text: string; arriving?: boolean; prompt?: boolean; prose: JsonValue };
 
 // The JSON import types each entry by its literal shape; every entry is a
 // FixtureEntry, the daemon test's webappEntry.
@@ -34,10 +34,22 @@ const MARKER_FLOOR = 0x2190;
 
 /** The daemon's parse of TEXT, settled or still ARRIVING. */
 export function treeProse(text: string, { arriving = false } = {}): ParsedProse {
-  const entry = ENTRIES.find((e) => e.text === text && (e.arriving ?? false) === arriving);
+  return fixtureParse(text, { arriving, prompt: false });
+}
+
+/** The daemon's parse of TEXT as a PROMPT, its entries read (ParsePrompt). */
+export function promptProse(text: string): ParsedProse {
+  return fixtureParse(text, { arriving: false, prompt: true });
+}
+
+/** The fixture's parse of TEXT, as ARRIVING served prose or as a PROMPT. */
+function fixtureParse(text: string, { arriving, prompt }: { arriving: boolean; prompt: boolean }): ParsedProse {
+  const entry = ENTRIES.find(
+    (e) => e.text === text && (e.arriving ?? false) === arriving && (e.prompt ?? false) === prompt,
+  );
   if (entry === undefined) {
     throw new Error(
-      `no daemon parse of ${JSON.stringify(text)} (arriving: ${arriving}) in test/fixtures/parsed-prose.json: ` +
+      `no daemon parse of ${JSON.stringify(text)} (arriving: ${arriving}, prompt: ${prompt}) in test/fixtures/parsed-prose.json: ` +
         "add it to test/fixtures/prose-inputs.json and run `go test ./internal/prose -run WebappFixture -update` from daemon/",
     );
   }

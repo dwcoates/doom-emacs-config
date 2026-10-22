@@ -153,6 +153,8 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+const ANSWERED_TREE = "1 🔧 Did it\n├── 1.1 first\n└── 1.2 second";
+
 describe("the settled state", () => {
   it("renders the whole markdown", () => {
     const el = drawFeedResponse(
@@ -1336,6 +1338,34 @@ describe("the wrapped tree a settled response carries", () => {
     expect(streaming.querySelector(".mp-tree")?.outerHTML).toBe(
       settled.querySelector(".mp-tree")?.outerHTML,
     );
+  });
+
+  it("links each label a later prompt answers to that prompt", () => {
+    // Arrange — the daemon says the prompt p2 answers 1.1.
+    const el = drawFeedResponse(
+      response({
+        result: { case: "success", value: { prose: { prose: treeProse(ANSWERED_TREE) } } },
+        answers: [{ label: "1.1", prompt: { value: "p2" } }],
+      }),
+      rowContext(),
+    );
+    // Act
+    mount(el);
+    // Assert
+    const linked = [...el.querySelectorAll(".mp-label-linked")].map((l) => [l.getAttribute("data-label"), l.getAttribute("data-answer-prompt")]);
+    expect(linked).toEqual([["1.1", "p2"]]);
+  });
+
+  it("links nothing in a response nothing answers", () => {
+    // Arrange
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { prose: treeProse(ANSWERED_TREE) } } } }),
+      rowContext(),
+    );
+    // Act
+    mount(el);
+    // Assert
+    expect([el.querySelector(".mp-label"), el.querySelector(".mp-label-linked")]).toEqual([expect.anything(), null]);
   });
 
   it("does not pin a settled tree bubble to the cap; it shrinks to fit", () => {

@@ -21,6 +21,7 @@ import { inline, renderMarkdown } from "../markdown.js";
 import { renderTreeHtml, type TreeCols, type TreeIssue } from "../metaprompt-tree.js";
 import { computedPx, pageResizeObserver, placeChildren, queryAll, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
+import { entryHtml } from "../feed/entries.js";
 import { applyTextReveal, clearTextReveal, fullTextOf } from "./text-reveal.js";
 
 /** The webapp surfaces a wrap issue through the client logger. */
@@ -47,6 +48,8 @@ export function proseHtml(prose: ParsedProse, cols: TreeCols): string {
           return renderMarkdown(block.block.value.markdown);
         case "tree":
           return `<div class="mp-tree">${renderTreeHtml(block.block.value, inline, cols(), logTreeIssue)}</div>`;
+        case "entry":
+          return entryHtml(block.block.value);
         default:
           return invariant("a prose block has no arm", { case: String(block.block.case) });
       }

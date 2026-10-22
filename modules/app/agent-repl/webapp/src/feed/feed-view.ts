@@ -121,6 +121,7 @@ import { glideSentPrompt } from "./send-glide.js";
 import { isOwnTurn } from "../composer/own-turns.js";
 import { promptWaves, setPromptWave } from "../breathing.js";
 import { childrenMatching, queryAll } from "../dom.js";
+import { flashEntryOncePainted } from "./entries.js";
 
 /** The row a new row is inserted above, sampled before the insert. */
 interface InsertSample {
@@ -1138,11 +1139,18 @@ export function createFeedController(
             operation: "feed.selection-unchanged",
             context: { feed: feedName(), selected: arm.case, row: row.value },
           });
+          // A LINKED LABEL CLICKED AGAIN flashes its entry again, though the
+          // prompt it reveals is already the selection.
+          if (viewport.case === "reveal") revealEntry(row, viewport.value.entryLabel);
           return;
         }
         switch (viewport.case) {
           case "center":
             centerOnRow(row);
+            return;
+          case "reveal":
+            centerOnRow(row);
+            revealEntry(row, viewport.value.entryLabel);
             return;
           case "hold":
             return;
@@ -1220,6 +1228,19 @@ export function createFeedController(
    * coordinates through `offsetTop`. A row this feed has not drawn centers
    * nothing, but the follow is still released.
    */
+  /** Flash ROW's entry answering LABEL, which a linked label revealed (entries.ts). */
+  function revealEntry(row: FeedId, label: string): void {
+    const node = findRowElement(row);
+    if (node === null) {
+      log.debug("the selection reveals an entry of a row this feed has not drawn", {
+        operation: "feed.selection-reveal-absent",
+        context: { feed: feedName(), row: row.value, label },
+      });
+      return;
+    }
+    flashEntryOncePainted(node, label);
+  }
+
   function centerOnRow(center: FeedId): void {
     if (opts.scroll === undefined) return;
     const node = findRowElement(center);

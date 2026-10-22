@@ -178,5 +178,16 @@
   },
   {
     "text": "Response (`x`)\n\n1 🔧 A\n└── 1.1 b"
+  },
+  {
+    "text": "3.1 - yes",
+    "prompt": true
+  },
+  {
+    "text": "3.1 - yes\n1 🔧 Fixed\n└── 1.1 a",
+    "prompt": true
+  },
+  {
+    "text": "1 🔧 Did it\n├── 1.1 first\n└── 1.2 second"
   }
 ]

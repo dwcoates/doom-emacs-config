@@ -655,9 +655,13 @@ function pack(pieces: Piece[], width: number, markdown: boolean): { lines: strin
 /** One output line of a wrapped tree, split so inline markup applies to the
  * body alone and the structural prefix is emitted verbatim. */
 export interface RenderLine {
-  /** Connectors + label (first line) or continuation indent (wrap lines);
+  /** Connectors (a node's head line) or continuation indent (wrap lines);
    * empty for a passed-through non-branch line. */
   prefix: string;
+  /** A node's head line's label, with the space after it ("1.1 "); unset on
+   * a wrap line and a passed-through line. Drawn as its own element
+   * (`TREE_LABEL_CLASS`) so a label a later prompt answers can be a link. */
+  label?: string;
   /** The branch text on this line, or the whole line for a raw passthrough:
    * raw markdown, or the inline HTML when `formatTree` was handed INLINE. */
   body: string;
@@ -667,7 +671,7 @@ export interface RenderLine {
 
 /** The exact text of one output line, matching the daemon formatter's output. */
 export function lineText(l: RenderLine): string {
-  return l.raw ? l.body : (l.prefix + l.body).replace(/\s+$/u, "");
+  return l.raw ? l.body : (l.prefix + (l.label ?? "") + l.body).replace(/\s+$/u, "");
 }
 
 /** wrap_branch: render BRANCH as one or more lines, none wider than WIDTH. */
@@ -689,7 +693,7 @@ function wrapBranch(
   const packed = pack(toPieces(tokenize(body, markdown), field), field, markdown);
   const indent = continuationIndent(branch, hasChildren);
   const lines: RenderLine[] = [
-    { prefix: branch.prefix + branch.label, body: packed.lines[0], raw: false },
+    { prefix: branch.prefix, label: branch.label, body: packed.lines[0], raw: false },
   ];
   for (let i = 1; i < packed.lines.length; i++) {
     lines.push({ prefix: indent, body: packed.lines[i], raw: false });
@@ -882,7 +886,7 @@ export function renderTreeHtml(
         });
       }
       unwrapped = true;
-      lines = [{ prefix: row.branch.prefix + row.branch.label, body: inline(escapeHtml(row.branch.body)), raw: false }];
+      lines = [{ prefix: row.branch.prefix, label: row.branch.label, body: inline(escapeHtml(row.branch.body)), raw: false }];
     }
     parts.push(lines.map(renderLine).join(""));
   }
@@ -915,7 +919,20 @@ function renderLine(l: RenderLine): string {
   }
   return `<div class="mp-line"><span class="mp-prefix">${boxWideChars(
     escapeHtml(l.prefix),
-  )}</span><span class="mp-content">${content}</span></div>`;
+  )}${labelHtml(l.label)}</span><span class="mp-content">${content}</span></div>`;
+}
+
+/** The class a tree node's label wears, its label text in `TREE_LABEL_ATTRIBUTE`. */
+export const TREE_LABEL_CLASS = "mp-label";
+
+/** The attribute naming the label a `TREE_LABEL_CLASS` element draws. */
+export const TREE_LABEL_ATTRIBUTE = "data-label";
+
+/** LABEL ("1.1 ") as its own element and the space after it, or "" when unset. */
+function labelHtml(label: string | undefined): string {
+  if (label === undefined) return "";
+  const text = label.trimEnd();
+  return `<span class="${TREE_LABEL_CLASS}" ${TREE_LABEL_ATTRIBUTE}="${escapeHtml(text)}">${escapeHtml(text)}</span>${escapeHtml(label.slice(text.length))}`;
 }
 
 /**

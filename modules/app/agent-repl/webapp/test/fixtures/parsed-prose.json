@@ -3067,5 +3067,139 @@
         "markdown": "Response (`x`)\n\n1 🔧 A\n└── 1.1 b"
       }
     }
+  },
+  {
+    "text": "3.1 - yes",
+    "prompt": true,
+    "prose": {
+      "blocks": [
+        {
+          "entry": {
+            "label": {
+              "text": "3.1"
+            },
+            "text": {
+              "markdown": "yes"
+            }
+          }
+        }
+      ],
+      "source": {
+        "markdown": "3.1 - yes"
+      }
+    }
+  },
+  {
+    "text": "3.1 - yes\n1 🔧 Fixed\n└── 1.1 a",
+    "prompt": true,
+    "prose": {
+      "blocks": [
+        {
+          "entry": {
+            "label": {
+              "text": "3.1"
+            },
+            "text": {
+              "markdown": "yes"
+            }
+          }
+        },
+        {
+          "tree": {
+            "nodes": [
+              {
+                "id": {},
+                "root": {
+                  "marker": {
+                    "text": "🔧"
+                  }
+                },
+                "label": {
+                  "text": "1"
+                },
+                "text": {
+                  "markdown": "Fixed"
+                }
+              },
+              {
+                "id": {
+                  "index": 1
+                },
+                "branch": {
+                  "parent": {}
+                },
+                "label": {
+                  "text": "1.1"
+                },
+                "text": {
+                  "markdown": "a"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "source": {
+        "markdown": "3.1 - yes\n1 🔧 Fixed\n└── 1.1 a"
+      }
+    }
+  },
+  {
+    "text": "1 🔧 Did it\n├── 1.1 first\n└── 1.2 second",
+    "prose": {
+      "blocks": [
+        {
+          "tree": {
+            "nodes": [
+              {
+                "id": {},
+                "root": {
+                  "marker": {
+                    "text": "🔧"
+                  }
+                },
+                "label": {
+                  "text": "1"
+                },
+                "text": {
+                  "markdown": "Did it"
+                }
+              },
+              {
+                "id": {
+                  "index": 1
+                },
+                "branch": {
+                  "parent": {}
+                },
+                "label": {
+                  "text": "1.1"
+                },
+                "text": {
+                  "markdown": "first"
+                }
+              },
+              {
+                "id": {
+                  "index": 2
+                },
+                "branch": {
+                  "parent": {}
+                },
+                "label": {
+                  "text": "1.2"
+                },
+                "text": {
+                  "markdown": "second"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "source": {
+        "markdown": "1 🔧 Did it\n├── 1.1 first\n└── 1.2 second"
+      }
+    }
   }
 ]

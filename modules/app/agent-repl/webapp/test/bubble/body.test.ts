@@ -31,7 +31,7 @@ import { EXPANDED_CLASS } from "../../src/expand.js";
 import { useTreeLayout } from "../tree-layout.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { fireResize } from "../resize-observer.js";
-import { plainProse, servedProse, treeProse } from "../prose.js";
+import { plainProse, promptProse, servedProse, treeProse } from "../prose.js";
 import { create } from "@bufbuild/protobuf";
 import { ParsedProseSchema } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
@@ -342,6 +342,13 @@ describe("proseHtml", () => {
     host.innerHTML = proseHtml(prose, () => 80);
     // Assert
     expect([...host.children].map((c) => c.className || c.tagName)).toEqual(["P", "mp-tree", "P"]);
+  });
+
+  it("draws a prompt's entry as its entry block", () => {
+    // Act
+    const html = proseHtml(promptProse("3.1 - yes"), () => 80);
+    // Assert
+    expect(html).toContain('class="mp-entry" data-entry-label="3.1"');
   });
 
   it("measures no budget for prose with no tree", () => {

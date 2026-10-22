@@ -79,6 +79,7 @@ import {
   FeedMergeSuccessSchema,
   FeedPageSchema,
   FeedRowSchema,
+  FeedSelectionRowViewportSchema,
   FeedSelectionSchema,
   FeedSessionSeparationSchema,
   FeedSubagentSchema,
@@ -932,8 +933,8 @@ export type SelectionShape =
   | { prompt: string; viewport?: RowViewport }
   | { bubble: string; viewport?: RowViewport };
 
-/** What the viewport does about a newly selected row. */
-type RowViewport = "center" | "hold";
+/** What the viewport does about a newly selected row; `{ reveal }` names the entry to flash. */
+type RowViewport = "center" | "hold" | { reveal: string };
 
 /** The daemon's `FeedSelection` for SHAPE. */
 export function selectionOf(shape: SelectionShape): FeedSelection {
@@ -942,7 +943,15 @@ export function selectionOf(shape: SelectionShape): FeedSelection {
       selection: { case: "none", value: { viewport: { case: shape.none, value: {} } } },
     });
   }
-  const viewport = { viewport: { case: shape.viewport ?? "center", value: {} } } as const;
+  const asked = shape.viewport ?? "center";
+  const viewport = create(FeedSelectionRowViewportSchema, {
+    viewport:
+      asked === "center"
+        ? { case: "center", value: {} }
+        : asked === "hold"
+          ? { case: "hold", value: {} }
+          : { case: "reveal", value: { entryLabel: asked.reveal } },
+  });
   if ("response" in shape) {
     return create(FeedSelectionSchema, {
       selection: { case: "response", value: { row: feedId(shape.response), viewport } },

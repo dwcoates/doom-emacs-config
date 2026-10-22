@@ -2674,6 +2674,23 @@ html[data-page-unshown] *::after {
 .mp-tree { font-family: ui-monospace, monospace; font-size: calc(var(--tree-font-rem) * 1rem * var(--feed-text-scale)); line-height: var(--tree-line-h); white-space: pre-wrap; overflow-wrap: anywhere; clear: right; }
 .md .mp-tree { margin: 0.5em 0; }
 .mp-prefix, .mp-content { white-space: pre-wrap; }
+/* A TREE LABEL A LATER PROMPT ANSWERS is a link to that prompt (feed/entries.ts):
+   the markdown link's own color, so it reads as the link it is. */
+.mp-label-linked { color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 0.15em; }
+/* A PROMPT'S ENTRY answering one label: the label, then what the entry says.
+   The label is the click target that edits the entry, in the tree's own
+   monospace so it reads as the label it answers. */
+.mp-entry { display: flex; gap: 0.5em; align-items: baseline; border-radius: 4px; }
+.mp-entry-label { font-family: ui-monospace, monospace; color: var(--accent); cursor: pointer; flex: none; }
+.mp-entry-text { flex: 1 1 auto; min-width: 0; }
+.mp-entry-text > :first-child { margin-top: 0; }
+.mp-entry-text > :last-child { margin-bottom: 0; }
+/* The entry a linked label revealed flashes once, as a coalesced held card does. */
+.mp-entry-flash { animation: mp-entry-flash 1.2s ease-out; }
+@keyframes mp-entry-flash {
+  0%, 30% { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+  100% { background: transparent; }
+}
 /* A double-width character (an emoji above all) is drawn in a box exactly the
    two columns the wrapper counts it as, whatever its glyph's own advance. */
 .mp-wide { display: inline-block; width: 2ch; text-align: center; }

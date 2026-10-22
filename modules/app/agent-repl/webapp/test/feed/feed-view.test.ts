@@ -2408,6 +2408,53 @@ describe("createFeedController: the feed selection", () => {
     expect(acts).toEqual([]);
   });
 
+  it("centers a prompt a linked label reveals", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(selectionOf({ prompt: "r1", viewport: { reveal: "3.1" } }));
+    // Assert
+    expect(acts).toEqual(["selectionMoved"]);
+  });
+
+  it("flashes the entry a linked label reveals, recording a row that draws none", async () => {
+    // Arrange — the stub bubble draws no entry, so the flash finds none.
+    const capture = captureLogRecords();
+    const { controller } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(selectionOf({ prompt: "r1", viewport: { reveal: "3.1" } }));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.entries.flash-absent");
+    expect(record.context).toMatchObject({ row: "r1", label: "3.1" });
+  });
+
+  it("flashes the entry again when the revealed prompt is already selected, centering nothing", async () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.applySelection(selectionOf({ prompt: "r1", viewport: { reveal: "3.1" } }));
+    acts.length = 0;
+    const capture = captureLogRecords();
+    // Act
+    controller.applySelection(selectionOf({ prompt: "r1", viewport: { reveal: "3.2" } }));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.entries.flash-absent");
+    expect([acts, record.context?.label]).toEqual([[], "3.2"]);
+  });
+
+  it("records a reveal of a row this feed has not drawn at DEBUG", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { controller } = selecting();
+    // Act
+    controller.applySelection(selectionOf({ prompt: "absent", viewport: { reveal: "3.1" } }));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.selection-reveal-absent");
+    expect(record.context).toMatchObject({ row: "absent", label: "3.1" });
+  });
+
   it("does not re-center when the same row is restated", () => {
     // Arrange
     const { controller, acts } = selecting();
