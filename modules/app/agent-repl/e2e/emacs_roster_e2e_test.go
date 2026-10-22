@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -304,27 +305,15 @@ func TestEmacsUnfocusedTurnEndRaisesTheDaemonsBanner(t *testing.T) {
 	recordForm := `(if (file-exists-p ` + elispString(e.Notifier.Record) + `)
 	                   (with-temp-buffer (insert-file-contents ` + elispString(e.Notifier.Record) + `) (buffer-string))
 	                 "")`
+	// A completed turn's banner is titled by its mark and the workspace's
+	// name alone.
+	wantTitle := "✅ " + s.Name
 	e.AwaitEval("the daemon's banner program to record the completed-turn banner", recordForm,
 		func(raw json.RawMessage) bool {
 			var text string
-			return json.Unmarshal(raw, &text) == nil && strings.Contains(text, "turn completed") &&
-				completedBanners(e.Notifier.Invocations()[before:]) > 0
+			return json.Unmarshal(raw, &text) == nil && strings.Contains(text, wantTitle) &&
+				bannersTitled(e.Notifier.Invocations()[before:], wantTitle) > 0
 		})
-
-	wantTitle := "✅ " + s.Name + " turn completed"
-	found := false
-	var argvs [][]string
-	for _, inv := range e.Notifier.Invocations()[before:] {
-		argvs = append(argvs, inv.Argv)
-		for _, arg := range inv.Argv {
-			if strings.HasPrefix(arg, wantTitle) {
-				found = true
-			}
-		}
-	}
-	if !found {
-		t.Errorf("the daemon's banners are %q, want one titled %q", argvs, wantTitle)
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -401,13 +390,13 @@ func decodeBool(raw json.RawMessage) bool {
 	return string(raw) != "false"
 }
 
-// completedBanners counts the completed-turn banners among INVOCATIONS, by
-// the phrase the scenario reads the recorder file for.
-func completedBanners(invocations []harness.Invocation) int {
+// bannersTitled counts the banners among INVOCATIONS whose title is exactly
+// TITLE.
+func bannersTitled(invocations []harness.Invocation, title string) int {
 	n := 0
 	for _, inv := range invocations {
-		for _, arg := range inv.Argv {
-			n += strings.Count(arg, "turn completed")
+		if slices.Contains(inv.Argv, title) {
+			n++
 		}
 	}
 	return n
