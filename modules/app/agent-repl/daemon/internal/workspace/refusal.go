@@ -123,6 +123,10 @@ const (
 	// or one another allocation is claiming (CreateWorkspaceError
 	// .name_reserved). Its `branch` field names the branch.
 	ArmNameReserved = "name_reserved"
+	// ArmInvalidName refuses a supplied name that breaks the naming rule
+	// (CreateWorkspaceError.invalid_name, ValidateSuppliedName). It carries
+	// `name`, `component` and the nested `rule` arm.
+	ArmInvalidName = "invalid_name"
 	// ArmForkSourceHasNoConversation is a fork into the primary branch whose
 	// source never had a conversation.
 	ArmForkSourceHasNoConversation = "fork_source_has_no_conversation"

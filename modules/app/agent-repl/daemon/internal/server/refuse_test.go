@@ -912,3 +912,33 @@ func TestFamilyRefusalPassesAnyOtherError(t *testing.T) {
 		t.Fatal("an ordinary error was mapped as a family refusal")
 	}
 }
+
+// TestSetArmFillsTheInvalidNameArmAndItsRule pins a workspace refusal's
+// nested arm end to end: the verb's refusalarm.Nested `rule` selects the
+// arm of CreateWorkspaceInvalidName.rule, beside the name and component.
+func TestSetArmFillsTheInvalidNameArmAndItsRule(t *testing.T) {
+	cases := []struct {
+		name string
+		rule refusalarm.Nested
+		set  func(*agentreplv1.CreateWorkspaceInvalidName) bool
+	}{
+		{name: "the slug rule", rule: workspace.NameRuleSlug, set: func(m *agentreplv1.CreateWorkspaceInvalidName) bool { return m.GetSlug() != nil }},
+		{name: "the prefix rule", rule: workspace.NameRulePrefix, set: func(m *agentreplv1.CreateWorkspaceInvalidName) bool { return m.GetPrefix() != nil }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			resp := &agentreplv1.CreateWorkspaceResponse{}
+			fields := map[string]any{"name": "a b/Fix It", "component": "a b", "rule": tc.rule}
+
+			// Act.
+			ok := setResponseError(resp, workspace.ArmInvalidName, fields)
+
+			// Assert.
+			arm := resp.GetError().GetInvalidName()
+			if !ok || arm.GetName() != "a b/Fix It" || arm.GetComponent() != "a b" || !tc.set(arm) {
+				t.Fatalf("setResponseError = %v, invalid_name = %+v; want the name, component and %s arm", ok, arm, tc.rule)
+			}
+		})
+	}
+}

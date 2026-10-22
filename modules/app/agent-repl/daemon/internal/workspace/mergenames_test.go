@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -272,5 +273,50 @@ func TestRevealMergeWorkspaceThatCannotBeRecordedIsAnError(t *testing.T) {
 	}
 	if !loggedAtError(f, opRevealMergeWorkspace) {
 		t.Fatal("the failed reveal was not recorded at ERROR")
+	}
+}
+
+func TestCreateRefusesASuppliedNameThatBreaksTheNamingRule(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	t.Setenv(PrefixEnv, "ABC")
+	t.Setenv(LegacyPrefixEnv, "")
+	supplied := "let's look at how we can see file edit diffs"
+
+	// Act
+	_, err := f.verbs.Create(context.Background(), CreateSpec{RepoDir: mainWorktree(t, f), Name: "  " + supplied + " "})
+
+	// Assert
+	refusal, ok := AsRefusal(err)
+	if !ok || refusal.Arm != ArmInvalidName {
+		t.Fatalf("Create = %v, want the invalid_name refusal", err)
+	}
+	if refusal.Fields["name"] != supplied || refusal.Fields["component"] != supplied || refusal.Fields["rule"] != NameRuleSlug {
+		t.Fatalf("fields = %+v, want the trimmed name, its breaking component and the slug rule", refusal.Fields)
+	}
+	if len(f.git.created) != 0 {
+		t.Fatalf("created = %+v, want nothing built", f.git.created)
+	}
+	record, found := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRefusal})
+	if !found || record.Context["arm"] != ArmInvalidName || record.Context["arm_component"] != supplied || record.Context["arm_rule"] != NameRuleSlug {
+		t.Fatalf("record = %+v (found %v), want the typed refusal logged with its component and rule", record, found)
+	}
+}
+
+func TestCreateLeavesTheNameFreeAfterRefusingABadSuppliedName(t *testing.T) {
+	// Arrange: a refused name was never claimed, so a later legal create of a
+	// name it shares a prefix with is not blocked by a stale claim.
+	f := newFixture(t)
+	t.Setenv(PrefixEnv, "ABC")
+	t.Setenv(LegacyPrefixEnv, "")
+	repo := mainWorktree(t, f)
+	_, _ = f.verbs.Create(context.Background(), CreateSpec{RepoDir: repo, Name: "ABC/Bad Name"})
+
+	// Act
+	claimed := f.verbs.(*verbs).names.claimed
+
+	// Assert
+	if len(claimed) != 0 {
+		t.Fatalf("claimed = %+v, want no claim left by a refused name", claimed)
 	}
 }

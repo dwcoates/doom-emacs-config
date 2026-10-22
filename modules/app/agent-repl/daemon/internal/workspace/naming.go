@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"agent-repld/internal/dirpath"
+	"agent-repld/internal/refusalarm"
 )
 
 // The naming rule's constants. The rule itself — lowercase, hyphenated, at
@@ -95,6 +96,48 @@ func ValidateSlug(slug string) error {
 	}
 	if len(slug) > SlugMaxLen {
 		return fmt.Errorf("the answer is %d characters, over the %d-character bound", len(slug), SlugMaxLen)
+	}
+	return nil
+}
+
+// prefixShape is a supplied name's PREFIX component (a person's initials, a
+// team): ASCII letters and digits, optionally joined by single `.`, `_` or
+// `-`. Unlike a slug it may be uppercase, because a prefix is often initials.
+var prefixShape = regexp.MustCompile(`^[A-Za-z0-9]+([._-][A-Za-z0-9]+)*$`)
+
+// The rules a supplied name can break, spelled as the
+// agentrepl.v1.CreateWorkspaceInvalidName.rule arms.
+const (
+	// NameRuleSlug is a supplied name whose last component is not a slug.
+	NameRuleSlug = refusalarm.Nested("slug")
+	// NameRulePrefix is a supplied name with a component before the last that
+	// is not a prefix.
+	NameRulePrefix = refusalarm.Nested("prefix")
+)
+
+// NameBreach is where a supplied name broke the naming rule: the
+// `/`-separated component, as it appears in the name, and the rule it broke.
+type NameBreach struct {
+	Component string
+	Rule      refusalarm.Nested
+}
+
+// ValidateSuppliedName checks a name the user SUPPLIED, which becomes the
+// workspace's branch, worktree directory and tab label as it stands. Its last
+// `/`-separated component must have the slug's shape (ValidateSlugShape) with
+// no word or length limit, and every earlier component must be a prefix
+// (prefixShape). It answers the first breach, or nil for a legal name. The
+// name is validated, never repaired.
+func ValidateSuppliedName(name string) *NameBreach {
+	components := strings.Split(name, "/")
+	last := len(components) - 1
+	for i, component := range components[:last] {
+		if !prefixShape.MatchString(component) {
+			return &NameBreach{Component: components[i], Rule: NameRulePrefix}
+		}
+	}
+	if ValidateSlugShape(components[last]) != nil {
+		return &NameBreach{Component: components[last], Rule: NameRuleSlug}
 	}
 	return nil
 }

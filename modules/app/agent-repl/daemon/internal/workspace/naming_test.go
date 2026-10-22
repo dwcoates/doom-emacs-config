@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agent-repld/internal/refusalarm"
 )
 
 func TestValidateSlugAcceptsTheNamingRule(t *testing.T) {
@@ -308,5 +310,66 @@ func TestMainWorktreeDirLeavesAWorktreeAlone(t *testing.T) {
 	// Assert.
 	if got != dir {
 		t.Fatalf("MainWorktreeDir(%q) = %q, want it unchanged", dir, got)
+	}
+}
+
+func TestValidateSuppliedNameAcceptsALegalName(t *testing.T) {
+	cases := []struct {
+		name     string
+		supplied string
+	}{
+		{name: "a bare slug", supplied: "fix-login"},
+		{name: "a one-word slug", supplied: "diffs"},
+		{name: "an uppercase prefix", supplied: "ABC/reconnect-fix"},
+		{name: "a prefix joined by dot, underscore and hyphen", supplied: "team.a_b-c/fix"},
+		{name: "two prefixes", supplied: "org/ABC/fix"},
+		{name: "a slug over the minted word and length limits", supplied: "render-file-edit-diffs-in-the-webapp-feed-as-they-stream-in"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			supplied := tc.supplied
+
+			// Act
+			breach := ValidateSuppliedName(supplied)
+
+			// Assert
+			if breach != nil {
+				t.Fatalf("ValidateSuppliedName(%q) = %+v, want nil", supplied, breach)
+			}
+		})
+	}
+}
+
+func TestValidateSuppliedNameNamesTheFirstBreach(t *testing.T) {
+	cases := []struct {
+		name      string
+		supplied  string
+		component string
+		rule      refusalarm.Nested
+	}{
+		{name: "a pasted prompt", supplied: "let's look at how we can see file edit diffs", component: "let's look at how we can see file edit diffs", rule: NameRuleSlug},
+		{name: "a prompt whose words hold a slash", supplied: "edits land as python calls (bash agent tool, that is)/render diffs", component: "edits land as python calls (bash agent tool, that is)", rule: NameRulePrefix},
+		{name: "an uppercase slug", supplied: "Fix-Login", component: "Fix-Login", rule: NameRuleSlug},
+		{name: "a doubled hyphen", supplied: "fix--login", component: "fix--login", rule: NameRuleSlug},
+		{name: "a trailing slash", supplied: "ABC/", component: "", rule: NameRuleSlug},
+		{name: "a leading slash", supplied: "/fix", component: "", rule: NameRulePrefix},
+		{name: "a doubled slash", supplied: "ABC//fix", component: "", rule: NameRulePrefix},
+		{name: "a prefix with a doubled dot", supplied: "a..b/fix", component: "a..b", rule: NameRulePrefix},
+		{name: "a bad prefix before a bad slug", supplied: "a b/C D", component: "a b", rule: NameRulePrefix},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			supplied := tc.supplied
+
+			// Act
+			breach := ValidateSuppliedName(supplied)
+
+			// Assert
+			if breach == nil || breach.Component != tc.component || breach.Rule != tc.rule {
+				t.Fatalf("ValidateSuppliedName(%q) = %+v, want component %q under rule %q", supplied, breach, tc.component, tc.rule)
+			}
+		})
 	}
 }
