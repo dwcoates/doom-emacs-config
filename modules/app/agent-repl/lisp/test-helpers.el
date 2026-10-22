@@ -416,8 +416,16 @@ file the run made unremovable, which the person reading the run must see."
     (setenv "AGENT_REPL_LOG_LEVEL" "debug")
     ;; Debug is a window, never a standing level
     ;; (proto/vocab/log-level-window.json); this process gets the longest.
-    (setenv "AGENT_REPL_LOG_LEVEL_UNTIL"
-            (number-to-string (+ (truncate (float-time)) 300)))
+    ;; THE WINDOW IS READ AGAINST THE INSTANT IT WAS ARMED, NOT THE WALL
+    ;; CLOCK: a batch process runs many tests, and how long it has run says
+    ;; nothing about any one of them, so its debug files must not stop part
+    ;; way through (2026-10-21: a suite starved to 498s read `info' in a
+    ;; debug-file test). The window still obeys the vocabulary's bound; a
+    ;; test that moves time binds `agent-repl--log-level-clock' itself.
+    (let ((armed (truncate (float-time))))
+      (setenv "AGENT_REPL_LOG_LEVEL_UNTIL" (number-to-string (+ armed 300)))
+      (defvar agent-repl--log-level-clock)
+      (setq agent-repl--log-level-clock (lambda () armed)))
     ;; The global Emacs sink's default is baked from the state root when
     ;; `core.el' loads.  Pre-bind its defcustom to this process's state dir
     ;; so concurrent ERT processes cannot contend for one append-file lock.

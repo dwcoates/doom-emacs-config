@@ -97,6 +97,13 @@ clean; BODY runs after the load with the same bindings still active."
   (should (equal (getenv "AGENT_REPL_LOG_LEVEL") "debug"))
   (should (eq (agent-repl--log-level-from-environment) 'debug)))
 
+(ert-deftest agent-repl-test-helpers-batch-log-level-clock-holds-the-arm-instant ()
+  "The batch window is read at the instant it was armed, however long the process runs."
+  ;; Arrange: the harness armed the window to end 300s after its instant.
+  (let ((until (string-to-number (getenv "AGENT_REPL_LOG_LEVEL_UNTIL"))))
+    ;; Act / Assert
+    (should (= (funcall agent-repl--log-level-clock) (- until 300)))))
+
 (ert-deftest agent-repl-test-helpers-batch-global-log-is-process-isolated ()
   "Each batch process writes load-time records inside its PID-scoped state dir."
   (let ((state-dir (file-name-as-directory (getenv "AGENT_REPL_STATE_DIR"))))
