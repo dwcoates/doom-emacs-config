@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -558,29 +557,6 @@ func TestAnUndecidableServingProbeIsNotAFreeOne(t *testing.T) {
 	}
 	if verdict != VerdictUndecided || waits != 0 {
 		t.Fatalf("verdict = %q after %d waits, want %q after none", verdict, waits, VerdictUndecided)
-	}
-}
-
-// TestTwoServingProbesNeverRefuseEachOther: the probe is a shared lock, so a
-// probe held at the same instant as another reads the lock free.
-func TestTwoServingProbesNeverRefuseEachOther(t *testing.T) {
-	// Arrange: another prober's shared lock, held.
-	path := servingLockPath(filepath.Join(t.TempDir(), LockName))
-	other, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer other.Close()
-	if err := syscall.Flock(int(other.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
-		t.Fatalf("the other probe's shared lock: %v", err)
-	}
-
-	// Act.
-	held, err := servingHeld(path)
-
-	// Assert.
-	if err != nil || held {
-		t.Fatalf("servingHeld = (%v, %v), want (false, nil) beside another probe", held, err)
 	}
 }
 

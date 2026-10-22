@@ -1,10 +1,13 @@
 package harness
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agent-repld/internal/daemonaddr"
 )
 
 // withFakeGitBinary points the suite's fake git at a stand-in for one test.
@@ -129,6 +132,40 @@ func TestRootIsFresh(t *testing.T) {
 			// Assert
 			if got != tc.want {
 				t.Fatalf("rootIsFresh(%+v) = %v, want %v", tc.opts, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestKilledHoldsNoLock(t *testing.T) {
+	answer := func(boot, serving int, err error) func(string) (daemonaddr.Holder, daemonaddr.Holder, error) {
+		return func(string) (daemonaddr.Holder, daemonaddr.Holder, error) {
+			return daemonaddr.Holder{PID: boot}, daemonaddr.Holder{PID: serving}, err
+		}
+	}
+	killed := []int{100, 101}
+	tests := []struct {
+		name    string
+		holders func(string) (daemonaddr.Holder, daemonaddr.Holder, error)
+		wantErr string
+	}{
+		{name: "locks nobody holds", holders: answer(0, 0, nil)},
+		{name: "a successor holding both", holders: answer(200, 200, nil)},
+		{name: "the killed leader holding the boot claim", holders: answer(100, 0, nil), wantErr: "pid 100 still holds daemon.lock"},
+		{name: "a killed member holding the serving lock", holders: answer(200, 101, nil), wantErr: "pid 101 still holds daemon.serving"},
+		{name: "holders that cannot be named", holders: answer(0, 0, errors.New("denied")), wantErr: "name the locks' holders after the kill: denied"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := killedHoldsNoLock("/state/daemon.addr", killed, tt.holders)
+
+			// Assert
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Fatalf("killedHoldsNoLock = %v, want nil", err)
+			case tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)):
+				t.Fatalf("killedHoldsNoLock = %v, want it to name %q", err, tt.wantErr)
 			}
 		})
 	}

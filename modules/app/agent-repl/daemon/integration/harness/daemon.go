@@ -1439,15 +1439,44 @@ func (d *Daemon) killGroup() bool {
 	}
 	// KILL RETURNS ONCE EVERY MEMBER HAS EXITED, NOT ONLY THE LEADER. A
 	// member holds its open files until its exit, and one the daemon had
-	// forked but not yet exec'd holds the daemon's own: its boot claim and its
-	// serving lock. A fresh daemon on the same state root, started the instant
-	// Kill returned, read that dying member as its incumbent serving and
-	// refused to boot (2026-10-15, TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain:
-	// the killed daemon was forking its desktop notifier).
+	// forked but not yet exec'd holds the daemon's own. That once included
+	// its boot claim and its serving lock, as flocks: a fresh daemon started
+	// the instant Kill returned read the dying member as its incumbent
+	// serving and refused to boot (2026-10-15, the killed daemon forking its
+	// desktop notifier), and a child that had left the group before its exec
+	// did the same past this wait (2026-10-22). Those two are record locks
+	// now, which no child holds (daemonaddr/recordlock.go); the check after
+	// this wait says so for every Kill.
 	if err := awaitGroupEnd(pgid, held.pids(), leaderExitReportAfter, procgroup.UnendedMembers, held.wait, killStoppedGroup, d.memberStalled); err != nil {
 		d.t.Errorf("harness: await the exit of the killed daemon's group %d: %v", pgid, err)
 	}
+	// THE STATE ROOT IS FREE WHEN KILL RETURNS, by the kernel's own account:
+	// the boot claim and the serving lock are record locks, which die with
+	// the process that took them whatever its children hold, so no process
+	// of the killed group can hold either by now. A successor that already
+	// took them over holds them under its own pid, which is no violation.
+	if err := killedHoldsNoLock(filepath.Join(d.StateDir, "daemon.addr"), append([]int{pgid}, held.pids()...), daemonaddr.LockHolders); err != nil {
+		d.t.Errorf("harness: %v", err)
+	}
 	return true
+}
+
+// killedHoldsNoLock reports a boot claim or serving lock beside addrPath that
+// the kernel names as held by one of KILLED, a group Kill already ended.
+func killedHoldsNoLock(addrPath string, killed []int, holders func(string) (daemonaddr.Holder, daemonaddr.Holder, error)) error {
+	boot, serving, err := holders(addrPath)
+	if err != nil {
+		return fmt.Errorf("name the locks' holders after the kill: %w", err)
+	}
+	for _, h := range []struct {
+		lock   string
+		holder daemonaddr.Holder
+	}{{daemonaddr.LockName, boot}, {daemonaddr.ServingName, serving}} {
+		if h.holder.PID != 0 && slices.Contains(killed, h.holder.PID) {
+			return fmt.Errorf("the killed daemon's pid %d still holds %s beside %s after Kill returned", h.holder.PID, h.lock, addrPath)
+		}
+	}
+	return nil
 }
 
 // heldExits is the exit events of a stopped group's members, taken before any

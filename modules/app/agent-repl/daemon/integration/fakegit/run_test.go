@@ -271,6 +271,51 @@ func TestWorktreeAddCreatesTheTreeAndTheBranch(t *testing.T) {
 	}
 }
 
+// Every form of `worktree add` leaves the new tree's admin files in place
+// before the tree is listed, as real git does: a listed tree with no admin
+// HEAD is one no real git shows.
+func TestEveryWorktreeAddWritesTheTreesAdminFiles(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     func(target string) []string
+		wantHead string
+	}{
+		{name: "a new branch", args: func(target string) []string { return []string{"add", "-b", "feature", target, "main"} }, wantHead: "ref: refs/heads/feature\n"},
+		{name: "an existing branch", args: func(target string) []string { return []string{"add", target, "spare"} }, wantHead: "ref: refs/heads/spare\n"},
+		{name: "a detached head", args: func(target string) []string { return []string{"add", "--detach", target, "main"} }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, repo, dir := world(t)
+			repo.AddBranch("spare", repo.BranchHeads["main"])
+			target := filepath.Join(filepath.Dir(dir), "wt")
+
+			// Act.
+			got := Run(s, "/", append([]string{"-C", dir, "worktree"}, tt.args(target)...))
+
+			// Assert.
+			if got.Exit != 0 {
+				t.Fatalf("worktree %v = %+v, want a success", tt.args(target), got)
+			}
+			admin, ok := s.GitDirOf(target)
+			if !ok {
+				t.Fatalf("the new tree %s has no git dir", target)
+			}
+			want := tt.wantHead
+			if want == "" {
+				want = repo.Worktree(target).Head + "\n"
+			}
+			for name, body := range map[string]string{"HEAD": want, "commondir": "../..\n", "gitdir": filepath.Join(target, ".git") + "\n"} {
+				raw, err := os.ReadFile(filepath.Join(admin, name))
+				if err != nil || string(raw) != body {
+					t.Fatalf("admin %s = %q (%v), want %q", name, raw, err, body)
+				}
+			}
+		})
+	}
+}
+
 func TestWorktreeAddRefusesAnExistingBranch(t *testing.T) {
 	// Arrange.
 	s, _, dir := world(t)

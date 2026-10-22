@@ -784,7 +784,15 @@ func (o *orchestrator) bubbleLabel(ctx context.Context, entry wsm.MergeQueueEntr
 		return r.label()
 	}
 	label, err := o.sourceLabel(ctx, entry.Workspace, entry.Source)
-	if err != nil {
+	switch {
+	case err != nil && cutUnder(ctx, err):
+		// THE READ ENDED WITH ITS CONTEXT, which says nothing about the merge
+		// or its branch: the publish it served was cut short (a shutdown, a
+		// caller gone), and the next publish reads the label again.
+		o.log(ctx, entry.Workspace).Info("daemon.merge.queue", "the read of a queued merge's bubble label ended with its context; the workspace's id stands in",
+			dlog.Context{"workspace": string(entry.Workspace), "cause": err.Error()})
+		return string(entry.Workspace)
+	case err != nil:
 		o.log(ctx, entry.Workspace).Error("daemon.merge.queue", "could not read what a queued merge lands for its bubble's label",
 			dlog.Context{"workspace": string(entry.Workspace), "error": err.Error()})
 		return string(entry.Workspace)

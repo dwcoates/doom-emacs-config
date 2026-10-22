@@ -287,14 +287,16 @@ func run(ctx context.Context, opts options, h hooks) error {
 			// outcome of the boot claim and not a condition to remediate --
 			// the incumbent keeps serving, its advertisement is untouched, and
 			// this process exits having written nothing.
-			log.Info("daemon.cmd.claim", "another daemon holds the boot claim; exiting without disturbing it", dlog.Context{
+			refusal := dlog.Context{
 				"addr_path":  layout.DaemonAddr(),
 				"state_dir":  layout.Dir(),
 				"claim_wait": claimWait.String(),
 				"verdict":    string(verdict),
 				"probed":     bootMode == daemonaddr.BootOrdinary,
 				"waited_ms":  claimWaited.Milliseconds(),
-			})
+			}
+			nameClaimHolder(refusal, err, procmetrics.Kernel{})
+			log.Info("daemon.cmd.claim", "another daemon holds the boot claim; exiting without disturbing it", refusal)
 			return err
 		}
 		log.Error("daemon.cmd.claim", "the loopback listener could not be claimed", dlog.Context{
@@ -1354,5 +1356,39 @@ func joinBackgroundLoops(loops *runningLoops, bound time.Duration, log dlog.Logg
 			"bound_ms": bound.Milliseconds(),
 			"loops":    loops.outstanding(),
 		})
+	}
+}
+
+// identityReader names a process; procmetrics.Kernel in production.
+type identityReader interface {
+	Identity(pid int) (procmetrics.Identity, error)
+}
+
+// nameClaimHolder adds to a boot refusal's record the process the kernel
+// named as holding the lock that refused it, read at the refusal: its pid,
+// which lock it held, and, while it still runs, its name and parent. A
+// refusal is otherwise silent about WHO refused it, and a holder that is not
+// the incumbent daemon (a child it had not finished spawning, on 2026-10-22)
+// reads exactly like one.
+func nameClaimHolder(record dlog.Context, err error, procs identityReader) {
+	var held *daemonaddr.HeldError
+	if !errors.As(err, &held) {
+		return
+	}
+	record["held_lock"] = held.Path
+	if held.Holder.PID == 0 {
+		record["holder"] = "the kernel named no holder"
+		return
+	}
+	record["holder_pid"] = held.Holder.PID
+	id, ierr := procs.Identity(held.Holder.PID)
+	switch {
+	case errors.Is(ierr, procmetrics.ErrGone):
+		record["holder"] = "exited since the refusal"
+	case ierr != nil:
+		record["holder"] = "could not be read: " + ierr.Error()
+	default:
+		record["holder"] = id.Name
+		record["holder_ppid"] = id.PPID
 	}
 }

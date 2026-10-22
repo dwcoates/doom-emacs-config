@@ -543,14 +543,10 @@ func worktree(s *State, repo *Repo, subject []string) Result {
 				return Result{Stderr: fmt.Sprintf("fatal: invalid reference: %s\n", base), Exit: 128}
 			}
 		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return Result{Stderr: err.Error() + "\n", Exit: 128}
-		}
-		if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+repo.CommonDir+"\n"), 0o644); err != nil {
-			return Result{Stderr: err.Error() + "\n", Exit: 128}
+		if res, ok := addWorktree(repo, &Worktree{Dir: dir, Branch: branchName, Head: head}); !ok {
+			return res
 		}
 		repo.AddBranch(branchName, head)
-		repo.Worktrees = append(repo.Worktrees, &Worktree{Dir: dir, Branch: branchName, Head: head})
 		return Result{Stdout: "Preparing worktree\n"}
 
 	case len(subject) >= 2 && subject[1] == "remove":
@@ -678,13 +674,9 @@ func addDetached(s *State, repo *Repo, subject []string) Result {
 	if !ok {
 		return Result{Stderr: fmt.Sprintf("fatal: invalid reference: %s\n", base), Exit: 128}
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return Result{Stderr: err.Error() + "\n", Exit: 128}
+	if res, ok := addWorktree(repo, &Worktree{Dir: dir, Head: head}); !ok {
+		return res
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+repo.CommonDir+"\n"), 0o644); err != nil {
-		return Result{Stderr: err.Error() + "\n", Exit: 128}
-	}
-	repo.Worktrees = append(repo.Worktrees, &Worktree{Dir: dir, Head: head})
 	return Result{Stdout: "Preparing worktree (detached HEAD)\n"}
 }
 
@@ -1436,13 +1428,9 @@ func addExisting(repo *Repo, dir, branch string) Result {
 			return Result{Stderr: fmt.Sprintf("fatal: '%s' is already checked out at '%s'\n", branch, wt.Dir), Exit: 128}
 		}
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return Result{Stderr: err.Error() + "\n", Exit: 128}
+	if res, ok := addWorktree(repo, &Worktree{Dir: dir, Branch: branch, Head: head}); !ok {
+		return res
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+repo.CommonDir+"\n"), 0o644); err != nil {
-		return Result{Stderr: err.Error() + "\n", Exit: 128}
-	}
-	repo.Worktrees = append(repo.Worktrees, &Worktree{Dir: dir, Branch: branch, Head: head})
 	return Result{Stdout: "Preparing worktree (checking out '" + branch + "')\n"}
 }
 
@@ -1641,4 +1629,43 @@ func tag(s *State, repo *Repo, wt *Worktree, subject []string) Result {
 		return Result{}
 	}
 	return Result{Stderr: fmt.Sprintf("fatal: fakegit has no fixture for `git %s`\n", strings.Join(subject, " ")), Exit: 128}
+}
+
+// addWorktree makes WT's directory and its admin directory and records it:
+// THE one way every `worktree add` of the fake creates a linked worktree.
+//
+// THE ADMIN FILES ARE WRITTEN BEFORE THE WORKTREE IS LISTED, as real git's
+// `worktree add` writes them (HEAD, commondir and gitdir, under a lock that
+// keeps the tree out of every judgment until they are there). A fake tree
+// listed with no admin HEAD was one no real git ever shows, and a reaper
+// sweep that read it between its add and the test's own admin writes
+// recorded it at ERROR (2026-10-22,
+// TestTheReaperRemovesALandedIdleWorktreeAndKeepsTheRest).
+func addWorktree(repo *Repo, wt *Worktree) (Result, bool) {
+	fail := func(err error) (Result, bool) { return Result{Stderr: err.Error() + "\n", Exit: 128}, false }
+	if err := os.MkdirAll(wt.Dir, 0o755); err != nil {
+		return fail(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Dir, ".git"), []byte("gitdir: "+repo.CommonDir+"\n"), 0o644); err != nil {
+		return fail(err)
+	}
+	admin := gitDir(repo, wt)
+	if err := os.MkdirAll(admin, 0o755); err != nil {
+		return fail(err)
+	}
+	head := wt.Head + "\n"
+	if wt.Branch != "" {
+		head = "ref: refs/heads/" + wt.Branch + "\n"
+	}
+	for name, body := range map[string]string{
+		"HEAD":      head,
+		"commondir": "../..\n",
+		"gitdir":    filepath.Join(wt.Dir, ".git") + "\n",
+	} {
+		if err := os.WriteFile(filepath.Join(admin, name), []byte(body), 0o644); err != nil {
+			return fail(err)
+		}
+	}
+	repo.Worktrees = append(repo.Worktrees, wt)
+	return Result{}, true
 }
