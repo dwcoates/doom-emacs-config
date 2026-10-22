@@ -252,12 +252,13 @@
     {
       "id": "skill-agent-repl-tests",
       "kind": "skill_link",
-      "why": "the /agent-repl-tests skill",
+      "why": "retired from the global skills: /agent-repl-tests is needed only for agent-repl's own tests, so it is linked in the repository alone and every machine's global link comes out",
       "profile": "run",
       "name": "agent-repl-tests",
       "source": {
         "repo": "modules/app/agent-repl/skills/agent-repl-tests"
-      }
+      },
+      "retired": true
     },
     {
       "id": "skill-agent-repl-runtime",
@@ -298,6 +299,56 @@
       "name": "agent-repl-workspaces",
       "source": {
         "repo": "modules/app/agent-repl/skills/agent-repl-workspaces"
+      }
+    },
+    {
+      "id": "skill-agent-repl-debug",
+      "kind": "skill_link",
+      "why": "the /agent-repl-debug skill, which investigates the running agent-repl from any repository",
+      "profile": "run",
+      "name": "agent-repl-debug",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/agent-repl-debug"
+      }
+    },
+    {
+      "id": "skill-agent-repl-help",
+      "kind": "skill_link",
+      "why": "the /agent-repl-help skill, which answers questions about agent-repl from any repository",
+      "profile": "run",
+      "name": "agent-repl-help",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/agent-repl-help"
+      }
+    },
+    {
+      "id": "skill-agent-repl-install",
+      "kind": "skill_link",
+      "why": "the /agent-repl-install skill, which sets a machine up for agent-repl from any repository",
+      "profile": "run",
+      "name": "agent-repl-install",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/agent-repl-install"
+      }
+    },
+    {
+      "id": "skill-agent-repl-update-harness",
+      "kind": "skill_link",
+      "why": "the /agent-repl-update-harness skill, which places every change to the agent harness in its one home",
+      "profile": "run",
+      "name": "agent-repl-update-harness",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/agent-repl-update-harness"
+      }
+    },
+    {
+      "id": "skill-show-chess-game",
+      "kind": "skill_link",
+      "why": "the /show-chess-game skill, which CEE sessions use to draw a game in the feed",
+      "profile": "run",
+      "name": "show-chess-game",
+      "source": {
+        "repo": "modules/app/agent-repl/skills/show-chess-game"
       }
     },
     {
