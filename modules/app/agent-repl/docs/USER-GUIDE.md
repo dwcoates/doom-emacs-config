@@ -482,6 +482,10 @@ A workspace that fails to be created is reported in two places.
 - Nothing is reported for a create handed to a new daemon during a restart, or for the hidden workspace an async merge runs in.
   - The merge queue reports that one's failure back to the workspace that asked for the merge.
 - The request's wording is `prompts/workspace-create-failed.md`.
+- A name you type for a workspace (`SPC TAB N`, `SPC TAB C`, `SPC TAB F`) is checked before anything is built.
+  - The last part must be lowercase words joined by single hyphens, such as `fix-login`.
+  - It may follow a prefix such as `ABC/`, made of letters and digits joined by single `.`, `_` or `-`.
+  - A name that breaks either rule is refused, and the failure quotes the part that broke it.
 
 ## The default model
 

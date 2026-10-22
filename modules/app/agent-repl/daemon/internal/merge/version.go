@@ -6,6 +6,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/semver"
 	"agent-repld/internal/wsm"
 
@@ -38,13 +39,9 @@ const (
 // The reasons an increment is unexpected, spelled as the
 // agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected.reason arms.
 const (
-	reasonUnversionedRepository = NestedArm("unversioned_repository")
-	reasonNotDefaultBranch      = NestedArm("not_default_branch")
+	reasonUnversionedRepository = refusalarm.Nested("unversioned_repository")
+	reasonNotDefaultBranch      = refusalarm.Nested("not_default_branch")
 )
-
-// NestedArm is a refusal field naming an arm of a oneof INSIDE the error arm
-// (the unexpected increment's `reason`). The rpc layer sets that arm by name.
-type NestedArm string
 
 // requestDeploy reads where a request's deploy lands and its repository's
 // deploy config, refusing a repository that states no usable deploy. Nothing
@@ -108,7 +105,7 @@ func (o *orchestrator) requestTarget(ctx context.Context, requester wsm.Workspac
 }
 
 // unexpectedVersion is the unexpected-increment refusal with its reason arm.
-func unexpectedVersion(ws ids.WorkspaceID, reason NestedArm, format string, args ...any) *RefusalError {
+func unexpectedVersion(ws ids.WorkspaceID, reason refusalarm.Nested, format string, args ...any) *RefusalError {
 	refusal := refuse(ArmVersionIncrementUnexpected, ws, format, args...)
 	refusal.Fields = map[string]any{"reason": reason}
 	return refusal

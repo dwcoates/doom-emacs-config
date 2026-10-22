@@ -1435,8 +1435,9 @@ fields."
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
 Returns `(:repository V :open O :hidden H :recently-merged S :closed C
-:current C-or-nil :revision N :version V-or-nil)'.  THERE IS NO TAB BAR MESSAGE: the Open
-section's rows are the tab bar, each stating its own tab."
+:current C-or-nil :revision N :version V-or-nil)'.  THERE IS NO TAB BAR
+MESSAGE: the Open section's rows are the tab bar, each stating its own
+tab."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object

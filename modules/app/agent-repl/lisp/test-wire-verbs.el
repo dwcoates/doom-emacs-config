@@ -2057,7 +2057,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-fork-source-arm ()
@@ -2132,6 +2132,44 @@ ref it names."
     (should-error (agent-repl-wire-decode-create-workspace-error
                    (agent-repl-test-wire-verbs--parse "{\"asyncMergeNameTaken\":{\"name\":\"x\"}}"))
                   :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-invalid-name-slug-arm ()
+  "CreateWorkspaceError's `invalid_name' arm decodes the name, its breaking
+component and the `slug' rule."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"invalidName\":{\"name\":\"Fix It\",\"component\":\"Fix It\",\"slug\":{}}}"))
+                   '(:cause (:arm :invalid-name
+                             :value (:name "Fix It" :component "Fix It" :rule :slug)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-invalid-name-prefix-arm ()
+  "The `prefix' rule decodes, and an omitted component is the empty string
+protojson spells it as."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"invalidName\":{\"name\":\"ABC//fix\",\"prefix\":{}}}"))
+                   '(:cause (:arm :invalid-name
+                             :value (:name "ABC//fix" :component "" :rule :prefix)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-invalid-name-unset-rule-is-a-breach ()
+  "An `invalid_name' arm with no rule set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-create-workspace-error
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"invalidName\":{\"name\":\"x y\",\"component\":\"x y\"}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-invalid-name-rule-arms-pinned ()
+  "CreateWorkspaceInvalidName's rule arms are exactly what the frozen schema
+declares, so the codec's arm list cannot drift from it."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceInvalidName")
+                       #'string<)
+                 (sort (mapcar (lambda (arm) (symbol-name (car arm)))
+                               agent-repl-wire-verbs--invalid-name-rule-arms)
+                       #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-name-reserved-arm ()
   "CreateWorkspaceError's `name_reserved' arm decodes the branch the name resolves to."
@@ -5661,3 +5699,28 @@ instead diverges from it unseen."
                 agent-repl-wire-decode-finish-workspace-error-owner-lands))
     (should (string-match-p "agent-repl-wire-verbs--decode-ref-arm"
                             (prin1-to-string (symbol-function fn))))))
+
+(ert-deftest agent-repl-test-wire-verbs-empty-arm-decodes-an-empty-message ()
+  "An empty-arm decoder answers nil for the empty JSON object."
+  (agent-repl-test-wire-verbs--with-common
+    (should (null (funcall (agent-repl-wire-verbs--empty-arm "SomeEmptyArm") nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-empty-arm-refuses-a-field ()
+  "An empty-arm decoder refuses any field as unknown, naming its message."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (funcall (agent-repl-wire-verbs--empty-arm "SomeEmptyArm") '((stray . "x")))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-empty-arms-share-one-decoder ()
+  "Every empty arm in the verbs codec is decoded through
+`agent-repl-wire-verbs--empty-arm', so no site hand-rolls a lambda around
+`agent-repl-wire-verbs--decode-empty' that could drift from it."
+  (let ((source (with-temp-buffer
+                  (insert-file-contents
+                   (concat (file-name-sans-extension
+                            (symbol-file 'agent-repl-wire-verbs--empty-arm 'defun))
+                           ".el"))
+                  (buffer-string))))
+    (should-not (string-match-p
+                 "(lambda (\\([a-z]+\\))[ \t\n]+(agent-repl-wire-verbs--decode-empty[ \t\n]+\"[A-Za-z]+\"[ \t\n]+\\1))"
+                 source))))

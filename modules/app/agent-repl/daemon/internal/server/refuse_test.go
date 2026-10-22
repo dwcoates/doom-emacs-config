@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -328,7 +329,7 @@ func TestSetArmSelectsANestedOneofArm(t *testing.T) {
 	// Act.
 	ok := setResponseError(resp, "bubble_refused", map[string]any{
 		"detail": "the subagent's turn is running",
-		"kind":   nestedArm("agent_busy"),
+		"kind":   refusalarm.Nested("agent_busy"),
 	})
 
 	// Assert.
@@ -346,7 +347,7 @@ func TestSetArmCarriesTheDetailBesideTheNestedArm(t *testing.T) {
 	// Act.
 	setResponseError(resp, "bubble_refused", map[string]any{
 		"detail": "the subagent's turn is running",
-		"kind":   nestedArm("agent_busy"),
+		"kind":   refusalarm.Nested("agent_busy"),
 	})
 
 	// Assert.
@@ -363,7 +364,7 @@ func TestSetArmRefusesANestedArmTheMessageDoesNotCarry(t *testing.T) {
 	resp := &agentreplv1.SubmitPromptResponse{}
 
 	// Act.
-	ok := setResponseError(resp, "bubble_refused", map[string]any{"kind": nestedArm("no_such_kind")})
+	ok := setResponseError(resp, "bubble_refused", map[string]any{"kind": refusalarm.Nested("no_such_kind")})
 
 	// Assert.
 	if ok {
@@ -909,5 +910,35 @@ func TestFamilyRefusalMapsEachParentStateOntoItsArm(t *testing.T) {
 func TestFamilyRefusalPassesAnyOtherError(t *testing.T) {
 	if _, ok := familyRefusal(errors.New("disk on fire")); ok {
 		t.Fatal("an ordinary error was mapped as a family refusal")
+	}
+}
+
+// TestSetArmFillsTheInvalidNameArmAndItsRule pins a workspace refusal's
+// nested arm end to end: the verb's refusalarm.Nested `rule` selects the
+// arm of CreateWorkspaceInvalidName.rule, beside the name and component.
+func TestSetArmFillsTheInvalidNameArmAndItsRule(t *testing.T) {
+	cases := []struct {
+		name string
+		rule refusalarm.Nested
+		set  func(*agentreplv1.CreateWorkspaceInvalidName) bool
+	}{
+		{name: "the slug rule", rule: workspace.NameRuleSlug, set: func(m *agentreplv1.CreateWorkspaceInvalidName) bool { return m.GetSlug() != nil }},
+		{name: "the prefix rule", rule: workspace.NameRulePrefix, set: func(m *agentreplv1.CreateWorkspaceInvalidName) bool { return m.GetPrefix() != nil }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			resp := &agentreplv1.CreateWorkspaceResponse{}
+			fields := map[string]any{"name": "a b/Fix It", "component": "a b", "rule": tc.rule}
+
+			// Act.
+			ok := setResponseError(resp, workspace.ArmInvalidName, fields)
+
+			// Assert.
+			arm := resp.GetError().GetInvalidName()
+			if !ok || arm.GetName() != "a b/Fix It" || arm.GetComponent() != "a b" || !tc.set(arm) {
+				t.Fatalf("setResponseError = %v, invalid_name = %+v; want the name, component and %s arm", ok, arm, tc.rule)
+			}
+		})
 	}
 }

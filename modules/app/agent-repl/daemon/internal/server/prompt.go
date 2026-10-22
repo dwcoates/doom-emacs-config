@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/workspace"
@@ -433,7 +434,7 @@ func bubbleRefused(r refusal) refusal {
 	for name, value := range r.Fields {
 		fields[name] = value
 	}
-	fields["kind"] = nestedArm(kind)
+	fields["kind"] = refusalarm.Nested(kind)
 	r.Fields = fields
 	return r
 }

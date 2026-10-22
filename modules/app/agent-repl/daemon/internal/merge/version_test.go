@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/semver"
 	"agent-repld/internal/wsm"
 )
@@ -83,7 +84,7 @@ func TestAnIncrementOnADeployOffAVersionedMainIsRefusedWithItsReason(t *testing.
 		name    string
 		arrange func(h *harness)
 		source  wsm.MergeSource
-		want    NestedArm
+		want    refusalarm.Nested
 	}{
 		{
 			name:    "an unversioned repository",

@@ -1498,7 +1498,8 @@ is refused HERE, before anything is sent."
   "Encode `WatchDaemonEmacs' from VALUE.
 VALUE is the plist `(:elisp-build BUILD :focus F :instance I)', plus the
 OPTIONAL `:pid' PID of this Emacs process, which the daemon measures in its
-process metrics while the stream stands (`agent-repl-wire-encode-editor-process').
+process metrics while the stream stands
+\(`agent-repl-wire-encode-editor-process').
 The build is REQUIRED and never empty: a watch without it is refused,
 because a deploy could not tell whether this Emacs runs the checkout's
 elisp.  An empty one is refused HERE, before anything is sent.  The focus

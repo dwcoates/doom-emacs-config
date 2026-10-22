@@ -1430,13 +1430,11 @@ func (d *Daemon) killGroup() bool {
 	if d.afterLeaderExit != nil {
 		d.afterLeaderExit()
 	}
-	if !d.signalGroup(pgid, syscall.SIGKILL) {
-		return false
-	}
-	// THE GROUP IS CONTINUED, AS THE LEADER WAS (killStopped): an accepted
-	// SIGKILL never resumes a member the group stop suspended. Every member
-	// has the SIGKILL pending, so its next instant is its exit.
-	if !d.signalGroup(pgid, syscall.SIGCONT) {
+	// THE GROUP IS KILLED AND CONTINUED, AS THE LEADER WAS (killStopped): an
+	// accepted SIGKILL never resumes a member the group stop suspended. Every
+	// member has the SIGKILL pending, so its next instant is its exit.
+	if err := killStoppedGroup(pgid); err != nil {
+		d.t.Errorf("harness: kill the daemon's group %d: %v", pgid, err)
 		return false
 	}
 	// KILL RETURNS ONCE EVERY MEMBER HAS EXITED, NOT ONLY THE LEADER. A
@@ -1446,7 +1444,7 @@ func (d *Daemon) killGroup() bool {
 	// Kill returned, read that dying member as its incumbent serving and
 	// refused to boot (2026-10-15, TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain:
 	// the killed daemon was forking its desktop notifier).
-	if err := awaitGroupEnd(pgid, held.pids(), leaderExitReportAfter, procgroup.UnendedMembers, held.wait, d.memberStalled); err != nil {
+	if err := awaitGroupEnd(pgid, held.pids(), leaderExitReportAfter, procgroup.UnendedMembers, held.wait, killStoppedGroup, d.memberStalled); err != nil {
 		d.t.Errorf("harness: await the exit of the killed daemon's group %d: %v", pgid, err)
 	}
 	return true
@@ -1524,8 +1522,19 @@ var errHeldExitUnseen = errors.New("the wait on its held exit event answered no 
 // process stays listed until it turns zombie, and is never awaited twice. Such
 // a member whose exit was not seen (awaitExitEvent) is listed again until the
 // listing drops it, yielding between rounds rather than spinning the core.
+//
+// A ROUND THAT LISTS A MEMBER STILL TO AWAIT KILLS THE GROUP AGAIN FIRST. A
+// member whose fork was under way while the group's SIGKILL was sent is born
+// after that signal and never receives it, so awaiting it alone waits out its
+// whole life (2026-10-22: TestKillReturnsOnceEveryMemberHasReleasedItsFiles
+// waited 100s on the `sleep 100` its subshell forked as the orphaned group was
+// continued). A SIGKILLed process forks nothing more, so every round's kill
+// reaches every member that can still exist, and the group's end is reached
+// by construction rather than by the members' own exits. The group id is
+// still ours for that kill, exactly as for Kill's own: the caller holds sigMu
+// and the leader is unreaped.
 func awaitGroupEnd(pgid int, held []int, reportAfter time.Duration, list func(int) ([]procgroup.Member, error),
-	wait func(context.Context, int) (bool, error), stalled func(pid int, waited time.Duration)) error {
+	wait func(context.Context, int) (bool, error), kill func(pgid int) error, stalled func(pid int, waited time.Duration)) error {
 	exited := map[int]bool{}
 	for _, pid := range held {
 		seen, err := awaitKilledLeader(pid, reportAfter, wait, stalled)
@@ -1542,12 +1551,20 @@ func awaitGroupEnd(pgid int, held []int, reportAfter time.Duration, list func(in
 		if err != nil {
 			return err
 		}
-		pending, unseen := 0, 0
+		var waiting []procgroup.Member
 		for _, m := range members {
-			if exited[m.Pid] {
-				continue
+			if !exited[m.Pid] {
+				waiting = append(waiting, m)
 			}
-			pending++
+		}
+		if len(waiting) == 0 {
+			return nil
+		}
+		if err := kill(pgid); err != nil {
+			return fmt.Errorf("kill the group again for its %d members still to await: %w", len(waiting), err)
+		}
+		unseen := 0
+		for _, m := range waiting {
 			seen, err := awaitKilledLeader(m.Pid, reportAfter, wait, stalled)
 			if err != nil {
 				return fmt.Errorf("member %d (%s, %s): %w", m.Pid, m.Comm, m.State, err)
@@ -1558,10 +1575,7 @@ func awaitGroupEnd(pgid int, held []int, reportAfter time.Duration, list func(in
 			}
 			exited[m.Pid] = true
 		}
-		if pending == 0 {
-			return nil
-		}
-		if unseen == pending {
+		if unseen == len(waiting) {
 			runtime.Gosched()
 		}
 	}
@@ -1610,6 +1624,12 @@ func (d *Daemon) memberStalled(pid int, waited time.Duration) {
 	d.t.Helper()
 	out, err := stallListing("-p", pid)
 	d.t.Errorf("harness: member %d of the killed daemon's group has not exited %s after the group's SIGKILL and SIGCONT; still waiting (ps err %v):\n%s", pid, waited, err, out)
+}
+
+// killStoppedGroup SIGKILLs process group pgid and continues it
+// (killStopped), through procgroup.Signal: awaitGroupEnd's kill.
+func killStoppedGroup(pgid int) error {
+	return killStopped(pgid, procgroup.Signal)
 }
 
 // killStopped SIGKILLs a process this harness may hold stopped, then

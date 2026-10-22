@@ -21,6 +21,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/workspace"
@@ -61,24 +62,6 @@ type refusal struct {
 	Op string
 }
 
-// mergeFields carries a merge refusal's fields onto the wire's: a field
-// naming a nested arm (merge.NestedArm, the unexpected increment's `reason`)
-// becomes the arm setNestedArms sets, and every other field passes as it is.
-func mergeFields(fields map[string]any) map[string]any {
-	if fields == nil {
-		return nil
-	}
-	out := make(map[string]any, len(fields))
-	for k, v := range fields {
-		if arm, ok := v.(merge.NestedArm); ok {
-			out[k] = nestedArm(arm)
-			continue
-		}
-		out[k] = v
-	}
-	return out
-}
-
 // asRefusal normalizes a component error into a refusal, reporting false for an
 // ordinary failure that must surface as an error rather than an answer.
 func (s *server) asRefusal(err error) (refusal, bool) {
@@ -100,7 +83,7 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		}), true
 	}
 	if mergeRefusal, ok := merge.Refused(err); ok {
-		return s.fill(refusal{Arm: mergeRefusal.Arm, Reason: mergeRefusal.Reason, Fields: mergeFields(mergeRefusal.Fields)}), true
+		return s.fill(refusal{Arm: mergeRefusal.Arm, Reason: mergeRefusal.Reason, Fields: mergeRefusal.Fields}), true
 	}
 	var confirm *workspace.ConfirmRequired
 	if errors.As(err, &confirm) {
@@ -274,12 +257,6 @@ func setResponseError(resp proto.Message, arm string, fields map[string]any) boo
 	return true
 }
 
-// nestedArm is a refusal field value naming an arm of a oneof INSIDE the
-// `<Rpc>Error` arm message — SubmitPromptBubbleRefused's `kind`. The nested
-// arms are empty messages, so the arm NAME is the whole value; the refusal
-// keys it by the oneof's own name.
-type nestedArm string
-
 // setArm populates one `<Rpc>Error` arm by name, filling whichever of the arm
 // message's own fields the refusal supplied.
 func setArm(errMessage protoreflect.Message, arm string, fields map[string]any) bool {
@@ -395,7 +372,7 @@ func familyRefusal(err error) (refusal, bool) {
 	var parent *wsm.ParentNotOpenError
 	if errors.As(err, &parent) {
 		return refusal{Arm: "parent_not_open", Reason: err.Error(), Fields: map[string]any{
-			"parent": parent.Parent.Ref(), "state": nestedArm(parent.State.String()),
+			"parent": parent.Parent.Ref(), "state": refusalarm.Nested(parent.State.String()),
 		}}, true
 	}
 	return refusal{}, false
@@ -413,7 +390,7 @@ func setNestedArms(armMessage protoreflect.Message, fields map[string]any) bool 
 		if !ok {
 			continue
 		}
-		name, ok := value.(nestedArm)
+		name, ok := value.(refusalarm.Nested)
 		if !ok {
 			return false
 		}

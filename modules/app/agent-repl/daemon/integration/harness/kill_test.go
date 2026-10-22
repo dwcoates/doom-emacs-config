@@ -2,6 +2,7 @@ package harness
 
 import (
 	"agent-repld/internal/procgroup"
+	"agent-repld/internal/sourcescan"
 	"bufio"
 	"context"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -842,6 +844,7 @@ func TestKillReturnsOnceEveryMemberHasReleasedItsFiles(t *testing.T) {
 func TestAwaitGroupEnd(t *testing.T) {
 	errList := errors.New("the group could not be listed")
 	errWait := errors.New("the exit event could not be registered")
+	errKill := errors.New("the group could not be signalled")
 	m := func(pid int) procgroup.Member { return procgroup.Member{Pid: pid, Comm: "c", State: "running"} }
 	tests := []struct {
 		name     string
@@ -851,8 +854,12 @@ func TestAwaitGroupEnd(t *testing.T) {
 		waitErr  error
 		// unseenWaits is how many of a pid's waits answer an exit not seen.
 		unseenWaits map[int]int
+		killErr     error
 		wantWaits   []int
-		wantErr     error
+		// wantEvents, when set, is the whole order of group kills ("kill")
+		// and member waits ("wait <pid>").
+		wantEvents []string
+		wantErr    error
 	}{
 		{name: "an empty group awaits nothing", listings: [][]procgroup.Member{nil}},
 		{name: "each member is awaited once though it stays listed until it is a zombie",
@@ -868,6 +875,15 @@ func TestAwaitGroupEnd(t *testing.T) {
 			held: []int{1}, listings: [][]procgroup.Member{{m(1)}}, wantWaits: []int{1}},
 		{name: "a held member's wait that answers no exit is answered", held: []int{5},
 			listings: [][]procgroup.Member{{}}, unseenWaits: map[int]int{5: 1}, wantWaits: []int{5}, wantErr: errHeldExitUnseen},
+		{name: "a member forked during the kill is killed before it is awaited",
+			listings: [][]procgroup.Member{{m(1)}, {m(1), m(3)}}, wantWaits: []int{1, 3},
+			wantEvents: []string{"kill", "wait 1", "kill", "wait 3"}},
+		{name: "a round with nothing left to await kills nothing",
+			held: []int{1}, listings: [][]procgroup.Member{{m(1)}}, wantWaits: []int{1},
+			wantEvents: []string{"wait 1"}},
+		{name: "a kill that fails is answered and nothing more is awaited",
+			listings: [][]procgroup.Member{{m(1)}}, killErr: errKill, wantErr: errKill,
+			wantEvents: []string{"kill"}},
 		{name: "a listing that fails is answered", listErr: errList, wantErr: errList},
 		{name: "a wait that fails is answered", listings: [][]procgroup.Member{{m(1)}}, waitErr: errWait,
 			wantWaits: []int{1}, wantErr: errWait},
@@ -885,19 +901,28 @@ func TestAwaitGroupEnd(t *testing.T) {
 				return l, nil
 			}
 			var waits []int
+			var events []string
 			unseen := maps.Clone(tt.unseenWaits)
 			wait := func(_ context.Context, pid int) (bool, error) {
 				waits = append(waits, pid)
+				events = append(events, fmt.Sprintf("wait %d", pid))
 				if unseen[pid] > 0 {
 					unseen[pid]--
 					return false, nil
 				}
 				return tt.waitErr == nil, tt.waitErr
 			}
+			kill := func(pgid int) error {
+				if pgid != 7 {
+					t.Errorf("killed group %d, want the awaited group 7", pgid)
+				}
+				events = append(events, "kill")
+				return tt.killErr
+			}
 			stalled := func(int, time.Duration) { t.Error("a stall was reported") }
 
 			// Act
-			err := awaitGroupEnd(7, tt.held, time.Minute, list, wait, stalled)
+			err := awaitGroupEnd(7, tt.held, time.Minute, list, wait, kill, stalled)
 
 			// Assert
 			if !errors.Is(err, tt.wantErr) {
@@ -908,6 +933,9 @@ func TestAwaitGroupEnd(t *testing.T) {
 			}
 			if !slices.Equal(waits, tt.wantWaits) {
 				t.Errorf("waits = %v, want %v", waits, tt.wantWaits)
+			}
+			if tt.wantEvents != nil && !slices.Equal(events, tt.wantEvents) {
+				t.Errorf("events = %v, want %v", events, tt.wantEvents)
 			}
 		})
 	}
@@ -1032,5 +1060,25 @@ func TestEveryStallReportListsThroughStallListing(t *testing.T) {
 	// Assert
 	if direct != 1 || shared != 3 {
 		t.Fatalf("the listing's columns are spelled %d times and stallListing named %d times, want 1 and 3 (its definition and both reports)", direct, shared)
+	}
+}
+
+// TestTheHarnessKillsAStoppedGroupThroughOneHelper pins that the harness
+// SIGKILLs and continues a process group only through killStoppedGroup, so
+// Kill's own group kill and awaitGroupEnd's re-kill cannot drift apart: no
+// production file of the package signals a group's SIGKILL or SIGCONT itself.
+func TestTheHarnessKillsAStoppedGroupThroughOneHelper(t *testing.T) {
+	// Arrange
+	files := sourcescan.Production(t)
+	handRolled := regexp.MustCompile(`signalGroup\([^)]*syscall\.SIG(KILL|CONT)\)`)
+
+	for _, f := range files {
+		// Act
+		loc := handRolled.FindIndex(f.Source)
+
+		// Assert
+		if loc != nil {
+			t.Errorf("%s signals a group's SIGKILL or SIGCONT by hand (%q); use killStoppedGroup", f.Name, f.Source[loc[0]:loc[1]])
+		}
 	}
 }

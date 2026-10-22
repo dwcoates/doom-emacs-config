@@ -520,6 +520,15 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 	}
 	if supplied := strings.TrimSpace(spec.Name); supplied != "" {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "supplied := strings.TrimSpace(spec.Name); supplied != \"\""})
+		// A SUPPLIED NAME IS CHECKED BEFORE IT IS CLAIMED. It becomes the
+		// branch, the worktree directory and the tab label as it stands, so a
+		// name that breaks the naming rule is refused here, naming the part
+		// that broke it, rather than handed to `git` to fail on.
+		if breach := ValidateSuppliedName(supplied); breach != nil {
+			return "", nil, refuseWith(log, "CreateWorkspace", ArmInvalidName,
+				fmt.Sprintf("the name %q breaks the %s rule at %q", supplied, breach.Rule, breach.Component), false,
+				map[string]any{"name": supplied, "component": breach.Component, "rule": breach.Rule})
+		}
 		return v.claimSupplied(ctx, log, repoDir, supplied, "")
 	}
 	// A FORK IS NAMED FROM ITS PROMPT PLUS THE CONVERSATION IT CONTINUES (owner
