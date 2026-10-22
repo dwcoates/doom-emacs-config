@@ -215,10 +215,12 @@ Two marks an agent sets on its own workspace show on every surface:
   - The bubble is drawn only in your feed, placed where it was asked for rather than pinned, and its resolving, conflicts and fixes tabs stream the merge workspace's agent.
   - Every queue tab lists the merge by its own name; clicking the entry switches to your workspace and opens the merge's bubble there, and never selects or reveals the merge workspace.
 - **The merge workspace is revealed, and stays visible, when:**
-  - the merge fails;
   - its agent asks a question or for a permission;
   - you press a running tab's `stop`;
   - you select it.
+- **A merge workspace is never revealed by its merge's own outcome.**
+  - A failed merge's workspace stays hidden, listed among the closed workspaces.
+  - Selecting it there reveals it.
 - **A revealed merge workspace is an ordinary workspace.**
   - Its feed has no merge bubble, and its footer shows its own statuses.
   - The bubble's header then carries an `open merge workspace` button.
