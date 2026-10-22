@@ -180,19 +180,21 @@ func (*GetLiveWorkResponse_Failure) isGetLiveWorkResponse_Result() {}
 
 // The session's open obligations, from the three tables' non-terminal rows
 // within the requested lineage — never another session's. Empty lists are the
-// ordinary answer for an idle session. IDS ONLY: the caller
-// follows up per item (GetWorkflow, OpenAgentSession, the detached row's
-// state), which the reconciliation does anyway.
+// ordinary answer for an idle session. Each item is named by its id, and a
+// detached run also by the agent that owns it; the caller follows up per item
+// (GetWorkflow, OpenAgentSession, the owner's book), which the reconciliation
+// does anyway.
 type GetLiveWorkSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Agents with no terminal frame: detached subagents, workflow agents.
 	LiveAgents []*v1.AgentId `protobuf:"bytes,1,rep,name=live_agents,json=liveAgents,proto3" json:"live_agents,omitempty"`
 	// Workflow runs with no terminal.
 	LiveWorkflows []*v1.DetachedWorkId `protobuf:"bytes,2,rep,name=live_workflows,json=liveWorkflows,proto3" json:"live_workflows,omitempty"`
-	// Non-agent detached runs (bash) with no terminal.
-	LiveDetached  []*v1.DetachedWorkId `protobuf:"bytes,3,rep,name=live_detached,json=liveDetached,proto3" json:"live_detached,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Non-agent detached runs (a shell) with no terminal, each with its owner,
+	// oldest announcement first.
+	LiveDetachedRuns []*GetLiveWorkDetached `protobuf:"bytes,4,rep,name=live_detached_runs,json=liveDetachedRuns,proto3" json:"live_detached_runs,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GetLiveWorkSuccess) Reset() {
@@ -239,9 +241,76 @@ func (x *GetLiveWorkSuccess) GetLiveWorkflows() []*v1.DetachedWorkId {
 	return nil
 }
 
-func (x *GetLiveWorkSuccess) GetLiveDetached() []*v1.DetachedWorkId {
+func (x *GetLiveWorkSuccess) GetLiveDetachedRuns() []*GetLiveWorkDetached {
 	if x != nil {
-		return x.LiveDetached
+		return x.LiveDetachedRuns
+	}
+	return nil
+}
+
+// One live non-agent detached run, named together with the agent that owns it.
+//
+// THE OWNER IS PART OF THE ITEM, NOT A LOOKUP. The answer spans the whole
+// lineage — the main agent and every subagent at any depth — and a run's
+// start, the only record of what it IS, lies in its OWNER's book. A caller
+// handed the id alone reads the main agent's book, finds no start for a run a
+// subagent announced, and reports a description the record never lost. So a
+// run is never answered without its owner: both fields are set on every item,
+// and an item missing either is malformed.
+type GetLiveWorkDetached struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// REQUIRED. The run's handle: the key its own stream is opened under and the
+	// unit its start was recorded as in the owner's book.
+	Work *v1.DetachedWorkId `protobuf:"bytes,1,opt,name=work,proto3" json:"work,omitempty"`
+	// REQUIRED. The agent in the requested lineage that announced the run — the
+	// main agent or a subagent at any depth (the detached row's declared owner).
+	// The run is described from this agent's book, and a terminal the caller
+	// writes for it is written there.
+	Owner         *v1.AgentId `protobuf:"bytes,2,opt,name=owner,proto3" json:"owner,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetLiveWorkDetached) Reset() {
+	*x = GetLiveWorkDetached{}
+	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetLiveWorkDetached) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetLiveWorkDetached) ProtoMessage() {}
+
+func (x *GetLiveWorkDetached) ProtoReflect() protoreflect.Message {
+	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetLiveWorkDetached.ProtoReflect.Descriptor instead.
+func (*GetLiveWorkDetached) Descriptor() ([]byte, []int) {
+	return file_store_v1_endpoint_get_live_work_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetLiveWorkDetached) GetWork() *v1.DetachedWorkId {
+	if x != nil {
+		return x.Work
+	}
+	return nil
+}
+
+func (x *GetLiveWorkDetached) GetOwner() *v1.AgentId {
+	if x != nil {
+		return x.Owner
 	}
 	return nil
 }
@@ -262,7 +331,7 @@ type GetLiveWorkFailure struct {
 
 func (x *GetLiveWorkFailure) Reset() {
 	*x = GetLiveWorkFailure{}
-	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[3]
+	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -274,7 +343,7 @@ func (x *GetLiveWorkFailure) String() string {
 func (*GetLiveWorkFailure) ProtoMessage() {}
 
 func (x *GetLiveWorkFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[3]
+	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -287,7 +356,7 @@ func (x *GetLiveWorkFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLiveWorkFailure.ProtoReflect.Descriptor instead.
 func (*GetLiveWorkFailure) Descriptor() ([]byte, []int) {
-	return file_store_v1_endpoint_get_live_work_proto_rawDescGZIP(), []int{3}
+	return file_store_v1_endpoint_get_live_work_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetLiveWorkFailure) GetDetail() string {
@@ -351,7 +420,7 @@ type GetLiveWorkInvalidRequest struct {
 
 func (x *GetLiveWorkInvalidRequest) Reset() {
 	*x = GetLiveWorkInvalidRequest{}
-	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[4]
+	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -363,7 +432,7 @@ func (x *GetLiveWorkInvalidRequest) String() string {
 func (*GetLiveWorkInvalidRequest) ProtoMessage() {}
 
 func (x *GetLiveWorkInvalidRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[4]
+	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -376,7 +445,7 @@ func (x *GetLiveWorkInvalidRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLiveWorkInvalidRequest.ProtoReflect.Descriptor instead.
 func (*GetLiveWorkInvalidRequest) Descriptor() ([]byte, []int) {
-	return file_store_v1_endpoint_get_live_work_proto_rawDescGZIP(), []int{4}
+	return file_store_v1_endpoint_get_live_work_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetLiveWorkInvalidRequest) GetField() string {
@@ -395,7 +464,7 @@ type GetLiveWorkStorageFailure struct {
 
 func (x *GetLiveWorkStorageFailure) Reset() {
 	*x = GetLiveWorkStorageFailure{}
-	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[5]
+	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -407,7 +476,7 @@ func (x *GetLiveWorkStorageFailure) String() string {
 func (*GetLiveWorkStorageFailure) ProtoMessage() {}
 
 func (x *GetLiveWorkStorageFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[5]
+	mi := &file_store_v1_endpoint_get_live_work_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -420,7 +489,7 @@ func (x *GetLiveWorkStorageFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLiveWorkStorageFailure.ProtoReflect.Descriptor instead.
 func (*GetLiveWorkStorageFailure) Descriptor() ([]byte, []int) {
-	return file_store_v1_endpoint_get_live_work_proto_rawDescGZIP(), []int{5}
+	return file_store_v1_endpoint_get_live_work_proto_rawDescGZIP(), []int{6}
 }
 
 var File_store_v1_endpoint_get_live_work_proto protoreflect.FileDescriptor
@@ -433,12 +502,15 @@ const file_store_v1_endpoint_get_live_work_proto_rawDesc = "" +
 	"\x13GetLiveWorkResponse\x128\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1c.store.v1.GetLiveWorkSuccessH\x00R\asuccess\x128\n" +
 	"\afailure\x18\x02 \x01(\v2\x1c.store.v1.GetLiveWorkFailureH\x00R\afailureB\b\n" +
-	"\x06result\"\xdd\x01\n" +
+	"\x06result\"\xf9\x01\n" +
 	"\x12GetLiveWorkSuccess\x129\n" +
 	"\vlive_agents\x18\x01 \x03(\v2\x18.conversation.v1.AgentIdR\n" +
 	"liveAgents\x12F\n" +
-	"\x0elive_workflows\x18\x02 \x03(\v2\x1f.conversation.v1.DetachedWorkIdR\rliveWorkflows\x12D\n" +
-	"\rlive_detached\x18\x03 \x03(\v2\x1f.conversation.v1.DetachedWorkIdR\fliveDetached\"\xd4\x01\n" +
+	"\x0elive_workflows\x18\x02 \x03(\v2\x1f.conversation.v1.DetachedWorkIdR\rliveWorkflows\x12K\n" +
+	"\x12live_detached_runs\x18\x04 \x03(\v2\x1d.store.v1.GetLiveWorkDetachedR\x10liveDetachedRunsJ\x04\b\x03\x10\x04R\rlive_detached\"z\n" +
+	"\x13GetLiveWorkDetached\x123\n" +
+	"\x04work\x18\x01 \x01(\v2\x1f.conversation.v1.DetachedWorkIdR\x04work\x12.\n" +
+	"\x05owner\x18\x02 \x01(\v2\x18.conversation.v1.AgentIdR\x05owner\"\xd4\x01\n" +
 	"\x12GetLiveWorkFailure\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12N\n" +
 	"\x0fstorage_failure\x18\x02 \x01(\v2#.store.v1.GetLiveWorkStorageFailureH\x00R\x0estorageFailure\x12N\n" +
@@ -460,31 +532,34 @@ func file_store_v1_endpoint_get_live_work_proto_rawDescGZIP() []byte {
 	return file_store_v1_endpoint_get_live_work_proto_rawDescData
 }
 
-var file_store_v1_endpoint_get_live_work_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_store_v1_endpoint_get_live_work_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_store_v1_endpoint_get_live_work_proto_goTypes = []any{
 	(*GetLiveWorkRequest)(nil),        // 0: store.v1.GetLiveWorkRequest
 	(*GetLiveWorkResponse)(nil),       // 1: store.v1.GetLiveWorkResponse
 	(*GetLiveWorkSuccess)(nil),        // 2: store.v1.GetLiveWorkSuccess
-	(*GetLiveWorkFailure)(nil),        // 3: store.v1.GetLiveWorkFailure
-	(*GetLiveWorkInvalidRequest)(nil), // 4: store.v1.GetLiveWorkInvalidRequest
-	(*GetLiveWorkStorageFailure)(nil), // 5: store.v1.GetLiveWorkStorageFailure
-	(*v1.AgentId)(nil),                // 6: conversation.v1.AgentId
-	(*v1.DetachedWorkId)(nil),         // 7: conversation.v1.DetachedWorkId
+	(*GetLiveWorkDetached)(nil),       // 3: store.v1.GetLiveWorkDetached
+	(*GetLiveWorkFailure)(nil),        // 4: store.v1.GetLiveWorkFailure
+	(*GetLiveWorkInvalidRequest)(nil), // 5: store.v1.GetLiveWorkInvalidRequest
+	(*GetLiveWorkStorageFailure)(nil), // 6: store.v1.GetLiveWorkStorageFailure
+	(*v1.AgentId)(nil),                // 7: conversation.v1.AgentId
+	(*v1.DetachedWorkId)(nil),         // 8: conversation.v1.DetachedWorkId
 }
 var file_store_v1_endpoint_get_live_work_proto_depIdxs = []int32{
-	6, // 0: store.v1.GetLiveWorkRequest.session:type_name -> conversation.v1.AgentId
-	2, // 1: store.v1.GetLiveWorkResponse.success:type_name -> store.v1.GetLiveWorkSuccess
-	3, // 2: store.v1.GetLiveWorkResponse.failure:type_name -> store.v1.GetLiveWorkFailure
-	6, // 3: store.v1.GetLiveWorkSuccess.live_agents:type_name -> conversation.v1.AgentId
-	7, // 4: store.v1.GetLiveWorkSuccess.live_workflows:type_name -> conversation.v1.DetachedWorkId
-	7, // 5: store.v1.GetLiveWorkSuccess.live_detached:type_name -> conversation.v1.DetachedWorkId
-	5, // 6: store.v1.GetLiveWorkFailure.storage_failure:type_name -> store.v1.GetLiveWorkStorageFailure
-	4, // 7: store.v1.GetLiveWorkFailure.invalid_request:type_name -> store.v1.GetLiveWorkInvalidRequest
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	7,  // 0: store.v1.GetLiveWorkRequest.session:type_name -> conversation.v1.AgentId
+	2,  // 1: store.v1.GetLiveWorkResponse.success:type_name -> store.v1.GetLiveWorkSuccess
+	4,  // 2: store.v1.GetLiveWorkResponse.failure:type_name -> store.v1.GetLiveWorkFailure
+	7,  // 3: store.v1.GetLiveWorkSuccess.live_agents:type_name -> conversation.v1.AgentId
+	8,  // 4: store.v1.GetLiveWorkSuccess.live_workflows:type_name -> conversation.v1.DetachedWorkId
+	3,  // 5: store.v1.GetLiveWorkSuccess.live_detached_runs:type_name -> store.v1.GetLiveWorkDetached
+	8,  // 6: store.v1.GetLiveWorkDetached.work:type_name -> conversation.v1.DetachedWorkId
+	7,  // 7: store.v1.GetLiveWorkDetached.owner:type_name -> conversation.v1.AgentId
+	6,  // 8: store.v1.GetLiveWorkFailure.storage_failure:type_name -> store.v1.GetLiveWorkStorageFailure
+	5,  // 9: store.v1.GetLiveWorkFailure.invalid_request:type_name -> store.v1.GetLiveWorkInvalidRequest
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_get_live_work_proto_init() }
@@ -496,7 +571,7 @@ func file_store_v1_endpoint_get_live_work_proto_init() {
 		(*GetLiveWorkResponse_Success)(nil),
 		(*GetLiveWorkResponse_Failure)(nil),
 	}
-	file_store_v1_endpoint_get_live_work_proto_msgTypes[3].OneofWrappers = []any{
+	file_store_v1_endpoint_get_live_work_proto_msgTypes[4].OneofWrappers = []any{
 		(*GetLiveWorkFailure_StorageFailure)(nil),
 		(*GetLiveWorkFailure_InvalidRequest)(nil),
 	}
@@ -506,7 +581,7 @@ func file_store_v1_endpoint_get_live_work_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_store_v1_endpoint_get_live_work_proto_rawDesc), len(file_store_v1_endpoint_get_live_work_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
