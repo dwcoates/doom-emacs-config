@@ -1348,6 +1348,17 @@ found, ERROR not-found or failed.
 
 ## A task message the fold cannot type is typed by the store (2026-10-06)
 
+**THE CALL NAMES THE KIND when the call is itself a detachable kind**
+(`restateTaskMessage` in convert/detached.ts, applied once at the top of the
+engine's message loop and again inside the fold). The vendor types a task by
+what RUNS it: a `Monitor`'s watch is `local_bash` on its start and on the level
+(the `monitor-*` captures). Read as a shell, a monitor waited for a `Bash`
+result that never comes, was announced only at its end, and its record named
+no owner while it ran (store.db.live-work.unscoped, 2026-10-22). Restated, it
+is announced at its start, claims no spool, and its `task_notification` settles
+its unit with `AgentMonitorEnded` (`monitorEndedEntry`). A `SendMessage` that
+resumed a subagent is not a detachable kind, so the vendor's word stands there.
+
 Only `task_started` states a task's kind; a `task_notification` states none,
 and the fold forgets a kind once its task settles. A keep-alive rewind's
 replacement vendor query re-reports an earlier query's ended background shell

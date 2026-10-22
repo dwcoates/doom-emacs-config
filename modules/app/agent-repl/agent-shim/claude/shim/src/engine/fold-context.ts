@@ -182,6 +182,13 @@ export interface EngineFoldOutput {
 export interface EngineFold {
   onSdkMessage(message: SdkMessage, context: FoldContext): EngineFoldOutput;
   /**
+   * `message` as every reader takes it: a task message's `task_type` restated
+   * by the call that started the task (convert/fold.ts `restateTaskMessage`).
+   * The engine reads its live table from the restated message, so the table
+   * and the fold agree on what the work is. A read: it records nothing.
+   */
+  restateTaskMessage(message: SdkMessage): SdkMessage;
+  /**
    * The query the fold was reading is OVER — it died, or the engine replaced
    * it. Nothing that query announced can settle any more, so whatever the fold
    * still holds for it is let go (convert/fold.ts `endQuery`).
@@ -257,6 +264,8 @@ export function turnBoundaryOnlyFold(): EngineFold {
     endQuery: (): void => undefined,
     // CONVERTS NO HOOK, so it dropped none.
     reportDroppedHooks: (): void => undefined,
+    // CONVERTS NO TASK, so it restates none.
+    restateTaskMessage: (message) => message,
     // NAMES NOTHING: it converts no task, so no task awaits an agent and it
     // knows none.
     taskAwaitingAgent: (): undefined => undefined,

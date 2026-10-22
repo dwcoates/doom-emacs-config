@@ -13,7 +13,8 @@
  * `settle` therefore answers `undefined` on a successful arming — the fold's
  * own vocabulary for "this result is not the unit's conclusion" — and the
  * `ended` arm is minted by {@link monitorEnded} at the moment the watch leaves
- * the live set, which is observed elsewhere. An arming that FAILED is a real
+ * the live set: the task's `task_notification` (convert/detached.ts
+ * `monitorEndedEntry`). An arming that FAILED is a real
  * conclusion: nothing was ever watching, so that settles as `failure`.
  *
  * # The lifetime comes from the CALL, not the receipt
@@ -101,6 +102,14 @@ export function monitorEnded(
     "a monitor left the live set; the watch's unit is settled as ended",
   );
   return item({ case: "ended", value: create(conversationv1.AgentMonitorEndedSchema, { call }) });
+}
+
+/**
+ * The watch left the live set, restating the start CALL armed — or none, for a
+ * call nothing observed (convert/detached.ts `monitorEndedEntry`).
+ */
+export function monitorEndedFor(call: PendingCall | undefined): conversationv1.AgentActivity["item"] {
+  return monitorEnded(call === undefined ? undefined : armedAs(call));
 }
 
 /** The watch as the call armed it: the start frame's body, and every settle's restatement. */

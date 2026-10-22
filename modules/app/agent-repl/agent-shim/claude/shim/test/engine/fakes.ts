@@ -711,6 +711,13 @@ export class RecordingFold implements EngineFold {
     this.queryEnds.push(why);
   }
 
+  /** How a task message is restated; unchanged unless a suite says so. */
+  restateFor: (message: SdkMessage) => SdkMessage = (message) => message;
+
+  restateTaskMessage(message: SdkMessage): SdkMessage {
+    return this.restateFor(message);
+  }
+
   /** Every `reportDroppedHooks` the engine called, by its stated reason. */
   readonly droppedHookReports: string[] = [];
 
