@@ -20,6 +20,8 @@ import {
   bashUnitsWithoutCommand,
   createReconciler,
   findAnnouncedKind,
+  groupRunsByOwner,
+  ownedRunsOf,
   revivalFate,
   findUnit,
   reconciledCoordinate,
@@ -438,7 +440,7 @@ describe("liveWork", () => {
 
     // Assert.
     expect(asked).toBe(2);
-    expect(answer.liveDetached).toEqual([]);
+    expect(answer.liveDetachedRuns).toEqual([]);
   });
 
   it("raises loudly when the store answers with no result arm", async () => {
@@ -473,6 +475,156 @@ describe("liveWork", () => {
     await expect(createReconciler({ client: empty, sleep: instantly }).liveWork(MAIN)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
+  });
+});
+
+/** A store whose only answer is ANSWER, to GetLiveWork; every other read is unused. */
+function liveWorkAnswering(answer: storev1.GetLiveWorkResponse): StoreClient {
+  return {
+    openAgentSession: async () => {
+      throw new Error("unused");
+    },
+    watchAgentSession: () => {
+      throw new Error("unused");
+    },
+    watchBashRun: () => {
+      throw new Error("unused");
+    },
+    readAgentPage: async () => {
+      throw new Error("unused");
+    },
+    getWorkflow: async () => {
+      throw new Error("unused");
+    },
+    getSidecarCursors: async () => {
+      throw new Error("unused");
+    },
+    getLiveWork: async () => answer,
+    getAgentByVendorTask: () => Promise.reject(new Error("unused")),
+    getDetachedWork: () => Promise.reject(new Error("unused")),
+    getPeerDelivery: () => Promise.reject(new Error("unused")),
+    writeBatch: async () => {
+      throw new Error("unused");
+    },
+  };
+}
+
+/** A live detached run WORK, owned by OWNER; either may be left empty. */
+function run(work: string, owner: string): storev1.GetLiveWorkDetached {
+  return create(storev1.GetLiveWorkDetachedSchema, {
+    work: work === "" ? undefined : create(conversationv1.DetachedWorkIdSchema, { value: work }),
+    owner: owner === "" ? undefined : create(conversationv1.AgentIdSchema, { value: owner }),
+  });
+}
+
+/** A successful GetLiveWork answer holding RUNS. */
+function answering(...runs: storev1.GetLiveWorkDetached[]): storev1.GetLiveWorkResponse {
+  return create(storev1.GetLiveWorkResponseSchema, {
+    result: { case: "success", value: create(storev1.GetLiveWorkSuccessSchema, { liveDetachedRuns: runs }) },
+  });
+}
+
+describe("the live-work read's detached runs", () => {
+  it("answers each run with its owner", async () => {
+    // Arrange.
+    const client = liveWorkAnswering(answering(run("b01", "main"), run("b02", "sub-1")));
+
+    // Act.
+    const answer = await createReconciler({ client, sleep: instantly }).liveWork(MAIN);
+
+    // Assert.
+    expect(answer.liveDetachedRuns.map((r) => [r.work?.value, r.owner?.value])).toEqual([
+      ["b01", "main"],
+      ["b02", "sub-1"],
+    ]);
+  });
+
+  const broken: ReadonlyArray<readonly [string, storev1.GetLiveWorkDetached]> = [
+    ["a run with no owner", run("b01", "")],
+    ["a run with no work", run("", "sub-1")],
+  ];
+  for (const [name, item] of broken) {
+    it(`refuses ${name} as a store that broke its contract`, async () => {
+      // Arrange.
+      const client = liveWorkAnswering(answering(run("b00", "main"), item));
+
+      // Act.
+      const answer = createReconciler({ client, sleep: instantly }).liveWork(MAIN);
+
+      // Assert.
+      await expect(answer).rejects.toMatchObject({ kind: "store_unavailable" });
+    });
+
+    it(`records ${name} at error, naming the item`, async () => {
+      // Arrange.
+      const client = liveWorkAnswering(answering(item));
+      const before = logSinkMark();
+
+      // Act.
+      await createReconciler({ client, sleep: instantly }).liveWork(MAIN).catch(() => undefined);
+
+      // Assert.
+      const record = logRecordsSince(before).find(
+        (r) => r.message === "the store answered an open-obligation read that breaks its contract",
+      );
+      expect([record?.level, record?.context?.work_id, record?.context?.owner]).toEqual([
+        "error",
+        item.work?.value ?? "",
+        item.owner?.value ?? "",
+      ]);
+    });
+  }
+});
+
+describe("ownedRunsOf", () => {
+  it("states each run's work and owner, in the store's order", () => {
+    // Arrange.
+    const success = create(storev1.GetLiveWorkSuccessSchema, { liveDetachedRuns: [run("b02", "sub-1"), run("b01", "main")] });
+
+    // Act.
+    const runs = ownedRunsOf(success);
+
+    // Assert.
+    expect(runs.map((r) => [r.work.value, r.owner.value])).toEqual([
+      ["b02", "sub-1"],
+      ["b01", "main"],
+    ]);
+  });
+
+  for (const [name, item] of [
+    ["no owner", run("b01", "")],
+    ["no work", run("", "sub-1")],
+  ] as const) {
+    it(`throws on a run with ${name}, never guessing a book`, () => {
+      expect(() => ownedRunsOf(create(storev1.GetLiveWorkSuccessSchema, { liveDetachedRuns: [item] }))).toThrow(
+        "without its work or owner",
+      );
+    });
+  }
+});
+
+describe("groupRunsByOwner", () => {
+  const owned = (work: string, owner: string) => ({
+    work: create(conversationv1.DetachedWorkIdSchema, { value: work }),
+    owner: create(conversationv1.AgentIdSchema, { value: owner }),
+  });
+
+  it("answers nothing for no runs", () => {
+    expect(groupRunsByOwner([])).toEqual([]);
+  });
+
+  it("gathers each owner's runs once, owners in the order of their first run", () => {
+    // Arrange.
+    const runs = [owned("b1", "sub-1"), owned("b2", "main"), owned("b3", "sub-1")];
+
+    // Act.
+    const groups = groupRunsByOwner(runs);
+
+    // Assert.
+    expect(groups.map((g) => [g.owner.value, g.works.map((w) => w.value)])).toEqual([
+      ["sub-1", ["b1", "b3"]],
+      ["main", ["b2"]],
+    ]);
   });
 });
 

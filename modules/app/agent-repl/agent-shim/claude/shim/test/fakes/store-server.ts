@@ -1067,13 +1067,18 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
           if (created === session || !lineage.has(created) || concluded(created)) continue;
           liveAgents.push(create(conversationv1.AgentIdSchema, { value: created }));
         }
-        const liveDetached: conversationv1.DetachedWorkId[] = [];
+        const liveDetachedRuns: storev1.GetLiveWorkDetached[] = [];
         for (const [workId, runId] of detachedAnnounced) {
           const owner = detachedOwner.get(workId);
           if (owner === undefined || !lineage.has(owner)) continue;
           const ended = (runId !== undefined && bashEndedRuns.has(runId)) || endedByUnit.has(workId);
           if (!ended) {
-            liveDetached.push(create(conversationv1.DetachedWorkIdSchema, { value: workId }));
+            liveDetachedRuns.push(
+              create(storev1.GetLiveWorkDetachedSchema, {
+                work: create(conversationv1.DetachedWorkIdSchema, { value: workId }),
+                owner: create(conversationv1.AgentIdSchema, { value: owner }),
+              }),
+            );
           }
         }
         return create(storev1.GetLiveWorkResponseSchema, {
@@ -1084,7 +1089,7 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
               // Workflow is kicked, so nothing ever writes a workflow row and
               // the live set is empty by construction rather than by omission.
               liveWorkflows: [],
-              liveDetached,
+              liveDetachedRuns,
             }),
           },
         });

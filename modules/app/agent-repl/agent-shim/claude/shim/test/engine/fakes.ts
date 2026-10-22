@@ -367,6 +367,26 @@ export function errorResultMessage(
   } as unknown as SdkMessage;
 }
 
+/**
+ * The owner a fixture's live run takes when it belongs to whichever session
+ * the live-work read names: `RecordingPersistence.liveWork` answers it as that
+ * session's main agent, so a fixture need not know the session's id.
+ */
+const READ_SESSION = "\u0000the session the read names";
+
+/** A live detached run the session's own main agent owns (see {@link READ_SESSION}). */
+export function ownedBySession(work: string): storev1.GetLiveWorkDetached {
+  return ownedBy(work, READ_SESSION);
+}
+
+/** A live detached run OWNER owns: a subagent's, when OWNER is a subagent id. */
+export function ownedBy(work: string, owner: string): storev1.GetLiveWorkDetached {
+  return create(storev1.GetLiveWorkDetachedSchema, {
+    work: create(conversationv1.DetachedWorkIdSchema, { value: work }),
+    owner: create(conversationv1.AgentIdSchema, { value: owner }),
+  });
+}
+
 /** An in-memory record plane that remembers everything it was handed. */
 export class RecordingPersistence implements Persistence {
   readonly durable: PersistEntry[] = [];
@@ -517,8 +537,10 @@ export class RecordingPersistence implements Persistence {
     if (this.openHangs) return new Promise<conversationv1.HistoryPage>(() => undefined);
     if (this.openError !== undefined) return Promise.reject(this.openError);
     this.closedPages++;
-    return Promise.resolve(this.page);
+    return Promise.resolve(this.pagesByAgent.get(agent?.value ?? "") ?? this.page);
   }
+  /** A book of its own for an agent, served in place of `page` to reads naming it. */
+  readonly pagesByAgent = new Map<string, conversationv1.HistoryPage>();
   /**
    * The one-shot HEAD read: the newest pointer of `page`, exactly what the
    * store's place index answers for the book `page` stands for.
@@ -563,7 +585,14 @@ export class RecordingPersistence implements Persistence {
   liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess> {
     this.liveWorkSessions.push(session.value);
     if (this.liveWorkError !== undefined) return Promise.reject(this.liveWorkError);
-    return Promise.resolve(this.live);
+    return Promise.resolve(
+      create(storev1.GetLiveWorkSuccessSchema, {
+        ...this.live,
+        liveDetachedRuns: this.live.liveDetachedRuns.map((run) =>
+          run.owner?.value === READ_SESSION ? ownedBy(run.work?.value ?? "", session.value) : run,
+        ),
+      }),
+    );
   }
   /**
    * The store's answer per vendor task locator; an unlisted locator answers
