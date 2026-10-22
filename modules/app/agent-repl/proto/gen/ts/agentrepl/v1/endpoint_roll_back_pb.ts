@@ -26,13 +26,15 @@ import type { SubmitPromptResponse } from "./endpoint_submit_prompt_pb";
 import { file_agentrepl_v1_endpoint_submit_prompt } from "./endpoint_submit_prompt_pb";
 import type { PromptOrigin } from "../../conversation/v1/prompt_origin_pb";
 import { file_conversation_v1_prompt_origin } from "../../conversation/v1/prompt_origin_pb";
+import type { FeedId } from "../../frontend/v1/feed_pb";
+import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/endpoint_roll_back.proto.
  */
 export const file_agentrepl_v1_endpoint_roll_back: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcm9sbF9iYWNrLnByb3RvEgxhZ2VudHJlcGwudjEiqgEKD1JvbGxCYWNrUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEioKBXRva2VuGAIgASgLMhsuYWdlbnRyZXBsLnYxLlJvbGxiYWNrVG9rZW4SMQoGcmVzZW5kGAMgASgLMhwuYWdlbnRyZXBsLnYxLlJvbGxCYWNrUmVzZW5kSACIAQFCCQoHX3Jlc2VuZCLIAQoOUm9sbEJhY2tSZXNlbmQSFwoPaWRlbXBvdGVuY3lfa2V5GAEgASgJEi0KBm9yaWdpbhgCIAEoDjIdLmNvbnZlcnNhdGlvbi52MS5Qcm9tcHRPcmlnaW4SMgoFd2hvbGUYAyABKAsyIS5hZ2VudHJlcGwudjEuUm9sbEJhY2tSZXNlbmRXaG9sZUgAEjIKBWVudHJ5GAQgASgLMiEuYWdlbnRyZXBsLnYxLlJvbGxCYWNrUmVzZW5kRW50cnlIAEIGCgRlZGl0Ij4KE1JvbGxCYWNrUmVzZW5kV2hvbGUSJwoEc2FpZBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZCIyChNSb2xsQmFja1Jlc2VuZEVudHJ5Eg0KBWxhYmVsGAEgASgJEgwKBHRleHQYAiABKAkifAoQUm9sbEJhY2tSZXNwb25zZRIwCgdzdWNjZXNzGAEgASgLMh0uYWdlbnRyZXBsLnYxLlJvbGxCYWNrU3VjY2Vzc0gAEiwKBWVycm9yGAIgASgLMhsuYWdlbnRyZXBsLnYxLlJvbGxCYWNrRXJyb3JIAEIICgZyZXN1bHQi1QEKD1JvbGxCYWNrU3VjY2VzcxIpCgZwcm9tcHQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSQAoOZmlsZXNfcmVzdG9yZWQYAiABKAsyIy5hZ2VudHJlcGwudjEuUm9sbEJhY2tGaWxlc1Jlc3RvcmVkSACIAQESNwoGcmVzZW5kGAMgASgLMiIuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFJlc3BvbnNlSAGIAQFCEQoPX2ZpbGVzX3Jlc3RvcmVkQgkKB19yZXNlbmQiJgoVUm9sbEJhY2tGaWxlc1Jlc3RvcmVkEg0KBWZpbGVzGAEgASgNQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_conversation_v1_user, file_agentrepl_v1_rollback, file_agentrepl_v1_endpoint_submit_prompt, file_conversation_v1_prompt_origin]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcm9sbF9iYWNrLnByb3RvEgxhZ2VudHJlcGwudjEiqgEKD1JvbGxCYWNrUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEioKBXRva2VuGAIgASgLMhsuYWdlbnRyZXBsLnYxLlJvbGxiYWNrVG9rZW4SMQoGcmVzZW5kGAMgASgLMhwuYWdlbnRyZXBsLnYxLlJvbGxCYWNrUmVzZW5kSACIAQFCCQoHX3Jlc2VuZCLIAQoOUm9sbEJhY2tSZXNlbmQSFwoPaWRlbXBvdGVuY3lfa2V5GAEgASgJEi0KBm9yaWdpbhgCIAEoDjIdLmNvbnZlcnNhdGlvbi52MS5Qcm9tcHRPcmlnaW4SMgoFd2hvbGUYAyABKAsyIS5hZ2VudHJlcGwudjEuUm9sbEJhY2tSZXNlbmRXaG9sZUgAEjIKBWVudHJ5GAQgASgLMiEuYWdlbnRyZXBsLnYxLlJvbGxCYWNrUmVzZW5kRW50cnlIAEIGCgRlZGl0Ij4KE1JvbGxCYWNrUmVzZW5kV2hvbGUSJwoEc2FpZBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZCJUChNSb2xsQmFja1Jlc2VuZEVudHJ5Eg0KBWxhYmVsGAEgASgJEgwKBHRleHQYAiABKAkSIAoDcm93GAMgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkInwKEFJvbGxCYWNrUmVzcG9uc2USMAoHc3VjY2VzcxgBIAEoCzIdLmFnZW50cmVwbC52MS5Sb2xsQmFja1N1Y2Nlc3NIABIsCgVlcnJvchgCIAEoCzIbLmFnZW50cmVwbC52MS5Sb2xsQmFja0Vycm9ySABCCAoGcmVzdWx0ItUBCg9Sb2xsQmFja1N1Y2Nlc3MSKQoGcHJvbXB0GAEgASgLMhkuY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkEkAKDmZpbGVzX3Jlc3RvcmVkGAIgASgLMiMuYWdlbnRyZXBsLnYxLlJvbGxCYWNrRmlsZXNSZXN0b3JlZEgAiAEBEjcKBnJlc2VuZBgDIAEoCzIiLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRSZXNwb25zZUgBiAEBQhEKD19maWxlc19yZXN0b3JlZEIJCgdfcmVzZW5kIiYKFVJvbGxCYWNrRmlsZXNSZXN0b3JlZBINCgVmaWxlcxgBIAEoDUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_conversation_v1_user, file_agentrepl_v1_rollback, file_agentrepl_v1_endpoint_submit_prompt, file_conversation_v1_prompt_origin, file_frontend_v1_feed]);
 
 /**
  * @generated from message agentrepl.v1.RollBackRequest
@@ -167,6 +169,17 @@ export type RollBackResendEntry = Message<"agentrepl.v1.RollBackResendEntry"> & 
    * @generated from field: string text = 2;
    */
   text: string;
+
+  /**
+   * The prompt row whose entry was clicked (HostWorkspacePromptEntryClicked).
+   * A rollback planned to any other prompt refuses the resend
+   * (`entry_not_found`) before anything is rolled back, so an edit made for
+   * one prompt can never be applied to another that happens to hold the
+   * same label.
+   *
+   * @generated from field: frontend.v1.FeedId row = 3;
+   */
+  row?: FeedId | undefined;
 };
 
 /**

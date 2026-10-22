@@ -299,8 +299,9 @@ type RollBackError_FilesNotRestorable struct {
 }
 
 type RollBackError_EntryNotFound struct {
-	// The resend edits an entry the prompt does not hold: no entry of the
-	// rolled-back prompt answers the label it named. Nothing was rolled back.
+	// The resend edits an entry the rolled-back prompt does not hold: the
+	// edit was made for another prompt, or no entry of this one answers the
+	// label it named. Nothing was rolled back.
 	EntryNotFound *RollBackEntryNotFound `protobuf:"bytes,12,opt,name=entry_not_found,json=entryNotFound,proto3,oneof"`
 }
 
