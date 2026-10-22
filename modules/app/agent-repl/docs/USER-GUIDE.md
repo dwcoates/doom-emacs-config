@@ -183,6 +183,24 @@ Two marks an agent sets on its own workspace show on every surface:
   - The workspace is drawn in the background status (yellow) while no turn runs, and the footer names the workspace it waits for.
   - The agent clears the mark when the answer arrives.
 
+## The summary's principal link
+
+A workspace can have one principal link: the link that best stands for its task, such as its pull request, ticket or design doc.
+
+- While one is set, the purple summary in the top bar is underlined.
+  - Hovering it shows the whole summary, with the link beneath it.
+  - Clicking it opens the link in the Chrome profile of the account the workspace's session runs as, the same way a link in the feed opens.
+  - Clicking it does not open the session line the heading otherwise opens.
+- A workspace with no summary yet has nothing to click, even with a link set.
+- Agents set the link on their own, without asking, whenever a link in the conversation best reflects the workspace's task.
+  - A later link that fits the task better replaces it.
+- You can set or clear it yourself from a shell:
+  - `agent-repld workspace set WS -principal-link URL` sets it.
+  - `agent-repld workspace set WS -no-principal-link` clears it.
+  - Only `http` and `https` links are accepted.
+- `agent-repld workspace status WS` shows the link as `principalLink`.
+- The link is kept across restarts.
+
 ## Sync and async merges
 
 - **A merge is a ONE-SHOT or ASYNC.**
