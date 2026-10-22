@@ -475,7 +475,7 @@ func DrawUserBlocks(
 				continue
 			}
 			blocks = append(blocks, &frontendv1.FeedUserPromptBlock{
-				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: prose.Parse(log, drawn, prose.Settled)}},
+				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: prose.ParsePrompt(log, drawn)}},
 			})
 		case *conversationv1.UserContentBlock_Image:
 			src, alt, err := resolveImage(b.Image)

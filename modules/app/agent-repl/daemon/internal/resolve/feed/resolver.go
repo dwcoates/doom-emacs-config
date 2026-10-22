@@ -1055,6 +1055,9 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	stampSuperseded(f, id, snapshot)
 	// A PROSE ROW'S `interim` IS STATED HERE TOO (interim.go).
 	stampInterim(f, id, snapshot)
+	// A RESPONSE'S `answers` IS STATED HERE TOO, from the feed's own order
+	// (answers.go).
+	stampAnswers(f, id, snapshot)
 	// A ROW'S `selectable` IS STATED HERE, on every publication, so a response
 	// gains it on the publication that settles it and no producer can publish
 	// a row whose selectability disagrees with the one rule (selection.go).
@@ -1088,6 +1091,11 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 			"an upsert restated the row it already published",
 			dlog.Context{"feed": f.key, "row": id})
 		return
+	}
+	// A PROMPT'S ENTRIES OR A RESPONSE'S LABELS CHANGED: every response of the
+	// feed restates its answers once this row is published (answers.go).
+	if answersChanged(existing, snapshot) {
+		defer r.restateAnswers(s, at.feed, "a prompt's entries or a response's labels were drawn or changed")
 	}
 	// A ROW A READER'S LOAD DREW BELOW EVERYTHING LOADED BEFORE is QUIET: it
 	// is that reader's page, the page delivers it, and it is stored where it
@@ -1312,6 +1320,12 @@ func (r *resolver) retireAs(s *wsState, addr feedid.Feed, id string, removed *fr
 		return false
 	}
 	r.announceMergeRowRetired(s, addr, f.rows[id])
+	// A RETIRED PROMPT WITH ENTRIES, OR A RETIRED RESPONSE WITH A TREE, changes
+	// what the feed's answers are read from: they are restated once the
+	// removal is published (answers.go).
+	if answersRead(f.rows[id]) {
+		defer r.restateAnswers(s, addr, "a prompt with entries or a response with a tree was removed")
+	}
 	wasResponse := isResponseRow(f.rows[id])
 	retiredTurn := f.rows[id].GetTurn().GetValue()
 	retiredCounted := countsAfter(f.rows[id], retiredTurn)
