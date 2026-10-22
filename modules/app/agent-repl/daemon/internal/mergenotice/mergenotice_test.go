@@ -780,7 +780,7 @@ func TestSentencesOfTwoChangesCountsThemBoth(t *testing.T) {
 	got := Sentences(changes)
 
 	// Assert.
-	if !strings.HasPrefix(got, "It changed 3 times since the last notice you were told, oldest first:") {
+	if !strings.HasPrefix(got, "It changed 2 times since the last notice you were told, oldest first:") || strings.Count(got, "\n- ") != 2 {
 		t.Fatalf("Sentences = %q, want both changes counted", got)
 	}
 }
