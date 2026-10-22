@@ -1855,3 +1855,40 @@ func TestADequeueOfARunSuspendedWithNoTakeBackRecordedPanics(t *testing.T) {
 	// Act.
 	_ = h.o.dequeue(context.Background(), theWorkspace, CauseUserDrop)
 }
+
+func TestAQueuedMergesLabelThatCannotBeReadIsRecordedByWhyItFailed(t *testing.T) {
+	tests := []struct {
+		name      string
+		cancel    bool
+		cause     error
+		wantLevel string
+	}{
+		{name: "a read cut by its ended context is no failure", cancel: true, cause: context.Canceled, wantLevel: "info"},
+		{name: "a read that failed on its own is an error", cause: errors.New("git broke"), wantLevel: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.git.mainWorktreeErr = tt.cause
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tt.cancel {
+				cancel()
+			}
+			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "feature"}}
+
+			// Act
+			label := h.o.bubbleLabel(ctx, entry)
+
+			// Assert
+			if label != string(theWorkspace) {
+				t.Fatalf("label = %q, want the workspace's id standing in", label)
+			}
+			recs := dlog.FilterRecords(h.logs.Records(), dlog.RecordQuery{Operation: "daemon.merge.queue"})
+			if len(recs) != 1 || recs[0].Level != tt.wantLevel || recs[0].Context["workspace"] != string(theWorkspace) {
+				t.Fatalf("records = %+v, want one %s record naming the workspace", recs, tt.wantLevel)
+			}
+		})
+	}
+}
