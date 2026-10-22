@@ -659,17 +659,81 @@ alone, so it stands exactly while the daemon's selection does."
 
 (defun agent-repl-input-selection-return ()
   "Act on the selected bubble with `RET'.
-A selected prompt a rollback can reach is rolled back to, keeping files,
-exactly as `C-c C-RET' does.  Any other selected bubble (a final response
-in particular) is replied to: the composer is sent, and the daemon quotes
-the selected bubble ahead of it."
+A selected prompt a rollback can reach is rolled back to, keeping files.
+With the composer empty that is exactly `C-c C-RET': the composer holds
+the rolled-back prompt again.  With words in the composer the prompt is
+RESENT in the same call with those words (`agent-repl--input-resend'): the
+entry the reader clicked edited, when the composer holds one, else the
+composer's words whole.  Any other selected bubble (a final response in
+particular) is replied to: the composer is sent, and the daemon quotes the
+selected bubble ahead of it."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
-         (kind (agent-repl-host-selection ws)))
-    (agent-repl--info ws "elisp.input.selection-return ws=%s kind=%S" ws kind)
-    (if (eq kind :prompt)
-        (agent-repl-rollback-keep-files)
-      (agent-repl-send))))
+         (kind (agent-repl-host-selection ws))
+         (resend (and (eq kind :prompt) (agent-repl--input-resend ws))))
+    (agent-repl--info ws "elisp.input.selection-return ws=%s kind=%S resend=%S"
+                      ws kind (and resend (plist-get (plist-get resend :edit) :arm)))
+    (cond
+     (resend (agent-repl--input-rollback ws :keep-files nil resend))
+     ((eq kind :prompt) (agent-repl-rollback-keep-files))
+     (t (agent-repl-send)))))
+
+;;;; ---- Editing a prompt's entry, and resending it -----------------------
+;;
+;; A CLICK ON AN ENTRY of a prompt in the webview (`3.1.2 - my answer')
+;; selects the prompt and fills the composer with what the entry says
+;; (`agent-repl-input-edit-entry', the host watch's `prompt_entry_clicked').
+;; `RET' then rolls back to the prompt and resends it with that entry as the
+;; composer holds it, every other word kept; the daemon does the edit and
+;; the resend in the rollback's own call (RollBackRequest.resend), and
+;; refuses an edit made for any prompt but the one rolled back to.
+
+(defvar-local agent-repl--input-editing-entry nil
+  "The prompt entry this composer is editing, or nil.
+A plist (:row FEEDID :label LABEL) from the reader's click on that entry.
+Ended by any send, and by the click on another entry.")
+
+(defun agent-repl-input-edit-entry (ws row label text)
+  "Fill WS's composer with TEXT to edit the entry answering LABEL of prompt ROW.
+The composer's contents go to its history first, as a discard saves them,
+and the keyboard goes to the composer in insert state.  A workspace with no
+composer has nothing to fill: recorded, and nothing changes."
+  (let ((buf (agent-repl--input-buffer ws)))
+    (if (null buf)
+        (agent-repl--warn ws "elisp.input.edit-entry-no-composer ws=%s row=%S label=%s"
+                          ws (plist-get row :value) label)
+      (with-current-buffer buf
+        (agent-repl--input-save-to-history ws))
+      (agent-repl--input-fill-said ws buf (agent-repl--input-said (list text)) (list text))
+      (with-current-buffer buf
+        (setq agent-repl--input-editing-entry (list :row row :label label)))
+      (agent-repl--info ws "elisp.input.edit-entry ws=%s row=%S label=%s chars=%d"
+                        ws (plist-get row :value) label (length text))
+      (agent-repl-input-focus-for-reply ws)
+      (agent-repl--input-flash
+       ws (format "editing entry %s: RET resends the prompt with it" label)))))
+
+(defun agent-repl--input-resend (ws)
+  "Return what WS's composer resends in a rollback's place, or nil when empty.
+A plist (:raw RAW :said SAID :key KEY :origin :user-sent :edit EDIT): the
+composer's words RAW (as a send prepares them, SAID), a fresh idempotency
+KEY, and EDIT, the entry the composer is editing with RAW as its words, or
+else the whole SAID.  Nil when the composer holds nothing to send, so `RET'
+only rolls back."
+  (let* ((parts (agent-repl--read-input-parts ws))
+         (raw (agent-repl--input-parts-text parts))
+         (images (agent-repl--input-parts-images parts)))
+    (unless (and (string-empty-p (string-trim raw)) (null images))
+      (agent-repl--input-refuse-missing-images ws parts)
+      (let* ((said (agent-repl--input-said (agent-repl--prepare-input-parts ws parts nil)))
+             (buf (agent-repl--input-buffer ws))
+             (entry (and buf (buffer-local-value 'agent-repl--input-editing-entry buf))))
+        (list :raw raw :said said :key (agent-repl--uuid) :origin :user-sent
+              :edit (if (and entry (null images))
+                        (list :arm :entry :value (list :row (plist-get entry :row)
+                                                       :label (plist-get entry :label)
+                                                       :text (agent-repl--prepare-input ws raw nil)))
+                      (list :arm :whole :value (list :said said))))))))
 
 (with-eval-after-load 'evil
   (agent-repl--input-selection-bind-keys))
@@ -957,7 +1021,8 @@ to the oldest."
     (:prompt-not-recorded . "the conversation holds no record of that prompt")
     (:first-prompt . "the first prompt can't be rolled back; /clear starts over")
     (:unseen-prompt . "a later prompt the feed never showed would be dropped")
-    (:files-not-restorable . "files can't be restored to that prompt"))
+    (:files-not-restorable . "files can't be restored to that prompt")
+    (:entry-not-found . "the edited entry is not one the selected prompt holds; click the entry again"))
   "Each PlanRollback / RollBack / ListRollbackPrompts refusal arm, in plain words.")
 
 (defun agent-repl--input-rollback-refusal-text (cause)
@@ -995,8 +1060,10 @@ They come in the order the confirmation lists them."
                            (plist-get cancel :items)
                            "background agent or shell" "background agents and shells")))))))
 
-(defun agent-repl--input-rollback-confirmation (plan)
-  "Return the y/n question that states PLAN, side effects in the `error' face."
+(defun agent-repl--input-rollback-confirmation (plan &optional resend)
+  "Return the y/n question that states PLAN, side effects in the `error' face.
+RESEND, when the composer's words are sent in the prompt's place, is
+named too: the entry it edits, or the composer's words whole."
   (let* ((target (plist-get plan :target))
          (dropped (plist-get target :prompts-dropped))
          (head (format "%s \"%s\"%s."
@@ -1013,8 +1080,19 @@ They come in the order the confirmation lists them."
                   "Files are not restored (C-c M-RET restores them)."))
          (effects (mapcar (lambda (sentence) (propertize sentence 'face 'error))
                           (agent-repl--input-rollback-side-effects plan))))
-    (concat (mapconcat #'identity (append (list head files) effects) " ")
+    (concat (mapconcat #'identity
+                       (append (list head files) effects
+                               (when resend (list (agent-repl--input-resend-sentence resend))))
+                       " ")
             " Roll back? ")))
+
+(defun agent-repl--input-resend-sentence (resend)
+  "Return the confirmation's sentence naming what RESEND sends."
+  (let ((edit (plist-get resend :edit)))
+    (if (eq (plist-get edit :arm) :entry)
+        (format "The prompt is sent again with entry %s as the composer holds it."
+                (plist-get (plist-get edit :value) :label))
+      "The composer's words are sent in its place.")))
 
 (defun agent-repl--input-rollback-refused (ws verb cause)
   "Log and flash WS's VERB (`plan', `roll-back' or `list') refusal CAUSE.
@@ -1031,7 +1109,39 @@ rollback did not happen and the key must be pressed again."
   (agent-repl--warn ws "elisp.input.rollback-failure ws=%s verb=%s detail=%S" ws verb detail)
   (agent-repl--input-flash ws "rollback: the daemon did not answer"))
 
-(defun agent-repl--input-rollback-done (ws success)
+(defun agent-repl--input-rollback-done (ws success &optional resend snapshot)
+  "Finish WS's rollback from its RollBack SUCCESS.
+With a RESEND the composer's words went out in the prompt's place: its
+submission's answer is read as a send's is (`agent-repl--input-resent'),
+SNAPSHOT restoring the composer if it was refused.  Without one the
+composer is refilled with the rolled-back prompt (`agent-repl--input-refilled')."
+  (if resend
+      (agent-repl--input-resent ws success resend snapshot)
+    (agent-repl--input-refilled ws success)))
+
+(defun agent-repl--input-resent (ws success resend snapshot)
+  "Read the resend's submission on WS's RollBack SUCCESS, as a send's answer.
+RESEND is what was sent; SNAPSHOT the composer as it stood before it was
+cleared.  A success that carries no submission is a contract breach: the
+request carried a resend, so the answer must."
+  (let ((answer (plist-get success :resend))
+        (raw (plist-get resend :raw))
+        (origin (plist-get resend :origin)))
+    (agent-repl--info ws "elisp.input.rollback-resent ws=%s key=%s arm=%S"
+                      ws (plist-get resend :key) (plist-get answer :arm))
+    (pcase (plist-get answer :arm)
+      (:success
+       (agent-repl--input-on-success ws raw origin (plist-get answer :value) t)
+       (message "rollback: done, the prompt was sent again"))
+      (:error
+       (agent-repl--input-on-error ws (plist-get resend :said) origin raw (plist-get answer :value)
+                                   (plist-get resend :key) snapshot))
+      (other
+       (agent-repl--input-restore ws snapshot)
+       (agent-repl--error ws "elisp.input.rollback-resend-unanswered ws=%s key=%s arm=%S"
+                          ws (plist-get resend :key) other)))))
+
+(defun agent-repl--input-refilled (ws success)
   "Refill WS's composer from the RollBack SUCCESS and say it is done.
 The composer's contents go to its history first, as a discard saves them;
 then it holds the rolled-back prompt's words and path images, in their
@@ -1063,20 +1173,33 @@ logged at WARN and flashed, never silently lost."
                                (plist-get restored :files) "file" "files"))
                     "rollback: done"))))
 
-(defun agent-repl--input-rollback-perform (ws conn ref token)
-  "Send RollBack for WS on CONN with the plan TOKEN, echoed verbatim."
-  (agent-repl-rpc-roll-back
-   conn (list :workspace ref :token token)
-   :on-response
-   (lambda (response)
-     (pcase (plist-get response :arm)
-       (:success (agent-repl--input-rollback-done ws (plist-get response :value)))
-       (:error (agent-repl--input-rollback-refused
-                ws "roll-back" (plist-get (plist-get response :value) :cause)))
-       (other (agent-repl--error ws "elisp.input.rollback-unknown-arm ws=%s verb=roll-back arm=%S"
-                                 ws other))))
-   :on-failure
-   (lambda (detail) (agent-repl--input-rollback-failed ws "roll-back" detail))))
+(defun agent-repl--input-rollback-perform (ws conn ref token &optional resend)
+  "Send RollBack for WS on CONN with the plan TOKEN, echoed verbatim.
+RESEND rides the request when given.  Its words left the composer: the
+composer is cleared as every send clears it
+\(`agent-repl--input-optimistic-clear'), and restored when the rollback
+is refused or fails, since nothing was sent."
+  (let ((snapshot (when resend (agent-repl--input-optimistic-clear ws (plist-get resend :raw)))))
+    (agent-repl-rpc-roll-back
+     conn (append (list :workspace ref :token token)
+                  (when resend
+                    (list :resend (list :idempotency-key (plist-get resend :key)
+                                        :origin (plist-get resend :origin)
+                                        :edit (plist-get resend :edit)))))
+     :on-response
+     (lambda (response)
+       (pcase (plist-get response :arm)
+         (:success (agent-repl--input-rollback-done ws (plist-get response :value) resend snapshot))
+         (:error
+          (agent-repl--input-restore ws snapshot)
+          (agent-repl--input-rollback-refused
+           ws "roll-back" (plist-get (plist-get response :value) :cause)))
+         (other (agent-repl--error ws "elisp.input.rollback-unknown-arm ws=%s verb=roll-back arm=%S"
+                                   ws other))))
+     :on-failure
+     (lambda (detail)
+       (agent-repl--input-restore ws snapshot)
+       (agent-repl--input-rollback-failed ws "roll-back" detail)))))
 
 (defun agent-repl--input-rollback-endpoints (ws context)
   "Return WS's (REF . CONN) for a rollback rpc, or nil after saying why not.
@@ -1085,11 +1208,13 @@ ready or no daemon connection stands; the composer flashes either way.
 The one guard every rollback rpc sends behind (`agent-repl--input-endpoints')."
   (agent-repl--input-endpoints ws "rollback" "rollback" "context" context))
 
-(defun agent-repl--input-rollback (ws files &optional prompt)
+(defun agent-repl--input-rollback (ws files &optional prompt resend)
   "Plan a rollback of WS's conversation, confirm it, and perform it.
 FILES is `:keep-files' or `:restore-files'.  PROMPT, a FeedId plist as
 ListRollbackPrompts served it, names the prompt to roll back to; nil
-plans the selected prompt, else the latest.  The plan is asked for
+plans the selected prompt, else the latest.  RESEND, as
+`agent-repl--input-resend' builds it, is sent in the rolled-back prompt's
+place in the same call; nil only rolls back.  The plan is asked for
 synchronously, so the confirmation is read in the command loop of the key
 that asked for it."
   (when-let* ((endpoints (agent-repl--input-rollback-endpoints
@@ -1116,10 +1241,11 @@ that asked for it."
                   (agent-repl--input-flash ws "rollback: no prompt to roll back to"))
                  (:plan
                   (let ((plan (plist-get outcome :value)))
-                    (if (y-or-n-p (agent-repl--input-rollback-confirmation plan))
+                    (if (y-or-n-p (agent-repl--input-rollback-confirmation plan resend))
                         (progn
-                          (agent-repl--info ws "elisp.input.rollback-confirmed ws=%s" ws)
-                          (agent-repl--input-rollback-perform ws conn ref (plist-get plan :token)))
+                          (agent-repl--info ws "elisp.input.rollback-confirmed ws=%s resend=%S"
+                                            ws (and resend (plist-get (plist-get resend :edit) :arm)))
+                          (agent-repl--input-rollback-perform ws conn ref (plist-get plan :token) resend))
                       (agent-repl--info ws "elisp.input.rollback-declined ws=%s" ws)
                       (message "rollback: cancelled"))))
                  (other
@@ -1635,7 +1761,10 @@ stood BEFORE the push, with the unsent-discard marker the push may clear.
 the daemon REFUSES the submission, so a refused prompt is never in
 history and never costs the user their words or images.  (Regression watch: the
 optimistic clear landed without a restore arm, and six composer
-integration scenarios read an empty composer after a refusal.)"
+integration scenarios read an empty composer after a refusal.)
+
+A SEND ENDS AN ENTRY EDIT: the composer's words went out, whichever way.
+The edit is in the snapshot, so a refusal's restore brings it back."
   (let ((buf (agent-repl--input-buffer ws))
         (snapshot nil))
     (when buf
@@ -1645,10 +1774,15 @@ integration scenarios read an empty composer after a refusal.)"
                              :point (point)
                              :history agent-repl--input-history
                              :history-index agent-repl--history-index
-                             :discard-entry agent-repl--history-discard-entry))
+                             :discard-entry agent-repl--history-discard-entry
+                             :editing-entry agent-repl--input-editing-entry))
         (agent-repl--history-push (buffer-string))
         (agent-repl--history-reset)
-        (erase-buffer)))
+        (erase-buffer)
+        (when agent-repl--input-editing-entry
+          (agent-repl--log ws "elisp.input.edit-entry-ended ws=%s label=%s reason=sent"
+                           ws (plist-get agent-repl--input-editing-entry :label)))
+        (setq agent-repl--input-editing-entry nil)))
     (agent-repl--history-save ws)
     (agent-repl--log ws "elisp.input.optimistic-clear ws=%s raw-len=%d buffer=%s"
                      ws (length raw) (and buf t))
@@ -1683,7 +1817,8 @@ nothing to restore into."
           (goto-char (min (plist-get snapshot :point) (point-max))))
         (setq agent-repl--input-history (plist-get snapshot :history))
         (setq agent-repl--history-index (plist-get snapshot :history-index))
-        (setq agent-repl--history-discard-entry (plist-get snapshot :discard-entry)))
+        (setq agent-repl--history-discard-entry (plist-get snapshot :discard-entry))
+        (setq agent-repl--input-editing-entry (plist-get snapshot :editing-entry)))
       (agent-repl--history-save ws)
       (agent-repl--log ws "elisp.input.restored ws=%s text-len=%d images=%d"
                        ws (length (plist-get snapshot :text))

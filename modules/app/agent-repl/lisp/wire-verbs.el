@@ -4490,17 +4490,27 @@ it.  An incomplete request errors here rather than reaching the wire."
 
 (defun agent-repl-wire-decode-feed-selection-row-viewport (json)
   "Decode FeedSelectionRowViewport from JSON into (:viewport VP).
-VP is (:arm ARM :value nil), and ARM is `:center' (a step from
-Emacs) or `:hold' (a click in the webapp); exactly one is set."
+VP is (:arm ARM :value V), and ARM is `:center' (a step from Emacs),
+`:hold' (a click in the webapp) or `:reveal' (a click on a label a prompt
+answers, V being (:entry-label LABEL)); exactly one is set.  `:center'
+and `:hold' carry a nil V."
   (let ((message "FeedSelectionRowViewport"))
-    (agent-repl-wire-verbs--check-keys message json '(center hold))
+    (agent-repl-wire-verbs--check-keys message json '(center hold reveal))
     (list :viewport
           (agent-repl-wire-verbs--decode-oneof
            message "viewport" json
            (list (list 'center :center
                        (agent-repl-wire-verbs--empty-arm "FeedSelectionRowViewportCenter"))
                  (list 'hold :hold
-                       (agent-repl-wire-verbs--empty-arm "FeedSelectionRowViewportHold")))))))
+                       (agent-repl-wire-verbs--empty-arm "FeedSelectionRowViewportHold"))
+                 (list 'reveal :reveal
+                       #'agent-repl-wire-decode-feed-selection-row-viewport-reveal))))))
+
+(defun agent-repl-wire-decode-feed-selection-row-viewport-reveal (json)
+  "Decode FeedSelectionRowViewportReveal from JSON into (:entry-label LABEL)."
+  (let ((message "FeedSelectionRowViewportReveal"))
+    (agent-repl-wire-verbs--check-keys message json '(entryLabel))
+    (list :entry-label (agent-repl-wire-verbs--decode-string message 'entryLabel json))))
 
 (defun agent-repl-wire-decode-feed-selection-row (message json)
   "Decode the selected-row MESSAGE from JSON into (:row FEEDID :viewport VP).
@@ -4920,18 +4930,55 @@ ENTRIES are newest first, possibly none."
 ;; Perform a confirmed plan: the token goes back exactly as PlanRollback
 ;; served it.  See endpoint_roll_back.proto.
 
+(defun agent-repl-wire-encode-roll-back-resend (resend)
+  "Encode RollBackResend from plist RESEND.
+RESEND is (:idempotency-key KEY :origin KEYWORD :edit EDIT), all required.
+EDIT is (:arm :whole :value (:said SAID)) for a whole new prompt, or (:arm
+:entry :value (:row FEEDID :label LABEL :text TEXT)) for the rolled-back
+prompt ROW with the entry answering LABEL saying TEXT instead."
+  (let* ((message "RollBackResend")
+         (edit (agent-repl-wire-verbs--require message "edit" (plist-get resend :edit)))
+         (value (plist-get edit :value)))
+    (list (cons 'idempotencyKey
+                (agent-repl-wire-verbs--require message "idempotency_key"
+                                                 (plist-get resend :idempotency-key)))
+          (cons 'origin
+                (agent-repl-wire-encode-prompt-origin
+                 (agent-repl-wire-verbs--require message "origin" (plist-get resend :origin))))
+          (pcase (plist-get edit :arm)
+            (:whole (cons 'whole
+                          (list (cons 'said
+                                      (agent-repl-wire-encode-user-said
+                                       (agent-repl-wire-verbs--require
+                                        "RollBackResendWhole" "said" (plist-get value :said)))))))
+            (:entry (cons 'entry
+                          (list (cons 'label
+                                      (agent-repl-wire-verbs--require
+                                       "RollBackResendEntry" "label" (plist-get value :label)))
+                                (cons 'text (or (plist-get value :text) ""))
+                                (cons 'row
+                                      (agent-repl-wire-encode-feed-id
+                                       (agent-repl-wire-verbs--require
+                                        "RollBackResendEntry" "row" (plist-get value :row)))))))
+            (other (agent-repl-wire-verbs--fail message "edit" (format "unknown edit arm %S" other)))))))
+
 (defun agent-repl-wire-encode-roll-back-request (request)
   "Encode RollBackRequest from plist REQUEST (:workspace REF :token TOKEN).
-Both are required.  TOKEN is the plan's decoded token, echoed verbatim."
+Both are required.  TOKEN is the plan's decoded token, echoed verbatim.
+The OPTIONAL :resend is the prompt sent in the rolled-back one's place
+\(`agent-repl-wire-encode-roll-back-resend'); absent is a plain rollback."
   (let ((message "RollBackRequest"))
-    (list (cons 'workspace
-                (agent-repl-wire-encode-workspace-ref
-                 (agent-repl-wire-verbs--require message "workspace"
-                                                  (plist-get request :workspace))))
-          (cons 'token
-                (agent-repl-wire-encode-rollback-token
-                 (agent-repl-wire-verbs--require message "token"
-                                                  (plist-get request :token)))))))
+    (append
+     (list (cons 'workspace
+                 (agent-repl-wire-encode-workspace-ref
+                  (agent-repl-wire-verbs--require message "workspace"
+                                                   (plist-get request :workspace))))
+           (cons 'token
+                 (agent-repl-wire-encode-rollback-token
+                  (agent-repl-wire-verbs--require message "token"
+                                                   (plist-get request :token)))))
+     (when-let* ((resend (plist-get request :resend)))
+       (list (cons 'resend (agent-repl-wire-encode-roll-back-resend resend)))))))
 
 (defun agent-repl-wire-decode-roll-back-files-restored (json)
   "Decode RollBackFilesRestored from JSON into (:files N)."
@@ -4940,15 +4987,27 @@ Both are required.  TOKEN is the plan's decoded token, echoed verbatim."
     (list :files (agent-repl-wire--decode-uint32 message 'files json))))
 
 (defun agent-repl-wire-decode-roll-back-success (json)
-  "Decode RollBackSuccess from JSON into (:prompt SAID :files-restored F-or-nil).
-The prompt is REQUIRED: it is what the composer holds again."
+  "Decode RollBackSuccess from JSON into a plist.
+\(:prompt SAID :files-restored F-or-nil :resend R-or-nil).  The prompt is
+REQUIRED: it is what the composer holds again.  RESEND is the resend's
+submission decoded as SubmitPromptResponse, present exactly when the
+request carried a resend."
   (let ((message "RollBackSuccess"))
-    (agent-repl-wire-verbs--check-keys message json '(prompt filesRestored))
+    (agent-repl-wire-verbs--check-keys message json '(prompt filesRestored resend))
     (list :prompt (agent-repl-wire-verbs--decode-required-message
                    message 'prompt json #'agent-repl-wire-decode-user-said)
           :files-restored (agent-repl-wire-verbs--decode-optional-message
                            message 'filesRestored json
-                           #'agent-repl-wire-decode-roll-back-files-restored))))
+                           #'agent-repl-wire-decode-roll-back-files-restored)
+          :resend (agent-repl-wire-verbs--decode-optional-message
+                   message 'resend json
+                   #'agent-repl-wire-decode-submit-prompt-response))))
+
+(defun agent-repl-wire-decode-roll-back-entry-not-found (json)
+  "Decode RollBackEntryNotFound from JSON into (:label LABEL)."
+  (let ((message "RollBackEntryNotFound"))
+    (agent-repl-wire-verbs--check-keys message json '(label))
+    (list :label (agent-repl-wire-verbs--decode-string message 'label json))))
 
 (defconst agent-repl-wire-roll-back-error-own-arms
   '((planStale :plan-stale "RollBackPlanStale")
@@ -4967,7 +5026,7 @@ is judged after the answer, and the daemon draws the prompts back."
     (agent-repl-wire-verbs--check-keys
      message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
                     planStale noSession promptNotRecorded firstPrompt unseenPrompt
-                    filesNotRestorable))
+                    filesNotRestorable entryNotFound))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -4979,7 +5038,9 @@ is judged after the answer, and the daemon draws the prompts back."
                     agent-repl-wire-roll-back-error-own-arms)
             (list (list 'filesNotRestorable :files-not-restorable
                         (lambda (v) (agent-repl-wire-verbs--decode-vendor-message
-                                     "RollBackFilesNotRestorable" v)))))))))
+                                     "RollBackFilesNotRestorable" v)))
+                  (list 'entryNotFound :entry-not-found
+                        #'agent-repl-wire-decode-roll-back-entry-not-found)))))))
 
 (defun agent-repl-wire-decode-roll-back-response (json)
   "Decode RollBackResponse from JSON into (:arm ARM :value V)."

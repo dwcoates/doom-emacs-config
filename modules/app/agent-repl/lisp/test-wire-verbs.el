@@ -3983,13 +3983,23 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached' and
 
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-move-arms-pinned ()
   "SelectFeedRowRequest's move oneof has exactly the arms the schema declares.
-Emacs spells two of them; `leftView' and `bubble' (a click) are the
+Emacs spells two of them; `leftView', `bubble' (a click), `answer' (a
+click on a linked label) and `entry' (a click on a prompt's entry) are the
 webapp's alone."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_select_feed_row.pb.go"
                         "SelectFeedRowRequest")
                        #'string<)
-                 '("bubble" "clear" "leftView" "turnBoundary"))))
+                 '("answer" "bubble" "clear" "entry" "leftView" "turnBoundary"))))
+
+(ert-deftest agent-repl-test-wire-verbs-select-feed-row-answer-and-entry-have-no-spelling ()
+  "The webapp's label and entry clicks are never sent from Emacs, so each is refused."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (arm '(:answer :entry))
+      (should-error (agent-repl-wire-encode-select-feed-row-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :move (list :arm arm :value '(:row (:value "r1") :label "3.1"))))
+                    :type 'agent-repl-wire-error))))
 
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-bubble-has-no-spelling ()
   "The webapp's click move is never sent from Emacs, so it is refused."
@@ -4225,7 +4235,14 @@ webapp's alone."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "frontend/v1/feed.pb.go" "FeedSelectionRowViewport")
                        #'string<)
-                 '("center" "hold"))))
+                 '("center" "hold" "reveal"))))
+
+(ert-deftest agent-repl-test-wire-verbs-feed-selection-row-viewport-reveal-names-its-entry ()
+  "A selected prompt a linked label revealed decodes `:reveal' with its entry label."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-feed-selection-row-viewport
+                    (agent-repl-test-wire-verbs--parse "{\"reveal\":{\"entryLabel\":\"3.1\"}}"))
+                   '(:viewport (:arm :reveal :value (:entry-label "3.1")))))))
 
 ;;;; ---- PlanRollback -----------------------------------------------------
 
@@ -4493,6 +4510,72 @@ webapp's alone."
                                              :token))))
                    "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"token\":{\"value\":\"tok-1\"}}"))))
 
+(defun agent-repl-test-wire-verbs--roll-back-with (edit)
+  "Encode a RollBack request resending EDIT, as JSON."
+  (json-serialize
+   (agent-repl-wire-encode-roll-back-request
+    (list :workspace agent-repl-test-wire-verbs--ref
+          :token (plist-get (agent-repl-test-wire-verbs--plan agent-repl-test-wire-verbs--minimal-plan)
+                            :token)
+          :resend (list :idempotency-key "k-1" :origin :user-sent :edit edit)))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-resend-entry-shape ()
+  "An entry edit carries its key, origin, label, words and the prompt it edits."
+  (agent-repl-test-wire-verbs--with-common
+    (should (string-match-p
+             (regexp-quote "\"resend\":{\"idempotencyKey\":\"k-1\",\"origin\":\"ORIGIN::user-sent\",\"entry\":{\"label\":\"3.1\",\"text\":\"new\",\"row\":{\"value\":\"p1\"}}}")
+             (agent-repl-test-wire-verbs--roll-back-with
+              '(:arm :entry :value (:row (:value "p1") :label "3.1" :text "new")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-resend-whole-shape ()
+  "A whole resend carries the composer's prompt."
+  (agent-repl-test-wire-verbs--with-common
+    (should (string-match-p
+             (regexp-quote "\"whole\":{\"said\":")
+             (agent-repl-test-wire-verbs--roll-back-with
+              (list :arm :whole :value (list :said agent-repl-test-wire-verbs--edit-said)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-without-a-resend-sends-none ()
+  "A plain rollback carries no resend field."
+  (agent-repl-test-wire-verbs--with-common
+    (should-not (string-match-p
+                 "resend"
+                 (json-serialize
+                  (agent-repl-wire-encode-roll-back-request
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :token (plist-get (agent-repl-test-wire-verbs--plan
+                                            agent-repl-test-wire-verbs--minimal-plan)
+                                           :token))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-resend-entry-without-a-row-refused ()
+  "An entry edit naming no prompt is refused before anything is sent."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-test-wire-verbs--roll-back-with
+                   '(:arm :entry :value (:label "3.1" :text "new")))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-resend-unknown-edit-refused ()
+  "An edit arm the schema does not declare is refused before anything is sent."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-test-wire-verbs--roll-back-with '(:arm :sideways :value nil))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-success-carries-the-resend ()
+  "A success after a resend carries the resend's submission, decoded as SubmitPrompt's."
+  (agent-repl-test-wire-verbs--with-common
+    (let ((value (plist-get (agent-repl-wire-decode-roll-back-response
+                             (agent-repl-test-wire-verbs--parse
+                              "{\"success\":{\"prompt\":{\"content\":{\"blocks\":[]}},\"resend\":{\"error\":{\"noSession\":{}}}}}"))
+                            :value)))
+      (should (equal (plist-get (plist-get value :resend) :arm) :error)))))
+
+(ert-deftest agent-repl-test-wire-verbs-roll-back-edit-arms-pinned ()
+  "RollBackResend's edit oneof has exactly the arms encoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_roll_back.pb.go" "RollBackResend")
+                       #'string<)
+                 '("entry" "whole"))))
+
 (ert-deftest agent-repl-test-wire-verbs-roll-back-missing-token-refused ()
   "The token is REQUIRED."
   (agent-repl-test-wire-verbs--with-common
@@ -4518,7 +4601,7 @@ webapp's alone."
                                                          (:arm :image
                                                           :value (:location (:arm :path :value (:path "/i.png"))
                                                                   :media-type "image/png")))))
-                             :files-restored nil))))))
+                             :files-restored nil :resend nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-roll-back-success-files-restored ()
   "A restore carries how many files it changed back."
@@ -4552,7 +4635,9 @@ webapp's alone."
                     ("{\"firstPrompt\":{}}" (:arm :first-prompt :value nil))
                     ("{\"unseenPrompt\":{}}" (:arm :unseen-prompt :value nil))
                     ("{\"filesNotRestorable\":{\"vendorMessage\":\"gone\"}}"
-                     (:arm :files-not-restorable :value (:vendor-message "gone")))))
+                     (:arm :files-not-restorable :value (:vendor-message "gone")))
+                    ("{\"entryNotFound\":{\"label\":\"3.1\"}}"
+                     (:arm :entry-not-found :value (:label "3.1")))))
       (should (equal (agent-repl-wire-decode-roll-back-response
                       (agent-repl-test-wire-verbs--parse
                        (concat "{\"error\":" (car case) "}")))
@@ -4572,7 +4657,7 @@ webapp's alone."
                        #'string<)
                  (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway"
                              "notYetAdopted" "planStale" "noSession" "promptNotRecorded"
-                             "firstPrompt" "unseenPrompt" "filesNotRestorable")
+                             "firstPrompt" "unseenPrompt" "filesNotRestorable" "entryNotFound")
                        #'string<))))
 
 ;;;; ---- EditHeldPrompt ------------------------------------------------------
