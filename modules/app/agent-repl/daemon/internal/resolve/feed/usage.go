@@ -201,16 +201,17 @@ func (s *wsState) subagentFigure(created *conversationv1.AgentId) *frontendv1.Fe
 }
 
 // applyResponseFacts sets what a subagent's card reads off the subagent's OWN
-// API responses rather than off its spawn's frames: its lifetime fresh input.
-// Compose and re-stamp both go through here, so no frame of the spawn can
-// draw another quantity over it.
+// API responses rather than off its spawn's frames: its lifetime fresh input
+// and the model its latest response named. Compose and re-stamp both go
+// through here, so no frame of the spawn can draw another quantity over them.
 func (s *wsState) applyResponseFacts(bubble *frontendv1.FeedSubagent, created *conversationv1.AgentId) {
 	bubble.Tokens = s.subagentFigure(created)
+	bubble.Model = s.subagentModel(created)
 }
 
 // restampSubagentCard re-pushes the card of the subagent AGENT names with what
 // its responses now state (applyResponseFacts), when the card is drawn and
-// what they state moved. The main agent has no card, so its responses re-stamp
+// either fact moved. The main agent has no card, so its responses re-stamp
 // nothing here.
 func (r *resolver) restampSubagentCard(s *wsState, agent *conversationv1.AgentId) {
 	for unit, state := range s.subagents {
@@ -219,7 +220,7 @@ func (r *resolver) restampSubagentCard(s *wsState, agent *conversationv1.AgentId
 		}
 		facts := &frontendv1.FeedSubagent{}
 		s.applyResponseFacts(facts, state.created)
-		if proto.Equal(facts.GetTokens(), state.bubble.GetTokens()) {
+		if proto.Equal(facts.GetTokens(), state.bubble.GetTokens()) && proto.Equal(facts.GetModel(), state.bubble.GetModel()) {
 			continue
 		}
 		s.applyResponseFacts(state.bubble, state.created)

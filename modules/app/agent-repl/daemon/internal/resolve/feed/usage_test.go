@@ -364,6 +364,7 @@ func TestARecomposedCardKeepsWhatItsResponsesStated(t *testing.T) {
 	h.spawnSubagent("spawn-2", recomposed, "Explore", "map the daemon")
 	for _, created := range []*conversationv1.AgentId{restamped, recomposed} {
 		h.subagentSpends(created, "spend-"+created.GetValue(), misses(1_000, 0))
+		h.subagentAnswers(created, "answer-"+created.GetValue(), "claude-sonnet-5")
 	}
 
 	// Act.
@@ -372,8 +373,9 @@ func TestARecomposedCardKeepsWhatItsResponsesStated(t *testing.T) {
 	// Assert.
 	a := bubbleOf(h.bubbleRow("spawn-1", restamped))
 	b := bubbleOf(h.bubbleRow("spawn-2", recomposed))
-	if b.GetTokens() == nil || !proto.Equal(a.GetTokens(), b.GetTokens()) {
-		t.Fatalf("re-stamped %v != re-composed %v", a.GetTokens(), b.GetTokens())
+	if b.GetTokens() == nil || b.GetModel() == nil ||
+		!proto.Equal(a.GetTokens(), b.GetTokens()) || !proto.Equal(a.GetModel(), b.GetModel()) {
+		t.Fatalf("re-stamped (%v, %v) != re-composed (%v, %v)", a.GetTokens(), a.GetModel(), b.GetTokens(), b.GetModel())
 	}
 }
 
@@ -381,10 +383,18 @@ func TestApplyResponseFacts(t *testing.T) {
 	tests := []struct {
 		name       string
 		spend      bool
+		model      string
 		wantTokens *frontendv1.FeedSubagentTokens
+		wantModel  *frontendv1.FeedSubagentModel
 	}{
-		{name: "nothing stated", wantTokens: nil},
-		{name: "usage stated", spend: true, wantTokens: &frontendv1.FeedSubagentTokens{Text: "1k tok"}},
+		{name: "nothing stated", wantTokens: nil, wantModel: nil},
+		{name: "usage alone", spend: true, wantTokens: &frontendv1.FeedSubagentTokens{Text: "1k tok"}},
+		{name: "model alone", model: "claude-opus-5", wantModel: &frontendv1.FeedSubagentModel{Name: "claude-opus-5"}},
+		{
+			name: "both", spend: true, model: "claude-opus-5",
+			wantTokens: &frontendv1.FeedSubagentTokens{Text: "1k tok"},
+			wantModel:  &frontendv1.FeedSubagentModel{Name: "claude-opus-5"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -395,15 +405,21 @@ func TestApplyResponseFacts(t *testing.T) {
 			if test.spend {
 				h.subagentSpends(created, "sub-1", misses(1_000, 0))
 			}
+			if test.model != "" {
+				h.subagentAnswers(created, "sub-2", test.model)
+			}
 			s := h.resolver.state(testWorkspace)
-			bubble := &frontendv1.FeedSubagent{Tokens: &frontendv1.FeedSubagentTokens{Text: "stale"}}
+			bubble := &frontendv1.FeedSubagent{
+				Tokens: &frontendv1.FeedSubagentTokens{Text: "stale"},
+				Model:  &frontendv1.FeedSubagentModel{Name: "stale"},
+			}
 
 			// Act.
 			s.applyResponseFacts(bubble, created)
 
 			// Assert.
-			if !proto.Equal(bubble.GetTokens(), test.wantTokens) {
-				t.Fatalf("tokens = %v, want %v", bubble.GetTokens(), test.wantTokens)
+			if !proto.Equal(bubble.GetTokens(), test.wantTokens) || !proto.Equal(bubble.GetModel(), test.wantModel) {
+				t.Fatalf("(%v, %v), want (%v, %v)", bubble.GetTokens(), bubble.GetModel(), test.wantTokens, test.wantModel)
 			}
 		})
 	}
