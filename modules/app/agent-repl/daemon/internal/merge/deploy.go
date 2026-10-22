@@ -537,8 +537,11 @@ func (o *orchestrator) RollOutLanding(ctx context.Context, ledger ids.LeaseID) (
 		}
 	}
 	if found == nil {
+		// A REFUSAL ANSWERED TO ITS CALLER, at INFO: the caller (a deploy
+		// hook) is handed the typed arm and owns what it does with it, so the
+		// record is the answer's, not a warning about this daemon.
 		err := refuse(ArmUnknownDeploy, "", "no deploy running in this daemon has ledger %s", ledger)
-		o.deps.Log.Global().Warn(op, "refused a rollout for a deploy this daemon is not running", dlog.Context{"ledger": string(ledger)})
+		o.deps.Log.Global().Info(op, "refused a rollout for a deploy this daemon is not running", dlog.Context{"ledger": string(ledger)})
 		return false, err
 	}
 	found.mu.Lock()

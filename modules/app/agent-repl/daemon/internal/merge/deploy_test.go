@@ -386,8 +386,12 @@ func TestRollOutLanding(t *testing.T) {
 		if !refused || refusal.Arm != ArmUnknownDeploy {
 			t.Fatalf("RollOutLanding = %v, want the %s refusal", err, ArmUnknownDeploy)
 		}
-		if _, logged := h.recordFor(dlog.LevelWarn, "daemon.merge.roll_out_landing"); !logged {
-			t.Fatal("the refusal was not recorded")
+		record, logged := h.recordFor(dlog.LevelInfo, "daemon.merge.roll_out_landing")
+		if !logged || record.Context["ledger"] != "00000000deadbeef" {
+			t.Fatalf("the refusal was not recorded at info naming the ledger: %+v", record)
+		}
+		if _, warned := h.recordFor(dlog.LevelWarn, "daemon.merge.roll_out_landing"); warned {
+			t.Fatal("a refusal answered to its caller must not be recorded as a warning")
 		}
 	})
 	t.Run("a running deploy's ledger registers the rollout for its teardown", func(t *testing.T) {
