@@ -103,12 +103,14 @@ export function toolFailure(
 // The three envelopes
 // ---------------------------------------------------------------------------
 
-/** What rides an activity's envelope: the response's cost and effort. */
-interface ActivityEnvelope {
+/** What rides an activity's envelope: the response's cost, effort and model. */
+export interface ActivityEnvelope {
   /** Set ONLY on the unit for the API response's FIRST content block. */
   readonly usage?: conversationv1.TokenUsage;
   /** Set on the same unit as `usage`, and no other. */
   readonly effort?: conversationv1.AgentEffortLevel;
+  /** The model that answered the response; set on the same unit as `usage`. */
+  readonly model?: conversationv1.AgentModel;
   /** The skill or plugin the producer attributed the unit to. */
   readonly attribution?: conversationv1.AgentActivityAttribution;
 }
@@ -134,6 +136,7 @@ export function agentActivity(
     item,
     usage: envelope.usage,
     effort: envelope.effort,
+    model: envelope.model,
     attribution: envelope.attribution,
     contract: ACTIVITY_CONTRACT,
   });

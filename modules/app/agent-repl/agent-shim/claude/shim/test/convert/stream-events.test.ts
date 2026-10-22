@@ -14,7 +14,12 @@ import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { logRecordsDuring, type LogRecord } from "../log-records.js";
 import { createFold } from "../../src/convert/fold.js";
-import { convertAssistantMessage, StreamBlocks } from "../../src/convert/stream-events.js";
+import {
+  convertAssistantMessage,
+  responseEnvelope,
+  responseModel,
+  StreamBlocks,
+} from "../../src/convert/stream-events.js";
 import { createCallRegistry } from "../../src/convert/tool-calls.js";
 import { TOOL_CONVERTERS } from "../../src/convert/tools/registry.js";
 import { conversationv1 } from "../../src/proto.js";
@@ -137,6 +142,52 @@ describe("usage over a streamed response", () => {
     const carrying = foldStreamedResponse().filter((e) => activityOf(e)?.usage !== undefined);
 
     expect(carrying.length).toBe(1);
+  });
+});
+
+describe("the model over a streamed response", () => {
+  it("rides the response's FIRST block, the unit usage rides", () => {
+    const carrying = foldStreamedResponse().filter((e) => activityOf(e)?.model !== undefined);
+
+    expect(carrying.map((entry) => entry.upsertKey)).toEqual([`activity:${MESSAGE_ID}:0`]);
+  });
+
+  it("names the model the vendor's assistant line states", () => {
+    const carrying = foldStreamedResponse().find((e) => activityOf(e)?.model !== undefined);
+
+    expect(activityOf(carrying!)?.model?.name).toBe("claude-opus-5");
+  });
+});
+
+describe("responseModel", () => {
+  it.each([
+    ["a named model", "claude-sonnet-5", "claude-sonnet-5"],
+    ["an empty name", "", undefined],
+    ["no name at all", undefined, undefined],
+    ["a name that is not a string", 7, undefined],
+  ])("reads %s", (_case, name, want) => {
+    expect(responseModel(name)?.name).toBe(want);
+  });
+});
+
+describe("responseEnvelope", () => {
+  const usage = create(conversationv1.TokenUsageSchema, {});
+  const model = create(conversationv1.AgentModelSchema, { name: "claude-opus-5" });
+
+  it("carries both facts when the vendor stated both", () => {
+    expect(responseEnvelope(usage, model)).toEqual({ usage, model });
+  });
+
+  it("carries the model alone when the vendor stated no usage", () => {
+    expect(responseEnvelope(undefined, model)).toEqual({ model });
+  });
+
+  it("carries the usage alone when the vendor named no model", () => {
+    expect(responseEnvelope(usage, undefined)).toEqual({ usage });
+  });
+
+  it("carries nothing when the vendor stated neither", () => {
+    expect(responseEnvelope(undefined, undefined)).toEqual({});
   });
 });
 
@@ -281,6 +332,18 @@ function usageOf(usage: unknown) {
   ];
   return activityOf(entries[0])?.usage;
 }
+
+describe("a response whose vendor line names no model", () => {
+  it("carries no model rather than a guessed one", () => {
+    const line = assistantWithUsage({ input_tokens: 1, output_tokens: 1 }) as unknown as {
+      message: Record<string, unknown>;
+    };
+    delete line.message.model;
+    const entries = [...createFold().onSdkMessage(line as unknown as SdkMessage, foldContext()).entries];
+
+    expect(activityOf(entries[0])?.model).toBeUndefined();
+  });
+});
 
 describe("the vendor's usage block", () => {
   it("carries NO usage when the vendor stated something that is not an object at all", () => {

@@ -56,7 +56,7 @@ import { conversationv1 } from "../proto.js";
 import { sdkRecordTimestampMs } from "./place.js";
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
-import { activityEntry, agentActivity, prose, settledAt, type FrameOrigin } from "./entries.js";
+import { activityEntry, agentActivity, prose, settledAt, type ActivityEnvelope, type FrameOrigin } from "./entries.js";
 import { bookFor, spawningCallOf, type FoldContext } from "./fold-context.js";
 import { blockActivityId, refusalActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
@@ -555,6 +555,30 @@ interface RawAssistantMessage {
   readonly content?: unknown;
   readonly stop_reason?: string | null;
   readonly usage?: unknown;
+  readonly model?: unknown;
+}
+
+/**
+ * The model the vendor says answered a response, or `undefined` when it named
+ * none — absence draws no model, never a guessed one.
+ */
+export function responseModel(name: unknown): conversationv1.AgentModel | undefined {
+  if (typeof name !== "string" || name === "") return undefined;
+  return create(conversationv1.AgentModelSchema, { name });
+}
+
+/**
+ * What rides a response's FIRST block's unit: its usage and the model that
+ * answered it, each only when the vendor stated it.
+ */
+export function responseEnvelope(
+  usage: conversationv1.TokenUsage | undefined,
+  model: conversationv1.AgentModel | undefined,
+): ActivityEnvelope {
+  return {
+    ...(usage === undefined ? {} : { usage }),
+    ...(model === undefined ? {} : { model }),
+  };
 }
 
 /**
@@ -714,6 +738,7 @@ export function convertAssistantMessage(
   const failure = responseFailureReason(api.stop_reason, aborted);
   const notice = synthesizedSubject(message);
   const usage = tokenUsage(api.usage);
+  const model = responseModel(api.model);
   const entries: PersistEntry[] = [];
 
   // THIS STREAM'S response, and no other agent's: resolved from the line's own
@@ -729,9 +754,8 @@ export function convertAssistantMessage(
     const index = streamed === undefined ? nextIndexFor(state) : streamed + offset;
     offset += 1;
     firstIndex ??= index;
-    // USAGE RIDES THE FIRST BLOCK'S UNIT AND NO OTHER.
-    const envelope =
-      index === 0 && !state.usageAttached && usage !== undefined ? { usage } : {};
+    // USAGE AND THE MODEL RIDE THE FIRST BLOCK'S UNIT AND NO OTHER.
+    const envelope = index === 0 && !state.usageAttached ? responseEnvelope(usage, model) : {};
     if (index === 0 && usage !== undefined) state.usageAttached = true;
     const origin = (discriminator: string): FrameOrigin => ({
       agentId,
