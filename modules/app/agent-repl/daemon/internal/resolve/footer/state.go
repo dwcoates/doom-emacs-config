@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/latestmodel"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
 )
@@ -582,6 +583,9 @@ type wsState struct {
 
 	// agents are the live subagents with feed bubbles, by spawn unit.
 	agents map[string]*agentRow
+	// agentModel is the model each agent's latest API response named; a
+	// subagent's row draws its created agent's.
+	agentModel latestmodel.Ledger
 	// shells are the live detached shells, by work id.
 	shells map[string]*shellRow
 	// monitors are the live monitors, by activity id.
@@ -693,6 +697,7 @@ func newWSState() *wsState {
 		questions:       map[string]standing{},
 		retiredRows:     map[string]*agentRow{},
 		agents:          map[string]*agentRow{},
+		agentModel:      latestmodel.Ledger{},
 		shells:          map[string]*shellRow{},
 		monitors:        map[string]*monitorRow{},
 		merges:          newMergeBubbles(),

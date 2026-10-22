@@ -40,6 +40,7 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 			s.tok.responses.Observe(unit, act.GetUsage() != nil)
 			s.tok.observeUsage(unit, s.usageAgent(agent.GetValue()), act.Usage)
 			s.tok.evaluateAlarm(r.opts.alarmTokens)
+			s.agentModel.Record(agent, act.GetModel())
 			label := s.agentLabel(agent.GetValue())
 			r.clearRetry(ws, s, agent.GetValue(), act)
 			r.recordSpawnOwner(s, agent, act)
@@ -950,6 +951,9 @@ func (r *resolver) agentsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 		}
 		if row.description != "" {
 			drawn.Description = &frontendv1.FooterAgentRowDescription{Text: row.description}
+		}
+		if model := s.agentModel.Of(row.createdAgent); model != "" {
+			drawn.Model = &frontendv1.FooterAgentRowModel{Name: model}
 		}
 		agentRowState(d, drawn)
 		out.Rows = append(out.Rows, drawn)
