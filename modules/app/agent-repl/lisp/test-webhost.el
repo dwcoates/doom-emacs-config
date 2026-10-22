@@ -580,6 +580,35 @@ The current tab's page, not shown here, is the nearest of all."
         ;; Assert
         (should (equal lanes '(("id-a" "id-c") . ("id-b"))))))))
 
+(ert-deftest agent-repl-test-wh-a-load-loads-a-mid-adopt-page-at-once ()
+  "A page whose workspace waits on its adopt is ensured plainly, out of every lane."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (dolist (ws '("a" "b" "c")) (agent-repl-webhost-ensure-page ws))
+    (setq agent-repl-test-wh--calls nil)
+    (agent-repl-test-wh--with-order '("a" "b" "c") "a"
+      (cl-letf (((symbol-function 'agent-repl-host-adopting-p) (lambda (ws) (equal ws "c"))))
+        ;; Act
+        (agent-repl-test-wh--load "load-committed")))
+    ;; Assert
+    (should (equal (agent-repl-test-wh--ensured-lanes)
+                   '(("c" . nil) ("a" . "after") ("b" . "after"))))))
+
+(ert-deftest agent-repl-test-wh-the-replay-records-the-mid-adopt-pages ()
+  "A load records how many pages it loaded at once for their adopts."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (let ((logged nil))
+      (agent-repl-test-wh--with-order '("alpha") nil
+        (cl-letf (((symbol-function 'agent-repl-host-adopting-p) (lambda (_ws) t))
+                  ((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+          ;; Act
+          (agent-repl-test-wh--load "load-committed")))
+      ;; Assert
+      (should (seq-some (lambda (text) (string-search "elisp.webhost.replay-in-turn after=0 before=0 adopting=1" text)) logged)))))
+
 (ert-deftest agent-repl-test-wh-the-replay-records-the-pages-handed-over-in-turn ()
   "A load records how many pages it handed over in turn."
   ;; Arrange
