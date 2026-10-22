@@ -43,6 +43,7 @@ import { createRevealRelay } from "./lifecycle/reveal-relay.js";
 import { mountLoginOverlay } from "./login/login.js";
 import { answerLoginRequests } from "./login/request.js";
 import { mountNewsDigest } from "./news-digest/news-digest.js";
+import { mountImageOverlay } from "./image-overlay/image-overlay.js";
 import { drawCommandPanel } from "./panels/panels.js";
 import { createPromptWaveDriver } from "./prompt-wave-driver.js";
 import { liveUnshownAnimationsEnv, pauseAnimationsWhileUnshown } from "./host/unshown-animations.js";
@@ -259,6 +260,7 @@ export async function boot(): Promise<void> {
     // THE NEWS DIGEST OVERLAY IS MOUNTED WITH IT, because the lifecycle's
     // daemon stream is what carries the digest's standing.
     const newsDigest = mountNewsDigest(shell.newsDigest, ctx, { feedScroll: shell.feedScroll });
+    const imageOverlay = mountImageOverlay(shell.imageOverlay, ctx, { feedScroll: shell.feedScroll });
     // A ROW THE DAEMON ASKS THIS PAGE TO REVEAL (a queue entry opening an async
     // merge's bubble here) can arrive before the feed below is mounted; the
     // relay holds it until the feed binds its reveal.
@@ -294,6 +296,8 @@ export async function boot(): Promise<void> {
       renderers: createRowRenderers(ctx),
       // The root feed's held section draws in the tail region after the rows.
       held: { host: shell.holdTray, editorIngress },
+      // The image overlay this feed's watch draws.
+      imageOverlay,
       // The docked gate is drawn outside the scroll box; a choice clicked in
       // it holds the feed's view as a click in the feed does.
       clickZones: [shell.gateDock],

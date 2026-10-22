@@ -38,6 +38,9 @@ import {
   type OutOfViewCause,
 } from "./out-of-view-collapse.js";
 import { installBackgroundClear } from "./background-click.js";
+import { installImageOpen } from "./feed-image.js";
+import type { ImageOverlayHandle } from "../image-overlay/image-overlay.js";
+import type { FeedImageOverlay } from "../../../proto/gen/ts/frontend/v1/feed_image_overlay_pb";
 import {
   governedRowAt,
   installBubbleSelect,
@@ -150,6 +153,11 @@ export interface FeedDeps {
    * (and still requires the daemon to state one).
    */
   held?: { host: HTMLElement; editorIngress: EditorIngressView };
+  /**
+   * The image overlay the root feed's watch draws (image-overlay.ts). Absent
+   * in a fixture rendering the feed on its own, which then draws no overlay.
+   */
+  imageOverlay?: Pick<ImageOverlayHandle, "apply">;
 }
 
 export interface FeedHandle extends Handle {
@@ -335,6 +343,11 @@ export function mountFeed(
       ? null
       : installBackgroundClear(scrollBox, ctx, () => root.selectionActive());
 
+  // A CLICK ON ANY IMAGE THE FEED DREW opens it over the feed (owner ruling,
+  // 2026-10-22): a prompt's, a held card's, a tool card's. It asks the daemon,
+  // which owns the overlay; the daemon's push then draws it.
+  const uninstallImageOpen = scrollBox === null ? null : installImageOpen(scrollBox, ctx);
+
   // THE ROOT FEED'S HELD SECTION (held/section.ts): drawn after the rows, fed
   // by this feed's own open and watch.
   const held: HeldSection | null =
@@ -443,8 +456,8 @@ export function mountFeed(
       },
       onPush: (response) => {
         // A frame carries EXACTLY ONE of a row upsert, a response-selection
-        // push, or a feed-text-scale push (endpoint_watch_feed.proto). The two
-        // non-row frames carry no row, so they must be routed BEFORE
+        // push, a feed-text-scale push, a held change or an image-overlay push
+        // (endpoint_watch_feed.proto). The non-row frames carry no row, so they must be routed BEFORE
         // `requireMessage(response.row)`, which would otherwise reject a
         // well-formed push as a malformed row. A frame with none still fails
         // loudly there, as before.
@@ -460,9 +473,24 @@ export function mountFeed(
           applyHeldChange(response.held);
           return;
         }
+        if (response.imageOverlay !== undefined) {
+          applyImageOverlay(response.imageOverlay);
+          return;
+        }
         root.upsert(requireMessage(response.row, "WatchFeedResponse.row"));
       },
     });
+  }
+
+  /** The workspace's image overlay, drawn as the daemon pushed it. */
+  function applyImageOverlay(overlay: FeedImageOverlay): void {
+    if (deps.imageOverlay === undefined) {
+      log.debug("an image overlay frame reached a feed mounted with no overlay; nothing draws it", {
+        operation: "feed.image-overlay-undrawn",
+      });
+      return;
+    }
+    deps.imageOverlay.apply(overlay);
   }
 
   /**
@@ -1123,6 +1151,7 @@ export function mountFeed(
     host.removeEventListener(READER_TOGGLE_EVENT, onReaderToggle);
     held?.dispose();
     uninstallClear?.();
+    uninstallImageOpen?.();
     selectionVisibility?.dispose();
     outOfView?.dispose();
     root.dispose();

@@ -24,6 +24,14 @@ func (s *fakeServer) SelectFeedRow(ctx context.Context, req *connect.Request[v1.
 	return handleUnary[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse](ctx, s, "SelectFeedRow", req.Msg)
 }
 
+func (s *fakeServer) OpenFeedImage(ctx context.Context, req *connect.Request[v1.OpenFeedImageRequest]) (*connect.Response[v1.OpenFeedImageResponse], error) {
+	return handleUnary[v1.OpenFeedImageRequest, v1.OpenFeedImageResponse](ctx, s, "OpenFeedImage", req.Msg)
+}
+
+func (s *fakeServer) CloseFeedImage(ctx context.Context, req *connect.Request[v1.CloseFeedImageRequest]) (*connect.Response[v1.CloseFeedImageResponse], error) {
+	return handleUnary[v1.CloseFeedImageRequest, v1.CloseFeedImageResponse](ctx, s, "CloseFeedImage", req.Msg)
+}
+
 func (s *fakeServer) PlanRollback(ctx context.Context, req *connect.Request[v1.PlanRollbackRequest]) (*connect.Response[v1.PlanRollbackResponse], error) {
 	return handleUnary[v1.PlanRollbackRequest, v1.PlanRollbackResponse](ctx, s, "PlanRollback", req.Msg)
 }

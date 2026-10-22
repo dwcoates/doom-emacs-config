@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { drawnBodyOf, servedSrcOf } from "./drawn-body.js";
+import { FeedUserPromptBodySchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { type Control } from "../../src/control.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -50,6 +52,7 @@ import {
   HELD_STATUS_BADGES,
   HELD_NOTE_CLASS,
   drawHeldPrompt,
+  drawImageBlock,
   drawUnsupportedBlock,
   heldBadgeClasses,
   drawHeldBadgePill,
@@ -59,7 +62,8 @@ import {
   type HeldPromptDroppedDetail,
   type HeldStatus,
 } from "../../src/held/held-prompt.js";
-import { BUBBLE_QUOTE_CLASS } from "../../src/bubble/quote.js";
+import { QUOTE_PARTS_CLASS } from "../../src/bubble/quote.js";
+import { BUBBLE_EXPANDED_ONLY_CLASS } from "../../src/bubble/expanded-only.js";
 import * as heldPromptModule from "../../src/held/held-prompt.js";
 import type { HeldContext } from "../../src/held/context.js";
 import { testHeldContext } from "./held-context.js";
@@ -182,6 +186,9 @@ function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
     ...(overrides.badge !== undefined ? { badge: overrides.badge } : {}),
     ...(overrides.notes !== undefined ? { notes: overrides.notes } : {}),
   });
+  // THE DAEMON'S DRAWN BODY, as feed.DrawUserBlocks resolves the said.
+  if (overrides.body === undefined) prompt.body = drawnBodyOf(prompt.said);
+  else prompt.body = create(FeedUserPromptBodySchema, overrides.body);
   // THE DAEMON'S ONE BADGE and its notes, ranked as feed_held.proto fixes.
   // Their words are deliberately ones no card would compose (`wire <status>`),
   // so an assertion on them proves the card drew the wire verbatim.
@@ -278,7 +285,7 @@ describe("drawHeldPrompt identity", () => {
   it("draws the words the user typed", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(heldPrompt(), tc);
-    expect(card.querySelector(".queued-text")?.textContent).toContain(
+    expect(card.querySelector(".prompt-block-text")?.textContent).toContain(
       "fix the test",
     );
   });
@@ -875,7 +882,7 @@ describe("the queued-at age", () => {
   });
 });
 
-describe("the said body", () => {
+describe("the drawn body", () => {
   /** A held reply: the quote of an earlier bubble, then the person's words. */
   function heldReply(): HTMLElement {
     const { tc } = trayContext();
@@ -884,7 +891,7 @@ describe("the said body", () => {
         said: {
           content: {
             blocks: [
-              { block: { case: "quote", value: { text: "⟢ Replying:\n\n```\nParis.\n```\n\n⟢ My message:\n" } } },
+              { block: { case: "quote", value: { text: "Paris." } } },
               { block: { case: "text", value: { text: "and its population?" } } },
             ],
           },
@@ -894,19 +901,16 @@ describe("the said body", () => {
     );
   }
 
-  it("draws a reply's quote ahead of the words, as the quote block the collapsed card hides", () => {
+  it("draws a reply's quote ahead of the words, from its parts as the feed row does", () => {
     // Act
     const body = heldReply().querySelector(".bubble-body");
     // Assert
-    expect([...(body?.children ?? [])].map((child) => child.className)).toEqual([
-      `queued-quote ${BUBBLE_QUOTE_CLASS}`,
-      "queued-text",
-    ]);
+    expect([...(body?.children ?? [])].map((child) => child.classList.contains(QUOTE_PARTS_CLASS))).toEqual([true, false]);
   });
 
-  it("draws the quote's fenced text as a code block", () => {
+  it("draws the quoted text as a code block", () => {
     // Act
-    const quote = heldReply().querySelector(`.${BUBBLE_QUOTE_CLASS}`);
+    const quote = heldReply().querySelector(`.${QUOTE_PARTS_CLASS}`);
     // Assert
     expect(quote?.querySelector("pre code")?.textContent).toBe("Paris.");
   });
@@ -923,42 +927,10 @@ describe("the said body", () => {
       }),
       tc,
     );
-    expect(card.querySelector(".queued-text")?.innerHTML).toContain(
-      "<strong>bold</strong>",
-    );
+    expect(card.querySelector(".prompt-block-text")?.innerHTML).toContain("<strong>bold</strong>");
   });
 
-  it("draws a url image as a picture", () => {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(
-      heldPrompt({
-        said: {
-          content: {
-            blocks: [
-              {
-                block: {
-                  case: "image",
-                  value: {
-                    location: {
-                      case: "url",
-                      value: { url: "https://example.test/a.png" },
-                    },
-                    mediaType: "image/png",
-                  },
-                },
-              },
-            ],
-          },
-        },
-      }),
-      tc,
-    );
-    expect(card.querySelector<HTMLImageElement>("img.queued-image")?.src).toBe(
-      "https://example.test/a.png",
-    );
-  });
-
-  it("names a host-path image rather than drawing a broken picture", () => {
+  it("draws a host-path image as the picture the daemon serves", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
       heldPrompt({
@@ -980,9 +952,43 @@ describe("the said body", () => {
       }),
       tc,
     );
-    expect(card.querySelector(".queued-image-path")?.textContent).toBe(
-      "/tmp/a.png",
+    expect(card.querySelector<HTMLImageElement>("img.prompt-block-image")?.getAttribute("src")).toBe(
+      servedSrcOf("/tmp/a.png"),
     );
+  });
+
+  it("draws the held card's image only once the card is expanded", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(
+      heldPrompt({ body: { blocks: [{ block: { case: "image", value: { src: "/feed-images/a", alt: "a.png" } } }] } }),
+      tc,
+    );
+    expect(card.querySelector("img.prompt-block-image")?.classList.contains(BUBBLE_EXPANDED_ONLY_CLASS)).toBe(true);
+  });
+
+  it("refuses a card the daemon served with no body", () => {
+    const { tc } = trayContext();
+    const prompt = heldPrompt();
+    prompt.body = undefined;
+    expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
+  });
+
+  it("draws an image the editor holds by its path, the webview being unable to load it", () => {
+    expect(
+      drawImageBlock(
+        { location: { case: "path", value: { path: "/tmp/a.png" } }, mediaType: "image/png" } as never,
+        "path",
+      ).textContent,
+    ).toBe("/tmp/a.png");
+  });
+
+  it("draws a held image only once the card is expanded", () => {
+    expect(
+      drawImageBlock(
+        { location: { case: "path", value: { path: "/tmp/a.png" } }, mediaType: "image/png" } as never,
+        "path",
+      ).classList.contains(BUBBLE_EXPANDED_ONLY_CLASS),
+    ).toBe(true);
   });
 
   it("draws nothing for an unmodeled block", () => {
@@ -1040,9 +1046,9 @@ describe("the said body", () => {
     expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
   });
 
-  it("refuses a content block whose oneof is unset", () => {
+  it("refuses a drawn block whose oneof is unset", () => {
     const { tc } = trayContext();
-    const prompt = heldPrompt({ said: { content: { blocks: [{}] } } });
+    const prompt = heldPrompt({ body: { blocks: [{}] } });
     expect(() => drawHeldPrompt(prompt, tc)).toThrow(MalformedView);
   });
 });
@@ -1109,7 +1115,7 @@ describe("the held prompt's spec: a prompt bubble on the held fill", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(saying("first line\nsecond line"), tc);
     expect(
-      card.querySelector(".bubble-scroll .queued-text")?.textContent,
+      card.querySelector(".bubble-scroll .prompt-block-text")?.textContent,
     ).toContain("second line");
   });
 

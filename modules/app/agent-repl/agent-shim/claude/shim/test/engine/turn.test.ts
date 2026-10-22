@@ -23,7 +23,6 @@ import { SessionIdentity, createAgentIdentityStore } from "../../src/engine/iden
 import {
   buildPrompt,
   promptEntry,
-  saidText,
   STARTED_TURNS_REMEMBERED,
   textSaid,
   TurnEngine,
@@ -32,6 +31,7 @@ import {
   type SessionContext,
 } from "../../src/engine/turn.js";
 import { RecordingPersistence, ScriptedQuery } from "./fakes.js";
+import { saidContent } from "../../src/engine/said-content.js";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -396,7 +396,7 @@ describe("StartTurn behind the shim's own keep-alive", () => {
     await starting;
 
     // Assert
-    expect(h.submitted.map((entry) => [saidText(entry.said), entry.keepalive])).toEqual([["do the thing", false]]);
+    expect(h.submitted.map((entry) => [saidContent(entry.said), entry.keepalive])).toEqual([["do the thing", false]]);
   });
 
   it("writes no prompt row while it waits", async () => {
@@ -689,67 +689,6 @@ describe("StartTurn behind the shim's own keep-alive", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-});
-
-describe("what the user said", () => {
-  it("is the text of the text blocks", () => {
-    expect(saidText(textSaid("hello"))).toBe("hello");
-  });
-
-  it("carries an image by its path rather than re-encoding its bytes", () => {
-    const said = create(conversationv1.UserSaidSchema, {
-      content: create(conversationv1.UserContentSchema, {
-        blocks: [
-          create(conversationv1.UserContentBlockSchema, {
-            block: {
-              case: "image",
-              value: create(conversationv1.ImageBlockSchema, {
-                mediaType: "image/png",
-                location: { case: "path", value: create(conversationv1.ImageBlockPathSchema, { path: "/tmp/a.png" }) },
-              }),
-            },
-          }),
-        ],
-      }),
-    });
-
-    expect(saidText(said)).toBe("/tmp/a.png");
-  });
-
-  it("delivers a reply's quote verbatim ahead of the words, with a blank line between", () => {
-    const quote = "⟢ Replying to an earlier response of yours:\n\n```\nParis.\n```\n\n⟢ My message:\n";
-    const said = create(conversationv1.UserSaidSchema, {
-      content: create(conversationv1.UserContentSchema, {
-        blocks: [
-          create(conversationv1.UserContentBlockSchema, {
-            block: { case: "quote", value: create(conversationv1.UserQuoteBlockSchema, { text: quote }) },
-          }),
-          ...(textSaid("And its population?").content?.blocks ?? []),
-        ],
-      }),
-    });
-
-    expect(saidText(said)).toBe(
-      "⟢ Replying to an earlier response of yours:\n\n```\nParis.\n```\n\n⟢ My message:\n\nAnd its population?",
-    );
-  });
-
-  it("RAISES on an UnsupportedBlock rather than silently dropping what the user sent", () => {
-    const said = create(conversationv1.UserSaidSchema, {
-      content: create(conversationv1.UserContentSchema, {
-        blocks: [
-          create(conversationv1.UserContentBlockSchema, {
-            block: {
-              case: "unsupported",
-              value: create(conversationv1.UnsupportedBlockSchema, { kind: "video" }),
-            },
-          }),
-        ],
-      }),
-    });
-
-    expect(() => saidText(said)).toThrow(/UnsupportedBlock is not a fallback/);
   });
 });
 
@@ -1061,7 +1000,7 @@ describe("the vendor note on a prompt", () => {
     );
 
     // Assert
-    expect(saidText(h.submitted[0]?.said ?? textSaid(""))).toContain("<system-reminder>the work was cut for this</system-reminder>");
+    expect(saidContent(h.submitted[0]?.said ?? textSaid(""))).toContain("<system-reminder>the work was cut for this</system-reminder>");
   });
 
   it("keeps the note off the prompt row", async () => {
@@ -1081,7 +1020,7 @@ describe("the vendor note on a prompt", () => {
     // Assert
     const row = h.persistence.durable.find((entry) => entry.item.kind === "prompt");
     const said = row?.item.kind === "prompt" ? row.item.prompt.said : undefined;
-    expect(saidText(said ?? textSaid(""))).toBe("do it the other way");
+    expect(saidContent(said ?? textSaid(""))).toBe("do it the other way");
   });
 });
 
@@ -1133,7 +1072,7 @@ describe("a reply's quote", () => {
     );
 
     // Assert
-    expect(saidText(h.submitted[0]?.said ?? textSaid(""))).toBe("the quote\nmy words");
+    expect(saidContent(h.submitted[0]?.said ?? textSaid(""))).toBe("the quote\nmy words");
   });
 });
 
@@ -1172,7 +1111,7 @@ describe("StartTurn joining the running turn", () => {
 
     // Assert
     const prompt = h.joins[0]?.prompt;
-    expect([saidText(prompt?.said ?? textSaid("")), prompt?.origin]).toEqual([
+    expect([saidContent(prompt?.said ?? textSaid("")), prompt?.origin]).toEqual([
       "also cover the edge case",
       conversationv1.PromptOrigin.USER_SENT,
     ]);
@@ -1574,7 +1513,7 @@ describe("a repeated StartTurn of a turn id the shim already started", () => {
     const repeat = await h.turns.startTurn(cut);
 
     // Assert
-    expect([repeat.result.case, h.submitted.map((entry) => saidText(entry.said))]).toEqual(["success", ["/clear"]]);
+    expect([repeat.result.case, h.submitted.map((entry) => saidContent(entry.said))]).toEqual(["success", ["/clear"]]);
   });
 
   it("writes no second prompt row", async () => {
@@ -3515,50 +3454,6 @@ class FailingBashStore extends RecordingPersistence {
 
 const AGENT = create(conversationv1.AgentIdSchema, { value: "agent-1" });
 
-function unsupportedSaid(): conversationv1.UserSaid {
-  return create(conversationv1.UserSaidSchema, {
-    content: create(conversationv1.UserContentSchema, {
-      blocks: [create(conversationv1.UserContentBlockSchema, {})],
-    }),
-  });
-}
-
-describe("what the user said, at the edges of the block union", () => {
-  const imageSaid = (
-    location: conversationv1.ImageBlock["location"],
-  ): conversationv1.UserSaid =>
-    create(conversationv1.UserSaidSchema, {
-      content: create(conversationv1.UserContentSchema, {
-        blocks: [
-          create(conversationv1.UserContentBlockSchema, {
-            block: {
-              case: "image",
-              value: create(conversationv1.ImageBlockSchema, { mediaType: "image/png", location }),
-            },
-          }),
-        ],
-      }),
-    });
-
-  it("carries an image hosted at a url by that url", () => {
-    const said = imageSaid({
-      case: "url",
-      value: create(conversationv1.ImageBlockUrlSchema, { url: "https://example.invalid/a.png" }),
-    });
-
-    expect(saidText(said)).toBe("https://example.invalid/a.png");
-  });
-
-  it("contributes an empty line for an image that states no location at all", () => {
-    // Neither arm set: the block says an image is here and does not say where.
-    expect(saidText(imageSaid({ case: undefined }))).toBe("");
-  });
-
-  it("RAISES on a content block carrying no arm, rather than delivering a prompt short one block", () => {
-    expect(() => saidText(unsupportedSaid())).toThrow(/carries no arm/);
-  });
-});
-
 describe("the prompt row's own guard", () => {
   it("REFUSES to record a prompt that carries no turn id", () => {
     const prompt = create(conversationv1.AgentPromptSchema, { agent: AGENT, said: textSaid("x") });
@@ -4106,12 +4001,6 @@ describe("DetachForeground's kind-before-state answer", () => {
       "debug",
       "refused a DetachForeground naming no unit as invalid input; the vendor was not asked",
     ]);
-  });
-});
-
-describe("what the user said, with no content at all", () => {
-  it("is the empty string for a prompt carrying no content message", () => {
-    expect(saidText(create(conversationv1.UserSaidSchema, {}))).toBe("");
   });
 });
 

@@ -92,10 +92,17 @@ message HeldPrompt {
   // force or cancel names, and the same TurnId the submission's
   // response returned. There is no second, daemon-internal entry id.
   conversation.v1.TurnId turn = 1;
-  // What the user said, WHOLE — the very payload the daemon will forward, so
-  // the held card shows exactly what will land in the feed, and a UserSaid that
-  // carries images (or anything UserContent grows) is held intact.
+  // What the user said, WHOLE — the very payload the daemon will forward, and
+  // what an edit or a drop hands back to the composer. A UserSaid that carries
+  // images (or anything UserContent grows) is held intact. The card DRAWS
+  // `body`, never this.
   conversation.v1.UserSaid said = 2;
+  // What the card draws: `said` resolved by the daemon exactly as the prompt's
+  // feed row will be (frontend.v1.FeedUserPromptBody) -- sentinel spans
+  // stripped, each image a source the webview loads, a reply's quote taken
+  // apart -- so the held card shows what will land in the feed, drawn the way
+  // the feed draws it.
+  FeedUserPromptBody body = 26;
   // When it was queued.
   HeldPromptQueuedAt queued_at = 3;
   // What the classifier decided about ORDER. THE ARM IS THE VERDICT. Never
@@ -562,8 +569,12 @@ message HeldPromptBuildRefreshHold {}
 // not accepted; the card draws the prompt and why it waits, and nothing else.
 message HeldIngressPrompt {
   // What the user said, WHOLE: the very payload the daemon will submit once
-  // the queue accepts it, so the card shows exactly what will land.
+  // the queue accepts it. The card DRAWS `body`, never this.
   conversation.v1.UserSaid said = 1;
+  // What the card draws: `said` resolved exactly as the prompt's feed row will
+  // be (frontend.v1.FeedUserPromptBody), so the card shows what will land,
+  // drawn the way the feed draws it.
+  FeedUserPromptBody body = 4;
   // When the editor wrote the entry.
   HeldIngressPromptQueuedAt queued_at = 2;
   // Why the entry still waits. ALWAYS SET: an entry with no badge is a

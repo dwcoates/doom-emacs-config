@@ -1,0 +1,65 @@
+// endpoint_close_feed_image.proto — CloseFeedImage: close the image open over
+// the workspace's feed. FEED section.
+//
+// The webapp closes the overlay when the reader clicks it or presses Escape.
+// The daemon sets the workspace's overlay (frontend.v1.FeedImageOverlay) to
+// its closed arm and pushes it on the root feed's watch. Closing an overlay
+// that is already closed is an answer, not a refusal: the overlay is closed.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Close the image open over a workspace's feed.
+message CloseFeedImageRequest {
+  // The workspace whose overlay closes — the daemon-minted ref, echoed
+  // verbatim like every per-workspace request.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message CloseFeedImageResponse {
+  oneof result {
+    CloseFeedImageSuccess success = 1;
+    CloseFeedImageError error = 2;
+  }
+}
+
+// The overlay is closed, whether or not an image was open. Empty: the closed
+// overlay reaches the webapp on the root feed's watch.
+message CloseFeedImageSuccess {}
+
+// The overlay could not be addressed. Arms derived from the daemon's refusal
+// sites.
+message CloseFeedImageError {
+  // WHY the overlay was not closed.
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    CloseFeedImageUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    CloseFeedImageWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    CloseFeedImageTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    CloseFeedImageNotYetAdopted not_yet_adopted = 4;
+  }
+}
+
+// The workspace id is not in the daemon's registry.
+message CloseFeedImageUnknownWorkspace {}
+// The echoed dir disagrees with the registry's dir for this id.
+message CloseFeedImageWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// This daemon released the workspace to a successor.
+message CloseFeedImageTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// A joining daemon has not finished adopting this workspace yet.
+message CloseFeedImageNotYetAdopted {}

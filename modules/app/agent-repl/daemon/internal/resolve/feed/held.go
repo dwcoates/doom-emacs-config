@@ -2,6 +2,7 @@ package feed
 
 import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/proto"
@@ -159,7 +160,10 @@ func (r *resolver) heldFolds(s *wsState, folds []holds.Fold) []*agentreplv1.Watc
 func (r *resolver) renderHeld(s *wsState, h *heldState) *frontendv1.FeedHeld {
 	log := r.logger(s.id)
 	items := make([]*frontendv1.FeedHeldItem, 0, len(h.prompts))
-	for _, card := range holds.Prompts(h.prompts, h.editing, log) {
+	draw := func(content *conversationv1.UserContent) *frontendv1.FeedUserPromptBody {
+		return &frontendv1.FeedUserPromptBody{Blocks: r.drawUserBlocks(s, content)}
+	}
+	for _, card := range holds.Prompts(h.prompts, h.editing, draw, log) {
 		id, drawn := r.promptRowDrawn(s, card.Turn)
 		if drawn {
 			log.Debug(opHeld, "a standing hold's prompt row is drawn; it has settled out of the section", dlog.Context{
@@ -178,7 +182,7 @@ func (r *resolver) renderHeld(s *wsState, h *heldState) *frontendv1.FeedHeld {
 		}
 		items = append(items, &frontendv1.FeedHeldItem{
 			Id:   r.ingressItemID(s, entry.Key),
-			Item: &frontendv1.FeedHeldItem_Ingress{Ingress: holds.IngressPrompt(entry)},
+			Item: &frontendv1.FeedHeldItem_Ingress{Ingress: holds.IngressPrompt(entry, draw)},
 		})
 	}
 	return &frontendv1.FeedHeld{Items: items}

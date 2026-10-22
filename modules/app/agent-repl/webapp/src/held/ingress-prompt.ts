@@ -22,7 +22,6 @@ import type {
   HeldIngressPrompt,
   HeldIngressPromptBadge,
 } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
-import type { UserSaid } from "../../../proto/gen/ts/conversation/v1/user_pb";
 import { BUBBLE_MORE_ELLIPSIS, ELLIPSIS_CAP_LINES, drawBubble } from "../bubble/draw.js";
 import { log } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -30,6 +29,7 @@ import { msOf, requireCase, requireMessage } from "../rpc/strict.js";
 import type { HeldContext } from "./context.js";
 import type { EditorIngressEntry } from "./editor-ingress.js";
 import { drawHeldBadgePill, drawQueuedAge, drawUserSaid, type HeldBadgeTone } from "./held-prompt.js";
+import { drawFeedUserPromptBody } from "../feed/rows/user-prompt.js";
 
 /** The attribute an ingress card carries: who drew it, `daemon` or `editor`. */
 export const INGRESS_SOURCE_ATTRIBUTE = "data-held-ingress";
@@ -59,7 +59,12 @@ export const DAEMON_UNREACHABLE_LABEL = "waiting for the daemon";
 /** What one ingress card draws, whichever source it came from. */
 interface IngressCard {
   readonly source: "daemon" | "editor";
-  readonly said: UserSaid;
+  /**
+   * What the card draws: the daemon's resolved body for its own item, or the
+   * editor's raw said for an entry the editor holds while the daemon is out
+   * of reach (no daemon resolved it).
+   */
+  readonly content: HTMLElement[];
   readonly queuedAtMs: number;
   readonly label: string;
   readonly detail: string | null;
@@ -81,7 +86,7 @@ export function drawHeldIngressPrompt(u: HeldIngressPrompt, tc: HeldContext, pre
   return drawIngressCard(
     {
       source: "daemon",
-      said: requireMessage(u.said, `${path}.said`),
+      content: drawFeedUserPromptBody(requireMessage(u.body, `${path}.body`), `${path}.body`),
       queuedAtMs: msOf(requireMessage(u.queuedAt, `${path}.queued_at`).atMs, `${path}.queued_at.at_ms`),
       label: badge.label,
       detail: badge.detail ?? null,
@@ -98,7 +103,7 @@ export function drawEditorIngressEntry(entry: EditorIngressEntry, tc: HeldContex
   return drawIngressCard(
     {
       source: "editor",
-      said: entry.said,
+      content: drawUserSaid(entry.said, "EditorIngressEntry.said"),
       queuedAtMs: entry.queuedAtMs,
       label: DAEMON_UNREACHABLE_LABEL,
       detail: null,
@@ -128,7 +133,7 @@ function drawIngressCard(card: IngressCard, tc: HeldContext, path: string, previ
       hooks: ["held-right"],
       waving: false,
       strip: [head],
-      content: drawUserSaid(card.said, `${path}.said`),
+      content: card.content,
       capLines: ELLIPSIS_CAP_LINES,
       more: BUBBLE_MORE_ELLIPSIS,
     },

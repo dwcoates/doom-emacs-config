@@ -53,6 +53,7 @@
  * listens in production (the composer is host-native) and the event is
  * harmless there — it is the seam, not a promise about who is on the far end.
  */
+import { drawFeedUserPromptBody } from "../feed/rows/user-prompt.js";
 import { labelledControl, setControlsDisabled, type Control } from "../control.js";
 import { getOption } from "@bufbuild/protobuf";
 import type {
@@ -110,6 +111,7 @@ import { controlPlaneFailed } from "../failure/sink.js";
 import { formatTickedAge } from "../duration.js";
 import { markdownSlot } from "../bubble/body.js";
 import { quoteSlot } from "../bubble/quote.js";
+import { expandedOnly } from "../bubble/expanded-only.js";
 import {
   BUBBLE_MORE_ELLIPSIS,
   ELLIPSIS_CAP_LINES,
@@ -234,10 +236,11 @@ export function drawHeldPrompt(
     // card to the shutdown it should explain.
     drawn.pill.setAttribute("data-schedule-id", hold.value.scheduleId);
   }
-  // A HELD SESSION ACT IS DRAWN AS WHAT IT DOES; a prompt, as what was said.
+  // A HELD SESSION ACT IS DRAWN AS WHAT IT DOES; a prompt, as its feed row
+  // will draw it: the daemon's resolved body, images and all.
   const content =
     u.act === undefined
-      ? drawUserSaid(said, `${path}.said`)
+      ? drawFeedUserPromptBody(requireMessage(u.body, `${path}.body`), `${path}.body`)
       : [drawHeldSessionAct(u.act, `${path}.act`)];
 
   // THE CONTROLS ARE ALWAYS SHOWN (owner request, 2026-10-13), in ONE footer
@@ -1413,6 +1416,7 @@ export function drawQuoteBlock(u: UserQuoteBlock, path: string): HTMLElement {
  * A URL is fetchable and draws as the picture. A host PATH is not — the daemon
  * runs on that host and the webview does not — so the card names the file
  * rather than drawing a broken image where the user's attachment should be.
+ * Either is drawn only once the card is expanded (src/bubble/expanded-only.ts).
  */
 export function drawImageBlock(u: ImageBlock, path: string): HTMLElement {
   const location = requireCase(u.location, `${path}.location`);
@@ -1424,6 +1428,7 @@ export function drawImageBlock(u: ImageBlock, path: string): HTMLElement {
     case "url": {
       const image = document.createElement("img");
       image.className = "queued-image";
+      expandedOnly(image);
       image.src = location.value.url;
       image.alt = u.mediaType;
       return image;
@@ -1431,6 +1436,7 @@ export function drawImageBlock(u: ImageBlock, path: string): HTMLElement {
     case "path": {
       const named = document.createElement("div");
       named.className = "queued-image-path";
+      expandedOnly(named);
       named.setAttribute("data-host-path", location.value.path);
       named.textContent = location.value.path;
       return named;

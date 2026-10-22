@@ -305,6 +305,35 @@ While the agent waits on a question or a permission card, type the choice's numb
   - On a card of several questions, the card moves on to the next unanswered question.
   - Each answered question stays listed above it, with its header and its answer, typed words in italics.
 
+## Images in prompts
+
+Copy an image, then paste it into the input window the way you paste words.
+
+- **Every paste key pastes images:** `C-y`, `s-v`, and evil's `p` and `P`.
+  - The image goes where the paste happened, so images and words can alternate.
+  - When the clipboard holds text, those keys paste the text as usual. A file copied in Finder pastes its name, for example.
+  - `C-c C-i` pastes the clipboard's image even when text comes with it.
+- **The image shows in the input window as a 120-pixel-tall thumbnail.**
+  - Every image is scaled to that height, large or small, and the feed draws it the same size.
+  - Click it to open it large over the feed (see below).
+  - It is one character: one `DEL` removes it, and killing and yanking moves it.
+  - A terminal frame shows `[Copied Image]` in its place.
+- **In the feed, a prompt's images show once its bubble is expanded.**
+  - A collapsed prompt bubble, like a collapsed held card, shows your words alone, as it does for a reply's quote.
+  - A held card draws its images the same way the prompt's bubble will.
+- **Click any image to open it large over the feed**: a thumbnail in the input window, a prompt's image, a held card's, or a tool card's.
+  - It fills the feed's column, just inside it, so the rows still show around its edge.
+  - Click it, or press `Esc` while the feed has focus, to close it.
+  - Clicking another image replaces it, and it stays open when you switch workspaces and come back.
+- **The agent receives the image itself**, between your words, in the order you placed them.
+  - It is also told the image's file path, so it can copy, commit or edit the file. The path is not shown in your prompt bubble.
+- **The file is kept in the workspace at `.claude/emacs/images/`**, named after its contents.
+  - Pasting the same image twice keeps one file.
+  - A TIFF-only clipboard (from some macOS apps) is converted to PNG with `sips`, because Claude takes PNG, JPEG, GIF and WebP.
+- **Prompt history keeps the images.** Recalling an entry brings them back.
+- **An image whose file is gone** (its worktree was deleted) **shows as "Image no longer available"**, in the feed and in the input window.
+  - A prompt holding one is not sent: the input window names it, and keeps your text so you can delete it and send again.
+
 ## Replying to a response
 
 Select a final response with `M-s-k` / `M-s-j` and send a prompt with `RET`. The
@@ -344,7 +373,7 @@ you are replying to. Sending ends the selection.
 - **After a rollback:**
   - the dropped prompts and everything after them are gone from the feed, for good;
   - the input window's previous contents are saved to its history;
-  - the input window holds the rolled-back prompt's text and attachments, ready to edit and send again.
+  - the input window holds the rolled-back prompt's text and images, in their places, ready to edit and send again.
 - **Limits of `C-c M-RET` (file restore):**
   - Only changes made by the agent's own file-editing tools are restored. Changes made by shell commands (`sed -i`, a build, `git checkout`) are not.
   - Git commits are not undone, so files and history can disagree after a restore.

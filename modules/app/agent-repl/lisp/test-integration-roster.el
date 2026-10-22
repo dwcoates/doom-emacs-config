@@ -47,7 +47,7 @@
 (declare-function agent-repl-host--on-workspace-activated "host" (&rest _))
 (declare-function agent-repl-roster-echo-finished "roster" (ws))
 (declare-function agent-repl-roster-refresh-magit "roster" (ws))
-(declare-function agent-repl--input-said "input" (text attachments))
+(declare-function agent-repl--input-said "input" (parts))
 (defvar agent-repl-roster-view)
 (defvar agent-repl-roster-update-functions)
 (defvar agent-repl-roster-finish-functions)

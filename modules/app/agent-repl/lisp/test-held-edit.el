@@ -190,8 +190,8 @@
     ;; Assert
     (should (equal (agent-repl-test-he--text) "my revision"))))
 
-(ert-deftest agent-repl-held-edit-a-path-image-becomes-an-attachment ()
-  "An image the held prompt carries by path is re-attached to the composer."
+(ert-deftest agent-repl-held-edit-a-path-image-returns-in-its-place ()
+  "An image the held prompt carries by path returns to the composer after its words."
   (agent-repl-test-he--with
     ;; Arrange
     (let ((host (list :held-prompt-edit
@@ -205,8 +205,8 @@
       ;; Act
       (agent-repl-held-edit-on-host-update "ws-one" host)
       ;; Assert
-      (should (equal (buffer-local-value 'agent-repl-input-attachments agent-repl-test-he--buffer)
-                     '((:path "/tmp/i.png" :media-type "image/png")))))))
+      (should (equal (with-current-buffer agent-repl-test-he--buffer (agent-repl--input-parts))
+                     '("see" (:path "/tmp/i.png" :media-type "image/png")))))))
 
 (ert-deftest agent-repl-held-edit-a-url-image-cancels-the-edit ()
   "Content no composer can hold is not half-taken: the edit is cancelled."

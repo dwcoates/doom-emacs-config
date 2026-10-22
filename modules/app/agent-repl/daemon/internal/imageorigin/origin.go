@@ -20,7 +20,9 @@ package imageorigin
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -90,6 +92,20 @@ func (o *Origin) Register(path, mediaType string) (string, error) {
 	return Route + id, nil
 }
 
+// Serves reports whether SRC is a source this origin answers: its route
+// followed by the id of a registered image. A source that names a path nobody
+// registered is not one, however it is spelled.
+func (o *Origin) Serves(src string) bool {
+	id, routed := strings.CutPrefix(src, Route)
+	if !routed || id == "" {
+		return false
+	}
+	o.mu.RLock()
+	_, ok := o.entries[id]
+	o.mu.RUnlock()
+	return ok
+}
+
 // Handler serves a registered image by id.
 func (o *Origin) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +128,15 @@ func (o *Origin) Handler() http.Handler {
 			return
 		}
 		file, err := os.Open(found.path)
+		if errors.Is(err, fs.ErrNotExist) {
+			// A FILE THAT IS GONE IS AN ANSWER: a pasted image lives in its
+			// workspace's worktree, and a deleted worktree takes it along. The
+			// page draws the 404 as "Image no longer available".
+			o.log.Info(op, "a registered image's file is gone, so it is answered not found",
+				dlog.Context{"id": id, "path": found.path})
+			http.NotFound(w, r)
+			return
+		}
 		if err != nil {
 			o.log.Error(op, "a registered image could not be opened",
 				dlog.Context{"id": id, "path": found.path, "cause": err.Error()})

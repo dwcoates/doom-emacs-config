@@ -76,6 +76,7 @@
 (declare-function agent-repl-wire-decode-lock-holder-failure "agent-repl-wire-common" (value))
 (declare-function agent-repl-wire--decode-double "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire-encode-workspace-ref "agent-repl-wire-common" (ref))
+(declare-function agent-repl-wire-encode-image-block "agent-repl-wire-common" (value))
 (declare-function agent-repl-wire-decode-workspace-ref "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-decode-workspace-has-open-children "agent-repl-wire-common" (value))
 (declare-function agent-repl-wire-decode-workspace-parent-not-open "agent-repl-wire-common" (value))
@@ -4579,6 +4580,59 @@ sends a click, but its decoder knows every arm the contract has."
    "SelectFeedRowResponse" json
    #'agent-repl-wire-decode-select-feed-row-success
    #'agent-repl-wire-decode-select-feed-row-error))
+
+;;;; ---- OpenFeedImage ---------------------------------------------------
+;;
+;; Open one image large over a workspace's feed.  Emacs sends only the
+;; `composer' arm: an image in its input window, by the ImageBlock the
+;; composer would submit.  See endpoint_open_feed_image.proto.
+
+(defun agent-repl-wire-encode-open-feed-image-composer (value)
+  "Encode OpenFeedImageComposer from VALUE (:image IMAGEBLOCK)."
+  (list (cons 'image (agent-repl-wire-encode-image-block
+                      (agent-repl-wire-verbs--require "OpenFeedImageComposer" "image"
+                                                      (plist-get value :image))))))
+
+(defun agent-repl-wire-encode-open-feed-image-request (request)
+  "Encode OpenFeedImageRequest from plist REQUEST (:workspace REF :image IMAGE).
+IMAGE is (:arm :composer :value (:image IMAGEBLOCK)).  Both are required:
+the workspace names whose feed the image opens over, and the image is what
+opens."
+  (let ((message "OpenFeedImageRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-workspace-ref
+                 (agent-repl-wire-verbs--require message "workspace" (plist-get request :workspace))))
+          (agent-repl-wire-verbs--encode-oneof
+           message "image"
+           (agent-repl-wire-verbs--require message "image" (plist-get request :image))
+           (list (list :composer 'composer #'agent-repl-wire-encode-open-feed-image-composer))))))
+
+(defun agent-repl-wire-decode-open-feed-image-error (json)
+  "Decode OpenFeedImageError from JSON into (:cause (:arm ARM :value V)).
+Beside the four handover arms, `:unservable' (V (:detail STRING)) and
+`:not-drawn' (V (:src STRING))."
+  (let ((message "OpenFeedImageError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
+                    unservable notDrawn))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (append (agent-repl-wire-verbs--handover-arms "OpenFeedImage")
+                   (list (list 'unservable :unservable
+                               (lambda (v) (agent-repl-wire-verbs--decode-detail "OpenFeedImageUnservable" v)))
+                         (list 'notDrawn :not-drawn
+                               (lambda (v)
+                                 (agent-repl-wire-verbs--check-keys "OpenFeedImageNotDrawn" v '(src))
+                                 (list :src (agent-repl-wire-verbs--decode-string
+                                             "OpenFeedImageNotDrawn" 'src v))))))))))
+
+(defun agent-repl-wire-decode-open-feed-image-response (json)
+  "Decode OpenFeedImageResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "OpenFeedImageResponse" json
+   (agent-repl-wire-verbs--empty-arm "OpenFeedImageSuccess")
+   #'agent-repl-wire-decode-open-feed-image-error))
 
 ;;;; ---- Rollback: the shared token ------------------------------------
 ;;

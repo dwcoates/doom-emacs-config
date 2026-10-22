@@ -6,6 +6,7 @@ import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.
 import { createControl } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
+import { WatchFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import {
   FeedBreadcrumbSchema,
   FeedPageSchema,
@@ -154,6 +155,28 @@ describe("mountFeed: opening the root feed", () => {
     channel.push(push(responseRow("r1")));
     await settle();
     expect(host.querySelector('[data-feed-row="r1"]')).not.toBeNull();
+  });
+
+  it("routes an image-overlay frame to the page's overlay rather than reading it as a row", async () => {
+    // Arrange — a live tail, and an overlay that records what it is handed.
+    const { h, channel } = liveRootHarness();
+    const { scroll, host } = scrollHost();
+    const applied: string[] = [];
+    mountFeed(host, h.ctx, {
+      renderers: stubRenderers(),
+      scrollBox: scroll,
+      imageOverlay: { apply: (overlay) => applied.push(overlay.state.case ?? "unset") },
+    });
+    await settle();
+    // Act — an overlay frame (no row of its own).
+    channel.push(
+      create(WatchFeedResponseSchema, {
+        imageOverlay: { state: { case: "open", value: { image: { src: "/feed-images/abc", alt: "" } } } },
+      }),
+    );
+    await settle();
+    // Assert
+    expect(applied).toEqual(["open"]);
   });
 
   it("routes a selection frame to the feed rather than reading it as a row", async () => {

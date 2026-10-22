@@ -3206,13 +3206,13 @@ html[data-page-unshown] *::after {
 .bubble[data-cap-lines="unbounded"] > .bubble-scroll.expanded {
   max-height: none;
 }
-/* A REPLY'S QUOTE (src/bubble/quote.ts): the earlier bubble a prompt replied
-   to, a block among the prompt's own, shown ONLY once the bubble is opened
-   (owner request, 2026-10-08), so a collapsed prompt is the person's words
-   alone. Keyed on the same one toggle's `.expanded`, on the box the body sits
-   in; child combinators keep an open bubble from showing the quotes of a
-   bubble nested inside it. */
-.bubble-scroll:not(.expanded) > .bubble-body > .bubble-quote { display: none; }
+/* AN EXPANDED-ONLY BLOCK (src/bubble/expanded-only.ts): a reply's quote among
+   a prompt's blocks, shown ONLY once the bubble is opened (owner request,
+   2026-10-08), so a collapsed prompt is the person's words alone. Keyed on
+   the same one toggle's `.expanded`, on the box the body sits in; child
+   combinators keep an open bubble from showing the blocks of a bubble nested
+   inside it. */
+.bubble-scroll:not(.expanded) > .bubble-body > .bubble-expanded-only { display: none; }
 /* A FEED PROMPT'S QUOTE is drawn from its parts (src/bubble/quote.ts
    `QUOTE_PARTS_CLASS`): its HEADING shows folded too (owner request,
    2026-10-19), and every other part (the heading's colon, the quoted code
@@ -6073,18 +6073,27 @@ bubble-body.bubble-body { display: block; }
   max-width: 100%;
 }
 .prompt-block-unsupported { color: var(--muted); font-style: italic; }
-/* An ATTACHED IMAGE is drawn at its own size, but never wider than the bubble
-   it sits in: an unconstrained `<img>` of a screenshot is a couple of thousand
-   pixels wide and would push the bubble -- and with it the feed's column --
-   off the panel. `height: auto` keeps the aspect ratio while the width is
-   capped, and the block display puts it on its own line beneath the words
-   rather than in their flow. */
+/* AN IMAGE IS A THUMBNAIL (owner ruling, 2026-10-14): every image, large or
+   small, is scaled to the same fixed height -- the height the Emacs input
+   window draws it at (`agent-repl-image-thumbnail-height') -- and never wider
+   than the bubble it sits in. `object-fit: contain' keeps the aspect ratio
+   when the width cap bites, and the block display puts it on its own line
+   between the words around it. */
 .prompt-block-image {
   display: block;
+  height: 120px;
+  width: auto;
   max-width: 100%;
-  height: auto;
+  object-fit: contain;
+  object-position: left center;
   margin-top: 0.35rem;
   border-radius: 3px;
+}
+/* An image whose file is gone (its worktree was deleted): said, in its place. */
+.prompt-block-image-missing {
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-style: italic;
 }
 
 /* ---- held section (src/held) ------------------------------------------ */
@@ -8826,6 +8835,51 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 .merge-updating-main { padding: 0.15rem 0; }
 /* The tests tab's log line sits under its suites. */
 .merge-test-log { padding-top: 0.3rem; color: var(--muted); }
+
+/* ---- image overlay (src/image-overlay/image-overlay.ts) ---- */
+
+/* AN IMAGE OPEN OVER THE FEED (owner ruling, 2026-10-22) sits over the feed's
+   streaming area, just shy of it: the fixed host is kept on #feed-scroll's
+   rectangle, and its padding (the feed's own 1rem column inset, less at the
+   top and bottom) keeps the frame inside the column the rows span, so the rows
+   stay visible around its edge. Over the news digest (44), under the login
+   overlay (50). A click anywhere on it closes it. */
+[data-component="image-overlay"] {
+  position: fixed;
+  z-index: 45;
+  display: flex;
+  box-sizing: border-box;
+  padding: 0.75rem 1rem;
+  cursor: zoom-out;
+}
+[data-component="image-overlay"][hidden] {
+  display: none;
+}
+.image-overlay-frame {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 0.78);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
+}
+/* The image as large as fits the frame, aspect kept, never stretched past
+   its own size. */
+.image-overlay-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.image-overlay-missing {
+  color: var(--muted);
+  font-style: italic;
+}
 
 /* ---- news digest overlay (src/news-digest/news-digest.ts) ---- */
 

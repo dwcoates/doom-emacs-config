@@ -15,6 +15,7 @@ import {
   commandLifecycleOf,
   peerAddressLabel,
   peerDeclarationOf,
+  peerContent,
   peerEnvelope,
   peerHoldOf,
   permissionClassOf,
@@ -147,6 +148,30 @@ describe("peerEnvelope", () => {
     const envelope = peerEnvelope("hi", { from: "agent-repl:x", fromName: 'a "b" <c>\nd & e' });
     // Assert
     expect(envelope.split("\n")[0]).toBe('<cross-session-message from="agent-repl:x" from-name="a &quot;b&quot; &lt;c&gt; d &amp; e">');
+  });
+});
+
+describe("peerContent", () => {
+  const peer = { from: "agent-repl:ws-1" };
+
+  it("is the envelope's string for words alone, exactly as peerEnvelope spells it", () => {
+    expect(peerContent("hi", peer)).toBe(peerEnvelope("hi", peer));
+  });
+
+  it("puts the envelope's tags around a block list, every block kept in its place", () => {
+    // Arrange
+    const image = { type: "image" as const, source: { type: "url" as const, url: "https://example.invalid/a.png" } };
+
+    // Act
+    const content = peerContent([{ type: "text", text: "look" }, image], peer);
+
+    // Assert
+    expect(content).toEqual([
+      { type: "text", text: '<cross-session-message from="agent-repl:ws-1">' },
+      { type: "text", text: "look" },
+      image,
+      { type: "text", text: "</cross-session-message>" },
+    ]);
   });
 });
 

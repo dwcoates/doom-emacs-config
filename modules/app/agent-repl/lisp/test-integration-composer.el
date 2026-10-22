@@ -50,8 +50,8 @@
 (defvar agent-repl-host-update-functions)
 (defvar agent-repl-send-postfix)
 (defvar agent-repl-send-prefix)
-;; Buffer-local var of the same name as the accessor function above.
-(defvar agent-repl-input-attachments)
+(declare-function agent-repl--read-input-buffer "input")
+(defvar agent-repl--image-marker-text)
 
 ;;;; ---- Fixtures ----
 
@@ -137,6 +137,15 @@ the wait before this scenario's own push has actually been delivered."
     (delq nil (mapcar (lambda (block)
                         (agent-repl-itest--body-field block 'image 'path 'path))
                       blocks))))
+
+(defun agent-repl-itest-composer--image (name)
+  "Write a pasted image NAME into the fixture workspace and return its path.
+A real file: the composer refuses to send an image whose file is gone."
+  (let ((path (expand-file-name (concat ".claude/emacs/images/" name)
+                                agent-repl-itest-composer--dir)))
+    (make-directory (file-name-directory path) t)
+    (with-temp-file path (insert "image-bytes"))
+    path))
 
 (defun agent-repl-itest-composer--make-buffer (ws text)
   "Create a live `agent-repl-input-mode' buffer for WS containing TEXT.
@@ -545,12 +554,12 @@ PROMPT_ORIGIN_USER_SENT_WITH_PREFIX -- its ONE production site."
 (ert-deftest agent-repl-itest-composer-attached-image-travels-as-a-path-block ()
   "A pasted image travels as `ImageBlock{path}' beside the text.
 Ruled at kickoff: pasted images travel as ImageBlock{path}; the composer
-keeps the attachment list per buffer and clears it on a successful send."
+holds each one as a character of its own text."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+      (let ((image (agent-repl-itest-composer--image "pasted.png"))
             (buf (agent-repl-itest-composer--make-buffer
                   agent-repl-itest-composer--ws "look at this")))
         (unwind-protect
@@ -572,7 +581,7 @@ WHERE the bytes are, the media type says WHAT they are."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+      (let ((image (agent-repl-itest-composer--image "pasted.png"))
             (buf (agent-repl-itest-composer--make-buffer
                   agent-repl-itest-composer--ws "look at this")))
         (unwind-protect
@@ -590,14 +599,13 @@ WHERE the bytes are, the media type says WHAT they are."
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 (ert-deftest agent-repl-itest-composer-attachments-clear-after-a-successful-turn-send ()
-  "Attachments clear on a successful `turn' send: the NEXT send has none.
-§10: the attachment list is \"cleared on a successful send\" -- a second
-submit that still carried the first image would resend it twice."
+  "Images clear with the composer on a `turn' send: the NEXT send has none.
+A second submit that still carried the first image would resend it twice."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+      (let ((image (agent-repl-itest-composer--image "pasted.png"))
             (buf (agent-repl-itest-composer--make-buffer
                   agent-repl-itest-composer--ws "look at this")))
         (unwind-protect
@@ -609,18 +617,11 @@ submit that still carried the first image would resend it twice."
               (should (equal (agent-repl-itest-composer--image-paths
                               (agent-repl-itest-composer--submit-body daemon 0))
                              (list image)))
-              ;; THE CLEARING IS A CONSEQUENCE OF THE ANSWER, NOT OF THE
-              ;; REQUEST LANDING.  `--await-call' proves only that the
-              ;; daemon recorded the submit; input.el empties the
-              ;; attachment list in the success callback, which runs when
-              ;; the answer arrives.  A second send issued on the strength
-              ;; of the recorded call alone races that callback and
-              ;; sometimes re-sends the very image this test exists to
-              ;; prove is gone -- so the wait is for the observable
-              ;; consequence, not for the request.
+              ;; The wait is for the observable consequence -- the composer
+              ;; holding no image -- not for the request landing.
               (agent-repl-itest--wait-until
-               (lambda () (null (buffer-local-value 'agent-repl-input-attachments buf)))
-               nil "the first send's attachments to clear")
+               (lambda () (null (agent-repl-input-attachments agent-repl-itest-composer--ws)))
+               nil "the first send's images to clear")
               ;; Act: second send, nothing newly attached.
               (with-current-buffer buf (insert "and this"))
               (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
@@ -631,15 +632,14 @@ submit that still carried the first image would resend it twice."
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 (ert-deftest agent-repl-itest-composer-attachments-survive-a-merging-refusal ()
-  "A `merging' refusal must not clear the attachment: it was never delivered.
-§10: attachments clear ONLY on a successful send; a refused submission
-that dropped the image would silently lose it."
+  "A `merging' refusal must not lose the image: it was never delivered.
+A refused submission that dropped the image would silently lose it."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--script daemon "SubmitPrompt" '((error . ((merging . ())))))
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+      (let ((image (agent-repl-itest-composer--image "pasted.png"))
             (buf (agent-repl-itest-composer--make-buffer
                   agent-repl-itest-composer--ws "look at this")))
         (unwind-protect
@@ -650,7 +650,7 @@ that dropped the image would silently lose it."
               (agent-repl-itest--await-call daemon "SubmitPrompt")
               (agent-repl-itest-composer--await-log daemon "elisp.input.refused-merging" "warn")
               ;; Assert: the attachment SURVIVES the refusal.
-              (should (equal (with-current-buffer buf agent-repl-input-attachments)
+              (should (equal (agent-repl-input-attachments agent-repl-itest-composer--ws)
                              (list (list :path image :media-type "image/png")))))
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
@@ -662,8 +662,8 @@ in the order the person composed them -- attach order, not reverse."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let* ((first (expand-file-name "first.png" agent-repl-itest-composer--dir))
-             (second (expand-file-name "second.jpg" agent-repl-itest-composer--dir))
+      (let* ((first (agent-repl-itest-composer--image "first.png"))
+             (second (agent-repl-itest-composer--image "second.jpg"))
              (buf (agent-repl-itest-composer--make-buffer
                    agent-repl-itest-composer--ws "compare these")))
         (unwind-protect
@@ -686,6 +686,36 @@ in the order the person composed them -- attach order, not reverse."
                                second))
                 (should (equal (agent-repl-itest--body-field (nth 2 blocks) 'image 'mediaType)
                                "image/jpeg"))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+(ert-deftest agent-repl-itest-composer-images-travel-in-their-place-among-the-words ()
+  "Images pasted between words reach the daemon in their places among them."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let* ((first (agent-repl-itest-composer--image "first.png"))
+             (second (agent-repl-itest-composer--image "second.png"))
+             (buf (agent-repl-itest-composer--make-buffer
+                   agent-repl-itest-composer--ws "this ")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (with-current-buffer buf
+                (agent-repl-input-attach-image first "image/png")
+                (insert " versus ")
+                (agent-repl-input-attach-image second "image/png")
+                (insert " which is better?"))
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert.
+              (let* ((body (agent-repl-itest-composer--submit-body daemon))
+                     (blocks (agent-repl-itest--body-field body 'said 'content 'blocks)))
+                (should (equal (mapcar #'caar blocks) '(text image text image text)))
+                (should (equal (agent-repl-itest-composer--text-blocks body)
+                               '("this " " versus " " which is better?")))
+                (should (equal (agent-repl-itest-composer--image-paths body)
+                               (list first second)))))
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 (ert-deftest agent-repl-itest-composer-success-turn-runs-the-send-posthooks ()
@@ -1200,7 +1230,7 @@ the arm is HANDLED now, and the record this waits on says so."
         (unwind-protect
             (progn
               (with-current-buffer buf
-                (agent-repl-input-attach-image "/tmp/itest-shot.png" "image/png"))
+                (agent-repl-input-attach-image (agent-repl-itest-composer--image "itest-shot.png") "image/png"))
               (setq agent-repl-send-posthooks
                     (list (cons "" (lambda (_ws _raw) (setq ran t)))))
               ;; Act.
@@ -1209,7 +1239,8 @@ the arm is HANDLED now, and the record this waits on says so."
               (agent-repl-itest-composer--await-log
                daemon "elisp.input.refused-no-session" "warn")
               ;; Assert.
-              (should (equal (with-current-buffer buf (buffer-string)) "run the tests"))
+              (should (equal (agent-repl--read-input-buffer agent-repl-itest-composer--ws)
+                             "run the tests"))
               (should (agent-repl-input-attachments agent-repl-itest-composer--ws))
               (should (null ran)))
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
@@ -1618,7 +1649,7 @@ send-empty, and must carry no TextBlock at all."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+      (let ((image (agent-repl-itest-composer--image "pasted.png"))
             (buf (agent-repl-itest-composer--make-buffer agent-repl-itest-composer--ws "")))
         (unwind-protect
             (progn
@@ -1644,7 +1675,7 @@ daemon, not Emacs, holds it until the running turn ends (owner ruling,
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+      (let ((image (agent-repl-itest-composer--image "pasted.png"))
             (buf (agent-repl-itest-composer--make-buffer
                   agent-repl-itest-composer--ws "queue this for later")))
         (unwind-protect
@@ -1657,9 +1688,9 @@ daemon, not Emacs, holds it until the running turn ends (owner ruling,
               ;; Assert: composer emptied, attachments cleared.
               (should (equal (with-current-buffer buf (buffer-string)) ""))
               (should (null (agent-repl-input-attachments agent-repl-itest-composer--ws)))
-              ;; Assert: history carries the raw text.
+              ;; Assert: history carries what the composer held, image and all.
               (should (equal (car (buffer-local-value 'agent-repl--input-history buf))
-                             "queue this for later"))
+                             (concat "queue this for later" agent-repl--image-marker-text)))
               ;; Assert: ONE submission, deferred, with BOTH text and image.
               (let ((body (agent-repl-itest-composer--submit-body daemon)))
                 (should (equal (length (agent-repl-itest--calls daemon "SubmitPrompt")) 1))

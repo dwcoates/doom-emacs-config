@@ -72,6 +72,10 @@
          follows #feed-scroll's rectangle) in every webview while it stands.
          Hidden until the daemon pushes a digest. -->
     <div id="news-digest" data-component="news-digest" hidden></div>
+    <!-- The image open over the feed: drawn over the FEED's streaming area
+         (it follows #feed-scroll's rectangle). Hidden until the daemon pushes
+         an open image. -->
+    <div id="image-overlay" data-component="image-overlay" hidden></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

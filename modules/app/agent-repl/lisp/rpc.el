@@ -117,6 +117,8 @@
 (declare-function agent-repl-wire-encode-edit-held-prompt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-edit-held-prompt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-decode-select-feed-row-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-open-feed-image-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-open-feed-image-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-update-question-draft-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-update-question-draft-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-answer-permission-request "wire-verbs" (request))
@@ -530,6 +532,15 @@ the newest row and `:newer' at the oldest; `:older' wraps past the oldest,
 and `:newer' past the newest ends the selection at the feed's tail),
 pushes the result to the webapp and to the host watch, and acks the
 outcome here.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-open-feed-image
+  "OpenFeedImage"
+  agent-repl-wire-encode-open-feed-image-request
+  agent-repl-wire-decode-open-feed-image-response
+  "Open one image large over a workspace's feed.
+The request carries the workspace ref and the image: from Emacs, the
+composer's ImageBlock.  The daemon holds the workspace's overlay and pushes
+it to the webapp on the root feed's watch; the ack is empty.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-plan-rollback
   "PlanRollback"

@@ -36,6 +36,7 @@ import {
 import { EXPANDED_CLASS } from "../src/expand.js";
 import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../src/bubble/quote.js";
+import { BUBBLE_EXPANDED_ONLY_CLASS } from "../src/bubble/expanded-only.js";
 import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, isOwnRule, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
@@ -3914,29 +3915,51 @@ describe("the bubble's expand-only region", () => {
 });
 
 /**
- * A REPLY'S QUOTE (src/bubble/quote.ts): a block in a prompt bubble's body
- * that shows only while the one toggle has the bubble's own box open.
+ * AN EXPANDED-ONLY BLOCK (src/bubble/expanded-only.ts): a reply's quote or an
+ * image in a prompt bubble's body, shown only while the one toggle has the
+ * bubble's own box open.
  */
-describe("a reply's quote in a prompt bubble", () => {
+describe("an expanded-only block in a prompt bubble", () => {
+  /** Every rule whose selector names the expanded-only class. */
+  const expandedOnlyRules = (): CssRule[] =>
+    rulesOf(stylesheet).filter((rule) => rule.selectors.some((sel) => sel.includes(`.${BUBBLE_EXPANDED_ONLY_CLASS}`)));
+
+  it("hides the block only in the body of a scroll box that is not expanded", () => {
+    // Arrange / Act
+    const selectors = expandedOnlyRules().flatMap((rule) => rule.selectors);
+    // Assert
+    expect(selectors).toEqual([`.bubble-scroll:not(.expanded) > .bubble-body > .${BUBBLE_EXPANDED_ONLY_CLASS}`]);
+  });
+
+  it("takes the hidden block out of layout", () => {
+    // Arrange / Act
+    const declarations = expandedOnlyRules().map((rule) => rule.declarations.trim());
+    // Assert
+    expect(declarations).toEqual(["display: none;"]);
+  });
+});
+
+/**
+ * A FEED PROMPT'S QUOTE, drawn from its parts (src/bubble/quote.ts): its
+ * heading shows folded, and every other part hides with the fold.
+ */
+describe("a feed prompt's quote parts", () => {
   /** Every rule whose selector names the quote class. */
   const quoteRules = (): CssRule[] =>
     rulesOf(stylesheet).filter((rule) => rule.selectors.some((sel) => sel.includes(`.${BUBBLE_QUOTE_CLASS}`)));
 
-  it("hides the quote only in the body of a scroll box that is not expanded", () => {
+  it("hides every part but the heading in the body of a scroll box that is not expanded", () => {
     // Arrange / Act
     const selectors = quoteRules().flatMap((rule) => rule.selectors);
     // Assert
-    expect(selectors).toEqual([
-      `.bubble-scroll:not(.expanded) > .bubble-body > .${BUBBLE_QUOTE_CLASS}`,
-      `.bubble-scroll:not(.expanded) > .bubble-body > .${QUOTE_PARTS_CLASS} .${BUBBLE_QUOTE_CLASS}`,
-    ]);
+    expect(selectors).toEqual([`.bubble-scroll:not(.expanded) > .bubble-body > .${QUOTE_PARTS_CLASS} .${BUBBLE_QUOTE_CLASS}`]);
   });
 
-  it("takes the hidden quote out of layout", () => {
+  it("takes the hidden parts out of layout", () => {
     // Arrange / Act
     const declarations = quoteRules().map((rule) => rule.declarations.trim());
     // Assert
-    expect(declarations).toEqual(["display: none;", "display: none;"]);
+    expect(declarations).toEqual(["display: none;"]);
   });
 
   it("draws the quote's heading and closing marker smaller than the prompt's words", () => {

@@ -21,9 +21,12 @@
 ;;                   arm's composer oneof into one keyword and this file
 ;;                   draws the FIXED treatment per arm (see
 ;;                   `agent-repl--input-gate-refusals').
-;;   UserSaid        one TextBlock for the composed text plus one
-;;                   ImageBlock{path, media_type} per image attached
-;;                   through `clipboard-image.el'.
+;;   UserSaid        the composer's contents IN ORDER: each run of words
+;;                   one TextBlock, each pasted image one
+;;                   ImageBlock{path, media_type} in its place among them
+;;                   (`agent-repl--input-said').  The buffer IS the
+;;                   composition: an image is one marker character in the
+;;                   text (`clipboard-image.el'), never a list kept beside it.
 ;;   SubmitPrompt    `(:said SAID :idempotency-key UUID :origin ORIGIN
 ;;                   :workspace REF)'.  All four are required; the origin
 ;;                   names THIS send site and the workspace ref is the
@@ -59,6 +62,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
 (require 'subr-x)
 
 (declare-function agent-repl-webhost-dismiss-digest "webhost" (ws))
@@ -117,11 +121,12 @@
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-rpc-submit-prompt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-select-feed-row "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-open-feed-image "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-plan-rollback-sync "agent-repl-rpc" (conn request &optional timeout))
 (declare-function agent-repl-rpc-roll-back "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-list-rollback-prompts-sync "agent-repl-rpc" (conn request &optional timeout))
 (declare-function agent-repl--format-summary-relative-time "agent-repl-prompt-summary" (sent-at &optional now))
-(declare-function agent-repl--image-insert-marker "clipboard-image" (path &optional ws))
+(declare-function agent-repl-input-attach-image "clipboard-image" (path media-type))
 (declare-function agent-repl-held-edit-active-p "held-edit" (ws))
 (declare-function agent-repl-held-edit-commit "held-edit" (ws said snapshot))
 (declare-function agent-repl-held-edit-cancel "held-edit" (ws))
@@ -223,14 +228,6 @@ composer could not hand to a live daemon sit in the durable ingress
 and never replaced by it: a refusal flash must not hide that prompts are
 still owed.")
 
-(defvar-local agent-repl-input-attachments nil
-  "Images attached to this composer, oldest first.
-Each element is the plist `(:path ABSOLUTE-PATH :media-type MIME)'.
-`clipboard-image.el' appends to this list when the user attaches a
-pasteboard image; `agent-repl--send' turns each entry into one
-`ImageBlock' beside the text block and clears the list on a submission
-the daemon accepted.")
-
 (defvar-local agent-repl--input-flash-timer-key nil
   "Unique core timer-registry key for this composer's notice dwell.")
 
@@ -314,51 +311,53 @@ one is skipped), stop any history browsing, and persist the ring."
 
 ;;;; ---- Filling the composer from what a person said -------------------
 
-(defun agent-repl--input-said-text (said)
-  "Return the words of SAID (a decoded `UserSaid').
-Its text blocks, joined in order by newlines."
-  (mapconcat (lambda (block) (plist-get (plist-get block :value) :text))
-             (cl-remove-if-not (lambda (block) (eq (plist-get block :arm) :text))
-                               (plist-get (plist-get said :content) :blocks))
-             "\n"))
-
-(defun agent-repl--input-said-attachments (said)
-  "Return SAID's image blocks as composer attachments, and what cannot be one.
-The answer is the plist (:attachments LIST :dropped N).  A composer
-attachment is a host PATH, `(:path :media-type)'; an image by URL, or a
-block this schema does not model, cannot be put into the composer, and is
-counted in N instead."
-  (let ((attachments nil)
-        (dropped 0))
+(defun agent-repl--input-said-parts (said)
+  "Return SAID's blocks as composer PARTS, and what cannot be one.
+The answer is the plist (:parts LIST :dropped N).  PARTS are in SAID's
+order (see `agent-repl--input-parts'): each text block its words, two
+adjacent text blocks joined by a newline, and each image by host PATH
+the plist `(:path :media-type)'.  An image by URL, or any other block,
+cannot be put into the composer, and is counted in N instead."
+  (let ((parts nil)
+        (dropped 0)
+        (after-text nil))
     (dolist (block (plist-get (plist-get said :content) :blocks))
       (pcase (plist-get block :arm)
-        (:text nil)
+        (:text
+         (let ((text (plist-get (plist-get block :value) :text)))
+           (if after-text
+               (setcar parts (concat (car parts) "\n" text))
+             (push text parts))
+           (setq after-text t)))
         (:image
          (let* ((image (plist-get block :value))
                 (location (plist-get image :location)))
            (if (eq (plist-get location :arm) :path)
-               (push (list :path (plist-get (plist-get location :value) :path)
-                           :media-type (plist-get image :media-type))
-                     attachments)
+               (progn
+                 (push (list :path (plist-get (plist-get location :value) :path)
+                             :media-type (plist-get image :media-type))
+                       parts)
+                 (setq after-text nil))
              (cl-incf dropped))))
         (_ (cl-incf dropped))))
-    (list :attachments (nreverse attachments) :dropped dropped)))
+    (list :parts (nreverse parts) :dropped dropped)))
 
-(defun agent-repl--input-fill-said (ws buf said attachments)
-  "Replace composer BUF's contents with SAID's words and ATTACHMENTS, for WS.
-ATTACHMENTS are `(:path :media-type)' plists; each is attached and its
-marker drawn, as a pasted image is."
+(defun agent-repl--input-fill-said (ws buf said parts)
+  "Replace composer BUF's contents with SAID's PARTS, for WS.
+PARTS come from `agent-repl--input-said-parts': each string is inserted
+as words and each image is attached in its place, as a pasted one is."
   (with-current-buffer buf
     (let ((agent-repl--history-navigating t))
       (erase-buffer)
-      (insert (agent-repl--input-said-text said))
-      (setq agent-repl-input-attachments nil)
-      (dolist (attachment attachments)
-        (goto-char (point-max))
-        (agent-repl-input-attach-image (plist-get attachment :path)
-                                       (plist-get attachment :media-type))
-        (agent-repl--image-insert-marker (plist-get attachment :path) ws))
-      (goto-char (point-max)))))
+      (dolist (part parts)
+        (if (stringp part)
+            (insert part)
+          (agent-repl-input-attach-image (plist-get part :path)
+                                         (plist-get part :media-type))))
+      (goto-char (point-max))
+      (agent-repl--log ws "elisp.input.filled ws=%s turn-blocks=%d parts=%d"
+                       ws (length (plist-get (plist-get said :content) :blocks))
+                       (length parts)))))
 
 (defun agent-repl-discard-input ()
   "Save current input to history, clear the buffer, and enter insert state.
@@ -375,7 +374,6 @@ edit's CANCEL: the held prompt keeps its content and the queue resumes
       (agent-repl-held-edit-cancel ws))
     (agent-repl--input-save-to-history ws t)
     (erase-buffer)
-    (setq agent-repl-input-attachments nil)
     (when (fboundp 'evil-insert-state) (evil-insert-state))))
 
 ;;;; ---- Unsent input across an Emacs restart ----------------------------
@@ -502,66 +500,82 @@ the timer fires."
          (run-at-time agent-repl-input-flash-seconds nil
                       #'agent-repl--input-expire-flash ws buffer text))))))
 
-;;;; ---- Attachments -----------------------------------------------------
+;;;; ---- Images in the composer ------------------------------------------
 
 (defconst agent-repl--input-image-marker-property 'agent-repl-image-marker
-  "Text property naming a span of composer text as an ATTACHMENT MARKER.
-Its value is the attached image's path.  `clipboard-image.el' puts it
-over the marker line it draws (and that line's newline), and
-`agent-repl--read-input-buffer' drops every span carrying it -- so the
-marker is DRAWN and never SENT.  The image travels as its own
-`ImageBlock'; a marker riding the words would leave the agent reading a
-filename it was never meant to see.
+  "Text property naming one composer character as an attached IMAGE.
+Its value is the plist `(:path ABSOLUTE-PATH :media-type MIME)'.
+`clipboard-image.el' inserts one such character per image, drawn as the
+image itself, and `agent-repl--input-parts' reads each one back as an
+image in its place among the words -- so the image is SENT as its own
+`ImageBlock' and never as words.  A marker riding the words would leave
+the agent reading a filename it was never meant to see.
 
-Declared here, in the file that loads first and does the stripping, so
-one name serves both sides.  A TEXT PROPERTY rather than the thumbnail
-overlay: the overlay exists only when a thumbnail could be drawn, and a
-TTY frame gets none while still needing the marker stripped.")
+THE BUFFER IS THE ONLY RECORD.  There is no attachment list kept beside
+the text: deleting the character detaches the image, killing and yanking
+it moves the image, and the order the user composed is the order the
+characters stand in.  A list kept beside the text could disagree with it.
 
-(defun agent-repl-input-attach-image (path media-type)
-  "Register PATH (MIME MEDIA-TYPE) as an image attached to THIS composer.
-The ONE entry point that attaches an image: `clipboard-image.el' calls it
-after capturing the pasteboard, and it operates on the CURRENT buffer,
-which must be a composer.  Returns the resulting attachment list.
+Declared here, in the file that loads first and does the reading, so one
+name serves both sides.")
 
-The file is NOT read here: an `ImageBlock' carries a REFERENCE, and the
-daemon and the shim run on this same host, so the path is the whole
-payload."
-  (unless (derived-mode-p 'agent-repl-input-mode)
-    (agent-repl--fatal '(:agent-repl-central "the attachment request has no composer workspace")
-                       "elisp.input.attach-outside-composer buffer=%s path=%s"
-                       (buffer-name) path))
-  (let ((ws (agent-repl--buffer-owner (current-buffer))))
-    (setq agent-repl-input-attachments
-          (append agent-repl-input-attachments
-                  (list (list :path path :media-type media-type))))
-    (agent-repl--info ws "elisp.input.attached ws=%s path=%s media-type=%s count=%d"
-                      ws path media-type (length agent-repl-input-attachments))
-    agent-repl-input-attachments))
+(defun agent-repl--input-parts ()
+  "Return the current composer's contents as ordered PARTS.
+Each part is a string of words or an image plist `(:path :media-type)',
+in buffer order; adjacent words form one string.  EVERY marker character
+is its own image, even when two neighbors carry the same plist (a yanked
+copy of an image shares its original's)."
+  (let ((pos (point-min))
+        (end (point-max))
+        (parts nil))
+    (while (< pos end)
+      (let ((image (get-text-property pos agent-repl--input-image-marker-property))
+            (next (next-single-property-change
+                   pos agent-repl--input-image-marker-property nil end)))
+        (if image
+            (dotimes (_ (- next pos)) (push image parts))
+          (push (buffer-substring-no-properties pos next) parts))
+        (setq pos next)))
+    (nreverse parts)))
+
+(defun agent-repl--input-parts-text (parts)
+  "Return the words of PARTS, every image left out."
+  (apply #'concat (seq-filter #'stringp parts)))
+
+(defun agent-repl--input-parts-images (parts)
+  "Return the images of PARTS, in order."
+  (seq-remove #'stringp parts))
+
+(defun agent-repl--input-image-present-p (path)
+  "Return non-nil when the image file at PATH still exists.
+The ONE existence check an image in the composer is judged by -- how it
+is drawn (`agent-repl--image-decorate') and whether it may be sent
+\(`agent-repl--input-refuse-missing-images') -- so the two never disagree."
+  (file-exists-p path))
+
+(defun agent-repl--input-refuse-missing-images (ws parts)
+  "Refuse to send PARTS for WS when an image among them has no file any more.
+An image whose worktree was deleted is drawn as no longer available, and
+sending it would only have the vendor refuse the whole turn; so the send
+stops HERE, before the composer is touched, naming each missing file.
+Recorded at info -- a deleted worktree is the user's own act -- and
+signalled as a `user-error'."
+  (let ((missing (seq-remove #'agent-repl--input-image-present-p
+                             (mapcar (lambda (image) (plist-get image :path))
+                                     (agent-repl--input-parts-images parts)))))
+    (when missing
+      (agent-repl--info ws "elisp.input.send-refused-missing-images ws=%s paths=%S" ws missing)
+      (user-error "agent-repl: %s no longer available (%s); delete %s to send"
+                  (if (cdr missing) "these images are" "this image is")
+                  (mapconcat #'file-name-nondirectory missing ", ")
+                  (if (cdr missing) "them" "it")))))
 
 (defun agent-repl-input-attachments (&optional ws)
-  "Return the images attached to a composer, oldest first.
-With WS, reads WS's composer; without it, THIS buffer's own list -- the
-send pipeline knows which workspace it is submitting for, while a caller
-already inside the composer does not have to say so."
-  (if (null ws)
-      agent-repl-input-attachments
-    (let ((buf (agent-repl--input-buffer ws)))
-      (if buf
-          (buffer-local-value 'agent-repl-input-attachments buf)
-        (agent-repl--log ws "elisp.input.attachments-no-buffer ws=%s" ws)
-        nil))))
-
-(defun agent-repl-input-clear-attachments (ws)
-  "Drop every image attached to WS's composer.
-Run only after the daemon ACCEPTED the submission: an attachment cleared
-on a refusal would be silently lost user intent."
-  (let ((buf (agent-repl--input-buffer ws)))
-    (when buf
-      (with-current-buffer buf
-        (agent-repl--log ws "elisp.input.attachments-cleared ws=%s count=%d"
-                         ws (length agent-repl-input-attachments))
-        (setq agent-repl-input-attachments nil)))))
+  "Return the images in a composer, in order.
+With WS, reads WS's composer; without it, THIS buffer.  Read from the
+buffer's own text, because the text is the only record of them."
+  (agent-repl--input-parts-images
+   (if ws (agent-repl--read-input-parts ws) (agent-repl--input-parts))))
 
 ;;;; ---- Feed selection (reply to a response, roll back to a prompt) -------
 ;;
@@ -843,6 +857,32 @@ under DETAIL-NAME, so a log line names what was asked."
                            ws detail failure)
          (agent-repl--input-flash ws (format "%s: the daemon did not answer" prefix)))))))
 
+(defun agent-repl--input-open-feed-image (ws image)
+  "Ask the daemon to open IMAGE large over WS's feed, and report how it went.
+IMAGE is a composer image (:path :media-type).  The daemon holds the
+workspace's overlay and pushes it to the webapp, which draws it over the
+feed's rows (`OpenFeedImage'); THE ONE SEND of a composer image click (see
+`agent-repl--input-call')."
+  (let ((path (plist-get image :path)))
+    (agent-repl--input-call
+     ws :op "open-feed-image"
+     :prefix "image"
+     :detail-name "path" :detail path
+     :rpc #'agent-repl-rpc-open-feed-image
+     :request (lambda (ref)
+                (list :workspace ref
+                      :image (list :arm :composer
+                                   :value (list :image (plist-get (agent-repl--input-image-block image)
+                                                                  :value)))))
+     :on-success
+     (lambda (_value)
+       (agent-repl--info ws "elisp.input.open-feed-image-answered ws=%s path=%s" ws path))
+     :on-refused
+     (lambda (cause)
+       (pcase (plist-get cause :arm)
+         (:unservable (format "cannot be shown (%s)" (plist-get (plist-get cause :value) :detail)))
+         (_ "not shown"))))))
+
 (defun agent-repl--input-select-feed-row (ws move)
   "Send the `SelectFeedRow' MOVE for WS and report how it went.
 MOVE is (:arm ARM :value V): ARM `:turn-boundary' with V
@@ -992,27 +1032,28 @@ rollback did not happen and the key must be pressed again."
 (defun agent-repl--input-rollback-done (ws success)
   "Refill WS's composer from the RollBack SUCCESS and say it is done.
 The composer's contents go to its history first, as a discard saves them;
-then it holds the rolled-back prompt's words and path attachments.  An
-image by URL (or a block the composer cannot hold) is dropped: logged at
-WARN and flashed, never silently lost."
+then it holds the rolled-back prompt's words and path images, in their
+order.  An image by URL (or a block the composer cannot hold) is dropped:
+logged at WARN and flashed, never silently lost."
   (let* ((said (plist-get success :prompt))
-         (images (agent-repl--input-said-attachments said))
-         (dropped (plist-get images :dropped))
+         (filled (agent-repl--input-said-parts said))
+         (parts (plist-get filled :parts))
+         (dropped (plist-get filled :dropped))
          (restored (plist-get success :files-restored))
          (buf (agent-repl--input-buffer ws)))
     (if (null buf)
         (agent-repl--warn ws "elisp.input.rollback-no-composer ws=%s" ws)
       (with-current-buffer buf
         (agent-repl--input-save-to-history ws))
-      (agent-repl--input-fill-said ws buf said (plist-get images :attachments)))
+      (agent-repl--input-fill-said ws buf said parts))
     (when (> dropped 0)
       (agent-repl--warn ws "elisp.input.rollback-attachments-dropped ws=%s count=%d" ws dropped)
       (agent-repl--input-flash
        ws (format "rollback: %s could not be attached and %s dropped"
                   (agent-repl--input-rollback-plural dropped "image" "images")
                   (if (= dropped 1) "was" "were"))))
-    (agent-repl--info ws "elisp.input.rollback-done ws=%s attachments=%d dropped=%d files-restored=%S"
-                      ws (length (plist-get images :attachments)) dropped
+    (agent-repl--info ws "elisp.input.rollback-done ws=%s images=%d dropped=%d files-restored=%S"
+                      ws (length (agent-repl--input-parts-images parts)) dropped
                       (and restored (plist-get restored :files)))
     (message "%s" (if restored
                       (format "rollback: done, %s restored"
@@ -1415,21 +1456,36 @@ that copy; otherwise fall back to the canonical file."
         agent-repl--command-prefix
       (format agent-repl-command-prefix-template file))))
 
-(defun agent-repl--prepare-input (ws raw &optional force-metaprompt)
-  "Compose the text WS actually submits from RAW.
+(defun agent-repl--input-prefix (ws raw &optional force-metaprompt)
+  "Return the text WS's submission of RAW is prefixed with, or \"\".
 PROMPT COMPOSITION IS FREE: everything this function does happens BEFORE
 submission, and what is submitted is what is drawn.  The read-directive
-is prepended ONLY when FORCE-METAPROMPT is non-nil, bracketed as a
+is the prefix ONLY when FORCE-METAPROMPT is non-nil, bracketed as a
 harness-injected span (`agent-repl--meta-wrap') so the daemon strips it
 from the DRAWN row while the agent still receives it verbatim.  The
 agent API finds the asking workspace from the agent's working directory,
-so a prompt carries no workspace tag of its own."
+so a prompt carries no workspace tag of its own.  THE ONE FRAMING both
+`agent-repl--prepare-input' (words) and `agent-repl--prepare-input-parts'
+\(words and images) apply."
   (let ((prepend-p (agent-repl--should-prepend-metaprompt-p raw force-metaprompt ws)))
     (agent-repl--log ws "elisp.input.prepare raw-len=%d force=%s prepend=%s"
                      (length raw) force-metaprompt prepend-p)
     (if prepend-p
-        (concat (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "\n\n" raw)
-      raw)))
+        (concat (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "\n\n")
+      "")))
+
+(defun agent-repl--prepare-input (ws raw &optional force-metaprompt)
+  "Compose the text WS actually submits from RAW.
+RAW behind `agent-repl--input-prefix'."
+  (concat (agent-repl--input-prefix ws raw force-metaprompt) raw))
+
+(defun agent-repl--prepare-input-parts (ws parts &optional force-metaprompt)
+  "Compose the PARTS WS actually submits from the composed PARTS.
+PARTS are words and images (`agent-repl--input-parts'); the prefix of
+their words (`agent-repl--input-prefix') is put before the first part,
+so the images keep their places among the words."
+  (cons (agent-repl--input-prefix ws (agent-repl--input-parts-text parts) force-metaprompt)
+        parts))
 
 ;;;; ---- Identity --------------------------------------------------------
 
@@ -1517,28 +1573,38 @@ naming one is refused before a request is built.")
   "Return the `UserContentBlock' text arm for TEXT."
   (list :arm :text :value (list :text text)))
 
-(defun agent-repl--input-image-block (attachment)
-  "Return the `UserContentBlock' image arm for ATTACHMENT.
+(defun agent-repl--input-image-block (image)
+  "Return the `UserContentBlock' image arm for IMAGE, a `(:path :media-type)'.
 The image travels by REFERENCE: an `ImageBlockPath' naming a file on this
 host, because the daemon and the shim read it from the same filesystem
 Emacs wrote it to."
   (list :arm :image
         :value (list :location (list :arm :path
-                                     :value (list :path (plist-get attachment :path)))
-                     :media-type (plist-get attachment :media-type))))
+                                     :value (list :path (plist-get image :path)))
+                     :media-type (plist-get image :media-type))))
 
-(defun agent-repl--input-said (text attachments)
-  "Build the `UserSaid' for TEXT plus ATTACHMENTS.
-Blocks travel in the order the person composed them: the words first,
-then each image in attachment order.  Empty TEXT contributes no block at
-all -- an image-only submission is a legitimate thing to say, and an empty
-`TextBlock' would be a sentinel for one."
-  (list :content
-        (list :blocks
-              (append
-               (unless (string-empty-p text)
-                 (list (agent-repl--input-text-block text)))
-               (mapcar #'agent-repl--input-image-block attachments)))))
+(defun agent-repl--input-said (parts)
+  "Build the `UserSaid' for PARTS, words and images in composed order.
+PARTS are strings and image plists (`agent-repl--input-parts').  Blocks
+travel in the order the person composed them: adjacent strings are one
+`TextBlock', and each image is one `ImageBlock' in its place.  Words that
+are only whitespace contribute no block at all -- an image-only
+submission is a legitimate thing to say, and a blank `TextBlock' would
+be a sentinel for one (the vendor refuses it, too)."
+  (let ((blocks nil)
+        (words nil))
+    (cl-flet ((flush ()
+                (let ((text (apply #'concat (nreverse words))))
+                  (setq words nil)
+                  (unless (string-blank-p text)
+                    (push (agent-repl--input-text-block text) blocks)))))
+      (dolist (part parts)
+        (if (stringp part)
+            (push part words)
+          (flush)
+          (push (agent-repl--input-image-block part) blocks)))
+      (flush))
+    (list :content (list :blocks (nreverse blocks)))))
 
 (defun agent-repl--input-optimistic-clear (ws raw)
   "Clear WS's composer and record RAW the instant a from-buffer prompt is sent.
@@ -1555,15 +1621,17 @@ durable held-prompt ingress (see `agent-repl--input-on-failure'), which is
 independent of the composer.  Between the ring and the ingress, the erased
 draft is always recoverable.
 
-ATTACHMENTS are cleared too: the submission carried them, so leaving them
-would re-send them on the next prompt.  The ring is persisted once here.
+The images go with the text, because they ARE text: each is a marker
+character the erase removes.  The ring records the composer's contents
+as they stood, images included, so recalling the entry brings them back.
+The ring is persisted once here.
 
-RETURNS A SNAPSHOT of everything this erased -- the composer's text and
-point, its attachments, and the history ring and browse index as they
+RETURNS A SNAPSHOT of everything this erased -- the composer's text (its
+images among it) and point, and the history ring and browse index as they
 stood BEFORE the push, with the unsent-discard marker the push may clear.
 `agent-repl--input-restore' puts it all back when
 the daemon REFUSES the submission, so a refused prompt is never in
-history and never costs the user their words.  (Regression watch: the
+history and never costs the user their words or images.  (Regression watch: the
 optimistic clear landed without a restore arm, and six composer
 integration scenarios read an empty composer after a refusal.)"
   (let ((buf (agent-repl--input-buffer ws))
@@ -1573,15 +1641,13 @@ integration scenarios read an empty composer after a refusal.)"
         (setq snapshot (list :buffer buf
                              :text (buffer-string)
                              :point (point)
-                             :attachments agent-repl-input-attachments
                              :history agent-repl--input-history
                              :history-index agent-repl--history-index
                              :discard-entry agent-repl--history-discard-entry))
-        (agent-repl--history-push raw)
+        (agent-repl--history-push (buffer-string))
         (agent-repl--history-reset)
         (erase-buffer)))
     (agent-repl--history-save ws)
-    (agent-repl-input-clear-attachments ws)
     (agent-repl--log ws "elisp.input.optimistic-clear ws=%s raw-len=%d buffer=%s"
                      ws (length raw) (and buf t))
     snapshot))
@@ -1589,10 +1655,11 @@ integration scenarios read an empty composer after a refusal.)"
 (defun agent-repl--input-restore (ws snapshot)
   "Put WS's composer back exactly as SNAPSHOT found it, after a REFUSAL.
 A refusal is the daemon saying the prompt did NOT land, so every trace of
-the optimistic clear is undone: the text and point return, the
-attachments return, and the history ring and browse index go back to
-their pre-push values -- a refused prompt is never in history.  The ring
-is re-persisted so the un-push survives a restart.
+the optimistic clear is undone: the text and point return (the images
+with it, since each is a character of it), and the history ring and
+browse index go back to their pre-push values -- a refused prompt is
+never in history.  The ring is re-persisted so the un-push survives a
+restart.
 
 SNAPSHOT is nil for any submission that was never taken from the composer
 (a canned command, a metaprompt read, a queue re-drive), and then this is
@@ -1612,14 +1679,13 @@ nothing to restore into."
           (erase-buffer)
           (insert text)
           (goto-char (min (plist-get snapshot :point) (point-max))))
-        (setq agent-repl-input-attachments (plist-get snapshot :attachments))
         (setq agent-repl--input-history (plist-get snapshot :history))
         (setq agent-repl--history-index (plist-get snapshot :history-index))
         (setq agent-repl--history-discard-entry (plist-get snapshot :discard-entry)))
       (agent-repl--history-save ws)
-      (agent-repl--log ws "elisp.input.restored ws=%s text-len=%d attachments=%d"
+      (agent-repl--log ws "elisp.input.restored ws=%s text-len=%d images=%d"
                        ws (length (plist-get snapshot :text))
-                       (length (plist-get snapshot :attachments)))))))
+                       (length (agent-repl-input-attachments ws)))))))
 
 (defun agent-repl--input-accepted (ws raw arm &optional from-buffer)
   "Finish an ACCEPTED submission for WS: keep the record, clear what was sent.
@@ -1630,10 +1696,10 @@ daemon acted on are all answers, and none of them leaves the sent text
 owed a resend.
 
 FROM-BUFFER says the submitted text WAS the composer\='s contents.  When
-it is, THIS FUNCTION DOES NOT touch the composer, the history ring, or the
-attachments: `agent-repl--input-optimistic-clear' already erased the
-composer, pushed RAW to history, reset the position, saved the ring and
-cleared the attachments at dispatch time (owner ruling: a from-buffer
+it is, THIS FUNCTION DOES NOT touch the composer or the history ring:
+`agent-repl--input-optimistic-clear' already erased the composer (its
+images with it), pushed it to history, reset the position and saved the
+ring at dispatch time (owner ruling: a from-buffer
 submit clears and records on return regardless of the ack).  Re-doing any
 of it here would double-push history or error on the already-empty
 composer, so the accept path for a from-buffer submission is purely a log.
@@ -1647,8 +1713,8 @@ user never submitted would destroy work the daemon was never told about
 reached the from-buffer path, which now clears optimistically instead).
 RAW is still pushed onto the ring -- a canned prompt WAS sent -- but the
 history POSITION is left where it was, because a surviving draft keeps its
-navigation state.  ATTACHMENTS are cleared, since the submission carried
-them."
+navigation state.  The draft's images stay in it too: a caller-composed
+prompt never carried them."
   (if from-buffer
       (agent-repl--log ws "elisp.input.accepted ws=%s arm=%S raw-len=%d from-buffer=t (optimistic clear already applied at dispatch)"
                        ws arm (length raw))
@@ -1657,7 +1723,6 @@ them."
         (with-current-buffer buf
           (agent-repl--history-push raw)))
       (agent-repl--history-save ws)
-      (agent-repl-input-clear-attachments ws)
       (agent-repl--log ws "elisp.input.accepted ws=%s arm=%S raw-len=%d buffer=%s from-buffer=nil"
                        ws arm (length raw) (and buf t)))))
 
@@ -1798,7 +1863,7 @@ itself, so no arm words its echo differently from its flash."
   "Handle a `SubmitPromptError' for WS.
 EVERY arm here is the daemon saying the prompt did NOT land, so the FIRST
 thing this does is hand SNAPSHOT to `agent-repl--input-restore\=': a
-from-buffer submission gets its text, its point, its attachments and its
+from-buffer submission gets its text (images and all), its point and its
 history ring back exactly as they were before the optimistic clear, and
 the refused prompt is never left in history.  SNAPSHOT is nil for a
 canned/metaprompt/re-drive send, which cleared nothing to begin with.
@@ -1838,8 +1903,8 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; The key was already accepted for this workspace, so the earlier
          ;; submission stands.  Nothing landed twice and nothing is owed a
          ;; resend: this is an ANSWER about identity, not a transport
-         ;; failure, so the prompt is NOT queued.  The text and the
-         ;; attachments stay put so the user can see what they wrote.
+         ;; failure, so the prompt is NOT queued.  The text and its
+         ;; images stay put so the user can see what they wrote.
          (agent-repl--warn ws "elisp.input.duplicate-submission ws=%s origin=%S arm=%S key=%s"
                            ws origin arm key)
          (agent-repl--input-flash ws "already submitted")
@@ -2020,41 +2085,27 @@ value Emacs constructs from a path."
 
 ;;;; ---- The send pipeline ------------------------------------------------
 
-(defun agent-repl--input-text-without-image-markers ()
-  "Return (TEXT . STRIPPED) for the current buffer, markers removed.
-TEXT is the buffer's contents with every span carrying
-`agent-repl--input-image-marker-property' dropped; STRIPPED is how many
-characters that cost.  The markers are DRAWN text, not composed text --
-see the property's own docstring."
-  (let ((pos (point-min))
-        (end (point-max))
-        (parts nil)
-        (stripped 0))
-    (while (< pos end)
-      (let ((next (next-single-property-change
-                   pos agent-repl--input-image-marker-property nil end)))
-        (if (get-text-property pos agent-repl--input-image-marker-property)
-            (setq stripped (+ stripped (- next pos)))
-          (push (buffer-substring-no-properties pos next) parts))
-        (setq pos next)))
-    (cons (apply #'concat (nreverse parts)) stripped)))
-
-(defun agent-repl--read-input-buffer (ws)
-  "Return the text contents of WS's input buffer, or nil.
-The attachment markers `clipboard-image.el' draws are NOT part of that
-text: they are stripped here, which is the one place every send site and
-the history push alike read the composer through."
+(defun agent-repl--read-input-parts (ws)
+  "Return WS's composer contents as ordered PARTS, or nil with no composer.
+The one place every send site reads the composer through: words and
+images in the order they stand (`agent-repl--input-parts')."
   (let ((buf (agent-repl--input-buffer ws)))
     (if buf
         (with-current-buffer buf
-          (let* ((read (agent-repl--input-text-without-image-markers))
-                 (stripped (cdr read)))
-            (when (> stripped 0)
-              (agent-repl--log ws "elisp.input.image-markers-stripped ws=%s chars=%d"
-                               ws stripped))
-            (car read)))
+          (let ((parts (agent-repl--input-parts)))
+            (agent-repl--log-verbose ws "elisp.input.read ws=%s parts=%d images=%d"
+                                     ws (length parts)
+                                     (length (agent-repl--input-parts-images parts)))
+            parts))
       (agent-repl--log-verbose ws "elisp.input.read-no-buffer ws=%s" ws)
       nil)))
+
+(defun agent-repl--read-input-buffer (ws)
+  "Return the WORDS of WS's input buffer, or nil with no composer.
+The images among them are NOT part of that text: a caller that reads the
+draft as words (a command prefix, a seeded prompt) gets the words."
+  (when (agent-repl--input-buffer ws)
+    (agent-repl--input-parts-text (agent-repl--read-input-parts ws))))
 
 (defun agent-repl--send (origin &optional prompt ws force-metaprompt)
   "Submit PROMPT (or the input buffer's contents) to workspace WS.
@@ -2090,9 +2141,10 @@ Returns the submission's idempotency key, or nil when nothing was sent."
     (agent-repl--info ws "elisp.input.send ws=%s origin=%S force-metaprompt=%s from-buffer=%s"
                       ws origin force-metaprompt (null prompt))
     (agent-repl--input-check-gate ws)
-    (let* ((raw (or prompt (agent-repl--read-input-buffer ws) ""))
-           (attachments (agent-repl-input-attachments ws))
-           (empty-p (and (string-empty-p (string-trim raw)) (null attachments))))
+    (let* ((parts (if prompt (list prompt) (agent-repl--read-input-parts ws)))
+           (raw (agent-repl--input-parts-text parts))
+           (images (agent-repl--input-parts-images parts))
+           (empty-p (and (string-empty-p (string-trim raw)) (null images))))
       (if empty-p
           (progn
             (agent-repl--info ws "elisp.input.send-empty ws=%s origin=%S -- nothing to send"
@@ -2104,9 +2156,10 @@ Returns the submission's idempotency key, or nil when nothing was sent."
             (when (null prompt)
               (agent-repl-verb-retry-vendor-error ws))
             nil)
+        (agent-repl--input-refuse-missing-images ws parts)
         (let* ((from-buffer (null prompt))
-               (text (agent-repl--prepare-input ws raw force-metaprompt))
-               (said (agent-repl--input-said text attachments)))
+               (said (agent-repl--input-said
+                      (agent-repl--prepare-input-parts ws parts force-metaprompt))))
           ;; A HELD-PROMPT EDIT TURNS THE COMPOSER'S SEND INTO ITS COMMIT:
           ;; the words replace the held prompt's content rather than going
           ;; out as a new prompt.  The composer is cleared and the words
@@ -2121,9 +2174,9 @@ Returns the submission's idempotency key, or nil when nothing was sent."
             ;; `(null prompt)' is the one fact that says the words came out
             ;; of the composer.  A from-buffer submission clears the composer
             ;; and records RAW HERE, at dispatch, so a missing or failed ack
-            ;; can never leave the composer full (owner ruling).  `said' and
-            ;; `attachments' were already captured above, so the clear costs
-            ;; the submission nothing.
+            ;; can never leave the composer full (owner ruling).  `said' was
+            ;; already built above, images and all, so the clear costs the
+            ;; submission nothing.
             (let ((snapshot (when from-buffer
                               (agent-repl--input-optimistic-clear ws raw))))
               (agent-repl--input-submit ws said origin raw nil from-buffer snapshot))))))))
@@ -2167,8 +2220,7 @@ sits behind a harness re-read."
     (agent-repl--input-check-gate ws)
     (agent-repl--input-submit
      ws
-     (agent-repl--input-said (agent-repl--meta-wrap (agent-repl--command-prefix-for ws))
-                             (agent-repl-input-attachments ws))
+     (agent-repl--input-said (list (agent-repl--meta-wrap (agent-repl--command-prefix-for ws))))
      :metaprompt-read "")))
 
 (defun agent-repl--append-to-input-buffer (text)

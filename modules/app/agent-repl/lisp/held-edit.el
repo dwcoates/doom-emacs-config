@@ -40,10 +40,10 @@
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--input-buffer "input" (ws))
-(declare-function agent-repl--read-input-buffer "input" (ws))
 (declare-function agent-repl--input-restore "input" (ws snapshot))
-(declare-function agent-repl--input-said-attachments "input" (said))
-(declare-function agent-repl--input-fill-said "input" (ws buf said attachments))
+(declare-function agent-repl--input-said-parts "input" (said))
+(declare-function agent-repl--input-parts-images "input" (parts))
+(declare-function agent-repl--input-fill-said "input" (ws buf said parts))
 (declare-function agent-repl--history-push "history" (&optional text))
 (declare-function agent-repl--history-reset "history" ())
 (declare-function agent-repl--history-save "history" (&optional ws))
@@ -89,14 +89,15 @@ edit is about THIS composer's contents.")
 
 (defun agent-repl--held-edit-save-draft (ws buf)
   "Save BUF's standing draft for WS to history, exactly as a send saves it.
-`agent-repl--history-push' skips a blank draft, so only non-whitespace
-words are recorded.  Returns non-nil when the draft was non-blank."
-  (let ((raw (or (agent-repl--read-input-buffer ws) "")))
+`agent-repl--history-push' skips a blank draft, so only a draft with
+words or images is recorded, its images among its words.  Returns
+non-nil when the draft was non-blank."
+  (let ((draft (with-current-buffer buf (buffer-string))))
     (with-current-buffer buf
-      (agent-repl--history-push raw)
+      (agent-repl--history-push)
       (agent-repl--history-reset))
     (agent-repl--history-save ws)
-    (not (string-empty-p (string-trim raw)))))
+    (not (string-empty-p (string-trim draft)))))
 
 (defun agent-repl--held-edit-enter (ws edit)
   "Take EDIT, WS's new standing held-prompt edit, into the composer.
@@ -106,34 +107,35 @@ composer to edit in, or content no composer can hold, the edit is
 cancelled, said, and logged, rather than left claimed by nobody."
   (let* ((buf (agent-repl--input-buffer ws))
          (said (plist-get edit :said))
-         (images (agent-repl--input-said-attachments said))
-         ;; An attachment the composer cannot hold makes the whole content
+         (filled (agent-repl--input-said-parts said))
+         ;; A block the composer cannot hold makes the whole content
          ;; unholdable: an edit that silently lost an image would commit
          ;; the prompt without it.
-         (attachments (if (> (plist-get images :dropped) 0)
-                          :unrepresentable
-                        (plist-get images :attachments)))
+         (parts (if (> (plist-get filled :dropped) 0)
+                    :unrepresentable
+                  (plist-get filled :parts)))
          (turn (plist-get (plist-get edit :turn) :value)))
     (cond
      ((null buf)
       (agent-repl--info ws "elisp.held-edit.no-composer ws=%s turn=%s edit=%s" ws turn (plist-get edit :edit))
       (message "agent-repl: no composer is open to edit the held prompt in; the edit is cancelled")
       (agent-repl--held-edit-send ws (plist-get edit :turn) '(:arm :cancel :value nil) "cancel"))
-     ((eq attachments :unrepresentable)
+     ((eq parts :unrepresentable)
       (agent-repl--info ws "elisp.held-edit.unrepresentable ws=%s turn=%s edit=%s" ws turn (plist-get edit :edit))
       (message "agent-repl: the held prompt carries content the composer cannot hold; the edit is cancelled")
       (agent-repl--held-edit-send ws (plist-get edit :turn) '(:arm :cancel :value nil) "cancel"))
      (t
       (let ((saved (agent-repl--held-edit-save-draft ws buf)))
-        (agent-repl--input-fill-said ws buf said attachments)
+        (agent-repl--input-fill-said ws buf said parts)
         (with-current-buffer buf
           (setq agent-repl--held-edit (list :turn (plist-get edit :turn) :edit (plist-get edit :edit)))
           (unless (member agent-repl--held-edit-mode-line-spec mode-line-format)
             (setq-local mode-line-format
                         (append mode-line-format (list agent-repl--held-edit-mode-line-spec))))
           (force-mode-line-update))
-        (agent-repl--info ws "elisp.held-edit.began ws=%s turn=%s edit=%s draft-saved=%s attachments=%d"
-                          ws turn (plist-get edit :edit) saved (length attachments)))))))
+        (agent-repl--info ws "elisp.held-edit.began ws=%s turn=%s edit=%s draft-saved=%s images=%d"
+                          ws turn (plist-get edit :edit) saved
+                          (length (agent-repl--input-parts-images parts))))))))
 
 (defun agent-repl--held-edit-leave (ws buf)
   "End WS's edit mode in BUF: the daemon states no edit stands any more.

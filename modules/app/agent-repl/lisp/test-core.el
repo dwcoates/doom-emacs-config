@@ -295,10 +295,7 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
                       (nreverse central-sites)))))
 
 (defconst agent-repl-test--user-facing-message-sites
-  '(("clipboard-image.el" agent-repl-attach-clipboard-image
-     "agent-repl: attached image %s"
-     "confirms the interactive attachment command")
-    ("commands.el" agent-repl--push-release-callback "agent-repl: %s"
+  '(("commands.el" agent-repl--push-release-callback "agent-repl: %s"
      "tells the user the release push they asked for landed, in the script's own words")
     ("commands.el" agent-repl--push-release-callback "agent-repl: release push failed: %s"
      "tells the user the release push they asked for failed, in the script's own words")
@@ -1471,6 +1468,21 @@ one to its caller.  A caller that must abort signals for itself."
                        (buffer-string))
                      (encode-coding-string "caf\u00e9" 'utf-8))))))
 
+(ert-deftest agent-repl-test-write-file-atomically-writes-binary-bytes-as-they-are ()
+  "BINARY writes a unibyte string's bytes with no encoding."
+  (agent-repl-test--with-atomic-dir dir
+    ;; Arrange.
+    (let ((file (expand-file-name "f.png" dir))
+          (bytes (unibyte-string #x89 #x50 #x4e #x47 #x00 #xff #xe9)))
+      ;; Act.
+      (agent-repl--write-file-atomically file bytes t)
+      ;; Assert.
+      (should (equal (with-temp-buffer
+                       (set-buffer-multibyte nil)
+                       (insert-file-contents-literally file)
+                       (buffer-string))
+                     bytes)))))
+
 (ert-deftest agent-repl-test-write-file-atomically-failure-keeps-previous-contents ()
   "A write failing before its rename keeps FILE whole, removes the temporary, and re-signals."
   (agent-repl-test--with-atomic-dir dir
@@ -1493,7 +1505,7 @@ one to its caller.  A caller that must abort signals for itself."
                              (insert-file-contents
                               (expand-file-name name agent-repl-test-core--lisp-dir))
                              (buffer-string)))
-                         '("history.el" "held-ingress.el"))))
+                         '("history.el" "held-ingress.el" "clipboard-image.el"))))
     ;; Assert.
     (dolist (source sources)
       (should (string-match-p "(agent-repl--write-file-atomically" source))

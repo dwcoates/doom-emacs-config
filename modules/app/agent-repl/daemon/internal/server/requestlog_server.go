@@ -800,3 +800,17 @@ func (s *requestLoggingServer) SetWorkspaceCorrespondence(
 ) (*connect.Response[agentreplv1.SetWorkspaceCorrespondenceResponse], error) {
 	return serveUnary(s, ctx, "SetWorkspaceCorrespondence", req, s.server.SetWorkspaceCorrespondence)
 }
+
+func (s *requestLoggingServer) OpenFeedImage(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.OpenFeedImageRequest],
+) (*connect.Response[agentreplv1.OpenFeedImageResponse], error) {
+	return serveUnary(s, ctx, "OpenFeedImage", req, s.server.OpenFeedImage)
+}
+
+func (s *requestLoggingServer) CloseFeedImage(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.CloseFeedImageRequest],
+) (*connect.Response[agentreplv1.CloseFeedImageResponse], error) {
+	return serveUnary(s, ctx, "CloseFeedImage", req, s.server.CloseFeedImage)
+}

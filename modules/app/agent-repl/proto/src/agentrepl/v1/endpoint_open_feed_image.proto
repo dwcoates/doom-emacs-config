@@ -1,0 +1,114 @@
+// endpoint_open_feed_image.proto — OpenFeedImage: open one image large over
+// the workspace's feed. FEED section.
+//
+// A click on an image opens it: in Emacs, a thumbnail in the input window; in
+// the webapp, an image the feed drew (a prompt bubble's, a held card's, a tool
+// card's). The DAEMON holds each workspace's overlay (frontend.v1
+// FeedImageOverlay) and pushes it on the root feed's watch, so an open from
+// either client is drawn by the webapp the same way, and a second open
+// replaces the first. Closing is CloseFeedImage.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "conversation/v1/content_blocks.proto";
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Open an image over a workspace's feed.
+message OpenFeedImageRequest {
+  // The workspace whose feed the image opens over — the daemon-minted ref,
+  // echoed verbatim like every per-workspace request.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // WHICH image, as the clicking client holds it. THE ARM IS WHERE THE CLICK
+  // WAS: each client names the image in the form it already has, and the
+  // daemon resolves it to what the overlay draws. Never unset: a request with
+  // no arm is refused as InvalidArgument.
+  oneof image {
+    // An image in the Emacs input window, by the reference the composer
+    // will send it as.
+    OpenFeedImageComposer composer = 2;
+    // An image the webapp drew, echoed exactly as the daemon served it.
+    OpenFeedImageDrawn drawn = 3;
+  }
+}
+
+// An image in the Emacs input window.
+message OpenFeedImageComposer {
+  // The image, exactly as the composer would submit it: a host path and its
+  // MIME type. The daemon makes the path servable as it does for a prompt's
+  // image, so the overlay loads it from the daemon's own image origin.
+  conversation.v1.ImageBlock image = 1;
+}
+
+// An image the webapp drew in the feed.
+message OpenFeedImageDrawn {
+  // The drawn image, echoed unchanged: the daemon only opens a source it
+  // served itself (its image origin) or a url of a scheme it would have drawn,
+  // so a client cannot make the overlay load anything the feed would not.
+  frontend.v1.FeedImageBlock image = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message OpenFeedImageResponse {
+  oneof result {
+    OpenFeedImageSuccess success = 1;
+    OpenFeedImageError error = 2;
+  }
+}
+
+// The image is open over the feed. Empty: the overlay itself reaches the
+// webapp on the root feed's watch.
+message OpenFeedImageSuccess {}
+
+// The image was not opened. Arms derived from the daemon's refusal sites.
+// Validation failures (an unset arm) are Connect InvalidArgument, never an
+// arm.
+message OpenFeedImageError {
+  // WHY the image was not opened.
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    OpenFeedImageUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    OpenFeedImageWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    OpenFeedImageTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    OpenFeedImageNotYetAdopted not_yet_adopted = 4;
+    // The composer's image names no source the daemon can serve: a relative
+    // path, no media type, or no location at all. The overlay is left as it
+    // was.
+    OpenFeedImageUnservable unservable = 5;
+    // The drawn image names a source the daemon did not serve and would not
+    // draw. The overlay is left as it was.
+    OpenFeedImageNotDrawn not_drawn = 6;
+  }
+}
+
+// The workspace id is not in the daemon's registry.
+message OpenFeedImageUnknownWorkspace {}
+// The echoed dir disagrees with the registry's dir for this id.
+message OpenFeedImageWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// This daemon released the workspace to a successor.
+message OpenFeedImageTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// A joining daemon has not finished adopting this workspace yet.
+message OpenFeedImageNotYetAdopted {}
+// The composer's image has no source the daemon can serve.
+message OpenFeedImageUnservable {
+  // The daemon's account of why, for a human and for logs; never switched on.
+  string detail = 1;
+}
+// The drawn image names a source the daemon would not draw.
+message OpenFeedImageNotDrawn {
+  // The source the request named, echoed so the caller can say which.
+  string src = 1;
+}

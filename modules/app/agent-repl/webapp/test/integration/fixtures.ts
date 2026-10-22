@@ -100,6 +100,7 @@ import { ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/to
 import { enduringLine } from "../footer/enduring-line.js";
 import { hiddenRow, numberTabs, rowEntries, sectionTabRegions, withFamily } from "../roster-families.js";
 import { sentTo } from "../feed/addresses.js";
+import { drawnBodyOf } from "../held/drawn-body.js";
 
 // ---------------------------------------------------------------------------
 // Arm enumeration
@@ -2713,9 +2714,11 @@ export function heldPrompt(init?: {
     const verdict = HOLD_BADGES[classification] ?? { label: classification };
     notes.push(verdict.detail ?? verdict.label);
   }
+  const said = userSaid(init?.text ?? "also fix the footer");
   return create(HeldPromptSchema, {
     turn: turnId(init?.turn ?? HELD_TURN_ID),
-    said: userSaid(init?.text ?? "also fix the footer"),
+    said,
+    body: drawnBodyOf(said),
     queuedAt: { atMs: 3_000n },
     classification: classificationValue(classification),
     hold: holdValue(hold),
@@ -2736,17 +2739,21 @@ export const INGRESS_BADGE_ARMS = ["awaitingIntake", "noSession", "merge", "cold
 export type IngressBadgeArm = (typeof INGRESS_BADGE_ARMS)[number];
 
 /** A held item for an unaccepted ingress entry under KEY, its badge standing for ARM. */
-export const heldIngressItem = (init?: { key?: string; arm?: IngressBadgeArm; text?: string }): HeldItemInit => ({
-  id: { value: `held:ingress:${init?.key ?? "k-1"}` },
-  item: {
-    case: "ingress",
-    value: {
-      said: { content: { blocks: [{ block: { case: "text", value: { text: init?.text ?? "sent while the daemon was down" } } }] } },
-      queuedAt: { atMs: 0n },
-      badge: { label: `badge ${init?.arm ?? "noSession"}`, standsFor: { case: init?.arm ?? "noSession", value: {} } },
+export const heldIngressItem = (init?: { key?: string; arm?: IngressBadgeArm; text?: string }): HeldItemInit => {
+  const said = userSaid(init?.text ?? "sent while the daemon was down");
+  return {
+    id: { value: `held:ingress:${init?.key ?? "k-1"}` },
+    item: {
+      case: "ingress",
+      value: {
+        said,
+        body: drawnBodyOf(said),
+        queuedAt: { atMs: 0n },
+        badge: { label: `badge ${init?.arm ?? "noSession"}`, standsFor: { case: init?.arm ?? "noSession", value: {} } },
+      },
     },
-  },
-});
+  };
+};
 
 export function heldSection(init?: { items?: HeldItemInit[] }): FeedHeld {
   return create(FeedHeldSchema, {

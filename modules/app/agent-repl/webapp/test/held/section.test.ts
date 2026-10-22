@@ -234,7 +234,7 @@ describe("mountHeldSection", () => {
     // Arrange
     const m = mounted();
     m.held.apply(section([multiLineItem("t1")]));
-    m.host.querySelector<HTMLElement>(".queued-text")?.click();
+    m.host.querySelector<HTMLElement>(".prompt-block-text")?.click();
     // Act
     m.held.apply(section([multiLineItem("t1")]));
     // Assert
@@ -246,7 +246,7 @@ describe("mountHeldSection", () => {
     // Arrange
     const m = mounted();
     m.held.apply(section([multiLineItem("t1")]));
-    m.host.querySelector<HTMLElement>(".queued-text")?.click();
+    m.host.querySelector<HTMLElement>(".prompt-block-text")?.click();
     // Act
     m.held.apply(section([multiLineItem("t2")]));
     // Assert

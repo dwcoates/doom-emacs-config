@@ -96,6 +96,19 @@ func TestTrayConvertsEachClassificationArm(t *testing.T) {
 	}
 }
 
+func TestTrayCardCarriesTheBodyItsDrawerResolves(t *testing.T) {
+	// Arrange.
+	r, _ := newRenderer(t)
+
+	// Act.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "look at this")})
+
+	// Assert.
+	if got := onlyPrompt(t, latest(t, r)).GetBody().GetBlocks()[0].GetText().GetText(); got != "drawn:look at this" {
+		t.Fatalf("body = %q, want the drawer's resolution of the said", got)
+	}
+}
+
 func TestTrayCarriesTheAfterToolCallRationale(t *testing.T) {
 	// Arrange.
 	r, _ := newRenderer(t)

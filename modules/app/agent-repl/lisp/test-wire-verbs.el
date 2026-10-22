@@ -3849,6 +3849,67 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached' and
                           "SELECT_FEED_ROW_DIRECTION_"))
                  #'string<))))
 
+(defconst agent-repl-test-wire-verbs--composer-image
+  '(:location (:arm :path :value (:path "/w/clip.png")) :media-type "image/png")
+  "An ImageBlock the composer holds.")
+
+(ert-deftest agent-repl-test-wire-verbs-open-feed-image-composer-shape ()
+  "An open from the composer carries the echoed ref and the composer's ImageBlock."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-open-feed-image-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :image (list :arm :composer
+                                        :value (list :image agent-repl-test-wire-verbs--composer-image)))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"composer\":{\"image\":{\"path\":{\"path\":\"/w/clip.png\"},\"mediaType\":\"image/png\"}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-feed-image-missing-image-refused ()
+  "The image is REQUIRED, so an open without one never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-open-feed-image-request
+                   (list :workspace agent-repl-test-wire-verbs--ref))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-open-feed-image-missing-workspace-refused ()
+  "The workspace is REQUIRED, so an open without one never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-open-feed-image-request
+                   (list :image (list :arm :composer
+                                      :value (list :image agent-repl-test-wire-verbs--composer-image))))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-open-feed-image-drawn-arm-has-no-spelling ()
+  "The webapp's `drawn' arm is never sent from Emacs, so it is refused."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-open-feed-image-request
+                   (list :workspace agent-repl-test-wire-verbs--ref
+                         :image '(:arm :drawn :value (:image (:src "/x" :alt "")))))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-open-feed-image-success-decodes ()
+  "The empty success decodes as the success arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get (agent-repl-wire-decode-open-feed-image-response
+                               (json-parse-string "{\"success\":{}}" :object-type 'alist))
+                              :arm)
+                   :success))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-feed-image-refusals-decode ()
+  "Each refusal arm decodes with its own fields."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case '(("{\"error\":{\"unservable\":{\"detail\":\"not absolute\"}}}"
+                     :unservable (:detail "not absolute"))
+                    ("{\"error\":{\"notDrawn\":{\"src\":\"/x\"}}}"
+                     :not-drawn (:src "/x"))
+                    ("{\"error\":{\"notYetAdopted\":{}}}"
+                     :not-yet-adopted nil)))
+      (let ((cause (plist-get (plist-get (agent-repl-wire-decode-open-feed-image-response
+                                          (json-parse-string (nth 0 case) :object-type 'alist))
+                                         :value)
+                              :cause)))
+        (should (equal (list (plist-get cause :arm) (plist-get cause :value))
+                       (list (nth 1 case) (nth 2 case))))))))
+
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-turn-boundary-step-shape ()
   "A turn-boundary step carries the echoed ref and the step's direction."
   (agent-repl-test-wire-verbs--with-common

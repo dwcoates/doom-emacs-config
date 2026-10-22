@@ -77,7 +77,7 @@ type IngressSink interface {
 // IngressPrompt projects one ingress entry onto its card. The wait kinds are
 // a closed set this package declares, so a kind outside it is a defect, and it
 // panics rather than draw a badge that says something false.
-func IngressPrompt(e IngressEntry) *frontendv1.HeldIngressPrompt {
+func IngressPrompt(e IngressEntry, draw DrawBody) *frontendv1.HeldIngressPrompt {
 	badge := &frontendv1.HeldIngressPromptBadge{}
 	switch e.Wait.Kind {
 	case IngressAwaitingIntake:
@@ -107,6 +107,7 @@ func IngressPrompt(e IngressEntry) *frontendv1.HeldIngressPrompt {
 	}
 	return &frontendv1.HeldIngressPrompt{
 		Said:     e.Said,
+		Body:     draw(e.Said.GetContent()),
 		QueuedAt: &frontendv1.HeldIngressPromptQueuedAt{AtMs: e.QueuedAt.UnixMilli()},
 		Badge:    badge,
 	}

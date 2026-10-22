@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 )
@@ -133,4 +134,65 @@ func blockDescription(block *conversationv1.ImageBlock) string {
 		return "an unset image block"
 	}
 	return fmt.Sprintf("%T", block.GetLocation())
+}
+
+// ImageSources answers which image the feed's overlay may draw
+// (frontend.v1.FeedImageOverlay), for the two clients that open one.
+type ImageSources interface {
+	// Composer resolves an image the Emacs input window holds into what the
+	// overlay draws, exactly as a prompt's image is resolved.
+	Composer(block *conversationv1.ImageBlock) (*frontendv1.FeedImageBlock, error)
+	// Drawn checks an image the webapp drew, echoed back: nil when its source
+	// is one the feed serves or a url the feed would draw.
+	Drawn(image *frontendv1.FeedImageBlock) error
+}
+
+// NewImageSources builds the overlay's image sources over the feed's own
+// image resolution. SERVED reports whether a source is one the daemon's image
+// origin answers (imageorigin.Origin.Serves).
+func NewImageSources(resolve ImageResolver, served func(src string) bool, log dlog.Logger) (ImageSources, error) {
+	switch {
+	case resolve == nil:
+		return nil, fmt.Errorf("feed: an image resolver is required")
+	case served == nil:
+		return nil, fmt.Errorf("feed: an image origin check is required")
+	case log == nil:
+		return nil, fmt.Errorf("feed: a logger is required")
+	}
+	return &imageSources{resolve: resolve, served: served, log: log}, nil
+}
+
+// imageSources is ImageSources over the feed's resolver and the origin's
+// registry.
+type imageSources struct {
+	resolve ImageResolver
+	served  func(src string) bool
+	log     dlog.Logger
+}
+
+// Composer is the prompt's own resolution: the overlay shows a composer image
+// from the same source a sent prompt's bubble will.
+func (s *imageSources) Composer(block *conversationv1.ImageBlock) (*frontendv1.FeedImageBlock, error) {
+	src, alt, err := s.resolve(block)
+	if err != nil {
+		return nil, err
+	}
+	return &frontendv1.FeedImageBlock{Src: src, Alt: alt}, nil
+}
+
+// Drawn accepts what the feed could have served: a source of the daemon's
+// image origin, or a url the url arm would have answered verbatim. Anything
+// else -- a path nobody registered, a scheme an image must not be handed --
+// is refused, so an echo cannot make the overlay load what the feed would not.
+func (s *imageSources) Drawn(image *frontendv1.FeedImageBlock) error {
+	src := image.GetSrc()
+	if s.served(src) {
+		s.log.Debug("daemon.feed.overlay_source", "a drawn image's source is one the image origin serves",
+			dlog.Context{"src": src})
+		return nil
+	}
+	if _, _, err := resolveImageURL(s.log, src); err != nil {
+		return fmt.Errorf("feed: the drawn image's source %q is not one the feed serves or draws: %w", src, err)
+	}
+	return nil
 }

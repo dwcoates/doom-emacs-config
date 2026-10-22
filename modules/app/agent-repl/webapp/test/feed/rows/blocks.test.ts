@@ -13,6 +13,7 @@ import {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
+  IMAGE_MISSING_TEXT,
   drawFeedImageBlock,
   drawFeedQuoteBlock,
   drawFeedTextBlock,
@@ -24,7 +25,9 @@ import {
 } from "../../../src/feed/rows/blocks.js";
 import { boundCopyText, COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE } from "../../../src/copy-control.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
+import imageThumbnail from "../../../../proto/vocab/image-thumbnail.json";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../../src/bubble/quote.js";
+import { BUBBLE_EXPANDED_ONLY_CLASS } from "../../../src/bubble/expanded-only.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, createBubbleBody, paintBody } from "../../../src/bubble/body.js";
 
 /** Paint BLOCK through the one bubble body, as a prompt bubble does. */
@@ -128,12 +131,15 @@ describe("the attached image's own rule in the stylesheet", () => {
     expect(rule).toContain("max-width: 100%");
   });
 
-  it("leaves the height to follow the capped width, so the picture is not squashed", () => {
+  it.each([
+    ["draws every image at the shared thumbnail height, large or small", `height: ${imageThumbnail.height_px}px`],
+    ["keeps the aspect ratio when the width cap bites", "object-fit: contain"],
+  ])("%s", (_name, declaration) => {
     // Arrange.
     const rule = stylesheet.match(/\.prompt-block-image\s*\{[^}]*\}/)?.[0] ?? "";
 
     // Act / Assert.
-    expect(rule).toContain("height: auto");
+    expect(rule).toContain(declaration);
   });
 });
 
@@ -146,6 +152,42 @@ describe("drawFeedImageBlock", () => {
   it("keeps an empty alt empty, that being a legitimate resolution", () => {
     const el = drawFeedImageBlock(create(FeedImageBlockSchema, { src: "/x.png", alt: "" }));
     expect(el.getAttribute("alt")).toBe("");
+  });
+
+  it("says the shared words for a lost image", () => {
+    expect(IMAGE_MISSING_TEXT).toBe(imageThumbnail.missing_text);
+  });
+
+  it("says the image is no longer available, in its place, when it cannot be loaded", () => {
+    // Arrange
+    const box = document.createElement("div");
+    const el = drawFeedImageBlock(create(FeedImageBlockSchema, { src: "/gone.png", alt: "clip.png" }));
+    box.appendChild(el);
+
+    // Act
+    el.dispatchEvent(new Event("error"));
+
+    // Assert
+    expect([box.children.length, box.firstElementChild?.className, box.textContent, (box.firstElementChild as HTMLElement).title]).toEqual([
+      1,
+      "prompt-block prompt-block-image-missing",
+      IMAGE_MISSING_TEXT,
+      "clip.png",
+    ]);
+  });
+
+  it("records an image that cannot be loaded at info, naming its src", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const el = drawFeedImageBlock(create(FeedImageBlockSchema, { src: "/gone.png", alt: "" }));
+    document.createElement("div").appendChild(el);
+
+    // Act
+    el.dispatchEvent(new Event("error"));
+
+    // Assert
+    const record = await forwardedRecord(capture, "feed.draw-image-block.missing");
+    expect([record.level.case, record.context?.src]).toEqual(["info", "/gone.png"]);
   });
 });
 
@@ -171,6 +213,32 @@ describe("drawPromptBlockArm", () => {
       "p",
     );
     expect(el.tagName).toBe("IMG");
+  });
+
+  it("draws a prompt's image only once its bubble is expanded", () => {
+    const el = drawPromptBlockArm(
+      { case: "image", value: create(FeedImageBlockSchema, { src: "/a", alt: "" }) },
+      "p",
+    );
+    expect(el.classList.contains(BUBBLE_EXPANDED_ONLY_CLASS)).toBe(true);
+  });
+
+  it("keeps a lost prompt image's note expanded-only, like the image it replaces", () => {
+    // Arrange
+    const box = document.createElement("div");
+    const el = drawPromptBlockArm(
+      { case: "image", value: create(FeedImageBlockSchema, { src: "/gone", alt: "" }) },
+      "p",
+    );
+    box.appendChild(el);
+
+    // Act
+    el.dispatchEvent(new Event("error"));
+
+    // Assert
+    expect(new Set(box.firstElementChild?.classList ?? [])).toEqual(
+      new Set(["prompt-block", BUBBLE_EXPANDED_ONLY_CLASS, "prompt-block-image-missing"]),
+    );
   });
 
   it("draws the unsupported arm", () => {

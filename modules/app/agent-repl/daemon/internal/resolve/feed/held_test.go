@@ -530,3 +530,27 @@ func TestStatingEntriesForgetsTheClaimsOfEntriesNoLongerStated(t *testing.T) {
 		t.Fatalf("held ids = %v, want %v: a forgotten claim settles nothing", got, want)
 	}
 }
+
+func TestAHeldCardDrawsItsBodyAsThePromptsRowWill(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.resolver.deps.ResolveImage = func(*conversationv1.ImageBlock) (string, string, error) {
+		return "/feed-images/abc", "clip.png", nil
+	}
+	hold := standingHold("turn-1", "look", 0)
+	hold.Said.Content.Blocks = append(hold.Said.Content.Blocks, &conversationv1.UserContentBlock{
+		Block: &conversationv1.UserContentBlock_Image{Image: &conversationv1.ImageBlock{
+			Location:  &conversationv1.ImageBlock_Path{Path: &conversationv1.ImageBlockPath{Path: "/w/clip.png"}},
+			MediaType: "image/png",
+		}},
+	})
+
+	// Act
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{hold})
+
+	// Assert
+	blocks := h.heldNow().GetItems()[0].GetPrompt().GetBody().GetBlocks()
+	if len(blocks) != 2 || blocks[0].GetText().GetText() != "look" || blocks[1].GetImage().GetSrc() != "/feed-images/abc" {
+		t.Fatalf("held body = %v, want the words and the resolved image", blocks)
+	}
+}

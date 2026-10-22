@@ -1606,6 +1606,7 @@ type harness struct {
 	Facts     *fakeSessionFacts
 	Login     *fakeLogin
 	Feed      *fakeFeed
+	Images    *fakeImageSources
 	Footer    *fakeFooter
 	Topbar    *fakeTopbar
 	Sidebar   *fakeSidebar
@@ -1709,6 +1710,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Facts:      &fakeSessionFacts{facts: map[ids.WorkspaceID]HostFacts{}},
 		Login:      &fakeLogin{},
 		Feed:       &fakeFeed{},
+		Images:     &fakeImageSources{},
 		Footer:     &fakeFooter{},
 		Topbar:     &fakeTopbar{},
 		Sidebar:    &fakeSidebar{},
@@ -1757,6 +1759,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Ownership:         h.Ownership,
 		SuccessorAddress:  func() string { return "127.0.0.1:9999" },
 		Feed:              h.Feed,
+		Images:            h.Images,
 		Footer:            h.Footer,
 		Topbar:            h.Topbar,
 		Sidebar:           h.Sidebar,
@@ -2330,4 +2333,24 @@ func (f *fakeEmacsMeasure) all() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.events...)
+}
+
+// fakeImageSources is feed.ImageSources answering what a test scripts: a
+// composer image resolves to `resolved` unless `composerErr` is set, and a
+// drawn image is accepted unless `drawnErr` is set.
+type fakeImageSources struct {
+	resolved    *frontendv1.FeedImageBlock
+	composerErr error
+	drawnErr    error
+}
+
+func (f *fakeImageSources) Composer(*conversationv1.ImageBlock) (*frontendv1.FeedImageBlock, error) {
+	if f.composerErr != nil {
+		return nil, f.composerErr
+	}
+	return f.resolved, nil
+}
+
+func (f *fakeImageSources) Drawn(*frontendv1.FeedImageBlock) error {
+	return f.drawnErr
 }

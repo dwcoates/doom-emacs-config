@@ -110,6 +110,9 @@ type Deps struct {
 
 	// Feed backs OpenFeed, WatchFeed and GetFeedPage.
 	Feed feed.Resolver
+	// Images resolves the image an OpenFeedImage names into what the feed's
+	// overlay draws (feed_image.go).
+	Images feed.ImageSources
 	// Footer backs WatchFooter.
 	Footer footer.Resolver
 	// Topbar backs WatchTopbar.
@@ -384,6 +387,9 @@ type server struct {
 	// by the ROOT feed's WatchFeed so a selection change reaches every open
 	// webview. A publish.Topic replays its latest value, so a webview that
 	// attaches mid-selection is handed the current selection at once.
+	// imageOverlayTopics is one FeedImageOverlay push topic per workspace,
+	// subscribed by that workspace's root feed watch (feed_image.go).
+	imageOverlayTopics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedImageOverlay]
 	selectionTopics map[ids.WorkspaceID]*publish.Topic[*selectionState]
 
 	// feedTextScaleMu guards the feed text zoom below. It is SEPARATE from mu so
@@ -452,6 +458,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a successor address source")
 	case deps.Feed == nil:
 		return nil, missing("a feed resolver")
+	case deps.Images == nil:
+		return nil, missing("the feed's image sources")
 	case deps.Footer == nil:
 		return nil, missing("a footer resolver")
 	case deps.Topbar == nil:
@@ -534,6 +542,7 @@ func New(deps Deps) (Server, error) {
 		selections:          make(map[ids.WorkspaceID]*selectionState),
 		rollbackPlans:       make(map[string]rollbackPlan),
 		selectionTopics:     make(map[ids.WorkspaceID]*publish.Topic[*selectionState]),
+		imageOverlayTopics:  make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedImageOverlay]),
 		// The zoom starts at the persistence default; Prime seeds the stored
 		// value onto the topic before anything is served.
 		feedTextScale: wsm.DefaultFeedTextScale,

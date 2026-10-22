@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "THE cross-language look of a pasted image: the one thumbnail height every",
+    "image is drawn at, large or small, and what an image whose file is gone",
+    "(its worktree was deleted) is drawn as instead (owner ruling, 2026-10-14).",
+    "",
+    "Emacs draws images in the composer (lisp/clipboard-image.el) and the",
+    "webapp draws them in the feed (src/feed/rows/blocks.ts, styles.css).",
+    "Two languages cannot compile one constant, so each holds its own and each",
+    "asserts it against this file: a size or wording changed on one side fails",
+    "both suites instead of leaving the two drawing one image two ways."
+  ],
+  "height_px": 120,
+  "missing_text": "Image no longer available"
+}
