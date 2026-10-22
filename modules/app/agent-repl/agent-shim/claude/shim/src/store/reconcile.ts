@@ -776,6 +776,62 @@ export function resumedAgentAnnouncement(
   });
 }
 
+/**
+ * One live detached run and the agent whose book describes it.
+ *
+ * The owner is the run's own, never assumed: `GetLiveWork` answers the whole
+ * lineage, and a run a subagent announced has its start in the subagent's
+ * book, not the main agent's.
+ */
+export interface OwnedRun {
+  /** The run's handle, which is also its unit in the owner's book. */
+  readonly work: conversationv1.DetachedWorkId;
+  /** The agent that announced the run; its book holds the run's start. */
+  readonly owner: conversationv1.AgentId;
+}
+
+/** One owner's live runs, in the order they were given. */
+export interface OwnerRuns {
+  /** The agent whose book every run in `works` is described from. */
+  readonly owner: conversationv1.AgentId;
+  /** That owner's runs, in the order they were given. */
+  readonly works: readonly conversationv1.DetachedWorkId[];
+}
+
+/**
+ * The store's live detached runs as owned runs.
+ *
+ * EVERY RUN NAMES ITS WORK AND ITS OWNER (store.v1.GetLiveWorkDetached), and
+ * the read validates that before answering (`liveWorkOnce`), so a run here
+ * missing either is a broken invariant: it throws rather than guessing a book.
+ */
+export function ownedRunsOf(success: storev1.GetLiveWorkSuccess): OwnedRun[] {
+  return success.liveDetachedRuns.map((run) => {
+    if (run.work === undefined || run.work.value === "" || run.owner === undefined || run.owner.value === "") {
+      throw new Error(`a live detached run reached reconciliation without its work or owner: work=${run.work?.value ?? ""} owner=${run.owner?.value ?? ""}`);
+    }
+    return { work: run.work, owner: run.owner };
+  });
+}
+
+/**
+ * RUNS GROUPED BY OWNER, so each owner's book is read once and every run is
+ * described from the book that holds its start. Owners come in the order their
+ * first run was given; each owner's runs keep the order they were given.
+ */
+export function groupRunsByOwner(runs: readonly OwnedRun[]): OwnerRuns[] {
+  const groups = new Map<string, { owner: conversationv1.AgentId; works: conversationv1.DetachedWorkId[] }>();
+  for (const run of runs) {
+    let group = groups.get(run.owner.value);
+    if (group === undefined) {
+      group = { owner: run.owner, works: [] };
+      groups.set(run.owner.value, group);
+    }
+    group.works.push(run.work);
+  }
+  return [...groups.values()];
+}
+
 export function createReconciler(options: ReconcilerOptions): Reconciler {
   /** One session's open obligations, as the store answered them once. */
   const liveWorkOnce = async (
@@ -821,11 +877,26 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
         "the store answered GetLiveWork with no result arm set",
       );
     }
+    // EVERY LIVE DETACHED RUN NAMES ITS OWNER, whose book describes it. A run
+    // missing its work or owner breaks the store's contract: it is refused
+    // here, as an answer with no arm is, and never described from a guessed
+    // book.
+    const ownerless = result.value.liveDetachedRuns.find(
+      (run) => (run.work?.value ?? "") === "" || (run.owner?.value ?? "") === "",
+    );
+    if (ownerless !== undefined) {
+      const detail = "the store answered a live detached run without its work or its owner";
+      LOGGER.error(
+        { agent: session.value, work_id: ownerless.work?.value ?? "", owner: ownerless.owner?.value ?? "", detail },
+        "the store answered an open-obligation read that breaks its contract",
+      );
+      throw new PersistenceError("store_unavailable", detail);
+    }
     LOGGER.debug(
       {
         agent: session.value,
         live_agents: result.value.liveAgents.length,
-        live_detached: result.value.liveDetached.length,
+        live_detached: result.value.liveDetachedRuns.length,
         live_workflows: result.value.liveWorkflows.length,
       },
       "read the record's open obligations",

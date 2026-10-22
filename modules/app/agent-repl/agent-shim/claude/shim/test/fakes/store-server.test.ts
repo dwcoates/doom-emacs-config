@@ -992,7 +992,7 @@ describe("GetLiveWork", () => {
     // Assert.
     expect(
       response.result.case === "success"
-        ? response.result.value.liveDetached.map((id) => id.value)
+        ? response.result.value.liveDetachedRuns.map((run) => run.work?.value)
         : [],
     ).toEqual(["task-1"]);
   });
@@ -1008,7 +1008,7 @@ describe("GetLiveWork", () => {
     const response = await client.getLiveWork(liveWorkFor("main"));
 
     // Assert.
-    expect(response.result.case === "success" ? response.result.value.liveDetached : []).toEqual([]);
+    expect(response.result.case === "success" ? response.result.value.liveDetachedRuns : []).toEqual([]);
   });
 
   it("keeps reporting detached work while its origin unit is not at a terminal arm", async () => {
@@ -1022,7 +1022,7 @@ describe("GetLiveWork", () => {
 
     // Assert.
     expect(
-      response.result.case === "success" ? response.result.value.liveDetached.map((id) => id.value) : [],
+      response.result.case === "success" ? response.result.value.liveDetachedRuns.map((run) => run.work?.value) : [],
     ).toEqual(["task-1"]);
   });
 
@@ -1037,7 +1037,7 @@ describe("GetLiveWork", () => {
 
     // Assert.
     expect(
-      response.result.case === "success" ? response.result.value.liveDetached.map((id) => id.value) : [],
+      response.result.case === "success" ? response.result.value.liveDetachedRuns.map((run) => run.work?.value) : [],
     ).toEqual(["task-1"]);
   });
 
@@ -1051,7 +1051,7 @@ describe("GetLiveWork", () => {
 
     // Assert.
     expect(
-      response.result.case === "success" ? response.result.value.liveDetached : [],
+      response.result.case === "success" ? response.result.value.liveDetachedRuns : [],
     ).toEqual([]);
   });
 
@@ -1066,7 +1066,7 @@ describe("GetLiveWork", () => {
 
     // Assert.
     expect(
-      response.result.case === "success" ? response.result.value.liveDetached : [],
+      response.result.case === "success" ? response.result.value.liveDetachedRuns : [],
     ).toEqual([]);
   });
 
@@ -1103,7 +1103,7 @@ describe("GetLiveWork", () => {
 
     // Assert.
     expect(
-      response.result.case === "success" ? response.result.value.liveDetached : [],
+      response.result.case === "success" ? response.result.value.liveDetachedRuns : [],
     ).toEqual([]);
   });
 

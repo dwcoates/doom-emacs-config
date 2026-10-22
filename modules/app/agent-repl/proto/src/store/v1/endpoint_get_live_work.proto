@@ -50,16 +50,42 @@ message GetLiveWorkResponse {
 
 // The session's open obligations, from the three tables' non-terminal rows
 // within the requested lineage — never another session's. Empty lists are the
-// ordinary answer for an idle session. IDS ONLY: the caller
-// follows up per item (GetWorkflow, OpenAgentSession, the detached row's
-// state), which the reconciliation does anyway.
+// ordinary answer for an idle session. Each item is named by its id, and a
+// detached run also by the agent that owns it; the caller follows up per item
+// (GetWorkflow, OpenAgentSession, the owner's book), which the reconciliation
+// does anyway.
 message GetLiveWorkSuccess {
   // Agents with no terminal frame: detached subagents, workflow agents.
   repeated conversation.v1.AgentId live_agents = 1;
   // Workflow runs with no terminal.
   repeated conversation.v1.DetachedWorkId live_workflows = 2;
-  // Non-agent detached runs (bash) with no terminal.
-  repeated conversation.v1.DetachedWorkId live_detached = 3;
+  // Field 3 stays unused: no detached run is answered as a bare id, without
+  // the owner whose book describes it.
+  reserved 3;
+  reserved "live_detached";
+  // Non-agent detached runs (a shell) with no terminal, each with its owner,
+  // oldest announcement first.
+  repeated GetLiveWorkDetached live_detached_runs = 4;
+}
+
+// One live non-agent detached run, named together with the agent that owns it.
+//
+// THE OWNER IS PART OF THE ITEM, NOT A LOOKUP. The answer spans the whole
+// lineage — the main agent and every subagent at any depth — and a run's
+// start, the only record of what it IS, lies in its OWNER's book. A caller
+// handed the id alone reads the main agent's book, finds no start for a run a
+// subagent announced, and reports a description the record never lost. So a
+// run is never answered without its owner: both fields are set on every item,
+// and an item missing either is malformed.
+message GetLiveWorkDetached {
+  // REQUIRED. The run's handle: the key its own stream is opened under and the
+  // unit its start was recorded as in the owner's book.
+  conversation.v1.DetachedWorkId work = 1;
+  // REQUIRED. The agent in the requested lineage that announced the run — the
+  // main agent or a subagent at any depth (the detached row's declared owner).
+  // The run is described from this agent's book, and a terminal the caller
+  // writes for it is written there.
+  conversation.v1.AgentId owner = 2;
 }
 
 // The set could not be read. THE ARM IS WHY.

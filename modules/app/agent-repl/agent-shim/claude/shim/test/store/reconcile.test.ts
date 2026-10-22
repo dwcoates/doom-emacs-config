@@ -20,6 +20,8 @@ import {
   bashUnitsWithoutCommand,
   createReconciler,
   findAnnouncedKind,
+  groupRunsByOwner,
+  ownedRunsOf,
   revivalFate,
   findUnit,
   reconciledCoordinate,
@@ -30,6 +32,7 @@ import {
 import { createPersistence } from "../../src/store/writer.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
 import { agent, readEntry, socketPathForTest, spawnEntry, unit } from "./persistence-fixtures.js";
+import { stubClient } from "./stub-client.js";
 
 const PRODUCER = producerId("vendor-session-1");
 const BOOK = agent("book-1");
@@ -60,26 +63,6 @@ async function reconciler(name: string) {
   return { started, client, reconciler: createReconciler({ client, sleep: instantly }) };
 }
 
-/** A store client whose every verb but the ones given throws if called. */
-function stubClient(overrides: Partial<StoreClient>): StoreClient {
-  const refuse = (): never => {
-    throw new Error("stub store client: this suite did not expect that call");
-  };
-  return {
-    openAgentSession: refuse,
-    watchAgentSession: refuse,
-    watchBashRun: refuse,
-    readAgentPage: refuse,
-    getWorkflow: refuse,
-    getSidecarCursors: refuse,
-    getLiveWork: refuse,
-    getAgentByVendorTask: refuse,
-    getDetachedWork: refuse,
-    getPeerDelivery: refuse,
-    writeBatch: refuse,
-    ...overrides,
-  };
-}
 
 /** One recorded bash start, as it would come back from the agent's own book. */
 /** A spawn unit as the book records its start. */
@@ -342,25 +325,7 @@ describe("liveWork", () => {
   });
 
   it("raises a PersistenceError when the store refuses", async () => {
-    const refusing: StoreClient = {
-      openAgentSession: async () => {
-        throw new Error("unused");
-      },
-      watchAgentSession: () => {
-        throw new Error("unused");
-      },
-      watchBashRun: () => {
-        throw new Error("unused");
-      },
-      readAgentPage: async () => {
-        throw new Error("unused");
-      },
-      getWorkflow: async () => {
-        throw new Error("unused");
-      },
-      getSidecarCursors: async () => {
-        throw new Error("unused");
-      },
+    const refusing: StoreClient = stubClient({
       getLiveWork: async () =>
         create(storev1.GetLiveWorkResponseSchema, {
           result: {
@@ -368,13 +333,7 @@ describe("liveWork", () => {
             value: create(storev1.GetLiveWorkFailureSchema, { detail: "the disk is full" }),
           },
         }),
-      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
-      getDetachedWork: () => Promise.reject(new Error("unused")),
-      getPeerDelivery: () => Promise.reject(new Error("unused")),
-      writeBatch: async () => {
-        throw new Error("unused");
-      },
-    };
+    });
 
     await expect(createReconciler({ client: refusing, sleep: instantly }).liveWork(MAIN)).rejects.toBeInstanceOf(
       PersistenceError,
@@ -386,25 +345,7 @@ describe("liveWork", () => {
   it("answers once a momentarily busy database lets go", async () => {
     // Arrange: the store is busy for its first answer only.
     let asked = 0;
-    const busyOnce: StoreClient = {
-      openAgentSession: async () => {
-        throw new Error("unused");
-      },
-      watchAgentSession: () => {
-        throw new Error("unused");
-      },
-      watchBashRun: () => {
-        throw new Error("unused");
-      },
-      readAgentPage: async () => {
-        throw new Error("unused");
-      },
-      getWorkflow: async () => {
-        throw new Error("unused");
-      },
-      getSidecarCursors: async () => {
-        throw new Error("unused");
-      },
+    const busyOnce: StoreClient = stubClient({
       getLiveWork: async () => {
         asked += 1;
         if (asked > 1) {
@@ -425,54 +366,150 @@ describe("liveWork", () => {
           },
         });
       },
-      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
-      getDetachedWork: () => Promise.reject(new Error("unused")),
-      getPeerDelivery: () => Promise.reject(new Error("unused")),
-      writeBatch: async () => {
-        throw new Error("unused");
-      },
-    };
+    });
 
     // Act.
     const answer = await createReconciler({ client: busyOnce, sleep: instantly }).liveWork(MAIN);
 
     // Assert.
     expect(asked).toBe(2);
-    expect(answer.liveDetached).toEqual([]);
+    expect(answer.liveDetachedRuns).toEqual([]);
   });
 
   it("raises loudly when the store answers with no result arm", async () => {
-    const empty: StoreClient = {
-      openAgentSession: async () => {
-        throw new Error("unused");
-      },
-      watchAgentSession: () => {
-        throw new Error("unused");
-      },
-      watchBashRun: () => {
-        throw new Error("unused");
-      },
-      readAgentPage: async () => {
-        throw new Error("unused");
-      },
-      getWorkflow: async () => {
-        throw new Error("unused");
-      },
-      getSidecarCursors: async () => {
-        throw new Error("unused");
-      },
+    const empty: StoreClient = stubClient({
       getLiveWork: async () => create(storev1.GetLiveWorkResponseSchema, {}),
-      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
-      getDetachedWork: () => Promise.reject(new Error("unused")),
-      getPeerDelivery: () => Promise.reject(new Error("unused")),
-      writeBatch: async () => {
-        throw new Error("unused");
-      },
-    };
+    });
 
     await expect(createReconciler({ client: empty, sleep: instantly }).liveWork(MAIN)).rejects.toMatchObject({
       kind: "store_unavailable",
     });
+  });
+});
+
+/** A store whose only answer is ANSWER, to GetLiveWork; every other read is unused. */
+function liveWorkAnswering(answer: storev1.GetLiveWorkResponse): StoreClient {
+  return stubClient({
+    getLiveWork: async () => answer,
+  });
+}
+
+/** A live detached run WORK, owned by OWNER; either may be left empty. */
+function run(work: string, owner: string): storev1.GetLiveWorkDetached {
+  return create(storev1.GetLiveWorkDetachedSchema, {
+    work: work === "" ? undefined : create(conversationv1.DetachedWorkIdSchema, { value: work }),
+    owner: owner === "" ? undefined : create(conversationv1.AgentIdSchema, { value: owner }),
+  });
+}
+
+/** A successful GetLiveWork answer holding RUNS. */
+function answering(...runs: storev1.GetLiveWorkDetached[]): storev1.GetLiveWorkResponse {
+  return create(storev1.GetLiveWorkResponseSchema, {
+    result: { case: "success", value: create(storev1.GetLiveWorkSuccessSchema, { liveDetachedRuns: runs }) },
+  });
+}
+
+describe("the live-work read's detached runs", () => {
+  it("answers each run with its owner", async () => {
+    // Arrange.
+    const client = liveWorkAnswering(answering(run("b01", "main"), run("b02", "sub-1")));
+
+    // Act.
+    const answer = await createReconciler({ client, sleep: instantly }).liveWork(MAIN);
+
+    // Assert.
+    expect(answer.liveDetachedRuns.map((r) => [r.work?.value, r.owner?.value])).toEqual([
+      ["b01", "main"],
+      ["b02", "sub-1"],
+    ]);
+  });
+
+  const broken: ReadonlyArray<readonly [string, storev1.GetLiveWorkDetached]> = [
+    ["a run with no owner", run("b01", "")],
+    ["a run with no work", run("", "sub-1")],
+  ];
+  for (const [name, item] of broken) {
+    it(`refuses ${name} as a store that broke its contract`, async () => {
+      // Arrange.
+      const client = liveWorkAnswering(answering(run("b00", "main"), item));
+
+      // Act.
+      const answer = createReconciler({ client, sleep: instantly }).liveWork(MAIN);
+
+      // Assert.
+      await expect(answer).rejects.toMatchObject({ kind: "store_unavailable" });
+    });
+
+    it(`records ${name} at error, naming the item`, async () => {
+      // Arrange.
+      const client = liveWorkAnswering(answering(item));
+      const before = logSinkMark();
+
+      // Act.
+      await createReconciler({ client, sleep: instantly }).liveWork(MAIN).catch(() => undefined);
+
+      // Assert.
+      const record = logRecordsSince(before).find(
+        (r) => r.message === "the store answered an open-obligation read that breaks its contract",
+      );
+      expect([record?.level, record?.context?.work_id, record?.context?.owner]).toEqual([
+        "error",
+        item.work?.value ?? "",
+        item.owner?.value ?? "",
+      ]);
+    });
+  }
+});
+
+describe("ownedRunsOf", () => {
+  it("states each run's work and owner, in the store's order", () => {
+    // Arrange.
+    const success = create(storev1.GetLiveWorkSuccessSchema, { liveDetachedRuns: [run("b02", "sub-1"), run("b01", "main")] });
+
+    // Act.
+    const runs = ownedRunsOf(success);
+
+    // Assert.
+    expect(runs.map((r) => [r.work.value, r.owner.value])).toEqual([
+      ["b02", "sub-1"],
+      ["b01", "main"],
+    ]);
+  });
+
+  for (const [name, item] of [
+    ["no owner", run("b01", "")],
+    ["no work", run("", "sub-1")],
+  ] as const) {
+    it(`throws on a run with ${name}, never guessing a book`, () => {
+      expect(() => ownedRunsOf(create(storev1.GetLiveWorkSuccessSchema, { liveDetachedRuns: [item] }))).toThrow(
+        "without its work or owner",
+      );
+    });
+  }
+});
+
+describe("groupRunsByOwner", () => {
+  const owned = (work: string, owner: string) => ({
+    work: create(conversationv1.DetachedWorkIdSchema, { value: work }),
+    owner: create(conversationv1.AgentIdSchema, { value: owner }),
+  });
+
+  it("answers nothing for no runs", () => {
+    expect(groupRunsByOwner([])).toEqual([]);
+  });
+
+  it("gathers each owner's runs once, owners in the order of their first run", () => {
+    // Arrange.
+    const runs = [owned("b1", "sub-1"), owned("b2", "main"), owned("b3", "sub-1")];
+
+    // Act.
+    const groups = groupRunsByOwner(runs);
+
+    // Assert.
+    expect(groups.map((g) => [g.owner.value, g.works.map((w) => w.value)])).toEqual([
+      ["sub-1", ["b1", "b3"]],
+      ["main", ["b2"]],
+    ]);
   });
 });
 

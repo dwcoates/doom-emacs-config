@@ -1915,7 +1915,7 @@ describe("reconciliation at session start", () => {
 
     expect([
       revived.liveWork.map((item) => item.work?.value).includes(run),
-      live.result.case === "success" ? live.result.value.liveDetached.map((id) => id.value).includes(run) : undefined,
+      live.result.case === "success" ? live.result.value.liveDetachedRuns.map((run) => run.work?.value).includes(run) : undefined,
     ]).toEqual([false, false]);
   });
 
@@ -1951,7 +1951,7 @@ describe("reconciliation at session start", () => {
       }),
     );
 
-    expect(live.result.case === "success" ? live.result.value.liveDetached.map((id) => id.value) : []).toContain(run);
+    expect(live.result.case === "success" ? live.result.value.liveDetachedRuns.map((run) => run.work?.value) : []).toContain(run);
   });
 
   test("a session start never closes ANOTHER session's live work (2026-09-23)", async () => {
@@ -2006,7 +2006,7 @@ describe("reconciliation at session start", () => {
     );
     const open = live.result.case === "success" ? live.result.value : undefined;
     expect(open?.liveAgents.map((id) => id.value)).toEqual(aSubagents);
-    expect(open?.liveDetached.map((id) => id.value)).toEqual(["a-run"]);
+    expect(open?.liveDetachedRuns.map((run) => run.work?.value)).toEqual(["a-run"]);
     // ...while B's own in-process subagent, proof its reconciliation ran, is closed.
     const bLive = await store.getLiveWork(
       create(storev1.GetLiveWorkRequestSchema, {

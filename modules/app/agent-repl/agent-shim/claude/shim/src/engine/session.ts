@@ -61,6 +61,9 @@ import type { AgentPageSession, PersistEntry, Persistence, RecordPlace } from ".
 import {
   announceLiveWork,
   bashUnitsWithoutCommand,
+  groupRunsByOwner,
+  ownedRunsOf,
+  type OwnedRun,
   closingAgentTerminal,
   closingMonitorTerminal,
   findMonitorCall,
@@ -6178,6 +6181,73 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * ONE OWNER'S BOOK, read back far enough to hold every run in WORKS, for
+   * reconciliation. A book with no rows yet describes nothing and is not a
+   * fault; any other failure is recorded and leaves the runs undescribed.
+   */
+  async function reconciliationBook(
+    owner: conversationv1.AgentId,
+    works: readonly conversationv1.DetachedWorkId[],
+  ): Promise<readonly conversationv1.HistoryEntryAt[]> {
+    try {
+      return await readBookFor(
+        owner,
+        works.map((work) => work.value),
+      );
+    } catch (err) {
+      if (answeredNoBookYet(err)) {
+        LOGGER.debug(
+          { agent: owner.value },
+          "the owner's book holds no rows yet, so reconciliation describes live work from an empty book",
+        );
+      } else {
+        // warn: a defect because reconciliation lost access to the durable book it must describe.
+        LOGGER.warn(
+          { agent: owner.value, cause: err instanceof Error ? err.message : String(err) },
+          "the book could not be read for reconciliation; live work cannot be described",
+        );
+      }
+      return [];
+    }
+  }
+
+  /**
+   * THE ANNOUNCEMENTS FOR ONE OWNER'S LIVE HANDLES, described from that
+   * owner's BOOK: each handle's recorded start, then a subagent resumed by a
+   * send, named by the store and described by its spawn. A handle neither
+   * describes is reported as a record-plane loss when OWED says it is owed a
+   * description, and otherwise dropped as no live work. `described` and
+   * `resumed` are answered apart because a caller may filter only the first.
+   */
+  async function describeLiveRuns(
+    owner: conversationv1.AgentId,
+    book: readonly conversationv1.HistoryEntryAt[],
+    handles: readonly conversationv1.DetachedWorkId[],
+    owed: (handle: conversationv1.DetachedWorkId) => boolean,
+  ): Promise<{ described: conversationv1.AgentDetachedWork[]; resumed: conversationv1.AgentDetachedWork[] }> {
+    const undescribed: conversationv1.DetachedWorkId[] = [];
+    const described = announceLiveWork(
+      book,
+      handles,
+      owner,
+      (handle) => {
+        if (owed(handle)) undescribed.push(handle);
+        else
+          LOGGER.info(
+            { work: handle.value, owner: owner.value },
+            "a record candidate the book cannot describe is not a live shell; it is not re-announced",
+          );
+      },
+      await bashStartsFor(bashUnitsWithoutCommand(book, handles)),
+    );
+    // A SUBAGENT RESUMED BY A SEND is described from its spawn, named by the
+    // store; only what is not a send is the record-plane loss.
+    const resumed = await announceResumedAgents(owner, book, undescribed);
+    for (const handle of resumed.notResumes) reportUndescribableWork(handle, owner);
+    return { described, resumed: resumed.announced };
+  }
+
+  /**
    * GetLiveWork reconciliation.
    *
    * RE-ADOPT what the revived vendor process actually has, and WRITE THE
@@ -6208,102 +6278,73 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return [];
     }
     const closing: PersistEntry[] = [];
+    const readopted: conversationv1.AgentDetachedWork[] = [];
 
-    // THE RECORD IS THE ONLY PLACE the work's own start survives a bounce, so
-    // the book is read ONCE and every description below comes out of it. This
-    // is a read and not a follow, so it goes through the ONE-SHOT verb: the
-    // store mints no watch token for a tail that is never stood.
-    let book: readonly conversationv1.HistoryEntryAt[] = [];
-    if (open.liveDetached.length > 0 || open.liveAgents.length > 0) {
-      try {
-        book = await readBookFor(
-          agentId,
-          open.liveDetached.map((work) => work.value),
-        );
-      } catch (err) {
-        if (answeredNoBookYet(err)) {
-          LOGGER.debug(
-            { agent: agentId.value },
-            "this session's book holds no rows yet, so reconciliation describes live work from an empty book",
-          );
-        } else {
-          // warn: a defect because reconciliation lost access to the durable book it must describe.
-          LOGGER.warn(
-            { cause: err instanceof Error ? err.message : String(err) },
-            "the book could not be read for reconciliation; live work cannot be described",
-          );
-        }
-      }
-    }
+    // EACH RUN IS DESCRIBED FROM ITS OWNER'S BOOK. The answer spans the whole
+    // lineage, and a run a subagent announced (a shell it backgrounded) has
+    // its start in the subagent's book; describing it from the main agent's
+    // book found nothing and reported a loss the record never had (2026-10-22,
+    // dashboard-game-review-metrics). One book is read per owner.
+    for (const { owner, works } of groupRunsByOwner(ownedRunsOf(open))) {
+      const book = await reconciliationBook(owner, works);
 
-    // A REVIVED SHIM'S VENDOR IS A NEW CLI PROCESS, and it holds NOTHING from
-    // before: the SDK states its background-task level is per process and
-    // nothing is emitted at startup, and no capture shows a revived process
-    // re-announcing any task. So survival is never asked of the vendor (its
-    // `backgroundTasks` MOVES foreground work and answers `false` for work
-    // already in the background; it is no observation). It is decided by WHERE
-    // THE WORK RAN, from the record (`revivalFate`):
-    //
-    // - IN THE CLI PROCESS (a subagent's run, a subagent resumed by a send, a
-    //   monitor's watch, whose events only the CLI delivered): provably ended
-    //   by the replacement, so it is closed here with its lost terminal.
-    // - BACKED BY ITS OWN OS PROCESS AND SPOOL (a shell): it may still be
-    //   running, so the shim NEVER writes its terminal here. It stays live,
-    //   re-announced, and its terminal is the sidecar's, read off the spool.
-    //
-    // Work this process has already seen start under the current query is
-    // live by observation and is re-announced whatever its kind.
-    const readoptable: conversationv1.DetachedWorkId[] = [];
-    for (const work of open.liveDetached) {
-      const run = toolCallActivityId(work.value);
-      const item = findUnit(book, run);
-      if (live.byToolUseId(work.value) !== undefined) {
-        readoptable.push(work);
-        continue;
-      }
-      const fate = revivalFate(item, findAnnouncedKind(book, work));
-      switch (fate.kind) {
-        case "spool":
-          LOGGER.debug(
-            { work_id: work.value, kind: fate.unit },
-            "a spool-backed run outlives the CLI process; it stays live and its terminal is the sidecar's",
-          );
+      // A REVIVED SHIM'S VENDOR IS A NEW CLI PROCESS, and it holds NOTHING from
+      // before: the SDK states its background-task level is per process and
+      // nothing is emitted at startup, and no capture shows a revived process
+      // re-announcing any task. So survival is never asked of the vendor (its
+      // `backgroundTasks` MOVES foreground work and answers `false` for work
+      // already in the background; it is no observation). It is decided by WHERE
+      // THE WORK RAN, from the record (`revivalFate`):
+      //
+      // - IN THE CLI PROCESS (a subagent's run, a subagent resumed by a send, a
+      //   monitor's watch, whose events only the CLI delivered): provably ended
+      //   by the replacement, so it is closed here with its lost terminal, in
+      //   its owner's book.
+      // - BACKED BY ITS OWN OS PROCESS AND SPOOL (a shell): it may still be
+      //   running, so the shim NEVER writes its terminal here. It stays live,
+      //   re-announced, and its terminal is the sidecar's, read off the spool.
+      //
+      // Work this process has already seen start under the current query is
+      // live by observation and is re-announced whatever its kind.
+      const readoptable: conversationv1.DetachedWorkId[] = [];
+      for (const work of works) {
+        const run = toolCallActivityId(work.value);
+        const item = findUnit(book, run);
+        if (live.byToolUseId(work.value) !== undefined) {
           readoptable.push(work);
           continue;
-        case "unknown":
-          // warn: a decision because the record states no kind for this live handle, so it cannot be judged in-process and is left live rather than risk closing a running process.
-          LOGGER.warn(
-            { work_id: work.value, unit: item?.case ?? "" },
-            "the record states no kind for this live work; it is left live, since only work that ran in the CLI process may be closed at revival",
-          );
-          continue;
-        case "in_process":
-          LOGGER.info(
-            { work_id: work.value, kind: fate.unit, reason: "the CLI process that ran it was replaced" },
-            "closed live work that ran inside the CLI process: the CLI process that ran it was replaced",
-          );
-          closing.push(await closingInProcessWork(agentId, book, run, item));
-          continue;
+        }
+        const fate = revivalFate(item, findAnnouncedKind(book, work));
+        switch (fate.kind) {
+          case "spool":
+            LOGGER.debug(
+              { work_id: work.value, owner: owner.value, kind: fate.unit },
+              "a spool-backed run outlives the CLI process; it stays live and its terminal is the sidecar's",
+            );
+            readoptable.push(work);
+            continue;
+          case "unknown":
+            // warn: a decision because the record states no kind for this live handle, so it cannot be judged in-process and is left live rather than risk closing a running process.
+            LOGGER.warn(
+              { work_id: work.value, owner: owner.value, unit: item?.case ?? "" },
+              "the record states no kind for this live work; it is left live, since only work that ran in the CLI process may be closed at revival",
+            );
+            continue;
+          case "in_process":
+            LOGGER.info(
+              { work_id: work.value, owner: owner.value, kind: fate.unit, reason: "the CLI process that ran it was replaced" },
+              "closed live work that ran inside the CLI process: the CLI process that ran it was replaced",
+            );
+            closing.push(await closingInProcessWork(owner, book, run, item));
+            continue;
+        }
       }
+      // RE-ADOPTED WORK IS ANNOUNCED `created`, NEVER `detached`: a daemon that
+      // restarted was not there for the original announcement and has no element
+      // to continue, so it must be told what the work IS.
+      const { described, resumed } = await describeLiveRuns(owner, book, readoptable, () => true);
+      readopted.push(...described, ...resumed);
     }
-    // RE-ADOPTED WORK IS ANNOUNCED `created`, NEVER `detached`: a daemon that
-    // restarted was not there for the original announcement and has no element
-    // to continue, so it must be told what the work IS.
-    const undescribedSurvivors: conversationv1.DetachedWorkId[] = [];
-    const readopted = announceLiveWork(
-      book,
-      readoptable,
-      agentId,
-      (handle) => {
-        undescribedSurvivors.push(handle);
-      },
-      await bashStartsFor(bashUnitsWithoutCommand(book, readoptable)),
-    );
-    // A SUBAGENT RESUMED BY A SEND is described from its spawn, named by the
-    // store; only what is not a send is the record-plane loss.
-    const resumed = await announceResumedAgents(agentId, book, undescribedSurvivors);
-    readopted.push(...resumed.announced);
-    for (const handle of resumed.notResumes) reportUndescribableWork(handle);
 
     for (const agent of open.liveAgents) {
       if (agent.value === agentId.value) continue;
@@ -6949,44 +6990,43 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const tableShellIds = live.workIds(tableShellEntries());
       const owed = [...levelIds, ...tableShellIds];
       const inLevel = new Set(owed.map((id) => id.value));
-      const fromRecord = open.liveDetached.filter((id) => !inLevel.has(id.value));
-      const handles = [...owed, ...fromRecord];
+      // EACH HANDLE IS DESCRIBED FROM ITS OWNER'S BOOK. The record names the
+      // owner of every run it holds open, a subagent's included; a handle only
+      // this process holds, which the record does not name, is the main
+      // agent's.
+      const recorded = ownedRunsOf(open);
+      const recordedOwner = new Map(recorded.map((run) => [run.work.value, run.owner]));
+      const fromRecord = recorded.filter((run) => !inLevel.has(run.work.value));
+      const handles: OwnedRun[] = [
+        ...owed.map((work) => ({ work, owner: recordedOwner.get(work.value) ?? agentId })),
+        ...fromRecord,
+      ];
       LOGGER.info(
         {
           level_items: levelIds.map((id) => id.value),
           table_shells: tableShellIds.map((id) => id.value),
-          record_only: fromRecord.map((id) => id.value),
+          record_only: fromRecord.map((run) => run.work.value),
         },
         "gathered the live membership to re-announce to a new watch",
       );
       if (handles.length === 0) return [];
-      // READ, NOT WATCH: the one-shot verb, so no watch token is minted for a
-      // tail this description never stands.
-      const book = await readBookFor(
-        agentId,
-        handles.map((handle) => handle.value),
-      );
-      const undescribed: conversationv1.DetachedWorkId[] = [];
-      const described = announceLiveWork(
-        book,
-        handles,
-        agentId,
-        (handle) => {
-          // ONLY A LEVEL ITEM IS OWED A DESCRIPTION: a record candidate the
-          // book cannot describe is not known to be a shell, so it is not live.
-          if (inLevel.has(handle.value)) undescribed.push(handle);
-          else LOGGER.info({ work: handle.value }, "a record candidate the book cannot describe is not a live shell; it is not re-announced");
-        },
-        await bashStartsFor(bashUnitsWithoutCommand(book, handles)),
-      );
-      const announcements = described.filter(
-        (work) => inLevel.has(work.work?.value ?? "") || work.kind?.kind.case === "bash",
-      );
-      // A SUBAGENT RESUMED BY A SEND is described from its spawn, named by the
-      // store; only a handle that is not a send takes the undescribed path.
-      const resumed = await announceResumedAgents(agentId, book, undescribed);
-      for (const handle of resumed.notResumes) reportUndescribableWork(handle);
-      return [...announcements, ...resumed.announced];
+      const announcements: conversationv1.AgentDetachedWork[] = [];
+      for (const { owner, works } of groupRunsByOwner(handles)) {
+        // READ, NOT WATCH: the one-shot verb, so no watch token is minted for a
+        // tail this description never stands.
+        const book = await readBookFor(
+          owner,
+          works.map((work) => work.value),
+        );
+        // ONLY A LEVEL ITEM IS OWED A DESCRIPTION: a record candidate the book
+        // cannot describe is not known to be a shell, so it is not live.
+        const { described, resumed } = await describeLiveRuns(owner, book, works, (handle) => inLevel.has(handle.value));
+        announcements.push(
+          ...described.filter((work) => inLevel.has(work.work?.value ?? "") || work.kind?.kind.case === "bash"),
+          ...resumed,
+        );
+      }
+      return announcements;
     } catch (err) {
       // NO BOOK YET IS NOT AN UNREACHABLE STORE. A workspace created moments
       // ago has written no row, so the store answers `unknown_agent` -- its
@@ -7067,18 +7107,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
-   * A live handle of this session's lineage that no row of the main book
+   * A live handle of this session's lineage that no row of its OWNER's book
    * describes, and that no send resumed: it cannot be announced, because an
    * announcement must state its kind and nothing the record holds names one.
+   * The owner is the store's answer for the handle, so a subagent's run is
+   * looked for in the subagent's book and only a real loss reaches here.
    *
    * ONE SITE FOR ONE FACT, shared by StartSession and a re-announcement. The
    * store's live set is scoped to this session's lineage, so the handle IS
    * this conversation's work; its absence from the announcement is a
    * record-plane loss, stated at ERROR and never judged by asking the vendor.
    */
-  function reportUndescribableWork(handle: conversationv1.DetachedWorkId): void {
+  function reportUndescribableWork(handle: conversationv1.DetachedWorkId, owner: conversationv1.AgentId): void {
     LOGGER.error(
-      { work_id: handle.value, detail: "no row of the main book describes this live handle and no send resumed it" },
+      {
+        work_id: handle.value,
+        owner: owner.value,
+        detail: "no row of its owner's book describes this live handle and no send resumed it",
+      },
       "live work of this session has no describable record, so its kind is unknown and it cannot be announced",
     );
   }

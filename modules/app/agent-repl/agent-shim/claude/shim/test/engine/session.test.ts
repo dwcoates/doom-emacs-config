@@ -51,7 +51,7 @@ import { VENDOR_ERROR_RETRY_INTERVAL_MS } from "../../src/engine/vendor-error-re
 import { isVendorErrorRetryPrompt } from "../../src/engine/vendor-error-retry-prompt.js";
 import { rollBackSessionRequestFor } from "../service/requests.js";
 import type { ForkVendorSession } from "../../src/engine/fork-session.js";
-import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ScriptedQuery, emitSummary, errorResultMessage, hookResponse, initMessage, resultMessage, unexpectedVendorFork } from "./fakes.js";
+import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ownedBy, ownedBySession, ScriptedQuery, emitSummary, errorResultMessage, hookResponse, initMessage, resultMessage, unexpectedVendorFork } from "./fakes.js";
 import { projectDir, transcriptPath } from "../../src/engine/vendor-paths.js";
 
 interface Harness {
@@ -6365,7 +6365,7 @@ describe("GetLiveWork reconciliation", () => {
   function revivedOver(work: string, entries: conversationv1.HistoryEntryAt[]): Harness {
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: work })],
+      liveDetachedRuns: [ownedBySession(work)],
     });
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
       entries,
@@ -6427,6 +6427,124 @@ describe("GetLiveWork reconciliation", () => {
     // Assert.
     const message = "a spool-backed run outlives the CLI process; it stays live and its terminal is the sidecar's";
     expect([logLevelFor(before, message), logContextFor(before, message)?.work_id]).toEqual(["debug", "b01"]);
+  });
+
+  /**
+   * A session revived over a store holding `work` live and owned by the
+   * SUBAGENT `sub-1`, whose own book holds `subEntries`; the main book is empty.
+   */
+  function revivedOverSubagentRun(work: string, subEntries: conversationv1.HistoryEntryAt[]): Harness {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetachedRuns: [ownedBy(work, "sub-1")],
+    });
+    h.persistence.pagesByAgent.set(
+      "sub-1",
+      create(conversationv1.HistoryPageSchema, {
+        entries: subEntries,
+        boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+      }),
+    );
+    return h;
+  }
+
+  const UNDESCRIBABLE = "live work of this session has no describable record, so its kind is unknown and it cannot be announced";
+
+  it("re-adopts a subagent's live shell as a shell, owned by the subagent", async () => {
+    // Arrange.
+    const h = revivedOverSubagentRun("b01", [recordedBashRun("b01")]);
+
+    // Act.
+    const response = await started(h);
+
+    // Assert.
+    const live = response.result.case === "success" ? (response.result.value.session?.liveWork ?? []) : [];
+    expect(live.map((work) => [work.work?.value, work.kind?.kind.case, work.owner?.value])).toEqual([["b01", "bash", "sub-1"]]);
+  });
+
+  it("records no undescribable-work error for a subagent's live shell", async () => {
+    // Arrange.
+    const h = revivedOverSubagentRun("b01", [recordedBashRun("b01")]);
+    const before = logSinkMark();
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    expect(logLevelFor(before, UNDESCRIBABLE)).toBeUndefined();
+  });
+
+  it("reads the subagent's own book to describe the subagent's run", async () => {
+    // Arrange.
+    const h = revivedOverSubagentRun("b01", [recordedBashRun("b01")]);
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    expect(h.persistence.firstPageAgents).toContain("sub-1");
+  });
+
+  it("still reports a subagent's live shell whose start no book holds, naming its owner", async () => {
+    // Arrange: the subagent's book states the run is a shell, but holds no start row for it.
+    const h = revivedOverSubagentRun("b01", [
+      recordedAnnouncement("b01", { case: "bash", value: create(conversationv1.DetachedWorkKindBashSchema, {}) }),
+    ]);
+    const before = logSinkMark();
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    expect([logLevelFor(before, UNDESCRIBABLE), logContextFor(before, UNDESCRIBABLE)?.owner]).toEqual(["error", "sub-1"]);
+  });
+
+  it("closes a subagent's in-process run in the subagent's own book", async () => {
+    // Arrange.
+    const h = revivedOverSubagentRun("toolu_watch", [recordedUnit("toolu_watch", ARMED_MONITOR)]);
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    const closing = [...h.persistence.buffered, ...h.persistence.durable].filter((entry) =>
+      entry.upsertKey?.includes("toolu_watch"),
+    );
+    expect(closing.length > 0 && closing.every((entry) => entry.agentId?.value === "sub-1")).toBe(true);
+  });
+
+  /** The live work a new watch's re-announcement states. */
+  async function reannouncedTo(h: Harness): Promise<conversationv1.AgentDetachedWork[] | undefined> {
+    const watch = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+    await watch.next();
+    const second = await nextPush(watch);
+    await watch.return?.();
+    return second.frame.case === "sessionStarted" ? second.frame.value.liveWork : undefined;
+  }
+
+  it("re-announces a subagent's live shell to a new watch as a shell, owned by the subagent", async () => {
+    // Arrange.
+    const h = revivedOverSubagentRun("b01", [recordedBashRun("b01")]);
+    await started(h);
+
+    // Act.
+    const live = await reannouncedTo(h);
+
+    // Assert.
+    expect(live?.map((work) => [work.work?.value, work.kind?.kind.case, work.owner?.value])).toEqual([["b01", "bash", "sub-1"]]);
+  });
+
+  it("records no undescribable-work error when re-announcing a subagent's live shell", async () => {
+    // Arrange.
+    const h = revivedOverSubagentRun("b01", [recordedBashRun("b01")]);
+    await started(h);
+    const before = logSinkMark();
+
+    // Act.
+    await reannouncedTo(h);
+
+    // Assert.
+    expect(logLevelFor(before, UNDESCRIBABLE)).toBeUndefined();
   });
 
   it("never asks the vendor about survival at StartSession", async () => {
@@ -6555,7 +6673,7 @@ describe("GetLiveWork reconciliation", () => {
     // daemon adopting a running shim needs the membership that is live now.
     const h = harness({ backgroundTasks: true });
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+      liveDetachedRuns: [ownedBySession("b01")],
     });
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
       entries: [recordedBashRun("b01")],
@@ -6585,7 +6703,7 @@ describe("GetLiveWork reconciliation", () => {
     // shim cannot reach is a session-level fact, never a quiet empty list.
     const h = harness({ backgroundTasks: true });
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+      liveDetachedRuns: [ownedBySession("b01")],
     });
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
       entries: [recordedBashRun("b01")],
@@ -11107,7 +11225,7 @@ describe("reconciliation when the record cannot describe the work", () => {
     // Arrange.
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+      liveDetachedRuns: [ownedBySession("b01")],
     });
     h.persistence.openError = new PersistenceError("store_unavailable", "the store is down");
 
@@ -11123,7 +11241,7 @@ describe("reconciliation when the record cannot describe the work", () => {
     // shell would put a bash terminal on a subagent's own unit.
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_spawn" })],
+      liveDetachedRuns: [ownedBySession("toolu_spawn")],
     });
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
       entries: [
@@ -11219,7 +11337,7 @@ describe("reconciliation when the record cannot describe the work", () => {
     // page closed it as a shell run and the store relabelled it `bash`.
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_old_spawn" })],
+      liveDetachedRuns: [ownedBySession("toolu_old_spawn")],
     });
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
       entries: [unitEntry("9", "toolu_recent", monitorStart)],
@@ -11242,7 +11360,7 @@ describe("reconciliation when the record cannot describe the work", () => {
   it("walks down from the oldest entry it already holds", async () => {
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_old_spawn" })],
+      liveDetachedRuns: [ownedBySession("toolu_old_spawn")],
     });
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
       entries: [unitEntry("9", "toolu_a", monitorStart), unitEntry("8", "toolu_b", monitorStart)],
@@ -11263,7 +11381,7 @@ describe("reconciliation when the record cannot describe the work", () => {
   it("reads no older page when the newest one describes every live unit", async () => {
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_spawn" })],
+      liveDetachedRuns: [ownedBySession("toolu_spawn")],
     });
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
       entries: [unitEntry("1", "toolu_spawn", spawnStart)],
@@ -11278,7 +11396,7 @@ describe("reconciliation when the record cannot describe the work", () => {
   it("closes a MONITOR the book describes with the monitor's ended arm, not as a shell run", async () => {
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_watch" })],
+      liveDetachedRuns: [ownedBySession("toolu_watch")],
     });
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
       entries: [unitEntry("1", "toolu_watch", monitorStart)],
@@ -11295,7 +11413,7 @@ describe("reconciliation when the record cannot describe the work", () => {
   it("restates the recorded start on the monitor it closes, so its card still draws", async () => {
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_watch" })],
+      liveDetachedRuns: [ownedBySession("toolu_watch")],
     });
     const armed = create(conversationv1.AgentMonitorStartSchema, { description: "watch the log" });
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
@@ -11761,7 +11879,7 @@ describe("reconciliation against work the shim has already SEEN start", () => {
       },
     });
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_seen" })],
+      liveDetachedRuns: [ownedBySession("toolu_seen")],
     });
 
     await h.engine.startSession(freshRequest());
@@ -12024,7 +12142,7 @@ describe("a vendor failure that is not an Error", () => {
   it("logs a bare-string book-read rejection while reconciling", async () => {
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+      liveDetachedRuns: [ownedBySession("b01")],
     });
     h.persistence.readFirstPage = () => Promise.reject("the store socket went away");
     const before = logSinkMark();
@@ -12060,7 +12178,7 @@ describe("a vendor failure that is not an Error", () => {
   it("carries a bare-string book-read rejection into the re-announcement fault", async () => {
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+      liveDetachedRuns: [ownedBySession("b01")],
     });
     const details = await faultDetailsWhile(h, async () => {
       await started(h);
@@ -13023,7 +13141,7 @@ describe("reconciliation's remaining descriptions", () => {
   it("re-adopts a live shell whose row holds no arm, announcing it with an empty command", async () => {
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b02" })],
+      liveDetachedRuns: [ownedBySession("b02")],
     });
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
       entries: [
@@ -13173,7 +13291,7 @@ describe("StartSession's remaining steps when the query died under them", () => 
       },
     });
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+      liveDetachedRuns: [ownedBySession("b01")],
     });
     const pending = h.engine.startSession(freshRequest());
     const first = await untilQuery(h, 0);
@@ -13543,7 +13661,7 @@ describe("re-announcing live work the record cannot describe", () => {
     const h = harness();
     await started(h);
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_foreign" })],
+      liveDetachedRuns: [ownedBySession("toolu_foreign")],
     });
     await vendorRunsLive(h, "toolu_foreign", "local_agent");
     return h;
@@ -13645,7 +13763,7 @@ describe("re-announcing live background work whose row moved past its start", ()
     await started(h);
     await vendorRunsLive(h, id, taskType);
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: id })],
+      liveDetachedRuns: [ownedBySession(id)],
     });
     h.persistence.page = create(conversationv1.HistoryPageSchema, {
       entries: [row],
@@ -13711,7 +13829,7 @@ describe("re-announcing live background work whose row moved past its start", ()
     // (2026-10-14: the re-announcement named no shell while the stand-down
     // refusal counted one).
     const h = await adoptedWith("toolu_bg_shell", BACKGROUND_SHELL);
-    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, { liveDetached: [] });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, { liveDetachedRuns: [] });
     h.persistence.bashFrames = [SHELL_START];
 
     // Act.
@@ -13814,7 +13932,7 @@ describe("re-announcing when the store holds no rows for this agent yet", () => 
   ): Promise<Harness> {
     const h = harness({ backgroundTasks: true });
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+      liveDetachedRuns: [ownedBySession("b01")],
     });
     await started(h);
     await vendorRunsLive(h, "b01", "local_bash");
@@ -13913,7 +14031,7 @@ describe("reconciling when the store holds no rows for this agent yet", () => {
   async function startWithBookRefused(error: PersistenceError): Promise<number> {
     const h = harness({ backgroundTasks: true });
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+      liveDetachedRuns: [ownedBySession("b01")],
     });
     h.persistence.openError = error;
     const before = logSinkMark();
@@ -14962,7 +15080,7 @@ describe("a subagent resumed by a send whose spawn this process never saw", () =
   function restoredHarness(): Harness {
     const h = harness({ backgroundTasks: true });
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
-      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_send" })],
+      liveDetachedRuns: [ownedBySession("toolu_send")],
     });
     h.persistence.page = resumedBook();
     return h;

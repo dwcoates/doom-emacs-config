@@ -37,7 +37,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_get_live_work.proto.
  */
 export const file_store_v1_endpoint_get_live_work: GenFile = /*@__PURE__*/
-  fileDesc("CiVzdG9yZS92MS9lbmRwb2ludF9nZXRfbGl2ZV93b3JrLnByb3RvEghzdG9yZS52MSI/ChJHZXRMaXZlV29ya1JlcXVlc3QSKQoHc2Vzc2lvbhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkIoEBChNHZXRMaXZlV29ya1Jlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zdG9yZS52MS5HZXRMaXZlV29ya1N1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc3RvcmUudjEuR2V0TGl2ZVdvcmtGYWlsdXJlSABCCAoGcmVzdWx0IrQBChJHZXRMaXZlV29ya1N1Y2Nlc3MSLQoLbGl2ZV9hZ2VudHMYASADKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZBI3Cg5saXZlX3dvcmtmbG93cxgCIAMoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtJZBI2Cg1saXZlX2RldGFjaGVkGAMgAygLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkIqwBChJHZXRMaXZlV29ya0ZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEj4KD3N0b3JhZ2VfZmFpbHVyZRgCIAEoCzIjLnN0b3JlLnYxLkdldExpdmVXb3JrU3RvcmFnZUZhaWx1cmVIABI+Cg9pbnZhbGlkX3JlcXVlc3QYAyABKAsyIy5zdG9yZS52MS5HZXRMaXZlV29ya0ludmFsaWRSZXF1ZXN0SABCBgoEa2luZCIqChlHZXRMaXZlV29ya0ludmFsaWRSZXF1ZXN0Eg0KBWZpZWxkGAEgASgJIhsKGUdldExpdmVXb3JrU3RvcmFnZUZhaWx1cmVCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_detached_work]);
+  fileDesc("CiVzdG9yZS92MS9lbmRwb2ludF9nZXRfbGl2ZV93b3JrLnByb3RvEghzdG9yZS52MSI/ChJHZXRMaXZlV29ya1JlcXVlc3QSKQoHc2Vzc2lvbhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkIoEBChNHZXRMaXZlV29ya1Jlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zdG9yZS52MS5HZXRMaXZlV29ya1N1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc3RvcmUudjEuR2V0TGl2ZVdvcmtGYWlsdXJlSABCCAoGcmVzdWx0IswBChJHZXRMaXZlV29ya1N1Y2Nlc3MSLQoLbGl2ZV9hZ2VudHMYASADKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZBI3Cg5saXZlX3dvcmtmbG93cxgCIAMoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtJZBI5ChJsaXZlX2RldGFjaGVkX3J1bnMYBCADKAsyHS5zdG9yZS52MS5HZXRMaXZlV29ya0RldGFjaGVkSgQIAxAEUg1saXZlX2RldGFjaGVkIm0KE0dldExpdmVXb3JrRGV0YWNoZWQSLQoEd29yaxgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtJZBInCgVvd25lchgCIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkIqwBChJHZXRMaXZlV29ya0ZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEj4KD3N0b3JhZ2VfZmFpbHVyZRgCIAEoCzIjLnN0b3JlLnYxLkdldExpdmVXb3JrU3RvcmFnZUZhaWx1cmVIABI+Cg9pbnZhbGlkX3JlcXVlc3QYAyABKAsyIy5zdG9yZS52MS5HZXRMaXZlV29ya0ludmFsaWRSZXF1ZXN0SABCBgoEa2luZCIqChlHZXRMaXZlV29ya0ludmFsaWRSZXF1ZXN0Eg0KBWZpZWxkGAEgASgJIhsKGUdldExpdmVXb3JrU3RvcmFnZUZhaWx1cmVCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_detached_work]);
 
 /**
  * Ask for one session's open obligations.
@@ -98,9 +98,10 @@ export const GetLiveWorkResponseSchema: GenMessage<GetLiveWorkResponse> = /*@__P
 /**
  * The session's open obligations, from the three tables' non-terminal rows
  * within the requested lineage — never another session's. Empty lists are the
- * ordinary answer for an idle session. IDS ONLY: the caller
- * follows up per item (GetWorkflow, OpenAgentSession, the detached row's
- * state), which the reconciliation does anyway.
+ * ordinary answer for an idle session. Each item is named by its id, and a
+ * detached run also by the agent that owns it; the caller follows up per item
+ * (GetWorkflow, OpenAgentSession, the owner's book), which the reconciliation
+ * does anyway.
  *
  * @generated from message store.v1.GetLiveWorkSuccess
  */
@@ -120,11 +121,12 @@ export type GetLiveWorkSuccess = Message<"store.v1.GetLiveWorkSuccess"> & {
   liveWorkflows: DetachedWorkId[];
 
   /**
-   * Non-agent detached runs (bash) with no terminal.
+   * Non-agent detached runs (a shell) with no terminal, each with its owner,
+   * oldest announcement first.
    *
-   * @generated from field: repeated conversation.v1.DetachedWorkId live_detached = 3;
+   * @generated from field: repeated store.v1.GetLiveWorkDetached live_detached_runs = 4;
    */
-  liveDetached: DetachedWorkId[];
+  liveDetachedRuns: GetLiveWorkDetached[];
 };
 
 /**
@@ -133,6 +135,46 @@ export type GetLiveWorkSuccess = Message<"store.v1.GetLiveWorkSuccess"> & {
  */
 export const GetLiveWorkSuccessSchema: GenMessage<GetLiveWorkSuccess> = /*@__PURE__*/
   messageDesc(file_store_v1_endpoint_get_live_work, 2);
+
+/**
+ * One live non-agent detached run, named together with the agent that owns it.
+ *
+ * THE OWNER IS PART OF THE ITEM, NOT A LOOKUP. The answer spans the whole
+ * lineage — the main agent and every subagent at any depth — and a run's
+ * start, the only record of what it IS, lies in its OWNER's book. A caller
+ * handed the id alone reads the main agent's book, finds no start for a run a
+ * subagent announced, and reports a description the record never lost. So a
+ * run is never answered without its owner: both fields are set on every item,
+ * and an item missing either is malformed.
+ *
+ * @generated from message store.v1.GetLiveWorkDetached
+ */
+export type GetLiveWorkDetached = Message<"store.v1.GetLiveWorkDetached"> & {
+  /**
+   * REQUIRED. The run's handle: the key its own stream is opened under and the
+   * unit its start was recorded as in the owner's book.
+   *
+   * @generated from field: conversation.v1.DetachedWorkId work = 1;
+   */
+  work?: DetachedWorkId | undefined;
+
+  /**
+   * REQUIRED. The agent in the requested lineage that announced the run — the
+   * main agent or a subagent at any depth (the detached row's declared owner).
+   * The run is described from this agent's book, and a terminal the caller
+   * writes for it is written there.
+   *
+   * @generated from field: conversation.v1.AgentId owner = 2;
+   */
+  owner?: AgentId | undefined;
+};
+
+/**
+ * Describes the message store.v1.GetLiveWorkDetached.
+ * Use `create(GetLiveWorkDetachedSchema)` to create a new message.
+ */
+export const GetLiveWorkDetachedSchema: GenMessage<GetLiveWorkDetached> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_get_live_work, 3);
 
 /**
  * The set could not be read. THE ARM IS WHY.
@@ -172,7 +214,7 @@ export type GetLiveWorkFailure = Message<"store.v1.GetLiveWorkFailure"> & {
  * Use `create(GetLiveWorkFailureSchema)` to create a new message.
  */
 export const GetLiveWorkFailureSchema: GenMessage<GetLiveWorkFailure> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_get_live_work, 3);
+  messageDesc(file_store_v1_endpoint_get_live_work, 4);
 
 /**
  * The request was malformed or violated the validation invariant.
@@ -194,7 +236,7 @@ export type GetLiveWorkInvalidRequest = Message<"store.v1.GetLiveWorkInvalidRequ
  * Use `create(GetLiveWorkInvalidRequestSchema)` to create a new message.
  */
 export const GetLiveWorkInvalidRequestSchema: GenMessage<GetLiveWorkInvalidRequest> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_get_live_work, 4);
+  messageDesc(file_store_v1_endpoint_get_live_work, 5);
 
 /**
  * The database failed; `detail` carries the driver's text.
@@ -209,5 +251,5 @@ export type GetLiveWorkStorageFailure = Message<"store.v1.GetLiveWorkStorageFail
  * Use `create(GetLiveWorkStorageFailureSchema)` to create a new message.
  */
 export const GetLiveWorkStorageFailureSchema: GenMessage<GetLiveWorkStorageFailure> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_get_live_work, 5);
+  messageDesc(file_store_v1_endpoint_get_live_work, 6);
 

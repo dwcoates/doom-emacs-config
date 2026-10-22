@@ -64,9 +64,12 @@ const (
 	  WHERE a.ended_at_ms IS NULL AND a.agent_id != ?
 	  ORDER BY a.started_at_ms ASC, a.agent_id ASC`
 
-	// liveDetachedSQL binds (session, the workflow kind excluded).
+	// liveDetachedSQL binds (session, the workflow kind excluded). Each row is
+	// the run and its OWNER, the lineage member whose book holds its start; the
+	// join on owner_agent is what places the run in the lineage, so the owner
+	// is never NULL here.
 	liveDetachedSQL = sessionLineageCTE + `
-	  SELECT w.work_id FROM lineage l CROSS JOIN detached_work w ON w.owner_agent = l.agent_id
+	  SELECT w.work_id, w.owner_agent FROM lineage l CROSS JOIN detached_work w ON w.owner_agent = l.agent_id
 	  WHERE w.ended_at_ms IS NULL AND w.kind != ?
 	  ORDER BY w.announced_at_ms ASC, w.work_id ASC`
 
@@ -133,18 +136,24 @@ func (d *DB) LiveWork(ctx context.Context, session string) (*storev1.GetLiveWork
 		return nil, err
 	}
 
-	detached, err := d.scanStrings(ctx, liveDetachedSQL, session, detachedKindWorkflow)
+	// EACH RUN IS ANSWERED WITH ITS OWNER. The lineage spans every subagent,
+	// and a run's start is in its owner's book, so an id alone sends the caller
+	// to the wrong book for a run a subagent announced.
+	detached, err := d.scanStringPairs(ctx, liveDetachedSQL, session, detachedKindWorkflow)
 	if err != nil {
 		return nil, d.refuse(base, storagef(err, "scanning live detached work"))
 	}
-	for _, id := range detached {
-		success.LiveDetached = append(success.LiveDetached, &conversationv1.DetachedWorkId{Value: id})
+	for _, run := range detached {
+		success.LiveDetachedRuns = append(success.LiveDetachedRuns, &storev1.GetLiveWorkDetached{
+			Work:  &conversationv1.DetachedWorkId{Value: run[0]},
+			Owner: &conversationv1.AgentId{Value: run[1]},
+		})
 	}
 
 	d.observeQuery(StatementLiveWork, "agent", base, started, int64(len(agents)+len(detached)))
 	d.traceStatement(ctx, StatementLiveWork, "agent", base, int64(len(agents)+len(detached)))
 	d.log.LogVerbose(base, "live work read agents=%d workflows=%d detached=%d",
-		len(success.LiveAgents), len(success.LiveWorkflows), len(success.LiveDetached))
+		len(success.LiveAgents), len(success.LiveWorkflows), len(success.LiveDetachedRuns))
 	return success, nil
 }
 
@@ -257,19 +266,40 @@ func cursorConversion(version, through sql.NullInt64) *storev1.CursorConversion 
 	return conv
 }
 
+// scanStrings runs a one-column string query and answers each row's value,
+// in the statement's order.
 func (d *DB) scanStrings(ctx context.Context, query string, args ...any) ([]string, error) {
+	return scanRows(ctx, d, query, func(rows *sql.Rows) (string, error) {
+		var value string
+		return value, rows.Scan(&value)
+	}, args...)
+}
+
+// scanStringPairs runs a two-column string query and answers each row as
+// its two values, in the statement's order.
+func (d *DB) scanStringPairs(ctx context.Context, query string, args ...any) ([][2]string, error) {
+	return scanRows(ctx, d, query, func(rows *sql.Rows) ([2]string, error) {
+		var pair [2]string
+		return pair, rows.Scan(&pair[0], &pair[1])
+	}, args...)
+}
+
+// scanRows runs a query on the read handle and answers each row as SCAN
+// reads it, in the statement's order. The first scan error, or the
+// iteration's own error, is the answer's error; the rows are always closed.
+func scanRows[T any](ctx context.Context, d *DB, query string, scan func(*sql.Rows) (T, error), args ...any) ([]T, error) {
 	rows, err := d.read.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close() //nolint:errcheck // the deferred close of a read
-	var out []string
+	var out []T
 	for rows.Next() {
-		var value string
-		if err := rows.Scan(&value); err != nil {
+		row, err := scan(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, value)
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }

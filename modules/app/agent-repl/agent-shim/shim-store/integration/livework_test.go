@@ -81,7 +81,7 @@ func TestLiveWorkScansDetachedWorkBesideAgents(t *testing.T) {
 	if got := agentValues(live.GetLiveAgents()); !contains(got, "sub-live") {
 		t.Errorf("live_agents is missing the started subagent: %v", got)
 	}
-	if got := workValues(live.GetLiveDetached()); !contains(got, "work-bash-live") {
+	if got := runValues(live.GetLiveDetachedRuns()); !contains(got, "work-bash-live") {
 		t.Errorf("live_detached is missing the announced run: %v", got)
 	}
 	store.assertNoErrorRecords()
@@ -155,7 +155,7 @@ func TestLiveDetachedSurvivesARestart(t *testing.T) {
 	// Assert.
 	after, cancelAfter := callContext(t)
 	defer cancelAfter()
-	if got := workValues(liveWork(after, t, store.client(), "main").GetLiveDetached()); !contains(got, "work-restart") {
+	if got := runValues(liveWork(after, t, store.client(), "main").GetLiveDetachedRuns()); !contains(got, "work-restart") {
 		t.Errorf("an announced run did not survive a restart: live_detached is %v", got)
 	}
 	store.assertNoErrorRecords()
@@ -183,7 +183,7 @@ func TestARunConcludedBeforeARestartStaysClosedAcrossIt(t *testing.T) {
 	// Assert.
 	after, cancelAfter := callContext(t)
 	defer cancelAfter()
-	if got := workValues(liveWork(after, t, store.client(), "main").GetLiveDetached()); contains(got, "work-closed") {
+	if got := runValues(liveWork(after, t, store.client(), "main").GetLiveDetachedRuns()); contains(got, "work-closed") {
 		t.Errorf("a restart resurrected a concluded run: live_detached is %v", got)
 	}
 	store.assertNoErrorRecords()
@@ -223,7 +223,7 @@ func TestLiveWorkAnswersEachSessionOnlyItsOwnObligations(t *testing.T) {
 			live := liveWork(ctx, t, cli, tc.session)
 
 			// Assert.
-			agents, runs := agentValues(live.GetLiveAgents()), workValues(live.GetLiveDetached())
+			agents, runs := agentValues(live.GetLiveAgents()), runValues(live.GetLiveDetachedRuns())
 			if !contains(agents, tc.wantAgent) || contains(agents, tc.notAgent) {
 				t.Errorf("live_agents = %v, want %s and never %s", agents, tc.wantAgent, tc.notAgent)
 			}
