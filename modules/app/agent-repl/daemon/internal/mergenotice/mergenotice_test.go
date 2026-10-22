@@ -878,3 +878,16 @@ func TestAnUnrecordableUntoldNoticeIsRecordedAndTheNoticeStillTold(t *testing.T)
 		t.Fatalf("no error record of the unrecorded notice: %+v", f.logs.Records())
 	}
 }
+
+func TestHeadlineOfAPausedQueueNamesNoMerge(t *testing.T) {
+	// Arrange.
+	paused := merge.QueueChange{Kind: merge.QueueChangePaused, Queue: merge.QueueSnapshot{Repo: repoDoom, Paused: true}}
+
+	// Act.
+	got := Headline(paused)
+
+	// Assert.
+	if got != "merge queue of doom: paused" {
+		t.Fatalf("Headline = %q, want the queue paused and no merge named", got)
+	}
+}
