@@ -2097,6 +2097,16 @@ message FeedSubagent {
   // `conversation.v1.DetachedWorkId` exactly as the daemon and the footer hold
   // it (`FooterWorkId` names the same work by the same string).
   optional FeedDetachedWorkId work_id = 7;
+  // The model the subagent's latest API response named, drawn small after
+  // the label ("Explore (claude-sonnet-5)"). UNSET until the subagent has
+  // answered once (conversation.v1.AgentActivity.model); the head then draws
+  // the label alone, never a guessed model.
+  optional FeedSubagentModel model = 9;
+}
+// The model element.
+message FeedSubagentModel {
+  // The model's id, verbatim ("claude-opus-5").
+  string name = 1;
 }
 // The detached-work id element: the id a reader uses to refer to one unit of
 // async work. Drawn verbatim; never parsed.

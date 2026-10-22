@@ -60,6 +60,22 @@ message AgentActivity {
   // when it is absent.
   optional AgentEffortLevel effort = 18;
 
+  // THE MODEL THAT ANSWERED THIS UNIT'S API RESPONSE, when this is the unit
+  // carrying it. On the envelope for exactly the reason `usage` is: it is a
+  // fact about an API RESPONSE, and a response yields several units. It rides
+  // the same unit `usage` rides.
+  //
+  // THE ONE WITNESS OF WHICH MODEL A SUBAGENT RUNS ON. A spawn states only the
+  // model its caller asked for (AgentSubagentPrompt.requested_model), which is
+  // unset whenever the agent's own definition or the parent chose, and the
+  // models that ran it only once it settles (AgentSubagentSuccess.models_used).
+  // The subagent's own responses name their model from the first one on, so a
+  // surface drawing a live subagent's model reads it here.
+  //
+  // UNSET means the producer reported no model for the response; a consumer
+  // draws nothing rather than guessing one.
+  optional AgentModel model = 37;
+
   // WHAT THIS UNIT IS ATTRIBUTABLE TO beyond the agent that produced it: the
   // skill whose instructions were in view, the plugin the tool came from.
   //
