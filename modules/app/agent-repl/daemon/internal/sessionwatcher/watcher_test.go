@@ -591,6 +591,45 @@ func TestTheFooterHearsAnAdoptedItemWithNoAnnouncer(t *testing.T) {
 	}
 }
 
+// TestTheFeedHearsAnAdoptedItemAsStandingWork pins that an item the session
+// says is ALREADY live reaches the feed as standing work, never as a stream's
+// news: its spawning call was made before the attach, and the feed must not
+// report a call it never draws as one that failed to.
+func TestTheFeedHearsAnAdoptedItemAsStandingWork(t *testing.T) {
+	// Arrange / Act: the watcher starts on a session with one live shell.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
+	h.client.nextBashOpen(t)
+
+	// Assert.
+	got := h.rec.drain()
+	standing, ok := find(got, "feed.OnStandingWork")
+	if !ok || standing.detail != "w-1" {
+		t.Fatalf("the feed was not told w-1 is standing work; saw %v", names(got))
+	}
+	if _, news := find(got, "feed.OnDetachedWork"); news {
+		t.Fatalf("the adopted item also reached the feed as a stream's announcement; saw %v", names(got))
+	}
+}
+
+// TestAStreamsAnnouncementReachesTheFeedAsNews is the other side: work
+// announced on an agent's stream is news, and reaches the feed as such.
+func TestAStreamsAnnouncementReachesTheFeedAsNews(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+
+	// Assert.
+	if _, ok := find(got, "feed.OnDetachedWork"); !ok {
+		t.Fatalf("the stream's announcement never reached the feed; saw %v", names(got))
+	}
+	if _, standing := find(got, "feed.OnStandingWork"); standing {
+		t.Fatalf("a stream's announcement reached the feed as standing work; saw %v", names(got))
+	}
+}
+
 // TestBothViewSinksHearOneLiveWorkSet is the fan-out itself: the roster and the
 // footer are handed the SAME value on the same edge, which is what makes a
 // disagreement between the two surfaces unrepresentable.

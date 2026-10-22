@@ -1541,6 +1541,12 @@ func TestALeftoverDetachmentIsReportedOnlyWhenItArrivedLive(t *testing.T) {
 			wantError:  false,
 			wantRecord: "daemon.feed.replayed_detachment_unclaimed",
 		},
+		{
+			name:       "work the session's opening restated is recorded at debug",
+			arrange:    func(h *harness) { h.standingShell("work-1", "gh run watch") },
+			wantError:  false,
+			wantRecord: "daemon.feed.standing_detachment_unclaimed",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
@@ -1668,5 +1674,40 @@ func TestAnInterruptedTurnKeepsTheProseItHadReached(t *testing.T) {
 	responses := h.responseRows()
 	if len(responses) != 1 || responses[0].GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() != "Working on it…" {
 		t.Fatalf("response rows = %v, want exactly the answer the turn reached before it was stopped", responses)
+	}
+}
+
+// standingShell is a shell the session's opening restated as running when the
+// view attached (FeedSink.OnStandingWork): created-origin, as the shim restates
+// re-adopted work, and keyed by its own call's id.
+func (h *harness) standingShell(work, command string) {
+	h.t.Helper()
+	h.resolver.OnStandingWork(testWorkspace, createdShell(work, command))
+}
+
+// TestARestatedShellPastTheReplayedPageIsNoFaultAtAReplayedTurnEnd is the
+// 2026-10-22 handover: the successor took the opening's live shell, then
+// replayed the newest page, whose turn end came before the shell's call was
+// reached. The call is simply further back than the page; nothing failed.
+func TestARestatedShellPastTheReplayedPageIsNoFaultAtAReplayedTurnEnd(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.standingShell("toolu_watch", "gh run watch")
+
+	// Act: the page replays a turn's prompt and end, and nothing of the
+	// shell's call.
+	h.replay(stampedPage(historyPage(&conversationv1.HistoryMore{},
+		frameEntry(mainAgent(), &conversationv1.AgentSuccess{
+			Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+		}),
+		promptEntry("turn-old", "watch the run"),
+	), "turn-old", "turn-old"))
+
+	// Assert.
+	if h.hasRecord("error", "daemon.feed.detached_unplaceable") {
+		t.Fatalf("records = %+v, want no ERROR for a restated shell", h.records())
+	}
+	if got := h.warnings.keys(); len(got) != 0 {
+		t.Fatalf("raised = %v, want nothing on the topbar", got)
 	}
 }

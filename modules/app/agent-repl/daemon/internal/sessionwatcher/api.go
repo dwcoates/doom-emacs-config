@@ -220,6 +220,12 @@ type FeedSink interface {
 	// OnDetachedWork is work leaving the stream, which is what makes a bubble
 	// outlive its turn.
 	OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace)
+	// OnStandingWork is work the session's opening (SessionStarted.live_work)
+	// restated as already running when this watch attached. It is the same
+	// work OnDetachedWork would describe, but it is not news: its spawning
+	// call was made before the attach, so the feed must not read a call it
+	// never draws as a fault.
+	OnStandingWork(ws ids.WorkspaceID, work *conversationv1.AgentDetachedWork)
 	// OnBash is one detached shell's progress.
 	OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkId, bash *conversationv1.AgentBash)
 	// OnLiveWorkChanged republishes the AUTHORITATIVE live-work set. A

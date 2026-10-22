@@ -599,7 +599,10 @@ func bubbleLabel(bubble *frontendv1.FeedSubagent) string {
 
 // drawDetachedWork draws work that left the stream. It is announced HERE and
 // nowhere else, so this is where a bubble first becomes a detached one.
-func (r *resolver) drawDetachedWork(s *wsState, announcer *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {
+//
+// SOURCE is how the feed heard of the work, which a held detachment keeps for
+// the turn's terminal (turnended.go).
+func (r *resolver) drawDetachedWork(s *wsState, announcer *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, source detachmentSource) {
 	// THE KIND IS REQUIRED on a live announcement and a replayed one alike: the
 	// session watcher refuses a live one without it before any view takes it
 	// (resolveDetachedLocked), and the shim never records one.
@@ -620,7 +623,7 @@ func (r *resolver) drawDetachedWork(s *wsState, announcer *conversationv1.AgentI
 		}
 		// ONE IDENTITY SPANS THE MOVE: the element already on screen continues
 		// as a detached one rather than being replaced by a second drawing.
-		r.detachUnit(s, announcer, unitID, workID, stated)
+		r.detachUnit(s, announcer, unitID, workID, stated, source)
 	case *conversationv1.AgentDetachedWork_Created:
 		switch created := origin.Created.GetWorkCreated().GetWork().(type) {
 		case *conversationv1.DetachableWork_Subagent:
@@ -631,7 +634,7 @@ func (r *resolver) drawDetachedWork(s *wsState, announcer *conversationv1.AgentI
 			// it, but the head is drawn only where its spawning card stands —
 			// which is the same move a detachment makes, keyed by the same bytes.
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawDetachedWork", "branch": "case *conversationv1.DetachableWork_Bash"})
-			r.detachUnit(s, announcer, workID, workID, stated)
+			r.detachUnit(s, announcer, workID, workID, stated, source)
 		case *conversationv1.DetachableWork_Monitor:
 			// A MONITOR'S ENTRY IS ITS CALL'S OWN CARD, drawn from the call's
 			// frames (a replay serves them too); the announcement describes the
@@ -722,7 +725,7 @@ func (r *resolver) drawAnnouncedBubble(s *wsState, unitID string, agent *convers
 
 // detachUnit moves the unit a detachment names to its detached drawing, in its
 // owner's feed at its own row — or holds the detachment until that unit draws.
-func (r *resolver) detachUnit(s *wsState, announcer *conversationv1.AgentId, unitID, workID, stated string) {
+func (r *resolver) detachUnit(s *wsState, announcer *conversationv1.AgentId, unitID, workID, stated string, source detachmentSource) {
 	log := r.logger(s.id)
 	if state, ok := s.subagents[unitID]; ok {
 		if _, err := feedid.DetachedOwner(stated, state.carrier); err != nil {
@@ -773,10 +776,10 @@ func (r *resolver) detachUnit(s *wsState, announcer *conversationv1.AgentId, uni
 	// it; a mark still standing when the turn ends is reported as
 	// unplaceable, in drawTerminal.
 	s.markDetached(unitID, workID)
-	s.heldDetachments[unitID] = heldDetachment{work: workID, owner: stated, announcer: announcer.GetValue(), plane: s.plane}
+	s.heldDetachments[unitID] = heldDetachment{work: workID, owner: stated, announcer: announcer.GetValue(), source: source}
 	log.Debug("daemon.feed.detachment_held",
 		"a detachment named a unit this resolver has not drawn yet; it is held until the unit draws",
-		dlog.Context{"unit": unitID, "work": workID, "owner": stated, "announcer": announcer.GetValue()})
+		dlog.Context{"unit": unitID, "work": workID, "owner": stated, "announcer": announcer.GetValue(), "source": source.String()})
 }
 
 // drawCreatedSubagent draws a subagent that was detached from birth, in the

@@ -414,7 +414,19 @@ func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.Agen
 	s := r.state(ws)
 	defer s.placingEntry(place)()
 	defer s.drawingEntry(turn)()
-	r.drawDetachedWork(s, agent, work)
+	r.drawDetachedWork(s, agent, work, detachmentSourceOf(s.plane))
+}
+
+// OnStandingWork draws work the session's opening restated as already running
+// when this view attached. It is drawn as any announcement of the work is, and
+// held against its call's row the same way; what differs is that its call was
+// made before the attach, so a call row the loaded pages never reach is not a
+// fault (detachmentStanding).
+func (r *resolver) OnStandingWork(ws ids.WorkspaceID, work *conversationv1.AgentDetachedWork) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.drawDetachedWork(s, nil, work, detachmentStanding)
 }
 
 // OnLiveWorkChanged settles every detached shell, every detached subagent's
