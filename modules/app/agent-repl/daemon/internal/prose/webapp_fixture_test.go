@@ -21,10 +21,12 @@ const (
 
 var update = flag.Bool("update", false, "rewrite the webapp's parsed-prose fixture from its inputs")
 
-// webappInput is one text the webapp's tests draw, and the stage it is parsed at.
+// webappInput is one text the webapp's tests draw, and how it is parsed: as
+// a prompt (ParsePrompt), or as served prose at its stage.
 type webappInput struct {
 	Text     string `json:"text"`
 	Arriving bool   `json:"arriving,omitempty"`
+	Prompt   bool   `json:"prompt,omitempty"`
 }
 
 // webappEntry is one fixture entry: an input and Parse's answer for it, as the
@@ -32,6 +34,7 @@ type webappInput struct {
 type webappEntry struct {
 	Text     string          `json:"text"`
 	Arriving bool            `json:"arriving,omitempty"`
+	Prompt   bool            `json:"prompt,omitempty"`
 	Prose    json.RawMessage `json:"prose"`
 }
 
@@ -51,7 +54,11 @@ func webappFixture(t *testing.T) []byte {
 		if in.Arriving {
 			stage = Arriving
 		}
-		parsed, err := protojson.Marshal(parse(in.Text, stage))
+		answer := parse(in.Text, stage)
+		if in.Prompt {
+			answer = parsePrompt(in.Text)
+		}
+		parsed, err := protojson.Marshal(answer)
 		if err != nil {
 			t.Fatalf("marshal the parse of %q: %v", in.Text, err)
 		}
@@ -61,7 +68,7 @@ func webappFixture(t *testing.T) []byte {
 		if err := json.Compact(&compact, parsed); err != nil {
 			t.Fatalf("compact the parse of %q: %v", in.Text, err)
 		}
-		entries = append(entries, webappEntry{Text: in.Text, Arriving: in.Arriving, Prose: compact.Bytes()})
+		entries = append(entries, webappEntry{Text: in.Text, Arriving: in.Arriving, Prompt: in.Prompt, Prose: compact.Bytes()})
 	}
 	out, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
