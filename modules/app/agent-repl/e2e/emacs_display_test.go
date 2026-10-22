@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,9 +31,9 @@ import (
 // NOTHING HERE SLEEPS. Xvfb's own `-displayfd` is the synchronization
 // primitive: the server writes the display number it settled on to that
 // descriptor ONLY once it is listening, so reading a number back is both
-// "which display" and "it is up" in one edge. That also removes the race a
-// hand-picked `:99` would have had between two concurrent worlds, since the
-// server -- not the test -- chooses the free number.
+// "which display" and "it is up" in one edge. The NUMBER is the harness's
+// own, from a counter that never repeats (nextXvfbDisplay), so no two worlds
+// can meet on one.
 
 // xvfbScreen is the virtual screen Xvfb serves. A webview is laid out in
 // real pixels, so the geometry is a real input to what the panel renders:
@@ -49,6 +50,27 @@ const xvfbScreen = "1280x1024x24"
 // it exists to catch is a server that cannot start at all -- no free display,
 // no socket directory -- not a slow one.
 const xvfbReadyBound = 1 * time.Second
+
+// THE HARNESS OWNS THE DISPLAY NUMBERS, AND NEVER REUSES ONE.
+//
+// `-displayfd` alone had each server SEARCH the container's display namespace
+// (`/tmp/.X11-unix' and `/tmp/.X<n>-lock') for a free number, and a killed
+// server leaves its socket and lock files behind. On the 2026-10-22 20:21Z
+// gate run a start met a number some earlier server's state still claimed:
+// "_XSERVTransMakeAllCOTSServerListeners: server already running", and no
+// display was ever reported. Every server in the container is this test
+// process's (one sandbox unit, one `go test`), so handing each start the next
+// number of a counter that only climbs makes a collision impossible: no number
+// is asked for twice, by anyone. `-displayfd` stays as the readiness edge.
+const firstXvfbDisplay = 10
+
+var lastXvfbDisplay atomic.Int64
+
+// nextXvfbDisplay is the next display number of this process, never one
+// handed out before.
+func nextXvfbDisplay() int {
+	return firstXvfbDisplay + int(lastXvfbDisplay.Add(1)) - 1
+}
 
 // xvfbStartMu serializes Xvfb STARTS -- not their lives.
 //
@@ -147,12 +169,9 @@ func startXvfb(t *testing.T, box sandbox, dir string) *xdisplay {
 		FramebufferPath: filepath.Join(fbDir, xvfbFramebufferFile),
 		t:               t,
 	}
-	// `-displayfd 1` makes the SERVER pick a free display and report it, so
-	// no two worlds can collide over a hard-coded number. `-nolisten tcp`
-	// keeps it to the container's own abstract/unix sockets.
-	proc, err := box.StartProcess(ctx, numFile, logFile,
-		"Xvfb", "-displayfd", "1", "-screen", "0", xvfbScreen, "-nolisten", "tcp",
-		"-fbdir", fbDir)
+	display := nextXvfbDisplay()
+	t.Logf("starting Xvfb on display :%d", display)
+	proc, err := box.StartProcess(ctx, numFile, logFile, xvfbArgv(display, fbDir)...)
 	if err != nil {
 		cancel()
 		if closeErr := logFile.Close(); closeErr != nil {
@@ -188,7 +207,19 @@ func startXvfb(t *testing.T, box sandbox, dir string) *xdisplay {
 	})
 
 	x.Display = x.awaitDisplay(numPath)
+	if want := ":" + strconv.Itoa(display); x.Display != want {
+		t.Fatalf("Xvfb reported display %s, not the %s it was started on:\n%s", x.Display, want, x.tailLog())
+	}
 	return x
+}
+
+// xvfbArgv is the command line of one Xvfb on DISPLAY, its framebuffer under
+// FBDIR. `-displayfd 1` reports the number once the server is listening, which
+// is the start's readiness edge; `-nolisten tcp` keeps it to the container's
+// own sockets.
+func xvfbArgv(display int, fbDir string) []string {
+	return []string{"Xvfb", ":" + strconv.Itoa(display), "-displayfd", "1",
+		"-screen", "0", xvfbScreen, "-nolisten", "tcp", "-fbdir", fbDir}
 }
 
 // awaitDisplay reads the display number Xvfb reports, or fails loudly.
@@ -243,5 +274,53 @@ func (x *xdisplay) Env() []string {
 	return []string{
 		"DISPLAY=" + x.Display,
 		"GDK_BACKEND=x11",
+	}
+}
+
+// TestNextXvfbDisplayNeverRepeatsANumber pins the allocation that keeps every
+// Xvfb start off every other server's display, concurrent callers included.
+func TestNextXvfbDisplayNeverRepeatsANumber(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	const callers = 64
+	got := make(chan int, callers)
+	var wg sync.WaitGroup
+
+	// Act
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got <- nextXvfbDisplay()
+		}()
+	}
+	wg.Wait()
+	close(got)
+
+	// Assert
+	seen := map[int]bool{}
+	for n := range got {
+		if n < firstXvfbDisplay {
+			t.Fatalf("display %d is below the first handed out, %d", n, firstXvfbDisplay)
+		}
+		if seen[n] {
+			t.Fatalf("display %d was handed out twice", n)
+		}
+		seen[n] = true
+	}
+}
+
+// TestXvfbArgvStartsTheServerOnItsHandedOutDisplay pins that the server is
+// told its number rather than left to search for one, and still reports
+// readiness through -displayfd.
+func TestXvfbArgvStartsTheServerOnItsHandedOutDisplay(t *testing.T) {
+	t.Parallel()
+	// Act
+	argv := xvfbArgv(17, "/fb")
+
+	// Assert
+	want := []string{"Xvfb", ":17", "-displayfd", "1", "-screen", "0", xvfbScreen, "-nolisten", "tcp", "-fbdir", "/fb"}
+	if strings.Join(argv, " ") != strings.Join(want, " ") {
+		t.Fatalf("argv = %q, want %q", argv, want)
 	}
 }
