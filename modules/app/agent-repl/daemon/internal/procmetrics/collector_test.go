@@ -21,8 +21,11 @@ type fakeReader struct {
 	usage    map[int]Usage
 	pidsErr  error
 	usageErr map[int]error
-	host     Host
-	hostErr  error
+	// onUsage runs as a pid's usage is read, before it answers: a process
+	// exiting, or its pid being reused, between the listing and the read.
+	onUsage map[int]func(f *fakeReader)
+	host    Host
+	hostErr error
 }
 
 func (f *fakeReader) PIDs() ([]int, error) {
@@ -61,6 +64,9 @@ func (f *fakeReader) Args(pid int) ([]string, error) {
 func (f *fakeReader) Usage(pid int) (Usage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if hook := f.onUsage[pid]; hook != nil {
+		hook(f)
+	}
 	if err := f.usageErr[pid]; err != nil {
 		return Usage{}, err
 	}
@@ -460,5 +466,36 @@ func TestNewRefusesMissingDeps(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "are required") {
 		t.Fatalf("New = %v, want the missing deps refused", err)
+	}
+}
+
+func TestAProcessGoneDuringItsUsageReadIsNoFailure(t *testing.T) {
+	tests := []struct {
+		name   string
+		during func(f *fakeReader)
+	}{
+		{name: "it exited", during: func(f *fakeReader) { delete(f.ids, 40) }},
+		{name: "its pid was reused", during: func(f *fakeReader) {
+			id := f.ids[40]
+			id.StartUnixMicros++
+			f.ids[40] = id
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the read answers EPERM, as a process mid-exit can.
+			reader := newWorld()
+			reader.usageErr[40] = errors.New("proc_pid_rusage: operation not permitted")
+			reader.onUsage = map[int]func(f *fakeReader){40: tt.during}
+			h := newHarness(t, reader)
+
+			// Act
+			h.scrape(t)
+
+			// Assert
+			if errs := errorRecords(h.log); len(errs) != 0 {
+				t.Fatalf("error records = %+v, want none for a process gone during its read", errs)
+			}
+		})
 	}
 }
