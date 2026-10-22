@@ -53,6 +53,16 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_load_feed_through_pb";
 import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
 import {
+  OpenFeedImageResponseSchema,
+  type OpenFeedImageRequest,
+  type OpenFeedImageResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_image_pb";
+import {
+  CloseFeedImageResponseSchema,
+  type CloseFeedImageRequest,
+  type CloseFeedImageResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_feed_image_pb";
+import {
   FeedHeldItemSchema,
   FeedHeldSchema,
   type FeedHeld,
@@ -210,6 +220,10 @@ export interface FeedScript {
   foldMergeBubble?: (req: FoldMergeBubbleRequest) => FoldMergeBubbleResponse;
   /** Answers SubmitPrompt (an outcome marker's resend); a minted turn when unscripted. */
   submitPrompt?: (req: SubmitPromptRequest) => SubmitPromptResponse;
+  /** Answers OpenFeedImage; a success when unscripted. A throw is a transport failure. */
+  openFeedImage?: (req: OpenFeedImageRequest) => OpenFeedImageResponse;
+  /** Answers CloseFeedImage; a success when unscripted. A throw is a transport failure. */
+  closeFeedImage?: (req: CloseFeedImageRequest) => CloseFeedImageResponse;
   /** The page's clock. Pass a `countingTicker` to assert on live subscriptions. */
   ticker?: Ticker;
 }
@@ -224,6 +238,8 @@ export interface FeedCalls {
   selectFeedRow: SelectFeedRowRequest[];
   foldMergeBubble: FoldMergeBubbleRequest[];
   submitPrompt: SubmitPromptRequest[];
+  openFeedImage: OpenFeedImageRequest[];
+  closeFeedImage: CloseFeedImageRequest[];
 }
 
 export interface Harness {
@@ -235,7 +251,7 @@ export interface Harness {
 
 /** A context whose client speaks to the scripted daemon. */
 export function harness(script: FeedScript = {}): Harness {
-  const calls: FeedCalls = { openFeed: [], watchFeed: [], getFeedPage: [], interrupt: [], loadFeedThrough: [], selectFeedRow: [], foldMergeBubble: [], submitPrompt: [] };
+  const calls: FeedCalls = { openFeed: [], watchFeed: [], getFeedPage: [], interrupt: [], loadFeedThrough: [], selectFeedRow: [], foldMergeBubble: [], submitPrompt: [], openFeedImage: [], closeFeedImage: [] };
   const channels = script.channels ?? new Map<string, Channel<WatchFeedResponse>>();
   const sink = new RecordingSink();
   const transport = createRouterTransport(({ service }) => {
@@ -293,6 +309,14 @@ export function harness(script: FeedScript = {}): Harness {
           script.foldMergeBubble?.(req) ??
           create(FoldMergeBubbleResponseSchema, { result: { case: "success", value: {} } })
         );
+      },
+      openFeedImage: (req) => {
+        calls.openFeedImage.push(req);
+        return script.openFeedImage?.(req) ?? create(OpenFeedImageResponseSchema, { result: { case: "success", value: {} } });
+      },
+      closeFeedImage: (req) => {
+        calls.closeFeedImage.push(req);
+        return script.closeFeedImage?.(req) ?? create(CloseFeedImageResponseSchema, { result: { case: "success", value: {} } });
       },
       selectFeedRow: (req) => {
         calls.selectFeedRow.push(req);
@@ -379,6 +403,7 @@ export function heldPromptItem(id: string, turn: string, text = "held words"): F
       value: {
         turn: { value: turn },
         said: { content: { blocks: [{ block: { case: "text", value: { text } } }] } },
+        body: { blocks: [{ block: { case: "text", value: { text } } }] },
         queuedAt: { atMs: 0n },
         classification: { case: "classifying", value: {} },
         badge: {
@@ -402,6 +427,7 @@ export function heldIngressItem(id: string, text = "ingress words"): FeedHeldIte
       case: "ingress",
       value: {
         said: { content: { blocks: [{ block: { case: "text", value: { text } } }] } },
+        body: { blocks: [{ block: { case: "text", value: { text } } }] },
         queuedAt: { atMs: 0n },
         badge: { label: "waiting for the session", standsFor: { case: "noSession", value: {} } },
       },

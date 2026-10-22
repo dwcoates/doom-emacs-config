@@ -8836,6 +8836,51 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 /* The tests tab's log line sits under its suites. */
 .merge-test-log { padding-top: 0.3rem; color: var(--muted); }
 
+/* ---- image overlay (src/image-overlay/image-overlay.ts) ---- */
+
+/* AN IMAGE OPEN OVER THE FEED (owner ruling, 2026-10-22) sits over the feed's
+   streaming area, just shy of it: the fixed host is kept on #feed-scroll's
+   rectangle, and its padding (the feed's own 1rem column inset, less at the
+   top and bottom) keeps the frame inside the column the rows span, so the rows
+   stay visible around its edge. Over the news digest (44), under the login
+   overlay (50). A click anywhere on it closes it. */
+[data-component="image-overlay"] {
+  position: fixed;
+  z-index: 45;
+  display: flex;
+  box-sizing: border-box;
+  padding: 0.75rem 1rem;
+  cursor: zoom-out;
+}
+[data-component="image-overlay"][hidden] {
+  display: none;
+}
+.image-overlay-frame {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 0.78);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
+}
+/* The image as large as fits the frame, aspect kept, never stretched past
+   its own size. */
+.image-overlay-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.image-overlay-missing {
+  color: var(--muted);
+  font-style: italic;
+}
+
 /* ---- news digest overlay (src/news-digest/news-digest.ts) ---- */
 
 /* THE DAILY CLAUDE NEWS DIGEST covers the FEED's own box and nothing else:

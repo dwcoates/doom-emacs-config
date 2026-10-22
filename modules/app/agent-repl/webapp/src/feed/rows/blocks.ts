@@ -76,13 +76,28 @@ export const IMAGE_MISSING_TEXT = "Image no longer available";
  * failure is what reports that, whenever it happens, so the image is swapped
  * for {@link IMAGE_MISSING_TEXT} rather than left as a broken-image icon.
  */
-export function drawFeedImageBlock(block: FeedImageBlock): HTMLElement {
+/** The classes a drawn image and its lost-image note wear. */
+export interface FeedImageClasses {
+  readonly image: string;
+  readonly missing: string;
+}
+
+/** The class every thumbnail the feed draws wears; a click on one opens it (feed-image.ts). */
+export const FEED_IMAGE_CLASS = "prompt-block-image";
+
+/** A thumbnail among a bubble's or a card's blocks. */
+export const THUMBNAIL_CLASSES: FeedImageClasses = {
+  image: `prompt-block ${FEED_IMAGE_CLASS}`,
+  missing: "prompt-block prompt-block-image-missing",
+};
+
+export function drawFeedImageBlock(block: FeedImageBlock, classes: FeedImageClasses = THUMBNAIL_CLASSES): HTMLElement {
   log.info("drawing a prompt image block", {
     operation: "feed.draw-image-block",
     context: { has_alt: block.alt !== "" },
   });
   const el = document.createElement("img");
-  el.className = "prompt-block prompt-block-image";
+  el.className = classes.image;
   el.src = block.src;
   el.alt = block.alt;
   el.addEventListener("error", () => {
@@ -90,11 +105,12 @@ export function drawFeedImageBlock(block: FeedImageBlock): HTMLElement {
       operation: "feed.draw-image-block.missing",
       context: { src: block.src, alt: block.alt },
     });
-    // The note takes the image's place AND its classes (an expanded-only
-    // mark included), so it is hidden and shown exactly as the image was.
+    // The note takes the image's place AND any class added to it since (an
+    // expanded-only mark), so it is hidden and shown exactly as the image was.
+    const own = new Set(classes.image.split(" "));
     const missing = document.createElement("div");
-    missing.className = [...el.classList].filter((name) => name !== "prompt-block-image").join(" ");
-    missing.classList.add("prompt-block-image-missing");
+    missing.className = classes.missing;
+    for (const added of [...el.classList].filter((name) => !own.has(name))) missing.classList.add(added);
     missing.textContent = IMAGE_MISSING_TEXT;
     if (block.alt !== "") missing.title = block.alt;
     el.replaceWith(missing);

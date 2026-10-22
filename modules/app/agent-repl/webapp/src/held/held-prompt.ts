@@ -53,6 +53,7 @@
  * listens in production (the composer is host-native) and the event is
  * harmless there — it is the seam, not a promise about who is on the far end.
  */
+import { drawFeedUserPromptBody } from "../feed/rows/user-prompt.js";
 import { labelledControl, setControlsDisabled, type Control } from "../control.js";
 import { getOption } from "@bufbuild/protobuf";
 import type {
@@ -235,10 +236,11 @@ export function drawHeldPrompt(
     // card to the shutdown it should explain.
     drawn.pill.setAttribute("data-schedule-id", hold.value.scheduleId);
   }
-  // A HELD SESSION ACT IS DRAWN AS WHAT IT DOES; a prompt, as what was said.
+  // A HELD SESSION ACT IS DRAWN AS WHAT IT DOES; a prompt, as its feed row
+  // will draw it: the daemon's resolved body, images and all.
   const content =
     u.act === undefined
-      ? drawUserSaid(said, `${path}.said`)
+      ? drawFeedUserPromptBody(requireMessage(u.body, `${path}.body`), `${path}.body`)
       : [drawHeldSessionAct(u.act, `${path}.act`)];
 
   // THE CONTROLS ARE ALWAYS SHOWN (owner request, 2026-10-13), in ONE footer

@@ -39,6 +39,8 @@ export interface ShellElements {
   loginOverlay: HTMLElement;
   /** The news digest overlay over the feed's box. Ships hidden. */
   newsDigest: HTMLElement;
+  /** The image overlay over the feed's streaming area. Ships hidden. */
+  imageOverlay: HTMLElement;
 }
 
 /**
@@ -59,6 +61,7 @@ const SHELL_IDS: ReadonlyArray<readonly [keyof ShellElements, string]> = [
   ["composer", "composer"],
   ["loginOverlay", "login-overlay"],
   ["newsDigest", "news-digest"],
+  ["imageOverlay", "image-overlay"],
 ];
 
 /**

@@ -236,11 +236,9 @@ describe("drawPromptBlockArm", () => {
     el.dispatchEvent(new Event("error"));
 
     // Assert
-    expect([...(box.firstElementChild?.classList ?? [])]).toEqual([
-      "prompt-block",
-      BUBBLE_EXPANDED_ONLY_CLASS,
-      "prompt-block-image-missing",
-    ]);
+    expect(new Set(box.firstElementChild?.classList ?? [])).toEqual(
+      new Set(["prompt-block", BUBBLE_EXPANDED_ONLY_CLASS, "prompt-block-image-missing"]),
+    );
   });
 
   it("draws the unsupported arm", () => {

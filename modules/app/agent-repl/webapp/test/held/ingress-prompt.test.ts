@@ -46,6 +46,7 @@ const heldContext = () =>
 function ingress(arm: string, label = "waiting", detail?: string): HeldIngressPrompt {
   return create(HeldIngressPromptSchema, {
     said: { content: { blocks: [{ block: { case: "text", value: { text: "what's dmitry's comment" } } }] } },
+    body: { blocks: [{ block: { case: "text", value: { text: "what's dmitry's comment" } } }] },
     queuedAt: { atMs: BigInt(NOW - 60_000) },
     badge: create(HeldIngressPromptBadgeSchema, {
       label,
@@ -135,6 +136,7 @@ describe("the queued age every held card shares", () => {
       create(HeldPromptSchema, {
         turn: { value: "t1" },
         said: { content: { blocks: [{ block: { case: "text", value: { text: "x" } } }] } },
+        body: { blocks: [{ block: { case: "text", value: { text: "x" } } }] },
         queuedAt: { atMs: BigInt(NOW - 60_000) },
         classification: { case: "classifying", value: {} },
         badge: { label: "classifying", standsFor: { case: "classifying", value: {} } },
@@ -156,6 +158,7 @@ describe("the badge every held card shares", () => {
       create(HeldPromptSchema, {
         turn: { value: "t1" },
         said: { content: { blocks: [{ block: { case: "text", value: { text: "x" } } }] } },
+        body: { blocks: [{ block: { case: "text", value: { text: "x" } } }] },
         queuedAt: { atMs: 0n },
         classification: { case: "classifying", value: {} },
         badge: { label: "classifying", standsFor: { case: "classifying", value: {} } },
