@@ -21,11 +21,9 @@ MODULE="$(cd "$THIS_DIR/.." && pwd -P)"
 RELOAD="emacsclient (progn (unless (fboundp (quote agent-repl-elisp-reload-if-stale)) (load \"$MODULE/lisp/elisp-build.el\" nil t)) (agent-repl-elisp-reload-if-stale \"$MODULE\"))"
 TMP="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
-PASS=0
-FAIL=0
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
-pass() { printf '  PASS: %s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf '  FAIL: %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
 
 TRANSCRIPT="$TMP/transcript"
 STATE="$TMP/state"
@@ -313,5 +311,4 @@ fi
 reset
 if grep_in "$("$RUNTIME" help)" -q 'bounce --hard'; then pass "help lists the verbs"; else fail "help lists the verbs"; fi
 
-echo "agent-repl-runtime: $PASS passed, $FAIL failed"
-[ "$FAIL" -eq 0 ]
+harness_finish

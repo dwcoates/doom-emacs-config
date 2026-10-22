@@ -17,10 +17,8 @@ RUN="$THIS_DIR/run.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0
-FAIL=0
-pass() { printf '  PASS: %s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf '  FAIL: %s\n' "$1" >&2; shift; [ $# -eq 0 ] || printf '%s\n' "$@" | sed 's/^/        /' >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=../../bin/lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../bin/lib-harness-report.sh"
 
 # new_case: stubs and fixtures for a work account signed in as
 # work@example.com, whose Chrome profile is "Profile 3". The gns stub's
@@ -148,6 +146,4 @@ for t in $(declare -F | awk '{print $3}' | grep '^test_'); do
   "$t"
 done
 
-echo
-echo "Passed: $PASS  Failed: $FAIL"
-exit $((FAIL > 0))
+harness_finish

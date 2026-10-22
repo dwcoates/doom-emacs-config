@@ -16,10 +16,8 @@ PROBE="$THIS_DIR/deploy-hook-probe.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0
-FAIL=0
-pass() { printf '  PASS: %s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf '  FAIL: %s\n' "$1" >&2; shift; [ $# -eq 0 ] || printf '%s\n' "$@" | sed 's/^/        /' >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 test_the_probe_records_where_it_ran_and_exits_zero() {
   local out rc=0
@@ -55,6 +53,4 @@ for t in $(declare -F | awk '{print $3}' | grep '^test_'); do
   "$t"
 done
 
-echo
-echo "Passed: $PASS  Failed: $FAIL"
-exit $((FAIL > 0))
+harness_finish

@@ -17,9 +17,8 @@ set -uo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/e2e-repeat.sh"
 
-FAILURES=0
-pass() { printf 'ok   - %s\n' "$1"; }
-fail() { printf 'FAIL - %s\n     %s\n' "$1" "$2"; FAILURES=$((FAILURES + 1)); }
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 # make_root <exit-status-script> — a throwaway module root whose sandbox stub
 # exits with the status the given snippet prints for the run index in $RUN_INDEX.
@@ -164,9 +163,4 @@ fi
 rm -rf "$root" "$out_root"
 
 printf '\n'
-if (( FAILURES == 0 )); then
-    printf 'test-e2e-repeat.sh: all assertions passed\n'
-    exit 0
-fi
-printf 'test-e2e-repeat.sh: %d assertion(s) failed\n' "$FAILURES"
-exit 1
+harness_finish

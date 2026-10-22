@@ -16,10 +16,8 @@ set -euo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 HELPER="$THIS_DIR/with-cpu-load.sh"
 
-PASS=0
-FAIL=0
-pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
-fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $2"; }
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 # gone TOKEN: wait, bounded at 5s, for every process whose argv carries TOKEN
 # to be gone. A loop polls its owner once per pass, so it exits within one
@@ -99,5 +97,4 @@ nocmd=$?
 set -e
 if [ "$zero" = 2 ] && [ "$nocmd" = 2 ]; then pass "a zero loop count or a missing command is refused"; else fail "a zero loop count or a missing command is refused" "got $zero and $nocmd"; fi
 
-echo "with-cpu-load: $PASS passed, $FAIL failed"
-[ "$FAIL" = 0 ]
+harness_finish

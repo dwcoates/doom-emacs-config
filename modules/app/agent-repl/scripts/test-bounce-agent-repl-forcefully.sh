@@ -17,7 +17,8 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/bounce-agent-repl-forcefully.sh"
-FAILURES=0
+# shellcheck source=../bin/lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../bin/lib-harness-report.sh"
 STARTED=()
 WORLDS=()
 
@@ -33,8 +34,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-fail() { echo "FAIL: $*"; FAILURES=$((FAILURES + 1)); }
-pass() { echo "ok:   $*"; }
 
 # world -- a temporary checkout, cache home and state root, left in W.
 W=""
@@ -275,8 +274,4 @@ BUILDER="$w/failing-builder" run "$w"; status=$?
 kill -0 "$daemon" 2>/dev/null && pass "a failed build leaves the daemon running" || fail "a failed build stopped the daemon"
 grep -q "NOTHING WAS STOPPED" "$w/out" && pass "a failed build says nothing was stopped" || fail "output: $(cat "$w/out")"
 
-if [ "$FAILURES" -ne 0 ]; then
-    echo "$FAILURES failure(s)"
-    exit 1
-fi
-echo "all passed"
+harness_finish

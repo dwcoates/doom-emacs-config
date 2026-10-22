@@ -8,10 +8,8 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SCRIPT="$THIS_DIR/daemon-contract-current.sh"
 TMP="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
-PASS=0
-FAIL=0
-pass() { printf '  PASS: %s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf '  FAIL: %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 # report BODY [EXIT]: a readiness stub that prints BODY and exits EXIT.
 report() {
@@ -38,5 +36,4 @@ expect_exit "an unreadable build stamp is unknown" 2
 report '{"systems": [{"name": "shim", "deployed_sha": "0123456789abcdef0123456789abcdef01234567"}]}'
 expect_exit "a report naming no daemon is unknown" 2
 
-echo "daemon-contract-current: $PASS passed, $FAIL failed"
-[ "$FAIL" -eq 0 ]
+harness_finish

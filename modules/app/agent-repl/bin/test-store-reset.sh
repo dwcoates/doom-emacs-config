@@ -16,11 +16,9 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 RESET="$THIS_DIR/store-reset.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
-PASS=0
-FAIL=0
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
-pass() { printf '  PASS: %s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf '  FAIL: %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
 
 STUB="$TMP/launchctl"
 cat >"$STUB" <<'STUB_EOF'
@@ -280,5 +278,4 @@ else
     pass "--keep-down needs no plist, because it starts nothing"
 fi
 
-printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish

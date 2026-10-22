@@ -11,10 +11,8 @@ DISCOVER="$SCRIPT_DIR/agent-repl-log-discovery.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-fail() {
-  printf 'FAIL: %s\n' "$*" >&2
-  exit 1
-}
+# shellcheck source=../bin/lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../bin/lib-harness-report.sh"
 
 workspace="$TMP/workspace"
 targets="$TMP/targets"
@@ -185,4 +183,5 @@ if HOME="$TMP/home" AGENT_REPL_STATE_DIR="$state" XDG_CACHE_HOME="$cache" "$DISC
   fail 'malformed JSONL was accepted'
 fi
 
-printf 'PASS: agent-repl-log-discovery\n'
+[ "$FAIL" -ne 0 ] || pass "agent-repl-log-discovery: every assertion held"
+harness_finish

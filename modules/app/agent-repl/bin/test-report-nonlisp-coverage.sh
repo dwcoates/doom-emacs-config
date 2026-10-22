@@ -11,18 +11,8 @@ set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_SRC="$THIS_DIR/report-nonlisp-coverage.sh"
-PASS=0
-FAIL=0
-
-pass() {
-    printf '  PASS: %s\n' "$1"
-    PASS=$((PASS + 1))
-}
-
-fail() {
-    printf '  FAIL: %s\n' "$1" >&2
-    FAIL=$((FAIL + 1))
-}
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 make_tree() {
     local tree="$1" component
@@ -459,5 +449,4 @@ test_e2e_dispatches_to_the_e2e_makefile
 test_e2e_failure_is_loud
 test_missing_e2e_makefile_is_loud
 
-printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish

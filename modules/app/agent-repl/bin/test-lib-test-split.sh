@@ -22,13 +22,11 @@ set -euo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_UNDER_TEST="$THIS_DIR/lib-test-split.sh"
 
-PASS=0
-FAIL=0
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
-fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -z "${2:-}" ] || echo "       $2"; }
 
 # The fixture harness: three groups, each recording that it ran.
 HARNESS="$TMP/harness.sh"
@@ -186,6 +184,4 @@ t_a_harness_with_no_groups_is_refused
 t_a_failing_group_fails_the_harness
 t_a_bash_without_epochrealtime_is_refused
 
-echo "-----"
-echo "passed: $PASS  failed: $FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish

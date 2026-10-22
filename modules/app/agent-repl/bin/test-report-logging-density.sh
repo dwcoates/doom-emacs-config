@@ -11,18 +11,8 @@ SCRIPT_SRC="$THIS_DIR/report-logging-density.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-logging-density-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0
-FAIL=0
-
-pass() {
-    printf '  PASS: %s\n' "$1"
-    PASS=$((PASS + 1))
-}
-
-fail() {
-    printf '  FAIL: %s\n' "$1" >&2
-    FAIL=$((FAIL + 1))
-}
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 make_tree() {
     local tree="$1" bin="$1/modules/app/agent-repl/bin"
@@ -305,8 +295,4 @@ test_zero_call_guard_allows_the_shared_package
 test_binary_marked_source_is_counted_as_authored_text
 test_repository_sources_have_no_unexpected_zero_calls
 
-if [ "$FAIL" -ne 0 ]; then
-    printf 'FAIL: %d logging-density test(s) failed; %d passed\n' "$FAIL" "$PASS" >&2
-    exit 1
-fi
-printf 'PASS: report-logging-density (%d tests)\n' "$PASS"
+harness_finish

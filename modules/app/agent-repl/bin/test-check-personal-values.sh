@@ -21,11 +21,9 @@ trap 'rm -rf "$TMP"' EXIT
 FAKE_HOME="$TMP/home-ann"
 mkdir -p "$FAKE_HOME"
 printf '{"oauthAccount":{"emailAddress":"ann@host.test"}}' >"$FAKE_HOME/.claude.json"
-PASS=0
-FAIL=0
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
-pass() { printf '  PASS: %s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf '  FAIL: %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
 
 # file writes one fixture file under a case's tree. Its body is the third
 # argument.
@@ -145,5 +143,4 @@ test_docs_reports_are_skipped_but_the_user_guide_is_not
 test_lineage_root_line_is_skipped
 test_real_module_is_clean
 
-printf '%d passed, %d failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish

@@ -36,10 +36,8 @@ HELPER="$THIS_DIR/background.sh"
 MODULE_DIR="$(cd "$THIS_DIR/.." && pwd -P)"
 REPO_ROOT="$(cd "$MODULE_DIR/../../.." && pwd -P)"
 
-PASS=0
-FAIL=0
-pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
-fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $2"; }
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/bg.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -696,6 +694,4 @@ d="$TMP/s-ertgate"; make_fixture "$d"
 printf '(defun agent-repl-test--require-background-priority (m b))\n' >"$d/modules/app/agent-repl/lisp/test-helpers.el"
 expect_violation "a batch harness that no longer calls its gate" "$d" "test-helpers.el: does not call agent-repl-test--require-background-priority"
 
-echo
-echo "test-background.sh: $PASS passed, $FAIL failed"
-[ "$FAIL" -eq 0 ]
+harness_finish

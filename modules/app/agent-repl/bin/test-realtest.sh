@@ -37,10 +37,8 @@ LIB_UNDER_TEST="$THIS_DIR/lib-realtest-backup.sh"
 readonly EXIT_DECLINED=77
 readonly EXIT_INCOMPLETE=78
 
-PASS=0
-FAIL=0
-pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
-fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $2"; return 0; }
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 cleanup() { rm -rf "$SCRATCH"; }
@@ -2329,6 +2327,4 @@ test_a_run_of_one_realtest_hands_the_editor_back_too
 test_the_editor_handback_survives_a_failing_realtest
 test_a_run_states_which_editor_the_owner_gets_back_before_it_starts
 
-echo
-echo "$PASS passed, $FAIL failed"
-[ "$FAIL" -eq 0 ]
+harness_finish
