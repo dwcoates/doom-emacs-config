@@ -266,38 +266,40 @@ func cursorConversion(version, through sql.NullInt64) *storev1.CursorConversion 
 	return conv
 }
 
+// scanStrings runs a one-column string query and answers each row's value,
+// in the statement's order.
 func (d *DB) scanStrings(ctx context.Context, query string, args ...any) ([]string, error) {
-	rows, err := d.read.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close() //nolint:errcheck // the deferred close of a read
-	var out []string
-	for rows.Next() {
+	return scanRows(ctx, d, query, func(rows *sql.Rows) (string, error) {
 		var value string
-		if err := rows.Scan(&value); err != nil {
-			return nil, err
-		}
-		out = append(out, value)
-	}
-	return out, rows.Err()
+		return value, rows.Scan(&value)
+	}, args...)
 }
 
 // scanStringPairs runs a two-column string query and answers each row as
 // its two values, in the statement's order.
 func (d *DB) scanStringPairs(ctx context.Context, query string, args ...any) ([][2]string, error) {
+	return scanRows(ctx, d, query, func(rows *sql.Rows) ([2]string, error) {
+		var pair [2]string
+		return pair, rows.Scan(&pair[0], &pair[1])
+	}, args...)
+}
+
+// scanRows runs a query on the read handle and answers each row as SCAN
+// reads it, in the statement's order. The first scan error, or the
+// iteration's own error, is the answer's error; the rows are always closed.
+func scanRows[T any](ctx context.Context, d *DB, query string, scan func(*sql.Rows) (T, error), args ...any) ([]T, error) {
 	rows, err := d.read.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close() //nolint:errcheck // the deferred close of a read
-	var out [][2]string
+	var out []T
 	for rows.Next() {
-		var pair [2]string
-		if err := rows.Scan(&pair[0], &pair[1]); err != nil {
+		row, err := scan(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, pair)
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }

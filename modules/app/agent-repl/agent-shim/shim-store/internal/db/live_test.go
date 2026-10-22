@@ -1,7 +1,9 @@
 package db
 
 import (
+	"database/sql"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -875,5 +877,76 @@ func TestLiveWorkEndsARunWhoseHandleIsItsOwnOriginUnit(t *testing.T) {
 	}
 	if got := len(live.GetLiveDetachedRuns()); got != 0 {
 		t.Fatalf("live_detached = %d, want 0 once the one run concluded", got)
+	}
+}
+
+// ---- scanRows ----
+
+// threeRowsSQL answers three rows of two columns, in a fixed order.
+const threeRowsSQL = `SELECT 'a', '1' UNION ALL SELECT 'b', '2' UNION ALL SELECT 'c', '3'`
+
+func TestScanRowsAnswersEveryRowInTheStatementsOrder(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	got, err := scanRows(ctx(), d, threeRowsSQL, func(rows *sql.Rows) (string, error) {
+		var first, second string
+		return first + second, rows.Scan(&first, &second)
+	})
+
+	// Assert
+	if err != nil || !slices.Equal(got, []string{"a1", "b2", "c3"}) {
+		t.Fatalf("scanRows = %v, %v; want [a1 b2 c3]", got, err)
+	}
+}
+
+func TestScanRowsAnswersTheFirstScanError(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	broken := errors.New("this row cannot be read")
+
+	// Act
+	got, err := scanRows(ctx(), d, threeRowsSQL, func(*sql.Rows) (string, error) {
+		return "", broken
+	})
+
+	// Assert
+	if !errors.Is(err, broken) || got != nil {
+		t.Fatalf("scanRows = %v, %v; want no rows and the scan's error", got, err)
+	}
+}
+
+func TestScanRowsAnswersAQueryThatCannotRun(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	_, err := scanRows(ctx(), d, `SELECT nothing FROM no_such_table`, func(*sql.Rows) (string, error) {
+		return "", nil
+	})
+
+	// Assert
+	if err == nil {
+		t.Fatal("scanRows answered a query over a missing table without an error")
+	}
+}
+
+// The two string scanners are scanRows with a fixed row shape: what they
+// answer is exactly what scanRows answers for the same statement.
+func TestTheStringScannersAnswerWhatScanRowsAnswers(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	pairs, pairsErr := d.scanStringPairs(ctx(), threeRowsSQL)
+	firsts, firstsErr := d.scanStrings(ctx(), `SELECT 'a' UNION ALL SELECT 'b' UNION ALL SELECT 'c'`)
+
+	// Assert
+	if pairsErr != nil || firstsErr != nil {
+		t.Fatalf("errors: %v, %v", pairsErr, firstsErr)
+	}
+	if !slices.Equal(pairs, [][2]string{{"a", "1"}, {"b", "2"}, {"c", "3"}}) || !slices.Equal(firsts, []string{"a", "b", "c"}) {
+		t.Fatalf("scanStringPairs = %v, scanStrings = %v", pairs, firsts)
 	}
 }
