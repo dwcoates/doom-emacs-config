@@ -670,19 +670,30 @@ func workspaceAsyncMerge(c *cliCall, args []string) int {
 
 // workspaceArg parses a command of one workspace and answers it.
 func (c *cliCall) workspaceArg(fs *flag.FlagSet, stateDir *string, args []string) (*workspacev1.WorkspaceRef, []string, bool) {
-	positionals, ok := c.parse(fs, args)
+	positionals, ok := c.targetArgs(fs, stateDir, args, "workspace")
 	if !ok {
-		return nil, nil, false
-	}
-	if len(positionals) == 0 {
-		c.usageFailed("the command names its workspace")
-		return nil, nil, false
-	}
-	if !c.dial(*stateDir) {
 		return nil, nil, false
 	}
 	ref, ok := c.named(positionals[0])
 	return ref, positionals[1:], ok
+}
+
+// targetArgs parses ARGS for a command whose first positional names its
+// target (WHAT, for the usage failure) and dials the daemon, answering the
+// positionals, the target first.
+func (c *cliCall) targetArgs(fs *flag.FlagSet, stateDir *string, args []string, what string) ([]string, bool) {
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return nil, false
+	}
+	if len(positionals) == 0 {
+		c.usageFailed("the command names its %s", what)
+		return nil, false
+	}
+	if !c.dial(*stateDir) {
+		return nil, false
+	}
+	return positionals, true
 }
 
 func workspacePrompt(c *cliCall, args []string) int {
@@ -1193,15 +1204,8 @@ func queueStatus(c *cliCall, args []string) int {
 // `merge-queue move-down pt3-sentences` answered "the daemon's roster holds no
 // workspace named" while the queue listed it waiting).
 func (c *cliCall) queuedArg(fs *flag.FlagSet, stateDir *string, args []string) (*workspacev1.WorkspaceRef, []string, bool) {
-	positionals, ok := c.parse(fs, args)
+	positionals, ok := c.targetArgs(fs, stateDir, args, "merge")
 	if !ok {
-		return nil, nil, false
-	}
-	if len(positionals) == 0 {
-		c.usageFailed("the command names its merge")
-		return nil, nil, false
-	}
-	if !c.dial(*stateDir) {
 		return nil, nil, false
 	}
 	name := positionals[0]

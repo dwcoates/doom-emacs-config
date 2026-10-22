@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -997,5 +998,47 @@ func TestAQueueVerbRefusesAnUnreadableQueue(t *testing.T) {
 	// Assert
 	if code != exitFailure || !strings.Contains(f.errOut.String(), "read the merge queues: connection refused") {
 		t.Fatalf("exit %d, stderr %q, want the unread queues named", code, f.errOut.String())
+	}
+}
+
+func TestEveryTargetedVerbRefusesAMissingTargetAndDialsNothing(t *testing.T) {
+	tests := []struct {
+		noun, verb, want string
+	}{
+		{noun: workspaceNoun, verb: "status", want: "the command names its workspace"},
+		{noun: mergeQueueNoun, verb: "dequeue", want: "the command names its merge"},
+		{noun: mergeQueueNoun, verb: "move-up", want: "the command names its merge"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.noun+" "+tt.verb, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(tt.noun, tt.verb)
+
+			// Assert
+			if code != exitFailure || !strings.Contains(f.errOut.String(), tt.want) || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d, stderr %q, requests %v; want %q and nothing asked", code, f.errOut.String(), f.client.requests, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheTargetedVerbsShareOneArgumentPreamble(t *testing.T) {
+	// Arrange: the parse-then-dial preamble lives in targetArgs alone.
+	src, err := os.ReadFile("agentcli.go")
+	if err != nil {
+		t.Fatalf("read agentcli.go: %v", err)
+	}
+
+	// Act
+	handRolled := strings.Count(string(src), "c.usageFailed(\"the command names its workspace\")") +
+		strings.Count(string(src), "c.usageFailed(\"the command names its merge\")")
+
+	// Assert
+	if handRolled != 0 || strings.Count(string(src), "c.targetArgs(fs, stateDir, args, ") != 2 {
+		t.Fatalf("usage refusals %d, targetArgs calls %d; want the one preamble shared by workspaceArg and queuedArg",
+			handRolled, strings.Count(string(src), "c.targetArgs(fs, stateDir, args, "))
 	}
 }
