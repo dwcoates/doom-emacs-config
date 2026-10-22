@@ -152,7 +152,7 @@ type subjectDoc struct {
 	// to remove (2026-10-22: pt2-semver-test, resumed at its tests).
 	CloseAlso  string `json:"close_also,omitempty"`
 	CleanupDir string `json:"cleanup_dir,omitempty"`
-	Other      string `json:"other,omitempty"`
+	Other      string `json:"other,omitempty"` // another workspace whose worktree the merge works in
 }
 
 // roundDoc is one durable tab round.
@@ -242,7 +242,8 @@ func (d *outcomeDoc) outcome() (outcome, error) {
 	return outcome{landed: d.Landed, target: d.Target, commits: fromCommitDocs(d.Commits), alreadyOn: d.AlreadyOn, version: version}, nil
 }
 
-// subject and toSubjectDoc carry the subject through the record.
+// subject and toSubjectDoc carry the subject through the record: what a
+// restart reads back is exactly what the run recorded.
 func (d subjectDoc) subject() subject {
 	return subject{
 		branch: d.Branch, dir: d.Dir, targetDir: d.TargetDir, made: d.Made,
