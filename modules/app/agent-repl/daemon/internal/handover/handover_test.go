@@ -44,6 +44,13 @@ func (q *fakeQueue) calls() []ids.WorkspaceID {
 // workspace: the lease row is what the behavior is made of.
 func newIntake(t *testing.T) (*Intake, *fakeQueue, wsm.DB, ids.WorkspaceID) {
 	t.Helper()
+	intake, queue, db, ws, _ := newIntakeLogged(t)
+	return intake, queue, db, ws
+}
+
+// newIntakeLogged is newIntake with the logger its records land on.
+func newIntakeLogged(t *testing.T) (*Intake, *fakeQueue, wsm.DB, ids.WorkspaceID, *dlog.TestLogger) {
+	t.Helper()
 	log := dlog.NewTestSurfaces()
 	db, err := wsm.OpenInMemory(context.Background(), wsm.WithLogger(log.Global()), wsm.WithTemporaryGuard(tempdirstest.Guard(t)))
 	if err != nil {
@@ -62,7 +69,7 @@ func newIntake(t *testing.T) (*Intake, *fakeQueue, wsm.DB, ids.WorkspaceID) {
 	if err != nil {
 		t.Fatalf("NewIntake: %v", err)
 	}
-	return intake, queue, db, ws.ID
+	return intake, queue, db, ws.ID, log.Global().(*dlog.TestLogger)
 }
 
 // TestQuiesceTakesTheHold covers the outgoing half: from the transfer notice
@@ -197,6 +204,30 @@ func TestDrainIntakeLeavesAnotherHoldersLeaseAlone(t *testing.T) {
 	lease, held, err := db.Lease(context.Background(), ws)
 	if err != nil || !held || lease.Holder != wsm.HolderMerge {
 		t.Fatalf("lease = %+v, held %v (err %v), want the merge's lease untouched", lease, held, err)
+	}
+}
+
+// TestDrainIntakeRecordsAnotherHoldersLeaseAtInfo pins the level: a merge
+// running across a deploy is the ordinary case, never a warning.
+func TestDrainIntakeRecordsAnotherHoldersLeaseAtInfo(t *testing.T) {
+	// Arrange
+	intake, _, db, ws, log := newIntakeLogged(t)
+	if _, err := db.AcquireLease(context.Background(), ws, wsm.HolderMerge, wsm.PolicyRefuse); err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	// Act
+	if err := intake.DrainIntake(context.Background(), ws); err != nil {
+		t.Fatalf("DrainIntake: %v", err)
+	}
+
+	// Assert
+	if warns := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: "warn"}); len(warns) != 0 {
+		t.Fatalf("warnings = %+v, want none", warns)
+	}
+	got, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: opDrain})
+	if !ok || got.Context["holder"] != wsm.HolderMerge.String() {
+		t.Fatalf("drain record = %+v (found %v), want one INFO naming the merge holder", got, ok)
 	}
 }
 

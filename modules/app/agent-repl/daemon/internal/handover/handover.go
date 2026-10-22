@@ -118,7 +118,11 @@ func (i *Intake) DrainIntake(ctx context.Context, ws ids.WorkspaceID) error {
 		// ANOTHER HOLDER'S LEASE IS NOT THIS ONE'S TO RELEASE. A merge that
 		// was running when the handover began still owns the workspace on the
 		// successor, and dropping its lease would let work in behind it.
-		i.log.Warn(opDrain, "the workspace is held by another lease holder; leaving it in place", fields)
+		//
+		// INFO, NOT WARN: a merge running across a deploy is the ordinary case
+		// (the queue lands work while deploys roll), and this is the designed
+		// answer to it, as quiesce's own branch for the same lease records.
+		i.log.Info(opDrain, "the workspace is held by another lease holder; leaving it in place", fields)
 		i.queue.OnLeaseChanged(ws)
 		return nil
 	}
