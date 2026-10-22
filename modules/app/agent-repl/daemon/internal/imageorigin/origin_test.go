@@ -221,8 +221,62 @@ func TestHandlerReportsARegisteredImageThatVanished(t *testing.T) {
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("the origin answered %d for a vanished file, want 404", recorder.Code)
 	}
-	if !recordedAtLevel(log, "error", "could not be opened") {
-		t.Errorf("the vanished file was not recorded at error level; records: %v", log.Records())
+	if !recordedAtLevel(log, "info", "file is gone") {
+		t.Errorf("the vanished file was not recorded at info level; records: %v", log.Records())
+	}
+}
+
+// TestHandlerRecordsAnUnreadableImageAtError covers an open that fails for
+// any reason but a missing file: a defect, recorded at error, answered 404.
+func TestHandlerRecordsAnUnreadableImageAtError(t *testing.T) {
+	// Arrange.
+	origin, log := newOrigin(t)
+	path := writeImage(t)
+	src, err := origin.Register(path, "image/png")
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("make the sample image unreadable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	recorder := httptest.NewRecorder()
+
+	// Act.
+	origin.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, src, nil))
+
+	// Assert.
+	if recorder.Code != http.StatusNotFound || !recordedAtLevel(log, "error", "could not be opened") {
+		t.Errorf("an unreadable image answered %d; records: %v", recorder.Code, log.Records())
+	}
+}
+
+// TestServes covers which sources the origin answers: its route and a
+// registered id, nothing else.
+func TestServes(t *testing.T) {
+	origin, _ := newOrigin(t)
+	src, err := origin.Register(writeImage(t), "image/png")
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	tests := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"a registered source", src, true},
+		{"an unregistered id beneath the route", Route + "0000", false},
+		{"the bare route", Route, false},
+		{"a source off the route", "https://example.invalid/clip.png", false},
+		{"the empty string", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act / Assert.
+			if got := origin.Serves(tt.src); got != tt.want {
+				t.Errorf("Serves(%q) = %v, want %v", tt.src, got, tt.want)
+			}
+		})
 	}
 }
 

@@ -425,6 +425,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the image resolver: %w", err)
 	}
+	// THE OVERLAY OPENS ONLY WHAT THE FEED COULD DRAW: a composer image is
+	// resolved by the same resolver, and a drawn image's echo is checked
+	// against the same origin.
+	imageSources, err := feed.NewImageSources(resolveImage, images.Serves, log)
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the overlay's image sources: %w", err)
+	}
 	// Zero leaves the resolver's own DefaultMomentaryDwell in force; the flag
 	// and its environment knob are what let a caller compress a window whose
 	// whole purpose is to be long enough for a person to read.
@@ -1458,6 +1465,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Ownership:         ownership,
 			SuccessorAddress:  rolloutController.SuccessorAddress,
 			Feed:              feedResolver,
+			Images:            imageSources,
 			Footer:            footerResolver,
 			Topbar:            topbarResolver,
 			Sidebar:           sidebarResolver,

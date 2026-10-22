@@ -8,6 +8,35 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
+// textBody draws a body of one text block per text block of CONTENT, so a
+// test can tell the drawn body is the said's own.
+func textBody(content *conversationv1.UserContent) *frontendv1.FeedUserPromptBody {
+	body := &frontendv1.FeedUserPromptBody{}
+	for _, block := range content.GetBlocks() {
+		if text := block.GetText(); text != nil {
+			body.Blocks = append(body.Blocks, &frontendv1.FeedUserPromptBlock{
+				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: "drawn:" + text.GetText()}},
+			})
+		}
+	}
+	return body
+}
+
+func TestIngressPromptDrawsTheBodyItsDrawerResolves(t *testing.T) {
+	// Arrange
+	said := &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+		{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "hi"}}},
+	}}}
+
+	// Act
+	card := IngressPrompt(IngressEntry{Key: "k-1", Said: said, Wait: IngressWait{Kind: IngressAwaitingIntake}}, textBody)
+
+	// Assert
+	if got := card.GetBody().GetBlocks()[0].GetText().GetText(); got != "drawn:hi" {
+		t.Fatalf("body = %q, want the drawer's resolution of the said", got)
+	}
+}
+
 func TestIngressPromptDrawsEachWaitAsItsBadge(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -25,7 +54,7 @@ func TestIngressPromptDrawsEachWaitAsItsBadge(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			card := IngressPrompt(IngressEntry{Key: "k-1", Wait: IngressWait{Kind: tc.kind}})
+			card := IngressPrompt(IngressEntry{Key: "k-1", Wait: IngressWait{Kind: tc.kind}}, textBody)
 
 			// Assert
 			badge := card.GetBadge()
@@ -46,7 +75,7 @@ func TestIngressPromptCarriesTheSaidTheQueuedAtAndTheDetail(t *testing.T) {
 
 	// Act
 	card := IngressPrompt(IngressEntry{Key: "k-1", Said: said, QueuedAt: at,
-		Wait: IngressWait{Kind: IngressAwaitingIntake, Detail: "waits behind an earlier prompt"}})
+		Wait: IngressWait{Kind: IngressAwaitingIntake, Detail: "waits behind an earlier prompt"}}, textBody)
 
 	// Assert
 	if card.GetSaid() != said {
@@ -70,5 +99,5 @@ func TestIngressPromptPanicsOnAWaitWithNoBadge(t *testing.T) {
 	}()
 
 	// Act
-	IngressPrompt(IngressEntry{Key: "k-1", Wait: IngressWait{Kind: IngressWaitKind(99)}})
+	IngressPrompt(IngressEntry{Key: "k-1", Wait: IngressWait{Kind: IngressWaitKind(99)}}, textBody)
 }

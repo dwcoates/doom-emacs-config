@@ -176,6 +176,14 @@ func (s *server) watchFeed(
 	// serving), then every later change.
 	scales := s.feedTextScaleTopic.Subscribe(streamCtx)
 
+	// THE IMAGE OVERLAY RIDES THE ROOT FEED'S WATCH ONLY, like the selection:
+	// it lies over the workspace's root feed. The topic replays its latest
+	// value, so a page opening after the image was opened draws it at once.
+	var overlays <-chan *frontendv1.FeedImageOverlay
+	if target.Feed.Root {
+		overlays = s.imageOverlayTopic(target.WS).Subscribe(streamCtx)
+	}
+
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a feed tail", dlog.Context{"token": token.GetValue()})
 	for {
@@ -225,6 +233,21 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{FeedTextScale: sc}); err != nil {
+				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				return nil
+			}
+		case overlay, ok := <-overlays:
+			if !ok {
+				// The overlay subscription closes only on streamCtx
+				// cancellation, which the Done case handles.
+				overlays = nil
+				continue
+			}
+			if overlay == nil {
+				log.Error(rpc, "the image overlay topic raised an empty overlay; it was not sent", nil)
+				continue
+			}
+			if err := out.Send(&agentreplv1.WatchFeedResponse{ImageOverlay: overlay}); err != nil {
 				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
 				return nil
 			}

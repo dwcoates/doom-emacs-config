@@ -45,7 +45,7 @@ func orderedHolds(held []wsm.HeldPrompt) []wsm.HeldPrompt {
 // the entry is still emitted: a prompt the daemon is really holding must be
 // visible even when its explanation is defective, and dropping it would hide
 // pending work.
-func heldPrompt(h wsm.HeldPrompt, editing bool, log dlog.Logger) *frontendv1.HeldPrompt {
+func heldPrompt(h wsm.HeldPrompt, editing bool, draw DrawBody, log dlog.Logger) *frontendv1.HeldPrompt {
 	if h.Tombstone != nil {
 		log.Debug("daemon.holds.convert", "a retired hold was skipped: the tray draws standing holds only",
 			dlog.Context{"turn_id": string(h.Turn), "tombstone": h.Tombstone.Kind})
@@ -69,6 +69,7 @@ func heldPrompt(h wsm.HeldPrompt, editing bool, log dlog.Logger) *frontendv1.Hel
 	out := &frontendv1.HeldPrompt{
 		Turn:     &conversationv1.TurnId{Value: string(h.Turn)},
 		Said:     h.Said,
+		Body:     draw(h.Said.GetContent()),
 		QueuedAt: &frontendv1.HeldPromptQueuedAt{AtMs: h.QueuedAt.UnixMilli()},
 	}
 	setClassification(out, h, log)

@@ -12,6 +12,7 @@
 package holds
 
 import (
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -38,20 +39,27 @@ type Sink interface {
 	SetEditing(ws ids.WorkspaceID, turn ids.TurnID)
 }
 
+// DrawBody resolves what a person said into the body a card draws: the very
+// body the prompt's feed row will carry (feed.DrawUserBlocks). The feed
+// resolver supplies it, because it owns the sentinel strip and the image
+// resolution the drawing needs.
+type DrawBody func(content *conversationv1.UserContent) *frontendv1.FeedUserPromptBody
+
 // Prompts renders the standing holds as the held section's prompt cards, in
 // delivery order: oldest first, a retired hold skipped, each card's "fold
 // above" button naming the standing card drawn just before it. EDITING names
-// the hold an EditHeldPrompt claim stands on, empty when none does.
+// the hold an EditHeldPrompt claim stands on, empty when none does. DRAW
+// resolves each card's body.
 //
 // The answer pairs each card with the hold it was drawn from, because the
 // section's caller keys each item by the hold's turn.
-func Prompts(held []wsm.HeldPrompt, editing ids.TurnID, log dlog.Logger) []Card {
+func Prompts(held []wsm.HeldPrompt, editing ids.TurnID, draw DrawBody, log dlog.Logger) []Card {
 	cards := make([]Card, 0, len(held))
 	// ahead is the standing entry drawn just before this one: what its "fold
 	// above" button would fold it into.
 	var ahead *wsm.HeldPrompt
 	for _, h := range orderedHolds(held) {
-		prompt := heldPrompt(h, editing != "" && h.Turn == editing, log)
+		prompt := heldPrompt(h, editing != "" && h.Turn == editing, draw, log)
 		if prompt == nil {
 			continue
 		}

@@ -13,6 +13,20 @@ import (
 	"agent-repld/internal/wsm"
 )
 
+// textBody draws a body of one text block per text block of CONTENT, so a
+// test can tell the drawn body is the said's own.
+func textBody(content *conversationv1.UserContent) *frontendv1.FeedUserPromptBody {
+	body := &frontendv1.FeedUserPromptBody{}
+	for _, block := range content.GetBlocks() {
+		if text := block.GetText(); text != nil {
+			body.Blocks = append(body.Blocks, &frontendv1.FeedUserPromptBlock{
+				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: "drawn:" + text.GetText()}},
+			})
+		}
+	}
+	return body
+}
+
 // testWS is the workspace every test in this package addresses.
 const testWS = ids.WorkspaceID("ws-holds")
 
@@ -33,7 +47,7 @@ type renderer struct {
 // and renders them at once, as the feed resolver does on every change.
 func (r *renderer) SetHeldPrompts(_ ids.WorkspaceID, held []wsm.HeldPrompt) {
 	r.held = held
-	r.cards = holds.Prompts(r.held, r.editing, r.log)
+	r.cards = holds.Prompts(r.held, r.editing, textBody, r.log)
 }
 
 // FoldHeldPrompts records the standing holds a fold left, and renders them
@@ -45,7 +59,7 @@ func (r *renderer) FoldHeldPrompts(ws ids.WorkspaceID, held []wsm.HeldPrompt, _ 
 // SetEditing records the hold being edited, and renders again.
 func (r *renderer) SetEditing(_ ids.WorkspaceID, turn ids.TurnID) {
 	r.editing = turn
-	r.cards = holds.Prompts(r.held, r.editing, r.log)
+	r.cards = holds.Prompts(r.held, r.editing, textBody, r.log)
 }
 
 // newRenderer builds a renderer plus the surfaces its records land in.
