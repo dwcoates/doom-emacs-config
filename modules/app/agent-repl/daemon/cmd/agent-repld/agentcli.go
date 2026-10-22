@@ -136,7 +136,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"create":      {usage: "create -repository here|DIR -topology primary|child [-origin-master] [-owner WS] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-as-user]", run: workspaceCreate},
 		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":      {usage: "prompt WS TEXT", run: workspacePrompt},
-		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-as-user]", run: workspaceSet},
+		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-principal-link URL|-no-principal-link] [-as-user]", run: workspaceSet},
 		"finished":    {usage: "finished WS -placement back|front [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":        {usage: "open WS", run: workspaceOpen},
 		"close":       {usage: "close WS [-as-user]", run: workspaceClose},
@@ -732,12 +732,14 @@ func workspaceSet(c *cliCall, args []string) int {
 	notOneShot := fs.Bool("not-one-shot", false, "unmark the workspace a one-shot")
 	await := fs.String("await", "", "mark the workspace awaiting this workspace")
 	notAwaiting := fs.Bool("not-awaiting", false, "clear what the workspace awaits")
+	principalLink := fs.String("principal-link", "", "the url the topbar's summary opens")
+	noPrincipalLink := fs.Bool("no-principal-link", false, "clear the workspace's principal link")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
-	if len(rest) != 0 || (*hidden && *shown) || (*parent != "" && *topLevel) || (*oneShot && *notOneShot) || (*await != "" && *notAwaiting) {
+	if len(rest) != 0 || (*hidden && *shown) || (*parent != "" && *topLevel) || (*oneShot && *notOneShot) || (*await != "" && *notAwaiting) || (*principalLink != "" && *noPrincipalLink) {
 		return c.usageFailed("each setting is set one way, and nothing else is positional")
 	}
 	var calls []func() int
@@ -783,6 +785,12 @@ func workspaceSet(c *cliCall, args []string) int {
 			return answer(c, resp, err)
 		})
 	}
+	if req := principalLinkRequest(ref, *principalLink, *noPrincipalLink); req != nil {
+		calls = append(calls, func() int {
+			resp, err := c.client.SetWorkspacePrincipalLink(c.ctx, connect.NewRequest(req))
+			return answer(c, resp, err)
+		})
+	}
 	if *oneShot || *notOneShot || *await != "" || *notAwaiting {
 		requester, ok := c.requester(*asUser)
 		if !ok {
@@ -822,6 +830,21 @@ func workspaceSet(c *cliCall, args []string) int {
 		}
 	}
 	return exitSuccess
+}
+
+// principalLinkRequest reads the -principal-link and -no-principal-link flags
+// into the request for REF: a set naming the url, a clear, or nil when neither
+// flag was given.
+func principalLinkRequest(ref *workspacev1.WorkspaceRef, url string, clear bool) *agentreplv1.SetWorkspacePrincipalLinkRequest {
+	switch {
+	case url != "":
+		return &agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref,
+			Change: &agentreplv1.SetWorkspacePrincipalLinkRequest_Set{Set: &agentreplv1.SetWorkspacePrincipalLinkSet{Url: url}}}
+	case clear:
+		return &agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref,
+			Change: &agentreplv1.SetWorkspacePrincipalLinkRequest_Clear{Clear: &agentreplv1.SetWorkspacePrincipalLinkClear{}}}
+	}
+	return nil
 }
 
 // priorityOf reads a -priority flag: a level, or none to clear it.
