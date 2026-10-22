@@ -93,6 +93,7 @@ type RollBackError struct {
 	//	*RollBackError_FirstPrompt
 	//	*RollBackError_UnseenPrompt
 	//	*RollBackError_FilesNotRestorable
+	//	*RollBackError_EntryNotFound
 	Cause         isRollBackError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -225,6 +226,15 @@ func (x *RollBackError) GetFilesNotRestorable() *RollBackFilesNotRestorable {
 	return nil
 }
 
+func (x *RollBackError) GetEntryNotFound() *RollBackEntryNotFound {
+	if x != nil {
+		if x, ok := x.Cause.(*RollBackError_EntryNotFound); ok {
+			return x.EntryNotFound
+		}
+	}
+	return nil
+}
+
 type isRollBackError_Cause interface {
 	isRollBackError_Cause()
 }
@@ -288,6 +298,12 @@ type RollBackError_FilesNotRestorable struct {
 	FilesNotRestorable *RollBackFilesNotRestorable `protobuf:"bytes,11,opt,name=files_not_restorable,json=filesNotRestorable,proto3,oneof"`
 }
 
+type RollBackError_EntryNotFound struct {
+	// The resend edits an entry the prompt does not hold: no entry of the
+	// rolled-back prompt answers the label it named. Nothing was rolled back.
+	EntryNotFound *RollBackEntryNotFound `protobuf:"bytes,12,opt,name=entry_not_found,json=entryNotFound,proto3,oneof"`
+}
+
 func (*RollBackError_UnknownWorkspace) isRollBackError_Cause() {}
 
 func (*RollBackError_WorkspaceRefMismatch) isRollBackError_Cause() {}
@@ -308,6 +324,54 @@ func (*RollBackError_UnseenPrompt) isRollBackError_Cause() {}
 
 func (*RollBackError_FilesNotRestorable) isRollBackError_Cause() {}
 
+func (*RollBackError_EntryNotFound) isRollBackError_Cause() {}
+
+// No entry of the rolled-back prompt answers the label a resend named.
+type RollBackEntryNotFound struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The label the resend named.
+	Label         string `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RollBackEntryNotFound) Reset() {
+	*x = RollBackEntryNotFound{}
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RollBackEntryNotFound) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RollBackEntryNotFound) ProtoMessage() {}
+
+func (x *RollBackEntryNotFound) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RollBackEntryNotFound.ProtoReflect.Descriptor instead.
+func (*RollBackEntryNotFound) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *RollBackEntryNotFound) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
 // The workspace id is not in the daemon's registry.
 type RollBackUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -317,7 +381,7 @@ type RollBackUnknownWorkspace struct {
 
 func (x *RollBackUnknownWorkspace) Reset() {
 	*x = RollBackUnknownWorkspace{}
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -329,7 +393,7 @@ func (x *RollBackUnknownWorkspace) String() string {
 func (*RollBackUnknownWorkspace) ProtoMessage() {}
 
 func (x *RollBackUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -342,7 +406,7 @@ func (x *RollBackUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*RollBackUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{3}
 }
 
 // The echoed dir disagrees with the registry's dir for this id.
@@ -356,7 +420,7 @@ type RollBackWorkspaceRefMismatch struct {
 
 func (x *RollBackWorkspaceRefMismatch) Reset() {
 	*x = RollBackWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -368,7 +432,7 @@ func (x *RollBackWorkspaceRefMismatch) String() string {
 func (*RollBackWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *RollBackWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -381,7 +445,7 @@ func (x *RollBackWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*RollBackWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *RollBackWorkspaceRefMismatch) GetRegistryDir() string {
@@ -402,7 +466,7 @@ type RollBackTransferringAway struct {
 
 func (x *RollBackTransferringAway) Reset() {
 	*x = RollBackTransferringAway{}
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -414,7 +478,7 @@ func (x *RollBackTransferringAway) String() string {
 func (*RollBackTransferringAway) ProtoMessage() {}
 
 func (x *RollBackTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -427,7 +491,7 @@ func (x *RollBackTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackTransferringAway.ProtoReflect.Descriptor instead.
 func (*RollBackTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RollBackTransferringAway) GetAddress() string {
@@ -446,7 +510,7 @@ type RollBackNotYetAdopted struct {
 
 func (x *RollBackNotYetAdopted) Reset() {
 	*x = RollBackNotYetAdopted{}
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -458,7 +522,7 @@ func (x *RollBackNotYetAdopted) String() string {
 func (*RollBackNotYetAdopted) ProtoMessage() {}
 
 func (x *RollBackNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -471,7 +535,7 @@ func (x *RollBackNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*RollBackNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{6}
 }
 
 // The plan no longer describes what would happen.
@@ -483,7 +547,7 @@ type RollBackPlanStale struct {
 
 func (x *RollBackPlanStale) Reset() {
 	*x = RollBackPlanStale{}
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -495,7 +559,7 @@ func (x *RollBackPlanStale) String() string {
 func (*RollBackPlanStale) ProtoMessage() {}
 
 func (x *RollBackPlanStale) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -508,7 +572,7 @@ func (x *RollBackPlanStale) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackPlanStale.ProtoReflect.Descriptor instead.
 func (*RollBackPlanStale) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{7}
 }
 
 // No running session.
@@ -520,7 +584,7 @@ type RollBackNoSession struct {
 
 func (x *RollBackNoSession) Reset() {
 	*x = RollBackNoSession{}
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -532,7 +596,7 @@ func (x *RollBackNoSession) String() string {
 func (*RollBackNoSession) ProtoMessage() {}
 
 func (x *RollBackNoSession) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -545,7 +609,7 @@ func (x *RollBackNoSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackNoSession.ProtoReflect.Descriptor instead.
 func (*RollBackNoSession) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{8}
 }
 
 // The prompt has no record in the vendor transcript.
@@ -557,7 +621,7 @@ type RollBackPromptNotRecorded struct {
 
 func (x *RollBackPromptNotRecorded) Reset() {
 	*x = RollBackPromptNotRecorded{}
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -569,7 +633,7 @@ func (x *RollBackPromptNotRecorded) String() string {
 func (*RollBackPromptNotRecorded) ProtoMessage() {}
 
 func (x *RollBackPromptNotRecorded) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -582,7 +646,7 @@ func (x *RollBackPromptNotRecorded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackPromptNotRecorded.ProtoReflect.Descriptor instead.
 func (*RollBackPromptNotRecorded) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{9}
 }
 
 // The prompt is its conversation's first.
@@ -594,7 +658,7 @@ type RollBackFirstPrompt struct {
 
 func (x *RollBackFirstPrompt) Reset() {
 	*x = RollBackFirstPrompt{}
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -606,7 +670,7 @@ func (x *RollBackFirstPrompt) String() string {
 func (*RollBackFirstPrompt) ProtoMessage() {}
 
 func (x *RollBackFirstPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -619,7 +683,7 @@ func (x *RollBackFirstPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackFirstPrompt.ProtoReflect.Descriptor instead.
 func (*RollBackFirstPrompt) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{10}
 }
 
 // An unseen prompt follows the cut point.
@@ -631,7 +695,7 @@ type RollBackUnseenPrompt struct {
 
 func (x *RollBackUnseenPrompt) Reset() {
 	*x = RollBackUnseenPrompt{}
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -643,7 +707,7 @@ func (x *RollBackUnseenPrompt) String() string {
 func (*RollBackUnseenPrompt) ProtoMessage() {}
 
 func (x *RollBackUnseenPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -656,7 +720,7 @@ func (x *RollBackUnseenPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackUnseenPrompt.ProtoReflect.Descriptor instead.
 func (*RollBackUnseenPrompt) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{11}
 }
 
 // The files cannot be restored.
@@ -670,7 +734,7 @@ type RollBackFilesNotRestorable struct {
 
 func (x *RollBackFilesNotRestorable) Reset() {
 	*x = RollBackFilesNotRestorable{}
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -682,7 +746,7 @@ func (x *RollBackFilesNotRestorable) String() string {
 func (*RollBackFilesNotRestorable) ProtoMessage() {}
 
 func (x *RollBackFilesNotRestorable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_rollback_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_rollback_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -695,7 +759,7 @@ func (x *RollBackFilesNotRestorable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackFilesNotRestorable.ProtoReflect.Descriptor instead.
 func (*RollBackFilesNotRestorable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_rollback_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RollBackFilesNotRestorable) GetVendorMessage() string {
@@ -711,7 +775,7 @@ const file_agentrepl_v1_rollback_proto_rawDesc = "" +
 	"\n" +
 	"\x1bagentrepl/v1/rollback.proto\x12\fagentrepl.v1\"%\n" +
 	"\rRollbackToken\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05value\"\xdf\x06\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"\xae\a\n" +
 	"\rRollBackError\x12U\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2&.agentrepl.v1.RollBackUnknownWorkspaceH\x00R\x10unknownWorkspace\x12b\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2*.agentrepl.v1.RollBackWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12U\n" +
@@ -724,9 +788,12 @@ const file_agentrepl_v1_rollback_proto_rawDesc = "" +
 	"\x13prompt_not_recorded\x18\a \x01(\v2'.agentrepl.v1.RollBackPromptNotRecordedH\x00R\x11promptNotRecorded\x12F\n" +
 	"\ffirst_prompt\x18\b \x01(\v2!.agentrepl.v1.RollBackFirstPromptH\x00R\vfirstPrompt\x12I\n" +
 	"\runseen_prompt\x18\t \x01(\v2\".agentrepl.v1.RollBackUnseenPromptH\x00R\funseenPrompt\x12\\\n" +
-	"\x14files_not_restorable\x18\v \x01(\v2(.agentrepl.v1.RollBackFilesNotRestorableH\x00R\x12filesNotRestorableB\a\n" +
+	"\x14files_not_restorable\x18\v \x01(\v2(.agentrepl.v1.RollBackFilesNotRestorableH\x00R\x12filesNotRestorable\x12M\n" +
+	"\x0fentry_not_found\x18\f \x01(\v2#.agentrepl.v1.RollBackEntryNotFoundH\x00R\rentryNotFoundB\a\n" +
 	"\x05causeJ\x04\b\n" +
-	"\x10\vR\x0evendor_refused\"\x1a\n" +
+	"\x10\vR\x0evendor_refused\"-\n" +
+	"\x15RollBackEntryNotFound\x12\x14\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\"\x1a\n" +
 	"\x18RollBackUnknownWorkspace\"A\n" +
 	"\x1cRollBackWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"4\n" +
@@ -753,37 +820,39 @@ func file_agentrepl_v1_rollback_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_rollback_proto_rawDescData
 }
 
-var file_agentrepl_v1_rollback_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_agentrepl_v1_rollback_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_agentrepl_v1_rollback_proto_goTypes = []any{
 	(*RollbackToken)(nil),                // 0: agentrepl.v1.RollbackToken
 	(*RollBackError)(nil),                // 1: agentrepl.v1.RollBackError
-	(*RollBackUnknownWorkspace)(nil),     // 2: agentrepl.v1.RollBackUnknownWorkspace
-	(*RollBackWorkspaceRefMismatch)(nil), // 3: agentrepl.v1.RollBackWorkspaceRefMismatch
-	(*RollBackTransferringAway)(nil),     // 4: agentrepl.v1.RollBackTransferringAway
-	(*RollBackNotYetAdopted)(nil),        // 5: agentrepl.v1.RollBackNotYetAdopted
-	(*RollBackPlanStale)(nil),            // 6: agentrepl.v1.RollBackPlanStale
-	(*RollBackNoSession)(nil),            // 7: agentrepl.v1.RollBackNoSession
-	(*RollBackPromptNotRecorded)(nil),    // 8: agentrepl.v1.RollBackPromptNotRecorded
-	(*RollBackFirstPrompt)(nil),          // 9: agentrepl.v1.RollBackFirstPrompt
-	(*RollBackUnseenPrompt)(nil),         // 10: agentrepl.v1.RollBackUnseenPrompt
-	(*RollBackFilesNotRestorable)(nil),   // 11: agentrepl.v1.RollBackFilesNotRestorable
+	(*RollBackEntryNotFound)(nil),        // 2: agentrepl.v1.RollBackEntryNotFound
+	(*RollBackUnknownWorkspace)(nil),     // 3: agentrepl.v1.RollBackUnknownWorkspace
+	(*RollBackWorkspaceRefMismatch)(nil), // 4: agentrepl.v1.RollBackWorkspaceRefMismatch
+	(*RollBackTransferringAway)(nil),     // 5: agentrepl.v1.RollBackTransferringAway
+	(*RollBackNotYetAdopted)(nil),        // 6: agentrepl.v1.RollBackNotYetAdopted
+	(*RollBackPlanStale)(nil),            // 7: agentrepl.v1.RollBackPlanStale
+	(*RollBackNoSession)(nil),            // 8: agentrepl.v1.RollBackNoSession
+	(*RollBackPromptNotRecorded)(nil),    // 9: agentrepl.v1.RollBackPromptNotRecorded
+	(*RollBackFirstPrompt)(nil),          // 10: agentrepl.v1.RollBackFirstPrompt
+	(*RollBackUnseenPrompt)(nil),         // 11: agentrepl.v1.RollBackUnseenPrompt
+	(*RollBackFilesNotRestorable)(nil),   // 12: agentrepl.v1.RollBackFilesNotRestorable
 }
 var file_agentrepl_v1_rollback_proto_depIdxs = []int32{
-	2,  // 0: agentrepl.v1.RollBackError.unknown_workspace:type_name -> agentrepl.v1.RollBackUnknownWorkspace
-	3,  // 1: agentrepl.v1.RollBackError.workspace_ref_mismatch:type_name -> agentrepl.v1.RollBackWorkspaceRefMismatch
-	4,  // 2: agentrepl.v1.RollBackError.transferring_away:type_name -> agentrepl.v1.RollBackTransferringAway
-	5,  // 3: agentrepl.v1.RollBackError.not_yet_adopted:type_name -> agentrepl.v1.RollBackNotYetAdopted
-	6,  // 4: agentrepl.v1.RollBackError.plan_stale:type_name -> agentrepl.v1.RollBackPlanStale
-	7,  // 5: agentrepl.v1.RollBackError.no_session:type_name -> agentrepl.v1.RollBackNoSession
-	8,  // 6: agentrepl.v1.RollBackError.prompt_not_recorded:type_name -> agentrepl.v1.RollBackPromptNotRecorded
-	9,  // 7: agentrepl.v1.RollBackError.first_prompt:type_name -> agentrepl.v1.RollBackFirstPrompt
-	10, // 8: agentrepl.v1.RollBackError.unseen_prompt:type_name -> agentrepl.v1.RollBackUnseenPrompt
-	11, // 9: agentrepl.v1.RollBackError.files_not_restorable:type_name -> agentrepl.v1.RollBackFilesNotRestorable
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	3,  // 0: agentrepl.v1.RollBackError.unknown_workspace:type_name -> agentrepl.v1.RollBackUnknownWorkspace
+	4,  // 1: agentrepl.v1.RollBackError.workspace_ref_mismatch:type_name -> agentrepl.v1.RollBackWorkspaceRefMismatch
+	5,  // 2: agentrepl.v1.RollBackError.transferring_away:type_name -> agentrepl.v1.RollBackTransferringAway
+	6,  // 3: agentrepl.v1.RollBackError.not_yet_adopted:type_name -> agentrepl.v1.RollBackNotYetAdopted
+	7,  // 4: agentrepl.v1.RollBackError.plan_stale:type_name -> agentrepl.v1.RollBackPlanStale
+	8,  // 5: agentrepl.v1.RollBackError.no_session:type_name -> agentrepl.v1.RollBackNoSession
+	9,  // 6: agentrepl.v1.RollBackError.prompt_not_recorded:type_name -> agentrepl.v1.RollBackPromptNotRecorded
+	10, // 7: agentrepl.v1.RollBackError.first_prompt:type_name -> agentrepl.v1.RollBackFirstPrompt
+	11, // 8: agentrepl.v1.RollBackError.unseen_prompt:type_name -> agentrepl.v1.RollBackUnseenPrompt
+	12, // 9: agentrepl.v1.RollBackError.files_not_restorable:type_name -> agentrepl.v1.RollBackFilesNotRestorable
+	2,  // 10: agentrepl.v1.RollBackError.entry_not_found:type_name -> agentrepl.v1.RollBackEntryNotFound
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_rollback_proto_init() }
@@ -802,6 +871,7 @@ func file_agentrepl_v1_rollback_proto_init() {
 		(*RollBackError_FirstPrompt)(nil),
 		(*RollBackError_UnseenPrompt)(nil),
 		(*RollBackError_FilesNotRestorable)(nil),
+		(*RollBackError_EntryNotFound)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -809,7 +879,7 @@ func file_agentrepl_v1_rollback_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_rollback_proto_rawDesc), len(file_agentrepl_v1_rollback_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

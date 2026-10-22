@@ -175,3 +175,31 @@ wrong labels). That needs one parse, in one place, that every program reads.
 - **Consequences:**
   - A response is re-published when a prompt answering it is drawn, and when such a
     prompt is removed by a rollback.
+
+### 5. Clicking a linked label or an entry, and resending an edited prompt
+
+- **What:**
+  - `SelectFeedRowRequest.move` gained `answer` (`SelectFeedRowAnswer`: the
+    answering prompt's row and the label) and `entry` (`SelectFeedRowEntry`: a
+    prompt's row and one entry's label).
+  - `frontend.v1.FeedSelectionRowViewport` gained `reveal`
+    (`FeedSelectionRowViewportReveal.entry_label`).
+  - `WatchHostWorkspaceResponse` gained the event `prompt_entry_clicked`
+    (`HostWorkspacePromptEntryClicked`: row, label, text).
+  - `RollBackRequest` gained `optional RollBackResend resend` (an idempotency key,
+    an origin, and an `edit` oneof: `whole` with a `UserSaid`, or `entry` with a
+    label and its new text); `RollBackSuccess` gained `optional SubmitPromptResponse
+    resend`; `RollBackError.cause` gained `entry_not_found`.
+- **Why:** the owner's original ask. Clicking a label selects and reveals the prompt
+  that answered it, flashing the entry. Clicking an entry fills the composer with
+  it, and RET then rolls the conversation back to that prompt and resends it with
+  that entry edited; RET on any selected prompt resends with the composer's words.
+- **Decisions inside the shape:**
+  - The resend rides the rollback request, not a second call after it: the daemon
+    submits it in the same handler, so no Emacs round trip sits between the cut and
+    the resend, and an entry naming a label the prompt does not hold is refused
+    before anything is rolled back.
+  - The resend's answer is SubmitPrompt's own response type, so a refused resend
+    reads exactly as a refused send does.
+  - Revealing the answering prompt moves the feed (it is elsewhere), unlike a bubble
+    click, which never does: a viewport arm of its own says so.

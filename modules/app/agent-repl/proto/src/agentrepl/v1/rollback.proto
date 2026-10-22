@@ -52,7 +52,15 @@ message RollBackError {
     // The files cannot be restored to that prompt (it was sent before file
     // checkpointing was on, or its checkpoint is gone). Nothing was changed.
     RollBackFilesNotRestorable files_not_restorable = 11;
+    // The resend edits an entry the prompt does not hold: no entry of the
+    // rolled-back prompt answers the label it named. Nothing was rolled back.
+    RollBackEntryNotFound entry_not_found = 12;
   }
+}
+// No entry of the rolled-back prompt answers the label a resend named.
+message RollBackEntryNotFound {
+  // The label the resend named.
+  string label = 1;
 }
 // The workspace id is not in the daemon's registry.
 message RollBackUnknownWorkspace {}

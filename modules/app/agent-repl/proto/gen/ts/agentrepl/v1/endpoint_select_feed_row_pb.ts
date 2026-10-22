@@ -30,7 +30,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_select_feed_row.proto.
  */
 export const file_agentrepl_v1_endpoint_select_feed_row: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VsZWN0X2ZlZWRfcm93LnByb3RvEgxhZ2VudHJlcGwudjEixwIKFFNlbGVjdEZlZWRSb3dSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOAoNdHVybl9ib3VuZGFyeRgHIAEoCzIfLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93U3RlcEgAEjEKBWNsZWFyGAQgASgLMiAuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dDbGVhckgAEjgKCWxlZnRfdmlldxgFIAEoCzIjLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93TGVmdFZpZXdIABIzCgZidWJibGUYBiABKAsyIS5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd0J1YmJsZUgAQgYKBG1vdmVKBAgCEANKBAgDEARSCHJlc3BvbnNlUgZwcm9tcHQiNwoTU2VsZWN0RmVlZFJvd0J1YmJsZRIgCgNyb3cYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQiTAoRU2VsZWN0RmVlZFJvd1N0ZXASNwoJZGlyZWN0aW9uGAEgASgOMiQuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dEaXJlY3Rpb24iFAoSU2VsZWN0RmVlZFJvd0NsZWFyIjkKFVNlbGVjdEZlZWRSb3dMZWZ0VmlldxIgCgNyb3cYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQiiwEKFVNlbGVjdEZlZWRSb3dSZXNwb25zZRI1CgdzdWNjZXNzGAEgASgLMiIuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dTdWNjZXNzSAASMQoFZXJyb3IYAiABKAsyIC5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd0Vycm9ySABCCAoGcmVzdWx0IuwBChRTZWxlY3RGZWVkUm93U3VjY2VzcxI+CghzZWxlY3RlZBgBIAEoCzIqLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93U3VjY2Vzc1NlbGVjdGVkSAASUQoSbm90aGluZ19zZWxlY3RhYmxlGAIgASgLMjMuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dTdWNjZXNzTm90aGluZ1NlbGVjdGFibGVIABI2CgRub25lGAMgASgLMiYuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dTdWNjZXNzTm9uZUgAQgkKB291dGNvbWUiTQocU2VsZWN0RmVlZFJvd1N1Y2Nlc3NTZWxlY3RlZBItCglzZWxlY3Rpb24YASABKAsyGi5mcm9udGVuZC52MS5GZWVkU2VsZWN0aW9uIicKJVNlbGVjdEZlZWRSb3dTdWNjZXNzTm90aGluZ1NlbGVjdGFibGUiGgoYU2VsZWN0RmVlZFJvd1N1Y2Nlc3NOb25lIo0DChJTZWxlY3RGZWVkUm93RXJyb3ISSAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKy5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd1Vua25vd25Xb3Jrc3BhY2VIABJRChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMi8uYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkgKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMisuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dUcmFuc2ZlcnJpbmdBd2F5SAASQwoPbm90X3lldF9hZG9wdGVkGAQgASgLMiguYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dOb3RZZXRBZG9wdGVkSAASQgoObm90X3NlbGVjdGFibGUYBSABKAsyKC5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd05vdFNlbGVjdGFibGVIAEIHCgVjYXVzZSI+ChpTZWxlY3RGZWVkUm93Tm90U2VsZWN0YWJsZRIgCgNyb3cYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQiHwodU2VsZWN0RmVlZFJvd1Vua25vd25Xb3Jrc3BhY2UiOQohU2VsZWN0RmVlZFJvd1dvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIwCh1TZWxlY3RGZWVkUm93VHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhwKGlNlbGVjdEZlZWRSb3dOb3RZZXRBZG9wdGVkKo0BChZTZWxlY3RGZWVkUm93RGlyZWN0aW9uEikKJVNFTEVDVF9GRUVEX1JPV19ESVJFQ1RJT05fVU5TUEVDSUZJRUQQABIjCh9TRUxFQ1RfRkVFRF9ST1dfRElSRUNUSU9OX09MREVSEAESIwofU0VMRUNUX0ZFRURfUk9XX0RJUkVDVElPTl9ORVdFUhACQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_frontend_v1_feed]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VsZWN0X2ZlZWRfcm93LnByb3RvEgxhZ2VudHJlcGwudjEirwMKFFNlbGVjdEZlZWRSb3dSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOAoNdHVybl9ib3VuZGFyeRgHIAEoCzIfLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93U3RlcEgAEjEKBWNsZWFyGAQgASgLMiAuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dDbGVhckgAEjgKCWxlZnRfdmlldxgFIAEoCzIjLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93TGVmdFZpZXdIABIzCgZidWJibGUYBiABKAsyIS5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd0J1YmJsZUgAEjMKBmFuc3dlchgIIAEoCzIhLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93QW5zd2VySAASMQoFZW50cnkYCSABKAsyIC5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd0VudHJ5SABCBgoEbW92ZUoECAIQA0oECAMQBFIIcmVzcG9uc2VSBnByb21wdCJGChNTZWxlY3RGZWVkUm93QW5zd2VyEiAKA3JvdxgBIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZBINCgVsYWJlbBgCIAEoCSJFChJTZWxlY3RGZWVkUm93RW50cnkSIAoDcm93GAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEg0KBWxhYmVsGAIgASgJIjcKE1NlbGVjdEZlZWRSb3dCdWJibGUSIAoDcm93GAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkIkwKEVNlbGVjdEZlZWRSb3dTdGVwEjcKCWRpcmVjdGlvbhgBIAEoDjIkLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93RGlyZWN0aW9uIhQKElNlbGVjdEZlZWRSb3dDbGVhciI5ChVTZWxlY3RGZWVkUm93TGVmdFZpZXcSIAoDcm93GAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkIosBChVTZWxlY3RGZWVkUm93UmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93U3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dFcnJvckgAQggKBnJlc3VsdCLsAQoUU2VsZWN0RmVlZFJvd1N1Y2Nlc3MSPgoIc2VsZWN0ZWQYASABKAsyKi5hZ2VudHJlcGwudjEuU2VsZWN0RmVlZFJvd1N1Y2Nlc3NTZWxlY3RlZEgAElEKEm5vdGhpbmdfc2VsZWN0YWJsZRgCIAEoCzIzLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93U3VjY2Vzc05vdGhpbmdTZWxlY3RhYmxlSAASNgoEbm9uZRgDIAEoCzImLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93U3VjY2Vzc05vbmVIAEIJCgdvdXRjb21lIk0KHFNlbGVjdEZlZWRSb3dTdWNjZXNzU2VsZWN0ZWQSLQoJc2VsZWN0aW9uGAEgASgLMhouZnJvbnRlbmQudjEuRmVlZFNlbGVjdGlvbiInCiVTZWxlY3RGZWVkUm93U3VjY2Vzc05vdGhpbmdTZWxlY3RhYmxlIhoKGFNlbGVjdEZlZWRSb3dTdWNjZXNzTm9uZSKNAwoSU2VsZWN0RmVlZFJvd0Vycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93V29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93VHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5TZWxlY3RGZWVkUm93Tm90WWV0QWRvcHRlZEgAEkIKDm5vdF9zZWxlY3RhYmxlGAUgASgLMiguYWdlbnRyZXBsLnYxLlNlbGVjdEZlZWRSb3dOb3RTZWxlY3RhYmxlSABCBwoFY2F1c2UiPgoaU2VsZWN0RmVlZFJvd05vdFNlbGVjdGFibGUSIAoDcm93GAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkIh8KHVNlbGVjdEZlZWRSb3dVbmtub3duV29ya3NwYWNlIjkKIVNlbGVjdEZlZWRSb3dXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodU2VsZWN0RmVlZFJvd1RyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpTZWxlY3RGZWVkUm93Tm90WWV0QWRvcHRlZCqNAQoWU2VsZWN0RmVlZFJvd0RpcmVjdGlvbhIpCiVTRUxFQ1RfRkVFRF9ST1dfRElSRUNUSU9OX1VOU1BFQ0lGSUVEEAASIwofU0VMRUNUX0ZFRURfUk9XX0RJUkVDVElPTl9PTERFUhABEiMKH1NFTEVDVF9GRUVEX1JPV19ESVJFQ1RJT05fTkVXRVIQAkIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_frontend_v1_feed]);
 
 /**
  * @generated from message agentrepl.v1.SelectFeedRowRequest
@@ -96,6 +96,29 @@ export type SelectFeedRowRequest = Message<"agentrepl.v1.SelectFeedRowRequest"> 
      */
     value: SelectFeedRowBubble;
     case: "bubble";
+  } | {
+    /**
+     * The reader clicked a response's label a later prompt answers
+     * (frontend.v1.FeedResponseAnswer): select that prompt, CENTERED, and
+     * name the entry the webapp flashes in it
+     * (frontend.v1.FeedSelectionRowViewportReveal). The prompt is elsewhere
+     * in the feed, so unlike a bubble click this one moves the feed.
+     *
+     * @generated from field: agentrepl.v1.SelectFeedRowAnswer answer = 8;
+     */
+    value: SelectFeedRowAnswer;
+    case: "answer";
+  } | {
+    /**
+     * The reader clicked an entry of a prompt: select that prompt as a click
+     * does (frontend.v1.FeedSelectionRowViewportHold), and tell Emacs to fill
+     * the composer with the entry (HostWorkspacePromptEntryClicked), so the
+     * next send rolls the prompt back and resends it with that entry edited.
+     *
+     * @generated from field: agentrepl.v1.SelectFeedRowEntry entry = 9;
+     */
+    value: SelectFeedRowEntry;
+    case: "entry";
   } | { case: undefined; value?: undefined };
 };
 
@@ -105,6 +128,62 @@ export type SelectFeedRowRequest = Message<"agentrepl.v1.SelectFeedRowRequest"> 
  */
 export const SelectFeedRowRequestSchema: GenMessage<SelectFeedRowRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 0);
+
+/**
+ * The prompt a response's linked label names, and the label.
+ *
+ * @generated from message agentrepl.v1.SelectFeedRowAnswer
+ */
+export type SelectFeedRowAnswer = Message<"agentrepl.v1.SelectFeedRowAnswer"> & {
+  /**
+   * The answering prompt's row, as FeedResponseAnswer.prompt names it.
+   *
+   * @generated from field: frontend.v1.FeedId row = 1;
+   */
+  row?: FeedId | undefined;
+
+  /**
+   * The label the reader clicked, whose entry the prompt answers it with.
+   *
+   * @generated from field: string label = 2;
+   */
+  label: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SelectFeedRowAnswer.
+ * Use `create(SelectFeedRowAnswerSchema)` to create a new message.
+ */
+export const SelectFeedRowAnswerSchema: GenMessage<SelectFeedRowAnswer> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 1);
+
+/**
+ * The prompt entry the reader clicked.
+ *
+ * @generated from message agentrepl.v1.SelectFeedRowEntry
+ */
+export type SelectFeedRowEntry = Message<"agentrepl.v1.SelectFeedRowEntry"> & {
+  /**
+   * The prompt's row.
+   *
+   * @generated from field: frontend.v1.FeedId row = 1;
+   */
+  row?: FeedId | undefined;
+
+  /**
+   * The entry's label, as frontend.v1.ProseEntry carries it.
+   *
+   * @generated from field: string label = 2;
+   */
+  label: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SelectFeedRowEntry.
+ * Use `create(SelectFeedRowEntrySchema)` to create a new message.
+ */
+export const SelectFeedRowEntrySchema: GenMessage<SelectFeedRowEntry> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 2);
 
 /**
  * The bubble a click names, echoed from the FeedRow.id the webview drew.
@@ -125,7 +204,7 @@ export type SelectFeedRowBubble = Message<"agentrepl.v1.SelectFeedRowBubble"> & 
  * Use `create(SelectFeedRowBubbleSchema)` to create a new message.
  */
 export const SelectFeedRowBubbleSchema: GenMessage<SelectFeedRowBubble> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 1);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 3);
 
 /**
  * One step along the turn boundaries.
@@ -146,7 +225,7 @@ export type SelectFeedRowStep = Message<"agentrepl.v1.SelectFeedRowStep"> & {
  * Use `create(SelectFeedRowStepSchema)` to create a new message.
  */
 export const SelectFeedRowStepSchema: GenMessage<SelectFeedRowStep> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 2);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 4);
 
 /**
  * Dismiss the selection.
@@ -161,7 +240,7 @@ export type SelectFeedRowClear = Message<"agentrepl.v1.SelectFeedRowClear"> & {
  * Use `create(SelectFeedRowClearSchema)` to create a new message.
  */
 export const SelectFeedRowClearSchema: GenMessage<SelectFeedRowClear> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 3);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 5);
 
 /**
  * The selected row is no longer visible in the webapp.
@@ -182,7 +261,7 @@ export type SelectFeedRowLeftView = Message<"agentrepl.v1.SelectFeedRowLeftView"
  * Use `create(SelectFeedRowLeftViewSchema)` to create a new message.
  */
 export const SelectFeedRowLeftViewSchema: GenMessage<SelectFeedRowLeftView> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 4);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 6);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -213,7 +292,7 @@ export type SelectFeedRowResponse = Message<"agentrepl.v1.SelectFeedRowResponse"
  * Use `create(SelectFeedRowResponseSchema)` to create a new message.
  */
 export const SelectFeedRowResponseSchema: GenMessage<SelectFeedRowResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 5);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 7);
 
 /**
  * The move was applied. The same selection reaches the webapp and Emacs on
@@ -262,7 +341,7 @@ export type SelectFeedRowSuccess = Message<"agentrepl.v1.SelectFeedRowSuccess"> 
  * Use `create(SelectFeedRowSuccessSchema)` to create a new message.
  */
 export const SelectFeedRowSuccessSchema: GenMessage<SelectFeedRowSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 6);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 8);
 
 /**
  * A row is selected after the move.
@@ -283,7 +362,7 @@ export type SelectFeedRowSuccessSelected = Message<"agentrepl.v1.SelectFeedRowSu
  * Use `create(SelectFeedRowSuccessSelectedSchema)` to create a new message.
  */
 export const SelectFeedRowSuccessSelectedSchema: GenMessage<SelectFeedRowSuccessSelected> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 7);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 9);
 
 /**
  * A step found no turn boundary to select.
@@ -298,7 +377,7 @@ export type SelectFeedRowSuccessNothingSelectable = Message<"agentrepl.v1.Select
  * Use `create(SelectFeedRowSuccessNothingSelectableSchema)` to create a new message.
  */
 export const SelectFeedRowSuccessNothingSelectableSchema: GenMessage<SelectFeedRowSuccessNothingSelectable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 8);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 10);
 
 /**
  * Nothing is selected after the move.
@@ -313,7 +392,7 @@ export type SelectFeedRowSuccessNone = Message<"agentrepl.v1.SelectFeedRowSucces
  * Use `create(SelectFeedRowSuccessNoneSchema)` to create a new message.
  */
 export const SelectFeedRowSuccessNoneSchema: GenMessage<SelectFeedRowSuccessNone> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 9);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 11);
 
 /**
  * Arms derived from the daemon's refusal sites, mirroring SelectWorkspace.
@@ -376,7 +455,7 @@ export type SelectFeedRowError = Message<"agentrepl.v1.SelectFeedRowError"> & {
  * Use `create(SelectFeedRowErrorSchema)` to create a new message.
  */
 export const SelectFeedRowErrorSchema: GenMessage<SelectFeedRowError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 10);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 12);
 
 /**
  * A clicked row the daemon does not deem selectable.
@@ -397,7 +476,7 @@ export type SelectFeedRowNotSelectable = Message<"agentrepl.v1.SelectFeedRowNotS
  * Use `create(SelectFeedRowNotSelectableSchema)` to create a new message.
  */
 export const SelectFeedRowNotSelectableSchema: GenMessage<SelectFeedRowNotSelectable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 11);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 13);
 
 /**
  * The workspace id is not in the daemon's registry.
@@ -412,7 +491,7 @@ export type SelectFeedRowUnknownWorkspace = Message<"agentrepl.v1.SelectFeedRowU
  * Use `create(SelectFeedRowUnknownWorkspaceSchema)` to create a new message.
  */
 export const SelectFeedRowUnknownWorkspaceSchema: GenMessage<SelectFeedRowUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 12);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 14);
 
 /**
  * The echoed dir disagrees with the registry's dir for this id.
@@ -433,7 +512,7 @@ export type SelectFeedRowWorkspaceRefMismatch = Message<"agentrepl.v1.SelectFeed
  * Use `create(SelectFeedRowWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const SelectFeedRowWorkspaceRefMismatchSchema: GenMessage<SelectFeedRowWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 13);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 15);
 
 /**
  * This daemon released the workspace to a successor.
@@ -454,7 +533,7 @@ export type SelectFeedRowTransferringAway = Message<"agentrepl.v1.SelectFeedRowT
  * Use `create(SelectFeedRowTransferringAwaySchema)` to create a new message.
  */
 export const SelectFeedRowTransferringAwaySchema: GenMessage<SelectFeedRowTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 14);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 16);
 
 /**
  * A joining daemon has not finished adopting this workspace yet.
@@ -469,7 +548,7 @@ export type SelectFeedRowNotYetAdopted = Message<"agentrepl.v1.SelectFeedRowNotY
  * Use `create(SelectFeedRowNotYetAdoptedSchema)` to create a new message.
  */
 export const SelectFeedRowNotYetAdoptedSchema: GenMessage<SelectFeedRowNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 15);
+  messageDesc(file_agentrepl_v1_endpoint_select_feed_row, 17);
 
 /**
  * Which way a step moves along the selectable rows. With nothing selected,

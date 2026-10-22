@@ -161,12 +161,21 @@ message FeedSelectionRowViewport {
     // previously selected one collapses), nothing is centered, and the tail is
     // not followed again until the reader's next input.
     FeedSelectionRowViewportHold hold = 2;
+    // The reader clicked a label this prompt's entry answers
+    // (agentrepl.v1.SelectFeedRowAnswer): center the row, as a step does, and
+    // flash the entry answering the label so the reader sees which one.
+    FeedSelectionRowViewportReveal reveal = 3;
   }
 }
 // Center the newly selected row: the selection was stepped from Emacs.
 message FeedSelectionRowViewportCenter {}
 // Hold the feed still under the clicked row: the selection was a click.
 message FeedSelectionRowViewportHold {}
+// Center the newly selected prompt and flash its entry answering a label.
+message FeedSelectionRowViewportReveal {
+  // The label whose entry to flash, as frontend.v1.ProseEntry carries it.
+  string entry_label = 1;
+}
 
 // A selected final response: the next prompt sent is a reply to it, and the
 // daemon prepends a copy of it to that prompt. `M-s-j`/`M-s-k` in the
