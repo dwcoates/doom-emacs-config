@@ -40,6 +40,7 @@ import {
   terminalEntry,
   unownedEntry,
 } from "./persistence-fixtures.js";
+import { stubClient } from "./stub-client.js";
 
 const PRODUCER = producerId("vendor-session-1");
 const BOOK = agent("book-1");
@@ -986,26 +987,6 @@ describe("an entry whose kind has nothing servable in it", () => {
 // A store that answers a WriteBatch badly
 // ---------------------------------------------------------------------------
 
-/** A store client whose every verb is a defect until an override names it. */
-function stubClient(overrides: Partial<StoreClient>): StoreClient {
-  const refuse = (): never => {
-    throw new Error("stub store client: this suite did not expect that call");
-  };
-  return {
-    openAgentSession: refuse,
-    watchAgentSession: refuse,
-    watchBashRun: refuse,
-    readAgentPage: refuse,
-    getWorkflow: refuse,
-    getSidecarCursors: refuse,
-    getLiveWork: refuse,
-    getAgentByVendorTask: refuse,
-    getDetachedWork: refuse,
-    getPeerDelivery: refuse,
-    writeBatch: refuse,
-    ...overrides,
-  };
-}
 
 /** A persistence over a hand-built client, with no wall-clock backoff at all. */
 function planeOver(overrides: Partial<StoreClient>): Persistence {

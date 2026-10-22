@@ -38,6 +38,7 @@ import {
   readEntry,
   socketPathForTest,
 } from "./persistence-fixtures.js";
+import { stubClient } from "./stub-client.js";
 
 /**
  * Resolve `"hung"` only after the event loop has turned enough times that a
@@ -811,26 +812,6 @@ function unitOf(entry: conversationv1.HistoryEntryAt | undefined): string | unde
 // is to refuse it loudly rather than forward half a record.
 // ---------------------------------------------------------------------------
 
-/** A store client whose every verb is a defect until an override names it. */
-function stubClient(overrides: Partial<StoreClient>): StoreClient {
-  const refuse = (): never => {
-    throw new Error("stub store client: this suite did not expect that call");
-  };
-  return {
-    openAgentSession: refuse,
-    watchAgentSession: refuse,
-    watchBashRun: refuse,
-    readAgentPage: refuse,
-    getWorkflow: refuse,
-    getSidecarCursors: refuse,
-    getLiveWork: refuse,
-    getAgentByVendorTask: refuse,
-    getDetachedWork: refuse,
-    getPeerDelivery: refuse,
-    writeBatch: refuse,
-    ...overrides,
-  };
-}
 
 /**
  * A reader over a hand-built store client.

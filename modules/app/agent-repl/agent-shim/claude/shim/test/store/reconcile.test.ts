@@ -32,6 +32,7 @@ import {
 import { createPersistence } from "../../src/store/writer.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
 import { agent, readEntry, socketPathForTest, spawnEntry, unit } from "./persistence-fixtures.js";
+import { stubClient } from "./stub-client.js";
 
 const PRODUCER = producerId("vendor-session-1");
 const BOOK = agent("book-1");
@@ -62,26 +63,6 @@ async function reconciler(name: string) {
   return { started, client, reconciler: createReconciler({ client, sleep: instantly }) };
 }
 
-/** A store client whose every verb but the ones given throws if called. */
-function stubClient(overrides: Partial<StoreClient>): StoreClient {
-  const refuse = (): never => {
-    throw new Error("stub store client: this suite did not expect that call");
-  };
-  return {
-    openAgentSession: refuse,
-    watchAgentSession: refuse,
-    watchBashRun: refuse,
-    readAgentPage: refuse,
-    getWorkflow: refuse,
-    getSidecarCursors: refuse,
-    getLiveWork: refuse,
-    getAgentByVendorTask: refuse,
-    getDetachedWork: refuse,
-    getPeerDelivery: refuse,
-    writeBatch: refuse,
-    ...overrides,
-  };
-}
 
 /** One recorded bash start, as it would come back from the agent's own book. */
 /** A spawn unit as the book records its start. */
@@ -344,25 +325,7 @@ describe("liveWork", () => {
   });
 
   it("raises a PersistenceError when the store refuses", async () => {
-    const refusing: StoreClient = {
-      openAgentSession: async () => {
-        throw new Error("unused");
-      },
-      watchAgentSession: () => {
-        throw new Error("unused");
-      },
-      watchBashRun: () => {
-        throw new Error("unused");
-      },
-      readAgentPage: async () => {
-        throw new Error("unused");
-      },
-      getWorkflow: async () => {
-        throw new Error("unused");
-      },
-      getSidecarCursors: async () => {
-        throw new Error("unused");
-      },
+    const refusing: StoreClient = stubClient({
       getLiveWork: async () =>
         create(storev1.GetLiveWorkResponseSchema, {
           result: {
@@ -370,13 +333,7 @@ describe("liveWork", () => {
             value: create(storev1.GetLiveWorkFailureSchema, { detail: "the disk is full" }),
           },
         }),
-      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
-      getDetachedWork: () => Promise.reject(new Error("unused")),
-      getPeerDelivery: () => Promise.reject(new Error("unused")),
-      writeBatch: async () => {
-        throw new Error("unused");
-      },
-    };
+    });
 
     await expect(createReconciler({ client: refusing, sleep: instantly }).liveWork(MAIN)).rejects.toBeInstanceOf(
       PersistenceError,
@@ -388,25 +345,7 @@ describe("liveWork", () => {
   it("answers once a momentarily busy database lets go", async () => {
     // Arrange: the store is busy for its first answer only.
     let asked = 0;
-    const busyOnce: StoreClient = {
-      openAgentSession: async () => {
-        throw new Error("unused");
-      },
-      watchAgentSession: () => {
-        throw new Error("unused");
-      },
-      watchBashRun: () => {
-        throw new Error("unused");
-      },
-      readAgentPage: async () => {
-        throw new Error("unused");
-      },
-      getWorkflow: async () => {
-        throw new Error("unused");
-      },
-      getSidecarCursors: async () => {
-        throw new Error("unused");
-      },
+    const busyOnce: StoreClient = stubClient({
       getLiveWork: async () => {
         asked += 1;
         if (asked > 1) {
@@ -427,13 +366,7 @@ describe("liveWork", () => {
           },
         });
       },
-      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
-      getDetachedWork: () => Promise.reject(new Error("unused")),
-      getPeerDelivery: () => Promise.reject(new Error("unused")),
-      writeBatch: async () => {
-        throw new Error("unused");
-      },
-    };
+    });
 
     // Act.
     const answer = await createReconciler({ client: busyOnce, sleep: instantly }).liveWork(MAIN);
@@ -444,33 +377,9 @@ describe("liveWork", () => {
   });
 
   it("raises loudly when the store answers with no result arm", async () => {
-    const empty: StoreClient = {
-      openAgentSession: async () => {
-        throw new Error("unused");
-      },
-      watchAgentSession: () => {
-        throw new Error("unused");
-      },
-      watchBashRun: () => {
-        throw new Error("unused");
-      },
-      readAgentPage: async () => {
-        throw new Error("unused");
-      },
-      getWorkflow: async () => {
-        throw new Error("unused");
-      },
-      getSidecarCursors: async () => {
-        throw new Error("unused");
-      },
+    const empty: StoreClient = stubClient({
       getLiveWork: async () => create(storev1.GetLiveWorkResponseSchema, {}),
-      getAgentByVendorTask: () => Promise.reject(new Error("unused")),
-      getDetachedWork: () => Promise.reject(new Error("unused")),
-      getPeerDelivery: () => Promise.reject(new Error("unused")),
-      writeBatch: async () => {
-        throw new Error("unused");
-      },
-    };
+    });
 
     await expect(createReconciler({ client: empty, sleep: instantly }).liveWork(MAIN)).rejects.toMatchObject({
       kind: "store_unavailable",
@@ -480,33 +389,9 @@ describe("liveWork", () => {
 
 /** A store whose only answer is ANSWER, to GetLiveWork; every other read is unused. */
 function liveWorkAnswering(answer: storev1.GetLiveWorkResponse): StoreClient {
-  return {
-    openAgentSession: async () => {
-      throw new Error("unused");
-    },
-    watchAgentSession: () => {
-      throw new Error("unused");
-    },
-    watchBashRun: () => {
-      throw new Error("unused");
-    },
-    readAgentPage: async () => {
-      throw new Error("unused");
-    },
-    getWorkflow: async () => {
-      throw new Error("unused");
-    },
-    getSidecarCursors: async () => {
-      throw new Error("unused");
-    },
+  return stubClient({
     getLiveWork: async () => answer,
-    getAgentByVendorTask: () => Promise.reject(new Error("unused")),
-    getDetachedWork: () => Promise.reject(new Error("unused")),
-    getPeerDelivery: () => Promise.reject(new Error("unused")),
-    writeBatch: async () => {
-      throw new Error("unused");
-    },
-  };
+  });
 }
 
 /** A live detached run WORK, owned by OWNER; either may be left empty. */
