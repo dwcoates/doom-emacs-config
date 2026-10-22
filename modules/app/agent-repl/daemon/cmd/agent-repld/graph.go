@@ -330,8 +330,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		MintKey:    prompthandler.MintKey,
 		Log:        p.Surfaces,
 	})
+	// THE QUEUE IS BUILT BELOW; its Supersede is bound into holdsRef there.
+	holdsRef := &holdsForwarder{}
 	followNotices := workspacesubs.New(workspacesubs.Deps{
 		Subscribers: p.DB,
+		Holds:       holdsRef,
+		Untold:      p.DB,
 		Status:      verbsRef.status,
 		Briefs:      merge.BriefsFrom(paths.PromptsDir),
 		MintKey:     prompthandler.MintKey,
@@ -885,6 +889,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the prompt queue: %w", err)
 	}
+	holdsRef.bind(queue)
 	lifecycle.queue = queue
 	vendorServes.bind(queue)
 	deliveries.bind(queue)

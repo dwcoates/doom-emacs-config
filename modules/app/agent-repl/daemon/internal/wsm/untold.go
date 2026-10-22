@@ -13,9 +13,9 @@ import (
 // untoldTable is one subscription notifier's durable untold notices: a table
 // keyed by the subscriber and the notice's subject, holding the turn the
 // notice was submitted as and the JSON array of every change it says. Each
-// notifier's subject is its own column (merge_queue_untold_notices.repo_key);
-// the read and the write are one each, so no two such tables can be kept two
-// ways.
+// notifier's subject is its own column (merge_queue_untold_notices.repo_key,
+// workspace_untold_notices.followed); the read and the write are one each, so
+// the two tables cannot be kept two ways.
 type untoldTable struct {
 	table   string
 	subject string
@@ -26,6 +26,7 @@ type untoldTable struct {
 // The untold tables.
 var (
 	mergeQueueUntold = untoldTable{table: "merge_queue_untold_notices", subject: "repo_key", noun: "untold merge notice"}
+	workspaceUntold  = untoldTable{table: "workspace_untold_notices", subject: "followed", noun: "untold workspace notice"}
 )
 
 // readUntold answers SUBSCRIBER's untold notice about SUBJECT in T: its turn

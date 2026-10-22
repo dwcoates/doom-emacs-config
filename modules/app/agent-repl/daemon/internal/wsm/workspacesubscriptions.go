@@ -233,5 +233,10 @@ func endWorkspaceSubscriptionsInTx(ctx context.Context, tx *sql.Tx, ws Workspace
 	if err != nil {
 		return 0, err
 	}
+	// A CLOSED WORKSPACE IS TOLD NOTHING MORE, so its untold notices go with
+	// its subscriptions (workspacenotices.go).
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_untold_notices WHERE subscriber = ?`, ws); err != nil {
+		return 0, err
+	}
 	return res.RowsAffected()
 }

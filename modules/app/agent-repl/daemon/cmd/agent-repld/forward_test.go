@@ -643,3 +643,44 @@ func TestFreshBootSettle(t *testing.T) {
 type settlingController struct{ rollout.Controller }
 
 func (settlingController) SettleBoot(context.Context) {}
+
+// supersedingQueue is a prompt queue whose only verb is Supersede, answering
+// retired and recording what it was asked.
+type supersedingQueue struct {
+	promptqueue.Service
+	retired bool
+	asked   []ids.TurnID
+}
+
+func (q *supersedingQueue) Supersede(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) (bool, error) {
+	q.asked = append(q.asked, turn)
+	return q.retired, nil
+}
+
+func TestHoldsForwarderSupersedesThroughTheBoundQueue(t *testing.T) {
+	// Arrange
+	f := &holdsForwarder{}
+	q := &supersedingQueue{retired: true}
+	f.bind(q)
+
+	// Act
+	retired, err := f.Supersede(context.Background(), "ws-a", "turn-1")
+
+	// Assert
+	if err != nil || !retired || len(q.asked) != 1 || q.asked[0] != "turn-1" {
+		t.Fatalf("Supersede = (%v, %v) asking %v, want the bound queue's answer for turn-1", retired, err, q.asked)
+	}
+}
+
+func TestHoldsForwarderRefusesASupersessionBeforeTheQueue(t *testing.T) {
+	// Arrange
+	f := &holdsForwarder{}
+
+	// Act
+	retired, err := f.Supersede(context.Background(), "ws-a", "turn-1")
+
+	// Assert
+	if err == nil || retired {
+		t.Fatalf("Supersede = (%v, %v), want a refusal before the queue is bound", retired, err)
+	}
+}

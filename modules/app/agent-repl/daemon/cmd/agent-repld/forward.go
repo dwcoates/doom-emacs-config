@@ -597,3 +597,28 @@ func (f *detachedForwarder) HandBack(ctx context.Context, requester ids.Workspac
 	}
 	return target.HandBack(ctx, requester, mergeWS, out)
 }
+
+// holdsForwarder is the prompt queue's Supersede for a notifier built before
+// the queue (workspacesubs): bound once the queue exists, and refusing,
+// loudly, a supersession that arrives before it.
+type holdsForwarder struct {
+	mu     sync.RWMutex
+	target promptqueue.Service
+}
+
+func (f *holdsForwarder) bind(target promptqueue.Service) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.target = target
+}
+
+// Supersede implements untoldnotice.Holds through the bound queue.
+func (f *holdsForwarder) Supersede(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (bool, error) {
+	f.mu.RLock()
+	target := f.target
+	f.mu.RUnlock()
+	if target == nil {
+		return false, fmt.Errorf("agent-repld: a notice was superseded before the prompt queue existed")
+	}
+	return target.Supersede(ctx, ws, turn)
+}

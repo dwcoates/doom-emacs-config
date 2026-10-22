@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -46,7 +48,7 @@ func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conver
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.got = append(p.got, submission{ws: ws, text: said.GetContent().GetBlocks()[0].GetText().GetText(), origin: origin, defer_: delivery == wsm.DeliveryDeferred})
-	return prompthandler.Outcome{Turn: ids.TurnID("turn-" + string(ws))}, nil
+	return prompthandler.Outcome{Turn: ids.TurnID(fmt.Sprintf("turn-%s-%d", ws, len(p.got)))}, nil
 }
 
 type fakeSubscribers struct {
@@ -58,25 +60,68 @@ func (f *fakeSubscribers) WorkspaceSubscribers(context.Context, wsm.WorkspaceID)
 	return f.subs, f.err
 }
 
+// fakeHolds answers each Supersede with retired (or err) and records the
+// turns it was asked to retire.
+type fakeHolds struct {
+	retired bool
+	err     error
+	asked   []ids.TurnID
+}
+
+func (h *fakeHolds) Supersede(_ context.Context, _ ids.WorkspaceID, turn ids.TurnID) (bool, error) {
+	h.asked = append(h.asked, turn)
+	return h.retired, h.err
+}
+
+// fakeUntold is the durable untold-notice store in memory.
+type fakeUntold struct {
+	rows      map[[2]ids.WorkspaceID]wsm.UntoldWorkspaceNotice
+	readErr   error
+	recordErr error
+}
+
+func (u *fakeUntold) UntoldWorkspaceNotice(_ context.Context, subscriber, followed ids.WorkspaceID) (wsm.UntoldWorkspaceNotice, bool, error) {
+	if u.readErr != nil {
+		return wsm.UntoldWorkspaceNotice{}, false, u.readErr
+	}
+	n, ok := u.rows[[2]ids.WorkspaceID{subscriber, followed}]
+	return n, ok, nil
+}
+
+func (u *fakeUntold) RecordUntoldWorkspaceNotice(_ context.Context, n wsm.UntoldWorkspaceNotice) error {
+	if u.recordErr != nil {
+		return u.recordErr
+	}
+	u.rows[[2]ids.WorkspaceID{n.Subscriber, n.Followed}] = n
+	return nil
+}
+
 type fixture struct {
 	s         *Service
 	prompts   *fakePrompts
 	subs      *fakeSubscribers
+	holds     *fakeHolds
+	untold    *fakeUntold
+	status    func() *agentreplv1.WorkspaceStatus
 	statusErr error
 	briefErr  error
 	logs      *dlog.TestSurfaces
 }
 
 func newFixture() *fixture {
-	f := &fixture{prompts: &fakePrompts{failFor: map[ids.WorkspaceID]error{}}, subs: &fakeSubscribers{}, logs: dlog.NewTestSurfaces()}
+	f := &fixture{prompts: &fakePrompts{failFor: map[ids.WorkspaceID]error{}}, subs: &fakeSubscribers{},
+		holds: &fakeHolds{retired: true}, untold: &fakeUntold{rows: map[[2]ids.WorkspaceID]wsm.UntoldWorkspaceNotice{}},
+		status: idleStatus, logs: dlog.NewTestSurfaces()}
 	keys := 0
 	f.s = New(Deps{
 		Subscribers: f.subs,
+		Holds:       f.holds,
+		Untold:      f.untold,
 		Status: func(_ context.Context, ws ids.WorkspaceID) (*agentreplv1.WorkspaceStatus, error) {
 			if f.statusErr != nil {
 				return nil, f.statusErr
 			}
-			return idleStatus(), nil
+			return f.status(), nil
 		},
 		Briefs: func(name string, values map[string]string) (string, error) {
 			if f.briefErr != nil {
@@ -203,7 +248,7 @@ func TestAnEdgeThatCannotBeToldIsRecorded(t *testing.T) {
 		{name: "the status cannot be read", arrange: func(f *fixture) { f.statusErr = errors.New("db gone") },
 			message: "could not read the followed workspace's status; its subscribers are not told of the edge"},
 		{name: "the brief cannot be composed", arrange: func(f *fixture) { f.briefErr = errors.New("brief gone") },
-			message: "could not compose a workspace notice; its subscribers are not told of the edge"},
+			message: "could not compose a workspace notice; the subscriber is not told of the edge"},
 		{name: "the submission fails", arrange: func(f *fixture) { f.prompts.failFor[watcherA] = errors.New("queue gone") },
 			message: "could not submit a workspace notice to its subscriber"},
 	}
@@ -260,5 +305,125 @@ func TestStatusWordsStatesTheStatus(t *testing.T) {
 				t.Errorf("StatusWords =\n%q\nwant\n%q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestANewEdgeSupersedesTheSubscribersUntoldNoticeAndSaysItsChangesFirst(t *testing.T) {
+	// Arrange: a turn starts, and ends before its notice is told.
+	f := newFixture()
+	f.subs.subs = []wsm.WorkspaceSubscription{subscribed(watcherA, wsm.WorkspaceEventTurnStarted, wsm.WorkspaceEventTurnEnded)}
+	f.s.TurnStarted(followed)
+
+	// Act
+	f.s.TurnEnded(followed)
+	f.deliverAll()
+
+	// Assert
+	last := f.prompts.got[len(f.prompts.got)-1].text
+	want := "It changed 2 times since the last notice you were told, oldest first:\n- `followed` started a turn.\n- `followed` ended a turn."
+	if !reflect.DeepEqual(f.holds.asked, []ids.TurnID{"turn-ws-a-1"}) || !strings.Contains(last, want) {
+		t.Fatalf("superseded %v, last notice %q; want the first notice superseded and both edges said", f.holds.asked, last)
+	}
+}
+
+func TestTheSupersedingNoticeCarriesTheStatusAsItNowStands(t *testing.T) {
+	// Arrange: the workspace ran a turn, then closed.
+	f := newFixture()
+	f.subs.subs = []wsm.WorkspaceSubscription{subscribed(watcherA, wsm.WorkspaceEventTurnStarted, wsm.WorkspaceEventClosed)}
+	reads := 0
+	f.status = func() *agentreplv1.WorkspaceStatus {
+		reads++
+		st := idleStatus()
+		if reads > 1 {
+			st.Standing = &agentreplv1.WorkspaceStatusStanding{Standing: &agentreplv1.WorkspaceStatusStanding_Closed{Closed: &agentreplv1.WorkspaceStatusClosed{}}}
+		}
+		return st
+	}
+	f.s.TurnStarted(followed)
+
+	// Act
+	f.s.Closed(wsm.Workspace{ID: followed})
+	f.deliverAll()
+
+	// Assert
+	last := f.prompts.got[len(f.prompts.got)-1].text
+	if !strings.Contains(last, "closed.") || strings.Contains(last, "open, idle") {
+		t.Fatalf("last notice %q, want the workspace closed as it now stands", last)
+	}
+}
+
+func TestTheUntoldWorkspaceNoticeSurvivesARestart(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.subs.subs = []wsm.WorkspaceSubscription{subscribed(watcherA, wsm.WorkspaceEventTurnStarted, wsm.WorkspaceEventTurnEnded)}
+	f.s.TurnStarted(followed)
+	f.deliverAll()
+	restarted := New(f.s.deps)
+
+	// Act
+	restarted.TurnEnded(followed)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	restarted.Run(ctx, f.prompts)
+
+	// Assert
+	if !reflect.DeepEqual(f.holds.asked, []ids.TurnID{"turn-ws-a-1"}) {
+		t.Fatalf("superseded = %v, want the first daemon's notice superseded", f.holds.asked)
+	}
+}
+
+func TestAnUntoldWorkspaceNoticeThatCannotBeReadOrRecordedIsRecorded(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+		message string
+	}{
+		{name: "unreadable", arrange: func(f *fixture) { f.untold.readErr = errors.New("db gone") },
+			message: "could not read the subscriber's untold notice; the next one says only the new change"},
+		{name: "unrecordable", arrange: func(f *fixture) { f.untold.recordErr = errors.New("disk full") },
+			message: "could not record the subscriber's untold notice; the next notice cannot supersede it"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture()
+			f.subs.subs = []wsm.WorkspaceSubscription{subscribed(watcherA, wsm.WorkspaceEventLanded)}
+			tt.arrange(f)
+
+			// Act
+			f.s.Landed(followed)
+			f.deliverAll()
+
+			// Assert
+			if len(f.prompts.got) != 1 {
+				t.Fatalf("submitted = %+v, want the notice still told", f.prompts.got)
+			}
+			if _, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op, Message: tt.message}); !ok {
+				t.Fatalf("no error record %q: %+v", tt.message, f.logs.Records())
+			}
+		})
+	}
+}
+
+func TestBothNotifiersShareOneSupersession(t *testing.T) {
+	// Arrange: the supersede-and-carry decision lives in internal/untoldnotice
+	// alone; a notifier that hand-rolled its own would call Supersede itself.
+	var calls int
+	for _, path := range []string{"workspacesubs.go", "../mergenotice/mergenotice.go"} {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+
+		// Act
+		if strings.Contains(string(src), ".Supersede(") {
+			t.Errorf("%s calls Supersede itself; take untoldnotice.Carried", path)
+		}
+		calls += strings.Count(string(src), "untoldnotice.Carried(")
+	}
+
+	// Assert
+	if calls != 2 {
+		t.Fatalf("untoldnotice.Carried calls = %d, want one per notifier", calls)
 	}
 }
