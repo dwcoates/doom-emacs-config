@@ -164,6 +164,10 @@ Any field at all is unknown, so this is the whole validation."
   (agent-repl--log '(:agent-repl-context "a codec call outside a request has no workspace") "elisp.wire.verbs-decode-empty message=%s" message)
   nil)
 
+(defun agent-repl-wire-verbs--empty-arm (message)
+  "Return a decoder for the empty refusal arm MESSAGE."
+  (lambda (json) (agent-repl-wire-verbs--decode-empty message json)))
+
 (defun agent-repl-wire-verbs--decode-oneof (message field json arms)
   "Decode the oneof FIELD of MESSAGE from JSON into (:arm KEYWORD :value V).
 ARMS is a list of (WIRE-SYMBOL KEYWORD DECODER).  Exactly one arm must be
@@ -606,6 +610,36 @@ workspace has not been created yet; BRANCH is what the name resolves to."
     (agent-repl-wire-verbs--check-keys message json '(branch))
     (list :branch (agent-repl-wire-verbs--decode-string message 'branch json))))
 
+;; A SUPPLIED NAME THAT BREAKS THE NAMING RULE is refused before anything is
+;; built (CreateWorkspaceError.invalid_name).  The arm says which component
+;; broke which rule, so the sentence is worded from the arm alone.
+
+(defconst agent-repl-wire-verbs--invalid-name-rule-arms
+  (list (list 'slug :slug
+              (agent-repl-wire-verbs--empty-arm "CreateWorkspaceInvalidNameSlug"))
+        (list 'prefix :prefix
+              (agent-repl-wire-verbs--empty-arm "CreateWorkspaceInvalidNamePrefix")))
+  "The `rule' oneof arms of CreateWorkspaceInvalidName, as decode-oneof arms.")
+
+(defun agent-repl-wire-decode-create-workspace-invalid-name (json)
+  "Decode CreateWorkspaceInvalidName from JSON into (:name N :component C :rule R).
+N is the supplied name, trimmed; C is the `/'-separated component that
+broke its rule, empty when that component is empty; R is `:slug' when
+the last component is not a slug and `:prefix' when an earlier one is
+not a prefix."
+  (let ((message "CreateWorkspaceInvalidName"))
+    (agent-repl-wire-verbs--check-keys message json '(name component slug prefix))
+    (list :name (agent-repl-wire-verbs--decode-string message 'name json)
+          :component (agent-repl-wire-verbs--decode-string message 'component json)
+          :rule (plist-get (agent-repl-wire-verbs--decode-oneof
+                            message "rule" json
+                            agent-repl-wire-verbs--invalid-name-rule-arms)
+                           :arm))))
+
+(defun agent-repl-wire-decode-create-workspace-error-invalid-name (json)
+  "Decode CreateWorkspaceError's `invalid_name' cause arm."
+  (agent-repl-wire-decode-create-workspace-invalid-name json))
+
 (defun agent-repl-wire-decode-create-workspace-error-name-reserved (json)
   "Decode CreateWorkspaceError's `name_reserved' cause arm."
   (agent-repl-wire-decode-create-workspace-name-reserved json))
@@ -740,7 +774,7 @@ async-merge arms and `origin_fetch_failed' are not decoded: an async
 merge and a create cut from origin are an agent\='s requests, never the
 editor\='s, so one answering an editor create is a breach."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation nameReserved unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected oneShotOwnerLands unknownRequester parentNotOpen))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation nameReserved invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected oneShotOwnerLands unknownRequester parentNotOpen))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -756,6 +790,7 @@ editor\='s, so one answering an editor create is a breach."
          (list 'unknownForkSource :unknown-fork-source #'agent-repl-wire-decode-create-workspace-error-unknown-fork-source)
          (list 'forkSourceHasNoConversation :fork-source-has-no-conversation #'agent-repl-wire-decode-create-workspace-error-fork-source-has-no-conversation)
          (list 'nameReserved :name-reserved #'agent-repl-wire-decode-create-workspace-error-name-reserved)
+         (list 'invalidName :invalid-name #'agent-repl-wire-decode-create-workspace-error-invalid-name)
          (list 'unknownContextWorkspace :unknown-context-workspace #'agent-repl-wire-decode-create-workspace-error-unknown-context-workspace)
          (list 'unknownOwner :unknown-owner #'agent-repl-wire-decode-create-workspace-error-unknown-owner)
          (list 'ownerNoticeRequired :owner-notice-required #'agent-repl-wire-decode-create-workspace-error-owner-notice-required)
@@ -4718,10 +4753,6 @@ ARM is `:plan' (V the plan plist) or `:nothing-to-roll-back' (V nil)."
   "Decode the vendor-refusal MESSAGE from JSON into (:vendor-message)."
   (agent-repl-wire-verbs--check-keys message json '(vendorMessage))
   (list :vendor-message (agent-repl-wire-verbs--decode-string message 'vendorMessage json)))
-
-(defun agent-repl-wire-verbs--empty-arm (message)
-  "Return a decoder for the empty refusal arm MESSAGE."
-  (lambda (json) (agent-repl-wire-verbs--decode-empty message json)))
 
 (defun agent-repl-wire-verbs--handover-arms (prefix)
   "Return the four cross-cutting refusal arms, their messages named PREFIX*.

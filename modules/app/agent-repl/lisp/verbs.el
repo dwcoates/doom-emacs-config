@@ -1273,6 +1273,8 @@ arm is named by its keyword and its own fields."
       (agent-repl-verbs--create-policy-refusal-sentence (plist-get refusal :value)))
      ((eq keyword :inside-temporary-directory)
       (agent-repl-verbs-temporary-directory-sentence (plist-get refusal :value)))
+     ((eq keyword :invalid-name)
+      (agent-repl-verbs--create-invalid-name-sentence (plist-get refusal :value)))
      (t
       (format "the daemon refused it: %s%s"
               (if keyword (substring (symbol-name keyword) 1) "unstated")
@@ -1323,6 +1325,25 @@ to supply a name by hand."
             (if (and answer (not (string-empty-p answer)))
                 (format " -- the model answered %S" answer)
               ""))))
+
+(defun agent-repl-verbs--create-invalid-name-sentence (invalid)
+  "Word an `invalid_name\=' refusal whose fields are INVALID.
+A SUPPLIED NAME IS THE BRANCH, THE WORKTREE DIRECTORY AND THE TAB LABEL,
+so the daemon refuses one that breaks the naming rule before building
+anything.  The sentence quotes the name and the part that broke the
+rule, and states the rule, because the user\='s next move is to type a
+name that keeps it."
+  (let ((name (plist-get invalid :name))
+        (component (plist-get invalid :component)))
+    (format "the name %S is not a workspace name: %s"
+            name
+            (pcase (plist-get invalid :rule)
+              (:slug (format "its last part %S must be lowercase words joined by single hyphens, like fix-login"
+                             component))
+              (:prefix (if (string-empty-p component)
+                           "it has an empty part between slashes"
+                         (format "its prefix %S must be letters and digits joined by single . _ or -"
+                                 component)))))))
 
 (defun agent-repl-verbs--create-policy-refusal-sentence (missing)
   "Word a `one_shot_policy_missing\=' refusal whose fields are MISSING.

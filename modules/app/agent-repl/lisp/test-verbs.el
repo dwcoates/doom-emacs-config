@@ -1636,6 +1636,60 @@ refusal still reaches the generic reporting."
                   "/w/x" '(:cause (:arm :some-new-arm :value nil)))
                  "the daemon refused /w/x: some-new-arm")))
 
+;; A SUPPLIED NAME THAT BREAKS THE NAMING RULE: one case per rule, plus the
+;; empty-component wording and the streamed form the incident took.
+
+(defun agent-repl-test-verbs--invalid-name-refusal (name component rule)
+  "A decoded `invalid_name' refusal of NAME at COMPONENT under RULE."
+  (list :cause (list :arm :invalid-name
+                     :value (list :name name :component component :rule rule))))
+
+(ert-deftest agent-repl-verbs-create-invalid-name-slug-names-the-last-part ()
+  "A name whose last part is not a slug quotes the name, the part and the rule."
+  (agent-repl-test-verbs--with
+      (list (cons :create (list :response (list :arm :error
+                                                :value (agent-repl-test-verbs--invalid-name-refusal
+                                                        "let's look" "let's look" :slug)))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :name "let's look")
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: workspace creation FAILED: the name \"let's look\" is not a workspace name: its last part \"let's look\" must be lowercase words joined by single hyphens, like fix-login"))))
+
+(ert-deftest agent-repl-verbs-create-invalid-name-prefix-names-the-prefix ()
+  "A name whose prefix is not letters and digits quotes that prefix."
+  (agent-repl-test-verbs--with
+      (list (cons :create (list :response (list :arm :error
+                                                :value (agent-repl-test-verbs--invalid-name-refusal
+                                                        "a b/fix" "a b" :prefix)))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :name "a b/fix")
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: workspace creation FAILED: the name \"a b/fix\" is not a workspace name: its prefix \"a b\" must be letters and digits joined by single . _ or -"))))
+
+(ert-deftest agent-repl-verbs-create-invalid-name-empty-part-says-so ()
+  "An empty part between slashes is named as such, not quoted as \"\"."
+  (agent-repl-test-verbs--with
+      (list (cons :create (list :response (list :arm :error
+                                                :value (agent-repl-test-verbs--invalid-name-refusal
+                                                        "ABC//fix" "" :prefix)))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :name "ABC//fix")
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: workspace creation FAILED: the name \"ABC//fix\" is not a workspace name: it has an empty part between slashes"))))
+
+(ert-deftest agent-repl-verbs-create-streamed-invalid-name-reaches-the-minibuffer ()
+  "The incident's shape: the refusal arrives LATER on the progress stream
+and is echoed as the create's failure."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :accepted :value nil))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :name "Fix It")
+    (agent-repl-mutation-progress-handle
+     (list :op-id (plist-get (agent-repl-test-verbs--request :create) :op-id)
+           :event (list :arm :create
+                        :value (list :arm :failed
+                                     :value (list :arm :refusal
+                                                  :value (agent-repl-test-verbs--invalid-name-refusal
+                                                          "Fix It" "Fix It" :slug))))))
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: workspace creation FAILED: the name \"Fix It\" is not a workspace name"))))
+
 (ert-deftest agent-repl-verbs-create-naming-failed-names-the-cause ()
   "A create refused because the workspace could not be named states the cause
 the daemon read off the failure."
