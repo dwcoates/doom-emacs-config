@@ -198,9 +198,11 @@ export const domCollapsedGeometry: CollapsedGeometry = {
       if (node.nodeType === Node.TEXT_NODE) {
         range.selectNodeContents(node);
         take(range.getClientRects());
-      } else if (view.getComputedStyle(node as Element).display === "inline") {
+      } else if (node instanceof HTMLImageElement || view.getComputedStyle(node as Element).display === "inline") {
         // An inline element's padding and border (inline code's) sit past
-        // its text's edge, and a line ending in one needs them too.
+        // its text's edge, and a line ending in one needs them too. An image
+        // the collapsed face shows (src/bubble/collapsed-thumbnail.ts) has no
+        // text at all, so its own box is what it needs; a hidden one has none.
         take((node as Element).getClientRects());
       }
     }

@@ -3213,6 +3213,19 @@ html[data-page-unshown] *::after {
    combinators keep an open bubble from showing the blocks of a bubble nested
    inside it. */
 .bubble-scroll:not(.expanded) > .bubble-body > .bubble-expanded-only { display: none; }
+/* A COLLAPSED PROMPT'S IMAGE IS SMALL (src/bubble/collapsed-thumbnail.ts;
+   owner request, 2026-10-22): no wider than about a dozen characters and a
+   few lines tall, its aspect ratio kept, until the bubble is opened and the
+   image takes the full thumbnail height (`.prompt-block-image`). A bubble in
+   the ellipsis mode (a held prompt) collapses to one line, which no picture
+   fits, so there the image is hidden until the card is opened. Child
+   combinators keep an open bubble from reaching a nested bubble's image. */
+.bubble-scroll:not(.expanded) > .bubble-body > img.bubble-collapsed-thumbnail {
+  height: auto;
+  max-width: 12ch;
+  max-height: 3em;
+}
+.bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body > .bubble-collapsed-thumbnail { display: none; }
 /* A FEED PROMPT'S QUOTE is drawn from its parts (src/bubble/quote.ts
    `QUOTE_PARTS_CLASS`): its HEADING shows folded too (owner request,
    2026-10-19), and every other part (the heading's colon, the quoted code

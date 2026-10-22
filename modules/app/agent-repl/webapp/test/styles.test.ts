@@ -37,6 +37,7 @@ import { EXPANDED_CLASS } from "../src/expand.js";
 import { HAS_MORE_CLASS } from "../src/feed/bubble-more.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../src/bubble/quote.js";
 import { BUBBLE_EXPANDED_ONLY_CLASS } from "../src/bubble/expanded-only.js";
+import { BUBBLE_COLLAPSED_THUMBNAIL_CLASS } from "../src/bubble/collapsed-thumbnail.js";
 import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, isOwnRule, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
@@ -2504,9 +2505,12 @@ describe("regression: the response/prompt bubble collapse model", () => {
     // the response/prompt bubble keeps its capped-preview model, not the tool
     // cards' hidden-section one.
     // An interim's corner dropping its duration reserve (owner request,
-    // 2026-10-13) hides chrome inside the box, never the box or its body.
+    // 2026-10-13) hides chrome inside the box, never the box or its body, and
+    // a folded held card's thumbnail (src/bubble/collapsed-thumbnail.ts) hides
+    // a block inside the body, never the body.
+    const insideBox = (one: string): boolean => /\.usage-corner\b/.test(one) || /\.bubble-body\s*>\s*\S/.test(one);
     for (const rule of hiders) {
-      for (const sel of rule.selectors.filter((one) => !/\.usage-corner\b/.test(one))) {
+      for (const sel of rule.selectors.filter((one) => !insideBox(one))) {
         expect(/^\.bubble\S*\s*>\s*\.bubble-scroll(?!\S*::)/.test(sel)).toBe(false);
       }
     }
@@ -3936,6 +3940,70 @@ describe("an expanded-only block in a prompt bubble", () => {
     const declarations = expandedOnlyRules().map((rule) => rule.declarations.trim());
     // Assert
     expect(declarations).toEqual(["display: none;"]);
+  });
+});
+
+/**
+ * A COLLAPSED PROMPT'S IMAGE (src/bubble/collapsed-thumbnail.ts): drawn small
+ * while the bubble is folded, at the full thumbnail height once it is opened,
+ * and hidden in a folded ellipsis-mode bubble (a held card's one line).
+ */
+describe("a collapsed prompt's image", () => {
+  /** A bubble (MORE its data-more, when set) whose body holds one marked image; EXPANDED opens it. */
+  function bubbleWithImage(expanded: boolean, more?: string): { bubble: HTMLElement; image: HTMLImageElement } {
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    if (more !== undefined) bubble.setAttribute("data-more", more);
+    const scroll = document.createElement("div");
+    scroll.className = expanded ? `bubble-scroll ${EXPANDED_CLASS}` : "bubble-scroll";
+    const body = document.createElement("div");
+    body.className = "bubble-body";
+    const image = document.createElement("img");
+    image.className = `prompt-block prompt-block-image ${BUBBLE_COLLAPSED_THUMBNAIL_CLASS}`;
+    body.append(image);
+    scroll.append(body);
+    bubble.append(scroll);
+    return { bubble, image };
+  }
+
+  it.each([
+    ["caps the folded image's width at about a dozen characters", "max-width", "12ch"],
+    ["caps the folded image's height at a few lines", "max-height", "3em"],
+    ["sizes the folded image's height by its aspect ratio", "height", "auto"],
+  ])("%s", (_name, property, expected) => {
+    // Arrange
+    const { bubble, image } = bubbleWithImage(false);
+    // Act
+    const value = inDocument(bubble, () => cascadedValue(image, property));
+    // Assert
+    expect(value).toBe(expected);
+  });
+
+  it("draws the opened image at the full thumbnail height", () => {
+    // Arrange
+    const { bubble, image } = bubbleWithImage(true);
+    // Act
+    const height = inDocument(bubble, () => cascadedValue(image, "height"));
+    // Assert
+    expect(height).toBe("120px");
+  });
+
+  it("hides the image in a folded ellipsis-mode bubble", () => {
+    // Arrange
+    const { bubble, image } = bubbleWithImage(false, "ellipsis");
+    // Act
+    const display = inDocument(bubble, () => cascadedValue(image, "display"));
+    // Assert
+    expect(display).toBe("none");
+  });
+
+  it("shows the image once an ellipsis-mode bubble is opened", () => {
+    // Arrange
+    const { bubble, image } = bubbleWithImage(true, "ellipsis");
+    // Act
+    const display = inDocument(bubble, () => cascadedValue(image, "display"));
+    // Assert
+    expect(display).toBe("block");
   });
 });
 

@@ -13,7 +13,7 @@
  * empty paragraph: a prompt that draws nothing where the person typed something
  * is worse than a loud refusal, because the reader cannot tell it happened.
  */
-import { expandedOnly } from "../../bubble/expanded-only.js";
+import { collapsedThumbnail } from "../../bubble/collapsed-thumbnail.js";
 import { requireCase, unreachableArm } from "../../rpc/strict.js";
 import { log } from "../../log.js";
 import { markdownSlot, type SlotMark } from "../../bubble/body.js";
@@ -105,8 +105,8 @@ export function drawFeedImageBlock(block: FeedImageBlock, classes: FeedImageClas
       operation: "feed.draw-image-block.missing",
       context: { src: block.src, alt: block.alt },
     });
-    // The note takes the image's place AND any class added to it since (an
-    // expanded-only mark), so it is hidden and shown exactly as the image was.
+    // The note takes the image's place AND any class added to it since (a
+    // collapsed-thumbnail mark), so it is hidden and shown exactly as the image was.
     const own = new Set(classes.image.split(" "));
     const missing = document.createElement("div");
     missing.className = classes.missing;
@@ -181,8 +181,8 @@ export function drawPromptBlockArm(arm: PromptBlockArm, path: string, mark?: Slo
     case "text":
       return drawFeedTextBlock(block.value, mark);
     case "image":
-      // A prompt's image is drawn only once its bubble is expanded.
-      return expandedOnly(drawFeedImageBlock(block.value));
+      // A collapsed prompt draws its image small (src/bubble/collapsed-thumbnail.ts).
+      return collapsedThumbnail(drawFeedImageBlock(block.value));
     case "unsupported":
       return drawFeedUnsupportedBlock(block.value);
     case "quote":
