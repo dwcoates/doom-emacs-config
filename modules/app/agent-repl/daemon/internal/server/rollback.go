@@ -11,6 +11,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -19,6 +20,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/prose"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -123,6 +125,9 @@ func (s *server) RollBack(
 	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
 		return nil, err
 	}
+	if err := validateRollBackResend(req.Msg.Resend); err != nil {
+		return nil, err
+	}
 	resp := &agentreplv1.RollBackResponse{}
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
@@ -151,6 +156,27 @@ func (s *server) RollBack(
 	if planned.requireBare && now.followed {
 		return stale("agent output landed after the prompt since the rollback was offered without a confirmation")
 	}
+	// THE RESEND IS COMPOSED, AND VALIDATED AS SUBMITPROMPT VALIDATES IT,
+	// BEFORE ANYTHING IS ROLLED BACK: a resend that cannot be sent refuses
+	// the whole call while the conversation is still whole.
+	var resend *agentreplv1.SubmitPromptRequest
+	if r := req.Msg.Resend; r != nil {
+		said, ok := resendSaid(r, replyquote.Words(planned.said))
+		if !ok {
+			return answer(resp, s.refuse(subject.Log, rpc, resp, refusal{
+				Arm:    "entry_not_found",
+				Reason: fmt.Sprintf("no entry of the rolled-back prompt answers %q", r.GetEntry().GetLabel()),
+				Fields: map[string]any{"label": r.GetEntry().GetLabel()},
+				Info:   true,
+			}))
+		}
+		resend = &agentreplv1.SubmitPromptRequest{
+			Workspace: req.Msg.GetWorkspace(), Said: said, IdempotencyKey: r.GetIdempotencyKey(), Origin: r.GetOrigin(),
+		}
+		if err := validateSubmitPromptRequest(resend); err != nil {
+			return nil, err
+		}
+	}
 	result, err := s.deps.Verbs.RollBack(ctx, ws, workspace.RollbackRequest{
 		Turns: planned.turns, Since: planned.since, DropHeld: planned.dropHeld, RestoreFiles: planned.restore,
 	})
@@ -175,8 +201,66 @@ func (s *server) RollBack(
 		success.FilesRestored = &agentreplv1.RollBackFilesRestored{Files: uint32(result.FilesRestored)}
 	}
 	subject.Log.Info(opRollback, "the conversation was rolled back", planned.context())
+	if resend != nil {
+		sent, err := s.SubmitPrompt(ctx, connect.NewRequest(resend))
+		if err != nil {
+			subject.Log.Error(opRollback, "the conversation was rolled back, but its resend could not be submitted",
+				dlog.Context{"cause": err.Error(), "idempotency_key": resend.GetIdempotencyKey()})
+			return nil, err
+		}
+		success.Resend = sent.Msg
+		subject.Log.Info(opRollback, "the rollback's resend was submitted",
+			dlog.Context{"idempotency_key": resend.GetIdempotencyKey(), "accepted": sent.Msg.GetSuccess() != nil})
+	}
 	resp.Result = &agentreplv1.RollBackResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
+}
+
+// resendSaid composes what a rollback's resend R sends: its whole prompt, or
+// WORDS (the rolled-back prompt as the person said it) with the entry R names
+// saying R's text instead. ok is false when WORDS holds no entry answering
+// the label an entry edit names.
+func resendSaid(r *agentreplv1.RollBackResend, words *conversationv1.UserSaid) (*conversationv1.UserSaid, bool) {
+	if whole := r.GetWhole(); whole != nil {
+		return whole.GetSaid(), true
+	}
+	edit := r.GetEntry()
+	said := proto.Clone(words).(*conversationv1.UserSaid)
+	for _, block := range said.GetContent().GetBlocks() {
+		text := block.GetText()
+		if text == nil {
+			continue
+		}
+		if replaced, ok := prose.ReplaceEntry(text.GetText(), edit.GetLabel(), edit.GetText()); ok {
+			text.Text = replaced
+			return said, true
+		}
+	}
+	return nil, false
+}
+
+// validateRollBackResend requires a resend, when one is carried, to name its
+// key, its origin and its edit, and an entry edit to name its label.
+func validateRollBackResend(r *agentreplv1.RollBackResend) *connect.Error {
+	if r == nil {
+		return nil
+	}
+	if r.GetIdempotencyKey() == "" {
+		return invalid("resend.idempotency_key", "a resend's idempotency key is required")
+	}
+	if r.GetOrigin() == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
+		return invalid("resend.origin", "a resend's origin is required")
+	}
+	switch edit := r.GetEdit().(type) {
+	case *agentreplv1.RollBackResend_Whole:
+		return validateUserSaid("resend.whole.said", edit.Whole.GetSaid())
+	case *agentreplv1.RollBackResend_Entry:
+		if edit.Entry.GetLabel() == "" {
+			return invalid("resend.entry.label", "an entry edit names the entry's label")
+		}
+		return nil
+	}
+	return invalid("resend.edit", "a resend's edit is required")
 }
 
 // mintRollbackToken files PLAN under a fresh token and answers the token: the
