@@ -9,6 +9,7 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl-page-unloaded-p "page-unload" (ws))
 (declare-function agent-repl-page-unload-remount "page-unload" (ws))
+(declare-function agent-repl--frontend-precreate-webview "frontend" (ws))
 (declare-function agent-repl-input-hidden-p "window" (ws))
 (declare-function agent-repl--open-progress-placeholder "open-progress" (ws))
 (declare-function agent-repl-held-ingress-refresh "held-ingress" (ws))
@@ -578,6 +579,16 @@ now finds a live view."
           (agent-repl--ensure-own-panels-on-persp-switch ws)
           (agent-repl--maybe-autoselect-input ws))
       (agent-repl--log ws "elisp.panels.restore-on-view-created: skipped ws=%s reason=not-current" ws))))
+
+(defun agent-repl--panels-mount-awaited-view (ws)
+  "Make WS\='s view for the switch to WS, and run the restore that awaited it.
+The switch\='s panel restore declined for want of a view (`no-live-view');
+the mount makes one when WS is entitled to it
+\(`agent-repl--frontend-precreate-webview'), and the restore runs again on
+it (`agent-repl--panels-on-view-created').  Every mount a switch owes goes
+through here, so none can make the view without restoring its panels."
+  (agent-repl--frontend-precreate-webview ws)
+  (agent-repl--panels-on-view-created ws))
 
 (defvar agent-repl--switch-trigger nil
   "What triggered the newest perspective activation, captured AT the activation.

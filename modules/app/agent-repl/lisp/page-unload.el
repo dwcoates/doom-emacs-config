@@ -54,8 +54,7 @@
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--frontend-detach-webview "agent-repl-frontend" (ws buf))
 (declare-function agent-repl-open-tabs-hidden-p "open-tabs" (ws))
-(declare-function agent-repl--frontend-precreate-webview "agent-repl-frontend" (ws))
-(declare-function agent-repl--panels-on-view-created "panels" (ws))
+(declare-function agent-repl--panels-mount-awaited-view "panels" (ws))
 (declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-roster-update-functions)
@@ -159,8 +158,7 @@ Called from the switch's panel restore, which declined for want of the view
 this makes (panels.el); the restore runs again on the new view."
   (agent-repl--ws-put ws :page-unloaded nil)
   (agent-repl--info ws "elisp.page-unload.remount ws=%s" ws)
-  (agent-repl--frontend-precreate-webview ws)
-  (agent-repl--panels-on-view-created ws))
+  (agent-repl--panels-mount-awaited-view ws))
 
 (defun agent-repl-page-unload--reason (ws now)
   "Why WS's page should be unloaded at NOW, or nil when it should be held.

@@ -4762,6 +4762,35 @@ the user switched away and back."
       (agent-repl--panels-on-view-created "ws-a")
       (should-not restored))))
 
+(ert-deftest agent-repl-test-panels-mount-awaited-view-mounts-before-it-restores ()
+  "The owed view is made first, and the restore that awaited it runs on it."
+  ;; Arrange
+  (let (calls)
+    (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
+               (lambda (ws) (push (list 'mount ws) calls) :created))
+              ((symbol-function 'agent-repl--panels-on-view-created)
+               (lambda (ws) (push (list 'restore ws) calls))))
+      ;; Act
+      (agent-repl--panels-mount-awaited-view "ws-a")
+      ;; Assert
+      (should (equal (nreverse calls) '((mount "ws-a") (restore "ws-a")))))))
+
+(ert-deftest agent-repl-test-panels-mount-awaited-view-is-the-one-site-that-announces-a-view ()
+  "No module announces a made view to the panels by hand.
+Every mount a switch or a pass owes goes through
+`agent-repl--panels-mount-awaited-view', so a site that mounted and
+announced on its own could drift from it: panels.el holds the one call."
+  (let ((dir agent-repl-test-panels--dir))
+    (dolist (file '("page-unload.el" "webview-recovery.el" "panels.el"))
+      (with-temp-buffer
+        (insert-file-contents (expand-file-name file dir))
+        (goto-char (point-min))
+        (let ((hits 0))
+          (while (re-search-forward "^[ \t]+(agent-repl--panels-on-view-created ws)" nil t)
+            (setq hits (1+ hits)))
+          (should (equal (cons file hits)
+                         (cons file (if (equal file "panels.el") 1 0)))))))))
+
 ;;;; ---- Switch trigger capture -------------------------------------------
 
 (ert-deftest agent-repl-test-panels-capture-switch-trigger-records-the-command ()
