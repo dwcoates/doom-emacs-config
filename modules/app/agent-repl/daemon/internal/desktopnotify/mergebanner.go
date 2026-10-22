@@ -3,7 +3,6 @@ package desktopnotify
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"agent-repld/internal/ids"
 )
@@ -50,24 +49,21 @@ func (e MergeEnd) String() string {
 // raises nothing.
 type MergeBanners struct {
 	poster Poster
-	now    func() time.Time
 }
 
-// NewMergeBanners builds the merge banners. It panics on a missing
-// collaborator.
-func NewMergeBanners(poster Poster, now func() time.Time) *MergeBanners {
-	if poster == nil || now == nil {
-		panic("desktopnotify: NewMergeBanners requires a Poster and a clock")
+// NewMergeBanners builds the merge banners. It panics on a missing poster.
+func NewMergeBanners(poster Poster) *MergeBanners {
+	if poster == nil {
+		panic("desktopnotify: NewMergeBanners requires a Poster")
 	}
-	return &MergeBanners{poster: poster, now: now}
+	return &MergeBanners{poster: poster}
 }
 
 // Queued posts the banner of a merge put in line: what it lands, under the
 // workspace it runs in.
 func (m *MergeBanners) Queued(ws ids.WorkspaceID, label string) {
-	at := m.now()
 	m.poster.Post(ws, KindMergeQueued, func(_ context.Context, name string) Banner {
-		return Banner{Title: MergeQueuedTitle(name, at), Body: label}
+		return Banner{Title: MergeQueuedTitle(name), Body: label}
 	})
 }
 
@@ -75,28 +71,27 @@ func (m *MergeBanners) Queued(ws ids.WorkspaceID, label string) {
 // its one-line account. An end outside the three panics here, on the caller's
 // goroutine, rather than inside the banner's composition.
 func (m *MergeBanners) Resolved(ws ids.WorkspaceID, end MergeEnd, summary string) {
-	at := m.now()
-	mark, what := mergeEndWords(end)
+	mark := mergeEndMark(end)
 	m.poster.Post(ws, KindMergeResolved, func(_ context.Context, name string) Banner {
-		return Banner{Title: eventTitle(mark, name, what, at), Body: summary}
+		return Banner{Title: eventTitle(mark, name), Body: summary}
 	})
 }
 
 // MergeQueuedTitle is a queued merge's banner title.
-func MergeQueuedTitle(name string, at time.Time) string {
-	return eventTitle("🔀", name, "merge queued", at)
+func MergeQueuedTitle(name string) string {
+	return eventTitle("🔀", name)
 }
 
-// mergeEndWords is a resolved merge's mark and what happened to it. An end
-// outside the three is a defect in the caller, and panics.
-func mergeEndWords(end MergeEnd) (mark, what string) {
+// mergeEndMark is a resolved merge's mark. An end outside the three is a
+// defect in the caller, and panics.
+func mergeEndMark(end MergeEnd) string {
 	switch end {
 	case MergeLanded:
-		return "🎉", "merge landed"
+		return "🎉"
 	case MergeFailed:
-		return "❌", "merge failed"
+		return "❌"
 	case MergeAbandoned:
-		return "⛔", "merge abandoned"
+		return "⛔"
 	}
 	panic(fmt.Sprintf("desktopnotify: a merge banner for an unknown end %s", end))
 }

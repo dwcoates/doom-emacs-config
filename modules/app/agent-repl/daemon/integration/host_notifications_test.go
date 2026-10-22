@@ -137,7 +137,7 @@ func TestAgentAddressedRaisesABannerWithItsText(t *testing.T) {
 }
 
 // TestACompletedTurnRaisesTheCompletedBanner pins the turn-end banner: a turn
-// that concluded raises ✅ "<name> turn completed <time>" over the summary the
+// that concluded raises "✅ <name>" over the summary the
 // daemon's headless call wrote (the fake vendor answers ROUTE_HOLD to text),
 // set in italics.
 func TestACompletedTurnRaisesTheCompletedBanner(t *testing.T) {
@@ -151,13 +151,13 @@ func TestACompletedTurnRaisesTheCompletedBanner(t *testing.T) {
 
 	// Assert
 	argvs := awaitBannerSettled(t, f, "the completed-turn banner")
-	if !bannerCarrying(argvs, "✅", "turn completed", desktopnotify.Italic("ROUTE_HOLD")) {
+	if !bannerCarrying(argvs, "✅", desktopnotify.Italic("ROUTE_HOLD")) {
 		t.Fatalf("banners %q, want the completed title over the model's summary", argvs)
 	}
 }
 
-// TestAFailedTurnRaisesTheErroredBanner pins that a failed turn raises ❌
-// "<name> turn errored <time>" over the errored ending's line.
+// TestAFailedTurnRaisesTheErroredBanner pins that a failed turn raises
+// "❌ <name>" over the errored ending's line.
 func TestAFailedTurnRaisesTheErroredBanner(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -170,7 +170,7 @@ func TestAFailedTurnRaisesTheErroredBanner(t *testing.T) {
 	}))
 
 	// Assert
-	if argvs := awaitBannerSettled(t, f, "the errored-turn banner"); !bannerCarrying(argvs, "❌", "turn errored") {
+	if argvs := awaitBannerSettled(t, f, "the errored-turn banner"); !bannerCarrying(argvs, "❌") {
 		t.Fatalf("banners %q, want the errored title", argvs)
 	}
 }
@@ -206,7 +206,7 @@ func TestABannerRingsOneChimeAndCarriesNoSoundOfItsOwn(t *testing.T) {
 		t.Fatalf("chimes %q, want exactly one", argvs)
 	}
 	argvs := awaitBannerSettled(t, f, "the silent turn banner")
-	if !bannerCarrying(argvs, "turn completed") || slices.ContainsFunc(argvs, func(argv []string) bool {
+	if !bannerCarrying(argvs, "✅") || slices.ContainsFunc(argvs, func(argv []string) bool {
 		return slices.Contains(argv, "-sound") || slices.ContainsFunc(argv, func(arg string) bool { return strings.HasPrefix(arg, "--sound") })
 	}) {
 		t.Fatalf("banners %q, want the turn's banner with no sound flag", argvs)

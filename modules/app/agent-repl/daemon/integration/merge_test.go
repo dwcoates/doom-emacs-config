@@ -419,12 +419,12 @@ func TestALandedMergeIsSeenByEveryObserver(t *testing.T) {
 		var merges [][]string
 		for _, inv := range bannerRuns(f) {
 			argv := [][]string{inv.Argv}
-			if bannerCarrying(argv, "merge queued") || bannerCarrying(argv, "merge landed") ||
-				bannerCarrying(argv, "merge failed") || bannerCarrying(argv, "merge abandoned") {
+			if bannerCarrying(argv, "🔀") || bannerCarrying(argv, "🎉") ||
+				bannerCarrying(argv, "❌") || bannerCarrying(argv, "⛔") {
 				merges = append(merges, inv.Argv)
 			}
 		}
-		if len(merges) != 2 || !bannerCarrying(merges[:1], "🔀", "merge queued") || !bannerCarrying(merges[1:], "🎉", "merge landed", "Merged into main") {
+		if len(merges) != 2 || !bannerCarrying(merges[:1], "🔀") || !bannerCarrying(merges[1:], "🎉", "Merged into main") {
 			t.Errorf("merge banners %q, want the queued banner then the landed one, and nothing else", merges)
 		}
 	})

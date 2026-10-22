@@ -2,9 +2,8 @@ package desktopnotify
 
 import (
 	"context"
-	"strings"
+	"regexp"
 	"testing"
-	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -44,8 +43,6 @@ func (s *fakeSummaries) Summarize(_ context.Context, _ ids.WorkspaceID, answer s
 	return "the summary"
 }
 
-var turnEndedAt = time.Date(2026, 9, 29, 14, 7, 0, 0, time.Local)
-
 type turnFixture struct {
 	banners   *TurnBanners
 	poster    *fakePoster
@@ -56,8 +53,7 @@ type turnFixture struct {
 func newTurnBanners(endings fakeEndings) turnFixture {
 	f := turnFixture{poster: &fakePoster{}, summaries: &fakeSummaries{}, log: dlog.NewTestLogger()}
 	f.banners = NewTurnBanners(TurnDeps{
-		Endings: endings, Poster: f.poster, Summaries: f.summaries,
-		Now: func() time.Time { return turnEndedAt }, Log: f.log,
+		Endings: endings, Poster: f.poster, Summaries: f.summaries, Log: f.log,
 	})
 	return f
 }
@@ -71,17 +67,17 @@ func TestTurnBannerForEachTurnEnd(t *testing.T) {
 		wantBody  string
 	}{
 		{name: "completed", how: wsm.CloseCompleted, ending: feed.TurnEnding{Answer: "answer"},
-			wantTitle: "✅ my-ws turn completed 14:07", wantBody: "𝘵𝘩𝘦 𝘴𝘶𝘮𝘮𝘢𝘳𝘺"},
+			wantTitle: "✅ my-ws", wantBody: "𝘵𝘩𝘦 𝘴𝘶𝘮𝘮𝘢𝘳𝘺"},
 		{name: "interrupted", how: wsm.CloseKilled, ending: feed.TurnEnding{},
-			wantTitle: "✅ my-ws turn completed 14:07", wantBody: "𝘵𝘩𝘦 𝘴𝘶𝘮𝘮𝘢𝘳𝘺"},
+			wantTitle: "✅ my-ws", wantBody: "𝘵𝘩𝘦 𝘴𝘶𝘮𝘮𝘢𝘳𝘺"},
 		{name: "expected stop", how: wsm.CloseFailed, ending: feed.TurnEnding{Failure: ladder.ExpectedStop, Error: "stopped by a hook"},
-			wantTitle: "✅ my-ws turn completed 14:07", wantBody: "𝘵𝘩𝘦 𝘴𝘶𝘮𝘮𝘢𝘳𝘺"},
+			wantTitle: "✅ my-ws", wantBody: "𝘵𝘩𝘦 𝘴𝘶𝘮𝘮𝘢𝘳𝘺"},
 		{name: "failed", how: wsm.CloseFailed, ending: feed.TurnEnding{Failure: ladder.VendorFailed, Error: "rate limited: slow down"},
-			wantTitle: "❌ my-ws turn errored 14:07", wantBody: "rate limited: slow down"},
+			wantTitle: "❌ my-ws", wantBody: "rate limited: slow down"},
 		{name: "vendor blocked", how: wsm.CloseFailed, ending: feed.TurnEnding{Failure: ladder.VendorBlocked, Error: "usage limit"},
-			wantTitle: "❌ my-ws turn errored 14:07", wantBody: "usage limit"},
+			wantTitle: "❌ my-ws", wantBody: "usage limit"},
 		{name: "agent died", how: wsm.CloseAgentDied, ending: feed.TurnEnding{Error: "the agent process died"},
-			wantTitle: "❌ my-ws turn errored 14:07", wantBody: "the agent process died"},
+			wantTitle: "❌ my-ws", wantBody: "the agent process died"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -155,17 +151,15 @@ func TestEventTitle(t *testing.T) {
 		name string
 		mark string
 		ws   string
-		what string
-		at   time.Time
 		want string
 	}{
-		{name: "an afternoon event", mark: "✅", ws: "my-ws", what: "turn completed", at: turnEndedAt, want: "✅ my-ws turn completed 14:07"},
-		{name: "a morning hour is zero-padded", mark: "🔀", ws: "w", what: "merge queued", at: time.Date(2026, 1, 2, 3, 4, 0, 0, time.Local), want: "🔀 w merge queued 03:04"},
+		{name: "a turn mark", mark: "✅", ws: "my-ws", want: "✅ my-ws"},
+		{name: "a merge mark", mark: "🔀", ws: "w", want: "🔀 w"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := eventTitle(tc.mark, tc.ws, tc.what, tc.at)
+			got := eventTitle(tc.mark, tc.ws)
 
 			// Assert
 			if got != tc.want {
@@ -175,20 +169,24 @@ func TestEventTitle(t *testing.T) {
 	}
 }
 
-// TestEveryEventTitleIsComposedByEventTitle pins the shared shape: no banner
-// title in the package formats its own clock.
+// TestEveryEventTitleIsComposedByEventTitle pins the shared shape: every
+// banner title in the package is the workspace's name, either bare (an agent
+// notification) or behind its mark through eventTitle.
 func TestEveryEventTitleIsComposedByEventTitle(t *testing.T) {
+	titled := regexp.MustCompile(`Title: (.+?), Body`)
+	allowed := regexp.MustCompile(`^(name|eventTitle\(mark, name\)|TurnTitle\(end, name\)|MergeQueuedTitle\(name\))$`)
 	// Arrange / Act
+	seen := 0
 	for _, file := range sourcescan.Production(t) {
-		count := strings.Count(string(file.Source), `"15:04"`)
-
-		// Assert
-		want := 0
-		if file.Name == "turnbanner.go" {
-			want = 1
+		for _, m := range titled.FindAllStringSubmatch(string(file.Source), -1) {
+			seen++
+			// Assert
+			if !allowed.MatchString(m[1]) {
+				t.Errorf("%s titles a banner %q: compose titles through eventTitle", file.Name, m[1])
+			}
 		}
-		if count != want {
-			t.Errorf("%s formats a banner clock %d times, want %d: compose titles through eventTitle", file.Name, count, want)
-		}
+	}
+	if seen == 0 {
+		t.Fatal("found no banner titles to check")
 	}
 }
