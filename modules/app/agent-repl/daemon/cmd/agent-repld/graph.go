@@ -832,7 +832,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Summaries: desktopnotify.Summarizer{
 			Headless: headlessClient, ConfigDirs: configDirs, PromptsDir: paths.PromptsDir, Log: log,
 		},
-		Now: time.Now,
 		Log: log,
 	})
 
@@ -1168,7 +1167,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Feed:            feedResolver,
 		Footer:          footerResolver,
 		Sidebar:         sidebarResolver,
-		Banners:         desktopnotify.NewMergeBanners(notifier, time.Now),
+		Banners:         desktopnotify.NewMergeBanners(notifier),
 		PromptsDir:      paths.PromptsDir,
 		Briefs:          merge.BriefsFrom(paths.PromptsDir),
 		StateDir:        p.Layout.Dir(),

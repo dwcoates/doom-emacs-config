@@ -50,15 +50,19 @@ workspace's tab) and the tab blink.
   notification is raised from the same daemon code path that tells clients a
   turn completed, not from a second derivation of the same fact.
 - **Banner content.** A turn that ended normally:
-  `✅ <workspace title> turn completed <timestamp>` over a one-sentence
+  `✅ <workspace name>` over a one-sentence
   declarative Haiku summary of the turn's final response message (the content
   of the green-bordered response bubble the webapp shows), asked as bare
   inference with no tools and no system prompt. The summary is set in
   italics (Unicode sans-serif italic letters, since a banner carries no
   markup) and names no commit SHA ("merged to master", never which commit).
   A turn that ended in
-  failure: `❌ <workspace title> turn errored <timestamp>` over the daemon's
+  failure: `❌ <workspace name>` over the daemon's
   error message for why the turn failed.
+- **Every event banner's title is its mark and the workspace's name, and
+  nothing else** (owner, 2026-10-22). The turn banners' `✅`/`❌` and the
+  merge banners' `🔀`/`🎉`/`❌`/`⛔` say what happened; the title carries no
+  "turn completed"/"merge landed" words and no clock.
 - **The banner follows the roster status the turn end resolves to.** A turn
   end resolving to `done` (green) raises the ✅ banner; one resolving to
   `turn_failed` (turquoise) or `vendor_blocked` (blue) raises the ❌ banner,

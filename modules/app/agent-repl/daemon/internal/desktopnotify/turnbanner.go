@@ -2,8 +2,6 @@ package desktopnotify
 
 import (
 	"context"
-	"fmt"
-	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -39,9 +37,7 @@ type TurnDeps struct {
 	Endings   Endings
 	Poster    Poster
 	Summaries Summaries
-	// Now stamps the banner with the turn's end.
-	Now func() time.Time
-	Log dlog.Logger
+	Log       dlog.Logger
 }
 
 // TurnBanners raises the banner a turn end earns. The prompt queue's turn end
@@ -54,8 +50,8 @@ type TurnBanners struct {
 
 // NewTurnBanners builds the turn banner. It panics on a missing collaborator.
 func NewTurnBanners(deps TurnDeps) *TurnBanners {
-	if deps.Endings == nil || deps.Poster == nil || deps.Summaries == nil || deps.Now == nil || deps.Log == nil {
-		panic("desktopnotify: NewTurnBanners requires Endings, Poster, Summaries, Now and Log")
+	if deps.Endings == nil || deps.Poster == nil || deps.Summaries == nil || deps.Log == nil {
+		panic("desktopnotify: NewTurnBanners requires Endings, Poster, Summaries and Log")
 	}
 	return &TurnBanners{deps: deps}
 }
@@ -82,27 +78,26 @@ func (t *TurnBanners) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how wsm.T
 		})
 		return
 	}
-	at := t.deps.Now()
 	log.Debug(opTurn, "posting the turn's banner", dlog.Context{"turn_end": end.String()})
 	t.deps.Poster.Post(ws, KindTurnEnded, func(ctx context.Context, name string) Banner {
 		if end == ladder.TurnEndFailed {
-			return Banner{Title: TurnTitle(end, name, at), Body: ending.Error}
+			return Banner{Title: TurnTitle(end, name), Body: ending.Error}
 		}
-		return Banner{Title: TurnTitle(end, name, at), Body: Italic(t.deps.Summaries.Summarize(ctx, ws, ending.Answer))}
+		return Banner{Title: TurnTitle(end, name), Body: Italic(t.deps.Summaries.Summarize(ctx, ws, ending.Answer))}
 	})
 }
 
-// TurnTitle is a turn banner's first line: the outcome's mark, the
-// workspace's name, what happened, and the local time the turn ended.
-func TurnTitle(end ladder.TurnEnd, name string, at time.Time) string {
+// TurnTitle is a turn banner's first line: the outcome's mark and the
+// workspace's name.
+func TurnTitle(end ladder.TurnEnd, name string) string {
 	if end == ladder.TurnEndFailed {
-		return eventTitle("❌", name, "turn errored", at)
+		return eventTitle("❌", name)
 	}
-	return eventTitle("✅", name, "turn completed", at)
+	return eventTitle("✅", name)
 }
 
-// eventTitle is every event banner's first line: its mark, the workspace's
-// name, what happened, and the local time it happened.
-func eventTitle(mark, name, what string, at time.Time) string {
-	return fmt.Sprintf("%s %s %s %s", mark, name, what, at.Format("15:04"))
+// eventTitle is every event banner's first line: its mark and the
+// workspace's name, and nothing else. What happened is the mark's to say.
+func eventTitle(mark, name string) string {
+	return mark + " " + name
 }
