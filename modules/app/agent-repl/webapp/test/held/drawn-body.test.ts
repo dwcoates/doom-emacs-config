@@ -30,7 +30,7 @@ describe("drawnBodyOf", () => {
 
     // Assert
     expect(body.blocks.map(({ block }) => ({ case: block.case, value: { ...block.value } }))).toEqual(
-      want.map((block) => ({ case: block.case, value: expect.objectContaining(block.value) })),
+      want.map((block) => ({ case: block.case, value: expect.objectContaining(block.value) as Record<string, unknown> })),
     );
   });
 
