@@ -266,7 +266,14 @@ func probeShared(path string) (bool, Holder, error) {
 
 // holderOf answers the process holding the lock at PATH right now, without
 // taking it. A holder in this process is named as this process.
+//
+// A LOOKUP CREATES NOTHING. A lock file that does not exist is held by no one,
+// and making it here would leave a lock file wherever a path was merely asked
+// about.
 func holderOf(path string) (Holder, error) {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return Holder{}, nil
+	}
 	gate, err := gateFor(path)
 	if err != nil {
 		return Holder{}, err

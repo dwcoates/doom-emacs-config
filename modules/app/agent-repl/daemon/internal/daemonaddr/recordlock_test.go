@@ -334,3 +334,21 @@ func TestEveryLockFileOpenGoesThroughOpenLockFile(t *testing.T) {
 		}
 	}
 }
+
+func TestLookingUpTheHoldersOfAbsentLocksCreatesNoFile(t *testing.T) {
+	// Arrange.
+	addrPath := filepath.Join(t.TempDir(), "daemon.addr")
+
+	// Act.
+	boot, serving, err := LockHolders(addrPath)
+
+	// Assert.
+	if err != nil || boot.PID != 0 || serving.PID != 0 {
+		t.Fatalf("LockHolders = (%+v, %+v, %v), want no holders", boot, serving, err)
+	}
+	for _, path := range []string{LockPath(addrPath), ServingPath(addrPath)} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stat %s = %v, want it never created", path, err)
+		}
+	}
+}
