@@ -28,15 +28,12 @@ func TestTheReaperRemovesALandedIdleWorktreeAndKeepsTheRest(t *testing.T) {
 	// Arrange.
 	d := newDaemon(t, harness.Opts{ExtraEnv: reaperEnv})
 	repo := harness.NewRepo(t)
+	// THE OPEN WORKSPACE FIRST, before any other tree exists to be swept
+	// half set up.
+	open := registeredBeforeAnySweepSeesItIdle(t, d, repo)
 	landed := repo.AddWorktree("landed")
 	unlanded := repo.AddWorktree("unlanded")
 	repo.CommitIn(unlanded, "work.txt", "unlanded work\n")
-	// THE OPEN WORKSPACE IS REGISTERED BEFORE ITS TREE IS IDLE: a fresh tree
-	// passes no gate, so no sweep can see this one idle and unregistered and
-	// reap it (2026-10-22: a sweep between the idling and the registration
-	// removed the open checkout as landed).
-	open := repo.AddWorktree("open")
-	harness.Register(t, d, open)
 	idleSince := time.Now().Add(-72 * time.Hour)
 	for _, dir := range []string{landed, unlanded, open} {
 		repo.IdleWorktree(dir, idleSince)
@@ -88,14 +85,9 @@ func TestTheReaperExpiresAWorktreeThatNeverLanded(t *testing.T) {
 	repo := harness.NewRepo(t)
 	now := time.Now()
 	// An open workspace registers the repository with the daemon; its own
-	// checkout is kept by its gate. It is registered FIRST, before any tree
-	// is idle: the sweep awaited below must count it in the same sweep that
-	// expires the stale tree, and a fresh unregistered tree passes no gate,
-	// so no sweep can reap it or expire the stale tree without it
-	// (2026-10-22: a sweep between the idling and the registration removed
-	// the open checkout as landed).
-	open := repo.AddWorktree("open")
-	harness.Register(t, d, open)
+	// checkout is kept by its gate, in the same sweep that expires the stale
+	// tree, so it is registered before any tree is set up.
+	open := registeredBeforeAnySweepSeesItIdle(t, d, repo)
 	stale := repo.AddWorktree("stale")
 	staleHead := repo.CommitIn(stale, "stale.txt", "never landed\n")
 	repo.SetDirty(stale, true)
@@ -136,4 +128,26 @@ func TestTheReaperExpiresAWorktreeThatNeverLanded(t *testing.T) {
 	if !repo.HasWorktree(young) || !repo.HasWorktree(open) {
 		t.Fatalf("the young or the open worktree was touched: worktrees %v", repo.Worktrees())
 	}
+}
+
+// registeredBeforeAnySweepSeesItIdle adds the open workspace's worktree,
+// registers it, and waits for a sweep that counted it as an open workspace,
+// answering its directory. Only then may a test idle it, and a test calls it
+// before it adds any other tree, so the awaited sweeps see none half set up.
+//
+// A SWEEP SNAPSHOTS THE REGISTRY BEFORE IT READS THE WORKTREES (reaper.go),
+// so a sweep already running when the workspace registered judges the tree as
+// unregistered, and reaps it if the test has idled it by the time the sweep
+// reads it (2026-10-22, twice: registering before idling did not close that
+// window). Sweeps run one at a time, so once a sweep has counted the
+// workspace, every later sweep's snapshot holds it.
+func registeredBeforeAnySweepSeesItIdle(t *testing.T, d *harness.Daemon, repo *harness.Repo) string {
+	t.Helper()
+	open := repo.AddWorktree("open")
+	harness.Register(t, d, open)
+	d.AwaitLogRecord(d.RunLogPath(), "a sweep that counted the registered open workspace", func(r harness.LogRecord) bool {
+		kept, _ := r.Context["kept"].(map[string]any)
+		return r.Operation == "daemon.worktreereap.sweep" && r.Message == "the sweep finished" && kept["open_workspace"] == float64(1)
+	})
+	return open
 }

@@ -1610,6 +1610,9 @@ type harness struct {
 	edges   *fakeEdges
 	holds   *fakeHolds
 	judge   *scriptedJudge
+	// elapsed advances the queue's clock past instant; zero unless a test
+	// moves it (the classifier's measured latency).
+	elapsed atomic.Int64
 	drain   *noteRecorder
 	banners *fakeTurnBanners
 	commits *fakeRecounter
@@ -1716,7 +1719,7 @@ func newHarness(t *testing.T) *harness {
 			defer h.hostMu.Unlock()
 			h.hostPublishes++
 		},
-		Now: func() time.Time { return instant },
+		Now: func() time.Time { return instant.Add(time.Duration(h.elapsed.Load())) },
 		// Every workspace directory exists unless a test says otherwise.
 		Stat: func(string) (fs.FileInfo, error) { return nil, h.statErr },
 		Log:  h.log,
