@@ -224,7 +224,10 @@
               },
               "outputTokens": "36"
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH",
+            "model": {
+              "name": "fake-opus-4-8"
+            }
           }
         },
         "agentId": {
@@ -466,7 +469,10 @@
               },
               "outputTokens": "36"
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH",
+            "model": {
+              "name": "fake-sonnet-5"
+            }
           }
         },
         "agentId": {
@@ -543,7 +549,10 @@
               },
               "outputTokens": "36"
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH",
+            "model": {
+              "name": "fake-opus-4-8"
+            }
           }
         },
         "agentId": {
@@ -785,7 +794,10 @@
               },
               "outputTokens": "36"
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH",
+            "model": {
+              "name": "fake-sonnet-5"
+            }
           }
         },
         "agentId": {
@@ -862,7 +874,10 @@
               },
               "outputTokens": "36"
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH",
+            "model": {
+              "name": "fake-opus-4-8"
+            }
           }
         },
         "agentId": {
@@ -1094,7 +1109,10 @@
               },
               "outputTokens": "36"
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH",
+            "model": {
+              "name": "fake-opus-4-8"
+            }
           }
         },
         "agentId": {
