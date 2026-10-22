@@ -367,6 +367,25 @@ describe("ensure", () => {
     ]);
   });
 
+  // A removed page and a re-pointed one retire their frame the same way.
+  for (const [how, act] of [
+    ["removed", (h: Host) => h.remove("p")],
+    ["re-pointed", (h: Host) => h.ensure("p", "http://ws-p.localhost:2/")],
+  ] as const) {
+    it(`retires a ${how} page's frame and lets the lane it was loading go on`, () => {
+      // Arrange
+      inTurn(host, "p");
+      inTurn(host, "q");
+      const old = frame("p");
+
+      // Act
+      act(host);
+
+      // Assert
+      expect([old.isConnected, loading("q")]).toEqual([false, true]);
+    });
+  }
+
   it("lets a lane go on when the page it was loading is re-pointed", () => {
     // Arrange
     inTurn(host, "p");

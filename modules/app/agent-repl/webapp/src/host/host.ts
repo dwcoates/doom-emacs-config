@@ -342,6 +342,18 @@ export function createHost(env: HostEnv): Host {
     return false;
   };
 
+  /**
+   * End FRAME's document and its place in the lanes: the frame leaves the
+   * page, a lane it waited in forgets it, and a lane it was loading in starts
+   * its next page. Shared by a removed page and a re-pointed one, which both
+   * end the page now in the frame.
+   */
+  const retire = (frame: Frame): void => {
+    frame.iframe.remove();
+    unqueue(frame.id);
+    finishTurn(frame.id);
+  };
+
   /** Load ID now if it is still waiting its turn (it is being shown). */
   const loadNow = (frame: Frame): boolean => {
     if (!unqueue(frame.id)) return false;
@@ -497,9 +509,7 @@ export function createHost(env: HostEnv): Host {
       // page calling the successor, so it never waits a lane's turn: the page
       // loads now, and the lane it held or waited in goes on without it, as
       // it does for a removed page.
-      frame.iframe.remove();
-      unqueue(id);
-      finishTurn(id);
+      retire(frame);
       const fresh = create(id, url, undefined);
       fresh.inputBackground = frame.inputBackground;
       fresh.gateDock = frame.gateDock;
@@ -545,9 +555,7 @@ export function createHost(env: HostEnv): Host {
     remove(id) {
       return withFrame("remove", id, (frame) => {
         frames.delete(id);
-        frame.iframe.remove();
-        unqueue(id);
-        finishTurn(id);
+        retire(frame);
         if (shownId === id) {
           shownId = null;
           placeSidebar();
