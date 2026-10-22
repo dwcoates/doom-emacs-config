@@ -153,9 +153,9 @@ var cliNouns = map[string]map[string]cliCommand{
 	},
 	mergeQueueNoun: {
 		"status":         {usage: "status [-repository here|DIR]", run: queueStatus},
-		"dequeue":        {usage: "dequeue WS", run: queueDequeue},
-		"move-up":        {usage: "move-up WS", run: queueMove(true)},
-		"move-down":      {usage: "move-down WS", run: queueMove(false)},
+		"dequeue":        {usage: "dequeue MERGE|here", run: queueDequeue},
+		"move-up":        {usage: "move-up MERGE|here", run: queueMove(true)},
+		"move-down":      {usage: "move-down MERGE|here", run: queueMove(false)},
 		"pause":          {usage: "pause [-repository here|DIR]", run: queuePause(true)},
 		"resume":         {usage: "resume [-repository here|DIR]", run: queuePause(false)},
 		"disable-racing": {usage: "disable-racing", run: queueRacing(false)},
@@ -1183,9 +1183,60 @@ func queueStatus(c *cliCall, args []string) int {
 	return answer(c, resp, err)
 }
 
+// queuedArg answers the merge a queue verb names: `here`, the calling
+// workspace's own merge, or a merge's NAME as the queues list it, which must
+// name exactly one merge across every queue.
+//
+// THE QUEUE NAMES ITS MERGES, NOT THE ROSTER. An async merge runs in a hidden
+// workspace, and the roster leaves hidden workspaces out, so a verb that read
+// the name off the roster could address no async merge at all (2026-10-22:
+// `merge-queue move-down pt3-sentences` answered "the daemon's roster holds no
+// workspace named" while the queue listed it waiting).
+func (c *cliCall) queuedArg(fs *flag.FlagSet, stateDir *string, args []string) (*workspacev1.WorkspaceRef, []string, bool) {
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return nil, nil, false
+	}
+	if len(positionals) == 0 {
+		c.usageFailed("the command names its merge")
+		return nil, nil, false
+	}
+	if !c.dial(*stateDir) {
+		return nil, nil, false
+	}
+	name := positionals[0]
+	if name == here {
+		ref, ok := c.calling()
+		return ref, positionals[1:], ok
+	}
+	resp, err := c.client.GetMergeQueueStatus(c.ctx, connect.NewRequest(&agentreplv1.GetMergeQueueStatusRequest{}))
+	if err != nil {
+		return nil, nil, c.failed("read the merge queues: %v", err)
+	}
+	success := resp.Msg.GetSuccess()
+	if success == nil {
+		return nil, nil, c.failed("the daemon refused to read the merge queues: %v", resp.Msg.GetResult())
+	}
+	var found []*workspacev1.WorkspaceRef
+	for _, queue := range success.GetQueues() {
+		for _, entry := range queue.GetEntries() {
+			if entry.GetName() == name {
+				found = append(found, entry.GetWorkspace())
+			}
+		}
+	}
+	switch len(found) {
+	case 0:
+		return nil, nil, c.failed("no merge in any queue is named %q", name)
+	case 1:
+		return found[0], positionals[1:], true
+	}
+	return nil, nil, c.failed("%d merges in the queues are named %q", len(found), name)
+}
+
 func queueDequeue(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	ref, rest, ok := c.queuedArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
@@ -1197,7 +1248,7 @@ func queueDequeue(c *cliCall, args []string) int {
 func queueMove(up bool) func(c *cliCall, args []string) int {
 	return func(c *cliCall, args []string) int {
 		fs, stateDir := c.flags()
-		ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+		ref, rest, ok := c.queuedArg(fs, stateDir, args)
 		if !ok || len(rest) != 0 {
 			return exitFailure
 		}

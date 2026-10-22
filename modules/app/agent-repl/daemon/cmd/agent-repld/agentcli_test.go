@@ -28,6 +28,7 @@ type cliClient struct {
 	status   *agentreplv1.GetWorkspaceStatusResponse
 	create   *agentreplv1.CreateWorkspaceResponse
 	finish   *agentreplv1.FinishWorkspaceResponse
+	queues   *agentreplv1.GetMergeQueueStatusResponse
 }
 
 func (c *cliClient) record(req proto.Message) error {
@@ -116,6 +117,16 @@ func (c *cliClient) UpdateDeployHold(_ context.Context, req *connect.Request[age
 
 func (c *cliClient) RollOutLanding(_ context.Context, req *connect.Request[agentreplv1.RollOutLandingRequest]) (*connect.Response[agentreplv1.RollOutLandingResponse], error) {
 	return connect.NewResponse(&agentreplv1.RollOutLandingResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) GetMergeQueueStatus(_ context.Context, req *connect.Request[agentreplv1.GetMergeQueueStatusRequest]) (*connect.Response[agentreplv1.GetMergeQueueStatusResponse], error) {
+	if err := c.record(req.Msg); err != nil {
+		return nil, err
+	}
+	if c.queues != nil {
+		return connect.NewResponse(c.queues), nil
+	}
+	return connect.NewResponse(&agentreplv1.GetMergeQueueStatusResponse{Result: &agentreplv1.GetMergeQueueStatusResponse_Success{Success: &agentreplv1.GetMergeQueueStatusSuccess{}}}), nil
 }
 
 func (c *cliClient) UpdateMergeQueue(_ context.Context, req *connect.Request[agentreplv1.UpdateMergeQueueRequest]) (*connect.Response[agentreplv1.UpdateMergeQueueResponse], error) {
@@ -876,5 +887,115 @@ func TestCreateOriginMasterRefusesAChild(t *testing.T) {
 	// Assert
 	if code != exitFailure || len(f.client.requests) != 0 || !strings.Contains(f.errOut.String(), "-origin-master") {
 		t.Fatalf("exit %d, requests %v, stderr %q; want the flag refused for a child", code, f.client.requests, f.errOut.String())
+	}
+}
+
+// queuesListing answers the merge queues listing ENTRIES, each a merge's name
+// and its workspace, spread across two repositories' queues.
+func queuesListing(entries ...[2]string) *agentreplv1.GetMergeQueueStatusResponse {
+	queues := []*agentreplv1.MergeQueueStatus{{}, {}}
+	for i, e := range entries {
+		queues[i%2].Entries = append(queues[i%2].Entries, &agentreplv1.MergeQueueStatusEntry{Name: e[0], Workspace: &workspacev1.WorkspaceRef{Id: e[1]}})
+	}
+	return &agentreplv1.GetMergeQueueStatusResponse{Result: &agentreplv1.GetMergeQueueStatusResponse_Success{Success: &agentreplv1.GetMergeQueueStatusSuccess{Queues: queues}}}
+}
+
+// evicted answers the workspace one queue update names, whichever verb it was.
+func evicted(req *agentreplv1.UpdateMergeQueueRequest) string {
+	switch action := req.GetAction().(type) {
+	case *agentreplv1.UpdateMergeQueueRequest_Evict:
+		return "dequeue " + action.Evict.GetWorkspace().GetId()
+	case *agentreplv1.UpdateMergeQueueRequest_MoveUp:
+		return "move-up " + action.MoveUp.GetWorkspace().GetId()
+	case *agentreplv1.UpdateMergeQueueRequest_MoveDown:
+		return "move-down " + action.MoveDown.GetWorkspace().GetId()
+	}
+	return ""
+}
+
+func TestAQueueVerbAddressesAMergeByTheNameTheQueueListsItUnder(t *testing.T) {
+	for _, verb := range []string{"dequeue", "move-up", "move-down"} {
+		t.Run(verb, func(t *testing.T) {
+			// Arrange: the async merge's workspace is hidden, so no roster row names it.
+			f := newCLIFixture()
+			f.client.queues = queuesListing([2]string{"other", "ws-other"}, [2]string{"pt3-sentences", "ws-hidden-merge"})
+
+			// Act
+			code := f.run(mergeQueueNoun, verb, "pt3-sentences")
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			if got := evicted(only[*agentreplv1.UpdateMergeQueueRequest](t, f)); got != verb+" ws-hidden-merge" {
+				t.Fatalf("update = %q, want %s of the listed merge's workspace", got, verb)
+			}
+		})
+	}
+}
+
+func TestAQueueVerbAddressesHereAsTheCallingWorkspacesOwnMerge(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(mergeQueueNoun, "dequeue", "here")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+	}
+	if got := evicted(only[*agentreplv1.UpdateMergeQueueRequest](t, f)); got != "dequeue ws-caller" {
+		t.Fatalf("update = %q, want the caller's own merge", got)
+	}
+}
+
+func TestAQueueVerbRefusesANameTheQueuesDoNotListOnce(t *testing.T) {
+	tests := []struct {
+		name   string
+		queues *agentreplv1.GetMergeQueueStatusResponse
+		stderr string
+	}{
+		{name: "no merge has the name, though a workspace does", queues: queuesListing([2]string{"other", "ws-other"}), stderr: `no merge in any queue is named "peer"`},
+		{name: "two merges share the name", queues: queuesListing([2]string{"peer", "ws-a"}, [2]string{"peer", "ws-b"}), stderr: `2 merges in the queues are named "peer"`},
+		{
+			name:   "the daemon refuses the read",
+			queues: &agentreplv1.GetMergeQueueStatusResponse{Result: &agentreplv1.GetMergeQueueStatusResponse_Error{Error: &agentreplv1.GetMergeQueueStatusError{}}},
+			stderr: "the daemon refused to read the merge queues",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.client.queues = tt.queues
+
+			// Act
+			code := f.run(mergeQueueNoun, "dequeue", "peer")
+
+			// Assert
+			if code != exitFailure || !strings.Contains(f.errOut.String(), tt.stderr) {
+				t.Fatalf("exit %d, stderr %q, want a failure saying %q", code, f.errOut.String(), tt.stderr)
+			}
+			for _, req := range f.client.requests {
+				if _, updated := req.(*agentreplv1.UpdateMergeQueueRequest); updated {
+					t.Fatalf("requests = %v, want no queue update", f.client.requests)
+				}
+			}
+		})
+	}
+}
+
+func TestAQueueVerbRefusesAnUnreadableQueue(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.err = errors.New("connection refused")
+
+	// Act
+	code := f.run(mergeQueueNoun, "move-up", "pt3-sentences")
+
+	// Assert
+	if code != exitFailure || !strings.Contains(f.errOut.String(), "read the merge queues: connection refused") {
+		t.Fatalf("exit %d, stderr %q, want the unread queues named", code, f.errOut.String())
 	}
 }

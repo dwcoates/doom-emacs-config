@@ -123,8 +123,10 @@ Either kind:
 ## 4. Controlling the queue
 
 - `merge-queue status [-repository here|DIR]` reads every queue, or one.
-- `merge-queue dequeue WS`, `merge-queue move-up WS` and
-  `merge-queue move-down WS` take a merge off the queue or move it one place.
+- `merge-queue dequeue MERGE`, `merge-queue move-up MERGE` and
+  `merge-queue move-down MERGE` take a merge off the queue or move it one
+  place. MERGE is the name `merge-queue status` lists it under (an async
+  merge's `-name`), or `here` for this workspace's own merge.
 - `merge-queue pause` and `merge-queue resume [-repository here|DIR]` suspend
   or resume a queue.
 - `merge-queue disable-racing` and `merge-queue enable-racing`: on AC power the
