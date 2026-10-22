@@ -35,7 +35,7 @@ work_email() {
 
 work_profile() {
   [ -f "$CHROME_STATE" ] || return 1
-  jq -r --arg e "$1" '.profile.info_cache // {} | to_entries[] | select(.value.user_name == $e) | .key' "$CHROME_STATE" | head -n 1
+  jq -r --arg e "$1" '.profile.info_cache // {} | to_entries[] | select(.value.user_name == $e) | .key' "$CHROME_STATE" | sed -n 1p
 }
 
 renew() {
@@ -47,7 +47,7 @@ renew() {
 
   started="$(gns auth login --env "$env" --device 2>&1)" || die "the device-code sign-in could not start: $started"
   printf '%s\n' "$started"
-  url="$(grep -Eo 'https://[^[:space:]]+' <<<"$started" | head -n 1)"
+  url="$(grep -Eo 'https://[^[:space:]]+' <<<"$started" | sed -n 1p)"
   [ -n "$url" ] || die "the device-code sign-in printed no sign-in page: $started"
   open -na "Google Chrome" --args --profile-directory="$profile" "$url" || die "the sign-in page could not be opened in Chrome profile $profile"
   log "opened the sign-in page in $email's Chrome profile ($profile); waiting for it to complete"
