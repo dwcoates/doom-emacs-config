@@ -2466,6 +2466,15 @@ func workValues(ids []*conversationv1.DetachedWorkId) []string {
 	return out
 }
 
+// runValues is the work id of each live detached run, in the store's order.
+func runValues(runs []*storev1.GetLiveWorkDetached) []string {
+	out := make([]string, 0, len(runs))
+	for _, run := range runs {
+		out = append(out, run.GetWork().GetValue())
+	}
+	return out
+}
+
 func contains(values []string, want string) bool {
 	for _, v := range values {
 		if v == want {

@@ -68,7 +68,7 @@ func TestARunAnnouncedThenObservedIsOneOpenObligation(t *testing.T) {
 		bashRun(agentID("main"), itestBashRunID, bashStart("sleep 60", 1000))))
 
 	// Assert
-	if got := workValues(liveWork(ctx, t, cli, "main").GetLiveDetached()); len(got) != 1 {
+	if got := runValues(liveWork(ctx, t, cli, "main").GetLiveDetachedRuns()); len(got) != 1 {
 		t.Fatalf("live_detached = %v, want exactly one entry for one run", got)
 	}
 	store.assertNoErrorRecords()
@@ -91,7 +91,7 @@ func TestARunObservedBeforeItIsAnnouncedIsStillOneOpenObligation(t *testing.T) {
 		frameLine(agentID("main"), detachedRunFrame("main", itestBashHandle, itestBashRunID))))
 
 	// Assert
-	if got := workValues(liveWork(ctx, t, cli, "main").GetLiveDetached()); len(got) != 1 {
+	if got := runValues(liveWork(ctx, t, cli, "main").GetLiveDetachedRuns()); len(got) != 1 {
 		t.Fatalf("live_detached = %v, want exactly one entry for one run", got)
 	}
 	store.assertNoErrorRecords()
@@ -116,7 +116,7 @@ func TestARunsTerminalClosesTheObligationItsAnnouncementOpened(t *testing.T) {
 		bashRun(agentID("main"), itestBashRunID, bashSuccess("sleep 60", 0))))
 
 	// Assert
-	if got := workValues(liveWork(ctx, t, cli, "main").GetLiveDetached()); len(got) != 0 {
+	if got := runValues(liveWork(ctx, t, cli, "main").GetLiveDetachedRuns()); len(got) != 0 {
 		t.Fatalf("live_detached = %v, want empty after the run concluded", got)
 	}
 	store.assertNoErrorRecords()
@@ -137,7 +137,7 @@ func TestAFailedRunClosesItsObligationToo(t *testing.T) {
 		bashRun(agentID("main"), itestBashRunID, bashFailureFrame())))
 
 	// Assert
-	if got := workValues(liveWork(ctx, t, cli, "main").GetLiveDetached()); len(got) != 0 {
+	if got := runValues(liveWork(ctx, t, cli, "main").GetLiveDetachedRuns()); len(got) != 0 {
 		t.Fatalf("live_detached = %v, want empty after a failure terminal", got)
 	}
 	store.assertNoErrorRecords()
@@ -160,7 +160,7 @@ func TestTheOriginUnitsTerminalOnTheSpawningStreamClosesTheRun(t *testing.T) {
 		frameLine(agentID("main"), bashActivityFrame("main", itestBashRunID, bashSuccess("sleep 60", 0)))))
 
 	// Assert
-	if got := workValues(liveWork(ctx, t, cli, "main").GetLiveDetached()); len(got) != 0 {
+	if got := runValues(liveWork(ctx, t, cli, "main").GetLiveDetachedRuns()); len(got) != 0 {
 		t.Fatalf("live_detached = %v, want the origin unit's terminal to have closed the run", got)
 	}
 	store.assertNoErrorRecords()
@@ -206,7 +206,7 @@ func TestACoincidentHandleAndUnitIdIsOneObligation(t *testing.T) {
 		bashRun(agentID("main"), coincident, bashStart("sleep 60", 1000))))
 
 	// Assert
-	if got := workValues(liveWork(ctx, t, cli, "main").GetLiveDetached()); len(got) != 1 {
+	if got := runValues(liveWork(ctx, t, cli, "main").GetLiveDetachedRuns()); len(got) != 1 {
 		t.Fatalf("live_detached = %v, want exactly one entry for one run", got)
 	}
 	store.assertNoErrorRecords()
@@ -234,7 +234,7 @@ func TestACoincidentHandleAndUnitIdIsClosedByOneTerminal(t *testing.T) {
 		bashRun(agentID("main"), coincident, bashSuccess("sleep 60", 0))))
 
 	// Assert
-	if got := workValues(liveWork(ctx, t, cli, "main").GetLiveDetached()); len(got) != 0 {
+	if got := runValues(liveWork(ctx, t, cli, "main").GetLiveDetachedRuns()); len(got) != 0 {
 		t.Fatalf("live_detached = %v, want empty after the one run concluded", got)
 	}
 	store.assertNoErrorRecords()
@@ -261,7 +261,7 @@ func TestAnAnnouncedRunWithNoRowsIsARefusedWatchButAnOpenObligation(t *testing.T
 		frameLine(agentID("main"), detachedRunFrame("main", itestBashHandle, itestBashRunID))))
 
 	// Assert: the obligation is open...
-	if got := workValues(liveWork(ctx, t, cli, "main").GetLiveDetached()); !contains(got, itestBashHandle) {
+	if got := runValues(liveWork(ctx, t, cli, "main").GetLiveDetachedRuns()); !contains(got, itestBashHandle) {
 		t.Fatalf("live_detached = %v, want the announced run", got)
 	}
 	// ...and the run's own stream is refused, because there is no row.

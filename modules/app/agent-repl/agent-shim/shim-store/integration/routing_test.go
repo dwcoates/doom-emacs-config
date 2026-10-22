@@ -196,8 +196,8 @@ func TestDetachedWorkAnnouncementIsTheSourceOfLiveDetached(t *testing.T) {
 
 	// Assert.
 	live := liveWork(ctx, t, cli, "main")
-	if !contains(workValues(live.GetLiveDetached()), "work-bash-live") {
-		t.Errorf("the announced run is missing from live_detached: %v", workValues(live.GetLiveDetached()))
+	if !contains(runValues(live.GetLiveDetachedRuns()), "work-bash-live") {
+		t.Errorf("the announced run is missing from live_detached: %v", runValues(live.GetLiveDetachedRuns()))
 	}
 	store.assertNoErrorRecords()
 }
@@ -225,7 +225,7 @@ func TestReAnnouncingDetachedWorkNeitherDuplicatesTheLineNorTheObligation(t *tes
 	// Assert.
 	page := openSession(ctx, t, cli, "main", nil)
 	assertTexts(t, "the announcer's book after a re-announcement", pageTexts(page.GetPage()), []string{"detached:work-again"})
-	if got := workValues(liveWork(ctx, t, cli, "main").GetLiveDetached()); len(got) != 1 {
+	if got := runValues(liveWork(ctx, t, cli, "main").GetLiveDetachedRuns()); len(got) != 1 {
 		t.Errorf("live_detached = %v, want exactly one entry per run", got)
 	}
 	store.assertNoErrorRecords()
@@ -253,8 +253,8 @@ func TestDetachedWorkLeavesLiveWorkAtItsTerminal(t *testing.T) {
 
 	// Assert.
 	live := liveWork(ctx, t, cli, "main")
-	if contains(workValues(live.GetLiveDetached()), "work-bash-2") {
-		t.Errorf("a concluded run is still in live_detached: %v", workValues(live.GetLiveDetached()))
+	if contains(runValues(live.GetLiveDetachedRuns()), "work-bash-2") {
+		t.Errorf("a concluded run is still in live_detached: %v", runValues(live.GetLiveDetachedRuns()))
 	}
 	store.assertNoErrorRecords()
 }

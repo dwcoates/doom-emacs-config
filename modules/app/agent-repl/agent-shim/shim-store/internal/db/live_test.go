@@ -80,10 +80,10 @@ func TestLiveWorkListsADetachedRunWithNoTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LiveWork: %v", err)
 	}
-	if got := len(live.GetLiveDetached()); got != 1 {
+	if got := len(live.GetLiveDetachedRuns()); got != 1 {
 		t.Fatalf("live_detached = %d, want 1", got)
 	}
-	if got := live.GetLiveDetached()[0].GetValue(); got != "run-1" {
+	if got := live.GetLiveDetachedRuns()[0].GetWork().GetValue(); got != "run-1" {
 		t.Fatalf("live detached = %q, want run-1", got)
 	}
 }
@@ -102,7 +102,7 @@ func TestLiveWorkExcludesADetachedRunThatEnded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LiveWork: %v", err)
 	}
-	if got := len(live.GetLiveDetached()); got != 0 {
+	if got := len(live.GetLiveDetachedRuns()); got != 0 {
 		t.Fatalf("live_detached = %d, want 0", got)
 	}
 }
@@ -120,7 +120,7 @@ func TestLiveWorkNeverListsAWorkflowRunAmongTheDetached(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LiveWork: %v", err)
 	}
-	if got := len(live.GetLiveDetached()); got != 0 {
+	if got := len(live.GetLiveDetachedRuns()); got != 0 {
 		t.Fatalf("live_detached = %d, want 0", got)
 	}
 	if got := len(live.GetLiveWorkflows()); got != 0 {
@@ -157,7 +157,7 @@ func TestLiveWorkAnswersAnIdleStoreWithEmptyLists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LiveWork: %v", err)
 	}
-	if len(live.GetLiveAgents())+len(live.GetLiveWorkflows())+len(live.GetLiveDetached()) != 0 {
+	if len(live.GetLiveAgents())+len(live.GetLiveWorkflows())+len(live.GetLiveDetachedRuns()) != 0 {
 		t.Fatalf("idle store reported obligations: %+v", live)
 	}
 }
@@ -187,8 +187,8 @@ func liveIDs(live *storev1.GetLiveWorkSuccess) (agents, detached []string) {
 	for _, a := range live.GetLiveAgents() {
 		agents = append(agents, a.GetValue())
 	}
-	for _, w := range live.GetLiveDetached() {
-		detached = append(detached, w.GetValue())
+	for _, run := range live.GetLiveDetachedRuns() {
+		detached = append(detached, run.GetWork().GetValue())
 	}
 	return agents, detached
 }
@@ -291,6 +291,70 @@ func TestLiveWorkIncludesDetachedWorkOwnedByANestedSubagent(t *testing.T) {
 	}
 	if _, detached := liveIDs(live); len(detached) != 1 || detached[0] != "run-1" {
 		t.Fatalf("live_detached = %v, want [run-1]", detached)
+	}
+}
+
+// liveOwners maps each live detached run to the owner the store answered it with.
+func liveOwners(live *storev1.GetLiveWorkSuccess) map[string]string {
+	owners := map[string]string{}
+	for _, run := range live.GetLiveDetachedRuns() {
+		owners[run.GetWork().GetValue()] = run.GetOwner().GetValue()
+	}
+	return owners
+}
+
+func TestLiveWorkAnswersEachDetachedRunWithTheAgentThatAnnouncedIt(t *testing.T) {
+	tests := []struct {
+		name      string
+		announcer string
+	}{
+		{"a run the main agent announced is owned by the main agent", "agent-main"},
+		{"a run a subagent announced is owned by the subagent", "sub-1"},
+		{"a run a nested subagent announced is owned by the nested subagent", "sub-2"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange: main spawned sub-1, which spawned sub-2.
+			d, _ := newStore(t)
+			writeOK(t, d, pageEntry("w1", "u1", "agent-main", frameItem(activityFrame("agent-main", "act-1", subagentStart("sub-1")))))
+			writeOK(t, d, pageEntry("w2", "u2", "sub-1", frameItem(activityFrame("sub-1", "act-2", subagentStart("sub-2")))))
+			writeOK(t, d, pageEntry("w3", "u3", test.announcer, frameItem(detachedFrame(test.announcer, createdWork("run-1", bashWork())))))
+
+			// Act
+			live, err := d.LiveWork(ctx(), "agent-main")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("LiveWork: %v", err)
+			}
+			if got := liveOwners(live); len(got) != 1 || got["run-1"] != test.announcer {
+				t.Fatalf("live detached runs = %v, want run-1 owned by %s", got, test.announcer)
+			}
+		})
+	}
+}
+
+func TestLiveWorkAnswersEveryDetachedRunWithBothItsWorkAndItsOwner(t *testing.T) {
+	// Arrange: two runs, one per owner.
+	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w1", "u1", "agent-main", frameItem(activityFrame("agent-main", "act-1", subagentStart("sub-1")))))
+	writeOK(t, d, pageEntry("w2", "u2", "agent-main", frameItem(detachedFrame("agent-main", createdWork("run-main", bashWork())))))
+	writeOK(t, d, pageEntry("w3", "u3", "sub-1", frameItem(detachedFrame("sub-1", createdWork("run-sub", bashWork())))))
+
+	// Act
+	live, err := d.LiveWork(ctx(), "agent-main")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("LiveWork: %v", err)
+	}
+	for _, run := range live.GetLiveDetachedRuns() {
+		if run.GetWork().GetValue() == "" || run.GetOwner().GetValue() == "" {
+			t.Fatalf("a live detached run is missing its work or its owner: %v", run)
+		}
+	}
+	if got := len(live.GetLiveDetachedRuns()); got != 2 {
+		t.Fatalf("live detached runs = %d, want 2", got)
 	}
 }
 
@@ -809,7 +873,7 @@ func TestLiveWorkEndsARunWhoseHandleIsItsOwnOriginUnit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LiveWork: %v", err)
 	}
-	if got := len(live.GetLiveDetached()); got != 0 {
+	if got := len(live.GetLiveDetachedRuns()); got != 0 {
 		t.Fatalf("live_detached = %d, want 0 once the one run concluded", got)
 	}
 }

@@ -724,7 +724,7 @@ func (s *Server) GetLiveWork(ctx context.Context, req *connect.Request[storev1.G
 		return liveWorkFailure(ref), nil
 	}
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work", AgentID: session},
-		"open obligations served agents=%d workflows=%d detached=%d", len(live.GetLiveAgents()), len(live.GetLiveWorkflows()), len(live.GetLiveDetached()))
+		"open obligations served agents=%d workflows=%d detached=%d", len(live.GetLiveAgents()), len(live.GetLiveWorkflows()), len(live.GetLiveDetachedRuns()))
 	return connect.NewResponse(&storev1.GetLiveWorkResponse{
 		Result: &storev1.GetLiveWorkResponse_Success{Success: live},
 	}), nil
