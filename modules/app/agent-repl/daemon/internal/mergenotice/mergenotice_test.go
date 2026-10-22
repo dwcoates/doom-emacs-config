@@ -758,3 +758,16 @@ func TestValuesFailsHardOnANoticeOfNoChange(t *testing.T) {
 	// Act.
 	Values(wsm.MergeQueueDetailEveryChange, nil)
 }
+
+func TestSentencesCountsEveryChangeItLists(t *testing.T) {
+	// Arrange.
+	changes := []merge.QueueChange{steppedFix, steppedFix, landedLast}
+
+	// Act.
+	got := Sentences(changes)
+
+	// Assert.
+	if !strings.HasPrefix(got, "It changed 3 times since the last notice you were told, oldest first:") || strings.Count(got, "\n- ") != 3 {
+		t.Fatalf("Sentences = %q, want three changes counted and listed", got)
+	}
+}
