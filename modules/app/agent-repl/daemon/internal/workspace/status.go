@@ -44,7 +44,11 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 		Repository:  &workspacev1.RepositoryRef{Id: string(record.Repo)},
 	}
 	if record.Awaiting != nil {
-		out.Awaiting = &workspacev1.WorkspaceRef{Id: string(*record.Awaiting)}
+		awaited, err := v.refOf(ctx, *record.Awaiting, "the workspace it awaits")
+		if err != nil {
+			return nil, err
+		}
+		out.Awaiting = awaited
 	}
 	if record.Closed {
 		out.Standing = &agentreplv1.WorkspaceStatusStanding{Standing: &agentreplv1.WorkspaceStatusStanding_Closed{Closed: &agentreplv1.WorkspaceStatusClosed{}}}
@@ -62,15 +66,19 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 // one, and for a merge workspace the workspace whose worktree its creation
 // recorded as the landing, the primary branch otherwise.
 func (v *verbs) mergeTargetOf(ctx context.Context, record wsm.Workspace) (*agentreplv1.WorkspaceStatusMergeTarget, error) {
-	owner := func(id ids.WorkspaceID, lands bool) *agentreplv1.WorkspaceStatusMergeTarget {
+	owner := func(ref *workspacev1.WorkspaceRef, lands bool) *agentreplv1.WorkspaceStatusMergeTarget {
 		return &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Owner{Owner: &agentreplv1.WorkspaceStatusMergeTargetOwner{
-			Owner: &workspacev1.WorkspaceRef{Id: string(id)}, OwnerLands: lands}}}
+			Owner: ref, OwnerLands: lands}}}
 	}
 	primary := &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Primary{Primary: &agentreplv1.WorkspaceStatusMergeTargetPrimary{}}}
 	fields := dlog.Context{"workspace": string(record.ID)}
 	if record.MergeOf == nil {
 		if record.Parent != nil {
-			return owner(*record.Parent, record.OwnerLands), nil
+			parent, err := v.refOf(ctx, *record.Parent, "its owner")
+			if err != nil {
+				return nil, err
+			}
+			return owner(parent, record.OwnerLands), nil
 		}
 		return primary, nil
 	}
@@ -94,7 +102,20 @@ func (v *verbs) mergeTargetOf(ctx context.Context, record wsm.Workspace) (*agent
 		v.deps.Log.Global().Error(opStatus, "could not read the workspace a merge workspace lands in", dlog.WithCause(dlog.Merge(fields, dlog.Context{"target_dir": job.Layout.TargetDir}), err))
 		return nil, fmt.Errorf("status: workspace at %q: %w", job.Layout.TargetDir, err)
 	}
-	return owner(into.ID, false), nil
+	return owner(into.Ref(), false), nil
+}
+
+// refOf answers workspace ID as every wire names it, its directory and all
+// (workspace.v1.WorkspaceRef.dir is for display): a ref of the id alone drew
+// a subscriber's notice as landing "into the workspace at “" (2026-10-22).
+// WHAT names the workspace in the record of a failed read.
+func (v *verbs) refOf(ctx context.Context, id ids.WorkspaceID, what string) (*workspacev1.WorkspaceRef, error) {
+	record, err := v.deps.DB.Workspace(ctx, id)
+	if err != nil {
+		v.deps.Log.Global().Error(opStatus, "could not read "+what+" to name it in a workspace's status", dlog.WithCause(dlog.Context{"workspace": string(id)}, err))
+		return nil, fmt.Errorf("status: read %s %q: %w", what, id, err)
+	}
+	return record.Ref(), nil
 }
 
 // activityOf projects an open workspace's footer status onto what an agent
