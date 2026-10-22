@@ -146,7 +146,13 @@ type subjectDoc struct {
 	TargetDir string `json:"target_dir"`
 	Made      bool   `json:"made"`
 	Closes    string `json:"closes,omitempty"`
-	Other     string `json:"other,omitempty"`
+	// CloseAlso and CleanupDir are an async merge's other landing effects
+	// (wsm.MergeOrigin.CloseOnLanding and CleanupDir). A record without them
+	// let a merge a restart interrupted land and keep the worktree it was asked
+	// to remove (2026-10-22: pt2-semver-test, resumed at its tests).
+	CloseAlso  string `json:"close_also,omitempty"`
+	CleanupDir string `json:"cleanup_dir,omitempty"`
+	Other      string `json:"other,omitempty"`
 }
 
 // roundDoc is one durable tab round.
@@ -240,14 +246,16 @@ func (d *outcomeDoc) outcome() (outcome, error) {
 func (d subjectDoc) subject() subject {
 	return subject{
 		branch: d.Branch, dir: d.Dir, targetDir: d.TargetDir, made: d.Made,
-		closes: ids.WorkspaceID(d.Closes), other: ids.WorkspaceID(d.Other),
+		closes: ids.WorkspaceID(d.Closes), closesAlso: ids.WorkspaceID(d.CloseAlso),
+		cleanupDir: d.CleanupDir, other: ids.WorkspaceID(d.Other),
 	}
 }
 
 func toSubjectDoc(s subject) subjectDoc {
 	return subjectDoc{
 		Branch: s.branch, Dir: s.dir, TargetDir: s.targetDir, Made: s.made,
-		Closes: string(s.closes), Other: string(s.other),
+		Closes: string(s.closes), CloseAlso: string(s.closesAlso),
+		CleanupDir: s.cleanupDir, Other: string(s.other),
 	}
 }
 

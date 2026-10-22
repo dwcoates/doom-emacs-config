@@ -3,7 +3,9 @@ package merge
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
+	"unsafe"
 )
 
 // recordedDoc reads the harness workspace's progress record.
@@ -103,5 +105,52 @@ func TestAnAbandonedRunTakesNoStopAtItsStepBoundary(t *testing.T) {
 	}
 	if _, suspended := r.suspendedFor(); suspended {
 		t.Fatal("the restart took an abandoned run")
+	}
+}
+
+func TestEverySubjectFieldSurvivesTheRecord(t *testing.T) {
+	// Arrange: a subject with every field set to a value distinct from its zero.
+	var want subject
+	v := reflect.ValueOf(&want).Elem()
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Field(i)
+		f = reflect.NewAt(f.Type(), unsafe.Pointer(f.UnsafeAddr())).Elem()
+		switch f.Kind() {
+		case reflect.String:
+			f.SetString("set-" + v.Type().Field(i).Name)
+		case reflect.Bool:
+			f.SetBool(true)
+		default:
+			t.Fatalf("subject.%s is a %s this test cannot set; teach it, and carry the field through subjectDoc", v.Type().Field(i).Name, f.Kind())
+		}
+	}
+
+	// Act: through the record and its JSON, as a restart reads it back.
+	raw, err := json.Marshal(toSubjectDoc(want))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var doc subjectDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got := doc.subject()
+
+	// Assert
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("subject through the record = %+v, want %+v: a field a restart would drop", got, want)
+	}
+}
+
+func TestAResumedAsyncMergeKeepsItsLandingEffects(t *testing.T) {
+	// Arrange: an async merge asked to close another workspace and clean up a worktree.
+	recorded := subject{branch: "pt2", closes: "ws-merge", closesAlso: "ws-maker", cleanupDir: "/wt/pt-semver"}
+
+	// Act
+	resumed := toSubjectDoc(recorded).subject()
+
+	// Assert
+	if resumed.closesAlso != "ws-maker" || resumed.cleanupDir != "/wt/pt-semver" {
+		t.Fatalf("resumed subject = %+v, want its close and cleanup kept", resumed)
 	}
 }
