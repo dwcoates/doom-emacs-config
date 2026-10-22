@@ -44,6 +44,7 @@ A ref id names the workspace of the same name."
   (declare (indent 0))
   `(agent-repl-test--with-clean-state
      (let ((agent-repl-open-tabs--startup 'expected)
+           (agent-repl-roster-view nil)
            (agent-repl-open-tabs-sender
             (lambda (workspaces on-frame on-close)
               (when agent-repl-test-open-tabs--connected
@@ -178,6 +179,10 @@ A ref id names the workspace of the same name."
         :value (list :ready ready :total total
                      :failed (mapcar (lambda (id) (list :workspace (list :id id) :name id))
                                      failed))))
+
+(defun agent-repl-test-open-tabs--selected-before (id)
+  "Stage a roster naming workspace ID as the selection the restart found."
+  (setq agent-repl-roster-view (list :current (list :workspace (list :id id)))))
 
 ;;;; ---- Holding ----
 
@@ -644,6 +649,150 @@ leaves the tab open."
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
     ;; Assert
     (should (null agent-repl-test-open-tabs--switches))))
+
+;;;; ---- The startup keeps the selection before the restart ----
+
+(ert-deftest agent-repl-test-open-tabs-the-startup-lands-on-the-selection-before-the-restart ()
+  "The roster's `current' is the startup's landing, though another tab opened first."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--selected-before "b")
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                     (agent-repl-test-open-tabs--row "b"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "b" :ready))
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--switches '(("b" . startup))))))
+
+(ert-deftest agent-repl-test-open-tabs-the-startup-selects-nothing-before-the-selection-opens ()
+  "A tab opened ahead of the selection before the restart is not selected."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--selected-before "b")
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                     (agent-repl-test-open-tabs--row "b"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Assert
+    (should (null agent-repl-test-open-tabs--switches))))
+
+(ert-deftest agent-repl-test-open-tabs-the-startup-keeps-choosing-while-the-selection-opens ()
+  "The startup is still choosing while it waits for the selection before the restart."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--selected-before "b")
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                     (agent-repl-test-open-tabs--row "b"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Assert
+    (should (agent-repl-open-tabs-choosing-p))))
+
+(ert-deftest agent-repl-test-open-tabs-a-hidden-selection-lands-on-the-first-drawn-tab ()
+  "A selection in a collapsed section has no tab, so the first drawn tab is the landing."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--selected-before "b")
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                     (agent-repl-test-open-tabs--row "b" t))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--switches '(("a" . startup))))))
+
+(ert-deftest agent-repl-test-open-tabs-an-undrawn-selection-lands-on-the-first-drawn-tab ()
+  "A selection the bar does not draw is not waited for."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (setq agent-repl-test-open-tabs--undrawn '("b"))
+    (agent-repl-test-open-tabs--selected-before "b")
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                     (agent-repl-test-open-tabs--row "b"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--switches '(("a" . startup))))))
+
+(ert-deftest agent-repl-test-open-tabs-a-selection-outside-the-walk-lands-on-the-first-drawn-tab ()
+  "A selection naming no row of the walk is not waited for."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--selected-before "gone")
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--switches '(("a" . startup))))))
+
+(ert-deftest agent-repl-test-open-tabs-a-refused-selection-lands-on-a-tab-already-open ()
+  "The selection the startup waited for is refused, so it lands on a tab already drawn."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--selected-before "b")
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                     (agent-repl-test-open-tabs--row "b"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Act
+    (agent-repl-test-open-tabs--frame
+     (agent-repl-test-open-tabs--opened "b" :refused '(:cause (:arm :unknown-workspace :value nil))))
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--switches '(("a" . startup))))))
+
+(ert-deftest agent-repl-test-open-tabs-a-refused-selection-with-nothing-open-still-waits ()
+  "The selection is refused before any tab is drawn, so nothing is selected yet."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--selected-before "b")
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                     (agent-repl-test-open-tabs--row "b"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame
+     (agent-repl-test-open-tabs--opened "b" :refused '(:cause (:arm :unknown-workspace :value nil))))
+    ;; Assert
+    (should (null agent-repl-test-open-tabs--switches))))
+
+(ert-deftest agent-repl-test-open-tabs-a-refused-selection-lands-on-the-next-tab-drawn ()
+  "Once the selection is refused, the next tab drawn is the landing."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--selected-before "b")
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                     (agent-repl-test-open-tabs--row "b"))
+    (agent-repl-test-open-tabs--frame
+     (agent-repl-test-open-tabs--opened "b" :refused '(:cause (:arm :unknown-workspace :value nil))))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--switches '(("a" . startup))))))
+
+(ert-deftest agent-repl-test-open-tabs-the-startups-landing-is-an-info-record-naming-its-source ()
+  "The landing is recorded at INFO with the source that decided it."
+  (agent-repl-test-open-tabs--with
+    (let (infos)
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Arrange
+        (agent-repl-test-open-tabs--selected-before "b")
+        (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                         (agent-repl-test-open-tabs--row "b"))
+        ;; Act
+        (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "b" :ready)))
+      ;; Assert
+      (should (member "elisp.open-tabs.startup-lands ws=b source=roster" infos)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-landing-with-no-selection-names-the-first-drawn-source ()
+  "With no selection before the restart, the landing record names `first-drawn'."
+  (agent-repl-test-open-tabs--with
+    (let (infos)
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Arrange
+        (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+        ;; Act
+        (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready)))
+      ;; Assert
+      (should (member "elisp.open-tabs.startup-lands ws=a source=first-drawn" infos)))))
 
 (ert-deftest agent-repl-test-open-tabs-the-startup-is-choosing-until-it-selects ()
   "Until the startup selects, the frame has no workspace to move to."

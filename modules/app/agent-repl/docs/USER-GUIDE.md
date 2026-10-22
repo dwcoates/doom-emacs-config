@@ -390,6 +390,16 @@ you are replying to. Sending ends the selection.
   - If anything changed between planning the rollback and confirming it (a prompt was sent or queued, a turn started or ended), the rollback is refused and nothing happens. Press the key again.
   - If the vendor refuses to cut the conversation, nothing is rolled back and its reason is shown.
 
+## The selected workspace across a restart
+
+A restart, a deploy or a landed merge never changes which workspace is selected.
+
+- When Emacs starts again, it opens on the workspace you had selected before it quit.
+  - Other workspaces may finish opening first; Emacs waits for yours rather than switching to them.
+  - If that workspace is hidden, in a collapsed section, or could not be opened, Emacs opens on the first tab that is ready instead.
+- When the daemon restarts or a deploy rolls out, the frame stays where it was.
+- A merge that lands moves you only when you were standing on the workspace it closes.
+
 ## Unsent input across a restart
 
 When Emacs quits, each workspace's input window is saved to that workspace's prompt history, the same way `C-c C-c` saves it.
