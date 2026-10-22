@@ -64,6 +64,7 @@ import {
 } from "../../src/held/held-prompt.js";
 import { QUOTE_PARTS_CLASS } from "../../src/bubble/quote.js";
 import { BUBBLE_EXPANDED_ONLY_CLASS } from "../../src/bubble/expanded-only.js";
+import { BUBBLE_COLLAPSED_THUMBNAIL_CLASS } from "../../src/bubble/collapsed-thumbnail.js";
 import * as heldPromptModule from "../../src/held/held-prompt.js";
 import type { HeldContext } from "../../src/held/context.js";
 import { testHeldContext } from "./held-context.js";
@@ -957,13 +958,23 @@ describe("the drawn body", () => {
     );
   });
 
-  it("draws the held card's image only once the card is expanded", () => {
+  it("marks the held card's image as a prompt image a collapsed bubble draws small", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
       heldPrompt({ body: { blocks: [{ block: { case: "image", value: { src: "/feed-images/a", alt: "a.png" } } }] } }),
       tc,
     );
-    expect(card.querySelector("img.prompt-block-image")?.classList.contains(BUBBLE_EXPANDED_ONLY_CLASS)).toBe(true);
+    expect(card.querySelector("img.prompt-block-image")?.classList.contains(BUBBLE_COLLAPSED_THUMBNAIL_CLASS)).toBe(true);
+  });
+
+  it("draws the held card in the ellipsis mode, whose one collapsed line hides a thumbnail", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(
+      heldPrompt({ body: { blocks: [{ block: { case: "image", value: { src: "/feed-images/a", alt: "a.png" } } }] } }),
+      tc,
+    );
+    const image = card.querySelector("img.prompt-block-image");
+    expect(image?.closest(".bubble")?.getAttribute("data-more")).toBe("ellipsis");
   });
 
   it("refuses a card the daemon served with no body", () => {

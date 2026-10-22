@@ -309,6 +309,23 @@ describe("domCollapsedGeometry.visibleLines: the fragments the box shows", () =>
     // Assert
     expect(lines.map((l) => l.right)).toEqual([50, 64]);
   });
+
+  it("counts a block image's own box, which holds no text", () => {
+    // Arrange -- a collapsed prompt's thumbnail, wider than the words above it.
+    const { box, body } = laidBody(rects({ right: 50, top: 0 }), rects());
+    const image = document.createElement("img");
+    image.style.display = "block";
+    body.append(image);
+    vi.spyOn(image, "getClientRects").mockReturnValue(rects({ right: 120, top: 20 }));
+    clip(box, 0, 60);
+    clip(body, 0, 60);
+
+    // Act
+    const lines = domCollapsedGeometry.visibleLines(box, body);
+
+    // Assert
+    expect(lines.map((l) => l.right)).toEqual([50, 120]);
+  });
 });
 
 describe("domCollapsedGeometry.floats: what sits beside the body", () => {
