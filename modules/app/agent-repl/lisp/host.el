@@ -1469,7 +1469,11 @@ the link\='s edges walk every detached workspace:
 
   - no link stands: nothing is dialed and nothing polls; the link-up edge
     re-attaches WS (`agent-repl-host-on-link-up');
-  - a walk onto the live daemon is already in flight: nothing more;
+  - a walk onto the live daemon, or onto the successor it is handing over
+    to, is already in flight: nothing more.  A handover\='s adopt moves
+    WS onto the successor before the old daemon\='s stream ends planned,
+    and that ending must not register WS back on the daemon that is
+    leaving;
   - the live daemon IS the one WS lost, and it is handing over: its
     successor\='s promotion re-attaches WS (`agent-repl-host-on-link-promote')
     -- registering on a daemon that is leaving would only fail;
@@ -1485,14 +1489,17 @@ the link\='s edges walk every detached workspace:
 Regression, 2026-10-03: a bounce\='s announced stand-down registered every
 workspace on the daemon that had just said it was leaving, and each one
 failed (`elisp.host.planned-ending-register-failed', with the connect
-and rpc failures under it) a millisecond before the link went down."
+and rpc failures under it) a millisecond before the link went down.
+Regression, 2026-10-22: the same failure, for a workspace whose adopt onto
+the successor was already in flight when the old stream ended planned."
   (let ((live (agent-repl-link-live))
         (walk (plist-get (agent-repl-host--entry ws) :reattach)))
     (agent-repl-host--put ws :detached t)
     (cond
      ((null live)
       (agent-repl--info ws "elisp.host.reattach-awaiting-link ws=%s trigger=%s" ws trigger))
-     ((and walk (eq (plist-get walk :conn) live))
+     ((and walk (memq (plist-get walk :conn)
+                      (delq nil (list live (agent-repl-link-successor)))))
       (agent-repl--log ws "elisp.host.reattach-in-flight ws=%s trigger=%s address=%S"
                        ws trigger (agent-repl-connect-connection-address live)))
      ((and (eq live (agent-repl-host--recorded-conn ws))

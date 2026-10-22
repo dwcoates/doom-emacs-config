@@ -4398,6 +4398,46 @@ Registering on a daemon that is handing over would only fail."
         ;; Assert
         (should (equal told '("ws-1")))))))
 
+;; Regression, 2026-10-22: a handover's adopt had already moved the
+;; workspace onto the successor when the old daemon's stream ended planned,
+;; and the ending registered it back on the daemon that was leaving.
+
+(ert-deftest agent-repl-test-host-planned-end-during-an-adopt-registers-nothing ()
+  "A planned end while an adopt onto the successor is in flight calls nothing."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((leaving (agent-repl-connect-open "127.0.0.1:61043"))
+            (successor (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" leaving)
+        (setq agent-repl-test-host--live leaving
+              agent-repl-test-host--successor successor)
+        (agent-repl-host--put "ws-1" :conn successor)
+        (agent-repl-host--put "ws-1" :reattach (list :token 'adopt :conn successor :trigger "transferred"))
+        (setq agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-test-host--end-planned "ws-1")
+        ;; Assert
+        (should (null (agent-repl-test-host--calls-to "RegisterWorkspace" leaving)))))))
+
+(ert-deftest agent-repl-test-host-planned-end-during-an-adopt-records-the-walk-in-flight ()
+  "The ending is answered by the walk already in flight, on the record."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((leaving (agent-repl-connect-open "127.0.0.1:61043"))
+            (successor (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" leaving)
+        (setq agent-repl-test-host--live leaving
+              agent-repl-test-host--successor successor)
+        (agent-repl-host--put "ws-1" :conn successor)
+        (agent-repl-host--put "ws-1" :reattach (list :token 'adopt :conn successor :trigger "transferred"))
+        ;; Act
+        (agent-repl-test-host--end-planned "ws-1")
+        ;; Assert
+        (should (agent-repl-test-host--logged-p
+                 :log "elisp.host.reattach-in-flight ws=ws-1 trigger=planned-ending"))))))
+
 (ert-deftest agent-repl-test-host-reattach-in-flight-is-not-walked-twice ()
   "A second loss found while a walk onto the live daemon is in flight sends nothing."
   (agent-repl-test-host--with-harness
