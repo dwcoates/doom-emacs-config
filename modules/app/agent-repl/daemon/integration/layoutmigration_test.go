@@ -174,6 +174,7 @@ var layout3Undo = map[int][]string{
 		`ALTER TABLE merge_queue RENAME COLUMN source_pre_deploy_hooks TO source_actions_before`,
 		`ALTER TABLE merge_queue RENAME COLUMN source_post_deploy_hooks TO source_actions_after`},
 	69: {`DROP TABLE merge_queue_untold_notices`},
+	70: {`DROP TABLE workspace_untold_notices`},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by

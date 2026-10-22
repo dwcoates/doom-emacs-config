@@ -522,6 +522,12 @@ type DB interface {
 	// RecordUntoldMergeNotice records a subscriber's untold notice of one
 	// queue, replacing the one recorded before.
 	RecordUntoldMergeNotice(ctx context.Context, n UntoldMergeNotice) error
+	// UntoldWorkspaceNotice answers a subscriber's untold notice about one
+	// followed workspace (workspacenotices.go), and whether one is recorded.
+	UntoldWorkspaceNotice(ctx context.Context, subscriber, followed WorkspaceID) (UntoldWorkspaceNotice, bool, error)
+	// RecordUntoldWorkspaceNotice records a subscriber's untold notice about
+	// one followed workspace, replacing the one recorded before.
+	RecordUntoldWorkspaceNotice(ctx context.Context, n UntoldWorkspaceNotice) error
 	// MarkCloseWhenTurnEnds marks a workspace to close when its running turn
 	// ends (selfclose.go).
 	MarkCloseWhenTurnEnds(ctx context.Context, id WorkspaceID, at time.Time) error

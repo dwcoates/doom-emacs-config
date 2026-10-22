@@ -46,6 +46,7 @@ import (
 	"agent-repld/internal/noticeloop"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/untoldnotice"
 	"agent-repld/internal/wsm"
 )
 
@@ -71,19 +72,13 @@ type Untold interface {
 	RecordUntoldMergeNotice(ctx context.Context, n wsm.UntoldMergeNotice) error
 }
 
-// Holds retires a subscriber's untold notice (promptqueue.Queue's Supersede):
-// true when it was retired, false when it was already told.
-type Holds interface {
-	Supersede(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (bool, error)
-}
-
 // Deps are the service's collaborators: everything but the prompt handler,
 // which is built after the merge orchestrator this service is handed to, and
 // is handed to Run instead.
 type Deps struct {
 	Subscriptions Subscriptions
 	// Holds retires a notice a newer one supersedes.
-	Holds Holds
+	Holds untoldnotice.Holds
 	// Untold keeps each subscriber's untold notice across restarts.
 	Untold Untold
 	// Briefs loads and splices a brief at use time.
@@ -238,10 +233,8 @@ func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, t
 }
 
 // carried answers the sentences the subscriber's untold notice of REPO's queue
-// said, which the next notice must say again: all of them when the notice was
-// retired before it was told (or never submitted), none when it was told. A
-// notice that could not be retired, or could not be read, stands and is told,
-// so nothing it said is carried.
+// said that the next notice must say again (untoldnotice.Carried). A notice
+// that could not be read stands and is told, so nothing it said is carried.
 func (s *Service) carried(ctx context.Context, subscriber ids.WorkspaceID, repo wsm.RepoKey) []string {
 	log := s.deps.Log.Global()
 	fields := dlog.Context{"subscriber": string(subscriber), "repo": string(repo)}
@@ -250,26 +243,7 @@ func (s *Service) carried(ctx context.Context, subscriber ids.WorkspaceID, repo 
 		log.Error(op, "could not read the subscriber's untold notice; the next one says only the new change", dlog.WithCause(fields, err))
 		return nil
 	}
-	if !found {
-		return nil
-	}
-	fields["carried"] = len(prev.Sentences)
-	if prev.Turn == "" {
-		log.Info(op, "the subscriber's last notice was never submitted; the next one says its changes", fields)
-		return prev.Sentences
-	}
-	fields["superseded_turn"] = string(prev.Turn)
-	retired, err := s.deps.Holds.Supersede(ctx, subscriber, prev.Turn)
-	if err != nil {
-		log.Error(op, "could not supersede the subscriber's untold notice; it stands and is told, and the next one says only the new change", dlog.WithCause(fields, err))
-		return nil
-	}
-	if !retired {
-		log.Debug(op, "the subscriber's last notice was told; the next one says only the new change", fields)
-		return nil
-	}
-	log.Info(op, "the subscriber's untold notice was superseded; the next one says its changes first", fields)
-	return prev.Sentences
+	return untoldnotice.Carried(ctx, s.deps.Holds, log, op, subscriber, untoldnotice.Notice{Turn: prev.Turn, Sentences: prev.Sentences}, found, fields)
 }
 
 // Values are the brief's placeholders for one notice of SENTENCES, oldest
@@ -282,24 +256,10 @@ func Values(detail wsm.MergeQueueDetail, sentences []string, latest merge.QueueC
 	}
 	return map[string]string{
 		"label":  Headline(latest),
-		"change": Sentences(sentences),
+		"change": untoldnotice.Sentences(sentences),
 		"queue":  Queue(latest.Queue),
 		"detail": detailWords(detail),
 	}
-}
-
-// Sentences states every change, oldest first: one change as its sentence,
-// several as a list under how many there were.
-func Sentences(sentences []string) string {
-	if len(sentences) == 1 {
-		return sentences[0]
-	}
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("It changed %d times since the last notice you were told, oldest first:", len(sentences)))
-	for _, sentence := range sentences {
-		b.WriteString("\n- " + sentence)
-	}
-	return b.String()
 }
 
 // Headline is a notice's first line: the queue and what happened to it.

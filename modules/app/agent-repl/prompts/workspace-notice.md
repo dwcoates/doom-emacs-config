@@ -1,7 +1,7 @@
-<!-- used by: daemon/internal/workspacesubs (a workspace subscription's notice of the followed workspace's change); placeholders: {{label}}, {{followed}}, {{event}}, {{status}} -->
+<!-- used by: daemon/internal/workspacesubs (a workspace subscription's notice of the followed workspace's change); placeholders: {{label}}, {{event}}, {{status}} -->
 {{label}}
 
-A workspace you subscribed to changed: `{{followed}}` {{event}}
+A workspace you subscribed to changed. {{event}}
 
 {{status}}
 
