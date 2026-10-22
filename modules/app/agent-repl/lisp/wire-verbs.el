@@ -4473,11 +4473,9 @@ Emacs) or `:hold' (a click in the webapp); exactly one is set."
           (agent-repl-wire-verbs--decode-oneof
            message "viewport" json
            (list (list 'center :center
-                       (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                    "FeedSelectionRowViewportCenter" v)))
+                       (agent-repl-wire-verbs--empty-arm "FeedSelectionRowViewportCenter"))
                  (list 'hold :hold
-                       (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                    "FeedSelectionRowViewportHold" v))))))))
+                       (agent-repl-wire-verbs--empty-arm "FeedSelectionRowViewportHold")))))))
 
 (defun agent-repl-wire-decode-feed-selection-row (message json)
   "Decode the selected-row MESSAGE from JSON into (:row FEEDID :viewport VP).
@@ -4502,14 +4500,11 @@ ARM is `:return-to-tail', `:stay' or `:hold'; exactly one is set."
           (agent-repl-wire-verbs--decode-oneof
            message "viewport" json
            (list (list 'returnToTail :return-to-tail
-                       (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                    "FeedSelectionNoneReturnToTail" v)))
+                       (agent-repl-wire-verbs--empty-arm "FeedSelectionNoneReturnToTail"))
                  (list 'stay :stay
-                       (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                    "FeedSelectionNoneStay" v)))
+                       (agent-repl-wire-verbs--empty-arm "FeedSelectionNoneStay"))
                  (list 'hold :hold
-                       (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                    "FeedSelectionNoneHold" v))))))))
+                       (agent-repl-wire-verbs--empty-arm "FeedSelectionNoneHold")))))))
 
 (defun agent-repl-wire-decode-feed-selection (json)
   "Decode frontend.v1.FeedSelection from JSON into (:arm ARM :value V).
@@ -4550,11 +4545,9 @@ ARM is `:selected' (V (:selection SEL)), `:nothing-selectable' or `:none'
            (list (list 'selected :selected
                        #'agent-repl-wire-decode-select-feed-row-success-selected)
                  (list 'nothingSelectable :nothing-selectable
-                       (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                    "SelectFeedRowSuccessNothingSelectable" v)))
+                       (agent-repl-wire-verbs--empty-arm "SelectFeedRowSuccessNothingSelectable"))
                  (list 'none :none
-                       (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                    "SelectFeedRowSuccessNone" v))))))))
+                       (agent-repl-wire-verbs--empty-arm "SelectFeedRowSuccessNone")))))))
 
 (defun agent-repl-wire-decode-select-feed-row-error (json)
   "Decode SelectFeedRowError from JSON into (:cause (:arm ARM :value V)).
@@ -4652,14 +4645,11 @@ else the latest)."
                    (agent-repl-wire-verbs--decode-oneof
                     message "chosen" json
                     (list (list 'selected :selected
-                                (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                             "RollbackPlanTargetSelected" v)))
+                                (agent-repl-wire-verbs--empty-arm "RollbackPlanTargetSelected"))
                           (list 'latest :latest
-                                (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                             "RollbackPlanTargetLatest" v)))
+                                (agent-repl-wire-verbs--empty-arm "RollbackPlanTargetLatest"))
                           (list 'named :named
-                                (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                             "RollbackPlanTargetNamed" v)))))
+                                (agent-repl-wire-verbs--empty-arm "RollbackPlanTargetNamed"))))
                    :arm)
           :excerpt (agent-repl-wire-verbs--decode-string message 'excerpt json)
           :prompts-dropped (agent-repl-wire--decode-uint32 message 'promptsDropped json))))
@@ -4687,7 +4677,7 @@ ARM is `:kept' (V nil) or `:restored' (V the restored plist)."
     (agent-repl-wire-verbs--decode-oneof
      message "files" json
      (list (list 'kept :kept
-                 (lambda (v) (agent-repl-wire-verbs--decode-empty "RollbackPlanFilesKept" v)))
+                 (agent-repl-wire-verbs--empty-arm "RollbackPlanFilesKept"))
            (list 'restored :restored #'agent-repl-wire-decode-rollback-plan-files-restored)))))
 
 (defun agent-repl-wire-decode-rollback-plan-drop-queued (json)
@@ -4731,8 +4721,7 @@ ARM is `:plan' (V the plan plist) or `:nothing-to-roll-back' (V nil)."
            message "outcome" json
            (list (list 'plan :plan #'agent-repl-wire-decode-rollback-plan)
                  (list 'nothingToRollBack :nothing-to-roll-back
-                       (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                    "PlanRollbackNothingToRollBack" v))))))))
+                       (agent-repl-wire-verbs--empty-arm "PlanRollbackNothingToRollBack")))))))
 
 (defun agent-repl-wire-verbs--decode-detail (message json)
   "Decode MESSAGE, which carries only its `detail' sentence, from JSON.
@@ -5009,10 +4998,6 @@ reaching the wire."
            message 'editingTurn json
            #'agent-repl-wire-decode-edit-held-prompt-being-edited-editing-turn))))
 
-(defun agent-repl-wire-decode-edit-held-prompt-empty-cause (message)
-  "Return a decoder for the empty refusal arm MESSAGE."
-  (lambda (json) (agent-repl-wire-verbs--decode-empty message json)))
-
 (defun agent-repl-wire-decode-edit-held-prompt-error (json)
   "Decode EditHeldPromptError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
@@ -5025,29 +5010,29 @@ THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
            (list (list 'unknownWorkspace :unknown-workspace
-                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptUnknownWorkspace"))
+                       (agent-repl-wire-verbs--empty-arm "EditHeldPromptUnknownWorkspace"))
                  (list 'workspaceRefMismatch :workspace-ref-mismatch
                        #'agent-repl-wire-decode-edit-held-prompt-workspace-ref-mismatch)
                  (list 'transferringAway :transferring-away
                        #'agent-repl-wire-decode-edit-held-prompt-transferring-away)
                  (list 'notYetAdopted :not-yet-adopted
-                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNotYetAdopted"))
+                       (agent-repl-wire-verbs--empty-arm "EditHeldPromptNotYetAdopted"))
                  (list 'noSuchHold :no-such-hold
-                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNoSuchHold"))
+                       (agent-repl-wire-verbs--empty-arm "EditHeldPromptNoSuchHold"))
                  (list 'notHeld :not-held
-                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNotHeld"))
+                       (agent-repl-wire-verbs--empty-arm "EditHeldPromptNotHeld"))
                  (list 'alreadyDelivered :already-delivered
-                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptAlreadyDelivered"))
+                       (agent-repl-wire-verbs--empty-arm "EditHeldPromptAlreadyDelivered"))
                  (list 'beingEdited :being-edited
                        #'agent-repl-wire-decode-edit-held-prompt-being-edited)
                  (list 'notEditing :not-editing
-                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNotEditing"))
+                       (agent-repl-wire-verbs--empty-arm "EditHeldPromptNotEditing"))
                  (list 'noEditor :no-editor
-                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptNoEditor"))
+                       (agent-repl-wire-verbs--empty-arm "EditHeldPromptNoEditor"))
                  ;; The prompt's delivery call is in flight: neither held nor
                  ;; delivered yet, and back in the tray if the call fails.
                  (list 'beingDelivered :being-delivered
-                       (agent-repl-wire-decode-edit-held-prompt-empty-cause "EditHeldPromptBeingDelivered")))))))
+                       (agent-repl-wire-verbs--empty-arm "EditHeldPromptBeingDelivered")))))))
 
 (defun agent-repl-wire-decode-edit-held-prompt-response (json)
   "Decode EditHeldPromptResponse from JSON into (:arm ARM :value V)."
@@ -5242,10 +5227,10 @@ Returns (:workspace REF :outcome ONEOF), ONEOF's arm one of `:sent',
           (agent-repl-wire-verbs--decode-oneof
            message "outcome" json
            (list (list 'sent :sent
-                       (lambda (value) (agent-repl-wire-verbs--decode-empty "SendHiddenKeepalivesSent" value)))
+                       (agent-repl-wire-verbs--empty-arm "SendHiddenKeepalivesSent"))
                  (list 'skipped :skipped #'agent-repl-wire-decode-send-hidden-keepalives-skipped)
                  (list 'notRunning :not-running
-                       (lambda (value) (agent-repl-wire-verbs--decode-empty "SendHiddenKeepalivesNotRunning" value)))
+                       (agent-repl-wire-verbs--empty-arm "SendHiddenKeepalivesNotRunning"))
                  (list 'failed :failed
                        (lambda (value)
                          (agent-repl-wire-verbs--decode-string-fields

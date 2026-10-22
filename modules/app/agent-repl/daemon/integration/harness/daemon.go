@@ -1430,13 +1430,11 @@ func (d *Daemon) killGroup() bool {
 	if d.afterLeaderExit != nil {
 		d.afterLeaderExit()
 	}
-	if !d.signalGroup(pgid, syscall.SIGKILL) {
-		return false
-	}
-	// THE GROUP IS CONTINUED, AS THE LEADER WAS (killStopped): an accepted
-	// SIGKILL never resumes a member the group stop suspended. Every member
-	// has the SIGKILL pending, so its next instant is its exit.
-	if !d.signalGroup(pgid, syscall.SIGCONT) {
+	// THE GROUP IS KILLED AND CONTINUED, AS THE LEADER WAS (killStopped): an
+	// accepted SIGKILL never resumes a member the group stop suspended. Every
+	// member has the SIGKILL pending, so its next instant is its exit.
+	if err := killStoppedGroup(pgid); err != nil {
+		d.t.Errorf("harness: kill the daemon's group %d: %v", pgid, err)
 		return false
 	}
 	// KILL RETURNS ONCE EVERY MEMBER HAS EXITED, NOT ONLY THE LEADER. A

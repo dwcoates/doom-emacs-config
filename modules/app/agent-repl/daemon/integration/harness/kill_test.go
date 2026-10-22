@@ -2,6 +2,7 @@ package harness
 
 import (
 	"agent-repld/internal/procgroup"
+	"agent-repld/internal/sourcescan"
 	"bufio"
 	"context"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -1058,5 +1060,25 @@ func TestEveryStallReportListsThroughStallListing(t *testing.T) {
 	// Assert
 	if direct != 1 || shared != 3 {
 		t.Fatalf("the listing's columns are spelled %d times and stallListing named %d times, want 1 and 3 (its definition and both reports)", direct, shared)
+	}
+}
+
+// TestTheHarnessKillsAStoppedGroupThroughOneHelper pins that the harness
+// SIGKILLs and continues a process group only through killStoppedGroup, so
+// Kill's own group kill and awaitGroupEnd's re-kill cannot drift apart: no
+// production file of the package signals a group's SIGKILL or SIGCONT itself.
+func TestTheHarnessKillsAStoppedGroupThroughOneHelper(t *testing.T) {
+	// Arrange
+	files := sourcescan.Production(t)
+	handRolled := regexp.MustCompile(`signalGroup\([^)]*syscall\.SIG(KILL|CONT)\)`)
+
+	for _, f := range files {
+		// Act
+		loc := handRolled.FindIndex(f.Source)
+
+		// Assert
+		if loc != nil {
+			t.Errorf("%s signals a group's SIGKILL or SIGCONT by hand (%q); use killStoppedGroup", f.Name, f.Source[loc[0]:loc[1]])
+		}
 	}
 }

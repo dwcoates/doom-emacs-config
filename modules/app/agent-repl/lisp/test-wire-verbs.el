@@ -5699,3 +5699,28 @@ instead diverges from it unseen."
                 agent-repl-wire-decode-finish-workspace-error-owner-lands))
     (should (string-match-p "agent-repl-wire-verbs--decode-ref-arm"
                             (prin1-to-string (symbol-function fn))))))
+
+(ert-deftest agent-repl-test-wire-verbs-empty-arm-decodes-an-empty-message ()
+  "An empty-arm decoder answers nil for the empty JSON object."
+  (agent-repl-test-wire-verbs--with-common
+    (should (null (funcall (agent-repl-wire-verbs--empty-arm "SomeEmptyArm") nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-empty-arm-refuses-a-field ()
+  "An empty-arm decoder refuses any field as unknown, naming its message."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (funcall (agent-repl-wire-verbs--empty-arm "SomeEmptyArm") '((stray . "x")))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-empty-arms-share-one-decoder ()
+  "Every empty arm in the verbs codec is decoded through
+`agent-repl-wire-verbs--empty-arm', so no site hand-rolls a lambda around
+`agent-repl-wire-verbs--decode-empty' that could drift from it."
+  (let ((source (with-temp-buffer
+                  (insert-file-contents
+                   (concat (file-name-sans-extension
+                            (symbol-file 'agent-repl-wire-verbs--empty-arm 'defun))
+                           ".el"))
+                  (buffer-string))))
+    (should-not (string-match-p
+                 "(lambda (\\([a-z]+\\))[ \t\n]+(agent-repl-wire-verbs--decode-empty[ \t\n]+\"[A-Za-z]+\"[ \t\n]+\\1))"
+                 source))))
