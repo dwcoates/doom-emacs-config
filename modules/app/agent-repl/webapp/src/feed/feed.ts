@@ -561,13 +561,20 @@ export function mountFeed(
         // Marked FIRST: a refusal whose cause cannot be read still ends the
         // wait of a tab held for this page.
         markConversationDrawn("refused");
-        log.error("the daemon refused to open the workspace's root feed", {
-          operation: "feed.root-open-refused",
-          context: {
-            arm: requireCase(result.value.cause ?? {}, "OpenFeedError.cause")
-              .case,
-          },
-        });
+        {
+          const arm = requireCase(result.value.cause ?? {}, "OpenFeedError.cause").case;
+          // A WORKSPACE MOVING TO ITS SUCCESSOR IS A PLANNED MOVE, not a
+          // failure: the daemon answered that it no longer serves the
+          // workspace, which a deploy's handover does to every page it moves
+          // (owner ruling, 2026-10-22). Every other refusal is an error.
+          const record = arm === "transferringAway" ? log.info : log.error;
+          record(
+            arm === "transferringAway"
+              ? "the daemon handed the workspace to its successor, so it refused to open the root feed here"
+              : "the daemon refused to open the workspace's root feed",
+            { operation: "feed.root-open-refused", context: { arm } },
+          );
+        }
         // THE DAEMON ANSWERED AND REFUSED, so the loop's own card would name a
         // daemon that is plainly reachable (the audit's N3 row 14). The footer
         // says what actually stopped: this feed is no longer tailing.

@@ -46,7 +46,7 @@
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
 import { log } from "../log.js";
-import { daemonUnreachable, frameUndecodable, frameUndrawable, type FailureSink } from "../failure/sink.js";
+import { daemonUnreachable, frameUndecodable, frameUndrawable, outageAnnounced, type FailureSink } from "../failure/sink.js";
 import { clearClientFailure, clearClientFailures, reportClientFailure } from "./link.js";
 import { MalformedView, UnknownPushArm, isMalformedView, isUnknownPushArm } from "./malformed.js";
 import { assertNoUnknownFields } from "./strict.js";
@@ -278,10 +278,22 @@ export function watchStream<Res extends Message>(
 
   const reportUnreachable = (end: StreamEnd): void => {
     const { closeCode, closeReason } = closeEvidence(end);
-    log.error(`the ${opts.name} stream ended without being cancelled; reopening`, {
-      operation: "rpc.stream-transport-failure",
-      context: { rpc: opts.name, end: end.kind, close_code: closeCode, close_reason: closeReason, backoff_ms: backoffMs },
-    });
+    const context = { rpc: opts.name, end: end.kind, close_code: closeCode, close_reason: closeReason, backoff_ms: backoffMs };
+    // AN END INSIDE AN ANNOUNCED OUTAGE IS THE ANNOUNCEMENT COMING TRUE, not
+    // a failure (owner ruling, 2026-10-22): recorded at INFO, still reopened,
+    // and its card still held back by the window. Past the window it is an
+    // error again.
+    if (outageAnnounced(ctx.failures)) {
+      log.info(`the ${opts.name} stream ended inside the daemon's announced outage; reopening`, {
+        operation: "rpc.stream-ended-announced",
+        context,
+      });
+    } else {
+      log.error(`the ${opts.name} stream ended without being cancelled; reopening`, {
+        operation: "rpc.stream-transport-failure",
+        context,
+      });
+    }
     ctx.failures.report(daemonUnreachable(closeCode, closeReason));
     // AFTER the failure, so the footer's line names this stream rather than
     // the failure's generic account of the same ending.

@@ -2239,6 +2239,45 @@ describe("mountFeed and the client's link verdict", () => {
     );
   });
 
+  it("records a workspace handed to the successor as a planned move, at info", async () => {
+    // Arrange: a deploy's handover answers the root feed's open this way for
+    // every page it moves (owner ruling, 2026-10-22).
+    const capture = captureLogRecords();
+    const h = harness({
+      openFeed: () =>
+        create(OpenFeedResponseSchema, {
+          result: { case: "error", value: { cause: { case: "transferringAway", value: { address: "127.0.0.1:1" } } } },
+        }),
+    });
+
+    // Act
+    mount(h);
+    await settle();
+
+    // Assert
+    const record = await forwardedRecord(capture, "feed.root-open-refused");
+    expect([record.level.case, record.context?.["arm"]]).toEqual(["info", "transferringAway"]);
+  });
+
+  it("records any other refusal of the root feed at error", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const h = harness({
+      openFeed: () =>
+        create(OpenFeedResponseSchema, {
+          result: { case: "error", value: { cause: { case: "feedUndecodable", value: {} } } },
+        }),
+    });
+
+    // Act
+    mount(h);
+    await settle();
+
+    // Assert
+    const record = await forwardedRecord(capture, "feed.root-open-refused");
+    expect([record.level.case, record.context?.["arm"]]).toEqual(["error", "feedUndecodable"]);
+  });
+
   it("reports a reveal probe that never reached the daemon as a transport failure", async () => {
     const h = harness({
       openFeed: (req) => {

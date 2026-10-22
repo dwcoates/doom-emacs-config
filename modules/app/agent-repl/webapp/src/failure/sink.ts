@@ -64,6 +64,25 @@ export interface FailureSink {
    * headless one) has no row to hold back; `createLocalFailures` implements it.
    */
   suppress?(arm: ClientFailureArm, untilMs: number): void;
+  /**
+   * Whether ARM is held back right now by an announced window (`suppress`).
+   * OPTIONAL for the same reason `suppress` is: a collecting sink announces
+   * nothing, so nothing is ever expected of it.
+   */
+  suppressing?(arm: ClientFailureArm): boolean;
+}
+
+/**
+ * Whether the daemon has ANNOUNCED the outage this page is inside: a deploy's
+ * handover or a bounce said it was going away and for how long, so a link that
+ * drops inside that window is the announcement coming true, not a failure.
+ *
+ * THE ONE QUESTION every transport failure asks before it is recorded (owner
+ * ruling, 2026-10-22: nothing is logged as an error during a deploy unless it
+ * is one), so a stream and a unary call cannot answer it two ways.
+ */
+export function outageAnnounced(failures: FailureSink): boolean {
+  return failures.suppressing?.("daemonUnreachable") === true;
 }
 
 // ---------------------------------------------------------------------------

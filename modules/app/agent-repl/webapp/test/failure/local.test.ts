@@ -355,15 +355,30 @@ describe("createLocalFailures: suppress", () => {
     expect(armsOf(failures)).toEqual(["bootFailed"]);
   });
 
-  it("clears the suppression on retract, so an early recovery is not muted on", () => {
+  it("keeps the announced window standing across a retract, so a handover's next stream end stays expected", () => {
+    // ARRANGE: a deploy's handover moves streams one at a time; one reading
+    // again is not the outage over (owner ruling, 2026-10-22).
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     const failures = createLocalFailures();
     failures.suppress("daemonUnreachable", NOW + 8000);
+    // ACT
     failures.retract("daemonUnreachable");
     failures.report(daemonUnreachable(1006, "gone"));
-    expect(armsOf(failures)).toEqual(["daemonUnreachable"]);
+    // ASSERT
+    expect([failures.standing(), failures.suppressing("daemonUnreachable")]).toEqual([[], true]);
   });
+
+  it("answers suppressing only while the window stands, and only for its arm", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const failures = createLocalFailures();
+    failures.suppress("daemonUnreachable", NOW + 8000);
+    const inside = [failures.suppressing("daemonUnreachable"), failures.suppressing("bootFailed")];
+    vi.setSystemTime(NOW + 8001);
+    expect([...inside, failures.suppressing("daemonUnreachable")]).toEqual([true, false, false]);
+  });
+
 });
 
 describe("createLocalFailures and the client's link verdict", () => {
