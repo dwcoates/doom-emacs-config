@@ -391,6 +391,9 @@ type Verbs interface {
 	MarkViewed(ctx context.Context, ws ids.WorkspaceID) error
 	// SetPriority sets or clears the roster priority badge.
 	SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error
+	// SetPrincipalLink records the workspace's principal link, which the
+	// topbar's summary opens, or clears it with nil.
+	SetPrincipalLink(ctx context.Context, ws ids.WorkspaceID, link *string) error
 	// SetHidden moves the workspace into the roster's hidden section, or back
 	// out of it, and republishes the roster.
 	SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error
