@@ -82,6 +82,16 @@ func readUsage(usage map[string]any) *conversationv1.TokenUsage {
 	}
 }
 
+// readModel reads the model the vendor says answered a response, nil when it
+// named none — absence draws no model, never a guessed one.
+func readModel(v any) *conversationv1.AgentModel {
+	name, ok := v.(string)
+	if !ok || name == "" {
+		return nil
+	}
+	return &conversationv1.AgentModel{Name: name}
+}
+
 // readEffort maps the vendor's effort literal onto the one canonical effort
 // vocabulary. An absent or unrecognized level is UNSET, never "low": a consumer
 // that draws effort must draw nothing when the producer reported none.
