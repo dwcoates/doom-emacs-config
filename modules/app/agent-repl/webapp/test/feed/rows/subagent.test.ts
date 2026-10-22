@@ -90,6 +90,26 @@ describe("drawFeedSubagent: the head's parts", () => {
     expect(el.querySelector(".subagent-tokens")?.classList.contains("token-count")).toBe(true);
   });
 
+  it("draws the model its latest response named in parentheses", () => {
+    const { el } = drawRow(subagentRow("b1", { model: "claude-sonnet-5" }));
+    expect(el.querySelector(".subagent-model")?.textContent).toBe("(claude-sonnet-5)");
+  });
+
+  it("draws the model right after the label", () => {
+    const { el } = drawRow(subagentRow("b1", { model: "claude-sonnet-5", description: "sweep the repo" }));
+    expect(el.querySelector(".subagent-label")?.nextElementSibling?.className).toBe("subagent-model");
+  });
+
+  it("draws the model on a detached head too", () => {
+    const { el } = drawRow(subagentRow("b1", { detached: true, model: "claude-haiku-4-5" }));
+    expect(el.querySelector(".subagent-model")?.textContent).toBe("(claude-haiku-4-5)");
+  });
+
+  it("draws NO model before a response named one, never a guessed one", () => {
+    const { el } = drawRow(subagentRow("b1"));
+    expect(el.querySelector(".subagent-model")).toBeNull();
+  });
+
   it("refuses a head with no label", () => {
     const { ctx } = harness();
     const row = subagentRow("b1");
@@ -693,5 +713,27 @@ describe("drawFeedSubagent: the badge before the clock", () => {
     const { el } = drawRow(row);
     // Assert
     expect(el.querySelector(".subagent-clock")?.classList.contains(HEAD_CLOCK_CLASS)).toBe(true);
+  });
+});
+
+describe("drawFeedSubagent: the model's styling", () => {
+  let uninstall = (): void => undefined;
+  afterEach(() => {
+    uninstall();
+  });
+
+  it.each([
+    ["font-size", "0.7rem"],
+    ["color", "var(--info-model)"],
+  ])("draws the model with %s %s", (property, want) => {
+    // Arrange
+    uninstall = installStylesheet();
+    const { el } = drawRow(subagentRow("b1", { model: "claude-sonnet-5" }));
+    document.body.append(el);
+    const model = el.querySelector(".subagent-model") as HTMLElement;
+    // Act
+    const value = cascadedValue(model, property);
+    // Assert
+    expect(value).toBe(want);
   });
 });

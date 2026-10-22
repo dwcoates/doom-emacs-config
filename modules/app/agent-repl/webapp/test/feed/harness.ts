@@ -768,10 +768,12 @@ export function subagentRow(
     description?: string;
     tokens?: string;
     workId?: string;
+    model?: string;
   } = {},
 ): FeedRow {
   const subagent = create(FeedSubagentSchema, {
     label: { text: "Explore" },
+    model: opts.model === undefined ? undefined : { name: opts.model },
     workId: opts.workId === undefined ? undefined : { text: opts.workId },
     description: opts.description === undefined ? undefined : { text: opts.description },
     tokens: opts.tokens === undefined ? undefined : { text: opts.tokens },

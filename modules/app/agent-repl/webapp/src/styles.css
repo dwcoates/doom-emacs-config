@@ -5878,7 +5878,7 @@ bubble-body.bubble-body { display: block; }
    right end (.head-clock, .merge-head-end) is the bubble's right edge. */
 .bubble-head-slot { flex: 1 1 auto; }
 
-/* The subagent head line: label, description, tokens, clock, quietness, stop.
+/* The subagent head line: label, model, description, tokens, clock, quietness, stop.
    Laid out on one row in the fold's own pill, which the existing .async-ticker
    rule already dresses. */
 .subagent-head {
@@ -5899,6 +5899,13 @@ bubble-body.bubble-body { display: block; }
    adopt it. Yellow for now (var(--token-yellow)). */
 .token-count { color: var(--token-yellow); }
 .subagent-tokens { font-size: 0.7rem; }
+/* The model after the label ("Explore (claude-sonnet-5)", owner request,
+   2026-10-22): the head's small figure size, in the topbar's model hue. */
+.subagent-model {
+  color: var(--info-model);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
 /* The description is the bubble's TITLE: the shared one-line title fold
    (`.title-fold`, title-fold.ts) caps it and writes its ellipsis. The width
    cap stays. */
