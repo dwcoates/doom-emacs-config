@@ -1682,16 +1682,7 @@ func TestAnInterruptedTurnKeepsTheProseItHadReached(t *testing.T) {
 // re-adopted work, and keyed by its own call's id.
 func (h *harness) standingShell(work, command string) {
 	h.t.Helper()
-	h.resolver.OnStandingWork(testWorkspace, &conversationv1.AgentDetachedWork{
-		Kind:  kinds.Bash(),
-		Work:  &conversationv1.DetachedWorkId{Value: work},
-		Owner: mainAgent(),
-		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
-			WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Bash{
-				Bash: bashCall(work, command).GetBash(),
-			}},
-		}},
-	})
+	h.resolver.OnStandingWork(testWorkspace, createdShell(work, command))
 }
 
 // TestARestatedShellPastTheReplayedPageIsNoFaultAtAReplayedTurnEnd is the

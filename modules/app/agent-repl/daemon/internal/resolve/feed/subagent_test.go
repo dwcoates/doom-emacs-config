@@ -2815,19 +2815,62 @@ func TestACreatedSubagentWithNoKnownOwnerDrawsNothing(t *testing.T) {
 	}
 }
 
-func TestACreatedShellIsHeldUntilItsCallDrawsAndThenReplacesIt(t *testing.T) {
-	// Arrange: a re-announced live shell whose call the feed has not drawn.
-	h := newHarness(t)
-	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+// createdShell is a created-origin shell announcement, owned by the main
+// agent and keyed by its own call's id, as the shim states re-adopted work.
+func createdShell(work, command string) *conversationv1.AgentDetachedWork {
+	return &conversationv1.AgentDetachedWork{
 		Kind:  kinds.Bash(),
-		Work:  &conversationv1.DetachedWorkId{Value: "toolu_bash"},
+		Work:  &conversationv1.DetachedWorkId{Value: work},
 		Owner: mainAgent(),
 		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
 			WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Bash{
-				Bash: bashCall("toolu_bash", "npm test").GetBash(),
+				Bash: bashCall(work, command).GetBash(),
 			}},
 		}},
-	}, nil, nil)
+	}
+}
+
+func TestACreatedShellIsBuiltAsTheShimStatesReadoptedWork(t *testing.T) {
+	// Act.
+	got := createdShell("toolu_x", "make")
+
+	// Assert.
+	bash := got.GetCreated().GetWorkCreated().GetBash()
+	if got.GetWork().GetValue() != "toolu_x" || got.GetOwner().GetValue() != mainAgent().GetValue() ||
+		got.GetKind() == nil || bash.GetStart().GetCommand().GetLine() != "make" {
+		t.Fatalf("createdShell = %+v, want work toolu_x, owner main, a kind, and the command", got)
+	}
+}
+
+// The two ways a feed test hands the resolver a created shell share one shape.
+func TestEveryCreatedShellInTheseTestsIsBuiltByCreatedShell(t *testing.T) {
+	for _, file := range []string{"subagent_test.go", "turnended_test.go"} {
+		t.Run(file, func(t *testing.T) {
+			// Arrange.
+			text, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act.
+			n := strings.Count(string(text), "DetachableWork_"+"Bash{")
+
+			// Assert: only createdShell itself builds one by hand.
+			want := 0
+			if file == "subagent_test.go" {
+				want = 1
+			}
+			if n != want {
+				t.Fatalf("%s builds %d created shells by hand, want %d (use createdShell)", file, n, want)
+			}
+		})
+	}
+}
+
+func TestACreatedShellIsHeldUntilItsCallDrawsAndThenReplacesIt(t *testing.T) {
+	// Arrange: a re-announced live shell whose call the feed has not drawn.
+	h := newHarness(t)
+	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), createdShell("toolu_bash", "npm test"), nil, nil)
 	if got := h.shellHeadFeeds(); len(got) != 0 {
 		t.Fatalf("shell heads on %v before the call drew, want none", got)
 	}
