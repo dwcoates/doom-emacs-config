@@ -415,6 +415,9 @@ if [ ! -x "$binary" ]; then
 fi
 
 helper_args=(--mode "$format" --level "$level" --width "$width" --sample-n "$sample_n")
+# A WORKSPACE WHOSE DIRECTORY IS GONE (a landed merge's worktree) still has its
+# targets here, named by its ID; the reader reads them when its link is gone.
+helper_args+=(--workspace-logs-dir "$state_root/logs")
 [ -z "$since" ] || helper_args+=(--since "$since")
 [ -z "$until" ] || helper_args+=(--until "$until")
 [ -z "$runtimes" ] || helper_args+=(--runtime "$runtimes")
