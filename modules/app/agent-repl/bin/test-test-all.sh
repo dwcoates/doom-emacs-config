@@ -21,18 +21,8 @@ CSVHeader="run_id,recorded_at_utc,commit,branch,suite,duration_seconds,measure"
 # shellcheck source=/dev/null
 . "$THIS_DIR/lib-fake-git-fixture.sh"
 
-PASS=0
-FAIL=0
-
-pass() {
-    printf '  PASS: %s\n' "$1"
-    PASS=$((PASS + 1))
-}
-
-fail() {
-    printf '  FAIL: %s\n' "$1" >&2
-    FAIL=$((FAIL + 1))
-}
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 # make_tree lays out a fake repository: the real test-all.sh, recording
 # stand-ins for the two wrappers, and a stub `go` whose `build -o OUT` writes a
@@ -502,6 +492,4 @@ test_old_run_logs_past_the_keep_are_removed
 test_the_runner_does_not_inherit_the_logging_marker
 test_the_runner_is_told_its_log
 
-echo "-----"
-echo "passed: $PASS  failed: $FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish

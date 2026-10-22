@@ -70,10 +70,8 @@ fi
 # shellcheck source=lib-deploy-stamp.sh
 . "$THIS_DIR/lib-deploy-stamp.sh"
 
-PASS=0
-FAIL=0
-pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
-fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $2"; }
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 # --- build a fake project tree in a temp dir -------------------------------
 # Layout mirrors what build-frontend.sh expects relative to its parent dir.
@@ -1955,6 +1953,4 @@ test_split_run healing build_group_healing
 test_split_run dependencies build_group_dependencies
 test_split_run staging build_group_staging
 
-echo "-----"
-echo "passed: $PASS  failed: $FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish

@@ -15,18 +15,8 @@ trap 'rm -rf "$TMP"' EXIT
 # sink-finding cases, which match the reader's text exactly, failed whenever
 # the harness ran outside a TMPDIR without one.
 TMP="$(cd "$TMP" && pwd -P)"
-PASS=0
-FAIL=0
-
-pass() {
-    printf '  PASS: %s\n' "$1"
-    PASS=$((PASS + 1))
-}
-
-fail() {
-    printf '  FAIL: %s\n' "$1" >&2
-    FAIL=$((FAIL + 1))
-}
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 # shellcheck source=lib-grep-in.sh
 . "$THIS_DIR/lib-grep-in.sh"
@@ -203,7 +193,7 @@ test_central_default_emacs_sink() {
     mkdir -p "$state/logs"
     printf '%s\n' '{"timestamp":"2026-09-10T10:00:16.000000Z","runtime":"emacs","pid":51,"level":"info","verbosity":"normal","operation":"emacs.durable","message":"emacs durable central","context":{}}' \
         >"$state/logs/emacs.central.log"
-    out="$(AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE= run_logs --central --runtime emacs --json)"
+    out="$(AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE='' run_logs --central --runtime emacs --json)"
     rm -f "$state/logs/emacs.central.log"
     if grep_in "$out" -q '"operation":"emacs.durable"'; then
         pass "--central reads the durable <state>/logs/emacs.central.log by default"
@@ -1006,5 +996,4 @@ test_messages_source_in_timeline
 test_messages_source_fields_and_level
 test_follow
 
-printf '%d passed, %d failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish

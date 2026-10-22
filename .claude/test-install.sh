@@ -37,10 +37,8 @@ if [ "$(command -v git)" != "$FAKE_GIT_BIN/git" ]; then
   exit 2
 fi
 
-PASS=0
-FAIL=0
-pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); shift; if [ $# -gt 0 ]; then printf '%s\n' "$@" | sed 's/^/        /'; fi; }
+# shellcheck source=../modules/app/agent-repl/bin/lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../modules/app/agent-repl/bin/lib-harness-report.sh"
 
 # Local skills install.sh expects to find under modules/app/agent-repl/skills/.
 # agent-repl-debug is deliberately absent: it is PROJECT-scoped (checked-in
@@ -684,6 +682,4 @@ test_purge_is_idempotent
 test_purge_refuses_malformed_settings
 test_uninstall_purges_legacy_hooks
 
-echo
-echo "Passed: $PASS  Failed: $FAIL"
-exit $((FAIL > 0))
+harness_finish

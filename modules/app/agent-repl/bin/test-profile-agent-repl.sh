@@ -17,19 +17,8 @@ cleanup() {
     rm -rf "$TMP"
 }
 trap cleanup EXIT
-PASS=0
-FAIL=0
-
-pass() {
-    printf 'ok   - %s\n' "$1"
-    PASS=$((PASS + 1))
-}
-
-fail() {
-    printf 'FAIL - %s\n' "$1" >&2
-    [ -z "${2:-}" ] || printf '       %s\n' "$2" >&2
-    FAIL=$((FAIL + 1))
-}
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 # --- stubs: ps answers from a table, kill -WINCH is recorded, emacsclient answers
 STUBS="$TMP/stubs"
@@ -541,5 +530,4 @@ else
     fail "switch-bench cancels a tour that overruns its deadline, fails the run and closes its session" "rc=$rc out=$out"
 fi
 
-printf '\ntest-profile-agent-repl.sh: %d passed, %d failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish

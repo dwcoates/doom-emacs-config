@@ -71,10 +71,8 @@ command -v python3 >/dev/null 2>&1 || {
     exit 2
 }
 
-PASS=0
-FAIL=0
-pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
-fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $2"; return 0; }
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 # --- fixture ----------------------------------------------------------------
 
@@ -873,6 +871,4 @@ test_split_run cli readiness_group_cli
 test_split_run source-tree readiness_group_source_tree
 test_split_run bounce readiness_group_bounce
 
-echo "-----"
-echo "passed: $PASS  failed: $FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish

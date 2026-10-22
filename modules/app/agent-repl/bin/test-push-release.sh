@@ -21,8 +21,8 @@ clear_live_git_bindings
 
 THIS_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$THIS_DIR/push-release.sh"
-PASS=0
-FAIL=0
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-push-release-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -32,20 +32,6 @@ FAKE_BIN="$TMP/bin"
 mkdir -p "$FAKE_BIN"
 "$THIS_DIR/fake-git.sh" --install "$FAKE_BIN/git"
 export PATH="$FAKE_BIN:$PATH"
-
-pass() {
-  printf '  PASS: %s\n' "$1"
-  PASS=$((PASS + 1))
-}
-
-fail() {
-  printf '  FAIL: %s\n' "$1" >&2
-  FAIL=$((FAIL + 1))
-  shift
-  if [ "$#" -gt 0 ]; then
-    printf '%s\n' "$@" | sed 's/^/        /' >&2
-  fi
-}
 
 # mkrepo — a fake repository with two commits on master and the pre-push hook
 # installed. FIRST and SECOND hold the commits' ids; SECOND is master's tip.
@@ -153,5 +139,4 @@ echo "test-push-release.sh"
 for t in $(declare -F | awk '{print $3}' | grep '^test_'); do
   "$t"
 done
-printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish

@@ -81,10 +81,8 @@ esac
 EOF
 chmod +x "$BIN/sqlite3"
 
-fail() {
-  printf 'FAIL: %s\n' "$1" >&2
-  exit 1
-}
+# shellcheck source=../bin/lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../bin/lib-harness-report.sh"
 
 # start_fake_store MODE — bring up the scripted Connect server and block until
 # it is accepting. The FIFO write in the fixture completes only after
@@ -98,6 +96,7 @@ start_fake_store() {
   read -r -t 20 _ <"$READY_FIFO" || {
     cat "$TMP/fake-store.err" >&2
     fail "fake store ($1) never signalled readiness"
+    harness_finish
   }
 }
 
@@ -120,7 +119,7 @@ s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.bind(p)
 s.close()
 '
-  [ -S "$STORE_SOCK" ] || fail "refusing-socket fixture did not create a socket file"
+  [ -S "$STORE_SOCK" ] || { fail "refusing-socket fixture did not create a socket file"; harness_finish; }
 }
 
 # run_doctor [extra doctor args...] — always exits 1 here, because the
@@ -308,4 +307,5 @@ stop_fake_store
 grep_in "$DOCTOR_OUT" -q '"check":"launchd-shim-store","status":"PASS","detail":"com.agentrepl.shim-store loaded and running (pid 4242)"' ||
   fail "a loaded service's long launchctl print was not read to its pid: $DOCTOR_OUT"
 
-printf 'PASS: doctor probes the store Connect endpoints and bounds integrity scans\n'
+[ "$FAIL" -ne 0 ] || pass "doctor probes the store Connect endpoints and bounds integrity scans"
+harness_finish

@@ -13,11 +13,9 @@ set -uo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_SRC="$THIS_DIR/e2e-coverage.sh"
 SUMMARY_SRC="$THIS_DIR/e2e-shim-coverage-summary.mjs"
-PASS=0
-FAIL=0
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
-pass() { printf '  PASS: %s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf '  FAIL: %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
 
 make_tree() {
     local tree="$1" module
@@ -267,5 +265,4 @@ test_failed_npm_deps_abort_before_the_suite
 test_summary_counts_only_our_sources
 test_summary_without_our_sources_is_loud
 
-printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish

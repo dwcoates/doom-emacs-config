@@ -16,11 +16,9 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 CHECK="$THIS_DIR/check-go-deps.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-check-go-deps-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
-PASS=0
-FAIL=0
+# shellcheck source=lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
 
-pass() { printf '  PASS: %s\n' "$1"; PASS=$((PASS + 1)); }
-fail() { printf '  FAIL: %s\n' "$1" >&2; FAIL=$((FAIL + 1)); }
 
 # gomod writes one fixture go.mod. Its body is read from stdin.
 gomod() { # CASE-NAME REL-DIR
@@ -247,5 +245,4 @@ test_nested_node_modules_and_testdata_are_ignored
 test_no_go_mod_is_an_error
 test_real_module_tree_passes
 
-printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish

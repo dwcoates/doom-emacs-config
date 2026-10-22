@@ -27,13 +27,11 @@ FAKE_GIT="$THIS_DIR/../modules/app/agent-repl/bin/fake-git.sh"
 clear_live_git_bindings
 unset AGENT_REPL_SAFE_TEST_RUN
 
-PASS=0
-FAIL=0
+# shellcheck source=../modules/app/agent-repl/bin/lib-harness-report.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../modules/app/agent-repl/bin/lib-harness-report.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
-fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -z "${2:-}" ] || echo "       $2"; }
 
 # The only `git` the net, the hook, the cases and the foreign sessions reach.
 mkdir -p "$TMP/bin"
@@ -317,6 +315,4 @@ t_a_missing_hook_is_an_environment_error
 t_a_gone_runs_registration_is_pruned
 t_a_live_runs_registration_is_kept
 
-echo "-----"
-echo "passed: $PASS  failed: $FAIL"
-[ "$FAIL" -eq 0 ]
+harness_finish
