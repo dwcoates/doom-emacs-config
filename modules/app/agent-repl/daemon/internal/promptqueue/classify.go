@@ -374,18 +374,24 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 	// delivers when the turn ends. It is not retried: the retry would sit
 	// between the prompt and its verdict, and the safe verdict loses nothing
 	// but an interjection.
+	// THE JUDGE'S LATENCY IS RECORDED on both outcomes, so its timeout
+	// (classifier.RunTimeout) is set from measured healthy latency rather than
+	// a guess (2026-10-22: a 15s timeout killed one classification in twelve,
+	// and no record said how long the others took).
+	judgeStarted := q.deps.Now()
 	verdict, err := q.deps.Judge.Judge(ctx, runningText, saidText(sub.Said))
+	judgeMS := q.deps.Now().Sub(judgeStarted).Milliseconds()
 	if err != nil {
 		log.Error(opClassify, "the classifier failed; the prompt waits for the running turn to end",
-			dlog.Context{"running_turn": string(running), "cause": err.Error()})
+			dlog.Context{"running_turn": string(running), "cause": err.Error(), "judge_ms": judgeMS})
 		return wsm.Classification{
 			Arm:    wsm.ArmHoldForTurnEnd,
 			Reason: "the classifier could not decide, so the prompt waits for the running turn to end",
 			At:     q.deps.Now(),
 		}, classifier.RouteQueue
 	}
-	log.Debug(opClassify, "the classifier routed the prompt", dlog.Context{
-		"route": verdict.Route.String(), "reason": verdict.Reason,
+	log.Info(opClassify, "the classifier routed the prompt", dlog.Context{
+		"route": verdict.Route.String(), "reason": verdict.Reason, "judge_ms": judgeMS,
 	})
 	return wsm.Classification{Arm: routeArm(verdict.Route), Reason: verdict.Reason, At: q.deps.Now()}, verdict.Route
 }

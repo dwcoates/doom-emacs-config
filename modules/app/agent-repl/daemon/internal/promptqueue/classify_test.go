@@ -1440,3 +1440,42 @@ func TestAVerdictForAPromptRetiredWhileJudgedIsNotAnError(t *testing.T) {
 		})
 	}
 }
+
+func TestTheClassifiersLatencyIsRecordedOnEitherOutcome(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		level   string
+		message string
+	}{
+		{name: "a verdict", level: "info", message: "the classifier routed the prompt"},
+		{name: "a failure", err: errors.New("timeout: signal: killed"), level: "error", message: "the classifier failed; the prompt waits for the running turn to end"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the judge takes 1.5s of the queue's clock.
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+			h.judge.err = tt.err
+			h.judge.onJudge = func() { h.elapsed.Add(int64(1500 * time.Millisecond)) }
+
+			// Act.
+			if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+
+			// Assert.
+			for _, r := range h.log.Records() {
+				if r.Level == tt.level && r.Operation == opClassify && r.Message == tt.message {
+					if r.Context["judge_ms"] != int64(1500) {
+						t.Fatalf("judge_ms = %v (%T), want 1500", r.Context["judge_ms"], r.Context["judge_ms"])
+					}
+					return
+				}
+			}
+			t.Fatalf("records = %+v, want %q at %s carrying judge_ms", h.log.Records(), tt.message, tt.level)
+		})
+	}
+}
