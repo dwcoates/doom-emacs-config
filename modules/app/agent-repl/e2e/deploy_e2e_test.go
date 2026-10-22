@@ -26,7 +26,6 @@
 package e2e
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -159,7 +158,7 @@ func TestADeployOverARunningTurnHandsItOverAndEndsNothing(t *testing.T) {
 		sawHeld = sawHeld || held(row)
 	}
 	if !sawHeld {
-		ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+		ctx, cancel := w.WaitCtx()
 		harness.AwaitView(t, ctx, feed, "the live foreground Bash unit the turn parks on", held)
 		cancel()
 	}

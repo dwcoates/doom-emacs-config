@@ -36,7 +36,6 @@
 package e2e
 
 import (
-	"context"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -79,7 +78,7 @@ func TestMcpToolCall(t *testing.T) {
 	}
 
 	// Assert: the call raised no unmodeled-tool warning.
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := w.WaitCtx()
 	defer cancel()
 	view := harness.AwaitView(t, ctx, topbar, "the topbar after the MCP turn", func(v *frontendv1.TopbarView) bool { return v != nil })
 	if got := countUnmodeledWarnings(view, toolName); got != 0 {

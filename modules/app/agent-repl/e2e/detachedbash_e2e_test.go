@@ -297,7 +297,7 @@ func TestBashDetachedStartAndComplete(t *testing.T) {
 	turn := SubmitPrompt(t, w, ws, "!bash-detach")
 	AwaitTurnEnded(t, w, ws, turn)
 
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := w.WaitCtx()
 	defer cancel()
 
 	// BASH_DETACH's default command (no !bash-detach args): "for i in 1 2 3;
@@ -383,7 +383,7 @@ func TestBashDetachExplicitPoll(t *testing.T) {
 	turn := SubmitPrompt(t, w, ws, "!bash-detach-poll")
 	AwaitTurnEnded(t, w, ws, turn)
 
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := w.WaitCtx()
 	defer cancel()
 
 	// BASH_DETACH_POLL's default command (no args): "tail -f build.log"; the
@@ -446,7 +446,7 @@ func TestBashForegroundCompleted(t *testing.T) {
 	turn := SubmitPrompt(t, w, ws, "!bash")
 	AwaitTurnEnded(t, w, ws, turn)
 
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := w.WaitCtx()
 	defer cancel()
 
 	// BASH's default command (no !bash args): "pwd; ls | head", stdout

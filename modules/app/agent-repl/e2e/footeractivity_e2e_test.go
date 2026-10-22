@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"context"
 	"regexp"
 	"testing"
 
@@ -112,7 +111,7 @@ func TestNoFooterPushBetweenFeedItemsCarriesAFeedItemDerivedLine(t *testing.T) {
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "read")
 	awaitFeedRow(t, w, ws, "the read call's settled row", toolCallSettled(turn, "Read"))
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	ctx, cancel := w.WaitCtx()
 	defer cancel()
 	var got swept
 	select {
