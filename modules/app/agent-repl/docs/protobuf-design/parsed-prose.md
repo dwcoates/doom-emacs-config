@@ -149,3 +149,29 @@ wrong labels). That needs one parse, in one place, that every program reads.
     they were typed as (`webapp/src/bubble/body.ts` `unparsedProse`), a tree in them
     drawn as markdown rather than as a tree. This is the one place the webapp draws
     text no daemon served, and it parses nothing there either.
+
+### 4. A prompt's entries, and the responses they answer
+
+- **What:** `ProseBlock` gained the arm `ProseEntry entry = 3` (`ProseEntryLabel`,
+  `ProseEntryText`), and `FeedResponse` gained `repeated FeedResponseAnswer answers =
+  10` (`label`, `prompt`).
+- **Why:** the owner's original ask: a prompt answers a response's tree by label
+  (`3.1.2 - my answer`), and a label in the response links to the prompt that
+  answered it. Both ends need the parse, which only the daemon does.
+- **Decisions inside the shape:**
+  - Only a PROMPT's text is read for entries (the `tldr_prompt` grammar, linked into
+    the daemon through `tree-sitter-tldr/tldr_prompt/src`). A response's numbered
+    lines are its tree's.
+  - A line opening on a label and a marker is a pasted tree's root, not an entry: the
+    grammar's own heading rule, with the marker the deciding token.
+  - An entry's text is markdown, not a nested parse: blocks stay flat.
+  - The link lives on the RESPONSE (`answers`), because that is the row the reader
+    clicks a label in; an entry finds the response it answers by the rule below, so
+    the prompt carries no reference of its own.
+  - **The binding rule:** an entry answers the nearest response before its prompt, on
+    the same feed, whose tree holds a node with the entry's label. A reply to an older
+    response's label therefore binds to that response as long as no newer one reuses
+    the label.
+- **Consequences:**
+  - A response is re-published when a prompt answering it is drawn, and when such a
+    prompt is removed by a rollback.

@@ -1016,6 +1016,23 @@ message FeedResponse {
   // earlier response when the later row is first placed; the client draws the
   // interim treatment from THIS flag alone. `final_answer` outranks it.
   bool interim = 9;
+  // THE PROMPTS THAT ANSWERED THIS RESPONSE'S TREE, one per entry
+  // (frontend.v1.ProseEntry) that answers one of its labels, in feed order.
+  // An entry answers the NEAREST response before its prompt, on the same
+  // feed, whose tree holds a node with the entry's label; the client draws
+  // that node's label as a link to the prompt. A DAEMON FACT stated on every
+  // publication: the response is RE-PUBLISHED when a prompt answering it is
+  // first drawn and when one is removed (a rollback). Empty while nothing
+  // answers it, and always empty on a response with no tree.
+  repeated FeedResponseAnswer answers = 10;
+}
+
+// One entry of a later prompt that answers one of a response's labels.
+message FeedResponseAnswer {
+  // The label answered, as the response's tree carries it ("3.1.2").
+  string label = 1;
+  // The prompt row whose entry answers it.
+  FeedId prompt = 2;
 }
 
 // A vendor notice drawn on its own: the prose is the vendor's words, and the

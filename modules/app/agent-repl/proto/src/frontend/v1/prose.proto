@@ -64,7 +64,40 @@ message ProseBlock {
     // A metaprompt TLDR tree: the text's main tree, or one the model wrote
     // inside a language-less code fence.
     ProseTree tree = 2;
+    // One entry of a PROMPT answering one label of a response's tree
+    // (`3.1.2 - my answer`). Only a prompt's text is read for entries: a
+    // response's numbered lines are its tree's, never entries.
+    ProseEntry entry = 3;
   }
+}
+
+// ---- Entry: a prompt's answer to one label --------------------------------
+
+// One entry of a prompt: a column-0 line opening on a label (a dotted label,
+// or any label followed by a separator `-`, `–`, `—` or `:`), and every line
+// up to the next such line or the end of the text. The grammar's rule
+// (tree-sitter-tldr/tldr_prompt). A line opening on a label and a marker
+// (`1 🔧 text`) is a pasted tree's root, never an entry.
+message ProseEntry {
+  // The label the entry answers, as written ("3.1.2"), without its
+  // separator. Never empty.
+  ProseEntryLabel label = 1;
+  // What the entry says: the words after the label and its separator, and
+  // every line the entry runs to, as markdown. May be empty: a label alone
+  // on its line, with nothing after it.
+  ProseEntryText text = 2;
+}
+
+// An entry's label.
+message ProseEntryLabel {
+  // The label, as written.
+  string text = 1;
+}
+
+// What an entry says.
+message ProseEntryText {
+  // The markdown.
+  string markdown = 1;
 }
 
 // A run of ordinary markdown, exactly as written.
