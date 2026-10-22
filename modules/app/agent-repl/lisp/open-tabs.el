@@ -26,8 +26,12 @@
 ;;     asked for again, on the next link-up or roster push.
 ;;
 ;; THE STARTUP is this process's FIRST open: from process start until it
-;; finishes, the frame has no workspace of the user's yet, and the first
-;; drawn tab it opens is selected.
+;; finishes, the frame has no workspace of the user's yet.  It lands on the
+;; workspace the user had selected before the restart -- the roster's
+;; `current', which the daemon keeps durably -- once that tab is drawn
+;; (owner ruling, 2026-10-22: a restart, a deploy or a landed merge never
+;; changes the selection).  Only when the roster names no workspace the
+;; startup can draw does it land on the first drawn tab it opens.
 
 ;;; Code:
 
@@ -60,6 +64,9 @@
 (declare-function agent-repl--pseudo-workspace-name-p "core" (ws))
 (declare-function agent-repl--ws-current-name "workspace" ())
 
+(declare-function agent-repl-roster--current-id "roster" (roster))
+
+(defvar agent-repl-roster-view)
 (defvar agent-repl-roster--stream)
 (defvar agent-repl-roster--walking)
 (defvar agent-repl-link-up-functions)
@@ -374,13 +381,15 @@ once a daemon is serving."
          (agent-repl-open-tabs--show id ws))))
       (:hidden
        (when row (agent-repl-open-tabs--dormant id))
-       (agent-repl--info ws "elisp.open-tabs.opened-hidden ws=%s id=%s" ws id))
+       (agent-repl--info ws "elisp.open-tabs.opened-hidden ws=%s id=%s" ws id)
+       (agent-repl-open-tabs--maybe-land-startup))
       (:refused
        (when row (puthash id 'refused agent-repl-open-tabs--state))
        (agent-repl--error ws "elisp.open-tabs.refused ws=%s id=%s cause=%S"
                           ws id (plist-get outcome :value))
        (agent-repl-open-tabs--say "%s: the daemon refused to open it (%s)."
-                                  ws (agent-repl-open-tabs--cause-word outcome)))
+                                  ws (agent-repl-open-tabs--cause-word outcome))
+       (agent-repl-open-tabs--maybe-land-startup))
       (arm (agent-repl--error ws "elisp.open-tabs.unknown-outcome arm=%S ws=%s" arm ws)))))
 
 (defun agent-repl-open-tabs--cause-word (refused)
@@ -388,25 +397,68 @@ once a daemon is serving."
   (let ((arm (plist-get (plist-get (plist-get refused :value) :cause) :arm)))
     (if (keywordp arm) (substring (symbol-name arm) 1) "unnamed")))
 
+(defun agent-repl-open-tabs--drawn-open-p (name)
+  "Return non-nil when workspace NAME's tab is answered open and drawn."
+  (and (cl-find-if (lambda (row)
+                     (and (equal (plist-get row :name) name)
+                          (eq (gethash (plist-get row :id) agent-repl-open-tabs--state) 'open)))
+                   agent-repl-open-tabs--rows)
+       (member name (agent-repl-roster-drawn-tab-order))
+       t))
+
+(defun agent-repl-open-tabs--startup-landing ()
+  "Return (WS . SOURCE): where the startup lands now, WS nil while it waits.
+THE SELECTION BEFORE THE RESTART WINS.  The roster's `current' is the
+workspace the user last selected, kept by the daemon across every restart,
+so when it names a row of this walk that the bar draws and the daemon has
+not refused, the startup waits for that tab (SOURCE `roster') and lands
+on nothing else.  Only when the roster names no such row -- no selection
+at all, or one that is hidden, refused or gone -- is the first drawn tab
+answered open taken (SOURCE `first-drawn'), so a startup still never
+leaves the frame on no workspace."
+  (let* ((id (and agent-repl-roster-view
+                  (agent-repl-roster--current-id agent-repl-roster-view)))
+         (row (and id (agent-repl-open-tabs--row id)))
+         (name (and row (plist-get row :name))))
+    (if (and row
+             (not (plist-get row :collapsed))
+             (not (eq (gethash id agent-repl-open-tabs--state) 'refused))
+             (member name (agent-repl-roster-drawn-tab-order)))
+        (cons (and (agent-repl-open-tabs--drawn-open-p name) name) 'roster)
+      (cons (cl-find-if #'agent-repl-open-tabs--drawn-open-p
+                      (agent-repl-roster-drawn-tab-order))
+            'first-drawn))))
+
+(defun agent-repl-open-tabs--maybe-land-startup ()
+  "Select the startup's landing (`agent-repl-open-tabs--startup-landing').
+Only while the startup runs and has not landed yet; the selection is
+asked of the daemon like every other switch.  Every answer that can
+change the landing calls this: a tab drawn, and a tab answered hidden or
+refused, which may have been the one the startup waited for."
+  (when (agent-repl-open-tabs-choosing-p)
+    (pcase-let ((`(,ws . ,source) (agent-repl-open-tabs--startup-landing)))
+      (if (null ws)
+          (agent-repl--log agent-repl-open-tabs--central
+                           "elisp.open-tabs.startup-landing-waits source=%s" source)
+        (agent-repl--info ws "elisp.open-tabs.startup-lands ws=%s source=%s" ws source)
+        (setq agent-repl-open-tabs--startup-selected ws)
+        (agent-repl-host-request-switch ws 'startup)))))
+
 (defun agent-repl-open-tabs--show (id ws)
   "Draw workspace WS's tab (ref ID), now that it is open.
-THE STARTUP'S FIRST DRAWN TAB IS SELECTED at once, so a startup never
-shows no workspace while the rest come up; the selection is asked of the
-daemon like every other switch."
+THE STARTUP LANDS once its landing is drawn
+\(`agent-repl-open-tabs--maybe-land-startup'): the workspace selected
+before the restart, else the first drawn tab, so a startup never shows
+no workspace while the rest come up."
   (puthash id 'open agent-repl-open-tabs--state)
   (unless agent-repl-roster--walking
     (agent-repl-roster-refresh-order))
-  (let ((select (and (agent-repl-open-tabs-starting-p)
-                     (null agent-repl-open-tabs--startup-selected)
-                     (member ws (agent-repl-roster-drawn-tab-order))
-                     t)))
-    (agent-repl--info ws "elisp.open-tabs.tab-opened ws=%s id=%s selects=%s" ws id select)
-    (when (agent-repl-open-tabs-starting-p)
-      (agent-repl-startup-reach :first-tab))
-    (agent-repl-open-tabs--say "%s: ready." ws)
-    (when select
-      (setq agent-repl-open-tabs--startup-selected ws)
-      (agent-repl-host-request-switch ws 'startup)))
+  (agent-repl--info ws "elisp.open-tabs.tab-opened ws=%s id=%s choosing=%s"
+                    ws id (agent-repl-open-tabs-choosing-p))
+  (when (agent-repl-open-tabs-starting-p)
+    (agent-repl-startup-reach :first-tab))
+  (agent-repl-open-tabs--say "%s: ready." ws)
+  (agent-repl-open-tabs--maybe-land-startup)
   ;; The selection may name this workspace, and had no tab to land on.
   (unless agent-repl-roster--walking
     (agent-repl-roster-apply-current)))
