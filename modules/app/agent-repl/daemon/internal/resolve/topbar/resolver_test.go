@@ -1261,8 +1261,11 @@ func TestARetractedSynthesisWithNoVendorSummaryLeavesNoTitle(t *testing.T) {
 	}
 }
 
+// link is a principal link for SetPrincipalLink, which takes an optional url.
+func link(url string) *string { return &url }
+
 func TestThePrincipalLinkRidesTheTitle(t *testing.T) {
-	const link = "https://github.com/o/r/pull/7"
+	const url = "https://github.com/o/r/pull/7"
 	tests := []struct {
 		name     string
 		arrange  func(h *harness)
@@ -1272,19 +1275,19 @@ func TestThePrincipalLinkRidesTheTitle(t *testing.T) {
 	}{
 		{name: "a summary carries the link", arrange: func(h *harness) {
 			h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
-			h.r.SetPrincipalLink(testWS, link)
-		}, wantText: "Wire up the reconnect backoff", wantLink: link},
+			h.r.SetPrincipalLink(testWS, link(url))
+		}, wantText: "Wire up the reconnect backoff", wantLink: url},
 		{name: "a link set before the summary lands with it", arrange: func(h *harness) {
-			h.r.SetPrincipalLink(testWS, link)
+			h.r.SetPrincipalLink(testWS, link(url))
 			h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
-		}, wantText: "the vendor's own summary", wantLink: link},
+		}, wantText: "the vendor's own summary", wantLink: url},
 		{name: "a cleared link leaves plain text", arrange: func(h *harness) {
 			h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
-			h.r.SetPrincipalLink(testWS, link)
-			h.r.SetPrincipalLink(testWS, "")
+			h.r.SetPrincipalLink(testWS, link(url))
+			h.r.SetPrincipalLink(testWS, nil)
 		}, wantText: "Wire up the reconnect backoff"},
 		{name: "no summary publishes no link", arrange: func(h *harness) {
-			h.r.SetPrincipalLink(testWS, link)
+			h.r.SetPrincipalLink(testWS, link(url))
 		}, noTitle: true},
 	}
 	for _, tt := range tests {
@@ -1325,7 +1328,7 @@ func TestSettingThePrincipalLinkRepublishesTheStrip(t *testing.T) {
 	before := h.view(t)
 
 	// Act
-	h.r.SetPrincipalLink(testWS, "https://example.com/doc")
+	h.r.SetPrincipalLink(testWS, link("https://example.com/doc"))
 
 	// Assert: a NEW view was published, carrying the link.
 	after := h.view(t)

@@ -21,9 +21,8 @@ func (v *verbs) SetPrincipalLink(ctx context.Context, ws ids.WorkspaceID, link *
 		return err
 	}
 	fields := dlog.Context{"cleared": link == nil}
-	url := ""
 	if link != nil {
-		url = *link
+		url := *link
 		fields["url"] = url
 		if err := externalbrowser.Validate(url); err != nil {
 			return refuseWith(log, rpc, ArmInvalidLink,
@@ -35,7 +34,7 @@ func (v *verbs) SetPrincipalLink(ctx context.Context, ws ids.WorkspaceID, link *
 		log.Error(opSetPrincipalLink, "could not record the principal link", dlog.WithCause(fields, err))
 		return fmt.Errorf("set principal link on %q: %w", ws, err)
 	}
-	v.deps.Topbar.SetPrincipalLink(ws, url)
+	v.deps.Topbar.SetPrincipalLink(ws, link)
 	if link == nil {
 		log.Info(opSetPrincipalLink, "cleared the principal link", fields)
 	} else {

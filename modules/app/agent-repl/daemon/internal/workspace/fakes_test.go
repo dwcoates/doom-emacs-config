@@ -2943,10 +2943,15 @@ func (f *fakeFooter) SetWorkspaceDir(ws ids.WorkspaceID, dir string) error {
 
 func (stubTopbar) SetWorkspaceDir(ids.WorkspaceID, string) error { return nil }
 func (stubTopbar) SetNaming(ids.WorkspaceID, topbar.Naming)      {}
-func (s stubTopbar) SetPrincipalLink(_ ids.WorkspaceID, url string) {
-	if s.principalLinks != nil {
-		*s.principalLinks = append(*s.principalLinks, url)
+func (s stubTopbar) SetPrincipalLink(_ ids.WorkspaceID, link *string) {
+	if s.principalLinks == nil {
+		return
 	}
+	url := ""
+	if link != nil {
+		url = *link
+	}
+	*s.principalLinks = append(*s.principalLinks, url)
 }
 func (s stubTopbar) SetAccount(_ ids.WorkspaceID, account topbar.Account) {
 	if s.accounts != nil {

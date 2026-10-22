@@ -482,11 +482,7 @@ func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.W
 	})
 	// THE PRINCIPAL LINK IS DURABLE, so a restarted daemon's title opens the
 	// same link the workspace had.
-	principalLink := ""
-	if record.PrincipalLink != nil {
-		principalLink = *record.PrincipalLink
-	}
-	v.deps.Topbar.SetPrincipalLink(record.ID, principalLink)
+	v.deps.Topbar.SetPrincipalLink(record.ID, record.PrincipalLink)
 	log.Debug(opRegister, "installed the topbar's naming and account lines", dlog.Context{
 		"workspace": string(record.ID), "config_dir": configDir,
 	})

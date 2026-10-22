@@ -264,8 +264,8 @@ func title(s *wsState) *frontendv1.TopbarTitle {
 	default:
 		return nil
 	}
-	if s.principalLink != "" {
-		out.Link = &frontendv1.TopbarTitleLink{Url: s.principalLink}
+	if s.principalLink != nil {
+		out.Link = &frontendv1.TopbarTitleLink{Url: *s.principalLink}
 	}
 	return out
 }
@@ -552,11 +552,14 @@ func (r *resolver) SetSynthesizedTitle(ws ids.WorkspaceID, title string) {
 }
 
 // SetPrincipalLink installs the workspace's principal link, which the title
-// carries while a summary stands. An empty url clears it.
-func (r *resolver) SetPrincipalLink(ws ids.WorkspaceID, url string) {
-	r.mutate(ws, "daemon.topbar.set_principal_link", "the topbar took the principal link",
-		dlog.Context{"present": url != "", "url": url},
-		func(s *wsState) { s.principalLink = url })
+// carries while a summary stands. Nil clears it.
+func (r *resolver) SetPrincipalLink(ws ids.WorkspaceID, link *string) {
+	ctx := dlog.Context{"present": link != nil}
+	if link != nil {
+		ctx["url"] = *link
+	}
+	r.mutate(ws, "daemon.topbar.set_principal_link", "the topbar took the principal link", ctx,
+		func(s *wsState) { s.principalLink = link })
 }
 
 // SetModelCatalog installs the switchable model set.

@@ -173,9 +173,9 @@ type wsState struct {
 	synthesizedTitle string
 
 	// principalLink is the workspace's principal link, which title() attaches
-	// to the title while one stands; empty while the workspace has none. Its
+	// to the title while one stands; nil while the workspace has none. Its
 	// sole writer is SetPrincipalLink.
-	principalLink string
+	principalLink *string
 
 	// permissionMode is the mode in force, as the session facts spell it.
 	permissionMode string
