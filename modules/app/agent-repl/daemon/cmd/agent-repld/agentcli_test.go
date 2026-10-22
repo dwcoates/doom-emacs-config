@@ -1042,3 +1042,19 @@ func TestTheTargetedVerbsShareOneArgumentPreamble(t *testing.T) {
 			handRolled, strings.Count(string(src), "c.targetArgs(fs, stateDir, args, "))
 	}
 }
+
+func TestAGateWithNoColdGateNamesTheWorkspacesStanding(t *testing.T) {
+	// Arrange: the default status stands idle, with no gate.
+	f := newCLIFixture()
+	f.client.status = &agentreplv1.GetWorkspaceStatusResponse{Result: &agentreplv1.GetWorkspaceStatusResponse_Success{Success: &agentreplv1.GetWorkspaceStatusSuccess{
+		Status: &agentreplv1.WorkspaceStatus{Standing: &agentreplv1.WorkspaceStatusStanding{}}}}}
+
+	// Act
+	code := f.run(workspaceNoun, "gate", "peer", "pay")
+
+	// Assert
+	stderr := f.errOut.String()
+	if code != exitRefused || !strings.Contains(stderr, "no cold gate stands on the workspace; it stands {") || strings.Contains(stderr, "&{") {
+		t.Fatalf("exit %d, stderr %q; want the refusal naming the standing as JSON, never a Go struct", code, stderr)
+	}
+}
