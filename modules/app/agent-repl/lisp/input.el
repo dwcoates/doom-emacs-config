@@ -121,6 +121,7 @@
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-rpc-submit-prompt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-select-feed-row "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-open-feed-image "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-plan-rollback-sync "agent-repl-rpc" (conn request &optional timeout))
 (declare-function agent-repl-rpc-roll-back "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-list-rollback-prompts-sync "agent-repl-rpc" (conn request &optional timeout))
@@ -855,6 +856,32 @@ under DETAIL-NAME, so a log line names what was asked."
          (agent-repl--warn ws (concat slug "-failure ws=%s " shown " detail=%S")
                            ws detail failure)
          (agent-repl--input-flash ws (format "%s: the daemon did not answer" prefix)))))))
+
+(defun agent-repl--input-open-feed-image (ws image)
+  "Ask the daemon to open IMAGE large over WS's feed, and report how it went.
+IMAGE is a composer image (:path :media-type).  The daemon holds the
+workspace's overlay and pushes it to the webapp, which draws it over the
+feed's rows (`OpenFeedImage'); THE ONE SEND of a composer image click (see
+`agent-repl--input-call')."
+  (let ((path (plist-get image :path)))
+    (agent-repl--input-call
+     ws :op "open-feed-image"
+     :prefix "image"
+     :detail-name "path" :detail path
+     :rpc #'agent-repl-rpc-open-feed-image
+     :request (lambda (ref)
+                (list :workspace ref
+                      :image (list :arm :composer
+                                   :value (list :image (plist-get (agent-repl--input-image-block image)
+                                                                  :value)))))
+     :on-success
+     (lambda (_value)
+       (agent-repl--info ws "elisp.input.open-feed-image-answered ws=%s path=%s" ws path))
+     :on-refused
+     (lambda (cause)
+       (pcase (plist-get cause :arm)
+         (:unservable (format "cannot be shown (%s)" (plist-get (plist-get cause :value) :detail)))
+         (_ "not shown"))))))
 
 (defun agent-repl--input-select-feed-row (ws move)
   "Send the `SelectFeedRow' MOVE for WS and report how it went.

@@ -11,10 +11,10 @@
 ;; clipboard's image even when text rides beside it.
 ;;
 ;; AN IMAGE IS ONE CHARACTER OF THE COMPOSER'S TEXT.  It is inserted where
-;; the paste happened, drawn as the image itself (at most
-;; `agent-repl-image-thumbnail-max-height' pixels tall; a frame that cannot
-;; draw images shows "[Copied Image]"), and clicking it opens the file in
-;; the system's image viewer.  It carries
+;; the paste happened, drawn as the image itself (a thumbnail
+;; `agent-repl-image-thumbnail-height' pixels tall; a frame that cannot
+;; draw images shows "[Copied Image]"), and clicking it opens it large over
+;; the feed, in the webapp (`OpenFeedImage').  It carries
 ;; `agent-repl--input-image-marker-property' (input.el), whose value names
 ;; the file and its MIME type, and that property is the whole record:
 ;; input.el reads the buffer in order, so words and images are submitted
@@ -49,6 +49,7 @@
 (declare-function agent-repl--fatal "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
 (declare-function agent-repl--input-image-present-p "agent-repl-input" (path))
+(declare-function agent-repl--input-open-feed-image "agent-repl-input" (ws image))
 (declare-function agent-repl--write-file-atomically "agent-repl-core" (file text &optional binary))
 (declare-function agent-repl-refill-keymap "agent-repl-core" (map fill))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
@@ -101,7 +102,7 @@ against proto/vocab/image-thumbnail.json.")
 
 (defun agent-repl--image-call-process (program &rest args)
   "Run PROGRAM with ARGS synchronously; return its exit code (output discarded).
-An external-boundary wrapper for `sips' and the system image opener;
+An external-boundary wrapper for `sips';
 registered in `agent-repl--external-boundary-functions' (core.el) so
 tests stub it via `cl-letf' rather than shelling out."
   (apply #'call-process program nil nil nil args)) ;; ALLOW-EXTERNAL-BOUNDARY
@@ -292,7 +293,7 @@ opens nothing."
                      (list 'display (agent-repl--image-display path ws)
                            'keymap agent-repl--image-marker-map
                            'mouse-face 'highlight
-                           'help-echo (format "mouse-1: open %s" path)))
+                           'help-echo (format "mouse-1: show %s over the feed" path)))
                   (agent-repl--log ws "clipboard-image: drawn as no longer available path=%s" path)
                   (remove-list-of-text-properties at (1+ at) '(keymap mouse-face))
                   (add-text-properties
@@ -334,23 +335,20 @@ payload."
                       ws path media-type at)
     at))
 
-(defun agent-repl--image-open (path &optional ws)
-  "Open the image at PATH in the system's image viewer.
-A missing file (its worktree was deleted) is recorded at info and a
-viewer that fails at error; each is signalled as a `user-error'."
-  (unless (file-exists-p path)
-    (agent-repl--info ws "clipboard-image: open refused, file missing path=%s" path)
-    (user-error "agent-repl: the image %s no longer exists" path))
-  (let* ((opener (if (eq system-type 'darwin) "open" "xdg-open"))
-         (exit (agent-repl--image-call-process opener path)))
-    (agent-repl--log ws "clipboard-image: opened path=%s opener=%s exit=%s" path opener exit)
-    (unless (eq 0 exit)
-      (agent-repl--error ws "clipboard-image: open failed path=%s opener=%s exit=%s"
-                         path opener exit)
-      (user-error "agent-repl: %s could not open %s" opener path))))
+(defun agent-repl--image-open (image ws)
+  "Open IMAGE, a composer image (:path :media-type), large over WS's feed.
+The webapp draws it over the feed's rows (`agent-repl--input-open-feed-image').
+A file that is gone (its worktree was deleted) is recorded at info and
+signalled as a `user-error'; nothing is asked of the daemon."
+  (let ((path (plist-get image :path)))
+    (unless (agent-repl--input-image-present-p path)
+      (agent-repl--info ws "clipboard-image: open refused, file missing path=%s" path)
+      (user-error "agent-repl: the image %s no longer exists" path))
+    (agent-repl--log ws "clipboard-image: opening over the feed path=%s" path)
+    (agent-repl--input-open-feed-image ws image)))
 
 (defun agent-repl-input-open-image-at-mouse (event)
-  "Open the composer image clicked in EVENT in the system's image viewer."
+  "Open the composer image clicked in EVENT large over the workspace's feed."
   (interactive "e")
   (let* ((position (event-start event))
          (buffer (window-buffer (posn-window position)))
@@ -361,7 +359,7 @@ viewer that fails at error; each is signalled as a `user-error'."
     (unless image
       (agent-repl--fatal ws "clipboard-image: a click opened no image buffer=%s point=%s"
                          (buffer-name buffer) (posn-point position)))
-    (agent-repl--image-open (plist-get image :path) ws)))
+    (agent-repl--image-open image ws)))
 
 ;;;; ---- Pasting --------------------------------------------------------------
 

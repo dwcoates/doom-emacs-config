@@ -2279,6 +2279,61 @@ The host watch's selection kind is `agent-repl-test-input--selection-kind'."
                       (:failure (funcall (plist-get keys :on-failure) (cadr answer)))))))
          ,@body))))
 
+(defmacro agent-repl-test-input--with-open-image (answer &rest body)
+  "Run BODY in a composer whose `OpenFeedImage' answers ANSWER.
+ANSWER is `(:response PLIST)' or `(:failure DETAIL)'.  Each request the
+stubbed rpc received is pushed onto `requests'."
+  (declare (indent 1))
+  `(agent-repl-test-input--with
+     (let ((requests nil)
+           (answer ,answer))
+       (cl-letf (((symbol-function 'agent-repl-rpc-open-feed-image)
+                  (lambda (_conn request &rest keys)
+                    (push request requests)
+                    (pcase (car answer)
+                      (:response (funcall (plist-get keys :on-response) (cadr answer)))
+                      (:failure (funcall (plist-get keys :on-failure) (cadr answer)))))))
+         ,@body))))
+
+(ert-deftest agent-repl-test-input-open-feed-image-sends-the-composer-image ()
+  "A composer image click sends the composer arm, the ImageBlock the send would carry."
+  (agent-repl-test-input--with-open-image '(:response (:arm :success :value nil))
+    ;; Act
+    (agent-repl--input-open-feed-image "ws-one" '(:path "/w/clip.png" :media-type "image/png"))
+    ;; Assert
+    (should (equal (plist-get (car requests) :image)
+                   '(:arm :composer
+                     :value (:image (:location (:arm :path :value (:path "/w/clip.png"))
+                                     :media-type "image/png")))))))
+
+(ert-deftest agent-repl-test-input-open-feed-image-success-is-recorded-at-info ()
+  "An opened image is recorded at INFO, naming its path."
+  (agent-repl-test-input--with-open-image '(:response (:arm :success :value nil))
+    (let ((infos nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+        ;; Act
+        (agent-repl--input-open-feed-image "ws-one" '(:path "/w/clip.png" :media-type "image/png")))
+      ;; Assert
+      (should (member "elisp.input.open-feed-image-answered ws=ws-one path=/w/clip.png" infos)))))
+
+(ert-deftest agent-repl-test-input-open-feed-image-refusal-flashes-its-detail ()
+  "An unservable image is refused, flashed with the daemon's detail."
+  (agent-repl-test-input--with-open-image
+      '(:response (:arm :error :value (:cause (:arm :unservable :value (:detail "not absolute")))))
+    ;; Act
+    (agent-repl--input-open-feed-image "ws-one" '(:path "clip.png" :media-type "image/png"))
+    ;; Assert
+    (should (string-match-p "image: cannot be shown (not absolute)" (or (agent-repl-test-input--notice) "")))))
+
+(ert-deftest agent-repl-test-input-open-feed-image-failure-flashes ()
+  "An open the daemon never answered flashes the composer."
+  (agent-repl-test-input--with-open-image '(:failure (:kind :transport :message "down"))
+    ;; Act
+    (agent-repl--input-open-feed-image "ws-one" '(:path "/w/clip.png" :media-type "image/png"))
+    ;; Assert
+    (should (string-match-p "image: the daemon did not answer" (or (agent-repl-test-input--notice) "")))))
+
 (defun agent-repl-test-input--select-outcome (arm)
   "A `SelectFeedRow' success answer whose outcome is ARM."
   (list :response

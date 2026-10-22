@@ -399,48 +399,37 @@ TARGETS is derived from the types, as a vector, the way Emacs answers it."
 
 ;;;; ---- Opening ----
 
-(ert-deftest agent-repl-image-open-runs-the-system-opener ()
-  "macOS opens the image with `open'."
-  (agent-repl-test-image--with
-    (let ((file (make-temp-file "agent-repl-open" nil ".png")))
-      (unwind-protect
-          (progn
-            (agent-repl--image-open file "ws-one")
-            (should (equal agent-repl-test-image--calls (list (list "open" file)))))
-        (delete-file file)))))
+(defconst agent-repl-test-image--png '(:path "/tmp/a.png" :media-type "image/png")
+  "A composer image the tests open.")
 
-(ert-deftest agent-repl-image-open-uses-xdg-open-off-macos ()
-  "Elsewhere the image opens with `xdg-open'."
+(ert-deftest agent-repl-image-open-asks-the-daemon-to-show-it-over-the-feed ()
+  "Opening a present image hands it, whole, to the composer's OpenFeedImage send."
   (agent-repl-test-image--with
-    (let ((file (make-temp-file "agent-repl-open" nil ".png"))
-          (system-type 'gnu/linux))
-      (unwind-protect
-          (progn
-            (agent-repl--image-open file "ws-one")
-            (should (equal (caar agent-repl-test-image--calls) "xdg-open")))
-        (delete-file file)))))
+    (let (sent)
+      (cl-letf (((symbol-function 'agent-repl--input-open-feed-image)
+                 (lambda (ws image) (setq sent (list ws image)))))
+        (agent-repl--image-open agent-repl-test-image--png "ws-one"))
+      (should (equal sent (list "ws-one" agent-repl-test-image--png))))))
 
-(ert-deftest agent-repl-image-open-refuses-a-missing-file ()
-  "A file that is gone is refused, recorded below error, and nothing is run."
+(ert-deftest agent-repl-image-open-runs-no-program ()
+  "The image opens in the webapp: no viewer process is run."
   (agent-repl-test-image--with
-    (should-error (agent-repl--image-open "/nowhere/a.png" "ws-one") :type 'user-error)
-    (should (null agent-repl-test-image--errors))
+    (cl-letf (((symbol-function 'agent-repl--input-open-feed-image) #'ignore))
+      (agent-repl--image-open agent-repl-test-image--png "ws-one"))
     (should (null agent-repl-test-image--calls))))
 
-(ert-deftest agent-repl-image-open-refuses-a-failing-opener ()
-  "An opener that fails is refused and recorded with its exit."
+(ert-deftest agent-repl-image-open-refuses-a-missing-file ()
+  "A file that is gone is refused, recorded below error, and the daemon is not asked."
   (agent-repl-test-image--with
-    (let ((file (make-temp-file "agent-repl-open" nil ".png")))
-      (unwind-protect
-          (progn
-            (setq agent-repl-test-image--exit 1)
-            (should-error (agent-repl--image-open file "ws-one") :type 'user-error)
-            (should (string-match-p "open failed .* opener=open exit=1"
-                                    (car agent-repl-test-image--errors))))
-        (delete-file file)))))
+    (setq agent-repl-test-image--gone '("/tmp/a.png"))
+    (let (sent)
+      (cl-letf (((symbol-function 'agent-repl--input-open-feed-image)
+                 (lambda (&rest args) (setq sent args))))
+        (should-error (agent-repl--image-open agent-repl-test-image--png "ws-one") :type 'user-error))
+      (should (equal (list sent agent-repl-test-image--errors) '(nil nil))))))
 
 (ert-deftest agent-repl-image-click-opens-the-clicked-image ()
-  "A click on the image opens that image's file."
+  "A click on the image opens that image, path and MIME type."
   (agent-repl-test-image--with
     (let ((opened nil)
           (window-buffer (current-buffer)))
@@ -449,9 +438,9 @@ TARGETS is derived from the types, as a vector, the way Emacs answers it."
                 ((symbol-function 'window-buffer) (lambda (_) window-buffer))
                 ((symbol-function 'posn-point) (lambda (_) 1))
                 ((symbol-function 'agent-repl--image-open)
-                 (lambda (path _ws) (setq opened path))))
+                 (lambda (image _ws) (setq opened image))))
         (agent-repl-input-open-image-at-mouse '(mouse-1 (window 1))))
-      (should (equal opened "/tmp/a.png")))))
+      (should (equal opened agent-repl-test-image--png)))))
 
 ;;;; ---- Pasting ----
 

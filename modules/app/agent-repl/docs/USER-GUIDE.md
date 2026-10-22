@@ -315,9 +315,16 @@ Copy an image, then paste it into the input window the way you paste words.
   - `C-c C-i` pastes the clipboard's image even when text comes with it.
 - **The image shows in the input window as a 120-pixel-tall thumbnail.**
   - Every image is scaled to that height, large or small, and the feed draws it the same size.
-  - Click it to open the file in your system's image viewer.
+  - Click it to open it large over the feed (see below).
   - It is one character: one `DEL` removes it, and killing and yanking moves it.
   - A terminal frame shows `[Copied Image]` in its place.
+- **In the feed, a prompt's images show once its bubble is expanded.**
+  - A collapsed prompt bubble, like a collapsed held card, shows your words alone, as it does for a reply's quote.
+  - A held card draws its images the same way the prompt's bubble will.
+- **Click any image to open it large over the feed**: a thumbnail in the input window, a prompt's image, a held card's, or a tool card's.
+  - It fills the feed's column, just inside it, so the rows still show around its edge.
+  - Click it, or press `Esc` while the feed has focus, to close it.
+  - Clicking another image replaces it, and it stays open when you switch workspaces and come back.
 - **The agent receives the image itself**, between your words, in the order you placed them.
   - It is also told the image's file path, so it can copy, commit or edit the file. The path is not shown in your prompt bubble.
 - **The file is kept in the workspace at `.claude/emacs/images/`**, named after its contents.
