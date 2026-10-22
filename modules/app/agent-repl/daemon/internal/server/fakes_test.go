@@ -342,6 +342,10 @@ type fakeVerbs struct {
 	// setHiddenErr is what it answers.
 	hiddenSets   []hiddenSet
 	setHiddenErr error
+	// principalLinks records every link SetPrincipalLink received, "" for a
+	// clear; setPrincipalLinkErr is what it answers.
+	principalLinks      []string
+	setPrincipalLinkErr error
 	// opens and selects count every Open and Select the handlers made: the
 	// two verbs that bring a workspace up.
 	opens, selects atomic.Int32
@@ -610,6 +614,15 @@ type hiddenSet struct {
 func (f *fakeVerbs) SetHidden(_ context.Context, ws ids.WorkspaceID, hidden bool) error {
 	f.hiddenSets = append(f.hiddenSets, hiddenSet{ws: ws, hidden: hidden})
 	return f.setHiddenErr
+}
+
+func (f *fakeVerbs) SetPrincipalLink(_ context.Context, _ ids.WorkspaceID, link *string) error {
+	url := ""
+	if link != nil {
+		url = *link
+	}
+	f.principalLinks = append(f.principalLinks, url)
+	return f.setPrincipalLinkErr
 }
 
 func (f *fakeVerbs) RegisterRepository(_ context.Context, path string) (workspace.RegisteredRepository, error) {

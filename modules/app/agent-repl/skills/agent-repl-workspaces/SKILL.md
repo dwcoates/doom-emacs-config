@@ -1,6 +1,6 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status or list them all, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), hide or show a workspace, set its priority, retarget its parent, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended (mark it a one-shot); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status or list them all, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), set its principal link (the url its topbar summary opens), hide or show a workspace, set its priority, retarget its parent, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended (mark it a one-shot); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever a link supplied in the conversation best reflects this workspace''s task (set its principal link, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
 argument-hint: "create | async-merge | prompt | status | list | set | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
@@ -144,6 +144,18 @@ Choose the combination from what the work needs:
   answer arrives, run `workspace set here -not-awaiting` FIRST, then act on
   it. The daemon cannot tell whether a reply is the one awaited, so clearing
   the mark is always yours.
+- **PRINCIPAL LINK.** The topbar draws this workspace's summary as a link to
+  its principal link; a click opens it in the browser of the session's login.
+  - Set it PROACTIVELY, WITHOUT asking: whenever a link supplied in the
+    conversation (a pull request, a ticket, a design doc, a dashboard) best
+    reflects this workspace's current summary or task, or is otherwise the
+    most salient link, run `workspace set here -principal-link URL`.
+  - Judge each new link against the ones supplied before it, and against the
+    standing link `workspace status here` shows as `principalLink`. When the
+    new one fits the task better, set it; there is only ever one.
+  - `-no-principal-link` clears it, when no link reflects the task any more.
+  - Only http and https urls are accepted; anything else is refused
+    `invalid_link` with the reason.
 - `-hidden` / `-shown`, `-priority`, and `-parent WS` / `-top-level` (a
   retarget, which re-applies the landing rules) set the rest.
 

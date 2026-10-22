@@ -357,6 +357,28 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "workspace",
 		},
 		{
+			name: "set principal link with no workspace",
+			check: func() *connect.Error {
+				return validateSetWorkspacePrincipalLinkRequest(&agentreplv1.SetWorkspacePrincipalLinkRequest{})
+			},
+			field: "workspace",
+		},
+		{
+			name: "set principal link with no change arm",
+			check: func() *connect.Error {
+				return validateSetWorkspacePrincipalLinkRequest(&agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref()})
+			},
+			field: "change",
+		},
+		{
+			name: "set principal link with a blank url",
+			check: func() *connect.Error {
+				return validateSetWorkspacePrincipalLinkRequest(&agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref(),
+					Change: &agentreplv1.SetWorkspacePrincipalLinkRequest_Set{Set: &agentreplv1.SetWorkspacePrincipalLinkSet{Url: " "}}})
+			},
+			field: "set.url",
+		},
+		{
 			name: "swap with no workspace",
 			check: func() *connect.Error {
 				return validateSwapWorkspacesRequest(&agentreplv1.SwapWorkspacesRequest{

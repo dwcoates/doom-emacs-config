@@ -235,6 +235,9 @@ const (
 	ArmOneShotPolicyMissing = "one_shot_policy_missing"
 	// ArmInvalidUrl is an OpenExternal link that is not an absolute url.
 	ArmInvalidUrl = "invalid_url"
+	// ArmInvalidLink is a SetWorkspacePrincipalLink url the external browser
+	// would not open: not http or https, or carrying whitespace.
+	ArmInvalidLink = "invalid_link"
 	// ArmNoBrowserConfigured is an OpenExternal on a daemon that resolved no
 	// external browser launcher at all.
 	ArmNoBrowserConfigured = "no_browser_configured"

@@ -463,8 +463,8 @@ func (v *verbs) bindResolvers(log dlog.Logger, id wsm.WorkspaceID, dir string) e
 // publishNaming installs the topbar's naming and account lines: both are
 // DAEMON facts (the registry's name and branch, the repo-under-root account
 // rule) and no vendor frame carries either, so nothing else can state them.
-// It then restores the workspace's persisted summary, which outranks the name
-// in the title.
+// It then restores the workspace's persisted principal link and summary, which
+// outranks the name in the title.
 // Until they are installed the topbar is not complete and publishes NO view at
 // all, so this is part of registration rather than of a session's bring-up.
 func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
@@ -480,6 +480,9 @@ func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.W
 		Name:      record.Name,
 		ConfigDir: configDir,
 	})
+	// THE PRINCIPAL LINK IS DURABLE, so a restarted daemon's title opens the
+	// same link the workspace had.
+	v.deps.Topbar.SetPrincipalLink(record.ID, record.PrincipalLink)
 	log.Debug(opRegister, "installed the topbar's naming and account lines", dlog.Context{
 		"workspace": string(record.ID), "config_dir": configDir,
 	})

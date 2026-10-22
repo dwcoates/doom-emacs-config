@@ -59,7 +59,12 @@ type WorkspaceStatus struct {
 	// The repository the workspace belongs to, by its registry id: what a
 	// create from inside this workspace names to be cut in the same
 	// repository (CreateWorkspaceRequest.repository).
-	Repository    *v1.RepositoryRef `protobuf:"bytes,9,opt,name=repository,proto3" json:"repository,omitempty"`
+	Repository *v1.RepositoryRef `protobuf:"bytes,9,opt,name=repository,proto3" json:"repository,omitempty"`
+	// The workspace's principal link (SetWorkspacePrincipalLink), the url the
+	// topbar's summary opens, verbatim. UNSET while the workspace has none. An
+	// agent reads it to judge whether a link it was just given fits the task
+	// better than the one standing.
+	PrincipalLink *string `protobuf:"bytes,10,opt,name=principal_link,json=principalLink,proto3,oneof" json:"principal_link,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -155,6 +160,13 @@ func (x *WorkspaceStatus) GetRepository() *v1.RepositoryRef {
 		return x.Repository
 	}
 	return nil
+}
+
+func (x *WorkspaceStatus) GetPrincipalLink() string {
+	if x != nil && x.PrincipalLink != nil {
+		return *x.PrincipalLink
+	}
+	return ""
 }
 
 // Where a workspace's branch lands.
@@ -1094,7 +1106,7 @@ var File_agentrepl_v1_workspace_status_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\n" +
-	"#agentrepl/v1/workspace_status.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\xc1\x03\n" +
+	"#agentrepl/v1/workspace_status.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x80\x04\n" +
 	"\x0fWorkspaceStatus\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -1106,8 +1118,11 @@ const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\bawaiting\x18\b \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\bawaiting\x88\x01\x01\x12;\n" +
 	"\n" +
 	"repository\x18\t \x01(\v2\x1b.workspace.v1.RepositoryRefR\n" +
-	"repositoryB\v\n" +
-	"\t_awaiting\"\xba\x01\n" +
+	"repository\x12*\n" +
+	"\x0eprincipal_link\x18\n" +
+	" \x01(\tH\x01R\rprincipalLink\x88\x01\x01B\v\n" +
+	"\t_awaitingB\x11\n" +
+	"\x0f_principal_link\"\xba\x01\n" +
 	"\x1aWorkspaceStatusMergeTarget\x12K\n" +
 	"\aprimary\x18\x01 \x01(\v2/.agentrepl.v1.WorkspaceStatusMergeTargetPrimaryH\x00R\aprimary\x12E\n" +
 	"\x05owner\x18\x02 \x01(\v2-.agentrepl.v1.WorkspaceStatusMergeTargetOwnerH\x00R\x05ownerB\b\n" +

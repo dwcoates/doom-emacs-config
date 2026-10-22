@@ -1261,6 +1261,82 @@ func TestARetractedSynthesisWithNoVendorSummaryLeavesNoTitle(t *testing.T) {
 	}
 }
 
+// link is a principal link for SetPrincipalLink, which takes an optional url.
+func link(url string) *string { return &url }
+
+func TestThePrincipalLinkRidesTheTitle(t *testing.T) {
+	const url = "https://github.com/o/r/pull/7"
+	tests := []struct {
+		name     string
+		arrange  func(h *harness)
+		wantText string
+		wantLink string
+		noTitle  bool
+	}{
+		{name: "a summary carries the link", arrange: func(h *harness) {
+			h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+			h.r.SetPrincipalLink(testWS, link(url))
+		}, wantText: "Wire up the reconnect backoff", wantLink: url},
+		{name: "a link set before the summary lands with it", arrange: func(h *harness) {
+			h.r.SetPrincipalLink(testWS, link(url))
+			h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
+		}, wantText: "the vendor's own summary", wantLink: url},
+		{name: "a cleared link leaves plain text", arrange: func(h *harness) {
+			h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+			h.r.SetPrincipalLink(testWS, link(url))
+			h.r.SetPrincipalLink(testWS, nil)
+		}, wantText: "Wire up the reconnect backoff"},
+		{name: "no summary publishes no link", arrange: func(h *harness) {
+			h.r.SetPrincipalLink(testWS, link(url))
+		}, noTitle: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+
+			// Act
+			tt.arrange(h)
+
+			// Assert
+			got := h.view(t).GetTitle()
+			if tt.noTitle {
+				if got != nil {
+					t.Fatalf("title = %v, want none: nothing is clickable without a summary", got)
+				}
+				return
+			}
+			if got.GetText() != tt.wantText {
+				t.Errorf("title text = %q, want %q", got.GetText(), tt.wantText)
+			}
+			if tt.wantLink == "" && got.Link != nil {
+				t.Errorf("title link = %v, want none", got.Link)
+			}
+			if tt.wantLink != "" && got.GetLink().GetUrl() != tt.wantLink {
+				t.Errorf("title link = %q, want %q", got.GetLink().GetUrl(), tt.wantLink)
+			}
+		})
+	}
+}
+
+func TestSettingThePrincipalLinkRepublishesTheStrip(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+	before := h.view(t)
+
+	// Act
+	h.r.SetPrincipalLink(testWS, link("https://example.com/doc"))
+
+	// Assert: a NEW view was published, carrying the link.
+	after := h.view(t)
+	if after == before || after.GetTitle().GetLink().GetUrl() != "https://example.com/doc" {
+		t.Fatalf("published view = %v, want a fresh view whose title links the doc", after.GetTitle())
+	}
+}
+
 // parkedLine is the park's sentence as a reader on this machine reads it: a
 // LOCAL wall clock, because the daemon and the reader share one.
 func parkedLine() string {

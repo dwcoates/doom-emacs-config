@@ -172,6 +172,11 @@ type wsState struct {
 	// SetSynthesizedTitle.
 	synthesizedTitle string
 
+	// principalLink is the workspace's principal link, which title() attaches
+	// to the title while one stands; nil while the workspace has none. Its
+	// sole writer is SetPrincipalLink.
+	principalLink *string
+
 	// permissionMode is the mode in force, as the session facts spell it.
 	permissionMode string
 	// picker is exactly the switchable set the daemon will accept.

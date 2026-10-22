@@ -1300,3 +1300,34 @@ func countRecords(f *fixture, level, operation string) int {
 	}
 	return n
 }
+
+func TestRegistrationHandsTheTitleTheRecordedPrincipalLink(t *testing.T) {
+	link := "https://example.com/design"
+	tests := []struct {
+		name string
+		link *string
+		want string
+	}{
+		{name: "a recorded link is restored", link: &link, want: link},
+		{name: "a workspace with none is handed none", link: nil, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the workspace is already registered, as across a restart.
+			f := newFixture(t)
+			ws := f.workspace("w1", f.git.mainWorktree)
+			ws.PrincipalLink = tt.link
+			f.db.with(ws)
+
+			// Act.
+			if _, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{}); err != nil {
+				t.Fatalf("Register: %v", err)
+			}
+
+			// Assert.
+			if !slices.Equal(f.topbarPrincipalLinks, []string{tt.want}) {
+				t.Fatalf("topbar links = %q, want [%q]", f.topbarPrincipalLinks, tt.want)
+			}
+		})
+	}
+}

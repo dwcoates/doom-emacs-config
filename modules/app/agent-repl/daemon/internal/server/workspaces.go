@@ -903,6 +903,35 @@ func (s *server) SetWorkspacePriority(
 	return connect.NewResponse(resp), nil
 }
 
+// SetWorkspacePrincipalLink sets or clears the workspace's principal link,
+// which the topbar's summary opens. The new title arrives on the topbar stream.
+func (s *server) SetWorkspacePrincipalLink(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetWorkspacePrincipalLinkRequest],
+) (*connect.Response[agentreplv1.SetWorkspacePrincipalLinkResponse], error) {
+	const rpc = "SetWorkspacePrincipalLink"
+	if err := validateSetWorkspacePrincipalLinkRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.SetWorkspacePrincipalLinkResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	var link *string
+	if set := req.Msg.GetSet(); set != nil {
+		url := set.GetUrl()
+		link = &url
+	}
+	if err := s.deps.Verbs.SetPrincipalLink(ctx, subject.Record.ID, link); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.SetWorkspacePrincipalLinkResponse_Success{
+		Success: &agentreplv1.SetWorkspacePrincipalLinkSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // SetWorkspaceHidden moves a workspace into the roster's hidden section, or
 // back out of it. The new state arrives on the roster stream.
 func (s *server) SetWorkspaceHidden(

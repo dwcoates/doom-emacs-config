@@ -35,13 +35,14 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 		return nil, err
 	}
 	out := &agentreplv1.WorkspaceStatus{
-		Workspace:   record.Ref(),
-		Name:        record.Name,
-		Branch:      record.Branch,
-		MergeTarget: target,
-		Hidden:      record.Hidden || record.MergeHidden(),
-		OneShot:     record.OneShot,
-		Repository:  &workspacev1.RepositoryRef{Id: string(record.Repo)},
+		Workspace:     record.Ref(),
+		Name:          record.Name,
+		Branch:        record.Branch,
+		MergeTarget:   target,
+		Hidden:        record.Hidden || record.MergeHidden(),
+		OneShot:       record.OneShot,
+		Repository:    &workspacev1.RepositoryRef{Id: string(record.Repo)},
+		PrincipalLink: record.PrincipalLink,
 	}
 	if record.Awaiting != nil {
 		awaited, err := v.refOf(ctx, *record.Awaiting, "the workspace it awaits")

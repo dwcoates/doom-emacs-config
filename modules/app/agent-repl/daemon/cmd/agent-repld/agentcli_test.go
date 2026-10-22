@@ -80,6 +80,10 @@ func (c *cliClient) SetWorkspaceCorrespondence(_ context.Context, req *connect.R
 	return connect.NewResponse(&agentreplv1.SetWorkspaceCorrespondenceResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) SetWorkspacePrincipalLink(_ context.Context, req *connect.Request[agentreplv1.SetWorkspacePrincipalLinkRequest]) (*connect.Response[agentreplv1.SetWorkspacePrincipalLinkResponse], error) {
+	return connect.NewResponse(&agentreplv1.SetWorkspacePrincipalLinkResponse{}), c.record(req.Msg)
+}
+
 func (c *cliClient) SubmitPrompt(_ context.Context, req *connect.Request[agentreplv1.SubmitPromptRequest]) (*connect.Response[agentreplv1.SubmitPromptResponse], error) {
 	return connect.NewResponse(&agentreplv1.SubmitPromptResponse{}), c.record(req.Msg)
 }
@@ -433,6 +437,73 @@ func TestSetRefusesASettingSetBothWays(t *testing.T) {
 
 	// Act
 	code := f.run(workspaceNoun, "set", "here", "-one-shot", "-not-one-shot")
+
+	// Assert
+	if code != exitFailure || len(f.client.requests) != 0 {
+		t.Fatalf("exit %d, requests %v; want a usage failure and nothing sent", code, f.client.requests)
+	}
+}
+
+func TestSetSendsThePrincipalLinkChange(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantSet string
+	}{
+		{name: "-principal-link sets the url", args: []string{"-principal-link", "https://example.com/pr/3"}, wantSet: "https://example.com/pr/3"},
+		{name: "-no-principal-link clears it", args: []string{"-no-principal-link"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"set", "here"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			req := only[*agentreplv1.SetWorkspacePrincipalLinkRequest](t, f)
+			if req.GetWorkspace() == nil {
+				t.Error("the request names no workspace")
+			}
+			if tt.wantSet != "" && req.GetSet().GetUrl() != tt.wantSet {
+				t.Errorf("change = %v, want a set of %q", req.GetChange(), tt.wantSet)
+			}
+			if tt.wantSet == "" && req.GetClear() == nil {
+				t.Errorf("change = %v, want a clear", req.GetChange())
+			}
+		})
+	}
+}
+
+func TestStatusPrintsThePrincipalLink(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	link := "https://example.com/pr/4"
+	f.client.status = &agentreplv1.GetWorkspaceStatusResponse{Result: &agentreplv1.GetWorkspaceStatusResponse_Success{Success: &agentreplv1.GetWorkspaceStatusSuccess{
+		Status: &agentreplv1.WorkspaceStatus{Repository: &workspacev1.RepositoryRef{Id: "repo-1"}, PrincipalLink: &link}}}}
+
+	// Act
+	code := f.run(workspaceNoun, "status", "here")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+	}
+	if !strings.Contains(f.out.String(), link) {
+		t.Fatalf("stdout = %q, want it to carry the principal link", f.out.String())
+	}
+}
+
+func TestSetRefusesAPrincipalLinkSetAndClearedAtOnce(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "set", "here", "-principal-link", "https://example.com", "-no-principal-link")
 
 	// Assert
 	if code != exitFailure || len(f.client.requests) != 0 {

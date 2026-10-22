@@ -25,6 +25,13 @@
  * daemon states the summary only when one exists and never folds the
  * workspace's name into it; this end never concatenates identity fragments and
  * never stands the name in for a missing summary.
+ *
+ * THE SUMMARY OPENS THE PRINCIPAL LINK, when the title carries one. It is drawn
+ * through the one external-link component, so the click is OpenExternal (the
+ * Chrome profile of the session's account) and never a navigation, and that
+ * component's claimed click stops propagating, so the heading's session-line
+ * reveal does not also open. With no summary there is no title, so nothing is
+ * clickable.
  */
 import { createControl } from "../control.js";
 import type {
@@ -34,7 +41,9 @@ import type {
   TopbarTitle,
   TopbarWorkspaceName,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import { renderExternalLink } from "../link.js";
 import { log } from "../log.js";
+import type { AppContext } from "../rpc/context.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { toneClass, topbarTone } from "../vocab.js";
 import type { TopbarContext } from "./context.js";
@@ -147,10 +156,11 @@ export function drawTopbarConnectivity(u: TopbarConnectivity): HTMLElement {
 export function drawTopbarHeading(
   title: TopbarTitle | undefined,
   name: TopbarWorkspaceName,
+  ctx: AppContext,
 ): HTMLElement {
   const heading = document.createElement("div");
   heading.className = "topbar-heading";
-  if (title !== undefined) heading.append(drawTopbarTitle(title));
+  if (title !== undefined) heading.append(drawTopbarTitle(title, ctx));
   heading.append(drawTopbarWorkspaceName(name));
   return heading;
 }
@@ -167,9 +177,18 @@ export function drawHeadingLine(className: string, text: string): HTMLElement {
   return element;
 }
 
-/** The title: the workspace's generated summary, drawn verbatim. */
-export function drawTopbarTitle(u: TopbarTitle): HTMLElement {
-  return drawHeadingLine("topbar-title", u.text);
+/**
+ * The title: the workspace's generated summary, drawn verbatim. With a
+ * principal link the summary's text is that link, and the tooltip names the
+ * url beneath the whole summary.
+ */
+export function drawTopbarTitle(u: TopbarTitle, ctx: AppContext): HTMLElement {
+  const element = drawHeadingLine("topbar-title", u.text);
+  if (u.link === undefined) return element;
+  element.classList.add("topbar-title-linked");
+  element.title = `${u.text}\n${u.link.url}`;
+  element.replaceChildren(renderExternalLink(ctx, { text: u.text, url: u.link.url }));
+  return element;
 }
 
 /** The workspace's name, drawn verbatim on the heading's second line. */

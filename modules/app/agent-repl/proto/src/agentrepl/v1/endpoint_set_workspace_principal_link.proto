@@ -1,0 +1,114 @@
+// endpoint_set_workspace_principal_link.proto — SetWorkspacePrincipalLink:
+// name the one link that best stands for a workspace's task, or clear it.
+// AGENT API section.
+//
+// THE PRINCIPAL LINK IS THE TOPBAR SUMMARY'S DESTINATION. While one is set,
+// the topbar draws the workspace's summary as a link to it
+// (frontend.v1.TopbarTitle.link), and a click opens it the way every outward
+// link opens: OpenExternal, in the Chrome profile of the account the
+// workspace's session spends as. A workspace with no summary draws nothing
+// clickable, whatever its link.
+//
+// THE AGENT KEEPS IT CURRENT. An agent sets it, without asking anyone, when a
+// link supplied in its conversation best reflects the workspace's current
+// summary or task (a pull request, a ticket, a design doc), and replaces it
+// when a more fitting one arrives. Setting a workspace's link replaces the
+// one it had; there is only ever one.
+//
+// DURABLE: the daemon records the link on the workspace, so it stands across
+// a daemon restart, and every set and clear republishes the workspace's
+// topbar. GetWorkspaceStatus reads it back (WorkspaceStatus.principal_link).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetWorkspacePrincipalLinkRequest {
+  // The workspace whose link is set or cleared.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // THE ARM IS THE CHANGE: name a link, or take the workspace's link away.
+  // The two are exclusive, and clearing is its own arm rather than an empty
+  // url, so a blank url is a malformed set and never a disguised clear. Unset
+  // is a malformed request (Connect InvalidArgument).
+  oneof change {
+    // Set the link, replacing any the workspace had.
+    SetWorkspacePrincipalLinkSet set = 2;
+    // Clear the link. Clearing a workspace that has none is no change and
+    // succeeds.
+    SetWorkspacePrincipalLinkClear clear = 3;
+  }
+}
+
+// Set the workspace's principal link.
+message SetWorkspacePrincipalLinkSet {
+  // The link, an absolute http or https url with no whitespace, stored and
+  // later opened verbatim. A url the external browser would refuse to open is
+  // refused here (`invalid_link`), so a stored link is always one a click can
+  // open. A blank url is a malformed request (Connect InvalidArgument).
+  string url = 1;
+}
+
+// Clear the workspace's principal link. DELIBERATELY EMPTY: the arm is the
+// request.
+message SetWorkspacePrincipalLinkClear {}
+
+// THE ARM IS THE OUTCOME.
+message SetWorkspacePrincipalLinkResponse {
+  oneof result {
+    SetWorkspacePrincipalLinkSuccess success = 1;
+    SetWorkspacePrincipalLinkError error = 2;
+  }
+}
+
+// Recorded; the workspace's topbar push carries the new title.
+message SetWorkspacePrincipalLinkSuccess {}
+
+// The daemon's refusals; nothing was recorded. Validation failures (an unset
+// field or arm, a blank url) are Connect InvalidArgument, never an arm.
+message SetWorkspacePrincipalLinkError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SetWorkspacePrincipalLinkUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SetWorkspacePrincipalLinkWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SetWorkspacePrincipalLinkTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SetWorkspacePrincipalLinkNotYetAdopted not_yet_adopted = 4;
+    // The url is not one the external browser opens: not http or https, or
+    // carrying whitespace.
+    SetWorkspacePrincipalLinkInvalidLink invalid_link = 5;
+  }
+}
+
+// The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
+message SetWorkspacePrincipalLinkUnknownWorkspace {}
+
+// The echoed dir disagrees with the registry's dir for this id.
+message SetWorkspacePrincipalLinkWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// This daemon released the workspace to a successor.
+message SetWorkspacePrincipalLinkTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting this workspace yet.
+// DELIBERATELY EMPTY.
+message SetWorkspacePrincipalLinkNotYetAdopted {}
+
+// The url is not one the external browser opens.
+message SetWorkspacePrincipalLinkInvalidLink {
+  // The url exactly as the request named it.
+  string url = 1;
+  // Why it was refused, in the validator's words, for the agent to correct
+  // the url from. Prose to be read, not a vocabulary to switch on.
+  string reason = 2;
+}

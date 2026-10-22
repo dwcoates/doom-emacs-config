@@ -269,3 +269,33 @@ func TestStatusFailsLoudlyWhenAWorkspaceItNamesCannotBeRead(t *testing.T) {
 }
 
 func ptrTo[T any](v T) *T { return &v }
+
+func TestStatusAnswersThePrincipalLink(t *testing.T) {
+	link := "https://example.com/ticket"
+	tests := []struct {
+		name string
+		link *string
+	}{
+		{name: "a set link is answered", link: &link},
+		{name: "no link is answered unset", link: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", Repo: "repo-1", PrincipalLink: tt.link}
+			f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{"ws-1": footerIdle()}
+
+			// Act.
+			got, err := f.verbs.Status(context.Background(), "ws-1")
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Status: %v", err)
+			}
+			if (got.PrincipalLink == nil) != (tt.link == nil) || (tt.link != nil && got.GetPrincipalLink() != *tt.link) {
+				t.Errorf("principal link = %v, want %v", got.PrincipalLink, tt.link)
+			}
+		})
+	}
+}

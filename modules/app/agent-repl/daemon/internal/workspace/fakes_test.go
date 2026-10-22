@@ -176,11 +176,13 @@ type fakeDB struct {
 	// onMarkSelfClose runs once a self-close mark is written, for a test that
 	// moves the session between the mark and the recheck; markSelfCloseErr
 	// fails the mark and takeSelfCloseErr the take.
-	onMarkSelfClose  func()
-	setOneShotErr    error
-	setAwaitingErr   error
-	markSelfCloseErr error
-	takeSelfCloseErr error
+	onMarkSelfClose func()
+	setOneShotErr   error
+	setAwaitingErr  error
+	// setPrincipalLinkErr fails SetPrincipalLink.
+	setPrincipalLinkErr error
+	markSelfCloseErr    error
+	takeSelfCloseErr    error
 	// reopened records every Reopen, in order.
 	reopened []ids.WorkspaceID
 	// closures is every close record MarkClosed was handed, in order, per
@@ -621,6 +623,18 @@ func (d *fakeDB) SetAwaiting(_ context.Context, id ids.WorkspaceID, awaited *ids
 	}
 	ws := d.workspaces[id]
 	ws.Awaiting = awaited
+	d.workspaces[id] = ws
+	return nil
+}
+
+// SetPrincipalLink records the link on the fake's record;
+// setPrincipalLinkErr fails it and writes nothing.
+func (d *fakeDB) SetPrincipalLink(_ context.Context, id ids.WorkspaceID, link *string) error {
+	if d.setPrincipalLinkErr != nil {
+		return d.setPrincipalLinkErr
+	}
+	ws := d.workspaces[id]
+	ws.PrincipalLink = link
 	d.workspaces[id] = ws
 	return nil
 }
@@ -2638,6 +2652,9 @@ type fixture struct {
 	// handed; topbarWarnings every warning line it was asked to raise.
 	topbarEffortSettings []claudesettings.Effort
 	topbarWarnings       []string
+	// topbarPrincipalLinks is every principal link the topbar seam was
+	// handed, in order; an empty one is a clear.
+	topbarPrincipalLinks []string
 	// effortReads is every config root whose settings were read; the read
 	// answers effortSettings and effortErr.
 	effortReads    []string
@@ -2716,7 +2733,7 @@ func newFixture(t *testing.T) *fixture {
 
 	verbs, err := New(Deps{
 		DB: f.db, Derived: f.derived, Git: f.git, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings}, Browser: f.browser,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, principalLinks: &f.topbarPrincipalLinks}, Browser: f.browser,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -2890,6 +2907,9 @@ type stubTopbar struct {
 	coldGates *[]topbar.ColdGate
 	// accounts records every account cell the verbs installed, in order.
 	accounts *[]topbar.Account
+	// principalLinks records every principal link the verbs installed, in
+	// order; an empty one is a clear.
+	principalLinks *[]string
 	// window is the context window the strip answers; nil answers none and
 	// nil-panics, as every seam a test did not wire does.
 	window *int64
@@ -2923,6 +2943,16 @@ func (f *fakeFooter) SetWorkspaceDir(ws ids.WorkspaceID, dir string) error {
 
 func (stubTopbar) SetWorkspaceDir(ids.WorkspaceID, string) error { return nil }
 func (stubTopbar) SetNaming(ids.WorkspaceID, topbar.Naming)      {}
+func (s stubTopbar) SetPrincipalLink(_ ids.WorkspaceID, link *string) {
+	if s.principalLinks == nil {
+		return
+	}
+	url := ""
+	if link != nil {
+		url = *link
+	}
+	*s.principalLinks = append(*s.principalLinks, url)
+}
 func (s stubTopbar) SetAccount(_ ids.WorkspaceID, account topbar.Account) {
 	if s.accounts != nil {
 		*s.accounts = append(*s.accounts, account)

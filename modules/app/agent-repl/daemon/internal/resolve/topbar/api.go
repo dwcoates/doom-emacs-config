@@ -153,6 +153,12 @@ type Resolver interface {
 	// ai-title and the workspace name. An empty text retracts it. Its sole
 	// producer is the title synthesizer.
 	SetSynthesizedTitle(ws ids.WorkspaceID, title string)
+	// SetPrincipalLink installs the workspace's principal link, which the
+	// title carries for the summary to open (TopbarTitle.link). Nil clears
+	// it. It rides the title, so a workspace with no summary publishes
+	// no link. Its sole producer is the workspace verbs, at registration and
+	// on every SetWorkspacePrincipalLink.
+	SetPrincipalLink(ws ids.WorkspaceID, link *string)
 	// SetModelCatalog installs the switchable model set the selector renders,
 	// in display order.
 	SetModelCatalog(ws ids.WorkspaceID, models []*conversationv1.ModelOption)

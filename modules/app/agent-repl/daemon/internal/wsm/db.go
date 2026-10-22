@@ -537,6 +537,9 @@ type DB interface {
 	// SetAwaiting marks a workspace awaiting correspondence from another, or
 	// clears the mark with nil (standings.go).
 	SetAwaiting(ctx context.Context, id WorkspaceID, awaited *WorkspaceID) error
+	// SetPrincipalLink records a workspace's principal link, or clears it
+	// with nil (principallink.go).
+	SetPrincipalLink(ctx context.Context, id WorkspaceID, link *string) error
 	// SetOneShot marks a workspace's creation a one-shot or unmarks it; a
 	// workspace with no creation job is ErrNotFound (standings.go).
 	SetOneShot(ctx context.Context, id WorkspaceID, oneShot bool) error

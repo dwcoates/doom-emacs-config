@@ -7776,6 +7776,14 @@ bubble-body.bubble-body { display: block; }
   font-style: italic;
   color: var(--tool-title);
 }
+/* THE SUMMARY AS ITS PRINCIPAL LINK: the same purple, underlined, with the
+   pointer. The link component's anchor would otherwise take the agent's link
+   color, so it inherits the summary's. */
+.topbar-title-linked .external-link {
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
 /* THE WORKSPACE NAME: the foreground color, bold, and a step larger than the
    summary and every cell of the band (owner ruling, 2026-10-17: "row 1.5,
    just for the workspace name"). Under a summary it hangs from the name line's
