@@ -299,3 +299,13 @@ func TestNoProductionCodeHandBuildsAHook(t *testing.T) {
 		t.Fatalf("hooks built by hand in %v, want PromptHook and ScriptHook", byHand)
 	}
 }
+
+func TestPathIsRelBeneathTheRoot(t *testing.T) {
+	// Act
+	got := Path("/repo")
+
+	// Assert
+	if got != filepath.Join("/repo", Rel) {
+		t.Fatalf("Path = %q, want %q beneath the root", got, Rel)
+	}
+}
