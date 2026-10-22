@@ -1,4 +1,4 @@
-package holds
+package holds_test
 
 import (
 	"testing"
@@ -6,21 +6,9 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-)
 
-// textBody draws a body of one text block per text block of CONTENT, so a
-// test can tell the drawn body is the said's own.
-func textBody(content *conversationv1.UserContent) *frontendv1.FeedUserPromptBody {
-	body := &frontendv1.FeedUserPromptBody{}
-	for _, block := range content.GetBlocks() {
-		if text := block.GetText(); text != nil {
-			body.Blocks = append(body.Blocks, &frontendv1.FeedUserPromptBlock{
-				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: &frontendv1.ParsedProse{Source: &frontendv1.ProseSource{Markdown: "drawn:" + text.GetText()}}}},
-			})
-		}
-	}
-	return body
-}
+	"agent-repld/internal/resolve/holds"
+)
 
 func TestIngressPromptDrawsTheBodyItsDrawerResolves(t *testing.T) {
 	// Arrange
@@ -29,7 +17,7 @@ func TestIngressPromptDrawsTheBodyItsDrawerResolves(t *testing.T) {
 	}}}
 
 	// Act
-	card := IngressPrompt(IngressEntry{Key: "k-1", Said: said, Wait: IngressWait{Kind: IngressAwaitingIntake}}, textBody)
+	card := holds.IngressPrompt(holds.IngressEntry{Key: "k-1", Said: said, Wait: holds.IngressWait{Kind: holds.IngressAwaitingIntake}}, textBody)
 
 	// Assert
 	if got := card.GetBody().GetBlocks()[0].GetText().GetProse().GetSource().GetMarkdown(); got != "drawn:hi" {
@@ -40,21 +28,21 @@ func TestIngressPromptDrawsTheBodyItsDrawerResolves(t *testing.T) {
 func TestIngressPromptDrawsEachWaitAsItsBadge(t *testing.T) {
 	tests := []struct {
 		name      string
-		kind      IngressWaitKind
+		kind      holds.IngressWaitKind
 		wantLabel string
 		wantArm   func(*frontendv1.HeldIngressPromptBadge) bool
 	}{
-		{"awaiting intake", IngressAwaitingIntake, "waiting to be queued", func(b *frontendv1.HeldIngressPromptBadge) bool { return b.GetAwaitingIntake() != nil }},
-		{"no session", IngressNoSession, "waiting for the session", func(b *frontendv1.HeldIngressPromptBadge) bool { return b.GetNoSession() != nil }},
-		{"merge", IngressMerge, "merge running", func(b *frontendv1.HeldIngressPromptBadge) bool { return b.GetMerge() != nil }},
-		{"cold gate", IngressColdGate, "cold gate", func(b *frontendv1.HeldIngressPromptBadge) bool { return b.GetColdGate() != nil }},
-		{"moved away", IngressMovedAway, "workspace moving", func(b *frontendv1.HeldIngressPromptBadge) bool { return b.GetMovedAway() != nil }},
-		{"refused", IngressRefused, "not yet queued", func(b *frontendv1.HeldIngressPromptBadge) bool { return b.GetRefused() != nil }},
+		{"awaiting intake", holds.IngressAwaitingIntake, "waiting to be queued", func(b *frontendv1.HeldIngressPromptBadge) bool { return b.GetAwaitingIntake() != nil }},
+		{"no session", holds.IngressNoSession, "waiting for the session", func(b *frontendv1.HeldIngressPromptBadge) bool { return b.GetNoSession() != nil }},
+		{"merge", holds.IngressMerge, "merge running", func(b *frontendv1.HeldIngressPromptBadge) bool { return b.GetMerge() != nil }},
+		{"cold gate", holds.IngressColdGate, "cold gate", func(b *frontendv1.HeldIngressPromptBadge) bool { return b.GetColdGate() != nil }},
+		{"moved away", holds.IngressMovedAway, "workspace moving", func(b *frontendv1.HeldIngressPromptBadge) bool { return b.GetMovedAway() != nil }},
+		{"refused", holds.IngressRefused, "not yet queued", func(b *frontendv1.HeldIngressPromptBadge) bool { return b.GetRefused() != nil }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			card := IngressPrompt(IngressEntry{Key: "k-1", Wait: IngressWait{Kind: tc.kind}}, textBody)
+			card := holds.IngressPrompt(holds.IngressEntry{Key: "k-1", Wait: holds.IngressWait{Kind: tc.kind}}, textBody)
 
 			// Assert
 			badge := card.GetBadge()
@@ -74,8 +62,8 @@ func TestIngressPromptCarriesTheSaidTheQueuedAtAndTheDetail(t *testing.T) {
 	at := time.UnixMilli(1_700_000_000_123)
 
 	// Act
-	card := IngressPrompt(IngressEntry{Key: "k-1", Said: said, QueuedAt: at,
-		Wait: IngressWait{Kind: IngressAwaitingIntake, Detail: "waits behind an earlier prompt"}}, textBody)
+	card := holds.IngressPrompt(holds.IngressEntry{Key: "k-1", Said: said, QueuedAt: at,
+		Wait: holds.IngressWait{Kind: holds.IngressAwaitingIntake, Detail: "waits behind an earlier prompt"}}, textBody)
 
 	// Assert
 	if card.GetSaid() != said {
@@ -94,10 +82,10 @@ func TestIngressPromptPanicsOnAWaitWithNoBadge(t *testing.T) {
 	defer func() {
 		// Assert
 		if recover() == nil {
-			t.Fatal("IngressPrompt returned for an unknown wait kind, want a panic")
+			t.Fatal("holds.IngressPrompt returned for an unknown wait kind, want a panic")
 		}
 	}()
 
 	// Act
-	IngressPrompt(IngressEntry{Key: "k-1", Wait: IngressWait{Kind: IngressWaitKind(99)}}, textBody)
+	holds.IngressPrompt(holds.IngressEntry{Key: "k-1", Wait: holds.IngressWait{Kind: holds.IngressWaitKind(99)}}, textBody)
 }
