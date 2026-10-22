@@ -2716,6 +2716,7 @@ export function heldPrompt(init?: {
   return create(HeldPromptSchema, {
     turn: turnId(init?.turn ?? HELD_TURN_ID),
     said: userSaid(init?.text ?? "also fix the footer"),
+    body: { blocks: [{ block: { case: "text", value: { text: init?.text ?? "also fix the footer" } } }] },
     queuedAt: { atMs: 3_000n },
     classification: classificationValue(classification),
     hold: holdValue(hold),
@@ -2742,6 +2743,7 @@ export const heldIngressItem = (init?: { key?: string; arm?: IngressBadgeArm; te
     case: "ingress",
     value: {
       said: { content: { blocks: [{ block: { case: "text", value: { text: init?.text ?? "sent while the daemon was down" } } }] } },
+      body: { blocks: [{ block: { case: "text", value: { text: init?.text ?? "sent while the daemon was down" } } }] },
       queuedAt: { atMs: 0n },
       badge: { label: `badge ${init?.arm ?? "noSession"}`, standsFor: { case: init?.arm ?? "noSession", value: {} } },
     },
