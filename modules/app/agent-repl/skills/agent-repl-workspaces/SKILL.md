@@ -123,7 +123,9 @@ Choose the combination from what the work needs:
 - `workspace subscribe WS -events ...` has this workspace's agent told, as a
   prompt drawn nowhere, when WS's turn starts or ends, it needs input, it lands
   or it closes. Subscribe instead of polling; `workspace unsubscribe WS` ends
-  it. A subscription ends with either workspace's close. A notice that waited
+  it. A subscription ends with this workspace's close (re-opening does not
+  restore it) and when WS is forgotten; WS closing is an event it tells, and
+  it goes on following WS if WS is opened again. A notice that waited
   behind your turns lists every change since the last one you were told,
   oldest first, and its status is WS as it stands when the notice is made.
 
