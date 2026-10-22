@@ -2,6 +2,7 @@ package main
 
 import (
 	"agent-repld/internal/ids"
+	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
@@ -15,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1714,5 +1716,73 @@ func TestATestRunRefusesTheLiveMetricsRoot(t *testing.T) {
 	}
 	if _, statErr := os.Stat(live); !os.IsNotExist(statErr) {
 		t.Fatalf("the refused root was created (stat err = %v)", statErr)
+	}
+}
+
+// fakeIdentities answers Identity from a table, or with ERR.
+type fakeIdentities struct {
+	ids map[int]procmetrics.Identity
+	err error
+}
+
+func (f fakeIdentities) Identity(pid int) (procmetrics.Identity, error) {
+	if f.err != nil {
+		return procmetrics.Identity{}, f.err
+	}
+	return f.ids[pid], nil
+}
+
+func TestABootRefusalNamesTheProcessHoldingTheLock(t *testing.T) {
+	held := func(pid int) error {
+		return &daemonaddr.HeldError{Path: "/state/daemon.serving", Holder: daemonaddr.Holder{PID: pid}}
+	}
+	tests := []struct {
+		name  string
+		err   error
+		procs fakeIdentities
+		want  dlog.Context
+	}{
+		{
+			name:  "a holder that still runs is named with its parent",
+			err:   held(4242),
+			procs: fakeIdentities{ids: map[int]procmetrics.Identity{4242: {PID: 4242, PPID: 1, Name: "agent-repl-shim"}}},
+			want:  dlog.Context{"held_lock": "/state/daemon.serving", "holder_pid": 4242, "holder": "agent-repl-shim", "holder_ppid": 1},
+		},
+		{
+			name:  "a holder gone since the refusal keeps its pid",
+			err:   held(4242),
+			procs: fakeIdentities{err: procmetrics.ErrGone},
+			want:  dlog.Context{"held_lock": "/state/daemon.serving", "holder_pid": 4242, "holder": "exited since the refusal"},
+		},
+		{
+			name:  "a holder that cannot be read says why",
+			err:   held(4242),
+			procs: fakeIdentities{err: errors.New("denied")},
+			want:  dlog.Context{"held_lock": "/state/daemon.serving", "holder_pid": 4242, "holder": "could not be read: denied"},
+		},
+		{
+			name: "a lock the kernel named no holder for says so",
+			err:  held(0),
+			want: dlog.Context{"held_lock": "/state/daemon.serving", "holder": "the kernel named no holder"},
+		},
+		{
+			name: "a refusal with no holder attached adds nothing",
+			err:  daemonaddr.ErrClaimed,
+			want: dlog.Context{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			record := dlog.Context{}
+
+			// Act
+			nameClaimHolder(record, fmt.Errorf("bind: %w", tt.err), tt.procs)
+
+			// Assert
+			if !reflect.DeepEqual(record, tt.want) {
+				t.Fatalf("record = %v, want %v", record, tt.want)
+			}
+		})
 	}
 }
