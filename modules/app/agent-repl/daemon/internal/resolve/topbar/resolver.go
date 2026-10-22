@@ -251,15 +251,23 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 // branch are never composed into it, as a suffix or as a stand-in: the name is
 // its own element (TopbarWorkspaceName), drawn beneath the summary, and a
 // workspace with no summary yet draws no title line at all.
+//
+// THE PRINCIPAL LINK RIDES THE TITLE, so a workspace with no summary has
+// nothing clickable: the link is attached only to a title that exists.
 func title(s *wsState) *frontendv1.TopbarTitle {
+	var out *frontendv1.TopbarTitle
 	switch {
 	case s.synthesizedTitle != "":
-		return &frontendv1.TopbarTitle{Text: s.synthesizedTitle}
+		out = &frontendv1.TopbarTitle{Text: s.synthesizedTitle}
 	case s.sessionTitle != "":
-		return &frontendv1.TopbarTitle{Text: s.sessionTitle}
+		out = &frontendv1.TopbarTitle{Text: s.sessionTitle}
 	default:
 		return nil
 	}
+	if s.principalLink != "" {
+		out.Link = &frontendv1.TopbarTitleLink{Url: s.principalLink}
+	}
+	return out
 }
 
 // sessionLine composes the identity line: which vendor session, which account
@@ -541,6 +549,14 @@ func (r *resolver) SetSynthesizedTitle(ws ids.WorkspaceID, title string) {
 	r.mutate(ws, "daemon.topbar.set_synthesized_title", "the topbar took a synthesized title",
 		dlog.Context{"present": title != ""},
 		func(s *wsState) { s.synthesizedTitle = title })
+}
+
+// SetPrincipalLink installs the workspace's principal link, which the title
+// carries while a summary stands. An empty url clears it.
+func (r *resolver) SetPrincipalLink(ws ids.WorkspaceID, url string) {
+	r.mutate(ws, "daemon.topbar.set_principal_link", "the topbar took the principal link",
+		dlog.Context{"present": url != "", "url": url},
+		func(s *wsState) { s.principalLink = url })
 }
 
 // SetModelCatalog installs the switchable model set.
