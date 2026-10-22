@@ -213,27 +213,33 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, t
 	key := noticeKey{subscriber: told.Subscriber, repo: change.Queue.Repo}
 	changes := append(s.carried(ctx, key, fields), change)
 	fields["changes"] = len(changes)
+	turn, failure, err := s.submit(ctx, prompts, told, changes)
+	if err != nil {
+		log.Error(op, failure, dlog.WithCause(fields, err))
+		s.keepUntold(key, "", changes)
+		return
+	}
+	s.keepUntold(key, turn, changes)
+	fields["turn"] = string(turn)
+	log.Info(op, "told a subscriber's agent of a merge queue change", fields)
+}
+
+// submit composes the notice of CHANGES and submits it to TOLD, answering the
+// turn it was submitted as, or the record a failure is written with and why.
+func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, told Recipient, changes []merge.QueueChange) (ids.TurnID, string, error) {
 	text, err := s.deps.Briefs(BriefNotice, Values(told.Detail, changes))
 	if err != nil {
-		log.Error(op, "could not compose a merge queue notice; the subscriber is not told of the change", dlog.WithCause(fields, err))
-		s.keepUntold(key, "", changes)
-		return
+		return "", "could not compose a merge queue notice; the subscriber is not told of the change", err
 	}
-	submitKey, err := s.deps.MintKey("merge-queue-notice")
+	key, err := s.deps.MintKey("merge-queue-notice")
 	if err != nil {
-		log.Error(op, "could not mint a merge queue notice's idempotency key; the subscriber is not told of the change", dlog.WithCause(fields, err))
-		s.keepUntold(key, "", changes)
-		return
+		return "", "could not mint a merge queue notice's idempotency key; the subscriber is not told of the change", err
 	}
-	outcome, err := prompts.Submit(ctx, told.Subscriber, feed.SaidText(text), submitKey, Origin, nil, wsm.DeliveryDeferred, nil)
+	outcome, err := prompts.Submit(ctx, told.Subscriber, feed.SaidText(text), key, Origin, nil, wsm.DeliveryDeferred, nil)
 	if err != nil {
-		log.Error(op, "could not submit a merge queue notice to its subscriber", dlog.WithCause(fields, err))
-		s.keepUntold(key, "", changes)
-		return
+		return "", "could not submit a merge queue notice to its subscriber", err
 	}
-	s.keepUntold(key, outcome.Turn, changes)
-	fields["turn"] = string(outcome.Turn)
-	log.Info(op, "told a subscriber's agent of a merge queue change", fields)
+	return outcome.Turn, "", nil
 }
 
 // carried answers the changes the subscriber's untold notice of KEY's queue
