@@ -672,6 +672,11 @@ describe("the agents panel", () => {
     expect(panel.querySelector(".footer-row-description")).toBeNull();
   });
 
+  it("draws the model its latest response named verbatim", () => {
+    const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
+    expect(panel.querySelector(".footer-row-model")?.textContent).toBe("claude-sonnet-5");
+  });
+
   it("draws the running token sum verbatim", () => {
     const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
     expect(panel.querySelector(".footer-row-tokens")?.textContent).toBe("12.4k");
@@ -805,33 +810,48 @@ describe("the agents panel's fixed columns", () => {
     ]);
   });
 
-  it("heads the figure columns 'tokens' then 'duration'", () => {
+  it("heads the columns 'tokens', 'duration' then 'model'", () => {
     // Arrange / Act
     const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
     // Assert
     expect([...panel.querySelectorAll(".footer-column-header")].map((h) => h.textContent)).toEqual([
       "tokens",
       "duration",
+      "model",
     ]);
   });
 
-  it("draws the header as the grid's four cells: stop, tokens, duration, caret", () => {
+  it("draws the header as the grid's five cells: stop, tokens, duration, model, caret", () => {
     // Arrange / Act
     const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
     const header = panel.querySelector<HTMLElement>(".footer-panel-header") as HTMLElement;
     // Assert
-    expect(cells(header)).toEqual(["footer-stop", "tokens", "duration", ""]);
+    expect(cells(header)).toEqual(["footer-stop", "tokens", "duration", "model", ""]);
   });
 
-  it("draws each row as the grid's four cells: main, tokens, duration, caret", () => {
+  it("draws each row as the grid's five cells: main, tokens, duration, model, caret", () => {
     // Arrange / Act
     const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
     const row = panel.querySelector<HTMLElement>(".footer-row") as HTMLElement;
     // Assert
-    expect(cells(row)).toEqual(["footer-row-main", "footer-row-tokens", "footer-row-clock", "footer-row-caret"]);
+    expect(cells(row)).toEqual([
+      "footer-row-main",
+      "footer-row-tokens",
+      "footer-row-clock",
+      "footer-row-model",
+      "footer-row-caret",
+    ]);
   });
 
-  it("keeps a waiting row's wait inside the main cell, so the row stays four cells", () => {
+  it("keeps a modelless row at five cells, its model cell empty", () => {
+    // Arrange / Act
+    const { panel } = drawPanel("agents", { agents: [{ ...AGENT_ROW, model: undefined }] });
+    const row = panel.querySelector<HTMLElement>(".footer-row") as HTMLElement;
+    // Assert
+    expect([row.children.length, row.querySelector(".footer-row-model")?.textContent]).toEqual([5, ""]);
+  });
+
+  it("keeps a waiting row's wait inside the main cell, so the row stays five cells", () => {
     // Arrange / Act
     const { panel } = drawPanel("agents", {
       agents: [
@@ -844,7 +864,7 @@ describe("the agents panel's fixed columns", () => {
     const row = panel.querySelector<HTMLElement>(".footer-row") as HTMLElement;
     // Assert
     expect([row.children.length, row.querySelector(".footer-row-main .footer-row-state")]).toEqual([
-      4,
+      5,
       expect.any(HTMLElement),
     ]);
   });
@@ -868,7 +888,7 @@ describe("the agents panel's fixed columns", () => {
       cascadedValue(panel, "grid-template-columns").replace(/\s+/g, " "),
     ]).toEqual([
       "grid",
-      "minmax(0, 1fr) minmax(var(--footer-tokens-col-min), max-content) minmax(var(--footer-duration-col-min), max-content) auto",
+      "minmax(0, 1fr) minmax(var(--footer-tokens-col-min), max-content) minmax(var(--footer-duration-col-min), max-content) max-content auto",
     ]);
   });
 
@@ -888,6 +908,8 @@ describe("the agents panel's fixed columns", () => {
   it.each([
     ["the duration header", '[data-column="duration"]'],
     ["a row's duration cell", ".footer-row > .footer-row-clock"],
+    ["the model header", '[data-column="model"]'],
+    ["a row's model cell", ".footer-row > .footer-row-model"],
   ])("draws the bar left of %s at the row delimiters' thickness and color", (_name, selector) => {
     // Arrange
     const { panel } = styled();
@@ -896,6 +918,29 @@ describe("the agents panel's fixed columns", () => {
     const bar = ["width", "style", "color"].map((part) => cascadedValue(el, `border-left-${part}`));
     // Assert
     expect(bar).toEqual(["1px", "solid", "var(--border)"]);
+  });
+
+  it.each([
+    ["the model header", '[data-column="model"]'],
+    ["a row's model cell", ".footer-row > .footer-row-model"],
+  ])("reads %s left to right from its bar", (_name, selector) => {
+    // Arrange
+    const { panel } = styled();
+    const el = panel.querySelector(selector) as HTMLElement;
+    // Act
+    const align = cascadedValue(el, "text-align");
+    // Assert
+    expect(align).toBe("left");
+  });
+
+  it("draws a row's model in the topbar's model hue", () => {
+    // Arrange
+    const { row } = styled();
+    const model = row.querySelector(".footer-row-model") as HTMLElement;
+    // Act
+    const color = cascadedValue(model, "color");
+    // Assert
+    expect(color).toBe("var(--info-model)");
   });
 
   it("puts the stop-all control at the header's left edge", () => {

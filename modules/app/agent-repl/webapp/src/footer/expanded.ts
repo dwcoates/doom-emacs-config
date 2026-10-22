@@ -36,6 +36,7 @@ import type {
   FooterAgentRow,
   FooterAgentRowDescription,
   FooterAgentRowLabel,
+  FooterAgentRowModel,
   FooterAgentRowRuntime,
   FooterAgentRowTokens,
   FooterAgentRowWaitingForApi,
@@ -603,12 +604,12 @@ function usageRow(usage: string): HTMLElement {
  *
  * FIXED COLUMNS (owner request, 2026-10-01). The panel is ONE grid whose rows
  * share its columns (`subgrid`, styles.css): the row's main cell, then tokens,
- * then duration, then the caret. Every row's tokens and duration therefore
+ * then duration, then the model (owner request, 2026-10-22), then the caret. Every row's tokens and duration therefore
  * share one width, at least wide enough for the largest common value and
  * growing with a longer one, so a clock going from "4m 59s" to "5m" no longer
- * moves the token count. The header is the same four cells: the "stop all"
- * control on the LEFT (where the "live agents" title was), then the "tokens"
- * and "duration" column headers above their columns.
+ * moves the token count. The header is the same five cells: the "stop all"
+ * control on the LEFT (where the "live agents" title was), then the "tokens",
+ * "duration" and "model" column headers above their columns.
  */
 export function drawFooterExpandedAgents(
   u: FooterExpandedAgents,
@@ -620,6 +621,7 @@ export function drawFooterExpandedAgents(
   header.appendChild(deps.stops.allAgents);
   header.appendChild(columnHeader("tokens"));
   header.appendChild(columnHeader("duration"));
+  header.appendChild(columnHeader("model"));
   header.appendChild(document.createElement("span"));
 
   if (u.rows.length === 0) return [header, emptyRow("no live agents")];
@@ -631,7 +633,7 @@ export function drawFooterExpandedAgents(
 
 /**
  * One subagent with work ahead of it: ⚙ · label · description · [its wait for
- * the API] · tokens · clock · ▸. The row's STATE is stamped as `data-state`;
+ * the API] · tokens · clock · model · ▸. The row's STATE is stamped as `data-state`;
  * a running agent draws nothing more, a waiting one its wait.
  */
 export function drawFooterAgentRow(
@@ -642,7 +644,7 @@ export function drawFooterAgentRow(
   const row = jumpRow("agents", u.work, u.jump, deps, path);
   row.classList.add(COLUMNS_ROW_CLASS);
   // THE MAIN CELL holds everything before the figure columns, so the row is
-  // exactly the grid's four cells whatever optional parts it carries.
+  // exactly the grid's five cells whatever optional parts it carries.
   const main = document.createElement("span");
   main.className = "footer-row-main";
   main.appendChild(glyph("agents", "⚙"));
@@ -668,6 +670,7 @@ export function drawFooterAgentRow(
   row.appendChild(
     drawFooterAgentRowRuntime(requireMessage(u.runtime, `${path}.runtime`), deps, `${path}.runtime`),
   );
+  row.appendChild(drawFooterAgentRowModel(u.model));
   row.appendChild(caret());
   return finishJumpRow(row, main);
 }
@@ -715,6 +718,18 @@ export function drawFooterAgentRowRuntime(
   path: string,
 ): HTMLElement {
   return runtimeClock(u.startedAtMs, deps, `${path}.started_at_ms`);
+}
+
+/**
+ * The model the subagent's latest response named, verbatim. The cell is drawn
+ * EMPTY while unset — before the subagent has answered once — so the row keeps
+ * the grid's cells, and never draws a guessed model.
+ */
+export function drawFooterAgentRowModel(u: FooterAgentRowModel | undefined): HTMLElement {
+  const model = document.createElement("span");
+  model.className = "footer-row-model";
+  if (u !== undefined) model.textContent = u.name;
+  return model;
 }
 
 // ---- the tasks panel ------------------------------------------------------

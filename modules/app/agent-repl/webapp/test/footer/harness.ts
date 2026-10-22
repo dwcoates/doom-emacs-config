@@ -325,6 +325,7 @@ export const AGENT_ROW = {
   tokens: { text: "12.4k" },
   runtime: { startedAtMs: BigInt(NOW - 65_000) },
   state: { case: "running" as const, value: {} },
+  model: { name: "claude-sonnet-5" },
 };
 
 /** One live shell row. */

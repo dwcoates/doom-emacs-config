@@ -6831,8 +6831,10 @@ bubble-body.bubble-body { display: block; }
    (`max-content`), shrinking back to that floor when the value goes. So a clock
    turning "4m 59s" into "5m" no longer moves the token count. A vertical bar
    (the row delimiters' own 1px `--border`) separates tokens from duration,
-   header included. The header is the same four cells: "stop all" on the LEFT,
-   then the "tokens" and "duration" headers above their columns.
+   header included. A fifth column, the subagent's model, sits after duration
+   behind the same bar (owner request, 2026-10-22). The header is the same
+   cells: "stop all" on the LEFT, then the "tokens", "duration" and "model"
+   headers above their columns.
 
    THE MERGE QUEUE TAB IS THE SAME TABLE (owner request, 2026-10-01): its
    workspace, stage and duration columns take the one duration floor, bar,
@@ -6852,6 +6854,7 @@ bubble-body.bubble-body { display: block; }
     minmax(0, 1fr)
     minmax(var(--footer-tokens-col-min), max-content)
     minmax(var(--footer-duration-col-min), max-content)
+    max-content
     auto;
 }
 .pfooter-sheet[data-panel="agents"] > *,
@@ -6876,12 +6879,22 @@ bubble-body.bubble-body { display: block; }
 }
 .footer-columns > .footer-row-tokens,
 .footer-columns > .footer-row-clock,
+.footer-columns > .footer-row-model,
 .footer-column-header {
   white-space: nowrap;
   text-align: right;
 }
+/* THE MODEL COLUMN (owner request, 2026-10-22) is a name, not a figure: it
+   reads left to right from its bar, in the topbar's model hue. */
+.footer-columns > .footer-row-model,
+.footer-column-header[data-column="model"] {
+  text-align: left;
+}
+.footer-row-model { color: var(--info-model); }
 .footer-columns > .footer-row-clock,
-.footer-column-header[data-column="duration"] {
+.footer-columns > .footer-row-model,
+.footer-column-header[data-column="duration"],
+.footer-column-header[data-column="model"] {
   /* LONGHANDS, as the strip's partition writes them: a `var()` inside the
      shorthand is not readable back through `getComputedStyle` under jsdom. */
   border-left-width: 1px;
