@@ -419,6 +419,10 @@ message CreateWorkspaceError {
     // workspace will be created under it when the merge starts
     // (agentrepl.v1.CreateWorkspaceAsyncMerge.name).
     CreateWorkspaceNameReserved name_reserved = 18;
+    // The supplied name breaks the naming rule, so it cannot be the
+    // workspace's branch, worktree directory and tab label. Nothing was
+    // claimed, built or created.
+    CreateWorkspaceInvalidName invalid_name = 42;
     // The one-shot's context workspace is not in the daemon's registry.
     CreateWorkspaceUnknownContextWorkspace unknown_context_workspace = 19;
     // The named parent is hidden or closed, and creating a child of it
@@ -527,6 +531,41 @@ message CreateWorkspaceNameReserved {
   // The branch the supplied name resolves to.
   string branch = 1;
 }
+// A supplied name (CreateWorkspaceStandard.name) that breaks the naming rule.
+// The name is the workspace's branch, its worktree directory and its tab
+// label, so it is checked before anything is claimed or built: a name `git`
+// or the filesystem would refuse, or one a person would not type as a label
+// (spaces, punctuation, a pasted prompt), is refused here with the part that
+// broke the rule, never handed to `git` to fail on.
+//
+// The rule reads the name as `/`-separated components. The LAST component is
+// the slug: lowercase ASCII letters and digits in hyphen-separated words, with
+// no leading, trailing or doubled hyphen. Every EARLIER component is a prefix
+// (a person's initials, a team): ASCII letters and digits, optionally joined
+// by single `.`, `_` or `-`. A name the daemon mints is held to the same
+// slug shape plus word and length limits; a supplied name has no such limits.
+message CreateWorkspaceInvalidName {
+  // The name as supplied, with surrounding whitespace trimmed.
+  string name = 1;
+  // The `/`-separated component of `name` that broke its rule, exactly as it
+  // appears in `name`. Empty when that component is empty (a leading,
+  // trailing or doubled `/`), which is itself the breach.
+  string component = 2;
+  // Which rule `component` broke. The arm is set from where the component
+  // sits in the name, so a client words the refusal from the arm alone.
+  oneof rule {
+    // The last component is not a slug.
+    CreateWorkspaceInvalidNameSlug slug = 3;
+    // A component before the last is not a prefix.
+    CreateWorkspaceInvalidNamePrefix prefix = 4;
+  }
+}
+// The name's last component, its slug, is not lowercase hyphen-separated
+// ASCII alphanumeric words.
+message CreateWorkspaceInvalidNameSlug {}
+// A prefix component of the name is empty, or is not ASCII letters and digits
+// joined by single `.`, `_` or `-`.
+message CreateWorkspaceInvalidNamePrefix {}
 // Names the owner the registry does not hold for this repository.
 message CreateWorkspaceUnknownOwner {
   // The owner as the request named it.
