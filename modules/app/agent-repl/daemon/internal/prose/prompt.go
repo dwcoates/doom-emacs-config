@@ -143,3 +143,27 @@ func readEntries(text string) ([]entrySpan, error) {
 	}
 	return entries, nil
 }
+
+// ReplaceEntry answers TEXT with the first entry answering LABEL saying
+// SAYS instead: its label, its separator and the whitespace after them kept,
+// and every other word of TEXT unchanged. ok is false, and TEXT is answered
+// unchanged, when no entry of TEXT answers LABEL.
+func ReplaceEntry(text, label, says string) (string, bool) {
+	entries, err := readEntries(text)
+	if err != nil {
+		panic(err.Error())
+	}
+	for _, e := range entries {
+		if e.label != label {
+			continue
+		}
+		content := text[e.textStart:e.end]
+		lead := content[:len(content)-len(strings.TrimLeft(content, " \t\n"))]
+		trail := content[len(strings.TrimRight(content, "\n")):]
+		if lead == "" && says != "" {
+			lead = " "
+		}
+		return text[:e.textStart] + lead + says + trail + text[e.end:], true
+	}
+	return text, false
+}

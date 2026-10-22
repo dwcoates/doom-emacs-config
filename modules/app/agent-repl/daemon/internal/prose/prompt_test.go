@@ -146,3 +146,59 @@ func TestParsePromptRecordsAFailureOnceAndPanics(t *testing.T) {
 		t.Errorf("the record's context = %v, want the function, the text's length and the cause", ctx)
 	}
 }
+
+func TestReplaceEntrySwapsOneEntrysWords(t *testing.T) {
+	tests := []struct {
+		name  string
+		text  string
+		label string
+		says  string
+		want  string
+	}{
+		{name: "after a dash", text: "3.1 - old words", label: "3.1", says: "new words", want: "3.1 - new words"},
+		{name: "after a colon", text: "3.1: old", label: "3.1", says: "new", want: "3.1: new"},
+		{name: "after a dotted label alone", text: "3.1 old", label: "3.1", says: "new", want: "3.1 new"},
+		{name: "on the line after its label", text: "3.1\nold", label: "3.1", says: "new", want: "3.1\nnew"},
+		{name: "after a label with nothing after it", text: "3.1 -", label: "3.1", says: "new", want: "3.1 - new"},
+		{name: "running to several lines", text: "3.1 - old\nmore old\n", label: "3.1", says: "new", want: "3.1 - new\n"},
+		{
+			name: "among others, each kept",
+			text: "thanks\n3.1 - first\n\n3.2 - second\n3.3 - third", label: "3.2", says: "changed",
+			want: "thanks\n3.1 - first\n\n3.2 - changed\n3.3 - third",
+		},
+		{name: "the first of two answering one label", text: "3.1 - a\n3.1 - b", label: "3.1", says: "z", want: "3.1 - z\n3.1 - b"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, ok := ReplaceEntry(tc.text, tc.label, tc.says)
+
+			// Assert
+			if !ok || got != tc.want {
+				t.Fatalf("ReplaceEntry(%q, %q, %q) = %q, %v; want %q, true", tc.text, tc.label, tc.says, got, ok, tc.want)
+			}
+		})
+	}
+}
+
+func TestReplaceEntryLeavesATextWithNoSuchEntryAlone(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "no entry at all", text: "please fix it"},
+		{name: "entries answering other labels", text: "3.1 - a\n3.2 - b"},
+		{name: "a pasted tree's root with the label", text: "9 🔧 Fixed\n└── 9.1 x"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, ok := ReplaceEntry(tc.text, "9", "new")
+
+			// Assert
+			if ok || got != tc.text {
+				t.Fatalf("ReplaceEntry(%q) = %q, %v; want the text unchanged and false", tc.text, got, ok)
+			}
+		})
+	}
+}
