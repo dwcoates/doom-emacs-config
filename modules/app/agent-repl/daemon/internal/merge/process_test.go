@@ -495,6 +495,25 @@ func TestAFailedPromptHookIsRecorded(t *testing.T) {
 	}
 }
 
+// TestASucceededPromptHookIsRecorded covers the success's canonical record:
+// the stage, the hook's place in it, and how its turn closed.
+func TestASucceededPromptHookIsRecorded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.configurePromptHooks(nil, []string{"after"})
+	h.briefs["after"] = nil
+	enqueue(t, h)
+
+	// Act.
+	_ = h.admit(context.Background())
+
+	// Assert.
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.hook", Message: "a prompt hook succeeded"})
+	if !ok || record.Context["stage"] != TabPostDeploy || record.Context["hook"] != 0 {
+		t.Fatalf("daemon.merge.hook record = %+v (found %v), want the succeeded hook's stage and index", record, ok)
+	}
+}
+
 // TestAFailedPromptHooksTabSettlesFailed covers the feed's half of the same
 // failure: the hook's tab settles failed with its composed summary.
 func TestAFailedPromptHooksTabSettlesFailed(t *testing.T) {

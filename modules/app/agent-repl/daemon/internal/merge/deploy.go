@@ -309,6 +309,10 @@ func (r *run) runHook(ctx context.Context, stage stageOf, i int, hook *repoconfi
 		}
 		r.upsert(round, hookPromptTab(round.settled(r.o.nowMS(), "")))
 		r.closeTab(ctx, round, "succeeded")
+		// THE SUCCESS IS RECORDED, as a script hook's is: before it, a prompt
+		// hook that ran and succeeded left no record at all.
+		r.o.log(ctx, r.ws).Info("daemon.merge.hook", "a prompt hook succeeded", dlog.Context{
+			"workspace": string(r.ws), "lease": string(r.lease.ID), "stage": stage.kind, "hook": i, "close": close.String()})
 		return "", nil
 	case *repoconfigv1.DeployHook_Script:
 		return r.runScriptHook(ctx, stage, i, h.Script)
