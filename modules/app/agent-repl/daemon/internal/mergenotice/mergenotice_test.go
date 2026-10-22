@@ -771,3 +771,16 @@ func TestSentencesCountsEveryChangeItLists(t *testing.T) {
 		t.Fatalf("Sentences = %q, want three changes counted and listed", got)
 	}
 }
+
+func TestSentencesOfTwoChangesCountsThemBoth(t *testing.T) {
+	// Arrange.
+	changes := []merge.QueueChange{steppedFix, landedLast}
+
+	// Act.
+	got := Sentences(changes)
+
+	// Assert.
+	if !strings.HasPrefix(got, "It changed 3 times since the last notice you were told, oldest first:") {
+		t.Fatalf("Sentences = %q, want both changes counted", got)
+	}
+}
