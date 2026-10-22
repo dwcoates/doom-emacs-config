@@ -522,6 +522,10 @@ func (s *fakeServer) SetWorkspaceCorrespondence(ctx context.Context, req *connec
 	return handleUnary[v1.SetWorkspaceCorrespondenceRequest, v1.SetWorkspaceCorrespondenceResponse](ctx, s, "SetWorkspaceCorrespondence", req.Msg)
 }
 
+func (s *fakeServer) SetWorkspacePrincipalLink(ctx context.Context, req *connect.Request[v1.SetWorkspacePrincipalLinkRequest]) (*connect.Response[v1.SetWorkspacePrincipalLinkResponse], error) {
+	return handleUnary[v1.SetWorkspacePrincipalLinkRequest, v1.SetWorkspacePrincipalLinkResponse](ctx, s, "SetWorkspacePrincipalLink", req.Msg)
+}
+
 func (s *fakeServer) SetWorkspaceOneShot(ctx context.Context, req *connect.Request[v1.SetWorkspaceOneShotRequest]) (*connect.Response[v1.SetWorkspaceOneShotResponse], error) {
 	return handleUnary[v1.SetWorkspaceOneShotRequest, v1.SetWorkspaceOneShotResponse](ctx, s, "SetWorkspaceOneShot", req.Msg)
 }
