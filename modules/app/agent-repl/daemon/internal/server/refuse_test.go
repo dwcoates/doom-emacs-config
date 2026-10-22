@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -328,7 +329,7 @@ func TestSetArmSelectsANestedOneofArm(t *testing.T) {
 	// Act.
 	ok := setResponseError(resp, "bubble_refused", map[string]any{
 		"detail": "the subagent's turn is running",
-		"kind":   nestedArm("agent_busy"),
+		"kind":   refusalarm.Nested("agent_busy"),
 	})
 
 	// Assert.
@@ -346,7 +347,7 @@ func TestSetArmCarriesTheDetailBesideTheNestedArm(t *testing.T) {
 	// Act.
 	setResponseError(resp, "bubble_refused", map[string]any{
 		"detail": "the subagent's turn is running",
-		"kind":   nestedArm("agent_busy"),
+		"kind":   refusalarm.Nested("agent_busy"),
 	})
 
 	// Assert.
@@ -363,7 +364,7 @@ func TestSetArmRefusesANestedArmTheMessageDoesNotCarry(t *testing.T) {
 	resp := &agentreplv1.SubmitPromptResponse{}
 
 	// Act.
-	ok := setResponseError(resp, "bubble_refused", map[string]any{"kind": nestedArm("no_such_kind")})
+	ok := setResponseError(resp, "bubble_refused", map[string]any{"kind": refusalarm.Nested("no_such_kind")})
 
 	// Assert.
 	if ok {

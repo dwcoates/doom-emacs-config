@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/semver"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -2054,12 +2055,12 @@ func TestFinishWorkspaceAnswersTheVersionRefusalsOnTheirArms(t *testing.T) {
 		{name: "a missing increment", err: &merge.RefusalError{Arm: merge.ArmVersionIncrementRequired, Workspace: testWorkspaceID, Reason: "required"},
 			check: func(e *agentreplv1.FinishWorkspaceError) bool { return e.GetVersionIncrementRequired() != nil }},
 		{name: "an increment in an unversioned repository", err: &merge.RefusalError{Arm: merge.ArmVersionIncrementUnexpected, Workspace: testWorkspaceID, Reason: "unversioned",
-			Fields: map[string]any{"reason": merge.NestedArm("unversioned_repository")}},
+			Fields: map[string]any{"reason": refusalarm.Nested("unversioned_repository")}},
 			check: func(e *agentreplv1.FinishWorkspaceError) bool {
 				return e.GetVersionIncrementUnexpected().GetUnversionedRepository() != nil
 			}},
 		{name: "an increment off the default branch", err: &merge.RefusalError{Arm: merge.ArmVersionIncrementUnexpected, Workspace: testWorkspaceID, Reason: "parent",
-			Fields: map[string]any{"reason": merge.NestedArm("not_default_branch")}},
+			Fields: map[string]any{"reason": refusalarm.Nested("not_default_branch")}},
 			check: func(e *agentreplv1.FinishWorkspaceError) bool {
 				return e.GetVersionIncrementUnexpected().GetNotDefaultBranch() != nil
 			}},

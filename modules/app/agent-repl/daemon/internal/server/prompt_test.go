@@ -14,6 +14,7 @@ import (
 
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -445,7 +446,7 @@ func TestBubbleRefusedFoldsNotDeliverable(t *testing.T) {
 	out := bubbleRefused(in)
 
 	// Assert.
-	if out.Arm != "bubble_refused" || out.Fields["kind"] != nestedArm("not_deliverable") {
+	if out.Arm != "bubble_refused" || out.Fields["kind"] != refusalarm.Nested("not_deliverable") {
 		t.Fatalf("refusal = %+v, want bubble_refused with kind not_deliverable", out)
 	}
 }
@@ -475,7 +476,7 @@ func TestBubbleRefusedFoldsAgentBusy(t *testing.T) {
 	out := bubbleRefused(in)
 
 	// Assert.
-	if out.Arm != "bubble_refused" || out.Fields["kind"] != nestedArm("agent_busy") {
+	if out.Arm != "bubble_refused" || out.Fields["kind"] != refusalarm.Nested("agent_busy") {
 		t.Fatalf("refusal = %+v, want bubble_refused with kind agent_busy", out)
 	}
 }
