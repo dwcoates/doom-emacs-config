@@ -131,7 +131,7 @@
 (declare-function agent-repl-page-unloaded-p "page-unload" (ws))
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
 (declare-function agent-repl-webhost-remove "webhost" (ws))
-(declare-function agent-repl-open-tabs-hidden-p "open-tabs" (ws))
+(declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
 (declare-function agent-repl-webhost-reload-page "webhost" (ws))
 (declare-function agent-repl-webhost-show "webhost" (ws))
 (declare-function agent-repl-webhost-buffer "webhost" ())
@@ -1130,7 +1130,8 @@ Refusals, all preconditions rather than failures:
                          mount — the roster has not reached this
                          workspace, and a guessed URL is not an option;
   - `:hidden'            the user hid it, or its repository section is
-                         collapsed: it runs nothing (open-tabs.el);
+                         collapsed, and the user is not looking at it:
+                         it runs nothing (`agent-repl-open-tabs-withheld-p');
   - `:unloaded'          its page was unloaded because nobody looked at
                          it (page-unload.el); the switch to it remounts it;
   - `:already-mounted'   a live webview buffer already exists (this is
@@ -1141,7 +1142,7 @@ Refusals, all preconditions rather than failures:
    ((not (agent-repl--ws-live-p ws)) :not-live)
    ((not (agent-repl--ws-gui-frontend-p ws)) :not-gui)
    ((null (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws))) :no-ref)
-   ((and (fboundp 'agent-repl-open-tabs-hidden-p) (agent-repl-open-tabs-hidden-p ws)) :hidden)
+   ((and (fboundp 'agent-repl-open-tabs-withheld-p) (agent-repl-open-tabs-withheld-p ws)) :hidden)
    ((and (fboundp 'agent-repl-page-unloaded-p) (agent-repl-page-unloaded-p ws)) :unloaded)
    ((buffer-live-p (agent-repl--ws-get ws :frontend-buffer)) :already-mounted)
    ((not (agent-repl--frontend-xwidget-available-p)) :no-xwidget)))

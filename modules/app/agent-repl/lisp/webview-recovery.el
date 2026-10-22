@@ -24,13 +24,12 @@
 
 (require 'cl-lib)
 
-(declare-function agent-repl--panels-on-view-created "panels" (ws))
+(declare-function agent-repl--panels-mount-awaited-view "panels" (ws))
 (declare-function agent-repl--with-deferred-quit "agent-repl-core")
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
-(declare-function agent-repl--frontend-precreate-webview "agent-repl-frontend" (ws))
 (declare-function agent-repl--frontend-precreate-refusal "agent-repl-frontend" (ws))
 
 (defvar agent-repl-link-up-functions)
@@ -61,13 +60,12 @@ not cost the rest their pages."
     (dolist (ws (agent-repl--webview-precreate-missing))
       (condition-case err
           (progn
-            (agent-repl--frontend-precreate-webview ws)
-            (setq made (1+ made))
-            (agent-repl--info agent-repl--webview-precreate-central
-                              "elisp.webview-recovery.precreate-created ws=%s" ws)
             ;; The workspace the user stands on may have declined its
             ;; panel restore for want of exactly this view.
-            (agent-repl--panels-on-view-created ws))
+            (agent-repl--panels-mount-awaited-view ws)
+            (setq made (1+ made))
+            (agent-repl--info agent-repl--webview-precreate-central
+                              "elisp.webview-recovery.precreate-created ws=%s" ws))
         (error (agent-repl--warn ws "webview-precreate: ws=%s outcome=failed err=%S"
                                  ws err))))
     made))

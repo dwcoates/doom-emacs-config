@@ -9,6 +9,8 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl-page-unloaded-p "page-unload" (ws))
 (declare-function agent-repl-page-unload-remount "page-unload" (ws))
+(declare-function agent-repl-open-tabs-hidden-p "open-tabs" (ws))
+(declare-function agent-repl--frontend-precreate-webview "frontend" (ws))
 (declare-function agent-repl-input-hidden-p "window" (ws))
 (declare-function agent-repl--open-progress-placeholder "open-progress" (ws))
 (declare-function agent-repl-held-ingress-refresh "held-ingress" (ws))
@@ -579,6 +581,16 @@ now finds a live view."
           (agent-repl--maybe-autoselect-input ws))
       (agent-repl--log ws "elisp.panels.restore-on-view-created: skipped ws=%s reason=not-current" ws))))
 
+(defun agent-repl--panels-mount-awaited-view (ws)
+  "Make WS\='s view for the switch to WS, and run the restore that awaited it.
+The switch\='s panel restore declined for want of a view (`no-live-view');
+the mount makes one when WS is entitled to it
+\(`agent-repl--frontend-precreate-webview'), and the restore runs again on
+it (`agent-repl--panels-on-view-created').  Every mount a switch owes goes
+through here, so none can make the view without restoring its panels."
+  (agent-repl--frontend-precreate-webview ws)
+  (agent-repl--panels-on-view-created ws))
+
 (defvar agent-repl--switch-trigger nil
   "What triggered the newest perspective activation, captured AT the activation.
 A plist: :command (`this-command' then, which a deferred pass can no longer
@@ -698,10 +710,17 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
         (agent-repl--frontend-dispatch-show ws))
       ;; AN UNLOADED PAGE COMES BACK ON THE SWITCH TO IT (page-unload.el):
       ;; the restore just awaited its view, and the remount's view runs it.
-      (when (and (eq reason 'no-live-view)
-                 (fboundp 'agent-repl-page-unloaded-p)
-                 (agent-repl-page-unloaded-p ws))
-        (agent-repl-page-unload-remount ws)))
+      ;; A WITHHELD WORKSPACE THE USER SWITCHED TO HAS ITS PAGE MADE NOW: one
+      ;; hidden, or in a collapsed repository section, holds no page until
+      ;; it is looked at (`agent-repl-open-tabs-withheld-p'), and no
+      ;; pre-creation pass is owed it, so the switch is what makes it.
+      (when (eq reason 'no-live-view)
+        (cond
+         ((and (fboundp 'agent-repl-page-unloaded-p) (agent-repl-page-unloaded-p ws))
+          (agent-repl-page-unload-remount ws))
+         ((and (fboundp 'agent-repl-open-tabs-hidden-p) (agent-repl-open-tabs-hidden-p ws))
+          (agent-repl--info log-ws "elisp.panels.mount-withheld ws=%s" ws)
+          (agent-repl--panels-mount-awaited-view ws)))))
     ;; Take over the frame with THIS workspace's own panels in fullscreen —
     ;; replacing every visible window with the input+view panels — when a
     ;; foreign workspace's panels were just purged.

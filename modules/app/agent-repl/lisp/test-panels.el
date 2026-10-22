@@ -3375,6 +3375,51 @@ is set, dispatching through WS's own frontend (the webview + input layout)."
         ;; Assert
         (should-not remounted)))))
 
+(defmacro agent-repl-test-panels--with-no-live-view (hidden &rest body)
+  "Run BODY on a no-live-view restore of \"my-ws\", HIDDEN by the bar or not.
+The page was never unloaded; `mounted' collects the workspaces the restore
+mounts an awaited view for, and `infos' every INFO line."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (let ((mounted nil) (infos nil))
+       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
+                 ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
+                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                 ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
+                 ((symbol-function 'agent-repl-page-unloaded-p) (lambda (_ws) nil))
+                 ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) ,hidden))
+                 ((symbol-function 'agent-repl--panels-mount-awaited-view)
+                  (lambda (ws) (push ws mounted)))
+                 ((symbol-function 'agent-repl--info)
+                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+         ,@body))))
+
+(ert-deftest agent-repl-test-panels-a-switch-to-a-withheld-workspace-mounts-its-page ()
+  "A hidden or collapsed workspace the user switched to has its page made.
+2026-10-22: a switch to `definitions', alone in a collapsed repository
+section, landed on a perspective with no page, and nothing made one."
+  (agent-repl-test-panels--with-no-live-view t
+    ;; Act
+    (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
+    ;; Assert
+    (should (equal mounted '("my-ws")))))
+
+(ert-deftest agent-repl-test-panels-a-switch-to-a-withheld-workspace-records-the-mount ()
+  "The mount a withheld workspace's switch makes is recorded at INFO."
+  (agent-repl-test-panels--with-no-live-view t
+    ;; Act
+    (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
+    ;; Assert
+    (should (member "elisp.panels.mount-withheld ws=my-ws" infos))))
+
+(ert-deftest agent-repl-test-panels-a-switch-to-a-drawn-workspace-with-no-page-mounts-nothing ()
+  "A drawn workspace's missing view is pre-creation's to make, not the switch's."
+  (agent-repl-test-panels--with-no-live-view nil
+    ;; Act
+    (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
+    ;; Assert
+    (should-not mounted)))
+
 (ert-deftest agent-repl-test-panels-ensure-own-records-restore-decision-already-visible ()
   "The panel-restore decision is recorded at INFO: decision=no-show reason=already-visible."
   ;; Arrange
@@ -4761,6 +4806,35 @@ the user switched away and back."
                (lambda (_ws) (setq restored t))))
       (agent-repl--panels-on-view-created "ws-a")
       (should-not restored))))
+
+(ert-deftest agent-repl-test-panels-mount-awaited-view-mounts-before-it-restores ()
+  "The owed view is made first, and the restore that awaited it runs on it."
+  ;; Arrange
+  (let (calls)
+    (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
+               (lambda (ws) (push (list 'mount ws) calls) :created))
+              ((symbol-function 'agent-repl--panels-on-view-created)
+               (lambda (ws) (push (list 'restore ws) calls))))
+      ;; Act
+      (agent-repl--panels-mount-awaited-view "ws-a")
+      ;; Assert
+      (should (equal (nreverse calls) '((mount "ws-a") (restore "ws-a")))))))
+
+(ert-deftest agent-repl-test-panels-mount-awaited-view-is-the-one-site-that-announces-a-view ()
+  "No module announces a made view to the panels by hand.
+Every mount a switch or a pass owes goes through
+`agent-repl--panels-mount-awaited-view', so a site that mounted and
+announced on its own could drift from it: panels.el holds the one call."
+  (let ((dir agent-repl-test-panels--dir))
+    (dolist (file '("page-unload.el" "webview-recovery.el" "panels.el"))
+      (with-temp-buffer
+        (insert-file-contents (expand-file-name file dir))
+        (goto-char (point-min))
+        (let ((hits 0))
+          (while (re-search-forward "^[ \t]+(agent-repl--panels-on-view-created ws)" nil t)
+            (setq hits (1+ hits)))
+          (should (equal (cons file hits)
+                         (cons file (if (equal file "panels.el") 1 0)))))))))
 
 ;;;; ---- Switch trigger capture -------------------------------------------
 
