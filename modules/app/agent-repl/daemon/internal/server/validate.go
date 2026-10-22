@@ -220,6 +220,22 @@ func validateSelectFeedRowRequest(req *agentreplv1.SelectFeedRowRequest) *connec
 		return validateFeedID("move.left_view.row", move.LeftView.GetRow())
 	case *agentreplv1.SelectFeedRowRequest_Bubble:
 		return validateFeedID("move.bubble.row", move.Bubble.GetRow())
+	case *agentreplv1.SelectFeedRowRequest_Answer:
+		if err := validateFeedID("move.answer.row", move.Answer.GetRow()); err != nil {
+			return err
+		}
+		if move.Answer.GetLabel() == "" {
+			return invalid("move.answer.label", "an answer names the label the reader clicked")
+		}
+		return nil
+	case *agentreplv1.SelectFeedRowRequest_Entry:
+		if err := validateFeedID("move.entry.row", move.Entry.GetRow()); err != nil {
+			return err
+		}
+		if move.Entry.GetLabel() == "" {
+			return invalid("move.entry.label", "an entry names its label")
+		}
+		return nil
 	}
 	return invalid("move", "a selection move is required")
 }

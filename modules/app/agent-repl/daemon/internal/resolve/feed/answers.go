@@ -19,6 +19,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
 )
 
 // responseLabels answers the labels of every node of ROW's trees, when ROW is
@@ -140,4 +141,26 @@ func (r *resolver) restateAnswers(s *wsState, addr feedid.Feed, why string) {
 	r.logger(s.id).Debug("daemon.feed.answers_restated",
 		"what a response's answers are read from changed; every response of the feed restated them",
 		dlog.Context{"feed": f.key, "why": why, "responses": len(responses)})
+}
+
+// promptEntryText answers what ROW's entry answering LABEL says, when ROW is a
+// user prompt holding one: the first such entry.
+func promptEntryText(row *frontendv1.FeedRow, label string) (string, bool) {
+	for _, block := range row.GetUserPrompt().GetSuccess().GetBody().GetBlocks() {
+		for _, prose := range block.GetText().GetProse().GetBlocks() {
+			if entry := prose.GetEntry(); entry != nil && entry.GetLabel().GetText() == label {
+				return entry.GetText().GetMarkdown(), true
+			}
+		}
+	}
+	return "", false
+}
+
+// PromptEntry answers what the entry answering LABEL of the root-feed user
+// prompt row ID says, as last published.
+func (r *resolver) PromptEntry(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) (string, bool) {
+	text, ok := r.rootRowText(ws, id, func(row *frontendv1.FeedRow) (string, bool) {
+		return promptEntryText(row, label)
+	})
+	return text.Markdown, ok
 }

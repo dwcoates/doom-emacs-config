@@ -361,6 +361,11 @@ type Resolver interface {
 	// deem selectable — the submit path and the selection refuse it rather
 	// than using an empty text.
 	SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool)
+	// PromptEntry answers what the entry answering LABEL of the root-feed user
+	// prompt row ID says (frontend.v1.ProseEntry.text), as last published. A
+	// miss is a row that is not such a prompt, or holds no entry answering
+	// LABEL.
+	PromptEntry(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) (string, bool)
 	// BubbleText answers the text of one landed root-feed bubble (a prompt or
 	// a landed response bubble, a thinking one included) as markdown, with
 	// whether it is a prompt, whether or not the reader can select it. A miss
