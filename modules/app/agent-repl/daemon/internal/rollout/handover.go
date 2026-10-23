@@ -132,6 +132,7 @@ func (c *controller) claimHandover() (*handoverSlot, error) {
 // every later handover is refused as already in flight, and the record below
 // names the pid-bearing cause for the operator.
 func (c *controller) abandonHandover(ctx context.Context, slot *handoverSlot, fields dlog.Context, cause error) {
+	c.reopenCreates("the handover was abandoned", fields)
 	if slot.successor != nil {
 		if err := slot.successor.Stop(ctx); err != nil {
 			c.log.Error(opHandover, "the abandoned handover's successor could not be stopped; the handover stays in flight so no second successor is spawned beside it",
@@ -209,6 +210,11 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 	}
 	c.log.Info(opHandover, "the successor answered its health probe; it is serving in joining mode", fields)
 	c.closeSuccessorFaults(ctx, fields)
+
+	if err := c.closeCreates(c.lifetime(ctx), address, fields); err != nil {
+		c.abandonHandover(ctx, slot, fields, err)
+		return nil, err
+	}
 
 	workspaces, untransferable, err := c.served(ctx)
 	if err != nil {
@@ -404,6 +410,7 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 		c.log.Error(opHandover, "the handover cannot finish: workspaces whose adoption never landed were reclaimed and are served here again; not exiting",
 			dlog.Merge(fields, dlog.Context{"reclaimed": reclaimed, "untransferred": failed}))
 		c.clearDeployLine("workspaces were reclaimed", fields)
+		c.reopenCreates("the handover cannot finish and this daemon keeps serving", fields)
 		return
 	}
 	if failed > 0 {
@@ -413,6 +420,7 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 		c.log.Error(opHandover, "the handover cannot finish: workspaces that did not transfer are still served here; not exiting",
 			dlog.Merge(fields, dlog.Context{"untransferred": failed}))
 		c.clearDeployLine("workspaces did not transfer", fields)
+		c.reopenCreates("the handover cannot finish and this daemon keeps serving", fields)
 		return
 	}
 

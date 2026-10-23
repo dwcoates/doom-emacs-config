@@ -713,6 +713,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	}
 	serveErr := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log), serveExit{
 		OnShuttingDown: beginShutdown(claim, withdrawal, log),
+		AwaitCreates:   built.AwaitCreates,
 		EndStreams:     endStreams,
 		Mark:           teardown.mark,
 		Log:            log,
@@ -845,6 +846,11 @@ type serveExit struct {
 	// finds no address rather than a present address backed by a listener
 	// that has stopped accepting.
 	OnShuttingDown func()
+	// AwaitCreates, when non-nil, closes the create gate and waits for every
+	// create in flight; the shutdown runs it right after OnShuttingDown and
+	// before any answer or stream is ended, so a create's outcome still
+	// reaches its client.
+	AwaitCreates func()
 	// EndStreams, when non-nil, ends every standing stream the surface serves
 	// (the server's Close); the shutdown runs it once the answers owed have
 	// left, and waits for every stream's end frame before the process can
@@ -931,6 +937,14 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 		// transient the sidecar already treats as gone.
 		if exit.OnShuttingDown != nil {
 			exit.OnShuttingDown()
+		}
+		// NO CREATE IS CUT OFF BY THE EXIT. Every create admitted finishes,
+		// and publishes its outcome, before anything below waits on answers
+		// or ends a stream; one asked for from here is refused standing_down.
+		if exit.AwaitCreates != nil {
+			start := time.Now()
+			exit.AwaitCreates()
+			mark("serve_await_creates", start)
 		}
 		// THE CALLS BEING ANSWERED GO FIRST, and this is the wait that
 		// actually happens. `UpdateShutdownSchedule{now}` ends the serving

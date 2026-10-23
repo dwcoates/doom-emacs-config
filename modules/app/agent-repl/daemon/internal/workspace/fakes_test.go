@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/account"
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/claudesettings"
+	"agent-repld/internal/creategate"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
@@ -1034,6 +1035,9 @@ type fakeGit struct {
 	// createHangs makes CreateWorktree run until its context ends, as a git
 	// stuck behind a hook that never returns does.
 	createHangs bool
+	// duringCreate, when set, runs inside CreateWorktree, while the create
+	// is mid-flight.
+	duringCreate func()
 	// fetched records each Fetch as "dir remote"; fetchErr fails every one.
 	fetched  []string
 	fetchErr error
@@ -1167,6 +1171,9 @@ func (g *fakeGit) Fetch(_ context.Context, dir, remote string) error {
 }
 
 func (g *fakeGit) CreateWorktree(ctx context.Context, repoDir, branch, baseRef, worktreeDir string) error {
+	if g.duringCreate != nil {
+		g.duringCreate()
+	}
 	if g.createHangs {
 		<-ctx.Done()
 		return ctx.Err()
@@ -2658,6 +2665,8 @@ func (h *fakeHealth) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.
 // fixture is one arranged verb surface plus every fake behind it, so a test
 // arranges by mutating fields and asserts by reading them.
 type fixture struct {
+	// creates is the create gate the verbs hold a ticket from.
+	creates *creategate.Gate
 	// home is the home directory a feed link's leading `~` expands to.
 	home     string
 	verbs    Verbs
@@ -2739,8 +2748,9 @@ func (d *fakeDerived) ReportCreated(ws wsm.Workspace, ownerNotice string) {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{
-		home: t.TempDir(),
-		db:   newFakeDB(),
+		creates: creategate.New(),
+		home:    t.TempDir(),
+		db:      newFakeDB(),
 		// The main worktree is a REAL worktree directory: every registration
 		// of a linked worktree registers it first.
 		git:       &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: worktreeDir(t)},
@@ -2780,7 +2790,7 @@ func newFixture(t *testing.T) *fixture {
 	f.hasSession = true
 
 	verbs, err := New(Deps{
-		DB: f.db, Derived: f.derived, Git: f.git, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
+		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, principalLinks: &f.topbarPrincipalLinks}, Browser: f.browser,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet,
 		Headless:   f.headless,

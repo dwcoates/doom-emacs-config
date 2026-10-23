@@ -30,6 +30,7 @@ func TestNewRefusesEveryMissingCollaborator(t *testing.T) {
 	}{
 		{name: "no state client", strip: func(d *Deps) { d.DB = nil }},
 		{name: "no git client", strip: func(d *Deps) { d.Git = nil }},
+		{name: "no create gate", strip: func(d *Deps) { d.Creates = nil }},
 		{name: "no account resolver", strip: func(d *Deps) { d.Accounts = nil }},
 		{name: "no prompt queue", strip: func(d *Deps) { d.Queue = nil }},
 		{name: "no turn-stop queue", strip: func(d *Deps) { d.TurnStops = nil }},

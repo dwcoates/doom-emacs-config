@@ -23,6 +23,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/chessboard"
+	"agent-repld/internal/creategate"
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
@@ -107,6 +108,9 @@ type Deps struct {
 	// SEAM ADDITION (recorded in the report): workspace.Ownership reports the
 	// STANDING but carries no address, and the arm has nowhere else to get one.
 	SuccessorAddress func() string
+	// Creates admits every create this surface is asked for, and refuses one
+	// while the daemon stands down (creategate).
+	Creates *creategate.Gate
 
 	// Feed backs OpenFeed, WatchFeed and GetFeedPage.
 	Feed feed.Resolver
@@ -456,6 +460,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("an ownership source")
 	case deps.SuccessorAddress == nil:
 		return nil, missing("a successor address source")
+	case deps.Creates == nil:
+		return nil, missing("the create gate")
 	case deps.Feed == nil:
 		return nil, missing("a feed resolver")
 	case deps.Images == nil:

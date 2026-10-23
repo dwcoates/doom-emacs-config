@@ -32,6 +32,7 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/clock"
+	"agent-repld/internal/creategate"
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
@@ -358,6 +359,11 @@ type Deps struct {
 	// recording the workspace's own fault. Expiry is remediated as it comes up:
 	// there is deliberately no abort and no retry machinery.
 	AdoptionWindow time.Duration
+	// Creates is the create gate. A handover or restart closes it and waits
+	// every create in flight out before it lists what this daemon serves, and
+	// reopens it when it ends with this daemon still serving (creategate).
+	// REQUIRED.
+	Creates *creategate.Gate
 	// HoldoutWarnEvery is the cadence a handover waiting on busy workspaces
 	// names them at. A never-free workspace is waited on FOREVER; this is only
 	// how often it is named.
@@ -677,6 +683,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.LeaseChanged == nil {
 		return nil, errors.New("rollout: a lease-changed hook is required; a bounce that releases the restart hold without it leaves the intake held")
+	}
+	if deps.Creates == nil {
+		return nil, errors.New("rollout: the create gate is required; a handover that listed what it serves while a create was still running would leave that create's workspace behind")
 	}
 	if deps.Bounces == nil {
 		return nil, errors.New("rollout: the prompt queue's bounce registry is required; every bounce and every transfer is decided there")

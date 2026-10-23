@@ -29,6 +29,7 @@ import (
 
 	"agent-repld/internal/classifierupdate"
 	"agent-repld/internal/commandcatalog"
+	"agent-repld/internal/creategate"
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
@@ -1607,6 +1608,7 @@ type harness struct {
 	DB        *fakeDB
 	Ownership *fakeOwnership
 	Verbs     *fakeVerbs
+	Creates   *creategate.Gate
 	Retarget  *fakeRetarget
 	Prompts   *fakePrompts
 	Queue     *fakeQueue
@@ -1711,6 +1713,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		}},
 		Ownership:  &fakeOwnership{standing: workspace.StandingOwned},
 		Verbs:      &fakeVerbs{},
+		Creates:    creategate.New(),
 		Retarget:   &fakeRetarget{},
 		Prompts:    &fakePrompts{},
 		Queue:      &fakeQueue{},
@@ -1771,6 +1774,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Login:             h.Login,
 		Ownership:         h.Ownership,
 		SuccessorAddress:  func() string { return "127.0.0.1:9999" },
+		Creates:           h.Creates,
 		Feed:              h.Feed,
 		Images:            h.Images,
 		Footer:            h.Footer,

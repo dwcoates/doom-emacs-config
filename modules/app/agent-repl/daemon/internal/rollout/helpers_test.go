@@ -1,6 +1,7 @@
 package rollout
 
 import (
+	"agent-repld/internal/creategate"
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"errors"
@@ -1088,7 +1089,9 @@ func (r *fakeRegistry) Pending(ws ids.WorkspaceID) bool {
 
 // harness is one controller under test with every fake reachable.
 type harness struct {
-	c *controller
+	// creates is the create gate a handover closes.
+	creates *creategate.Gate
+	c       *controller
 	// restarts keeps what the controller timed.
 	restarts *restarttimingtest.Recorder
 	// merges records the merge mover's calls, in order, as "suspend <ws>" and
@@ -1246,9 +1249,11 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		startErr:     make(map[ids.WorkspaceID]error),
 		merges:       &fakeMerges{order: order},
 		restarts:     &restarttimingtest.Recorder{},
+		creates:      creategate.New(),
 	}
 	h.reports = &fakeReports{registry: h.registry}
 	deps := Deps{
+		Creates:        h.creates,
 		Reports:        h.reports,
 		Merges:         h.merges,
 		SelfExe:        filepath.Join(state, "agent-repld"),

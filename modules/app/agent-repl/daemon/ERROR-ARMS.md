@@ -246,3 +246,22 @@ carries it, at INFO.
 | rpc | arm | daemon-side refusal | package |
 | --- | --- | --- | --- |
 | SelectWorkspace | `standing_down` | the select's revival met `shimclient.ErrStandingDown`; the selection is already recorded and the client re-asserts it on the next daemon | workspace |
+
+## `CreateWorkspaceError.transferring_away` and `.standing_down` landed, 2026-10-23
+
+A create ran detached under the daemon's lifetime and nothing that ended the
+daemon waited for it: a handover listed what it served while a create was
+still materializing a workspace, and the exit then cut the create off, leaving
+a worktree and a branch with no workspace. Every create now holds a ticket from
+the create gate (`internal/creategate`) for its whole run. A handover or
+restart closes the gate and waits the tickets out before it lists what it
+serves; every other exit does so before it ends a stream. A create asked for
+while the gate is closed is refused before anything is named or built, at INFO,
+because it is the stand-down's ordinary answer. Emacs and `agent-repld
+workspace create` send a `transferring_away` create to the named successor
+once.
+
+| rpc | arm | daemon-side refusal | package |
+| --- | --- | --- | --- |
+| CreateWorkspace | `transferring_away` (tag 43) | the gate is closed for a handover; `address` is the successor the create is sent to | server |
+| CreateWorkspace | `standing_down` (tag 44) | the gate is closed with no successor listening (a drain, a restart across a state layout change, a signal) | server |

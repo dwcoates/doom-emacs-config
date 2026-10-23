@@ -3,6 +3,7 @@ package server
 import (
 	"time"
 
+	"agent-repld/internal/creategate"
 	"agent-repld/internal/runtimemetrics"
 	"context"
 	"errors"
@@ -166,7 +167,16 @@ func (s *server) CreateWorkspace(
 	// keeps this request's values but drops its cancellation, so a client
 	// deadline or disconnect can never cancel `git worktree add` mid-run — the
 	// defect that silently failed a create. It ends only with the daemon.
-	bgCtx, cancel := s.backgroundContext(ctx)
+	// A CREATE HOLDS A TICKET FOR ITS WHOLE RUN, released only once its
+	// outcome is answered or published (creategate): a stand-down closes the
+	// gate and waits the tickets out, so nothing it snapshots or exits over
+	// is a create still running. One the gate will not admit is refused here,
+	// before anything was named or built.
+	admitted, release, err := s.deps.Creates.Admit(ctx)
+	if err != nil {
+		return answer(resp, s.refuseUnadmitted(rpc, resp, err))
+	}
+	bgCtx, cancel := s.backgroundContext(admitted)
 
 	// OPTION B: a create that carries an op_id is ACKED NOW and worked in the
 	// background. The rpc returns at once so a slow naming call or worktree add
@@ -180,8 +190,10 @@ func (s *server) CreateWorkspace(
 		go func() {
 			// The goroutine OWNS the cancel: cancelling in the handler would
 			// tear bgCtx down the instant the ack returns, which is the very
-			// cancellation this detaches from.
+			// cancellation this detaches from. It owns the ticket too, which is
+			// released after the outcome is published.
 			defer cancel()
+			defer release()
 			s.runBackgroundCreate(bgCtx, rpc, spec, opID)
 		}()
 		resp.Result = &agentreplv1.CreateWorkspaceResponse_Accepted{
@@ -193,6 +205,7 @@ func (s *server) CreateWorkspace(
 	}
 
 	defer cancel()
+	defer release()
 	created, err := s.deps.Verbs.Create(bgCtx, spec)
 	if err != nil {
 		return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
@@ -203,6 +216,25 @@ func (s *server) CreateWorkspace(
 		Success: &agentreplv1.CreateWorkspaceSuccess{Workspace: created.Ref()},
 	}
 	return connect.NewResponse(resp), nil
+}
+
+// refuseUnadmitted answers a create the gate did not admit: transferring_away
+// naming the successor the create is to be sent to, or standing_down when none
+// is listening. Both are the stand-down's ordinary answer, never a fault.
+func (s *server) refuseUnadmitted(rpc string, resp proto.Message, err error) *connect.Error {
+	var closed *creategate.ClosedError
+	if !errors.As(err, &closed) {
+		return fail(s.log, rpc, err)
+	}
+	if closed.Successor != "" {
+		return s.refuse(s.log, rpc, resp, s.fill(refusal{
+			Arm:    workspace.ArmTransferringAway,
+			Reason: err.Error(),
+			Fields: map[string]any{"address": closed.Successor},
+			Info:   true,
+		}))
+	}
+	return s.refuse(s.log, rpc, resp, s.fill(refusal{Arm: "standing_down", Reason: err.Error(), Info: true}))
 }
 
 // requesterID is the requesting workspace's id, nil when the user asked.

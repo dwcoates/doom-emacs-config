@@ -19,6 +19,7 @@ import (
 
 	"agent-repld/internal/account"
 	"agent-repld/internal/claudesettings"
+	"agent-repld/internal/creategate"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/externalbrowser"
@@ -696,6 +697,9 @@ type Deps struct {
 	// Zero means DefaultRestartStopBound, where the sizing is stated; it is a
 	// field so the overrun is exercised without waiting the real bound out.
 	RestartStopBound time.Duration
+	// Creates is the create gate every create holds a ticket from for its
+	// whole run (creategate). Required.
+	Creates *creategate.Gate
 	// WorktreeBound bounds a create's worktree step. Zero means
 	// DefaultWorktreeBound, where the sizing is stated; it is a field so the
 	// overrun is exercised without waiting the real bound out.
@@ -973,6 +977,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a derived-workspace reporter")
 	case deps.Git == nil:
 		return nil, missing("a git client")
+	case deps.Creates == nil:
+		return nil, missing("the create gate")
 	case deps.Accounts == nil:
 		return nil, missing("an account resolver")
 	case deps.Queue == nil:

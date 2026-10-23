@@ -27,6 +27,7 @@ import (
 	"agent-repld/internal/clock"
 	"agent-repld/internal/commandcatalog"
 	"agent-repld/internal/cpugov"
+	"agent-repld/internal/creategate"
 	"agent-repld/internal/deployedversion"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
@@ -192,6 +193,11 @@ type graph struct {
 	// (standDownShims): an ordinary exit or a handover leaves them for a
 	// successor to adopt, and with the root gone nothing ever can.
 	StopShims func(ctx context.Context) (int, error)
+	// AwaitCreates closes the create gate and waits for every create in
+	// flight to finish. The exit calls it once shutdown begins and before it
+	// ends any stream, so a create is never cut off by the exit and its
+	// outcome still reaches the stream its client watches (creategate).
+	AwaitCreates func()
 	// SettleBoot ends a FRESH boot once its bring-up has run: every live shim
 	// is judged against the installed build, and every owed landing report is
 	// paid. A joining successor has none; its takeover does the same.
@@ -978,11 +984,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, err
 	}
+	// THE CREATE GATE (creategate): every create holds a ticket from it for
+	// its whole run, and every way this daemon stands down closes it and
+	// waits the tickets out first -- a handover or restart before it lists
+	// what it serves, every other exit before it ends its streams.
+	creates := creategate.New()
 	mergeMover := &mergeForwarder{}
 	// THE DETACHED-MERGE SERVICE IS BUILT AFTER THE ROLLOUT AND THE DEPLOY,
 	// which pay the landing reports it owes; both reach it through this.
 	detachedRef := &detachedForwarder{}
 	rolloutController, err := rollout.New(rollout.Deps{
+		Creates:          creates,
 		Restarts:         p.Metrics,
 		Reconnects:       p.Reconnects,
 		Reports:          detachedRef,
@@ -1238,6 +1250,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	verbs, err := workspace.New(workspace.Deps{
 		Instance:     p.Instance,
+		Creates:      creates,
 		Derived:      derivedNotices,
 		DB:           p.DB,
 		Git:          git,
@@ -1470,6 +1483,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Login:             loginManager,
 			Ownership:         ownership,
 			SuccessorAddress:  rolloutController.SuccessorAddress,
+			Creates:           creates,
 			Feed:              feedResolver,
 			Images:            imageSources,
 			Footer:            footerResolver,
@@ -1574,8 +1588,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				func(ctx context.Context) { followNotices.Run(ctx, handler) },
 				selfCloses.Run)
 		}),
-		StopShims:  stopEveryShim(fleet, supervisor, rootLossShimStopBound),
-		SettleBoot: freshBootSettle(p.Opts.joining != "", rolloutController),
+		StopShims:    stopEveryShim(fleet, supervisor, rootLossShimStopBound),
+		AwaitCreates: awaitCreatesAtExit(creates, holdoutWarnEvery, time.After, log),
+		SettleBoot:   freshBootSettle(p.Opts.joining != "", rolloutController),
 	}, nil
 }
 

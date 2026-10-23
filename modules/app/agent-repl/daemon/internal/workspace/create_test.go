@@ -2004,3 +2004,62 @@ func TestTheWorktreeBoundDefaultsToTheMeasuredWindow(t *testing.T) {
 		t.Fatalf("worktreeBound = %v, want DefaultWorktreeBound %v", got, DefaultWorktreeBound)
 	}
 }
+
+func TestACreateHoldsATicketForItsWholeRun(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	during := -1
+	f.git.duringCreate = func() { during = f.creates.InFlight() }
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert: counted while it ran, and released once it returned.
+	if during != 1 || f.creates.InFlight() != 0 {
+		t.Fatalf("in flight during the create = %d and after = %d, want 1 and 0", during, f.creates.InFlight())
+	}
+}
+
+func TestACreateTheDaemonStartsWhileStandingDownEndsBeforeBuildingAnything(t *testing.T) {
+	// Arrange: the gate is shut and the daemon's lifetime ends.
+	f := newFixture(t)
+	f.creates.Close("")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	_, err := f.verbs.Create(ctx, standardSpec(t, f))
+
+	// Assert: nothing named or built, and the record says why.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Create() error = %v, want the stand-down's context.Canceled", err)
+	}
+	if len(f.git.created) != 0 || f.creates.InFlight() != 0 {
+		t.Fatalf("created %d worktrees with %d in flight, want none", len(f.git.created), f.creates.InFlight())
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opCreate,
+		Message: "the daemon stood down before the create could start; nothing was named or built"}); !ok {
+		t.Fatalf("no record of the create ending before it started in %+v", f.log.logger.Records())
+	}
+}
+
+func TestACreateAdmittedBeforeTheGateClosedRunsToTheEnd(t *testing.T) {
+	// Arrange: the rpc admitted the create, then a stand-down closed the gate.
+	f := newFixture(t)
+	admitted, release, err := f.creates.Admit(context.Background())
+	if err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+	defer release()
+	f.creates.Close("127.0.0.1:9")
+
+	// Act.
+	_, err = f.verbs.Create(admitted, standardSpec(t, f))
+
+	// Assert.
+	if err != nil || len(f.git.created) != 1 {
+		t.Fatalf("Create() = %v with %d worktrees, want it created", err, len(f.git.created))
+	}
+}

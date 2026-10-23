@@ -108,6 +108,12 @@ func (c *controller) beginRestart(ctx context.Context, ask Ask) (*handoverPlan, 
 		c.abandonHandover(ctx, slot, fields, err)
 		return nil, err
 	}
+	// No successor listens until this daemon has gone, so a create refused
+	// from here is standing_down.
+	if err := c.closeCreates(c.lifetime(ctx), "", fields); err != nil {
+		c.abandonHandover(ctx, slot, fields, err)
+		return nil, err
+	}
 	workspaces, untransferable, err := c.served(ctx)
 	if err != nil {
 		c.log.Error(opHandover, "could not list what this daemon serves; the restart is abandoned before anything was announced",

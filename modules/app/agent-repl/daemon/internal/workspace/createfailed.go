@@ -35,7 +35,22 @@ const BriefCreateFailed = "workspace-create-failed"
 // asked to find out why (reportCreateFailure). The report hangs off the verb
 // rather than any one caller, so no way of creating a workspace can fail
 // without it.
+//
+// A CREATE HOLDS A TICKET FOR ITS WHOLE RUN (creategate), so a stand-down
+// waits for it rather than cutting it off part-built. A create the CreateWorkspace
+// rpc admitted already holds one; one the daemon starts itself (a merge
+// workspace, a support workspace) waits here while a stand-down has the gate
+// closed, and ends with the daemon, before anything was named or built, if the
+// stand-down goes ahead.
 func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error) {
+	ctx, release, err := v.deps.Creates.Hold(ctx)
+	if err != nil {
+		v.deps.Log.Global().Info(opCreate, "the daemon stood down before the create could start; nothing was named or built", dlog.Context{
+			"repo_dir": spec.RepoDir, "cause": err.Error(),
+		})
+		return wsm.Workspace{}, err
+	}
+	defer release()
 	created, err := v.create(ctx, spec)
 	if err != nil {
 		v.reportCreateFailure(ctx, spec, err)

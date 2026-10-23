@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1784,5 +1785,46 @@ func TestABootRefusalNamesTheProcessHoldingTheLock(t *testing.T) {
 				t.Fatalf("record = %v, want %v", record, tt.want)
 			}
 		})
+	}
+}
+
+// TestServeWaitsForTheCreatesBeforeAnyAnswerOrStreamIsEnded pins where the
+// exit's wait for creates sits: after the withdrawal, and before the grace
+// waits and the stream ends, so a create's outcome still reaches its client.
+func TestServeWaitsForTheCreatesBeforeAnyAnswerOrStreamIsEnded(t *testing.T) {
+	// Arrange.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	gate := &recordingGate{Handler: http.NotFoundHandler()}
+	record := func(step string) func() {
+		return func() {
+			gate.mu.Lock()
+			gate.calls = append(gate.calls, step)
+			gate.mu.Unlock()
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act.
+	served := make(chan error, 1)
+	go func() {
+		served <- serve(ctx, listener, gate, serveExit{
+			OnShuttingDown: record("withdraw"),
+			AwaitCreates:   record("await_creates"),
+			Log:            dlog.NewTestLogger(),
+		})
+	}()
+	cancel()
+	if err := <-served; err != nil {
+		t.Fatalf("serve() = %v, want an orderly shutdown", err)
+	}
+
+	// Assert.
+	got := gate.recorded()
+	want := []string{"withdraw", "await_creates", "AwaitQuiet", "AwaitWritesQuiet"}
+	if !slices.Equal(got[:min(len(got), len(want))], want) {
+		t.Fatalf("the exit's steps = %v, want %v first", got, want)
 	}
 }

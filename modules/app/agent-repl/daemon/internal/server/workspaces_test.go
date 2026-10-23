@@ -2268,3 +2268,88 @@ func TestOpenWorkspaceIsTimedOnlyWhenTheSessionComesUp(t *testing.T) {
 		})
 	}
 }
+
+// A CREATE THE GATE WILL NOT ADMIT IS REFUSED BEFORE ANYTHING RUNS, with the
+// arm the stand-down's kind calls for.
+
+func TestCreateWorkspaceRefusesWhileTheGateIsClosed(t *testing.T) {
+	cases := []struct {
+		name      string
+		successor string
+		check     func(t *testing.T, e *agentreplv1.CreateWorkspaceError)
+	}{
+		{name: "a handover names its successor", successor: "127.0.0.1:4242", check: func(t *testing.T, e *agentreplv1.CreateWorkspaceError) {
+			if got := e.GetTransferringAway().GetAddress(); got != "127.0.0.1:4242" {
+				t.Fatalf("error = %v, want transferring_away to 127.0.0.1:4242", e)
+			}
+		}},
+		{name: "a stand-down with no successor names none", check: func(t *testing.T, e *agentreplv1.CreateWorkspaceError) {
+			if e.GetStandingDown() == nil {
+				t.Fatalf("error = %v, want standing_down", e)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		for _, opID := range []string{"", "op-refused"} {
+			t.Run(fmt.Sprintf("%s/op_id=%q", tc.name, opID), func(t *testing.T) {
+				// Arrange.
+				h := newHarness(t)
+				repoRef := registeredRepoRef(h)
+				h.Creates.Close(tc.successor)
+
+				// Act.
+				resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(repoRef, opID)))
+
+				// Assert.
+				if err != nil {
+					t.Fatalf("CreateWorkspace: %v", err)
+				}
+				tc.check(t, resp.Msg.GetError())
+				if len(h.Verbs.createSpecs) != 0 {
+					t.Fatalf("the verb ran %d creates, want none", len(h.Verbs.createSpecs))
+				}
+			})
+		}
+	}
+}
+
+func TestCreateWorkspaceHoldsItsTicketUntilTheOutcomeIsPublished(t *testing.T) {
+	// Arrange: a create held open after its ack.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+	h.Verbs.createRelease = make(chan struct{})
+	if _, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(repoRef, "op-held"))); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	idle := h.Creates.Idle()
+	if h.Creates.InFlight() != 1 {
+		t.Fatalf("in flight after the ack = %d, want 1", h.Creates.InFlight())
+	}
+
+	// Act.
+	close(h.Verbs.createRelease)
+	<-idle
+
+	// Assert.
+	if h.Creates.InFlight() != 0 {
+		t.Fatalf("in flight after the create = %d, want 0", h.Creates.InFlight())
+	}
+}
+
+func TestCreateWorkspaceReleasesASynchronousTicketWithItsAnswer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+
+	// Act.
+	if _, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(repoRef, ""))); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	// Assert.
+	if h.Creates.InFlight() != 0 {
+		t.Fatalf("in flight after the answer = %d, want 0", h.Creates.InFlight())
+	}
+}
