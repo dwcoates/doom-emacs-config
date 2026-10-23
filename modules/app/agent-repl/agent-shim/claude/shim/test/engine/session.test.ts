@@ -16625,6 +16625,19 @@ describe("the live-work level the shim pushes", () => {
   });
 });
 
+/** A spy on the engine's `pushes.push`. */
+type PushSpy = { mock: { calls: unknown[][] } };
+
+/**
+ * Every update the engine pushed on ARM, in push order: the one projection of
+ * the push spy the session-stream suites read their statements through.
+ */
+function pushedOfArm(spy: PushSpy, arm: conversationv1.SessionUpdate["update"]["case"]): conversationv1.SessionUpdate[] {
+  return spy.mock.calls
+    .map(([update]) => update as conversationv1.SessionUpdate)
+    .filter((update) => update.update.case === arm);
+}
+
 /**
  * THE RUNTIME'S SLASH-COMMAND CATALOG, read and stated on the session stream.
  *
@@ -16636,13 +16649,10 @@ describe("the live-work level the shim pushes", () => {
  */
 describe("the slash-command catalog", () => {
   /** Every catalog the engine pushed, as name lists, in push order. */
-  function statedCatalogs(spy: { mock: { calls: unknown[][] } }): string[][] {
-    return spy.mock.calls
-      .map(([update]) => update as conversationv1.SessionUpdate)
-      .filter((update) => update.update.case === "commandCatalog")
-      .map((update) =>
-        update.update.case === "commandCatalog" ? update.update.value.commands.map((entry) => entry.name) : [],
-      );
+  function statedCatalogs(spy: PushSpy): string[][] {
+    return pushedOfArm(spy, "commandCatalog").map((update) =>
+      update.update.case === "commandCatalog" ? update.update.value.commands.map((entry) => entry.name) : [],
+    );
   }
 
   function faultComponents(h: Harness): string[] {
@@ -16773,11 +16783,10 @@ describe("the slash-command catalog", () => {
  */
 describe("the vendor's skill set", () => {
   /** Every skills-changed statement the engine pushed, as path lists. */
-  function statedStale(spy: { mock: { calls: unknown[][] } }): string[][] {
-    return spy.mock.calls
-      .map(([update]) => update as conversationv1.SessionUpdate)
-      .filter((update) => update.update.case === "skillsChanged")
-      .map((update) => (update.update.case === "skillsChanged" ? update.update.value.paths : []));
+  function statedStale(spy: PushSpy): string[][] {
+    return pushedOfArm(spy, "skillsChanged").map((update) =>
+      update.update.case === "skillsChanged" ? update.update.value.paths : [],
+    );
   }
 
   /** A harness whose account root holds a skills directory, and that directory's path. */
