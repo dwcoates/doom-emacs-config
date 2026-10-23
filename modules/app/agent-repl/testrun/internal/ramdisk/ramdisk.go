@@ -47,6 +47,7 @@ import (
 	"time"
 
 	"agentrepl/testrun/internal/command"
+	"agentrepl/testrun/internal/proctable"
 	"agentrepl/testrun/reap"
 )
 
@@ -268,8 +269,11 @@ type Manager struct {
 	// of this run's disk takes the same members.
 	Own reap.Members
 	// Probe runs the short-bounded reads of the disk manager and the host
-	// (`hdiutil info`, `sysctl`, `ps`, `lsof`).
+	// (`hdiutil info`, `sysctl`, `lsof`).
 	Probe BoundedRunner
+	// Procs reads the host's process table (proctable.List), never through
+	// ps, which blocks behind a process wedged in execve.
+	Procs func() ([]proctable.Entry, error)
 	// Watch runs Setup's two probes of the disk manager, watching one that
 	// misses its bound to its own answer.
 	Watch WatchedRunner
@@ -306,7 +310,7 @@ func Default(log Logger) Manager {
 	return Manager{
 		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, VolumesParent: DefaultVolumesParent, Pid: os.Getpid(),
 		Reap:  reap.OSReap(log),
-		Probe: RunBounded, Watch: RunWatched, Alive: ProcessAlive, Mounted: IsMountPoint, Log: log, Now: time.Now,
+		Probe: RunBounded, Procs: proctable.List, Watch: RunWatched, Alive: ProcessAlive, Mounted: IsMountPoint, Log: log, Now: time.Now,
 		LockBound: LockBound, Memory: HostMemory,
 	}
 }

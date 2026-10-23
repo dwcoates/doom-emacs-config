@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/testrun/internal/proctable"
 	"agentrepl/testrun/reap"
 )
 
@@ -202,8 +203,8 @@ func TestTroubleString(t *testing.T) {
 		},
 		{
 			name:    "the host when the disk manager did not answer",
-			trouble: Trouble{InfoErr: errors.New("timed out"), Host: "load average 28.7 21.4 17.2\ndisk process 357 Ss 51:08 /usr/libexec/diskarbitrationd\n"},
-			want:    "the disk manager did not answer hdiutil info after 0s: timed out; the disk manager answered diskutil list in 0s; the host then: load average 28.7 21.4 17.2, disk process 357 Ss 51:08 /usr/libexec/diskarbitrationd",
+			trouble: Trouble{InfoErr: errors.New("timed out"), Host: "load average 28.7 21.4 17.2\ndisk process 357 S - /usr/libexec/diskarbitrationd\n"},
+			want:    "the disk manager did not answer hdiutil info after 0s: timed out; the disk manager answered diskutil list in 0s; the host then: load average 28.7 21.4 17.2, disk process 357 S - /usr/libexec/diskarbitrationd",
 		},
 	}
 	for _, tc := range tests {
@@ -272,7 +273,7 @@ func TestSetupAsksAWedgedDiskManagerNothingMore(t *testing.T) {
 	m.Setup(16) //nolint:errcheck // the calls are the subject
 
 	// Assert
-	want := []string{"diskutil list", "hdiutil info", "sysctl -n vm.loadavg", "ps -axo pid=,stat=,etime=,args="}
+	want := []string{"diskutil list", "hdiutil info", "sysctl -n vm.loadavg"}
 	if strings.Join(h.calls, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("calls = %q, want only the two probes and the host's state", h.calls)
 	}
@@ -408,9 +409,12 @@ func TestSetupWaitsOnAStuckRegistryLockOnce(t *testing.T) {
 }
 
 func TestHostSnapshot(t *testing.T) {
-	ps := "  357 Ss   51:08 /usr/libexec/diskarbitrationd\n" +
-		"  901 S     0:01 /usr/bin/hdiutil detach /dev/disk4\n" +
-		"  902 R     0:00 /bin/zsh\n"
+	procs := []proctable.Entry{
+		proctable.Entry{Pid: 357, State: 'S', Comm: "diskarbitrationd", Argv: []string{"/usr/libexec/diskarbitrationd"}},
+		{Pid: 901, State: 'S', Comm: "hdiutil", Argv: []string{"/usr/bin/hdiutil", "detach", "/dev/disk4"}, Env: []string{"HOME=/h"}},
+		{Pid: 902, State: 'R', Comm: "zsh", Argv: []string{"/bin/zsh"}},
+		{Pid: 903, State: 'S', Comm: "diskimagesiod"},
+	}
 	tests := []struct {
 		name string
 		host *fakeHost
@@ -418,23 +422,23 @@ func TestHostSnapshot(t *testing.T) {
 	}{
 		{
 			name: "names the load and every disk process",
-			host: &fakeHost{load: "{ 28.72 21.45 17.25 }\n", ps: ps},
-			want: "load average 28.72 21.45 17.25\ndisk process 357 Ss 51:08 /usr/libexec/diskarbitrationd\ndisk process 901 S 0:01 /usr/bin/hdiutil detach /dev/disk4\n",
+			host: &fakeHost{load: "{ 28.72 21.45 17.25 }\n", procs: procs},
+			want: "load average 28.72 21.45 17.25\ndisk process 357 S - /usr/libexec/diskarbitrationd\ndisk process 901 S - /usr/bin/hdiutil detach /dev/disk4 HOME=/h\ndisk process 903 S - (diskimagesiod)\n",
 		},
 		{
 			name: "says no disk process ran",
-			host: &fakeHost{load: "{ 4.50 13.70 15.31 }", ps: "  902 R     0:00 /bin/zsh\n"},
+			host: &fakeHost{load: "{ 4.50 13.70 15.31 }", procs: procs[2:3]},
 			want: "load average 4.50 13.70 15.31\nno disk process running\n",
 		},
 		{
 			name: "names a failed sysctl in place of the load",
-			host: &fakeHost{loadErr: errors.New("sysctl did not answer within 500ms"), ps: ps},
+			host: &fakeHost{loadErr: errors.New("sysctl did not answer within 500ms"), procs: procs},
 			want: "load average unknown, sysctl failed: sysctl did not answer within 500ms\ndisk process 357",
 		},
 		{
-			name: "names a failed ps in place of the processes",
-			host: &fakeHost{load: "{ 1.00 1.00 1.00 }", psErr: errors.New("ps did not answer within 500ms")},
-			want: "load average 1.00 1.00 1.00\ndisk processes unknown, ps failed: ps did not answer within 500ms\n",
+			name: "names a failed process table in place of the processes",
+			host: &fakeHost{load: "{ 1.00 1.00 1.00 }", procsErr: errors.New("proc_info listpids: EINVAL")},
+			want: "load average 1.00 1.00 1.00\ndisk processes unknown, the process table failed: proc_info listpids: EINVAL\n",
 		},
 	}
 	for _, tc := range tests {
@@ -453,6 +457,32 @@ func TestHostSnapshot(t *testing.T) {
 	}
 }
 
+func TestElapsed(t *testing.T) {
+	now := time.Date(2026, 10, 23, 17, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		start time.Time
+		want  string
+	}{
+		{name: "an unknown start", want: "-"},
+		{name: "minutes and seconds", start: now.Add(-(51*time.Minute + 8*time.Second)), want: "51:08"},
+		{name: "hours", start: now.Add(-(2*time.Hour + 3*time.Minute + 4*time.Second)), want: "02:03:04"},
+		{name: "days", start: now.Add(-(4*24*time.Hour + 23*time.Hour + 43*time.Minute + 20*time.Second)), want: "04-23:43:20"},
+		{name: "a start after now reads zero", start: now.Add(time.Second), want: "00:00"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := elapsed(now, tc.start)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("elapsed = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHostSnapshotReadsWithinTheHostBound(t *testing.T) {
 	// Arrange
 	h := &fakeHost{}
@@ -462,28 +492,33 @@ func TestHostSnapshotReadsWithinTheHostBound(t *testing.T) {
 	m.hostSnapshot()
 
 	// Assert
-	if h.bounds["sysctl -n vm.loadavg"] != HostBound || h.bounds["ps -axo pid=,stat=,etime=,args="] != HostBound {
-		t.Fatalf("bounds = %v, want sysctl and ps within HostBound %s", h.bounds, HostBound)
+	if h.bounds["sysctl -n vm.loadavg"] != HostBound {
+		t.Fatalf("bounds = %v, want sysctl within HostBound %s", h.bounds, HostBound)
+	}
+	for call := range h.bounds {
+		if strings.HasPrefix(call, "ps ") {
+			t.Fatalf("the snapshot ran %q; the process table is never read through ps", call)
+		}
 	}
 }
 
 func TestSetupReadsTheHostWhenAProbeDoesNotAnswer(t *testing.T) {
 	// Arrange
-	h := &fakeHost{fail: map[string]bool{"hdiutil info": true}, load: "{ 28.72 21.45 17.25 }", ps: "  357 Ss   51:08 /usr/libexec/diskarbitrationd\n"}
+	h := &fakeHost{fail: map[string]bool{"hdiutil info": true}, load: "{ 28.72 21.45 17.25 }", procs: []proctable.Entry{proctable.Entry{Pid: 357, State: 'S', Comm: "diskarbitrationd", Argv: []string{"/usr/libexec/diskarbitrationd"}}}}
 	m := newManager(t, h)
 
 	// Act
 	_, trouble, _ := m.Setup(16)
 
 	// Assert
-	if want := "load average 28.72 21.45 17.25\ndisk process 357 Ss 51:08 /usr/libexec/diskarbitrationd\n"; trouble == nil || trouble.Host != want {
+	if want := "load average 28.72 21.45 17.25\ndisk process 357 S - /usr/libexec/diskarbitrationd\n"; trouble == nil || trouble.Host != want {
 		t.Fatalf("trouble = %+v, want the host's state %q", trouble, want)
 	}
 }
 
 func TestSetupLogsTheHostWhenAProbeDoesNotAnswer(t *testing.T) {
 	// Arrange
-	h := &fakeHost{fail: map[string]bool{"hdiutil info": true}, load: "{ 28.72 21.45 17.25 }", ps: "  357 Ss   51:08 /usr/libexec/diskarbitrationd\n"}
+	h := &fakeHost{fail: map[string]bool{"hdiutil info": true}, load: "{ 28.72 21.45 17.25 }", procs: []proctable.Entry{proctable.Entry{Pid: 357, State: 'S', Comm: "diskarbitrationd", Argv: []string{"/usr/libexec/diskarbitrationd"}}}}
 	m := newManager(t, h)
 	log := m.Log.(*fakeLog)
 
@@ -491,7 +526,7 @@ func TestSetupLogsTheHostWhenAProbeDoesNotAnswer(t *testing.T) {
 	m.Setup(16) //nolint:errcheck // the log is the subject
 
 	// Assert
-	if !log.has("INFO RAM disk check at 2026-10-12T00:00:01.000Z: the disk manager did not answer; the host: load average 28.72 21.45 17.25, disk process 357 Ss 51:08 /usr/libexec/diskarbitrationd") {
+	if !log.has("INFO RAM disk check at 2026-10-12T00:00:01.000Z: the disk manager did not answer; the host: load average 28.72 21.45 17.25, disk process 357 S - /usr/libexec/diskarbitrationd") {
 		t.Fatalf("log = %q, want the host's state at INFO", log.lines)
 	}
 }
@@ -507,9 +542,12 @@ func TestSetupReadsNoHostStateWhenBothProbesAnswer(t *testing.T) {
 	// Assert
 	t.Cleanup(func() { v.Release() })
 	for _, call := range h.calls {
-		if strings.HasPrefix(call, "sysctl") || strings.HasPrefix(call, "ps ") {
+		if strings.HasPrefix(call, "sysctl") {
 			t.Fatalf("calls = %q, want no read of the host's state", h.calls)
 		}
+	}
+	if h.procsRead != 0 {
+		t.Fatalf("the process table was read %d times, want none", h.procsRead)
 	}
 }
 
@@ -640,7 +678,7 @@ func TestProbe(t *testing.T) {
 // bounds, after that long; a call also in never fails at CommandBound
 // instead.
 func lateHost(took map[string]time.Duration, never ...string) *fakeHost {
-	h := &fakeHost{late: map[string]chan Late{}, load: "{ 14.99 13.71 13.41 }", ps: "  358 Ss   04-23:43:20 /usr/libexec/diskarbitrationd\n"}
+	h := &fakeHost{late: map[string]chan Late{}, load: "{ 14.99 13.71 13.41 }", procs: []proctable.Entry{{Pid: 358, State: 'S', Comm: "diskarbitrationd", Argv: []string{"/usr/libexec/diskarbitrationd"}}}}
 	for call, d := range took {
 		late := make(chan Late, 1)
 		late <- Late{Took: d}
@@ -697,7 +735,7 @@ func TestSetupLogsTheHostWhileAProbeIsLate(t *testing.T) {
 
 	// Assert
 	t.Cleanup(func() { v.Release() })
-	if !log.has("INFO RAM disk check at 2026-10-12T00:00:01.000Z: the disk manager had not answered diskutil list within 1s, so it is waited for to its own answer; the host: load average 14.99 13.71 13.41, disk process 358 Ss 04-23:43:20 /usr/libexec/diskarbitrationd") {
+	if !log.has("INFO RAM disk check at 2026-10-12T00:00:01.000Z: the disk manager had not answered diskutil list within 1s, so it is waited for to its own answer; the host: load average 14.99 13.71 13.41, disk process 358 S - /usr/libexec/diskarbitrationd") {
 		t.Fatalf("log = %q, want the host's state while the probe was late", log.snapshot())
 	}
 }
@@ -746,7 +784,7 @@ func TestSetupKeepsTheHostOfAProbeThatNeverAnswers(t *testing.T) {
 	_, trouble, _ := m.Setup(16)
 
 	// Assert
-	if want := "load average 14.99 13.71 13.41\ndisk process 358 Ss 04-23:43:20 /usr/libexec/diskarbitrationd\n"; trouble == nil || trouble.Host != want {
+	if want := "load average 14.99 13.71 13.41\ndisk process 358 S - /usr/libexec/diskarbitrationd\n"; trouble == nil || trouble.Host != want {
 		t.Fatalf("trouble = %+v, want the host's state read while the probe was late %q", trouble, want)
 	}
 }

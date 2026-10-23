@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/testrun/internal/proctable"
 	"agentrepl/testrun/reap"
 )
 
@@ -40,12 +41,14 @@ type fakeHost struct {
 	attachOut string
 	// bounds are the bounds the probes ran under, by call.
 	bounds map[string]time.Duration
-	// load and ps are what `sysctl -n vm.loadavg` and `ps` answer; loadErr
-	// and psErr their failures, if any.
-	load    string
-	loadErr error
-	ps      string
-	psErr   error
+	// load and procs are what `sysctl -n vm.loadavg` and the process table
+	// answer; loadErr and procsErr their failures, if any.
+	load     string
+	loadErr  error
+	procs    []proctable.Entry
+	procsErr error
+	// procsRead counts the process table's reads.
+	procsRead int
 	// late, by call, is the channel a watched probe answers once it missed
 	// its bound; a call not in it answers as run does.
 	late map[string]chan Late
@@ -86,8 +89,6 @@ func (h *fakeHost) run(name string, args ...string) (string, error) {
 		return h.lsof, h.lsofErr
 	case strings.HasPrefix(call, "sysctl"):
 		return h.load, h.loadErr
-	case strings.HasPrefix(call, "ps "):
-		return h.ps, h.psErr
 	}
 	return "", nil
 }
@@ -159,6 +160,7 @@ func newManager(t *testing.T, h *fakeHost) Manager {
 		Run: h.run, Registry: filepath.Join(t.TempDir(), "registry"), MountParent: parent, VolumesParent: h.volumes, Pid: 4242,
 		Reap:      func(reap.Members) (reap.Result, error) { return reap.Result{}, nil },
 		Probe:     h.probe,
+		Procs:     func() ([]proctable.Entry, error) { h.procsRead++; return h.procs, h.procsErr },
 		Watch:     h.watch,
 		Alive:     func(int) bool { return false },
 		Mounted:   func(string) (bool, error) { return false, nil },
