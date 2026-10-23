@@ -37,7 +37,9 @@
 ;; `post-command-hook'.  Never from a timer: a timer fires inside
 ;; `accept-process-output', so it could start a second hunspell exchange
 ;; while flyspell's own is waiting on its reply, and the two would read
-;; each other's answers.
+;; each other's answers.  The check runs with redisplay inhibited:
+;; `flyspell-small-region' calls `sit-for' after every word, which would
+;; draw the cursor walking the pasted text word by word.
 ;;
 ;; CODE IS NOT PROSE.  A fenced block, an inline `code' span and a token that
 ;; reads as a path, a URL, an identifier or an address are skipped
@@ -265,7 +267,10 @@ nothing left to check."
       (when-let* ((pending agent-repl--spell-pending))
         (setq agent-repl--spell-pending nil)
         (when flyspell-mode
-          (agent-repl--spell-check-region (car pending) (cdr pending)))
+          ;; flyspell redisplays after every word it checks; drawn, the
+          ;; cursor would walk the whole insertion (see the commentary).
+          (let ((inhibit-redisplay t))
+            (agent-repl--spell-check-region (car pending) (cdr pending))))
         (set-marker (car pending) nil)
         (set-marker (cdr pending) nil)))))
 
