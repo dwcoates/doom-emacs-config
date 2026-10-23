@@ -787,7 +787,7 @@ func TestAVanishedFileKeepsItsTailerSoItsTerminalCanBeSpelled(t *testing.T) {
 	// Arrange: a claimed spool being tailed.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "hello\n")
-	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -809,7 +809,7 @@ func TestAVanishedFileIsStatedOnce(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "hello\n")
-	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -900,7 +900,7 @@ func TestASpoolThatReadItsOwnExitMarkerIsNoLongerTracked(t *testing.T) {
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1settled", "work\nEXIT=0\n")
-	h.sc.TaskSpawned("b1settled", "toolu_settled_run", "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1settled", "toolu_settled_run", "", spool, false, "/workspace", "workspace-id", "session-1", noLaunch)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -921,7 +921,7 @@ func TestARunIsSettledOnlyOnceItsTerminalIsDurable(t *testing.T) {
 	store := &fakeStore{writeFail: "the store is refusing everything"}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1refused", "work\nEXIT=0\n")
-	h.sc.TaskSpawned("b1refused", "toolu_refused_run", "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1refused", "toolu_refused_run", "", spool, false, "/workspace", "workspace-id", "session-1", noLaunch)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -941,7 +941,7 @@ func TestASettledRunIsNeverConcludedLost(t *testing.T) {
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1swept", "work\nEXIT=0\n")
-	h.sc.TaskSpawned("b1swept", "toolu_swept_run", "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1swept", "toolu_swept_run", "", spool, false, "/workspace", "workspace-id", "session-1", noLaunch)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -1147,7 +1147,7 @@ func TestAnAgentSpoolsBookIsItsSpawningCall(t *testing.T) {
 	// tool_use_id.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "a1", promptLine+"\n")
-	h.sc.TaskSpawned("a1", "toolu_spawn_0001", "owner-agent", spool, true, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("a1", "toolu_spawn_0001", "owner-agent", spool, true, "/workspace", "workspace-id", "session-1", noLaunch)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -1939,7 +1939,7 @@ func TestAFileThatWentWithItsWholeTreeIsStatedWithoutWarning(t *testing.T) {
 	// is what a harness deleting its own run directory does.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "hello\n")
-	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -2433,7 +2433,7 @@ func TestAVanishedFileIsWarnedAboutOnlyWhenSomethingWasOutstanding(t *testing.T)
 				h.sc.options.PollInterval = time.Nanosecond
 			}
 			spool := h.spoolFile(t, "b1", tc.content)
-			h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+			h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 			if err := h.sc.beginCycle(); err != nil {
 				t.Fatalf("beginCycle: %v", err)
 			}
@@ -2827,7 +2827,7 @@ func boundedSpool(t *testing.T) (*fakeStore, string) {
 	h := newHarness(t, store)
 	content := strings.Repeat("line of test output\n", (2*tail.MaxBatchBytes)/20+7)
 	h.spoolFile(t, "b1", content)
-	h.sc.TaskSpawned("b1", "call-1", "agent-1", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1", "call-1", "agent-1", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -2918,7 +2918,7 @@ func TestASpentSliceYieldsABoundedFileToTheNextTick(t *testing.T) {
 	h := newHarness(t, store)
 	h.sc.options.PollInterval = time.Nanosecond
 	h.spoolFile(t, "b1", strings.Repeat("x", 2*tail.MaxBatchBytes))
-	h.sc.TaskSpawned("b1", "call-1", "agent-1", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1", "call-1", "agent-1", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -2949,7 +2949,7 @@ func TestARescanInsideTheClearIntervalKeepsTheRememberedMisses(t *testing.T) {
 	for i, spawner := range []string{"agent-1", "agent-2", "agent-3"} {
 		task := fmt.Sprintf("b%dmiss", i)
 		h.spoolFile(t, task, "work\n")
-		h.sc.TaskSpawned(task, fmt.Sprintf("call-%d", i), spawner, "", false, "/workspace", "workspace-id", "session-1")
+		h.sc.TaskSpawned(task, fmt.Sprintf("call-%d", i), spawner, "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 	}
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
@@ -2979,7 +2979,7 @@ func TestARescanPastTheClearIntervalDropsTheRememberedMisses(t *testing.T) {
 	for i, spawner := range []string{"agent-1", "agent-2", "agent-3"} {
 		task := fmt.Sprintf("b%dmiss", i)
 		h.spoolFile(t, task, "work\n")
-		h.sc.TaskSpawned(task, fmt.Sprintf("call-%d", i), spawner, "", false, "/workspace", "workspace-id", "session-1")
+		h.sc.TaskSpawned(task, fmt.Sprintf("call-%d", i), spawner, "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 	}
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)

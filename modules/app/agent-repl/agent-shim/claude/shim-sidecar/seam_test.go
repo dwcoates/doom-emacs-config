@@ -26,12 +26,12 @@ func (l *lostCapable) LostTerminal(taskID, runActivityID, ownerAgentID, reason s
 
 // observerCapable is a handler whose converter accepts spawn observations.
 type observerCapable struct {
-	observer func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string)
+	observer func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string, launch launchSite)
 }
 
 func (o *observerCapable) Handle([]tail.Frame, *tail.Context) []*storev1.StoreEntry { return nil }
 
-func (o *observerCapable) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string)) {
+func (o *observerCapable) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string, launch launchSite)) {
 	o.observer = fn
 }
 
@@ -129,7 +129,7 @@ func TestPlumbedObservationsReachTheOwnerIndex(t *testing.T) {
 	h.sc.plumbObserver(tail.KindSessionTranscript, handler, h.sc.log)
 
 	// Act.
-	handler.observer("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+	handler.observer("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 
 	// Assert.
 	if got := h.sc.owners.activityFor("b1"); got != "call-1" {
@@ -154,7 +154,7 @@ func TestLostSweepArmsFromSilence(t *testing.T) {
 	// Arrange: a claimed spool that stops growing.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "hello\n")
-	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestALostSweepNeverConcludesASpoolTheReaderHasNotSeen(t *testing.T) {
 	// they may be its own terminator.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "hello\nEXIT=0\n")
-	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}

@@ -62,7 +62,7 @@ func TestAWatchedRunTheStoreHoldsLiveIsTracked(t *testing.T) {
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1live", "work\n")
-	h.sc.TaskSpawned("b1live", "toolu_live", "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1live", "toolu_live", "", spool, false, "/workspace", "workspace-id", "session-1", noLaunch)
 
 	// Act.
 	beginOrFail(t, h)
@@ -82,7 +82,7 @@ func TestAWatchedRunTheStoreHoldsEndedIsSettledNotTracked(t *testing.T) {
 	store := &fakeStore{settled: map[string]int64{"toolu_done": 42}}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1done", "work\n")
-	h.sc.TaskSpawned("b1done", "toolu_done", "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1done", "toolu_done", "", spool, false, "/workspace", "workspace-id", "session-1", noLaunch)
 
 	// Act.
 	beginOrFail(t, h)
@@ -103,7 +103,7 @@ func TestARunTheStoreCannotAnswerForIsNotTrackedAndIsAskedAgain(t *testing.T) {
 	store := &fakeStore{settlementsFail: "database is locked"}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1unknown", "work\n")
-	h.sc.TaskSpawned("b1unknown", "toolu_unknown", "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1unknown", "toolu_unknown", "", spool, false, "/workspace", "workspace-id", "session-1", noLaunch)
 	beginOrFail(t, h)
 	if h.sc.tracker.Open(spool) || !h.sc.tracking(spool) {
 		t.Fatalf("open=%t tracking=%t, want the run untracked and still awaiting its settlement",
@@ -126,7 +126,7 @@ func TestARunSettledInThisProcessIsNotQueuedAgain(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1again", "work\n")
-	h.sc.TaskSpawned("b1again", "toolu_again", "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1again", "toolu_again", "", spool, false, "/workspace", "workspace-id", "session-1", noLaunch)
 	h.sc.tracker.Settle(spool)
 
 	// Act: its watcher is rebuilt (a vanished file that came back).
@@ -205,7 +205,7 @@ func TestAConclusionTheStoreHoldsEndedMintsNoLostAndSettles(t *testing.T) {
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1other", "work\n")
-	h.sc.TaskSpawned("b1other", "toolu_other", "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1other", "toolu_other", "", spool, false, "/workspace", "workspace-id", "session-1", noLaunch)
 	beginOrFail(t, h)
 	h.sc.pollAll()
 	store.settled = map[string]int64{"toolu_other": 77}
@@ -229,7 +229,7 @@ func TestAConclusionTheStoreCannotAnswerForMintsNothingAndSuspends(t *testing.T)
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1blind", "work\n")
-	h.sc.TaskSpawned("b1blind", "toolu_blind", "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1blind", "toolu_blind", "", spool, false, "/workspace", "workspace-id", "session-1", noLaunch)
 	beginOrFail(t, h)
 	h.sc.pollAll()
 	store.settlementsFail = "database is locked"
@@ -257,7 +257,7 @@ func TestAConclusionWhoseLostWriteFailedIsNotSettled(t *testing.T) {
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1unwritten", "work\n")
-	h.sc.TaskSpawned("b1unwritten", "toolu_unwritten", "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1unwritten", "toolu_unwritten", "", spool, false, "/workspace", "workspace-id", "session-1", noLaunch)
 	beginOrFail(t, h)
 	h.sc.pollAll()
 	store.writeFail = "disk is gone"
@@ -277,7 +277,7 @@ func TestAConclusionWhoseLostIsDurableIsSettled(t *testing.T) {
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1written", "work\n")
-	h.sc.TaskSpawned("b1written", "toolu_written", "", spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1written", "toolu_written", "", spool, false, "/workspace", "workspace-id", "session-1", noLaunch)
 	beginOrFail(t, h)
 	h.sc.pollAll()
 
@@ -338,7 +338,7 @@ func TestAFreshSidecarNeverTracksOrLosesARunThatSettledBeforeIt(t *testing.T) {
 			store := &fakeStore{}
 			h := newHarness(t, store)
 			spool := h.spoolFile(t, test.taskID, test.spool)
-			h.sc.TaskSpawned(test.taskID, test.run, test.agent, spool, test.bg, "/workspace", "workspace-id", "session-1")
+			h.sc.TaskSpawned(test.taskID, test.run, test.agent, spool, test.bg, "/workspace", "workspace-id", "session-1", noLaunch)
 			beginOrFail(t, h)
 			test.settle(h)
 			if h.sc.tracking(spool) {
@@ -349,7 +349,7 @@ func TestAFreshSidecarNeverTracksOrLosesARunThatSettledBeforeIt(t *testing.T) {
 			// launch from its transcript, resumes the spool at its committed
 			// cursor, and runs long past every silence window.
 			h.restart(t)
-			h.sc.TaskSpawned(test.taskID, test.run, test.agent, spool, test.bg, "/workspace", "workspace-id", "session-1")
+			h.sc.TaskSpawned(test.taskID, test.run, test.agent, spool, test.bg, "/workspace", "workspace-id", "session-1", noLaunch)
 			beginOrFail(t, h)
 			h.sc.pollAll()
 			h.advance(24 * time.Hour)

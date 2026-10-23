@@ -989,3 +989,28 @@ func TestScanFindsASpoolWhenTheRootIsAnUnnamedUIDDir(t *testing.T) {
 		t.Fatalf("target = %+v, want the shell spool b1f", got)
 	}
 }
+
+func TestTaskKind(t *testing.T) {
+	cases := []struct {
+		task      string
+		wantKind  tail.Kind
+		wantKnown bool
+	}{
+		{task: "b1x", wantKind: tail.KindShellSpool, wantKnown: true},
+		{task: "a1x", wantKind: tail.KindAgentTranscript, wantKnown: true},
+		{task: "w1x", wantKind: tail.KindWorkflowSpool, wantKnown: true},
+		{task: "z1x", wantKind: tail.KindResidueSpool},
+		{task: "", wantKind: tail.KindResidueSpool},
+	}
+	for _, tc := range cases {
+		t.Run(tc.task, func(t *testing.T) {
+			// Act
+			kind, known := TaskKind(tc.task)
+
+			// Assert
+			if kind != tc.wantKind || known != tc.wantKnown {
+				t.Fatalf("TaskKind(%q) = %v, %v; want %v, %v", tc.task, kind, known, tc.wantKind, tc.wantKnown)
+			}
+		})
+	}
+}

@@ -22,28 +22,43 @@ import (
 // converter has exactly one observer. An unadopted callback is a reader that
 // asked for nothing, which is silence rather than a defect; the reader states
 // its own expectations at the plumbing site.
+// LaunchSite is where and when a launch was read: the spawning call's own
+// instant, and the transcript (path and file identity) whose line stated it.
+// A reader judging a run it can never read by its spool needs both: when it
+// started, and whether everything its transcript says about it has been read.
+type LaunchSite struct {
+	AtMs       int64
+	Transcript string
+	FileID     string
+}
+
 type seamObserver struct {
-	spawned         func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string)
+	spawned         func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string, launch LaunchSite)
 	stopped         func(taskID string)
 	concluded       func(taskID string)
 	shellConcluded  func(taskID, status string, atMs int64)
 	workspaceDir    string
 	workspaceID     string
 	claudeSessionID string
+	path            string
+	fileID          string
 }
 
 // TaskSpawned implements convert.Observer.
-func (o *seamObserver) TaskSpawned(taskID, toolUseID, agentID, outputPath string, backgrounded bool) {
+func (o *seamObserver) TaskSpawned(taskID, toolUseID, agentID, outputPath string, backgrounded bool, launchedAtMs int64) {
 	if o.spawned == nil {
 		return
 	}
-	o.spawned(taskID, toolUseID, agentID, outputPath, backgrounded, o.workspaceDir, o.workspaceID, o.claudeSessionID)
+	o.spawned(taskID, toolUseID, agentID, outputPath, backgrounded, o.workspaceDir, o.workspaceID, o.claudeSessionID,
+		LaunchSite{AtMs: launchedAtMs, Transcript: o.path, FileID: o.fileID})
 }
 
 func (o *seamObserver) bind(ctx *Context) {
 	o.workspaceDir = ctx.WorkspaceDir
 	o.workspaceID = ctx.WorkspaceID
 	o.claudeSessionID = ctx.ClaudeSessionID
+	o.path = ctx.Path
+	o.fileID = ctx.FileID
 }
 
 // TaskStopped implements convert.Observer.
@@ -100,14 +115,14 @@ func (h *AgentTranscriptHandler) SetTaskConclusionObserver(fn func(taskID string
 // A LAUNCH IS THE ONLY PLACE THE VENDOR STATES WHICH CALL OPENED WHICH SPOOL, and
 // only this package reads tool results — so without this the reader cannot claim
 // a spool at all and every one of them waits out its hold and goes to residue.
-func (h *SessionTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string)) {
+func (h *SessionTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string, launch LaunchSite)) {
 	h.obs.spawned = fn
 }
 
 // SetTaskObserver adopts the reader's spawn-observation sink. A sidechain can
 // itself launch detached work, so a subagent's transcript reports launches on the
 // same terms as a session's.
-func (h *AgentTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string)) {
+func (h *AgentTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string, launch LaunchSite)) {
 	h.obs.spawned = fn
 }
 

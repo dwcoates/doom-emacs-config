@@ -337,7 +337,7 @@ func TestTaskObserverReceivesALaunchReadOffAToolResult(t *testing.T) {
 	h := NewSessionTranscriptHandler(testLogger(t))
 	type spawn struct{ task, call, agent, output, workspaceDir, workspaceID, claudeSessionID string }
 	var seen []spawn
-	h.SetTaskObserver(func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string) {
+	h.SetTaskObserver(func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string, _ LaunchSite) {
 		seen = append(seen, spawn{taskID, toolUseID, agentID, outputPath, workspaceDir, workspaceID, claudeSessionID})
 	})
 	lines := `{"type":"assistant","uuid":"a1","isSidechain":false,"timestamp":"2026-07-21T15:36:10.000Z","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"toolu_spawn","name":"Agent","input":{"description":"d","prompt":"p"}}]}}

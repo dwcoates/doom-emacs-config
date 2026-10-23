@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	storev1 "agentrepl/proto/store/v1"
 )
@@ -55,6 +56,7 @@ func seedDetachedShell(t *testing.T, tree *vendorTree, cwd, session string) deta
 	result := retargetSession(t, decodeRecord(t, captured.Lines[10]), session, cwd)
 	result = setToolResultText(t, result, backgroundLaunchText(taskID, spool))
 	result = setNested(t, result, "toolUseResult", "backgroundTaskId", taskID)
+	call, result = launchedNow(call), launchedNow(result)
 
 	g := newGrowingFile(t, tree.sessionPath(slug, session))
 	g.AppendLine(encodeRecord(t, call))
@@ -79,9 +81,21 @@ func appendDetachedLaunch(t *testing.T, fx detachedFixture, taskID, callID strin
 	result := retargetSession(t, decodeRecord(t, captured.Lines[10]), fx.Session, cwd)
 	result = setToolUseID(t, setToolResultText(t, result, backgroundLaunchText(taskID, spool)), callID)
 	result = setNested(t, result, "toolUseResult", "backgroundTaskId", taskID)
+	call, result = launchedNow(call), launchedNow(result)
 	fx.Parent.AppendLine(encodeRecord(t, call))
 	fx.Parent.AppendLine(encodeRecord(t, result))
 	return spool
+}
+
+// launchedNow restamps a captured launch record to this instant. The capture's
+// own stamp predates the machine's boot, and a shell launched before the boot
+// cannot write the spool these subjects grow after it: the reader concludes
+// such a run LOST the moment its transcript is read (preboot.go), so a
+// subject whose spool comes later must launch after the boot, as every real
+// one does.
+func launchedNow(record map[string]any) map[string]any {
+	record["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
+	return record
 }
 
 // requireCapturedBackgroundLaunchPair guards the provenance every detached

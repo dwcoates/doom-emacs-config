@@ -29,8 +29,17 @@ import (
 // spawning call's tool result and reports the task it opened; the reader is what
 // turns that into a spool's owner.
 type taskObserverSink interface {
-	SetTaskObserver(func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string))
+	SetTaskObserver(func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string, launch handler.LaunchSite))
 }
+
+// BOTH TRANSCRIPT HANDLERS ARE SINKS AT COMPILE TIME. The plumbing finds a
+// sink by a run-time assertion, so a signature that drifted between this
+// interface and a handler would only surface as an ERROR at plumbing, with
+// every spool unowned; these make the drift a build failure instead.
+var (
+	_ taskObserverSink = (*handler.SessionTranscriptHandler)(nil)
+	_ taskObserverSink = (*handler.AgentTranscriptHandler)(nil)
+)
 
 // lostTerminalSink is implemented by a handler that can mint a detached run's
 // terminal from the reader's LOST conclusion. The reader states HOW it stopped
