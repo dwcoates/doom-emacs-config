@@ -34,6 +34,7 @@
            (agent-repl-test-wh--host 'host-xwidget)
            (agent-repl--webhost-url nil)
            (agent-repl--webhost-daemon-origin nil)
+           (agent-repl--webhost-follow-conn nil)
            (agent-repl--webhost-reload-started-ms nil))
        (cl-letf (((symbol-function 'agent-repl-webhost-xwidget)
                   (lambda () agent-repl-test-wh--host))
@@ -79,6 +80,7 @@ so stubbing the accessor would not reach the code under test."
 Binds `reloads' and `records', newest first."
   (declare (indent 1))
   `(let ((reloads nil) (records nil)
+         (agent-repl--webhost-follow-conn nil)
          (agent-repl--webhost-reloaded-for-call nil)
          (agent-repl--webhost-predates-reload-pending nil))
      (cl-letf (((symbol-function 'agent-repl-link-live) (lambda () ,link))
@@ -103,6 +105,28 @@ Binds `reloads' and `records', newest first."
       (should (assoc 'info records))
       (should (string-match-p "elisp.webhost.predates-call op=setDaemon action=reload url=http://host.localhost:2/\\?host=1"
                               (cdr (assoc 'info records)))))))
+
+(ert-deftest agent-repl-test-wh-a-stale-host-is-reloaded-on-the-daemon-it-follows ()
+  "Mid-handover the link can still name the daemon being left; the host is reloaded where it was pointed."
+  (let ((leaving (agent-repl-test-wh--conn "127.0.0.1:1"))
+        (followed (agent-repl-test-wh--conn "127.0.0.1:2")))
+    (agent-repl-test-wh--with-predates leaving
+      ;; Arrange
+      (setq agent-repl--webhost-follow-conn followed)
+      ;; Act
+      (agent-repl--webhost-predates-call "setDaemon")
+      ;; Assert
+      (should (equal reloads (list followed))))))
+
+(ert-deftest agent-repl-test-wh-following-a-daemon-records-its-connection ()
+  "The host's calls moving to a daemon make that daemon the one it belongs on."
+  (agent-repl-test-wh--with-host
+    (setq agent-repl--webhost-url "http://host.localhost:1/?host=1")
+    (let ((successor (agent-repl-test-wh--conn "127.0.0.1:2")))
+      ;; Act
+      (agent-repl-webhost-follow-daemon "alpha" successor)
+      ;; Assert
+      (should (eq agent-repl--webhost-follow-conn successor)))))
 
 (ert-deftest agent-repl-test-wh-an-answer-from-the-document-being-left-asks-for-nothing ()
   "An unknown call answered before the reloaded host loads is the old document's: INFO, no second reload."
@@ -504,13 +528,15 @@ Binds `reloads' and `records', newest first."
   "A host loaded on a daemon dials that daemon, so a later move is measured from there."
   ;; Arrange
   (agent-repl-test-wh--with-host
-    (setq agent-repl--webhost-daemon-origin "http://host.localhost:2")
+    (setq agent-repl--webhost-daemon-origin "http://host.localhost:2"
+          agent-repl--webhost-follow-conn (agent-repl-test-wh--conn "127.0.0.1:2"))
     (cl-letf (((symbol-function 'agent-repl-webhost-url) (lambda (_conn) "http://host.localhost:3/?host=1"))
               ((symbol-function 'agent-repl--frontend-webview-navigate-widget) (lambda (_xw _url) nil)))
       ;; Act
       (agent-repl--webhost-reload-now 'conn))
     ;; Assert
-    (should-not agent-repl--webhost-daemon-origin)))
+    (should-not agent-repl--webhost-daemon-origin)
+    (should-not agent-repl--webhost-follow-conn)))
 
 (ert-deftest agent-repl-test-wh-a-page-moved-to-the-hosts-own-daemon-is-re-pointed ()
   "A page moved onto the daemon the host already talks to is re-pointed, the host left alone."
