@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -107,6 +108,12 @@ type gitFixture struct {
 	// still classify: a git ended by somebody else while the daemon's context
 	// is perfectly alive.
 	KillSelfWith int `json:"kill_self_with"`
+	// HolderFifo, when set, makes the fake start a descendant that inherits
+	// its stdout and stderr and lives until the test opens and closes the
+	// named pipe, then answer and exit. It models a hook git ran leaving a
+	// process behind that holds git's output open after git is gone
+	// (2026-10-23: a `ps` stuck in the kernel).
+	HolderFifo string `json:"holder_fifo"`
 }
 
 // ok is a fixture that succeeds with that stdout.
@@ -130,6 +137,12 @@ func killedBy(sig syscall.Signal, match ...string) gitFixture {
 // context ends.
 func blocks(fifo string, match ...string) gitFixture {
 	return gitFixture{Match: match, BlockOnFifo: fifo}
+}
+
+// leavesHolder is a fixture that answers stdout, leaving behind a descendant
+// that holds git's output open until the test releases it through fifo.
+func leavesHolder(fifo, stdout string, match ...string) gitFixture {
+	return gitFixture{Match: match, Stdout: stdout, HolderFifo: fifo}
 }
 
 // newFifo makes a named pipe for the blocks fixture and returns its path.
@@ -375,6 +388,17 @@ func fakeGitMain() {
 		}
 		if !hasPrefix(subject, fixture.Match) {
 			continue
+		}
+		if fixture.HolderFifo != "" {
+			// cat (by path: the fake runs with an empty PATH) opens the pipe for reading, which waits for the test's
+			// writer, then reads to the writer's close: it lives exactly until
+			// the test releases it, with this git's stdout and stderr.
+			holder := exec.Command("/bin/sh", "-c", `exec /bin/cat <"$0" >/dev/null`, fixture.HolderFifo)
+			holder.Stdout, holder.Stderr = os.Stdout, os.Stderr
+			if err := holder.Start(); err != nil {
+				fmt.Fprintf(os.Stderr, "fake git: starting the output holder: %v\n", err)
+				os.Exit(120)
+			}
 		}
 		if fixture.BlockOnFifo != "" {
 			pipe, err := os.OpenFile(fixture.BlockOnFifo, os.O_RDONLY, 0)

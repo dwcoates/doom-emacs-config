@@ -211,20 +211,33 @@ func (c *client) invoke(ctx context.Context, dir string, extra []string, args ..
 	cmd := childproc.CommandContext(ctx, childproc.Stable, gitBinary, full...)
 	cmd.Env = append(scrubEnv(os.Environ()), extra...)
 
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
 	in := invocation{args: args, dir: dir}
+	// Git's output goes to files, never pipes: a hook git ran can leave a
+	// process holding git's stderr long after git exits, and a pipe would
+	// keep Wait waiting on it (childproc.Capture).
+	capture, err := childproc.CaptureOutput(cmd)
+	if err != nil {
+		in.exitCode = -1
+		in.stderr = err.Error()
+		return in, in.fail()
+	}
+
 	started := time.Now()
-	err := cmd.Start()
+	err = cmd.Start()
 	if err == nil {
 		in.pid = cmd.Process.Pid
 		err = cmd.Wait()
 		in.duration = time.Since(started)
 	}
-	in.stdout = stdout.String()
-	in.stderr = stderr.String()
+	stdout, stderr, finishErr := capture.Finish()
+	if finishErr != nil {
+		// What git said is unreadable, so nothing it answered can be judged.
+		in.exitCode = -1
+		in.stderr = errors.Join(err, finishErr).Error()
+		return in, in.fail()
+	}
+	in.stdout = stdout
+	in.stderr = stderr
 
 	switch {
 	case err == nil:

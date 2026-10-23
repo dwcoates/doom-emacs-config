@@ -3,6 +3,7 @@ package gitclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -945,5 +946,60 @@ func TestTheGitBinaryIsGitOnPathUnlessTheBuildNamesAnother(t *testing.T) {
 	// Assert: a build that links nothing in runs the host's git by name.
 	if gitBinary != "git" {
 		t.Fatalf("gitBinary = %q, want \"git\" in a build that names no other", gitBinary)
+	}
+}
+
+// A GIT THAT EXITED IS ANSWERED, whatever its descendants still hold. A hook
+// git ran once left a `ps` stuck in the kernel holding git's stderr, and with
+// pipes for output the wait for git never returned: every workspace create
+// waiting on that git hung for good (2026-10-23).
+
+func TestAGitWhoseDescendantStillHoldsItsOutputIsAnswered(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fifo := newFifo(t)
+	newFakeGit(t, leavesHolder(fifo, "feature\n"))
+	type answer struct {
+		branch string
+		err    error
+	}
+	done := make(chan answer, 1)
+
+	// Act.
+	go func() {
+		branch, err := git.CurrentBranch(context.Background(), "/repo")
+		done <- answer{branch, err}
+	}()
+	// The holder is live, holding git's output, until this test's cleanup
+	// closes the writer.
+	awaitOpen(t, fifo)
+	got := <-done
+
+	// Assert.
+	if got.err != nil || got.branch != "feature" {
+		t.Fatalf("CurrentBranch = %q, %v; want %q and no error", got.branch, got.err, "feature")
+	}
+}
+
+func TestAGitWhoseOutputCannotBeCapturedIsAFailureAndNeverRuns(t *testing.T) {
+	// Arrange: no file for git's output can be made.
+	git, surfaces := newTestClient(t)
+	fake := newFakeGit(t, ok("feature\n"))
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "absent"))
+
+	// Act
+	_, err := git.CurrentBranch(context.Background(), "/repo")
+
+	// Assert: a failure naming the cause, recorded once, and git never ran.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "make the child's stdout file") {
+		t.Fatalf("CurrentBranch error = %v (%T), want a *gitclient.Error naming the stdout file", err, err)
+	}
+	record, found := recordFor(surfaces.records(), "error", "daemon.gitclient.current_branch")
+	if !found || !strings.Contains(fmt.Sprint(record.Context["stderr"]), "make the child's stdout file") {
+		t.Fatalf("no error record naming the stdout file in %+v", surfaces.records())
+	}
+	if calls := fake.calls(); len(calls) != 0 {
+		t.Fatalf("git ran %d times, want never: %v", len(calls), subjects(calls))
 	}
 }
