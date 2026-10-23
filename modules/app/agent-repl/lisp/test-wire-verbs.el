@@ -2057,7 +2057,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-fork-source-arm ()
@@ -2170,6 +2170,20 @@ declares, so the codec's arm list cannot drift from it."
                  (sort (mapcar (lambda (arm) (symbol-name (car arm)))
                                agent-repl-wire-verbs--invalid-name-rule-arms)
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-transferring-away-arm ()
+  "CreateWorkspaceError's `transferring_away' arm decodes the successor's address."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}"))
+                   '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-standing-down-arm ()
+  "CreateWorkspaceError's `standing_down' arm decodes as the empty arm it is."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"standingDown\":{}}"))
+                   '(:cause (:arm :standing-down :value nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-name-reserved-arm ()
   "CreateWorkspaceError's `name_reserved' arm decodes the branch the name resolves to."

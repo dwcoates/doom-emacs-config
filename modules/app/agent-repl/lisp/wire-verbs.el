@@ -576,6 +576,20 @@ The named brief file is absent."
 the form names is not one the daemon knows."
   (agent-repl-wire-verbs--decode-empty "CreateWorkspaceUnknownRepository" json))
 
+(defun agent-repl-wire-decode-create-workspace-transferring-away (json)
+  "Decode CreateWorkspaceTransferringAway from JSON into a plist (`:address').
+The daemon is handing over and admitted no create; the successor at
+`:address' creates it."
+  (let ((message "CreateWorkspaceTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                    message 'address json))))
+
+(defun agent-repl-wire-decode-create-workspace-standing-down (json)
+  "Decode CreateWorkspaceStandingDown from JSON.  Empty: the daemon is
+standing down with no successor listening and admitted no create."
+  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceStandingDown" json))
+
 (defun agent-repl-wire-verbs--decode-ref-arm (message field json)
   "Decode MESSAGE, whose one FIELD names a `WorkspaceRef\', from JSON.
 Returns (KEYWORD REF), KEYWORD being FIELD\'s keyword."
@@ -699,6 +713,14 @@ the last thing the model said, when it said anything at all."
           :answer (agent-repl-wire-verbs--decode-string
                        message 'answer json))))
 
+(defun agent-repl-wire-decode-create-workspace-error-transferring-away (json)
+  "Decode CreateWorkspaceError's `transferring_away' cause arm from JSON."
+  (agent-repl-wire-decode-create-workspace-transferring-away json))
+
+(defun agent-repl-wire-decode-create-workspace-error-standing-down (json)
+  "Decode CreateWorkspaceError's `standing_down' cause arm from JSON."
+  (agent-repl-wire-decode-create-workspace-standing-down json))
+
 (defun agent-repl-wire-decode-create-workspace-error-ungated-without-consent (json)
   "Decode CreateWorkspaceError's `ungated_without_consent' cause arm from JSON."
   (agent-repl-wire-decode-create-workspace-ungated-without-consent json))
@@ -775,7 +797,7 @@ async-merge arms and `origin_fetch_failed' are not decoded: an async
 merge and a create cut from origin are an agent\='s requests, never the
 editor\='s, so one answering an editor create is a breach."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation nameReserved invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected oneShotOwnerLands unknownRequester parentNotOpen))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation nameReserved invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected oneShotOwnerLands unknownRequester parentNotOpen transferringAway standingDown))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -798,6 +820,8 @@ editor\='s, so one answering an editor create is a breach."
          (list 'ownerNoticeUnexpected :owner-notice-unexpected #'agent-repl-wire-decode-create-workspace-error-owner-notice-unexpected)
          (list 'oneShotOwnerLands :one-shot-owner-lands #'agent-repl-wire-decode-create-workspace-error-one-shot-owner-lands)
          (list 'unknownRequester :unknown-requester #'agent-repl-wire-decode-create-workspace-error-unknown-requester)
+         (list 'transferringAway :transferring-away #'agent-repl-wire-decode-create-workspace-error-transferring-away)
+         (list 'standingDown :standing-down #'agent-repl-wire-decode-create-workspace-error-standing-down)
          agent-repl-wire-verbs--parent-not-open-arm)))))
 
 (defun agent-repl-wire-decode-create-workspace-response-success (json)

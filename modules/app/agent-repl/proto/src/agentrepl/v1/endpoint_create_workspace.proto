@@ -490,8 +490,27 @@ message CreateWorkspaceError {
     // The async merge's repository's `.agent-repl/deploy.yaml` is unusable.
     // Nothing was recorded.
     DeployConfigInvalid async_merge_deploy_config_invalid = 41;
+    // This daemon is handing its workspaces to a successor and admits no new
+    // create: a create admitted now could still be materializing when the
+    // handover snapshots what it serves. Nothing was created; the same
+    // request sent to `address` is created there.
+    CreateWorkspaceTransferringAway transferring_away = 43;
+    // This daemon is standing down with no successor listening yet (a drain,
+    // a restart across a state layout change, a signal) and admits no new
+    // create. Nothing was created; the daemon that serves next creates it.
+    CreateWorkspaceStandingDown standing_down = 44;
   }
 }
+// A create this daemon did not admit because it is handing over. Every create
+// it admitted before closing finishes before the handover lists what it
+// serves, so none is ever cut off by it.
+message CreateWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so the client sends the create there.
+  string address = 1;
+}
+// A create this daemon did not admit because it is standing down with no
+// successor. Every create it admitted before closing finishes before it exits.
+message CreateWorkspaceStandingDown {}
 message CreateWorkspaceUngatedWithoutConsent {}
 message CreateWorkspaceNoSlug {}
 message CreateWorkspaceBriefMissing {
