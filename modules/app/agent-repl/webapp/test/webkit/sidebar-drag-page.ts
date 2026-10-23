@@ -8,6 +8,7 @@
 import { createArrangeHold } from "../../src/sidebar/arrange.js";
 import { pressToDrag } from "../../src/sidebar/drag.js";
 import { installPageLogger } from "./page-log";
+import { takePageSelection } from "./page-selection";
 
 /** What the test reads back from the page. */
 export interface SidebarDragPage {
@@ -70,10 +71,7 @@ window.sidebarDragPage = {
     });
   },
   takeSelection(): string {
-    const selection = document.getSelection();
-    const text = selection === null ? "" : selection.toString();
-    selection?.removeAllRanges();
-    return text;
+    return takePageSelection(document);
   },
   charMiddle(id: string, at: number): { x: number; y: number } {
     const text = document.getElementById(id)?.firstChild;

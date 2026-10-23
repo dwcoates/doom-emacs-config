@@ -8,6 +8,7 @@
  */
 import { createControl } from "../../src/control.js";
 import { installSelectionClickGuard } from "../../src/selection.js";
+import { takePageSelection } from "./page-selection";
 
 /** What the test reads back from the page. */
 export interface SelectionPage {
@@ -70,10 +71,7 @@ window.selectionPage = {
     return taken;
   },
   takeSelection(): string {
-    const selection = document.getSelection();
-    const text = selection === null ? "" : selection.toString();
-    selection?.removeAllRanges();
-    return text;
+    return takePageSelection(document);
   },
   focus(id: string): void {
     document.getElementById(id)?.focus();
