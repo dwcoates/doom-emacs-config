@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/latestmodel"
+	"agent-repld/internal/resolve/ladder"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
 )
@@ -66,6 +67,37 @@ type allowanceWindow struct {
 	// verdict is the status arm of the last rate-limit event for this window,
 	// VerdictNone until one with a status has been seen.
 	verdict wsm.AllowanceVerdict
+	// verdictResetsAtS is the reset, epoch SECONDS, of the window INSTANCE the
+	// verdict is about: the event's own reset, or the drawn figures' reset
+	// when the event named none. 0 while neither was known, and the verdict
+	// then lapses with the drawn figures' reset (liveVerdict).
+	verdictResetsAtS int64
+}
+
+// liveVerdict is the verdict as it may be drawn at nowS (epoch seconds): the
+// filed one while the window instance it was about has not reset, and
+// VerdictNone once it has. A verdict on a window that has since reset is
+// about a window that no longer exists, so it never colors the figures of
+// the instance after it.
+func (w *allowanceWindow) liveVerdict(nowS int64) wsm.AllowanceVerdict {
+	resetsAtS := w.verdictResetsAtS
+	if resetsAtS == 0 {
+		resetsAtS = w.resetsAtS
+	}
+	if nowS >= resetsAtS {
+		return wsm.VerdictNone
+	}
+	return w.verdict
+}
+
+// observeVerdict files a rate-limit event's verdict, scoped to the window
+// instance the event names by its reset (resetsAtMs, 0 when it named none).
+func (w *allowanceWindow) observeVerdict(verdict wsm.AllowanceVerdict, resetsAtMs int64) {
+	w.verdict = verdict
+	w.verdictResetsAtS = resetsAtMs / 1000
+	if w.verdictResetsAtS == 0 {
+		w.verdictResetsAtS = w.resetsAtS
+	}
 }
 
 // observeSampledFigures files a figure sighting read off a usage SAMPLE,
@@ -101,15 +133,19 @@ func (w *allowanceWindow) fileFigures(utilizationPercent float64, resetsAtMs int
 	w.resetsAtS = resetsAtMs / 1000
 }
 
-// rateState is the drawn allowances. The five-hour window is the session
-// allowance, the seven-day window (with its per-model and overage-included
-// aliases) is the weekly one, and the vendor's own overage window is the
-// third.
+// rateState is the drawn allowances, ONE PER VENDOR WINDOW: the five-hour
+// session allowance, the account-wide seven-day one, the seven-day ones the
+// vendor meters per model family, and the vendor's own overage window. No
+// window's figure or verdict is ever filed under another's.
 type rateState struct {
 	// session is the rolling five-hour allowance.
 	session allowanceWindow
-	// weekly is the seven-day allowance.
+	// weekly is the account-wide seven-day allowance.
 	weekly allowanceWindow
+	// weeklyOpus is the seven-day allowance for the Opus model family.
+	weeklyOpus allowanceWindow
+	// weeklySonnet is the seven-day allowance for the Sonnet model family.
+	weeklySonnet allowanceWindow
 	// overage is the allowance the vendor bills beyond the two above. It
 	// stays unfigured — and so draws absent — on the accounts that never
 	// report an overage window at all.
@@ -522,9 +558,13 @@ type wsState struct {
 	faults []Fault
 	// blocked is the standing VENDOR OR ACCOUNT block, nil when nothing
 	// blocks the session. It is raised and lifted by exactly the facts the
-	// roster's vendor_blocked is (ladder.ClassifyFailure, ladder.RateLimitBlocks,
-	// a session start, a turn start), so the strip and the dot move together.
+	// roster's vendor_blocked is (ladder.ClassifyFailure, rateLimits, a
+	// session start, a turn start), so the strip and the dot move together.
 	blocked *blockedState
+	// rateLimits is the windows whose newest rate-limit verdict rejected the
+	// session: a rate-limit event raises the usage-limit block while any
+	// stands, and lifts the block once none does.
+	rateLimits ladder.RateLimitRejections
 
 	// interrupted is the momentary interrupted status, nil when it is not
 	// standing.

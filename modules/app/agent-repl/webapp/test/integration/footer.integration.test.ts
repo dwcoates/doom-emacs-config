@@ -1547,12 +1547,12 @@ describe("the usage line the strip cannot fit", () => {
       resetsAtS: 1_700n,
       status: { case: "allowedWarning", value: {} },
     },
-    weekly: {
+    weekly: { overall: {
       newsworthy: false,
       utilization: 0.63,
       resetsAtS: 9_000n,
       status: { case: "allowed", value: {} },
-    },
+    } },
   };
 
   /** Boot with that line standing. */

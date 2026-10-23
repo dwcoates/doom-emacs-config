@@ -198,10 +198,12 @@ func TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance(t *testing.T) {
 
 	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := sfAwaitSampledAllowance(t, ctx, footer.Stream, "the weekly allowance", (*frontendv1.FooterActivityEnduringUsage).GetWeekly, 0.91)
+	view := sfAwaitSampledAllowance(t, ctx, footer.Stream, "the weekly allowance", func(u *frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance {
+		return u.GetWeekly().GetOverall()
+	}, 0.91)
 
 	// Assert
-	sfAssertEventFeedsAllowance(t, view, footerEnduringUsage(view).GetWeekly(), 0.91)
+	sfAssertEventFeedsAllowance(t, view, footerEnduringUsage(view).GetWeekly().GetOverall(), 0.91)
 	sfAwaitSessionArmRecords(t, w, workspaceDir, sfFooterSessionUpdate, "rate_limit_status", before+1)
 }
 
@@ -344,6 +346,32 @@ func TestSampledAllowanceResetsAfterItWasRead(t *testing.T) {
 	}
 }
 
+// THE PER-MODEL WEEKLY WINDOWS ARE DRAWN BESIDE THE OVERALL ONE. The fake
+// account's sample reads Opus at 77% and Sonnet at 21% (catalogs.ts
+// fakeAccountUsage); each lands on its own figure in the weekly element,
+// never folded into the overall weekly figure. The unread arm ahead keeps the
+// turn-close reprobes from re-filing the start-time sample.
+func TestSampledPerModelWeeklyWindowsAreDrawnBesideTheOverallOne(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws, _ := sfNewWorkspace(t)
+	sfSwitchedToUnread(t, w, ws, driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable"), "service_unavailable")
+
+	// Act
+	weekly := sfAwaitUsage(t, w, ws).GetWeekly()
+
+	// Assert
+	if got := weekly.GetOverall().GetUtilization(); got != 0.63 {
+		t.Errorf("FooterWeeklyAllowance.overall.utilization = %v, want the sampled 0.63", got)
+	}
+	if got := weekly.GetModels().GetOpus().GetUtilization(); got != 0.77 {
+		t.Errorf("FooterWeeklyModelAllowances.opus.utilization = %v, want the sampled 0.77", got)
+	}
+	if got := weekly.GetModels().GetSonnet().GetUtilization(); got != 0.21 {
+		t.Errorf("FooterWeeklyModelAllowances.sonnet.utilization = %v, want the sampled 0.21", got)
+	}
+}
+
 // `!usage-opus-absent` IS NOT AN UNAVAILABILITY, and that is the whole
 // scenario: the service answered in full and this account simply has no opus
 // window (catalogs.ts: "An ABSENT OPTIONAL WINDOW, which is NOT an
@@ -361,7 +389,10 @@ func TestAccountUsageOpusAbsentDrawsTheSessionAndWeeklyAllowances(t *testing.T) 
 
 	// Assert
 	line := sfAwaitUsage(t, w, ws)
-	if line.GetWeekly() == nil {
-		t.Errorf("FooterActivityEnduringUsage.weekly is UNSET, want the weekly allowance an absent opus window leaves drawn")
+	if line.GetWeekly().GetOverall() == nil {
+		t.Errorf("FooterWeeklyAllowance.overall is UNSET, want the weekly allowance an absent opus window leaves drawn")
+	}
+	if line.GetWeekly().GetModels().GetOpus() != nil {
+		t.Errorf("FooterWeeklyModelAllowances.opus = %+v, want no opus figure for an account with no opus window", line.GetWeekly().GetModels().GetOpus())
 	}
 }

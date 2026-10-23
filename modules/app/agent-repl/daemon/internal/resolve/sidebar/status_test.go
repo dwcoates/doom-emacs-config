@@ -11,6 +11,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/ratelimittest"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/shimclient"
@@ -339,13 +340,44 @@ func TestRowIsVendorBlockedWhenTheVendorRejectedTheAllowance(t *testing.T) {
 	}
 }
 
-// rejectedRateLimit is the vendor's rejected allowance verdict.
+func TestARowsRateLimitBlockIsLiftedOnlyByItsOwnWindow(t *testing.T) {
+	tests := []struct {
+		name string
+		lift func(r sidebarResolver)
+		want string
+	}{
+		{name: "an allowed verdict on another window leaves the row blocked", lift: func(r sidebarResolver) {
+			r.OnSessionUpdate(theWS, ratelimittest.Update(ratelimittest.Allowed(ratelimittest.FiveHour())))
+		}, want: "vendor_blocked"},
+		{name: "an allowed verdict on the rejected window lifts the block", lift: func(r sidebarResolver) {
+			r.OnSessionUpdate(theWS, ratelimittest.Update(ratelimittest.Allowed(ratelimittest.SevenDay())))
+		}, want: "ready"},
+		{name: "a new turn forgets the rejection, so another window's verdict leaves it unblocked", lift: func(r sidebarResolver) {
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.OnSessionUpdate(theWS, ratelimittest.Update(ratelimittest.Allowed(ratelimittest.FiveHour())))
+		}, want: "submitting"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+			r.OnSessionUpdate(theWS, ratelimittest.Update(ratelimittest.Rejected(ratelimittest.SevenDay())))
+
+			// Act.
+			tc.lift(r)
+
+			// Assert.
+			if got := statusName(onlyRow(t, r)); got != tc.want {
+				t.Fatalf("status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// rejectedRateLimit is the vendor's rejected allowance verdict, about no
+// window.
 func rejectedRateLimit() *conversationv1.SessionUpdate {
-	return &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_RateLimitStatus{
-			RateLimitStatus: &conversationv1.SessionRateLimitStatus{
-				Status: &conversationv1.SessionRateLimitStatus_Rejected{
-					Rejected: &conversationv1.SessionRateLimitRejected{}}}}}
+	return ratelimittest.Update(ratelimittest.Rejected(nil))
 }
 
 // failedTurn runs one turn on a live row that the main agent's terminal ends

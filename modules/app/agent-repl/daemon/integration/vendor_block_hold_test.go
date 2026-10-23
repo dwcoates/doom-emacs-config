@@ -9,20 +9,15 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/integration/harness"
+	"agent-repld/internal/ratelimittest"
 )
 
 // rateLimitVerdict is a five-hour rate-limit status with the given verdict.
 func rateLimitVerdict(rejected bool) *conversationv1.SessionUpdate {
-	status := &conversationv1.SessionRateLimitStatus{
-		RateLimitType: &conversationv1.SessionRateLimitType{
-			Window: &conversationv1.SessionRateLimitType_FiveHour{FiveHour: &conversationv1.SessionRateLimitWindowFiveHour{}},
-		},
-		Status: &conversationv1.SessionRateLimitStatus_Allowed{Allowed: &conversationv1.SessionRateLimitAllowed{}},
-	}
 	if rejected {
-		status.Status = &conversationv1.SessionRateLimitStatus_Rejected{Rejected: &conversationv1.SessionRateLimitRejected{}}
+		return ratelimittest.Update(ratelimittest.Rejected(ratelimittest.FiveHour()))
 	}
-	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_RateLimitStatus{RateLimitStatus: status}}
+	return ratelimittest.Update(ratelimittest.Allowed(ratelimittest.FiveHour()))
 }
 
 // TestAPromptDuringAUsageLimitIsHeldAfterReconnectAndDeliveredWhenTheVendorServes

@@ -86,6 +86,9 @@ type wsState struct {
 	// vendorBlocked reports evidence that the block is the vendor's or the
 	// account's rather than agent-repl's.
 	vendorBlocked bool
+	// rateLimits is the windows whose newest rate-limit verdict rejected the
+	// session; a rate-limit event sets vendorBlocked to whether any stands.
+	rateLimits ladder.RateLimitRejections
 
 	// result is the READ STATE of the last turn's result: whether the user
 	// has seen it yet. It is a FACT about the workspace, not a display mode,
@@ -192,6 +195,14 @@ func newWSState() *wsState {
 	}
 }
 
+// liftVendorBlock lifts the vendor block wholesale, every window's
+// rate-limit rejection with it, so a later verdict on one window cannot
+// re-raise a rejection the lift already answered.
+func (s *wsState) liftVendorBlock() {
+	s.vendorBlocked = false
+	s.rateLimits.Clear()
+}
+
 // startTurn folds an accepted turn in, which retires every fact the previous
 // turn left standing.
 func (s *wsState) startTurn(turn *footer.TurnStarted) {
@@ -201,7 +212,7 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 	}
 	s.turnEverRan = true
 	s.sawActivity = false
-	s.vendorBlocked = false
+	s.liftVendorBlock()
 	// A NEW TURN ENDS THE LAST ONE'S RETRY: the prompt that opened it is
 	// working until the API fails again.
 	s.retrying = ""

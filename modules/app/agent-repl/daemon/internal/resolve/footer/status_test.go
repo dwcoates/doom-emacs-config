@@ -6,10 +6,12 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/ratelimittest"
 	"agent-repld/internal/resolve/turnfault"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/vocab"
@@ -776,10 +778,8 @@ func TestARejectedRateLimitBlocksTheSession(t *testing.T) {
 	// the roster draws vendor_blocked on the same event.
 	h := newHarness(t)
 	connected(h)
-	update := rateLimitStatus(fiveHourWindow(), 100, 5*time.Hour)
-	update.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_Rejected{
-		Rejected: &conversationv1.SessionRateLimitRejected{},
-	}
+	update := rateLimitStatus(ratelimittest.FiveHour(), 100, 5*time.Hour)
+	withVerdict(update, ratelimittest.Rejected)
 
 	// Act
 	h.r.OnSessionUpdate(testWS, update)
@@ -790,18 +790,64 @@ func TestARejectedRateLimitBlocksTheSession(t *testing.T) {
 	}
 }
 
+func TestARateLimitBlockIsLiftedOnlyByItsOwnWindow(t *testing.T) {
+	tests := []struct {
+		name string
+		lift *conversationv1.SessionUpdate
+		want bool
+	}{
+		{name: "an allowed verdict on another window leaves the weekly block standing",
+			lift: rateLimitStatus(ratelimittest.FiveHour(), 10, 5*time.Hour), want: true},
+		{name: "an allowed opus verdict leaves the overall weekly block standing",
+			lift: rateLimitStatus(ratelimittest.SevenDayOpus(), 10, 5*time.Hour), want: true},
+		{name: "an allowed verdict on the weekly window lifts it",
+			lift: rateLimitStatus(ratelimittest.SevenDay(), 10, 5*time.Hour), want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.OnSessionUpdate(testWS, withVerdict(rateLimitStatus(ratelimittest.SevenDay(), 100, 5*time.Hour), ratelimittest.Rejected))
+
+			// Act
+			h.r.OnSessionUpdate(testWS, tc.lift)
+
+			// Assert
+			blocked := h.view(t).GetStrip().GetStatus().GetVendorFault().GetUsageLimit() != nil
+			if blocked != tc.want {
+				t.Fatalf("status = %q, want usage-limit block %v", h.status(t), tc.want)
+			}
+		})
+	}
+}
+
+func TestASessionStartForgetsEveryWindowsRejection(t *testing.T) {
+	// Arrange: the weekly window rejected, then the session restarted.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, withVerdict(rateLimitStatus(ratelimittest.SevenDay(), 100, 5*time.Hour), ratelimittest.Rejected))
+	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{})
+
+	// Act: an allowed verdict on another window.
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.FiveHour(), 10, 5*time.Hour))
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetVendorFault().GetUsageLimit() != nil {
+		t.Fatalf("status = %q, want the restarted session unblocked", h.status(t))
+	}
+}
+
 func TestAnAllowedRateLimitLiftsTheBlock(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	rejected := rateLimitStatus(fiveHourWindow(), 100, 5*time.Hour)
-	rejected.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_Rejected{
-		Rejected: &conversationv1.SessionRateLimitRejected{},
-	}
+	rejected := rateLimitStatus(ratelimittest.FiveHour(), 100, 5*time.Hour)
+	withVerdict(rejected, ratelimittest.Rejected)
 	h.r.OnSessionUpdate(testWS, rejected)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 10, 5*time.Hour))
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.FiveHour(), 10, 5*time.Hour))
 
 	// Assert
 	if got := h.status(t); got != "idle" {
@@ -1879,10 +1925,8 @@ func TestAVendorBlockOutranksApiRetrying(t *testing.T) {
 	connected(h)
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 	h.r.OnApiError(testWS, mainAgent, enotfound())
-	update := rateLimitStatus(fiveHourWindow(), 100, 5*time.Hour)
-	update.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_Rejected{
-		Rejected: &conversationv1.SessionRateLimitRejected{},
-	}
+	update := rateLimitStatus(ratelimittest.FiveHour(), 100, 5*time.Hour)
+	withVerdict(update, ratelimittest.Rejected)
 
 	// Act
 	h.r.OnSessionUpdate(testWS, update)

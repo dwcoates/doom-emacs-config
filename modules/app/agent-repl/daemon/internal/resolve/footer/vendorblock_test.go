@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/ratelimittest"
 	"agent-repld/internal/shimclient"
 )
 
@@ -22,10 +23,8 @@ func (s *servesRecorder) listen(ws ids.WorkspaceID, was string) {
 
 // rejectedRateLimit is a rate-limit verdict that refuses the session.
 func rejectedRateLimit() *conversationv1.SessionUpdate {
-	update := rateLimitStatus(fiveHourWindow(), 100, 5*time.Hour)
-	update.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_Rejected{
-		Rejected: &conversationv1.SessionRateLimitRejected{},
-	}
+	update := rateLimitStatus(ratelimittest.FiveHour(), 100, 5*time.Hour)
+	withVerdict(update, ratelimittest.Rejected)
 	return update
 }
 
@@ -128,7 +127,7 @@ func TestTheVendorServesEdgeIsToldOnEveryFactThatLiftsTheBlock(t *testing.T) {
 			name:  "an allowed rate-limit verdict lifts a usage limit",
 			stand: usageLimited,
 			lift: func(h *harness) {
-				h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 10, 5*time.Hour))
+				h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.FiveHour(), 10, 5*time.Hour))
 			},
 			want: string(testWS) + ":" + VendorBlockUsageLimit,
 		},

@@ -176,6 +176,21 @@ var layout3Undo = map[int][]string{
 	69: {`DROP TABLE merge_queue_untold_notices`},
 	70: {`DROP TABLE workspace_untold_notices`},
 	71: {`ALTER TABLE workspaces DROP COLUMN principal_link`},
+	72: {
+		`ALTER TABLE account_usage DROP COLUMN weekly_opus_utilization`,
+		`ALTER TABLE account_usage DROP COLUMN weekly_opus_resets_at_s`,
+		`ALTER TABLE account_usage DROP COLUMN weekly_opus_sampled_at_ms`,
+		`ALTER TABLE account_usage DROP COLUMN weekly_opus_verdict`,
+		`ALTER TABLE account_usage DROP COLUMN weekly_sonnet_utilization`,
+		`ALTER TABLE account_usage DROP COLUMN weekly_sonnet_resets_at_s`,
+		`ALTER TABLE account_usage DROP COLUMN weekly_sonnet_sampled_at_ms`,
+		`ALTER TABLE account_usage DROP COLUMN weekly_sonnet_verdict`,
+		`ALTER TABLE account_usage DROP COLUMN session_verdict_resets_at_s`,
+		`ALTER TABLE account_usage DROP COLUMN weekly_verdict_resets_at_s`,
+		`ALTER TABLE account_usage DROP COLUMN weekly_opus_verdict_resets_at_s`,
+		`ALTER TABLE account_usage DROP COLUMN weekly_sonnet_verdict_resets_at_s`,
+		`ALTER TABLE account_usage DROP COLUMN overage_verdict_resets_at_s`,
+	},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by

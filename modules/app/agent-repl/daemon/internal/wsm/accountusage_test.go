@@ -15,9 +15,14 @@ func fullUsage(root string) AccountUsage {
 	return AccountUsage{
 		ConfigDir:  root,
 		ObservedAt: time.Unix(1_791_294_066, 0).UTC(),
-		Session:    &AllowanceFigures{Utilization: 0.44, ResetsAtS: 1_791_299_399, SampledAtMs: 1_791_294_066_973, Verdict: VerdictAllowed},
-		Weekly:     &AllowanceFigures{Utilization: 0.53, ResetsAtS: 1_791_532_799, SampledAtMs: 1_791_294_066_973, Verdict: VerdictNone},
-		Overage:    &AllowanceFigures{Utilization: 0.1, ResetsAtS: 1_793_000_000, Verdict: VerdictRejected},
+		Session: &AllowanceFigures{Utilization: 0.44, ResetsAtS: 1_791_299_399, SampledAtMs: 1_791_294_066_973,
+			Verdict: VerdictAllowed, VerdictResetsAtS: 1_791_299_399},
+		Weekly: &AllowanceFigures{Utilization: 0.53, ResetsAtS: 1_791_532_799, SampledAtMs: 1_791_294_066_973, Verdict: VerdictNone},
+		WeeklyOpus: &AllowanceFigures{Utilization: 0.12, ResetsAtS: 1_791_532_799, SampledAtMs: 1_791_294_066_973,
+			Verdict: VerdictRejected, VerdictResetsAtS: 1_791_532_799},
+		WeeklySonnet: &AllowanceFigures{Utilization: 0.3, ResetsAtS: 1_791_532_799, SampledAtMs: 1_791_294_066_973,
+			Verdict: VerdictAllowedWarning},
+		Overage: &AllowanceFigures{Utilization: 0.1, ResetsAtS: 1_793_000_000, Verdict: VerdictRejected, VerdictResetsAtS: 1_793_000_000},
 	}
 }
 
@@ -44,6 +49,11 @@ func TestAccountUsageIsReadBack(t *testing.T) {
 		{name: "the weekly window alone unfigured", usage: func() AccountUsage {
 			u := fullUsage("/home/a/.claude")
 			u.Weekly = nil
+			return u
+		}()},
+		{name: "the model windows unfigured", usage: func() AccountUsage {
+			u := fullUsage("/home/a/.claude")
+			u.WeeklyOpus, u.WeeklySonnet = nil, nil
 			return u
 		}()},
 	}
@@ -166,6 +176,111 @@ func TestAccountUsagesRefusesAHalfStoredWindow(t *testing.T) {
 	}
 	if !loggedOperation(log, "daemon.wsm.account_usages", "error") {
 		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+	}
+}
+
+func TestAStoredVerdictWithNoResetReloadsAsAnUnknownReset(t *testing.T) {
+	// Arrange: a row as the build before layout 72 leaves it, with no verdict
+	// reset beside a figured window.
+	s, _ := testStore(t)
+	if err := s.SetAccountUsage(context.Background(), fullUsage("/home/a/.claude")); err != nil {
+		t.Fatalf("seed SetAccountUsage: %v", err)
+	}
+	if _, err := s.db().Exec(`UPDATE account_usage SET session_verdict_resets_at_s = NULL`); err != nil {
+		t.Fatalf("clear the verdict reset: %v", err)
+	}
+
+	// Act
+	got, err := s.AccountUsages(context.Background())
+
+	// Assert
+	if err != nil || len(got) != 1 || got[0].Session.VerdictResetsAtS != 0 || got[0].Session.Verdict != VerdictAllowed {
+		t.Fatalf("AccountUsages = %+v, %v, want the session verdict with an unknown (0) reset", got, err)
+	}
+}
+
+func TestAccountUsagesRefusesAVerdictResetForAnUnfiguredWindow(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	usage := fullUsage("/home/a/.claude")
+	usage.WeeklySonnet = nil
+	if err := s.SetAccountUsage(context.Background(), usage); err != nil {
+		t.Fatalf("seed SetAccountUsage: %v", err)
+	}
+	if _, err := s.db().Exec(`UPDATE account_usage SET weekly_sonnet_verdict_resets_at_s = 5`); err != nil {
+		t.Fatalf("corrupt the row: %v", err)
+	}
+
+	// Act
+	_, err := s.AccountUsages(context.Background())
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Field != "weekly_sonnet" {
+		t.Fatalf("AccountUsages = %v, want a DecodeError naming the weekly_sonnet window", err)
+	}
+	if !loggedOperation(log, "daemon.wsm.account_usages", "error") {
+		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+	}
+}
+
+func TestSetAccountUsageRefusesAnUnknownModelWindowVerdict(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	usage := fullUsage("/home/a/.claude")
+	usage.WeeklyOpus.Verdict = "maybe"
+
+	// Act
+	err := s.SetAccountUsage(context.Background(), usage)
+
+	// Assert
+	if err == nil {
+		t.Fatal("SetAccountUsage accepted an unknown verdict on the opus window")
+	}
+	if !loggedOperation(log, "daemon.wsm.set_account_usage", "error") {
+		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+	}
+	if got, _ := s.AccountUsages(context.Background()); len(got) != 0 {
+		t.Fatalf("AccountUsages = %+v, want nothing stored", got)
+	}
+}
+
+func TestAccountUsageWithAModelWindowAndASeatIsRefused(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	usage := seatUsage("/home/a/.claude", nil)
+	usage.WeeklySonnet = &AllowanceFigures{Utilization: 0.3}
+
+	// Act
+	err := s.SetAccountUsage(context.Background(), usage)
+
+	// Assert
+	if err == nil {
+		t.Fatal("SetAccountUsage accepted a model window beside a seat's spend")
+	}
+}
+
+// THE WINDOW LIST IS THE ONE SHAPE every statement walks: each named window
+// has its five columns in the table, and the usage hands one figure slot per
+// name, so a window added to one but not the other fails here.
+func TestEveryStoredWindowHasItsColumnsAndItsSlot(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	var usage AccountUsage
+
+	// Act
+	slots := usage.windows()
+
+	// Assert
+	if len(slots) != len(accountUsageWindowNames) {
+		t.Fatalf("windows() = %d slots, want one per name (%d)", len(slots), len(accountUsageWindowNames))
+	}
+	for _, name := range accountUsageWindowNames {
+		for _, col := range windowColumns(name) {
+			if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('account_usage') WHERE name = ?`, col); got != 1 {
+				t.Fatalf("column %s is missing from account_usage", col)
+			}
+		}
 	}
 }
 
@@ -305,6 +420,28 @@ func TestTheMigrationAddsTheSeatColumns(t *testing.T) {
 	s := handle.(*store)
 	if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('account_usage') WHERE name LIKE 'seat_%'`); got != 4 {
 		t.Fatalf("seat columns after the migration = %d, want 4", got)
+	}
+}
+
+func TestTheMigrationAddsTheModelWindowAndVerdictResetColumns(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 71)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-71 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('account_usage')
+WHERE name LIKE 'weekly_opus_%' OR name LIKE 'weekly_sonnet_%' OR name LIKE '%_verdict_resets_at_s'`)
+	// Five columns per model window (its verdict reset among them), plus a
+	// verdict reset for each of the three windows before them.
+	if got != 13 {
+		t.Fatalf("columns the migration added = %d, want 13", got)
 	}
 }
 

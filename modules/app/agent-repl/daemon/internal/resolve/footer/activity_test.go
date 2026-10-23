@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
+	"agent-repld/internal/ratelimittest"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -181,11 +182,7 @@ func lineName(t *testing.T, h *harness) string {
 
 // rejectedFiveHour is the vendor refusing the five-hour allowance.
 func rejectedFiveHour() *conversationv1.SessionUpdate {
-	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_RateLimitStatus{
-		RateLimitStatus: &conversationv1.SessionRateLimitStatus{
-			Status:        &conversationv1.SessionRateLimitStatus_Rejected{Rejected: &conversationv1.SessionRateLimitRejected{}},
-			RateLimitType: fiveHourWindow(),
-		}}}
+	return ratelimittest.Update(ratelimittest.Rejected(ratelimittest.FiveHour()))
 }
 
 func TestANonEscalatingFaultIsNeverSalient(t *testing.T) {

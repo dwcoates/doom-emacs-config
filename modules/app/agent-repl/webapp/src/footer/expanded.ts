@@ -86,7 +86,7 @@ import { isMalformedView } from "../rpc/malformed.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { stopControlHasAnswer, type StopControls } from "./stop.js";
 import {
-  drawFooterAllowance,
+  drawLabelledAllowance,
   drawGivesUpCountdown,
   enduringUsage,
   footerCountdownSpan,
@@ -542,7 +542,7 @@ export function drawFooterTokensLineVerdict(
  *
  * IT IS THE STRIP'S OWN ENDURING USAGE, not a second resolution of it: the
  * same message the strip's cell carries, drawn again without a width to fight.
- * The allowance cells are the strip's own drawing (`drawFooterAllowance`) in
+ * The allowance cells are the strip's own drawing (`drawLabelledAllowance`) in
  * the strip's own order (`orderedAllowances`), so a reader who opens the sheet
  * finds the figures they were reading rather than a rearranged list.
  *
@@ -564,9 +564,7 @@ export function drawFooterUsageRows(
   for (const allowance of orderedAllowances(usage)) {
     const row = usageRow("allowance");
     row.setAttribute("data-usage-allowance", allowance.label);
-    row.appendChild(
-      drawFooterAllowance(allowance.value, allowance.label, { ctx }, `${usagePath}.${allowance.label}`),
-    );
+    row.appendChild(drawLabelledAllowance(allowance, { ctx }, usagePath));
     rows.push(row);
   }
   return rows;

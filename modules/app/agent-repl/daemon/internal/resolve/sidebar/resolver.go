@@ -728,7 +728,7 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 	r.mutateWorkspace(ws, "daemon.sidebar.on_session_started", "the roster took a session start",
 		dlog.Context{"vendor_session_id": started.GetVendorSessionId()}, func(s *wsState) {
 			s.started = true
-			s.vendorBlocked = false
+			s.liftVendorBlock()
 			s.stateUnreported = false
 		})
 }
@@ -883,7 +883,7 @@ func sessionUpdateArm(update *conversationv1.SessionUpdate) (string, func(*wsSta
 		}
 	case *conversationv1.SessionUpdate_RateLimitStatus:
 		return "rate_limit_status", func(s *wsState) {
-			s.vendorBlocked = ladder.RateLimitBlocks(u.RateLimitStatus)
+			s.vendorBlocked = s.rateLimits.Observe(u.RateLimitStatus)
 		}
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting", func(s *wsState) { s.compacting = true }
@@ -994,6 +994,9 @@ func (r *resolver) OnSignedIn(ws ids.WorkspaceID) {
 			s.lastFailure = ladder.NoFailure
 			s.lastFailureSignInCures = false
 			s.turnFault = ladder.NoTurnFault
+			// A SIGN-IN ANSWERS THE ACCOUNT CAUSE ONLY: a window the vendor
+			// rejected stays rejected until its own verdict lifts it, as the
+			// footer's sign-in leaves its rate-limit rejections standing.
 			s.vendorBlocked = false
 			s.result = resultNone
 			s.endAnswered = true
