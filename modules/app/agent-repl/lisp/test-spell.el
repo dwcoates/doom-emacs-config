@@ -493,6 +493,21 @@ global queue and `post-command-hook' are bound afresh."
     (agent-repl--spell-check-pending (current-buffer))
     (should (equal checked '((1 . 12))))))
 
+(ert-deftest agent-repl-test-spell-the-pending-check-inhibits-redisplay ()
+  "The queued span is checked with redisplay inhibited, so no cursor walks it."
+  (let ((agent-repl--spell-pending-buffers nil)
+        (post-command-hook nil)
+        (inhibited 'unset))
+    (cl-letf (((symbol-function 'agent-repl--spell-check-region)
+               (lambda (_beg _end) (setq inhibited inhibit-redisplay))))
+      (agent-repl-test--with-temp-buffer " *test-spell-composer*"
+        (add-hook 'after-change-functions #'agent-repl--spell-on-change nil t)
+        (setq-local flyspell-mode t)
+        (insert "hello world")
+        (run-hooks 'post-command-hook)))
+    (should (eq inhibited t))
+    (should-not inhibit-redisplay)))
+
 (ert-deftest agent-repl-test-spell-the-command-end-checks-every-queued-composer ()
   "Two composers queued before a command ends are both checked."
   (agent-repl-test-spell--queueing
