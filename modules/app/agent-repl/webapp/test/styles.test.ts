@@ -13,6 +13,11 @@
  * supported, everywhere in the webapp"): `user-select: none` is FORBIDDEN on
  * every selector, fold glyphs and disclosure markers included. The allowlist
  * that once admitted those is gone.
+ *
+ * ONE EXCEPTION, AND IT HOLDS NO TEXT AWAY FROM A READER: while a sidebar drag
+ * carries an item, the page's root wears the drag's class and nothing selects
+ * (owner request, 2026-10-23: a drag highlighted every row between pickup and
+ * drop; src/sidebar/drag.ts). The class comes off at the drop.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -43,6 +48,7 @@ import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/respons
 import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, isOwnRule, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
 import { createControl } from "../src/control.js";
+import { DRAGGING_CLASS } from "../src/sidebar/drag.js";
 import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
 
 /** The selectors on which any `user-select`/`-webkit-user-select` is `none`. */
@@ -63,13 +69,24 @@ const responseBorder = (hue: string): string =>
 /** The turn's answer's border: the green hue at its drawn strength. */
 const FINAL_BORDER = responseBorder("--final-response");
 
+/** The one selector that suppresses selection: everything, while a sidebar drag stands. */
+const DRAGGING_SELECTOR = `html.${DRAGGING_CLASS} *`;
+
 describe("the stylesheet's selectability contract", () => {
-  it("suppresses selection nowhere", () => {
+  it("suppresses selection nowhere but under a sidebar drag", () => {
     // Arrange / Act
     const suppressing = selectorsSuppressingSelection(stylesheet);
 
     // Assert
-    expect(suppressing).toEqual([]);
+    expect(suppressing).toEqual([DRAGGING_SELECTOR]);
+  });
+
+  it("suppresses selection under a sidebar drag in WebKit's prefixed property too", () => {
+    // Arrange / Act
+    const dragRule = rulesOf(stylesheet).find((rule) => rule.selectors.includes(DRAGGING_SELECTOR) && /user-select/.test(rule.declarations));
+
+    // Assert
+    expect(dragRule?.declarations).toMatch(/-webkit-user-select\s*:\s*none/);
   });
 
   it("leaves the thinking fold's summary text selectable", () => {

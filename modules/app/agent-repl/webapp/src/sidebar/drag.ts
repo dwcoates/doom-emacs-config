@@ -32,6 +32,13 @@
  * drawer redraws a marked box from its wire whatever the push says, so a
  * refused or cancelled drag can never leave a rearranged section on screen.
  *
+ * A DRAG SELECTS NO TEXT. While the page's root wears `DRAGGING_CLASS` the
+ * stylesheet makes nothing selectable, so WebKit cannot sweep a selection
+ * across the rows the item passes, whether the pointer or the edge scroll
+ * moves under the press; lifting clears what the press selected before the
+ * threshold. No event the drag could cancel covers every path WebKit extends
+ * a selection on, so it is the stylesheet that stops it.
+ *
  * A DRAG IS NOT A CLICK. The click a browser fires after the release would
  * select the row or fold the section under the pointer, so the first click
  * after a drag is swallowed. It is forgotten at the next press, so a release
@@ -144,11 +151,6 @@ export function pressToDrag(arrange: ArrangeContext, spec: DragSpec, down: Point
     if (event.type === "pointerup") lifted.drop();
     else lifted.cancel("the pointer was lost");
   };
-  // A DRAG SELECTS NO TEXT: the browser would otherwise sweep a selection
-  // across every row the pointer passes.
-  const noSelect = (event: Event): void => {
-    if (lifted !== null) event.preventDefault();
-  };
   const key = (event: KeyboardEvent): void => {
     if (event.key !== "Escape" || lifted === null) return;
     event.preventDefault();
@@ -160,13 +162,11 @@ export function pressToDrag(arrange: ArrangeContext, spec: DragSpec, down: Point
     win.removeEventListener("pointerup", end);
     win.removeEventListener("pointercancel", end);
     win.removeEventListener("keydown", key, true);
-    document.removeEventListener("selectstart", noSelect, true);
   };
   win.addEventListener("pointermove", move);
   win.addEventListener("pointerup", end);
   win.addEventListener("pointercancel", end);
   win.addEventListener("keydown", key, true);
-  document.addEventListener("selectstart", noSelect, true);
 }
 
 /** A lifted item: it follows the pointer until it is dropped or cancelled. */
@@ -186,6 +186,7 @@ function lift(arrange: ArrangeContext, spec: DragSpec, down: PointerEvent): Lift
   if (!lists.includes(parent)) throw new Error(`invariant: a ${spec.kind} item's own list is one it may be dropped into`);
   arrange.hold.drag();
   spec.box.setAttribute(REARRANGED_ATTRIBUTE, "true");
+  // WHAT THE PRESS SELECTED BEFORE THE THRESHOLD goes; DRAGGING_CLASS keeps more from coming (file comment).
   item.ownerDocument.getSelection()?.removeAllRanges();
   log.debug("lifted a sidebar item to drag it", { operation: "sidebar.drag.lift", context: { kind: spec.kind } });
 
