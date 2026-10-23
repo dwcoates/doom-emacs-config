@@ -1,8 +1,8 @@
 package deploy
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -25,14 +25,20 @@ const layoutProbeBound = 10 * time.Second
 func askBinary(ctx context.Context, bin, question string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, layoutProbeBound)
 	defer cancel()
-	var stderr bytes.Buffer
 	cmd := childproc.CommandContext(ctx, childproc.Stable, bin, question)
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	capture, err := childproc.CaptureOutput(cmd)
 	if err != nil {
-		return "", fmt.Errorf("deploy: ask %s %s: %w (stderr: %q)", bin, question, err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("deploy: ask %s %s: %w", bin, question, err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	runErr := cmd.Run()
+	out, stderr, err := capture.Finish()
+	if err != nil {
+		return "", fmt.Errorf("deploy: ask %s %s: %w", bin, question, errors.Join(runErr, err))
+	}
+	if runErr != nil {
+		return "", fmt.Errorf("deploy: ask %s %s: %w (stderr: %q)", bin, question, runErr, strings.TrimSpace(stderr))
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // BinaryLayout asks a daemon binary which state layout it writes, by running

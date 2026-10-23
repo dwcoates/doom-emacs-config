@@ -1,8 +1,8 @@
 package desktopnotify
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -115,19 +115,25 @@ type ExecRunner struct{}
 // is an error carrying the program's standard error.
 func (ExecRunner) Run(ctx context.Context, bin string, args []string, started func()) (string, error) {
 	cmd := childproc.CommandContext(ctx, childproc.Stable, bin, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
+	capture, err := childproc.CaptureOutput(cmd)
+	if err != nil {
 		return "", fmt.Errorf("%s: %w", bin, err)
+	}
+	if err := cmd.Start(); err != nil {
+		return "", errors.Join(fmt.Errorf("%s: %w", bin, err), capture.Close())
 	}
 	if started != nil {
 		started()
 	}
-	if err := cmd.Wait(); err != nil {
-		return stdout.String(), fmt.Errorf("%s: %w: %s", bin, err, strings.TrimSpace(stderr.String()))
+	waitErr := cmd.Wait()
+	stdout, stderr, err := capture.Finish()
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", bin, errors.Join(waitErr, err))
 	}
-	return stdout.String(), nil
+	if waitErr != nil {
+		return stdout, fmt.Errorf("%s: %w: %s", bin, waitErr, strings.TrimSpace(stderr))
+	}
+	return stdout, nil
 }
 
 // Backend posts one banner.

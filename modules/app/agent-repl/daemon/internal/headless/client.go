@@ -1,7 +1,6 @@
 package headless
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -205,11 +204,17 @@ func execCLI(ctx context.Context, bin string, args, env []string, stdin string) 
 	cmd := childproc.CommandContext(ctx, childproc.Stable, bin, args...) //nolint:gosec // daemon-resolved binary, never client input
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Env = env
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return stdout.String(), fmt.Errorf("%s %s: %w (stderr: %s)", bin, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	capture, err := childproc.CaptureOutput(cmd)
+	if err != nil {
+		return "", fmt.Errorf("%s %s: %w", bin, strings.Join(args, " "), err)
 	}
-	return stdout.String(), nil
+	runErr := cmd.Run()
+	stdout, stderr, err := capture.Finish()
+	if err != nil {
+		return "", fmt.Errorf("%s %s: %w", bin, strings.Join(args, " "), errors.Join(runErr, err))
+	}
+	if runErr != nil {
+		return stdout, fmt.Errorf("%s %s: %w (stderr: %s)", bin, strings.Join(args, " "), runErr, strings.TrimSpace(stderr))
+	}
+	return stdout, nil
 }

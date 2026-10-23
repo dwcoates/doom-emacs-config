@@ -126,3 +126,17 @@ func TestTheBinaryQuestionsShareAskBinary(t *testing.T) {
 		t.Fatalf("layout.go runs %d processes by hand, want the one inside askBinary", execs)
 	}
 }
+
+func TestAskBinaryRefusesAnOutputThatCannotBeCaptured(t *testing.T) {
+	// Arrange: no file for the answer can be made.
+	bin := standInDaemon(t, "echo answer\n")
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "absent"))
+
+	// Act
+	_, err := askBinary(context.Background(), bin, "-the-question")
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "-the-question") || !strings.Contains(err.Error(), "make the child's stdout file") {
+		t.Fatalf("askBinary error = %v, want it to carry the question and the stdout file", err)
+	}
+}

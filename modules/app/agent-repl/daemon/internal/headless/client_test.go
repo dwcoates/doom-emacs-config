@@ -556,3 +556,17 @@ func TestExecCLISurfacesANonZeroExitWithItsStderr(t *testing.T) {
 		t.Fatalf("err = %v, want the binary's stderr carried", err)
 	}
 }
+
+func TestExecCLISurfacesAnOutputThatCannotBeCaptured(t *testing.T) {
+	// Arrange: no file for the run's output can be made.
+	bin := fakeVendor(t, "printf 'never'")
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "absent"))
+
+	// Act.
+	_, err := execCLI(context.Background(), bin, []string{"-p"}, os.Environ(), "q")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), bin) || !strings.Contains(err.Error(), "make the child's stdout file") {
+		t.Fatalf("err = %v, want a refusal naming %q and the stdout file", err, bin)
+	}
+}

@@ -790,3 +790,21 @@ func TestEveryProgramRunGoesThroughRunWithin(t *testing.T) {
 		t.Fatalf("backend.go bounds %d runs and calls runner.Run %d times, want both only in runWithin", timeouts, runs)
 	}
 }
+
+func TestExecRunnerRefusesAnOutputThatCannotBeCapturedWithoutStarting(t *testing.T) {
+	// Arrange: no file for the program's output can be made.
+	t.Setenv("DESKTOPNOTIFY_HELPER", "ok")
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "absent"))
+	started := 0
+
+	// Act
+	_, err := ExecRunner{}.Run(context.Background(), os.Args[0], []string{"-test.run=^TestExecRunnerHelperProcess$"}, func() { started++ })
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "make the child's stdout file") {
+		t.Fatalf("Run err = %v, want a refusal naming the stdout file", err)
+	}
+	if started != 0 {
+		t.Fatalf("started called %d times, want never", started)
+	}
+}
