@@ -106,6 +106,23 @@ gone "$daemon" && pass "the daemon is stopped by its SIGTERM" || fail "the daemo
 gone "$shim" && pass "a shim that ignores SIGTERM is killed after the grace" || fail "the shim survived"
 gone "$lock" && pass "the shim locks are stopped" || fail "a shim lock survived"
 
+# ---- the processes are found without a whole-table ps ----------------------
+
+# One process wedged in execve blocks every ps that lists all processes, in the
+# kernel and unkillably (2026-10-23); a bounce must still find its backends.
+# The ps first on PATH refuses any listing and records that it was asked.
+world; w="$W"
+printf '#!/bin/sh\necho "$*" >>"%s/ps-calls"\nexit 1\n' "$w" >"$w/pathbin/ps"
+chmod +x "$w/pathbin/ps"
+backend "$w/checkout/daemon/bin/agent-repld" obeys; daemon="$PID"
+backend "$w/cache/agent-repl/bin/shim-lock" obeys; lock="$PID"
+run "$w"; status=$?
+[ "$status" -eq 0 ] && gone "$daemon" && gone "$lock" &&
+    pass "a bounce finds and stops its backends with no ps at all" ||
+    fail "a bounce without ps left a backend or failed (exit $status): $(cat "$w/out")"
+[ ! -e "$w/ps-calls" ] && pass "a bounce never lists the process table with ps" ||
+    fail "ps was asked: $(cat "$w/ps-calls")"
+
 # ---- the services are the next daemon's to restart, never the bounce's -------
 
 world; w="$W"

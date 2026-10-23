@@ -97,7 +97,12 @@ log "built"
 pids_of() {
     # THE TEXT RIDES THE ENVIRONMENT, never awk's own argv, or awk would find
     # it in its own command line and answer itself.
-    ps -axo pid=,command= 2>/dev/null |
+    #
+    # pgrep, NEVER `ps -ax` (2026-10-23): one process wedged in execve blocks
+    # every whole-table ps in the kernel, unkillably, which would hang this
+    # recovery script exactly when the host most needs it. pgrep reads only
+    # what answers for a wedged process too, and leaves itself out.
+    pgrep -lf . 2>/dev/null |
         PIDS_OF_TEXT="$1" awk -v self="$$" -v sub_="${BASHPID:-}" \
             'index($0, ENVIRON["PIDS_OF_TEXT"]) { pid = $1; if (pid != self && pid != sub_) print pid }'
 }
