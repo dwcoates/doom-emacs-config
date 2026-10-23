@@ -1092,6 +1092,16 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 html.sb-dragging, html.sb-dragging * { cursor: grabbing !important; }
+/* A DRAG SELECTS NO TEXT (owner request, 2026-10-23: dragging an item in the
+   rail highlighted every row between pickup and drop). WebKit extends a press's
+   selection from more than the mouse's moves (a drag's edge scroll does it
+   with no mousemove at all), so no event a drag could cancel covers it. A node
+   that cannot be selected cannot be swept into one, on any path, so while a
+   drag stands nothing is selectable; the lift clears what the press selected
+   before the threshold (src/sidebar/drag.ts). This is the one `user-select:
+   none` the stylesheet test admits, since it lasts only while an item is
+   carried and no text is read across. */
+html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 
 /* THE SUBSECTION NAME POPUP, under the control that asked for it. */
 /* THE NAME POPUP is quiet (owner request, 2026-10-20): one hairline box, a
