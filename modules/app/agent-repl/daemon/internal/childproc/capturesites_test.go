@@ -2,10 +2,7 @@ package childproc
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"io/fs"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -15,32 +12,10 @@ import (
 // pipe, and Wait then waits on every process that inherited it.
 func TestEveryCapturedChildWritesToFiles(t *testing.T) {
 	// Arrange
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatalf("resolve the daemon root: %v", err)
-	}
 	var offenders []string
-	fset := token.NewFileSet()
 
 	// Act
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(root, path)
-		if d.IsDir() {
-			if rel == "integration" || rel == "e2e" || rel == "internal/childproc" || strings.HasPrefix(d.Name(), ".") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-		if err != nil {
-			return err
-		}
+	eachDaemonSource(t, daemonRoot(t), func(fset *token.FileSet, file *ast.File) {
 		// The commands this file builds, by the name each is bound to: only
 		// their Output and CombinedOutput are exec's, which pipe the output.
 		commands := map[string]bool{}
@@ -79,13 +54,9 @@ func TestEveryCapturedChildWritesToFiles(t *testing.T) {
 			}
 			return true
 		})
-		return nil
 	})
 
 	// Assert
-	if err != nil {
-		t.Fatalf("walk the daemon sources: %v", err)
-	}
 	if len(offenders) > 0 {
 		t.Fatalf("these sites capture a child's output in memory; use childproc.CaptureOutput:\n%s", strings.Join(offenders, "\n"))
 	}

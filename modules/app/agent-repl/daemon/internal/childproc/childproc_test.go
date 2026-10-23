@@ -3,12 +3,9 @@ package childproc
 import (
 	"context"
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -85,34 +82,10 @@ func TestAChildRunsInItsDirectoryWhenTheDaemonsIsDeleted(t *testing.T) {
 // would start its child wherever the daemon stands.
 func TestEveryChildIsBuiltHere(t *testing.T) {
 	// Arrange
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatalf("resolve the daemon root: %v", err)
-	}
 	var offenders []string
-	fset := token.NewFileSet()
 
 	// Act
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(root, path)
-		if d.IsDir() {
-			// The integration and e2e harnesses start the daemon under test,
-			// not a child of a serving daemon.
-			if rel == "integration" || rel == "e2e" || rel == "internal/childproc" || strings.HasPrefix(d.Name(), ".") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-		if err != nil {
-			return err
-		}
+	eachDaemonSource(t, daemonRoot(t), func(fset *token.FileSet, file *ast.File) {
 		ast.Inspect(file, func(n ast.Node) bool {
 			sel, ok := n.(*ast.SelectorExpr)
 			if !ok {
@@ -123,13 +96,9 @@ func TestEveryChildIsBuiltHere(t *testing.T) {
 			}
 			return true
 		})
-		return nil
 	})
 
 	// Assert
-	if err != nil {
-		t.Fatalf("walk the daemon sources: %v", err)
-	}
 	if len(offenders) > 0 {
 		t.Fatalf("these sites build a child with os/exec directly; use childproc.Command or childproc.CommandContext:\n%s", strings.Join(offenders, "\n"))
 	}
