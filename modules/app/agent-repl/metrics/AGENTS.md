@@ -23,6 +23,13 @@ offer one: the `agent-repl-metrics` skill (`skills/agent-repl-metrics/`).
 
 ## Where each series comes from
 
+- The test runner (`testrun/internal/testtimes`), pushed through
+  `storeimport` when a merge queue gate's run ends:
+  `agentrepl_test_seconds{suite, test, outcome, trigger}` and
+  `agentrepl_test_suite_seconds{suite, outcome, trigger}`. Only a gate pushes:
+  the daemon names the root and trigger in the gate's environment, and the
+  runner removes both before any unit starts.
+
 - Every Go runtime (`agentrepl/logging/metrics`): the Go runtime collector
   and `agentrepl_build_info{program, build}`.
 - The daemon only:
