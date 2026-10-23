@@ -229,7 +229,7 @@ func TestASpoolClaimedByAnActiveSessionIsWatched(t *testing.T) {
 	// Arrange: the harness's session-1 is live.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "hello\n")
-	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -247,7 +247,7 @@ func TestASpoolClaimedByAClosedSessionIsNotWatched(t *testing.T) {
 	h := newHarness(t, &fakeStore{})
 	h.closedWorkspace(t, "sess-closed")
 	spool := h.spoolFile(t, "b2", "hello\n")
-	h.sc.TaskSpawned("b2", "call-2", "", "", false, "/workspace", "workspace-id", "sess-closed")
+	h.sc.TaskSpawned("b2", "call-2", "", "", false, "/workspace", "workspace-id", "sess-closed", noLaunch)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -434,7 +434,7 @@ func TestAnEndedWorkspacesOpenRunKeepsItsSpoolWatched(t *testing.T) {
 	// Arrange: a shell run the LOST policy still holds open.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "still running\n")
-	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}

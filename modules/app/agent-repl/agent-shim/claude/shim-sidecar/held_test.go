@@ -40,7 +40,7 @@ func TestUnownedSpoolIsRetainedAcrossRescans(t *testing.T) {
 	}
 
 	// Act: the spawning call arrives on a later pass.
-	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 	h.sc.rescan()
 
 	// Assert: it was held, never dropped, so it is tailed the moment it is
@@ -106,7 +106,7 @@ func TestALapsedSpoolIsReadFromItsStartOnceClaimed(t *testing.T) {
 	h.sc.rescan()
 
 	// Act.
-	h.sc.TaskSpawned("b1", "call-1", "agent-1", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1", "call-1", "agent-1", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 	h.sc.rescan()
 
 	// Assert: it is claimed as the shell run it is, not left to residue.
@@ -167,7 +167,7 @@ func TestAClaimedSpoolStatesTheClaim(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "hello\n")
-	h.sc.TaskSpawned("b1", "call-1", "agent-1", "", false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("b1", "call-1", "agent-1", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -210,7 +210,7 @@ func TestSpoolsNothingRendersAreNeverRead(t *testing.T) {
 			// Arrange: claimed, so only the skip rule can keep it unread.
 			h := newHarness(t, &fakeStore{})
 			spool := tc.arrange(t, h)
-			h.sc.TaskSpawned(strings.TrimSuffix(filepath.Base(spool), ".output"), "call-1", "agent-1", "", true, "/workspace", "workspace-id", "session-1")
+			h.sc.TaskSpawned(strings.TrimSuffix(filepath.Base(spool), ".output"), "call-1", "agent-1", "", true, "/workspace", "workspace-id", "session-1", noLaunch)
 
 			// Act.
 			if err := h.sc.beginCycle(); err != nil {
@@ -252,7 +252,7 @@ func TestAnAgentSpoolThatIsItsOwnFileIsStillRead(t *testing.T) {
 	// can prove, so the skip rule leaves it to its claim.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "a1", promptLine+"\n")
-	h.sc.TaskSpawned("a1", "call-1", "agent-1", "", true, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned("a1", "call-1", "agent-1", "", true, "/workspace", "workspace-id", "session-1", noLaunch)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {

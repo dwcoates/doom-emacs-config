@@ -26,6 +26,7 @@ import (
 	"sort"
 
 	"agentrepl/shim-claude-sidecar/internal/discover"
+	"agentrepl/shim-claude-sidecar/internal/handler"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
@@ -98,7 +99,9 @@ func (s *sidecar) claimHeldShells() {
 			continue
 		}
 		bound.Log("the shim's claim names this held spool's run; it is claimed as that run's spawn")
-		s.TaskSpawned(taskID, run, owner, "", false, at.workspaceDir, at.workspaceID, at.claudeSessionID)
+		// No launch instant: a claimed spool exists and is read, so its run is
+		// concluded from it, never as a pre-boot run with no spool.
+		s.TaskSpawned(taskID, run, owner, "", false, at.workspaceDir, at.workspaceID, at.claudeSessionID, handler.LaunchSite{})
 		delete(s.unclaimedShells, taskID)
 	}
 }

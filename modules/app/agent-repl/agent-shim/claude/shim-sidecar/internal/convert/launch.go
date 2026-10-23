@@ -71,7 +71,7 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 	// the spawning call's id and needs no separate report; what the reader
 	// genuinely cannot derive is WHOSE book the spawn happened in, which is what
 	// a detached run's frames are attributed to.
-	c.observer.TaskSpawned(taskID, call.activityID, call.agentID, output, backgrounded)
+	c.observer.TaskSpawned(taskID, call.activityID, call.agentID, output, backgrounded, call.startedAt)
 }
 
 // backgroundSentence is the vendor's own account of a shell it launched into the

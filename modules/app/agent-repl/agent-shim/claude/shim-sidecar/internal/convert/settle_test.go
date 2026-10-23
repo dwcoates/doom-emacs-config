@@ -467,7 +467,7 @@ func (o recordingObserver) ShellConcluded(taskID, status string, atMs int64) {
 	}
 }
 
-func (o recordingObserver) TaskSpawned(string, string, string, string, bool) {}
+func (o recordingObserver) TaskSpawned(string, string, string, string, bool, int64) {}
 
 func (o recordingObserver) TaskConcluded(taskID string) {
 	if o.concluded != nil {

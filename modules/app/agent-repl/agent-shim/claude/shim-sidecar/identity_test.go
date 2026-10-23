@@ -302,7 +302,7 @@ func TestTheUnparkedFileRereadsTheSameBytesUnderTheNewBook(t *testing.T) {
 func watchedWithNoBook(t *testing.T, h *harness, task, call, spawner string) string {
 	t.Helper()
 	spool := h.spoolFile(t, task, "work whose book is not settled yet\n")
-	h.sc.TaskSpawned(task, call, spawner, spool, false, "/workspace", "workspace-id", "session-1")
+	h.sc.TaskSpawned(task, call, spawner, spool, false, "/workspace", "workspace-id", "session-1", noLaunch)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}

@@ -20,6 +20,7 @@ import (
 	"agentrepl/proto/store/v1/storev1connect"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/discover"
+	"agentrepl/shim-claude-sidecar/internal/handler"
 	"agentrepl/shim-claude-sidecar/internal/livelock"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"connectrpc.com/connect"
@@ -43,6 +44,12 @@ func TestMain(m *testing.M) {
 }
 
 // fakeStore answers the sidecar's two verbs and records what it was asked.
+// launchSite is handler.LaunchSite for tests whose locals shadow the package.
+type launchSite = handler.LaunchSite
+
+// noLaunch is a spawn read with no launch instant: never judged as pre-boot.
+var noLaunch = launchSite{}
+
 type fakeStore struct {
 	storev1connect.UnimplementedShimStoreHandler
 

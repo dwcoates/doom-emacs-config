@@ -45,7 +45,7 @@ type Observer interface {
 	// the launch result that states it, and the reader's own alternative — an a*
 	// task id, or a spool target carrying a task id — is a second reading of the
 	// same fact, which is how the two halves of the seam come to disagree.
-	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string)
+	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string, launch handler.LaunchSite)
 
 	// TaskStopped reports that a person stopped a task. The reader owns what
 	// that means: the terminal is minted by the spool's handler, which is the
@@ -60,7 +60,7 @@ type Observer interface {
 var _ Observer = (*sidecar)(nil)
 
 // TaskSpawned implements Observer for the sidecar.
-func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string) {
+func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string, launch handler.LaunchSite) {
 	if workspaceDir == "" || workspaceID == "" || claudeSessionID == "" {
 		s.log.With(logging.Context{
 			Operation: "record-spawn", TaskID: taskID, ActivityID: toolUseID,
@@ -99,6 +99,9 @@ func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string
 	// A SPAWN IS ALSO WHAT A HELD NOTIFICATION WAITS FOR when the run's spool
 	// will never be read: the terminal is keyed on the spawning call.
 	s.applyNotifiedUnread(taskID)
+	// A SHELL FROM BEFORE THIS BOOT WHOSE SPOOL IS GONE can be concluded by
+	// nothing that reads files (preboot.go).
+	s.holdPreBoot(taskID, toolUseID, ownerAgentID, normalizedOutput, backgrounded, launch)
 }
 
 // TaskStopped implements Observer for the sidecar.

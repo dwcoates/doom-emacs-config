@@ -256,6 +256,10 @@ type sidecar struct {
 	// after the notification (applyNotified), so a terminator the spool carries
 	// always wins over the notification's weaker account.
 	notified map[string]shellNotice
+	// preBoot holds, by task id, each detached shell run launched before the
+	// machine last booted whose named spool is gone (preboot.go); the sweep
+	// concludes them once a full scan has found no spool for them either.
+	preBoot map[string]preBootHold
 
 	// cursors is CYCLE-SCOPED: recovered as the first act of every production
 	// cycle and dropped the moment production is suspended, so a tailer can
@@ -452,6 +456,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		stopped:            map[string]int64{},
 		concluded:          map[string]struct{}{},
 		notified:           map[string]shellNotice{},
+		preBoot:            map[string]preBootHold{},
 		parked:             map[string]bool{},
 		residueWithheld:    map[string]map[string]int{},
 		shapeCatalogued:    map[string]bool{},
@@ -2092,6 +2097,7 @@ func agentLocators(target discover.Target) []*storev1.AgentLocator {
 func (s *sidecar) sweep() {
 	s.requireCursors("sweep")
 	s.concludeLost("lost sweep", s.tracker.Sweep(s.bootTimeMs(), s.now().UnixMilli(), s.unseenBytes))
+	s.concludePreBoot()
 }
 
 // unseenBytes answers whether a file holds bytes the reader has not yet seen:

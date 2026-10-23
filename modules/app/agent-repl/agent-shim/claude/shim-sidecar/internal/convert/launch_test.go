@@ -33,7 +33,7 @@ type spawnReport struct {
 	Backgrounded bool
 }
 
-func (o spawnObserver) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool) {
+func (o spawnObserver) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool, launchedAtMs int64) {
 	*o.spawns = append(*o.spawns, spawnReport{taskID, toolUseID, ownerAgentID, outputPath, backgrounded})
 }
 

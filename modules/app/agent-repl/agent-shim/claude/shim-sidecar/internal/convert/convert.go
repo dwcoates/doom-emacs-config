@@ -58,7 +58,11 @@ type Observer interface {
 	// only that one), and it is what decides `top_level`: a backgrounded
 	// subagent's stream outlives the spawning turn, so the subagent is its own
 	// top level rather than the session's main agent.
-	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool)
+	//
+	// LAUNCHEDATMS is the spawning call's own instant: a reader judging a run
+	// whose spool it can never read (one launched before the machine last
+	// booted, its spool wiped with /tmp) needs to know when it started.
+	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool, launchedAtMs int64)
 
 	// TaskStopped reports a TaskStop result: a person stopped this task.
 	//
@@ -88,10 +92,10 @@ type Observer interface {
 // noopObserver is the default: a converter with nobody listening still converts.
 type noopObserver struct{}
 
-func (noopObserver) TaskSpawned(string, string, string, string, bool) {}
-func (noopObserver) TaskStopped(string)                               {}
-func (noopObserver) TaskConcluded(string)                             {}
-func (noopObserver) ShellConcluded(string, string, int64)             {}
+func (noopObserver) TaskSpawned(string, string, string, string, bool, int64) {}
+func (noopObserver) TaskStopped(string)                                      {}
+func (noopObserver) TaskConcluded(string)                                    {}
+func (noopObserver) ShellConcluded(string, string, int64)                    {}
 
 // openCall is what a tool RETURN needs to settle its unit, remembered from the
 // call. One entry per OPEN call, deleted the moment the call settles — the map

@@ -155,7 +155,7 @@ func TestASpoolALaunchClaimedIsNotAskedAbout(t *testing.T) {
 	// Arrange: the transcript's own launch claims b1.
 	store := &fakeStore{}
 	h, _ := claimsHarness(t, store)
-	h.sc.TaskSpawned("b1", "call-1", "sess-1", "", false, h.workspace, "workspace-id", "sess-1")
+	h.sc.TaskSpawned("b1", "call-1", "sess-1", "", false, h.workspace, "workspace-id", "sess-1", noLaunch)
 	h.sc.rescan()
 
 	// Act.
