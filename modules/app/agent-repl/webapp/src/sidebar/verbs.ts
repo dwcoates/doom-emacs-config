@@ -59,9 +59,9 @@ import {
   type RestartWorkspaceError,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_restart_workspace_pb";
 import {
-  SelectWorkspaceRequestSchema,
-  type SelectWorkspaceRequest,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+  SelectInEditorRequestSchema,
+  type SelectInEditorRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import {
   SetWorkspaceHiddenRequestSchema,
   type SetWorkspaceHiddenError,
@@ -800,9 +800,9 @@ export function clearRefusal(control: HTMLElement): void {
   }
 }
 
-/** SelectWorkspace: the row click. Idempotent — re-selecting is a success. */
-export function buildSelectWorkspaceRequest(workspace: WorkspaceRef): SelectWorkspaceRequest {
-  return create(SelectWorkspaceRequestSchema, { workspace });
+/** SelectInEditor: the row click, relayed for the editor to make the switch. */
+export function buildSelectInEditorRequest(workspace: WorkspaceRef): SelectInEditorRequest {
+  return create(SelectInEditorRequestSchema, { workspace });
 }
 
 /** OpenWorkspace: bring a registered-but-closed workspace back up. */

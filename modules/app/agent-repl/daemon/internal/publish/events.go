@@ -25,13 +25,17 @@ type Events[T any] struct {
 	subs map[*subscriber[T]]struct{}
 }
 
-// Emit hands v to every live subscriber. With none, v is gone, by design.
-func (e *Events[T]) Emit(v T) {
+// Emit hands v to every live subscriber and answers how many it was handed
+// to. With none, v is gone, by design. The count is read under the lock that
+// hands v over, so a caller that must act when nobody heard an event decides
+// on exactly the subscribers it reached, never on a count read before or after.
+func (e *Events[T]) Emit(v T) int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for s := range e.subs {
 		s.enqueue(v)
 	}
+	return len(e.subs)
 }
 
 // Subscribe returns a channel carrying every event emitted from this call on,

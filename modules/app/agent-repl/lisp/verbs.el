@@ -1418,8 +1418,9 @@ made the gesture that minted REF.  THE LANDING IS WITHDRAWN once the user
 has switched workspaces IN EMACS since then, whether before the answer or
 while the landing waits for its tab: the user has moved on, and dragging
 them back to the new workspace takes them off their own choice.  A
-switch made from the sidebar or by an agent is not the user\='s move in
-Emacs and withdraws nothing (`agent-repl-host--editor-switches\=').
+sidebar row\='s click is such a switch, relayed to Emacs; a switch an
+agent made is not the user\='s move and withdraws nothing
+\(`agent-repl-host--editor-switches\=').
 
 LANDER is HOW the landing is made, and defaults to
 `agent-repl-verbs--land-on\=' -- a projectile switch to the minted

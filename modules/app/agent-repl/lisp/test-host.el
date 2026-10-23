@@ -2187,6 +2187,50 @@ answers `:unknown' and records the breach rather than opening."
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.notification-clicked ws=ws-1"))))
 
+;;;; ---- The rail's row click ----
+
+(ert-deftest agent-repl-test-host-select-requested-sends-select-workspace ()
+  "A `select_requested' push requests the switch to the workspace its stream carries."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    ;; Act
+    (agent-repl-test-host--push "ws-2" (list :arm :select-requested :value nil))
+    ;; Assert
+    (should (equal (agent-repl-test-host--selected-ids) '("ws-id-2")))))
+
+(ert-deftest agent-repl-test-host-select-requested-is-a-sidebar-switch-request ()
+  "The click takes the key's own path, recorded with the `sidebar' trigger."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-2" (list :arm :select-requested :value nil))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.switch-requested ws=ws-2 trigger=sidebar shown=ws-1 pending=none"))))
+
+(ert-deftest agent-repl-test-host-select-requested-is-counted ()
+  "A sidebar row's click is the user's switch, counted as a key's is."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :select-requested :value nil))
+    ;; Assert
+    (should (= (agent-repl-host-editor-switch-count) 1))))
+
+(ert-deftest agent-repl-test-host-select-requested-is-logged ()
+  "The click reaching Emacs leaves an INFO record naming the workspace."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :select-requested :value nil))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.select-requested ws=ws-1"))))
+
 ;;;; ---- The final-response click ----
 
 (ert-deftest agent-repl-test-host-final-response-click-focuses-this-workspaces-composer ()

@@ -1,0 +1,76 @@
+// endpoint_select_in_editor.proto — SelectInEditor: a HOST-RAISED switch. WEB
+// section. The rail's row click calls this rather than SelectWorkspace, so a
+// switch made in a page is the EDITOR'S OWN SWITCH, exactly as fast as a key.
+//
+// WHY THE EDITOR MAKES IT. Emacs moves its frame the moment it requests a
+// switch (a tab chord, a picker, a banner click), and the roster's `current`
+// only confirms it. A page that called SelectWorkspace itself left the frame to
+// follow the roster push the selection provokes, which waits on the whole
+// registry being re-read: a sidebar click took some 350ms where the same switch
+// by key took 10 (2026-10-23). Relayed, the click reaches Emacs as the host
+// stream's `select_requested`, and Emacs requests the switch through the same
+// path every key takes.
+//
+// A WORKSPACE THE EDITOR DOES NOT HOLD IS SELECTED HERE. Emacs holds a host
+// stream for every workspace it has a tab for, and a row can be clicked
+// without one (a closed row, an open one whose tab has not opened yet). The
+// event is handed to exactly the host streams standing at that moment, and
+// when there are none the daemon selects the workspace itself, as
+// SelectWorkspace would, so no click goes nowhere.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/endpoint_select_workspace.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SelectInEditorRequest {
+  // The workspace the user clicked.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message SelectInEditorResponse {
+  oneof result {
+    SelectInEditorSuccess success = 1;
+    SelectInEditorError error = 2;
+  }
+}
+
+// THE ARM IS WHICH PARTY MADE THE SWITCH.
+message SelectInEditorSuccess {
+  oneof route {
+    // The editor holds the workspace: the click was relayed to it as the host
+    // stream's `select_requested`, and the editor makes the switch.
+    SelectInEditorRelayed relayed = 1;
+    // The editor holds no host stream for the workspace, so the daemon
+    // selected it, exactly as SelectWorkspace answers success.
+    SelectWorkspaceSuccess selected = 2;
+  }
+}
+
+// Relayed to the workspace's host stream. Empty: nothing else is owed.
+message SelectInEditorRelayed {}
+
+// SelectWorkspace's refusals, arm for arm: the workspace is resolved, and on
+// the daemon's route selected, exactly as SelectWorkspace does it.
+// Validation failures (unset field, blank string) are Connect
+// InvalidArgument, never an arm.
+message SelectInEditorError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SelectWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SelectWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SelectWorkspaceTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SelectWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // The daemon's route only: this daemon is standing down, recorded the
+    // selection, and started no session (SelectWorkspaceError.standing_down).
+    SelectWorkspaceStandingDown standing_down = 5;
+  }
+}

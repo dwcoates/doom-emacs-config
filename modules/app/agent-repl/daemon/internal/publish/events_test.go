@@ -127,3 +127,33 @@ func TestEventsCancelUnregistersTheSubscriber(t *testing.T) {
 		t.Fatalf("Subscribers() = %d, want 0", got)
 	}
 }
+
+func TestEventsEmitAnswersHowManySubscribersItReached(t *testing.T) {
+	tests := []struct {
+		name        string
+		subscribers int
+	}{
+		{name: "none", subscribers: 0},
+		{name: "one", subscribers: 1},
+		{name: "two", subscribers: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var events publish.Events[int]
+			for range tt.subscribers {
+				events.Subscribe(ctx)
+			}
+
+			// Act.
+			got := events.Emit(1)
+
+			// Assert.
+			if got != tt.subscribers {
+				t.Fatalf("Emit = %d, want %d", got, tt.subscribers)
+			}
+		})
+	}
+}
