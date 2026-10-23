@@ -3631,7 +3631,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     if (!takeJoinBack(join, "an ask opened before the vendor took the prompt in")) {
       LOGGER.error(
-        { ...fields, invariant_violation: "a join the vendor gave back is one the session still holds" },
+        {
+          ...fields,
+          detail: "the vendor cancelled the join's send, but it neither waits to join nor holds the send slot",
+          invariant_violation: "a join the vendor gave back is one the session still holds",
+        },
         "the vendor gave back a prompt waiting to join the running turn that the session no longer held; nothing is withdrawn",
       );
       return;
