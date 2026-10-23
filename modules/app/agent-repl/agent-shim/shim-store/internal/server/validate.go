@@ -45,6 +45,7 @@ const (
 	SiteRunEmpty               = "run_empty"
 	SiteVendorTaskEmpty        = "vendor_task_empty"
 	SiteRunIDEmpty             = "run_id_empty"
+	SiteAnnouncedBeforeInvalid = "announced_before_invalid"
 	SiteUnitEmpty              = "unit_empty"
 	SiteDeliveryEmpty          = "delivery_empty"
 	SiteUnknownBashRun         = "unknown_bash_run"
@@ -422,6 +423,16 @@ func validateGetShellRunClaimsRequest(req *storev1.GetShellRunClaimsRequest) *re
 func validateGetRunSettlementsRequest(req *storev1.GetRunSettlementsRequest) *refusal {
 	return validateIDList(req.GetRunIds(), SiteRunIDEmpty, "run_ids",
 		"run_ids: the lookup names no run", "run_ids: an asked run id is empty")
+}
+
+// validateGetLiveShellRunsAnnouncedBeforeRequest is the use site for
+// GetLiveShellRunsAnnouncedBefore: a positive instant. Unscoped on purpose,
+// exactly as GetRunSettlements is.
+func validateGetLiveShellRunsAnnouncedBeforeRequest(req *storev1.GetLiveShellRunsAnnouncedBeforeRequest) *refusal {
+	if req.GetAnnouncedBeforeMs() <= 0 {
+		return refuse(SiteAnnouncedBeforeInvalid, "announced_before_ms", "announced_before_ms: %d is not an instant", req.GetAnnouncedBeforeMs())
+	}
+	return nil
 }
 
 // validateIDList is the one shape of an unscoped id-set lookup's request: at

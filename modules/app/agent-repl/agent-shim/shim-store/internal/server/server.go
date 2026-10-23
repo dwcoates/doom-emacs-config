@@ -963,6 +963,58 @@ func runSettlementsFailure(ref *refusal) *connect.Response[storev1.GetRunSettlem
 	})
 }
 
+// ---- GetLiveShellRunsAnnouncedBefore ----
+
+// GetLiveShellRunsAnnouncedBefore answers every live shell run whose
+// announcement the store wrote before the asked instant: the sidecar's
+// question, once per process, about the shells from before the machine's boot.
+func (s *Server) GetLiveShellRunsAnnouncedBefore(ctx context.Context, req *connect.Request[storev1.GetLiveShellRunsAnnouncedBeforeRequest]) (*connect.Response[storev1.GetLiveShellRunsAnnouncedBeforeResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreGetLiveShellRunsAnnouncedBeforeProcedure, req.Header())
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-shell-runs"}, "reading the live shell runs announced before %d", req.Msg.GetAnnouncedBeforeMs())
+
+	if ref := validateGetLiveShellRunsAnnouncedBeforeRequest(req.Msg); ref != nil {
+		s.logRefusal(log, "store.rpc.get-live-shell-runs", ref, logging.Fields{})
+		return liveShellRunsFailure(ref), nil
+	}
+
+	runs, err := s.store.LiveShellRunsAnnouncedBefore(correlated(ctx, req.Header()), req.Msg.GetAnnouncedBeforeMs())
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.get-live-shell-runs", err, logging.Fields{})
+		return liveShellRunsFailure(ref), nil
+	}
+	success := &storev1.GetLiveShellRunsAnnouncedBeforeSuccess{Runs: make([]*storev1.GetLiveShellRunsAnnouncedBeforeRun, 0, len(runs))}
+	for _, run := range runs {
+		success.Runs = append(success.Runs, &storev1.GetLiveShellRunsAnnouncedBeforeRun{
+			Detached: &storev1.GetLiveWorkDetached{
+				Work:  &conversationv1.DetachedWorkId{Value: run.WorkID},
+				Owner: &conversationv1.AgentId{Value: run.Owner},
+			},
+			Run:           &conversationv1.AgentActivityId{Value: run.Run},
+			AnnouncedAtMs: run.AnnouncedAtMs,
+		})
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-shell-runs"}, "answering runs=%d", len(success.Runs))
+	return connect.NewResponse(&storev1.GetLiveShellRunsAnnouncedBeforeResponse{
+		Result: &storev1.GetLiveShellRunsAnnouncedBeforeResponse_Success{Success: success},
+	}), nil
+}
+
+// liveShellRunsFailure has TWO arms: the request was malformed, or the storage
+// layer failed.
+func liveShellRunsFailure(ref *refusal) *connect.Response[storev1.GetLiveShellRunsAnnouncedBeforeResponse] {
+	failure := &storev1.GetLiveShellRunsAnnouncedBeforeFailure{Detail: ref.detail}
+	if ref.class == classInvalid {
+		failure.Kind = &storev1.GetLiveShellRunsAnnouncedBeforeFailure_InvalidRequest{
+			InvalidRequest: &storev1.GetLiveShellRunsAnnouncedBeforeInvalidRequest{Field: ref.field},
+		}
+	} else {
+		failure.Kind = &storev1.GetLiveShellRunsAnnouncedBeforeFailure_StorageFailure{StorageFailure: &storev1.GetLiveShellRunsAnnouncedBeforeStorageFailure{}}
+	}
+	return connect.NewResponse(&storev1.GetLiveShellRunsAnnouncedBeforeResponse{
+		Result: &storev1.GetLiveShellRunsAnnouncedBeforeResponse_Failure{Failure: failure},
+	})
+}
+
 // ---- GetShellRunClaims ----
 
 // GetShellRunClaims answers which run each asked task id names, with the book

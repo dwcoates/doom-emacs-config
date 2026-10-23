@@ -199,10 +199,16 @@ type fakeStore struct {
 	peerFor       string
 	peerAsked     bool
 
-	settled      []db.SettledRun
-	settledErr   error
-	settledFor   []string
-	settledAsked bool
+	settled    []db.SettledRun
+	settledErr error
+	// liveShells, liveShellsErr and liveShellsBefore are LiveShellRunsAnnouncedBefore's
+	// answer and the instant it was asked with; liveShellsAsked records a read.
+	liveShells       []db.LiveShellRun
+	liveShellsErr    error
+	liveShellsBefore int64
+	liveShellsAsked  bool
+	settledFor       []string
+	settledAsked     bool
 
 	cursors      []*storev1.CursorState
 	cursorsErr   error
@@ -363,6 +369,14 @@ func (f *fakeStore) RunSettlements(_ context.Context, runIDs []string) ([]db.Set
 	f.settledAsked = true
 	f.settledFor = runIDs
 	return f.settled, f.settledErr
+}
+
+func (f *fakeStore) LiveShellRunsAnnouncedBefore(_ context.Context, beforeMs int64) ([]db.LiveShellRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.liveShellsAsked = true
+	f.liveShellsBefore = beforeMs
+	return f.liveShells, f.liveShellsErr
 }
 
 func (f *fakeStore) Cursors(_ context.Context, fileID *string) ([]*storev1.CursorState, error) {
@@ -2357,6 +2371,102 @@ func TestGetRunSettlementsRefusesAnIncompleteRequest(t *testing.T) {
 			store.mu.Unlock()
 			if asked {
 				t.Fatalf("the store was read for a request the server refuses")
+			}
+		})
+	}
+}
+
+// ---- GetLiveShellRunsAnnouncedBefore ----
+
+func liveShellsRequest() *storev1.GetLiveShellRunsAnnouncedBeforeRequest {
+	return &storev1.GetLiveShellRunsAnnouncedBeforeRequest{AnnouncedBeforeMs: 1000}
+}
+
+func TestGetLiveShellRunsAnnouncedBeforeServesEachRunWithItsOwner(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.liveShells = []db.LiveShellRun{{WorkID: "toolu_1", Run: "toolu_1", Owner: "agent-a", AnnouncedAtMs: 500}}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetLiveShellRunsAnnouncedBefore(context.Background(), connect.NewRequest(liveShellsRequest()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveShellRunsAnnouncedBefore = %v, want nil", err)
+	}
+	runs := res.Msg.GetSuccess().GetRuns()
+	if len(runs) != 1 || runs[0].GetDetached().GetWork().GetValue() != "toolu_1" || runs[0].GetDetached().GetOwner().GetValue() != "agent-a" ||
+		runs[0].GetRun().GetValue() != "toolu_1" || runs[0].GetAnnouncedAtMs() != 500 {
+		t.Fatalf("runs = %v, want toolu_1 owned by agent-a, announced at 500", runs)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.liveShellsBefore != 1000 {
+		t.Fatalf("the store was asked for runs before %d, want 1000", store.liveShellsBefore)
+	}
+}
+
+func TestGetLiveShellRunsAnnouncedBeforeServesAnEmptySuccess(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.client.GetLiveShellRunsAnnouncedBefore(context.Background(), connect.NewRequest(liveShellsRequest()))
+
+	// Assert.
+	if err != nil || res.Msg.GetSuccess() == nil || len(res.Msg.GetSuccess().GetRuns()) != 0 {
+		t.Fatalf("result = %v, %v; want the success arm with no runs", res.Msg.GetResult(), err)
+	}
+}
+
+func TestGetLiveShellRunsAnnouncedBeforeMapsAStorageFailure(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.liveShellsErr = fmt.Errorf("%w: scan failed", ErrStorage)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetLiveShellRunsAnnouncedBefore(context.Background(), connect.NewRequest(liveShellsRequest()))
+
+	// Assert.
+	if err != nil || res.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Fatalf("result = %v, %v; want the storage_failure arm", res.Msg.GetResult(), err)
+	}
+	traced := false
+	for _, rec := range records(t, h.logs) {
+		if rec.Operation == "store.rpc.get-live-shell-runs" && rec.Context["refusal_site"] == SiteDatabaseFailure {
+			traced = true
+		}
+	}
+	if !traced {
+		t.Fatalf("records = %+v, want a trace at site %q", records(t, h.logs), SiteDatabaseFailure)
+	}
+}
+
+func TestGetLiveShellRunsAnnouncedBeforeRefusesANonPositiveInstant(t *testing.T) {
+	for _, before := range []int64{0, -1} {
+		t.Run(fmt.Sprint(before), func(t *testing.T) {
+			// Arrange.
+			store := newFakeStore()
+			h := newHarness(t, store, 0)
+
+			// Act.
+			res, err := h.client.GetLiveShellRunsAnnouncedBefore(context.Background(),
+				connect.NewRequest(&storev1.GetLiveShellRunsAnnouncedBeforeRequest{AnnouncedBeforeMs: before}))
+
+			// Assert.
+			if err != nil || res.Msg.GetFailure().GetInvalidRequest().GetField() != "announced_before_ms" {
+				t.Fatalf("result = %v, %v; want invalid_request naming announced_before_ms", res.Msg.GetResult(), err)
+			}
+			rec, ok := findRecord(t, h.logs, "store.rpc.get-live-shell-runs", "warn")
+			if !ok || rec.Context["refusal_site"] != SiteAnnouncedBeforeInvalid {
+				t.Fatalf("records = %+v, want one warn refusal at site %q", records(t, h.logs), SiteAnnouncedBeforeInvalid)
+			}
+			store.mu.Lock()
+			defer store.mu.Unlock()
+			if store.liveShellsAsked {
+				t.Fatal("the store was read for a request the server refuses")
 			}
 		})
 	}

@@ -86,6 +86,9 @@ const (
 	StatementShellRunClaims = "shell_run_claims"
 	// StatementRunSettlements is the sidecar's settled-run lookup by run ids.
 	StatementRunSettlements = "run_settlements"
+	// StatementLiveShellRuns is the sidecar's lookup of the live shell runs
+	// announced before the machine's boot.
+	StatementLiveShellRuns = "live_shell_runs"
 	// StatementPeerDelivery is the delivery index lookup by delivery id.
 	StatementPeerDelivery = "peer_delivery"
 	// StatementDetachedWorkByUnit is the shim's detached-work lookup by unit.
