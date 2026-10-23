@@ -31,7 +31,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_report_latencies.proto.
  */
 export const file_agentrepl_v1_endpoint_report_latencies: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVwb3J0X2xhdGVuY2llcy5wcm90bxIMYWdlbnRyZXBsLnYxIoIBCg9SZXBvcnRlZExhdGVuY3kSLwoEa2luZBgBIAEoDjIhLmFnZW50cmVwbC52MS5SZXBvcnRlZExhdGVuY3lLaW5kEi0KCXdvcmtzcGFjZRgCIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDwoHc2Vjb25kcxgDIAEoASKHAQoWUmVwb3J0TGF0ZW5jaWVzUmVxdWVzdBIwCglsYXRlbmNpZXMYASADKAsyHS5hZ2VudHJlcGwudjEuUmVwb3J0ZWRMYXRlbmN5EjsKDmVkaXRvcl9zdGFydHVwGAIgAygLMiMuYWdlbnRyZXBsLnYxLlJlcG9ydGVkRWRpdG9yU3RhcnR1cCL5AQoVUmVwb3J0ZWRFZGl0b3JTdGFydHVwEjcKCW1pbGVzdG9uZRgBIAEoDjIkLmFnZW50cmVwbC52MS5FZGl0b3JTdGFydHVwTWlsZXN0b25lEjsKB3NwYXduZWQYAiABKAsyKC5hZ2VudHJlcGwudjEuRWRpdG9yU3RhcnR1cERhZW1vblNwYXduZWRIABI7CgdydW5uaW5nGAMgASgLMiguYWdlbnRyZXBsLnYxLkVkaXRvclN0YXJ0dXBEYWVtb25SdW5uaW5nSAASIwobc2Vjb25kc19zaW5jZV9wcm9jZXNzX3N0YXJ0GAQgASgBQggKBmRhZW1vbiIcChpFZGl0b3JTdGFydHVwRGFlbW9uU3Bhd25lZCIcChpFZGl0b3JTdGFydHVwRGFlbW9uUnVubmluZyKRAQoXUmVwb3J0TGF0ZW5jaWVzUmVzcG9uc2USNwoHc3VjY2VzcxgBIAEoCzIkLmFnZW50cmVwbC52MS5SZXBvcnRMYXRlbmNpZXNTdWNjZXNzSAASMwoFZXJyb3IYAiABKAsyIi5hZ2VudHJlcGwudjEuUmVwb3J0TGF0ZW5jaWVzRXJyb3JIAEIICgZyZXN1bHQi5gEKFlJlcG9ydExhdGVuY2llc1N1Y2Nlc3MSOQoIcmVjb3JkZWQYASABKAsyJS5hZ2VudHJlcGwudjEuUmVwb3J0TGF0ZW5jaWVzUmVjb3JkZWRIABJGCg9wYXJ0bHlfcmVjb3JkZWQYAiABKAsyKy5hZ2VudHJlcGwudjEuUmVwb3J0TGF0ZW5jaWVzUGFydGx5UmVjb3JkZWRIABI+CgttZXRyaWNzX29mZhgDIAEoCzInLmFnZW50cmVwbC52MS5SZXBvcnRMYXRlbmNpZXNNZXRyaWNzT2ZmSABCCQoHb3V0Y29tZSIrChdSZXBvcnRMYXRlbmNpZXNSZWNvcmRlZBIQCghyZWNvcmRlZBgBIAEoDSJUCh1SZXBvcnRMYXRlbmNpZXNQYXJ0bHlSZWNvcmRlZBIQCghyZWNvcmRlZBgBIAEoDRIhChlkcm9wcGVkX3Vua25vd25fd29ya3NwYWNlGAIgASgNIhsKGVJlcG9ydExhdGVuY2llc01ldHJpY3NPZmYidAoUUmVwb3J0TGF0ZW5jaWVzRXJyb3ISUwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgBIAEoCzIxLmFnZW50cmVwbC52MS5SZXBvcnRMYXRlbmNpZXNXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAQgcKBWNhdXNlImcKI1JlcG9ydExhdGVuY2llc1dvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHdvcmtzcGFjZV9pZBgBIAEoCRIUCgxyZXBvcnRlZF9kaXIYAiABKAkSFAoMcmVnaXN0cnlfZGlyGAMgASgJKtkBChNSZXBvcnRlZExhdGVuY3lLaW5kEiUKIVJFUE9SVEVEX0xBVEVOQ1lfS0lORF9VTlNQRUNJRklFRBAAEicKI1JFUE9SVEVEX0xBVEVOQ1lfS0lORF9TV0lUQ0hfUkVQRUFUEAESJgoiUkVQT1JURURfTEFURU5DWV9LSU5EX1NXSVRDSF9GSVJTVBACEiMKH1JFUE9SVEVEX0xBVEVOQ1lfS0lORF9QQUdFX0JPT1QQAxIlCiFSRVBPUlRFRF9MQVRFTkNZX0tJTkRfUFJPTVBUX0VDSE8QBCrgAQoWRWRpdG9yU3RhcnR1cE1pbGVzdG9uZRIoCiRFRElUT1JfU1RBUlRVUF9NSUxFU1RPTkVfVU5TUEVDSUZJRUQQABIhCh1FRElUT1JfU1RBUlRVUF9NSUxFU1RPTkVfSU5JVBABEioKJkVESVRPUl9TVEFSVFVQX01JTEVTVE9ORV9EQUVNT05fTElOS0VEEAISJgoiRURJVE9SX1NUQVJUVVBfTUlMRVNUT05FX0ZJUlNUX1RBQhADEiUKIUVESVRPUl9TVEFSVFVQX01JTEVTVE9ORV9BTExfVEFCUxAEQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVwb3J0X2xhdGVuY2llcy5wcm90bxIMYWdlbnRyZXBsLnYxIoIBCg9SZXBvcnRlZExhdGVuY3kSLwoEa2luZBgBIAEoDjIhLmFnZW50cmVwbC52MS5SZXBvcnRlZExhdGVuY3lLaW5kEi0KCXdvcmtzcGFjZRgCIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDwoHc2Vjb25kcxgDIAEoASLGAQoWUmVwb3J0TGF0ZW5jaWVzUmVxdWVzdBIwCglsYXRlbmNpZXMYASADKAsyHS5hZ2VudHJlcGwudjEuUmVwb3J0ZWRMYXRlbmN5EjsKDmVkaXRvcl9zdGFydHVwGAIgAygLMiMuYWdlbnRyZXBsLnYxLlJlcG9ydGVkRWRpdG9yU3RhcnR1cBI9ChBlZGl0b3JfbGF0ZW5jaWVzGAMgAygLMiMuYWdlbnRyZXBsLnYxLlJlcG9ydGVkRWRpdG9yTGF0ZW5jeSJXChVSZXBvcnRlZEVkaXRvckxhdGVuY3kSLQoEa2luZBgBIAEoDjIfLmFnZW50cmVwbC52MS5FZGl0b3JMYXRlbmN5S2luZBIPCgdzZWNvbmRzGAIgASgBIvkBChVSZXBvcnRlZEVkaXRvclN0YXJ0dXASNwoJbWlsZXN0b25lGAEgASgOMiQuYWdlbnRyZXBsLnYxLkVkaXRvclN0YXJ0dXBNaWxlc3RvbmUSOwoHc3Bhd25lZBgCIAEoCzIoLmFnZW50cmVwbC52MS5FZGl0b3JTdGFydHVwRGFlbW9uU3Bhd25lZEgAEjsKB3J1bm5pbmcYAyABKAsyKC5hZ2VudHJlcGwudjEuRWRpdG9yU3RhcnR1cERhZW1vblJ1bm5pbmdIABIjChtzZWNvbmRzX3NpbmNlX3Byb2Nlc3Nfc3RhcnQYBCABKAFCCAoGZGFlbW9uIhwKGkVkaXRvclN0YXJ0dXBEYWVtb25TcGF3bmVkIhwKGkVkaXRvclN0YXJ0dXBEYWVtb25SdW5uaW5nIpEBChdSZXBvcnRMYXRlbmNpZXNSZXNwb25zZRI3CgdzdWNjZXNzGAEgASgLMiQuYWdlbnRyZXBsLnYxLlJlcG9ydExhdGVuY2llc1N1Y2Nlc3NIABIzCgVlcnJvchgCIAEoCzIiLmFnZW50cmVwbC52MS5SZXBvcnRMYXRlbmNpZXNFcnJvckgAQggKBnJlc3VsdCLmAQoWUmVwb3J0TGF0ZW5jaWVzU3VjY2VzcxI5CghyZWNvcmRlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5SZXBvcnRMYXRlbmNpZXNSZWNvcmRlZEgAEkYKD3BhcnRseV9yZWNvcmRlZBgCIAEoCzIrLmFnZW50cmVwbC52MS5SZXBvcnRMYXRlbmNpZXNQYXJ0bHlSZWNvcmRlZEgAEj4KC21ldHJpY3Nfb2ZmGAMgASgLMicuYWdlbnRyZXBsLnYxLlJlcG9ydExhdGVuY2llc01ldHJpY3NPZmZIAEIJCgdvdXRjb21lIisKF1JlcG9ydExhdGVuY2llc1JlY29yZGVkEhAKCHJlY29yZGVkGAEgASgNIlQKHVJlcG9ydExhdGVuY2llc1BhcnRseVJlY29yZGVkEhAKCHJlY29yZGVkGAEgASgNEiEKGWRyb3BwZWRfdW5rbm93bl93b3Jrc3BhY2UYAiABKA0iGwoZUmVwb3J0TGF0ZW5jaWVzTWV0cmljc09mZiJ0ChRSZXBvcnRMYXRlbmNpZXNFcnJvchJTChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAEgASgLMjEuYWdlbnRyZXBsLnYxLlJlcG9ydExhdGVuY2llc1dvcmtzcGFjZVJlZk1pc21hdGNoSABCBwoFY2F1c2UiZwojUmVwb3J0TGF0ZW5jaWVzV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMd29ya3NwYWNlX2lkGAEgASgJEhQKDHJlcG9ydGVkX2RpchgCIAEoCRIUCgxyZWdpc3RyeV9kaXIYAyABKAkqpwIKE1JlcG9ydGVkTGF0ZW5jeUtpbmQSJQohUkVQT1JURURfTEFURU5DWV9LSU5EX1VOU1BFQ0lGSUVEEAASJwojUkVQT1JURURfTEFURU5DWV9LSU5EX1NXSVRDSF9SRVBFQVQQARImCiJSRVBPUlRFRF9MQVRFTkNZX0tJTkRfU1dJVENIX0ZJUlNUEAISIwofUkVQT1JURURfTEFURU5DWV9LSU5EX1BBR0VfQk9PVBADEiUKIVJFUE9SVEVEX0xBVEVOQ1lfS0lORF9QUk9NUFRfRUNITxAEEiQKIFJFUE9SVEVEX0xBVEVOQ1lfS0lORF9QQUdFX1NUQUxMEAUSJgoiUkVQT1JURURfTEFURU5DWV9LSU5EX1JFTE9BRF9CTEFOSxAGKn0KEUVkaXRvckxhdGVuY3lLaW5kEiMKH0VESVRPUl9MQVRFTkNZX0tJTkRfVU5TUEVDSUZJRUQQABIdChlFRElUT1JfTEFURU5DWV9LSU5EX1NUQUxMEAESJAogRURJVE9SX0xBVEVOQ1lfS0lORF9FTElTUF9SRUxPQUQQAirgAQoWRWRpdG9yU3RhcnR1cE1pbGVzdG9uZRIoCiRFRElUT1JfU1RBUlRVUF9NSUxFU1RPTkVfVU5TUEVDSUZJRUQQABIhCh1FRElUT1JfU1RBUlRVUF9NSUxFU1RPTkVfSU5JVBABEioKJkVESVRPUl9TVEFSVFVQX01JTEVTVE9ORV9EQUVNT05fTElOS0VEEAISJgoiRURJVE9SX1NUQVJUVVBfTUlMRVNUT05FX0ZJUlNUX1RBQhADEiUKIUVESVRPUl9TVEFSVFVQX01JTEVTVE9ORV9BTExfVEFCUxAEQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * One finished interaction.
@@ -93,6 +93,16 @@ export type ReportLatenciesRequest = Message<"agentrepl.v1.ReportLatenciesReques
    * @generated from field: repeated agentrepl.v1.ReportedEditorStartup editor_startup = 2;
    */
   editorStartup: ReportedEditorStartup[];
+
+  /**
+   * The editor's own latencies since its last acknowledged report, oldest
+   * first: interactions that belong to the editor as a whole rather than to
+   * one workspace. Sent by Emacs only, and kept and sent again with the next
+   * batch until a report is acknowledged, as `latencies' are.
+   *
+   * @generated from field: repeated agentrepl.v1.ReportedEditorLatency editor_latencies = 3;
+   */
+  editorLatencies: ReportedEditorLatency[];
 };
 
 /**
@@ -101,6 +111,36 @@ export type ReportLatenciesRequest = Message<"agentrepl.v1.ReportLatenciesReques
  */
 export const ReportLatenciesRequestSchema: GenMessage<ReportLatenciesRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_report_latencies, 1);
+
+/**
+ * One finished editor-wide interaction.
+ *
+ * @generated from message agentrepl.v1.ReportedEditorLatency
+ */
+export type ReportedEditorLatency = Message<"agentrepl.v1.ReportedEditorLatency"> & {
+  /**
+   * Which interaction this measured. Required; UNSPECIFIED is
+   * InvalidArgument.
+   *
+   * @generated from field: agentrepl.v1.EditorLatencyKind kind = 1;
+   */
+  kind: EditorLatencyKind;
+
+  /**
+   * How long it took, in seconds. Finite and not negative; anything else is
+   * InvalidArgument.
+   *
+   * @generated from field: double seconds = 2;
+   */
+  seconds: number;
+};
+
+/**
+ * Describes the message agentrepl.v1.ReportedEditorLatency.
+ * Use `create(ReportedEditorLatencySchema)` to create a new message.
+ */
+export const ReportedEditorLatencySchema: GenMessage<ReportedEditorLatency> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 2);
 
 /**
  * One milestone of the editor's startup, timed by the editor from its own
@@ -156,7 +196,7 @@ export type ReportedEditorStartup = Message<"agentrepl.v1.ReportedEditorStartup"
  * Use `create(ReportedEditorStartupSchema)` to create a new message.
  */
 export const ReportedEditorStartupSchema: GenMessage<ReportedEditorStartup> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 2);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 3);
 
 /**
  * The editor found no daemon serving and started one, so its startup
@@ -172,7 +212,7 @@ export type EditorStartupDaemonSpawned = Message<"agentrepl.v1.EditorStartupDaem
  * Use `create(EditorStartupDaemonSpawnedSchema)` to create a new message.
  */
 export const EditorStartupDaemonSpawnedSchema: GenMessage<EditorStartupDaemonSpawned> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 3);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 4);
 
 /**
  * The editor linked to a daemon that was already serving. DELIBERATELY
@@ -188,7 +228,7 @@ export type EditorStartupDaemonRunning = Message<"agentrepl.v1.EditorStartupDaem
  * Use `create(EditorStartupDaemonRunningSchema)` to create a new message.
  */
 export const EditorStartupDaemonRunningSchema: GenMessage<EditorStartupDaemonRunning> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 4);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 5);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -219,7 +259,7 @@ export type ReportLatenciesResponse = Message<"agentrepl.v1.ReportLatenciesRespo
  * Use `create(ReportLatenciesResponseSchema)` to create a new message.
  */
 export const ReportLatenciesResponseSchema: GenMessage<ReportLatenciesResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 5);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 6);
 
 /**
  * The report was received: the client drops the batch. Which of the arms is
@@ -267,7 +307,7 @@ export type ReportLatenciesSuccess = Message<"agentrepl.v1.ReportLatenciesSucces
  * Use `create(ReportLatenciesSuccessSchema)` to create a new message.
  */
 export const ReportLatenciesSuccessSchema: GenMessage<ReportLatenciesSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 6);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 7);
 
 /**
  * Every latency in the batch was recorded.
@@ -277,9 +317,9 @@ export const ReportLatenciesSuccessSchema: GenMessage<ReportLatenciesSuccess> = 
 export type ReportLatenciesRecorded = Message<"agentrepl.v1.ReportLatenciesRecorded"> & {
   /**
    * How many latencies were recorded: the length of the batch's
-   * `latencies`. Every editor startup milestone in the batch is recorded too
-   * and is not counted here, since a milestone names no workspace and is
-   * never dropped.
+   * `latencies`. Every editor startup milestone and editor latency in the
+   * batch is recorded too and is not counted here, since neither names a
+   * workspace, so neither is ever dropped.
    *
    * @generated from field: uint32 recorded = 1;
    */
@@ -291,7 +331,7 @@ export type ReportLatenciesRecorded = Message<"agentrepl.v1.ReportLatenciesRecor
  * Use `create(ReportLatenciesRecordedSchema)` to create a new message.
  */
 export const ReportLatenciesRecordedSchema: GenMessage<ReportLatenciesRecorded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 7);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 8);
 
 /**
  * Part of the batch named workspaces the daemon's registry no longer holds:
@@ -322,7 +362,7 @@ export type ReportLatenciesPartlyRecorded = Message<"agentrepl.v1.ReportLatencie
  * Use `create(ReportLatenciesPartlyRecordedSchema)` to create a new message.
  */
 export const ReportLatenciesPartlyRecordedSchema: GenMessage<ReportLatenciesPartlyRecorded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 8);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 9);
 
 /**
  * The daemon was started without a metrics root, so it records no metrics.
@@ -339,7 +379,7 @@ export type ReportLatenciesMetricsOff = Message<"agentrepl.v1.ReportLatenciesMet
  * Use `create(ReportLatenciesMetricsOffSchema)` to create a new message.
  */
 export const ReportLatenciesMetricsOffSchema: GenMessage<ReportLatenciesMetricsOff> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 9);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 10);
 
 /**
  * The daemon's refusals. Validation failures (an unspecified kind, an unset
@@ -372,7 +412,7 @@ export type ReportLatenciesError = Message<"agentrepl.v1.ReportLatenciesError"> 
  * Use `create(ReportLatenciesErrorSchema)` to create a new message.
  */
 export const ReportLatenciesErrorSchema: GenMessage<ReportLatenciesError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 10);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 11);
 
 /**
  * A ref in the batch named a known workspace id with the wrong dir.
@@ -407,7 +447,7 @@ export type ReportLatenciesWorkspaceRefMismatch = Message<"agentrepl.v1.ReportLa
  * Use `create(ReportLatenciesWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const ReportLatenciesWorkspaceRefMismatchSchema: GenMessage<ReportLatenciesWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 11);
+  messageDesc(file_agentrepl_v1_endpoint_report_latencies, 12);
 
 /**
  * Which interaction a reported latency measured. Each value names one entry
@@ -458,6 +498,29 @@ export enum ReportedLatencyKind {
    * @generated from enum value: REPORTED_LATENCY_KIND_PROMPT_ECHO = 4;
    */
   PROMPT_ECHO = 4,
+
+  /**
+   * A stall of the page's main thread while the page was shown: how late the
+   * page's steady sampling timer ran, when it ran at least the vocabulary's
+   * detection floor late. Measured by the webapp alone. A page that is not
+   * shown samples nothing, because WebKit slows a hidden frame's timers and
+   * nobody is looking at it.
+   *
+   * @generated from enum value: REPORTED_LATENCY_KIND_PAGE_STALL = 5;
+   */
+  PAGE_STALL = 5,
+
+  /**
+   * A reload's blank page: from Emacs starting a reload of the page (the
+   * host's reload, which reloads every page, or the page's own) to the
+   * reloaded page's first frame shown. Measured by the webapp from the
+   * instant Emacs writes into the URL it loads the page at. A reloaded page
+   * that is not shown when it first paints reports nothing: nobody saw it
+   * blank.
+   *
+   * @generated from enum value: REPORTED_LATENCY_KIND_RELOAD_BLANK = 6;
+   */
+  RELOAD_BLANK = 6,
 }
 
 /**
@@ -465,6 +528,46 @@ export enum ReportedLatencyKind {
  */
 export const ReportedLatencyKindSchema: GenEnum<ReportedLatencyKind> = /*@__PURE__*/
   enumDesc(file_agentrepl_v1_endpoint_report_latencies, 0);
+
+/**
+ * Which editor-wide interaction a reported editor latency measured. Each
+ * value names one entry of proto/vocab/latencies.json, as a
+ * ReportedLatencyKind does.
+ *
+ * @generated from enum agentrepl.v1.EditorLatencyKind
+ */
+export enum EditorLatencyKind {
+  /**
+   * Never sent: a request carrying it is refused as InvalidArgument.
+   *
+   * @generated from enum value: EDITOR_LATENCY_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * A stall of the editor's command loop: how late the editor's steady
+   * sampling timer ran, when it ran at least the vocabulary's detection floor
+   * late. Every keystroke and every redisplay waits on the loop meanwhile.
+   *
+   * @generated from enum value: EDITOR_LATENCY_KIND_STALL = 1;
+   */
+  STALL = 1,
+
+  /**
+   * A deploy's pushed elisp reload (DaemonReloadElisp), from its first module
+   * load to its heartbeat assertion done. The editor runs nothing else
+   * meanwhile.
+   *
+   * @generated from enum value: EDITOR_LATENCY_KIND_ELISP_RELOAD = 2;
+   */
+  ELISP_RELOAD = 2,
+}
+
+/**
+ * Describes the enum agentrepl.v1.EditorLatencyKind.
+ */
+export const EditorLatencyKindSchema: GenEnum<EditorLatencyKind> = /*@__PURE__*/
+  enumDesc(file_agentrepl_v1_endpoint_report_latencies, 1);
 
 /**
  * Which milestone of the editor's startup was reached. A closed set of
@@ -518,5 +621,5 @@ export enum EditorStartupMilestone {
  * Describes the enum agentrepl.v1.EditorStartupMilestone.
  */
 export const EditorStartupMilestoneSchema: GenEnum<EditorStartupMilestone> = /*@__PURE__*/
-  enumDesc(file_agentrepl_v1_endpoint_report_latencies, 1);
+  enumDesc(file_agentrepl_v1_endpoint_report_latencies, 2);
 
