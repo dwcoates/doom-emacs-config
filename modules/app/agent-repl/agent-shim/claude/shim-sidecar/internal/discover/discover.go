@@ -623,28 +623,22 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 	}
 	taskID := strings.TrimSuffix(segs[3], ".output")
 	target := Target{Path: path, TaskID: taskID, SpoolDir: filepath.Dir(path)}
+	kind, known := TaskKind(taskID)
+	target.Kind = kind
+	// Every spool but an agent's transcript is read RAW. A workflow spool
+	// (R-S4: KICKED this wave, discovered and cursor-tailed but converted only
+	// to DECLARED residue) is raw because no conversion uses its record
+	// structure, and reading it as JSONL would refuse lines a workflow spool is
+	// under no obligation to make parseable.
+	target.Raw = kind != tail.KindAgentTranscript
 	switch {
-	case strings.HasPrefix(taskID, "b"):
-		target.Kind = tail.KindShellSpool
-		target.Raw = true
-	case strings.HasPrefix(taskID, "a"):
-		target.Kind = tail.KindAgentTranscript
-	case strings.HasPrefix(taskID, "w"):
-		// R-S4: workflow is KICKED this wave, so a w* spool is discovered and
-		// cursor-tailed like any other file but converted only to DECLARED
-		// residue. It is read RAW because there is no conversion that would use
-		// its record structure, and reading it as JSONL would refuse lines a
-		// workflow spool is under no obligation to make parseable.
-		target.Kind = tail.KindWorkflowSpool
-		target.Raw = true
+	case known:
 	default:
 		// THE PREFIX IS HOW A SPOOL'S CONVERSION IS SELECTED, so one we do not
 		// recognize means the bytes cannot be converted — and nothing could
 		// render them, so the reader never reads them. It is still discovered,
 		// so that decision is stated, and it is loud because a new vendor task
 		// kind is a mapping this reader is missing.
-		target.Kind = tail.KindResidueSpool
-		target.Raw = true
 		bound := d.log.With(logging.Context{Operation: "classify-spool", Path: path, TaskID: taskID})
 		if d.statedUnclassifiable[path] {
 			bound.LogVerbose("spool task id still has no a/b/w kind prefix; the defect was already stated for this path")
@@ -655,6 +649,25 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 			Log("spool task id has no a/b/w kind prefix: its conversion cannot be selected, so nothing renders it and it is not read; a new vendor task kind needs a mapping")
 	}
 	return target, true
+}
+
+// TaskKind is the kind of run a vendor task id names, by its prefix: b a
+// detached shell, a a backgrounded agent, w a workflow. An id with none of
+// those prefixes is residue, and known is false.
+//
+// THE ONE MAPPING. Spool discovery selects a spool's conversion by it, and the
+// reader judges a run it can never read (preboot.go) by it, so the two can
+// never disagree about what a task id is.
+func TaskKind(taskID string) (kind tail.Kind, known bool) {
+	switch {
+	case strings.HasPrefix(taskID, "b"):
+		return tail.KindShellSpool, true
+	case strings.HasPrefix(taskID, "a"):
+		return tail.KindAgentTranscript, true
+	case strings.HasPrefix(taskID, "w"):
+		return tail.KindWorkflowSpool, true
+	}
+	return tail.KindResidueSpool, false
 }
 
 // Normalize resolves a path to the spelling everything else compares against.
