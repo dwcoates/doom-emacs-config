@@ -2780,7 +2780,7 @@ sweep `5m` after start, then one every `24h`, so a daemon that restarts daily
 still sweeps daily. Time comes from an injected `Clock`; the unit suite fires
 the schedule by hand and never sleeps. **One sweep at a time**: in process a
 `TryLock` refuses a second (`ErrSweepRunning`), and across processes the sweep
-holds `<lock dir>/worktree-reap.lock` (`internal/flock`) for its whole run,
+holds `<lock dir>/worktree-reap.lock` (`internal/recordlock`) for its whole run,
 so an incumbent and its handover successor never sweep together; the loser
 records INFO and sweeps nothing.
 
@@ -3088,7 +3088,7 @@ than 15m away (a sleeping machine does not advance the monotonic clock). A
 run with nothing new, or none worth reporting, stands nothing and is still
 recorded. A model failure or no source read records only the run's end, so
 the cadence moves but the same material is read again. One run at a time:
-`TryLock` in process, and `<lock dir>/news-digest.lock` (`internal/flock`)
+`TryLock` in process, and `<lock dir>/news-digest.lock` (`internal/recordlock`)
 across processes; a scheduled run re-reads the cadence UNDER that lock and
 does not run (republishing the standing instead) when another daemon's run
 just ended. Only the daemon that serves (`rollout.Controller.ServesIntake`,

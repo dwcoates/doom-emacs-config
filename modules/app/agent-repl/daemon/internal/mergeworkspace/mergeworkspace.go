@@ -18,10 +18,10 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/flock"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/recordlock"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/sessioncommand"
 	"agent-repld/internal/standdown"
@@ -465,7 +465,7 @@ func (s *Service) retireLanded(ctx context.Context, landed []wsm.Workspace, now 
 	}
 	log := s.deps.Log.Global()
 	lockFields := dlog.Context{"lock": s.deps.WorktreeLock, "requesters": len(landed)}
-	lock, held, err := flock.TryExclusive(s.deps.WorktreeLock)
+	lock, held, err := recordlock.Hold(s.deps.WorktreeLock)
 	if err != nil {
 		sweepFailed(ctx, log, log.Error, "could not take the worktree lock; no idle landed requester is retired", lockFields, err)
 		return 0

@@ -12,7 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/flock"
+	"agent-repld/internal/recordlock"
 	"agent-repld/internal/wsm"
 )
 
@@ -92,7 +92,7 @@ func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (out
 		return outcome{}, ErrAlreadyRunning
 	}
 	defer d.running.Unlock()
-	lock, held, err := flock.TryExclusive(d.deps.LockPath)
+	lock, held, err := recordlock.Hold(d.deps.LockPath)
 	if err != nil {
 		log.Error(opRun, "the news digest run lock could not be taken", dlog.Context{"lock": d.deps.LockPath, "cause": err.Error()})
 		return outcome{}, fmt.Errorf("newsdigest: %w", err)

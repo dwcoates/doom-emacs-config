@@ -428,3 +428,116 @@ func TestEveryLockFileOpenGoesThroughOpenFile(t *testing.T) {
 		}
 	}
 }
+
+func TestHold(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   func(t *testing.T) string
+		hold   bool // the lock is already held in this process
+		wantOK bool
+	}{
+		{name: "a free lock is held", path: lockPath, wantOK: true},
+		{name: "a held lock answers false", path: lockPath, hold: true},
+		{name: "a missing directory is created", wantOK: true,
+			path: func(t *testing.T) string { return filepath.Join(t.TempDir(), "a", "b", "x.lock") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			path := tt.path(t)
+			if tt.hold {
+				mustTake(t, path)
+			}
+
+			// Act.
+			rec, ok, err := Hold(path)
+
+			// Assert.
+			if err != nil || ok != tt.wantOK {
+				t.Fatalf("Hold = (%v, %v), want (%v, nil)", ok, err, tt.wantOK)
+			}
+			if ok && rec.Path() != path {
+				t.Fatalf("Path = %q, want %q", rec.Path(), path)
+			}
+			rec.Release()
+		})
+	}
+}
+
+func TestHoldInNeverCreatesADirectory(t *testing.T) {
+	// Arrange.
+	dir := filepath.Join(t.TempDir(), "gone")
+
+	// Act.
+	_, ok, err := HoldIn(filepath.Join(dir, "x.lock"))
+
+	// Assert.
+	if !errors.Is(err, os.ErrNotExist) || ok {
+		t.Fatalf("HoldIn = (%v, %v), want os.ErrNotExist", ok, err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("the directory exists after HoldIn: %v", err)
+	}
+}
+
+func TestHoldFailsWhenTheLockCannotBeToldAbout(t *testing.T) {
+	// Arrange: the lock's directory is a file.
+	parent := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(parent, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	_, ok, err := Hold(filepath.Join(parent, "x.lock"))
+
+	// Assert.
+	if err == nil || ok {
+		t.Fatalf("Hold = (%v, %v), want an error", ok, err)
+	}
+}
+
+// TestEveryDaemonKernelLockGoesThroughThisPackage pins the call sites to the
+// one primitive: a production file of the daemon that takes a kernel lock of
+// its own fails here. The one exception is sessionlock's PROBE of the flock a
+// shim's holder process takes (shim-lock), which is that process's contract
+// and is only ever probed here, never held.
+func TestEveryDaemonKernelLockGoesThroughThisPackage(t *testing.T) {
+	// Arrange.
+	allowed := map[string]bool{
+		filepath.Join("internal", "recordlock", "recordlock.go"): true,
+		filepath.Join("internal", "sessionlock", "api.go"):       true,
+	}
+	root := filepath.Join("..", "..")
+	var offenders []string
+
+	// Act.
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (d.Name() == "integration" || d.Name() == "testdata") {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, path)
+		s := string(body)
+		if (strings.Contains(s, "Flock(") || strings.Contains(s, "F_SETLK")) && !allowed[rel] {
+			offenders = append(offenders, rel)
+		}
+		return nil
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("walking the daemon's sources: %v", err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("kernel locks taken outside recordlock in %v; take recordlock.Hold or recordlock.TryExclusive", offenders)
+	}
+}

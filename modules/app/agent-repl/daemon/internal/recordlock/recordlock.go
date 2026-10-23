@@ -1,6 +1,9 @@
 // Package recordlock is the daemon's one kernel lock: a whole-file record
 // lock (fcntl), held by the PROCESS that took it. The boot claim and the
-// serving lock (daemonaddr) go through it.
+// serving lock (daemonaddr), the merge queue's per-repository lock, the
+// landed-worktree reaper's and the held-prompt ingress's sweep locks, the
+// merge workspaces' worktree lock and the news digest's run lock all go
+// through it.
 //
 // A RECORD LOCK, NOT AN flock, because a record lock belongs to a process and
 // an flock to an open file description. An flock is held for as long as ANY
@@ -41,6 +44,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 )
@@ -197,6 +201,34 @@ func TryExclusive(path string) (*Record, Holder, error) {
 		return nil, Holder{}, err
 	}
 	return &Record{f: f, gate: gate, path: path}, Holder{}, nil
+}
+
+// Hold takes the lock at PATH without blocking, for the length of some work,
+// creating its directory and file as needed. The bool is false when another
+// holder has it -- a legal answer the caller waits out or skips -- while an
+// error means the lock could not be TOLD about, which is never read as free.
+func Hold(path string) (*Record, bool, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, false, fmt.Errorf("creating the lock directory %s: %w", filepath.Dir(path), err)
+	}
+	return HoldIn(path)
+}
+
+// HoldIn is Hold for a lock that lives INSIDE a directory the caller does not
+// own the existence of: it creates the lock file but NEVER a directory. A
+// missing directory is an error wrapping os.ErrNotExist. A lock beside the
+// entries of a shared state root must not recreate that root: a daemon whose
+// root was deleted would otherwise put the path back and read its own
+// recreation as "replaced by another directory".
+func HoldIn(path string) (*Record, bool, error) {
+	rec, _, err := TryExclusive(path)
+	switch {
+	case errors.Is(err, ErrWouldBlock):
+		return nil, false, nil
+	case err != nil:
+		return nil, false, fmt.Errorf("locking %s: %w", path, err)
+	}
+	return rec, true, nil
 }
 
 // BlockExclusive waits for the exclusive lock on F, an already open

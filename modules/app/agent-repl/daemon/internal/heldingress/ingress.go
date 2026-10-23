@@ -12,11 +12,11 @@ import (
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/flock"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/intakegate"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/recordlock"
 	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
 )
@@ -133,7 +133,7 @@ func (i *ingress) Sweep(ctx context.Context) error {
 	// recreating it would put back a state root that was deleted under this
 	// daemon (its own root watch would then read the recreation as another
 	// directory). No directory is no entry, so there is nothing to sweep.
-	lock, held, err := flock.TryExclusiveIn(i.deps.LockPath)
+	lock, held, err := recordlock.HoldIn(i.deps.LockPath)
 	if errors.Is(err, os.ErrNotExist) {
 		i.deps.Log.Global().Debug(opLock, "the ingress directory does not exist; nothing has been written to sweep", dlog.Context{"dir": i.deps.Dir})
 		return nil

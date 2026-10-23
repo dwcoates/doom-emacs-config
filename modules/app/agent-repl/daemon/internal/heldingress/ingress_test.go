@@ -14,9 +14,9 @@ import (
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/flock"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/recordlock"
 	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/wsm"
 )
@@ -565,7 +565,7 @@ func TestASweepTakesNothingWhileAnotherDaemonHoldsTheSweepLock(t *testing.T) {
 	// Arrange: another daemon on this state root is mid-sweep.
 	w := newWorld(t)
 	w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
-	other, held, err := flock.TryExclusiveIn(filepath.Join(w.dir, LockName))
+	other, held, err := recordlock.HoldIn(filepath.Join(w.dir, LockName))
 	if err != nil || !held {
 		t.Fatalf("TryExclusive = (%v, %v), want the lock", held, err)
 	}

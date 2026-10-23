@@ -15,10 +15,10 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
-	"agent-repld/internal/flock"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/recordlock"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"agent-repld/internal/wsm"
@@ -1123,7 +1123,7 @@ func TestSweepRetiresNothingWhileTheReaperHoldsTheWorktreeLock(t *testing.T) {
 	f := newFixture(t)
 	landedRequester(t, f, time.Now())
 	f.now = time.Now().Add(LandedIdleLimit + time.Hour)
-	held, ok, err := flock.TryExclusive(f.svc.deps.WorktreeLock)
+	held, ok, err := recordlock.Hold(f.svc.deps.WorktreeLock)
 	if err != nil || !ok {
 		t.Fatalf("TryExclusive = %v, %v", ok, err)
 	}
