@@ -9,8 +9,9 @@
  * Drawn here, there is one copy, it is always current, and a switch changes
  * only which page is shown beside it.
  *
- * SO THE WEBHOST TALKS TO THE DAEMON. It opens its own connection on its own
- * origin (the daemon serves it, like a page), registers as a page of its own
+ * SO THE WEBHOST TALKS TO THE DAEMON. It opens its own connection to the
+ * daemon Emacs last named (rpc/daemon-origin.ts: the one that served it, until
+ * a handover moves the workspaces on), registers as a page of its own
  * on that connection (`WatchPage`, with no workspace), and logs as the webhost
  * (`ClientLogRequest.source.webhost`), which the daemon files centrally. Its
  * failures go to every page's warning chip (host.ts `setFailures`), the
@@ -33,6 +34,7 @@ import { beginPage, endPageAtPagehide, pageEnding, stopAtPageTeardown } from "..
 import { createAgentReplClient, type AgentReplClient } from "../rpc/client.js";
 import { createDaemonContext } from "../rpc/context.js";
 import { createDaemonTransport } from "../rpc/transport.js";
+import type { DaemonOrigin } from "../rpc/daemon-origin.js";
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
 import type { Host } from "./host.js";
 import { installLoadCensus, type LoadCensus } from "./load-census.js";
@@ -52,6 +54,8 @@ export interface WebhostSidebarStartDeps {
   installCensus?: (doc: Document) => LoadCensus;
   /** The webhost's live log threshold (`Host.setLogLevel`); info when absent. */
   level?: LevelWindow;
+  /** The daemon the sidebar dials (`Host.setDaemon` moves it); the webhost's own origin when absent. */
+  daemon?: DaemonOrigin;
 }
 
 /**
@@ -73,7 +77,8 @@ export function startWebhostSidebar(
   // sidebar's roster) neither answer nor reopen into a document that is gone.
   beginPage();
   const client =
-    deps.client ?? createAgentReplClient(createDaemonTransport(win.location.origin, { signal: pageEnding() }));
+    deps.client ??
+    createAgentReplClient(createDaemonTransport(deps.daemon ?? win.location.origin, { signal: pageEnding() }));
   const connectionId = mintConnectionId();
   bindLogContext({ connection_id: connectionId });
   installForwardingLogger(() => client, { case: "webhost", value: {} }, deps.level ?? "info", deps.installLogger ?? setLogger);

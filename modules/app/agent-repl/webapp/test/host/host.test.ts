@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // The host page: one iframe per workspace, one shown, state replayed on hello,
 // facts mirrored for Emacs. See src/host/host.ts.
+import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { levelApplyShapeOf } from "./level-apply-shape.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +20,12 @@ import { HOST_CHANNEL, type HostToPage } from "../../src/host/protocol.js";
 let host: Host;
 
 beforeEach(() => {
-  host = createHost({ doc: document, win: window, level: LevelWindow.fixed("info") });
+  host = createHost({
+    daemon: createDaemonOrigin("http://host.localhost:1"),
+    doc: document,
+    win: window,
+    level: LevelWindow.fixed("info"),
+  });
 });
 
 afterEach(() => {
@@ -28,7 +34,9 @@ afterEach(() => {
 });
 
 function frame(id: string): HTMLIFrameElement {
-  const found = document.querySelector<HTMLIFrameElement>(`iframe[${FRAME_WORKSPACE_ATTRIBUTE}="${id}"]`);
+  const found = document.querySelector<HTMLIFrameElement>(
+    `iframe[${FRAME_WORKSPACE_ATTRIBUTE}="${id}"]`,
+  );
   if (found === null) throw new Error(`no frame for ${id}`);
   return found;
 }
@@ -55,7 +63,9 @@ function pages(h: Host, ...ids: string[]): void {
 
 /** Deliver DATA to the host as though ID's page posted it. */
 function fromPage(id: string, data: unknown): void {
-  window.dispatchEvent(new MessageEvent("message", { data, source: frame(id).contentWindow }));
+  window.dispatchEvent(
+    new MessageEvent("message", { data, source: frame(id).contentWindow }),
+  );
 }
 
 /** Ensure ID's page in turn in LANE on H, answering the parsed answer. */
@@ -129,18 +139,21 @@ describe("ensure in turn", () => {
     expect([answer.outcome, loading("b")]).toEqual(["queued", false]);
   });
 
-  it.each(["page", "refused"])("starts the next page once the one before says it drew (%s)", (what) => {
-    // Arrange
-    inTurn(host, "a");
-    inTurn(host, "b");
-    inTurn(host, "c");
+  it.each(["page", "refused"])(
+    "starts the next page once the one before says it drew (%s)",
+    (what) => {
+      // Arrange
+      inTurn(host, "a");
+      inTurn(host, "b");
+      inTurn(host, "c");
 
-    // Act
-    fromPage("a", { channel: HOST_CHANNEL, kind: "drawn", what });
+      // Act
+      fromPage("a", { channel: HOST_CHANNEL, kind: "drawn", what });
 
-    // Assert
-    expect([loading("b"), loading("c")]).toEqual([true, false]);
-  });
+      // Assert
+      expect([loading("b"), loading("c")]).toEqual([true, false]);
+    },
+  );
 
   it("loads a page still waiting its turn the moment it is shown", () => {
     // Arrange
@@ -231,7 +244,12 @@ describe("ensure in turn", () => {
     // Arrange
     vi.useFakeTimers();
     try {
-      const timed = createHost({ doc: document, win: window, level: LevelWindow.fixed("info") });
+      const timed = createHost({
+        daemon: createDaemonOrigin("http://host.localhost:1"),
+        doc: document,
+        win: window,
+        level: LevelWindow.fixed("info"),
+      });
       inTurn(timed, "p", "right");
       inTurn(timed, "q", "left");
 
@@ -249,7 +267,12 @@ describe("ensure in turn", () => {
     // Arrange
     vi.useFakeTimers();
     try {
-      const timed = createHost({ doc: document, win: window, level: LevelWindow.fixed("info") });
+      const timed = createHost({
+        daemon: createDaemonOrigin("http://host.localhost:1"),
+        doc: document,
+        win: window,
+        level: LevelWindow.fixed("info"),
+      });
       try {
         inTurn(timed, "p");
         inTurn(timed, "q");
@@ -258,11 +281,18 @@ describe("ensure in turn", () => {
         vi.advanceTimersByTime(IN_TURN_BOUND_MS);
 
         // Assert
-        const notes = parsed(timed.ids()).notes as { level: string; text: string }[];
-        expect([loading("q"), notes.some((n) => n.level === "warn" && n.text.includes("page p loading in turn in lane right"))]).toEqual([
-          true,
-          true,
-        ]);
+        const notes = parsed(timed.ids()).notes as {
+          level: string;
+          text: string;
+        }[];
+        expect([
+          loading("q"),
+          notes.some(
+            (n) =>
+              n.level === "warn" &&
+              n.text.includes("page p loading in turn in lane right"),
+          ),
+        ]).toEqual([true, true]);
       } finally {
         timed.dispose();
       }
@@ -275,7 +305,9 @@ describe("ensure in turn", () => {
 describe("ensure", () => {
   it("creates an iframe at the URL for a new workspace", () => {
     // Act
-    const answer = parsed(host.ensure("a", "http://ws-a.localhost:1/?workspace=a"));
+    const answer = parsed(
+      host.ensure("a", "http://ws-a.localhost:1/?workspace=a"),
+    );
 
     // Assert
     expect(answer.outcome).toBe("created");
@@ -331,8 +363,15 @@ describe("ensure", () => {
     // Assert
     expect(posted).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "inputBackground", background: "#123456" }),
-        expect.objectContaining({ kind: "gateDock", pixels: 40, background: "#abcdef" }),
+        expect.objectContaining({
+          kind: "inputBackground",
+          background: "#123456",
+        }),
+        expect.objectContaining({
+          kind: "gateDock",
+          pixels: 40,
+          background: "#abcdef",
+        }),
       ]),
     );
   });
@@ -355,16 +394,18 @@ describe("ensure", () => {
     inTurn(host, "q");
 
     // Act
-    const answer = parsed(host.ensure("q", "http://ws-q.localhost:2/", "right"));
+    const answer = parsed(
+      host.ensure("q", "http://ws-q.localhost:2/", "right"),
+    );
     const repointed = frame("q");
     fromPage("p", { channel: HOST_CHANNEL, kind: "drawn", what: "page" });
 
     // Assert
-    expect([answer.outcome, repointed.getAttribute("src"), frame("q") === repointed]).toEqual([
-      "navigated",
-      "http://ws-q.localhost:2/",
-      true,
-    ]);
+    expect([
+      answer.outcome,
+      repointed.getAttribute("src"),
+      frame("q") === repointed,
+    ]).toEqual(["navigated", "http://ws-q.localhost:2/", true]);
   });
 
   // A removed page and a re-pointed one retire their frame the same way.
@@ -446,7 +487,11 @@ describe("show", () => {
     host.show("a");
 
     // Assert
-    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "presence", shown: true });
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "presence",
+      shown: true,
+    });
   });
 
   it("tells the previously shown page it is hidden", () => {
@@ -460,7 +505,11 @@ describe("show", () => {
     host.show("b");
 
     // Assert
-    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "presence", shown: false });
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "presence",
+      shown: false,
+    });
   });
 
   it("answers absent for a workspace it holds no page for", () => {
@@ -534,7 +583,11 @@ describe("commands", () => {
     host.setInputBackground("a", "#101010");
 
     // Assert
-    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "inputBackground", background: "#101010" });
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "inputBackground",
+      background: "#101010",
+    });
   });
 
   it("sends the docked gate's slot to the page", () => {
@@ -546,7 +599,12 @@ describe("commands", () => {
     host.setGateDock("a", 140, null);
 
     // Assert
-    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "gateDock", pixels: 140, background: null });
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "gateDock",
+      pixels: 140,
+      background: null,
+    });
   });
 
   it("asks the page to close its news digest", () => {
@@ -558,20 +616,28 @@ describe("commands", () => {
     host.dismissDigest("a");
 
     // Assert
-    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "dismissDigest" });
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "dismissDigest",
+    });
   });
 
   it("sends the editor's held-prompt ingress entries to the page", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");
     const posted = postsTo("a");
-    const entries = [{ key: "k-1", queuedAt: "2026-10-20T15:18:02Z", said: { content: {} } }];
+    const entries = [
+      { key: "k-1", queuedAt: "2026-10-20T15:18:02Z", said: { content: {} } },
+    ];
 
     // Act
     const outcome = parsed(host.setHeldIngress("a", entries)).outcome;
 
     // Assert
-    expect([outcome, posted]).toEqual(["sent", [{ channel: HOST_CHANNEL, kind: "heldIngress", entries }]]);
+    expect([outcome, posted]).toEqual([
+      "sent",
+      [{ channel: HOST_CHANNEL, kind: "heldIngress", entries }],
+    ]);
   });
 
   it("refuses ingress entries that are not ingress entries, posting nothing", () => {
@@ -583,11 +649,17 @@ describe("commands", () => {
     const answer = parsed(host.setHeldIngress("a", [{ key: 3 }]));
 
     // Assert
-    expect([answer.outcome, posted, (answer.notes as unknown[]).length]).toEqual(["refused", [], 1]);
+    expect([
+      answer.outcome,
+      posted,
+      (answer.notes as unknown[]).length,
+    ]).toEqual(["refused", [], 1]);
   });
 
   it("answers absent for a command to a workspace it holds no page for", () => {
-    expect(parsed(host.setInputBackground("nobody", "#000")).outcome).toBe("absent");
+    expect(parsed(host.setInputBackground("nobody", "#000")).outcome).toBe(
+      "absent",
+    );
   });
 });
 
@@ -609,14 +681,21 @@ describe("hello", () => {
       { channel: HOST_CHANNEL, kind: "sidebarDock", docked: false },
       { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] },
       { channel: HOST_CHANNEL, kind: "inputBackground", background: "#202020" },
-      { channel: HOST_CHANNEL, kind: "gateDock", pixels: 90, background: "#202020" },
+      {
+        channel: HOST_CHANNEL,
+        kind: "gateDock",
+        pixels: 90,
+        background: "#202020",
+      },
     ]);
   });
 
   it("replays the editor's held-prompt ingress entries to a page that says hello", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");
-    const entries = [{ key: "k-1", queuedAt: "2026-10-20T15:18:02Z", said: { content: {} } }];
+    const entries = [
+      { key: "k-1", queuedAt: "2026-10-20T15:18:02Z", said: { content: {} } },
+    ];
     host.setHeldIngress("a", entries);
     const posted = postsTo("a");
 
@@ -624,7 +703,11 @@ describe("hello", () => {
     fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
 
     // Assert
-    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "heldIngress", entries });
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "heldIngress",
+      entries,
+    });
   });
 
   it("forgets the drawn mark of a page that says hello again", () => {
@@ -649,7 +732,10 @@ describe("mirrored facts", () => {
     fromPage("a", { channel: HOST_CHANNEL, kind: "drawn", what: "refused" });
 
     // Assert
-    expect(parsed(host.drawn("a"))).toMatchObject({ outcome: "present", drawn: "refused" });
+    expect(parsed(host.drawn("a"))).toMatchObject({
+      outcome: "present",
+      drawn: "refused",
+    });
   });
 
   it("answers the shown page's selection", () => {
@@ -658,14 +744,26 @@ describe("mirrored facts", () => {
     host.show("a");
 
     // Act
-    fromPage("a", { channel: HOST_CHANNEL, kind: "selection", text: "picked", focused: true });
+    fromPage("a", {
+      channel: HOST_CHANNEL,
+      kind: "selection",
+      text: "picked",
+      focused: true,
+    });
 
     // Assert
-    expect(parsed(host.selection())).toMatchObject({ id: "a", text: "picked", focused: true });
+    expect(parsed(host.selection())).toMatchObject({
+      id: "a",
+      text: "picked",
+      focused: true,
+    });
   });
 
   it("answers no selection when no page is shown", () => {
-    expect(parsed(host.selection())).toMatchObject({ outcome: "none-shown", text: null });
+    expect(parsed(host.selection())).toMatchObject({
+      outcome: "none-shown",
+      text: null,
+    });
   });
 
   it("answers whether a text field of the shown page holds the keyboard", () => {
@@ -704,18 +802,33 @@ describe("notes", () => {
     const answer = parsed(host.ids());
 
     // Assert
-    expect(answer.notes).toEqual([{ level: "info", text: expect.stringContaining("cannot read") as unknown }]);
+    expect(answer.notes).toEqual([
+      {
+        level: "info",
+        text: expect.stringContaining("cannot read") as unknown,
+      },
+    ]);
   });
 
   it("notes a message on its channel from no page it holds", () => {
     // Arrange
-    window.dispatchEvent(new MessageEvent("message", { data: { channel: HOST_CHANNEL, kind: "hello" }, source: window }));
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: { channel: HOST_CHANNEL, kind: "hello" },
+        source: window,
+      }),
+    );
 
     // Act
     const answer = parsed(host.ids());
 
     // Assert
-    expect(answer.notes).toEqual([{ level: "warn", text: expect.stringContaining("no workspace page") as unknown }]);
+    expect(answer.notes).toEqual([
+      {
+        level: "warn",
+        text: expect.stringContaining("no workspace page") as unknown,
+      },
+    ]);
   });
 
   it("hands each note to one answer only", () => {
@@ -733,7 +846,12 @@ describe("notes", () => {
 
   it("ignores a message on another channel", () => {
     // Arrange
-    window.dispatchEvent(new MessageEvent("message", { data: { channel: "vite" }, source: window }));
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: { channel: "vite" },
+        source: window,
+      }),
+    );
 
     // Act
     const answer = parsed(host.ids());
@@ -765,7 +883,9 @@ describe("hostHasFocus", () => {
 
   it("answers yes for a text field of the host itself", () => {
     // Arrange
-    const doc = { activeElement: document.createElement("textarea") } as unknown as Document;
+    const doc = {
+      activeElement: document.createElement("textarea"),
+    } as unknown as Document;
 
     // Act / Assert
     expect(hostHasFocus(doc, host)).toBe(true);
@@ -773,7 +893,9 @@ describe("hostHasFocus", () => {
 
   it("answers no for any other focused element", () => {
     // Arrange
-    const doc = { activeElement: document.createElement("button") } as unknown as Document;
+    const doc = {
+      activeElement: document.createElement("button"),
+    } as unknown as Document;
 
     // Act / Assert
     expect(hostHasFocus(doc, host)).toBe(false);
@@ -782,7 +904,11 @@ describe("hostHasFocus", () => {
 
 describe("the webhost's sidebar", () => {
   /** A failure row as the webhost relays it. */
-  const FAILURE = { arm: "daemonUnreachable", headline: "lost the connection", evidence: [["close", "1006"]] } as const;
+  const FAILURE = {
+    arm: "daemonUnreachable",
+    headline: "lost the connection",
+    evidence: [["close", "1006"]],
+  } as const;
 
   /** ID's page reports its gate band PIXELS tall. */
   function band(id: string, pixels: number): void {
@@ -791,7 +917,9 @@ describe("the webhost's sidebar", () => {
 
   /** Where the sidebar ends, as the webhost set it. */
   function sidebarBottom(): string {
-    return document.documentElement.style.getPropertyValue(SIDEBAR_BOTTOM_PROPERTY);
+    return document.documentElement.style.getPropertyValue(
+      SIDEBAR_BOTTOM_PROPERTY,
+    );
   }
 
   afterEach(() => {
@@ -822,7 +950,11 @@ describe("the webhost's sidebar", () => {
     fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
 
     // Assert
-    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "sidebarDock", docked: true });
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "sidebarDock",
+      docked: true,
+    });
   });
 
   it("tells every page its own standing failures", () => {
@@ -834,7 +966,9 @@ describe("the webhost's sidebar", () => {
     host.setFailures([FAILURE]);
 
     // Assert
-    expect(toB).toEqual([{ channel: HOST_CHANNEL, kind: "webhostFailures", failures: [FAILURE] }]);
+    expect(toB).toEqual([
+      { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [FAILURE] },
+    ]);
   });
 
   it("tells a page that says hello the failures standing", () => {
@@ -847,7 +981,11 @@ describe("the webhost's sidebar", () => {
     fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
 
     // Assert
-    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "webhostFailures", failures: [FAILURE] });
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "webhostFailures",
+      failures: [FAILURE],
+    });
   });
 
   it("ends the sidebar above the gate band of the page on screen", () => {
@@ -923,7 +1061,13 @@ describe("the webhost's sidebar", () => {
     host.dispose();
     const stack = document.createElement("div");
     document.body.append(stack);
-    host = createHost({ doc: document, win: window, level: LevelWindow.fixed("info"), frames: stack });
+    host = createHost({
+      daemon: createDaemonOrigin("http://host.localhost:1"),
+      doc: document,
+      win: window,
+      level: LevelWindow.fixed("info"),
+      frames: stack,
+    });
 
     // Act
     host.ensure("a", "http://ws-a.localhost:1/");
@@ -937,8 +1081,17 @@ describe("setLogLevel", () => {
   /** A host on CLOCK, holding the level window it raises. */
   function leveled(clock: { ms: number }) {
     host.dispose();
-    const level = new LevelWindow({ level: "info", untilMs: null }, () => clock.ms);
-    host = createHost({ doc: document, win: window, level, now: () => clock.ms });
+    const level = new LevelWindow(
+      { level: "info", untilMs: null },
+      () => clock.ms,
+    );
+    host = createHost({
+      daemon: createDaemonOrigin("http://host.localhost:1"),
+      doc: document,
+      win: window,
+      level,
+      now: () => clock.ms,
+    });
     return level;
   }
 
@@ -964,7 +1117,12 @@ describe("setLogLevel", () => {
     host.setLogLevel("debug", 1_060_000);
 
     // Assert
-    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: 1_060_000 });
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "logLevel",
+      level: "debug",
+      untilMs: 1_060_000,
+    });
   });
 
   it("replays a standing window to a page that says hello", () => {
@@ -978,7 +1136,12 @@ describe("setLogLevel", () => {
     fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
 
     // Assert
-    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: 1_060_000 });
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "logLevel",
+      level: "debug",
+      untilMs: 1_060_000,
+    });
   });
 
   it("replays no window that has ended", () => {
@@ -1011,7 +1174,14 @@ describe("setLogLevel", () => {
     expect([answer.outcome, level.level(), posted]).toEqual([
       "closed",
       "info",
-      [{ channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null }],
+      [
+        {
+          channel: HOST_CHANNEL,
+          kind: "logLevel",
+          level: "info",
+          untilMs: null,
+        },
+      ],
     ]);
   });
 
@@ -1020,18 +1190,24 @@ describe("setLogLevel", () => {
     ["a window with no end", "debug", null],
     ["an info level with an end", "info", 1_060_000],
     ["a window longer than a level may last", "debug", 1_000_000 + 600_000],
-  ] as const)("refuses %s, leaving the level at info", (_name, name, untilMs) => {
-    // Arrange
-    const level = leveled({ ms: 1_000_000 });
+  ] as const)(
+    "refuses %s, leaving the level at info",
+    (_name, name, untilMs) => {
+      // Arrange
+      const level = leveled({ ms: 1_000_000 });
 
-    // Act
-    const answer = parsed(host.setLogLevel(name, untilMs));
+      // Act
+      const answer = parsed(host.setLogLevel(name, untilMs));
 
-    // Assert
-    expect([answer.outcome, level.level(), (answer.notes as unknown[]).length]).toEqual(["refused", "info", 1]);
-  });
+      // Assert
+      expect([
+        answer.outcome,
+        level.level(),
+        (answer.notes as unknown[]).length,
+      ]).toEqual(["refused", "info", 1]);
+    },
+  );
 });
-
 
 describe("the webhost's log level", () => {
   it("is applied through LevelWindow.apply, never opened or closed by hand", () => {
@@ -1050,14 +1226,19 @@ describe("a hidden page keeps the size it was hidden at", () => {
   });
 
   /** A host whose frames measure at whatever SIZE holds, recording that each was laid out when measured. */
-  function sizedHost(size: { width: number; height: number }): { host: Host; detached: string[] } {
+  function sizedHost(size: { width: number; height: number }): {
+    host: Host;
+    detached: string[];
+  } {
     const detached: string[] = [];
     const sized = createHost({
+      daemon: createDaemonOrigin("http://host.localhost:1"),
       doc: document,
       win: window,
       level: LevelWindow.fixed("info"),
       measure: (element) => {
-        if (!element.isConnected) detached.push(element.getAttribute(FRAME_WORKSPACE_ATTRIBUTE) ?? "?");
+        if (!element.isConnected)
+          detached.push(element.getAttribute(FRAME_WORKSPACE_ATTRIBUTE) ?? "?");
         return { ...size };
       },
     });
@@ -1065,7 +1246,9 @@ describe("a hidden page keeps the size it was hidden at", () => {
     return { host: sized, detached };
   }
   const frameOf = (id: string): HTMLIFrameElement =>
-    document.querySelector<HTMLIFrameElement>(`iframe[${FRAME_WORKSPACE_ATTRIBUTE}="${id}"]`)!;
+    document.querySelector<HTMLIFrameElement>(
+      `iframe[${FRAME_WORKSPACE_ATTRIBUTE}="${id}"]`,
+    )!;
 
   it("fixes a frame created hidden at the size it fills, measured once it is in the document", () => {
     // Arrange
@@ -1075,7 +1258,11 @@ describe("a hidden page keeps the size it was hidden at", () => {
     sized.ensure("a", "http://a.example/");
 
     // Assert
-    expect([frameOf("a").style.width, frameOf("a").style.height, detached]).toEqual(["800px", "600px", []]);
+    expect([
+      frameOf("a").style.width,
+      frameOf("a").style.height,
+      detached,
+    ]).toEqual(["800px", "600px", []]);
   });
 
   it("lets the shown frame fill the view, and fixes the one it replaced at its size then", () => {
@@ -1091,8 +1278,14 @@ describe("a hidden page keeps the size it was hidden at", () => {
     sized.show("b");
 
     // Assert
-    expect([frameOf("b").style.width, frameOf("b").style.height]).toEqual(["", ""]);
-    expect([frameOf("a").style.width, frameOf("a").style.height]).toEqual(["800px", "700px"]);
+    expect([frameOf("b").style.width, frameOf("b").style.height]).toEqual([
+      "",
+      "",
+    ]);
+    expect([frameOf("a").style.width, frameOf("a").style.height]).toEqual([
+      "800px",
+      "700px",
+    ]);
   });
 
   it("lets a frame shown again fill the view at whatever size it is now", () => {
@@ -1107,13 +1300,17 @@ describe("a hidden page keeps the size it was hidden at", () => {
     sized.show("a");
 
     // Assert
-    expect([frameOf("a").style.width, frameOf("a").style.height]).toEqual(["", ""]);
+    expect([frameOf("a").style.width, frameOf("a").style.height]).toEqual([
+      "",
+      "",
+    ]);
   });
 });
 
 describe("show with a switch's start", () => {
   const hello = { channel: HOST_CHANNEL, kind: "hello" } as const;
-  const presenceIn = (posted: HostToPage[]) => posted.filter((m) => m.kind === "presence");
+  const presenceIn = (posted: HostToPage[]) =>
+    posted.filter((m) => m.kind === "presence");
 
   it("tells a listening page when the switch that showed it began", () => {
     // Arrange
@@ -1126,7 +1323,12 @@ describe("show with a switch's start", () => {
 
     // Assert
     expect(presenceIn(posted)).toEqual([
-      { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: 1_700_000_000_123 },
+      {
+        channel: HOST_CHANNEL,
+        kind: "presence",
+        shown: true,
+        switchStartedAtMs: 1_700_000_000_123,
+      },
     ]);
   });
 
@@ -1142,7 +1344,12 @@ describe("show with a switch's start", () => {
 
     // Assert
     expect(presenceIn(posted)).toEqual([
-      { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: 1_700_000_000_123 },
+      {
+        channel: HOST_CHANNEL,
+        kind: "presence",
+        shown: true,
+        switchStartedAtMs: 1_700_000_000_123,
+      },
       { channel: HOST_CHANNEL, kind: "presence", shown: true },
     ]);
   });
@@ -1158,7 +1365,9 @@ describe("show with a switch's start", () => {
     fromPage("a", hello);
 
     // Assert
-    expect(presenceIn(posted)).toEqual([{ channel: HOST_CHANNEL, kind: "presence", shown: true }]);
+    expect(presenceIn(posted)).toEqual([
+      { channel: HOST_CHANNEL, kind: "presence", shown: true },
+    ]);
   });
 
   it("forgets the switch of a page hidden again before it said hello", () => {
@@ -1173,14 +1382,22 @@ describe("show with a switch's start", () => {
     fromPage("a", hello);
 
     // Assert
-    expect(presenceIn(posted)).toEqual([{ channel: HOST_CHANNEL, kind: "presence", shown: true }]);
+    expect(presenceIn(posted)).toEqual([
+      { channel: HOST_CHANNEL, kind: "presence", shown: true },
+    ]);
   });
 });
 
 describe("a page loaded by a reload", () => {
   const hello = { channel: HOST_CHANNEL, kind: "hello" } as const;
-  const presenceIn = (posted: HostToPage[]) => posted.filter((m) => m.kind === "presence");
-  const reloaded = { channel: HOST_CHANNEL, kind: "presence", shown: false, reloadStartedAtMs: 1_700_000_000_500 };
+  const presenceIn = (posted: HostToPage[]) =>
+    posted.filter((m) => m.kind === "presence");
+  const reloaded = {
+    channel: HOST_CHANNEL,
+    kind: "presence",
+    shown: false,
+    reloadStartedAtMs: 1_700_000_000_500,
+  };
   const plain = { channel: HOST_CHANNEL, kind: "presence", shown: false };
 
   it("hands a page a reload's ensure created the reload's start with the presence its hello replays, once", () => {
@@ -1258,5 +1475,228 @@ describe("a page loaded by a reload", () => {
 
     // Assert
     expect(presenceIn(posted)).toEqual([plain]);
+  });
+});
+
+describe("a shown page re-pointed at another daemon", () => {
+  const hello = { channel: HOST_CHANNEL, kind: "hello" } as const;
+  const drew = { channel: HOST_CHANNEL, kind: "drawn", what: "page" } as const;
+  const framesOf = (id: string): HTMLIFrameElement[] => [
+    ...document.querySelectorAll<HTMLIFrameElement>(
+      `iframe[${FRAME_WORKSPACE_ATTRIBUTE}="${id}"]`,
+    ),
+  ];
+  const fromFrame = (el: HTMLIFrameElement, data: unknown): void => {
+    window.dispatchEvent(
+      new MessageEvent("message", { data, source: el.contentWindow }),
+    );
+  };
+
+  it("keeps the shown page on screen and loads its replacement hidden", () => {
+    // Arrange
+    pages(host, "a");
+    host.show("a");
+
+    // Act
+    const answer = parsed(host.ensure("a", "http://ws-a.localhost:2/"));
+
+    // Assert
+    const [old, fresh] = framesOf("a");
+    expect([
+      answer.outcome,
+      old.hasAttribute(FRAME_SHOWN_ATTRIBUTE),
+      fresh.hasAttribute(FRAME_SHOWN_ATTRIBUTE),
+      fresh.getAttribute("src"),
+    ]).toEqual(["replacing", true, false, "http://ws-a.localhost:2/"]);
+  });
+
+  it("shows the replacement and drops the old page once the replacement has drawn", () => {
+    // Arrange
+    pages(host, "a");
+    host.show("a");
+    host.ensure("a", "http://ws-a.localhost:2/");
+    const [, fresh] = framesOf("a");
+    fromFrame(fresh, hello);
+
+    // Act
+    fromFrame(fresh, drew);
+
+    // Assert
+    expect(framesOf("a")).toEqual([fresh]);
+    expect(fresh.hasAttribute(FRAME_SHOWN_ATTRIBUTE)).toBe(true);
+    expect(parsed(host.drawn("a")).drawn).toBe("page");
+  });
+
+  it("shows the replacement anyway, recorded at warn, when it never says it drew", () => {
+    // Arrange
+    vi.useFakeTimers();
+    try {
+      const timed = createHost({
+        daemon: createDaemonOrigin("http://host.localhost:1"),
+        doc: document,
+        win: window,
+        level: LevelWindow.fixed("info"),
+      });
+      try {
+        timed.ensure("b", "http://ws-b.localhost:1/");
+        timed.show("b");
+        timed.ensure("b", "http://ws-b.localhost:2/");
+        const [, fresh] = framesOf("b");
+
+        // Act
+        vi.advanceTimersByTime(IN_TURN_BOUND_MS);
+
+        // Assert
+        const notes = parsed(timed.ids()).notes as {
+          level: string;
+          text: string;
+        }[];
+        expect(framesOf("b")).toEqual([fresh]);
+        expect(
+          notes.some(
+            (n) =>
+              n.level === "warn" &&
+              n.text.includes("page b's replacement did not say it had drawn"),
+          ),
+        ).toBe(true);
+      } finally {
+        timed.dispose();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("hands the replacement every call the page is given while it waits", () => {
+    // Arrange
+    pages(host, "a");
+    host.show("a");
+    host.ensure("a", "http://ws-a.localhost:2/");
+    const [, fresh] = framesOf("a");
+    host.setInputBackground("a", "#123456");
+    const posted = (() => {
+      const got: HostToPage[] = [];
+      const target = fresh.contentWindow;
+      if (target === null) throw new Error("no window");
+      vi.spyOn(target, "postMessage").mockImplementation((m: unknown) => {
+        got.push(m as HostToPage);
+      });
+      return got;
+    })();
+
+    // Act
+    fromFrame(fresh, hello);
+
+    // Assert
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "inputBackground",
+      background: "#123456",
+    });
+  });
+
+  it("drops a waiting replacement when the page is removed", () => {
+    // Arrange
+    pages(host, "a");
+    host.show("a");
+    host.ensure("a", "http://ws-a.localhost:2/");
+
+    // Act
+    host.remove("a");
+
+    // Assert
+    expect(framesOf("a")).toEqual([]);
+  });
+
+  it("replaces a waiting replacement re-pointed again, and leaves one re-pointed to the same URL alone", () => {
+    // Arrange
+    pages(host, "a");
+    host.show("a");
+    host.ensure("a", "http://ws-a.localhost:2/");
+
+    // Act
+    const same = parsed(host.ensure("a", "http://ws-a.localhost:2/")).outcome;
+    host.ensure("a", "http://ws-a.localhost:3/");
+
+    // Assert
+    expect(same).toBe("unchanged");
+    expect(framesOf("a").map((f) => f.getAttribute("src"))).toEqual([
+      "http://ws-a.localhost:1/",
+      "http://ws-a.localhost:3/",
+    ]);
+  });
+
+  it("re-points a hidden page in a fresh frame at once, since nobody sees it", () => {
+    // Arrange
+    pages(host, "a", "b");
+    host.show("a");
+
+    // Act
+    const answer = parsed(host.ensure("b", "http://ws-b.localhost:2/"));
+
+    // Assert
+    expect(answer.outcome).toBe("navigated");
+    expect(framesOf("b").map((f) => f.getAttribute("src"))).toEqual([
+      "http://ws-b.localhost:2/",
+    ]);
+  });
+});
+
+describe("setDaemon", () => {
+  it("moves the webhost's daemon and says so", () => {
+    // Arrange
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    const retargeted = createHost({
+      daemon,
+      doc: document,
+      win: window,
+      level: LevelWindow.fixed("info"),
+    });
+    try {
+      // Act
+      const answer = parsed(retargeted.setDaemon("http://host.localhost:2"));
+      const again = parsed(retargeted.setDaemon("http://host.localhost:2"));
+
+      // Assert
+      expect([answer.outcome, again.outcome, daemon.current()]).toEqual([
+        "retargeted",
+        "unchanged",
+        "http://host.localhost:2",
+      ]);
+    } finally {
+      retargeted.dispose();
+    }
+  });
+
+  it("refuses what is no daemon origin, recorded at warn, and keeps the daemon", () => {
+    // Arrange
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    const refusing = createHost({
+      daemon,
+      doc: document,
+      win: window,
+      level: LevelWindow.fixed("info"),
+    });
+    try {
+      // Act
+      const answer = parsed(
+        refusing.setDaemon("http://host.localhost:2/?host=1"),
+      );
+
+      // Assert
+      const notes = answer.notes as { level: string; text: string }[];
+      expect([answer.outcome, daemon.current()]).toEqual([
+        "refused",
+        "http://host.localhost:1",
+      ]);
+      expect(
+        notes.some(
+          (n) =>
+            n.level === "warn" && n.text.includes("which is no daemon origin"),
+        ),
+      ).toBe(true);
+    } finally {
+      refusing.dispose();
+    }
   });
 });
