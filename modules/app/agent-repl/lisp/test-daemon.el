@@ -2683,6 +2683,25 @@ the shutdown schedule exists to avoid."
       ;; Assert
       (should (null signalled)))))
 
+(ert-deftest agent-repl-test-daemon-multi-repo-config-dir-defaults-from-its-variable ()
+  "The work account's config root is read from MULTI_REPO_CONFIG_DIR, as the installer reads it."
+  ;; Arrange
+  (let ((process-environment (cons "MULTI_REPO_CONFIG_DIR=/tmp/work-root" process-environment)))
+    ;; Act
+    (let ((default (eval (car (get 'agent-repl-daemon-multi-repo-config-dir 'standard-value)) t)))
+      ;; Assert
+      (should (equal default "/tmp/work-root")))))
+
+(ert-deftest agent-repl-test-daemon-multi-repo-config-dir-without-its-variable-is-the-work-account-root ()
+  "With MULTI_REPO_CONFIG_DIR unset or empty, the root is the work account's documented one."
+  (dolist (env '("MULTI_REPO_CONFIG_DIR" "MULTI_REPO_CONFIG_DIR="))
+    ;; Arrange
+    (let ((process-environment (cons env process-environment)))
+      ;; Act
+      (let ((default (eval (car (get 'agent-repl-daemon-multi-repo-config-dir 'standard-value)) t)))
+        ;; Assert
+        (should (equal default (expand-file-name "~/.claude-chesscom")))))))
+
 (provide 'test-daemon)
 
 ;;; test-daemon.el ends here

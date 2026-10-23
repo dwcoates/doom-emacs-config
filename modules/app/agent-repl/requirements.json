@@ -212,6 +212,15 @@
       "doc": "docs/USER-GUIDE.md#setup"
     },
     {
+      "id": "multi-repo-config-dir",
+      "kind": "env",
+      "why": "names the work account's Claude config root, which sessions under MULTI_REPO_ROOT run under, so every global skill is linked into its skills directory too",
+      "profile": "run",
+      "optional": true,
+      "name": "MULTI_REPO_CONFIG_DIR",
+      "doc": "docs/USER-GUIDE.md#setup"
+    },
+    {
       "id": "workspace-prefix",
       "kind": "env",
       "why": "prefixes new workspace branches, such as with your initials",

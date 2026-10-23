@@ -106,7 +106,7 @@ LAST_RC=0
 run_install() {
   local repo="$1" home="$2" action="${3:-install}"
   set +e
-  HOME="$home" FOO_SKILL_ROOT="$(cat "$repo/.foo-skill-root")" \
+  HOME="$home" FOO_SKILL_ROOT="$(cat "$repo/.foo-skill-root")" MULTI_REPO_CONFIG_DIR="${WORK_CONFIG:-}" \
     bash "$repo/.claude/install.sh" "$action" >"$repo/.install.log" 2>&1
   LAST_RC=$?
   set -e
@@ -348,6 +348,73 @@ test_install_leaves_a_users_file_at_a_retired_skills_name() {
     pass "a file of the user's at a retired skill's name is left alone"
   else
     fail "retired skill vs user file" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+# --- the work account's config root (MULTI_REPO_CONFIG_DIR) ---
+# Sessions under MULTI_REPO_ROOT run under the work account's config root, so
+# every skill link is kept in its skills directory as well as ~/.claude's.
+
+test_install_links_every_skill_into_the_work_config_root_too() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  WORK_CONFIG="$home/.claude-work" run_install "$repo" "$home"
+  local main work; main="$(readlink "$home/.claude/skills/foo" 2>/dev/null || echo MISSING)"
+  work="$(readlink "$home/.claude-work/skills/foo" 2>/dev/null || echo MISSING)"
+  if [ "$LAST_RC" -eq 0 ] && [ "$main" = "$repo/impl/foo" ] && [ "$work" = "$repo/impl/foo" ]; then
+    pass "install links a skill into the work account's config root and ~/.claude"
+  else
+    fail "work config root link" "rc: $LAST_RC" "main: $main" "work: $work" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+test_install_with_no_work_config_root_links_only_into_claude() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  run_install "$repo" "$home"
+  if [ "$LAST_RC" -eq 0 ] && [ -L "$home/.claude/skills/foo" ] && [ ! -e "$home/.claude-work" ]; then
+    pass "with no work config root, install links into ~/.claude alone"
+  else
+    fail "no work config root" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+test_check_reports_a_skill_missing_from_the_work_config_root() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  run_install "$repo" "$home"
+  WORK_CONFIG="$home/.claude-work" run_install "$repo" "$home" check
+  if grep -q "skill-foo: $home/.claude-work/skills/foo is not linked" "$repo/.install.log"; then
+    pass "check reports a skill linked into ~/.claude but missing from the work config root"
+  else
+    fail "work config root check" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+test_install_removes_a_retired_skills_link_from_the_work_config_root() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  retire_skill "$repo" old-skill
+  mkdir -p "$home/.claude-work/skills"
+  ln -s "$(cd "$repo" && pwd -P)/modules/app/agent-repl/skills/old-skill" "$home/.claude-work/skills/old-skill"
+  ln -s /somewhere/else "$home/.claude-work/skills/foreign"
+  WORK_CONFIG="$home/.claude-work" run_install "$repo" "$home"
+  if [ "$LAST_RC" -eq 0 ] && [ ! -L "$home/.claude-work/skills/old-skill" ] && [ -L "$home/.claude-work/skills/foreign" ]; then
+    pass "a retired skill's link of ours comes out of the work config root, and a foreign link stays"
+  else
+    fail "retired link in work config root" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+test_uninstall_removes_the_work_config_roots_links_too() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  WORK_CONFIG="$home/.claude-work" run_install "$repo" "$home"
+  WORK_CONFIG="$home/.claude-work" run_install "$repo" "$home" uninstall
+  if [ "$LAST_RC" -eq 0 ] && [ ! -L "$home/.claude/skills/foo" ] && [ ! -L "$home/.claude-work/skills/foo" ]; then
+    pass "uninstall removes our links from both config roots"
+  else
+    fail "uninstall in work config root" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
   fi
   cleanup "$repo" "$home"
 }
@@ -662,6 +729,11 @@ test_install_preserves_non_symlink_file
 test_install_removes_a_retired_skills_link
 test_install_a_retired_skill_with_no_link_is_met
 test_install_leaves_a_users_file_at_a_retired_skills_name
+test_install_links_every_skill_into_the_work_config_root_too
+test_install_with_no_work_config_root_links_only_into_claude
+test_check_reports_a_skill_missing_from_the_work_config_root
+test_install_removes_a_retired_skills_link_from_the_work_config_root
+test_uninstall_removes_the_work_config_roots_links_too
 test_install_installs_pre_commit_hook
 test_install_refreshes_managed_hook
 test_install_refreshes_legacy_marked_hook
