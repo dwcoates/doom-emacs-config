@@ -8,6 +8,12 @@
  * into as `calc(<base> * var(--feed-text-scale))` (see styles.css). The scale is
  * therefore applied in exactly one spot and reaches all feed text at once, while
  * nothing outside the feed references the property.
+ *
+ * The FIRST value never waits for the watch: the daemon serves the entry
+ * document with the zoom in force already stamped onto the <html> element's
+ * inline `--feed-text-scale` (daemon/internal/server/assets.go), so the first
+ * paint is at the saved zoom. The watch's push then rewrites that same inline
+ * property, with every later change.
  */
 import { log } from "../log.js";
 

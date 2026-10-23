@@ -364,7 +364,10 @@
      `calc(<base> * var(--feed-text-scale))`, so all feed text scales together
      and every relative size is preserved. It is referenced ONLY by feed-scroll
      rules — never the sidebar, topbar, footer or composer — which is what keeps
-     the zoom scoped to the feed. Default 1 = 100%. */
+     the zoom scoped to the feed. Default 1 = 100%, which only a page served
+     without the daemon (the dev server) ever draws: the daemon stamps the zoom
+     in force onto the served <html> element's inline style, which outranks
+     this default from the first paint (daemon/internal/server/assets.go). */
   --feed-text-scale: 1;
   /* THE BUBBLE AND TREE TYPE SIZES, as bare rem multipliers, so a rule can
      compute one from the other. `--bubble-font-rem` is a bubble's text size:
