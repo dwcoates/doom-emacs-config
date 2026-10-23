@@ -1239,11 +1239,13 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    part in layout or hit testing, so a faded row is still clickable.
    HIDDEN WORKSPACES FADES THE SAME WAY WHENEVER IT SCROLLS (owner request,
    2026-10-20): stretched or capped at whole lines, while rows lie below its
-   viewport's edge its last strip fades as Recently Merged's does. */
+   viewport's edge its last strip fades as Recently Merged's does.
+   SO DOES THE OPEN SECTION (owner request, 2026-10-23): capped above the
+   bands or stretched to the foot, its last strip fades while rows lie below. */
 #ws-sidebar { --band-foot-fade: 1.4rem; }
-#ws-sidebar .repo[data-band-stretched][data-band-more] > .sb-sections,
 #ws-sidebar .repo[data-band-stretched][data-band-more] > .rows,
-#ws-sidebar .repo.hidden-section[data-band-more] > .rows {
+#ws-sidebar .repo.hidden-section[data-band-more] > .rows,
+#ws-sidebar .repo.open-section[data-band-more] > .sb-sections {
   mask-image: linear-gradient(to bottom, #000 calc(100% - var(--band-foot-fade)), transparent 100%);
 }
 #ws-sidebar .repo.merged-section {

@@ -1350,8 +1350,23 @@ describe("recently merged rows", () => {
     expect(mask.includes("var(--band-foot-fade)")).toBe(want);
   });
 
-  it("fades the Open section's viewport foot when it is the stretched one", () => {
-    expect(css).toContain("#ws-sidebar .repo[data-band-stretched][data-band-more] > .sb-sections,");
+  it.each([
+    { name: "fades a capped Open viewport while rows lie below it", attrs: ["data-band-more"], want: true },
+    { name: "fades a stretched Open viewport while rows lie below it", attrs: ["data-band-stretched", "data-band-more"], want: true },
+    { name: "leaves an Open viewport with nothing below unfaded", attrs: [], want: false },
+    { name: "leaves a stretched Open viewport with nothing below unfaded", attrs: ["data-band-stretched"], want: false },
+  ])("$name", ({ attrs, want }) => {
+    // Arrange
+    const section = document.createElement("div");
+    section.className = "repo open-section";
+    for (const attr of attrs) section.setAttribute(attr, "");
+    const sections = document.createElement("div");
+    sections.className = "sb-sections";
+    section.appendChild(sections);
+    // Act
+    const mask = inRail(section, () => cascadedValue(sections, "mask-image"));
+    // Assert
+    expect(mask.includes("var(--band-foot-fade)")).toBe(want);
   });
 
   it("declares the one rail row vertical padding", () => {
