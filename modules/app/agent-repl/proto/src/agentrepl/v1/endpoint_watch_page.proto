@@ -59,6 +59,19 @@ message WatchPageRequest {
   // exactly one, and a second would leave the first's subscriptions addressable
   // by a client that no longer owns them.
   string page = 1;
+  // PRESENT ONLY ON THE WEB VIEW HOST'S OWN PAGE STREAM (its sidebar's): the
+  // host is the one document a handover no longer reloads, so it states the
+  // webapp build it was loaded from, and a deploy that built another reloads
+  // it (WatchDaemonResponse.reload_webhost). Absent on every workspace page,
+  // which states its build on WatchWebWorkspace.
+  optional WebhostPage webhost = 2;
+}
+
+// The web view host's page stream: what it was loaded from.
+message WebhostPage {
+  // The webapp build the host was loaded from (webapp/src/webapp-build.ts).
+  // REQUIRED and not empty.
+  string webapp_build = 1;
 }
 
 // One frame on the page's stream.
