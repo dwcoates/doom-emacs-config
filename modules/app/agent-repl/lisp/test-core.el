@@ -418,7 +418,10 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("host.el" agent-repl-host-request-switch
      "[agent-repl] Cannot switch to %s: no daemon connection"
      "explains why the user's switch request went nowhere")
-    ("input.el" agent-repl--input-rollback-done
+    ("input.el" agent-repl--input-resent
+     "rollback: done, the prompt was sent again"
+     "tells the user the rollback they confirmed is done and their words were sent in the prompt's place")
+    ("input.el" agent-repl--input-refilled
      "%s"
      "tells the user the rollback they confirmed is done, with the files it restored")
     ("input.el" agent-repl--input-rollback
@@ -4743,7 +4746,7 @@ survives into the rest of the batch run."
           (agent-repl-test--fake-heartbeat-arm-count 0))
       (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl--assert-heartbeat-armed)
         ;; Assert
@@ -4763,7 +4766,7 @@ survives into the rest of the batch run."
           (agent-repl-test--fake-heartbeat-arm-count 0))
       (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl--assert-heartbeat-armed)
         ;; Assert
@@ -4782,7 +4785,7 @@ survives into the rest of the batch run."
            '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
           (agent-repl-test--fake-heartbeat-arm-count 0))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings)))
+                 (agent-repl-test--record-into warnings))
                 ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--assert-heartbeat-armed)
@@ -4797,7 +4800,7 @@ survives into the rest of the batch run."
           (agent-repl--required-timer-keys
            '((:test-heartbeat . agent-repl-test--arm-fn-that-arms-nothing))))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings)))
+                 (agent-repl-test--record-into warnings))
                 ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
         ;; Act
         (let ((result (agent-repl--assert-heartbeat-armed)))
@@ -4815,7 +4818,7 @@ survives into the rest of the batch run."
           (agent-repl--required-timer-keys
            '((:test-heartbeat . agent-repl-test--arm-fn-that-does-not-exist))))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings)))
+                 (agent-repl-test--record-into warnings))
                 ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
         ;; Act
         (agent-repl--assert-heartbeat-armed)
@@ -4836,7 +4839,7 @@ survives into the rest of the batch run."
           (agent-repl-test--fake-heartbeat-arm-count 0))
       (agent-repl--register-timer :test-heartbeat (agent-repl-test--armed-timer))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+                 (agent-repl-test--record-into warnings)))
         ;; Act
         (let ((result (agent-repl--assert-heartbeat-armed)))
           ;; Assert
@@ -5069,7 +5072,7 @@ Shared shape with `agent-repl-refill-keymap': a keymap built inside its
   (declare (indent 1))
   `(let ((,var nil))
      (cl-letf (((symbol-function 'agent-repl--log)
-                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) ,var))))
+                (agent-repl-test--record-into ,var)))
        ,@body)))
 
 (ert-deftest agent-repl-test-core-a-first-decision-is-recorded ()
@@ -5540,7 +5543,7 @@ name -- but it never claims the unregistered workspace as its sink."
   (let ((logged nil))
     (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
               ((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       ;; Act
       (agent-repl--user-message nil "terse" nil :detail "")
       ;; Assert
@@ -5791,7 +5794,7 @@ entry per tick for the whole bring-up."
   ;; Arrange
   (let ((logged nil))
     (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       ;; Act
       (agent-repl-test--quit-deferred-p
         (agent-repl--with-deferred-quit "uds-filter"
@@ -5808,7 +5811,7 @@ entry per tick for the whole bring-up."
   (let ((quit-flag nil)
         (logged nil))
     (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       ;; Act
       (agent-repl--with-deferred-quit "uds-filter" t))
     ;; Assert
@@ -5893,7 +5896,7 @@ entry per tick for the whole bring-up."
   ;; Arrange
   (let ((logged nil))
     (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       ;; Act
       (agent-repl-test--with-pending-quit
         (agent-repl--deferred-quit-audit "webview-precreate-drain")))
@@ -5908,7 +5911,7 @@ entry per tick for the whole bring-up."
   (let ((quit-flag nil)
         (logged nil))
     (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       ;; Act
       (agent-repl--deferred-quit-audit "webview-precreate-drain"))
     ;; Assert
@@ -5962,7 +5965,7 @@ entry per tick for the whole bring-up."
         (logged nil))
     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () 'window))
               ((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       ;; Act
       (agent-repl-test--quit-deferred-p
         (agent-repl--with-deferred-quit "webview-precreate-drain"
@@ -6706,7 +6709,7 @@ restores them afterwards."
       (cl-letf (((symbol-function 'delete-file)
                  (lambda (&rest _) (signal 'file-error (list "Removing old name" "permission denied"))))
                 ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+                 (agent-repl-test--record-into warnings)))
         ;; Act
         (let ((result (agent-repl--sweep-expired-log-files (list dir))))
           ;; Assert
@@ -7197,7 +7200,7 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
   ;; Arrange
   (let ((noted nil))
     (cl-letf (((symbol-function 'agent-repl--info)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) noted))))
+               (agent-repl-test--record-into noted)))
       ;; Act
       (agent-repl--note-log-level-selection
        (agent-repl--log-level-window "debug" nil 1000000)))

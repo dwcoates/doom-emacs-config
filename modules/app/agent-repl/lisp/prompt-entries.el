@@ -97,6 +97,11 @@ It is put on `treesit-extra-load-path', never the user's own grammar dir.")
                 (string-trim (buffer-string)))
               (agent-repl-prompt-entries--source-hash))))
 
+(defconst agent-repl-prompt-entries--build-log-scope
+  '(:agent-repl-central "the prompt grammar is built once for the whole Emacs")
+  "Log scope of the grammar build's records.
+One library serves every composer, so its build belongs to no workspace.")
+
 (defvar agent-repl-prompt-entries--building nil
   "Non-nil while the grammar library is being built.")
 
@@ -132,7 +137,7 @@ program that is not git."
                           (mapcar (lambda (name) (expand-file-name name dir))
                                   agent-repl-prompt-entries--sources))))
     (make-directory agent-repl-prompt-entries--library-dir t)
-    (agent-repl--info nil "elisp.prompt-entries.build-started library=%s source=%s" library hash)
+    (agent-repl--info agent-repl-prompt-entries--build-log-scope "elisp.prompt-entries.build-started library=%s source=%s" library hash)
     (setq agent-repl-prompt-entries--building t)
     (agent-repl--async-command
      "prompt-grammar" dir command
@@ -148,11 +153,11 @@ and nothing waiting is called."
   (let ((waiting (nreverse agent-repl-prompt-entries--waiting)))
     (setq agent-repl-prompt-entries--waiting nil)
     (if (not ok)
-        (agent-repl--error nil "elisp.prompt-entries.build-failed library=%s output=%S"
+        (agent-repl--error agent-repl-prompt-entries--build-log-scope "elisp.prompt-entries.build-failed library=%s output=%S"
                            library (string-trim output))
       (with-temp-file (agent-repl-prompt-entries--stamp) (insert hash "\n"))
       (agent-repl-prompt-entries--on-load-path)
-      (agent-repl--info nil "elisp.prompt-entries.built library=%s waiting=%d" library (length waiting))
+      (agent-repl--info agent-repl-prompt-entries--build-log-scope "elisp.prompt-entries.built library=%s waiting=%d" library (length waiting))
       (mapc #'funcall waiting))))
 
 ;;;; ---- Marking the composer ----
