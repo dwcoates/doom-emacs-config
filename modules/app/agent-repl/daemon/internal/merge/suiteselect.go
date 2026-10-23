@@ -139,10 +139,10 @@ var suiteRules = []suiteRule{
 
 	// SHARED BY SEVERAL SYSTEMS: their consumers, plus the end-to-end suites.
 	// The logging module's Go half is replaced into the daemon, the store, the
-	// sidecar and the lock helper; its TS half is imported by the shim and the
+	// sidecar, the lock helper and the test runner; its TS half is imported by the shim and the
 	// webapp (whose build harness builds the webapp).
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{
-		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "shim", "webapp", "build-frontend-harness", "e2e", "e2e-emacs", repoScans}},
+		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "shim", "webapp", "build-frontend-harness", testrunSuite, "e2e", "e2e-emacs", repoScans}},
 	// The wire contract every producer and consumer is generated from, and the
 	// Go helpers beside it: every system and suite reads it, so every suite
 	// runs.

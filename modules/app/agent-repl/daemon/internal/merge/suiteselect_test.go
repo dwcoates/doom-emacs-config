@@ -35,7 +35,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "the shared logging module selects its consumers and the cross-system suite",
 			paths: []string{"modules/app/agent-repl/agent-shim/logging/go/log.go"},
-			want:  []string{"daemon", "sidecar", "store", "lock", "shim", "webapp", "build-frontend-harness", "logging", "logging-density", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"daemon", "sidecar", "store", "lock", "shim", "webapp", "build-frontend-harness", "testrun", "logging", "logging-density", "e2e", "e2e-emacs", "repo-scans"},
 		},
 		{
 			name:  "an ordinary bin script selects the script harnesses",
