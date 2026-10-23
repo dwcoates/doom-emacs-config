@@ -803,6 +803,7 @@ re-routes their frontend resolution instead."
          (agent-repl--webhost-reload-timer nil)
          (agent-repl--webhost-build nil)
          (agent-repl--webhost-url nil)
+         (agent-repl--webhost-reloaded-for-call nil)
          ;; Repo-fold set: global UI state, so a test that folds a repo
          ;; would otherwise leak that fold into every later test's
          ;; tab-bar render.

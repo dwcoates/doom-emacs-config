@@ -1055,6 +1055,7 @@ signals."
                 (agent-repl--held-ingress-pushed (make-hash-table :test 'equal))
                 (agent-repl--webhost-reload-timer nil)
                 (agent-repl--webhost-build nil)
+                (agent-repl--webhost-reloaded-for-call nil)
                 ;; The opens are process-wide (open-tabs.el): each scenario
                 ;; runs with the startup over, its opens asked of its own
                 ;; daemon, unless it stages its own.
