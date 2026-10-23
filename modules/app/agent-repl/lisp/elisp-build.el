@@ -35,11 +35,13 @@
 
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
+(declare-function agent-repl--now "core" ())
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--fatal "core" (ws fmt &rest args))
 (declare-function agent-repl--assert-heartbeat-armed "core" ())
 (declare-function agent-repl--elisp-file-sha256 "config" (file))
 (declare-function agent-repl--elisp-module-file "config" (root module))
+(declare-function agent-repl-latency-report-editor "latency-report" (kind seconds))
 
 (defvar agent-repl--elisp-module-builds)
 (defvar agent-repl--frontend-root)
@@ -230,11 +232,16 @@ failure is already recorded at ERROR."
        (message "agent-repl: elisp reload FAILED -- %s could not be read: %s"
                 config (error-message-string err))))
     (when modules
-      (let* ((loaded (agent-repl--elisp-reload-load-modules root modules))
+      (let* ((started (agent-repl--now))
+             (loaded (agent-repl--elisp-reload-load-modules root modules))
              (entries (car loaded))
              (failures (cdr loaded)))
         (setq agent-repl--elisp-module-builds entries)
         (agent-repl--elisp-reload-report-heartbeat (agent-repl--assert-heartbeat-armed))
+        ;; THE EDITOR RAN NOTHING ELSE from the first load to here, so this
+        ;; span is how long the reload held the person up (`elisp_reload').
+        (agent-repl-latency-report-editor
+         :elisp-reload (max 0.0 (- (agent-repl--now) started)))
         (when failures
           (agent-repl--error agent-repl--elisp-build-log-scope
                              "elisp.elisp-build.reload-module-failures count=%d failures=%S"

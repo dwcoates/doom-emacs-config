@@ -20,6 +20,12 @@ func ValidateReportedLatency(l *agentreplv1.ReportedLatency) (LatencyKind, error
 	return validateReported(l)
 }
 
+// ValidateEditorLatency checks one editor-wide latency Emacs reported,
+// answering the kind it names. Every error wraps ErrInvalidLatency.
+func ValidateEditorLatency(l *agentreplv1.ReportedEditorLatency) (LatencyKind, error) {
+	return validateEditor(l)
+}
+
 // editorMilestones maps each reported editor startup milestone to its phase.
 var editorMilestones = map[agentreplv1.EditorStartupMilestone]restarttiming.EditorMilestone{
 	agentreplv1.EditorStartupMilestone_EDITOR_STARTUP_MILESTONE_INIT:          restarttiming.EditorInit,
@@ -62,6 +68,16 @@ func (s *Surface) ObserveLatency(ws ids.WorkspaceID, kind LatencyKind, seconds f
 		return
 	}
 	s.latencies.observe(ws, kind, seconds)
+}
+
+// ObserveEditorLatency records one editor-wide latency, already validated,
+// under the empty workspace: it belongs to the editor, not to any workspace,
+// so no workspace's close forgets it. The off surface records nothing.
+func (s *Surface) ObserveEditorLatency(kind LatencyKind, seconds float64) {
+	if s == nil {
+		return
+	}
+	s.latencies.observe("", kind, seconds)
 }
 
 // FoldShimMeasurements folds one shim measurements frame for ws. The off

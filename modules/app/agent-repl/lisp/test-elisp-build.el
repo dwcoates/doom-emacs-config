@@ -99,6 +99,9 @@ Every module in ABSENT is named by config.el but gets no file."
                  agent-repl-test-eb--logs)
        t))
 
+(defvar agent-repl-test-eb--reported nil
+  "Every editor latency the reload reported, newest first, as (KIND SECONDS).")
+
 (defmacro agent-repl-test-eb--with-harness (&rest body)
   "Run BODY with the logger, `message', the load and the assertion stubbed."
   (declare (indent 0))
@@ -109,8 +112,11 @@ Every module in ABSENT is named by config.el but gets no file."
          (agent-repl-test-eb--heartbeat-ran nil)
          (agent-repl-test-eb--timers nil)
          (agent-repl-test-eb--failing-loads nil)
+         (agent-repl-test-eb--reported nil)
          (agent-repl--elisp-module-builds agent-repl--elisp-module-builds))
-     (cl-letf (((symbol-function 'agent-repl--log)
+     (cl-letf (((symbol-function 'agent-repl-latency-report-editor)
+                (lambda (kind seconds) (push (list kind seconds) agent-repl-test-eb--reported)))
+               ((symbol-function 'agent-repl--log)
                 (lambda (_ws fmt &rest args)
                   (push (cons :log (apply #'format fmt args)) agent-repl-test-eb--logs)))
                ((symbol-function 'agent-repl--info)
@@ -316,6 +322,30 @@ Every module in ABSENT is named by config.el but gets no file."
       (agent-repl--elisp-reload-run root "any")
       ;; Assert
       (should agent-repl-test-eb--heartbeat-ran))))
+
+(ert-deftest agent-repl-test-eb-reload-reports-its-span-as-an-elisp-reload ()
+  "The span from the first load to the heartbeat assertion is reported as `elisp_reload'."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status"))
+      (let ((clock '(10.0 10.25)))
+        (cl-letf (((symbol-function 'agent-repl--now) (lambda () (pop clock))))
+          ;; Act
+          (agent-repl--elisp-reload-run root "any")))
+      ;; Assert
+      (should (equal agent-repl-test-eb--reported '((:elisp-reload 0.25)))))))
+
+(ert-deftest agent-repl-test-eb-reload-of-no-module-reports-nothing ()
+  "A reload whose config names no module loads nothing and reports no span."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root nil)
+      ;; Act
+      (agent-repl--elisp-reload-run root "any")
+      ;; Assert
+      (should-not agent-repl-test-eb--reported))))
 
 (ert-deftest agent-repl-test-eb-reload-logs-the-heartbeat-counts ()
   "The assertion's armed/rearmed/failed/unavailable counts are logged."

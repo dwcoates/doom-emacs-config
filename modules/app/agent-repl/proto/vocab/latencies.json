@@ -15,13 +15,17 @@
     "    compare them with this file.",
     "",
     "reported_as names the wire enum value a runtime reports the latency",
-    "with: agentrepl.v1.ReportedLatencyKind for Emacs and the webapp,",
+    "with: agentrepl.v1.ReportedLatencyKind for the webapp,",
+    "agentrepl.v1.EditorLatencyKind for Emacs's own editor-wide latencies,",
     "shim.v1.ShimLatencyKind for the shim. null is a latency only the",
     "profile report measures (from log edges), not yet reported live.",
     "",
     "buckets_seconds are the histogram's inclusive upper bounds, ascending,",
     "+Inf implied. A latency reported live MUST carry them; the shim states",
-    "them in every frame and the daemon refuses any that differ."
+    "them in every frame and the daemon refuses any that differ.",
+    "",
+    "detection_floor_ms is how late a stall sampler's timer must run before",
+    "it reports a stall; shorter delays are a healthy loop and send nothing."
   ],
   "latencies": [
     {
@@ -111,6 +115,52 @@
       "reason": "a busy event loop delays every frame the shim sends and every call it answers",
       "reported_as": "SHIM_LATENCY_KIND_EVENT_LOOP_DELAY",
       "buckets_seconds": [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]
+    },
+    {
+      "name": "editor_stall",
+      "description": "a stall of Emacs's command loop",
+      "start": "the moment Emacs's steady sampling timer was due",
+      "end": "the moment its callback ran, when at least detection_floor_ms late",
+      "measured_by": "emacs",
+      "threshold_ms": 100,
+      "reason": "every keystroke and redisplay waits on the loop; anything past ~100ms reads as the editor freezing",
+      "reported_as": "EDITOR_LATENCY_KIND_STALL",
+      "detection_floor_ms": 50,
+      "buckets_seconds": [0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30]
+    },
+    {
+      "name": "elisp_reload",
+      "description": "a deploy's pushed elisp reload (first module load to heartbeat assertion done)",
+      "start": "the reload's first module load (elisp.elisp-build.reload-begin)",
+      "end": "the heartbeat assertion done (elisp.elisp-build.reload-heartbeat)",
+      "measured_by": "emacs",
+      "threshold_ms": 100,
+      "reason": "Emacs runs nothing else meanwhile",
+      "reported_as": "EDITOR_LATENCY_KIND_ELISP_RELOAD",
+      "buckets_seconds": [0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30]
+    },
+    {
+      "name": "page_stall",
+      "description": "a stall of a shown page's main thread",
+      "start": "the moment the shown page's steady sampling timer was due",
+      "end": "the moment its callback ran, when at least detection_floor_ms late",
+      "measured_by": "webapp",
+      "threshold_ms": 100,
+      "reason": "the shown page paints and answers nothing meanwhile",
+      "reported_as": "REPORTED_LATENCY_KIND_PAGE_STALL",
+      "detection_floor_ms": 50,
+      "buckets_seconds": [0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30]
+    },
+    {
+      "name": "reload_blank",
+      "description": "a reload's blank page (Emacs starts the reload to the reloaded page's first frame shown)",
+      "start": "Emacs starts a reload of the page, the host's or its own (the instant in the page URL's reload_at)",
+      "end": "the reloaded page's first frame shown (page.shown-frame)",
+      "measured_by": "webapp",
+      "threshold_ms": 100,
+      "reason": "the page the user is looking at is blank meanwhile; a reload should not be seen at all",
+      "reported_as": "REPORTED_LATENCY_KIND_RELOAD_BLANK",
+      "buckets_seconds": [0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30]
     }
   ]
 }

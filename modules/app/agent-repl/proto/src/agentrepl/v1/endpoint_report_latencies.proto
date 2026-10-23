@@ -45,6 +45,19 @@ enum ReportedLatencyKind {
   // page. Measured by the webapp from the submit instant the daemon hands it
   // (WatchWebWorkspaceResponse.prompt_echo), on the host's wall clock.
   REPORTED_LATENCY_KIND_PROMPT_ECHO = 4;
+  // A stall of the page's main thread while the page was shown: how late the
+  // page's steady sampling timer ran, when it ran at least the vocabulary's
+  // detection floor late. Measured by the webapp alone. A page that is not
+  // shown samples nothing, because WebKit slows a hidden frame's timers and
+  // nobody is looking at it.
+  REPORTED_LATENCY_KIND_PAGE_STALL = 5;
+  // A reload's blank page: from Emacs starting a reload of the page (the
+  // host's reload, which reloads every page, or the page's own) to the
+  // reloaded page's first frame shown. Measured by the webapp from the
+  // instant Emacs writes into the URL it loads the page at. A reloaded page
+  // that is not shown when it first paints reports nothing: nobody saw it
+  // blank.
+  REPORTED_LATENCY_KIND_RELOAD_BLANK = 6;
 }
 
 // One finished interaction.
@@ -70,6 +83,39 @@ message ReportLatenciesRequest {
   // with the next batch until a report is acknowledged, so a daemon handover
   // during the startup does not lose it.
   repeated ReportedEditorStartup editor_startup = 2;
+  // The editor's own latencies since its last acknowledged report, oldest
+  // first: interactions that belong to the editor as a whole rather than to
+  // one workspace. Sent by Emacs only, and kept and sent again with the next
+  // batch until a report is acknowledged, as `latencies' are.
+  repeated ReportedEditorLatency editor_latencies = 3;
+}
+
+// ---- Editor latencies: the editor as a whole, no workspace ----
+
+// Which editor-wide interaction a reported editor latency measured. Each
+// value names one entry of proto/vocab/latencies.json, as a
+// ReportedLatencyKind does.
+enum EditorLatencyKind {
+  // Never sent: a request carrying it is refused as InvalidArgument.
+  EDITOR_LATENCY_KIND_UNSPECIFIED = 0;
+  // A stall of the editor's command loop: how late the editor's steady
+  // sampling timer ran, when it ran at least the vocabulary's detection floor
+  // late. Every keystroke and every redisplay waits on the loop meanwhile.
+  EDITOR_LATENCY_KIND_STALL = 1;
+  // A deploy's pushed elisp reload (DaemonReloadElisp), from its first module
+  // load to its heartbeat assertion done. The editor runs nothing else
+  // meanwhile.
+  EDITOR_LATENCY_KIND_ELISP_RELOAD = 2;
+}
+
+// One finished editor-wide interaction.
+message ReportedEditorLatency {
+  // Which interaction this measured. Required; UNSPECIFIED is
+  // InvalidArgument.
+  EditorLatencyKind kind = 1;
+  // How long it took, in seconds. Finite and not negative; anything else is
+  // InvalidArgument.
+  double seconds = 2;
 }
 
 // ---- Editor startup: how long the editor took to come up ----
@@ -151,9 +197,9 @@ message ReportLatenciesSuccess {
 // Every latency in the batch was recorded.
 message ReportLatenciesRecorded {
   // How many latencies were recorded: the length of the batch's
-  // `latencies`. Every editor startup milestone in the batch is recorded too
-  // and is not counted here, since a milestone names no workspace and is
-  // never dropped.
+  // `latencies`. Every editor startup milestone and editor latency in the
+  // batch is recorded too and is not counted here, since neither names a
+  // workspace, so neither is ever dropped.
   uint32 recorded = 1;
 }
 

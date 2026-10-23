@@ -119,6 +119,67 @@ func TestAnObservedLatencyIsServedInItsBuckets(t *testing.T) {
 	)
 }
 
+func TestValidateEditorLatency(t *testing.T) {
+	stall := agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL
+	tests := []struct {
+		name    string
+		latency *agentreplv1.ReportedEditorLatency
+		want    string
+	}{
+		{name: "a stall", latency: &agentreplv1.ReportedEditorLatency{Kind: stall, Seconds: 0.2}, want: "editor_stall"},
+		{name: "an elisp reload", latency: &agentreplv1.ReportedEditorLatency{Kind: agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_ELISP_RELOAD, Seconds: 0.2}, want: "elisp_reload"},
+		{name: "an unspecified kind", latency: &agentreplv1.ReportedEditorLatency{Seconds: 0.2}},
+		{name: "a negative duration", latency: &agentreplv1.ReportedEditorLatency{Kind: stall, Seconds: -1}},
+		{name: "a NaN duration", latency: &agentreplv1.ReportedEditorLatency{Kind: stall, Seconds: math.NaN()}},
+		{name: "an infinite duration", latency: &agentreplv1.ReportedEditorLatency{Kind: stall, Seconds: math.Inf(1)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			kind, err := ValidateEditorLatency(tt.latency)
+
+			// Assert
+			if tt.want == "" {
+				if !errors.Is(err, ErrInvalidLatency) {
+					t.Fatalf("err = %v, want ErrInvalidLatency", err)
+				}
+				return
+			}
+			if err != nil || kind.Name != tt.want {
+				t.Fatalf("ValidateEditorLatency = (%v, %v), want %s", kind, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnEditorLatencyIsServedUnderNoWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := openSurface(t)
+
+	// Act
+	s.ObserveEditorLatency(EditorKinds[agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL], 0.15)
+	body := scrape(t, s)
+
+	// Assert
+	mustContain(t, body,
+		`agentrepl_latency_seconds_bucket{latency="editor_stall",workspace="",le="0.1"} 0`,
+		`agentrepl_latency_seconds_bucket{latency="editor_stall",workspace="",le="0.2"} 1`,
+		`agentrepl_latency_seconds_count{latency="editor_stall",workspace=""} 1`,
+	)
+}
+
+func TestAWorkspaceForgetKeepsTheEditorsLatencies(t *testing.T) {
+	// Arrange
+	s, _ := openSurface(t)
+	s.ObserveEditorLatency(EditorKinds[agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL], 0.15)
+
+	// Act
+	s.ForgetWorkspace("ws1")
+
+	// Assert
+	mustContain(t, scrape(t, s), `agentrepl_latency_seconds_count{latency="editor_stall",workspace=""} 1`)
+}
+
 // frame builds a shim frame for counting run since with traffic and, when
 // counts is set, a first-output histogram whose ten cumulative bucket counts
 // are counts.
@@ -364,6 +425,7 @@ func TestTheOffSurfaceObservesNothingAndWrapsNothing(t *testing.T) {
 	// Act
 	wrapped := s.ObserveForgets(db)
 	s.ObserveLatency("ws1", LatencyKind{}, 1)
+	s.ObserveEditorLatency(LatencyKind{}, 1)
 	s.FoldShimMeasurements("ws1", frame(1, 1, 1, nil, 0, 0))
 	s.ForgetWorkspace("ws1")
 

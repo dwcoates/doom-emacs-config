@@ -1176,3 +1176,87 @@ describe("show with a switch's start", () => {
     expect(presenceIn(posted)).toEqual([{ channel: HOST_CHANNEL, kind: "presence", shown: true }]);
   });
 });
+
+describe("a page loaded by a reload", () => {
+  const hello = { channel: HOST_CHANNEL, kind: "hello" } as const;
+  const presenceIn = (posted: HostToPage[]) => posted.filter((m) => m.kind === "presence");
+  const reloaded = { channel: HOST_CHANNEL, kind: "presence", shown: false, reloadStartedAtMs: 1_700_000_000_500 };
+  const plain = { channel: HOST_CHANNEL, kind: "presence", shown: false };
+
+  it("hands a page a reload's ensure created the reload's start with the presence its hello replays, once", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/", null, 1_700_000_000_500);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([reloaded, plain]);
+  });
+
+  it("hands a page waiting in a lane the reload's start once it loads and says hello", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/", "right", 1_700_000_000_500);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([reloaded]);
+  });
+
+  it("hands a page re-pointed by a reload's ensure the reload's start in its fresh frame", () => {
+    // Arrange
+    pages(host, "a");
+    host.ensure("a", "http://ws-a.localhost:2/", null, 1_700_000_000_500);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([reloaded]);
+  });
+
+  it("hands a reloaded page the start the reload call named", () => {
+    // Arrange
+    pages(host, "a");
+    host.reload("a", 1_700_000_000_500);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([reloaded]);
+  });
+
+  it("hands nothing to a page an ensure left unchanged", () => {
+    // Arrange
+    pages(host, "a");
+    fromPage("a", hello);
+    host.ensure("a", "http://ws-a.localhost:1/", null, 1_700_000_000_500);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([plain]);
+  });
+
+  it("hands nothing to a page no reload loaded", () => {
+    // Arrange
+    pages(host, "a");
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", hello);
+
+    // Assert
+    expect(presenceIn(posted)).toEqual([plain]);
+  });
+});

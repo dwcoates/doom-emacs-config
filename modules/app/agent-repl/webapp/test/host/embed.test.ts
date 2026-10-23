@@ -134,6 +134,14 @@ describe("presence", () => {
     expect(presence.switchStartedAt()).toBe(1_700_000_000_123);
   });
 
+  it("hands the presence the start of the reload that loaded it, shown or not", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: false, reloadStartedAtMs: 1_700_000_000_500 });
+
+    // Assert
+    expect(presence.reloadStartedAt()).toBe(1_700_000_000_500);
+  });
+
   it("records the host showing it at info", async () => {
     // Act
     fromHost({ channel: HOST_CHANNEL, kind: "presence", shown: true });

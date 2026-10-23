@@ -344,9 +344,11 @@ so stubbing the accessor would not reach the code under test."
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
     ;; Act
-    (agent-repl-webhost-reload-page "alpha")
+    (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000500)))
+      (agent-repl-webhost-reload-page "alpha"))
     ;; Assert
-    (should (= 1 (length (agent-repl-test-wh--sent "reload"))))))
+    (should (equal (agent-repl-test-wh--sent "reload")
+                   (list (agent-repl--webhost-script "reload" "id-alpha" 1700000000500))))))
 
 (ert-deftest agent-repl-test-wh-reloading-a-page-whose-url-moved-re-points-it ()
   "A handover moves the URL; the page is pointed at the new one."
@@ -354,12 +356,14 @@ so stubbing the accessor would not reach the code under test."
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
     (cl-letf (((symbol-function 'agent-repl-frontend-webview-url)
-               (lambda (_ws) "http://ws-alpha.localhost:2/")))
+               (lambda (_ws) "http://ws-alpha.localhost:2/"))
+              ((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000500)))
       ;; Act
       (agent-repl-webhost-reload-page "alpha"))
     ;; Assert
     (should (equal (gethash "id-alpha" agent-repl--webhost-pages) "http://ws-alpha.localhost:2/"))
-    (should (= 2 (length (agent-repl-test-wh--sent "ensure"))))))
+    (should (equal (cadr (agent-repl-test-wh--sent "ensure"))
+                   (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:2/" nil 1700000000500)))))
 
 (ert-deftest agent-repl-test-wh-a-page-moved-to-another-daemon-reloads-the-host-there ()
   "The host draws the sidebar over its own daemon connection, so it follows a handover."
@@ -507,13 +511,42 @@ so stubbing the accessor would not reach the code under test."
     (agent-repl-test-wh--load "load-committed")
     ;; Assert
     (should (equal (agent-repl-test-wh--sent "ensure")
-                   (list (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:1/")
-                         (agent-repl--webhost-script "ensure" "id-beta" "http://ws-beta.localhost:1/" "after"))))))
+                   (list (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:1/" nil nil)
+                         (agent-repl--webhost-script "ensure" "id-beta" "http://ws-beta.localhost:1/" "after" nil))))))
+
+(ert-deftest agent-repl-test-wh-a-reload-hands-its-start-with-every-page-it-replays ()
+  "A replay after a reload hands every page the reload's start, then forgets it."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "beta")
+    (agent-repl-webhost-show "alpha")
+    (setq agent-repl-test-wh--calls nil
+          agent-repl--webhost-reload-started-ms 1700000000500)
+    ;; Act
+    (agent-repl-test-wh--load "load-committed")
+    ;; Assert
+    (should (equal (agent-repl-test-wh--sent "ensure")
+                   (list (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:1/" nil 1700000000500)
+                         (agent-repl--webhost-script "ensure" "id-beta" "http://ws-beta.localhost:1/" "after" 1700000000500))))
+    (should-not agent-repl--webhost-reload-started-ms)))
+
+(ert-deftest agent-repl-test-wh-a-reload-of-the-host-records-its-start ()
+  "Navigating the host for a reload records the instant the reload began."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (cl-letf (((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000500))
+              ((symbol-function 'agent-repl-webhost-url) (lambda (_conn) "http://host.localhost:2/?host=1"))
+              ((symbol-function 'agent-repl--frontend-webview-navigate-widget) (lambda (_xw _url) nil)))
+      ;; Act
+      (agent-repl--webhost-reload-now 'conn))
+    ;; Assert
+    (should (equal agent-repl--webhost-reload-started-ms 1700000000500))))
 
 (defun agent-repl-test-wh--ensured-lanes ()
   "Each ensure sent, as (WORKSPACE . LANE), LANE nil for a plain ensure."
   (mapcar (lambda (script)
-            (string-match "\"id-\\([a-z0-9]+\\)\",\"[^\"]*\"\\(?:,\"\\([a-z]+\\)\"\\)?)" script)
+            (string-match "\"id-\\([a-z0-9]+\\)\",\"[^\"]*\",\\(?:null\\|\"\\([a-z]+\\)\"\\),\\(?:null\\|[0-9]+\\))" script)
             (cons (match-string 1 script) (match-string 2 script)))
           (agent-repl-test-wh--sent "ensure")))
 

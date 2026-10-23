@@ -265,6 +265,9 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; It needs core.el, connect.el and rpc.el and nothing else, so it loads
 ;; immediately after the transport and before its first consumer.
 (agent-repl--load-module "daemon-link")
+;; latency-report.el is the one path Emacs's measurements take to the
+;; daemon's metrics; startup.el, stall.el and elisp-build.el queue into it.
+(agent-repl--load-module "latency-report")
 ;; WHY: mutation-progress.el is the correlation seat the daemon-link's push
 ;; dispatch hands workspace-mutation progress to, and the create verb registers
 ;; its callbacks with; it needs only core.el, so it loads beside daemon-link.
@@ -325,6 +328,7 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "history")
 (agent-repl--load-module "status")
 (agent-repl--load-module "autosave")
+(agent-repl--load-module "stall")
 (agent-repl--load-module "input")
 ;; The composer's spellcheck (flyspell + hunspell); panels.el turns it on
 ;; for every composer it creates.

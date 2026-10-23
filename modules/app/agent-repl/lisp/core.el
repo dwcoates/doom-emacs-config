@@ -51,15 +51,17 @@ same job replaces its timer rather than adding one.  Reset alongside
 `agent-repl--timers' by `agent-repl--cancel-all-timers'.")
 
 (defconst agent-repl--required-timer-keys
-  '((:state-poll . agent-repl--arm-state-poll-timer)
-    (:autosave   . agent-repl--arm-autosave-timer))
+  '((:state-poll    . agent-repl--arm-state-poll-timer)
+    (:autosave      . agent-repl--arm-autosave-timer)
+    (:stall-sampler . agent-repl--arm-stall-sampler))
   "Alist of (KEY . ARM-FUNCTION) for every timer the module must keep armed.
 
 This is the contract `agent-repl--assert-heartbeat-armed' enforces: each
 KEY names a job that must have exactly one live timer once the module is
 loaded, and ARM-FUNCTION is the owner file's entry point for (re-)arming
 it.  The owners are `status.el' (:state-poll, the heartbeat that repaints
-the tab bar) and `autosave.el' (:autosave).
+the tab bar), `autosave.el' (:autosave) and `stall.el' (:stall-sampler, the
+command loop's stall measurement).
 
 EVERY KEY HERE MUST HAVE A LIVE OWNER.  Two did not: `:readiness-poll' and
 `:workspace-status-export' outlived `readiness.el' and
@@ -308,6 +310,12 @@ the test suite sets it to a temp dir to isolate state.")
 (defconst agent-repl--state-dir-default "~/.claude-emacs"
   "Fallback root for agent-repl state when `agent-repl--state-dir-env' is unset.
 A fixed sibling of the Claude CLI config dir (~/.claude).")
+
+(defun agent-repl--now ()
+  "External-boundary wrapper: the host\='s wall clock now, in float seconds.
+The one seam a measurement reads its clock through, so a test steps the
+clock by stubbing this alone."
+  (float-time))
 
 (defun agent-repl--now-unix-ms ()
   "The host\='s wall clock now, in Unix milliseconds.

@@ -20,9 +20,8 @@
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function doom-run-hooks "doom-lib" (&rest hooks))
 (declare-function agent-repl--fatal "core" (ws fmt &rest args))
-(declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl-daemon--spawned-here-p "daemon" ())
-(declare-function agent-repl-rpc-report-latencies "rpc" (conn request &rest keys))
+(declare-function agent-repl-latency-report-startup "latency-report" (milestones))
 
 (defconst agent-repl-startup--central
   '(:agent-repl-central "the editor's startup spans every workspace")
@@ -41,18 +40,16 @@
 ;;
 ;; THE REPORT WAITS FOR THE STARTUP TO END, because every milestone carries
 ;; how this Emacs came to a daemon (spawned it, or found it running), and
-;; the startup's milestones are one batch.  A batch the daemon did not answer
-;; is kept and sent again on the next link-up, so a daemon handover during
-;; the startup loses nothing.  Each milestone leaves once a report of it is
-;; acknowledged.  A hot reload of this file keeps all of it: the variables
-;; are `defvar's, and a reload is no new startup.
+;; the startup's milestones are one batch.  At the end they are handed to
+;; latency-report.el, which keeps each until a report of it is acknowledged,
+;; so a daemon handover during the startup loses nothing.  A milestone
+;; reached after the end is handed over at once.  A hot reload of this file
+;; keeps all of it: the variables are `defvar's, and a reload is no new
+;; startup.
 
 (defvar agent-repl-startup--milestones nil
   "The startup milestones this process reached, oldest first.
 Each is (KEYWORD . SECONDS-SINCE-PROCESS-START).")
-
-(defvar agent-repl-startup--unreported nil
-  "The reached milestones no report has had acknowledged, oldest first.")
 
 (defvar agent-repl-startup--daemon nil
   "How this Emacs came to a daemon: `:spawned' or `:running', or nil before.
@@ -61,20 +58,19 @@ Decided at the first link-up.")
 (defvar agent-repl-startup--ended nil
   "Non-nil once the startup's open finished; the milestones are reported from then.")
 
-(defvar agent-repl-startup--report-in-flight nil
-  "Non-nil while a startup report is unanswered.  One at a time.")
-
 (defun agent-repl-startup--since-process-start (&optional at)
   "Seconds from this Emacs process's start to AT, or to now when AT is nil."
   (float-time (time-subtract (or at (current-time)) before-init-time)))
 
 (defun agent-repl-startup--record (milestone seconds)
-  "Record MILESTONE as reached SECONDS after the process start."
+  "Record MILESTONE as reached SECONDS after the process start.
+After the startup's end it is handed to the report at once."
   (let ((cell (cons milestone seconds)))
-    (setq agent-repl-startup--milestones (append agent-repl-startup--milestones (list cell))
-          agent-repl-startup--unreported (append agent-repl-startup--unreported (list cell)))
+    (setq agent-repl-startup--milestones (append agent-repl-startup--milestones (list cell)))
     (agent-repl--info agent-repl-startup--central
-                      "elisp.startup.milestone milestone=%s seconds=%.3f" milestone seconds)))
+                      "elisp.startup.milestone milestone=%s seconds=%.3f" milestone seconds)
+    (when agent-repl-startup--ended
+      (agent-repl-startup--report (list cell)))))
 
 (defun agent-repl-startup-reach (milestone)
   "Record that the editor's startup reached MILESTONE now, once per process.
@@ -86,77 +82,35 @@ other is reached, so it is recorded at its own instant and in its order."
     (agent-repl-startup--record milestone (agent-repl-startup--since-process-start))))
 
 (defun agent-repl-startup-on-link-up (&rest _connections)
-  "Reach `:daemon-linked' at the first link-up, and send a report still owed.
+  "Reach `:daemon-linked' at the first link-up.
 The first link-up also decides how this Emacs came to a daemon: a daemon
 this process spawned and still runs is `:spawned', any other `:running'."
   (unless agent-repl-startup--daemon
     (setq agent-repl-startup--daemon
           (if (agent-repl-daemon--spawned-here-p) :spawned :running))
-    (agent-repl-startup-reach :daemon-linked))
-  (agent-repl-startup--report))
+    (agent-repl-startup-reach :daemon-linked)))
 
 (defun agent-repl-startup-ended ()
   "The startup's open finished: reach `:all-tabs' and report the startup."
   (agent-repl-startup-reach :all-tabs)
   (setq agent-repl-startup--ended t)
-  (agent-repl-startup--report))
+  (agent-repl-startup--report agent-repl-startup--milestones))
 
-(defun agent-repl-startup--report ()
-  "Send the unacknowledged milestones, once the startup has ended.
-Nothing is sent before the end, with no link, with nothing owed, or while
-a report is in flight (the next link-up or answer sends what is left).
-A startup that ended before any link-up named no daemon, which the open's
-order makes impossible: it is an invariant violation."
-  (let ((conn (and agent-repl-startup--ended
-                   agent-repl-startup--unreported
-                   (not agent-repl-startup--report-in-flight)
-                   (agent-repl-link-live))))
-    (when conn
-      (unless agent-repl-startup--daemon
-        (agent-repl--fatal agent-repl-startup--central
-                           "elisp.startup.report no-daemon milestones=%S"
-                           agent-repl-startup--unreported))
-      (let ((batch agent-repl-startup--unreported)
-            (daemon agent-repl-startup--daemon))
-        (setq agent-repl-startup--report-in-flight t)
-        (agent-repl--info agent-repl-startup--central
-                          "elisp.startup.report send milestones=%d daemon=%s" (length batch) daemon)
-        (agent-repl-rpc-report-latencies
-         conn
-         (list :editor-startup
-               (mapcar (lambda (cell)
-                         (list :milestone (car cell) :daemon daemon :seconds (cdr cell)))
-                       batch))
-         :on-response (lambda (response) (agent-repl-startup--report-answered batch response))
-         :on-failure (lambda (detail) (agent-repl-startup--report-failed batch detail)))))))
-
-(defun agent-repl-startup--report-answered (batch response)
-  "The daemon answered the report of BATCH with RESPONSE.
-Every answer ends the batch: a success recorded it, and a refusal is a
-defect the same batch would only repeat, so it is recorded and dropped."
-  (setq agent-repl-startup--report-in-flight nil
-        agent-repl-startup--unreported
-        (cl-set-difference agent-repl-startup--unreported batch :test #'eq))
-  (pcase (plist-get response :arm)
-    (:success
-     (agent-repl--info agent-repl-startup--central
-                       "elisp.startup.report ok milestones=%d outcome=%s"
-                       (length batch) (plist-get (plist-get response :value) :arm)))
-    (:error
-     (agent-repl--error agent-repl-startup--central
-                        "elisp.startup.report refused milestones=%d cause=%S"
-                        (length batch) (plist-get response :value)))
-    (arm
-     (agent-repl--error agent-repl-startup--central
-                        "elisp.startup.report unknown-arm milestones=%d arm=%S" (length batch) arm)))
-  (agent-repl-startup--report))
-
-(defun agent-repl-startup--report-failed (batch detail)
-  "The report of BATCH did not reach the daemon (DETAIL).
-It is kept for the next link-up."
-  (setq agent-repl-startup--report-in-flight nil)
+(defun agent-repl-startup--report (milestones)
+  "Hand MILESTONES, a list of (KEYWORD . SECONDS), to the report.
+Each carries how this Emacs came to a daemon.  A startup that ended
+before any link-up named no daemon, which the open's order makes
+impossible: it is an invariant violation."
+  (unless agent-repl-startup--daemon
+    (agent-repl--fatal agent-repl-startup--central
+                       "elisp.startup.report no-daemon milestones=%S" milestones))
   (agent-repl--info agent-repl-startup--central
-                    "elisp.startup.report deferred milestones=%d detail=%S" (length batch) detail))
+                    "elisp.startup.report queued milestones=%d daemon=%s"
+                    (length milestones) agent-repl-startup--daemon)
+  (agent-repl-latency-report-startup
+   (mapcar (lambda (cell)
+             (list :milestone (car cell) :daemon agent-repl-startup--daemon :seconds (cdr cell)))
+           milestones)))
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl-startup-on-link-up)
 

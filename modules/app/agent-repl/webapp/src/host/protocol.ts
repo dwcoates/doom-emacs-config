@@ -50,6 +50,14 @@ interface PresenceMessage {
    * listening page it is shown; a host from a build before it never sends it.
    */
   readonly switchStartedAtMs?: number;
+  /**
+   * When the reload that loaded this page began: the wall-clock instant (Unix
+   * milliseconds) Emacs started it, the host's reload or the page's own. The
+   * page measures how long it stood blank from it (reload-blank.ts). ABSENT
+   * when the page was not loaded by a reload (a tab opening, the editor's
+   * first host load), and on every message but the one its hello replays.
+   */
+  readonly reloadStartedAtMs?: number;
 }
 
 /** host -> page: the background the workspace's Emacs input window paints. */
@@ -210,12 +218,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parseHostToPage(data: unknown): HostToPage | null {
   if (!isRecord(data) || data.channel !== HOST_CHANNEL) return null;
   switch (data.kind) {
-    case "presence":
+    case "presence": {
       if (typeof data.shown !== "boolean") return null;
-      if (data.switchStartedAtMs === undefined) return { channel: HOST_CHANNEL, kind: "presence", shown: data.shown };
-      return typeof data.switchStartedAtMs === "number" && Number.isFinite(data.switchStartedAtMs)
-        ? { channel: HOST_CHANNEL, kind: "presence", shown: data.shown, switchStartedAtMs: data.switchStartedAtMs }
-        : null;
+      const instant = (value: unknown): number | null | undefined =>
+        value === undefined ? undefined : typeof value === "number" && Number.isFinite(value) ? value : null;
+      const switchStartedAtMs = instant(data.switchStartedAtMs);
+      const reloadStartedAtMs = instant(data.reloadStartedAtMs);
+      if (switchStartedAtMs === null || reloadStartedAtMs === null) return null;
+      return {
+        channel: HOST_CHANNEL,
+        kind: "presence",
+        shown: data.shown,
+        ...(switchStartedAtMs === undefined ? {} : { switchStartedAtMs }),
+        ...(reloadStartedAtMs === undefined ? {} : { reloadStartedAtMs }),
+      };
+    }
     case "inputBackground":
       return typeof data.background === "string"
         ? { channel: HOST_CHANNEL, kind: "inputBackground", background: data.background }

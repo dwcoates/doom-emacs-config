@@ -17,53 +17,38 @@
 
 ;;;; ---- The editor's startup milestones ----
 
-(defvar agent-repl-test-startup--sent nil "Every startup report sent, newest first, as its request plist.")
-(defvar agent-repl-test-startup--answer nil "How the stubbed rpc answers: (:response R), (:failure D) or nil for never.")
-(defvar agent-repl-test-startup--records nil "Every info and error record, newest first, as (LEVEL TEXT).")
+(defvar agent-repl-test-startup--queued nil "Every batch handed to the report, newest first.")
+(defvar agent-repl-test-startup--records nil "Every info record, newest first, as (LEVEL TEXT).")
+(defvar agent-repl-test-startup--spawned nil "Whether the stubbed daemon was spawned by this Emacs.")
 
 (defmacro agent-repl-test-startup--with-milestones (&rest body)
-  "Run BODY with fresh milestone state, a stepping clock, a live link and a stubbed rpc.
+  "Run BODY with fresh milestone state, a stepping clock and a recording report.
 The clock answers 1, 2, 3, ... seconds since the process start, one per read;
 the init instant is 0.5 seconds.  This Emacs spawned its daemon unless BODY
 rebinds `agent-repl-test-startup--spawned'."
   (declare (indent 0))
   `(let ((agent-repl-startup--milestones nil)
-         (agent-repl-startup--unreported nil)
          (agent-repl-startup--daemon nil)
          (agent-repl-startup--ended nil)
-         (agent-repl-startup--report-in-flight nil)
-         (agent-repl-test-startup--sent nil)
+         (agent-repl-test-startup--queued nil)
          (agent-repl-test-startup--records nil)
-         (agent-repl-test-startup--answer
-          (list :response '(:arm :success :value (:arm :recorded :value (:recorded 0)))))
          (agent-repl-test-startup--spawned t)
-         (agent-repl-test-startup--link 'conn)
          (after-init-time nil)
          (clock 0))
      (cl-letf (((symbol-function 'agent-repl-startup--since-process-start)
                 (lambda (&optional at) (if at 0.5 (setq clock (1+ clock)))))
                ((symbol-function 'agent-repl-daemon--spawned-here-p)
                 (lambda () agent-repl-test-startup--spawned))
-               ((symbol-function 'agent-repl-link-live) (lambda () agent-repl-test-startup--link))
                ((symbol-function 'agent-repl--info)
                 (lambda (_ws fmt &rest args) (push (list 'info (apply #'format fmt args)) agent-repl-test-startup--records)))
-               ((symbol-function 'agent-repl--error)
-                (lambda (_ws fmt &rest args) (push (list 'error (apply #'format fmt args)) agent-repl-test-startup--records)))
-               ((symbol-function 'agent-repl-rpc-report-latencies)
-                (lambda (_conn request &rest keys)
-                  (push request agent-repl-test-startup--sent)
-                  (pcase agent-repl-test-startup--answer
-                    (`(:response ,r) (funcall (plist-get keys :on-response) r))
-                    (`(:failure ,d) (funcall (plist-get keys :on-failure) d))))))
+               ((symbol-function 'agent-repl-latency-report-startup)
+                (lambda (milestones) (push milestones agent-repl-test-startup--queued))))
        ,@body)))
 
-(defvar agent-repl-test-startup--spawned nil "Whether the stubbed daemon was spawned by this Emacs.")
-(defvar agent-repl-test-startup--link nil "What the stubbed `agent-repl-link-live' answers.")
-
-(defun agent-repl-test-startup--sent-milestones (&optional n)
-  "The milestones of the Nth newest report sent (0 the newest), as (MILESTONE DAEMON SECONDS)."
+(defun agent-repl-test-startup--queued-milestones (&optional n)
+  "The milestones of the Nth newest batch handed over (0 the newest), as (MILESTONE DAEMON SECONDS)."
   (mapcar (lambda (m) (list (plist-get m :milestone) (plist-get m :daemon) (plist-get m :seconds)))
-          (plist-get (nth (or n 0) agent-repl-test-startup--sent) :editor-startup)))
+          (nth (or n 0) agent-repl-test-startup--queued)))
 
 (ert-deftest agent-repl-test-startup-a-milestone-is-reached-once ()
   "A milestone reached twice keeps its first instant."
@@ -105,10 +90,10 @@ rebinds `agent-repl-test-startup--spawned'."
     (agent-repl-startup-on-link-up 'conn)
     (agent-repl-startup-reach :first-tab)
     ;; Assert
-    (should-not agent-repl-test-startup--sent)))
+    (should-not agent-repl-test-startup--queued)))
 
-(ert-deftest agent-repl-test-startup-the-end-reports-every-milestone ()
-  "The startup's end sends every milestone with the daemon arm, and an acknowledgment clears them."
+(ert-deftest agent-repl-test-startup-the-end-hands-every-milestone-to-the-report ()
+  "The startup's end hands every milestone, with the daemon arm, to the report in one batch."
   (agent-repl-test-startup--with-milestones
     ;; Arrange
     (setq agent-repl-test-startup--spawned nil)
@@ -117,68 +102,34 @@ rebinds `agent-repl-test-startup--spawned'."
     ;; Act
     (agent-repl-startup-ended)
     ;; Assert
-    (should (equal (agent-repl-test-startup--sent-milestones)
+    (should (= (length agent-repl-test-startup--queued) 1))
+    (should (equal (agent-repl-test-startup--queued-milestones)
                    '((:daemon-linked :running 1) (:first-tab :running 2) (:all-tabs :running 3))))
-    (should-not agent-repl-startup--unreported)
-    (should (assoc '(info "elisp.startup.report ok milestones=3 outcome=:recorded")
+    (should (assoc '(info "elisp.startup.report queued milestones=3 daemon=:running")
                    (mapcar #'list agent-repl-test-startup--records)))))
 
-(ert-deftest agent-repl-test-startup-a-report-that-did-not-arrive-is-sent-at-the-next-link-up ()
-  "A transport failure keeps the batch, and the next link-up sends it again."
+(ert-deftest agent-repl-test-startup-a-milestone-after-the-end-is-handed-over-at-once ()
+  "A milestone first reached after the end goes to the report on its own."
   (agent-repl-test-startup--with-milestones
     ;; Arrange
     (agent-repl-startup-on-link-up 'conn)
-    (setq agent-repl-test-startup--answer '(:failure (:kind :transport)))
     (agent-repl-startup-ended)
-    (should (= (length agent-repl-startup--unreported) 2))
     ;; Act
-    (setq agent-repl-test-startup--answer
-          (list :response '(:arm :success :value (:arm :metrics-off :value nil))))
-    (agent-repl-startup-on-link-up 'conn)
+    (agent-repl-startup-reach :first-tab)
     ;; Assert
-    (should (= (length agent-repl-test-startup--sent) 2))
-    (should (equal (agent-repl-test-startup--sent-milestones) (agent-repl-test-startup--sent-milestones 1)))
-    (should-not agent-repl-startup--unreported)))
+    (should (= (length agent-repl-test-startup--queued) 2))
+    (should (equal (agent-repl-test-startup--queued-milestones) '((:first-tab :spawned 3))))))
 
-(ert-deftest agent-repl-test-startup-a-refused-report-is-recorded-and-dropped ()
-  "A refusal is a defect the same batch would repeat: recorded at ERROR, never resent."
+(ert-deftest agent-repl-test-startup-a-link-up-hands-nothing-over ()
+  "A link-up only reaches daemon-linked: sending what waits is the report's own job."
   (agent-repl-test-startup--with-milestones
     ;; Arrange
     (agent-repl-startup-on-link-up 'conn)
-    (setq agent-repl-test-startup--answer
-          (list :response '(:arm :error :value (:arm :workspace-ref-mismatch :value nil))))
-    ;; Act
-    (agent-repl-startup-ended)
-    (agent-repl-startup-on-link-up 'conn)
-    ;; Assert
-    (should (= (length agent-repl-test-startup--sent) 1))
-    (should-not agent-repl-startup--unreported)
-    (should (cl-some (lambda (r) (and (eq (car r) 'error) (string-match-p "elisp.startup.report refused milestones=2" (cadr r))))
-                     agent-repl-test-startup--records))))
-
-(ert-deftest agent-repl-test-startup-one-report-at-a-time ()
-  "A link-up while a report is unanswered sends nothing more."
-  (agent-repl-test-startup--with-milestones
-    ;; Arrange
-    (agent-repl-startup-on-link-up 'conn)
-    (setq agent-repl-test-startup--answer nil)
     (agent-repl-startup-ended)
     ;; Act
     (agent-repl-startup-on-link-up 'conn)
     ;; Assert
-    (should (= (length agent-repl-test-startup--sent) 1))))
-
-(ert-deftest agent-repl-test-startup-no-link-keeps-the-report ()
-  "With no link standing nothing is sent, and the milestones wait."
-  (agent-repl-test-startup--with-milestones
-    ;; Arrange
-    (agent-repl-startup-on-link-up 'conn)
-    (setq agent-repl-test-startup--link nil)
-    ;; Act
-    (agent-repl-startup-ended)
-    ;; Assert
-    (should-not agent-repl-test-startup--sent)
-    (should (= (length agent-repl-startup--unreported) 2))))
+    (should (= (length agent-repl-test-startup--queued) 1))))
 
 (ert-deftest agent-repl-test-startup-an-end-before-any-link-up-is-fatal ()
   "A startup that ended naming no daemon is an invariant violation, raised loudly."
@@ -187,7 +138,7 @@ rebinds `agent-repl-test-startup--spawned'."
                (lambda (_ws fmt &rest args) (error (apply #'format fmt args)))))
       ;; Act / Assert
       (should-error (agent-repl-startup-ended))
-      (should-not agent-repl-test-startup--sent))))
+      (should-not agent-repl-test-startup--queued))))
 
 ;;;; ---- Doom's one-time setup at idle ----
 

@@ -8,6 +8,11 @@ describe("parseHostToPage", () => {
   it.each([
     ["presence", { channel: HOST_CHANNEL, kind: "presence", shown: true }],
     ["presence a switch made", { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: 1_700_000_000_123 }],
+    ["presence a reload loaded", { channel: HOST_CHANNEL, kind: "presence", shown: false, reloadStartedAtMs: 1_700_000_000_500 }],
+    [
+      "presence a reload loaded and a switch showed",
+      { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: 1_700_000_000_123, reloadStartedAtMs: 1_700_000_000_100 },
+    ],
     ["inputBackground", { channel: HOST_CHANNEL, kind: "inputBackground", background: "#123456" }],
     ["gateDock with a background", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 120, background: "#000" }],
     ["gateDock without a background", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 120, background: null }],
@@ -49,6 +54,8 @@ describe("parseHostToPage", () => {
     ["presence without a boolean", { channel: HOST_CHANNEL, kind: "presence", shown: "yes" }],
     ["presence with a switch start that is not a number", { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: "now" }],
     ["presence with a non-finite switch start", { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: NaN }],
+    ["presence with a reload start that is not a number", { channel: HOST_CHANNEL, kind: "presence", shown: true, reloadStartedAtMs: "then" }],
+    ["presence with a non-finite reload start", { channel: HOST_CHANNEL, kind: "presence", shown: true, reloadStartedAtMs: Infinity }],
     ["an inputBackground without a string", { channel: HOST_CHANNEL, kind: "inputBackground", background: 3 }],
     ["a gateDock with a non-finite height", { channel: HOST_CHANNEL, kind: "gateDock", pixels: Infinity, background: null }],
     ["a sidebarDock without a boolean", { channel: HOST_CHANNEL, kind: "sidebarDock", docked: 1 }],

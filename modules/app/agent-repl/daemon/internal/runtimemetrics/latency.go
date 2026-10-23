@@ -43,6 +43,9 @@ var (
 	pageBootBuckets   = []float64{0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30}
 	vendorBuckets     = []float64{0.5, 1, 2, 3, 5, 8, 13, 21, 34, 60}
 	eventLoopBuckets  = []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5}
+	// stallBuckets bound the waits a person sits through: a stalled loop, a
+	// blank page, a reload the editor runs nothing else during.
+	stallBuckets = []float64{0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30}
 )
 
 // ReportedKinds are the latencies Emacs and the webapp report.
@@ -51,6 +54,15 @@ var ReportedKinds = map[agentreplv1.ReportedLatencyKind]LatencyKind{
 	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_SWITCH_FIRST:  {Name: "switch_first", Buckets: navigationBuckets},
 	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_BOOT:     {Name: "page_boot", Buckets: pageBootBuckets},
 	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PROMPT_ECHO:   {Name: "prompt_echo", Buckets: navigationBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_PAGE_STALL:    {Name: "page_stall", Buckets: stallBuckets},
+	agentreplv1.ReportedLatencyKind_REPORTED_LATENCY_KIND_RELOAD_BLANK:  {Name: "reload_blank", Buckets: stallBuckets},
+}
+
+// EditorKinds are the editor-wide latencies Emacs reports, which name no
+// workspace: their series carry an empty `workspace` label.
+var EditorKinds = map[agentreplv1.EditorLatencyKind]LatencyKind{
+	agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL:        {Name: "editor_stall", Buckets: stallBuckets},
+	agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_ELISP_RELOAD: {Name: "elisp_reload", Buckets: stallBuckets},
 }
 
 // WorkspaceOpen is the daemon-measured latency from an OpenWorkspace's
@@ -161,6 +173,18 @@ func validateReported(l *agentreplv1.ReportedLatency) (LatencyKind, error) {
 	kind, ok := ReportedKinds[l.GetKind()]
 	if !ok {
 		return LatencyKind{}, fmt.Errorf("%w: kind %v is not a reported latency", ErrInvalidLatency, l.GetKind())
+	}
+	if s := l.GetSeconds(); math.IsNaN(s) || math.IsInf(s, 0) || s < 0 {
+		return LatencyKind{}, fmt.Errorf("%w: %s took %v seconds", ErrInvalidLatency, kind.Name, s)
+	}
+	return kind, nil
+}
+
+// validateEditor checks one editor-wide latency, answering its kind.
+func validateEditor(l *agentreplv1.ReportedEditorLatency) (LatencyKind, error) {
+	kind, ok := EditorKinds[l.GetKind()]
+	if !ok {
+		return LatencyKind{}, fmt.Errorf("%w: kind %v is not an editor latency", ErrInvalidLatency, l.GetKind())
 	}
 	if s := l.GetSeconds(); math.IsNaN(s) || math.IsInf(s, 0) || s < 0 {
 		return LatencyKind{}, fmt.Errorf("%w: %s took %v seconds", ErrInvalidLatency, kind.Name, s)
