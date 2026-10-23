@@ -24,6 +24,7 @@ import {
   WatchPageResponseSchema,
   type SubscribePageRequest,
   type UnsubscribePageRequest,
+  type WatchPageRequest,
   type WatchPageResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_page_pb";
 import { WatchFooterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
@@ -134,6 +135,8 @@ function ended(
 interface FakeDaemon {
   /** Every server-streaming call the page opened, by rpc name. */
   readonly streamOpens: string[];
+  /** Every WatchPage request the page opened its stream with. */
+  readonly pageRequests: WatchPageRequest[];
   /** Every SubscribePage the page issued. */
   readonly subscribes: SubscribePageRequest[];
   /** Every UnsubscribePage the page issued. */
@@ -157,6 +160,7 @@ interface FakeDaemon {
  */
 function fakeDaemon(): { client: ReturnType<typeof createAgentReplClient>; daemon: FakeDaemon } {
   const streamOpens: string[] = [];
+  const pageRequests: WatchPageRequest[] = [];
   const subscribes: SubscribePageRequest[] = [];
   const unsubscribes: UnsubscribePageRequest[] = [];
   let outbound: WatchPageResponse[] = [];
@@ -167,6 +171,7 @@ function fakeDaemon(): { client: ReturnType<typeof createAgentReplClient>; daemo
 
   const state: FakeDaemon = {
     streamOpens,
+    pageRequests,
     subscribes,
     unsubscribes,
     send(frame: WatchPageResponse): void {
@@ -187,8 +192,9 @@ function fakeDaemon(): { client: ReturnType<typeof createAgentReplClient>; daemo
 
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
-      watchPage: async function* () {
+      watchPage: async function* (req) {
         streamOpens.push("WatchPage");
+        pageRequests.push(req);
         open = true;
         outbound = [];
         for (;;) {
@@ -570,6 +576,36 @@ describe("the page's one standing stream", () => {
     // Assert: the ONE stream is standing again, so the subscriptions that
     // ended with it have something to reopen onto.
     expect(daemon.streamOpens.filter((name) => name === "WatchPage").length).toBeGreaterThan(1);
+    ctx.quiesce();
+  });
+
+  it("states the web view host's build on the host's own stream", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+
+    // Act.
+    const handle = startPageStreams(ctx, "webhost-1", "Web1");
+    await settle();
+
+    // Assert.
+    const request = daemon.pageRequests.find((r) => r.page === "webhost-1");
+    expect(request?.webhost?.webappBuild).toBe("Web1");
+    handle.cancel();
+    ctx.quiesce();
+  });
+
+  it("states no host build on a workspace page's stream", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+
+    // Act.
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+
+    // Assert.
+    expect(daemon.pageRequests.find((r) => r.page === "page-1")?.webhost).toBeUndefined();
     ctx.quiesce();
   });
 

@@ -130,6 +130,13 @@ export interface DaemonContextInit {
    */
   page: string;
   /**
+   * The webapp build the web view host was loaded from, set by the host's
+   * own context alone: its page stream states it (WatchPageRequest.webhost),
+   * so a deploy that built another reloads the host. Unset on every
+   * workspace page, which states its build on WatchWebWorkspace.
+   */
+  webhostBuild?: string;
+  /**
    * The page's stream, for a test that drives ONE component's watch against a
    * scripted client. Production leaves it unset and gets the real one, opened
    * here; a substitute cannot reach production because nothing but a test
@@ -239,6 +246,6 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
   // this same object, so it is opened once the rest of the context exists and
   // handed back on the finished one.
   const streams: PageStreams =
-    init.streams ?? startPageStreams(base satisfies PageStreamContext, init.page);
+    init.streams ?? startPageStreams(base satisfies PageStreamContext, init.page, init.webhostBuild);
   return { ...base, streams };
 }

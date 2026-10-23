@@ -35,6 +35,7 @@ import { createAgentReplClient, type AgentReplClient } from "../rpc/client.js";
 import { createDaemonContext } from "../rpc/context.js";
 import { createDaemonTransport } from "../rpc/transport.js";
 import type { DaemonOrigin } from "../rpc/daemon-origin.js";
+import { readWebappBuild } from "../webapp-build.js";
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
 import type { Host } from "./host.js";
 import { installLoadCensus, type LoadCensus } from "./load-census.js";
@@ -56,6 +57,8 @@ export interface WebhostSidebarStartDeps {
   level?: LevelWindow;
   /** The daemon the sidebar dials (`Host.setDaemon` moves it); the webhost's own origin when absent. */
   daemon?: DaemonOrigin;
+  /** The webapp build the webhost was loaded from; read off its own entry script when absent. */
+  webappBuild?: () => string;
 }
 
 /**
@@ -99,7 +102,10 @@ export function startWebhostSidebar(
     log.info("the webhost is starting its sidebar", { operation: "webhost.sidebar-start", context: {} });
     // Text in the sidebar copies and selects exactly as it does in a page.
     installTextAffordances(doc);
-    const ctx = createDaemonContext({ client, ticker: createTicker(), failures, page: connectionId });
+    // THE WEBHOST STATES ITS BUILD on its page stream: a handover no longer
+    // reloads it, so a deploy that built another reloads it instead.
+    const webhostBuild = (deps.webappBuild ?? (() => readWebappBuild(doc)))();
+    const ctx = createDaemonContext({ client, ticker: createTicker(), failures, page: connectionId, webhostBuild });
     // An unloaded webhost stops at once: its requests, and its census.
     const unwatch = endPageAtPagehide(win);
     stopAtPageTeardown(() => census.stop());
