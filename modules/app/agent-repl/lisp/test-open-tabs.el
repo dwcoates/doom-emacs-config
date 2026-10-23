@@ -296,7 +296,7 @@ A ref id names the workspace of the same name."
       (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
                  (lambda (_ws) (error "the host would not start")))
                 ((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")))
       ;; Assert
@@ -569,7 +569,7 @@ section, landed on a perspective that no page was ever made for."
   (agent-repl-test-open-tabs--with
     (let (errors)
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Arrange
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
         ;; Act
@@ -1074,7 +1074,7 @@ leaves the tab open."
   (agent-repl-test-open-tabs--with
     (let (errors)
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Arrange
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
         ;; Act

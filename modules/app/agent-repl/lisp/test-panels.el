@@ -1832,7 +1832,7 @@ had already gone on to C."
       ;; Arrange.
       (let ((records nil))
         (cl-letf (((symbol-function 'agent-repl--info)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) records))))
+                   (agent-repl-test--record-into records)))
           (agent-repl--schedule-switch-activation "ws-b")
           (agent-repl--schedule-switch-activation "ws-c")
           ;; Act.
@@ -1848,7 +1848,7 @@ had already gone on to C."
       ;; Arrange.
       (let ((records nil))
         (cl-letf (((symbol-function 'agent-repl--info)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) records))))
+                   (agent-repl-test--record-into records)))
           (agent-repl--schedule-switch-activation "ws-b")
           (agent-repl--schedule-switch-activation "ws-c")
           ;; Act.
@@ -1865,7 +1865,7 @@ had already gone on to C."
       (let ((records nil)
             (now 100.0))
         (cl-letf (((symbol-function 'agent-repl--info)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) records)))
+                   (agent-repl-test--record-into records))
                   ((symbol-function 'float-time) (lambda (&optional _) now)))
           (agent-repl--schedule-switch-activation "ws-b")
           (setq now 100.27)
@@ -2030,7 +2030,7 @@ answers.  BODY runs with the other window selected; `input-buf' is bound."
   (agent-repl-test-panels--with-visible-input t
     (let ((infos nil))
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl--maybe-autoselect-input "test-ws"))
       ;; Assert
@@ -3332,7 +3332,7 @@ is set, dispatching through WS's own frontend (the webview + input layout)."
                       ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                       ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
                       ((symbol-function 'agent-repl--info)
-                       (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                       (agent-repl-test--record-into infos)))
               ;; Act
               (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
               ;; Assert
@@ -3434,7 +3434,7 @@ section, landed on a perspective with no page, and nothing made one."
                       ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
                       ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
                       ((symbol-function 'agent-repl--info)
-                       (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                       (agent-repl-test--record-into infos)))
               ;; Act
               (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
               ;; Assert
@@ -3456,7 +3456,7 @@ section, landed on a perspective with no page, and nothing made one."
                       ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                       ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
                       ((symbol-function 'agent-repl--info)
-                       (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                       (agent-repl-test--record-into infos)))
               ;; Act
               (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
               ;; Assert
@@ -3477,7 +3477,7 @@ section, landed on a perspective with no page, and nothing made one."
                       ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                       ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
                       ((symbol-function 'agent-repl--info)
-                       (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                       (agent-repl-test--record-into infos)))
               ;; Act
               (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
               ;; Assert
@@ -4313,11 +4313,9 @@ press."
   `(let ((agent-repl-test-panels--info nil)
          (agent-repl-test-panels--debug nil))
      (cl-letf (((symbol-function 'agent-repl--info)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-test-panels--info)))
+                (agent-repl-test--record-into agent-repl-test-panels--info))
                ((symbol-function 'agent-repl--log)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-test-panels--debug))))
+                (agent-repl-test--record-into agent-repl-test-panels--debug)))
        ,@body)))
 
 (defvar agent-repl-test-panels--info nil
@@ -4574,7 +4572,7 @@ exemption has its own test."
                  ((symbol-function 'agent-repl--open-progress-show)
                   (lambda (_ws buf) buf))
                  ((symbol-function 'agent-repl--info)
-                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) records)))
+                  (agent-repl-test--record-into records))
                  ((symbol-function 'agent-repl--ws-frontend)
                   (lambda (_ws)
                     (agent-repl-frontend-create

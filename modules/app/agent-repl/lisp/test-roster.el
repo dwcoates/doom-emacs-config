@@ -573,7 +573,7 @@ start's reconcile on its first row and drew no tabs at all."
       (cl-letf (((symbol-function 'agent-repl--ws-create)
                  (lambda (_ws &optional _dir) (error "no such directory")))
                 ((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-apply
          (agent-repl-test-roster--roster
@@ -680,7 +680,7 @@ reading."
       (cl-letf (((symbol-function 'agent-repl--ws-persp-kill)
                  (lambda (_ws) (error "Window is dedicated to `*agent-panel-input-first*'")))
                 ((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         (agent-repl-roster-apply (agent-repl-test-roster--roster :sections nil)))
       ;; Assert
       (should (seq-some (lambda (text)
@@ -1008,7 +1008,7 @@ for a landing."
                 ((symbol-function 'agent-repl--ws-all-names) (lambda () nil))
                 ((symbol-function 'agent-repl--ws-list-names) (lambda () nil))
                 ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+                 (agent-repl-test--record-into warnings)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--roster :sections nil)))
       ;; Assert
@@ -1226,7 +1226,7 @@ that follows must not care which of the two got there first."
                          "repo" (list (agent-repl-test-roster--row "b" "stays" :ready))))))
       ;; Act
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         (agent-repl-roster-apply
          (agent-repl-test-roster--roster
           :sections (list (agent-repl-test-roster--section
@@ -1334,7 +1334,7 @@ own choice (2026-10-07): the view decides nothing once its stream ended."
     (setq agent-repl-roster--stream nil)
     (let ((logged nil))
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-roster-apply
          (agent-repl-test-roster--roster
@@ -1449,7 +1449,7 @@ activation hook sends no SelectWorkspace echo."
     (let ((infos nil))
       (setq agent-repl-test-roster--current-name "one")
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply
          (agent-repl-test-roster--roster
@@ -1467,7 +1467,7 @@ activation hook sends no SelectWorkspace echo."
       (setq agent-repl-test-roster--current-name "one"
             agent-repl-host--select-in-flight "one")
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
       ;; Assert
@@ -1513,7 +1513,7 @@ changed while the user typed is followed once, to where it ended."
     (let ((infos nil))
       (setq agent-repl-test-roster--current-name "one")
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
       ;; Assert
@@ -1531,7 +1531,7 @@ changed while the user typed is followed once, to where it ended."
       (setq agent-repl-test-roster--current-name "one"
             agent-repl-host-last-request (cons "two" (float-time)))
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
       ;; Assert
@@ -1545,7 +1545,7 @@ changed while the user typed is followed once, to where it ended."
     (let ((infos nil))
       (setq agent-repl-test-roster--current-name "two")
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
       ;; Assert
@@ -1559,7 +1559,7 @@ changed while the user typed is followed once, to where it ended."
       (setq agent-repl-test-roster--current-name "two")
       (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b"))
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-roster-apply (agent-repl-test-roster--two-tabs "b")))
       ;; Assert
@@ -1670,7 +1670,7 @@ user's next sidebar click."
       (funcall push)
       (let (logged)
         (cl-letf (((symbol-function 'agent-repl--log)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                   (agent-repl-test--record-into logged)))
           ;; Act
           (funcall push))
         ;; Assert
@@ -1686,7 +1686,7 @@ user's next sidebar click."
                        "repo" (list (agent-repl-test-roster--row "a" "one" :ready))))))
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-roster-apply
          (agent-repl-test-roster--roster
@@ -2201,7 +2201,7 @@ on finishes would miss a workspace going back to work."
       (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
                  (lambda (_conn _on-push _on-close &optional _on-open) 'fake-stream))
                 ((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-on-link-promote old successor)
         ;; Assert
@@ -2276,7 +2276,7 @@ on finishes would miss a workspace going back to work."
       (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
                  (lambda (_conn _on-push _on-close &optional _on-open) 'fake-stream))
                 ((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-on-link-handover old successor)
         ;; Assert
@@ -2345,7 +2345,7 @@ on finishes would miss a workspace going back to work."
       (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
                  (lambda (_conn _on-push _on-close &optional _on-open) 'fake-stream))
                 ((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-subscribe 'conn-1))
       ;; Assert
@@ -2365,7 +2365,7 @@ on finishes would miss a workspace going back to work."
                  (lambda (_conn _on-push _on-close &optional on-open)
                    (setq accepted on-open) 'fake-stream))
                 ((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         (agent-repl-roster-subscribe conn)
         ;; Act
         (funcall accepted))
@@ -2386,7 +2386,7 @@ on finishes would miss a workspace going back to work."
                  (lambda (_conn _on-push _on-close &optional on-open)
                    (setq accepted on-open) 'fake-stream))
                 ((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         (agent-repl-roster-subscribe conn)
         ;; Act
         (funcall accepted))
@@ -2448,7 +2448,7 @@ Each subscribe answers a fresh stream record `(:conn C :on-push F
           (logs nil))
       (agent-repl-test-roster--with-stream live
         (cl-letf (((symbol-function 'agent-repl--info)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                   (agent-repl-test--record-into logs)))
           (agent-repl-roster-subscribe dead)
           (funcall (plist-get (car streams) :on-open))
           ;; Act
@@ -2504,7 +2504,7 @@ Each subscribe answers a fresh stream record `(:conn C :on-push F
 LEVEL is the logging rung's symbol, e.g. `agent-repl--info'."
   (declare (indent 1))
   `(cl-letf (((symbol-function ,level)
-              (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+              (agent-repl-test--record-into logs)))
      ,@body))
 
 (defun agent-repl-test-roster--end-planned (record)
@@ -2754,7 +2754,7 @@ record reached no file at all."
   (agent-repl-test-roster--with-editor
     (let (logs)
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-apply
          (agent-repl-test-roster--roster
@@ -2771,7 +2771,7 @@ record reached no file at all."
   (agent-repl-test-roster--with-editor
     (let (logs)
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-apply
          (agent-repl-test-roster--roster
@@ -2883,7 +2883,7 @@ count never moves; the tabs opening is the only bring-up there is."
            (list (lambda (&rest _) (error "display blew up"))))
           (logs nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-apply
          (agent-repl-test-roster--roster
@@ -2904,7 +2904,7 @@ saying the roster had been asked for one and declined."
   (agent-repl-test-roster--with-editor
     (let (logs)
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-desired-tabs
          (agent-repl-test-roster--roster
@@ -2923,7 +2923,7 @@ saying the roster had been asked for one and declined."
   (agent-repl-test-roster--with-editor
     (let (logs)
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         ;; Act
         (agent-repl-roster-desired-tabs
          (agent-repl-test-roster--roster
@@ -2995,7 +2995,7 @@ saying the roster had been asked for one and declined."
            errors)
       (plist-put second :tab (list :tab (list :arm :numbered :value (list :number 5))))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (let ((applied (agent-repl-roster-apply roster)))
           ;; Assert
@@ -3678,7 +3678,7 @@ workspace the user left."
           agent-repl-roster--view-stream 'old-stream)
     (let ((logged nil))
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-roster-apply-current))
       ;; Assert

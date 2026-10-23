@@ -658,7 +658,7 @@ in `completion-category-overrides', with the `substring' style."
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl-host-route-handover) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
       ;; Assert
@@ -674,7 +674,7 @@ in `completion-category-overrides', with the `substring' style."
       (cl-letf (((symbol-function 'agent-repl-host-route-handover)
                  (lambda (ws cause slug) (push (list ws cause slug) routed) t))
                 ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
       ;; Assert
@@ -689,7 +689,7 @@ in `completion-category-overrides', with the `substring' style."
     (setq agent-repl--command-completion-catalog agent-repl-test-command-completion--catalog)
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
       ;; Assert
@@ -706,7 +706,7 @@ in `completion-category-overrides', with the `substring' style."
     (setq agent-repl--command-completion-catalog agent-repl-test-command-completion--catalog)
     (let ((errors nil))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
       ;; Assert
@@ -720,7 +720,7 @@ in `completion-category-overrides', with the `substring' style."
     ;; Arrange
     (let ((errors nil))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
       ;; Assert
@@ -744,7 +744,7 @@ in `completion-category-overrides', with the `substring' style."
     (let ((logged nil))
       (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
       ;; Assert
@@ -758,7 +758,7 @@ in `completion-category-overrides', with the `substring' style."
     (let ((logged nil))
       (cl-letf (((symbol-function 'agent-repl-host-conn-or-primary) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-command-completion-refresh "ws-1"))
       ;; Assert

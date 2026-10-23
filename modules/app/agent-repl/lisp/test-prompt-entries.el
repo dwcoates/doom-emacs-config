@@ -56,9 +56,9 @@ first, `errors' and `infos' to the formatted records."
                 (lambda (label dir command callback)
                   (push (list :label label :dir dir :command command :callback callback) builds)))
                ((symbol-function 'agent-repl--error)
-                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors)))
+                (agent-repl-test--record-into errors))
                ((symbol-function 'agent-repl--info)
-                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                (agent-repl-test--record-into infos)))
        ,@body)))
 
 ;;;; ---- Freshness ----

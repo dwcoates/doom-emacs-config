@@ -1398,7 +1398,7 @@ ring (owner ruling overrides the old keep-the-text contract)."
     (agent-repl-test-input--compose '("/tmp/a.png") '("/tmp/gone.png"))
     (let (recorded)
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) recorded))))
+                 (agent-repl-test--record-into recorded)))
         ;; Act
         (ignore-errors (agent-repl--send :user-sent)))
       ;; Assert
@@ -1837,17 +1837,13 @@ WARN and must never reach the `unknown-error-arm' ERROR branch."
          (agent-repl-test-input--warn nil)
          (agent-repl-test-input--error nil))
      (cl-letf (((symbol-function 'agent-repl--info)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-test-input--info)))
+                (agent-repl-test--record-into agent-repl-test-input--info))
                ((symbol-function 'agent-repl--log)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-test-input--debug)))
+                (agent-repl-test--record-into agent-repl-test-input--debug))
                ((symbol-function 'agent-repl--warn)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-test-input--warn)))
+                (agent-repl-test--record-into agent-repl-test-input--warn))
                ((symbol-function 'agent-repl--error)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-test-input--error))))
+                (agent-repl-test--record-into agent-repl-test-input--error)))
        ,@body)))
 
 (defun agent-repl-test-input--rung-has-p (messages prefix)
@@ -2426,7 +2422,7 @@ stubbed rpc received is pushed onto `requests'."
   (agent-repl-test-input--with-open-image '(:response (:arm :success :value nil))
     (let ((infos nil))
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl--input-open-feed-image "ws-one" '(:path "/w/clip.png" :media-type "image/png")))
       ;; Assert
@@ -2569,7 +2565,7 @@ ran in onto `insert-buffers'; every INFO record lands on `infos'."
                    ((symbol-function 'evil-insert-state)
                     (lambda (&optional _arg) (push (current-buffer) insert-buffers)))
                    ((symbol-function 'agent-repl--info)
-                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                    (agent-repl-test--record-into infos)))
            ,@body)))))
 
 (ert-deftest agent-repl-test-input-focus-for-reply-selects-the-composer-window ()
@@ -2628,7 +2624,7 @@ ran in onto `insert-buffers'; every INFO record lands on `infos'."
     ;; Arrange
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-turn-boundary-select-prev))
       ;; Assert
@@ -2649,7 +2645,7 @@ ran in onto `insert-buffers'; every INFO record lands on `infos'."
     ;; Arrange
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-turn-boundary-select-next))
       ;; Assert
@@ -2662,7 +2658,7 @@ ran in onto `insert-buffers'; every INFO record lands on `infos'."
     ;; Arrange
     (let ((errors nil))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-turn-boundary-select-next))
       ;; Assert
@@ -2970,8 +2966,7 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
                  ((symbol-function 'y-or-n-p)
                   (lambda (prompt) (setq agent-repl-test-input--asked prompt) confirm))
                  ((symbol-function 'agent-repl--warn)
-                  (lambda (_ws fmt &rest args)
-                    (push (apply #'format fmt args) agent-repl-test-input--warned))))
+                  (agent-repl-test--record-into agent-repl-test-input--warned)))
          ,@body))))
 
 (defun agent-repl-test-input--plan (&rest overrides)
@@ -3423,7 +3418,7 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
     ;; Arrange
     (let ((errors nil))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-rollback-keep-files))
       ;; Assert
@@ -3503,7 +3498,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
   (agent-repl-test-input--with-rollback nil nil nil
     (let ((errors nil))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl--input-rollback-offer "ws-one" '(:arm :later :value nil)))
       ;; Assert
@@ -3586,7 +3581,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
     (let ((agent-repl-test-input--list-answer '(:response (:arm :accepted :value nil)))
           (errors nil))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl--input-rollback-choose "ws-one"))
       ;; Assert
@@ -3697,7 +3692,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
     ;; Arrange
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-turn-boundary-select-prev))
       ;; Assert
@@ -3828,7 +3823,7 @@ recorded; the response view is killed afterwards."
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl--input-selection-changed "ws-one"))
       ;; Assert
@@ -3895,7 +3890,7 @@ recorded; the response view is killed afterwards."
     ;; Arrange
     (let (errors)
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (should-error (agent-repl-response-search-forward))
         ;; Assert
@@ -4005,7 +4000,7 @@ The record is bound as `ran'."
     (let (errors)
       (cl-letf (((symbol-function 'key-binding) (lambda (_key &rest _) nil))
                 ((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (should-error (agent-repl-response-search-buffer))
         ;; Assert
@@ -4264,7 +4259,7 @@ holds it until the condition clears."
           '(:response (:arm :error :value (:reason (:arm :merging :value nil)))))
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-test-input--submit-deferred))
       ;; Assert
@@ -4837,7 +4832,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
            '(:response (:arm :error :value (:cause (:arm :ask-not-standing :value nil)))))
           (warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         (agent-repl-test-input--type-digit ?1))
       (should (cl-some (lambda (m) (string-match-p "elisp.input.answer-question-refused .*:label \"a\".*ask-not-standing" m))
                        warned))
@@ -4929,7 +4924,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
       (let (warned)
         (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
                   ((symbol-function 'agent-repl--warn)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                   (agent-repl-test--record-into warned)))
           ;; Act
           (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes"))
         ;; Assert
@@ -4988,7 +4983,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
     (agent-repl-test-input--compose "look " '("/tmp/gone.png"))
     (let (recorded)
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) recorded))))
+                 (agent-repl-test--record-into recorded)))
         ;; Act / Assert
         (should-error (agent-repl--input-resend "ws-one") :type 'user-error))
       (should (member "elisp.input.send-refused-missing-images ws=ws-one paths=(\"/tmp/gone.png\")"

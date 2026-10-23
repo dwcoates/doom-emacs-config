@@ -45,7 +45,7 @@
   "Run BODY collecting every INFO record's text into LOGGED, newest first."
   (declare (indent 1))
   `(cl-letf (((symbol-function 'agent-repl--info)
-              (lambda (_ws fmt &rest args) (push (apply #'format fmt args) ,logged))))
+              (agent-repl-test--record-into ,logged)))
      ,@body))
 
 (defun agent-repl-test-wr--said-p (logged &rest parts)
@@ -135,7 +135,7 @@
         (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
                    (lambda (_ws) (error "mount blew up")))
                   ((symbol-function 'agent-repl--warn)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                   (agent-repl-test--record-into warned)))
           ;; Act
           (agent-repl-webview-precreate-all))
         ;; Assert

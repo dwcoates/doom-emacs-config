@@ -1021,7 +1021,7 @@ switch (2026-10-15)."
     (agent-repl--ws-put "ws1" :ref '(:id "id-1" :dir "/tmp/x"))
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--log-verbose)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl--ws-by-ref-id "id-1")
         ;; Assert
@@ -1369,7 +1369,7 @@ gated push would then drop the very repaint this exists for."
                 ;; value is the log emitter's rather than a contract; a signal
                 ;; escaping the containment still fails this test.
                 ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         (agent-repl--ws-repaint-sidebar "doomed" "test")
         (should (cl-some (lambda (l) (string-match-p "push error" l)) warned))))))
 
@@ -2163,8 +2163,7 @@ of the cache (no sentinel head)."
     (let* ((persp-names-cache '("main" "ws-a"))
            (logs nil))
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args)
-                   (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         (agent-repl--reorder-workspace-to-front "missing-ws")
         (should (cl-find-if (lambda (l)
                               (and (string-match-p "reorder-workspace-to-front: BAIL" l)
@@ -2179,8 +2178,7 @@ of the cache (no sentinel head)."
            (logs nil))
       (cl-letf (((symbol-function 'persp-update-names-cache) (lambda (_) nil))
                 ((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args)
-                   (push (apply #'format fmt args) logs))))
+                 (agent-repl-test--record-into logs)))
         (agent-repl--reorder-workspace-to-front "merge-failed-ws")
         (should (cl-find-if (lambda (l)
                               (string-match-p "reorder-workspace-to-front: APPLY" l))
@@ -3428,7 +3426,7 @@ so no half-torn-down workspace is left behind its surviving tab."
                 ((symbol-function 'agent-repl--ws-land-then-kill)
                  (lambda (_ws) (error "no frame")))
                 ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl--kill-one-workspace "ws")
         ;; Assert — the failure is surfaced and the teardown still finishes.
@@ -3639,9 +3637,9 @@ formatted line, and every `run-at-time' onto `timers' as its function."
          (timers nil))
      (cl-letf (((symbol-function 'agent-repl--minibuffer-active-p) (lambda () ,active))
                ((symbol-function 'agent-repl--info)
-                (lambda (_scope fmt &rest args) (push (apply #'format fmt args) infos)))
+                (agent-repl-test--record-into infos))
                ((symbol-function 'agent-repl--error)
-                (lambda (_scope fmt &rest args) (push (apply #'format fmt args) errors)))
+                (agent-repl-test--record-into errors))
                ((symbol-function 'run-at-time)
                 (lambda (_time _repeat fn &rest _) (push fn timers) nil)))
        ,@body)))

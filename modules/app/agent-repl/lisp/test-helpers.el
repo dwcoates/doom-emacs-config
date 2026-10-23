@@ -1024,6 +1024,15 @@ tag inside the struct body rather than to the next line."
       (setq start (match-end 0)))
     (delete-dups names)))
 
+(defmacro agent-repl-test--record-into (place)
+  "A stand-in for a logging rung that records each record's text into PLACE.
+The lambda takes the rung's arguments (SCOPE FMT &rest ARGS), formats the
+record and pushes it onto PLACE, so PLACE holds the records newest first.
+Stub a rung with it: ((symbol-function \='agent-repl--error)
+\(agent-repl-test--record-into errors)).  THE ONE such recorder every suite
+uses (test-test-helpers.el holds every suite to it)."
+  `(lambda (_scope fmt &rest args) (push (apply #'format fmt args) ,place)))
+
 (defvar agent-repl-test--popups-shown nil
   "Buffers handed to `agent-repl-popup-show' inside
 `agent-repl-test--recording-popups', newest first.")

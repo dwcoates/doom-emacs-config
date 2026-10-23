@@ -270,7 +270,7 @@ idle run's own timers are recorded (Emacs arms others, such as undo's)."
     (setq agent-repl-test-startup--buffer-hook (list (lambda () (error "Boom"))))
     (let ((errors nil))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (ignore-errors (agent-repl-startup--first-hooks-run)))
       ;; Assert
@@ -284,7 +284,7 @@ idle run's own timers are recorded (Emacs arms others, such as undo's)."
     (setq agent-repl-test-startup--buffer-hook (list #'ignore))
     (let ((infos nil))
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl-startup--first-hooks-run))
       ;; Assert

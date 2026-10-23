@@ -983,8 +983,7 @@ produced the `snapshot skipped' warning twice per run."
           (warnings nil))
       (unwind-protect
           (cl-letf (((symbol-function 'agent-repl--warn)
-                     (lambda (_ws fmt &rest args)
-                       (push (apply #'format fmt args) warnings))))
+                     (agent-repl-test--record-into warnings)))
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
@@ -1228,7 +1227,7 @@ cause, and the error reaches the caller."
           (cl-letf (((symbol-function 'rename-file)
                      (lambda (&rest _) (signal 'file-error '("rename refused"))))
                     ((symbol-function 'agent-repl--error)
-                     (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+                     (agent-repl-test--record-into logged)))
             ;; Act.
             (should-error (agent-repl--write-sexp-file file '("after")) :type 'file-error))
           ;; Assert.

@@ -373,7 +373,7 @@ PUSHED holds (WS . ENTRIES) per push, newest first."
       (with-temp-file path (insert "not json"))
       (clrhash agent-repl--held-ingress-pushed)
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-held-ingress-refresh "ws-one"))
       ;; Assert
@@ -386,7 +386,7 @@ PUSHED holds (WS . ENTRIES) per push, newest first."
     ;; Arrange
     (let ((errors nil))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (let ((view (agent-repl-held-ingress--entry-view
                      "ws-one" (expand-file-name "held_20261020T151802.1_abc_k-9.json" (agent-repl-held-ingress-dir)))))

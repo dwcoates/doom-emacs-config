@@ -1057,7 +1057,7 @@ list, so there is nothing to drop."
         (logged nil))
     (agent-repl-test-verbs--with nil
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act / Assert.
         (should-error (agent-repl-show-hidden-workspace) :type 'user-error)
         (should (member "elisp.verbs.show-hidden-none" logged))
@@ -1118,7 +1118,7 @@ list, so there is nothing to drop."
   "The record names the gesture, so a swap's and a move's are told apart."
   (let (infos)
     (cl-letf (((symbol-function 'agent-repl--info)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos)))
+               (agent-repl-test--record-into infos))
               ((symbol-function 'message) #'ignore))
       (agent-repl-verbs--no-tab-to-take "swap" "a" "b" '(:cause (:arm :other-repository :value nil))))
     (should (equal infos '("elisp.verbs.swap-no-tab ws=a target=b arm=:other-repository")))))
@@ -1167,9 +1167,9 @@ list, so there is nothing to drop."
         '((:move . (:response (:arm :error :value (:cause (:arm :other-repository :value nil))))))
       (agent-repl-test-verbs--with-two-refs
         (cl-letf (((symbol-function 'agent-repl--info)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos)))
+                   (agent-repl-test--record-into infos))
                   ((symbol-function 'agent-repl--warn)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warns))))
+                   (agent-repl-test--record-into warns)))
           ;; Act.
           (agent-repl-verb-move "ws-one" "ws-two")
           ;; Assert.
@@ -1300,7 +1300,7 @@ list, so there is nothing to drop."
     (let ((op-id (plist-get (agent-repl-test-verbs--request :kill) :op-id))
           errors)
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_scope fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-mutation-progress-handle
          (list :op-id op-id
@@ -1424,11 +1424,11 @@ daemon starts sending it, with no table to update here."
   (agent-repl-test-verbs--with agent-repl-test-verbs--unrestorable-refusal
     (let (infos faults)
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos)))
+                 (agent-repl-test--record-into infos))
                 ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) faults)))
+                 (agent-repl-test--record-into faults))
                 ((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) faults))))
+                 (agent-repl-test--record-into faults)))
         (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/gone")))
       (should (cl-some (lambda (m) (string-prefix-p "elisp.verbs.open-unrestorable" m)) infos))
       (should-not (cl-some (lambda (m) (string-match-p "unrestorable\\|-refused" m)) faults)))))
@@ -1870,7 +1870,7 @@ to the staged progress the daemon pushes on the WatchDaemon channel."
     (let (logged)
       (cl-letf (((symbol-function 'y-or-n-p) (lambda (_p) nil))
                 ((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         (agent-repl-kill-workspace)
         (should (cl-some (lambda (m) (string-prefix-p "elisp.verbs.kill-declined" m)) logged))))))
 
@@ -2150,7 +2150,7 @@ current workspace is the forked context, and the topology is primary."
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
         (cl-letf (((symbol-function 'agent-repl--warn)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                   (agent-repl-test--record-into logged))
                   ((symbol-function 'agent-repl-verbs--read-prompt)
                    (lambda (_p &optional _history-file _unseeded) (error "the commission must not be asked"))))
           ;; Act.
@@ -2333,7 +2333,7 @@ A fork that left no trace was indistinguishable from one never run."
       (let (logs logged-at-first-read)
         (agent-repl-test-verbs--with nil
           (cl-letf (((symbol-function 'agent-repl--info)
-                     (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                     (agent-repl-test--record-into logs))
                     ((symbol-function 'agent-repl-verbs--dynamic-repository)
                      (lambda (_c)
                        (setq logged-at-first-read (copy-sequence logs))
@@ -2368,7 +2368,7 @@ A fork that left no trace was indistinguishable from one never run."
         (let (logs)
           (agent-repl-test-verbs--with nil
             (cl-letf (((symbol-function 'agent-repl--info)
-                       (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                       (agent-repl-test--record-into logs))
                       ((symbol-function 'agent-repl-verbs--section-of-ws)
                        (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
                       ((symbol-function 'agent-repl-verbs--read-repository)
@@ -2397,7 +2397,7 @@ A fork that left no trace was indistinguishable from one never run."
   (let (logs)
     (agent-repl-test-verbs--with nil
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                 (agent-repl-test--record-into logs))
                 ((symbol-function 'agent-repl-verbs--section-of-ws)
                  (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
                 ((symbol-function 'read-string) (lambda (&rest _) "")))
@@ -2574,7 +2574,7 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
   "A `RepositoryRef\=' without a directory is a bug: logged, then a hard failure."
   (let (errors)
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_scope fmt &rest args) (push (apply #'format fmt args) errors))))
+               (agent-repl-test--record-into errors)))
       ;; Act
       (let ((err (should-error (agent-repl-verbs--repository-name '(:id "id")))))
         ;; Assert
@@ -2720,7 +2720,7 @@ directories need not exist."
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-ee nil
         (cl-letf (((symbol-function 'agent-repl--error)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                   (agent-repl-test--record-into logged))
                   ((symbol-function 'agent-repl-verbs--read-prompt)
                    (lambda (_p &optional _history-file _unseeded) (error "the commission must not be read"))))
           ;; Act.
@@ -2738,7 +2738,7 @@ directories need not exist."
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-ee "/tmp/agent-repl-test/elsewhere"
         (cl-letf (((symbol-function 'agent-repl--warn)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                   (agent-repl-test--record-into logged))
                   ((symbol-function 'agent-repl-verbs--read-prompt)
                    (lambda (_p &optional _history-file _unseeded) (error "the commission must not be read"))))
           ;; Act.
@@ -2804,7 +2804,7 @@ directories need not exist."
   (let (logs)
     (agent-repl-test-verbs--with nil
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                 (agent-repl-test--record-into logs))
                 ((symbol-function 'agent-repl-verbs--section-of-ws)
                  (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
                 ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "commission")))
@@ -2984,7 +2984,7 @@ returning the text."
     (agent-repl--write-sexp-file file '("ok" 42))
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act.
         (should-error (agent-repl-verbs--persisted-history-load file)))
       ;; Assert.
@@ -3099,7 +3099,7 @@ That is what survives a crash: nothing waits for the read to end."
       (cl-letf (((symbol-function 'rename-file)
                  (lambda (&rest _) (signal 'file-error '("disk full"))))
                 ((symbol-function 'agent-repl--error)
-                 (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged)))
+                 (agent-repl-test--record-into logged))
                 ((symbol-function 'read-string)
                  (agent-repl-test-verbs--fake-minibuffer '("words"))))
         ;; Act.
@@ -3286,7 +3286,7 @@ selection argument at all, so a new creation path cannot select by habit."
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-agent-repl-repo nil
         (cl-letf (((symbol-function 'agent-repl--error)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                   (agent-repl-test--record-into logged)))
           ;; Act / Assert.
           (should-error (agent-repl-verbs--agent-repl-repository) :type 'user-error)
           (should (cl-some (lambda (m)
@@ -3304,7 +3304,7 @@ selection argument at all, so a new creation path cannot select by habit."
     (agent-repl-test-verbs--with nil
       (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
         (cl-letf (((symbol-function 'agent-repl--warn)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                   (agent-repl-test--record-into logged)))
           ;; Act / Assert.
           (should-error (agent-repl-verbs--agent-repl-repository) :type 'user-error)
           (should (cl-some (lambda (m)
@@ -3570,7 +3570,7 @@ Its minibuffer line is the pushed fault's, never the verb's.")
     (agent-repl-test-verbs--with
         `((:deploy . (:response (:arm :error :value (:cause ,cause)))))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         (agent-repl-deploy nil)))
     errors))
 
@@ -3713,7 +3713,7 @@ pause sent."
                                       :value (:cause (:arm :unknown-repository :value nil))))))
       (agent-repl-test-verbs--with-repository (agent-repl-test-verbs--repo-ref)
         (cl-letf (((symbol-function 'agent-repl--warn)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) records))))
+                   (agent-repl-test--record-into records)))
           (agent-repl-merge-queue-pause))))
     (should (cl-find-if
              (lambda (record)
@@ -4187,7 +4187,7 @@ came back CLOSED left behind."
       (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
         (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "waiting" "/tmp/w") 0)
         (cl-letf (((symbol-function 'agent-repl--log)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+                   (agent-repl-test--record-into logs)))
           ;; Act.
           (agent-repl-verbs--pending-landing-fire)))
       ;; Assert.
@@ -4203,7 +4203,7 @@ came back CLOSED left behind."
       (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil)))
         (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "arrives" "/tmp/w") 0))
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                 (agent-repl-test--record-into logs))
                 ((symbol-function 'agent-repl-switch-to-project) #'ignore))
         ;; Act.
         (agent-repl-test-verbs--tab-arrives "arrives" "arrived-ws"))
@@ -4259,7 +4259,7 @@ came back CLOSED left behind."
       (agent-repl-test-verbs--user-switches)
       (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
                 ((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act.
         (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "new" "/tmp/n") 0))
       ;; Assert.
@@ -4354,7 +4354,7 @@ came back CLOSED left behind."
       (cl-letf (((symbol-function 'agent-repl--minibuffer-active-p) (lambda () active))
                 ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) tab))
                 ((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         (agent-repl-verbs-select-minted (agent-repl-test-verbs--ref "new" "/tmp/n") 0)
         (setq active nil tab nil)
         ;; Act.

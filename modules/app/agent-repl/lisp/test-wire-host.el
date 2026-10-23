@@ -2174,7 +2174,7 @@ replaces it."
   "An unknown create-stage arm is recorded at ERROR before it is refused."
   (let (logged)
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       (condition-case nil
           (agent-repl-wire-decode-workspace-create-stage
            (agent-repl-test-wire-host--parse "{\"teleporting\":{}}"))
@@ -2265,7 +2265,7 @@ replaces it."
   "An unknown open-stage arm is recorded at ERROR before it is refused."
   (let (logged)
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       (condition-case nil
           (agent-repl-wire-decode-workspace-open-stage
            (agent-repl-test-wire-host--parse "{\"teleporting\":{}}"))
