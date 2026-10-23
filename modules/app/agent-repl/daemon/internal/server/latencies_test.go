@@ -265,3 +265,111 @@ func TestReportLatenciesRefusesAMalformedStartupMilestone(t *testing.T) {
 		})
 	}
 }
+
+func editorLatency(kind agentreplv1.EditorLatencyKind, seconds float64) *agentreplv1.ReportedEditorLatency {
+	return &agentreplv1.ReportedEditorLatency{Kind: kind, Seconds: seconds}
+}
+
+func TestReportLatenciesRecordsTheEditorsOwnLatencies(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	resp, err := reportBatch(t, h, &agentreplv1.ReportLatenciesRequest{
+		Latencies: []*agentreplv1.ReportedLatency{latency(pageBoot, ref(), 0.4)},
+		EditorLatencies: []*agentreplv1.ReportedEditorLatency{
+			editorLatency(agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL, 0.25),
+			editorLatency(agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_ELISP_RELOAD, 0.3),
+		},
+	})
+
+	// Assert
+	if err != nil || resp.GetSuccess().GetRecorded().GetRecorded() != 1 {
+		t.Fatalf("ReportLatencies = %v, %v; want only the workspace latency counted", resp, err)
+	}
+	want := []observedLatency{{kind: "editor_stall", seconds: 0.25}, {kind: "elisp_reload", seconds: 0.3}}
+	if got := h.Latencies.editorLatencies(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("editor latencies = %+v, want %+v", got, want)
+	}
+}
+
+func TestReportLatenciesRecordsTheEditorsLatenciesWhenEveryLatencyIsDropped(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	gone := &workspacev1.WorkspaceRef{Id: "closed-and-forgotten"}
+
+	// Act
+	_, err := reportBatch(t, h, &agentreplv1.ReportLatenciesRequest{
+		Latencies:       []*agentreplv1.ReportedLatency{latency(pageBoot, gone, 0.4)},
+		EditorLatencies: []*agentreplv1.ReportedEditorLatency{editorLatency(agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL, 0.1)},
+	})
+
+	// Assert
+	if err != nil || len(h.Latencies.editorLatencies()) != 1 {
+		t.Fatalf("err = %v, editor latencies = %v; want the editor latency recorded", err, h.Latencies.editorLatencies())
+	}
+}
+
+func TestReportLatenciesRecordsNoEditorLatencyOfARefusedBatch(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	wrong := &workspacev1.WorkspaceRef{Id: string(testWorkspaceID), Dir: "/elsewhere"}
+
+	// Act
+	resp, err := reportBatch(t, h, &agentreplv1.ReportLatenciesRequest{
+		Latencies:       []*agentreplv1.ReportedLatency{latency(pageBoot, wrong, 0.4)},
+		EditorLatencies: []*agentreplv1.ReportedEditorLatency{editorLatency(agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL, 0.1)},
+	})
+
+	// Assert
+	if err != nil || resp.GetError().GetWorkspaceRefMismatch() == nil || len(h.Latencies.editorLatencies()) != 0 {
+		t.Fatalf("ReportLatencies = %v, %v, editor = %v; want the refusal and nothing recorded", resp, err, h.Latencies.editorLatencies())
+	}
+}
+
+func TestReportLatenciesRecordsNoEditorLatencyWhenTheMetricsSurfaceIsOff(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Latencies.enabled = false
+
+	// Act
+	resp, err := reportBatch(t, h, &agentreplv1.ReportLatenciesRequest{
+		EditorLatencies: []*agentreplv1.ReportedEditorLatency{editorLatency(agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL, 0.1)},
+	})
+
+	// Assert
+	if err != nil || resp.GetSuccess().GetMetricsOff() == nil || len(h.Latencies.editorLatencies()) != 0 {
+		t.Fatalf("ReportLatencies = %v, %v; want metrics_off and nothing recorded", resp, err)
+	}
+}
+
+func TestReportLatenciesRefusesAMalformedEditorLatency(t *testing.T) {
+	cases := []struct {
+		name    string
+		latency *agentreplv1.ReportedEditorLatency
+	}{
+		{name: "an unspecified kind", latency: editorLatency(agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_UNSPECIFIED, 0.1)},
+		{name: "a negative duration", latency: editorLatency(agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL, -1)},
+		{name: "a non-finite duration", latency: editorLatency(agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL, math.Inf(1))},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			_, err := reportBatch(t, h, &agentreplv1.ReportLatenciesRequest{
+				Latencies:       []*agentreplv1.ReportedLatency{latency(pageBoot, ref(), 0.2)},
+				EditorLatencies: []*agentreplv1.ReportedEditorLatency{tc.latency},
+			})
+
+			// Assert
+			if code := connectCode(t, err); code != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", code)
+			}
+			if len(h.Latencies.all()) != 0 || len(h.Latencies.editorLatencies()) != 0 {
+				t.Fatalf("a malformed batch recorded %+v and %+v", h.Latencies.all(), h.Latencies.editorLatencies())
+			}
+		})
+	}
+}

@@ -25,12 +25,14 @@ type LatencyRecorder interface {
 	Enabled() bool
 	// ObserveLatency records one validated latency for ws.
 	ObserveLatency(ws ids.WorkspaceID, kind runtimemetrics.LatencyKind, seconds float64)
+	// ObserveEditorLatency records one validated editor-wide latency.
+	ObserveEditorLatency(kind runtimemetrics.LatencyKind, seconds float64)
 	// The editor's startup milestones are recorded as restarts.
 	restarttiming.Recorder
 }
 
 // ReportLatencies records a client's finished interaction latencies, and the
-// editor's startup milestones, in the always-on metrics
+// editor's startup milestones and editor-wide latencies, in the always-on metrics
 // (endpoint_report_latencies.proto).
 //
 // THE BATCH IS ALL OR NOTHING ON A DEFECT, PER WORKSPACE ON A SCHEDULE. A
@@ -63,6 +65,14 @@ func (s *server) ReportLatencies(
 			return nil, invalid(fmt.Sprintf("editor_startup[%d]", i), err.Error())
 		}
 		startups[i] = o
+	}
+	editorKinds := make([]runtimemetrics.LatencyKind, len(req.Msg.GetEditorLatencies()))
+	for i, l := range req.Msg.GetEditorLatencies() {
+		kind, err := runtimemetrics.ValidateEditorLatency(l)
+		if err != nil {
+			return nil, invalid(fmt.Sprintf("editor_latencies[%d]", i), err.Error())
+		}
+		editorKinds[i] = kind
 	}
 	resp := &agentreplv1.ReportLatenciesResponse{}
 	if !s.deps.Latencies.Enabled() {
@@ -118,6 +128,10 @@ func (s *server) ReportLatencies(
 	}
 	if len(startups) > 0 {
 		s.log.Info(rpc, "recorded the editor's startup milestones", dlog.Context{"milestones": len(startups)})
+	}
+	// AN EDITOR LATENCY NAMES NO WORKSPACE either, so none is ever dropped.
+	for i, l := range req.Msg.GetEditorLatencies() {
+		s.deps.Latencies.ObserveEditorLatency(editorKinds[i], l.GetSeconds())
 	}
 	success := &agentreplv1.ReportLatenciesSuccess{}
 	if dropped == 0 {

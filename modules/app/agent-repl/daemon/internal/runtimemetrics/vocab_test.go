@@ -35,6 +35,9 @@ func TestTheKindTablesMatchTheVocabulary(t *testing.T) {
 	for k, v := range ReportedKinds {
 		tables[k.String()] = v
 	}
+	for k, v := range EditorKinds {
+		tables[k.String()] = v
+	}
 	for k, v := range ShimKinds {
 		tables[k.String()] = v
 	}

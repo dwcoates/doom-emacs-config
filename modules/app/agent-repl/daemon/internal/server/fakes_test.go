@@ -2219,9 +2219,23 @@ type fakeLatencies struct {
 	enabled  bool
 	observed []observedLatency
 	restarts []restarttiming.Observation
+	editor   []observedLatency
 }
 
 func (f *fakeLatencies) Enabled() bool { return f.enabled }
+
+func (f *fakeLatencies) ObserveEditorLatency(kind runtimemetrics.LatencyKind, seconds float64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.editor = append(f.editor, observedLatency{kind: kind.Name, seconds: seconds})
+}
+
+// editorLatencies answers every editor-wide latency recorded.
+func (f *fakeLatencies) editorLatencies() []observedLatency {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]observedLatency(nil), f.editor...)
+}
 
 func (f *fakeLatencies) ObserveRestart(o restarttiming.Observation) {
 	f.mu.Lock()
