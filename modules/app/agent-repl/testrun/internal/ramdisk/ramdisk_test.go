@@ -924,7 +924,7 @@ func TestAcquireLogsItsEdgesWithTimings(t *testing.T) {
 	t.Cleanup(func() { v.Release() })
 	want := []string{
 		"INFO RAM disk acquire: begin at 2026-10-12T00:00:01.000Z, 16 MiB",
-		"INFO RAM disk seat: took seat 0 of 2048",
+		"INFO RAM disk seat: took seat 0 of 512",
 		"INFO RAM disk acquire: /dev/disk9 mounted at " + h.mount + " in 3s (attach 1s, format 1s, mount 1s)",
 	}
 	if strings.Join(log.lines, "\n") != strings.Join(want, "\n") {

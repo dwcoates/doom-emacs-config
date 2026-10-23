@@ -9,10 +9,11 @@ import (
 	"agentrepl/testrun/internal/seats"
 )
 
-// A RUN'S RAM DISK TAKES A MEMORY SEAT (owner ruling, 2026-10-14). A RAM
-// disk's memory is wired: nothing pages it out, and `nice 19`, which keeps
-// test runs off the owner's CPU, does nothing for memory. So however many runs
-// overlap, their RAM disks together hold at most half the host's memory: there
+// A RUN'S RAM DISK TAKES A MEMORY SEAT (owner ruling, 2026-10-14; the share
+// cut from a half to an eighth, 2026-10-23). A RAM disk's memory is wired:
+// nothing pages it out, and `nice 19`, which keeps test runs off the owner's
+// CPU, does nothing for memory. So however many runs overlap, their RAM disks
+// together hold at most an eighth of the host's memory: there
 // are MemorySeats seats, each a lock file under the registry, and a run holds
 // one from before its disk is attached until it is released. A run that finds
 // every seat held waits for one, on the kernel's own lock rather than a poll,
@@ -20,8 +21,10 @@ import (
 // lock with its holder (package seats).
 
 // MemoryShare is the share of the host's memory every run's RAM disk together
-// may hold.
-const MemoryShare = 2 // one half
+// may hold. A HALF WAS TOO MUCH (2026-10-23): three runs' 8 GiB disks held 24
+// GiB of a 48 GiB host while it swapped 20 GiB, and one process wedged in
+// execve under that paging hung every ps on the host.
+const MemoryShare = 8 // one eighth
 
 // MemorySeats is how many RAM disks of sizeMiB fit in the host's share: never
 // fewer than one, so a host smaller than one disk's share still runs, one run
@@ -50,7 +53,7 @@ func (m Manager) seat(sizeMiB int) (*os.File, error) {
 	waited := false
 	f, i, err := seatPool(m.Registry, n).Take(func(held int) {
 		waited, start = true, m.Now()
-		m.Log.Infof("RAM disk seat: all %d are held (half of the host's %d MiB, %d MiB each); waiting for one", held, mem>>20, sizeMiB)
+		m.Log.Infof("RAM disk seat: all %d are held (an eighth of the host's %d MiB, %d MiB each); waiting for one", held, mem>>20, sizeMiB)
 	})
 	if err != nil {
 		return nil, err
