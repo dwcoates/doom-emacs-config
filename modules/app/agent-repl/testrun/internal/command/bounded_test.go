@@ -180,7 +180,7 @@ func TestEveryBoundedCommandGoesThroughBoundedAndOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bounded) < 3 {
-		t.Fatalf("found command.Bounded in %v, want the reap and the RAM disk's two files", bounded)
+	if len(bounded) < 2 {
+		t.Fatalf("found command.Bounded in %v, want the RAM disk's two files", bounded)
 	}
 }

@@ -16,7 +16,8 @@ const WaitDelay = time.Second
 
 // Bounded is name with args, killed once ctx is done. Every command testrun
 // bounds is started here and judged by Outcome: the RAM disk's disk-manager
-// probes and the reap's listing of the process table.
+// probes. (The reap reads the process table in process, proctable, never
+// through a command: a ps blocked in the kernel outlives any bound.)
 func Bounded(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.WaitDelay = WaitDelay
