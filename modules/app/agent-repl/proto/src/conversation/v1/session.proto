@@ -315,7 +315,32 @@ message SessionUpdate {
     // it changes and restates it on every WatchSession open once it has been
     // stated. See SessionVendorErrorRetry.
     SessionVendorErrorRetry vendor_error_retry = 38;
+    // THE VENDOR'S SKILL SET IS STALE: a skill directory it loads from changed
+    // on disk after its process started. A STANDING LEVEL: stated once, at the
+    // first change the shim sees, and restated on every WatchSession open, so a
+    // daemon that attaches later still learns it. It is never withdrawn: only a
+    // new vendor process loads the current set, and the shim that sees the
+    // change is replaced for it. See SessionSkillsChanged.
+    SessionSkillsChanged skills_changed = 39;
   }
+}
+
+// THE VENDOR LOADS ITS SKILLS ONCE, AT ITS PROCESS'S START (measured
+// 2026-10-23, claude-agent-sdk 0.3.280: a skill written into the account's or
+// the worktree's skills directory after the start is not listed by
+// supportedCommands() 2s or 10s later), so re-reading the command catalog can
+// never surface a skill installed, changed or removed since. The shim watches
+// the directories its vendor loads skills from -- the account root's
+// `skills/` and the worktree's `.claude/skills/`, each skill followed through
+// its link -- and states this at the first change. The daemon answers it by
+// replacing the shim at the session's next idle point, through the same
+// bounce a stale build takes; the replacement's vendor loads the current set
+// and its StartSession states the new catalog.
+message SessionSkillsChanged {
+  // The paths whose change made the set stale, as the shim saw them at the
+  // first change: a skills directory whose entries changed, or a skill's
+  // SKILL.md. At least one.
+  repeated string paths = 1;
 }
 
 // THE VENDOR-ERROR RETRY AGENT-REPL OWNS (owner ruling, 2026-10-20). The shim
