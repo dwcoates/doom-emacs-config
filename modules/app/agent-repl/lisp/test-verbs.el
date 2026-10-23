@@ -4872,3 +4872,95 @@ name or closed flag is roster.el's, so the two files cannot disagree."
               ((symbol-function 'message) (lambda (fmt &rest args) (setq said (apply #'format fmt args)))))
       (should (agent-repl-verbs--no-tab-to-take "swap" "kid" "root" '(:cause (:arm :not-siblings :value nil)))))
     (should (equal said "agent-repl: kid and root are not siblings, so kid cannot take that tab"))))
+
+;;;; ---- A create refused by a daemon handing over ----
+
+(defvar agent-repl-test-verbs--create-sends nil
+  "Each create sent, as (CONN . REQUEST), oldest first.")
+
+(defun agent-repl-test-verbs--handover-refusal (address)
+  "The decoded `transferring_away' refusal naming ADDRESS."
+  (list :arm :error :value (list :cause (list :arm :transferring-away :value (list :address address)))))
+
+(defmacro agent-repl-test-verbs--with-create-answers (answers &rest body)
+  "Run BODY with each create answered by the next of ANSWERS, then success.
+Every send is recorded in `agent-repl-test-verbs--create-sends'."
+  (declare (indent 1))
+  `(let ((agent-repl-test-verbs--create-sends nil)
+         (pending ,answers))
+     (cl-letf (((symbol-function 'agent-repl-rpc-create-workspace)
+                (lambda (conn request &rest keys)
+                  (setq agent-repl-test-verbs--create-sends
+                        (append agent-repl-test-verbs--create-sends (list (cons conn request))))
+                  (funcall (plist-get keys :on-response)
+                           (or (pop pending) (list :arm :success :value nil))))))
+       ,@body)))
+
+(ert-deftest agent-repl-verbs-create-handed-over-is-sent-to-the-accepted-successor ()
+  "A daemon handing over refuses the create naming its successor; the same
+create is sent there at once when that successor is already accepted."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-create-answers
+        (list (agent-repl-test-verbs--handover-refusal "127.0.0.1:9100"))
+      (cl-letf (((symbol-function 'agent-repl-link-successor-at)
+                 (lambda (address) (and (equal address "127.0.0.1:9100") 'successor-conn))))
+        ;; Act
+        (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :name "chosen")
+        ;; Assert
+        (let ((sends agent-repl-test-verbs--create-sends))
+          (should (equal (mapcar #'car sends) '(test-conn successor-conn)))
+          (should (equal (plist-get (cdr (nth 0 sends)) :form)
+                         (plist-get (cdr (nth 1 sends)) :form))))
+        (should-not (agent-repl-test-verbs--messaged-p "creation FAILED"))))))
+
+(ert-deftest agent-repl-verbs-create-handed-over-waits-for-a-pending-successor ()
+  "A successor still pending acceptance is sent nothing until it is accepted,
+and the create is sent once then."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-create-answers
+        (list (agent-repl-test-verbs--handover-refusal "127.0.0.1:9100"))
+      (let ((agent-repl-link-handover-functions nil))
+        (cl-letf (((symbol-function 'agent-repl-link-successor-at) (lambda (_address) nil)))
+          ;; Act
+          (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+          (should (= (length agent-repl-test-verbs--create-sends) 1))
+          (run-hook-with-args 'agent-repl-link-handover-functions 'test-conn 'successor-conn)
+          ;; Assert
+          (should (equal (mapcar #'car agent-repl-test-verbs--create-sends)
+                         '(test-conn successor-conn))))))))
+
+(ert-deftest agent-repl-verbs-create-handed-over-twice-is-a-failure ()
+  "The one resend is never resent: a successor handing over too fails the create."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-create-answers
+        (list (agent-repl-test-verbs--handover-refusal "127.0.0.1:9100")
+              (agent-repl-test-verbs--handover-refusal "127.0.0.1:9200"))
+      (cl-letf (((symbol-function 'agent-repl-link-successor-at) (lambda (_address) 'successor-conn)))
+        ;; Act
+        (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+        ;; Assert
+        (should (= (length agent-repl-test-verbs--create-sends) 2))
+        (should (agent-repl-test-verbs--messaged-p
+                 "workspace creation FAILED: the daemon's successor was itself handing over"))))))
+
+(ert-deftest agent-repl-verbs-create-handed-over-without-an-address-is-a-failure ()
+  "A `transferring_away' naming no successor is a breach, said as the create's failure."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-create-answers
+        (list (agent-repl-test-verbs--handover-refusal ""))
+      ;; Act
+      (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+      ;; Assert
+      (should (= (length agent-repl-test-verbs--create-sends) 1))
+      (should (agent-repl-test-verbs--messaged-p
+               "workspace creation FAILED: the daemon refused it as handing over but named no successor")))))
+
+(ert-deftest agent-repl-verbs-create-standing-down-says-to-create-again ()
+  "A daemon standing down with no successor created nothing, and says so."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :error :value (:cause (:arm :standing-down :value nil))))))
+    ;; Act
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+    ;; Assert
+    (should (agent-repl-test-verbs--messaged-p
+             "workspace creation FAILED: the daemon is standing down and created nothing; create it again once it is back"))))

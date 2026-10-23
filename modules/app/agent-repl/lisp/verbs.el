@@ -99,6 +99,8 @@
 (declare-function agent-repl-switch-to-project "commands" (&optional project))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-link-connect "agent-repl-daemon-link" ())
+(declare-function agent-repl-link-successor-at "agent-repl-daemon-link" (address))
+(declare-function agent-repl-link-on-successor-accepted "agent-repl-daemon-link" (fn))
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
 (declare-function agent-repl--input-rollback-offer "agent-repl-input" (ws offer))
 (declare-function agent-repl--input-rollback-done "agent-repl-input" (ws success))
@@ -1095,10 +1097,11 @@ state."
    (lambda (value) (agent-repl-verbs--no-tab-to-take "move" ws target value))))
 
 (cl-defun agent-repl-verb-create (repository form
+                                             &rest keys
                                              &key initial-prompt name
                                              prompt context
                                              owner fork-of model priority
-                                             allow-ungated)
+                                             allow-ungated conn resent)
   "Create a workspace in REPOSITORY under FORM.
 FORM is the creation form\'s BARE ARM KEYWORD -- `:standard' or
 `:one-shot' -- and that arm\'s own fields ride as keyword arguments beside
@@ -1126,6 +1129,12 @@ copies; without it the context is fresh.  The editor makes a child only
 as a fork of its owner, which lands itself and so carries no owner
 notice.  MODEL, PRIORITY (a bare level keyword) and ALLOW-UNGATED are the
 remaining creation facts and are omitted when nil.
+
+A DAEMON HANDING OVER CREATES NOTHING NEW (creategate): it refuses with
+`transferring_away' naming its successor, and the same create is sent
+there once that successor is accepted (`agent-repl-verbs--create-handed-over').
+CONN is the connection the create is sent on, the primary link when nil;
+RESENT marks the one resend, which is never resent again.
 
 CREATING A WORKSPACE NEVER MOVES THE USER (owner ruling, 2026-10-16).
 No creation -- dynamic, static, fork or one-shot -- selects what it
@@ -1172,7 +1181,7 @@ and the new workspace\'s tab arrives through the roster push."
     ;; that phases are messages, not only a mode line.
     (agent-repl-workspace-progress-report :create :requested)
     (agent-repl-verbs--send-op
-     op-id #'agent-repl-rpc-create-workspace (agent-repl-verbs--conn)
+     op-id #'agent-repl-rpc-create-workspace (or conn (agent-repl-verbs--conn))
      (list :repository repository
            :form (agent-repl-verbs--create-form
                   form :initial-prompt initial-prompt :name name
@@ -1209,8 +1218,42 @@ and the new workspace\'s tab arrives through the roster push."
      ;; A SYNCHRONOUS refusal (validation, an unknown repository) is answered
      ;; on the rpc before the work detaches, so no progress will follow: the
      ;; op is retired (`agent-repl-verbs--send-op') and the refusal worded,
-     ;; falling through for arms it does not claim.
-     #'agent-repl-verbs--create-refusal)))
+     ;; falling through for arms it does not claim.  A handover's refusal is
+     ;; the one answered by sending the create on instead.
+     (lambda (value)
+       (or (and (not resent)
+                (agent-repl-verbs--create-handed-over
+                 value
+                 (lambda (successor)
+                   (apply #'agent-repl-verb-create repository form
+                          :conn successor :resent t keys))))
+           (agent-repl-verbs--create-refusal value))))))
+
+(defun agent-repl-verbs--create-handed-over (value resend)
+  "Send on a create the daemon refused, from VALUE, because it is handing over.
+Answers non-nil when VALUE is the `transferring_away' arm, which it claims:
+RESEND is called with the successor\='s connection at once when that
+successor is already accepted, and otherwise at its acceptance
+\(`agent-repl-link-on-successor-accepted'), so nothing is ever sent to an
+unproven daemon.  The arm is an ordinary answer during a handover, so it is
+INFO; one naming no address is a contract breach, said as the create\='s
+failure."
+  (let ((refusal (agent-repl-verbs--refusal-arm value))
+        (scope '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")))
+    (when (eq (plist-get refusal :arm) :transferring-away)
+      (let ((address (plist-get (plist-get refusal :value) :address)))
+        (if (or (null address) (string-empty-p address))
+            (progn
+              (agent-repl--error scope "elisp.verbs.create-handed-over-without-address address=%S" address)
+              (agent-repl-workspace-progress-report
+               :create :failed "the daemon refused it as handing over but named no successor"))
+          (agent-repl--info scope "elisp.verbs.create-handed-over address=%S" address)
+          (let ((successor (agent-repl-link-successor-at address)))
+            (if successor
+                (funcall resend successor)
+              (agent-repl--info scope "elisp.verbs.create-awaiting-successor address=%S" address)
+              (agent-repl-link-on-successor-accepted resend)))))
+      t)))
 
 (defun agent-repl-verbs--create-stage-message (stage)
   "Echo the minibuffer line for a create STAGE keyword.
@@ -1242,10 +1285,11 @@ the daemon log)."
 
 (defun agent-repl-verbs--create-refusal (value)
   "Surface a daemon refusal of a create, from VALUE, as the create\='s FAILURE.
-Answers non-nil when it claimed the arm.  It claims every arm except the
-two handover arms (`agent-repl-verbs--handover-arms\='), which are the
-rollout\='s ordering rather than a failure and fall through to the
-generic refusal handling that routes them to the handover.
+Answers non-nil when it claimed the arm.  It claims every arm except
+`not_yet_adopted\=', which is the rollout\='s ordering rather than a failure
+and falls through to the generic refusal handling that routes it to the
+handover.  `transferring_away\=' reaches here only from the one resend
+\(`agent-repl-verbs--create-handed-over\='), and is a failure then.
 
 A REFUSED CREATE IS A FAILED CREATE, AND IT IS SAID AS ONE (owner ruling,
 2026-09-27).  A synchronous refusal and one that arrives later on the
@@ -1260,13 +1304,19 @@ nothing having happened."
     t))
 
 (defun agent-repl-verbs--create-refusal-sentence (value)
-  "Word the refusal VALUE of a create, or answer nil for a handover arm.
+  "Word the refusal VALUE of a create, or answer nil for `not_yet_adopted\='.
 The create-specific arms are worded by their own functions; every other
 arm is named by its keyword and its own fields."
   (let* ((refusal (agent-repl-verbs--refusal-arm value))
          (keyword (plist-get refusal :arm)))
     (cond
+     ;; Reached only by the one resend (`agent-repl-verbs--create-handed-over'):
+     ;; the successor was handing over too.
+     ((eq keyword :transferring-away)
+      "the daemon's successor was itself handing over, so nothing was created; create it again")
      ((memq keyword agent-repl-verbs--handover-arms) nil)
+     ((eq keyword :standing-down)
+      "the daemon is standing down and created nothing; create it again once it is back")
      ((eq keyword :naming-failed)
       (agent-repl-verbs--create-naming-refusal-sentence (plist-get refusal :value)))
      ((eq keyword :one-shot-policy-missing)

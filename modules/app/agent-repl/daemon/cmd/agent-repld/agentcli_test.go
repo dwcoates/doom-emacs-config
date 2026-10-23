@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -28,8 +29,10 @@ type cliClient struct {
 	err      error
 	status   *agentreplv1.GetWorkspaceStatusResponse
 	create   *agentreplv1.CreateWorkspaceResponse
-	finish   *agentreplv1.FinishWorkspaceResponse
-	queues   *agentreplv1.GetMergeQueueStatusResponse
+	// creates, when set, answers each CreateWorkspace in turn, before create.
+	creates []*agentreplv1.CreateWorkspaceResponse
+	finish  *agentreplv1.FinishWorkspaceResponse
+	queues  *agentreplv1.GetMergeQueueStatusResponse
 }
 
 func (c *cliClient) record(req proto.Message) error {
@@ -40,6 +43,11 @@ func (c *cliClient) record(req proto.Message) error {
 func (c *cliClient) CreateWorkspace(_ context.Context, req *connect.Request[agentreplv1.CreateWorkspaceRequest]) (*connect.Response[agentreplv1.CreateWorkspaceResponse], error) {
 	if err := c.record(req.Msg); err != nil {
 		return nil, err
+	}
+	if len(c.creates) > 0 {
+		next := c.creates[0]
+		c.creates = c.creates[1:]
+		return connect.NewResponse(next), nil
 	}
 	if c.create != nil {
 		return connect.NewResponse(c.create), nil
@@ -147,6 +155,8 @@ type cliFixture struct {
 	errOut bytes.Buffer
 	// dialOptions counts the client options the command dialed with.
 	dialOptions int
+	// dialed is every address the command dialed, in order.
+	dialed []string
 }
 
 func newCLIFixture() *cliFixture {
@@ -161,7 +171,8 @@ func cliRow(id, dir, name string) *frontendv1.RosterRow {
 func (f *cliFixture) run(noun string, args ...string) int {
 	deps := cliDeps{
 		address: func(string) (string, error) { return "127.0.0.1:1", nil },
-		client: func(_ string, options ...connect.ClientOption) agentreplv1connect.AgentReplClient {
+		client: func(address string, options ...connect.ClientOption) agentreplv1connect.AgentReplClient {
+			f.dialed = append(f.dialed, address)
 			f.dialOptions = len(options)
 			return f.client
 		},
@@ -1127,5 +1138,70 @@ func TestAGateWithNoColdGateNamesTheWorkspacesStanding(t *testing.T) {
 	stderr := f.errOut.String()
 	if code != exitRefused || !strings.Contains(stderr, "no cold gate stands on the workspace; it stands {") || strings.Contains(stderr, "&{") {
 		t.Fatalf("exit %d, stderr %q; want the refusal naming the standing as JSON, never a Go struct", code, stderr)
+	}
+}
+
+func transferringAway(address string) *agentreplv1.CreateWorkspaceResponse {
+	return &agentreplv1.CreateWorkspaceResponse{Result: &agentreplv1.CreateWorkspaceResponse_Error{Error: &agentreplv1.CreateWorkspaceError{
+		Cause: &agentreplv1.CreateWorkspaceError_TransferringAway{TransferringAway: &agentreplv1.CreateWorkspaceTransferringAway{Address: address}},
+	}}}
+}
+
+func TestCreateRefusedByAHandingOverDaemonIsSentToItsSuccessor(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.creates = []*agentreplv1.CreateWorkspaceResponse{transferringAway("127.0.0.1:2")}
+
+	// Act
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "primary", "-context", "fresh")
+
+	// Assert: the same create, sent again to the successor, which created it.
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+	}
+	if !slices.Equal(f.dialed, []string{"127.0.0.1:1", "127.0.0.1:2"}) {
+		t.Fatalf("dialed %v, want the daemon and then its successor", f.dialed)
+	}
+	var creates []*agentreplv1.CreateWorkspaceRequest
+	for _, req := range f.client.requests {
+		if typed, ok := req.(*agentreplv1.CreateWorkspaceRequest); ok {
+			creates = append(creates, typed)
+		}
+	}
+	if len(creates) != 2 || !proto.Equal(creates[0], creates[1]) {
+		t.Fatalf("creates sent = %v, want the same create twice", creates)
+	}
+	if !strings.Contains(f.errOut.String(), "sending the create to its successor at 127.0.0.1:2") {
+		t.Fatalf("stderr %q, want the resend named", f.errOut.String())
+	}
+}
+
+func TestCreateRefusedTwiceByHandingOverDaemonsIsRefused(t *testing.T) {
+	// Arrange: the successor is handing over too.
+	f := newCLIFixture()
+	f.client.creates = []*agentreplv1.CreateWorkspaceResponse{transferringAway("127.0.0.1:2"), transferringAway("127.0.0.1:3")}
+
+	// Act
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "primary", "-context", "fresh")
+
+	// Assert: sent once more, never chased further.
+	if code != exitRefused || len(f.dialed) != 2 {
+		t.Fatalf("exit %d after dialing %v, want refused after the one resend", code, f.dialed)
+	}
+}
+
+func TestCreateRefusedStandingDownIsNotResent(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.create = &agentreplv1.CreateWorkspaceResponse{Result: &agentreplv1.CreateWorkspaceResponse_Error{Error: &agentreplv1.CreateWorkspaceError{
+		Cause: &agentreplv1.CreateWorkspaceError_StandingDown{StandingDown: &agentreplv1.CreateWorkspaceStandingDown{}},
+	}}}
+
+	// Act
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "primary", "-context", "fresh")
+
+	// Assert
+	if code != exitRefused || len(f.dialed) != 1 {
+		t.Fatalf("exit %d after dialing %v, want refused with no resend", code, f.dialed)
 	}
 }

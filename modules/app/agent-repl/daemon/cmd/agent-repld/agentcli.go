@@ -250,6 +250,12 @@ func (c *cliCall) dial(stateDir string) bool {
 	return true
 }
 
+// noted tells the caller what the command did on its behalf that the answer
+// alone would not show.
+func (c *cliCall) noted(format string, a ...any) {
+	fmt.Fprintf(c.errOut, "agent-repld %s: %s\n", c.name, fmt.Sprintf(format, a...))
+}
+
 // failed reports a failure of the command itself, and answers false.
 func (c *cliCall) failed(format string, a ...any) bool {
 	fmt.Fprintf(c.errOut, "agent-repld %s: %s\n", c.name, fmt.Sprintf(format, a...))
@@ -581,6 +587,14 @@ func workspaceCreate(c *cliCall, args []string) int {
 		req.Priority = level
 	}
 	resp, err := c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
+	// A DAEMON HANDING OVER CREATES NOTHING NEW: it names its successor, and
+	// the same create is sent there once. A successor that is itself handing
+	// over already is answered as refused, like any other refusal.
+	if successor := resp.Msg.GetError().GetTransferringAway().GetAddress(); err == nil && successor != "" {
+		c.noted("the daemon is handing over; sending the create to its successor at %s", successor)
+		c.client = c.deps.client(successor)
+		resp, err = c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
+	}
 	return answer(c, resp, err)
 }
 
