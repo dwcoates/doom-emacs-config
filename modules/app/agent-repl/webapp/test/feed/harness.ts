@@ -682,6 +682,27 @@ export function responseRow(
   });
 }
 
+/**
+ * A settled FINAL response row: the prose the daemon stamped as its turn's
+ * concluded answer, the green bubble.
+ */
+export function finalResponseRow(id: string, markdown = "done", parent?: string): FeedRow {
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    order: orderFor(id),
+    parent: parent === undefined ? undefined : { row: feedId(parent) },
+    row: {
+      case: "activity",
+      value: {
+        unit: {
+          case: "response",
+          value: { finalAnswer: true, result: { case: "success", value: { prose: { markdown } } } },
+        },
+      },
+    },
+  });
+}
+
 /** The flags a settled response row of `settledResponseRow` wears. */
 export type SettledResponseFlags = { thinking: true } | { interim: true };
 

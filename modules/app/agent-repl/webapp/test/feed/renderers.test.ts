@@ -18,18 +18,21 @@ import {
 import {
   faultEndingRow,
   feedId,
+  finalResponseRow,
   harness,
   mergeTabRow,
   responseRow,
   rowContext,
   subagentRow,
   toolCallRow,
+  turnEndedRow,
   userPromptRow,
 } from "./harness.js";
 import {
   GROUP_TAB_MEMBER_ATTRIBUTE,
   createToolGroupStore,
 } from "../../src/feed/tool-group.js";
+import { createResponseRunStore } from "../../src/feed/response-run.js";
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { createTicker } from "../../src/clock.js";
 import { stoppedClock } from "./cards/tool-card-head-shape.js";
@@ -288,6 +291,82 @@ describe("arrangeSubfeedRows leaves placed rows in the document", () => {
     arrangeSubfeedRows(host, view);
     // Assert
     expect(host.querySelector('[data-feed-row="b"]')).toBeNull();
+  });
+});
+
+describe("arrangeSubfeedRows coalesced final responses", () => {
+  /** Arrange ROWS with both run stores, as the default bubble body does. */
+  function arranged(rows: FeedRow[], host = document.createElement("div")): HTMLElement {
+    arrangeSubfeedRows(host, viewOf(rows), createToolGroupStore(createTicker()), createResponseRunStore());
+    return host;
+  }
+
+  it("coalesces two contiguous final responses into ONE top-level run", () => {
+    const host = arranged([finalResponseRow("a"), finalResponseRow("b")]);
+    expect(host.children).toHaveLength(1);
+    expect(host.querySelectorAll(".response-run")).toHaveLength(1);
+  });
+
+  it("places every member inside the run, in feed order", () => {
+    const host = arranged([finalResponseRow("a"), turnEndedRow("e", "t1"), finalResponseRow("b")]);
+    const ids = [...host.querySelectorAll(".response-run > [data-feed-row]")].map((el) =>
+      el.getAttribute("data-feed-row"),
+    );
+    expect(ids).toEqual(["a", "e", "b"]);
+  });
+
+  it("leaves a concluded ending after the last member at the top level", () => {
+    const host = arranged([finalResponseRow("a"), finalResponseRow("b"), turnEndedRow("e", "t2")]);
+    expect(host.querySelector(':scope > [data-feed-row="e"]')).not.toBeNull();
+  });
+
+  it("leaves a lone final response at the top level, as today", () => {
+    const host = arranged([finalResponseRow("a"), userPromptRow("p", "hi"), finalResponseRow("b")]);
+    expect(host.querySelector(".response-run")).toBeNull();
+    expect(host.children).toHaveLength(3);
+  });
+
+  it("draws the runs one by one for a caller with no run store", () => {
+    const host = document.createElement("div");
+    arrangeSubfeedRows(host, viewOf([finalResponseRow("a"), finalResponseRow("b")]), createToolGroupStore(createTicker()));
+    expect(host.querySelector(".response-run")).toBeNull();
+    expect(host.children).toHaveLength(2);
+  });
+
+  it("nests a row parented to a run member inside that member", () => {
+    const host = arranged([finalResponseRow("a"), finalResponseRow("b"), responseRow("c", "x", "b")]);
+    expect(host.querySelector('.response-run [data-feed-row="b"] .feed-nest [data-feed-row="c"]')).not.toBeNull();
+  });
+
+  it("keeps the run's wrapper across a live push that extends it", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [finalResponseRow("a"), finalResponseRow("b")];
+    const view = viewOf(rows);
+    const runs = createResponseRunStore();
+    arrangeSubfeedRows(host, view, undefined, runs);
+    const wrapper = host.firstElementChild;
+    // Act
+    rows.push(turnEndedRow("e", "t2"), finalResponseRow("c"));
+    arrangeSubfeedRows(host, view, undefined, runs);
+    // Assert
+    expect(host.firstElementChild).toBe(wrapper);
+    expect(host.querySelectorAll(".response-run > [data-feed-row]")).toHaveLength(4);
+  });
+
+  it("drops the run once its members no longer coalesce", () => {
+    // Arrange
+    const host = document.createElement("div");
+    const rows = [finalResponseRow("a"), finalResponseRow("b")];
+    const view = viewOf(rows);
+    const runs = createResponseRunStore();
+    arrangeSubfeedRows(host, view, undefined, runs);
+    // Act: a prompt lands between the two answers.
+    rows.splice(1, 0, userPromptRow("p", "hi"));
+    arrangeSubfeedRows(host, view, undefined, runs);
+    // Assert
+    expect(host.querySelector(".response-run")).toBeNull();
+    expect([...host.children].map((el) => el.getAttribute("data-feed-row"))).toEqual(["a", "p", "b"]);
   });
 });
 

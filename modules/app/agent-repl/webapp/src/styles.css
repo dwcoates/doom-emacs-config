@@ -2466,7 +2466,8 @@ html[data-page-unshown] *::after {
 /* The answer the turn landed on, as against the commentary above it: green.
    `:not([data-variant="thinking"])` keeps it off reasoning — the structural
    half is that the daemon never names a thinking row as the answer. */
-.bubble.final-response:not([data-variant="thinking"]) {
+.bubble.final-response:not([data-variant="thinking"]),
+.feed-item > .response-run {
   border-color: color-mix(in srgb, var(--final-response) var(--response-border-strength), transparent);
 }
 /* A TURN THAT ENDED any way but a normal completed answer (owner ruling,
@@ -2499,6 +2500,38 @@ html[data-page-unshown] *::after {
    above's specificity, both `!important`. */
 .bubble.final-response.entry-selected {
   --bubble-bg: var(--selected-final-response-bg) !important;
+}
+/* A COALESCED RUN OF FINAL RESPONSES (src/feed/response-run.ts): contiguous
+   green answers drawn as ONE tabless bubble. The run hangs on the response's
+   rail at the response's width cap and wears the bubble's corners, shadow and
+   green border once (its color is the answer's own rule above); each member bubble inside it drops its own and stretches
+   to the run's width, so the members read as one message. Each member keeps
+   its own fill, so a selected member greys only its own part. A subtle grey
+   line separates each member from the one above it (a concluded turn ending
+   between two members takes no slot, so the sibling rule skips it). */
+.feed-item > .response-run {
+  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
+  margin-right: auto;
+  width: fit-content;
+  max-width: var(--bubble-max-width);
+  display: flex;
+  flex-direction: column;
+  border-width: 0.3px;
+  border-style: solid;
+  border-radius: 8px;
+  box-shadow: var(--bubble-shadow);
+  overflow: hidden;
+}
+.response-run > .feed-item > .bubble {
+  margin: 0;
+  width: auto;
+  max-width: none;
+  border-width: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.response-run > .feed-item:has(> .bubble) ~ .feed-item:has(> .bubble) {
+  border-top: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
 }
 /* THE SELECTED PROMPT (owner request, 2026-10-19): a prompt bubble that is not
    held (a user prompt, an agent-addressed prompt, a peer message) is filled

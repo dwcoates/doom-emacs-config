@@ -1971,6 +1971,48 @@ describe("the removed amber async border", () => {
   });
 });
 
+describe("a coalesced run of final responses (response-run.ts)", () => {
+  it("draws the run's border in the answer's own green rule", () => {
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".feed-item > .response-run") && r.declarations.includes("border-color"));
+    expect(rule?.selectors).toContain('.bubble.final-response:not([data-variant="thinking"])');
+    expect(rule?.declarations).toContain(FINAL_BORDER);
+  });
+
+  it("hangs the run on the response's rail at the bubble cap", () => {
+    const rule = rulesOfSelector(".feed-item > .response-run");
+    expect(rule).toMatch(/margin-left:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
+    expect(rule).toMatch(/max-width:\s*var\(--bubble-max-width\)/);
+    expect(rule).toMatch(/width:\s*fit-content/);
+  });
+
+  it("wears the bubble's border thickness, corners and shadow once, on the run", () => {
+    const rule = rulesOfSelector(".feed-item > .response-run");
+    expect(rule).toMatch(/border-width:\s*0\.3px/);
+    expect(rule).toMatch(/border-radius:\s*8px/);
+    expect(rule).toMatch(/box-shadow:\s*var\(--bubble-shadow\)/);
+  });
+
+  it("strips each member bubble's own border, corners, shadow and margins", () => {
+    const rule = declarationsOf(".response-run > .feed-item > .bubble") ?? "";
+    for (const declaration of [/margin:\s*0/, /width:\s*auto/, /max-width:\s*none/, /border-width:\s*0/, /border-radius:\s*0/, /box-shadow:\s*none/]) {
+      expect(rule).toMatch(declaration);
+    }
+  });
+
+  it("separates each member from the one above with a subtle grey line", () => {
+    const rule = declarationsOf(".response-run > .feed-item:has(> .bubble) ~ .feed-item:has(> .bubble)");
+    expect(rule).toMatch(/border-top:\s*1px solid color-mix\(in srgb, var\(--muted\) 35%, transparent\)/);
+  });
+});
+
+/** Every declaration of the rules whose selector list includes SELECTOR, joined. */
+function rulesOfSelector(selector: string): string {
+  return rulesOf(stylesheet)
+    .filter((rule) => rule.selectors.includes(selector))
+    .map((rule) => rule.declarations)
+    .join("\n");
+}
+
 describe("the selected-entry mark (a jump's landing, the feed selection)", () => {
   it("rings the selected card with the selection token", () => {
     // Arrange / Act
