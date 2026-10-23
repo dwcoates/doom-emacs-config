@@ -835,12 +835,14 @@ interface RowRefusal {
  * THE ROW'S ONE CALL LIFECYCLE, shared by every held-prompt control whose
  * refusal is said at the row: the row's standing refusal is cleared and its
  * controls disabled for the call; a typed refusal (ATTEMPT answering one) or a
- * call that never landed is drawn as the row's next sibling and logged, and
- * re-enables the row so it can be retried. Answers whether the call succeeded.
+ * call that never landed is drawn as the row's next sibling and logged.
+ * Answers whether the call succeeded.
  *
- * Success leaves the row alone: the held section's own push is what takes the card
- * down or redraws it, and re-enabling a row about to be replaced would only
- * flicker.
+ * THE ROW IS DISABLED FOR EXACTLY THE CALL, whatever it answered. A success
+ * does not promise a push: a release into a running turn registers an
+ * interrupt and leaves the held view as it was until that turn ends, so a row
+ * left disabled for the push to replace stayed dead for the whole turn
+ * (2026-10-23). A card the push does take down takes its row with it.
  */
 async function rowCall(
   button: Control,
@@ -854,7 +856,13 @@ async function rowCall(
   setControlsDisabled(row, true);
   try {
     const refused = await attempt();
-    if (refused === null) return true;
+    if (refused === null) {
+      log.info(`${rpc} accepted a ${action}`, {
+        operation: "held.held-prompt.action-accepted",
+        context: { turn, action },
+      });
+      return true;
+    }
     drawRefusalAfter(row, REFUSAL_KIND, refused.arm, refused.say);
     log.warn(`${rpc} refused a ${action}`, {
       operation: "held.held-prompt.action-refused",
@@ -873,13 +881,7 @@ async function rowCall(
     });
     return false;
   } finally {
-    // Only a refusal leaves the row on screen; re-enable so it can be retried.
-    if (
-      row !== null &&
-      row.parentElement?.querySelector(".queued-refusal") != null
-    ) {
-      setControlsDisabled(row, false);
-    }
+    setControlsDisabled(row, false);
   }
 }
 
