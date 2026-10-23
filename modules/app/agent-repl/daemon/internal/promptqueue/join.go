@@ -418,12 +418,7 @@ func (q *queue) reholdWithdrawn(ctx context.Context, ws ids.WorkspaceID, turn id
 		}))
 		return
 	}
-	again := held
-	again.Turn = wsm.NewTurnID()
-	again.Hold = nil
-	again.ScheduleID = ""
-	again.Tombstone = nil
-	again.Classification = &wsm.Classification{Arm: wsm.ArmHoldForTurnEnd, Reason: askOpenReason, At: q.deps.Now()}
+	again := heldAgain(held, nil, &wsm.Classification{Arm: wsm.ArmHoldForTurnEnd, Reason: askOpenReason, At: q.deps.Now()})
 	fields["held_turn"] = string(again.Turn)
 	if err := q.deps.DB.PutHeldPrompt(ctx, again); err != nil {
 		log.Error(opJoin, "could not hold the withdrawn prompt again; it is lost from the queue", dlog.Merge(fields, dlog.Context{"cause": err.Error()}))

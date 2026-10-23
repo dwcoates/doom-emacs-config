@@ -40,6 +40,22 @@ import (
 // prompt the vendor never recorded (prompt_not_recorded) has nothing to cut
 // and is re-held.
 
+// heldAgain is HELD, a prompt that left the tray, standing in it again IN ITS
+// PLACE (its QueuedAt) under a NEW turn id, held under HOLD and judged by
+// VERDICT, either nil for none. THE ONE SHAPE of a prompt held again: a turn
+// id is started once, and the shim derives the prompt's vendor uuid from it,
+// so a prompt the vendor already saw is never delivered under its old id; and
+// a retirement, or a drain schedule it waited on, belongs to the old entry.
+func heldAgain(held wsm.HeldPrompt, hold *wsm.HoldKind, verdict *wsm.Classification) wsm.HeldPrompt {
+	again := held
+	again.Turn = wsm.NewTurnID()
+	again.Hold = hold
+	again.ScheduleID = ""
+	again.Classification = verdict
+	again.Tombstone = nil
+	return again
+}
+
 // forgetTry drops the try a turn end can no longer act on.
 func (q *queue) forgetTry(ws ids.WorkspaceID, turn ids.TurnID, log dlog.Logger) {
 	if tried, ok := q.takeTry(ws, turn); ok {
@@ -107,12 +123,7 @@ func (q *queue) reholdFailedTry(ctx context.Context, d *delivery, turn ids.TurnI
 	_ = q.deps.Feed.RollBackTurns(d.ws, []ids.TurnID{turn})
 
 	kind := wsm.HoldReconnect
-	again := tried
-	again.Turn = wsm.NewTurnID()
-	again.Hold = &kind
-	again.ScheduleID = ""
-	again.Classification = nil
-	again.Tombstone = nil
+	again := heldAgain(tried, &kind, nil)
 	if err := q.deps.DB.PutHeldPrompt(ctx, again); err != nil {
 		log.Error(opTurnEnded, "could not put the blocked tried prompt back on the hold; it is lost from the queue",
 			dlog.Merge(fields, dlog.Context{"cause": err.Error(), "held_turn": string(again.Turn)}))
