@@ -343,8 +343,8 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		RunLog:            os.Getenv(ramdisk.EnvRunLog),
 		PrepareWebappDist: suites.PrepareWebappDist,
 		Metrics:           metricsTarget,
-		PushTimes: func(ctx context.Context, target testtimes.Target, tests []testtimes.Test, suites []testtimes.Suite, at time.Time) error {
-			return testtimes.Push(ctx, http.DefaultClient, target, tests, suites, at)
+		PushTimes: func(ctx context.Context, target testtimes.Target, report testtimes.Report, at time.Time) error {
+			return testtimes.Push(ctx, http.DefaultClient, target, report, at)
 		},
 	}, args)
 }

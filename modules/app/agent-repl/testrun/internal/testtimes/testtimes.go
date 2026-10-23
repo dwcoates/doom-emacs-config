@@ -45,6 +45,17 @@ const SeriesName = "agentrepl_test_seconds"
 // per run.
 const SuiteSeriesName = "agentrepl_test_suite_seconds"
 
+// The gauges every unit's resource use lands in, one sample per run each: a
+// unit is one process (a chunk of tests, a build, a harness group), the
+// finest grain the kernel accounts resources at.
+const (
+	UnitWallSeriesName        = "agentrepl_test_unit_wall_seconds"
+	UnitCPUSeriesName         = "agentrepl_test_unit_cpu_seconds"
+	UnitMaxRSSSeriesName      = "agentrepl_test_unit_max_rss_bytes"
+	UnitBlockReadsSeriesName  = "agentrepl_test_unit_block_reads"
+	UnitBlockWritesSeriesName = "agentrepl_test_unit_block_writes"
+)
+
 // The outcomes a test is labeled with.
 const (
 	Pass = "pass"
@@ -65,6 +76,27 @@ type Suite struct {
 	Name    string
 	Outcome string
 	Seconds float64
+}
+
+// Unit is one unit's resource use in a run.
+type Unit struct {
+	Suite   string
+	ID      string
+	Outcome string
+	// Wall and CPU are seconds.
+	Wall, CPU float64
+	// MaxRSSBytes is the largest resident set of the unit's process or any
+	// one descendant it reaped.
+	MaxRSSBytes int64
+	// BlockReads and BlockWrites are block I/O operations to storage.
+	BlockReads, BlockWrites int64
+}
+
+// Report is everything one run pushes.
+type Report struct {
+	Tests  []Test
+	Suites []Suite
+	Units  []Unit
 }
 
 // Target is where a run pushes and what ran it.
@@ -195,20 +227,35 @@ func labelValue(v string) string {
 	return r.Replace(v)
 }
 
-// Encode writes TESTS and SUITES as Prometheus text exposition, every sample
-// labeled with TRIGGER and stamped AT.
-func Encode(tests []Test, suites []Suite, trigger string, at time.Time) []byte {
+// Encode writes REPORT as Prometheus text exposition, every sample labeled
+// with TRIGGER and stamped AT.
+func Encode(report Report, trigger string, at time.Time) []byte {
 	var b bytes.Buffer
 	ms := at.UnixMilli()
-	for _, t := range tests {
+	num := func(v float64) string { return strconv.FormatFloat(v, 'g', -1, 64) }
+	for _, t := range report.Tests {
 		fmt.Fprintf(&b, "%s{suite=\"%s\",test=\"%s\",outcome=\"%s\",trigger=\"%s\"} %s %d\n",
-			SeriesName, labelValue(t.Suite), labelValue(t.Name), t.Outcome, labelValue(trigger),
-			strconv.FormatFloat(t.Seconds, 'g', -1, 64), ms)
+			SeriesName, labelValue(t.Suite), labelValue(t.Name), t.Outcome, labelValue(trigger), num(t.Seconds), ms)
 	}
-	for _, s := range suites {
+	for _, s := range report.Suites {
 		fmt.Fprintf(&b, "%s{suite=\"%s\",outcome=\"%s\",trigger=\"%s\"} %s %d\n",
-			SuiteSeriesName, labelValue(s.Name), s.Outcome, labelValue(trigger),
-			strconv.FormatFloat(s.Seconds, 'g', -1, 64), ms)
+			SuiteSeriesName, labelValue(s.Name), s.Outcome, labelValue(trigger), num(s.Seconds), ms)
+	}
+	for _, u := range report.Units {
+		labels := fmt.Sprintf("suite=\"%s\",unit=\"%s\",outcome=\"%s\",trigger=\"%s\"",
+			labelValue(u.Suite), labelValue(u.ID), u.Outcome, labelValue(trigger))
+		for _, v := range []struct {
+			name  string
+			value string
+		}{
+			{UnitWallSeriesName, num(u.Wall)},
+			{UnitCPUSeriesName, num(u.CPU)},
+			{UnitMaxRSSSeriesName, strconv.FormatInt(u.MaxRSSBytes, 10)},
+			{UnitBlockReadsSeriesName, strconv.FormatInt(u.BlockReads, 10)},
+			{UnitBlockWritesSeriesName, strconv.FormatInt(u.BlockWrites, 10)},
+		} {
+			fmt.Fprintf(&b, "%s{%s} %s %d\n", v.name, labels, v.value, ms)
+		}
 	}
 	return b.Bytes()
 }
@@ -217,14 +264,15 @@ func Encode(tests []Test, suites []Suite, trigger string, at time.Time) []byte {
 // run's exit.
 const pushBound = 10 * time.Second
 
-// Push sends TESTS and SUITES, stamped AT, to the store under the target's
-// root, labeled as the test runner's.
-func Push(ctx context.Context, client *http.Client, target Target, tests []Test, suites []Suite, at time.Time) error {
+// Push sends REPORT, stamped AT, to the store under the target's root,
+// labeled as the test runner's.
+func Push(ctx context.Context, client *http.Client, target Target, report Report, at time.Time) error {
 	ctx, cancel := context.WithTimeout(ctx, pushBound)
 	defer cancel()
-	body := Encode(tests, suites, target.Trigger, at)
+	body := Encode(report, target.Trigger, at)
 	if err := storeimport.Post(ctx, client, target.Root, body, "instance=testrun"); err != nil {
-		return fmt.Errorf("testtimes: %d test and %d suite times were not pushed: %w", len(tests), len(suites), err)
+		return fmt.Errorf("testtimes: %d test, %d suite and %d unit records were not pushed: %w",
+			len(report.Tests), len(report.Suites), len(report.Units), err)
 	}
 	return nil
 }

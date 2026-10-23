@@ -41,11 +41,24 @@ type Spec struct {
 	Display func(output []byte, passed bool) []byte
 }
 
+// Usage is what a unit's process and its reaped descendants used, as the
+// kernel's wait accounting reports it.
+type Usage struct {
+	// CPU is user plus system seconds.
+	CPU float64
+	// MaxRSSBytes is the largest resident set of the process or any one
+	// descendant it reaped.
+	MaxRSSBytes int64
+	// BlockReads and BlockWrites are the block input and output operations
+	// that went to storage (the kernel's ru_inblock and ru_oublock).
+	BlockReads, BlockWrites int64
+}
+
 // Process is one started unit.
 type Process interface {
-	// Wait blocks until the process exits and returns its exit status and the
-	// CPU seconds it and its reaped descendants used.
-	Wait() (exit int, cpu float64, err error)
+	// Wait blocks until the process exits and returns its exit status and
+	// what it and its reaped descendants used.
+	Wait() (exit int, usage Usage, err error)
 	// Kill stops the process and everything it started.
 	Kill()
 }
@@ -74,7 +87,8 @@ type Result struct {
 	Outcome    Outcome
 	Exit       int
 	Start, End time.Time
-	CPU        float64
+	// Usage is what the unit's process used.
+	Usage Usage
 	// Items are the per-item seconds the unit's output reported.
 	Items map[string]float64
 	// Tests are the individual tests' times the unit's output reported.
@@ -130,7 +144,7 @@ type grant struct {
 type completion struct {
 	id     string
 	exit   int
-	cpu    float64
+	usage  Usage
 	err    error
 	output *bytes.Buffer
 }
@@ -233,8 +247,8 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		}
 		running[s.ID] = p
 		go func() {
-			exit, cpu, err := p.Wait()
-			done <- completion{id: s.ID, exit: exit, cpu: cpu, err: err, output: out}
+			exit, usage, err := p.Wait()
+			done <- completion{id: s.ID, exit: exit, usage: usage, err: err, output: out}
 		}()
 	}
 
@@ -300,7 +314,7 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		}
 		spec := byID[c.id]
 		used -= spec.Width()
-		res := Result{Spec: spec, Exit: c.exit, Start: starts[c.id], End: r.Clock.Now(), CPU: c.cpu}
+		res := Result{Spec: spec, Exit: c.exit, Start: starts[c.id], End: r.Clock.Now(), Usage: c.usage}
 		switch {
 		case c.err != nil:
 			r.Log.Errorf("unit %s (%s) could not be waited on: %v", c.id, spec.Suite, c.err)
@@ -389,7 +403,7 @@ func (r *Runner) reportUnit(res Result) {
 	id, suite := res.Spec.ID, res.Spec.Suite
 	switch res.Outcome {
 	case Passed:
-		r.Log.Infof("unit %s [%s] ok, %.3fs wall, %.3fs cpu", id, suite, res.Wall(), res.CPU)
+		r.Log.Infof("unit %s [%s] ok, %.3fs wall, %.3fs cpu", id, suite, res.Wall(), res.Usage.CPU)
 	case Declined:
 		r.Log.Infof("unit %s [%s] declined (exit %d) after %.3fs", id, suite, ExitDeclined, res.Wall())
 	case Failed:

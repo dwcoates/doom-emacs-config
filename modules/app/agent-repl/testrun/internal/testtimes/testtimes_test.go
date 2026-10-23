@@ -182,14 +182,21 @@ func TestEncodeStampsEverySampleWithTheTriggerAndTheRunsEnd(t *testing.T) {
 	at := time.UnixMilli(1_700_000_000_123)
 
 	// Act
-	got := string(Encode(
-		[]Test{{Suite: "webapp", Name: `a > says "hi"\n`, Outcome: Pass, Seconds: 0.5}},
-		[]Suite{{Name: "webapp", Outcome: Pass, Seconds: 12}},
-		"merge_queue", at))
+	got := string(Encode(Report{
+		Tests:  []Test{{Suite: "webapp", Name: `a > says "hi"\n`, Outcome: Pass, Seconds: 0.5}},
+		Suites: []Suite{{Name: "webapp", Outcome: Pass, Seconds: 12}},
+		Units:  []Unit{{Suite: "webapp", ID: "webapp#00", Outcome: Fail, Wall: 3, CPU: 2.5, MaxRSSBytes: 1048576, BlockReads: 7, BlockWrites: 9}},
+	}, "merge_queue", at))
 
 	// Assert
+	unit := `{suite="webapp",unit="webapp#00",outcome="fail",trigger="merge_queue"}`
 	want := `agentrepl_test_seconds{suite="webapp",test="a > says \"hi\"\\n",outcome="pass",trigger="merge_queue"} 0.5 1700000000123` + "\n" +
-		`agentrepl_test_suite_seconds{suite="webapp",outcome="pass",trigger="merge_queue"} 12 1700000000123` + "\n"
+		`agentrepl_test_suite_seconds{suite="webapp",outcome="pass",trigger="merge_queue"} 12 1700000000123` + "\n" +
+		`agentrepl_test_unit_wall_seconds` + unit + ` 3 1700000000123` + "\n" +
+		`agentrepl_test_unit_cpu_seconds` + unit + ` 2.5 1700000000123` + "\n" +
+		`agentrepl_test_unit_max_rss_bytes` + unit + ` 1048576 1700000000123` + "\n" +
+		`agentrepl_test_unit_block_reads` + unit + ` 7 1700000000123` + "\n" +
+		`agentrepl_test_unit_block_writes` + unit + ` 9 1700000000123` + "\n"
 	if got != want {
 		t.Fatalf("Encode =\n%s\nwant\n%s", got, want)
 	}
@@ -208,13 +215,13 @@ func TestPushSendsTheEncodedTimesToTheStore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "store.json"), []byte(`{"import_url":"`+srv.URL+`/api/v1/import/prometheus","job":"agent-repl"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tests := []Test{{Suite: "elisp", Name: "t", Outcome: Pass, Seconds: 1}}
+	report := Report{Tests: []Test{{Suite: "elisp", Name: "t", Outcome: Pass, Seconds: 1}}}
 
 	// Act
-	err := Push(context.Background(), srv.Client(), Target{Root: root, Trigger: "merge_queue"}, tests, nil, time.UnixMilli(5))
+	err := Push(context.Background(), srv.Client(), Target{Root: root, Trigger: "merge_queue"}, report, time.UnixMilli(5))
 
 	// Assert
-	if err != nil || body != string(Encode(tests, nil, "merge_queue", time.UnixMilli(5))) || labels != "job=agent-repl,instance=testrun" {
+	if err != nil || body != string(Encode(report, "merge_queue", time.UnixMilli(5))) || labels != "job=agent-repl,instance=testrun" {
 		t.Fatalf("Push = %v; store got %q labeled %q", err, body, labels)
 	}
 }
@@ -224,10 +231,10 @@ func TestPushAnswersAStoreThatCannotBeReached(t *testing.T) {
 	root := t.TempDir()
 
 	// Act
-	err := Push(context.Background(), http.DefaultClient, Target{Root: root, Trigger: "merge_queue"}, []Test{{Name: "t"}}, nil, time.Now())
+	err := Push(context.Background(), http.DefaultClient, Target{Root: root, Trigger: "merge_queue"}, Report{Tests: []Test{{Name: "t"}}}, time.Now())
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "1 test and 0 suite times were not pushed") {
+	if err == nil || !strings.Contains(err.Error(), "1 test, 0 suite and 0 unit records were not pushed") {
 		t.Fatalf("Push = %v, want the unpushed times named", err)
 	}
 }

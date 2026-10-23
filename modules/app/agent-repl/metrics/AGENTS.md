@@ -26,7 +26,9 @@ offer one: the `agent-repl-metrics` skill (`skills/agent-repl-metrics/`).
 - The test runner (`testrun/internal/testtimes`), pushed through
   `storeimport` when a merge queue gate's run ends:
   `agentrepl_test_seconds{suite, test, outcome, trigger}` and
-  `agentrepl_test_suite_seconds{suite, outcome, trigger}`. Only a gate pushes:
+  `agentrepl_test_suite_seconds{suite, outcome, trigger}`, and every unit's
+  `agentrepl_test_unit_{wall_seconds,cpu_seconds,max_rss_bytes,block_reads,block_writes}{suite, unit, outcome, trigger}`.
+  Only a gate pushes:
   the daemon names the root and trigger in the gate's environment, and the
   runner removes both before any unit starts.
 

@@ -57,9 +57,8 @@ type Deps struct {
 	// Metrics is where the run pushes every test's time when it ends, and
 	// what ran it; the zero Target pushes nothing (testtimes.TakeTarget).
 	Metrics testtimes.Target
-	// PushTimes sends the run's test and suite times, stamped AT, to TARGET
-	// (testtimes.Push).
-	PushTimes func(ctx context.Context, target testtimes.Target, tests []testtimes.Test, suites []testtimes.Suite, at time.Time) error
+	// PushTimes sends the run's report, stamped AT, to TARGET (testtimes.Push).
+	PushTimes func(ctx context.Context, target testtimes.Target, report testtimes.Report, at time.Time) error
 }
 
 // Reuser is the run's pass-record seam (reuse.Runner).
@@ -308,25 +307,38 @@ var suiteOutcomes = map[run.Outcome]string{
 	run.Declined:  testtimes.Skip,
 }
 
-// pushTimes sends every test's and every suite's time to the metrics store,
-// when the run was told to (Deps.Metrics), stamped with the run's end. A
-// suite's time is its slot time (run.SuiteResult.UnitSeconds).
+// unitOutcomes is the outcome a unit's resource use is labeled with.
+var unitOutcomes = suiteOutcomes
+
+// pushTimes sends every test's and every suite's time, and every unit's
+// resource use, to the metrics store when the run was told to
+// (Deps.Metrics), stamped with the run's end. A suite's time is its slot time
+// (run.SuiteResult.UnitSeconds). A cancelled unit never ran, so it used
+// nothing and is left out.
 func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults []run.SuiteResult, end time.Time) error {
 	if !d.Metrics.Enabled() {
 		return nil
 	}
-	var tests []testtimes.Test
+	var report testtimes.Report
 	for _, r := range results {
-		tests = append(tests, r.Tests...)
+		report.Tests = append(report.Tests, r.Tests...)
+		if r.Outcome == run.Cancelled {
+			continue
+		}
+		report.Units = append(report.Units, testtimes.Unit{
+			Suite: r.Spec.Suite, ID: r.Spec.ID, Outcome: unitOutcomes[r.Outcome],
+			Wall: r.Wall(), CPU: r.Usage.CPU, MaxRSSBytes: r.Usage.MaxRSSBytes,
+			BlockReads: r.Usage.BlockReads, BlockWrites: r.Usage.BlockWrites,
+		})
 	}
-	suiteTimes := make([]testtimes.Suite, 0, len(suiteResults))
 	for _, s := range suiteResults {
-		suiteTimes = append(suiteTimes, testtimes.Suite{Name: s.Name, Outcome: suiteOutcomes[s.Outcome], Seconds: s.UnitSeconds})
+		report.Suites = append(report.Suites, testtimes.Suite{Name: s.Name, Outcome: suiteOutcomes[s.Outcome], Seconds: s.UnitSeconds})
 	}
-	if err := d.PushTimes(ctx, d.Metrics, tests, suiteTimes, end); err != nil {
+	if err := d.PushTimes(ctx, d.Metrics, report, end); err != nil {
 		return err
 	}
-	d.Log.Infof("metrics: pushed %d test and %d suite times (trigger %s)", len(tests), len(suiteTimes), d.Metrics.Trigger)
+	d.Log.Infof("metrics: pushed %d test, %d suite and %d unit records (trigger %s)",
+		len(report.Tests), len(report.Suites), len(report.Units), d.Metrics.Trigger)
 	return nil
 }
 
@@ -351,7 +363,7 @@ func printUnitSummary(log *run.Log, results []run.Result, slots int, start, end 
 	busy, cpu := 0.0, 0.0
 	for _, r := range results {
 		busy += r.Wall()
-		cpu += r.CPU
+		cpu += r.Usage.CPU
 	}
 	util := 0.0
 	if wall > 0 {
@@ -364,7 +376,7 @@ func printUnitSummary(log *run.Log, results []run.Result, slots int, start, end 
 		if i == 10 {
 			break
 		}
-		log.Infof("  %8.3fs  %s [%s] (estimated %.1fs, cpu %.1fs)", r.Wall(), r.Spec.ID, r.Spec.Suite, r.Spec.Est, r.CPU)
+		log.Infof("  %8.3fs  %s [%s] (estimated %.1fs, cpu %.1fs)", r.Wall(), r.Spec.ID, r.Spec.Suite, r.Spec.Est, r.Usage.CPU)
 	}
 	for _, r := range results {
 		if line, over := overCores(r); over {
@@ -382,11 +394,11 @@ func printUnitSummary(log *run.Log, results []run.Result, slots int, start, end 
 func overCores(r run.Result) (string, bool) {
 	w := r.Wall()
 	width := r.Spec.Width()
-	if w <= 1 || r.CPU <= (float64(width)+0.5)*w {
+	if w <= 1 || r.Usage.CPU <= (float64(width)+0.5)*w {
 		return "", false
 	}
 	return fmt.Sprintf("unit %s used %.1f cores on average (%.1fs cpu in %.1fs) but holds %d core slot(s): it is not pinned to its width",
-		r.Spec.ID, r.CPU/w, r.CPU, w, width), true
+		r.Spec.ID, r.Usage.CPU/w, r.Usage.CPU, w, width), true
 }
 
 func printSuiteSummaries(log *run.Log, passed, declined, failed []run.SuiteResult) {

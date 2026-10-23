@@ -106,41 +106,51 @@ func (e OSExec) start(spec Spec, out *bytes.Buffer, root string) (Process, error
 
 // Wait implements Process. The unit's temp root is removed once it has exited;
 // a root that cannot be removed fails the wait, whatever the unit's status.
-func (p *osProcess) Wait() (int, float64, error) {
-	exit, cpu, err := p.wait()
+func (p *osProcess) Wait() (int, Usage, error) {
+	exit, usage, err := p.wait()
 	if rmErr := os.RemoveAll(p.root); rmErr != nil {
 		rmErr = fmt.Errorf("run: remove the temp root %s of %s: %w", p.root, p.id, rmErr)
 		if err != nil {
-			return exit, cpu, fmt.Errorf("%w; %w", err, rmErr)
+			return exit, usage, fmt.Errorf("%w; %w", err, rmErr)
 		}
-		return -1, cpu, rmErr
+		return -1, usage, rmErr
 	}
-	return exit, cpu, err
+	return exit, usage, err
 }
 
-func (p *osProcess) wait() (int, float64, error) {
+// usageOf is what an exited process used: its CPU and, where the kernel's
+// wait accounting reports it, its peak resident set and block I/O.
+func usageOf(st *os.ProcessState) Usage {
+	u := Usage{CPU: (st.UserTime() + st.SystemTime()).Seconds()}
+	if ru, ok := st.SysUsage().(*syscall.Rusage); ok {
+		u.MaxRSSBytes = maxRSSBytes(ru.Maxrss)
+		u.BlockReads, u.BlockWrites = ru.Inblock, ru.Oublock
+	}
+	return u
+}
+
+func (p *osProcess) wait() (int, Usage, error) {
 	defer close(p.done)
 	defer p.file.Close()
 	waitErr := p.cmd.Wait()
 	if _, err := p.file.Seek(0, io.SeekStart); err != nil {
-		return -1, 0, fmt.Errorf("run: rewind the output of pid %d: %w", p.cmd.Process.Pid, err)
+		return -1, Usage{}, fmt.Errorf("run: rewind the output of pid %d: %w", p.cmd.Process.Pid, err)
 	}
 	if _, err := io.Copy(p.out, p.file); err != nil {
-		return -1, 0, fmt.Errorf("run: read the output of pid %d: %w", p.cmd.Process.Pid, err)
+		return -1, Usage{}, fmt.Errorf("run: read the output of pid %d: %w", p.cmd.Process.Pid, err)
 	}
-	st := p.cmd.ProcessState
-	cpu := (st.UserTime() + st.SystemTime()).Seconds()
+	usage := usageOf(p.cmd.ProcessState)
 	var exitErr *exec.ExitError
 	switch {
 	case waitErr == nil:
-		return 0, cpu, nil
+		return 0, usage, nil
 	case errors.As(waitErr, &exitErr):
 		if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-			return 128 + int(ws.Signal()), cpu, nil
+			return 128 + int(ws.Signal()), usage, nil
 		}
-		return exitErr.ExitCode(), cpu, nil
+		return exitErr.ExitCode(), usage, nil
 	default:
-		return -1, cpu, waitErr
+		return -1, usage, waitErr
 	}
 }
 

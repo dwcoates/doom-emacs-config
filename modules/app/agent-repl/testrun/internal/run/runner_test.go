@@ -17,7 +17,7 @@ import (
 type script struct {
 	output   string
 	exit     int
-	cpu      float64
+	usage    Usage
 	startErr error
 	waitErr  error
 	// hold, when set, blocks the unit until it is closed.
@@ -71,7 +71,7 @@ func (e *fakeExec) Start(spec Spec, out *bytes.Buffer) (Process, error) {
 	return &fakeProc{e: e, id: spec.ID, s: s, out: out, kill: make(chan struct{})}, nil
 }
 
-func (p *fakeProc) Wait() (int, float64, error) {
+func (p *fakeProc) Wait() (int, Usage, error) {
 	exit := p.s.exit
 	if p.s.hold != nil {
 		select {
@@ -85,7 +85,7 @@ func (p *fakeProc) Wait() (int, float64, error) {
 	p.e.running--
 	p.e.width -= p.e.widths[p.id]
 	p.e.mu.Unlock()
-	return exit, p.s.cpu, p.s.waitErr
+	return exit, p.s.usage, p.s.waitErr
 }
 
 func (p *fakeProc) Kill() {
@@ -462,7 +462,7 @@ func TestRunRecordsItemTimings(t *testing.T) {
 	s.Items = func(out []byte) (map[string]float64, error) {
 		return map[string]float64{string(bytes.TrimSpace(out)): 1.5}, nil
 	}
-	r, _, _ := newRunner(1, &fakeExec{scripts: map[string]script{"ert#00": {output: "test-core.el\n", cpu: 0.75}}})
+	r, _, _ := newRunner(1, &fakeExec{scripts: map[string]script{"ert#00": {output: "test-core.el\n", usage: Usage{CPU: 0.75, MaxRSSBytes: 4096, BlockReads: 2, BlockWrites: 3}}}})
 
 	// Act
 	results, _, err := r.Run(context.Background(), []Spec{s})
@@ -474,8 +474,8 @@ func TestRunRecordsItemTimings(t *testing.T) {
 	if got := results[0].Items["test-core.el"]; got != 1.5 {
 		t.Fatalf("item seconds = %v, want 1.5", got)
 	}
-	if results[0].CPU != 0.75 {
-		t.Fatalf("cpu = %v, want 0.75", results[0].CPU)
+	if want := (Usage{CPU: 0.75, MaxRSSBytes: 4096, BlockReads: 2, BlockWrites: 3}); results[0].Usage != want {
+		t.Fatalf("usage = %+v, want %+v", results[0].Usage, want)
 	}
 }
 
