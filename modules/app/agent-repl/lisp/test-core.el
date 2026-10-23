@@ -7159,6 +7159,24 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
 
 ;;;; ---- The wall clock in Unix milliseconds ----
 
+(ert-deftest agent-repl-test-core-now-reads-the-wall-clock-in-seconds ()
+  "The measurement clock is the wall clock's float seconds."
+  (cl-letf (((symbol-function 'float-time) (lambda (&optional _) 1700000000.25)))
+    (should (equal (agent-repl--now) 1700000000.25))))
+
+(ert-deftest agent-repl-test-core-no-source-wraps-the-wall-clock-by-hand ()
+  "No source but core.el defines a function whose body is `(float-time)'.
+A measurement reads its clock through `agent-repl--now', so a test steps
+every measurement's clock the same way."
+  (let (offenders)
+    (dolist (file (agent-repl-test--production-lisp-files))
+      (unless (equal (file-name-nondirectory file) "core.el")
+        (with-temp-buffer
+          (insert-file-contents file)
+          (when (re-search-forward "(defun [^ ]+ ()\n\\(?:  \".*\n\\(?:.*\n\\)*?\\)?  (float-time))" nil t)
+            (push (file-name-nondirectory file) offenders)))))
+    (should-not offenders)))
+
 (ert-deftest agent-repl-test-core-now-unix-ms-reads-the-wall-clock-in-milliseconds ()
   "The instant is the wall clock's seconds times 1000, truncated to an integer."
   (cl-letf (((symbol-function 'float-time) (lambda (&optional _) 1700000000.1239)))

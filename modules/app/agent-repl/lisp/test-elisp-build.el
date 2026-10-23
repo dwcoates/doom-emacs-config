@@ -330,7 +330,7 @@ Every module in ABSENT is named by config.el but gets no file."
       ;; Arrange
       (agent-repl-test-eb--write-root root '("core" "status"))
       (let ((clock '(10.0 10.25)))
-        (cl-letf (((symbol-function 'agent-repl--elisp-reload-now) (lambda () (pop clock))))
+        (cl-letf (((symbol-function 'agent-repl--now) (lambda () (pop clock))))
           ;; Act
           (agent-repl--elisp-reload-run root "any")))
       ;; Assert

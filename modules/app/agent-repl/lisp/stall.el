@@ -31,6 +31,7 @@
 ;;; Code:
 
 (declare-function agent-repl--info "core" (ws fmt &rest args))
+(declare-function agent-repl--now "core" ())
 (declare-function agent-repl--register-timer "core" (key timer))
 (declare-function agent-repl-latency-report-editor "latency-report" (kind seconds))
 
@@ -50,13 +51,9 @@
 (defvar agent-repl-stall--last nil
   "The `float-time' of the sampler's previous run, or nil before its first.")
 
-(defun agent-repl-stall--now ()
-  "External-boundary wrapper: the wall clock, in float seconds."
-  (float-time))
-
 (defun agent-repl-stall-sample ()
   "One run of the sampler: measure the gap since the last run, report a stall."
-  (let* ((now (agent-repl-stall--now))
+  (let* ((now (agent-repl--now))
          (last agent-repl-stall--last)
          (stall (and last (- now last agent-repl-stall-interval))))
     (setq agent-repl-stall--last now)

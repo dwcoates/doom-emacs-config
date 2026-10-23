@@ -23,7 +23,7 @@
          (agent-repl-test-stall--reported nil)
          (agent-repl-test-stall--records nil)
          (agent-repl-test-stall--clock 100.0))
-     (cl-letf (((symbol-function 'agent-repl-stall--now) (lambda () agent-repl-test-stall--clock))
+     (cl-letf (((symbol-function 'agent-repl--now) (lambda () agent-repl-test-stall--clock))
                ((symbol-function 'agent-repl-latency-report-editor)
                 (lambda (kind seconds) (push (list kind seconds) agent-repl-test-stall--reported)))
                ((symbol-function 'agent-repl--info)

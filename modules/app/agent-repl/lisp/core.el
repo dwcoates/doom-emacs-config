@@ -311,6 +311,12 @@ the test suite sets it to a temp dir to isolate state.")
   "Fallback root for agent-repl state when `agent-repl--state-dir-env' is unset.
 A fixed sibling of the Claude CLI config dir (~/.claude).")
 
+(defun agent-repl--now ()
+  "External-boundary wrapper: the host\='s wall clock now, in float seconds.
+The one seam a measurement reads its clock through, so a test steps the
+clock by stubbing this alone."
+  (float-time))
+
 (defun agent-repl--now-unix-ms ()
   "The host\='s wall clock now, in Unix milliseconds.
 The one spelling of the instants agent-repl puts on the wire and compares:
