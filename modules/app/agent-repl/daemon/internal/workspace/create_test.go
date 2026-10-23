@@ -13,6 +13,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/account"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/sourcescan"
@@ -1893,5 +1894,63 @@ func TestCreateFromOriginWhoseFetchFailsIsRefusedAndBuildsNothing(t *testing.T) 
 	}
 	if !logged {
 		t.Fatalf("records = %+v, want the refusal recorded with git's failure", f.log.logger.Records())
+	}
+}
+
+func TestCreateRecordsBothEdgesOfTheWorktreeStep(t *testing.T) {
+	cases := []struct {
+		name    string
+		message string
+		level   string
+	}{
+		{name: "the start, before git runs", message: "materializing the worktree", level: "info"},
+		{name: "the end, with how long git took", message: "materialized the worktree", level: "info"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+
+			// Act.
+			if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// Assert.
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: tc.level, Operation: opCreate, Message: tc.message})
+			if !ok {
+				t.Fatalf("no %s record %q in %+v", tc.level, tc.message, f.log.logger.Records())
+			}
+			if record.Context["branch"] != f.git.created[0].Branch || record.Context["worktree_dir"] != f.git.created[0].WorktreeDir {
+				t.Fatalf("record context = %+v, want the created branch and worktree", record.Context)
+			}
+			if tc.message == "materialized the worktree" {
+				if _, ok := record.Context["duration_ms"]; !ok {
+					t.Fatalf("record context = %+v, want duration_ms", record.Context)
+				}
+			}
+		})
+	}
+}
+
+func TestAFailedWorktreeStepIsRecordedWithItsDurationAndNoEnd(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.createErr = errors.New("branch already checked out")
+
+	// Act.
+	_, _ = f.verbs.Create(context.Background(), standardSpec(t, f))
+
+	// Assert.
+	records := f.log.logger.Records()
+	failure, ok := dlog.FindRecord(records, dlog.RecordQuery{Level: "error", Operation: opCreate, Message: "could not materialize the worktree"})
+	if !ok || failure.Context["cause"] != "branch already checked out" {
+		t.Fatalf("no failure record carrying the cause in %+v", records)
+	}
+	if _, ok := failure.Context["duration_ms"]; !ok {
+		t.Fatalf("failure context = %+v, want duration_ms", failure.Context)
+	}
+	if _, ended := dlog.FindRecord(records, dlog.RecordQuery{Operation: opCreate, Message: "materialized the worktree"}); ended {
+		t.Fatalf("a failed worktree step recorded a successful end: %+v", records)
 	}
 }

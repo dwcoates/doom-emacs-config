@@ -318,12 +318,26 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		materializeAt = spec.MergeOf.ForkHead
 	}
 	reportCreateStage(spec, CreateStageCreatingWorktree)
+	// THE WORKTREE STEP IS RECORDED AT BOTH EDGES. It is git, and git runs the
+	// repository's hooks: a create once stood here for good behind a hook
+	// that never returned, and the log said nothing between the name and the
+	// silence (2026-10-23). A start with no end now names the stuck step, and
+	// each end's duration is what a bound on the step would be measured from.
+	global.Info(opCreate, "materializing the worktree", dlog.Context{
+		"branch": branch, "worktree_dir": worktreeDir, "base_ref": materializeAt,
+	})
+	materializing := v.now()
 	if err := v.deps.Git.CreateWorktree(ctx, repoDir, branch, materializeAt, worktreeDir); err != nil {
 		global.Error(opCreate, "could not materialize the worktree", dlog.Context{
 			"branch": branch, "worktree_dir": worktreeDir, "cause": err.Error(),
+			"duration_ms": v.now().Sub(materializing).Milliseconds(),
 		})
 		return wsm.Workspace{}, fmt.Errorf("create %q: materialize %q: %w", branch, worktreeDir, err)
 	}
+	global.Info(opCreate, "materialized the worktree", dlog.Context{
+		"branch": branch, "worktree_dir": worktreeDir,
+		"duration_ms": v.now().Sub(materializing).Milliseconds(),
+	})
 
 	// THE WORKTREE EXISTS; everything from here to the terminal outcome —
 	// registration, a fork's record, the session bring-up and the
