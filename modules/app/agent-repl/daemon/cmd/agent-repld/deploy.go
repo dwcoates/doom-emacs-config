@@ -249,3 +249,17 @@ func (f *deployClientsForwarder) PushReloadWebappBuild(ws ids.WorkspaceID, build
 		target.PushReloadWebappBuild(ws, build)
 	}
 }
+
+func (f *deployClientsForwarder) WebhostBuilds() []string {
+	if target, ok := f.bound(); ok {
+		return target.WebhostBuilds()
+	}
+	return nil
+}
+
+func (f *deployClientsForwarder) PushReloadWebhost(build string) int {
+	if target, ok := f.bound(); ok {
+		return target.PushReloadWebhost(build)
+	}
+	return 0
+}

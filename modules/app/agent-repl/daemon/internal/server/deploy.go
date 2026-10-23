@@ -255,6 +255,64 @@ func (s *server) holdWebBuild(ws ids.WorkspaceID, build string) func() {
 	}
 }
 
+// WebhostBuilds answers the webapp build every standing web view host's page
+// stream stated, sorted.
+func (s *server) WebhostBuilds() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.webhostBuilds))
+	for _, build := range s.webhostBuilds {
+		out = append(out, build)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// holdWebhostBuild records a web view host's stated build for as long as its
+// page stream stands, and answers the release.
+func (s *server) holdWebhostBuild(build string) func() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.webStreamSeq++
+	key := strconv.FormatUint(s.webStreamSeq, 10)
+	s.webhostBuilds[key] = build
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		delete(s.webhostBuilds, key)
+	}
+}
+
+// PushReloadWebhost pushes reload_webhost to every Emacs stream, naming the
+// webapp build to reload the web view host onto, and answers how many it
+// reached. Emacs owns the host, so a webview's WatchDaemon never carries it.
+// A stream whose queue is full is reported loudly rather than blocked on.
+func (s *server) PushReloadWebhost(build string) int {
+	push := &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_ReloadWebhost{
+		ReloadWebhost: &agentreplv1.DaemonReloadWebhost{Build: build},
+	}}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	reached := 0
+	for w := range s.daemonWatchers {
+		if !w.emacs {
+			continue
+		}
+		select {
+		case w.elisp <- push:
+			reached++
+			s.log.Info("daemon.server.reload_webhost", "pushed the web view host's reload to an Emacs", dlog.Context{
+				"stream": w.id, "build": build,
+			})
+		default:
+			s.log.Error("daemon.server.reload_webhost", "an Emacs stream's push queue is full; the web view host's reload did not reach it", dlog.Context{
+				"stream": w.id, "build": build,
+			})
+		}
+	}
+	return reached
+}
+
 // validateWatchDaemonRequest is WatchDaemonRequest's base function: the client
 // is REQUIRED, and an Emacs states the elisp it loaded.
 func validateWatchDaemonRequest(req *agentreplv1.WatchDaemonRequest) *connect.Error {

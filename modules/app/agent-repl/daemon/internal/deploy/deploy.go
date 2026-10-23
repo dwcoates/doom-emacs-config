@@ -188,6 +188,12 @@ type Clients interface {
 	// PushReloadWebappBuild pushes reload_webapp on one workspace's host
 	// stream, naming the webapp build the deploy brings.
 	PushReloadWebappBuild(ws ids.WorkspaceID, build string)
+	// WebhostBuilds answers the webapp build every standing web view host
+	// stated on its page stream.
+	WebhostBuilds() []string
+	// PushReloadWebhost pushes reload_webhost to every Emacs, naming the
+	// webapp build the deploy brings, and answers how many it reached.
+	PushReloadWebhost(build string) int
 }
 
 // Services restarts the launchd services.
@@ -1071,6 +1077,25 @@ func (d *Deployer) webapp(fresh builds) Outcome {
 		d.log.Info(opDecide, "a webview runs an older webapp; pushed the reload", dlog.Context{
 			"workspace": string(ws), "running": running, "fresh": fresh.webapp,
 		})
+	}
+	// THE WEB VIEW HOST is no workspace's webview, and a handover no longer
+	// reloads it, so a host on an older webapp is reloaded here.
+	for _, running := range d.deps.Clients.WebhostBuilds() {
+		if running == fresh.webapp {
+			continue
+		}
+		reached := d.deps.Clients.PushReloadWebhost(fresh.webapp)
+		out.Recipients += reached
+		if reached == 0 {
+			d.log.Error(opDecide, "the web view host runs an older webapp, but no Emacs stream took its reload", dlog.Context{
+				"running": running, "fresh": fresh.webapp,
+			})
+		} else {
+			d.log.Info(opDecide, "the web view host runs an older webapp; pushed its reload", dlog.Context{
+				"running": running, "fresh": fresh.webapp, "emacs": reached,
+			})
+		}
+		break
 	}
 	if out.Recipients > 0 {
 		out.Kind = ReloadPushed

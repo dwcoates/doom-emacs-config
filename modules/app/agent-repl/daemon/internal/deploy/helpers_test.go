@@ -282,6 +282,23 @@ type fakeClients struct {
 	elispBuild   string
 	webappPushes []ids.WorkspaceID
 	webappBuilds []string
+	webhosts     []string
+	webhostPush  []string
+	// webhostReach is how many Emacs streams a host reload reaches.
+	webhostReach int
+}
+
+func (c *fakeClients) WebhostBuilds() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.webhosts...)
+}
+
+func (c *fakeClients) PushReloadWebhost(build string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.webhostPush = append(c.webhostPush, build)
+	return c.webhostReach
 }
 
 func (c *fakeClients) EmacsBuilds() []EmacsClient {

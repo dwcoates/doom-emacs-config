@@ -429,3 +429,115 @@ func TestAReleasedWebBuildIsForgotten(t *testing.T) {
 		t.Fatalf("builds = %v, want none once every stream closed", got)
 	}
 }
+
+func TestTheWebviewHostsPageStreamHoldsItsBuildWhileItStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	s := h.Server.(*server)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, err := h.Client.WatchPage(ctx, connect.NewRequest(&agentreplv1.WatchPageRequest{
+		Page: "webhost-1", Webhost: &agentreplv1.WebhostPage{WebappBuild: "Web1"},
+	}))
+	if err != nil {
+		t.Fatalf("WatchPage: %v", err)
+	}
+
+	// Act
+	if !stream.Receive() {
+		t.Fatalf("the host's page stream ended before it attached: %v", stream.Err())
+	}
+
+	// Assert
+	if got := s.WebhostBuilds(); len(got) != 1 || got[0] != "Web1" {
+		t.Fatalf("WebhostBuilds = %v, want the host's build", got)
+	}
+}
+
+func TestAHeldHostBuildGoesWithItsRelease(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	s := h.Server.(*server)
+	release := s.holdWebhostBuild("Web1")
+	keep := s.holdWebhostBuild("Web2")
+	defer keep()
+
+	// Act
+	release()
+
+	// Assert
+	if got := s.WebhostBuilds(); len(got) != 1 || got[0] != "Web2" {
+		t.Fatalf("WebhostBuilds = %v, want only the build still held", got)
+	}
+}
+
+func TestAWorkspacePagesStreamStatesNoHostBuild(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act
+	attachPageStream(t, h, ctx, "page-1")
+
+	// Assert
+	if got := h.Server.(*server).WebhostBuilds(); len(got) != 0 {
+		t.Fatalf("WebhostBuilds = %v, want none", got)
+	}
+}
+
+func TestWatchPageRefusesAHostNamingNoBuild(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act
+	stream, dialErr := h.Client.WatchPage(ctx, connect.NewRequest(&agentreplv1.WatchPageRequest{
+		Page: "webhost-1", Webhost: &agentreplv1.WebhostPage{},
+	}))
+	err := dialErr
+	if err == nil {
+		stream.Receive()
+		err = stream.Err()
+	}
+
+	// Assert
+	if got := connectCode(t, err); got != connect.CodeInvalidArgument {
+		t.Fatalf("the refusal came back as %v, not invalid_argument", got)
+	}
+}
+
+func TestTheHostReloadReachesEveryEmacsAndNoWebview(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	emacs := openDaemonWatch(t, h, emacsWatch("older"), "sync-emacs")
+	webview := openDaemonWatch(t, h, webviewWatch(), "sync-webview")
+	s := h.Server.(*server)
+
+	// Act
+	reached := s.PushReloadWebhost("Web2")
+
+	// Assert
+	if reached != 1 {
+		t.Fatalf("reached = %d, want the one Emacs", reached)
+	}
+	s.MutationProgress(&agentreplv1.WorkspaceMutationProgress{OpId: "after"})
+	for webview.Receive() {
+		if webview.Msg().GetReloadWebhost() != nil {
+			t.Fatalf("a webview was handed the host's reload")
+		}
+		if webview.Msg().GetMutationProgress().GetOpId() == "after" {
+			break
+		}
+	}
+	for emacs.Receive() {
+		if reload := emacs.Msg().GetReloadWebhost(); reload != nil {
+			if reload.GetBuild() != "Web2" {
+				t.Fatalf("reload = %v, want the fresh build", reload)
+			}
+			return
+		}
+	}
+	t.Fatalf("the Emacs stream ended without the host's reload: %v", emacs.Err())
+}
