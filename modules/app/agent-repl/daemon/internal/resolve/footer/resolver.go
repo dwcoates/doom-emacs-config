@@ -1272,14 +1272,23 @@ func (r *resolver) observeAccountUsage(ws ids.WorkspaceID, s *wsState, usage *co
 		if five := outcome.Available.GetFiveHour(); five != nil {
 			moved = r.observeSampledWindow(ws, s, "session", &account.rate.session, five, at) || moved
 		}
-		if seven := outcome.Available.GetSevenDay(); seven != nil {
-			moved = r.observeSampledWindow(ws, s, "weekly", &account.rate.weekly, seven, at) || moved
-		}
-		if opus := outcome.Available.GetSevenDayOpus(); opus != nil {
-			moved = r.observeSampledWindow(ws, s, "weekly_opus", &account.rate.weeklyOpus, opus, at) || moved
-		}
-		if sonnet := outcome.Available.GetSevenDaySonnet(); sonnet != nil {
-			moved = r.observeSampledWindow(ws, s, "weekly_sonnet", &account.rate.weeklySonnet, sonnet, at) || moved
+		// THE LONGER WINDOWS ARE OPTIONAL, AND A SAMPLE IS COMPLETE: one that
+		// omits a window says the account has no such allowance, so a figure
+		// an older sample filed for it leaves rather than standing stale.
+		for _, optional := range []struct {
+			name   string
+			window *allowanceWindow
+			sample *conversationv1.SessionUsageWindow
+		}{
+			{"weekly", &account.rate.weekly, outcome.Available.GetSevenDay()},
+			{"weekly_opus", &account.rate.weeklyOpus, outcome.Available.GetSevenDayOpus()},
+			{"weekly_sonnet", &account.rate.weeklySonnet, outcome.Available.GetSevenDaySonnet()},
+		} {
+			if optional.sample == nil {
+				moved = r.retireUnreportedWindow(ws, s, optional.name, optional.window, at) || moved
+				continue
+			}
+			moved = r.observeSampledWindow(ws, s, optional.name, optional.window, optional.sample, at) || moved
 		}
 		if moved {
 			account.touch(r.opts.clock.Now())
@@ -1287,6 +1296,24 @@ func (r *resolver) observeAccountUsage(ws ids.WorkspaceID, s *wsState, usage *co
 	default:
 		r.logUnreadableSample(ws, s, usage)
 	}
+}
+
+// retireUnreportedWindow clears a figured window a subscription sample did
+// not report, figure and verdict alike, and reports whether it did. A sample
+// older than the window's own newest one is no evidence the window went
+// away, so it leaves the window standing.
+func (r *resolver) retireUnreportedWindow(ws ids.WorkspaceID, s *wsState, name string, w *allowanceWindow, at int64) bool {
+	if !w.figured || at < w.sampledAtMs {
+		return false
+	}
+	r.logOf(ws, s).Info("daemon.footer.account_usage_figure",
+		"a usage sample reported no such window, so the account has none; its figure leaves the line",
+		dlog.Context{
+			"window": name, "source": "account_usage_sample", "observed_at_ms": at,
+			"previous_utilization": w.utilization, "previous_sampled_at_ms": w.sampledAtMs,
+		})
+	*w = allowanceWindow{}
+	return true
 }
 
 // observeSampledWindow files one window of a subscription sample and records

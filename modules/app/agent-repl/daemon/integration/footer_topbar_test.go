@@ -391,12 +391,16 @@ func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T)
 		return v.GetStrip().GetStatus().GetIdle() != nil
 	})
 
+	// The window resets in the FUTURE: a verdict about a window whose reset
+	// has passed is about a window that no longer exists, and is not drawn.
+	resetsAtMs := time.Now().Add(5 * time.Hour).UnixMilli()
+
 	// Act: the FIGURES come from account_usage...
 	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
 		Update: &conversationv1.SessionUpdate_AccountUsage{AccountUsage: &conversationv1.SessionAccountUsage{
 			ObservedAtMs: 1_700_000_000_000,
 			Outcome: &conversationv1.SessionAccountUsage_Available{Available: &conversationv1.SessionAccountUsageAvailable{
-				FiveHour: &conversationv1.SessionUsageWindow{UtilizationPercent: 95, ResetsAtMs: 1_700_010_000_000},
+				FiveHour: &conversationv1.SessionUsageWindow{UtilizationPercent: 95, ResetsAtMs: resetsAtMs},
 			}},
 		}},
 	})
@@ -415,7 +419,7 @@ func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T)
 	if allowance.GetUtilization() != 0.95 {
 		t.Fatalf("the session allowance's utilization = %v, want 0.95 (the account_usage figure, converted)", allowance.GetUtilization())
 	}
-	if allowance.GetResetsAtS() != 1_700_010_000_000/1000 {
+	if allowance.GetResetsAtS() != resetsAtMs/1000 {
 		t.Fatalf("the session allowance's resets_at_s = %d, want the account_usage figure converted to seconds", allowance.GetResetsAtS())
 	}
 	if !allowance.GetNewsworthy() {

@@ -862,7 +862,9 @@ Rulings already binding; code swaps to the generated arms when it lands:
   resets_at) come from account_usage: five_hour → `session`, seven_day →
   `weekly.overall`, seven_day_opus → `weekly.models.opus`, seven_day_sonnet
   → `weekly.models.sonnet`; sampled at a cadence and complete from the
-  first sample.
+  first sample. A sample is COMPLETE: one that omits an optional window
+  (seven_day, seven_day_opus, seven_day_sonnet) retires the figure an older
+  sample filed for it, since the account has no such allowance.
 - The VERDICT (`FooterAllowance.status` arm) comes from
   `SessionUpdate.rate_limit_status`, matched by window, EACH VENDOR WINDOW
   ITS OWN: five_hour → session; seven_day → `weekly.overall`;

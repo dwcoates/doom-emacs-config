@@ -706,6 +706,80 @@ func TestASampleWithoutASevenDayWindowDrawsNoWeeklyAllowance(t *testing.T) {
 	}
 }
 
+func TestASampleThatNoLongerReportsAWindowRetiresItsFigure(t *testing.T) {
+	tests := []struct {
+		name     string
+		later    *conversationv1.SessionUpdate
+		retained func(*frontendv1.FooterActivityEnduringUsage) bool
+		want     bool
+	}{
+		{name: "a newer sample without the opus window retires it",
+			later: usageSampleWithModels(10, 40, -1, 30, instant.UnixMilli()+10),
+			retained: func(u *frontendv1.FooterActivityEnduringUsage) bool {
+				return u.GetWeekly().GetModels().GetOpus() != nil
+			},
+			want: false},
+		{name: "a newer sample without the sonnet window retires it",
+			later: usageSampleWithModels(10, 40, 12, -1, instant.UnixMilli()+10),
+			retained: func(u *frontendv1.FooterActivityEnduringUsage) bool {
+				return u.GetWeekly().GetModels().GetSonnet() != nil
+			},
+			want: false},
+		{name: "a newer sample without the overall weekly window retires it",
+			later:    usageSampleWithModels(10, -1, 12, 30, instant.UnixMilli()+10),
+			retained: func(u *frontendv1.FooterActivityEnduringUsage) bool { return u.GetWeekly().GetOverall() != nil },
+			want:     false},
+		{name: "a newer sample without any model window draws no models element",
+			later:    usageSampleWithModels(10, 40, -1, -1, instant.UnixMilli()+10),
+			retained: func(u *frontendv1.FooterActivityEnduringUsage) bool { return u.GetWeekly().GetModels() != nil },
+			want:     false},
+		{name: "an older sample without the opus window leaves it standing",
+			later: usageSampleWithModels(10, 40, -1, 30, instant.UnixMilli()-10),
+			retained: func(u *frontendv1.FooterActivityEnduringUsage) bool {
+				return u.GetWeekly().GetModels().GetOpus() != nil
+			},
+			want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.OnSessionUpdate(testWS, usageSampleWithModels(10, 40, 12, 30, instant.UnixMilli()))
+
+			// Act
+			h.r.OnSessionUpdate(testWS, tc.later)
+
+			// Assert
+			if got := tc.retained(enduringUsageOf(h)); got != tc.want {
+				t.Fatalf("window retained = %v, want %v (usage %+v)", got, tc.want, enduringUsageOf(h))
+			}
+		})
+	}
+}
+
+func TestARetiredWindowIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, usageSampleWithModels(10, 40, 12, 30, instant.UnixMilli()))
+
+	// Act
+	h.r.OnSessionUpdate(testWS, usageSampleWithModels(10, 40, -1, 30, instant.UnixMilli()+10))
+
+	// Assert
+	found := false
+	for _, rec := range h.log.Records() {
+		if rec.Operation == "daemon.footer.account_usage_figure" && rec.Level == "info" &&
+			rec.Context["window"] == "weekly_opus" && rec.Context["previous_utilization"] == 0.12 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no INFO record of the opus window's retirement with its previous figure: %v", h.log.Records())
+	}
+}
+
 func TestAStatusNamingNoWindowIsDropped(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
