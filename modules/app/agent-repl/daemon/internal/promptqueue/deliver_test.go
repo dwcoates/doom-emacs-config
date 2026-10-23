@@ -5,9 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1217,33 +1214,16 @@ func TestRetractAcceptedTakesDownTheTurnsMirroredRow(t *testing.T) {
 // site hand-rolls a retraction that could take down a different row.
 func TestEveryMirroredRowRetractionGoesThroughRetractAccepted(t *testing.T) {
 	// Arrange
-	fset := token.NewFileSet()
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
+	fset, funcs := productionFuncs(t)
 	var sites []string
 	// Act
-	for _, path := range files {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
+	for _, fn := range funcs {
+		ast.Inspect(fn, func(n ast.Node) bool {
+			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "OnPromptRetired" && fn.Name.Name != "retractAccepted" {
+				sites = append(sites, fset.Position(sel.Pos()).String()+" in "+fn.Name.Name)
 			}
-			ast.Inspect(fn, func(n ast.Node) bool {
-				if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "OnPromptRetired" && fn.Name.Name != "retractAccepted" {
-					sites = append(sites, fset.Position(sel.Pos()).String()+" in "+fn.Name.Name)
-				}
-				return true
-			})
-		}
+			return true
+		})
 	}
 	// Assert
 	if len(sites) != 0 {

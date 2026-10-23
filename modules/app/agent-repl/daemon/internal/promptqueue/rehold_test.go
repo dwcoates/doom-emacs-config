@@ -5,11 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
-	"go/parser"
-	"go/token"
-	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -260,43 +256,29 @@ func TestHeldAgainDropsTheOldEntrysRetirementAndSchedule(t *testing.T) {
 // schedule the old entry carried.
 func TestEveryReHoldGoesThroughHeldAgain(t *testing.T) {
 	// Arrange
-	fset := token.NewFileSet()
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
+	fset, funcs := productionFuncs(t)
 	var sites []string
 	// Act
-	for _, path := range files {
-		if strings.HasSuffix(path, "_test.go") {
+	for _, fn := range funcs {
+		if fn.Name.Name == "heldAgain" {
 			continue
 		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Name.Name == "heldAgain" {
-				continue
-			}
-			ast.Inspect(fn, func(n ast.Node) bool {
-				assign, ok := n.(*ast.AssignStmt)
-				if !ok || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
-					return true
-				}
-				lhs, ok := assign.Lhs[0].(*ast.SelectorExpr)
-				if !ok || lhs.Sel.Name != "Turn" {
-					return true
-				}
-				if call, ok := assign.Rhs[0].(*ast.CallExpr); ok {
-					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "NewTurnID" {
-						sites = append(sites, fset.Position(assign.Pos()).String()+" in "+fn.Name.Name)
-					}
-				}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			assign, ok := n.(*ast.AssignStmt)
+			if !ok || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
 				return true
-			})
-		}
+			}
+			lhs, ok := assign.Lhs[0].(*ast.SelectorExpr)
+			if !ok || lhs.Sel.Name != "Turn" {
+				return true
+			}
+			if call, ok := assign.Rhs[0].(*ast.CallExpr); ok {
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "NewTurnID" {
+					sites = append(sites, fset.Position(assign.Pos()).String()+" in "+fn.Name.Name)
+				}
+			}
+			return true
+		})
 	}
 	// Assert
 	if len(sites) != 0 {
