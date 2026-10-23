@@ -291,6 +291,8 @@ The standing notice first, then the held-prompt waiting line."
   ;; A WORD THAT BEGINS AN OPEN WORKSPACE'S NAME completes to it
   ;; (workspace-completion.el).
   (add-hook 'completion-at-point-functions #'agent-repl-workspace-completion-at-point nil t)
+  ;; Only `TAB' takes a company completion (`agent-repl--input-use-company-map').
+  (add-hook 'company-mode-hook #'agent-repl--input-use-company-map nil t)
   (add-hook 'kill-buffer-hook #'agent-repl--input-cancel-flash-timer nil t))
 
 (defun agent-repl--input-buffer (ws)
@@ -2453,6 +2455,46 @@ with no multi-select standing, or with text in the composer, it is
 (define-key agent-repl-input-mode-map (kbd "RET") #'agent-repl-send)
 (define-key agent-repl-input-mode-map (kbd "S-RET") #'newline)
 (define-key agent-repl-input-mode-map (kbd "C-<return>") #'agent-repl-input-control-return)
+
+;; ONLY `TAB' TAKES A COMPLETION.  Company's active map binds `RET' to
+;; `company-complete-selection', and company's keymap outranks every evil
+;; and mode map while its popup is up, so `RET' completed the selected
+;; candidate instead of sending.  The composer gives itself a buffer-local
+;; `company-active-map' whose parent is the global one (so every other
+;; company key, and any later rebinding of one, still applies): there `RET'
+;; closes the popup and does what `RET' does in the composer, and `TAB'
+;; inserts the selected candidate.  The map is installed from the
+;; composer's own `company-mode-hook', since company loads lazily and is
+;; switched on in a buffer only after its major mode is set up.
+(defvar company-active-map)
+(declare-function company-abort "company" ())
+(declare-function company-complete-selection "company" ())
+
+(defun agent-repl-input-company-return ()
+  "Close company's popup, then run the composer's own `RET' binding."
+  (interactive)
+  (company-abort)
+  (let ((cmd (key-binding (this-command-keys-vector))))
+    (cl-assert (commandp cmd) nil
+               "composer RET resolves to no command after company-abort: %S" cmd)
+    (setq this-command cmd)
+    (call-interactively cmd)))
+
+(defun agent-repl--input-company-map (parent)
+  "Return the composer's company active map, inheriting from PARENT."
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map parent)
+    (dolist (key (list (kbd "RET") [return]))
+      (define-key map key #'agent-repl-input-company-return))
+    (dolist (key (list (kbd "TAB") [tab]))
+      (define-key map key #'company-complete-selection))
+    map))
+
+(defun agent-repl--input-use-company-map ()
+  "Give this composer its own `company-active-map'."
+  (unless (local-variable-p 'company-active-map)
+    (setq-local company-active-map
+                (agent-repl--input-company-map (default-value 'company-active-map)))))
 
 ;; NUMBERED ANSWERS.  The digits 1-9 are bound on the plain mode map, which
 ;; insert and emacs state read; in normal state evil's motion map binds them
