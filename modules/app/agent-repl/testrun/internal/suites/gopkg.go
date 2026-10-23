@@ -17,6 +17,7 @@ import (
 
 	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
 	"agentrepl/testrun/testenv"
 )
@@ -182,6 +183,7 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		// A test binary runs in its package's directory, as `go test` runs it.
 		sp := spec(id, p.Suite, dir, argv, p.ChunkEnv...)
 		sp.Items = func(out []byte) (map[string]float64, error) { return ParseGoTestItems(out, items) }
+		sp.Tests = func(out []byte, _ bool) ([]testtimes.Test, error) { return testtimes.ParseGo(p.Suite, p.Rel, out) }
 		sp.Display = QuietGoTestOutput
 		return sp
 	}

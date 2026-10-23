@@ -1177,6 +1177,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Briefs:          merge.BriefsFrom(paths.PromptsDir),
 		StateDir:        p.Layout.Dir(),
 		TestCommand:     merge.TestCommandFor,
+		TestMetricsRoot: p.Metrics.Root(),
 		TestRunner:      scripts,
 		HookRunner:      scripts,
 		Governor:        gateGovernor,

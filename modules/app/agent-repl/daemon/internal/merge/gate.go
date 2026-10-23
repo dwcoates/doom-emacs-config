@@ -134,7 +134,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string, adm *g
 		return gateVerdict{}, err
 	}
 	// A speculative gate (one behind the head) runs niced; see gateArgv.
-	argv = gateArgv(append([]string(nil), argv...), speculative)
+	argv = gateArgv(append([]string(nil), argv...), speculative, r.o.deps.TestMetricsRoot)
 	// The FULL selection passes no narrowing: running everything is the
 	// script's own default, and a repository whose script knows no --suites
 	// flag is never handed one.

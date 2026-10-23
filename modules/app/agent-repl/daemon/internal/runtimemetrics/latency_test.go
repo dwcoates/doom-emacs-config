@@ -489,3 +489,20 @@ func TestAForgottenWorkspaceLosesItsShimHeap(t *testing.T) {
 		t.Fatalf("a forgotten workspace's heap was still served:\n%s", body)
 	}
 }
+
+func TestTheSurfaceAnswersTheRootItWasOpenedUnder(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	root := t.TempDir()
+	s, err := Open(log, root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(s.Close)
+	var off *Surface
+
+	// Act / Assert
+	if s.Root() != root || off.Root() != "" {
+		t.Fatalf("Root() = %q and off %q, want %q and empty", s.Root(), off.Root(), root)
+	}
+}

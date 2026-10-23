@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -41,6 +42,7 @@ import (
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
+	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/reap"
 	"agentrepl/testrun/roster"
 )
@@ -271,6 +273,13 @@ func investigate(log *run.Log, m ramdisk.Manager, module string, trouble *ramdis
 }
 
 func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, root string, prefix []string) int {
+	// THE PUSH'S TARGET LEAVES THE ENVIRONMENT before any unit starts, so a
+	// test that runs testrun again never pushes into the owner's store.
+	metricsTarget, err := testtimes.TakeTarget()
+	if err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
 	if err := os.Setenv("TMPDIR", root); err != nil {
 		log.Errorf("point TMPDIR at the run's temp root %s: %v", root, err)
 		return 1
@@ -333,6 +342,10 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		Pid:               os.Getpid(),
 		RunLog:            os.Getenv(ramdisk.EnvRunLog),
 		PrepareWebappDist: suites.PrepareWebappDist,
+		Metrics:           metricsTarget,
+		PushTimes: func(ctx context.Context, target testtimes.Target, tests []testtimes.Test, suites []testtimes.Suite, at time.Time) error {
+			return testtimes.Push(ctx, http.DefaultClient, target, tests, suites, at)
+		},
 	}, args)
 }
 

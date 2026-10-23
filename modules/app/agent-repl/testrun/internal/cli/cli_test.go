@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
+	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
 )
 
@@ -1022,5 +1024,94 @@ func TestRunConditions(t *testing.T) {
 				t.Fatalf("RunConditions = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// pushed is one PushTimes call.
+type pushed struct {
+	target testtimes.Target
+	tests  []testtimes.Test
+	suites []testtimes.Suite
+}
+
+// withTestTimes makes every suite's one unit report a test named after it,
+// and records every push.
+func withTestTimes(h *harness, target testtimes.Target, err error) *[]pushed {
+	calls := &[]pushed{}
+	build := h.deps.Build
+	h.deps.Build = func(l suites.Layout, s roster.Suite) (suites.Units, error) {
+		u, berr := build(l, s)
+		for i := range u.Atomic {
+			name := s.Name
+			u.Atomic[i].Tests = func([]byte, bool) ([]testtimes.Test, error) {
+				return []testtimes.Test{{Suite: name, Name: name + ".TestA", Outcome: testtimes.Pass, Seconds: 1}}, nil
+			}
+		}
+		return u, berr
+	}
+	h.deps.Metrics = target
+	h.deps.PushTimes = func(_ context.Context, target testtimes.Target, tests []testtimes.Test, suiteTimes []testtimes.Suite, _ time.Time) error {
+		*calls = append(*calls, pushed{target: target, tests: tests, suites: suiteTimes})
+		return err
+	}
+	return calls
+}
+
+func TestARunToldNoMetricsTargetPushesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	calls := withTestTimes(&h, testtimes.Target{}, nil)
+
+	// Act
+	code := h.run(t)
+
+	// Assert
+	if code != 0 || len(*calls) != 0 {
+		t.Fatalf("exit = %d, pushes = %d; want a clean run that pushed nothing", code, len(*calls))
+	}
+}
+
+func TestARunToldAMetricsTargetPushesEveryTestAndSuite(t *testing.T) {
+	// Arrange
+	h := newHarness(t, map[string]int{"ert": 1}, nil)
+	target := testtimes.Target{Root: "/m", Trigger: "merge_queue"}
+	calls := withTestTimes(&h, target, nil)
+
+	// Act
+	h.run(t)
+
+	// Assert
+	if len(*calls) != 1 || (*calls)[0].target != target {
+		t.Fatalf("pushes = %+v, want one to %+v", *calls, target)
+	}
+	got := (*calls)[0]
+	if len(got.tests) != len(roster.Suites) || len(got.suites) != len(roster.Suites) {
+		t.Fatalf("pushed %d tests and %d suites, want one of each per roster suite", len(got.tests), len(got.suites))
+	}
+	for _, s := range got.suites {
+		want := testtimes.Pass
+		if s.Name == "ert" {
+			want = testtimes.Fail
+		}
+		if s.Outcome != want {
+			t.Errorf("suite %s pushed %s, want %s", s.Name, s.Outcome, want)
+		}
+	}
+	if !strings.Contains(h.out.String(), "metrics: pushed "+strconv.Itoa(len(roster.Suites))+" test and ") {
+		t.Errorf("stdout does not say what was pushed:\n%s", h.out)
+	}
+}
+
+func TestARunWhosePushFailsSaysSoAndFails(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	withTestTimes(&h, testtimes.Target{Root: "/m", Trigger: "merge_queue"}, errors.New("the store is down"))
+
+	// Act
+	code := h.run(t)
+
+	// Assert
+	if code != 1 || !strings.Contains(h.errOut.String(), "recording this run's test times in the metrics store failed: the store is down") {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
 	}
 }

@@ -819,14 +819,35 @@ const HeadNice = 10
 // runs at: behind the head's, ahead of an ad-hoc run's 19.
 const SpeculativeNice = 15
 
+// testMetricsRootEnv and testMetricsTriggerEnv tell agent-repl's test runner
+// (testrun) where to push every test's time when its run ends, and what ran
+// it: the merge queue's head gate or a speculative one behind it. A gate whose
+// daemon records no metrics names neither, and the runner pushes nothing.
+const (
+	testMetricsRootEnv    = "AGENT_REPL_TEST_METRICS_ROOT"
+	testMetricsTriggerEnv = "AGENT_REPL_TEST_METRICS_TRIGGER"
+)
+
+// The triggers a gate names (testMetricsTriggerEnv).
+const (
+	TriggerMergeQueue            = "merge_queue"
+	TriggerMergeQueueSpeculative = "merge_queue_speculative"
+)
+
 // gateArgv is every gate's command line: the script, told the niceness its
-// whole tree runs at (HeadNice, or SpeculativeNice behind the head).
-func gateArgv(argv []string, speculative bool) []string {
-	nice := HeadNice
+// whole tree runs at (HeadNice, or SpeculativeNice behind the head) and,
+// when the daemon records metrics under metricsRoot, where its test runner
+// pushes every test's time.
+func gateArgv(argv []string, speculative bool, metricsRoot string) []string {
+	nice, trigger := HeadNice, TriggerMergeQueue
 	if speculative {
-		nice = SpeculativeNice
+		nice, trigger = SpeculativeNice, TriggerMergeQueueSpeculative
 	}
-	return append([]string{"env", fmt.Sprintf("%s=%d", testNicenessEnv, nice)}, argv...)
+	env := []string{"env", fmt.Sprintf("%s=%d", testNicenessEnv, nice)}
+	if metricsRoot != "" {
+		env = append(env, testMetricsRootEnv+"="+metricsRoot, testMetricsTriggerEnv+"="+trigger)
+	}
+	return append(env, argv...)
 }
 
 // queueWindow is the window in force: the test override when one is set, else

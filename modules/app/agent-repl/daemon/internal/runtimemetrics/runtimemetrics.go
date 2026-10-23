@@ -26,6 +26,9 @@ const Operation = "daemon.metrics"
 
 // Surface is the daemon's open metrics surface.
 type Surface struct {
+	// root is the metrics root the surface advertises under, which the merge
+	// queue hands its test runs so they push their timings to the same store.
+	root      string
 	srv       *metrics.Server
 	log       dlog.Logger
 	version   *deployedVersion
@@ -63,8 +66,17 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 		"address": srv.Addr(),
 		"target":  srv.TargetPath(),
 	})
-	return &Surface{srv: srv, log: log, version: version, latencies: lat, restarts: rst, rpcs: rpcs, records: records, merges: mrg,
+	return &Surface{root: root, srv: srv, log: log, version: version, latencies: lat, restarts: rst, rpcs: rpcs, records: records, merges: mrg,
 		emacs: procmetrics.NewEmacsProcess(log)}, nil
+}
+
+// Root is the metrics root the surface was opened under; the off surface's
+// is empty.
+func (s *Surface) Root() string {
+	if s == nil {
+		return ""
+	}
+	return s.root
 }
 
 // AttachEmacs measures the Emacs of pid while the WatchDaemon stream that

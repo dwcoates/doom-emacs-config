@@ -17,6 +17,7 @@ import (
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
+	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
 )
 
@@ -53,6 +54,12 @@ type Deps struct {
 	// the dist (roster.Suite.NeedsWebappDist): the run is then the dist's one
 	// writer, and no unit sees it change under it.
 	PrepareWebappDist func(moduleRoot string) error
+	// Metrics is where the run pushes every test's time when it ends, and
+	// what ran it; the zero Target pushes nothing (testtimes.TakeTarget).
+	Metrics testtimes.Target
+	// PushTimes sends the run's test and suite times, stamped AT, to TARGET
+	// (testtimes.Push).
+	PushTimes func(ctx context.Context, target testtimes.Target, tests []testtimes.Test, suites []testtimes.Suite, at time.Time) error
 }
 
 // Reuser is the run's pass-record seam (reuse.Runner).
@@ -216,6 +223,10 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		log.Errorf("recording this run's timings in the host history failed: %v", err)
 		return 1
 	}
+	if err := pushTimes(ctx, d, results, suiteResults, end); err != nil {
+		log.Errorf("recording this run's test times in the metrics store failed: %v", err)
+		return 1
+	}
 	unitsPerSuite := map[string]int{}
 	for _, r := range results {
 		unitsPerSuite[r.Spec.Suite]++
@@ -287,6 +298,36 @@ func inRosterOrder(rs []run.SuiteResult) []run.SuiteResult {
 	out := append([]run.SuiteResult(nil), rs...)
 	sort.SliceStable(out, func(i, j int) bool { return index[out[i].Name] < index[out[j].Name] })
 	return out
+}
+
+// suiteOutcomes is the outcome a suite's time is labeled with.
+var suiteOutcomes = map[run.Outcome]string{
+	run.Passed:    testtimes.Pass,
+	run.Failed:    testtimes.Fail,
+	run.Cancelled: testtimes.Fail,
+	run.Declined:  testtimes.Skip,
+}
+
+// pushTimes sends every test's and every suite's time to the metrics store,
+// when the run was told to (Deps.Metrics), stamped with the run's end. A
+// suite's time is its slot time (run.SuiteResult.UnitSeconds).
+func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults []run.SuiteResult, end time.Time) error {
+	if !d.Metrics.Enabled() {
+		return nil
+	}
+	var tests []testtimes.Test
+	for _, r := range results {
+		tests = append(tests, r.Tests...)
+	}
+	suiteTimes := make([]testtimes.Suite, 0, len(suiteResults))
+	for _, s := range suiteResults {
+		suiteTimes = append(suiteTimes, testtimes.Suite{Name: s.Name, Outcome: suiteOutcomes[s.Outcome], Seconds: s.UnitSeconds})
+	}
+	if err := d.PushTimes(ctx, d.Metrics, tests, suiteTimes, end); err != nil {
+		return err
+	}
+	d.Log.Infof("metrics: pushed %d test and %d suite times (trigger %s)", len(tests), len(suiteTimes), d.Metrics.Trigger)
+	return nil
 }
 
 func partition(rs []run.SuiteResult) (passed, declined, failed []run.SuiteResult) {

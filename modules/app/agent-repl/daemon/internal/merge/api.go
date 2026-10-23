@@ -569,6 +569,9 @@ type Deps struct {
 	// script, which the gate checks is there before it runs; `--suites <a,b>`
 	// is appended.
 	TestCommand func(tree, script string) []string
+	// TestMetricsRoot is the metrics root every gate's test runner pushes its
+	// tests' times under (gateArgv); empty when the daemon records no metrics.
+	TestMetricsRoot string
 	// TestRunner runs the test gate. Injected so the gate is exercised against
 	// a scripted script rather than the repository's real suite: GIT IS NEVER
 	// CALLED DURING TESTING and neither is the real roster.

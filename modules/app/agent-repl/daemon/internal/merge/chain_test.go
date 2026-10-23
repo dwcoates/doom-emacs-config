@@ -1114,15 +1114,20 @@ func TestEveryGateNamesTheNicenessItsTreeRunsAt(t *testing.T) {
 	tests := []struct {
 		name        string
 		speculative bool
+		metricsRoot string
 		want        []string
 	}{
 		{name: "the head", want: []string{"env", "AGENT_REPL_TEST_NICENESS=10", "bash", "s"}},
 		{name: "behind the head", speculative: true, want: []string{"env", "AGENT_REPL_TEST_NICENESS=15", "bash", "s"}},
+		{name: "the head of a daemon recording metrics", metricsRoot: "/m", want: []string{
+			"env", "AGENT_REPL_TEST_NICENESS=10", "AGENT_REPL_TEST_METRICS_ROOT=/m", "AGENT_REPL_TEST_METRICS_TRIGGER=merge_queue", "bash", "s"}},
+		{name: "behind the head of a daemon recording metrics", speculative: true, metricsRoot: "/m", want: []string{
+			"env", "AGENT_REPL_TEST_NICENESS=15", "AGENT_REPL_TEST_METRICS_ROOT=/m", "AGENT_REPL_TEST_METRICS_TRIGGER=merge_queue_speculative", "bash", "s"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act.
-			got := gateArgv([]string{"bash", "s"}, tt.speculative)
+			got := gateArgv([]string{"bash", "s"}, tt.speculative, tt.metricsRoot)
 
 			// Assert.
 			if !slices.Equal(got, tt.want) {

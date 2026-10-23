@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"agentrepl/testrun/internal/sched"
+	"agentrepl/testrun/internal/testtimes"
 )
 
 // ExitDeclined is the exit status a suite uses to say "my precondition is not
@@ -31,6 +32,10 @@ type Spec struct {
 	// Items parses the unit's output into seconds per item, for the history.
 	// Nil for a unit that is not a chunk.
 	Items func(output []byte) (map[string]float64, error)
+	// Tests parses the unit's output into every individual test's time, for
+	// the metrics store (testtimes), given whether the unit passed. Nil for a
+	// unit that runs no tests of its own.
+	Tests func(output []byte, passed bool) ([]testtimes.Test, error)
 	// Display, when set, is what of the unit's output the run log shows,
 	// given whether the unit passed. Nil shows it whole.
 	Display func(output []byte, passed bool) []byte
@@ -72,6 +77,8 @@ type Result struct {
 	CPU        float64
 	// Items are the per-item seconds the unit's output reported.
 	Items map[string]float64
+	// Tests are the individual tests' times the unit's output reported.
+	Tests []testtimes.Test
 	// CancelledBy names the failed dependency of a cancelled unit.
 	CancelledBy string
 }
@@ -314,6 +321,21 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 				res.Outcome, res.Exit = Failed, 1
 			}
 			res.Items = items
+		}
+		if spec.Tests != nil && (res.Outcome == Passed || res.Outcome == Failed) {
+			tests, err := spec.Tests(c.output.Bytes(), res.Outcome == Passed)
+			switch {
+			case err != nil && res.Outcome == Passed:
+				// As for the item timings: a passing unit that printed what its
+				// suite does not promise broke its timing contract.
+				r.Log.Errorf("unit %s (%s) passed but its test timings are unreadable: %v", c.id, spec.Suite, err)
+				res.Outcome, res.Exit = Failed, 1
+			case err != nil:
+				// A unit that failed may have stopped before it reported its
+				// tests; its failure is the error, recorded with its verdict.
+				r.Log.Infof("unit %s (%s) failed, and its test timings are unreadable: %v", c.id, spec.Suite, err)
+			}
+			res.Tests = tests
 		}
 		// The block is bracketed by a line naming its unit and suite and by
 		// the unit's verdict line, so a reader of the interleaved run (the
