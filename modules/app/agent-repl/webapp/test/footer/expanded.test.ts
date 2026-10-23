@@ -140,7 +140,7 @@ function drawTokensPanelWith(kind: FooterActivity): HTMLElement {
 function rateLimited(): FooterActivity {
   return unpinned({
     session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
-    weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
+    weekly: { overall: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) } },
   });
 }
 
@@ -148,14 +148,38 @@ function rateLimited(): FooterActivity {
 function rateLimitedWithOverage(): FooterActivity {
   return unpinned({
     session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
-    weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
+    weekly: { overall: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) } },
     overage: { newsworthy: true, utilization: 0.91, resetsAtS: BigInt((NOW + 7_200_000) / 1000) },
+  });
+}
+
+/** The same activity, with the per-model weekly windows beside the overall one. */
+function rateLimitedWithModels(): FooterActivity {
+  const week = BigInt((NOW + 259_200_000) / 1000);
+  return unpinned({
+    weekly: {
+      overall: { newsworthy: false, utilization: 0.63, resetsAtS: week },
+      models: {
+        opus: { newsworthy: false, utilization: 0.12, resetsAtS: week },
+        sonnet: { newsworthy: false, utilization: 0.3, resetsAtS: week },
+      },
+    },
   });
 }
 
 describe("drawFooterUsageRows: what the strip could not fit", () => {
   // THE SECOND WINDOW. The strip cuts it off at 1280 by design; the sheet is
   // where a reader gets to see it.
+  it("carries the weekly element's per-model windows", () => {
+    // Arrange + Act
+    const panel = drawTokensPanelWith(rateLimitedWithModels());
+
+    // Assert
+    expect(panel.querySelector('[data-usage-allowance="weekly"]')?.textContent).toBe(
+      "weekly 63% (overall) (12% opus 30% sonnet) · resets in 3d",
+    );
+  });
+
   it("carries the weekly window the strip cut off", () => {
     const panel = drawTokensPanelWith(rateLimited());
     expect(

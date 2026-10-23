@@ -15,6 +15,7 @@ import {
   FOOTER_RATE_SEPARATOR_GAP,
   drawFooterRateDivider,
   drawFooterStatusActivity,
+  drawLabelledAllowance,
   enduringUsage,
   footerCountdownSpan,
   orderedAllowances,
@@ -1300,7 +1301,7 @@ describe("the enduring line", () => {
     const cell = enduringCell({
       usage: {
         session: allowance(0.72, true, 3_900_000, "allowedWarning"),
-        weekly: allowance(0.31, false, 259_200_000, "allowed"),
+        weekly: { overall: allowance(0.31, false, 259_200_000, "allowed") },
       },
     });
     expect(cell.querySelector(".footer-activity-enduring")?.textContent).toBe(
@@ -1312,7 +1313,7 @@ describe("the enduring line", () => {
     const cell = enduringCell({
       usage: {
         session: allowance(0.4, false, 3_900_000),
-        weekly: allowance(0.3, false, 259_200_000),
+        weekly: { overall: allowance(0.3, false, 259_200_000) },
         overage: allowance(0.1, false, 7_200_000),
       },
     });
@@ -1369,7 +1370,7 @@ describe("the enduring line", () => {
     const cell = enduringCell({
       usage: {
         session: allowance(0.31, false, 60_000),
-        weekly: allowance(0.91, true, 60_000),
+        weekly: { overall: allowance(0.91, true, 60_000) },
       },
     });
 
@@ -1387,7 +1388,7 @@ describe("the enduring line", () => {
     const cell = enduringCell({
       usage: {
         session: allowance(0.31, false, 60_000),
-        weekly: allowance(0.2, false, 60_000),
+        weekly: { overall: allowance(0.2, false, 60_000) },
       },
     });
     const separators = [
@@ -1407,7 +1408,7 @@ describe("the enduring line", () => {
     const cell = enduringCell({
       usage: {
         session: allowance(0.31, false, 60_000),
-        weekly: allowance(0.2, false, 60_000),
+        weekly: { overall: allowance(0.2, false, 60_000) },
       },
     });
     const separator = cell.querySelector(".footer-rate-separator");
@@ -1421,7 +1422,7 @@ describe("the enduring line", () => {
     const cell = enduringCell({
       usage: {
         session: allowance(0.31, false, 60_000),
-        weekly: allowance(0.2, false, 60_000),
+        weekly: { overall: allowance(0.2, false, 60_000) },
       },
     });
     const separator = cell.querySelector(".footer-rate-separator");
@@ -1461,7 +1462,7 @@ describe("the enduring line", () => {
     const cell = enduringCell({
       usage: {
         session: allowance(0.31, false, 60_000),
-        weekly: allowance(0.2, false, 60_000),
+        weekly: { overall: allowance(0.2, false, 60_000) },
       },
     });
     document.body.replaceChildren(cell);
@@ -1605,6 +1606,154 @@ describe("enduringUsage", () => {
   });
 });
 
+describe("drawFooterWeeklyAllowance", () => {
+  const WEEK = 259_200_000;
+
+  it("labels the overall figure and draws the per-model ones in parentheses", () => {
+    // Arrange + Act
+    const cell = enduringCell({
+      usage: {
+        weekly: {
+          overall: allowance(0.4, false, WEEK),
+          models: { opus: allowance(0.12, false, WEEK), sonnet: allowance(0.3, false, WEEK) },
+        },
+      },
+    });
+
+    // Assert
+    expect(cell.querySelector('[data-allowance="weekly"]')?.textContent).toBe(
+      "weekly 40% (overall) (12% opus 30% sonnet) · resets in 3d",
+    );
+  });
+
+  it("draws no (overall) label when no per-model window stands", () => {
+    // Arrange + Act
+    const cell = enduringCell({ usage: { weekly: { overall: allowance(0.4, false, WEEK) } } });
+
+    // Assert
+    expect(cell.querySelector('[data-allowance="weekly"]')?.textContent).toBe(
+      "weekly 40% · resets in 3d",
+    );
+  });
+
+  it("draws only the model windows the vendor reported", () => {
+    // Arrange + Act
+    const cell = enduringCell({
+      usage: { weekly: { overall: allowance(0.4, false, WEEK), models: { opus: allowance(0.12, false, WEEK) } } },
+    });
+
+    // Assert
+    expect(cell.querySelector('[data-allowance="weekly"]')?.textContent).toBe(
+      "weekly 40% (overall) (12% opus) · resets in 3d",
+    );
+  });
+
+  it("draws the per-model windows alone, with no countdown, when no overall figure stands", () => {
+    // Arrange + Act
+    const cell = enduringCell({
+      usage: {
+        weekly: { models: { opus: allowance(0.12, false, WEEK), sonnet: allowance(0.3, false, WEEK) } },
+      },
+    });
+
+    // Assert
+    expect(cell.querySelector('[data-allowance="weekly"]')?.textContent).toBe(
+      "weekly (12% opus 30% sonnet)",
+    );
+  });
+
+  it("colors each model's percentage by how full it is", () => {
+    // Arrange + Act
+    const cell = enduringCell({
+      usage: { weekly: { overall: allowance(0.4, false, WEEK), models: { opus: allowance(0.95, true, WEEK) } } },
+    });
+    const percent = cell.querySelector<HTMLElement>('[data-weekly-model="opus"] [data-datum="percent"]');
+
+    // Assert
+    expect([percent?.textContent, percent?.style.color]).toEqual(["95%", paintedAs(95)]);
+  });
+
+  it("wears a model window's own verdict on its figure, not on the overall one", () => {
+    // Arrange + Act
+    const cell = enduringCell({
+      usage: {
+        weekly: {
+          overall: allowance(0.4, false, WEEK, "allowed"),
+          models: { opus: allowance(1, true, WEEK, "rejected") },
+        },
+      },
+    });
+    const weekly = cell.querySelector('[data-allowance="weekly"]');
+    const opus = cell.querySelector('[data-weekly-model="opus"]');
+
+    // Assert
+    expect([weekly?.getAttribute("data-arm"), opus?.getAttribute("data-arm"), opus?.className,
+      opus?.getAttribute("data-newsworthy"), opus?.getAttribute("title")]).toEqual([
+      "allowed",
+      "rejected",
+      "footer-weekly-model arm-rejected footer-allowance-newsworthy",
+      "true",
+      "the allowance is spent — calls are being rejected",
+    ]);
+  });
+
+  it("lapses a model window whose reset has passed on its own", () => {
+    // Arrange
+    const cell = enduringCell({
+      usage: {
+        weekly: {
+          overall: allowance(0.4, false, WEEK),
+          models: { opus: allowance(0.12, true, 60_000, "rejected"), sonnet: allowance(0.3, false, WEEK) },
+        },
+      },
+    });
+
+    // Act
+    vi.advanceTimersByTime(60_000);
+    const opus = cell.querySelector('[data-weekly-model="opus"]');
+
+    // Assert
+    expect([opus?.getAttribute("data-lapsed"), opus?.className, opus?.hasAttribute("data-arm"),
+      cell.querySelector('[data-allowance="weekly"]')?.textContent]).toEqual([
+      "true",
+      "footer-weekly-model",
+      false,
+      "weekly 40% (overall) (opus reset 30% sonnet) · resets in 2d 23h 59m",
+    ]);
+  });
+
+  it("lapses the whole element, models with it, when the overall window resets", () => {
+    // Arrange
+    const cell = enduringCell({
+      usage: {
+        weekly: { overall: allowance(0.4, false, 60_000), models: { opus: allowance(0.12, false, WEEK) } },
+      },
+    });
+
+    // Act
+    vi.advanceTimersByTime(60_000);
+    const weekly = cell.querySelector('[data-allowance="weekly"]');
+
+    // Assert
+    expect([weekly?.getAttribute("data-lapsed"), weekly?.textContent]).toEqual([
+      "true",
+      "weekly reset since last seen",
+    ]);
+  });
+
+  it("refuses a weekly element carrying neither an overall nor a model window", () => {
+    // Arrange + Act + Assert
+    expect(() => enduringCell({ usage: { weekly: {} } })).toThrow(MalformedView);
+  });
+
+  it("refuses a models element carrying no model window", () => {
+    // Arrange + Act + Assert
+    expect(() =>
+      enduringCell({ usage: { weekly: { overall: allowance(0.4, false, WEEK), models: {} } } }),
+    ).toThrow(MalformedView);
+  });
+});
+
 describe("orderedAllowances", () => {
   // The order is session, weekly, overage, whichever windows are newsworthy
   // (owner ruling, 2026-10-08). Every row but the first is a case that once
@@ -1623,7 +1772,7 @@ describe("orderedAllowances", () => {
       unpinnedInit(undefined, {
         usage: {
           session: allowance(session ? 0.9 : 0.1, session, 1000),
-          weekly: allowance(weekly ? 0.9 : 0.1, weekly, 1000),
+          weekly: { overall: allowance(weekly ? 0.9 : 0.1, weekly, 1000) },
           overage: allowance(overage ? 0.9 : 0.1, overage, 1000),
         },
       }),
@@ -1638,13 +1787,42 @@ describe("orderedAllowances", () => {
     expect(labels).toEqual(["session", "weekly", "overage"]);
   });
 
+  // THE STRIP AND THE SHEET SHARE ONE DRAWING: every cell the strip draws is
+  // drawLabelledAllowance's output for its entry, so a hand-rolled strip cell
+  // that drifted from the sheet's fails here.
+  it("draws every strip cell exactly as drawLabelledAllowance draws its entry", () => {
+    // Arrange
+    const activity = activityOf(
+      "idle",
+      unpinnedInit(undefined, {
+        usage: {
+          session: allowance(0.4, false, 1000, "allowed"),
+          weekly: { overall: allowance(0.5, false, 1000), models: { sonnet: allowance(0.2, false, 1000) } },
+          overage: allowance(0.1, false, 1000),
+        },
+      }),
+    );
+    const usage = enduringUsage(activity, "p");
+    if (usage === undefined) throw new Error("no usage");
+    const { cell } = draw(activity);
+
+    // Act
+    const strip = [...cell.querySelectorAll(".footer-rate-figures > [data-allowance]")].map((e) => e.outerHTML);
+    const shared = orderedAllowances(usage).map(
+      (entry) => drawLabelledAllowance(entry, { ctx: harness().ctx }, "p").outerHTML,
+    );
+
+    // Assert
+    expect(strip).toEqual(shared);
+  });
+
   it("keeps weekly before overage when session is absent and only overage is newsworthy", () => {
     // Arrange
     const activity = activityOf(
       "idle",
       unpinnedInit(undefined, {
         usage: {
-          weekly: allowance(0.1, false, 1000),
+          weekly: { overall: allowance(0.1, false, 1000) },
           overage: allowance(0.9, true, 1000),
         },
       }),

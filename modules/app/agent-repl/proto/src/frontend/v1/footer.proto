@@ -2189,10 +2189,16 @@ message FooterActivityEnduringUsage {
   // The rolling five-hour session allowance. UNSET until a figure for it has
   // been observed.
   optional FooterAllowance session = 1;
-  // The seven-day weekly allowance. UNSET when the account has no weekly
-  // allowance or none has been reported; a figure nobody reported is never
-  // drawn.
-  optional FooterAllowance weekly = 2;
+  // Tag 2 (`weekly`, the one seven-day allowance as a bare FooterAllowance)
+  // is RETIRED: the weekly element now carries the per-model windows beside
+  // the account-wide one (tag 6). Reserved by number only, so the name lives
+  // on in tag 6.
+  reserved 2;
+  // The seven-day weekly allowances, drawn as ONE element: "weekly 40%
+  // (overall) (12% opus 30% sonnet) · resets in 3d". UNSET when the vendor
+  // reported no seven-day window of any kind; a figure nobody reported is
+  // never drawn.
+  optional FooterWeeklyAllowance weekly = 6;
   // What the newest account-usage SAMPLE managed to read. UNSET means no
   // sample has been observed and the figures came from a rate-limit event
   // alone.
@@ -2213,6 +2219,36 @@ message FooterActivityEnduringUsage {
   // line carries no age.
   reserved 5;
   reserved "figures_read_at_ms";
+}
+
+// The weekly element of the usage line: the account-wide seven-day window,
+// then, in parentheses, the seven-day windows the vendor meters per model
+// family. THE PER-MODEL WINDOWS ARE EXHAUSTIBLE ON THEIR OWN: the Opus window
+// can run out while the overall one has room, which without its own figure
+// is a refusal with no visible cause. SET when at least one of its windows is
+// figured.
+message FooterWeeklyAllowance {
+  // The account-wide seven-day allowance. UNSET while the vendor has
+  // reported no figure for it; the per-model windows still draw. Its reset
+  // is the countdown the element draws.
+  optional FooterAllowance overall = 1;
+  // The per-model seven-day allowances, drawn in parentheses after the
+  // overall figure. UNSET when the vendor meters no model family apart; set
+  // only when at least one of them is figured. When it is set beside
+  // `overall`, the overall figure is labelled "(overall)".
+  optional FooterWeeklyModelAllowances models = 2;
+}
+
+// The per-model seven-day allowances, drawn "(12% opus 30% sonnet)". Each is
+// drawn with its own percentage, verdict and lapse; neither draws a reset
+// countdown of its own (the element's countdown is the overall window's).
+message FooterWeeklyModelAllowances {
+  // The seven-day allowance for the Opus model family. UNSET when the vendor
+  // reported none.
+  optional FooterAllowance opus = 1;
+  // The seven-day allowance for the Sonnet model family. UNSET when the
+  // vendor reported none.
+  optional FooterAllowance sonnet = 2;
 }
 
 // The newest account-usage sample's outcome, BY NAME. THE ARM IS WHETHER A
@@ -2271,7 +2307,10 @@ message FooterAllowance {
   // The vendor's VERDICT, copied from SessionRateLimitStatus.status for this
   // window. UNSET IS LEGAL: no rate-limit event has been observed for the
   // window yet — the figures above (from the sampled account usage) draw
-  // without a verdict class, and the arm joins when the vendor speaks.
+  // without a verdict class, and the arm joins when the vendor speaks. A
+  // verdict is about ONE instance of the window: once the reset the vendor
+  // named for it has passed, it is no longer shipped, even beside a fresh
+  // figure for the next instance.
   oneof status {
     // The vendor allows requests against this allowance.
     FooterAllowanceAllowed allowed = 5;

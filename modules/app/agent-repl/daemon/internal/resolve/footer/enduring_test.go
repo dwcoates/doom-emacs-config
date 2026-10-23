@@ -126,8 +126,8 @@ func TestAnAllowancePastTheThresholdIsNewsworthy(t *testing.T) {
 	if !report.GetSession().GetNewsworthy() {
 		t.Fatalf("session allowance = %+v, want newsworthy at 90%%", report.GetSession())
 	}
-	if report.GetWeekly().GetNewsworthy() {
-		t.Fatalf("weekly allowance = %+v, want unremarkable at 12%%", report.GetWeekly())
+	if report.GetWeekly().GetOverall().GetNewsworthy() {
+		t.Fatalf("weekly allowance = %+v, want unremarkable at 12%%", report.GetWeekly().GetOverall())
 	}
 }
 
@@ -215,7 +215,7 @@ func TestARejectedAllowanceStatusIsCopied(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, update)
 
 	// Assert
-	// A rejected verdict blocks the session (ladder.RateLimitBlocks), so the
+	// A rejected verdict blocks the session (ladder.RateLimitRejections), so the
 	// allowance line stands under the block.
 	got := enduringUsageOf(h).GetSession()
 	if got.GetRejected() == nil {
@@ -251,7 +251,7 @@ func TestTheFiguresComeFromTheUsageSample(t *testing.T) {
 
 	// Assert
 	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage()
-	if line.GetSession().GetUtilization() != 0.95 || line.GetWeekly().GetUtilization() != 0.9 {
+	if line.GetSession().GetUtilization() != 0.95 || line.GetWeekly().GetOverall().GetUtilization() != 0.9 {
 		t.Fatalf("allowances = %+v, want both figures from the sample", line)
 	}
 }
@@ -300,7 +300,7 @@ func TestTheVerdictJoinsWhenTheRateLimitEventArrives(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, update)
 
 	// Assert
-	// A rejected verdict blocks the session (ladder.RateLimitBlocks), so the
+	// A rejected verdict blocks the session (ladder.RateLimitRejections), so the
 	// allowance line stands under the block.
 	got := enduringUsageOf(h).GetSession()
 	if got.GetRejected() == nil {
@@ -313,22 +313,26 @@ func TestEveryRateLimitWindowMatchesItsAllowance(t *testing.T) {
 	tests := []struct {
 		name   string
 		window *conversationv1.SessionRateLimitType
-		// want names the allowance the verdict must land on; every other
-		// allowance must be left without a status arm.
+		// want names the allowance the verdict must land on, "" for none;
+		// every other allowance must be left without a status arm.
 		want string
 	}{
 		{name: "five hour is the session allowance", window: fiveHourWindow(), want: "session"},
-		{name: "seven day is the weekly allowance", window: sevenDayWindow(), want: "weekly"},
-		{name: "seven day opus is the weekly allowance", window: sevenDayOpusWindow(), want: "weekly"},
-		{name: "seven day sonnet is the weekly allowance", window: sevenDaySonnetWindow(), want: "weekly"},
-		{name: "seven day overage included is the weekly allowance", window: sevenDayOverageIncludedWindow(), want: "weekly"},
+		{name: "seven day is the overall weekly allowance", window: sevenDayWindow(), want: "weekly"},
+		{name: "seven day opus is the opus weekly allowance", window: sevenDayOpusWindow(), want: "weekly_opus"},
+		{name: "seven day sonnet is the sonnet weekly allowance", window: sevenDaySonnetWindow(), want: "weekly_sonnet"},
+		{name: "seven day overage included is no drawn allowance", window: sevenDayOverageIncludedWindow(), want: ""},
 		{name: "overage is the overage allowance", window: overageWindow(), want: "overage"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
 			connected(h)
-			h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+			h.r.OnSessionUpdate(testWS, usageSampleWithModels(95, 90, 40, 30, instant.UnixMilli()))
+			// The overage window is figured only by an event; the statusless
+			// second one leaves it figured with no verdict of its own.
+			h.r.OnSessionUpdate(testWS, rateLimitStatus(overageWindow(), 10, 5*time.Hour))
+			h.r.OnSessionUpdate(testWS, withStatus(rateLimitStatus(overageWindow(), 10, 5*time.Hour), nil))
 
 			// Act
 			h.r.OnSessionUpdate(testWS, rateLimitStatus(tc.window, 95, 5*time.Hour))
@@ -336,17 +340,149 @@ func TestEveryRateLimitWindowMatchesItsAllowance(t *testing.T) {
 			// Assert
 			line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage()
 			drawn := map[string]*frontendv1.FooterAllowance{
-				"session": line.GetSession(),
-				"weekly":  line.GetWeekly(),
-				"overage": line.GetOverage(),
+				"session":       line.GetSession(),
+				"weekly":        line.GetWeekly().GetOverall(),
+				"weekly_opus":   line.GetWeekly().GetModels().GetOpus(),
+				"weekly_sonnet": line.GetWeekly().GetModels().GetSonnet(),
+				"overage":       line.GetOverage(),
 			}
 			for label, allowance := range drawn {
+				if allowance == nil {
+					t.Fatalf("%s allowance is not drawn; the arrangement figures every window", label)
+				}
 				verdicted := allowance.GetStatus() != nil
 				if verdicted != (label == tc.want) {
-					t.Fatalf("%s status = %+v, want the verdict on %s alone", label, allowance.GetStatus(), tc.want)
+					t.Fatalf("%s status = %+v, want the verdict on %q alone", label, allowance.GetStatus(), tc.want)
 				}
 			}
 		})
+	}
+}
+
+// withStatus replaces a rate-limit event's status arm; nil leaves it unset.
+func withStatus(update *conversationv1.SessionUpdate, status any) *conversationv1.SessionUpdate {
+	event := update.GetRateLimitStatus()
+	event.Status = nil
+	switch arm := status.(type) {
+	case *conversationv1.SessionRateLimitStatus_Rejected:
+		event.Status = arm
+	case *conversationv1.SessionRateLimitStatus_Allowed:
+		event.Status = arm
+	}
+	return update
+}
+
+// rejectedStatus is the rejected verdict arm.
+func rejectedStatus() *conversationv1.SessionRateLimitStatus_Rejected {
+	return &conversationv1.SessionRateLimitStatus_Rejected{Rejected: &conversationv1.SessionRateLimitRejected{}}
+}
+
+// usageSampleWithModels is usageSample with the per-model seven-day windows
+// too; a negative utilization leaves that window unreported.
+func usageSampleWithModels(fiveHour, sevenDay, opus, sonnet float64, observedAtMs int64) *conversationv1.SessionUpdate {
+	update := usageSample(fiveHour, sevenDay, observedAtMs)
+	available := update.GetAccountUsage().GetAvailable()
+	week := instant.Add(7 * 24 * time.Hour).UnixMilli()
+	if opus >= 0 {
+		available.SevenDayOpus = &conversationv1.SessionUsageWindow{UtilizationPercent: opus, ResetsAtMs: week}
+	}
+	if sonnet >= 0 {
+		available.SevenDaySonnet = &conversationv1.SessionUsageWindow{UtilizationPercent: sonnet, ResetsAtMs: week}
+	}
+	return update
+}
+
+func TestTheWeeklyElementCarriesThePerModelWindows(t *testing.T) {
+	tests := []struct {
+		name                       string
+		sevenDay, opus, sonnet     float64
+		wantOverall                float64
+		wantOpus, wantSonnet       float64
+		wantModels, wantOverallSet bool
+	}{
+		{name: "overall and both models", sevenDay: 40, opus: 12, sonnet: 30,
+			wantOverallSet: true, wantOverall: 0.4, wantModels: true, wantOpus: 0.12, wantSonnet: 0.3},
+		{name: "overall alone carries no models", sevenDay: 40, opus: -1, sonnet: -1,
+			wantOverallSet: true, wantOverall: 0.4},
+		{name: "overall and opus alone", sevenDay: 40, opus: 12, sonnet: -1,
+			wantOverallSet: true, wantOverall: 0.4, wantModels: true, wantOpus: 0.12},
+		{name: "models with no overall figure", sevenDay: -1, opus: 12, sonnet: 30,
+			wantModels: true, wantOpus: 0.12, wantSonnet: 0.3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			h.r.OnSessionUpdate(testWS, usageSampleWithModels(10, tc.sevenDay, tc.opus, tc.sonnet, instant.UnixMilli()))
+
+			// Assert
+			weekly := enduringUsageOf(h).GetWeekly()
+			if (weekly.GetOverall() != nil) != tc.wantOverallSet || weekly.GetOverall().GetUtilization() != tc.wantOverall {
+				t.Fatalf("overall = %+v, want set=%v at %v", weekly.GetOverall(), tc.wantOverallSet, tc.wantOverall)
+			}
+			models := weekly.GetModels()
+			if (models != nil) != tc.wantModels {
+				t.Fatalf("models = %+v, want set=%v", models, tc.wantModels)
+			}
+			if models.GetOpus().GetUtilization() != tc.wantOpus || models.GetSonnet().GetUtilization() != tc.wantSonnet {
+				t.Fatalf("models = %+v, want opus %v sonnet %v", models, tc.wantOpus, tc.wantSonnet)
+			}
+		})
+	}
+}
+
+// A VERDICT IS ABOUT ONE WINDOW INSTANCE. A rejection of the week that has
+// since reset never colors the next week's figure.
+func TestAVerdictLapsesWithTheWindowInstanceItWasAbout(t *testing.T) {
+	tests := []struct {
+		name    string
+		advance time.Duration
+		want    bool
+	}{
+		{name: "before the reset the verdict stands", advance: 30 * time.Minute, want: true},
+		{name: "at the reset the verdict lapses", advance: time.Hour, want: false},
+		{name: "after the reset the verdict lapses", advance: 2 * time.Hour, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the week resets in an hour, and the vendor rejected it.
+			h := newHarness(t)
+			connected(h)
+			h.r.OnSessionUpdate(testWS, usageSample(10, 100, instant.UnixMilli()))
+			h.r.OnSessionUpdate(testWS, withStatus(rateLimitStatus(sevenDayWindow(), 100, time.Hour), rejectedStatus()))
+
+			// Act: a fresh sample of the next week, taken after the clock moved.
+			h.clock.Advance(tc.advance)
+			h.r.OnSessionUpdate(testWS, usageSample(10, 3, h.clock.Now().UnixMilli()))
+
+			// Assert
+			got := enduringUsageOf(h).GetWeekly().GetOverall().GetRejected() != nil
+			if got != tc.want {
+				t.Fatalf("rejected drawn = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAVerdictNamingNoResetLapsesWithTheFiguresItWasFiledAgainst(t *testing.T) {
+	// Arrange: the sampled week resets in seven days; the event names no reset.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, usageSample(10, 100, instant.UnixMilli()))
+	event := withStatus(rateLimitStatus(sevenDayWindow(), 100, time.Hour), rejectedStatus())
+	event.GetRateLimitStatus().ResetsAtMs = nil
+	h.r.OnSessionUpdate(testWS, event)
+
+	// Act
+	h.clock.Advance(7*24*time.Hour + time.Minute)
+	h.r.OnSessionUpdate(testWS, usageSample(10, 3, h.clock.Now().UnixMilli()))
+
+	// Assert
+	if got := enduringUsageOf(h).GetWeekly().GetOverall(); got.GetStatus() != nil {
+		t.Fatalf("weekly status = %+v, want the verdict lapsed with the week it was filed against", got.GetStatus())
 	}
 }
 
@@ -440,7 +576,15 @@ func TestAnEventAloneDoesNotFigureASampledWindow(t *testing.T) {
 		drawn  func(*frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance
 	}{
 		{"five hour", fiveHourWindow(), (*frontendv1.FooterActivityEnduringUsage).GetSession},
-		{"seven day", sevenDayWindow(), (*frontendv1.FooterActivityEnduringUsage).GetWeekly},
+		{"seven day", sevenDayWindow(), func(u *frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance {
+			return u.GetWeekly().GetOverall()
+		}},
+		{"seven day opus", sevenDayOpusWindow(), func(u *frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance {
+			return u.GetWeekly().GetModels().GetOpus()
+		}},
+		{"seven day sonnet", sevenDaySonnetWindow(), func(u *frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance {
+			return u.GetWeekly().GetModels().GetSonnet()
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -621,8 +765,8 @@ func TestAStatusNamingNoWindowIsDropped(t *testing.T) {
 
 	// Assert
 	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage()
-	if line.GetSession().GetStatus() != nil || line.GetWeekly().GetStatus() != nil {
-		t.Fatalf("session = %+v weekly = %+v, want a windowless status filed nowhere", line.GetSession(), line.GetWeekly())
+	if line.GetSession().GetStatus() != nil || line.GetWeekly().GetOverall().GetStatus() != nil {
+		t.Fatalf("session = %+v weekly = %+v, want a windowless status filed nowhere", line.GetSession(), line.GetWeekly().GetOverall())
 	}
 }
 
@@ -656,7 +800,7 @@ func TestAnUnreadableSampleKeepsTheStandingFiguresDrawn(t *testing.T) {
 
 	// Assert
 	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage()
-	if line.GetSession().GetUtilization() != 0.95 || line.GetWeekly().GetUtilization() != 0.90 {
+	if line.GetSession().GetUtilization() != 0.95 || line.GetWeekly().GetOverall().GetUtilization() != 0.90 {
 		t.Fatalf("allowances = %+v, want the figures on hand left standing after an unreadable sample", line)
 	}
 }
@@ -749,7 +893,7 @@ func TestEveryUnreadReasonIsNamedAndLeavesTheFiguresStanding(t *testing.T) {
 
 			// Assert
 			line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage()
-			if line.GetSession().GetUtilization() != 0.95 || line.GetWeekly().GetUtilization() != 0.90 {
+			if line.GetSession().GetUtilization() != 0.95 || line.GetWeekly().GetOverall().GetUtilization() != 0.90 {
 				t.Fatalf("allowances = %+v, want the figures on hand left standing", line)
 			}
 			if line.GetSample() != nil {

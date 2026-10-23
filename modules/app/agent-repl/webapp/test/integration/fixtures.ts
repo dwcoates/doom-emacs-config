@@ -1795,7 +1795,7 @@ export function allowance(
 export const enduringUsage = (
   session?: FooterAllowanceArm,
   weekly?: FooterAllowanceArm,
-): object => ({ usage: { session: allowance(session), weekly: allowance(weekly ?? "allowed") } });
+): object => ({ usage: { session: allowance(session), weekly: { overall: allowance(weekly ?? "allowed")  }} });
 
 /** Every SALIENT kind arm, with a complete payload for each. */
 export const FOOTER_SALIENT_KINDS: Record<string, object> = {

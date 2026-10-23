@@ -84,26 +84,121 @@ func TestEveryAgentFailureArmIsClassifiedByTheTable(t *testing.T) {
 	}
 }
 
-func TestRateLimitBlocks(t *testing.T) {
+// rateLimitEvent is a rate-limit event about window with the given status
+// arm (nil for a statusless event).
+func rateLimitEvent(window *conversationv1.SessionRateLimitType, status any) *conversationv1.SessionRateLimitStatus {
+	event := &conversationv1.SessionRateLimitStatus{RateLimitType: window}
+	switch arm := status.(type) {
+	case *conversationv1.SessionRateLimitStatus_Rejected:
+		event.Status = arm
+	case *conversationv1.SessionRateLimitStatus_Allowed:
+		event.Status = arm
+	case *conversationv1.SessionRateLimitStatus_AllowedWarning:
+		event.Status = arm
+	}
+	return event
+}
+
+var (
+	rejected = &conversationv1.SessionRateLimitStatus_Rejected{Rejected: &conversationv1.SessionRateLimitRejected{}}
+	allowed  = &conversationv1.SessionRateLimitStatus_Allowed{Allowed: &conversationv1.SessionRateLimitAllowed{}}
+	warning  = &conversationv1.SessionRateLimitStatus_AllowedWarning{AllowedWarning: &conversationv1.SessionRateLimitAllowedWarning{}}
+
+	fiveHour = &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_FiveHour{
+		FiveHour: &conversationv1.SessionRateLimitWindowFiveHour{}}}
+	sevenDay = &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDay{
+		SevenDay: &conversationv1.SessionRateLimitWindowSevenDay{}}}
+	sevenDayOpus = &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDayOpus{
+		SevenDayOpus: &conversationv1.SessionRateLimitWindowSevenDayOpus{}}}
+)
+
+func TestRateLimitRejections(t *testing.T) {
 	cases := []struct {
 		name   string
-		status *conversationv1.SessionRateLimitStatus
+		events []*conversationv1.SessionRateLimitStatus
 		want   bool
 	}{
-		{name: "a rejected verdict blocks", status: &conversationv1.SessionRateLimitStatus{
-			Status: &conversationv1.SessionRateLimitStatus_Rejected{Rejected: &conversationv1.SessionRateLimitRejected{}}}, want: true},
-		{name: "an allowed verdict does not", status: &conversationv1.SessionRateLimitStatus{
-			Status: &conversationv1.SessionRateLimitStatus_Allowed{Allowed: &conversationv1.SessionRateLimitAllowed{}}}},
-		{name: "no verdict does not", status: &conversationv1.SessionRateLimitStatus{}},
+		{name: "an empty set does not block", want: false},
+		{name: "a rejected verdict blocks",
+			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(sevenDay, rejected)}, want: true},
+		{name: "an allowed verdict does not block",
+			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(sevenDay, allowed)}, want: false},
+		{name: "a warning verdict does not block",
+			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(fiveHour, warning)}, want: false},
+		{name: "no verdict does not block",
+			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(sevenDay, nil)}, want: false},
+		{name: "an allowed verdict on the same window lifts the rejection",
+			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(sevenDay, rejected), rateLimitEvent(sevenDay, allowed)}, want: false},
+		{name: "an allowed verdict on another window leaves the rejection standing",
+			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(sevenDay, rejected), rateLimitEvent(fiveHour, allowed)}, want: true},
+		{name: "the opus window is a window of its own",
+			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(sevenDayOpus, rejected), rateLimitEvent(sevenDay, allowed)}, want: true},
+		{name: "a windowless rejection is lifted only by a windowless verdict",
+			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(nil, rejected), rateLimitEvent(fiveHour, allowed)}, want: true},
+		{name: "two rejected windows block until both are lifted",
+			events: []*conversationv1.SessionRateLimitStatus{
+				rateLimitEvent(sevenDay, rejected), rateLimitEvent(fiveHour, rejected), rateLimitEvent(sevenDay, allowed)}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			var set RateLimitRejections
+			got := set.Blocked()
+
+			// Act
+			for _, event := range tc.events {
+				got = set.Observe(event)
+			}
+
+			// Assert
+			if got != tc.want || set.Blocked() != tc.want {
+				t.Fatalf("Observe = %v, Blocked = %v, want %v", got, set.Blocked(), tc.want)
+			}
+		})
+	}
+}
+
+func TestRateLimitRejectionsClearLiftsEveryWindow(t *testing.T) {
+	// Arrange
+	var set RateLimitRejections
+	set.Observe(rateLimitEvent(sevenDay, rejected))
+	set.Observe(rateLimitEvent(fiveHour, rejected))
+
+	// Act
+	set.Clear()
+
+	// Assert
+	if set.Blocked() {
+		t.Fatal("Blocked after Clear = true, want false")
+	}
+}
+
+func TestRateLimitWindow(t *testing.T) {
+	cases := []struct {
+		name   string
+		window *conversationv1.SessionRateLimitType
+		want   string
+	}{
+		{name: "five hour", window: fiveHour, want: "five_hour"},
+		{name: "seven day", window: sevenDay, want: "seven_day"},
+		{name: "seven day opus", window: sevenDayOpus, want: "seven_day_opus"},
+		{name: "seven day sonnet", window: &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDaySonnet{
+			SevenDaySonnet: &conversationv1.SessionRateLimitWindowSevenDaySonnet{}}}, want: "seven_day_sonnet"},
+		{name: "seven day overage included", window: &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDayOverageIncluded{
+			SevenDayOverageIncluded: &conversationv1.SessionRateLimitWindowSevenDayOverageIncluded{}}}, want: "seven_day_overage_included"},
+		{name: "overage", window: &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_Overage{
+			Overage: &conversationv1.SessionRateLimitWindowOverage{}}}, want: "overage"},
+		{name: "no window named", window: nil, want: "unset"},
+		{name: "a type with no window set", window: &conversationv1.SessionRateLimitType{}, want: "unset"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := RateLimitBlocks(tc.status)
+			got := RateLimitWindow(&conversationv1.SessionRateLimitStatus{RateLimitType: tc.window})
 
 			// Assert
 			if got != tc.want {
-				t.Fatalf("RateLimitBlocks = %v, want %v", got, tc.want)
+				t.Fatalf("RateLimitWindow = %q, want %q", got, tc.want)
 			}
 		})
 	}

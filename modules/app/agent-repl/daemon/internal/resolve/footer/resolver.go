@@ -733,6 +733,7 @@ func (r *resolver) applyTurnStarted(ws ids.WorkspaceID, s *wsState, turn *TurnSt
 	s.turnRefused = false
 	s.sawActivity = false
 	s.blocked = nil
+	s.rateLimits.Clear()
 	s.queryDied = nil
 	s.interrupted = nil
 	// COMPACTING IS OR-ED IN, NEVER ASSIGNED. `SessionUpdate.compacting` is the
@@ -1041,6 +1042,7 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 		dlog.Context{"vendor_session_id": started.GetVendorSessionId()}, func(s *wsState) {
 			s.sessionStarted = true
 			s.blocked = nil
+			s.rateLimits.Clear()
 			// THE SCHEDULE IS THE SESSION'S: a (re)started one states its own.
 			s.vendorRetry = nil
 			// A STARTED SESSION HAS A LIVE QUERY: the restart the death asked
@@ -1107,10 +1109,11 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 		return "rate_limit_status", func(s *wsState) {
 			r.logSessionArm(ws, s, "rate_limit_status")
 			r.observeRateLimitStatus(s, u.RateLimitStatus)
-			// A REJECTED VERDICT IS THE ACCOUNT REFUSING THE SESSION, and any
-			// other verdict lifts the block — the same rule, on the same event,
-			// as the roster's vendor_blocked (ladder.RateLimitBlocks).
-			if ladder.RateLimitBlocks(u.RateLimitStatus) {
+			// A REJECTED VERDICT IS THE ACCOUNT REFUSING THE SESSION, and the
+			// block lifts once no window's newest verdict is a rejection —
+			// the same rule, on the same event, as the roster's
+			// vendor_blocked (ladder.RateLimitRejections).
+			if s.rateLimits.Observe(u.RateLimitStatus) {
 				if s.blocked == nil {
 					s.blocked = &blockedState{kind: blockedUsageLimit, at: r.opts.clock.Now()}
 				}
@@ -1272,6 +1275,12 @@ func (r *resolver) observeAccountUsage(ws ids.WorkspaceID, s *wsState, usage *co
 		if seven := outcome.Available.GetSevenDay(); seven != nil {
 			moved = r.observeSampledWindow(ws, s, "weekly", &account.rate.weekly, seven, at) || moved
 		}
+		if opus := outcome.Available.GetSevenDayOpus(); opus != nil {
+			moved = r.observeSampledWindow(ws, s, "weekly_opus", &account.rate.weeklyOpus, opus, at) || moved
+		}
+		if sonnet := outcome.Available.GetSevenDaySonnet(); sonnet != nil {
+			moved = r.observeSampledWindow(ws, s, "weekly_sonnet", &account.rate.weeklySonnet, sonnet, at) || moved
+		}
 		if moved {
 			account.touch(r.opts.clock.Now())
 		}
@@ -1318,8 +1327,8 @@ func (r *resolver) observeSampledWindow(ws ids.WorkspaceID, s *wsState, name str
 // windows compare.
 func (r *resolver) observeSeatSpend(ws ids.WorkspaceID, s *wsState, spend *conversationv1.SessionAccountUsageSeatSpend, at int64) {
 	account := s.usage
-	newest := account.rate.session.sampledAtMs
-	newest = max(newest, account.rate.weekly.sampledAtMs)
+	rate := &account.rate
+	newest := max(rate.session.sampledAtMs, rate.weekly.sampledAtMs, rate.weeklyOpus.sampledAtMs, rate.weeklySonnet.sampledAtMs)
 	if account.seat != nil {
 		newest = max(newest, account.seat.sampledAtMs)
 	}
@@ -1397,26 +1406,31 @@ func unavailableReason(unavailable *conversationv1.SessionAccountUsageUnavailabl
 }
 
 // observeRateLimitStatus takes one rate-limit event and files it under the
-// window it is about: five_hour is the session allowance; seven_day and its
-// per-model and overage-included aliases are all the weekly one. The event is
-// the VERDICT's only source, so filing it is what lets an allowance's status
-// arm join. ITS UTILIZATION IS NEVER DRAWN ON A SAMPLED WINDOW (session,
-// weekly): it carries no instant to order it against the samples, so the
-// newest sample's figure stands (see `allowanceWindow`). The overage window,
-// which no sample figures, takes the event's figure. A status naming no
-// window is not filable at all.
+// window it is about, EACH VENDOR WINDOW ITS OWN: five_hour is the session
+// allowance, seven_day the account-wide weekly one, seven_day_opus and
+// seven_day_sonnet the per-model weekly ones, and overage the overage one.
+// The event is the VERDICT's only source, so filing it is what lets an
+// allowance's status arm join; the verdict is scoped to the window instance
+// the event names by its reset (allowanceWindow.observeVerdict). ITS
+// UTILIZATION IS NEVER DRAWN ON A SAMPLED WINDOW: it carries no instant to
+// order it against the samples, so the newest sample's figure stands (see
+// `allowanceWindow`). The overage window, which no sample figures, takes the
+// event's figure. The seven_day_overage_included window has no drawn
+// allowance, and a status naming no window is not filable at all; both still
+// count toward the session's block (wsState.rateLimits).
 func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.SessionRateLimitStatus) {
 	if status == nil {
 		return
 	}
 	account := s.usage
+	name := ladder.RateLimitWindow(status)
 	if account.seat != nil {
 		// A PER-SEAT ACCOUNT DRAWS ITS SPEND, NEVER A WINDOW: the modes are
 		// never held together, and only a subscription sample ends the seat
 		// mode (observeAccountUsage).
 		r.logOf(s.id, s).Debug("daemon.footer.rate_limit_on_seat",
 			"a rate-limit event for a per-seat account is not filed as a window; the seat's spend stands",
-			dlog.Context{"window": rateWindowName(status)})
+			dlog.Context{"window": name})
 		return
 	}
 	var window *allowanceWindow
@@ -1424,21 +1438,24 @@ func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.Ses
 	switch status.GetRateLimitType().GetWindow().(type) {
 	case *conversationv1.SessionRateLimitType_FiveHour:
 		window = &account.rate.session
-	case *conversationv1.SessionRateLimitType_SevenDay,
-		*conversationv1.SessionRateLimitType_SevenDayOpus,
-		*conversationv1.SessionRateLimitType_SevenDaySonnet,
-		*conversationv1.SessionRateLimitType_SevenDayOverageIncluded:
+	case *conversationv1.SessionRateLimitType_SevenDay:
 		window = &account.rate.weekly
+	case *conversationv1.SessionRateLimitType_SevenDayOpus:
+		window = &account.rate.weeklyOpus
+	case *conversationv1.SessionRateLimitType_SevenDaySonnet:
+		window = &account.rate.weeklySonnet
 	case *conversationv1.SessionRateLimitType_Overage:
 		window = &account.rate.overage
 		sampled = false
 	default:
+		r.logOf(s.id, s).Debug("daemon.footer.rate_limit_undrawn_window",
+			"a rate-limit event about a window the usage line draws no allowance for; only its verdict's block applies",
+			dlog.Context{"window": name, "verdict": string(verdictOf(status))})
 		return
 	}
-	window.verdict = verdictOf(status)
 	if status.UtilizationPercent != nil {
 		fields := dlog.Context{
-			"window":               rateWindowName(status),
+			"window":               name,
 			"source":               "rate_limit_event",
 			"utilization_percent":  status.GetUtilizationPercent(),
 			"resets_at_ms":         status.GetResetsAtMs(),
@@ -1453,6 +1470,7 @@ func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.Ses
 				"a rate-limit event figured the overage window", fields)
 		}
 	}
+	window.observeVerdict(verdictOf(status), status.GetResetsAtMs())
 	account.touch(r.opts.clock.Now())
 }
 
@@ -1763,24 +1781,4 @@ func (r *resolver) SetParticipants(ws ids.WorkspaceID, host, web bool) {
 			s.hostStream = host
 			s.webStream = web
 		})
-}
-
-// rateWindowName names the window a rate-limit event is about, for the logs.
-func rateWindowName(status *conversationv1.SessionRateLimitStatus) string {
-	switch status.GetRateLimitType().GetWindow().(type) {
-	case *conversationv1.SessionRateLimitType_FiveHour:
-		return "five_hour"
-	case *conversationv1.SessionRateLimitType_SevenDay:
-		return "seven_day"
-	case *conversationv1.SessionRateLimitType_SevenDayOpus:
-		return "seven_day_opus"
-	case *conversationv1.SessionRateLimitType_SevenDaySonnet:
-		return "seven_day_sonnet"
-	case *conversationv1.SessionRateLimitType_SevenDayOverageIncluded:
-		return "seven_day_overage_included"
-	case *conversationv1.SessionRateLimitType_Overage:
-		return "overage"
-	default:
-		return "unset"
-	}
 }

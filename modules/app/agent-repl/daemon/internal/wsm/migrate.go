@@ -167,6 +167,7 @@ var migrations = []migration{
 	{To: 69, Name: "merge_queue_untold_notices", Kind: MigrationAdditive, DDL: mergeQueueUntoldNoticesDDL},
 	{To: 70, Name: "workspace_untold_notices", Kind: MigrationAdditive, DDL: workspaceUntoldNoticesDDL},
 	{To: 71, Name: "principal_link", Kind: MigrationAdditive, DDL: principalLinkDDL},
+	{To: 72, Name: "account_usage_windows", Kind: MigrationAdditive, DDL: accountUsageWindowsDDL},
 }
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its

@@ -42,7 +42,8 @@ type accountUsage struct {
 
 // figured reports whether any window has a figure to draw.
 func (u *accountUsage) figured() bool {
-	return u.rate.session.figured || u.rate.weekly.figured || u.rate.overage.figured
+	r := &u.rate
+	return r.session.figured || r.weekly.figured || r.weeklyOpus.figured || r.weeklySonnet.figured || r.overage.figured
 }
 
 // observed reports whether anything at all is known about the account.
@@ -85,11 +86,13 @@ func (u *accountUsage) touch(at time.Time) {
 // record is the evidence as the state store keeps it.
 func (u *accountUsage) record(root string) wsm.AccountUsage {
 	rec := wsm.AccountUsage{
-		ConfigDir:  root,
-		ObservedAt: u.rate.at,
-		Session:    u.rate.session.figures(),
-		Weekly:     u.rate.weekly.figures(),
-		Overage:    u.rate.overage.figures(),
+		ConfigDir:    root,
+		ObservedAt:   u.rate.at,
+		Session:      u.rate.session.figures(),
+		Weekly:       u.rate.weekly.figures(),
+		WeeklyOpus:   u.rate.weeklyOpus.figures(),
+		WeeklySonnet: u.rate.weeklySonnet.figures(),
+		Overage:      u.rate.overage.figures(),
 	}
 	if u.seat != nil {
 		rec.Seat = &wsm.SeatSpend{
@@ -108,6 +111,8 @@ func usageFromRecord(rec wsm.AccountUsage) *accountUsage {
 	u.rate.at = rec.ObservedAt
 	u.rate.session.restore(rec.Session)
 	u.rate.weekly.restore(rec.Weekly)
+	u.rate.weeklyOpus.restore(rec.WeeklyOpus)
+	u.rate.weeklySonnet.restore(rec.WeeklySonnet)
 	u.rate.overage.restore(rec.Overage)
 	if rec.Seat != nil {
 		u.seat = &seatSpend{
@@ -126,10 +131,11 @@ func (w *allowanceWindow) figures() *wsm.AllowanceFigures {
 		return nil
 	}
 	return &wsm.AllowanceFigures{
-		Utilization: w.utilization,
-		ResetsAtS:   w.resetsAtS,
-		SampledAtMs: w.sampledAtMs,
-		Verdict:     w.verdict,
+		Utilization:      w.utilization,
+		ResetsAtS:        w.resetsAtS,
+		SampledAtMs:      w.sampledAtMs,
+		Verdict:          w.verdict,
+		VerdictResetsAtS: w.verdictResetsAtS,
 	}
 }
 
@@ -140,11 +146,12 @@ func (w *allowanceWindow) restore(f *wsm.AllowanceFigures) {
 		return
 	}
 	*w = allowanceWindow{
-		figured:     true,
-		utilization: f.Utilization,
-		resetsAtS:   f.ResetsAtS,
-		sampledAtMs: f.SampledAtMs,
-		verdict:     f.Verdict,
+		figured:          true,
+		utilization:      f.Utilization,
+		resetsAtS:        f.ResetsAtS,
+		sampledAtMs:      f.SampledAtMs,
+		verdict:          f.Verdict,
+		verdictResetsAtS: f.VerdictResetsAtS,
 	}
 }
 

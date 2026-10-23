@@ -126,7 +126,7 @@ func TestASecondWorkspaceOnTheAccountDrawsTheFiguresTheFirstLearns(t *testing.T)
 
 	// Assert
 	usage := enduringOfWS(t, h, otherWS).GetUsage()
-	if usage.GetSession().GetUtilization() != 0.44 || usage.GetWeekly().GetUtilization() != 0.53 {
+	if usage.GetSession().GetUtilization() != 0.44 || usage.GetWeekly().GetOverall().GetUtilization() != 0.53 {
 		t.Fatalf("second workspace's usage = %+v, want the account's 44%% and 53%%", usage)
 	}
 }
@@ -517,8 +517,70 @@ func TestARestartedResolverDrawsTheKeptFigures(t *testing.T) {
 
 	// Assert
 	usage := enduringOf(t, after).GetUsage()
-	if usage.GetSession().GetUtilization() != 0.44 || usage.GetWeekly().GetUtilization() != 0.53 {
+	if usage.GetSession().GetUtilization() != 0.44 || usage.GetWeekly().GetOverall().GetUtilization() != 0.53 {
 		t.Fatalf("restarted usage = %+v, want the kept 44%% and 53%%", usage)
+	}
+}
+
+func TestARestartedResolverDrawsTheKeptModelWindowsAndVerdictScope(t *testing.T) {
+	// Arrange: an opus rejection of a week that resets in an hour, kept.
+	kept := &keptUsage{}
+	before := newHarness(t, WithAccountUsageSink(kept.sink))
+	connected(before)
+	before.r.SetAccount(testWS, personalRoot)
+	before.r.OnSessionUpdate(testWS, usageSampleWithModels(44, 53, 12, 30, instant.UnixMilli()))
+	before.r.OnSessionUpdate(testWS, withStatus(rateLimitStatus(sevenDayOpusWindow(), 100, time.Hour), rejectedStatus()))
+	record := kept.last(t)
+	after := newHarness(t, WithAccountUsages([]wsm.AccountUsage{record}))
+
+	// Act: the restarted resolver draws after that hour has passed.
+	after.clock.Advance(2 * time.Hour)
+	connected(after)
+	after.r.SetAccount(testWS, personalRoot)
+
+	// Assert
+	if record.WeeklyOpus == nil || record.WeeklyOpus.VerdictResetsAtS != instant.Add(time.Hour).Unix() {
+		t.Fatalf("kept opus window = %+v, want its verdict scoped to the hour's reset", record.WeeklyOpus)
+	}
+	models := enduringOf(t, after).GetUsage().GetWeekly().GetModels()
+	if models.GetOpus().GetUtilization() != 0.12 || models.GetSonnet().GetUtilization() != 0.3 || models.GetOpus().GetStatus() != nil {
+		t.Fatalf("restarted models = %+v, want the kept 12%% and 30%% with the lapsed verdict undrawn", models)
+	}
+}
+
+func TestASeatSpendSampleClearsTheKeptModelWindows(t *testing.T) {
+	// Arrange
+	kept := &keptUsage{}
+	h := newHarness(t, WithAccountUsageSink(kept.sink))
+	connected(h)
+	h.r.SetAccount(testWS, workRoot)
+	h.r.OnSessionUpdate(testWS, usageSampleWithModels(44, 53, 12, 30, instant.UnixMilli()))
+
+	// Act
+	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(1)), "USD", instant.UnixMilli()+1))
+
+	// Assert
+	if got := kept.last(t); got.Seat == nil || got.WeeklyOpus != nil || got.WeeklySonnet != nil {
+		t.Fatalf("kept = %+v, want the seat alone with no model window", got)
+	}
+}
+
+func TestASeatSampleOlderThanAModelWindowsSampleIsRefused(t *testing.T) {
+	// Arrange: the newest sample on hand figured only the opus window.
+	h := newHarness(t)
+	connected(h)
+	h.r.SetAccount(testWS, workRoot)
+	h.r.OnSessionUpdate(testWS, usageSample(44, 53, instant.UnixMilli()))
+	opusOnly := usageSampleWithModels(44, -1, 12, -1, instant.UnixMilli()+10)
+	opusOnly.GetAccountUsage().GetAvailable().FiveHour = nil
+	h.r.OnSessionUpdate(testWS, opusOnly)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(1)), "USD", instant.UnixMilli()+5))
+
+	// Assert
+	if got := enduringOf(t, h); got.GetSeatSpend() != nil {
+		t.Fatalf("enduring = %+v, want the older seat sample refused", got)
 	}
 }
 

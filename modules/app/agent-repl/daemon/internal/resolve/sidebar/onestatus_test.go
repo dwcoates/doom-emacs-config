@@ -276,6 +276,22 @@ var turnCases = []turnCase{
 		s.footer.OnSessionUpdate(theWS, rejectedRateLimit())
 		s.roster.OnSessionUpdate(theWS, rejectedRateLimit())
 	}},
+	{name: "the weekly allowance rejected, then the session allowance allowed", apply: func(s *surfaces) {
+		for _, update := range []*conversationv1.SessionUpdate{
+			windowedRateLimit(sevenDayWindow(), rejectedVerdict()), windowedRateLimit(fiveHourWindow(), allowedVerdict()),
+		} {
+			s.footer.OnSessionUpdate(theWS, update)
+			s.roster.OnSessionUpdate(theWS, update)
+		}
+	}},
+	{name: "the weekly allowance rejected, then lifted by its own verdict", apply: func(s *surfaces) {
+		for _, update := range []*conversationv1.SessionUpdate{
+			windowedRateLimit(sevenDayWindow(), rejectedVerdict()), windowedRateLimit(sevenDayWindow(), allowedVerdict()),
+		} {
+			s.footer.OnSessionUpdate(theWS, update)
+			s.roster.OnSessionUpdate(theWS, update)
+		}
+	}},
 	{name: "the vendor retrying the turn's call", apply: func(s *surfaces) {
 		s.startTurn()
 		s.apiError()

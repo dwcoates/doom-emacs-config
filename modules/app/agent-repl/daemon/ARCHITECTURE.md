@@ -860,14 +860,23 @@ Rulings already binding; code swaps to the generated arms when it lands:
 
 - `SessionUpdate.account_usage` is NOT retired. FIGURES (utilization,
   resets_at) come from account_usage: five_hour → `session`, seven_day →
-  `weekly`; sampled at a cadence and complete from the first sample.
+  `weekly.overall`, seven_day_opus → `weekly.models.opus`, seven_day_sonnet
+  → `weekly.models.sonnet`; sampled at a cadence and complete from the
+  first sample.
 - The VERDICT (`FooterAllowance.status` arm) comes from
-  `SessionUpdate.rate_limit_status`, matched by window: five_hour →
-  session; seven_day / seven_day_opus / seven_day_sonnet /
-  seven_day_overage_included → weekly; `overage` → the `overage`
-  allowance, its own cell since 2026-09-13. It
-  stays UNSET until a rate-limit event for that window has been seen — an
-  unset status oneof is LEGAL ("no vendor verdict observed yet").
+  `SessionUpdate.rate_limit_status`, matched by window, EACH VENDOR WINDOW
+  ITS OWN: five_hour → session; seven_day → `weekly.overall`;
+  seven_day_opus / seven_day_sonnet → their `weekly.models` figure;
+  `overage` → the `overage` allowance, its own cell since 2026-09-13;
+  seven_day_overage_included has no drawn allowance. It stays UNSET until a
+  rate-limit event for that window has been seen — an unset status oneof is
+  LEGAL ("no vendor verdict observed yet"). A verdict is scoped to the
+  window instance its event named by its reset, and is not shipped once
+  that reset has passed (`allowanceWindow.liveVerdict`), so a rejection of
+  last week never colors this week's figure.
+- The usage-limit BLOCK is per window too (`ladder.RateLimitRejections`,
+  shared by the footer and the roster): a window's rejection is lifted only
+  by a later verdict on the same window, a session start or a new turn.
 - The allowance line draws as soon as a usage sample exists; the verdict
   arm joins when it arrives.
 - A per-seat sample (`SessionAccountUsage.seat_spend`) draws the seat's

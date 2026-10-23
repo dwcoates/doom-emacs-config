@@ -50,6 +50,8 @@ import type {
   FooterActivityTransientTask,
   FooterActivityTransientUpdated,
   FooterAllowance,
+  FooterWeeklyAllowance,
+  FooterWeeklyModelAllowances,
   FooterStatusActivityAt,
   FooterStatusActivityAuthenticating,
   FooterStatusActivityBlockedOnUser,
@@ -834,14 +836,7 @@ export function drawFooterActivityEnduringUsage(
     figures.className = "footer-rate-figures";
     ordered.forEach((allowance, index) => {
       if (index > 0) figures.append(...drawFooterRateDivider());
-      figures.appendChild(
-        drawFooterAllowance(
-          allowance.value,
-          allowance.label,
-          deps,
-          `${path}.${allowance.label}`,
-        ),
-      );
+      figures.appendChild(drawLabelledAllowance(allowance, deps, path));
     });
     parts.push(figures);
   }
@@ -906,11 +901,14 @@ export function paintPressure(figure: HTMLElement, fraction: number): void {
   figure.style.color = pressurePercentColor(Math.round(fraction * 100));
 }
 
-/** One drawable allowance, under the label the strip and the sheet both use. */
-export interface LabelledAllowance {
-  readonly label: string;
-  readonly value: FooterAllowance;
-}
+/**
+ * One drawable allowance, under the label the strip and the sheet both use:
+ * a single window (session, overage) or the weekly element, which carries
+ * the per-model weekly windows beside the account-wide one.
+ */
+export type LabelledAllowance =
+  | { readonly kind: "single"; readonly label: string; readonly value: FooterAllowance }
+  | { readonly kind: "weekly"; readonly label: "weekly"; readonly value: FooterWeeklyAllowance };
 
 /**
  * The windows the producer figured, ALWAYS in the one fixed order session,
@@ -919,19 +917,43 @@ export interface LabelledAllowance {
  * newsworthiness, status, a reset — reorders the line; `newsworthy` only
  * emphasizes. (The line once drew the newsworthy window first, so the weekly
  * figure jumped left of the session's the moment it crossed the threshold.)
- * The strip and the tokens sheet draw exactly this list.
+ * The strip and the tokens sheet draw exactly this list, each entry through
+ * `drawLabelledAllowance`.
  */
 export function orderedAllowances(
   u: FooterActivityEnduringUsage,
 ): LabelledAllowance[] {
   const present: LabelledAllowance[] = [];
   if (u.session !== undefined)
-    present.push({ label: "session", value: u.session });
+    present.push({ kind: "single", label: "session", value: u.session });
   if (u.weekly !== undefined)
-    present.push({ label: "weekly", value: u.weekly });
+    present.push({ kind: "weekly", label: "weekly", value: u.weekly });
   if (u.overage !== undefined)
-    present.push({ label: "overage", value: u.overage });
+    present.push({ kind: "single", label: "overage", value: u.overage });
   return present;
+}
+
+/**
+ * One entry of `orderedAllowances`, drawn: the one place the strip and the
+ * tokens sheet turn an entry into its cell, so neither can draw an entry the
+ * other draws differently. `path` is the usage message's own.
+ */
+export function drawLabelledAllowance(
+  allowance: LabelledAllowance,
+  deps: AllowanceDeps,
+  path: string,
+): HTMLElement {
+  const at = `${path}.${allowance.label}`;
+  switch (allowance.kind) {
+    case "single":
+      return drawFooterAllowance(allowance.value, allowance.label, deps, at);
+    case "weekly":
+      return drawFooterWeeklyAllowance(allowance.value, deps, at);
+    default: {
+      const other: { kind: string } = allowance;
+      return unreachableArm(path, other.kind);
+    }
+  }
 }
 
 // ---- the kinds' lines -------------------------------------------------------
@@ -1315,13 +1337,125 @@ export function drawFooterAllowance(
   deps: AllowanceDeps,
   path: string,
 ): HTMLElement {
-  const status = u.status.case === undefined ? null : u.status;
+  return drawAllowanceCell(u, label, [], deps, path);
+}
+
+/**
+ * The weekly element: "weekly 40% (overall) (12% opus 30% sonnet) · resets
+ * in 3d" (owner ruling, 2026-10-23).
+ *
+ * The account-wide window draws exactly as any allowance does, and is
+ * labelled "(overall)" only when the per-model windows stand beside it; with
+ * none it reads "weekly 40% · resets in 3d". The per-model windows follow in
+ * parentheses, each its own percentage, verdict and lapse
+ * (`drawWeeklyModels`); the countdown is the overall window's. With no
+ * overall figure the element reads "weekly (12% opus 30% sonnet)", with no
+ * countdown.
+ *
+ * WHEN THE OVERALL WINDOW LAPSES, THE WHOLE ELEMENT DOES: the per-model
+ * windows leave with the overall percentage, since a new seven-day window has
+ * begun and the next push carries its figures.
+ */
+export function drawFooterWeeklyAllowance(
+  u: FooterWeeklyAllowance,
+  deps: AllowanceDeps,
+  path: string,
+): HTMLElement {
+  const models =
+    u.models === undefined ? null : drawWeeklyModels(u.models, deps, `${path}.models`);
+  if (u.overall === undefined) {
+    if (models === null) {
+      throw new MalformedView(path, "a weekly allowance carries neither an overall nor a per-model window");
+    }
+    const span = document.createElement("span");
+    span.className = "footer-allowance";
+    span.setAttribute("data-allowance", "weekly");
+    span.append(document.createTextNode("weekly "), models);
+    return span;
+  }
+  const between: Node[] = [];
+  if (models !== null) {
+    const overallMark = document.createElement("span");
+    overallMark.className = "footer-weekly-overall";
+    overallMark.textContent = WEEKLY_OVERALL_TEXT;
+    between.push(overallMark, document.createTextNode(" "), models);
+  }
+  return drawAllowanceCell(u.overall, "weekly", between, deps, `${path}.overall`);
+}
+
+/** What marks the account-wide weekly figure when per-model ones stand beside it. */
+export const WEEKLY_OVERALL_TEXT = " (overall)";
+
+/**
+ * The per-model weekly windows in parentheses: "(12% opus 30% sonnet)", in
+ * the fixed order opus, sonnet. A model window whose reset has passed reads
+ * "opus reset" with no percentage and no verdict, on its own clock.
+ */
+function drawWeeklyModels(
+  u: FooterWeeklyModelAllowances,
+  deps: AllowanceDeps,
+  path: string,
+): HTMLElement {
+  const present: [string, FooterAllowance][] = [];
+  if (u.opus !== undefined) present.push(["opus", u.opus]);
+  if (u.sonnet !== undefined) present.push(["sonnet", u.sonnet]);
+  if (present.length === 0) {
+    throw new MalformedView(path, "a weekly models element carries no model window");
+  }
+  const group = document.createElement("span");
+  group.className = "footer-weekly-models";
+  group.append("(");
+  present.forEach(([model, allowance], index) => {
+    if (index > 0) group.append(" ");
+    group.appendChild(drawWeeklyModel(allowance, model, deps, `${path}.${model}`));
+  });
+  group.append(")");
+  return group;
+}
+
+/** One per-model weekly window: "12% opus", lapsing to "opus reset". */
+function drawWeeklyModel(
+  u: FooterAllowance,
+  model: string,
+  deps: AllowanceDeps,
+  path: string,
+): HTMLElement {
   const span = document.createElement("span");
-  span.className =
-    status === null
-      ? "footer-allowance"
-      : `footer-allowance arm-${status.case}`;
-  span.setAttribute("data-allowance", label);
+  span.setAttribute("data-weekly-model", model);
+  markAllowanceVerdict(span, u, "footer-weekly-model", `weekly ${model}`, path);
+  const percent = drawFooterPercent(u.utilization);
+  const name = document.createTextNode(` ${model}`);
+  span.append(percent, name);
+  const resetsAtMs = msOf(u.resetsAtS, `${path}.resets_at_s`) * 1000;
+  span.appendChild(
+    footerClockSpan(deps.ctx.ticker, "countdown", undefined, (countdown, nowMs) => {
+      if (resetsAtMs - nowMs > 0) return;
+      if (span.hasAttribute("data-lapsed")) return;
+      span.setAttribute("data-lapsed", "true");
+      percent.remove();
+      name.remove();
+      unmarkAllowanceVerdict(span, "footer-weekly-model");
+      countdown.textContent = `${model} reset`;
+    }),
+  );
+  return span;
+}
+
+/**
+ * Mark an allowance's cell with what its figure says beyond the percentage:
+ * the vendor's verdict as `data-arm`, its class and its sentence as the
+ * title, and newsworthiness. The one place a drawn allowance — a whole cell
+ * or a per-model weekly figure — wears its verdict.
+ */
+function markAllowanceVerdict(
+  span: HTMLElement,
+  u: FooterAllowance,
+  baseClass: string,
+  label: string,
+  path: string,
+): void {
+  const status = u.status.case === undefined ? null : u.status;
+  span.className = status === null ? baseClass : `${baseClass} arm-${status.case}`;
   if (status !== null) {
     span.setAttribute("data-arm", status.case);
     span.title = allowanceStatusTitle(status, `${path}.status`);
@@ -1339,10 +1473,35 @@ export function drawFooterAllowance(
       },
     },
   );
+}
+
+/** Take back everything `markAllowanceVerdict` put on a cell, for a lapse. */
+function unmarkAllowanceVerdict(span: HTMLElement, baseClass: string): void {
+  span.className = baseClass;
+  span.removeAttribute("data-arm");
+  span.removeAttribute("data-newsworthy");
+  span.removeAttribute("title");
+}
+
+/**
+ * One allowance cell: LABEL, the percentage, `between` (the weekly element's
+ * "(overall)" and per-model windows, empty for any other), then the reset
+ * countdown. Its lapse removes all but the countdown's sentence.
+ */
+function drawAllowanceCell(
+  u: FooterAllowance,
+  label: string,
+  between: Node[],
+  deps: AllowanceDeps,
+  path: string,
+): HTMLElement {
+  const span = document.createElement("span");
+  span.setAttribute("data-allowance", label);
+  markAllowanceVerdict(span, u, "footer-allowance", label, path);
 
   const labelNode = document.createTextNode(`${label} `);
   const percent = drawFooterPercent(u.utilization);
-  span.append(labelNode, percent);
+  span.append(labelNode, percent, ...between);
   const resetsAtMs = msOf(u.resetsAtS, `${path}.resets_at_s`) * 1000;
   span.appendChild(
     footerClockSpan(deps.ctx.ticker, "countdown", undefined, (countdown, nowMs) => {
@@ -1351,7 +1510,7 @@ export function drawFooterAllowance(
         countdown.textContent = ` · resets in ${formatCountdown(remaining)}`;
         return;
       }
-      lapseAllowance(span, labelNode, percent);
+      lapseAllowance(span, [labelNode, percent, ...between]);
       countdown.textContent = `${label} reset since last seen`;
     }),
   );
@@ -1361,17 +1520,14 @@ export function drawFooterAllowance(
 /**
  * Turn a drawn allowance whose reset has passed into the lapsed one: the
  * percentage and the verdict describe a window that no longer exists, so both
- * leave, and only the reset sentence the countdown draws stays.
+ * leave (with `drawn`, everything drawn before the countdown), and only the
+ * reset sentence the countdown draws stays.
  */
-function lapseAllowance(span: HTMLElement, labelNode: Text, percent: HTMLElement): void {
+function lapseAllowance(span: HTMLElement, drawn: Node[]): void {
   if (span.hasAttribute("data-lapsed")) return;
   span.setAttribute("data-lapsed", "true");
-  labelNode.remove();
-  percent.remove();
-  span.className = "footer-allowance";
-  span.removeAttribute("data-arm");
-  span.removeAttribute("data-newsworthy");
-  span.removeAttribute("title");
+  for (const node of drawn) node.parentNode?.removeChild(node);
+  unmarkAllowanceVerdict(span, "footer-allowance");
 }
 
 /**

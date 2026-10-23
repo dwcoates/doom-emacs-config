@@ -790,6 +790,54 @@ func TestARejectedRateLimitBlocksTheSession(t *testing.T) {
 	}
 }
 
+func TestARateLimitBlockIsLiftedOnlyByItsOwnWindow(t *testing.T) {
+	tests := []struct {
+		name string
+		lift *conversationv1.SessionUpdate
+		want bool
+	}{
+		{name: "an allowed verdict on another window leaves the weekly block standing",
+			lift: rateLimitStatus(fiveHourWindow(), 10, 5*time.Hour), want: true},
+		{name: "an allowed opus verdict leaves the overall weekly block standing",
+			lift: rateLimitStatus(sevenDayOpusWindow(), 10, 5*time.Hour), want: true},
+		{name: "an allowed verdict on the weekly window lifts it",
+			lift: rateLimitStatus(sevenDayWindow(), 10, 5*time.Hour), want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.OnSessionUpdate(testWS, withStatus(rateLimitStatus(sevenDayWindow(), 100, 5*time.Hour), rejectedStatus()))
+
+			// Act
+			h.r.OnSessionUpdate(testWS, tc.lift)
+
+			// Assert
+			blocked := h.view(t).GetStrip().GetStatus().GetVendorFault().GetUsageLimit() != nil
+			if blocked != tc.want {
+				t.Fatalf("status = %q, want usage-limit block %v", h.status(t), tc.want)
+			}
+		})
+	}
+}
+
+func TestASessionStartForgetsEveryWindowsRejection(t *testing.T) {
+	// Arrange: the weekly window rejected, then the session restarted.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, withStatus(rateLimitStatus(sevenDayWindow(), 100, 5*time.Hour), rejectedStatus()))
+	h.r.OnSessionStarted(testWS, &conversationv1.SessionStarted{})
+
+	// Act: an allowed verdict on another window.
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 10, 5*time.Hour))
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetVendorFault().GetUsageLimit() != nil {
+		t.Fatalf("status = %q, want the restarted session unblocked", h.status(t))
+	}
+}
+
 func TestAnAllowedRateLimitLiftsTheBlock(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

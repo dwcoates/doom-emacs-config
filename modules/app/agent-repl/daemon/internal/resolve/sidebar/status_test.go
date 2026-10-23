@@ -339,6 +339,70 @@ func TestRowIsVendorBlockedWhenTheVendorRejectedTheAllowance(t *testing.T) {
 	}
 }
 
+func TestARowsRateLimitBlockIsLiftedOnlyByItsOwnWindow(t *testing.T) {
+	tests := []struct {
+		name string
+		lift func(r sidebarResolver)
+		want string
+	}{
+		{name: "an allowed verdict on another window leaves the row blocked", lift: func(r sidebarResolver) {
+			r.OnSessionUpdate(theWS, windowedRateLimit(fiveHourWindow(), allowedVerdict()))
+		}, want: "vendor_blocked"},
+		{name: "an allowed verdict on the rejected window lifts the block", lift: func(r sidebarResolver) {
+			r.OnSessionUpdate(theWS, windowedRateLimit(sevenDayWindow(), allowedVerdict()))
+		}, want: "ready"},
+		{name: "a new turn forgets the rejection, so another window's verdict leaves it unblocked", lift: func(r sidebarResolver) {
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			r.OnSessionUpdate(theWS, windowedRateLimit(fiveHourWindow(), allowedVerdict()))
+		}, want: "submitting"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+			r.OnSessionUpdate(theWS, windowedRateLimit(sevenDayWindow(), rejectedVerdict()))
+
+			// Act.
+			tc.lift(r)
+
+			// Assert.
+			if got := statusName(onlyRow(t, r)); got != tc.want {
+				t.Fatalf("status = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// windowedRateLimit is the vendor's verdict on one allowance window.
+func windowedRateLimit(window *conversationv1.SessionRateLimitType, verdict *conversationv1.SessionRateLimitStatus) *conversationv1.SessionUpdate {
+	verdict.RateLimitType = window
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_RateLimitStatus{RateLimitStatus: verdict}}
+}
+
+// rejectedVerdict and allowedVerdict are a rate-limit event's two verdicts
+// that decide a block, about no window until windowedRateLimit names one.
+func rejectedVerdict() *conversationv1.SessionRateLimitStatus {
+	return &conversationv1.SessionRateLimitStatus{
+		Status: &conversationv1.SessionRateLimitStatus_Rejected{Rejected: &conversationv1.SessionRateLimitRejected{}}}
+}
+
+func allowedVerdict() *conversationv1.SessionRateLimitStatus {
+	return &conversationv1.SessionRateLimitStatus{
+		Status: &conversationv1.SessionRateLimitStatus_Allowed{Allowed: &conversationv1.SessionRateLimitAllowed{}}}
+}
+
+// fiveHourWindow and sevenDayWindow are the session and weekly windows.
+func fiveHourWindow() *conversationv1.SessionRateLimitType {
+	return &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_FiveHour{
+		FiveHour: &conversationv1.SessionRateLimitWindowFiveHour{}}}
+}
+
+func sevenDayWindow() *conversationv1.SessionRateLimitType {
+	return &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDay{
+		SevenDay: &conversationv1.SessionRateLimitWindowSevenDay{}}}
+}
+
 // rejectedRateLimit is the vendor's rejected allowance verdict.
 func rejectedRateLimit() *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{

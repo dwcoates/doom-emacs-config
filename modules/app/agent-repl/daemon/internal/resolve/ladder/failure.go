@@ -127,13 +127,64 @@ func ApiFailureBlocks(failed *conversationv1.ApiRequestFailed) bool {
 	}
 }
 
-// RateLimitBlocks reports whether a rate-limit verdict leaves the session
-// vendor-blocked: only a REJECTED one does, and any other verdict lifts a
-// block that stands. Both resolvers apply it to the same event, so the strip
-// and the dot move together.
-func RateLimitBlocks(status *conversationv1.SessionRateLimitStatus) bool {
-	_, rejected := status.GetStatus().(*conversationv1.SessionRateLimitStatus_Rejected)
-	return rejected
+// RateLimitWindow names the allowance window a rate-limit event is about,
+// "unset" when the vendor named none. It is the key RateLimitRejections
+// tracks each window under, and the name every log records.
+func RateLimitWindow(status *conversationv1.SessionRateLimitStatus) string {
+	switch status.GetRateLimitType().GetWindow().(type) {
+	case *conversationv1.SessionRateLimitType_FiveHour:
+		return "five_hour"
+	case *conversationv1.SessionRateLimitType_SevenDay:
+		return "seven_day"
+	case *conversationv1.SessionRateLimitType_SevenDayOpus:
+		return "seven_day_opus"
+	case *conversationv1.SessionRateLimitType_SevenDaySonnet:
+		return "seven_day_sonnet"
+	case *conversationv1.SessionRateLimitType_SevenDayOverageIncluded:
+		return "seven_day_overage_included"
+	case *conversationv1.SessionRateLimitType_Overage:
+		return "overage"
+	default:
+		return "unset"
+	}
+}
+
+// RateLimitRejections is the set of allowance windows whose newest
+// rate-limit verdict REJECTED the session. The vendor gives a verdict per
+// window, so a verdict on one window says nothing about another: an allowed
+// five-hour verdict never lifts a weekly rejection. The session is
+// vendor-blocked by rate limits exactly while the set is non-empty. Both
+// resolvers keep one per workspace and feed it the same events, so the strip
+// and the dot move together. The zero value is an empty set.
+type RateLimitRejections struct {
+	rejected map[string]struct{}
+}
+
+// Observe files one rate-limit event under its window: a rejected verdict
+// adds the window, any other verdict (or none) removes it. It reports whether
+// any window still stands rejected afterwards.
+func (r *RateLimitRejections) Observe(status *conversationv1.SessionRateLimitStatus) bool {
+	window := RateLimitWindow(status)
+	if _, rejected := status.GetStatus().(*conversationv1.SessionRateLimitStatus_Rejected); rejected {
+		if r.rejected == nil {
+			r.rejected = map[string]struct{}{}
+		}
+		r.rejected[window] = struct{}{}
+	} else {
+		delete(r.rejected, window)
+	}
+	return r.Blocked()
+}
+
+// Blocked reports whether any window's newest verdict rejected the session.
+func (r *RateLimitRejections) Blocked() bool {
+	return len(r.rejected) > 0
+}
+
+// Clear forgets every window's rejection, for the moments a resolver lifts
+// the session's block wholesale (a fresh session, a completed sign-in).
+func (r *RateLimitRejections) Clear() {
+	r.rejected = nil
 }
 
 // ApiFailureCuredBySignIn reports whether a failed api request names an

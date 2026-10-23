@@ -41,9 +41,11 @@ func (r *resolver) enduring(s *wsState) *frontendv1.FooterActivityEnduring {
 // never opens the line by itself; its outcome stays visible in the logs
 // (`logUnreadableSample`).
 func (r *resolver) enduringUsage(s *wsState) *frontendv1.FooterActivityEnduringUsage {
-	session := r.allowance(&s.usage.rate.session)
-	weekly := r.allowance(&s.usage.rate.weekly)
-	overage := r.allowance(&s.usage.rate.overage)
+	nowS := r.opts.clock.Now().Unix()
+	rate := &s.usage.rate
+	session := r.allowance(&rate.session, nowS)
+	weekly := r.weeklyAllowance(rate, nowS)
+	overage := r.allowance(&rate.overage, nowS)
 	if session == nil && weekly == nil && overage == nil {
 		return nil
 	}
@@ -54,11 +56,30 @@ func (r *resolver) enduringUsage(s *wsState) *frontendv1.FooterActivityEnduringU
 	}
 }
 
+// weeklyAllowance projects the seven-day windows onto the weekly element: the
+// account-wide window and, beside it, the per-model ones. Nil when none of
+// them is figured; its models are nil when neither model window is.
+func (r *resolver) weeklyAllowance(rate *rateState, nowS int64) *frontendv1.FooterWeeklyAllowance {
+	overall := r.allowance(&rate.weekly, nowS)
+	opus := r.allowance(&rate.weeklyOpus, nowS)
+	sonnet := r.allowance(&rate.weeklySonnet, nowS)
+	var models *frontendv1.FooterWeeklyModelAllowances
+	if opus != nil || sonnet != nil {
+		models = &frontendv1.FooterWeeklyModelAllowances{Opus: opus, Sonnet: sonnet}
+	}
+	if overall == nil && models == nil {
+		return nil
+	}
+	return &frontendv1.FooterWeeklyAllowance{Overall: overall, Models: models}
+}
+
 // allowance projects one window's evidence onto the drawn allowance, or nil
 // when no figure has been observed for it. The status arm is COPIED, arm for
-// arm, from the window's last rate-limit event; no event yet, or an event the
-// vendor left statusless, draws NO arm — nothing is defaulted to "allowed".
-func (r *resolver) allowance(w *allowanceWindow) *frontendv1.FooterAllowance {
+// arm, from the window's last rate-limit event; no event yet, an event the
+// vendor left statusless, or a verdict about a window instance that has
+// since reset (allowanceWindow.liveVerdict) draws NO arm — nothing is
+// defaulted to "allowed".
+func (r *resolver) allowance(w *allowanceWindow, nowS int64) *frontendv1.FooterAllowance {
 	if !w.figured {
 		return nil
 	}
@@ -67,7 +88,7 @@ func (r *resolver) allowance(w *allowanceWindow) *frontendv1.FooterAllowance {
 		ResetsAtS:   w.resetsAtS,
 		Utilization: w.utilization,
 	}
-	switch w.verdict {
+	switch w.liveVerdict(nowS) {
 	case wsm.VerdictAllowed:
 		allowance.Status = &frontendv1.FooterAllowance_Allowed{Allowed: &frontendv1.FooterAllowanceAllowed{}}
 	case wsm.VerdictAllowedWarning:
