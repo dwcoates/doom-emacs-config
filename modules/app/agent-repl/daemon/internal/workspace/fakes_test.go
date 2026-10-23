@@ -1000,6 +1000,11 @@ type fakeGit struct {
 
 	commonDir    string
 	mainWorktree string
+	// mainOf answers MainWorktree per directory, as git does: a worktree
+	// CreateWorktree cut belongs to the repository it was cut from, and that
+	// repository's main worktree belongs to itself. A directory it does not
+	// name answers mainWorktree.
+	mainOf       map[string]string
 	commonDirErr error
 	// outsideEveryRepository makes the RepositoryOf probe answer "not in a
 	// repository", which is an ordinary answer and never an error.
@@ -1113,8 +1118,23 @@ func (g *fakeGit) CommonDir(context.Context, string) (string, error) {
 // MainWorktree answers what registration derives the repository from. The
 // fixture keys it the same way CommonDir is keyed, since a fake repository has
 // exactly one of each.
-func (g *fakeGit) MainWorktree(context.Context, string) (string, error) {
-	return g.mainWorktree, g.commonDirErr
+func (g *fakeGit) MainWorktree(_ context.Context, dir string) (string, error) {
+	if g.commonDirErr != nil {
+		return "", g.commonDirErr
+	}
+	if main, ok := g.mainOf[dir]; ok {
+		return main, nil
+	}
+	return g.mainWorktree, nil
+}
+
+// belongsTo records that DIR is a worktree of the repository whose main
+// worktree is MAIN, exactly as a cut by CreateWorktree would have.
+func (g *fakeGit) belongsTo(t testing.TB, dir, main string) {
+	t.Helper()
+	if err := g.recordCut(main, dir); err != nil {
+		t.Fatalf("record %q as a worktree of %q: %v", dir, main, err)
+	}
 }
 
 // RepositoryOf is the PROBE half: `outsideEveryRepository` is the ordinary
@@ -1148,7 +1168,28 @@ func (g *fakeGit) CreateWorktree(_ context.Context, repoDir, branch, baseRef, wo
 		return g.createErr
 	}
 	g.created = append(g.created, createdWorktree{repoDir, branch, baseRef, worktreeDir})
-	return os.MkdirAll(filepath.Join(worktreeDir, ".git"), 0o755)
+	if err := os.MkdirAll(filepath.Join(worktreeDir, ".git"), 0o755); err != nil {
+		return err
+	}
+	return g.recordCut(repoDir, worktreeDir)
+}
+
+// recordCut records what CreateWorktree made true in git: the new worktree
+// and the repository's own main worktree both belong to the repository.
+func (g *fakeGit) recordCut(repoDir, worktreeDir string) error {
+	if g.mainOf == nil {
+		g.mainOf = map[string]string{}
+	}
+	main, err := normalizeDir(repoDir)
+	if err != nil {
+		return err
+	}
+	cut, err := normalizeDir(worktreeDir)
+	if err != nil {
+		return err
+	}
+	g.mainOf[main], g.mainOf[cut] = main, main
+	return nil
 }
 
 func (g *fakeGit) ListWorktrees(_ context.Context, repoDir string) ([]gitclient.Worktree, error) {

@@ -78,21 +78,25 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 	// to the announcement, so they go to the run log with the directory on
 	// them, and every record from the mint onwards goes to the workspace's
 	// own sink.
-	if facts.RepoDir == "" {
-		// THE REPOSITORY IS ITS MAIN WORKTREE, not its common dir.
-		// workspace.v1's RepositoryRef.dir is "the repository's normalized
-		// main-worktree directory", and the merge geometry a top-level
-		// workspace targets is that same directory: keyed by the common dir,
-		// every merge ran `git -C <repo>/.git` and the self-repo comparison
-		// the rollout trigger keys on could never match.
-		main, err := v.deps.Git.MainWorktree(ctx, normalized)
-		if err != nil {
-			global.Error(opRegister, "could not resolve the repository's main worktree", dlog.Context{"cause": err.Error()})
-			return wsm.Workspace{}, false, fmt.Errorf("register %q: repository main worktree: %w", normalized, err)
-		}
-		facts.RepoDir = main
-		global.Debug(opRegister, "derived the repository from git", dlog.Context{"repo_dir": main})
+	// THE REPOSITORY IS ITS MAIN WORKTREE, not its common dir.
+	// workspace.v1's RepositoryRef.dir is "the repository's normalized
+	// main-worktree directory", and the merge geometry a top-level workspace
+	// targets is that same directory: keyed by the common dir, every merge ran
+	// `git -C <repo>/.git` and the self-repo comparison the rollout trigger
+	// keys on could never match.
+	//
+	// AND IT IS ALWAYS GIT'S TO SAY. The row's repository is the roster's
+	// grouping, so a workspace listed under a repository is a worktree OF that
+	// repository only if the repository is read off the directory itself. A
+	// caller that already knows the repository it means (creation, the main
+	// worktree's own registration) still names it, and the name is checked
+	// against git: a disagreement is a daemon bug, never an answer, so it
+	// fails the registration with nothing written.
+	main, err := v.repositoryOfWorktree(ctx, global, normalized, facts.RepoDir)
+	if err != nil {
+		return wsm.Workspace{}, false, err
 	}
+	facts.RepoDir = main
 	if facts.Branch == "" {
 		branch, err := v.deps.Git.CurrentBranch(ctx, normalized)
 		if err != nil {
@@ -131,13 +135,8 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 	// mints a repository only from that registration (wsm.ensureRepo), so a
 	// linked worktree's announcement registers the main worktree before
 	// itself -- born closed, existing without being opened.
-	repoDir, err := normalizeDir(facts.RepoDir)
-	if err != nil {
-		global.Error(opRegister, "the repository directory cannot be normalized", dlog.Context{"repo_dir": facts.RepoDir, "cause": err.Error()})
-		return wsm.Workspace{}, false, fmt.Errorf("register %q: repository %q: %w", normalized, facts.RepoDir, err)
-	}
-	if !wsm.IsMainWorktree(normalized, repoDir) {
-		if _, err := v.ensureMainWorktree(ctx, global, repoDir, facts.DefaultBranch); err != nil {
+	if !wsm.IsMainWorktree(normalized, facts.RepoDir) {
+		if _, err := v.ensureMainWorktree(ctx, global, facts.RepoDir, facts.DefaultBranch); err != nil {
 			return wsm.Workspace{}, false, err
 		}
 	}
@@ -252,6 +251,48 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 	v.reviveRecordedConversation(ctx, log, record, created)
 	return record, created, nil
 }
+
+// repositoryOfWorktree answers the main worktree of the repository the
+// normalized worktree dir belongs to, read off git. CLAIMED is the repository
+// the caller believes it is registering into, or "" when it does not say; a
+// claim git disagrees with is an invariant violation, recorded at ERROR and
+// answered as ErrRepositoryMismatch.
+//
+// Every failure is recorded here, once, as registerRow's are.
+func (v *verbs) repositoryOfWorktree(ctx context.Context, log dlog.Logger, normalized, claimed string) (string, error) {
+	main, err := v.deps.Git.MainWorktree(ctx, normalized)
+	if err != nil {
+		log.Error(opRegister, "could not resolve the repository's main worktree", dlog.Context{"cause": err.Error()})
+		return "", fmt.Errorf("register %q: repository main worktree: %w", normalized, err)
+	}
+	if main, err = normalizeDir(main); err != nil {
+		log.Error(opRegister, "git's main worktree cannot be normalized", dlog.Context{"cause": err.Error()})
+		return "", fmt.Errorf("register %q: repository main worktree: %w", normalized, err)
+	}
+	if claimed == "" {
+		log.Debug(opRegister, "derived the repository from git", dlog.Context{"repo_dir": main})
+		return main, nil
+	}
+	want, err := normalizeDir(claimed)
+	if err != nil {
+		log.Error(opRegister, "the repository directory cannot be normalized", dlog.Context{"repo_dir": claimed, "cause": err.Error()})
+		return "", fmt.Errorf("register %q: repository %q: %w", normalized, claimed, err)
+	}
+	if want != main {
+		log.Error(opRegister, "the worktree belongs to a different repository than the one it was registered into", dlog.Context{
+			"claimed_repo_dir":    want,
+			"git_repo_dir":        main,
+			"invariant_violation": "a workspace's repository is the repository its worktree belongs to",
+		})
+		return "", fmt.Errorf("register %q into %q: git says it belongs to %q: %w", normalized, want, main, ErrRepositoryMismatch)
+	}
+	log.Debug(opRegister, "git confirmed the repository the worktree is registered into", dlog.Context{"repo_dir": main})
+	return main, nil
+}
+
+// ErrRepositoryMismatch is a registration naming a repository its worktree
+// does not belong to (repositoryOfWorktree).
+var ErrRepositoryMismatch = errors.New("the worktree does not belong to the named repository")
 
 // ensureMainWorktree registers the repository's main worktree at repoDir as a
 // workspace BORN CLOSED, unless the registry already holds a workspace there
