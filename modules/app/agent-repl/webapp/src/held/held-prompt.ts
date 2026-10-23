@@ -54,7 +54,7 @@
  * harmless there — it is the seam, not a promise about who is on the far end.
  */
 import { drawFeedUserPromptBody } from "../feed/rows/user-prompt.js";
-import { labelledControl, setControlsDisabled, type Control } from "../control.js";
+import { labelledControl, whileControlsDisabled, type Control } from "../control.js";
 import { getOption } from "@bufbuild/protobuf";
 import type {
   HeldPrompt,
@@ -853,36 +853,35 @@ async function rowCall(
 ): Promise<boolean> {
   const row = button.parentElement;
   clearRefusalsAfter(row, REFUSAL_KIND);
-  setControlsDisabled(row, true);
-  try {
-    const refused = await attempt();
-    if (refused === null) {
-      log.info(`${rpc} accepted a ${action}`, {
-        operation: "held.held-prompt.action-accepted",
-        context: { turn, action },
+  return whileControlsDisabled(row, async () => {
+    try {
+      const refused = await attempt();
+      if (refused === null) {
+        log.info(`${rpc} accepted a ${action}`, {
+          operation: "held.held-prompt.action-accepted",
+          context: { turn, action },
+        });
+        return true;
+      }
+      drawRefusalAfter(row, REFUSAL_KIND, refused.arm, refused.say);
+      log.warn(`${rpc} refused a ${action}`, {
+        operation: "held.held-prompt.action-refused",
+        context: { turn, action, arm: refused.arm, sentence: refused.say },
       });
-      return true;
+      return false;
+    } catch (err) {
+      // A MALFORMED VIEW IS NOT A TRANSPORT FAILURE: the daemon answered, and
+      // this renderer could not read the answer. It travels up loudly rather
+      // than being drawn as "could not be reached", which would be a lie.
+      if (isMalformedView(err)) throw err;
+      drawRefusalAfter(row, REFUSAL_KIND, "error", "the daemon could not be reached");
+      log.error(`${rpc} failed for a ${action}: ${String(err)}`, {
+        operation: "held.held-prompt.action-failed",
+        context: { turn, action, cause: err },
+      });
+      return false;
     }
-    drawRefusalAfter(row, REFUSAL_KIND, refused.arm, refused.say);
-    log.warn(`${rpc} refused a ${action}`, {
-      operation: "held.held-prompt.action-refused",
-      context: { turn, action, arm: refused.arm, sentence: refused.say },
-    });
-    return false;
-  } catch (err) {
-    // A MALFORMED VIEW IS NOT A TRANSPORT FAILURE: the daemon answered, and
-    // this renderer could not read the answer. It travels up loudly rather
-    // than being drawn as "could not be reached", which would be a lie.
-    if (isMalformedView(err)) throw err;
-    drawRefusalAfter(row, REFUSAL_KIND, "error", "the daemon could not be reached");
-    log.error(`${rpc} failed for a ${action}: ${String(err)}`, {
-      operation: "held.held-prompt.action-failed",
-      context: { turn, action, cause: err },
-    });
-    return false;
-  } finally {
-    setControlsDisabled(row, false);
-  }
+  });
 }
 
 /**
@@ -1044,8 +1043,7 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
     operation: "held.held-prompt.edit",
     context: { turn: spec.turn.value },
   });
-  setControlsDisabled(row, true);
-  try {
+  await whileControlsDisabled(row, async () => {
     let response;
     try {
       response = await callUnary(
@@ -1106,9 +1104,7 @@ async function beginEdit(spec: ActionSpec, button: Control): Promise<void> {
         return unreachableArm("EditHeldPromptResponse.result", other.case);
       }
     }
-  } finally {
-    setControlsDisabled(row, false);
-  }
+  });
 }
 
 /** `UpdateHeldPromptError`'s cause union, narrowed to a SET arm. */

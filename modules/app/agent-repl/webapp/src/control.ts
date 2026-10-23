@@ -160,3 +160,19 @@ export function setControlsDisabled(root: Element | null, disabled: boolean): vo
   if (root === null) return;
   for (const control of queryAll<Control>(root, CONTROL_SELECTOR)) control.disabled = disabled;
 }
+
+/**
+ * Run CALL with every control under ROOT disabled, and re-enable them once it
+ * settles, whatever it answered or threw. The ONE way a row of controls is
+ * disabled for an answer in flight: a row disabled past its call stays dead
+ * for as long as nothing happens to redraw it (2026-10-23, a held prompt's
+ * Send now).
+ */
+export async function whileControlsDisabled<T>(root: Element | null, call: () => Promise<T>): Promise<T> {
+  setControlsDisabled(root, true);
+  try {
+    return await call();
+  } finally {
+    setControlsDisabled(root, false);
+  }
+}

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { CONTROL_SELECTOR, armButtonRole, createControl, isControl, labelledControl, setControlsDisabled } from "../src/control.js";
+import { CONTROL_SELECTOR, armButtonRole, createControl, isControl, labelledControl, setControlsDisabled, whileControlsDisabled } from "../src/control.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeOf, withoutBlockComments } from "./source-text.js";
 import { codeUnder, filesUnder } from "./files-under.js";
@@ -392,11 +392,84 @@ describe("setControlsDisabled", () => {
     expect(() => setControlsDisabled(null, true)).not.toThrow();
   });
 
+});
+
+describe("whileControlsDisabled", () => {
+  /** A root holding two controls, and the aria-disabled each wears. */
+  const root = (): { el: HTMLElement; states: () => (string | null)[] } => {
+    const el = document.createElement("div");
+    const controls = [createControl(), createControl()];
+    el.append(...controls);
+    return { el, states: () => controls.map((c) => c.getAttribute("aria-disabled")) };
+  };
+
+  it("disables every control under the root while the call is in flight", async () => {
+    // Arrange
+    const { el, states } = root();
+    let seen: (string | null)[] = [];
+    // Act
+    await whileControlsDisabled(el, () => {
+      seen = states();
+      return Promise.resolve();
+    });
+    // Assert
+    expect(seen).toEqual(["true", "true"]);
+  });
+
+  it("re-enables every control once the call resolves", async () => {
+    // Arrange
+    const { el, states } = root();
+    // Act
+    await whileControlsDisabled(el, () => Promise.resolve());
+    // Assert
+    expect(states()).toEqual([null, null]);
+  });
+
+  it("answers what the call resolved to", async () => {
+    // Arrange
+    const { el } = root();
+    // Act
+    const answered = await whileControlsDisabled(el, () => Promise.resolve(42));
+    // Assert
+    expect(answered).toBe(42);
+  });
+
+  it("re-enables every control and rethrows when the call rejects", async () => {
+    // Arrange
+    const { el, states } = root();
+    const cause = new Error("boom");
+    // Act
+    const thrown = await whileControlsDisabled(el, () => Promise.reject(cause)).catch((err: unknown) => err);
+    // Assert
+    expect([thrown, states()]).toEqual([cause, [null, null]]);
+  });
+
+  it("runs the call for a root already gone", async () => {
+    // Arrange
+    let ran = false;
+    // Act
+    await whileControlsDisabled(null, () => {
+      ran = true;
+      return Promise.resolve();
+    });
+    // Assert
+    expect(ran).toBe(true);
+  });
+
   it.each(["held/held-prompt.ts", "feed/merge/queue-offer.ts"])("is how %s disables its answers", (file) => {
     const code = codeOf(readFileSync(path.join(SRC, file), "utf8"));
-    expect([/\bsetControlsDisabled\(/.test(code), /querySelectorAll<Control>\(CONTROL_SELECTOR\)/.test(code)]).toEqual([
+    expect([/\bwhileControlsDisabled\(/.test(code), /querySelectorAll<Control>\(CONTROL_SELECTOR\)/.test(code)]).toEqual([
       true,
       false,
     ]);
+  });
+
+  it("is the only way src disables a row of controls", () => {
+    // Arrange
+    const files = [...codeUnder(SRC)].filter(([file]) => !`${path.sep}${file}`.endsWith(`${path.sep}control.ts`));
+    // Act
+    const handRolled = files.filter(([, code]) => /\bsetControlsDisabled\(/.test(code)).map(([file]) => file);
+    // Assert
+    expect(handRolled).toEqual([]);
   });
 });

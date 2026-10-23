@@ -17,7 +17,7 @@
  *
  * THE HEADLINE IS THE DAEMON'S SENTENCE, drawn verbatim.
  */
-import { labelledControl, setControlsDisabled, type Control } from "../../control.js";
+import { labelledControl, whileControlsDisabled, type Control } from "../../control.js";
 import type { FeedMergeQueueOffer, FeedRow } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   AnswerMergeQueueOfferResponseSchema,
@@ -123,47 +123,46 @@ async function answer(
 ): Promise<void> {
   const actions = button.parentElement;
   clearRefusalsAfter(actions, REFUSAL_KIND);
-  setControlsDisabled(actions, true);
   controls.dismiss();
   log.info(`answering the merge-queue question: ${decision}`, {
     operation: "merge.queue-offer.answer",
     context: { decision },
   });
-  try {
-    const response = await callUnary(
-      ctx,
-      "AnswerMergeQueueOffer",
-      (client) =>
-        client.answerMergeQueueOffer({
-          workspace: ctx.workspace,
-          decision: decisionArm(decision),
-        }),
-      AnswerMergeQueueOfferResponseSchema,
-    );
-    const result = requireCase(response.result, "AnswerMergeQueueOfferResponse.result");
-    if (result.case === "success") return;
-    const cause = requireCase(result.value.cause, "AnswerMergeQueueOfferError.cause");
-    const say = crossCuttingSentence("AnswerMergeQueueOffer", cause) ?? answerMergeQueueOfferRefusal(cause);
-    drawRefusalAfter(actions, REFUSAL_KIND, cause.case, say);
-    controls.restore();
-    log.warn(`AnswerMergeQueueOffer refused a ${decision}`, {
-      operation: "merge.queue-offer.refused",
-      context: { decision, arm: cause.case, sentence: say },
-    });
-  } catch (err) {
-    // A MALFORMED VIEW IS NOT A TRANSPORT FAILURE: the daemon answered, and
-    // this renderer could not read the answer. It travels up loudly rather
-    // than being drawn as "could not be reached", which would be a lie.
-    if (isMalformedView(err)) throw err;
-    drawRefusalAfter(actions, REFUSAL_KIND, "error", "the daemon could not be reached");
-    controls.restore();
-    log.error(`AnswerMergeQueueOffer failed for a ${decision}: ${String(err)}`, {
-      operation: "merge.queue-offer.failed",
-      context: { decision, cause: err },
-    });
-  } finally {
-    setControlsDisabled(actions, false);
-  }
+  await whileControlsDisabled(actions, async () => {
+    try {
+      const response = await callUnary(
+        ctx,
+        "AnswerMergeQueueOffer",
+        (client) =>
+          client.answerMergeQueueOffer({
+            workspace: ctx.workspace,
+            decision: decisionArm(decision),
+          }),
+        AnswerMergeQueueOfferResponseSchema,
+      );
+      const result = requireCase(response.result, "AnswerMergeQueueOfferResponse.result");
+      if (result.case === "success") return;
+      const cause = requireCase(result.value.cause, "AnswerMergeQueueOfferError.cause");
+      const say = crossCuttingSentence("AnswerMergeQueueOffer", cause) ?? answerMergeQueueOfferRefusal(cause);
+      drawRefusalAfter(actions, REFUSAL_KIND, cause.case, say);
+      controls.restore();
+      log.warn(`AnswerMergeQueueOffer refused a ${decision}`, {
+        operation: "merge.queue-offer.refused",
+        context: { decision, arm: cause.case, sentence: say },
+      });
+    } catch (err) {
+      // A MALFORMED VIEW IS NOT A TRANSPORT FAILURE: the daemon answered, and
+      // this renderer could not read the answer. It travels up loudly rather
+      // than being drawn as "could not be reached", which would be a lie.
+      if (isMalformedView(err)) throw err;
+      drawRefusalAfter(actions, REFUSAL_KIND, "error", "the daemon could not be reached");
+      controls.restore();
+      log.error(`AnswerMergeQueueOffer failed for a ${decision}: ${String(err)}`, {
+        operation: "merge.queue-offer.failed",
+        context: { decision, cause: err },
+      });
+    }
+  });
 }
 
 /** The decision arm, built by name so a fourth answer is a compile error. */
