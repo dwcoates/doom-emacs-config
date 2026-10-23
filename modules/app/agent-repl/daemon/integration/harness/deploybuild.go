@@ -144,7 +144,7 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
     cp ` + shellword.Quote(daemonBinary) + ` "$out/daemon/bin/agent-repld"
   fi
   if [ "$mode" = "` + string(DeployStaleWebapp) + `" ]; then
-    printf '<script src="/assets/index-` + stagedWebappEntry + `.js"></script>' > "$out/webapp/dist/index.html"
+    printf '<html><script src="/assets/index-` + stagedWebappEntry + `.js"></script></html>' > "$out/webapp/dist/index.html"
     printf '// fresh\n' > "$out/webapp/dist/assets/index-` + stagedWebappEntry + `.js"
   fi
   for f in built-sha source-tree; do

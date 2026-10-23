@@ -295,7 +295,7 @@ func NewFakeWebappDist(t testing.TB, dir string) string {
 	}
 	// The entry names a hashed bundle exactly as Vite's does, because the
 	// deploy reads the served webapp's build off it (FakeWebappEntry).
-	writeFile(t, filepath.Join(dir, "index.html"), "<!doctype html><title>agent-repl</title><script src=\"/assets/index-"+FakeWebappEntry+".js\"></script>")
+	writeFile(t, filepath.Join(dir, "index.html"), "<!doctype html><html><title>agent-repl</title><script src=\"/assets/index-"+FakeWebappEntry+".js\"></script></html>")
 	writeFile(t, filepath.Join(assets, "index-"+FakeWebappEntry+".js"), "// fake webapp bundle\n")
 	writeFile(t, filepath.Join(assets, "app.js"), "// fake webapp asset\n")
 	return dir

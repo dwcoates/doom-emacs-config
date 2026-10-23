@@ -1,9 +1,12 @@
 package server
 
 import (
+	"bytes"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"agent-repld/internal/dlog"
@@ -18,6 +21,14 @@ import (
 // Cache-Control: no-store, so a rebuilt webapp is picked up by a reload rather
 // than by a cache eviction. NOTHING ELSE gets that header: the hashed bundles
 // beneath it are immutable by name and must stay cacheable.
+//
+// THE FEED TEXT ZOOM IS STAMPED INTO THE ENTRY POINT. The document's <html>
+// element is served carrying the zoom in force as an inline
+// `--feed-text-scale`, the same property feed/feed-text-scale.ts writes, so a
+// page's FIRST paint already draws feed text at the user's zoom. The feed
+// watch's FeedTextScale push still carries every later change, but it arrives
+// only after the first page of rows is painted, which drew a visible snap from
+// the default size to the saved one on every page load.
 
 // opAssets is the asset origin's operation name.
 const opAssets = "daemon.server.assets"
@@ -76,10 +87,18 @@ func (s *server) serveEntryPoint(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the webapp entry point is not readable", http.StatusInternalServerError)
 		return
 	}
+	scale := s.currentFeedTextScale()
+	body, err = stampFeedTextScale(body, scale)
+	if err != nil {
+		s.log.Error(opAssets, "the webapp entry point could not carry the feed text scale",
+			dlog.Context{"path": target, "scale": scale, "cause": err.Error()})
+		http.Error(w, "the webapp entry point has no single <html> element", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	s.log.Debug(opAssets, "served the webapp entry point",
-		dlog.Context{"path": target, "bytes": len(body), "modified": info.ModTime().String()})
+		dlog.Context{"path": target, "bytes": len(body), "modified": info.ModTime().String(), "feed_text_scale": scale})
 	if r.Method == http.MethodHead {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -88,6 +107,28 @@ func (s *server) serveEntryPoint(w http.ResponseWriter, r *http.Request) {
 		s.log.Debug(opAssets, "the client went away mid-entry-point",
 			dlog.Context{"cause": err.Error()})
 	}
+}
+
+// htmlOpenTag is the entry document's root element's opening, the one place
+// stampFeedTextScale writes.
+const htmlOpenTag = "<html"
+
+// stampFeedTextScale writes `scale` onto the entry document's <html> element as
+// an inline `--feed-text-scale` (the property styles.css multiplies every feed
+// font size by). An inline style on the root element outranks the stylesheet's
+// `:root` default, so the stamped value is in force from the first paint. A
+// document without exactly one <html> opening tag is a broken build, refused
+// rather than served unscaled.
+func stampFeedTextScale(body []byte, scale float64) ([]byte, error) {
+	if n := bytes.Count(body, []byte(htmlOpenTag)); n != 1 {
+		return nil, fmt.Errorf("the entry document carries %d %q opening tags, want exactly 1", n, htmlOpenTag)
+	}
+	at := bytes.Index(body, []byte(htmlOpenTag)) + len(htmlOpenTag)
+	attr := ` style="--feed-text-scale: ` + strconv.FormatFloat(scale, 'g', -1, 64) + `"`
+	out := make([]byte, 0, len(body)+len(attr))
+	out = append(out, body[:at]...)
+	out = append(out, attr...)
+	return append(out, body[at:]...), nil
 }
 
 // path normalizes a request path to a slash-relative asset path.

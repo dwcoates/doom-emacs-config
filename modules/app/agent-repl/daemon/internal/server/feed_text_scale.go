@@ -108,6 +108,14 @@ func clampFeedTextScale(scale float64) float64 {
 	return scale
 }
 
+// currentFeedTextScale reads the zoom in force, which the entry point stamps
+// into every page it serves (assets.go).
+func (s *server) currentFeedTextScale() float64 {
+	s.feedTextScaleMu.Lock()
+	defer s.feedTextScaleMu.Unlock()
+	return s.feedTextScale
+}
+
 // SeedFeedTextScale sets the in-memory scale and publishes it onto the feed
 // watch topic. Prime calls it at boot with the persisted value so a feed opened
 // before the first nudge is handed the zoom the user last chose (a topic
