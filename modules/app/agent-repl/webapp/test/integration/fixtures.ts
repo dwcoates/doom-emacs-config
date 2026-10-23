@@ -2845,6 +2845,9 @@ export const WATCH_DAEMON_PUSHES = [
   // The machine's persistent-wifi standing: an EMACS stream's alone too (a
   // webview draws it as its topbar's chip), skipped as the same skew.
   "persistentWifi",
+  // The web view host's reload onto a new build: an EMACS stream's alone
+  // (Emacs owns the host), skipped as the same skew.
+  "reloadWebhost",
   // The planned end of the stream: consumed by the stream pipeline itself
   // (`plannedEnding`), which then reopens without filing a failure.
   "ending",
