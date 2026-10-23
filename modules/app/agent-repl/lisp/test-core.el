@@ -3840,6 +3840,115 @@ another process removes is."
       (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
         (should (equal (alist-get 'unroutable_workspace record) "mid-record-ws"))))))
 
+(defmacro agent-repl-test--with-tree-departing-under-a-standing-root (ws &rest body)
+  "Run BODY with WS registered at a root whose `.claude' goes as its link is re-made.
+The root still stands, as it does for the whole of a removal that deletes
+it last; the `.claude/emacs' directory the link needs is missing."
+  (declare (indent 1))
+  `(let ((project (make-temp-file "agent-repl-departing-tree-" t))
+         (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+     (unwind-protect
+         (progn
+           (agent-repl--ws-put ,ws :project-dir project)
+           (cl-letf (((symbol-function 'agent-repl--workspace-emacs-log-target)
+                      (lambda (_ws)
+                        (signal 'file-missing
+                                (list "Creating directory" "No such file or directory"
+                                      (expand-file-name ".claude/emacs" project)))))
+                     ((symbol-function 'display-warning) #'ignore))
+             ,@body))
+       (delete-directory project t))))
+
+(ert-deftest agent-repl-test-a-tree-departing-under-a-standing-root-does-not-signal ()
+  "A removal under way, its root still standing, never signals into the logging caller."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (agent-repl-test--with-tree-departing-under-a-standing-root "departing-ws"
+        ;; Act / Assert: a returned record, not a signal.
+        (should (agent-repl--info "departing-ws" "elisp.test.departing payload"))))))
+
+(ert-deftest agent-repl-test-a-tree-departing-under-a-standing-root-lands-the-record-centrally ()
+  "The record a departing tree could not host is written centrally, naming its workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (agent-repl-test--with-tree-departing-under-a-standing-root "departing-ws"
+        ;; Act
+        (agent-repl--info "departing-ws" "elisp.test.departing payload"))
+      ;; Assert
+      (let ((record (agent-repl-test--log-record-for path "elisp-test-departing")))
+        (should (equal (alist-get 'unroutable_workspace record) "departing-ws"))))))
+
+(ert-deftest agent-repl-test-a-tree-departing-under-a-standing-root-announces-the-fallback ()
+  "The fallback names the missing path, as any other central fallback names its reason."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (agent-repl-test--with-tree-departing-under-a-standing-root "departing-ws"
+        ;; Act
+        (agent-repl--info "departing-ws" "elisp.test.departing payload"))
+      ;; Assert
+      (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
+        (should (equal (alist-get 'unroutable_workspace record) "departing-ws"))
+        (should (string-search ".claude/emacs" (alist-get 'message record)))))))
+
+(ert-deftest agent-repl-test-log-tree-departing-is-a-missing-path-below-the-root ()
+  "A missing path below the workspace's root is a departing tree."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "tree-ws" :project-dir "/tmp/agent-repl-tree-root")
+    ;; Act / Assert
+    (should (agent-repl--log-tree-departing-p
+             "tree-ws" '(file-missing "Creating directory" "No such file or directory"
+                     "/tmp/agent-repl-tree-root/.claude/emacs")))))
+
+(ert-deftest agent-repl-test-log-tree-departing-is-not-a-missing-path-elsewhere ()
+  "A missing path outside the workspace's tree is not."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "tree-ws" :project-dir "/tmp/agent-repl-tree-root")
+    ;; Act / Assert
+    (should-not (agent-repl--log-tree-departing-p
+             "tree-ws" '(file-missing "Opening output file" "No such file or directory"
+                     "/tmp/agent-repl-elsewhere/emacs.log")))))
+
+(ert-deftest agent-repl-test-log-tree-departing-is-not-a-sibling-sharing-the-roots-prefix ()
+  "A sibling whose name merely starts with the root's is not inside it."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "tree-ws" :project-dir "/tmp/agent-repl-tree-root")
+    ;; Act / Assert
+    (should-not (agent-repl--log-tree-departing-p
+             "tree-ws" '(file-missing "Creating directory" "No such file or directory"
+                     "/tmp/agent-repl-tree-root-sibling/.claude")))))
+
+(ert-deftest agent-repl-test-log-tree-departing-is-not-another-file-error ()
+  "Only a missing path is a departure; a refused one is not."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "tree-ws" :project-dir "/tmp/agent-repl-tree-root")
+    ;; Act / Assert
+    (should-not (agent-repl--log-tree-departing-p
+             "tree-ws" '(file-error "Creating directory" "Permission denied"
+                     "/tmp/agent-repl-tree-root/.claude/emacs")))))
+
+(ert-deftest agent-repl-test-a-missing-path-outside-the-tree-while-routable-is-signalled ()
+  "A `file-missing' naming no path of the workspace's tree is not rerouted."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      ;; Arrange
+      (let ((project (make-temp-file "agent-repl-missing-elsewhere-" t)))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put "elsewhere-ws" :project-dir project)
+              (cl-letf (((symbol-function 'agent-repl--workspace-emacs-log-target)
+                         (lambda (_ws)
+                           (signal 'file-missing
+                                   (list "Opening output file" "No such file or directory"
+                                         "/tmp/agent-repl-runtime-target/emacs.log")))))
+                ;; Act / Assert
+                (should-error (agent-repl--info "elsewhere-ws" "elisp.test.elsewhere payload")
+                              :type 'file-missing)))
+          (delete-directory project t))))))
+
 (ert-deftest agent-repl-test-a-sink-failure-while-still-routable-is-signalled ()
   "A write failure for a workspace that still owns its sink is not rerouted."
   (agent-repl-test--with-clean-state

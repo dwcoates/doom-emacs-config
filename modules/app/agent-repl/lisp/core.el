@@ -2442,6 +2442,22 @@ Return when the window ends, nil for `info'."
   "Whether a LEVEL / VERBOSITY record clears `agent-repl-log-buffer-level'."
   (agent-repl--log-record-clears-p level verbosity agent-repl-log-buffer-level))
 
+(defun agent-repl--log-tree-departing-p (ws err)
+  "Non-nil when ERR is a path of WS's own tree going missing under a record.
+A worktree's removal deletes its root last, so while it runs the root still
+stands and the workspace still routes, but re-making its `.claude/emacs'
+link fails with `file-missing' naming a path below that root: on
+2026-10-23 every roster push during a merge's removal signalled so and was
+dropped whole.  ERR's last datum is the file it names; a missing file
+anywhere else (the runtime-owned target) is not this fact."
+  (let ((root (agent-repl--ws-get ws :project-dir))
+        (file (car (last err))))
+    (and (eq (car err) 'file-missing)
+         (stringp root)
+         (stringp file)
+         (string-prefix-p (file-name-as-directory (expand-file-name root))
+                          (expand-file-name file)))))
+
 (cl-defun agent-repl--emit-log-record
     (ws level verbosity fmt args &key operation-fmt message-mode fatal)
   "Build, route, persist, and present one log record.
@@ -2573,8 +2589,12 @@ formatted message and the display text are not built."
           ;; time its identity is stamped or its link re-made.  That is the same
           ;; fact routing would have found a moment later, so the record takes
           ;; the same central fallback rather than signalling into its caller.
-          ;; A failure while the workspace is STILL routable is not that fact
-          ;; and is signalled unchanged.
+          ;; So does a path of the workspace's own tree going missing while its
+          ;; root still stands: a removal deletes the root LAST, so for the
+          ;; whole of it the root is routable and its `.claude' is not
+          ;; (`agent-repl--log-tree-departing-p').  Any other failure while the
+          ;; workspace is still routable is not that fact and is signalled
+          ;; unchanged.
           (condition-case err
               (if (not build)
                   (progn
@@ -2586,8 +2606,9 @@ formatted message and the display text are not built."
                   (agent-repl--do-log-to-file record sink-ws)))
             (error
              (unless (and sink-ws
-                          (not (let ((agent-repl--log-dir-confirmed nil))
-                                 (agent-repl--ws-log-routable-p sink-ws))))
+                          (or (agent-repl--log-tree-departing-p sink-ws err)
+                              (not (let ((agent-repl--log-dir-confirmed nil))
+                                     (agent-repl--ws-log-routable-p sink-ws)))))
                (signal (car err) (cdr err)))
              (announce-central-fallback sink-ws (error-message-string err))
              (if (not build)
