@@ -2302,14 +2302,7 @@ describe("a turn the vendor started on its own", () => {
 describe("a prompt joining the running turn", () => {
   /** Send `turnId` to join the running turn, and answer its client uuid. */
   async function join(h: Harness, turnId: string): Promise<string> {
-    const response = await h.engine.startTurn(
-      create(shimv1.StartTurnRequestSchema, {
-        turn: create(conversationv1.TurnIdSchema, { value: turnId }),
-        said: textSaid("also this"),
-        origin: conversationv1.PromptOrigin.USER_SENT,
-        joinRunningTurn: true,
-      }),
-    );
+    const response = await sendJoin(h, turnId);
     if (response.result.case !== "success") throw new Error(`the join was refused: ${response.result.case}`);
     return h.minted.at(-1) ?? "";
   }
@@ -2677,18 +2670,6 @@ describe("a prompt joining the running turn", () => {
  * of the vendor's queue, and the vendor's answer decides its one door.
  */
 describe("a prompt waiting to join when an ask opens", () => {
-  /** Send `turnId` to join the running turn, answering the StartTurn. */
-  function sendJoin(h: Harness, turnId: string): Promise<shimv1.StartTurnResponse> {
-    return h.engine.startTurn(
-      create(shimv1.StartTurnRequestSchema, {
-        turn: create(conversationv1.TurnIdSchema, { value: turnId }),
-        said: textSaid("also this"),
-        origin: conversationv1.PromptOrigin.USER_SENT,
-        joinRunningTurn: true,
-      }),
-    );
-  }
-
   /** Run turn-1 and send turn-2 to join it; answers turn-1's and the join's client uuids. */
   async function joining(h: Harness): Promise<{ running: string; joined: string }> {
     await started(h);
@@ -9186,6 +9167,18 @@ function conversationResetMessage(uuid: string): SdkMessage {
 }
 
 /** Open a real turn, without waiting on anything it produces. */
+/** Send `turnId` to join the running turn (`join_running_turn`), answering the StartTurn. */
+function sendJoin(h: Harness, turnId: string): Promise<shimv1.StartTurnResponse> {
+  return h.engine.startTurn(
+    create(shimv1.StartTurnRequestSchema, {
+      turn: create(conversationv1.TurnIdSchema, { value: turnId }),
+      said: textSaid("also this"),
+      origin: conversationv1.PromptOrigin.USER_SENT,
+      joinRunningTurn: true,
+    }),
+  );
+}
+
 async function realPrompt(h: Harness, turnId: string): Promise<void> {
   await h.engine.startTurn(
     create(shimv1.StartTurnRequestSchema, {
