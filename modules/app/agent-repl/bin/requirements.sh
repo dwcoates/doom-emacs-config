@@ -23,7 +23,8 @@
 #   emacs                    the emacs on PATH at a minimum version, with features
 #   env                      an environment variable the user sets
 #   notification_permission  macOS lets a banner program notify
-#   skill_link               a Claude Code skill linked into ~/.claude/skills
+#   skill_link               a Claude Code skill linked into the skills directory of
+#                            every Claude config root agent-repl runs sessions under
 #                            (`"retired": true`: our link is removed instead)
 #   git_hook                 a managed git hook in the repository's hooks dir
 #   launchd_service          a launchd user agent installed and running: its
@@ -61,6 +62,18 @@ BUILD_FRONTEND="${AGENT_REPL_REQUIREMENTS_BUILD:-$MODULE_DIR/bin/build-frontend.
 LAUNCHCTL="${AGENT_REPL_LAUNCHCTL:-launchctl}"
 CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl"
 SKILLS_DIR="$HOME/.claude/skills"
+
+# skills_dirs: every skills directory a skill link is kept in, one per line.
+# A session runs under ~/.claude, or, for a workspace under MULTI_REPO_ROOT,
+# under the work account's config root MULTI_REPO_CONFIG_DIR (the same value
+# Emacs passes the daemon as --multi-repo-config-dir). A skill linked into the
+# first alone is missing from every session of the second.
+skills_dirs() {
+  printf '%s\n' "$SKILLS_DIR"
+  if [ -n "${MULTI_REPO_CONFIG_DIR:-}" ]; then
+    printf '%s/skills\n' "$MULTI_REPO_CONFIG_DIR"
+  fi
+}
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 
 # ---------------------------------------------------------------------------
@@ -338,8 +351,8 @@ in_linked_worktree() {
 # stands at its name; a file of the user's there is theirs, and not ours to
 # report.
 check_retired_skill_link() {
-  local e="$1" dest src
-  dest="$SKILLS_DIR/$(field "$e" .name)"
+  local e="$1" dir="$2" dest src
+  dest="$dir/$(field "$e" .name)"
   src="$(skill_source "$e")"
   FIX="rm $dest"
   if [ -L "$dest" ] && { [ "$(readlink "$dest")" = "$src" ] || [ ! -e "$dest" ]; }; then
@@ -349,14 +362,27 @@ check_retired_skill_link() {
   fi
 }
 
+# check_skill_link ENTRY: the link checked in every skills directory
+# (skills_dirs); the first directory where it is not ok decides the status.
 check_skill_link() {
-  local e="$1" name src dest
+  local e="$1" dir joined=""
+  while IFS= read -r dir; do
+    check_skill_link_in "$e" "$dir"
+    if [ "$STATUS" != ok ]; then return; fi
+    joined="${joined:+$joined; }$DETAIL"
+  done < <(skills_dirs)
+  DETAIL="$joined"
+}
+
+# check_skill_link_in ENTRY DIR: the link checked in the one skills directory DIR.
+check_skill_link_in() {
+  local e="$1" dir="$2" name src dest
   if [ "$(printf '%s\n' "$e" | jq -r '.retired // false')" = true ]; then
-    check_retired_skill_link "$e"
+    check_retired_skill_link "$e" "$dir"
     return
   fi
   name="$(field "$e" .name)"
-  dest="$SKILLS_DIR/$name"
+  dest="$dir/$name"
   src="$(skill_source "$e")"
   if [ -z "$src" ]; then
     STATUS=needs-user; DETAIL="$(field "$e" .source.env) is not set, so $name has no source"
@@ -543,15 +569,24 @@ install_notification_permission() {
 }
 
 install_skill_link() {
-  local e="$1" src
+  local e="$1" src dir name
+  name="$(field "$e" .name)"
   if [ "$(printf '%s\n' "$e" | jq -r '.retired // false')" = true ]; then
-    rm -f "$SKILLS_DIR/$(field "$e" .name)"
+    src="$(skill_source "$e")"
+    while IFS= read -r dir; do
+      # Only a link of ours comes out; a file or a foreign link is the user's.
+      if [ -L "$dir/$name" ] && { [ "$(readlink "$dir/$name")" = "$src" ] || [ ! -e "$dir/$name" ]; }; then
+        rm -f "$dir/$name"
+      fi
+    done < <(skills_dirs)
     return
   fi
   src="$(skill_source "$e")"
   [ -n "$src" ] && [ -e "$src" ] || return 1
-  mkdir -p "$SKILLS_DIR"
-  ln -sfn "$src" "$SKILLS_DIR/$(field "$e" .name)"
+  while IFS= read -r dir; do
+    mkdir -p "$dir"
+    ln -sfn "$src" "$dir/$name"
+  done < <(skills_dirs)
 }
 
 install_git_hook() {
@@ -643,11 +678,13 @@ uninstall_entry() {
   kind="$(field "$e" .kind)"
   case "$kind" in
     skill_link)
-      dest="$SKILLS_DIR/$(field "$e" .name)"
       src="$(skill_source "$e")"
-      if [ -L "$dest" ] && [ -n "$src" ] && [ "$(readlink "$dest")" = "$src" ]; then
-        rm -f "$dest"; say "uninstall: removed $dest"
-      fi ;;
+      while IFS= read -r dir; do
+        dest="$dir/$(field "$e" .name)"
+        if [ -L "$dest" ] && [ -n "$src" ] && [ "$(readlink "$dest")" = "$src" ]; then
+          rm -f "$dest"; say "uninstall: removed $dest"
+        fi
+      done < <(skills_dirs) ;;
     git_hook)
       hook_paths "$e"
       if [ -e "$HOOK_DEST" ] && [ "$HOOK_SRC" -ef "$HOOK_DEST" ]; then
