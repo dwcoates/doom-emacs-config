@@ -31,7 +31,10 @@
   (declare (indent 0))
   `(agent-repl-test--with-clean-state
      (let ((agent-repl-test-wh--calls nil)
-           (agent-repl-test-wh--host 'host-xwidget))
+           (agent-repl-test-wh--host 'host-xwidget)
+           (agent-repl--webhost-url nil)
+           (agent-repl--webhost-daemon-origin nil)
+           (agent-repl--webhost-reload-started-ms nil))
        (cl-letf (((symbol-function 'agent-repl-webhost-xwidget)
                   (lambda () agent-repl-test-wh--host))
                  ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
@@ -351,12 +354,14 @@ so stubbing the accessor would not reach the code under test."
                    (list (agent-repl--webhost-script "reload" "id-alpha" 1700000000500))))))
 
 (ert-deftest agent-repl-test-wh-reloading-a-page-whose-url-moved-re-points-it ()
-  "A handover moves the URL; the page is pointed at the new one."
+  "A handover moves the URL; the page is pointed at the new one, with the reload's start."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
     (cl-letf (((symbol-function 'agent-repl-frontend-webview-url)
                (lambda (_ws) "http://ws-alpha.localhost:2/"))
+              ((symbol-function 'agent-repl-host-conn)
+               (let ((successor (agent-repl-test-wh--conn "127.0.0.1:2"))) (lambda (_ws) successor)))
               ((symbol-function 'agent-repl--now-unix-ms) (lambda () 1700000000500)))
       ;; Act
       (agent-repl-webhost-reload-page "alpha"))
@@ -365,12 +370,13 @@ so stubbing the accessor would not reach the code under test."
     (should (equal (cadr (agent-repl-test-wh--sent "ensure"))
                    (agent-repl--webhost-script "ensure" "id-alpha" "http://ws-alpha.localhost:2/" nil 1700000000500)))))
 
-(ert-deftest agent-repl-test-wh-a-page-moved-to-another-daemon-reloads-the-host-there ()
-  "The host draws the sidebar over its own daemon connection, so it follows a handover."
+(ert-deftest agent-repl-test-wh-a-page-moved-to-another-daemon-moves-the-hosts-calls-without-reloading-it ()
+  "A handover never reloads the host: its own calls follow the page to the successor."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
-    (setq agent-repl--webhost-url "http://host.localhost:1/?host=1")
+    (setq agent-repl--webhost-url "http://host.localhost:1/?host=1"
+          agent-repl--webhost-daemon-origin nil)
     (let ((reloaded nil)
           (successor (agent-repl-test-wh--conn "127.0.0.1:2")))
       (cl-letf (((symbol-function 'agent-repl-frontend-webview-url)
@@ -380,9 +386,47 @@ so stubbing the accessor would not reach the code under test."
         ;; Act
         (agent-repl-webhost-reload-page "alpha"))
       ;; Assert
-      (should (equal reloaded (list successor)))
+      (should (null reloaded))
+      (should (equal (agent-repl-test-wh--sent "setDaemon")
+                     (list (agent-repl--webhost-script "setDaemon" "http://host.localhost:2"))))
       (should (equal (gethash "id-alpha" agent-repl--webhost-pages) "http://ws-alpha.localhost:2/"))
-      (should (= 1 (length (agent-repl-test-wh--sent "ensure")))))))
+      (should (= 2 (length (agent-repl-test-wh--sent "ensure")))))))
+
+(ert-deftest agent-repl-test-wh-the-hosts-calls-move-once-per-daemon ()
+  "Every page of a handover names the same successor; the host is told it once."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (setq agent-repl--webhost-url "http://host.localhost:1/?host=1"
+          agent-repl--webhost-daemon-origin nil)
+    (let ((successor (agent-repl-test-wh--conn "127.0.0.1:2")))
+      ;; Act
+      (agent-repl-webhost-follow-daemon "alpha" successor)
+      (agent-repl-webhost-follow-daemon "beta" successor)
+      ;; Assert
+      (should (= 1 (length (agent-repl-test-wh--sent "setDaemon")))))))
+
+(ert-deftest agent-repl-test-wh-the-hosts-own-daemon-moves-nothing ()
+  "A page re-pointed onto the daemon that served the host tells the host nothing."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (setq agent-repl--webhost-url "http://host.localhost:2/?host=1"
+          agent-repl--webhost-daemon-origin nil)
+    ;; Act
+    (agent-repl-webhost-follow-daemon "alpha" (agent-repl-test-wh--conn "127.0.0.1:2"))
+    ;; Assert
+    (should-not (agent-repl-test-wh--sent "setDaemon"))))
+
+(ert-deftest agent-repl-test-wh-a-host-reload-forgets-where-its-calls-were-moved ()
+  "A host loaded on a daemon dials that daemon, so a later move is measured from there."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (setq agent-repl--webhost-daemon-origin "http://host.localhost:2")
+    (cl-letf (((symbol-function 'agent-repl-webhost-url) (lambda (_conn) "http://host.localhost:3/?host=1"))
+              ((symbol-function 'agent-repl--frontend-webview-navigate-widget) (lambda (_xw _url) nil)))
+      ;; Act
+      (agent-repl--webhost-reload-now 'conn))
+    ;; Assert
+    (should-not agent-repl--webhost-daemon-origin)))
 
 (ert-deftest agent-repl-test-wh-a-page-moved-to-the-hosts-own-daemon-is-re-pointed ()
   "A page moved onto the daemon the host already talks to is re-pointed, the host left alone."

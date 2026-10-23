@@ -136,6 +136,7 @@
 (declare-function agent-repl-webhost-show "webhost" (ws))
 (declare-function agent-repl-webhost-buffer "webhost" ())
 (declare-function agent-repl-webhost-url "webhost" (conn))
+(defvar agent-repl--webhost-url)
 (declare-function agent-repl-webhost-reload "webhost" (conn))
 (declare-function agent-repl-webhost-reload-onto "webhost" (conn build))
 (declare-function agent-repl--ws-resolve-persp "workspace" (ws))
@@ -1295,16 +1296,19 @@ build it runs (a restart replaced its shim)."
   (when-let ((xw (agent-repl-webhost-xwidget)))
     (agent-repl--frontend-webview-uri xw)))
 
-(defun agent-repl--frontend-host-at-home-p (ws uri)
-  "Return non-nil when URI is the host page on the daemon that owns WS.
-Home is the host page's ORIGIN on that daemon, not its full URL.  An unknown
-or empty URI is not home: a web view that cannot say where it is has no
-claim on being left alone."
+(defun agent-repl--frontend-host-at-home-p (_ws uri)
+  "Return non-nil when URI is the host page where the host last loaded it.
+Home is the host page's ORIGIN at its last load (`agent-repl--webhost-url'),
+not its full URL, and not the daemon that owns the workspace now: a
+handover moves the workspaces without reloading the host (webhost.el).  An
+unknown or empty URI is not home: a web view that cannot say where it is
+has no claim on being left alone, and neither does a host never loaded."
   (and (stringp uri)
        (not (string-empty-p uri))
-       (when-let ((conn (and (fboundp 'agent-repl-host-conn) (agent-repl-host-conn ws))))
+       agent-repl--webhost-url
+       (progn
          (let ((there (url-generic-parse-url uri))
-               (home (url-generic-parse-url (agent-repl-webhost-url conn))))
+               (home (url-generic-parse-url agent-repl--webhost-url)))
            (and (equal (url-type there) (url-type home))
                 (equal (url-host there) (url-host home))
                 (equal (url-port there) (url-port home))

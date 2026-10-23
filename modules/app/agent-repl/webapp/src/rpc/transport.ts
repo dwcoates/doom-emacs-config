@@ -7,12 +7,14 @@
  * is the smaller wire and the one whose unknown-field preservation the strict
  * layer above depends on.
  *
- * The daemon serves Connect over the same origin the page was loaded from, so
- * there is no cross-origin credential story here and none is invented.
+ * A page dials the daemon over the same origin it was loaded from. The web
+ * view host dials a daemon it is told (rpc/daemon-origin.ts), which the daemon
+ * answers across origins for the host alone; no credentials ride either way.
  */
 import { createConnectTransport } from "@connectrpc/connect-web";
 import type { Transport } from "@connectrpc/connect";
 import { createLinkedAbortController } from "@connectrpc/connect/protocol";
+import type { DaemonOrigin } from "./daemon-origin.js";
 
 export interface DaemonTransportOptions {
   /**
@@ -30,10 +32,26 @@ export interface DaemonTransportOptions {
   signal?: AbortSignal;
 }
 
-/** A Connect transport pointed at the daemon serving this page. */
-export function createDaemonTransport(baseUrl: string, opts: DaemonTransportOptions = {}): Transport {
+/**
+ * A Connect transport pointed at a daemon: BASE is a fixed origin (a page's
+ * own), or a daemon origin read at every call (the web view host's).
+ */
+export function createDaemonTransport(base: string | DaemonOrigin, opts: DaemonTransportOptions = {}): Transport {
   // The page's fetch is read at each call, as the library itself reads it.
-  const fetch: typeof globalThis.fetch = opts.fetch ?? ((input, init) => globalThis.fetch(input, init));
+  const pageFetch: typeof globalThis.fetch = opts.fetch ?? ((input, init) => globalThis.fetch(input, init));
+  const baseUrl = typeof base === "string" ? base : base.current();
+  // A MOVABLE ORIGIN IS READ AT EVERY CALL: the library builds each call's
+  // URL on the base it was made with, which is re-pointed here.
+  const fetch: typeof globalThis.fetch =
+    typeof base === "string"
+      ? pageFetch
+      : (input, init) => {
+          const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+          // Connect builds every call's URL on the base it was given; one
+          // that is not is a broken invariant, never a URL to guess at.
+          if (!url.startsWith(baseUrl)) throw new Error(`a daemon call's URL ${url} is not on its base ${baseUrl}`);
+          return pageFetch(base.current() + url.slice(baseUrl.length), init);
+        };
   const signal = opts.signal;
   return createConnectTransport({
     baseUrl,

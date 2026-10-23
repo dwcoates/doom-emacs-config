@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { createDaemonTransport } from "../../src/rpc/transport.js";
+import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 
 describe("createDaemonTransport", () => {
   it("builds a transport with the two methods a Connect client calls", () => {
@@ -129,5 +130,27 @@ describe("createDaemonTransport", () => {
     await expect(client.daemonHealth({}, { signal: new AbortController().signal })).rejects.toBeDefined();
     // Assert
     expect(listening.size).toBe(0);
+  });
+
+  it("sends every call to the daemon origin it is told at the moment of the call", async () => {
+    // Arrange
+    const urls: string[] = [];
+    const fetchFn = vi.fn(async (url: unknown) => {
+      urls.push(String(url));
+      return new Response(new Uint8Array(), { status: 500 });
+    });
+    const daemon = createDaemonOrigin("http://host.localhost:1000");
+    const client = createAgentReplClient(createDaemonTransport(daemon, { fetch: fetchFn as unknown as typeof globalThis.fetch }));
+    await expect(client.daemonHealth({})).rejects.toBeDefined();
+
+    // Act
+    daemon.set("http://host.localhost:2000");
+    await expect(client.daemonHealth({})).rejects.toBeDefined();
+
+    // Assert
+    expect(urls).toEqual([
+      "http://host.localhost:1000/agentrepl.v1.AgentRepl/DaemonHealth",
+      "http://host.localhost:2000/agentrepl.v1.AgentRepl/DaemonHealth",
+    ]);
   });
 });

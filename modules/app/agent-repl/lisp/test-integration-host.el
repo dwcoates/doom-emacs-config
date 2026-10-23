@@ -61,6 +61,11 @@ null) and whether a reload asked for it (a fourth, the reload's start, or
 null)."
   (when (string-match "h\\.ensure(\"[^\"]*\",\"\\([^\"]*\\)\"\\(?:,\\(?:null\\|\"[a-z]+\"\\)\\)?\\(?:,\\(?:null\\|[0-9]+\\)\\)?)" script)
     (match-string 1 script)))
+(defun agent-repl-itest-host--set-daemon-origin (script)
+  "The origin a host call SCRIPT points the host's own calls at, or nil."
+  (when (string-match "h\\.setDaemon(\"\\([^\"]*\\)\")" script)
+    (match-string 1 script)))
+
 (declare-function agent-repl-popup-open "popup")
 (declare-function agent-repl-link-successor "daemon-link")
 (declare-function agent-repl--ws-put "workspace")
@@ -1356,7 +1361,8 @@ the observable is the URL the host is asked to hold."
         (let ((successor-conn (agent-repl-connect-open
                                (agent-repl-itest-daemon-address successor)))
               (navigated nil)
-              (host-moved nil))
+              (host-moved nil)
+              (calls-moved nil))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
                          (lambda () successor-conn))
@@ -1377,7 +1383,9 @@ the observable is the URL the host is asked to hold."
                         ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
                          (lambda (_widget script _callback)
                            (when-let ((url (agent-repl-itest-host--ensured-url script)))
-                             (push url navigated))))
+                             (push url navigated))
+                           (when-let ((origin (agent-repl-itest-host--set-daemon-origin script)))
+                             (push origin calls-moved))))
                         ((symbol-function 'agent-repl--call-in-background-workspace)
                          (lambda (_ws fn) (funcall fn))))
                 (agent-repl--ws-put agent-repl-itest-host--ws :frontend 'gui)
@@ -1390,12 +1398,12 @@ the observable is the URL the host is asked to hold."
                 (agent-repl-itest--wait-until (lambda () navigated) nil
                                               "the webview redial")
                 (should (equal 1 (length navigated)))
-                ;; The webhost moved with it: its sidebar talks to the daemon
-                ;; that served it.
-                (should (string-match-p
-                         (format "\\`http://host\\.localhost:%s/"
-                                 (car (last (split-string (agent-repl-itest-daemon-address successor) ":"))))
-                         (car host-moved)))
+                ;; THE WEBHOST STAYS: a handover never reloads it, and its
+                ;; own calls follow the workspace to the successor.
+                (should (null host-moved))
+                (should (equal calls-moved
+                               (list (format "http://host.localhost:%s"
+                                             (car (last (split-string (agent-repl-itest-daemon-address successor) ":")))))))
                 (should (equal (car navigated)
                                (format "http://ws-%s.localhost:%s/?workspace=%s&dir=%s&log_level=info"
                                        (agent-repl--frontend-page-host-label (plist-get ref :id))
@@ -2100,7 +2108,8 @@ the page is re-pointed in the one host web view rather than remounted."
         (let ((fresh (agent-repl-connect-open
                       (agent-repl-itest-daemon-address successor)))
               (navigated nil)
-              (host-moved nil))
+              (host-moved nil)
+              (calls-moved nil))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
                          (lambda () t))
@@ -2112,7 +2121,9 @@ the page is re-pointed in the one host web view rather than remounted."
                         ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
                          (lambda (_widget script _callback)
                            (when-let ((url (agent-repl-itest-host--ensured-url script)))
-                             (push url navigated))))
+                             (push url navigated))
+                           (when-let ((origin (agent-repl-itest-host--set-daemon-origin script)))
+                             (push origin calls-moved))))
                         ((symbol-function 'agent-repl--call-in-background-workspace)
                          (lambda (_ws fn) (funcall fn))))
                 (agent-repl--ws-put agent-repl-itest-host--ws :frontend 'gui)
@@ -2131,11 +2142,11 @@ the page is re-pointed in the one host web view rather than remounted."
                          (format "\\`http://ws-[a-z0-9-]+\\.localhost:%s/"
                                  (car (last (split-string (agent-repl-itest-daemon-address successor) ":"))))
                          (car navigated)))
-                ;; The webhost moved with it.
-                (should (string-match-p
-                         (format "\\`http://host\\.localhost:%s/"
-                                 (car (last (split-string (agent-repl-itest-daemon-address successor) ":"))))
-                         (car host-moved))))
+                ;; The webhost stays, its own calls moved to the new daemon.
+                (should (null host-moved))
+                (should (equal calls-moved
+                               (list (format "http://host.localhost:%s"
+                                             (car (last (split-string (agent-repl-itest-daemon-address successor) ":"))))))))
             (agent-repl-connect-close fresh)))))))
 
 ;; audit-3 #24

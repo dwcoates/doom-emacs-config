@@ -43,6 +43,7 @@ import {
   type HostToPage,
   type PageToHost,
 } from "./protocol.js";
+import { isDaemonOrigin, type DaemonOrigin } from "../rpc/daemon-origin.js";
 
 /** What the host needs from its environment, injectable for tests. */
 export interface HostEnv {
@@ -56,6 +57,8 @@ export interface HostEnv {
   readonly now?: () => number;
   /** An element's laid-out box; `getBoundingClientRect` when omitted. */
   readonly measure?: (element: Element) => { width: number; height: number };
+  /** The daemon the webhost's own calls go to (`setDaemon` moves it). */
+  readonly daemon: DaemonOrigin;
 }
 
 /**
@@ -129,6 +132,13 @@ export interface Host {
   onShown(listener: (id: string) => void): () => void;
   /** Drop workspace ID's page. */
   remove(id: string): string;
+  /**
+   * Point the webhost's own daemon calls (its sidebar's) at ORIGIN, the
+   * daemon its workspaces moved to: a handover no longer reloads the
+   * webhost. Answers `retargeted`, `unchanged`, or `refused` for anything
+   * that is not an http origin.
+   */
+  setDaemon(origin: string): string;
   /**
    * Load workspace ID's page again from its URL. RELOAD_STARTED_AT_MS is when
    * the reload began, handed to the page it loads.
@@ -227,6 +237,17 @@ export function createHost(env: HostEnv): Host {
    * before it to another, each nearest first.
    */
   const lanes = new Map<string, Lane>();
+  /**
+   * THE SHOWN PAGE STAYS ON SCREEN UNTIL ITS REPLACEMENT HAS DRAWN. A page
+   * re-pointed while it is shown (a handover moving its workspace to the
+   * successor) loads in a hidden frame of its own, its replacement, and the
+   * two change places when the replacement says it has drawn, so the person
+   * looking at the page never sees it blank. Keyed by workspace id; the
+   * bound is `IN_TURN_BOUND_MS`, after which the replacement is shown drawn
+   * or not, so a replacement that never draws cannot hold a dead page on
+   * screen.
+   */
+  const incoming = new Map<string, { fresh: Frame; bound: number }>();
   /** Who is told every page shown (`onShown`): the webhost's sidebar. */
   const shownListeners = new Set<(id: string) => void>();
 
@@ -394,7 +415,33 @@ export function createHost(env: HostEnv): Host {
     for (const frame of frames.values()) {
       if (frame.iframe.contentWindow === source) return frame;
     }
+    for (const { fresh } of incoming.values()) {
+      if (fresh.iframe.contentWindow === source) return fresh;
+    }
     return null;
+  };
+
+  /** Drop ID's replacement, unshown: a later re-point or a removal supersedes it. */
+  const dropIncoming = (id: string): void => {
+    const waiting = incoming.get(id);
+    if (waiting === undefined) return;
+    win.clearTimeout(waiting.bound);
+    incoming.delete(id);
+    waiting.fresh.iframe.remove();
+  };
+
+  /** ID's replacement takes the old page's place, on screen if it is shown. */
+  const swapIn = (id: string): void => {
+    const waiting = incoming.get(id);
+    if (waiting === undefined) return;
+    win.clearTimeout(waiting.bound);
+    incoming.delete(id);
+    const old = frames.get(id);
+    frames.set(id, waiting.fresh);
+    if (old !== undefined) retire(old);
+    applyShown(waiting.fresh, id === shownId);
+    post(waiting.fresh, presenceOf(waiting.fresh));
+    if (id === shownId) placeSidebar();
   };
 
   const take = (frame: Frame, message: PageToHost): void => {
@@ -407,6 +454,7 @@ export function createHost(env: HostEnv): Host {
       case "drawn":
         frame.drawn = message.what;
         finishTurn(frame.id);
+        if (incoming.get(frame.id)?.fresh === frame) swapIn(frame.id);
         return;
       case "selection":
         frame.selection = { text: message.text, focused: message.focused };
@@ -468,7 +516,20 @@ export function createHost(env: HostEnv): Host {
     frame.iframe.removeAttribute(FRAME_SHOWN_ATTRIBUTE);
   };
 
-  const create = (id: string, url: string, lane: string | undefined): Frame => {
+  /**
+   * Give TO everything Emacs told FROM that a page is replayed on hello, and
+   * the gate band FROM last reported: a page re-pointed into a fresh frame
+   * keeps what the page it replaces held.
+   */
+  const carryDesiredState = (from: Frame, to: Frame): void => {
+    to.inputBackground = from.inputBackground;
+    to.gateDock = from.gateDock;
+    to.heldIngress = from.heldIngress;
+    to.gateBand = from.gateBand;
+  };
+
+  /** A frame for ID at URL, in the page and laid out SHOWN or hidden, not yet loading. */
+  const newFrame = (id: string, url: string, shown: boolean): Frame => {
     const iframe = doc.createElement("iframe");
     iframe.className = FRAME_CLASS;
     iframe.setAttribute(FRAME_WORKSPACE_ATTRIBUTE, id);
@@ -491,10 +552,15 @@ export function createHost(env: HostEnv): Host {
       pendingSwitchStartedAtMs: null,
       pendingReloadStartedAtMs: null,
     };
-    frames.set(id, frame);
     frameParent.append(iframe);
     // Laid out first, so a frame created hidden is fixed at the size it fills.
-    applyShown(frame, id === shownId);
+    applyShown(frame, shown);
+    return frame;
+  };
+
+  const create = (id: string, url: string, lane: string | undefined): Frame => {
+    const frame = newFrame(id, url, id === shownId);
+    frames.set(id, frame);
     if (lane !== undefined) {
       const queue = laneNamed(lane);
       queue.waiting.push(id);
@@ -505,9 +571,18 @@ export function createHost(env: HostEnv): Host {
     return frame;
   };
 
+  /**
+   * Answer OP on ID's page as ACT does it. A replacement waiting to take the
+   * page's place (`incoming`) is given the same call, so it comes on screen
+   * holding everything the page it replaces was told.
+   */
   const withFrame = (op: string, id: string, act: (frame: Frame) => string): string => {
     const frame = frames.get(id);
-    return frame === undefined ? answer(op, id, "absent") : answer(op, id, act(frame));
+    if (frame === undefined) return answer(op, id, "absent");
+    const outcome = act(frame);
+    const waiting = incoming.get(id);
+    if (waiting !== undefined) act(waiting.fresh);
+    return answer(op, id, outcome);
   };
 
   return {
@@ -519,7 +594,23 @@ export function createHost(env: HostEnv): Host {
         const queued = laneName !== undefined && laneNamed(laneName).waiting.includes(id);
         return answer("ensure", id, queued ? "queued" : "created");
       }
-      if (frame.url === url) return answer("ensure", id, "unchanged");
+      if (frame.url === url && !incoming.has(id)) return answer("ensure", id, "unchanged");
+      const pending = incoming.get(id);
+      if (pending !== undefined && pending.fresh.url === url) return answer("ensure", id, "unchanged");
+      dropIncoming(id);
+      if (id === shownId) {
+        // THE SHOWN PAGE STAYS UNTIL ITS REPLACEMENT HAS DRAWN (`incoming`).
+        const fresh = newFrame(id, url, false);
+        carryDesiredState(frame, fresh);
+        fresh.pendingReloadStartedAtMs = reloadStartedAtMs;
+        const bound = win.setTimeout(() => {
+          note("warn", `page ${id}'s replacement did not say it had drawn within ${IN_TURN_BOUND_MS}ms; it is shown as it is`);
+          swapIn(id);
+        }, IN_TURN_BOUND_MS);
+        incoming.set(id, { fresh, bound });
+        load(fresh);
+        return answer("ensure", id, "replacing");
+      }
       // A RE-POINTED PAGE IS A NEW PAGE, IN A NEW FRAME, LOADED AT ONCE.
       //
       // Setting the old frame's `src` left its document running until the new
@@ -535,10 +626,7 @@ export function createHost(env: HostEnv): Host {
       // it does for a removed page.
       retire(frame);
       const fresh = create(id, url, undefined);
-      fresh.inputBackground = frame.inputBackground;
-      fresh.gateDock = frame.gateDock;
-      fresh.heldIngress = frame.heldIngress;
-      fresh.gateBand = frame.gateBand;
+      carryDesiredState(frame, fresh);
       fresh.pendingSwitchStartedAtMs = frame.pendingSwitchStartedAtMs;
       fresh.pendingReloadStartedAtMs = reloadStartedAtMs;
       return answer("ensure", id, "navigated");
@@ -579,6 +667,7 @@ export function createHost(env: HostEnv): Host {
     },
     remove(id) {
       return withFrame("remove", id, (frame) => {
+        dropIncoming(id);
         frames.delete(id);
         retire(frame);
         if (shownId === id) {
@@ -588,8 +677,16 @@ export function createHost(env: HostEnv): Host {
         return "removed";
       });
     },
+    setDaemon(origin) {
+      if (!isDaemonOrigin(origin)) {
+        note("warn", `setDaemon was handed ${JSON.stringify(origin)}, which is no daemon origin; the webhost's calls stay where they were`);
+        return answer("setDaemon", null, "refused");
+      }
+      return answer("setDaemon", null, env.daemon.set(origin) ? "retargeted" : "unchanged", { origin });
+    },
     reload(id, reloadStartedAtMs = null) {
       return withFrame("reload", id, (frame) => {
+        dropIncoming(id);
         resetFacts(frame);
         frame.attached = false;
         frame.pendingSwitchStartedAtMs = null;
@@ -693,6 +790,7 @@ export function createHost(env: HostEnv): Host {
     },
     dispose() {
       win.removeEventListener("message", onMessage);
+      for (const id of [...incoming.keys()]) dropIncoming(id);
       for (const frame of frames.values()) frame.iframe.remove();
       frames.clear();
       shownId = null;
