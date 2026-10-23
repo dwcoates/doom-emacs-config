@@ -15,6 +15,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
@@ -842,16 +843,36 @@ func (s *server) SelectWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
+	history := workspace.RecordSelection
+	if req.Msg.GetKeepSelectionHistory() {
+		history = workspace.KeepSelectionHistory
+	}
+	selected, cerr := s.selectSubject(ctx, rpc, subject, history, req.Msg.GetReveal(), resp)
+	if selected == nil {
+		return answer(resp, cerr)
+	}
+	resp.Result = &agentreplv1.SelectWorkspaceResponse_Success{Success: selected}
+	return connect.NewResponse(resp), nil
+}
+
+// selectSubject is THE ONE SELECT a client's request makes of the daemon. It
+// selects SUBJECT under HISTORY and reveals REVEAL's row when it is set, and
+// answers the success to send. A nil success is no selection: a refusal set
+// onto RESP's error arm with a nil error, or the error to answer.
+func (s *server) selectSubject(
+	ctx context.Context,
+	rpc string,
+	subject resolved,
+	history workspace.SelectionHistory,
+	reveal *frontendv1.FeedId,
+	resp proto.Message,
+) (*agentreplv1.SelectWorkspaceSuccess, *connect.Error) {
 	// SELECTING A HIDDEN MERGE WORKSPACE REVEALS IT, before the selection, so
 	// the roster draws the workspace it names as current.
 	if subject.Record.MergeHidden() {
 		if err := s.deps.Merge.RevealMergeWorkspace(ctx, subject.Record.ID, "the user selected it"); err != nil {
 			return nil, fail(subject.Log, rpc, err)
 		}
-	}
-	history := workspace.RecordSelection
-	if req.Msg.GetKeepSelectionHistory() {
-		history = workspace.KeepSelectionHistory
 	}
 	if err := s.deps.Verbs.Select(ctx, subject.Record.ID, history); err != nil {
 		// A CALLER THAT LEFT IS NOT A FAILURE. A user switching workspaces
@@ -862,24 +883,21 @@ func (s *server) SelectWorkspace(
 			subject.Log.Info(rpc, "the caller left before the select finished", dlog.Context{"cause": err.Error()})
 			return nil, connect.NewError(connect.CodeCanceled, err)
 		}
-		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		return nil, s.answerRefusal(subject.Log, rpc, resp, err, nil)
 	}
 	// THE USER CHOSE A WORKSPACE (a switch in Emacs, a handed banner's click),
 	// so no banner made before the choice may steer a later return to Emacs.
 	s.deps.Banners.Forget("a workspace was selected")
 	// A ROW THE SELECTION NAMES is revealed on the selected workspace's page
 	// (an async merge's queue entry opening its bubble in the requester).
-	if row := req.Msg.GetReveal(); row.GetValue() != "" {
-		s.revealRow(subject.Log, subject.Record.ID, row)
+	if reveal.GetValue() != "" {
+		s.revealRow(subject.Log, subject.Record.ID, reveal)
 	}
 	// THE REVISION IS READ AFTER THE STAMP, whose render published under the
 	// resolver's lock (sidebar.Resolver.Revision): every roster at it or later
 	// carries this selection, so the editor that moved on it is never moved
 	// back by a roster from before it.
-	resp.Result = &agentreplv1.SelectWorkspaceResponse_Success{
-		Success: &agentreplv1.SelectWorkspaceSuccess{RosterRevision: s.deps.Sidebar.Revision()},
-	}
-	return connect.NewResponse(resp), nil
+	return &agentreplv1.SelectWorkspaceSuccess{RosterRevision: s.deps.Sidebar.Revision()}, nil
 }
 
 // MarkWorkspaceViewed records that the user has SEEN this workspace, which
