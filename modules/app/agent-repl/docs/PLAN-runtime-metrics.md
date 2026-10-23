@@ -254,6 +254,9 @@ run, judgement call 12).
 | `agentrepl_log_bytes`, `agentrepl_log_files` | gauge | `runtime` | daemon: the state root's logs directory, by the runtime each file's name carries |
 | `agentrepl_merge_step_seconds` | histogram | `step` | daemon (`merge`): how long a merge spent on each step before it left it |
 | `agentrepl_merge_seconds` | histogram | `span`, `outcome` | daemon (`merge`): each merge's `pick`, `queued`, `running` and `total` spans, `landed`, `already_on`, `failed` (or `ok` for a pick) |
+| `agentrepl_test_seconds` | gauge, one sample per run | `suite`, `test`, `outcome`, `trigger` | testrun, pushed when a merge queue gate's run ends: every individual test (each go test and subtest, ERT test, vitest test, harness group); `trigger` is `merge_queue` or `merge_queue_speculative` |
+| `agentrepl_test_suite_seconds` | gauge, one sample per run | `suite`, `outcome`, `trigger` | testrun, pushed with the tests: each suite's slot time |
+| `agentrepl_test_unit_wall_seconds`, `..._cpu_seconds`, `..._max_rss_bytes`, `..._block_reads`, `..._block_writes` | gauge, one sample per run | `suite`, `unit`, `outcome`, `trigger` | testrun, pushed with the tests: each unit's process (a chunk of tests, a build, a harness group), from the kernel's wait accounting, the finest grain resources are accounted at |
 | `agentrepl_workspaces` | gauge | `repository`, `state` | daemon: the registry's workspaces, `open`, `hidden` or `closed`; live sessions are `agentrepl_process_count{process="shim"}` |
 
 Process groups (`process`): `daemon`, `daemon_tools`, `store`, `sidecar`,

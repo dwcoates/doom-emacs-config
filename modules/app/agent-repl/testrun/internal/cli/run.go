@@ -17,6 +17,7 @@ import (
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
+	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
 )
 
@@ -53,6 +54,11 @@ type Deps struct {
 	// the dist (roster.Suite.NeedsWebappDist): the run is then the dist's one
 	// writer, and no unit sees it change under it.
 	PrepareWebappDist func(moduleRoot string) error
+	// Metrics is where the run pushes every test's time when it ends, and
+	// what ran it; the zero Target pushes nothing (testtimes.TakeTarget).
+	Metrics testtimes.Target
+	// PushTimes sends the run's report, stamped AT, to TARGET (testtimes.Push).
+	PushTimes func(ctx context.Context, target testtimes.Target, report testtimes.Report, at time.Time) error
 }
 
 // Reuser is the run's pass-record seam (reuse.Runner).
@@ -216,6 +222,10 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		log.Errorf("recording this run's timings in the host history failed: %v", err)
 		return 1
 	}
+	if err := pushTimes(ctx, d, results, suiteResults, end); err != nil {
+		log.Errorf("recording this run's test times in the metrics store failed: %v", err)
+		return 1
+	}
 	unitsPerSuite := map[string]int{}
 	for _, r := range results {
 		unitsPerSuite[r.Spec.Suite]++
@@ -289,6 +299,49 @@ func inRosterOrder(rs []run.SuiteResult) []run.SuiteResult {
 	return out
 }
 
+// suiteOutcomes is the outcome a suite's time is labeled with.
+var suiteOutcomes = map[run.Outcome]string{
+	run.Passed:    testtimes.Pass,
+	run.Failed:    testtimes.Fail,
+	run.Cancelled: testtimes.Fail,
+	run.Declined:  testtimes.Skip,
+}
+
+// unitOutcomes is the outcome a unit's resource use is labeled with.
+var unitOutcomes = suiteOutcomes
+
+// pushTimes sends every test's and every suite's time, and every unit's
+// resource use, to the metrics store when the run was told to
+// (Deps.Metrics), stamped with the run's end. A suite's time is its slot time
+// (run.SuiteResult.UnitSeconds). A cancelled unit never ran, so it used
+// nothing and is left out.
+func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults []run.SuiteResult, end time.Time) error {
+	if !d.Metrics.Enabled() {
+		return nil
+	}
+	var report testtimes.Report
+	for _, r := range results {
+		report.Tests = append(report.Tests, r.Tests...)
+		if r.Outcome == run.Cancelled {
+			continue
+		}
+		report.Units = append(report.Units, testtimes.Unit{
+			Suite: r.Spec.Suite, ID: r.Spec.ID, Outcome: unitOutcomes[r.Outcome],
+			Wall: r.Wall(), CPU: r.Usage.CPU, MaxRSSBytes: r.Usage.MaxRSSBytes,
+			BlockReads: r.Usage.BlockReads, BlockWrites: r.Usage.BlockWrites,
+		})
+	}
+	for _, s := range suiteResults {
+		report.Suites = append(report.Suites, testtimes.Suite{Name: s.Name, Outcome: suiteOutcomes[s.Outcome], Seconds: s.UnitSeconds})
+	}
+	if err := d.PushTimes(ctx, d.Metrics, report, end); err != nil {
+		return err
+	}
+	d.Log.Infof("metrics: pushed %d test, %d suite and %d unit records (trigger %s)",
+		len(report.Tests), len(report.Suites), len(report.Units), d.Metrics.Trigger)
+	return nil
+}
+
 func partition(rs []run.SuiteResult) (passed, declined, failed []run.SuiteResult) {
 	for _, r := range rs {
 		switch r.Outcome {
@@ -310,7 +363,7 @@ func printUnitSummary(log *run.Log, results []run.Result, slots int, start, end 
 	busy, cpu := 0.0, 0.0
 	for _, r := range results {
 		busy += r.Wall()
-		cpu += r.CPU
+		cpu += r.Usage.CPU
 	}
 	util := 0.0
 	if wall > 0 {
@@ -323,7 +376,7 @@ func printUnitSummary(log *run.Log, results []run.Result, slots int, start, end 
 		if i == 10 {
 			break
 		}
-		log.Infof("  %8.3fs  %s [%s] (estimated %.1fs, cpu %.1fs)", r.Wall(), r.Spec.ID, r.Spec.Suite, r.Spec.Est, r.CPU)
+		log.Infof("  %8.3fs  %s [%s] (estimated %.1fs, cpu %.1fs)", r.Wall(), r.Spec.ID, r.Spec.Suite, r.Spec.Est, r.Usage.CPU)
 	}
 	for _, r := range results {
 		if line, over := overCores(r); over {
@@ -341,11 +394,11 @@ func printUnitSummary(log *run.Log, results []run.Result, slots int, start, end 
 func overCores(r run.Result) (string, bool) {
 	w := r.Wall()
 	width := r.Spec.Width()
-	if w <= 1 || r.CPU <= (float64(width)+0.5)*w {
+	if w <= 1 || r.Usage.CPU <= (float64(width)+0.5)*w {
 		return "", false
 	}
 	return fmt.Sprintf("unit %s used %.1f cores on average (%.1fs cpu in %.1fs) but holds %d core slot(s): it is not pinned to its width",
-		r.Spec.ID, r.CPU/w, r.CPU, w, width), true
+		r.Spec.ID, r.Usage.CPU/w, r.Usage.CPU, w, width), true
 }
 
 func printSuiteSummaries(log *run.Log, passed, declined, failed []run.SuiteResult) {

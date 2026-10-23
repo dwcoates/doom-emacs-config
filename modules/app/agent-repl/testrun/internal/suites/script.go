@@ -11,6 +11,7 @@ import (
 
 	"agentrepl/testrun/internal/command"
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
 )
 
@@ -37,6 +38,18 @@ func splitScriptUnitsForItems(path string, s roster.Suite, items []string) Units
 	chunk := func(id string, selected []string) run.Spec {
 		sp := spec(id, s.Name, filepath.Dir(path), []string{path, "--only", strings.Join(selected, ",")})
 		sp.Items = func(out []byte) (map[string]float64, error) { return ParseItemLines(out, selected) }
+		// A HARNESS GROUP IS ITS FINEST TEST: each group's time is its item's.
+		sp.Tests = func(out []byte, passed bool) ([]testtimes.Test, error) {
+			items, err := ParseItemLines(out, selected)
+			if err != nil {
+				return nil, err
+			}
+			outcome := testtimes.Pass
+			if !passed {
+				outcome = testtimes.Fail
+			}
+			return testtimes.OfItems(s.Name, items, outcome), nil
+		}
 		return sp
 	}
 	return Units{Splits: []Split{{Group: s.Name, Suite: s.Name, Items: items, Chunk: chunk}}}

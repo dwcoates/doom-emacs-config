@@ -35,6 +35,15 @@ func runHelper(mode string) int {
 	case "print-env":
 		fmt.Fprintf(os.Stdout, "%s=%s\n", arg, os.Getenv(arg))
 		return 0
+	case "allocate":
+		// Touch ARG megabytes, so the process's resident set holds them.
+		mb, _ := strconv.Atoi(arg)
+		buf := make([]byte, mb<<20)
+		for i := range buf {
+			buf[i] = byte(i)
+		}
+		fmt.Fprintln(os.Stdout, buf[len(buf)-1])
+		return 0
 	case "exit":
 		fmt.Fprint(os.Stdout, "to stdout\n")
 		fmt.Fprint(os.Stderr, "to stderr\n")
@@ -172,6 +181,26 @@ func waitBounded(t *testing.T, p Process) (int, error) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("the unit did not exit")
 		return 0, nil
+	}
+}
+
+func TestOSExecReportsWhatTheUnitUsed(t *testing.T) {
+	// Arrange
+	log, _ := newExecLog()
+	p, err := OSExec{Log: log, Grace: time.Second, TmpParent: t.TempDir()}.Start(helperSpec([]string{helperEnv + "=allocate:64"}), &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	exit, usage, err := p.Wait()
+
+	// Assert
+	if err != nil || exit != 0 {
+		t.Fatalf("Wait = %d, %v", exit, err)
+	}
+	if usage.CPU <= 0 || usage.MaxRSSBytes < 64<<20 {
+		t.Fatalf("usage = %+v, want some CPU and a resident set of at least the 64MB the unit touched", usage)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/sched"
+	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
 )
 
@@ -122,7 +123,8 @@ func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string
 	}
 	reporter := filepath.Join(l.Module, "testrun", "vitest", "items-reporter.mjs")
 	chunk := func(id string, items []string) run.Spec {
-		itemsOut := filepath.Join(work, "items", filepath.Base(id)+".json")
+		tag := filepath.Base(id)
+		itemsOut := filepath.Join(work, "items", tag+".json")
 		argv := []string{
 			"npx", "vitest", "run", "--config", s.IntegrationConfig,
 			"--maxWorkers=1", "--minWorkers=1",
@@ -139,8 +141,10 @@ func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string
 				"--coverage.reportsDirectory="+filepath.Join(cover.VitestIntegrationCoverage(l.Work, s.Name), filepath.Base(id)),
 			)
 		}
-		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut)
+		testsOut := filepath.Join(work, "items", tag+".tests.json")
+		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut, testtimes.VitestTestsEnv+"="+testsOut)
 		sp.Items = func([]byte) (map[string]float64, error) { return ParseVitestItems(itemsOut, dir, items) }
+		sp.Tests = func([]byte, bool) ([]testtimes.Test, error) { return testtimes.ParseVitest(s.Name, testsOut, dir) }
 		return sp
 	}
 	return Split{Group: group, Suite: s.Name, Items: files, Chunk: chunk}, nil
@@ -185,8 +189,10 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 				argv = append(argv, "--coverage.all=false", "--coverage.reporter=json")
 			}
 		}
-		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut)
+		testsOut := filepath.Join(work, "items", tag+".tests.json")
+		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut, testtimes.VitestTestsEnv+"="+testsOut)
 		sp.Items = func([]byte) (map[string]float64, error) { return ParseVitestItems(itemsOut, dir, items) }
+		sp.Tests = func([]byte, bool) ([]testtimes.Test, error) { return testtimes.ParseVitest(s.Name, testsOut, dir) }
 		return sp
 	}
 	atomic := []run.Spec{typecheck}

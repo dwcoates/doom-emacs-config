@@ -12,6 +12,7 @@ import (
 	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
 )
 
@@ -1323,4 +1324,65 @@ func TestTheVitestMergeUnitWritesWhereTheBaselineReads(t *testing.T) {
 		}
 	}
 	t.Fatal("no webapp:coverage unit")
+}
+
+// TestEveryChunkKindReadsItsTestTimes pins the one test-time reader every
+// chunk kind carries: a chunk built without one would leave its suite's tests
+// out of the metrics store unnoticed.
+func TestEveryChunkKindReadsItsTestTimes(t *testing.T) {
+	// Arrange: one chunk of each kind, built by its suite, and what each
+	// prints for one test.
+	module := t.TempDir()
+	write(t, filepath.Join(module, "lisp", "test-agent-repl.el"),
+		"(load (expand-file-name \"test-helpers.el\" dir) nil t)\n(load (expand-file-name \"x\" dir) nil t)\n", 0o644)
+	ert, err := ertUnits(Layout{Repo: module, Module: module, Work: t.TempDir()}, roster.Suite{Name: "ert", Kind: roster.ERT, Path: "lisp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := splitScriptUnitsForItems(filepath.Join(module, "bin", "h.sh"), roster.Suite{Name: "h", Kind: roster.SplitScript}, []string{"x"})
+	goModule := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+	_, goSplit, err := goPkg{Suite: "m", Module: goModule, Rel: "p", Bin: "/b"}.units()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vitestDir := t.TempDir()
+	vitest, err := vitestUnitsForFiles(Layout{Module: vitestDir, Work: t.TempDir()}, roster.Suite{Name: "webapp"}, vitestDir, []string{"a.test.ts"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vitestChunk := vitest.Splits[0].Chunk("webapp#00", []string{"a.test.ts"})
+	for _, kv := range vitestChunk.Env {
+		if path, ok := strings.CutPrefix(kv, testtimes.VitestTestsEnv+"="); ok {
+			write(t, path, `[{"file":"`+vitestDir+`/a.test.ts","name":"x","state":"pass","seconds":2.5}]`, 0o644)
+		}
+	}
+	tests := []struct {
+		kind  string
+		chunk run.Spec
+		out   string
+		want  testtimes.Test
+	}{
+		{kind: "ert", chunk: ert.Splits[0].Chunk("ert#00", []string{"x"}), out: "   passed  1/1  x (2.500000 sec)\n",
+			want: testtimes.Test{Suite: "ert", Name: "x", Outcome: testtimes.Pass, Seconds: 2.5}},
+		{kind: "harness", chunk: harness.Splits[0].Chunk("h#00", []string{"x"}), out: "TESTRUN-ITEM x 2.5\n",
+			want: testtimes.Test{Suite: "h", Name: "x", Outcome: testtimes.Pass, Seconds: 2.5}},
+		{kind: "go", chunk: goSplit.Chunk("m:p#00", []string{"TestA"}), out: "--- PASS: TestA (2.5s)\n",
+			want: testtimes.Test{Suite: "m", Name: "p.TestA", Outcome: testtimes.Pass, Seconds: 2.5}},
+		{kind: "vitest", chunk: vitestChunk,
+			want: testtimes.Test{Suite: "webapp", Name: "a.test.ts > x", Outcome: testtimes.Pass, Seconds: 2.5}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.kind, func(t *testing.T) {
+			// Act
+			if tt.chunk.Tests == nil {
+				t.Fatalf("the %s chunk reads no test times", tt.kind)
+			}
+			got, err := tt.chunk.Tests([]byte(tt.out), true)
+
+			// Assert
+			if err != nil || len(got) != 1 || got[0] != tt.want {
+				t.Fatalf("Tests = %+v, %v; want [%+v]", got, err, tt.want)
+			}
+		})
+	}
 }

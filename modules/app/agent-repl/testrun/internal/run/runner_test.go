@@ -10,13 +10,14 @@ import (
 	"time"
 
 	"agentrepl/testrun/internal/sched"
+	"agentrepl/testrun/internal/testtimes"
 )
 
 // script is what a fake unit does: print, then exit.
 type script struct {
 	output   string
 	exit     int
-	cpu      float64
+	usage    Usage
 	startErr error
 	waitErr  error
 	// hold, when set, blocks the unit until it is closed.
@@ -70,7 +71,7 @@ func (e *fakeExec) Start(spec Spec, out *bytes.Buffer) (Process, error) {
 	return &fakeProc{e: e, id: spec.ID, s: s, out: out, kill: make(chan struct{})}, nil
 }
 
-func (p *fakeProc) Wait() (int, float64, error) {
+func (p *fakeProc) Wait() (int, Usage, error) {
 	exit := p.s.exit
 	if p.s.hold != nil {
 		select {
@@ -84,7 +85,7 @@ func (p *fakeProc) Wait() (int, float64, error) {
 	p.e.running--
 	p.e.width -= p.e.widths[p.id]
 	p.e.mu.Unlock()
-	return exit, p.s.cpu, p.s.waitErr
+	return exit, p.s.usage, p.s.waitErr
 }
 
 func (p *fakeProc) Kill() {
@@ -461,7 +462,7 @@ func TestRunRecordsItemTimings(t *testing.T) {
 	s.Items = func(out []byte) (map[string]float64, error) {
 		return map[string]float64{string(bytes.TrimSpace(out)): 1.5}, nil
 	}
-	r, _, _ := newRunner(1, &fakeExec{scripts: map[string]script{"ert#00": {output: "test-core.el\n", cpu: 0.75}}})
+	r, _, _ := newRunner(1, &fakeExec{scripts: map[string]script{"ert#00": {output: "test-core.el\n", usage: Usage{CPU: 0.75, MaxRSSBytes: 4096, BlockReads: 2, BlockWrites: 3}}}})
 
 	// Act
 	results, _, err := r.Run(context.Background(), []Spec{s})
@@ -473,8 +474,8 @@ func TestRunRecordsItemTimings(t *testing.T) {
 	if got := results[0].Items["test-core.el"]; got != 1.5 {
 		t.Fatalf("item seconds = %v, want 1.5", got)
 	}
-	if results[0].CPU != 0.75 {
-		t.Fatalf("cpu = %v, want 0.75", results[0].CPU)
+	if want := (Usage{CPU: 0.75, MaxRSSBytes: 4096, BlockReads: 2, BlockWrites: 3}); results[0].Usage != want {
+		t.Fatalf("usage = %+v, want %+v", results[0].Usage, want)
 	}
 }
 
@@ -496,6 +497,102 @@ func TestRunFailsAPassingUnitWhoseTimingsAreUnreadable(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "unit ert#00 (ert) passed but its item timings are unreadable: no item lines") {
 		t.Fatalf("no timing error in:\n%s", errOut)
+	}
+}
+
+func TestRunRecordsTheTestTimesOfAPassedAndAFailedUnit(t *testing.T) {
+	tests := []struct {
+		name   string
+		exit   int
+		passed bool
+	}{
+		{name: "a passed unit", exit: 0, passed: true},
+		{name: "a failed unit", exit: 1, passed: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := spec("go#00", "daemon")
+			var told []bool
+			s.Tests = func(out []byte, passed bool) ([]testtimes.Test, error) {
+				told = append(told, passed)
+				return []testtimes.Test{{Suite: "daemon", Name: string(bytes.TrimSpace(out)), Seconds: 2}}, nil
+			}
+			r, _, _ := newRunner(1, &fakeExec{scripts: map[string]script{"go#00": {output: "x.TestA\n", exit: tt.exit}}})
+
+			// Act
+			results, _, err := r.Run(context.Background(), []Spec{s})
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(told) != 1 || told[0] != tt.passed {
+				t.Fatalf("Tests was told passed = %v, want [%v]", told, tt.passed)
+			}
+			if len(results[0].Tests) != 1 || results[0].Tests[0].Name != "x.TestA" {
+				t.Fatalf("tests = %+v, want x.TestA", results[0].Tests)
+			}
+		})
+	}
+}
+
+func TestRunFailsAPassingUnitWhoseTestTimesAreUnreadable(t *testing.T) {
+	// Arrange
+	s := spec("go#00", "daemon")
+	s.Tests = func([]byte, bool) ([]testtimes.Test, error) { return nil, errors.New("no tests file") }
+	r, _, errOut := newRunner(1, &fakeExec{scripts: map[string]script{}})
+
+	// Act
+	_, suites, err := r.Run(context.Background(), []Spec{s})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := suiteByName(suites, "daemon"); got.Outcome != Failed {
+		t.Fatalf("suite = %+v, want failed", got)
+	}
+	if !strings.Contains(errOut.String(), "unit go#00 (daemon) passed but its test timings are unreadable: no tests file") {
+		t.Fatalf("no timing error in:\n%s", errOut)
+	}
+}
+
+func TestRunRecordsAFailedUnitsUnreadableTestTimesAtInfo(t *testing.T) {
+	// Arrange
+	s := spec("go#00", "daemon")
+	s.Tests = func([]byte, bool) ([]testtimes.Test, error) { return nil, errors.New("no tests file") }
+	r, out, errOut := newRunner(1, &fakeExec{scripts: map[string]script{"go#00": {exit: 1}}})
+
+	// Act
+	_, _, err := r.Run(context.Background(), []Spec{s})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "unit go#00 (daemon) failed, and its test timings are unreadable: no tests file") ||
+		strings.Contains(errOut.String(), "test timings") {
+		t.Fatalf("want the unreadable timings at info only; out:\n%s\nerr:\n%s", out, errOut)
+	}
+}
+
+func TestRunReadsNoTestTimesOfADeclinedUnit(t *testing.T) {
+	// Arrange
+	s := spec("h#00", "harness")
+	s.MayDecline = true
+	called := false
+	s.Tests = func([]byte, bool) ([]testtimes.Test, error) { called = true; return nil, nil }
+	r, _, _ := newRunner(1, &fakeExec{scripts: map[string]script{"h#00": {exit: ExitDeclined}}})
+
+	// Act
+	if _, _, err := r.Run(context.Background(), []Spec{s}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if called {
+		t.Fatalf("a declined unit's test times were read")
 	}
 }
 

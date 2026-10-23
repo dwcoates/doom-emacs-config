@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"agentrepl/testrun/internal/sched"
+	"agentrepl/testrun/internal/testtimes"
 )
 
 // ExitDeclined is the exit status a suite uses to say "my precondition is not
@@ -31,16 +32,33 @@ type Spec struct {
 	// Items parses the unit's output into seconds per item, for the history.
 	// Nil for a unit that is not a chunk.
 	Items func(output []byte) (map[string]float64, error)
+	// Tests parses the unit's output into every individual test's time, for
+	// the metrics store (testtimes), given whether the unit passed. Nil for a
+	// unit that runs no tests of its own.
+	Tests func(output []byte, passed bool) ([]testtimes.Test, error)
 	// Display, when set, is what of the unit's output the run log shows,
 	// given whether the unit passed. Nil shows it whole.
 	Display func(output []byte, passed bool) []byte
 }
 
+// Usage is what a unit's process and its reaped descendants used, as the
+// kernel's wait accounting reports it.
+type Usage struct {
+	// CPU is user plus system seconds.
+	CPU float64
+	// MaxRSSBytes is the largest resident set of the process or any one
+	// descendant it reaped.
+	MaxRSSBytes int64
+	// BlockReads and BlockWrites are the block input and output operations
+	// that went to storage (the kernel's ru_inblock and ru_oublock).
+	BlockReads, BlockWrites int64
+}
+
 // Process is one started unit.
 type Process interface {
-	// Wait blocks until the process exits and returns its exit status and the
-	// CPU seconds it and its reaped descendants used.
-	Wait() (exit int, cpu float64, err error)
+	// Wait blocks until the process exits and returns its exit status and
+	// what it and its reaped descendants used.
+	Wait() (exit int, usage Usage, err error)
 	// Kill stops the process and everything it started.
 	Kill()
 }
@@ -69,9 +87,12 @@ type Result struct {
 	Outcome    Outcome
 	Exit       int
 	Start, End time.Time
-	CPU        float64
+	// Usage is what the unit's process used.
+	Usage Usage
 	// Items are the per-item seconds the unit's output reported.
 	Items map[string]float64
+	// Tests are the individual tests' times the unit's output reported.
+	Tests []testtimes.Test
 	// CancelledBy names the failed dependency of a cancelled unit.
 	CancelledBy string
 }
@@ -123,7 +144,7 @@ type grant struct {
 type completion struct {
 	id     string
 	exit   int
-	cpu    float64
+	usage  Usage
 	err    error
 	output *bytes.Buffer
 }
@@ -226,8 +247,8 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		}
 		running[s.ID] = p
 		go func() {
-			exit, cpu, err := p.Wait()
-			done <- completion{id: s.ID, exit: exit, cpu: cpu, err: err, output: out}
+			exit, usage, err := p.Wait()
+			done <- completion{id: s.ID, exit: exit, usage: usage, err: err, output: out}
 		}()
 	}
 
@@ -293,7 +314,7 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		}
 		spec := byID[c.id]
 		used -= spec.Width()
-		res := Result{Spec: spec, Exit: c.exit, Start: starts[c.id], End: r.Clock.Now(), CPU: c.cpu}
+		res := Result{Spec: spec, Exit: c.exit, Start: starts[c.id], End: r.Clock.Now(), Usage: c.usage}
 		switch {
 		case c.err != nil:
 			r.Log.Errorf("unit %s (%s) could not be waited on: %v", c.id, spec.Suite, c.err)
@@ -314,6 +335,21 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 				res.Outcome, res.Exit = Failed, 1
 			}
 			res.Items = items
+		}
+		if spec.Tests != nil && (res.Outcome == Passed || res.Outcome == Failed) {
+			tests, err := spec.Tests(c.output.Bytes(), res.Outcome == Passed)
+			switch {
+			case err != nil && res.Outcome == Passed:
+				// As for the item timings: a passing unit that printed what its
+				// suite does not promise broke its timing contract.
+				r.Log.Errorf("unit %s (%s) passed but its test timings are unreadable: %v", c.id, spec.Suite, err)
+				res.Outcome, res.Exit = Failed, 1
+			case err != nil:
+				// A unit that failed may have stopped before it reported its
+				// tests; its failure is the error, recorded with its verdict.
+				r.Log.Infof("unit %s (%s) failed, and its test timings are unreadable: %v", c.id, spec.Suite, err)
+			}
+			res.Tests = tests
 		}
 		// The block is bracketed by a line naming its unit and suite and by
 		// the unit's verdict line, so a reader of the interleaved run (the
@@ -367,7 +403,7 @@ func (r *Runner) reportUnit(res Result) {
 	id, suite := res.Spec.ID, res.Spec.Suite
 	switch res.Outcome {
 	case Passed:
-		r.Log.Infof("unit %s [%s] ok, %.3fs wall, %.3fs cpu", id, suite, res.Wall(), res.CPU)
+		r.Log.Infof("unit %s [%s] ok, %.3fs wall, %.3fs cpu", id, suite, res.Wall(), res.Usage.CPU)
 	case Declined:
 		r.Log.Infof("unit %s [%s] declined (exit %d) after %.3fs", id, suite, ExitDeclined, res.Wall())
 	case Failed:

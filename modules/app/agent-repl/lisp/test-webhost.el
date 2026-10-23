@@ -66,6 +66,64 @@ so stubbing the accessor would not reach the code under test."
     ;; Assert
     (should (string-search "h.ensure(\"id-\\\"a\\\"\",\"http://x/\")" script))))
 
+(ert-deftest agent-repl-test-wh-a-script-answers-unknown-call-for-a-method-the-host-lacks ()
+  "A host from an older build answers `unknown-call' rather than throwing."
+  ;; Act
+  (let ((script (agent-repl--webhost-script "setDaemon" "http://host.localhost:2")))
+    ;; Assert
+    (should (string-search "typeof h[\"setDaemon\"]===\"function\"?h.setDaemon(" script))
+    (should (string-search "outcome:\"unknown-call\"" script))))
+
+(defmacro agent-repl-test-wh--with-predates (link &rest body)
+  "Run BODY with LINK as the live link, host reloads and records captured.
+Binds `reloads' and `records', newest first."
+  (declare (indent 1))
+  `(let ((reloads nil) (records nil)
+         (agent-repl--webhost-reloaded-for-call nil))
+     (cl-letf (((symbol-function 'agent-repl-link-live) (lambda () ,link))
+               ((symbol-function 'agent-repl-webhost-reload) (lambda (conn) (push conn reloads)))
+               ((symbol-function 'agent-repl--log) #'ignore)
+               ((symbol-function 'agent-repl--info)
+                (lambda (_ws fmt &rest args) (push (cons 'info (apply #'format fmt args)) records)))
+               ((symbol-function 'agent-repl--warn)
+                (lambda (_ws fmt &rest args) (push (cons 'warn (apply #'format fmt args)) records)))
+               ((symbol-function 'agent-repl--error)
+                (lambda (_ws fmt &rest args) (push (cons 'error (apply #'format fmt args)) records))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-wh-a-host-that-lacks-a-call-is-reloaded-on-the-live-daemon ()
+  "An `unknown-call' answer reloads the host where Emacs is served now, at INFO."
+  (let ((live (agent-repl-test-wh--conn "127.0.0.1:2")))
+    (agent-repl-test-wh--with-predates live
+      ;; Act
+      (agent-repl--webhost-answered "{\"op\":\"setDaemon\",\"id\":null,\"outcome\":\"unknown-call\",\"notes\":[]}")
+      ;; Assert
+      (should (equal reloads (list live)))
+      (should (assoc 'info records))
+      (should (string-match-p "elisp.webhost.predates-call op=setDaemon action=reload url=http://host.localhost:2/\\?host=1"
+                              (cdr (assoc 'info records)))))))
+
+(ert-deftest agent-repl-test-wh-a-reloaded-host-that-still-lacks-the-call-is-an-error ()
+  "A host freshly reloaded on the live daemon that still lacks a call is not stale: ERROR, no second reload."
+  (let ((live (agent-repl-test-wh--conn "127.0.0.1:2")))
+    (agent-repl-test-wh--with-predates live
+      ;; Arrange
+      (agent-repl--webhost-predates-call "setDaemon")
+      ;; Act
+      (agent-repl--webhost-predates-call "setDaemon")
+      ;; Assert
+      (should (= 1 (length reloads)))
+      (should (string-match-p "reason=served-webapp-predates-elisp" (cdr (assoc 'error records)))))))
+
+(ert-deftest agent-repl-test-wh-a-host-that-lacks-a-call-with-no-link-waits-at-warn ()
+  "With no live daemon there is nowhere to reload the host: WARN, nothing reloaded."
+  (agent-repl-test-wh--with-predates nil
+    ;; Act
+    (agent-repl--webhost-predates-call "setDaemon")
+    ;; Assert
+    (should-not reloads)
+    (should (string-match-p "reason=no-link" (cdr (assoc 'warn records))))))
+
 (ert-deftest agent-repl-test-wh-a-script-queues-itself-when-the-host-has-not-started ()
   "A call made before the host's code started is queued on the page."
   ;; Act

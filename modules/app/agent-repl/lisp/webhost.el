@@ -48,6 +48,7 @@
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl-host-conn "host" (ws))
+(declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl-connect-connection-address "connect" (conn))
 (declare-function agent-repl--frontend-make-webview-buffer "frontend" (url))
 (declare-function agent-repl--frontend-webview-live-widget "frontend" (buf))
@@ -262,15 +263,48 @@ the host buffer is never displayed itself; workspace slots display it."
   "The script calling the host's METHOD with ARGS, queued until the host starts.
 Each of ARGS is JSON-encoded, so nothing is spliced into the script unquoted.
 A queued call answers `queued', naming the workspace id when the first of
-ARGS is one, so the caller can ask again.
+ARGS is one, so the caller can ask again.  A host that has no METHOD (one
+loaded from a build older than this elisp) answers `unknown-call' rather
+than throwing, so the gap between the two is seen
+\(`agent-repl--webhost-answered').
 The answer is always a string: a null answer is dropped without a callback."
   (let ((call (format "h.%s(%s)" method (mapconcat #'json-encode args ",")))
+        (op (json-encode method))
         (id (if (stringp (car args)) (json-encode (car args)) "null")))
-    (format (concat "(function(){var c=function(h){return %s;};var h=window.agentReplHost;"
+    (format (concat "(function(){var c=function(h){return typeof h[%s]===\"function\"?%s:"
+                    "JSON.stringify({op:%s,id:%s,outcome:\"unknown-call\",notes:[]});};"
+                    "var h=window.agentReplHost;"
                     "if(h){return c(h);}"
                     "(window.__agentReplHostPending=window.__agentReplHostPending||[]).push(c);"
                     "return JSON.stringify({op:%s,id:%s,outcome:\"queued\",notes:[]});})()")
-            call (json-encode method) id)))
+            op call op id op id)))
+
+(defvar agent-repl--webhost-reloaded-for-call nil
+  "The host URL a reload for an unknown call last loaded, or nil.
+A host loaded from that URL that still lacks a call is not stale: the
+daemon serves a webapp older than this elisp, which no reload fixes.")
+
+(defun agent-repl--webhost-predates-call (op)
+  "The host has no OP: it was loaded from a build older than this elisp.
+EMACS AND THE HOST SPEAK ONE PROTOCOL.  A host that predates a call Emacs
+makes is reloaded on the daemon serving Emacs now, which serves the build
+this elisp came with; one that still lacks the call after that reload is a
+daemon serving an older webapp than this elisp, an ERROR no reload heals."
+  (let* ((conn (agent-repl-link-live))
+         (url (and conn (agent-repl-webhost-url conn))))
+    (cond
+     ((null conn)
+      (agent-repl--warn agent-repl--webhost-central
+                        "elisp.webhost.predates-call op=%s action=none reason=no-link" op))
+     ((equal url agent-repl--webhost-reloaded-for-call)
+      (agent-repl--error agent-repl--webhost-central
+                         "elisp.webhost.predates-call op=%s action=none reason=served-webapp-predates-elisp url=%s"
+                         op url))
+     (t
+      (setq agent-repl--webhost-reloaded-for-call url)
+      (agent-repl--info agent-repl--webhost-central
+                        "elisp.webhost.predates-call op=%s action=reload url=%s" op url)
+      (agent-repl-webhost-reload conn)))))
 
 (defun agent-repl--webhost-answer-ws (answer)
   "The log scope for ANSWER: the workspace it names, or the central scope."
@@ -306,6 +340,8 @@ The xwidget `javascript-callback' handler calls this BY SYMBOL: see
              (scope (agent-repl--webhost-answer-ws answer)))
         (agent-repl--log scope "elisp.webhost.answer op=%s id=%s outcome=%s"
                          (plist-get answer :op) (plist-get answer :id) (plist-get answer :outcome))
+        (when (equal (plist-get answer :outcome) "unknown-call")
+          (agent-repl--webhost-predates-call (plist-get answer :op)))
         (dolist (note (plist-get answer :notes))
           (agent-repl--webhost-record-note scope (plist-get answer :op) note)))
     (error

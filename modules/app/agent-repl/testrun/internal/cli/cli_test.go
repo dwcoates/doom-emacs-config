@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +17,9 @@ import (
 	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/internal/sched"
 	"agentrepl/testrun/internal/suites"
+	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
 )
 
@@ -303,7 +306,7 @@ func TestOverCores(t *testing.T) {
 	result := func(wall, cpu float64, slots int) run.Result {
 		var sp run.Spec
 		sp.ID, sp.Slots = "u", slots
-		return run.Result{Spec: sp, Start: at, End: at.Add(time.Duration(wall * float64(time.Second))), CPU: cpu}
+		return run.Result{Spec: sp, Start: at, End: at.Add(time.Duration(wall * float64(time.Second))), Usage: run.Usage{CPU: cpu}}
 	}
 	tests := []struct {
 		name     string
@@ -357,8 +360,8 @@ type fakeExec struct {
 
 type fakeProc struct{ exit int }
 
-func (p fakeProc) Wait() (int, float64, error) { return p.exit, 0.5, nil }
-func (p fakeProc) Kill()                       {}
+func (p fakeProc) Wait() (int, run.Usage, error) { return p.exit, run.Usage{CPU: 0.5}, nil }
+func (p fakeProc) Kill()                         {}
 
 func (e *fakeExec) Start(s run.Spec, out *bytes.Buffer) (run.Process, error) {
 	e.mu.Lock()
@@ -1022,5 +1025,124 @@ func TestRunConditions(t *testing.T) {
 				t.Fatalf("RunConditions = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// pushed is one PushTimes call.
+type pushed struct {
+	target testtimes.Target
+	report testtimes.Report
+}
+
+// withTestTimes makes every suite's one unit report a test named after it,
+// and records every push.
+func withTestTimes(h *harness, target testtimes.Target, err error) *[]pushed {
+	calls := &[]pushed{}
+	build := h.deps.Build
+	h.deps.Build = func(l suites.Layout, s roster.Suite) (suites.Units, error) {
+		u, berr := build(l, s)
+		for i := range u.Atomic {
+			name := s.Name
+			u.Atomic[i].Tests = func([]byte, bool) ([]testtimes.Test, error) {
+				return []testtimes.Test{{Suite: name, Name: name + ".TestA", Outcome: testtimes.Pass, Seconds: 1}}, nil
+			}
+		}
+		return u, berr
+	}
+	h.deps.Metrics = target
+	h.deps.PushTimes = func(_ context.Context, target testtimes.Target, report testtimes.Report, _ time.Time) error {
+		*calls = append(*calls, pushed{target: target, report: report})
+		return err
+	}
+	return calls
+}
+
+func TestARunToldNoMetricsTargetPushesNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	calls := withTestTimes(&h, testtimes.Target{}, nil)
+
+	// Act
+	code := h.run(t)
+
+	// Assert
+	if code != 0 || len(*calls) != 0 {
+		t.Fatalf("exit = %d, pushes = %d; want a clean run that pushed nothing", code, len(*calls))
+	}
+}
+
+func TestARunToldAMetricsTargetPushesEveryTestAndSuite(t *testing.T) {
+	// Arrange
+	h := newHarness(t, map[string]int{"ert": 1}, nil)
+	target := testtimes.Target{Root: "/m", Trigger: "merge_queue"}
+	calls := withTestTimes(&h, target, nil)
+
+	// Act
+	h.run(t)
+
+	// Assert
+	if len(*calls) != 1 || (*calls)[0].target != target {
+		t.Fatalf("pushes = %+v, want one to %+v", *calls, target)
+	}
+	got := (*calls)[0].report
+	if len(got.Tests) != len(roster.Suites) || len(got.Suites) != len(roster.Suites) || len(got.Units) != len(roster.Suites) {
+		t.Fatalf("pushed %d tests, %d suites and %d units, want one of each per roster suite", len(got.Tests), len(got.Suites), len(got.Units))
+	}
+	for _, u := range got.Units {
+		if u.CPU != 0.5 || u.Wall <= 0 {
+			t.Errorf("unit %s pushed cpu %v wall %v, want the unit's own figures", u.ID, u.CPU, u.Wall)
+		}
+	}
+	for _, s := range got.Suites {
+		want := testtimes.Pass
+		if s.Name == "ert" {
+			want = testtimes.Fail
+		}
+		if s.Outcome != want {
+			t.Errorf("suite %s pushed %s, want %s", s.Name, s.Outcome, want)
+		}
+	}
+	if !strings.Contains(h.out.String(), "metrics: pushed "+strconv.Itoa(len(roster.Suites))+" test, ") {
+		t.Errorf("stdout does not say what was pushed:\n%s", h.out)
+	}
+}
+
+func TestARunWhosePushFailsSaysSoAndFails(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	withTestTimes(&h, testtimes.Target{Root: "/m", Trigger: "merge_queue"}, errors.New("the store is down"))
+
+	// Act
+	code := h.run(t)
+
+	// Assert
+	if code != 1 || !strings.Contains(h.errOut.String(), "recording this run's test times in the metrics store failed: the store is down") {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+}
+
+func TestAPushLeavesOutACancelledUnit(t *testing.T) {
+	// Arrange
+	at := time.Unix(100, 0)
+	results := []run.Result{
+		{Spec: run.Spec{Unit: sched.Unit{ID: "a", Suite: "s"}}, Outcome: run.Failed, Start: at, End: at.Add(time.Second)},
+		{Spec: run.Spec{Unit: sched.Unit{ID: "b", Suite: "s"}}, Outcome: run.Cancelled, Start: at, End: at},
+	}
+	var got testtimes.Report
+	d := Deps{
+		Log:     &run.Log{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}},
+		Metrics: testtimes.Target{Root: "/m", Trigger: "merge_queue"},
+		PushTimes: func(_ context.Context, _ testtimes.Target, report testtimes.Report, _ time.Time) error {
+			got = report
+			return nil
+		},
+	}
+
+	// Act
+	err := pushTimes(context.Background(), d, results, nil, at)
+
+	// Assert
+	if err != nil || len(got.Units) != 1 || got.Units[0].ID != "a" || got.Units[0].Outcome != testtimes.Fail || got.Units[0].Wall != 1 {
+		t.Fatalf("pushTimes = %v, units %+v; want only the failed unit, with its wall time", err, got.Units)
 	}
 }

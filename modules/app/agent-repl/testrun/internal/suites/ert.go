@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
 )
 
@@ -61,6 +62,7 @@ func ertUnits(l Layout, s roster.Suite) (Units, error) {
 			[]string{"emacs", "-batch", "-Q", "-l", "ert", "-l", driver, "--eval", form},
 			"AGENT_REPL_ITEST_FAKEDAEMON="+fake)
 		sp.Items = func(out []byte) (map[string]float64, error) { return ParseItemLines(out, items) }
+		sp.Tests = func(out []byte, _ bool) ([]testtimes.Test, error) { return testtimes.ParseERT(s.Name, out) }
 		return sp
 	}
 	return Units{
