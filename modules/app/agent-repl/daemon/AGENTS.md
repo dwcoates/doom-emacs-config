@@ -112,7 +112,6 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   | `footer.DefaultMomentaryDwell` | 1500ms | `--footer-momentary-dwell`, `AGENT_REPL_FOOTER_MOMENTARY_DWELL` (the environment beats the flag; a malformed or non-positive value is REFUSED, never ignored), `harness.Opts.FooterMomentaryDwell` | the window is sized for a PERSON to read a momentary status, so it is a real product window and not a bound to be tightened. The two tests whose subject is its RETIREMENT read no clock, so they run the daemon at 150ms — ~25x the measured p90 push arrival, wide enough that the status and its successor stay two separately observed pushes — and cost 0.39s each instead of 1.74s |
   | `boot.DefaultAdoptBound` | 10s | `AGENT_REPL_BOOT_ADOPT_BOUND` (malformed or non-positive is REFUSED, never ignored), the suite runs it at 300ms | THE BOUND THAT KEEPS THE DAEMON SERVING AT ALL. The listener is bound and daemon.addr published at boot steps 5 and 6 and `http.Server.Serve` is not reached until the reconciliation has finished, so every instant one workspace's adoption spends is an instant the kernel is queueing connections onto a socket nobody accepts on. `shimclient.bringUp` redials a shim whose lock reads HELD forever — correctly, a held flock is a living process — so a survivor whose socket path is gone never resolves: pid 31984 listened for TEN HOURS with its accept queue at 128/128. A healthy adoption is a local AF_UNIX connect (itself bounded by `shimsocket.DialTimeout`, 2s) plus the shim's first pushed diagnostics frame, so 10s is ~5x one bounded connect. An overrun is ERROR and the workspace is UNDETERMINED — neither adopted nor orphan-closed — and the boot goes on |
   | `bootStallBound` (cmd/agent-repld/run.go) | 90s | `hooks.BootStall` | the LAST RESORT on the WHOLE reconciliation, for a step whose own bound somebody forgot. Its expiry dumps every goroutine into the run log at ERROR and ends the process, because Emacs respawns a daemon that exited and cannot tell one that is listening and dead from a healthy one. Sized above the worst LEGITIMATE boot: a handful of workspaces adopted serially at `boot.DefaultAdoptBound` apiece plus the manifest, the holds, the orphan closes and the merge recovery, all local sqlite work in milliseconds. Never paid on a healthy boot |
-  | `desktopnotify.DefaultDeliveredBound` | 160ms | `AGENT_REPL_NOTIFIER_LIST_BOUND` (malformed or non-positive is REFUSED, never ignored), the integration suite runs it at 750ms (`harness.NotifierListBoundEnv`) | ONE query of which banners the platform still holds (`terminal-notifier -list ALL`), on Emacs's focus claim. A healthy run is 56-76ms worst at load 16-22, so 160ms is just over twice it. The suite's banner program is a recorder whose append lands on the run's RAM disk at background I/O priority (up to 330ms p99 under a full run), so it needs a bound of its own: at 160ms the gate killed it with nothing hung |
   | `workspace.DefaultStartSessionBound` | 60s | `AGENT_REPL_START_SESSION_BOUND` (malformed or non-positive is REFUSED, never ignored), the integration suite runs it short | ONE `StartSession` call, and the LAST step of the bring-up that had no bound at all: the dial ladder is bounded, an adoption is bounded by `boot.DefaultAdoptBound`, and then the rpc that actually starts the session could take forever -- holding the workspace's START GATE, and so every other route to starting that workspace, with it. MEASURED, realtest run 2026-09-13T16:20:34: workspace `2b81f45a724642ef`'s shim accepted the start, logged `shim.convert.hooks: a hook blocked the gated action` on `SessionStart:resume`, and never answered; three daemon generations sat in that call for 35s, 3m30s and 8m30s, each ended only by the NEXT deploy's SIGTERM. It is a PRODUCT window, not a bound on the daemon's own work -- what it covers is the shim's vendor resume plus whatever `SessionStart` hooks the user configured, which are arbitrary commands -- so it is sized the way the adopt bound is: every healthy bring-up in that same run (spawn, ready, StartSession and the watcher, end to end) ran 116ms, 245ms and 254ms, and 60s is ~240x the slowest of them. An overrun is ERROR naming the unanswered call, and the bring-up fails rather than waiting |
   | `workspace.DefaultWorktreeBound` | 2m | `workspace.Deps.WorktreeBound` (tests only) | ONE create's worktree step, the `git worktree add` that cuts the branch and checks it out. It runs the repository's hooks, which are arbitrary commands, and a hook that never returned held four creates for good on 2026-10-23. MEASURED from the editor's stage records over 102 creates (2026-10-20 to 2026-10-23): median 1.4s, p90 6.8s, p95 10.7s, slowest 48.5s and 51.4s, both healthy explanation-engine checkouts; 2m is just over twice the slowest. An overrun stops git, is ERROR `daemon.workspace.create` with `bound_ms`, and fails the create |
   | `server.acceptBackoffFloor` / `acceptBackoffCeiling` | 5ms doubling to 1s | none | how long `server.RetryAccept` waits between retries of a TRANSIENT accept failure (EMFILE, ENFILE, ENOBUFS, ENOMEM, ECONNABORTED, ECONNRESET, EINTR, EAGAIN — named explicitly, never read off the deprecated `net.Error.Temporary`). Nothing waits here unless Accept actually failed; what the ceiling covers is descriptor exhaustion, where retrying at full speed spins a core and writes a record per attempt without making a descriptor available. `net.ErrClosed` is the daemon's OWN shutdown closing the listener: DEBUG and returned, never an ERROR against a clean exit |
@@ -584,16 +583,22 @@ is Emacs-wide: a focused Emacs, whatever workspace it shows, gets no banner.
   - Linux READS the click BACK: `notify-send --wait` blocks until a click, a
     dismissal or its 60s timeout, and a click is relayed to Emacs as the host
     stream's `notification_clicked`.
-- **Emacs coming forward claims the newest live banner**
-  (`ClaimLiveNotification`, `desktopnotify/held.go`). The notifier holds each
+- **Emacs coming forward claims the newest held banner, in its focus report**
+  (`ReportEditorFocus`, `desktopnotify/held.go`). The notifier holds each
   banner from the edge it is made on, the newest per workspace. A read-back
-  banner is live while its program runs. A handed banner is live while
-  `terminal-notifier -list ALL` still lists its group, asked once per claim
-  under a 100ms bound (40ms measured). The claim answers the newest live one
-  and lets go of every banner it read. A successful `SelectWorkspace` and a
-  read-back click let go of all of them, so a banner made before the user
-  chose a workspace never moves them later. A claim while Emacs reads as
-  unfocused is refused (`editor_unfocused`) and consumes nothing.
+  banner is held while its program runs; a handed banner until a claim, a
+  selection or a later banner of its workspace lets it go. The report that
+  moves the stream's focus from unfocused to focused (`Focus.Report`'s gain,
+  read under the slot's own lock) claims in the same call and answers the
+  newest held banner's workspace (`banner`), or `nothing_held`; every other
+  report answers `no_gain`. So the switch costs one round trip, and no
+  unfocused report can land between a gain and its claim (2026-10-23: the
+  separate `ClaimLiveNotification` call was refused that way, and its
+  `terminal-notifier -list ALL` query, 40-160ms on the path and killed at its
+  bound under load, is gone: a banner cleared from Notification Center still
+  steers the next return). A successful `SelectWorkspace` and a read-back
+  click let go of every held banner, so a banner made before the user chose a
+  workspace never moves them later.
 - **Every banner runs on its own goroutine**; focus is read before composing
   and again after, and `Notifier.Close` cancels and joins them before the state
   client closes.

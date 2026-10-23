@@ -44,20 +44,40 @@ func TestFocusTakesTheAttachedStreamsFocus(t *testing.T) {
 	}
 }
 
-func TestFocusReportMovesTheStandingStreamsFocus(t *testing.T) {
-	// Arrange
-	f := NewFocus(dlog.NewTestLogger())
-	f.Attach(false)
-
-	// Act
-	err := f.Report(true)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Report: %v", err)
+func TestFocusReportMovesTheStandingStreamsFocusAndAnswersAGain(t *testing.T) {
+	cases := []struct {
+		name       string
+		attached   bool
+		reported   bool
+		wantGained bool
+	}{
+		{name: "unfocused to focused is a gain", attached: false, reported: true, wantGained: true},
+		{name: "focused to focused is no gain", attached: true, reported: true, wantGained: false},
+		{name: "focused to unfocused is no gain", attached: true, reported: false, wantGained: false},
+		{name: "unfocused to unfocused is no gain", attached: false, reported: false, wantGained: false},
 	}
-	if !f.Focused() {
-		t.Fatal("a reported focus did not stand")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			f := NewFocus(log)
+			f.Attach(tc.attached)
+
+			// Act
+			gained, err := f.Report(tc.reported)
+
+			// Assert
+			if err != nil || gained != tc.wantGained {
+				t.Fatalf("Report = (%v, %v), want (%v, nil)", gained, err, tc.wantGained)
+			}
+			if got := f.Focused(); got != tc.reported {
+				t.Fatalf("Focused() = %v, want the reported %v", got, tc.reported)
+			}
+			r, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Message: "Emacs reported its focus"})
+			if !ok || r.Context["focused"] != tc.reported || r.Context["gained"] != tc.wantGained {
+				t.Fatalf("record = %+v (found=%v), want focused and gained recorded", r, ok)
+			}
+		})
 	}
 }
 
@@ -66,11 +86,11 @@ func TestFocusReportWithNoStreamIsRefused(t *testing.T) {
 	f := NewFocus(dlog.NewTestLogger())
 
 	// Act
-	err := f.Report(true)
+	gained, err := f.Report(true)
 
 	// Assert
-	if !errors.Is(err, ErrNoEmacsStream) {
-		t.Fatalf("Report = %v, want ErrNoEmacsStream", err)
+	if !errors.Is(err, ErrNoEmacsStream) || gained {
+		t.Fatalf("Report = (%v, %v), want (false, ErrNoEmacsStream)", gained, err)
 	}
 	if f.Focused() {
 		t.Fatal("a refused report changed the focus")
@@ -89,7 +109,7 @@ func TestFocusReleaseReadsUnfocused(t *testing.T) {
 	if f.Focused() {
 		t.Fatal("a released stream's focus still stood")
 	}
-	if err := f.Report(true); !errors.Is(err, ErrNoEmacsStream) {
+	if _, err := f.Report(true); !errors.Is(err, ErrNoEmacsStream) {
 		t.Fatalf("Report after release = %v, want ErrNoEmacsStream", err)
 	}
 }

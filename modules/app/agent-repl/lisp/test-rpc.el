@@ -615,18 +615,6 @@ missing here or there is a broken seam.")
       ;; Assert
       (should (equal sent '("ReportEditorFocus" . "{\"focus\":{\"focused\":{}}}"))))))
 
-(ert-deftest agent-repl-test-rpc-claim-live-notification-sends-the-empty-claim ()
-  "ClaimLiveNotification is a unary call carrying an empty request."
-  ;; Arrange
-  (agent-repl-test-rpc--with-logs
-    (let ((sent nil))
-      (cl-letf (((symbol-function 'agent-repl-connect-unary)
-                 (lambda (_conn method json &rest _keys) (setq sent (cons method json)) nil)))
-        ;; Act
-        (agent-repl-rpc-claim-live-notification nil nil))
-      ;; Assert
-      (should (equal sent '("ClaimLiveNotification" . "{}"))))))
-
 (ert-deftest agent-repl-test-rpc-daemon-stream-without-a-build-never-opens ()
   "An Emacs with no elisp build to report fails loudly and opens nothing."
   ;; Arrange

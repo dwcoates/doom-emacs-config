@@ -1152,11 +1152,41 @@ composer and vendor_info arms together."
                   #'agent-repl-wire-encode-report-editor-focus-request nil)
                  '("ReportEditorFocusRequest" focus "required message field is absent"))))
 
-(ert-deftest agent-repl-test-wire-host-report-editor-focus-decodes-success ()
-  "The success arm is empty."
+(ert-deftest agent-repl-test-wire-host-report-editor-focus-decodes-no-gain ()
+  "A report that was no gain answers the no_gain claim arm."
   (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-report-editor-focus-response "{\"success\":{}}")
-                 '(:arm :success :value nil))))
+                  #'agent-repl-wire-decode-report-editor-focus-response
+                  "{\"success\":{\"noGain\":{}}}")
+                 '(:arm :success :value (:claim (:arm :no-gain :value nil))))))
+
+(ert-deftest agent-repl-test-wire-host-report-editor-focus-decodes-nothing-held ()
+  "A gain with no banner held answers the nothing_held claim arm."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-report-editor-focus-response
+                  "{\"success\":{\"nothingHeld\":{}}}")
+                 '(:arm :success :value (:claim (:arm :nothing-held :value nil))))))
+
+(ert-deftest agent-repl-test-wire-host-report-editor-focus-decodes-banner ()
+  "A gain that claimed a banner names its workspace ref."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-report-editor-focus-response
+                  "{\"success\":{\"banner\":{\"workspace\":{\"id\":\"ws1\",\"dir\":\"/work/ws1\"}}}}")
+                 '(:arm :success :value
+                   (:claim (:arm :banner :value (:workspace (:id "ws1" :dir "/work/ws1"))))))))
+
+(ert-deftest agent-repl-test-wire-host-report-editor-focus-banner-without-workspace-is-refused ()
+  "A claimed banner naming no workspace is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-report-editor-focus-response
+                  "{\"success\":{\"banner\":{}}}")
+                 '("ReportEditorFocusBannerClaimed" workspace "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-report-editor-focus-success-without-claim-is-refused ()
+  "A success naming no claim arm is a contract breach, never a silent no-gain."
+  (should (equal (car (agent-repl-test-wire-host--breach
+                       #'agent-repl-wire-decode-report-editor-focus-response
+                       "{\"success\":{}}"))
+                 "ReportEditorFocusSuccess")))
 
 (ert-deftest agent-repl-test-wire-host-report-editor-focus-decodes-no-emacs-stream ()
   "The refusal names its cause: no Emacs stream stands."
@@ -1172,66 +1202,13 @@ composer and vendor_info arms together."
                   "{\"error\":{\"busy\":{}}}")
                  '("ReportEditorFocusError" busy "unknown field"))))
 
-(ert-deftest agent-repl-test-wire-host-claim-live-notification-request-is-empty ()
-  "The claim carries nothing: the banners are the daemon's."
-  (should (equal (agent-repl-test-wire-host--quiet
-                   (json-serialize
-                    (agent-repl-wire-encode-claim-live-notification-request nil)))
-                 "{}")))
-
-(ert-deftest agent-repl-test-wire-host-claim-live-notification-request-with-fields-is-refused ()
-  "An empty message given fields never leaves Emacs."
-  (should (equal (agent-repl-test-wire-host--encode-breach
-                  #'agent-repl-wire-encode-claim-live-notification-request '(:workspace "x"))
-                 '("ClaimLiveNotificationRequest" - "expected an empty message"))))
-
-(ert-deftest agent-repl-test-wire-host-claim-live-notification-decodes-live ()
-  "The live arm names the banner's workspace ref."
-  (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-claim-live-notification-response
-                  "{\"success\":{\"live\":{\"workspace\":{\"id\":\"ws1\",\"dir\":\"/work/ws1\"}}}}")
-                 '(:arm :success :value
-                   (:outcome (:arm :live :value (:workspace (:id "ws1" :dir "/work/ws1"))))))))
-
-(ert-deftest agent-repl-test-wire-host-claim-live-notification-decodes-none ()
-  "The none arm names nothing."
-  (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-claim-live-notification-response
-                  "{\"success\":{\"none\":{}}}")
-                 '(:arm :success :value (:outcome (:arm :none :value nil))))))
-
-(ert-deftest agent-repl-test-wire-host-claim-live-notification-live-without-workspace-is-refused ()
-  "A live answer naming no workspace is a contract breach."
-  (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-claim-live-notification-response
-                  "{\"success\":{\"live\":{}}}")
-                 '("ClaimLiveNotificationLive" workspace "required message field is absent"))))
-
-(ert-deftest agent-repl-test-wire-host-claim-live-notification-decodes-editor-unfocused ()
-  "The refusal names its cause: the daemon holds Emacs unfocused."
-  (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-claim-live-notification-response
-                  "{\"error\":{\"editorUnfocused\":{}}}")
-                 '(:arm :error :value (:cause (:arm :editor-unfocused :value nil))))))
-
-(ert-deftest agent-repl-test-wire-host-claim-live-notification-unknown-cause-is-refused ()
-  "An unmodeled refusal cause is refused rather than silently dropped."
-  (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-claim-live-notification-response
-                  "{\"error\":{\"busy\":{}}}")
-                 '("ClaimLiveNotificationError" busy "unknown field"))))
-
-(ert-deftest agent-repl-test-wire-host-claim-live-notification-arms-match-the-bindings ()
-  "The decoders' arm sets are exactly what the frozen schema declares."
+(ert-deftest agent-repl-test-wire-host-report-editor-focus-claim-arms-match-the-bindings ()
+  "The claim decoder's arm set is exactly what the frozen schema declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
-                        "agentrepl/v1/endpoint_claim_live_notification.pb.go"
-                        "ClaimLiveNotificationSuccess")
+                        "agentrepl/v1/endpoint_report_editor_focus.pb.go"
+                        "ReportEditorFocusSuccess")
                        #'string<)
-                 (list "live" "none")))
-  (should (equal (agent-repl-test--generated-oneof-arms
-                  "agentrepl/v1/endpoint_claim_live_notification.pb.go"
-                  "ClaimLiveNotificationError")
-                 (list "editorUnfocused"))))
+                 (list "banner" "noGain" "nothingHeld"))))
 
 (ert-deftest agent-repl-test-wire-host-editor-focus-arms-match-the-bindings ()
   "The focus encoder's arm set is exactly what the frozen schema declares."

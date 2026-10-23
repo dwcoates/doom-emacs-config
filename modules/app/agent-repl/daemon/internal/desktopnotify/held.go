@@ -1,29 +1,21 @@
 package desktopnotify
 
 import (
-	"cmp"
-	"context"
-	"errors"
-	"fmt"
-	"slices"
+	"maps"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 )
 
 // opClaim is the operation the held banners' records carry: each banner held
-// or let go, and every ClaimLiveNotification answered.
+// or let go, and every claim a focus gain made.
 const opClaim = "daemon.desktopnotify.claim"
 
-// ErrEditorUnfocused is a claim made while Emacs reads as unfocused: the user
-// is not looking at Emacs, so no banner may move its tab.
-var ErrEditorUnfocused = errors.New("Emacs is not focused")
-
-// Claim is what a claim came to: the newest live banner's target, or none.
+// Claim is what a claim came to: the newest held banner's target, or none.
 type Claim struct {
-	// Live is whether a held banner was still live.
-	Live bool
-	// Target is the live banner's workspace. Zero unless Live.
+	// Held is whether a banner was held.
+	Held bool
+	// Target is the newest held banner's workspace. Zero unless Held.
 	Target Target
 }
 
@@ -32,10 +24,6 @@ type heldBanner struct {
 	// seq orders the banners by when each was made.
 	seq    uint64
 	target Target
-	// handed is a banner the platform holds: it is live while the platform
-	// still lists it. One that is not handed is a read-back banner whose
-	// program is still showing it, which is live by being held at all.
-	handed bool
 }
 
 // held is the banners the notifier made since the last claim or selection,
@@ -58,94 +46,43 @@ func (n *Notifier) hold(target Target, log dlog.Logger) uint64 {
 }
 
 // settle records what a held banner's program came to: a handed banner stays
-// held for the platform to vouch for, and any other has left the desktop. A
-// banner a claim, a selection or a later banner of its workspace already let
-// go is left alone.
+// held until a claim, a selection or a later banner of its workspace lets it
+// go, and any other (a read-back banner whose program stopped showing it) has
+// left the desktop. A banner already let go is left alone.
 func (n *Notifier) settle(ws ids.WorkspaceID, seq uint64, handed bool, log dlog.Logger) {
 	n.heldMu.Lock()
 	banner, ok := n.held.banners[ws]
 	current := ok && banner.seq == seq
-	switch {
-	case current && handed:
-		banner.handed = true
-		n.held.banners[ws] = banner
-	case current:
+	if current && !handed {
 		delete(n.held.banners, ws)
 	}
 	n.heldMu.Unlock()
-	log.Debug(opClaim, "settled the held banner", dlog.Context{"seq": seq, "handed": handed, "still_held": current})
+	log.Debug(opClaim, "settled the held banner", dlog.Context{"seq": seq, "handed": handed, "still_held": current && handed})
 }
 
-// Claim answers the workspace of the newest held banner that is still live,
-// and lets go of every banner it read, live or not: each banner steers one
-// return to Emacs at most. ErrEditorUnfocused while Emacs reads as unfocused,
-// and any failure to ask the platform which banners it still lists, let go of
-// nothing.
-func (n *Notifier) Claim(ctx context.Context) (Claim, error) {
-	if !n.deps.Focus.Focused() {
-		n.deps.Log.Info(opClaim, "a claim arrived while Emacs reads as unfocused; it was refused", nil)
-		return Claim{}, ErrEditorUnfocused
-	}
-	banners := n.heldNewestFirst()
-	delivered, err := n.delivered(ctx, banners)
-	if err != nil {
-		return Claim{}, err
-	}
+// Claim answers the workspace of the newest held banner and lets go of every
+// banner held: each banner steers one return to Emacs at most. It is made by
+// a FOCUS GAIN, under the very report that is the gain, so it never asks
+// whether Emacs is focused; and it never asks the platform which banners it
+// still lists, a program run on the path from focus to switch (see
+// agentrepl.v1.ReportEditorFocusRequest). The answer is memory alone.
+func (n *Notifier) Claim() Claim {
+	n.heldMu.Lock()
+	held := len(n.held.banners)
 	claim := Claim{}
-	for _, banner := range banners {
-		if !banner.handed || delivered[banner.target.ID] {
-			claim = Claim{Live: true, Target: banner.target}
-			break
+	var newest uint64
+	for banner := range maps.Values(n.held.banners) {
+		if !claim.Held || banner.seq > newest {
+			claim = Claim{Held: true, Target: banner.target}
+			newest = banner.seq
 		}
 	}
-	n.letGo(banners)
-	n.deps.Log.Info(opClaim, "answered a focus claim", dlog.Context{
-		"held": len(banners), "live": claim.Live, "workspace": string(claim.Target.ID),
-	})
-	return claim, nil
-}
-
-// heldNewestFirst answers every held banner, the newest first.
-func (n *Notifier) heldNewestFirst() []heldBanner {
-	n.heldMu.Lock()
-	banners := make([]heldBanner, 0, len(n.held.banners))
-	for _, banner := range n.held.banners {
-		banners = append(banners, banner)
-	}
+	clear(n.held.banners)
 	n.heldMu.Unlock()
-	slices.SortFunc(banners, func(a, b heldBanner) int { return cmp.Compare(b.seq, a.seq) })
-	return banners
-}
-
-// delivered asks the platform which workspaces' banners it still lists, when
-// any of banners was handed to it; a claim of read-back banners alone asks
-// nothing.
-func (n *Notifier) delivered(ctx context.Context, banners []heldBanner) (map[ids.WorkspaceID]bool, error) {
-	if !slices.ContainsFunc(banners, func(b heldBanner) bool { return b.handed }) {
-		return nil, nil
-	}
-	if n.deps.Backend == nil {
-		// A handed banner was made by a backend; holding one without a backend
-		// is a broken notifier, never a runtime condition.
-		panic("desktopnotify: a handed banner is held with no banner backend")
-	}
-	delivered, err := n.deps.Backend.Delivered(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ask the banner program %s which banners it still holds: %w", n.deps.Backend.Program(), err)
-	}
-	return delivered, nil
-}
-
-// letGo lets go of banners, sparing any of their workspaces' banners made
-// since they were read.
-func (n *Notifier) letGo(banners []heldBanner) {
-	n.heldMu.Lock()
-	defer n.heldMu.Unlock()
-	for _, banner := range banners {
-		if n.held.banners[banner.target.ID].seq == banner.seq {
-			delete(n.held.banners, banner.target.ID)
-		}
-	}
+	n.deps.Log.Info(opClaim, "a focus gain claimed the newest held banner", dlog.Context{
+		"held": held, "claimed": claim.Held, "workspace": string(claim.Target.ID),
+	})
+	return claim
 }
 
 // Forget lets go of every held banner: the user chose a workspace (a

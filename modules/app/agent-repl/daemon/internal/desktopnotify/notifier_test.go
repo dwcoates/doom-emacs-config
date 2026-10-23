@@ -27,29 +27,6 @@ type fakeBackend struct {
 	// onPost, when set, runs as Post is called, which is where a test reads
 	// what the notifier had already done when it handed the banner over.
 	onPost func()
-	// delivered and deliveredErr answer Delivered; asked counts its calls.
-	delivered    map[ids.WorkspaceID]bool
-	deliveredErr error
-	asked        int
-	// onDelivered, when set, runs as Delivered is called: a test's window
-	// between a claim reading the held banners and letting them go.
-	onDelivered func()
-}
-
-func (b *fakeBackend) Delivered(context.Context) (map[ids.WorkspaceID]bool, error) {
-	if b.onDelivered != nil {
-		b.onDelivered()
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.asked++
-	return b.delivered, b.deliveredErr
-}
-
-func (b *fakeBackend) deliveredAsks() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.asked
 }
 
 func (b *fakeBackend) Program() string { return "fake-banner" }
@@ -263,7 +240,7 @@ func TestNotifierRechecksFocusAfterComposing(t *testing.T) {
 	// Act
 	f.notifier.Post("ws1", "turn_ended", func(ctx context.Context, name string) Banner {
 		// Emacs gains focus while the banner is being composed.
-		if err := f.focus.Report(true); err != nil {
+		if _, err := f.focus.Report(true); err != nil {
 			t.Errorf("Report: %v", err)
 		}
 		return Banner{Title: "t"}
@@ -556,7 +533,7 @@ func TestNotifierRingsNothingForABannerNotMade(t *testing.T) {
 			compose := titledBy
 			if tc.focusLater {
 				compose = func(ctx context.Context, name string) Banner {
-					if err := focus.Report(true); err != nil {
+					if _, err := focus.Report(true); err != nil {
 						t.Errorf("Report: %v", err)
 					}
 					return titledBy(ctx, name)

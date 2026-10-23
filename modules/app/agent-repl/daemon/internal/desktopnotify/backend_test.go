@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"agent-repld/internal/ids"
 )
 
 // fakeRunner answers one scripted stdout and records the argv it was handed.
@@ -125,7 +123,7 @@ func TestPlatformForRefusesAMacOSBannerWithNoClickAction(t *testing.T) {
 
 func TestNewBackendTakesTheOverride(t *testing.T) {
 	// Act
-	b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "/tmp/fake-notifier", noLookPath, &fakeRunner{stdout: version3}, DefaultDeliveredBound)
+	b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "/tmp/fake-notifier", noLookPath, &fakeRunner{stdout: version3})
 
 	// Assert
 	if err != nil {
@@ -138,7 +136,7 @@ func TestNewBackendTakesTheOverride(t *testing.T) {
 
 func TestNewBackendLooksTheProgramUpOnPath(t *testing.T) {
 	// Act
-	b, err := NewBackend(context.Background(), mustPlatform(t, "linux"), "", onPath, &fakeRunner{}, DefaultDeliveredBound)
+	b, err := NewBackend(context.Background(), mustPlatform(t, "linux"), "", onPath, &fakeRunner{})
 
 	// Assert
 	if err != nil {
@@ -151,7 +149,7 @@ func TestNewBackendLooksTheProgramUpOnPath(t *testing.T) {
 
 func TestNewBackendRefusesAMissingProgram(t *testing.T) {
 	// Act
-	_, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", noLookPath, &fakeRunner{stdout: version3}, DefaultDeliveredBound)
+	_, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", noLookPath, &fakeRunner{stdout: version3})
 
 	// Assert
 	if err == nil {
@@ -181,7 +179,7 @@ func TestNewBackendChecksTheMinimumVersion(t *testing.T) {
 			runner := &fakeRunner{stdout: tc.stdout, err: tc.err}
 
 			// Act
-			_, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner, DefaultDeliveredBound)
+			_, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner)
 
 			// Assert
 			if !reflect.DeepEqual(runner.args, []string{"-version"}) {
@@ -205,7 +203,7 @@ func TestNewBackendAsksNoVersionOfAProgramWithNoMinimum(t *testing.T) {
 	runner := &fakeRunner{}
 
 	// Act
-	_, err := NewBackend(context.Background(), mustPlatform(t, "linux"), "", onPath, runner, DefaultDeliveredBound)
+	_, err := NewBackend(context.Background(), mustPlatform(t, "linux"), "", onPath, runner)
 
 	// Assert
 	if err != nil || runner.args != nil {
@@ -230,7 +228,7 @@ func TestTerminalNotifierBackendSpeaksTerminalNotifiersArgv(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			runner := &fakeRunner{stdout: version3}
-			b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner, DefaultDeliveredBound)
+			b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner)
 			if err != nil {
 				t.Fatalf("NewBackend: %v", err)
 			}
@@ -252,7 +250,7 @@ func TestTerminalNotifierBackendSpeaksTerminalNotifiersArgv(t *testing.T) {
 func TestNotifySendBackendSpeaksNotifySendsArgv(t *testing.T) {
 	// Arrange
 	runner := &fakeRunner{}
-	b, _ := NewBackend(context.Background(), mustPlatform(t, "linux"), "", onPath, runner, DefaultDeliveredBound)
+	b, _ := NewBackend(context.Background(), mustPlatform(t, "linux"), "", onPath, runner)
 
 	// Act
 	_, err := b.Post(context.Background(), target, Banner{Title: "T", Body: "B"}, func() {})
@@ -283,7 +281,7 @@ func TestBackendReadsTheOutcome(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			runner := &fakeRunner{stdout: version3}
-			b, err := NewBackend(context.Background(), mustPlatform(t, tc.goos), "", onPath, runner, DefaultDeliveredBound)
+			b, err := NewBackend(context.Background(), mustPlatform(t, tc.goos), "", onPath, runner)
 			if err != nil {
 				t.Fatalf("NewBackend: %v", err)
 			}
@@ -307,7 +305,7 @@ func TestBackendSurfacesAFailedProgram(t *testing.T) {
 	// Arrange
 	cause := errors.New("exit status 3: notifications are not authorized")
 	runner := &fakeRunner{stdout: version3}
-	b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner, DefaultDeliveredBound)
+	b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner)
 	if err != nil {
 		t.Fatalf("NewBackend: %v", err)
 	}
@@ -320,150 +318,6 @@ func TestBackendSurfacesAFailedProgram(t *testing.T) {
 	if !errors.Is(err, cause) || outcome != Unclicked {
 		t.Fatalf("Post = (%v, %v), want (Unclicked, the program's failure)", outcome, err)
 	}
-}
-
-// TestTerminalNotifierBackendListsTheBannersItStillHolds pins the macOS
-// delivered query: terminal-notifier -list ALL, read as the workspaces whose
-// group Notification Center still lists.
-func TestTerminalNotifierBackendListsTheBannersItStillHolds(t *testing.T) {
-	cases := []struct {
-		name   string
-		stdout string
-		want   map[ids.WorkspaceID]bool
-	}{
-		{name: "a list naming no banner is empty output", stdout: "", want: map[ids.WorkspaceID]bool{}},
-		{name: "the header row alone names no banner", stdout: "GroupID\tTitle\tSubtitle\tMessage\tDelivered At\n",
-			want: map[ids.WorkspaceID]bool{}},
-		{name: "each workspace group is a delivered banner",
-			stdout: "GroupID\tTitle\tSubtitle\tMessage\tDelivered At\n" +
-				"agent-repl:ws1\tT1\t\tB1\t2026-10-15 16:16:08 +0000\n" +
-				"agent-repl:ws2\tT2\t\tB2\t2026-10-15 16:17:08 +0000\n",
-			want: map[ids.WorkspaceID]bool{"ws1": true, "ws2": true}},
-		{name: "a group that is no workspace's is skipped",
-			stdout: "GroupID\tTitle\tSubtitle\tMessage\tDelivered At\n" +
-				"agent-repl-docker-fd\tT\t\tB\t2026-10-15 05:21:33 +0000\n" +
-				"agent-repl:\tT\t\tB\t2026-10-15 05:21:33 +0000\n" +
-				"other-app\tT\t\tB\t2026-10-15 05:21:33 +0000\n" +
-				"agent-repl:ws3\tT\t\tB\t2026-10-15 05:21:33 +0000",
-			want: map[ids.WorkspaceID]bool{"ws3": true}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			runner := &fakeRunner{stdout: version3}
-			b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner, DefaultDeliveredBound)
-			if err != nil {
-				t.Fatalf("NewBackend: %v", err)
-			}
-			runner.stdout = tc.stdout
-
-			// Act
-			got, err := b.Delivered(context.Background())
-
-			// Assert
-			if err != nil {
-				t.Fatalf("Delivered: %v", err)
-			}
-			if !reflect.DeepEqual(runner.args, []string{"-list", "ALL"}) {
-				t.Fatalf("ran %q, want -list ALL", runner.args)
-			}
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("Delivered = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestBackendDeliveredSurfacesAFailedProgram(t *testing.T) {
-	// Arrange
-	cause := errors.New("exit status 1: list refused")
-	runner := &fakeRunner{stdout: version3}
-	b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner, DefaultDeliveredBound)
-	if err != nil {
-		t.Fatalf("NewBackend: %v", err)
-	}
-	runner.err = cause
-
-	// Act
-	got, err := b.Delivered(context.Background())
-
-	// Assert
-	if !errors.Is(err, cause) || got != nil {
-		t.Fatalf("Delivered = (%v, %v), want (nil, the program's failure)", got, err)
-	}
-}
-
-func TestBackendDeliveredIsBoundedByTheDeliveredBound(t *testing.T) {
-	// Arrange
-	runner := &fakeRunner{stdout: version3}
-	b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner, DefaultDeliveredBound)
-	if err != nil {
-		t.Fatalf("NewBackend: %v", err)
-	}
-	runner.block = make(chan struct{})
-
-	// Act
-	_, err = b.Delivered(context.Background())
-
-	// Assert
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Delivered = %v, want the bound's deadline", err)
-	}
-}
-
-func TestBackendDeliveredIsBoundedByTheBoundItWasBuiltWith(t *testing.T) {
-	// Arrange: a bound no default shares, so only the one handed in can match.
-	const bound = 7 * time.Second
-	runner := &fakeRunner{stdout: version3}
-	b, err := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, runner, bound)
-	if err != nil {
-		t.Fatalf("NewBackend: %v", err)
-	}
-	runner.stdout = ""
-	before := time.Now()
-
-	// Act
-	if _, err := b.Delivered(context.Background()); err != nil {
-		t.Fatalf("Delivered: %v", err)
-	}
-	after := time.Now()
-
-	// Assert: the deadline was set inside the call, the bound out from then.
-	if runner.deadline.Before(before.Add(bound)) || runner.deadline.After(after.Add(bound)) {
-		t.Fatalf("Delivered ran with a deadline %s out, want the %s it was built with", runner.deadline.Sub(before), bound)
-	}
-}
-
-func TestNewBackendPanicsOnANonPositiveDeliveredBound(t *testing.T) {
-	// Arrange
-	defer func() {
-		// Assert
-		got, _ := recover().(string)
-		if !strings.Contains(got, "delivered bound of 0s") {
-			t.Fatalf("panic = %q, want it to name the zero bound", got)
-		}
-	}()
-
-	// Act
-	_, _ = NewBackend(context.Background(), mustPlatform(t, "darwin"), "", onPath, &fakeRunner{stdout: version3}, 0)
-	t.Fatal("NewBackend returned for a zero delivered bound, want a panic")
-}
-
-func TestReadBackBackendIsNeverAskedWhatIsDelivered(t *testing.T) {
-	// Arrange
-	b, err := NewBackend(context.Background(), mustPlatform(t, "linux"), "", onPath, &fakeRunner{}, DefaultDeliveredBound)
-	if err != nil {
-		t.Fatalf("NewBackend: %v", err)
-	}
-	defer func() {
-		// Assert
-		if recover() == nil {
-			t.Fatal("Delivered on a read-back backend did not panic")
-		}
-	}()
-
-	// Act
-	_, _ = b.Delivered(context.Background())
 }
 
 // TestBackendReportsTheBannerMadeExactlyWhenItIsMade pins the made edge the
@@ -488,7 +342,7 @@ func TestBackendReportsTheBannerMadeExactlyWhenItIsMade(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			runner := &fakeRunner{stdout: version3}
-			b, err := NewBackend(context.Background(), mustPlatform(t, tc.goos), "", onPath, runner, DefaultDeliveredBound)
+			b, err := NewBackend(context.Background(), mustPlatform(t, tc.goos), "", onPath, runner)
 			if err != nil {
 				t.Fatalf("NewBackend: %v", err)
 			}
@@ -577,7 +431,7 @@ func TestResolveProgram(t *testing.T) {
 // resolveProgram's rule: a missing one is refused with its role named.
 func TestBannerAndChimeResolveThroughOneHelper(t *testing.T) {
 	// Act
-	_, bannerErr := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", noLookPath, &fakeRunner{}, DefaultDeliveredBound)
+	_, bannerErr := NewBackend(context.Background(), mustPlatform(t, "darwin"), "", noLookPath, &fakeRunner{})
 	_, chimeErr := NewChime(mustChimePlatform(t, "darwin"), "", noLookPath, &fakeRunner{})
 
 	// Assert

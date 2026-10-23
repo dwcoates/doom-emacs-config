@@ -1,7 +1,6 @@
 package desktopnotify
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -25,154 +24,85 @@ func heldFixture(t *testing.T) notifierFixture {
 	return f
 }
 
-// focusEmacs reports Emacs focused, as the focus gain a claim follows.
-func focusEmacs(t *testing.T, f notifierFixture) {
-	t.Helper()
-	if err := f.focus.Report(true); err != nil {
-		t.Fatalf("Report: %v", err)
-	}
-}
-
-// claimTarget is the target a live claim of ws answers.
+// claimTarget is the target a claim of ws answers.
 func claimTarget(ws ids.WorkspaceID) Target {
 	return Target{ID: ws, Dir: named.workspace.Dir}
 }
 
-func TestClaimAnswersTheNewestHandedBannerThePlatformStillHolds(t *testing.T) {
+// claimRecorded asserts the claim's one INFO record and its context.
+func claimRecorded(t *testing.T, f notifierFixture, held int, want Claim) {
+	t.Helper()
+	r, ok := hasRecord(f.log, "info", "a focus gain claimed the newest held banner")
+	if !ok || r.Context["held"] != held || r.Context["claimed"] != want.Held || r.Context["workspace"] != string(want.Target.ID) {
+		t.Fatalf("record = %+v (found=%v), want held=%d and the claim's outcome recorded", r, ok, held)
+	}
+}
+
+func TestClaimAnswersTheNewestHeldBanner(t *testing.T) {
 	cases := []struct {
-		name      string
-		delivered map[ids.WorkspaceID]bool
-		want      Claim
+		name  string
+		posts []ids.WorkspaceID
+		held  int
+		want  Claim
 	}{
-		{name: "the newest of two delivered banners", delivered: map[ids.WorkspaceID]bool{"ws1": true, "ws2": true},
-			want: Claim{Live: true, Target: claimTarget("ws2")}},
-		{name: "an older banner when the newest is no longer listed", delivered: map[ids.WorkspaceID]bool{"ws1": true},
-			want: Claim{Live: true, Target: claimTarget("ws1")}},
-		{name: "none when the platform lists neither", delivered: map[ids.WorkspaceID]bool{"other": true},
-			want: Claim{}},
+		{name: "the newest of two banners", posts: []ids.WorkspaceID{"ws1", "ws2"}, held: 2,
+			want: Claim{Held: true, Target: claimTarget("ws2")}},
+		{name: "a workspace's later banner replaces its earlier one", posts: []ids.WorkspaceID{"ws1", "ws2", "ws1"}, held: 2,
+			want: Claim{Held: true, Target: claimTarget("ws1")}},
+		{name: "none when nothing is held", posts: nil, held: 0, want: Claim{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			f := heldFixture(t)
-			postSettled(f, "ws1")
-			postSettled(f, "ws2")
-			f.backend.delivered = tc.delivered
-			focusEmacs(t, f)
+			for _, ws := range tc.posts {
+				postSettled(f, ws)
+			}
 
 			// Act
-			got, err := f.notifier.Claim(context.Background())
+			got := f.notifier.Claim()
 
 			// Assert
-			if err != nil || got != tc.want {
-				t.Fatalf("Claim = (%+v, %v), want (%+v, nil)", got, err, tc.want)
+			if got != tc.want {
+				t.Fatalf("Claim = %+v, want %+v", got, tc.want)
 			}
-			r, ok := hasRecord(f.log, "info", "answered a focus claim")
-			if !ok || r.Context["held"] != 2 || r.Context["live"] != tc.want.Live || r.Context["workspace"] != string(tc.want.Target.ID) {
-				t.Fatalf("record = %+v (found=%v), want the claim's outcome recorded", r, ok)
-			}
+			claimRecorded(t, f, tc.held, tc.want)
 		})
 	}
 }
 
-func TestClaimWithNothingHeldAnswersNoneAndAsksNothing(t *testing.T) {
-	// Arrange
-	f := heldFixture(t)
-	focusEmacs(t, f)
-
-	// Act
-	got, err := f.notifier.Claim(context.Background())
-
-	// Assert
-	if err != nil || got.Live {
-		t.Fatalf("Claim = (%+v, %v), want none", got, err)
-	}
-	if asks := f.backend.deliveredAsks(); asks != 0 {
-		t.Fatalf("the platform was asked %d times, want none", asks)
-	}
-}
-
-func TestClaimLetsGoOfEveryBannerItRead(t *testing.T) {
+func TestClaimLetsGoOfEveryBannerHeld(t *testing.T) {
 	// Arrange
 	f := heldFixture(t)
 	postSettled(f, "ws1")
 	postSettled(f, "ws2")
-	f.backend.delivered = map[ids.WorkspaceID]bool{"ws1": true, "ws2": true}
-	focusEmacs(t, f)
-	if _, err := f.notifier.Claim(context.Background()); err != nil {
-		t.Fatalf("first Claim: %v", err)
-	}
+	f.notifier.Claim()
 
 	// Act
-	got, err := f.notifier.Claim(context.Background())
+	got := f.notifier.Claim()
 
 	// Assert
-	if err != nil || got.Live {
-		t.Fatalf("second Claim = (%+v, %v), want none: the first consumed every banner", got, err)
+	if got.Held {
+		t.Fatalf("second Claim = %+v, want none: the first consumed every banner", got)
 	}
 }
 
-func TestClaimWhileEmacsIsUnfocusedIsRefusedAndConsumesNothing(t *testing.T) {
+func TestClaimRunsNoProgram(t *testing.T) {
 	// Arrange
 	f := heldFixture(t)
 	postSettled(f, "ws1")
-	f.backend.delivered = map[ids.WorkspaceID]bool{"ws1": true}
+	posted := len(f.backend.banners())
 
 	// Act
-	_, err := f.notifier.Claim(context.Background())
+	f.notifier.Claim()
 
-	// Assert
-	if !errors.Is(err, ErrEditorUnfocused) {
-		t.Fatalf("Claim = %v, want ErrEditorUnfocused", err)
-	}
-	if _, ok := hasRecord(f.log, "info", "a claim arrived while Emacs reads as unfocused; it was refused"); !ok {
-		t.Fatal("the refused claim left no record")
-	}
-	focusEmacs(t, f)
-	if got, err := f.notifier.Claim(context.Background()); err != nil || got != (Claim{Live: true, Target: claimTarget("ws1")}) {
-		t.Fatalf("the focused Claim = (%+v, %v), want ws1: the refused one consumed nothing", got, err)
+	// Assert: the claim is memory alone; the backend ran only the post.
+	if got := len(f.backend.banners()); got != posted {
+		t.Fatalf("the backend ran %d programs after the claim, want none", got-posted)
 	}
 }
 
-func TestClaimWithNoEmacsStreamIsRefused(t *testing.T) {
-	// Arrange
-	f := newNotifierFixture(t, named)
-
-	// Act
-	_, err := f.notifier.Claim(context.Background())
-
-	// Assert
-	if !errors.Is(err, ErrEditorUnfocused) {
-		t.Fatalf("Claim = %v, want ErrEditorUnfocused", err)
-	}
-}
-
-func TestClaimSurfacesAFailedDeliveredQueryAndConsumesNothing(t *testing.T) {
-	// Arrange
-	f := heldFixture(t)
-	postSettled(f, "ws1")
-	cause := errors.New("exit status 1: list refused")
-	f.backend.deliveredErr = cause
-	focusEmacs(t, f)
-
-	// Act
-	got, err := f.notifier.Claim(context.Background())
-
-	// Assert
-	if !errors.Is(err, cause) || got.Live {
-		t.Fatalf("Claim = (%+v, %v), want the program's failure", got, err)
-	}
-	if _, ok := hasRecord(f.log, "info", "answered a focus claim"); ok {
-		t.Fatal("a failed claim was recorded as answered")
-	}
-	f.backend.deliveredErr = nil
-	f.backend.delivered = map[ids.WorkspaceID]bool{"ws1": true}
-	if got, err := f.notifier.Claim(context.Background()); err != nil || !got.Live {
-		t.Fatalf("the retried Claim = (%+v, %v), want ws1: the failed one consumed nothing", got, err)
-	}
-}
-
-func TestClaimAnswersAReadBackBannerStillShowingWithoutAskingThePlatform(t *testing.T) {
+func TestClaimAnswersAReadBackBannerStillShowing(t *testing.T) {
 	// Arrange
 	f := newNotifierFixture(t, named)
 	f.focus.Attach(false)
@@ -181,19 +111,15 @@ func TestClaimAnswersAReadBackBannerStillShowingWithoutAskingThePlatform(t *test
 	f.backend.madeSignal = make(chan struct{})
 	f.notifier.Post("ws1", "turn_ended", titledBy)
 	<-f.backend.madeSignal
-	focusEmacs(t, f)
 
 	// Act
-	got, err := f.notifier.Claim(context.Background())
+	got := f.notifier.Claim()
 
 	// Assert
 	close(f.backend.block)
 	f.notifier.wg.Wait()
-	if err != nil || got != (Claim{Live: true, Target: claimTarget("ws1")}) {
-		t.Fatalf("Claim = (%+v, %v), want the showing banner's ws1", got, err)
-	}
-	if asks := f.backend.deliveredAsks(); asks != 0 {
-		t.Fatalf("the platform was asked %d times, want none for a read-back banner", asks)
+	if got != (Claim{Held: true, Target: claimTarget("ws1")}) {
+		t.Fatalf("Claim = %+v, want the showing banner's ws1", got)
 	}
 }
 
@@ -203,14 +129,30 @@ func TestADismissedReadBackBannerIsNoLongerHeld(t *testing.T) {
 	f.focus.Attach(false)
 	f.backend.outcome = Unclicked
 	postSettled(f, "ws1")
-	focusEmacs(t, f)
 
 	// Act
-	got, err := f.notifier.Claim(context.Background())
+	got := f.notifier.Claim()
 
 	// Assert
-	if err != nil || got.Live {
-		t.Fatalf("Claim = (%+v, %v), want none: the banner left the desktop", got, err)
+	if got.Held {
+		t.Fatalf("Claim = %+v, want none: the banner left the desktop", got)
+	}
+}
+
+func TestAHandedBannerStaysHeldAfterItsProgramExits(t *testing.T) {
+	// Arrange
+	f := heldFixture(t)
+
+	// Act
+	postSettled(f, "ws1")
+
+	// Assert
+	if got := f.notifier.Claim(); got != (Claim{Held: true, Target: claimTarget("ws1")}) {
+		t.Fatalf("Claim = %+v, want ws1: the platform holds a handed banner", got)
+	}
+	r, ok := hasRecord(f.log, "debug", "settled the held banner")
+	if !ok || r.Context["handed"] != true || r.Context["still_held"] != true {
+		t.Fatalf("record = %+v (found=%v), want the handed banner recorded still held", r, ok)
 	}
 }
 
@@ -219,60 +161,13 @@ func TestAFailedBannerIsNeverHeld(t *testing.T) {
 	f := heldFixture(t)
 	f.backend.err = errors.New("exit status 3: notifications are not authorized")
 	postSettled(f, "ws1")
-	focusEmacs(t, f)
 
 	// Act
-	got, err := f.notifier.Claim(context.Background())
+	got := f.notifier.Claim()
 
 	// Assert
-	if err != nil || got.Live {
-		t.Fatalf("Claim = (%+v, %v), want none: no banner was made", got, err)
-	}
-}
-
-func TestAWorkspacesLaterBannerReplacesItsEarlierOne(t *testing.T) {
-	// Arrange
-	f := heldFixture(t)
-	postSettled(f, "ws1")
-	postSettled(f, "ws2")
-	postSettled(f, "ws1")
-	f.backend.delivered = map[ids.WorkspaceID]bool{"ws1": true, "ws2": true}
-	focusEmacs(t, f)
-
-	// Act
-	got, err := f.notifier.Claim(context.Background())
-
-	// Assert
-	if err != nil || got != (Claim{Live: true, Target: claimTarget("ws1")}) {
-		t.Fatalf("Claim = (%+v, %v), want ws1, whose later banner is the newest", got, err)
-	}
-	r, _ := hasRecord(f.log, "info", "answered a focus claim")
-	if r.Context["held"] != 2 {
-		t.Fatalf("held %v banners, want 2: one per workspace", r.Context["held"])
-	}
-}
-
-func TestClaimSparesABannerMadeWhileItAskedThePlatform(t *testing.T) {
-	// Arrange
-	f := heldFixture(t)
-	postSettled(f, "ws1")
-	f.backend.delivered = map[ids.WorkspaceID]bool{"ws1": true, "ws2": true}
-	f.backend.onDelivered = func() {
-		f.backend.onDelivered = nil
-		f.notifier.hold(claimTarget("ws2"), f.log)
-	}
-	focusEmacs(t, f)
-
-	// Act
-	first, err := f.notifier.Claim(context.Background())
-
-	// Assert
-	if err != nil || first != (Claim{Live: true, Target: claimTarget("ws1")}) {
-		t.Fatalf("Claim = (%+v, %v), want ws1, the one banner it read", first, err)
-	}
-	second, err := f.notifier.Claim(context.Background())
-	if err != nil || second != (Claim{Live: true, Target: claimTarget("ws2")}) {
-		t.Fatalf("the next Claim = (%+v, %v), want ws2: a banner made meanwhile is spared", second, err)
+	if got.Held {
+		t.Fatalf("Claim = %+v, want none: no banner was made", got)
 	}
 }
 
@@ -281,15 +176,13 @@ func TestForgetLetsGoOfEveryHeldBanner(t *testing.T) {
 	f := heldFixture(t)
 	postSettled(f, "ws1")
 	postSettled(f, "ws2")
-	f.backend.delivered = map[ids.WorkspaceID]bool{"ws1": true, "ws2": true}
-	focusEmacs(t, f)
 
 	// Act
 	f.notifier.Forget("the user selected a workspace")
 
 	// Assert
-	if got, err := f.notifier.Claim(context.Background()); err != nil || got.Live {
-		t.Fatalf("Claim = (%+v, %v), want none after Forget", got, err)
+	if got := f.notifier.Claim(); got.Held {
+		t.Fatalf("Claim = %+v, want none after Forget", got)
 	}
 	r, ok := hasRecord(f.log, "debug", "let go of every held banner")
 	if !ok || r.Context["reason"] != "the user selected a workspace" || r.Context["held"] != 2 {
@@ -315,9 +208,8 @@ func TestAClickedBannerLetsGoOfEveryHeldBannerBeforeAskingEmacs(t *testing.T) {
 	f.notifier.wg.Wait()
 
 	// Assert
-	focusEmacs(t, f)
-	if got, err := f.notifier.Claim(context.Background()); err != nil || got.Live {
-		t.Fatalf("Claim = (%+v, %v), want none: the click chose the workspace", got, err)
+	if got := f.notifier.Claim(); got.Held {
+		t.Fatalf("Claim = %+v, want none: the click chose the workspace", got)
 	}
 	if got := f.clicks.clicked(); len(got) != 1 || got[0] != "ws1" {
 		t.Fatalf("clicks = %v, want [ws1]", got)

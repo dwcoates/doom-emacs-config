@@ -4628,6 +4628,29 @@ switch pass shows its page once it is made."
         (should (agent-repl-test-host--logged-p
                  :info "elisp.host.move-on-request ws=ws-2 decision=moved from=ws-1 page=none"))))))
 
+(ert-deftest agent-repl-test-host-a-moved-request-records-its-timing-and-collections ()
+  "The moved record carries the time since the request, the move's own time,
+and the collections the move ran, so a slow switch names what spent it."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe-three)
+    (agent-repl-test-host--moving "ws-1" '("ws-1" "ws-2")
+      (cl-letf (((symbol-function 'agent-repl-roster-move-frame)
+                 (lambda (ws) (push ws moved) (garbage-collect))))
+        ;; Act
+        (agent-repl-host-request-switch "ws-2" 'cycle)
+        ;; Assert
+        (should (seq-some
+                 (lambda (entry)
+                   (and (eq (car entry) :info)
+                        (string-match
+                         "decision=moved from=ws-1 page=shown since-request-ms=\\([0-9]+\\) move-ms=\\([0-9]+\\) gcs=\\([0-9]+\\) gc-ms=[0-9]+\\'"
+                         (cdr entry))
+                        (>= (string-to-number (match-string 1 (cdr entry)))
+                            (string-to-number (match-string 2 (cdr entry))))
+                        (>= (string-to-number (match-string 3 (cdr entry))) 1)))
+                 agent-repl-test-host--logs))))))
+
 (ert-deftest agent-repl-test-host-a-switch-request-moves-on-every-press ()
   "Every press moves the frame, though only the first select is on the wire."
   (agent-repl-test-host--with-harness

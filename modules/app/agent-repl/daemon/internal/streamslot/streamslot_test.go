@@ -57,11 +57,12 @@ func TestUpdateMovesOnlyAStandingValue(t *testing.T) {
 		wantOK   bool
 		wantVal  int
 		wantGen  uint64
+		wantPrev int
 		released bool
 	}{
-		{name: "a standing stream", attach: true, wantOK: true, wantVal: 7, wantGen: 1},
-		{name: "no stream ever", attach: false, wantOK: false, wantVal: 0, wantGen: 0},
-		{name: "a released stream", attach: true, released: true, wantOK: false, wantVal: 0, wantGen: 1},
+		{name: "a standing stream", attach: true, wantOK: true, wantVal: 7, wantGen: 1, wantPrev: 3},
+		{name: "no stream ever", attach: false, wantOK: false, wantVal: 0, wantGen: 0, wantPrev: 0},
+		{name: "a released stream", attach: true, released: true, wantOK: false, wantVal: 0, wantGen: 1, wantPrev: 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -75,12 +76,12 @@ func TestUpdateMovesOnlyAStandingValue(t *testing.T) {
 			}
 
 			// Act
-			gen, attached := s.Update(7)
+			previous, gen, attached := s.Update(7)
 
 			// Assert
 			v, ok := s.Get()
-			if attached != tt.wantOK || ok != tt.wantOK || v != tt.wantVal || gen != tt.wantGen {
-				t.Fatalf("Update = (%d, %v), Get = (%d, %v); want (%d, %v), (%d, %v)", gen, attached, v, ok, tt.wantGen, tt.wantOK, tt.wantVal, tt.wantOK)
+			if attached != tt.wantOK || ok != tt.wantOK || v != tt.wantVal || gen != tt.wantGen || previous != tt.wantPrev {
+				t.Fatalf("Update = (%d, %d, %v), Get = (%d, %v); want (%d, %d, %v), (%d, %v)", previous, gen, attached, v, ok, tt.wantPrev, tt.wantGen, tt.wantOK, tt.wantVal, tt.wantOK)
 			}
 		})
 	}

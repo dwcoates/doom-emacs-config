@@ -239,23 +239,24 @@ func TestReportEditorFocusMovesTheBannerDecision(t *testing.T) {
 	}
 }
 
-// claimLiveNotification makes the claim an Emacs that just came forward makes.
-func claimLiveNotification(t *testing.T, d *harness.Daemon) *agentreplv1.ClaimLiveNotificationResponse {
+// reportFocus reports Emacs's focus and answers the report's success.
+func reportFocus(t *testing.T, d *harness.Daemon, focus *agentreplv1.EditorFocus) *agentreplv1.ReportEditorFocusSuccess {
 	t.Helper()
-	resp, err := d.Client().ClaimLiveNotification(context.Background(),
-		connect.NewRequest(&agentreplv1.ClaimLiveNotificationRequest{}))
-	if err != nil {
-		t.Fatalf("ClaimLiveNotification: %v", err)
+	resp, err := d.Client().ReportEditorFocus(context.Background(),
+		connect.NewRequest(&agentreplv1.ReportEditorFocusRequest{Focus: focus}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ReportEditorFocus = (%v, %v), want success", resp, err)
 	}
-	return resp.Msg
+	return resp.Msg.GetSuccess()
 }
 
-// TestAFocusGainClaimsTheBannerThePlatformStillHolds pins the claim on macOS:
-// a banner handed to the platform while Emacs was away, and still listed by
-// it, names its workspace to the Emacs that came forward, once.
-func TestAFocusGainClaimsTheBannerThePlatformStillHolds(t *testing.T) {
+// TestAFocusGainClaimsTheHeldBannerInTheSameReport pins the claim on macOS: a
+// banner handed to the platform while Emacs was away names its workspace in
+// the answer to the report that brings Emacs forward, once, and the platform
+// is asked nothing on the way.
+func TestAFocusGainClaimsTheHeldBannerInTheSameReport(t *testing.T) {
 	if runtime.GOOS != "darwin" {
-		t.Skip("only a macOS banner is handed to the platform and listed by it")
+		t.Skip("only a macOS banner is handed to the platform and held past its program")
 	}
 	t.Parallel()
 	// Arrange
@@ -264,46 +265,23 @@ func TestAFocusGainClaimsTheBannerThePlatformStillHolds(t *testing.T) {
 	f.submit("go", "k-claimed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	pushConcludedTurn(f.shim, mainAgent, "answer-1")
 	awaitBannerSettled(t, f, "the handed turn banner")
-	f.d.Notifier.SetStdout("GroupID\tTitle\tSubtitle\tMessage\tDelivered At\n" +
-		"agent-repl:" + f.ws.GetId() + "\tT\t\tB\t2026-10-15 16:16:08 +0000\n")
-	resp, err := f.d.Client().ReportEditorFocus(context.Background(),
-		connect.NewRequest(&agentreplv1.ReportEditorFocusRequest{Focus: harness.FocusedEditor()}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("ReportEditorFocus = (%v, %v), want success", resp, err)
-	}
+	runs := len(bannerRuns(f))
 
 	// Act
-	first := claimLiveNotification(t, f.d)
-	second := claimLiveNotification(t, f.d)
+	first := reportFocus(t, f.d, harness.FocusedEditor())
+	reportFocus(t, f.d, harness.UnfocusedEditor())
+	second := reportFocus(t, f.d, harness.FocusedEditor())
 
 	// Assert
-	got := first.GetSuccess().GetLive().GetWorkspace()
+	got := first.GetBanner().GetWorkspace()
 	if got.GetId() != f.ws.GetId() || got.GetDir() != f.ws.GetDir() {
-		t.Fatalf("first claim = %v, want live naming %v", first, f.ws)
+		t.Fatalf("first gain = %v, want the banner arm naming %v", first, f.ws)
 	}
-	if second.GetSuccess().GetNone() == nil {
-		t.Fatalf("second claim = %v, want none: the first consumed the banner", second)
+	if second.GetNothingHeld() == nil {
+		t.Fatalf("second gain = %v, want nothing_held: the first consumed the banner", second)
 	}
-	if !slices.ContainsFunc(bannerRuns(f), func(inv harness.Invocation) bool {
-		return slices.Equal(inv.Argv, []string{"-list", "ALL"})
-	}) {
-		t.Fatalf("banner program runs %v, want the platform asked -list ALL", bannerRuns(f))
-	}
-}
-
-// TestAClaimWhileEmacsIsUnfocusedIsRefused pins the refusal arm: no stream
-// stands, so Emacs reads as unfocused.
-func TestAClaimWhileEmacsIsUnfocusedIsRefused(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	d := harness.StartDaemon(t, harness.Opts{})
-
-	// Act
-	resp := claimLiveNotification(t, d)
-
-	// Assert
-	if resp.GetError().GetEditorUnfocused() == nil {
-		t.Fatalf("response = %v, want the editor_unfocused arm", resp)
+	if after := bannerRuns(f); len(after) != runs {
+		t.Fatalf("banner program runs %v after the gains, want none: the claim asks the platform nothing", after[runs:])
 	}
 }
 

@@ -1631,7 +1631,7 @@ type harness struct {
 	Focus *desktopnotify.Focus
 	// Emacs records every Emacs pid a stream attached and every release.
 	Emacs *fakeEmacsMeasure
-	// Banners is the desktop banners ClaimLiveNotification claims.
+	// Banners is the desktop banners a ReportEditorFocus gain claims.
 	Banners *fakeBanners
 	// PersistentWifi is the persistent-wifi controller the rpc delegates to.
 	PersistentWifi *fakePersistentWifi
@@ -1667,16 +1667,21 @@ type harness struct {
 type fakeBanners struct {
 	mu      sync.Mutex
 	claim   desktopnotify.Claim
-	err     error
 	claims  int
 	forgets []string
 }
 
-func (b *fakeBanners) Claim(context.Context) (desktopnotify.Claim, error) {
+func (b *fakeBanners) Claim() desktopnotify.Claim {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.claims++
-	return b.claim, b.err
+	return b.claim
+}
+
+func (b *fakeBanners) claimCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.claims
 }
 
 func (b *fakeBanners) Forget(reason string) {

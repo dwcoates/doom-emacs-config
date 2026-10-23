@@ -550,13 +550,6 @@ func (s *requestLoggingServer) ReportEditorFocus(
 	return serveUnary(s, ctx, "ReportEditorFocus", req, s.server.ReportEditorFocus)
 }
 
-func (s *requestLoggingServer) ClaimLiveNotification(
-	ctx context.Context,
-	req *connect.Request[agentreplv1.ClaimLiveNotificationRequest],
-) (*connect.Response[agentreplv1.ClaimLiveNotificationResponse], error) {
-	return serveUnary(s, ctx, "ClaimLiveNotification", req, s.server.ClaimLiveNotification)
-}
-
 func (s *requestLoggingServer) WatchHostWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.WatchHostWorkspaceRequest],

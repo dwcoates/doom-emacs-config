@@ -123,7 +123,7 @@ func TestDefaultDeployIsASuccess(t *testing.T) {
 	}
 }
 
-func TestReportEditorFocusAnswersSuccessByDefault(t *testing.T) {
+func TestReportEditorFocusAnswersSuccessNoGainByDefault(t *testing.T) {
 	// Arrange.
 	_, baseURL := newTestServer(t)
 	client := newTestClient(t, baseURL)
@@ -134,8 +134,8 @@ func TestReportEditorFocusAnswersSuccessByDefault(t *testing.T) {
 	}))
 
 	// Assert.
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("ReportEditorFocus = (%v, %v), want success", resp, err)
+	if err != nil || resp.Msg.GetSuccess().GetNoGain() == nil {
+		t.Fatalf("ReportEditorFocus = (%v, %v), want success no_gain", resp, err)
 	}
 }
 
