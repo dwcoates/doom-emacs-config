@@ -290,6 +290,32 @@ adopt call goes to the SUCCESSOR, and its absence is a contract breach
 worth an ERROR rather than an improvised reconnect."
   agent-repl-link--successor)
 
+(defun agent-repl-link-successor-at (address)
+  "Return the ACCEPTED successor connection at ADDRESS, dialing it if needed.
+A successor already standing at ADDRESS is returned as is; otherwise the
+dial goes through `agent-repl-link-dial-successor', which is idempotent
+for the matching address and whose guard wins when a successor stands at
+a DIFFERENT address.  Answers nil while the dial is not accepted yet --
+the caller then waits for acceptance (`agent-repl-link-on-successor-accepted')
+rather than sending anything to an unproven daemon."
+  (let ((standing (agent-repl-link-successor)))
+    (if (and standing
+             (equal address (agent-repl-connect-connection-address standing)))
+        standing
+      (agent-repl-link-dial-successor address))))
+
+(defun agent-repl-link-on-successor-accepted (fn)
+  "Call FN with the successor's connection once its `WatchDaemon' is ACCEPTED.
+NO BUSY LOOP AND NO POLL: ONE self-removing function hangs on
+`agent-repl-link-handover-functions', and the acceptance itself wakes it.
+A successor that never arrives never wakes it.  The one spelling of that
+wait for every caller that may act on a successor only once it is proven."
+  (let (once)
+    (setq once (lambda (_old new)
+                 (remove-hook 'agent-repl-link-handover-functions once)
+                 (funcall fn new)))
+    (add-hook 'agent-repl-link-handover-functions once)))
+
 (defun agent-repl-link-successor-pending-p ()
   "Return non-nil while a successor dial stands but is NOT accepted yet.
 

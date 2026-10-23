@@ -45,6 +45,8 @@
 (declare-function agent-repl--input-buffer-name "core")
 (declare-function agent-repl--input-selection-changed "input" (ws))
 (declare-function agent-repl-link-successor-pending-p "daemon-link")
+(declare-function agent-repl-link-successor-at "daemon-link")
+(declare-function agent-repl-link-on-successor-accepted "daemon-link")
 
 (require 'cl-lib)
 (require 'subr-x)
@@ -1730,27 +1732,23 @@ adopt is sent to an address the link never attached.
 Answers nil while the dial has not been ACCEPTED yet — the caller must
 then wait for acceptance rather than adopt onto an unproven daemon."
   (let ((standing (agent-repl-link-successor)))
-    (if (and standing
-             (equal address (agent-repl-connect-connection-address standing)))
-        standing
+    (unless (and standing
+                 (equal address (agent-repl-connect-connection-address standing)))
       (agent-repl--info ws "elisp.host.redial ws=%s address=%S standing=%S"
                         ws address
                         (and standing
-                             (agent-repl-connect-connection-address standing)))
-      (agent-repl-link-dial-successor address))))
+                             (agent-repl-connect-connection-address standing))))
+    (agent-repl-link-successor-at address)))
 
 (defun agent-repl-host--adopt-on-acceptance (ws)
   "Adopt WS onto the successor as soon as its `WatchDaemon' is ACCEPTED.
 NO BUSY LOOP AND NO POLL: the handover hooks are daemon-link's acceptance
 seam, so this hangs ONE self-removing function there and is woken by the
 acceptance itself.  A successor that never arrives simply never wakes it."
-  (let (retry)
-    (setq retry
-          (lambda (_old new)
-            (remove-hook 'agent-repl-link-handover-functions retry)
-            (agent-repl--info ws "elisp.host.adopt-retry ws=%s" ws)
-            (agent-repl-host--reattach ws new :adopt "successor-accepted")))
-    (add-hook 'agent-repl-link-handover-functions retry)))
+  (agent-repl-link-on-successor-accepted
+   (lambda (new)
+     (agent-repl--info ws "elisp.host.adopt-retry ws=%s" ws)
+     (agent-repl-host--reattach ws new :adopt "successor-accepted"))))
 
 (defun agent-repl-host-route-handover (ws arm slug)
   "Hand ARM, a per-workspace rpc's refusal for WS, to the handover walk.

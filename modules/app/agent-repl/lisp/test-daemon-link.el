@@ -1656,3 +1656,53 @@ as if it were understood."
 (provide 'test-daemon-link)
 
 ;;; test-daemon-link.el ends here
+
+;;;; ---- Acting on a successor once it is proven ----
+
+(ert-deftest agent-repl-test-link-successor-at-answers-the-standing-successor ()
+  "A successor already accepted at ADDRESS is answered without a second dial."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let* ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+           (successor (agent-repl-test-link--announce-successor conn "127.0.0.1:9100"))
+           (streams (length agent-repl-test-link--streams)))
+      ;; Act
+      (let ((got (agent-repl-link-successor-at "127.0.0.1:9100")))
+        ;; Assert
+        (should (eq got successor))
+        (should (= (length agent-repl-test-link--streams) streams))))))
+
+(ert-deftest agent-repl-test-link-successor-at-dials-and-answers-nil-until-accepted ()
+  "With no successor standing, ADDRESS is dialed and nil answered while it is pending."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Act
+    (let ((got (agent-repl-link-successor-at "127.0.0.1:9100")))
+      ;; Assert
+      (should-not got)
+      (should (agent-repl-link-successor-pending-p)))))
+
+(ert-deftest agent-repl-test-link-on-successor-accepted-calls-once-with-the-successor ()
+  "The function runs once, with the successor, at its acceptance, and is then gone."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (called nil))
+      (agent-repl-link-on-successor-accepted (lambda (new) (push new called)))
+      ;; Act
+      (let ((successor (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")))
+        ;; Assert
+        (should (equal called (list successor)))
+        (should-not agent-repl-link-handover-functions)))))
+
+(ert-deftest agent-repl-test-link-successor-waits-are-spelled-once ()
+  "No other source hangs its own self-removing handover hook or re-checks a
+standing successor's address: both go through daemon-link's helpers."
+  (let ((dir agent-repl-test-link--lisp-dir))
+    (dolist (file (directory-files dir t "\\`[a-z-]+\\.el\\'"))
+      (unless (or (string-prefix-p "test-" (file-name-nondirectory file))
+                  (equal (file-name-nondirectory file) "daemon-link.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (should-not (search-forward "(remove-hook 'agent-repl-link-handover-functions" nil t)))))))
