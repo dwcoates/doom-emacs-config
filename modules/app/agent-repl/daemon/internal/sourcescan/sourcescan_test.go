@@ -1,8 +1,12 @@
 package sourcescan
 
 import (
+	"go/ast"
+	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -103,5 +107,63 @@ func TestNoDaemonTestHandRollsAProductionSourceScan(t *testing.T) {
 	}
 	if len(offenders) != 0 {
 		t.Fatalf("these tests glob their own sources instead of using sourcescan: %v", offenders)
+	}
+}
+
+func TestEachDaemonSourceVisitsOnlyServingProductionSources(t *testing.T) {
+	cases := []struct {
+		name string
+		skip []string
+		want []string
+	}{
+		{name: "the harnesses, tests, hidden directories and other files are skipped", want: []string{"cmd/main.go", "internal/owner/z.go", "internal/pkg/b.go"}},
+		{name: "a named directory is skipped too", skip: []string{"internal/owner"}, want: []string{"cmd/main.go", "internal/pkg/b.go"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			root := t.TempDir()
+			for _, rel := range []string{
+				"cmd/main.go", "internal/pkg/b.go", "internal/owner/z.go",
+				"internal/pkg/b_test.go", "integration/x.go", "e2e/y.go", ".hidden/w.go", "internal/pkg/notes.md",
+			} {
+				path := filepath.Join(root, rel)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				if err := os.WriteFile(path, []byte("package p\n"), 0o600); err != nil {
+					t.Fatalf("write %s: %v", rel, err)
+				}
+			}
+			var visited []string
+
+			// Act
+			EachDaemonSource(t, root, tc.skip, func(fset *token.FileSet, file *ast.File) {
+				rel, _ := filepath.Rel(root, fset.Position(file.Pos()).Filename)
+				visited = append(visited, rel)
+			})
+
+			// Assert
+			sort.Strings(visited)
+			if !slices.Equal(visited, tc.want) {
+				t.Fatalf("visited %v, want %v", visited, tc.want)
+			}
+		})
+	}
+}
+
+func TestDaemonRootIsTheModuleRoot(t *testing.T) {
+	// Arrange: this package sits two levels below the daemon module.
+	want, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("Abs: %v", err)
+	}
+
+	// Act
+	root := DaemonRoot(t)
+
+	// Assert
+	if root != want {
+		t.Fatalf("DaemonRoot = %q, want %q", root, want)
 	}
 }

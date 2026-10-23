@@ -1,11 +1,9 @@
 package creategate
 
 import (
+	"agent-repld/internal/sourcescan"
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"io/fs"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,31 +15,10 @@ import (
 // shares.
 func TestEveryWaitOnTheGateGoesThroughAwaitIdle(t *testing.T) {
 	// Arrange
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatalf("resolve the daemon root: %v", err)
-	}
-	fset := token.NewFileSet()
 	var offenders []string
 
 	// Act
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") || filepath.Base(path) == "creategate" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-		if err != nil {
-			return err
-		}
+	sourcescan.EachDaemonSource(t, sourcescan.DaemonRoot(t), []string{"internal/creategate"}, func(fset *token.FileSet, file *ast.File) {
 		imports := false
 		for _, spec := range file.Imports {
 			if p, _ := strconv.Unquote(spec.Path.Value); p == "agent-repld/internal/creategate" {
@@ -49,7 +26,7 @@ func TestEveryWaitOnTheGateGoesThroughAwaitIdle(t *testing.T) {
 			}
 		}
 		if !imports {
-			return nil
+			return
 		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			if call, ok := n.(*ast.CallExpr); ok {
@@ -59,13 +36,9 @@ func TestEveryWaitOnTheGateGoesThroughAwaitIdle(t *testing.T) {
 			}
 			return true
 		})
-		return nil
 	})
 
 	// Assert
-	if err != nil {
-		t.Fatalf("walk the daemon sources: %v", err)
-	}
 	if len(offenders) > 0 {
 		t.Fatalf("these sites wait on the create gate's Idle themselves; use Gate.AwaitIdle:\n%s", strings.Join(offenders, "\n"))
 	}

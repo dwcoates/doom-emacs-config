@@ -1,6 +1,7 @@
 package childproc
 
 import (
+	"agent-repld/internal/sourcescan"
 	"go/ast"
 	"go/token"
 	"strings"
@@ -15,7 +16,7 @@ func TestEveryCapturedChildWritesToFiles(t *testing.T) {
 	var offenders []string
 
 	// Act
-	eachDaemonSource(t, daemonRoot(t), func(fset *token.FileSet, file *ast.File) {
+	sourcescan.EachDaemonSource(t, sourcescan.DaemonRoot(t), []string{"internal/childproc"}, func(fset *token.FileSet, file *ast.File) {
 		// The commands this file builds, by the name each is bound to: only
 		// their Output and CombinedOutput are exec's, which pipe the output.
 		commands := map[string]bool{}

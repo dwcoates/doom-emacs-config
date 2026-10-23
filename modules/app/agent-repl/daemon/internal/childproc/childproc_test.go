@@ -1,6 +1,7 @@
 package childproc
 
 import (
+	"agent-repld/internal/sourcescan"
 	"context"
 	"go/ast"
 	"go/token"
@@ -85,7 +86,7 @@ func TestEveryChildIsBuiltHere(t *testing.T) {
 	var offenders []string
 
 	// Act
-	eachDaemonSource(t, daemonRoot(t), func(fset *token.FileSet, file *ast.File) {
+	sourcescan.EachDaemonSource(t, sourcescan.DaemonRoot(t), []string{"internal/childproc"}, func(fset *token.FileSet, file *ast.File) {
 		ast.Inspect(file, func(n ast.Node) bool {
 			sel, ok := n.(*ast.SelectorExpr)
 			if !ok {
