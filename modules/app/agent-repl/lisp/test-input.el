@@ -1693,6 +1693,112 @@ pinned on both sides: here, and in webapp/test/styles.test.ts."
     (should word-wrap)
     (should-not truncate-lines)))
 
+;;;; ---- Only TAB takes a company completion ----
+
+(defvar company-active-map)
+
+(defmacro agent-repl-test-input--with-company (parent &rest body)
+  "Run BODY in a composer whose company map was installed over PARENT.
+Company itself is never loaded: PARENT stands in for its global
+`company-active-map', and `company-mode-hook' is run as company runs it."
+  (declare (indent 1))
+  `(let ((company-active-map ,parent)
+         (company-mode-hook nil))
+     (with-temp-buffer
+       (agent-repl-input-mode)
+       (run-hooks 'company-mode-hook)
+       ,@body)))
+
+(ert-deftest agent-repl-input-company-map-is-installed-buffer-locally ()
+  "Company switching on in a composer gives it its own `company-active-map'."
+  ;; Arrange.
+  (let ((parent (make-sparse-keymap)))
+    ;; Act.
+    (agent-repl-test-input--with-company parent
+      ;; Assert.
+      (should (local-variable-p 'company-active-map))
+      (should (eq (keymap-parent company-active-map) parent)))))
+
+(ert-deftest agent-repl-input-company-map-is-installed-once ()
+  "Company switching on again keeps the composer's map it already has."
+  ;; Arrange.
+  (agent-repl-test-input--with-company (make-sparse-keymap)
+    (let ((installed company-active-map))
+      ;; Act.
+      (run-hooks 'company-mode-hook)
+      ;; Assert.
+      (should (eq company-active-map installed)))))
+
+(ert-deftest agent-repl-input-company-map-return-does-not-complete ()
+  "`RET' with company's popup up runs the composer's `RET', not a completion."
+  ;; Arrange.
+  (let ((parent (make-sparse-keymap)))
+    (define-key parent (kbd "RET") #'ignore)
+    (define-key parent [return] #'ignore)
+    ;; Act.
+    (agent-repl-test-input--with-company parent
+      ;; Assert.
+      (should (eq (lookup-key company-active-map (kbd "RET"))
+                  #'agent-repl-input-company-return))
+      (should (eq (lookup-key company-active-map [return])
+                  #'agent-repl-input-company-return)))))
+
+(ert-deftest agent-repl-input-company-map-tab-completes-the-selection ()
+  "`TAB' with company's popup up inserts the selected candidate."
+  ;; Arrange.
+  (let ((parent (make-sparse-keymap)))
+    (define-key parent (kbd "TAB") #'ignore)
+    (define-key parent [tab] #'ignore)
+    ;; Act.
+    (agent-repl-test-input--with-company parent
+      ;; Assert.
+      (should (eq (lookup-key company-active-map (kbd "TAB"))
+                  #'company-complete-selection))
+      (should (eq (lookup-key company-active-map [tab])
+                  #'company-complete-selection)))))
+
+(ert-deftest agent-repl-input-company-map-inherits-every-other-key ()
+  "Every other company key still resolves through the global map."
+  ;; Arrange.
+  (let ((parent (make-sparse-keymap)))
+    (define-key parent (kbd "C-n") #'ignore)
+    ;; Act.
+    (agent-repl-test-input--with-company parent
+      (define-key parent (kbd "C-p") #'ding)
+      ;; Assert.
+      (should (eq (lookup-key company-active-map (kbd "C-n")) #'ignore))
+      (should (eq (lookup-key company-active-map (kbd "C-p")) #'ding)))))
+
+(ert-deftest agent-repl-input-company-return-aborts-then-sends ()
+  "`agent-repl-input-company-return' closes the popup, then sends."
+  ;; Arrange.
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'company-abort) (lambda () (push 'abort calls)))
+              ((symbol-function 'agent-repl-send)
+               (lambda () (interactive) (push 'send calls)))
+              ((symbol-function 'this-command-keys-vector) (lambda () (kbd "RET"))))
+      (with-temp-buffer
+        (agent-repl-input-mode)
+        ;; Act.
+        (agent-repl-input-company-return)
+        ;; Assert.
+        (should (equal (nreverse calls) '(abort send)))
+        (should (eq this-command #'agent-repl-send))))))
+
+(ert-deftest agent-repl-input-company-return-fails-hard-without-a-command ()
+  "A composer `RET' bound to no command is an invariant failure, not a no-op."
+  ;; Arrange.
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'company-abort) #'ignore)
+              ((symbol-function 'agent-repl-send)
+               (lambda () (interactive) (setq sent t)))
+              ((symbol-function 'key-binding) (lambda (&rest _) nil)))
+      (with-temp-buffer
+        (agent-repl-input-mode)
+        ;; Act / Assert.
+        (should (string-match-p "no command" (cadr (should-error (agent-repl-input-company-return)))))
+        (should-not sent)))))
+
 ;;;; ---- The send edge is durable ----
 
 ;; A user's send is a once-per-action edge, so its record has to survive the
