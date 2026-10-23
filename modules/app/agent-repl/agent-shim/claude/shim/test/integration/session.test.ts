@@ -9,7 +9,7 @@
  * than silently paid.
  */
 import { create } from "@bufbuild/protobuf";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
@@ -2253,6 +2253,55 @@ describe("WatchAgent before the session's first turn", () => {
 
     // Assert.
     expect(watchAgentEntry(entry).entry).toBeDefined();
+    watch.close();
+  });
+});
+
+/**
+ * THE VENDOR LOADS ITS SKILLS ONCE, AT ITS START, so a skill installed
+ * mid-session reaches the catalog only through a new vendor process: the shim
+ * watches the directories its vendor loads from and states the set stale on
+ * WatchSession, which the daemon answers by replacing it at the next idle
+ * point. Real directories, the real kernel watch, the mocked vendor.
+ */
+describe("a skill installed mid-session", () => {
+  /** Read the watch until a skills-changed statement arrives, answering its paths. */
+  async function awaitSkillsChanged(watch: ReturnType<typeof watchSession>): Promise<string[]> {
+    for (;;) {
+      const frame = await watch.next();
+      const update = sessionUpdate(frame);
+      if (update.update.case === "skillsChanged") return update.update.value.paths;
+    }
+  }
+
+  /** Install a skill named NAME into DIR, the way a link or a copy lands one. */
+  function installSkill(dir: string, name: string): void {
+    mkdirSync(join(dir, name), { recursive: true });
+    writeFileSync(join(dir, name, "SKILL.md"), `---\nname: ${name}\ndescription: the ${name} skill\n---\n`);
+  }
+
+  test("into the account's skills directory is stated as a stale skill set", async () => {
+    const shim = await spawnShim();
+    mkdirSync(join(shim.dirs.configDir, "skills"), { recursive: true });
+    await shim.clients.h1.startSession(freshSession());
+    const watch = watchSession(shim);
+
+    installSkill(join(shim.dirs.configDir, "skills"), "agent-repl-workspaces");
+
+    const paths = await awaitSkillsChanged(watch);
+    expect(paths.some((changed) => changed.includes("agent-repl-workspaces"))).toBe(true);
+    watch.close();
+  });
+
+  test("into a worktree skills directory that did not exist at the start is stated too", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = watchSession(shim);
+
+    installSkill(join(shim.dirs.workspace, ".claude", "skills"), "repo-skill");
+
+    const paths = await awaitSkillsChanged(watch);
+    expect(paths.length).toBeGreaterThan(0);
     watch.close();
   });
 });
