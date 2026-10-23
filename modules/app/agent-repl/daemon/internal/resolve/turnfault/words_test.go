@@ -352,6 +352,7 @@ func TestOfCloseWordsNothingForACloseThatIsNoFailure(t *testing.T) {
 		{name: "a completion", how: wsm.CloseCompleted},
 		{name: "an interrupt", how: wsm.CloseKilled},
 		{name: "a folded prompt", how: wsm.CloseFolded},
+		{name: "a withdrawn prompt", how: wsm.CloseWithdrawn},
 		{name: "a close this build does not know", how: wsm.TurnClose(99)},
 	}
 	for _, tc := range cases {

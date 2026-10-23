@@ -1292,6 +1292,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       permissionMode = mode;
       pushPermissionMode();
     },
+    onAskOpened: () => withdrawJoinsForAsk(),
   });
 
   /** Whether the ask raised on `agentId`'s book is the keep-alive's. */
@@ -3561,18 +3562,93 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * nothing.
    */
   function withdrawRefusedJoin(join: Join, why: string): void {
+    takeJoinBack(join, `the vendor did not queue the join: ${why}`);
+  }
+
+  /**
+   * Take back a join the vendor will never run, WHY naming the reason: it
+   * waits on no turn, and its send is retired. One the running turn's end
+   * already opened as its own turn is released from the slot, recorded at
+   * ERROR, since its prompt row is already written for a turn that runs
+   * nothing. Answers whether the session still held the join, either way.
+   */
+  function takeJoinBack(join: Join, why: string): boolean {
     if (joins.includes(join)) {
       joins = joins.filter((waiting) => waiting !== join);
-      sends.forget(join.turn.id.value, `the vendor did not queue the join: ${why}`);
-      return;
+      sends.forget(join.turn.id.value, why);
+      return true;
     }
     if (open === join.turn) {
       LOGGER.error(
-        { turn_id: join.turn.id.value, cause: why, detail: "the running turn ended before the vendor said it held the join" },
-        "a join the vendor did not queue had already opened as its own turn; the turn is released",
+        { turn_id: join.turn.id.value, cause: why, detail: "the running turn ended before the vendor gave the join back" },
+        "a join taken back had already opened as its own turn; the turn is released",
       );
       releaseTurn(join.turn);
+      return true;
     }
+    return false;
+  }
+
+  /**
+   * AN ASK OPENED (PermissionGate.onAskOpened): every prompt still waiting to
+   * join the running turn is asked out of the vendor's queue by its send's
+   * uuid, because the turn's next tool boundary now lies behind the user's
+   * answer (conversation.v1.SessionJoinWithdrawn). The requests are made
+   * synchronously, in the tick the ask registers, so each reaches the vendor
+   * before anything the user answers can.
+   */
+  function withdrawJoinsForAsk(): void {
+    const active = query;
+    if (active === undefined || joins.length === 0) return;
+    for (const join of joins) void withdrawJoin(active, join);
+  }
+
+  /**
+   * Ask the vendor to give back one waiting join. THE VENDOR ARBITRATES: a
+   * prompt it still held is cancelled, never runs, and is stated withdrawn; one
+   * it already took (folded into the running turn, or dequeued for a turn of
+   * its own) is not, and its fate is stated as every join's is. So the prompt
+   * leaves by exactly one door.
+   */
+  async function withdrawJoin(active: QueryLike, join: Join): Promise<void> {
+    const fields = { turn_id: join.turn.id.value, running_turn: join.into.id.value };
+    let cancelled: boolean;
+    try {
+      cancelled = await active.cancelAsyncMessage(promptUuid(join.turn.id.value));
+    } catch (err) {
+      LOGGER.error(
+        { ...fields, cause: err instanceof Error ? err.message : String(err) },
+        "an ask opened, but the vendor did not answer the request to give back the prompt waiting to join the running turn; it stays queued",
+      );
+      return;
+    }
+    if (!cancelled) {
+      LOGGER.info(
+        fields,
+        "an ask opened, but the vendor had already taken in the prompt waiting to join the running turn; its fate is stated as before",
+      );
+      return;
+    }
+    if (!takeJoinBack(join, "an ask opened before the vendor took the prompt in")) {
+      LOGGER.error(
+        {
+          ...fields,
+          detail: "the vendor cancelled the join's send, but it neither waits to join nor holds the send slot",
+          invariant_violation: "a join the vendor gave back is one the session still holds",
+        },
+        "the vendor gave back a prompt waiting to join the running turn that the session no longer held; nothing is withdrawn",
+      );
+      return;
+    }
+    pushes.push(
+      create(conversationv1.SessionUpdateSchema, {
+        update: {
+          case: "joinWithdrawn",
+          value: create(conversationv1.SessionJoinWithdrawnSchema, { turn: join.turn.id, into: join.into.id }),
+        },
+      }),
+    );
+    LOGGER.info(fields, "an ask opened before the vendor took in the prompt waiting to join the running turn; the vendor gave it back and it is withdrawn");
   }
 
   /** A turn in the send slot the shim sent on its own: its keep-alive, or the network-resume prompt. */
@@ -6613,6 +6689,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     },
     releaseTurn,
     joinRunningTurn,
+    askOpen: () => gate.askOpen,
     noteStopCommand: (turn, command) => {
       stopCommand = { turn, command };
       LOGGER.debug(

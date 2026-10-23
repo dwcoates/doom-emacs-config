@@ -342,6 +342,42 @@ func TestGoneFromTheSweep(t *testing.T) {
 	}
 }
 
+func TestAStartTurnAskOpenRefusalMatchesTheQueuesAskSentinel(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal *ShimRefusal
+		want    bool
+	}{
+		{"StartTurn ask_open", &ShimRefusal{Verb: "StartTurn", Arm: ArmShimAskOpen}, true},
+		{"StartTurn no_session", &ShimRefusal{Verb: "StartTurn", Arm: ArmShimNoSession}, false},
+		{"UpdateAgent ask_open", &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimAskOpen}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			got := errors.Is(fmt.Errorf("join: %w", tt.refusal), promptqueue.ErrAskOpen)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("errors.Is(..., ErrAskOpen) = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAStartTurnAskOpenRefusalIsNotTheReconnectSentinel(t *testing.T) {
+	// Arrange
+	refusal := &ShimRefusal{Verb: "StartTurn", Arm: ArmShimAskOpen}
+
+	// Act
+	got := errors.Is(refusal, promptqueue.ErrShimHasNoSession)
+
+	// Assert
+	if got {
+		t.Fatal("an ask_open refusal must not hold the prompt for a reconnect")
+	}
+}
+
 func TestAStartTurnNoSessionRefusalMatchesTheQueuesReconnectSentinel(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -53,6 +53,19 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     }
   }
 
+  /**
+   * Take the first BUFFERED value MATCHES accepts out of the queue, answering
+   * whether one was. A value already handed to a consumer is never in the
+   * buffer, so it is never taken back: what the vendor's own cancel of a
+   * queued message does.
+   */
+  remove(matches: (value: T) => boolean): boolean {
+    const at = this.buffer.findIndex(matches);
+    if (at < 0) return false;
+    this.buffer.splice(at, 1);
+    return true;
+  }
+
   get isEnded(): boolean {
     return this.state !== "open";
   }

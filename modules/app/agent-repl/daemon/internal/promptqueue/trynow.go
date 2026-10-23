@@ -4,8 +4,6 @@ import (
 	"context"
 	"sort"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
-
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
 )
@@ -127,7 +125,7 @@ func (q *queue) rehold(ctx context.Context, d *delivery, h wsm.HeldPrompt, cause
 		log.Error(opSubmit, "could not put the refused prompt back on the after-reconnect hold", dlog.Merge(fields, dlog.Context{"store_cause": err.Error()}))
 		return
 	}
-	q.deps.Feed.OnPromptRetired(d.ws, &conversationv1.AgentPrompt{Id: &conversationv1.TurnId{Value: string(h.Turn)}})
+	q.retractAccepted(d.ws, h.Turn)
 	log.Info(opSubmit, "the vendor refused the prompt tried now; it is back on the after-reconnect hold in its place", fields)
 	// A tray that could not be republished is recorded at ERROR by pushTray;
 	// the hold itself is durable either way.

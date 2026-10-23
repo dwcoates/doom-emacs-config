@@ -317,18 +317,29 @@ export async function createRealQuery(
 }
 
 /**
- * The real query as the shim drives it, held to the one member the vendor
- * provides without declaring (`getSettings`, see types.ts AppliedSettingsLike).
- * A query lacking it is a vendor change, refused loudly at construction rather
- * than discovered as a TypeError on the first probe.
+ * The members the vendor's query provides WITHOUT DECLARING them, each with
+ * what the shim cannot do without it (see types.ts QueryLike).
+ */
+const UNDECLARED_MEMBERS = [
+  { member: "getSettings", consequence: "the shim cannot read the applied effort" },
+  { member: "cancelAsyncMessage", consequence: "the shim cannot take back a prompt waiting to join the running turn" },
+] as const;
+
+/**
+ * The real query as the shim drives it, held to the members the vendor
+ * provides without declaring (UNDECLARED_MEMBERS). A query lacking one is a
+ * vendor change, refused loudly at construction rather than discovered as a
+ * TypeError on first use.
  */
 export function asQueryLike(query: object): QueryLike {
-  if (typeof (query as { getSettings?: unknown }).getSettings !== "function") {
-    LOGGER.error(
-      { cause: "the vendor query's getSettings is not a function" },
-      "the vendor query provides no getSettings(); the shim cannot read the applied effort",
-    );
-    throw new Error("the vendor SDK's query no longer provides getSettings()");
+  for (const { member, consequence } of UNDECLARED_MEMBERS) {
+    if (typeof (query as Record<string, unknown>)[member] !== "function") {
+      LOGGER.error(
+        { cause: `the vendor query's ${member} is not a function`, member },
+        `the vendor query provides no ${member}(); ${consequence}`,
+      );
+      throw new Error(`the vendor SDK's query no longer provides ${member}()`);
+    }
   }
   return query as QueryLike;
 }

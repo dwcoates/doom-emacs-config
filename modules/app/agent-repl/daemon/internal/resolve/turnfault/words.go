@@ -185,7 +185,7 @@ func ofLost(lost *conversationv1.DetachedLost) Words {
 
 // OfClose words a turn whose durable close is all there is to tell it by: no
 // terminal of its own explained it. It reports false for a close that is no
-// failure (a completion, an interrupt, a folded prompt).
+// failure (a completion, an interrupt, a folded or withdrawn prompt).
 func OfClose(how wsm.TurnClose) (Words, bool) {
 	switch how {
 	case wsm.CloseAgentDied:
@@ -198,7 +198,7 @@ func OfClose(how wsm.TurnClose) (Words, bool) {
 		return words("the turn was dropped: nothing saw it end", "closed:orphaned"), true
 	case wsm.CloseFailed:
 		return words("the turn failed with an error, and no account of the failure was recorded", "closed:failed"), true
-	case wsm.CloseCompleted, wsm.CloseKilled, wsm.CloseFolded:
+	case wsm.CloseCompleted, wsm.CloseKilled, wsm.CloseFolded, wsm.CloseWithdrawn:
 		return Words{}, false
 	}
 	return Words{}, false

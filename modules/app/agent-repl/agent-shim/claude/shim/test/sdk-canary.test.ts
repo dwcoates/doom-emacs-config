@@ -266,6 +266,30 @@ describe("the undeclared getSettings the shim relies on", () => {
   });
 });
 
+/**
+ * THE OTHER UNDECLARED MEMBER. `Query.cancelAsyncMessage()` exists only in the
+ * SDK's runtime, so it is graded there, together with the declared request it
+ * sends and the declared meaning the shim takes back a waiting join on (a
+ * message already dequeued is not dropped). See src/sdk/types.ts QueryLike.
+ */
+describe("the undeclared cancelAsyncMessage the shim relies on", () => {
+  const SDK_MJS = readDeclarations("sdk.mjs");
+
+  it("is provided by the runtime query as the cancel_async_message control request answering cancelled", () => {
+    expect(SDK_MJS).toMatch(
+      /async cancelAsyncMessage\(e\)\{return\(await this\.request\(\{subtype:"cancel_async_message",message_uuid:e\}\)\)\.response\.cancelled\}/,
+    );
+  });
+
+  it("is a request the declarations still name", () => {
+    expect(SDK_DTS).toMatch(/subtype: 'cancel_async_message';/);
+  });
+
+  it("drops only a message still queued, the arbitration a withdrawn join stands on", () => {
+    expect(SDK_DTS).toContain("Drops a pending async user message from the command queue by uuid. No-op if already dequeued for execution.");
+  });
+});
+
 describe("Query methods the shim relies on", () => {
   for (const [name, returnType] of QUERY_METHODS) {
     it(`declares ${name}`, () => {

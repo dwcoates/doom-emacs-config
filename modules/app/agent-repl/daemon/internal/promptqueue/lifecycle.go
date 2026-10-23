@@ -45,6 +45,14 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 		q.onFolded(ctx, ws, turn, log)
 		return
 	}
+	// A WITHDRAWN PROMPT IS HELD AGAIN. One still waiting to join ran no turn,
+	// and nothing about the running turn changes; one that had already stood
+	// as the session's turn ends here like any turn, so what is held -- the
+	// withdrawn prompt first -- is delivered.
+	withdrawn := how == wsm.CloseWithdrawn
+	if withdrawn && q.onWithdrawn(ctx, ws, turn, log) {
+		return
+	}
 	q.deps.Edges.TurnEnded(ws)
 
 	// SERIALIZED AGAINST A LEASE CHANGE. The turn end that frees a workspace
@@ -114,8 +122,14 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	// footer takes the SAME close at the same instant: it is what raises a
 	// failed turn's fault on both surfaces (ladder.ResolveTurnFault), so the
 	// strip and the dot cannot disagree about it.
-	q.deps.Sidebar.SetTurnEnded(ws, how)
-	q.deps.Footer.SetTurnEnded(ws, how)
+	if withdrawn {
+		// A WITHDRAWN TURN NEVER RAN, so it leaves no result to read: the
+		// surfaces drop it as they drop a turn the shim refused.
+		q.setTurn(ws, nil)
+	} else {
+		q.deps.Sidebar.SetTurnEnded(ws, how)
+		q.deps.Footer.SetTurnEnded(ws, how)
+	}
 
 	// THE DOOR: the row closes and the feed draws the ending together. A
 	// failed write is recorded there, and the queue goes on to deliver.

@@ -183,6 +183,27 @@ func TestSenderStartTurnCarriesTheRefusalArm(t *testing.T) {
 	}
 }
 
+// A join refused because an ask blocks the vendor carries the ask_open arm, so
+// the queue keeps the prompt held for the running turn's end.
+func TestSenderJoinRunningTurnCarriesTheAskOpenRefusalForTheQueue(t *testing.T) {
+	// Arrange
+	s := newTestSender(&fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+		Result: &shimv1.StartTurnResponse_Failure{Failure: &shimv1.StartTurnFailure{
+			Detail: "an ask blocks the vendor",
+			Kind:   &shimv1.StartTurnFailure_AskOpen{AskOpen: &shimv1.StartTurnAskOpen{}},
+		}},
+	}})
+
+	// Act
+	_, err := s.JoinRunningTurn(context.Background(), "turn-2", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
+
+	// Assert
+	refusal, ok := AsShimRefusal(err)
+	if !ok || refusal.Arm != ArmShimAskOpen || !errors.Is(err, promptqueue.ErrAskOpen) {
+		t.Fatalf("JoinRunningTurn = %v, want the typed ask_open refusal the queue matches", err)
+	}
+}
+
 func TestSenderStartTurnMarksAShimThatDiedUnderTheCallForTheQueue(t *testing.T) {
 	// Arrange
 	died := fmt.Errorf("%w: unavailable: dial unix /s.sock: connect: connection refused", shimclient.ErrShimDied)

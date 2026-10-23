@@ -2302,14 +2302,7 @@ describe("a turn the vendor started on its own", () => {
 describe("a prompt joining the running turn", () => {
   /** Send `turnId` to join the running turn, and answer its client uuid. */
   async function join(h: Harness, turnId: string): Promise<string> {
-    const response = await h.engine.startTurn(
-      create(shimv1.StartTurnRequestSchema, {
-        turn: create(conversationv1.TurnIdSchema, { value: turnId }),
-        said: textSaid("also this"),
-        origin: conversationv1.PromptOrigin.USER_SENT,
-        joinRunningTurn: true,
-      }),
-    );
+    const response = await sendJoin(h, turnId);
     if (response.result.case !== "success") throw new Error(`the join was refused: ${response.result.case}`);
     return h.minted.at(-1) ?? "";
   }
@@ -2670,6 +2663,168 @@ describe("a prompt joining the running turn", () => {
  * excluded is the race the adoption left open: a vendor-started turn landing
  * the instant before a StartTurn's own answer was charged to the StartTurn.
  */
+/**
+ * A JOINING PROMPT AN ASK OVERTOOK IS TAKEN BACK (conversation.v1
+ * SessionJoinWithdrawn). The ask puts the running turn's next tool boundary
+ * behind the user's answer, so every prompt still waiting to join is asked out
+ * of the vendor's queue, and the vendor's answer decides its one door.
+ */
+describe("a prompt waiting to join when an ask opens", () => {
+  /** Run turn-1 and send turn-2 to join it; answers turn-1's and the join's client uuids. */
+  async function joining(h: Harness): Promise<{ running: string; joined: string }> {
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const running = h.minted.at(-1) ?? "";
+    const response = await sendJoin(h, "turn-2");
+    if (response.result.case !== "success") throw new Error(`the join was refused: ${response.result.case}`);
+    return { running, joined: h.minted.at(-1) ?? "" };
+  }
+
+  /** Open a permission ask on the main agent, which blocks the vendor. */
+  function openAsk(h: Harness): void {
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+    void spec.canUseTool("Bash", {}, { signal: new AbortController().signal, toolUseID: "toolu_ask", requestId: "r" });
+  }
+
+  /** Every withdrawal stated, as [turn, into]. */
+  const withdrawals = (spy: PushSpy): [string, string][] =>
+    pushedOfArm(spy, "joinWithdrawn").map((update) =>
+      update.update.case === "joinWithdrawn"
+        ? [update.update.value.turn?.value ?? "", update.update.value.into?.value ?? ""]
+        : ["", ""],
+    );
+
+  /** Every prompt row written, by turn, in order. */
+  const promptTurns = (h: Harness): string[] =>
+    [...h.persistence.durable, ...h.persistence.buffered].flatMap((entry) =>
+      entry.item.kind === "prompt" ? [entry.item.prompt.id?.value ?? ""] : [],
+    );
+
+  it("asks the vendor to give back the waiting prompt by its send's uuid the moment the ask opens", async () => {
+    // Arrange
+    const h = harness();
+    const { joined } = await joining(h);
+
+    // Act
+    openAsk(h);
+
+    // Assert
+    expect(h.queries[0]?.query.cancelledUuids).toEqual([joined]);
+  });
+
+  it("states the prompt the vendor gave back withdrawn, naming the turn it was to join", async () => {
+    // Arrange
+    const h = harness();
+    await joining(h);
+    const pushed = vi.spyOn(h.engine.pushes, "push");
+
+    // Act
+    openAsk(h);
+
+    // Assert
+    await vi.waitFor(() => {
+      expect(withdrawals(pushed)).toEqual([["turn-2", "turn-1"]]);
+    });
+  });
+
+  it("runs no turn for the withdrawn prompt once the running turn ends", async () => {
+    // Arrange
+    const h = harness();
+    const { running } = await joining(h);
+    const pushed = vi.spyOn(h.engine.pushes, "push");
+    openAsk(h);
+    await vi.waitFor(() => {
+      expect(withdrawals(pushed)).toHaveLength(1);
+    });
+
+    // Act
+    await h.engine.onSdkMessage({ ...resultMessage("turn-1-result"), user_message_uuid: running } as SdkMessage);
+
+    // Assert
+    expect([promptTurns(h), (await startDuring(h, "turn-3")).result.case]).toEqual([["turn-1"], "success"]);
+  });
+
+  it("keeps a prompt the vendor had already taken and states nothing withdrawn", async () => {
+    // Arrange
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.cancelAsyncMessageAnswer = false;
+      },
+    });
+    const { running } = await joining(h);
+    const pushed = vi.spyOn(h.engine.pushes, "push");
+    const mark = logSinkMark();
+    openAsk(h);
+    await vi.waitFor(() => {
+      expect(logRecordsSince(mark).some((record) => record.message.includes("had already taken in the prompt"))).toBe(true);
+    });
+
+    // Act
+    await h.engine.onSdkMessage({ ...resultMessage("turn-1-result"), user_message_uuid: running } as SdkMessage);
+
+    // Assert
+    expect([withdrawals(pushed), promptTurns(h)]).toEqual([[], ["turn-1", "turn-2"]]);
+  });
+
+  it("records at error a vendor that does not answer the give-back, and keeps the prompt waiting", async () => {
+    // Arrange
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.cancelAsyncMessageRejects = new Error("the control channel closed");
+      },
+    });
+    await joining(h);
+    const pushed = vi.spyOn(h.engine.pushes, "push");
+    const mark = logSinkMark();
+
+    // Act
+    openAsk(h);
+
+    // Assert
+    await vi.waitFor(() => {
+      const record = logRecordsSince(mark).find((entry) => entry.message.includes("did not answer the request to give back"));
+      expect([record?.level, record?.context.cause, record?.context.turn_id, withdrawals(pushed)]).toEqual([
+        "error",
+        "the control channel closed",
+        "turn-2",
+        [],
+      ]);
+    });
+  });
+
+  it("asks the vendor for nothing when no prompt waits to join", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+
+    // Act
+    openAsk(h);
+
+    // Assert
+    expect(h.queries[0]?.query.cancelledUuids).toEqual([]);
+  });
+
+  it("refuses a prompt sent to join while an ask is open, pushing nothing", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const minted = h.minted.length;
+    openAsk(h);
+
+    // Act
+    const response = await sendJoin(h, "turn-2");
+
+    // Assert
+    expect([response.result.case === "failure" ? response.result.value.kind.case : "accepted", h.minted.length]).toEqual([
+      "askOpen",
+      minted,
+    ]);
+  });
+});
+
 describe("replies matched to their send by id", () => {
   /** The turn id the fold was handed for each message, in order, from `mark`. */
   const turnsFrom = (h: Harness, mark: number): (string | undefined)[] =>
@@ -9012,6 +9167,18 @@ function conversationResetMessage(uuid: string): SdkMessage {
 }
 
 /** Open a real turn, without waiting on anything it produces. */
+/** Send `turnId` to join the running turn (`join_running_turn`), answering the StartTurn. */
+function sendJoin(h: Harness, turnId: string): Promise<shimv1.StartTurnResponse> {
+  return h.engine.startTurn(
+    create(shimv1.StartTurnRequestSchema, {
+      turn: create(conversationv1.TurnIdSchema, { value: turnId }),
+      said: textSaid("also this"),
+      origin: conversationv1.PromptOrigin.USER_SENT,
+      joinRunningTurn: true,
+    }),
+  );
+}
+
 async function realPrompt(h: Harness, turnId: string): Promise<void> {
   await h.engine.startTurn(
     create(shimv1.StartTurnRequestSchema, {

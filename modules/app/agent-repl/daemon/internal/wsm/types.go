@@ -771,6 +771,11 @@ const (
 	// answered, but as part of that turn, so its own turn never ran and no
 	// ending of its own is drawn.
 	CloseFolded
+	// CloseWithdrawn is a prompt sent to join the running turn that the vendor
+	// gave back before taking it in, because an ask opened first
+	// (conversation.v1.SessionJoinWithdrawn): its turn never ran, no ending of
+	// its own is drawn, and the prompt is held again under a new turn.
+	CloseWithdrawn
 )
 
 // Failed reports whether the close is the turn failing: its own failure, or

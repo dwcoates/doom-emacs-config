@@ -374,6 +374,8 @@ func startTurnArm(failure *shimv1.StartTurnFailure) string {
 		return "vendor_refused"
 	case failure.GetQueryDead() != nil:
 		return "query_dead"
+	case failure.GetAskOpen() != nil:
+		return ArmShimAskOpen
 	default:
 		return ArmShimUnspecified
 	}

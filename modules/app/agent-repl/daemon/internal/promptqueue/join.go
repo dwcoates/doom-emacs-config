@@ -205,6 +205,14 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 	if err != nil {
 		q.withdrawJoining(sub.WS, sub.Turn)
 		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
+		// THE ACCEPTED ROW DRAWN BEFORE THE CALL COMES DOWN: the prompt stays
+		// held, so the tray draws it and the feed must not show it accepted.
+		q.retractAccepted(sub.WS, sub.Turn)
+		if errors.Is(err, ErrAskOpen) {
+			log.Info(opJoin, "an ask blocks the vendor, so the prompt cannot join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
+			q.recordWaiting(ctx, sub, askOpenReason, log)
+			return joinWaiting
+		}
 		log.Error(opJoin, "the shim refused the prompt sent to join the running turn; it waits for it to end", dlog.Context{"cause": err.Error()})
 		q.recordWaiting(ctx, sub, "the session would not take the prompt into the running turn, so it waits for it to end", log)
 		return joinWaiting
@@ -345,6 +353,81 @@ func (q *queue) onFolded(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnI
 	log.Info(opJoin, "the vendor folded the prompt into the running turn; its own turn closed unrun", dlog.Context{
 		"folded_into": string(joined.into),
 	})
+}
+
+// askOpenReason is the verdict reason of a prompt held because an ask blocked
+// the vendor before the prompt joined the running turn: refused at the join
+// (StartTurnFailure.ask_open), or given back by the vendor after it
+// (conversation.v1.SessionJoinWithdrawn).
+const askOpenReason = "a question or permission ask is waiting on you, so the prompt waits for the running turn to end"
+
+// onWithdrawn takes a prompt the vendor gave back before taking it into the
+// running turn (conversation.v1.SessionJoinWithdrawn) BACK TO THE HELD TRAY
+// (owner ruling, 2026-10-23): an ask opened while it waited, so it must not
+// stand in the feed as accepted beside a card the user has not answered.
+//
+//   - Its accepted row comes down, and its own turn closes unrun
+//     (wsm.CloseWithdrawn), drawing no ending.
+//   - It is held again in its ORIGINAL PLACE (its hold's QueuedAt) under a
+//     NEW turn id, waiting for the running turn's end: a turn id is started
+//     once, and the shim derives the prompt's vendor uuid from it, so the
+//     uuid the vendor cancelled is never sent again.
+//
+// It answers whether the prompt was still waiting to join. One that had
+// already stood as its own turn (the turn it joined ended before the vendor
+// gave it back) was the session's turn, and the caller ends it as a turn end,
+// which delivers what is held, this prompt first.
+func (q *queue) onWithdrawn(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, log dlog.Logger) bool {
+	q.mu.Lock()
+	joined, wasJoining := q.stateLocked(ws).endJoiningLocked(turn)
+	q.mu.Unlock()
+	if !wasJoining {
+		q.retractAccepted(ws, turn)
+		q.reholdWithdrawn(ctx, ws, turn, log)
+		log.Info(opJoin, "the vendor gave back a prompt that had already stood as its own turn; it is held again and the turn ends", nil)
+		return false
+	}
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+	q.retractAccepted(ws, turn)
+	_ = q.closeTurn(ctx, ws, turn, wsm.CloseWithdrawn, log)
+	q.reholdWithdrawn(ctx, ws, turn, log)
+	log.Info(opJoin, "an ask opened before the vendor took in the prompt sent to join the running turn; it is held again", dlog.Context{
+		"joined_turn": string(joined.into),
+	})
+	return true
+}
+
+// reholdWithdrawn puts the withdrawn prompt of TURN back in the held tray, in
+// its original place, under a new turn id and the ask-open verdict.
+//
+// A JOINING PROMPT ALWAYS CAME FROM A HOLD (a judged join and a flush both send
+// a standing hold), so its hold's record is there to restore. One that is not
+// is an invariant violation, recorded at ERROR: the prompt is then lost from
+// the queue, and the record names it.
+func (q *queue) reholdWithdrawn(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, log dlog.Logger) {
+	fields := dlog.Context{"withdrawn_turn": string(turn)}
+	held, found, err := q.deps.DB.HeldPromptByTurn(ctx, turn)
+	switch {
+	case err != nil:
+		log.Error(opJoin, "could not read the withdrawn prompt's hold; it is lost from the queue", dlog.Merge(fields, dlog.Context{"cause": err.Error()}))
+		return
+	case !found:
+		log.Error(opJoin, "the withdrawn prompt has no hold to restore; it is lost from the queue", dlog.Merge(fields, dlog.Context{
+			"invariant_violation": "every prompt sent to join the running turn was sent from a standing hold",
+		}))
+		return
+	}
+	again := heldAgain(held, nil, &wsm.Classification{Arm: wsm.ArmHoldForTurnEnd, Reason: askOpenReason, At: q.deps.Now()})
+	fields["held_turn"] = string(again.Turn)
+	if err := q.deps.DB.PutHeldPrompt(ctx, again); err != nil {
+		log.Error(opJoin, "could not hold the withdrawn prompt again; it is lost from the queue", dlog.Merge(fields, dlog.Context{"cause": err.Error()}))
+		return
+	}
+	log.Info(opJoin, "the withdrawn prompt is held again in its place, waiting for the running turn to end", fields)
+	// A tray that could not be republished is recorded at ERROR by pushTray;
+	// the hold itself is durable either way.
+	_ = q.pushTray(ctx, ws, log)
 }
 
 // onJoinedTurnStood gives the footer and the roster the turn fact of a joining

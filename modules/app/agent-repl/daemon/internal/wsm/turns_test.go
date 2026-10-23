@@ -839,6 +839,7 @@ func TestTurnCloseFailed(t *testing.T) {
 		{name: "orphaned", how: CloseOrphaned, want: false},
 		{name: "agent died", how: CloseAgentDied, want: true},
 		{name: "folded", how: CloseFolded, want: false},
+		{name: "withdrawn", how: CloseWithdrawn, want: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1143,6 +1144,7 @@ func TestClaimIdempotencyKeyReadsTheClaimedTurnsRow(t *testing.T) {
 		{name: "a failed close is acceptance", row: true, close: closePtr(CloseFailed), wantStanding: ClaimAccepted, wantEvidence: EvidenceTerminal},
 		{name: "a killed close is acceptance", row: true, close: closePtr(CloseKilled), wantStanding: ClaimAccepted, wantEvidence: EvidenceTerminal},
 		{name: "a folded close is acceptance", row: true, close: closePtr(CloseFolded), wantStanding: ClaimAccepted, wantEvidence: EvidenceTerminal},
+		{name: "a withdrawn close is acceptance", row: true, close: closePtr(CloseWithdrawn), wantStanding: ClaimAccepted, wantEvidence: EvidenceTerminal},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

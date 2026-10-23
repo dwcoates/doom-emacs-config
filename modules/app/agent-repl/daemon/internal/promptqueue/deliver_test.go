@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
 	"strings"
 	"testing"
 
@@ -1194,5 +1195,38 @@ func TestDeliverRefusesAnAgentsPromptWhoseSenderCannotBeRead(t *testing.T) {
 				t.Fatalf("no ERROR record of the failed sender read: %+v", h.log.Records())
 			}
 		})
+	}
+}
+
+func TestRetractAcceptedTakesDownTheTurnsMirroredRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	h.q.retractAccepted("ws", "t1")
+	// Assert
+	if got := h.feed.retiredPrompts(); len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("retired prompts = %v, want [t1]", got)
+	}
+}
+
+// THE ONE RETRACTION. Every production path in this package that takes an
+// accepted prompt's mirrored row back goes through retractAccepted, so no
+// site hand-rolls a retraction that could take down a different row.
+func TestEveryMirroredRowRetractionGoesThroughRetractAccepted(t *testing.T) {
+	// Arrange
+	fset, funcs := productionFuncs(t)
+	var sites []string
+	// Act
+	for _, fn := range funcs {
+		ast.Inspect(fn, func(n ast.Node) bool {
+			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "OnPromptRetired" && fn.Name.Name != "retractAccepted" {
+				sites = append(sites, fset.Position(sel.Pos()).String()+" in "+fn.Name.Name)
+			}
+			return true
+		})
+	}
+	// Assert
+	if len(sites) != 0 {
+		t.Fatalf("mirrored rows retracted outside retractAccepted: %v", sites)
 	}
 }

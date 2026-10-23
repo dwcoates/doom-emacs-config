@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"sync"
 	"sync/atomic"
@@ -23,6 +26,7 @@ import (
 	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1847,4 +1851,26 @@ func (e *fakeEdges) edgesTold() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return append([]string(nil), e.got...)
+}
+
+// productionFuncs parses every production source of this package
+// (sourcescan.Production) and answers each function declaration with the file
+// set that positions it: what a structural rule over the package's own code
+// walks.
+func productionFuncs(t *testing.T) (*token.FileSet, []*ast.FuncDecl) {
+	t.Helper()
+	fset := token.NewFileSet()
+	var funcs []*ast.FuncDecl
+	for _, file := range sourcescan.Production(t) {
+		parsed, err := parser.ParseFile(fset, file.Name, file.Source, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", file.Name, err)
+		}
+		for _, decl := range parsed.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				funcs = append(funcs, fn)
+			}
+		}
+	}
+	return fset, funcs
 }

@@ -11,6 +11,28 @@ import { describe, expect, it } from "vitest";
 import { AsyncQueue } from "../../src/fake/queue.js";
 
 describe("AsyncQueue", () => {
+  it("removes a buffered value, which the consumer then never reads", async () => {
+    // Arrange
+    const queue = new AsyncQueue<number>();
+    queue.push(1);
+    queue.push(2);
+    // Act
+    const removed = queue.remove((value) => value === 1);
+    // Assert
+    const iterator = queue[Symbol.asyncIterator]();
+    expect([removed, await iterator.next()]).toEqual([true, { value: 2, done: false }]);
+  });
+
+  it("removes nothing once the value was handed to a consumer", async () => {
+    // Arrange
+    const queue = new AsyncQueue<number>();
+    queue.push(1);
+    const iterator = queue[Symbol.asyncIterator]();
+    await iterator.next();
+    // Act / Assert
+    expect(queue.remove((value) => value === 1)).toBe(false);
+  });
+
   it("delivers pushed values in order", async () => {
     const queue = new AsyncQueue<number>();
     queue.push(1);

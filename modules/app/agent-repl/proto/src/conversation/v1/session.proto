@@ -322,7 +322,49 @@ message SessionUpdate {
     // new vendor process loads the current set, and the shim that sees the
     // change is replaced for it. See SessionSkillsChanged.
     SessionSkillsChanged skills_changed = 39;
+    // A PROMPT SENT TO JOIN THE RUNNING TURN WAS TAKEN BACK before the vendor
+    // took it in (shim.v1.StartTurnRequest.join_running_turn). An EVENT,
+    // stated once, live, per withdrawn prompt. It rides the session stream
+    // because a joining prompt has no stream of its own. See
+    // SessionJoinWithdrawn, which carries the arm's whole contract.
+    SessionJoinWithdrawn join_withdrawn = 40;
   }
+}
+
+// A JOINING PROMPT AN ASK OVERTOOK, TAKEN BACK (owner ruling, 2026-10-23).
+//
+// A prompt sent to join the running turn waits in the vendor's queue until the
+// turn's next tool boundary. An ask that opens meanwhile -- a question batch or
+// a permission ask, on the main agent or on any subagent, that blocks the
+// vendor -- puts that boundary behind the user's answer, so the prompt would
+// stand in the feed as accepted beside a card the user has not answered, and
+// would run only once the card is. The owner: the prompt goes back to being a
+// HELD prompt instead.
+//
+// PRODUCER OBLIGATIONS (the shim):
+//   - The instant an ask opens, every prompt still waiting to join is asked
+//     out of the vendor's queue by its send's uuid. The VENDOR ARBITRATES: a
+//     prompt it still held is cancelled and never runs, and this is stated for
+//     it; one it already took (folded, or dequeued for a turn) is not, and its
+//     fate is stated as before (AgentPrompt.folded_into, or its own turn).
+//     So every joining prompt leaves by exactly one door.
+//   - A withdrawn prompt was never recorded in the vendor conversation, and
+//     no prompt row is written for it.
+//   - A prompt sent to join while an ask is ALREADY open is never pushed: the
+//     StartTurn is refused (shim.v1.StartTurnFailure.ask_open).
+//
+// CONSUMER OBLIGATIONS (the daemon):
+//   - The prompt's turn ends unrun, drawing no ending of its own, its accepted
+//     row is taken out of the feed, and the prompt is held again in its
+//     original place in the held tray, waiting for the running turn's end.
+//   - It is held again under a NEW turn id: a turn id is started once, and the
+//     prompt's vendor uuid is derived from it, so the cancelled uuid is never
+//     sent again.
+message SessionJoinWithdrawn {
+  // The withdrawn prompt's turn (StartTurnRequest.turn).
+  TurnId turn = 1;
+  // The turn it had been sent to join.
+  TurnId into = 2;
 }
 
 // THE VENDOR LOADS ITS SKILLS ONCE, AT ITS PROCESS'S START (measured

@@ -197,6 +197,7 @@ const REFUSABLE = new Set([
   "apply_flag_settings",
   "get_settings",
   "rewind_files",
+  "cancel_async_message",
 ]);
 
 /**
@@ -1596,9 +1597,26 @@ export function createFakeQuery(
    * the order their messages arrived.
    */
   const inbox = new AsyncQueue<SdkUserMessage>();
+  /**
+   * THE CANCEL OF A QUEUED MESSAGE (`cancelAsyncMessage`). The real CLI reads
+   * its stdin in order, so a message is always queued before a cancel sent
+   * after it reaches the CLI. Here the message crosses an async hop into the
+   * inbox, so a cancel can arrive first: it is remembered and the message
+   * dropped on arrival, which is what the CLI's order would have done. A
+   * message a turn already took is never taken back.
+   */
+  const takenUuids = new Set<string>();
+  const dropOnArrival = new Set<string>();
   void (async (): Promise<void> => {
     try {
       for await (const userMessage of prompt) {
+        if (userMessage.uuid !== undefined && dropOnArrival.delete(userMessage.uuid)) {
+          LOGGER.info(
+            { claude_session_id: sessionUuid, client_uuid: userMessage.uuid },
+            "fake vendor dropped a message cancelled before it arrived",
+          );
+          continue;
+        }
         const peer = peerOriginOf(userMessage);
         if (peer !== undefined && userMessage.uuid !== undefined) {
           const cause = peerHoldCause(peer);
@@ -1722,6 +1740,7 @@ export function createFakeQuery(
     );
     let initOwed = initAfterFirstTurn;
     for await (const userMessage of inbox) {
+      if (userMessage.uuid !== undefined) takenUuids.add(userMessage.uuid);
       // THE FIRST TURN IS WHAT BRINGS THE INIT, and it arrives BEFORE the turn
       // it rode in on produces anything — which is the order the real vendor
       // emits them in, and the order that makes the init facts land on a
@@ -1945,6 +1964,25 @@ export function createFakeQuery(
         throw new Error("the mocked vendor refused get_settings");
       }
       return { applied: { effort: fakeAppliedEffort(model, effortLevel) } };
+    },
+
+    cancelAsyncMessage: async (messageUuid: string): Promise<boolean> => {
+      if (refuse.has("cancel_async_message")) {
+        throw new Error("the mocked vendor refused cancel_async_message");
+      }
+      if (takenUuids.has(messageUuid)) {
+        LOGGER.info(
+          { claude_session_id: sessionUuid, client_uuid: messageUuid },
+          "fake vendor kept a message a turn already took; cancel_async_message drops nothing",
+        );
+        return false;
+      }
+      if (!inbox.remove((queued) => queued.uuid === messageUuid)) dropOnArrival.add(messageUuid);
+      LOGGER.info(
+        { claude_session_id: sessionUuid, client_uuid: messageUuid },
+        "fake vendor dropped a queued message on cancel_async_message",
+      );
+      return true;
     },
 
     setModel: async (next?: string): Promise<void> => {

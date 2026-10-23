@@ -263,6 +263,16 @@ export interface QueryLike extends AsyncIterable<SdkMessage> {
   rewindFiles(userMessageId: string, options?: { dryRun?: boolean }): Promise<RewindFilesResultLike>;
   /** Push more user messages into a running streaming-input query. */
   streamInput(stream: AsyncIterable<SdkUserMessage>): Promise<void>;
+  /**
+   * Drop a user message still waiting in the vendor's command queue, by the
+   * uuid it was sent under (the `cancel_async_message` control request).
+   * Answers whether it was dropped: `false` when the vendor already took it
+   * (dequeued for a turn, or folded into the running one), and it then runs.
+   * UNDECLARED BY THE VENDOR, like `getSettings`: `sdk.d.ts` declares the
+   * request (`SDKControlCancelAsyncMessageRequest`) but not the method the
+   * SDK's runtime provides.
+   */
+  cancelAsyncMessage(messageUuid: string): Promise<boolean>;
   /** Release the query and the CLI child behind it. */
   close(): void;
 }
@@ -277,10 +287,13 @@ export interface QueryLike extends AsyncIterable<SdkMessage> {
  */
 type Assert<T extends true> = T;
 //
-// `getSettings` is the one member the vendor does not declare; it is held to
-// the runtime instead (`asQueryLike` in real-query.ts, and the sdk-canary
-// suite), and every other member to the declaration here.
-type _QueryStillSatisfiesQueryLike = Assert<Query extends Omit<QueryLike, "getSettings"> ? true : false>;
+// `getSettings` and `cancelAsyncMessage` are the members the vendor does not
+// declare; they are held to the runtime instead (`asQueryLike` in
+// real-query.ts, and the sdk-canary suite), and every other member to the
+// declaration here.
+type _QueryStillSatisfiesQueryLike = Assert<
+  Query extends Omit<QueryLike, "getSettings" | "cancelAsyncMessage"> ? true : false
+>;
 
 /**
  * Describe an interrupt receipt that reports surviving work, or return null

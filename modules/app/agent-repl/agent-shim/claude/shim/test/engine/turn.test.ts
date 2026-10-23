@@ -64,6 +64,8 @@ interface Harness {
   joinRejects: Error | undefined;
   /** When set, `SessionContext.joinRunningTurn`'s admission rejects with it, as a held peer message's does. */
   joinAdmissionRejects: Error | undefined;
+  /** What the session answers for askOpen(): whether an ask blocks the vendor. */
+  askOpen: boolean;
   /** The sender every join was pushed with, in order. */
   readonly joinSentBys: (shimv1.StartTurnSentBy | undefined)[];
   /** Every store_unreachable the turn verbs reported to the session. */
@@ -120,6 +122,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     turn: () => undefined,
     nowMs: () => 1,
     onPermissionModeSet: () => undefined,
+    onAskOpened: () => undefined,
   });
   const state: Harness = {
     turns: undefined as unknown as TurnEngine,
@@ -139,6 +142,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     joinRejects: undefined,
     joinAdmissionRejects: undefined,
     joinSentBys: [],
+    askOpen: false,
     storeFaults: [] as string[],
     storeRecoveries: [] as number[],
     knows: true,
@@ -197,6 +201,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
       state.joinSentBys.push(sentBy);
       return state.joinAdmissionRejects === undefined ? Promise.resolve() : Promise.reject(state.joinAdmissionRejects);
     },
+    askOpen: () => state.askOpen,
     releaseTurn: (turn) => {
       if (state.open === turn) state.open = undefined;
       if (state.adopted === turn) state.adopted = undefined;
@@ -1077,6 +1082,32 @@ describe("a reply's quote", () => {
 });
 
 describe("StartTurn joining the running turn", () => {
+  it("refuses a join as ask_open while an ask blocks the vendor", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+    h.askOpen = true;
+
+    // Act
+    const response = await h.turns.startTurn(joinTurn());
+
+    // Assert
+    expect(response.result.case === "failure" ? response.result.value.kind.case : "accepted").toBe("askOpen");
+  });
+
+  it("pushes nothing to the vendor for a join refused as ask_open", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+    h.askOpen = true;
+
+    // Act
+    await h.turns.startTurn(joinTurn());
+
+    // Assert
+    expect(h.joins).toEqual([]);
+  });
+
   it("accepts a join while a daemon turn runs", async () => {
     // Arrange
     const h = await harness();

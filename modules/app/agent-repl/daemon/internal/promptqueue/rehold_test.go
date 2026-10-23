@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
 	"slices"
 	"testing"
+	"time"
 
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -206,5 +208,80 @@ func TestTheReHoldIsRecordedAtInfo(t *testing.T) {
 	// Assert
 	if !logged(h.log.Records(), "info", opTurnEnded, "the vendor blocked the tried prompt; it is back on the after-reconnect hold in its place") {
 		t.Fatalf("no INFO record of the re-hold")
+	}
+}
+
+func TestHeldAgainKeepsThePromptsWordsAndPlaceUnderANewTurn(t *testing.T) {
+	// Arrange
+	queued := instant.Add(-time.Minute)
+	held := wsm.HeldPrompt{Workspace: theWorkspace, Turn: "t1", Said: textSaid("the words"), QueuedAt: queued, Origin: "PROMPT_ORIGIN_USER_SENT"}
+	// Act
+	again := heldAgain(held, nil, nil)
+	// Assert
+	if again.Turn == "" || again.Turn == "t1" || !again.QueuedAt.Equal(queued) || saidText(again.Said) != "the words" || again.Origin != held.Origin {
+		t.Fatalf("held again = %+v, want t1's words, origin and place under a new turn", again)
+	}
+}
+
+func TestHeldAgainStandsUnderTheGivenHoldAndVerdict(t *testing.T) {
+	// Arrange
+	kind := wsm.HoldReconnect
+	verdict := &wsm.Classification{Arm: wsm.ArmHoldForTurnEnd, Reason: "why", At: instant}
+	// Act
+	again := heldAgain(wsm.HeldPrompt{Turn: "t1"}, &kind, verdict)
+	// Assert
+	if again.Hold != &kind || again.Classification != verdict {
+		t.Fatalf("held again = %+v, want the given hold and verdict", again)
+	}
+}
+
+func TestHeldAgainDropsTheOldEntrysRetirementAndSchedule(t *testing.T) {
+	// Arrange
+	old := wsm.HeldPrompt{
+		Turn:           "t1",
+		ScheduleID:     "schedule-1",
+		Tombstone:      &wsm.Tombstone{Kind: tombstoneDelivered, At: instant},
+		Classification: &wsm.Classification{Arm: wsm.ArmAfterToolCall},
+	}
+	// Act
+	again := heldAgain(old, nil, nil)
+	// Assert
+	if again.ScheduleID != "" || again.Tombstone != nil || again.Classification != nil || again.Hold != nil {
+		t.Fatalf("held again = %+v, want no schedule, retirement, verdict or hold carried over", again)
+	}
+}
+
+// THE ONE SHAPE. A held prompt's turn is re-minted (`x.Turn = wsm.NewTurnID()`)
+// only inside heldAgain, so no hand-rolled re-hold can keep a retirement or a
+// schedule the old entry carried.
+func TestEveryReHoldGoesThroughHeldAgain(t *testing.T) {
+	// Arrange
+	fset, funcs := productionFuncs(t)
+	var sites []string
+	// Act
+	for _, fn := range funcs {
+		if fn.Name.Name == "heldAgain" {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			assign, ok := n.(*ast.AssignStmt)
+			if !ok || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
+				return true
+			}
+			lhs, ok := assign.Lhs[0].(*ast.SelectorExpr)
+			if !ok || lhs.Sel.Name != "Turn" {
+				return true
+			}
+			if call, ok := assign.Rhs[0].(*ast.CallExpr); ok {
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "NewTurnID" {
+					sites = append(sites, fset.Position(assign.Pos()).String()+" in "+fn.Name.Name)
+				}
+			}
+			return true
+		})
+	}
+	// Assert
+	if len(sites) != 0 {
+		t.Fatalf("a held prompt's turn re-minted outside heldAgain: %v", sites)
 	}
 }
