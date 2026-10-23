@@ -365,6 +365,7 @@ type WatchDaemonResponse struct {
 	//	*WatchDaemonResponse_FaultsStanding
 	//	*WatchDaemonResponse_PersistentWifi
 	//	*WatchDaemonResponse_NewsDigest
+	//	*WatchDaemonResponse_ReloadWebhost
 	Push          isWatchDaemonResponse_Push `protobuf_oneof:"push"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -488,6 +489,15 @@ func (x *WatchDaemonResponse) GetNewsDigest() *NewsDigestStanding {
 	return nil
 }
 
+func (x *WatchDaemonResponse) GetReloadWebhost() *DaemonReloadWebhost {
+	if x != nil {
+		if x, ok := x.Push.(*WatchDaemonResponse_ReloadWebhost); ok {
+			return x.ReloadWebhost
+		}
+	}
+	return nil
+}
+
 type isWatchDaemonResponse_Push interface {
 	isWatchDaemonResponse_Push()
 }
@@ -568,6 +578,15 @@ type WatchDaemonResponse_NewsDigest struct {
 	NewsDigest *NewsDigestStanding `protobuf:"bytes,9,opt,name=news_digest,json=newsDigest,proto3,oneof"`
 }
 
+type WatchDaemonResponse_ReloadWebhost struct {
+	// A DEPLOY FOUND THE WEB VIEW HOST ON AN OLDER WEBAPP: reload it onto the
+	// build named. Emacs owns the host, so the push goes to Emacs; the host
+	// states its build on its own page stream (WatchPageRequest.webhost). Sent
+	// ONLY on an Emacs stream, and never replayed: a host loaded later states
+	// its own build, and a deploy that runs after it compares that.
+	ReloadWebhost *DaemonReloadWebhost `protobuf:"bytes,11,opt,name=reload_webhost,json=reloadWebhost,proto3,oneof"`
+}
+
 func (*WatchDaemonResponse_ShutdownAnnounced) isWatchDaemonResponse_Push() {}
 
 func (*WatchDaemonResponse_DrainScheduled) isWatchDaemonResponse_Push() {}
@@ -585,6 +604,8 @@ func (*WatchDaemonResponse_FaultsStanding) isWatchDaemonResponse_Push() {}
 func (*WatchDaemonResponse_PersistentWifi) isWatchDaemonResponse_Push() {}
 
 func (*WatchDaemonResponse_NewsDigest) isWatchDaemonResponse_Push() {}
+
+func (*WatchDaemonResponse_ReloadWebhost) isWatchDaemonResponse_Push() {}
 
 // Whether a news digest stands. THE ARM IS THE STANDING; exactly one is set.
 type NewsDigestStanding struct {
@@ -897,6 +918,54 @@ func (x *DaemonReloadElisp) GetBuild() string {
 	return ""
 }
 
+// The web view host's reload onto a webapp build (WatchDaemonResponse
+// .reload_webhost).
+type DaemonReloadWebhost struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The webapp build the host is reloaded onto: the one the daemon serves.
+	// REQUIRED.
+	Build         string `protobuf:"bytes,1,opt,name=build,proto3" json:"build,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonReloadWebhost) Reset() {
+	*x = DaemonReloadWebhost{}
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonReloadWebhost) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonReloadWebhost) ProtoMessage() {}
+
+func (x *DaemonReloadWebhost) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonReloadWebhost.ProtoReflect.Descriptor instead.
+func (*DaemonReloadWebhost) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *DaemonReloadWebhost) GetBuild() string {
+	if x != nil {
+		return x.Build
+	}
+	return ""
+}
+
 type DaemonShutdownAnnounced struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The new daemon's socket address, verbatim — what Emacs dials for the
@@ -917,7 +986,7 @@ type DaemonShutdownAnnounced struct {
 
 func (x *DaemonShutdownAnnounced) Reset() {
 	*x = DaemonShutdownAnnounced{}
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -929,7 +998,7 @@ func (x *DaemonShutdownAnnounced) String() string {
 func (*DaemonShutdownAnnounced) ProtoMessage() {}
 
 func (x *DaemonShutdownAnnounced) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -942,7 +1011,7 @@ func (x *DaemonShutdownAnnounced) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonShutdownAnnounced.ProtoReflect.Descriptor instead.
 func (*DaemonShutdownAnnounced) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DaemonShutdownAnnounced) GetAddress() string {
@@ -988,7 +1057,7 @@ type DaemonShutdownCause struct {
 
 func (x *DaemonShutdownCause) Reset() {
 	*x = DaemonShutdownCause{}
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1000,7 +1069,7 @@ func (x *DaemonShutdownCause) String() string {
 func (*DaemonShutdownCause) ProtoMessage() {}
 
 func (x *DaemonShutdownCause) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1013,7 +1082,7 @@ func (x *DaemonShutdownCause) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonShutdownCause.ProtoReflect.Descriptor instead.
 func (*DaemonShutdownCause) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *DaemonShutdownCause) GetKind() isDaemonShutdownCause_Kind {
@@ -1084,7 +1153,7 @@ type DaemonShutdownSelfMergeRollout struct {
 
 func (x *DaemonShutdownSelfMergeRollout) Reset() {
 	*x = DaemonShutdownSelfMergeRollout{}
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1096,7 +1165,7 @@ func (x *DaemonShutdownSelfMergeRollout) String() string {
 func (*DaemonShutdownSelfMergeRollout) ProtoMessage() {}
 
 func (x *DaemonShutdownSelfMergeRollout) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1109,7 +1178,7 @@ func (x *DaemonShutdownSelfMergeRollout) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonShutdownSelfMergeRollout.ProtoReflect.Descriptor instead.
 func (*DaemonShutdownSelfMergeRollout) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{14}
 }
 
 // A scheduled drain reached its instant.
@@ -1122,7 +1191,7 @@ type DaemonShutdownScheduledDrain struct {
 
 func (x *DaemonShutdownScheduledDrain) Reset() {
 	*x = DaemonShutdownScheduledDrain{}
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1134,7 +1203,7 @@ func (x *DaemonShutdownScheduledDrain) String() string {
 func (*DaemonShutdownScheduledDrain) ProtoMessage() {}
 
 func (x *DaemonShutdownScheduledDrain) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1147,7 +1216,7 @@ func (x *DaemonShutdownScheduledDrain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonShutdownScheduledDrain.ProtoReflect.Descriptor instead.
 func (*DaemonShutdownScheduledDrain) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DaemonShutdownScheduledDrain) GetReason() *DrainReason {
@@ -1167,7 +1236,7 @@ type DaemonShutdownImmediate struct {
 
 func (x *DaemonShutdownImmediate) Reset() {
 	*x = DaemonShutdownImmediate{}
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1179,7 +1248,7 @@ func (x *DaemonShutdownImmediate) String() string {
 func (*DaemonShutdownImmediate) ProtoMessage() {}
 
 func (x *DaemonShutdownImmediate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1192,7 +1261,7 @@ func (x *DaemonShutdownImmediate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonShutdownImmediate.ProtoReflect.Descriptor instead.
 func (*DaemonShutdownImmediate) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DaemonShutdownImmediate) GetReason() *DrainReason {
@@ -1216,7 +1285,7 @@ type DaemonDrainScheduled struct {
 
 func (x *DaemonDrainScheduled) Reset() {
 	*x = DaemonDrainScheduled{}
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1228,7 +1297,7 @@ func (x *DaemonDrainScheduled) String() string {
 func (*DaemonDrainScheduled) ProtoMessage() {}
 
 func (x *DaemonDrainScheduled) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1241,7 +1310,7 @@ func (x *DaemonDrainScheduled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonDrainScheduled.ProtoReflect.Descriptor instead.
 func (*DaemonDrainScheduled) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DaemonDrainScheduled) GetAtMs() int64 {
@@ -1267,7 +1336,7 @@ type DaemonDrainCancelled struct {
 
 func (x *DaemonDrainCancelled) Reset() {
 	*x = DaemonDrainCancelled{}
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1279,7 +1348,7 @@ func (x *DaemonDrainCancelled) String() string {
 func (*DaemonDrainCancelled) ProtoMessage() {}
 
 func (x *DaemonDrainCancelled) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1292,7 +1361,7 @@ func (x *DaemonDrainCancelled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DaemonDrainCancelled.ProtoReflect.Descriptor instead.
 func (*DaemonDrainCancelled) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{18}
 }
 
 var File_agentrepl_v1_endpoint_watch_daemon_proto protoreflect.FileDescriptor
@@ -1316,7 +1385,7 @@ const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
 	"\x05value\x18\x01 \x01(\tR\x05value\"!\n" +
 	"\rEditorProcess\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\x05R\x03pid\"\x14\n" +
-	"\x12WatchDaemonWebview\"\xde\x05\n" +
+	"\x12WatchDaemonWebview\"\xaa\x06\n" +
 	"\x13WatchDaemonResponse\x12V\n" +
 	"\x12shutdown_announced\x18\x01 \x01(\v2%.agentrepl.v1.DaemonShutdownAnnouncedH\x00R\x11shutdownAnnounced\x12M\n" +
 	"\x0fdrain_scheduled\x18\x02 \x01(\v2\".agentrepl.v1.DaemonDrainScheduledH\x00R\x0edrainScheduled\x12M\n" +
@@ -1327,7 +1396,8 @@ const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
 	"\x0ffaults_standing\x18\a \x01(\v2\".agentrepl.v1.DaemonFaultsStandingH\x00R\x0efaultsStanding\x12L\n" +
 	"\x0fpersistent_wifi\x18\b \x01(\v2!.agentrepl.v1.PersistentWifiStateH\x00R\x0epersistentWifi\x12C\n" +
 	"\vnews_digest\x18\t \x01(\v2 .agentrepl.v1.NewsDigestStandingH\x00R\n" +
-	"newsDigestB\x06\n" +
+	"newsDigest\x12J\n" +
+	"\x0ereload_webhost\x18\v \x01(\v2!.agentrepl.v1.DaemonReloadWebhostH\x00R\rreloadWebhostB\x06\n" +
 	"\x04pushJ\x04\b\n" +
 	"\x10\vR\astartup\"\x8c\x01\n" +
 	"\x12NewsDigestStanding\x126\n" +
@@ -1347,7 +1417,9 @@ const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
 	"\x11DaemonReloadElisp\x12\x1f\n" +
 	"\vmodule_root\x18\x01 \x01(\tR\n" +
 	"moduleRoot\x12\x14\n" +
-	"\x05build\x18\x02 \x01(\tR\x05build\"\xcd\x01\n" +
+	"\x05build\x18\x02 \x01(\tR\x05build\"+\n" +
+	"\x13DaemonReloadWebhost\x12\x14\n" +
+	"\x05build\x18\x01 \x01(\tR\x05build\"\xcd\x01\n" +
 	"\x17DaemonShutdownAnnounced\x12\x1d\n" +
 	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01\x127\n" +
 	"\x05cause\x18\x02 \x01(\v2!.agentrepl.v1.DaemonShutdownCauseR\x05cause\x12,\n" +
@@ -1383,7 +1455,7 @@ func file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_agentrepl_v1_endpoint_watch_daemon_proto_goTypes = []any{
 	(*WatchDaemonRequest)(nil),             // 0: agentrepl.v1.WatchDaemonRequest
 	(*WatchDaemonEmacs)(nil),               // 1: agentrepl.v1.WatchDaemonEmacs
@@ -1396,52 +1468,54 @@ var file_agentrepl_v1_endpoint_watch_daemon_proto_goTypes = []any{
 	(*DaemonFaultsStanding)(nil),           // 8: agentrepl.v1.DaemonFaultsStanding
 	(*DaemonStandingFault)(nil),            // 9: agentrepl.v1.DaemonStandingFault
 	(*DaemonReloadElisp)(nil),              // 10: agentrepl.v1.DaemonReloadElisp
-	(*DaemonShutdownAnnounced)(nil),        // 11: agentrepl.v1.DaemonShutdownAnnounced
-	(*DaemonShutdownCause)(nil),            // 12: agentrepl.v1.DaemonShutdownCause
-	(*DaemonShutdownSelfMergeRollout)(nil), // 13: agentrepl.v1.DaemonShutdownSelfMergeRollout
-	(*DaemonShutdownScheduledDrain)(nil),   // 14: agentrepl.v1.DaemonShutdownScheduledDrain
-	(*DaemonShutdownImmediate)(nil),        // 15: agentrepl.v1.DaemonShutdownImmediate
-	(*DaemonDrainScheduled)(nil),           // 16: agentrepl.v1.DaemonDrainScheduled
-	(*DaemonDrainCancelled)(nil),           // 17: agentrepl.v1.DaemonDrainCancelled
-	(*EditorFocus)(nil),                    // 18: agentrepl.v1.EditorFocus
-	(*WorkspaceMutationProgress)(nil),      // 19: agentrepl.v1.WorkspaceMutationProgress
-	(*DaemonStreamEnding)(nil),             // 20: agentrepl.v1.DaemonStreamEnding
-	(*PersistentWifiState)(nil),            // 21: agentrepl.v1.PersistentWifiState
-	(*v1.NewsDigestOverlay)(nil),           // 22: frontend.v1.NewsDigestOverlay
-	(*DaemonFault)(nil),                    // 23: agentrepl.v1.DaemonFault
-	(*DrainReason)(nil),                    // 24: agentrepl.v1.DrainReason
+	(*DaemonReloadWebhost)(nil),            // 11: agentrepl.v1.DaemonReloadWebhost
+	(*DaemonShutdownAnnounced)(nil),        // 12: agentrepl.v1.DaemonShutdownAnnounced
+	(*DaemonShutdownCause)(nil),            // 13: agentrepl.v1.DaemonShutdownCause
+	(*DaemonShutdownSelfMergeRollout)(nil), // 14: agentrepl.v1.DaemonShutdownSelfMergeRollout
+	(*DaemonShutdownScheduledDrain)(nil),   // 15: agentrepl.v1.DaemonShutdownScheduledDrain
+	(*DaemonShutdownImmediate)(nil),        // 16: agentrepl.v1.DaemonShutdownImmediate
+	(*DaemonDrainScheduled)(nil),           // 17: agentrepl.v1.DaemonDrainScheduled
+	(*DaemonDrainCancelled)(nil),           // 18: agentrepl.v1.DaemonDrainCancelled
+	(*EditorFocus)(nil),                    // 19: agentrepl.v1.EditorFocus
+	(*WorkspaceMutationProgress)(nil),      // 20: agentrepl.v1.WorkspaceMutationProgress
+	(*DaemonStreamEnding)(nil),             // 21: agentrepl.v1.DaemonStreamEnding
+	(*PersistentWifiState)(nil),            // 22: agentrepl.v1.PersistentWifiState
+	(*v1.NewsDigestOverlay)(nil),           // 23: frontend.v1.NewsDigestOverlay
+	(*DaemonFault)(nil),                    // 24: agentrepl.v1.DaemonFault
+	(*DrainReason)(nil),                    // 25: agentrepl.v1.DrainReason
 }
 var file_agentrepl_v1_endpoint_watch_daemon_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.WatchDaemonRequest.emacs:type_name -> agentrepl.v1.WatchDaemonEmacs
 	4,  // 1: agentrepl.v1.WatchDaemonRequest.webview:type_name -> agentrepl.v1.WatchDaemonWebview
-	18, // 2: agentrepl.v1.WatchDaemonEmacs.focus:type_name -> agentrepl.v1.EditorFocus
+	19, // 2: agentrepl.v1.WatchDaemonEmacs.focus:type_name -> agentrepl.v1.EditorFocus
 	2,  // 3: agentrepl.v1.WatchDaemonEmacs.instance:type_name -> agentrepl.v1.EditorInstance
 	3,  // 4: agentrepl.v1.WatchDaemonEmacs.process:type_name -> agentrepl.v1.EditorProcess
-	11, // 5: agentrepl.v1.WatchDaemonResponse.shutdown_announced:type_name -> agentrepl.v1.DaemonShutdownAnnounced
-	16, // 6: agentrepl.v1.WatchDaemonResponse.drain_scheduled:type_name -> agentrepl.v1.DaemonDrainScheduled
-	17, // 7: agentrepl.v1.WatchDaemonResponse.drain_cancelled:type_name -> agentrepl.v1.DaemonDrainCancelled
-	19, // 8: agentrepl.v1.WatchDaemonResponse.mutation_progress:type_name -> agentrepl.v1.WorkspaceMutationProgress
+	12, // 5: agentrepl.v1.WatchDaemonResponse.shutdown_announced:type_name -> agentrepl.v1.DaemonShutdownAnnounced
+	17, // 6: agentrepl.v1.WatchDaemonResponse.drain_scheduled:type_name -> agentrepl.v1.DaemonDrainScheduled
+	18, // 7: agentrepl.v1.WatchDaemonResponse.drain_cancelled:type_name -> agentrepl.v1.DaemonDrainCancelled
+	20, // 8: agentrepl.v1.WatchDaemonResponse.mutation_progress:type_name -> agentrepl.v1.WorkspaceMutationProgress
 	10, // 9: agentrepl.v1.WatchDaemonResponse.reload_elisp:type_name -> agentrepl.v1.DaemonReloadElisp
-	20, // 10: agentrepl.v1.WatchDaemonResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
+	21, // 10: agentrepl.v1.WatchDaemonResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
 	8,  // 11: agentrepl.v1.WatchDaemonResponse.faults_standing:type_name -> agentrepl.v1.DaemonFaultsStanding
-	21, // 12: agentrepl.v1.WatchDaemonResponse.persistent_wifi:type_name -> agentrepl.v1.PersistentWifiState
+	22, // 12: agentrepl.v1.WatchDaemonResponse.persistent_wifi:type_name -> agentrepl.v1.PersistentWifiState
 	6,  // 13: agentrepl.v1.WatchDaemonResponse.news_digest:type_name -> agentrepl.v1.NewsDigestStanding
-	22, // 14: agentrepl.v1.NewsDigestStanding.shown:type_name -> frontend.v1.NewsDigestOverlay
-	7,  // 15: agentrepl.v1.NewsDigestStanding.none:type_name -> agentrepl.v1.NewsDigestNone
-	9,  // 16: agentrepl.v1.DaemonFaultsStanding.faults:type_name -> agentrepl.v1.DaemonStandingFault
-	23, // 17: agentrepl.v1.DaemonStandingFault.fault:type_name -> agentrepl.v1.DaemonFault
-	12, // 18: agentrepl.v1.DaemonShutdownAnnounced.cause:type_name -> agentrepl.v1.DaemonShutdownCause
-	13, // 19: agentrepl.v1.DaemonShutdownCause.self_merge_rollout:type_name -> agentrepl.v1.DaemonShutdownSelfMergeRollout
-	14, // 20: agentrepl.v1.DaemonShutdownCause.scheduled_drain:type_name -> agentrepl.v1.DaemonShutdownScheduledDrain
-	15, // 21: agentrepl.v1.DaemonShutdownCause.immediate:type_name -> agentrepl.v1.DaemonShutdownImmediate
-	24, // 22: agentrepl.v1.DaemonShutdownScheduledDrain.reason:type_name -> agentrepl.v1.DrainReason
-	24, // 23: agentrepl.v1.DaemonShutdownImmediate.reason:type_name -> agentrepl.v1.DrainReason
-	24, // 24: agentrepl.v1.DaemonDrainScheduled.reason:type_name -> agentrepl.v1.DrainReason
-	25, // [25:25] is the sub-list for method output_type
-	25, // [25:25] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	11, // 14: agentrepl.v1.WatchDaemonResponse.reload_webhost:type_name -> agentrepl.v1.DaemonReloadWebhost
+	23, // 15: agentrepl.v1.NewsDigestStanding.shown:type_name -> frontend.v1.NewsDigestOverlay
+	7,  // 16: agentrepl.v1.NewsDigestStanding.none:type_name -> agentrepl.v1.NewsDigestNone
+	9,  // 17: agentrepl.v1.DaemonFaultsStanding.faults:type_name -> agentrepl.v1.DaemonStandingFault
+	24, // 18: agentrepl.v1.DaemonStandingFault.fault:type_name -> agentrepl.v1.DaemonFault
+	13, // 19: agentrepl.v1.DaemonShutdownAnnounced.cause:type_name -> agentrepl.v1.DaemonShutdownCause
+	14, // 20: agentrepl.v1.DaemonShutdownCause.self_merge_rollout:type_name -> agentrepl.v1.DaemonShutdownSelfMergeRollout
+	15, // 21: agentrepl.v1.DaemonShutdownCause.scheduled_drain:type_name -> agentrepl.v1.DaemonShutdownScheduledDrain
+	16, // 22: agentrepl.v1.DaemonShutdownCause.immediate:type_name -> agentrepl.v1.DaemonShutdownImmediate
+	25, // 23: agentrepl.v1.DaemonShutdownScheduledDrain.reason:type_name -> agentrepl.v1.DrainReason
+	25, // 24: agentrepl.v1.DaemonShutdownImmediate.reason:type_name -> agentrepl.v1.DrainReason
+	25, // 25: agentrepl.v1.DaemonDrainScheduled.reason:type_name -> agentrepl.v1.DrainReason
+	26, // [26:26] is the sub-list for method output_type
+	26, // [26:26] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_daemon_proto_init() }
@@ -1470,13 +1544,14 @@ func file_agentrepl_v1_endpoint_watch_daemon_proto_init() {
 		(*WatchDaemonResponse_FaultsStanding)(nil),
 		(*WatchDaemonResponse_PersistentWifi)(nil),
 		(*WatchDaemonResponse_NewsDigest)(nil),
+		(*WatchDaemonResponse_ReloadWebhost)(nil),
 	}
 	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[6].OneofWrappers = []any{
 		(*NewsDigestStanding_Shown)(nil),
 		(*NewsDigestStanding_None)(nil),
 	}
-	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[11].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[12].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[12].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[13].OneofWrappers = []any{
 		(*DaemonShutdownCause_SelfMergeRollout)(nil),
 		(*DaemonShutdownCause_ScheduledDrain)(nil),
 		(*DaemonShutdownCause_Immediate)(nil),
@@ -1487,7 +1562,7 @@ func file_agentrepl_v1_endpoint_watch_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc), len(file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

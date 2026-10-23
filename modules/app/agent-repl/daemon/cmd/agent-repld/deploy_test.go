@@ -188,8 +188,9 @@ func TestTheBootingDeployerClosesTheDeployFaultsAnEarlierDaemonLeft(t *testing.T
 
 // fakeClients records what a bound forwarder hands on.
 type fakeClients struct {
-	pushedElisp  []string
-	pushedWebapp []ids.WorkspaceID
+	pushedElisp   []string
+	pushedWebapp  []ids.WorkspaceID
+	pushedWebhost []string
 }
 
 func (f *fakeClients) EmacsBuilds() []deploy.EmacsClient {
@@ -207,6 +208,13 @@ func (f *fakeClients) WebviewBuilds() map[ids.WorkspaceID][]string {
 
 func (f *fakeClients) PushReloadWebappBuild(ws ids.WorkspaceID, _ string) {
 	f.pushedWebapp = append(f.pushedWebapp, ws)
+}
+
+func (f *fakeClients) WebhostBuilds() []string { return []string{"old"} }
+
+func (f *fakeClients) PushReloadWebhost(build string) int {
+	f.pushedWebhost = append(f.pushedWebhost, build)
+	return 1
 }
 
 func TestAnUnboundClientsForwarderAnswersNoClient(t *testing.T) {

@@ -50,6 +50,7 @@ function start(host: Host, deps: WebhostSidebarStartDeps) {
     client,
     installLogger: () => undefined,
     installCensus: () => ({ stop: () => undefined }),
+    webappBuild: () => "Web1",
     ...deps,
   });
   return logged;

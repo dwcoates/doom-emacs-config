@@ -147,6 +147,12 @@ message WatchDaemonResponse {
     // that opens while a digest stands draws it, and a dismiss in any one
     // webview takes it down in every one. Sent ONLY on a webview stream.
     NewsDigestStanding news_digest = 9;
+    // A DEPLOY FOUND THE WEB VIEW HOST ON AN OLDER WEBAPP: reload it onto the
+    // build named. Emacs owns the host, so the push goes to Emacs; the host
+    // states its build on its own page stream (WatchPageRequest.webhost). Sent
+    // ONLY on an Emacs stream, and never replayed: a host loaded later states
+    // its own build, and a deploy that runs after it compares that.
+    DaemonReloadWebhost reload_webhost = 11;
   }
 }
 
@@ -201,6 +207,14 @@ message DaemonReloadElisp {
   // algorithm). What this Emacs reports as its elisp_build from then on.
   // REQUIRED.
   string build = 2;
+}
+
+// The web view host's reload onto a webapp build (WatchDaemonResponse
+// .reload_webhost).
+message DaemonReloadWebhost {
+  // The webapp build the host is reloaded onto: the one the daemon serves.
+  // REQUIRED.
+  string build = 1;
 }
 
 message DaemonShutdownAnnounced {

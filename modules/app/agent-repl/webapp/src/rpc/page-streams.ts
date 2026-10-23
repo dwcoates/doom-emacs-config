@@ -219,9 +219,10 @@ function newAttachment(): Attachment {
 
 /**
  * Open this page's one stream and answer the handle every component subscribes
- * through. PAGE is the id this document minted for itself.
+ * through. PAGE is the id this document minted for itself; WEBHOST_BUILD, set
+ * by the web view host alone, is the webapp build the host was loaded from.
  */
-export function startPageStreams(ctx: PageStreamContext, page: string): PageStreamsHandle {
+export function startPageStreams(ctx: PageStreamContext, page: string, webhostBuild?: string): PageStreamsHandle {
   const subscriptions = new Map<string, FrameQueue<PageFrame>>();
   const attachedListeners = new Set<() => void>();
   let attachment = newAttachment();
@@ -235,7 +236,8 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
   const stream: StreamHandle = watchStream<WatchPageResponse>(ctx, {
     name: "WatchPage",
     schema: WatchPageResponseSchema,
-    open: (client, signal) => client.watchPage({ page }, { signal }),
+    open: (client, signal) =>
+      client.watchPage(webhostBuild === undefined ? { page } : { page, webhost: { webappBuild: webhostBuild } }, { signal }),
     onPush: (response) => routeFrame(response),
     onEnd: () => detach(),
   });

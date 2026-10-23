@@ -1260,7 +1260,7 @@ opens are OpenTabs streams."
                        #'string<)
                  (sort (list "shutdownAnnounced" "drainScheduled" "drainCancelled"
                              "mutationProgress" "reloadElisp" "ending" "faultsStanding"
-                             "persistentWifi" "newsDigest")
+                             "persistentWifi" "newsDigest" "reloadWebhost")
                        #'string<))))
 
 ;;;; ---- OpenTabs ----
@@ -1452,6 +1452,19 @@ opens are OpenTabs streams."
                   "{\"persistentWifi\":{\"notJoined\":{},\"on\":{}}}")
                  '(:arm :persistent-wifi
                    :value (:wifi (:arm :not-joined :value nil) :mode (:arm :on :value nil))))))
+
+(ert-deftest agent-repl-test-wire-host-reload-webhost-push-decodes-its-build ()
+  "The web view host's reload push decodes to the build it names."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"reloadWebhost\":{\"build\":\"Web2\"}}")
+                 '(:arm :reload-webhost :value (:build "Web2")))))
+
+(ert-deftest agent-repl-test-wire-host-reload-webhost-without-a-build-is-refused ()
+  "A host reload naming no build is a breach, never a reload to attempt."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-daemon-reload-webhost "{}")
+                 '("DaemonReloadWebhost" build "required string is empty"))))
 
 (ert-deftest agent-repl-test-wire-host-faults-standing-empty-is-none-standing ()
   "An empty standing set decodes to no faults: the last one closed."

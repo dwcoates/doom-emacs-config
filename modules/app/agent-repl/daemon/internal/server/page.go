@@ -169,6 +169,10 @@ func (s *server) WatchPage(
 		return connect.NewError(connect.CodeInvalidArgument,
 			fmt.Errorf("%s: page is required", rpc))
 	}
+	if host := req.Msg.GetWebhost(); host != nil && host.GetWebappBuild() == "" {
+		return connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("%s: webhost.webapp_build is required", rpc))
+	}
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
 
@@ -177,6 +181,11 @@ func (s *server) WatchPage(
 		return TransportClosed(s.log, rpc, "page_already_attached", err.Error(), false)
 	}
 	defer s.detachPage(page)
+	// THE WEB VIEW HOST'S BUILD stands for as long as its page stream does:
+	// a deploy reloads a host on an older webapp (deploy.Deployer.webapp).
+	if host := req.Msg.GetWebhost(); host != nil {
+		defer s.holdWebhostBuild(host.GetWebappBuild())()
+	}
 
 	s.acceptStream(ctx, rpc)
 	s.log.Debug(rpc, "attached a page's one standing stream",

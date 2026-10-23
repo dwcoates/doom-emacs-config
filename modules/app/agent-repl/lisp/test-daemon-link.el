@@ -1208,6 +1208,19 @@ as if it were understood."
       ;; Assert
       (should (equal handled '((:wifi nil :mode (:arm :on :value nil))))))))
 
+(ert-deftest agent-repl-test-link-a-reload-webhost-push-reloads-the-host-on-its-daemon ()
+  "A `reload_webhost' push reloads the host onto its build, on the daemon that pushed it."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (reloaded nil))
+      (cl-letf (((symbol-function 'agent-repl-webhost-reload-onto)
+                 (lambda (on build) (push (list on build) reloaded))))
+        ;; Act
+        (agent-repl-test-link--push conn (list :arm :reload-webhost :value '(:build "Web2"))))
+      ;; Assert
+      (should (equal reloaded (list (list conn "Web2")))))))
+
 ;;;; ---- The daemon's standing loud faults ----
 
 (defun agent-repl-test-link--standing (&rest ids)

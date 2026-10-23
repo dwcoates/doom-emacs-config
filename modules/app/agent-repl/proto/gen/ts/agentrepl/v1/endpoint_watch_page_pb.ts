@@ -62,7 +62,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_page.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_page: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfcGFnZS5wcm90bxIMYWdlbnRyZXBsLnYxIiAKEFdhdGNoUGFnZVJlcXVlc3QSDAoEcGFnZRgBIAEoCSKrAQoRV2F0Y2hQYWdlUmVzcG9uc2USLgoIYXR0YWNoZWQYASABKAsyGi5hZ2VudHJlcGwudjEuUGFnZUF0dGFjaGVkSAASJwoEcHVzaBgCIAEoCzIXLmFnZW50cmVwbC52MS5QYWdlRnJhbWVIABI0CgVlbmRlZBgDIAEoCzIjLmFnZW50cmVwbC52MS5QYWdlU3Vic2NyaXB0aW9uRW5kZWRIAEIHCgVmcmFtZSIOCgxQYWdlQXR0YWNoZWQixgMKCVBhZ2VGcmFtZRIUCgxzdWJzY3JpcHRpb24YASABKAkSPAoGcm9zdGVyGAIgASgLMiouYWdlbnRyZXBsLnYxLldhdGNoV29ya3NwYWNlUm9zdGVyUmVzcG9uc2VIABJACg13ZWJfd29ya3NwYWNlGAMgASgLMicuYWdlbnRyZXBsLnYxLldhdGNoV2ViV29ya3NwYWNlUmVzcG9uc2VIABIzCgZkYWVtb24YBCABKAsyIS5hZ2VudHJlcGwudjEuV2F0Y2hEYWVtb25SZXNwb25zZUgAEjMKBnRvcGJhchgFIAEoCzIhLmFnZW50cmVwbC52MS5XYXRjaFRvcGJhclJlc3BvbnNlSAASMwoGZm9vdGVyGAYgASgLMiEuYWdlbnRyZXBsLnYxLldhdGNoRm9vdGVyUmVzcG9uc2VIABIvCgRmZWVkGAggASgLMh8uYWdlbnRyZXBsLnYxLldhdGNoRmVlZFJlc3BvbnNlSAASOwoObG9naW5fdGVybWluYWwYCSABKAsyIS5hZ2VudHJlcGwudjEuTG9naW5UZXJtaW5hbE91dHB1dEgAQgkKB3BheWxvYWRKBAgHEAhSBWhvbGRzIvMBChVQYWdlU3Vic2NyaXB0aW9uRW5kZWQSFAoMc3Vic2NyaXB0aW9uGAEgASgJEkIKDHVuc3Vic2NyaWJlZBgCIAEoCzIqLmFnZW50cmVwbC52MS5QYWdlU3Vic2NyaXB0aW9uVW5zdWJzY3JpYmVkSAASQQoMc291cmNlX2VuZGVkGAMgASgLMikuYWdlbnRyZXBsLnYxLlBhZ2VTdWJzY3JpcHRpb25Tb3VyY2VFbmRlZEgAEjYKBmZhaWxlZBgEIAEoCzIkLmFnZW50cmVwbC52MS5QYWdlU3Vic2NyaXB0aW9uRmFpbGVkSABCBQoDaG93Ih4KHFBhZ2VTdWJzY3JpcHRpb25VbnN1YnNjcmliZWQiHQobUGFnZVN1YnNjcmlwdGlvblNvdXJjZUVuZGVkIjcKFlBhZ2VTdWJzY3JpcHRpb25GYWlsZWQSDAoEY29kZRgBIAEoCRIPCgdtZXNzYWdlGAIgASgJIt8DChRTdWJzY3JpYmVQYWdlUmVxdWVzdBIMCgRwYWdlGAEgASgJEhQKDHN1YnNjcmlwdGlvbhgCIAEoCRI7CgZyb3N0ZXIYAyABKAsyKS5hZ2VudHJlcGwudjEuV2F0Y2hXb3Jrc3BhY2VSb3N0ZXJSZXF1ZXN0SAASPwoNd2ViX3dvcmtzcGFjZRgEIAEoCzImLmFnZW50cmVwbC52MS5XYXRjaFdlYldvcmtzcGFjZVJlcXVlc3RIABIyCgZkYWVtb24YBSABKAsyIC5hZ2VudHJlcGwudjEuV2F0Y2hEYWVtb25SZXF1ZXN0SAASMgoGdG9wYmFyGAYgASgLMiAuYWdlbnRyZXBsLnYxLldhdGNoVG9wYmFyUmVxdWVzdEgAEjIKBmZvb3RlchgHIAEoCzIgLmFnZW50cmVwbC52MS5XYXRjaEZvb3RlclJlcXVlc3RIABIuCgRmZWVkGAkgASgLMh4uYWdlbnRyZXBsLnYxLldhdGNoRmVlZFJlcXVlc3RIABJBCg5sb2dpbl90ZXJtaW5hbBgKIAEoCzInLmFnZW50cmVwbC52MS5XYXRjaExvZ2luVGVybWluYWxSZXF1ZXN0SABCCQoHcmVxdWVzdEoECAgQCVIFaG9sZHMiFwoVU3Vic2NyaWJlUGFnZVJlc3BvbnNlIjwKFlVuc3Vic2NyaWJlUGFnZVJlcXVlc3QSDAoEcGFnZRgBIAEoCRIUCgxzdWJzY3JpcHRpb24YAiABKAkiGQoXVW5zdWJzY3JpYmVQYWdlUmVzcG9uc2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_endpoint_watch_workspace_roster, file_agentrepl_v1_endpoint_watch_web_workspace, file_agentrepl_v1_endpoint_watch_daemon, file_agentrepl_v1_endpoint_watch_topbar, file_agentrepl_v1_endpoint_watch_footer, file_agentrepl_v1_endpoint_watch_feed, file_agentrepl_v1_endpoint_watch_login_terminal]);
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfcGFnZS5wcm90bxIMYWdlbnRyZXBsLnYxIl0KEFdhdGNoUGFnZVJlcXVlc3QSDAoEcGFnZRgBIAEoCRIvCgd3ZWJob3N0GAIgASgLMhkuYWdlbnRyZXBsLnYxLldlYmhvc3RQYWdlSACIAQFCCgoIX3dlYmhvc3QiIwoLV2ViaG9zdFBhZ2USFAoMd2ViYXBwX2J1aWxkGAEgASgJIqsBChFXYXRjaFBhZ2VSZXNwb25zZRIuCghhdHRhY2hlZBgBIAEoCzIaLmFnZW50cmVwbC52MS5QYWdlQXR0YWNoZWRIABInCgRwdXNoGAIgASgLMhcuYWdlbnRyZXBsLnYxLlBhZ2VGcmFtZUgAEjQKBWVuZGVkGAMgASgLMiMuYWdlbnRyZXBsLnYxLlBhZ2VTdWJzY3JpcHRpb25FbmRlZEgAQgcKBWZyYW1lIg4KDFBhZ2VBdHRhY2hlZCLGAwoJUGFnZUZyYW1lEhQKDHN1YnNjcmlwdGlvbhgBIAEoCRI8CgZyb3N0ZXIYAiABKAsyKi5hZ2VudHJlcGwudjEuV2F0Y2hXb3Jrc3BhY2VSb3N0ZXJSZXNwb25zZUgAEkAKDXdlYl93b3Jrc3BhY2UYAyABKAsyJy5hZ2VudHJlcGwudjEuV2F0Y2hXZWJXb3Jrc3BhY2VSZXNwb25zZUgAEjMKBmRhZW1vbhgEIAEoCzIhLmFnZW50cmVwbC52MS5XYXRjaERhZW1vblJlc3BvbnNlSAASMwoGdG9wYmFyGAUgASgLMiEuYWdlbnRyZXBsLnYxLldhdGNoVG9wYmFyUmVzcG9uc2VIABIzCgZmb290ZXIYBiABKAsyIS5hZ2VudHJlcGwudjEuV2F0Y2hGb290ZXJSZXNwb25zZUgAEi8KBGZlZWQYCCABKAsyHy5hZ2VudHJlcGwudjEuV2F0Y2hGZWVkUmVzcG9uc2VIABI7Cg5sb2dpbl90ZXJtaW5hbBgJIAEoCzIhLmFnZW50cmVwbC52MS5Mb2dpblRlcm1pbmFsT3V0cHV0SABCCQoHcGF5bG9hZEoECAcQCFIFaG9sZHMi8wEKFVBhZ2VTdWJzY3JpcHRpb25FbmRlZBIUCgxzdWJzY3JpcHRpb24YASABKAkSQgoMdW5zdWJzY3JpYmVkGAIgASgLMiouYWdlbnRyZXBsLnYxLlBhZ2VTdWJzY3JpcHRpb25VbnN1YnNjcmliZWRIABJBCgxzb3VyY2VfZW5kZWQYAyABKAsyKS5hZ2VudHJlcGwudjEuUGFnZVN1YnNjcmlwdGlvblNvdXJjZUVuZGVkSAASNgoGZmFpbGVkGAQgASgLMiQuYWdlbnRyZXBsLnYxLlBhZ2VTdWJzY3JpcHRpb25GYWlsZWRIAEIFCgNob3ciHgocUGFnZVN1YnNjcmlwdGlvblVuc3Vic2NyaWJlZCIdChtQYWdlU3Vic2NyaXB0aW9uU291cmNlRW5kZWQiNwoWUGFnZVN1YnNjcmlwdGlvbkZhaWxlZBIMCgRjb2RlGAEgASgJEg8KB21lc3NhZ2UYAiABKAki3wMKFFN1YnNjcmliZVBhZ2VSZXF1ZXN0EgwKBHBhZ2UYASABKAkSFAoMc3Vic2NyaXB0aW9uGAIgASgJEjsKBnJvc3RlchgDIAEoCzIpLmFnZW50cmVwbC52MS5XYXRjaFdvcmtzcGFjZVJvc3RlclJlcXVlc3RIABI/Cg13ZWJfd29ya3NwYWNlGAQgASgLMiYuYWdlbnRyZXBsLnYxLldhdGNoV2ViV29ya3NwYWNlUmVxdWVzdEgAEjIKBmRhZW1vbhgFIAEoCzIgLmFnZW50cmVwbC52MS5XYXRjaERhZW1vblJlcXVlc3RIABIyCgZ0b3BiYXIYBiABKAsyIC5hZ2VudHJlcGwudjEuV2F0Y2hUb3BiYXJSZXF1ZXN0SAASMgoGZm9vdGVyGAcgASgLMiAuYWdlbnRyZXBsLnYxLldhdGNoRm9vdGVyUmVxdWVzdEgAEi4KBGZlZWQYCSABKAsyHi5hZ2VudHJlcGwudjEuV2F0Y2hGZWVkUmVxdWVzdEgAEkEKDmxvZ2luX3Rlcm1pbmFsGAogASgLMicuYWdlbnRyZXBsLnYxLldhdGNoTG9naW5UZXJtaW5hbFJlcXVlc3RIAEIJCgdyZXF1ZXN0SgQICBAJUgVob2xkcyIXChVTdWJzY3JpYmVQYWdlUmVzcG9uc2UiPAoWVW5zdWJzY3JpYmVQYWdlUmVxdWVzdBIMCgRwYWdlGAEgASgJEhQKDHN1YnNjcmlwdGlvbhgCIAEoCSIZChdVbnN1YnNjcmliZVBhZ2VSZXNwb25zZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_endpoint_watch_workspace_roster, file_agentrepl_v1_endpoint_watch_web_workspace, file_agentrepl_v1_endpoint_watch_daemon, file_agentrepl_v1_endpoint_watch_topbar, file_agentrepl_v1_endpoint_watch_footer, file_agentrepl_v1_endpoint_watch_feed, file_agentrepl_v1_endpoint_watch_login_terminal]);
 
 /**
  * Opens the page's one stream.
@@ -81,6 +81,17 @@ export type WatchPageRequest = Message<"agentrepl.v1.WatchPageRequest"> & {
    * @generated from field: string page = 1;
    */
   page: string;
+
+  /**
+   * PRESENT ONLY ON THE WEB VIEW HOST'S OWN PAGE STREAM (its sidebar's): the
+   * host is the one document a handover no longer reloads, so it states the
+   * webapp build it was loaded from, and a deploy that built another reloads
+   * it (WatchDaemonResponse.reload_webhost). Absent on every workspace page,
+   * which states its build on WatchWebWorkspace.
+   *
+   * @generated from field: optional agentrepl.v1.WebhostPage webhost = 2;
+   */
+  webhost?: WebhostPage | undefined;
 };
 
 /**
@@ -89,6 +100,28 @@ export type WatchPageRequest = Message<"agentrepl.v1.WatchPageRequest"> & {
  */
 export const WatchPageRequestSchema: GenMessage<WatchPageRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_watch_page, 0);
+
+/**
+ * The web view host's page stream: what it was loaded from.
+ *
+ * @generated from message agentrepl.v1.WebhostPage
+ */
+export type WebhostPage = Message<"agentrepl.v1.WebhostPage"> & {
+  /**
+   * The webapp build the host was loaded from (webapp/src/webapp-build.ts).
+   * REQUIRED and not empty.
+   *
+   * @generated from field: string webapp_build = 1;
+   */
+  webappBuild: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.WebhostPage.
+ * Use `create(WebhostPageSchema)` to create a new message.
+ */
+export const WebhostPageSchema: GenMessage<WebhostPage> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 1);
 
 /**
  * One frame on the page's stream.
@@ -132,7 +165,7 @@ export type WatchPageResponse = Message<"agentrepl.v1.WatchPageResponse"> & {
  * Use `create(WatchPageResponseSchema)` to create a new message.
  */
 export const WatchPageResponseSchema: GenMessage<WatchPageResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 1);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 2);
 
 /**
  * The latch: the daemon has registered this page.
@@ -147,7 +180,7 @@ export type PageAttached = Message<"agentrepl.v1.PageAttached"> & {
  * Use `create(PageAttachedSchema)` to create a new message.
  */
 export const PageAttachedSchema: GenMessage<PageAttached> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 2);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 3);
 
 /**
  * One push, addressed to the subscription that asked for it.
@@ -218,7 +251,7 @@ export type PageFrame = Message<"agentrepl.v1.PageFrame"> & {
  * Use `create(PageFrameSchema)` to create a new message.
  */
 export const PageFrameSchema: GenMessage<PageFrame> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 3);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 4);
 
 /**
  * A subscription that has ended, AND WHY.
@@ -279,7 +312,7 @@ export type PageSubscriptionEnded = Message<"agentrepl.v1.PageSubscriptionEnded"
  * Use `create(PageSubscriptionEndedSchema)` to create a new message.
  */
 export const PageSubscriptionEndedSchema: GenMessage<PageSubscriptionEnded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 4);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 5);
 
 /**
  * Presence is the fact: the client asked for this end.
@@ -294,7 +327,7 @@ export type PageSubscriptionUnsubscribed = Message<"agentrepl.v1.PageSubscriptio
  * Use `create(PageSubscriptionUnsubscribedSchema)` to create a new message.
  */
 export const PageSubscriptionUnsubscribedSchema: GenMessage<PageSubscriptionUnsubscribed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 5);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 6);
 
 /**
  * Presence is the fact: the source finished of its own accord.
@@ -309,7 +342,7 @@ export type PageSubscriptionSourceEnded = Message<"agentrepl.v1.PageSubscription
  * Use `create(PageSubscriptionSourceEndedSchema)` to create a new message.
  */
 export const PageSubscriptionSourceEndedSchema: GenMessage<PageSubscriptionSourceEnded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 6);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 7);
 
 /**
  * A subscription that ended in FAILURE, carrying the error verbatim.
@@ -347,7 +380,7 @@ export type PageSubscriptionFailed = Message<"agentrepl.v1.PageSubscriptionFaile
  * Use `create(PageSubscriptionFailedSchema)` to create a new message.
  */
 export const PageSubscriptionFailedSchema: GenMessage<PageSubscriptionFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 7);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 8);
 
 /**
  * Starts one subscription on an already-attached page.
@@ -432,7 +465,7 @@ export type SubscribePageRequest = Message<"agentrepl.v1.SubscribePageRequest"> 
  * Use `create(SubscribePageRequestSchema)` to create a new message.
  */
 export const SubscribePageRequestSchema: GenMessage<SubscribePageRequest> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 8);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 9);
 
 /**
  * The subscription exists. It carries nothing: the acceptance IS the answer.
@@ -447,7 +480,7 @@ export type SubscribePageResponse = Message<"agentrepl.v1.SubscribePageResponse"
  * Use `create(SubscribePageResponseSchema)` to create a new message.
  */
 export const SubscribePageResponseSchema: GenMessage<SubscribePageResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 9);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 10);
 
 /**
  * Ends one subscription without disturbing the page's other ones.
@@ -471,7 +504,7 @@ export type UnsubscribePageRequest = Message<"agentrepl.v1.UnsubscribePageReques
  * Use `create(UnsubscribePageRequestSchema)` to create a new message.
  */
 export const UnsubscribePageRequestSchema: GenMessage<UnsubscribePageRequest> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 10);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 11);
 
 /**
  * The subscription is over. Unsubscribing one that does not exist is NOT a
@@ -488,5 +521,5 @@ export type UnsubscribePageResponse = Message<"agentrepl.v1.UnsubscribePageRespo
  * Use `create(UnsubscribePageResponseSchema)` to create a new message.
  */
 export const UnsubscribePageResponseSchema: GenMessage<UnsubscribePageResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 11);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 12);
 

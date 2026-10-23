@@ -1635,6 +1635,17 @@ one is a contract breach, never a reload to attempt."
        "DaemonReloadElisp"
        (list :module-root root :build build)))))
 
+(defun agent-repl-wire-decode-daemon-reload-webhost (value)
+  "Decode VALUE as `DaemonReloadWebhost', a plist `(:build)'.
+The build is REQUIRED: it is what the host is reloaded onto, and an empty
+one is a contract breach, never a reload to attempt."
+  (let ((object (agent-repl-wire--object "DaemonReloadWebhost" value)))
+    (agent-repl-wire--check-keys "DaemonReloadWebhost" object '(build))
+    (let ((build (agent-repl-wire--decode-string "DaemonReloadWebhost" 'build object)))
+      (when (string-empty-p build)
+        (agent-repl-wire--fail "DaemonReloadWebhost" 'build "required string is empty"))
+      (agent-repl-wire--decoded "DaemonReloadWebhost" (list :build build)))))
+
 (defun agent-repl-wire-decode-daemon-drain-cancelled (value)
   "Decode VALUE as the empty `DaemonDrainCancelled' — presence is the fact."
   (agent-repl-wire--decode-empty "DaemonDrainCancelled" value))
@@ -2177,7 +2188,8 @@ THE ARM IS THE FRAME; an unset one is a contract breach."
      (faultsStanding :faults-standing
                      agent-repl-wire-decode-watch-daemon-response-faults-standing)
      (persistentWifi :persistent-wifi
-                     agent-repl-wire-decode-watch-daemon-response-persistent-wifi))))
+                     agent-repl-wire-decode-watch-daemon-response-persistent-wifi)
+     (reloadWebhost :reload-webhost agent-repl-wire-decode-daemon-reload-webhost))))
 
 (defun agent-repl-wire-decode-watch-daemon-response-persistent-wifi (value)
   "Decode `WatchDaemonResponse''s `persistent_wifi' push arm VALUE.
@@ -2199,7 +2211,7 @@ UpdatePersistentWifiMode's success)."
     (agent-repl-wire--check-keys
      "WatchDaemonResponse" object
      '(shutdownAnnounced drainScheduled drainCancelled mutationProgress reloadElisp
-       ending faultsStanding persistentWifi))
+       ending faultsStanding persistentWifi reloadWebhost))
     (agent-repl-wire--decoded
      "WatchDaemonResponse"
      (agent-repl-wire-decode-watch-daemon-response-push object))))
