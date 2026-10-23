@@ -240,12 +240,13 @@ daemon runs with its metrics surface off."
 (defcustom agent-repl-daemon-multi-repo-config-dir
   (let ((dir (getenv "MULTI_REPO_CONFIG_DIR")))
     (expand-file-name (if (and (stringp dir) (not (string-empty-p dir))) dir "~/.claude-chesscom")))
-  "Vendor config root for workspaces UNDER `agent-repl-daemon-multi-repo-root\='.
+  "Vendor config root for workspaces UNDER `agent-repl-daemon-multi-repo-root'.
 Passed as `--multi-repo-config-dir\='.  Read from `MULTI_REPO_CONFIG_DIR\=',
 the same variable the installer links every global skill under, so the
-sessions this root serves have the skills the installer linked for them.  REQUIRED BY THE DAEMON for the same
-reason as `agent-repl-daemon-default-config-dir\=': the account is
-DETERMINED by the workspace path, so both roots must have an answer."
+sessions this root serves have the skills the installer linked for them.
+REQUIRED BY THE DAEMON for the same reason as
+`agent-repl-daemon-default-config-dir\=': the account is DETERMINED by the
+workspace path, so both roots must have an answer."
   :type 'string
   :group 'agent-repl)
 
