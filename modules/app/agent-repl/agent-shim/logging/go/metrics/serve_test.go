@@ -16,6 +16,8 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+
+	"agentrepl/logging/metrics/storeimport"
 )
 
 // errSink records every error the surface hands its caller.
@@ -372,5 +374,14 @@ func TestAPushThatCannotHappenIsRecordedAndTheListenerStillStops(t *testing.T) {
 				t.Fatalf("the listener still answers after Close")
 			}
 		})
+	}
+}
+
+// TestTheSurfacePushesThroughTheSharedStoreImport pins the one store file
+// every pusher reads: a runtime's final values and the test runner's timings
+// name the same file through storeimport.
+func TestTheSurfacePushesThroughTheSharedStoreImport(t *testing.T) {
+	if StoreFile != storeimport.File {
+		t.Fatalf("StoreFile = %q, storeimport.File = %q", StoreFile, storeimport.File)
 	}
 }
