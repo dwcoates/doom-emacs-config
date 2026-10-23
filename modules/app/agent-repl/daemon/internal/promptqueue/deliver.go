@@ -316,6 +316,15 @@ func (q *queue) mirrorAccepted(sub Submission) {
 	q.deps.Feed.UpsertAtTurnAddress(ws, turn, feedid.RowKey{Kind: feedid.KindPrompt, ID: string(turn)}, row)
 }
 
+// retractAccepted takes back the user_prompt row mirrorAccepted drew for TURN,
+// whose prompt is held again rather than delivered: the tray draws it now, and
+// the feed must not keep showing it as accepted. THE ONE RETRACTION of a
+// mirrored row, so every path that takes an accepted prompt back takes back the
+// same row.
+func (q *queue) retractAccepted(ws ids.WorkspaceID, turn ids.TurnID) {
+	q.deps.Feed.OnPromptRetired(ws, &conversationv1.AgentPrompt{Id: &conversationv1.TurnId{Value: string(turn)}})
+}
+
 // mirrorBlocks renders a submission's content as drawn blocks, through the
 // SAME function the feed resolver draws a replayed user prompt with. A live
 // session sees only this mirror -- nothing brings a delivered user prompt
@@ -354,7 +363,7 @@ func (q *queue) startTurn(ctx context.Context, sender Sender, sub Submission, lo
 // prompt waits under the reconnect hold -- its standing hold re-stamped, or a
 // new one recorded -- for the session's coming up to deliver it.
 func (q *queue) holdForReconnect(ctx context.Context, sub Submission, cause error, log dlog.Logger) (Disposition, error) {
-	q.deps.Feed.OnPromptRetired(sub.WS, &conversationv1.AgentPrompt{Id: &conversationv1.TurnId{Value: string(sub.Turn)}})
+	q.retractAccepted(sub.WS, sub.Turn)
 	why := "the shim holds no session; the prompt is held until the session reconnects"
 	switch {
 	case errors.Is(cause, ErrShimDied):
