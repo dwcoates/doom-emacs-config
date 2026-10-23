@@ -86,6 +86,13 @@ workspace's own.")
 (defvar agent-repl--webhost-gate-docks (make-hash-table :test #'equal)
   "Workspace id -> (PIXELS . BACKGROUND), the slot its docked gate takes.")
 
+(defvar agent-repl--webhost-reload-started-ms nil
+  "When the host reload now loading began, in epoch ms, or nil.
+Set when a reload navigates the host (`agent-repl--webhost-reload-now') and
+handed with every page the next replay loads, then cleared: each page
+measures how long it stood blank from it (`reload_blank').  Nil for the
+host's first load, which is the editor starting, not a reload.")
+
 (defvar agent-repl--webhost-held-ingress (make-hash-table :test #'equal)
   "Workspace id -> the vector of its held-prompt ingress entries the page draws
 while it cannot reach the daemon (`agent-repl-webhost-set-held-ingress').")
@@ -400,9 +407,10 @@ should be held at, WS's new one included.  Every page of a handover
 reloads anyway, so nothing more is reloaded than the handover already
 reloads."
   (let* ((url (agent-repl-frontend-webview-url ws))
-         (id (agent-repl--webhost-id ws)))
+         (id (agent-repl--webhost-id ws))
+         (started (agent-repl--now-unix-ms)))
     (if (equal (gethash id agent-repl--webhost-pages) url)
-        (agent-repl--webhost-call "reload" id)
+        (agent-repl--webhost-call "reload" id started)
       (puthash id url agent-repl--webhost-pages)
       (let* ((conn (agent-repl-host-conn ws))
              (host-url (and agent-repl--webhost-url (agent-repl-webhost-url conn))))
@@ -411,7 +419,7 @@ reloads."
               (agent-repl--info ws "elisp.webhost.follows-daemon ws=%s from=%s to=%s"
                                 ws agent-repl--webhost-url host-url)
               (agent-repl-webhost-reload conn))
-          (agent-repl--webhost-call "ensure" id url))))
+          (agent-repl--webhost-call "ensure" id url nil started))))
     (agent-repl--info ws "elisp.webhost.page-reloaded ws=%s id=%s" ws id)
     id))
 
@@ -495,11 +503,11 @@ order given."
 
 (defun agent-repl--webhost-replay-page (id lane)
   "Hand the host page ID and its state.
-Given a LANE, the host loads it once the pages before it in LANE have drawn."
+Given a LANE, the host loads it once the pages before it in LANE have drawn.
+A replay after a reload hands the reload's start with the page
+\(`agent-repl--webhost-reload-started-ms')."
   (when-let ((url (gethash id agent-repl--webhost-pages)))
-    (if lane
-        (agent-repl--webhost-call "ensure" id url lane)
-      (agent-repl--webhost-call "ensure" id url))
+    (agent-repl--webhost-call "ensure" id url lane agent-repl--webhost-reload-started-ms)
     (when-let ((background (gethash id agent-repl--webhost-input-backgrounds)))
       (agent-repl--webhost-call "setInputBackground" id background))
     (when-let ((dock (gethash id agent-repl--webhost-gate-docks)))
@@ -540,8 +548,12 @@ out (`agent-repl-host-adopting-p')."
         (agent-repl--webhost-replay-page id "after"))
       (dolist (id (cdr lanes))
         (agent-repl--webhost-replay-page id "before"))
-      (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn after=%d before=%d adopting=%d"
-                        (length (car lanes)) (length (cdr lanes)) (length adopting))))
+      (agent-repl--info agent-repl--webhost-central "elisp.webhost.replay-in-turn after=%d before=%d adopting=%d reload-started-ms=%s"
+                        (length (car lanes)) (length (cdr lanes)) (length adopting)
+                        agent-repl--webhost-reload-started-ms)))
+  ;; THE RELOAD'S START WAS HANDED WITH THIS REPLAY'S PAGES; a later load is
+  ;; not this reload's.
+  (setq agent-repl--webhost-reload-started-ms nil)
   (when (and agent-repl--webhost-log-level
              (> (cdr agent-repl--webhost-log-level) (agent-repl--now-unix-ms)))
     (agent-repl--webhost-call "setLogLevel" (symbol-name (car agent-repl--webhost-log-level))
@@ -552,7 +564,8 @@ out (`agent-repl-host-adopting-p')."
   (setq agent-repl--webhost-reload-timer nil)
   (if-let ((xw (agent-repl-webhost-xwidget)))
       (progn
-        (setq agent-repl--webhost-url (agent-repl-webhost-url conn))
+        (setq agent-repl--webhost-url (agent-repl-webhost-url conn)
+              agent-repl--webhost-reload-started-ms (agent-repl--now-unix-ms))
         (agent-repl--frontend-webview-navigate-widget xw agent-repl--webhost-url)
         (agent-repl--info agent-repl--webhost-central "elisp.webhost.reloaded pages=%d"
                           (hash-table-count agent-repl--webhost-pages)))

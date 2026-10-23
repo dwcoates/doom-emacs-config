@@ -97,6 +97,13 @@ interface Frame {
    * the presence its hello replays, then forgotten.
    */
   pendingSwitchStartedAtMs: number | null;
+  /**
+   * When the reload that loads the page now in the frame began
+   * (reloadStartedAtMs), while that page has not said hello yet: handed over
+   * with the presence its hello replays, then forgotten. Null for a page no
+   * reload loaded.
+   */
+  pendingReloadStartedAtMs: number | null;
 }
 
 /** The host's API, as Emacs calls it through `window.agentReplHost`. */
@@ -107,8 +114,11 @@ export interface Host {
    * before it in that lane has drawn (see `createHost`'s pacing), or at once
    * if it is shown first. Without one it loads at once. A page re-pointed
    * at a new URL loads at once in a fresh frame, whatever LANE says.
+   * RELOAD_STARTED_AT_MS is when the reload that asks for the page began
+   * (the presence message's reloadStartedAtMs), null when no reload asks: it
+   * is handed to a page this call loads, and to nothing else.
    */
-  ensure(id: string, url: string, lane?: string): string;
+  ensure(id: string, url: string, lane?: string | null, reloadStartedAtMs?: number | null): string;
   /**
    * Show workspace ID's page and hide every other. SWITCH_STARTED_AT_MS is
    * when the user's switch that asked for it began (the presence message's
@@ -119,8 +129,11 @@ export interface Host {
   onShown(listener: (id: string) => void): () => void;
   /** Drop workspace ID's page. */
   remove(id: string): string;
-  /** Load workspace ID's page again from its URL. */
-  reload(id: string): string;
+  /**
+   * Load workspace ID's page again from its URL. RELOAD_STARTED_AT_MS is when
+   * the reload began, handed to the page it loads.
+   */
+  reload(id: string, reloadStartedAtMs?: number | null): string;
   /** Tell ID's page the background its Emacs input window paints. */
   setInputBackground(id: string, background: string): string;
   /** Tell ID's page the slot its docked gate takes. */
@@ -236,11 +249,16 @@ export function createHost(env: HostEnv): Host {
     target.postMessage(message, "*");
   };
 
-  const presenceOf = (frame: Frame, switchStartedAtMs: number | null = null): HostToPage => ({
+  const presenceOf = (
+    frame: Frame,
+    switchStartedAtMs: number | null = null,
+    reloadStartedAtMs: number | null = null,
+  ): HostToPage => ({
     channel: HOST_CHANNEL,
     kind: "presence",
     shown: frame.id === shownId,
     ...(switchStartedAtMs === null ? {} : { switchStartedAtMs }),
+    ...(reloadStartedAtMs === null ? {} : { reloadStartedAtMs }),
   });
 
   /** Whether the sidebar is docked over the pages, as every page is told. */
@@ -262,7 +280,11 @@ export function createHost(env: HostEnv): Host {
     // A SWITCH THE PAGE MISSED WHILE IT LOADED is handed over once, here.
     const switchStartedAtMs = frame.id === shownId ? frame.pendingSwitchStartedAtMs : null;
     frame.pendingSwitchStartedAtMs = null;
-    post(frame, presenceOf(frame, switchStartedAtMs));
+    // SO IS THE RELOAD THAT LOADED IT, shown or not: the page decides, once it
+    // has drawn, whether anyone saw it blank.
+    const reloadStartedAtMs = frame.pendingReloadStartedAtMs;
+    frame.pendingReloadStartedAtMs = null;
+    post(frame, presenceOf(frame, switchStartedAtMs, reloadStartedAtMs));
     post(frame, dockMessage());
     post(frame, failuresMessage());
     if (frame.inputBackground !== null) {
@@ -467,6 +489,7 @@ export function createHost(env: HostEnv): Host {
       gateBand: 0,
       attached: false,
       pendingSwitchStartedAtMs: null,
+      pendingReloadStartedAtMs: null,
     };
     frames.set(id, frame);
     frameParent.append(iframe);
@@ -488,11 +511,12 @@ export function createHost(env: HostEnv): Host {
   };
 
   return {
-    ensure(id, url, lane) {
+    ensure(id, url, lane, reloadStartedAtMs = null) {
       const frame = frames.get(id);
+      const laneName = lane ?? undefined;
       if (frame === undefined) {
-        create(id, url, lane);
-        const queued = lane !== undefined && laneNamed(lane).waiting.includes(id);
+        create(id, url, laneName).pendingReloadStartedAtMs = reloadStartedAtMs;
+        const queued = laneName !== undefined && laneNamed(laneName).waiting.includes(id);
         return answer("ensure", id, queued ? "queued" : "created");
       }
       if (frame.url === url) return answer("ensure", id, "unchanged");
@@ -516,6 +540,7 @@ export function createHost(env: HostEnv): Host {
       fresh.heldIngress = frame.heldIngress;
       fresh.gateBand = frame.gateBand;
       fresh.pendingSwitchStartedAtMs = frame.pendingSwitchStartedAtMs;
+      fresh.pendingReloadStartedAtMs = reloadStartedAtMs;
       return answer("ensure", id, "navigated");
     },
     show(id, switchStartedAtMs = null) {
@@ -563,11 +588,12 @@ export function createHost(env: HostEnv): Host {
         return "removed";
       });
     },
-    reload(id) {
+    reload(id, reloadStartedAtMs = null) {
       return withFrame("reload", id, (frame) => {
         resetFacts(frame);
         frame.attached = false;
         frame.pendingSwitchStartedAtMs = null;
+        frame.pendingReloadStartedAtMs = reloadStartedAtMs;
         frame.iframe.src = frame.url;
         return "reloaded";
       });

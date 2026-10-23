@@ -100,6 +100,8 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
             context: { shown: message.shown, visibility: doc.visibilityState },
           });
         }
+        // THE RELOAD FIRST, so a show it rides with already knows it.
+        if (message.reloadStartedAtMs !== undefined) presence.setReloadStartedAt(message.reloadStartedAtMs);
         presence.setShown(message.shown, message.switchStartedAtMs ?? null);
         return;
       case "inputBackground":

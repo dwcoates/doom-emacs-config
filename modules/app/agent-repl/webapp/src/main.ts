@@ -70,6 +70,8 @@ import { installPageDrawnReport } from "./page-drawn-report.js";
 import { installLatencyReport, REPORT_LATENCIES_RESPONSE, reportLatenciesRequest } from "./latency-report.js";
 import { callUnary } from "./rpc/unary.js";
 import { pageSwitchLatencyEnv, watchPageBoot, watchSwitchLatency } from "./switch-latency.js";
+import { watchReloadBlank } from "./reload-blank.js";
+import { watchPageStall } from "./page-stall.js";
 import { createPromptEcho, installPromptEcho } from "./prompt-echo.js";
 import { createPageSeen } from "./page-seen.js";
 import { createAgentReplClient } from "./rpc/client.js";
@@ -225,7 +227,20 @@ export async function boot(): Promise<void> {
     watchPageBoot(bootedAtMs, latencyEnv, (kind, seconds) => latencies.record(kind, seconds));
     if (pagePresence().embedded) {
       watchSwitchLatency(pagePresence(), latencyEnv, (kind, seconds) => latencies.record(kind, seconds));
+      watchReloadBlank(pagePresence(), latencyEnv, (kind, seconds) => latencies.record(kind, seconds));
     }
+    // A STALL OF THIS PAGE'S MAIN THREAD while it is seen (page-stall.ts).
+    watchPageStall(
+      pagePresence(),
+      {
+        now: () => performance.now(),
+        every: (fn, ms) => {
+          const timer = window.setInterval(fn, ms);
+          return () => window.clearInterval(timer);
+        },
+      },
+      (kind, seconds) => latencies.record(kind, seconds),
+    );
     // A PROMPT'S ECHO ends at its row drawn here (prompt-echo.ts).
     const promptEcho = createPromptEcho(latencyEnv.wallNow, (kind, seconds) => latencies.record(kind, seconds));
     installPromptEcho(promptEcho);

@@ -157,6 +157,27 @@ describe("presence switch start", () => {
     // Assert
     expect(presence.switchStartedAt()).toBeNull();
   });
+
+  it("knows no reload start until the host names one", () => {
+    // Act
+    presence = createPresence(document, true);
+
+    // Assert
+    expect(presence.reloadStartedAt()).toBeNull();
+  });
+
+  it("keeps the reload start the host named, through a hide", () => {
+    // Arrange
+    presence = createPresence(document, true);
+    presence.setReloadStartedAt(1_700_000_000_500);
+
+    // Act
+    presence.setShown(true);
+    presence.setShown(false);
+
+    // Assert
+    expect(presence.reloadStartedAt()).toBe(1_700_000_000_500);
+  });
 });
 
 describe("pageIsEmbedded", () => {

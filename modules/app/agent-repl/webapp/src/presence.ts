@@ -41,6 +41,11 @@ export interface Presence {
    * the page is hidden. Set before listeners hear the show.
    */
   switchStartedAt(): number | null;
+  /**
+   * When the reload that loaded this page began (wall-clock Unix
+   * milliseconds), or null when no reload loaded it.
+   */
+  reloadStartedAt(): number | null;
 }
 
 /** The presence plus the one writer the host link holds. */
@@ -50,6 +55,8 @@ export interface PresenceSource extends Presence {
    * made carries when that switch began (switchStartedAt).
    */
   setShown(shown: boolean, switchStartedAtMs?: number | null): void;
+  /** The host said a reload that began at STARTEDATMS loaded this page. */
+  setReloadStartedAt(startedAtMs: number): void;
   /** Stop listening to the document. */
   dispose(): void;
 }
@@ -61,6 +68,7 @@ export interface PresenceSource extends Presence {
 export function createPresence(doc: Document, embedded: boolean): PresenceSource {
   let hostShown = !embedded;
   let switchStartedAtMs: number | null = null;
+  let reloadStartedAtMs: number | null = null;
   const listeners = new Set<PresenceListener>();
   const visible = (): boolean => doc.visibilityState === "visible";
   const seen = (): boolean => hostShown && visible();
@@ -75,6 +83,7 @@ export function createPresence(doc: Document, embedded: boolean): PresenceSource
     seen,
     shown: () => hostShown,
     switchStartedAt: () => switchStartedAtMs,
+    reloadStartedAt: () => reloadStartedAtMs,
     onChange(listener) {
       listeners.add(listener);
       return () => {
@@ -86,6 +95,9 @@ export function createPresence(doc: Document, embedded: boolean): PresenceSource
       hostShown = shown;
       switchStartedAtMs = shown ? startedAtMs : null;
       tell("host");
+    },
+    setReloadStartedAt(startedAtMs) {
+      reloadStartedAtMs = startedAtMs;
     },
     dispose() {
       doc.removeEventListener("visibilitychange", onVisibility);
