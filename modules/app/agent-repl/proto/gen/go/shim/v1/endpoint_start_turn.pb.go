@@ -82,6 +82,9 @@ type StartTurnRequest struct {
 	//     vendor runs the prompt as its next turn. Its prompt row is written the
 	//     moment the running turn closes, as this turn's first row, and the turn
 	//     runs under this request's id and origin like any other.
+	//   - WITHDRAWN: an ask opened while the prompt still waited in the
+	//     vendor's queue, and the vendor gave it back. No prompt row is ever
+	//     written for it, and conversation.v1.SessionJoinWithdrawn states it.
 	//
 	// The success answers the moment the prompt is pushed; its page is read
 	// then, before either fate. With no turn of the daemon's open, the flag
@@ -477,6 +480,7 @@ type StartTurnFailure struct {
 	//	*StartTurnFailure_NoSession
 	//	*StartTurnFailure_VendorRefused
 	//	*StartTurnFailure_QueryDead
+	//	*StartTurnFailure_AskOpen
 	Kind          isStartTurnFailure_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -562,6 +566,15 @@ func (x *StartTurnFailure) GetQueryDead() *StartTurnQueryDead {
 	return nil
 }
 
+func (x *StartTurnFailure) GetAskOpen() *StartTurnAskOpen {
+	if x != nil {
+		if x, ok := x.Kind.(*StartTurnFailure_AskOpen); ok {
+			return x.AskOpen
+		}
+	}
+	return nil
+}
+
 type isStartTurnFailure_Kind interface {
 	isStartTurnFailure_Kind()
 }
@@ -603,6 +616,17 @@ type StartTurnFailure_QueryDead struct {
 	QueryDead *StartTurnQueryDead `protobuf:"bytes,5,opt,name=query_dead,json=queryDead,proto3,oneof"`
 }
 
+type StartTurnFailure_AskOpen struct {
+	// A `join_running_turn` start refused because an ASK IS OPEN: a question
+	// batch or a permission ask blocks the vendor, so the prompt could join
+	// the running turn only once the user answered it. The prompt is never
+	// pushed; the daemon keeps it held for the running turn's end. Only a
+	// `join_running_turn` start is refused under this arm. A prompt already
+	// waiting to join when an ask opens is taken back instead
+	// (conversation.v1.SessionJoinWithdrawn).
+	AskOpen *StartTurnAskOpen `protobuf:"bytes,6,opt,name=ask_open,json=askOpen,proto3,oneof"`
+}
+
 func (*StartTurnFailure_TurnAlreadyOpen) isStartTurnFailure_Kind() {}
 
 func (*StartTurnFailure_NoSession) isStartTurnFailure_Kind() {}
@@ -610,6 +634,8 @@ func (*StartTurnFailure_NoSession) isStartTurnFailure_Kind() {}
 func (*StartTurnFailure_VendorRefused) isStartTurnFailure_Kind() {}
 
 func (*StartTurnFailure_QueryDead) isStartTurnFailure_Kind() {}
+
+func (*StartTurnFailure_AskOpen) isStartTurnFailure_Kind() {}
 
 type StartTurnTurnAlreadyOpen struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -755,6 +781,42 @@ func (*StartTurnQueryDead) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_start_turn_proto_rawDescGZIP(), []int{8}
 }
 
+type StartTurnAskOpen struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartTurnAskOpen) Reset() {
+	*x = StartTurnAskOpen{}
+	mi := &file_shim_v1_endpoint_start_turn_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartTurnAskOpen) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartTurnAskOpen) ProtoMessage() {}
+
+func (x *StartTurnAskOpen) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_start_turn_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartTurnAskOpen.ProtoReflect.Descriptor instead.
+func (*StartTurnAskOpen) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_start_turn_proto_rawDescGZIP(), []int{9}
+}
+
 // Open the turn's page with no history. DELIBERATELY EMPTY: the arm's
 // presence is the whole instruction.
 type StartTurnTailOnly struct {
@@ -765,7 +827,7 @@ type StartTurnTailOnly struct {
 
 func (x *StartTurnTailOnly) Reset() {
 	*x = StartTurnTailOnly{}
-	mi := &file_shim_v1_endpoint_start_turn_proto_msgTypes[9]
+	mi := &file_shim_v1_endpoint_start_turn_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -777,7 +839,7 @@ func (x *StartTurnTailOnly) String() string {
 func (*StartTurnTailOnly) ProtoMessage() {}
 
 func (x *StartTurnTailOnly) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_start_turn_proto_msgTypes[9]
+	mi := &file_shim_v1_endpoint_start_turn_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -790,7 +852,7 @@ func (x *StartTurnTailOnly) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartTurnTailOnly.ProtoReflect.Descriptor instead.
 func (*StartTurnTailOnly) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_start_turn_proto_rawDescGZIP(), []int{9}
+	return file_shim_v1_endpoint_start_turn_proto_rawDescGZIP(), []int{10}
 }
 
 var File_shim_v1_endpoint_start_turn_proto protoreflect.FileDescriptor
@@ -821,7 +883,7 @@ const file_shim_v1_endpoint_start_turn_proto_rawDesc = "" +
 	"\x06result\"z\n" +
 	"\x10StartTurnSuccess\x124\n" +
 	"\x06prompt\x18\x01 \x01(\v2\x1c.conversation.v1.AgentPromptR\x06prompt\x120\n" +
-	"\x04page\x18\x02 \x01(\v2\x1c.conversation.v1.HistoryPageR\x04page\"\xc9\x02\n" +
+	"\x04page\x18\x02 \x01(\v2\x1c.conversation.v1.HistoryPageR\x04page\"\x81\x03\n" +
 	"\x10StartTurnFailure\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12O\n" +
 	"\x11turn_already_open\x18\x02 \x01(\v2!.shim.v1.StartTurnTurnAlreadyOpenH\x00R\x0fturnAlreadyOpen\x12<\n" +
@@ -829,12 +891,14 @@ const file_shim_v1_endpoint_start_turn_proto_rawDesc = "" +
 	"no_session\x18\x03 \x01(\v2\x1b.shim.v1.StartTurnNoSessionH\x00R\tnoSession\x12H\n" +
 	"\x0evendor_refused\x18\x04 \x01(\v2\x1f.shim.v1.StartTurnVendorRefusedH\x00R\rvendorRefused\x12<\n" +
 	"\n" +
-	"query_dead\x18\x05 \x01(\v2\x1b.shim.v1.StartTurnQueryDeadH\x00R\tqueryDeadB\x06\n" +
+	"query_dead\x18\x05 \x01(\v2\x1b.shim.v1.StartTurnQueryDeadH\x00R\tqueryDead\x126\n" +
+	"\bask_open\x18\x06 \x01(\v2\x19.shim.v1.StartTurnAskOpenH\x00R\aaskOpenB\x06\n" +
 	"\x04kind\"+\n" +
 	"\x18StartTurnTurnAlreadyOpenJ\x04\b\x01\x10\x02R\tkeepalive\"\x14\n" +
 	"\x12StartTurnNoSession\"\x18\n" +
 	"\x16StartTurnVendorRefused\"\x14\n" +
-	"\x12StartTurnQueryDead\"\x13\n" +
+	"\x12StartTurnQueryDead\"\x12\n" +
+	"\x10StartTurnAskOpen\"\x13\n" +
 	"\x11StartTurnTailOnlyB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
@@ -849,7 +913,7 @@ func file_shim_v1_endpoint_start_turn_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_start_turn_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_start_turn_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_shim_v1_endpoint_start_turn_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_shim_v1_endpoint_start_turn_proto_goTypes = []any{
 	(*StartTurnRequest)(nil),         // 0: shim.v1.StartTurnRequest
 	(*StartTurnSentBy)(nil),          // 1: shim.v1.StartTurnSentBy
@@ -860,36 +924,38 @@ var file_shim_v1_endpoint_start_turn_proto_goTypes = []any{
 	(*StartTurnNoSession)(nil),       // 6: shim.v1.StartTurnNoSession
 	(*StartTurnVendorRefused)(nil),   // 7: shim.v1.StartTurnVendorRefused
 	(*StartTurnQueryDead)(nil),       // 8: shim.v1.StartTurnQueryDead
-	(*StartTurnTailOnly)(nil),        // 9: shim.v1.StartTurnTailOnly
-	(*v1.TurnId)(nil),                // 10: conversation.v1.TurnId
-	(*v1.UserSaid)(nil),              // 11: conversation.v1.UserSaid
-	(v1.PromptOrigin)(0),             // 12: conversation.v1.PromptOrigin
-	(*v1.HistoryPointer)(nil),        // 13: conversation.v1.HistoryPointer
-	(*v1.AgentPermissionMode)(nil),   // 14: conversation.v1.AgentPermissionMode
-	(*v1.AgentPrompt)(nil),           // 15: conversation.v1.AgentPrompt
-	(*v1.HistoryPage)(nil),           // 16: conversation.v1.HistoryPage
+	(*StartTurnAskOpen)(nil),         // 9: shim.v1.StartTurnAskOpen
+	(*StartTurnTailOnly)(nil),        // 10: shim.v1.StartTurnTailOnly
+	(*v1.TurnId)(nil),                // 11: conversation.v1.TurnId
+	(*v1.UserSaid)(nil),              // 12: conversation.v1.UserSaid
+	(v1.PromptOrigin)(0),             // 13: conversation.v1.PromptOrigin
+	(*v1.HistoryPointer)(nil),        // 14: conversation.v1.HistoryPointer
+	(*v1.AgentPermissionMode)(nil),   // 15: conversation.v1.AgentPermissionMode
+	(*v1.AgentPrompt)(nil),           // 16: conversation.v1.AgentPrompt
+	(*v1.HistoryPage)(nil),           // 17: conversation.v1.HistoryPage
 }
 var file_shim_v1_endpoint_start_turn_proto_depIdxs = []int32{
-	10, // 0: shim.v1.StartTurnRequest.turn:type_name -> conversation.v1.TurnId
-	11, // 1: shim.v1.StartTurnRequest.said:type_name -> conversation.v1.UserSaid
-	12, // 2: shim.v1.StartTurnRequest.origin:type_name -> conversation.v1.PromptOrigin
-	13, // 3: shim.v1.StartTurnRequest.known_through:type_name -> conversation.v1.HistoryPointer
-	9,  // 4: shim.v1.StartTurnRequest.tail_only:type_name -> shim.v1.StartTurnTailOnly
+	11, // 0: shim.v1.StartTurnRequest.turn:type_name -> conversation.v1.TurnId
+	12, // 1: shim.v1.StartTurnRequest.said:type_name -> conversation.v1.UserSaid
+	13, // 2: shim.v1.StartTurnRequest.origin:type_name -> conversation.v1.PromptOrigin
+	14, // 3: shim.v1.StartTurnRequest.known_through:type_name -> conversation.v1.HistoryPointer
+	10, // 4: shim.v1.StartTurnRequest.tail_only:type_name -> shim.v1.StartTurnTailOnly
 	1,  // 5: shim.v1.StartTurnRequest.sent_by:type_name -> shim.v1.StartTurnSentBy
-	14, // 6: shim.v1.StartTurnSentBy.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	15, // 6: shim.v1.StartTurnSentBy.permission_mode:type_name -> conversation.v1.AgentPermissionMode
 	3,  // 7: shim.v1.StartTurnResponse.success:type_name -> shim.v1.StartTurnSuccess
 	4,  // 8: shim.v1.StartTurnResponse.failure:type_name -> shim.v1.StartTurnFailure
-	15, // 9: shim.v1.StartTurnSuccess.prompt:type_name -> conversation.v1.AgentPrompt
-	16, // 10: shim.v1.StartTurnSuccess.page:type_name -> conversation.v1.HistoryPage
+	16, // 9: shim.v1.StartTurnSuccess.prompt:type_name -> conversation.v1.AgentPrompt
+	17, // 10: shim.v1.StartTurnSuccess.page:type_name -> conversation.v1.HistoryPage
 	5,  // 11: shim.v1.StartTurnFailure.turn_already_open:type_name -> shim.v1.StartTurnTurnAlreadyOpen
 	6,  // 12: shim.v1.StartTurnFailure.no_session:type_name -> shim.v1.StartTurnNoSession
 	7,  // 13: shim.v1.StartTurnFailure.vendor_refused:type_name -> shim.v1.StartTurnVendorRefused
 	8,  // 14: shim.v1.StartTurnFailure.query_dead:type_name -> shim.v1.StartTurnQueryDead
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	9,  // 15: shim.v1.StartTurnFailure.ask_open:type_name -> shim.v1.StartTurnAskOpen
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_start_turn_proto_init() }
@@ -911,6 +977,7 @@ func file_shim_v1_endpoint_start_turn_proto_init() {
 		(*StartTurnFailure_NoSession)(nil),
 		(*StartTurnFailure_VendorRefused)(nil),
 		(*StartTurnFailure_QueryDead)(nil),
+		(*StartTurnFailure_AskOpen)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -918,7 +985,7 @@ func file_shim_v1_endpoint_start_turn_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_start_turn_proto_rawDesc), len(file_shim_v1_endpoint_start_turn_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

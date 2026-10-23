@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_start_turn.proto.
  */
 export const file_shim_v1_endpoint_start_turn: GenFile = /*@__PURE__*/
-  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEiiAMKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEjgKDWtub3duX3Rocm91Z2gYBSABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXJIABIvCgl0YWlsX29ubHkYCCABKAsyGi5zaGltLnYxLlN0YXJ0VHVyblRhaWxPbmx5SAASGQoRam9pbl9ydW5uaW5nX3R1cm4YBiABKAgSGAoLdmVuZG9yX25vdGUYByABKAlIAYgBARIpCgdzZW50X2J5GAkgASgLMhguc2hpbS52MS5TdGFydFR1cm5TZW50QnlCCQoHb3BlbmluZ0IOCgxfdmVuZG9yX25vdGVKBAgEEAVSCXBhZ2Vfc2l6ZSKWAQoPU3RhcnRUdXJuU2VudEJ5EhQKDHdvcmtzcGFjZV9pZBgBIAEoCRIbCg53b3Jrc3BhY2VfbmFtZRgCIAEoCUgAiAEBEj0KD3Blcm1pc3Npb25fbW9kZRgDIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlQhEKD193b3Jrc3BhY2VfbmFtZSJ5ChFTdGFydFR1cm5SZXNwb25zZRIsCgdzdWNjZXNzGAEgASgLMhkuc2hpbS52MS5TdGFydFR1cm5TdWNjZXNzSAASLAoHZmFpbHVyZRgCIAEoCzIZLnNoaW0udjEuU3RhcnRUdXJuRmFpbHVyZUgAQggKBnJlc3VsdCJsChBTdGFydFR1cm5TdWNjZXNzEiwKBnByb21wdBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdBIqCgRwYWdlGAIgASgLMhwuY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQYWdlIosCChBTdGFydFR1cm5GYWlsdXJlEg4KBmRldGFpbBgBIAEoCRI+ChF0dXJuX2FscmVhZHlfb3BlbhgCIAEoCzIhLnNoaW0udjEuU3RhcnRUdXJuVHVybkFscmVhZHlPcGVuSAASMQoKbm9fc2Vzc2lvbhgDIAEoCzIbLnNoaW0udjEuU3RhcnRUdXJuTm9TZXNzaW9uSAASOQoOdmVuZG9yX3JlZnVzZWQYBCABKAsyHy5zaGltLnYxLlN0YXJ0VHVyblZlbmRvclJlZnVzZWRIABIxCgpxdWVyeV9kZWFkGAUgASgLMhsuc2hpbS52MS5TdGFydFR1cm5RdWVyeURlYWRIAEIGCgRraW5kIisKGFN0YXJ0VHVyblR1cm5BbHJlYWR5T3BlbkoECAEQAlIJa2VlcGFsaXZlIhQKElN0YXJ0VHVybk5vU2Vzc2lvbiIYChZTdGFydFR1cm5WZW5kb3JSZWZ1c2VkIhQKElN0YXJ0VHVyblF1ZXJ5RGVhZCITChFTdGFydFR1cm5UYWlsT25seUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_history, file_conversation_v1_permission, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
+  fileDesc("CiFzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3R1cm4ucHJvdG8SB3NoaW0udjEiiAMKEFN0YXJ0VHVyblJlcXVlc3QSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBItCgZvcmlnaW4YAyABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luEjgKDWtub3duX3Rocm91Z2gYBSABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXJIABIvCgl0YWlsX29ubHkYCCABKAsyGi5zaGltLnYxLlN0YXJ0VHVyblRhaWxPbmx5SAASGQoRam9pbl9ydW5uaW5nX3R1cm4YBiABKAgSGAoLdmVuZG9yX25vdGUYByABKAlIAYgBARIpCgdzZW50X2J5GAkgASgLMhguc2hpbS52MS5TdGFydFR1cm5TZW50QnlCCQoHb3BlbmluZ0IOCgxfdmVuZG9yX25vdGVKBAgEEAVSCXBhZ2Vfc2l6ZSKWAQoPU3RhcnRUdXJuU2VudEJ5EhQKDHdvcmtzcGFjZV9pZBgBIAEoCRIbCg53b3Jrc3BhY2VfbmFtZRgCIAEoCUgAiAEBEj0KD3Blcm1pc3Npb25fbW9kZRgDIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlQhEKD193b3Jrc3BhY2VfbmFtZSJ5ChFTdGFydFR1cm5SZXNwb25zZRIsCgdzdWNjZXNzGAEgASgLMhkuc2hpbS52MS5TdGFydFR1cm5TdWNjZXNzSAASLAoHZmFpbHVyZRgCIAEoCzIZLnNoaW0udjEuU3RhcnRUdXJuRmFpbHVyZUgAQggKBnJlc3VsdCJsChBTdGFydFR1cm5TdWNjZXNzEiwKBnByb21wdBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdBIqCgRwYWdlGAIgASgLMhwuY29udmVyc2F0aW9uLnYxLkhpc3RvcnlQYWdlIroCChBTdGFydFR1cm5GYWlsdXJlEg4KBmRldGFpbBgBIAEoCRI+ChF0dXJuX2FscmVhZHlfb3BlbhgCIAEoCzIhLnNoaW0udjEuU3RhcnRUdXJuVHVybkFscmVhZHlPcGVuSAASMQoKbm9fc2Vzc2lvbhgDIAEoCzIbLnNoaW0udjEuU3RhcnRUdXJuTm9TZXNzaW9uSAASOQoOdmVuZG9yX3JlZnVzZWQYBCABKAsyHy5zaGltLnYxLlN0YXJ0VHVyblZlbmRvclJlZnVzZWRIABIxCgpxdWVyeV9kZWFkGAUgASgLMhsuc2hpbS52MS5TdGFydFR1cm5RdWVyeURlYWRIABItCghhc2tfb3BlbhgGIAEoCzIZLnNoaW0udjEuU3RhcnRUdXJuQXNrT3BlbkgAQgYKBGtpbmQiKwoYU3RhcnRUdXJuVHVybkFscmVhZHlPcGVuSgQIARACUglrZWVwYWxpdmUiFAoSU3RhcnRUdXJuTm9TZXNzaW9uIhgKFlN0YXJ0VHVyblZlbmRvclJlZnVzZWQiFAoSU3RhcnRUdXJuUXVlcnlEZWFkIhIKEFN0YXJ0VHVybkFza09wZW4iEwoRU3RhcnRUdXJuVGFpbE9ubHlCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_history, file_conversation_v1_permission, file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin]);
 
 /**
  * The prompt the daemon is handing over NOW. Nothing here is a queue entry:
@@ -120,6 +120,9 @@ export type StartTurnRequest = Message<"shim.v1.StartTurnRequest"> & {
    *     vendor runs the prompt as its next turn. Its prompt row is written the
    *     moment the running turn closes, as this turn's first row, and the turn
    *     runs under this request's id and origin like any other.
+   *   - WITHDRAWN: an ask opened while the prompt still waited in the
+   *     vendor's queue, and the vendor gave it back. No prompt row is ever
+   *     written for it, and conversation.v1.SessionJoinWithdrawn states it.
    * The success answers the moment the prompt is pushed; its page is read
    * then, before either fate. With no turn of the daemon's open, the flag
    * changes nothing: the prompt starts its turn as any StartTurn does.
@@ -360,6 +363,20 @@ export type StartTurnFailure = Message<"shim.v1.StartTurnFailure"> & {
      */
     value: StartTurnQueryDead;
     case: "queryDead";
+  } | {
+    /**
+     * A `join_running_turn` start refused because an ASK IS OPEN: a question
+     * batch or a permission ask blocks the vendor, so the prompt could join
+     * the running turn only once the user answered it. The prompt is never
+     * pushed; the daemon keeps it held for the running turn's end. Only a
+     * `join_running_turn` start is refused under this arm. A prompt already
+     * waiting to join when an ask opens is taken back instead
+     * (conversation.v1.SessionJoinWithdrawn).
+     *
+     * @generated from field: shim.v1.StartTurnAskOpen ask_open = 6;
+     */
+    value: StartTurnAskOpen;
+    case: "askOpen";
   } | { case: undefined; value?: undefined };
 };
 
@@ -423,6 +440,19 @@ export const StartTurnQueryDeadSchema: GenMessage<StartTurnQueryDead> = /*@__PUR
   messageDesc(file_shim_v1_endpoint_start_turn, 8);
 
 /**
+ * @generated from message shim.v1.StartTurnAskOpen
+ */
+export type StartTurnAskOpen = Message<"shim.v1.StartTurnAskOpen"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartTurnAskOpen.
+ * Use `create(StartTurnAskOpenSchema)` to create a new message.
+ */
+export const StartTurnAskOpenSchema: GenMessage<StartTurnAskOpen> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_turn, 9);
+
+/**
  * Open the turn's page with no history. DELIBERATELY EMPTY: the arm's
  * presence is the whole instruction.
  *
@@ -436,5 +466,5 @@ export type StartTurnTailOnly = Message<"shim.v1.StartTurnTailOnly"> & {
  * Use `create(StartTurnTailOnlySchema)` to create a new message.
  */
 export const StartTurnTailOnlySchema: GenMessage<StartTurnTailOnly> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_turn, 9);
+  messageDesc(file_shim_v1_endpoint_start_turn, 10);
 
