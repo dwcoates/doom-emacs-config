@@ -155,7 +155,7 @@ describe("the model over a streamed response", () => {
   it("names the model the vendor's assistant line states", () => {
     const carrying = foldStreamedResponse().find((e) => activityOf(e)?.model !== undefined);
 
-    expect(activityOf(carrying!)?.model?.name).toBe("claude-opus-5");
+    expect(activityOf(carrying)?.model?.name).toBe("claude-opus-5");
   });
 });
 
