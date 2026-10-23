@@ -27,23 +27,19 @@ func (c *controller) closeCreates(ctx context.Context, successor string, fields 
 		return nil
 	}
 	c.log.Info(opHandover, "closed the create gate; waiting for the creates in flight to finish before listing what this daemon serves", fields)
-	idle := c.deps.Creates.Idle()
-	for warnings := 1; ; warnings++ {
-		select {
-		case <-idle:
-			c.log.Info(opHandover, "every create in flight finished; the stand-down proceeds", fields)
-			return nil
-		case <-ctx.Done():
-			c.log.Info(opHandover, "the daemon's lifetime ended while creates were still finishing", dlog.WithCause(fields, ctx.Err()))
-			return fmt.Errorf("rollout: await the creates in flight: %w", ctx.Err())
-		case <-c.deps.Clock.After(c.deps.HoldoutWarnEvery):
-			c.log.Warn(opHandover, "still waiting for creates in flight to finish before listing what this daemon serves", dlog.Merge(fields, dlog.Context{
-				"creates_in_flight": c.deps.Creates.InFlight(),
-				"warnings":          warnings,
-				"cadence":           c.deps.HoldoutWarnEvery.String(),
-			}))
-		}
+	err := c.deps.Creates.AwaitIdle(ctx, c.deps.HoldoutWarnEvery, c.deps.Clock.After, func(warnings, inFlight int) {
+		c.log.Warn(opHandover, "still waiting for creates in flight to finish before listing what this daemon serves", dlog.Merge(fields, dlog.Context{
+			"creates_in_flight": inFlight,
+			"warnings":          warnings,
+			"cadence":           c.deps.HoldoutWarnEvery.String(),
+		}))
+	})
+	if err != nil {
+		c.log.Info(opHandover, "the daemon's lifetime ended while creates were still finishing", dlog.WithCause(fields, err))
+		return fmt.Errorf("rollout: await the creates in flight: %w", err)
 	}
+	c.log.Info(opHandover, "every create in flight finished; the stand-down proceeds", fields)
+	return nil
 }
 
 // reopenCreates admits creates again: the stand-down ended with this daemon

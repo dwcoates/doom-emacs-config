@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // ClosedError refuses a create the gate did not admit: the daemon is standing
@@ -155,6 +156,24 @@ func (g *Gate) Idle() <-chan struct{} {
 		g.idle = make(chan struct{})
 	}
 	return g.idle
+}
+
+// AwaitIdle waits until no create is in flight. Each time EVERY passes first,
+// as AFTER measures it, HOLDOUT is told how many waits have run out and how
+// many creates are still in flight, so a long wait is named while it lasts.
+// It answers ctx's error when ctx ends first.
+func (g *Gate) AwaitIdle(ctx context.Context, every time.Duration, after func(time.Duration) <-chan time.Time, holdout func(warnings, inFlight int)) error {
+	idle := g.Idle()
+	for warnings := 1; ; warnings++ {
+		select {
+		case <-idle:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-after(every):
+			holdout(warnings, g.InFlight())
+		}
+	}
 }
 
 // InFlight answers how many creates hold a ticket, for the record.

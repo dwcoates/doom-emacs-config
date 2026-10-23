@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func closed(ch <-chan struct{}) bool {
@@ -173,5 +174,60 @@ func TestIdle(t *testing.T) {
 	// Assert
 	if !closed(idle) {
 		t.Fatal("Idle stayed open after the last create left")
+	}
+}
+
+func TestAwaitIdle(t *testing.T) {
+	cases := []struct {
+		name      string
+		inFlight  bool
+		cancel    bool
+		wantErr   error
+		wantNamed bool
+	}{
+		{name: "nothing in flight answers at once", wantErr: nil},
+		{name: "a create in flight is named on the cadence and awaited", inFlight: true, wantNamed: true},
+		{name: "an ended context ends the wait", inFlight: true, cancel: true, wantErr: context.Canceled},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			g := New()
+			release := func() {}
+			if tc.inFlight {
+				_, release, _ = g.Admit(context.Background())
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancel {
+				cancel()
+			}
+			ticks := make(chan time.Time, 1)
+			asked := make(chan struct{}, 4)
+			after := func(time.Duration) <-chan time.Time { asked <- struct{}{}; return ticks }
+			var named []int
+			done := make(chan error, 1)
+
+			// Act
+			go func() {
+				done <- g.AwaitIdle(ctx, time.Minute, after, func(warnings, inFlight int) { named = append(named, warnings, inFlight) })
+			}()
+			if tc.wantNamed {
+				<-asked
+				ticks <- time.Time{}
+				<-asked
+				release()
+			}
+			err := <-done
+			release()
+
+			// Assert
+			if !errors.Is(err, tc.wantErr) && err != tc.wantErr {
+				t.Fatalf("AwaitIdle = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantNamed && (len(named) != 2 || named[0] != 1 || named[1] != 1) {
+				t.Fatalf("holdout told %v, want (1 warning, 1 in flight)", named)
+			}
+		})
 	}
 }

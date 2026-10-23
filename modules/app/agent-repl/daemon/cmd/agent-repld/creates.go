@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"time"
 
 	"agent-repld/internal/creategate"
@@ -26,19 +28,19 @@ func awaitCreatesAtExit(gate *creategate.Gate, every time.Duration, after func(t
 			return
 		}
 		log.Info(op, "the exit waits for the creates in flight to finish", dlog.Context{"creates_in_flight": inFlight})
-		idle := gate.Idle()
-		for warnings := 1; ; warnings++ {
-			select {
-			case <-idle:
-				log.Info(op, "every create in flight finished; the exit proceeds", dlog.Context{"creates_in_flight": inFlight})
-				return
-			case <-after(every):
-				log.Warn(op, "the exit is still waiting for creates in flight to finish", dlog.Context{
-					"creates_in_flight": gate.InFlight(),
-					"warnings":          warnings,
-					"cadence":           every.String(),
-				})
-			}
+		// The exit has no lifetime left to end this wait; each create's own
+		// steps are bounded, and that bounds it. A context that never ends
+		// cannot end the wait, so an error here is a broken invariant.
+		err := gate.AwaitIdle(context.Background(), every, after, func(warnings, inFlight int) {
+			log.Warn(op, "the exit is still waiting for creates in flight to finish", dlog.Context{
+				"creates_in_flight": inFlight,
+				"warnings":          warnings,
+				"cadence":           every.String(),
+			})
+		})
+		if err != nil {
+			panic(fmt.Sprintf("agent-repld: the exit's wait for creates ended with %v under a context that never ends", err))
 		}
+		log.Info(op, "every create in flight finished; the exit proceeds", dlog.Context{"creates_in_flight": inFlight})
 	}
 }
