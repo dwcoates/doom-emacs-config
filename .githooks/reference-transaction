@@ -50,18 +50,39 @@ readonly SKILL="modules/app/agent-repl/skills/agent-repl-merge-queue/SKILL.md"
 readonly RUN_REGISTRY="agent-repl-safe-test-runs"
 readonly RUN_MARKER="AGENT_REPL_SAFE_TEST_RUN"
 
-# ancestors prints this hook's pid and every ancestor's, nearest first, from
-# one process listing.
-ancestors() {
-  ps -A -o pid= -o ppid= | awk -v start="$$" '
-    { parent[$1] = $2 }
-    END { p = start; for (n = 0; p > 1 && n < NR; n++) { print p; p = parent[p] } }'
+# descends_from ROOT succeeds when this hook descends from process ROOT. It
+# walks ROOT's descendants one generation per `pgrep -P`, never `ps`: `ps`
+# reads every process's task, and one wedged process left every `ps` on the
+# machine stuck in the kernel, so each ref write's committed phase, and with it
+# git, hung with it (2026-10-23: every new workspace's `git worktree add`).
+# pgrep reads only the kernel's process table, so no other process's state can
+# stall it. `-a` keeps this hook, an ancestor of the pgrep, in the answer.
+descends_from() {
+  local frontier="$1" next status
+  while [ -n "$frontier" ]; do
+    set +e
+    next="$(pgrep -a -P "$frontier")"
+    status=$?
+    set -e
+    case "$status" in
+      0) ;;
+      1) return 1 ;;
+      *)
+        echo "[safe-test-run] reference-transaction: pgrep -a -P $frontier failed (exit $status) while judging whether this git belongs to a run. The refs below went unjudged:" >&2
+        printf '%s\n' "$TX" | sed 's/^/[safe-test-run]   /' >&2
+        exit 1
+        ;;
+    esac
+    grep -qxF -- "$$" <<<"$next" && return 0
+    frontier="$(paste -sd, - <<<"$next")"
+  done
+  return 1
 }
 
 # journal_test_runs appends TX's refs to the journal of every registered
 # safe-test-run the git running this hook belongs to (see 2. above).
 journal_test_runs() {
-  local registry run id by chain="" root old new ref
+  local registry run id by root old new ref
   registry="$(git rev-parse --path-format=absolute --git-common-dir)/$RUN_REGISTRY"
   [ -d "$registry" ] || return 0
   for run in "$registry"/*; do
@@ -78,8 +99,7 @@ journal_test_runs() {
           exit 1
           ;;
       esac
-      [ -n "$chain" ] || chain="$(ancestors)"
-      grep -qxF -- "$root" <<<"$chain" || continue
+      descends_from "$root" || continue
       by=ancestry
     fi
     while read -r old new ref; do

@@ -41,6 +41,17 @@ trap 'rm -rf "$TMP"' EXIT
 FAKE_BIN="$TMP/bin"
 mkdir -p "$FAKE_BIN"
 ln -s "$FAKE_GIT" "$FAKE_BIN/git"
+
+# The hook must never run `ps`: one wedged process leaves every `ps` on the
+# machine stuck in the kernel, and git with it. This `ps` only records that it
+# was run, so a hook that reaches for it fails the assertions below.
+PS_CALLS="$TMP/ps-calls"
+cat >"$FAKE_BIN/ps" <<PS
+#!/usr/bin/env bash
+printf 'ps %s\\n' "\$*" >>"$PS_CALLS"
+exit 1
+PS
+chmod +x "$FAKE_BIN/ps"
 export PATH="$FAKE_BIN:$PATH"
 
 pass() {
@@ -303,8 +314,17 @@ register() {
 
 journal_of() { cat "$1/.fakegit/agent-repl-safe-test-runs/$2/journal" 2>/dev/null || true; }
 
-# A pid that is never an ancestor: the walk stops before pid 1.
-readonly NOT_AN_ANCESTOR=1
+# A live process that is never an ancestor of the hook: a childless sleep
+# this harness started, so nothing descends from it.
+sleep 600 </dev/null >/dev/null 2>&1 &
+readonly NOT_AN_ANCESTOR=$!
+trap 'kill "$NOT_AN_ANCESTOR" 2>/dev/null; rm -rf "$TMP"' EXIT
+
+# A pgrep that fails as pgrep does on a fatal error, for the loud-failure case.
+FAILING_PGREP_BIN="$TMP/failing-pgrep"
+mkdir -p "$FAILING_PGREP_BIN"
+printf '#!/usr/bin/env bash\nexit 3\n' >"$FAILING_PGREP_BIN/pgrep"
+chmod +x "$FAILING_PGREP_BIN/pgrep"
 
 test_committed_with_no_run_registered_journals_nothing() {
   local repo
@@ -368,10 +388,11 @@ test_another_runs_marker_journals_only_that_run() {
   register "$repo" run-b "$NOT_AN_ANCESTOR"
   attempt "$repo" commit_on_feature_tx committed AGENT_REPL_SAFE_TEST_RUN="$REGISTERED"
 
-  if [ -z "$(journal_of "$repo" run-a-1)" ] && [ -n "$(journal_of "$repo" run-b-1)" ]; then
+  local run_a="run-a-$NOT_AN_ANCESTOR" run_b="run-b-$NOT_AN_ANCESTOR"
+  if [ -z "$(journal_of "$repo" "$run_a")" ] && [ -n "$(journal_of "$repo" "$run_b")" ]; then
     pass "a marked git is journaled in its own run only, never in a concurrent one"
   else
-    fail "a marked git is journaled in its own run only, never in a concurrent one" "a=$(journal_of "$repo" run-a-1)" "b=$(journal_of "$repo" run-b-1)"
+    fail "a marked git is journaled in its own run only, never in a concurrent one" "a=$(journal_of "$repo" "$run_a")" "b=$(journal_of "$repo" "$run_b")"
   fi
 }
 
@@ -399,6 +420,35 @@ test_a_run_not_ending_in_a_pid_fails_loudly() {
     pass "a registered run whose name carries no root pid fails the hook loudly, naming the run and the unjudged refs"
   else
     fail "a registered run whose name carries no root pid fails the hook loudly, naming the run and the unjudged refs" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+test_judging_ancestry_never_runs_ps() {
+  local repo
+  repo="$(mkrepo)"
+  register "$repo" run-a "$$"
+  register "$repo" run-b "$NOT_AN_ANCESTOR"
+  rm -f "$PS_CALLS"
+  attempt "$repo" commit_on_feature_tx committed
+
+  if [ "$RUN_RC" -eq 0 ] && [ ! -e "$PS_CALLS" ] && [ -n "$(journal_of "$repo" "run-a-$$")" ]; then
+    pass "judging a run's ancestry never runs ps, whose hang once hung every ref write"
+  else
+    fail "judging a run's ancestry never runs ps, whose hang once hung every ref write" "exit=$RUN_RC" "$RUN_OUT" "$(cat "$PS_CALLS" 2>/dev/null)"
+  fi
+}
+
+test_a_failing_pgrep_fails_loudly() {
+  local repo
+  repo="$(mkrepo)"
+  register "$repo" run-a "$$"
+  attempt "$repo" commit_on_feature_tx committed PATH="$FAILING_PGREP_BIN:$PATH"
+
+  if [ "$RUN_RC" -ne 0 ] && grep_in "$RUN_OUT" -qF "failed (exit 3) while judging whether this git belongs to a run" &&
+    grep_in "$RUN_OUT" -q "refs/heads/feature" && [ -z "$(journal_of "$repo" "$REGISTERED")" ]; then
+    pass "a pgrep that fails fails the hook loudly, naming the unjudged refs, and journals nothing"
+  else
+    fail "a pgrep that fails fails the hook loudly, naming the unjudged refs, and journals nothing" "exit=$RUN_RC" "$RUN_OUT" "$(journal_of "$repo" "$REGISTERED")"
   fi
 }
 
@@ -465,6 +515,8 @@ test_committed_by_a_foreign_git_is_not_journaled
 test_another_runs_marker_journals_only_that_run
 test_prepared_never_journals
 test_a_run_not_ending_in_a_pid_fails_loudly
+test_judging_ancestry_never_runs_ps
+test_a_failing_pgrep_fails_loudly
 test_a_tag_through_git_lands_in_the_journal
 test_a_refused_transaction_through_git_moves_nothing_and_journals_nothing
 
