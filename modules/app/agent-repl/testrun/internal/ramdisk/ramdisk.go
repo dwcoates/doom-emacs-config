@@ -71,10 +71,12 @@ const EnvSizeMiB = "AGENT_REPL_TEST_RAMDISK_MIB"
 
 // DefaultSizeMiB is the volume's size. A RAM disk's memory is taken as blocks
 // are first written and is never handed back before the detach, so the size
-// is also the most memory a run can hold. It is sized from measurement: the
-// largest live footprint of a full run's temp root (see testrun's AGENTS.md
-// section), with headroom.
-const DefaultSizeMiB = 8192
+// is also the most memory a run can hold, and since APFS writes changed data
+// to fresh blocks a busy disk tends toward its whole size. It is sized from
+// measurement: a full run's peak use was 2511 MiB (2026-10-23, the run's own
+// "RAM disk use" line, use.go), and 4 GiB is that with headroom a run
+// growing its footprint has before it fills the disk.
+const DefaultSizeMiB = 4096
 
 // UnitIOTier is the disk I/O tier every unit of a RAM-disk run runs at.
 //

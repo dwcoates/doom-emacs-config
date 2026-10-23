@@ -340,8 +340,9 @@ memory; under it the merge queue's overlapping runs, 13 slots each on a
   The run's summary names every such unit (`it is not pinned to its width`);
   the fix is pinning it or declaring its true width in the roster.
 - MEMORY IS SEATED, because `nice` does nothing for it and a RAM disk's memory
-  is wired. A run's RAM disk holds one of `ramdisk.MemorySeats` seats (half
-  the host's memory over the disk's size, at least one) from before it is
+  is wired. A run's RAM disk holds one of `ramdisk.MemorySeats` seats (an
+  eighth of the host's memory over the disk's size, at least one; a half until
+  2026-10-23, when three runs' disks held 24 GiB while the host swapped 20 GiB) from before it is
   attached until it is released; a run that finds every seat held waits for
   one on its flock and says so in the run log.
 
@@ -554,9 +555,10 @@ unreachable from a live process.
     registration guard and short enough for sockets; exported to units as
     `AGENT_REPL_TEST_SHORT_BASE`, which the daemon integration harness's run
     roots and the unit tests' exempt root follow (`tempdirstest.ShortBase`).
-  - Sized `ramdisk.DefaultSizeMiB` (override `AGENT_REPL_TEST_RAMDISK_MIB`):
-    the measured live peak of the run root is 1.5-1.8 GB for
-    `daemon,store,sidecar`; a RAM disk holds at most its size in memory.
+  - Sized `ramdisk.DefaultSizeMiB`, 4 GiB (override
+    `AGENT_REPL_TEST_RAMDISK_MIB`): a full run's measured peak is 2511 MiB
+    (2026-10-23), which every run now logs at release (`RAM disk use: peak`).
+    A RAM disk holds at most its size in memory, and tends toward all of it.
   - ITS UNITS RUN AT THE DEFAULT I/O TIER (`taskpolicy -d default`, owner
     ruling 2026-10-14), not the throttle tier `bin/background.sh` gives the
     run: a throttled tier stalls every read of build caches, sources and

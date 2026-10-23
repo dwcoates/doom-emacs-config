@@ -25,9 +25,9 @@ func TestMemorySeats(t *testing.T) {
 		sizeMiB int
 		want    int
 	}{
-		{name: "half of 64 GiB holds four 8 GiB disks", mem: 64 << 30, sizeMiB: 8192, want: 4},
-		{name: "a share smaller than one disk still seats one run", mem: 8 << 30, sizeMiB: 8192, want: 1},
-		{name: "a share that does not divide evenly rounds down", mem: 40 << 30, sizeMiB: 8192, want: 2},
+		{name: "an eighth of 64 GiB holds two 4 GiB disks", mem: 64 << 30, sizeMiB: 4096, want: 2},
+		{name: "a share smaller than one disk still seats one run", mem: 16 << 30, sizeMiB: 4096, want: 1},
+		{name: "a share that does not divide evenly rounds down", mem: 48 << 30, sizeMiB: 4096, want: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
