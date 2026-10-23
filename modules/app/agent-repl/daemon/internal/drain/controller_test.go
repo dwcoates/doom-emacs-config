@@ -376,6 +376,33 @@ func TestShutdownNowStandsEverySessionDownWhenTheCallerCannotOutliveTheBound(t *
 	assertSteppedOverTheWedgedShim(t, h, wedged, healthy, bound, elapsed)
 }
 
+// TestShutdownNowStandsEverySessionDownWhenTheCallersBudgetIsAlreadySpent is
+// the listing's half of the same contract: the walk lists the workspaces it
+// stands down on the daemon's own bound too, so a caller whose budget ran out
+// before the walk (spent on the announcement and the merge drain under load)
+// still has every session stood down rather than none.
+func TestShutdownNowStandsEverySessionDownWhenTheCallersBudgetIsAlreadySpent(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) { d.StandBound = 50 * time.Millisecond })
+	ws := h.workspace(t, instant)
+	caller, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	if err := h.c.ShutdownNow(caller, maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	stood := false
+	for _, call := range h.stand.Killed() {
+		stood = stood || call.WS == ws
+	}
+	if !stood {
+		t.Fatalf("stood down = %+v, want %s stood down although the caller's budget was spent", h.stand.Killed(), ws)
+	}
+}
+
 // assertSteppedOverTheWedgedShim is the shared assertion of the two tests
 // above: the daemon spent ITS OWN bound on the shim that would not go, said so
 // at ERROR, stood the sibling down anyway, and exited. It is one helper rather

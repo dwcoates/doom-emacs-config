@@ -366,8 +366,15 @@ func (c *controller) ShutdownNow(ctx context.Context, reason *agentreplv1.DrainR
 // outlives its daemon holds the workspace lock that refuses the next session
 // and keeps ~95 MiB resident — the very leak this whole path exists to close.
 // The caller's context bounds the ANSWER it is waiting for, never the act.
+//
+// THE LISTING IS DETACHED AND BOUNDED THE SAME WAY. Read on the caller's
+// context, a caller whose budget was spent before the walk began (on the
+// announcement and the merge drain, under load) failed the listing, and no
+// session at all was stood down.
 func (c *controller) standEverySessionDown(ctx context.Context) {
-	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
+	list, cancelList := context.WithTimeout(context.WithoutCancel(ctx), c.deps.StandBound)
+	workspaces, err := c.deps.DB.ListWorkspaces(list)
+	cancelList()
 	if err != nil {
 		c.log.Error(opNow, "could not list the workspaces to stand down; the shims will outlive this daemon",
 			dlog.WithCause(nil, err))
