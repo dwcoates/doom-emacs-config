@@ -54,6 +54,7 @@ import { drawFeedTab, drawFeedTabline, drawFeedTabStrip, setFeedTablineClock } f
 import { drawToolCardClock } from "./cards/tool-head.js";
 import { log } from "../log.js";
 import { placeChildren } from "../dom.js";
+import { createKeyedStore } from "./keyed-store.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import type { FeedRow, FeedToolCardClock } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
@@ -286,27 +287,14 @@ export function groupKey(kind: string, firstMemberId: string): string {
 
 /** Build a store of tabbed groups for one feed, whose clocks repaint on TICKER. */
 export function createToolGroupStore(ticker: Ticker): ToolGroupStore {
-  const groups = new Map<string, ToolGroup>();
-  let seen = new Set<string>();
+  const groups = createKeyedStore<ToolGroup>();
   return {
     arrange(key, kind, members) {
-      seen.add(key);
-      let group = groups.get(key);
-      if (group === undefined) {
-        group = createToolGroup(kind, ticker);
-        groups.set(key, group);
-      }
+      const group = groups.use(key, () => createToolGroup(kind, ticker));
       group.update(members);
       return group.wrapper;
     },
-    prune() {
-      for (const [key, group] of groups) {
-        if (seen.has(key)) continue;
-        group.dispose();
-        groups.delete(key);
-      }
-      seen = new Set();
-    },
+    prune: groups.prune,
   };
 }
 

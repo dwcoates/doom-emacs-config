@@ -48,6 +48,12 @@ import {
   type GroupMember,
   type ToolGroupStore,
 } from "./tool-group.js";
+import {
+  createResponseRunStore,
+  responseRunEnd,
+  responseRunKey,
+  type ResponseRunStore,
+} from "./response-run.js";
 import type {
   FeedArtifact,
   FeedBreadcrumb,
@@ -227,10 +233,11 @@ export const defaultBubbleBody: BubbleBodyRenderer = (mount, view, rc) => {
   // is what lets a reader's tab pick and a run's identity survive the re-arrange
   // each live push triggers.
   const groups = createToolGroupStore(rc.ctx.ticker);
+  const runs = createResponseRunStore();
 
   const draw = (): void => {
     drawBreadcrumbTrail(breadcrumbs, view.breadcrumbs(), rc, mount);
-    arrangeSubfeedRows(rows, view, groups);
+    arrangeSubfeedRows(rows, view, groups, runs);
     const slot = view.composerSlot;
     if (slot !== undefined && mount.lastElementChild !== slot) mount.append(slot);
   };
@@ -306,11 +313,16 @@ export function drawFeedBreadcrumb(crumb: FeedBreadcrumb, rc: RowContext): HTMLE
  * of vendor-fault endings stacks across turns (`groupSpansTurns`), since each
  * is its own turn's. Callers with no `groups` store (a fixture
  * exercising the arranger alone) get the plain per-row layout.
+ *
+ * A run of >=2 CONTIGUOUS top-level final responses (see `responseRunEnd`)
+ * coalesces likewise, into ONE tabless bubble that shows every member in
+ * order (response-run.ts). Callers with no `runs` store get them one by one.
  */
 export function arrangeSubfeedRows(
   host: HTMLElement,
   view: SubfeedView,
   groups?: ToolGroupStore,
+  runs?: ResponseRunStore,
 ): void {
   // WHAT WAS DRAWN BEFORE, so a row this arrangement DROPS can be unsubscribed
   // rather than left ticking against an element nobody can see. A row that is
@@ -331,6 +343,14 @@ export function arrangeSubfeedRows(
   let i = 0;
   while (i < rows.length) {
     const row = rows[i];
+    const runEnd = runs === undefined ? i + 1 : responseRunEnd(rows, i);
+    if (runEnd > i + 1) {
+      const members = rows.slice(i, runEnd).map((member) => drawPlaced(member, view, placed));
+      // `runs` is defined here — `runEnd` passes `i + 1` only when it is.
+      top.push(runs!.arrange(responseRunKey(row.id?.value ?? ""), members));
+      i = runEnd;
+      continue;
+    }
     // A run is only ever of TOP-LEVEL groupable cards: a parented row nests, and
     // its appearance between two same-kind cards breaks the run.
     const kind = groups !== undefined && row.parent?.row === undefined ? groupKindOf(row) : null;
@@ -351,13 +371,11 @@ export function arrangeSubfeedRows(
         j += 1;
       }
       if (j - i >= 2) {
-        const members: GroupMember[] = [];
-        for (const member of rows.slice(i, j)) {
-          const el = view.drawRow(member);
-          const id = member.id?.value ?? "";
-          if (member.id !== undefined) placed.set(id, el);
-          members.push({ id, element: el, clock: memberClockOf(member) });
-        }
+        const members: GroupMember[] = rows.slice(i, j).map((member) => ({
+          id: member.id?.value ?? "",
+          element: drawPlaced(member, view, placed),
+          clock: memberClockOf(member),
+        }));
         // `groups` is defined here — `kind` is non-null only when it is.
         top.push(groups!.arrange(groupKey(kind, members[0].id), kind, members));
         i = j;
@@ -365,8 +383,7 @@ export function arrangeSubfeedRows(
       }
       // A run of one is a lone card: fall through to the ordinary placement.
     }
-    const el = view.drawRow(row);
-    if (row.id !== undefined) placed.set(row.id.value, el);
+    const el = drawPlaced(row, view, placed);
     const parent = row.parent?.row;
     if (parent === undefined) {
       top.push(el);
@@ -402,6 +419,7 @@ export function arrangeSubfeedRows(
   // disposed — after `replaceChildren`, so a member re-placed elsewhere is safely
   // out of the old group before it is torn down.
   groups?.prune();
+  runs?.prune();
   let stopped = 0;
   for (const el of before) {
     if (host.contains(el)) continue;
@@ -413,6 +431,17 @@ export function arrangeSubfeedRows(
       context: { dropped: stopped },
     });
   }
+}
+
+/**
+ * Draw ROW through VIEW and record its element in PLACED under its id, so a
+ * later row parented to it finds its container. Every row an arrangement
+ * places, alone or as a run's member, is drawn through here.
+ */
+export function drawPlaced(row: FeedRow, view: SubfeedView, placed: Map<string, HTMLElement>): HTMLElement {
+  const el = view.drawRow(row);
+  if (row.id !== undefined) placed.set(row.id.value, el);
+  return el;
 }
 
 /** A container row's nesting slot, created on the first child that needs it. */
