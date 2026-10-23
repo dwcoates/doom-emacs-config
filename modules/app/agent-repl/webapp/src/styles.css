@@ -6842,6 +6842,12 @@ bubble-body.bubble-body { display: block; }
    same cadence the phase word does, and the completed box is drawn plainly
    rather than colored — a finished task is not news. */
 .footer-glyph[data-glyph="completed"] { color: var(--ok); }
+/* A MERGE ROW WEARS THE MERGE PURPLE (owner request, 2026-10-23): its ⇄ glyph
+   and the state it stands in (its step, or waiting on you) are drawn in THE
+   ONE PURPLE, the purple status --blocked a merge in progress wears. */
+.footer-row-merges .footer-glyph[data-glyph="merges"],
+.footer-row-merges .footer-row-description,
+.footer-row-merges .footer-row-state { color: var(--blocked); }
 .footer-glyph-running {
   display: inline-block;
   color: var(--thinking);
