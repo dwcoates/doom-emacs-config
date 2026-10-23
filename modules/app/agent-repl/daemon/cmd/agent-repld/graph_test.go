@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 
-	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -203,30 +202,6 @@ func TestResolveAdoptBoundReadsADuration(t *testing.T) {
 	}
 	if got != 250*time.Millisecond {
 		t.Fatalf("resolveAdoptBound(\"250ms\") = %v, want 250ms", got)
-	}
-}
-
-// TestResolveNotifierListBoundDefaultsToThePlatformBound pins that an unset
-// knob leaves the bound measured against the platform's program in force.
-func TestResolveNotifierListBoundDefaultsToThePlatformBound(t *testing.T) {
-	// Arrange, Act.
-	got, err := resolveNotifierListBound("")
-
-	// Assert.
-	if err != nil || got != desktopnotify.DefaultDeliveredBound {
-		t.Fatalf("resolveNotifierListBound(\"\") = (%v, %v), want (%v, nil)", got, err, desktopnotify.DefaultDeliveredBound)
-	}
-}
-
-// TestResolveNotifierListBoundTakesASetValue pins that a set knob is the
-// bound the banner query runs under.
-func TestResolveNotifierListBoundTakesASetValue(t *testing.T) {
-	// Arrange, Act.
-	got, err := resolveNotifierListBound("2s")
-
-	// Assert.
-	if err != nil || got != 2*time.Second {
-		t.Fatalf("resolveNotifierListBound(\"2s\") = (%v, %v), want (2s, nil)", got, err)
 	}
 }
 

@@ -46,15 +46,19 @@ func (s *Slot[T]) Release(generation uint64) (current bool) {
 	return current
 }
 
-// Update moves the standing stream's value, answering its generation and
-// whether one stood: with none standing nothing changes.
-func (s *Slot[T]) Update(v T) (generation uint64, attached bool) {
+// Update moves the standing stream's value, answering the value it replaced,
+// its generation and whether one stood: with none standing nothing changes
+// and previous is the zero value. The previous value is read under the same
+// hold the new one is written under, so a caller deciding on the change (a
+// focus GAIN) decides on exactly the edge it made.
+func (s *Slot[T]) Update(v T) (previous T, generation uint64, attached bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.attached {
+		previous = s.value
 		s.value = v
 	}
-	return s.generation, s.attached
+	return previous, s.generation, s.attached
 }
 
 // Get answers the standing stream's value, and whether one stands.

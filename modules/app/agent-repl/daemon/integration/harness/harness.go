@@ -39,7 +39,6 @@
 //	AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS   compresses the idle cutoff
 //	AGENT_REPL_BROWSER_CMD                the external browser launcher for OpenExternal
 //	AGENT_REPL_NOTIFIER_CMD               the desktop banner program (a recorder)
-//	AGENT_REPL_NOTIFIER_LIST_BOUND        sizes the banner query's bound for the recorder (NotifierListBoundEnv)
 //	AGENT_REPL_CHIME_CMD                  the banner sound player (a recorder)
 //	AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR  the fake pmset/networksetup/ipconfig/sudo the persistent-wifi controller runs
 //	AGENT_REPL_PERSISTENT_WIFI_HOTSPOT    the hotspot it joins (FakeHotspot)

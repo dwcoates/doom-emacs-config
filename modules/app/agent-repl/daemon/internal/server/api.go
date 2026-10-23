@@ -133,8 +133,9 @@ type Deps struct {
 	// Emacs measures the Emacs whose WatchDaemon stream stands, for as long
 	// as the stream does (runtimemetrics.Surface.AttachEmacs).
 	Emacs EmacsMeasure
-	// Banners backs ClaimLiveNotification, and SelectWorkspace lets every held
-	// banner go: a workspace the user chose outranks any banner made before.
+	// Banners is claimed by ReportEditorFocus's focus gain, and SelectWorkspace
+	// lets every held banner go: a workspace the user chose outranks any
+	// banner made before.
 	Banners Banners
 	// PersistentWifi backs UpdatePersistentWifiMode, and its topic is the
 	// `persistent_wifi` state every Emacs WatchDaemon stream subscribes to (a

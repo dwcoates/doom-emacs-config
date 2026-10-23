@@ -7,14 +7,37 @@
 // stream without knowing its focus. The daemon replaces its held focus with
 // the reported one and decides every later desktop banner on it.
 //
-// IDEMPOTENT: reporting the focus the daemon already holds is a success and
-// changes nothing.
+// A FOCUS GAIN CLAIMS THE NEWEST BANNER, IN THE SAME CALL. A report that moves
+// the stream's held focus from unfocused to focused is Emacs coming forward,
+// whatever brought it (the dock, an application switcher, a click on one of
+// its frames). The daemon answers it with the workspace of the newest desktop
+// banner it holds, which Emacs selects exactly as any other switch (it
+// REQUESTS the switch with SelectWorkspace and its frame moves on the
+// request), and lets go of every banner it held. The claim is made under the
+// very focus change that justifies it, so no unfocused report can land
+// between the gain and the claim, and the switch costs one round trip.
+//
+// A BANNER IS HELD from the moment it is made until a claim, a workspace
+// selection (a banner's own click is one), or a newer banner of its workspace
+// lets it go; a read-back banner (Linux notify-send) is let go too once its
+// program stops showing it. The platform is NOT asked at the claim which
+// banners it still lists: that query is a program run (terminal-notifier
+// -list, 40-160ms) on the path from focus to switch, and the switch is due in
+// tens of milliseconds. So a macOS banner the user cleared from Notification
+// Center still steers the next return.
+//
+// A CLAIM CONSUMES: each banner steers at most one return to Emacs, and none
+// made before the user last chose a workspace ever steers one.
+//
+// IDEMPOTENT for the held focus: reporting the focus the daemon already holds
+// is a success, changes nothing, and claims nothing.
 
 syntax = "proto3";
 
 package agentrepl.v1;
 
 import "agentrepl/v1/editor_focus.proto";
+import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -32,7 +55,29 @@ message ReportEditorFocusResponse {
 }
 
 // The daemon now decides desktop banners on the reported focus.
-message ReportEditorFocusSuccess {}
+message ReportEditorFocusSuccess {
+  // What the report claimed. THE ARM IS THE ANSWER; REQUIRED.
+  oneof claim {
+    // The report was no focus gain (an unfocused report, or a focused one
+    // after focused), so nothing was claimed.
+    ReportEditorFocusNoGain no_gain = 1;
+    // The report was a gain and the daemon held no banner: Emacs stays where
+    // it is.
+    ReportEditorFocusNothingHeld nothing_held = 2;
+    // The report was a gain and claimed the newest held banner, whose
+    // workspace Emacs selects.
+    ReportEditorFocusBannerClaimed banner = 3;
+  }
+}
+
+message ReportEditorFocusNoGain {}
+
+message ReportEditorFocusNothingHeld {}
+
+message ReportEditorFocusBannerClaimed {
+  // The workspace the banner was posted for. REQUIRED, never empty.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
 
 // Validation failures (unset field, unset oneof) are Connect InvalidArgument,
 // never an arm.

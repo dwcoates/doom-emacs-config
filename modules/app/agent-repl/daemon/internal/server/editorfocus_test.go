@@ -7,6 +7,8 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"agent-repld/internal/desktopnotify"
 )
 
 // unfocusedEditor is the focus an Emacs stream in these tests connects with.
@@ -80,6 +82,96 @@ func TestReportEditorFocusMovesTheFocus(t *testing.T) {
 	}
 	if !h.Focus.Focused() {
 		t.Fatal("the reported focus did not stand")
+	}
+}
+
+func TestAFocusGainClaimsTheNewestHeldBannersWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	emacsDaemonStream(t, h, ctx, unfocusedEditor())
+	h.Banners.claim = desktopnotify.Claim{Held: true, Target: desktopnotify.Target{ID: testWorkspaceID, Dir: testWorkspaceDir}}
+
+	// Act
+	resp, err := reportFocus(t, h, focusedEditor())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ReportEditorFocus: %v", err)
+	}
+	got := resp.GetSuccess().GetBanner().GetWorkspace()
+	if got.GetId() != string(testWorkspaceID) || got.GetDir() != testWorkspaceDir {
+		t.Fatalf("result = %v, want the banner arm naming the banner's workspace", resp.GetResult())
+	}
+	if n := h.Banners.claimCount(); n != 1 {
+		t.Fatalf("claims = %d, want the gain's one", n)
+	}
+}
+
+func TestAFocusGainWithNothingHeldAnswersNothingHeld(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	emacsDaemonStream(t, h, ctx, unfocusedEditor())
+
+	// Act
+	resp, err := reportFocus(t, h, focusedEditor())
+
+	// Assert
+	if err != nil || resp.GetSuccess().GetNothingHeld() == nil {
+		t.Fatalf("ReportEditorFocus = (%v, %v), want success nothing_held", resp, err)
+	}
+}
+
+func TestAReportThatIsNoGainClaimsNothing(t *testing.T) {
+	cases := []struct {
+		name     string
+		connect  *agentreplv1.EditorFocus
+		reported *agentreplv1.EditorFocus
+	}{
+		{name: "focused after focused", connect: focusedEditor(), reported: focusedEditor()},
+		{name: "unfocused after focused", connect: focusedEditor(), reported: unfocusedEditor()},
+		{name: "unfocused after unfocused", connect: unfocusedEditor(), reported: unfocusedEditor()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			emacsDaemonStream(t, h, ctx, tc.connect)
+			h.Banners.claim = desktopnotify.Claim{Held: true, Target: desktopnotify.Target{ID: testWorkspaceID, Dir: testWorkspaceDir}}
+
+			// Act
+			resp, err := reportFocus(t, h, tc.reported)
+
+			// Assert
+			if err != nil || resp.GetSuccess().GetNoGain() == nil {
+				t.Fatalf("ReportEditorFocus = (%v, %v), want success no_gain", resp, err)
+			}
+			if n := h.Banners.claimCount(); n != 0 {
+				t.Fatalf("claims = %d, want none: the report was no gain", n)
+			}
+		})
+	}
+}
+
+func TestARefusedReportClaimsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Banners.claim = desktopnotify.Claim{Held: true, Target: desktopnotify.Target{ID: testWorkspaceID, Dir: testWorkspaceDir}}
+
+	// Act
+	resp, err := reportFocus(t, h, focusedEditor())
+
+	// Assert
+	if err != nil || resp.GetError().GetNoEmacsStream() == nil {
+		t.Fatalf("ReportEditorFocus = (%v, %v), want the no_emacs_stream arm", resp, err)
+	}
+	if n := h.Banners.claimCount(); n != 0 {
+		t.Fatalf("claims = %d, want none: the report was refused", n)
 	}
 }
 

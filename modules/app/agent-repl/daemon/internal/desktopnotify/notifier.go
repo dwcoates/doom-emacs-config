@@ -182,7 +182,7 @@ func (n *Notifier) Raise(ws ids.WorkspaceID, kind, text string) {
 }
 
 // show composes and posts one banner, rings its chime the instant it is made,
-// holds it for a focus claim while it is live, and relays its click.
+// holds it for a focus gain's claim, and relays its click.
 func (n *Notifier) show(ws ids.WorkspaceID, log dlog.Logger, compose Compose) {
 	workspace, err := n.deps.Workspaces.Workspace(n.ctx, ws)
 	switch {

@@ -68,16 +68,20 @@ func (f *Focus) release(generation uint64) {
 	})
 }
 
-// Report moves the standing stream's focus. ErrNoEmacsStream when none stands.
-func (f *Focus) Report(focused bool) error {
-	generation, attached := f.slot.Update(focused)
+// Report moves the standing stream's focus, answering whether the report is a
+// FOCUS GAIN: the stream's focus moved from unfocused to focused, which is
+// Emacs coming forward. A focused report after a focused one (focus moving
+// between two Emacs frames) is no gain. ErrNoEmacsStream when none stands.
+func (f *Focus) Report(focused bool) (gained bool, err error) {
+	previous, generation, attached := f.slot.Update(focused)
 	if !attached {
-		return ErrNoEmacsStream
+		return false, ErrNoEmacsStream
 	}
+	gained = focused && !previous
 	f.log.Info(opFocus, "Emacs reported its focus", dlog.Context{
-		"focused": focused, "generation": generation,
+		"focused": focused, "gained": gained, "generation": generation,
 	})
-	return nil
+	return gained, nil
 }
 
 // Focused reports whether a standing Emacs stream reports Emacs focused.

@@ -19,11 +19,13 @@
 ;;     the roster's `current', which the frame follows like any other switch,
 ;;     so no push reaches Emacs.
 ;;
-;;   - WHAT COMING FORWARD DOES.  Once the daemon accepts a report that Emacs
-;;     GAINED focus, however the user brought it forward (the dock, an
-;;     application switcher), Emacs claims the newest banner still live
-;;     (`ClaimLiveNotification') and selects the workspace it names
-;;     (`agent-repl--claim-live-notification').
+;;   - WHAT COMING FORWARD DOES.  The report that Emacs GAINED focus, however
+;;     the user brought it forward (the dock, an application switcher),
+;;     claims the newest banner the daemon holds IN THE SAME CALL: its answer
+;;     names the banner's workspace, which Emacs selects
+;;     (`agent-repl--focus-claim-answered').  One round trip from coming
+;;     forward to the switch, and no report can land between the gain and
+;;     its claim.
 ;;
 ;; The tab BLINK is none of them: it is drawn from the roster's attention marker
 ;; (status.el), not from any notification.
@@ -41,7 +43,6 @@
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl-link-live "daemon-link" ())
 (declare-function agent-repl-rpc-report-editor-focus "rpc" (conn request &rest keys))
-(declare-function agent-repl-rpc-claim-live-notification "rpc" (conn request &rest keys))
 (declare-function agent-repl-wire-editor-focus "wire-host" (focused))
 (defvar agent-repl--global-log-scope)
 (defvar agent-repl-link-up-functions)
@@ -93,13 +94,6 @@ answered, is what makes the daemon's focus end on Emacs's.")
 (defvar agent-repl--focus-report-owed nil
   "Non-nil when the focus may have changed while a report was in flight.")
 
-(defvar agent-repl--focus-accepted nil
-  "The focus the daemon last ACCEPTED from this Emacs, non-nil when focused.
-An accepted focused report that follows an accepted unfocused one is a
-FOCUS GAIN, the one moment Emacs claims the newest live banner.  Moving
-focus between two Emacs frames reports focused after focused, which is
-no gain and claims nothing.")
-
 (defvar agent-repl--focus-report-timer nil
   "The pending coalesced report, or nil.
 Moving focus between two Emacs frames reports out-then-in within one
@@ -132,15 +126,12 @@ new one is OWED and sent when that one is answered."
          :on-failure (lambda (detail) (agent-repl--focus-report-failed focused detail))))))))
 
 (defun agent-repl--focus-report-answered (focused response)
-  "Record the daemon's RESPONSE to a report of FOCUSED, and send what is owed."
+  "Record the daemon's RESPONSE to a report of FOCUSED, and send what is owed.
+A success carries what the report claimed (`agent-repl--focus-claim-answered')."
   (pcase (plist-get response :arm)
     (:success
-     (let ((gained (and focused (not agent-repl--focus-accepted))))
-       (setq agent-repl--focus-accepted focused)
-       (agent-repl--log agent-repl--focus-log-scope
-                        "elisp.notifications.focus-report ok focused=%s gained=%s" focused gained)
-       (when gained
-         (agent-repl--claim-live-notification))))
+     (agent-repl--focus-claim-answered
+      focused (plist-get (plist-get response :value) :claim)))
     (:error
      ;; NO EMACS STREAM STANDS on that daemon: the link is between streams.
      ;; The stream that comes back states its focus itself, so nothing is
@@ -189,59 +180,35 @@ stream stood) is told here, once the stream stands."
 
 ;;;; ---- Coming forward ----
 
-(defun agent-repl--claim-live-notification ()
-  "Claim the newest live desktop banner, and select the workspace it names.
-Called on a FOCUS GAIN the daemon accepted, so the claim is made under
-the focus it is refused without.  With no link standing there is no
-daemon holding banners, and nothing is claimed."
-  (let ((conn (agent-repl-link-live)))
-    (if (null conn)
-        (agent-repl--log agent-repl--focus-log-scope
-                         "elisp.notifications.claim skipped reason=no-link")
-      (agent-repl--info agent-repl--focus-log-scope "elisp.notifications.claim send")
-      (agent-repl-rpc-claim-live-notification
-       conn nil
-       :on-response #'agent-repl--claim-live-notification-answered
-       :on-failure #'agent-repl--claim-live-notification-failed))))
-
-(defun agent-repl--claim-live-notification-answered (response)
-  "Select the workspace the claim's RESPONSE names, if a banner was live."
-  (pcase (plist-get response :arm)
-    (:success
-     (let ((outcome (plist-get (plist-get response :value) :outcome)))
-       (pcase (plist-get outcome :arm)
-         (:live
-          (let* ((id (plist-get (plist-get (plist-get outcome :value) :workspace) :id))
-                 (ws (agent-repl--ws-by-ref-id id)))
-            (if ws
-                (progn
-                  (agent-repl--info ws "elisp.notifications.claim live ws=%s id=%s" ws id)
-                  (agent-repl-host-request-switch ws 'notification-focus))
-              ;; THE BANNER'S WORKSPACE HAS NO TAB in this Emacs (closed or
-              ;; hidden since the banner was made): there is nowhere to land,
-              ;; so the user stays where they are.
-              (agent-repl--info agent-repl--focus-log-scope
-                                "elisp.notifications.claim live-without-tab id=%s" id))))
-         (:none
-          (agent-repl--log agent-repl--focus-log-scope "elisp.notifications.claim none"))
-         (arm
-          (agent-repl--error agent-repl--focus-log-scope
-                             "elisp.notifications.claim unknown-outcome arm=%S" arm)))))
-    (:error
-     ;; EMACS LOST FOCUS AGAIN before the claim landed, or its stream ended:
-     ;; the user is not looking, so nothing moves, and the banners stay held
-     ;; for the claim the next focus gain makes.
-     (agent-repl--info agent-repl--focus-log-scope
-                       "elisp.notifications.claim refused cause=%S"
-                       (plist-get (plist-get response :value) :cause)))
+(defun agent-repl--focus-claim-answered (focused claim)
+  "Select the workspace CLAIM names, the claim a report of FOCUSED made.
+CLAIM is the success's `claim' oneof: `:banner' is a FOCUS GAIN that
+claimed the newest banner the daemon held, whose workspace Emacs selects
+like any other switch; `:nothing-held' is a gain with no banner held, and
+`:no-gain' any other report, so nothing moves."
+  (pcase (plist-get claim :arm)
+    (:banner
+     (let* ((id (plist-get (plist-get (plist-get claim :value) :workspace) :id))
+            (ws (agent-repl--ws-by-ref-id id)))
+       (if ws
+           (progn
+             (agent-repl--info ws "elisp.notifications.claim banner ws=%s id=%s" ws id)
+             (agent-repl-host-request-switch ws 'notification-focus))
+         ;; THE BANNER'S WORKSPACE HAS NO TAB in this Emacs (closed or hidden
+         ;; since the banner was made): there is nowhere to land, so the user
+         ;; stays where they are.
+         (agent-repl--info agent-repl--focus-log-scope
+                           "elisp.notifications.claim banner-without-tab id=%s" id))))
+    (:nothing-held
+     (agent-repl--log agent-repl--focus-log-scope
+                      "elisp.notifications.focus-report ok focused=%s claim=nothing-held" focused))
+    (:no-gain
+     (agent-repl--log agent-repl--focus-log-scope
+                      "elisp.notifications.focus-report ok focused=%s claim=no-gain" focused))
     (arm
      (agent-repl--error agent-repl--focus-log-scope
-                        "elisp.notifications.claim unknown-arm arm=%S" arm))))
-
-(defun agent-repl--claim-live-notification-failed (detail)
-  "Record a claim that failed in transport, or on the daemon, with DETAIL."
-  (agent-repl--error agent-repl--focus-log-scope
-                     "elisp.notifications.claim failed detail=%S" detail))
+                        "elisp.notifications.claim unknown-arm focused=%s arm=%S"
+                        focused arm))))
 
 ;;;; ---- The click ----
 
