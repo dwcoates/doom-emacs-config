@@ -9,9 +9,10 @@
  * stylesheet draws as a subtle highlight.
  *
  * A TABLE (owner request, 2026-10-01): a header row, then one row per entry,
- * every row the same height, in three columns — the workspace, its stage (the
- * front's active tab; "waiting" for everyone behind it) and how long it has
- * been in that stage. It is a COLUMN TABLE exactly as the expanded footer's
+ * every row the same height, in three columns — the workspace, the worktree
+ * its merge lands in (`target`, owner request 2026-10-23) and how long it has
+ * been in its stage. The workspace header counts the entries, "workspace (3)".
+ * It is a COLUMN TABLE exactly as the expanded footer's
  * agents panel is (src/columns.ts): one grid whose header and rows share its
  * columns through `subgrid`, the duration column floored for "5hr 30m 30s"
  * and growing to its widest value. The duration ticks from the entry's
@@ -25,9 +26,13 @@
  * four cross-cutting causes worded by the shared `refusalSentence` so a
  * transferring daemon reads the same here as it does in the rail.
  *
- * THE FRONT ENTRY SHOWS WHAT IT IS DOING, as the very same `FeedMergeTabLabel`
- * its own bubble draws — imported, never respelled — so a waiting user watches
- * real progress instead of a spinner.
+ * THE MERGE RUNNING WEARS THE MERGE PURPLE, every merge waiting is greyed
+ * (owner request, 2026-10-23): the row's `data-queue-status`, read off the
+ * entry's status arm, is what the stylesheet colors.
+ *
+ * A PAUSED QUEUE SAYS SO ABOVE ITS TABLE (owner request, 2026-10-23): a
+ * "queue paused" banner in the paused amber, while the snapshot carries
+ * `frontend.v1.FeedMergeQueue.paused`.
  *
  * EVERY WAITING ROW CARRIES TWO MOVE CONTROLS (owner request, 2026-10-12), a
  * subtle up chevron and down chevron left of the workspace's name, which ask
@@ -62,7 +67,7 @@ import type { WorkspaceRef } from "../../../../proto/gen/ts/workspace/v1/workspa
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { jumpToWorkspace, type JumpSite } from "./jump.js";
-import { drawFeedMergeTabLabel } from "./tab-strip.js";
+import { drawPausedMark } from "./paused.js";
 
 const PATH = "FeedMergeQueue";
 
@@ -70,10 +75,15 @@ const PATH = "FeedMergeQueue";
 export type QueuePlace = "ahead" | "current" | "behind";
 
 /** The table's columns, in order, each named by its header. */
-export const QUEUE_COLUMNS = ["workspace", "stage", "duration"] as const;
+export const QUEUE_COLUMNS = ["workspace", "target", "duration"] as const;
 
-/** A waiting entry's stage, drawn in the stage column. */
-export const WAITING_STAGE = "waiting";
+/** The banner a paused queue draws above its table. */
+export const QUEUE_PAUSED_TEXT = "queue paused";
+
+/** The workspace column's header: its name and how many entries the table holds. */
+export function workspaceHeaderText(count: number): string {
+  return `workspace (${count})`;
+}
 
 /** Which way a move control moves its row's merge. */
 export type QueueMove = "up" | "down";
@@ -98,12 +108,16 @@ export function drawFeedMergeQueue(queue: FeedMergeQueue, rc: RowContext): HTMLE
   });
   const el = document.createElement("div");
   el.className = "merge-queue list-rows";
-  el.append(drawQueueHeader());
   const rows: { entry: FeedMergeQueueEntry; place: QueuePlace }[] = [
     ...queue.ahead.map((entry) => ({ entry, place: "ahead" as const })),
     { entry: requireMessage(queue.current, `${PATH}.current`), place: "current" },
     ...queue.behind.map((entry) => ({ entry, place: "behind" as const })),
   ];
+  if (queue.paused !== undefined) {
+    el.setAttribute("data-queue-paused", "");
+    el.append(drawPausedMark("merge-queue-paused", QUEUE_PAUSED_TEXT));
+  }
+  el.append(drawQueueHeader(rows.length));
   const waiting = rows.map(({ entry }) => entry.status.case === "waiting");
   rows.forEach(({ entry, place }, i) => {
     const moves: QueueMoves = {
@@ -115,18 +129,25 @@ export function drawFeedMergeQueue(queue: FeedMergeQueue, rc: RowContext): HTMLE
   return el;
 }
 
-/** The header row: one header per column, above its column. */
-function drawQueueHeader(): HTMLElement {
+/**
+ * The header row: one header per column, above its column, the workspace
+ * header counting the COUNT entries beneath it.
+ */
+function drawQueueHeader(count: number): HTMLElement {
   const header = document.createElement("div");
   header.className = `merge-queue-header ${COLUMNS_ROW_CLASS}`;
-  for (const column of QUEUE_COLUMNS) header.append(columnHeader(column));
+  for (const column of QUEUE_COLUMNS) {
+    const cell = columnHeader(column);
+    if (column === "workspace") cell.textContent = workspaceHeaderText(count);
+    header.append(cell);
+  }
   return header;
 }
 
 /**
- * One entry: its move controls and name, its stage and how long it has been in
- * it, and its jump. MOVES says which of a waiting entry's chevrons have a
- * waiting merge to pass.
+ * One entry: its move controls and name, the worktree it lands in, how long it
+ * has been in its stage, and its jump. MOVES says which of a waiting entry's
+ * chevrons have a waiting merge to pass.
  */
 export function drawFeedMergeQueueEntry(
   entry: FeedMergeQueueEntry,
@@ -160,27 +181,25 @@ export function drawFeedMergeQueueEntry(
   workspace.append(moveSlot, label);
   line.append(workspace);
 
-  const stage = document.createElement("span");
-  stage.className = "merge-queue-stage";
+  const target = requireMessage(entry.target, `${PATH}Entry.target`);
+  const targetCell = document.createElement("span");
+  targetCell.className = "merge-queue-target";
+  targetCell.textContent = target.text;
+  targetCell.title = target.dir;
+  line.append(targetCell);
+
   let enteredMs: number;
   switch (status.case) {
     case "merging":
-      stage.append(
-        drawFeedMergeTabLabel(
-          requireMessage(status.value.activeTab, `${PATH}Merging.active_tab`),
-        ),
-      );
       enteredMs = msOf(status.value.stageEnteredAtMs, `${PATH}Merging.stage_entered_at_ms`);
       break;
     case "waiting":
-      stage.textContent = WAITING_STAGE;
       moveSlot.append(drawMoveControl(el, rc, ref, "up", moves.up), drawMoveControl(el, rc, ref, "down", moves.down));
       enteredMs = msOf(status.value.stageEnteredAtMs, `${PATH}Waiting.stage_entered_at_ms`);
       break;
     default:
       return unreachableArm(`${PATH}Entry.status`, armName(status));
   }
-  line.append(stage);
 
   line.append(liveElapsedClock(rc.ctx.ticker, "footer-row-clock merge-queue-duration", enteredMs));
 

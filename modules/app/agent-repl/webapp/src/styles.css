@@ -404,6 +404,11 @@
      from the teal async cards and the grey tool cards in a long feed. */
   --merge-card: #fef3c7;
   --merge-border: #ca8a04;
+  /* A PAUSED MERGE QUEUE'S AMBER (owner request, 2026-10-23): the merge
+     bubble's "paused" pill, its queue tab's banner and its frame. A warm
+     orange, so a stopped queue reads at a glance apart from the purple of a
+     merge at work. */
+  --merge-paused: #d97706;
   /* Inline-code chip wash, so a `token` inside a sentence of prose reads as
      typeable at a glance. The light theme's chip SINKS INTO its pale bubble: a
      transparent BLACK wash, never a --fg one, since --fg flips light in the
@@ -607,6 +612,7 @@
     --async-border: #4fc4b0;
     --merge-card: #3a2e0a;
     --merge-border: #e0b603;
+    --merge-paused: #f59e0b;
     /* A white wash, lighter than the dark bubble (see the :root note). */
     --code-bg: color-mix(in srgb, #ffffff 12%, transparent);
     /* Lighter than this theme's `--muted`, as in the :root note. */
@@ -6931,7 +6937,7 @@ bubble-body.bubble-body { display: block; }
    headers above their columns.
 
    THE MERGE QUEUE TAB IS THE SAME TABLE (owner request, 2026-10-01): its
-   workspace, stage and duration columns take the one duration floor, bar,
+   workspace, target and duration columns take the one duration floor, bar,
    spacing and tabular figures declared here, so the two tables' duration
    columns cannot drift apart. Each table declares only its own columns. */
 .pfooter-sheet[data-panel="agents"],
@@ -8342,6 +8348,54 @@ bubble-body.bubble-body { display: block; }
 .merge-badge.is-succeeded { color: var(--ok); }
 .merge-badge.is-failed { color: var(--err); }
 .merge-badge.is-abandoned { color: var(--muted); }
+/* A PAUSED QUEUE (owner request, 2026-10-23; feed/merge/paused.ts): a pause
+   glyph and a word in --merge-paused, on a soft wash of it. The head draws it
+   as a pill after its badge, folded and expanded alike, and the queue tab as a
+   banner above its table. The glyph is two bars drawn by the element itself,
+   so it is the same shape in every font. */
+.merge-paused-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  color: var(--merge-paused);
+  background: color-mix(in srgb, var(--merge-paused) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--merge-paused) 55%, transparent);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.merge-paused-glyph {
+  display: inline-flex;
+  gap: 0.16em;
+  flex: none;
+}
+.merge-paused-glyph::before,
+.merge-paused-glyph::after {
+  content: "";
+  width: 0.2em;
+  height: 0.72em;
+  border-radius: 1px;
+  background: currentColor;
+}
+.merge-badge.is-paused {
+  align-self: center;
+  padding: 0.05em 0.55em;
+  border-radius: 999px;
+}
+/* A merge on a paused queue does not breathe: nothing moves until it resumes. */
+.merge-head[data-paused] .merge-badge.is-live { animation: none; opacity: 0.7; }
+/* THE WHOLE BUBBLE SAYS SO TOO: its frame takes the amber while its head is
+   paused, so a folded bubble reads as stopped from across the feed. */
+.tool-card.bubble-fold[data-merge-bubble]:has(> .bubble-head .merge-head[data-paused]) {
+  border-color: var(--merge-paused);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--merge-paused) 35%, transparent);
+}
+.merge-queue-paused {
+  justify-content: center;
+  margin-bottom: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+}
+
 /* THE SWITCH TO A DETACHED MERGE'S MERGE WORKSPACE (workspace-switch.ts): a
    prominent button at the head line's right end, there for the bubble's whole
    life, and in an agentic tab's content in place of the rows the requester's
@@ -8504,7 +8558,7 @@ bubble-body.bubble-body { display: block; }
    workspace · stage · duration under a header row. Rows are delimited by the
    ONE shared `.list-rows` rule. */
 .merge-queue {
-  /* The stage column may shrink below its text (owner rule, 2026-10-06:
+  /* The target column may shrink below its text (owner rule, 2026-10-06:
      nothing in the feed spans past the stream area); its cell clips with an
      ellipsis instead. */
   grid-template-columns:
@@ -8610,10 +8664,19 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   background: none;
   cursor: default;
 }
-/* THE DURATION READS AS THE STAGE DOES (owner request, 2026-10-17): the same
+/* THE MERGE RUNNING WEARS THE ONE PURPLE, every merge waiting is greyed
+   (owner request, 2026-10-23): the row's workspace and target are drawn in
+   --blocked at the front and in --muted behind it. */
+.merge-queue-entry[data-queue-status="merging"] :is(.merge-queue-label, .merge-queue-target) { color: var(--blocked); }
+.merge-queue-entry[data-queue-status="waiting"] :is(.merge-queue-label, .merge-queue-target) { color: var(--muted); }
+.merge-queue-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* THE DURATION READS AS THE TARGET DOES (owner request, 2026-10-17): the same
    size, font and muted grey, so the clock's own blue never sets its figures
    apart as the row's loudest cell. */
-.merge-queue-stage,
 .merge-queue-line > .merge-queue-duration {
   color: var(--muted);
   font: inherit;

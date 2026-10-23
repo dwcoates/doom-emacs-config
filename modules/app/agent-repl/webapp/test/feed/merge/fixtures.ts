@@ -80,6 +80,7 @@ const DEFAULT_QUEUE = {
   current: {
     workspace: { ref: { id: "mine", dir: "/w/mine" } },
     label: { text: "mine" },
+    target: { text: "doom", dir: "/src/doom" },
     status: { case: "waiting" as const, value: { stageEnteredAtMs: TAB_STARTED_AT_MS } },
   },
   behind: [],
@@ -151,7 +152,7 @@ export function tabRow(rowId: string, spec: TabSpec): FeedRow {
 /** A merge head message. */
 export function mergeHead(
   result:
-    | { case: "update"; stage?: "waiting" | "merging" }
+    | { case: "update"; stage?: "waiting" | "merging"; paused?: boolean }
     | {
         case: "success";
         endedAtMs: bigint;
@@ -169,7 +170,13 @@ export function mergeHead(
 ): FeedMerge {
   const arm =
     result.case === "update"
-      ? { case: "update" as const, value: { stage: { case: result.stage ?? "merging", value: {} } } }
+      ? {
+          case: "update" as const,
+          value: {
+            stage: { case: result.stage ?? "merging", value: {} },
+            ...(result.paused === true ? { paused: {} } : {}),
+          },
+        }
       : result.case === "success"
         ? {
             case: "success" as const,

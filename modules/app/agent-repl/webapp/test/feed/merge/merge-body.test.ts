@@ -407,6 +407,7 @@ describe("resolved tabs draw the tab row's own content", () => {
             current: {
               workspace: { ref: { id: "mine", dir: "/w/mine" } },
               label: { text: "mine" },
+              target: { text: "doom", dir: "/src/doom" },
               status: { case: "waiting", value: {} },
             },
             behind: [],
