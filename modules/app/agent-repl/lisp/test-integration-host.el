@@ -56,8 +56,10 @@ replay is run here, exactly where the load would run it."
   "The page URL a host call SCRIPT asks the host to hold, or nil.
 Every page lives in the one host web view (webhost.el), so pointing a page
 at a URL is the host's `ensure' call, and that call is the observable,
-whether the page loads at once or in turn (a third argument, its lane)."
-  (when (string-match "h\\.ensure(\"[^\"]*\",\"\\([^\"]*\\)\"\\(?:,\"[a-z]+\"\\)?)" script)
+whether the page loads at once or in turn (a third argument, its lane, or
+null) and whether a reload asked for it (a fourth, the reload's start, or
+null)."
+  (when (string-match "h\\.ensure(\"[^\"]*\",\"\\([^\"]*\\)\"\\(?:,\\(?:null\\|\"[a-z]+\"\\)\\)?\\(?:,\\(?:null\\|[0-9]+\\)\\)?)" script)
     (match-string 1 script)))
 (declare-function agent-repl-popup-open "popup")
 (declare-function agent-repl-link-successor "daemon-link")
