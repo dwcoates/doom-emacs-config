@@ -1830,6 +1830,18 @@ func (f *fakeStore) GetRunSettlements(_ context.Context, request *connect.Reques
 	}), nil
 }
 
+// GetLiveShellRunsAnnouncedBefore answers that the record holds no live shell
+// from before the boot: every subject here launches after it, so the record
+// has none to name.
+func (f *fakeStore) GetLiveShellRunsAnnouncedBefore(_ context.Context, _ *connect.Request[storev1.GetLiveShellRunsAnnouncedBeforeRequest]) (*connect.Response[storev1.GetLiveShellRunsAnnouncedBeforeResponse], error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "GetLiveShellRunsAnnouncedBefore")
+	return connect.NewResponse(&storev1.GetLiveShellRunsAnnouncedBeforeResponse{
+		Result: &storev1.GetLiveShellRunsAnnouncedBeforeResponse_Success{Success: &storev1.GetLiveShellRunsAnnouncedBeforeSuccess{}},
+	}), nil
+}
+
 // terminalRunOf names the run an entry ENDS, the way the store's detached_work
 // row is ended: a detached shell's terminal bash frame, or a spawn activity
 // that settled (a backgrounded subagent's settle, whose activity id is the run).

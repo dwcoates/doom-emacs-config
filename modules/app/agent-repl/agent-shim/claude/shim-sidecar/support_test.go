@@ -99,6 +99,28 @@ type fakeStore struct {
 	settled          map[string]int64
 	settlementsFail  string
 	settlementsAsked [][]string
+
+	// liveShells is what GetLiveShellRunsAnnouncedBefore answers; liveShellsFail,
+	// non-empty, answers the failure arm; liveShellsAsked is every instant asked.
+	liveShells      []*storev1.GetLiveShellRunsAnnouncedBeforeRun
+	liveShellsFail  string
+	liveShellsAsked []int64
+}
+
+// GetLiveShellRunsAnnouncedBefore answers liveShells, or the failure arm.
+func (f *fakeStore) GetLiveShellRunsAnnouncedBefore(_ context.Context, request *connect.Request[storev1.GetLiveShellRunsAnnouncedBeforeRequest]) (*connect.Response[storev1.GetLiveShellRunsAnnouncedBeforeResponse], error) {
+	f.liveShellsAsked = append(f.liveShellsAsked, request.Msg.GetAnnouncedBeforeMs())
+	if f.liveShellsFail != "" {
+		return connect.NewResponse(&storev1.GetLiveShellRunsAnnouncedBeforeResponse{
+			Result: &storev1.GetLiveShellRunsAnnouncedBeforeResponse_Failure{Failure: &storev1.GetLiveShellRunsAnnouncedBeforeFailure{
+				Detail: f.liveShellsFail,
+				Kind:   &storev1.GetLiveShellRunsAnnouncedBeforeFailure_StorageFailure{StorageFailure: &storev1.GetLiveShellRunsAnnouncedBeforeStorageFailure{}},
+			}},
+		}), nil
+	}
+	return connect.NewResponse(&storev1.GetLiveShellRunsAnnouncedBeforeResponse{
+		Result: &storev1.GetLiveShellRunsAnnouncedBeforeResponse_Success{Success: &storev1.GetLiveShellRunsAnnouncedBeforeSuccess{Runs: f.liveShells}},
+	}), nil
 }
 
 // GetRunSettlements answers the way the store does: a run is settled once a

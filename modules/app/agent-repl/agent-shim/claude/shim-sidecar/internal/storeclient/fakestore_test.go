@@ -42,6 +42,10 @@ type fakeStore struct {
 	settlements    *storev1.GetRunSettlementsResponse
 	settlementsErr error
 	lastSettleReq  *storev1.GetRunSettlementsRequest
+	// liveShells answers GetLiveShellRunsAnnouncedBefore; lastLiveShellsReq is
+	// the last request it was asked.
+	liveShells        *storev1.GetLiveShellRunsAnnouncedBeforeResponse
+	lastLiveShellsReq *storev1.GetLiveShellRunsAnnouncedBeforeRequest
 }
 
 func (f *fakeStore) GetRunSettlements(_ context.Context, request *connect.Request[storev1.GetRunSettlementsRequest]) (*connect.Response[storev1.GetRunSettlementsResponse], error) {
@@ -50,6 +54,11 @@ func (f *fakeStore) GetRunSettlements(_ context.Context, request *connect.Reques
 		return nil, f.settlementsErr
 	}
 	return connect.NewResponse(f.settlements), nil
+}
+
+func (f *fakeStore) GetLiveShellRunsAnnouncedBefore(_ context.Context, request *connect.Request[storev1.GetLiveShellRunsAnnouncedBeforeRequest]) (*connect.Response[storev1.GetLiveShellRunsAnnouncedBeforeResponse], error) {
+	f.lastLiveShellsReq = request.Msg
+	return connect.NewResponse(f.liveShells), nil
 }
 
 func (f *fakeStore) GetShellRunClaims(_ context.Context, request *connect.Request[storev1.GetShellRunClaimsRequest]) (*connect.Response[storev1.GetShellRunClaimsResponse], error) {

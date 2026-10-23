@@ -67,6 +67,7 @@ const (
 	rpcGetSidecarCursors = storev1connect.ShimStoreGetSidecarCursorsProcedure
 	rpcGetShellRunClaims = storev1connect.ShimStoreGetShellRunClaimsProcedure
 	rpcGetRunSettlements = storev1connect.ShimStoreGetRunSettlementsProcedure
+	rpcGetLiveShellRuns  = storev1connect.ShimStoreGetLiveShellRunsAnnouncedBeforeProcedure
 
 	// WriteBatchSite is the `refusal_site` a refused write is reported under.
 	// A caller that states the refusal itself — the cycle parking a file on an
@@ -321,6 +322,43 @@ func (c *Client) RunSettlements(ctx context.Context, runIDs []string) ([]*storev
 	default:
 		bound.With(logging.Context{Level: "error"}).Log("run settlements answer carries neither success nor failure")
 		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcGetRunSettlements)
+	}
+}
+
+// LiveShellRunsAnnouncedBefore answers every detached shell run the record
+// holds no terminal for whose announcement the store wrote before beforeMs,
+// oldest first, each with its owner and spawning call.
+//
+// A FAILURE IS NEVER SOFTENED INTO AN EMPTY ANSWER: "no such run" would leave
+// a run nothing else will ever end held open as running, which is exactly what
+// the question exists to prevent.
+func (c *Client) LiveShellRunsAnnouncedBefore(ctx context.Context, beforeMs int64) ([]*storev1.GetLiveShellRunsAnnouncedBeforeRun, error) {
+	bound := c.log.With(logging.Context{
+		Operation: "storeclient-live-shell-runs", StoreSocket: c.socket, RPC: rpcGetLiveShellRuns,
+	})
+	bound.LogVerbose("live shell runs announced before %d requested", beforeMs)
+	response, err := c.rpc.GetLiveShellRunsAnnouncedBefore(ctx, connect.NewRequest(&storev1.GetLiveShellRunsAnnouncedBeforeRequest{AnnouncedBeforeMs: beforeMs}))
+	if err != nil {
+		return nil, callFailure(bound, rpcGetLiveShellRuns, "live shell runs", "so no run from before the boot was concluded", err)
+	}
+	switch result := response.Msg.GetResult().(type) {
+	case *storev1.GetLiveShellRunsAnnouncedBeforeResponse_Success:
+		runs := result.Success.GetRuns()
+		bound.LogVerbose("live shell runs answered runs=%d", len(runs))
+		return runs, nil
+	case *storev1.GetLiveShellRunsAnnouncedBeforeResponse_Failure:
+		refusal := &RefusalError{RPC: rpcGetLiveShellRuns, Detail: result.Failure.GetDetail()}
+		switch kind := result.Failure.GetKind().(type) {
+		case *storev1.GetLiveShellRunsAnnouncedBeforeFailure_InvalidRequest:
+			refusal.Kind, refusal.Field = RefusalInvalidRequest, kind.InvalidRequest.GetField()
+		case *storev1.GetLiveShellRunsAnnouncedBeforeFailure_StorageFailure:
+			refusal.Kind = RefusalStorageFailure
+		}
+		bound.With(logging.Context{Level: "error"}).Log("live shell runs refused: %s", refusal.Detail)
+		return nil, refusal
+	default:
+		bound.With(logging.Context{Level: "error"}).Log("live shell runs answer carries neither success nor failure")
+		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcGetLiveShellRuns)
 	}
 }
 

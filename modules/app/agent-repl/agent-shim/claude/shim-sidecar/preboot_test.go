@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/handler"
 )
 
@@ -235,7 +237,7 @@ func TestAPreBootShellDiscoveryFindsASpoolForIsReleased(t *testing.T) {
 	store := &fakeStore{}
 	h := prebootHarness(t, store)
 	h.sc.TaskSpawned("b1found", "toolu_found", "agent-1", "/nowhere/b1found.output", false, "/workspace", "workspace-id", "session-1", launchAt(beforeBoot))
-	h.sc.unclaimedShells["b1found"] = "/elsewhere/tasks/b1found.output"
+	h.sc.unclaimedShells["b1found"] = "/elsewhere/tasks/b1found.output" // the launch named the task, so its run is known
 	h.sc.rescan()
 
 	// Act
@@ -244,5 +246,89 @@ func TestAPreBootShellDiscoveryFindsASpoolForIsReleased(t *testing.T) {
 	// Assert
 	if lostTerminalsFor(store.writes, "toolu_found") != 0 || len(h.sc.preBoot) != 0 {
 		t.Fatalf("LOST = %d, held = %d; want it released to its spool's reader", lostTerminalsFor(store.writes, "toolu_found"), len(h.sc.preBoot))
+	}
+}
+
+// recordRun is a live shell the record names, announced at ms.
+func recordRun(run, owner string, ms int64) *storev1.GetLiveShellRunsAnnouncedBeforeRun {
+	return &storev1.GetLiveShellRunsAnnouncedBeforeRun{
+		Detached:      &storev1.GetLiveWorkDetached{Work: &conversationv1.DetachedWorkId{Value: run}, Owner: &conversationv1.AgentId{Value: owner}},
+		Run:           &conversationv1.AgentActivityId{Value: run},
+		AnnouncedAtMs: ms,
+	}
+}
+
+func TestAShellTheRecordNamesFromBeforeTheBootIsConcludedLost(t *testing.T) {
+	// Arrange: no launch is read by this process; only the record names it.
+	store := &fakeStore{liveShells: []*storev1.GetLiveShellRunsAnnouncedBeforeRun{recordRun("toolu_ghost", "agent-1", beforeBoot)}}
+	h := prebootHarness(t, store)
+	h.sc.rescan()
+
+	// Act: the first sweep asks the record and holds the run; a full scan
+	// later, the next sweep concludes it.
+	h.sc.sweep()
+	h.sc.rescan()
+	h.sc.sweep()
+
+	// Assert
+	if got := lostTerminalsFor(store.writes, "toolu_ghost"); got != 1 {
+		t.Fatalf("LOST terminals = %d, want 1", got)
+	}
+	if len(store.liveShellsAsked) != 1 || store.liveShellsAsked[0] != bootMs {
+		t.Fatalf("the record was asked %v, want once with the boot instant %d", store.liveShellsAsked, bootMs)
+	}
+}
+
+func TestTheRecordIsNotAskedBeforeTheFirstFullScan(t *testing.T) {
+	// Arrange: a process that has completed no full scan yet.
+	store := &fakeStore{}
+	h := prebootHarness(t, store)
+	h.sc.fullScans = 0
+
+	// Act
+	h.sc.askRecordForPreBoot()
+
+	// Assert
+	if len(store.liveShellsAsked) != 0 {
+		t.Fatalf("the record was asked %v before any full scan", store.liveShellsAsked)
+	}
+}
+
+func TestTheRecordIsAskedAgainOnlyAfterItFailed(t *testing.T) {
+	// Arrange
+	store := &fakeStore{liveShellsFail: "database is locked"}
+	h := prebootHarness(t, store)
+	h.sc.rescan()
+
+	// Act
+	h.sc.askRecordForPreBoot()
+	store.liveShellsFail = ""
+	h.sc.askRecordForPreBoot()
+	h.sc.askRecordForPreBoot()
+
+	// Assert
+	if len(store.liveShellsAsked) != 2 {
+		t.Fatalf("the record was asked %d times, want 2: once failing, once answering, never after", len(store.liveShellsAsked))
+	}
+	h.requireOnce(t, "preboot-run", "error")
+}
+
+func TestARecordRunWithASpoolIsReleasedToItsReader(t *testing.T) {
+	// Arrange: the record names the run, and a launch read here ties it to a
+	// spool discovery holds.
+	store := &fakeStore{liveShells: []*storev1.GetLiveShellRunsAnnouncedBeforeRun{recordRun("toolu_spooled", "agent-1", beforeBoot)}}
+	h := prebootHarness(t, store)
+	h.sc.TaskSpawned("b1spooled", "toolu_spooled", "agent-1", "", false, "/workspace", "workspace-id", "session-1", noLaunch)
+	h.sc.unclaimedShells["b1spooled"] = "/elsewhere/tasks/b1spooled.output"
+	h.sc.rescan()
+	h.sc.askRecordForPreBoot()
+	h.sc.rescan()
+
+	// Act
+	h.sc.concludePreBoot()
+
+	// Assert
+	if lostTerminalsFor(store.writes, "toolu_spooled") != 0 || len(h.sc.preBoot) != 0 {
+		t.Fatalf("LOST = %d, held = %d; want it released to its spool's reader", lostTerminalsFor(store.writes, "toolu_spooled"), len(h.sc.preBoot))
 	}
 }
