@@ -12,11 +12,13 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"agent-repld/internal/recordlock"
 )
 
 // The record locks' guarantees are about OTHER processes, so these cases run
 // a second one: this test binary re-executed as TestLockHelperProcess, which
-// takes what its mode names, prints "ready <pid>" or "child <pid>", and holds
+// takes what its mode names, prints "ready <pid>", and holds
 // until its stdin closes.
 
 const lockHelperEnv = "DAEMONADDR_LOCK_HELPER"
@@ -25,8 +27,6 @@ const lockHelperEnv = "DAEMONADDR_LOCK_HELPER"
 //
 //	serve PATH    hold the boot claim at PATH and its serving lock
 //	shared PATH   hold a shared record lock on PATH
-//	forked PATH   hold the boot claim, start a child that inherits the
-//	              claim's descriptor, print the child, and EXIT at once
 //	probe PATH    print who holds the boot claim and the serving lock
 func TestLockHelperProcess(t *testing.T) {
 	mode := os.Getenv(lockHelperEnv)
@@ -52,30 +52,15 @@ func TestLockHelperProcess(t *testing.T) {
 		if err != nil {
 			fail(err)
 		}
-		if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, wholeFile(syscall.F_RDLCK)); err != nil {
+		if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, &syscall.Flock_t{Type: syscall.F_RDLCK}); err != nil {
 			fail(err)
 		}
-	case "forked":
-		lock, err := acquireBootLock(path)
-		if err != nil {
-			fail(err)
-		}
-		// THE CHILD HOLDS A DESCRIPTOR OF THE CLAIM'S OPEN FILE DESCRIPTION,
-		// as a child the daemon forked holds one until its exec. A flock
-		// would stay held through it after this process exits.
-		child := exec.Command("/bin/sleep", "300")
-		child.ExtraFiles = []*os.File{lock.rec.f}
-		if err := child.Start(); err != nil {
-			fail(err)
-		}
-		fmt.Printf("child %d\n", child.Process.Pid)
-		os.Exit(0)
 	case "probe":
-		boot, err := holderOf(path)
+		boot, err := recordlock.HolderOf(path)
 		if err != nil {
 			fail(err)
 		}
-		serving, err := holderOf(ServingPath(filepath.Join(filepath.Dir(path), "daemon.addr")))
+		serving, err := recordlock.HolderOf(ServingPath(filepath.Join(filepath.Dir(path), "daemon.addr")))
 		if err != nil {
 			fail(err)
 		}
@@ -144,36 +129,6 @@ func (h *lockHelper) field(t *testing.T, word string) int {
 	return 0
 }
 
-func TestAClaimIsFreeOnceItsHolderExitsWhileAChildHoldsItsDescriptor(t *testing.T) {
-	// Arrange: a holder that started a child inheriting the claim's
-	// descriptor, then exited; the child is still alive.
-	path := filepath.Join(t.TempDir(), LockName)
-	helper := startLockHelper(t, "forked", path)
-	child := helper.field(t, "child")
-	t.Cleanup(func() {
-		if p, err := os.FindProcess(child); err == nil {
-			_ = p.Kill()
-			_, _ = p.Wait()
-		}
-	})
-	if err := helper.cmd.Wait(); err != nil {
-		t.Fatalf("the holder's exit: %v", err)
-	}
-	if err := syscall.Kill(child, 0); err != nil {
-		t.Fatalf("the child holding the descriptor is gone (%v); the case needs it alive", err)
-	}
-
-	// Act.
-	lock, err := acquireBootLock(path)
-
-	// Assert: the dead holder's claim is free; the child's descriptor holds
-	// nothing.
-	if err != nil {
-		t.Fatalf("acquireBootLock = %v, want the claim free once its holder exited", err)
-	}
-	lock.release()
-}
-
 func TestARefusedClaimNamesTheProcessHoldingIt(t *testing.T) {
 	// Arrange.
 	path := filepath.Join(t.TempDir(), LockName)
@@ -239,7 +194,7 @@ func TestAskingAboutTheLocksInTheHoldingProcessKeepsThemHeld(t *testing.T) {
 		{"a bounded take", func(path string) { _, _, _ = acquireBootLockWithin(path, ClaimWaitBound, BootOrdinary, nil) }},
 		{"a claim probe", func(path string) { _ = ProbeBootClaim(filepath.Join(filepath.Dir(path), "daemon.addr")) }},
 		{"a serving probe", func(path string) { _, _ = servingHeld(servingLockPath(path)) }},
-		{"a holder lookup", func(path string) { _, _ = holderOf(path); _, _ = holderOf(servingLockPath(path)) }},
+		{"a holder lookup", func(path string) { _, _ = recordlock.HolderOf(path); _, _ = recordlock.HolderOf(servingLockPath(path)) }},
 	}
 	for _, tt := range asks {
 		t.Run(tt.name, func(t *testing.T) {
@@ -278,7 +233,7 @@ func TestAFreeLockNamesNoHolder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), LockName)
 
 	// Act.
-	holder, err := holderOf(path)
+	holder, err := recordlock.HolderOf(path)
 
 	// Assert.
 	if err != nil || holder.PID != 0 {
@@ -299,37 +254,18 @@ func TestAHeldErrorWithNoNamedHolderSaysSo(t *testing.T) {
 	}
 }
 
-func TestOpenLockFileCreatesAReadWriteFile(t *testing.T) {
-	// Arrange.
-	path := filepath.Join(t.TempDir(), LockName)
-
-	// Act.
-	f, err := openLockFile(path)
-
-	// Assert: created, and lockable both ways.
-	if err != nil {
-		t.Fatalf("openLockFile: %v", err)
-	}
-	defer f.Close()
-	for _, typ := range []int16{syscall.F_RDLCK, syscall.F_WRLCK} {
-		if err := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, wholeFile(typ)); err != nil {
-			t.Fatalf("lock type %d on the opened file: %v", typ, err)
-		}
-	}
-}
-
-// Every lock file this package opens goes through openLockFile: a
-// hand-rolled open elsewhere is a drifted copy.
-func TestEveryLockFileOpenGoesThroughOpenLockFile(t *testing.T) {
+// Every lock file this package opens goes through recordlock.OpenFile: a
+// hand-rolled open here is a drifted copy, and closing one would drop a held
+// record lock.
+func TestEveryLockFileOpenGoesThroughRecordlock(t *testing.T) {
 	for _, name := range []string{"lock.go", "recordlock.go", "claim.go"} {
 		body, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
 		}
-		lines := strings.Split(string(body), "\n")
-		for i, line := range lines {
-			if strings.Contains(line, "os.OpenFile(") && !strings.Contains(lines[max(i-1, 0)], "func openLockFile") {
-				t.Errorf("%s:%d opens a file by hand; use openLockFile: %s", name, i+1, strings.TrimSpace(line))
+		for i, line := range strings.Split(string(body), "\n") {
+			if strings.Contains(line, "os.OpenFile(") {
+				t.Errorf("%s:%d opens a file by hand; use recordlock.OpenFile: %s", name, i+1, strings.TrimSpace(line))
 			}
 		}
 	}

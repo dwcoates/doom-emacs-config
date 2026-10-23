@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"agent-repld/internal/recordlock"
 )
 
 // LockName is the boot-exclusivity lock file beside daemon.addr.
@@ -144,21 +146,21 @@ func LockPath(addrPath string) string {
 // The lock, not the bind, is the exclusivity: a port-0 bind hands every
 // racing daemon a different free port and so arbitrates nothing. A record
 // lock does arbitrate, and the kernel releases it on the death of the process
-// that took it, whatever its children hold (recordlock.go), so a daemon that
+// that took it, whatever its children hold (recordlock), so a daemon that
 // was force-killed leaves the claim free rather than a stale file that has to
 // be reasoned about.
 type bootLock struct {
-	rec  *heldRecord
+	rec  *recordlock.Record
 	path string
 	// serving is the held serving lock (ServingName), nil until takeServing
 	// and again once depart released it.
-	serving *heldRecord
+	serving *recordlock.Record
 }
 
 // openBootLock opens the lock file without attempting to lock it. Failing to
 // open it is never read as the claim being free: it is an undecided claim.
 func openBootLock(path string) (*os.File, error) {
-	f, err := openLockFile(path)
+	f, err := recordlock.OpenFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("open the boot lock %q: %w", path, err)
 	}
@@ -173,9 +175,9 @@ func openBootLock(path string) (*os.File, error) {
 // unchanged -- it is not racing anybody, the incumbent has already stood down
 // -- and so does ProbeBootClaim, whose whole question is "is it held NOW".
 func acquireBootLock(path string) (*bootLock, error) {
-	rec, holder, err := tryExclusive(path)
+	rec, holder, err := recordlock.TryExclusive(path)
 	switch {
-	case errors.Is(err, errWouldBlock):
+	case errors.Is(err, recordlock.ErrWouldBlock):
 		return nil, &HeldError{Path: path, Holder: holder}
 	case err != nil:
 		return nil, fmt.Errorf("take the boot lock %q: %w", path, err)
@@ -257,7 +259,7 @@ func acquireBootLockWithin(path string, wait time.Duration, mode BootMode, onRef
 	case <-timer.C:
 		// THE HOLDER IS NAMED ON THE WAITING DESCRIPTOR, which asks the
 		// kernel without disturbing the wait queued on it.
-		holder, _ := holderOn(f)
+		holder, _ := recordlock.HolderOn(f)
 		// THE LATE WINNER IS RELEASED, NEVER LEAKED. The blocking attempt is
 		// still queued in the kernel; if it lands after this answer it hands
 		// back a claim nobody asked for any more.
@@ -282,7 +284,7 @@ func servingHeld(path string) (bool, error) {
 
 // servingHeldBy is servingHeld with the holder the kernel named when held.
 func servingHeldBy(path string) (bool, Holder, error) {
-	held, holder, err := probeShared(path)
+	held, holder, err := recordlock.ProbeShared(path)
 	if err != nil {
 		return false, Holder{}, fmt.Errorf("probe the serving lock %q: %w", path, err)
 	}
@@ -298,11 +300,11 @@ func (l *bootLock) takeServing() error {
 	}
 	path := filepath.Join(filepath.Dir(l.path), ServingName)
 	// Opened with O_CREATE and never unlinked: see ServingName.
-	f, err := openLockFile(path)
+	f, err := recordlock.OpenFile(path)
 	if err != nil {
 		return fmt.Errorf("open the serving lock %q: %w", path, err)
 	}
-	rec, err := blockExclusive(f, path)
+	rec, err := recordlock.BlockExclusive(f, path)
 	if err != nil {
 		return fmt.Errorf("take the serving lock %q: %w", path, err)
 	}
@@ -335,7 +337,7 @@ func (l *bootLock) depart() error {
 	}
 	rec := l.serving
 	l.serving = nil
-	if err := rec.unlock(); err != nil {
+	if err := rec.Release(); err != nil {
 		return fmt.Errorf("release the serving lock beside %q: %w", l.path, err)
 	}
 	return nil
@@ -350,7 +352,7 @@ func (l *bootLock) depart() error {
 // goroutine itself never touches the filesystem by name, and a wait that is
 // abandoned cannot recreate the file after its owner has gone.
 func blockForBootLock(f *os.File, path string) (*bootLock, error) {
-	rec, err := blockExclusive(f, path)
+	rec, err := recordlock.BlockExclusive(f, path)
 	if err != nil {
 		return nil, fmt.Errorf("wait for the boot lock %q: %w", path, err)
 	}
@@ -389,7 +391,7 @@ func (l *bootLock) release() error {
 	}
 	rec := l.rec
 	l.rec = nil
-	if err := rec.unlock(); err != nil {
+	if err := rec.Release(); err != nil {
 		return fmt.Errorf("release the boot lock %q: %w", l.path, err)
 	}
 	return departErr
@@ -404,7 +406,7 @@ func (l *bootLock) verify() error {
 	if l.rec == nil {
 		return fmt.Errorf("the boot lock %q is released", l.path)
 	}
-	held, err := l.rec.f.Stat()
+	held, err := l.rec.Stat()
 	if err != nil {
 		return fmt.Errorf("stat the held boot lock %q: %w", l.path, err)
 	}

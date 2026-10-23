@@ -12,8 +12,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/flock"
 	"agent-repld/internal/headless"
+	"agent-repld/internal/recordlock"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -268,7 +268,7 @@ func TestARefreshWhileOneRunsInThisDaemonIsAlreadyRunning(t *testing.T) {
 func TestARefreshWhileAnotherDaemonHoldsTheLockIsAlreadyRunning(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	held, ok, err := flock.TryExclusive(w.lock)
+	held, ok, err := recordlock.Hold(w.lock)
 	if err != nil || !ok {
 		t.Fatalf("taking the lock: %v %v", ok, err)
 	}

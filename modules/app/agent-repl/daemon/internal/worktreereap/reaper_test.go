@@ -760,8 +760,8 @@ func TestASweepIsRefusedWhileAnotherIsRunning(t *testing.T) {
 }
 
 func TestASweepHeldByAnotherProcessIsSkippedAtInfo(t *testing.T) {
-	// Arrange: an flock on a second open file description conflicts exactly
-	// as another process's would.
+	// Arrange: a second holder in this process is refused exactly as another
+	// process's would be (recordlock's in-process gate).
 	w := newWorld(t)
 	repo := w.addRepo("repo")
 	w.addTree(repo, tree{name: "landed"})

@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"agent-repld/internal/flock"
+	"agent-repld/internal/recordlock"
 )
 
 // This file holds the merge queue's REPO-SCOPED KERNEL LOCK.
 //
 // The durable queue keeps the order; the lock keeps two daemons from running
 // one repository's queue at the same time. The kernel arbitrates, so the
-// guarantee survives a daemon that died without cleaning up: an flock is
+// guarantee survives a daemon that died without cleaning up: a record lock is
 // released by the kernel when the holding process goes away, which no
 // check-then-act on a state file can promise.
 
@@ -26,14 +26,14 @@ func repoLockName(repo string) string {
 }
 
 // repoLock is one held repository lock.
-type repoLock = flock.Lock
+type repoLock = recordlock.Record
 
 // acquireRepoLock takes the repository's queue lock under dir, without
 // blocking. The bool is false when another daemon holds it — a legal answer
 // this daemon waits out — while an error means the lock could not be TOLD
 // about, which is never read as free.
 func acquireRepoLock(dir, repo string) (*repoLock, bool, error) {
-	lock, ok, err := flock.TryExclusive(filepath.Join(dir, repoLockName(repo)))
+	lock, ok, err := recordlock.Hold(filepath.Join(dir, repoLockName(repo)))
 	if err != nil {
 		return nil, false, fmt.Errorf("merge: %w", err)
 	}

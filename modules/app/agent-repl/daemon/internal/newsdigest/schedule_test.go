@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"agent-repld/internal/flock"
+	"agent-repld/internal/recordlock"
 )
 
 // scheduled is one schedule run on its own goroutine.
@@ -144,7 +144,7 @@ func TestADaemonThatDoesNotServeStartsNoRun(t *testing.T) {
 func TestARunAnotherDaemonHoldsIsLookedAtAgainAfterTheRecheck(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	held, ok, err := flock.TryExclusive(w.lock)
+	held, ok, err := recordlock.Hold(w.lock)
 	if err != nil || !ok {
 		t.Fatalf("taking the lock: %v %v", ok, err)
 	}
