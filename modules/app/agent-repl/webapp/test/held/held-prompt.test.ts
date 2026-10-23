@@ -1283,6 +1283,72 @@ describe("in-flight", () => {
     );
     expect(disabled).toBe(true);
   });
+
+  // A release into a running turn answers success and pushes nothing until
+  // that turn ends: the row must not wait for a push to come back.
+  it("re-enables the whole row once a release is accepted, with no push", async () => {
+    // Arrange
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<Control>('[data-held-action="release"]')?.click();
+    await settle();
+    // Assert
+    expect(
+      [...card.querySelectorAll<Control>(".queued-actions ar-button")].some(
+        (b) => b.disabled,
+      ),
+    ).toBe(false);
+  });
+
+  it("re-enables the whole row once a fold is accepted, with no push", async () => {
+    // Arrange
+    const { tc } = foldContext(foldSuccess);
+    const card = drawHeldPrompt(foldable(), tc);
+    // Act
+    card.querySelector<Control>('[data-held-action="fold"]')?.click();
+    await settle();
+    // Assert
+    expect(
+      [...card.querySelectorAll<Control>(".queued-actions ar-button")].some(
+        (b) => b.disabled,
+      ),
+    ).toBe(false);
+  });
+
+  it("re-enables the row when a call never lands", async () => {
+    // Arrange
+    const { tc } = trayContext(() => {
+      throw new ConnectError("down", Code.Unavailable);
+    });
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    const release = card.querySelector<Control>('[data-held-action="release"]');
+    // Act
+    release?.click();
+    await settle();
+    // Assert
+    expect(release?.disabled).toBe(false);
+  });
+
+  it("logs an accepted action at info with its turn and action", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act
+    card.querySelector<Control>('[data-held-action="release"]')?.click();
+    await settle();
+    // Assert
+    const record = await forwardedRecord(
+      capture,
+      "held.held-prompt.action-accepted",
+    );
+    expect([record.level.case, record.context?.turn, record.context?.action]).toEqual([
+      "info",
+      "turn-1",
+      "release",
+    ]);
+  });
 });
 
 describe("the tray's own logging", () => {
