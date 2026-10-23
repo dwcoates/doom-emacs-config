@@ -38,16 +38,27 @@ func responseLabels(row *frontendv1.FeedRow) map[string]bool {
 	return labels
 }
 
+// promptEntries answers ROW's entries, in order, when ROW is a user prompt;
+// nil otherwise. The one walk of a prompt's entries: every reader of them
+// reads through it.
+func promptEntries(row *frontendv1.FeedRow) []*frontendv1.ProseEntry {
+	var entries []*frontendv1.ProseEntry
+	for _, block := range row.GetUserPrompt().GetSuccess().GetBody().GetBlocks() {
+		for _, prose := range block.GetText().GetProse().GetBlocks() {
+			if entry := prose.GetEntry(); entry != nil {
+				entries = append(entries, entry)
+			}
+		}
+	}
+	return entries
+}
+
 // promptEntryLabels answers the labels ROW's entries answer, in order, when
 // ROW is a user prompt; nil otherwise.
 func promptEntryLabels(row *frontendv1.FeedRow) []string {
 	var labels []string
-	for _, block := range row.GetUserPrompt().GetSuccess().GetBody().GetBlocks() {
-		for _, prose := range block.GetText().GetProse().GetBlocks() {
-			if entry := prose.GetEntry(); entry != nil {
-				labels = append(labels, entry.GetLabel().GetText())
-			}
-		}
+	for _, entry := range promptEntries(row) {
+		labels = append(labels, entry.GetLabel().GetText())
 	}
 	return labels
 }
@@ -146,11 +157,9 @@ func (r *resolver) restateAnswers(s *wsState, addr feedid.Feed, why string) {
 // promptEntryText answers what ROW's entry answering LABEL says, when ROW is a
 // user prompt holding one: the first such entry.
 func promptEntryText(row *frontendv1.FeedRow, label string) (string, bool) {
-	for _, block := range row.GetUserPrompt().GetSuccess().GetBody().GetBlocks() {
-		for _, prose := range block.GetText().GetProse().GetBlocks() {
-			if entry := prose.GetEntry(); entry != nil && entry.GetLabel().GetText() == label {
-				return entry.GetText().GetMarkdown(), true
-			}
+	for _, entry := range promptEntries(row) {
+		if entry.GetLabel().GetText() == label {
+			return entry.GetText().GetMarkdown(), true
 		}
 	}
 	return "", false

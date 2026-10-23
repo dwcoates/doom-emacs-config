@@ -1,6 +1,9 @@
 package feed
 
 import (
+	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -158,4 +161,107 @@ func equalPairs(got, want [][2]string) bool {
 		}
 	}
 	return true
+}
+
+// entryRow is a user prompt row whose one text block holds ENTRIES, each a
+// (label, words) pair, after a plain block.
+func entryRow(entries ...[2]string) *frontendv1.FeedRow {
+	blocks := []*frontendv1.ProseBlock{{Block: &frontendv1.ProseBlock_Plain{Plain: &frontendv1.ProsePlain{Markdown: "intro"}}}}
+	for _, e := range entries {
+		blocks = append(blocks, &frontendv1.ProseBlock{Block: &frontendv1.ProseBlock_Entry{Entry: &frontendv1.ProseEntry{
+			Label: &frontendv1.ProseEntryLabel{Text: e[0]},
+			Text:  &frontendv1.ProseEntryText{Markdown: e[1]},
+		}}})
+	}
+	return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
+		Result: &frontendv1.FeedUserPrompt_Success{Success: &frontendv1.FeedUserPromptSuccess{
+			Body: &frontendv1.FeedUserPromptBody{Blocks: []*frontendv1.FeedUserPromptBlock{{
+				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: &frontendv1.ParsedProse{Blocks: blocks}}},
+			}}},
+		}},
+	}}}
+}
+
+func TestPromptEntriesReadsAPromptsEntriesInOrder(t *testing.T) {
+	tests := []struct {
+		name string
+		row  *frontendv1.FeedRow
+		want []string
+	}{
+		{"a prompt's entries, plain blocks left out", entryRow([2]string{"1.2", "b"}, [2]string{"1.1", "a"}), []string{"1.2", "1.1"}},
+		{"a prompt holding no entry", entryRow(), nil},
+		{"a row that is no prompt", &frontendv1.FeedRow{}, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			var got []string
+			for _, e := range promptEntries(tc.row) {
+				got = append(got, e.GetLabel().GetText())
+			}
+
+			// Assert
+			if !slices.Equal(got, tc.want) || !slices.Equal(promptEntryLabels(tc.row), tc.want) {
+				t.Fatalf("promptEntries labels = %v, promptEntryLabels = %v, want %v", got, promptEntryLabels(tc.row), tc.want)
+			}
+		})
+	}
+}
+
+func TestPromptEntryTextReadsTheFirstEntryAnsweringALabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		label  string
+		want   string
+		wantOK bool
+	}{
+		{"an entry answering the label", "1.1", "first", true},
+		{"a label two entries answer", "1.2", "second", true},
+		{"a label no entry answers", "9.9", "", false},
+	}
+	row := entryRow([2]string{"1.1", "first"}, [2]string{"1.2", "second"}, [2]string{"1.2", "again"})
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, ok := promptEntryText(row, tc.label)
+
+			// Assert
+			if got != tc.want || ok != tc.wantOK {
+				t.Fatalf("promptEntryText(%q) = (%q, %v), want (%q, %v)", tc.label, got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestPromptEntryReadsAPublishedPromptsEntry(t *testing.T) {
+	// Arrange
+	h := answeredHarness(t)
+	h.deliverPrompt("turn-2", "1.1 - yes, do that")
+	row := &frontendv1.FeedId{Value: h.promptRowID("turn-2")}
+
+	// Act
+	got, ok := h.resolver.PromptEntry(testWorkspace, row, "1.1")
+	_, missing := h.resolver.PromptEntry(testWorkspace, row, "1.2")
+
+	// Assert
+	if got != "yes, do that" || !ok || missing {
+		t.Fatalf("PromptEntry = (%q, %v), absent label ok = %v; want (\"yes, do that\", true) and false", got, ok, missing)
+	}
+}
+
+func TestEveryReaderOfAPromptsEntriesWalksThemThroughPromptEntries(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("answers.go")
+	if err != nil {
+		t.Fatalf("read answers.go: %v", err)
+	}
+
+	// Act
+	walks := strings.Count(string(src), ".GetEntry()")
+	calls := strings.Count(string(src), "promptEntries(row)")
+
+	// Assert: the one walk is promptEntries' own, and both readers call it.
+	if walks != 1 || calls != 2 {
+		t.Fatalf("answers.go reads GetEntry() %d times and calls promptEntries %d times, want 1 and 2", walks, calls)
+	}
 }
