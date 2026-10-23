@@ -51,15 +51,17 @@ same job replaces its timer rather than adding one.  Reset alongside
 `agent-repl--timers' by `agent-repl--cancel-all-timers'.")
 
 (defconst agent-repl--required-timer-keys
-  '((:state-poll . agent-repl--arm-state-poll-timer)
-    (:autosave   . agent-repl--arm-autosave-timer))
+  '((:state-poll    . agent-repl--arm-state-poll-timer)
+    (:autosave      . agent-repl--arm-autosave-timer)
+    (:stall-sampler . agent-repl--arm-stall-sampler))
   "Alist of (KEY . ARM-FUNCTION) for every timer the module must keep armed.
 
 This is the contract `agent-repl--assert-heartbeat-armed' enforces: each
 KEY names a job that must have exactly one live timer once the module is
 loaded, and ARM-FUNCTION is the owner file's entry point for (re-)arming
 it.  The owners are `status.el' (:state-poll, the heartbeat that repaints
-the tab bar) and `autosave.el' (:autosave).
+the tab bar), `autosave.el' (:autosave) and `stall.el' (:stall-sampler, the
+command loop's stall measurement).
 
 EVERY KEY HERE MUST HAVE A LIVE OWNER.  Two did not: `:readiness-poll' and
 `:workspace-status-export' outlived `readiness.el' and

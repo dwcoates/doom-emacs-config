@@ -4715,7 +4715,41 @@ encoder reads: the common codec owns the real encoding.")
                                         (secondsSinceProcessStart . 2.0))
                                        ((milestone . "EDITOR_STARTUP_MILESTONE_ALL_TABS")
                                         (running)
-                                        (secondsSinceProcessStart . 6.5))]))))))
+                                        (secondsSinceProcessStart . 6.5))])
+                     (editorLatencies . []))))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-latencies-request-carries-editor-latencies ()
+  "The editor's own latencies ride `editorLatencies', each fully spelled."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-report-latencies-request
+                    (list :editor-latencies
+                          (list (list :kind :stall :seconds 0.25)
+                                (list :kind :elisp-reload :seconds 1))))
+                   '((editorStartup . [])
+                     (editorLatencies . [((kind . "EDITOR_LATENCY_KIND_STALL") (seconds . 0.25))
+                                         ((kind . "EDITOR_LATENCY_KIND_ELISP_RELOAD") (seconds . 1.0))]))))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-latencies-refuses-a-malformed-editor-latency ()
+  "An unknown kind or a bad time never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (latency (list (list :kind :unspecified :seconds 1)
+                           (list :kind :stall :seconds -1)
+                           (list :kind :stall :seconds 0.0e+NaN)
+                           (list :kind :stall :seconds 1.0e+INF)
+                           (list :kind :stall)))
+      (should-error (agent-repl-wire-encode-report-latencies-request
+                     (list :editor-latencies (list latency)))
+                    :type 'agent-repl-wire-error))))
+
+(ert-deftest agent-repl-test-wire-verbs-editor-latency-kinds-pinned ()
+  "The editor latency vocabulary is every generated enum name except UNSPECIFIED."
+  (should (equal
+           (sort (mapcar #'cdr agent-repl-wire-editor-latency-kinds) #'string<)
+           (sort (remove "EDITOR_LATENCY_KIND_UNSPECIFIED"
+                         (agent-repl-test--generated-enum-names
+                          "agentrepl/v1/endpoint_report_latencies.pb.go"
+                          "EDITOR_LATENCY_KIND_"))
+                 #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-report-latencies-request-serializes-empty-arms ()
   "An empty daemon arm serializes as an empty object, as protojson expects."
@@ -4723,7 +4757,7 @@ encoder reads: the common codec owns the real encoding.")
     (should (equal (json-serialize
                     (agent-repl-wire-encode-report-latencies-request
                      (list :editor-startup (list (list :milestone :init :daemon :spawned :seconds 1)))))
-                   "{\"editorStartup\":[{\"milestone\":\"EDITOR_STARTUP_MILESTONE_INIT\",\"spawned\":{},\"secondsSinceProcessStart\":1.0}]}"))))
+                   "{\"editorStartup\":[{\"milestone\":\"EDITOR_STARTUP_MILESTONE_INIT\",\"spawned\":{},\"secondsSinceProcessStart\":1.0}],\"editorLatencies\":[]}"))))
 
 (ert-deftest agent-repl-test-wire-verbs-report-latencies-refuses-a-malformed-milestone ()
   "An unknown milestone or daemon arm, or a bad time, never reaches the wire."

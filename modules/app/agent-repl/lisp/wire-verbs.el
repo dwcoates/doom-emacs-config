@@ -5499,14 +5499,38 @@ the seconds a finite, non-negative number since the process start."
           (cons arm nil)
           (cons 'secondsSinceProcessStart (float seconds)))))
 
+(defconst agent-repl-wire-editor-latency-kinds
+  '((:stall . "EDITOR_LATENCY_KIND_STALL")
+    (:elisp-reload . "EDITOR_LATENCY_KIND_ELISP_RELOAD"))
+  "The EditorLatencyKind vocabulary Emacs sends, keyword to wire name.
+UNSPECIFIED is deliberately ABSENT, as for the startup milestones.")
+
+(defun agent-repl-wire-encode-reported-editor-latency (latency)
+  "Encode one ReportedEditorLatency from plist LATENCY.
+LATENCY is (:kind KEYWORD :seconds NUMBER), each required: the kind from
+its closed vocabulary, the seconds a finite, non-negative number."
+  (let* ((message "ReportedEditorLatency")
+         (name (cdr (assq (plist-get latency :kind) agent-repl-wire-editor-latency-kinds)))
+         (seconds (plist-get latency :seconds)))
+    (unless name
+      (agent-repl-wire-verbs--fail message "kind" "unknown kind"))
+    (unless (and (numberp seconds) (>= seconds 0) (< seconds 1.0e+INF))
+      (agent-repl-wire-verbs--fail message "seconds" "not a finite, non-negative number"))
+    (list (cons 'kind name)
+          (cons 'seconds (float seconds)))))
+
 (defun agent-repl-wire-encode-report-latencies-request (request)
   "Encode ReportLatenciesRequest from plist REQUEST.
-REQUEST is (:editor-startup MILESTONES), each milestone a plist for
-`agent-repl-wire-encode-reported-editor-startup'.  Emacs reports no
-interaction latency of its own, so `latencies' is never spelled."
+REQUEST is (:editor-startup MILESTONES :editor-latencies LATENCIES), each
+milestone a plist for `agent-repl-wire-encode-reported-editor-startup' and
+each latency one for `agent-repl-wire-encode-reported-editor-latency'.
+Emacs reports no workspace's latency, so `latencies' is never spelled."
   (list (cons 'editorStartup
               (vconcat (mapcar #'agent-repl-wire-encode-reported-editor-startup
-                               (plist-get request :editor-startup))))))
+                               (plist-get request :editor-startup))))
+        (cons 'editorLatencies
+              (vconcat (mapcar #'agent-repl-wire-encode-reported-editor-latency
+                               (plist-get request :editor-latencies))))))
 
 (defun agent-repl-wire-decode-report-latencies-recorded (json)
   "Decode ReportLatenciesRecorded from JSON into (:recorded N)."

@@ -1,0 +1,137 @@
+;;; test-stall.el --- ERT tests for agent-repl stall.el -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; Run with:
+;;   bin/background.sh emacs -batch -Q -l ert -l lisp/test-stall.el \
+;;     -f ert-run-tests-batch-and-exit
+
+;;; Code:
+
+(load (expand-file-name "test-helpers.el" (file-name-directory
+                                            (or load-file-name buffer-file-name)))
+      nil t)
+
+(defvar agent-repl-test-stall--reported nil "Every stall reported, newest first, as (KIND SECONDS).")
+(defvar agent-repl-test-stall--records nil "Every info record, newest first.")
+(defvar agent-repl-test-stall--clock 0.0 "What the stubbed wall clock answers.")
+
+(defmacro agent-repl-test-stall--with (&rest body)
+  "Run BODY with a settable clock, a recording report and no prior run."
+  (declare (indent 0))
+  `(let ((agent-repl-stall--last nil)
+         (agent-repl-test-stall--reported nil)
+         (agent-repl-test-stall--records nil)
+         (agent-repl-test-stall--clock 100.0))
+     (cl-letf (((symbol-function 'agent-repl-stall--now) (lambda () agent-repl-test-stall--clock))
+               ((symbol-function 'agent-repl-latency-report-editor)
+                (lambda (kind seconds) (push (list kind seconds) agent-repl-test-stall--reported)))
+               ((symbol-function 'agent-repl--info)
+                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) agent-repl-test-stall--records))))
+       ,@body)))
+
+(defun agent-repl-test-stall--run-after (seconds)
+  "Advance the clock by SECONDS and run the sampler."
+  (setq agent-repl-test-stall--clock (+ agent-repl-test-stall--clock seconds))
+  (agent-repl-stall-sample))
+
+(ert-deftest agent-repl-test-stall-the-first-run-measures-nothing ()
+  "The first run has no previous run to measure from."
+  (agent-repl-test-stall--with
+    ;; Act
+    (agent-repl-stall-sample)
+    ;; Assert
+    (should-not agent-repl-test-stall--reported)
+    (should (= agent-repl-stall--last 100.0))))
+
+(ert-deftest agent-repl-test-stall-an-on-time-run-reports-nothing ()
+  "A run one interval after the last is a healthy loop."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    ;; Act
+    (agent-repl-test-stall--run-after agent-repl-stall-interval)
+    ;; Assert
+    (should-not agent-repl-test-stall--reported)))
+
+(ert-deftest agent-repl-test-stall-a-delay-under-the-floor-reports-nothing ()
+  "A run late by less than the floor is a healthy loop."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    ;; Act
+    (agent-repl-test-stall--run-after (+ agent-repl-stall-interval (/ agent-repl-stall-floor 2)))
+    ;; Assert
+    (should-not agent-repl-test-stall--reported)))
+
+(ert-deftest agent-repl-test-stall-a-delay-at-the-floor-is-a-stall ()
+  "A run late by the floor exactly is reported."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    ;; Act
+    (agent-repl-test-stall--run-after (+ agent-repl-stall-interval agent-repl-stall-floor))
+    ;; Assert
+    (should (= (length agent-repl-test-stall--reported) 1))
+    (should (eq (car (car agent-repl-test-stall--reported)) :stall))))
+
+(ert-deftest agent-repl-test-stall-a-stall-is-the-gap-less-the-interval ()
+  "A run 1.1s after the last reports a 1s stall."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    ;; Act
+    (agent-repl-test-stall--run-after (+ agent-repl-stall-interval 1.0))
+    ;; Assert
+    (should (< (abs (- (cadr (car agent-repl-test-stall--reported)) 1.0)) 1e-9))))
+
+(ert-deftest agent-repl-test-stall-each-run-measures-from-the-one-before ()
+  "Two stalls in a row are reported separately, each from its own previous run."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    ;; Act
+    (agent-repl-test-stall--run-after (+ agent-repl-stall-interval 0.5))
+    (agent-repl-test-stall--run-after (+ agent-repl-stall-interval 0.2))
+    ;; Assert
+    (should (equal (mapcar (lambda (r) (/ (round (* 1000 (cadr r))) 1000.0)) agent-repl-test-stall--reported)
+                   '(0.2 0.5)))))
+
+(ert-deftest agent-repl-test-stall-a-gap-past-any-stall-is-recorded-not-reported ()
+  "A gap longer than any stall (a host sleep) is recorded at INFO and not reported."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    ;; Act
+    (agent-repl-test-stall--run-after 3600.0)
+    ;; Assert
+    (should-not agent-repl-test-stall--reported)
+    (should (string-match-p "elisp.stall.unclassified gap=3600.000" (car agent-repl-test-stall--records)))))
+
+(ert-deftest agent-repl-test-stall-arming-registers-the-sampler-key-and-forgets-the-last-run ()
+  "Arming goes through the timer registry under `:stall-sampler' and starts measuring afresh."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (setq agent-repl-stall--last 5.0)
+    (let (registered)
+      (cl-letf (((symbol-function 'agent-repl--register-timer)
+                 (lambda (key timer) (setq registered (list key timer)) timer))
+                ((symbol-function 'run-at-time)
+                 (lambda (secs repeat fn) (list 'timer secs repeat fn))))
+        ;; Act
+        (agent-repl--arm-stall-sampler))
+      ;; Assert
+      (should (equal registered
+                     (list :stall-sampler
+                           (list 'timer agent-repl-stall-interval agent-repl-stall-interval
+                                 #'agent-repl-stall-sample))))
+      (should-not agent-repl-stall--last))))
+
+(ert-deftest agent-repl-test-stall-the-sampler-is-a-required-timer ()
+  "The heartbeat assertion re-arms the sampler, through this file's arm function."
+  (should (eq (cdr (assq :stall-sampler agent-repl--required-timer-keys))
+              #'agent-repl--arm-stall-sampler)))
+
+(provide 'test-stall)
+
+;;; test-stall.el ends here
