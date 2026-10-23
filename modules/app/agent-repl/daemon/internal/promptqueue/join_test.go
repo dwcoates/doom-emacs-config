@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"agent-repld/internal/classifier"
@@ -589,5 +590,227 @@ func TestAnAgentsPromptJoiningTheRunningTurnDeclaresItsSender(t *testing.T) {
 	want := SentBy{Workspace: theSender, Name: "parser-fix", PermissionMode: "auto"}
 	if last := handed[len(handed)-1]; last == nil || *last != want {
 		t.Fatalf("the join's sender = %+v, want %+v", last, want)
+	}
+}
+
+// A JOINING PROMPT AN ASK OVERTOOK GOES BACK TO THE HELD TRAY (owner ruling,
+// 2026-10-23): refused at the join while an ask is open, or given back by the
+// vendor once one opened (conversation.v1.SessionJoinWithdrawn).
+
+// reheld answers the standing holds other than ORIGINAL, the prompt's first.
+func reheld(h *harness, original ids.TurnID) []wsm.HeldPrompt {
+	var out []wsm.HeldPrompt
+	for turn, held := range snapshot(h) {
+		if turn != original && held.Tombstone == nil {
+			out = append(out, held)
+		}
+	}
+	return out
+}
+
+func TestAJoinRefusedForAnOpenAskWaitsWithTheAsksReason(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.joinErr = fmt.Errorf("shim StartTurn refused: ask_open: %w", ErrAskOpen)
+
+	// Act
+	sentToJoin(t, h)
+
+	// Assert
+	if c := verdictOf(t, h, "t1"); c.Arm != wsm.ArmHoldForTurnEnd || c.Reason != askOpenReason {
+		t.Fatalf("verdict = %+v, want the prompt waiting for the running turn's end with the ask's reason", c)
+	}
+}
+
+func TestAJoinRefusedForAnOpenAskIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.joinErr = fmt.Errorf("shim StartTurn refused: ask_open: %w", ErrAskOpen)
+
+	// Act
+	sentToJoin(t, h)
+
+	// Assert
+	if !logged(h.log.Records(), dlog.LevelInfo, opJoin, "an ask blocks the vendor, so the prompt cannot join the running turn; it waits for it to end") {
+		t.Fatalf("records = %+v, want the ask-open refusal at info", h.log.Records())
+	}
+	if logged(h.log.Records(), dlog.LevelError, opJoin, "the shim refused the prompt sent to join the running turn; it waits for it to end") {
+		t.Fatalf("records = %+v, want no error for an expected ask-open refusal", h.log.Records())
+	}
+}
+
+func TestARefusedJoinTakesItsAcceptedRowDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.joinErr = errors.New("turn_already_open")
+
+	// Act
+	sentToJoin(t, h)
+
+	// Assert
+	if got := h.feed.retiredPrompts(); len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("retired prompts = %v, want t1's accepted row taken down", got)
+	}
+}
+
+func TestAWithdrawnJoinClosesItsTurnAsWithdrawnAndRaisesNoBanner(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sentToJoin(t, h)
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseWithdrawn)
+
+	// Assert
+	if how, ok := h.db.closedTurn("t1"); !ok || how != wsm.CloseWithdrawn {
+		t.Fatalf("close = (%s, %v), want withdrawn", how, ok)
+	}
+	if ended := h.banners.ended; len(ended) != 0 {
+		t.Fatalf("banners = %+v, want none for a prompt that ran no turn", ended)
+	}
+}
+
+func TestAWithdrawnJoinTakesItsAcceptedRowDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sentToJoin(t, h)
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseWithdrawn)
+
+	// Assert
+	if got := h.feed.retiredPrompts(); len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("retired prompts = %v, want t1's accepted row taken down", got)
+	}
+}
+
+func TestAWithdrawnJoinIsHeldAgainInItsPlaceUnderANewTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sentToJoin(t, h)
+	original := snapshot(h)["t1"]
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseWithdrawn)
+
+	// Assert
+	again := reheld(h, "t1")
+	if len(again) != 1 {
+		t.Fatalf("held again = %+v, want exactly the withdrawn prompt", again)
+	}
+	got := again[0]
+	if got.Turn == "t1" || !got.QueuedAt.Equal(original.QueuedAt) || saidText(got.Said) != "also cover the edge case" {
+		t.Fatalf("held again = %+v, want t1's words in t1's place under a new turn", got)
+	}
+	if got.Classification == nil || got.Classification.Arm != wsm.ArmHoldForTurnEnd || got.Classification.Reason != askOpenReason {
+		t.Fatalf("verdict = %+v, want the prompt waiting for the running turn's end with the ask's reason", got.Classification)
+	}
+}
+
+func TestAWithdrawnJoinLeavesNoJoiningPrompt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sentToJoin(t, h)
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseWithdrawn)
+
+	// Assert
+	if joined, ok := h.q.joining(theWorkspace); ok {
+		t.Fatalf("joining = %+v, want none after the withdrawal", joined)
+	}
+}
+
+func TestAWithdrawnJoinLeavesTheRunningTurnAlone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sentToJoin(t, h)
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseWithdrawn)
+
+	// Assert
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v, want nothing delivered while the running turn runs", started)
+	}
+	if ends := h.footer.turnEnds(); len(ends) != 0 {
+		t.Fatalf("footer ends = %v, want the running turn's status untouched", ends)
+	}
+}
+
+func TestAWithdrawnJoinWhoseHoldCannotBeReadIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sentToJoin(t, h)
+	h.db.byTurnErr = errors.New("the store is gone")
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseWithdrawn)
+
+	// Assert
+	if !logged(h.log.Records(), dlog.LevelError, opJoin, "could not read the withdrawn prompt's hold; it is lost from the queue") {
+		t.Fatalf("records = %+v, want the unreadable hold at error", h.log.Records())
+	}
+}
+
+func TestAWithdrawnPromptWithNoHoldIsAnInvariantViolation(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	log := h.q.deps.Log.Global()
+
+	// Act
+	h.q.reholdWithdrawn(context.Background(), theWorkspace, "never-held", log)
+
+	// Assert
+	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opJoin, Message: "the withdrawn prompt has no hold to restore; it is lost from the queue"})
+	if !ok || record.Context["withdrawn_turn"] != "never-held" {
+		t.Fatalf("records = %+v, want the missing hold at error naming the turn", h.log.Records())
+	}
+	if again := reheld(h, ""); len(again) != 0 {
+		t.Fatalf("held = %+v, want nothing held", again)
+	}
+}
+
+func TestAWithdrawnJoinThatCannotBeHeldAgainIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sentToJoin(t, h)
+	h.db.putHeldErr = errors.New("disk full")
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseWithdrawn)
+
+	// Assert
+	if !logged(h.log.Records(), dlog.LevelError, opJoin, "could not hold the withdrawn prompt again; it is lost from the queue") {
+		t.Fatalf("records = %+v, want the failed re-hold at error", h.log.Records())
+	}
+}
+
+// THE VENDOR CAN GIVE A PROMPT BACK after the turn it joined ended and it stood
+// as its own turn: that turn ends, and what is held -- the prompt itself --
+// is delivered.
+func TestAWithdrawnPromptThatHadStoodAsItsOwnTurnIsDeliveredAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sentToJoin(t, h)
+	h.watcher.running("t1")
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	h.watcher.idle()
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseWithdrawn)
+
+	// Assert
+	if how, ok := h.db.closedTurn("t1"); !ok || how != wsm.CloseWithdrawn {
+		t.Fatalf("close = (%s, %v), want withdrawn", how, ok)
+	}
+	started := h.sender.started()
+	if len(started) != 1 || started[0] == "t1" {
+		t.Fatalf("started = %v, want the withdrawn prompt delivered again under a new turn", started)
+	}
+	for _, how := range h.footer.turnEnds() {
+		if how == wsm.CloseWithdrawn {
+			t.Fatalf("footer ends = %v, want no result for a turn that never ran", h.footer.turnEnds())
+		}
 	}
 }

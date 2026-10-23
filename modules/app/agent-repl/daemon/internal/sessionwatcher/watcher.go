@@ -805,6 +805,30 @@ func (w *watcher) foldJoinLocked(turn, into ids.TurnID) {
 	w.turnEndedLocked(turn, wsm.CloseFolded)
 }
 
+// withdrawJoinLocked ends a joining turn the vendor gave back before taking
+// it in, because an ask opened (conversation.v1.SessionJoinWithdrawn): it ends
+// unrun as wsm.CloseWithdrawn, and the prompt queue holds the prompt again.
+// One that already stood in flight (the turn it joined ended first) ends as
+// that turn. A withdrawal served again, or one for a turn this watcher never
+// had in hand, ends nothing.
+func (w *watcher) withdrawJoinLocked(turn, into ids.TurnID) {
+	fields := dlog.Context{"turn_id": string(turn), "joined_turn": string(into), "turn_in_flight": ids.Optional(w.turn)}
+	if _, ended := w.closedTurns[turn]; ended {
+		w.log.Debug("daemon.sessionwatcher.turn_withdrawn_again", "a withdrawn prompt's turn already ended; nothing ends again", fields)
+		return
+	}
+	held := w.turn != nil && *w.turn == turn
+	for _, entry := range w.waiting {
+		held = held || entry.turn == turn
+	}
+	if !held {
+		w.log.Info("daemon.sessionwatcher.turn_withdrawn_unheld", "a withdrawal named a turn this watcher was not holding; nothing ends", fields)
+		return
+	}
+	w.log.Info("daemon.sessionwatcher.turn_withdrawn", "the vendor gave back a joining prompt before taking it in; its own turn ends unrun", fields)
+	w.turnEndedLocked(turn, wsm.CloseWithdrawn)
+}
+
 // acceptedLocked reports whether `turn` is the turn in flight and past its
 // opening.
 func (w *watcher) acceptedLocked(turn ids.TurnID) bool {

@@ -292,7 +292,7 @@ func (a ClassificationArm) String() string {
 }
 
 // valid reports whether the turn close is one of the declared arms.
-func (c TurnClose) valid() bool { return c >= CloseCompleted && c <= CloseFolded }
+func (c TurnClose) valid() bool { return c >= CloseCompleted && c <= CloseWithdrawn }
 
 // String names a turn close for a log record; an undeclared close is named by
 // its number.
@@ -310,6 +310,8 @@ func (c TurnClose) String() string {
 		return "agent_died"
 	case CloseFolded:
 		return "folded"
+	case CloseWithdrawn:
+		return "withdrawn"
 	default:
 		return fmt.Sprintf("close(%d)", int(c))
 	}

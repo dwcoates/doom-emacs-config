@@ -223,6 +223,12 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		})
 		w.pendingSkillsChanged = append([]string{}, paths...)
 
+	case *conversationv1.SessionUpdate_JoinWithdrawn:
+		// A PROMPT SENT TO JOIN THE RUNNING TURN WAS GIVEN BACK before the
+		// vendor took it in: its own turn ends unrun, and the lifecycle sink
+		// (the prompt queue) holds it again once the lock is let go.
+		w.withdrawJoinLocked(ids.TurnID(u.JoinWithdrawn.GetTurn().GetValue()), ids.TurnID(u.JoinWithdrawn.GetInto().GetValue()))
+
 	default:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeSessionUpdateLocked", "branch": "default"})
 		w.log.Warn("daemon.sessionwatcher.session_update_unrouted", "a SessionUpdate arm has no route", dlog.Context{
@@ -321,6 +327,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "vendor_error_retry"
 	case *conversationv1.SessionUpdate_SkillsChanged:
 		return "skills_changed"
+	case *conversationv1.SessionUpdate_JoinWithdrawn:
+		return "join_withdrawn"
 	default:
 		return "unset"
 	}

@@ -2881,6 +2881,7 @@ func TestSessionArmNamesTheCompactionAndNetworkResumeArms(t *testing.T) {
 		{name: "a network-resume outcome", update: networkResumeOutcomeUpdate(), want: "network_resume_outcome"},
 		{name: "the vendor's effort", update: effortChangedUpdate(), want: "effort_changed"},
 		{name: "agent-repl's vendor-error retry", update: vendorErrorRetryUpdate(), want: "vendor_error_retry"},
+		{name: "a joining prompt withdrawn", update: joinWithdrawnUpdate("turn-2", "turn-1"), want: "join_withdrawn"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -3437,5 +3438,104 @@ func TestRouteRollbackSettledHandsTheSettleToTheFeedAlone(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatalf("events = %+v, want the feed's alone", got)
+	}
+}
+
+// A JOINING PROMPT AN ASK OVERTOOK (conversation.v1.SessionJoinWithdrawn): the
+// vendor gave it back, so its own turn ends unrun as withdrawn.
+
+// joinWithdrawnUpdate states TURN, sent to join INTO, withdrawn.
+func joinWithdrawnUpdate(turn, into string) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_JoinWithdrawn{
+		JoinWithdrawn: &conversationv1.SessionJoinWithdrawn{
+			Turn: &conversationv1.TurnId{Value: turn},
+			Into: &conversationv1.TurnId{Value: into},
+		},
+	}}
+}
+
+func TestAWithdrawnJoinEndsItsJoiningTurnAsWithdrawn(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(joinWithdrawnUpdate("turn-2", "turn-1")) })
+
+	// Assert.
+	ended := requireEvent(t, got, "lifecycle.OnTurnEnded")
+	if ended.turn == nil || *ended.turn != "turn-2" || ended.close != wsm.CloseWithdrawn {
+		t.Fatalf("turn ended = (%v, %v), want turn-2 withdrawn", ended.turn, ended.close)
+	}
+}
+
+func TestAWithdrawnJoinLeavesTheTurnItWasToJoinInFlight(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+
+	// Act.
+	h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(joinWithdrawnUpdate("turn-2", "turn-1")) })
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-1" {
+		t.Fatalf("turn in flight = %v, want turn-1", turn)
+	}
+}
+
+func TestTheTurnAWithdrawnJoinWasToJoinEndsWithNothingBehindIt(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+	h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(joinWithdrawnUpdate("turn-2", "turn-1")) })
+
+	// Act.
+	endTurn1(h)
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none once the joined turn ends", turn)
+	}
+}
+
+func TestAWithdrawnJoinThatHadStoodInFlightEndsAsTheTurnInFlight(t *testing.T) {
+	// Arrange: turn-1 ended first, so turn-2 stands in flight.
+	h, _ := joiningHarness(t)
+	endTurn1(h)
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(joinWithdrawnUpdate("turn-2", "turn-1")) })
+
+	// Assert.
+	ended := requireEvent(t, got, "lifecycle.OnTurnEnded")
+	if ended.turn == nil || *ended.turn != "turn-2" || ended.close != wsm.CloseWithdrawn || h.w.TurnInFlight() != nil {
+		t.Fatalf("turn ended = (%v, %v), in flight = %v; want turn-2 withdrawn and nothing in flight", ended.turn, ended.close, h.w.TurnInFlight())
+	}
+}
+
+func TestAWithdrawalServedAgainEndsNothingMore(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+	h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(joinWithdrawnUpdate("turn-2", "turn-1")) })
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(joinWithdrawnUpdate("turn-2", "turn-1")) })
+
+	// Assert.
+	if hasEvent(got, "lifecycle.OnTurnEnded") {
+		t.Fatalf("events = %+v, want no second end for a withdrawal served again", got)
+	}
+}
+
+func TestAWithdrawalOfATurnNeverHeldEndsNothing(t *testing.T) {
+	// Arrange.
+	h, _ := joiningHarness(t)
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(joinWithdrawnUpdate("turn-9", "turn-1")) })
+
+	// Assert.
+	if hasEvent(got, "lifecycle.OnTurnEnded") {
+		t.Fatalf("events = %+v, want nothing ended for a turn this watcher never held", got)
+	}
+	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-1" {
+		t.Fatalf("turn in flight = %v, want turn-1 untouched", turn)
 	}
 }

@@ -81,6 +81,16 @@ func TestResolveTurnEndReadsNoEndForAFoldedPrompt(t *testing.T) {
 	}
 }
 
+func TestResolveTurnEndReadsNoEndForAWithdrawnPrompt(t *testing.T) {
+	// Act
+	_, ok := ResolveTurnEnd(wsm.CloseWithdrawn, NoFailure)
+
+	// Assert
+	if ok {
+		t.Fatal("a withdrawn prompt's turn never ran, so it has no turn end to read")
+	}
+}
+
 func TestResolveTurnFaultReadsEveryCloseAndClass(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -91,6 +101,7 @@ func TestResolveTurnFaultReadsEveryCloseAndClass(t *testing.T) {
 		{name: "a completion raises no fault", how: wsm.CloseCompleted, class: NoFailure, want: NoTurnFault},
 		{name: "an interrupt raises no fault", how: wsm.CloseKilled, class: NoFailure, want: NoTurnFault},
 		{name: "a folded prompt raises no fault", how: wsm.CloseFolded, class: NoFailure, want: NoTurnFault},
+		{name: "a withdrawn prompt raises no fault", how: wsm.CloseWithdrawn, class: NoFailure, want: NoTurnFault},
 		{name: "a vendor-failed turn is a vendor fault", how: wsm.CloseFailed, class: VendorFailed, want: VendorTurnFault},
 		{name: "a vendor-blocked turn is a vendor fault", how: wsm.CloseFailed, class: VendorBlocked, want: VendorTurnFault},
 		{name: "a failed close no terminal explained is a vendor fault", how: wsm.CloseFailed, class: NoFailure, want: VendorTurnFault},

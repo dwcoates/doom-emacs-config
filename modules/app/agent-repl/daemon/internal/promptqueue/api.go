@@ -73,6 +73,12 @@ var (
 	// under the reconnect hold rather than lost (feed_held.proto,
 	// HeldPromptReconnectHold).
 	ErrShimHasNoSession = errors.New("promptqueue: the shim holds no session")
+	// ErrAskOpen is the SHIM's own refusal of a prompt sent to join the
+	// running turn because an ask blocks the vendor (StartTurnFailure.ask_open):
+	// the vendor would take the prompt in only once the user answered. The
+	// sender's typed refusal answers errors.Is against it, and the prompt stays
+	// held for the running turn's end.
+	ErrAskOpen = errors.New("promptqueue: an ask blocks the vendor")
 	// ErrShimDied is a delivery that failed because the shim DIED under it:
 	// the session read live when the prompt arrived, and the shim was gone
 	// by the time StartTurn reached it. The sender's error answers errors.Is

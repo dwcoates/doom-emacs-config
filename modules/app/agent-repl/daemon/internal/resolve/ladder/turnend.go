@@ -51,10 +51,10 @@ func ResolveTurnEnd(how wsm.TurnClose, class FailureClass) (TurnEnd, bool) {
 			return TurnEndDone, true
 		}
 		return TurnEndFailed, true
-	case wsm.CloseFolded:
-		// A FOLDED PROMPT'S TURN NEVER RAN, so it has no end to read: the turn
-		// it joined ends for it. No caller asks, and one that did is told the
-		// close is not a turn end.
+	case wsm.CloseFolded, wsm.CloseWithdrawn:
+		// A FOLDED OR WITHDRAWN PROMPT'S TURN NEVER RAN, so it has no end to
+		// read: the turn it joined ends for it, or it was held again. No
+		// caller asks, and one that did is told the close is not a turn end.
 		return 0, false
 	default:
 		return 0, false
@@ -121,7 +121,7 @@ func (f TurnFault) String() string {
 // asked for, whatever closed the row after it.
 func ResolveTurnFault(how wsm.TurnClose, class FailureClass) (TurnFault, bool) {
 	switch how {
-	case wsm.CloseCompleted, wsm.CloseKilled, wsm.CloseFolded:
+	case wsm.CloseCompleted, wsm.CloseKilled, wsm.CloseFolded, wsm.CloseWithdrawn:
 		return NoTurnFault, true
 	case wsm.CloseFailed, wsm.CloseOrphaned, wsm.CloseAgentDied:
 	default:

@@ -419,6 +419,24 @@ func TestAFoldedCloseDrawsNoEndingOfItsOwn(t *testing.T) {
 	}
 }
 
+func TestAWithdrawnCloseDrawsNoEndingOfItsOwn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "port the footer")
+	h.deliverPrompt("turn-2", "also cover the edge case")
+
+	// Act
+	h.closeTurn("turn-2", wsm.CloseWithdrawn)
+
+	// Assert
+	if n := h.endingRows("turn-2"); n != 0 {
+		t.Fatalf("ending rows = %d, want none: the withdrawn prompt never ran", n)
+	}
+	if !h.hasRecord(dlog.LevelDebug, "daemon.feed.turn_closed_withdrawn") {
+		t.Fatalf("records = %+v, want the withdrawn close recorded", h.records())
+	}
+}
+
 func TestAReplayedTurnsRecordedEndingIsDrawnAtItsRecordedAddress(t *testing.T) {
 	// Arrange: a repair turn recorded at a tab, closed with no
 	// terminal on the page, then an ordinary turn.

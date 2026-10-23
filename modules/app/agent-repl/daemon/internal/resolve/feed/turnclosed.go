@@ -41,6 +41,14 @@ func (r *resolver) OnTurnClosed(ws ids.WorkspaceID, turn ids.TurnID, close wsm.R
 			dlog.Context{"turn": string(turn)})
 		return
 	}
+	// A WITHDRAWN PROMPT'S TURN NEVER RAN EITHER: the vendor gave the prompt
+	// back and it is held again, so there is no ending to draw.
+	if close.How == wsm.CloseWithdrawn {
+		r.logger(ws).Debug("daemon.feed.turn_closed_withdrawn",
+			"a prompt withdrawn from the running turn's join closed; it is held again, so no ending is drawn",
+			dlog.Context{"turn": string(turn)})
+		return
+	}
 	if !s.knownTurns[turn] {
 		// The feed has not seen this turn opened (a boot closes turns before
 		// any watch replays them). Its prompt, when it is replayed, is ended

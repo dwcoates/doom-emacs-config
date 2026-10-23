@@ -62,6 +62,10 @@ const (
 	// own policy keeps it from arising (see sender.SetModel), and the
 	// remediation menu (pay | clear | compact) is the cold gate row's.
 	ArmShimCold = "cold"
+	// ArmShimAskOpen is StartTurnFailure.ask_open: a prompt sent to join the
+	// running turn while an ask blocks the vendor. The queue keeps it held for
+	// the running turn's end (promptqueue.ErrAskOpen).
+	ArmShimAskOpen = "ask_open"
 	// ArmShimUnspecified is a failure whose kind oneof is unset, which is
 	// illegal on the wire and is surfaced rather than guessed at.
 	ArmShimUnspecified = "unspecified"
@@ -91,9 +95,21 @@ type ShimRefusal struct {
 
 // Is matches promptqueue.ErrShimHasNoSession for a StartTurn the shim refused
 // because it holds no session: the queue holds that prompt under the
-// reconnect hold rather than retiring it.
+// reconnect hold rather than retiring it. It matches promptqueue.ErrAskOpen
+// for a join the shim refused because an ask blocks the vendor: the queue
+// keeps that prompt held for the running turn's end.
 func (r *ShimRefusal) Is(target error) bool {
-	return target == promptqueue.ErrShimHasNoSession && r.Verb == "StartTurn" && r.Arm == ArmShimNoSession
+	if r.Verb != "StartTurn" {
+		return false
+	}
+	switch target {
+	case promptqueue.ErrShimHasNoSession:
+		return r.Arm == ArmShimNoSession
+	case promptqueue.ErrAskOpen:
+		return r.Arm == ArmShimAskOpen
+	default:
+		return false
+	}
 }
 
 // KillRefusedLive reports that this refusal is a KillTurn the shim declined

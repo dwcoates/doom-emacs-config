@@ -21,6 +21,7 @@ func TestTurnCloseStringNamesEveryDeclaredClose(t *testing.T) {
 		{how: CloseOrphaned, want: "orphaned"},
 		{how: CloseAgentDied, want: "agent_died"},
 		{how: CloseFolded, want: "folded"},
+		{how: CloseWithdrawn, want: "withdrawn"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
