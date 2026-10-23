@@ -574,6 +574,17 @@ describe("fitBands", () => {
     expect([hidden.hasAttribute(BAND_STRETCHED_ATTRIBUTE), hidden.hasAttribute(BAND_MORE_ATTRIBUTE)]).toEqual([false, true]);
   });
 
+  it("marks a capped Open band with rows below its edge", () => {
+    // Arrange — the Open section capped above the bands, Recently Merged lowest.
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
+    laidOut(rail, 510, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    const open = band(rail.pane, "open-section");
+    expect([open.hasAttribute(BAND_STRETCHED_ATTRIBUTE), open.hasAttribute(BAND_MORE_ATTRIBUTE)]).toEqual([false, true]);
+  });
+
   it("leaves a stretched band whose rows all show unmarked", () => {
     // Arrange
     const rail = drawn({ open: 3, hidden: 3, merged: 4 });

@@ -1332,26 +1332,26 @@ describe("recently merged rows", () => {
   });
 
   it.each([
-    { name: "fades a capped Hidden Workspaces viewport while rows lie below it", cls: "hidden-section", attrs: ["data-band-more"], want: true },
-    { name: "leaves a Hidden Workspaces viewport with nothing below unfaded", cls: "hidden-section", attrs: [], want: false },
-    { name: "leaves a capped Recently Merged viewport unfaded", cls: "merged-section", attrs: ["data-band-more"], want: false },
-    { name: "fades a stretched Recently Merged viewport while rows lie below it", cls: "merged-section", attrs: ["data-band-stretched", "data-band-more"], want: true },
-  ])("$name", ({ cls, attrs, want }) => {
+    { name: "fades a capped Hidden Workspaces viewport while rows lie below it", cls: "hidden-section", region: "rows", attrs: ["data-band-more"], want: true },
+    { name: "leaves a Hidden Workspaces viewport with nothing below unfaded", cls: "hidden-section", region: "rows", attrs: [], want: false },
+    { name: "leaves a capped Recently Merged viewport unfaded", cls: "merged-section", region: "rows", attrs: ["data-band-more"], want: false },
+    { name: "fades a stretched Recently Merged viewport while rows lie below it", cls: "merged-section", region: "rows", attrs: ["data-band-stretched", "data-band-more"], want: true },
+    { name: "fades a capped Open viewport while rows lie below it", cls: "open-section", region: "sb-sections", attrs: ["data-band-more"], want: true },
+    { name: "fades a stretched Open viewport while rows lie below it", cls: "open-section", region: "sb-sections", attrs: ["data-band-stretched", "data-band-more"], want: true },
+    { name: "leaves an Open viewport with nothing below unfaded", cls: "open-section", region: "sb-sections", attrs: [], want: false },
+    { name: "leaves a stretched Open viewport with nothing below unfaded", cls: "open-section", region: "sb-sections", attrs: ["data-band-stretched"], want: false },
+  ])("$name", ({ cls, region, attrs, want }) => {
     // Arrange
     const section = document.createElement("div");
     section.className = `repo ${cls}`;
     for (const attr of attrs) section.setAttribute(attr, "");
-    const rows = document.createElement("div");
-    rows.className = "rows";
-    section.appendChild(rows);
+    const viewport = document.createElement("div");
+    viewport.className = region;
+    section.appendChild(viewport);
     // Act
-    const mask = inRail(section, () => cascadedValue(rows, "mask-image"));
+    const mask = inRail(section, () => cascadedValue(viewport, "mask-image"));
     // Assert
     expect(mask.includes("var(--band-foot-fade)")).toBe(want);
-  });
-
-  it("fades the Open section's viewport foot when it is the stretched one", () => {
-    expect(css).toContain("#ws-sidebar .repo[data-band-stretched][data-band-more] > .sb-sections,");
   });
 
   it("declares the one rail row vertical padding", () => {
