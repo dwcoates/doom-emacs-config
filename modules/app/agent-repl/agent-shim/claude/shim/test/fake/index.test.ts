@@ -1130,6 +1130,60 @@ describe("backgroundTasks", () => {
   });
 });
 
+/**
+ * THE CANCEL OF A QUEUED MESSAGE (`cancel_async_message`): a message still
+ * queued is dropped and never runs; one a turn already took is kept.
+ */
+describe("cancelAsyncMessage", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("drops a message still queued behind the running turn, which then never runs", async () => {
+    // Arrange
+    let answer: boolean | undefined;
+
+    // Act
+    const driven = await driveScenario(["one", "two"], {
+      clientUuids: ["ua", "ub"],
+      during: async (query) => {
+        answer = await query.cancelAsyncMessage("ub");
+      },
+    });
+
+    // Assert
+    expect([answer, ofType(driven, "result").length]).toEqual([true, 1]);
+  });
+
+  it("keeps a message a turn already took, answering false", async () => {
+    // Arrange
+    let answer: boolean | undefined;
+
+    // Act
+    await driveScenario(["one"], {
+      clientUuids: ["ua"],
+      during: async (query, _feeder, messages) => {
+        await vi.waitFor(() => {
+          expect(messages.some((message) => message.type === "result")).toBe(true);
+        });
+        answer = await query.cancelAsyncMessage("ua");
+      },
+    });
+
+    // Assert
+    expect(answer).toBe(false);
+  });
+
+  it("refuses the cancel when told to refuse cancel_async_message", async () => {
+    // Arrange
+    vi.stubEnv("AGENT_REPL_FAKE_REFUSE", "cancel_async_message");
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+
+    // Act / Assert
+    await expect(query.cancelAsyncMessage("ua")).rejects.toThrow(/refused cancel_async_message/);
+  });
+});
+
 describe("streamInput and close", () => {
   it("accepts a second input stream rather than refusing a verb that exists", async () => {
     // Arrange

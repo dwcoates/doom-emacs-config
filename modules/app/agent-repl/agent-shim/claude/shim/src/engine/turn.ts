@@ -169,6 +169,11 @@ export interface SessionContext {
     sentBy: shimv1.StartTurnSentBy | undefined,
   ): Promise<void>;
   /**
+   * Whether an ask that is not the keep-alive's blocks the vendor: a prompt
+   * sent to join the running turn is then refused (StartTurnFailure.ask_open).
+   */
+  askOpen(): boolean;
+  /**
    * Deliver a prompt to the vendor as the send of `turn`, under a client uuid
    * the vendor echoes on its reply (engine/sends.ts).
    *
@@ -734,6 +739,21 @@ export class TurnEngine {
     if (turn === undefined || said === undefined) {
       // validate/ refuses this at the wire; the guard keeps the invariant local.
       throw new Error("shim turn: StartTurn reached the engine without a turn id or a prompt");
+    }
+    // AN OPEN ASK REFUSES THE JOIN, checked in the same synchronous step as
+    // the push: the vendor would take the prompt in only once the user
+    // answered, so it is never pushed and the daemon keeps it held. An ask
+    // that opens after the push takes the join back instead
+    // (conversation.v1.SessionJoinWithdrawn).
+    if (this.session.askOpen()) {
+      LOGGER.info(
+        { turn_id: turn.value, running_turn: running.id.value },
+        "an ask blocks the vendor, so the prompt sent to join the running turn is refused; the daemon keeps it held",
+      );
+      return startTurnRefused(
+        { kind: "askOpen" },
+        "an ask blocks the vendor; the prompt could join the running turn only once the ask is answered",
+      );
     }
     const prompt = buildPrompt(turn, agentId, said, request.origin);
     const joining: OpenTurn = { id: turn, keepalive: false, startedAtMs: this.session.nowMs() };

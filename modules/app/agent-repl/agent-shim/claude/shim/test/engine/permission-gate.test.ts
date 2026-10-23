@@ -34,9 +34,16 @@ function gateWith(
   keepalive: (agentId: conversationv1.AgentId) => boolean = () => false,
   turn: (agentId: conversationv1.AgentId) => conversationv1.TurnId | undefined = () => undefined,
   nowMs: () => number = () => 1000,
-): { gate: PermissionGate; written: PersistEntry[]; modes: conversationv1.AgentPermissionMode[] } {
+): {
+  gate: PermissionGate;
+  written: PersistEntry[];
+  modes: conversationv1.AgentPermissionMode[];
+  /** How many entries were recorded when each onAskOpened was told. */
+  asksOpened: number[];
+} {
   const written: PersistEntry[] = [];
   const modes: conversationv1.AgentPermissionMode[] = [];
+  const asksOpened: number[] = [];
   const gate = new PermissionGate({
     mainAgentId: () => AGENT,
     agentFor: (vendorAgentId) => (vendorAgentId === SUBAGENT.value ? SUBAGENT : undefined),
@@ -45,8 +52,9 @@ function gateWith(
     turn,
     nowMs,
     onPermissionModeSet: (mode) => modes.push(mode),
+    onAskOpened: () => asksOpened.push(written.length),
   });
-  return { gate, written, modes };
+  return { gate, written, modes, asksOpened };
 }
 
 const QUESTION_INPUT = {
@@ -884,6 +892,7 @@ describe("an ask whose book is resolved asynchronously", () => {
       turn: () => undefined,
       nowMs: () => 1000,
       onPermissionModeSet: () => undefined,
+      onAskOpened: () => undefined,
     });
     return { gate, written, settle: (agent) => settle(agent) };
   }
@@ -1560,5 +1569,74 @@ describe("the settle instant an ask states", () => {
     );
     // Assert
     expect(settledAtOf(written)).toEqual({ atMs: 2500n, startedAtMs: 1000n });
+  });
+});
+
+describe("the session hears every ask that blocks the vendor", () => {
+  it("tells the session a question opened before its start frame is recorded", () => {
+    // Arrange
+    const { gate, asksOpened } = gateWith();
+
+    // Act
+    void gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, { signal: new AbortController().signal, toolUseID: "toolu_q", requestId: "r" });
+
+    // Assert
+    expect(asksOpened).toEqual([0]);
+  });
+
+  it("tells the session a permission ask opened before its start frame is recorded", () => {
+    // Arrange
+    const { gate, asksOpened } = gateWith();
+
+    // Act
+    void gate.canUseTool("Bash", {}, { signal: new AbortController().signal, toolUseID: "toolu_p", requestId: "r" });
+
+    // Assert
+    expect(asksOpened).toEqual([0]);
+  });
+
+  it("tells the session nothing of an ask the keep-alive raised", () => {
+    // Arrange
+    const { gate, asksOpened } = gateWith(() => true);
+
+    // Act
+    void gate.canUseTool("Bash", {}, { signal: new AbortController().signal, toolUseID: "toolu_p", requestId: "r" });
+
+    // Assert
+    expect(asksOpened).toEqual([]);
+  });
+
+  it("reads an ask open while one blocks the vendor", () => {
+    // Arrange
+    const { gate } = gateWith();
+
+    // Act
+    void gate.canUseTool("Bash", {}, { signal: new AbortController().signal, toolUseID: "toolu_p", requestId: "r" });
+
+    // Assert
+    expect(gate.askOpen).toBe(true);
+  });
+
+  it("reads no ask open while only the keep-alive's ask stands", () => {
+    // Arrange
+    const { gate } = gateWith(() => true);
+
+    // Act
+    void gate.canUseTool("Bash", {}, { signal: new AbortController().signal, toolUseID: "toolu_p", requestId: "r" });
+
+    // Assert
+    expect(gate.askOpen).toBe(false);
+  });
+
+  it("reads no ask open once the gate stood every ask down", () => {
+    // Arrange
+    const { gate } = gateWith();
+    void gate.canUseTool("Bash", {}, { signal: new AbortController().signal, toolUseID: "toolu_p", requestId: "r" });
+
+    // Act
+    gate.standDown("SIGTERM");
+
+    // Assert
+    expect(gate.askOpen).toBe(false);
   });
 });

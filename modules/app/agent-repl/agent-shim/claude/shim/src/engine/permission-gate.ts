@@ -449,6 +449,13 @@ interface PermissionGateDeps {
   readonly nowMs: () => number;
   /** A standing grant carried a mode change; the session restates it authoritatively. */
   onPermissionModeSet(mode: conversationv1.AgentPermissionMode): void;
+  /**
+   * An ask that is not the keep-alive's just opened and BLOCKS the vendor: the
+   * session takes back every prompt still waiting to join the running turn
+   * (conversation.v1.SessionJoinWithdrawn). Told synchronously, the moment the
+   * ask registers and before its start frame is recorded.
+   */
+  onAskOpened(): void;
 }
 
 interface PendingBase {
@@ -656,6 +663,29 @@ export class PermissionGate {
   }
 
   /**
+   * Whether an ask that is not the keep-alive's blocks the vendor right now:
+   * a prompt sent to join the running turn is then refused
+   * (shim.v1.StartTurnFailure.ask_open), because the vendor would take it in
+   * only once the user answered.
+   */
+  get askOpen(): boolean {
+    for (const pending of this.pendingByToolUse.values()) {
+      if (!pending.keepalive) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Register an ask as blocking the vendor, and tell the session when it is
+   * not the keep-alive's. THE ONE PLACE AN ASK OPENS, for both kinds, so no
+   * ask can block the vendor without the session hearing of it.
+   */
+  private register(pending: Pending): void {
+    this.pendingByToolUse.set(pending.toolUseId, pending);
+    if (!pending.keepalive) this.deps.onAskOpened();
+  }
+
+  /**
    * Every ask blocking the vendor right now, in the order they opened, each as
    * its start frame carried it — what a re-announcement states, so a daemon
    * that attaches while the user is being asked stands the gate it was not
@@ -712,7 +742,7 @@ export class PermissionGate {
       },
     });
     return new Promise<PermissionResultLike>((resolve) => {
-      this.pendingByToolUse.set(options.toolUseID, {
+      this.register({
         kind: "question",
         toolUseId: options.toolUseID,
         agentId,
@@ -857,7 +887,7 @@ export class PermissionGate {
       },
     });
     return new Promise<PermissionResultLike>((resolve) => {
-      this.pendingByToolUse.set(options.toolUseID, {
+      this.register({
         kind: "permission",
         toolUseId: options.toolUseID,
         agentId,

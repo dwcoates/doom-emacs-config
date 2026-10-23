@@ -7,7 +7,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, writeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { logRecordsSince } from "../log-records.js";
 import {
   asQueryLike,
@@ -357,6 +357,7 @@ describe("createRealQuery", () => {
     const query = {
       interrupt: async (): Promise<void> => {},
       getSettings: () => Promise.resolve({ applied: { effort: null } }),
+      cancelAsyncMessage: () => Promise.resolve(false),
     };
     vi.resetModules();
     vi.doMock("../../src/vendor-guard.js", () => ({
@@ -670,27 +671,43 @@ describe("the options' choice between the stderr callback and the spawner", () =
 });
 
 describe("asQueryLike", () => {
-  it("passes a query that provides getSettings through unchanged", () => {
+  // The shim's logger is configured once per process, so once for the suite.
+  beforeAll(async () => {
+    const log = await import("../../src/log.js");
+    log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000ff", agentReplSessionId: "real-query-suite" });
+  });
+
+  const COMPLETE = {
+    getSettings: () => Promise.resolve({ applied: { effort: null } }),
+    cancelAsyncMessage: () => Promise.resolve(false),
+  };
+
+  it("passes a query that provides every undeclared member through unchanged", () => {
     // Arrange
-    const query = { getSettings: () => Promise.resolve({ applied: { effort: null } }) };
+    const query = { ...COMPLETE };
     // Act / Assert
     expect(asQueryLike(query)).toBe(query);
   });
 
-  it("refuses a query that lost getSettings, loudly at construction", () => {
-    // Arrange, Act, Assert
-    expect(() => asQueryLike({})).toThrow(/no longer provides getSettings/);
-  });
+  for (const member of ["getSettings", "cancelAsyncMessage"] as const) {
+    it(`refuses a query that lost ${member}, loudly at construction`, () => {
+      // Arrange
+      const query: Record<string, unknown> = { ...COMPLETE };
+      delete query[member];
+      // Act / Assert
+      expect(() => asQueryLike(query)).toThrow(new RegExp(`no longer provides ${member}`));
+    });
 
-  it("records the refusal at error with its cause", async () => {
-    // Arrange
-    const log = await import("../../src/log.js");
-    log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000ff", agentReplSessionId: "real-query-suite" });
-    vi.mocked(writeSync).mockClear();
-    // Act
-    expect(() => asQueryLike({})).toThrow();
-    // Assert
-    const record = logRecordsSince(0).find((candidate) => candidate.message.includes("provides no getSettings"));
-    expect([record?.level, record?.context.cause]).toEqual(["error", "the vendor query's getSettings is not a function"]);
-  });
+    it(`records the refusal of a query that lost ${member} at error with its cause`, () => {
+      // Arrange
+      vi.mocked(writeSync).mockClear();
+      const query: Record<string, unknown> = { ...COMPLETE };
+      delete query[member];
+      // Act
+      expect(() => asQueryLike(query)).toThrow();
+      // Assert
+      const record = logRecordsSince(0).find((candidate) => candidate.message.includes(`provides no ${member}`));
+      expect([record?.level, record?.context.cause]).toEqual(["error", `the vendor query's ${member} is not a function`]);
+    });
+  }
 });

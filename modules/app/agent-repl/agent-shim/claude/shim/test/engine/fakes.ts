@@ -70,6 +70,15 @@ export class ScriptedQuery implements QueryLike {
   appliedEffortPinned = false;
   /** When set, `getSettings` rejects with it. */
   getSettingsRejects: Error | undefined;
+  /**
+   * What `cancelAsyncMessage` answers: true when the vendor still held the
+   * message and dropped it, false when it had already taken it.
+   */
+  cancelAsyncMessageAnswer = true;
+  /** When set, `cancelAsyncMessage` rejects with it. */
+  cancelAsyncMessageRejects: Error | undefined;
+  /** The uuids `cancelAsyncMessage` was asked to drop, in order. */
+  readonly cancelledUuids: string[] = [];
   setPermissionModeRejects: Error | undefined;
   /**
    * `close()` records the call but leaves the stream standing.
@@ -159,6 +168,13 @@ export class ScriptedQuery implements QueryLike {
     return this.getSettingsRejects === undefined
       ? Promise.resolve({ applied: { effort: this.appliedEffort } })
       : Promise.reject(this.getSettingsRejects);
+  }
+  cancelAsyncMessage(messageUuid: string): Promise<boolean> {
+    this.calls.push(`cancelAsyncMessage:${messageUuid}`);
+    this.cancelledUuids.push(messageUuid);
+    return this.cancelAsyncMessageRejects === undefined
+      ? Promise.resolve(this.cancelAsyncMessageAnswer)
+      : Promise.reject(this.cancelAsyncMessageRejects);
   }
   setModel(model?: string): Promise<void> {
     this.calls.push(`setModel:${model ?? ""}`);
