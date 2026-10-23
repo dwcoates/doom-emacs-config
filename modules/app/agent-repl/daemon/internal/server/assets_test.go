@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -73,7 +74,7 @@ func TestEntryPointIsReStattedPerRequest(t *testing.T) {
 	n, _ := second.Body.Read(body)
 
 	// Assert.
-	if got := string(body[:n]); got != "<html>second</html>" {
+	if got := string(body[:n]); got != `<html style="--feed-text-scale: 1">second</html>` {
 		t.Fatalf("entry point body = %q, want the rewritten document", got)
 	}
 }
@@ -168,5 +169,139 @@ func TestChunkIsServedUnderEveryPageHost(t *testing.T) {
 				t.Fatalf("status = %d body = %q, want %d %q", resp.StatusCode, got, http.StatusOK, body)
 			}
 		})
+	}
+}
+
+// TestStampFeedTextScale pins the stamp itself: the zoom lands as an inline
+// `--feed-text-scale` on the one <html> opening tag, and a document without
+// exactly one is refused rather than served unscaled.
+func TestStampFeedTextScale(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		scale   float64
+		want    string
+		wantErr string
+	}{
+		{
+			name:  "a bare html tag carries the scale",
+			body:  "<!doctype html><html><body></body></html>",
+			scale: 1.12,
+			want:  `<!doctype html><html style="--feed-text-scale: 1.12"><body></body></html>`,
+		},
+		{
+			name:  "an html tag with attributes keeps them after the scale",
+			body:  `<html lang="en"><head></head></html>`,
+			scale: 0.5,
+			want:  `<html style="--feed-text-scale: 0.5" lang="en"><head></head></html>`,
+		},
+		{
+			name:  "the default scale is written whole",
+			body:  "<html></html>",
+			scale: 1,
+			want:  `<html style="--feed-text-scale: 1"></html>`,
+		},
+		{
+			name:    "a document with no html tag is refused",
+			body:    "<!doctype html><title>t</title>",
+			scale:   1,
+			wantErr: "carries 0",
+		},
+		{
+			name:    "a document with two html tags is refused",
+			body:    "<html></html><html></html>",
+			scale:   1,
+			wantErr: "carries 2",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got, err := stampFeedTextScale([]byte(tc.body), tc.scale)
+
+			// Assert.
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want one containing %q", err, tc.wantErr)
+				}
+				if got != nil {
+					t.Fatalf("a refused stamp answered a body %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("stamp: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("stamped body = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEntryPointCarriesTheSeededFeedTextScale pins the reason for the stamp:
+// a page loaded after the persisted zoom was seeded paints at that zoom from
+// its first frame, before any feed watch has pushed it.
+func TestEntryPointCarriesTheSeededFeedTextScale(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Server.SeedFeedTextScale(1.34)
+
+	// Act.
+	resp, err := h.HTTP.Client().Get(h.HTTP.URL + "/")
+	if err != nil {
+		t.Fatalf("get the entry point: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read the entry point: %v", err)
+	}
+
+	// Assert.
+	if got, want := string(body), `<html style="--feed-text-scale: 1.34">first</html>`; got != want {
+		t.Fatalf("entry point body = %q, want %q", got, want)
+	}
+}
+
+// TestEntryPointWithoutAnHTMLTagIsRefused pins the broken-build path: an entry
+// document the zoom cannot be stamped into is answered 500 and logged once
+// with the path, the scale and the cause, never served unscaled.
+func TestEntryPointWithoutAnHTMLTagIsRefused(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	if err := os.WriteFile(filepath.Join(h.WebappDist, entryPoint), []byte("<title>no root</title>"), 0o644); err != nil {
+		t.Fatalf("rewrite the entry point: %v", err)
+	}
+
+	// Act.
+	resp, err := h.HTTP.Client().Get(h.HTTP.URL + "/")
+	if err != nil {
+		t.Fatalf("get the entry point: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	// Assert.
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusInternalServerError)
+	}
+	if strings.Contains(string(body), "no root") {
+		t.Fatalf("the unstampable document was served: %q", body)
+	}
+	errs := log.at("ERROR")
+	if len(errs) != 1 {
+		t.Fatalf("ERROR records = %+v, want exactly one", errs)
+	}
+	rec := errs[0]
+	if rec.Operation != opAssets {
+		t.Fatalf("operation = %q, want %q", rec.Operation, opAssets)
+	}
+	if rec.Context["path"] != filepath.Join(h.WebappDist, entryPoint) || rec.Context["scale"] != 1.0 {
+		t.Fatalf("context = %+v, want the entry path and scale 1", rec.Context)
+	}
+	if cause, _ := rec.Context["cause"].(string); !strings.Contains(cause, "carries 0") {
+		t.Fatalf("cause = %v, want the tag count", rec.Context["cause"])
 	}
 }
