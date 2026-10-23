@@ -1700,3 +1700,54 @@ describe("setDaemon", () => {
     }
   });
 });
+
+describe("a page re-pointed into a fresh frame", () => {
+  const hello = { channel: HOST_CHANNEL, kind: "hello" } as const;
+  const lastFrame = (id: string): HTMLIFrameElement => {
+    const all = document.querySelectorAll<HTMLIFrameElement>(
+      `iframe[${FRAME_WORKSPACE_ATTRIBUTE}="${id}"]`,
+    );
+    return all[all.length - 1];
+  };
+  const postsInto = (el: HTMLIFrameElement): HostToPage[] => {
+    const got: HostToPage[] = [];
+    const target = el.contentWindow;
+    if (target === null) throw new Error("no window");
+    vi.spyOn(target, "postMessage").mockImplementation((m: unknown) => {
+      got.push(m as HostToPage);
+    });
+    return got;
+  };
+
+  it.each([
+    { name: "shown, behind its replacement", shown: true },
+    { name: "hidden, at once", shown: false },
+  ])("keeps what Emacs told the page it replaces, when $name", ({ shown }) => {
+    // Arrange
+    pages(host, "a", "b");
+    host.show(shown ? "a" : "b");
+    host.setInputBackground("a", "#123456");
+    host.setGateDock("a", 120, "#000");
+    host.ensure("a", "http://ws-a.localhost:2/");
+    const fresh = lastFrame("a");
+    const posted = postsInto(fresh);
+
+    // Act
+    window.dispatchEvent(
+      new MessageEvent("message", { data: hello, source: fresh.contentWindow }),
+    );
+
+    // Assert
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "inputBackground",
+      background: "#123456",
+    });
+    expect(posted).toContainEqual({
+      channel: HOST_CHANNEL,
+      kind: "gateDock",
+      pixels: 120,
+      background: "#000",
+    });
+  });
+});

@@ -516,6 +516,18 @@ export function createHost(env: HostEnv): Host {
     frame.iframe.removeAttribute(FRAME_SHOWN_ATTRIBUTE);
   };
 
+  /**
+   * Give TO everything Emacs told FROM that a page is replayed on hello, and
+   * the gate band FROM last reported: a page re-pointed into a fresh frame
+   * keeps what the page it replaces held.
+   */
+  const carryDesiredState = (from: Frame, to: Frame): void => {
+    to.inputBackground = from.inputBackground;
+    to.gateDock = from.gateDock;
+    to.heldIngress = from.heldIngress;
+    to.gateBand = from.gateBand;
+  };
+
   /** A frame for ID at URL, in the page and laid out SHOWN or hidden, not yet loading. */
   const newFrame = (id: string, url: string, shown: boolean): Frame => {
     const iframe = doc.createElement("iframe");
@@ -589,10 +601,7 @@ export function createHost(env: HostEnv): Host {
       if (id === shownId) {
         // THE SHOWN PAGE STAYS UNTIL ITS REPLACEMENT HAS DRAWN (`incoming`).
         const fresh = newFrame(id, url, false);
-        fresh.inputBackground = frame.inputBackground;
-        fresh.gateDock = frame.gateDock;
-        fresh.heldIngress = frame.heldIngress;
-        fresh.gateBand = frame.gateBand;
+        carryDesiredState(frame, fresh);
         fresh.pendingReloadStartedAtMs = reloadStartedAtMs;
         const bound = win.setTimeout(() => {
           note("warn", `page ${id}'s replacement did not say it had drawn within ${IN_TURN_BOUND_MS}ms; it is shown as it is`);
@@ -617,10 +626,7 @@ export function createHost(env: HostEnv): Host {
       // it does for a removed page.
       retire(frame);
       const fresh = create(id, url, undefined);
-      fresh.inputBackground = frame.inputBackground;
-      fresh.gateDock = frame.gateDock;
-      fresh.heldIngress = frame.heldIngress;
-      fresh.gateBand = frame.gateBand;
+      carryDesiredState(frame, fresh);
       fresh.pendingSwitchStartedAtMs = frame.pendingSwitchStartedAtMs;
       fresh.pendingReloadStartedAtMs = reloadStartedAtMs;
       return answer("ensure", id, "navigated");
