@@ -864,22 +864,35 @@ decision is recorded at INFO, as the roster's follow records its own."
           (not (equal (agent-repl--ws-by-ref-id id) ws)))
       (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=no-tab-yet" ws))
      (t
-      (agent-repl-roster-move-frame ws)
-      ;; THE WEBVIEW TAKES ITS NEW SIZE BEFORE THE PAGE IS SHOWN, so WebKit
-      ;; paints the page once, at the size it is shown at.  The frame move
-      ;; laid out WS's windows, and a workspace whose gate hides the input
-      ;; gives the webview the input's space too; fitted only by the
-      ;; redisplay after the command, the size reached WebKit after the
-      ;; show, and the page painted at the old height, the Emacs window
-      ;; showing below it, then painted again at the new one some 50ms later
-      ;; (owner, 2026-10-16).  Nothing is painted that the switch would not
-      ;; paint: rapid presses show each page, and WebKit draws only the one
-      ;; shown at each frame.
-      (agent-repl--frontend-fit-webviews)
-      (let ((page (agent-repl-webhost-has-page-p ws)))
-        (when page (agent-repl-webhost-show ws))
-        (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=moved from=%s page=%s"
-                          ws shown (if page "shown" "none")))))))
+      ;; THE MOVE IS TIMED, GC APART.  A switch a focus gain's claim asks for
+      ;; took 140-190ms from its select to its move where a keyboard one took
+      ;; 3-5ms (2026-10-23), and the log could not say whether the select's
+      ;; send, a collection or the move itself spent it.  The record carries
+      ;; all three: the time since the request (which the select's send is
+      ;; inside), the move's own, and the collections during the move.
+      (let ((started (float-time))
+            (gcs gcs-done)
+            (gc-seconds gc-elapsed))
+        (agent-repl-roster-move-frame ws)
+        ;; THE WEBVIEW TAKES ITS NEW SIZE BEFORE THE PAGE IS SHOWN, so WebKit
+        ;; paints the page once, at the size it is shown at.  The frame move
+        ;; laid out WS's windows, and a workspace whose gate hides the input
+        ;; gives the webview the input's space too; fitted only by the
+        ;; redisplay after the command, the size reached WebKit after the
+        ;; show, and the page painted at the old height, the Emacs window
+        ;; showing below it, then painted again at the new one some 50ms later
+        ;; (owner, 2026-10-16).  Nothing is painted that the switch would not
+        ;; paint: rapid presses show each page, and WebKit draws only the one
+        ;; shown at each frame.
+        (agent-repl--frontend-fit-webviews)
+        (let ((page (agent-repl-webhost-has-page-p ws)))
+          (when page (agent-repl-webhost-show ws))
+          (agent-repl--info ws "elisp.host.move-on-request ws=%s decision=moved from=%s page=%s since-request-ms=%d move-ms=%d gcs=%d gc-ms=%d"
+                            ws shown (if page "shown" "none")
+                            (round (* 1000 (- (float-time) (cdr agent-repl-host-last-request))))
+                            (round (* 1000 (- (float-time) started)))
+                            (- gcs-done gcs)
+                            (round (* 1000 (- gc-elapsed gc-seconds))))))))))
 
 (defun agent-repl-host--send-subject-verb (ws op rpc on-success on-not-sent)
   "Send workspace WS\='s ref through the workspace-subject verb RPC.
