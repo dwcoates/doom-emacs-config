@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/protoarm"
+	"agent-repld/internal/ratelimittest"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/ladder"
 	"agent-repld/internal/resolve/sidebar"
@@ -278,7 +279,7 @@ var turnCases = []turnCase{
 	}},
 	{name: "the weekly allowance rejected, then the session allowance allowed", apply: func(s *surfaces) {
 		for _, update := range []*conversationv1.SessionUpdate{
-			windowedRateLimit(sevenDayWindow(), rejectedVerdict()), windowedRateLimit(fiveHourWindow(), allowedVerdict()),
+			ratelimittest.Update(ratelimittest.Rejected(ratelimittest.SevenDay())), ratelimittest.Update(ratelimittest.Allowed(ratelimittest.FiveHour())),
 		} {
 			s.footer.OnSessionUpdate(theWS, update)
 			s.roster.OnSessionUpdate(theWS, update)
@@ -286,7 +287,7 @@ var turnCases = []turnCase{
 	}},
 	{name: "the weekly allowance rejected, then lifted by its own verdict", apply: func(s *surfaces) {
 		for _, update := range []*conversationv1.SessionUpdate{
-			windowedRateLimit(sevenDayWindow(), rejectedVerdict()), windowedRateLimit(sevenDayWindow(), allowedVerdict()),
+			ratelimittest.Update(ratelimittest.Rejected(ratelimittest.SevenDay())), ratelimittest.Update(ratelimittest.Allowed(ratelimittest.SevenDay())),
 		} {
 			s.footer.OnSessionUpdate(theWS, update)
 			s.roster.OnSessionUpdate(theWS, update)

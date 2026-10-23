@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/ratelimittest"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -175,7 +176,7 @@ func TestARateLimitVerdictIsSharedAcrossTheAccount(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, usageSample(30, 20, instant.UnixMilli()))
 
 	// Act
-	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 30, 5*time.Hour))
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.FiveHour(), 30, 5*time.Hour))
 
 	// Assert
 	if got := enduringOfWS(t, h, otherWS).GetUsage().GetSession(); got.GetAllowed() == nil {
@@ -414,7 +415,7 @@ func TestARateLimitEventOnASeatAccountDrawsNoWindow(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(1)), "USD", instant.UnixMilli()))
 
 	// Act
-	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 50, time.Hour))
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.FiveHour(), 50, time.Hour))
 
 	// Assert
 	if got := enduringOf(t, h); got.GetSeatSpend() == nil {
@@ -529,7 +530,7 @@ func TestARestartedResolverDrawsTheKeptModelWindowsAndVerdictScope(t *testing.T)
 	connected(before)
 	before.r.SetAccount(testWS, personalRoot)
 	before.r.OnSessionUpdate(testWS, usageSampleWithModels(44, 53, 12, 30, instant.UnixMilli()))
-	before.r.OnSessionUpdate(testWS, withStatus(rateLimitStatus(sevenDayOpusWindow(), 100, time.Hour), rejectedStatus()))
+	before.r.OnSessionUpdate(testWS, withVerdict(rateLimitStatus(ratelimittest.SevenDayOpus(), 100, time.Hour), ratelimittest.Rejected))
 	record := kept.last(t)
 	after := newHarness(t, WithAccountUsages([]wsm.AccountUsage{record}))
 

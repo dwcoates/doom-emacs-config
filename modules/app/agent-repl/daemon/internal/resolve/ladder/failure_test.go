@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"agent-repld/internal/ratelimittest"
 )
 
 func TestClassifyFailurePlacesEveryAgentFailureArm(t *testing.T) {
@@ -84,34 +86,6 @@ func TestEveryAgentFailureArmIsClassifiedByTheTable(t *testing.T) {
 	}
 }
 
-// rateLimitEvent is a rate-limit event about window with the given status
-// arm (nil for a statusless event).
-func rateLimitEvent(window *conversationv1.SessionRateLimitType, status any) *conversationv1.SessionRateLimitStatus {
-	event := &conversationv1.SessionRateLimitStatus{RateLimitType: window}
-	switch arm := status.(type) {
-	case *conversationv1.SessionRateLimitStatus_Rejected:
-		event.Status = arm
-	case *conversationv1.SessionRateLimitStatus_Allowed:
-		event.Status = arm
-	case *conversationv1.SessionRateLimitStatus_AllowedWarning:
-		event.Status = arm
-	}
-	return event
-}
-
-var (
-	rejected = &conversationv1.SessionRateLimitStatus_Rejected{Rejected: &conversationv1.SessionRateLimitRejected{}}
-	allowed  = &conversationv1.SessionRateLimitStatus_Allowed{Allowed: &conversationv1.SessionRateLimitAllowed{}}
-	warning  = &conversationv1.SessionRateLimitStatus_AllowedWarning{AllowedWarning: &conversationv1.SessionRateLimitAllowedWarning{}}
-
-	fiveHour = &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_FiveHour{
-		FiveHour: &conversationv1.SessionRateLimitWindowFiveHour{}}}
-	sevenDay = &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDay{
-		SevenDay: &conversationv1.SessionRateLimitWindowSevenDay{}}}
-	sevenDayOpus = &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDayOpus{
-		SevenDayOpus: &conversationv1.SessionRateLimitWindowSevenDayOpus{}}}
-)
-
 func TestRateLimitRejections(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -120,24 +94,24 @@ func TestRateLimitRejections(t *testing.T) {
 	}{
 		{name: "an empty set does not block", want: false},
 		{name: "a rejected verdict blocks",
-			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(sevenDay, rejected)}, want: true},
+			events: []*conversationv1.SessionRateLimitStatus{ratelimittest.Rejected(ratelimittest.SevenDay())}, want: true},
 		{name: "an allowed verdict does not block",
-			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(sevenDay, allowed)}, want: false},
+			events: []*conversationv1.SessionRateLimitStatus{ratelimittest.Allowed(ratelimittest.SevenDay())}, want: false},
 		{name: "a warning verdict does not block",
-			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(fiveHour, warning)}, want: false},
+			events: []*conversationv1.SessionRateLimitStatus{ratelimittest.AllowedWarning(ratelimittest.FiveHour())}, want: false},
 		{name: "no verdict does not block",
-			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(sevenDay, nil)}, want: false},
+			events: []*conversationv1.SessionRateLimitStatus{ratelimittest.Statusless(ratelimittest.SevenDay())}, want: false},
 		{name: "an allowed verdict on the same window lifts the rejection",
-			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(sevenDay, rejected), rateLimitEvent(sevenDay, allowed)}, want: false},
+			events: []*conversationv1.SessionRateLimitStatus{ratelimittest.Rejected(ratelimittest.SevenDay()), ratelimittest.Allowed(ratelimittest.SevenDay())}, want: false},
 		{name: "an allowed verdict on another window leaves the rejection standing",
-			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(sevenDay, rejected), rateLimitEvent(fiveHour, allowed)}, want: true},
+			events: []*conversationv1.SessionRateLimitStatus{ratelimittest.Rejected(ratelimittest.SevenDay()), ratelimittest.Allowed(ratelimittest.FiveHour())}, want: true},
 		{name: "the opus window is a window of its own",
-			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(sevenDayOpus, rejected), rateLimitEvent(sevenDay, allowed)}, want: true},
+			events: []*conversationv1.SessionRateLimitStatus{ratelimittest.Rejected(ratelimittest.SevenDayOpus()), ratelimittest.Allowed(ratelimittest.SevenDay())}, want: true},
 		{name: "a windowless rejection is lifted only by a windowless verdict",
-			events: []*conversationv1.SessionRateLimitStatus{rateLimitEvent(nil, rejected), rateLimitEvent(fiveHour, allowed)}, want: true},
+			events: []*conversationv1.SessionRateLimitStatus{ratelimittest.Rejected(nil), ratelimittest.Allowed(ratelimittest.FiveHour())}, want: true},
 		{name: "two rejected windows block until both are lifted",
 			events: []*conversationv1.SessionRateLimitStatus{
-				rateLimitEvent(sevenDay, rejected), rateLimitEvent(fiveHour, rejected), rateLimitEvent(sevenDay, allowed)}, want: true},
+				ratelimittest.Rejected(ratelimittest.SevenDay()), ratelimittest.Rejected(ratelimittest.FiveHour()), ratelimittest.Allowed(ratelimittest.SevenDay())}, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -161,8 +135,8 @@ func TestRateLimitRejections(t *testing.T) {
 func TestRateLimitRejectionsClearLiftsEveryWindow(t *testing.T) {
 	// Arrange
 	var set RateLimitRejections
-	set.Observe(rateLimitEvent(sevenDay, rejected))
-	set.Observe(rateLimitEvent(fiveHour, rejected))
+	set.Observe(ratelimittest.Rejected(ratelimittest.SevenDay()))
+	set.Observe(ratelimittest.Rejected(ratelimittest.FiveHour()))
 
 	// Act
 	set.Clear()
@@ -179,15 +153,12 @@ func TestRateLimitWindow(t *testing.T) {
 		window *conversationv1.SessionRateLimitType
 		want   string
 	}{
-		{name: "five hour", window: fiveHour, want: "five_hour"},
-		{name: "seven day", window: sevenDay, want: "seven_day"},
-		{name: "seven day opus", window: sevenDayOpus, want: "seven_day_opus"},
-		{name: "seven day sonnet", window: &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDaySonnet{
-			SevenDaySonnet: &conversationv1.SessionRateLimitWindowSevenDaySonnet{}}}, want: "seven_day_sonnet"},
-		{name: "seven day overage included", window: &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDayOverageIncluded{
-			SevenDayOverageIncluded: &conversationv1.SessionRateLimitWindowSevenDayOverageIncluded{}}}, want: "seven_day_overage_included"},
-		{name: "overage", window: &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_Overage{
-			Overage: &conversationv1.SessionRateLimitWindowOverage{}}}, want: "overage"},
+		{name: "five hour", window: ratelimittest.FiveHour(), want: "five_hour"},
+		{name: "seven day", window: ratelimittest.SevenDay(), want: "seven_day"},
+		{name: "seven day opus", window: ratelimittest.SevenDayOpus(), want: "seven_day_opus"},
+		{name: "seven day sonnet", window: ratelimittest.SevenDaySonnet(), want: "seven_day_sonnet"},
+		{name: "seven day overage included", window: ratelimittest.SevenDayOverageIncluded(), want: "seven_day_overage_included"},
+		{name: "overage", window: ratelimittest.Overage(), want: "overage"},
 		{name: "no window named", window: nil, want: "unset"},
 		{name: "a type with no window set", window: &conversationv1.SessionRateLimitType{}, want: "unset"},
 	}

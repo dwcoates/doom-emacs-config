@@ -12,6 +12,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/integration/harness"
+	"agent-repld/internal/ratelimittest"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/prototext"
@@ -402,14 +403,7 @@ func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T)
 	// ...and the VERDICT comes from rate_limit_status, for the same window. An
 	// ALLOWED verdict, because a refusal blocks the session and moves the
 	// enduring line out of the idle cell.
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_RateLimitStatus{RateLimitStatus: &conversationv1.SessionRateLimitStatus{
-			Status: &conversationv1.SessionRateLimitStatus_Allowed{Allowed: &conversationv1.SessionRateLimitAllowed{}},
-			RateLimitType: &conversationv1.SessionRateLimitType{
-				Window: &conversationv1.SessionRateLimitType_FiveHour{FiveHour: &conversationv1.SessionRateLimitWindowFiveHour{}},
-			},
-		}},
-	})
+	f.shim.PushSessionUpdate(ratelimittest.Update(ratelimittest.Allowed(ratelimittest.FiveHour())))
 
 	// Assert: the session allowance carries BOTH the figure (utilization,
 	// reset) from account_usage and the verdict (allowed) from

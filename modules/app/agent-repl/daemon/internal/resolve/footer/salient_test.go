@@ -11,6 +11,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/deployprogress"
+	"agent-repld/internal/ratelimittest"
 )
 
 // lineNow is the activity line the last published view carries.
@@ -25,11 +26,9 @@ func rateEvent(window *conversationv1.SessionRateLimitType, verdict string) *con
 	update := rateLimitStatus(window, 85, time.Hour)
 	switch verdict {
 	case "allowed_warning":
-		update.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_AllowedWarning{
-			AllowedWarning: &conversationv1.SessionRateLimitAllowedWarning{}}
+		withVerdict(update, ratelimittest.AllowedWarning)
 	case "rejected":
-		update.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_Rejected{
-			Rejected: &conversationv1.SessionRateLimitRejected{}}
+		withVerdict(update, ratelimittest.Rejected)
 	}
 	return update
 }
@@ -160,7 +159,7 @@ func TestARateLimitEventFeedsTheUsageFiguresAndStandsNoSalientLine(t *testing.T)
 			bothAllowances(h, 85, 40)
 
 			// Act
-			h.r.OnSessionUpdate(testWS, rateEvent(fiveHourWindow(), tt.verdict))
+			h.r.OnSessionUpdate(testWS, rateEvent(ratelimittest.FiveHour(), tt.verdict))
 
 			// Assert
 			if got := lineNow(t, h); got.tier != "enduring" {
