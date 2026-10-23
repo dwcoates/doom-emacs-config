@@ -119,12 +119,14 @@ func TestRegisterDerivesTheParentBranchFromTheRepositoryDefault(t *testing.T) {
 
 func TestRegisterKeepsTheSuppliedFacts(t *testing.T) {
 	// Arrange: supplied facts are never re-derived, because the announcer knows
-	// its own tree.
+	// its own tree. The repository is the one git agrees with.
 	f := newFixture(t)
 	given := worktreeDir(t)
+	dir := worktreeDir(t)
+	f.git.belongsTo(t, dir, given)
 
 	// Act.
-	if _, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{
 		Name: "given", Branch: "given-branch", ParentBranch: "given-parent", RepoDir: given,
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
@@ -134,6 +136,78 @@ func TestRegisterKeepsTheSuppliedFacts(t *testing.T) {
 	got := f.db.registered[len(f.db.registered)-1]
 	if got.Name != "given" || got.Branch != "given-branch" || got.ParentBranch != "given-parent" || got.RepoDir != given {
 		t.Fatalf("registered facts = %+v, want the supplied ones kept", got)
+	}
+}
+
+// TestRegisterRefusesARepositoryGitDisagreesWith covers the roster's
+// grouping invariant at its source: a workspace is listed under a repository
+// only if its worktree belongs to that repository, so a registration naming
+// any other repository fails with nothing written and an ERROR naming both.
+func TestRegisterRefusesARepositoryGitDisagreesWith(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	claimed, actual, dir := worktreeDir(t), worktreeDir(t), worktreeDir(t)
+	f.git.belongsTo(t, dir, actual)
+
+	// Act.
+	_, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{RepoDir: claimed})
+
+	// Assert.
+	if !errors.Is(err, ErrRepositoryMismatch) {
+		t.Fatalf("Register = %v, want ErrRepositoryMismatch", err)
+	}
+	if len(f.db.registered) != 0 {
+		t.Fatalf("registrations = %+v, want none", f.db.registered)
+	}
+	rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opRegister})
+	if !ok || rec.Context["claimed_repo_dir"] != claimed || rec.Context["git_repo_dir"] != actual || rec.Context["invariant_violation"] == nil {
+		t.Fatalf("ERROR record = %+v, want one naming the claimed and git's repositories", rec)
+	}
+}
+
+// TestRegisterAsksGitEvenWhenTheRepositoryIsNamed covers that a named
+// repository never skips git: a git that cannot answer fails the registration.
+func TestRegisterAsksGitEvenWhenTheRepositoryIsNamed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.commonDirErr = errors.New("git: not a repository")
+
+	// Act.
+	_, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{RepoDir: worktreeDir(t)})
+
+	// Assert.
+	if !errors.Is(err, f.git.commonDirErr) {
+		t.Fatalf("Register = %v, want git's failure", err)
+	}
+	if len(f.db.registered) != 0 {
+		t.Fatalf("registrations = %+v, want none", f.db.registered)
+	}
+	if countRecords(f, "error", opRegister) != 1 {
+		t.Fatalf("ERROR records = %d, want exactly one", countRecords(f, "error", opRegister))
+	}
+}
+
+// TestRegisterMatchesTheNamedRepositoryInAnySpelling covers that the check
+// compares canonical directories: a named repository reached through a
+// symlink is the repository git names.
+func TestRegisterMatchesTheNamedRepositoryInAnySpelling(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	main, dir := worktreeDir(t), worktreeDir(t)
+	f.git.belongsTo(t, dir, main)
+	link := filepath.Join(t.TempDir(), "repo-link")
+	if err := os.Symlink(main, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{RepoDir: link}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Assert.
+	if got := f.db.registered[len(f.db.registered)-1].RepoDir; got != main {
+		t.Fatalf("registered repository = %q, want git's %q", got, main)
 	}
 }
 
@@ -1178,6 +1252,7 @@ func TestEnsureMainWorktreesRegistersEveryMissingOneBornClosed(t *testing.T) {
 		wsm.Repository{ID: "repo-missing", Dir: missing, DefaultBranch: "trunk"},
 		wsm.Repository{ID: "repo-held", Dir: held, DefaultBranch: "master"})
 	f.db.with(wsm.Workspace{ID: "ws-held", Dir: held, Repo: "repo-held"})
+	f.git.belongsTo(t, missing, missing)
 
 	// Act.
 	if err := f.verbs.EnsureMainWorktrees(context.Background()); err != nil {
@@ -1276,6 +1351,7 @@ func TestEnsureMainWorktreesSurfacesARegistrationThatFailed(t *testing.T) {
 	f := newFixture(t)
 	missing := worktreeDir(t)
 	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-missing", Dir: missing})
+	f.git.belongsTo(t, missing, missing)
 	f.db.registerErr = errFake
 
 	// Act.
