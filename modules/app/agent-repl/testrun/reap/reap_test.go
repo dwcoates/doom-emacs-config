@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"agentrepl/testrun/internal/proctable"
 )
 
 // recLog records every line Reap logs.
@@ -168,8 +170,8 @@ func TestReapFreezesUntilAPassFindsNothingNewThenKillsEveryMember(t *testing.T) 
 	}
 }
 
-// TestReapLogsHowLongEachListingTook pins the record ListBound is set from:
-// every freeze pass and the confirmation name their listing's time.
+// TestReapLogsHowLongEachListingTook pins that every freeze pass and the
+// confirmation name their listing's time.
 func TestReapLogsHowLongEachListingTook(t *testing.T) {
 	// Arrange.
 	table := newFakeTable(member(501, "bash harness.sh"))
@@ -381,12 +383,15 @@ type awaitAll struct{ *fakeTable }
 
 func (awaitAll) AwaitExit([]int, time.Duration) ([]int, error) { return nil, nil }
 
-func TestParsePS(t *testing.T) {
-	// Arrange.
-	out := "  101 Ss   Tue Oct 14 01:20:27 2026     /bin/bash -c x TMPDIR=/tmp/artr-7\n" +
-		"  102 T    Tue Oct  7 09:05:01 2026     git status\n" +
-		"  103 S    Tue Oct 14 01:20:27 2026     gone\n" +
-		"  104 S    Tue Oct 14 01:20:27 2026     root-owned\n"
+func TestFromEntries(t *testing.T) {
+	// Arrange
+	start := time.Date(2026, 10, 14, 1, 20, 27, 750_000_000, time.Local)
+	entries := []proctable.Entry{
+		{Pid: 101, State: 'S', Start: start, Argv: []string{"/bin/bash", "-c", "x"}, Env: []string{"TMPDIR=/tmp/artr-7"}},
+		{Pid: 102, State: 'T', Start: start, Argv: []string{"git", "status"}},
+		{Pid: 103, State: 'S', Start: start, Comm: "gone"},
+		{Pid: 104, State: 'S', Comm: "rootd"},
+	}
 	getsid := func(pid int) (int, error) {
 		switch pid {
 		case 103:
@@ -397,50 +402,36 @@ func TestParsePS(t *testing.T) {
 		return 77, nil
 	}
 
-	// Act.
-	got, err := parsePS(out, getsid)
+	// Act
+	got, err := fromEntries(entries, getsid)
 
-	// Assert.
+	// Assert
 	if err != nil {
-		t.Fatalf("parsePS() error = %v", err)
+		t.Fatalf("fromEntries() error = %v", err)
 	}
+	second := time.Date(2026, 10, 14, 1, 20, 27, 0, time.Local)
 	want := []Proc{
-		{Pid: 101, Sid: 77, State: 'S', Start: time.Date(2026, 10, 14, 1, 20, 27, 0, time.Local), Line: "/bin/bash -c x TMPDIR=/tmp/artr-7"},
-		{Pid: 102, Sid: 77, State: 'T', Start: time.Date(2026, 10, 7, 9, 5, 1, 0, time.Local), Line: "git status"},
-		{Pid: 104, Sid: -1, State: 'S', Start: time.Date(2026, 10, 14, 1, 20, 27, 0, time.Local), Line: "root-owned"},
+		{Pid: 101, Sid: 77, State: 'S', Start: second, Line: "/bin/bash -c x TMPDIR=/tmp/artr-7"},
+		{Pid: 102, Sid: 77, State: 'T', Start: second, Line: "git status"},
+		{Pid: 104, Sid: -1, State: 'S', Line: "(rootd)"},
 	}
 	if len(got) != len(want) {
-		t.Fatalf("parsePS() = %+v, want %+v", got, want)
+		t.Fatalf("fromEntries() = %+v, want %+v", got, want)
 	}
 	for i := range want {
 		if got[i].Pid != want[i].Pid || got[i].Sid != want[i].Sid || got[i].State != want[i].State || !got[i].Start.Equal(want[i].Start) || got[i].Line != want[i].Line {
-			t.Errorf("parsePS()[%d] = %+v, want %+v", i, got[i], want[i])
+			t.Errorf("fromEntries()[%d] = %+v, want %+v", i, got[i], want[i])
 		}
 	}
 }
 
-func TestParsePSFailures(t *testing.T) {
-	tests := []struct {
-		name string
-		out  string
-		sid  error
-		want string
-	}{
-		{name: "a short line", out: "101 S Tue\n", want: "has fewer fields"},
-		{name: "no pid", out: "abc S Tue Oct 14 01:20:27 2026 x\n", want: "names no pid"},
-		{name: "no start", out: "101 S Tue Oct 99 01:20:27 2026 x\n", want: "names no start time"},
-		{name: "getsid fails", out: "101 S Tue Oct 14 01:20:27 2026 x\n", sid: syscall.EINVAL, want: "getsid(101)"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act.
-			_, err := parsePS(tt.out, func(int) (int, error) { return 1, tt.sid })
+func TestFromEntriesFailsWhenGetsidFails(t *testing.T) {
+	// Act
+	got, err := fromEntries([]proctable.Entry{{Pid: 101}}, func(int) (int, error) { return 0, syscall.EINVAL })
 
-			// Assert.
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("parsePS() error = %v, want %q", err, tt.want)
-			}
-		})
+	// Assert
+	if err == nil || got != nil || !strings.Contains(err.Error(), "getsid(101)") {
+		t.Fatalf("fromEntries() = %v, %v; want getsid's failure", got, err)
 	}
 }
 

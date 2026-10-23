@@ -34,7 +34,7 @@ type Proc struct {
 	Pid int
 	// Sid is its session id.
 	Sid int
-	// State is ps's first state letter: 'T' stopped, 'Z' a zombie.
+	// State is its state letter, as ps prints it: 'T' stopped, 'Z' a zombie.
 	State byte
 	// Start is when it started, to the second.
 	Start time.Time
@@ -142,7 +142,7 @@ type Result struct {
 // Reap waits for each to exit. A last listing confirms no member remains.
 //
 // Every pass, the kill and the confirmation are logged, each with how long its
-// listing took (ListBound is set from those times); a failure is logged at
+// listing took; a failure is logged at
 // ERROR and answered, and the caller then keeps whatever the members ran out
 // of (a RAM disk is never detached under a member).
 func Reap(t Table, m Members, log Logger) (Result, error) {
