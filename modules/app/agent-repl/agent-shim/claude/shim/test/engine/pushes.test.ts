@@ -805,6 +805,24 @@ describe("the runtime's slash-command catalog", () => {
   });
 });
 
+describe("the vendor's skill set gone stale", () => {
+  function stale(...paths: string[]): conversationv1.SessionUpdate {
+    return create(conversationv1.SessionUpdateSchema, {
+      update: { case: "skillsChanged", value: create(conversationv1.SessionSkillsChangedSchema, { paths }) },
+    });
+  }
+
+  it("is replayed to a consumer that joins after it was stated", async () => {
+    // A HANDOVER'S SUCCESSOR IS THAT CONSUMER, and it owes the replacement.
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(stale("/c/skills/new"));
+
+    const opening = await take(pushes.subscribe(), 2);
+
+    expect(opening[1]).toEqual(stale("/c/skills/new"));
+  });
+});
+
 describe("withdrawing a standing fact", () => {
   function cacheLapse(atMs: bigint): conversationv1.SessionUpdate {
     return create(conversationv1.SessionUpdateSchema, {

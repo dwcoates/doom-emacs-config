@@ -41,6 +41,7 @@ import {
   stopAgent,
 } from "../integration-support/client.js";
 import { testTempDir } from "../temp-dir.js";
+import { FakeSkillWatchFs } from "../engine/skill-watch-fake.js";
 
 /** How the drive answers or steers a scenario (goldens.ts's policies). */
 export type EnginePolicy = "allow" | "deny" | "answer" | "decline" | "background" | "interrupt";
@@ -144,6 +145,7 @@ export async function driveEngineScenario(prompt: string, policy: EnginePolicy, 
     forkVendorSession: unexpectedVendorFork,
     runtime: { shimBuildSha: "golden", sdkVersion: "golden" },
     env: { stateDir, configDir, cwd },
+    skillWatchFs: new FakeSkillWatchFs(),
     nowMs: clock,
     newUuid: () => `00000000-0000-4000-8000-${String(++engineUuids).padStart(12, "0")}`,
     mintVendorSessionId: () => GOLDEN_SESSION_ID,

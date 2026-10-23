@@ -175,6 +175,11 @@ export class SessionPushes {
   // without being awaited, so it usually lands before the daemon's watch
   // exists, and a consumer that attached later would otherwise offer no
   // completions until the catalog next changed.
+  //
+  // `skillsChanged` is the vendor's skill set gone stale on disk, a LEVEL the
+  // daemon answers by replacing this shim at its next idle point: a daemon that
+  // attaches after it was stated (a handover's successor) must still learn it,
+  // or the replacement it owes is lost with the daemon that heard it.
   private static readonly REPLAYED = [
     "contextUsage",
     "modelChanged",
@@ -187,6 +192,7 @@ export class SessionPushes {
     "commandCatalog",
     "cacheLapse",
     "vendorErrorRetry",
+    "skillsChanged",
   ];
 
   /**

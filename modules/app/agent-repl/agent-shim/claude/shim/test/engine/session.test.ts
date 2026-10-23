@@ -53,6 +53,8 @@ import { rollBackSessionRequestFor } from "../service/requests.js";
 import type { ForkVendorSession } from "../../src/engine/fork-session.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedProbe, ownedBy, ownedBySession, ScriptedQuery, emitSummary, errorResultMessage, hookResponse, initMessage, resultMessage, unexpectedVendorFork } from "./fakes.js";
 import { projectDir, transcriptPath } from "../../src/engine/vendor-paths.js";
+import { FakeSkillWatchFs } from "./skill-watch-fake.js";
+import type { SkillWatchFs } from "../../src/engine/skill-watch.js";
 
 interface Harness {
   readonly engine: SessionEngine;
@@ -191,6 +193,8 @@ function harness(
     closeLeavesStreamOpen?: boolean;
     /** The LAST-RESORT bound on a child that answers nothing at all. */
     initTimeoutMs?: number;
+    /** The filesystem the engine's watch on the vendor's skills reads; an empty fake when unset. */
+    skillWatchFs?: SkillWatchFs;
     /** How long StartSession waits for its one control round-trip to answer. */
     liveSignalTimeoutMs?: number;
     /**
@@ -339,6 +343,7 @@ function harness(
       return uuid;
     },
     env: { stateDir, configDir, cwd },
+    skillWatchFs: options.skillWatchFs ?? new FakeSkillWatchFs(),
     nowMs: options.clock ?? (() => options.nowMs ?? 1_000_100),
     probeApiReachable: probe.probe,
     networkResumeScheduler: networkScheduler,
@@ -830,6 +835,7 @@ describe("StartSession, fresh", () => {
       createQuery: () => Promise.reject(new Error("the mocked vendor is not implemented")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      skillWatchFs: new FakeSkillWatchFs(),
       nowMs: () => 1,
       scheduler: h.scheduler,
       acquireLock: () => () => undefined,
@@ -849,6 +855,7 @@ describe("StartSession, fresh", () => {
       createQuery: () => Promise.reject(new Error("no")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      skillWatchFs: new FakeSkillWatchFs(),
       nowMs: () => 1,
       scheduler: h.scheduler,
       acquireLock: (id) => {
@@ -884,6 +891,7 @@ describe("StartSession, fresh", () => {
       createQuery: () => Promise.reject(new Error("no")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      skillWatchFs: new FakeSkillWatchFs(),
       nowMs: () => 1,
       scheduler: h.scheduler,
       acquireLock: () => () => undefined,
@@ -910,6 +918,7 @@ describe("StartSession, fresh", () => {
       createQuery: () => Promise.reject(new Error("no")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      skillWatchFs: new FakeSkillWatchFs(),
       nowMs: () => 1,
       scheduler: h.scheduler,
       acquireLock: () => () => undefined,
@@ -947,6 +956,7 @@ describe("StartSession, fresh", () => {
       createQuery: () => Promise.reject(new Error("no")),
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      skillWatchFs: new FakeSkillWatchFs(),
       nowMs: () => 1,
       scheduler: h.scheduler,
       acquireLock: () => () => undefined,
@@ -977,6 +987,7 @@ describe("StartSession, fresh", () => {
       },
       runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
       env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      skillWatchFs: new FakeSkillWatchFs(),
       nowMs: () => 1,
       scheduler: h.scheduler,
       acquireLock: () => () => undefined,
@@ -16619,9 +16630,9 @@ describe("the live-work level the shim pushes", () => {
  *
  * WHAT THIS GUARDS: that the composer's completions are the runtime's own
  * answer, read once the session is up and re-read with the session's other
- * pulled facts, so a skill added mid-session reaches the daemon after the next
- * turn. A read that fails is a fault on its own component, never a silently
- * empty catalog.
+ * pulled facts. A skill installed mid-session reaches it only through a new
+ * vendor process ("the vendor's skill set", below). A read that fails is a
+ * fault on its own component, never a silently empty catalog.
  */
 describe("the slash-command catalog", () => {
   /** Every catalog the engine pushed, as name lists, in push order. */
@@ -16748,6 +16759,159 @@ describe("the slash-command catalog", () => {
     await vi.waitFor(() => {
       expect(faultComponents(h)).not.toContain("vendor-command-catalog");
     });
+  });
+});
+
+/**
+ * THE VENDOR'S SKILL SET, watched on disk.
+ *
+ * WHAT THIS GUARDS: the vendor loads its skills once, at its start, so a skill
+ * installed mid-session reaches the catalog only through a new vendor process.
+ * The engine watches the directories the vendor loads from and states the set
+ * stale (SessionSkillsChanged) at the first change, as a level a late watch is
+ * caught up on, so the daemon replaces the shim at its next idle point.
+ */
+describe("the vendor's skill set", () => {
+  /** Every skills-changed statement the engine pushed, as path lists. */
+  function statedStale(spy: { mock: { calls: unknown[][] } }): string[][] {
+    return spy.mock.calls
+      .map(([update]) => update as conversationv1.SessionUpdate)
+      .filter((update) => update.update.case === "skillsChanged")
+      .map((update) => (update.update.case === "skillsChanged" ? update.update.value.paths : []));
+  }
+
+  /** A harness whose account root holds a skills directory, and that directory's path. */
+  function withSkills(): { h: Harness; fsys: FakeSkillWatchFs; skills: string } {
+    const fsys = new FakeSkillWatchFs();
+    const h = harness({ skillWatchFs: fsys });
+    const skills = `${h.configDir}/skills`;
+    fsys.mkdir(skills);
+    return { h, fsys, skills };
+  }
+
+  it("states nothing while the skills are unchanged", async () => {
+    // Arrange.
+    const { h } = withSkills();
+    const pushed = vi.spyOn(h.engine.pushes, "push");
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    expect(statedStale(pushed)).toEqual([]);
+  });
+
+  it("states the set stale when a skill is installed mid-session", async () => {
+    // Arrange.
+    const { h, fsys, skills } = withSkills();
+    const pushed = vi.spyOn(h.engine.pushes, "push");
+    await started(h);
+
+    // Act.
+    fsys.mkdir(`${skills}/agent-repl-workspaces`);
+    fsys.fire(skills, "agent-repl-workspaces");
+
+    // Assert.
+    expect(statedStale(pushed)).toEqual([[`${skills}/agent-repl-workspaces`]]);
+  });
+
+  it("records the change at INFO, naming what changed", async () => {
+    // Arrange.
+    const { h, fsys, skills } = withSkills();
+    await started(h);
+
+    // Act.
+    const records = logRecordsDuring(() => fsys.fire(skills, "new-skill"));
+
+    // Assert.
+    expect(
+      records.some(
+        (record) =>
+          record.level === "info" &&
+          record.message.includes("the vendor's skill set changed on disk") &&
+          record.context["changed"] === `${skills}/new-skill`,
+      ),
+    ).toBe(true);
+  });
+
+  it("states it once however many changes follow", async () => {
+    // Arrange.
+    const { h, fsys, skills } = withSkills();
+    const pushed = vi.spyOn(h.engine.pushes, "push");
+    await started(h);
+
+    // Act.
+    fsys.fire(skills, "one");
+    fsys.fire(skills, "two");
+
+    // Assert.
+    expect(statedStale(pushed)).toEqual([[`${skills}/one`]]);
+  });
+
+  it("catches a watch opened after the change up on the stale set", async () => {
+    // Arrange.
+    const { h, fsys, skills } = withSkills();
+    await started(h);
+    fsys.fire(skills, "late-skill");
+
+    // Act.
+    const iterator = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const seen: string[] = [];
+    for (;;) {
+      // A queued frame resolves in the microtask queue; the immediate fires
+      // only once the queue is drained, so it marks the end of what was queued.
+      const next = await Promise.race([
+        iterator.next(),
+        new Promise<undefined>((resolve) => setImmediate(() => resolve(undefined))),
+      ]);
+      if (next === undefined || next.done === true) break;
+      seen.push(next.value.update.case ?? "");
+    }
+
+    // Assert.
+    expect(seen).toContain("skillsChanged");
+  });
+
+  it("arms the watch before the vendor query exists", async () => {
+    // Arrange.
+    const fsys = new FakeSkillWatchFs();
+    let watchedBeforeQuery = false;
+    const h = harness({
+      skillWatchFs: fsys,
+      onQueryCreated: () => {
+        watchedBeforeQuery = fsys.watches.size > 0;
+      },
+    });
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    expect(watchedBeforeQuery).toBe(true);
+  });
+
+  it("watches the worktree's skills directory as well as the account's", async () => {
+    // Arrange.
+    const { h, fsys } = withSkills();
+    fsys.mkdir(`${h.cwd}/.claude/skills`);
+
+    // Act.
+    await started(h);
+
+    // Assert.
+    expect(fsys.watching(`${h.cwd}/.claude/skills`)).toBe(true);
+  });
+
+  it("ends the watch when the session stands down", async () => {
+    // Arrange.
+    const { h, fsys, skills } = withSkills();
+    await started(h);
+
+    // Act.
+    await h.engine.standDown("SIGTERM");
+
+    // Assert.
+    expect(fsys.watching(skills)).toBe(false);
   });
 });
 

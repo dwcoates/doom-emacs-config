@@ -198,6 +198,7 @@ import {
   vendorErrorRetryUpdate,
   type UsageReading,
 } from "./vendor-error-retry.js";
+import { REAL_SKILL_WATCH_FS, SkillSetWatch, skillDirsOf, type SkillWatchFs } from "./skill-watch.js";
 import { networkReach, type NetworkReach } from "./network-reach.js";
 import {
   KEEPALIVE_YIELD_BUDGET_MS,
@@ -298,6 +299,11 @@ interface EngineDeps {
    * Unset is the process's own timer; a test supplies one it releases by hand.
    */
   readonly measurementsWait?: Wait;
+  /**
+   * The filesystem the watch on the vendor's skills reads (engine/skill-watch.ts).
+   * Unset is the platform's own; a test supplies one it fires by hand.
+   */
+  readonly skillWatchFs?: SkillWatchFs;
   /**
    * The event-loop sampler's clock and lifetime (engine/measurements.ts,
    * sampleEventLoop): main.ts always supplies the process's own, for the
@@ -862,6 +868,43 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     nowMs: deps.nowMs,
     scheduler: deps.vendorErrorRetryScheduler ?? REAL_SCHEDULER,
   });
+
+  /**
+   * The vendor's skill set gone stale on disk, once the watch first saw a
+   * change, and never withdrawn: only a new vendor process loads the current
+   * set, and the daemon answers the statement by replacing this shim.
+   */
+  let skillsStale: conversationv1.SessionSkillsChanged | undefined;
+  /**
+   * The watch on the directories the vendor loads its skills from, armed by
+   * StartSession BEFORE the vendor query is created: a change after the vendor
+   * loaded its skills is then always seen, and one before is in what it
+   * loaded, so no change can fall between the two.
+   */
+  const skillWatch = new SkillSetWatch(
+    skillDirsOf(deps.env.configDir, deps.env.cwd),
+    deps.skillWatchFs ?? REAL_SKILL_WATCH_FS,
+    (changed) => noteSkillsChanged(changed),
+  );
+
+  /**
+   * A change on a skills directory the vendor loads from: the first one makes
+   * the set stale and states it; a later one only adds to the record, since
+   * the replacement owed is already asked for.
+   */
+  function noteSkillsChanged(changed: string): void {
+    const context = { changed, vendor_session_id: identity?.vendorSessionId ?? "" };
+    if (skillsStale !== undefined) {
+      LOGGER.debug(context, "another change to the vendor's skills; the replacement is already owed");
+      return;
+    }
+    skillsStale = create(conversationv1.SessionSkillsChangedSchema, { paths: [changed] });
+    LOGGER.info(
+      context,
+      "the vendor's skill set changed on disk; the vendor loaded its skills at its start, so the session is owed a new vendor process at its next idle point",
+    );
+    pushes.push(create(conversationv1.SessionUpdateSchema, { update: { case: "skillsChanged", value: skillsStale } }));
+  }
 
   let identity: SessionIdentity | undefined;
   /**
@@ -2280,8 +2323,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // an unhealthy verdict no later success could lift. A re-read is also the
     // honest answer to a catalog that changed under the account.
     await pushModelCatalog();
-    // THE COMMAND CATALOG CAN CHANGE UNDER A SESSION (a skill added mid-session),
-    // so it is re-read with the rest; an unchanged one pushes nothing.
+    // THE COMMAND CATALOG IS RE-READ WITH THE REST; an unchanged one pushes
+    // nothing. A skill installed mid-session does NOT reach it this way: the
+    // vendor loads its skills once, at its start (measured 2026-10-23), so
+    // that change arrives through the skill watch and a new vendor process
+    // (`skillWatch`, SessionSkillsChanged).
     await pushCommandCatalog();
     // The level the vendor sends can move under a turn (a vendor-side model
     // fallback), so it is re-read with the rest.
@@ -5301,6 +5347,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // rotation is announced exactly like a vendor-initiated one.
       pushes.push(await identity.rotate(clearedTo));
     }
+    // ARMED BEFORE THE QUERY EXISTS, so the vendor's load of its skills never
+    // precedes the watch (see `skillWatch`). A retried start arms nothing new.
+    skillWatch.start();
     effectiveModel = requestedModel;
     try {
       const initialized = awaitInit();
@@ -7400,6 +7449,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     await concludeWatchers();
     await concludeBashWatchers();
+    skillWatch.close();
     pushes.standDown();
     await releaseLock?.();
     releaseLock = undefined;
