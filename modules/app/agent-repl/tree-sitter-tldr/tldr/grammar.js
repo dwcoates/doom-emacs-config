@@ -64,7 +64,6 @@ module.exports = grammar({
   ],
 
   conflicts: $ => [
-    [$.fence, $._closed_fence],
     [$._tree_headed],
     [$._tree_bare],
     [$._tree_headed, $._lone_headed],

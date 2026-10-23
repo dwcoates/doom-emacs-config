@@ -4,8 +4,9 @@
  *
  *   HEADING_LABEL  a column-0 dotted label, accepted only when the line says
  *                  it is a label: a dotted label then whitespace or the end, or
- *                  any label then a separator (- – — :) or a marker at or above
- *                  U+2190. The token is the label alone; what decided it is
+ *                  any label then a separator (- – — :) or a marker (at or
+ *                  above U+2190, or a code point U+FE0F follows). The token
+ *                  is the label alone; what decided it is
  *                  left for the grammar to read.
  *   BRANCH_LABEL   a dotted label after a branch's connector, accepted only
  *                  when whitespace or the end of the line follows it, so
@@ -30,6 +31,11 @@ enum TokenType {
 
 /* The webapp's EMOJI_FLOOR: every metaprompt root marker sits at or above it. */
 #define MARKER_FLOOR 0x2190
+
+/* The emoji presentation selector: a code point below MARKER_FLOOR that it
+ * follows opens a marker too (ℹ️, ‼️, ©️, the keycaps), as tldr's scanner
+ * reads a root's marker. */
+#define EMOJI_PRESENTATION 0xfe0f
 
 static bool is_digit(int32_t c) { return c >= '0' && c <= '9'; }
 static bool is_blank(int32_t c) { return c == ' ' || c == '\t'; }
@@ -74,7 +80,10 @@ static bool scan_heading_label(TSLexer *lexer) {
   if (dotted && (at_line_end(lexer) || is_blank(lexer->lookahead))) return true;
   while (is_blank(lexer->lookahead)) advance(lexer);
   if (is_separator(lexer->lookahead)) return true;
-  return lexer->lookahead >= MARKER_FLOOR;
+  if (lexer->lookahead >= MARKER_FLOOR) return true;
+  if (at_line_end(lexer)) return false;
+  advance(lexer);
+  return lexer->lookahead == EMOJI_PRESENTATION;
 }
 
 static bool scan_branch_label(TSLexer *lexer) {

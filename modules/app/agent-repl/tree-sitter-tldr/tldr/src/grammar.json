@@ -1046,10 +1046,6 @@
   "extras": [],
   "conflicts": [
     [
-      "fence",
-      "_closed_fence"
-    ],
-    [
       "_tree_headed"
     ],
     [

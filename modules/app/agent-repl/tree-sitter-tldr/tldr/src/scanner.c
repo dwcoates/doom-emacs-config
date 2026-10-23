@@ -99,6 +99,14 @@ typedef struct {
  * while ASCII prose after a bare number stays below it. */
 #define EMOJI_FLOOR 0x2190
 
+/* The emoji presentation selector. A code point below EMOJI_FLOOR that it
+ * follows is an emoji too (ℹ️ U+2139, ‼️ U+203C, ©️ U+00A9, the keycaps),
+ * so it opens a marker as well (2026-10-23: a root opening on ℹ️ was read
+ * as prose, and its branches with it). tldr_prompt's scanner and
+ * daemon/internal/prose opensMarker read a marker by the same rule. */
+#define EMOJI_PRESENTATION 0xfe0f
+
+
 static bool is_digit(int32_t c) { return c >= '0' && c <= '9'; }
 
 /* JavaScript's whitespace, which `\s` and String.prototype.trim match:
@@ -120,6 +128,11 @@ typedef struct {
 /* The code point at I, or -1 past the end (JavaScript's charCodeAt answers
  * NaN there, which every comparison below treats as false). */
 static int32_t at(Line l, uint32_t i) { return i < l.n ? l.cp[i] : -1; }
+
+/* Whether the code point at I opens a root's marker. */
+static bool opens_marker(Line l, uint32_t i) {
+  return at(l, i) >= EMOJI_FLOOR || (at(l, i) >= 0 && at(l, i + 1) == EMOJI_PRESENTATION);
+}
 
 /* line.trim() === "" */
 static bool is_blank_line(Line l) {
@@ -170,7 +183,7 @@ static bool is_emoji_root_line(Line l) {
   int64_t end = dotted_label_end(l);
   if (end < 0) return false;
   if (at(l, (uint32_t)end) != ' ') return false;
-  return at(l, (uint32_t)end + 1) >= EMOJI_FLOOR;
+  return opens_marker(l, (uint32_t)end + 1);
 }
 
 /* isHeaderLine: the line starts with `Response (`. */
