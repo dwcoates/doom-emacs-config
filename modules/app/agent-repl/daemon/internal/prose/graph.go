@@ -170,21 +170,43 @@ func branchShape(it item) (depth, labelAt, labelEnd int, text string) {
 	return depth, labelAt, labelAt, strings.TrimSpace(l.text[after:])
 }
 
-// splitMarker splits a root's body into its marker (a symbol or emoji at or
-// above markerFloor, with any variation selector, skin tone or zero-width
-// joined continuation) and the text after it.
+// emojiPresentation is the emoji presentation selector. A code point below
+// markerFloor that it follows is an emoji too (ℹ️ U+2139, ‼️ U+203C, ©️, the
+// keycaps), so it opens a marker as well (2026-10-23: a root opening on ℹ️
+// was read as prose, and its branches with it).
+const emojiPresentation = 0xfe0f
+
+// opensMarker is whether S opens on a root's marker: a code point at or above
+// markerFloor, or one emojiPresentation follows. The grammars read a marker by
+// the same rule (tldr's opens_marker, tldr_prompt's scan_heading_label and
+// MARKER).
+func opensMarker(s string) bool {
+	r, size := utf8.DecodeRuneInString(s)
+	if r == utf8.RuneError {
+		return false
+	}
+	if r >= markerFloor {
+		return true
+	}
+	next, _ := utf8.DecodeRuneInString(s[size:])
+	return next == emojiPresentation
+}
+
+// splitMarker splits a root's body into its marker (opensMarker's code point,
+// with any variation selector, keycap, skin tone or zero-width joined
+// continuation) and the text after it.
 func splitMarker(body string) (marker, text string) {
 	i := 0
-	r, size := utf8.DecodeRuneInString(body)
-	if r < markerFloor {
-		// The grammar classifies a root by this very code point.
+	if !opensMarker(body) {
+		// The grammar classifies a root by this very rule.
 		panic("prose: a root's body does not open on a marker: " + strconv.Quote(body))
 	}
+	_, size := utf8.DecodeRuneInString(body)
 	i += size
 	for i < len(body) {
 		r, size := utf8.DecodeRuneInString(body[i:])
 		switch {
-		case r == 0xfe0f, r >= 0x1f3fb && r <= 0x1f3ff:
+		case r == emojiPresentation, r == 0x20e3, r >= 0x1f3fb && r <= 0x1f3ff:
 			i += size
 		case r == 0x200d:
 			next, nsize := utf8.DecodeRuneInString(body[i+size:])

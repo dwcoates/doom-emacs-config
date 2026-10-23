@@ -58,13 +58,15 @@ const cp = n => String.fromCodePoint(n);
 const MARKER_FLOOR = cp(0x2190);
 
 /**
- * A root's marker: a symbol or emoji at or above MARKER_FLOOR, with any
- * variation selector (U+FE0F), skin tone (U+1F3FB to U+1F3FF) or
- * zero-width-joined (U+200D) continuation.
+ * A root's marker: a symbol or emoji at or above MARKER_FLOOR, or any code
+ * point the emoji presentation selector (U+FE0F) follows (ℹ️, ‼️, ©️, the
+ * keycaps), with any variation selector, keycap (U+20E3), skin tone (U+1F3FB
+ * to U+1F3FF) or zero-width-joined (U+200D) continuation. tldr's scanner and
+ * daemon/internal/prose read a marker by the same rule.
  */
 const MARKER = new RegExp(
-  `[ \\t]*[${MARKER_FLOOR}-${cp(0x10ffff)}]` +
-    `(${cp(0xfe0f)}|${cp(0x200d)}[${MARKER_FLOOR}-${cp(0x10ffff)}]${cp(0xfe0f)}?|[${cp(0x1f3fb)}-${cp(0x1f3ff)}])*`,
+  `[ \\t]*(?:[${MARKER_FLOOR}-${cp(0x10ffff)}]|[^\\s]${cp(0xfe0f)})` +
+    `(${cp(0xfe0f)}|${cp(0x20e3)}|${cp(0x200d)}[${MARKER_FLOOR}-${cp(0x10ffff)}]${cp(0xfe0f)}?|[${cp(0x1f3fb)}-${cp(0x1f3ff)}])*`,
   'u',
 );
 

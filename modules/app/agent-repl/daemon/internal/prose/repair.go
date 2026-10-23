@@ -39,7 +39,7 @@ func repairUnlabeledRoots(d document) []edit {
 // `│   text` is a wrapped line under a branch, not a root without a label.
 func opensOnMarker(line string) bool {
 	r, _ := utf8.DecodeRuneInString(line)
-	if r < markerFloor || (r >= 0x2500 && r <= 0x257f) {
+	if !opensMarker(line) || (r >= 0x2500 && r <= 0x257f) {
 		return false
 	}
 	marker, _ := splitMarker(line)

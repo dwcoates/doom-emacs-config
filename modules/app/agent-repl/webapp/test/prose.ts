@@ -67,8 +67,10 @@ export function servedProse(text: string, { arriving = false } = {}): ParsedPros
 
 /** Whether TEXT holds a connector line or a labelled root line. */
 function treeShaped(text: string): boolean {
-  const rootLike = [...text.matchAll(/^[0-9]+(?:\.[0-9]+)* (.)/gmu)].some(
-    (m) => (m[1].codePointAt(0) ?? 0) >= MARKER_FLOOR,
+  // A marker opens on a code point at or above the floor, or on one the emoji
+  // presentation selector follows (daemon/internal/prose opensMarker).
+  const rootLike = [...text.matchAll(/^[0-9]+(?:\.[0-9]+)* (.)(\u{fe0f})?/gmu)].some(
+    (m) => (m[1].codePointAt(0) ?? 0) >= MARKER_FLOOR || m[2] !== undefined,
   );
   return /[├└]──/.test(text) || rootLike;
 }

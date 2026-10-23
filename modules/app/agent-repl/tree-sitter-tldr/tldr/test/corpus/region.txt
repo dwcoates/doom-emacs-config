@@ -345,3 +345,74 @@ A line no branch begins is a continuation
       (continuation
         (prefix)
         (text)))))
+
+========================================================================
+A root opening on an emoji below the floor (ℹ️) is a root, and the tree runs on through it
+========================================================================
+Response (✏️ changes made)
+
+1 🔕 Yes. I ran `agent-repld merge-queue unsubscribe` and this workspace is now unsubscribed from the doom merge queue
+└── 1.1 `merge-queue subscribe` turns the notices back on
+
+2 ℹ️ What you'll still be told
+├── 2.1 You'll still get a report when a merge I request ends, landed or failed
+│   └── 2.1.1 That report comes from the merge itself, not from the subscription
+└── 2.2 You'll still get messages from the one-shot workspaces I created, such as `agent-repl-skill-reload`, when they report back
+------------------------------------------------------------------------
+
+(document
+  (tree
+    (header_line
+      (continuation
+        (text)))
+    (blank_line
+      (raw))
+    (root_line
+      (branch
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text)))
+    (blank_line
+      (raw))
+    (root_line
+      (branch
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text)))
+    (connector_line
+      (branch
+        (prefix)
+        (label)
+        (text)))))
+
+========================================================================
+A symbol below the floor with no presentation selector opens no root
+========================================================================
+1 © 2026 Acme
+└── 1.1 Child
+------------------------------------------------------------------------
+
+(document
+  (before
+    (label_line
+      (branch
+        (label)
+        (text))))
+  (connector_line
+    (branch
+      (prefix)
+      (label)
+      (text))))

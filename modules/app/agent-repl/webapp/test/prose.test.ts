@@ -22,6 +22,7 @@ describe("plainProse", () => {
     { name: "a connector line", text: "intro\n├── 1.1 a" },
     { name: "a last-child connector", text: "└── 1.1 a" },
     { name: "a labelled root", text: "1 🔧 Fixed it" },
+    { name: "a root on an emoji below the floor", text: "2 ℹ️ What you'll still be told" },
   ])("refuses $name", ({ text }) => {
     // Act + Assert
     expect(() => plainProse(text)).toThrow(/plainProse given a tree/);

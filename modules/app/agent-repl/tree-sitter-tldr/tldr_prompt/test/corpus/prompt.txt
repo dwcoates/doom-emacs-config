@@ -195,3 +195,14 @@ A markdown table is prose
   (preamble
     (prose
       (text))))
+
+========================================================================
+A symbol below the floor with no presentation selector is prose
+========================================================================
+1 © 2026 Acme
+------------------------------------------------------------------------
+
+(document
+  (preamble
+    (prose
+      (text))))
