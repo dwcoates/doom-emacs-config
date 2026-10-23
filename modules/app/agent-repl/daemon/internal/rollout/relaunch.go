@@ -128,12 +128,12 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 		// gives the bounce back unperformed, before any prelaunch, and the
 		// registry reruns it when the merge releases the lease
 		// (promptqueue OnLeaseChanged).
-		if reason == ReasonBuildStale && !force {
+		if reason.waitsBehindAMerge() && !force {
 			if held, merging, err := c.deps.DB.Lease(ctx, ws); err != nil {
-				c.log.Error(opRelaunch, "could not read the workspace's lease before the stale-build bounce", dlog.WithCause(fields, err))
+				c.log.Error(opRelaunch, "could not read the workspace's lease before the unforced bounce", dlog.WithCause(fields, err))
 				return fmt.Errorf("rollout: relaunch %q: read the lease: %w", ws, err)
 			} else if merging && held.Holder == wsm.HolderMerge {
-				c.log.Info(opRelaunch, "a merge holds the workspace; the stale-build bounce waits for the merge to release it", dlog.Merge(fields, dlog.Context{"lease": string(held.ID)}))
+				c.log.Info(opRelaunch, "a merge holds the workspace; the unforced bounce waits for the merge to release it", dlog.Merge(fields, dlog.Context{"lease": string(held.ID)}))
 				return fmt.Errorf("rollout: relaunch %q: a merge holds the workspace: %w", ws, bounce.ErrDeferredBehindLease)
 			}
 		}

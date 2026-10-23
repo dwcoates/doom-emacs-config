@@ -329,6 +329,32 @@ func (s *lifecycleSink) OnQueryDied(ws ids.WorkspaceID) {
 	s.log.Info("daemon.cmd.lifecycle", "the session's vendor query died; its shim is replaced through the bounce registry", fields)
 }
 
+// OnSkillsChanged replaces a session whose vendor's skill set went stale on
+// disk: the vendor loads its skills once, at its start, so a skill installed,
+// changed or removed since reaches the session only through a new vendor
+// process. The replacement is the bounce a stale build takes, UNFORCED, so it
+// waits for the session's next idle point -- never a running turn, never live
+// work, never a merge's run -- and its resume states the new catalog. A
+// restated level joins the replacement already asked for.
+func (s *lifecycleSink) OnSkillsChanged(ws ids.WorkspaceID, paths []string) {
+	fields := dlog.Context{"workspace": string(ws), "reason": string(rollout.ReasonSkillsChanged), "paths": paths}
+	controller, ok := s.builds.controller()
+	if !ok {
+		s.log.Error("daemon.cmd.lifecycle", "a session's skill set went stale before the rollout controller existed; nothing replaces its shim", fields)
+		return
+	}
+	// THE OUTCOME IS RECORDED ONCE, by BounceShim itself under the
+	// replacement's reason; nothing here waits on it.
+	decision, err := controller.BounceShim(context.Background(), ws, rollout.ReasonSkillsChanged, false, nil)
+	if err != nil {
+		// BounceShim recorded the refusal at ERROR with its cause.
+		return
+	}
+	fields["bounced_now"] = decision.Now
+	fields["already_pending"] = decision.AlreadyPending
+	s.log.Info("daemon.cmd.lifecycle", "the session's vendor skill set went stale; its shim is replaced at its next idle point through the bounce registry", fields)
+}
+
 // OnFree is the freeness edge, which a turn's end raises: the queue bounces a
 // shim registered for it, and a withheld workspace's stand-down the turn
 // deferred is taken.

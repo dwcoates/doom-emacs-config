@@ -58,23 +58,55 @@ func TestARestartOverAMergesLeaseLeavesTheLeaseToTheMerge(t *testing.T) {
 // any prelaunch, and the registry reruns it once the merge releases the lease
 // (owner ruling 2026-10-12: a graceful restart that fails to restart a
 // session is a defect; before this it failed at ERROR and was never retried).
+//
+// A stale skill set waits the same way: it, too, owes the session only a
+// fresher process, and nothing is waiting on it.
 func TestAStaleBuildBounceOverAMergesLeaseIsDeferred(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	ws, _ := h.workspace(t)
-	if _, err := h.db.AcquireLease(context.Background(), ws, wsm.HolderMerge, wsm.PolicyHold); err != nil {
-		t.Fatalf("AcquireLease: %v", err)
-	}
+	for _, reason := range []RelaunchReason{ReasonBuildStale, ReasonSkillsChanged} {
+		t.Run(string(reason), func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			if _, err := h.db.AcquireLease(context.Background(), ws, wsm.HolderMerge, wsm.PolicyHold); err != nil {
+				t.Fatalf("AcquireLease: %v", err)
+			}
 
-	// Act.
-	err := h.c.shimBounce(ReasonBuildStale, false)(context.Background(), ws)
+			// Act.
+			err := h.c.shimBounce(reason, false)(context.Background(), ws)
 
-	// Assert.
-	if !errors.Is(err, bounce.ErrDeferredBehindLease) {
-		t.Fatalf("bounce = %v, want it deferred behind the merge's lease", err)
+			// Assert.
+			if !errors.Is(err, bounce.ErrDeferredBehindLease) {
+				t.Fatalf("bounce = %v, want it deferred behind the merge's lease", err)
+			}
+			if len(h.fleet.resumes) != 0 {
+				t.Fatalf("resumes = %v, want nothing replaced under the merge", h.fleet.resumes)
+			}
+		})
 	}
-	if len(h.fleet.resumes) != 0 {
-		t.Fatalf("resumes = %v, want nothing replaced under the merge", h.fleet.resumes)
+}
+
+func TestOnlyTheReplacementsNothingWaitsOnWaitBehindAMerge(t *testing.T) {
+	tests := []struct {
+		reason RelaunchReason
+		waits  bool
+	}{
+		{ReasonBuildStale, true},
+		{ReasonSkillsChanged, true},
+		{ReasonRestartVerb, false},
+		{ReasonQueryDied, false},
+		{ReasonShimLogCeiling, false},
+		{ReasonHandoverTransfer, false},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.reason), func(t *testing.T) {
+			// Act
+			got := tc.reason.waitsBehindAMerge()
+
+			// Assert
+			if got != tc.waits {
+				t.Fatalf("waitsBehindAMerge = %v, want %v", got, tc.waits)
+			}
+		})
 	}
 }
 
