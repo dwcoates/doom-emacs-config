@@ -1,0 +1,96 @@
+// endpoint_get_live_shell_runs_announced_before.proto —
+// GetLiveShellRunsAnnouncedBefore: every detached SHELL run the record holds
+// no terminal for whose announcement the store wrote before an instant.
+//
+// WHY THE SIDECAR ASKS. A process cannot outlive the kernel that ran it, so a
+// shell announced before the machine's boot is ended, whatever the record
+// says. A shell's terminal is the sidecar's, read off its spool, but a reboot
+// empties /tmp, where the spools live, and the sidecar resumes each transcript
+// at its committed cursor, past the launches it read before the reboot. Such a
+// run is then on no file the sidecar reads and in no line it will read again:
+// nothing would ever write its terminal, and the shim, for which a shell is
+// live until the sidecar writes its end, re-announces it as running forever.
+// The record is the one place that still names it, so the sidecar asks the
+// record, once per process, for the shells announced before the boot, and
+// concludes each LOST (swept_up) that no spool it reads accounts for.
+//
+// UNSCOPED ON PURPOSE. The sidecar reads every session on the host, and the
+// question is about the machine's boot, which every session on the host
+// shares; a run is answered with its owner, so each terminal is written into
+// the right book.
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "store/v1/endpoint_get_live_work.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Ask for the live shell runs announced before an instant.
+message GetLiveShellRunsAnnouncedBeforeRequest {
+  // REQUIRED, positive. A Unix instant in milliseconds; the answer holds the
+  // runs whose announcement the store wrote strictly before it. The store
+  // stamps an announcement from its own clock when it writes it, and a later
+  // re-announcement of the same run never moves that stamp, so a run
+  // announced before the boot keeps answering as such. Zero or negative is
+  // refused with `invalid_request`.
+  int64 announced_before_ms = 1;
+}
+
+// The runs, or why they could not be read. THE ARM IS THE ANSWER.
+message GetLiveShellRunsAnnouncedBeforeResponse {
+  // Exactly one arm is set: the runs the record holds, or why it could not
+  // answer.
+  oneof result {
+    GetLiveShellRunsAnnouncedBeforeSuccess success = 1;
+    GetLiveShellRunsAnnouncedBeforeFailure failure = 2;
+  }
+}
+
+// Every live shell run announced before the asked instant, oldest
+// announcement first. Empty is the ordinary answer on a host where every
+// shell from before the boot has ended.
+message GetLiveShellRunsAnnouncedBeforeSuccess {
+  // The runs, oldest announcement first.
+  repeated GetLiveShellRunsAnnouncedBeforeRun runs = 1;
+}
+
+// One live shell run, with what a caller needs to write its terminal.
+message GetLiveShellRunsAnnouncedBeforeRun {
+  // REQUIRED. The run's handle and the agent that owns it, exactly as
+  // GetLiveWork answers a live detached run: the owner's book holds the run's
+  // start, and a terminal written for the run is written there.
+  GetLiveWorkDetached detached = 1;
+  // REQUIRED. The spawning call's activity id: the unit the run detached from
+  // (the row's origin unit), which a terminal is keyed by and GetRunSettlements
+  // is asked by.
+  conversation.v1.AgentActivityId run = 2;
+  // REQUIRED. When the store wrote the run's announcement, in Unix
+  // milliseconds from the store's own clock: strictly before the asked
+  // instant.
+  int64 announced_at_ms = 3;
+}
+
+// The runs could not be read. THE ARM IS WHY.
+message GetLiveShellRunsAnnouncedBeforeFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+  // Why the store could not answer: a malformed request, or a database that
+  // failed.
+  oneof kind {
+    GetLiveShellRunsAnnouncedBeforeStorageFailure storage_failure = 2;
+    // `announced_before_ms` zero or negative.
+    GetLiveShellRunsAnnouncedBeforeInvalidRequest invalid_request = 3;
+  }
+}
+
+// The request was malformed or violated the validation invariant.
+message GetLiveShellRunsAnnouncedBeforeInvalidRequest {
+  // Which field, as the store names it — for the caller's logs, never
+  // switched on.
+  string field = 1;
+}
+
+// The database failed; `detail` carries the driver's text.
+message GetLiveShellRunsAnnouncedBeforeStorageFailure {}

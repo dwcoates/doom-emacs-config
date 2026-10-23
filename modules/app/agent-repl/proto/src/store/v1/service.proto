@@ -14,6 +14,7 @@ package store.v1;
 
 import "store/v1/endpoint_get_agent_by_vendor_task.proto";
 import "store/v1/endpoint_get_detached_work.proto";
+import "store/v1/endpoint_get_live_shell_runs_announced_before.proto";
 import "store/v1/endpoint_get_live_work.proto";
 import "store/v1/endpoint_get_peer_delivery.proto";
 import "store/v1/endpoint_get_run_settlements.proto";
@@ -86,6 +87,12 @@ service ShimStore {
   // a run's file, so a run that settled before this process started is never
   // tracked again and never concluded LOST. Absent from the answer = not settled.
   rpc GetRunSettlements(GetRunSettlementsRequest) returns (GetRunSettlementsResponse);
+
+  // EVERY SHELL RUN FROM BEFORE AN INSTANT the record holds no terminal for,
+  // host-wide. The sidecar asks once per process with the machine's boot
+  // instant: a shell announced before the boot cannot still be running, and
+  // one no spool it reads accounts for is concluded LOST from the record.
+  rpc GetLiveShellRunsAnnouncedBefore(GetLiveShellRunsAnnouncedBeforeRequest) returns (GetLiveShellRunsAnnouncedBeforeResponse);
 
   // WHAT KIND of detached work one unit left as, and whether the record holds
   // it as ENDED, by the spawning call's activity id. The shim asks before
