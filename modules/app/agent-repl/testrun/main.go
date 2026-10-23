@@ -230,6 +230,7 @@ func runParent(log *run.Log, module string, runner *life.Runner) (string, []stri
 		log.Errorf("export %s: %v", ramdisk.EnvShortBase, err)
 	}
 	log.Infof("the run's root is on a %d MiB RAM disk at %s (%s); units run at the %s I/O tier", size, v.Mount, v.Device, ramdisk.UnitIOTier)
+	v.WatchUse(ramdisk.UseEvery)
 	return v.Mount, ramdisk.UnitPrefix(), func() error {
 		if err := v.Release(); err != nil {
 			return fmt.Errorf("release the run's RAM disk: %w", err)

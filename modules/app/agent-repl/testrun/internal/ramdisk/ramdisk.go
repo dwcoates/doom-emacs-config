@@ -290,6 +290,8 @@ type Manager struct {
 	// Memory answers the host's physical memory, which sizes the memory
 	// seats (seats.go).
 	Memory func() (uint64, error)
+	// Used answers the bytes in use on a mounted volume (MountUsed).
+	Used func(mount string) (uint64, error)
 }
 
 // Volume is one attached, mounted RAM disk owned by this run.
@@ -298,8 +300,12 @@ type Volume struct {
 	Device string
 	// Mount is where its volume is mounted.
 	Mount string
+	// SizeMiB is its size.
+	SizeMiB int
 
-	m    Manager
+	m Manager
+	// use records the space in use over the run (WatchUse).
+	use  *use
 	lock *os.File
 	// seat is the memory seat the disk holds until its release (seats.go).
 	seat *os.File
@@ -311,7 +317,7 @@ func Default(log Logger) Manager {
 		Run: ExecRunner, Registry: DefaultRegistry, MountParent: DefaultMountParent, VolumesParent: DefaultVolumesParent, Pid: os.Getpid(),
 		Reap:  reap.OSReap(log),
 		Probe: RunBounded, Procs: proctable.List, Watch: RunWatched, Alive: ProcessAlive, Mounted: IsMountPoint, Log: log, Now: time.Now,
-		LockBound: LockBound, Memory: HostMemory,
+		LockBound: LockBound, Memory: HostMemory, Used: MountUsed,
 	}
 }
 
@@ -474,7 +480,7 @@ func (m Manager) attach(sizeMiB int) (_ *Volume, err error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &Volume{m: m, lock: lock, Mount: filepath.Join(m.MountParent, fmt.Sprintf("artr-%d", m.Pid))}
+	v := &Volume{m: m, lock: lock, SizeMiB: sizeMiB, Mount: filepath.Join(m.MountParent, fmt.Sprintf("artr-%d", m.Pid))}
 	out, err := m.Run("hdiutil", "attach", "-nomount", fmt.Sprintf("ram://%d", sizeMiB*2048))
 	if err != nil {
 		// A KILLED ATTACH MAY STILL HAVE ATTACHED. hdiutil killed at its bound
@@ -535,6 +541,7 @@ func (m Manager) detachNewRAMDisks(before string) error {
 func (v *Volume) Release() error {
 	start := v.m.Now()
 	v.m.Log.Infof("RAM disk release: begin at %s, %s mounted at %s", stamp(start), v.Device, v.Mount)
+	v.stopUse()
 	var errs []error
 	detached := true
 	if v.Device != "" {
