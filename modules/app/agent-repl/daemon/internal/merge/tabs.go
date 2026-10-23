@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -192,30 +193,56 @@ func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int6
 	}
 }
 
-// liveHead is the head's result for a merge still in flight: WAITING in its
-// queue behind the merges ahead of it, or MERGING once its run was admitted
-// (frontend.v1.FeedMergeUpdate.stage). It is resolved from the same fact the
-// head's clock origin switches on (headClockMS), so the badge and the clock
-// never disagree.
-type liveHead int
+// liveHead is the head's result for a merge still in flight: its STAGE,
+// WAITING in its queue behind the merges ahead of it or MERGING once its run
+// was admitted (frontend.v1.FeedMergeUpdate.stage), and whether its queue is
+// PAUSED (frontend.v1.FeedMergeUpdate.paused). The stage is resolved from the
+// same fact the head's clock origin switches on (headClockMS), so the badge
+// and the clock never disagree.
+type liveHead struct {
+	stage  headStage
+	paused bool
+}
+
+// headStage is where a live merge stands in its queue.
+type headStage int
 
 const (
-	// headMerging is a merge being worked on: its run admitted, or an async
+	// stageMerging is a merge being worked on: its run admitted, or an async
 	// merge's resolving turn running before it joins the queue.
-	headMerging liveHead = iota + 1
-	// headWaiting is a merge waiting in its queue.
-	headWaiting
+	stageMerging headStage = iota + 1
+	// stageWaiting is a merge waiting in its queue.
+	stageWaiting
 )
 
-// update is the live arm the head draws for STAGE.
-func (stage liveHead) update() *frontendv1.FeedMergeUpdate {
-	switch stage {
-	case headMerging:
-		return &frontendv1.FeedMergeUpdate{Stage: &frontendv1.FeedMergeUpdate_Merging{Merging: &frontendv1.FeedMergeUpdateMerging{}}}
-	case headWaiting:
-		return &frontendv1.FeedMergeUpdate{Stage: &frontendv1.FeedMergeUpdate_Waiting{Waiting: &frontendv1.FeedMergeUpdateWaiting{}}}
+var (
+	// headMerging is a merge being worked on, on a queue that runs.
+	headMerging = liveHead{stage: stageMerging}
+	// headWaiting is a merge waiting in a queue that runs.
+	headWaiting = liveHead{stage: stageWaiting}
+)
+
+// onPaused is HEAD as a queue whose pause is PAUSED draws it.
+func (head liveHead) onPaused(paused bool) liveHead {
+	head.paused = paused
+	return head
+}
+
+// update is the live arm the head draws.
+func (head liveHead) update() *frontendv1.FeedMergeUpdate {
+	update := &frontendv1.FeedMergeUpdate{}
+	switch head.stage {
+	case stageMerging:
+		update.Stage = &frontendv1.FeedMergeUpdate_Merging{Merging: &frontendv1.FeedMergeUpdateMerging{}}
+	case stageWaiting:
+		update.Stage = &frontendv1.FeedMergeUpdate_Waiting{Waiting: &frontendv1.FeedMergeUpdateWaiting{}}
+	default:
+		panic(fmt.Sprintf("merge: live head stage %d is no stage", int(head.stage)))
 	}
-	panic(fmt.Sprintf("merge: live head stage %d is no stage", int(stage)))
+	if head.paused {
+		update.Paused = &frontendv1.FeedMergeUpdatePaused{}
+	}
+	return update
 }
 
 // headIsLive reports whether RESULT is a live head's (liveHead) rather than an
@@ -513,18 +540,22 @@ func branchLabel(source, target string) string {
 //
 // bubbles carries an async merge's bubble (queueView), keyed by the entry's
 // own workspace; a sync merge has none.
-func queueSnapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID, names map[ids.WorkspaceID]string, dirs map[ids.WorkspaceID]string, bubbles map[ids.WorkspaceID]*frontendv1.FeedMergeQueueBubble, standings []*frontendv1.FeedMergeQueueEntry) *frontendv1.FeedMergeQueue {
+func queueSnapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID, view queueView) *frontendv1.FeedMergeQueue {
 	snap := &frontendv1.FeedMergeQueue{}
+	if view.paused {
+		snap.Paused = &frontendv1.FeedMergeQueuePaused{}
+	}
 	seenSelf := false
 	for i, entry := range entries {
 		row := &frontendv1.FeedMergeQueueEntry{
 			Workspace: &frontendv1.FeedMergeQueueWorkspace{Ref: &workspacev1.WorkspaceRef{
 				Id:  string(entry.Workspace),
-				Dir: dirs[entry.Workspace],
+				Dir: view.dirs[entry.Workspace],
 			}},
-			Label:  &frontendv1.FeedMergeQueueLabel{Text: names[entry.Workspace]},
-			Status: standings[i].Status,
-			Bubble: bubbles[entry.Workspace],
+			Label:  &frontendv1.FeedMergeQueueLabel{Text: view.names[entry.Workspace]},
+			Status: view.standings[i].Status,
+			Bubble: view.bubbles[entry.Workspace],
+			Target: queueTarget(view.targets[entry.Workspace]),
 		}
 		switch {
 		case entry.Workspace == self:
@@ -537,6 +568,15 @@ func queueSnapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID, names ma
 		}
 	}
 	return snap
+}
+
+// queueTarget is the target column's cell for a merge landing in the worktree
+// at DIR: the worktree's directory name, with its full path for hover.
+func queueTarget(dir string) *frontendv1.FeedMergeQueueTarget {
+	if dir == "" {
+		panic("merge: a queue entry's landing worktree was never resolved")
+	}
+	return &frontendv1.FeedMergeQueueTarget{Text: filepath.Base(dir), Dir: dir}
 }
 
 // saidText composes the one canonical prompt form the daemon submits a brief

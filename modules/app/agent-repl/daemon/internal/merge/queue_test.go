@@ -983,7 +983,7 @@ func TestHeadClockMSFollowsTheEntrysStanding(t *testing.T) {
 				t.Fatalf("headClockMS: %v", err)
 			}
 			if clocked != tc.wantClocked || ms != tc.wantMS(r) || stage != tc.wantStage {
-				t.Fatalf("headClockMS = %d stage %d clocked %v, want %d stage %d clocked %v", ms, stage, clocked, tc.wantMS(r), tc.wantStage, tc.wantClocked)
+				t.Fatalf("headClockMS = %d stage %+v clocked %v, want %d stage %+v clocked %v", ms, stage, clocked, tc.wantMS(r), tc.wantStage, tc.wantClocked)
 			}
 		})
 	}

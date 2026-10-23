@@ -112,6 +112,34 @@ func (o *orchestrator) resolveSubject(ctx context.Context, r *run) (subject, err
 	}
 }
 
+// targetDirOf answers the checkout the merge workspace WS queued lands in, by
+// its source: a workspace's recorded target, or the repository's main
+// worktree. It is what the boot recovery resumes a merge against and what the
+// queue tab's target column names. A creation_jobs row that will not decode
+// is returned as the DecodeError it is.
+func (o *orchestrator) targetDirOf(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource) (string, error) {
+	switch source.Kind {
+	case wsm.MergeSourceOwnBranch:
+		job, err := o.layoutFor(ctx, ws)
+		if err != nil {
+			return "", err
+		}
+		return job.Layout.TargetDir, nil
+	case wsm.MergeSourceWorkspace:
+		job, err := o.layoutFor(ctx, source.Workspace)
+		if err != nil {
+			return "", err
+		}
+		return job.Layout.TargetDir, nil
+	default:
+		record, err := o.deps.DB.Workspace(ctx, ws)
+		if err != nil {
+			return "", err
+		}
+		return o.deps.Git.MainWorktree(ctx, record.Dir)
+	}
+}
+
 // requestedBranch answers the workspace branch a request merges: the one
 // recorded when it was requested (checkSource). A request recorded by an
 // earlier build carries none, and its branch is read from the worktree now,
