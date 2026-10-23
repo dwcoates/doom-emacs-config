@@ -102,7 +102,3 @@ var nativeEndian = binary.LittleEndian
 func errShort(n int) error {
 	return fmt.Errorf("kern.procargs2: %d bytes, too short for argc", n)
 }
-
-func errArgc(argc, got int) error {
-	return fmt.Errorf("kern.procargs2: argc is %d but only %d strings follow", argc, got)
-}

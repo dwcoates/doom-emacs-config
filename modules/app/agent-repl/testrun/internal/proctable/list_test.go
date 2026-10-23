@@ -34,7 +34,7 @@ func TestParseProcArgs(t *testing.T) {
 		{name: "an empty argument is kept", buf: procArgsBuf(2, "/bin/echo", "echo", "", "A=1"), wantArgv: []string{"echo", ""}, wantEnv: []string{"A=1"}},
 		{name: "too short for argc", buf: []byte{1, 0}, wantErr: "too short for argc"},
 		{name: "no executable path", buf: []byte{1, 0, 0, 0, 'x'}, wantErr: "no executable path"},
-		{name: "fewer strings than argc", buf: []byte{3, 0, 0, 0, '/', 0, 's', 'h', 0}, wantErr: "argc is 3 but only 1 strings follow"},
+		{name: "a rewritten title leaves fewer strings than argc: what is there, no env", buf: []byte{3, 0, 0, 0, '/', 0, 'n', 'p', 'm', ' ', 'e', 'x', 'e', 'c', 0}, wantArgv: []string{"npm exec"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

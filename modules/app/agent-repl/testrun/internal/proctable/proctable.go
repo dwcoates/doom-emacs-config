@@ -106,7 +106,12 @@ func ParseProcArgs(buf []byte) (argv, env []string, err error) {
 		rest = rest[j+1:]
 	}
 	if len(strs) < argc {
-		return nil, nil, errArgc(argc, len(strs))
+		// A process that rewrote its own title (node's process.title, which
+		// `npm exec` sets) overwrote its argument area in place, so argc no
+		// longer counts what is there (measured 2026-10-23: argc 298, 214
+		// strings). ps shows what is there; so does this, with no
+		// environment, since where argv ends is no longer known.
+		return strs, nil, nil
 	}
 	return strs[:argc], strs[argc:], nil
 }
