@@ -88,6 +88,12 @@ workspace's own.")
 (defvar agent-repl--webhost-gate-docks (make-hash-table :test #'equal)
   "Workspace id -> (PIXELS . BACKGROUND), the slot its docked gate takes.")
 
+(defvar agent-repl--webhost-follow-conn nil
+  "The connection to the daemon the host's calls were last pointed at, or nil.
+The daemon the host belongs on once a handover moved it: a host found
+stale after that is reloaded there, never on a link still naming the
+daemon being left.  Nil until a handover first moves the host.")
+
 (defvar agent-repl--webhost-daemon-origin nil
   "The daemon origin the host's own calls were last pointed at, or nil.
 Nil until a handover first moves them; a host load starts on the daemon
@@ -294,10 +300,13 @@ The answer is always a string: a null answer is dropped without a callback."
 (defun agent-repl--webhost-predates-call (op)
   "The host has no OP: it was loaded from a build older than this elisp.
 EMACS AND THE HOST SPEAK ONE PROTOCOL.  A host that predates a call Emacs
-makes is reloaded on the daemon serving Emacs now, which serves the build
-this elisp came with; one that still lacks the call after that reload is a
-daemon serving an older webapp than this elisp, an ERROR no reload heals."
-  (let* ((conn (agent-repl-link-live))
+makes is reloaded on the daemon it belongs on: the one a handover pointed
+it at (`agent-repl--webhost-follow-conn'), else the one serving Emacs.
+Mid-handover the link can still name the daemon being left, and a host
+reloaded there dials a daemon about to exit.  One that still lacks the call
+after that reload is a daemon serving an older webapp than this elisp, an
+ERROR no reload heals."
+  (let* ((conn (or agent-repl--webhost-follow-conn (agent-repl-link-live)))
          (url (and conn (agent-repl-webhost-url conn))))
     (cond
      (agent-repl--webhost-predates-reload-pending
@@ -481,7 +490,8 @@ calls go moves (`setDaemon')."
     (unless (equal origin (or agent-repl--webhost-daemon-origin
                               (and agent-repl--webhost-url
                                    (agent-repl--webhost-url-origin agent-repl--webhost-url))))
-      (setq agent-repl--webhost-daemon-origin origin)
+      (setq agent-repl--webhost-daemon-origin origin
+            agent-repl--webhost-follow-conn conn)
       (agent-repl--info ws "elisp.webhost.follows-daemon ws=%s to=%s" ws origin)
       (agent-repl--webhost-call "setDaemon" origin))))
 
@@ -633,6 +643,7 @@ out (`agent-repl-host-adopting-p')."
       (progn
         (setq agent-repl--webhost-url (agent-repl-webhost-url conn)
               agent-repl--webhost-daemon-origin nil
+              agent-repl--webhost-follow-conn nil
               agent-repl--webhost-reload-started-ms (agent-repl--now-unix-ms))
         (agent-repl--frontend-webview-navigate-widget xw agent-repl--webhost-url)
         (agent-repl--info agent-repl--webhost-central "elisp.webhost.reloaded pages=%d"
