@@ -264,3 +264,19 @@ owner's delegation.
 - Why optional and not refused when absent: the field is metrics only, and refusing a stream from an Emacs whose elisp predates it would shut that Emacs out of the daemon that must push it the reload.
 - Consequences: the daemon's process collector reads the pid from the server's stream-scoped holder instead of its own ancestry, and Emacs sends `(emacs-pid)`.
 - Decided under the owner's delegation; additive.
+
+### 11. Stalls and a reload's blank page are reported, and Emacs reports latencies of its own
+
+- What:
+  - `agentrepl.v1.ReportedLatencyKind` gains `PAGE_STALL` (a shown page's main thread late by at least the vocabulary's detection floor) and `RELOAD_BLANK` (a reload's start to the reloaded page drawn, measured only by a page shown when it draws).
+  - `agentrepl.v1.ReportLatenciesRequest` gains `repeated ReportedEditorLatency editor_latencies = 3`, each an `agentrepl.v1.EditorLatencyKind` (`STALL`, `ELISP_RELOAD`) and its seconds.
+  - The host-to-page presence message (webapp `host/protocol.ts`, not a protobuf) gains `reloadStartedAtMs`, which Emacs hands the host with the `ensure` or `reload` call a reload makes.
+- Why: the owner sees the webapp flash, the font size change and Emacs freeze during hot reloads (2026-10-23), and no metric measured any of it: `workspace_reconnect` ends when the streams are back, not when the page has painted, and nothing measured either event loop the person waits on.
+- Why a stall and not every sample: a sampler runs every 100ms, and only a run at least the detection floor (50ms) late is reported, so a healthy loop sends nothing and the histogram is the distribution of freezes a person felt.
+- Why the editor's latencies are their own list: `ReportedLatency` requires a workspace, and a stall of the editor's loop or a reload of its elisp belongs to no workspace. Their series carry an empty `workspace` label, and no workspace's close forgets them.
+- Why the reload's start rides the host's presence message: it is the channel that already hands a page the start of the switch that showed it (`switchStartedAtMs`), so the page that sees the end measures from a start handed through the channel that carried the interaction.
+- Consequences:
+  - Emacs gains one reporter for every measurement it sends (`lisp/latency-report.el`); `lisp/startup.el` hands its milestones to it instead of reporting them itself.
+  - `ReportLatenciesRecorded.recorded` still counts `latencies` only.
+- Decided under the owner's delegation; additive.
+
