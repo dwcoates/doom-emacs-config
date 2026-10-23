@@ -642,6 +642,69 @@ func TestARefusedReplacementOfAStaleSkillSetIsNotStatedAsTaken(t *testing.T) {
 	}
 }
 
+// Every replacement the lifecycle sink asks for goes through replaceShim:
+// unforced, its outcome left to BounceShim, and stated with the workspace, the
+// reason and the decision. A caller that hand-rolled its own request would
+// drift from that shape, and fails here.
+func TestEveryLifecycleReplacementSharesOneShape(t *testing.T) {
+	tests := []struct {
+		name   string
+		ask    func(*lifecycleSink)
+		reason rollout.RelaunchReason
+	}{
+		{"a dead query", func(s *lifecycleSink) { s.OnQueryDied("ws-1") }, rollout.ReasonQueryDied},
+		{"a stale skill set", func(s *lifecycleSink) { s.OnSkillsChanged("ws-1", []string{"/c/skills/x"}) }, rollout.ReasonSkillsChanged},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			bouncer := &fakeShimBouncer{}
+			sink, log := queryDiedSink(bouncer)
+
+			// Act
+			tc.ask(sink)
+
+			// Assert
+			if len(bouncer.asked) != 1 || bouncer.asked[0].reason != tc.reason || bouncer.asked[0].force || bouncer.asked[0].done != nil {
+				t.Fatalf("asked = %+v, want one unforced %s replacement whose outcome BounceShim records", bouncer.asked, tc.reason)
+			}
+			rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.cmd.lifecycle"})
+			if !ok || rec.Context["workspace"] != "ws-1" || rec.Context["reason"] != string(tc.reason) || rec.Context["bounced_now"] != true {
+				t.Fatalf("stated = %+v (found %v), want the workspace, the reason and the decision", rec, ok)
+			}
+		})
+	}
+}
+
+func TestReplaceShimStatesNothingOverARefusal(t *testing.T) {
+	// Arrange
+	bouncer := &fakeShimBouncer{err: errors.New("refused")}
+	sink, log := queryDiedSink(bouncer)
+
+	// Act
+	sink.replaceShim("ws-1", rollout.ReasonSkillsChanged, dlog.Context{}, "unbound", "stated")
+
+	// Assert
+	if hasLifecycleRecord(log, "info", "stated") || hasLifecycleRecord(log, "error", "unbound") {
+		t.Fatalf("records = %+v, want nothing stated over BounceShim's own refusal record", log.Records())
+	}
+}
+
+func TestReplaceShimWithNoRolloutSaysUnboundAtError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	sink := &lifecycleSink{health: &healthForwarder{}, builds: &rolloutForwarder{}, log: log}
+
+	// Act
+	sink.replaceShim("ws-1", rollout.ReasonQueryDied, dlog.Context{"extra": 1}, "unbound", "stated")
+
+	// Assert
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Message: "unbound"})
+	if !ok || rec.Context["workspace"] != "ws-1" || rec.Context["reason"] != string(rollout.ReasonQueryDied) || rec.Context["extra"] != 1 {
+		t.Fatalf("records = %+v, want the unbound ERROR with the workspace, the reason and the caller's fields", log.Records())
+	}
+}
+
 // fakeVendorSessions records the resume handles the sink writes.
 type fakeVendorSessions struct {
 	stored string

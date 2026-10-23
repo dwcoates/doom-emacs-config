@@ -311,22 +311,9 @@ func (s *lifecycleSink) OnVendorSessionID(ws ids.WorkspaceID, vendorSessionID st
 // is free and the replacement runs at once; a repeated death joins the
 // replacement already asked for.
 func (s *lifecycleSink) OnQueryDied(ws ids.WorkspaceID) {
-	fields := dlog.Context{"workspace": string(ws), "reason": string(rollout.ReasonQueryDied)}
-	controller, ok := s.builds.controller()
-	if !ok {
-		s.log.Error("daemon.cmd.lifecycle", "a session's query died before the rollout controller existed; nothing restarts it", fields)
-		return
-	}
-	// THE OUTCOME IS RECORDED ONCE, by BounceShim itself under the
-	// replacement's reason; nothing here waits on it.
-	decision, err := controller.BounceShim(context.Background(), ws, rollout.ReasonQueryDied, false, nil)
-	if err != nil {
-		// BounceShim recorded the refusal at ERROR with its cause.
-		return
-	}
-	fields["bounced_now"] = decision.Now
-	fields["already_pending"] = decision.AlreadyPending
-	s.log.Info("daemon.cmd.lifecycle", "the session's vendor query died; its shim is replaced through the bounce registry", fields)
+	s.replaceShim(ws, rollout.ReasonQueryDied, dlog.Context{},
+		"a session's query died before the rollout controller existed; nothing restarts it",
+		"the session's vendor query died; its shim is replaced through the bounce registry")
 }
 
 // OnSkillsChanged replaces a session whose vendor's skill set went stale on
@@ -337,22 +324,33 @@ func (s *lifecycleSink) OnQueryDied(ws ids.WorkspaceID) {
 // work, never a merge's run -- and its resume states the new catalog. A
 // restated level joins the replacement already asked for.
 func (s *lifecycleSink) OnSkillsChanged(ws ids.WorkspaceID, paths []string) {
-	fields := dlog.Context{"workspace": string(ws), "reason": string(rollout.ReasonSkillsChanged), "paths": paths}
+	s.replaceShim(ws, rollout.ReasonSkillsChanged, dlog.Context{"paths": paths},
+		"a session's skill set went stale before the rollout controller existed; nothing replaces its shim",
+		"the session's vendor skill set went stale; its shim is replaced at its next idle point through the bounce registry")
+}
+
+// replaceShim asks the bounce registry to replace WS's shim for REASON,
+// UNFORCED, so the replacement waits for the session's freeness, and states
+// the request at INFO as STATED with FIELDS. UNBOUND is the ERROR said when no
+// rollout controller exists yet, so the replacement is recorded rather than
+// dropped. THE OUTCOME IS RECORDED ONCE, by BounceShim itself under the
+// replacement's reason: nothing here waits on it, and a refusal BounceShim
+// already recorded at ERROR states nothing more.
+func (s *lifecycleSink) replaceShim(ws ids.WorkspaceID, reason rollout.RelaunchReason, fields dlog.Context, unbound, stated string) {
+	fields["workspace"] = string(ws)
+	fields["reason"] = string(reason)
 	controller, ok := s.builds.controller()
 	if !ok {
-		s.log.Error("daemon.cmd.lifecycle", "a session's skill set went stale before the rollout controller existed; nothing replaces its shim", fields)
+		s.log.Error("daemon.cmd.lifecycle", unbound, fields)
 		return
 	}
-	// THE OUTCOME IS RECORDED ONCE, by BounceShim itself under the
-	// replacement's reason; nothing here waits on it.
-	decision, err := controller.BounceShim(context.Background(), ws, rollout.ReasonSkillsChanged, false, nil)
+	decision, err := controller.BounceShim(context.Background(), ws, reason, false, nil)
 	if err != nil {
-		// BounceShim recorded the refusal at ERROR with its cause.
 		return
 	}
 	fields["bounced_now"] = decision.Now
 	fields["already_pending"] = decision.AlreadyPending
-	s.log.Info("daemon.cmd.lifecycle", "the session's vendor skill set went stale; its shim is replaced at its next idle point through the bounce registry", fields)
+	s.log.Info("daemon.cmd.lifecycle", stated, fields)
 }
 
 // OnFree is the freeness edge, which a turn's end raises: the queue bounces a
