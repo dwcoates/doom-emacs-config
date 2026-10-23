@@ -21,8 +21,9 @@ import (
 	"agentrepl/testrun/internal/seats"
 )
 
-// Share is the percentage of the host's cores every test run together holds.
-const Share = 70
+// Share is the percentage of the host's cores every test run together holds
+// (owner ruling 2026-10-23: half, down from the 70% first chosen).
+const Share = 50
 
 // DefaultDir is where the host's core seats live; every run on the host
 // shares it.
