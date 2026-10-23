@@ -345,12 +345,7 @@ export function arrangeSubfeedRows(
     const row = rows[i];
     const runEnd = runs === undefined ? i + 1 : responseRunEnd(rows, i);
     if (runEnd > i + 1) {
-      const members: HTMLElement[] = [];
-      for (const member of rows.slice(i, runEnd)) {
-        const el = view.drawRow(member);
-        if (member.id !== undefined) placed.set(member.id.value, el);
-        members.push(el);
-      }
+      const members = rows.slice(i, runEnd).map((member) => drawPlaced(member, view, placed));
       // `runs` is defined here — `runEnd` passes `i + 1` only when it is.
       top.push(runs!.arrange(responseRunKey(row.id?.value ?? ""), members));
       i = runEnd;
@@ -376,13 +371,11 @@ export function arrangeSubfeedRows(
         j += 1;
       }
       if (j - i >= 2) {
-        const members: GroupMember[] = [];
-        for (const member of rows.slice(i, j)) {
-          const el = view.drawRow(member);
-          const id = member.id?.value ?? "";
-          if (member.id !== undefined) placed.set(id, el);
-          members.push({ id, element: el, clock: memberClockOf(member) });
-        }
+        const members: GroupMember[] = rows.slice(i, j).map((member) => ({
+          id: member.id?.value ?? "",
+          element: drawPlaced(member, view, placed),
+          clock: memberClockOf(member),
+        }));
         // `groups` is defined here — `kind` is non-null only when it is.
         top.push(groups!.arrange(groupKey(kind, members[0].id), kind, members));
         i = j;
@@ -390,8 +383,7 @@ export function arrangeSubfeedRows(
       }
       // A run of one is a lone card: fall through to the ordinary placement.
     }
-    const el = view.drawRow(row);
-    if (row.id !== undefined) placed.set(row.id.value, el);
+    const el = drawPlaced(row, view, placed);
     const parent = row.parent?.row;
     if (parent === undefined) {
       top.push(el);
@@ -439,6 +431,17 @@ export function arrangeSubfeedRows(
       context: { dropped: stopped },
     });
   }
+}
+
+/**
+ * Draw ROW through VIEW and record its element in PLACED under its id, so a
+ * later row parented to it finds its container. Every row an arrangement
+ * places, alone or as a run's member, is drawn through here.
+ */
+export function drawPlaced(row: FeedRow, view: SubfeedView, placed: Map<string, HTMLElement>): HTMLElement {
+  const el = view.drawRow(row);
+  if (row.id !== undefined) placed.set(row.id.value, el);
+  return el;
 }
 
 /** A container row's nesting slot, created on the first child that needs it. */

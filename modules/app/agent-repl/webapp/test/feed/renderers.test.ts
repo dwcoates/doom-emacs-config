@@ -12,6 +12,7 @@ import {
   armName,
   defaultBubbleBody,
   drawBreadcrumbTrail,
+  drawPlaced,
   nestSlot,
   type SubfeedView,
 } from "../../src/feed/renderers.js";
@@ -40,6 +41,7 @@ import { tick } from "../../src/feed/ticking.js";
 import type { RowRenderers } from "../../src/feed/renderers.js";
 import { orderFor } from "../feed-order.js";
 import { filesUnder } from "../files-under.js";
+import renderersSource from "../../src/feed/renderers.ts?raw";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -291,6 +293,32 @@ describe("arrangeSubfeedRows leaves placed rows in the document", () => {
     arrangeSubfeedRows(host, view);
     // Assert
     expect(host.querySelector('[data-feed-row="b"]')).toBeNull();
+  });
+});
+
+describe("drawPlaced", () => {
+  it("returns the element the view drew for the row", () => {
+    const view = viewOf([]);
+    const el = drawPlaced(responseRow("a"), view, new Map());
+    expect(el.getAttribute("data-feed-row")).toBe("a");
+  });
+
+  it("records the drawn element under the row's id", () => {
+    const placed = new Map<string, HTMLElement>();
+    const el = drawPlaced(responseRow("a"), viewOf([]), placed);
+    expect(placed.get("a")).toBe(el);
+  });
+
+  it("records nothing for a row with no id", () => {
+    const placed = new Map<string, HTMLElement>();
+    const row = create(FeedRowSchema, { order: orderFor("x") });
+    drawPlaced(row, viewOf([]), placed);
+    expect(placed.size).toBe(0);
+  });
+
+  it("is the arranger's only way to draw a row", () => {
+    const draws = renderersSource.match(/view\.drawRow\(/g) ?? [];
+    expect(draws).toHaveLength(1);
   });
 });
 
