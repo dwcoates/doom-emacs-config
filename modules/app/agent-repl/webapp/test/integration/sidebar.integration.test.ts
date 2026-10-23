@@ -426,13 +426,13 @@ describe("the attention blink cadence", () => {
 });
 
 describe("selecting a workspace", () => {
-  it("calls SelectWorkspace on a row click", async () => {
+  it("calls SelectInEditor on a row click", async () => {
     // Arrange
     await withRoster({ rows: [rosterRow({ id: "ws-other" })] });
     // Act
     await harness.click('[data-roster-row="ws-other"] [data-select]');
     // Assert
-    expect(harness.fake.calls("selectWorkspace")).toHaveLength(1);
+    expect(harness.fake.calls("selectInEditor")).toHaveLength(1);
   });
 
   it("echoes the row's own WorkspaceRef", async () => {
@@ -441,18 +441,18 @@ describe("selecting a workspace", () => {
     // Act
     await harness.click('[data-roster-row="ws-other"] [data-select]');
     // Assert
-    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("selectWorkspace");
+    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("selectInEditor");
     expect(request.workspace?.id).toBe("ws-other");
   });
 
   it("makes no other call for a cross-workspace click", async () => {
-    // Arrange: R8 — SelectWorkspace and nothing else.
+    // Arrange: R8 — SelectInEditor and nothing else.
     await withRoster({ rows: [rosterRow({ id: "ws-other" })] });
     harness.fake.clearCalls();
     // Act
     await harness.click('[data-roster-row="ws-other"] [data-select]');
     // Assert
-    expect(harness.fake.log().map((c) => c.rpc)).toEqual(["selectWorkspace"]);
+    expect(harness.fake.log().map((c) => c.rpc)).toEqual(["selectInEditor"]);
   });
 });
 

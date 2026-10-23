@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { OpenWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
-import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+import { SelectInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { RosterRowSchema, type RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -35,6 +35,7 @@ import {
   type RowPlace,
   drawRosterFamily,
   pathedFamilies,
+  noteSelectRoute,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
 import { codeOf } from "../source-text.js";
@@ -65,8 +66,8 @@ function drawnPicture(name: string): string {
   return host.innerHTML;
 }
 
-const SELECT_OK = create(SelectWorkspaceResponseSchema, {
-  result: { case: "success", value: {} },
+const SELECT_OK = create(SelectInEditorResponseSchema, {
+  result: { case: "success", value: { route: { case: "relayed", value: {} } } },
 });
 
 /** The row line: what the pointer and the keyboard focus are read from. */
@@ -121,7 +122,7 @@ describe("the row's identity and hooks", () => {
     expect(drawn.querySelector(".name")?.textContent).toBe("the rail");
   });
 
-  it("offers exactly one SelectWorkspace click target", () => {
+  it("offers exactly one SelectInEditor click target", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     expect(drawn.querySelectorAll(":scope > [data-select]").length).toBe(1);
   });
@@ -800,7 +801,7 @@ describe("the row click in the hidden section", () => {
           calls.push(`hidden:${request.workspace?.id ?? ""}:${request.visibility.case ?? ""}`);
           return create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } });
         },
-        selectWorkspace: (request) => {
+        selectInEditor: (request) => {
           calls.push(`select:${request.workspace?.id ?? ""}`);
           return SELECT_OK;
         },
@@ -819,7 +820,7 @@ describe("the row click in the hidden section", () => {
           create(SetWorkspaceHiddenResponseSchema, {
             result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } },
           }),
-        selectWorkspace: (request) => {
+        selectInEditor: (request) => {
           selected.push(request.workspace?.id ?? "");
           return SELECT_OK;
         },
@@ -838,7 +839,7 @@ describe("the row click in the hidden section", () => {
           shown.push(request.workspace?.id ?? "");
           return create(SetWorkspaceHiddenResponseSchema, { result: { case: "success", value: {} } });
         },
-        selectWorkspace: () => SELECT_OK,
+        selectInEditor: () => SELECT_OK,
       }),
     );
     const drawn = drawRosterFamily(hiddenRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] })), sc, "R", "hidden");
@@ -884,7 +885,7 @@ describe("returnFromBand", () => {
     const calls: string[] = [];
     const sc = sidebarContext(
       appContext({
-        selectWorkspace: (request) => {
+        selectInEditor: (request) => {
           calls.push(`select:${request.workspace?.id ?? ""}`);
           return SELECT_OK;
         },
@@ -898,7 +899,7 @@ describe("returnFromBand", () => {
     const calls: string[] = [];
     const sc = sidebarContext(
       appContext({
-        selectWorkspace: () => {
+        selectInEditor: () => {
           calls.push("select");
           return SELECT_OK;
         },
@@ -948,7 +949,7 @@ describe("the row click in the recently-merged band", () => {
           calls.push(`${request.revertMerge === undefined ? "open" : "revert"}:${request.workspace?.id ?? ""}`);
           return open;
         },
-        selectWorkspace: (request) => {
+        selectInEditor: (request) => {
           calls.push(`select:${request.workspace?.id ?? ""}`);
           return SELECT_OK;
         },
@@ -1058,12 +1059,66 @@ describe("the band choice list", () => {
   });
 });
 
+describe("noteSelectRoute", () => {
+  const ws = create(WorkspaceRefSchema, { id: "ws-1" });
+  const answer = (route: MessageInitShape<typeof SelectInEditorResponseSchema>) =>
+    create(SelectInEditorResponseSchema, route);
+
+  it.each([
+    ["relayed", "the rail's click was relayed to the editor"],
+    ["selected", "the rail's click was selected by the daemon"],
+  ] as const)("records the %s route at DEBUG", async (route, message) => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    noteSelectRoute(answer({ result: { case: "success", value: { route: { case: route, value: {} } } } }), ws);
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.row.select-route");
+    expect([record.level.case, record.message, record.context]).toMatchObject([
+      "debug",
+      message,
+      { workspace: "ws-1", route },
+    ]);
+  });
+
+  it("refuses a success that names no route", () => {
+    // Arrange
+    const malformed = answer({ result: { case: "success", value: {} } });
+    // Act / Assert
+    expect(() => noteSelectRoute(malformed, ws)).toThrow(MalformedView);
+  });
+
+  it("records nothing for an answer that is not a success", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    noteSelectRoute(
+      answer({ result: { case: "error", value: { cause: { case: "standingDown", value: {} } } } }),
+      ws,
+    );
+    // Assert
+    await expect(forwardedRecord(capture, "sidebar.row.select-route")).rejects.toThrow();
+  });
+});
+
 describe("the row click", () => {
-  it("calls SelectWorkspace and nothing else", async () => {
+  it("records which party made the switch", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const sc = sidebarContext(appContext({ selectInEditor: () => SELECT_OK }));
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
+    // Act
+    await click(drawn.querySelector("[data-select]") as Element);
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.row.select-route");
+    expect(record.context).toMatchObject({ workspace: "ws-1", route: "relayed" });
+  });
+
+  it("calls SelectInEditor and nothing else", async () => {
     const calls: string[] = [];
     const sc = sidebarContext(
       appContext({
-        selectWorkspace: (request) => {
+        selectInEditor: (request) => {
           calls.push(request.workspace?.id ?? "");
           return SELECT_OK;
         },
@@ -1079,7 +1134,7 @@ describe("the row click", () => {
     const calls: string[] = [];
     const sc = sidebarContext(
       appContext({
-        selectWorkspace: (request) => {
+        selectInEditor: (request) => {
           calls.push(request.workspace?.id ?? "");
           return SELECT_OK;
         },
@@ -1113,7 +1168,7 @@ describe("the row click", () => {
     const calls: string[] = [];
     const sc = sidebarContext(
       appContext({
-        selectWorkspace: (request) => {
+        selectInEditor: (request) => {
           calls.push(request.workspace?.id ?? "");
           return SELECT_OK;
         },
@@ -1132,7 +1187,7 @@ describe("the row click", () => {
     let dir = "";
     const sc = sidebarContext(
       appContext({
-        selectWorkspace: (request) => {
+        selectInEditor: (request) => {
           dir = request.workspace?.dir ?? "";
           return SELECT_OK;
         },
@@ -1146,8 +1201,8 @@ describe("the row click", () => {
   it("says a refusal at the row itself", async () => {
     const sc = sidebarContext(
       appContext({
-        selectWorkspace: () =>
-          create(SelectWorkspaceResponseSchema, {
+        selectInEditor: () =>
+          create(SelectInEditorResponseSchema, {
             result: {
               case: "error",
               value: { cause: { case: "unknownWorkspace", value: {} } },
@@ -1165,8 +1220,8 @@ describe("the row click", () => {
   it("labels the row's refusal with the cause's own arm", async () => {
     const sc = sidebarContext(
       appContext({
-        selectWorkspace: () =>
-          create(SelectWorkspaceResponseSchema, {
+        selectInEditor: () =>
+          create(SelectInEditorResponseSchema, {
             result: {
               case: "error",
               value: { cause: { case: "notYetAdopted", value: {} } },
@@ -1185,7 +1240,7 @@ describe("the row click", () => {
 describe("the selection fade", () => {
   /** A rail context whose selection fade reads CLOCK, with every drawn row under the document. */
   const fadeContext = (clock: () => number) => {
-    const sc = sidebarContext(appContext({ selectWorkspace: () => SELECT_OK }));
+    const sc = sidebarContext(appContext({ selectInEditor: () => SELECT_OK }));
     return { ...sc, selectionFade: createSelectionFade(document, clock) };
   };
   const rising = (drawn: HTMLElement): boolean => drawn.classList.contains(SELECTION_NUMBER_RISE.className);
@@ -1280,7 +1335,7 @@ describe("the verb menu", () => {
     let calls = 0;
     const sc = sidebarContext(
       appContext({
-        selectWorkspace: () => {
+        selectInEditor: () => {
           calls += 1;
           return SELECT_OK;
         },
@@ -1649,7 +1704,7 @@ describe("the detail panel opens on hover", () => {
     let calls = 0;
     const sc = sidebarContext(
       appContext({
-        selectWorkspace: () => {
+        selectInEditor: () => {
           calls += 1;
           return SELECT_OK;
         },

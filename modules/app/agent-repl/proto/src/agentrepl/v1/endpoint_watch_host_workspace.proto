@@ -87,6 +87,13 @@ message WatchHostWorkspaceResponse {
     // never replayed to a late subscriber, because a click belongs to the
     // moment it was made; the selection itself rides `selection`.
     HostWorkspaceFinalResponseClicked final_response_clicked = 11;
+    // THE USER CLICKED THIS WORKSPACE'S ROW IN A PAGE'S RAIL (SelectInEditor):
+    // switch to this workspace exactly as a key switches to it, the frame
+    // moving at once and the selection requested of the daemon. The editor
+    // makes the switch, never the daemon, which is what makes a click as fast
+    // as a key. An event, not state: never replayed to a late subscriber,
+    // because a click belongs to the moment it was made.
+    HostWorkspaceSelectRequested select_requested = 12;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -133,6 +140,11 @@ message HostWorkspaceNotificationClicked {}
 // selection push carries what was selected, so focusing the composer in
 // insert state is the whole of Emacs's obligation.
 message HostWorkspaceFinalResponseClicked {}
+
+// The user clicked this workspace's row in a page's rail. Empty: the stream
+// it rides names the workspace, and requesting the switch to it is the whole
+// of Emacs's obligation.
+message HostWorkspaceSelectRequested {}
 
 // The host-facing state of one workspace: what Emacs needs to correlate
 // processes, gate its composer, and manage buffers — nothing a webview draws.

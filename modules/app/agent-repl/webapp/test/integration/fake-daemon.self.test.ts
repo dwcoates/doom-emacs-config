@@ -110,6 +110,7 @@ describe("every rpc answers", () => {
       ["clientLog", client.clientLog({ source: { case: "workspace", value: workspace } })],
       ["registerWorkspace", client.registerWorkspace({ dir: "/tmp/x" })],
       ["selectWorkspace", client.selectWorkspace({ workspace })],
+      ["selectInEditor", client.selectInEditor({ workspace })],
       ["adoptHostWorkspace", client.adoptHostWorkspace({ workspace })],
       ["adoptWebWorkspace", client.adoptWebWorkspace({ workspace })],
       ["openLogin", client.openLogin({ workspace })],

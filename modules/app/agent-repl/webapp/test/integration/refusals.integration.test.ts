@@ -650,8 +650,8 @@ const REFUSAL_SITES: RefusalSite[] = [
     arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
   },
   {
-    name: "SelectWorkspace",
-    rpc: "selectWorkspace",
+    name: "SelectInEditor",
+    rpc: "selectInEditor",
     click: `[data-roster-row="${WORKSPACE_ID}"] [data-select]`,
     site: `[data-roster-row="${WORKSPACE_ID}"]`,
     arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
@@ -721,8 +721,8 @@ const REFUSAL_SITES: RefusalSite[] = [
     arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
   },
   {
-    name: "SelectWorkspace",
-    rpc: "selectWorkspace",
+    name: "SelectInEditor",
+    rpc: "selectInEditor",
     click: '[data-roster-row="ws-other"] [data-select]',
     site: '[data-roster-row="ws-other"]',
     arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: "ws-other" })] })),
@@ -816,8 +816,8 @@ describe("per-rpc refusal arms", () => {
         // `link_unresolved` is drawn nowhere by this page: the daemon publishes
         // the footer line and asks the question in the conversation.
         .filter((arm) => arm !== "linkUnresolved")
-        // SelectWorkspace's expected answers are not refusals; pinned below.
-        .filter((arm) => testCase.rpc !== "selectWorkspace" || SELECT_WORKSPACE_EXPECTED_ARMS[arm] === undefined)
+        // SelectInEditor's expected answers are not refusals; pinned below.
+        .filter((arm) => testCase.rpc !== "selectInEditor" || SELECT_WORKSPACE_EXPECTED_ARMS[arm] === undefined)
         .map((arm) => ({ name: testCase.name, testCase, arm })),
     ),
   )("draws $name's $arm arm at its call site", async ({ testCase, arm }) => {
@@ -828,10 +828,10 @@ describe("per-rpc refusal arms", () => {
   });
 });
 
-describe("SelectWorkspace's standing_down arm", () => {
+describe("SelectInEditor's standing_down arm", () => {
   it("draws nothing at the row, the next daemon taking the selection", async () => {
     // Arrange / Act
-    const site = REFUSAL_SITES.find((s) => s.rpc === "selectWorkspace")!;
+    const site = REFUSAL_SITES.find((s) => s.rpc === "selectInEditor")!;
     harness = await provoke(site, "standingDown");
     // Assert
     expect(harness.$(`${site.site} .refusal`)).toBeNull();

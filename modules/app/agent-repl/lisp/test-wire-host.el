@@ -347,7 +347,8 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                             :open-commit-log)
                       (list "{\"selection\":{\"none\":{}}}" :selection)
                       (list "{\"evaluate\":{\"token\":{\"value\":\"t-1\"},\"text\":\"(+ 1 2)\"}}" :evaluate)
-                      (list "{\"finalResponseClicked\":{}}" :final-response-clicked)))
+                      (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
+                      (list "{\"selectRequested\":{}}" :select-requested)))
     (should (equal (plist-get (agent-repl-test-wire-host--decode
                                #'agent-repl-wire-decode-watch-host-workspace-response
                                (nth 0 case))
@@ -627,6 +628,22 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   #'agent-repl-wire-decode-host-workspace-final-response-clicked
                   "{\"row\":\"r\"}")
                  '("HostWorkspaceFinalResponseClicked" row "unknown field"))))
+
+;;;; ---- The rail's row click push ----
+
+(ert-deftest agent-repl-test-wire-host-select-requested-decodes-empty ()
+  "The click push is empty: presence is the fact, and the stream names the workspace."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-host-workspace-response
+                  "{\"selectRequested\":{}}")
+                 '(:arm :select-requested :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-select-requested-refuses-a-field ()
+  "A field on the empty click message is refused, not ignored."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-select-requested
+                  "{\"workspace\":\"w\"}")
+                 '("HostWorkspaceSelectRequested" workspace "unknown field"))))
 
 ;;;; ---- The notification click push ----
 
@@ -1507,7 +1524,7 @@ opens are OpenTabs streams."
                        #'string<)
                  (sort (list "evaluate" "host" "transferred" "reloadWebapp"
                              "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection"
-                             "finalResponseClicked")
+                             "finalResponseClicked" "selectRequested")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()

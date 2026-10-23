@@ -522,6 +522,13 @@ func (s *requestLoggingServer) SelectWorkspace(
 	return serveUnary(s, ctx, "SelectWorkspace", req, s.server.SelectWorkspace)
 }
 
+func (s *requestLoggingServer) SelectInEditor(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SelectInEditorRequest],
+) (*connect.Response[agentreplv1.SelectInEditorResponse], error) {
+	return serveUnary(s, ctx, "SelectInEditor", req, s.server.SelectInEditor)
+}
+
 func (s *requestLoggingServer) ReportPageUnloading(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ReportPageUnloadingRequest],

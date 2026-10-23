@@ -12,9 +12,10 @@
  * the when-column from whichever arm the daemon chose — this end applies no
  * precedence of its own.
  *
- * THE ROW CLICK IS SelectWorkspace AND NOTHING ELSE (R8). Cross-workspace
+ * THE ROW CLICK IS SelectInEditor AND NOTHING ELSE (R8). Cross-workspace
  * navigation is the host's to perform; the rail only says which workspace the
- * user picked, and the roster's new `current` arrives on the stream.
+ * user picked, the daemon relays it to the editor, which switches as it does
+ * for a key, and the roster's new `current` arrives on the stream.
  *
  * WHAT TICKS AND WHAT DOES NOT. The when-column's arms that ship an INSTANT
  * (`merged`, `hidden`, and the starts of `sync_merging` and `turn_running`)
@@ -55,7 +56,10 @@ import type {
   RosterRowViewed,
   RosterRowWorkspace,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+import {
+  SelectInEditorResponseSchema,
+  type SelectInEditorResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import { SetWorkspaceHiddenResponseSchema, type SetWorkspaceHiddenError } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { formatTickedAge } from "../duration.js";
@@ -76,7 +80,7 @@ import { toneClass } from "../vocab.js";
 import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
 import { clampBeside } from "../topbar/clamp.js";
 import {
-  buildSelectWorkspaceRequest,
+  buildSelectInEditorRequest,
   buildSetWorkspaceHiddenRequest,
   setWorkspaceHiddenRefusal,
   type CauseOf,
@@ -963,7 +967,17 @@ export function toggleRowMenu(ws: HTMLElement, target: VerbTarget): void {
   toggleHiddenDropdown(target.sc.dropdowns, "row-menu", menu, more === null ? [] : [more]);
 }
 
-/** The row click: SelectWorkspace, echoed, idempotent, and nothing else. */
+/**
+ * The row click: SelectInEditor, echoed, idempotent, and nothing else.
+ *
+ * THE EDITOR MAKES THE SWITCH, as it makes a key's (owner request,
+ * 2026-10-23): the daemon relays the click to Emacs, which moves its frame on
+ * the request. A page that asked the daemon to select left the frame to
+ * follow the roster push the select provoked, which waited on the daemon
+ * re-reading its whole registry, some 350ms where a key took 10. A workspace
+ * Emacs holds no tab for is selected by the daemon instead; either way the
+ * answer says which party made the switch, recorded here at DEBUG.
+ */
 async function selectWorkspace(
   line: HTMLElement,
   sc: SidebarContext,
@@ -977,11 +991,36 @@ async function selectWorkspace(
   // the row's own box, exactly where a menu item's refusal lands.
   await runVerb(line, {
     sc,
-    rpc: "SelectWorkspace",
-    call: (client) => client.selectWorkspace(buildSelectWorkspaceRequest(workspace)),
-    schema: SelectWorkspaceResponseSchema,
+    rpc: "SelectInEditor",
+    call: (client) => client.selectInEditor(buildSelectInEditorRequest(workspace)),
+    schema: SelectInEditorResponseSchema,
     expectedArms: SELECT_WORKSPACE_EXPECTED_ARMS,
+    took: (response) => noteSelectRoute(response, workspace),
   });
+}
+
+/**
+ * Record which party made a row click's switch: the editor the click was
+ * relayed to, or the daemon, for a workspace the editor holds no tab for. A
+ * success naming neither is a malformed view.
+ */
+export function noteSelectRoute(response: SelectInEditorResponse, workspace: WorkspaceRef): void {
+  const result = requireCase(response.result, "SelectInEditorResponse.result");
+  if (result.case !== "success") return;
+  const route = requireCase(result.value.route, "SelectInEditorResponse.result.success.route");
+  switch (route.case) {
+    case "relayed":
+    case "selected":
+      log.debug(`the rail's click was ${route.case === "relayed" ? "relayed to the editor" : "selected by the daemon"}`, {
+        operation: "sidebar.row.select-route",
+        context: { workspace: workspace.id, route: route.case },
+      });
+      return;
+    default: {
+      const other: { case: string } = route;
+      unreachableArm("SelectInEditorResponse.result.success.route", other.case);
+    }
+  }
 }
 
 /**

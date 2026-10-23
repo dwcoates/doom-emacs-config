@@ -388,6 +388,10 @@ func (s *fakeServer) OpenInEditor(ctx context.Context, req *connect.Request[v1.O
 	return handleUnary[v1.OpenInEditorRequest, v1.OpenInEditorResponse](ctx, s, "OpenInEditor", req.Msg)
 }
 
+func (s *fakeServer) SelectInEditor(ctx context.Context, req *connect.Request[v1.SelectInEditorRequest]) (*connect.Response[v1.SelectInEditorResponse], error) {
+	return handleUnary[v1.SelectInEditorRequest, v1.SelectInEditorResponse](ctx, s, "SelectInEditor", req.Msg)
+}
+
 func (s *fakeServer) AdoptWebWorkspace(ctx context.Context, req *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {
 	return handleUnary[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse](ctx, s, "AdoptWebWorkspace", req.Msg)
 }

@@ -17,8 +17,9 @@ import (
 )
 
 // THE HOST VIEW. WatchHostWorkspace carries one STATE arm (`host`, whole-
-// replaced per push), one NOTICE arm (`transferred`) and three EVENT arms
-// (notification_clicked, reload_webapp, open_in_editor). Each kind has its own
+// replaced per push), one NOTICE arm (`transferred`) and its EVENT arms
+// (notification_clicked, select_requested, reload_webapp, open_in_editor and
+// the rest). Each kind has its own
 // source. A Topic replays exactly its latest value to a late subscriber, so
 // the state and the notice cannot share one: a subscriber arriving after the
 // notice would be handed it and never the state. The events ride

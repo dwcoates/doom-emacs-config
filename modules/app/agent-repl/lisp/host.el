@@ -763,14 +763,16 @@ snapshots it when the gesture is made, and lands only if it has not moved
 since (`agent-repl-verbs-select-minted'): a user who switched away while
 the workspace was being minted is not dragged back to it.
 
-ONLY EMACS COUNTS.  A switch a sidebar row or an agent made reaches Emacs
-as the roster's `current' and moves the frame as a FOLLOW
+ONLY EMACS COUNTS.  A switch an agent made reaches Emacs as the roster's
+`current' and moves the frame as a FOLLOW
 \(`agent-repl-roster-following'), which is never counted; neither is a
 transient background activation (`agent-repl--eager-open-in-progress') nor
 a move Emacs makes on its own account (`agent-repl-host-automatic-switch').
-What is counted is every switch request from an Emacs gesture
-\(`agent-repl-host-request-switch') and every perspective activation an
-Emacs command made directly (`agent-repl-host--on-workspace-activated').")
+What is counted is every switch request a gesture of the user\='s makes
+\(`agent-repl-host-request-switch') -- a key, a picker, a banner click, or
+a sidebar row\='s click, which the daemon relays to Emacs
+\(`agent-repl-host--select-requested') -- and every perspective activation
+an Emacs command made directly (`agent-repl-host--on-workspace-activated').")
 
 (defvar agent-repl-host-automatic-switch nil
   "Non-nil while Emacs moves the frame on its own account, not the user\='s.
@@ -1243,6 +1245,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:notification-clicked (agent-repl-host--notification-clicked ws))
     (:selection (agent-repl-host--apply-selection ws value))
     (:final-response-clicked (agent-repl-host--final-response-clicked ws))
+    (:select-requested (agent-repl-host--select-requested ws))
     (:transferred (agent-repl-host--transferred ws value))
     (:reload-webapp (agent-repl-host--reload-webapp ws value))
     (:open-in-editor (agent-repl-host--open-in-editor ws value))
@@ -1350,6 +1353,20 @@ state (`agent-repl-input-focus-for-reply').  An event, never replayed, so
 a reconnect never moves the keyboard."
   (agent-repl--info ws "elisp.host.final-response-clicked ws=%s" ws)
   (agent-repl-input-focus-for-reply ws))
+
+;;;; ---- The rail's row click ----
+
+(defun agent-repl-host--select-requested (ws)
+  "Switch to WS: the user clicked its row in a page\='s rail.
+THE SAME SWITCH AS A KEY\='S (`agent-repl-host-request-switch'), so the
+frame moves on the click rather than after the roster push that a select
+made by the page provoked, which waited on the daemon re-reading its
+whole registry: some 350ms, where a key took 10 (2026-10-23).  The daemon
+relays the click on WS\='s own host stream (SelectInEditor), so WS is a
+workspace Emacs holds.  An event, never replayed, so a reconnect never
+switches."
+  (agent-repl--info ws "elisp.host.select-requested ws=%s" ws)
+  (agent-repl-host-request-switch ws 'sidebar))
 
 ;;;; ---- The notification click ----
 

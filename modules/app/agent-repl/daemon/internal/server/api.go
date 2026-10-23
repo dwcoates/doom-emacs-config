@@ -734,6 +734,18 @@ func (s *server) NotificationClicked(ws ids.WorkspaceID) {
 	})
 }
 
+// pushSelectRequested pushes select_requested onto the workspace's host
+// stream: the user clicked its row in a page's rail, and Emacs switches to it
+// as it switches for a key (SelectInEditor). It answers how many host streams
+// the event was handed to.
+func (s *server) pushSelectRequested(ws ids.WorkspaceID) int {
+	return s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_SelectRequested{
+			SelectRequested: &agentreplv1.HostWorkspaceSelectRequested{},
+		},
+	})
+}
+
 // PushTransferred pushes `transferred` on the host stream and
 // `transferred{address}` on the web stream.
 //

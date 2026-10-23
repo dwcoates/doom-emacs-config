@@ -855,7 +855,46 @@ func (s *server) SelectWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
-// selectSubject is THE ONE SELECT a client's request makes of the daemon. It
+// SelectInEditor relays a page's row click to the editor, which makes the
+// switch exactly as it makes a key's (endpoint_select_in_editor.proto): the
+// frame moves on the request, rather than after the roster push a select here
+// would provoke. A workspace no host stream holds has no tab to move to, and
+// is selected here instead, exactly as SelectWorkspace selects it.
+//
+// THE ROUTE IS DECIDED BY THE EVENT'S OWN DELIVERY (publish.Events.Emit): the
+// daemon selects only when the relay reached no host stream at all, so a click
+// is never both relayed and selected, and never neither.
+func (s *server) SelectInEditor(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SelectInEditorRequest],
+) (*connect.Response[agentreplv1.SelectInEditorResponse], error) {
+	const rpc = "SelectInEditor"
+	resp := &agentreplv1.SelectInEditorResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	if heard := s.pushSelectRequested(subject.Record.ID); heard > 0 {
+		subject.Log.Info(rpc, "relayed a row click to the editor, which makes the switch",
+			dlog.Context{"host_streams": heard})
+		resp.Result = &agentreplv1.SelectInEditorResponse_Success{Success: &agentreplv1.SelectInEditorSuccess{
+			Route: &agentreplv1.SelectInEditorSuccess_Relayed{Relayed: &agentreplv1.SelectInEditorRelayed{}},
+		}}
+		return connect.NewResponse(resp), nil
+	}
+	subject.Log.Info(rpc, "no host stream holds the workspace; the daemon selects it", nil)
+	selected, cerr := s.selectSubject(ctx, rpc, subject, workspace.RecordSelection, nil, resp)
+	if selected == nil {
+		return answer(resp, cerr)
+	}
+	resp.Result = &agentreplv1.SelectInEditorResponse_Success{Success: &agentreplv1.SelectInEditorSuccess{
+		Route: &agentreplv1.SelectInEditorSuccess_Selected{Selected: selected},
+	}}
+	return connect.NewResponse(resp), nil
+}
+
+// selectSubject is THE ONE SELECT a client's request makes of the daemon:
+// SelectWorkspace's, and SelectInEditor's for a workspace no editor holds. It
 // selects SUBJECT under HISTORY and reveals REVEAL's row when it is set, and
 // answers the success to send. A nil success is no selection: a refusal set
 // onto RESP's error arm with a nil error, or the error to answer.

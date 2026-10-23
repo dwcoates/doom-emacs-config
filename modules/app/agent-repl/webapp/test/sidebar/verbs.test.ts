@@ -35,9 +35,9 @@ import {
   RestartWorkspaceResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_restart_workspace_pb";
 import {
-  SelectWorkspaceErrorSchema,
-  SelectWorkspaceResponseSchema,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+  SelectInEditorErrorSchema,
+  SelectInEditorResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import {
   SetWorkspacePriorityErrorSchema,
   SetWorkspacePriorityResponseSchema,
@@ -56,7 +56,7 @@ import {
   buildRevertMergeRequest,
   buildRestartWorkspaceRequest,
   restartWorkspaceRefusal,
-  buildSelectWorkspaceRequest,
+  buildSelectInEditorRequest,
   buildSetWorkspacePriorityRequest,
   buildSetWorkspaceHiddenRequest,
   drawKillConfirm,
@@ -92,8 +92,8 @@ async function click(control: Element): Promise<void> {
 }
 
 describe("the requests each verb is", () => {
-  it("addresses SelectWorkspace with the row's echoed identity", () => {
-    expect(buildSelectWorkspaceRequest(TARGET_WS).workspace).toEqual(TARGET_WS);
+  it("addresses SelectInEditor with the row's echoed identity", () => {
+    expect(buildSelectInEditorRequest(TARGET_WS).workspace).toEqual(TARGET_WS);
   });
 
   it("addresses OpenWorkspace with the row's echoed identity", () => {
@@ -397,16 +397,16 @@ const VERBS: readonly VerbUnderTest[] = [
       }),
   },
   {
-    rpc: "SelectWorkspace",
-    method: "selectWorkspace",
-    responseSchema: SelectWorkspaceResponseSchema,
-    errorSchema: SelectWorkspaceErrorSchema,
+    rpc: "SelectInEditor",
+    method: "selectInEditor",
+    responseSchema: SelectInEditorResponseSchema,
+    errorSchema: SelectInEditorErrorSchema,
     call: (t, control) =>
       runVerb(control, {
         sc: t.sc,
-        rpc: "SelectWorkspace",
-        call: (client) => client.selectWorkspace(buildSelectWorkspaceRequest(TARGET_WS)),
-        schema: SelectWorkspaceResponseSchema,
+        rpc: "SelectInEditor",
+        call: (client) => client.selectInEditor(buildSelectInEditorRequest(TARGET_WS)),
+        schema: SelectInEditorResponseSchema,
         expectedArms: SELECT_WORKSPACE_EXPECTED_ARMS,
       }),
     expected: SELECT_WORKSPACE_EXPECTED_ARMS,
@@ -455,7 +455,7 @@ describe.each(VERBS.map((verb) => [verb.rpc, verb] as const))(
 );
 
 describe("an expected answer", () => {
-  const select = VERBS.find((verb) => verb.rpc === "SelectWorkspace");
+  const select = VERBS.find((verb) => verb.rpc === "SelectInEditor");
 
   it("draws no refusal for a select a daemon standing down answered", async () => {
     expect(await refuseWith(select!, "standingDown")).toBeNull();
@@ -470,8 +470,8 @@ describe("an expected answer", () => {
 
   it("re-enables the row a daemon standing down answered", async () => {
     const t = target({
-      selectWorkspace: () =>
-        create(SelectWorkspaceResponseSchema, {
+      selectInEditor: () =>
+        create(SelectInEditorResponseSchema, {
           result: { case: "error", value: { cause: { case: "standingDown", value: {} } } },
         }),
     });
