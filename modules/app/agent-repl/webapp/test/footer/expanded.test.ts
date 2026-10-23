@@ -1190,6 +1190,44 @@ describe("the merges panel", () => {
     expect(panel.querySelector('[data-glyph="merges"]')?.textContent).toBe("⇄");
   });
 
+  describe("wears the merge purple", () => {
+    let uninstall: () => void = () => undefined;
+    afterEach(() => {
+      uninstall();
+      uninstall = () => undefined;
+    });
+
+    /** The color the cascade hands SELECTOR in a mounted, styled merges panel. */
+    function paint(selector: string): string {
+      // Arrange
+      uninstall = installStylesheet();
+      const { panel } = drawPanel("merges", {
+        merges: [{ ...MERGE_ROW, step: { text: "tests" }, waitingOnUser: {} }],
+      });
+      document.body.append(panel);
+      const el = panel.querySelector(selector);
+      if (el === null) throw new Error(`the merge row drew no ${selector}`);
+      // Act
+      const color = cascadedValue(el, "color");
+      panel.remove();
+      return color;
+    }
+
+    it.each([
+      ["the merge glyph", '[data-glyph="merges"]'],
+      ["the step", ".footer-row-description"],
+      ["the waiting-on-you state", ".footer-row-state"],
+    ])("draws %s in --blocked", (_name, selector) => {
+      // Assert
+      expect(paint(selector)).toBe("var(--blocked)");
+    });
+
+    it("leaves the branch line uncolored", () => {
+      // Assert
+      expect(paint(".footer-row-label")).not.toBe("var(--blocked)");
+    });
+  });
+
 
   it("refuses a row with no label", () => {
     const view = expanded({ merges: [MERGE_ROW] });

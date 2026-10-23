@@ -19,6 +19,7 @@ import {
   WAITING_FOR_API_GLYPH,
   WAITING_ON_USER_GLYPH,
   chipGlyph,
+  CHIP_TOOLTIPS,
   chipWaiting,
   footerStatusActivity,
   subStatusWords,
@@ -40,6 +41,7 @@ import {
 } from "./harness.js";
 import { createStopControls } from "../../src/footer/stop.js";
 import { statusWords } from "../../src/footer/parts.js";
+import { TOOLTIP_KEY_ATTR, TOOLTIP_TEXT_ATTR } from "../../src/tooltip.js";
 
 /** Every test's clock reads from here, so a countdown's arithmetic is exact. */
 const NOW = 1_800_000_000_000;
@@ -530,7 +532,7 @@ describe("drawFooterChipAgents: the waiting-for-the-API glyph", () => {
 
   it("says what the glyph counts on hover", () => {
     const { row } = drawStrip({ liveWork: { agents: { count: 3, waitingForApi: { count: 2 } } } });
-    expect(row.querySelector<HTMLElement>(".footer-chip-waiting")?.title).toBe("2 waiting for the API");
+    expect(row.querySelector(".footer-chip-waiting")?.getAttribute(TOOLTIP_TEXT_ATTR)).toBe("2 waiting for the API");
   });
 });
 
@@ -552,13 +554,50 @@ describe("drawFooterChipMerges: the waiting-on-you glyph", () => {
 
   it("says what the glyph counts on hover", () => {
     const { row } = drawStrip({ liveWork: { merges: { count: 2, waitingOnUser: { count: 1 } } } });
-    expect(row.querySelector<HTMLElement>(".footer-chip-waiting")?.title).toBe("1 waiting on you");
+    expect(row.querySelector(".footer-chip-waiting")?.getAttribute(TOOLTIP_TEXT_ATTR)).toBe("1 waiting on you");
   });
 
   it("opens the merges panel when clicked", () => {
     const { row, selected } = drawStrip({ liveWork: { merges: { count: 1 } } });
     row.querySelector<HTMLElement>('[data-chip="merges"]')?.dispatchEvent(new MouseEvent("click"));
     expect(selected).toEqual(["merges"]);
+  });
+});
+
+describe("the chips' tooltips", () => {
+  const ALL_CHIPS = {
+    agents: { count: 1 },
+    tasks: { done: 1, total: 2 },
+    shells: { count: 1 },
+    monitors: { count: 1 },
+    crons: { count: 1 },
+    merges: { count: 1 },
+  };
+
+  it.each([
+    ["agents", "Background subagents"],
+    ["tasks", "Task progress"],
+    ["shells", "Background shells"],
+    ["monitors", "Background monitors"],
+    ["crons", "Scheduled jobs"],
+    ["merges", "Async merges"],
+  ])("tooltips the %s chip with what it is for", (chip, text) => {
+    // Arrange / Act
+    const { row } = drawStrip({ liveWork: ALL_CHIPS });
+    // Assert
+    expect(row.querySelector(`[data-chip="${chip}"]`)?.getAttribute(TOOLTIP_TEXT_ATTR)).toBe(text);
+  });
+
+  it("keys every chip's tooltip by its panel, so it survives a redraw", () => {
+    // Arrange / Act
+    const { row } = drawStrip({ liveWork: ALL_CHIPS });
+    // Assert
+    const keys = [...row.querySelectorAll("[data-chip]")].map((el) => el.getAttribute(TOOLTIP_KEY_ATTR));
+    expect(keys).toEqual(CHIP_PANELS.map((panel) => `chip:${panel}`));
+  });
+
+  it.each(Object.entries(CHIP_TOOLTIPS))("keeps the %s chip's tooltip to five words at most", (_chip, text) => {
+    expect(text.split(" ").length).toBeLessThanOrEqual(5);
   });
 });
 
@@ -575,8 +614,20 @@ describe("chipWaiting", () => {
     expect(chipWaiting("waitingForApi", "⧗", 2, "waiting for the API").getAttribute("data-waiting-for-api")).toBe("2");
   });
 
-  it("titles the figure with what the rows wait for", () => {
-    expect(chipWaiting("waitingOnUser", "?", 3, "waiting on you").title).toBe("3 waiting on you");
+  it("tooltips the figure with what the rows wait for", () => {
+    expect(chipWaiting("waitingOnUser", "?", 3, "waiting on you").getAttribute(TOOLTIP_TEXT_ATTR)).toBe(
+      "3 waiting on you",
+    );
+  });
+
+  it("keys the figure's tooltip by its name, apart from its chip's", () => {
+    expect(chipWaiting("waitingOnUser", "?", 3, "waiting on you").getAttribute(TOOLTIP_KEY_ATTR)).toBe(
+      "chip:waitingOnUser",
+    );
+  });
+
+  it("carries no native title, which would show beside the delayed tooltip", () => {
+    expect(chipWaiting("waitingOnUser", "?", 3, "waiting on you").hasAttribute("title")).toBe(false);
   });
 
   it.each([

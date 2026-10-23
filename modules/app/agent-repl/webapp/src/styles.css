@@ -6747,6 +6747,26 @@ bubble-body.bubble-body { display: block; }
 .footer-chip-selected { color: var(--fg); background: color-mix(in srgb, var(--fg) 10%, transparent); }
 .footer-chip-glyph { opacity: 0.85; }
 
+/* THE DELAYED HOVER TOOLTIP (src/tooltip.ts; owner request, 2026-10-23): a few
+   words naming what the element under a resting pointer is for. Drawn on the
+   body and fixed above its anchor, because the footer dock clips its overflow;
+   centered on the anchor by the transform. Under the login overlay (z-index
+   50), which is the one truly modal surface. */
+.app-tooltip {
+  position: fixed;
+  transform: translate(-50%, -100%);
+  z-index: 49;
+  pointer-events: none;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--fg);
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  box-shadow: var(--sidebar-shadow);
+}
+
 /* The tokens cell's two glyphs. Presence IS the fact for both: the alarm's
    sentence and the verdict's evidence are the panel's lines, never repeated
    here, so each is a single character with a hover. Only a reconciled turn
@@ -6842,6 +6862,12 @@ bubble-body.bubble-body { display: block; }
    same cadence the phase word does, and the completed box is drawn plainly
    rather than colored — a finished task is not news. */
 .footer-glyph[data-glyph="completed"] { color: var(--ok); }
+/* A MERGE ROW WEARS THE MERGE PURPLE (owner request, 2026-10-23): its ⇄ glyph
+   and the state it stands in (its step, or waiting on you) are drawn in THE
+   ONE PURPLE, the purple status --blocked a merge in progress wears. */
+.footer-row-merges .footer-glyph[data-glyph="merges"],
+.footer-row-merges .footer-row-description,
+.footer-row-merges .footer-row-state { color: var(--blocked); }
 .footer-glyph-running {
   display: inline-block;
   color: var(--thinking);
