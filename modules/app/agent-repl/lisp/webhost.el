@@ -93,6 +93,16 @@ workspace's own.")
 Nil until a handover first moves them; a host load starts on the daemon
 that served it.")
 
+(defvar agent-repl--webhost-reloaded-for-call nil
+  "The host URL a reload for an unknown call last loaded, or nil.
+A host loaded from that URL that still lacks a call is not stale: the
+daemon serves a webapp older than this elisp, which no reload fixes.")
+
+(defvar agent-repl--webhost-predates-reload-pending nil
+  "Non-nil from a reload for an unknown call until the reloaded host loads.
+Answers that arrive meanwhile come from the document being left, which was
+already found stale, so they ask for nothing more.")
+
 (defvar agent-repl--webhost-reload-started-ms nil
   "When the host reload now loading began, in epoch ms, or nil.
 Set when a reload navigates the host (`agent-repl--webhost-reload-now') and
@@ -185,6 +195,8 @@ reads it, so it is read here off `last-input-event' rather than passed."
       (agent-repl--info agent-repl--webhost-central "elisp.webhost.load-changed status=%s pages=%d shown=%s"
                         status (hash-table-count agent-repl--webhost-pages) agent-repl--webhost-shown)
       (when (equal status "load-committed")
+        ;; From here on every answer is the new document's.
+        (setq agent-repl--webhost-predates-reload-pending nil)
         (agent-repl--webhost-replay)))))
 
 (defun agent-repl--webhost-callback (xwidget event-type)
@@ -279,11 +291,6 @@ The answer is always a string: a null answer is dropped without a callback."
                     "return JSON.stringify({op:%s,id:%s,outcome:\"queued\",notes:[]});})()")
             op call op id op id)))
 
-(defvar agent-repl--webhost-reloaded-for-call nil
-  "The host URL a reload for an unknown call last loaded, or nil.
-A host loaded from that URL that still lacks a call is not stale: the
-daemon serves a webapp older than this elisp, which no reload fixes.")
-
 (defun agent-repl--webhost-predates-call (op)
   "The host has no OP: it was loaded from a build older than this elisp.
 EMACS AND THE HOST SPEAK ONE PROTOCOL.  A host that predates a call Emacs
@@ -293,6 +300,9 @@ daemon serving an older webapp than this elisp, an ERROR no reload heals."
   (let* ((conn (agent-repl-link-live))
          (url (and conn (agent-repl-webhost-url conn))))
     (cond
+     (agent-repl--webhost-predates-reload-pending
+      (agent-repl--info agent-repl--webhost-central
+                        "elisp.webhost.predates-call op=%s action=none reason=reload-pending" op))
      ((null conn)
       (agent-repl--warn agent-repl--webhost-central
                         "elisp.webhost.predates-call op=%s action=none reason=no-link" op))
@@ -301,7 +311,8 @@ daemon serving an older webapp than this elisp, an ERROR no reload heals."
                          "elisp.webhost.predates-call op=%s action=none reason=served-webapp-predates-elisp url=%s"
                          op url))
      (t
-      (setq agent-repl--webhost-reloaded-for-call url)
+      (setq agent-repl--webhost-reloaded-for-call url
+            agent-repl--webhost-predates-reload-pending t)
       (agent-repl--info agent-repl--webhost-central
                         "elisp.webhost.predates-call op=%s action=reload url=%s" op url)
       (agent-repl-webhost-reload conn)))))

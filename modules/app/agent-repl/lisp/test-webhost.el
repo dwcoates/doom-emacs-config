@@ -79,7 +79,8 @@ so stubbing the accessor would not reach the code under test."
 Binds `reloads' and `records', newest first."
   (declare (indent 1))
   `(let ((reloads nil) (records nil)
-         (agent-repl--webhost-reloaded-for-call nil))
+         (agent-repl--webhost-reloaded-for-call nil)
+         (agent-repl--webhost-predates-reload-pending nil))
      (cl-letf (((symbol-function 'agent-repl-link-live) (lambda () ,link))
                ((symbol-function 'agent-repl-webhost-reload) (lambda (conn) (push conn reloads)))
                ((symbol-function 'agent-repl--log) #'ignore)
@@ -103,12 +104,37 @@ Binds `reloads' and `records', newest first."
       (should (string-match-p "elisp.webhost.predates-call op=setDaemon action=reload url=http://host.localhost:2/\\?host=1"
                               (cdr (assoc 'info records)))))))
 
+(ert-deftest agent-repl-test-wh-an-answer-from-the-document-being-left-asks-for-nothing ()
+  "An unknown call answered before the reloaded host loads is the old document's: INFO, no second reload."
+  (let ((live (agent-repl-test-wh--conn "127.0.0.1:2")))
+    (agent-repl-test-wh--with-predates live
+      ;; Arrange
+      (agent-repl--webhost-predates-call "setDaemon")
+      ;; Act
+      (agent-repl--webhost-predates-call "setDaemon")
+      ;; Assert
+      (should (= 1 (length reloads)))
+      (should-not (assoc 'error records))
+      (should (string-match-p "reason=reload-pending" (cdr (assoc 'info records)))))))
+
+(ert-deftest agent-repl-test-wh-a-host-load-ends-the-pending-reload ()
+  "The reloaded host's load committing means later answers are the new document's."
+  (agent-repl-test-wh--with-host
+    ;; Arrange
+    (let ((agent-repl--webhost-predates-reload-pending t))
+      (cl-letf (((symbol-function 'agent-repl--webhost-replay) #'ignore))
+        ;; Act
+        (agent-repl-test-wh--load "load-committed"))
+      ;; Assert
+      (should-not agent-repl--webhost-predates-reload-pending))))
+
 (ert-deftest agent-repl-test-wh-a-reloaded-host-that-still-lacks-the-call-is-an-error ()
   "A host freshly reloaded on the live daemon that still lacks a call is not stale: ERROR, no second reload."
   (let ((live (agent-repl-test-wh--conn "127.0.0.1:2")))
     (agent-repl-test-wh--with-predates live
       ;; Arrange
       (agent-repl--webhost-predates-call "setDaemon")
+      (setq agent-repl--webhost-predates-reload-pending nil)
       ;; Act
       (agent-repl--webhost-predates-call "setDaemon")
       ;; Assert
