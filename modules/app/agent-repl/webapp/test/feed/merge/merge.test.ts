@@ -17,7 +17,8 @@ import { countingTicker, drawnBefore, harness, mergeRow, rowContext } from "../h
 import { oneofArms } from "../../arms.js";
 import { mergeHead } from "./fixtures.js";
 import { HEAD_CLOCK_CLASS } from "../../../src/feed/cards/tool-head.js";
-import { WAITING_STAGE } from "../../../src/feed/merge/queue.js";
+import { PAUSED_WORD, WAITING_STAGE } from "../../../src/feed/merge/merge.js";
+import { PAUSED_MARK_CLASS } from "../../../src/feed/merge/paused.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
 
 beforeEach(() => {
@@ -43,6 +44,33 @@ describe("drawFeedMerge: the head's constant props", () => {
   it("draws the ⇄ glyph for the vocabulary's merge icon", () => {
     const el = draw(mergeHead({ case: "update" }));
     expect(el.querySelector(".merge-glyph")?.textContent).toBe("⇄");
+  });
+});
+
+describe("drawFeedMerge: a merge on a paused queue (owner request, 2026-10-23)", () => {
+  it("draws the paused pill after the stage badge while the queue is paused", () => {
+    const el = draw(mergeHead({ case: "update", stage: "waiting", paused: true }));
+    expect(
+      [...el.querySelectorAll(".merge-badge")].map((b) => [b.textContent, b.classList.contains("is-paused")]),
+    ).toEqual([
+      [WAITING_STAGE, false],
+      [PAUSED_WORD, true],
+    ]);
+  });
+
+  it("draws the pill as the shared paused mark", () => {
+    const el = draw(mergeHead({ case: "update", stage: "merging", paused: true }));
+    expect(el.querySelector(".merge-badge.is-paused")?.classList.contains(PAUSED_MARK_CLASS)).toBe(true);
+  });
+
+  it("marks the head paused, which the bubble's frame is tinted by", () => {
+    const el = draw(mergeHead({ case: "update", stage: "waiting", paused: true }));
+    expect(el.hasAttribute("data-paused")).toBe(true);
+  });
+
+  it("draws no pill and no mark while the queue runs", () => {
+    const el = draw(mergeHead({ case: "update", stage: "waiting" }));
+    expect([el.querySelector(".is-paused"), el.hasAttribute("data-paused")]).toEqual([null, false]);
   });
 });
 

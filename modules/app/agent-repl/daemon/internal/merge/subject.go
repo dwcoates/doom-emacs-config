@@ -112,6 +112,34 @@ func (o *orchestrator) resolveSubject(ctx context.Context, r *run) (subject, err
 	}
 }
 
+// targetDirOf answers the checkout the merge workspace WS queued lands in, by
+// its source: a workspace's recorded target, or the repository's main
+// worktree. It is what the boot recovery resumes a merge against and what the
+// queue tab's target column names. A creation_jobs row that will not decode
+// is returned as the DecodeError it is.
+func (o *orchestrator) targetDirOf(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource) (string, error) {
+	switch source.Kind {
+	case wsm.MergeSourceOwnBranch:
+		job, err := o.layoutFor(ctx, ws)
+		if err != nil {
+			return "", err
+		}
+		return job.Layout.TargetDir, nil
+	case wsm.MergeSourceWorkspace:
+		job, err := o.layoutFor(ctx, source.Workspace)
+		if err != nil {
+			return "", err
+		}
+		return job.Layout.TargetDir, nil
+	default:
+		record, err := o.deps.DB.Workspace(ctx, ws)
+		if err != nil {
+			return "", err
+		}
+		return o.deps.Git.MainWorktree(ctx, record.Dir)
+	}
+}
+
 // requestedBranch answers the workspace branch a request merges: the one
 // recorded when it was requested (checkSource). A request recorded by an
 // earlier build carries none, and its branch is read from the worktree now,
@@ -165,40 +193,32 @@ func (o *orchestrator) branchSubject(ctx context.Context, r *run) (subject, erro
 }
 
 // sourceLabel is what a merge in line lands, as its bubble's head names it
-// before the merge is admitted: the same line the running merge draws.
+// before the merge is admitted: the same line the running merge draws. Its
+// target is targetDirOf's, the one resolution of where a source lands.
 func (o *orchestrator) sourceLabel(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource) (string, error) {
+	var branch string
 	switch source.Kind {
-	case wsm.MergeSourceOwnBranch:
-		job, err := o.layoutFor(ctx, ws)
+	case wsm.MergeSourceOwnBranch, wsm.MergeSourceWorkspace:
+		owner := ws
+		if source.Kind == wsm.MergeSourceWorkspace {
+			owner = source.Workspace
+		}
+		job, err := o.layoutFor(ctx, owner)
 		if err != nil {
 			return "", err
 		}
-		branch, err := o.requestedBranch(ctx, ws, source, job.Layout.SourceDir)
+		branch, err = o.requestedBranch(ctx, ws, source, job.Layout.SourceDir)
 		if err != nil {
 			return "", err
 		}
-		return branchLabel(branch, job.Layout.TargetDir), nil
-	case wsm.MergeSourceWorkspace:
-		job, err := o.layoutFor(ctx, source.Workspace)
-		if err != nil {
-			return "", err
-		}
-		branch, err := o.requestedBranch(ctx, ws, source, job.Layout.SourceDir)
-		if err != nil {
-			return "", err
-		}
-		return branchLabel(branch, job.Layout.TargetDir), nil
 	case wsm.MergeSourceBranch:
-		record, err := o.deps.DB.Workspace(ctx, ws)
-		if err != nil {
-			return "", err
-		}
-		main, err := o.deps.Git.MainWorktree(ctx, record.Dir)
-		if err != nil {
-			return "", err
-		}
-		return branchLabel(source.Branch, main), nil
+		branch = source.Branch
 	default:
 		return "", fmt.Errorf("merge: the undeclared source %s", source.Kind)
 	}
+	target, err := o.targetDirOf(ctx, ws, source)
+	if err != nil {
+		return "", err
+	}
+	return branchLabel(branch, target), nil
 }

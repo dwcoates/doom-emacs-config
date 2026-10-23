@@ -425,12 +425,17 @@ func TestAPauseAndAResumeAreReportedWithTheQueuesPausedState(t *testing.T) {
 func TestAChangeWhoseQueueCannotBeReadIsRecordedAndTheWriteStands(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.db.pausedReadErr = errors.New("the store is gone")
+	gone := errors.New("the store is gone")
+	h.db.pausedReadErr = gone
 
 	// Act.
-	enqueue(t, h)
+	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser})
 
-	// Assert.
+	// Assert: the queue tab's redraw reads the pause too, so the enqueue
+	// answers the unread pause once its write has stood.
+	if !errors.Is(err, gone) {
+		t.Fatalf("Enqueue = %v, want the unread pause", err)
+	}
 	if kinds := h.events.kinds(); len(kinds) != 0 {
 		t.Fatalf("changes = %v, want none reported", kinds)
 	}

@@ -139,7 +139,7 @@ func TestHeadRowRefusesAResultThatIsNoHeadArm(t *testing.T) {
 		result any
 	}{
 		{name: "nil", result: nil},
-		{name: "a stage outside the enum", result: liveHead(99)},
+		{name: "a stage outside the enum", result: liveHead{stage: 99}},
 		{name: "a foreign type", result: "merging"},
 	}
 	for _, tt := range tests {
@@ -171,7 +171,7 @@ func TestQueueSnapshotPlacesEachEntrysStanding(t *testing.T) {
 	}
 
 	// Act.
-	snap := queueSnapshot(entries, "ws-2", map[ids.WorkspaceID]string{}, map[ids.WorkspaceID]string{}, map[ids.WorkspaceID]*frontendv1.FeedMergeQueueBubble{}, standings)
+	snap := queueSnapshot(entries, "ws-2", snapshotView(false, standings))
 
 	// Assert.
 	if got := snap.GetAhead()[0].GetMerging(); got != front {
@@ -179,6 +179,101 @@ func TestQueueSnapshotPlacesEachEntrysStanding(t *testing.T) {
 	}
 	if got := snap.GetCurrent().GetWaiting().GetStageEnteredAtMs(); got != 3000 {
 		t.Fatalf("this workspace's wait began at %d, want 3000", got)
+	}
+}
+
+// snapshotView is a queue view of the two entries ws-1 and ws-2, both landing
+// in the main worktree at /src/doom, on a queue PAUSED or not.
+func snapshotView(paused bool, standings []*frontendv1.FeedMergeQueueEntry) queueView {
+	return queueView{
+		paused:    paused,
+		names:     map[ids.WorkspaceID]string{},
+		dirs:      map[ids.WorkspaceID]string{},
+		targets:   map[ids.WorkspaceID]string{"ws-1": "/src/doom", "ws-2": "/src/doom"},
+		bubbles:   map[ids.WorkspaceID]*frontendv1.FeedMergeQueueBubble{},
+		standings: standings,
+	}
+}
+
+// TestQueueSnapshotCarriesThePauseAndEachTarget covers the snapshot's queue
+// facts: the pause rides the snapshot exactly while the queue is paused, and
+// every entry names the worktree it lands in by its directory name and path.
+func TestQueueSnapshotCarriesThePauseAndEachTarget(t *testing.T) {
+	tests := []struct {
+		name   string
+		paused bool
+	}{
+		{name: "a queue that runs", paused: false},
+		{name: "a paused queue", paused: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			entries := []wsm.MergeQueueEntry{{Workspace: "ws-1", Position: 1}, {Workspace: "ws-2", Position: 2}}
+			standings := []*frontendv1.FeedMergeQueueEntry{
+				{Status: &frontendv1.FeedMergeQueueEntry_Merging{Merging: &frontendv1.FeedMergeQueueMerging{ActiveTab: tabLabel(TabQueue, 1)}}},
+				{Status: &frontendv1.FeedMergeQueueEntry_Waiting{Waiting: &frontendv1.FeedMergeQueueWaiting{StageEnteredAtMs: 3000}}},
+			}
+
+			// Act.
+			snap := queueSnapshot(entries, "ws-2", snapshotView(tt.paused, standings))
+
+			// Assert.
+			if got := snap.GetPaused() != nil; got != tt.paused {
+				t.Fatalf("the snapshot says paused %v, want %v", got, tt.paused)
+			}
+			for _, entry := range []*frontendv1.FeedMergeQueueEntry{snap.GetAhead()[0], snap.GetCurrent()} {
+				if got := entry.GetTarget(); got.GetText() != "doom" || got.GetDir() != "/src/doom" {
+					t.Fatalf("an entry's target is %+v, want doom at /src/doom", got)
+				}
+			}
+		})
+	}
+}
+
+// TestQueueTargetRefusesAnUnresolvedWorktree covers the invariant: an entry
+// whose landing worktree was never resolved panics rather than drawing an
+// empty target.
+func TestQueueTargetRefusesAnUnresolvedWorktree(t *testing.T) {
+	// Arrange.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatalf("queueTarget drew a target for no worktree, want a panic")
+		}
+	}()
+
+	// Act.
+	queueTarget("")
+}
+
+// TestALiveHeadDrawsItsQueuesPause covers frontend.v1.FeedMergeUpdate.paused:
+// a live head carries the pause exactly while its queue is paused, beside its
+// stage rather than in place of it.
+func TestALiveHeadDrawsItsQueuesPause(t *testing.T) {
+	tests := []struct {
+		name        string
+		head        liveHead
+		wantPaused  bool
+		wantWaiting bool
+	}{
+		{name: "waiting on a queue that runs", head: headWaiting.onPaused(false), wantPaused: false, wantWaiting: true},
+		{name: "waiting on a paused queue", head: headWaiting.onPaused(true), wantPaused: true, wantWaiting: true},
+		{name: "merging on a paused queue", head: headMerging.onPaused(true), wantPaused: true, wantWaiting: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			update := headRow(theWorkspace, "lease-1", "branch", 1, tt.head).GetActivity().GetMerge().GetUpdate()
+
+			// Assert.
+			if got := update.GetPaused() != nil; got != tt.wantPaused {
+				t.Fatalf("the head says paused %v, want %v", got, tt.wantPaused)
+			}
+			if got := update.GetWaiting() != nil; got != tt.wantWaiting {
+				t.Fatalf("the head says waiting %v, want %v", got, tt.wantWaiting)
+			}
+		})
 	}
 }
 

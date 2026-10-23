@@ -17,6 +17,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { COLOR_TOKENS, colorValue } from "../../src/vocab.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,17 +25,18 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 interface Row {
   place: "ahead" | "current" | "behind";
   name: string;
-  /** The front's active tab label, or undefined for a waiting entry. */
-  tab?: string;
+  /** Whether the entry is the merge running rather than one waiting. */
+  merging?: boolean;
+  /** The worktree it lands in, by its directory name. */
+  target?: string;
   clock: string;
 }
 
 /** One entry's markup. */
 function entry(r: Row): string {
-  const status = r.tab === undefined ? "waiting" : "merging";
-  const stage = r.tab === undefined ? "waiting" : `<span class="merge-tab-label">${r.tab}</span>`;
+  const status = r.merging === true ? "merging" : "waiting";
   const moves =
-    r.tab === undefined
+    r.merging !== true
       ? `<ar-button role="button" class="merge-queue-move" data-merge-move="up" aria-label="move up the merge queue"></ar-button>` +
         `<ar-button role="button" class="merge-queue-move" data-merge-move="down" aria-label="move down the merge queue"></ar-button>`
       : "";
@@ -45,7 +47,7 @@ function entry(r: Row): string {
           <span class="merge-queue-moves">${moves}</span>
           <span class="merge-queue-label">${r.name}</span>
         </span>
-        <span class="merge-queue-stage">${stage}</span>
+        <span class="merge-queue-target" title="/src/${r.target ?? "doom"}">${r.target ?? "doom"}</span>
         <span class="footer-row-clock merge-queue-duration">${r.clock}</span>
       </ar-button>
     </div>`;
@@ -54,8 +56,8 @@ function entry(r: Row): string {
 /** The header as `drawFeedMergeQueue` shapes it. */
 const HEADER = `
   <div class="merge-queue-header footer-columns">
-    <span class="footer-column-header" data-column="workspace">workspace</span>
-    <span class="footer-column-header" data-column="stage">stage</span>
+    <span class="footer-column-header" data-column="workspace">workspace (3)</span>
+    <span class="footer-column-header" data-column="target">target</span>
     <span class="footer-column-header" data-column="duration">duration</span>
   </div>`;
 
@@ -71,8 +73,8 @@ interface Box {
 interface Measured {
   /** The header's and every row's duration cell. */
   duration: Box[];
-  /** The header's and every row's stage cell. */
-  stage: Box[];
+  /** The header's and every row's target cell. */
+  target: Box[];
   /** Every entry row. */
   rows: Box[];
   /** Every row's name, as drawn. */
@@ -81,8 +83,12 @@ interface Measured {
   moves: Box[];
   /** The width "5hr 30m 30s" takes in the duration cell's own font. */
   floor: number;
-  /** Every entry row's stage cell's size, font and color. */
-  stageLooks: string[];
+  /** Every entry row's target cell's size, font and color. */
+  targetLooks: string[];
+  /** Every entry row's name color and target color, in row order. */
+  colors: { name: string; target: string }[];
+  /** What --blocked and --muted resolve to on the table. */
+  inks: { blocked: string; muted: string };
   /** Every entry row's duration cell's size, font and color. */
   durationLooks: string[];
 }
@@ -114,13 +120,28 @@ async function measure(page: Page, rows: readonly Row[]): Promise<Measured> {
       });
     return {
       duration: boxes(".merge-queue-duration, [data-column='duration']"),
-      stage: boxes(".merge-queue-stage, [data-column='stage']"),
+      target: boxes(".merge-queue-target, [data-column='target']"),
       rows: boxes(".merge-queue-entry"),
       names: boxes(".merge-queue-label"),
       moves: boxes(".merge-queue-move"),
       floor,
-      stageLooks: looks(".merge-queue-stage"),
+      targetLooks: looks(".merge-queue-target"),
       durationLooks: looks(".merge-queue-duration"),
+      colors: [...table.querySelectorAll(".merge-queue-entry")].map((row) => ({
+        name: getComputedStyle(row.querySelector(".merge-queue-label") as Element).color,
+        target: getComputedStyle(row.querySelector(".merge-queue-target") as Element).color,
+      })),
+      inks: (() => {
+        const ink = (v: string): string => {
+          const swatch = document.createElement("span");
+          swatch.style.color = `var(${v})`;
+          table.append(swatch);
+          const color = getComputedStyle(swatch).color;
+          swatch.remove();
+          return color;
+        };
+        return { blocked: ink("--blocked"), muted: ink("--muted") };
+      })(),
     };
   }, html);
 }
@@ -130,7 +151,7 @@ const distinct = (xs: number[]): number[] => [...new Set(xs.map((x) => Math.roun
 
 /** A front, this workspace, and one behind. */
 const QUEUE: readonly Row[] = [
-  { place: "ahead", name: "front-workspace", tab: "tests (2)", clock: "4m 59s" },
+  { place: "ahead", name: "front-workspace", merging: true, clock: "4m 59s" },
   { place: "current", name: "mine", clock: "1h 5m" },
   { place: "behind", name: "after", clock: "5s" },
 ];
@@ -145,6 +166,9 @@ describe("the merge queue tab's columns in WebKit", () => {
     page = await browser.newPage({ viewport: { width: 700, height: 400 } });
     await page.setContent(`<!doctype html><html><head></head><body><div id="host" style="width: 520px"></div></body></html>`);
     await page.addStyleTag({ content: css });
+    // THE STATUS TOKENS ARE THE SCRIPT'S, never the stylesheet's (src/vocab.ts
+    // COLOR_TOKENS), so the page is given the one purple the app gives it.
+    await page.addStyleTag({ content: `:root { ${COLOR_TOKENS.purple}: ${colorValue("light", "purple")}; }` });
   });
 
   afterAll(async () => {
@@ -156,9 +180,9 @@ describe("the merge queue tab's columns in WebKit", () => {
     expect([distinct(m.duration.map((b) => b.left)), distinct(m.duration.map((b) => b.width))].map((d) => d.length)).toEqual([1, 1]);
   });
 
-  it("gives every row's stage cell the header's left edge", async () => {
+  it("gives every row's target cell the header's left edge", async () => {
     const m = await measure(page, QUEUE);
-    expect(distinct(m.stage.map((b) => b.left)).length).toBe(1);
+    expect(distinct(m.target.map((b) => b.left)).length).toBe(1);
   });
 
   it("makes the duration column at least wide enough for '5hr 30m 30s'", async () => {
@@ -171,10 +195,10 @@ describe("the merge queue tab's columns in WebKit", () => {
   it("holds the duration column still when a value goes from '4m 59s' to '5m'", async () => {
     const before = await measure(page, QUEUE);
     const after = await measure(page, [{ ...QUEUE[0], clock: "5m" }, QUEUE[1], QUEUE[2]]);
-    expect([Math.round(after.duration[1].left), Math.round(after.duration[1].width), Math.round(after.stage[1].left)]).toEqual([
+    expect([Math.round(after.duration[1].left), Math.round(after.duration[1].width), Math.round(after.target[1].left)]).toEqual([
       Math.round(before.duration[1].left),
       Math.round(before.duration[1].width),
-      Math.round(before.stage[1].left),
+      Math.round(before.target[1].left),
     ]);
   });
 
@@ -222,14 +246,32 @@ describe("the merge queue tab's columns in WebKit", () => {
     expect(m.moves.slice(0, 2).every((b) => b.top >= row.top && b.top + b.height <= row.top + row.height)).toBe(true);
   });
 
-  it("draws every row's duration in its stage's size, font and color", async () => {
+  it("draws every waiting row's duration in its target's size, font and color", async () => {
     const m = await measure(page, QUEUE);
-    expect(m.durationLooks).toEqual(m.stageLooks);
+    expect(m.durationLooks.slice(1)).toEqual(m.targetLooks.slice(1));
+  });
+
+  it("draws the merge running's name and target in the one purple", async () => {
+    const m = await measure(page, QUEUE);
+    expect([m.colors[0], m.inks.blocked === m.inks.muted]).toEqual([{ name: m.inks.blocked, target: m.inks.blocked }, false]);
+  });
+
+  it("greys every waiting row's name and target", async () => {
+    const m = await measure(page, QUEUE);
+    expect(m.colors.slice(1)).toEqual([
+      { name: m.inks.muted, target: m.inks.muted },
+      { name: m.inks.muted, target: m.inks.muted },
+    ]);
+  });
+
+  it("keeps a long target to its row's height, ending it rather than wrapping", async () => {
+    const m = await measure(page, [{ ...QUEUE[0], target: "a-very-long-worktree-directory-".repeat(6) }, QUEUE[1]]);
+    expect(distinct(m.rows.map((b) => b.height)).length).toBe(1);
   });
 
   it("keeps a long name to its row's height, ending it rather than wrapping", async () => {
     const m = await measure(page, [
-      { place: "ahead", name: "a-very-long-workspace-name-".repeat(6), tab: "tests", clock: "5s" },
+      { place: "ahead", name: "a-very-long-workspace-name-".repeat(6), merging: true, clock: "5s" },
       QUEUE[1],
     ]);
     expect(distinct(m.rows.map((b) => b.height)).length).toBe(1);

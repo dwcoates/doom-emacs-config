@@ -3373,7 +3373,15 @@ message FeedMergeUpdate {
     FeedMergeUpdateWaiting waiting = 1;
     FeedMergeUpdateMerging merging = 2;
   }
+  // SET WHILE THE MERGE'S QUEUE IS PAUSED (owner request, 2026-10-23), beside
+  // the stage rather than in place of it: a paused queue advances nothing, so
+  // the merge stands where the stage says until the queue resumes. The head
+  // draws a "paused" badge in the paused amber, folded and expanded alike.
+  // Unset while the queue runs.
+  optional FeedMergeUpdatePaused paused = 3;
 }
+// The merge's queue is paused.
+message FeedMergeUpdatePaused {}
 // The merge waits in the queue for the merges ahead of it.
 message FeedMergeUpdateWaiting {}
 // The merge is being worked on: admitted off the queue, or resolving its
@@ -4146,7 +4154,13 @@ message FeedMergeQueue {
   FeedMergeQueueEntry current = 2;
   // The entries behind, nearest first.
   repeated FeedMergeQueueEntry behind = 3;
+  // SET WHILE THE QUEUE IS PAUSED (owner request, 2026-10-23): the tab draws a
+  // "queue paused" banner in the paused amber above its table. Unset while the
+  // queue runs.
+  optional FeedMergeQueuePaused paused = 4;
 }
+// The queue is paused: it admits no merge until it is resumed.
+message FeedMergeQueuePaused {}
 message FeedMergeQueueEntry {
   FeedMergeQueueWorkspace workspace = 1;
   FeedMergeQueueLabel label = 2;
@@ -4162,6 +4176,19 @@ message FeedMergeQueueEntry {
   // (SelectWorkspaceRequest.reveal). Unset for a sync merge, whose entry is
   // the requesting workspace itself and whose click selects it.
   optional FeedMergeQueueBubble bubble = 5;
+  // WHERE THE ENTRY'S MERGE LANDS (owner request, 2026-10-23), drawn in the
+  // queue table's target column.
+  FeedMergeQueueTarget target = 6;
+}
+// The git worktree an entry's merge lands in: the parent workspace's worktree
+// for a workspace merging into its parent, the repository's main worktree
+// otherwise.
+message FeedMergeQueueTarget {
+  // The worktree's directory name, resolved by the daemon ("doom" for the
+  // main worktree at ~/.config/doom), drawn verbatim.
+  string text = 1;
+  // The worktree's full path on the daemon's host, shown on hover.
+  string dir = 2;
 }
 // Where an async merge's bubble stands: the requester's workspace and the
 // bubble's head row on its root feed.

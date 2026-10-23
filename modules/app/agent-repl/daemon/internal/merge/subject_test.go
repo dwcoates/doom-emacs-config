@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/gitclient"
@@ -135,6 +136,50 @@ func TestTheQueuedLabelIsTheOneTheRunningMergeDraws(t *testing.T) {
 				t.Fatalf("queued label = (%q, %v), want the running label %q", queued, err, running)
 			}
 		})
+	}
+}
+
+// TestTargetDirOfIsWhereTheRunningMergeLands pins targetDirOf as the one
+// resolution of where a source lands: for every source it answers the target
+// the running merge's subject lands in, which the queued head's label and the
+// queue tab's target column both read.
+func TestTargetDirOfIsWhereTheRunningMergeLands(t *testing.T) {
+	tests := []struct {
+		name   string
+		source wsm.MergeSource
+	}{
+		{name: "own branch", source: ownBranch},
+		{name: "another workspace", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace, Workspace: otherWorkspace}},
+		{name: "a branch", source: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: "agent-1/fix"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.registerOther(otherWorkspace, "ws-two", "other-branch")
+			running := subjectOf(t, h, tt.source).targetDir
+
+			// Act.
+			target, err := h.o.targetDirOf(context.Background(), theWorkspace, tt.source)
+
+			// Assert.
+			if err != nil || target != running {
+				t.Fatalf("targetDirOf = (%q, %v), want the running merge's target %q", target, err, running)
+			}
+		})
+	}
+}
+
+func TestSourceLabelRefusesAnUndeclaredSource(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.o.sourceLabel(context.Background(), theWorkspace, wsm.MergeSource{Kind: wsm.MergeSourceKind(99)})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "undeclared source") {
+		t.Fatalf("sourceLabel = %v, want the undeclared source refused", err)
 	}
 }
 

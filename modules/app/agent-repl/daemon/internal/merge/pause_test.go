@@ -127,12 +127,16 @@ func TestThePausesTakeBackRecordsThatTheMergeStaysSuspended(t *testing.T) {
 // more than the harness's one queue.
 const otherQueueKey = wsm.RepoKey("/other/checkout/.git")
 
-// seedQueue gives a repository's queue one waiting entry, which is all an
-// unscoped pause needs to count the queue as one to change.
+// seedQueue gives a repository's queue one waiting entry of the harness's
+// workspace, which an unscoped pause counts as a queue to change and its
+// redraw can name. The entry was enqueued at the harness clock, so an
+// unscoped pause can draw its tab.
 func seedQueue(h *harness, repo wsm.RepoKey, paused bool) {
 	h.db.mu.Lock()
 	defer h.db.mu.Unlock()
-	h.db.queues[repo] = append(h.db.queues[repo], wsm.MergeQueueEntry{State: wsm.MergeQueued})
+	h.db.queues[repo] = append(h.db.queues[repo], wsm.MergeQueueEntry{
+		Repo: repo, Workspace: theWorkspace, State: wsm.MergeQueued, Source: ownBranch, EnqueuedAt: h.clock(),
+	})
 	h.db.paused[repo] = paused
 }
 
@@ -283,5 +287,78 @@ func TestAScopedPauseOfARepositoryTheRegistryDoesNotHoldIsRefused(t *testing.T) 
 				t.Fatal("a refused scoped pause paused the queue")
 			}
 		})
+	}
+}
+
+// TestAPauseChangeRedrawsEveryBubbleOnTheQueue covers the bubble's half of a
+// pause (frontend.v1.FeedMergeUpdate.paused, frontend.v1.FeedMergeQueue.paused):
+// a pause redraws every head in line as paused and every queue tab with the
+// queue paused, and a resume redraws them running again.
+func TestAPauseChangeRedrawsEveryBubbleOnTheQueue(t *testing.T) {
+	tests := []struct {
+		name       string
+		act        func(h *harness) error
+		wantPaused bool
+	}{
+		{name: "pause", act: func(h *harness) error { return h.o.Pause(context.Background(), nil) }, wantPaused: true},
+		{name: "resume", act: func(h *harness) error {
+			if err := h.o.Pause(context.Background(), nil); err != nil {
+				return err
+			}
+			return h.o.Unpause(context.Background(), nil)
+		}, wantPaused: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: two merges in line on a queue that runs.
+			h := newHarness(t)
+			enqueue(t, h)
+			queueAnother(t, h, "ws-2", "two")
+
+			// Act.
+			if err := tt.act(h); err != nil {
+				t.Fatalf("act: %v", err)
+			}
+
+			// Assert.
+			for _, ws := range []wsm.WorkspaceID{theWorkspace, "ws-2"} {
+				if got := lastMergeOf(t, h, ws).GetUpdate().GetPaused() != nil; got != tt.wantPaused {
+					t.Fatalf("%s's head says paused %v, want %v", ws, got, tt.wantPaused)
+				}
+				if got := lastQueueTabOf(t, h, ws).GetQueue().GetPaused() != nil; got != tt.wantPaused {
+					t.Fatalf("%s's queue tab says paused %v, want %v", ws, got, tt.wantPaused)
+				}
+			}
+		})
+	}
+}
+
+// TestAPauseWhoseRedrawFailsIsRecordedAndThePauseStands covers redrawPaused's
+// error path: a queue whose bubbles cannot be redrawn is recorded at ERROR
+// with its repository and cause, the pause is answered with the cause, and
+// the pause itself stands.
+func TestAPauseWhoseRedrawFailsIsRecordedAndThePauseStands(t *testing.T) {
+	// Arrange: a merge in line whose workspace record is gone by the redraw.
+	h := newHarness(t)
+	enqueue(t, h)
+	h.db.mu.Lock()
+	h.db.queues[h.repoKey()][0].Workspace = "ws-gone"
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Pause(context.Background(), nil)
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Pause answered no error, want the failed redraw")
+	}
+	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.pause", text: "could not redraw the merge queue's bubbles after its pause changed",
+		context: map[string]string{"repo": string(h.repoKey())}}) {
+		t.Fatalf("no error record of the failed redraw: %+v", h.logs.Records())
+	}
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	if !h.db.paused[h.repoKey()] {
+		t.Fatalf("the queue is not paused, want the pause to stand")
 	}
 }

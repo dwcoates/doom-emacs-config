@@ -153,7 +153,7 @@ func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry
 func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry) (bool, error) {
 	const op = "daemon.merge.recover"
 	ws := entry.Workspace
-	_, jobErr := o.recoverTarget(ctx, ws, entry.Source)
+	_, jobErr := o.targetDirOf(ctx, ws, entry.Source)
 	var decodeErr *wsm.DecodeError
 	if errors.As(jobErr, &decodeErr) {
 		fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "error": decodeErr.Error()}
@@ -230,7 +230,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 	if recorded {
 		return o.recoverResumable(ctx, repo, lease, doc)
 	}
-	target, jobErr := o.recoverTarget(ctx, ws, entry.Source)
+	target, jobErr := o.targetDirOf(ctx, ws, entry.Source)
 	// CORRUPTION REFUSES THE LOAD, it is never an unmergeable outcome. A
 	// creation_jobs row that will not decode is a half-written record, not a
 	// workspace whose geometry was legitimately removed: dropping the merge and
@@ -412,32 +412,6 @@ func (o *orchestrator) resumedMergeOwns(ctx context.Context, t wsm.Turn) (bool, 
 		return false, err
 	}
 	return doc.Displaced != nil && doc.Displaced.Turn == string(t.ID), nil
-}
-
-// recoverTarget answers the checkout a recovered merge lands in, by its
-// source: a workspace's recorded target, or the repository's main worktree. A
-// creation_jobs row that will not decode is returned as the DecodeError it is.
-func (o *orchestrator) recoverTarget(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource) (string, error) {
-	switch source.Kind {
-	case wsm.MergeSourceOwnBranch:
-		job, err := o.layoutFor(ctx, ws)
-		if err != nil {
-			return "", err
-		}
-		return job.Layout.TargetDir, nil
-	case wsm.MergeSourceWorkspace:
-		job, err := o.layoutFor(ctx, source.Workspace)
-		if err != nil {
-			return "", err
-		}
-		return job.Layout.TargetDir, nil
-	default:
-		record, err := o.deps.DB.Workspace(ctx, ws)
-		if err != nil {
-			return "", err
-		}
-		return o.deps.Git.MainWorktree(ctx, record.Dir)
-	}
 }
 
 // sweepTrees removes every scratch tree -- and, unless keepBranch, the branch

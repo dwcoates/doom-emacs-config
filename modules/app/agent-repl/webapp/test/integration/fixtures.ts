@@ -1388,12 +1388,14 @@ const mergeTabKindValue = (
               {
                 workspace: { ref: workspaceRef("ws-ahead") },
                 label: { text: "ws-ahead" },
+                target: { text: "doom", dir: "/src/doom" },
                 status: { case: "waiting", value: { stageEnteredAtMs: MERGE_TAB_STARTED_AT_MS } },
               },
             ],
             current: {
               workspace: { ref: workspaceRef() },
               label: { text: "ws-1" },
+              target: { text: "doom", dir: "/src/doom" },
               status: {
                 case: "merging",
                 value: { activeTab: { words: { case: "text", value: "tests" }, round: 1 }, stageEnteredAtMs: MERGE_TAB_STARTED_AT_MS },
@@ -1403,6 +1405,7 @@ const mergeTabKindValue = (
               {
                 workspace: { ref: workspaceRef("ws-behind") },
                 label: { text: "ws-behind" },
+                target: { text: "doom", dir: "/src/doom" },
                 status: { case: "waiting", value: { stageEnteredAtMs: MERGE_TAB_STARTED_AT_MS } },
               },
             ],

@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -54,7 +55,7 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 	if err != nil {
 		return err
 	}
-	changed := 0
+	var changed []wsm.RepoKey
 	for _, repo := range repos {
 		was, err := o.deps.DB.MergeQueuePaused(ctx, repo)
 		if err != nil {
@@ -66,9 +67,9 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 		if err := o.deps.DB.SetMergeQueuePaused(ctx, repo, paused); err != nil {
 			return err
 		}
-		changed++
+		changed = append(changed, repo)
 	}
-	if changed == 0 {
+	if len(changed) == 0 {
 		arm, reason := ArmNotPaused, "the merge queue is not paused"
 		if paused {
 			arm, reason = ArmAlreadyPaused, "the merge queue is already paused"
@@ -76,14 +77,34 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 		o.deps.Log.Global().Warn(op, "refused a pause change that would not change anything", dlog.Context{"arm": arm})
 		return &RefusalError{Arm: arm, Reason: reason}
 	}
-	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": changed, "scoped": scope != nil})
+	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": len(changed), "scoped": scope != nil})
 	if paused {
-		return o.suspendForPause(ctx, repos)
+		suspended := o.suspendForPause(ctx, repos)
+		return errors.Join(suspended, o.redrawPaused(ctx, op, changed))
 	}
+	redrawn := o.redrawPaused(ctx, op, changed)
 	for _, repo := range repos {
 		o.kick(repo)
 	}
-	return nil
+	return redrawn
+}
+
+// redrawPaused redraws every bubble on each of REPOS' queues once its pause
+// changed, so each head's paused badge and each queue tab's banner follow the
+// pause at once (frontend.v1.FeedMergeUpdate.paused,
+// frontend.v1.FeedMergeQueue.paused). A queue that cannot be redrawn is
+// recorded under OP and the rest are still redrawn; the errors are answered
+// joined.
+func (o *orchestrator) redrawPaused(ctx context.Context, op string, repos []wsm.RepoKey) error {
+	var errs []error
+	for _, repo := range repos {
+		if err := o.republishQueue(ctx, repo); err != nil {
+			o.deps.Log.Global().Error(op, "could not redraw the merge queue's bubbles after its pause changed", dlog.Context{
+				"repo": string(repo), "error": err.Error()})
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // pauseScope resolves WHICH queues one pause or resume addresses: every
@@ -594,7 +615,7 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 				return err
 			}
 			if clocked {
-				o.publishHead(entry.Workspace, lease, o.bubbleLabel(ctx, entry), clock, stage, headQueue)
+				o.publishHead(entry.Workspace, lease, o.bubbleLabel(ctx, entry), clock, stage.onPaused(view.paused), headQueue)
 			}
 			state, shown, err := o.queueTabState(entry)
 			if err != nil {
@@ -635,9 +656,10 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 	return nil
 }
 
-// queueView is what every drawing of one repository's queue reads: each
-// in-line workspace's name and directory, an async merge's bubble, and each
-// entry's standing, all keyed by the entry's own workspace.
+// queueView is what every drawing of one repository's queue reads: whether
+// the queue is paused, each in-line workspace's name and directory, the
+// worktree its merge lands in, an async merge's bubble, and each entry's
+// standing, all keyed by the entry's own workspace.
 //
 // AN ASYNC MERGE IS NAMED FOR ITSELF AND OPENS ITS BUBBLE (owner ruling,
 // 2026-10-17). Its entry's workspace is the hidden merge workspace the daemon
@@ -647,17 +669,25 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 // hidden merge workspace is never selected or revealed from the queue. A sync
 // merge's entry is the requesting workspace itself and carries no bubble.
 type queueView struct {
+	paused    bool
 	names     map[ids.WorkspaceID]string
 	dirs      map[ids.WorkspaceID]string
+	targets   map[ids.WorkspaceID]string
 	bubbles   map[ids.WorkspaceID]*frontendv1.FeedMergeQueueBubble
 	standings []*frontendv1.FeedMergeQueueEntry
 }
 
 // viewQueue resolves the queue view of one repository's in-line entries.
 func (o *orchestrator) viewQueue(ctx context.Context, repo wsm.RepoKey, entries []wsm.MergeQueueEntry) (queueView, error) {
+	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
+	if err != nil {
+		return queueView{}, fmt.Errorf("merge: read whether the queue of %s is paused: %w", repo, err)
+	}
 	view := queueView{
+		paused:  paused,
 		names:   map[ids.WorkspaceID]string{},
 		dirs:    map[ids.WorkspaceID]string{},
+		targets: map[ids.WorkspaceID]string{},
 		bubbles: map[ids.WorkspaceID]*frontendv1.FeedMergeQueueBubble{},
 	}
 	for _, entry := range entries {
@@ -667,6 +697,11 @@ func (o *orchestrator) viewQueue(ctx context.Context, repo wsm.RepoKey, entries 
 		}
 		view.names[entry.Workspace] = record.Name
 		view.dirs[entry.Workspace] = record.Dir
+		target, err := o.targetDirOf(ctx, entry.Workspace, entry.Source)
+		if err != nil {
+			return queueView{}, fmt.Errorf("merge: resolve the worktree the merge of %s lands in: %w", entry.Workspace, err)
+		}
+		view.targets[entry.Workspace] = target
 		if record.MergeOf == nil {
 			continue
 		}
@@ -711,7 +746,7 @@ func (o *orchestrator) asyncMergeBubble(ctx context.Context, ws, requester ids.W
 
 // snapshot is the queue as self sees it.
 func (v queueView) snapshot(entries []wsm.MergeQueueEntry, self ids.WorkspaceID) *frontendv1.FeedMergeQueue {
-	return queueSnapshot(entries, self, v.names, v.dirs, v.bubbles, v.standings)
+	return queueSnapshot(entries, self, v)
 }
 
 // settleLeavingQueueTab draws a merge's own queue tab ONE LAST TIME as it
@@ -1286,7 +1321,7 @@ func (o *orchestrator) queueTabState(entry wsm.MergeQueueEntry) (tabState, bool,
 func (o *orchestrator) headClockMS(entry wsm.MergeQueueEntry) (int64, liveHead, bool, error) {
 	span, clocked, err := o.queueSpanOf(entry)
 	if err != nil || !clocked {
-		return 0, 0, clocked, err
+		return 0, liveHead{}, clocked, err
 	}
 	if span.admitted {
 		return span.admittedMS, headMerging, true, nil

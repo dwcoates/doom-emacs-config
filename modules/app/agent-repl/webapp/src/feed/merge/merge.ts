@@ -15,6 +15,11 @@
  * live merge's word is the daemon's stage (`frontend.v1.FeedMergeUpdate.stage`):
  * `waiting` while it waits in line, `merging` once it is worked on.
  *
+ * A PAUSED QUEUE SHOWS ON THE HEAD (owner request, 2026-10-23): while the
+ * live arm carries `frontend.v1.FeedMergeUpdate.paused`, a "paused" pill in the
+ * paused amber follows the stage badge and the head is marked `data-paused`,
+ * which the stylesheet tints the whole bubble by, folded and expanded alike.
+ *
  * THE CLOCK CLOSES THE HEAD'S RIGHT END, after the landed commit and the
  * switch (`HEAD_CLOCK_CLASS`, owner request 2026-10-18), at the badge's size.
  *
@@ -38,7 +43,7 @@ import { asHeadClock } from "../cards/tool-head.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { stopTicking } from "../ticking.js";
-import { WAITING_STAGE } from "./queue.js";
+import { drawPausedMark } from "./paused.js";
 import { drawFeedMergeVersion } from "./version.js";
 import { drawMergeWorkspaceSwitch, switchFacts } from "./workspace-switch.js";
 import type {
@@ -53,6 +58,12 @@ import type {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 
 const PATH = "FeedMerge";
+
+/** A live merge's badge word while it waits in line. */
+export const WAITING_STAGE = "waiting";
+
+/** The pill a live merge on a paused queue draws beside its badge. */
+export const PAUSED_WORD = "paused";
 
 /** The character each vocabulary glyph name draws as. */
 const GLYPHS: Readonly<Record<string, string>> = { merge: "⇄" };
@@ -97,6 +108,10 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
       el.setAttribute("data-state", "update");
       // THE BADGE COMES BEFORE THE CLOCK (owner ruling, 2026-10-11).
       el.append(badge(liveWord(result.value), "is-live"));
+      if (result.value.paused !== undefined) {
+        el.setAttribute("data-paused", "");
+        el.append(drawPausedMark("merge-badge is-paused", PAUSED_WORD));
+      }
       end.append(drawLiveClock(runtime, rc));
       el.append(end);
       return el;
@@ -229,8 +244,6 @@ export function liveWord(update: FeedMergeUpdate): string {
   const stage = requireCase(update.stage, `${PATH}.update.stage`);
   switch (stage.case) {
     case "waiting":
-      // THE ONE WORD for a merge waiting in line: the queue tab's stage column
-      // says it of every entry behind the front.
       return WAITING_STAGE;
     case "merging":
       return "merging";
