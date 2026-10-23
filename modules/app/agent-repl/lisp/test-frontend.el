@@ -320,10 +320,10 @@ test is the mount's own binding of the slot to its workspace."
       (should-error (agent-repl-frontend-webview-url "alpha")))))
 
 (ert-deftest agent-repl-test-frontend-host-at-home-accepts-the-host-page ()
-  "The host page on the daemon that owns the workspace is home."
+  "The host page where the host last loaded it is home."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+    (let ((agent-repl--webhost-url "http://host.localhost:7777/?host=1"))
       ;; Act / Assert
       (should (agent-repl--frontend-host-at-home-p "alpha" "http://host.localhost:7777/?host=1")))))
 
@@ -331,17 +331,34 @@ test is the mount's own binding of the slot to its workspace."
   "Home is the ORIGIN."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+    (let ((agent-repl--webhost-url "http://host.localhost:7777/?host=1"))
       ;; Act / Assert
       (should (agent-repl--frontend-host-at-home-p "alpha" "http://host.localhost:7777/elsewhere")))))
 
+(ert-deftest agent-repl-test-frontend-host-at-home-stays-home-after-a-handover ()
+  "A handover moves the workspace without reloading the host, so the host's origin stays home."
+  ;; Arrange: the workspace is on the successor now, the host where it loaded.
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7778"
+      (let ((agent-repl--webhost-url "http://host.localhost:7777/?host=1"))
+        ;; Act / Assert
+        (should (agent-repl--frontend-host-at-home-p "alpha" "http://host.localhost:7777/?host=1"))))))
+
 (ert-deftest agent-repl-test-frontend-host-at-home-refuses-another-daemons-port ()
-  "A host page served by a DIFFERENT daemon is astray."
+  "A host page on a port other than its last load's is astray."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
+    (let ((agent-repl--webhost-url "http://host.localhost:7777/?host=1"))
       ;; Act / Assert
       (should-not (agent-repl--frontend-host-at-home-p "alpha" "http://host.localhost:7778/?host=1")))))
+
+(ert-deftest agent-repl-test-frontend-host-at-home-refuses-a-host-never-loaded ()
+  "With no host load to measure against, nothing is home."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--webhost-url nil))
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-host-at-home-p "alpha" "http://host.localhost:7777/?host=1")))))
 
 (ert-deftest agent-repl-test-frontend-host-at-home-refuses-a-page-that-left-the-web ()
   "`about:blank' -- where an external hyperlink can strand a web view -- is not home."
@@ -378,7 +395,8 @@ EFFECTS collects what the rescue did: (:page WS) for a page reload and
          (progn
            (agent-repl--ws-put "ws1" :frontend-buffer slot)
            (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
-             (cl-letf (((symbol-function 'agent-repl-webhost-xwidget) (lambda () 'host-xwidget))
+             (cl-letf* ((agent-repl--webhost-url "http://host.localhost:7777/?host=1")
+                        ((symbol-function 'agent-repl-webhost-xwidget) (lambda () 'host-xwidget))
                        ((symbol-function 'agent-repl--frontend-webview-uri) (lambda (_xw) ,uri))
                        ((symbol-function 'agent-repl-webhost-reload-page)
                         (lambda (ws) (push (list :page ws) ,effects) "ws-1"))
