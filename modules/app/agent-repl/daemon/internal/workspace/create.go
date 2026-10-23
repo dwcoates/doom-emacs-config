@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -327,11 +328,21 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		"branch": branch, "worktree_dir": worktreeDir, "base_ref": materializeAt,
 	})
 	materializing := v.now()
-	if err := v.deps.Git.CreateWorktree(ctx, repoDir, branch, materializeAt, worktreeDir); err != nil {
-		global.Error(opCreate, "could not materialize the worktree", dlog.Context{
+	worktreeCtx, cancelWorktree := context.WithTimeout(ctx, v.worktreeBound)
+	err = v.deps.Git.CreateWorktree(worktreeCtx, repoDir, branch, materializeAt, worktreeDir)
+	overran := errors.Is(worktreeCtx.Err(), context.DeadlineExceeded)
+	cancelWorktree()
+	if err != nil {
+		fields := dlog.Context{
 			"branch": branch, "worktree_dir": worktreeDir, "cause": err.Error(),
 			"duration_ms": v.now().Sub(materializing).Milliseconds(),
-		})
+		}
+		if overran {
+			fields["bound_ms"] = v.worktreeBound.Milliseconds()
+			global.Error(opCreate, "the worktree step overran its bound; git was stopped and the create fails", fields)
+			return wsm.Workspace{}, fmt.Errorf("create %q: materialize %q: git ran past %s: %w", branch, worktreeDir, v.worktreeBound, err)
+		}
+		global.Error(opCreate, "could not materialize the worktree", fields)
 		return wsm.Workspace{}, fmt.Errorf("create %q: materialize %q: %w", branch, worktreeDir, err)
 	}
 	global.Info(opCreate, "materialized the worktree", dlog.Context{
@@ -1062,3 +1073,15 @@ func (v *verbs) resolveBase(ctx context.Context, log dlog.Logger, repoDir, baseR
 	}
 	return commit, nil
 }
+
+// DefaultWorktreeBound bounds a create's worktree step: the one `git worktree
+// add` that cuts the branch and checks it out.
+//
+// THE STEP RUNS THE REPOSITORY'S HOOKS, which are arbitrary commands, and a
+// hook that never returned once held four creates for good with nothing to end
+// them (2026-10-23). MEASURED from the editor's stage records over 102 creates,
+// 2026-10-20 to 2026-10-23: median 1.4s, p90 6.8s, p95 10.7s, and the two
+// slowest, 48.5s and 51.4s, were healthy checkouts of the explanation-engine
+// repository. Two minutes is just over twice the slowest healthy step. An
+// overrun stops git, is ERROR naming the bound, and fails the create.
+const DefaultWorktreeBound = 2 * time.Minute

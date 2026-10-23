@@ -1031,6 +1031,9 @@ type fakeGit struct {
 
 	created   []createdWorktree
 	createErr error
+	// createHangs makes CreateWorktree run until its context ends, as a git
+	// stuck behind a hook that never returns does.
+	createHangs bool
 	// fetched records each Fetch as "dir remote"; fetchErr fails every one.
 	fetched  []string
 	fetchErr error
@@ -1163,7 +1166,11 @@ func (g *fakeGit) Fetch(_ context.Context, dir, remote string) error {
 	return g.fetchErr
 }
 
-func (g *fakeGit) CreateWorktree(_ context.Context, repoDir, branch, baseRef, worktreeDir string) error {
+func (g *fakeGit) CreateWorktree(ctx context.Context, repoDir, branch, baseRef, worktreeDir string) error {
+	if g.createHangs {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	if g.createErr != nil {
 		return g.createErr
 	}

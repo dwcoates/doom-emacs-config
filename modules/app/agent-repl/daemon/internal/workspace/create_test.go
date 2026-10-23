@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -1952,5 +1953,54 @@ func TestAFailedWorktreeStepIsRecordedWithItsDurationAndNoEnd(t *testing.T) {
 	}
 	if _, ended := dlog.FindRecord(records, dlog.RecordQuery{Operation: opCreate, Message: "materialized the worktree"}); ended {
 		t.Fatalf("a failed worktree step recorded a successful end: %+v", records)
+	}
+}
+
+func TestAWorktreeStepPastItsBoundFailsTheCreate(t *testing.T) {
+	// Arrange: git never returns on its own.
+	f := newFixture(t)
+	f.git.createHangs = true
+	f.verbs.(*verbs).worktreeBound = time.Millisecond
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
+
+	// Assert: the create fails naming the bound, and nothing is registered.
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "git ran past 1ms") {
+		t.Fatalf("Create() error = %v, want the overrun naming the bound", err)
+	}
+	if len(f.db.registered) != 0 {
+		t.Fatalf("registered %d workspaces, want none after an overrun", len(f.db.registered))
+	}
+}
+
+func TestAWorktreeStepPastItsBoundIsRecordedWithTheBound(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.createHangs = true
+	f.verbs.(*verbs).worktreeBound = time.Millisecond
+
+	// Act.
+	_, _ = f.verbs.Create(context.Background(), standardSpec(t, f))
+
+	// Assert.
+	records := f.log.logger.Records()
+	record, ok := dlog.FindRecord(records, dlog.RecordQuery{Level: "error", Operation: opCreate,
+		Message: "the worktree step overran its bound; git was stopped and the create fails"})
+	if !ok || record.Context["bound_ms"] != int64(1) {
+		t.Fatalf("no overrun record carrying bound_ms in %+v", records)
+	}
+	if _, plain := dlog.FindRecord(records, dlog.RecordQuery{Operation: opCreate, Message: "could not materialize the worktree"}); plain {
+		t.Fatalf("an overrun was also recorded as an ordinary failure: %+v", records)
+	}
+}
+
+func TestTheWorktreeBoundDefaultsToTheMeasuredWindow(t *testing.T) {
+	// Arrange, Act.
+	f := newFixture(t)
+
+	// Assert.
+	if got := f.verbs.(*verbs).worktreeBound; got != DefaultWorktreeBound {
+		t.Fatalf("worktreeBound = %v, want DefaultWorktreeBound %v", got, DefaultWorktreeBound)
 	}
 }

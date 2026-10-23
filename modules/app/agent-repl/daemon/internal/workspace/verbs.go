@@ -67,6 +67,8 @@ type verbs struct {
 	// restartStopBound bounds the restart's forced end of the running turn;
 	// see DefaultRestartStopBound.
 	restartStopBound time.Duration
+	// worktreeBound bounds a create's worktree step; see DefaultWorktreeBound.
+	worktreeBound time.Duration
 
 	// selection serializes Select's selection section — the read of the
 	// current workspace through the roster push — so two concurrent selects

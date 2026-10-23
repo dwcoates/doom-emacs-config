@@ -696,6 +696,10 @@ type Deps struct {
 	// Zero means DefaultRestartStopBound, where the sizing is stated; it is a
 	// field so the overrun is exercised without waiting the real bound out.
 	RestartStopBound time.Duration
+	// WorktreeBound bounds a create's worktree step. Zero means
+	// DefaultWorktreeBound, where the sizing is stated; it is a field so the
+	// overrun is exercised without waiting the real bound out.
+	WorktreeBound time.Duration
 }
 
 // CacheLapses is the hidden workspaces' cache keeper (cachelapse.Keeper),
@@ -1042,7 +1046,11 @@ func New(deps Deps) (Verbs, error) {
 	if stopBound <= 0 {
 		stopBound = DefaultRestartStopBound
 	}
-	return &verbs{deps: deps, load: load, splice: splice, now: now, restartStopBound: stopBound}, nil
+	worktreeBound := deps.WorktreeBound
+	if worktreeBound <= 0 {
+		worktreeBound = DefaultWorktreeBound
+	}
+	return &verbs{deps: deps, load: load, splice: splice, now: now, restartStopBound: stopBound, worktreeBound: worktreeBound}, nil
 }
 
 // SelectionHistory says what a select does to the durable selection history
