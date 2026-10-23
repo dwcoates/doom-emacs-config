@@ -212,6 +212,17 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		})
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
+	case *conversationv1.SessionUpdate_SkillsChanged:
+		// THE VENDOR'S SKILL SET WENT STALE ON DISK: no view draws it, and the
+		// lifecycle sink asks for the shim's replacement at the next idle
+		// point, once the lock is let go.
+		paths := u.SkillsChanged.GetPaths()
+		w.log.Info("daemon.sessionwatcher.skills_changed", "the session's vendor skill set went stale on disk; its shim is owed a replacement", dlog.Context{
+			"arm":   sessionArm(update),
+			"paths": paths,
+		})
+		w.pendingSkillsChanged = append([]string{}, paths...)
+
 	default:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeSessionUpdateLocked", "branch": "default"})
 		w.log.Warn("daemon.sessionwatcher.session_update_unrouted", "a SessionUpdate arm has no route", dlog.Context{
@@ -308,6 +319,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "rollback_settled"
 	case *conversationv1.SessionUpdate_VendorErrorRetry:
 		return "vendor_error_retry"
+	case *conversationv1.SessionUpdate_SkillsChanged:
+		return "skills_changed"
 	default:
 		return "unset"
 	}

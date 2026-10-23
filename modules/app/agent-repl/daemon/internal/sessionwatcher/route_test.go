@@ -1106,6 +1106,65 @@ func TestNoOtherSessionUpdateTellsTheLifecycleSinkTheQueryDied(t *testing.T) {
 	}
 }
 
+func skillsChangedUpdate(paths ...string) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_SkillsChanged{
+		SkillsChanged: &conversationv1.SessionSkillsChanged{Paths: paths},
+	}}
+}
+
+// A STALE SKILL SET is told to the lifecycle sink alone, off the lock, with
+// the paths the shim named: no view draws it, and the sink asks for the shim's
+// replacement at the next idle point.
+func TestASkillsChangedUpdateIsToldToTheLifecycleSinkAlone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.routeNow(func(w *watcher) {
+		w.routeSessionUpdateLocked(skillsChangedUpdate("/c/skills/new", "/c/skills/old/SKILL.md"))
+	})
+
+	// Assert.
+	assertNames(t, got, []string{"lifecycle.OnSkillsChanged"})
+	if got[0].detail != "/c/skills/new,/c/skills/old/SKILL.md" {
+		t.Fatalf("paths told = %q, want the shim's two", got[0].detail)
+	}
+}
+
+func TestASkillsChangedUpdateIsRecordedAtInfoWithItsPaths(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(skillsChangedUpdate("/c/skills/new")) })
+
+	// Assert.
+	for _, r := range h.log.Records() {
+		if r.Operation == "daemon.sessionwatcher.skills_changed" && r.Level == "info" {
+			if paths, _ := r.Context["paths"].([]string); len(paths) == 1 && paths[0] == "/c/skills/new" {
+				return
+			}
+		}
+	}
+	t.Fatalf("no INFO skills_changed record naming the path: %+v", h.log.Records())
+}
+
+func TestNoOtherSessionUpdateTellsTheLifecycleSinkTheSkillsChanged(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(compactingUpdate()) })
+
+	// Assert.
+	if n := countName(names(got), "lifecycle.OnSkillsChanged"); n != 0 {
+		t.Fatalf("OnSkillsChanged told %d times for a compaction: %v", n, names(got))
+	}
+}
+
 // TestUnroutedSessionArmIsWarnedAbout covers an arm with no route: a frame the
 // daemon silently drops is a fact nobody ever draws.
 func TestACompactionsProgressIsRoutedWithNoWarning(t *testing.T) {

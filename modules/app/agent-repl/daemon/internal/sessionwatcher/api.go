@@ -416,6 +416,13 @@ type LifecycleSink interface {
 	// ends the death closed. An adopted shim whose query had already died
 	// re-announces the death, so a boot that adopts it is told too.
 	OnQueryDied(ws ids.WorkspaceID)
+	// OnSkillsChanged reports that the session's vendor's skill set went
+	// stale on disk (conversation.v1.SessionSkillsChanged), naming the paths
+	// whose change the shim saw. The vendor loads its skills once, at its
+	// start, so the session is owed a new vendor process. It is told off the
+	// lock, like OnTurnEnded, on every statement the watch receives -- the
+	// shim restates the level on every watch, so a new daemon is told too.
+	OnSkillsChanged(ws ids.WorkspaceID, paths []string)
 	// OnVendorSessionID reports the vendor session id in force as the shim
 	// stated it -- a rotation (a /clear), or a re-announced start on a new
 	// watch -- which is the id a later resume names and so the one the session

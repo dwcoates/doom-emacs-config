@@ -1069,6 +1069,10 @@ func (s *lifecycleSink) OnQueryDied(ids.WorkspaceID) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnQueryDied"})
 }
 
+func (s *lifecycleSink) OnSkillsChanged(_ ids.WorkspaceID, paths []string) {
+	s.rec.emit(event{sink: "lifecycle", method: "OnSkillsChanged", detail: strings.Join(paths, ",")})
+}
+
 func (s *lifecycleSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
 	held := live
 	s.rec.emit(event{sink: "lifecycle", method: "OnLiveWorkChanged", live: &held})

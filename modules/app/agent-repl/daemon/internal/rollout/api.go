@@ -46,11 +46,24 @@ import (
 // path; the reason is what the log and the hold record say.
 type RelaunchReason string
 
+// waitsBehindAMerge reports whether an unforced bounce for this reason waits
+// for a merge holding the workspace to release it, rather than ending the
+// merge's run: true for the replacements nothing is waiting on (a stale build,
+// a stale skill set), which owe the session only a fresher process.
+func (r RelaunchReason) waitsBehindAMerge() bool {
+	return r == ReasonBuildStale || r == ReasonSkillsChanged
+}
+
 // The bounce reasons.
 const (
 	// ReasonBuildStale is the build-staleness bounce: the shim reports a build
 	// that is not the installed bundle's.
 	ReasonBuildStale RelaunchReason = "build_stale"
+	// ReasonSkillsChanged is a session whose vendor's skill set went stale on
+	// disk (conversation.v1.SessionSkillsChanged): the vendor loads its skills
+	// once, at its start, so only a new process loads the current set.
+	// Unforced, like a stale build, it waits for the session's next idle point.
+	ReasonSkillsChanged RelaunchReason = "skills_changed"
 	// ReasonRestartVerb is an operator's RestartWorkspace.
 	ReasonRestartVerb RelaunchReason = "restart_verb"
 	// ReasonShimLogCeiling is dlog forcing a process roll after shim.log

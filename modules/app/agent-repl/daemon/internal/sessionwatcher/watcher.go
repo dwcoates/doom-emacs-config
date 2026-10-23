@@ -196,6 +196,10 @@ type watcher struct {
 	// to the lifecycle sink, which flushTurnEnds tells off the lock AFTER the
 	// turn ends the death closed.
 	pendingQueryDeath bool
+	// pendingSkillsChanged is a stale skill set routed under mu and not yet
+	// handed to the lifecycle sink, as the paths the shim named; nil when none
+	// is pending.
+	pendingSkillsChanged []string
 	// pendingVendorSessionID is the vendor session id in force, as the shim
 	// last stated it (a rotation, a re-announced start), not yet handed to the
 	// lifecycle sink, which records it as what a later resume names.
@@ -2342,9 +2346,11 @@ func (w *watcher) flushTurnEnds() {
 	w.pendingUnobserved = nil
 	died := w.pendingQueryDeath
 	w.pendingQueryDeath = false
+	skills := w.pendingSkillsChanged
+	w.pendingSkillsChanged = nil
 	vendorSessionID := w.pendingVendorSessionID
 	w.pendingVendorSessionID = ""
-	if len(adopted) > 0 || len(pending) > 0 || len(unobserved) > 0 || died || vendorSessionID != "" {
+	if len(adopted) > 0 || len(pending) > 0 || len(unobserved) > 0 || died || skills != nil || vendorSessionID != "" {
 		// THE DISPATCH IS JOINABLE. It is the one sink call this watcher makes
 		// off its own mutex, and the sinks it drives read the state client --
 		// so Close, which the daemon runs BEFORE closing that client, waits on
@@ -2378,6 +2384,9 @@ func (w *watcher) flushTurnEnds() {
 	// before anything is asked to restart the session they ran in.
 	if died {
 		w.sinks.Lifecycle.OnQueryDied(w.ws)
+	}
+	if skills != nil {
+		w.sinks.Lifecycle.OnSkillsChanged(w.ws, skills)
 	}
 }
 
