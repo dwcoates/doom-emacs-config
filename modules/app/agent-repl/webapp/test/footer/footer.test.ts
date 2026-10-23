@@ -12,6 +12,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { TICKING_ATTRIBUTE } from "../../src/feed/ticking.js";
 import { compactionProgress } from "../../src/footer/progress.js";
+import { TOOLTIP_DELAY_MS } from "../../src/tooltip.js";
 import {
   buildWatchFooterRequest,
   mountFooter,
@@ -247,6 +248,37 @@ describe("mountFooter: the standing stream", () => {
     h.tail.push(pushView(footerView()));
     await settle();
     expect(host.querySelectorAll(".footer-chip")).toHaveLength(0);
+  });
+
+  it("keeps a chip's hover tooltip across a push that redraws the chip", async () => {
+    // Arrange
+    const { host, h, footer } = mount();
+    await settle();
+    h.tail.push(pushView(withAgents()));
+    await settle();
+    host.querySelector('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(TOOLTIP_DELAY_MS);
+    // Act
+    h.tail.push(pushView(withAgents(2)));
+    await settle();
+    // Assert
+    const tips = [...document.body.querySelectorAll(".app-tooltip")].map((tip) => tip.textContent);
+    footer.dispose();
+    expect(tips).toEqual(["Background subagents"]);
+  });
+
+  it("removes a shown chip tooltip when the footer is disposed", async () => {
+    // Arrange
+    const { host, h, footer } = mount();
+    await settle();
+    h.tail.push(pushView(withAgents()));
+    await settle();
+    host.querySelector('[data-chip="agents"]')?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(TOOLTIP_DELAY_MS);
+    // Act
+    footer.dispose();
+    // Assert
+    expect(document.body.querySelector(".app-tooltip")).toBeNull();
   });
 
   it("draws no expanded section while nothing is selected", async () => {

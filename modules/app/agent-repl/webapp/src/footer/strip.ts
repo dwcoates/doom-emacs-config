@@ -32,6 +32,7 @@
  * off the shared ticker, and is never pushed.
  */
 import { armButtonRole } from "../control.js";
+import { armTooltip } from "../tooltip.js";
 import type {
   FooterChipAgents,
   FooterChipCrons,
@@ -702,7 +703,7 @@ export function drawFooterChipAgents(u: FooterChipAgents, deps: StripDeps): HTML
 }
 
 /**
- * A chip's waiting figure: " <glyph> N", titled with what the N rows wait
+ * A chip's waiting figure: " <glyph> N", tooltipped with what the N rows wait
  * for, and stamped `data-<name in kebab case>` with the count. The agents
  * chip's waiting-for-the-API figure and the merges chip's waiting-on-you
  * figure are both drawn by it.
@@ -711,7 +712,7 @@ export function chipWaiting(name: string, glyph: string, count: number, waitsFor
   const waiting = document.createElement("span");
   waiting.className = "footer-chip-waiting";
   waiting.setAttribute(`data-${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`, String(count));
-  waiting.title = `${count} ${waitsFor}`;
+  armTooltip(waiting, `chip:${name}`, `${count} ${waitsFor}`);
   waiting.appendChild(document.createTextNode(" "));
   waiting.appendChild(chipGlyph(name, glyph));
   waiting.appendChild(document.createTextNode(` ${count}`));
@@ -765,11 +766,25 @@ export function drawFooterChipCrons(u: FooterChipCrons, deps: StripDeps): HTMLEl
   return chip("crons", "◷", String(u.count), deps);
 }
 
-/** One chip: glyph, count, and the click that opens its panel. */
-function chip(panel: FooterPanel, glyph: string, count: string, deps: StripDeps): HTMLElement {
+/**
+ * What each chip is for, in a few words: its delayed hover tooltip (owner
+ * request, 2026-10-23).
+ */
+export const CHIP_TOOLTIPS: Readonly<Record<FooterChipPanel, string>> = {
+  agents: "Background subagents",
+  tasks: "Task progress",
+  shells: "Background shells",
+  monitors: "Background monitors",
+  crons: "Scheduled jobs",
+  merges: "Async merges",
+};
+
+/** One chip: glyph, count, tooltip, and the click that opens its panel. */
+function chip(panel: FooterChipPanel, glyph: string, count: string, deps: StripDeps): HTMLElement {
   const el = document.createElement("span");
   el.className = "footer-chip";
   el.setAttribute("data-chip", panel);
+  armTooltip(el, `chip:${panel}`, CHIP_TOOLTIPS[panel]);
   armButtonRole(el);
   if (deps.selection === panel) {
     el.setAttribute("data-selected", "true");

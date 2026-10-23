@@ -53,6 +53,7 @@ import { onClientVerdict, standingClientFailure } from "../rpc/link.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
+import { mountTooltips } from "../tooltip.js";
 import {
   createJumpNotices,
   drawFooterExpanded,
@@ -130,6 +131,9 @@ export function mountFooter(
   // WHAT THE STRIP DREW, stated on every change of it: the daemon's arm, or
   // the client's own verdict standing over it (see `drawn-status.ts`).
   const drawnStatus = createDrawnStatusLog("footer", "footer.drawn-status");
+  // The chips' hover tooltips are owned by the host, which outlives every
+  // redraw, so a strip redrawn under a resting pointer keeps its tooltip.
+  const tooltips = mountTooltips(host);
   // THE DOCK AND THE OPEN SECTION ARE KEPT ACROSS PUSHES, so the section's own
   // scroll box — the reader's — is never detached and never reset. Only their
   // children are redrawn.
@@ -198,6 +202,7 @@ export function mountFooter(
       publishCompactionProgress(null);
       // Every clock this component started hangs off the host's subtree.
       stopTicking(host);
+      tooltips.dispose();
       host.replaceChildren();
     },
   };
@@ -217,6 +222,12 @@ export function mountFooter(
    */
   function draw(): void {
     if (disposed) return;
+    drawView();
+    tooltips.refresh();
+  }
+
+  /** The body of `draw`: the strip, divider and panel for the last view. */
+  function drawView(): void {
     // Whatever the last draw scheduled belongs to the view it drew; this draw
     // schedules its own if it picks a live transient.
     expiry.cancel();
