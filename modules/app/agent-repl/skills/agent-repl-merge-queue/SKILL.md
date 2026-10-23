@@ -1,6 +1,6 @@
 ---
 name: agent-repl-merge-queue
-description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/deploy.yaml` says (for agent-repl: landed where its topology says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH no workspace owns (a subagent''s, or one cut by hand) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix). A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, moves a waiting merge up or down, pauses or resumes a queue, disables or enables racing, and subscribes this workspace to a queue''s changes. Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, or the queue paused, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
+description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/deploy.yaml` says (for agent-repl: landed where its topology says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH no workspace owns (a subagent''s, or one cut by hand) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, moves a waiting merge up or down, pauses or resumes a queue, disables or enables racing, and subscribes this workspace to a queue''s changes. Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, or the queue paused, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
 argument-hint: "here [front] [minor|patch <changelog-line>] | async <name> <branch> ... | status | dequeue | move-up | move-down | pause | resume | disable-racing | enable-racing | subscribe | unsubscribe"
 allowed-tools: Bash(~/.claude/skills/agent-repl-merge-queue/agent-repld:*)
 ---
@@ -136,6 +136,39 @@ Either kind:
   after it drains, to report a landing) instead of polling it;
   `merge-queue unsubscribe` ends it.
 - Holding or releasing a repository's deploys is `/agent-repl-runtime`'s.
+
+### Commandeering the running spot
+
+The user wants a merge to run BEFORE the one already running, not merely be
+next (owner ruling 2026-10-23). CRITICAL: do this only when the user asked for
+it; it discards the running merge's test progress.
+
+1. Put the commandeering merge at the front: a new request uses
+   `-placement front`; a waiting one is moved with `merge-queue move-up MERGE`
+   until it sits directly behind the running merge (`move-up` never passes the
+   running merge).
+2. `merge-queue status` and note the running merge's name and kind. Before
+   dequeuing it, record what re-requesting it needs: a workspace's own merge
+   (`kind: ownBranch`) needs its `-version-part` and `-changelog-line` from the
+   request in that workspace's conversation; an async merge needs its full
+   async-merge request.
+3. `merge-queue dequeue RUNNING`. The commandeering merge starts.
+4. Once `merge-queue status` shows the commandeering merge running, put the
+   displaced merge back at the FRONT so it runs right after:
+   - a workspace's own merge is re-requested only by that workspace (the
+     daemon refuses another workspace's `workspace finished WS` with
+     `requesterMayNotLand`): `workspace prompt WS TEXT` that workspace, saying
+     it was displaced by an owner instruction, nothing wrong with its branch,
+     and giving the exact command: `workspace finished here -placement front`
+     with its original `-version-part` and `-changelog-line`.
+   - an async merge is re-requested by its requester with `-placement front`
+     and the same arguments as before.
+5. Report which merge was displaced and that it was re-queued (or that its
+   workspace was prompted to).
+
+- **CRITICAL: between the dequeue (step 3) and the re-request (step 4), a
+  different front placement can slip ahead of the displaced merge.** Nothing
+  closes this gap short of a daemon verb that does all of it atomically.
 
 ## Notes
 
