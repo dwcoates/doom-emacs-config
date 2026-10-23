@@ -140,6 +140,14 @@ func (p *proxyStore) GetShellRunClaims(ctx context.Context, req *connect.Request
 	return connect.NewResponse(resp.Msg), nil
 }
 
+func (p *proxyStore) GetLiveShellRunsAnnouncedBefore(ctx context.Context, req *connect.Request[storev1.GetLiveShellRunsAnnouncedBeforeRequest]) (*connect.Response[storev1.GetLiveShellRunsAnnouncedBeforeResponse], error) {
+	resp, err := p.up.GetLiveShellRunsAnnouncedBefore(ctx, connect.NewRequest(req.Msg))
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp.Msg), nil
+}
+
 func (p *proxyStore) GetRunSettlements(ctx context.Context, req *connect.Request[storev1.GetRunSettlementsRequest]) (*connect.Response[storev1.GetRunSettlementsResponse], error) {
 	resp, err := p.up.GetRunSettlements(ctx, connect.NewRequest(req.Msg))
 	if err != nil {

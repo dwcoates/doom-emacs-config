@@ -90,6 +90,9 @@ type Store interface {
 	// RunSettlements answers which of the asked runs the record holds as
 	// ended; a run absent from the answer is not settled.
 	RunSettlements(ctx context.Context, runIDs []string) ([]db.SettledRun, error)
+	// LiveShellRunsAnnouncedBefore answers every live shell run whose
+	// announcement was written before the instant, oldest first.
+	LiveShellRunsAnnouncedBefore(ctx context.Context, beforeMs int64) ([]db.LiveShellRun, error)
 	Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorState, error)
 	ResidueShapes(ctx context.Context, kind *string, limit uint32, includeExample bool) ([]*storev1.ResidueShapeRow, error)
 	Close() error

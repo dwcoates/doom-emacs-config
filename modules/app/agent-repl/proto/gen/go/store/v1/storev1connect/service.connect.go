@@ -71,6 +71,9 @@ const (
 	// ShimStoreGetRunSettlementsProcedure is the fully-qualified name of the ShimStore's
 	// GetRunSettlements RPC.
 	ShimStoreGetRunSettlementsProcedure = "/store.v1.ShimStore/GetRunSettlements"
+	// ShimStoreGetLiveShellRunsAnnouncedBeforeProcedure is the fully-qualified name of the ShimStore's
+	// GetLiveShellRunsAnnouncedBefore RPC.
+	ShimStoreGetLiveShellRunsAnnouncedBeforeProcedure = "/store.v1.ShimStore/GetLiveShellRunsAnnouncedBefore"
 	// ShimStoreGetDetachedWorkProcedure is the fully-qualified name of the ShimStore's GetDetachedWork
 	// RPC.
 	ShimStoreGetDetachedWorkProcedure = "/store.v1.ShimStore/GetDetachedWork"
@@ -83,21 +86,22 @@ const (
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
 var (
-	shimStoreServiceDescriptor                    = v1.File_store_v1_service_proto.Services().ByName("ShimStore")
-	shimStoreOpenAgentSessionMethodDescriptor     = shimStoreServiceDescriptor.Methods().ByName("OpenAgentSession")
-	shimStoreWatchAgentSessionMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("WatchAgentSession")
-	shimStoreReadAgentPageMethodDescriptor        = shimStoreServiceDescriptor.Methods().ByName("ReadAgentPage")
-	shimStoreWatchBashRunMethodDescriptor         = shimStoreServiceDescriptor.Methods().ByName("WatchBashRun")
-	shimStoreGetWorkflowMethodDescriptor          = shimStoreServiceDescriptor.Methods().ByName("GetWorkflow")
-	shimStoreListResidueShapesMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("ListResidueShapes")
-	shimStoreGetSidecarCursorsMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("GetSidecarCursors")
-	shimStoreGetLiveWorkMethodDescriptor          = shimStoreServiceDescriptor.Methods().ByName("GetLiveWork")
-	shimStoreGetAgentByVendorTaskMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("GetAgentByVendorTask")
-	shimStoreGetShellRunClaimsMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("GetShellRunClaims")
-	shimStoreGetRunSettlementsMethodDescriptor    = shimStoreServiceDescriptor.Methods().ByName("GetRunSettlements")
-	shimStoreGetDetachedWorkMethodDescriptor      = shimStoreServiceDescriptor.Methods().ByName("GetDetachedWork")
-	shimStoreGetPeerDeliveryMethodDescriptor      = shimStoreServiceDescriptor.Methods().ByName("GetPeerDelivery")
-	shimStoreWriteBatchMethodDescriptor           = shimStoreServiceDescriptor.Methods().ByName("WriteBatch")
+	shimStoreServiceDescriptor                               = v1.File_store_v1_service_proto.Services().ByName("ShimStore")
+	shimStoreOpenAgentSessionMethodDescriptor                = shimStoreServiceDescriptor.Methods().ByName("OpenAgentSession")
+	shimStoreWatchAgentSessionMethodDescriptor               = shimStoreServiceDescriptor.Methods().ByName("WatchAgentSession")
+	shimStoreReadAgentPageMethodDescriptor                   = shimStoreServiceDescriptor.Methods().ByName("ReadAgentPage")
+	shimStoreWatchBashRunMethodDescriptor                    = shimStoreServiceDescriptor.Methods().ByName("WatchBashRun")
+	shimStoreGetWorkflowMethodDescriptor                     = shimStoreServiceDescriptor.Methods().ByName("GetWorkflow")
+	shimStoreListResidueShapesMethodDescriptor               = shimStoreServiceDescriptor.Methods().ByName("ListResidueShapes")
+	shimStoreGetSidecarCursorsMethodDescriptor               = shimStoreServiceDescriptor.Methods().ByName("GetSidecarCursors")
+	shimStoreGetLiveWorkMethodDescriptor                     = shimStoreServiceDescriptor.Methods().ByName("GetLiveWork")
+	shimStoreGetAgentByVendorTaskMethodDescriptor            = shimStoreServiceDescriptor.Methods().ByName("GetAgentByVendorTask")
+	shimStoreGetShellRunClaimsMethodDescriptor               = shimStoreServiceDescriptor.Methods().ByName("GetShellRunClaims")
+	shimStoreGetRunSettlementsMethodDescriptor               = shimStoreServiceDescriptor.Methods().ByName("GetRunSettlements")
+	shimStoreGetLiveShellRunsAnnouncedBeforeMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("GetLiveShellRunsAnnouncedBefore")
+	shimStoreGetDetachedWorkMethodDescriptor                 = shimStoreServiceDescriptor.Methods().ByName("GetDetachedWork")
+	shimStoreGetPeerDeliveryMethodDescriptor                 = shimStoreServiceDescriptor.Methods().ByName("GetPeerDelivery")
+	shimStoreWriteBatchMethodDescriptor                      = shimStoreServiceDescriptor.Methods().ByName("WriteBatch")
 )
 
 // ShimStoreClient is a client for the store.v1.ShimStore service.
@@ -144,6 +148,11 @@ type ShimStoreClient interface {
 	// a run's file, so a run that settled before this process started is never
 	// tracked again and never concluded LOST. Absent from the answer = not settled.
 	GetRunSettlements(context.Context, *connect.Request[v1.GetRunSettlementsRequest]) (*connect.Response[v1.GetRunSettlementsResponse], error)
+	// EVERY SHELL RUN FROM BEFORE AN INSTANT the record holds no terminal for,
+	// host-wide. The sidecar asks once per process with the machine's boot
+	// instant: a shell announced before the boot cannot still be running, and
+	// one no spool it reads accounts for is concluded LOST from the record.
+	GetLiveShellRunsAnnouncedBefore(context.Context, *connect.Request[v1.GetLiveShellRunsAnnouncedBeforeRequest]) (*connect.Response[v1.GetLiveShellRunsAnnouncedBeforeResponse], error)
 	// WHAT KIND of detached work one unit left as, and whether the record holds
 	// it as ENDED, by the spawning call's activity id. The shim asks before
 	// folding a task message whose kind it does not hold (a task_notification
@@ -235,6 +244,12 @@ func NewShimStoreClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(shimStoreGetRunSettlementsMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		getLiveShellRunsAnnouncedBefore: connect.NewClient[v1.GetLiveShellRunsAnnouncedBeforeRequest, v1.GetLiveShellRunsAnnouncedBeforeResponse](
+			httpClient,
+			baseURL+ShimStoreGetLiveShellRunsAnnouncedBeforeProcedure,
+			connect.WithSchema(shimStoreGetLiveShellRunsAnnouncedBeforeMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		getDetachedWork: connect.NewClient[v1.GetDetachedWorkRequest, v1.GetDetachedWorkResponse](
 			httpClient,
 			baseURL+ShimStoreGetDetachedWorkProcedure,
@@ -258,20 +273,21 @@ func NewShimStoreClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 
 // shimStoreClient implements ShimStoreClient.
 type shimStoreClient struct {
-	openAgentSession     *connect.Client[v1.OpenAgentSessionRequest, v1.OpenAgentSessionResponse]
-	watchAgentSession    *connect.Client[v1.WatchAgentSessionRequest, v1.WatchAgentSessionResponse]
-	readAgentPage        *connect.Client[v1.ReadAgentPageRequest, v1.ReadAgentPageResponse]
-	watchBashRun         *connect.Client[v1.WatchBashRunRequest, v1.WatchBashRunResponse]
-	getWorkflow          *connect.Client[v1.GetWorkflowRequest, v1.GetWorkflowResponse]
-	listResidueShapes    *connect.Client[v1.ListResidueShapesRequest, v1.ListResidueShapesResponse]
-	getSidecarCursors    *connect.Client[v1.GetSidecarCursorsRequest, v1.GetSidecarCursorsResponse]
-	getLiveWork          *connect.Client[v1.GetLiveWorkRequest, v1.GetLiveWorkResponse]
-	getAgentByVendorTask *connect.Client[v1.GetAgentByVendorTaskRequest, v1.GetAgentByVendorTaskResponse]
-	getShellRunClaims    *connect.Client[v1.GetShellRunClaimsRequest, v1.GetShellRunClaimsResponse]
-	getRunSettlements    *connect.Client[v1.GetRunSettlementsRequest, v1.GetRunSettlementsResponse]
-	getDetachedWork      *connect.Client[v1.GetDetachedWorkRequest, v1.GetDetachedWorkResponse]
-	getPeerDelivery      *connect.Client[v1.GetPeerDeliveryRequest, v1.GetPeerDeliveryResponse]
-	writeBatch           *connect.Client[v1.WriteBatchRequest, v1.WriteBatchResponse]
+	openAgentSession                *connect.Client[v1.OpenAgentSessionRequest, v1.OpenAgentSessionResponse]
+	watchAgentSession               *connect.Client[v1.WatchAgentSessionRequest, v1.WatchAgentSessionResponse]
+	readAgentPage                   *connect.Client[v1.ReadAgentPageRequest, v1.ReadAgentPageResponse]
+	watchBashRun                    *connect.Client[v1.WatchBashRunRequest, v1.WatchBashRunResponse]
+	getWorkflow                     *connect.Client[v1.GetWorkflowRequest, v1.GetWorkflowResponse]
+	listResidueShapes               *connect.Client[v1.ListResidueShapesRequest, v1.ListResidueShapesResponse]
+	getSidecarCursors               *connect.Client[v1.GetSidecarCursorsRequest, v1.GetSidecarCursorsResponse]
+	getLiveWork                     *connect.Client[v1.GetLiveWorkRequest, v1.GetLiveWorkResponse]
+	getAgentByVendorTask            *connect.Client[v1.GetAgentByVendorTaskRequest, v1.GetAgentByVendorTaskResponse]
+	getShellRunClaims               *connect.Client[v1.GetShellRunClaimsRequest, v1.GetShellRunClaimsResponse]
+	getRunSettlements               *connect.Client[v1.GetRunSettlementsRequest, v1.GetRunSettlementsResponse]
+	getLiveShellRunsAnnouncedBefore *connect.Client[v1.GetLiveShellRunsAnnouncedBeforeRequest, v1.GetLiveShellRunsAnnouncedBeforeResponse]
+	getDetachedWork                 *connect.Client[v1.GetDetachedWorkRequest, v1.GetDetachedWorkResponse]
+	getPeerDelivery                 *connect.Client[v1.GetPeerDeliveryRequest, v1.GetPeerDeliveryResponse]
+	writeBatch                      *connect.Client[v1.WriteBatchRequest, v1.WriteBatchResponse]
 }
 
 // OpenAgentSession calls store.v1.ShimStore.OpenAgentSession.
@@ -327,6 +343,11 @@ func (c *shimStoreClient) GetShellRunClaims(ctx context.Context, req *connect.Re
 // GetRunSettlements calls store.v1.ShimStore.GetRunSettlements.
 func (c *shimStoreClient) GetRunSettlements(ctx context.Context, req *connect.Request[v1.GetRunSettlementsRequest]) (*connect.Response[v1.GetRunSettlementsResponse], error) {
 	return c.getRunSettlements.CallUnary(ctx, req)
+}
+
+// GetLiveShellRunsAnnouncedBefore calls store.v1.ShimStore.GetLiveShellRunsAnnouncedBefore.
+func (c *shimStoreClient) GetLiveShellRunsAnnouncedBefore(ctx context.Context, req *connect.Request[v1.GetLiveShellRunsAnnouncedBeforeRequest]) (*connect.Response[v1.GetLiveShellRunsAnnouncedBeforeResponse], error) {
+	return c.getLiveShellRunsAnnouncedBefore.CallUnary(ctx, req)
 }
 
 // GetDetachedWork calls store.v1.ShimStore.GetDetachedWork.
@@ -388,6 +409,11 @@ type ShimStoreHandler interface {
 	// a run's file, so a run that settled before this process started is never
 	// tracked again and never concluded LOST. Absent from the answer = not settled.
 	GetRunSettlements(context.Context, *connect.Request[v1.GetRunSettlementsRequest]) (*connect.Response[v1.GetRunSettlementsResponse], error)
+	// EVERY SHELL RUN FROM BEFORE AN INSTANT the record holds no terminal for,
+	// host-wide. The sidecar asks once per process with the machine's boot
+	// instant: a shell announced before the boot cannot still be running, and
+	// one no spool it reads accounts for is concluded LOST from the record.
+	GetLiveShellRunsAnnouncedBefore(context.Context, *connect.Request[v1.GetLiveShellRunsAnnouncedBeforeRequest]) (*connect.Response[v1.GetLiveShellRunsAnnouncedBeforeResponse], error)
 	// WHAT KIND of detached work one unit left as, and whether the record holds
 	// it as ENDED, by the spawning call's activity id. The shim asks before
 	// folding a task message whose kind it does not hold (a task_notification
@@ -475,6 +501,12 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(shimStoreGetRunSettlementsMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimStoreGetLiveShellRunsAnnouncedBeforeHandler := connect.NewUnaryHandler(
+		ShimStoreGetLiveShellRunsAnnouncedBeforeProcedure,
+		svc.GetLiveShellRunsAnnouncedBefore,
+		connect.WithSchema(shimStoreGetLiveShellRunsAnnouncedBeforeMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	shimStoreGetDetachedWorkHandler := connect.NewUnaryHandler(
 		ShimStoreGetDetachedWorkProcedure,
 		svc.GetDetachedWork,
@@ -517,6 +549,8 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 			shimStoreGetShellRunClaimsHandler.ServeHTTP(w, r)
 		case ShimStoreGetRunSettlementsProcedure:
 			shimStoreGetRunSettlementsHandler.ServeHTTP(w, r)
+		case ShimStoreGetLiveShellRunsAnnouncedBeforeProcedure:
+			shimStoreGetLiveShellRunsAnnouncedBeforeHandler.ServeHTTP(w, r)
 		case ShimStoreGetDetachedWorkProcedure:
 			shimStoreGetDetachedWorkHandler.ServeHTTP(w, r)
 		case ShimStoreGetPeerDeliveryProcedure:
@@ -574,6 +608,10 @@ func (UnimplementedShimStoreHandler) GetShellRunClaims(context.Context, *connect
 
 func (UnimplementedShimStoreHandler) GetRunSettlements(context.Context, *connect.Request[v1.GetRunSettlementsRequest]) (*connect.Response[v1.GetRunSettlementsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetRunSettlements is not implemented"))
+}
+
+func (UnimplementedShimStoreHandler) GetLiveShellRunsAnnouncedBefore(context.Context, *connect.Request[v1.GetLiveShellRunsAnnouncedBeforeRequest]) (*connect.Response[v1.GetLiveShellRunsAnnouncedBeforeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetLiveShellRunsAnnouncedBefore is not implemented"))
 }
 
 func (UnimplementedShimStoreHandler) GetDetachedWork(context.Context, *connect.Request[v1.GetDetachedWorkRequest]) (*connect.Response[v1.GetDetachedWorkResponse], error) {

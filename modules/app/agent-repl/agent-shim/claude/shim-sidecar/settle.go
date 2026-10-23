@@ -44,7 +44,7 @@ func (s *sidecar) trackDetached(target discover.Target, now time.Time) {
 	if target.TaskID == "" || target.SessionID != "" {
 		return
 	}
-	s.releasePreBoot(target.TaskID)
+	s.releasePreBoot(target.TaskID, s.owners.activityFor(target.TaskID))
 	if s.tracker.Settled(target.Path) {
 		// The run settled earlier in this process and its watcher was rebuilt
 		// (a vanished file that came back, say). It is never tracked again.
