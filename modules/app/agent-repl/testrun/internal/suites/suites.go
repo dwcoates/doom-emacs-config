@@ -59,8 +59,12 @@ type Split struct {
 	// OverheadCap bounds history's per-process estimate when the suite can
 	// prove a tighter startup bound. Zero leaves the measured value unbounded.
 	OverheadCap float64
-	// Chunk builds the spec of one chunk from its items.
+	// Chunk builds the spec of one chunk from its items. The chunk's unit,
+	// width included, is the scheduler's (sched.Chunkable), so Chunk never
+	// sets it.
 	Chunk func(id string, items []string) run.Spec
+	// Slots is every chunk's width; zero is one slot.
+	Slots int
 }
 
 // Units is everything one suite contributes.

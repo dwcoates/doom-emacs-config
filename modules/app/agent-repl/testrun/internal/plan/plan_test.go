@@ -102,6 +102,25 @@ func TestBuildChunksASplitAndBuildsEachChunksSpec(t *testing.T) {
 	}
 }
 
+func TestBuildGivesEachChunkItsSplitsWidth(t *testing.T) {
+	// Arrange
+	sp := split("it", "a", "b")
+	sp.Slots = 2
+
+	// Act
+	p, err := Build(estimates{}, []suites.Units{{Splits: []suites.Split{sp}}}, 4)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range p.Specs {
+		if s.Width() != 2 {
+			t.Fatalf("%s is %d wide, want the split's 2", s.ID, s.Width())
+		}
+	}
+}
+
 func TestBuildCapsAProvenProcessOverhead(t *testing.T) {
 	// Arrange: history attributed a large queueing gap to startup, but this
 	// split's provider knows its already-built process starts within one second.

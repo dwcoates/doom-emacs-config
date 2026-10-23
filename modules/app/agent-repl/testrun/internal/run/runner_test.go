@@ -110,9 +110,69 @@ func (c *tickClock) Now() time.Time {
 	return c.t
 }
 
+// fakeCores is the host's core pool: free seats shared by every hold, a
+// hold blocking until enough are free.
+type fakeCores struct {
+	mu   sync.Mutex
+	cond *sync.Cond
+	free int
+	// holdErr fails a unit's hold; releaseErr fails every release.
+	holdErr    map[string]error
+	releaseErr error
+	held       int
+	peak       int
+	released   []string
+	// waiting, when set, receives a unit's ID when its hold must wait.
+	waiting chan string
+}
+
+func newCores(free int) *fakeCores {
+	c := &fakeCores{free: free}
+	c.cond = sync.NewCond(&c.mu)
+	return c
+}
+
+func (c *fakeCores) Hold(id string, width int) (func() error, error) {
+	if err := c.holdErr[id]; err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.free < width && c.waiting != nil {
+		c.waiting <- id
+	}
+	for c.free < width {
+		c.cond.Wait()
+	}
+	c.free -= width
+	c.held += width
+	c.peak = max(c.peak, c.held)
+	return func() error {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.free += width
+		c.held -= width
+		c.released = append(c.released, id)
+		c.cond.Broadcast()
+		return c.releaseErr
+	}, nil
+}
+
+// give frees n more of the host's seats, as another run's units exiting would.
+func (c *fakeCores) give(n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.free += n
+	c.cond.Broadcast()
+}
+
 func newRunner(slots int, e *fakeExec) (*Runner, *bytes.Buffer, *bytes.Buffer) {
+	return newRunnerOn(slots, newCores(1<<20), e)
+}
+
+func newRunnerOn(slots int, c *fakeCores, e *fakeExec) (*Runner, *bytes.Buffer, *bytes.Buffer) {
 	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
-	return &Runner{Slots: slots, Exec: e, Clock: &tickClock{}, Log: &Log{Out: out, Err: errOut}}, out, errOut
+	return &Runner{Slots: slots, Cores: c, Exec: e, Clock: &tickClock{}, Log: &Log{Out: out, Err: errOut}}, out, errOut
 }
 
 func spec(id, suite string, deps ...string) Spec {
@@ -596,5 +656,195 @@ func TestRunShowsWhatAUnitsDisplayKeeps(t *testing.T) {
 	// Assert
 	if !sawPassed || !strings.Contains(out.String(), "kept\n") || strings.Contains(out.String(), "noise") {
 		t.Fatalf("display was not applied (passed=%v):\n%s", sawPassed, out)
+	}
+}
+
+func TestRunNeverHoldsMoreThanTheHostsFreeCores(t *testing.T) {
+	// Arrange: four slots of its own, but other runs hold all but two of the
+	// host's core seats.
+	release := make(chan struct{})
+	scripts := map[string]script{}
+	var specs []Spec
+	for _, id := range []string{"a", "b", "c", "d"} {
+		scripts[id] = script{hold: release}
+		specs = append(specs, spec(id, "s"))
+	}
+	e := &fakeExec{scripts: scripts}
+	starts := make(chan string, len(specs))
+	e.onStart = func(id string) { starts <- id }
+	c := newCores(2)
+	c.waiting = make(chan string, 1)
+	r, _, _ := newRunnerOn(4, c, e)
+
+	// Act
+	result := make(chan error)
+	go func() {
+		_, _, err := r.Run(context.Background(), specs)
+		result <- err
+	}()
+	<-starts
+	<-starts
+	waiter := <-c.waiting
+	close(release)
+	err := <-result
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.peak != 2 || c.peak != 2 {
+		t.Fatalf("peak running = %d, peak seats = %d; want both 2, the host's free cores", e.peak, c.peak)
+	}
+	if waiter != "c" {
+		t.Fatalf("the unit that waited for host cores = %q, want c, the queue's next", waiter)
+	}
+	if len(e.started) != 4 || len(c.released) != 4 {
+		t.Fatalf("started %v, released %v; want all four started and given back", e.started, c.released)
+	}
+}
+
+func TestRunHoldsAWideUnitsWidthInHostCores(t *testing.T) {
+	// Arrange
+	wide := spec("w", "e2e-emacs")
+	wide.Slots = 2
+	e := &fakeExec{scripts: map[string]script{}}
+	c := newCores(2)
+	r, _, _ := newRunnerOn(2, c, e)
+
+	// Act
+	_, _, err := r.Run(context.Background(), []Spec{wide})
+
+	// Assert
+	if err != nil || c.peak != 2 {
+		t.Fatalf("Run = %v, peak seats = %d; want the wide unit holding 2", err, c.peak)
+	}
+}
+
+func TestRunStartsAUnitOnceAnotherRunGivesCoresBack(t *testing.T) {
+	// Arrange: the host's every seat is held by another run.
+	e := &fakeExec{scripts: map[string]script{}}
+	c := newCores(0)
+	c.waiting = make(chan string, 1)
+	r, _, _ := newRunnerOn(2, c, e)
+
+	// Act
+	result := make(chan error)
+	go func() {
+		_, _, err := r.Run(context.Background(), []Spec{spec("a", "s")})
+		result <- err
+	}()
+	<-c.waiting
+	e.mu.Lock()
+	startedWhileHeld := len(e.started)
+	e.mu.Unlock()
+	c.give(1)
+	err := <-result
+
+	// Assert
+	if startedWhileHeld != 0 {
+		t.Fatal("a unit started while the host's cores were all held")
+	}
+	if err != nil || len(e.started) != 1 {
+		t.Fatalf("Run = %v, started %v; want a started once a seat was given back", err, e.started)
+	}
+}
+
+func TestRunFailsAUnitThatCannotHoldItsHostCores(t *testing.T) {
+	// Arrange
+	e := &fakeExec{scripts: map[string]script{}}
+	c := newCores(4)
+	c.holdErr = map[string]error{"a": errors.New("seats directory is gone")}
+	r, _, errOut := newRunnerOn(2, c, e)
+
+	// Act
+	results, suites, err := r.Run(context.Background(), []Spec{spec("a", "s"), spec("b", "t")})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := suiteByName(suites, "s"); got.Outcome != Failed {
+		t.Fatalf("suite s = %v, want Failed", got.Outcome)
+	}
+	if got := suiteByName(suites, "t"); got.Outcome != Passed {
+		t.Fatalf("suite t = %v, want Passed: one unit's hold must not stop the rest", got.Outcome)
+	}
+	if !strings.Contains(errOut.String(), "unit a (s) could not start: seats directory is gone") {
+		t.Fatalf("stderr = %q, want the hold's failure", errOut.String())
+	}
+	for _, res := range results {
+		if res.Spec.ID == "a" && res.Exit != -1 {
+			t.Fatalf("unit a exit = %d, want -1", res.Exit)
+		}
+	}
+	if len(e.started) != 1 || e.started[0] != "b" {
+		t.Fatalf("started %v, want only b", e.started)
+	}
+}
+
+func TestRunLogsAFailedCoreRelease(t *testing.T) {
+	// Arrange
+	e := &fakeExec{scripts: map[string]script{}}
+	c := newCores(1)
+	c.releaseErr = errors.New("close: bad file descriptor")
+	r, _, errOut := newRunnerOn(1, c, e)
+
+	// Act
+	_, suites, err := r.Run(context.Background(), []Spec{spec("a", "s")})
+
+	// Assert
+	if err != nil || suiteByName(suites, "s").Outcome != Passed {
+		t.Fatalf("Run = %v; want the unit's own verdict to stand", err)
+	}
+	if !strings.Contains(errOut.String(), "unit a gave back its host cores, but closing a seat failed: close: bad file descriptor") {
+		t.Fatalf("stderr = %q, want the release's failure", errOut.String())
+	}
+}
+
+func TestRunCancelledWhileAUnitWaitsForHostCores(t *testing.T) {
+	// Arrange: a runs; b waits for the host's only other seat, held elsewhere.
+	hold := make(chan struct{})
+	e := &fakeExec{scripts: map[string]script{"a": {hold: hold}}}
+	starts := make(chan string, 1)
+	e.onStart = func(id string) { starts <- id }
+	c := newCores(1)
+	c.waiting = make(chan string, 1)
+	r, _, _ := newRunnerOn(2, c, e)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act
+	result := make(chan error)
+	go func() {
+		_, _, err := r.Run(ctx, []Spec{spec("a", "s"), spec("b", "s")})
+		result <- err
+	}()
+	<-starts
+	<-c.waiting
+	cancel()
+	err := <-result
+
+	// Assert
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context.Canceled", err)
+	}
+	if len(e.started) != 1 || len(e.killed) != 1 {
+		t.Fatalf("started %v, killed %v; want only a, killed", e.started, e.killed)
+	}
+	if len(c.released) != 1 || c.released[0] != "a" {
+		t.Fatalf("released %v, want a's seat given back", c.released)
+	}
+}
+
+func TestRunRefusesARunWithoutAHostCorePool(t *testing.T) {
+	// Arrange
+	r, _, _ := newRunner(1, &fakeExec{})
+	r.Cores = nil
+
+	// Act
+	_, _, err := r.Run(context.Background(), []Spec{spec("a", "s")})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "no host core pool") {
+		t.Fatalf("Run = %v, want the missing pool refused", err)
 	}
 }

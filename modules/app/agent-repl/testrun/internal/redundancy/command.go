@@ -1,6 +1,7 @@
 package redundancy
 
 import (
+	"agentrepl/testrun/internal/cores"
 	"flag"
 	"fmt"
 	"os"
@@ -16,7 +17,7 @@ import (
 
 // EnvBackground is the marker bin/background.sh exports; a measurement is
 // the heaviest test load there is and never runs at normal priority.
-const EnvBackground = "AGENT_REPL_BACKGROUND_PRIORITY"
+const EnvBackground = cores.EnvBackground
 
 // DefaultOverhead is the fixed weight each kept case adds to its runtime,
 // so that among sets of equal runtime the smaller one wins.

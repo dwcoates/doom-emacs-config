@@ -26,7 +26,12 @@ type Chunkable struct {
 	Items    []Item
 	Overhead float64
 	Deps     []string
+	// Slots is every chunk's width, as Unit.Slots: zero is one slot.
+	Slots int
 }
+
+// Width is how many slots each of the group's chunks holds.
+func (c Chunkable) Width() int { return max(c.Slots, 1) }
 
 // Plan is the schedule's input after chunking: every unit, with group aliases
 // expanded to the concrete chunk IDs.
@@ -98,6 +103,12 @@ func PlanRun(atomic []Unit, chunkables []Chunkable, n int) (Plan, error) {
 	for _, c := range chunkables {
 		if len(c.Items) == 0 {
 			return Plan{}, fmt.Errorf("sched: splittable group %q has no items", c.Group)
+		}
+		if c.Slots < 0 {
+			return Plan{}, fmt.Errorf("sched: splittable group %q has a negative width %d", c.Group, c.Slots)
+		}
+		if c.Width() > n {
+			return Plan{}, fmt.Errorf("sched: splittable group %q's chunks need %d core slots but this host has only %d", c.Group, c.Width(), n)
 		}
 	}
 	prepared := append([]Chunkable(nil), chunkables...)
@@ -187,10 +198,11 @@ func candidateSizes(chunkables []Chunkable, slots int) []float64 {
 		for _, it := range c.Items {
 			total += it.Est
 		}
-		// More chunks than slots cannot increase this group's concurrency; it
-		// only adds process overhead and candidate simulations. Other suites
-		// still sequence independently through those same slots.
-		for k := 1; k <= min(len(c.Items), slots); k++ {
+		// More chunks than fit in the slots at once cannot increase this
+		// group's concurrency; it only adds process overhead and candidate
+		// simulations. Other suites still sequence independently through
+		// those same slots.
+		for k := 1; k <= min(len(c.Items), slots/c.Width()); k++ {
 			sizes = append(sizes, total/float64(k))
 		}
 	}
@@ -211,7 +223,7 @@ func chunkCounts(chunkables []Chunkable, size float64, slots int) []int {
 		if !math.IsInf(size, 1) && size > 0 {
 			k = int(math.Ceil(total/size - 1e-9))
 		}
-		k = max(1, min(k, len(c.Items), slots))
+		k = max(1, min(k, len(c.Items), slots/c.Width()))
 		counts[i] = k
 	}
 	return counts
@@ -257,7 +269,7 @@ func build(atomic []Unit, chunkables []Chunkable, counts []int) (Plan, error) {
 			for _, it := range chunk {
 				est += it.Est
 			}
-			p.Units = append(p.Units, Unit{ID: ChunkID(c.Group, j), Suite: c.Suite, Deps: expand(c.Deps), Est: est})
+			p.Units = append(p.Units, Unit{ID: ChunkID(c.Group, j), Suite: c.Suite, Deps: expand(c.Deps), Est: est, Slots: c.Slots})
 		}
 	}
 	return p, nil

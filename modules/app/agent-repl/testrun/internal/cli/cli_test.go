@@ -72,39 +72,11 @@ func TestSelects(t *testing.T) {
 	}
 }
 
-func TestSlotsForHost(t *testing.T) {
-	for cpus, want := range map[int]int{16: 13, 15: 12, 4: 1, 3: 0, 1: -2} {
-		if got := SlotsForHost(cpus); got != want {
-			t.Errorf("SlotsForHost(%d) = %d, want %d", cpus, got, want)
-		}
-	}
-}
+// freeCores is a host core pool that is never short: the cli's tests are
+// about the run, and the pool's own waits are run.Runner's and cores.Host's.
+type freeCores struct{}
 
-func TestSlotsIsEveryCoreButTheReserve(t *testing.T) {
-	// Act
-	got, err := Slots(16)
-
-	// Assert
-	if err != nil || got != 13 {
-		t.Fatalf("Slots(16) = %d, %v; want 13", got, err)
-	}
-}
-
-func TestSlotsRefusesAHostTooSmallToLeaveTheReserve(t *testing.T) {
-	// Arrange: a host with exactly the reserve and nothing for the run.
-	cpus := HostReserve
-
-	// Act
-	got, err := Slots(cpus)
-
-	// Assert
-	if err == nil {
-		t.Fatalf("Slots(%d) = %d, want an error", cpus, got)
-	}
-	if !strings.Contains(err.Error(), "reserves 3 for the live runtime") {
-		t.Fatalf("error = %v, want it to name the reserve", err)
-	}
-}
+func (freeCores) Hold(string, int) (func() error, error) { return func() error { return nil }, nil }
 
 func csvFile(t *testing.T, rows ...string) string {
 	t.Helper()
@@ -483,6 +455,7 @@ func newHarness(t *testing.T, exits map[string]int, buildErr map[string]error) h
 		Exec:        e,
 		Clock:       &tick{},
 		Slots:       4,
+		Cores:       freeCores{},
 		HistoryPath: filepath.Join(root, "history.json"),
 		Build: func(_ suites.Layout, s roster.Suite) (suites.Units, error) {
 			if err := buildErr[s.Name]; err != nil {

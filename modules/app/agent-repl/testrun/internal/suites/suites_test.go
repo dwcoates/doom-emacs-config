@@ -547,9 +547,10 @@ func TestGoPkgUnits(t *testing.T) {
 	tests := []struct {
 		name      string
 		covDir    bool
-		parallel  int
+		parallel  roster.Parallel
 		wantBuild []string
 		wantChunk []string
+		wantSlots int
 	}{
 		{
 			name:      "a covered package compiles instrumented and writes counters",
@@ -563,8 +564,9 @@ func TestGoPkgUnits(t *testing.T) {
 			wantChunk: []string{"BIN", "-test.count=1", "-test.v", "-test.parallel=1", "-test.timeout=10m", "-test.run=^(TestA)$"},
 		},
 		{
-			name:      "a wait-bound package overlaps its tests in a chunk",
-			parallel:  4,
+			name:      "a wait-bound package overlaps its tests in a chunk at its width",
+			parallel:  roster.Parallel{Tests: 4, Slots: 2},
+			wantSlots: 2,
 			wantBuild: []string{"go", "test", "-c", "-o", "BIN", "./p"},
 			wantChunk: []string{"BIN", "-test.count=1", "-test.v", "-test.parallel=4", "-test.timeout=10m", "-test.run=^(TestA)$"},
 		},
@@ -607,6 +609,9 @@ func TestGoPkgUnits(t *testing.T) {
 			chunk := split.Chunk("m:p#00", []string{"TestA"})
 			if !reflect.DeepEqual(subst(chunk.Argv), tt.wantChunk) || chunk.Dir != filepath.Join(module, "p") {
 				t.Fatalf("chunk = %v in %s, want %v in the package dir", subst(chunk.Argv), chunk.Dir, tt.wantChunk)
+			}
+			if split.Slots != tt.wantSlots {
+				t.Fatalf("the split's chunks hold %d slots, want %d", split.Slots, tt.wantSlots)
 			}
 			if tt.covDir {
 				if info, err := os.Stat(cov); err != nil || !info.IsDir() {

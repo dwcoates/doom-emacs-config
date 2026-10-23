@@ -22,11 +22,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"agentrepl/testrun/internal/cli"
+	"agentrepl/testrun/internal/cores"
 	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/gitinfo"
 	"agentrepl/testrun/internal/history"
@@ -284,11 +286,30 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		log.Errorf("create the run's scratch directory: %v", err)
 		return 1
 	}
-	slots, err := cli.Slots(runtime.NumCPU())
+	// THE HOST'S CORE BUDGET (package cores): this run and every other on
+	// the host hold their units' cores from one pool of seats, and the run
+	// plans on the whole budget. A run nested inside another's unit is
+	// refused before it could wait on its own ancestor's seats, and every
+	// unit this run starts is marked so a run inside it is refused in turn.
+	if err := cores.Check(os.Getenv); err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	slots, err := cores.Budget(runtime.NumCPU())
 	if err != nil {
 		log.Errorf("size the run: %v", err)
 		return 1
 	}
+	rank, err := cores.Rank(os.Getenv)
+	if err != nil {
+		log.Errorf("rank the run for the host's cores: %v", err)
+		return 1
+	}
+	if err := os.Setenv(cores.NestedEnv, strconv.Itoa(os.Getpid())); err != nil {
+		log.Errorf("mark the run's units as holding core seats (%s): %v", cores.NestedEnv, err)
+		return 1
+	}
+	log.Infof("core budget: %d of the host's %d cores (%d%%), shared by every test run on the host through %s; this run ranks %d", slots, runtime.NumCPU(), cores.Share, cores.DefaultDir, rank)
 	reuseDeps, err := reuse.HostDeps(args.Module, self, work, log)
 	if err != nil {
 		log.Errorf("%v", err)
@@ -302,6 +323,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		Exec:              run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root, Prefix: prefix},
 		Clock:             run.WallClock{},
 		Slots:             slots,
+		Cores:             cores.NewHost(cores.DefaultDir, slots, rank, log),
 		HistoryPath:       histPath,
 		Build:             suites.Build,
 		Git:               gitinfo.Head,
