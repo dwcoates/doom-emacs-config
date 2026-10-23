@@ -3391,7 +3391,7 @@ mounts an awaited view for, and `infos' every INFO line."
                  ((symbol-function 'agent-repl--panels-mount-awaited-view)
                   (lambda (ws) (push ws mounted)))
                  ((symbol-function 'agent-repl--info)
-                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                  (agent-repl-test--record-into infos)))
          ,@body))))
 
 (ert-deftest agent-repl-test-panels-a-switch-to-a-withheld-workspace-mounts-its-page ()

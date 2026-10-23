@@ -997,7 +997,7 @@ describe("adoptAtBoot", () => {
 
   it("records a move at info, naming the successor's address", async () => {
     // ARRANGE
-    const h = captureLogger();
+    const h = captureLogRecords();
     const { client } = lifecycleClient({
       adopt: () => refusal({ case: "transferringAway", value: { address: "127.0.0.1:2" } }),
     });
@@ -1007,7 +1007,7 @@ describe("adoptAtBoot", () => {
     await adoptAtBoot(ctx);
 
     // ASSERT
-    const record = forwardedRecord(await forwarded(h), "lifecycle.adopt-moved");
+    const record = recordFor(await forwardedRecords(h), "lifecycle.adopt-moved");
     expect(record.level.case).toBe("info");
     expect(record.context).toMatchObject({ address: "127.0.0.1:2" });
   });

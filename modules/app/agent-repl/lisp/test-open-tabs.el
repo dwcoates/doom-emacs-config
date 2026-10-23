@@ -800,7 +800,7 @@ leaves the tab open."
   (agent-repl-test-open-tabs--with
     (let (infos)
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Arrange
         (agent-repl-test-open-tabs--selected-before "b")
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
@@ -815,7 +815,7 @@ leaves the tab open."
   (agent-repl-test-open-tabs--with
     (let (infos)
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Arrange
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
         ;; Act

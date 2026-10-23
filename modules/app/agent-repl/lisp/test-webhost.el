@@ -790,7 +790,7 @@ The current tab's page, not shown here, is the nearest of all."
       (agent-repl-test-wh--with-order '("alpha") nil
         (cl-letf (((symbol-function 'agent-repl-host-adopting-p) (lambda (_ws) t))
                   ((symbol-function 'agent-repl--info)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                   (agent-repl-test--record-into logged)))
           ;; Act
           (agent-repl-test-wh--load "load-committed")))
       ;; Assert
