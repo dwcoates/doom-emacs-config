@@ -242,6 +242,13 @@ projects it for an answer by number: `(:row FEEDID :kind (:arm
 such card stands, and before the first push."
   (plist-get (agent-repl-host-state ws) :ask))
 
+(defun agent-repl-host-unanswered-entries (ws)
+  "Return the labels of WS's composer entries that answer nothing, or nil.
+As the daemon read the entries the composer last reported
+\(`HostComposerEntries'), in the composer's order.  Nil before the first
+push and whenever every reported label targets a response."
+  (plist-get (plist-get (agent-repl-host-state ws) :composer-entries) :unanswered))
+
 (defun agent-repl-host-backfill (ws)
   "Return WS's backfill arm keyword, or nil.
 One of `:none', `:pending', `:done', `:failed'.  Nil when there is no

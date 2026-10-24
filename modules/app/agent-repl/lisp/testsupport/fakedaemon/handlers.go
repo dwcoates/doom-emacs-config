@@ -25,6 +25,14 @@ func (s *fakeServer) SelectFeedRow(ctx context.Context, req *connect.Request[v1.
 	return handleUnary[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse](ctx, s, "SelectFeedRow", req.Msg)
 }
 
+func (s *fakeServer) ReportComposerEntries(ctx context.Context, req *connect.Request[v1.ReportComposerEntriesRequest]) (*connect.Response[v1.ReportComposerEntriesResponse], error) {
+	return handleUnary[v1.ReportComposerEntriesRequest, v1.ReportComposerEntriesResponse](ctx, s, "ReportComposerEntries", req.Msg)
+}
+
+func (s *fakeServer) FindEntryNeighbor(ctx context.Context, req *connect.Request[v1.FindEntryNeighborRequest]) (*connect.Response[v1.FindEntryNeighborResponse], error) {
+	return handleUnary[v1.FindEntryNeighborRequest, v1.FindEntryNeighborResponse](ctx, s, "FindEntryNeighbor", req.Msg)
+}
+
 func (s *fakeServer) OpenFeedImage(ctx context.Context, req *connect.Request[v1.OpenFeedImageRequest]) (*connect.Response[v1.OpenFeedImageResponse], error) {
 	return handleUnary[v1.OpenFeedImageRequest, v1.OpenFeedImageResponse](ctx, s, "OpenFeedImage", req.Msg)
 }

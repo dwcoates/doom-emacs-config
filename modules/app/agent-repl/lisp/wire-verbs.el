@@ -4668,6 +4668,92 @@ Beside the four handover arms, `:unservable' (V (:detail STRING)) and
    (agent-repl-wire-verbs--empty-arm "OpenFeedImageSuccess")
    #'agent-repl-wire-decode-open-feed-image-error))
 
+;;;; ---- ReportComposerEntries ------------------------------------------
+;;
+;; The composer's entry labels and the one point is on.  The daemon answers
+;; with state on the feed and host watches, never in the success.  See
+;; endpoint_report_composer_entries.proto.
+
+(defun agent-repl-wire-encode-report-composer-entries-request (request)
+  "Encode ReportComposerEntriesRequest from plist REQUEST.
+\(:workspace REF :labels LABELS :at-point AT): LABELS the composer's entry
+labels in order, AT which entry point is on, (:arm :entry :value (:label
+L)) or (:arm :none).  REF and AT are required."
+  (let ((message "ReportComposerEntriesRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-workspace-ref
+                 (agent-repl-wire-verbs--require message "workspace" (plist-get request :workspace))))
+          (cons 'labels (vconcat (plist-get request :labels)))
+          (cons 'atPoint
+                (list (agent-repl-wire-verbs--encode-oneof
+                       "ComposerEntryAtPoint" "at"
+                       (agent-repl-wire-verbs--require message "at_point" (plist-get request :at-point))
+                       (list (list :none 'none #'ignore)
+                             (list :entry 'entry
+                                   (lambda (v)
+                                     (list (cons 'label (agent-repl-wire-verbs--require-string
+                                                         "ComposerEntryAtPointEntry" "label"
+                                                         (plist-get v :label)))))))))))))
+
+(defun agent-repl-wire-decode-report-composer-entries-response (json)
+  "Decode ReportComposerEntriesResponse from JSON into (:arm ARM :value V).
+The success is empty; the error is one of the four handover arms."
+  (agent-repl-wire-verbs--decode-result
+   "ReportComposerEntriesResponse" json
+   (agent-repl-wire-verbs--empty-arm "ReportComposerEntriesSuccess")
+   (lambda (v)
+     (agent-repl-wire-verbs--check-keys
+      "ReportComposerEntriesError" v '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+     (list :cause (agent-repl-wire-verbs--decode-oneof
+                   "ReportComposerEntriesError" "cause" v
+                   (agent-repl-wire-verbs--handover-arms "ReportComposerEntries"))))))
+
+;;;; ---- FindEntryNeighbor ----------------------------------------------
+;;
+;; The label a line opened beside an entry line answers.  See
+;; endpoint_find_entry_neighbor.proto.
+
+(defun agent-repl-wire-encode-find-entry-neighbor-request (request)
+  "Encode FindEntryNeighborRequest from plist REQUEST.
+\(:workspace REF :label LABEL :direction DIRECTION): DIRECTION (:arm :next)
+for the node below (`o') or (:arm :previous) for the node above (`O').
+All three are required."
+  (let ((message "FindEntryNeighborRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-workspace-ref
+                 (agent-repl-wire-verbs--require message "workspace" (plist-get request :workspace))))
+          (cons 'label (agent-repl-wire-verbs--require-string message "label" (plist-get request :label)))
+          (cons 'direction
+                (list (agent-repl-wire-verbs--encode-oneof
+                       "EntryNeighborDirection" "way"
+                       (agent-repl-wire-verbs--require message "direction" (plist-get request :direction))
+                       (list (list :next 'next #'ignore)
+                             (list :previous 'previous #'ignore))))))))
+
+(defun agent-repl-wire-decode-find-entry-neighbor-response (json)
+  "Decode FindEntryNeighborResponse from JSON into (:arm ARM :value V).
+The success is (:neighbor (:arm :found :value (:label L)) or (:arm :none
+:value nil)); the error one of the four handover arms."
+  (agent-repl-wire-verbs--decode-result
+   "FindEntryNeighborResponse" json
+   (lambda (v)
+     (agent-repl-wire-verbs--check-keys "FindEntryNeighborSuccess" v '(found none))
+     (list :neighbor
+           (agent-repl-wire-verbs--decode-oneof
+            "FindEntryNeighborSuccess" "neighbor" v
+            (list (list 'found :found
+                        (lambda (found)
+                          (agent-repl-wire-verbs--check-keys "FindEntryNeighborFound" found '(label))
+                          (list :label (agent-repl-wire-verbs--decode-required-string
+                                        "FindEntryNeighborFound" 'label found))))
+                  (list 'none :none (agent-repl-wire-verbs--empty-arm "FindEntryNeighborNone"))))))
+   (lambda (v)
+     (agent-repl-wire-verbs--check-keys
+      "FindEntryNeighborError" v '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+     (list :cause (agent-repl-wire-verbs--decode-oneof
+                   "FindEntryNeighborError" "cause" v
+                   (agent-repl-wire-verbs--handover-arms "FindEntryNeighbor"))))))
+
 ;;;; ---- Rollback: the shared token ------------------------------------
 ;;
 ;; See rollback.proto.  The token is OPAQUE: decoded from a PlanRollback

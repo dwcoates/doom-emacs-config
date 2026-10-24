@@ -223,13 +223,23 @@ first, `errors' and `infos' to the formatted records."
 (defconst agent-repl-test-prompt-entries--headings
   '(("heading" 1 10 ("label" 1 4) ("separator" 4 7))
     ("heading" 11 22 ("label" 11 12) ("marker" 13 14))
-    ("heading" 23 32 ("label" 23 26)))
-  "An entry with a separator, a pasted root with a marker, an entry without a separator.")
+    ("heading" 21 30 ("label" 21 24)))
+  "An entry with a separator, a pasted root with a marker, an entry without a separator.
+They stand over the fake tree's text: `1.1 - yes', `1 🔧 Fixed', `2.1 - no'.")
 
-(ert-deftest agent-repl-test-prompt-entries-label-spans-are-the-entries-alone ()
-  "Each entry's label and separator is a span, a root with a marker none."
+(ert-deftest agent-repl-test-prompt-entries-entries-are-the-headings-without-a-marker ()
+  "Each entry is its label and the span of its label and separator; a root with a marker is none."
   (agent-repl-test-prompt-entries--with-tree agent-repl-test-prompt-entries--headings
-    (should (equal (agent-repl-prompt-entries--label-spans) '((1 . 7) (23 . 26))))))
+    (should (equal (agent-repl-prompt-entries--entries) '(("1.1" 1 7) ("2.1" 21 24))))))
+
+(ert-deftest agent-repl-test-prompt-entries-entry-at-point-is-the-entry-on-points-line ()
+  "Point anywhere on an entry's line names that entry; elsewhere none."
+  (agent-repl-test-prompt-entries--with-tree agent-repl-test-prompt-entries--headings
+    (let ((entries (agent-repl-prompt-entries--entries)))
+      (should (equal (list (progn (goto-char 8) (agent-repl-prompt-entries--entry-at-point entries))
+                           (progn (goto-char 15) (agent-repl-prompt-entries--entry-at-point entries))
+                           (progn (goto-char 28) (agent-repl-prompt-entries--entry-at-point entries)))
+                     '("1.1" nil "2.1"))))))
 
 (ert-deftest agent-repl-test-prompt-entries-mark-draws-each-span-in-the-label-face ()
   "Marking lays one overlay in the label face over each entry's span."
@@ -242,7 +252,7 @@ first, `errors' and `infos' to the formatted records."
                                  (cl-remove-if-not (lambda (ov) (overlay-get ov 'agent-repl-prompt-entry))
                                                    (overlays-in (point-min) (point-max))))
                          (lambda (a b) (< (car a) (car b))))
-                   '((1 7 agent-repl-prompt-entry-label) (23 26 agent-repl-prompt-entry-label))))))
+                   '((1 7 agent-repl-prompt-entry-label) (21 24 agent-repl-prompt-entry-label))))))
 
 (ert-deftest agent-repl-test-prompt-entries-mark-restates-rather-than-piles-up ()
   "Marking again replaces the overlays: an entry that stopped being one loses its mark."
@@ -258,6 +268,42 @@ first, `errors' and `infos' to the formatted records."
                              (cl-remove-if-not (lambda (ov) (overlay-get ov 'agent-repl-prompt-entry))
                                                (overlays-in (point-min) (point-max))))
                      '(1))))))
+
+(ert-deftest agent-repl-test-prompt-entries-mark-draws-a-label-answering-nothing-as-a-warning ()
+  "A label the daemon says answers nothing wears the unanswered face."
+  (agent-repl-test-prompt-entries--with-tree agent-repl-test-prompt-entries--headings
+    (setq agent-repl-prompt-entries--ws "ws-1")
+    (cl-letf (((symbol-function 'agent-repl-host-unanswered-entries) (lambda (_ws) '("2.1"))))
+      ;; Act
+      (agent-repl-prompt-entries-mark))
+    ;; Assert
+    (should (equal (mapcar (lambda (ov) (overlay-get ov 'face))
+                           (sort (cl-remove-if-not (lambda (ov) (overlay-get ov 'agent-repl-prompt-entry))
+                                                   (overlays-in (point-min) (point-max)))
+                                 (lambda (a b) (< (overlay-start a) (overlay-start b)))))
+                   '(agent-repl-prompt-entry-label agent-repl-prompt-entry-unanswered)))))
+
+(ert-deftest agent-repl-test-prompt-entries-a-host-push-re-marks-the-workspaces-composer ()
+  "A host push re-marks the composer of its workspace."
+  (let ((marked nil))
+    (with-temp-buffer
+      (let ((buf (current-buffer)))
+        (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (ws) (and (equal ws "ws-1") buf)))
+                  ((symbol-function 'agent-repl-prompt-entries-mark) (lambda () (push (current-buffer) marked))))
+          ;; Act
+          (agent-repl-prompt-entries--host-updated "ws-1" nil))
+        ;; Assert
+        (should (equal marked (list buf)))))))
+
+(ert-deftest agent-repl-test-prompt-entries-a-host-push-for-a-workspace-with-no-composer-marks-nothing ()
+  "A host push for a workspace with no composer touches nothing."
+  (let ((marked 0))
+    (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl-prompt-entries-mark) (lambda () (cl-incf marked))))
+      ;; Act
+      (agent-repl-prompt-entries--host-updated "ws-1" nil))
+    ;; Assert
+    (should (= marked 0))))
 
 (ert-deftest agent-repl-test-prompt-entries-mark-before-the-grammar-loads-draws-nothing ()
   "A composer whose parser is not made yet is not marked."
@@ -297,9 +343,12 @@ first, `errors' and `infos' to the formatted records."
           (agent-repl-prompt-entries-enable "ws-1")
           ;; Assert
           (should (equal (list agent-repl-prompt-entries--parser
+                               agent-repl-prompt-entries--ws
                                (car (memq #'agent-repl-prompt-entries--on-change after-change-functions))
+                               (car (memq #'agent-repl-prompt-entries--report post-command-hook))
                                marked)
-                         (list '(parser tldr_prompt) #'agent-repl-prompt-entries--on-change 1)))
+                         (list '(parser tldr_prompt) "ws-1" #'agent-repl-prompt-entries--on-change
+                               #'agent-repl-prompt-entries--report 1)))
           (insert "x")
           (should (= marked 2)))))))
 
@@ -318,6 +367,214 @@ first, `errors' and `infos' to the formatted records."
         (funcall ready))
       ;; Assert
       (should-not created))))
+
+;;;; ---- Reporting the composer's entries ----
+
+(defmacro agent-repl-test-prompt-entries--reporting (&rest body)
+  "Run BODY in a reporting composer of \"ws-1\" over the fake tree.
+Binds `sent' to the report requests made, newest first, `answer' and
+`fail' to the last report's callbacks, and `logs' to the formatted records
+of every rung."
+  (declare (indent 0))
+  `(let ((sent nil) (answer nil) (fail nil) (logs nil))
+     (agent-repl-test-prompt-entries--with-tree agent-repl-test-prompt-entries--headings
+       (setq agent-repl-prompt-entries--ws "ws-1")
+       (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) '(:id "ws-1" :dir "/w")))
+                 ((symbol-function 'agent-repl-host-conn-or-primary) (lambda (_ws) 'conn))
+                 ((symbol-function 'agent-repl-rpc-report-composer-entries)
+                  (lambda (_conn request &rest keys)
+                    (push request sent)
+                    (setq answer (plist-get keys :on-response) fail (plist-get keys :on-failure))))
+                 ((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs))
+                 ((symbol-function 'agent-repl--info) (agent-repl-test--record-into logs))
+                 ((symbol-function 'agent-repl--warn) (agent-repl-test--record-into logs))
+                 ((symbol-function 'agent-repl--error) (agent-repl-test--record-into logs)))
+         ,@body))))
+
+(ert-deftest agent-repl-test-prompt-entries-report-names-the-labels-and-the-entry-at-point ()
+  "A report carries every entry's label in order and the one point is on."
+  (agent-repl-test-prompt-entries--reporting
+    ;; Arrange
+    (goto-char 25)
+    ;; Act
+    (agent-repl-prompt-entries--report)
+    ;; Assert
+    (should (equal (car sent) '(:workspace (:id "ws-1" :dir "/w") :labels ("1.1" "2.1")
+                               :at-point (:arm :entry :value (:label "2.1")))))))
+
+(ert-deftest agent-repl-test-prompt-entries-report-with-point-on-no-entry-says-none ()
+  "Point off every entry line is reported as no entry."
+  (agent-repl-test-prompt-entries--reporting
+    (goto-char 15)
+    (agent-repl-prompt-entries--report)
+    (should (equal (plist-get (car sent) :at-point) '(:arm :none)))))
+
+(ert-deftest agent-repl-test-prompt-entries-report-sends-nothing-when-nothing-moved ()
+  "A command that moved neither the entries nor point's entry sends nothing."
+  (agent-repl-test-prompt-entries--reporting
+    ;; Arrange
+    (goto-char 2)
+    (agent-repl-prompt-entries--report)
+    (funcall answer '(:arm :success :value nil))
+    ;; Act: point moves within the same entry line.
+    (goto-char 5)
+    (agent-repl-prompt-entries--report)
+    ;; Assert
+    (should (= (length sent) 1))))
+
+(ert-deftest agent-repl-test-prompt-entries-report-waits-for-the-one-in-flight-then-sends-the-latest ()
+  "A move while a report is in flight is owed, and sent once that report is answered."
+  (agent-repl-test-prompt-entries--reporting
+    ;; Arrange
+    (goto-char 2)
+    (agent-repl-prompt-entries--report)
+    (goto-char 15)
+    (agent-repl-prompt-entries--report)
+    (goto-char 25)
+    (agent-repl-prompt-entries--report)
+    (should (= (length sent) 1))
+    ;; Act
+    (funcall answer '(:arm :success :value nil))
+    ;; Assert: one more report, of where point stands now.
+    (should (equal (mapcar (lambda (r) (plist-get r :at-point)) sent)
+                   '((:arm :entry :value (:label "2.1")) (:arm :entry :value (:label "1.1")))))))
+
+(ert-deftest agent-repl-test-prompt-entries-a-failed-report-is-warned-and-sent-again ()
+  "A report the daemon never answered is logged at WARN and sent again on the next command."
+  (agent-repl-test-prompt-entries--reporting
+    ;; Arrange
+    (goto-char 2)
+    (agent-repl-prompt-entries--report)
+    ;; Act
+    (funcall fail '(:kind :timeout))
+    (agent-repl-prompt-entries--report)
+    ;; Assert
+    (should (= (length sent) 2))
+    (should (cl-some (lambda (m) (string-match-p "elisp.prompt-entries.report-failure ws=ws-1" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-a-refused-report-is-recorded-at-info ()
+  "A report the daemon refused is recorded with its cause."
+  (agent-repl-test-prompt-entries--reporting
+    (agent-repl-prompt-entries--report)
+    (funcall answer '(:arm :error :value (:cause (:arm :not-yet-adopted :value nil))))
+    (should (cl-some (lambda (m) (string-match-p "report-refused ws=ws-1 .*not-yet-adopted" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-a-report-answered-by-an-unknown-arm-is-an-error ()
+  "An answer arm the composer does not know is recorded at ERROR."
+  (agent-repl-test-prompt-entries--reporting
+    (agent-repl-prompt-entries--report)
+    (funcall answer '(:arm :mystery))
+    (should (cl-some (lambda (m) (string-match-p "report-unknown-arm ws=ws-1 arm=:mystery" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-report-with-no-ref-sends-nothing-and-tries-again ()
+  "With no daemon-minted ref nothing is sent, and the next command tries again."
+  (agent-repl-test-prompt-entries--reporting
+    ;; Arrange
+    (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
+      (agent-repl-prompt-entries--report))
+    ;; Act
+    (agent-repl-prompt-entries--report)
+    ;; Assert
+    (should (= (length sent) 1))
+    (should (cl-some (lambda (m) (string-match-p "report-skipped ws=ws-1 ref=nil" m)) logs))))
+
+;;;; ---- Opening a line beside an entry ----
+
+(defmacro agent-repl-test-prompt-entries--opening (answer &rest body)
+  "Run BODY in a composer of \"ws-1\" over the fake tree, the neighbor call answering ANSWER.
+ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
+`asked' to the neighbor requests made and `logs' to every record."
+  (declare (indent 1))
+  `(let ((asked nil) (logs nil))
+     (agent-repl-test-prompt-entries--with-tree agent-repl-test-prompt-entries--headings
+       (setq agent-repl-prompt-entries--ws "ws-1")
+       (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) '(:id "ws-1" :dir "/w")))
+                 ((symbol-function 'agent-repl-host-conn-or-primary) (lambda (_ws) 'conn))
+                 ((symbol-function 'agent-repl-rpc-find-entry-neighbor-sync)
+                  (lambda (_conn request &optional _timeout)
+                    (push request asked)
+                    (let ((a ,answer))
+                      (if (eq (car a) :signal) (signal (cadr a) (cddr a)) a))))
+                 ((symbol-function 'evil-open-below) (lambda (_n) (end-of-line) (insert "\n")))
+                 ((symbol-function 'evil-open-above) (lambda (_n) (beginning-of-line) (insert "\n") (forward-line -1)))
+                 ((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs))
+                 ((symbol-function 'agent-repl--info) (agent-repl-test--record-into logs))
+                 ((symbol-function 'agent-repl--warn) (agent-repl-test--record-into logs))
+                 ((symbol-function 'agent-repl--error) (agent-repl-test--record-into logs)))
+         ,@body))))
+
+(defun agent-repl-test-prompt-entries--line ()
+  "The text of point's line."
+  (buffer-substring-no-properties (line-beginning-position) (line-end-position)))
+
+(ert-deftest agent-repl-test-prompt-entries-o-on-an-entry-opens-the-next-nodes-entry ()
+  "`o' on an entry line opens a line below filled with the next node's label."
+  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "1.2"))))
+    ;; Arrange
+    (goto-char 3)
+    ;; Act
+    (agent-repl-prompt-entries-open-below)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction) (plist-get (car asked) :label))
+                   '("1.2 - " (:arm :next) "1.1")))))
+
+(ert-deftest agent-repl-test-prompt-entries-O-on-an-entry-opens-the-previous-nodes-entry ()
+  "`O' on an entry line opens a line above filled with the previous node's label."
+  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "2"))))
+    ;; Arrange
+    (goto-char 23)
+    ;; Act
+    (agent-repl-prompt-entries-open-above)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction))
+                   '("2 - " (:arm :previous))))))
+
+(ert-deftest agent-repl-test-prompt-entries-o-with-no-neighbor-opens-an-empty-line ()
+  "An entry with no neighbor that way opens the line empty."
+  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :none :value nil)))
+    (goto-char 3)
+    (agent-repl-prompt-entries-open-below)
+    (should (equal (agent-repl-test-prompt-entries--line) ""))))
+
+(ert-deftest agent-repl-test-prompt-entries-o-off-an-entry-asks-nothing ()
+  "`o' on a line that is no entry opens it empty and asks the daemon nothing."
+  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :none :value nil)))
+    (goto-char 15)
+    (agent-repl-prompt-entries-open-below)
+    (should (equal (list (agent-repl-test-prompt-entries--line) asked) '("" nil)))))
+
+(ert-deftest agent-repl-test-prompt-entries-a-refused-neighbor-opens-an-empty-line ()
+  "A refusal opens the line empty and is recorded at info."
+  (agent-repl-test-prompt-entries--opening '(:arm :error :value (:cause (:arm :not-yet-adopted :value nil)))
+    (goto-char 3)
+    (agent-repl-prompt-entries-open-below)
+    (should (equal (agent-repl-test-prompt-entries--line) ""))
+    (should (cl-some (lambda (m) (string-match-p "neighbor-refused ws=ws-1 label=1.1" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-an-unanswered-neighbor-is-warned ()
+  "A daemon that never answers opens the line empty and is logged at WARN."
+  (agent-repl-test-prompt-entries--opening '(:signal agent-repl-connect-error "timed out")
+    (goto-char 3)
+    (agent-repl-prompt-entries-open-below)
+    (should (equal (agent-repl-test-prompt-entries--line) ""))
+    (should (cl-some (lambda (m) (string-match-p "neighbor-failure ws=ws-1 label=1.1" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-a-neighbor-answered-by-an-unknown-arm-is-an-error ()
+  "An answer arm the composer does not know is recorded at ERROR."
+  (agent-repl-test-prompt-entries--opening '(:arm :mystery)
+    (goto-char 3)
+    (agent-repl-prompt-entries-open-below)
+    (should (cl-some (lambda (m) (string-match-p "neighbor-unknown-arm ws=ws-1 arm=:mystery" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-o-and-O-are-bound-in-command-mode ()
+  "`o' and `O' are bound in the composer's normal state to the entry-aware opens."
+  (let (bound)
+    (cl-letf (((symbol-function 'evil-define-key*)
+               (lambda (state map &rest bindings) (push (list state (eq map agent-repl-input-mode-map) bindings) bound))))
+      (agent-repl-prompt-entries-bind-keys))
+    (should (equal bound
+                   (list (list 'normal t (list "o" #'agent-repl-prompt-entries-open-below
+                                               "O" #'agent-repl-prompt-entries-open-above)))))))
 
 (provide 'test-prompt-entries)
 
