@@ -166,10 +166,15 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   and professional, in agent-repl's existing colors (the light and dark
   themes' variables in `webapp/src/styles.css`).
 - A design mock of the chat: `docs/knowledge-graph/chat-mock.html` (open it
-  directly in a browser).
-- The sidebar is the same across every app. Its existing title
-  ("Workspaces") becomes the app switcher: clicking it opens a dropdown of
-  apps, today agent-repl's workspaces and the chat.
+  directly in a browser). Its chat stream is the reference; its sidebar is
+  not, and the sidebar follows the rule below.
+- The sidebar's head stays exactly as it is (the purple search icon, the
+  version, everything else). The only change to existing UI is that the
+  "Workspaces" title becomes clickable, opening a dropdown of apps: today
+  Workspaces and Chat.
+- With Chat selected, everything below the head changes: the Open, Hidden,
+  Recently Merged and other bands give way to a list of chats, most recent
+  first. The search icon then searches the chats' contents.
 - Each answer shows its premises as links that jump to that node's path.
 - The webapp already has a composer (`webapp/src/composer/composer.ts`),
   drawn in production only inside subagent bubbles, since the root composer
@@ -253,7 +258,35 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
     extensions, so similarity search runs in Go over embeddings held in
     memory, which is fast enough for one person's graph;
 
+- The zettel service's contract, proposed:
+  - the zettel service is a launchd-managed singleton like the store, the
+    only owner of zettel's SQLite database, serving a new `zettel.v1`
+    package over Connect on a unix socket;
+  - the daemon is its only caller, and gains new client-facing RPCs that the
+    webapp and Emacs call, which it resolves into `zettel.v1` calls;
+  - answers stream from the zettel service through the daemon to the webapp,
+    the way agent turns stream today.
+- Data model, proposed (SQLite, in the zettel service):
+  - `node`: id, created time, title, question text, root node id, and its
+    parent: either a node (with the revision asked of) or a place outside
+    zettel (which contributor, and where in it), plus the quote and question
+    context. A node's parent never changes, so its root never does either;
+  - `revision`: node id, revision number, answer text, created time, the
+    model that wrote it, and whether it was generated or a correction;
+  - `premise`: the general node, the specific node, created time, and what
+    proposed it;
+  - `embedding`: node id, revision, embedding model, vector;
+  - premise inference state per node, durable so a restart resumes it;
+  - sighting counts per node, for the chat's least-seen branch pick.
+  - A chat in the sidebar list is a tree, named by its root node's title and
+    ordered by the newest activity anywhere in it.
+
 ## Known complications
+
+- agent-repl runs Claude through Claude Code accounts (subscription logins,
+  routed by `daemon/internal/account`), not API keys. The Messages API needs
+  an API key, which is a separate bill. The alternative is answering chat
+  questions through the Agent SDK with no tools, which uses the same login.
 
 - Several parents makes context grow with how many branches meet, on top of
   how deep the chain is, and it loses prompt caching: a combination of
