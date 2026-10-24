@@ -15,6 +15,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	testrunv1 "agentrepl/proto/testrun/v1"
+	"agentrepl/testrun/caselist"
 )
 
 // testredundancycli.go — `agent-repld test redundancy go|vitest|report`: a
@@ -159,11 +160,11 @@ func measurementFlags(fs *flag.FlagSet, m *testrunv1.RedundancyMeasurement) func
 			}
 		}
 		if *deleteFile != "" {
-			if m.DeleteCases, err = readDeleteSet(*deleteFile); err != nil {
+			if m.DeleteCases, err = caselist.ReadDeleteSet(*deleteFile); err != nil {
 				return err
 			}
 		}
-		m.Pins = commaItems(*pins)
+		m.Pins = caselist.SplitList(*pins)
 		if set["overhead"] {
 			m.OverheadUs = proto.Int64(overhead.Microseconds())
 		}
@@ -219,9 +220,9 @@ func goRedundancyFlags(fs *flag.FlagSet) redundancyFlags {
 			return errors.New("name exactly one of -pkg, -roster-suite and -suites")
 		case *pkg != "":
 			g.Subject = &testrunv1.RedundancyGo_Package{Package: &testrunv1.RedundancyGoPackage{Package: *pkg,
-				TestFiles: commaItems(*tests), Tags: *tags, Programs: commaItems(*programs)}}
+				TestFiles: caselist.SplitList(*tests), Tags: *tags, Programs: caselist.SplitList(*programs)}}
 		case *rosterSuite != "":
-			g.Subject = &testrunv1.RedundancyGo_RosterSuites{RosterSuites: &testrunv1.RedundancyGoRosterSuites{Names: commaItems(*rosterSuite)}}
+			g.Subject = &testrunv1.RedundancyGo_RosterSuites{RosterSuites: &testrunv1.RedundancyGoRosterSuites{Names: caselist.SplitList(*rosterSuite)}}
 		default:
 			list, err := readGoSuites(*suites)
 			if err != nil {
@@ -229,12 +230,12 @@ func goRedundancyFlags(fs *flag.FlagSet) redundancyFlags {
 			}
 			g.Subject = &testrunv1.RedundancyGo_Suites{Suites: &testrunv1.RedundancyGoSuiteList{Suites: list}}
 		}
-		g.Mutate = commaItems(*mutate)
+		g.Mutate = caselist.SplitList(*mutate)
 		if set["runs"] {
 			g.Runs = proto.Int32(int32(*runs))
 		}
 		if set["pin-calls"] {
-			g.PinCalls = &testrunv1.RedundancyGoPinCalls{Calls: commaItems(*pinCalls)}
+			g.PinCalls = &testrunv1.RedundancyGoPinCalls{Calls: caselist.SplitList(*pinCalls)}
 		}
 		if set["hang-bound"] {
 			g.HangBoundMs = proto.Int64(hangBound.Milliseconds())
@@ -265,7 +266,7 @@ func vitestRedundancyFlags(fs *flag.FlagSet) redundancyFlags {
 			return err
 		}
 		v.PackageDir = rel
-		if v.Mutate = commaItems(*mutate); len(v.Mutate) == 0 {
+		if v.Mutate = caselist.SplitList(*mutate); len(v.Mutate) == 0 {
 			return errors.New("-mutate is required")
 		}
 		if set["runs"] {
@@ -322,25 +323,6 @@ func redundancyUniverse(name string) (testrunv1.RedundancyUniverse, error) {
 	return 0, fmt.Errorf("unknown -universe %q: kills-only or strict", name)
 }
 
-// readDeleteSet reads a -delete file: one case per line; blank lines and
-// lines starting with # are skipped, as the tool reads it.
-func readDeleteSet(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read -delete %s: %w", path, err)
-	}
-	var out []string
-	for _, l := range strings.Split(string(data), "\n") {
-		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
-			out = append(out, l)
-		}
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("-delete %s names no case", path)
-	}
-	return out, nil
-}
-
 // readGoSuites reads a -suites file, the tool's JSON suite list.
 func readGoSuites(path string) ([]*testrunv1.RedundancyGoSuite, error) {
 	data, err := os.ReadFile(path)
@@ -363,15 +345,4 @@ func readGoSuites(path string) ([]*testrunv1.RedundancyGoSuite, error) {
 		out = append(out, &testrunv1.RedundancyGoSuite{Package: s.Package, Tags: s.Tags, TestFiles: s.Tests, Programs: s.Programs, Kept: s.Kept, Module: s.Module})
 	}
 	return out, nil
-}
-
-// commaItems splits a comma-separated flag, dropping empty entries.
-func commaItems(list string) []string {
-	var out []string
-	for _, item := range strings.Split(list, ",") {
-		if item = strings.TrimSpace(item); item != "" {
-			out = append(out, item)
-		}
-	}
-	return out
 }

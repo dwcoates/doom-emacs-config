@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"agentrepl/testrun/caselist"
 	"agentrepl/testrun/internal/redundancy"
 	"agentrepl/testrun/internal/redundancy/proc"
 	"agentrepl/testrun/internal/run"
@@ -45,7 +46,7 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	if a.Package == "" {
 		return Args{}, fmt.Errorf("-package is required")
 	}
-	if a.Mutate = redundancy.SplitList(mutate); len(a.Mutate) == 0 {
+	if a.Mutate = caselist.SplitList(mutate); len(a.Mutate) == 0 {
 		return Args{}, fmt.Errorf("-mutate is required")
 	}
 	var err error

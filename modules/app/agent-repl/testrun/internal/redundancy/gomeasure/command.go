@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"agentrepl/testrun/caselist"
 	"agentrepl/testrun/internal/redundancy"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
@@ -62,7 +63,7 @@ func rosterSuites(names, module string) ([]Suite, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	list := redundancy.SplitList(names)
+	list := caselist.SplitList(names)
 	if len(list) > 1 && module == "" {
 		return nil, "", fmt.Errorf("-roster-suite names several suites, so -module must name the mutated one")
 	}
@@ -163,7 +164,7 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 		}
 		a.Suites, a.Module = s, module
 	case pkg != "":
-		a.Suites = []Suite{{Package: pkg, Tags: tags, Tests: redundancy.SplitList(tests), Programs: redundancy.SplitList(programs)}}
+		a.Suites = []Suite{{Package: pkg, Tags: tags, Tests: caselist.SplitList(tests), Programs: caselist.SplitList(programs)}}
 	default:
 		s, err := readSuites(suitesFile)
 		if err != nil {
@@ -174,7 +175,7 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	if a.Module == "" {
 		return Args{}, fmt.Errorf("-module is required")
 	}
-	a.Mutate = redundancy.SplitList(mutate)
+	a.Mutate = caselist.SplitList(mutate)
 	if len(a.Mutate) == 0 {
 		if len(a.Suites) != 1 {
 			return Args{}, fmt.Errorf("-mutate is required when -suites names several")
@@ -184,7 +185,7 @@ func ParseArgs(argv []string, stderr io.Writer) (Args, error) {
 	if a.Estimate && len(a.Delete) == 0 {
 		return Args{}, fmt.Errorf("-estimate needs -delete")
 	}
-	a.PinCalls = redundancy.SplitList(pinCalls)
+	a.PinCalls = caselist.SplitList(pinCalls)
 	var err error
 	// The real path, as go list answers every package's directory.
 	if a.Module, err = redundancy.RealPath(a.Module); err != nil {

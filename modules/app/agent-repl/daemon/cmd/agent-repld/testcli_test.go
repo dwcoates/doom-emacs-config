@@ -133,7 +133,7 @@ func TestBuildSelections(t *testing.T) {
 			Tests: &testrunv1.TestSelectionGoPackage_All{All: &testrunv1.TestSelectionGoAllTests{}}}}}
 	}
 	cases := []struct {
-		name                        string
+		name string
 		sel  testSelections
 		want []*testrunv1.TestSelection
 	}{
@@ -176,7 +176,7 @@ func TestBuildSelections(t *testing.T) {
 
 func TestBuildSelectionsRefuses(t *testing.T) {
 	cases := []struct {
-		name                        string
+		name string
 		sel  testSelections
 		want string
 	}{
