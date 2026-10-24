@@ -256,8 +256,9 @@ last, sharing an annotation, so 1 2 ... 9 reads as \"1-9\"."
 (defun agent-repl--input-help-keys (command context)
   "Return the keys that run COMMAND in CONTEXT, as (KEY . ANNOTATION) pairs.
 Shortest first, then alphabetically: a keymap's own order is the reverse
-of its definitions, which says nothing to a reader.  A key bound in several states is one pair, annotated
-with its states (`agent-repl--input-help-state-label', nil for none), and
+of its definitions, which says nothing to a reader.  A key bound in
+several states is one pair, annotated with its states
+(`agent-repl--input-help-state-label', nil for none), and
 a run of digits is one range (`agent-repl--input-help-collapse-digits').
 A command no map binds is a broken help table, and is fatal."
   (let ((raw (agent-repl--input-help-raw-keys command context))
