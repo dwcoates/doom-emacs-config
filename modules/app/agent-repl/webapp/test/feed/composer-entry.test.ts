@@ -17,27 +17,43 @@ const nodeEntry = (row: string, label: string): FeedComposerEntry =>
 /** The push naming no node. */
 const noEntry = (): FeedComposerEntry => create(FeedComposerEntrySchema, { at: { case: "none", value: {} } });
 
-/** A response row holding two tree lines of node 3.1 and one of its child. */
+/**
+ * A response row holding node 3.1 (a head and a wrap line), its child and
+ * grandchild, its parent, its next sibling, and 3.10, whose label merely opens
+ * on the same characters.
+ */
 function rowWithNode(): HTMLElement {
   const row = document.createElement("article");
   row.setAttribute("data-feed-row", "r1");
   row.innerHTML =
+    `<div class="mp-line" data-node="3">parent</div>` +
     `<div class="mp-line" data-node="3.1">head</div>` +
     `<div class="mp-line" data-node="3.1">wrap</div>` +
-    `<div class="mp-line" data-node="3.1.1">child</div>`;
+    `<div class="mp-line" data-node="3.1.1">child</div>` +
+    `<div class="mp-line" data-node="3.1.1.1">grandchild</div>` +
+    `<div class="mp-line" data-node="3.2">sibling</div>` +
+    `<div class="mp-line" data-node="3.10">lookalike</div>`;
   document.body.replaceChildren(row);
   return row;
 }
 
 describe("composerEntryRule", () => {
-  it("selects the node's own lines in its row", () => {
+  it("selects the node's whole subtree in its row, and nothing else", () => {
     // Arrange
     const row = rowWithNode();
     const selector = composerEntryRule(nodeEntry("r1", "3.1")).split(" {")[0];
     // Act
     const hits = [...document.querySelectorAll(selector)].map((el) => el.textContent);
     // Assert
-    expect([hits, row.isConnected]).toEqual([["head", "wrap"], true]);
+    expect([hits, row.isConnected]).toEqual([["head", "wrap", "child", "grandchild"], true]);
+  });
+
+  it("selects nothing in another row", () => {
+    // Arrange
+    rowWithNode();
+    const selector = composerEntryRule(nodeEntry("r2", "3.1")).split(" {")[0];
+    // Act + Assert
+    expect(document.querySelectorAll(selector).length).toBe(0);
   });
 
   it("draws nothing when no node is answered", () => {
@@ -95,7 +111,7 @@ describe("createComposerEntryHighlight", () => {
     rowWithNode();
     // Assert
     const selector = composerEntryRule(nodeEntry("r1", "3.1")).split(" {")[0];
-    expect(document.querySelectorAll(selector).length).toBe(2);
+    expect(document.querySelectorAll(selector).length).toBe(4);
   });
 
   it("records each highlight at info", async () => {

@@ -152,10 +152,26 @@ class RootWatch {
     this.anchor = this.watch(ancestor, (name) => {
       if (name === null || name === next) this.onAppeared();
     });
+    if (this.anchor === undefined) return;
     LOGGER.debug(
       { skills_dir: this.root, watching: ancestor },
       "the skills directory does not exist; watching the ancestor it would appear under",
     );
+    // WATCH FIRST, THEN LOOK: the component may have appeared between the look
+    // that chose this ancestor and the watch that now stands on it, an
+    // appearance no event will ever report (a `mkdir -p` lands every level at
+    // once). Anything after the watch began is an event; anything before it is
+    // seen here and armed deeper at once, so no appearance falls between the
+    // two. Whether it is a change is the caller's to say: an appearance an
+    // event reported is (onAppeared), and one while the watch starts is
+    // already in what the vendor is about to load.
+    if (this.fsys.entries(path.join(ancestor, next)) !== undefined) {
+      LOGGER.debug(
+        { skills_dir: this.root, appeared: path.join(ancestor, next) },
+        "the directory the ancestor's watch waits for appeared before the watch began; watching deeper",
+      );
+      this.arm();
+    }
   }
 
   close(): void {
