@@ -22,7 +22,24 @@ knowledge. Its new parts:
 - chats organized into a knowledge graph of questions asked of answers, recursively;
 - asking about a highlighted passage of anything on screen (an agent's
   response, a chat answer, later a book), with the question and answer landing
-  in the graph as a child of the text that was highlighted.
+  in the graph, traceable back to the text that was highlighted.
+
+The knowledge graph is its own system, orthogonal to agent-repl, and needs a
+name of its own (open).
+
+### Contributor and consumer UIs
+
+- A contributor UI is any interface that adds to the data model. Examples:
+  - agent-repl's feed: highlight text in a response bubble and ask about it;
+  - a book reader: read as normal, highlight text and ask about it;
+  - a chat in the style of claude.ai or ChatGPT, whose questions and answers
+    map onto the data model.
+- A consumer UI renders the data model. Example: flash cards for spaced
+  repetition over question-and-answer pairs.
+- One UI can be both: the branching chat both adds questions and renders the
+  graph.
+- Books and agent feeds stay in their contributor UIs and are not stored in
+  the graph. Only questions and answers are.
 
 agent-repl is heading toward being a general tool rather than only an agent
 manager. That is context for this project, not part of it: renaming agent-repl
@@ -109,9 +126,11 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 - A node can have several context parents, which makes the graph a directed
   acyclic graph. A node's parents must already exist when it is created, so
   cycles cannot happen.
-- A highlighted passage is not an entity of its own. It is an optional field
-  on a parent link: the passage names the revision it was taken from, and
-  includes its quoted words.
+- Every node records where it came from: which contributor UI, which thing in
+  it (a page of a book, a response bubble in a feed, a node in the graph), and
+  the highlighted words if any, so a question and answer can always be traced
+  back to its origin. When the origin is a node in the graph, it names the
+  revision the words were taken from.
 - A highlight also captures surrounding text, and how much depends on the
   view: the bubble in an agent feed, a passage, page or several pages in a book
   (chosen by a classifier), and the same approach as a book for a chat.
@@ -127,8 +146,7 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   `proto/src/agentrepl/v1/endpoint_submit_prompt.proto`). A text highlight
   becomes a second kind of selection beside it.
 - Every view uses one shared highlight component, so building highlights for
-  answers also builds them for books. A book is a source text in the graph,
-  and the reader is the view that shows one.
+  answers also builds them for books.
 - The webapp has its own input box, used whenever the host provides no input
   client.
 
@@ -206,14 +224,16 @@ Only rows marked settled are settled. Recommended picks are listed first.
 
 | Concept | Candidates |
 |---|---|
-| Anything stored in the graph | `node` (recommended), `item` |
-| The question-and-answer unit | `exchange` (recommended); notertame used `datum` |
-| A text brought in to be read, such as a book | `reading` (recommended), `material`; `source` and `document` ruled out, both already in heavy use (`document` is the browser's global) |
+| The knowledge-graph system itself | open; earlier ideas `commonplace`, `marginalia` |
+| The question-and-answer unit, the only thing stored as a graph node | `node`, `exchange`, `entry`; notertame used `datum` |
+| A UI that adds to the data model | `contributor` (settled) |
+| A UI that renders the data model | `consumer` (settled) |
 | A frozen version of a node's content | `revision` |
 | The link from a question to a parent | `premise` (recommended), `basis` |
 | The service that carries remote clients' encrypted traffic to the workstation | `relay` (settled) |
+| Where a node came from | `provenance` (recommended), `origin` (already used by `conversation.v1.PromptOrigin`) |
 | A highlighted passage | `quote` (recommended, matching the daemon's existing `replyquote` package for the whole-response reply), `excerpt` (already a rollback-preview field), `passage` |
-| Text around a highlight | `surround` (recommended), `vicinity` |
+| Text around a highlight | `context` (owner's preference), `surround`; `context` is already Go's `context.Context` and the model's context |
 | One stay of a parent on the path on screen | `visit` |
 | One counted instance of a bubble being seen | `sighting` |
 
