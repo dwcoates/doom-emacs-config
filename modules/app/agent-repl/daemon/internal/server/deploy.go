@@ -199,28 +199,47 @@ func (s *server) PushReloadElisp(streams []string, moduleRoot, build string) int
 	push := &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_ReloadElisp{
 		ReloadElisp: &agentreplv1.DaemonReloadElisp{ModuleRoot: moduleRoot, Build: build},
 	}}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	reached := 0
-	for w := range s.daemonWatchers {
-		if !w.emacs || !want[w.id] {
-			continue
-		}
-		select {
-		case w.elisp <- push:
-			reached++
+	return s.pushToEditors("daemon.server.reload_elisp", push,
+		func(w *daemonWatcher) bool { return want[w.id] },
+		func(w *daemonWatcher) {
 			s.log.Info("daemon.server.reload_elisp", "pushed the elisp reload to an Emacs", dlog.Context{
 				"stream": w.id, "build": build, "module_root": moduleRoot,
 				"state": "elisp_build", "before": w.elispBuild, "after": build,
 			})
 			w.elispBuild = build
+		})
+}
+
+// pushToEditors hands PUSH to every Emacs WatchDaemon stream WANT names, on
+// the stream's own addressed queue, and answers how many it reached. REACHED,
+// when set, runs for each stream reached, under the server's lock. A full
+// queue is recorded at ERROR under OP and the stream is not reached.
+func (s *server) pushToEditors(op string, push *agentreplv1.WatchDaemonResponse, want func(*daemonWatcher) bool, reached func(*daemonWatcher)) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for w := range s.daemonWatchers {
+		if !w.emacs || !want(w) {
+			continue
+		}
+		select {
+		case w.elisp <- push:
+			count++
+			if reached != nil {
+				reached(w)
+			}
 		default:
-			s.log.Error("daemon.server.reload_elisp", "an Emacs stream's push queue is full; the elisp reload did not reach it", dlog.Context{
-				"stream": w.id, "build": build,
+			s.log.Error(op, "an Emacs stream's push queue is full; the push did not reach it", dlog.Context{
+				"stream": w.id, "push": pushArm(push),
 			})
 		}
 	}
-	return reached
+	return count
+}
+
+// pushArm names a WatchDaemon push's arm for a log record.
+func pushArm(push *agentreplv1.WatchDaemonResponse) string {
+	return string(push.ProtoReflect().WhichOneof(push.ProtoReflect().Descriptor().Oneofs().ByName("push")).Name())
 }
 
 // WebviewBuilds answers, per workspace, the webapp build every open webview
