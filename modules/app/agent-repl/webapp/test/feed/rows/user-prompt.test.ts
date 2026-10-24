@@ -452,17 +452,20 @@ describe("drawFeedUserPrompt: the copy control", () => {
   });
 
   it.each([
-    ["hidden while the bubble is not selected", false, "none"],
-    ["shown while the bubble is selected", true, "inline-flex"],
-  ])("is %s", (_name, selected, display) => {
+    ["folded and not selected", false, false],
+    ["folded and selected", false, true],
+    ["opened and not selected", true, false],
+    ["opened and selected", true, true],
+  ])("is shown while the bubble is %s", (_name, expanded, selected) => {
     // Arrange
     const restore = installStylesheet();
     const { el, control } = copyControlOf([{ block: { case: "text", value: { prose: servedProse("hi") } } }]);
     el.classList.toggle(SELECTED_ENTRY_CLASS, selected);
+    el.querySelector(`.${BUBBLE_SCROLL_CLASS}`)?.classList.toggle(EXPANDED_CLASS, expanded);
     document.body.append(el);
     try {
       // Act / Assert
-      expect(cascadedValue(control, "display")).toBe(display);
+      expect(cascadedValue(control, "display")).toBe("inline-flex");
     } finally {
       el.remove();
       restore();

@@ -177,7 +177,7 @@ interface BubbleSpecBase {
   strip?: readonly HTMLElement[];
   /**
    * The corner, floated top-right inside the scroll box: a response's usage
-   * corner, or a selectable prompt's copy control.
+   * corner, or a prompt's copy control.
    */
   corner?: HTMLElement;
   /** The content: nodes, markdown slots among them (see body.ts). */

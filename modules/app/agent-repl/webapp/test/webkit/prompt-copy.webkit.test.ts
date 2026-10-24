@@ -2,7 +2,9 @@
  * A PROMPT'S COPY CONTROL SITS INSIDE ITS BUBBLE, THE SAME DISTANCE FROM THE
  * BUBBLE'S TOP AND RIGHT EDGES WHATEVER THE PROMPT HOLDS, FOLDED OR OPENED, IN
  * WEBKIT (owner request, 2026-10-24: the control was often off the bubble's
- * right-hand side once a prompt was opened). jsdom lays nothing out, so this
+ * right-hand side once a prompt was opened). It is drawn on every prompt,
+ * selected or not (owner request, 2026-10-24: a folded prompt, which is never
+ * the selected one, had none). jsdom lays nothing out, so this
  * draws real prompt bubbles over the real stylesheet in headless WebKit and
  * measures the control against the bubble's border box.
  */
@@ -20,12 +22,15 @@ const LONG = "the daemon agent is done with one contract question about a compac
 
 /** The prompts measured, by name. */
 const CASES: Record<string, PromptCase> = {
-  "a short prompt, folded": { blocks: [{ text: "hi" }], expanded: false },
-  "a short prompt, opened": { blocks: [{ text: "hi" }], expanded: true },
-  "a long prompt, folded": { blocks: [{ text: LONG }], expanded: false },
-  "a long prompt, opened": { blocks: [{ text: LONG }], expanded: true },
-  "a reply, folded": { blocks: [{ quote: LONG }, { text: "and Rome?" }], expanded: false },
-  "a reply, opened": { blocks: [{ quote: LONG }, { text: "and Rome?" }], expanded: true },
+  "a short prompt, folded": { blocks: [{ text: "hi" }], expanded: false, selected: true },
+  "a short prompt, opened": { blocks: [{ text: "hi" }], expanded: true, selected: true },
+  "a long prompt, folded": { blocks: [{ text: LONG }], expanded: false, selected: true },
+  "a long prompt, opened": { blocks: [{ text: LONG }], expanded: true, selected: true },
+  "a reply, folded": { blocks: [{ quote: LONG }, { text: "and Rome?" }], expanded: false, selected: true },
+  "a reply, opened": { blocks: [{ quote: LONG }, { text: "and Rome?" }], expanded: true, selected: true },
+  "a short prompt, folded, not selected": { blocks: [{ text: "hi" }], expanded: false, selected: false },
+  "a long prompt, folded, not selected": { blocks: [{ text: LONG }], expanded: false, selected: false },
+  "a reply, folded, not selected": { blocks: [{ quote: LONG }, { text: "and Rome?" }], expanded: false, selected: false },
 };
 
 describe("a prompt's copy control in WebKit", () => {
@@ -48,6 +53,10 @@ describe("a prompt's copy control in WebKit", () => {
   const reference = (): CopyGaps => measured["a short prompt, folded"];
 
   for (const name of Object.keys(CASES)) {
+    it(`is shown: ${name}`, () => {
+      expect(measured[name].shown).toBe(true);
+    });
+
     it(`is drawn whole inside the bubble: ${name}`, () => {
       expect(measured[name].inside).toBe(true);
     });

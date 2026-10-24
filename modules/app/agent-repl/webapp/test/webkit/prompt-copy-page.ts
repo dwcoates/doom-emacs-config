@@ -1,8 +1,8 @@
 /**
  * THE PAGE THE WEBKIT PROMPT-COPY TEST DRIVES (prompt-copy.webkit.test.ts):
  * real user prompt bubbles, drawn by the real row module over the real
- * stylesheet, selected and folded or opened, with their copy control measured
- * against the bubble's own edges.
+ * stylesheet, selected or not and folded or opened, with their copy control
+ * measured against the bubble's own edges.
  */
 import { create } from "@bufbuild/protobuf";
 import { FeedUserPromptSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -18,6 +18,8 @@ installPageLogger("prompt-copy");
 
 /** One drawn bubble's copy control, as gaps from the bubble's border box. */
 export interface CopyGaps {
+  /** Whether the control is drawn at all: a box with size, not `display: none`. */
+  shown: boolean;
   /** The control's right edge to the bubble's right edge, in CSS pixels. */
   right: number;
   /** The control's top edge to the bubble's top edge, in CSS pixels. */
@@ -30,15 +32,16 @@ export interface CopyGaps {
   besideLines: number;
 }
 
-/** One prompt to draw: its blocks, and whether the bubble is opened. */
+/** One prompt to draw: its blocks, whether the bubble is opened, and whether it is the selected entry. */
 export interface PromptCase {
   blocks: readonly ({ text: string } | { quote: string })[];
   expanded: boolean;
+  selected: boolean;
 }
 
 /** What the test calls, on `window.promptCopy`. */
 export interface PromptCopyPage {
-  /** Draw CASE's prompt selected, and measure its copy control. */
+  /** Draw CASE's prompt, and measure its copy control. */
   measure(c: PromptCase): CopyGaps;
 }
 
@@ -66,7 +69,7 @@ window.promptCopy = {
       },
     });
     const bubble = drawFeedUserPrompt(msg);
-    bubble.classList.add(SELECTED_ENTRY_CLASS);
+    if (c.selected) bubble.classList.add(SELECTED_ENTRY_CLASS);
     if (c.expanded) bubble.querySelector(`.${BUBBLE_SCROLL_CLASS}`)?.classList.add(EXPANDED_CLASS);
     const item = document.createElement("div");
     item.className = "feed-item";
@@ -90,6 +93,7 @@ window.promptCopy = {
     // control may still graze its bottom edge.
     const beside = lines.filter((line) => line.width > 0 && (line.top + line.bottom) / 2 < r.bottom && (line.top + line.bottom) / 2 > r.top);
     return {
+      shown: r.width > 0 && r.height > 0,
       right: Math.round((b.right - r.right) * 100) / 100,
       top: Math.round((r.top - b.top) * 100) / 100,
       inside:
