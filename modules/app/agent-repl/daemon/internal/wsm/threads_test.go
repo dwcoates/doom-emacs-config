@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	zettelv1 "agentrepl/proto/zettel/v1"
 )
 
 func TestRegisterThreadMintsAThreadInTheZettelHome(t *testing.T) {
@@ -190,6 +192,148 @@ func TestAnUnknownKindIsADecodeFailure(t *testing.T) {
 			var decode *DecodeError
 			if !errors.As(err, &decode) || decode.Field != "kind" {
 				t.Errorf("err = %v, want a kind decode failure", err)
+			}
+		})
+	}
+}
+
+func threadQuestion() *ThreadQuestion {
+	return &ThreadQuestion{Text: "What is hydronium?", Parent: &zettelv1.NodeParent{Origin: &zettelv1.NodeParent_Node{Node: &zettelv1.NodeParentNode{
+		Node: &zettelv1.NodeId{Id: "n1"}, Revision: &zettelv1.RevisionNumber{Number: 1},
+		Quote: &zettelv1.NodeQuote{Text: "forms hydronium"},
+	}}}}
+}
+
+func TestAThreadQuestionRidesTheTurn(t *testing.T) {
+	cases := []struct {
+		name string
+		put  func(s *store, ws Workspace) error
+		read func(s *store, ws Workspace) (*ThreadQuestion, error)
+	}{
+		{"turn", func(s *store, ws Workspace) error {
+			return s.PutTurn(context.Background(), Turn{ID: "turn-1", Workspace: ws.ID, Text: "q", Origin: "PROMPT_ORIGIN_COMPOSER", Question: threadQuestion()})
+		}, func(s *store, ws Workspace) (*ThreadQuestion, error) {
+			turn, err := s.Turn(context.Background(), ws.ID, "turn-1")
+			return turn.Question, err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act
+			if err := tc.put(s, ws); err != nil {
+				t.Fatal(err)
+			}
+			got, err := tc.read(s, ws)
+
+			// Assert
+			if err != nil || got == nil || got.Text != "What is hydronium?" || got.Parent.GetNode().GetQuote().GetText() != "forms hydronium" {
+				t.Errorf("question = %+v, err = %v, want it carried whole", got, err)
+			}
+		})
+	}
+}
+
+func TestAThreadQuestionIsStoredWholeOrRefused(t *testing.T) {
+	cases := []struct {
+		name     string
+		question *ThreadQuestion
+	}{
+		{"a blank question", &ThreadQuestion{Text: " ", Parent: threadQuestion().Parent}},
+		{"no origin", &ThreadQuestion{Text: "q", Parent: &zettelv1.NodeParent{}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act
+			err := s.PutTurn(context.Background(), Turn{ID: "turn-1", Workspace: ws.ID, Text: "q", Origin: "PROMPT_ORIGIN_COMPOSER", Question: tc.question})
+
+			// Assert
+			if err == nil {
+				t.Fatal("an incomplete thread question was stored")
+			}
+			if _, readErr := s.Turn(context.Background(), ws.ID, "turn-1"); !errors.Is(readErr, ErrNotFound) {
+				t.Errorf("read after refusal = %v, want nothing stored", readErr)
+			}
+		})
+	}
+}
+
+func TestAHalfStoredThreadQuestionIsADecodeFailure(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutTurn(context.Background(), Turn{ID: "turn-1", Workspace: ws.ID, Text: "q", Origin: "PROMPT_ORIGIN_COMPOSER", Question: threadQuestion()}); err != nil {
+		t.Fatal(err)
+	}
+	corrupt(t, s, `UPDATE turns SET thread_parent = NULL`)
+
+	// Act
+	_, err := s.Turn(context.Background(), ws.ID, "turn-1")
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Field != "thread_question" {
+		t.Errorf("err = %v, want a thread_question decode failure", err)
+	}
+}
+
+func TestAThreadAskRidesTheHeldPrompt(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.PutHeldPrompt(context.Background(), HeldPrompt{Workspace: ws.ID, Turn: "turn-1", Said: said("q"), Origin: "PROMPT_ORIGIN_COMPOSER", Ask: &ThreadAsk{Parent: threadQuestion().Parent}})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := s.HeldPrompts(context.Background(), ws.ID)
+	if err != nil || len(held) != 1 || held[0].Ask == nil || held[0].Ask.Parent.GetNode().GetQuote().GetText() != "forms hydronium" {
+		t.Errorf("held = %+v, err = %v, want the ask carried", held, err)
+	}
+}
+
+func TestAThreadAskWithNoOriginIsRefused(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.PutHeldPrompt(context.Background(), HeldPrompt{Workspace: ws.ID, Turn: "turn-1", Said: said("q"), Origin: "PROMPT_ORIGIN_COMPOSER", Ask: &ThreadAsk{Parent: &zettelv1.NodeParent{}}})
+
+	// Assert
+	if err == nil {
+		t.Fatal("an ask with no origin was stored")
+	}
+}
+
+func TestThreadAskGetParentNodeID(t *testing.T) {
+	cases := []struct {
+		name string
+		ask  *ThreadAsk
+		want string
+	}{
+		{"no ask", nil, ""},
+		{"a thread start", &ThreadAsk{Parent: &zettelv1.NodeParent{Origin: &zettelv1.NodeParent_ThreadStart{ThreadStart: &zettelv1.NodeParentThreadStart{}}}}, ""},
+		{"asked of a node", &ThreadAsk{Parent: threadQuestion().Parent}, "n1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act
+			got := tc.ask.GetParentNodeID()
+
+			// Assert
+			if got != tc.want {
+				t.Errorf("GetParentNodeID = %q, want %q", got, tc.want)
 			}
 		})
 	}

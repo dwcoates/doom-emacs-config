@@ -598,6 +598,9 @@ type HeldPrompt struct {
 	// Coalesced records that later prompts were folded into this one while it
 	// was still queued, so the tray can say so.
 	Coalesced bool
+	// Ask is where a zettel thread prompt's question was asked from, carried
+	// until it is delivered (threads.go); nil for every other prompt.
+	Ask *ThreadAsk
 }
 
 // HeldAct is a session act held in the queue.
@@ -753,6 +756,9 @@ type Turn struct {
 	ClosedAt *time.Time
 	// Close is how it ended, nil while it runs.
 	Close *TurnClose
+	// Question is a zettel thread turn's question and origin (threads.go); nil
+	// for every other turn.
+	Question *ThreadQuestion
 }
 
 // TurnClose is how a turn ended.

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	zettelv1 "agentrepl/proto/zettel/v1"
 
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
@@ -131,6 +132,13 @@ func TestAhead(t *testing.T) {
 	}
 }
 
+// threadPrompt is a held chat thread question.
+func threadPrompt(turn ids.TurnID) wsm.HeldPrompt {
+	held := prompt(turn)
+	held.Ask = &wsm.ThreadAsk{Parent: &zettelv1.NodeParent{Origin: &zettelv1.NodeParent_ThreadStart{ThreadStart: &zettelv1.NodeParentThreadStart{}}}}
+	return held
+}
+
 func TestFoldable(t *testing.T) {
 	act := wsm.HeldPrompt{Turn: "act", Said: said(textBlock("model")), Act: &wsm.HeldAct{Kind: wsm.ActPermissionMode, Value: "plan"}}
 	cut := wsm.HeldPrompt{Turn: "cut", Said: said(textBlock("/compact"))}
@@ -151,6 +159,8 @@ func TestFoldable(t *testing.T) {
 		{name: "the user's prompt into an agent's is refused", folded: prompt("b"), ahead: sentBy(prompt("a"), "ws-sender"), want: ErrOtherAuthor},
 		{name: "two workspaces' prompts are refused", folded: sentBy(prompt("b"), "ws-other"), ahead: sentBy(prompt("a"), "ws-sender"), want: ErrOtherAuthor},
 		{name: "one workspace's two prompts fold", folded: sentBy(prompt("b"), "ws-sender"), ahead: sentBy(prompt("a"), "ws-sender"), want: nil},
+		{name: "a folded thread question is refused", folded: threadPrompt("b"), ahead: prompt("a"), want: ErrThreadQuestion},
+		{name: "a thread question ahead is refused", folded: prompt("b"), ahead: threadPrompt("a"), want: ErrThreadQuestion},
 		{name: "the folded entry being edited is refused", folded: prompt("b"), ahead: prompt("a"), editing: "b", want: ErrEdited},
 		{name: "the entry ahead being edited is refused", folded: prompt("b"), ahead: prompt("a"), editing: "a", want: ErrEdited},
 	}

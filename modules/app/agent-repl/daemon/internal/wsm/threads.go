@@ -6,7 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
+
+	zettelv1 "agentrepl/proto/zettel/v1"
+	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
 )
@@ -59,9 +63,20 @@ func (r Repository) IsZettelHome() bool { return r.Kind == RepositoryKindZettel 
 // IT IS ADDITIVE: the previous build names no `kind` column, so every row it
 // writes takes the defaults (a git repository, a repository workspace), which
 // is exactly what that build ever writes.
+//
+// It also adds where a thread prompt's question was asked from: the held
+// prompt carries it (thread_parent) from the moment it is sent, so every copy
+// the queue makes of the hold carries it too, and the turn row it is delivered
+// as carries the question whole (thread_question, thread_parent) until the
+// answer is known and the exchange is recorded in zettel. The question's TEXT
+// is taken from the prompt's words when the turn row is written, so an edit of
+// the held prompt can never leave a stale copy of it.
 const threadsDDL = `
 ALTER TABLE repositories ADD COLUMN kind TEXT NOT NULL DEFAULT 'git' CHECK (kind IN ('git', 'zettel'));
 ALTER TABLE workspaces ADD COLUMN kind TEXT NOT NULL DEFAULT 'repository' CHECK (kind IN ('repository', 'thread'));
+ALTER TABLE held_prompts ADD COLUMN thread_parent BLOB;
+ALTER TABLE turns ADD COLUMN thread_question TEXT;
+ALTER TABLE turns ADD COLUMN thread_parent BLOB;
 
 CREATE TRIGGER workspaces_thread_lives_in_the_zettel_home_insert
 BEFORE INSERT ON workspaces
@@ -151,4 +166,100 @@ func ensureZettelHome(ctx context.Context, tx *sql.Tx, home string) (RepoID, err
 		return "", err
 	}
 	return id, nil
+}
+
+// ThreadAsk is where a thread prompt's question was asked from, decided when it
+// is sent. It rides the submission and the held prompt (threadsDDL), so it
+// survives every hold, re-hold and restart before delivery.
+type ThreadAsk struct {
+	// Parent is where the question came from.
+	Parent *zettelv1.NodeParent
+}
+
+// GetParentNodeID answers the node the question was asked of, "" for a thread
+// start or a nil ask.
+func (a *ThreadAsk) GetParentNodeID() string {
+	if a == nil {
+		return ""
+	}
+	return a.Parent.GetNode().GetNode().GetId()
+}
+
+// encodeThreadAsk renders an ask as its column, NULL for none.
+func encodeThreadAsk(a *ThreadAsk) (any, error) {
+	if a == nil {
+		return nil, nil
+	}
+	if a.Parent.GetOrigin() == nil {
+		return nil, errors.New("wsm: a thread ask carries where it was asked from")
+	}
+	blob, err := proto.Marshal(a.Parent)
+	if err != nil {
+		return nil, fmt.Errorf("wsm: encode a thread ask's parent: %w", err)
+	}
+	return blob, nil
+}
+
+// decodeThreadAsk reads the column back.
+func decodeThreadAsk(table, row string, parent []byte) (*ThreadAsk, error) {
+	if parent == nil {
+		return nil, nil
+	}
+	var decoded zettelv1.NodeParent
+	if err := proto.Unmarshal(parent, &decoded); err != nil {
+		return nil, &DecodeError{Table: table, Row: row, Field: "thread_parent", Err: err}
+	}
+	if decoded.GetOrigin() == nil {
+		return nil, &DecodeError{Table: table, Row: row, Field: "thread_parent", Err: errors.New("a thread ask's parent names an origin")}
+	}
+	return &ThreadAsk{Parent: &decoded}, nil
+}
+
+// ThreadQuestion is a thread turn's question as zettel will record it: the
+// words the user typed, and where they asked them from. It rides the turn row
+// (threadsDDL) from delivery until the answer is known.
+type ThreadQuestion struct {
+	// Text is the question as the user typed it, without the quoted material
+	// the daemon adds for the model.
+	Text string
+	// Parent is where the question came from.
+	Parent *zettelv1.NodeParent
+}
+
+// encodeThreadQuestion renders a question as its two columns, both NULL for
+// none. A question is stored whole or not at all.
+func encodeThreadQuestion(q *ThreadQuestion) (text, parent any, err error) {
+	if q == nil {
+		return nil, nil, nil
+	}
+	if strings.TrimSpace(q.Text) == "" {
+		return nil, nil, errors.New("wsm: a thread question carries the words the user typed")
+	}
+	if q.Parent.GetOrigin() == nil {
+		return nil, nil, errors.New("wsm: a thread question carries where it was asked from")
+	}
+	blob, err := proto.Marshal(q.Parent)
+	if err != nil {
+		return nil, nil, fmt.Errorf("wsm: encode a thread question's parent: %w", err)
+	}
+	return q.Text, blob, nil
+}
+
+// decodeThreadQuestion reads the two columns back; one set without the other,
+// or a parent that does not decode, is a corrupt row.
+func decodeThreadQuestion(table, row string, text sql.NullString, parent []byte) (*ThreadQuestion, error) {
+	switch {
+	case !text.Valid && parent == nil:
+		return nil, nil
+	case !text.Valid || parent == nil:
+		return nil, &DecodeError{Table: table, Row: row, Field: "thread_question", Err: errors.New("a thread question is stored whole or not at all")}
+	}
+	var decoded zettelv1.NodeParent
+	if err := proto.Unmarshal(parent, &decoded); err != nil {
+		return nil, &DecodeError{Table: table, Row: row, Field: "thread_parent", Err: err}
+	}
+	if decoded.GetOrigin() == nil {
+		return nil, &DecodeError{Table: table, Row: row, Field: "thread_parent", Err: errors.New("a thread question's parent names an origin")}
+	}
+	return &ThreadQuestion{Text: text.String, Parent: &decoded}, nil
 }

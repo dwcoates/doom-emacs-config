@@ -21,7 +21,7 @@ import (
 // refuse (see schema.go).
 const heldPromptColumns = `turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 	classification_arm, classification_reason, classification_command, classification_at,
-	tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced, sent_by`
+	tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced, sent_by, thread_parent`
 
 // scanHeldPrompt decodes one held prompt all-or-nothing. This is the row the
 // all-or-nothing rule was written for: a corrupt hold must never restore as a
@@ -47,10 +47,11 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 		actKind  sql.NullString
 		actValue sql.NullString
 		sentBy   sql.NullString
+		parent   []byte
 	)
 	if err := row.Scan(&h.Turn, &h.Workspace, &said, &h.Origin, &target, &holdKind, &schedule,
 		&arm, &reason, &command, &classAt, &tombKind, &tombAt, &queued, &delivery,
-		&actKind, &actValue, &h.Coalesced, &sentBy); err != nil {
+		&actKind, &actValue, &h.Coalesced, &sentBy, &parent); err != nil {
 		return HeldPrompt{}, err
 	}
 	id := string(h.Turn)
@@ -59,6 +60,11 @@ func scanHeldPrompt(row interface{ Scan(...any) error }) (HeldPrompt, error) {
 		return HeldPrompt{}, err
 	}
 	h.SentBy = from
+	ask, err := decodeThreadAsk("held_prompts", id, parent)
+	if err != nil {
+		return HeldPrompt{}, err
+	}
+	h.Ask = ask
 	// A delivery this build does not know is never read as the ordinary one: a
 	// deferred prompt misread would be classified and could interject.
 	h.Delivery = Delivery(delivery)
@@ -180,6 +186,11 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 		s.log.Error(op, "refused a held prompt whose sender and origin disagree", withError(fields, err))
 		return err
 	}
+	askParent, err := encodeThreadAsk(h.Ask)
+	if err != nil {
+		s.log.Error(op, "refused an unencodable thread ask", withError(fields, err))
+		return err
+	}
 	if h.Hold != nil {
 		fields["hold_kind"] = h.Hold.String()
 	}
@@ -216,8 +227,9 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO held_prompts (turn_id, workspace_id, said, origin, target, hold_kind, hold_schedule_id,
 			   classification_arm, classification_reason, classification_command, classification_at,
-			   accepted, tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced, sent_by)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+			   accepted, tombstone_kind, tombstone_at, queued_at, delivery, act_kind, act_value, coalesced, sent_by,
+			   thread_parent)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(turn_id) DO UPDATE SET
 			   workspace_id = excluded.workspace_id, said = excluded.said, origin = excluded.origin,
 			   target = excluded.target, hold_kind = excluded.hold_kind,
@@ -230,10 +242,10 @@ func (s *store) PutHeldPrompt(ctx context.Context, h HeldPrompt) error {
 			   tombstone_kind = excluded.tombstone_kind, tombstone_at = excluded.tombstone_at,
 			   queued_at = excluded.queued_at, delivery = excluded.delivery,
 			   act_kind = excluded.act_kind, act_value = excluded.act_value, coalesced = excluded.coalesced,
-			   sent_by = excluded.sent_by`,
+			   sent_by = excluded.sent_by, thread_parent = excluded.thread_parent`,
 			h.Turn, h.Workspace, said, h.Origin, target, holdKind, schedule,
 			arm, reason, command, classAt, tombKind, tombAt, nanos(h.QueuedAt), int(h.Delivery),
-			actKind, actValue, h.Coalesced, sentByColumn(h.SentBy))
+			actKind, actValue, h.Coalesced, sentByColumn(h.SentBy), askParent)
 		return err
 	})
 }

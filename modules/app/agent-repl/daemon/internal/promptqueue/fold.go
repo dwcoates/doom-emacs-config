@@ -46,6 +46,9 @@ var (
 	ErrAboveNotAPrompt = errors.New("promptqueue: the entry ahead is a session act, not a prompt")
 	// ErrAboveOtherAuthor is a fold into a prompt with another author.
 	ErrAboveOtherAuthor = errors.New("promptqueue: the entry ahead has another author")
+	// ErrThreadQuestion refuses a fold where either entry is a chat thread's
+	// question: one turn is one question.
+	ErrThreadQuestion = errors.New("promptqueue: a chat thread's question is never folded")
 	// ErrAboveMoved is a fold naming an entry that is no longer the one
 	// directly ahead. AboveMovedError carries it with the entry that is.
 	ErrAboveMoved = errors.New("promptqueue: the entry named is no longer directly ahead")
@@ -168,6 +171,9 @@ func (q *queue) aheadForFold(ctx context.Context, ws ids.WorkspaceID, folded wsm
 	case errors.Is(err, holdfold.ErrOtherAuthor):
 		log.Info(opFold, "the fold is refused: the entry ahead has another author", dlog.Context{"ahead_turn": string(ahead.Turn)})
 		return wsm.HeldPrompt{}, ErrAboveOtherAuthor
+	case errors.Is(err, holdfold.ErrThreadQuestion):
+		log.Info(opFold, "the fold is refused: a chat thread's question is never folded", nil)
+		return wsm.HeldPrompt{}, ErrThreadQuestion
 	case errors.Is(err, holdfold.ErrEdited):
 		log.Info(opFold, "the fold is refused: one of the two entries is being edited",
 			dlog.Context{"editing_turn": string(editing.Turn), "edit": editing.ID})
