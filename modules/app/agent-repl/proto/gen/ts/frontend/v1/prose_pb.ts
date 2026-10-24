@@ -34,7 +34,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/prose.proto.
  */
 export const file_frontend_v1_prose: GenFile = /*@__PURE__*/
-  fileDesc("Chdmcm9udGVuZC92MS9wcm9zZS5wcm90bxILZnJvbnRlbmQudjEiYAoLUGFyc2VkUHJvc2USJwoGYmxvY2tzGAEgAygLMhcuZnJvbnRlbmQudjEuUHJvc2VCbG9jaxIoCgZzb3VyY2UYAiABKAsyGC5mcm9udGVuZC52MS5Qcm9zZVNvdXJjZSIfCgtQcm9zZVNvdXJjZRIQCghtYXJrZG93bhgBIAEoCSKRAQoKUHJvc2VCbG9jaxIoCgVwbGFpbhgBIAEoCzIXLmZyb250ZW5kLnYxLlByb3NlUGxhaW5IABImCgR0cmVlGAIgASgLMhYuZnJvbnRlbmQudjEuUHJvc2VUcmVlSAASKAoFZW50cnkYAyABKAsyFy5mcm9udGVuZC52MS5Qcm9zZUVudHJ5SABCBwoFYmxvY2siZAoKUHJvc2VFbnRyeRIrCgVsYWJlbBgBIAEoCzIcLmZyb250ZW5kLnYxLlByb3NlRW50cnlMYWJlbBIpCgR0ZXh0GAIgASgLMhsuZnJvbnRlbmQudjEuUHJvc2VFbnRyeVRleHQiHwoPUHJvc2VFbnRyeUxhYmVsEgwKBHRleHQYASABKAkiIgoOUHJvc2VFbnRyeVRleHQSEAoIbWFya2Rvd24YASABKAkiHgoKUHJvc2VQbGFpbhIQCghtYXJrZG93bhgBIAEoCSJ0CglQcm9zZVRyZWUSMQoGaGVhZGVyGAEgASgLMhwuZnJvbnRlbmQudjEuUHJvc2VUcmVlSGVhZGVySACIAQESKQoFbm9kZXMYAiADKAsyGi5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlQgkKB19oZWFkZXIiHwoPUHJvc2VUcmVlSGVhZGVyEgwKBHRleHQYASABKAkirgIKDVByb3NlVHJlZU5vZGUSKAoCaWQYASABKAsyHC5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlSWQSLgoEcm9vdBgCIAEoCzIeLmZyb250ZW5kLnYxLlByb3NlVHJlZU5vZGVSb290SAASMgoGYnJhbmNoGAMgASgLMiAuZnJvbnRlbmQudjEuUHJvc2VUcmVlTm9kZUJyYW5jaEgAEi4KBWxhYmVsGAQgASgLMh8uZnJvbnRlbmQudjEuUHJvc2VUcmVlTm9kZUxhYmVsEiwKBHRleHQYBSABKAsyHi5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlVGV4dBIoCgRjb2RlGAYgAygLMhouZnJvbnRlbmQudjEuUHJvc2VUcmVlQ29kZUIHCgVwbGFjZSIgCg9Qcm9zZVRyZWVOb2RlSWQSDQoFaW5kZXgYASABKA0iVQoRUHJvc2VUcmVlTm9kZVJvb3QSNQoGbWFya2VyGAEgASgLMiAuZnJvbnRlbmQudjEuUHJvc2VUcmVlTm9kZU1hcmtlckgAiAEBQgkKB19tYXJrZXIiQwoTUHJvc2VUcmVlTm9kZUJyYW5jaBIsCgZwYXJlbnQYASABKAsyHC5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlSWQiIwoTUHJvc2VUcmVlTm9kZU1hcmtlchIMCgR0ZXh0GAEgASgJIiIKElByb3NlVHJlZU5vZGVMYWJlbBIMCgR0ZXh0GAEgASgJIiUKEVByb3NlVHJlZU5vZGVUZXh0EhAKCG1hcmtkb3duGAEgASgJIkEKDVByb3NlVHJlZUNvZGUSFQoIbGFuZ3VhZ2UYASABKAlIAIgBARIMCgRib2R5GAIgASgJQgsKCV9sYW5ndWFnZUIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z");
+  fileDesc("Chdmcm9udGVuZC92MS9wcm9zZS5wcm90bxILZnJvbnRlbmQudjEiYAoLUGFyc2VkUHJvc2USJwoGYmxvY2tzGAEgAygLMhcuZnJvbnRlbmQudjEuUHJvc2VCbG9jaxIoCgZzb3VyY2UYAiABKAsyGC5mcm9udGVuZC52MS5Qcm9zZVNvdXJjZSIfCgtQcm9zZVNvdXJjZRIQCghtYXJrZG93bhgBIAEoCSKkAQoKUHJvc2VCbG9jaxIoCgVwbGFpbhgBIAEoCzIXLmZyb250ZW5kLnYxLlByb3NlUGxhaW5IABImCgR0cmVlGAIgASgLMhYuZnJvbnRlbmQudjEuUHJvc2VUcmVlSAASLgoHZW50cmllcxgEIAEoCzIbLmZyb250ZW5kLnYxLlByb3NlRW50cnlUcmVlSABCBwoFYmxvY2tKBAgDEARSBWVudHJ5IkAKDlByb3NlRW50cnlUcmVlEi4KBW5vZGVzGAEgAygLMh8uZnJvbnRlbmQudjEuUHJvc2VFbnRyeVRyZWVOb2RlItgCChJQcm9zZUVudHJ5VHJlZU5vZGUSKAoCaWQYASABKAsyHC5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlSWQSMwoEcm9vdBgCIAEoCzIjLmZyb250ZW5kLnYxLlByb3NlRW50cnlUcmVlTm9kZVJvb3RIABI3CgZicmFuY2gYAyABKAsyJS5mcm9udGVuZC52MS5Qcm9zZUVudHJ5VHJlZU5vZGVCcmFuY2hIABIrCgVsYWJlbBgEIAEoCzIcLmZyb250ZW5kLnYxLlByb3NlRW50cnlMYWJlbBI3CgZhbnN3ZXIYBSABKAsyJS5mcm9udGVuZC52MS5Qcm9zZUVudHJ5VHJlZU5vZGVBbnN3ZXJIARIzCgRwYXRoGAYgASgLMiMuZnJvbnRlbmQudjEuUHJvc2VFbnRyeVRyZWVOb2RlUGF0aEgBQgcKBXBsYWNlQgYKBGtpbmQiGAoWUHJvc2VFbnRyeVRyZWVOb2RlUm9vdCJIChhQcm9zZUVudHJ5VHJlZU5vZGVCcmFuY2gSLAoGcGFyZW50GAEgASgLMhwuZnJvbnRlbmQudjEuUHJvc2VUcmVlTm9kZUlkIkUKGFByb3NlRW50cnlUcmVlTm9kZUFuc3dlchIpCgR0ZXh0GAEgASgLMhsuZnJvbnRlbmQudjEuUHJvc2VFbnRyeVRleHQiGAoWUHJvc2VFbnRyeVRyZWVOb2RlUGF0aCIfCg9Qcm9zZUVudHJ5TGFiZWwSDAoEdGV4dBgBIAEoCSIiCg5Qcm9zZUVudHJ5VGV4dBIQCghtYXJrZG93bhgBIAEoCSIeCgpQcm9zZVBsYWluEhAKCG1hcmtkb3duGAEgASgJInQKCVByb3NlVHJlZRIxCgZoZWFkZXIYASABKAsyHC5mcm9udGVuZC52MS5Qcm9zZVRyZWVIZWFkZXJIAIgBARIpCgVub2RlcxgCIAMoCzIaLmZyb250ZW5kLnYxLlByb3NlVHJlZU5vZGVCCQoHX2hlYWRlciIfCg9Qcm9zZVRyZWVIZWFkZXISDAoEdGV4dBgBIAEoCSKuAgoNUHJvc2VUcmVlTm9kZRIoCgJpZBgBIAEoCzIcLmZyb250ZW5kLnYxLlByb3NlVHJlZU5vZGVJZBIuCgRyb290GAIgASgLMh4uZnJvbnRlbmQudjEuUHJvc2VUcmVlTm9kZVJvb3RIABIyCgZicmFuY2gYAyABKAsyIC5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlQnJhbmNoSAASLgoFbGFiZWwYBCABKAsyHy5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlTGFiZWwSLAoEdGV4dBgFIAEoCzIeLmZyb250ZW5kLnYxLlByb3NlVHJlZU5vZGVUZXh0EigKBGNvZGUYBiADKAsyGi5mcm9udGVuZC52MS5Qcm9zZVRyZWVDb2RlQgcKBXBsYWNlIiAKD1Byb3NlVHJlZU5vZGVJZBINCgVpbmRleBgBIAEoDSJVChFQcm9zZVRyZWVOb2RlUm9vdBI1CgZtYXJrZXIYASABKAsyIC5mcm9udGVuZC52MS5Qcm9zZVRyZWVOb2RlTWFya2VySACIAQFCCQoHX21hcmtlciJDChNQcm9zZVRyZWVOb2RlQnJhbmNoEiwKBnBhcmVudBgBIAEoCzIcLmZyb250ZW5kLnYxLlByb3NlVHJlZU5vZGVJZCIjChNQcm9zZVRyZWVOb2RlTWFya2VyEgwKBHRleHQYASABKAkiIgoSUHJvc2VUcmVlTm9kZUxhYmVsEgwKBHRleHQYASABKAkiJQoRUHJvc2VUcmVlTm9kZVRleHQSEAoIbWFya2Rvd24YASABKAkiQQoNUHJvc2VUcmVlQ29kZRIVCghsYW5ndWFnZRgBIAEoCUgAiAEBEgwKBGJvZHkYAiABKAlCCwoJX2xhbmd1YWdlQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM");
 
 /**
  * A text the webapp draws as markdown, parsed by the daemon. It replaces the
@@ -126,14 +126,15 @@ export type ProseBlock = Message<"frontend.v1.ProseBlock"> & {
     case: "tree";
   } | {
     /**
-     * One entry of a PROMPT answering one label of a response's tree
-     * (`3.1.2 - my answer`). Only a prompt's text is read for entries: a
-     * response's numbered lines are its tree's, never entries.
+     * A run of a PROMPT's entries, each answering one label of a response's
+     * tree (`3.1.2 - my answer`), drawn as the tree their labels make. Only
+     * a prompt's text is read for entries: a response's numbered lines are
+     * its tree's, never entries.
      *
-     * @generated from field: frontend.v1.ProseEntry entry = 3;
+     * @generated from field: frontend.v1.ProseEntryTree entries = 4;
      */
-    value: ProseEntry;
-    case: "entry";
+    value: ProseEntryTree;
+    case: "entries";
   } | { case: undefined; value?: undefined };
 };
 
@@ -145,39 +146,185 @@ export const ProseBlockSchema: GenMessage<ProseBlock> = /*@__PURE__*/
   messageDesc(file_frontend_v1_prose, 2);
 
 /**
- * One entry of a prompt: a column-0 line opening on a label (a dotted label,
- * or any label followed by a separator `-`, `–`, `—` or `:`), and every line
- * up to the next such line or the end of the text. The grammar's rule
- * (tree-sitter-tldr/tldr_prompt). A line opening on a label and a marker
- * (`1 🔧 text`) is a pasted tree's root, never an entry.
+ * A run of a prompt's entries, drawn as a tree built from their labels alone.
  *
- * @generated from message frontend.v1.ProseEntry
+ * AN ENTRY is one column-0 line opening on a label (a dotted label, or any
+ * label followed by a separator `-`, `–`, `—` or `:`): the grammar's heading
+ * (tree-sitter-tldr/tldr_prompt). It is that ONE LINE: a line after it is the
+ * prompt's own prose, and ends the run. A line opening on a label and a marker
+ * (`1 🔧 text`) is a pasted tree's root, never an entry. Blank lines between
+ * two entries do not end the run.
+ *
+ * THE TREE IS THE LABELS'. Every entry is a node, and every ancestor its
+ * dotted label implies that no entry answers is a node too (`5.5.1` implies
+ * `5` and `5.5`), drawn by its label alone. Nodes keep the order their first
+ * entry appeared in; children follow the order of their first descendant
+ * entry. Two entries answering one label are two sibling nodes, the
+ * descendants of either attached to the first.
+ *
+ * THE DAEMON GUARANTEES what ProseTree guarantees: `nodes` is in reading
+ * order, a node's id is its index, a branch's parent id is smaller than its
+ * own. The webapp checks and refuses a tree that breaks them.
+ *
+ * @generated from message frontend.v1.ProseEntryTree
  */
-export type ProseEntry = Message<"frontend.v1.ProseEntry"> & {
+export type ProseEntryTree = Message<"frontend.v1.ProseEntryTree"> & {
   /**
-   * The label the entry answers, as written ("3.1.2"), without its
-   * separator. Never empty.
+   * @generated from field: repeated frontend.v1.ProseEntryTreeNode nodes = 1;
+   */
+  nodes: ProseEntryTreeNode[];
+};
+
+/**
+ * Describes the message frontend.v1.ProseEntryTree.
+ * Use `create(ProseEntryTreeSchema)` to create a new message.
+ */
+export const ProseEntryTreeSchema: GenMessage<ProseEntryTree> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_prose, 3);
+
+/**
+ * One node of an entry tree.
+ *
+ * @generated from message frontend.v1.ProseEntryTreeNode
+ */
+export type ProseEntryTreeNode = Message<"frontend.v1.ProseEntryTreeNode"> & {
+  /**
+   * The node's index in ProseEntryTree.nodes.
    *
-   * @generated from field: frontend.v1.ProseEntryLabel label = 1;
+   * @generated from field: frontend.v1.ProseTreeNodeId id = 1;
+   */
+  id?: ProseTreeNodeId | undefined;
+
+  /**
+   * Where the node stands. THE ARM IS THE PLACE.
+   *
+   * @generated from oneof frontend.v1.ProseEntryTreeNode.place
+   */
+  place: {
+    /**
+     * @generated from field: frontend.v1.ProseEntryTreeNodeRoot root = 2;
+     */
+    value: ProseEntryTreeNodeRoot;
+    case: "root";
+  } | {
+    /**
+     * @generated from field: frontend.v1.ProseEntryTreeNodeBranch branch = 3;
+     */
+    value: ProseEntryTreeNodeBranch;
+    case: "branch";
+  } | { case: undefined; value?: undefined };
+
+  /**
+   * The node's label, as written ("3.1.2"), without a separator. Never empty.
+   *
+   * @generated from field: frontend.v1.ProseEntryLabel label = 4;
    */
   label?: ProseEntryLabel | undefined;
 
   /**
-   * What the entry says: the words after the label and its separator, and
-   * every line the entry runs to, as markdown. May be empty: a label alone
-   * on its line, with nothing after it.
+   * What the node is. THE ARM IS THE KIND.
    *
-   * @generated from field: frontend.v1.ProseEntryText text = 2;
+   * @generated from oneof frontend.v1.ProseEntryTreeNode.kind
+   */
+  kind: {
+    /**
+     * An entry the person wrote: a click target that edits it.
+     *
+     * @generated from field: frontend.v1.ProseEntryTreeNodeAnswer answer = 5;
+     */
+    value: ProseEntryTreeNodeAnswer;
+    case: "answer";
+  } | {
+    /**
+     * An ancestor a deeper entry's label implies, which no entry answers:
+     * drawn by its label alone, dimmed.
+     *
+     * @generated from field: frontend.v1.ProseEntryTreeNodePath path = 6;
+     */
+    value: ProseEntryTreeNodePath;
+    case: "path";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message frontend.v1.ProseEntryTreeNode.
+ * Use `create(ProseEntryTreeNodeSchema)` to create a new message.
+ */
+export const ProseEntryTreeNodeSchema: GenMessage<ProseEntryTreeNode> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_prose, 4);
+
+/**
+ * A root of an entry tree: a node with no parent among the run's nodes.
+ *
+ * @generated from message frontend.v1.ProseEntryTreeNodeRoot
+ */
+export type ProseEntryTreeNodeRoot = Message<"frontend.v1.ProseEntryTreeNodeRoot"> & {
+};
+
+/**
+ * Describes the message frontend.v1.ProseEntryTreeNodeRoot.
+ * Use `create(ProseEntryTreeNodeRootSchema)` to create a new message.
+ */
+export const ProseEntryTreeNodeRootSchema: GenMessage<ProseEntryTreeNodeRoot> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_prose, 5);
+
+/**
+ * A branch of an entry tree.
+ *
+ * @generated from message frontend.v1.ProseEntryTreeNodeBranch
+ */
+export type ProseEntryTreeNodeBranch = Message<"frontend.v1.ProseEntryTreeNodeBranch"> & {
+  /**
+   * The node's parent. Its id is smaller than the branch's own.
+   *
+   * @generated from field: frontend.v1.ProseTreeNodeId parent = 1;
+   */
+  parent?: ProseTreeNodeId | undefined;
+};
+
+/**
+ * Describes the message frontend.v1.ProseEntryTreeNodeBranch.
+ * Use `create(ProseEntryTreeNodeBranchSchema)` to create a new message.
+ */
+export const ProseEntryTreeNodeBranchSchema: GenMessage<ProseEntryTreeNodeBranch> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_prose, 6);
+
+/**
+ * An entry the person wrote.
+ *
+ * @generated from message frontend.v1.ProseEntryTreeNodeAnswer
+ */
+export type ProseEntryTreeNodeAnswer = Message<"frontend.v1.ProseEntryTreeNodeAnswer"> & {
+  /**
+   * What the entry says: the words after its label and separator, on its one
+   * line, as markdown. May be empty: a label alone on its line.
+   *
+   * @generated from field: frontend.v1.ProseEntryText text = 1;
    */
   text?: ProseEntryText | undefined;
 };
 
 /**
- * Describes the message frontend.v1.ProseEntry.
- * Use `create(ProseEntrySchema)` to create a new message.
+ * Describes the message frontend.v1.ProseEntryTreeNodeAnswer.
+ * Use `create(ProseEntryTreeNodeAnswerSchema)` to create a new message.
  */
-export const ProseEntrySchema: GenMessage<ProseEntry> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 3);
+export const ProseEntryTreeNodeAnswerSchema: GenMessage<ProseEntryTreeNodeAnswer> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_prose, 7);
+
+/**
+ * An ancestor implied by a deeper entry's label.
+ *
+ * @generated from message frontend.v1.ProseEntryTreeNodePath
+ */
+export type ProseEntryTreeNodePath = Message<"frontend.v1.ProseEntryTreeNodePath"> & {
+};
+
+/**
+ * Describes the message frontend.v1.ProseEntryTreeNodePath.
+ * Use `create(ProseEntryTreeNodePathSchema)` to create a new message.
+ */
+export const ProseEntryTreeNodePathSchema: GenMessage<ProseEntryTreeNodePath> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_prose, 8);
 
 /**
  * An entry's label.
@@ -198,7 +345,7 @@ export type ProseEntryLabel = Message<"frontend.v1.ProseEntryLabel"> & {
  * Use `create(ProseEntryLabelSchema)` to create a new message.
  */
 export const ProseEntryLabelSchema: GenMessage<ProseEntryLabel> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 4);
+  messageDesc(file_frontend_v1_prose, 9);
 
 /**
  * What an entry says.
@@ -219,7 +366,7 @@ export type ProseEntryText = Message<"frontend.v1.ProseEntryText"> & {
  * Use `create(ProseEntryTextSchema)` to create a new message.
  */
 export const ProseEntryTextSchema: GenMessage<ProseEntryText> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 5);
+  messageDesc(file_frontend_v1_prose, 10);
 
 /**
  * A run of ordinary markdown, exactly as written.
@@ -241,7 +388,7 @@ export type ProsePlain = Message<"frontend.v1.ProsePlain"> & {
  * Use `create(ProsePlainSchema)` to create a new message.
  */
 export const ProsePlainSchema: GenMessage<ProsePlain> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 6);
+  messageDesc(file_frontend_v1_prose, 11);
 
 /**
  * A metaprompt TLDR tree, as a flat list of nodes related by identifier.
@@ -286,7 +433,7 @@ export type ProseTree = Message<"frontend.v1.ProseTree"> & {
  * Use `create(ProseTreeSchema)` to create a new message.
  */
 export const ProseTreeSchema: GenMessage<ProseTree> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 7);
+  messageDesc(file_frontend_v1_prose, 12);
 
 /**
  * The tree's opening `Response (…)` line, drawn above its first root.
@@ -307,7 +454,7 @@ export type ProseTreeHeader = Message<"frontend.v1.ProseTreeHeader"> & {
  * Use `create(ProseTreeHeaderSchema)` to create a new message.
  */
 export const ProseTreeHeaderSchema: GenMessage<ProseTreeHeader> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 8);
+  messageDesc(file_frontend_v1_prose, 13);
 
 /**
  * One node of a tree: a root or a branch, with its label, its text and any
@@ -380,7 +527,7 @@ export type ProseTreeNode = Message<"frontend.v1.ProseTreeNode"> & {
  * Use `create(ProseTreeNodeSchema)` to create a new message.
  */
 export const ProseTreeNodeSchema: GenMessage<ProseTreeNode> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 9);
+  messageDesc(file_frontend_v1_prose, 14);
 
 /**
  * A node's identity within one tree.
@@ -401,7 +548,7 @@ export type ProseTreeNodeId = Message<"frontend.v1.ProseTreeNodeId"> & {
  * Use `create(ProseTreeNodeIdSchema)` to create a new message.
  */
 export const ProseTreeNodeIdSchema: GenMessage<ProseTreeNodeId> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 10);
+  messageDesc(file_frontend_v1_prose, 15);
 
 /**
  * A top-level node of the tree.
@@ -424,7 +571,7 @@ export type ProseTreeNodeRoot = Message<"frontend.v1.ProseTreeNodeRoot"> & {
  * Use `create(ProseTreeNodeRootSchema)` to create a new message.
  */
 export const ProseTreeNodeRootSchema: GenMessage<ProseTreeNodeRoot> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 11);
+  messageDesc(file_frontend_v1_prose, 16);
 
 /**
  * A node under another node.
@@ -445,7 +592,7 @@ export type ProseTreeNodeBranch = Message<"frontend.v1.ProseTreeNodeBranch"> & {
  * Use `create(ProseTreeNodeBranchSchema)` to create a new message.
  */
 export const ProseTreeNodeBranchSchema: GenMessage<ProseTreeNodeBranch> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 12);
+  messageDesc(file_frontend_v1_prose, 17);
 
 /**
  * A root's opening symbol or emoji, drawn between its label and its text.
@@ -466,7 +613,7 @@ export type ProseTreeNodeMarker = Message<"frontend.v1.ProseTreeNodeMarker"> & {
  * Use `create(ProseTreeNodeMarkerSchema)` to create a new message.
  */
 export const ProseTreeNodeMarkerSchema: GenMessage<ProseTreeNodeMarker> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 13);
+  messageDesc(file_frontend_v1_prose, 18);
 
 /**
  * A node's label, drawn before its text.
@@ -487,7 +634,7 @@ export type ProseTreeNodeLabel = Message<"frontend.v1.ProseTreeNodeLabel"> & {
  * Use `create(ProseTreeNodeLabelSchema)` to create a new message.
  */
 export const ProseTreeNodeLabelSchema: GenMessage<ProseTreeNodeLabel> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 14);
+  messageDesc(file_frontend_v1_prose, 19);
 
 /**
  * A node's text, drawn after its label (and a root's marker).
@@ -510,7 +657,7 @@ export type ProseTreeNodeText = Message<"frontend.v1.ProseTreeNodeText"> & {
  * Use `create(ProseTreeNodeTextSchema)` to create a new message.
  */
 export const ProseTreeNodeTextSchema: GenMessage<ProseTreeNodeText> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 15);
+  messageDesc(file_frontend_v1_prose, 20);
 
 /**
  * A code block drawn beneath a node, opaque: never parsed as tree lines and
@@ -541,5 +688,5 @@ export type ProseTreeCode = Message<"frontend.v1.ProseTreeCode"> & {
  * Use `create(ProseTreeCodeSchema)` to create a new message.
  */
 export const ProseTreeCodeSchema: GenMessage<ProseTreeCode> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_prose, 16);
+  messageDesc(file_frontend_v1_prose, 21);
 

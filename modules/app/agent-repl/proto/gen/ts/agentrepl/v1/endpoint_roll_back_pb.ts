@@ -157,7 +157,7 @@ export const RollBackResendWholeSchema: GenMessage<RollBackResendWhole> = /*@__P
  */
 export type RollBackResendEntry = Message<"agentrepl.v1.RollBackResendEntry"> & {
   /**
-   * The label of the entry to replace, as frontend.v1.ProseEntry carries it.
+   * The label of the entry to replace, as a frontend.v1.ProseEntryTreeNode answer carries it.
    *
    * @generated from field: string label = 1;
    */

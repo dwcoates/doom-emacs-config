@@ -345,7 +345,7 @@ type SelectFeedRowEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The prompt's row.
 	Row *v11.FeedId `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
-	// The entry's label, as frontend.v1.ProseEntry carries it.
+	// The entry's label, as a frontend.v1.ProseEntryTreeNode answer carries it.
 	Label         string `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

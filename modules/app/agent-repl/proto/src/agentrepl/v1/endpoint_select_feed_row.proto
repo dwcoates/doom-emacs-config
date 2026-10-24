@@ -100,7 +100,7 @@ message SelectFeedRowAnswer {
 message SelectFeedRowEntry {
   // The prompt's row.
   frontend.v1.FeedId row = 1;
-  // The entry's label, as frontend.v1.ProseEntry carries it.
+  // The entry's label, as a frontend.v1.ProseEntryTreeNode answer carries it.
   string label = 2;
 }
 

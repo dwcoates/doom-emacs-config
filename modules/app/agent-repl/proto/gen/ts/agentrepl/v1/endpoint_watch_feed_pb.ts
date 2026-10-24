@@ -19,7 +19,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { FeedId, FeedRow, FeedSelection, FeedTextScale } from "../../frontend/v1/feed_pb";
+import type { FeedComposerEntry, FeedId, FeedRow, FeedSelection, FeedTextScale } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { FeedHeld } from "../../frontend/v1/feed_held_pb";
 import { file_frontend_v1_feed_held } from "../../frontend/v1/feed_held_pb";
@@ -33,7 +33,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_feed.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZmVlZC5wcm90bxIMYWdlbnRyZXBsLnYxIj8KEFdhdGNoRmVlZFJlcXVlc3QSKwoFd2F0Y2gYASABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4i0gIKEVdhdGNoRmVlZFJlc3BvbnNlEiEKA3JvdxgBIAEoCzIULmZyb250ZW5kLnYxLkZlZWRSb3cSMgoJc2VsZWN0aW9uGAIgASgLMhouZnJvbnRlbmQudjEuRmVlZFNlbGVjdGlvbkgAiAEBEjgKD2ZlZWRfdGV4dF9zY2FsZRgDIAEoCzIaLmZyb250ZW5kLnYxLkZlZWRUZXh0U2NhbGVIAYgBARI0CgRoZWxkGAQgASgLMiEuYWdlbnRyZXBsLnYxLldhdGNoRmVlZEhlbGRDaGFuZ2VIAogBARI5Cg1pbWFnZV9vdmVybGF5GAUgASgLMh0uZnJvbnRlbmQudjEuRmVlZEltYWdlT3ZlcmxheUgDiAEBQgwKCl9zZWxlY3Rpb25CEgoQX2ZlZWRfdGV4dF9zY2FsZUIHCgVfaGVsZEIQCg5faW1hZ2Vfb3ZlcmxheSKOAQoTV2F0Y2hGZWVkSGVsZENoYW5nZRIjCgRoZWxkGAEgASgLMhUuZnJvbnRlbmQudjEuRmVlZEhlbGQSIgoEcm93cxgCIAMoCzIULmZyb250ZW5kLnYxLkZlZWRSb3cSLgoFZm9sZHMYAyADKAsyHy5hZ2VudHJlcGwudjEuV2F0Y2hGZWVkSGVsZEZvbGQiWwoRV2F0Y2hGZWVkSGVsZEZvbGQSIwoGZm9sZGVkGAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEiEKBGludG8YAiABKAsyEy5mcm9udGVuZC52MS5GZWVkSWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_frontend_v1_feed, file_frontend_v1_feed_held, file_frontend_v1_feed_image_overlay, file_agentrepl_v1_feed_token]);
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZmVlZC5wcm90bxIMYWdlbnRyZXBsLnYxIj8KEFdhdGNoRmVlZFJlcXVlc3QSKwoFd2F0Y2gYASABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4iogMKEVdhdGNoRmVlZFJlc3BvbnNlEiEKA3JvdxgBIAEoCzIULmZyb250ZW5kLnYxLkZlZWRSb3cSMgoJc2VsZWN0aW9uGAIgASgLMhouZnJvbnRlbmQudjEuRmVlZFNlbGVjdGlvbkgAiAEBEjgKD2ZlZWRfdGV4dF9zY2FsZRgDIAEoCzIaLmZyb250ZW5kLnYxLkZlZWRUZXh0U2NhbGVIAYgBARI0CgRoZWxkGAQgASgLMiEuYWdlbnRyZXBsLnYxLldhdGNoRmVlZEhlbGRDaGFuZ2VIAogBARI5Cg1pbWFnZV9vdmVybGF5GAUgASgLMh0uZnJvbnRlbmQudjEuRmVlZEltYWdlT3ZlcmxheUgDiAEBEjsKDmNvbXBvc2VyX2VudHJ5GAYgASgLMh4uZnJvbnRlbmQudjEuRmVlZENvbXBvc2VyRW50cnlIBIgBAUIMCgpfc2VsZWN0aW9uQhIKEF9mZWVkX3RleHRfc2NhbGVCBwoFX2hlbGRCEAoOX2ltYWdlX292ZXJsYXlCEQoPX2NvbXBvc2VyX2VudHJ5Io4BChNXYXRjaEZlZWRIZWxkQ2hhbmdlEiMKBGhlbGQYASABKAsyFS5mcm9udGVuZC52MS5GZWVkSGVsZBIiCgRyb3dzGAIgAygLMhQuZnJvbnRlbmQudjEuRmVlZFJvdxIuCgVmb2xkcxgDIAMoCzIfLmFnZW50cmVwbC52MS5XYXRjaEZlZWRIZWxkRm9sZCJbChFXYXRjaEZlZWRIZWxkRm9sZBIjCgZmb2xkZWQYASABKAsyEy5mcm9udGVuZC52MS5GZWVkSWQSIQoEaW50bxgCIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_frontend_v1_feed, file_frontend_v1_feed_held, file_frontend_v1_feed_image_overlay, file_agentrepl_v1_feed_token]);
 
 /**
  * Opens the tail of the ONE feed the token names.
@@ -64,8 +64,8 @@ export const WatchFeedRequestSchema: GenMessage<WatchFeedRequest> = /*@__PURE__*
  *
  * A frame carries EXACTLY ONE of a row upsert (`row`), a response-selection
  * push (`selection`), a feed-text-scale push (`feed_text_scale`), a
- * held-section change (`held`), or an image-overlay push (`image_overlay`),
- * never more than one. The selection push is the daemon's per-workspace
+ * held-section change (`held`), an image-overlay push (`image_overlay`), or a
+ * composer-entry push (`composer_entry`), never more than one. The selection push is the daemon's per-workspace
  * reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
  * the ROOT feed's watch so the webapp recolors the selected final-response
  * bubble, center-scrolls it, and suppresses tail-follow while a selection is
@@ -122,6 +122,15 @@ export type WatchFeedResponse = Message<"agentrepl.v1.WatchFeedResponse"> & {
    * @generated from field: optional frontend.v1.FeedImageOverlay image_overlay = 5;
    */
   imageOverlay?: FeedImageOverlay | undefined;
+
+  /**
+   * The node the composer's entry at point answers, whole. Set on a
+   * composer-entry frame; unset otherwise. Carried on the ROOT feed's watch
+   * only, and the current state is sent the moment a root watch is accepted.
+   *
+   * @generated from field: optional frontend.v1.FeedComposerEntry composer_entry = 6;
+   */
+  composerEntry?: FeedComposerEntry | undefined;
 };
 
 /**

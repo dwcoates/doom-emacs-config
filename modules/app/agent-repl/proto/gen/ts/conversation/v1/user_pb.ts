@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/user.proto.
  */
 export const file_conversation_v1_user: GenFile = /*@__PURE__*/
-  fileDesc("Chpjb252ZXJzYXRpb24vdjEvdXNlci5wcm90bxIPY29udmVyc2F0aW9uLnYxIjkKCFVzZXJTYWlkEi0KB2NvbnRlbnQYASABKAsyHC5jb252ZXJzYXRpb24udjEuVXNlckNvbnRlbnQiQAoLVXNlckNvbnRlbnQSMQoGYmxvY2tzGAEgAygLMiEuY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50QmxvY2si4QEKEFVzZXJDb250ZW50QmxvY2sSKgoEdGV4dBgBIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5UZXh0QmxvY2tIABIsCgVpbWFnZRgCIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5JbWFnZUJsb2NrSAASOAoLdW5zdXBwb3J0ZWQYAyABKAsyIS5jb252ZXJzYXRpb24udjEuVW5zdXBwb3J0ZWRCbG9ja0gAEjAKBXF1b3RlGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLlVzZXJRdW90ZUJsb2NrSABCBwoFYmxvY2siHgoOVXNlclF1b3RlQmxvY2sSDAoEdGV4dBgBIAEoCUIwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_content_blocks]);
+  fileDesc("Chpjb252ZXJzYXRpb24vdjEvdXNlci5wcm90bxIPY29udmVyc2F0aW9uLnYxIjkKCFVzZXJTYWlkEi0KB2NvbnRlbnQYASABKAsyHC5jb252ZXJzYXRpb24udjEuVXNlckNvbnRlbnQiQAoLVXNlckNvbnRlbnQSMQoGYmxvY2tzGAEgAygLMiEuY29udmVyc2F0aW9uLnYxLlVzZXJDb250ZW50QmxvY2si4QEKEFVzZXJDb250ZW50QmxvY2sSKgoEdGV4dBgBIAEoCzIaLmNvbnZlcnNhdGlvbi52MS5UZXh0QmxvY2tIABIsCgVpbWFnZRgCIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5JbWFnZUJsb2NrSAASOAoLdW5zdXBwb3J0ZWQYAyABKAsyIS5jb252ZXJzYXRpb24udjEuVW5zdXBwb3J0ZWRCbG9ja0gAEjAKBXF1b3RlGAUgASgLMh8uY29udmVyc2F0aW9uLnYxLlVzZXJRdW90ZUJsb2NrSABCBwoFYmxvY2siMgoOVXNlclF1b3RlQmxvY2sSDAoEdGV4dBgBIAEoCRISCgpxdW90ZWRfcm93GAIgASgJQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_content_blocks]);
 
 /**
  * Something a person typed — the opening of a turn — or, when nested inside
@@ -149,6 +149,16 @@ export type UserQuoteBlock = Message<"conversation.v1.UserQuoteBlock"> & {
    * @generated from field: string text = 1;
    */
   text: string;
+
+  /**
+   * The daemon's own id of the quoted bubble's feed row (frontend.v1.FeedId's
+   * value), opaque to every other reader. It is what a reply's entries answer
+   * (frontend.v1.FeedResponse.answers). Empty on a quote recorded before it
+   * was kept, whose entries are bound as any prompt's are.
+   *
+   * @generated from field: string quoted_row = 2;
+   */
+  quotedRow: string;
 };
 
 /**

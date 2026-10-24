@@ -262,7 +262,7 @@ func (x *RollBackResendWhole) GetSaid() *v11.UserSaid {
 // TEXT instead: its label and separator kept, every other word unchanged.
 type RollBackResendEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The label of the entry to replace, as frontend.v1.ProseEntry carries it.
+	// The label of the entry to replace, as a frontend.v1.ProseEntryTreeNode answer carries it.
 	Label string `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
 	// What the entry says now.
 	Text string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
