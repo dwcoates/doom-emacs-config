@@ -1660,6 +1660,7 @@ type harness struct {
 	// SlashCommands is the real catalog table, which a test feeds directly.
 	SlashCommands *commandcatalog.Catalogs
 	Surfaces      *fakeSurfaces
+	Tests         *fakeTests
 	WebappDist    string
 }
 
@@ -1762,7 +1763,9 @@ func newHarness(t *testing.T, opts ...option) *harness {
 	}
 	h.Opens = opens
 
+	h.Tests = &fakeTests{}
 	deps := Deps{
+		Tests:             h.Tests,
 		SubagentMakers:    h.Makers,
 		DB:                h.DB,
 		Prompts:           h.Prompts,

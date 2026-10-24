@@ -151,6 +151,10 @@ type Options struct {
 	// outlives it is killed and answered as TimedOut, never as an error: the
 	// caller set the bound, so reaching it is an outcome the caller judges.
 	Timeout time.Duration
+	// ExtraFiles are open files the script inherits after its standard
+	// streams, extra[i] as fd 3+i (a test run's events pipe). The caller keeps
+	// its own copies and closes them when the run answers.
+	ExtraFiles []*os.File
 }
 
 // Cores is the run's average processor use, in cores: its CPU time over its
@@ -200,6 +204,7 @@ func (r *Runner) RunLinesWith(ctx context.Context, dir string, argv []string, op
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
 	cmd.Env = append(cleanEnv(os.Environ()), opts.Env...)
+	cmd.ExtraFiles = opts.ExtraFiles
 	// stdout and stderr are combined, in order, into one buffer: a caller
 	// painting a test gate's output or a deploy step's log wants what a
 	// terminal would have shown, not two streams it must interleave itself.

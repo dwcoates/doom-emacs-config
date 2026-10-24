@@ -54,6 +54,8 @@ import (
 type Deps struct {
 	// Instance is this daemon process's identity, for serving ownership.
 	Instance ids.InstanceID
+	// Tests runs a workspace's test script for RunTests (scriptrunner).
+	Tests TestRunner
 	// DB is the durable state, for the ownership check and the registry
 	// answers.
 	DB wsm.DB
@@ -447,6 +449,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the workspace verbs")
 	case deps.Retarget == nil:
 		return nil, missing("the retarget operation")
+	case deps.Tests == nil:
+		return nil, missing("a test runner")
 	case deps.Merge == nil:
 		return nil, missing("a merge orchestrator")
 	case deps.SubagentMakers == nil:

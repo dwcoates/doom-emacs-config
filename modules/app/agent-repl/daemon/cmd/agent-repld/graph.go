@@ -1455,6 +1455,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	return &graph{
 		Server: server.Deps{
 			Instance: p.Instance,
+			Tests:    scripts,
 			SubagentMakers: subagentmaker.New(subagentmaker.Deps{
 				Workspaces: p.DB.ListWorkspaces,
 				Session:    p.DB.Session,
