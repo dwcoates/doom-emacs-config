@@ -176,12 +176,15 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   - The parent is where the question was asked from, so the parents form a
     tree, which gives the chat stream and its sibling stacks one well-defined
     path to each node.
-  - Premises link a node to related nodes in other threads, and can be added
-    afterwards, when a later conversation turns out to connect to them.
-  - Each link records the revision of the node it points at.
-  - Open: whether the parent is expressed as the provenance's in-graph case,
-    whether premises added afterwards feed the model's context, and how cycles
-    among premises are prevented.
+  - A premise says one node is conceptual groundwork for another, regardless
+    of which was asked first. Asking about quarks one week and nuclear physics
+    the next still makes nuclear physics a premise of quarks. A premise is not
+    provenance, and premises can be added at any time.
+  - The parent link records the revision of the parent the question was
+    asked of.
+  - Open: whether the parent is expressed as the provenance's in-graph case;
+    who creates premises; whether premises feed the model's context; whether
+    a premise records a revision; how cycles among premises are prevented.
 
 - Chat nodes run on the Messages API, with context built from the graph,
   instead of Agent SDK sessions. A linear SDK transcript does not match a
