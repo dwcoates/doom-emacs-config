@@ -165,6 +165,8 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
     webapp works today;
   - desktop shell candidates: Electron, Tauri, Wails (Go, with the operating
     system's web view), or no shell at all (an installable web app).
+    Tauri is the leading candidate. Its Rust native side counts as no
+    downside (owner, 2026-10-24).
 
 ## Known complications
 
