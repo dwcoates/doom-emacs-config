@@ -128,9 +128,6 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   that makes sense on its own.
 - A node's content is versioned: each revision is frozen, and correcting an
   answer adds a new revision. The UI for corrections comes later.
-- A node can have several context parents, which makes the graph a directed
-  acyclic graph. A node's parents must already exist when it is created, so
-  cycles cannot happen.
 - Every node records where it came from: which contributor UI, which thing in
   it (a page of a book, a response bubble in a feed, a node in the graph), and
   the highlighted words if any, so a question and answer can always be traced
@@ -173,6 +170,18 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   not end the visits of the parents above.
 
 ## Proposed, not yet settled
+
+- Owner's proposal, 2026-10-24, replacing "a node can have several context
+  parents": a node has at most one parent, plus any number of premises.
+  - The parent is where the question was asked from, so the parents form a
+    tree, which gives the chat stream and its sibling stacks one well-defined
+    path to each node.
+  - Premises link a node to related nodes in other threads, and can be added
+    afterwards, when a later conversation turns out to connect to them.
+  - Each link records the revision of the node it points at.
+  - Open: whether the parent is expressed as the provenance's in-graph case,
+    whether premises added afterwards feed the model's context, and how cycles
+    among premises are prevented.
 
 - Chat nodes run on the Messages API, with context built from the graph,
   instead of Agent SDK sessions. A linear SDK transcript does not match a
