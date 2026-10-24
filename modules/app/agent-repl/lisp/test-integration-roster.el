@@ -1643,7 +1643,7 @@ the composer gate alone."
                                      (configDir . "/home/itest/.claude")))
                           (backfill . ((done . ())))
                           (,composer . ())))))
-    (naming . ())))
+    (naming . ()) (composerEntries . ())))
 
 (defun agent-repl-itest-roster--push-snapshot (daemon roster)
   "Push ROSTER on DAEMON's roster stream as a SNAPSHOT.

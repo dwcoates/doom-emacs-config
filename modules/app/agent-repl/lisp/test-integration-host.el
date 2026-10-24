@@ -127,7 +127,7 @@ accident."
                         (,composer . ())))))
     `((existing . ((id . ((value . "host-session-1")))
                    (live . ,live)))
-      (naming . ()))))
+      (naming . ()) (composerEntries . ()))))
 
 (defun agent-repl-itest-host--push-host (daemon workspace-id host &optional snapshot)
   "Push HOST (a HostWorkspace alist) on DAEMON's host stream for WORKSPACE-ID."
@@ -295,7 +295,7 @@ their own nature, and the daemon starts or revives implicitly on submit."
     (agent-repl-itest-host--with-subscription daemon ref
       ;; Act.
       (agent-repl-itest-host--push-host
-       daemon (plist-get ref :id) '((none . ()) (naming . ())))
+       daemon (plist-get ref :id) '((none . ()) (naming . ()) (composerEntries . ())))
       ;; Assert.
       (agent-repl-itest--wait-until
        (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws) :no-session))
@@ -314,7 +314,7 @@ treatment for this gate is the composer suite's business."
        daemon (plist-get ref :id)
        '((existing . ((id . ((value . "host-session-1")))
                       (terminal . ((rehydratable . t)))))
-         (naming . ())))
+         (naming . ()) (composerEntries . ())))
       ;; Assert.
       (agent-repl-itest--wait-until
        (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws) :terminal))
@@ -359,7 +359,7 @@ standing; both fields are unset until derived."
       ;; Act.
       (agent-repl-itest-host--push-host
        daemon (plist-get ref :id)
-       `((none . ()) (naming . ((slug . "itest-slug") (title . "Itest Title")))))
+       `((none . ()) (naming . ((slug . "itest-slug") (title . "Itest Title"))) (composerEntries . ())))
       ;; Assert.
       (agent-repl-itest--wait-until
        (lambda () (equal (agent-repl-host-display-title agent-repl-itest-host--ws)
@@ -378,7 +378,7 @@ unset title genuinely means \"not derived yet\"."
       ;; Act.
       (agent-repl-itest-host--push-host
        daemon (plist-get ref :id)
-       `((none . ()) (naming . ((slug . "itest-slug")))))
+       `((none . ()) (naming . ((slug . "itest-slug"))) (composerEntries . ())))
       ;; Assert.
       (agent-repl-itest--wait-until
        (lambda () (equal (agent-repl-host-display-title agent-repl-itest-host--ws)
@@ -466,7 +466,7 @@ freshly-started session's very first host push."
                                (shimAttached . t)
                                (backfill . ((done . ())))
                                (open . ())))))
-         (naming . ())))
+         (naming . ()) (composerEntries . ())))
       ;; Assert: the gate resolves normally — this is an accepted push.
       (agent-repl-itest--wait-until
        (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws) :open))
@@ -1093,7 +1093,7 @@ ELISP's own decoder, not the fake's."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
       ;; Act: `naming' present, but neither `none' nor `existing' set.
-      (agent-repl-itest--push daemon "host" '((host . ((naming . ()))))
+      (agent-repl-itest--push daemon "host" '((host . ((naming . ()) (composerEntries . ()))))
                               (plist-get ref :id))
       ;; Assert.
       (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
@@ -1116,7 +1116,7 @@ non-optional MESSAGE field absent → `agent-repl-wire-error'.\""
                                         (shimAttached . t)
                                         (backfill . ((done . ())))
                                         (open . ())))))
-                  (naming . ()))))
+                  (naming . ()) (composerEntries . ()))))
        (plist-get ref :id))
       ;; Assert.
       (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
@@ -1135,7 +1135,7 @@ unset oneof here is as much a breach as anywhere else in the contract."
       (agent-repl-itest--push
        daemon "host"
        '((host . ((existing . ((id . ((value . "host-session-1")))))
-                  (naming . ()))))
+                  (naming . ()) (composerEntries . ()))))
        (plist-get ref :id))
       ;; Assert.
       (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
@@ -1658,7 +1658,7 @@ represent it — so the DECODER is pinned directly, exactly as the
                                      (shimAttached . t)
                                      (backfill . ((done . nil)))
                                      (open . nil)))))
-               (naming . nil)))))
+               (naming . nil) (composerEntries . ())))))
    :type 'agent-repl-wire-error))
 
 ;; audit-2 #13
@@ -1675,7 +1675,7 @@ oneof too, and \"exactly one arm\" is not weaker inside a nested message."
                                      (backfill . ((done . nil)))
                                      (open . nil)
                                      (merging . nil)))))
-               (naming . nil)))))
+               (naming . nil) (composerEntries . ())))))
    :type 'agent-repl-wire-error))
 
 ;; audit-2 #14
@@ -1747,7 +1747,7 @@ user can see."
                                        (shimAttached . t)
                                        (backfill . ((done . ())))
                                        (open . ())))))
-                 (naming . ((title . "Refactor the codec")))))
+                 (naming . ((title . "Refactor the codec"))) (composerEntries . ())))
               ;; Assert.
               (agent-repl-itest--wait-until
                (lambda () (and (buffer-live-p buffer)
@@ -2236,7 +2236,7 @@ composer BY NAME rather than by the buffer object it already holds."
               ;; Act 1: a title carrying `*', the name form's own delimiter.
               (agent-repl-itest-host--push-host
                daemon (plist-get ref :id)
-               `((none . ()) (naming . ((title . "Fix *the* codec")))))
+               `((none . ()) (naming . ((title . "Fix *the* codec"))) (composerEntries . ())))
               (agent-repl-itest--wait-until
                (lambda () (string-match-p (regexp-quote "Fix the codec")
                                           (buffer-name buffer)))
@@ -2249,7 +2249,7 @@ composer BY NAME rather than by the buffer object it already holds."
               ;; Act 2: a SECOND, different title renames again.
               (agent-repl-itest-host--push-host
                daemon (plist-get ref :id)
-               `((none . ()) (naming . ((title . "Refactor the parser")))))
+               `((none . ()) (naming . ((title . "Refactor the parser"))) (composerEntries . ())))
               (agent-repl-itest--wait-until
                (lambda () (string-match-p (regexp-quote "Refactor the parser")
                                           (buffer-name buffer)))
@@ -2260,7 +2260,7 @@ composer BY NAME rather than by the buffer object it already holds."
               ;; Act 3: a title EQUAL to WS itself yields the bare canonical name.
               (agent-repl-itest-host--push-host
                daemon (plist-get ref :id)
-               `((none . ()) (naming . ((title . ,agent-repl-itest-host--ws)))))
+               `((none . ()) (naming . ((title . ,agent-repl-itest-host--ws))) (composerEntries . ())))
               (agent-repl-itest--wait-until
                (lambda () (equal (buffer-name buffer)
                                  (agent-repl--input-buffer-name agent-repl-itest-host--ws nil)))
@@ -2295,7 +2295,7 @@ in `agent-repl-host-state' by then."
     (agent-repl-itest-host--with-subscription daemon ref
       (agent-repl-itest-host--push-host
        daemon (plist-get ref :id)
-       `((none . ()) (naming . ((title . "Refactor the codec")))))
+       `((none . ()) (naming . ((title . "Refactor the codec"))) (composerEntries . ())))
       (agent-repl-itest--wait-until
        (lambda () (equal (agent-repl-host-display-title agent-repl-itest-host--ws)
                          "Refactor the codec"))
@@ -2332,10 +2332,10 @@ non-nil for exactly this reason."
               ;; Act: the SAME title, pushed for both workspaces.
               (agent-repl-itest-host--push-host
                daemon (plist-get ref-a :id)
-               `((none . ()) (naming . ((title . "Same Vendor Title")))))
+               `((none . ()) (naming . ((title . "Same Vendor Title"))) (composerEntries . ())))
               (agent-repl-itest-host--push-host
                daemon (plist-get ref-b :id)
-               `((none . ()) (naming . ((title . "Same Vendor Title")))))
+               `((none . ()) (naming . ((title . "Same Vendor Title"))) (composerEntries . ())))
               ;; Assert: both live, both still agent panels, distinct names.
               (agent-repl-itest--wait-until
                (lambda () (and (string-match-p "Same Vendor Title" (buffer-name buffer-a))

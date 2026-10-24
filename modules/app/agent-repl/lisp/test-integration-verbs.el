@@ -150,7 +150,7 @@ which leaves the push landing NO host state at all."
                                       (openedAtMs . "1735689600000")
                                       (linkSevered . ()))])
                           (open . ())))))
-    (naming . ())))
+    (naming . ()) (composerEntries . ())))
 
 (defun agent-repl-itest-verbs--await-health (text)
   "Block until the health buffer carries TEXT.
