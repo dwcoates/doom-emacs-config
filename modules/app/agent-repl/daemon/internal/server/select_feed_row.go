@@ -549,6 +549,9 @@ func (s *server) setSelection(ws ids.WorkspaceID, state *selectionState) {
 		delete(s.selections, ws)
 	}
 	s.selectionTopic(ws).Publish(state)
+	// What the composer's entries answer reads the selection
+	// (composer_entries.go).
+	s.composerChanges.Emit(ws)
 }
 
 // hostSelectionOf is the selection as Emacs needs it: the kind of row, and the

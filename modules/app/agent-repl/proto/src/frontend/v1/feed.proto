@@ -2740,6 +2740,10 @@ message FeedQuoteBlock {
   // The marker introducing the person's words, as the agent was told it,
   // without its trailing colon: "⟢ My message". Never empty.
   string closing = 4;
+  // The quoted bubble's row (conversation.v1.UserQuoteBlock.quoted_row),
+  // absent on a quote recorded before it was kept. The daemon binds a reply's
+  // entries to it (FeedResponse.answers).
+  optional FeedId quoted_row = 5;
 }
 
 // ①b A prompt one agent addressed to another — the user kind's sibling,

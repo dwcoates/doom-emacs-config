@@ -393,7 +393,7 @@ func TestSubmitAnswersAPanelCommandInline(t *testing.T) {
 func TestSubmitRecognizesACommandTypedAsAReply(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	said := replyquote.Quote(userSaid("/status"), "an earlier answer", false)
+	said := replyquote.Quote(userSaid("/status"), "an earlier answer", false, "")
 	// Act
 	got, err := h.h.Submit(context.Background(), theWorkspace, said, "key-1",
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, wsm.DeliveryOrdinary, nil)

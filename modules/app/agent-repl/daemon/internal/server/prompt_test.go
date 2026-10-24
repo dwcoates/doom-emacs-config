@@ -77,7 +77,7 @@ func join(parts []string) string {
 
 // TestSubmitPromptPrependsTheReferencedResponse pins that the markdown of the
 // response SELECTED when the prompt is accepted is quoted into the prompt as
-// its own LEADING BLOCK, under the response preamble, with the user's own
+// its own LEADING BLOCK, naming the quoted row, under the response preamble, with the user's own
 // words kept as the block after it (the wording is replyquote's, pinned
 // there). The reply target is not named on the request: the daemon reads its
 // own held selection.
@@ -104,7 +104,7 @@ func TestSubmitPromptPrependsTheReferencedResponse(t *testing.T) {
 
 	// Assert.
 	want := said("And its population?")
-	want.Content.Blocks = append([]*conversationv1.UserContentBlock{replyquote.Block("The capital is Paris.", false)},
+	want.Content.Blocks = append([]*conversationv1.UserContentBlock{replyquote.Block("The capital is Paris.", false, "resp-1")},
 		want.Content.Blocks...)
 	if !proto.Equal(h.Prompts.lastSaid, want) {
 		t.Fatalf("delivered prompt =\n%v\nwant\n%v", h.Prompts.lastSaid, want)
@@ -138,7 +138,7 @@ func TestSubmitPromptQuotesASelectedResponseProvedInterimSinceItsSelection(t *te
 
 	// Assert.
 	want := said("Why that file?")
-	want.Content.Blocks = append([]*conversationv1.UserContentBlock{replyquote.Block("Looking into it.", false)},
+	want.Content.Blocks = append([]*conversationv1.UserContentBlock{replyquote.Block("Looking into it.", false, "resp-1")},
 		want.Content.Blocks...)
 	if !proto.Equal(h.Prompts.lastSaid, want) {
 		t.Fatalf("delivered prompt =\n%v\nwant\n%v", h.Prompts.lastSaid, want)
@@ -247,7 +247,7 @@ func TestSubmitPromptWithASelectedPromptQuotesItAsAPromptAndEndsIt(t *testing.T)
 	}
 
 	// Assert: quoted as a prompt, in its own leading block.
-	want := replyquote.Quote(said("unchanged message"), "text of p2", true)
+	want := replyquote.Quote(said("unchanged message"), "text of p2", true, "p2")
 	if !proto.Equal(h.Prompts.lastSaid, want) {
 		t.Fatalf("delivered prompt = %v, want %v", h.Prompts.lastSaid, want)
 	}

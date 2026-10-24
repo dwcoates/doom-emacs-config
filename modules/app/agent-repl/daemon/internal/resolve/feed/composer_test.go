@@ -1,0 +1,217 @@
+package feed
+
+import (
+	"context"
+	"slices"
+	"testing"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"agent-repld/internal/replyquote"
+)
+
+// A COMPOSER'S ENTRIES target responses by the rule a sent prompt's entries
+// are bound by (entryTarget), read as if the prompt were the next row.
+
+// composerTree is a response tree whose nodes give every neighbor case:
+// 1 has children 1.1 and 1.2, 1.2 has 1.2.1, and 2 has 2.1.
+const composerTree = "1 🔧 One\n├── 1.1 a\n└── 1.2 b\n    └── 1.2.1 c\n\n2 ✅ Two\n└── 2.1 d"
+
+// twoAnsweredHarness draws two turns, answer-1 holding answeredTree and
+// answer-2 holding composerTree, both of which hold the labels 1, 1.1, 1.2.
+func twoAnsweredHarness(t *testing.T) *harness {
+	t.Helper()
+	h := answeredHarness(t)
+	h.deliverPrompt("turn-2", "and more")
+	h.send(responseSuccessActivity("answer-2", composerTree))
+	return h
+}
+
+// targetValues is TARGETS as row id values, "" for none.
+func targetValues(targets []*frontendv1.FeedId) []string {
+	out := make([]string, len(targets))
+	for i, t := range targets {
+		out[i] = t.GetValue()
+	}
+	return out
+}
+
+func TestComposerTargetsAreTheNewestResponseHoldingEachLabel(t *testing.T) {
+	// Arrange
+	h := twoAnsweredHarness(t)
+
+	// Act
+	got := targetValues(h.resolver.ComposerTargets(testWorkspace, nil, []string{"1.1", "2.1", "9.9"}))
+
+	// Assert: answer-2 is newest and holds 1.1 and 2.1; nothing holds 9.9.
+	want := []string{h.responseRowID("answer-2"), h.responseRowID("answer-2"), ""}
+	if !slices.Equal(got, want) {
+		t.Fatalf("targets = %v, want %v", got, want)
+	}
+}
+
+func TestComposerTargetsReachPastANewerResponseWithoutTheLabel(t *testing.T) {
+	// Arrange: answer-2 holds no tree.
+	h := answeredHarness(t)
+	h.deliverPrompt("turn-2", "and more")
+	h.send(responseSuccessActivity("answer-2", "just words"))
+
+	// Act
+	got := targetValues(h.resolver.ComposerTargets(testWorkspace, nil, []string{"1.1"}))
+
+	// Assert
+	if want := []string{h.responseRowID("answer-1")}; !slices.Equal(got, want) {
+		t.Fatalf("targets = %v, want the older response holding the label %v", got, want)
+	}
+}
+
+func TestComposerTargetsOfAReplyAreTheRepliedResponse(t *testing.T) {
+	// Arrange
+	h := twoAnsweredHarness(t)
+	reply := &frontendv1.FeedId{Value: h.responseRowID("answer-1")}
+
+	// Act: 1.1 is in both; 2.1 only in the newer answer-2.
+	got := targetValues(h.resolver.ComposerTargets(testWorkspace, reply, []string{"1.1", "2.1"}))
+
+	// Assert: the reply's response answers what it holds, and nothing else does.
+	if want := []string{h.responseRowID("answer-1"), ""}; !slices.Equal(got, want) {
+		t.Fatalf("targets = %v, want the replied response or nothing %v", got, want)
+	}
+}
+
+func TestComposerTargetsOfAReplyToAPromptAreBoundAsAnyPromptIs(t *testing.T) {
+	// Arrange: a reply to a prompt, which holds no tree.
+	h := twoAnsweredHarness(t)
+	reply := &frontendv1.FeedId{Value: h.promptRowID("turn-2")}
+
+	// Act
+	got := targetValues(h.resolver.ComposerTargets(testWorkspace, reply, []string{"1.1"}))
+
+	// Assert
+	if want := []string{h.responseRowID("answer-2")}; !slices.Equal(got, want) {
+		t.Fatalf("targets = %v, want the newest response holding the label %v", got, want)
+	}
+}
+
+func TestComposerTargetsOfAnUnknownWorkspaceAreNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	got := targetValues(h.resolver.ComposerTargets("ws-unknown", nil, []string{"1.1"}))
+
+	// Assert
+	if !slices.Equal(got, []string{""}) {
+		t.Fatalf("targets = %v, want nothing", got)
+	}
+}
+
+func TestEntryNeighborWalksTheTargetTree(t *testing.T) {
+	tests := []struct {
+		name   string
+		label  string
+		next   bool
+		want   string
+		wantOK bool
+	}{
+		{name: "next is the next sibling", label: "1.1", next: true, want: "1.2", wantOK: true},
+		{name: "next climbs to the parent's next sibling", label: "1.2.1", next: true, want: "2", wantOK: true},
+		{name: "next of a root is the next root", label: "1", next: true, want: "2", wantOK: true},
+		{name: "next of the tree's last node is none", label: "2.1", next: true},
+		{name: "previous is the previous sibling", label: "1.2", want: "1.1", wantOK: true},
+		{name: "previous of a first child is its parent", label: "1.1", want: "1", wantOK: true},
+		{name: "previous of the first root is none", label: "1"},
+		{name: "a label no response holds has no neighbor", label: "9.9", next: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := twoAnsweredHarness(t)
+
+			// Act
+			got, ok := h.resolver.EntryNeighbor(testWorkspace, nil, tc.label, tc.next)
+
+			// Assert
+			if got != tc.want || ok != tc.wantOK {
+				t.Fatalf("EntryNeighbor(%q, next=%v) = (%q, %v), want (%q, %v)", tc.label, tc.next, got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestEntryNeighborOfAReplyWalksTheRepliedTree(t *testing.T) {
+	// Arrange: answer-1's tree is 1, 1.1, 1.2; answer-2's has 1.2.1 under 1.2.
+	h := twoAnsweredHarness(t)
+	reply := &frontendv1.FeedId{Value: h.responseRowID("answer-1")}
+
+	// Act
+	got, ok := h.resolver.EntryNeighbor(testWorkspace, reply, "1.2", true)
+
+	// Assert: answer-1 has no node after 1.2.
+	if ok {
+		t.Fatalf("EntryNeighbor in the replied tree = (%q, true), want none", got)
+	}
+}
+
+func TestAReplysEntriesAnswerTheQuotedResponse(t *testing.T) {
+	// Arrange
+	h := twoAnsweredHarness(t)
+	quoted := h.responseRowID("answer-1")
+
+	// Act: a reply quoting answer-1 answers 1.1, which answer-2 holds too.
+	h.promptWith("turn-3", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		replyquote.Block("the old tree", false, quoted), textBlock("1.1 - this one"))
+
+	// Assert
+	older := answerPairs(h.responseOn(rootFeed(), "answer-1").GetAnswers())
+	newer := answerPairs(h.responseOn(rootFeed(), "answer-2").GetAnswers())
+	if want := [][2]string{{"1.1", h.promptRowID("turn-3")}}; !equalPairs(older, want) || len(newer) != 0 {
+		t.Fatalf("answer-1's answers = %v, answer-2's = %v; want the quoted one alone answered %v", older, newer, want)
+	}
+}
+
+func TestAQuoteDrawsTheRowItQuotes(t *testing.T) {
+	// Arrange
+	h := answeredHarness(t)
+	quoted := h.responseRowID("answer-1")
+
+	// Act
+	h.promptWith("turn-2", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		replyquote.Block("the old tree", false, quoted), textBlock("thanks"))
+
+	// Assert
+	if got := promptQuotedRow(h.promptRow("turn-2")); got != quoted {
+		t.Fatalf("the drawn quote's row = %q, want the quoted response %q", got, quoted)
+	}
+}
+
+func TestAQuoteRecordedWithoutItsRowDrawsNone(t *testing.T) {
+	// Arrange
+	h := answeredHarness(t)
+
+	// Act
+	h.promptWith("turn-2", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, quoteBlock("the old tree"), textBlock("thanks"))
+
+	// Assert
+	if got := promptQuotedRow(h.promptRow("turn-2")); got != "" {
+		t.Fatalf("the drawn quote's row = %q, want none", got)
+	}
+}
+
+func TestALabelChangeIsAnnouncedOnTheRootFeed(t *testing.T) {
+	// Arrange
+	h := answeredHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	changes := h.resolver.WatchLabelChanges(ctx)
+
+	// Act
+	h.deliverPrompt("turn-2", "and more")
+	h.send(responseSuccessActivity("answer-2", composerTree))
+
+	// Assert
+	if ws := <-changes; ws != testWorkspace {
+		t.Fatalf("announced %q, want the workspace whose response tree was drawn", ws)
+	}
+}

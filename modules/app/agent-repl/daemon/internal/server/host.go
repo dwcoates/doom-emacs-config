@@ -224,6 +224,11 @@ func (s *server) composeHostWorkspace(
 		log.Debug(op, "the host view carries the standing ask", dlog.Context{"row": ask.GetRow().GetValue()})
 	}
 
+	// THE COMPOSER'S ENTRIES THAT ANSWER NOTHING are state too, as last
+	// restated (composer_entries.go); always set, empty while every reported
+	// label targets a response.
+	view.ComposerEntries = &agentreplv1.HostComposerEntries{Unanswered: s.composerUnansweredOf(ws)}
+
 	facts, live := s.deps.SessionFacts.HostSessionFacts(ws)
 	switch {
 	case live:

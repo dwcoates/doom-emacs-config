@@ -1201,6 +1201,16 @@ func (f *fakeLogin) Close(context.Context, ids.WorkspaceID) error { return f.clo
 // fakeFeed answers the page and tail seams.
 type fakeFeed struct {
 	feed.Resolver
+	// targets is the response row each label targets (ComposerTargets),
+	// keyed by label; a missing label targets nothing. targetReplies records
+	// the reply each ComposerTargets call was asked for, in order.
+	targets       map[string]string
+	targetReplies []string
+	// neighbors is each label's neighbor (EntryNeighbor), keyed by the
+	// label, a NUL, and "next" or "previous".
+	neighbors map[string]string
+	// labelMoves is what WatchLabelChanges announces (moveLabels).
+	labelMoves publish.Events[ids.WorkspaceID]
 	// entries is what each prompt row's entry says, keyed by row id, a NUL,
 	// and the entry's label: what PromptEntry answers.
 	entries map[string]string
@@ -1385,6 +1395,32 @@ func (f *fakeFeed) SetMergeFold(_ ids.WorkspaceID, id *frontendv1.FeedId, folded
 // with no scripted text; unreadable breaks that guarantee for a row, so a test
 // can drive the defect path. An unselectable row is never selectable.
 // PromptEntry answers the entry text a test filed under the row and label.
+func (f *fakeFeed) ComposerTargets(_ ids.WorkspaceID, reply *frontendv1.FeedId, labels []string) []*frontendv1.FeedId {
+	f.sentMu.Lock()
+	f.targetReplies = append(f.targetReplies, reply.GetValue())
+	f.sentMu.Unlock()
+	out := make([]*frontendv1.FeedId, len(labels))
+	for i, label := range labels {
+		if row, ok := f.targets[label]; ok {
+			out[i] = &frontendv1.FeedId{Value: row}
+		}
+	}
+	return out
+}
+
+func (f *fakeFeed) EntryNeighbor(_ ids.WorkspaceID, _ *frontendv1.FeedId, label string, next bool) (string, bool) {
+	way := "previous"
+	if next {
+		way = "next"
+	}
+	neighbor, ok := f.neighbors[label+"\x00"+way]
+	return neighbor, ok
+}
+
+func (f *fakeFeed) WatchLabelChanges(ctx context.Context) <-chan ids.WorkspaceID {
+	return f.labelMoves.Subscribe(ctx)
+}
+
 func (f *fakeFeed) PromptEntry(_ ids.WorkspaceID, id *frontendv1.FeedId, label string) (string, bool) {
 	text, ok := f.entries[id.GetValue()+"\x00"+label]
 	return text, ok

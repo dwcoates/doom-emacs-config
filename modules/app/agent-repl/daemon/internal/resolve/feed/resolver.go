@@ -58,6 +58,9 @@ type resolver struct {
 	hostAsks map[ids.WorkspaceID]*agentreplv1.HostAsk
 	// askChanges announces every workspace whose hostAsks entry moved.
 	askChanges publish.Events[ids.WorkspaceID]
+	// labelChanges announces every workspace whose root feed changed what a
+	// composer's entry can target (composer.go).
+	labelChanges publish.Events[ids.WorkspaceID]
 	// deliveries is every cross-session message a row here was drawn for, by
 	// its delivery id: what is known of its two ends, and the rows waiting to
 	// name them (peerdelivery.go). Across workspaces, because one message's two
