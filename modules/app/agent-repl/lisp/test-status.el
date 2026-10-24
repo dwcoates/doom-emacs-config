@@ -5548,12 +5548,21 @@ rows the roster holds (812 records per switch before, 2026-10-15)."
                      (list (plist-get (plist-get row :unselected) :bg)
                            (plist-get (plist-get row :unselected) :fg)))))))
 
-(ert-deftest agent-repl-test-respec-tab-faces-replaces-a-stale-spec ()
-  "A face left on an old color by an earlier load takes its color again."
+(ert-deftest agent-repl-test-every-colored-tab-face-is-an-agent-repl-defface ()
+  "Each colored tab face is defined by `agent-repl-defface', so a load re-specs it."
   ;; Arrange
-  (face-spec-set 'agent-repl-tab-done (agent-repl--tab-face-spec "#000001") 'face-defface-spec)
-  ;; Act
-  (agent-repl--respec-tab-faces)
-  ;; Assert
-  (should (equal (plist-get (cdar (face-default-spec 'agent-repl-tab-done)) :background)
-                 agent-repl--color-done-green)))
+  (let ((defined nil))
+    (with-temp-buffer
+      (insert-file-contents (expand-file-name "status.el" agent-repl-test--module-dir))
+      ;; Act
+      (condition-case nil
+          (while t
+            (let ((form (read (current-buffer))))
+              (when (and (eq (car-safe form) 'agent-repl-defface)
+                         (eq (car-safe (cadr form)) 'quote))
+                (push (cadr (cadr form)) defined))))
+        (end-of-file nil)))
+    ;; Assert
+    (dolist (pair agent-repl--tab-state-faces)
+      (should (memq (car pair) defined)))))
+

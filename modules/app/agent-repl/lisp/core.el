@@ -4514,6 +4514,24 @@ under `emacs -Q', where Evil is absent."
       (dolist (binding agent-repl-feed-zoom-keys)
         (evil-define-key* state map (kbd (car binding)) (cdr binding))))))
 
+;;;; ---- Faces a reload re-specs --------------------------------------------
+
+;; A `defface' keeps a face's FIRST spec when its file is loaded again, so a
+;; reload that changes the spec leaves the live face as the first load made
+;; it (owner report, 2026-10-17: two greens in one tab, after a tab color
+;; moved).  `agent-repl-defface' states the spec again as the face's default
+;; on every load, so the live face equals the source by construction; a
+;; user's own customization still wins over a default spec.
+
+(defun agent-repl-defface (face spec doc &rest args)
+  "Define FACE as `defface' does, re-stating SPEC as its default on each load.
+DOC and ARGS are `defface''s, which expands to `custom-declare-face' with
+the same arguments.  A function rather than a macro, so a file calling it
+byte-compiles on its own.  Returns FACE."
+  (apply #'custom-declare-face face spec doc args)
+  (face-spec-set face spec 'face-defface-spec)
+  face)
+
 ;;;; ---- Keymaps a reload rebuilds ------------------------------------------
 
 ;; A keymap built inside `(defvar MAP (let ...))' is built ONCE per Emacs:

@@ -4978,6 +4978,28 @@ module loaded, about jobs nothing owns any more."
 
 ;;;; ---- Tests: keymaps a reload rebuilds ----
 
+(ert-deftest agent-repl-test-defface-defines-the-face-with-its-spec ()
+  "`agent-repl-defface' defines the face, with SPEC as its default spec."
+  ;; Act
+  (let ((face (agent-repl-defface 'agent-repl-test-defface-a
+                '((t :foreground "#010203"))
+                "A test face.")))
+    ;; Assert
+    (should (eq face 'agent-repl-test-defface-a))
+    (should (facep 'agent-repl-test-defface-a))
+    (should (equal (face-default-spec 'agent-repl-test-defface-a)
+                   '((t :foreground "#010203"))))))
+
+(ert-deftest agent-repl-test-defface-a-second-load-re-specs-the-face ()
+  "A second definition with a new spec replaces the first, unlike `defface'."
+  ;; Arrange
+  (agent-repl-defface 'agent-repl-test-defface-b '((t :foreground "#000001")) "A test face.")
+  ;; Act
+  (agent-repl-defface 'agent-repl-test-defface-b '((t :foreground "#000002")) "A test face.")
+  ;; Assert
+  (should (equal (face-default-spec 'agent-repl-test-defface-b)
+                 '((t :foreground "#000002")))))
+
 (ert-deftest agent-repl-test-refill-keymap-keeps-the-keymap-object ()
   "The refilled map is the SAME object, so holders of it see the new chords."
   ;; Arrange
