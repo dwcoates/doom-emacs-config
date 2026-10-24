@@ -132,7 +132,43 @@ func check(cfg *repoconfigv1.DeployConfig) error {
 			return err
 		}
 	}
+	if cfg.Concurrent != nil {
+		if cfg.GetConcurrent().GetThrough() == nil {
+			return errors.New("concurrent names no stage: `through_pre_deploy: {}` or `through_deploy: {}`")
+		}
+		if cfg.GetPreDeploy().GetLocalMerge() != nil {
+			return errors.New("concurrent cannot be set with pre_deploy.local_merge: a local merge lands on the target, which one deploy at a time may move")
+		}
+	}
 	return nil
+}
+
+// Stage is one of a deploy's three stages, in the order a deploy runs them.
+type Stage int
+
+// The stages.
+const (
+	StagePreDeploy Stage = iota
+	StageDeploy
+	StagePostDeploy
+)
+
+// Concurrent reports whether STAGE runs concurrently under CFG: deploys run
+// it side by side ahead of their turn, rather than one at a time in queue
+// order. Only a leading run of stages can be (DeployConfig.concurrent).
+func Concurrent(cfg *repoconfigv1.DeployConfig, stage Stage) bool {
+	switch cfg.GetConcurrent().GetThrough().(type) {
+	case *repoconfigv1.DeployConcurrentStages_ThroughPreDeploy:
+		return stage == StagePreDeploy
+	case *repoconfigv1.DeployConcurrentStages_ThroughDeploy:
+		return stage <= StageDeploy
+	}
+	return false
+}
+
+// AnyConcurrent reports whether CFG runs any stage concurrently.
+func AnyConcurrent(cfg *repoconfigv1.DeployConfig) bool {
+	return Concurrent(cfg, StagePreDeploy)
 }
 
 // checkEntry refuses a hook entry with no hook or no scope.
