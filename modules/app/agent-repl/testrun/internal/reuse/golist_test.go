@@ -10,7 +10,7 @@ import (
 func TestDecodeGoListReadsTheRecordStream(t *testing.T) {
 	// Arrange
 	out := []byte(`{"ImportPath":"fmt","Dir":"/goroot/src/fmt","Standard":true}
-{"ImportPath":"m/pkg","Dir":"/r/pkg","Module":{"Path":"m","Dir":"/r","GoMod":"/r/go.mod"}}`)
+{"ImportPath":"m/pkg","Dir":"/r/pkg","Module":{"Path":"m","Dir":"/r","GoMod":"/r/go.mod"},"CgoFiles":["binding.go"]}`)
 
 	// Act
 	pkgs, err := DecodeGoList(out)
@@ -19,7 +19,7 @@ func TestDecodeGoListReadsTheRecordStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pkgs) != 2 || !pkgs[0].Standard || pkgs[1].Module.GoMod != "/r/go.mod" {
+	if len(pkgs) != 2 || !pkgs[0].Standard || pkgs[1].Module.GoMod != "/r/go.mod" || !slices.Equal(pkgs[1].CgoFiles, []string{"binding.go"}) {
 		t.Fatalf("DecodeGoList = %+v", pkgs)
 	}
 }
@@ -109,5 +109,31 @@ func TestAddPatternWalkPlacesWhatDotDotDotWalks(t *testing.T) {
 	}
 	if got, want := set.Dirs(), []string{"mod", "mod/internal", "mod/internal/a"}; !slices.Equal(got, want) {
 		t.Fatalf("Dirs = %v, want %v", got, want)
+	}
+}
+
+func TestAddGoPackagesPlacesACgoPackagesWholeTree(t *testing.T) {
+	// Arrange: a cgo binding whose C includes a header from a subdirectory.
+	root := writeTree(t, map[string]string{
+		"mod/go.mod":                           "module m",
+		"mod/grammar/src/binding.go":           "package grammar",
+		"mod/grammar/src/tree_sitter/parser.h": "",
+	})
+	pkgs := []GoPackage{{ImportPath: "m/grammar", Dir: filepath.Join(root, "mod", "grammar", "src"),
+		Module: &GoModule{GoMod: filepath.Join(root, "mod", "go.mod")}, CgoFiles: []string{"binding.go"}}}
+	set := NewInputSet()
+
+	// Act
+	err := AddGoPackages(set, root, pkgs)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := set.Trees(), []string{"mod/grammar/src"}; !slices.Equal(got, want) {
+		t.Errorf("Trees = %v, want %v: the whole package, its headers' subdirectories included", got, want)
+	}
+	if got := set.FlatDirs(); len(got) != 0 {
+		t.Errorf("FlatDirs = %v, want none: the tree covers the package", got)
 	}
 }

@@ -19,6 +19,10 @@ type GoPackage struct {
 	Dir        string
 	Standard   bool
 	Module     *GoModule
+	// CgoFiles are the package's files that import "C". Their C sources
+	// include headers by relative path from any subdirectory of the package
+	// (tree-sitter's "tree_sitter/parser.h"), which no listing names.
+	CgoFiles []string
 }
 
 // GoModule is a package's module, as `go list -json` reports it.
@@ -35,7 +39,7 @@ type GoLister func(dir, tags string, tests bool, patterns ...string) ([]GoPackag
 
 // ExecGoList is GoLister over the real `go list -deps -json`.
 func ExecGoList(dir, tags string, tests bool, patterns ...string) ([]GoPackage, error) {
-	args := []string{"list", "-deps", "-json=ImportPath,Dir,Standard,Module"}
+	args := []string{"list", "-deps", "-json=ImportPath,Dir,Standard,Module,CgoFiles"}
 	if tests {
 		args = append(args, "-test")
 	}
@@ -73,8 +77,9 @@ func DecodeGoList(out []byte) ([]GoPackage, error) {
 
 // AddGoPackages places what a Go build of pkgs reads from the checkout at
 // repo: each package directory inside it (its listing, every file directly in
-// it, and its testdata tree, which `go test` gives the package by convention)
-// and each such module's go.mod and go.sum. Standard-library packages and
+// it, and its testdata tree, which `go test` gives the package by convention;
+// a cgo package's WHOLE tree, since its C includes headers from any
+// subdirectory by relative path) and each such module's go.mod and go.sum. Standard-library packages and
 // packages outside the checkout (the module cache) are covered by the
 // toolchain version and go.sum, not by the file set.
 func AddGoPackages(set *InputSet, repo string, pkgs []GoPackage) error {
@@ -89,7 +94,11 @@ func AddGoPackages(set *InputSet, repo string, pkgs []GoPackage) error {
 		if !inside {
 			continue
 		}
-		if err := addPackageDir(set, repo, rel); err != nil {
+		if len(p.CgoFiles) > 0 {
+			if err := set.AddTree(rel); err != nil {
+				return fmt.Errorf("reuse: cgo package %s: %w", p.ImportPath, err)
+			}
+		} else if err := addPackageDir(set, repo, rel); err != nil {
 			return fmt.Errorf("reuse: package %s: %w", p.ImportPath, err)
 		}
 		if p.Module == nil || p.Module.GoMod == "" {
