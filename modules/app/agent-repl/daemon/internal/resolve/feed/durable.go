@@ -77,6 +77,14 @@ func (r *resolver) restoreDurable(s *wsState) {
 			log.Info(opDurable, "a durable merge tab of a kind this daemon no longer draws is not drawn again", fields)
 			continue
 		}
+		// A ROW CARRYING FIELDS THIS BUILD HAS NO DESCRIPTOR FOR is refused
+		// alone: served, the webapp refuses the whole page it is on. A retired
+		// shape is re-encoded by a wsm layout step, so one reaching here is a
+		// retirement no step carried over.
+		if carriesUnknownFields(stored.Row, row) {
+			log.Error(opDurable, "a durable row carries fields this build has no descriptor for and is drawn nowhere", fields)
+			continue
+		}
 		ref, err := r.deps.Decode(row.GetId())
 		if err != nil {
 			fields["cause"] = err.Error()
@@ -145,6 +153,17 @@ func reserveOrder(f *feedState, key string) error {
 // arm frontend.v1.FeedMergeTab has retired (the conflicts and fixes tabs, now
 // parts of a commit's and a run's subtabs): it decodes with no kind, and no
 // client can draw it.
+// carriesUnknownFields reports whether ROW, decoded from RAW, carries anywhere
+// in it a field this build has no descriptor for: proto.Equal compares unknown
+// fields, so the row differs from RAW decoded with them discarded.
+func carriesUnknownFields(raw []byte, row *frontendv1.FeedRow) bool {
+	known := &frontendv1.FeedRow{}
+	if err := (proto.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, known); err != nil {
+		return true
+	}
+	return !proto.Equal(row, known)
+}
+
 func retiredMergeTab(row *frontendv1.FeedRow) bool {
 	tab := row.GetMergeTab()
 	return tab != nil && tab.GetKind() == nil

@@ -11,6 +11,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
@@ -393,6 +394,40 @@ func TestARedrawnMergeTabOfARetiredKindIsNotDrawn(t *testing.T) {
 	}
 	if hasRecordIn(log, "error", opDurable) || hasRecordIn(log, "warn", opDurable) {
 		t.Fatalf("records = %+v, want no warn or error for a retired tab", log.Records())
+	}
+}
+
+func TestARedrawnRowCarryingAFieldThisBuildCannotDescribeIsAnErrorAndDrawsNothing(t *testing.T) {
+	// Arrange: one good row, and an agent prompt whose text block carries a
+	// field number the schema has no descriptor for.
+	store := newFakeDurableRows()
+	first, _ := daemonOver(t, store)
+	first.UpsertDurable(testWorkspace, rootFeed(), mergeHeadRow("landed"))
+	block := &frontendv1.FeedTextBlock{}
+	block.ProtoReflect().SetUnknown(protowire.AppendString(protowire.AppendTag(nil, 1, protowire.BytesType), "raw text"))
+	unknown, err := proto.Marshal(&frontendv1.FeedRow{Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
+		Body: &frontendv1.FeedAgentPromptBody{Blocks: []*frontendv1.FeedAgentPromptBlock{{Block: &frontendv1.FeedAgentPromptBlock_Text{Text: block}}}},
+	}}})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := store.PutDurableFeedRow(context.Background(), wsm.DurableFeedRow{
+		Workspace: testWorkspace, RowID: "row|unknown", Plane: int(planeLive), OrderKey: "2zzzz", Row: unknown,
+	}); err != nil {
+		t.Fatalf("PutDurableFeedRow: %v", err)
+	}
+
+	// Act
+	second, log := daemonOver(t, store)
+	rows := feedRows(second, rootFeed())
+
+	// Assert
+	if len(rows) != 1 || labelOf(rows[0]) != "landed" {
+		t.Fatalf("rows = %+v, want the good row alone", rows)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opDurable,
+		Message: "a durable row carries fields this build has no descriptor for and is drawn nowhere"}); !ok {
+		t.Fatalf("records = %+v, want the row refused at error for its unknown field", log.Records())
 	}
 }
 
