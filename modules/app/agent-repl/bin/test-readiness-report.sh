@@ -92,7 +92,7 @@ make_repo() {
              "$root/agent-shim/shim-store" \
              "$root/agent-shim/claude/shim/dist" \
              "$root/agent-shim/claude/shim-sidecar" \
-             "$root/agent-shim/shim-lock" \
+             "$root/agent-shim/shim-lock" "$root/zettel" \
              "$root/webapp/dist" "$root/home/.cache/agent-repl/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/readiness-report.sh"
     cp "$LIB_UNDER_TEST" "$root/bin/lib-deploy-stamp.sh"
@@ -104,7 +104,7 @@ make_repo() {
     git_c "$root" init -q
     for d in proto agent-shim/shim-store \
              agent-shim/claude/shim agent-shim/claude/shim-sidecar \
-             agent-shim/shim-lock webapp daemon; do
+             agent-shim/shim-lock zettel webapp daemon; do
         echo "rev0" > "$root/$d/file.txt"
         git_c "$root" add -A
         n=$((n + 1))
@@ -315,7 +315,7 @@ t_unknown_deployed_revision_errors_per_system() {
     if [ "$RC" -eq 0 ] \
        && [ "$(jq_get "$OUT" 'sysmap["webapp"]["commits_behind"]')" = "None" ] \
        && [ "$(jq_get "$OUT" '"not present in this checkout" in sysmap["webapp"]["error"]')" = "True" ] \
-       && [ "$(jq_get "$OUT" 'len(d["systems"])')" = "6" ]; then
+       && [ "$(jq_get "$OUT" 'len(d["systems"])')" = "7" ]; then
         pass "a stamp naming an unknown revision errors that system only, exit stays 0"
     else
         fail "a stamp naming an unknown revision errors that system only, exit stays 0" \
