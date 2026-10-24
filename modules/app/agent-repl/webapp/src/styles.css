@@ -253,13 +253,14 @@
      settled, but not the turn's answer) wears NO border (owner request,
      2026-10-14, retiring the pear edge of 2026-09-23), as a thinking bubble
      wears none. */
-  /* THE GREEN ANSWER EDGE IS DRAWN AT HALF STRENGTH (owner ruling,
-     2026-10-08; owner request, 2026-10-14: the final response's green border
-     must read thin). Every bubble border is already 0.3px, which a Retina
-     WebKit rounds up to one device pixel, the thinnest line it draws, so a
-     narrower width changes nothing on screen. A fainter line is what reads
-     thinner: the hue at this share of its strength, in both themes. */
-  --response-border-strength: 50%;
+  /* THE GREEN ANSWER EDGE IS DRAWN AT 35% STRENGTH (owner ruling,
+     2026-10-08; owner requests, 2026-10-14: the final response's green border
+     must read thin, and 2026-10-24: half strength still read too prominent).
+     Every bubble border is already 0.3px, which a Retina WebKit rounds up to
+     one device pixel, the thinnest line it draws, so a narrower width changes
+     nothing on screen. A fainter line is what reads thinner: the hue at this
+     share of its strength, in both themes. */
+  --response-border-strength: 35%;
   /* THE SELECTED ENTRY's color: the ring on a non-bubble card a footer
      detached-work jump landed on. A selected BUBBLE is marked by its fill
      instead (--selected-bubble-bg, below). */
