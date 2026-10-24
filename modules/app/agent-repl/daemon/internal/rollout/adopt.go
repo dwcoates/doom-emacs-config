@@ -638,6 +638,16 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 			return fmt.Errorf("rollout: adopt %q: decode the carried cold gate: %w", ws, err)
 		}
 	}
+	// A SHIM PARKED AT ITS COLD GATE HOLDS NO LOCK, and it is running: it
+	// refused the resume before it took one (workspace.Fleet.AdoptParked), and
+	// the incumbent detached it for this daemon. Its free lock is not "no
+	// process to dial", and undialed it would be served by no daemon at all:
+	// a hidden workspace's bring-up is withheld, so nothing else here would
+	// ever reach it (shims 76760, 76813 and 76849, 2026-10-23 17:59).
+	if parked != nil && !dial {
+		c.log.Debug(opAdopt, "the lock reads free because the shim is parked at its cold gate; dialing it", fields)
+		dial = true
+	}
 
 	// THE ROW IS CLAIMED BEFORE THE SHIM IS DIALED, through the one
 	// arbitration the incumbent's reclaim also goes through. An incumbent
