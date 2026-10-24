@@ -77,6 +77,7 @@ enum DeployComponent {
   DEPLOY_COMPONENT_STORE = 4;
   DEPLOY_COMPONENT_SIDECAR = 5;
   DEPLOY_COMPONENT_ELISP = 6;
+  DEPLOY_COMPONENT_ZETTEL = 7;
 }
 
 // What the deploy decided for one component.
