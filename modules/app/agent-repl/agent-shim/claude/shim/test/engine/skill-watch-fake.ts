@@ -21,6 +21,12 @@ export class FakeSkillWatchFs implements SkillWatchFs {
   readonly watches = new Map<string, { onEvent: (name: string | null) => void; onError: (err: Error) => void }[]>();
   /** Directories whose watch refuses to start. */
   readonly unwatchable = new Set<string>();
+  /**
+   * What happens on disk the instant a watch on a directory begins, before it
+   * can see anything: a change landing between a look and a watch, which no
+   * event reports.
+   */
+  readonly onWatchBegins = new Map<string, () => void>();
 
   mkdir(dir: string): void {
     const parts = dir.split("/").filter(Boolean);
@@ -58,6 +64,11 @@ export class FakeSkillWatchFs implements SkillWatchFs {
 
   watchDir(dir: string, onEvent: (name: string | null) => void, onError: (err: Error) => void): DirWatch {
     if (this.unwatchable.has(dir)) throw new Error(`EMFILE: too many open files, watch '${dir}'`);
+    const begins = this.onWatchBegins.get(dir);
+    if (begins !== undefined) {
+      this.onWatchBegins.delete(dir);
+      begins();
+    }
     const entry = { onEvent, onError };
     const list = this.watches.get(dir) ?? [];
     list.push(entry);

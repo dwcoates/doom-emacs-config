@@ -113,6 +113,45 @@ describe("SkillSetWatch", () => {
     ]);
   });
 
+  it("reports a skills directory that appeared while its ancestor's watch was being armed", () => {
+    // Arrange: `.claude` appears; `.claude/skills` lands between the look and
+    // the watch on `.claude`, an appearance no event reports.
+    const fsys = new FakeFs();
+    fsys.mkdir(CWD);
+    const changes: string[] = [];
+    const watch = new SkillSetWatch([`${CWD}/.claude/skills`], fsys, (changed) => changes.push(changed));
+    watch.start();
+    fsys.mkdir(`${CWD}/.claude`);
+    fsys.onWatchBegins.set(`${CWD}/.claude`, () => fsys.mkdir(`${CWD}/.claude/skills/gamma`));
+
+    // Act
+    fsys.fire(CWD, ".claude");
+
+    // Assert
+    expect([changes, fsys.watching(`${CWD}/.claude/skills`), fsys.watching(`${CWD}/.claude/skills/gamma`)]).toEqual([
+      [`${CWD}/.claude/skills`],
+      true,
+      true,
+    ]);
+  });
+
+  it("watches a skills directory that appeared while the watch was starting, reporting nothing", () => {
+    // Arrange: the skills directory lands between the start's look and its
+    // watch on the ancestor. The watch starts before the vendor loads its
+    // skills, so the vendor loads this one: no change is owed.
+    const fsys = new FakeFs();
+    fsys.mkdir(CWD);
+    const changes: string[] = [];
+    const watch = new SkillSetWatch([`${CWD}/.claude/skills`], fsys, (changed) => changes.push(changed));
+    fsys.onWatchBegins.set(CWD, () => fsys.mkdir(`${CWD}/.claude/skills`));
+
+    // Act
+    watch.start();
+
+    // Assert
+    expect([changes, fsys.watching(`${CWD}/.claude/skills`)]).toEqual([[], true]);
+  });
+
   it("ignores an ancestor's event for another entry", () => {
     const fsys = new FakeFs();
     fsys.mkdir(CWD);
