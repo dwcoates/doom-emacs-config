@@ -3074,13 +3074,33 @@
     "prose": {
       "blocks": [
         {
-          "entry": {
-            "label": {
-              "text": "3.1"
-            },
-            "text": {
-              "markdown": "yes"
-            }
+          "entries": {
+            "nodes": [
+              {
+                "id": {},
+                "root": {},
+                "label": {
+                  "text": "3"
+                },
+                "path": {}
+              },
+              {
+                "id": {
+                  "index": 1
+                },
+                "branch": {
+                  "parent": {}
+                },
+                "label": {
+                  "text": "3.1"
+                },
+                "answer": {
+                  "text": {
+                    "markdown": "yes"
+                  }
+                }
+              }
+            ]
           }
         }
       ],
@@ -3095,13 +3115,33 @@
     "prose": {
       "blocks": [
         {
-          "entry": {
-            "label": {
-              "text": "3.1"
-            },
-            "text": {
-              "markdown": "yes"
-            }
+          "entries": {
+            "nodes": [
+              {
+                "id": {},
+                "root": {},
+                "label": {
+                  "text": "3"
+                },
+                "path": {}
+              },
+              {
+                "id": {
+                  "index": 1
+                },
+                "branch": {
+                  "parent": {}
+                },
+                "label": {
+                  "text": "3.1"
+                },
+                "answer": {
+                  "text": {
+                    "markdown": "yes"
+                  }
+                }
+              }
+            ]
           }
         },
         {

@@ -1,6 +1,8 @@
 package prose
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -10,55 +12,104 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
-// entryBlock is the entry block answering LABEL with TEXT.
-func entryBlock(label, text string) *frontendv1.ProseBlock {
-	return &frontendv1.ProseBlock{Block: &frontendv1.ProseBlock_Entry{Entry: &frontendv1.ProseEntry{
-		Label: &frontendv1.ProseEntryLabel{Text: label},
-		Text:  &frontendv1.ProseEntryText{Markdown: text},
-	}}}
-}
-
-// plainBlock is the plain block of MARKDOWN.
-func plainBlock(markdown string) *frontendv1.ProseBlock {
-	return &frontendv1.ProseBlock{Block: &frontendv1.ProseBlock_Plain{Plain: &frontendv1.ProsePlain{Markdown: markdown}}}
+// promptShape is a parsed prompt in a form a test can state: each block on
+// its own line, an entry tree's nodes indented beneath it. A node reads
+// `label ^parent = "words"` for an entry, `label ^parent ·` for a path node,
+// with `^-` for a root.
+func promptShape(p *frontendv1.ParsedProse) string {
+	var b strings.Builder
+	for _, block := range p.GetBlocks() {
+		switch {
+		case block.GetPlain() != nil:
+			fmt.Fprintf(&b, "plain %q\n", block.GetPlain().GetMarkdown())
+		case block.GetTree() != nil:
+			b.WriteString("tree\n")
+		case block.GetEntries() != nil:
+			b.WriteString("entries\n")
+			for _, n := range block.GetEntries().GetNodes() {
+				parent := "-"
+				if br := n.GetBranch(); br != nil {
+					parent = fmt.Sprint(br.GetParent().GetIndex())
+				}
+				if a := n.GetAnswer(); a != nil {
+					fmt.Fprintf(&b, "  %s ^%s = %q\n", n.GetLabel().GetText(), parent, a.GetText().GetMarkdown())
+				} else {
+					fmt.Fprintf(&b, "  %s ^%s ·\n", n.GetLabel().GetText(), parent)
+				}
+			}
+		}
+	}
+	return b.String()
 }
 
 func TestParsePromptReadsEntries(t *testing.T) {
 	tests := []struct {
 		name string
 		text string
-		want []*frontendv1.ProseBlock
+		want string
 	}{
-		{name: "a label and a dash", text: "3.1.2 - my answer", want: []*frontendv1.ProseBlock{entryBlock("3.1.2", "my answer")}},
-		{name: "a label and a colon", text: "3.1: my answer", want: []*frontendv1.ProseBlock{entryBlock("3.1", "my answer")}},
-		{name: "a label and an em dash", text: "2 — my answer", want: []*frontendv1.ProseBlock{entryBlock("2", "my answer")}},
-		{name: "a dotted label alone, then words", text: "3.1.2 my answer", want: []*frontendv1.ProseBlock{entryBlock("3.1.2", "my answer")}},
-		{name: "a label on its own line", text: "3.1.2\nmy answer", want: []*frontendv1.ProseBlock{entryBlock("3.1.2", "my answer")}},
-		{name: "a label with nothing after it", text: "3.1.2 -", want: []*frontendv1.ProseBlock{entryBlock("3.1.2", "")}},
+		{name: "a label and a dash", text: "3.1.2 - my answer", want: lines("entries", "  3 ^- ·", "  3.1 ^0 ·", `  3.1.2 ^1 = "my answer"`, "")},
+		{name: "a label and a colon", text: "3.1: my answer", want: lines("entries", "  3 ^- ·", `  3.1 ^0 = "my answer"`, "")},
+		{name: "a label and an em dash", text: "2 — my answer", want: lines("entries", `  2 ^- = "my answer"`, "")},
+		{name: "a dotted label alone, then words", text: "3.1 my answer", want: lines("entries", "  3 ^- ·", `  3.1 ^0 = "my answer"`, "")},
+		{name: "a label with nothing after it", text: "3.1 -", want: lines("entries", "  3 ^- ·", `  3.1 ^0 = ""`, "")},
 		{
-			name: "an entry running to several lines",
+			name: "an entry is its one line, and the line after it is prose",
 			text: "3.1 - first\nmore of it\n",
-			want: []*frontendv1.ProseBlock{entryBlock("3.1", "first\nmore of it")},
+			want: lines("entries", "  3 ^- ·", `  3.1 ^0 = "first"`, `plain "more of it"`, ""),
 		},
 		{
-			name: "two entries, a blank line apart",
+			name: "a label on its own line says nothing, and the line after it is prose",
+			text: "3.1\nmy answer",
+			want: lines("entries", "  3 ^- ·", `  3.1 ^0 = ""`, `plain "my answer"`, ""),
+		},
+		{
+			name: "entries a blank line apart are one tree",
 			text: "3.1 - first\n\n3.2 - second",
-			want: []*frontendv1.ProseBlock{entryBlock("3.1", "first"), entryBlock("3.2", "second")},
+			want: lines("entries", "  3 ^- ·", `  3.1 ^0 = "first"`, `  3.2 ^0 = "second"`, ""),
+		},
+		{
+			name: "entries answering far-apart labels make the tree their labels imply",
+			text: "3.1 - a\n4.2 - b\n5.5.1 - c",
+			want: lines("entries",
+				"  3 ^- ·", `  3.1 ^0 = "a"`,
+				"  4 ^- ·", `  4.2 ^2 = "b"`,
+				"  5 ^- ·", "  5.5 ^4 ·", `  5.5.1 ^5 = "c"`, ""),
+		},
+		{
+			name: "a label written after another branch joins its own parent",
+			text: "3.1 - a\n4.2 - b\n3.2 - c",
+			want: lines("entries", "  3 ^- ·", `  3.1 ^0 = "a"`, `  3.2 ^0 = "c"`, "  4 ^- ·", `  4.2 ^3 = "b"`, ""),
+		},
+		{
+			name: "an entry answering an implied ancestor answers that node",
+			text: "3.1 - a\n3 - b",
+			want: lines("entries", `  3 ^- = "b"`, `  3.1 ^0 = "a"`, ""),
+		},
+		{
+			name: "two entries answering one label are sibling nodes",
+			text: "3.1 - a\n3.1 - b",
+			want: lines("entries", "  3 ^- ·", `  3.1 ^0 = "a"`, `  3.1 ^0 = "b"`, ""),
+		},
+		{
+			name: "a line of prose between entries ends the run",
+			text: "3.1 - a\na note\n3.2 - b",
+			want: lines("entries", "  3 ^- ·", `  3.1 ^0 = "a"`, `plain "a note"`, "entries", "  3 ^- ·", `  3.2 ^0 = "b"`, ""),
 		},
 		{
 			name: "words before the first entry",
 			text: "thanks, a few notes\n3.1 - first",
-			want: []*frontendv1.ProseBlock{plainBlock("thanks, a few notes"), entryBlock("3.1", "first")},
+			want: lines(`plain "thanks, a few notes"`, "entries", "  3 ^- ·", `  3.1 ^0 = "first"`, ""),
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := ParsePrompt(dlog.NewTestLogger(), tc.text)
+			got := promptShape(ParsePrompt(dlog.NewTestLogger(), tc.text))
 
 			// Assert
-			if !proto.Equal(&frontendv1.ParsedProse{Blocks: got.GetBlocks()}, &frontendv1.ParsedProse{Blocks: tc.want}) {
-				t.Fatalf("blocks of %q = %v, want %v", tc.text, got.GetBlocks(), tc.want)
+			if got != tc.want {
+				t.Fatalf("ParsePrompt(%q) =\n%s\nwant\n%s", tc.text, got, tc.want)
 			}
 		})
 	}
@@ -116,8 +167,8 @@ func TestParsePromptDrawsAPastedTreeAfterAnEntryAsATree(t *testing.T) {
 	got := ParsePrompt(dlog.NewTestLogger(), text).GetBlocks()
 
 	// Assert
-	if len(got) != 2 || got[0].GetEntry().GetLabel().GetText() != "3.1" || got[1].GetTree() == nil {
-		t.Fatalf("blocks = %v, want the entry and then the tree", got)
+	if len(got) != 2 || got[0].GetEntries() == nil || got[1].GetTree() == nil {
+		t.Fatalf("blocks = %v, want the entries and then the tree", got)
 	}
 }
 
@@ -158,9 +209,9 @@ func TestReplaceEntrySwapsOneEntrysWords(t *testing.T) {
 		{name: "after a dash", text: "3.1 - old words", label: "3.1", says: "new words", want: "3.1 - new words"},
 		{name: "after a colon", text: "3.1: old", label: "3.1", says: "new", want: "3.1: new"},
 		{name: "after a dotted label alone", text: "3.1 old", label: "3.1", says: "new", want: "3.1 new"},
-		{name: "on the line after its label", text: "3.1\nold", label: "3.1", says: "new", want: "3.1\nnew"},
+		{name: "a label alone, the line after it kept as prose", text: "3.1\nold", label: "3.1", says: "new", want: "3.1 new\nold"},
 		{name: "after a label with nothing after it", text: "3.1 -", label: "3.1", says: "new", want: "3.1 - new"},
-		{name: "running to several lines", text: "3.1 - old\nmore old\n", label: "3.1", says: "new", want: "3.1 - new\n"},
+		{name: "only its own line, the line after it kept", text: "3.1 - old\nmore old\n", label: "3.1", says: "new", want: "3.1 - new\nmore old\n"},
 		{
 			name: "among others, each kept",
 			text: "thanks\n3.1 - first\n\n3.2 - second\n3.3 - third", label: "3.2", says: "changed",

@@ -27,9 +27,9 @@ var promptParsers = sync.Pool{New: func() any {
 	return p
 }}
 
-// entrySpan is one entry of a prompt's text: the byte span of its section,
-// its label, and where what it says begins (after the label and any
-// separator).
+// entrySpan is one entry of a prompt's text: the byte span of its one line
+// (its newline included), its label, and where what it says begins (after the
+// label and any separator).
 type entrySpan struct {
 	start, end int
 	label      string
@@ -37,10 +37,10 @@ type entrySpan struct {
 }
 
 // ParsePrompt parses a PROMPT's TEXT into the ParsedProse the webapp draws:
-// every entry answering a label (`3.1.2 - my answer`) as an entry block, and
-// the text around the entries exactly as Parse reads it, trees and all. A
-// prompt is settled text. Its source is the text as written: a prompt's
-// labels are the person's, and nothing renumbers them.
+// every run of entries answering labels (`3.1.2 - my answer`) as one entry
+// tree (entryTree), and the text around the runs exactly as Parse reads it,
+// trees and all. A prompt is settled text. Its source is the text as written:
+// a prompt's labels are the person's, and nothing renumbers them.
 //
 // A failure is a bug, recorded on LOG once and then a panic, as Parse's is.
 func ParsePrompt(log dlog.Logger, text string) (parsed *frontendv1.ParsedProse) {
@@ -74,16 +74,12 @@ func parsePrompt(text string) *frontendv1.ParsedProse {
 	}
 	out := &frontendv1.ParsedProse{Source: &frontendv1.ProseSource{Markdown: text}}
 	at := 0
-	for _, e := range entries {
-		if e.start > at {
-			out.Blocks = append(out.Blocks, parse(text[at:e.start], Settled).Blocks...)
+	for _, run := range entryRuns(text, entries) {
+		if start := run[0].start; start > at {
+			out.Blocks = append(out.Blocks, parse(text[at:start], Settled).Blocks...)
 		}
-		says := strings.TrimRight(strings.TrimLeft(text[e.textStart:e.end], " \t\n"), "\n")
-		out.Blocks = append(out.Blocks, &frontendv1.ProseBlock{Block: &frontendv1.ProseBlock_Entry{Entry: &frontendv1.ProseEntry{
-			Label: &frontendv1.ProseEntryLabel{Text: e.label},
-			Text:  &frontendv1.ProseEntryText{Markdown: says},
-		}}})
-		at = e.end
+		out.Blocks = append(out.Blocks, &frontendv1.ProseBlock{Block: &frontendv1.ProseBlock_Entries{Entries: entryTree(text, run)}})
+		at = run[len(run)-1].end
 	}
 	if at < len(text) {
 		out.Blocks = append(out.Blocks, parse(text[at:], Settled).Blocks...)
@@ -91,8 +87,114 @@ func parsePrompt(text string) *frontendv1.ParsedProse {
 	return out
 }
 
-// readEntries answers TEXT's entries, in order: every section of the prompt
-// grammar's parse whose heading carries no marker. A heading with a marker
+// entryRuns groups ENTRIES of TEXT into runs: entries with nothing but blank
+// lines between them. Any other line between two entries ends a run.
+func entryRuns(text string, entries []entrySpan) [][]entrySpan {
+	var runs [][]entrySpan
+	for i, e := range entries {
+		if i > 0 && strings.TrimSpace(text[entries[i-1].end:e.start]) == "" {
+			runs[len(runs)-1] = append(runs[len(runs)-1], e)
+			continue
+		}
+		runs = append(runs, []entrySpan{e})
+	}
+	return runs
+}
+
+// entrySays is what entry E of TEXT says: the words on its line after its
+// label and separator.
+func entrySays(text string, e entrySpan) string {
+	return strings.TrimSpace(text[e.textStart:e.end])
+}
+
+// entryNode is one node of an entry tree while it is built.
+type entryNode struct {
+	label    string
+	answer   bool
+	says     string
+	children []int
+}
+
+// entryTree is RUN, a run of TEXT's entries, as the tree its labels make
+// (frontend.v1.ProseEntryTree): every entry a node, and every ancestor its
+// dotted label implies that no entry answers a path node. Nodes and siblings
+// keep the order their first entry appeared in; two entries answering one
+// label are two sibling nodes, the descendants of either under the first.
+// The nodes are served in reading order.
+func entryTree(text string, run []entrySpan) *frontendv1.ProseEntryTree {
+	var nodes []entryNode
+	var roots []int
+	first := map[string]int{}
+	attach := func(parent int, n entryNode) int {
+		nodes = append(nodes, n)
+		at := len(nodes) - 1
+		if parent < 0 {
+			roots = append(roots, at)
+		} else {
+			nodes[parent].children = append(nodes[parent].children, at)
+		}
+		return at
+	}
+	for _, e := range run {
+		parent := -1
+		parts := strings.Split(e.label, ".")
+		for k := 1; k < len(parts); k++ {
+			prefix := strings.Join(parts[:k], ".")
+			at, ok := first[prefix]
+			if !ok {
+				at = attach(parent, entryNode{label: prefix})
+				first[prefix] = at
+			}
+			parent = at
+		}
+		says := entrySays(text, e)
+		if at, ok := first[e.label]; ok && !nodes[at].answer {
+			nodes[at].answer, nodes[at].says = true, says
+			continue
+		}
+		at := attach(parent, entryNode{label: e.label, answer: true, says: says})
+		if _, ok := first[e.label]; !ok {
+			first[e.label] = at
+		}
+	}
+	tree := &frontendv1.ProseEntryTree{}
+	var emit func(at, parent int)
+	emit = func(at, parent int) {
+		n := nodes[at]
+		id := uint32(len(tree.Nodes))
+		node := &frontendv1.ProseEntryTreeNode{
+			Id:    &frontendv1.ProseTreeNodeId{Index: id},
+			Label: &frontendv1.ProseEntryLabel{Text: n.label},
+		}
+		if parent < 0 {
+			node.Place = &frontendv1.ProseEntryTreeNode_Root{Root: &frontendv1.ProseEntryTreeNodeRoot{}}
+		} else {
+			node.Place = &frontendv1.ProseEntryTreeNode_Branch{Branch: &frontendv1.ProseEntryTreeNodeBranch{
+				Parent: &frontendv1.ProseTreeNodeId{Index: uint32(parent)},
+			}}
+		}
+		if n.answer {
+			node.Kind = &frontendv1.ProseEntryTreeNode_Answer{Answer: &frontendv1.ProseEntryTreeNodeAnswer{
+				Text: &frontendv1.ProseEntryText{Markdown: n.says},
+			}}
+		} else {
+			node.Kind = &frontendv1.ProseEntryTreeNode_Path{Path: &frontendv1.ProseEntryTreeNodePath{}}
+		}
+		tree.Nodes = append(tree.Nodes, node)
+		for _, c := range n.children {
+			emit(c, int(id))
+		}
+	}
+	for _, r := range roots {
+		emit(r, -1)
+	}
+	return tree
+}
+
+// readEntries answers TEXT's entries, in order: the heading line of every
+// section of the prompt grammar's parse whose heading carries no marker. An
+// entry is that one line: the section's lines after it are the prompt's own
+// prose. A heading with a marker
 // (`1 🔧 text`) opens a pasted tree's root, which is the tree's, not an entry.
 // A parse the grammar could not complete is an error: it accepts every text
 // whole by design.
@@ -135,8 +237,8 @@ func readEntries(text string) ([]entrySpan, error) {
 			textStart = int(sep.EndByte())
 		}
 		entries = append(entries, entrySpan{
-			start:     int(section.StartByte()),
-			end:       int(section.EndByte()),
+			start:     int(heading.StartByte()),
+			end:       int(heading.EndByte()),
 			label:     strings.TrimSpace(text[label.StartByte():label.EndByte()]),
 			textStart: textStart,
 		})
@@ -158,7 +260,7 @@ func ReplaceEntry(text, label, says string) (string, bool) {
 			continue
 		}
 		content := text[e.textStart:e.end]
-		lead := content[:len(content)-len(strings.TrimLeft(content, " \t\n"))]
+		lead := content[:len(content)-len(strings.TrimLeft(content, " \t"))]
 		trail := content[len(strings.TrimRight(content, "\n")):]
 		if lead == "" && says != "" {
 			lead = " "
