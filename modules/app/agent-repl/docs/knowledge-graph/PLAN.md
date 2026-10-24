@@ -130,6 +130,12 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   shim runs in its own directory, `~/zettel/threads/<thread-name>/`, under a
   canonical `~/zettel` directory (owner, 2026-10-24). A thread's name is
   generated once, when it is created, so its directory never moves.
+  `~/zettel` is fixed; it is not configurable.
+- To the daemon, a thread is a new kind of workspace (owner, 2026-10-24): its
+  directory is its thread directory instead of a worktree, it is left out of
+  workspace tabs and cycling and out of every repository, merge and deploy
+  feature, and it inherits every session-management feature with no code
+  duplicated.
 - Following premises feeds the model's context when answering: premises are
   added to the prompt as extra context.
 - Anthropic's Agent SDK docs say third-party developers may not offer
