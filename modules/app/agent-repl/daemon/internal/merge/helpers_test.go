@@ -2466,6 +2466,40 @@ type fakeHookRunner struct {
 	timeouts map[string]bool
 	lines    map[string][]string
 	err      error
+	// holds parks the next run of a script for one calling workspace, keyed
+	// by holdKey, until its release or the run's end.
+	holds map[string]hookHold
+}
+
+// hookHold is one parked script run: entered closes as the run starts, and
+// the run goes on once release closes.
+type hookHold struct{ entered, release chan struct{} }
+
+// holdKey keys a hold by the script and the worktree of the deploy that runs
+// it (EnvCallingWorkspace).
+func holdKey(script, worktree string) string { return script + "\x00" + worktree }
+
+// hold parks the next run of SCRIPT by the deploy whose worktree is WORKTREE,
+// answering when it started and the release that lets it go on.
+func (f *fakeHookRunner) hold(script, worktree string) (entered, release chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.holds == nil {
+		f.holds = map[string]hookHold{}
+	}
+	held := hookHold{entered: make(chan struct{}), release: make(chan struct{})}
+	f.holds[holdKey(script, worktree)] = held
+	return held.entered, held.release
+}
+
+// callingWorkspace is the deploy owner's worktree a hook run was given.
+func callingWorkspace(env []string) string {
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, EnvCallingWorkspace+"="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 func (f *fakeHookRunner) RunLinesWith(ctx context.Context, dir string, argv []string, opts scriptrunner.Options, onLine func(string)) (scriptrunner.Run, error) {
@@ -2473,7 +2507,18 @@ func (f *fakeHookRunner) RunLinesWith(ctx context.Context, dir string, argv []st
 	f.runs = append(f.runs, hookRun{dir: dir, argv: argv, env: opts.Env})
 	script := argv[len(argv)-1]
 	exit, timedOut, lines, err := f.exits[script], f.timeouts[script], f.lines[script], f.err
+	key := holdKey(script, callingWorkspace(opts.Env))
+	held, holding := f.holds[key]
+	delete(f.holds, key)
 	f.mu.Unlock()
+	if holding {
+		close(held.entered)
+		select {
+		case <-held.release:
+		case <-ctx.Done():
+			return scriptrunner.Run{}, context.Cause(ctx)
+		}
+	}
 	if err != nil {
 		return scriptrunner.Run{}, err
 	}

@@ -179,8 +179,10 @@ func (o *orchestrator) racesIn(repo wsm.RepoKey, head *run) bool {
 func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	const op = "daemon.merge.chain"
 	o.mu.Lock()
-	room := len(o.chains[repo]) > 0 && len(o.chains[repo]) < o.queueWindow()
+	members, current := len(o.chains[repo]), o.running[repo]
 	o.mu.Unlock()
+	window := o.windowFor(current)
+	room := members > 0 && members < window
 	if !room || !o.enterAdmission() {
 		return false
 	}
@@ -198,14 +200,18 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	o.mu.Lock()
 	head := o.running[repo]
 	o.mu.Unlock()
-	// ONLY A LOCAL MERGE RACES: a speculative run rebases and tests ahead of
-	// its turn, which is the local merge's work and no other deploy's.
-	if head == nil || !o.racesIn(repo, head) {
+	// A CHAIN FORMS BEHIND A HEAD THAT RACES OR RUNS CONCURRENT STAGES: a
+	// speculative run rebases and tests ahead of its turn, which is the local
+	// merge's work, or runs its concurrent stages (concurrent.go).
+	if head == nil || !o.chainsIn(repo, head) {
 		return false
+	}
+	if head != current {
+		window = o.windowFor(head)
 	}
 	o.mu.Lock()
 	chain := o.chains[repo]
-	if len(chain) == 0 || len(chain) >= o.queueWindow() || o.draining {
+	if len(chain) == 0 || len(chain) >= window || o.draining {
 		o.mu.Unlock()
 		return false
 	}
@@ -344,7 +350,7 @@ func (o *orchestrator) startSpeculative(ctx context.Context, r *run) {
 	r.source, r.job, r.lease = entry.Source, job, lease
 	r.mu.Unlock()
 	r.startedMS = o.deps.Now().UnixMilli()
-	log.Info(op, "admitted a merge behind its queue's head; it rebases onto the merge ahead and tests ahead of its turn", dlog.Context{
+	log.Info(op, "admitted a merge behind its queue's head; it takes its steps ahead of its turn", dlog.Context{
 		"workspace": string(ws), "repo": string(r.repo), "lease": string(lease.ID)})
 	// THE PUMP MAY BE WAITING ON THIS VERY ADMISSION to promote the merge,
 	// when the head ended while it was starting.

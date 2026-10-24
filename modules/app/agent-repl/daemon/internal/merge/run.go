@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"agent-repld/internal/deployconfig"
 	"context"
 	"fmt"
 	"os"
@@ -890,8 +891,15 @@ func failedIn(area footer.MergeFailedArea, summary string) outcome {
 // A RESUMED RUN SKIPS WHAT THE DEAD RUN FINISHED: a stage before the recorded
 // one is not run again, and the outcome a landing recorded is carried into the
 // stages that follow it.
+//
+// A ONE-AT-A-TIME STAGE IS ENTERED IN QUEUE ORDER when the config runs a
+// leading run of stages concurrently: a deploy behind its chain's head waits
+// at that stage's boundary for its turn (concurrent.go, awaitTurnFor).
 func (r *run) method(ctx context.Context) (outcome, error) {
 	if !r.resumingPast(TabPreDeploy) {
+		if err := r.awaitTurnFor(ctx, deployconfig.StagePreDeploy); err != nil {
+			return outcome{}, err
+		}
 		if out, gaveUp, err := r.preDeploy(ctx); err != nil || gaveUp {
 			return out, err
 		}
@@ -912,10 +920,16 @@ func (r *run) method(ctx context.Context) (outcome, error) {
 		}
 	}
 	if !r.resumingPast(TabDeploy) {
+		if err := r.awaitTurnFor(ctx, deployconfig.StageDeploy); err != nil {
+			return outcome{}, err
+		}
 		var err error
 		if out, err = r.deployStage(ctx, out); err != nil || out.failed != "" {
 			return out, err
 		}
+	}
+	if err := r.awaitTurnFor(ctx, deployconfig.StagePostDeploy); err != nil {
+		return outcome{}, err
 	}
 	return r.postDeploy(ctx, out)
 }
