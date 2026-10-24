@@ -21,7 +21,7 @@ import { inline, renderMarkdown } from "../markdown.js";
 import { renderTreeHtml, type TreeCols, type TreeIssue } from "../metaprompt-tree.js";
 import { computedPx, pageResizeObserver, placeChildren, queryAll, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
-import { entryHtml } from "../feed/entries.js";
+import { entryTreeHtml } from "../feed/entries.js";
 import { applyTextReveal, clearTextReveal, fullTextOf } from "./text-reveal.js";
 
 /** The webapp surfaces a wrap issue through the client logger. */
@@ -30,8 +30,8 @@ const logTreeIssue: TreeIssue = (message, context) => {
 };
 
 /**
- * Served prose → HTML: each plain block as markdown, each tree WRAPPED to the
- * measured COLS.
+ * Served prose → HTML: each plain block as markdown, each tree and each run of
+ * a prompt's entries WRAPPED to the measured COLS.
  *
  * The daemon serves every drawn text parsed (prose.proto): runs of plain
  * markdown and the trees between them, each tree a graph. The wrapper
@@ -48,8 +48,8 @@ export function proseHtml(prose: ParsedProse, cols: TreeCols): string {
           return renderMarkdown(block.block.value.markdown);
         case "tree":
           return `<div class="mp-tree">${renderTreeHtml(block.block.value, inline, cols(), logTreeIssue)}</div>`;
-        case "entry":
-          return entryHtml(block.block.value);
+        case "entries":
+          return `<div class="mp-tree mp-entry-tree">${entryTreeHtml(block.block.value, inline, cols(), logTreeIssue)}</div>`;
         default:
           return invariant("a prose block has no arm", { case: String(block.block.case) });
       }

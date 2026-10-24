@@ -344,11 +344,14 @@ describe("proseHtml", () => {
     expect([...host.children].map((c) => c.className || c.tagName)).toEqual(["P", "mp-tree", "P"]);
   });
 
-  it("draws a prompt's entry as its entry block", () => {
+  it("draws a prompt's entries as the tree their labels make", () => {
+    // Arrange
+    const host = document.createElement("div");
     // Act
-    const html = proseHtml(promptProse("3.1 - yes"), () => 80);
+    host.innerHTML = proseHtml(promptProse("3.1 - yes"), () => 80);
     // Assert
-    expect(html).toContain('class="mp-entry" data-entry-label="3.1"');
+    const tree = host.querySelector(".mp-entry-tree");
+    expect([tree?.classList.contains("mp-tree"), tree?.querySelector('.mp-entry[data-entry-label="3.1"]') !== null]).toEqual([true, true]);
   });
 
   it("measures no budget for prose with no tree", () => {

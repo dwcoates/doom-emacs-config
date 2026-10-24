@@ -707,7 +707,7 @@ function wrapBranch(
 
 /** One drawn row of a tree: a node's head, a passthrough line, or a code block. */
 export type TreeRow =
-  | { kind: "branch"; branch: Branch; hasChildren: boolean }
+  | { kind: "branch"; branch: Branch; hasChildren: boolean; node: number }
   | { kind: "raw"; text: string }
   | { kind: "code"; code: ProseTreeCode };
 
@@ -723,9 +723,10 @@ function malformedTree(message: string, context: Record<string, unknown>): never
  * still has a sibling below and four spaces once it is the last, and the node's
  * own connector is `├── `, or `└── ` for a last child — so a malformed rail the
  * model wrote is never drawn. Roots are drawn with their marker before their
- * text, a blank line between roots, and the header above the first.
+ * text, a blank line between roots (unless ROOTGAP is false), and the header
+ * above the first. Each branch row names its node's index in `nodes`.
  */
-export function layoutTree(tree: ProseTree): TreeRow[] {
+export function layoutTree(tree: ProseTree, { rootGap = true }: { rootGap?: boolean } = {}): TreeRow[] {
   const nodes = tree.nodes;
   const parent: (number | null)[] = [];
   const children: number[][] = nodes.map(() => []);
@@ -761,7 +762,7 @@ export function layoutTree(tree: ProseTree): TreeRow[] {
     let prefix = "";
     let body = n.text?.markdown ?? "";
     if (n.place.case === "root") {
-      if (roots > 0) rows.push({ kind: "raw", text: "" });
+      if (roots > 0 && rootGap) rows.push({ kind: "raw", text: "" });
       roots++;
       const marker = n.place.value.marker?.text;
       if (marker !== undefined) body = body === "" ? marker : `${marker} ${body}`;
@@ -775,6 +776,7 @@ export function layoutTree(tree: ProseTree): TreeRow[] {
       kind: "branch",
       branch: { prefix, label: `${n.label?.text ?? ""} `, body },
       hasChildren: children[i].length > 0,
+      node: i,
     });
     for (const code of n.code) rows.push({ kind: "code", code });
   });
@@ -849,6 +851,7 @@ export function renderTreeHtml(
   inline: InlineMarkup,
   width: number,
   onIssue?: TreeIssue,
+  options: TreeRenderOptions = {},
 ): string {
   if (!Number.isInteger(width) || width < 1) {
     log.error("a metaprompt tree was handed a column budget that is not a positive whole number", {
@@ -857,7 +860,7 @@ export function renderTreeHtml(
     });
     throw new RangeError(`metaprompt tree: column budget must be a positive integer, got ${String(width)}`);
   }
-  const rows = layoutTree(tree);
+  const rows = layoutTree(tree, { rootGap: options.rootGap });
   const parts: string[] = [];
   let overflowCount = 0;
   let unwrapped = false;
@@ -888,7 +891,8 @@ export function renderTreeHtml(
       unwrapped = true;
       lines = [{ prefix: row.branch.prefix, label: row.branch.label, body: inline(escapeHtml(row.branch.body)), raw: false }];
     }
-    parts.push(lines.map(renderLine).join(""));
+    const node: NodeLines = { label: row.branch.label.trimEnd(), decor: options.decorate?.(row.node) };
+    parts.push(lines.map((l) => renderLine(l, node)).join(""));
   }
   if (onIssue && overflowCount > 0) {
     onIssue("a metaprompt tree holds words wider than the column limit; served wider, never truncated", {
@@ -911,15 +915,53 @@ function renderFenceBlock(code: ProseTreeCode): string {
   return codeBlockHtml(code.body, code.language ?? "");
 }
 
-function renderLine(l: RenderLine): string {
-  if (l.raw && l.body.trim() === "") return `<div class="mp-line mp-blank"></div>`;
+/** How a caller decorates one node's drawn lines (`TreeRenderOptions.decorate`). */
+export interface TreeLineDecor {
+  /** Classes every line of the node wears, beside `mp-line`. */
+  readonly lineClass?: string;
+  /** Attributes every line of the node carries. */
+  readonly attributes?: Readonly<Record<string, string>>;
+  /** Classes the node's label wears, beside `TREE_LABEL_CLASS`. */
+  readonly labelClass?: string;
+}
+
+/** What renderTreeHtml is told beyond the tree and its width. */
+export interface TreeRenderOptions {
+  /** Each node's decoration, by its index in the tree's nodes. */
+  readonly decorate?: (node: number) => TreeLineDecor | undefined;
+  /** Whether a blank line stands between two roots; true unless told. */
+  readonly rootGap?: boolean;
+}
+
+/** The node a run of drawn lines belongs to: its label and decoration. */
+interface NodeLines {
+  label: string;
+  decor: TreeLineDecor | undefined;
+}
+
+/** The class every drawn tree line wears. */
+export const TREE_LINE_CLASS = "mp-line";
+
+/**
+ * The attribute every line of a node carries (its head line and its wrap
+ * lines alike): the node's label, so a stylesheet can address one node's
+ * lines without its children's (composer-entry.ts).
+ */
+export const TREE_NODE_ATTRIBUTE = "data-node";
+
+function renderLine(l: RenderLine, node?: NodeLines): string {
+  if (l.raw && l.body.trim() === "") return `<div class="${TREE_LINE_CLASS} mp-blank"></div>`;
   const content = boxWideChars(l.body);
   if (l.raw) {
-    return `<div class="mp-line"><span class="mp-content">${content}</span></div>`;
+    return `<div class="${TREE_LINE_CLASS}"><span class="mp-content">${content}</span></div>`;
   }
-  return `<div class="mp-line"><span class="mp-prefix">${boxWideChars(
+  const decor = node?.decor;
+  const classes = decor?.lineClass === undefined ? TREE_LINE_CLASS : `${TREE_LINE_CLASS} ${decor.lineClass}`;
+  let attributes = node === undefined ? "" : ` ${TREE_NODE_ATTRIBUTE}="${escapeHtml(node.label)}"`;
+  for (const [name, value] of Object.entries(decor?.attributes ?? {})) attributes += ` ${name}="${escapeHtml(value)}"`;
+  return `<div class="${classes}"${attributes}><span class="mp-prefix">${boxWideChars(
     escapeHtml(l.prefix),
-  )}${labelHtml(l.label)}</span><span class="mp-content">${content}</span></div>`;
+  )}${labelHtml(l.label, decor?.labelClass)}</span><span class="mp-content">${content}</span></div>`;
 }
 
 /** The class a tree node's label wears, its label text in `TREE_LABEL_ATTRIBUTE`. */
@@ -928,11 +970,12 @@ export const TREE_LABEL_CLASS = "mp-label";
 /** The attribute naming the label a `TREE_LABEL_CLASS` element draws. */
 export const TREE_LABEL_ATTRIBUTE = "data-label";
 
-/** LABEL ("1.1 ") as its own element and the space after it, or "" when unset. */
-function labelHtml(label: string | undefined): string {
+/** LABEL ("1.1 ") as its own element, wearing EXTRACLASS too when given, and the space after it, or "" when unset. */
+function labelHtml(label: string | undefined, extraClass?: string): string {
   if (label === undefined) return "";
   const text = label.trimEnd();
-  return `<span class="${TREE_LABEL_CLASS}" ${TREE_LABEL_ATTRIBUTE}="${escapeHtml(text)}">${escapeHtml(text)}</span>${escapeHtml(label.slice(text.length))}`;
+  const classes = extraClass === undefined ? TREE_LABEL_CLASS : `${TREE_LABEL_CLASS} ${extraClass}`;
+  return `<span class="${classes}" ${TREE_LABEL_ATTRIBUTE}="${escapeHtml(text)}">${escapeHtml(text)}</span>${escapeHtml(label.slice(text.length))}`;
 }
 
 /**

@@ -189,5 +189,17 @@
   },
   {
     "text": "1 🔧 Did it\n├── 1.1 first\n└── 1.2 second"
+  },
+  {
+    "text": "3.1 - a\n4.2 - **b**\n5.5.1 - c",
+    "prompt": true
+  },
+  {
+    "text": "3.1 - <b>x</b>",
+    "prompt": true
+  },
+  {
+    "text": "3.1 -",
+    "prompt": true
   }
 ]

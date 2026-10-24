@@ -11,6 +11,7 @@ import {
   TreeOverflowError,
   TREE_LABEL_ATTRIBUTE,
   TREE_LABEL_CLASS,
+  TREE_NODE_ATTRIBUTE,
   visibleWidth,
 } from "../src/metaprompt-tree.js";
 import { ProseTreeSchema, type ProseTree } from "../../proto/gen/ts/frontend/v1/prose_pb";
@@ -385,6 +386,49 @@ describe("a node's label", () => {
     const html = renderTreeHtml(tree(`${R}\n└── 1.1 foo bar`), identity, 14);
     // Assert — two labels: the root's and 1.1's head line, none on its wrap.
     expect(html.split(`class="${TREE_LABEL_CLASS}"`).length - 1).toBe(2);
+  });
+});
+
+describe("a node's lines", () => {
+  /** Each drawn line of HTML as its classes, its attributes and its label's classes. */
+  const lines = (html: string): { classes: string[]; attributes: Record<string, string>; labelClasses: string[] }[] =>
+    [...html.matchAll(/<div class="(mp-line[^"]*)"((?: [a-z-]+="[^"]*")*)>(.*?)<\/div>/gu)].map((m) => ({
+      classes: m[1].split(" "),
+      attributes: Object.fromEntries([...m[2].matchAll(/ ([a-z-]+)="([^"]*)"/gu)].map((a) => [a[1], a[2]])),
+      labelClasses: /<span class="(mp-label[^"]*)"/u.exec(m[3])?.[1].split(" ") ?? [],
+    }));
+
+  it("all name their node, its wrap lines too", () => {
+    // Act
+    const html = renderTreeHtml(tree(`${R}\n└── 1.1 foo bar`), identity, 14);
+    // Assert
+    expect(lines(html).map((l) => l.attributes[TREE_NODE_ATTRIBUTE])).toEqual(["1", "1.1", "1.1"]);
+  });
+
+  it("wear the caller's decoration, by the node's index", () => {
+    // Arrange
+    const decorate = (node: number) =>
+      node === 1 ? { lineClass: "picked", attributes: { "data-x": "y" }, labelClass: "picked-label" } : undefined;
+    // Act
+    const drawn = lines(renderTreeHtml(tree(`${R}\n└── 1.1 foo bar`), identity, 14, undefined, { decorate }));
+    // Assert
+    expect(drawn.map((l) => [l.classes.includes("picked"), l.attributes["data-x"] ?? null, l.labelClasses.includes("picked-label")])).toEqual([
+      [false, null, false],
+      [true, "y", true],
+      [true, "y", false],
+    ]);
+  });
+
+  it("stand with no blank line between roots when the caller says so", () => {
+    // Arrange
+    const twoRoots = graph([
+      { label: "1", text: "a" },
+      { label: "2", text: "b" },
+    ]);
+    // Act
+    const html = renderTreeHtml(twoRoots, identity, 40, undefined, { rootGap: false });
+    // Assert
+    expect([html.includes("mp-blank"), renderTreeHtml(twoRoots, identity, 40).includes("mp-blank")]).toEqual([false, true]);
   });
 });
 

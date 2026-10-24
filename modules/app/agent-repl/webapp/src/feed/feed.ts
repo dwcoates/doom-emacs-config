@@ -15,6 +15,7 @@ import { markConversationDrawn } from "./conversation-drawn.js";
 import { installUnshownTrim } from "./unshown-trim.js";
 import { pagePresence, type Presence } from "../presence.js";
 import { log } from "../log.js";
+import { createComposerEntryHighlight } from "./composer-entry.js";
 import { create } from "@bufbuild/protobuf";
 import { reportClientFailure } from "../rpc/link.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -188,6 +189,9 @@ export function mountFeed(
   deps: FeedDeps,
 ): FeedHandle {
   log.info("mounting the feed", { operation: "feed.mount", context: {} });
+  // THE NODE THE COMPOSER IS ANSWERING is drawn by one stylesheet rule the
+  // root watch's composer-entry pushes rewrite (composer-entry.ts).
+  const composerEntry = createComposerEntryHighlight(host.ownerDocument);
 
   const scrollBox = deps.scrollBox ?? host.parentElement ?? null;
   // THE SCROLL ANCHOR'S ROWS ARE THE ROOT BODY'S ROW LIST, not the feed
@@ -456,7 +460,8 @@ export function mountFeed(
       },
       onPush: (response) => {
         // A frame carries EXACTLY ONE of a row upsert, a response-selection
-        // push, a feed-text-scale push, a held change or an image-overlay push
+        // push, a feed-text-scale push, a held change, an image-overlay push
+        // or a composer-entry push
         // (endpoint_watch_feed.proto). The non-row frames carry no row, so they must be routed BEFORE
         // `requireMessage(response.row)`, which would otherwise reject a
         // well-formed push as a malformed row. A frame with none still fails
@@ -475,6 +480,10 @@ export function mountFeed(
         }
         if (response.imageOverlay !== undefined) {
           applyImageOverlay(response.imageOverlay);
+          return;
+        }
+        if (response.composerEntry !== undefined) {
+          composerEntry.apply(response.composerEntry);
           return;
         }
         root.upsert(requireMessage(response.row, "WatchFeedResponse.row"));
