@@ -1402,9 +1402,13 @@ func TestSelectFeedRowEntrySelectsTheResponseRevealingTheNode(t *testing.T) {
 		arm  func(*frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport
 	}{
 		{name: "a final response", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1") },
-			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport { return s.GetResponse().GetViewport() }},
+			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
+				return s.GetResponse().GetViewport()
+			}},
 		{name: "an interim response", set: func(h *harness) { h.Feed.markdown = map[string]string{"resp-1": "interim"} },
-			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport { return s.GetBubble().GetViewport() }},
+			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
+				return s.GetBubble().GetViewport()
+			}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1556,9 +1560,13 @@ func TestSelectFeedRowBranchSelectsTheResponseAndAsksTheHostToOpenAnEntry(t *tes
 		set  func(*harness)
 	}{
 		{name: "a final response", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1") },
-			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport { return s.GetResponse().GetViewport() }},
+			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
+				return s.GetResponse().GetViewport()
+			}},
 		{name: "an interim response", set: func(h *harness) { h.Feed.markdown = map[string]string{"resp-1": "interim"} },
-			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport { return s.GetBubble().GetViewport() }},
+			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
+				return s.GetBubble().GetViewport()
+			}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

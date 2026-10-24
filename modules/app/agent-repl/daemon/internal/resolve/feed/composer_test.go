@@ -113,18 +113,21 @@ func TestEntryNeighborWalksTheTargetTree(t *testing.T) {
 	tests := []struct {
 		name   string
 		label  string
-		next   bool
+		way    NeighborWay
 		want   string
 		wantOK bool
 	}{
-		{name: "next is the next sibling", label: "1.1", next: true, want: "1.2", wantOK: true},
-		{name: "next climbs to the parent's next sibling", label: "1.2.1", next: true, want: "2", wantOK: true},
-		{name: "next of a root is the next root", label: "1", next: true, want: "2", wantOK: true},
-		{name: "next of the tree's last node is none", label: "2.1", next: true},
-		{name: "previous is the previous sibling", label: "1.2", want: "1.1", wantOK: true},
-		{name: "previous of a first child is its parent", label: "1.1", want: "1", wantOK: true},
-		{name: "previous of the first root is none", label: "1"},
-		{name: "a label no response holds has no neighbor", label: "9.9", next: true},
+		{name: "next is the next sibling", label: "1.1", way: NeighborNext, want: "1.2", wantOK: true},
+		{name: "next climbs to the parent's next sibling", label: "1.2.1", way: NeighborNext, want: "2", wantOK: true},
+		{name: "next of a root is the next root", label: "1", way: NeighborNext, want: "2", wantOK: true},
+		{name: "next of the tree's last node is none", label: "2.1", way: NeighborNext},
+		{name: "previous is the previous sibling", label: "1.2", way: NeighborPrevious, want: "1.1", wantOK: true},
+		{name: "previous of a first child is its parent", label: "1.1", way: NeighborPrevious, want: "1", wantOK: true},
+		{name: "previous of the first root is none", label: "1", way: NeighborPrevious},
+		{name: "the first child of a root", label: "1", way: NeighborFirstChild, want: "1.1", wantOK: true},
+		{name: "the first child of a branch", label: "1.2", way: NeighborFirstChild, want: "1.2.1", wantOK: true},
+		{name: "a leaf has no first child", label: "1.1", way: NeighborFirstChild},
+		{name: "a label no response holds has no neighbor", label: "9.9", way: NeighborNext},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -132,11 +135,11 @@ func TestEntryNeighborWalksTheTargetTree(t *testing.T) {
 			h := twoAnsweredHarness(t)
 
 			// Act
-			got, ok := h.resolver.EntryNeighbor(testWorkspace, nil, tc.label, tc.next)
+			got, ok := h.resolver.EntryNeighbor(testWorkspace, nil, tc.label, tc.way)
 
 			// Assert
 			if got != tc.want || ok != tc.wantOK {
-				t.Fatalf("EntryNeighbor(%q, next=%v) = (%q, %v), want (%q, %v)", tc.label, tc.next, got, ok, tc.want, tc.wantOK)
+				t.Fatalf("EntryNeighbor(%q, %v) = (%q, %v), want (%q, %v)", tc.label, tc.way, got, ok, tc.want, tc.wantOK)
 			}
 		})
 	}
@@ -148,7 +151,7 @@ func TestEntryNeighborOfAReplyWalksTheRepliedTree(t *testing.T) {
 	reply := &frontendv1.FeedId{Value: h.responseRowID("answer-1")}
 
 	// Act
-	got, ok := h.resolver.EntryNeighbor(testWorkspace, reply, "1.2", true)
+	got, ok := h.resolver.EntryNeighbor(testWorkspace, reply, "1.2", NeighborNext)
 
 	// Assert: answer-1 has no node after 1.2.
 	if ok {
@@ -261,4 +264,34 @@ func TestResponseNodeAnswersWhetherAResponsesTreeHoldsALabel(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNeighborWayNamesEachWayAndRefusesAnyOther(t *testing.T) {
+	tests := []struct {
+		way  NeighborWay
+		want string
+	}{
+		{NeighborNext, "next"},
+		{NeighborPrevious, "previous"},
+		{NeighborFirstChild, "first_child"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.want, func(t *testing.T) {
+			// Act + Assert
+			if got := tc.way.String(); got != tc.want {
+				t.Fatalf("String() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	t.Run("an unnamed way panics", func(t *testing.T) {
+		// Arrange
+		defer func() {
+			if recover() == nil {
+				t.Fatal("NeighborWay(9).String() returned, want a panic")
+			}
+		}()
+
+		// Act
+		_ = NeighborWay(9).String()
+	})
 }

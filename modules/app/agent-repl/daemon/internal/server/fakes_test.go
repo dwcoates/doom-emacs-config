@@ -1281,7 +1281,7 @@ type fakeFeed struct {
 	targets       map[string]string
 	targetReplies []string
 	// neighbors is each label's neighbor (EntryNeighbor), keyed by the
-	// label, a NUL, and "next" or "previous".
+	// label, a NUL, and the way's name ("next", "previous", "first_child").
 	neighbors map[string]string
 	// labelMoves is what WatchLabelChanges announces (moveLabels).
 	labelMoves publish.Events[ids.WorkspaceID]
@@ -1489,12 +1489,8 @@ func (f *fakeFeed) ComposerTargets(_ ids.WorkspaceID, reply *frontendv1.FeedId, 
 	return out
 }
 
-func (f *fakeFeed) EntryNeighbor(_ ids.WorkspaceID, _ *frontendv1.FeedId, label string, next bool) (string, bool) {
-	way := "previous"
-	if next {
-		way = "next"
-	}
-	neighbor, ok := f.neighbors[label+"\x00"+way]
+func (f *fakeFeed) EntryNeighbor(_ ids.WorkspaceID, _ *frontendv1.FeedId, label string, way feed.NeighborWay) (string, bool) {
+	neighbor, ok := f.neighbors[label+"\x00"+way.String()]
 	return neighbor, ok
 }
 

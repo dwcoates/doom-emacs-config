@@ -375,11 +375,11 @@ type Resolver interface {
 	// a node labelled LABEL, as last published: false for a row that is no
 	// such response, or holds no such node (composer.go).
 	ResponseNode(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) bool
-	// EntryNeighbor answers the label a line opened beside the entry
-	// answering LABEL answers, in the tree that entry targets: the next node
-	// (NEXT) or the previous one. ok is false when it targets no response or
-	// its node has no neighbor that way (composer.go).
-	EntryNeighbor(ws ids.WorkspaceID, reply *frontendv1.FeedId, label string, next bool) (string, bool)
+	// EntryNeighbor answers the label of the node WAY from the entry
+	// answering LABEL, in the tree that entry targets: the next node, the
+	// previous one, or the node's first child. ok is false when it targets no
+	// response or its node has no neighbor that way (composer.go).
+	EntryNeighbor(ws ids.WorkspaceID, reply *frontendv1.FeedId, label string, way NeighborWay) (string, bool)
 	// WatchLabelChanges yields every workspace whose root feed changed what
 	// a composer's entry can target, from this call on, until ctx is
 	// cancelled. Every emission follows the change it announces.

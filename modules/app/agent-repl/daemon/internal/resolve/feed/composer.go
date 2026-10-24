@@ -2,6 +2,7 @@ package feed
 
 import (
 	"context"
+	"fmt"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -106,13 +107,38 @@ func (r *resolver) ResponseNode(ws ids.WorkspaceID, id *frontendv1.FeedId, label
 	return ok
 }
 
-// EntryNeighbor answers the label a line opened beside the entry answering
-// LABEL answers, in the tree of the response that entry targets
-// (ComposerTargets, replying to REPLY). NEXT finds the node's next sibling,
-// else its parent's next sibling, and so on up; otherwise the node's previous
-// sibling, else its parent. ok is false when the label targets no response or
-// its node has no such neighbor.
-func (r *resolver) EntryNeighbor(ws ids.WorkspaceID, reply *frontendv1.FeedId, label string, next bool) (string, bool) {
+// NeighborWay is which neighbor of an entry's node EntryNeighbor finds.
+type NeighborWay int
+
+const (
+	// NeighborNext is the node a line opened below the entry answers: the
+	// node's next sibling, else its parent's next sibling, and so on up.
+	NeighborNext NeighborWay = iota
+	// NeighborPrevious is the node a line opened above the entry answers:
+	// the node's previous sibling, else its parent.
+	NeighborPrevious
+	// NeighborFirstChild is the node the entry answers once it descends: the
+	// node's first child.
+	NeighborFirstChild
+)
+
+func (w NeighborWay) String() string {
+	switch w {
+	case NeighborNext:
+		return "next"
+	case NeighborPrevious:
+		return "previous"
+	case NeighborFirstChild:
+		return "first_child"
+	}
+	panic(fmt.Sprintf("feed: NeighborWay %d names no way", int(w)))
+}
+
+// EntryNeighbor answers the label of the node WAY from the entry answering
+// LABEL, in the tree of the response that entry targets (ComposerTargets,
+// replying to REPLY). ok is false when the label targets no response or its
+// node has no such neighbor.
+func (r *resolver) EntryNeighbor(ws ids.WorkspaceID, reply *frontendv1.FeedId, label string, way NeighborWay) (string, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	f := r.rootFeedState(ws)
@@ -124,7 +150,7 @@ func (r *resolver) EntryNeighbor(ws ids.WorkspaceID, reply *frontendv1.FeedId, l
 		return "", false
 	}
 	for _, block := range f.rows[id].GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetBlocks() {
-		if neighbor, found, ok := treeNeighbor(block.GetTree(), label, next); found {
+		if neighbor, found, ok := treeNeighbor(block.GetTree(), label, way); found {
 			return neighbor, ok
 		}
 	}
@@ -134,7 +160,7 @@ func (r *resolver) EntryNeighbor(ws ids.WorkspaceID, reply *frontendv1.FeedId, l
 // treeNeighbor answers LABEL's neighbor in TREE (EntryNeighbor's rule).
 // found is false when TREE holds no node labelled LABEL; ok is false when it
 // does and the node has no neighbor that way.
-func treeNeighbor(tree *frontendv1.ProseTree, label string, next bool) (neighbor string, found, ok bool) {
+func treeNeighbor(tree *frontendv1.ProseTree, label string, way NeighborWay) (neighbor string, found, ok bool) {
 	nodes := tree.GetNodes()
 	parent := make([]int, len(nodes))
 	children := map[int][]int{}
@@ -160,7 +186,13 @@ func treeNeighbor(tree *frontendv1.ProseTree, label string, next bool) (neighbor
 		}
 		return -1
 	}
-	if !next {
+	switch way {
+	case NeighborFirstChild:
+		if kids := children[at]; len(kids) > 0 {
+			return nodes[kids[0]].GetLabel().GetText(), true, true
+		}
+		return "", true, false
+	case NeighborPrevious:
 		if k := position(at); k > 0 {
 			return nodes[children[parent[at]][k-1]].GetLabel().GetText(), true, true
 		}
@@ -168,14 +200,16 @@ func treeNeighbor(tree *frontendv1.ProseTree, label string, next bool) (neighbor
 			return nodes[parent[at]].GetLabel().GetText(), true, true
 		}
 		return "", true, false
-	}
-	for i := at; i >= 0; i = parent[i] {
-		siblings := children[parent[i]]
-		if k := position(i); k+1 < len(siblings) {
-			return nodes[siblings[k+1]].GetLabel().GetText(), true, true
+	case NeighborNext:
+		for i := at; i >= 0; i = parent[i] {
+			siblings := children[parent[i]]
+			if k := position(i); k+1 < len(siblings) {
+				return nodes[siblings[k+1]].GetLabel().GetText(), true, true
+			}
 		}
+		return "", true, false
 	}
-	return "", true, false
+	panic(fmt.Sprintf("feed: treeNeighbor asked for NeighborWay %d", int(way)))
 }
 
 // WatchLabelChanges yields every workspace whose root feed changed what an

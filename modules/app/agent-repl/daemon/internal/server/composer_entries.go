@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"connectrpc.com/connect"
@@ -12,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
+	"agent-repld/internal/resolve/feed"
 )
 
 const opComposerEntries = "daemon.server.composer_entries"
@@ -129,21 +131,35 @@ func (s *server) FindEntryNeighbor(
 	}
 	ws := subject.Record.ID
 	label := req.Msg.GetLabel()
-	next := req.Msg.GetDirection().GetNext() != nil
+	way := neighborWayOf(req.Msg.GetDirection())
 	success := &agentreplv1.FindEntryNeighborSuccess{Neighbor: &agentreplv1.FindEntryNeighborSuccess_None{None: &agentreplv1.FindEntryNeighborNone{}}}
 	reply, answers := s.composerReply(ws)
 	neighbor, ok := "", false
 	if answers {
-		neighbor, ok = s.deps.Feed.EntryNeighbor(ws, reply, label, next)
+		neighbor, ok = s.deps.Feed.EntryNeighbor(ws, reply, label, way)
 	}
 	if ok {
 		success.Neighbor = &agentreplv1.FindEntryNeighborSuccess_Found{Found: &agentreplv1.FindEntryNeighborFound{Label: neighbor}}
 	}
 	subject.Log.Debug(opComposerEntries, "answered an entry line's neighbor", dlog.Context{
-		"label": label, "next": next, "reply": reply.GetValue(), "answers": answers, "neighbor": neighbor, "found": ok,
+		"label": label, "way": way.String(), "reply": reply.GetValue(), "answers": answers, "neighbor": neighbor, "found": ok,
 	})
 	resp.Result = &agentreplv1.FindEntryNeighborResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
+}
+
+// neighborWayOf is the feed's NeighborWay for DIRECTION, which validation
+// has seen name a way.
+func neighborWayOf(direction *agentreplv1.EntryNeighborDirection) feed.NeighborWay {
+	switch direction.GetWay().(type) {
+	case *agentreplv1.EntryNeighborDirection_Next:
+		return feed.NeighborNext
+	case *agentreplv1.EntryNeighborDirection_Previous:
+		return feed.NeighborPrevious
+	case *agentreplv1.EntryNeighborDirection_FirstChild:
+		return feed.NeighborFirstChild
+	}
+	panic(fmt.Sprintf("FindEntryNeighbor: validated direction carries way %T", direction.GetWay()))
 }
 
 // validateFindEntryNeighborRequest refuses a request naming no workspace, no
@@ -156,7 +172,7 @@ func validateFindEntryNeighborRequest(req *agentreplv1.FindEntryNeighborRequest)
 		return invalid("label", "the entry line's label is required")
 	}
 	if req.GetDirection().GetWay() == nil {
-		return invalid("direction", "which way the line opens is required")
+		return invalid("direction", "which neighbor of the node is asked for is required")
 	}
 	return nil
 }
