@@ -1475,6 +1475,140 @@ fields."
   "Decode `WorkspaceRoster''s `closed' field VALUE."
   (agent-repl-wire-decode-roster-closed-rows value))
 
+;;;; ---- The sidebar's apps: the switcher and the thread section ----
+;;
+;; Emacs draws neither (the webapp's rail does), but it reads both: the
+;; thread section is where Emacs learns the threads it opens workspaces for
+;; and picks among (threads.el), and the switcher is decoded whole so a
+;; roster carrying it is a roster this codec reads.
+
+(defun agent-repl-wire-decode-roster-text (message-name value)
+  "Decode VALUE as MESSAGE-NAME, a message whose one field is `text'."
+  (let ((object (agent-repl-wire--object message-name value)))
+    (agent-repl-wire--check-keys message-name object '(text))
+    (agent-repl-wire--decode-string message-name 'text object)))
+
+(defun agent-repl-wire-decode-sidebar-app (value)
+  "Decode VALUE as `SidebarApp', the arm keyword `:workspaces' or `:chat'."
+  (let ((object (agent-repl-wire--object "SidebarApp" value)))
+    (agent-repl-wire--check-keys "SidebarApp" object '(workspaces chat))
+    (plist-get
+     (agent-repl-wire--decode-oneof
+      "SidebarApp" 'app object
+      '((workspaces :workspaces agent-repl-wire-decode-sidebar-app-workspaces)
+        (chat :chat agent-repl-wire-decode-sidebar-app-chat)))
+     :arm)))
+
+(defun agent-repl-wire-decode-sidebar-app-workspaces (value)
+  "Decode VALUE as the empty `SidebarAppWorkspaces'."
+  (agent-repl-wire--decode-empty "SidebarAppWorkspaces" value))
+
+(defun agent-repl-wire-decode-sidebar-app-chat (value)
+  "Decode VALUE as the empty `SidebarAppChat'."
+  (agent-repl-wire--decode-empty "SidebarAppChat" value))
+
+(defun agent-repl-wire-decode-roster-app-switcher-title (value)
+  "Decode `RosterAppSwitcher''s `title' field VALUE as its text."
+  (agent-repl-wire-decode-roster-text "RosterAppSwitcherTitle" value))
+
+(defun agent-repl-wire-decode-roster-app-switcher-option-label (value)
+  "Decode `RosterAppSwitcherOption''s `label' field VALUE as its text."
+  (agent-repl-wire-decode-roster-text "RosterAppSwitcherOptionLabel" value))
+
+(defun agent-repl-wire-decode-roster-app-switcher-option-hint (value)
+  "Decode `RosterAppSwitcherOption''s `hint' field VALUE as its text."
+  (agent-repl-wire-decode-roster-text "RosterAppSwitcherOptionHint" value))
+
+(defun agent-repl-wire-decode-roster-app-switcher-option-shown (value)
+  "Decode VALUE as the empty `RosterAppSwitcherOptionShown' and return t."
+  (agent-repl-wire--decode-empty "RosterAppSwitcherOptionShown" value)
+  t)
+
+(defun agent-repl-wire-decode-roster-app-switcher-option (value)
+  "Decode VALUE as `RosterAppSwitcherOption', `(:label :hint :app :shown)'."
+  (let ((object (agent-repl-wire--object "RosterAppSwitcherOption" value)))
+    (agent-repl-wire--check-keys "RosterAppSwitcherOption" object '(label hint app shown))
+    (agent-repl-wire--decoded
+     "RosterAppSwitcherOption"
+     (list :label (agent-repl-wire--decode-message
+                   "RosterAppSwitcherOption" 'label object
+                   #'agent-repl-wire-decode-roster-app-switcher-option-label)
+           :hint (agent-repl-wire--decode-message
+                  "RosterAppSwitcherOption" 'hint object
+                  #'agent-repl-wire-decode-roster-app-switcher-option-hint)
+           :app (agent-repl-wire--decode-message
+                 "RosterAppSwitcherOption" 'app object #'agent-repl-wire-decode-sidebar-app)
+           :shown (agent-repl-wire--decode-optional-message
+                   "RosterAppSwitcherOption" 'shown object
+                   #'agent-repl-wire-decode-roster-app-switcher-option-shown)))))
+
+(defun agent-repl-wire-decode-roster-app-switcher (value)
+  "Decode VALUE as `RosterAppSwitcher', `(:title :shown :options)'.
+SHOWN is the app keyword the rail shows, which follows the selection."
+  (let ((object (agent-repl-wire--object "RosterAppSwitcher" value)))
+    (agent-repl-wire--check-keys "RosterAppSwitcher" object '(title shown options))
+    (agent-repl-wire--decoded
+     "RosterAppSwitcher"
+     (list :title (agent-repl-wire--decode-message
+                   "RosterAppSwitcher" 'title object
+                   #'agent-repl-wire-decode-roster-app-switcher-title)
+           :shown (agent-repl-wire--decode-message
+                   "RosterAppSwitcher" 'shown object #'agent-repl-wire-decode-sidebar-app)
+           :options (agent-repl-wire--decode-repeated
+                     "RosterAppSwitcher" 'options object
+                     #'agent-repl-wire-decode-roster-app-switcher-option)))))
+
+(defun agent-repl-wire-decode-roster-thread-new-button (value)
+  "Decode VALUE as `RosterThreadNewButton', its label."
+  (let ((object (agent-repl-wire--object "RosterThreadNewButton" value)))
+    (agent-repl-wire--check-keys "RosterThreadNewButton" object '(label))
+    (agent-repl-wire--decode-string "RosterThreadNewButton" 'label object)))
+
+(defun agent-repl-wire-decode-roster-thread-name (value)
+  "Decode `RosterThreadRow''s `name' field VALUE as its text."
+  (agent-repl-wire-decode-roster-text "RosterThreadName" value))
+
+(defun agent-repl-wire-decode-roster-thread-summary (value)
+  "Decode `RosterThreadRow''s `summary' field VALUE as its text."
+  (agent-repl-wire-decode-roster-text "RosterThreadSummary" value))
+
+(defun agent-repl-wire-decode-roster-thread-current (value)
+  "Decode VALUE as the empty `RosterThreadCurrent' and return t."
+  (agent-repl-wire--decode-empty "RosterThreadCurrent" value)
+  t)
+
+(defun agent-repl-wire-decode-roster-thread-row (value)
+  "Decode VALUE as `RosterThreadRow', `(:thread REF :name :summary :current)'.
+SUMMARY is nil when none is set; CURRENT is t on the selected thread."
+  (let ((object (agent-repl-wire--object "RosterThreadRow" value)))
+    (agent-repl-wire--check-keys "RosterThreadRow" object '(thread name summary current))
+    (agent-repl-wire--decoded
+     "RosterThreadRow"
+     (list :thread (agent-repl-wire--decode-message
+                    "RosterThreadRow" 'thread object #'agent-repl-wire-decode-workspace-ref)
+           :name (agent-repl-wire--decode-message
+                  "RosterThreadRow" 'name object #'agent-repl-wire-decode-roster-thread-name)
+           :summary (agent-repl-wire--decode-optional-message
+                     "RosterThreadRow" 'summary object
+                     #'agent-repl-wire-decode-roster-thread-summary)
+           :current (agent-repl-wire--decode-optional-message
+                     "RosterThreadRow" 'current object
+                     #'agent-repl-wire-decode-roster-thread-current)))))
+
+(defun agent-repl-wire-decode-roster-thread-section (value)
+  "Decode VALUE as `RosterThreadSection', `(:new-thread LABEL :rows ROWS)'.
+ROWS are every open thread, the one last interacted with first."
+  (let ((object (agent-repl-wire--object "RosterThreadSection" value)))
+    (agent-repl-wire--check-keys "RosterThreadSection" object '(newThread rows))
+    (agent-repl-wire--decoded
+     "RosterThreadSection"
+     (list :new-thread (agent-repl-wire--decode-message
+                        "RosterThreadSection" 'newThread object
+                        #'agent-repl-wire-decode-roster-thread-new-button)
+           :rows (agent-repl-wire--decode-repeated
+                  "RosterThreadSection" 'rows object
+                  #'agent-repl-wire-decode-roster-thread-row)))))
+
 (defun agent-repl-wire-decode-workspace-roster-current (value)
   "Decode `WorkspaceRoster''s optional `current' field VALUE."
   (agent-repl-wire-decode-roster-current-workspace value))
@@ -1486,13 +1620,14 @@ fields."
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
 Returns `(:repository V :open O :hidden H :recently-merged S :closed C
-:current C-or-nil :revision N :version V-or-nil)'.  THERE IS NO TAB BAR
+:current C-or-nil :revision N :version V-or-nil :app-switcher A
+:threads T)'.  THERE IS NO TAB BAR
 MESSAGE: the Open section's rows are the tab bar, each stating its own
 tab."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object
-     '(repository open hidden recentlyMerged closed current revision version))
+     '(repository open hidden recentlyMerged closed current revision version appSwitcher threads))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
      (list :repository (agent-repl-wire--decode-message
@@ -1516,7 +1651,13 @@ tab."
            :revision (agent-repl-wire--decode-uint64 "WorkspaceRoster" 'revision object)
            :version (agent-repl-wire--decode-optional-message
                      "WorkspaceRoster" 'version object
-                     #'agent-repl-wire-decode-workspace-roster-version)))))
+                     #'agent-repl-wire-decode-workspace-roster-version)
+           :app-switcher (agent-repl-wire--decode-message
+                          "WorkspaceRoster" 'appSwitcher object
+                          #'agent-repl-wire-decode-roster-app-switcher)
+           :threads (agent-repl-wire--decode-message
+                     "WorkspaceRoster" 'threads object
+                     #'agent-repl-wire-decode-roster-thread-section)))))
 
 ;;;; ---- The rpc ----
 

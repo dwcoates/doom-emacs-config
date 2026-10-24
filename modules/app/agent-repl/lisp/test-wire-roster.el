@@ -1265,7 +1265,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
           "\"open\":{\"label\":{\"text\":\"Open\"},\"collapsed\":{},\"workspaces\":{}},"
           "\"hidden\":{\"header\":{\"label\":{\"text\":\"Hidden\"},\"count\":{\"workspaces\":0}},"
           "\"hiddenRows\":{\"rows\":[]},\"expanded\":{}},"
-          "\"closed\":{\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{\"text\":\"Recently Merged\"},\"count\":{\"workspaces\":2}},"
+          "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{\"text\":\"Recently Merged\"},\"count\":{\"workspaces\":2}},"
           "\"groups\":[],\"collapsed\":{}},"
           "\"current\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"}}}")
   "A whole roster: the repository sections, the open, hidden and merged sections, and current.")
@@ -1292,7 +1292,9 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                    :closed (:rows nil)
                    :current (:workspace (:id "ws-1" :dir "/w/1"))
                    :revision 0
-                   :version nil))))
+                   :version nil
+                   :app-switcher (:title "Workspaces" :shown :workspaces :options nil)
+                   :threads (:new-thread "New thread" :rows nil)))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-revision ()
   "The roster's revision decodes from protojson's decimal string."
@@ -1341,7 +1343,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                              (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},"
                                      "\"open\":{\"label\":{},\"expanded\":{},\"workspaces\":{}},"
                                      "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"hiddenRows\":{},\"expanded\":{}},"
-                                     "\"closed\":{\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},"
+                                     "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},"
                                      "\"groups\":[],\"collapsed\":{}}}"))
                             :current)
                  nil)))
@@ -1352,7 +1354,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"open\":{\"label\":{},\"expanded\":{},\"workspaces\":{}},"
                           "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"hiddenRows\":{},\"expanded\":{}},"
-                          "\"closed\":{\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]}}"))
+                          "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]}}"))
                  '("WorkspaceRoster" repository "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-without-recently-merged-is-a-breach ()
@@ -1368,7 +1370,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},\"open\":{\"label\":{},\"expanded\":{},\"workspaces\":{}},"
-                          "\"closed\":{\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[],\"collapsed\":{}}}"))
+                          "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[],\"collapsed\":{}}}"))
                  '("WorkspaceRoster" hidden "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-a-collapsed-hidden-section ()
@@ -1401,7 +1403,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   #'agent-repl-wire-decode-workspace-roster
                   (concat "{\"repository\":{\"sections\":[],\"openCount\":{}},\"open\":{\"label\":{},\"expanded\":{},\"workspaces\":{}},"
                           "\"hidden\":{\"header\":{\"label\":{},\"count\":{}},\"hiddenRows\":{},\"expanded\":{}},"
-                          "\"closed\":{\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]},"
+                          "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[]},"
                           "\"hibernating\":{}}"))
                  '("WorkspaceRoster" hibernating "unknown field"))))
 
@@ -1412,7 +1414,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   "An empty hidden section, expanded, as a JSON member.")
 
 (defconst agent-repl-test-wire-roster--merged-json
-  "\"closed\":{\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[],\"collapsed\":{}}"
+  "\"closed\":{\"rows\":[]},\"appSwitcher\":{\"title\":{\"text\":\"Workspaces\"},\"shown\":{\"workspaces\":{}},\"options\":[]},\"threads\":{\"newThread\":{\"label\":\"New thread\"},\"rows\":[]},\"recentlyMerged\":{\"header\":{\"label\":{},\"count\":{}},\"groups\":[],\"collapsed\":{}}"
   "A merged band, collapsed, as a JSON member.")
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-merged-band-fold ()
@@ -1536,7 +1538,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
 
 (provide 'test-wire-roster)
 
-;;; test-wire-roster.el ends here
+
 
 ;;;; ---- RosterRow.availability ----
 
@@ -1700,3 +1702,42 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-open-count "{\"workspaces\":1,\"rows\":2}")
                  '("RosterOpenCount" rows "unknown field"))))
+
+;;;; ---- The sidebar's apps ----
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-app-switcher ()
+  "The switcher decodes its title, the app shown, and each option."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-app-switcher
+                  (concat "{\"title\":{\"text\":\"Chat\"},\"shown\":{\"chat\":{}},\"options\":["
+                          "{\"label\":{\"text\":\"Workspaces\"},\"hint\":{\"text\":\"agent-repl\"},\"app\":{\"workspaces\":{}}},"
+                          "{\"label\":{\"text\":\"Chat\"},\"hint\":{\"text\":\"zettel\"},\"app\":{\"chat\":{}},\"shown\":{}}]}"))
+                 '(:title "Chat" :shown :chat
+                   :options ((:label "Workspaces" :hint "agent-repl" :app :workspaces :shown nil)
+                             (:label "Chat" :hint "zettel" :app :chat :shown t))))))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-thread-section ()
+  "The thread section decodes its button and each thread, newest first."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-thread-section
+                  (concat "{\"newThread\":{\"label\":\"New thread\"},\"rows\":["
+                          "{\"thread\":{\"id\":\"t2\",\"dir\":\"/z/b\"},\"name\":{\"text\":\"b\"},"
+                          "\"summary\":{\"text\":\"light\"},\"current\":{}},"
+                          "{\"thread\":{\"id\":\"t1\",\"dir\":\"/z/a\"},\"name\":{\"text\":\"a\"}}]}"))
+                 '(:new-thread "New thread"
+                   :rows ((:thread (:id "t2" :dir "/z/b") :name "b" :summary "light" :current t)
+                          (:thread (:id "t1" :dir "/z/a") :name "a" :summary nil :current nil))))))
+
+(ert-deftest agent-repl-test-wire-roster-an-app-with-no-arm-is-a-breach ()
+  "Which app is shown is never unset on the wire."
+  (should (equal (agent-repl-test-wire-roster--breach #'agent-repl-wire-decode-sidebar-app "{}")
+                 '("SidebarApp" app "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-without-the-threads-is-a-breach ()
+  "The thread section is always set, empty when there are no threads."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-roster
+                  (replace-regexp-in-string
+                   "\"threads\":{[^}]*},\"rows\":\\[\\]}," ""
+                   agent-repl-test-wire-roster--roster-json t t))
+                 '("WorkspaceRoster" threads "required message field is absent"))))
