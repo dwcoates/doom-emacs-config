@@ -21,13 +21,20 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 enum TokenType {
   HEADING_LABEL,
   BRANCH_LABEL,
   LINE_END,
   ERROR_SENTINEL,
+  FENCE_OPEN,
+  FENCE_CLOSE,
+  FENCE_LINE,
 };
+
+/* The smallest backtick run that opens a fence, as in markdown. */
+#define FENCE_MIN 3
 
 /* The webapp's EMOJI_FLOOR: every metaprompt root marker sits at or above it. */
 #define MARKER_FLOOR 0x2190
@@ -106,26 +113,99 @@ static bool scan_line_end(TSLexer *lexer) {
   return true;
 }
 
-void *tree_sitter_tldr_prompt_external_scanner_create(void) { return NULL; }
-void tree_sitter_tldr_prompt_external_scanner_destroy(void *payload) { (void)payload; }
+/*
+ * THE FENCE. The scanner's one piece of state is the open fence's backtick
+ * count (0 when no fence is open), because markdown closes a fence only on a
+ * run at least as long as the one that opened it, with nothing after it but
+ * blanks. A shorter run, or a run with text after it (```yaml inside a ````
+ * fence), is a line of the fence. The run may follow rails or blanks, as the
+ * fence a tree's branch carries does.
+ */
+typedef struct {
+  uint8_t open;
+} Scanner;
+
+static bool is_rail(int32_t c) { return is_blank(c) || c == 0x2502 /* │ */; }
+static bool is_rail_or_backtick(int32_t c) { return is_rail(c) || c == '`'; }
+
+static unsigned count_backticks(TSLexer *lexer) {
+  unsigned n = 0;
+  while (lexer->lookahead == '`') {
+    advance(lexer);
+    n++;
+  }
+  return n;
+}
+
+/* A fence's own line: its close, or one of its lines. A blank line is not
+ * claimed here, so the grammar's own blank token takes it. */
+static bool scan_inside_fence(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
+  bool content = false;
+  while (is_rail(lexer->lookahead)) {
+    if (!is_blank(lexer->lookahead)) content = true;
+    advance(lexer);
+  }
+  unsigned run = count_backticks(lexer);
+  if (run > 0) content = true;
+  if (run >= scanner->open && valid_symbols[FENCE_CLOSE]) {
+    while (is_blank(lexer->lookahead)) advance(lexer);
+    if (at_line_end(lexer)) {
+      lexer->mark_end(lexer);
+      lexer->result_symbol = FENCE_CLOSE;
+      scanner->open = 0;
+      return true;
+    }
+  }
+  if (!valid_symbols[FENCE_LINE]) return false;
+  while (!at_line_end(lexer)) {
+    if (!is_blank(lexer->lookahead)) content = true;
+    advance(lexer);
+  }
+  if (!content) return false;
+  lexer->mark_end(lexer);
+  lexer->result_symbol = FENCE_LINE;
+  return true;
+}
+
+/* A fence's opening line: rails or blanks, at least FENCE_MIN backticks, and
+ * anything after them (its info string) to the end of the line. */
+static bool scan_fence_open(Scanner *scanner, TSLexer *lexer) {
+  while (is_rail(lexer->lookahead)) advance(lexer);
+  unsigned run = count_backticks(lexer);
+  if (run < FENCE_MIN) return false;
+  while (!at_line_end(lexer)) advance(lexer);
+  lexer->mark_end(lexer);
+  lexer->result_symbol = FENCE_OPEN;
+  scanner->open = run > 255 ? 255 : (uint8_t)run;
+  return true;
+}
+
+void *tree_sitter_tldr_prompt_external_scanner_create(void) {
+  Scanner *scanner = calloc(1, sizeof(Scanner));
+  return scanner;
+}
+void tree_sitter_tldr_prompt_external_scanner_destroy(void *payload) { free(payload); }
 unsigned tree_sitter_tldr_prompt_external_scanner_serialize(void *payload, char *buffer) {
-  (void)payload;
-  (void)buffer;
-  return 0;
+  buffer[0] = (char)((Scanner *)payload)->open;
+  return 1;
 }
 void tree_sitter_tldr_prompt_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {
-  (void)payload;
-  (void)buffer;
-  (void)length;
+  ((Scanner *)payload)->open = length > 0 ? (uint8_t)buffer[0] : 0;
 }
 
 bool tree_sitter_tldr_prompt_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
-  (void)payload;
+  Scanner *scanner = payload;
   /* Error recovery marks every symbol valid; no token here is a recovery aid. */
   if (valid_symbols[ERROR_SENTINEL]) return false;
   if (valid_symbols[LINE_END] && at_line_end(lexer)) {
     lexer->result_symbol = LINE_END;
     return scan_line_end(lexer);
+  }
+  if (scanner->open > 0 && (valid_symbols[FENCE_CLOSE] || valid_symbols[FENCE_LINE])) {
+    return scan_inside_fence(scanner, lexer, valid_symbols);
+  }
+  if (scanner->open == 0 && valid_symbols[FENCE_OPEN] && is_rail_or_backtick(lexer->lookahead)) {
+    return scan_fence_open(scanner, lexer);
   }
   if (valid_symbols[HEADING_LABEL] && is_digit(lexer->lookahead)) {
     lexer->result_symbol = HEADING_LABEL;

@@ -304,39 +304,6 @@
         }
       }
     },
-    "fence_open": {
-      "type": "TOKEN",
-      "content": {
-        "type": "PREC",
-        "value": 4,
-        "content": {
-          "type": "PATTERN",
-          "value": "[ \\t│]*```[^\\n]*"
-        }
-      }
-    },
-    "fence_close": {
-      "type": "TOKEN",
-      "content": {
-        "type": "PREC",
-        "value": 7,
-        "content": {
-          "type": "PATTERN",
-          "value": "[ \\t│]*```[ \\t]*"
-        }
-      }
-    },
-    "fence_line": {
-      "type": "TOKEN",
-      "content": {
-        "type": "PREC",
-        "value": 6,
-        "content": {
-          "type": "PATTERN",
-          "value": "[^\\n]+"
-        }
-      }
-    },
     "separator": {
       "type": "TOKEN",
       "content": {
@@ -427,6 +394,18 @@
     {
       "type": "SYMBOL",
       "name": "_error_sentinel"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "fence_open"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "fence_close"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "fence_line"
     }
   ],
   "inline": [],

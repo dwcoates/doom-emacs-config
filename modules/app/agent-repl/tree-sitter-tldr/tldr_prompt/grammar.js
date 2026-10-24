@@ -80,6 +80,9 @@ module.exports = grammar({
     $.branch_label,
     $._line_end,
     $._error_sentinel,
+    $.fence_open,
+    $.fence_close,
+    $.fence_line,
   ],
 
   rules: {
@@ -131,11 +134,15 @@ module.exports = grammar({
 
     _fence_blank: _ => token(prec(6, /[ \t]*\n/)),
 
-    fence_open: _ => token(prec(4, /[ \t│]*```[^\n]*/)),
-
-    fence_close: _ => token(prec(7, /[ \t│]*```[ \t]*/)),
-
-    fence_line: _ => token(prec(6, /[^\n]+/)),
+    // fence_open, fence_close and fence_line are the scanner's
+    // (src/scanner.c, `scan_fence`): a fence closes only on a run of at least
+    // its opener's backticks with nothing after it but blanks, as markdown's
+    // does, which needs the opener's length remembered across lines. A
+    // shorter run, or one with text after it (```yaml), is a line of the
+    // fence. As regular tokens, the close outranked the line, so an inner
+    // ```yaml closed a ```` fence and left `yaml` unparsed: on 2026-10-24
+    // that was a prompt this grammar could not parse whole, which the daemon
+    // treats as the invariant it is and panicked on.
 
     separator: _ => token(prec(2, /[ \t]*[-–—:]/)),
 
