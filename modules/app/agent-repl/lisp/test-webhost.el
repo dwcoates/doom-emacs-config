@@ -823,6 +823,52 @@ The current tab's page, not shown here, is the nearest of all."
 
 ;;;; ---- The log level window ----
 
+;;;; ---- The unfocused shade ----
+
+(ert-deftest agent-repl-test-wh-an-unfocused-emacs-shows-the-shade ()
+  "An unfocused Emacs tells the host it is unfocused, as JSON false."
+  (agent-repl-test-wh--with-host
+    (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) nil)))
+      ;; Act
+      (should (agent-repl-webhost-sync-editor-focus))
+      ;; Assert
+      (should (equal (agent-repl-test-wh--sent "setEditorFocused")
+                     (list (agent-repl--webhost-script "setEditorFocused" :json-false))))
+      (should (string-search "h.setEditorFocused(false)" (car (agent-repl-test-wh--sent "setEditorFocused")))))))
+
+(ert-deftest agent-repl-test-wh-a-focused-emacs-hides-the-shade ()
+  "A focused Emacs tells the host it is focused, as JSON true."
+  (agent-repl-test-wh--with-host
+    (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) 'unknown)))
+      ;; Act
+      (agent-repl-webhost-sync-editor-focus)
+      ;; Assert
+      (should (string-search "h.setEditorFocused(true)" (car (agent-repl-test-wh--sent "setEditorFocused")))))))
+
+(ert-deftest agent-repl-test-wh-the-focus-without-a-host-sends-nothing ()
+  "With no host the focus is not sent; the next load's replay reads it afresh."
+  (agent-repl-test-wh--with-host
+    (setq agent-repl-test-wh--host nil)
+    (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) nil)))
+      ;; Act / Assert
+      (should-not (agent-repl-webhost-sync-editor-focus))
+      (should (null agent-repl-test-wh--calls)))))
+
+(ert-deftest agent-repl-test-wh-a-load-replays-the-focus-first ()
+  "A loaded host is told Emacs's focus before any page is handed to it."
+  (agent-repl-test-wh--with-host
+    (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) nil)))
+      (agent-repl-webhost-ensure-page "alpha")
+      (setq agent-repl-test-wh--calls nil)
+      ;; Act
+      (agent-repl-test-wh--load "load-committed")
+      ;; Assert
+      (should (string-search "h.setEditorFocused(false)" (car (car (last agent-repl-test-wh--calls))))))))
+
+(ert-deftest agent-repl-test-wh-the-shade-rides-the-focus-settled-hook ()
+  "The shade follows every settled focus change."
+  (should (memq #'agent-repl-webhost-sync-editor-focus agent-repl-focus-settled-hook)))
+
 (ert-deftest agent-repl-test-wh-set-log-level-tells-the-host-the-window ()
   "A raised level is sent to the host with its window's end."
   (agent-repl-test-wh--with-host

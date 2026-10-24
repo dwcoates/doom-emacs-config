@@ -174,6 +174,15 @@ export interface Host {
    * no end, closes it. A profiling session calls it from Emacs.
    */
   setLogLevel(level: string, untilMs: number | null): string;
+  /**
+   * Whether Emacs is the focused desktop application. While it is not, the
+   * unfocused shade (`UNFOCUSED_SHADE_CLASS`) covers the whole web view in
+   * solid orange, so Emacs's window is the one spotted at a glance among the
+   * desktop's windows (macOS Mission Control shows them all at once); a
+   * focus gain takes it away. Answers `shown` or `hidden`, or `refused` for
+   * anything that is not a boolean.
+   */
+  setEditorFocused(focused: boolean): string;
   /** Stop listening and drop every page. */
   dispose(): void;
 }
@@ -200,6 +209,8 @@ const FRAME_CLASS = "workspace-frame";
 export const FRAME_WORKSPACE_ATTRIBUTE = "data-workspace-id";
 /** The attribute the shown iframe wears. */
 export const FRAME_SHOWN_ATTRIBUTE = "data-shown";
+/** The class of the layer covering the web view while Emacs is unfocused. */
+export const UNFOCUSED_SHADE_CLASS = "webhost-unfocused-shade";
 
 /**
  * One note the host made for Emacs to record, at the level it deserves: INFO
@@ -250,6 +261,16 @@ export function createHost(env: HostEnv): Host {
   const incoming = new Map<string, { fresh: Frame; bound: number }>();
   /** Who is told every page shown (`onShown`): the webhost's sidebar. */
   const shownListeners = new Set<(id: string) => void>();
+  /**
+   * THE UNFOCUSED SHADE (`setEditorFocused`), last in the body so it covers
+   * the pages and the sidebar alike. Hidden until Emacs says it is unfocused:
+   * a host loads because Emacs asked for it, and Emacs replays its focus with
+   * every load.
+   */
+  const shade = doc.createElement("div");
+  shade.className = UNFOCUSED_SHADE_CLASS;
+  shade.hidden = true;
+  doc.body.append(shade);
 
   const note = (level: HostNote["level"], text: string): void => {
     notes.push({ level, text });
@@ -785,6 +806,14 @@ export function createHost(env: HostEnv): Host {
           return answer("setLogLevel", null, "opened", { level, until_ms: applied.untilMs, pages: frames.size });
       }
     },
+    setEditorFocused(focused) {
+      if (typeof focused !== "boolean") {
+        note("warn", `setEditorFocused was handed ${JSON.stringify(focused)}, which is no boolean; the shade stays as it was`);
+        return answer("setEditorFocused", null, "refused");
+      }
+      shade.hidden = focused;
+      return answer("setEditorFocused", null, focused ? "hidden" : "shown");
+    },
     ids() {
       return answer("ids", null, "listed", { ids: [...frames.keys()], shown: shownId });
     },
@@ -798,6 +827,7 @@ export function createHost(env: HostEnv): Host {
         if (lane.bound !== null) win.clearTimeout(lane.bound);
       }
       lanes.clear();
+      shade.remove();
     },
   };
 }
