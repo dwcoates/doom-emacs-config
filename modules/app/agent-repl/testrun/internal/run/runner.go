@@ -132,6 +132,10 @@ type Runner struct {
 	Exec  Executor
 	Clock Clock
 	Log   *Log
+	// Ended, when set, is told each unit's result as its verdict is
+	// reported, with the unit's whole output (nil for a unit that never
+	// started): a caller streaming the run's progress (events.Emitter).
+	Ended func(res Result, output []byte)
 }
 
 // grant is a unit's answer from the host's core pool.
@@ -361,12 +365,14 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		}
 		r.Log.Block(shown)
 		r.reportUnit(res)
+		r.tellEnded(res, c.output.Bytes())
 		cancelled := q.Done(c.id, res.Outcome == Passed)
 		finishUnit(res)
 		for _, u := range cancelled {
 			now := r.Clock.Now()
 			cres := Result{Spec: byID[u.ID], Outcome: Cancelled, Exit: 1, Start: now, End: now, CancelledBy: c.id}
 			r.reportUnit(cres)
+			r.tellEnded(cres, nil)
 			finishUnit(cres)
 		}
 	}
@@ -378,6 +384,13 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		panic(fmt.Sprintf("run: %d units never became ready, which NewQueue's validation rules out", p))
 	}
 	return results, r.suiteList(suites, order), nil
+}
+
+// tellEnded tells the run's observer, if it has one, that a unit ended.
+func (r *Runner) tellEnded(res Result, output []byte) {
+	if r.Ended != nil {
+		r.Ended(res, output)
+	}
 }
 
 // releaseCores gives unit id's host core seats back. Closing a seat's file

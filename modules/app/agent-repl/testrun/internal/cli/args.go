@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,13 @@ type Args struct {
 	// it neither reuses nor records a pass, because a pass of some of a
 	// suite's tests says nothing about the rest.
 	Targeted bool
+	// Selection (--selection) is a file holding a testrun.v1.TestRunRequest:
+	// the run runs exactly the tests it names (internal/selection), and is
+	// Targeted.
+	Selection string
+	// EventsFD (--events-fd) is the file descriptor the run writes its
+	// testrun.v1.TestRunEvent stream to; zero writes none.
+	EventsFD int
 }
 
 // ReuseMode is how the run treats pass records. A --record run measures and a
@@ -51,7 +59,7 @@ func (a Args) ReuseMode() reuse.Mode {
 }
 
 // ParseArgs reads `--module DIR [--record --record-out PATH] [--coverage]
-// [--no-reuse] [--suites a,b]`. An unknown suite is an error, never a silently empty run:
+// [--no-reuse] [--suites a,b] [--selection PATH] [--events-fd N]`. An unknown suite is an error, never a silently empty run:
 // a caller that misspells a suite must not be told it passed.
 func ParseArgs(argv []string) (Args, error) {
 	var a Args
@@ -68,6 +76,23 @@ func ParseArgs(argv []string) (Args, error) {
 			a.RecordOut = argv[i]
 		case arg == "--coverage":
 			a.Coverage = true
+		case arg == "--selection":
+			if i+1 >= len(argv) {
+				return Args{}, errors.New("--selection needs a path")
+			}
+			i++
+			a.Selection = argv[i]
+			a.Targeted = true
+		case arg == "--events-fd":
+			if i+1 >= len(argv) {
+				return Args{}, errors.New("--events-fd needs a file descriptor")
+			}
+			i++
+			fd, err := strconv.Atoi(argv[i])
+			if err != nil || fd < 3 {
+				return Args{}, fmt.Errorf("--events-fd %q is not a file descriptor past stderr", argv[i])
+			}
+			a.EventsFD = fd
 		case arg == "--no-reuse":
 			a.NoReuse = true
 		case arg == "--module":
@@ -93,11 +118,16 @@ func ParseArgs(argv []string) (Args, error) {
 			}
 			a.Selected = append(a.Selected, sel...)
 		default:
-			return Args{}, fmt.Errorf("unknown argument '%s', expected --record, --record-out, --coverage, --no-reuse, or --suites <list>", arg)
+			return Args{}, fmt.Errorf("unknown argument '%s', expected --record, --record-out, --coverage, --no-reuse, --suites <list>, --selection <path> or --events-fd <n>", arg)
 		}
 	}
 	if a.Module == "" {
 		return Args{}, errors.New("--module is required")
+	}
+	if a.Selection != "" && (len(a.Selected) > 0 || a.Record || a.Coverage) {
+		// A selection names its own tests; a suite list, a canonical timing
+		// history or a coverage report is a whole-suite run's.
+		return Args{}, errors.New("--selection cannot be combined with --suites, --record or --coverage")
 	}
 	if a.Record && a.Coverage {
 		// Instrumentation and the report units inflate every Go and vitest

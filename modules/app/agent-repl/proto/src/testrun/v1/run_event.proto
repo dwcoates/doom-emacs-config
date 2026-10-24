@@ -1,0 +1,165 @@
+// run_event.proto — WHAT A TEST RUN REPORTS AS IT GOES: what it planned, each
+// unit's verdict as the unit ends (with the tests it ran), and how the run
+// ended. The runner (testrun) writes these as it runs a selection, and the
+// daemon relays them verbatim to whoever asked (agentrepl.v1 RunTests).
+//
+// THE ORDER IS FIXED. A run that can plan states `planned` first, then one
+// `unit_ended` per planned unit, then `ended` last. A selection the runner
+// cannot resolve states `refused` alone.
+syntax = "proto3";
+
+package testrun.v1;
+
+option go_package = "agentrepl/proto/testrun/v1;testrunv1";
+
+// One thing a run reports.
+message TestRunEvent {
+  // Exactly one arm is set, and the arms arrive in the order the file header
+  // states.
+  oneof event {
+    // The units the run will run: always the first event of a run that plans.
+    TestRunPlanned planned = 1;
+    // One unit has ended.
+    TestRunUnitEnded unit_ended = 2;
+    // The run has ended: always the last event of a run that planned.
+    TestRunEnded ended = 3;
+    // The selection could not be run at all: the run's only event.
+    TestRunRefused refused = 4;
+  }
+}
+
+// The run's plan, before any unit starts.
+message TestRunPlanned {
+  // Every unit the run will run, in no particular order; each is reported once
+  // by a unit_ended.
+  repeated TestRunPlannedUnit units = 1;
+  // The run's complete log, which holds every unit's whole output.
+  TestRunLog log = 2;
+}
+
+// One planned unit: one process the runner starts.
+message TestRunPlannedUnit {
+  // The unit's id, unique within the run (for example
+  // "daemon:internal/merge#00"), which its unit_ended names again.
+  string unit_id = 1;
+  // The roster suite the unit belongs to.
+  string suite = 2;
+}
+
+// Where a run's complete log is.
+message TestRunLog {
+  // The log file's absolute path.
+  string path = 1;
+}
+
+// One unit's verdict, with the tests it ran.
+message TestRunUnitEnded {
+  // The unit's id, as planned.
+  string unit_id = 1;
+  // The roster suite the unit belongs to.
+  string suite = 2;
+  // How long the unit ran, in milliseconds; zero for a unit cancelled before it
+  // started.
+  int64 wall_ms = 3;
+  // How the unit ended.
+  oneof verdict {
+    // Every test the unit ran passed.
+    TestRunUnitPassed passed = 4;
+    // The unit failed: a test failed, or the process did.
+    TestRunUnitFailed failed = 5;
+    // The unit's precondition was unmet (an e2e sandbox with no container
+    // runtime, say), so it ran nothing; a decline fails no run.
+    TestRunUnitDeclined declined = 6;
+    // A unit the unit depended on failed, so it never started.
+    TestRunUnitCancelled cancelled = 7;
+  }
+  // The tests the unit ran, each with its own outcome, where the unit's output
+  // states them (Go, vitest and ERT do; a harness states its groups). Empty for
+  // a unit that ran no test (a build) or never started.
+  repeated TestRunTestResult tests = 8;
+}
+
+// The unit passed.
+message TestRunUnitPassed {}
+
+// The unit failed.
+message TestRunUnitFailed {
+  // The process's exit status; -1 when it could not be started or waited on.
+  int32 exit_code = 1;
+  // The end of the unit's output, at most a few thousand bytes; the run's log
+  // holds all of it.
+  string output_tail = 2;
+}
+
+// The unit declined: its precondition was unmet.
+message TestRunUnitDeclined {}
+
+// The unit was cancelled before it started.
+message TestRunUnitCancelled {
+  // The unit whose failure cancelled it.
+  string cancelled_by_unit_id = 1;
+}
+
+// One test a unit ran.
+message TestRunTestResult {
+  // The test's name as its framework reports it: a Go test with its subtest
+  // path (TestFoo/a_case), a vitest test's full name, an ERT test's symbol, or
+  // a harness group.
+  string name = 1;
+  // How long the test ran, in milliseconds, where its framework says.
+  int64 wall_ms = 2;
+  // How the test ended.
+  oneof outcome {
+    // The test passed.
+    TestRunTestPassed passed = 3;
+    // The test failed.
+    TestRunTestFailed failed = 4;
+    // The test was skipped.
+    TestRunTestSkipped skipped = 5;
+  }
+}
+
+// The test passed.
+message TestRunTestPassed {}
+
+// The test failed.
+message TestRunTestFailed {}
+
+// The test was skipped.
+message TestRunTestSkipped {}
+
+// How the run ended.
+message TestRunEnded {
+  // Whether every unit passed (or declined).
+  oneof outcome {
+    // No unit failed.
+    TestRunEndedPassed passed = 1;
+    // At least one unit failed or was cancelled.
+    TestRunEndedFailed failed = 2;
+  }
+}
+
+// No unit failed.
+message TestRunEndedPassed {
+  // How many units ran and passed.
+  int32 passed_units = 1;
+  // How many units declined.
+  int32 declined_units = 2;
+}
+
+// At least one unit failed or was cancelled.
+message TestRunEndedFailed {
+  // How many units failed.
+  int32 failed_units = 1;
+  // How many units were cancelled by an earlier failure.
+  int32 cancelled_units = 2;
+  // How many units passed.
+  int32 passed_units = 3;
+}
+
+// The selection could not be run.
+message TestRunRefused {
+  // What could not be resolved, for a person: the target no suite owns, the
+  // test the target does not define, and so on.
+  string detail = 1;
+}

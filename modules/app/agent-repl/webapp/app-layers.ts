@@ -125,30 +125,35 @@ export interface ModuleGraph {
 }
 
 /**
- * The layer chunk name (`app-<n>`) of every app module the entry statically
- * reaches, read off GRAPH: IS_APP says which ids are app source, BUDGET is the
- * layer budget. The entry, the entry's own scripts and every other module get
- * no name.
+ * The layer chunk name (`<prefix>-<n>`) of every member module the entry
+ * statically reaches, read off GRAPH: IS_MEMBER says which ids are layered
+ * together, BUDGET is the layer budget. The walk follows every static import,
+ * member or not, so a set reached only through other code (the generated
+ * protobuf code, imported by the app's) is layered as the app's own source is.
+ * The entry, the entry's own scripts and every non-member get no name.
  */
-export function appLayerChunks(
+export function layerChunks(
   graph: ModuleGraph,
-  isApp: (id: string) => boolean,
+  isMember: (id: string) => boolean,
   budget: number,
+  prefix: string,
 ): Map<string, string> {
   const entries = [...graph.getModuleIds()].filter((id) => graph.getModuleInfo(id)?.isEntry === true);
   const scripts = new Set(entries.flatMap((id) => graph.getModuleInfo(id)?.importedIds ?? []));
   const reached = new Map<string, LayerModule>();
+  const walked = new Set<string>();
   const pending = [...scripts].flatMap((id) => graph.getModuleInfo(id)?.importedIds ?? []);
   for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
-    if (reached.has(id) || !isApp(id) || scripts.has(id) || entries.includes(id)) continue;
+    if (walked.has(id) || scripts.has(id) || entries.includes(id)) continue;
+    walked.add(id);
     const info = graph.getModuleInfo(id);
     if (info === null) throw new Error(`app-layers: rollup has no module info for ${id}`);
+    pending.push(...info.importedIds);
+    if (!isMember(id)) continue;
     if (info.code === null) throw new Error(`app-layers: rollup holds no code for ${id}`);
-    const imports = info.importedIds.filter(isApp);
-    reached.set(id, { id, imports, size: info.code.length });
-    pending.push(...imports);
+    reached.set(id, { id, imports: info.importedIds.filter(isMember), size: info.code.length });
   }
   const names = new Map<string, string>();
-  for (const [id, layer] of appLayers([...reached.values()], budget)) names.set(id, `app-${layer}`);
+  for (const [id, layer] of appLayers([...reached.values()], budget)) names.set(id, `${prefix}-${layer}`);
   return names;
 }

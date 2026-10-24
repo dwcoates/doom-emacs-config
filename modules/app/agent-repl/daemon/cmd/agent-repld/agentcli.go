@@ -33,7 +33,7 @@ import (
 	"agent-repld/internal/stateroot"
 )
 
-// THE AGENT API'S COMMANDS: four nouns over the serving daemon's rpcs.
+// THE AGENT API'S COMMANDS: five nouns over the serving daemon's rpcs.
 //
 //	agent-repld workspace    create | async-merge | prompt | set | finished | open | close | kill
 //	                         compact | status | list | subscribe | unsubscribe | gate
@@ -41,6 +41,7 @@ import (
 //	                         disable-racing | enable-racing | subscribe | unsubscribe
 //	agent-repld editor       eval
 //	agent-repld runtime      deploy-hold | roll-out-landing | health
+//	agent-repld test         run (testcli.go)
 //
 // EVERY COMMAND IS ONE RPC (a `set` with several flags is one rpc per flag,
 // in order), and its answer is printed as protojson. The daemon decides
@@ -165,6 +166,9 @@ var cliNouns = map[string]map[string]cliCommand{
 	},
 	editorNoun: {
 		"eval": {usage: "eval [-workspace WS] TEXT", run: editorEval},
+	},
+	testNoun: {
+		"run": {usage: "run [-workspace WS] [-go DIR[=TestA,TestB/sub/path]]... [-vitest FILE[=FULL NAME]]... [-ert FILE[=test-a,test-b]]... [-harness SCRIPT[=group1,group2]]...", run: testRun},
 	},
 	runtimeNoun: {
 		"deploy-hold":      {usage: "deploy-hold hold|release -repository here|DIR", run: runtimeDeployHold},

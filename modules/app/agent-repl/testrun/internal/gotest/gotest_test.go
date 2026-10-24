@@ -134,3 +134,35 @@ func TestNoOtherFileReimplementsTheseConventions(t *testing.T) {
 		t.Fatalf("use internal/gotest instead:\n%s", strings.Join(found, "\n"))
 	}
 }
+
+func TestPathPattern(t *testing.T) {
+	cases := []struct {
+		path string
+		want string
+	}{
+		{path: "TestA", want: "^TestA$"},
+		{path: "TestA/a_case/inner", want: "^TestA$/^a_case$/^inner$"},
+		{path: "TestA/x.y(1)", want: "^TestA$/^x\\.y\\(1\\)$"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			// Act
+			got := PathPattern(tc.path)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("PathPattern(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLiteralAlternation(t *testing.T) {
+	// Act
+	got := LiteralAlternation([]string{"a.b", "c|d"})
+
+	// Assert
+	if got != `(a\.b|c\|d)` {
+		t.Fatalf("LiteralAlternation = %q", got)
+	}
+}

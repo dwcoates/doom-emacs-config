@@ -14,14 +14,14 @@
 ### When to run which tests
 
 - Tests are used actively throughout: written alongside the code and run often to drive the work.
-- While developing, run only the tests covering what you change.
+- Run only the tests you need, at every stage: the tests, subtests and files covering what you change.
   - Never a whole suite, never a suite of a system the change does not touch, and never a repeat run for confidence.
   - Chasing a flaky test reruns that test, not its suite.
-- When a complete set of changes is finished (a feature fully added, a bug fixed, a prescribed change made), run the full unit and integration suites of the systems it touched, once.
-  - Add the e2e suite only with a stated reason: the change could have systemic knock-on effects.
-  - A failure there goes back to targeted runs, and the set finishes with one more full run.
-- After a git merge you made yourself, onto any branch, run the full suite: unit, integration and e2e.
-  - Never after a merge routed through the merge queue: the queue already runs the full suite as its gate.
+  - A finished change and a git merge you made yourself are verified the same way: the tests covering everything the change or merge touched, named one by one.
+- Never run the full suite yourself: the merge queue runs it as the gate of every landing.
+  - The rare exception is a change with systemic knock-on effects, and the run states that reason.
+- Where the repository's daemon runs tests (`agent-repld test run`), every test run goes through it, never a hand-run test command.
+  - The repository's tests skill says how to name the tests.
 
 ### Master moves only through the merge queue
 

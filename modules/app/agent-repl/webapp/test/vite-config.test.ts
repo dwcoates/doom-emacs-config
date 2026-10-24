@@ -106,7 +106,7 @@ function manualChunkFor(id: string): string | undefined {
 
 describe("vite.config.ts manualChunks", () => {
   const cases: { name: string; id: string; want: string | undefined }[] = [
-    { name: "the generated protobuf code goes to proto", id: "/r/proto/gen/ts/agentrepl/v1/api_pb.ts", want: "proto" },
+    { name: "generated protobuf code the entry never reaches is left to rollup", id: "/r/proto/gen/ts/agentrepl/v1/api_pb.ts", want: undefined },
     { name: "the protobuf-es runtime goes to protobuf", id: "/r/node_modules/@bufbuild/protobuf/dist/esm/index.js", want: "protobuf" },
     { name: "the connect client goes to connect", id: "/r/node_modules/@connectrpc/connect-web/dist/esm/index.js", want: "connect" },
     { name: "xterm goes to xterm", id: "/r/node_modules/@xterm/xterm/lib/xterm.js", want: "xterm" },
@@ -167,12 +167,12 @@ describe("vite.config.ts build", () => {
     expect(oversized).toEqual([]);
   });
 
-  it("puts the generated protobuf code in its own chunk, out of the entry", () => {
+  it("puts the generated protobuf code in a layer chunk of its own, out of the entry", () => {
     // Act.
     const holder = chunkHolding(clean.output, "/proto/gen/ts/");
 
     // Assert.
-    expect(holder).toMatch(/^assets\/proto-[A-Za-z0-9_-]+\.js$/);
+    expect(holder).toMatch(/^assets\/proto-[0-9]+-[A-Za-z0-9_-]+\.js$/);
   });
 
   it("puts the app's own code in a layer chunk, out of the entry", () => {

@@ -174,9 +174,20 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 	if len(p.Programs) > 0 {
 		p.ChunkEnv = append(p.ChunkEnv, testenv.Programs+"="+p.ProgramsDir)
 	}
-	chunk := func(id string, items []string) run.Spec {
+	// A NAMED CHUNK RUNS ONE TEST PATH: `-test.run` matches each level of a
+	// path separately, so two paths of different depths cannot share one
+	// pattern, and a selection gives each path its own chunk.
+	named := func(id string, items []string, names []string) run.Spec {
+		pattern := gotest.TopPattern(items)
+		switch len(names) {
+		case 0:
+		case 1:
+			pattern = gotest.PathPattern(names[0])
+		default:
+			panic(fmt.Sprintf("suites: a Go chunk runs one named test path, got %d: %v", len(names), names))
+		}
 		argv := []string{p.Bin, "-test.count=1", "-test.v", "-test.parallel=" + strconv.Itoa(max(p.Parallel.Tests, 1)),
-			"-test.timeout=" + timeout, "-test.run=" + gotest.TopPattern(items)}
+			"-test.timeout=" + timeout, "-test.run=" + pattern}
 		if p.CovDir != "" {
 			argv = append(argv, "-test.gocoverdir="+p.CovDir)
 		}
@@ -187,6 +198,7 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		sp.Display = QuietGoTestOutput
 		return sp
 	}
+	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
 	deps := []string{buildUnit.ID}
 	for _, name := range p.Programs {
 		deps = append(deps, ProgramUnitID(name))
@@ -199,6 +211,7 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		// misclassify that queue time as process startup and suppress splitting.
 		OverheadCap: 1,
 		Chunk:       chunk,
+		Named:       named,
 		Slots:       p.Parallel.Slots,
 	}, nil
 }

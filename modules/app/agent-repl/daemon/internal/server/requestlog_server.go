@@ -731,6 +731,14 @@ func (s *requestLoggingServer) CompactWorkspace(
 	return serveUnary(s, ctx, "CompactWorkspace", req, s.server.CompactWorkspace)
 }
 
+func (s *requestLoggingServer) RunTests(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RunTestsRequest],
+	stream *connect.ServerStream[agentreplv1.RunTestsResponse],
+) error {
+	return serveStream(s, ctx, "RunTests", req, stream, s.server.RunTests)
+}
+
 func (s *requestLoggingServer) EvaluateInEditor(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.EvaluateInEditorRequest],

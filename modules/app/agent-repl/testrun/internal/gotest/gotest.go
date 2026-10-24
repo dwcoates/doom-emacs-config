@@ -34,11 +34,30 @@ func IsTestFunc(fn *ast.FuncDecl, prefix, param string) bool {
 
 // TopPattern matches exactly the named top-level tests (and their subtests).
 func TopPattern(tests []string) string {
-	q := make([]string, len(tests))
-	for i, t := range tests {
-		q[i] = regexp.QuoteMeta(t)
+	return "^" + LiteralAlternation(tests) + "$"
+}
+
+// LiteralAlternation is a regexp group matching any one of items literally:
+// the one spelling of "these exact names" every runner's name filter builds
+// on (TopPattern here, the vitest -t pattern in suites).
+func LiteralAlternation(items []string) string {
+	q := make([]string, len(items))
+	for i, it := range items {
+		q[i] = regexp.QuoteMeta(it)
 	}
-	return "^(" + strings.Join(q, "|") + ")$"
+	return "(" + strings.Join(q, "|") + ")"
+}
+
+// PathPattern is the -test.run value that runs exactly one test path: a
+// top-level test and the subtests beneath it, each segment matched exactly
+// (`-test.run` splits on "/" and matches each level separately).
+func PathPattern(path string) string {
+	segments := strings.Split(path, "/")
+	q := make([]string, len(segments))
+	for i, segment := range segments {
+		q[i] = "^" + regexp.QuoteMeta(segment) + "$"
+	}
+	return strings.Join(q, "/")
 }
 
 // ResultLine is a -v result line; its groups are the outcome (PASS, FAIL or

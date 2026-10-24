@@ -127,7 +127,7 @@ func (t deployTarget) localMerge() *repoconfigv1.DeployLocalMerge {
 // Only a run with a local merge tests, so a run without one asking for it is a
 // defect.
 func (t deployTarget) testScript() string {
-	path := t.localMerge().GetTests().GetAgentReplSuites().GetScriptPath()
+	path := deployconfig.TestScript(t.cfg)
 	if path == "" {
 		panic("merge: a run with no agent_repl_suites test step asked for its test script")
 	}

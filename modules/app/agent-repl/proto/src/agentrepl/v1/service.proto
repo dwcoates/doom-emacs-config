@@ -11,6 +11,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/endpoint_run_tests.proto";
 import "agentrepl/v1/endpoint_submit_prompt.proto";
 import "agentrepl/v1/endpoint_retry_vendor_error.proto";
 import "agentrepl/v1/endpoint_select_feed_row.proto";
@@ -561,6 +562,10 @@ service AgentRepl {
   // End a merge-queue subscription. See
   // endpoint_unsubscribe_merge_queue.proto.
   rpc UnsubscribeMergeQueue(UnsubscribeMergeQueueRequest) returns (UnsubscribeMergeQueueResponse);
+  // Run the named tests from one workspace's worktree, streaming what the run
+  // reports; the daemon is the one runner of tests on the host. See
+  // endpoint_run_tests.proto.
+  rpc RunTests(RunTestsRequest) returns (stream RunTestsResponse);
 
   // ---- EDITOR: elisp evaluated in the running editor ----
   // Evaluate elisp in the running editor and answer with the result. See

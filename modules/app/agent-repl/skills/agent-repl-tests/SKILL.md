@@ -1,6 +1,7 @@
 ---
 name: agent-repl-tests
-description: Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or picks how to run tests for a change. Holds the measured test-performance pitfalls and their fixes as a living list.
+description: Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or runs tests for a change: every run goes through `agent-repld test run`, naming only the tests needed. Holds the measured test-performance pitfalls and their fixes as a living list.
+allowed-tools: Bash(~/.claude/skills/agent-repl-tests/agent-repld:*)
 ---
 
 # Write tests (agent-repl)
@@ -10,6 +11,54 @@ description: Write or change agent-repl tests (Go unit/integration/e2e, vitest, 
 Test performance work NEVER loses coverage. A faster test that tests less is
 a regression, whatever it saves. Every change below keeps the same assertions
 over the same code paths; it changes only what the test costs to run.
+
+## Running tests: `agent-repld test run`
+
+Every test run goes through the daemon:
+`~/.claude/skills/agent-repl-tests/agent-repld test run [-workspace WS] SELECTION...`.
+Never a hand-run `go test`, `npm test`, `emacs -batch`,
+`bin/background.sh ...` or `bin/test-all.sh`. The daemon runs the
+workspace's own `bin/test-all.sh` with the selection, so the run takes
+background priority, the host's one test-CPU budget, and the runner's own
+log.
+
+Name only the tests you need: the tests covering what you changed. Never
+the full suite: the merge queue runs it as the gate of every landing (the
+metaprompt's "When to run which tests" rules how broad a run is).
+
+Selections (each a repeatable flag; paths relative to the working directory
+or absolute, inside the workspace's worktree):
+
+```text
+-go DIR                        every test of the Go package in DIR
+-go DIR=TestA,TestB/case/sub   those tests; TestB/case/sub is one subtest path
+-vitest FILE                   every test of the vitest file
+-vitest 'FILE=suite test'      one test or describe block by its full name; repeat the flag for more
+-ert FILE                      every test of the ERT file
+-ert FILE=test-a,test-b        those ert-deftests
+-harness SCRIPT                the whole shell harness
+-harness SCRIPT=group1,group2  those groups of a harness that lists groups
+```
+
+Example, run from `modules/app/agent-repl`:
+
+```bash
+~/.claude/skills/agent-repl-tests/agent-repld test run -go daemon/internal/merge=TestQueue/front -ert lisp/test-status.el=agent-repl-status-test-x
+```
+
+Output: one line of protojson per event as it arrives: `planned` (the units
+and the run's log path), `unit_ended` per unit (verdict, wall time, per-test
+results, and a failed unit's output tail), then `ended` (passed or failed
+counts) or `refused` (a selection naming something the roster does not hold,
+or a name the runner cannot find). Read the run's log path from `planned`
+for full output.
+
+Exit codes: 0 passed, 1 tests failed, 6 refused (bad selection, unknown
+workspace, no selection), 2 the run or the call failed (e.g.
+`runner_failed`, which carries the script's exit code and last lines).
+
+A Go integration package (`-tags integration`) is selected by its directory
+like any other; the runner knows its tags.
 
 ## The rules this builds on
 
@@ -65,7 +114,7 @@ coverage impact (always none).
 
 7. **Running a whole suite when a targeted run would do.**
    - Evidence: the host has ONE suite slot shared by every session's full runs and every merge gate; gates waited 64-338s for it before any suite started, and a load average of 25-95 turned timing-sensitive tests red across unrelated merges (docs/investigations/2026-10-12-merge-queue-latency.md).
-   - Fix: while developing, run only the tests you touch (`go test -run '^TestName$' ./pkg` through `bin/background.sh`, `npm test -- -t "name"`, one ERT file, `bin/test-all.sh --suites <names>`). Run the full suite once per complete change, before it lands, and never in a polling loop.
+   - Fix: run only the tests you need, through `agent-repld test run` (see "Running tests"); never the full suite, which is the merge queue's gate.
 
 8. **Sequential waits that could overlap.**
    - Fix: `t.Parallel()` with per-test isolation (own temp dirs, own state roots, own sockets); wait-bound packages overlap 8 tests per chunk (df9f409ed; 16 per chunk was slower and failed).
