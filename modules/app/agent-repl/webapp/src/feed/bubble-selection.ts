@@ -52,7 +52,7 @@ import {
   ENTRY_LABEL_CLASS,
   LABEL_LINK_CLASS,
 } from "./entries.js";
-import { TREE_LABEL_ATTRIBUTE } from "../metaprompt-tree.js";
+import { TREE_CLASS, TREE_LABEL_ATTRIBUTE, TREE_LINE_CLASS, TREE_NODE_ATTRIBUTE } from "../metaprompt-tree.js";
 import { feedRowId, feedRowOf } from "./row-id.js";
 
 /** The attribute a root-feed row wears while the selection owns its bubble's expansion. */
@@ -127,11 +127,26 @@ export function governedRowAt(target: EventTarget | null, host: HTMLElement): HT
   return row.hasAttribute(SELECTION_GOVERNED_ATTRIBUTE) ? row : null;
 }
 
+/**
+ * The node of a response's tree TARGET is on, inside the governed ROW, or
+ * null: a line drawing a node, in a drawn tree, of a response the daemon says
+ * can be selected. What a hover boxes (branch-hover.ts) and a click answers.
+ */
+export function branchAt(row: HTMLElement, target: Element): { line: HTMLElement; label: string } | null {
+  if (row.getAttribute("data-unit") !== "response" || !row.hasAttribute(SELECTABLE_ATTRIBUTE)) return null;
+  const line = target.closest<HTMLElement>(`.${TREE_CLASS} .${TREE_LINE_CLASS}[${TREE_NODE_ATTRIBUTE}]`);
+  if (line === null || !row.contains(line)) return null;
+  const label = line.getAttribute(TREE_NODE_ATTRIBUTE);
+  if (label === null) throw new Error("a line the node selector matched names no node");
+  return { line, label };
+}
+
 /** What a click on a governed bubble asks of the daemon. */
 export type BubbleClick =
   | { case: "select"; row: string }
   | { case: "answer"; prompt: string; label: string }
   | { case: "entry"; row: string; label: string }
+  | { case: "branch"; row: string; label: string }
   | { case: "ignore"; reason: "not-landed" | "interactive" | "text-selection" };
 
 /**
@@ -162,6 +177,10 @@ export function bubbleClick(opts: { row: HTMLElement; target: Element; selectedT
     const entry = opts.target.closest<HTMLElement>(`.${ENTRY_CLASS}`);
     return { case: "entry", row, label: entry?.getAttribute(ENTRY_ATTRIBUTE) ?? "" };
   }
+  // A RESPONSE'S BRANCH IS ANSWERED: the response is selected, and Emacs opens
+  // a blank entry answering the node in the composer (branch-hover.ts).
+  const branch = branchAt(opts.row, opts.target);
+  if (branch !== null) return { case: "branch", row, label: branch.label };
   return { case: "select", row };
 }
 
@@ -215,6 +234,17 @@ export function installBubbleSelect(
           selectFeedRow(ctx, { case: "entry", value: { row: { value: click.row }, label: click.label } }, ENTRY_REQUEST),
         );
         return;
+      case "branch":
+        log.info("a click on a response's branch selects the response to answer the node", {
+          operation: "feed.branch-click",
+          context: { row: click.row, label: click.label },
+        });
+        void guardMalformed(
+          ctx,
+          "feed.selection-branch",
+          selectFeedRow(ctx, { case: "branch", value: { row: { value: click.row }, label: click.label } }, BRANCH_REQUEST),
+        );
+        return;
       default: {
         const other: { case: string } = click;
         return unreachableArm("BubbleClick", other.case);
@@ -235,3 +265,6 @@ export const ANSWER_REQUEST = "show the prompt that answered the clicked label";
 
 /** What the chip's `request` evidence names an entry's click as. */
 export const ENTRY_REQUEST = "edit the clicked entry";
+
+/** What the chip's `request` evidence names a response branch's click as. */
+export const BRANCH_REQUEST = "answer the clicked branch";

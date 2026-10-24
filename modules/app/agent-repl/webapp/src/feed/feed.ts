@@ -40,6 +40,7 @@ import {
   type OutOfViewCause,
 } from "./out-of-view-collapse.js";
 import { installBackgroundClear } from "./background-click.js";
+import { installBranchHover } from "./branch-hover.js";
 import { installImageOpen } from "./feed-image.js";
 import type { ImageOverlayHandle } from "../image-overlay/image-overlay.js";
 import type { FeedImageOverlay } from "../../../proto/gen/ts/frontend/v1/feed_image_overlay_pb";
@@ -348,6 +349,10 @@ export function mountFeed(
   // A CLICK ON A ROOT-FEED PROMPT OR RESPONSE BUBBLE selects it, or, on the
   // selected one, deselects it where the reader is (owner ruling, 2026-10-01).
   const uninstallSelect = installBubbleSelect(host, ctx);
+
+  // THE POINTER BOXES THE RESPONSE BRANCH UNDER IT, the node a click answers
+  // (owner ruling, 2026-10-24).
+  const uninstallBranchHover = installBranchHover(host);
 
   // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends the feed's selection
   // (owner ruling, 2026-09-23). It asks the daemon, which owns the selection;
@@ -1175,6 +1180,7 @@ export function mountFeed(
     intentScroll?.uninstall();
     uninstallExpand();
     uninstallSelect();
+    uninstallBranchHover();
     host.removeEventListener(READER_TOGGLE_EVENT, onReaderToggle);
     held?.dispose();
     uninstallClear?.();
