@@ -78,11 +78,21 @@ type failingSuite struct {
 	unnamed []string
 }
 
-// failingGroup is the failing tests one invocation runs.
+// TestRunCommand is how a fixing agent runs tests: through the daemon, which
+// starts every test run (bin/background.sh refuses any other), by the
+// installed front door.
+const TestRunCommand = "~/.claude/skills/agent-repl-workspaces/agent-repld test run"
+
+// failingGroup is the failing tests one selection runs.
 type failingGroup struct {
-	key     string
-	command string
-	tests   []string
+	key string
+	// flags answers the `agent-repld test run` selection flags that run
+	// names, the group's raw test names, built when the file is rendered so
+	// every chunk's failures of the group are in it.
+	flags func(names []string) []string
+	// names are the raw names flags takes; shown is how each is listed.
+	names []string
+	shown []string
 }
 
 // suite answers the named suite's entry, adding it.
@@ -97,17 +107,33 @@ func (f *failingTests) suite(name string) *failingSuite {
 	return s
 }
 
-// add records one failing test under the group key, with its invocation.
-func (s *failingSuite) add(key, command, test string) {
+// add records one failing test under the group key: name is what the
+// group's selection flags take, shown how the file lists it.
+func (s *failingSuite) add(key string, flags func([]string) []string, name, shown string) {
 	for _, g := range s.groups {
 		if g.key == key {
-			if !slices.Contains(g.tests, test) {
-				g.tests = append(g.tests, test)
+			if !slices.Contains(g.shown, shown) {
+				g.names, g.shown = append(g.names, name), append(g.shown, shown)
 			}
 			return
 		}
 	}
-	s.groups = append(s.groups, &failingGroup{key: key, command: command, tests: []string{test}})
+	s.groups = append(s.groups, &failingGroup{key: key, flags: flags, names: []string{name}, shown: []string{shown}})
+}
+
+// command is the group's `agent-repld test run` command line.
+func (g *failingGroup) command() string {
+	return TestRunCommand + " " + strings.Join(g.flags(g.names), " ")
+}
+
+// selectionFlag spells one `agent-repld test run` selection flag, its path
+// and its comma-separated names quoted for the shell.
+func selectionFlag(kind, path string, names []string) string {
+	value := path
+	if len(names) > 0 {
+		value += "=" + strings.Join(names, ",")
+	}
+	return "-" + kind + " " + shellword.Quote(value)
 }
 
 // readFailingTests reads every failing test out of a run's archived output.
@@ -171,20 +197,17 @@ func readUnit(found *failingTests, unit, suiteName string, lines []string, modul
 	switch {
 	case !known:
 	case suiteName == "e2e-emacs":
-		named = readGoUnit(s, lines, "e2e-emacs", func(pattern string) string {
-			return fmt.Sprintf("%s -run '%s'", filepath.Join(module, suite.Path), pattern)
+		// The Emacs layer runs whole: its harness has no tests to name.
+		script := filepath.Join(module, suite.Path)
+		named = readGoUnit(s, lines, "e2e-emacs", func([]string) []string {
+			return []string{selectionFlag("harness", script, nil)}
 		})
 	case suite.Kind == roster.GoModule || suite.Kind == roster.E2E:
-		rel, tags, ok := goUnitPackage(unit, suiteName)
+		rel, _, ok := goUnitPackage(unit, suiteName)
 		if ok {
-			dir := filepath.Join(module, suite.Path)
-			named = readGoUnit(s, lines, unit[:strings.LastIndex(unit, "#")], func(pattern string) string {
-				tagArg := ""
-				if tags != "" {
-					tagArg = " -tags " + tags
-				}
-				return fmt.Sprintf("cd %s && %s go test%s -count=1 -run '%s' %s",
-					dir, filepath.Join(module, "bin", "background.sh"), tagArg, pattern, goPackageArg(rel))
+			dir := filepath.Join(module, suite.Path, rel)
+			named = readGoUnit(s, lines, unit[:strings.LastIndex(unit, "#")], func(names []string) []string {
+				return []string{selectionFlag("go", dir, deepest(names))}
 			})
 		}
 	case suite.Kind == roster.ERT:
@@ -215,41 +238,31 @@ func goUnitPackage(unit, suite string) (rel, tags string, ok bool) {
 	return rest, "", true
 }
 
-// goPackageArg spells a package directory relative to its module for go test.
-func goPackageArg(rel string) string {
-	if rel == "." {
-		return "."
+// readGoUnit reads `go test -v` failure lines: every failing test and
+// subtest, by its full path.
+func readGoUnit(s *failingSuite, lines []string, key string, flags func([]string) []string) bool {
+	named := false
+	for _, line := range lines {
+		if m := goFailLine.FindStringSubmatch(line); m != nil {
+			s.add(key, flags, m[1], m[1])
+			named = true
+		}
 	}
-	return "./" + rel
+	return named
 }
 
-// readGoUnit reads `go test -v` failure lines. The invocation runs the failing
-// top-level tests; a failing subtest is named in full and run through its
-// parent.
-func readGoUnit(s *failingSuite, lines []string, key string, command func(pattern string) string) bool {
-	var names, tops []string
-	for _, line := range lines {
-		m := goFailLine.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		names = append(names, m[1])
-		top, _, _ := strings.Cut(m[1], "/")
-		if !slices.Contains(tops, top) {
-			tops = append(tops, top)
+// deepest keeps the failing tests nothing else failing is nested under: go
+// fails a test whose subtest failed, and naming the subtest path runs just
+// the failure.
+func deepest(names []string) []string {
+	var out []string
+	for _, n := range names {
+		nested := slices.ContainsFunc(names, func(o string) bool { return strings.HasPrefix(o, n+"/") })
+		if !nested && !slices.Contains(out, n) {
+			out = append(out, n)
 		}
 	}
-	if len(names) == 0 {
-		return false
-	}
-	quoted := make([]string, len(tops))
-	for i, top := range tops {
-		quoted[i] = regexp.QuoteMeta(top)
-	}
-	for _, name := range names {
-		s.add(key, command("^("+strings.Join(quoted, "|")+")$"), name)
-	}
-	return true
+	return out
 }
 
 // readERTUnit reads ERT's unexpected-result lines, grouping the tests by the
@@ -271,10 +284,10 @@ func readERTUnit(s *failingSuite, lines []string, module string) bool {
 		}
 	}
 	for _, file := range files {
-		command := fmt.Sprintf("cd %s && bin/background.sh emacs -batch -Q -l ert -l lisp/%s --eval \"(ert-run-tests-batch-and-exit '(member %s))\"",
-			module, file, strings.Join(byFile[file], " "))
+		path := filepath.Join(module, "lisp", file)
+		flags := func(names []string) []string { return []string{selectionFlag("ert", path, names)} }
 		for _, name := range byFile[file] {
-			s.add("ert:"+file, command, file+": "+name)
+			s.add("ert:"+file, flags, name, file+": "+name)
 		}
 	}
 	return len(files) > 0
@@ -287,10 +300,6 @@ func readVitestUnit(s *failingSuite, unit string, suite roster.Suite, lines []st
 	if strings.Contains(unit, ":") {
 		// The typecheck (or coverage) unit: no test to name.
 		return false
-	}
-	config := ""
-	if strings.HasPrefix(unit, suite.Name+"[integration]") {
-		config = " --config " + suite.IntegrationConfig
 	}
 	dir := filepath.Join(module, suite.Path)
 	byFile := map[string][]string{}
@@ -317,19 +326,26 @@ func readVitestUnit(s *failingSuite, unit string, suite roster.Suite, lines []st
 			byFile[m[1]] = append(byFile[m[1]], name)
 		}
 	}
-	runner := filepath.Join(module, "bin", "background.sh")
 	for _, file := range files {
+		path := filepath.Join(dir, file)
+		// A vitest flag carries ONE full name; "" is the whole file, which
+		// runs every name of it anyway.
+		flags := func(names []string) []string {
+			if slices.Contains(names, "") {
+				return []string{selectionFlag("vitest", path, nil)}
+			}
+			out := make([]string, 0, len(names))
+			for _, n := range names {
+				out = append(out, selectionFlag("vitest", path, []string{n}))
+			}
+			return out
+		}
 		if whole[file] || len(byFile[file]) == 0 {
-			s.add("vitest:"+file, fmt.Sprintf("cd %s && %s npx vitest run%s %s", dir, runner, config, file), file+": the whole file failed")
+			s.add("vitest:"+file, flags, "", file+": the whole file failed")
 			continue
 		}
-		patterns := make([]string, len(byFile[file]))
-		for i, name := range byFile[file] {
-			patterns[i] = regexp.QuoteMeta(name)
-		}
-		command := fmt.Sprintf("cd %s && %s npx vitest run%s %s -t %s", dir, runner, config, file, shellword.Quote(strings.Join(patterns, "|")))
 		for _, name := range byFile[file] {
-			s.add("vitest:"+file, command, file+": "+name)
+			s.add("vitest:"+file, flags, name, file+": "+name)
 		}
 	}
 	return len(files) > 0
@@ -342,11 +358,11 @@ func readScriptUnit(s *failingSuite, suite roster.Suite, lines []string, module 
 	if strings.HasPrefix(suite.Path, "/") {
 		script = filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(module))), suite.Path[1:])
 	}
-	command := strings.Join(append([]string{script}, suite.Args...), " ")
+	flags := func([]string) []string { return []string{selectionFlag("harness", script, nil)} }
 	named := false
 	for _, line := range lines {
 		if m := scriptFailLine.FindStringSubmatch(line); m != nil {
-			s.add("script:"+suite.Name, command, m[1])
+			s.add("script:"+suite.Name, flags, m[1], m[1])
 			named = true
 		}
 	}
@@ -358,17 +374,31 @@ func (f failingTests) render(archive string) string {
 	var b strings.Builder
 	b.WriteString("# The failing tests of the merge queue's last test gate run.\n")
 	b.WriteString(fmt.Sprintf("# The whole run is archived at %s.\n", archive))
-	b.WriteString("# Run exactly these while fixing, with the command given for each group.\n")
+	b.WriteString("# Run exactly these while fixing, through the daemon, with the command given\n")
+	b.WriteString("# for each group or the one that runs them all.\n")
 	b.WriteString("# After your turn the queue runs the selected suites again.\n")
 	if len(f.suites) == 0 {
 		b.WriteString("\nNo failing test could be attributed to a suite: read the archive.\n")
 		return b.String()
 	}
+	var all []string
+	for _, s := range f.suites {
+		for _, g := range s.groups {
+			for _, flag := range g.flags(g.names) {
+				if !slices.Contains(all, flag) {
+					all = append(all, flag)
+				}
+			}
+		}
+	}
+	if len(all) > 0 {
+		b.WriteString(fmt.Sprintf("\nrun all: %s %s\n", TestRunCommand, strings.Join(all, " ")))
+	}
 	for _, s := range f.suites {
 		b.WriteString(fmt.Sprintf("\n## %s\n", s.name))
 		for _, g := range s.groups {
-			b.WriteString(fmt.Sprintf("\nrun: %s\n", g.command))
-			for _, test := range g.tests {
+			b.WriteString(fmt.Sprintf("\nrun: %s\n", g.command()))
+			for _, test := range g.shown {
 				b.WriteString(fmt.Sprintf("- %s\n", test))
 			}
 		}
@@ -405,7 +435,7 @@ func (r *run) writeFailingTests(ctx context.Context, archive string) (string, er
 	named, unnamed := 0, 0
 	for _, s := range found.suites {
 		for _, g := range s.groups {
-			named += len(g.tests)
+			named += len(g.names)
 		}
 		unnamed += len(s.unnamed)
 	}

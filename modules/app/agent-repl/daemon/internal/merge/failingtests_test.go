@@ -45,7 +45,7 @@ func TestReadFailingTestsNamesAGoUnitsFailingTests(t *testing.T) {
 	s := suiteOf(t, readFailingTests(out, testModule), "daemon")
 
 	// Assert.
-	if len(s.groups) != 1 || !slices.Equal(s.groups[0].tests, []string{"TestA"}) {
+	if len(s.groups) != 1 || !slices.Equal(s.groups[0].shown, []string{"TestA"}) {
 		t.Fatalf("groups = %+v, want TestA alone", s.groups)
 	}
 }
@@ -58,8 +58,8 @@ func TestReadFailingTestsRunsAGoPackageFromItsModule(t *testing.T) {
 	s := suiteOf(t, readFailingTests(out, testModule), "daemon")
 
 	// Assert.
-	want := "cd /wt/modules/app/agent-repl/daemon && /wt/modules/app/agent-repl/bin/background.sh go test -count=1 -run '^(TestA)$' ./internal/merge"
-	if got := s.groups[0].command; got != want {
+	want := TestRunCommand + " -go '/wt/modules/app/agent-repl/daemon/internal/merge=TestA'"
+	if got := s.groups[0].command(); got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
 }
@@ -72,12 +72,12 @@ func TestReadFailingTestsRunsAnIntegrationPackageUnderItsTags(t *testing.T) {
 	s := suiteOf(t, readFailingTests(out, testModule), "daemon")
 
 	// Assert.
-	if got := s.groups[0].command; !strings.Contains(got, "go test -tags integration -count=1 -run '^(TestMergeLands)$' ./integration") {
-		t.Fatalf("command = %q, want the integration package under its tags", got)
+	if got := s.groups[0].command(); got != TestRunCommand+" -go '/wt/modules/app/agent-repl/daemon/integration=TestMergeLands'" {
+		t.Fatalf("command = %q, want the integration package by its directory (the runner knows its tags)", got)
 	}
 }
 
-func TestReadFailingTestsRunsAFailingSubtestThroughItsParent(t *testing.T) {
+func TestReadFailingTestsRunsJustTheFailingSubtest(t *testing.T) {
 	// Arrange.
 	out := failedUnit("daemon:internal/merge#00", "daemon", "    --- FAIL: TestA/one_case (0.00s)", "--- FAIL: TestA (0.00s)")
 
@@ -85,8 +85,8 @@ func TestReadFailingTestsRunsAFailingSubtestThroughItsParent(t *testing.T) {
 	s := suiteOf(t, readFailingTests(out, testModule), "daemon")
 
 	// Assert.
-	if !slices.Equal(s.groups[0].tests, []string{"TestA/one_case", "TestA"}) || !strings.Contains(s.groups[0].command, "-run '^(TestA)$'") {
-		t.Fatalf("group = %+v, want the subtest named and run through TestA", s.groups[0])
+	if !slices.Equal(s.groups[0].shown, []string{"TestA/one_case", "TestA"}) || !strings.HasSuffix(s.groups[0].command(), "=TestA/one_case'") {
+		t.Fatalf("group = %+v (%s), want the subtest listed and run alone by its path", s.groups[0], s.groups[0].command())
 	}
 }
 
@@ -98,8 +98,8 @@ func TestReadFailingTestsRunsTheCrossSystemSuiteFromItsDirectory(t *testing.T) {
 	s := suiteOf(t, readFailingTests(out, testModule), "e2e")
 
 	// Assert.
-	if got := s.groups[0].command; !strings.HasPrefix(got, "cd /wt/modules/app/agent-repl/e2e && ") || !strings.HasSuffix(got, "-run '^(TestWebappLayerSurfaces)$' .") {
-		t.Fatalf("command = %q, want the e2e package run from e2e/", got)
+	if got := s.groups[0].command(); got != TestRunCommand+" -go '/wt/modules/app/agent-repl/e2e=TestWebappLayerSurfaces'" {
+		t.Fatalf("command = %q, want the e2e package by its directory", got)
 	}
 }
 
@@ -137,8 +137,8 @@ func TestReadFailingTestsRunsTheEmacsClientLayersTestsThroughItsScript(t *testin
 	s := suiteOf(t, readFailingTests(out, testModule), "e2e-emacs")
 
 	// Assert.
-	want := "/wt/modules/app/agent-repl/bin/test-e2e-emacs.sh -run '^(TestEmacsRestartKeepsTheSelectedWorkspace)$'"
-	if got := s.groups[0].command; got != want {
+	want := TestRunCommand + " -harness '/wt/modules/app/agent-repl/bin/test-e2e-emacs.sh'"
+	if got := s.groups[0].command(); got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
 }
@@ -155,8 +155,8 @@ func TestReadFailingTestsNamesAnERTTestWithItsFile(t *testing.T) {
 	s := suiteOf(t, readFailingTests(out, testModule), "ert")
 
 	// Assert.
-	if !slices.Equal(s.groups[0].tests, []string{"test-wire-verbs.el: agent-repl-test-wire-verbs-merge-queue-action-arms-pinned"}) {
-		t.Fatalf("tests = %v, want the test named with its file", s.groups[0].tests)
+	if !slices.Equal(s.groups[0].shown, []string{"test-wire-verbs.el: agent-repl-test-wire-verbs-merge-queue-action-arms-pinned"}) {
+		t.Fatalf("tests = %v, want the test named with its file", s.groups[0].shown)
 	}
 }
 
@@ -168,8 +168,8 @@ func TestReadFailingTestsRunsERTTestsByNameInTheirFile(t *testing.T) {
 	s := suiteOf(t, readFailingTests(out, testModule), "ert")
 
 	// Assert.
-	want := `cd /wt/modules/app/agent-repl && bin/background.sh emacs -batch -Q -l ert -l lisp/test-core.el --eval "(ert-run-tests-batch-and-exit '(member agent-repl-a))"`
-	if got := s.groups[0].command; got != want {
+	want := TestRunCommand + " -ert '/wt/modules/app/agent-repl/lisp/test-core.el=agent-repl-a'"
+	if got := s.groups[0].command(); got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
 }
@@ -195,12 +195,12 @@ func TestReadFailingTestsNamesAVitestTestByItsFullName(t *testing.T) {
 	s := suiteOf(t, readFailingTests(out, testModule), "webapp")
 
 	// Assert.
-	if !slices.Equal(s.groups[0].tests, []string{"test/link.test.ts: links opens a file"}) {
-		t.Fatalf("tests = %v, want the file and full name", s.groups[0].tests)
+	if !slices.Equal(s.groups[0].shown, []string{"test/link.test.ts: links opens a file"}) {
+		t.Fatalf("tests = %v, want the file and full name", s.groups[0].shown)
 	}
 }
 
-func TestReadFailingTestsRunsAVitestFileWithItsNamePattern(t *testing.T) {
+func TestReadFailingTestsRunsAVitestTestByItsFullName(t *testing.T) {
 	// Arrange.
 	out := failedUnit("webapp#00", "webapp", " FAIL  test/link.test.ts > links > opens a (file)")
 
@@ -208,13 +208,13 @@ func TestReadFailingTestsRunsAVitestFileWithItsNamePattern(t *testing.T) {
 	s := suiteOf(t, readFailingTests(out, testModule), "webapp")
 
 	// Assert.
-	want := `cd /wt/modules/app/agent-repl/webapp && /wt/modules/app/agent-repl/bin/background.sh npx vitest run test/link.test.ts -t 'links opens a \(file\)'`
-	if got := s.groups[0].command; got != want {
+	want := TestRunCommand + ` -vitest '/wt/modules/app/agent-repl/webapp/test/link.test.ts=links opens a (file)'`
+	if got := s.groups[0].command(); got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}
 }
 
-func TestReadFailingTestsRunsAnIntegrationVitestFileUnderItsConfig(t *testing.T) {
+func TestReadFailingTestsRunsAnIntegrationVitestFileByItsPath(t *testing.T) {
 	// Arrange.
 	out := failedUnit("webapp[integration]#00", "webapp", " FAIL  test/integration/sidebar.integration.test.ts > arm coverage > covers every roster status arm")
 
@@ -222,8 +222,8 @@ func TestReadFailingTestsRunsAnIntegrationVitestFileUnderItsConfig(t *testing.T)
 	s := suiteOf(t, readFailingTests(out, testModule), "webapp")
 
 	// Assert.
-	if got := s.groups[0].command; !strings.Contains(got, "npx vitest run --config vitest.integration.config.ts test/integration/sidebar.integration.test.ts") {
-		t.Fatalf("command = %q, want the integration config", got)
+	if got := s.groups[0].command(); got != TestRunCommand+` -vitest '/wt/modules/app/agent-repl/webapp/test/integration/sidebar.integration.test.ts=arm coverage covers every roster status arm'` {
+		t.Fatalf("command = %q, want the integration file by its path (the runner knows its config)", got)
 	}
 }
 
@@ -235,7 +235,7 @@ func TestReadFailingTestsRunsAVitestFileThatFailedWholeWithNoPattern(t *testing.
 	s := suiteOf(t, readFailingTests(out, testModule), "shim")
 
 	// Assert.
-	if got := s.groups[0].command; strings.Contains(got, " -t ") || !strings.HasSuffix(got, "npx vitest run test/engine/session.test.ts") {
+	if got := s.groups[0].command(); got != TestRunCommand+" -vitest '/wt/modules/app/agent-repl/agent-shim/claude/shim/test/engine/session.test.ts'" {
 		t.Fatalf("command = %q, want the whole file run", got)
 	}
 }
@@ -248,8 +248,8 @@ func TestReadFailingTestsReadsAColoredVitestLine(t *testing.T) {
 	s := suiteOf(t, readFailingTests(out, testModule), "webapp")
 
 	// Assert.
-	if !slices.Equal(s.groups[0].tests, []string{"test/a.test.ts: b"}) {
-		t.Fatalf("tests = %v, want the colored line read", s.groups[0].tests)
+	if !slices.Equal(s.groups[0].shown, []string{"test/a.test.ts: b"}) {
+		t.Fatalf("tests = %v, want the colored line read", s.groups[0].shown)
 	}
 }
 
@@ -284,7 +284,7 @@ func TestReadFailingTestsNamesAHarnessesFailedCases(t *testing.T) {
 			s := suiteOf(t, readFailingTests(out, testModule), "background-harness")
 
 			// Assert.
-			if !slices.Equal(s.groups[0].tests, []string{tt.want}) || s.groups[0].command != "/wt/modules/app/agent-repl/bin/test-background.sh" {
+			if !slices.Equal(s.groups[0].shown, []string{tt.want}) || s.groups[0].command() != TestRunCommand+" -harness '/wt/modules/app/agent-repl/bin/test-background.sh'" {
 				t.Fatalf("group = %+v, want %q run through its harness", s.groups[0], tt.want)
 			}
 		})
@@ -299,7 +299,7 @@ func TestReadFailingTestsRunsARepositoryHarnessFromTheRepositoryRoot(t *testing.
 	s := suiteOf(t, readFailingTests(out, testModule), "precommit-harness")
 
 	// Assert.
-	if got := s.groups[0].command; got != "/wt/.githooks/test-pre-commit.sh" {
+	if got := s.groups[0].command(); got != TestRunCommand+" -harness '/wt/.githooks/test-pre-commit.sh'" {
 		t.Fatalf("command = %q, want the hook's harness at the repository root", got)
 	}
 }
@@ -394,13 +394,14 @@ func TestRenderPointsAnUnnamedUnitToItsBlockInTheArchive(t *testing.T) {
 
 func TestRenderListsEachGroupsCommandAndTests(t *testing.T) {
 	// Arrange.
-	found := failingTests{suites: []*failingSuite{{name: "daemon", groups: []*failingGroup{{command: "go test x", tests: []string{"TestA", "TestB"}}}}}}
+	flags := func(names []string) []string { return []string{selectionFlag("go", "/p", names)} }
+	found := failingTests{suites: []*failingSuite{{name: "daemon", groups: []*failingGroup{{flags: flags, names: []string{"TestA", "TestB"}, shown: []string{"TestA", "TestB"}}}}}}
 
 	// Act.
 	text := found.render("/logs/x.log")
 
 	// Assert.
-	if !strings.Contains(text, "## daemon\n\nrun: go test x\n- TestA\n- TestB\n") {
+	if !strings.Contains(text, "## daemon\n\nrun: "+TestRunCommand+" -go '/p=TestA,TestB'\n- TestA\n- TestB\n") {
 		t.Fatalf("text = %q, want the group's command then its tests", text)
 	}
 }
@@ -577,7 +578,7 @@ func TestAFixingAttemptsBriefCarriesTheFailingTestCasesInline(t *testing.T) {
 	// Assert.
 	got := fixingBriefValues(t, h)["failing_tests"]
 	written, err := os.ReadFile(filepath.Join(h.sourceD, FailingTestsFile))
-	if err != nil || got != string(written) || !strings.Contains(got, "- TestInline") || !strings.Contains(got, "-run '^(TestInline)$'") {
+	if err != nil || got != string(written) || !strings.Contains(got, "- TestInline") || !strings.Contains(got, TestRunCommand+" -go '"+filepath.Join(h.sourceD, moduleRoot, "daemon", "internal", "merge")+"=TestInline'") {
 		t.Fatalf("err %v: brief carries %q, file holds %q, want the file's body naming TestInline and its targeted run", err, got, written)
 	}
 }
@@ -639,5 +640,80 @@ func TestAFixingAttemptWritesTheFailingTestsBeforeItsBrief(t *testing.T) {
 	// Assert.
 	if _, err := os.Stat(filepath.Join(h.sourceD, FailingTestsFile)); err != nil {
 		t.Fatalf("the failing tests file is not in the worktree: %v", err)
+	}
+}
+
+func TestRenderRunsEveryFailingTestInOneCommand(t *testing.T) {
+	// Arrange.
+	out := failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)") +
+		failedUnit("ert#00", "ert", "   FAILED  1/2  agent-repl-a (0.1 sec) at test-core.el:12")
+
+	// Act.
+	text := readFailingTests(out, testModule).render("/logs/x.log")
+
+	// Assert.
+	// In roster order: the ERT suite before the daemon's.
+	want := "\nrun all: " + TestRunCommand + " -ert '/wt/modules/app/agent-repl/lisp/test-core.el=agent-repl-a' -go '/wt/modules/app/agent-repl/daemon/internal/merge=TestA'\n"
+	if !strings.Contains(text, want) {
+		t.Fatalf("text = %q, want the one command running every failing test: %q", text, want)
+	}
+}
+
+func TestReadFailingTestsGathersAPackagesFailuresAcrossItsChunks(t *testing.T) {
+	// Arrange: one package's tests failed in two chunks.
+	out := failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)") +
+		failedUnit("daemon:internal/merge#01", "daemon", "--- FAIL: TestZ (0.01s)")
+
+	// Act.
+	s := suiteOf(t, readFailingTests(out, testModule), "daemon")
+
+	// Assert.
+	if len(s.groups) != 1 || !strings.HasSuffix(s.groups[0].command(), "=TestA,TestZ'") {
+		t.Fatalf("groups = %+v, want one command naming both chunks' failures", s.groups)
+	}
+}
+
+func TestDeepest(t *testing.T) {
+	cases := []struct {
+		name  string
+		names []string
+		want  []string
+	}{
+		{name: "a parent failed by its subtest", names: []string{"TestA/x/y", "TestA/x", "TestA"}, want: []string{"TestA/x/y"}},
+		{name: "siblings each kept", names: []string{"TestA/x", "TestA/y", "TestA", "TestB"}, want: []string{"TestA/x", "TestA/y", "TestB"}},
+		{name: "a name sharing a prefix is no parent", names: []string{"TestAB", "TestA"}, want: []string{"TestAB", "TestA"}},
+		{name: "a repeat named once", names: []string{"TestA", "TestA"}, want: []string{"TestA"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := deepest(tc.names)
+
+			// Assert.
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("deepest = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// THE FIXING AGENT IS NEVER HANDED A HAND-RUN TEST COMMAND: bin/background.sh
+// refuses every test run the daemon did not start.
+func TestNoFailingTestCommandRunsATestByHand(t *testing.T) {
+	// Arrange: a failure of every kind of suite.
+	out := failedUnit("daemon:internal/merge#00", "daemon", "--- FAIL: TestA (0.01s)") +
+		failedUnit("e2e-emacs", "e2e-emacs", "--- FAIL: TestE (1.00s)") +
+		failedUnit("ert#00", "ert", "   FAILED  1/2  agent-repl-a (0.1 sec) at test-core.el:12") +
+		failedUnit("webapp#00", "webapp", " FAIL  test/a.test.ts > b") +
+		failedUnit("background-harness", "background-harness", "  FAIL: x")
+
+	// Act.
+	text := readFailingTests(out, testModule).render("/logs/x.log")
+
+	// Assert.
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "run") && !strings.Contains(line, ": "+TestRunCommand+" ") {
+			t.Fatalf("line %q runs tests by hand, want %s", line, TestRunCommand)
+		}
 	}
 }
