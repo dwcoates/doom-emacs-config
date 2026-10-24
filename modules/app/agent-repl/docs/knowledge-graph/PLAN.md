@@ -202,17 +202,18 @@ settled. Ideas so far:
 
 ## Glossary candidates
 
-Nothing here is settled yet.
+Only rows marked settled are settled. Recommended picks are listed first.
 
 | Concept | Candidates |
 |---|---|
-| The question-and-answer unit | open (notertame used `datum`) |
-| A source text, such as a book | open |
+| Anything stored in the graph | `node` (recommended), `item` |
+| The question-and-answer unit | `exchange` (recommended); notertame used `datum` |
+| A text brought in to be read, such as a book | `reading` (recommended), `material`; `source` and `document` ruled out, both already in heavy use (`document` is the browser's global) |
 | A frozen version of a node's content | `revision` |
-| The link from a question to a parent | open |
+| The link from a question to a parent | `premise` (recommended), `basis` |
 | The service that carries remote clients' encrypted traffic to the workstation | `relay` (settled) |
-| A highlighted passage | `excerpt` (preferred), `passage`, `quote` |
-| Text around a highlight | `surround`, `setting`, `vicinity` |
+| A highlighted passage | `quote` (recommended, matching the daemon's existing `replyquote` package for the whole-response reply), `excerpt` (already a rollback-preview field), `passage` |
+| Text around a highlight | `surround` (recommended), `vicinity` |
 | One stay of a parent on the path on screen | `visit` |
 | One counted instance of a bubble being seen | `sighting` |
 
