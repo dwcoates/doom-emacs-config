@@ -256,3 +256,26 @@ wrong labels). That needs one parse, in one place, that every program reads.
     never belong to a different line.
   - **The webapp draws the highlight as one stylesheet rule** over the node's lines
     (`webapp/src/feed/composer-entry.ts`), so a repaint of the response cannot drop it.
+
+### 7. Answering a response's branch from the feed
+
+- **What:**
+  - `SelectFeedRowRequest.move` gained `branch` (`SelectFeedRowBranch`: a response's
+    row and one node's label, tag 10).
+  - `WatchHostWorkspaceResponse` gained the event `compose_entry`
+    (`HostWorkspaceComposeEntry`: the label, tag 14).
+  - `feed.Resolver.ResponseNode` answers whether a response's tree holds a node.
+- **Why:** the owner's ask of 2026-10-24.
+  - A response's branch is boxed while the pointer is on it, drawn as the composer's
+    box is (`webapp/src/feed/subtree-box.ts`).
+  - A click on it selects the response, opens a blank `LABEL - ` entry on a line of
+    its own at the composer's end, and puts the keyboard there in insert state with
+    point right after it.
+- **Decisions inside the shape:**
+  - **The click never toggles.** It answers the node, so the response stays the one
+    replied to, as a click on a prompt's entry keeps its prompt.
+  - **The click names the node, not its text.** Emacs opens the entry itself
+    (`agent-repl-prompt-entries-opening`, the words `o` and `O` open with), so the
+    event carries only the label.
+  - **The hover is the webapp's alone.** It is drawn from the pointer and changes no
+    state, so no daemon round trip sits under the pointer.
