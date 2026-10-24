@@ -165,14 +165,15 @@ var suiteRules = []suiteRule{
 	// fail every merge's brief, so prompts/ selects the daemon suite.
 	{Kind: matchSubtree, Path: moduleRoot + "prompts/", Suites: []string{"daemon", "e2e", "e2e-emacs"}},
 
-	// DOCUMENTATION SELECTS NOTHING. The module's docs/ and plans/ hold
-	// prose, and so does every Markdown file at
+	// DOCUMENTATION SELECTS NOTHING. The module's docs/, plans/ and org/
+	// (the todo table of noticed deficiencies) hold prose, and so does every Markdown file at
 	// the module root -- except metaprompt.md, whose committed text the shim's
 	// own suite reads back (test/metaprompt.test.ts). Markdown deeper in the
 	// tree belongs to its system's region above: a suite may read it (the
 	// shim's AGENTS.md, a testdata MANIFEST.md, a skill's SKILL.md).
 	{Kind: matchSubtree, Path: moduleRoot + "docs/", Suites: []string{}},
 	{Kind: matchSubtree, Path: moduleRoot + "plans/", Suites: []string{}},
+	{Kind: matchSubtree, Path: moduleRoot + "org/", Suites: []string{}},
 	{Kind: matchExact, Path: moduleRoot + "metaprompt.md", Suites: []string{"shim", "sidecar", "e2e", "e2e-emacs"}},
 	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".md", Suites: []string{}},
 

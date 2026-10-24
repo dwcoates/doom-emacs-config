@@ -312,6 +312,7 @@ func TestSelectSuitesSelectsNothing(t *testing.T) {
 		{name: "an empty diff", paths: nil},
 		{name: "the module's docs", paths: []string{"modules/app/agent-repl/docs/USER-GUIDE.md"}},
 		{name: "the module's plans", paths: []string{"modules/app/agent-repl/plans/lazy-tail-first-replay-plan.md"}},
+		{name: "the module's todo table", paths: []string{"modules/app/agent-repl/org/todo.md"}},
 		{name: "Markdown at the module root", paths: []string{"modules/app/agent-repl/AGENTS.md"}},
 		{name: "the owner's Doom configuration", paths: []string{"config.el"}},
 		{name: "another module of the configuration", paths: []string{"modules/lang/personal-cc/config.el"}},

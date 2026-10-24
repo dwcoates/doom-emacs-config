@@ -405,7 +405,7 @@ var AlwaysRunRegions = []string{
 // enough to take in code a suite should test.
 var ReadByNoSuite = []string{
 	// The module's prose.
-	"docs/", "plans/", "AGENTS.md", "agent-shim/AGENTS.md", ".gitattributes", ".gitignore",
+	"docs/", "plans/", "org/", "AGENTS.md", "agent-shim/AGENTS.md", ".gitattributes", ".gitignore",
 	"DESIGN-protobuf-surfaces.md", "design-agent-shim-architecture.md", "design-async-response-streaming.md",
 	"design-chessboard-widget.md", "design-compact-orange.html", "design-dark-accent-tuner.html", "design-dark-palette-tuner.html", "design-green-lighter.html", "design-red-blue-darker.html", "design-selection-less-intense.html", "design-sidebar-selection-options.html", "design-progress-footer-samples.html", "design-progress-footer.md",
 	"design-shim-transport-inversion.md", "design-watcher-bubble-expansion.md", "design-workspace-sidebar-mock.html",
