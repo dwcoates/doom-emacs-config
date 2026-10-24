@@ -1,6 +1,6 @@
 // Package cover is `testrun cover-report`: merge the coverage counters every
 // package unit of one Go module wrote, and print the module's function report
-// and total, the shape bin/report-nonlisp-coverage.sh prints for it.
+// and total.
 package cover
 
 import (

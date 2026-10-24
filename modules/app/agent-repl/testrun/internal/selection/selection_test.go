@@ -134,6 +134,7 @@ func TestResolveRefuses(t *testing.T) {
 		{name: "a test saying neither whole nor subtests", req: request(goNamed(mod+"daemon", &testrunv1.TestSelectionGoTest{Name: "TestA"})), want: "neither whole nor which subtests"},
 		{name: "a vitest file naming an empty test", req: request(vitestNamed(mod+"webapp/src/a.test.ts", " ")), want: "names an empty test"},
 		{name: "a suite the roster lacks", req: request(goAll(mod+"daemon"), suiteSel("nope")), want: `suite "nope": no such suite`},
+		{name: "a script several suites run", req: request(harness(mod + "bin/coverage-honesty.sh")), want: "several suites run it (webapp-coverage-honesty, shim-coverage-honesty); select one by its suite"},
 		{name: "every suite beside a narrowed target", req: request(goAll(mod+"daemon"), everySuite()), want: "the request's one selection"},
 	}
 	for _, tc := range cases {

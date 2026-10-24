@@ -104,7 +104,6 @@ var suiteRules = []suiteRule{
 	// than the harness subset their directory otherwise maps to.
 	{Kind: matchSubtree, Path: moduleRoot + "testrun/", Full: true},
 	{Kind: matchExact, Path: moduleRoot + "bin/test-all.sh", Full: true},
-	{Kind: matchExact, Path: moduleRoot + "bin/report-nonlisp-coverage.sh", Full: true},
 	{Kind: matchExact, Path: moduleRoot + "bin/report-logging-density.sh", Full: true},
 	// The sandboxed suites' scripts and the runner they share are those
 	// suites' own, and the e2e module's sandboxscripts package tests them.

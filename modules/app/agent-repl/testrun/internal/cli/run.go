@@ -165,11 +165,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 			if a.Selects(s.Name) {
 				selected = append(selected, s)
 			} else {
-				if s.CoverageOnly && !a.Coverage {
-					log.Infof("%s: runs only in a coverage run, skipping", s.Name)
-				} else {
-					log.Infof("%s: not selected by --suites, skipping", s.Name)
-				}
+				log.Infof("%s: %s, skipping", s.Name, a.skipReason(s))
 			}
 		}
 	}

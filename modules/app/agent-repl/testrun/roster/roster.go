@@ -29,6 +29,22 @@ const (
 	E2E
 )
 
+// RunCondition is when a suite runs.
+type RunCondition int
+
+const (
+	// RunsAlways: every run that selects the suite runs it, a full run
+	// included.
+	RunsAlways RunCondition = iota
+	// RunsInCoverage: only a coverage run, since the suite checks the
+	// coverage numbers themselves; a full coverage run includes it, and a run
+	// without coverage that names it is refused.
+	RunsInCoverage
+	// RunsWhenNamed: only a run that names it; no full run includes it. For a
+	// measurement that needs its own run (the e2e perf phase).
+	RunsWhenNamed
+)
+
 // Suite is one roster entry.
 type Suite struct {
 	Name string
@@ -39,10 +55,9 @@ type Suite struct {
 	Path string
 	// Args are a Script suite's arguments.
 	Args []string
-	// CoverageOnly marks a suite that runs only in a coverage run: it checks
-	// the coverage numbers themselves. A run without coverage skips it, and
-	// refuses one that names it.
-	CoverageOnly bool
+	// Runs is when the suite runs; the zero value is in every run that
+	// selects it.
+	Runs RunCondition
 	// MayDecline marks the suites allowed to exit 77 ("precondition unmet").
 	MayDecline bool
 	// Harness marks a suite that tests the module's own shell scripts in bin/,
@@ -203,10 +218,10 @@ func LookupProgram(name string) (Program, bool) {
 // order.
 var Suites = []Suite{
 	{Name: "orchestrator-harness", Kind: Script, Path: "bin/test-test-all.sh", Harness: true},
-	{Name: "coverage-harness", Kind: Script, Path: "bin/test-report-nonlisp-coverage.sh", Harness: true},
 	{Name: "logging-density-harness", Kind: Script, Path: "bin/test-report-logging-density.sh", Harness: true},
 	{Name: "build-frontend-harness", Kind: SplitScript, Path: "bin/test-build-frontend.sh", Harness: true},
 	{Name: "background-harness", Kind: Script, Path: "bin/test-background.sh", Harness: true},
+	{Name: "e2e-perf-harness", Kind: Script, Path: "bin/test-e2e-perf.sh", Harness: true},
 	{Name: "cpu-load-harness", Kind: Script, Path: "bin/test-with-cpu-load.sh", Harness: true},
 	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true},
 	{Name: "requirements-harness", Kind: Script, Path: "bin/test-requirements.sh", Harness: true},
@@ -226,8 +241,6 @@ var Suites = []Suite{
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true},
 	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true},
 	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true},
-	{Name: "e2e-coverage-harness", Kind: Script, Path: "bin/test-e2e-coverage.sh", Harness: true},
-	{Name: "e2e-repeat-harness", Kind: Script, Path: "bin/test-e2e-repeat.sh", Harness: true},
 	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh"},
 	{Name: "bounce-harness", Kind: Script, Path: "scripts/test-bounce-agent-repl-forcefully.sh"},
 	{Name: "log-discovery-harness", Kind: Script, Path: "scripts/test-agent-repl-log-discovery.sh"},
@@ -331,8 +344,13 @@ var Suites = []Suite{
 	// The istanbul honesty probes (bin/coverage-honesty.mjs): whether each
 	// package's per-file coverage numbers are still a measurement. They run
 	// only in a coverage run, the one place those numbers are produced.
-	{Name: "webapp-coverage-honesty", Kind: Script, Path: "bin/coverage-honesty.sh", Args: []string{"webapp"}, CoverageOnly: true},
-	{Name: "shim-coverage-honesty", Kind: Script, Path: "bin/coverage-honesty.sh", Args: []string{"agent-shim/claude/shim"}, CoverageOnly: true},
+	{Name: "webapp-coverage-honesty", Kind: Script, Path: "bin/coverage-honesty.sh", Args: []string{"webapp"}, Runs: RunsInCoverage},
+	{Name: "shim-coverage-honesty", Kind: Script, Path: "bin/coverage-honesty.sh", Args: []string{"agent-shim/claude/shim"}, Runs: RunsInCoverage},
+	// The e2e perf phase (e2e/PERF-SPEC.md section D4): a latency
+	// measurement that needs its own run, so each mode runs only when named.
+	{Name: "e2e-perf", Kind: Script, Path: "bin/e2e-perf.sh", Args: []string{"report"}, Runs: RunsWhenNamed},
+	{Name: "e2e-perf-enforce", Kind: Script, Path: "bin/e2e-perf.sh", Args: []string{"enforce"}, Runs: RunsWhenNamed},
+	{Name: "e2e-perf-baseline", Kind: Script, Path: "bin/e2e-perf.sh", Args: []string{"baseline"}, Runs: RunsWhenNamed},
 	// The TLDR-tree grammar: its corpus, and the committed parser checked
 	// against what grammar.js generates.
 	{Name: "tree-sitter-tldr", Kind: Script, Path: "tree-sitter-tldr/test-tree-sitter-tldr.sh"},

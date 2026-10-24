@@ -245,15 +245,28 @@ func owningDir(l suites.Layout, path, what string, kinds ...roster.Kind) (roster
 	return best, bestRel, nil
 }
 
-// owningScript finds the harness suite whose script is path.
+// owningScript finds the harness suite whose script is path. A script
+// several suites run (each with its own arguments) names none of them alone,
+// and is refused: the caller names the suite instead.
 func owningScript(l suites.Layout, path string) (roster.Suite, error) {
 	abs := filepath.Join(l.Repo, filepath.FromSlash(path))
+	var owners []roster.Suite
 	for _, s := range roster.Suites {
 		if (s.Kind == roster.Script || s.Kind == roster.SplitScript) && roster.Resolve(l.Repo, l.Module, s.Path) == abs {
-			return s, nil
+			owners = append(owners, s)
 		}
 	}
-	return roster.Suite{}, fmt.Errorf("harness %s: no suite in the roster runs it", path)
+	switch len(owners) {
+	case 0:
+		return roster.Suite{}, fmt.Errorf("harness %s: no suite in the roster runs it", path)
+	case 1:
+		return owners[0], nil
+	}
+	names := make([]string, len(owners))
+	for i, s := range owners {
+		names[i] = s.Name
+	}
+	return roster.Suite{}, fmt.Errorf("harness %s: several suites run it (%s); select one by its suite", path, strings.Join(names, ", "))
 }
 
 // Narrow keeps only what the request names of one suite's units: the named

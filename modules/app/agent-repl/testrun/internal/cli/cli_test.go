@@ -1390,20 +1390,25 @@ func TestRunRefusesARequestItCannotLower(t *testing.T) {
 	}
 }
 
-func TestSelectsACoverageOnlySuiteOnlyInACoverageRun(t *testing.T) {
+func TestSelectsBySuiteRunCondition(t *testing.T) {
 	cases := []struct {
-		name string
-		args Args
-		want bool
+		name  string
+		suite string
+		args  Args
+		want  bool
 	}{
-		{name: "a full run without coverage skips it", args: Args{}, want: false},
-		{name: "a full coverage run runs it", args: Args{Coverage: true}, want: true},
-		{name: "a coverage run of other suites skips it", args: Args{Coverage: true, Selected: []string{"webapp"}}, want: false},
+		{name: "a full run without coverage skips a coverage-only suite", suite: "webapp-coverage-honesty", args: Args{}, want: false},
+		{name: "a full coverage run runs a coverage-only suite", suite: "webapp-coverage-honesty", args: Args{Coverage: true}, want: true},
+		{name: "a coverage run of other suites skips a coverage-only suite", suite: "webapp-coverage-honesty", args: Args{Coverage: true, Selected: []string{"webapp"}}, want: false},
+		{name: "a full run skips a named-only suite", suite: "e2e-perf", args: Args{}, want: false},
+		{name: "a full coverage run skips a named-only suite", suite: "e2e-perf", args: Args{Coverage: true}, want: false},
+		{name: "a run naming a named-only suite runs it", suite: "e2e-perf", args: Args{Selected: []string{"e2e-perf"}}, want: true},
+		{name: "a full run runs an ordinary suite", suite: "daemon", args: Args{}, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := tc.args.Selects("webapp-coverage-honesty")
+			got := tc.args.Selects(tc.suite)
 
 			// Assert
 			if got != tc.want {
@@ -1441,18 +1446,18 @@ func TestACoverageOnlySuiteNamedWithoutCoverageIsRefused(t *testing.T) {
 }
 
 // fullRunSize is how many suites a full run without coverage runs: every
-// roster suite but the coverage-only ones.
+// roster suite that runs always.
 func fullRunSize() int {
 	n := 0
 	for _, s := range roster.Suites {
-		if !s.CoverageOnly {
+		if s.Runs == roster.RunsAlways {
 			n++
 		}
 	}
 	return n
 }
 
-func TestAFullRunWithoutCoverageSkipsTheCoverageOnlySuites(t *testing.T) {
+func TestAFullRunWithoutCoverageSkipsTheSuitesItDoesNotRun(t *testing.T) {
 	// Arrange
 	h := newHarness(t, nil, nil)
 
@@ -1463,7 +1468,8 @@ func TestAFullRunWithoutCoverageSkipsTheCoverageOnlySuites(t *testing.T) {
 	if code != 0 || slices.Contains(h.exec.ran, "webapp-coverage-honesty") || slices.Contains(h.exec.ran, "shim-coverage-honesty") {
 		t.Fatalf("exit %d, ran %v; want the coverage-only suites skipped", code, h.exec.ran)
 	}
-	if !strings.Contains(h.out.String(), "webapp-coverage-honesty: runs only in a coverage run, skipping") {
-		t.Fatalf("stdout lacks the skip:\n%s", h.out.String())
+	if !strings.Contains(h.out.String(), "webapp-coverage-honesty: runs only in a coverage run, skipping") ||
+		!strings.Contains(h.out.String(), "e2e-perf: runs only when named, skipping") {
+		t.Fatalf("stdout lacks the skips:\n%s", h.out.String())
 	}
 }

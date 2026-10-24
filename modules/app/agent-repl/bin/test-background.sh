@@ -392,7 +392,7 @@ fi
 # ============================================================================
 
 # The test-runner invocations a non-test-named file may not carry unwrapped.
-RUNNER_RE='(go test|go -C [^ ]+ test|vitest|ert-run-tests|npm (run )?test|bin/test-all\.sh|report-nonlisp-coverage\.sh|e2e-coverage\.sh|scripts/test-)'
+RUNNER_RE='(go test|go -C [^ ]+ test|vitest|ert-run-tests|npm (run )?test|bin/test-all\.sh|scripts/test-)'
 PROLOGUE_RE='^\[\[ -n \$\{AGENT_REPL_BACKGROUND_PRIORITY:-\} \]\] \|\| exec "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)/([^"]+)" bash "\$\{BASH_SOURCE\[0\]\}" "\$@"$'
 
 # resolve PATH -- the physical path of PATH's directory, plus its basename.
@@ -438,7 +438,7 @@ scan() {
         find "$root/bin" "$root/.githooks" "$root/.claude" -maxdepth 1 -name 'test-*.sh' 2>/dev/null
         find "$module" \( -name node_modules -o -name testdata \) -prune -o -name 'test-*.sh' -print
         local named
-        for named in bin/coverage-honesty.sh; do
+        for named in bin/coverage-honesty.sh bin/e2e-perf.sh; do
             [ -e "$module/$named" ] && echo "$module/$named"
         done
         for named in .claude/safe-test-run.sh; do

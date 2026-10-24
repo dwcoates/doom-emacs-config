@@ -238,10 +238,30 @@ func parseSuites(spec string) ([]string, error) {
 
 // Selects reports whether a suite is part of the run.
 func (a Args) Selects(name string) bool {
-	if s, ok := roster.Lookup(name); ok && s.CoverageOnly && !a.Coverage {
-		return false
+	named := slices.Contains(a.Selected, name)
+	if s, ok := roster.Lookup(name); ok {
+		switch s.Runs {
+		case roster.RunsInCoverage:
+			if !a.Coverage {
+				return false
+			}
+		case roster.RunsWhenNamed:
+			return named
+		}
 	}
-	return len(a.Selected) == 0 || slices.Contains(a.Selected, name)
+	return len(a.Selected) == 0 || named
+}
+
+// skipReason says why a run that selects suites by name or in full skips s:
+// its run condition, or its absence from --suites.
+func (a Args) skipReason(s roster.Suite) string {
+	switch {
+	case s.Runs == roster.RunsInCoverage && !a.Coverage:
+		return "runs only in a coverage run"
+	case s.Runs == roster.RunsWhenNamed:
+		return "runs only when named"
+	}
+	return "not selected by --suites"
 }
 
 // coverageOnlyNamed refuses a run without coverage that names a suite which
@@ -252,7 +272,7 @@ func (a Args) coverageOnlyNamed() error {
 		return nil
 	}
 	for _, name := range a.Selected {
-		if s, ok := roster.Lookup(name); ok && s.CoverageOnly {
+		if s, ok := roster.Lookup(name); ok && s.Runs == roster.RunsInCoverage {
 			return fmt.Errorf("suite %s runs only in a coverage run; ask for coverage", name)
 		}
 	}
