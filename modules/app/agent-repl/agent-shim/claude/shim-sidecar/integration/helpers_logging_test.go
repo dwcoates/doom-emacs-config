@@ -81,6 +81,28 @@ func awaitOperationCount(ctx context.Context, t *testing.T, logPath, operation, 
 // requireContextKeys states that a record carries every correlation key its site
 // class owes. A missing key is the defect — the record cannot be joined — so it
 // is reported per key rather than as one opaque mismatch.
+// carriesAllOrNone fails the test unless R carries every one of KEYS or none
+// of them, and answers whether it carries every one (true for no KEYS).
+func carriesAllOrNone(t *testing.T, r logRecord, keys []string) bool {
+	t.Helper()
+	var carried, missing []string
+	for _, key := range keys {
+		if _, ok := r.Context[key]; ok {
+			carried = append(carried, key)
+		} else {
+			missing = append(missing, key)
+		}
+	}
+	if len(carried) > 0 && len(missing) > 0 {
+		t.Errorf("record %q (%s) carries %v but not %v; the group is carried whole or not at all; its context was %v", r.Operation, r.Level, carried, missing, r.Context)
+		return false
+	}
+	if len(carried) > 0 {
+		requireContextKeys(t, r, keys...)
+	}
+	return len(missing) == 0
+}
+
 func requireContextKeys(t *testing.T, r logRecord, keys ...string) {
 	t.Helper()
 	for _, key := range keys {

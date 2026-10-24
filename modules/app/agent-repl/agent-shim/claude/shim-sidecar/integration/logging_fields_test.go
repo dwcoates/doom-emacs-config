@@ -30,10 +30,19 @@ import (
 // and `omitempty` keeps the key absent rather than present-and-empty.
 
 // siteClass is one production logging site and the keys it owes.
+//
+// ALL-OR-NONE keys are a group a record carries whole or not at all, and at
+// least one of the class's records carries whole: a write that advances a
+// cursor names the cursor's whole address, while an INFERRED batch (cycle.go's
+// emit, an inferred terminal, a pre-boot LOST terminal) was read at no file
+// position and names none. Whether an inferred batch rides a clean ingest is
+// the host's timing, so the class owes the address only on the writes that
+// have one.
 type siteClass struct {
 	name      string
 	operation string
 	keys      []string
+	allOrNone []string
 }
 
 // greenPathSiteClasses enumerates the site classes ONE CLEAN INGEST of the real
@@ -44,8 +53,8 @@ type siteClass struct {
 var greenPathSiteClasses = []siteClass{
 	// The store seam. `rpc` is what joins a sidecar record to the store's own
 	// record of the same call; `producer` is what says whose rows those were.
-	{"cursor recovery rpc", "storeclient-cursors", []string{"component", "store_socket", "rpc"}},
-	{"write rpc", "storeclient-write-batch", []string{"component", "store_socket", "rpc", "producer", "path", "file_id", "offset"}},
+	{"cursor recovery rpc", "storeclient-cursors", []string{"component", "store_socket", "rpc"}, nil},
+	{"write rpc", "storeclient-write-batch", []string{"component", "store_socket", "rpc", "producer"}, []string{"path", "file_id", "offset"}},
 
 	// The file plane. `tail-pickup` is the one that reports a READ, so it owes
 	// the full (file_id, offset) address. The tailer's own poll and commit
@@ -53,46 +62,46 @@ var greenPathSiteClasses = []siteClass{
 	// as well as after, so they owe the file and — where there is one — the
 	// position, but a file identity they do not have yet is ABSENT rather than
 	// invented.
-	{"tail poll", "tailer-poll", []string{"component", "path", "offset"}},
-	{"tail commit", "tailer-commit", []string{"component", "path"}},
-	{"batch pickup", "tail-pickup", []string{"component", "path", "file_id", "offset"}},
+	{"tail poll", "tailer-poll", []string{"component", "path", "offset"}, nil},
+	{"tail commit", "tailer-commit", []string{"component", "path"}, nil},
+	{"batch pickup", "tail-pickup", []string{"component", "path", "file_id", "offset"}, nil},
 
 	// Per-ENTRY conversion. These sites produced a store row, so they owe the
 	// row's key on top of the file position it was read at.
-	{"tool call entry", "tool-call", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id", "upsert_key"}},
-	{"tool return entry", "tool-return", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id", "upsert_key"}},
-	{"thinking entry", "thinking", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id", "upsert_key"}},
+	{"tool call entry", "tool-call", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id", "upsert_key"}, nil},
+	{"tool return entry", "tool-return", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id", "upsert_key"}, nil},
+	{"thinking entry", "thinking", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id", "upsert_key"}, nil},
 	// The hook site narrates what the hook did AND names the row it stored it
 	// as. It owes no activity_id: the 2026-09-04 plane-ownership ruling gives
 	// the STREAM plane the served hook row, so this plane mints no unit of work
 	// here and the record it writes is an unserved item keyed by the vendor
 	// record's own uuid.
-	{"hook entry", "hook", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "upsert_key"}},
-	{"injected context entry", "context-injected", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id", "upsert_key"}},
+	{"hook entry", "hook", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "upsert_key"}, nil},
+	{"injected context entry", "context-injected", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id", "upsert_key"}, nil},
 
 	// Per-LINE conversion. A line is not yet a row, so it owes the book it was
 	// read for and the position it was read at, and no key.
-	{"converted line", "convert-line", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id"}},
-	{"assistant line", "assistant-line", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id"}},
-	{"user prompt line", "user-prompt", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id"}},
-	{"withheld line", "withhold", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id"}},
+	{"converted line", "convert-line", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id"}, nil},
+	{"assistant line", "assistant-line", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id"}, nil},
+	{"user prompt line", "user-prompt", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id"}, nil},
+	{"withheld line", "withhold", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id"}, nil},
 
 	// Residue is the one conversion site that owes a write_id in the log: it is
 	// the row nobody could model, and its write_id is the only way to find the
 	// bytes again.
-	{"residue row", "residue", []string{"component", "path", "file_id", "offset", "upsert_key", "write_id"}},
+	{"residue row", "residue", []string{"component", "path", "file_id", "offset", "upsert_key", "write_id"}, nil},
 
 	// The spawn spine. A launch names the task, the call that spawned it and
 	// the book the subagent is announced under.
-	{"launch", "launch", []string{"component", "path", "task_id", "activity_id", "agent_id", "book_agent_id"}},
-	{"spawn recorded", "record-spawn", []string{"component", "task_id", "activity_id"}},
+	{"launch", "launch", []string{"component", "path", "task_id", "activity_id", "agent_id", "book_agent_id"}, nil},
+	{"spawn recorded", "record-spawn", []string{"component", "task_id", "activity_id"}, nil},
 
 	// Lifecycle. These name the dependency and the file, and nothing else is
 	// theirs to name.
-	{"file watched", "watch", []string{"component", "path"}},
-	{"file classified", "discover-classify", []string{"component", "path"}},
-	{"cursor recovery", "recover-cursors", []string{"component", "store_socket"}},
-	{"process start", "start", []string{"component", "store_socket"}},
+	{"file watched", "watch", []string{"component", "path"}, nil},
+	{"file classified", "discover-classify", []string{"component", "path"}, nil},
+	{"cursor recovery", "recover-cursors", []string{"component", "store_socket"}, nil},
+	{"process start", "start", []string{"component", "store_socket"}, nil},
 }
 
 // TestEverySiteClassCarriesTheKeysItOwes drives one clean ingest and checks the
@@ -111,8 +120,15 @@ func TestEverySiteClassCarriesTheKeysItOwes(t *testing.T) {
 				t.Fatalf("a clean ingest wrote no %q record; the site class is unreachable or was renamed. The log held %v",
 					class.operation, operationLevels(records))
 			}
+			whole := 0
 			for _, r := range got {
 				requireContextKeys(t, r, class.keys...)
+				if carriesAllOrNone(t, r, class.allOrNone) {
+					whole++
+				}
+			}
+			if len(class.allOrNone) > 0 && whole == 0 {
+				t.Errorf("no %q record carries the whole of %v; the ingest's own write names its cursor", class.operation, class.allOrNone)
 			}
 		})
 	}
