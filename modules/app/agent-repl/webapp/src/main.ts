@@ -37,6 +37,7 @@ import { createTicker } from "./clock.js";
 import { createComposerGate, mountComposer } from "./composer/composer.js";
 import { createRowRenderers } from "./feed/renderers.js";
 import { mountFeed } from "./feed/feed.js";
+import { mountChat } from "./chat/chat.js";
 import { mountFooter } from "./footer/footer.js";
 import { adoptAtBoot, startLifecycle } from "./lifecycle/lifecycle.js";
 import { createRevealRelay } from "./lifecycle/reveal-relay.js";
@@ -80,6 +81,7 @@ import { isHostAddress, pageAddress } from "./rpc/page-address.js";
 import { createDaemonTransport } from "./rpc/transport.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import type { FeedId } from "../../proto/gen/ts/frontend/v1/feed_pb";
 import { shellElements } from "./shell.js";
 import { composerClosedFor, installColorValues } from "./vocab.js";
 import { childrenMatching } from "./dom.js";
@@ -266,8 +268,8 @@ export async function boot(): Promise<void> {
     // workspace, and Emacs is reloading the page onto it. So does a MOVE: the
     // page booted on the daemon its workspace left, and Emacs is reloading it
     // onto the successor.
-    const adoption = await adoptAtBoot(ctx);
-    if (adoption === "deferred" || adoption === "moved") {
+    const adopted = await adoptAtBoot(ctx);
+    if (adopted === "deferred" || adopted === "moved") {
       ctx.quiesce();
       return;
     }
@@ -313,7 +315,11 @@ export async function boot(): Promise<void> {
     // same overlay: one login flow, whichever control asked for it.
     answerLoginRequests((control) => login.open(control));
 
-    const feed = mountFeed(shell.feed, ctx, {
+    // A CHAT THREAD'S PAGE MOUNTS THE CHAT where an agent workspace's mounts
+    // its feed (the daemon names which, AdoptWebWorkspace). Everything else on
+    // the page -- the topbar, the footer, the sidebar -- is the same page.
+    const body = adopted.page === "thread" ? mountThreadBody(shell, ctx) : null;
+    const feed = body ?? mountFeed(shell.feed, ctx, {
       renderers: createRowRenderers(ctx),
       // The root feed's held section draws in the tail region after the rows.
       held: { host: shell.holdTray, editorIngress },
@@ -399,6 +405,35 @@ export async function boot(): Promise<void> {
     reportBootFailure(err, failures);
     throw err;
   }
+}
+
+/** The body a thread page mounts, as the boot wires a feed's. */
+interface PageBody {
+  /** This workspace was switched to: show the conversation's end. */
+  workspaceSelected(): void;
+  /** A footer jump row asked for a detached work's row. */
+  selectDetachedWork(id: FeedId): Promise<boolean>;
+}
+
+/**
+ * A chat thread's body: the chat, drawn in the feed's own box. A thread runs
+ * no tools, so it has no detached work for the footer to jump to; a jump row
+ * reaching it is a defect, thrown as one.
+ */
+function mountThreadBody(shell: ReturnType<typeof shellElements>, ctx: AppContext): PageBody {
+  mountChat(shell.feed, ctx, { scroll: shell.feedScroll, shown: () => pagePresence().shown() });
+  return {
+    workspaceSelected: () => {
+      shell.feedScroll.scrollTop = shell.feedScroll.scrollHeight;
+    },
+    selectDetachedWork: (id) => {
+      log.error("a footer jump row reached a chat thread, which runs no detached work", {
+        operation: "main.thread-detached-work",
+        context: { id: id.value },
+      });
+      return Promise.reject(new Error("a chat thread has no detached work to select"));
+    },
+  };
 }
 
 /**

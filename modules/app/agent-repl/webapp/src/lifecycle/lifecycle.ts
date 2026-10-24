@@ -52,6 +52,7 @@ import { ConnectError } from "@connectrpc/connect";
 import {
   AdoptWebWorkspaceResponseSchema,
   type AdoptWebWorkspaceError,
+  type WebWorkspacePage,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_web_workspace_pb";
 import {
   WatchDaemonResponseSchema,
@@ -603,7 +604,7 @@ export class AdoptionFailed extends Error {
 export async function adoptAtBoot(
   ctx: AppContext,
   backoff: AdoptBackoff = {},
-): Promise<"adopted" | "no-transfer" | "deferred" | "moved"> {
+): Promise<AdoptedPage | "deferred" | "moved"> {
   const initialMs = backoff.initialMs ?? ADOPT_INITIAL_MS;
   const maxMs = backoff.maxMs ?? ADOPT_MAX_MS;
   const budgetMs = backoff.budgetMs ?? ADOPT_BUDGET_MS;
@@ -635,8 +636,9 @@ export async function adoptAtBoot(
     }
     const result = requireCase(response.result, "AdoptWebWorkspaceResponse.result");
     if (result.case === "success") {
-      log.info("this workspace was adopted", { operation: "lifecycle.adopted" });
-      return "adopted";
+      const page = webPage(result.value.page, "AdoptWebWorkspaceSuccess.page");
+      log.info("this workspace was adopted", { operation: "lifecycle.adopted", context: { page } });
+      return { outcome: "adopted", page };
     }
     if (result.case !== "error") {
       const other: { case: string } = result;
@@ -646,8 +648,9 @@ export async function adoptAtBoot(
     if (outcome.kind === "no-transfer") {
       log.debug("no transfer was announced for this workspace; a plain boot", {
         operation: "lifecycle.adopt-no-transfer",
+        context: { page: outcome.page },
       });
-      return "no-transfer";
+      return { outcome: "no-transfer", page: outcome.page };
     }
     if (outcome.kind === "deferred") {
       // THE INCUMBENT KEPT THIS WORKSPACE until it is free, and Emacs puts the
@@ -694,9 +697,33 @@ export async function adoptAtBoot(
   }
 }
 
+/** Which body a workspace page mounts below its topbar: a feed, or a chat. */
+export type WebPage = "agent" | "thread";
+
+/** A page that goes on to mount its body, and which body that is. */
+export interface AdoptedPage {
+  outcome: "adopted" | "no-transfer";
+  page: WebPage;
+}
+
+/** The page the daemon named (WebWorkspacePage), as the boot switches on it. */
+export function webPage(page: WebWorkspacePage | undefined, path: string): WebPage {
+  const kind = requireCase(requireMessage(page, path).kind, `${path}.kind`);
+  switch (kind.case) {
+    case "agent":
+      return "agent";
+    case "thread":
+      return "thread";
+    default: {
+      const other: { case: string } = kind;
+      return unreachableArm(`${path}.kind`, other.case);
+    }
+  }
+}
+
 /** What the adoption loop does about one refusal. */
 export type AdoptionOutcome =
-  | { kind: "no-transfer" }
+  | { kind: "no-transfer"; page: WebPage }
   | { kind: "deferred" }
   | { kind: "moved"; address: string }
   | { kind: "retry"; arm: string }
@@ -714,7 +741,7 @@ export function classifyAdoptionRefusal(error: AdoptWebWorkspaceError): Adoption
   const arm = requireCase(error.cause, "AdoptWebWorkspaceError.cause");
   switch (arm.case) {
     case "noTransferAnnounced":
-      return { kind: "no-transfer" };
+      return { kind: "no-transfer", page: webPage(arm.value.page, "AdoptWebWorkspaceNoTransferAnnounced.page") };
     case "notYetAdopted":
       return { kind: "retry", arm: arm.case };
     // The successor refused a mid-work adoption and the incumbent took the
