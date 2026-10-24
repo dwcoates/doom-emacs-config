@@ -173,7 +173,7 @@ message FeedSelectionRowViewportCenter {}
 message FeedSelectionRowViewportHold {}
 // Center the newly selected prompt and flash its entry answering a label.
 message FeedSelectionRowViewportReveal {
-  // The label whose entry to flash, as frontend.v1.ProseEntry carries it.
+  // The label whose entry to flash, as a frontend.v1.ProseEntryTreeNode answer carries it.
   string entry_label = 1;
 }
 
@@ -1026,10 +1026,13 @@ message FeedResponse {
   // interim treatment from THIS flag alone. `final_answer` outranks it.
   bool interim = 9;
   // THE PROMPTS THAT ANSWERED THIS RESPONSE'S TREE, one per entry
-  // (frontend.v1.ProseEntry) that answers one of its labels, in feed order.
-  // An entry answers the NEAREST response before its prompt, on the same
-  // feed, whose tree holds a node with the entry's label; the client draws
-  // that node's label as a link to the prompt. A DAEMON FACT stated on every
+  // (a frontend.v1.ProseEntryTreeNode answer) that answers one of its labels, in feed order.
+  // An entry of a prompt that REPLIES to a response (its quote names the
+  // response, conversation.v1.UserQuoteBlock.quoted_row) answers that response
+  // when its tree holds the label. Any other entry answers the NEAREST
+  // response before its prompt, on the same feed, whose tree holds a node with
+  // the entry's label. The client draws that node's label as a link to the
+  // prompt. A DAEMON FACT stated on every
   // publication: the response is RE-PUBLISHED when a prompt answering it is
   // first drawn and when one is removed (a rollback). Empty while nothing
   // answers it, and always empty on a response with no tree.
@@ -2737,6 +2740,10 @@ message FeedQuoteBlock {
   // The marker introducing the person's words, as the agent was told it,
   // without its trailing colon: "⟢ My message". Never empty.
   string closing = 4;
+  // The quoted bubble's row (conversation.v1.UserQuoteBlock.quoted_row),
+  // absent on a quote recorded before it was kept. The daemon binds a reply's
+  // entries to it (FeedResponse.answers).
+  optional FeedId quoted_row = 5;
 }
 
 // ①b A prompt one agent addressed to another — the user kind's sibling,
@@ -4266,3 +4273,32 @@ message FeedMergeQueueWaiting {
 // ==========================================================================
 // PENDING — old bodies, verbatim, judged one kind at a time.
 // ==========================================================================
+
+// ---- The composer's entry ---------------------------------------------------
+
+// The node of a response's tree the entry point is on in the composer answers,
+// while the person types it (agentrepl.v1.ReportComposerEntries). The webapp
+// highlights that node's own line, not its children's, until the state says
+// otherwise. STATE, not an event: the root feed's watch carries it whenever it
+// changes and the moment a root watch is accepted, so a page that opens
+// mid-edit draws the highlight that stands.
+message FeedComposerEntry {
+  // THE ARM IS THE STATE.
+  oneof at {
+    // Point is on no entry line, or its entry's label targets no response.
+    FeedComposerEntryNone none = 1;
+    // Point's entry answers this node.
+    FeedComposerEntryNode node = 2;
+  }
+}
+
+message FeedComposerEntryNone {}
+
+// The node point's entry answers.
+message FeedComposerEntryNode {
+  // The response row whose tree holds the node: the selected response bubble
+  // when one is selected, else the newest response holding the label.
+  FeedId row = 1;
+  // The node's label, as the response's tree carries it.
+  string label = 2;
+}

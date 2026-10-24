@@ -60,7 +60,7 @@ message RollBackResendWhole {
 // The rolled-back prompt sent again with the entry answering LABEL saying
 // TEXT instead: its label and separator kept, every other word unchanged.
 message RollBackResendEntry {
-  // The label of the entry to replace, as frontend.v1.ProseEntry carries it.
+  // The label of the entry to replace, as a frontend.v1.ProseEntryTreeNode answer carries it.
   string label = 1;
   // What the entry says now.
   string text = 2;

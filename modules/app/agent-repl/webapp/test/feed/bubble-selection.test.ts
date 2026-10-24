@@ -155,7 +155,7 @@ function feed() {
     <article data-feed-row="r1" data-selection-governed data-selectable>
       <div class="bubble"><div class="bubble-scroll"><p id="prose">words <a id="link" href="#">x</a></p>
         <span class="mp-label mp-label-linked" data-label="1.1" data-answer-prompt="p9" id="linked">1.1</span>
-        <div class="mp-entry" data-entry-label="3.1"><span class="mp-entry-label" id="entry">3.1</span><div class="mp-entry-text" id="entry-text">yes</div></div></div>
+        <div class="mp-line mp-entry" data-node="3.1" data-entry-label="3.1"><span class="mp-prefix">└── <span class="mp-label mp-entry-label" data-label="3.1" id="entry">3.1</span> </span><span class="mp-content" id="entry-text">yes</span></div></div>
         <div class="bubble-subfeed"><article data-feed-row="n1"><span id="nested">inner</span></article></div>
       </div>
     </article>

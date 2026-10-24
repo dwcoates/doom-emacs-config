@@ -891,7 +891,7 @@ func TestTheJoinedTurnsTerminalSettlesTheFoldedPrompt(t *testing.T) {
 // quoteBlock is the quote of an earlier response quoting MARKDOWN, as
 // replyquote composes one.
 func quoteBlock(markdown string) *conversationv1.UserContentBlock {
-	return replyquote.Block(markdown, false)
+	return replyquote.Block(markdown, false, "")
 }
 
 // TestAQuotedPromptDrawsItsQuoteAsItsOwnBlock pins that a reply's quote is
@@ -1389,7 +1389,7 @@ func TestPromptRowRefusesAHeaderThatDisagreesWithTheOrigin(t *testing.T) {
 }
 
 // TestAPromptsTextIsDrawnWithItsEntries pins that a user prompt's text is read
-// as a prompt: an entry answering a label is drawn as its own entry block.
+// as a prompt: an entry answering a label is drawn in its run's entry tree.
 func TestAPromptsTextIsDrawnWithItsEntries(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -1399,8 +1399,8 @@ func TestAPromptsTextIsDrawnWithItsEntries(t *testing.T) {
 
 	// Assert.
 	blocks := h.only(rootFeed()).GetUserPrompt().GetSuccess().GetBody().GetBlocks()
-	entry := blocks[0].GetText().GetProse().GetBlocks()[0].GetEntry()
-	if entry.GetLabel().GetText() != "3.1" || entry.GetText().GetMarkdown() != "yes, that" {
+	nodes := blocks[0].GetText().GetProse().GetBlocks()[0].GetEntries().GetNodes()
+	if len(nodes) != 2 || nodes[1].GetLabel().GetText() != "3.1" || nodes[1].GetAnswer().GetText().GetMarkdown() != "yes, that" {
 		t.Fatalf("drawn text = %v, want the entry answering 3.1", blocks[0].GetText().GetProse())
 	}
 }

@@ -71,6 +71,10 @@
 (declare-function agent-repl-wire-encode-answer-editor-evaluation-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-answer-editor-evaluation-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-report-editor-focus-request "wire-host" (request))
+(declare-function agent-repl-wire-encode-report-composer-entries-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-report-composer-entries-response "wire-verbs" (json))
+(declare-function agent-repl-wire-encode-find-entry-neighbor-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-find-entry-neighbor-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-report-latencies-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-report-latencies-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-decode-report-editor-focus-response "wire-host" (alist))
@@ -508,6 +512,21 @@ option by its served label.  The card's new state arrives on the feed.")
 The request names the card by the row the host view's standing ask
 carried; the answer is allow once, allow with standing, or deny with no
 reason.  The card's new state arrives on the feed.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-report-composer-entries
+  "ReportComposerEntries"
+  agent-repl-wire-encode-report-composer-entries-request
+  agent-repl-wire-decode-report-composer-entries-response
+  "Report the entry labels a workspace's composer holds, and the one point is on.
+The daemon answers with state: the node point's entry answers on the
+feed's watch, and the labels answering nothing on the host view.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-find-entry-neighbor
+  "FindEntryNeighbor"
+  agent-repl-wire-encode-find-entry-neighbor-request
+  agent-repl-wire-decode-find-entry-neighbor-response
+  "Ask which label a line opened beside an entry line answers.
+The daemon finds the entry's next or previous node in the tree it targets.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-select-feed-row
   "SelectFeedRow"

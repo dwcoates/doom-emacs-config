@@ -16,6 +16,8 @@ import "agentrepl/v1/endpoint_run_tests.proto";
 import "agentrepl/v1/endpoint_submit_prompt.proto";
 import "agentrepl/v1/endpoint_retry_vendor_error.proto";
 import "agentrepl/v1/endpoint_select_feed_row.proto";
+import "agentrepl/v1/endpoint_report_composer_entries.proto";
+import "agentrepl/v1/endpoint_find_entry_neighbor.proto";
 import "agentrepl/v1/endpoint_fold_merge_bubble.proto";
 import "agentrepl/v1/endpoint_plan_rollback.proto";
 import "agentrepl/v1/endpoint_list_rollback_prompts.proto";
@@ -130,6 +132,16 @@ service AgentRepl {
   // its ordered rows, pushes it to the webapp and Emacs, and acks it here.
   // See endpoint_select_feed_row.proto.
   rpc SelectFeedRow(SelectFeedRowRequest) returns (SelectFeedRowResponse);
+
+  // The entries the composer holds while the person types, and the one point
+  // is on: the daemon pushes the node it answers to the webapp, and the labels
+  // that answer nothing to Emacs. See endpoint_report_composer_entries.proto.
+  rpc ReportComposerEntries(ReportComposerEntriesRequest) returns (ReportComposerEntriesResponse);
+
+  // The label a line opened beside an entry line answers: the entry's next
+  // or previous node in the tree it targets. See
+  // endpoint_find_entry_neighbor.proto.
+  rpc FindEntryNeighbor(FindEntryNeighborRequest) returns (FindEntryNeighborResponse);
 
   // The reader opened or closed a merge bubble: the daemon records the fold
   // on the bubble's durable head row, so it survives pushes, reloads and

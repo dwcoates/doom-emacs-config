@@ -5438,6 +5438,88 @@ instead diverges from it unseen."
       (progn (agent-repl-test-wire-verbs--decode-quietly decoder json) nil)
     (agent-repl-wire-error (cdr err))))
 
+;;;; ---- ReportComposerEntries ------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-report-composer-entries-names-the-entry-at-point ()
+  "A report carries the ref, the labels in order and the entry point is on."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-report-composer-entries-request
+                     (list :workspace agent-repl-test-wire-verbs--ref :labels '("3.1" "3.2")
+                           :at-point '(:arm :entry :value (:label "3.2")))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"labels\":[\"3.1\",\"3.2\"],\"atPoint\":{\"entry\":{\"label\":\"3.2\"}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-composer-entries-with-point-on-no-entry ()
+  "Point on no entry is the empty `none' arm, and no labels an empty array."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-report-composer-entries-request
+                     (list :workspace agent-repl-test-wire-verbs--ref :labels nil :at-point '(:arm :none))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"labels\":[],\"atPoint\":{\"none\":{}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-composer-entries-refuses-a-missing-point ()
+  "Which entry point is on is REQUIRED, so a report without it never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-report-composer-entries-request
+                   (list :workspace agent-repl-test-wire-verbs--ref :labels '("3.1")))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-report-composer-entries-success-decodes ()
+  "The empty success decodes as the success arm."
+  (should (equal (plist-get (agent-repl-test-wire-verbs--decode-quietly
+                             #'agent-repl-wire-decode-report-composer-entries-response "{\"success\":{}}")
+                            :arm)
+                 :success)))
+
+(ert-deftest agent-repl-test-wire-verbs-report-composer-entries-refusal-decodes ()
+  "A handover refusal decodes as its arm."
+  (should (equal (plist-get (plist-get (agent-repl-test-wire-verbs--decode-quietly
+                                        #'agent-repl-wire-decode-report-composer-entries-response
+                                        "{\"error\":{\"unknownWorkspace\":{}}}")
+                                       :value)
+                            :cause)
+                 '(:arm :unknown-workspace :value nil))))
+
+;;;; ---- FindEntryNeighbor ----------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-find-entry-neighbor-names-the-line-and-the-way ()
+  "A request carries the ref, the entry line's label and which way it opens."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-find-entry-neighbor-request
+                     (list :workspace agent-repl-test-wire-verbs--ref :label "3.1" :direction '(:arm :previous))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"label\":\"3.1\",\"direction\":{\"previous\":{}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-find-entry-neighbor-refuses-a-missing-direction ()
+  "The direction is REQUIRED."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-find-entry-neighbor-request
+                   (list :workspace agent-repl-test-wire-verbs--ref :label "3.1"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-find-entry-neighbor-found-decodes ()
+  "A found neighbor decodes with its label."
+  (should (equal (plist-get (plist-get (agent-repl-test-wire-verbs--decode-quietly
+                                        #'agent-repl-wire-decode-find-entry-neighbor-response
+                                        "{\"success\":{\"found\":{\"label\":\"3.2\"}}}")
+                                       :value)
+                            :neighbor)
+                 '(:arm :found :value (:label "3.2")))))
+
+(ert-deftest agent-repl-test-wire-verbs-find-entry-neighbor-none-decodes ()
+  "No neighbor is an answer, the `none' arm."
+  (should (equal (plist-get (plist-get (agent-repl-test-wire-verbs--decode-quietly
+                                        #'agent-repl-wire-decode-find-entry-neighbor-response
+                                        "{\"success\":{\"none\":{}}}")
+                                       :value)
+                            :neighbor)
+                 '(:arm :none :value nil))))
+
+(ert-deftest agent-repl-test-wire-verbs-find-entry-neighbor-refuses-a-found-without-its-label ()
+  "A found neighbor with no label is a contract breach."
+  (should (agent-repl-test-wire-verbs--decode-breach
+           #'agent-repl-wire-decode-find-entry-neighbor-response "{\"success\":{\"found\":{}}}")))
+
 ;;;; ---- SendHiddenKeepalives -------------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-hidden-keepalives-request-is-empty ()

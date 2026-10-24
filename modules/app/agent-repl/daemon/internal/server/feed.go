@@ -184,6 +184,14 @@ func (s *server) watchFeed(
 		overlays = s.imageOverlayTopic(target.WS).Subscribe(streamCtx)
 	}
 
+	// THE COMPOSER'S ENTRY RIDES THE ROOT FEED'S WATCH ONLY, like the
+	// selection: it names a row of the root feed. The topic replays its latest
+	// value, so a page opening mid-edit draws the highlight that stands.
+	var composerEntries <-chan *frontendv1.FeedComposerEntry
+	if target.Feed.Root {
+		composerEntries = s.composerEntryTopic(target.WS).Subscribe(streamCtx)
+	}
+
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a feed tail", dlog.Context{"token": token.GetValue()})
 	for {
@@ -248,6 +256,21 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{ImageOverlay: overlay}); err != nil {
+				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				return nil
+			}
+		case entry, ok := <-composerEntries:
+			if !ok {
+				// Closes only on streamCtx cancellation, which the Done case
+				// handles.
+				composerEntries = nil
+				continue
+			}
+			if entry == nil {
+				log.Error(rpc, "the composer-entry topic raised an empty entry; it was not sent", nil)
+				continue
+			}
+			if err := out.Send(&agentreplv1.WatchFeedResponse{ComposerEntry: entry}); err != nil {
 				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
 				return nil
 			}

@@ -49,7 +49,7 @@
           "\"open\":{},"
           "\"faults\":[{\"detail\":\"sidecar lag\",\"openedAtMs\":\"1756400000000\","
           "\"linkSevered\":{}}]}},"
-          "\"naming\":{\"slug\":\"fix-flaky\",\"title\":\"Fix the flaky reconnect\"}}")
+          "\"naming\":{\"slug\":\"fix-flaky\",\"title\":\"Fix the flaky reconnect\"},\"composerEntries\":{}}")
   "A fully populated HostWorkspace on the live standing.")
 
 ;;;; ---- RegisterWorkspace ----
@@ -692,7 +692,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   "Registered, but no session was ever created for it."
   (should (equal (plist-get (agent-repl-test-wire-host--decode
                              #'agent-repl-wire-decode-host-workspace
-                             "{\"none\":{},\"naming\":{}}")
+                             "{\"none\":{},\"naming\":{},\"composerEntries\":{}}")
                             :session)
                  '(:arm :none :value nil))))
 
@@ -720,7 +720,8 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                    :naming (:slug "fix-flaky" :title "Fix the flaky reconnect")
                    :held-prompt-edit nil
                    :gate nil
-                   :ask nil))))
+                   :ask nil
+                   :composer-entries (:unanswered nil)))))
 
 (ert-deftest agent-repl-test-wire-host-workspace-decodes-the-terminal-standing ()
   "A terminal session states whether reopening can rehydrate it."
@@ -733,7 +734,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
 (ert-deftest agent-repl-test-wire-host-workspace-unset-session-is-a-breach ()
   "A workspace with no session arm is a breach, not a default."
   (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-host-workspace "{\"naming\":{}}")
+                  #'agent-repl-wire-decode-host-workspace "{\"naming\":{},\"composerEntries\":{}}")
                  '("HostWorkspace" session "oneof is unset"))))
 
 (ert-deftest agent-repl-test-wire-host-workspace-without-naming-is-a-breach ()
@@ -742,11 +743,34 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   #'agent-repl-wire-decode-host-workspace "{\"none\":{}}")
                  '("HostWorkspace" naming "required message field is absent"))))
 
+(ert-deftest agent-repl-test-wire-host-workspace-without-composer-entries-is-a-breach ()
+  "`composer_entries' is always set: its absence is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace "{\"none\":{},\"naming\":{}}")
+                 '("HostWorkspace" composerEntries "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-composer-entries-decode-the-unanswered-labels ()
+  "The composer's labels that answer nothing decode in order."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-composer-entries "{\"unanswered\":[\"9.9\",\"8.8\"]}")
+                 '(:unanswered ("9.9" "8.8")))))
+
+(ert-deftest agent-repl-test-wire-host-composer-entries-with-none-unanswered-are-empty ()
+  "An absent `unanswered' is none."
+  (should (equal (agent-repl-test-wire-host--decode #'agent-repl-wire-decode-host-composer-entries "{}")
+                 '(:unanswered nil))))
+
+(ert-deftest agent-repl-test-wire-host-composer-entries-refuse-a-non-string-label ()
+  "A label that is not a string is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-composer-entries "{\"unanswered\":[3]}")
+                 '("HostComposerEntries" unanswered "an element is not a string"))))
+
 (ert-deftest agent-repl-test-wire-host-naming-undecided-halves-are-nil ()
   "Both naming fields are OPTIONAL and unset until derived."
   (should (equal (plist-get (agent-repl-test-wire-host--decode
                              #'agent-repl-wire-decode-host-workspace
-                             "{\"none\":{},\"naming\":{}}")
+                             "{\"none\":{},\"naming\":{},\"composerEntries\":{}}")
                             :naming)
                  '(:slug nil :title nil))))
 
@@ -762,7 +786,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   "A standing held-prompt edit decodes whole: its turn, its content, its id."
   (should (equal (plist-get (agent-repl-test-wire-host--decode
                              #'agent-repl-wire-decode-host-workspace
-                             "{\"none\":{},\"naming\":{},\"heldPromptEdit\":{\"turn\":{\"value\":\"t-1\"},\"said\":{\"content\":{\"blocks\":[{\"text\":{\"text\":\"fix it\"}}]}},\"edit\":\"3\"}}")
+                             "{\"none\":{},\"naming\":{},\"composerEntries\":{},\"heldPromptEdit\":{\"turn\":{\"value\":\"t-1\"},\"said\":{\"content\":{\"blocks\":[{\"text\":{\"text\":\"fix it\"}}]}},\"edit\":\"3\"}}")
                             :held-prompt-edit)
                  '(:turn (:value "t-1")
                    :said (:content (:blocks ((:arm :text :value (:text "fix it")))))
@@ -772,7 +796,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   "An absent held_prompt_edit is the fact that no edit stands."
   (should (null (plist-get (agent-repl-test-wire-host--decode
                             #'agent-repl-wire-decode-host-workspace
-                            "{\"none\":{},\"naming\":{}}")
+                            "{\"none\":{},\"naming\":{},\"composerEntries\":{}}")
                            :held-prompt-edit))))
 
 ;;;; ---- The standing ask ----
@@ -781,14 +805,14 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   "Decode a no-session HostWorkspace carrying ASK-JSON as its ask."
   (plist-get (agent-repl-test-wire-host--decode
               #'agent-repl-wire-decode-host-workspace
-              (concat "{\"none\":{},\"naming\":{},\"ask\":" ask-json "}"))
+              (concat "{\"none\":{},\"naming\":{},\"composerEntries\":{},\"ask\":" ask-json "}"))
              :ask))
 
 (ert-deftest agent-repl-test-wire-host-workspace-without-an-ask-carries-none ()
   "An absent ask is the fact that no card stands."
   (should-not (plist-get (agent-repl-test-wire-host--decode
                           #'agent-repl-wire-decode-host-workspace
-                          "{\"none\":{},\"naming\":{}}")
+                          "{\"none\":{},\"naming\":{},\"composerEntries\":{}}")
                          :ask)))
 
 (ert-deftest agent-repl-test-wire-host-ask-decodes-a-single-select-question ()
@@ -853,7 +877,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   "A standing cold gate decodes as its arm."
   (should (equal (plist-get (agent-repl-test-wire-host--decode
                              #'agent-repl-wire-decode-host-workspace
-                             "{\"none\":{},\"naming\":{},\"gate\":{\"coldGate\":{}}}")
+                             "{\"none\":{},\"naming\":{},\"composerEntries\":{},\"gate\":{\"coldGate\":{}}}")
                             :gate)
                  '(:arm :cold-gate :value nil))))
 
@@ -861,14 +885,14 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   "An absent gate is the fact that no gate stands."
   (should (null (plist-get (agent-repl-test-wire-host--decode
                             #'agent-repl-wire-decode-host-workspace
-                            "{\"none\":{},\"naming\":{}}")
+                            "{\"none\":{},\"naming\":{},\"composerEntries\":{}}")
                            :gate))))
 
 (ert-deftest agent-repl-test-wire-host-an-unassigned-gate-is-still-a-gate ()
   "Set-but-unassigned is a gate this build does not name: present, no arm."
   (should (equal (plist-get (agent-repl-test-wire-host--decode
                              #'agent-repl-wire-decode-host-workspace
-                             "{\"none\":{},\"naming\":{},\"gate\":{}}")
+                             "{\"none\":{},\"naming\":{},\"composerEntries\":{},\"gate\":{}}")
                             :gate)
                  '(:arm nil :value nil))))
 
@@ -914,7 +938,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   "An unknown key on HostWorkspace is refused at that level."
   (should (equal (agent-repl-test-wire-host--breach
                   #'agent-repl-wire-decode-host-workspace
-                  "{\"none\":{},\"naming\":{},\"hibernated\":{}}")
+                  "{\"none\":{},\"naming\":{},\"composerEntries\":{},\"hibernated\":{}}")
                  '("HostWorkspace" hibernated "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-existing-without-an-id-is-a-breach ()

@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/prose"
 )
 
 // A RESPONSE'S ANSWERS are the prompts whose entries answer its tree's labels:
@@ -163,20 +166,18 @@ func equalPairs(got, want [][2]string) bool {
 	return true
 }
 
-// entryRow is a user prompt row whose one text block holds ENTRIES, each a
-// (label, words) pair, after a plain block.
+// entryRow is a user prompt row whose one text block is the daemon's parse
+// of a line of prose and then ENTRIES, each a (label, words) pair, one line
+// each.
 func entryRow(entries ...[2]string) *frontendv1.FeedRow {
-	blocks := []*frontendv1.ProseBlock{{Block: &frontendv1.ProseBlock_Plain{Plain: &frontendv1.ProsePlain{Markdown: "intro"}}}}
+	text := "intro\n"
 	for _, e := range entries {
-		blocks = append(blocks, &frontendv1.ProseBlock{Block: &frontendv1.ProseBlock_Entry{Entry: &frontendv1.ProseEntry{
-			Label: &frontendv1.ProseEntryLabel{Text: e[0]},
-			Text:  &frontendv1.ProseEntryText{Markdown: e[1]},
-		}}})
+		text += e[0] + " - " + e[1] + "\n"
 	}
 	return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
 		Result: &frontendv1.FeedUserPrompt_Success{Success: &frontendv1.FeedUserPromptSuccess{
 			Body: &frontendv1.FeedUserPromptBody{Blocks: []*frontendv1.FeedUserPromptBlock{{
-				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: &frontendv1.ParsedProse{Blocks: blocks}}},
+				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: prose.ParsePrompt(dlog.NewTestLogger(), text)}},
 			}}},
 		}},
 	}}}
@@ -257,11 +258,11 @@ func TestEveryReaderOfAPromptsEntriesWalksThemThroughPromptEntries(t *testing.T)
 	}
 
 	// Act
-	walks := strings.Count(string(src), ".GetEntry()")
+	walks := strings.Count(string(src), ".GetEntries()")
 	calls := strings.Count(string(src), "promptEntries(row)")
 
 	// Assert: the one walk is promptEntries' own, and both readers call it.
 	if walks != 1 || calls != 2 {
-		t.Fatalf("answers.go reads GetEntry() %d times and calls promptEntries %d times, want 1 and 2", walks, calls)
+		t.Fatalf("answers.go reads GetEntries() %d times and calls promptEntries %d times, want 1 and 2", walks, calls)
 	}
 }

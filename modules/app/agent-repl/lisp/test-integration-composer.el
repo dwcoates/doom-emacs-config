@@ -71,7 +71,7 @@
                                      (configDir . "/home/itest/.claude")))
                           (backfill . ((done . ())))
                           (,composer . ())))))
-    (naming . ())))
+    (naming . ()) (composerEntries . ())))
 
 (defconst agent-repl-itest-composer--gate-keywords
   '((open . :open) (merging . :merging) (draining . :draining)
@@ -1002,7 +1002,7 @@ Ruled at kickoff — the daemon starts or revives the session implicitly."
             (agent-repl-host-subscribe conn agent-repl-itest-composer--ws ref)
             (agent-repl-itest--await-subscriber daemon "host" (plist-get ref :id))
             (agent-repl-itest--push daemon "host"
-                                    '((host . ((none . ()) (naming . ()))))
+                                    '((host . ((none . ()) (naming . ()) (composerEntries . ()))))
                                     (plist-get ref :id))
             (agent-repl-itest--wait-until
              (lambda () (eq (agent-repl-host-composer-gate
@@ -1039,7 +1039,7 @@ precondition; the daemon starts or revives the session implicitly)\"."
              daemon "host"
              '((host . ((existing . ((id . ((value . "host-session-1")))
                                       (terminal . ((rehydratable . t)))))
-                        (naming . ()))))
+                        (naming . ()) (composerEntries . ()))))
              (plist-get ref :id))
             (agent-repl-itest--wait-until
              (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws)

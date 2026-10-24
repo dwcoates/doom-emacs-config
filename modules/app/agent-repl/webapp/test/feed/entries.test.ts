@@ -2,12 +2,16 @@
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { FeedResponseAnswerSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import { ProseEntrySchema } from "../../../proto/gen/ts/frontend/v1/prose_pb";
+import { ProseEntryTreeSchema, type ProseEntryTree } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import {
   ANSWER_PROMPT_ATTRIBUTE,
+  ENTRY_ATTRIBUTE,
+  ENTRY_CLASS,
   ENTRY_FLASH_CLASS,
+  ENTRY_LABEL_CLASS,
+  ENTRY_PATH_CLASS,
   LABEL_LINK_CLASS,
-  entryHtml,
+  entryTreeHtml,
   flashEntry,
   flashEntryOncePainted,
   linkAnswers,
@@ -18,9 +22,22 @@ import { useTreeLayout } from "../tree-layout.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { plainProse, promptProse } from "../prose.js";
+import { inline } from "../../src/markdown.js";
+import { TREE_NODE_ATTRIBUTE } from "../../src/metaprompt-tree.js";
 
-/** An entry answering LABEL with TEXT. */
-const entry = (label: string, text: string) => create(ProseEntrySchema, { label: { text: label }, text: { markdown: text } });
+/** The entry tree the daemon parses PROMPT's one run of entries into. */
+function entryTree(prompt: string): ProseEntryTree {
+  const block = promptProse(prompt).blocks[0]?.block;
+  if (block?.case !== "entries") throw new Error(`no entry tree leads ${JSON.stringify(prompt)}`);
+  return block.value;
+}
+
+/** PROMPT's entry tree drawn, in a detached element. */
+const drawnEntries = (prompt: string): HTMLElement => hosted(entryTreeHtml(entryTree(prompt), inline, 80));
+
+/** The lines of EL whose node is LABEL. */
+const linesOf = (el: HTMLElement, label: string): Element[] =>
+  [...el.querySelectorAll(".mp-line")].filter((l) => l.getAttribute(TREE_NODE_ATTRIBUTE) === label);
 
 /** HTML in a detached element. */
 function hosted(html: string): HTMLElement {
@@ -36,35 +53,74 @@ const labels = (...names: string[]): HTMLElement =>
 /** An answer of LABEL by the prompt row PROMPT. */
 const answer = (label: string, prompt: string) => create(FeedResponseAnswerSchema, { label, prompt: { value: prompt } });
 
-describe("entryHtml", () => {
-  it("draws the label as the click target and the words as markdown", () => {
+describe("entryTreeHtml", () => {
+  it("draws each entry's line with its label as the click target", () => {
     // Act
-    const el = hosted(entryHtml(entry("3.1", "**yes**")));
+    const el = drawnEntries("3.1 - a\n4.2 - **b**\n5.5.1 - c");
     // Assert
-    expect([
-      el.querySelector(".mp-entry")?.getAttribute("data-entry-label"),
-      el.querySelector(".mp-entry-label")?.textContent,
-      el.querySelector(".mp-entry-text strong")?.textContent,
-    ]).toEqual(["3.1", "3.1", "yes"]);
+    const entries = [...el.querySelectorAll(`.${ENTRY_CLASS}`)].map((l) => [
+      l.getAttribute(ENTRY_ATTRIBUTE),
+      l.querySelector(`.${ENTRY_LABEL_CLASS}`)?.textContent,
+    ]);
+    expect(entries).toEqual([
+      ["3.1", "3.1"],
+      ["4.2", "4.2"],
+      ["5.5.1", "5.5.1"],
+    ]);
+  });
+
+  it("draws an entry's words as inline markdown", () => {
+    // Act
+    const el = drawnEntries("3.1 - a\n4.2 - **b**\n5.5.1 - c");
+    // Assert
+    expect(linesOf(el, "4.2")[0]?.querySelector("strong")?.textContent).toBe("b");
+  });
+
+  it("draws every ancestor a deeper label implies by its label alone, dimmed", () => {
+    // Act
+    const el = drawnEntries("3.1 - a\n4.2 - **b**\n5.5.1 - c");
+    // Assert
+    const paths = [...el.querySelectorAll(`.${ENTRY_PATH_CLASS}`)].map((l) => [
+      l.getAttribute(TREE_NODE_ATTRIBUTE),
+      l.querySelector(".mp-content")?.textContent,
+    ]);
+    expect(paths).toEqual([
+      ["3", ""],
+      ["4", ""],
+      ["5", ""],
+      ["5.5", ""],
+    ]);
+  });
+
+  it("draws the rails the labels make, with no blank line between roots", () => {
+    // Act
+    const el = drawnEntries("3.1 - a\n4.2 - **b**\n5.5.1 - c");
+    // Assert
+    const prefixes = [...el.querySelectorAll(".mp-line")].map((l) => l.querySelector(".mp-prefix")?.textContent);
+    expect(prefixes).toEqual(["3 ", "└── 3.1 ", "4 ", "└── 4.2 ", "5 ", "└── 5.5 ", "    └── 5.5.1 "]);
   });
 
   it("draws an entry that says nothing as its label alone", () => {
     // Act
-    const el = hosted(entryHtml(entry("3.1", "")));
+    const el = drawnEntries("3.1 -");
     // Assert
-    expect(el.querySelector(".mp-entry-text")?.innerHTML).toBe("");
+    expect(linesOf(el, "3.1")[0]?.querySelector(".mp-content")?.textContent).toBe("");
   });
 
-  it("escapes a label rather than reading it as markup", () => {
+  it("escapes what an entry says rather than reading it as markup", () => {
     // Act
-    const el = hosted(entryHtml(entry("<b>1</b>", "x")));
+    const el = drawnEntries("3.1 - <b>x</b>");
     // Assert
-    expect(el.querySelector(".mp-entry-label")?.textContent).toBe("<b>1</b>");
+    expect([linesOf(el, "3.1")[0]?.querySelector("b"), linesOf(el, "3.1")[0]?.textContent]).toEqual([null, "└── 3.1 <b>x</b>"]);
   });
 
-  it("refuses an entry served without its label", () => {
+  it.each([
+    ["no label", { nodes: [{ id: { index: 0 }, place: { case: "root", value: {} }, kind: { case: "path", value: {} } }] }],
+    ["no kind", { nodes: [{ id: { index: 0 }, place: { case: "root", value: {} }, label: { text: "3" } }] }],
+    ["no place", { nodes: [{ id: { index: 0 }, label: { text: "3" }, kind: { case: "path", value: {} } }] }],
+  ])("refuses a node served with %s", (_name, init) => {
     // Act + Assert
-    expect(() => entryHtml(create(ProseEntrySchema, { text: { markdown: "x" } }))).toThrow(MalformedView);
+    expect(() => entryTreeHtml(create(ProseEntryTreeSchema, init as never), inline, 80)).toThrow(MalformedView);
   });
 });
 
@@ -112,18 +168,18 @@ describe("linkAnswers", () => {
 describe("flashEntry", () => {
   it("flashes the row's entry answering the label", () => {
     // Arrange
-    const row = hosted(entryHtml(entry("3.1", "a")) + entryHtml(entry("3.2", "b")));
+    const row = drawnEntries("3.1 - a\n4.2 - **b**\n5.5.1 - c");
     // Act
-    flashEntry(row, "3.2");
+    flashEntry(row, "4.2");
     // Assert
     const flashed = [...row.querySelectorAll(`.${ENTRY_FLASH_CLASS}`)].map((el) => el.getAttribute("data-entry-label"));
-    expect(flashed).toEqual(["3.2"]);
+    expect(flashed).toEqual(["4.2"]);
   });
 
   it("records a row that draws no such entry at warn", async () => {
     // Arrange
     const capture = captureLogRecords();
-    const row = hosted(entryHtml(entry("3.1", "a")));
+    const row = drawnEntries("3.1 -");
     row.setAttribute("data-feed-row", "p1");
     // Act
     flashEntry(row, "9.9");
@@ -138,7 +194,7 @@ describe("flashEntryOncePainted", () => {
 
   it("flashes at once a row with no markdown slot to wait for", () => {
     // Arrange
-    const row = hosted(entryHtml(entry("3.1", "a")));
+    const row = drawnEntries("3.1 -");
     // Act
     flashEntryOncePainted(row, "3.1");
     // Assert

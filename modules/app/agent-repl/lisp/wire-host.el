@@ -555,14 +555,17 @@ breach."
 
 (defun agent-repl-wire-decode-host-workspace (value)
   "Decode VALUE as `HostWorkspace'.
-The plist is `(:session :naming :held-prompt-edit :gate :ask)'.
+The plist is `(:session :naming :held-prompt-edit :gate :ask
+:composer-entries)'.
 `naming' is a REQUIRED message sitting beside the session oneof; its two
 fields are the optional halves, not the message.  `held_prompt_edit' is
 absent when no held-prompt edit stands, and its absence is that fact.
 `gate' is absent when no gate stands, likewise, and `ask' when no question
-or permission card stands on the root feed."
+or permission card stands on the root feed.  `composer_entries' is always
+set: the composer's labels that answer nothing."
   (let ((object (agent-repl-wire--object "HostWorkspace" value)))
-    (agent-repl-wire--check-keys "HostWorkspace" object '(none existing naming heldPromptEdit gate ask))
+    (agent-repl-wire--check-keys "HostWorkspace" object
+                                 '(none existing naming heldPromptEdit gate ask composerEntries))
     (agent-repl-wire--decoded
      "HostWorkspace"
      (list :session (agent-repl-wire-decode-host-workspace-session object)
@@ -577,7 +580,26 @@ or permission card stands on the root feed."
                   #'agent-repl-wire-decode-host-gate)
            :ask (agent-repl-wire--decode-optional-message
                  "HostWorkspace" 'ask object
-                 #'agent-repl-wire-decode-host-ask)))))
+                 #'agent-repl-wire-decode-host-ask)
+           :composer-entries (agent-repl-wire--decode-message
+                              "HostWorkspace" 'composerEntries object
+                              #'agent-repl-wire-decode-host-composer-entries)))))
+
+(defun agent-repl-wire-decode-host-composer-entries (value)
+  "Decode VALUE as `HostComposerEntries', the plist (:unanswered LABELS).
+LABELS are the composer's entry labels that answer nothing, in order; an
+absent field is none."
+  (let ((object (agent-repl-wire--object "HostComposerEntries" value)))
+    (agent-repl-wire--check-keys "HostComposerEntries" object '(unanswered))
+    (agent-repl-wire--decoded
+     "HostComposerEntries"
+     (list :unanswered (agent-repl-wire--decode-repeated
+                        "HostComposerEntries" 'unanswered object
+                        (lambda (label)
+                          (if (stringp label)
+                              label
+                            (agent-repl-wire--fail "HostComposerEntries" 'unanswered
+                                                   "an element is not a string"))))))))
 
 ;;;; ---- The notification click push ----
 

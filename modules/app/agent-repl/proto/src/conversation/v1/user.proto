@@ -69,4 +69,9 @@ message UserQuoteBlock {
   // The composed quote, markdown: preamble, fenced quoted text, closing
   // marker. Never empty.
   string text = 1;
+  // The daemon's own id of the quoted bubble's feed row (frontend.v1.FeedId's
+  // value), opaque to every other reader. It is what a reply's entries answer
+  // (frontend.v1.FeedResponse.answers). Empty on a quote recorded before it
+  // was kept, whose entries are bound as any prompt's are.
+  string quoted_row = 2;
 }

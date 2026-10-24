@@ -362,10 +362,24 @@ type Resolver interface {
 	// than using an empty text.
 	SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool)
 	// PromptEntry answers what the entry answering LABEL of the root-feed user
-	// prompt row ID says (frontend.v1.ProseEntry.text), as last published. A
+	// prompt row ID says (its entry tree's answer node), as last published. A
 	// miss is a row that is not such a prompt, or holds no entry answering
 	// LABEL.
 	PromptEntry(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) (string, bool)
+	// ComposerTargets answers, for each of LABELS in order, the response row
+	// an entry answering it targets in a prompt not yet sent that replies to
+	// REPLY (nil for none), or nil where it targets nothing: the rule a sent
+	// prompt's entries are bound by (composer.go).
+	ComposerTargets(ws ids.WorkspaceID, reply *frontendv1.FeedId, labels []string) []*frontendv1.FeedId
+	// EntryNeighbor answers the label a line opened beside the entry
+	// answering LABEL answers, in the tree that entry targets: the next node
+	// (NEXT) or the previous one. ok is false when it targets no response or
+	// its node has no neighbor that way (composer.go).
+	EntryNeighbor(ws ids.WorkspaceID, reply *frontendv1.FeedId, label string, next bool) (string, bool)
+	// WatchLabelChanges yields every workspace whose root feed changed what
+	// a composer's entry can target, from this call on, until ctx is
+	// cancelled. Every emission follows the change it announces.
+	WatchLabelChanges(ctx context.Context) <-chan ids.WorkspaceID
 	// BubbleText answers the text of one landed root-feed bubble (a prompt or
 	// a landed response bubble, a thinking one included) as markdown, with
 	// whether it is a prompt, whether or not the reader can select it. A miss

@@ -266,7 +266,12 @@ type UserQuoteBlock struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The composed quote, markdown: preamble, fenced quoted text, closing
 	// marker. Never empty.
-	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	// The daemon's own id of the quoted bubble's feed row (frontend.v1.FeedId's
+	// value), opaque to every other reader. It is what a reply's entries answer
+	// (frontend.v1.FeedResponse.answers). Empty on a quote recorded before it
+	// was kept, whose entries are bound as any prompt's are.
+	QuotedRow     string `protobuf:"bytes,2,opt,name=quoted_row,json=quotedRow,proto3" json:"quoted_row,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -308,6 +313,13 @@ func (x *UserQuoteBlock) GetText() string {
 	return ""
 }
 
+func (x *UserQuoteBlock) GetQuotedRow() string {
+	if x != nil {
+		return x.QuotedRow
+	}
+	return ""
+}
+
 var File_conversation_v1_user_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_user_proto_rawDesc = "" +
@@ -322,9 +334,11 @@ const file_conversation_v1_user_proto_rawDesc = "" +
 	"\x05image\x18\x02 \x01(\v2\x1b.conversation.v1.ImageBlockH\x00R\x05image\x12E\n" +
 	"\vunsupported\x18\x03 \x01(\v2!.conversation.v1.UnsupportedBlockH\x00R\vunsupported\x127\n" +
 	"\x05quote\x18\x05 \x01(\v2\x1f.conversation.v1.UserQuoteBlockH\x00R\x05quoteB\a\n" +
-	"\x05block\"$\n" +
+	"\x05block\"C\n" +
 	"\x0eUserQuoteBlock\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04textB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\x04text\x18\x01 \x01(\tR\x04text\x12\x1d\n" +
+	"\n" +
+	"quoted_row\x18\x02 \x01(\tR\tquotedRowB0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_user_proto_rawDescOnce sync.Once

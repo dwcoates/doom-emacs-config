@@ -3074,13 +3074,33 @@
     "prose": {
       "blocks": [
         {
-          "entry": {
-            "label": {
-              "text": "3.1"
-            },
-            "text": {
-              "markdown": "yes"
-            }
+          "entries": {
+            "nodes": [
+              {
+                "id": {},
+                "root": {},
+                "label": {
+                  "text": "3"
+                },
+                "path": {}
+              },
+              {
+                "id": {
+                  "index": 1
+                },
+                "branch": {
+                  "parent": {}
+                },
+                "label": {
+                  "text": "3.1"
+                },
+                "answer": {
+                  "text": {
+                    "markdown": "yes"
+                  }
+                }
+              }
+            ]
           }
         }
       ],
@@ -3095,13 +3115,33 @@
     "prose": {
       "blocks": [
         {
-          "entry": {
-            "label": {
-              "text": "3.1"
-            },
-            "text": {
-              "markdown": "yes"
-            }
+          "entries": {
+            "nodes": [
+              {
+                "id": {},
+                "root": {},
+                "label": {
+                  "text": "3"
+                },
+                "path": {}
+              },
+              {
+                "id": {
+                  "index": 1
+                },
+                "branch": {
+                  "parent": {}
+                },
+                "label": {
+                  "text": "3.1"
+                },
+                "answer": {
+                  "text": {
+                    "markdown": "yes"
+                  }
+                }
+              }
+            ]
           }
         },
         {
@@ -3199,6 +3239,197 @@
       ],
       "source": {
         "markdown": "1 🔧 Did it\n├── 1.1 first\n└── 1.2 second"
+      }
+    }
+  },
+  {
+    "text": "3.1 - a\n4.2 - **b**\n5.5.1 - c",
+    "prompt": true,
+    "prose": {
+      "blocks": [
+        {
+          "entries": {
+            "nodes": [
+              {
+                "id": {},
+                "root": {},
+                "label": {
+                  "text": "3"
+                },
+                "path": {}
+              },
+              {
+                "id": {
+                  "index": 1
+                },
+                "branch": {
+                  "parent": {}
+                },
+                "label": {
+                  "text": "3.1"
+                },
+                "answer": {
+                  "text": {
+                    "markdown": "a"
+                  }
+                }
+              },
+              {
+                "id": {
+                  "index": 2
+                },
+                "root": {},
+                "label": {
+                  "text": "4"
+                },
+                "path": {}
+              },
+              {
+                "id": {
+                  "index": 3
+                },
+                "branch": {
+                  "parent": {
+                    "index": 2
+                  }
+                },
+                "label": {
+                  "text": "4.2"
+                },
+                "answer": {
+                  "text": {
+                    "markdown": "**b**"
+                  }
+                }
+              },
+              {
+                "id": {
+                  "index": 4
+                },
+                "root": {},
+                "label": {
+                  "text": "5"
+                },
+                "path": {}
+              },
+              {
+                "id": {
+                  "index": 5
+                },
+                "branch": {
+                  "parent": {
+                    "index": 4
+                  }
+                },
+                "label": {
+                  "text": "5.5"
+                },
+                "path": {}
+              },
+              {
+                "id": {
+                  "index": 6
+                },
+                "branch": {
+                  "parent": {
+                    "index": 5
+                  }
+                },
+                "label": {
+                  "text": "5.5.1"
+                },
+                "answer": {
+                  "text": {
+                    "markdown": "c"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "source": {
+        "markdown": "3.1 - a\n4.2 - **b**\n5.5.1 - c"
+      }
+    }
+  },
+  {
+    "text": "3.1 - \u003cb\u003ex\u003c/b\u003e",
+    "prompt": true,
+    "prose": {
+      "blocks": [
+        {
+          "entries": {
+            "nodes": [
+              {
+                "id": {},
+                "root": {},
+                "label": {
+                  "text": "3"
+                },
+                "path": {}
+              },
+              {
+                "id": {
+                  "index": 1
+                },
+                "branch": {
+                  "parent": {}
+                },
+                "label": {
+                  "text": "3.1"
+                },
+                "answer": {
+                  "text": {
+                    "markdown": "\u003cb\u003ex\u003c/b\u003e"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "source": {
+        "markdown": "3.1 - \u003cb\u003ex\u003c/b\u003e"
+      }
+    }
+  },
+  {
+    "text": "3.1 -",
+    "prompt": true,
+    "prose": {
+      "blocks": [
+        {
+          "entries": {
+            "nodes": [
+              {
+                "id": {},
+                "root": {},
+                "label": {
+                  "text": "3"
+                },
+                "path": {}
+              },
+              {
+                "id": {
+                  "index": 1
+                },
+                "branch": {
+                  "parent": {}
+                },
+                "label": {
+                  "text": "3.1"
+                },
+                "answer": {
+                  "text": {}
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "source": {
+        "markdown": "3.1 -"
       }
     }
   }

@@ -6,9 +6,11 @@
  * response it answers (frontend.v1.FeedResponse.answers); this module draws
  * both ends and nothing more:
  *
- *   - an entry block, its label a click target (`ENTRY_LABEL_CLASS`): a click
- *     selects the prompt and has Emacs fill the composer with the entry
- *     (SelectFeedRow's `entry` move, bubble-selection.ts);
+ *   - a run of entries as the tree their labels make (frontend.v1.ProseEntryTree,
+ *     `entryTreeHtml`), drawn by the one tree renderer: each entry's line a
+ *     click target (`ENTRY_LABEL_CLASS`) that selects the prompt and has
+ *     Emacs fill the composer with the entry (SelectFeedRow's `entry` move,
+ *     bubble-selection.ts), each implied ancestor dimmed (`ENTRY_PATH_CLASS`);
  *   - a response's answered labels, marked as links (`LABEL_LINK_CLASS`) on
  *     every paint of its prose (`linkAnswers`, the slot's mark): a click
  *     selects the answering prompt, centered (SelectFeedRow's `answer` move);
@@ -16,19 +18,29 @@
  *     daemon's selection push names it (FeedSelectionRowViewportReveal).
  */
 import type { FeedResponseAnswer } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import type { ProseEntry } from "../../../proto/gen/ts/frontend/v1/prose_pb";
-import { escapeHtml } from "../highlight.js";
+import { create } from "@bufbuild/protobuf";
+import {
+  ProseTreeNodeSchema,
+  ProseTreeSchema,
+  type ProseEntryTree,
+} from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
-import { renderMarkdown } from "../markdown.js";
-import { TREE_LABEL_ATTRIBUTE, TREE_LABEL_CLASS } from "../metaprompt-tree.js";
-import { requireMessage } from "../rpc/strict.js";
+import {
+  TREE_LABEL_ATTRIBUTE,
+  TREE_LABEL_CLASS,
+  renderTreeHtml,
+  type InlineMarkup,
+  type TreeIssue,
+  type TreeLineDecor,
+} from "../metaprompt-tree.js";
+import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, whenSlotPainted } from "../bubble/body.js";
 
-/** The class an entry block wears, its label in `ENTRY_ATTRIBUTE`. */
+/** The class every line of an entry wears, its label in `ENTRY_ATTRIBUTE`. */
 export const ENTRY_CLASS = "mp-entry";
 
-/** The attribute naming the label an entry block answers. */
+/** The attribute naming the label an entry's lines answer. */
 export const ENTRY_ATTRIBUTE = "data-entry-label";
 
 /** The class an entry's label wears: the click target that edits the entry. */
@@ -43,17 +55,49 @@ export const LABEL_LINK_CLASS = "mp-label-linked";
 /** The attribute naming the prompt row a linked label's answer is in. */
 export const ANSWER_PROMPT_ATTRIBUTE = "data-answer-prompt";
 
-/** ENTRY as HTML: its label, then what it says as markdown. */
-export function entryHtml(entry: ProseEntry): string {
-  const label = requireMessage(entry.label, "ProseEntry.label").text;
-  const says = requireMessage(entry.text, "ProseEntry.text").markdown;
-  const attr = escapeHtml(label);
-  return (
-    `<div class="${ENTRY_CLASS}" ${ENTRY_ATTRIBUTE}="${attr}">` +
-    `<span class="${ENTRY_LABEL_CLASS}" title="edit this entry and resend the prompt">${attr}</span>` +
-    `<div class="mp-entry-text">${says === "" ? "" : renderMarkdown(says)}</div>` +
-    `</div>`
-  );
+/** The class an implied ancestor's line wears: no entry answers it, so it is dimmed. */
+export const ENTRY_PATH_CLASS = "mp-entry-path";
+
+/**
+ * TREE, a run of a prompt's entries, as HTML: the tree their labels make,
+ * drawn by the one tree renderer at WIDTH columns (no blank line between its
+ * roots), each entry's lines wearing `ENTRY_CLASS` with its label in
+ * `ENTRY_ATTRIBUTE` and its label the click target, each implied ancestor's
+ * line `ENTRY_PATH_CLASS`. A node with no place, label or kind is refused.
+ */
+export function entryTreeHtml(tree: ProseEntryTree, inline: InlineMarkup, width: number, onIssue?: TreeIssue): string {
+  const decor: (TreeLineDecor | undefined)[] = [];
+  const nodes = tree.nodes.map((node, i) => {
+    const path = `ProseEntryTree.nodes[${i}]`;
+    const label = requireMessage(node.label, `${path}.label`).text;
+    const kind = requireCase(node.kind, `${path}.kind`);
+    let text = "";
+    switch (kind.case) {
+      case "answer":
+        text = requireMessage(kind.value.text, `${path}.answer.text`).markdown;
+        decor.push({ lineClass: ENTRY_CLASS, attributes: { [ENTRY_ATTRIBUTE]: label }, labelClass: ENTRY_LABEL_CLASS });
+        break;
+      case "path":
+        decor.push({ lineClass: ENTRY_PATH_CLASS });
+        break;
+      default: {
+        const other: { case: string } = kind;
+        return unreachableArm(`${path}.kind`, other.case);
+      }
+    }
+    const place = requireCase(node.place, `${path}.place`);
+    return create(ProseTreeNodeSchema, {
+      id: requireMessage(node.id, `${path}.id`),
+      label: { text: label },
+      text: { markdown: text },
+      place:
+        place.case === "root"
+          ? { case: "root", value: {} }
+          : { case: "branch", value: { parent: requireMessage(place.value.parent, `${path}.branch.parent`) } },
+    });
+  });
+  const drawn = create(ProseTreeSchema, { nodes });
+  return renderTreeHtml(drawn, inline, width, onIssue, { decorate: (i) => decor[i], rootGap: false });
 }
 
 /**
@@ -87,29 +131,29 @@ export function linkAnswers(rendered: HTMLElement, answers: readonly FeedRespons
 }
 
 /**
- * Flash ROW's entry answering LABEL, which a linked label revealed. The entry
- * is found in the row as it is drawn now; a row that draws no such entry is
- * recorded, because the daemon named an entry this drawing lacks.
+ * Flash ROW's entry answering LABEL, which a linked label revealed: every line
+ * the entry is drawn on, as the row is drawn now. A row that draws no such
+ * entry is recorded, because the daemon named an entry this drawing lacks.
  */
 export function flashEntry(row: HTMLElement, label: string): void {
-  const entry = queryAll<HTMLElement>(row, `.${ENTRY_CLASS}`).find(
-    (el) => el.getAttribute(ENTRY_ATTRIBUTE) === label,
-  );
-  if (entry === undefined) {
+  const lines = queryAll<HTMLElement>(row, `.${ENTRY_CLASS}`).filter((el) => el.getAttribute(ENTRY_ATTRIBUTE) === label);
+  if (lines.length === 0) {
     log.warn("a revealed prompt draws no entry answering the label", {
       operation: "feed.entries.flash-absent",
       context: { row: row.getAttribute("data-feed-row") ?? "unset", label },
     });
     return;
   }
-  entry.classList.remove(ENTRY_FLASH_CLASS);
-  // A FORCED LAYOUT restarts the animation when the same entry flashes twice.
-  void entry.offsetWidth;
-  entry.classList.add(ENTRY_FLASH_CLASS);
-  entry.addEventListener("animationend", () => entry.classList.remove(ENTRY_FLASH_CLASS), { once: true });
+  for (const line of lines) {
+    line.classList.remove(ENTRY_FLASH_CLASS);
+    // A FORCED LAYOUT restarts the animation when the same entry flashes twice.
+    void line.offsetWidth;
+    line.classList.add(ENTRY_FLASH_CLASS);
+    line.addEventListener("animationend", () => line.classList.remove(ENTRY_FLASH_CLASS), { once: true });
+  }
   log.info("a revealed prompt's entry flashed", {
     operation: "feed.entries.flashed",
-    context: { row: row.getAttribute("data-feed-row") ?? "unset", label },
+    context: { row: row.getAttribute("data-feed-row") ?? "unset", label, lines: lines.length },
   });
 }
 

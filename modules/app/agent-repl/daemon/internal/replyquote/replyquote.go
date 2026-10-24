@@ -77,15 +77,16 @@ func Fenced(text string) string {
 
 // Block composes the quote of a selected bubble: the preamble naming what is
 // quoted (a PROMPT, or a response of the agent's), MARKDOWN inside its code
-// fence, and the marker introducing the person's words.
-func Block(markdown string, prompt bool) *conversationv1.UserContentBlock {
+// fence, and the marker introducing the person's words. QUOTEDROW is the
+// quoted bubble's feed row id, kept so a reply's entries answer it.
+func Block(markdown string, prompt bool, quotedRow string) *conversationv1.UserContentBlock {
 	opening := openingResponse
 	if prompt {
 		opening = openingPrompt
 	}
 	text := opening + Fenced(markdown) + closing
 	return &conversationv1.UserContentBlock{
-		Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{Text: text}},
+		Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{Text: text, QuotedRow: quotedRow}},
 	}
 }
 
@@ -134,11 +135,12 @@ func Split(text string) (Parts, error) {
 }
 
 // Quote is SAID replying to a selected bubble: the bubble's quote ahead of
-// every block the person composed, each kept as it was, in order. SAID itself
+// every block the person composed, each kept as it was, in order, the quote
+// naming QUOTEDROW, the quoted bubble's feed row. SAID itself
 // is not modified.
-func Quote(said *conversationv1.UserSaid, markdown string, prompt bool) *conversationv1.UserSaid {
+func Quote(said *conversationv1.UserSaid, markdown string, prompt bool, quotedRow string) *conversationv1.UserSaid {
 	blocks := make([]*conversationv1.UserContentBlock, 0, len(said.GetContent().GetBlocks())+1)
-	blocks = append(blocks, Block(markdown, prompt))
+	blocks = append(blocks, Block(markdown, prompt, quotedRow))
 	blocks = append(blocks, said.GetContent().GetBlocks()...)
 	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}
 }

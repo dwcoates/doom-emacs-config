@@ -1096,7 +1096,7 @@ func TestTheHostViewCarriesTheStandingEdit(t *testing.T) {
 func TestTheHostViewHandsTheEditorTheWordsOfAQuotedPrompt(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.Queue.edit = &promptqueue.Edit{Turn: "turn-1", Said: replyquote.Quote(said("my words"), "Paris.", false), ID: 7}
+	h.Queue.edit = &promptqueue.Edit{Turn: "turn-1", Said: replyquote.Quote(said("my words"), "Paris.", false, ""), ID: 7}
 
 	// Act.
 	view := composeHost(t, h)

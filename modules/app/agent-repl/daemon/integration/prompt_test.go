@@ -1906,15 +1906,17 @@ func TestAReplyToASelectedPromptCarriesItsQuoteAsItsOwnBlock(t *testing.T) {
 	if words := blocks[1].GetText().GetText(); words != "the reply" {
 		t.Fatalf("StartTurn.said words = %q, want the person's own", words)
 	}
-	// Assert: the row draws the quote as its own arm, ahead of the words.
+	// Assert: the row draws the quote as its own arm, ahead of the words,
+	// naming the row it quoted.
 	row := awaitRow(t, f, feed, "the reply's row", func(r *frontendv1.FeedRow) bool {
 		return promptText(r) == "the reply"
 	})
 	drawn := row.GetUserPrompt().GetSuccess().GetBody().GetBlocks()
 	want := &frontendv1.FeedQuoteBlock{
-		Heading: "⟢ Replying to an earlier prompt in this conversation",
-		Quoted:  "the first prompt",
-		Closing: "⟢ My message",
+		Heading:   "⟢ Replying to an earlier prompt in this conversation",
+		Quoted:    "the first prompt",
+		Closing:   "⟢ My message",
+		QuotedRow: first.GetId(),
 	}
 	if len(drawn) != 2 || !proto.Equal(drawn[0].GetQuote(), want) {
 		t.Fatalf("drawn blocks = %v, want the quote arm taken apart (%v) then the words", drawn, want)

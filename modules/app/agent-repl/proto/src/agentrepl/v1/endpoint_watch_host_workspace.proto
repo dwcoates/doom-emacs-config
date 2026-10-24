@@ -157,9 +157,9 @@ message HostWorkspaceSelectRequested {}
 message HostWorkspacePromptEntryClicked {
   // The prompt's row, now the selection.
   frontend.v1.FeedId row = 1;
-  // The entry's label, as frontend.v1.ProseEntry carries it.
+  // The entry's label, as a frontend.v1.ProseEntryTreeNode answer carries it.
   string label = 2;
-  // What the entry says, as frontend.v1.ProseEntry carries it: what the
+  // What the entry says, as a frontend.v1.ProseEntryTreeNode answer carries it: what the
   // composer is filled with.
   string text = 3;
 }
@@ -209,6 +209,22 @@ message HostWorkspace {
   // arrived is refused there as not standing, so a stale view can never
   // answer a different card than the one it named.
   optional HostAsk ask = 6;
+  // THE COMPOSER'S ENTRIES THAT ANSWER NOTHING, as the daemon reads the
+  // entries the composer last reported (ReportComposerEntries): Emacs marks
+  // each such label in the composer as answering nothing. STATE, not an
+  // event: restated whenever what it follows from changes (a report, the
+  // selection, a response's tree). Always set; empty while every reported
+  // label targets a response.
+  HostComposerEntries composer_entries = 7;
+}
+
+// What the daemon reads of the composer's reported entries.
+message HostComposerEntries {
+  // Every reported label that targets no response: neither the selected
+  // response bubble's tree nor, with none selected, any response's on the
+  // root feed holds it. In the composer's order; a label written twice is
+  // listed once.
+  repeated string unanswered = 1;
 }
 
 // The standing ask Emacs answers by number. The card it names is drawn by the

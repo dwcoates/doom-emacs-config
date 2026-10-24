@@ -119,7 +119,7 @@ func TestDeliverMirrorsAnAttachedImageBesideTheWords(t *testing.T) {
 func TestDeliverMirrorsAReplysQuoteAsItsOwnBlock(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	said := replyquote.Quote(userSaid("and its population?"), "Paris.", false)
+	said := replyquote.Quote(userSaid("and its population?"), "Paris.", false, "")
 
 	// Act
 	if _, err := h.q.Submit(context.Background(), Submission{

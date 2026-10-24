@@ -1,0 +1,105 @@
+// endpoint_find_entry_neighbor.proto — FindEntryNeighbor: the label an entry
+// line opened beside another should answer. FEED section.
+//
+// Emacs calls it when the person opens a line from an entry line in command
+// mode (`o` below, `O` above), and fills the new line with the label the
+// daemon names, so the next entry answers the next node of the same tree.
+//
+// THE TREE IS THE RESPONSE THE ENTRY TARGETS, by the rule the composer's
+// entries are bound by (endpoint_report_composer_entries.proto): the selected
+// response bubble when one is selected, else the newest response on the root
+// feed whose tree holds the label. The neighbor is found in that tree:
+//   - `next`: the node's next sibling; else its parent's next sibling, and so
+//     on up its ancestors;
+//   - `previous`: the node's previous sibling; else its parent, and so on.
+// The answer is for the label the request names, so it holds for the line the
+// key was pressed on whatever the composer has reported since.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message FindEntryNeighborRequest {
+  // The workspace whose composer asks — the daemon-minted ref, echoed
+  // verbatim like every per-workspace request.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The label of the entry line the key was pressed on, as written. REQUIRED
+  // and never empty — empty is Connect InvalidArgument.
+  string label = 2;
+  // Which way the new line opens. REQUIRED — unset is Connect
+  // InvalidArgument.
+  EntryNeighborDirection direction = 3;
+}
+
+// Which way the new line opens. THE ARM IS THE DIRECTION.
+message EntryNeighborDirection {
+  oneof way {
+    // Below the entry line (`o`).
+    EntryNeighborNext next = 1;
+    // Above the entry line (`O`).
+    EntryNeighborPrevious previous = 2;
+  }
+}
+
+message EntryNeighborNext {}
+
+message EntryNeighborPrevious {}
+
+// THE ARM IS THE OUTCOME.
+message FindEntryNeighborResponse {
+  oneof result {
+    FindEntryNeighborSuccess success = 1;
+    FindEntryNeighborError error = 2;
+  }
+}
+
+// What the new line answers. THE ARM IS THE ANSWER: no neighbor is an answer,
+// never a failure.
+message FindEntryNeighborSuccess {
+  oneof neighbor {
+    // The label the new line answers.
+    FindEntryNeighborFound found = 1;
+    // The label targets no response, or its node has no neighbor that way:
+    // the line opens empty.
+    FindEntryNeighborNone none = 2;
+  }
+}
+
+message FindEntryNeighborFound {
+  // The neighbor's label, as the response's tree carries it. Never empty.
+  string label = 1;
+}
+
+message FindEntryNeighborNone {}
+
+message FindEntryNeighborError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    FindEntryNeighborUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    FindEntryNeighborWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    FindEntryNeighborTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    FindEntryNeighborNotYetAdopted not_yet_adopted = 4;
+  }
+}
+
+// The workspace id is not in the daemon's registry.
+message FindEntryNeighborUnknownWorkspace {}
+// The echoed dir disagrees with the registry's dir for this id.
+message FindEntryNeighborWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// This daemon released the workspace to a successor.
+message FindEntryNeighborTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// A joining daemon has not finished adopting this workspace yet.
+message FindEntryNeighborNotYetAdopted {}

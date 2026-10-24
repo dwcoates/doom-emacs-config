@@ -129,13 +129,23 @@ func TestBlock(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got := Block(tc.markdown, tc.prompt)
+			got := Block(tc.markdown, tc.prompt, "")
 
 			// Assert.
 			if got.GetQuote().GetText() != tc.want {
 				t.Fatalf("quote text =\n%q\nwant\n%q", got.GetQuote().GetText(), tc.want)
 			}
 		})
+	}
+}
+
+func TestBlockKeepsTheQuotedRow(t *testing.T) {
+	// Act.
+	got := Block("Paris.", false, "row-p1").GetQuote()
+
+	// Assert.
+	if got.GetQuotedRow() != "row-p1" {
+		t.Fatalf("quoted_row = %q, want the quoted bubble's row", got.GetQuotedRow())
 	}
 }
 
@@ -148,12 +158,12 @@ func TestQuote(t *testing.T) {
 		{
 			name: "the quote leads the person's words",
 			said: said(text("And its population?")),
-			want: said(Block("Paris.", false), text("And its population?")),
+			want: said(Block("Paris.", false, "row-p1"), text("And its population?")),
 		},
 		{
 			name: "every composed block is kept, in order, unflattened",
 			said: said(text("one"), image("/tmp/a.png"), text("two")),
-			want: said(Block("Paris.", false), text("one"), image("/tmp/a.png"), text("two")),
+			want: said(Block("Paris.", false, "row-p1"), text("one"), image("/tmp/a.png"), text("two")),
 		},
 	}
 	for _, tc := range cases {
@@ -162,7 +172,7 @@ func TestQuote(t *testing.T) {
 			before := proto.Clone(tc.said)
 
 			// Act.
-			got := Quote(tc.said, "Paris.", false)
+			got := Quote(tc.said, "Paris.", false, "row-p1")
 
 			// Assert.
 			if !proto.Equal(got, tc.want) {
@@ -297,7 +307,7 @@ func TestSplit(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			composed := Block(tc.markdown, tc.prompt).GetQuote().GetText()
+			composed := Block(tc.markdown, tc.prompt, "").GetQuote().GetText()
 
 			// Act.
 			got, err := Split(composed)

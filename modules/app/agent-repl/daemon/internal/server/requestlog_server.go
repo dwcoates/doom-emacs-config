@@ -97,6 +97,20 @@ func (s *requestLoggingServer) FoldMergeBubble(
 	return serveUnary(s, ctx, "FoldMergeBubble", req, s.server.FoldMergeBubble)
 }
 
+func (s *requestLoggingServer) ReportComposerEntries(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportComposerEntriesRequest],
+) (*connect.Response[agentreplv1.ReportComposerEntriesResponse], error) {
+	return serveUnary(s, ctx, "ReportComposerEntries", req, s.server.ReportComposerEntries)
+}
+
+func (s *requestLoggingServer) FindEntryNeighbor(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.FindEntryNeighborRequest],
+) (*connect.Response[agentreplv1.FindEntryNeighborResponse], error) {
+	return serveUnary(s, ctx, "FindEntryNeighbor", req, s.server.FindEntryNeighbor)
+}
+
 func (s *requestLoggingServer) SelectFeedRow(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SelectFeedRowRequest],

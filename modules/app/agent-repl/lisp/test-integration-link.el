@@ -333,7 +333,7 @@ is host.el's OWN `agent-repl-link-down-functions' hook, live via
           ;; state that was delivered to no one.
           (agent-repl-itest--await-subscriber daemon "host" id)
           (agent-repl-itest--push
-           daemon "host" '((host . ((none . ()) (naming . ())))) id)
+           daemon "host" '((host . ((none . ()) (naming . ()) (composerEntries . ())))) id)
           (agent-repl-itest--wait-until
            (lambda () (agent-repl-host-state ws)) nil "the host push to apply")
           ;; Act: the daemon drops the link with no end frame at all.

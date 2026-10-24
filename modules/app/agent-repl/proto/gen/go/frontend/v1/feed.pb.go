@@ -676,7 +676,7 @@ func (*FeedSelectionRowViewportHold) Descriptor() ([]byte, []int) {
 // Center the newly selected prompt and flash its entry answering a label.
 type FeedSelectionRowViewportReveal struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The label whose entry to flash, as frontend.v1.ProseEntry carries it.
+	// The label whose entry to flash, as a frontend.v1.ProseEntryTreeNode answer carries it.
 	EntryLabel    string `protobuf:"bytes,1,opt,name=entry_label,json=entryLabel,proto3" json:"entry_label,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5424,10 +5424,13 @@ type FeedResponse struct {
 	// interim treatment from THIS flag alone. `final_answer` outranks it.
 	Interim bool `protobuf:"varint,9,opt,name=interim,proto3" json:"interim,omitempty"`
 	// THE PROMPTS THAT ANSWERED THIS RESPONSE'S TREE, one per entry
-	// (frontend.v1.ProseEntry) that answers one of its labels, in feed order.
-	// An entry answers the NEAREST response before its prompt, on the same
-	// feed, whose tree holds a node with the entry's label; the client draws
-	// that node's label as a link to the prompt. A DAEMON FACT stated on every
+	// (a frontend.v1.ProseEntryTreeNode answer) that answers one of its labels, in feed order.
+	// An entry of a prompt that REPLIES to a response (its quote names the
+	// response, conversation.v1.UserQuoteBlock.quoted_row) answers that response
+	// when its tree holds the label. Any other entry answers the NEAREST
+	// response before its prompt, on the same feed, whose tree holds a node with
+	// the entry's label. The client draws that node's label as a link to the
+	// prompt. A DAEMON FACT stated on every
 	// publication: the response is RE-PUBLISHED when a prompt answering it is
 	// first drawn and when one is removed (a rollback). Empty while nothing
 	// answers it, and always empty on a response with no tree.
@@ -16833,7 +16836,11 @@ type FeedQuoteBlock struct {
 	Quoted string `protobuf:"bytes,3,opt,name=quoted,proto3" json:"quoted,omitempty"`
 	// The marker introducing the person's words, as the agent was told it,
 	// without its trailing colon: "⟢ My message". Never empty.
-	Closing       string `protobuf:"bytes,4,opt,name=closing,proto3" json:"closing,omitempty"`
+	Closing string `protobuf:"bytes,4,opt,name=closing,proto3" json:"closing,omitempty"`
+	// The quoted bubble's row (conversation.v1.UserQuoteBlock.quoted_row),
+	// absent on a quote recorded before it was kept. The daemon binds a reply's
+	// entries to it (FeedResponse.answers).
+	QuotedRow     *FeedId `protobuf:"bytes,5,opt,name=quoted_row,json=quotedRow,proto3,oneof" json:"quoted_row,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -16887,6 +16894,13 @@ func (x *FeedQuoteBlock) GetClosing() string {
 		return x.Closing
 	}
 	return ""
+}
+
+func (x *FeedQuoteBlock) GetQuotedRow() *FeedId {
+	if x != nil {
+		return x.QuotedRow
+	}
+	return nil
 }
 
 // ①b A prompt one agent addressed to another — the user kind's sibling,
@@ -26374,6 +26388,190 @@ func (x *FeedMergeQueueWaiting) GetStageEnteredAtMs() int64 {
 	return 0
 }
 
+// The node of a response's tree the entry point is on in the composer answers,
+// while the person types it (agentrepl.v1.ReportComposerEntries). The webapp
+// highlights that node's own line, not its children's, until the state says
+// otherwise. STATE, not an event: the root feed's watch carries it whenever it
+// changes and the moment a root watch is accepted, so a page that opens
+// mid-edit draws the highlight that stands.
+type FeedComposerEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE ARM IS THE STATE.
+	//
+	// Types that are valid to be assigned to At:
+	//
+	//	*FeedComposerEntry_None
+	//	*FeedComposerEntry_Node
+	At            isFeedComposerEntry_At `protobuf_oneof:"at"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FeedComposerEntry) Reset() {
+	*x = FeedComposerEntry{}
+	mi := &file_frontend_v1_feed_proto_msgTypes[411]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FeedComposerEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FeedComposerEntry) ProtoMessage() {}
+
+func (x *FeedComposerEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_proto_msgTypes[411]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FeedComposerEntry.ProtoReflect.Descriptor instead.
+func (*FeedComposerEntry) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{411}
+}
+
+func (x *FeedComposerEntry) GetAt() isFeedComposerEntry_At {
+	if x != nil {
+		return x.At
+	}
+	return nil
+}
+
+func (x *FeedComposerEntry) GetNone() *FeedComposerEntryNone {
+	if x != nil {
+		if x, ok := x.At.(*FeedComposerEntry_None); ok {
+			return x.None
+		}
+	}
+	return nil
+}
+
+func (x *FeedComposerEntry) GetNode() *FeedComposerEntryNode {
+	if x != nil {
+		if x, ok := x.At.(*FeedComposerEntry_Node); ok {
+			return x.Node
+		}
+	}
+	return nil
+}
+
+type isFeedComposerEntry_At interface {
+	isFeedComposerEntry_At()
+}
+
+type FeedComposerEntry_None struct {
+	// Point is on no entry line, or its entry's label targets no response.
+	None *FeedComposerEntryNone `protobuf:"bytes,1,opt,name=none,proto3,oneof"`
+}
+
+type FeedComposerEntry_Node struct {
+	// Point's entry answers this node.
+	Node *FeedComposerEntryNode `protobuf:"bytes,2,opt,name=node,proto3,oneof"`
+}
+
+func (*FeedComposerEntry_None) isFeedComposerEntry_At() {}
+
+func (*FeedComposerEntry_Node) isFeedComposerEntry_At() {}
+
+type FeedComposerEntryNone struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FeedComposerEntryNone) Reset() {
+	*x = FeedComposerEntryNone{}
+	mi := &file_frontend_v1_feed_proto_msgTypes[412]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FeedComposerEntryNone) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FeedComposerEntryNone) ProtoMessage() {}
+
+func (x *FeedComposerEntryNone) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_proto_msgTypes[412]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FeedComposerEntryNone.ProtoReflect.Descriptor instead.
+func (*FeedComposerEntryNone) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{412}
+}
+
+// The node point's entry answers.
+type FeedComposerEntryNode struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The response row whose tree holds the node: the selected response bubble
+	// when one is selected, else the newest response holding the label.
+	Row *FeedId `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
+	// The node's label, as the response's tree carries it.
+	Label         string `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FeedComposerEntryNode) Reset() {
+	*x = FeedComposerEntryNode{}
+	mi := &file_frontend_v1_feed_proto_msgTypes[413]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FeedComposerEntryNode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FeedComposerEntryNode) ProtoMessage() {}
+
+func (x *FeedComposerEntryNode) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_feed_proto_msgTypes[413]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FeedComposerEntryNode.ProtoReflect.Descriptor instead.
+func (*FeedComposerEntryNode) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{413}
+}
+
+func (x *FeedComposerEntryNode) GetRow() *FeedId {
+	if x != nil {
+		return x.Row
+	}
+	return nil
+}
+
+func (x *FeedComposerEntryNode) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
 var File_frontend_v1_feed_proto protoreflect.FileDescriptor
 
 const file_frontend_v1_feed_proto_rawDesc = "" +
@@ -27265,11 +27463,14 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\x03src\x18\x01 \x01(\tR\x03src\x12\x10\n" +
 	"\x03alt\x18\x02 \x01(\tR\x03alt\"*\n" +
 	"\x14FeedUnsupportedBlock\x12\x12\n" +
-	"\x04kind\x18\x01 \x01(\tR\x04kind\"h\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\"\xb0\x01\n" +
 	"\x0eFeedQuoteBlock\x12\x18\n" +
 	"\aheading\x18\x02 \x01(\tR\aheading\x12\x16\n" +
 	"\x06quoted\x18\x03 \x01(\tR\x06quoted\x12\x18\n" +
-	"\aclosing\x18\x04 \x01(\tR\aclosingJ\x04\b\x01\x10\x02R\x04text\"\xc1\x03\n" +
+	"\aclosing\x18\x04 \x01(\tR\aclosing\x127\n" +
+	"\n" +
+	"quoted_row\x18\x05 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\tquotedRow\x88\x01\x01B\r\n" +
+	"\v_quoted_rowJ\x04\b\x01\x10\x02R\x04text\"\xc1\x03\n" +
 	"\x0fFeedAgentPrompt\x12=\n" +
 	"\aaddress\x18\x01 \x01(\v2#.frontend.v1.FeedAgentPromptAddressR\aaddress\x124\n" +
 	"\x04body\x18\x02 \x01(\v2 .frontend.v1.FeedAgentPromptBodyR\x04body\x12P\n" +
@@ -27763,7 +27964,15 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"active_tab\x18\x01 \x01(\v2\x1e.frontend.v1.FeedMergeTabLabelR\tactiveTab\x12-\n" +
 	"\x13stage_entered_at_ms\x18\x02 \x01(\x03R\x10stageEnteredAtMs\"F\n" +
 	"\x15FeedMergeQueueWaiting\x12-\n" +
-	"\x13stage_entered_at_ms\x18\x01 \x01(\x03R\x10stageEnteredAtMsB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
+	"\x13stage_entered_at_ms\x18\x01 \x01(\x03R\x10stageEnteredAtMs\"\x8d\x01\n" +
+	"\x11FeedComposerEntry\x128\n" +
+	"\x04none\x18\x01 \x01(\v2\".frontend.v1.FeedComposerEntryNoneH\x00R\x04none\x128\n" +
+	"\x04node\x18\x02 \x01(\v2\".frontend.v1.FeedComposerEntryNodeH\x00R\x04nodeB\x04\n" +
+	"\x02at\"\x17\n" +
+	"\x15FeedComposerEntryNone\"T\n" +
+	"\x15FeedComposerEntryNode\x12%\n" +
+	"\x03row\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x03row\x12\x14\n" +
+	"\x05label\x18\x02 \x01(\tR\x05labelB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
 var (
 	file_frontend_v1_feed_proto_rawDescOnce sync.Once
@@ -27777,7 +27986,7 @@ func file_frontend_v1_feed_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_feed_proto_rawDescData
 }
 
-var file_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 411)
+var file_frontend_v1_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 414)
 var file_frontend_v1_feed_proto_goTypes = []any{
 	(*FeedId)(nil),                                      // 0: frontend.v1.FeedId
 	(*FeedSelection)(nil),                               // 1: frontend.v1.FeedSelection
@@ -28190,24 +28399,27 @@ var file_frontend_v1_feed_proto_goTypes = []any{
 	(*FeedMergeQueueLabel)(nil),                         // 408: frontend.v1.FeedMergeQueueLabel
 	(*FeedMergeQueueMerging)(nil),                       // 409: frontend.v1.FeedMergeQueueMerging
 	(*FeedMergeQueueWaiting)(nil),                       // 410: frontend.v1.FeedMergeQueueWaiting
-	(*v1.TurnId)(nil),                                   // 411: conversation.v1.TurnId
-	(*ParsedProse)(nil),                                 // 412: frontend.v1.ParsedProse
-	(*StatusPanelView)(nil),                             // 413: frontend.v1.StatusPanelView
-	(*TodosPanelView)(nil),                              // 414: frontend.v1.TodosPanelView
-	(*McpPanelView)(nil),                                // 415: frontend.v1.McpPanelView
-	(*ContextPanelView)(nil),                            // 416: frontend.v1.ContextPanelView
-	(*FailureHistoryReplayTruncated)(nil),               // 417: frontend.v1.FailureHistoryReplayTruncated
-	(*FeedChessBoard)(nil),                              // 418: frontend.v1.FeedChessBoard
-	(*TokenHeat)(nil),                                   // 419: frontend.v1.TokenHeat
-	(*FailureVendorMaxTurns)(nil),                       // 420: frontend.v1.FailureVendorMaxTurns
-	(*FailureVendorMaxBudget)(nil),                      // 421: frontend.v1.FailureVendorMaxBudget
-	(*FailureVendorExecutionError)(nil),                 // 422: frontend.v1.FailureVendorExecutionError
-	(*FailureVendorTurnFailed)(nil),                     // 423: frontend.v1.FailureVendorTurnFailed
-	(*v1.UserSaid)(nil),                                 // 424: conversation.v1.UserSaid
-	(*v1.AgentModel)(nil),                               // 425: conversation.v1.AgentModel
-	(v1.SessionCompactScope)(0),                         // 426: conversation.v1.SessionCompactScope
-	(*FailureCompactionColdRead)(nil),                   // 427: frontend.v1.FailureCompactionColdRead
-	(*v11.WorkspaceRef)(nil),                            // 428: workspace.v1.WorkspaceRef
+	(*FeedComposerEntry)(nil),                           // 411: frontend.v1.FeedComposerEntry
+	(*FeedComposerEntryNone)(nil),                       // 412: frontend.v1.FeedComposerEntryNone
+	(*FeedComposerEntryNode)(nil),                       // 413: frontend.v1.FeedComposerEntryNode
+	(*v1.TurnId)(nil),                                   // 414: conversation.v1.TurnId
+	(*ParsedProse)(nil),                                 // 415: frontend.v1.ParsedProse
+	(*StatusPanelView)(nil),                             // 416: frontend.v1.StatusPanelView
+	(*TodosPanelView)(nil),                              // 417: frontend.v1.TodosPanelView
+	(*McpPanelView)(nil),                                // 418: frontend.v1.McpPanelView
+	(*ContextPanelView)(nil),                            // 419: frontend.v1.ContextPanelView
+	(*FailureHistoryReplayTruncated)(nil),               // 420: frontend.v1.FailureHistoryReplayTruncated
+	(*FeedChessBoard)(nil),                              // 421: frontend.v1.FeedChessBoard
+	(*TokenHeat)(nil),                                   // 422: frontend.v1.TokenHeat
+	(*FailureVendorMaxTurns)(nil),                       // 423: frontend.v1.FailureVendorMaxTurns
+	(*FailureVendorMaxBudget)(nil),                      // 424: frontend.v1.FailureVendorMaxBudget
+	(*FailureVendorExecutionError)(nil),                 // 425: frontend.v1.FailureVendorExecutionError
+	(*FailureVendorTurnFailed)(nil),                     // 426: frontend.v1.FailureVendorTurnFailed
+	(*v1.UserSaid)(nil),                                 // 427: conversation.v1.UserSaid
+	(*v1.AgentModel)(nil),                               // 428: conversation.v1.AgentModel
+	(v1.SessionCompactScope)(0),                         // 429: conversation.v1.SessionCompactScope
+	(*FailureCompactionColdRead)(nil),                   // 430: frontend.v1.FailureCompactionColdRead
+	(*v11.WorkspaceRef)(nil),                            // 431: workspace.v1.WorkspaceRef
 }
 var file_frontend_v1_feed_proto_depIdxs = []int32{
 	2,   // 0: frontend.v1.FeedSelection.none:type_name -> frontend.v1.FeedSelectionNone
@@ -28228,7 +28440,7 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	6,   // 15: frontend.v1.FeedSelectionBubble.viewport:type_name -> frontend.v1.FeedSelectionRowViewport
 	0,   // 16: frontend.v1.FeedRow.id:type_name -> frontend.v1.FeedId
 	40,  // 17: frontend.v1.FeedRow.parent:type_name -> frontend.v1.FeedRowParent
-	411, // 18: frontend.v1.FeedRow.turn:type_name -> conversation.v1.TurnId
+	414, // 18: frontend.v1.FeedRow.turn:type_name -> conversation.v1.TurnId
 	18,  // 19: frontend.v1.FeedRow.order:type_name -> frontend.v1.FeedRowOrder
 	259, // 20: frontend.v1.FeedRow.user_prompt:type_name -> frontend.v1.FeedUserPrompt
 	269, // 21: frontend.v1.FeedRow.agent_prompt:type_name -> frontend.v1.FeedAgentPrompt
@@ -28253,7 +28465,7 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	17,  // 40: frontend.v1.FeedRowRemoved.rolled_back:type_name -> frontend.v1.FeedRowRolledBack
 	19,  // 41: frontend.v1.FeedRowOrder.pinned:type_name -> frontend.v1.FeedRowOrderPinned
 	21,  // 42: frontend.v1.FeedPeerMessage.from:type_name -> frontend.v1.FeedPeerMessageFrom
-	412, // 43: frontend.v1.FeedPeerMessage.prose:type_name -> frontend.v1.ParsedProse
+	415, // 43: frontend.v1.FeedPeerMessage.prose:type_name -> frontend.v1.ParsedProse
 	26,  // 44: frontend.v1.FeedPeerMessageFrom.name:type_name -> frontend.v1.FeedPeerMessageFromName
 	27,  // 45: frontend.v1.FeedPeerMessageFrom.workspace:type_name -> frontend.v1.FeedPeerMessageFromWorkspace
 	28,  // 46: frontend.v1.FeedPeerMessageFrom.unresolved:type_name -> frontend.v1.FeedPeerMessageFromUnresolved
@@ -28264,10 +28476,10 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	25,  // 51: frontend.v1.FeedPeerMessageFromAgent.unresolved:type_name -> frontend.v1.FeedPeerMessageFromAgentUnresolved
 	31,  // 52: frontend.v1.FeedSubagentHandbackBadge.label:type_name -> frontend.v1.FeedSubagentHandbackBadgeLabel
 	33,  // 53: frontend.v1.FeedMergeHandbackBadge.label:type_name -> frontend.v1.FeedMergeHandbackBadgeLabel
-	413, // 54: frontend.v1.FeedCommandPanel.status:type_name -> frontend.v1.StatusPanelView
-	414, // 55: frontend.v1.FeedCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
-	415, // 56: frontend.v1.FeedCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
-	416, // 57: frontend.v1.FeedCommandPanel.context:type_name -> frontend.v1.ContextPanelView
+	416, // 54: frontend.v1.FeedCommandPanel.status:type_name -> frontend.v1.StatusPanelView
+	417, // 55: frontend.v1.FeedCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
+	418, // 56: frontend.v1.FeedCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
+	419, // 57: frontend.v1.FeedCommandPanel.context:type_name -> frontend.v1.ContextPanelView
 	36,  // 58: frontend.v1.FeedCommandRefused.command:type_name -> frontend.v1.FeedCommandRefusedCommand
 	37,  // 59: frontend.v1.FeedCommandRefused.reason:type_name -> frontend.v1.FeedCommandRefusedReason
 	38,  // 60: frontend.v1.FeedCommandRefused.add_support:type_name -> frontend.v1.FeedCommandAddSupportOffer
@@ -28279,7 +28491,7 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	46,  // 66: frontend.v1.FeedPageSuccess.at_start:type_name -> frontend.v1.FeedPageAtStart
 	47,  // 67: frontend.v1.FeedPageSuccess.breadcrumbs:type_name -> frontend.v1.FeedBreadcrumbs
 	44,  // 68: frontend.v1.FeedPageError.headline:type_name -> frontend.v1.FeedPageErrorHeadline
-	417, // 69: frontend.v1.FeedPageError.history_replay_truncated:type_name -> frontend.v1.FailureHistoryReplayTruncated
+	420, // 69: frontend.v1.FeedPageError.history_replay_truncated:type_name -> frontend.v1.FailureHistoryReplayTruncated
 	48,  // 70: frontend.v1.FeedBreadcrumbs.crumbs:type_name -> frontend.v1.FeedBreadcrumb
 	0,   // 71: frontend.v1.FeedBreadcrumb.target:type_name -> frontend.v1.FeedId
 	80,  // 72: frontend.v1.FeedTurnActivity.response:type_name -> frontend.v1.FeedResponse
@@ -28292,19 +28504,19 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	56,  // 79: frontend.v1.FeedTurnActivity.plan:type_name -> frontend.v1.FeedPlan
 	62,  // 80: frontend.v1.FeedTurnActivity.findings:type_name -> frontend.v1.FeedFindings
 	50,  // 81: frontend.v1.FeedTurnActivity.subagent_result:type_name -> frontend.v1.FeedSubagentResult
-	418, // 82: frontend.v1.FeedTurnActivity.chess_board:type_name -> frontend.v1.FeedChessBoard
+	421, // 82: frontend.v1.FeedTurnActivity.chess_board:type_name -> frontend.v1.FeedChessBoard
 	51,  // 83: frontend.v1.FeedSubagentResult.report:type_name -> frontend.v1.FeedSubagentResultReport
 	52,  // 84: frontend.v1.FeedSubagentResult.delivering:type_name -> frontend.v1.FeedSubagentResultDelivering
 	53,  // 85: frontend.v1.FeedSubagentResult.delivered:type_name -> frontend.v1.FeedSubagentResultDelivered
 	54,  // 86: frontend.v1.FeedSubagentResult.undelivered:type_name -> frontend.v1.FeedSubagentResultUndelivered
-	412, // 87: frontend.v1.FeedSubagentResultReport.prose:type_name -> frontend.v1.ParsedProse
+	415, // 87: frontend.v1.FeedSubagentResultReport.prose:type_name -> frontend.v1.ParsedProse
 	55,  // 88: frontend.v1.FeedSubagentResultUndelivered.reason:type_name -> frontend.v1.FeedSubagentResultUndeliveredReason
 	57,  // 89: frontend.v1.FeedPlan.planning:type_name -> frontend.v1.FeedPlanPlanning
 	58,  // 90: frontend.v1.FeedPlan.planned:type_name -> frontend.v1.FeedPlanPlanned
 	61,  // 91: frontend.v1.FeedPlan.failed:type_name -> frontend.v1.FeedPlanFailed
 	59,  // 92: frontend.v1.FeedPlanPlanned.prose:type_name -> frontend.v1.FeedPlanProse
 	60,  // 93: frontend.v1.FeedPlanPlanned.edit:type_name -> frontend.v1.FeedPlanEditTarget
-	412, // 94: frontend.v1.FeedPlanProse.prose:type_name -> frontend.v1.ParsedProse
+	415, // 94: frontend.v1.FeedPlanProse.prose:type_name -> frontend.v1.ParsedProse
 	166, // 95: frontend.v1.FeedPlanFailed.marker:type_name -> frontend.v1.FeedOutcomeMarker
 	63,  // 96: frontend.v1.FeedFindings.heading:type_name -> frontend.v1.FeedFindingsHeading
 	64,  // 97: frontend.v1.FeedFindings.rows:type_name -> frontend.v1.FeedFindingsRow
@@ -28336,8 +28548,8 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	85,  // 123: frontend.v1.FeedResponseSuccess.reveal_pace:type_name -> frontend.v1.FeedResponseRevealPace
 	87,  // 124: frontend.v1.FeedResponseError.prose:type_name -> frontend.v1.FeedResponseProse
 	182, // 125: frontend.v1.FeedResponseError.sign_in:type_name -> frontend.v1.FeedOutcomeSignIn
-	412, // 126: frontend.v1.FeedResponseProse.prose:type_name -> frontend.v1.ParsedProse
-	419, // 127: frontend.v1.FeedResponseUsageStamp.heat:type_name -> frontend.v1.TokenHeat
+	415, // 126: frontend.v1.FeedResponseProse.prose:type_name -> frontend.v1.ParsedProse
+	422, // 127: frontend.v1.FeedResponseUsageStamp.heat:type_name -> frontend.v1.TokenHeat
 	95,  // 128: frontend.v1.FeedSimpleToolCall.name:type_name -> frontend.v1.FeedToolCallName
 	96,  // 129: frontend.v1.FeedSimpleToolCall.input:type_name -> frontend.v1.FeedToolCallInput
 	102, // 130: frontend.v1.FeedSimpleToolCall.running:type_name -> frontend.v1.FeedToolCallRunning
@@ -28413,10 +28625,10 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	143, // 200: frontend.v1.FeedTurnEndedErrored.model_not_found:type_name -> frontend.v1.FeedTurnErrorModelNotFound
 	144, // 201: frontend.v1.FeedTurnEndedErrored.oauth_org_not_allowed:type_name -> frontend.v1.FeedTurnErrorOauthOrgNotAllowed
 	145, // 202: frontend.v1.FeedTurnEndedErrored.max_output_tokens:type_name -> frontend.v1.FeedTurnErrorMaxOutputTokens
-	420, // 203: frontend.v1.FeedTurnEndedErrored.max_turns:type_name -> frontend.v1.FailureVendorMaxTurns
-	421, // 204: frontend.v1.FeedTurnEndedErrored.max_budget:type_name -> frontend.v1.FailureVendorMaxBudget
-	422, // 205: frontend.v1.FeedTurnEndedErrored.execution_error:type_name -> frontend.v1.FailureVendorExecutionError
-	423, // 206: frontend.v1.FeedTurnEndedErrored.turn_failed:type_name -> frontend.v1.FailureVendorTurnFailed
+	423, // 203: frontend.v1.FeedTurnEndedErrored.max_turns:type_name -> frontend.v1.FailureVendorMaxTurns
+	424, // 204: frontend.v1.FeedTurnEndedErrored.max_budget:type_name -> frontend.v1.FailureVendorMaxBudget
+	425, // 205: frontend.v1.FeedTurnEndedErrored.execution_error:type_name -> frontend.v1.FailureVendorExecutionError
+	426, // 206: frontend.v1.FeedTurnEndedErrored.turn_failed:type_name -> frontend.v1.FailureVendorTurnFailed
 	141, // 207: frontend.v1.FeedTurnEndedErrored.stop_hook_prevented:type_name -> frontend.v1.FeedTurnErrorStopHookPrevented
 	140, // 208: frontend.v1.FeedTurnEndedErrored.agent_process_died:type_name -> frontend.v1.FeedTurnErrorAgentProcessDied
 	156, // 209: frontend.v1.FeedTurnEndedErrored.unreachable:type_name -> frontend.v1.FeedTurnErrorUnreachable
@@ -28447,7 +28659,7 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	184, // 234: frontend.v1.FeedOutcomeAgentReplFaultExpansion.what_died:type_name -> frontend.v1.FeedOutcomeWhatDied
 	189, // 235: frontend.v1.FeedOutcomeAgentReplFaultExpansion.restarted:type_name -> frontend.v1.FeedOutcomeRestarted
 	183, // 236: frontend.v1.FeedOutcomeAgentReplFaultExpansion.resend:type_name -> frontend.v1.FeedOutcomeResend
-	424, // 237: frontend.v1.FeedOutcomeResend.said:type_name -> conversation.v1.UserSaid
+	427, // 237: frontend.v1.FeedOutcomeResend.said:type_name -> conversation.v1.UserSaid
 	185, // 238: frontend.v1.FeedOutcomeWhatDied.query:type_name -> frontend.v1.FeedOutcomeQueryDied
 	186, // 239: frontend.v1.FeedOutcomeWhatDied.process:type_name -> frontend.v1.FeedOutcomeProcessDied
 	187, // 240: frontend.v1.FeedOutcomeQueryDied.line:type_name -> frontend.v1.FeedOutcomeDeathLine
@@ -28534,199 +28746,203 @@ var file_frontend_v1_feed_proto_depIdxs = []int32{
 	266, // 321: frontend.v1.FeedUserPromptBlock.image:type_name -> frontend.v1.FeedImageBlock
 	267, // 322: frontend.v1.FeedUserPromptBlock.unsupported:type_name -> frontend.v1.FeedUnsupportedBlock
 	268, // 323: frontend.v1.FeedUserPromptBlock.quote:type_name -> frontend.v1.FeedQuoteBlock
-	412, // 324: frontend.v1.FeedTextBlock.prose:type_name -> frontend.v1.ParsedProse
-	274, // 325: frontend.v1.FeedAgentPrompt.address:type_name -> frontend.v1.FeedAgentPromptAddress
-	289, // 326: frontend.v1.FeedAgentPrompt.body:type_name -> frontend.v1.FeedAgentPromptBody
-	270, // 327: frontend.v1.FeedAgentPrompt.queued_to_live:type_name -> frontend.v1.FeedAgentPromptQueuedToLive
-	271, // 328: frontend.v1.FeedAgentPrompt.resumed_recipient:type_name -> frontend.v1.FeedAgentPromptResumedRecipient
-	272, // 329: frontend.v1.FeedAgentPrompt.refused:type_name -> frontend.v1.FeedAgentPromptRefused
-	273, // 330: frontend.v1.FeedAgentPromptRefused.reason:type_name -> frontend.v1.FeedAgentPromptRefusalReason
-	275, // 331: frontend.v1.FeedAgentPromptAddress.name:type_name -> frontend.v1.FeedAgentPromptAddressName
-	276, // 332: frontend.v1.FeedAgentPromptAddress.sent:type_name -> frontend.v1.FeedAgentPromptAddressSent
-	277, // 333: frontend.v1.FeedAgentPromptAddress.received:type_name -> frontend.v1.FeedAgentPromptAddressReceived
-	281, // 334: frontend.v1.FeedAgentPromptAddressSent.agent:type_name -> frontend.v1.FeedAgentPromptAddressAgent
-	285, // 335: frontend.v1.FeedAgentPromptAddressSent.peer_session:type_name -> frontend.v1.FeedAgentPromptAddressPeerSession
-	288, // 336: frontend.v1.FeedAgentPromptAddressSent.unclassified:type_name -> frontend.v1.FeedAgentPromptAddressUnclassified
-	281, // 337: frontend.v1.FeedAgentPromptAddressReceived.agent:type_name -> frontend.v1.FeedAgentPromptAddressAgent
-	278, // 338: frontend.v1.FeedAgentPromptAddressReceived.workspace:type_name -> frontend.v1.FeedAgentPromptAddressWorkspace
-	279, // 339: frontend.v1.FeedAgentPromptAddressWorkspace.named:type_name -> frontend.v1.FeedAgentPromptAddressWorkspaceNamed
-	280, // 340: frontend.v1.FeedAgentPromptAddressWorkspace.unnamed:type_name -> frontend.v1.FeedAgentPromptAddressWorkspaceUnnamed
-	282, // 341: frontend.v1.FeedAgentPromptAddressAgent.main_agent:type_name -> frontend.v1.FeedAgentPromptAddressAgentMain
-	283, // 342: frontend.v1.FeedAgentPromptAddressAgent.named:type_name -> frontend.v1.FeedAgentPromptAddressAgentNamed
-	284, // 343: frontend.v1.FeedAgentPromptAddressAgent.identified:type_name -> frontend.v1.FeedAgentPromptAddressAgentIdentified
-	286, // 344: frontend.v1.FeedAgentPromptAddressPeerSession.workspace:type_name -> frontend.v1.FeedAgentPromptAddressPeerSessionWorkspace
-	287, // 345: frontend.v1.FeedAgentPromptAddressPeerSession.unresolved:type_name -> frontend.v1.FeedAgentPromptAddressPeerSessionUnresolved
-	290, // 346: frontend.v1.FeedAgentPromptBody.blocks:type_name -> frontend.v1.FeedAgentPromptBlock
-	265, // 347: frontend.v1.FeedAgentPromptBlock.text:type_name -> frontend.v1.FeedTextBlock
-	266, // 348: frontend.v1.FeedAgentPromptBlock.image:type_name -> frontend.v1.FeedImageBlock
-	267, // 349: frontend.v1.FeedAgentPromptBlock.unsupported:type_name -> frontend.v1.FeedUnsupportedBlock
-	268, // 350: frontend.v1.FeedAgentPromptBlock.quote:type_name -> frontend.v1.FeedQuoteBlock
-	292, // 351: frontend.v1.FeedColdGate.standing:type_name -> frontend.v1.FeedColdGateStanding
-	299, // 352: frontend.v1.FeedColdGate.resolved:type_name -> frontend.v1.FeedColdGateResolved
-	294, // 353: frontend.v1.FeedColdGateStanding.context_tokens:type_name -> frontend.v1.FeedColdGateContextTokens
-	295, // 354: frontend.v1.FeedColdGateStanding.last_request:type_name -> frontend.v1.FeedColdGateLastRequest
-	296, // 355: frontend.v1.FeedColdGateStanding.model:type_name -> frontend.v1.FeedColdGateModel
-	297, // 356: frontend.v1.FeedColdGateStanding.compact:type_name -> frontend.v1.FeedColdGateCompactMenu
-	293, // 357: frontend.v1.FeedColdGateStanding.compact_and_resume:type_name -> frontend.v1.FeedColdGateCompactAndResume
-	425, // 358: frontend.v1.FeedColdGateModel.model:type_name -> conversation.v1.AgentModel
-	298, // 359: frontend.v1.FeedColdGateCompactMenu.models:type_name -> frontend.v1.FeedColdGateModelOption
-	426, // 360: frontend.v1.FeedColdGateCompactMenu.scopes:type_name -> conversation.v1.SessionCompactScope
-	425, // 361: frontend.v1.FeedColdGateModelOption.model:type_name -> conversation.v1.AgentModel
-	300, // 362: frontend.v1.FeedColdGateResolved.pay:type_name -> frontend.v1.FeedColdGateResolvedPay
-	301, // 363: frontend.v1.FeedColdGateResolved.clear:type_name -> frontend.v1.FeedColdGateResolvedClear
-	302, // 364: frontend.v1.FeedColdGateResolved.compact:type_name -> frontend.v1.FeedColdGateResolvedCompact
-	296, // 365: frontend.v1.FeedColdGateResolvedCompact.model:type_name -> frontend.v1.FeedColdGateModel
-	426, // 366: frontend.v1.FeedColdGateResolvedCompact.scope:type_name -> conversation.v1.SessionCompactScope
-	304, // 367: frontend.v1.FeedSessionSeparation.label:type_name -> frontend.v1.FeedSessionSeparationLabel
-	306, // 368: frontend.v1.FeedSessionSeparation.cleared:type_name -> frontend.v1.FeedContextCutCleared
-	307, // 369: frontend.v1.FeedSessionSeparation.compacted:type_name -> frontend.v1.FeedContextCutCompacted
-	310, // 370: frontend.v1.FeedSessionSeparation.worktree_entered:type_name -> frontend.v1.FeedWorktreeEntered
-	311, // 371: frontend.v1.FeedSessionSeparation.worktree_left:type_name -> frontend.v1.FeedWorktreeLeft
-	344, // 372: frontend.v1.FeedSessionSeparation.compaction_failed:type_name -> frontend.v1.FeedContextCutCompactionFailed
-	305, // 373: frontend.v1.FeedSessionSeparation.tokens:type_name -> frontend.v1.FeedContextCutTokens
-	309, // 374: frontend.v1.FeedContextCutCompacted.summary:type_name -> frontend.v1.FeedContextCutSummary
-	308, // 375: frontend.v1.FeedContextCutCompacted.cold_read:type_name -> frontend.v1.FeedContextCutColdRead
-	427, // 376: frontend.v1.FeedContextCutColdRead.evidence:type_name -> frontend.v1.FailureCompactionColdRead
-	412, // 377: frontend.v1.FeedContextCutSummary.prose:type_name -> frontend.v1.ParsedProse
-	315, // 378: frontend.v1.FeedWorktreeEntered.path:type_name -> frontend.v1.FeedWorktreePath
-	316, // 379: frontend.v1.FeedWorktreeEntered.branch:type_name -> frontend.v1.FeedWorktreeBranch
-	312, // 380: frontend.v1.FeedWorktreeLeft.kept:type_name -> frontend.v1.FeedWorktreeKept
-	313, // 381: frontend.v1.FeedWorktreeLeft.removed:type_name -> frontend.v1.FeedWorktreeRemoved
-	315, // 382: frontend.v1.FeedWorktreeKept.path:type_name -> frontend.v1.FeedWorktreePath
-	314, // 383: frontend.v1.FeedWorktreeRemoved.discarded:type_name -> frontend.v1.FeedWorktreeDiscarded
-	320, // 384: frontend.v1.FeedMerge.head:type_name -> frontend.v1.FeedMergeHead
-	335, // 385: frontend.v1.FeedMerge.update:type_name -> frontend.v1.FeedMergeUpdate
-	339, // 386: frontend.v1.FeedMerge.success:type_name -> frontend.v1.FeedMergeSuccess
-	341, // 387: frontend.v1.FeedMerge.error:type_name -> frontend.v1.FeedMergeError
-	318, // 388: frontend.v1.FeedMerge.queue_offer:type_name -> frontend.v1.FeedMergeQueueOffer
-	319, // 389: frontend.v1.FeedMergeQueueOffer.headline:type_name -> frontend.v1.FeedMergeQueueOfferHeadline
-	332, // 390: frontend.v1.FeedMergeHead.glyph:type_name -> frontend.v1.FeedMergeGlyph
-	333, // 391: frontend.v1.FeedMergeHead.label:type_name -> frontend.v1.FeedMergeLabel
-	334, // 392: frontend.v1.FeedMergeHead.runtime:type_name -> frontend.v1.FeedMergeRuntime
-	345, // 393: frontend.v1.FeedMergeHead.fold:type_name -> frontend.v1.FeedMergeFold
-	324, // 394: frontend.v1.FeedMergeHead.version:type_name -> frontend.v1.FeedMergeVersion
-	321, // 395: frontend.v1.FeedMergeHead.mode:type_name -> frontend.v1.FeedMergeMode
-	322, // 396: frontend.v1.FeedMergeMode.sync:type_name -> frontend.v1.FeedMergeModeSync
-	323, // 397: frontend.v1.FeedMergeMode.async:type_name -> frontend.v1.FeedMergeModeAsync
-	328, // 398: frontend.v1.FeedMergeModeAsync.workspace_switch:type_name -> frontend.v1.FeedMergeWorkspaceSwitch
-	325, // 399: frontend.v1.FeedMergeVersion.leading:type_name -> frontend.v1.FeedMergeVersionLeading
-	326, // 400: frontend.v1.FeedMergeVersion.incremented:type_name -> frontend.v1.FeedMergeVersionIncremented
-	327, // 401: frontend.v1.FeedMergeVersion.trailing:type_name -> frontend.v1.FeedMergeVersionTrailing
-	329, // 402: frontend.v1.FeedMergeWorkspaceSwitch.label:type_name -> frontend.v1.FeedMergeWorkspaceSwitchLabel
-	330, // 403: frontend.v1.FeedMergeWorkspaceSwitch.available:type_name -> frontend.v1.FeedMergeWorkspaceSwitchAvailable
-	331, // 404: frontend.v1.FeedMergeWorkspaceSwitch.removed:type_name -> frontend.v1.FeedMergeWorkspaceSwitchRemoved
-	428, // 405: frontend.v1.FeedMergeWorkspaceSwitchAvailable.target:type_name -> workspace.v1.WorkspaceRef
-	337, // 406: frontend.v1.FeedMergeUpdate.waiting:type_name -> frontend.v1.FeedMergeUpdateWaiting
-	338, // 407: frontend.v1.FeedMergeUpdate.merging:type_name -> frontend.v1.FeedMergeUpdateMerging
-	336, // 408: frontend.v1.FeedMergeUpdate.paused:type_name -> frontend.v1.FeedMergeUpdatePaused
-	340, // 409: frontend.v1.FeedMergeSuccess.landed_on:type_name -> frontend.v1.FeedMergeLandedOn
-	342, // 410: frontend.v1.FeedMergeError.failed:type_name -> frontend.v1.FeedMergeFailed
-	343, // 411: frontend.v1.FeedMergeError.abandoned:type_name -> frontend.v1.FeedMergeAbandoned
-	166, // 412: frontend.v1.FeedContextCutCompactionFailed.marker:type_name -> frontend.v1.FeedOutcomeMarker
-	346, // 413: frontend.v1.FeedMergeFold.daemon:type_name -> frontend.v1.FeedMergeFoldByDaemon
-	347, // 414: frontend.v1.FeedMergeFold.reader:type_name -> frontend.v1.FeedMergeFoldByReader
-	349, // 415: frontend.v1.FeedMergeTab.label:type_name -> frontend.v1.FeedMergeTabLabel
-	355, // 416: frontend.v1.FeedMergeTab.queue:type_name -> frontend.v1.FeedMergeTabQueue
-	357, // 417: frontend.v1.FeedMergeTab.rebasing:type_name -> frontend.v1.FeedMergeTabRebasing
-	362, // 418: frontend.v1.FeedMergeTab.rebase_commit:type_name -> frontend.v1.FeedMergeTabRebaseCommit
-	367, // 419: frontend.v1.FeedMergeTab.tests:type_name -> frontend.v1.FeedMergeTabTests
-	368, // 420: frontend.v1.FeedMergeTab.tests_run:type_name -> frontend.v1.FeedMergeTabTestsRun
-	372, // 421: frontend.v1.FeedMergeTab.tests_run_fixing:type_name -> frontend.v1.FeedMergeTabTestsRunFixing
-	388, // 422: frontend.v1.FeedMergeTab.committing:type_name -> frontend.v1.FeedMergeTabCommitting
-	356, // 423: frontend.v1.FeedMergeTab.resolving:type_name -> frontend.v1.FeedMergeTabResolving
-	390, // 424: frontend.v1.FeedMergeTab.updating_main:type_name -> frontend.v1.FeedMergeTabUpdatingMain
-	394, // 425: frontend.v1.FeedMergeTab.hook_prompt:type_name -> frontend.v1.FeedMergeTabHookPrompt
-	395, // 426: frontend.v1.FeedMergeTab.hook_script:type_name -> frontend.v1.FeedMergeTabHookScript
-	364, // 427: frontend.v1.FeedMergeTabLabel.commit:type_name -> frontend.v1.FeedMergeRebaseCommitIdentity
-	352, // 428: frontend.v1.FeedMergeTabSettled.succeeded:type_name -> frontend.v1.FeedMergeTabSucceeded
-	354, // 429: frontend.v1.FeedMergeTabSettled.failed:type_name -> frontend.v1.FeedMergeTabFailed
-	350, // 430: frontend.v1.FeedMergeTabQueue.live:type_name -> frontend.v1.FeedMergeTabLive
-	351, // 431: frontend.v1.FeedMergeTabQueue.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	402, // 432: frontend.v1.FeedMergeTabQueue.queue:type_name -> frontend.v1.FeedMergeQueue
-	350, // 433: frontend.v1.FeedMergeTabResolving.live:type_name -> frontend.v1.FeedMergeTabLive
-	351, // 434: frontend.v1.FeedMergeTabResolving.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	353, // 435: frontend.v1.FeedMergeTabResolving.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
-	350, // 436: frontend.v1.FeedMergeTabRebasing.live:type_name -> frontend.v1.FeedMergeTabLive
-	351, // 437: frontend.v1.FeedMergeTabRebasing.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	353, // 438: frontend.v1.FeedMergeTabRebasing.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
-	358, // 439: frontend.v1.FeedMergeTabRebasing.progress:type_name -> frontend.v1.FeedMergeRebaseProgress
-	359, // 440: frontend.v1.FeedMergeTabRebasing.lines:type_name -> frontend.v1.FeedMergeRebaseLine
-	360, // 441: frontend.v1.FeedMergeRebaseLine.replaying:type_name -> frontend.v1.FeedMergeRebaseReplaying
-	361, // 442: frontend.v1.FeedMergeRebaseReplaying.target:type_name -> frontend.v1.FeedMergeRebaseTarget
-	428, // 443: frontend.v1.FeedMergeRebaseTarget.workspace:type_name -> workspace.v1.WorkspaceRef
-	363, // 444: frontend.v1.FeedMergeTabRebaseCommit.pending:type_name -> frontend.v1.FeedMergeRebaseCommitPending
-	350, // 445: frontend.v1.FeedMergeTabRebaseCommit.live:type_name -> frontend.v1.FeedMergeTabLive
-	353, // 446: frontend.v1.FeedMergeTabRebaseCommit.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
-	351, // 447: frontend.v1.FeedMergeTabRebaseCommit.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	359, // 448: frontend.v1.FeedMergeTabRebaseCommit.lines:type_name -> frontend.v1.FeedMergeRebaseLine
-	365, // 449: frontend.v1.FeedMergeTabRebaseCommit.conflict:type_name -> frontend.v1.FeedMergeRebaseCommitConflict
-	350, // 450: frontend.v1.FeedMergeRebaseCommitConflict.live:type_name -> frontend.v1.FeedMergeTabLive
-	353, // 451: frontend.v1.FeedMergeRebaseCommitConflict.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
-	351, // 452: frontend.v1.FeedMergeRebaseCommitConflict.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	366, // 453: frontend.v1.FeedMergeRebaseCommitConflict.files:type_name -> frontend.v1.FeedMergeConflictFile
-	350, // 454: frontend.v1.FeedMergeTabTests.live:type_name -> frontend.v1.FeedMergeTabLive
-	351, // 455: frontend.v1.FeedMergeTabTests.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	353, // 456: frontend.v1.FeedMergeTabTests.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
-	350, // 457: frontend.v1.FeedMergeTabTestsRun.live:type_name -> frontend.v1.FeedMergeTabLive
-	351, // 458: frontend.v1.FeedMergeTabTestsRun.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	369, // 459: frontend.v1.FeedMergeTabTestsRun.waiting_for_turn:type_name -> frontend.v1.FeedMergeTabTestsRunWaitingForTurn
-	371, // 460: frontend.v1.FeedMergeTabTestsRun.output:type_name -> frontend.v1.FeedMergeTestsRunOutput
-	370, // 461: frontend.v1.FeedMergeTabTestsRunWaitingForTurn.holder:type_name -> frontend.v1.FeedMergeTestTurnHolder
-	376, // 462: frontend.v1.FeedMergeTestsRunOutput.suites:type_name -> frontend.v1.FeedMergeTestSuite
-	373, // 463: frontend.v1.FeedMergeTestsRunOutput.log:type_name -> frontend.v1.FeedMergeTestLog
-	350, // 464: frontend.v1.FeedMergeTabTestsRunFixing.live:type_name -> frontend.v1.FeedMergeTabLive
-	351, // 465: frontend.v1.FeedMergeTabTestsRunFixing.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	353, // 466: frontend.v1.FeedMergeTabTestsRunFixing.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
-	387, // 467: frontend.v1.FeedMergeTabTestsRunFixing.attempt:type_name -> frontend.v1.FeedMergeFixAttempt
-	374, // 468: frontend.v1.FeedMergeTestLog.token:type_name -> frontend.v1.FeedMergeTestLogToken
-	375, // 469: frontend.v1.FeedMergeTestLog.label:type_name -> frontend.v1.FeedMergeTestLogLabel
-	378, // 470: frontend.v1.FeedMergeTestSuite.running:type_name -> frontend.v1.FeedMergeTestSuiteRunning
-	382, // 471: frontend.v1.FeedMergeTestSuite.passed:type_name -> frontend.v1.FeedMergeTestSuitePassed
-	383, // 472: frontend.v1.FeedMergeTestSuite.failed:type_name -> frontend.v1.FeedMergeTestSuiteFailed
-	384, // 473: frontend.v1.FeedMergeTestSuite.reused:type_name -> frontend.v1.FeedMergeTestSuiteReused
-	386, // 474: frontend.v1.FeedMergeTestSuite.output:type_name -> frontend.v1.FeedMergeTestSpan
-	377, // 475: frontend.v1.FeedMergeTestSuite.counts:type_name -> frontend.v1.FeedMergeTestCounts
-	379, // 476: frontend.v1.FeedMergeTestSuiteRunning.unreported:type_name -> frontend.v1.FeedMergeTestSuiteRunningUnreported
-	380, // 477: frontend.v1.FeedMergeTestSuiteRunning.passing:type_name -> frontend.v1.FeedMergeTestSuiteRunningPassing
-	381, // 478: frontend.v1.FeedMergeTestSuiteRunning.failing:type_name -> frontend.v1.FeedMergeTestSuiteRunningFailing
-	385, // 479: frontend.v1.FeedMergeTestSuiteReused.source:type_name -> frontend.v1.FeedMergeTestSuiteReusedSource
-	350, // 480: frontend.v1.FeedMergeTabCommitting.live:type_name -> frontend.v1.FeedMergeTabLive
-	351, // 481: frontend.v1.FeedMergeTabCommitting.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	389, // 482: frontend.v1.FeedMergeTabCommitting.subject:type_name -> frontend.v1.FeedMergeCommitSubject
-	350, // 483: frontend.v1.FeedMergeTabUpdatingMain.live:type_name -> frontend.v1.FeedMergeTabLive
-	351, // 484: frontend.v1.FeedMergeTabUpdatingMain.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	391, // 485: frontend.v1.FeedMergeTabUpdatingMain.step:type_name -> frontend.v1.FeedMergeUpdatingMainStep
-	392, // 486: frontend.v1.FeedMergeUpdatingMainStep.fetching:type_name -> frontend.v1.FeedMergeUpdatingMainFetching
-	393, // 487: frontend.v1.FeedMergeUpdatingMainStep.fast_forwarding:type_name -> frontend.v1.FeedMergeUpdatingMainFastForwarding
-	350, // 488: frontend.v1.FeedMergeTabHookPrompt.live:type_name -> frontend.v1.FeedMergeTabLive
-	351, // 489: frontend.v1.FeedMergeTabHookPrompt.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	350, // 490: frontend.v1.FeedMergeTabHookScript.live:type_name -> frontend.v1.FeedMergeTabLive
-	351, // 491: frontend.v1.FeedMergeTabHookScript.settled:type_name -> frontend.v1.FeedMergeTabSettled
-	396, // 492: frontend.v1.FeedMergeTabHookScript.path:type_name -> frontend.v1.FeedMergeHookScriptPath
-	397, // 493: frontend.v1.FeedMergeTabHookScript.log:type_name -> frontend.v1.FeedMergeHookScriptLog
-	398, // 494: frontend.v1.FeedMergeTabHookScript.tail:type_name -> frontend.v1.FeedMergeHookScriptLine
-	399, // 495: frontend.v1.FeedMergeTabHookScript.exit:type_name -> frontend.v1.FeedMergeHookScriptExit
-	400, // 496: frontend.v1.FeedMergeHookScriptExit.exited:type_name -> frontend.v1.FeedMergeHookScriptExited
-	401, // 497: frontend.v1.FeedMergeHookScriptExit.timed_out:type_name -> frontend.v1.FeedMergeHookScriptTimedOut
-	404, // 498: frontend.v1.FeedMergeQueue.ahead:type_name -> frontend.v1.FeedMergeQueueEntry
-	404, // 499: frontend.v1.FeedMergeQueue.current:type_name -> frontend.v1.FeedMergeQueueEntry
-	404, // 500: frontend.v1.FeedMergeQueue.behind:type_name -> frontend.v1.FeedMergeQueueEntry
-	403, // 501: frontend.v1.FeedMergeQueue.paused:type_name -> frontend.v1.FeedMergeQueuePaused
-	407, // 502: frontend.v1.FeedMergeQueueEntry.workspace:type_name -> frontend.v1.FeedMergeQueueWorkspace
-	408, // 503: frontend.v1.FeedMergeQueueEntry.label:type_name -> frontend.v1.FeedMergeQueueLabel
-	409, // 504: frontend.v1.FeedMergeQueueEntry.merging:type_name -> frontend.v1.FeedMergeQueueMerging
-	410, // 505: frontend.v1.FeedMergeQueueEntry.waiting:type_name -> frontend.v1.FeedMergeQueueWaiting
-	406, // 506: frontend.v1.FeedMergeQueueEntry.bubble:type_name -> frontend.v1.FeedMergeQueueBubble
-	405, // 507: frontend.v1.FeedMergeQueueEntry.target:type_name -> frontend.v1.FeedMergeQueueTarget
-	428, // 508: frontend.v1.FeedMergeQueueBubble.requester:type_name -> workspace.v1.WorkspaceRef
-	0,   // 509: frontend.v1.FeedMergeQueueBubble.row:type_name -> frontend.v1.FeedId
-	428, // 510: frontend.v1.FeedMergeQueueWorkspace.ref:type_name -> workspace.v1.WorkspaceRef
-	349, // 511: frontend.v1.FeedMergeQueueMerging.active_tab:type_name -> frontend.v1.FeedMergeTabLabel
-	512, // [512:512] is the sub-list for method output_type
-	512, // [512:512] is the sub-list for method input_type
-	512, // [512:512] is the sub-list for extension type_name
-	512, // [512:512] is the sub-list for extension extendee
-	0,   // [0:512] is the sub-list for field type_name
+	415, // 324: frontend.v1.FeedTextBlock.prose:type_name -> frontend.v1.ParsedProse
+	0,   // 325: frontend.v1.FeedQuoteBlock.quoted_row:type_name -> frontend.v1.FeedId
+	274, // 326: frontend.v1.FeedAgentPrompt.address:type_name -> frontend.v1.FeedAgentPromptAddress
+	289, // 327: frontend.v1.FeedAgentPrompt.body:type_name -> frontend.v1.FeedAgentPromptBody
+	270, // 328: frontend.v1.FeedAgentPrompt.queued_to_live:type_name -> frontend.v1.FeedAgentPromptQueuedToLive
+	271, // 329: frontend.v1.FeedAgentPrompt.resumed_recipient:type_name -> frontend.v1.FeedAgentPromptResumedRecipient
+	272, // 330: frontend.v1.FeedAgentPrompt.refused:type_name -> frontend.v1.FeedAgentPromptRefused
+	273, // 331: frontend.v1.FeedAgentPromptRefused.reason:type_name -> frontend.v1.FeedAgentPromptRefusalReason
+	275, // 332: frontend.v1.FeedAgentPromptAddress.name:type_name -> frontend.v1.FeedAgentPromptAddressName
+	276, // 333: frontend.v1.FeedAgentPromptAddress.sent:type_name -> frontend.v1.FeedAgentPromptAddressSent
+	277, // 334: frontend.v1.FeedAgentPromptAddress.received:type_name -> frontend.v1.FeedAgentPromptAddressReceived
+	281, // 335: frontend.v1.FeedAgentPromptAddressSent.agent:type_name -> frontend.v1.FeedAgentPromptAddressAgent
+	285, // 336: frontend.v1.FeedAgentPromptAddressSent.peer_session:type_name -> frontend.v1.FeedAgentPromptAddressPeerSession
+	288, // 337: frontend.v1.FeedAgentPromptAddressSent.unclassified:type_name -> frontend.v1.FeedAgentPromptAddressUnclassified
+	281, // 338: frontend.v1.FeedAgentPromptAddressReceived.agent:type_name -> frontend.v1.FeedAgentPromptAddressAgent
+	278, // 339: frontend.v1.FeedAgentPromptAddressReceived.workspace:type_name -> frontend.v1.FeedAgentPromptAddressWorkspace
+	279, // 340: frontend.v1.FeedAgentPromptAddressWorkspace.named:type_name -> frontend.v1.FeedAgentPromptAddressWorkspaceNamed
+	280, // 341: frontend.v1.FeedAgentPromptAddressWorkspace.unnamed:type_name -> frontend.v1.FeedAgentPromptAddressWorkspaceUnnamed
+	282, // 342: frontend.v1.FeedAgentPromptAddressAgent.main_agent:type_name -> frontend.v1.FeedAgentPromptAddressAgentMain
+	283, // 343: frontend.v1.FeedAgentPromptAddressAgent.named:type_name -> frontend.v1.FeedAgentPromptAddressAgentNamed
+	284, // 344: frontend.v1.FeedAgentPromptAddressAgent.identified:type_name -> frontend.v1.FeedAgentPromptAddressAgentIdentified
+	286, // 345: frontend.v1.FeedAgentPromptAddressPeerSession.workspace:type_name -> frontend.v1.FeedAgentPromptAddressPeerSessionWorkspace
+	287, // 346: frontend.v1.FeedAgentPromptAddressPeerSession.unresolved:type_name -> frontend.v1.FeedAgentPromptAddressPeerSessionUnresolved
+	290, // 347: frontend.v1.FeedAgentPromptBody.blocks:type_name -> frontend.v1.FeedAgentPromptBlock
+	265, // 348: frontend.v1.FeedAgentPromptBlock.text:type_name -> frontend.v1.FeedTextBlock
+	266, // 349: frontend.v1.FeedAgentPromptBlock.image:type_name -> frontend.v1.FeedImageBlock
+	267, // 350: frontend.v1.FeedAgentPromptBlock.unsupported:type_name -> frontend.v1.FeedUnsupportedBlock
+	268, // 351: frontend.v1.FeedAgentPromptBlock.quote:type_name -> frontend.v1.FeedQuoteBlock
+	292, // 352: frontend.v1.FeedColdGate.standing:type_name -> frontend.v1.FeedColdGateStanding
+	299, // 353: frontend.v1.FeedColdGate.resolved:type_name -> frontend.v1.FeedColdGateResolved
+	294, // 354: frontend.v1.FeedColdGateStanding.context_tokens:type_name -> frontend.v1.FeedColdGateContextTokens
+	295, // 355: frontend.v1.FeedColdGateStanding.last_request:type_name -> frontend.v1.FeedColdGateLastRequest
+	296, // 356: frontend.v1.FeedColdGateStanding.model:type_name -> frontend.v1.FeedColdGateModel
+	297, // 357: frontend.v1.FeedColdGateStanding.compact:type_name -> frontend.v1.FeedColdGateCompactMenu
+	293, // 358: frontend.v1.FeedColdGateStanding.compact_and_resume:type_name -> frontend.v1.FeedColdGateCompactAndResume
+	428, // 359: frontend.v1.FeedColdGateModel.model:type_name -> conversation.v1.AgentModel
+	298, // 360: frontend.v1.FeedColdGateCompactMenu.models:type_name -> frontend.v1.FeedColdGateModelOption
+	429, // 361: frontend.v1.FeedColdGateCompactMenu.scopes:type_name -> conversation.v1.SessionCompactScope
+	428, // 362: frontend.v1.FeedColdGateModelOption.model:type_name -> conversation.v1.AgentModel
+	300, // 363: frontend.v1.FeedColdGateResolved.pay:type_name -> frontend.v1.FeedColdGateResolvedPay
+	301, // 364: frontend.v1.FeedColdGateResolved.clear:type_name -> frontend.v1.FeedColdGateResolvedClear
+	302, // 365: frontend.v1.FeedColdGateResolved.compact:type_name -> frontend.v1.FeedColdGateResolvedCompact
+	296, // 366: frontend.v1.FeedColdGateResolvedCompact.model:type_name -> frontend.v1.FeedColdGateModel
+	429, // 367: frontend.v1.FeedColdGateResolvedCompact.scope:type_name -> conversation.v1.SessionCompactScope
+	304, // 368: frontend.v1.FeedSessionSeparation.label:type_name -> frontend.v1.FeedSessionSeparationLabel
+	306, // 369: frontend.v1.FeedSessionSeparation.cleared:type_name -> frontend.v1.FeedContextCutCleared
+	307, // 370: frontend.v1.FeedSessionSeparation.compacted:type_name -> frontend.v1.FeedContextCutCompacted
+	310, // 371: frontend.v1.FeedSessionSeparation.worktree_entered:type_name -> frontend.v1.FeedWorktreeEntered
+	311, // 372: frontend.v1.FeedSessionSeparation.worktree_left:type_name -> frontend.v1.FeedWorktreeLeft
+	344, // 373: frontend.v1.FeedSessionSeparation.compaction_failed:type_name -> frontend.v1.FeedContextCutCompactionFailed
+	305, // 374: frontend.v1.FeedSessionSeparation.tokens:type_name -> frontend.v1.FeedContextCutTokens
+	309, // 375: frontend.v1.FeedContextCutCompacted.summary:type_name -> frontend.v1.FeedContextCutSummary
+	308, // 376: frontend.v1.FeedContextCutCompacted.cold_read:type_name -> frontend.v1.FeedContextCutColdRead
+	430, // 377: frontend.v1.FeedContextCutColdRead.evidence:type_name -> frontend.v1.FailureCompactionColdRead
+	415, // 378: frontend.v1.FeedContextCutSummary.prose:type_name -> frontend.v1.ParsedProse
+	315, // 379: frontend.v1.FeedWorktreeEntered.path:type_name -> frontend.v1.FeedWorktreePath
+	316, // 380: frontend.v1.FeedWorktreeEntered.branch:type_name -> frontend.v1.FeedWorktreeBranch
+	312, // 381: frontend.v1.FeedWorktreeLeft.kept:type_name -> frontend.v1.FeedWorktreeKept
+	313, // 382: frontend.v1.FeedWorktreeLeft.removed:type_name -> frontend.v1.FeedWorktreeRemoved
+	315, // 383: frontend.v1.FeedWorktreeKept.path:type_name -> frontend.v1.FeedWorktreePath
+	314, // 384: frontend.v1.FeedWorktreeRemoved.discarded:type_name -> frontend.v1.FeedWorktreeDiscarded
+	320, // 385: frontend.v1.FeedMerge.head:type_name -> frontend.v1.FeedMergeHead
+	335, // 386: frontend.v1.FeedMerge.update:type_name -> frontend.v1.FeedMergeUpdate
+	339, // 387: frontend.v1.FeedMerge.success:type_name -> frontend.v1.FeedMergeSuccess
+	341, // 388: frontend.v1.FeedMerge.error:type_name -> frontend.v1.FeedMergeError
+	318, // 389: frontend.v1.FeedMerge.queue_offer:type_name -> frontend.v1.FeedMergeQueueOffer
+	319, // 390: frontend.v1.FeedMergeQueueOffer.headline:type_name -> frontend.v1.FeedMergeQueueOfferHeadline
+	332, // 391: frontend.v1.FeedMergeHead.glyph:type_name -> frontend.v1.FeedMergeGlyph
+	333, // 392: frontend.v1.FeedMergeHead.label:type_name -> frontend.v1.FeedMergeLabel
+	334, // 393: frontend.v1.FeedMergeHead.runtime:type_name -> frontend.v1.FeedMergeRuntime
+	345, // 394: frontend.v1.FeedMergeHead.fold:type_name -> frontend.v1.FeedMergeFold
+	324, // 395: frontend.v1.FeedMergeHead.version:type_name -> frontend.v1.FeedMergeVersion
+	321, // 396: frontend.v1.FeedMergeHead.mode:type_name -> frontend.v1.FeedMergeMode
+	322, // 397: frontend.v1.FeedMergeMode.sync:type_name -> frontend.v1.FeedMergeModeSync
+	323, // 398: frontend.v1.FeedMergeMode.async:type_name -> frontend.v1.FeedMergeModeAsync
+	328, // 399: frontend.v1.FeedMergeModeAsync.workspace_switch:type_name -> frontend.v1.FeedMergeWorkspaceSwitch
+	325, // 400: frontend.v1.FeedMergeVersion.leading:type_name -> frontend.v1.FeedMergeVersionLeading
+	326, // 401: frontend.v1.FeedMergeVersion.incremented:type_name -> frontend.v1.FeedMergeVersionIncremented
+	327, // 402: frontend.v1.FeedMergeVersion.trailing:type_name -> frontend.v1.FeedMergeVersionTrailing
+	329, // 403: frontend.v1.FeedMergeWorkspaceSwitch.label:type_name -> frontend.v1.FeedMergeWorkspaceSwitchLabel
+	330, // 404: frontend.v1.FeedMergeWorkspaceSwitch.available:type_name -> frontend.v1.FeedMergeWorkspaceSwitchAvailable
+	331, // 405: frontend.v1.FeedMergeWorkspaceSwitch.removed:type_name -> frontend.v1.FeedMergeWorkspaceSwitchRemoved
+	431, // 406: frontend.v1.FeedMergeWorkspaceSwitchAvailable.target:type_name -> workspace.v1.WorkspaceRef
+	337, // 407: frontend.v1.FeedMergeUpdate.waiting:type_name -> frontend.v1.FeedMergeUpdateWaiting
+	338, // 408: frontend.v1.FeedMergeUpdate.merging:type_name -> frontend.v1.FeedMergeUpdateMerging
+	336, // 409: frontend.v1.FeedMergeUpdate.paused:type_name -> frontend.v1.FeedMergeUpdatePaused
+	340, // 410: frontend.v1.FeedMergeSuccess.landed_on:type_name -> frontend.v1.FeedMergeLandedOn
+	342, // 411: frontend.v1.FeedMergeError.failed:type_name -> frontend.v1.FeedMergeFailed
+	343, // 412: frontend.v1.FeedMergeError.abandoned:type_name -> frontend.v1.FeedMergeAbandoned
+	166, // 413: frontend.v1.FeedContextCutCompactionFailed.marker:type_name -> frontend.v1.FeedOutcomeMarker
+	346, // 414: frontend.v1.FeedMergeFold.daemon:type_name -> frontend.v1.FeedMergeFoldByDaemon
+	347, // 415: frontend.v1.FeedMergeFold.reader:type_name -> frontend.v1.FeedMergeFoldByReader
+	349, // 416: frontend.v1.FeedMergeTab.label:type_name -> frontend.v1.FeedMergeTabLabel
+	355, // 417: frontend.v1.FeedMergeTab.queue:type_name -> frontend.v1.FeedMergeTabQueue
+	357, // 418: frontend.v1.FeedMergeTab.rebasing:type_name -> frontend.v1.FeedMergeTabRebasing
+	362, // 419: frontend.v1.FeedMergeTab.rebase_commit:type_name -> frontend.v1.FeedMergeTabRebaseCommit
+	367, // 420: frontend.v1.FeedMergeTab.tests:type_name -> frontend.v1.FeedMergeTabTests
+	368, // 421: frontend.v1.FeedMergeTab.tests_run:type_name -> frontend.v1.FeedMergeTabTestsRun
+	372, // 422: frontend.v1.FeedMergeTab.tests_run_fixing:type_name -> frontend.v1.FeedMergeTabTestsRunFixing
+	388, // 423: frontend.v1.FeedMergeTab.committing:type_name -> frontend.v1.FeedMergeTabCommitting
+	356, // 424: frontend.v1.FeedMergeTab.resolving:type_name -> frontend.v1.FeedMergeTabResolving
+	390, // 425: frontend.v1.FeedMergeTab.updating_main:type_name -> frontend.v1.FeedMergeTabUpdatingMain
+	394, // 426: frontend.v1.FeedMergeTab.hook_prompt:type_name -> frontend.v1.FeedMergeTabHookPrompt
+	395, // 427: frontend.v1.FeedMergeTab.hook_script:type_name -> frontend.v1.FeedMergeTabHookScript
+	364, // 428: frontend.v1.FeedMergeTabLabel.commit:type_name -> frontend.v1.FeedMergeRebaseCommitIdentity
+	352, // 429: frontend.v1.FeedMergeTabSettled.succeeded:type_name -> frontend.v1.FeedMergeTabSucceeded
+	354, // 430: frontend.v1.FeedMergeTabSettled.failed:type_name -> frontend.v1.FeedMergeTabFailed
+	350, // 431: frontend.v1.FeedMergeTabQueue.live:type_name -> frontend.v1.FeedMergeTabLive
+	351, // 432: frontend.v1.FeedMergeTabQueue.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	402, // 433: frontend.v1.FeedMergeTabQueue.queue:type_name -> frontend.v1.FeedMergeQueue
+	350, // 434: frontend.v1.FeedMergeTabResolving.live:type_name -> frontend.v1.FeedMergeTabLive
+	351, // 435: frontend.v1.FeedMergeTabResolving.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	353, // 436: frontend.v1.FeedMergeTabResolving.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	350, // 437: frontend.v1.FeedMergeTabRebasing.live:type_name -> frontend.v1.FeedMergeTabLive
+	351, // 438: frontend.v1.FeedMergeTabRebasing.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	353, // 439: frontend.v1.FeedMergeTabRebasing.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	358, // 440: frontend.v1.FeedMergeTabRebasing.progress:type_name -> frontend.v1.FeedMergeRebaseProgress
+	359, // 441: frontend.v1.FeedMergeTabRebasing.lines:type_name -> frontend.v1.FeedMergeRebaseLine
+	360, // 442: frontend.v1.FeedMergeRebaseLine.replaying:type_name -> frontend.v1.FeedMergeRebaseReplaying
+	361, // 443: frontend.v1.FeedMergeRebaseReplaying.target:type_name -> frontend.v1.FeedMergeRebaseTarget
+	431, // 444: frontend.v1.FeedMergeRebaseTarget.workspace:type_name -> workspace.v1.WorkspaceRef
+	363, // 445: frontend.v1.FeedMergeTabRebaseCommit.pending:type_name -> frontend.v1.FeedMergeRebaseCommitPending
+	350, // 446: frontend.v1.FeedMergeTabRebaseCommit.live:type_name -> frontend.v1.FeedMergeTabLive
+	353, // 447: frontend.v1.FeedMergeTabRebaseCommit.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	351, // 448: frontend.v1.FeedMergeTabRebaseCommit.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	359, // 449: frontend.v1.FeedMergeTabRebaseCommit.lines:type_name -> frontend.v1.FeedMergeRebaseLine
+	365, // 450: frontend.v1.FeedMergeTabRebaseCommit.conflict:type_name -> frontend.v1.FeedMergeRebaseCommitConflict
+	350, // 451: frontend.v1.FeedMergeRebaseCommitConflict.live:type_name -> frontend.v1.FeedMergeTabLive
+	353, // 452: frontend.v1.FeedMergeRebaseCommitConflict.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	351, // 453: frontend.v1.FeedMergeRebaseCommitConflict.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	366, // 454: frontend.v1.FeedMergeRebaseCommitConflict.files:type_name -> frontend.v1.FeedMergeConflictFile
+	350, // 455: frontend.v1.FeedMergeTabTests.live:type_name -> frontend.v1.FeedMergeTabLive
+	351, // 456: frontend.v1.FeedMergeTabTests.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	353, // 457: frontend.v1.FeedMergeTabTests.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	350, // 458: frontend.v1.FeedMergeTabTestsRun.live:type_name -> frontend.v1.FeedMergeTabLive
+	351, // 459: frontend.v1.FeedMergeTabTestsRun.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	369, // 460: frontend.v1.FeedMergeTabTestsRun.waiting_for_turn:type_name -> frontend.v1.FeedMergeTabTestsRunWaitingForTurn
+	371, // 461: frontend.v1.FeedMergeTabTestsRun.output:type_name -> frontend.v1.FeedMergeTestsRunOutput
+	370, // 462: frontend.v1.FeedMergeTabTestsRunWaitingForTurn.holder:type_name -> frontend.v1.FeedMergeTestTurnHolder
+	376, // 463: frontend.v1.FeedMergeTestsRunOutput.suites:type_name -> frontend.v1.FeedMergeTestSuite
+	373, // 464: frontend.v1.FeedMergeTestsRunOutput.log:type_name -> frontend.v1.FeedMergeTestLog
+	350, // 465: frontend.v1.FeedMergeTabTestsRunFixing.live:type_name -> frontend.v1.FeedMergeTabLive
+	351, // 466: frontend.v1.FeedMergeTabTestsRunFixing.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	353, // 467: frontend.v1.FeedMergeTabTestsRunFixing.waiting_on_user:type_name -> frontend.v1.FeedMergeTabWaitingOnUser
+	387, // 468: frontend.v1.FeedMergeTabTestsRunFixing.attempt:type_name -> frontend.v1.FeedMergeFixAttempt
+	374, // 469: frontend.v1.FeedMergeTestLog.token:type_name -> frontend.v1.FeedMergeTestLogToken
+	375, // 470: frontend.v1.FeedMergeTestLog.label:type_name -> frontend.v1.FeedMergeTestLogLabel
+	378, // 471: frontend.v1.FeedMergeTestSuite.running:type_name -> frontend.v1.FeedMergeTestSuiteRunning
+	382, // 472: frontend.v1.FeedMergeTestSuite.passed:type_name -> frontend.v1.FeedMergeTestSuitePassed
+	383, // 473: frontend.v1.FeedMergeTestSuite.failed:type_name -> frontend.v1.FeedMergeTestSuiteFailed
+	384, // 474: frontend.v1.FeedMergeTestSuite.reused:type_name -> frontend.v1.FeedMergeTestSuiteReused
+	386, // 475: frontend.v1.FeedMergeTestSuite.output:type_name -> frontend.v1.FeedMergeTestSpan
+	377, // 476: frontend.v1.FeedMergeTestSuite.counts:type_name -> frontend.v1.FeedMergeTestCounts
+	379, // 477: frontend.v1.FeedMergeTestSuiteRunning.unreported:type_name -> frontend.v1.FeedMergeTestSuiteRunningUnreported
+	380, // 478: frontend.v1.FeedMergeTestSuiteRunning.passing:type_name -> frontend.v1.FeedMergeTestSuiteRunningPassing
+	381, // 479: frontend.v1.FeedMergeTestSuiteRunning.failing:type_name -> frontend.v1.FeedMergeTestSuiteRunningFailing
+	385, // 480: frontend.v1.FeedMergeTestSuiteReused.source:type_name -> frontend.v1.FeedMergeTestSuiteReusedSource
+	350, // 481: frontend.v1.FeedMergeTabCommitting.live:type_name -> frontend.v1.FeedMergeTabLive
+	351, // 482: frontend.v1.FeedMergeTabCommitting.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	389, // 483: frontend.v1.FeedMergeTabCommitting.subject:type_name -> frontend.v1.FeedMergeCommitSubject
+	350, // 484: frontend.v1.FeedMergeTabUpdatingMain.live:type_name -> frontend.v1.FeedMergeTabLive
+	351, // 485: frontend.v1.FeedMergeTabUpdatingMain.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	391, // 486: frontend.v1.FeedMergeTabUpdatingMain.step:type_name -> frontend.v1.FeedMergeUpdatingMainStep
+	392, // 487: frontend.v1.FeedMergeUpdatingMainStep.fetching:type_name -> frontend.v1.FeedMergeUpdatingMainFetching
+	393, // 488: frontend.v1.FeedMergeUpdatingMainStep.fast_forwarding:type_name -> frontend.v1.FeedMergeUpdatingMainFastForwarding
+	350, // 489: frontend.v1.FeedMergeTabHookPrompt.live:type_name -> frontend.v1.FeedMergeTabLive
+	351, // 490: frontend.v1.FeedMergeTabHookPrompt.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	350, // 491: frontend.v1.FeedMergeTabHookScript.live:type_name -> frontend.v1.FeedMergeTabLive
+	351, // 492: frontend.v1.FeedMergeTabHookScript.settled:type_name -> frontend.v1.FeedMergeTabSettled
+	396, // 493: frontend.v1.FeedMergeTabHookScript.path:type_name -> frontend.v1.FeedMergeHookScriptPath
+	397, // 494: frontend.v1.FeedMergeTabHookScript.log:type_name -> frontend.v1.FeedMergeHookScriptLog
+	398, // 495: frontend.v1.FeedMergeTabHookScript.tail:type_name -> frontend.v1.FeedMergeHookScriptLine
+	399, // 496: frontend.v1.FeedMergeTabHookScript.exit:type_name -> frontend.v1.FeedMergeHookScriptExit
+	400, // 497: frontend.v1.FeedMergeHookScriptExit.exited:type_name -> frontend.v1.FeedMergeHookScriptExited
+	401, // 498: frontend.v1.FeedMergeHookScriptExit.timed_out:type_name -> frontend.v1.FeedMergeHookScriptTimedOut
+	404, // 499: frontend.v1.FeedMergeQueue.ahead:type_name -> frontend.v1.FeedMergeQueueEntry
+	404, // 500: frontend.v1.FeedMergeQueue.current:type_name -> frontend.v1.FeedMergeQueueEntry
+	404, // 501: frontend.v1.FeedMergeQueue.behind:type_name -> frontend.v1.FeedMergeQueueEntry
+	403, // 502: frontend.v1.FeedMergeQueue.paused:type_name -> frontend.v1.FeedMergeQueuePaused
+	407, // 503: frontend.v1.FeedMergeQueueEntry.workspace:type_name -> frontend.v1.FeedMergeQueueWorkspace
+	408, // 504: frontend.v1.FeedMergeQueueEntry.label:type_name -> frontend.v1.FeedMergeQueueLabel
+	409, // 505: frontend.v1.FeedMergeQueueEntry.merging:type_name -> frontend.v1.FeedMergeQueueMerging
+	410, // 506: frontend.v1.FeedMergeQueueEntry.waiting:type_name -> frontend.v1.FeedMergeQueueWaiting
+	406, // 507: frontend.v1.FeedMergeQueueEntry.bubble:type_name -> frontend.v1.FeedMergeQueueBubble
+	405, // 508: frontend.v1.FeedMergeQueueEntry.target:type_name -> frontend.v1.FeedMergeQueueTarget
+	431, // 509: frontend.v1.FeedMergeQueueBubble.requester:type_name -> workspace.v1.WorkspaceRef
+	0,   // 510: frontend.v1.FeedMergeQueueBubble.row:type_name -> frontend.v1.FeedId
+	431, // 511: frontend.v1.FeedMergeQueueWorkspace.ref:type_name -> workspace.v1.WorkspaceRef
+	349, // 512: frontend.v1.FeedMergeQueueMerging.active_tab:type_name -> frontend.v1.FeedMergeTabLabel
+	412, // 513: frontend.v1.FeedComposerEntry.none:type_name -> frontend.v1.FeedComposerEntryNone
+	413, // 514: frontend.v1.FeedComposerEntry.node:type_name -> frontend.v1.FeedComposerEntryNode
+	0,   // 515: frontend.v1.FeedComposerEntryNode.row:type_name -> frontend.v1.FeedId
+	516, // [516:516] is the sub-list for method output_type
+	516, // [516:516] is the sub-list for method input_type
+	516, // [516:516] is the sub-list for extension type_name
+	516, // [516:516] is the sub-list for extension extendee
+	0,   // [0:516] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_feed_proto_init() }
@@ -29030,6 +29246,7 @@ func file_frontend_v1_feed_proto_init() {
 		(*FeedUserPromptBlock_Unsupported)(nil),
 		(*FeedUserPromptBlock_Quote)(nil),
 	}
+	file_frontend_v1_feed_proto_msgTypes[268].OneofWrappers = []any{}
 	file_frontend_v1_feed_proto_msgTypes[269].OneofWrappers = []any{
 		(*FeedAgentPrompt_QueuedToLive)(nil),
 		(*FeedAgentPrompt_ResumedRecipient)(nil),
@@ -29228,13 +29445,17 @@ func file_frontend_v1_feed_proto_init() {
 		(*FeedMergeQueueEntry_Merging)(nil),
 		(*FeedMergeQueueEntry_Waiting)(nil),
 	}
+	file_frontend_v1_feed_proto_msgTypes[411].OneofWrappers = []any{
+		(*FeedComposerEntry_None)(nil),
+		(*FeedComposerEntry_Node)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_feed_proto_rawDesc), len(file_frontend_v1_feed_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   411,
+			NumMessages:   414,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

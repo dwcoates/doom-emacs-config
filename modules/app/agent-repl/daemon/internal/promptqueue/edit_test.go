@@ -382,7 +382,7 @@ func quotedHeldPrompt(t *testing.T, h *harness, turn, words string) *conversatio
 	t.Helper()
 	running(t, h, "running-turn", "the running work")
 	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
-	said := replyquote.Quote(userSaid(words), "Paris.", false)
+	said := replyquote.Quote(userSaid(words), "Paris.", false, "")
 	sub := submission(idsTurn(turn), words)
 	sub.Said = said
 	if _, err := h.q.Submit(context.Background(), sub); err != nil {
@@ -416,7 +416,7 @@ func TestCommitEditCarryingAQuoteIsRefusedAndTheEditStands(t *testing.T) {
 	beginEdit(t, h, "t1")
 	// Act
 	err := h.q.CommitEdit(context.Background(), theWorkspace, "t1",
-		replyquote.Quote(userSaid("the edited words"), "forged", false))
+		replyquote.Quote(userSaid("the edited words"), "forged", false, ""))
 	// Assert
 	if !errors.Is(err, replyquote.ErrEditedQuote) {
 		t.Fatalf("CommitEdit = %v, want ErrEditedQuote", err)

@@ -133,7 +133,7 @@ func TestAnUnresolvedFeedLinksQuestionQuotesTheSourceBubble(t *testing.T) {
 
 	// Assert: quoted exactly as a reply to a selected response is — the
 	// quote its own leading block, the question the block after it.
-	want := replyquote.Quote(said("which file is nowhere.md?"), "see [AGENTS](nowhere.md)", false)
+	want := replyquote.Quote(said("which file is nowhere.md?"), "see [AGENTS](nowhere.md)", false, "row-1")
 	if !proto.Equal(h.Prompts.lastSaid, want) {
 		t.Fatalf("question = %v, want %v", h.Prompts.lastSaid, want)
 	}
@@ -149,7 +149,7 @@ func TestAnUnresolvedFeedLinksQuestionQuotesAThinkingBubble(t *testing.T) {
 	openFeedLink(t, h, "nowhere.md", "row-1")
 
 	// Assert.
-	want := replyquote.Quote(said("which file is nowhere.md?"), "maybe [AGENTS](nowhere.md)", false)
+	want := replyquote.Quote(said("which file is nowhere.md?"), "maybe [AGENTS](nowhere.md)", false, "row-1")
 	if !proto.Equal(h.Prompts.lastSaid, want) {
 		t.Fatalf("question = %v, want %v", h.Prompts.lastSaid, want)
 	}

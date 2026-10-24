@@ -27,6 +27,7 @@ import {
   standingClientFailure,
 } from "../../src/rpc/link.js";
 import { createFeedTail, latestEntry, mountFeed, rootRows } from "../../src/feed/feed.js";
+import { COMPOSER_ENTRY_STYLE_ID } from "../../src/feed/composer-entry.js";
 import { SCROLL_FLOOR_CLASS } from "../../src/scroll.js";
 import {
   SELECTED_ENTRY_CLASS,
@@ -177,6 +178,22 @@ describe("mountFeed: opening the root feed", () => {
     await settle();
     // Assert
     expect(applied).toEqual(["open"]);
+  });
+
+  it("routes a composer-entry frame to the page's highlight rather than reading it as a row", async () => {
+    // Arrange — a live tail.
+    const { h, channel } = liveRootHarness();
+    mount(h);
+    await settle();
+    // Act — a composer-entry frame (no row of its own).
+    channel.push(
+      create(WatchFeedResponseSchema, {
+        composerEntry: { at: { case: "node", value: { row: { value: "r1" }, label: "3.1" } } },
+      }),
+    );
+    await settle();
+    // Assert — the highlight's stylesheet names the node.
+    expect(document.getElementById(COMPOSER_ENTRY_STYLE_ID)?.textContent).toContain('[data-node="3.1"]');
   });
 
   it("routes a selection frame to the feed rather than reading it as a row", async () => {

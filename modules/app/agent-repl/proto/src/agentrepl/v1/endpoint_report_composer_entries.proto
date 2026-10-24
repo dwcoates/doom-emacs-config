@@ -1,0 +1,99 @@
+// endpoint_report_composer_entries.proto — ReportComposerEntries: the entries
+// a workspace's composer holds while the person types, and the one point is
+// on. FEED section.
+//
+// Emacs is the only sender. It reads its composer with the prompt grammar
+// (tree-sitter-tldr/tldr_prompt), as the daemon reads a sent prompt, and
+// reports what it reads each time it changes: the labels of every entry, in
+// order, and the entry line point is on, if any. The report REPLACES the one
+// before it, whole: the daemon holds the composer's entries as the last report
+// stated them, never a delta.
+//
+// THE DAEMON ANSWERS WITH STATE, NOT IN THIS RESPONSE. From the report and
+// what it already holds, it works out the response each label targets (the
+// selected response bubble when one is selected, else the newest response on
+// the root feed whose tree holds the label, the rule a sent prompt's entries
+// are bound by), and pushes two things, each restated whenever any of their
+// inputs changes (a report, the selection, a response's tree):
+//   - the root feed's watch carries the node point's entry answers
+//     (frontend.v1.FeedComposerEntry), which the webapp highlights;
+//   - the host's watch carries the labels that target nothing
+//     (agentrepl.v1.HostComposerEntries), which Emacs marks as answering
+//     nothing.
+//
+// IDEMPOTENT: restating the entries the daemon already holds changes nothing.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ReportComposerEntriesRequest {
+  // The workspace whose composer this is — the daemon-minted ref, echoed
+  // verbatim like every per-workspace request.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The label of every entry the composer holds, in order, as written
+  // ("3.1"). Empty when it holds none.
+  repeated string labels = 2;
+  // Which entry point is on. REQUIRED — unset is Connect InvalidArgument.
+  ComposerEntryAtPoint at_point = 3;
+}
+
+// Which entry point is on. THE ARM IS THE ANSWER.
+message ComposerEntryAtPoint {
+  oneof at {
+    // Point is on no entry line.
+    ComposerEntryAtPointNone none = 1;
+    // Point is on the entry answering this label, which `labels` holds.
+    ComposerEntryAtPointEntry entry = 2;
+  }
+}
+
+message ComposerEntryAtPointNone {}
+
+message ComposerEntryAtPointEntry {
+  // The label, as written. Never empty, and one of the request's `labels`.
+  string label = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ReportComposerEntriesResponse {
+  oneof result {
+    ReportComposerEntriesSuccess success = 1;
+    ReportComposerEntriesError error = 2;
+  }
+}
+
+// The daemon holds the reported entries and has pushed what follows from them.
+message ReportComposerEntriesSuccess {}
+
+message ReportComposerEntriesError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    ReportComposerEntriesUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ReportComposerEntriesWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    ReportComposerEntriesTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    ReportComposerEntriesNotYetAdopted not_yet_adopted = 4;
+  }
+}
+
+// The workspace id is not in the daemon's registry.
+message ReportComposerEntriesUnknownWorkspace {}
+// The echoed dir disagrees with the registry's dir for this id.
+message ReportComposerEntriesWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// This daemon released the workspace to a successor.
+message ReportComposerEntriesTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// A joining daemon has not finished adopting this workspace yet.
+message ReportComposerEntriesNotYetAdopted {}

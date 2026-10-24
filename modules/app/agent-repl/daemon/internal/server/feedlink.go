@@ -31,7 +31,7 @@ func (s *server) askAboutUnresolvedLink(ctx context.Context, log dlog.Logger, ws
 		Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: link.Question}},
 	}}}}
 	if quoted, ok := s.deps.Feed.BubbleText(ws, source); ok {
-		said = replyquote.Quote(said, quoted.Markdown, quoted.Prompt)
+		said = replyquote.Quote(said, quoted.Markdown, quoted.Prompt, source.GetValue())
 	} else {
 		log.Info("daemon.server.open_in_editor", "the unresolved link's source row is not a landed root bubble; its question is sent unquoted", dlog.Context{
 			"href": link.Href, "source_row": source.GetValue(),

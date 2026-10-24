@@ -64,29 +64,81 @@ message ProseBlock {
     // A metaprompt TLDR tree: the text's main tree, or one the model wrote
     // inside a language-less code fence.
     ProseTree tree = 2;
-    // One entry of a PROMPT answering one label of a response's tree
-    // (`3.1.2 - my answer`). Only a prompt's text is read for entries: a
-    // response's numbered lines are its tree's, never entries.
-    ProseEntry entry = 3;
+    // A run of a PROMPT's entries, each answering one label of a response's
+    // tree (`3.1.2 - my answer`), drawn as the tree their labels make. Only
+    // a prompt's text is read for entries: a response's numbered lines are
+    // its tree's, never entries.
+    ProseEntryTree entries = 4;
+  }
+  // Retired: one block per entry. A run of entries is one ProseEntryTree.
+  reserved 3;
+  reserved "entry";
+}
+
+// ---- Entries: a prompt's answers, as the tree their labels make --------
+
+// A run of a prompt's entries, drawn as a tree built from their labels alone.
+//
+// AN ENTRY is one column-0 line opening on a label (a dotted label, or any
+// label followed by a separator `-`, `–`, `—` or `:`): the grammar's heading
+// (tree-sitter-tldr/tldr_prompt). It is that ONE LINE: a line after it is the
+// prompt's own prose, and ends the run. A line opening on a label and a marker
+// (`1 🔧 text`) is a pasted tree's root, never an entry. Blank lines between
+// two entries do not end the run.
+//
+// THE TREE IS THE LABELS'. Every entry is a node, and every ancestor its
+// dotted label implies that no entry answers is a node too (`5.5.1` implies
+// `5` and `5.5`), drawn by its label alone. Nodes keep the order their first
+// entry appeared in; children follow the order of their first descendant
+// entry. Two entries answering one label are two sibling nodes, the
+// descendants of either attached to the first.
+//
+// THE DAEMON GUARANTEES what ProseTree guarantees: `nodes` is in reading
+// order, a node's id is its index, a branch's parent id is smaller than its
+// own. The webapp checks and refuses a tree that breaks them.
+message ProseEntryTree {
+  repeated ProseEntryTreeNode nodes = 1;
+}
+
+// One node of an entry tree.
+message ProseEntryTreeNode {
+  // The node's index in ProseEntryTree.nodes.
+  ProseTreeNodeId id = 1;
+  // Where the node stands. THE ARM IS THE PLACE.
+  oneof place {
+    ProseEntryTreeNodeRoot root = 2;
+    ProseEntryTreeNodeBranch branch = 3;
+  }
+  // The node's label, as written ("3.1.2"), without a separator. Never empty.
+  ProseEntryLabel label = 4;
+  // What the node is. THE ARM IS THE KIND.
+  oneof kind {
+    // An entry the person wrote: a click target that edits it.
+    ProseEntryTreeNodeAnswer answer = 5;
+    // An ancestor a deeper entry's label implies, which no entry answers:
+    // drawn by its label alone, dimmed.
+    ProseEntryTreeNodePath path = 6;
   }
 }
 
-// ---- Entry: a prompt's answer to one label --------------------------------
+// A root of an entry tree: a node with no parent among the run's nodes.
+message ProseEntryTreeNodeRoot {}
 
-// One entry of a prompt: a column-0 line opening on a label (a dotted label,
-// or any label followed by a separator `-`, `–`, `—` or `:`), and every line
-// up to the next such line or the end of the text. The grammar's rule
-// (tree-sitter-tldr/tldr_prompt). A line opening on a label and a marker
-// (`1 🔧 text`) is a pasted tree's root, never an entry.
-message ProseEntry {
-  // The label the entry answers, as written ("3.1.2"), without its
-  // separator. Never empty.
-  ProseEntryLabel label = 1;
-  // What the entry says: the words after the label and its separator, and
-  // every line the entry runs to, as markdown. May be empty: a label alone
-  // on its line, with nothing after it.
-  ProseEntryText text = 2;
+// A branch of an entry tree.
+message ProseEntryTreeNodeBranch {
+  // The node's parent. Its id is smaller than the branch's own.
+  ProseTreeNodeId parent = 1;
 }
+
+// An entry the person wrote.
+message ProseEntryTreeNodeAnswer {
+  // What the entry says: the words after its label and separator, on its one
+  // line, as markdown. May be empty: a label alone on its line.
+  ProseEntryText text = 1;
+}
+
+// An ancestor implied by a deeper entry's label.
+message ProseEntryTreeNodePath {}
 
 // An entry's label.
 message ProseEntryLabel {

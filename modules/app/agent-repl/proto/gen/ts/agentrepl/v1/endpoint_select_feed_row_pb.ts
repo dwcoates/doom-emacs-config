@@ -171,7 +171,7 @@ export type SelectFeedRowEntry = Message<"agentrepl.v1.SelectFeedRowEntry"> & {
   row?: FeedId | undefined;
 
   /**
-   * The entry's label, as frontend.v1.ProseEntry carries it.
+   * The entry's label, as a frontend.v1.ProseEntryTreeNode answer carries it.
    *
    * @generated from field: string label = 2;
    */

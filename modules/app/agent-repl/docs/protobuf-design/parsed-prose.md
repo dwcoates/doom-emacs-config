@@ -203,3 +203,54 @@ wrong labels). That needs one parse, in one place, that every program reads.
     reads exactly as a refused send does.
   - Revealing the answering prompt moves the feed (it is elsewhere), unlike a bubble
     click, which never does: a viewport arm of its own says so.
+
+### 6. A prompt's entries drawn as their tree, and the composer's entries answered live
+
+- **What:**
+  - `ProseBlock.entry` (tag 3) is retired. A run of a prompt's entries is one
+    `ProseEntryTree entries = 4`: nodes in reading order, each a `root` or a `branch`
+    under an earlier node, labelled, and either an `answer` (the entry's words) or a
+    `path` (an ancestor a deeper entry's label implies).
+  - `agentrepl.v1.ReportComposerEntries` (the composer's entry labels and the one
+    point is on), answered with state: `frontend.v1.FeedComposerEntry` on the root
+    feed's watch (`WatchFeedResponse.composer_entry`, tag 6) and
+    `agentrepl.v1.HostComposerEntries` on the host view (`HostWorkspace.composer_entries`,
+    tag 7).
+  - `agentrepl.v1.FindEntryNeighbor` (the next or previous node of an entry's target
+    tree).
+  - `conversation.v1.UserQuoteBlock.quoted_row` and
+    `frontend.v1.FeedQuoteBlock.quoted_row`: the row a reply quoted.
+  - `HostWorkspacePromptEntryClicked` moved to tag 13 of `WatchHostWorkspaceResponse`:
+    master took 12 for `select_requested` first.
+- **Why:** the owner's asks of 2026-10-24.
+  - A sent prompt's entries read as the tree of the labels they answer (labels only,
+    "option B").
+  - While an entry is typed in Emacs, the node it answers is highlighted in the feed,
+    that node's own line only, until point leaves the line.
+  - A label that answers nothing is marked in the composer.
+  - `o` and `O` on an entry line open the next or previous node's entry.
+  - An explicitly selected response is what entries answer, while typing and once
+    sent.
+- **Decisions inside the shape:**
+  - **An entry is its one line.** The lines after it are the prompt's prose, and a
+    line of prose between two entries ends the run; blank lines do not.
+  - **The tree is the labels'**, built by the daemon with no response read: `5.5.1`
+    implies `5` and `5.5`. Siblings keep the order their first entry appeared in; two
+    entries answering one label are two sibling nodes.
+  - **One target rule** (`daemon/internal/resolve/feed/composer.go` `entryTarget`)
+    binds a sent prompt's entries and the composer's: a reply to a response with a
+    tree answers that response when it holds the label, and nothing otherwise; any
+    other entry answers the nearest earlier response holding the label. A reply
+    names its response by the quote's `quoted_row`, which the daemon records at
+    submit; a quote recorded before it existed binds as any prompt does.
+  - **While a prompt is selected the composer answers nothing**: it is editing a sent
+    prompt's entry (or replying to a prompt), so nothing is highlighted and no label
+    is marked.
+  - **The highlight and the marks are state the daemon restates**, on a report, a
+    selection change and any change to a response's tree, so a late page or a new
+    response is never left with a stale highlight. Emacs reports one call at a time,
+    the latest owed (`lisp/core.el` `agent-repl-serial-send`).
+  - **The neighbor is asked for the line the key was pressed on**, so its answer can
+    never belong to a different line.
+  - **The webapp draws the highlight as one stylesheet rule** over the node's lines
+    (`webapp/src/feed/composer-entry.ts`), so a repaint of the response cannot drop it.

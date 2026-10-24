@@ -29,11 +29,28 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
+(require 'subr-x)
 (require 'treesit)
 
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--async-command "core" (label dir command callback))
+(declare-function agent-repl-serial-create "core" (&rest slots))
+(declare-function agent-repl-serial-send "core" (serial report send))
+(declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--warn "core" (ws fmt &rest args))
+(declare-function agent-repl-host-ref "host" (ws))
+(declare-function agent-repl-host-conn-or-primary "host" (ws))
+(declare-function agent-repl-host-unanswered-entries "host" (ws))
+(declare-function agent-repl--input-buffer "input" (ws))
+(declare-function agent-repl-rpc-report-composer-entries "rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-find-entry-neighbor-sync "rpc" (conn request &optional timeout))
+(declare-function evil-open-below "evil-commands" (count))
+(declare-function evil-open-above "evil-commands" (count))
+(declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
+(defvar agent-repl-input-mode-map)
+(defvar agent-repl-host-update-functions)
 (defvar agent-repl--frontend-root)
 
 (defface agent-repl-prompt-entry-label
@@ -113,7 +130,7 @@ One library serves every composer, so its build belongs to no workspace.")
   (add-to-list 'treesit-extra-load-path agent-repl-prompt-entries--library-dir))
 
 (defun agent-repl-prompt-entries-ensure (on-ready)
-  "Call ON-READY once the prompt grammar is loadable, building it first when stale.
+  "Call ON-READY once the prompt grammar is loadable, building it when stale.
 A fresh library is put on the load path and ON-READY called at once;
 otherwise ON-READY waits for the one build in flight, which this starts
 when none is."
@@ -126,7 +143,7 @@ when none is."
       (agent-repl-prompt-entries--start-build))))
 
 (defun agent-repl-prompt-entries--start-build ()
-  "Compile the grammar library, asynchronously, and answer the waiting on its end.
+  "Compile the grammar library asynchronously; answer the waiting when it ends.
 The compiler runs through `agent-repl--async-command', the one spawn of a
 program that is not git."
   (let* ((dir (agent-repl-prompt-entries--grammar-dir))
@@ -165,22 +182,33 @@ and nothing waiting is called."
 (defvar-local agent-repl-prompt-entries--parser nil
   "This composer's parser of the prompt grammar, or nil before it loads.")
 
+(defvar-local agent-repl-prompt-entries--ws nil
+  "The workspace this composer is, once marking is enabled.")
+
+(defvar-local agent-repl-prompt-entries--serial nil
+  "This composer's report serializer (`agent-repl-serial-send'), once enabled.")
+
 (defun agent-repl-prompt-entries-enable (ws)
   "Mark the entries of WS's composer, the current buffer, from now on.
-Marking starts once the grammar loads, which may be after this returns.
-Off when `agent-repl-input-entry-marking' is nil."
+Marking starts once the grammar loads, which may be after this returns,
+and so does reporting them to the daemon after each command
+\(`agent-repl-prompt-entries--report').  Off when
+`agent-repl-input-entry-marking' is nil."
   (if (not agent-repl-input-entry-marking)
       (agent-repl--info ws "elisp.prompt-entries.enable ws=%s outcome=off reason=agent-repl-input-entry-marking-nil" ws)
     (let ((buf (current-buffer)))
       (agent-repl-prompt-entries-ensure
-     (lambda ()
-       (when (buffer-live-p buf)
-         (with-current-buffer buf
-           (setq agent-repl-prompt-entries--parser
-                 (treesit-parser-create agent-repl-prompt-entries--language))
-           (add-hook 'after-change-functions #'agent-repl-prompt-entries--on-change nil t)
-           (agent-repl-prompt-entries-mark)
-           (agent-repl--info ws "elisp.prompt-entries.enabled ws=%s" ws))))))))
+       (lambda ()
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (setq agent-repl-prompt-entries--parser
+                   (treesit-parser-create agent-repl-prompt-entries--language)
+                   agent-repl-prompt-entries--ws ws
+                   agent-repl-prompt-entries--serial (agent-repl-serial-create))
+             (add-hook 'after-change-functions #'agent-repl-prompt-entries--on-change nil t)
+             (add-hook 'post-command-hook #'agent-repl-prompt-entries--report nil t)
+             (agent-repl-prompt-entries-mark)
+             (agent-repl--info ws "elisp.prompt-entries.enabled ws=%s" ws))))))))
 
 (defun agent-repl-prompt-entries--on-change (_beg _end _len)
   "Re-mark the composer's entries after an edit.
@@ -189,10 +217,13 @@ keystroke.  A whole-buffer pass: an edit can move where every later entry
 begins, and a composer is short."
   (agent-repl-prompt-entries-mark))
 
-(defun agent-repl-prompt-entries--label-spans ()
-  "The (BEG . END) of every entry's label and separator in the current buffer.
-A heading carrying a marker is a pasted tree's root and is left out."
-  (let (spans)
+(defun agent-repl-prompt-entries--entries ()
+  "Every entry of the current buffer, in order, as (LABEL BEG END).
+LABEL is the label as written; BEG and END span the label and its
+separator.  A heading carrying a marker is a pasted tree's root and is left
+out.  THE ONE READ of the composer's entries: marking, reporting and
+opening a line beside an entry all go through it."
+  (let (entries)
     (dolist (capture (treesit-query-capture agent-repl-prompt-entries--parser
                                             '((heading) @heading)))
       (let* ((heading (cdr capture))
@@ -200,19 +231,190 @@ A heading carrying a marker is a pasted tree's root and is left out."
              (label (treesit-search-subtree heading (lambda (n) (equal (treesit-node-type n) "label")) nil nil 1))
              (separator (treesit-search-subtree heading (lambda (n) (equal (treesit-node-type n) "separator")) nil nil 1)))
         (when (and label (null marker))
-          (push (cons (treesit-node-start label)
+          (push (list (string-trim (buffer-substring-no-properties (treesit-node-start label) (treesit-node-end label)))
+                      (treesit-node-start label)
                       (treesit-node-end (or separator label)))
-                spans))))
-    (nreverse spans)))
+                entries))))
+    (nreverse entries)))
+
+(defun agent-repl-prompt-entries--entry-at-point (entries)
+  "The label of the entry among ENTRIES whose line point is on, or nil."
+  (let ((bol (line-beginning-position)))
+    (car (seq-find (lambda (entry) (= (nth 1 entry) bol)) entries))))
+
+(defface agent-repl-prompt-entry-unanswered
+  '((t :inherit warning :weight bold))
+  "The face of an entry's label that answers nothing.
+No response the entry targets holds its label."
+  :group 'agent-repl)
 
 (defun agent-repl-prompt-entries-mark ()
-  "Restate the overlays marking the current composer's entry labels."
+  "Restate the overlays marking the current composer's entry labels.
+A label the daemon says answers nothing (`agent-repl-host-unanswered-entries')
+wears `agent-repl-prompt-entry-unanswered'; every other label
+`agent-repl-prompt-entry-label'."
   (when agent-repl-prompt-entries--parser
-    (remove-overlays (point-min) (point-max) 'agent-repl-prompt-entry t)
-    (dolist (span (agent-repl-prompt-entries--label-spans))
-      (let ((ov (make-overlay (car span) (cdr span))))
-        (overlay-put ov 'agent-repl-prompt-entry t)
-        (overlay-put ov 'face 'agent-repl-prompt-entry-label)))))
+    (let ((unanswered (and agent-repl-prompt-entries--ws
+                           (agent-repl-host-unanswered-entries agent-repl-prompt-entries--ws))))
+      (remove-overlays (point-min) (point-max) 'agent-repl-prompt-entry t)
+      (dolist (entry (agent-repl-prompt-entries--entries))
+        (let ((ov (make-overlay (nth 1 entry) (nth 2 entry))))
+          (overlay-put ov 'agent-repl-prompt-entry t)
+          (overlay-put ov 'face (if (member (nth 0 entry) unanswered)
+                                    'agent-repl-prompt-entry-unanswered
+                                  'agent-repl-prompt-entry-label)))))))
+
+(defun agent-repl-prompt-entries--host-updated (ws _host)
+  "Re-mark WS's composer after a host push, which may move what answers nothing.
+An `agent-repl-host-update-functions' entry."
+  (let ((buf (agent-repl--input-buffer ws)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (agent-repl-prompt-entries-mark)))))
+
+(add-hook 'agent-repl-host-update-functions #'agent-repl-prompt-entries--host-updated)
+
+;;;; ---- Reporting the composer's entries ----
+;;
+;; THE DAEMON IS TOLD WHAT THE COMPOSER HOLDS, after every command that moves
+;; it: the label of every entry, and the one point is on
+;; (ReportComposerEntries).  It answers with state: the node that entry
+;; answers, highlighted in the feed, and the labels that answer nothing,
+;; marked here.  ONE REPORT IS IN FLIGHT AT A TIME, the latest one owed once
+;; it is answered (`agent-repl-serial-send'): two reports racing could land
+;; in either order, and the daemon would then hold the older.
+
+(defvar-local agent-repl-prompt-entries--reported nil
+  "The (LABELS . AT) last sent from this composer, or nil.")
+
+(defun agent-repl-prompt-entries--report ()
+  "Report the composer's entries to the daemon when they moved since last sent.
+The composer's `post-command-hook' entry.  While a report is in flight the
+new one is owed, and sent once that one is answered."
+  (when (and agent-repl-prompt-entries--parser agent-repl-prompt-entries--ws)
+    (let* ((entries (agent-repl-prompt-entries--entries))
+           (state (cons (mapcar #'car entries) (agent-repl-prompt-entries--entry-at-point entries))))
+      (unless (equal state agent-repl-prompt-entries--reported)
+        (let ((buf (current-buffer)))
+          (agent-repl-serial-send
+           agent-repl-prompt-entries--serial
+           (lambda () (when (buffer-live-p buf) (with-current-buffer buf (agent-repl-prompt-entries--report))))
+           (lambda (done) (agent-repl-prompt-entries--send state done))))))))
+
+(defun agent-repl-prompt-entries--send (state done)
+  "Send STATE, (LABELS . AT), as this composer's report; call DONE once it ends.
+With no daemon-minted ref or no connection nothing is sent and nothing is
+marked reported, so the next command tries again."
+  (let* ((ws agent-repl-prompt-entries--ws)
+         (buf (current-buffer))
+         (ref (agent-repl-host-ref ws))
+         (conn (agent-repl-host-conn-or-primary ws)))
+    (if (not (and ref conn))
+        (progn
+          (agent-repl--log ws "elisp.prompt-entries.report-skipped ws=%s ref=%s conn=%s" ws (and ref t) (and conn t))
+          (funcall done))
+      (setq agent-repl-prompt-entries--reported state)
+      (agent-repl--log ws "elisp.prompt-entries.report ws=%s labels=%S at=%S" ws (car state) (cdr state))
+      (agent-repl-rpc-report-composer-entries
+       conn (list :workspace ref :labels (car state)
+                  :at-point (if (cdr state) (list :arm :entry :value (list :label (cdr state))) (list :arm :none)))
+       :on-response (lambda (response) (agent-repl-prompt-entries--answered ws state response done))
+       :on-failure (lambda (detail) (agent-repl-prompt-entries--failed buf ws state detail done))))))
+
+(defun agent-repl-prompt-entries--answered (ws state response done)
+  "Record the daemon's RESPONSE to WS's report of STATE, then end it with DONE."
+  (pcase (plist-get response :arm)
+    (:success nil)
+    (:error (agent-repl--info ws "elisp.prompt-entries.report-refused ws=%s labels=%S cause=%S"
+                              ws (car state) (plist-get (plist-get response :value) :cause)))
+    (other (agent-repl--error ws "elisp.prompt-entries.report-unknown-arm ws=%s arm=%S" ws other)))
+  (funcall done))
+
+(defun agent-repl-prompt-entries--failed (buf ws state detail done)
+  "Record BUF's report of STATE for WS, which the daemon never answered.
+DETAIL is the transport's failure.  Nothing is marked reported, so the next
+command sends it again; DONE ends the report."
+  (agent-repl--warn ws "elisp.prompt-entries.report-failure ws=%s labels=%S detail=%S" ws (car state) detail)
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (setq agent-repl-prompt-entries--reported nil)))
+  (funcall done))
+
+;;;; ---- Opening a line beside an entry ----
+;;
+;; `o' and `O' in command mode open a line below or above, as ever; on an
+;; entry line the new line is filled with the next node's label (below) or
+;; the previous one's (above), in the tree that entry targets, so the next
+;; entry answers the next node.  The daemon finds the node
+;; (FindEntryNeighbor), for the label of the line the key was pressed on.
+
+(defconst agent-repl-prompt-entries--neighbor-timeout 1.0
+  "Seconds `o' and `O' wait for the daemon to name the neighbor label.")
+
+(defun agent-repl-prompt-entries--neighbor (label next)
+  "The label of LABEL's next (NEXT) or previous node in its target tree, or nil.
+Nil, with the reason logged, when the composer is not reporting, no ref or
+connection stands, the daemon refused, or it never answered."
+  (let* ((ws agent-repl-prompt-entries--ws)
+         (ref (and ws (agent-repl-host-ref ws)))
+         (conn (and ws (agent-repl-host-conn-or-primary ws))))
+    (if (not (and ref conn))
+        (progn (agent-repl--log ws "elisp.prompt-entries.neighbor-skipped ws=%s label=%s" ws label) nil)
+      (condition-case err
+          (let ((response (agent-repl-rpc-find-entry-neighbor-sync
+                           conn (list :workspace ref :label label
+                                      :direction (list :arm (if next :next :previous)))
+                           agent-repl-prompt-entries--neighbor-timeout)))
+            (pcase (plist-get response :arm)
+              (:success
+               (let ((neighbor (plist-get (plist-get response :value) :neighbor)))
+                 (agent-repl--log ws "elisp.prompt-entries.neighbor ws=%s label=%s next=%s neighbor=%S"
+                                  ws label next neighbor)
+                 (when (eq (plist-get neighbor :arm) :found)
+                   (plist-get (plist-get neighbor :value) :label))))
+              (:error
+               (agent-repl--info ws "elisp.prompt-entries.neighbor-refused ws=%s label=%s cause=%S"
+                                 ws label (plist-get (plist-get response :value) :cause))
+               nil)
+              (other
+               (agent-repl--error ws "elisp.prompt-entries.neighbor-unknown-arm ws=%s arm=%S" ws other)
+               nil)))
+        (agent-repl-connect-error
+         (agent-repl--warn ws "elisp.prompt-entries.neighbor-failure ws=%s label=%s error=%S" ws label err)
+         nil)))))
+
+(defun agent-repl-prompt-entries--open (next)
+  "Open a line below (NEXT) or above point's line, filled with a neighbor.
+On an entry line whose label has a neighbor that way, the new line opens
+on `LABEL - '; otherwise it opens empty, as `evil-open-below' does."
+  (let* ((label (and agent-repl-prompt-entries--parser
+                     (agent-repl-prompt-entries--entry-at-point (agent-repl-prompt-entries--entries))))
+         (neighbor (and label (agent-repl-prompt-entries--neighbor label next))))
+    (if next (evil-open-below 1) (evil-open-above 1))
+    (when neighbor (insert neighbor " - "))))
+
+(defun agent-repl-prompt-entries-open-below ()
+  "Open a line below point; on an entry line, fill it with the next label.
+The composer's `o' in command mode: the next node's label, in the tree the
+entry targets."
+  (interactive)
+  (agent-repl-prompt-entries--open t))
+
+(defun agent-repl-prompt-entries-open-above ()
+  "Open a line above point; on an entry line, fill it with the previous label.
+The composer's `O' in command mode: the previous node's label, in the tree
+the entry targets."
+  (interactive)
+  (agent-repl-prompt-entries--open nil))
+
+(defun agent-repl-prompt-entries-bind-keys ()
+  "Bind `o' and `O' in the composer's command mode to the entry-aware opens."
+  (evil-define-key* 'normal agent-repl-input-mode-map
+    "o" #'agent-repl-prompt-entries-open-below
+    "O" #'agent-repl-prompt-entries-open-above))
+
+(with-eval-after-load 'evil
+  (agent-repl-prompt-entries-bind-keys))
 
 (provide 'prompt-entries)
 

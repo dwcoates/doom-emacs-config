@@ -120,7 +120,7 @@ func (s *server) SubmitPrompt(
 				NotFound: true,
 			})))
 		}
-		said = replyquote.Quote(said, quoted.Markdown, quoted.Prompt)
+		said = replyquote.Quote(said, quoted.Markdown, quoted.Prompt, ref.GetValue())
 	}
 
 	// VALIDATED ABOVE through the same mapping, so a failure here is a

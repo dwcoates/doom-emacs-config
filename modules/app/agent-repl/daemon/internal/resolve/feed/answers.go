@@ -38,15 +38,19 @@ func responseLabels(row *frontendv1.FeedRow) map[string]bool {
 	return labels
 }
 
-// promptEntries answers ROW's entries, in order, when ROW is a user prompt;
-// nil otherwise. The one walk of a prompt's entries: every reader of them
-// reads through it.
-func promptEntries(row *frontendv1.FeedRow) []*frontendv1.ProseEntry {
-	var entries []*frontendv1.ProseEntry
+// promptEntries answers ROW's entries, in its entry trees' reading order,
+// when ROW is a user prompt; nil otherwise: every answer node of every entry
+// tree (frontend.v1.ProseEntryTree), never a path node, which no entry
+// answers. The one walk of a prompt's entries: every reader of them reads
+// through it.
+func promptEntries(row *frontendv1.FeedRow) []*frontendv1.ProseEntryTreeNode {
+	var entries []*frontendv1.ProseEntryTreeNode
 	for _, block := range row.GetUserPrompt().GetSuccess().GetBody().GetBlocks() {
 		for _, prose := range block.GetText().GetProse().GetBlocks() {
-			if entry := prose.GetEntry(); entry != nil {
-				entries = append(entries, entry)
+			for _, node := range prose.GetEntries().GetNodes() {
+				if node.GetAnswer() != nil {
+					entries = append(entries, node)
+				}
 			}
 		}
 	}
@@ -61,18 +65,6 @@ func promptEntryLabels(row *frontendv1.FeedRow) []string {
 		labels = append(labels, entry.GetLabel().GetText())
 	}
 	return labels
-}
-
-// answerTarget answers the row the entry answering LABEL, in the prompt at
-// index AT of F's order, answers: the nearest response before it whose labels
-// (as LABELSAT reads them) hold LABEL, or "".
-func answerTarget(f *feedState, at int, label string, labelsAt func(int) map[string]bool) string {
-	for i := at - 1; i >= 0; i-- {
-		if labelsAt(i)[label] {
-			return f.order[i]
-		}
-	}
-	return ""
 }
 
 // stampAnswers states a response row's answers from F's order. It runs on the
@@ -100,8 +92,9 @@ func stampAnswers(f *feedState, id string, row *frontendv1.FeedRow) {
 	}
 	for i := at + 1; i < len(f.order); i++ {
 		prompt := f.rows[f.order[i]]
+		reply := promptQuotedRow(prompt)
 		for _, label := range promptEntryLabels(prompt) {
-			if answerTarget(f, i, label, labelsAt) == id {
+			if entryTarget(f, i, reply, label, labelsAt) == id {
 				resp.Answers = append(resp.Answers, &frontendv1.FeedResponseAnswer{Label: label, Prompt: prompt.GetId()})
 			}
 		}
@@ -135,8 +128,13 @@ func answersChanged(existing, snapshot *frontendv1.FeedRow) bool {
 
 // restateAnswers re-publishes every response of the feed at ADDR, so each
 // restates its answers from the feed as it now stands; upsert drops the ones
-// that come out unchanged. WHY is logged with the count.
+// that come out unchanged. WHY is logged with the count. On the root feed it
+// also announces the workspace on labelChanges: what the composer's entries
+// target is read from the same rows (composer.go).
 func (r *resolver) restateAnswers(s *wsState, addr feedid.Feed, why string) {
+	if addr.Root {
+		r.labelChanges.Emit(s.id)
+	}
 	f := r.feed(s, addr)
 	var responses []string
 	for _, id := range f.order {
@@ -159,7 +157,7 @@ func (r *resolver) restateAnswers(s *wsState, addr feedid.Feed, why string) {
 func promptEntryText(row *frontendv1.FeedRow, label string) (string, bool) {
 	for _, entry := range promptEntries(row) {
 		if entry.GetLabel().GetText() == label {
-			return entry.GetText().GetMarkdown(), true
+			return entry.GetAnswer().GetText().GetMarkdown(), true
 		}
 	}
 	return "", false

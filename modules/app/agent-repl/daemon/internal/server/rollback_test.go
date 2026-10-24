@@ -540,7 +540,7 @@ func TestRollBackSuccessHandsBackAQuotedPromptsWordsAlone(t *testing.T) {
 	h := newHarness(t)
 	h.Feed.prompts = feedIDs("p1")
 	h.Feed.rollbackTargetOK = true
-	h.Feed.rollbackTarget = feed.RollbackTarget{Turns: []ids.TurnID{"t1"}, Said: replyquote.Quote(said("roll me back"), "Paris.", false)}
+	h.Feed.rollbackTarget = feed.RollbackTarget{Turns: []ids.TurnID{"t1"}, Said: replyquote.Quote(said("roll me back"), "Paris.", false, "")}
 	token := planToken(t, h, keepFilesPlan())
 
 	// Act.
@@ -1201,7 +1201,7 @@ func TestRollBackResendSubmitsWhatItSends(t *testing.T) {
 		{name: "a whole prompt", rolled: said("the old words"), resend: wholeResend("the new words"), want: said("the new words")},
 		{name: "one entry edited", rolled: said("thanks\n3.1 - old\n3.2 - kept"), resend: entryResend("3.1", "new"), want: said("thanks\n3.1 - new\n3.2 - kept")},
 		{name: "an entry in a later text block", rolled: multiBlockSaid("first", "3.1 - old"), resend: entryResend("3.1", "new"), want: multiBlockSaid("first", "3.1 - new")},
-		{name: "an entry of a reply, its quote left out", rolled: replyquote.Quote(said("3.1 - old"), "Paris.", false), resend: entryResend("3.1", "new"), want: said("3.1 - new")},
+		{name: "an entry of a reply, its quote left out", rolled: replyquote.Quote(said("3.1 - old"), "Paris.", false, ""), resend: entryResend("3.1", "new"), want: said("3.1 - new")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

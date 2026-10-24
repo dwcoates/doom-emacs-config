@@ -403,6 +403,19 @@ type server struct {
 	imageOverlayTopics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedImageOverlay]
 	selectionTopics    map[ids.WorkspaceID]*publish.Topic[*selectionState]
 
+	// composerMu guards the composer's entries below (composer_entries.go):
+	// the last report per workspace, and the labels it last restated as
+	// answering nothing.
+	composerMu         sync.Mutex
+	composerReports    map[ids.WorkspaceID]composerReport
+	composerUnanswered map[ids.WorkspaceID][]string
+	// composerEntryTopics is one FeedComposerEntry push topic per workspace,
+	// subscribed by that workspace's root feed watch.
+	composerEntryTopics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedComposerEntry]
+	// composerChanges announces every workspace whose composer report or
+	// selection moved, for followComposerEntries.
+	composerChanges publish.Events[ids.WorkspaceID]
+
 	// feedTextScaleMu guards the feed text zoom below. It is SEPARATE from mu so
 	// an AdjustFeedTextScale that persists to the state store never blocks a
 	// feed watch, a host push, or any other rpc that takes mu.
@@ -559,6 +572,9 @@ func New(deps Deps) (Server, error) {
 		rollbackPlans:       make(map[string]rollbackPlan),
 		selectionTopics:     make(map[ids.WorkspaceID]*publish.Topic[*selectionState]),
 		imageOverlayTopics:  make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedImageOverlay]),
+		composerReports:     make(map[ids.WorkspaceID]composerReport),
+		composerUnanswered:  make(map[ids.WorkspaceID][]string),
+		composerEntryTopics: make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedComposerEntry]),
 		// The zoom starts at the persistence default; Prime seeds the stored
 		// value onto the topic before anything is served.
 		feedTextScale: wsm.DefaultFeedTextScale,
@@ -569,6 +585,10 @@ func New(deps Deps) (Server, error) {
 	// of them for its whole life. Subscribed before New returns, so no move
 	// after construction is missed.
 	go s.followHostAsks(life, deps.Feed.WatchHostAsks(life))
+	// WHAT THE COMPOSER'S ENTRIES ANSWER moves with a report, the selection
+	// and a response's tree, so one follower restates it on each, subscribed
+	// before New returns (composer_entries.go).
+	go s.followComposerEntries(life, s.composerChanges.Subscribe(life), deps.Feed.WatchLabelChanges(life))
 
 	mux := http.NewServeMux()
 	path, handler := agentreplv1connect.NewAgentReplHandler(&requestLoggingServer{server: s})

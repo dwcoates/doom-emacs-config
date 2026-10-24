@@ -45,9 +45,9 @@ export function reserveLabelsCss(reserve: readonly string[]): string {
 }
 
 /**
- * TEXT as one CSS string, for a ghost's `content`: quoted, with its
- * backslashes and quotes escaped and a line break written `\A `, so any text
- * reads back as exactly itself.
+ * TEXT as one CSS string, for a ghost's `content` or an attribute selector's
+ * value: quoted, with its backslashes and quotes escaped and a line break
+ * written `\A `, so any text reads back as exactly itself.
  */
 export function cssString(text: string): string {
   return `"${cssStringBody(text)}"`;

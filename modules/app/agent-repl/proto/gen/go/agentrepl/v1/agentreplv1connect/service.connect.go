@@ -46,6 +46,12 @@ const (
 	AgentReplSubmitPromptProcedure = "/agentrepl.v1.AgentRepl/SubmitPrompt"
 	// AgentReplSelectFeedRowProcedure is the fully-qualified name of the AgentRepl's SelectFeedRow RPC.
 	AgentReplSelectFeedRowProcedure = "/agentrepl.v1.AgentRepl/SelectFeedRow"
+	// AgentReplReportComposerEntriesProcedure is the fully-qualified name of the AgentRepl's
+	// ReportComposerEntries RPC.
+	AgentReplReportComposerEntriesProcedure = "/agentrepl.v1.AgentRepl/ReportComposerEntries"
+	// AgentReplFindEntryNeighborProcedure is the fully-qualified name of the AgentRepl's
+	// FindEntryNeighbor RPC.
+	AgentReplFindEntryNeighborProcedure = "/agentrepl.v1.AgentRepl/FindEntryNeighbor"
 	// AgentReplFoldMergeBubbleProcedure is the fully-qualified name of the AgentRepl's FoldMergeBubble
 	// RPC.
 	AgentReplFoldMergeBubbleProcedure = "/agentrepl.v1.AgentRepl/FoldMergeBubble"
@@ -333,6 +339,8 @@ var (
 	agentReplServiceDescriptor                          = v1.File_agentrepl_v1_service_proto.Services().ByName("AgentRepl")
 	agentReplSubmitPromptMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SubmitPrompt")
 	agentReplSelectFeedRowMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SelectFeedRow")
+	agentReplReportComposerEntriesMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("ReportComposerEntries")
+	agentReplFindEntryNeighborMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("FindEntryNeighbor")
 	agentReplFoldMergeBubbleMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("FoldMergeBubble")
 	agentReplAdjustFeedTextScaleMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("AdjustFeedTextScale")
 	agentReplOpenFeedImageMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("OpenFeedImage")
@@ -449,6 +457,14 @@ type AgentReplClient interface {
 	// its ordered rows, pushes it to the webapp and Emacs, and acks it here.
 	// See endpoint_select_feed_row.proto.
 	SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error)
+	// The entries the composer holds while the person types, and the one point
+	// is on: the daemon pushes the node it answers to the webapp, and the labels
+	// that answer nothing to Emacs. See endpoint_report_composer_entries.proto.
+	ReportComposerEntries(context.Context, *connect.Request[v1.ReportComposerEntriesRequest]) (*connect.Response[v1.ReportComposerEntriesResponse], error)
+	// The label a line opened beside an entry line answers: the entry's next
+	// or previous node in the tree it targets. See
+	// endpoint_find_entry_neighbor.proto.
+	FindEntryNeighbor(context.Context, *connect.Request[v1.FindEntryNeighborRequest]) (*connect.Response[v1.FindEntryNeighborResponse], error)
 	// The reader opened or closed a merge bubble: the daemon records the fold
 	// on the bubble's durable head row, so it survives pushes, reloads and
 	// restarts. See endpoint_fold_merge_bubble.proto.
@@ -802,6 +818,18 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplSelectFeedRowProcedure,
 			connect.WithSchema(agentReplSelectFeedRowMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		reportComposerEntries: connect.NewClient[v1.ReportComposerEntriesRequest, v1.ReportComposerEntriesResponse](
+			httpClient,
+			baseURL+AgentReplReportComposerEntriesProcedure,
+			connect.WithSchema(agentReplReportComposerEntriesMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		findEntryNeighbor: connect.NewClient[v1.FindEntryNeighborRequest, v1.FindEntryNeighborResponse](
+			httpClient,
+			baseURL+AgentReplFindEntryNeighborProcedure,
+			connect.WithSchema(agentReplFindEntryNeighborMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		foldMergeBubble: connect.NewClient[v1.FoldMergeBubbleRequest, v1.FoldMergeBubbleResponse](
@@ -1443,6 +1471,8 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 type agentReplClient struct {
 	submitPrompt               *connect.Client[v1.SubmitPromptRequest, v1.SubmitPromptResponse]
 	selectFeedRow              *connect.Client[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse]
+	reportComposerEntries      *connect.Client[v1.ReportComposerEntriesRequest, v1.ReportComposerEntriesResponse]
+	findEntryNeighbor          *connect.Client[v1.FindEntryNeighborRequest, v1.FindEntryNeighborResponse]
 	foldMergeBubble            *connect.Client[v1.FoldMergeBubbleRequest, v1.FoldMergeBubbleResponse]
 	adjustFeedTextScale        *connect.Client[v1.AdjustFeedTextScaleRequest, v1.AdjustFeedTextScaleResponse]
 	openFeedImage              *connect.Client[v1.OpenFeedImageRequest, v1.OpenFeedImageResponse]
@@ -1557,6 +1587,16 @@ func (c *agentReplClient) SubmitPrompt(ctx context.Context, req *connect.Request
 // SelectFeedRow calls agentrepl.v1.AgentRepl.SelectFeedRow.
 func (c *agentReplClient) SelectFeedRow(ctx context.Context, req *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error) {
 	return c.selectFeedRow.CallUnary(ctx, req)
+}
+
+// ReportComposerEntries calls agentrepl.v1.AgentRepl.ReportComposerEntries.
+func (c *agentReplClient) ReportComposerEntries(ctx context.Context, req *connect.Request[v1.ReportComposerEntriesRequest]) (*connect.Response[v1.ReportComposerEntriesResponse], error) {
+	return c.reportComposerEntries.CallUnary(ctx, req)
+}
+
+// FindEntryNeighbor calls agentrepl.v1.AgentRepl.FindEntryNeighbor.
+func (c *agentReplClient) FindEntryNeighbor(ctx context.Context, req *connect.Request[v1.FindEntryNeighborRequest]) (*connect.Response[v1.FindEntryNeighborResponse], error) {
+	return c.findEntryNeighbor.CallUnary(ctx, req)
 }
 
 // FoldMergeBubble calls agentrepl.v1.AgentRepl.FoldMergeBubble.
@@ -2089,6 +2129,14 @@ type AgentReplHandler interface {
 	// its ordered rows, pushes it to the webapp and Emacs, and acks it here.
 	// See endpoint_select_feed_row.proto.
 	SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error)
+	// The entries the composer holds while the person types, and the one point
+	// is on: the daemon pushes the node it answers to the webapp, and the labels
+	// that answer nothing to Emacs. See endpoint_report_composer_entries.proto.
+	ReportComposerEntries(context.Context, *connect.Request[v1.ReportComposerEntriesRequest]) (*connect.Response[v1.ReportComposerEntriesResponse], error)
+	// The label a line opened beside an entry line answers: the entry's next
+	// or previous node in the tree it targets. See
+	// endpoint_find_entry_neighbor.proto.
+	FindEntryNeighbor(context.Context, *connect.Request[v1.FindEntryNeighborRequest]) (*connect.Response[v1.FindEntryNeighborResponse], error)
 	// The reader opened or closed a merge bubble: the daemon records the fold
 	// on the bubble's durable head row, so it survives pushes, reloads and
 	// restarts. See endpoint_fold_merge_bubble.proto.
@@ -2438,6 +2486,18 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplSelectFeedRowProcedure,
 		svc.SelectFeedRow,
 		connect.WithSchema(agentReplSelectFeedRowMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplReportComposerEntriesHandler := connect.NewUnaryHandler(
+		AgentReplReportComposerEntriesProcedure,
+		svc.ReportComposerEntries,
+		connect.WithSchema(agentReplReportComposerEntriesMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplFindEntryNeighborHandler := connect.NewUnaryHandler(
+		AgentReplFindEntryNeighborProcedure,
+		svc.FindEntryNeighbor,
+		connect.WithSchema(agentReplFindEntryNeighborMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplFoldMergeBubbleHandler := connect.NewUnaryHandler(
@@ -3078,6 +3138,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSubmitPromptHandler.ServeHTTP(w, r)
 		case AgentReplSelectFeedRowProcedure:
 			agentReplSelectFeedRowHandler.ServeHTTP(w, r)
+		case AgentReplReportComposerEntriesProcedure:
+			agentReplReportComposerEntriesHandler.ServeHTTP(w, r)
+		case AgentReplFindEntryNeighborProcedure:
+			agentReplFindEntryNeighborHandler.ServeHTTP(w, r)
 		case AgentReplFoldMergeBubbleProcedure:
 			agentReplFoldMergeBubbleHandler.ServeHTTP(w, r)
 		case AgentReplAdjustFeedTextScaleProcedure:
@@ -3301,6 +3365,14 @@ func (UnimplementedAgentReplHandler) SubmitPrompt(context.Context, *connect.Requ
 
 func (UnimplementedAgentReplHandler) SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectFeedRow is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReportComposerEntries(context.Context, *connect.Request[v1.ReportComposerEntriesRequest]) (*connect.Response[v1.ReportComposerEntriesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportComposerEntries is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) FindEntryNeighbor(context.Context, *connect.Request[v1.FindEntryNeighborRequest]) (*connect.Response[v1.FindEntryNeighborResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.FindEntryNeighbor is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) FoldMergeBubble(context.Context, *connect.Request[v1.FoldMergeBubbleRequest]) (*connect.Response[v1.FoldMergeBubbleResponse], error) {

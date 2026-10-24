@@ -515,6 +515,8 @@ func DrawUserBlocks(
 // drawQuote is QUOTE taken apart for drawing (replyquote.Split). Every quote
 // block is composed by replyquote.Block, so one that does not split is an
 // invariant violation: recorded once and panicked on, never drawn as a guess.
+// The quoted bubble's row rides along when the quote kept it, so a reply's
+// entries answer it (entryTarget).
 func drawQuote(quote *conversationv1.UserQuoteBlock, log dlog.Logger) *frontendv1.FeedQuoteBlock {
 	parts, err := replyquote.Split(quote.GetText())
 	if err != nil {
@@ -523,7 +525,11 @@ func drawQuote(quote *conversationv1.UserQuoteBlock, log dlog.Logger) *frontendv
 			dlog.Context{"characters": len(quote.GetText()), "cause": err.Error()})
 		panic(fmt.Sprintf("feed: a quote block did not split: %v", err))
 	}
-	return &frontendv1.FeedQuoteBlock{Heading: parts.Heading, Quoted: parts.Quoted, Closing: parts.Closing}
+	drawn := &frontendv1.FeedQuoteBlock{Heading: parts.Heading, Quoted: parts.Quoted, Closing: parts.Closing}
+	if row := quote.GetQuotedRow(); row != "" {
+		drawn.QuotedRow = &frontendv1.FeedId{Value: row}
+	}
+	return drawn
 }
 
 // resolveImage runs the injected resolver, refusing rather than guessing when
