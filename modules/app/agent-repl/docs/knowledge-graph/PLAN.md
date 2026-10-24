@@ -118,9 +118,14 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   2026-10-24). Every prompt entered in the thread goes to that session, and
   the responses flow back into the thread and into zettel. The session is
   chronological, so the model sees the whole thread's history, not only the
-  path to the node being asked of. A question asked of an earlier answer
+  path to the node being asked of; the owner calls this ideal, because
+  sibling branches are useful context. A question asked of an earlier answer
   carries that answer's quote and context, the way a reply to a past response
   carries it today.
+- Later, maybe: limit how much of other branches reaches the model, say to
+  the nearest three or four nodes rather than twenty. One chronological
+  session holds everything, so a limit would need the shim to manage what
+  the session carries.
 - Threads are not attached to git repositories or worktrees.
 - Following premises feeds the model's context when answering: premises are
   added to the prompt as extra context.
@@ -293,7 +298,8 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
     prompt, and on Enter the new thread opens in the webapp;
   - Emacs has a binding for switching to the most recent thread;
   - proposed keys, under `SPC TAB`: `t` for a new thread, `T` for the most
-    recent thread (`SPC TAB R` already opens the most recent workspace);
+    recent thread (`SPC TAB R` already opens the most recent workspace),
+    and `SPC TAB .` for picking a thread by name from a minibuffer list (owner);
   - in the Chat view the topbar's tab bar is shown, as it is when
     agent-repl's panels are closed, so a workspace is one click away;
   - the sidebar's view always follows what is shown: showing a thread
@@ -364,7 +370,6 @@ Only rows marked settled are settled.
 
 - How does a thread get the equivalent of a workspace directory for its shim?
 - What does a thread's shim use in place of a workspace directory?
-- How does Emacs pick an older thread by name, other than clicking it in the sidebar?
 - Which embedding provider: a local model on the workstation, or a hosted API
   called from the workstation? Chat answers already send content to
   Anthropic, so a hosted embedding API adds one more vendor that sees it.
