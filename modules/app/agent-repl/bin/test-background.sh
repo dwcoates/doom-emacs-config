@@ -78,8 +78,9 @@ STUB
 chmod +x "$STUBS/uname" "$STUBS/perl" "$STUBS/nice" "$STUBS/taskpolicy"
 
 # run_helper DIR [ENV=VALUE...] -- <command...>
-# Runs the helper under the stubs with a CLEAN marker, the way a fresh entry
-# point would. Sets RC; the subject's stdout/stderr land in DIR.
+# Runs the helper (or SUBJECT, when set) under the stubs with a CLEAN marker,
+# as a run the daemon started, the way a fresh entry point would. Sets RC; the
+# subject's stdout/stderr land in DIR.
 run_helper() {
     local dir="$1"; shift
     local env_args=()
@@ -91,8 +92,9 @@ run_helper() {
     env -u AGENT_REPL_BACKGROUND_PRIORITY -u AGENT_REPL_PROFILE_ROOT -u AGENT_REPL_TEST_NICENESS \
         PATH="$STUBS:/usr/bin:/bin" \
         STUB_LOG="$dir/log" \
+        AGENT_REPL_TEST_RUN_BY_DAEMON=1 \
         "${env_args[@]}" \
-        bash "$HELPER" "$@" >"$dir/out" 2>"$dir/err"
+        bash "${SUBJECT:-$HELPER}" "$@" >"$dir/out" 2>"$dir/err"
     RC=$?
     set -e
 }
@@ -260,6 +262,7 @@ fi
 d="$TMP/h1j"
 mkdir -p "$d/bin"
 cp "$HELPER" "$d/bin/background.sh"
+cp "$THIS_DIR/lib-priority.sh" "$d/bin/lib-priority.sh"
 cat >"$d/bin/test-subject.sh" <<'SUBJECT'
 #!/usr/bin/env bash
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
@@ -268,7 +271,7 @@ SUBJECT
 : >"$d/log"
 set +e
 env -u AGENT_REPL_BACKGROUND_PRIORITY -u AGENT_REPL_TEST_NICENESS PATH="$STUBS:/usr/bin:/bin" STUB_LOG="$d/log" \
-    STUB_UNAME=Darwin STUB_NICENESS=0 \
+    STUB_UNAME=Darwin STUB_NICENESS=0 AGENT_REPL_TEST_RUN_BY_DAEMON=1 \
     bash "$d/bin/test-subject.sh" one two >"$d/out" 2>"$d/err"
 RC=$?
 set -e
@@ -292,6 +295,33 @@ if [ "$RC" -eq 0 ] && [ ! -s "$d/log" ] && [ "$(cat "$d/out")" = "marker=nice-19
     pass "the prologue runs an already-marked script directly"
 else
     fail "the prologue runs an already-marked script directly" "rc=$RC out: $(cat "$d/out") log: $(cat "$d/log")"
+fi
+
+# --- 1l. a run the daemon did not start is refused, nothing run ------------
+d="$TMP/h1l"
+run_helper "$d" STUB_UNAME=Darwin STUB_NICENESS=0 AGENT_REPL_TEST_RUN_BY_DAEMON= -- "${MARKER_CMD[@]}"
+if [ "$RC" -eq 78 ] && [ ! -s "$d/out" ] && [ ! -s "$d/log" ] &&
+    grep -q 'no test runs by hand: the daemon starts every test run' "$d/err"; then
+    pass "a run the daemon did not start is refused with exit 78 and nothing run"
+else
+    fail "a run the daemon did not start is refused with exit 78 and nothing run" "rc=$RC out: $(cat "$d/out") log: $(cat "$d/log") err: $(cat "$d/err")"
+fi
+
+# --- 1m. low-priority.sh demotes the same way, but marks no test run --------
+d="$TMP/h1m"
+SUBJECT="$THIS_DIR/low-priority.sh" run_helper "$d" STUB_UNAME=Darwin STUB_NICENESS=0 AGENT_REPL_TEST_RUN_BY_DAEMON= -- "${MARKER_CMD[@]}"
+if [ "$RC" -eq 0 ] && grep -q '^taskpolicy -d throttle nice -n 19 bash -c' "$d/log" && [ "$(cat "$d/out")" = "marker=" ]; then
+    pass "low-priority.sh demotes as the helper does, unmarked, and needs no daemon"
+else
+    fail "low-priority.sh demotes as the helper does, unmarked, and needs no daemon" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out") err: $(cat "$d/err")"
+fi
+
+# --- 1n. the helper and low-priority.sh share one demotion -----------------
+if grep -Fqx 'priority_exec marker "$@"' "$HELPER" && grep -Fqx 'priority_exec unmarked "$@"' "$THIS_DIR/low-priority.sh" &&
+    ! cat "$HELPER" "$THIS_DIR/low-priority.sh" | grep -v '^[[:space:]]*#' | grep -Eq 'nice -n|taskpolicy'; then
+    pass "background.sh and low-priority.sh demote only through lib-priority.sh's priority_exec"
+else
+    fail "background.sh and low-priority.sh demote only through lib-priority.sh's priority_exec"
 fi
 
 # ============================================================================
@@ -408,7 +438,7 @@ scan() {
         find "$root/bin" "$root/.githooks" "$root/.claude" -maxdepth 1 -name 'test-*.sh' 2>/dev/null
         find "$module" \( -name node_modules -o -name testdata \) -prune -o -name 'test-*.sh' -print
         local named
-        for named in bin/report-nonlisp-coverage.sh bin/e2e-coverage.sh bin/e2e-repeat.sh; do
+        for named in bin/coverage-honesty.sh; do
             [ -e "$module/$named" ] && echo "$module/$named"
         done
         for named in .claude/safe-test-run.sh; do

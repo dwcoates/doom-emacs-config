@@ -49,6 +49,14 @@
 # `go test`/`npx vitest`/`emacs -batch` fails loudly instead of running at
 # normal priority. Only this script sets it.
 #
+# ONLY THE DAEMON STARTS A TEST RUN (owner ruling, 2026-10-24). A run is
+# refused unless AGENT_REPL_TEST_RUN_BY_DAEMON=1, which the daemon sets on
+# every test command it starts (daemon/internal/merge.TestCommandFor: the
+# merge queue's gates, agentrepl.v1.RunTests, RunRedundancy) and every process
+# of the run inherits. A test run by hand is refused here, before anything is
+# demoted; the marker is what the runners that cannot be wrapped wait for, so
+# they refuse too. Agents run tests with `agent-repld test run`.
+#
 # THE LIVE RUNTIME IS NEVER ROUTED THROUGH HERE. The daemon, shim, store and
 # sidecar, and the bin/build-frontend.sh steps the daemon's deploy runs, stay
 # at normal priority. Only tests are demoted.
@@ -62,35 +70,21 @@
 #   [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "<dir>/background.sh" bash "${BASH_SOURCE[0]}" "$@"
 #
 # The command runs in the CURRENT directory; this wraps it, never relocates it.
+#
+# The demotion itself is bin/lib-priority.sh's, shared with bin/low-priority.sh
+# (the live-editor realtests, which are no test run and carry no marker).
 set -uo pipefail
 
-log() { printf 'background: %s\n' "$*" >&2; }
+# shellcheck source=lib-priority.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib-priority.sh"
 
-# EX_CONFIG: this host cannot run a test at background priority. Distinct from
-# a failing suite (1), from a usage error (2) and from test-all's
-# precondition decline (77), which would read as "skipped" rather than "wrong".
-readonly EXIT_REFUSED=78
+(( $# > 0 )) || priority_refuse "no command given; usage: background.sh <command> [args...]"
 
-refuse() {
-    log "REFUSING TO RUN: $*"
-    log "  tests only ever run at background priority; see bin/background.sh"
-    exit "$EXIT_REFUSED"
-}
-
-(( $# > 0 )) || refuse "no command given; usage: background.sh <command> [args...]"
-
-os=$(uname -s) || refuse "could not read the platform with uname"
-
-# read_niceness -- this process's niceness. macOS's nice(1) cannot print it
-# (it demands a utility), so there it is getpriority(PRIO_PROCESS, self) from
-# perl, which ships with macOS; the perl child inherits this process's value.
-# Linux's coreutils nice prints it, and the sandbox image may lack perl.
-read_niceness() {
-    case $os in
-        Darwin) perl -e 'print getpriority(0, 0)' ;;
-        Linux) nice ;;
-    esac
-}
+if [[ ${AGENT_REPL_TEST_RUN_BY_DAEMON:-} != 1 ]]; then
+    priority_log "REFUSING TO RUN: $*"
+    priority_log "  no test runs by hand: the daemon starts every test run (agent-repld test run; the merge queue runs the full suite)"
+    exit "$PRIORITY_EXIT_REFUSED"
+fi
 
 # A TEST'S RUNTIMES PROFILE INTO THE TEST'S OWN TREE. Every daemon, store,
 # sidecar and shim arms runtime profiling at boot and writes an armed marker
@@ -100,43 +94,4 @@ read_niceness() {
 # signal it. An explicit setting is kept.
 export AGENT_REPL_PROFILE_ROOT="${AGENT_REPL_PROFILE_ROOT:-${TMPDIR:-/tmp}/agent-repl-test-profiles}"
 
-# THE TARGET NICENESS: 19, unless AGENT_REPL_TEST_NICENESS names another from
-# 1 to 19. Only the merge queue's gates name one (owner ruling 2026-10-14): the
-# queue's head runs at 10 and the merge behind it at 15, so under contention
-# the head's tests run before any other test run's, and every one of them
-# still yields to the owner's processes at 0. Nothing here ever raises a
-# priority: a run already at or past its target runs as it is.
-target=${AGENT_REPL_TEST_NICENESS:-19}
-if ! [[ $target =~ ^[0-9]+$ ]] || (( target < 1 || target > 19 )); then
-    refuse "AGENT_REPL_TEST_NICENESS='$target' is not a niceness from 1 to 19"
-fi
-
-case $os in
-    Darwin|Linux)
-        niceness=$(read_niceness) || refuse "could not read this process's niceness"
-        [[ $niceness =~ ^-?[0-9]+$ ]] || refuse "the niceness read back is not a number: '$niceness'"
-        if (( niceness >= target )); then
-            export AGENT_REPL_BACKGROUND_PRIORITY=nice-$niceness
-            exec "$@"
-        fi
-        export AGENT_REPL_BACKGROUND_PRIORITY=nice-$target
-        # TO EXACTLY THE TARGET, FROM WHEREVER IT STANDS. nice(1) adds its
-        # increment to the current niceness, so `nice -n 19` from any niceness
-        # above 0 overshoots to 20 (macOS's ceiling); the increment is the
-        # distance to the target instead.
-        increment=$(( target - niceness ))
-        # DISK, TOO, ON macOS (owner ruling 2026-10-06): the CPU demotion left a
-        # run's disk I/O at normal priority, and a full run's hundreds of
-        # SQLite files starved the live store (a 111-page checkpoint took 54 s,
-        # its writes 5-7 s). `taskpolicy -d throttle` sets the I/O policy ONLY
-        # -- not `-b`, which also pins to the efficiency cores and was rejected
-        # 2026-09-23 -- and children inherit it with the niceness.
-        if [[ $os == Darwin ]]; then
-            exec taskpolicy -d throttle nice -n "$increment" "$@"
-        fi
-        exec nice -n "$increment" "$@"
-        ;;
-    *)
-        refuse "no background-priority mechanism is known for platform '$os'"
-        ;;
-esac
+priority_exec marker "$@"

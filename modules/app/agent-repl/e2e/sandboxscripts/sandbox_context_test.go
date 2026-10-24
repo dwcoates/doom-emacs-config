@@ -101,3 +101,40 @@ func TestSlotBudgetIsOneWhenTheVMMemoryIsUnknown(t *testing.T) {
 		})
 	}
 }
+
+// TestForwardedEnvCrossesOnlyTheNamedVariables: the container's environment
+// starts empty, and only the named variables the caller set cross into it,
+// the daemon's test-run marker among them.
+func TestForwardedEnvCrossesOnlyTheNamedVariables(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		env  []string
+		want []string
+	}{
+		{name: "nothing set", env: nil, want: nil},
+		{name: "the daemon's test-run marker", env: []string{"AGENT_REPL_TEST_RUN_BY_DAEMON=1"}, want: []string{"AGENT_REPL_TEST_RUN_BY_DAEMON=1"}},
+		{name: "the entrypoint's knobs", env: []string{"SANDBOX_SKIP_NPM=1", "SANDBOX_NODE_MODULES=/nm"}, want: []string{"SANDBOX_NODE_MODULES=/nm", "SANDBOX_SKIP_NPM=1"}},
+		{name: "an unnamed variable stays behind", env: []string{"HOME_SECRET=x", "AGENT_REPL_TEST_RUN_BY_DAEMON=1"}, want: []string{"AGENT_REPL_TEST_RUN_BY_DAEMON=1"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange
+			cmd := exec.Command("bash", "-c", `set -euo pipefail; script=$1; . "$script"; forwarded_env`, "bash", sandboxScript(t))
+			cmd.Env = append([]string{"PATH=/usr/bin:/bin"}, tc.env...)
+
+			// Act
+			out, err := cmd.Output()
+
+			// Assert
+			if err != nil {
+				t.Fatalf("forwarded_env = %v", err)
+			}
+			got := strings.Fields(string(out))
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("forwarded_env = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
