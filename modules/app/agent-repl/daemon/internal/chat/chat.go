@@ -31,6 +31,8 @@ import (
 	"strconv"
 	"sync"
 
+	"google.golang.org/protobuf/proto"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 	zettelv1 "agentrepl/proto/zettel/v1"
 
@@ -175,12 +177,20 @@ func (s *Service) Open(ctx context.Context, id ids.WorkspaceID) error {
 	return s.refresh(ctx, id)
 }
 
-// Asked re-reads a thread's questions in flight after a submission and
-// publishes the view.
-func (s *Service) Asked(ctx context.Context, id ids.WorkspaceID) error {
+// Asked is told a question was submitted, asked from ASKED (what Ask
+// answered): the highlight it quoted is consumed, and the thread's questions
+// in flight are read again.
+func (s *Service) Asked(ctx context.Context, id ids.WorkspaceID, asked *zettelv1.NodeParent) error {
 	if err := s.ensureLoaded(ctx, id); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	t := s.state(id)
+	if h := t.highlight; h != nil && asked.GetNode().GetQuote() != nil &&
+		string(h.Node) == asked.GetNode().GetNode().GetId() && proto.Equal(h.Quote, asked.GetNode().GetQuote()) {
+		t.highlight = nil
+	}
+	s.mu.Unlock()
 	return s.refresh(ctx, id)
 }
 
@@ -376,9 +386,10 @@ func (s *Service) forgetAnswer(ws ids.WorkspaceID, turn ids.TurnID) {
 
 // ---- Gestures ----
 
-// Ask decides where the thread's next question is asked from, consuming the
-// held highlight: the highlighted answer when there is one, else the end of
-// the shown path, else the start of the thread.
+// Ask decides where the thread's next question is asked from: the
+// highlighted answer when there is one, else the end of the shown path, else
+// the start of the thread. The highlight stands until Asked is told the
+// question was submitted.
 func (s *Service) Ask(ctx context.Context, id ids.WorkspaceID) (*zettelv1.NodeParent, error) {
 	if err := s.ensureLoaded(ctx, id); err != nil {
 		return nil, err
@@ -387,8 +398,6 @@ func (s *Service) Ask(ctx context.Context, id ids.WorkspaceID) (*zettelv1.NodePa
 	defer s.mu.Unlock()
 	t := s.state(id)
 	if h := t.highlight; h != nil {
-		t.highlight = nil
-		s.publish(t)
 		return askedOf(t.nodes[h.Node], h.Quote), nil
 	}
 	if len(t.path) > 0 {

@@ -410,25 +410,42 @@ func TestAskDecidesWhereTheQuestionIsAskedFrom(t *testing.T) {
 	}
 }
 
-func TestAskConsumesTheHighlight(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	f.zettel.seed("", 0)
-	f.open()
-	_ = f.svc.Select(context.Background(), thr, &Highlight{Node: "n1", Quote: &zettelv1.NodeQuote{Text: "words"}})
-
-	// Act
-	if _, err := f.svc.Ask(context.Background(), thr); err != nil {
-		t.Fatal(err)
+func TestTheSubmittedQuestionConsumesTheHighlightItQuoted(t *testing.T) {
+	cases := []struct {
+		name     string
+		reselect string
+		consumed bool
+	}{
+		{name: "the highlight asked with is consumed", consumed: true},
+		{name: "a highlight made since stands", reselect: "other words"},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.zettel.seed("", 0)
+			f.open()
+			ctx := context.Background()
+			_ = f.svc.Select(ctx, thr, &Highlight{Node: "n1", Quote: &zettelv1.NodeQuote{Text: "words"}})
+			asked, err := f.svc.Ask(ctx, thr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.reselect != "" {
+				_ = f.svc.Select(ctx, thr, &Highlight{Node: "n1", Quote: &zettelv1.NodeQuote{Text: tc.reselect}})
+			}
 
-	// Assert
-	if h := f.exchange("n1").GetAnswer().GetHighlight(); h != nil {
-		t.Fatalf("highlight = %v, want it consumed", h)
-	}
-	parent, _ := f.svc.Ask(context.Background(), thr)
-	if parent.GetNode().GetQuote() != nil {
-		t.Fatal("the next question quoted the consumed highlight")
+			// Act
+			if err := f.svc.Asked(ctx, thr, asked); err != nil {
+				t.Fatal(err)
+			}
+
+			// Assert
+			h := f.exchange("n1").GetAnswer().GetHighlight()
+			if consumed := h == nil; consumed != tc.consumed {
+				t.Fatalf("highlight = %v, want consumed %v", h, tc.consumed)
+			}
+		})
 	}
 }
 
@@ -439,7 +456,7 @@ func TestAQuestionInFlightGoesFromWaitingToANode(t *testing.T) {
 	f.zettel.seed("n1", 0)
 	f.open()
 	f.turns.ask("turn-9", "and then?", "n2", "")
-	if err := f.svc.Asked(context.Background(), thr); err != nil {
+	if err := f.svc.Asked(context.Background(), thr, nil); err != nil {
 		t.Fatal(err)
 	}
 	pending := func() *frontendv1.ChatPending { return f.view().GetConversation().GetPending() }
@@ -475,7 +492,7 @@ func TestAQuestionInFlightEndsThePathAtItsParent(t *testing.T) {
 	f.turns.ask("turn-9", "back up?", "n1", "the quoted words")
 
 	// Act
-	if err := f.svc.Asked(context.Background(), thr); err != nil {
+	if err := f.svc.Asked(context.Background(), thr, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -494,7 +511,7 @@ func TestATurnEndedUnansweredIsNoLongerInFlight(t *testing.T) {
 	f.zettel.seed("", 0)
 	f.open()
 	f.turns.ask("turn-9", "why?", "n1", "")
-	_ = f.svc.Asked(context.Background(), thr)
+	_ = f.svc.Asked(context.Background(), thr, nil)
 
 	// Act: the feed sees the end before the records do.
 	f.svc.TurnEnded(thr, "turn-9")
@@ -558,7 +575,7 @@ func TestAFailedRecordIsLoggedAndNoLongerDrawn(t *testing.T) {
 			f.zettel.seed("", 0)
 			f.open()
 			f.turns.ask("turn-9", "why?", "n1", "")
-			_ = f.svc.Asked(context.Background(), thr)
+			_ = f.svc.Asked(context.Background(), thr, nil)
 			tc.arrange(f)
 
 			// Act
