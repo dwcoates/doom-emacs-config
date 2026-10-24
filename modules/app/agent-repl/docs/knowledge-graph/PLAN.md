@@ -284,7 +284,7 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   local caller, so remote access also needs device pairing and
   authentication.
 - How sightings are counted: a bubble fully on screen, recorded by the daemon.
-- Navigation (owner's proposal, 2026-10-24, with refinements):
+- Navigation (owner, 2026-10-24, decided):
   - threads are not selectable the way workspaces are (`M-{`, `M-}`,
     `M-<number>`, `SPC p p`), because users do not bounce between threads
     the way they do between workspaces;
@@ -292,20 +292,25 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
     has a binding for one that works like the one-shot prompt: a minibuffer
     prompt, and on Enter the new thread opens in the webapp;
   - Emacs has a binding for switching to the most recent thread;
+  - proposed keys, under `SPC TAB`: `t` for a new thread, `T` for the most
+    recent thread (`SPC TAB R` already opens the most recent workspace);
   - in the Chat view the topbar's tab bar is shown, as it is when
     agent-repl's panels are closed, so a workspace is one click away;
   - the sidebar's view always follows what is shown: showing a thread
     shows the Chat view with the tab bar, and showing a workspace shows the
-    Workspaces view. Refinement: the view is derived from what is shown
-    rather than kept as separate state, so the two can never disagree, and
-    picking Chat in the dropdown shows the most recent thread.
+    Workspaces view. The view is derived from what is shown rather than kept
+    as separate state, so the two can never disagree, and picking Chat in
+    the dropdown shows the most recent thread.
+  - Opening a thread counts as interacting with it, for its place in the
+    sidebar list.
 
 ## Known complications
 
 - The shim assumes a workspace directory: its cwd, folder trust and
   per-session locks. A thread needs an equivalent that is not a repository.
-- Threads should inherit every part of the daemon's session management that
-  still applies. To be checked off one by one:
+- Threads inherit every part of the daemon's session management that still
+  applies (list agreed by the owner, 2026-10-24), to be checked off one by
+  one during implementation:
   - inherited: the cold-context gate (`StartSession` refusing a cold context
     with its cost), model and effort selection, interrupt (`KillTurn`),
     rollback (`RollBackSession`), hibernation and keepalive, kill, the name
@@ -359,8 +364,6 @@ Only rows marked settled are settled.
 
 - How does a thread get the equivalent of a workspace directory for its shim?
 - What does a thread's shim use in place of a workspace directory?
-- Which keys do the new-thread and most-recent-thread bindings use?
-- Does opening a thread count as interacting with it, for its place in the sidebar list?
 - How does Emacs pick an older thread by name, other than clicking it in the sidebar?
 - Which embedding provider: a local model on the workstation, or a hosted API
   called from the workstation? Chat answers already send content to
