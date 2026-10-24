@@ -2925,6 +2925,79 @@ composer was `:read'."
       ;; Act / Assert.
       (should-not (agent-repl-test-verbs--unseeded-by command)))))
 
+;;;; ---- Create: C-r searches the prompt history ----
+
+(defvar agent-repl-test-verbs--minibuffer-bindings nil
+  "Bindings recorded by `agent-repl-test-verbs--minibuffer-keys', newest first.")
+
+(defun agent-repl-test-verbs--minibuffer-keys (keys)
+  "Return a `read-string' stub that records what KEYS are bound to.
+The stub stands in for a minibuffer whose own local map binds `C-r' to
+`evil-paste-from-register' and RET to `exit-minibuffer', as Doom's does.
+It runs `minibuffer-setup-hook' as the real minibuffer does, then pushes
+an alist of each key in KEYS and its local binding onto
+`agent-repl-test-verbs--minibuffer-bindings'."
+  (lambda (&rest _)
+    (with-temp-buffer
+      (let ((own (make-sparse-keymap)))
+        (define-key own (kbd "C-r") #'evil-paste-from-register)
+        (define-key own (kbd "RET") #'exit-minibuffer)
+        (use-local-map own))
+      (run-hooks 'minibuffer-setup-hook)
+      (push (mapcar (lambda (key) (cons key (lookup-key (current-local-map) (kbd key))))
+                    keys)
+            agent-repl-test-verbs--minibuffer-bindings)
+      "typed")))
+
+(defun agent-repl-test-verbs--prompt-bindings (keys &optional history-file)
+  "Read a creation prompt and return the bindings of KEYS in its minibuffer.
+HISTORY-FILE is passed to `agent-repl-verbs--read-prompt'."
+  (let ((agent-repl-test-verbs--minibuffer-bindings nil))
+    (cl-letf (((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+              ((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'read-string) (agent-repl-test-verbs--minibuffer-keys keys)))
+      (agent-repl-verbs--read-prompt "Commission: " history-file 'unseeded))
+    (car agent-repl-test-verbs--minibuffer-bindings)))
+
+(ert-deftest agent-repl-verbs-read-prompt-c-r-searches-history-backward ()
+  "`C-r' in a creation prompt is the history isearch, not Doom's register paste."
+  ;; Act.
+  (let ((bindings (agent-repl-test-verbs--prompt-bindings '("C-r"))))
+    ;; Assert.
+    (should (eq (alist-get "C-r" bindings nil nil #'equal) #'isearch-backward))))
+
+(ert-deftest agent-repl-verbs-read-prompt-with-a-history-file-c-r-searches-history-backward ()
+  "`C-r' searches the history in a prompt whose history lives in a file too."
+  (agent-repl-test-verbs--with-history-file file
+    ;; Act.
+    (let ((bindings (agent-repl-test-verbs--prompt-bindings '("C-r") file)))
+      ;; Assert.
+      (should (eq (alist-get "C-r" bindings nil nil #'equal) #'isearch-backward)))))
+
+(ert-deftest agent-repl-verbs-read-prompt-keeps-the-minibuffer-s-other-keys ()
+  "The history map covers only `C-r'; the minibuffer's own keys still answer."
+  ;; Act.
+  (let ((bindings (agent-repl-test-verbs--prompt-bindings '("RET"))))
+    ;; Assert.
+    (should (eq (alist-get "RET" bindings nil nil #'equal) #'exit-minibuffer))))
+
+(ert-deftest agent-repl-verbs-read-prompt-history-map-stays-in-its-own-minibuffer ()
+  "A minibuffer opened after the creation prompt keeps its own `C-r'."
+  (let ((agent-repl-test-verbs--minibuffer-bindings nil))
+    ;; Arrange.
+    (agent-repl-test-verbs--prompt-bindings '("C-r"))
+    ;; Act.
+    (funcall (agent-repl-test-verbs--minibuffer-keys '("C-r")))
+    ;; Assert.
+    (should (eq (alist-get "C-r" (car agent-repl-test-verbs--minibuffer-bindings) nil nil #'equal)
+                #'evil-paste-from-register))))
+
+(ert-deftest agent-repl-verbs-prompt-history-map-binds-c-r-to-isearch-backward ()
+  "The map installed over a creation prompt's minibuffer puts `C-r' on the search."
+  ;; Act / Assert.
+  (should (eq (lookup-key agent-repl-verbs--prompt-history-map (kbd "C-r"))
+              #'isearch-backward)))
+
 ;;;; ---- Create: the persisted prompt history ----
 
 (defmacro agent-repl-test-verbs--with-history-file (var &rest body)
