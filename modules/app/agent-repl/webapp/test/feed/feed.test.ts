@@ -29,6 +29,7 @@ import {
 import { createFeedTail, latestEntry, mountFeed, rootRows } from "../../src/feed/feed.js";
 import { COMPOSER_ENTRY_STYLE_ID } from "../../src/feed/composer-entry.js";
 import { SCROLL_FLOOR_CLASS } from "../../src/scroll.js";
+import { JUMP_TO_TAIL_CLASS } from "../../src/feed/jump-to-tail.js";
 import {
   SELECTED_ENTRY_CLASS,
   SELECTED_ROW_ATTRIBUTE,
@@ -2508,6 +2509,18 @@ describe("mountFeed: the reader's click never moves the feed", () => {
     expect(record.context).toMatchObject({ by: "click", at: 100, row: "none" });
     feed.dispose();
     dock.remove();
+  });
+
+  it("draws the jump-to-tail control into its slot, and removes it once disposed", () => {
+    // Arrange
+    const slot = document.createElement("div");
+    const { scroll, host } = scrollHost();
+    const feed = mountFeed(host, harness().ctx, { renderers: stubRenderers(), scrollBox: scroll, jumpSlot: slot });
+    const drawn = slot.querySelectorAll(`.${JUMP_TO_TAIL_CLASS}`).length;
+    // Act
+    feed.dispose();
+    // Assert
+    expect([drawn, slot.childElementCount]).toEqual([1, 0]);
   });
 
   it("stops holding the view on clicks in the box or a click zone once disposed", async () => {

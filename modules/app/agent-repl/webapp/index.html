@@ -44,6 +44,12 @@
         <section id="hold-tray" data-component="hold-tray"></section>
       </div>
 
+      <!-- The jump-to-tail control's slot (src/feed/jump-to-tail.ts): no
+           height of its own, so the control it holds floats over the feed's
+           bottom edge without taking part in the column's layout, and outside
+           the scroll zone, so it never scrolls with the feed. -->
+      <div id="feed-jump" data-component="feed-jump"></div>
+
       <!-- The status footer: docked at the window's bottom rather than
            floating under the last row, so the strip stays put as the feed
            grows. Outside the scroll zone for exactly that reason. -->

@@ -102,6 +102,11 @@ export interface ScrollPosition {
  *   or collapsed the bubble of the feed's LAST root row; the feed parks at its
  *   tail and follows, so the opening sub-feed is brought into view, or the
  *   space the closing one leaves is filled (`TailFollow.lastBubbleFolded`).
+ * - `tailJumped`: the reader pressed the feed's jump-to-tail control
+ *   (`feed/jump-to-tail.ts`, shown while the reader is more than a page above
+ *   the tail); the feed parks at its tail and follows, and the reader has
+ *   returned to the tail exactly as a scroll back down would
+ *   (`onTailReached`) (owner request, 2026-10-24).
  * - `prependCompensation`: content above the reader changed height, and the
  *   view shifts by exactly that, so the content under the reader stays put.
  *   This is THE FEED'S SCROLL ANCHORING (`TailFollow`, "THE FEED OWNS ITS
@@ -138,6 +143,7 @@ export const SCROLL_CAUSES = [
   "workspaceSelected",
   "lastBubbleExpanded",
   "lastBubbleCollapsed",
+  "tailJumped",
   "prependCompensation",
   "latestVisible",
 ] as const;
@@ -159,6 +165,7 @@ type ParkCause =
   | "workspaceSelected"
   | "lastBubbleExpanded"
   | "lastBubbleCollapsed"
+  | "tailJumped"
   | "latestVisible";
 
 /** A named cause that supersedes the reader's click hold (`supersedeClick`). */
@@ -462,6 +469,8 @@ export class TailFollow {
   private latestHidden = true;
   /** Told when the reader's own scroll returns the feed to its tail (`onTailReached`). */
   private tailReached: (() => void) | null = null;
+  /** Told where the box stands after every scroll event and resize pass (`onViewChanged`). */
+  private viewChanged: ((box: ScrollPosition) => void) | null = null;
   /** The box's sizes the last resize pass saw, so only a real change is recorded. */
   private seenSize: { scrollHeight: number; clientHeight: number };
   /** What the feed's content last changed, stated on every uncaused move (`witnessMoves`). */
@@ -597,6 +606,36 @@ export class TailFollow {
    */
   onTailReached(listener: () => void): void {
     this.tailReached = listener;
+  }
+
+  /**
+   * THE READER JUMPED TO THE TAIL (owner request, 2026-10-24): they pressed
+   * the feed's jump-to-tail control. The feed parks at its tail and follows
+   * (`tailJumped`), and the reader has returned to the tail, so
+   * `onTailReached`'s listener runs as it does for a scroll back down.
+   */
+  jumpToTail(): void {
+    this.parkSuperseding("tailJumped");
+    this.tailReached?.();
+  }
+
+  /**
+   * LISTENER is told where the box stands after every scroll event and every
+   * resize pass the owner handles, once the owner's own moves for it are made:
+   * every change of where the reader stands relative to the tail passes
+   * through one of the two.
+   */
+  onViewChanged(listener: (box: ScrollPosition) => void): void {
+    this.viewChanged = listener;
+  }
+
+  /** Tell the view-changed listener where the box now stands. */
+  private reportView(): void {
+    this.viewChanged?.({
+      scrollHeight: this.box.scrollHeight,
+      scrollTop: this.box.scrollTop,
+      clientHeight: this.box.clientHeight,
+    });
   }
 
   /**
@@ -756,6 +795,7 @@ export class TailFollow {
     this.reanchor("scroll");
     this.latchIfLatestVisible("scroll");
     this.recedeFloor();
+    this.reportView();
   }
 
   /**
@@ -873,6 +913,7 @@ export class TailFollow {
     this.sync();
     this.reanchor("resize");
     this.follow();
+    this.reportView();
   }
 
   /**

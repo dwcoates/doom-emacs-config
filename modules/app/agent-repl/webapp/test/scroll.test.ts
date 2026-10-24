@@ -403,7 +403,7 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the thirteen causes the owner rules allow", () => {
+  it("names exactly the fourteen causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
@@ -417,6 +417,7 @@ describe("SCROLL_CAUSES", () => {
       "workspaceSelected",
       "lastBubbleExpanded",
       "lastBubbleCollapsed",
+      "tailJumped",
       "prependCompensation",
       "latestVisible",
     ]);
@@ -432,6 +433,7 @@ describe("TailFollow's parking causes", () => {
     ["a rolled-back row's removal", (tail) => tail.rolledBack(), "rolledBack"],
     ["a switch to this workspace", (tail) => tail.workspaceSelected(), "workspaceSelected"],
     ["a cleared selection", (tail) => tail.selectionCleared(), "selectionMoved"],
+    ["the jump-to-tail control", (tail) => tail.jumpToTail(), "tailJumped"],
   ];
 
   it.each(parks)("%s lands a scrolled-up box at its tail", (_name, act) => {
@@ -1334,6 +1336,27 @@ describe("TailFollow's latest-visible latch", () => {
     // Act
     l.box.scrollTop = 700;
     l.gesture();
+    // Assert
+    expect(c.reached).toBe(1);
+  });
+
+  it("tells onTailReached when the reader jumps to the tail", () => {
+    // Arrange
+    const l = withLatest(100);
+    const c = counted(l);
+    // Act
+    l.tail.jumpToTail();
+    // Assert
+    expect([c.reached, l.box.scrollTop]).toEqual([1, 1000]);
+  });
+
+  it("tells onTailReached once for a jump, not again for the jump's own scroll event", () => {
+    // Arrange
+    const l = withLatest(100);
+    const c = counted(l);
+    // Act
+    l.tail.jumpToTail();
+    l.scroll();
     // Assert
     expect(c.reached).toBe(1);
   });
@@ -3695,6 +3718,7 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     ["replaceRestore", (tail) => tail.replaceRestore()],
     ["rolledBack", (tail) => tail.rolledBack()],
     ["workspaceSelected", (tail) => tail.workspaceSelected()],
+    ["tailJumped", (tail) => tail.jumpToTail()],
   ])("ends a standing hold under %s and parks at the tail", async (cause, act) => {
     // Arrange
     const f = floored(700);
@@ -4073,5 +4097,48 @@ describe("selectionRowScroll", () => {
     selectionRowScroll(region, 60);
     // Assert
     expect(region.scrollTop).toBe(100);
+  });
+});
+
+describe("TailFollow.onViewChanged", () => {
+  /** A's box with every view report its listener received. */
+  function reported(a: ReturnType<typeof armed>): Array<{ scrollHeight: number; scrollTop: number; clientHeight: number }> {
+    const views: Array<{ scrollHeight: number; scrollTop: number; clientHeight: number }> = [];
+    a.tail.onViewChanged((box) => views.push(box));
+    return views;
+  }
+
+  it("reports where the box stands after a scroll event", () => {
+    // Arrange
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    const views = reported(a);
+    box.scrollTop = 250;
+    // Act
+    a.gesture();
+    // Assert
+    expect(views).toEqual([{ scrollHeight: 1000, scrollTop: 250, clientHeight: 300 }]);
+  });
+
+  it("reports where the box stands after a resize pass, with the follow's move already made", () => {
+    // Arrange
+    const f = following();
+    const views = reported(f);
+    f.box.scrollHeight = 1400;
+    // Act
+    f.resize();
+    // Assert
+    expect(views).toEqual([{ scrollHeight: 1400, scrollTop: 1400, clientHeight: 300 }]);
+  });
+
+  it("reports nothing for a park until the park's own scroll event arrives", () => {
+    // Arrange
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    const views = reported(a);
+    // Act
+    a.tail.jumpToTail();
+    // Assert
+    expect(views).toEqual([]);
   });
 });

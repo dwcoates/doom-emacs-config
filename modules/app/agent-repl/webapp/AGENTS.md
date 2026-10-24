@@ -591,7 +591,11 @@ hand any more:
   follows), `workspaceSelected` (the roster's `current` moved to this
   page's workspace, by any switch path: `src/sidebar/selection-edge.ts` parks
   the feed at its tail and follows; returning to Emacs from another
-  application is not a switch), `prependCompensation`, `latestVisible`
+  application is not a switch), `tailJumped` (the reader pressed the feed's
+  jump-to-tail control, `src/feed/jump-to-tail.ts`, which shows while the
+  reader stands more than a page above the tail: the feed parks at its tail
+  and follows, and the reader has returned to the tail, so `onTailReached`
+  runs), `prependCompensation`, `latestVisible`
   — each a named `TailFollow` cause, each move recorded at DEBUG as
   `scroll.feed-moved` with its cause. A follow starts from a parking cause, or
   (`latestVisible`, owner rule 2026-09-23) whenever the reader can SEE the feed
