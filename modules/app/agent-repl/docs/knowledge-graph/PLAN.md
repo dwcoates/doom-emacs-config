@@ -27,8 +27,8 @@ knowledge. Its new parts:
   response, a chat answer, later a book), with the question and answer landing
   in the graph, traceable back to the text that was highlighted.
 
-The knowledge graph is its own system, orthogonal to agent-repl, and needs a
-name of its own (open).
+The knowledge graph is its own system, orthogonal to agent-repl, called
+zettel (after a Zettelkasten, a box of linked note slips).
 
 ### Contributor and consumer UIs
 
@@ -229,15 +229,15 @@ Only rows marked settled are settled. Recommended picks are listed first.
 
 | Concept | Candidates |
 |---|---|
-| The knowledge-graph system itself | open; earlier ideas `commonplace`, `marginalia` |
+| The knowledge-graph system itself | `zettel` (settled) |
 | A node in the graph, holding at least a question and its answer | `node` (settled) |
 | A UI that adds to the data model | `contributor` (settled) |
 | A UI that renders the data model | `consumer` (settled) |
 | A frozen version of a node's content | `revision` |
 | The link from a question to a parent | `premise` (recommended), `basis` |
 | The service that carries remote clients' encrypted traffic to the workstation | `relay` (settled) |
-| Where a node came from | `provenance` (recommended), `origin` (already used by `conversation.v1.PromptOrigin`) |
-| A highlighted passage | `quote` (recommended, matching the daemon's existing `replyquote` package for the whole-response reply), `excerpt` (already a rollback-preview field), `passage` |
+| Where a node's question came from: the contributor UI and the place in it | `provenance` (settled) |
+| The exact words highlighted when the question was asked, stored in the provenance | `quote` (settled) |
 | Text around a highlight | `context` in conversation and docs, `questionContext` in code (settled) |
 | One stay of a parent on the path on screen | `visit` |
 | One counted instance of a bubble being seen | `sighting` |
