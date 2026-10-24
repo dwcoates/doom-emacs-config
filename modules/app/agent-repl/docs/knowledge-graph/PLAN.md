@@ -10,6 +10,8 @@ inside agent-repl.
 - Every term is settled during planning, before any code uses it.
 - Settled terms go in a glossary in the project's `AGENTS.md`.
 - Code, protos and docs use only glossary terms as identifiers, with no synonyms.
+- A glossary entry may list known synonyms, so they are understood when they
+  come up in conversation. Code never uses a synonym.
 - A glossary entry may give a code identifier that differs from the spoken
   term, when the spoken term would clash in code. Conversation and docs use
   the spoken term, and code uses the identifier.
@@ -128,9 +130,9 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   that makes sense on its own.
 - A node's content is versioned: each revision is frozen, and correcting an
   answer adds a new revision. The UI for corrections comes later.
-- Every node records where it came from: which contributor UI, which thing in
-  it (a page of a book, a response bubble in a feed, a node in the graph), and
-  the highlighted words if any, so a question and answer can always be traced
+- Every node records its parent, which is where it came from: which
+  contributor UI, which thing in it (a page of a book, a response bubble in a
+  feed, a node in the graph), and the highlighted words if any, so a question and answer can always be traced
   back to its origin. When the origin is a node in the graph, it names the
   revision the words were taken from.
 - A highlight also captures surrounding text, and how much depends on the
@@ -157,7 +159,16 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 ### Chat UX
 
 - The first implementation includes the chat, the principal contributor UI.
-  It looks much like the ChatGPT and claude.ai chat interfaces.
+  It looks much like the ChatGPT and claude.ai chat interfaces, and is slick
+  and professional, in agent-repl's existing colors (the light and dark
+  themes' variables in `webapp/src/styles.css`).
+- The sidebar is the same across every app. A selector at its top switches
+  between them, like tabs: one for agent-repl's workspaces, one for the chat,
+  and so on.
+- Each answer shows its premises as links that jump to that node's path.
+- The webapp already has a composer (`webapp/src/composer/composer.ts`),
+  drawn in production only inside subagent bubbles, since the root composer
+  is Emacs's. A host without Emacs could turn it on.
 
 - A normal chat stream of question and answer bubbles, one path at a time.
 - Sibling questions (questions asked of the same answer) stack under that
@@ -205,10 +216,10 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
     programmatically: the graph service is the only writer, and it refuses,
     in the same transaction as the insert, any premise that would close a
     loop.
-  - Parent and provenance are one concept (owner, 2026-10-24): where a node's
-    question came from. It can be a node in zettel, or a place outside it
-    such as a book page or an agent feed's response bubble. Open: which one
-    word names it, since the glossary allows no synonyms.
+  - Parent and provenance are one concept (owner, 2026-10-24), named
+    `parent`: where a node's question came from. It can be a node in zettel,
+    or a place outside it such as a book page or an agent feed's response
+    bubble. "Provenance" is a known synonym.
   - Open: whether
     a premise records a revision; how cycles among premises are prevented.
 
@@ -274,8 +285,8 @@ Only rows marked settled are settled. Recommended picks are listed first.
 | A frozen version of a node's content | `revision` |
 | The link from a question to a parent | `premise` (recommended), `basis` |
 | The service that carries remote clients' encrypted traffic to the workstation | `relay` (settled) |
-| Where a node's question came from: the contributor UI and the place in it | `provenance` (settled) |
-| The exact words highlighted when the question was asked, stored in the provenance | `quote` (settled) |
+| Where a node's question came from: a node in zettel, or a place in a contributor UI | `parent` (settled); known synonym "provenance" |
+| The exact words highlighted when the question was asked, stored with the parent | `quote` (settled) |
 | Text around a highlight | `context` in conversation and docs, `questionContext` in code (settled) |
 | One stay of a parent on the path on screen | `visit` |
 | One counted instance of a bubble being seen | `sighting` |
