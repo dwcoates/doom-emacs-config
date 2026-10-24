@@ -4559,10 +4559,7 @@ exactly one is set.  `:center' and `:hold' carry a nil V."
 The label is never empty."
   (let ((message "FeedSelectionRowViewportRevealNode"))
     (agent-repl-wire-verbs--check-keys message json '(label))
-    (let ((label (agent-repl-wire-verbs--decode-string message 'label json)))
-      (when (string-empty-p label)
-        (agent-repl-wire-verbs--fail message 'label "required string is empty"))
-      (list :label label))))
+    (list :label (agent-repl-wire-verbs--decode-required-string message 'label json))))
 
 (defun agent-repl-wire-decode-feed-selection-row (message json)
   "Decode the selected-row MESSAGE from JSON into (:row FEEDID :viewport VP).

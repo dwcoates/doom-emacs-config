@@ -39,6 +39,8 @@
 (declare-function agent-repl-wire--decode-optional-uint32 "wire-common")
 (declare-function agent-repl-wire--decode-repeated "wire-common")
 (declare-function agent-repl-wire--decode-string "wire-common")
+(declare-function agent-repl-wire--decode-required-string "wire-common")
+(declare-function agent-repl-wire--require-string "wire-common")
 (declare-function agent-repl-wire--decoded "wire-common")
 (declare-function agent-repl-wire--encode-empty "wire-common")
 (declare-function agent-repl-wire--encode-oneof "wire-common")
@@ -635,10 +637,9 @@ response; the composer opens a blank entry answering LABEL.  The label is
 never empty."
   (let ((object (agent-repl-wire--object "HostWorkspaceComposeEntry" value)))
     (agent-repl-wire--check-keys "HostWorkspaceComposeEntry" object '(label))
-    (let ((label (agent-repl-wire--decode-string "HostWorkspaceComposeEntry" 'label object)))
-      (when (string-empty-p label)
-        (agent-repl-wire--fail "HostWorkspaceComposeEntry" 'label "required string is empty"))
-      (agent-repl-wire--decoded "HostWorkspaceComposeEntry" (list :label label)))))
+    (agent-repl-wire--decoded
+     "HostWorkspaceComposeEntry"
+     (list :label (agent-repl-wire--decode-required-string "HostWorkspaceComposeEntry" 'label object)))))
 
 ;;;; ---- The selection push ----
 
@@ -1503,10 +1504,7 @@ THE ARM IS THE ANSWER: `:banner' names the workspace a focus gain claimed,
   "Encode `EditorInstance' from the string VALUE, this Emacs process's identity.
 REQUIRED and never empty: a watch without it is refused, and an empty one
 is refused HERE, before anything is sent."
-  (unless (stringp value)
-    (agent-repl-wire--fail "EditorInstance" 'value "required field is unset"))
-  (when (string-empty-p value)
-    (agent-repl-wire--fail "EditorInstance" 'value "required string is empty"))
+  (agent-repl-wire--require-string "EditorInstance" 'value value)
   (agent-repl-wire--encoded
    "EditorInstance"
    (list (cons 'value (agent-repl-wire--encode-string "EditorInstance" 'value value)))))
@@ -1526,10 +1524,7 @@ INSTANCE, this Emacs process's identity, the same on every stream it
 opens: a new one is how the daemon tells a full Emacs restart from a
 reconnect (`agent-repl-wire-encode-editor-instance')."
   (let ((build (plist-get value :elisp-build)))
-    (unless (stringp build)
-      (agent-repl-wire--fail "WatchDaemonEmacs" 'elispBuild "required field is unset"))
-    (when (string-empty-p build)
-      (agent-repl-wire--fail "WatchDaemonEmacs" 'elispBuild "required string is empty"))
+    (agent-repl-wire--require-string "WatchDaemonEmacs" 'elispBuild build)
     (unless (plist-member value :focus)
       (agent-repl-wire--fail "WatchDaemonEmacs" 'focus "required message field is absent"))
     (unless (plist-member value :instance)
@@ -1670,10 +1665,8 @@ one is a contract breach, never a reload to attempt."
     (agent-repl-wire--check-keys "DaemonReloadElisp" object '(moduleRoot build))
     (let ((root (agent-repl-wire--decode-string "DaemonReloadElisp" 'moduleRoot object))
           (build (agent-repl-wire--decode-string "DaemonReloadElisp" 'build object)))
-      (when (string-empty-p root)
-        (agent-repl-wire--fail "DaemonReloadElisp" 'moduleRoot "required string is empty"))
-      (when (string-empty-p build)
-        (agent-repl-wire--fail "DaemonReloadElisp" 'build "required string is empty"))
+      (agent-repl-wire--require-string "DaemonReloadElisp" 'moduleRoot root)
+      (agent-repl-wire--require-string "DaemonReloadElisp" 'build build)
       (agent-repl-wire--decoded
        "DaemonReloadElisp"
        (list :module-root root :build build)))))
@@ -1684,10 +1677,9 @@ The build is REQUIRED: it is what the host is reloaded onto, and an empty
 one is a contract breach, never a reload to attempt."
   (let ((object (agent-repl-wire--object "DaemonReloadWebhost" value)))
     (agent-repl-wire--check-keys "DaemonReloadWebhost" object '(build))
-    (let ((build (agent-repl-wire--decode-string "DaemonReloadWebhost" 'build object)))
-      (when (string-empty-p build)
-        (agent-repl-wire--fail "DaemonReloadWebhost" 'build "required string is empty"))
-      (agent-repl-wire--decoded "DaemonReloadWebhost" (list :build build)))))
+    (agent-repl-wire--decoded
+     "DaemonReloadWebhost"
+     (list :build (agent-repl-wire--decode-required-string "DaemonReloadWebhost" 'build object)))))
 
 (defun agent-repl-wire-decode-daemon-drain-cancelled (value)
   "Decode VALUE as the empty `DaemonDrainCancelled' — presence is the fact."
@@ -1952,10 +1944,8 @@ contract breach rather than a fault to echo as a blank."
                                  '(faultId line fault openedAtMs))
     (let ((id (agent-repl-wire--decode-string "DaemonStandingFault" 'faultId object))
           (line (agent-repl-wire--decode-string "DaemonStandingFault" 'line object)))
-      (when (string-empty-p id)
-        (agent-repl-wire--fail "DaemonStandingFault" 'faultId "required string is empty"))
-      (when (string-empty-p line)
-        (agent-repl-wire--fail "DaemonStandingFault" 'line "required string is empty"))
+      (agent-repl-wire--require-string "DaemonStandingFault" 'faultId id)
+      (agent-repl-wire--require-string "DaemonStandingFault" 'line line)
       (agent-repl-wire--decoded
        "DaemonStandingFault"
        (list :fault-id id
