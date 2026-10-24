@@ -589,6 +589,43 @@ Once per push over every closed row, which is why it is DEBUG."
                       :collapsed (plist-get entry :collapsed))))
             entries)))
 
+;;;; ---- Threads -----------------------------------------------------------
+;;
+;; A ZETTEL CHAT THREAD IS A WORKSPACE (the daemon's `thread' kind) with a
+;; page and a composer of its own, so Emacs opens one exactly as it opens a
+;; tab -- a perspective, its host stream, its panels -- from the roster's
+;; thread section.  It is never DRAWN: threads are not on the tab bar and are
+;; not in workspace cycling (owner ruling, 2026-10-24), so every thread's
+;; workspace is one of the walk's hidden ones, off the bar's drawing,
+;; numbering and navigation.  It is reached by the thread commands
+;; (threads.el) and by the roster's `current', like any other workspace.
+
+(defconst agent-repl-roster-thread-prefix "chat/"
+  "The prefix of a thread's workspace name, so no thread's name can take a tab's.")
+
+(defun agent-repl-roster-threads (&optional roster)
+  "Return ROSTER's thread rows, the one last interacted with first.
+ROSTER defaults to the last accepted roster (`agent-repl-roster-view')."
+  (plist-get (plist-get (or roster agent-repl-roster-view) :threads) :rows))
+
+(defun agent-repl-roster-thread-workspace-name (row)
+  "Return the workspace name a thread ROW is opened under."
+  (concat agent-repl-roster-thread-prefix (plist-get row :name)))
+
+(defun agent-repl-roster-desired-threads (roster)
+  "Return the workspaces ROSTER's threads ask for, as `agent-repl-roster-desired-tabs' does.
+Each carries `:thread' t and is never `:collapsed': its page loads and its
+session runs, it is only never drawn."
+  (mapcar (lambda (row)
+            (let ((ref (plist-get row :thread)))
+              (list :id (plist-get ref :id)
+                    :name (agent-repl-roster-thread-workspace-name row)
+                    :ref ref
+                    :availability nil
+                    :collapsed nil
+                    :thread t)))
+          (agent-repl-roster-threads roster)))
+
 ;;;; ---- Reconciliation ---------------------------------------------------
 
 (defun agent-repl-roster--open-tab (desired)
@@ -809,7 +846,8 @@ gone or closed, and sets the tab ORDER to the walk order strictly.
 
 A row that fails to reconcile is contained rather than fatal; see
 `agent-repl-roster--reconcile-row'."
-  (let* ((desired (agent-repl-roster-desired-tabs roster))
+  (let* ((desired (append (agent-repl-roster-desired-tabs roster)
+                          (agent-repl-roster-desired-threads roster)))
          (wanted-ids (make-hash-table :test 'equal))
          ;; Counted BEFORE the walk, because the walk is what makes rows
          ;; stop being tabless: asking the same question afterwards would
@@ -835,7 +873,10 @@ A row that fails to reconcile is contained rather than fatal; see
             (push (list :id (plist-get want :id) :name name :ref (plist-get want :ref)
                         :collapsed (plist-get want :collapsed))
                   rows)
-            (when (plist-get want :collapsed) (push name hidden)))
+            ;; A THREAD IS NEVER DRAWN, but its page loads: it is hidden
+            ;; from the bar while open-tabs asks for it like any shown tab.
+            (when (or (plist-get want :collapsed) (plist-get want :thread))
+              (push name hidden)))
           ;; A row that FAILED opened no tab, so it does not count towards
           ;; the bring-up.
           (when (and fresh name)
