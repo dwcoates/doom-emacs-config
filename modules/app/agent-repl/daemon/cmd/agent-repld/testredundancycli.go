@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -329,13 +330,17 @@ func readGoSuites(path string) ([]*testrunv1.RedundancyGoSuite, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read -suites %s: %w", path, err)
 	}
+	// THE REQUEST CARRIES THESE FIELDS ALONE: a field the tool's own file
+	// would honor beyond them is refused, never dropped on the way.
 	var list []struct {
 		Package, Tags, Module string
 		Tests, Programs       []string
 		Kept                  bool
 	}
-	if err := json.Unmarshal(data, &list); err != nil {
-		return nil, fmt.Errorf("decode -suites %s: %w", path, err)
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&list); err != nil {
+		return nil, fmt.Errorf("decode -suites %s (fields Package, Tags, Tests, Programs, Kept, Module): %w", path, err)
 	}
 	if len(list) == 0 {
 		return nil, fmt.Errorf("-suites %s names no suite", path)

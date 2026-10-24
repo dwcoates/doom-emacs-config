@@ -135,6 +135,10 @@ func TestTestRedundancyReadsItsFiles(t *testing.T) {
 }
 
 func TestTestRedundancyRefuses(t *testing.T) {
+	unknownField := filepath.Join(t.TempDir(), "suites.json")
+	if err := os.WriteFile(unknownField, []byte(`[{"Package":"./x","Prebuild":true}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	empty := filepath.Join(t.TempDir(), "empty.txt")
 	if err := os.WriteFile(empty, []byte("# nothing\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -157,6 +161,7 @@ func TestTestRedundancyRefuses(t *testing.T) {
 		{name: "a vitest measurement mutating nothing", args: []string{"vitest", "-out", "/o", "-package", "."}, want: "-mutate is required"},
 		{name: "a vitest measurement of no package", args: []string{"vitest", "-out", "/o", "-mutate", "x"}, want: "-package is required"},
 		{name: "a report of nothing", args: []string{"report"}, want: "-in is required"},
+		{name: "a suite list with a field the request cannot carry", args: []string{"go", "-out", "/o", "-suites", unknownField}, want: `unknown field "Prebuild"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
