@@ -37,6 +37,8 @@
 (declare-function agent-repl-host-request-switch "host" (ws trigger))
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl-serial-create "core" (&rest slots))
+(declare-function agent-repl-serial-send "core" (serial report send))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
@@ -83,16 +85,12 @@ directory can supply.  Here there is nothing missing to supply."
   '(:agent-repl-central "desktop focus is Emacs-wide")
   "The log scope every focus report records under.")
 
-(defvar agent-repl--focus-report-in-flight nil
-  "Non-nil while a `ReportEditorFocus' call is unanswered.
-REPORTS ARE SERIALIZED: two unary calls in flight at once may land in
-either order, and the daemon would keep whichever arrived last rather
-than the focus Emacs holds now.  One call at a time, and a change during
-it (`agent-repl--focus-report-owed') sends the CURRENT focus once it is
-answered, is what makes the daemon's focus end on Emacs's.")
-
-(defvar agent-repl--focus-report-owed nil
-  "Non-nil when the focus may have changed while a report was in flight.")
+(defvar agent-repl--focus-serial (agent-repl-serial-create)
+  "The focus reports' serializer (`agent-repl-serial-send').
+Two reports in flight at once may land in either order, and the daemon
+would keep whichever arrived last rather than the focus Emacs holds now;
+one at a time, the current focus sent once the one in flight is answered,
+is what makes the daemon's focus end on Emacs's.")
 
 (defvar agent-repl--focus-report-timer nil
   "The pending coalesced report, or nil.
@@ -104,29 +102,28 @@ told where focus came to rest rather than every step on the way.")
   "Tell the live daemon whether Emacs is focused now.
 With no link standing there is nothing to tell: the next WatchDaemon
 Emacs opens states its focus itself.  While a report is in flight, the
-new one is OWED and sent when that one is answered."
+new one is OWED and sent when that one is answered
+\(`agent-repl--focus-serial')."
   (let ((conn (agent-repl-link-live)))
-    (cond
-     ((null conn)
-      (agent-repl--log agent-repl--focus-log-scope
-                       "elisp.notifications.focus-report skipped reason=no-link"))
-     (agent-repl--focus-report-in-flight
-      (setq agent-repl--focus-report-owed t)
-      (agent-repl--log agent-repl--focus-log-scope
-                       "elisp.notifications.focus-report owed reason=in-flight"))
-     (t
-      (let ((focused (and (agent-repl--emacs-focused-p) t)))
-        (setq agent-repl--focus-report-in-flight t
-              agent-repl--focus-report-owed nil)
-        (agent-repl--info agent-repl--focus-log-scope
-                          "elisp.notifications.focus-report send focused=%s" focused)
-        (agent-repl-rpc-report-editor-focus
-         conn (list :focus (agent-repl-wire-editor-focus focused))
-         :on-response (lambda (response) (agent-repl--focus-report-answered focused response))
-         :on-failure (lambda (detail) (agent-repl--focus-report-failed focused detail))))))))
+    (if (null conn)
+        (agent-repl--log agent-repl--focus-log-scope
+                         "elisp.notifications.focus-report skipped reason=no-link")
+      (when (eq (agent-repl-serial-send
+                 agent-repl--focus-serial #'agent-repl--focus-report
+                 (lambda (done)
+                   (let ((focused (and (agent-repl--emacs-focused-p) t)))
+                     (agent-repl--info agent-repl--focus-log-scope
+                                       "elisp.notifications.focus-report send focused=%s" focused)
+                     (agent-repl-rpc-report-editor-focus
+                      conn (list :focus (agent-repl-wire-editor-focus focused))
+                      :on-response (lambda (response) (agent-repl--focus-report-answered focused response done))
+                      :on-failure (lambda (detail) (agent-repl--focus-report-failed focused detail done))))))
+                :owed)
+        (agent-repl--log agent-repl--focus-log-scope
+                         "elisp.notifications.focus-report owed reason=in-flight")))))
 
-(defun agent-repl--focus-report-answered (focused response)
-  "Record the daemon's RESPONSE to a report of FOCUSED, and send what is owed.
+(defun agent-repl--focus-report-answered (focused response done)
+  "Record the daemon's RESPONSE to a report of FOCUSED, then end it with DONE.
 A success carries what the report claimed (`agent-repl--focus-claim-answered')."
   (pcase (plist-get response :arm)
     (:success
@@ -143,20 +140,15 @@ A success carries what the report claimed (`agent-repl--focus-claim-answered')."
      (agent-repl--error agent-repl--focus-log-scope
                         "elisp.notifications.focus-report unknown-arm focused=%s arm=%S"
                         focused arm)))
-  (agent-repl--focus-report-settle))
+  (funcall done))
 
-(defun agent-repl--focus-report-failed (focused detail)
-  "Record a report of FOCUSED that failed in transport with DETAIL."
+(defun agent-repl--focus-report-failed (focused detail done)
+  "Record a report of FOCUSED that failed in transport with DETAIL.
+DONE ends the report."
   (agent-repl--error agent-repl--focus-log-scope
                      "elisp.notifications.focus-report failed focused=%s detail=%S"
                      focused detail)
-  (agent-repl--focus-report-settle))
-
-(defun agent-repl--focus-report-settle ()
-  "End the in-flight report, and send the owed one if focus moved meanwhile."
-  (setq agent-repl--focus-report-in-flight nil)
-  (when agent-repl--focus-report-owed
-    (agent-repl--focus-report)))
+  (funcall done))
 
 (defun agent-repl--focus-changed ()
   "Report Emacs's focus once the change that called this has settled.

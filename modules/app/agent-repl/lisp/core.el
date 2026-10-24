@@ -165,6 +165,39 @@ no unregistered chain to leave armed across a reload."
 
 (agent-repl--cancel-all-timers)
 
+;;;; ---- Serialized reports ----
+;;
+;; A REPORT OF STATE TO THE DAEMON is sent ONE AT A TIME.  Two unary calls in
+;; flight at once may land in either order, and the daemon would keep
+;; whichever arrived last rather than the state Emacs holds now.  So while a
+;; report is in flight a new one is OWED, and once the one in flight ends the
+;; report runs again, reading the state as it stands then: the daemon's state
+;; always ends on Emacs's.  THE ONE SERIALIZER every such report runs
+;; through (the desktop focus, the composer's entries).
+
+(cl-defstruct (agent-repl-serial
+               (:constructor agent-repl-serial-create))
+  "One serialized report: whether a call is in flight, and whether one is owed."
+  (in-flight nil)
+  (owed nil))
+
+(defun agent-repl-serial-send (serial report send)
+  "Run SEND for SERIAL unless a call is in flight, in which case owe REPORT.
+SEND is called with one argument, DONE, a function to call once the call
+has ended, answered or failed; DONE then runs REPORT again when one was
+owed meanwhile.  Answers `:owed' when the call was owed, `:sent' when SEND
+ran."
+  (if (agent-repl-serial-in-flight serial)
+      (progn (setf (agent-repl-serial-owed serial) t) :owed)
+    (setf (agent-repl-serial-in-flight serial) t
+          (agent-repl-serial-owed serial) nil)
+    (funcall send (lambda ()
+                    (setf (agent-repl-serial-in-flight serial) nil)
+                    (when (agent-repl-serial-owed serial)
+                      (setf (agent-repl-serial-owed serial) nil)
+                      (funcall report))))
+    :sent))
+
 ;;;; ---- One-shot settle latch ----
 ;;
 ;; Every asynchronous operation in this module races several arrivals for

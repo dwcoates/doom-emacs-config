@@ -7329,3 +7329,62 @@ the page read."
           (when (re-search-forward "(\\* 1000 (float-time))" nil t)
             (push (file-name-nondirectory file) offenders)))))
     (should-not offenders)))
+
+;;;; ---- Serialized reports ----
+
+(ert-deftest agent-repl-test-core-serial-sends-when-nothing-is-in-flight ()
+  "With nothing in flight the send runs at once."
+  (let ((serial (agent-repl-serial-create))
+        (sent 0))
+    (should (eq (agent-repl-serial-send serial #'ignore (lambda (_done) (cl-incf sent))) :sent))
+    (should (and (= sent 1) (agent-repl-serial-in-flight serial)))))
+
+(ert-deftest agent-repl-test-core-serial-owes-a-send-made-while-one-is-in-flight ()
+  "A send while one is in flight runs nothing and is owed."
+  (let ((serial (agent-repl-serial-create))
+        (sent 0))
+    (agent-repl-serial-send serial #'ignore (lambda (_done) (cl-incf sent)))
+    (should (eq (agent-repl-serial-send serial #'ignore (lambda (_done) (cl-incf sent))) :owed))
+    (should (and (= sent 1) (agent-repl-serial-owed serial)))))
+
+(ert-deftest agent-repl-test-core-serial-done-runs-the-owed-report-once ()
+  "Ending a call that owed reports runs the report once, and clears the debt."
+  (let ((serial (agent-repl-serial-create))
+        (done nil)
+        (reported 0))
+    (agent-repl-serial-send serial (lambda () (cl-incf reported)) (lambda (d) (setq done d)))
+    (agent-repl-serial-send serial #'ignore #'ignore)
+    (agent-repl-serial-send serial #'ignore #'ignore)
+    ;; Act
+    (funcall done)
+    ;; Assert
+    (should (equal (list reported (agent-repl-serial-in-flight serial) (agent-repl-serial-owed serial))
+                   '(1 nil nil)))))
+
+(ert-deftest agent-repl-test-core-serial-done-without-a-debt-runs-nothing ()
+  "Ending a call that owed nothing runs no report."
+  (let ((serial (agent-repl-serial-create))
+        (done nil)
+        (reported 0))
+    (agent-repl-serial-send serial (lambda () (cl-incf reported)) (lambda (d) (setq done d)))
+    (funcall done)
+    (should (and (= reported 0) (not (agent-repl-serial-in-flight serial))))))
+
+(ert-deftest agent-repl-test-core-serial-done-reruns-the-report-it-was-handed ()
+  "The report run after the call is the one the owed send was made with."
+  (let ((serial (agent-repl-serial-create))
+        (done nil)
+        (reported nil))
+    (agent-repl-serial-send serial (lambda () (push 'first reported)) (lambda (d) (setq done d)))
+    (agent-repl-serial-send serial (lambda () (push 'second reported)) #'ignore)
+    (funcall done)
+    (should (equal reported '(first)))))
+
+(ert-deftest agent-repl-test-core-every-serialized-report-goes-through-the-serializer ()
+  "The focus report and the composer's entries report run through `agent-repl-serial-send'."
+  (let ((dir (file-name-directory (symbol-file 'agent-repl-serial-send 'defun))))
+    (dolist (file '("notifications.el" "prompt-entries.el"))
+      (with-temp-buffer
+        (insert-file-contents (expand-file-name file dir))
+        (should (save-excursion (search-forward "(agent-repl-serial-send" nil t)))
+        (should-not (re-search-forward "in-flight nil$" nil t))))))

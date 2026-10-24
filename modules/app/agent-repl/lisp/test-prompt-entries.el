@@ -378,7 +378,8 @@ of every rung."
   (declare (indent 0))
   `(let ((sent nil) (answer nil) (fail nil) (logs nil))
      (agent-repl-test-prompt-entries--with-tree agent-repl-test-prompt-entries--headings
-       (setq agent-repl-prompt-entries--ws "ws-1")
+       (setq agent-repl-prompt-entries--ws "ws-1"
+             agent-repl-prompt-entries--serial (agent-repl-serial-create))
        (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) '(:id "ws-1" :dir "/w")))
                  ((symbol-function 'agent-repl-host-conn-or-primary) (lambda (_ws) 'conn))
                  ((symbol-function 'agent-repl-rpc-report-composer-entries)

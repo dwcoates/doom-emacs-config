@@ -36,6 +36,8 @@
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--async-command "core" (label dir command callback))
+(declare-function agent-repl-serial-create "core" (&rest slots))
+(declare-function agent-repl-serial-send "core" (serial report send))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl-host-ref "host" (ws))
@@ -183,6 +185,9 @@ and nothing waiting is called."
 (defvar-local agent-repl-prompt-entries--ws nil
   "The workspace this composer is, once marking is enabled.")
 
+(defvar-local agent-repl-prompt-entries--serial nil
+  "This composer's report serializer (`agent-repl-serial-send'), once enabled.")
+
 (defun agent-repl-prompt-entries-enable (ws)
   "Mark the entries of WS's composer, the current buffer, from now on.
 Marking starts once the grammar loads, which may be after this returns,
@@ -198,7 +203,8 @@ and so does reporting them to the daemon after each command
            (with-current-buffer buf
              (setq agent-repl-prompt-entries--parser
                    (treesit-parser-create agent-repl-prompt-entries--language)
-                   agent-repl-prompt-entries--ws ws)
+                   agent-repl-prompt-entries--ws ws
+                   agent-repl-prompt-entries--serial (agent-repl-serial-create))
              (add-hook 'after-change-functions #'agent-repl-prompt-entries--on-change nil t)
              (add-hook 'post-command-hook #'agent-repl-prompt-entries--report nil t)
              (agent-repl-prompt-entries-mark)
@@ -275,32 +281,28 @@ An `agent-repl-host-update-functions' entry."
 ;; (ReportComposerEntries).  It answers with state: the node that entry
 ;; answers, highlighted in the feed, and the labels that answer nothing,
 ;; marked here.  ONE REPORT IS IN FLIGHT AT A TIME, the latest one owed once
-;; it is answered: two reports racing could land in either order, and the
-;; daemon would then hold the older.
+;; it is answered (`agent-repl-serial-send'): two reports racing could land
+;; in either order, and the daemon would then hold the older.
 
 (defvar-local agent-repl-prompt-entries--reported nil
   "The (LABELS . AT) last sent from this composer, or nil.")
 
-(defvar-local agent-repl-prompt-entries--in-flight nil
-  "Non-nil while a report from this composer is unanswered.")
-
-(defvar-local agent-repl-prompt-entries--owed nil
-  "Non-nil when the composer moved while a report was in flight.")
-
 (defun agent-repl-prompt-entries--report ()
   "Report the composer's entries to the daemon when they moved since last sent.
-The composer's `post-command-hook' entry."
+The composer's `post-command-hook' entry.  While a report is in flight the
+new one is owed, and sent once that one is answered."
   (when (and agent-repl-prompt-entries--parser agent-repl-prompt-entries--ws)
     (let* ((entries (agent-repl-prompt-entries--entries))
            (state (cons (mapcar #'car entries) (agent-repl-prompt-entries--entry-at-point entries))))
-      (cond
-       ((equal state agent-repl-prompt-entries--reported))
-       (agent-repl-prompt-entries--in-flight
-        (setq agent-repl-prompt-entries--owed t))
-       (t (agent-repl-prompt-entries--send state))))))
+      (unless (equal state agent-repl-prompt-entries--reported)
+        (let ((buf (current-buffer)))
+          (agent-repl-serial-send
+           agent-repl-prompt-entries--serial
+           (lambda () (when (buffer-live-p buf) (with-current-buffer buf (agent-repl-prompt-entries--report))))
+           (lambda (done) (agent-repl-prompt-entries--send state done))))))))
 
-(defun agent-repl-prompt-entries--send (state)
-  "Send STATE, (LABELS . AT), as this composer's report.
+(defun agent-repl-prompt-entries--send (state done)
+  "Send STATE, (LABELS . AT), as this composer's report; call DONE once it ends.
 With no daemon-minted ref or no connection nothing is sent and nothing is
 marked reported, so the next command tries again."
   (let* ((ws agent-repl-prompt-entries--ws)
@@ -308,43 +310,35 @@ marked reported, so the next command tries again."
          (ref (agent-repl-host-ref ws))
          (conn (agent-repl-host-conn-or-primary ws)))
     (if (not (and ref conn))
-        (agent-repl--log ws "elisp.prompt-entries.report-skipped ws=%s ref=%s conn=%s" ws (and ref t) (and conn t))
-      (setq agent-repl-prompt-entries--in-flight t
-            agent-repl-prompt-entries--reported state)
+        (progn
+          (agent-repl--log ws "elisp.prompt-entries.report-skipped ws=%s ref=%s conn=%s" ws (and ref t) (and conn t))
+          (funcall done))
+      (setq agent-repl-prompt-entries--reported state)
       (agent-repl--log ws "elisp.prompt-entries.report ws=%s labels=%S at=%S" ws (car state) (cdr state))
       (agent-repl-rpc-report-composer-entries
        conn (list :workspace ref :labels (car state)
                   :at-point (if (cdr state) (list :arm :entry :value (list :label (cdr state))) (list :arm :none)))
-       :on-response (lambda (response) (agent-repl-prompt-entries--answered buf ws state response))
-       :on-failure (lambda (detail) (agent-repl-prompt-entries--failed buf ws state detail))))))
+       :on-response (lambda (response) (agent-repl-prompt-entries--answered ws state response done))
+       :on-failure (lambda (detail) (agent-repl-prompt-entries--failed buf ws state detail done))))))
 
-(defun agent-repl-prompt-entries--answered (buf ws state response)
-  "Finish BUF's report of STATE for WS on its RESPONSE, and send what is owed."
+(defun agent-repl-prompt-entries--answered (ws state response done)
+  "Record the daemon's RESPONSE to WS's report of STATE, then end it with DONE."
   (pcase (plist-get response :arm)
     (:success nil)
     (:error (agent-repl--info ws "elisp.prompt-entries.report-refused ws=%s labels=%S cause=%S"
                               ws (car state) (plist-get (plist-get response :value) :cause)))
     (other (agent-repl--error ws "elisp.prompt-entries.report-unknown-arm ws=%s arm=%S" ws other)))
-  (agent-repl-prompt-entries--settle buf))
+  (funcall done))
 
-(defun agent-repl-prompt-entries--failed (buf ws state detail)
-  "Finish BUF's report of STATE for WS, which the daemon never answered.
-DETAIL is the transport's failure.
-Nothing is marked reported, so the next command sends it again."
+(defun agent-repl-prompt-entries--failed (buf ws state detail done)
+  "Record BUF's report of STATE for WS, which the daemon never answered.
+DETAIL is the transport's failure.  Nothing is marked reported, so the next
+command sends it again; DONE ends the report."
   (agent-repl--warn ws "elisp.prompt-entries.report-failure ws=%s labels=%S detail=%S" ws (car state) detail)
   (when (buffer-live-p buf)
     (with-current-buffer buf
       (setq agent-repl-prompt-entries--reported nil)))
-  (agent-repl-prompt-entries--settle buf))
-
-(defun agent-repl-prompt-entries--settle (buf)
-  "End BUF's report in flight, and send the latest one if one is owed."
-  (when (buffer-live-p buf)
-    (with-current-buffer buf
-      (setq agent-repl-prompt-entries--in-flight nil)
-      (when agent-repl-prompt-entries--owed
-        (setq agent-repl-prompt-entries--owed nil)
-        (agent-repl-prompt-entries--report)))))
+  (funcall done))
 
 ;;;; ---- Opening a line beside an entry ----
 ;;

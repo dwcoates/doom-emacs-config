@@ -72,8 +72,7 @@ one of `debug', `info', `warn' and `error'."
 Every `ReportEditorFocus' call is recorded into `calls' as (CONN . REQUEST)
 with its callbacks in `answers', so a test answers each one itself."
   (declare (indent 2))
-  `(let ((agent-repl--focus-report-in-flight nil)
-         (agent-repl--focus-report-owed nil)
+  `(let ((agent-repl--focus-serial (agent-repl-serial-create))
          (agent-repl--focus-report-timer nil)
          (focused-now ,focused)
          (calls nil)
@@ -120,7 +119,7 @@ with its callbacks in `answers', so a test answers each one itself."
   (agent-repl-test-notifications--with-reporter t nil
     (agent-repl--focus-report)
     (should-not calls)
-    (should-not agent-repl--focus-report-in-flight)))
+    (should-not (agent-repl-serial-in-flight agent-repl--focus-serial))))
 
 (ert-deftest agent-repl-test-focus-report-in-flight-owes-the-next ()
   "A change while a report is in flight sends nothing yet and is owed."
@@ -128,7 +127,7 @@ with its callbacks in `answers', so a test answers each one itself."
     (agent-repl--focus-report)
     (agent-repl--focus-report)
     (should (= (length calls) 1))
-    (should agent-repl--focus-report-owed)))
+    (should (agent-repl-serial-owed agent-repl--focus-serial))))
 
 (ert-deftest agent-repl-test-focus-report-sends-the-owed-current-focus-when-answered ()
   "Once the in-flight report is answered, the owed one sends the focus held NOW."
@@ -145,7 +144,7 @@ with its callbacks in `answers', so a test answers each one itself."
   (agent-repl-test-notifications--with-reporter t 'conn
     (agent-repl--focus-report)
     (agent-repl-test-notifications--answer (car answers) agent-repl-test-notifications--no-gain)
-    (should-not agent-repl--focus-report-in-flight)
+    (should-not (agent-repl-serial-in-flight agent-repl--focus-serial))
     (should (= (length calls) 1))))
 
 (ert-deftest agent-repl-test-focus-report-refusal-is-recorded-at-info ()
@@ -156,7 +155,7 @@ with its callbacks in `answers', so a test answers each one itself."
      (agent-repl-test-notifications--answer
       (car answers) '(:arm :error :value (:cause (:arm :no-emacs-stream :value nil))))
      (should (agent-repl-test-notifications--recorded-p records 'info "focus-report refused focused=t"))
-     (should-not agent-repl--focus-report-in-flight))))
+     (should-not (agent-repl-serial-in-flight agent-repl--focus-serial)))))
 
 (ert-deftest agent-repl-test-focus-report-transport-failure-is-an-error ()
   "A transport failure is recorded at ERROR with its detail, and the report ends."
@@ -165,7 +164,7 @@ with its callbacks in `answers', so a test answers each one itself."
      (agent-repl--focus-report)
      (funcall (plist-get (car answers) :on-failure) '(:kind :connect :message "refused"))
      (should (agent-repl-test-notifications--recorded-p records 'error "focus-report failed focused=t detail=.*refused"))
-     (should-not agent-repl--focus-report-in-flight))))
+     (should-not (agent-repl-serial-in-flight agent-repl--focus-serial)))))
 
 (ert-deftest agent-repl-test-focus-report-unknown-arm-is-an-error ()
   "An answer arm the reporter does not know is recorded at ERROR."
@@ -209,7 +208,7 @@ with its callbacks in `answers', so a test answers each one itself."
        (agent-repl-test-notifications--answer (car answers) (agent-repl-test-notifications--banner "id-1")))
      (should (equal switches '(("tab-1" . notification-focus))))
      (should (agent-repl-test-notifications--recorded-p records 'info "claim banner ws=tab-1 id=id-1"))
-     (should-not agent-repl--focus-report-in-flight))))
+     (should-not (agent-repl-serial-in-flight agent-repl--focus-serial)))))
 
 (ert-deftest agent-repl-test-focus-gain-claim-is-one-call ()
   "The switch a claimed banner asks for needs no call beyond the report."
