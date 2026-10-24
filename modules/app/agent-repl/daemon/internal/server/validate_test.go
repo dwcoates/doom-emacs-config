@@ -891,3 +891,58 @@ func TestClientLogWithNoSourceIsInvalidArgument(t *testing.T) {
 		t.Fatalf("code = %v, want InvalidArgument", code)
 	}
 }
+
+func TestValidateRowLabelRefusesAMoveNamingNoRowOrNoLabel(t *testing.T) {
+	tests := []struct {
+		name      string
+		row       *frontendv1.FeedId
+		label     string
+		wantField string
+	}{
+		{name: "a row and a label", row: &frontendv1.FeedId{Value: "r1"}, label: "1.1"},
+		{name: "no row", label: "1.1", wantField: "move.branch.row"},
+		{name: "a row with no value", row: &frontendv1.FeedId{}, label: "1.1", wantField: "move.branch.row.value"},
+		{name: "no label", row: &frontendv1.FeedId{Value: "r1"}, wantField: "move.branch.label"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			err := validateRowLabel("move.branch", tc.row, tc.label, "a branch names its node's label")
+
+			// Assert
+			if tc.wantField == "" {
+				if err != nil {
+					t.Fatalf("validateRowLabel = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || err.Code() != connect.CodeInvalidArgument || !strings.HasPrefix(err.Message(), tc.wantField+":") {
+				t.Fatalf("validateRowLabel = %v, want InvalidArgument on %s", err, tc.wantField)
+			}
+		})
+	}
+}
+
+func TestEveryRowAndLabelMoveIsValidatedThroughValidateRowLabel(t *testing.T) {
+	tests := []struct {
+		name      string
+		move      *agentreplv1.SelectFeedRowRequest
+		wantField string
+	}{
+		{name: "answer", move: &agentreplv1.SelectFeedRowRequest{Workspace: ref(), Move: &agentreplv1.SelectFeedRowRequest_Answer{
+			Answer: &agentreplv1.SelectFeedRowAnswer{Row: &frontendv1.FeedId{Value: "r1"}}}}, wantField: "move.answer.label"},
+		{name: "entry", move: &agentreplv1.SelectFeedRowRequest{Workspace: ref(), Move: &agentreplv1.SelectFeedRowRequest_Entry{
+			Entry: &agentreplv1.SelectFeedRowEntry{Row: &frontendv1.FeedId{Value: "r1"}}}}, wantField: "move.entry.label"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			err := validateSelectFeedRowRequest(tc.move)
+
+			// Assert
+			if err == nil || !strings.HasPrefix(err.Message(), tc.wantField+":") {
+				t.Fatalf("validateSelectFeedRowRequest = %v, want InvalidArgument on %s", err, tc.wantField)
+			}
+		})
+	}
+}

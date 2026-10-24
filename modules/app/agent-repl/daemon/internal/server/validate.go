@@ -221,21 +221,9 @@ func validateSelectFeedRowRequest(req *agentreplv1.SelectFeedRowRequest) *connec
 	case *agentreplv1.SelectFeedRowRequest_Bubble:
 		return validateFeedID("move.bubble.row", move.Bubble.GetRow())
 	case *agentreplv1.SelectFeedRowRequest_Answer:
-		if err := validateFeedID("move.answer.row", move.Answer.GetRow()); err != nil {
-			return err
-		}
-		if move.Answer.GetLabel() == "" {
-			return invalid("move.answer.label", "an answer names the label the reader clicked")
-		}
-		return nil
+		return validateRowLabel("move.answer", move.Answer.GetRow(), move.Answer.GetLabel(), "an answer names the label the reader clicked")
 	case *agentreplv1.SelectFeedRowRequest_Entry:
-		if err := validateFeedID("move.entry.row", move.Entry.GetRow()); err != nil {
-			return err
-		}
-		if move.Entry.GetLabel() == "" {
-			return invalid("move.entry.label", "an entry names its label")
-		}
-		return nil
+		return validateRowLabel("move.entry", move.Entry.GetRow(), move.Entry.GetLabel(), "an entry names its label")
 	}
 	return invalid("move", "a selection move is required")
 }
@@ -1479,6 +1467,19 @@ func validateSendLoginInputRequest(req *agentreplv1.SendLoginInputRequest) *conn
 		if resize.GetCols() <= 0 {
 			return invalid("resize.cols", "a positive column count is required")
 		}
+	}
+	return nil
+}
+
+// validateRowLabel refuses a move under FIELD naming no row or no label as
+// InvalidArgument, WHY saying what the label is: the one check every move that
+// names a row and a label of it (answer, entry, branch) makes.
+func validateRowLabel(field string, row *frontendv1.FeedId, label, why string) *connect.Error {
+	if err := validateFeedID(field+".row", row); err != nil {
+		return err
+	}
+	if label == "" {
+		return invalid(field+".label", why)
 	}
 	return nil
 }
