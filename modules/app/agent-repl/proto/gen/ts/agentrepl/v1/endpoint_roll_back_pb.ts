@@ -171,7 +171,7 @@ export type RollBackResendEntry = Message<"agentrepl.v1.RollBackResendEntry"> & 
   text: string;
 
   /**
-   * The prompt row whose entry was clicked (HostWorkspacePromptEntryClicked).
+   * The prompt row whose entry is edited.
    * A rollback planned to any other prompt refuses the resend
    * (`entry_not_found`) before anything is rolled back, so an edit made for
    * one prompt can never be applied to another that happens to hold the

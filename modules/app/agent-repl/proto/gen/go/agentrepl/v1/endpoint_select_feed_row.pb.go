@@ -276,10 +276,14 @@ type SelectFeedRowRequest_Answer struct {
 }
 
 type SelectFeedRowRequest_Entry struct {
-	// The reader clicked an entry of a prompt: select that prompt as a click
-	// does (frontend.v1.FeedSelectionRowViewportHold), and tell Emacs to fill
-	// the composer with the entry (HostWorkspacePromptEntryClicked), so the
-	// next send rolls the prompt back and resends it with that entry edited.
+	// The reader clicked an entry of a prompt (owner ruling, 2026-10-24):
+	// select the response the entry answers, by the rule the prompt's entries
+	// are bound by, CENTERED, and name the node the webapp boxes in it, with
+	// its subtree, while that selection stands
+	// (frontend.v1.FeedSelectionRowViewportRevealNode). It never toggles, and
+	// asks nothing of Emacs. An entry of no prompt the feed holds, one that
+	// answers no response, or one whose response is not selectable, is
+	// refused as not selectable, echoing the prompt's row.
 	Entry *SelectFeedRowEntry `protobuf:"bytes,9,opt,name=entry,proto3,oneof"`
 }
 
@@ -419,6 +423,7 @@ func (x *SelectFeedRowAnswer) GetLabel() string {
 }
 
 // The prompt entry the reader clicked.
+// The entry of a prompt the reader clicked.
 type SelectFeedRowEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The prompt's row.

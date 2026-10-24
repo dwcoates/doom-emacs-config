@@ -266,7 +266,7 @@ type RollBackResendEntry struct {
 	Label string `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
 	// What the entry says now.
 	Text string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
-	// The prompt row whose entry was clicked (HostWorkspacePromptEntryClicked).
+	// The prompt row whose entry is edited.
 	// A rollback planned to any other prompt refuses the resend
 	// (`entry_not_found`) before anything is rolled back, so an edit made for
 	// one prompt can never be applied to another that happens to hold the

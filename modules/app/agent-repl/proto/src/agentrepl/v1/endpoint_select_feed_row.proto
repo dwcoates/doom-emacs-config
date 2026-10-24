@@ -80,10 +80,14 @@ message SelectFeedRowRequest {
     // (frontend.v1.FeedSelectionRowViewportReveal). The prompt is elsewhere
     // in the feed, so unlike a bubble click this one moves the feed.
     SelectFeedRowAnswer answer = 8;
-    // The reader clicked an entry of a prompt: select that prompt as a click
-    // does (frontend.v1.FeedSelectionRowViewportHold), and tell Emacs to fill
-    // the composer with the entry (HostWorkspacePromptEntryClicked), so the
-    // next send rolls the prompt back and resends it with that entry edited.
+    // The reader clicked an entry of a prompt (owner ruling, 2026-10-24):
+    // select the response the entry answers, by the rule the prompt's entries
+    // are bound by, CENTERED, and name the node the webapp boxes in it, with
+    // its subtree, while that selection stands
+    // (frontend.v1.FeedSelectionRowViewportRevealNode). It never toggles, and
+    // asks nothing of Emacs. An entry of no prompt the feed holds, one that
+    // answers no response, or one whose response is not selectable, is
+    // refused as not selectable, echoing the prompt's row.
     SelectFeedRowEntry entry = 9;
     // The reader clicked a node of a response's tree (owner request,
     // 2026-10-24): select that response as the reply's target, as a click
@@ -113,6 +117,7 @@ message SelectFeedRowAnswer {
 }
 
 // The prompt entry the reader clicked.
+// The entry of a prompt the reader clicked.
 message SelectFeedRowEntry {
   // The prompt's row.
   frontend.v1.FeedId row = 1;
