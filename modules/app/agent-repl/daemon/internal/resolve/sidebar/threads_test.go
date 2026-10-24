@@ -12,21 +12,21 @@ import (
 // THE SIDEBAR'S APPS: the rail title's switcher, the thread section, and the
 // threads' absence from every repository section and the tab bar.
 
-var zettelHome = wsm.Repository{ID: "repo-zettel", Dir: "/home/zettel/threads", Name: "zettel", Kind: wsm.RepositoryKindZettel}
+// zettelHomeID is the threads' repository, which the registry never lists.
+const zettelHomeID = ids.RepoID("repo-zettel")
 
 // thread is a chat thread in the zettel home, last interacted with at AT.
 func thread(id, name string, at *time.Time) wsm.Workspace {
 	return wsm.Workspace{
-		ID: ids.WorkspaceID(id), Kind: wsm.WorkspaceKindThread, Repo: zettelHome.ID,
+		ID: ids.WorkspaceID(id), Kind: wsm.WorkspaceKindThread, Repo: zettelHomeID,
 		Dir: "/home/zettel/threads/" + name, Name: name, CreatedAt: epoch, LastSelectedAt: at,
 	}
 }
 
-// withThreads is a registry of one agent workspace and the given threads.
+// withThreads is a registry of one agent workspace and the given threads. It
+// lists no zettel home, exactly as wsm.DB.ListRepositories never does.
 func withThreads(threads ...wsm.Workspace) sidebar.Registry {
-	reg := registry(append([]wsm.Workspace{placed(workspace("w-a", "a"), 1)}, threads...)...)
-	reg.Repositories = append(reg.Repositories, zettelHome)
-	return reg
+	return registry(append([]wsm.Workspace{placed(workspace("w-a", "a"), 1)}, threads...)...)
 }
 
 func TestThreadsAreDrawnOnlyInTheThreadSection(t *testing.T) {

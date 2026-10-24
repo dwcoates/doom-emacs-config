@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -522,7 +523,13 @@ func (s *store) ListRepositories(ctx context.Context) ([]Repository, error) {
 // listRepositories loads every repository through Q, in their stored order,
 // all-or-nothing.
 func listRepositories(ctx context.Context, q querier) ([]Repository, error) {
-	return listRows(ctx, q, `SELECT `+repositoryColumns+` FROM repositories ORDER BY place`, scanRepository)
+	all, err := listRows(ctx, q, `SELECT `+repositoryColumns+` FROM repositories ORDER BY place`, scanRepository)
+	if err != nil {
+		return nil, err
+	}
+	// EVERY ROW IS DECODED, so a corrupt kind fails the read loudly; only then
+	// is the zettel home left out (db.go).
+	return slices.DeleteFunc(all, Repository.IsZettelHome), nil
 }
 
 // setWorkspaceField is the one write path for a single workspace column: it

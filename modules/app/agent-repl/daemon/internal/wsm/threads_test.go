@@ -30,12 +30,12 @@ func TestRegisterThreadMintsAThreadInTheZettelHome(t *testing.T) {
 	if !loaded.IsThread() || loaded.Name != "hydrogen-ions" || loaded.Branch != "" {
 		t.Errorf("loaded = %+v, want a thread named after its directory with no branch", loaded)
 	}
-	repos, err := s.ListRepositories(context.Background())
-	if err != nil {
+	var kind string
+	if err := s.db().QueryRow(`SELECT kind FROM repositories WHERE id = ?`, loaded.Repo).Scan(&kind); err != nil {
 		t.Fatal(err)
 	}
-	if len(repos) != 1 || !repos[0].IsZettelHome() || repos[0].ID != loaded.Repo {
-		t.Errorf("repositories = %+v, want the one zettel home holding the thread", repos)
+	if RepositoryKind(kind) != RepositoryKindZettel {
+		t.Errorf("the thread's repository is a %q, want the zettel home", kind)
 	}
 }
 
@@ -366,5 +366,27 @@ func TestLastInteractedAtIsTheLatestOfSelectionActivityAndCreation(t *testing.T)
 				t.Fatalf("LastInteractedAt = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestListRepositoriesNeverListsTheZettelHome(t *testing.T) {
+	// Arrange
+	db, _ := testStore(t)
+	ctx := context.Background()
+	if _, err := db.RegisterThread(ctx, filepath.Join(t.TempDir(), "threads", "why"), "why"); err != nil {
+		t.Fatalf("RegisterThread: %v", err)
+	}
+
+	// Act
+	repos, err := db.ListRepositories(ctx)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, repo := range repos {
+		if repo.IsZettelHome() {
+			t.Fatalf("repositories = %+v, want no zettel home", repos)
+		}
 	}
 }

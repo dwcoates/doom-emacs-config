@@ -50,7 +50,11 @@ type DB interface {
 	// anything (CreateWorkspace's repository). A dir that cannot be judged is
 	// an ordinary error.
 	RefuseTemporary(dir string) error
-	// ListRepositories loads every repository, all-or-nothing.
+	// ListRepositories loads every GIT repository, all-or-nothing. The zettel
+	// home, which holds the chat threads (threads.go), is no repository to
+	// any repository feature -- the roster's sections, the reaper, the
+	// divergence sweep, the boot's retirement, the merge queue -- and is
+	// never listed.
 	ListRepositories(ctx context.Context) ([]Repository, error)
 	// SetRepositoryFolded records whether a repository's roster section is
 	// collapsed; an unknown repository is ErrNotFound.
