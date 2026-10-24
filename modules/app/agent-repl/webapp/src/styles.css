@@ -493,7 +493,10 @@
     --diff-add-bg: #12351f;
     --diff-del-bg: #3d1a1a;
     --muted: #898782;
-    --repo-head-expanded: #f1efe9;
+    /* An expanded repository header steps back from --fg (owner request,
+       2026-10-24): at full foreground it dominated the OPEN section, so it
+       sits a little below it, still well above the collapsed grey. */
+    --repo-head-expanded: #d2cfc8;
     --repo-head-collapsed: #898782;
     --merged-today-gutter: #ece8df;
     --border: #2c2c2b;
