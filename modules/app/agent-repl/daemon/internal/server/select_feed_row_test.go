@@ -1619,3 +1619,70 @@ func TestSelectFeedRowBranchClickIsRecordedAtInfo(t *testing.T) {
 	}
 	t.Fatalf("INFO records = %v, want one naming resp-1, its node 3.1 and the response kind", log.at("INFO"))
 }
+
+// TestSelectClickedSetsTheSelectionAndRunsThenUnderTheLock pins the one way a
+// click selects: the row is selected as the kind and viewport asked for, and
+// what follows runs while the selection lock is still held.
+func TestSelectClickedSetsTheSelectionAndRunsThenUnderTheLock(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("resp-1")
+	s := h.Server.(*server)
+	var locked bool
+
+	// Act.
+	success, selectable, err := s.selectClicked(testWorkspaceID, selectionResponse, &frontendv1.FeedId{Value: "resp-1"}, holdUnderClick(), func() {
+		locked = !s.selectionMu.TryLock()
+		if !locked {
+			s.selectionMu.Unlock()
+		}
+	})
+
+	// Assert.
+	if err != nil || !selectable || success.GetSelected().GetSelection().GetResponse().GetViewport().GetHold() == nil {
+		t.Fatalf("selectClicked = (%v, %v, %v), want resp-1 selected as a response and held", success, selectable, err)
+	}
+	if !locked {
+		t.Fatal("then ran without the selection lock held")
+	}
+}
+
+// TestSelectClickedFailsWithoutRunningThen pins that a row the selection
+// cannot be set on fails the move, selects nothing and asks nothing more.
+func TestSelectClickedFailsWithoutRunningThen(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	s := h.Server.(*server)
+	ran := false
+
+	// Act.
+	success, _, err := s.selectClicked(testWorkspaceID, selectionResponse, &frontendv1.FeedId{Value: "missing"}, holdUnderClick(), func() { ran = true })
+
+	// Assert.
+	if err == nil || success != nil || ran {
+		t.Fatalf("selectClicked = (%v, %v), then ran = %v; want an error and then never run", success, err, ran)
+	}
+	if _, _, held := s.currentSelection(testWorkspaceID); held {
+		t.Fatal("a failed selectClicked selected a row")
+	}
+}
+
+// TestEveryClickSelectsThroughSelectClicked pins that each click handler
+// (bubble, answer, entry, branch) selects through selectClicked, so none
+// hand-rolls the lock and the store.
+func TestEveryClickSelectsThroughSelectClicked(t *testing.T) {
+	// Arrange.
+	src, err := os.ReadFile("select_feed_row.go")
+	if err != nil {
+		t.Fatalf("read select_feed_row.go: %v", err)
+	}
+
+	// Act.
+	calls := strings.Count(string(src), "s.selectClicked(")
+	builds := strings.Count(string(src), "selectionOf(kind, row,")
+
+	// Assert: four handlers call it, and only it builds a clicked selection.
+	if calls != 4 || builds != 1 {
+		t.Fatalf("select_feed_row.go calls selectClicked %d times and builds a clicked selection %d times, want 4 and 1", calls, builds)
+	}
+}
