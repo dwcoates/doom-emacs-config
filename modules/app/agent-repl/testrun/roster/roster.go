@@ -196,13 +196,14 @@ var Programs = []Program{
 	{Name: "shim-store", Owner: "store", Module: "agent-shim/shim-store", Package: "."},
 	{Name: "shim-claude-sidecar", Owner: "sidecar", Module: "agent-shim/claude/shim-sidecar", Package: "."},
 	{Name: "shim-lock", Owner: "lock", Module: "agent-shim/shim-lock", Package: "."},
+	{Name: "zettel", Owner: "zettel", Module: "zettel", Package: "."},
 }
 
 // CoverageSystems are the suites whose code is a system the coverage
 // baseline measures: each one's statement coverage, every tier together, is
 // the reference a test removal is held to (testrun/coverage-baseline.json).
 // The generated protobufs, the test tooling and the e2e harness are not.
-var CoverageSystems = []string{"daemon", "sidecar", "store", "lock", "logging", "protohelpers", "webapp", "shim"}
+var CoverageSystems = []string{"daemon", "sidecar", "store", "lock", "logging", "protohelpers", "webapp", "shim", "zettel"}
 
 // LookupProgram answers the program named name.
 func LookupProgram(name string) (Program, bool) {
@@ -305,6 +306,8 @@ var Suites = []Suite{
 		// internal/testclose's scan walks the store's own tree.
 		Reuse: &Reuse{Inputs: []string{"agent-shim/shim-store/"}}},
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock", Reuse: &Reuse{}},
+	{Name: "zettel", Kind: GoModule, Path: "zettel", Programs: map[string][]string{"integration": {"zettel"}},
+		Reuse: &Reuse{Inputs: []string{"zettel/"}}},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go", Reuse: &Reuse{Inputs: []string{"proto/vocab/"}}},
 	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go", Reuse: &Reuse{}},
 	// The tests that read the whole module rather than one system's tree:
