@@ -179,3 +179,26 @@ func TestChatSystemPromptReadsTheCorpusBrief(t *testing.T) {
 		})
 	}
 }
+
+func TestAGoneThreadDirectoryIsMadeAgainWithNoGit(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	dir := filepath.Join(f.home, "zettel", "threads", "why")
+	ws := wsm.Workspace{ID: "t1", Kind: wsm.WorkspaceKindThread, Dir: dir, Name: "why"}
+	f.db.with(ws)
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID}
+
+	// Act
+	restored, err := f.verbs.RestoreMissingWorktree(context.Background(), ws)
+
+	// Assert
+	if !restored || err != nil {
+		t.Fatalf("RestoreMissingWorktree = (%v, %v), want the thread restored", restored, err)
+	}
+	if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
+		t.Fatalf("the thread's directory was not made again: %v", statErr)
+	}
+	if len(f.git.gitCalls) != 0 || len(f.git.restored) != 0 {
+		t.Fatalf("git calls = %v, want none for a thread", f.git.gitCalls)
+	}
+}
