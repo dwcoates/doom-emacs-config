@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -180,6 +181,10 @@ type FleetDeps struct {
 	// Deliveries holds a fork's PARENT's turn sequence while the fork is made
 	// (forking.go): the prompt queue's Exclusively.
 	Deliveries DeliveryExclusion
+	// ChatSystemPrompt reads a zettel chat thread's system prompt at use time
+	// (the corpus's chat-thread-system.md), which every thread's StartSession
+	// carries in its chat profile (sessionProfile). Required.
+	ChatSystemPrompt func() (string, error)
 	// SocketProbe probes a workspace's shim socket for a listener; nil means
 	// shimsocket.Probe. It is injected for the same reason Probe is.
 	SocketProbe SocketProbeFunc
@@ -508,6 +513,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs a bring-up step sink; the editor's startup is told each step by it")
 	case deps.Restarts == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs a restart recorder; each step of a session's start is timed into it")
+	case deps.ChatSystemPrompt == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs the chat system prompt; every chat thread's session starts under it")
 	}
 	probe := deps.Probe
 	if probe == nil {
@@ -2373,6 +2380,31 @@ func freshModel(recorded string, workAccount bool) *conversationv1.AgentModel {
 	}
 }
 
+// sessionProfile is the session a workspace runs: an agent's, or a zettel
+// chat thread's, which runs tool-less under the chat system prompt.
+func (f *Fleet) sessionProfile(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) (*shimv1.SessionProfile, error) {
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		log.Error(opBringUp, "the workspace record could not be read; the session was not started", dlog.Context{"cause": err.Error()})
+		return nil, fmt.Errorf("start session for %q: read the workspace: %w", ws, err)
+	}
+	if !record.IsThread() {
+		return &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Agent{Agent: &shimv1.SessionProfileAgent{}}}, nil
+	}
+	text, err := f.deps.ChatSystemPrompt()
+	if err == nil && strings.TrimSpace(text) == "" {
+		err = errors.New("the chat system prompt is empty")
+	}
+	if err != nil {
+		log.Error(opBringUp, "the chat system prompt could not be read; the thread's session was not started", dlog.Context{"cause": err.Error()})
+		return nil, fmt.Errorf("start session for %q: the chat system prompt: %w", ws, err)
+	}
+	log.Debug(opBringUp, "the session starts as a chat thread's", dlog.Context{"system_prompt_chars": len(text)})
+	return &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Chat{Chat: &shimv1.SessionProfileChat{
+		SystemPrompt: &shimv1.SessionProfileChatSystemPrompt{Text: text},
+	}}}, nil
+}
+
 // DefaultStartSessionBound bounds ONE StartSession call.
 //
 // A START THAT NEVER ANSWERS IS A WORKSPACE THAT NEVER COMES BACK. StartSession
@@ -2450,6 +2482,12 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		}
 		req.Source = &shimv1.StartSessionRequest_Resume{Resume: resume}
 	}
+	// EVERY START NAMES THE SESSION IT IS: an agent's, or a chat thread's.
+	profile, err := f.sessionProfile(ctx, log, ws)
+	if err != nil {
+		return nil, err
+	}
+	req.Profile = profile
 	// A HIDDEN WORKSPACE THE USER IS NOT LOOKING AT IS BORN HELD, so no keep-alive can fire
 	// between its start and the cache keeper's hold (cachelapse.Keeper): its
 	// cache is left to lapse from the first instant it runs.

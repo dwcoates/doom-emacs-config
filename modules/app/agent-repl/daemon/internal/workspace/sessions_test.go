@@ -591,6 +591,9 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 type fleetFixture struct {
 	// restarts records every restart observation the fleet makes.
 	restarts restarttimingtest.Recorder
+	// chatPrompt and chatPromptErr answer the fleet's ChatSystemPrompt.
+	chatPrompt    string
+	chatPromptErr error
 	// deliveries is the fleet's delivery exclusion, recording each hold.
 	deliveries fakeDeliveries
 	// probeSequence, when set, is answered by the lock probe in order before
@@ -799,6 +802,9 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			f.steps = append(f.steps, step)
 		},
 		SessionsUp: func(ws ids.WorkspaceID) { f.sessionsUp = append(f.sessionsUp, ws) },
+		ChatSystemPrompt: func() (string, error) {
+			return f.chatPrompt, f.chatPromptErr
+		},
 		Probe: func(string, string) (sessionlock.State, error) {
 			f.probes++
 			if len(f.probeSequence) > 0 {
