@@ -315,14 +315,17 @@ func waitsOutColdGate(origin conversationv1.PromptOrigin) bool {
 }
 
 // mergeOrigin reports whether an origin is one the merge orchestrator submits
-// under. They are exactly conversation.v1 PromptOrigin's merge arms.
+// under: conversation.v1 PromptOrigin's merge arms, and the deploy stage's
+// prompt hook, which runs as the deploy's own turn while the deploy holds the
+// lease (internal/merge/deploy.go's stageDeploy).
 func mergeOrigin(origin conversationv1.PromptOrigin) bool {
 	switch origin {
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME:
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_HOOK:
 		return true
 	}
 	return false

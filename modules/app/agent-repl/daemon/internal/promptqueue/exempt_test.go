@@ -19,6 +19,7 @@ func TestExemptFromLeaseIsTheMergesOwnOrigins(t *testing.T) {
 	}{
 		{"a merge brief under the merge", wsm.HolderMerge, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR, true},
 		{"a displaced turn's resume under the merge", wsm.HolderMerge, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME, true},
+		{"a deploy stage's prompt hook under the merge", wsm.HolderMerge, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_HOOK, true},
 		{"the user under the merge", wsm.HolderMerge, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},
 		{"a merge brief under a restart", wsm.HolderRestart, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR, false},
 	}
