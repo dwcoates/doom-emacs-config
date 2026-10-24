@@ -7,14 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/proto"
 
 	testrunv1 "agentrepl/proto/testrun/v1"
 
@@ -24,6 +22,7 @@ import (
 	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/internal/protofile"
 	"agentrepl/testrun/internal/selection"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/internal/testtimes"
@@ -100,6 +99,29 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		log.Errorf("resolve the module root %s: %v", a.Module, err)
 		return 1
 	}
+	ev := d.Events
+	if ev == nil {
+		ev = events.New(io.Discard, log)
+	}
+	// A SELECTION FILE IS READ FIRST: a request of whole suites lowers onto
+	// the ordinary suite run (its coverage and record included) before
+	// anything is planned from the arguments.
+	var req *testrunv1.TestRunRequest
+	if a.Selection != "" {
+		req = &testrunv1.TestRunRequest{}
+		err := protofile.Read(a.Selection, req)
+		if err != nil {
+			err = fmt.Errorf("read the selection: %w", err)
+		}
+		if err == nil {
+			a, err = a.WithRequest(req)
+		}
+		if err != nil {
+			log.Errorf("the selection cannot be run: %v", err)
+			ev.Refused(err.Error())
+			return 1
+		}
+	}
 	layout := suites.Layout{
 		Repo:     repoRoot(moduleRoot),
 		Module:   moduleRoot,
@@ -126,14 +148,10 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		return 1
 	}
 
-	ev := d.Events
-	if ev == nil {
-		ev = events.New(io.Discard, log)
-	}
 	var selected []roster.Suite
 	var resolved selection.Resolved
 	if a.Selection != "" {
-		resolved, err = resolveSelection(a.Selection, layout)
+		resolved, err = selection.Resolve(req, layout)
 		if err != nil {
 			log.Errorf("the selection cannot be run: %v", err)
 			ev.Refused(err.Error())
@@ -315,20 +333,6 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		log.Infof("reused an earlier green run of their exact inputs, NOT run: %s (--no-reuse runs them)", strings.Join(names, " "))
 	}
 	return 0
-}
-
-// resolveSelection reads the testrun.v1.TestRunRequest at path and resolves it
-// against the roster.
-func resolveSelection(path string, layout suites.Layout) (selection.Resolved, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return selection.Resolved{}, fmt.Errorf("read the selection %s: %w", path, err)
-	}
-	req := &testrunv1.TestRunRequest{}
-	if err := proto.Unmarshal(data, req); err != nil {
-		return selection.Resolved{}, fmt.Errorf("decode the selection %s: %w", path, err)
-	}
-	return selection.Resolve(req, layout)
 }
 
 // needsWebappDist reports whether a suite the run will run reads the

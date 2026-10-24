@@ -10,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	testrunv1 "agentrepl/proto/testrun/v1"
+
 	"agentrepl/testrun/internal/reuse"
+	"agentrepl/testrun/internal/selection"
 	"agentrepl/testrun/roster"
 )
 
@@ -23,8 +26,9 @@ type Args struct {
 	// history file: see RecordOut and "testrun run only STAGES --record" in
 	// run.go.
 	Record bool
-	// RecordOut is where a --record run stages its timing rows (see
-	// PendingRecord). Required together with Record.
+	// RecordOut is where a recording run stages its timing rows (see
+	// PendingRecord). Required when the run records; bin/test-all.sh offers
+	// it on every run, since a selection file can ask for a record.
 	RecordOut string
 	// Coverage enables the expensive coverage instrumentation and reports.
 	Coverage bool
@@ -138,9 +142,35 @@ func ParseArgs(argv []string) (Args, error) {
 	if a.Record && a.RecordOut == "" {
 		return Args{}, errors.New("--record needs --record-out: the path `run` stages this run's timing rows at, for a later `testrun finish-record` to commit outside the git-state net")
 	}
-	if a.RecordOut != "" && !a.Record {
-		return Args{}, errors.New("--record-out needs --record")
+	return a, nil
+}
+
+// WithRequest lowers a selection file's request onto the run's arguments. A
+// request of whole suites IS an ordinary suite run (--suites, or every suite
+// for every_suite): it reuses, covers and records exactly as one, and is no
+// longer Targeted. A narrower request stays Targeted, and may neither cover
+// nor record, since both are whole suites' measurements.
+func (a Args) WithRequest(req *testrunv1.TestRunRequest) (Args, error) {
+	names, whole, err := selection.Whole(req)
+	if err != nil {
+		return Args{}, err
 	}
+	switch {
+	case req.GetRecord() && req.GetCoverage():
+		return Args{}, errors.New("record and coverage cannot be combined: coverage instrumentation changes the suite timings record keeps")
+	case req.GetCoverage() && !whole:
+		return Args{}, errors.New("coverage measures whole suites: select suites (suite or every_suite), not tests within them")
+	case req.GetRecord() && (!whole || len(names) > 0):
+		return Args{}, errors.New("record keeps the whole roster's timings: the request's one selection must be every_suite")
+	case req.GetRecord() && a.RecordOut == "":
+		return Args{}, errors.New("record needs --record-out: the path the run stages its timing rows at, for `testrun finish-record` to commit")
+	}
+	if !whole {
+		return a, nil
+	}
+	a.Selection, a.Targeted = "", false
+	a.Selected = names
+	a.Coverage, a.Record = req.GetCoverage(), req.GetRecord()
 	return a, nil
 }
 
