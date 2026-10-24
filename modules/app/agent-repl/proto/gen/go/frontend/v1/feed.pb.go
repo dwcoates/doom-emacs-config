@@ -26390,9 +26390,10 @@ func (x *FeedMergeQueueWaiting) GetStageEnteredAtMs() int64 {
 
 // The node of a response's tree the entry point is on in the composer answers,
 // while the person types it (agentrepl.v1.ReportComposerEntries). The webapp
-// highlights that node's own line, not its children's, until the state says
-// otherwise. STATE, not an event: the root feed's watch carries it whenever it
-// changes and the moment a root watch is accepted, so a page that opens
+// highlights that node's whole subtree, the node's lines and every node's
+// beneath it, until the state says otherwise. STATE, not an event: the root
+// feed's watch carries it whenever it changes and the moment a root watch is
+// accepted, so a page that opens
 // mid-edit draws the highlight that stands.
 type FeedComposerEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`

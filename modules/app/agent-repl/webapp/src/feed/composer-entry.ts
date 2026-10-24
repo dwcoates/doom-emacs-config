@@ -4,9 +4,12 @@
  *
  * The daemon pushes, on the root feed's watch, the node of a response's tree
  * that the composer's entry at point answers (frontend.v1.FeedComposerEntry),
- * and says so again whenever it moves. The highlight is that node's own lines
- * (its head line and its wrap lines, never its children's), drawn by ONE
- * stylesheet rule this module rewrites on every push. A rule rather than a
+ * and says so again whenever it moves. The highlight is that node's whole
+ * subtree: every line of the node and of each node beneath it (owner ruling,
+ * 2026-10-24). A response tree's labels are its nodes' places (the daemon
+ * repairs them), so the subtree of `3.1` is `3.1` and every label opening on
+ * `3.1.`. It is drawn by ONE stylesheet rule this module rewrites on every
+ * push. A rule rather than a
  * class on the lines, because a response's prose is repainted whenever it
  * re-wraps or re-arrives: a rule addresses whatever lines stand, so no paint
  * can drop the highlight and nothing has to re-mark it.
@@ -21,8 +24,8 @@ import { cssString } from "../width-reserve.js";
 export const COMPOSER_ENTRY_STYLE_ID = "composer-entry-highlight";
 
 /**
- * The stylesheet ENTRY draws: a rule over the lines of its node in its row, or
- * nothing when no node is answered. A push with no state, or a node naming no
+ * The stylesheet ENTRY draws: a rule over the lines of its node's subtree in
+ * its row, or nothing when no node is answered. A push with no state, or a node naming no
  * row, is refused.
  */
 export function composerEntryRule(entry: FeedComposerEntry): string {
@@ -31,9 +34,11 @@ export function composerEntryRule(entry: FeedComposerEntry): string {
     case "none":
       return "";
     case "node": {
-      const row = requireMessage(at.value.row, "FeedComposerEntryNode.row").value;
+      const row = `[data-feed-row=${cssString(requireMessage(at.value.row, "FeedComposerEntryNode.row").value)}]`;
+      const label = at.value.label;
       return (
-        `[data-feed-row=${cssString(row)}] .${TREE_LINE_CLASS}[${TREE_NODE_ATTRIBUTE}=${cssString(at.value.label)}]` +
+        `${row} .${TREE_LINE_CLASS}[${TREE_NODE_ATTRIBUTE}=${cssString(label)}], ` +
+        `${row} .${TREE_LINE_CLASS}[${TREE_NODE_ATTRIBUTE}^=${cssString(`${label}.`)}]` +
         ` { background: var(--composer-entry-bg); box-shadow: inset 2px 0 0 var(--accent); }`
       );
     }
