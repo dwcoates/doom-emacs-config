@@ -5,7 +5,8 @@
      chat in agent-repl's real light and dark themes.
 
      What it shows:
-     - the shared sidebar, with its app selector (Workspaces / Chat);
+     - the shared sidebar, whose title is the app switcher: click it for a
+       menu of apps (Workspaces, Chat). `#menu` in the URL opens it on load;
      - one path through a tree, as a normal chat stream;
      - sibling stacks: arrows (or left/right swipe on a trackpad) on a question
        cycle its siblings, and everything below it redraws;
@@ -35,6 +36,8 @@
     --assistant: var(--panel-bg);
     --accent: #2563eb;
     --tool-command: #4b5563;
+    --info-agents: #7c3aed;
+    --topbar-h: 2.75rem;
     --ok: #16a34a;
     --thinking: #ea580c;
     --composer-bg: #e4e7eb;
@@ -50,6 +53,7 @@
       --sidebar-shadow: 0 2px 14px color-mix(in srgb, #000000 48%, transparent);
       --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 30%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
       --user: #0764c2; --user-fg: #f3f6fb; --thinking: #fb923c; --tool-command: #9ca3af;
+      --info-agents: #c4b5fd;
       --composer-bg: #0c0e12; --q-border: #facc15;
       --code-bg: color-mix(in srgb, #ffffff 12%, transparent);
     }
@@ -62,6 +66,7 @@
     --sidebar-shadow: 0 2px 14px color-mix(in srgb, #000000 48%, transparent);
     --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 30%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
     --user: #0764c2; --user-fg: #f3f6fb; --thinking: #fb923c; --tool-command: #9ca3af;
+    --info-agents: #c4b5fd;
     --composer-bg: #0c0e12; --q-border: #facc15;
     --code-bg: color-mix(in srgb, #ffffff 12%, transparent);
   }
@@ -80,16 +85,40 @@
     border-right: 1px solid var(--border); box-shadow: var(--sidebar-shadow);
     display: flex; flex-direction: column; z-index: 2;
   }
-  .apps {
-    display: flex; gap: 2px; margin: 12px 12px 8px; padding: 3px;
-    background: var(--card); border-radius: 8px;
+  /* The rail's head, as agent-repl draws it (.sb-head): the search toggle,
+     then the title. The title is now the app switcher. */
+  .sb-head {
+    position: relative; display: flex; align-items: center; gap: .5rem;
+    height: var(--topbar-h); flex: 0 0 auto; padding: 0 .7rem;
+    border-bottom: 1px solid var(--border); margin-bottom: 10px;
   }
-  .apps button {
-    flex: 1; border: 0; background: transparent; color: var(--muted);
-    font: inherit; font-size: 12.5px; font-weight: 550; padding: 6px 0;
-    border-radius: 6px; cursor: pointer;
+  .sb-search-btn {
+    display: inline-flex; align-items: center; color: var(--info-agents);
+    background: none; border: none; outline: none; opacity: .75; cursor: pointer; padding: .1rem;
   }
-  .apps button.on { background: var(--bg); color: var(--fg); box-shadow: var(--bubble-shadow); }
+  .sb-search-btn:hover, .sb-search-btn.active { opacity: 1; }
+  .sb-title {
+    display: inline-flex; align-items: center; gap: 4px; font: inherit;
+    font-weight: 600; font-size: .95rem; color: var(--fg); background: none; border: 0;
+    padding: 3px 6px; margin-left: -6px; border-radius: 6px; cursor: pointer;
+  }
+  .sb-title:hover, .sb-title.open { background: var(--card); }
+  .sb-title .caret { color: var(--muted); margin-top: 1px; transition: transform .15s; }
+  .sb-title.open .caret { transform: rotate(180deg); }
+  .apps-menu {
+    position: absolute; top: calc(var(--topbar-h) - 6px); left: 34px; min-width: 200px;
+    background: var(--sidebar-bg); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: var(--sidebar-shadow); padding: 4px; display: none; z-index: 5;
+  }
+  .apps-menu.open { display: block; }
+  .apps-menu button {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    border: 0; background: none; color: var(--fg); font: inherit; font-size: 13px;
+    padding: 7px 10px; border-radius: 6px; cursor: pointer;
+  }
+  .apps-menu button:hover { background: var(--card); }
+  .apps-menu .check { width: 12px; color: var(--muted); }
+  .apps-menu .hint { margin-left: auto; font-size: 11px; color: var(--muted); }
   .new-chat {
     margin: 4px 12px 10px; display: flex; align-items: center; gap: 8px;
     border: 1px solid var(--border); background: transparent; color: var(--fg);
@@ -97,7 +126,9 @@
   }
   .new-chat:hover { background: var(--card); }
   .new-chat kbd { margin-left: auto; font: 11px ui-monospace, monospace; color: var(--muted); }
+  .search.open { display: block; }
   .search {
+    display: none;
     margin: 0 12px 10px; padding: 7px 10px; border-radius: 8px; border: 0;
     background: var(--card); color: var(--fg); font: inherit; font-size: 13px; outline: none;
   }
@@ -116,7 +147,7 @@
   /* ── Main column ─────────────────────────────────────────── */
   .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .topbar {
-    height: 48px; flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+    height: var(--topbar-h); flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
     padding: 0 20px; border-bottom: 1px solid var(--border);
   }
   .crumbs { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center;
@@ -200,9 +231,18 @@
 <body>
 <div class="app">
   <aside class="sidebar">
-    <div class="apps"><button>Workspaces</button><button class="on">Chat</button></div>
+    <div class="sb-head">
+      <button class="sb-search-btn" id="searchbtn" title="search chats">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/></svg>
+      </button>
+      <button class="sb-title" id="apptitle"><span id="appname">Chat</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3.5 5 6.5 8 3.5"/></svg></button>
+      <div class="apps-menu" id="appsmenu">
+        <button data-app="Workspaces"><span class="check"></span>Workspaces<span class="hint">agent-repl</span></button>
+        <button data-app="Chat"><span class="check">✓</span>Chat<span class="hint">zettel</span></button>
+      </div>
+    </div>
     <button class="new-chat" id="new">＋ New chat</button>
-    <input class="search" placeholder="Search chats" />
+    <input class="search" id="search" placeholder="Search chats" />
     <div class="trees" id="trees"></div>
   </aside>
   <main class="main">
@@ -359,6 +399,19 @@ document.getElementById("new").onclick = () => {
   document.getElementById("where").textContent = "nothing yet, this starts a new tree";
   document.querySelectorAll(".tree.on").forEach(t => t.classList.remove("on"));
 };
+// The rail title is the app switcher: click it for the menu of apps.
+const title = document.getElementById("apptitle"), menu = document.getElementById("appsmenu");
+title.onclick = e => { e.stopPropagation(); title.classList.toggle("open"); menu.classList.toggle("open"); };
+document.addEventListener("click", () => { title.classList.remove("open"); menu.classList.remove("open"); });
+menu.querySelectorAll("button").forEach(b => b.onclick = () => {
+  menu.querySelectorAll(".check").forEach(c => c.textContent = "");
+  b.querySelector(".check").textContent = "✓";
+  document.getElementById("appname").textContent = b.dataset.app;
+});
+document.getElementById("searchbtn").onclick = e => {
+  e.currentTarget.classList.toggle("active");
+  document.getElementById("search").classList.toggle("open");
+};
 document.getElementById("theme").onclick = () => {
   const r = document.documentElement;
   const dark = r.dataset.theme ? r.dataset.theme === "dark"
@@ -366,6 +419,7 @@ document.getElementById("theme").onclick = () => {
   r.dataset.theme = dark ? "light" : "dark";
 };
 draw();
+if (location.hash === "#menu") { title.classList.add("open"); menu.classList.add("open"); }
 </script>
 </body>
 </html>

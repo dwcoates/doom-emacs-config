@@ -167,9 +167,9 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   themes' variables in `webapp/src/styles.css`).
 - A design mock of the chat: `docs/knowledge-graph/chat-mock.html` (open it
   directly in a browser).
-- The sidebar is the same across every app. A selector at its top switches
-  between them, like tabs: one for agent-repl's workspaces, one for the chat,
-  and so on.
+- The sidebar is the same across every app. Its existing title
+  ("Workspaces") becomes the app switcher: clicking it opens a dropdown of
+  apps, today agent-repl's workspaces and the chat.
 - Each answer shows its premises as links that jump to that node's path.
 - The webapp already has a composer (`webapp/src/composer/composer.ts`),
   drawn in production only inside subagent bubbles, since the root composer
