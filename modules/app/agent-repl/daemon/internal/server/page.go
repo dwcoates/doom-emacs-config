@@ -584,6 +584,14 @@ func (s *server) pageWatchFor(
 		return pageWatch{"WatchTopbar", func(ctx context.Context) error {
 			return s.watchTopbar(ctx, watch.Topbar, sink)
 		}}, true
+	case *agentreplv1.SubscribePageRequest_Chat:
+		sink := pageSink[agentreplv1.WatchChatResponse]{page: page, sub: sub,
+			wrap: func(m *agentreplv1.WatchChatResponse) *agentreplv1.PageFrame {
+				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Chat{Chat: m}}
+			}}
+		return pageWatch{"WatchChat", func(ctx context.Context) error {
+			return s.watchChat(ctx, watch.Chat, sink)
+		}}, true
 	case *agentreplv1.SubscribePageRequest_Footer:
 		sink := pageSink[agentreplv1.WatchFooterResponse]{page: page, sub: sub,
 			wrap: func(m *agentreplv1.WatchFooterResponse) *agentreplv1.PageFrame {

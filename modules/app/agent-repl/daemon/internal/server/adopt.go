@@ -1,6 +1,8 @@
 package server
 
 import (
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 	"context"
 
 	"connectrpc.com/connect"
@@ -72,9 +74,9 @@ func (s *server) AdoptWebWorkspace(
 		refused.Info = true
 		return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
 	}
-	subject.Log.Info("daemon.server.adopt_web", "the webview adopted the workspace", nil)
+	subject.Log.Info("daemon.server.adopt_web", "the webview adopted the workspace", dlog.Context{"thread": subject.Record.IsThread()})
 	resp.Result = &agentreplv1.AdoptWebWorkspaceResponse_Success{
-		Success: &agentreplv1.AdoptWebWorkspaceSuccess{},
+		Success: &agentreplv1.AdoptWebWorkspaceSuccess{Page: webPageOf(subject.Record)},
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -113,4 +115,13 @@ func (s *server) subjectForAdoption(
 		return resolved{}, s.refuse(s.log, rpc, resp, *r), true
 	}
 	return subject, nil, false
+}
+
+// webPageOf is the page a webview mounts for a workspace: a chat thread's
+// chat view, or an agent workspace's feed.
+func webPageOf(record wsm.Workspace) *agentreplv1.WebWorkspacePage {
+	if record.IsThread() {
+		return &agentreplv1.WebWorkspacePage{Kind: &agentreplv1.WebWorkspacePage_Thread{Thread: &agentreplv1.WebWorkspacePageThread{}}}
+	}
+	return &agentreplv1.WebWorkspacePage{Kind: &agentreplv1.WebWorkspacePage_Agent{Agent: &agentreplv1.WebWorkspacePageAgent{}}}
 }

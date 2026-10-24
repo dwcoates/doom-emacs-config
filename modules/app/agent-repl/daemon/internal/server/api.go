@@ -125,6 +125,8 @@ type Deps struct {
 	Topbar topbar.Resolver
 	// Sidebar backs WatchWorkspaceRoster, the one editor-global stream.
 	Sidebar sidebar.Resolver
+	// Chat backs the chat verbs and WatchChat (internal/chat).
+	Chat Chat
 	// LoudFaults is the daemon's standing loud faults, the `faults_standing`
 	// state every Emacs WatchDaemon stream subscribes to (a webview's never
 	// does: its topbar and footer views carry the same faults).
@@ -499,6 +501,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a topbar resolver")
 	case deps.Sidebar == nil:
 		return nil, missing("a sidebar resolver")
+	case deps.Chat == nil:
+		return nil, missing("a chat service")
 	case deps.LoudFaults == nil:
 		return nil, missing("the standing loud faults")
 	case deps.Focus == nil:

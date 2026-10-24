@@ -235,7 +235,16 @@ func (v *verbs) freeName(ctx context.Context, log dlog.Logger, repoDir, branch s
 		if err != nil {
 			return false, fmt.Errorf("probe the branch %q: %w", candidate, err)
 		}
-		return exists, nil
+		if exists {
+			return true, nil
+		}
+		// So is a directory: another branch's worktree under the same bare
+		// name stands where this one would be materialized (worktreeOccupied).
+		occupied, _, err := worktreeOccupied(repoDir, candidate)
+		if err != nil {
+			return false, err
+		}
+		return occupied, nil
 	})
 }
 
@@ -262,15 +271,6 @@ func (v *verbs) freeNameAgainst(ctx context.Context, log dlog.Logger, branch str
 			return "", nil, err
 		}
 		if held {
-			continue
-		}
-		// So is a directory: another branch's worktree under the same bare
-		// name stands where this one would be materialized (worktreeOccupied).
-		occupied, _, err := worktreeOccupied(repoDir, candidate)
-		if err != nil {
-			return "", nil, err
-		}
-		if occupied {
 			continue
 		}
 		if suffix > 1 {

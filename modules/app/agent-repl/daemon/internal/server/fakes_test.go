@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -353,6 +354,14 @@ type fakeVerbs struct {
 	// lastSelectHistory is the workspace.SelectionHistory the newest Select
 	// was asked for.
 	lastSelectHistory atomic.Int32
+	// selected is every workspace Select was handed, in order.
+	selectedMu sync.Mutex
+	selected   []ids.WorkspaceID
+	// createThread and createThreadErr answer CreateThread; threadQuestions
+	// records each question it was handed.
+	createThread    wsm.Workspace
+	createThreadErr error
+	threadQuestions []string
 	// registeredPaths records every RegisterRepository path the verb received.
 	registeredPaths []string
 	// arrangements records every ArrangeSidebar verb call, spelled
@@ -593,13 +602,21 @@ func (f *fakeVerbs) Interrupt(_ context.Context, _ ids.WorkspaceID, target works
 	return f.interruptOutcome, f.interruptErr
 }
 
+func (f *fakeVerbs) CreateThread(_ context.Context, question string) (wsm.Workspace, error) {
+	f.threadQuestions = append(f.threadQuestions, question)
+	return f.createThread, f.createThreadErr
+}
+
 func (f *fakeVerbs) CreateTask(context.Context, string) (wsm.Task, error) {
 	return f.createTask, f.createTaskErr
 }
 
-func (f *fakeVerbs) Select(ctx context.Context, _ ids.WorkspaceID, history workspace.SelectionHistory) error {
+func (f *fakeVerbs) Select(ctx context.Context, ws ids.WorkspaceID, history workspace.SelectionHistory) error {
 	f.selects.Add(1)
 	f.lastSelectHistory.Store(int32(history))
+	f.selectedMu.Lock()
+	f.selected = append(f.selected, ws)
+	f.selectedMu.Unlock()
 	if f.selectEntered != nil {
 		close(f.selectEntered)
 		<-ctx.Done()
@@ -737,6 +754,22 @@ type fakePrompts struct {
 	lastSentBy *ids.WorkspaceID
 	// submits counts the submissions.
 	submits int
+	// threadSubmissions records every SubmitThreadQuestion.
+	threadSubmissions []threadSubmission
+}
+
+// threadSubmission is one SubmitThreadQuestion the handler made.
+type threadSubmission struct {
+	ws     ids.WorkspaceID
+	said   *conversationv1.UserSaid
+	key    string
+	origin conversationv1.PromptOrigin
+	ask    *wsm.ThreadAsk
+}
+
+func (f *fakePrompts) SubmitThreadQuestion(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, ask *wsm.ThreadAsk) (prompthandler.Outcome, error) {
+	f.threadSubmissions = append(f.threadSubmissions, threadSubmission{ws, said, key, origin, ask})
+	return f.outcome, f.err
 }
 
 func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
@@ -1675,6 +1708,7 @@ type harness struct {
 	Creates   *creategate.Gate
 	Retarget  *fakeRetarget
 	Prompts   *fakePrompts
+	Chat      *fakeChat
 	Queue     *fakeQueue
 	Merge     *fakeMerge
 	Makers    *fakeMakers
@@ -1800,6 +1834,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Footer:     &fakeFooter{},
 		Topbar:     &fakeTopbar{},
 		Sidebar:    &fakeSidebar{},
+		Chat:       &fakeChat{},
 		Surfaces:   &fakeSurfaces{},
 		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
 		Emacs:      &fakeEmacsMeasure{},
@@ -1852,6 +1887,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Footer:            h.Footer,
 		Topbar:            h.Topbar,
 		Sidebar:           h.Sidebar,
+		Chat:              h.Chat,
 		LoudFaults:        &h.LoudFaults,
 		Focus:             h.Focus,
 		Emacs:             h.Emacs,
@@ -2467,4 +2503,14 @@ func (f *fakeImageSources) Drawn(*frontendv1.FeedImageBlock) error {
 
 func (f *fakeQueue) Supersede(context.Context, ids.WorkspaceID, ids.TurnID) (bool, error) {
 	return false, nil
+}
+
+// ListWorkspaces answers every registered workspace, by id.
+func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
+	out := make([]wsm.Workspace, 0, len(d.workspaces))
+	for _, ws := range d.workspaces {
+		out = append(out, ws)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
 }

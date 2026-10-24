@@ -43,6 +43,18 @@ func (s *server) SubmitPrompt(
 	if r != nil {
 		return answer(resp, s.refuse(s.log, rpc, resp, submitRefusal(*r)))
 	}
+	// A CHAT THREAD'S PROMPT IS A QUESTION, asked of the thread's graph: it
+	// takes the chat's highlight rather than a feed selection, and addresses
+	// no sub-feed.
+	if subject.Record.IsThread() {
+		if req.Msg.Feed != nil {
+			return nil, invalid("feed", "a chat thread has no sub-feed to address")
+		}
+		if req.Msg.GetSentBy() != nil {
+			return nil, invalid("sent_by", "a chat thread's questions are the user's, never an agent's")
+		}
+		return s.submitThreadQuestion(ctx, subject, req.Msg, resp)
+	}
 	sentBy, senderRefused, err := s.submitSender(ctx, subject, req.Msg.GetSentBy())
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)

@@ -851,3 +851,53 @@ func (s *requestLoggingServer) CloseFeedImage(
 ) (*connect.Response[agentreplv1.CloseFeedImageResponse], error) {
 	return serveUnary(s, ctx, "CloseFeedImage", req, s.server.CloseFeedImage)
 }
+
+func (s *requestLoggingServer) CreateThread(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.CreateThreadRequest],
+) (*connect.Response[agentreplv1.CreateThreadResponse], error) {
+	return serveUnary(s, ctx, "CreateThread", req, s.server.CreateThread)
+}
+
+func (s *requestLoggingServer) RequestNewThread(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RequestNewThreadRequest],
+) (*connect.Response[agentreplv1.RequestNewThreadResponse], error) {
+	return serveUnary(s, ctx, "RequestNewThread", req, s.server.RequestNewThread)
+}
+
+func (s *requestLoggingServer) WatchChat(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.WatchChatRequest],
+	stream *connect.ServerStream[agentreplv1.WatchChatResponse],
+) error {
+	return serveStream(s, ctx, "WatchChat", req, stream, s.server.WatchChat)
+}
+
+func (s *requestLoggingServer) SwitchChatSibling(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SwitchChatSiblingRequest],
+) (*connect.Response[agentreplv1.SwitchChatSiblingResponse], error) {
+	return serveUnary(s, ctx, "SwitchChatSibling", req, s.server.SwitchChatSibling)
+}
+
+func (s *requestLoggingServer) ReportChatSightings(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportChatSightingsRequest],
+) (*connect.Response[agentreplv1.ReportChatSightingsResponse], error) {
+	return serveUnary(s, ctx, "ReportChatSightings", req, s.server.ReportChatSightings)
+}
+
+func (s *requestLoggingServer) SelectChatText(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SelectChatTextRequest],
+) (*connect.Response[agentreplv1.SelectChatTextResponse], error) {
+	return serveUnary(s, ctx, "SelectChatText", req, s.server.SelectChatText)
+}
+
+func (s *requestLoggingServer) ShowSidebarApp(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ShowSidebarAppRequest],
+) (*connect.Response[agentreplv1.ShowSidebarAppResponse], error) {
+	return serveUnary(s, ctx, "ShowSidebarApp", req, s.server.ShowSidebarApp)
+}
