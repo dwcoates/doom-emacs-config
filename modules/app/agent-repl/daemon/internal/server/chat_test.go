@@ -19,8 +19,8 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/publish"
-	"agent-repld/internal/rollout"
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/rollout"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -126,6 +126,26 @@ func TestCreateThreadCreatesAndSubmitsTheFirstQuestion(t *testing.T) {
 	if len(subs) != 1 || subs[0].ask.Parent.GetThreadStart() == nil || subs[0].key != "create-thread:"+string(testThreadID) ||
 		subs[0].origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT {
 		t.Fatalf("submissions = %+v, want one thread-start question", subs)
+	}
+	if len(h.Verbs.selected) != 1 || h.Verbs.selected[0] != testThreadID {
+		t.Fatalf("selected = %v, want the new thread opened", h.Verbs.selected)
+	}
+}
+
+func TestCreateThreadWhoseSelectionFailsIsAFailure(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Verbs.createThread = wsm.Workspace{ID: testThreadID, Kind: wsm.WorkspaceKindThread, Dir: "/zettel/threads/why", Name: "why"}
+	h.Verbs.selectErr = errors.New("db gone")
+
+	// Act
+	_, err := h.Client.CreateThread(context.Background(), connect.NewRequest(&agentreplv1.CreateThreadRequest{
+		Question: &agentreplv1.CreateThreadQuestion{Text: "why?"},
+	}))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("err = %v, want internal", err)
 	}
 }
 

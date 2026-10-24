@@ -19,9 +19,9 @@
 ;; and the daemon's push asking for the new-thread prompt, which the
 ;; sidebar's new-thread button sends (`DaemonNewThreadRequested').
 ;;
-;; CREATING A THREAD DOES NOT MOVE THE USER, as no creation does (owner
-;; ruling, 2026-10-16): the thread arrives through the roster push, and
-;; `SPC TAB T' opens it.
+;; A NEW THREAD OPENS (owner ruling, 2026-10-24: "on Enter the new thread
+;; opens in the webapp"), unlike a new workspace: the daemon selects it, and
+;; the roster's `current' moves the frame onto it once its workspace is open.
 
 ;;; Code:
 
@@ -56,8 +56,8 @@
 (defun agent-repl-thread-new ()
   "Start a zettel chat thread from a question read in the minibuffer.
 Bound to `SPC TAB t\='.  The daemon names the thread after the question,
-brings its session up and asks the question; the thread arrives through
-the roster, and `SPC TAB T\=' opens it."
+brings its session up, asks the question and selects the thread, which the
+frame follows once its workspace is open."
   (interactive)
   (let ((question (agent-repl-verbs--read-required-prompt
                    "New thread: " "a thread starts from a question"
@@ -88,7 +88,7 @@ the roster, and `SPC TAB T\=' opens it."
             (name (file-name-nondirectory (directory-file-name (plist-get ref :dir)))))
        (agent-repl--info agent-repl-threads--log-scope "elisp.threads.created id=%s name=%s"
                          (plist-get ref :id) name)
-       (message "[agent-repl] Thread %s started; SPC TAB T opens it" name)))
+       (message "[agent-repl] Thread %s started" name)))
     (:error
      (let* ((cause (plist-get (plist-get response :value) :cause))
             (detail (plist-get (plist-get cause :value) :detail)))

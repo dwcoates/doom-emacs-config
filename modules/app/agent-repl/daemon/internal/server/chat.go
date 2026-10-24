@@ -93,7 +93,13 @@ func (s *server) CreateThread(
 		&wsm.ThreadAsk{Parent: threadStart()}); err != nil {
 		return nil, fail(log, rpc, fmt.Errorf("submit the thread's first question: %w", err))
 	}
-	log.Info(rpc, "created a thread and submitted its first question", dlog.Context{"thread": string(record.ID), "name": record.Name})
+	// THE NEW THREAD OPENS (owner ruling, 2026-10-24: "on Enter the new thread
+	// opens in the webapp"): it is selected, and the roster's `current' moves
+	// the editor onto it once its workspace is open there.
+	if err := s.deps.Verbs.Select(ctx, record.ID, workspace.RecordSelection); err != nil {
+		return nil, fail(log, rpc, fmt.Errorf("the new thread %q was created but could not be selected: %w", record.ID, err))
+	}
+	log.Info(rpc, "created a thread, submitted its first question and selected it", dlog.Context{"thread": string(record.ID), "name": record.Name})
 	resp.Result = &agentreplv1.CreateThreadResponse_Success{Success: &agentreplv1.CreateThreadSuccess{Thread: record.Ref()}}
 	return connect.NewResponse(resp), nil
 }
