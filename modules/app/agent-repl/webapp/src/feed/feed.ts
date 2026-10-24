@@ -13,6 +13,7 @@
  */
 import { markConversationDrawn } from "./conversation-drawn.js";
 import { installUnshownTrim } from "./unshown-trim.js";
+import { mountJumpToTail } from "./jump-to-tail.js";
 import { pagePresence, type Presence } from "../presence.js";
 import { log } from "../log.js";
 import { createComposerEntryHighlight } from "./composer-entry.js";
@@ -142,6 +143,12 @@ export interface FeedDeps {
    */
   clickZones?: readonly HTMLElement[];
   /**
+   * Where the jump-to-tail control draws (the page's own `#feed-jump`, outside
+   * the scroll box; jump-to-tail.ts). Absent in a fixture rendering the feed
+   * on its own, which then draws no control.
+   */
+  jumpSlot?: HTMLElement;
+  /**
    * Whether the host shows this page (`presence.ts`); the root feed frees its
    * older rows each time it stops (`unshown-trim.ts`). Defaults to the page's.
    */
@@ -211,6 +218,8 @@ export function mountFeed(
   // A click in a zone outside the box that draws part of the feed holds the
   // view as a click in the box does.
   const unholdZones = tail === null ? [] : (deps.clickZones ?? []).map((zone) => holdViewOnClicks(zone, tail));
+  // THE JUMP BACK TO THE TAIL, shown while the reader is more than a page up.
+  const unmountJump = tail === null || deps.jumpSlot === undefined ? null : mountJumpToTail(deps.jumpSlot, tail);
   // INTENT-ARMED INNER SCROLLING, on the same box. A capped section keeps the
   // wheel only while the reader has deliberately entered it; otherwise the
   // wheel redirects to the feed. Without it, a section the feed scrolled under
@@ -1161,6 +1170,7 @@ export function mountFeed(
     uninstallTrim();
     unobserve?.();
     for (const unhold of unholdZones) unhold();
+    unmountJump?.();
     intentScroll?.uninstall();
     uninstallExpand();
     uninstallSelect();

@@ -322,6 +322,8 @@ export async function boot(): Promise<void> {
       // The docked gate is drawn outside the scroll box; a choice clicked in
       // it holds the feed's view as a click in the feed does.
       clickZones: [shell.gateDock],
+      // The jump-to-tail control draws over the feed's bottom edge.
+      jumpSlot: shell.feedJump,
       // PER-BUBBLE COMPOSERS ARE DEV-MODE ONLY (R7): production's root
       // composer is host-native, and a webview that submits nothing has no
       // business drawing a text box inside a bubble either.

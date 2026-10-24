@@ -4412,6 +4412,65 @@ html[data-page-unshown] *::after {
 }
 #footer:empty { display: none; }
 
+/* THE JUMP-TO-TAIL CONTROL (src/feed/jump-to-tail.ts; owner request,
+   2026-10-24: "subtle and sleek"). Its slot has no height and sits between
+   the scroll zone and the footer, so the control floats over the feed's
+   bottom edge, centered, taking no part in the column's layout. A small
+   translucent disc with a thin chevron, muted until hovered; it fades and
+   rises in while the reader is more than a page above the tail, and takes no
+   pointer while hidden. Under every overlay (z-index 40 and up). */
+#feed-jump {
+  flex: none;
+  position: relative;
+  height: 0;
+  z-index: 3;
+}
+.feed-jump-to-tail {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--feed-bottom-gap) + 0.25rem);
+  width: 1.9rem;
+  height: 1.9rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 1px 4px color-mix(in srgb, #000000 10%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 0.35rem);
+  transition: opacity 160ms ease, transform 160ms ease, color 120ms ease;
+}
+.feed-jump-to-tail[data-shown] {
+  opacity: 0.85;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+.feed-jump-to-tail[data-shown]:hover {
+  opacity: 1;
+  color: var(--fg);
+}
+.feed-jump-to-tail-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The control appears and goes at once rather than rising and fading. */
+  .feed-jump-to-tail {
+    transition: none;
+  }
+}
+
 /* The dock itself: capped to the SAME width as the widest response bubble
    (--agent-bubble-cap, inherited from #main-col) and centered in the same
    column, so its rails land on the very columns the feed's bubbles hug. It

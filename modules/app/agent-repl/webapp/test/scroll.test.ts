@@ -37,10 +37,10 @@ import {
   MoveWitness,
   type MoveWitnessReport,
   type RevealGeometry,
-  type ReaderInput,
   heldRowName,
 } from "../src/scroll.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
+import { tailTriggers, type TailTriggers } from "./tail-triggers.js";
 import { fireResize } from "./resize-observer.js";
 import { expandedSectionAt, installClickExpand } from "../src/expand.js";
 import { frameQueue } from "./frame-queue.js";
@@ -336,46 +336,10 @@ describe("sectionFor", () => {
 /** A box parked at its tail: 700 + 300 viewport = 1000. */
 const atTail = (): ReanchorBox => ({ scrollTop: 700, scrollHeight: 1000, clientHeight: 300 });
 
-/**
- * A follow owner plus the three triggers it subscribed to.
- *
- * `gesture` is the READER moving the box: their input reaches it first and
- * the scroll event follows, which is the order the browser delivers them in
- * and the order the owner's attribution rule depends on. `scroll` alone is
- * therefore a movement with no reader behind it -- the box's own clamp.
- */
-function armed(box: ReanchorBox): {
-  tail: TailFollow;
-  scroll: () => void;
-  resize: () => void;
-  input: () => void;
-  gesture: () => void;
-} {
-  let onScroll = (): void => {};
-  let onResize = (): void => {};
-  let onInput = (_kind: ReaderInput): void => {};
+/** A follow owner plus the three triggers it subscribed to (`tailTriggers`). */
+function armed(box: ReanchorBox): TailTriggers & { tail: TailFollow } {
   const tail = new TailFollow(box);
-  tail.observe(
-    (cb) => {
-      onScroll = cb;
-    },
-    (cb) => {
-      onResize = cb;
-    },
-    (cb) => {
-      onInput = cb;
-    },
-  );
-  return {
-    tail,
-    scroll: () => onScroll(),
-    resize: () => onResize(),
-    input: () => onInput("wheel"),
-    gesture: () => {
-      onInput("wheel");
-      onScroll();
-    },
-  };
+  return { tail, ...tailTriggers(tail) };
 }
 
 /** A box a sent prompt parked at its tail, so a follow stands. */
@@ -403,7 +367,7 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the thirteen causes the owner rules allow", () => {
+  it("names exactly the fourteen causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
@@ -417,6 +381,7 @@ describe("SCROLL_CAUSES", () => {
       "workspaceSelected",
       "lastBubbleExpanded",
       "lastBubbleCollapsed",
+      "tailJumped",
       "prependCompensation",
       "latestVisible",
     ]);
@@ -432,6 +397,7 @@ describe("TailFollow's parking causes", () => {
     ["a rolled-back row's removal", (tail) => tail.rolledBack(), "rolledBack"],
     ["a switch to this workspace", (tail) => tail.workspaceSelected(), "workspaceSelected"],
     ["a cleared selection", (tail) => tail.selectionCleared(), "selectionMoved"],
+    ["the jump-to-tail control", (tail) => tail.jumpToTail(), "tailJumped"],
   ];
 
   it.each(parks)("%s lands a scrolled-up box at its tail", (_name, act) => {
@@ -1040,37 +1006,17 @@ describe("TailFollow's latest-visible latch", () => {
   } {
     const box: ReanchorBox = { scrollTop, scrollHeight: 1000, clientHeight: 300 };
     const entry: Entry = { offset: 900, height: 100 };
-    let onScroll = (): void => {};
-    let onResize = (): void => {};
-    let onInput = (_kind: ReaderInput): void => {};
     const tail = new TailFollow(box, () => ({
       boxTop: 0,
       boxHeight: box.clientHeight,
       nodeTop: entry.offset - box.scrollTop,
       nodeHeight: entry.height,
     }));
-    tail.observe(
-      (cb) => {
-        onScroll = cb;
-      },
-      (cb) => {
-        onResize = cb;
-      },
-      (cb) => {
-        onInput = cb;
-      },
-    );
     return {
       tail,
       box,
       entry,
-      scroll: () => onScroll(),
-      resize: () => onResize(),
-      input: () => onInput("wheel"),
-      gesture: () => {
-        onInput("wheel");
-        onScroll();
-      },
+      ...tailTriggers(tail),
       // A new row drawn under the last one becomes the latest entry.
       append: (height: number) => {
         entry.offset = box.scrollHeight;
@@ -1334,6 +1280,27 @@ describe("TailFollow's latest-visible latch", () => {
     // Act
     l.box.scrollTop = 700;
     l.gesture();
+    // Assert
+    expect(c.reached).toBe(1);
+  });
+
+  it("tells onTailReached when the reader jumps to the tail", () => {
+    // Arrange
+    const l = withLatest(100);
+    const c = counted(l);
+    // Act
+    l.tail.jumpToTail();
+    // Assert
+    expect([c.reached, l.box.scrollTop]).toEqual([1, 1000]);
+  });
+
+  it("tells onTailReached once for a jump, not again for the jump's own scroll event", () => {
+    // Arrange
+    const l = withLatest(100);
+    const c = counted(l);
+    // Act
+    l.tail.jumpToTail();
+    l.scroll();
     // Assert
     expect(c.reached).toBe(1);
   });
@@ -2865,24 +2832,17 @@ function anchoredFeed(
       return { top: at, bottom: at + (h[i] ?? 0) };
     },
   };
-  let onScroll = (): void => {};
-  let onResize = (): void => {};
-  let onInput = (_kind: ReaderInput): void => {};
   const tail = new TailFollow(box, () => null, rows);
-  tail.observe(
-    (cb) => (onScroll = cb),
-    (cb) => (onResize = cb),
-    (cb) => (onInput = cb),
-  );
+  const triggers = tailTriggers(tail);
   return {
     box,
     host,
     h,
     hidden,
     tail,
-    scroll: () => onScroll(),
-    resize: () => onResize(),
-    input: () => onInput("wheel"),
+    scroll: triggers.scroll,
+    resize: triggers.resize,
+    input: () => triggers.input(),
     /** Insert a row of HEIGHT at the top, as a prepend does. */
     prepend: (height: number) => {
       host.prepend(row(-1));
@@ -3525,15 +3485,8 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
         state.floorTop = at;
       },
     };
-    let onScroll = (): void => {};
-    let onResize = (): void => {};
-    let onInput = (_kind: ReaderInput): void => {};
     const tail = new TailFollow(box, () => null, null, floor);
-    tail.observe(
-      (cb) => (onScroll = cb),
-      (cb) => (onResize = cb),
-      (cb) => (onInput = cb),
-    );
+    const { scroll: onScroll, resize: onResize, input: onInput } = tailTriggers(tail);
     /** The box lays out: its position re-clamped into the range, as a browser's layout does. */
     const layout = (): void => {
       box.scrollTop = state.top;
@@ -3695,6 +3648,7 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
     ["replaceRestore", (tail) => tail.replaceRestore()],
     ["rolledBack", (tail) => tail.rolledBack()],
     ["workspaceSelected", (tail) => tail.workspaceSelected()],
+    ["tailJumped", (tail) => tail.jumpToTail()],
   ])("ends a standing hold under %s and parks at the tail", async (cause, act) => {
     // Arrange
     const f = floored(700);
@@ -3867,14 +3821,8 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
   it("takes the reader's press before the click for no gesture: a later move is uncaused", async () => {
     // Arrange -- the pointerdown that began the click is an input on the box.
     const box: ReanchorBox = { scrollTop: 700, scrollHeight: 1000, clientHeight: 300 };
-    let onScroll = (): void => {};
-    let onInput = (_kind: ReaderInput): void => {};
     const tail = new TailFollow(box);
-    tail.observe(
-      (cb) => (onScroll = cb),
-      () => {},
-      (cb) => (onInput = cb),
-    );
+    const { scroll: onScroll, input: onInput } = tailTriggers(tail);
     onInput("wheel");
     tail.readerClicked(document.createElement("div"));
     const capture = captureLogRecords();
@@ -4073,5 +4021,48 @@ describe("selectionRowScroll", () => {
     selectionRowScroll(region, 60);
     // Assert
     expect(region.scrollTop).toBe(100);
+  });
+});
+
+describe("TailFollow.onViewChanged", () => {
+  /** A's box with every view report its listener received. */
+  function reported(a: ReturnType<typeof armed>): Array<{ scrollHeight: number; scrollTop: number; clientHeight: number }> {
+    const views: Array<{ scrollHeight: number; scrollTop: number; clientHeight: number }> = [];
+    a.tail.onViewChanged((box) => views.push(box));
+    return views;
+  }
+
+  it("reports where the box stands after a scroll event", () => {
+    // Arrange
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    const views = reported(a);
+    box.scrollTop = 250;
+    // Act
+    a.gesture();
+    // Assert
+    expect(views).toEqual([{ scrollHeight: 1000, scrollTop: 250, clientHeight: 300 }]);
+  });
+
+  it("reports where the box stands after a resize pass, with the follow's move already made", () => {
+    // Arrange
+    const f = following();
+    const views = reported(f);
+    f.box.scrollHeight = 1400;
+    // Act
+    f.resize();
+    // Assert
+    expect(views).toEqual([{ scrollHeight: 1400, scrollTop: 1400, clientHeight: 300 }]);
+  });
+
+  it("reports nothing for a park until the park's own scroll event arrives", () => {
+    // Arrange
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    const views = reported(a);
+    // Act
+    a.tail.jumpToTail();
+    // Assert
+    expect(views).toEqual([]);
   });
 });

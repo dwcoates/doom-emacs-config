@@ -29,6 +29,8 @@ export interface ShellElements {
   feed: HTMLElement;
   /** The held-prompt tray at the feed's tail, inside the scroll zone. */
   holdTray: HTMLElement;
+  /** The jump-to-tail control's slot, between the scroll zone and the footer. */
+  feedJump: HTMLElement;
   /** The status footer, docked below the scroll zone. */
   footer: HTMLElement;
   /** The docked gate banner's slot, below the footer. Ships hidden. */
@@ -56,6 +58,7 @@ const SHELL_IDS: ReadonlyArray<readonly [keyof ShellElements, string]> = [
   ["feedScroll", "feed-scroll"],
   ["feed", "feed"],
   ["holdTray", "hold-tray"],
+  ["feedJump", "feed-jump"],
   ["footer", "footer"],
   ["gateDock", "gate-dock"],
   ["composer", "composer"],
