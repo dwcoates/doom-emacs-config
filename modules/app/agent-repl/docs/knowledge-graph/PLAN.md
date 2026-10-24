@@ -80,7 +80,11 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 
 ### Stack
 
-- The webapp's new views are built with React. React has the biggest
+- The whole webapp is built with React: new views are written in it, and the
+  existing views, the agent feed included, are ported to it, so shared pieces
+  such as the highlight component exist once. The port keeps the existing
+  look and feel, and the feed's current speed (a tab switch in the low tens
+  of milliseconds). React has the biggest
   ecosystem (gestures, long scrolling lists, text highlighting, markdown),
   and coding agents write it most reliably. Long views draw only the rows on
   screen, so the virtual DOM does not slow them.
@@ -224,4 +228,3 @@ Nothing here is settled yet.
 - Which embedding provider: a local model on the workstation, or a hosted API
   called from the workstation? Chat answers already send content to
   Anthropic, so a hosted embedding API adds one more vendor that sees it.
-- Are the existing webapp views ported to React, or left as they are?
