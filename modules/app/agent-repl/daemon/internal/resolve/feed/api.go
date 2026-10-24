@@ -371,6 +371,10 @@ type Resolver interface {
 	// REPLY (nil for none), or nil where it targets nothing: the rule a sent
 	// prompt's entries are bound by (composer.go).
 	ComposerTargets(ws ids.WorkspaceID, reply *frontendv1.FeedId, labels []string) []*frontendv1.FeedId
+	// ResponseNode answers whether the root-feed response row ID's tree holds
+	// a node labelled LABEL, as last published: false for a row that is no
+	// such response, or holds no such node (composer.go).
+	ResponseNode(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) bool
 	// EntryNeighbor answers the label a line opened beside the entry
 	// answering LABEL answers, in the tree that entry targets: the next node
 	// (NEXT) or the previous one. ok is false when it targets no response or

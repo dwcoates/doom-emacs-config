@@ -1288,6 +1288,9 @@ type fakeFeed struct {
 	// entries is what each prompt row's entry says, keyed by row id, a NUL,
 	// and the entry's label: what PromptEntry answers.
 	entries map[string]string
+	// nodes is each response row's tree nodes, keyed by row id, a NUL, and
+	// the node's label: what ResponseNode answers.
+	nodes map[string]bool
 	// sent are the sent rows SentPrompt drew, in order.
 	sentMu sync.Mutex
 	sent   []sentRow
@@ -1502,6 +1505,10 @@ func (f *fakeFeed) WatchLabelChanges(ctx context.Context) <-chan ids.WorkspaceID
 func (f *fakeFeed) PromptEntry(_ ids.WorkspaceID, id *frontendv1.FeedId, label string) (string, bool) {
 	text, ok := f.entries[id.GetValue()+"\x00"+label]
 	return text, ok
+}
+
+func (f *fakeFeed) ResponseNode(_ ids.WorkspaceID, id *frontendv1.FeedId, label string) bool {
+	return f.nodes[id.GetValue()+"\x00"+label]
 }
 
 func (f *fakeFeed) SelectableText(_ ids.WorkspaceID, id *frontendv1.FeedId) (feed.RowText, bool) {

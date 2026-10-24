@@ -234,3 +234,31 @@ func TestEveryComposerReadingTargetsThroughComposerTarget(t *testing.T) {
 		t.Fatalf("composer.go reads entryTarget directly %d times and through composerTarget %d times, want 1 and 2", direct, shared)
 	}
 }
+
+func TestResponseNodeAnswersWhetherAResponsesTreeHoldsALabel(t *testing.T) {
+	tests := []struct {
+		name  string
+		row   func(*harness) string
+		label string
+		want  bool
+	}{
+		{name: "a node the response's tree holds", row: func(h *harness) string { return h.responseRowID("answer-1") }, label: "1.1", want: true},
+		{name: "a label the response's tree does not hold", row: func(h *harness) string { return h.responseRowID("answer-1") }, label: "9.9"},
+		{name: "a prompt row", row: func(h *harness) string { return h.promptRowID("turn-1") }, label: "1.1"},
+		{name: "a row the feed does not hold", row: func(*harness) string { return "missing" }, label: "1.1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := answeredHarness(t)
+
+			// Act
+			got := h.resolver.ResponseNode(testWorkspace, &frontendv1.FeedId{Value: tc.row(h)}, tc.label)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("ResponseNode(%q) = %v, want %v", tc.label, got, tc.want)
+			}
+		})
+	}
+}

@@ -96,6 +96,16 @@ func (r *resolver) ComposerTargets(ws ids.WorkspaceID, reply *frontendv1.FeedId,
 	return targets
 }
 
+// ResponseNode answers whether the root-feed response row ID's tree holds a
+// node labelled LABEL, as last published: the node a reader clicks in the
+// feed to answer it.
+func (r *resolver) ResponseNode(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) bool {
+	_, ok := r.rootRowText(ws, id, func(row *frontendv1.FeedRow) (string, bool) {
+		return "", responseLabels(row)[label]
+	})
+	return ok
+}
+
 // EntryNeighbor answers the label a line opened beside the entry answering
 // LABEL answers, in the tree of the response that entry targets
 // (ComposerTargets, replying to REPLY). NEXT finds the node's next sibling,

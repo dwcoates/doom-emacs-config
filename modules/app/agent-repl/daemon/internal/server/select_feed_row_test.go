@@ -1484,3 +1484,138 @@ func TestSelectFeedRowAnswerAndEntryRequireALabel(t *testing.T) {
 		})
 	}
 }
+
+// branchMove builds a SelectFeedRow request for a click on the node LABEL of
+// the response ROW's tree.
+func branchMove(row, label string) *agentreplv1.SelectFeedRowRequest {
+	return &agentreplv1.SelectFeedRowRequest{
+		Workspace: ref(),
+		Move: &agentreplv1.SelectFeedRowRequest_Branch{Branch: &agentreplv1.SelectFeedRowBranch{
+			Row: &frontendv1.FeedId{Value: row}, Label: label}},
+	}
+}
+
+// TestSelectFeedRowBranchSelectsTheResponseAndAsksTheHostToOpenAnEntry pins
+// a click on a response's node: the response is selected as its kind, held,
+// and the host is asked to open an entry answering the node.
+func TestSelectFeedRowBranchSelectsTheResponseAndAsksTheHostToOpenAnEntry(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  func(*frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport
+		set  func(*harness)
+	}{
+		{name: "a final response", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1") },
+			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport { return s.GetResponse().GetViewport() }},
+		{name: "an interim response", set: func(h *harness) { h.Feed.markdown = map[string]string{"resp-1": "interim"} },
+			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport { return s.GetBubble().GetViewport() }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tc.set(h)
+			h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream := dialHostStream(t, h, ctx)
+
+			// Act.
+			resp := sendMove(t, h, branchMove("resp-1", "3.1"))
+			event := receiveHostEventPastSelection(t, stream)
+
+			// Assert.
+			if tc.arm(resp.Msg.GetSuccess().GetSelected().GetSelection()).GetHold() == nil {
+				t.Fatalf("result = %v, want resp-1 selected and held", resp.Msg.GetResult())
+			}
+			if got := event.GetComposeEntry().GetLabel(); got != "3.1" {
+				t.Fatalf("event = %v, want compose_entry naming 3.1", event)
+			}
+		})
+	}
+}
+
+// TestSelectFeedRowBranchNeverDeselects pins that a second click on a node
+// keeps the response selected: the click answers the node, so the response
+// stays the one replied to.
+func TestSelectFeedRowBranchNeverDeselects(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("resp-1")
+	h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
+	sendMove(t, h, branchMove("resp-1", "3.1"))
+
+	// Act.
+	resp := sendMove(t, h, branchMove("resp-1", "3.1"))
+
+	// Assert.
+	if resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse() == nil {
+		t.Fatalf("result = %v, want the response still selected", resp.Msg.GetResult())
+	}
+}
+
+// TestSelectFeedRowBranchRefusesARowThatIsNoSelectableResponseHoldingTheNode
+// pins that a click the daemon cannot honor is refused, selects nothing and
+// asks nothing of the host: a notification click is then the first event.
+func TestSelectFeedRowBranchRefusesARowThatIsNoSelectableResponseHoldingTheNode(t *testing.T) {
+	tests := []struct {
+		name string
+		set  func(*harness)
+	}{
+		{name: "a response whose tree holds no such node", set: func(h *harness) {
+			h.Feed.finals = feedIDs("resp-1")
+			h.Feed.nodes = map[string]bool{"resp-1\x009.9": true}
+		}},
+		{name: "a response that is not selectable", set: func(h *harness) {
+			h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
+		}},
+		{name: "a prompt", set: func(h *harness) {
+			h.Feed.prompts = feedIDs("resp-1")
+			h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tc.set(h)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream := dialHostStream(t, h, ctx)
+
+			// Act.
+			resp := sendMove(t, h, branchMove("resp-1", "3.1"))
+
+			// Assert.
+			if resp.Msg.GetError().GetNotSelectable().GetRow().GetValue() != "resp-1" {
+				t.Fatalf("result = %v, want not_selectable echoing resp-1", resp.Msg.GetResult())
+			}
+			if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
+				t.Fatal("a refused branch move selected a row")
+			}
+			h.Server.NotificationClicked(testWorkspaceID)
+			if first := receiveHostEventPastSelection(t, stream); first.GetComposeEntry() != nil {
+				t.Fatalf("first event = %v, want no compose_entry before the notification click", first)
+			}
+		})
+	}
+}
+
+// TestSelectFeedRowBranchClickIsRecordedAtInfo pins that the click enters the
+// workspace log, naming the row and the label.
+func TestSelectFeedRowBranchClickIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h, log := newLoggedHarness(t)
+	h.Feed.finals = feedIDs("resp-1")
+	h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
+
+	// Act.
+	sendMove(t, h, branchMove("resp-1", "3.1"))
+
+	// Assert.
+	for _, rec := range log.at("INFO") {
+		if rec.Operation == opSelectFeedRow && rec.Context["row"] == "resp-1" && rec.Context["label"] == "3.1" && rec.Context["kind"] == "response" {
+			return
+		}
+	}
+	t.Fatalf("INFO records = %v, want one naming resp-1, its node 3.1 and the response kind", log.at("INFO"))
+}

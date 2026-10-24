@@ -933,6 +933,8 @@ func TestEveryRowAndLabelMoveIsValidatedThroughValidateRowLabel(t *testing.T) {
 			Answer: &agentreplv1.SelectFeedRowAnswer{Row: &frontendv1.FeedId{Value: "r1"}}}}, wantField: "move.answer.label"},
 		{name: "entry", move: &agentreplv1.SelectFeedRowRequest{Workspace: ref(), Move: &agentreplv1.SelectFeedRowRequest_Entry{
 			Entry: &agentreplv1.SelectFeedRowEntry{Row: &frontendv1.FeedId{Value: "r1"}}}}, wantField: "move.entry.label"},
+		{name: "branch", move: &agentreplv1.SelectFeedRowRequest{Workspace: ref(), Move: &agentreplv1.SelectFeedRowRequest_Branch{
+			Branch: &agentreplv1.SelectFeedRowBranch{Label: "1.1"}}}, wantField: "move.branch.row"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

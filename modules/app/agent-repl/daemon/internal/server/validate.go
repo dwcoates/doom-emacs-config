@@ -224,6 +224,8 @@ func validateSelectFeedRowRequest(req *agentreplv1.SelectFeedRowRequest) *connec
 		return validateRowLabel("move.answer", move.Answer.GetRow(), move.Answer.GetLabel(), "an answer names the label the reader clicked")
 	case *agentreplv1.SelectFeedRowRequest_Entry:
 		return validateRowLabel("move.entry", move.Entry.GetRow(), move.Entry.GetLabel(), "an entry names its label")
+	case *agentreplv1.SelectFeedRowRequest_Branch:
+		return validateRowLabel("move.branch", move.Branch.GetRow(), move.Branch.GetLabel(), "a branch names its node's label")
 	}
 	return invalid("move", "a selection move is required")
 }

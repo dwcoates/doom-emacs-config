@@ -81,6 +81,14 @@ func (s *server) SelectFeedRow(
 			return answer(resp, s.refuse(subject.Log, rpc, resp,
 				notSelectable(row, fmt.Sprintf("is not a selectable prompt of this workspace's root feed holding an entry answering %q", label))))
 		}
+	case *agentreplv1.SelectFeedRowRequest_Branch:
+		row, label := move.Branch.GetRow(), move.Branch.GetLabel()
+		var selectable bool
+		success, selectable, err = s.selectBranch(subject.Log, ws, row, label)
+		if err == nil && !selectable {
+			return answer(resp, s.refuse(subject.Log, rpc, resp,
+				notSelectable(row, fmt.Sprintf("is not a selectable response of this workspace's root feed whose tree holds %q", label))))
+		}
 	}
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
@@ -398,6 +406,41 @@ func (s *server) selectEntry(log dlog.Logger, ws ids.WorkspaceID, row *frontendv
 	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
 		Push: &agentreplv1.WatchHostWorkspaceResponse_PromptEntryClicked{
 			PromptEntryClicked: &agentreplv1.HostWorkspacePromptEntryClicked{Row: row, Label: label, Text: text},
+		},
+	})
+	return selectedSuccess(sel), true, nil
+}
+
+// selectBranch selects ROW, the response whose tree node LABEL the reader
+// clicked, as a click does (holdUnderClick, never toggling: the click answers
+// the node, so the response stays the one replied to), and asks the host to
+// open an entry answering LABEL in the composer. A final response is a
+// `response` selection, any other a `bubble`. selectable is false (and
+// nothing changes) for a row that is no selectable response holding the node.
+func (s *server) selectBranch(log dlog.Logger, ws ids.WorkspaceID, row *frontendv1.FeedId, label string) (*agentreplv1.SelectFeedRowSuccess, bool, error) {
+	if !s.deps.Feed.ResponseNode(ws, row, label) {
+		log.Info(opSelectFeedRow, "a clicked branch is not a node of a response's tree", dlog.Context{"row": row.GetValue(), "label": label})
+		return nil, false, nil
+	}
+	if text, ok := s.deps.Feed.SelectableText(ws, row); !ok || text.Prompt {
+		log.Info(opSelectFeedRow, "a clicked branch's response is not selectable", dlog.Context{"row": row.GetValue(), "label": label})
+		return nil, false, nil
+	}
+	kind := selectionBubble
+	if indexOfFeedID(s.deps.Feed.FinalResponses(ws), row) >= 0 {
+		kind = selectionResponse
+	}
+	sel := selectionOf(kind, row, holdUnderClick())
+	s.selectionMu.Lock()
+	defer s.selectionMu.Unlock()
+	if err := s.setRowSelection(ws, sel); err != nil {
+		return nil, true, err
+	}
+	log.Info(opSelectFeedRow, "selected the response whose branch was clicked; asked the host to open an entry answering it",
+		dlog.Context{"kind": kind.String(), "row": row.GetValue(), "label": label})
+	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_ComposeEntry{
+			ComposeEntry: &agentreplv1.HostWorkspaceComposeEntry{Label: label},
 		},
 	})
 	return selectedSuccess(sel), true, nil
