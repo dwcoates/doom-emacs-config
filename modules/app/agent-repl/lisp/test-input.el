@@ -1652,6 +1652,16 @@ workspace's dwell clear another composer's badge."
           (should (eq cancelled 'composer-flash)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
+(ert-deftest agent-repl-input-mode-header-line-is-the-help-buttons ()
+  "The composer's header line is input-help.el's row of help buttons."
+  ;; Arrange.
+  (with-temp-buffer
+    ;; Act.
+    (agent-repl-input-mode)
+    ;; Assert.
+    (should (equal-including-properties header-line-format
+                                        (agent-repl-input-help-header-line)))))
+
 (ert-deftest agent-repl-input-mode-enables-visual-line-mode ()
   "The composer turns on `visual-line-mode' so Evil moves by screen line."
   ;; Arrange.

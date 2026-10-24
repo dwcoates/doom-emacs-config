@@ -127,6 +127,7 @@
 (declare-function agent-repl-rpc-list-rollback-prompts-sync "agent-repl-rpc" (conn request &optional timeout))
 (declare-function agent-repl--format-summary-relative-time "agent-repl-prompt-summary" (sent-at &optional now))
 (declare-function agent-repl-input-attach-image "clipboard-image" (path media-type))
+(declare-function agent-repl-input-help-header-line "input-help" ())
 (declare-function agent-repl-held-edit-active-p "held-edit" (ws))
 (declare-function agent-repl-held-edit-commit "held-edit" (ws said snapshot))
 (declare-function agent-repl-held-edit-cancel "held-edit" (ws))
@@ -264,8 +265,7 @@ The standing notice first, then the held-prompt waiting line."
 
 (define-derived-mode agent-repl-input-mode fundamental-mode "Agent Input"
   "Major mode for the host-native composer buffer."
-  (setq-local header-line-format
-              "C-c C-c: clear+save | (cmd) <up>/<down>: history | C-M-r: search history")
+  (setq-local header-line-format (agent-repl-input-help-header-line))
   (face-remap-add-relative 'header-line 'agent-repl-header-line)
   (agent-repl--set-buffer-background agent-repl-input-background)
   (unless (member agent-repl--input-mode-line-spec mode-line-format)

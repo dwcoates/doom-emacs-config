@@ -54,6 +54,7 @@
   (load (expand-file-name "test-history.el" dir) nil t)
   (load (expand-file-name "test-host.el" dir) nil t)
   (load (expand-file-name "test-input.el" dir) nil t)
+  (load (expand-file-name "test-input-help.el" dir) nil t)
   (load (expand-file-name "test-interaction-record.el" dir) nil t)
   (load (expand-file-name "test-keybindings.el" dir) nil t)
   (load (expand-file-name "test-log-timestamp.el" dir) nil t)
