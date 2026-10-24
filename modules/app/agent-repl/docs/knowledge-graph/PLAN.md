@@ -51,9 +51,19 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   reimplement belongs in the daemon.
 - Remote clients, such as the future mobile app, reach the workstation's
   daemon only through a proxy service over HTTP. The mobile app is not built
-  now. Proposed: the workstation dials out to the proxy, the proxy only passes
-  messages through, remote devices pair with the workstation, and content is
-  encrypted end to end so the proxy cannot read it.
+  now. It will eventually work with agent-repl's workspaces too, not only the
+  knowledge graph, so remote access is designed once for the whole contract.
+- Each user's own workstation is the server. No shared server ever holds a
+  user's data in readable form, so their information stays private.
+- All computation on persisted content, embeddings included, runs on the
+  workstation, where the graph lives. A remote client only sends requests and
+  shows results.
+- The graph gets its own service in the engine, the only owner of the graph
+  database, the way the store owns the record database. The store cannot be
+  reused: its only callers are the shim and the sidecar, and the daemon never
+  calls `store.v1`. The service calls the Messages API itself, and the daemon
+  stays the one endpoint every client talks to, passing graph calls on. A
+  change confined to the graph service rolls out without a daemon rollout.
 - The code may be regrouped by client, but only as directory renames and the
   reference updates they need. No code is reorganized. An illustration of the
   layout (names not settled):
@@ -133,20 +143,28 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
     desktop and mobile;
   - how it behaves: the workstation is the only place state is stored, one
     contract serves every client, and tests never reach a real vendor.
-- The graph gets its own service in the engine, the only owner of the graph
-  database, the way the store owns the record database. The store cannot be
-  reused: its only callers are the shim and the sidecar, and the daemon never
-  calls `store.v1`. The service calls the Messages API itself, and the daemon
-  stays the one endpoint every client talks to, passing graph calls on.
+- Remote access: privacy comes from end-to-end encryption, not from who runs
+  the machine in the middle. The daemon listens only on `127.0.0.1` today and
+  trusts every local caller, so remote access also needs device pairing and
+  authentication. Candidates for how a phone reaches the workstation:
+  - our own relay that forwards only end-to-end encrypted traffic, which the
+    workstation dials out to;
+  - a mesh VPN built on WireGuard, such as Tailscale, or Headscale for a
+    self-hosted coordination server;
+  - ruled out: opening a port on the workstation (exposed and fragile), and
+    Cloudflare Tunnel (Cloudflare can read the traffic it terminates).
 - Stack:
   - protobuf over Connect, as agent-repl already uses; Connect runs over HTTP,
     so the proxy can carry it unchanged;
   - SQLite through `modernc.org/sqlite`; that driver cannot load vector
     extensions, so similarity search runs in Go over embeddings held in
     memory, which is fast enough for one person's graph;
-  - the webapp stays plain TypeScript and Vite;
-  - Tauri for the desktop shell, because on macOS it uses the same WebKit
-    engine xwidget runs today.
+  - the webapp is not committed to staying framework-free; the choice goes
+    by what gives the best results. A framework that updates the page
+    directly without a virtual DOM (Solid, Svelte) is closest to how the
+    webapp works today;
+  - desktop shell candidates: Electron, Tauri, Wails (Go, with the operating
+    system's web view), or no shell at all (an installable web app).
 
 ## Known complications
 
@@ -198,5 +216,9 @@ Nothing here is settled yet.
 - With Emacs as the host, is the webapp's input box hidden or available alongside it?
 - In the chat, does a new prompt always attach to the end of the path on screen?
 - Is a separate overview of the graph wanted, or is the chat the only way to see it?
-- Which embedding provider?
+- Which embedding provider: a local model on the workstation, or a hosted API
+  called from the workstation? Chat answers already send content to
+  Anthropic, so a hosted embedding API adds one more vendor that sees it.
+- How does a remote client reach the workstation: our own relay, or a mesh VPN?
+- Which framework for the webapp, if any, and are existing views ported to it?
 - Tauri or Electron for the desktop shell?
