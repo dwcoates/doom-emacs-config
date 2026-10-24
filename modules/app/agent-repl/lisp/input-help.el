@@ -24,6 +24,7 @@
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--fatal "core" (ws fmt &rest args))
 (declare-function agent-repl-popup-show "popup" (buffer))
+(declare-function agent-repl-refill-keymap "core" (map fill))
 (defvar agent-repl-input-mode-map)
 (defvar evil-normal-state-map)
 (defvar evil-insert-state-map)
@@ -101,13 +102,15 @@ describing what goes with those keys.")
 
 ;;;; ---- The header line ------------------------------------------------
 
-(defvar agent-repl-input-help-button-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [header-line mouse-1] #'agent-repl-input-help-click)
-    ;; A press on a button is not a header-line drag.
-    (define-key map [header-line down-mouse-1] #'ignore)
-    map)
+(defvar agent-repl-input-help-button-map (make-sparse-keymap)
   "Keymap of every help button in the composer's header line.")
+
+(agent-repl-refill-keymap
+ agent-repl-input-help-button-map
+ (lambda (map)
+   (define-key map [header-line mouse-1] #'agent-repl-input-help-click)
+   ;; A press on a button is not a header-line drag.
+   (define-key map [header-line down-mouse-1] #'ignore)))
 
 (defun agent-repl--input-help-button (topic)
   "Return TOPIC's header-line button, carrying its id for the click."
