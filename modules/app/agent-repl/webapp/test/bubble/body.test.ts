@@ -425,6 +425,13 @@ describe("proseNeedsWidth", () => {
     // Act + Assert
     expect(proseNeedsWidth(servedProse(markdown))).toBe(want);
   });
+
+  it("says a prompt's run of entries needs a measured width", () => {
+    // Arrange
+    const prose = promptProse("3.1 - a\n4.2 - **b**\n5.5.1 - c");
+    // Act + Assert
+    expect([prose.blocks.map((b) => b.block.case), proseNeedsWidth(prose)]).toEqual([["entries"], true]);
+  });
 });
 
 describe("the bubble body", () => {
