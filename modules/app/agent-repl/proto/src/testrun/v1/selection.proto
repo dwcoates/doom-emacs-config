@@ -8,7 +8,9 @@
 // name the target does not define, is refused rather than run as nothing.
 //
 // THE NARROWEST RUN IS THE DEFAULT ONE TO ASK FOR. An agent names exactly the
-// tests its change touches; the whole roster is the merge queue's to run.
+// tests its change touches; the whole roster is the merge queue's to run. A
+// whole suite (`suite`) or the whole roster (`every_suite`) is named only for
+// what only a whole suite answers: its coverage, or a stated systemic reason.
 //
 // Every path is RELATIVE TO THE REPOSITORY ROOT (for example
 // "modules/app/agent-repl/daemon/internal/merge"), so a selection reads the
@@ -24,6 +26,17 @@ message TestRunRequest {
   // REQUIRED, at least one. The tests to run; a test two selections both name
   // runs once.
   repeated TestSelection selections = 1;
+  // Instrument the run and report coverage: every Go and vitest suite's, the
+  // systems the integration and e2e tiers spawn included, plus the suites that
+  // run only in a coverage run (the istanbul honesty probes). Coverage is a
+  // whole suite's measurement, so every selection must then be `suite` or
+  // `every_suite`; a narrower one is refused. Refused with `record`.
+  bool coverage = 2;
+  // Append the run's per-suite timings to the canonical timing history
+  // (test_time.csv), once every suite has passed on an unmoved branch. Only a
+  // run of the whole roster records: the one selection must be `every_suite`.
+  // Refused with `coverage`, whose instrumentation changes the timings.
+  bool record = 3;
 }
 
 // One target and the tests within it to run.
@@ -39,8 +52,23 @@ message TestSelection {
     TestSelectionErtFile ert_file = 3;
     // One shell test harness, whole or by its groups.
     TestSelectionHarness harness = 4;
+    // One roster suite, whole: every unit the roster plans for it.
+    TestSelectionSuite suite = 5;
+    // Every roster suite: the full run the merge queue gates on. Named alone.
+    TestSelectionEverySuite every_suite = 6;
   }
 }
+
+// ---- whole suites ----
+
+// One roster suite, whole.
+message TestSelectionSuite {
+  // REQUIRED. The suite's roster name (testrun/roster), e.g. "daemon".
+  string name = 1;
+}
+
+// Every roster suite runs. It is the only selection of its request.
+message TestSelectionEverySuite {}
 
 // ---- Go ----
 

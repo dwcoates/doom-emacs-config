@@ -8,7 +8,9 @@
 // name the target does not define, is refused rather than run as nothing.
 //
 // THE NARROWEST RUN IS THE DEFAULT ONE TO ASK FOR. An agent names exactly the
-// tests its change touches; the whole roster is the merge queue's to run.
+// tests its change touches; the whole roster is the merge queue's to run. A
+// whole suite (`suite`) or the whole roster (`every_suite`) is named only for
+// what only a whole suite answers: its coverage, or a stated systemic reason.
 //
 // Every path is RELATIVE TO THE REPOSITORY ROOT (for example
 // "modules/app/agent-repl/daemon/internal/merge"), so a selection reads the
@@ -26,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file testrun/v1/selection.proto.
  */
 export const file_testrun_v1_selection: GenFile = /*@__PURE__*/
-  fileDesc("Chp0ZXN0cnVuL3YxL3NlbGVjdGlvbi5wcm90bxIKdGVzdHJ1bi52MSI/Cg5UZXN0UnVuUmVxdWVzdBItCgpzZWxlY3Rpb25zGAEgAygLMhkudGVzdHJ1bi52MS5UZXN0U2VsZWN0aW9uIvoBCg1UZXN0U2VsZWN0aW9uEjgKCmdvX3BhY2thZ2UYASABKAsyIi50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25Hb1BhY2thZ2VIABI6Cgt2aXRlc3RfZmlsZRgCIAEoCzIjLnRlc3RydW4udjEuVGVzdFNlbGVjdGlvblZpdGVzdEZpbGVIABI0CghlcnRfZmlsZRgDIAEoCzIgLnRlc3RydW4udjEuVGVzdFNlbGVjdGlvbkVydEZpbGVIABIzCgdoYXJuZXNzGAQgASgLMiAudGVzdHJ1bi52MS5UZXN0U2VsZWN0aW9uSGFybmVzc0gAQggKBnRhcmdldCKiAQoWVGVzdFNlbGVjdGlvbkdvUGFja2FnZRITCgtwYWNrYWdlX2RpchgBIAEoCRIyCgNhbGwYAiABKAsyIy50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25Hb0FsbFRlc3RzSAASNgoFbmFtZWQYAyABKAsyJS50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25Hb05hbWVkVGVzdHNIAEIHCgV0ZXN0cyIZChdUZXN0U2VsZWN0aW9uR29BbGxUZXN0cyJLChlUZXN0U2VsZWN0aW9uR29OYW1lZFRlc3RzEi4KBXRlc3RzGAEgAygLMh8udGVzdHJ1bi52MS5UZXN0U2VsZWN0aW9uR29UZXN0IpwBChNUZXN0U2VsZWN0aW9uR29UZXN0EgwKBG5hbWUYASABKAkSNQoFd2hvbGUYAiABKAsyJC50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25Hb1dob2xlVGVzdEgAEjcKCHN1YnRlc3RzGAMgASgLMiMudGVzdHJ1bi52MS5UZXN0U2VsZWN0aW9uR29TdWJ0ZXN0c0gAQgcKBXNjb3BlIhoKGFRlc3RTZWxlY3Rpb25Hb1dob2xlVGVzdCJQChdUZXN0U2VsZWN0aW9uR29TdWJ0ZXN0cxI1CgVwYXRocxgBIAMoCzImLnRlc3RydW4udjEuVGVzdFNlbGVjdGlvbkdvU3VidGVzdFBhdGgiLgoaVGVzdFNlbGVjdGlvbkdvU3VidGVzdFBhdGgSEAoIc2VnbWVudHMYASADKAkipAEKF1Rlc3RTZWxlY3Rpb25WaXRlc3RGaWxlEgwKBGZpbGUYASABKAkSNgoDYWxsGAIgASgLMicudGVzdHJ1bi52MS5UZXN0U2VsZWN0aW9uVml0ZXN0QWxsVGVzdHNIABI6CgVuYW1lZBgDIAEoCzIpLnRlc3RydW4udjEuVGVzdFNlbGVjdGlvblZpdGVzdE5hbWVkVGVzdHNIAEIHCgV0ZXN0cyIdChtUZXN0U2VsZWN0aW9uVml0ZXN0QWxsVGVzdHMiMwodVGVzdFNlbGVjdGlvblZpdGVzdE5hbWVkVGVzdHMSEgoKZnVsbF9uYW1lcxgBIAMoCSKbAQoUVGVzdFNlbGVjdGlvbkVydEZpbGUSDAoEZmlsZRgBIAEoCRIzCgNhbGwYAiABKAsyJC50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25FcnRBbGxUZXN0c0gAEjcKBW5hbWVkGAMgASgLMiYudGVzdHJ1bi52MS5UZXN0U2VsZWN0aW9uRXJ0TmFtZWRUZXN0c0gAQgcKBXRlc3RzIhoKGFRlc3RTZWxlY3Rpb25FcnRBbGxUZXN0cyIwChpUZXN0U2VsZWN0aW9uRXJ0TmFtZWRUZXN0cxISCgp0ZXN0X25hbWVzGAEgAygJIqgBChRUZXN0U2VsZWN0aW9uSGFybmVzcxIOCgZzY3JpcHQYASABKAkSOAoDYWxsGAIgASgLMikudGVzdHJ1bi52MS5UZXN0U2VsZWN0aW9uSGFybmVzc0FsbEdyb3Vwc0gAEjwKBW5hbWVkGAMgASgLMisudGVzdHJ1bi52MS5UZXN0U2VsZWN0aW9uSGFybmVzc05hbWVkR3JvdXBzSABCCAoGZ3JvdXBzIh8KHVRlc3RTZWxlY3Rpb25IYXJuZXNzQWxsR3JvdXBzIjAKH1Rlc3RTZWxlY3Rpb25IYXJuZXNzTmFtZWRHcm91cHMSDQoFbmFtZXMYASADKAlCJlokYWdlbnRyZXBsL3Byb3RvL3Rlc3RydW4vdjE7dGVzdHJ1bnYxYgZwcm90bzM");
+  fileDesc("Chp0ZXN0cnVuL3YxL3NlbGVjdGlvbi5wcm90bxIKdGVzdHJ1bi52MSJhCg5UZXN0UnVuUmVxdWVzdBItCgpzZWxlY3Rpb25zGAEgAygLMhkudGVzdHJ1bi52MS5UZXN0U2VsZWN0aW9uEhAKCGNvdmVyYWdlGAIgASgIEg4KBnJlY29yZBgDIAEoCCLnAgoNVGVzdFNlbGVjdGlvbhI4Cgpnb19wYWNrYWdlGAEgASgLMiIudGVzdHJ1bi52MS5UZXN0U2VsZWN0aW9uR29QYWNrYWdlSAASOgoLdml0ZXN0X2ZpbGUYAiABKAsyIy50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25WaXRlc3RGaWxlSAASNAoIZXJ0X2ZpbGUYAyABKAsyIC50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25FcnRGaWxlSAASMwoHaGFybmVzcxgEIAEoCzIgLnRlc3RydW4udjEuVGVzdFNlbGVjdGlvbkhhcm5lc3NIABIvCgVzdWl0ZRgFIAEoCzIeLnRlc3RydW4udjEuVGVzdFNlbGVjdGlvblN1aXRlSAASOgoLZXZlcnlfc3VpdGUYBiABKAsyIy50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25FdmVyeVN1aXRlSABCCAoGdGFyZ2V0IiIKElRlc3RTZWxlY3Rpb25TdWl0ZRIMCgRuYW1lGAEgASgJIhkKF1Rlc3RTZWxlY3Rpb25FdmVyeVN1aXRlIqIBChZUZXN0U2VsZWN0aW9uR29QYWNrYWdlEhMKC3BhY2thZ2VfZGlyGAEgASgJEjIKA2FsbBgCIAEoCzIjLnRlc3RydW4udjEuVGVzdFNlbGVjdGlvbkdvQWxsVGVzdHNIABI2CgVuYW1lZBgDIAEoCzIlLnRlc3RydW4udjEuVGVzdFNlbGVjdGlvbkdvTmFtZWRUZXN0c0gAQgcKBXRlc3RzIhkKF1Rlc3RTZWxlY3Rpb25Hb0FsbFRlc3RzIksKGVRlc3RTZWxlY3Rpb25Hb05hbWVkVGVzdHMSLgoFdGVzdHMYASADKAsyHy50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25Hb1Rlc3QinAEKE1Rlc3RTZWxlY3Rpb25Hb1Rlc3QSDAoEbmFtZRgBIAEoCRI1CgV3aG9sZRgCIAEoCzIkLnRlc3RydW4udjEuVGVzdFNlbGVjdGlvbkdvV2hvbGVUZXN0SAASNwoIc3VidGVzdHMYAyABKAsyIy50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25Hb1N1YnRlc3RzSABCBwoFc2NvcGUiGgoYVGVzdFNlbGVjdGlvbkdvV2hvbGVUZXN0IlAKF1Rlc3RTZWxlY3Rpb25Hb1N1YnRlc3RzEjUKBXBhdGhzGAEgAygLMiYudGVzdHJ1bi52MS5UZXN0U2VsZWN0aW9uR29TdWJ0ZXN0UGF0aCIuChpUZXN0U2VsZWN0aW9uR29TdWJ0ZXN0UGF0aBIQCghzZWdtZW50cxgBIAMoCSKkAQoXVGVzdFNlbGVjdGlvblZpdGVzdEZpbGUSDAoEZmlsZRgBIAEoCRI2CgNhbGwYAiABKAsyJy50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25WaXRlc3RBbGxUZXN0c0gAEjoKBW5hbWVkGAMgASgLMikudGVzdHJ1bi52MS5UZXN0U2VsZWN0aW9uVml0ZXN0TmFtZWRUZXN0c0gAQgcKBXRlc3RzIh0KG1Rlc3RTZWxlY3Rpb25WaXRlc3RBbGxUZXN0cyIzCh1UZXN0U2VsZWN0aW9uVml0ZXN0TmFtZWRUZXN0cxISCgpmdWxsX25hbWVzGAEgAygJIpsBChRUZXN0U2VsZWN0aW9uRXJ0RmlsZRIMCgRmaWxlGAEgASgJEjMKA2FsbBgCIAEoCzIkLnRlc3RydW4udjEuVGVzdFNlbGVjdGlvbkVydEFsbFRlc3RzSAASNwoFbmFtZWQYAyABKAsyJi50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25FcnROYW1lZFRlc3RzSABCBwoFdGVzdHMiGgoYVGVzdFNlbGVjdGlvbkVydEFsbFRlc3RzIjAKGlRlc3RTZWxlY3Rpb25FcnROYW1lZFRlc3RzEhIKCnRlc3RfbmFtZXMYASADKAkiqAEKFFRlc3RTZWxlY3Rpb25IYXJuZXNzEg4KBnNjcmlwdBgBIAEoCRI4CgNhbGwYAiABKAsyKS50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25IYXJuZXNzQWxsR3JvdXBzSAASPAoFbmFtZWQYAyABKAsyKy50ZXN0cnVuLnYxLlRlc3RTZWxlY3Rpb25IYXJuZXNzTmFtZWRHcm91cHNIAEIICgZncm91cHMiHwodVGVzdFNlbGVjdGlvbkhhcm5lc3NBbGxHcm91cHMiMAofVGVzdFNlbGVjdGlvbkhhcm5lc3NOYW1lZEdyb3VwcxINCgVuYW1lcxgBIAMoCUImWiRhZ2VudHJlcGwvcHJvdG8vdGVzdHJ1bi92MTt0ZXN0cnVudjFiBnByb3RvMw");
 
 /**
  * What one run is asked to run.
@@ -41,6 +43,27 @@ export type TestRunRequest = Message<"testrun.v1.TestRunRequest"> & {
    * @generated from field: repeated testrun.v1.TestSelection selections = 1;
    */
   selections: TestSelection[];
+
+  /**
+   * Instrument the run and report coverage: every Go and vitest suite's, the
+   * systems the integration and e2e tiers spawn included, plus the suites that
+   * run only in a coverage run (the istanbul honesty probes). Coverage is a
+   * whole suite's measurement, so every selection must then be `suite` or
+   * `every_suite`; a narrower one is refused. Refused with `record`.
+   *
+   * @generated from field: bool coverage = 2;
+   */
+  coverage: boolean;
+
+  /**
+   * Append the run's per-suite timings to the canonical timing history
+   * (test_time.csv), once every suite has passed on an unmoved branch. Only a
+   * run of the whole roster records: the one selection must be `every_suite`.
+   * Refused with `coverage`, whose instrumentation changes the timings.
+   *
+   * @generated from field: bool record = 3;
+   */
+  record: boolean;
 };
 
 /**
@@ -94,6 +117,22 @@ export type TestSelection = Message<"testrun.v1.TestSelection"> & {
      */
     value: TestSelectionHarness;
     case: "harness";
+  } | {
+    /**
+     * One roster suite, whole: every unit the roster plans for it.
+     *
+     * @generated from field: testrun.v1.TestSelectionSuite suite = 5;
+     */
+    value: TestSelectionSuite;
+    case: "suite";
+  } | {
+    /**
+     * Every roster suite: the full run the merge queue gates on. Named alone.
+     *
+     * @generated from field: testrun.v1.TestSelectionEverySuite every_suite = 6;
+     */
+    value: TestSelectionEverySuite;
+    case: "everySuite";
   } | { case: undefined; value?: undefined };
 };
 
@@ -103,6 +142,42 @@ export type TestSelection = Message<"testrun.v1.TestSelection"> & {
  */
 export const TestSelectionSchema: GenMessage<TestSelection> = /*@__PURE__*/
   messageDesc(file_testrun_v1_selection, 1);
+
+/**
+ * One roster suite, whole.
+ *
+ * @generated from message testrun.v1.TestSelectionSuite
+ */
+export type TestSelectionSuite = Message<"testrun.v1.TestSelectionSuite"> & {
+  /**
+   * REQUIRED. The suite's roster name (testrun/roster), e.g. "daemon".
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message testrun.v1.TestSelectionSuite.
+ * Use `create(TestSelectionSuiteSchema)` to create a new message.
+ */
+export const TestSelectionSuiteSchema: GenMessage<TestSelectionSuite> = /*@__PURE__*/
+  messageDesc(file_testrun_v1_selection, 2);
+
+/**
+ * Every roster suite runs. It is the only selection of its request.
+ *
+ * @generated from message testrun.v1.TestSelectionEverySuite
+ */
+export type TestSelectionEverySuite = Message<"testrun.v1.TestSelectionEverySuite"> & {
+};
+
+/**
+ * Describes the message testrun.v1.TestSelectionEverySuite.
+ * Use `create(TestSelectionEverySuiteSchema)` to create a new message.
+ */
+export const TestSelectionEverySuiteSchema: GenMessage<TestSelectionEverySuite> = /*@__PURE__*/
+  messageDesc(file_testrun_v1_selection, 3);
 
 /**
  * A Go package's tests: all of them, or named top-level tests and subtests.
@@ -148,7 +223,7 @@ export type TestSelectionGoPackage = Message<"testrun.v1.TestSelectionGoPackage"
  * Use `create(TestSelectionGoPackageSchema)` to create a new message.
  */
 export const TestSelectionGoPackageSchema: GenMessage<TestSelectionGoPackage> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 2);
+  messageDesc(file_testrun_v1_selection, 4);
 
 /**
  * Every top-level test of the package runs.
@@ -163,7 +238,7 @@ export type TestSelectionGoAllTests = Message<"testrun.v1.TestSelectionGoAllTest
  * Use `create(TestSelectionGoAllTestsSchema)` to create a new message.
  */
 export const TestSelectionGoAllTestsSchema: GenMessage<TestSelectionGoAllTests> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 3);
+  messageDesc(file_testrun_v1_selection, 5);
 
 /**
  * The named top-level tests run, and no other.
@@ -184,7 +259,7 @@ export type TestSelectionGoNamedTests = Message<"testrun.v1.TestSelectionGoNamed
  * Use `create(TestSelectionGoNamedTestsSchema)` to create a new message.
  */
 export const TestSelectionGoNamedTestsSchema: GenMessage<TestSelectionGoNamedTests> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 4);
+  messageDesc(file_testrun_v1_selection, 6);
 
 /**
  * One top-level Go test, whole or narrowed to some of its subtests.
@@ -228,7 +303,7 @@ export type TestSelectionGoTest = Message<"testrun.v1.TestSelectionGoTest"> & {
  * Use `create(TestSelectionGoTestSchema)` to create a new message.
  */
 export const TestSelectionGoTestSchema: GenMessage<TestSelectionGoTest> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 5);
+  messageDesc(file_testrun_v1_selection, 7);
 
 /**
  * The whole top-level test runs.
@@ -243,7 +318,7 @@ export type TestSelectionGoWholeTest = Message<"testrun.v1.TestSelectionGoWholeT
  * Use `create(TestSelectionGoWholeTestSchema)` to create a new message.
  */
 export const TestSelectionGoWholeTestSchema: GenMessage<TestSelectionGoWholeTest> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 6);
+  messageDesc(file_testrun_v1_selection, 8);
 
 /**
  * Only the named subtests of the top-level test run.
@@ -265,7 +340,7 @@ export type TestSelectionGoSubtests = Message<"testrun.v1.TestSelectionGoSubtest
  * Use `create(TestSelectionGoSubtestsSchema)` to create a new message.
  */
 export const TestSelectionGoSubtestsSchema: GenMessage<TestSelectionGoSubtests> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 7);
+  messageDesc(file_testrun_v1_selection, 9);
 
 /**
  * One subtest, by its path beneath the top-level test.
@@ -289,7 +364,7 @@ export type TestSelectionGoSubtestPath = Message<"testrun.v1.TestSelectionGoSubt
  * Use `create(TestSelectionGoSubtestPathSchema)` to create a new message.
  */
 export const TestSelectionGoSubtestPathSchema: GenMessage<TestSelectionGoSubtestPath> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 8);
+  messageDesc(file_testrun_v1_selection, 10);
 
 /**
  * One vitest file's tests: all of them, or named ones.
@@ -333,7 +408,7 @@ export type TestSelectionVitestFile = Message<"testrun.v1.TestSelectionVitestFil
  * Use `create(TestSelectionVitestFileSchema)` to create a new message.
  */
 export const TestSelectionVitestFileSchema: GenMessage<TestSelectionVitestFile> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 9);
+  messageDesc(file_testrun_v1_selection, 11);
 
 /**
  * Every test in the file runs.
@@ -348,7 +423,7 @@ export type TestSelectionVitestAllTests = Message<"testrun.v1.TestSelectionVites
  * Use `create(TestSelectionVitestAllTestsSchema)` to create a new message.
  */
 export const TestSelectionVitestAllTestsSchema: GenMessage<TestSelectionVitestAllTests> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 10);
+  messageDesc(file_testrun_v1_selection, 12);
 
 /**
  * The named tests of the file run, and no other.
@@ -372,7 +447,7 @@ export type TestSelectionVitestNamedTests = Message<"testrun.v1.TestSelectionVit
  * Use `create(TestSelectionVitestNamedTestsSchema)` to create a new message.
  */
 export const TestSelectionVitestNamedTestsSchema: GenMessage<TestSelectionVitestNamedTests> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 11);
+  messageDesc(file_testrun_v1_selection, 13);
 
 /**
  * One ERT test file's tests: all of them, or named ones.
@@ -416,7 +491,7 @@ export type TestSelectionErtFile = Message<"testrun.v1.TestSelectionErtFile"> & 
  * Use `create(TestSelectionErtFileSchema)` to create a new message.
  */
 export const TestSelectionErtFileSchema: GenMessage<TestSelectionErtFile> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 12);
+  messageDesc(file_testrun_v1_selection, 14);
 
 /**
  * Every test the file defines runs.
@@ -431,7 +506,7 @@ export type TestSelectionErtAllTests = Message<"testrun.v1.TestSelectionErtAllTe
  * Use `create(TestSelectionErtAllTestsSchema)` to create a new message.
  */
 export const TestSelectionErtAllTestsSchema: GenMessage<TestSelectionErtAllTests> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 13);
+  messageDesc(file_testrun_v1_selection, 15);
 
 /**
  * The named tests of the file run, and no other.
@@ -452,7 +527,7 @@ export type TestSelectionErtNamedTests = Message<"testrun.v1.TestSelectionErtNam
  * Use `create(TestSelectionErtNamedTestsSchema)` to create a new message.
  */
 export const TestSelectionErtNamedTestsSchema: GenMessage<TestSelectionErtNamedTests> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 14);
+  messageDesc(file_testrun_v1_selection, 16);
 
 /**
  * One shell test harness: all of it, or named groups of a harness that splits
@@ -497,7 +572,7 @@ export type TestSelectionHarness = Message<"testrun.v1.TestSelectionHarness"> & 
  * Use `create(TestSelectionHarnessSchema)` to create a new message.
  */
 export const TestSelectionHarnessSchema: GenMessage<TestSelectionHarness> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 15);
+  messageDesc(file_testrun_v1_selection, 17);
 
 /**
  * The whole harness runs.
@@ -512,7 +587,7 @@ export type TestSelectionHarnessAllGroups = Message<"testrun.v1.TestSelectionHar
  * Use `create(TestSelectionHarnessAllGroupsSchema)` to create a new message.
  */
 export const TestSelectionHarnessAllGroupsSchema: GenMessage<TestSelectionHarnessAllGroups> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 16);
+  messageDesc(file_testrun_v1_selection, 18);
 
 /**
  * The named groups of the harness run, and no other.
@@ -533,5 +608,5 @@ export type TestSelectionHarnessNamedGroups = Message<"testrun.v1.TestSelectionH
  * Use `create(TestSelectionHarnessNamedGroupsSchema)` to create a new message.
  */
 export const TestSelectionHarnessNamedGroupsSchema: GenMessage<TestSelectionHarnessNamedGroups> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_selection, 17);
+  messageDesc(file_testrun_v1_selection, 19);
 

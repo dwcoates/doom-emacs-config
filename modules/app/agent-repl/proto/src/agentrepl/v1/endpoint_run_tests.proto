@@ -14,6 +14,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/workspace_topology.proto";
 import "testrun/v1/run_event.proto";
 import "testrun/v1/selection.proto";
 import "workspace/v1/workspace.proto";
@@ -27,6 +28,26 @@ message RunTestsRequest {
   // REQUIRED, naming at least one test. The tests to run, exactly as the
   // runner takes them.
   testrun.v1.TestRunRequest run = 2;
+  // How many times the run repeats, one run after another, each a whole run
+  // with its own log: every frame names the run it belongs to, so a flaky
+  // test's one failing run keeps its own evidence. 0 and 1 run once. Refused
+  // with a recording run.
+  uint32 runs = 3;
+  // Stop repeating after the first run that does not pass.
+  bool stop_at_first_failure = 4;
+  // Hold the host under CPU load for the whole run (bin/with-cpu-load.sh), to
+  // reproduce a load-sensitive failure. ONLY THE USER ASKS FOR LOAD (owner
+  // ruling, 2026-10-06): refused unless `requester` is the user.
+  RunTestsCpuLoad cpu_load = 5;
+  // REQUIRED. Who asks: the user, or the workspace whose agent runs the
+  // command line.
+  WorkspaceRequester requester = 6;
+}
+
+// The CPU load a run is held under.
+message RunTestsCpuLoad {
+  // REQUIRED, at least 1. How many busy loops run beside the tests.
+  uint32 loops = 1;
 }
 
 // One frame of the run's stream.
@@ -41,6 +62,9 @@ message RunTestsResponse {
     // how its run ended.
     RunTestsError error = 2;
   }
+  // Which run of the request the frame belongs to, from 1. Every frame of a
+  // run that repeats carries it; a request that runs once carries 1.
+  uint32 run = 3;
 }
 
 // Why the run could not start or did not finish.
@@ -53,7 +77,20 @@ message RunTestsError {
     RunTestsNoSelection no_selection = 2;
     // The runner could not be started, or ended without reporting its end.
     RunTestsRunnerFailed runner_failed = 3;
+    // CPU load was asked for by someone other than the user.
+    RunTestsCpuLoadRefused cpu_load_refused = 4;
+    // The request's options contradict each other.
+    RunTestsInvalid invalid = 5;
   }
+}
+
+// CPU load was asked for by someone other than the user.
+message RunTestsCpuLoadRefused {}
+
+// The request's options contradict each other.
+message RunTestsInvalid {
+  // Which options, and why they cannot go together.
+  string detail = 1;
 }
 
 // No workspace the daemon serves is the one named.

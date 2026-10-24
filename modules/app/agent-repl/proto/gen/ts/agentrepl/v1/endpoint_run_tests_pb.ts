@@ -17,6 +17,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { WorkspaceRequester } from "./workspace_topology_pb";
+import { file_agentrepl_v1_workspace_topology } from "./workspace_topology_pb";
 import type { TestRunEvent } from "../../testrun/v1/run_event_pb";
 import { file_testrun_v1_run_event } from "../../testrun/v1/run_event_pb";
 import type { TestRunRequest } from "../../testrun/v1/selection_pb";
@@ -29,7 +31,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_run_tests.proto.
  */
 export const file_agentrepl_v1_endpoint_run_tests: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcnVuX3Rlc3RzLnByb3RvEgxhZ2VudHJlcGwudjEiaQoPUnVuVGVzdHNSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJwoDcnVuGAIgASgLMhoudGVzdHJ1bi52MS5UZXN0UnVuUmVxdWVzdCJ0ChBSdW5UZXN0c1Jlc3BvbnNlEikKBWV2ZW50GAEgASgLMhgudGVzdHJ1bi52MS5UZXN0UnVuRXZlbnRIABIsCgVlcnJvchgCIAEoCzIbLmFnZW50cmVwbC52MS5SdW5UZXN0c0Vycm9ySABCBwoFZnJhbWUi1QEKDVJ1blRlc3RzRXJyb3ISQwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyJi5hZ2VudHJlcGwudjEuUnVuVGVzdHNVbmtub3duV29ya3NwYWNlSAASOQoMbm9fc2VsZWN0aW9uGAIgASgLMiEuYWdlbnRyZXBsLnYxLlJ1blRlc3RzTm9TZWxlY3Rpb25IABI7Cg1ydW5uZXJfZmFpbGVkGAMgASgLMiIuYWdlbnRyZXBsLnYxLlJ1blRlc3RzUnVubmVyRmFpbGVkSABCBwoFY2F1c2UiGgoYUnVuVGVzdHNVbmtub3duV29ya3NwYWNlIhUKE1J1blRlc3RzTm9TZWxlY3Rpb24iOQoUUnVuVGVzdHNSdW5uZXJGYWlsZWQSEQoJZXhpdF9jb2RlGAEgASgFEg4KBmRldGFpbBgCIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_testrun_v1_run_event, file_testrun_v1_selection, file_workspace_v1_workspace]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcnVuX3Rlc3RzLnByb3RvEgxhZ2VudHJlcGwudjEi/AEKD1J1blRlc3RzUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEicKA3J1bhgCIAEoCzIaLnRlc3RydW4udjEuVGVzdFJ1blJlcXVlc3QSDAoEcnVucxgDIAEoDRIdChVzdG9wX2F0X2ZpcnN0X2ZhaWx1cmUYBCABKAgSLwoIY3B1X2xvYWQYBSABKAsyHS5hZ2VudHJlcGwudjEuUnVuVGVzdHNDcHVMb2FkEjMKCXJlcXVlc3RlchgGIAEoCzIgLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VSZXF1ZXN0ZXIiIAoPUnVuVGVzdHNDcHVMb2FkEg0KBWxvb3BzGAEgASgNIoEBChBSdW5UZXN0c1Jlc3BvbnNlEikKBWV2ZW50GAEgASgLMhgudGVzdHJ1bi52MS5UZXN0UnVuRXZlbnRIABIsCgVlcnJvchgCIAEoCzIbLmFnZW50cmVwbC52MS5SdW5UZXN0c0Vycm9ySAASCwoDcnVuGAMgASgNQgcKBWZyYW1lIskCCg1SdW5UZXN0c0Vycm9yEkMKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJ1blRlc3RzVW5rbm93bldvcmtzcGFjZUgAEjkKDG5vX3NlbGVjdGlvbhgCIAEoCzIhLmFnZW50cmVwbC52MS5SdW5UZXN0c05vU2VsZWN0aW9uSAASOwoNcnVubmVyX2ZhaWxlZBgDIAEoCzIiLmFnZW50cmVwbC52MS5SdW5UZXN0c1J1bm5lckZhaWxlZEgAEkAKEGNwdV9sb2FkX3JlZnVzZWQYBCABKAsyJC5hZ2VudHJlcGwudjEuUnVuVGVzdHNDcHVMb2FkUmVmdXNlZEgAEjAKB2ludmFsaWQYBSABKAsyHS5hZ2VudHJlcGwudjEuUnVuVGVzdHNJbnZhbGlkSABCBwoFY2F1c2UiGAoWUnVuVGVzdHNDcHVMb2FkUmVmdXNlZCIhCg9SdW5UZXN0c0ludmFsaWQSDgoGZGV0YWlsGAEgASgJIhoKGFJ1blRlc3RzVW5rbm93bldvcmtzcGFjZSIVChNSdW5UZXN0c05vU2VsZWN0aW9uIjkKFFJ1blRlc3RzUnVubmVyRmFpbGVkEhEKCWV4aXRfY29kZRgBIAEoBRIOCgZkZXRhaWwYAiABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_workspace_topology, file_testrun_v1_run_event, file_testrun_v1_selection, file_workspace_v1_workspace]);
 
 /**
  * Run the selected tests from one workspace's worktree.
@@ -51,6 +53,40 @@ export type RunTestsRequest = Message<"agentrepl.v1.RunTestsRequest"> & {
    * @generated from field: testrun.v1.TestRunRequest run = 2;
    */
   run?: TestRunRequest | undefined;
+
+  /**
+   * How many times the run repeats, one run after another, each a whole run
+   * with its own log: every frame names the run it belongs to, so a flaky
+   * test's one failing run keeps its own evidence. 0 and 1 run once. Refused
+   * with a recording run.
+   *
+   * @generated from field: uint32 runs = 3;
+   */
+  runs: number;
+
+  /**
+   * Stop repeating after the first run that does not pass.
+   *
+   * @generated from field: bool stop_at_first_failure = 4;
+   */
+  stopAtFirstFailure: boolean;
+
+  /**
+   * Hold the host under CPU load for the whole run (bin/with-cpu-load.sh), to
+   * reproduce a load-sensitive failure. ONLY THE USER ASKS FOR LOAD (owner
+   * ruling, 2026-10-06): refused unless `requester` is the user.
+   *
+   * @generated from field: agentrepl.v1.RunTestsCpuLoad cpu_load = 5;
+   */
+  cpuLoad?: RunTestsCpuLoad | undefined;
+
+  /**
+   * REQUIRED. Who asks: the user, or the workspace whose agent runs the
+   * command line.
+   *
+   * @generated from field: agentrepl.v1.WorkspaceRequester requester = 6;
+   */
+  requester?: WorkspaceRequester | undefined;
 };
 
 /**
@@ -59,6 +95,27 @@ export type RunTestsRequest = Message<"agentrepl.v1.RunTestsRequest"> & {
  */
 export const RunTestsRequestSchema: GenMessage<RunTestsRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_run_tests, 0);
+
+/**
+ * The CPU load a run is held under.
+ *
+ * @generated from message agentrepl.v1.RunTestsCpuLoad
+ */
+export type RunTestsCpuLoad = Message<"agentrepl.v1.RunTestsCpuLoad"> & {
+  /**
+   * REQUIRED, at least 1. How many busy loops run beside the tests.
+   *
+   * @generated from field: uint32 loops = 1;
+   */
+  loops: number;
+};
+
+/**
+ * Describes the message agentrepl.v1.RunTestsCpuLoad.
+ * Use `create(RunTestsCpuLoadSchema)` to create a new message.
+ */
+export const RunTestsCpuLoadSchema: GenMessage<RunTestsCpuLoad> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 1);
 
 /**
  * One frame of the run's stream.
@@ -91,6 +148,14 @@ export type RunTestsResponse = Message<"agentrepl.v1.RunTestsResponse"> & {
     value: RunTestsError;
     case: "error";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * Which run of the request the frame belongs to, from 1. Every frame of a
+   * run that repeats carries it; a request that runs once carries 1.
+   *
+   * @generated from field: uint32 run = 3;
+   */
+  run: number;
 };
 
 /**
@@ -98,7 +163,7 @@ export type RunTestsResponse = Message<"agentrepl.v1.RunTestsResponse"> & {
  * Use `create(RunTestsResponseSchema)` to create a new message.
  */
 export const RunTestsResponseSchema: GenMessage<RunTestsResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_tests, 1);
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 2);
 
 /**
  * Why the run could not start or did not finish.
@@ -135,6 +200,22 @@ export type RunTestsError = Message<"agentrepl.v1.RunTestsError"> & {
      */
     value: RunTestsRunnerFailed;
     case: "runnerFailed";
+  } | {
+    /**
+     * CPU load was asked for by someone other than the user.
+     *
+     * @generated from field: agentrepl.v1.RunTestsCpuLoadRefused cpu_load_refused = 4;
+     */
+    value: RunTestsCpuLoadRefused;
+    case: "cpuLoadRefused";
+  } | {
+    /**
+     * The request's options contradict each other.
+     *
+     * @generated from field: agentrepl.v1.RunTestsInvalid invalid = 5;
+     */
+    value: RunTestsInvalid;
+    case: "invalid";
   } | { case: undefined; value?: undefined };
 };
 
@@ -143,7 +224,43 @@ export type RunTestsError = Message<"agentrepl.v1.RunTestsError"> & {
  * Use `create(RunTestsErrorSchema)` to create a new message.
  */
 export const RunTestsErrorSchema: GenMessage<RunTestsError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_tests, 2);
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 3);
+
+/**
+ * CPU load was asked for by someone other than the user.
+ *
+ * @generated from message agentrepl.v1.RunTestsCpuLoadRefused
+ */
+export type RunTestsCpuLoadRefused = Message<"agentrepl.v1.RunTestsCpuLoadRefused"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RunTestsCpuLoadRefused.
+ * Use `create(RunTestsCpuLoadRefusedSchema)` to create a new message.
+ */
+export const RunTestsCpuLoadRefusedSchema: GenMessage<RunTestsCpuLoadRefused> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 4);
+
+/**
+ * The request's options contradict each other.
+ *
+ * @generated from message agentrepl.v1.RunTestsInvalid
+ */
+export type RunTestsInvalid = Message<"agentrepl.v1.RunTestsInvalid"> & {
+  /**
+   * Which options, and why they cannot go together.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RunTestsInvalid.
+ * Use `create(RunTestsInvalidSchema)` to create a new message.
+ */
+export const RunTestsInvalidSchema: GenMessage<RunTestsInvalid> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 5);
 
 /**
  * No workspace the daemon serves is the one named.
@@ -158,7 +275,7 @@ export type RunTestsUnknownWorkspace = Message<"agentrepl.v1.RunTestsUnknownWork
  * Use `create(RunTestsUnknownWorkspaceSchema)` to create a new message.
  */
 export const RunTestsUnknownWorkspaceSchema: GenMessage<RunTestsUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_tests, 3);
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 6);
 
 /**
  * The request named no test.
@@ -173,7 +290,7 @@ export type RunTestsNoSelection = Message<"agentrepl.v1.RunTestsNoSelection"> & 
  * Use `create(RunTestsNoSelectionSchema)` to create a new message.
  */
 export const RunTestsNoSelectionSchema: GenMessage<RunTestsNoSelection> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_tests, 4);
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 7);
 
 /**
  * The runner could not be started, or ended without reporting its end.
@@ -201,5 +318,5 @@ export type RunTestsRunnerFailed = Message<"agentrepl.v1.RunTestsRunnerFailed"> 
  * Use `create(RunTestsRunnerFailedSchema)` to create a new message.
  */
 export const RunTestsRunnerFailedSchema: GenMessage<RunTestsRunnerFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_tests, 5);
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 8);
 

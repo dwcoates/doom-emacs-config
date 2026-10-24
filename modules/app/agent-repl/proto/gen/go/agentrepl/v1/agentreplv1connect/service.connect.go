@@ -318,6 +318,8 @@ const (
 	AgentReplUnsubscribeMergeQueueProcedure = "/agentrepl.v1.AgentRepl/UnsubscribeMergeQueue"
 	// AgentReplRunTestsProcedure is the fully-qualified name of the AgentRepl's RunTests RPC.
 	AgentReplRunTestsProcedure = "/agentrepl.v1.AgentRepl/RunTests"
+	// AgentReplRunRedundancyProcedure is the fully-qualified name of the AgentRepl's RunRedundancy RPC.
+	AgentReplRunRedundancyProcedure = "/agentrepl.v1.AgentRepl/RunRedundancy"
 	// AgentReplEvaluateInEditorProcedure is the fully-qualified name of the AgentRepl's
 	// EvaluateInEditor RPC.
 	AgentReplEvaluateInEditorProcedure = "/agentrepl.v1.AgentRepl/EvaluateInEditor"
@@ -432,6 +434,7 @@ var (
 	agentReplSubscribeMergeQueueMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("SubscribeMergeQueue")
 	agentReplUnsubscribeMergeQueueMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("UnsubscribeMergeQueue")
 	agentReplRunTestsMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("RunTests")
+	agentReplRunRedundancyMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("RunRedundancy")
 	agentReplEvaluateInEditorMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("EvaluateInEditor")
 	agentReplAnswerEditorEvaluationMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("AnswerEditorEvaluation")
 )
@@ -767,6 +770,9 @@ type AgentReplClient interface {
 	// reports; the daemon is the one runner of tests on the host. See
 	// endpoint_run_tests.proto.
 	RunTests(context.Context, *connect.Request[v1.RunTestsRequest]) (*connect.ServerStreamForClient[v1.RunTestsResponse], error)
+	// Measure which test cases are redundant from one workspace's worktree,
+	// streaming the measurement's output. See endpoint_run_redundancy.proto.
+	RunRedundancy(context.Context, *connect.Request[v1.RunRedundancyRequest]) (*connect.ServerStreamForClient[v1.RunRedundancyResponse], error)
 	// ---- EDITOR: elisp evaluated in the running editor ----
 	// Evaluate elisp in the running editor and answer with the result. See
 	// endpoint_evaluate_in_editor.proto.
@@ -1412,6 +1418,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplRunTestsMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		runRedundancy: connect.NewClient[v1.RunRedundancyRequest, v1.RunRedundancyResponse](
+			httpClient,
+			baseURL+AgentReplRunRedundancyProcedure,
+			connect.WithSchema(agentReplRunRedundancyMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		evaluateInEditor: connect.NewClient[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse](
 			httpClient,
 			baseURL+AgentReplEvaluateInEditorProcedure,
@@ -1532,6 +1544,7 @@ type agentReplClient struct {
 	subscribeMergeQueue        *connect.Client[v1.SubscribeMergeQueueRequest, v1.SubscribeMergeQueueResponse]
 	unsubscribeMergeQueue      *connect.Client[v1.UnsubscribeMergeQueueRequest, v1.UnsubscribeMergeQueueResponse]
 	runTests                   *connect.Client[v1.RunTestsRequest, v1.RunTestsResponse]
+	runRedundancy              *connect.Client[v1.RunRedundancyRequest, v1.RunRedundancyResponse]
 	evaluateInEditor           *connect.Client[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse]
 	answerEditorEvaluation     *connect.Client[v1.AnswerEditorEvaluationRequest, v1.AnswerEditorEvaluationResponse]
 }
@@ -2051,6 +2064,11 @@ func (c *agentReplClient) RunTests(ctx context.Context, req *connect.Request[v1.
 	return c.runTests.CallServerStream(ctx, req)
 }
 
+// RunRedundancy calls agentrepl.v1.AgentRepl.RunRedundancy.
+func (c *agentReplClient) RunRedundancy(ctx context.Context, req *connect.Request[v1.RunRedundancyRequest]) (*connect.ServerStreamForClient[v1.RunRedundancyResponse], error) {
+	return c.runRedundancy.CallServerStream(ctx, req)
+}
+
 // EvaluateInEditor calls agentrepl.v1.AgentRepl.EvaluateInEditor.
 func (c *agentReplClient) EvaluateInEditor(ctx context.Context, req *connect.Request[v1.EvaluateInEditorRequest]) (*connect.Response[v1.EvaluateInEditorResponse], error) {
 	return c.evaluateInEditor.CallUnary(ctx, req)
@@ -2392,6 +2410,9 @@ type AgentReplHandler interface {
 	// reports; the daemon is the one runner of tests on the host. See
 	// endpoint_run_tests.proto.
 	RunTests(context.Context, *connect.Request[v1.RunTestsRequest], *connect.ServerStream[v1.RunTestsResponse]) error
+	// Measure which test cases are redundant from one workspace's worktree,
+	// streaming the measurement's output. See endpoint_run_redundancy.proto.
+	RunRedundancy(context.Context, *connect.Request[v1.RunRedundancyRequest], *connect.ServerStream[v1.RunRedundancyResponse]) error
 	// ---- EDITOR: elisp evaluated in the running editor ----
 	// Evaluate elisp in the running editor and answer with the result. See
 	// endpoint_evaluate_in_editor.proto.
@@ -3033,6 +3054,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplRunTestsMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplRunRedundancyHandler := connect.NewServerStreamHandler(
+		AgentReplRunRedundancyProcedure,
+		svc.RunRedundancy,
+		connect.WithSchema(agentReplRunRedundancyMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplEvaluateInEditorHandler := connect.NewUnaryHandler(
 		AgentReplEvaluateInEditorProcedure,
 		svc.EvaluateInEditor,
@@ -3253,6 +3280,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplUnsubscribeMergeQueueHandler.ServeHTTP(w, r)
 		case AgentReplRunTestsProcedure:
 			agentReplRunTestsHandler.ServeHTTP(w, r)
+		case AgentReplRunRedundancyProcedure:
+			agentReplRunRedundancyHandler.ServeHTTP(w, r)
 		case AgentReplEvaluateInEditorProcedure:
 			agentReplEvaluateInEditorHandler.ServeHTTP(w, r)
 		case AgentReplAnswerEditorEvaluationProcedure:
@@ -3676,6 +3705,10 @@ func (UnimplementedAgentReplHandler) UnsubscribeMergeQueue(context.Context, *con
 
 func (UnimplementedAgentReplHandler) RunTests(context.Context, *connect.Request[v1.RunTestsRequest], *connect.ServerStream[v1.RunTestsResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RunTests is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RunRedundancy(context.Context, *connect.Request[v1.RunRedundancyRequest], *connect.ServerStream[v1.RunRedundancyResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RunRedundancy is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) EvaluateInEditor(context.Context, *connect.Request[v1.EvaluateInEditorRequest]) (*connect.Response[v1.EvaluateInEditorResponse], error) {
