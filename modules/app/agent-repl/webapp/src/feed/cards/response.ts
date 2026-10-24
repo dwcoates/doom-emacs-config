@@ -110,6 +110,7 @@ import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 import { easeIntoLook, readBubbleLook } from "../../bubble/collapse-motion.js";
 import { drawOutcomeCard } from "../marker.js";
 import { linkAnswers } from "../entries.js";
+import { markComposerEntry } from "../composer-entry.js";
 
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";
@@ -253,7 +254,13 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // A LABEL A LATER PROMPT ANSWERS IS A LINK to that prompt, restated on every
   // paint of the prose (entries.ts).
   const answers = u.answers;
-  const prose = markdownSlot(RESPONSE_PROSE_CLASS, served, answers.length === 0 ? undefined : (rendered) => linkAnswers(rendered, answers));
+  // THE SUBTREE THE COMPOSER IS ANSWERING is boxed on every paint too
+  // (composer-entry.ts).
+  const rowId = rc.row.id?.value ?? "";
+  const prose = markdownSlot(RESPONSE_PROSE_CLASS, served, (rendered) => {
+    if (answers.length > 0) linkAnswers(rendered, answers);
+    markComposerEntry(rendered, rowId);
+  });
 
   // A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user
   // owns the scroll). The daemon re-pushes the whole row on every fragment of an

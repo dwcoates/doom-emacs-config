@@ -2741,6 +2741,19 @@ html[data-page-unshown] *::after {
 .mp-entry { border-radius: 4px; }
 .mp-entry-label { color: var(--accent); cursor: pointer; }
 .mp-entry-path .mp-label { opacity: 0.55; }
+/* THE SUBTREE THE COMPOSER IS ANSWERING is one box (feed/composer-entry.ts):
+   each line inside it is painted from its left edge, the column the node's
+   label starts at, to its right edge, the widest line's text, with the
+   accent's bar on the left. */
+.mp-line.mp-line-composing {
+  background: linear-gradient(to right,
+    transparent var(--composer-left),
+    var(--accent) var(--composer-left),
+    var(--accent) calc(var(--composer-left) + 2px),
+    var(--composer-entry-bg) calc(var(--composer-left) + 2px),
+    var(--composer-entry-bg) var(--composer-right),
+    transparent var(--composer-right));
+}
 /* The entry a linked label revealed flashes once, as a coalesced held card does. */
 .mp-entry-flash { animation: mp-entry-flash 1.2s ease-out; }
 @keyframes mp-entry-flash {

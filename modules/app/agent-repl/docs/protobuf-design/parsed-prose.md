@@ -226,8 +226,9 @@ wrong labels). That needs one parse, in one place, that every program reads.
   - A sent prompt's entries read as the tree of the labels they answer (labels only,
     "option B").
   - While an entry is typed in Emacs, the node it answers is highlighted in the feed,
-    that node's whole subtree (first its own line only; the owner widened it to the
-    subtree on 2026-10-24), until point leaves the line.
+    that node's whole subtree as one box, from the column the node's label starts at
+    to the widest highlighted line (first its own line only; the owner widened it on
+    2026-10-24), until point leaves the line.
   - A label that answers nothing is marked in the composer.
   - `o` and `O` on an entry line open the next or previous node's entry.
   - An explicitly selected response is what entries answer, while typing and once

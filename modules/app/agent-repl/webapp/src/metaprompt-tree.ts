@@ -213,8 +213,8 @@ function charWidth(char: string, followedByVS16: boolean): number {
   return isWideCodePoint(char.codePointAt(0) ?? 0) ? 2 : 1;
 }
 
-/** text_width: the rendered column width of already-decoded text. */
-function textWidth(text: string): number {
+/** text_width: the rendered column width of already-decoded text, as a tree draws it. */
+export function textWidth(text: string): number {
   const chars = [...text];
   let total = 0;
   for (let i = 0; i < chars.length; i++) {
