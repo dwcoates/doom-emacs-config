@@ -950,3 +950,13 @@ describe("submitPromptRefusal: the unknown arm", () => {
     ).toThrow(/arm 'agentAsleep' is not one this build can draw/);
   });
 });
+
+describe("submitPromptRefusal: a chat thread's first answer", () => {
+  it("says to send once the first answer lands, the text kept", () => {
+    // Act
+    const said = submitPromptRefusal({ case: "threadAwaitingFirstAnswer", value: {} } as never);
+
+    // Assert
+    expect(said).toBe("the thread's first answer is still coming — send this once it lands; your text is kept");
+  });
+});
