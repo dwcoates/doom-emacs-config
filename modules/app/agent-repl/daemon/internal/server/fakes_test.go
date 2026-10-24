@@ -1269,6 +1269,10 @@ type fakeFeed struct {
 	// sent are the sent rows SentPrompt drew, in order.
 	sentMu sync.Mutex
 	sent   []sentRow
+	// readNewest is told each workspace ReadNewest read, and readNewestErr is
+	// what it answers.
+	readNewest    chan ids.WorkspaceID
+	readNewestErr error
 	// hostAsks is each workspace's standing ask HostAsk answers, and
 	// askMoves the stream WatchHostAsks hands the server.
 	hostAsksMu sync.Mutex
@@ -2513,4 +2517,11 @@ func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+func (f *fakeFeed) ReadNewest(_ context.Context, ws ids.WorkspaceID) error {
+	if f.readNewest != nil {
+		f.readNewest <- ws
+	}
+	return f.readNewestErr
 }

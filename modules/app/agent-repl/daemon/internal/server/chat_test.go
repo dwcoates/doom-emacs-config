@@ -15,9 +15,11 @@ import (
 	zettelv1 "agentrepl/proto/zettel/v1"
 
 	"agent-repld/internal/chat"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/publish"
+	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -557,3 +559,59 @@ func TestAdoptWebWorkspaceNamesThePageItMounts(t *testing.T) {
 		})
 	}
 }
+
+func TestWatchChatReplaysTheThreadsNewestPageForItsAnswers(t *testing.T) {
+	cases := []struct {
+		name  string
+		err   error
+		level string
+	}{
+		{name: "read", level: "debug"},
+		{name: "no history source yet", err: feed.ErrNoHistorySource, level: "debug"},
+		{name: "a failed read", err: errors.New("shim gone"), level: "error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			records := &signalLogger{records: make(chan dlog.Record, 64)}
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{workspace: records} })
+			thread := withThread(h)
+			read := make(chan ids.WorkspaceID, 1)
+			h.Feed.readNewest, h.Feed.readNewestErr = read, tc.err
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// Act
+			stream, err := h.Client.WatchChat(ctx, connect.NewRequest(&agentreplv1.WatchChatRequest{Thread: thread}))
+			if err != nil || !stream.Receive() {
+				t.Fatalf("WatchChat: %v / %v", err, stream.Err())
+			}
+
+			// Assert
+			if got := <-read; got != testThreadID {
+				t.Fatalf("read %s, want the thread", got)
+			}
+			for rec := range records.records {
+				if rec.Operation == "daemon.server.chat_replay" {
+					if rec.Level != tc.level {
+						t.Fatalf("record = %+v, want level %s", rec, tc.level)
+					}
+					return
+				}
+			}
+		})
+	}
+}
+
+// signalLogger hands every record to a channel, so a test waits for the one
+// it is about instead of for time to pass.
+type signalLogger struct{ records chan dlog.Record }
+
+func (l *signalLogger) send(level, op, msg string, ctx dlog.Context) {
+	l.records <- dlog.Record{Level: level, Operation: op, Message: msg, Context: ctx}
+}
+func (l *signalLogger) Debug(op, msg string, ctx dlog.Context) { l.send(dlog.LevelDebug, op, msg, ctx) }
+func (l *signalLogger) Info(op, msg string, ctx dlog.Context)  { l.send(dlog.LevelInfo, op, msg, ctx) }
+func (l *signalLogger) Warn(op, msg string, ctx dlog.Context)  { l.send(dlog.LevelWarn, op, msg, ctx) }
+func (l *signalLogger) Error(op, msg string, ctx dlog.Context) { l.send(dlog.LevelError, op, msg, ctx) }
+func (l *signalLogger) With(dlog.Context) dlog.Logger          { return l }

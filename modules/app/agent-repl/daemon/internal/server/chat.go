@@ -16,10 +16,12 @@ import (
 	zettelv1 "agentrepl/proto/zettel/v1"
 
 	"agent-repld/internal/chat"
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/replyquote"
+	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -148,6 +150,11 @@ func (s *server) watchChat(ctx context.Context, msg *agentreplv1.WatchChatReques
 	if err := s.deps.Chat.Open(ctx, subject.Record.ID); err != nil {
 		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("open the thread's chat view: %w", err))
 	}
+	// AN ANSWER THE DAEMON NEVER RECORDED -- one that came while it was down,
+	// or before it could reach zettel -- is learned again from the newest
+	// page's replay, which tells the chat service every concluded answer it
+	// draws (feed.ChatSink.TurnAnswered, recorded idempotently by turn).
+	go s.replayThreadAnswers(ctx, subject)
 	return serveTopic(s, ctx, rpc, subject.Log, s.deps.Chat.Topic(subject.Record.ID), out,
 		func(view *frontendv1.ChatView) *agentreplv1.WatchChatResponse {
 			return &agentreplv1.WatchChatResponse{View: view}
@@ -338,4 +345,20 @@ func mostRecentOf(records []wsm.Workspace, threads bool) (wsm.Workspace, bool) {
 		}
 	}
 	return best, found
+}
+
+// replayThreadAnswers reads a thread's newest feed page, so the chat service
+// is told every answer it draws. No history source up is ordinary: the page is
+// read when the session is.
+func (s *server) replayThreadAnswers(ctx context.Context, subject resolved) {
+	const op = "daemon.server.chat_replay"
+	err := s.deps.Feed.ReadNewest(ctx, subject.Record.ID)
+	switch {
+	case err == nil:
+		subject.Log.Debug(op, "the thread's newest page was read for its answers", nil)
+	case errors.Is(err, feed.ErrNoHistorySource), ctxend.Is(err):
+		subject.Log.Debug(op, "the thread's newest page was not read for its answers", dlog.Context{"cause": err.Error()})
+	default:
+		subject.Log.Error(op, "the thread's newest page could not be read for its answers", dlog.Context{"cause": err.Error()})
+	}
 }
