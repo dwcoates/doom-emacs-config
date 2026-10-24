@@ -300,7 +300,7 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 		if err := v.bindResolvers(log, record.ID, record.Dir); err != nil {
 			return nil, fmt.Errorf("open %q: bind the thread's views: %w", record.ID, err)
 		}
-		if err := v.publishNaming(ctx, log, record, ""); err != nil {
+		if err := v.publishNaming(ctx, log, record); err != nil {
 			log.Error(opOpen, "could not publish the thread's naming", dlog.Context{"dir": record.Dir, "cause": err.Error()})
 			return nil, fmt.Errorf("open %q: publish the thread's naming: %w", record.ID, err)
 		}

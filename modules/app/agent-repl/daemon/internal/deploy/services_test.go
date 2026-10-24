@@ -48,7 +48,7 @@ type fakeLaunchd struct {
 
 func newFakeLaunchd() *fakeLaunchd {
 	return &fakeLaunchd{
-		loaded: map[string]bool{StoreLabel: true, SidecarLabel: true},
+		loaded: map[string]bool{StoreLabel: true, SidecarLabel: true, ZettelLabel: true},
 		pid:    map[string]int{StoreLabel: 10, SidecarLabel: 20},
 	}
 }
@@ -939,5 +939,72 @@ func TestEnsureStoreCurrentsSecondHalfLeavesASidecarTheFirstHalfBootstrapped(t *
 	// Assert
 	if err != nil || len(h.acts()) != before {
 		t.Fatalf("second half = %v, acts %v; want a just-bootstrapped sidecar left alone", err, h.acts()[before:])
+	}
+}
+
+func TestRestartZettelKickstartsItAlone(t *testing.T) {
+	cases := []struct {
+		name    string
+		kickErr error
+	}{
+		{name: "kickstarted"},
+		{name: "a failed kickstart is surfaced", kickErr: errors.New("kickstart refused")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newRestarter(t)
+			h.launchd.kickErr = tc.kickErr
+
+			// Act
+			err := h.r.RestartZettel(context.Background())
+
+			// Assert
+			if tc.kickErr != nil {
+				if err == nil || !loggedTo(h.log, "error", "the zettel kickstart failed") {
+					t.Fatalf("RestartZettel = %v, records %+v; want the failure returned and at ERROR", err, h.log.Records())
+				}
+				return
+			}
+			if calls := h.launchd.Calls(); err != nil || len(calls) != 1 || calls[0] != "kickstart "+ZettelLabel {
+				t.Fatalf("RestartZettel = %v, calls = %v, want one zettel kickstart", err, calls)
+			}
+		})
+	}
+}
+
+func TestEnsureCurrentKeepsZettelLoadedAndCurrent(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *restarterHarness)
+		want    []string
+	}{
+		{name: "a stale zettel is restarted alone", arrange: func(t *testing.T, h *restarterHarness) {
+			h.running(t, ZettelLabel, buildreport.ServiceZettel, 30, "old zettel", "new zettel")
+		}, want: []string{"kickstart " + ZettelLabel}},
+		{name: "a current zettel is left alone", arrange: func(t *testing.T, h *restarterHarness) {
+			h.running(t, ZettelLabel, buildreport.ServiceZettel, 30, "new zettel", "new zettel")
+		}},
+		{name: "an unloaded zettel is bootstrapped", arrange: func(t *testing.T, h *restarterHarness) {
+			writeFile(t, filepath.Join(h.r.PlistDir, ZettelLabel+".plist"), "<plist/>")
+			h.launchd.loaded[ZettelLabel] = false
+		}, want: []string{"bootstrap " + ZettelLabel + ".plist"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newRestarter(t)
+			h.running(t, StoreLabel, buildreport.ServiceStore, 10, "new store", "new store")
+			h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "new sidecar", "new sidecar")
+			tc.arrange(t, h)
+
+			// Act
+			err := h.r.EnsureCurrent(context.Background())
+
+			// Assert
+			if err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(tc.want) {
+				t.Fatalf("EnsureCurrent = %v, acts %v; want %v", err, h.acts(), tc.want)
+			}
+		})
 	}
 }

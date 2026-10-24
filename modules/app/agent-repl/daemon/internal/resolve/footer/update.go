@@ -155,6 +155,8 @@ func updateComponent(c deployprogress.Component) *frontendv1.FooterStatusActivit
 		out.Component = &frontendv1.FooterStatusActivityUpdateComponent_Shim{Shim: &frontendv1.FooterStatusActivityUpdateComponentShim{}}
 	case deployprogress.Webapp:
 		out.Component = &frontendv1.FooterStatusActivityUpdateComponent_Webapp{Webapp: &frontendv1.FooterStatusActivityUpdateComponentWebapp{}}
+	case deployprogress.Zettel:
+		out.Component = &frontendv1.FooterStatusActivityUpdateComponent_Zettel{Zettel: &frontendv1.FooterStatusActivityUpdateComponentZettel{}}
 	}
 	return out
 }

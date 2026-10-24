@@ -16,10 +16,11 @@ import (
 	"agent-repld/internal/restarttiming"
 )
 
-// The launchd labels of the two services a deploy restarts.
+// The launchd labels of the three services a deploy restarts.
 const (
 	StoreLabel   = "com.agentrepl.shim-store"
 	SidecarLabel = "com.agentrepl.shim-claude-sidecar"
+	ZettelLabel  = "com.agentrepl.zettel"
 )
 
 const opServices = "daemon.deploy.services"
@@ -187,6 +188,39 @@ func (r *Restarter) ensureBothLoaded(ctx context.Context) (storeBootstrapped, si
 	return storeBootstrapped, sidecarBootstrapped, nil
 }
 
+// RestartZettel restarts the zettel service alone. Nothing else depends on
+// its socket but the daemon's chat calls, which fail loudly while it is out.
+func (r *Restarter) RestartZettel(ctx context.Context) error {
+	fields := dlog.Context{"zettel": ZettelLabel}
+	if err := r.Launchd.Kickstart(ctx, ZettelLabel); err != nil {
+		r.failed("the zettel kickstart failed", fields, err)
+		return fmt.Errorf("deploy: kickstart %s: %w", ZettelLabel, err)
+	}
+	r.Log.Info(opServices, "kickstarted zettel", fields)
+	return nil
+}
+
+// ensureZettelCurrent is the boot's zettel step: launchd holds the zettel
+// service, and it runs the installed build (restarted alone when it does not).
+// It is independent of the store and the sidecar, so it runs beside the
+// sidecar's half, never before a shim starts.
+func (r *Restarter) ensureZettelCurrent(ctx context.Context) error {
+	bootstrapped, err := r.ensureLoaded(ctx, ZettelLabel, dlog.Context{"zettel": ZettelLabel})
+	if err != nil {
+		return err
+	}
+	stale, err := r.runningStale(ctx, bootstrapped, ComponentZettel, ZettelLabel, buildreport.ServiceZettel)
+	if err != nil {
+		return err
+	}
+	if stale {
+		r.Log.Info(opServices, "the running zettel is not the installed build; restarting it", nil)
+		return r.RestartZettel(ctx)
+	}
+	r.Log.Debug(opServices, "zettel runs the installed build", nil)
+	return nil
+}
+
 // EnsureCurrent is the BOOT's service step: launchd holds both services
 // (EnsureLoaded), and neither RUNS an older build than the one installed in
 // CacheBin. A running service whose build report is not the installed build
@@ -249,12 +283,17 @@ func (r *Restarter) EnsureStoreCurrent(ctx context.Context) (func(context.Contex
 		if err := r.RestartStore(ctx); err != nil {
 			return nil, err
 		}
-		return func(context.Context) error {
+		return func(ctx context.Context) error {
 			r.Log.Debug(opServices, "the store's restart already restarted the sidecar onto the installed build", nil)
-			return nil
+			return r.ensureZettelCurrent(ctx)
 		}, nil
 	}
-	return func(ctx context.Context) error { return r.ensureSidecarCurrent(ctx, sidecarBootstrapped) }, nil
+	return func(ctx context.Context) error {
+		if err := r.ensureSidecarCurrent(ctx, sidecarBootstrapped); err != nil {
+			return err
+		}
+		return r.ensureZettelCurrent(ctx)
+	}, nil
 }
 
 // ensureSidecarCurrent is EnsureCurrent's second half: the sidecar's build

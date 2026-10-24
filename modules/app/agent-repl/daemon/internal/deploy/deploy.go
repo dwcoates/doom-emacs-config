@@ -62,6 +62,7 @@ type Component string
 const (
 	ComponentStore   Component = "store"
 	ComponentSidecar Component = "sidecar"
+	ComponentZettel  Component = "zettel"
 	ComponentElisp   Component = "elisp"
 	ComponentDaemon  Component = "daemon"
 	ComponentShim    Component = "shim"
@@ -83,6 +84,8 @@ func (c Component) Arm() agentreplv1.DeployComponent {
 		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_SIDECAR
 	case ComponentElisp:
 		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_ELISP
+	case ComponentZettel:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_ZETTEL
 	default:
 		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_UNSPECIFIED
 	}
@@ -200,6 +203,7 @@ type Clients interface {
 type Services interface {
 	RestartStore(ctx context.Context) error
 	RestartSidecar(ctx context.Context) error
+	RestartZettel(ctx context.Context) error
 }
 
 // Clock is the deploy's view of time.
@@ -518,7 +522,7 @@ func (d *Deployer) timePhase(phase restarttiming.DeployPhase, since time.Time, e
 // on the building line. shim-lock rides with the shim (see Targets).
 var builtComponents = []deployprogress.Component{
 	deployprogress.Shim, deployprogress.Webapp, deployprogress.Daemon,
-	deployprogress.Store, deployprogress.Sidecar,
+	deployprogress.Store, deployprogress.Sidecar, deployprogress.Zettel,
 }
 
 // progress states one phase on the update line.
@@ -704,13 +708,13 @@ func (d *Deployer) end(committed bool) {
 
 // builds are the fresh builds of one deploy.
 type builds struct {
-	shim, webapp, daemon, store, sidecar, lock, elisp string
+	shim, webapp, daemon, store, sidecar, zettel, lock, elisp string
 }
 
 func (b builds) fields() dlog.Context {
 	return dlog.Context{
 		"shim": b.shim, "webapp": b.webapp, "daemon": b.daemon,
-		"store": b.store, "sidecar": b.sidecar, "lock": b.lock, "elisp": b.elisp,
+		"store": b.store, "sidecar": b.sidecar, "zettel": b.zettel, "lock": b.lock, "elisp": b.elisp,
 	}
 }
 
@@ -735,6 +739,7 @@ func (d *Deployer) hashStaged(s Staged) (builds, error) {
 	step("daemon", &b.daemon, func() (string, error) { return buildid.File(s.DaemonBin()) })
 	step("store", &b.store, func() (string, error) { return buildid.File(s.CacheBin(buildreport.ServiceStore)) })
 	step("sidecar", &b.sidecar, func() (string, error) { return buildid.File(s.CacheBin(buildreport.ServiceSidecar)) })
+	step("zettel", &b.zettel, func() (string, error) { return buildid.File(s.CacheBin(buildreport.ServiceZettel)) })
 	step("lock", &b.lock, func() (string, error) { return buildid.File(s.CacheBin(sessionlock.HolderBinary)) })
 	step("elisp", &b.elisp, func() (string, error) { return buildid.Elisp(d.deps.Live.ModuleRoot) })
 	return b, err
@@ -777,6 +782,7 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous)
 	daemonStamps := stampsBeside(filepath.Dir(s.DaemonBin()), filepath.Dir(live.DaemonBin()), "")
 	storeInstall, storeWrites := cacheBin(buildreport.ServiceStore)
 	sidecarInstall, sidecarWrites := cacheBin(buildreport.ServiceSidecar)
+	zettelInstall, zettelWrites := cacheBin(buildreport.ServiceZettel)
 	lockInstall, lockWrites := cacheBin(sessionlock.HolderBinary)
 	artifacts := []artifact{
 		{component: ComponentShim, name: "shim", fresh: fresh.shim, installed: d.deps.Bundle.Build, install: func() error {
@@ -798,6 +804,9 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous)
 		{component: ComponentSidecar, name: buildreport.ServiceSidecar, fresh: fresh.sidecar, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(buildreport.ServiceSidecar))
 		}, install: sidecarInstall, writes: sidecarWrites},
+		{component: ComponentZettel, name: buildreport.ServiceZettel, fresh: fresh.zettel, installed: func() (string, error) {
+			return buildid.File(live.CacheBinPath(buildreport.ServiceZettel))
+		}, install: zettelInstall, writes: zettelWrites},
 		{component: ComponentShim, name: sessionlock.HolderBinary, fresh: fresh.lock, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(sessionlock.HolderBinary))
 		}, install: lockInstall, writes: lockWrites},
@@ -833,14 +842,18 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous)
 	return nil
 }
 
-// services restarts the store and the sidecar when the processes launchd runs
-// report a build that is not the fresh one. They hold no turn state, so
-// nothing is waited on.
+// services restarts the store and the sidecar, and the zettel service, when
+// the processes launchd runs report a build that is not the fresh one. They
+// hold no turn state, so nothing is waited on. Zettel is independent of the
+// other two: no shim writes into it, and its restart moves neither.
 func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) ([]Outcome, error) {
 	storeStale := d.serviceStale(ComponentStore, buildreport.ServiceStore, fresh.store)
 	sidecarStale := d.serviceStale(ComponentSidecar, buildreport.ServiceSidecar, fresh.sidecar)
+	zettelStale := d.serviceStale(ComponentZettel, buildreport.ServiceZettel, fresh.zettel)
 	store := Outcome{Component: ComponentStore, Build: fresh.store, Kind: UpToDate}
 	sidecar := Outcome{Component: ComponentSidecar, Build: fresh.sidecar, Kind: UpToDate}
+	zettel := Outcome{Component: ComponentZettel, Build: fresh.zettel, Kind: UpToDate}
+	outcomes := func() []Outcome { return []Outcome{store, sidecar, zettel} }
 	switch {
 	case storeStale:
 		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
@@ -850,7 +863,7 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 		prev.store = true
 		if err := d.deps.Services.RestartStore(ctx); err != nil {
 			d.log.Error(opDecide, "the store restart failed", dlog.WithCause(dlog.Context{"component": string(ComponentStore)}, err))
-			return []Outcome{store, sidecar}, &ServiceRestartFailed{Component: ComponentStore, Detail: err.Error()}
+			return outcomes(), &ServiceRestartFailed{Component: ComponentStore, Detail: err.Error()}
 		}
 		store.Kind, sidecar.Kind = Restarted, Restarted
 		d.log.Info(opDecide, "restarted the store and the sidecar onto the fresh build", dlog.Context{
@@ -862,12 +875,23 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 		prev.sidecar = true
 		if err := d.deps.Services.RestartSidecar(ctx); err != nil {
 			d.log.Error(opDecide, "the sidecar restart failed", dlog.WithCause(dlog.Context{"component": string(ComponentSidecar)}, err))
-			return []Outcome{store, sidecar}, &ServiceRestartFailed{Component: ComponentSidecar, Detail: err.Error()}
+			return outcomes(), &ServiceRestartFailed{Component: ComponentSidecar, Detail: err.Error()}
 		}
 		sidecar.Kind = Restarted
 		d.log.Info(opDecide, "restarted the sidecar onto the fresh build", dlog.Context{"sidecar_build": fresh.sidecar})
 	}
-	return []Outcome{store, sidecar}, nil
+	if zettelStale {
+		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
+			Components: []deployprogress.Component{deployprogress.Zettel}})
+		prev.zettel = true
+		if err := d.deps.Services.RestartZettel(ctx); err != nil {
+			d.log.Error(opDecide, "the zettel restart failed", dlog.WithCause(dlog.Context{"component": string(ComponentZettel)}, err))
+			return outcomes(), &ServiceRestartFailed{Component: ComponentZettel, Detail: err.Error()}
+		}
+		zettel.Kind = Restarted
+		d.log.Info(opDecide, "restarted zettel onto the fresh build", dlog.Context{"zettel_build": fresh.zettel})
+	}
+	return outcomes(), nil
 }
 
 // serviceStale reports whether the process launchd runs for a service is not

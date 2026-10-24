@@ -105,7 +105,7 @@ func TestTheBuildNamesEveryComponentItBuilds(t *testing.T) {
 	connected(h)
 	components := []deployprogress.Component{
 		deployprogress.Shim, deployprogress.Webapp, deployprogress.Daemon,
-		deployprogress.Store, deployprogress.Sidecar,
+		deployprogress.Store, deployprogress.Sidecar, deployprogress.Zettel,
 	}
 
 	// Act

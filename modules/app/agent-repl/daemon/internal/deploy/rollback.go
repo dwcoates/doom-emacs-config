@@ -55,15 +55,15 @@ type kept struct {
 type previous struct {
 	root string
 	kept []kept
-	// store and sidecar record the services the deploy ASKED to restart onto
+	// store, sidecar and zettel record the services the deploy ASKED to restart onto
 	// the fresh build. A restart that failed is included: it may have left
 	// the service running the fresh binary, so the rollback restarts it too.
-	store, sidecar bool
+	store, sidecar, zettel bool
 }
 
 // touched reports whether the deploy changed anything a rollback restores.
 func (p *previous) touched() bool {
-	return len(p.kept) > 0 || p.store || p.sidecar
+	return len(p.kept) > 0 || p.store || p.sidecar || p.zettel
 }
 
 // keep copies what stands at one live path aside before an install writes it.
@@ -111,7 +111,7 @@ func (e *RollbackFailed) Error() string {
 // failure: every path it can restore is restored, and every failure is named.
 func (d *Deployer) rollback(ctx context.Context, p *previous, nonce string, cause error) error {
 	ctx = context.WithoutCancel(ctx)
-	fields := dlog.Context{"cause": cause.Error(), "kept": len(p.kept), "store": p.store, "sidecar": p.sidecar}
+	fields := dlog.Context{"cause": cause.Error(), "kept": len(p.kept), "store": p.store, "sidecar": p.sidecar, "zettel": p.zettel}
 	d.log.Info(opRollback, "the deploy failed after it began installing; rolling back to the previous build", fields)
 	in := installer{nonce: nonce + "-rollback", log: d.log}
 	var (
@@ -157,6 +157,14 @@ func (d *Deployer) rollback(ctx context.Context, p *previous, nonce string, caus
 			fail(ComponentSidecar, "restart the sidecar", err)
 		} else {
 			d.log.Info(opRollback, "restarted the sidecar onto the restored build", nil)
+		}
+	}
+	if p.zettel {
+		if err := d.deps.Services.RestartZettel(ctx); err != nil {
+			d.log.Error(opRollback, "could not restart zettel onto the restored build", dlog.WithCause(nil, err))
+			fail(ComponentZettel, "restart zettel", err)
+		} else {
+			d.log.Info(opRollback, "restarted zettel onto the restored build", nil)
 		}
 	}
 	if len(failures) > 0 {

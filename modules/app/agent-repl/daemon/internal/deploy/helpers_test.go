@@ -69,7 +69,7 @@ func logged(log *dlog.TestSurfaces, level, operation, substr string) bool {
 
 // artifacts are the bytes one fake build stages, per artifact.
 type artifacts struct {
-	shim, webappEntry, daemon, store, sidecar, lock string
+	shim, webappEntry, daemon, store, sidecar, zettel, lock string
 }
 
 // stageInto writes a build's artifacts in build-frontend's staging layout.
@@ -83,6 +83,7 @@ func (a artifacts) stageInto(t *testing.T, staging string) {
 	writeFile(t, s.DaemonBin(), a.daemon)
 	writeFile(t, s.CacheBin(buildreport.ServiceStore), a.store)
 	writeFile(t, s.CacheBin(buildreport.ServiceSidecar), a.sidecar)
+	writeFile(t, s.CacheBin(buildreport.ServiceZettel), a.zettel)
 	writeFile(t, s.CacheBin("shim-lock"), a.lock)
 }
 
@@ -94,6 +95,7 @@ func (a artifacts) installInto(t *testing.T, live Live) {
 	writeFile(t, live.DaemonBin(), a.daemon)
 	writeFile(t, live.CacheBinPath(buildreport.ServiceStore), a.store)
 	writeFile(t, live.CacheBinPath(buildreport.ServiceSidecar), a.sidecar)
+	writeFile(t, live.CacheBinPath(buildreport.ServiceZettel), a.zettel)
 	writeFile(t, live.CacheBinPath("shim-lock"), a.lock)
 }
 
@@ -338,6 +340,7 @@ type fakeServices struct {
 	calls      []string
 	storeErr   error
 	sidecarErr error
+	zettelErr  error
 	// recovers makes a failing restart fail ONCE: every later restart of
 	// that service succeeds.
 	recovers bool
@@ -361,6 +364,17 @@ func (s *fakeServices) RestartSidecar(context.Context) error {
 	err := s.sidecarErr
 	if s.recovers {
 		s.sidecarErr = nil
+	}
+	return err
+}
+
+func (s *fakeServices) RestartZettel(context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, "zettel")
+	err := s.zettelErr
+	if s.recovers {
+		s.zettelErr = nil
 	}
 	return err
 }
@@ -555,8 +569,8 @@ const runningLayout = 11
 // theFresh is the build every harness stages; theOld is what is installed and
 // running before it.
 var (
-	theFresh = artifacts{shim: "shim-2", webappEntry: "Web2", daemon: "daemon-2", store: "store-2", sidecar: "sidecar-2", lock: "lock-2"}
-	theOld   = artifacts{shim: "shim-1", webappEntry: "Web1", daemon: "daemon-1", store: "store-1", sidecar: "sidecar-1", lock: "lock-1"}
+	theFresh = artifacts{shim: "shim-2", webappEntry: "Web2", daemon: "daemon-2", store: "store-2", sidecar: "sidecar-2", zettel: "zettel-2", lock: "lock-2"}
+	theOld   = artifacts{shim: "shim-1", webappEntry: "Web1", daemon: "daemon-1", store: "store-1", sidecar: "sidecar-1", zettel: "zettel-1", lock: "lock-1"}
 )
 
 func newHarness(t *testing.T) *harness {
@@ -592,6 +606,7 @@ func newHarness(t *testing.T) *harness {
 	// Both services run the FRESH build unless a test says otherwise.
 	h.report(t, buildreport.ServiceStore, 101, hashOf(t, theFresh.store))
 	h.report(t, buildreport.ServiceSidecar, 102, hashOf(t, theFresh.sidecar))
+	h.report(t, buildreport.ServiceZettel, 103, hashOf(t, theFresh.zettel))
 	d, err := New(Deps{
 		Live:        live,
 		StagingRoot: filepath.Join(t.TempDir(), "staging"),
