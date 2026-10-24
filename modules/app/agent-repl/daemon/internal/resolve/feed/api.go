@@ -589,6 +589,33 @@ type Deps struct {
 	// measures nothing and serves no pace, which is what a test that is not
 	// about pacing wants. Production always wires it.
 	Pacing RevealPacing
+	// Chat is told every turn's answer as this resolver draws it, which is how
+	// a zettel chat thread learns its answers (internal/chat, chatsink.go).
+	// nil tells nobody, which is what a test that is not about chat threads
+	// wants. Production always wires it.
+	Chat ChatSink
+}
+
+// ChatSink is told a turn's answer as the feed draws it: its prose while it
+// arrives, its settled answer when the turn concludes on one, and the turn's
+// end. It is told for EVERY workspace; the receiver keeps what concerns the
+// zettel threads it serves.
+//
+// CALLED WITH THE RESOLVER'S LOCK HELD: the receiver must never call back
+// into this resolver, and must not block.
+type ChatSink interface {
+	// AnswerProse is the main agent's prose for the turn so far, each time it
+	// grows on the live plane. A replay never tells it: an old turn's prose is
+	// not arriving.
+	AnswerProse(ws ids.WorkspaceID, turn ids.TurnID, markdown string)
+	// TurnAnswered is a turn's concluded answer, its settled markdown. It is
+	// told on EVERY plane, live and replayed, so an answer the receiver missed
+	// live (a daemon that stopped before recording it) is learned again when
+	// the turn's history replays; the receiver records it idempotently.
+	TurnAnswered(ws ids.WorkspaceID, turn ids.TurnID, markdown string)
+	// TurnEnded is a turn's end on the live plane, whatever its outcome, told
+	// after TurnAnswered for a turn that concluded on an answer.
+	TurnEnded(ws ids.WorkspaceID, turn ids.TurnID)
 }
 
 // WarningRaiser is the topbar's raised-warning channel, as this resolver needs
