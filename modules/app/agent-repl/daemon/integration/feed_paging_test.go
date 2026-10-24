@@ -47,7 +47,7 @@ func pagedFeedRows(t *testing.T) (*fixture, map[string]*frontendv1.FeedRow) {
 	}
 	rows := map[string]*frontendv1.FeedRow{}
 	awaitRow(t, f, tail, "the last pushed row", func(r *frontendv1.FeedRow) bool {
-		md := r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown()
+		md := r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown()
 		rows[md] = r
 		return md == "row "+itoa(pagingRows-1)
 	})

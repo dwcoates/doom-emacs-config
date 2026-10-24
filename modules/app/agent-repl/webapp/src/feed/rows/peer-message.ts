@@ -46,7 +46,7 @@ export function drawFeedPeerMessage(msg: FeedPeerMessage, previous?: HTMLElement
       hooks: [PEER_BUBBLE_CLASS],
       waving: false,
       strip: [drawFeedPeerMessageFrom(from)],
-      content: [markdownSlot(PEER_BODY_CLASS, msg.body)],
+      content: [markdownSlot(PEER_BODY_CLASS, requireMessage(msg.prose, "FeedPeerMessage.prose"))],
       capLines: 0,
     },
     previous,

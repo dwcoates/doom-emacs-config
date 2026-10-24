@@ -16,6 +16,10 @@ import {
   observeContainingBlock,
   paintBody,
   paintGeneration,
+  proseCharacters,
+  proseHtml,
+  proseSource,
+  unparsedProse,
   proseNeedsWidth,
   revealSlot,
   slotText,
@@ -27,6 +31,10 @@ import { EXPANDED_CLASS } from "../../src/expand.js";
 import { useTreeLayout } from "../tree-layout.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { fireResize } from "../resize-observer.js";
+import { plainProse, promptProse, servedProse, treeProse } from "../prose.js";
+import { create } from "@bufbuild/protobuf";
+import { ParsedProseSchema } from "../../../proto/gen/ts/frontend/v1/prose_pb";
+import { MalformedView } from "../../src/rpc/malformed.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -282,7 +290,7 @@ describe("an unmeasurable tree width is an invariant violation", () => {
     const { bubble: el } = drawBubble({
       role: "response",
       variant: "response",
-      content: [markdownSlot("prose", TREE)],
+      content: [markdownSlot("prose", treeProse(TREE))],
       capLines: "feed",
     });
     // Act — the attach is where the tree first paints and the observer is armed;
@@ -307,6 +315,104 @@ describe("an unmeasurable tree width is an invariant violation", () => {
   });
 });
 
+describe("proseHtml", () => {
+  it("draws a plain block as markdown", () => {
+    // Act + Assert
+    expect(proseHtml(plainProse("**done**"), () => 80)).toContain("<strong>done</strong>");
+  });
+
+  it("draws a tree block as the tree, wrapped to the budget", () => {
+    // Act
+    const html = proseHtml(servedProse("1 🔧 Fixed it\n└── 1.1 x"), () => 80);
+    // Assert
+    expect(html).toMatch(/^<div class="mp-tree">.*<\/div>$/s);
+  });
+
+  it("draws the blocks in the order they were served", () => {
+    // Arrange — prose, then a tree, then prose.
+    const prose = create(ParsedProseSchema, {
+      blocks: [
+        { block: { case: "plain", value: { markdown: "before" } } },
+        ...servedProse("1 🔧 Fixed it\n└── 1.1 x").blocks,
+        { block: { case: "plain", value: { markdown: "after" } } },
+      ],
+    });
+    const host = document.createElement("div");
+    // Act
+    host.innerHTML = proseHtml(prose, () => 80);
+    // Assert
+    expect([...host.children].map((c) => c.className || c.tagName)).toEqual(["P", "mp-tree", "P"]);
+  });
+
+  it("draws a prompt's entry as its entry block", () => {
+    // Act
+    const html = proseHtml(promptProse("3.1 - yes"), () => 80);
+    // Assert
+    expect(html).toContain('class="mp-entry" data-entry-label="3.1"');
+  });
+
+  it("measures no budget for prose with no tree", () => {
+    // Arrange
+    const cols = vi.fn(() => 80);
+    // Act
+    proseHtml(plainProse("hello"), cols);
+    // Assert
+    expect(cols).not.toHaveBeenCalled();
+  });
+
+  it("refuses a block with no arm, recording it through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const prose = create(ParsedProseSchema, { blocks: [{}] });
+    // Act
+    expect(() => proseHtml(prose, () => 80)).toThrow(/bubble body invariant/);
+    // Assert
+    const record = await forwardedRecord(capture, BODY_INVARIANT);
+    expect(record.level.case).toBe("error");
+  });
+});
+
+describe("proseCharacters", () => {
+  it("counts the characters of the served source", () => {
+    // Act + Assert
+    expect(proseCharacters(plainProse("hello\n"))).toBe(6);
+  });
+
+  it("refuses prose served without its source", () => {
+    // Act + Assert
+    expect(() => proseCharacters(create(ParsedProseSchema, {}))).toThrow(MalformedView);
+  });
+});
+
+describe("proseSource", () => {
+  it("answers the served source", () => {
+    // Act + Assert
+    expect(proseSource(plainProse("hello\n"))).toBe("hello\n");
+  });
+
+  it("refuses prose served without its source", () => {
+    // Act + Assert
+    expect(() => proseSource(create(ParsedProseSchema, {}))).toThrow(MalformedView);
+  });
+});
+
+describe("unparsedProse", () => {
+  it.each([
+    { name: "one line", markdown: "hello", want: ["hello"] },
+    { name: "a trailing newline, dropped from the block", markdown: "hello\n", want: ["hello"] },
+    { name: "only whitespace, as no block", markdown: "  \n", want: [] },
+    { name: "a tree, as one plain block rather than a tree", markdown: "1 🔧 A\n└── 1.1 b", want: ["1 🔧 A\n└── 1.1 b"] },
+  ])("holds $name", ({ markdown, want }) => {
+    // Act
+    const prose = unparsedProse(markdown);
+    // Assert
+    expect([prose.blocks.map((b) => (b.block.case === "plain" ? b.block.value.markdown : b.block.case)), proseSource(prose)]).toEqual([
+      want,
+      markdown,
+    ]);
+  });
+});
+
 describe("proseNeedsWidth", () => {
   it.each([
     { name: "a bare tree", markdown: TREE, want: true },
@@ -314,7 +420,7 @@ describe("proseNeedsWidth", () => {
     { name: "plain prose", markdown: "**done**, nothing tree-shaped", want: false },
   ])("says whether $name needs a measured width", ({ markdown, want }) => {
     // Act + Assert
-    expect(proseNeedsWidth(markdown)).toBe(want);
+    expect(proseNeedsWidth(servedProse(markdown))).toBe(want);
   });
 });
 
@@ -341,7 +447,7 @@ describe("the bubble body", () => {
 
 /** A response bubble holding one markdown slot of MARKDOWN, and that slot. */
 function slotted(markdown: string): { bubble: HTMLElement; slot: HTMLElement } {
-  const slot = markdownSlot("prose", markdown);
+  const slot = markdownSlot("prose", servedProse(markdown));
   const { bubble } = drawBubble({ role: "response", variant: "response", content: [slot], capLines: "feed" });
   return { bubble, slot };
 }
@@ -349,14 +455,14 @@ function slotted(markdown: string): { bubble: HTMLElement; slot: HTMLElement } {
 describe("markdown slots", () => {
   it("wears the slot attribute the pipeline finds it by", () => {
     // Arrange / Act
-    const slot = markdownSlot("prose", "**done**");
+    const slot = markdownSlot("prose", plainProse("**done**"));
     // Assert
     expect(slot.hasAttribute(MARKDOWN_SLOT_ATTRIBUTE)).toBe(true);
   });
 
   it("draws nothing of its own until a body paints it", () => {
     // Arrange / Act
-    const slot = markdownSlot("prose", "**done**");
+    const slot = markdownSlot("prose", plainProse("**done**"));
     // Assert
     expect(slot.childNodes).toHaveLength(0);
   });
@@ -364,7 +470,7 @@ describe("markdown slots", () => {
   it("is painted as markdown by paintBody", () => {
     // Arrange
     const body = createBubbleBody();
-    const slot = markdownSlot("prose", "**done**");
+    const slot = markdownSlot("prose", plainProse("**done**"));
     // Act
     paintBody(body, [slot]);
     // Assert
@@ -375,10 +481,10 @@ describe("markdown slots", () => {
     // Arrange
     const body = createBubbleBody();
     const wrapper = document.createElement("div");
-    const nested = markdownSlot("nested", "*deep*");
+    const nested = markdownSlot("nested", plainProse("*deep*"));
     wrapper.append(nested);
     // Act
-    paintBody(body, [markdownSlot("top", "top"), wrapper]);
+    paintBody(body, [markdownSlot("top", plainProse("top")), wrapper]);
     // Assert
     expect(nested.querySelector("em")?.textContent).toBe("deep");
   });
@@ -386,7 +492,7 @@ describe("markdown slots", () => {
   it("applies its mark to the painted markdown", () => {
     // Arrange
     const body = createBubbleBody();
-    const slot = markdownSlot("prose", "a b", (rendered) => {
+    const slot = markdownSlot("prose", plainProse("a b"), (rendered) => {
       rendered.querySelector("p")?.classList.add("marked");
     });
     // Act
@@ -401,10 +507,10 @@ describe("markdown slots", () => {
     const mark = (rendered: HTMLElement): void => {
       rendered.querySelector("p")?.classList.add("marked");
     };
-    const slot = markdownSlot("prose", "one", mark);
+    const slot = markdownSlot("prose", plainProse("one"), mark);
     paintBody(body, [slot]);
     // Act
-    paintBody(body, [markdownSlot("prose", "two", mark)]);
+    paintBody(body, [markdownSlot("prose", plainProse("two"), mark)]);
     // Assert
     expect(slot.querySelector("p.marked")?.textContent).toBe("two");
   });
@@ -412,12 +518,12 @@ describe("markdown slots", () => {
   it("drops its mark when the repainting slot carries none", () => {
     // Arrange
     const body = createBubbleBody();
-    const slot = markdownSlot("prose", "one", (rendered) => {
+    const slot = markdownSlot("prose", plainProse("one"), (rendered) => {
       rendered.querySelector("p")?.classList.add("marked");
     });
     paintBody(body, [slot]);
     // Act
-    paintBody(body, [markdownSlot("prose", "two")]);
+    paintBody(body, [markdownSlot("prose", plainProse("two"))]);
     // Assert
     expect(slot.querySelector("p.marked")).toBeNull();
   });
@@ -428,7 +534,7 @@ describe("markdown slots", () => {
     const badge = document.createElement("span");
     badge.textContent = "plan";
     // Act
-    paintBody(body, [badge, markdownSlot("prose", "text")]);
+    paintBody(body, [badge, markdownSlot("prose", plainProse("text"))]);
     // Assert
     expect(body.firstChild).toBe(badge);
   });
@@ -513,7 +619,7 @@ describe("revealSlot", () => {
   /** A body painted with one slot of MARKDOWN; answers both. */
   function painted(markdown: string): { body: BubbleBody; slot: HTMLElement } {
     const body = createBubbleBody();
-    const [slot] = paintBody(body, [markdownSlot("prose", markdown)]);
+    const [slot] = paintBody(body, [markdownSlot("prose", servedProse(markdown))]);
     return { body, slot: slot as HTMLElement };
   }
 
@@ -550,7 +656,7 @@ describe("revealSlot", () => {
     const { body, slot } = painted("hello world");
     revealSlot(body, slot, 3);
     // Act
-    paintBody(body, [markdownSlot("prose", "hello there")]);
+    paintBody(body, [markdownSlot("prose", plainProse("hello there"))]);
     // Assert
     expect(slot.textContent?.trim()).toBe("hel");
   });
@@ -561,7 +667,7 @@ describe("revealSlot", () => {
     revealSlot(body, slot, 7);
     const first = slot.firstElementChild;
     // Act
-    paintBody(body, [markdownSlot("prose", "first\n\nsecond")]);
+    paintBody(body, [markdownSlot("prose", plainProse("first\n\nsecond"))]);
     // Assert
     expect(slot.firstElementChild).toBe(first);
   });
@@ -570,7 +676,7 @@ describe("revealSlot", () => {
     // Arrange
     const capture = captureLogRecords();
     const body = createBubbleBody();
-    const stranger = markdownSlot("prose", "elsewhere");
+    const stranger = markdownSlot("prose", plainProse("elsewhere"));
     // Act + Assert
     expect(() => revealSlot(body, stranger, 1)).toThrow(/bubble body invariant/);
     const record = await forwardedRecord(capture, BODY_INVARIANT);
@@ -594,7 +700,7 @@ describe("slotText", () => {
   it("answers the whole rendered text while the slot is cut", () => {
     // Arrange
     const body = createBubbleBody();
-    const [slot] = paintBody(body, [markdownSlot("prose", "**hello** world")]);
+    const [slot] = paintBody(body, [markdownSlot("prose", plainProse("**hello** world"))]);
     revealSlot(body, slot as HTMLElement, 2);
     // Act
     const text = slotText(slot as HTMLElement);
@@ -653,9 +759,9 @@ describe("paintBody: a repaint is in place", () => {
   it("keeps a slot of the same class and repaints it with the new source", () => {
     // Arrange
     const body = createBubbleBody();
-    const [slot] = paintBody(body, [markdownSlot("prose", "one")]);
+    const [slot] = paintBody(body, [markdownSlot("prose", plainProse("one"))]);
     // Act
-    const [again] = paintBody(body, [markdownSlot("prose", "**two**")]);
+    const [again] = paintBody(body, [markdownSlot("prose", plainProse("**two**"))]);
     // Assert
     expect([again, slot.textContent?.trim()]).toEqual([slot, "two"]);
   });
@@ -663,10 +769,10 @@ describe("paintBody: a repaint is in place", () => {
   it("keeps an unchanged paragraph's node across the repaint", () => {
     // Arrange
     const body = createBubbleBody();
-    const [slot] = paintBody(body, [markdownSlot("prose", "first\n\nsec")]);
+    const [slot] = paintBody(body, [markdownSlot("prose", plainProse("first\n\nsec"))]);
     const first = (slot as HTMLElement).firstElementChild;
     // Act
-    paintBody(body, [markdownSlot("prose", "first\n\nsecond")]);
+    paintBody(body, [markdownSlot("prose", plainProse("first\n\nsecond"))]);
     // Assert
     expect((slot as HTMLElement).firstElementChild).toBe(first);
   });
@@ -674,9 +780,9 @@ describe("paintBody: a repaint is in place", () => {
   it("takes a slot of another class as the new content's own", () => {
     // Arrange
     const body = createBubbleBody();
-    const [slot] = paintBody(body, [markdownSlot("prose", "one")]);
+    const [slot] = paintBody(body, [markdownSlot("prose", plainProse("one"))]);
     // Act
-    const [again] = paintBody(body, [markdownSlot("plan-prose", "one")]);
+    const [again] = paintBody(body, [markdownSlot("plan-prose", plainProse("one"))]);
     // Assert
     expect(again).not.toBe(slot);
   });

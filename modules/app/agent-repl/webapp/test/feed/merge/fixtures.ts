@@ -17,6 +17,7 @@ import {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { SubfeedView } from "../../../src/feed/renderers.js";
 import { orderFor } from "../../feed-order.js";
+import { servedProse } from "../../prose.js";
 
 /** A feed id. */
 export function id(value: string): FeedId {
@@ -227,7 +228,7 @@ export function childRow(rowId: string, parent: string, text = "hi"): FeedRow {
       value: {
         unit: {
           case: "response",
-          value: { result: { case: "success", value: { prose: { markdown: text } } } },
+          value: { result: { case: "success", value: { prose: { prose: servedProse(text) } } } },
         },
       },
     },

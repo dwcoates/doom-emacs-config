@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!subagent"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!subagent"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!subagent"
+                    }
+                  }
                 }
               }
             ]
@@ -68,7 +79,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The subagent reported back."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The subagent reported back."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The subagent reported back."
+                }
+              }
             }
           },
           "usage": {

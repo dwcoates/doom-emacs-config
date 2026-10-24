@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!findings"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!findings"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!findings"
+                    }
+                  }
                 }
               }
             ]
@@ -106,7 +117,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Reported three findings."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Reported three findings."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Reported three findings."
+                }
+              }
             }
           },
           "usage": {

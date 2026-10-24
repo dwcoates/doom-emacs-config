@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!subagent-detached"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!subagent-detached"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!subagent-detached"
+                    }
+                  }
                 }
               }
             ]
@@ -71,7 +82,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Dispatched the agent to the background."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Dispatched the agent to the background."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Dispatched the agent to the background."
+                }
+              }
             }
           },
           "usage": {

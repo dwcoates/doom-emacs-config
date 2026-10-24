@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!read"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!read"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!read"
+                    }
+                  }
                 }
               }
             ]
@@ -194,7 +205,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Read the whole file."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Read the whole file."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Read the whole file."
+                }
+              }
             }
           },
           "usage": {

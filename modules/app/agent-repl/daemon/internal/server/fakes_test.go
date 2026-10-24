@@ -1201,6 +1201,9 @@ func (f *fakeLogin) Close(context.Context, ids.WorkspaceID) error { return f.clo
 // fakeFeed answers the page and tail seams.
 type fakeFeed struct {
 	feed.Resolver
+	// entries is what each prompt row's entry says, keyed by row id, a NUL,
+	// and the entry's label: what PromptEntry answers.
+	entries map[string]string
 	// sent are the sent rows SentPrompt drew, in order.
 	sentMu sync.Mutex
 	sent   []sentRow
@@ -1381,6 +1384,12 @@ func (f *fakeFeed) SetMergeFold(_ ids.WorkspaceID, id *frontendv1.FeedId, folded
 // landed root-feed rows by construction), answering "text of <row>" for one
 // with no scripted text; unreadable breaks that guarantee for a row, so a test
 // can drive the defect path. An unselectable row is never selectable.
+// PromptEntry answers the entry text a test filed under the row and label.
+func (f *fakeFeed) PromptEntry(_ ids.WorkspaceID, id *frontendv1.FeedId, label string) (string, bool) {
+	text, ok := f.entries[id.GetValue()+"\x00"+label]
+	return text, ok
+}
+
 func (f *fakeFeed) SelectableText(_ ids.WorkspaceID, id *frontendv1.FeedId) (feed.RowText, bool) {
 	prompt := indexOfFeedID(f.prompts, id) >= 0 || f.promptRows[id.GetValue()]
 	if f.unreadable[id.GetValue()] {

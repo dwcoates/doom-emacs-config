@@ -762,7 +762,7 @@ persp-mode activated, and \"main\"/\"none\" own no durable log sink."
       (unwind-protect
           (cl-letf (((symbol-function 'doom-fallback-buffer) (lambda () fallback))
                     ((symbol-function 'agent-repl--warn)
-                     (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                     (agent-repl-test--record-into warned)))
             (set-window-buffer sole buf)
             ;; Act
             (agent-repl-window--delete-buffer-windows buf)
@@ -810,8 +810,7 @@ persp-mode activated, and \"main\"/\"none\" own no durable log sink."
   (declare (indent 0))
   `(let ((agent-repl-window-test--debug nil))
      (cl-letf (((symbol-function 'agent-repl--log)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-window-test--debug))))
+                (agent-repl-test--record-into agent-repl-window-test--debug)))
        ,@body)))
 
 (defvar agent-repl-window-test--debug nil
@@ -1027,7 +1026,7 @@ the input window goes and the webview grows into its space."
                  ((symbol-function 'agent-repl-window--ensure-layout)
                   (lambda () (cl-incf reconciled)))
                  ((symbol-function 'agent-repl--info)
-                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) said))))
+                  (agent-repl-test--record-into said)))
          ,@body))))
 
 (ert-deftest agent-repl-window-test-a-gate-standing-up-on-screen-reconciles ()
@@ -1124,7 +1123,7 @@ next show reads the gate (`agent-repl--frontend-display-webview')."
                 ((symbol-function 'agent-repl-window--input-background) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl-webhost-set-gate-dock) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) said))))
+                 (agent-repl-test--record-into said)))
         ;; Act
         (agent-repl-window-tell-gate-dock "ws")
         ;; Assert
@@ -1144,7 +1143,7 @@ in `said', the input painting BACKGROUND (nil: no input buffer)."
                  ((symbol-function 'agent-repl-webhost-set-gate-dock)
                   (lambda (ws pixels bg) (push (list :gate-dock ws pixels bg) told) t))
                  ((symbol-function 'agent-repl--info)
-                  (lambda (_ws fmt &rest args) (push (apply #'format fmt args) said))))
+                  (agent-repl-test--record-into said)))
          ,@body))))
 
 (ert-deftest agent-repl-window-test-a-page-load-tells-the-input-background ()
@@ -1170,7 +1169,7 @@ in `said', the input painting BACKGROUND (nil: no input buffer)."
     (let ((logged nil))
       (cl-letf (((symbol-function 'agent-repl-webhost-set-input-background) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-window-tell-input-background "ws"))
       ;; Assert
@@ -1301,8 +1300,7 @@ the foreign window stood), :selected (`:input', `:view' or `:other'), and
               (cl-letf (((symbol-function '+workspace-current-name)
                          (lambda () current-ws))
                         ((symbol-function 'agent-repl--log)
-                         (lambda (_ws fmt &rest args)
-                           (push (apply #'format fmt args) logs))))
+                         (agent-repl-test--record-into logs)))
                 (let* ((other-win
                         (cond (foreign (split-window view-win nil 'right))
                               (side-foreign

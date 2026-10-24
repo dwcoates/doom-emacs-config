@@ -526,31 +526,38 @@ the wire that the client ticks against its own clock."
 time instead of restarting a fresh one.
 `endpoint_watch_daemon.proto' `DaemonShutdownAnnounced.minted_at_ms': \"A
 late receiver SHORTENS its quiet window by the time already elapsed
-rather than restarting it.\"  With 1400ms already elapsed out of a 1500ms
-outage, the reconnect must reach the successor within roughly 100ms — a
-client that restarted the whole 1500ms window from receipt would still be
-waiting when this test's deadline is checked."
+rather than restarting it.\"  The window is asserted as the deadline the
+client computed: minted 1400ms ago with a 1500ms outage, it ends at
+`minted_at_ms' + 1500, while a client that restarted the window from
+receipt would end it at least 1400ms later.  No wall-clock bound: how
+long a successor takes to start says nothing about the window (2026-10-23:
+a 1.0s bound over the successor's spawn failed under a loaded run).  The
+reconnect then reaching the successor shows the shortened window is the
+one the reconnect loop obeys
+\(`agent-repl-itest-link-bounce-reconnect-does-not-poll-before-the-deadline'
+pins that it waits for it)."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-link--with-link primary
       (let* ((state-dir (agent-repl-itest-daemon-state-dir primary))
              (minted-at-ms (- (truncate (* 1000 (float-time))) 1400)))
-        ;; Act: minted 1400ms in the past, a 1500ms outage — ~100ms of
-        ;; quiet remains.
+        ;; Act: minted 1400ms in the past, a 1500ms outage.
         (agent-repl-itest--push
          primary "daemon"
          `((shutdownAnnounced
             . ((cause . ((selfMergeRollout . ())))
                (expectedOutageMs . "1500")
                (mintedAtMs . ,(format "%d" minted-at-ms))))))
+        (agent-repl-itest--wait-until
+         (lambda () agent-repl-link--quiet-until-ms)
+         agent-repl-itest-default-timeout
+         "the announcement to size the quiet window")
+        ;; Assert: the window ends where the announcement put it.
+        (should (equal agent-repl-link--quiet-until-ms (+ minted-at-ms 1500)))
         (agent-repl-itest--stop-daemon primary t)
-        (let* ((start (float-time))
-               (successor (agent-repl-itest--start-daemon state-dir)))
+        (let ((successor (agent-repl-itest--start-daemon state-dir)))
           (unwind-protect
-              (progn
-                (agent-repl-itest--await-call successor "WatchDaemon")
-                ;; Assert: nowhere near the full 1500ms outage.
-                (should (< (- (float-time) start) 1.0)))
+              (agent-repl-itest--await-call successor "WatchDaemon")
             (agent-repl-itest--stop-daemon successor t)))))))
 
 (ert-deftest agent-repl-itest-link-bounce-reconnect-does-not-poll-before-the-deadline ()

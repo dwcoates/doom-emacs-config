@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!fault-recover"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!fault-recover"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!fault-recover"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Every message of this turn converted."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Every message of this turn converted."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Every message of this turn converted."
+                }
+              }
             }
           },
           "usage": {

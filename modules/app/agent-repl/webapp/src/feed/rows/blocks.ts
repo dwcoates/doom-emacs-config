@@ -14,9 +14,9 @@
  * is worse than a loud refusal, because the reader cannot tell it happened.
  */
 import { collapsedThumbnail } from "../../bubble/collapsed-thumbnail.js";
-import { requireCase, unreachableArm } from "../../rpc/strict.js";
+import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { log } from "../../log.js";
-import { markdownSlot, type SlotMark } from "../../bubble/body.js";
+import { markdownSlot, proseCharacters, proseSource, type SlotMark } from "../../bubble/body.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../bubble/quote.js";
 import { codeBlockHtml } from "../../code-block.js";
 import { boundCopyControl } from "../../copy-control.js";
@@ -50,9 +50,9 @@ export type PromptBlockArm =
 export function drawFeedTextBlock(block: FeedTextBlock, mark?: SlotMark): HTMLElement {
   log.info("drawing a prompt text block", {
     operation: "feed.draw-text-block",
-    context: { characters: block.text.length, marked: mark !== undefined },
+    context: { characters: proseCharacters(requireMessage(block.prose, "FeedTextBlock.prose")), marked: mark !== undefined },
   });
-  return markdownSlot("prompt-block prompt-block-text", block.text, mark);
+  return markdownSlot("prompt-block prompt-block-text", requireMessage(block.prose, "FeedTextBlock.prose"), mark);
 }
 
 /**
@@ -202,7 +202,7 @@ export function promptBlockCopyText(arm: PromptBlockArm, path: string): string {
   const block = requireCase(arm, path);
   switch (block.case) {
     case "text":
-      return block.value.text;
+      return proseSource(requireMessage(block.value.prose, `${path}.text.prose`));
     case "image":
       return block.value.alt === "" ? "[image]" : `[image: ${block.value.alt}]`;
     case "unsupported":

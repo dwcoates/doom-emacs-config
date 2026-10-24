@@ -1,0 +1,193 @@
+[
+  {
+    "text": "Response (✏️ changes made)\n\n1 🔧 Fixed it\n├── 1.1 Detail\n└── 1.2 More"
+  },
+  {
+    "text": "1 🌳 A bare Unicode tree, the shape the metaprompt answers in.\n├── 1.1 This branch is deliberately much longer than one hundred and five rendered columns, so the webapp must wrap it onto a continuation line beneath its own text column right here.\n│   └── 1.1.1 A child beneath the wrapped branch, so the rail through the wrap is load-bearing here too.\n└── 1.2 The last branch, also long enough to run past the limit and wrap, whose continuation carries no rail because nothing follows it once the wrap lands."
+  },
+  {
+    "text": "Response (✏️ changes made)\n1 🔧 Subagent created `hello_world.py` at the repo root\n├── 1.2 File contents\n    ```python\n    if __name__ == \"__main__\":\n        main()\n    ```\n├── 1.3 Follows your Python conventions\n└── 1.4 Verified by running `./hello_world.py`"
+  },
+  {
+    "text": "1 👋 Hello again\n └── 1.1 Nothing has changed since the last message, with hello/ (Go) and hello-rs/ (Rust)"
+  },
+  {
+    "text": "1 🌳 A bare Unicode tree, the shape the metaprompt answers in.\n├── 1.1 This branch is deliberately much longer than one hundred and five rendered columns, so the webapp must wrap it onto a continuation line beneath its own text column right here.\n│   └── 1.1.1 A child beneath the wrapped branch, so the rail through the wrap is load-bearing here too.\n└── 1.2 The last branch, also long enough to run past the limit and wrap, whose continuation carries no rail because nothing follows it once the wrap lands.",
+    "arriving": true
+  },
+  {
+    "text": "1 🌳 A tree whose longest branch is comfortably under the cap.\n├── 1.1 A branch of about seventy rendered columns, well inside the cap here.\n└── 1.2 Another branch, also short enough to stand on one line."
+  },
+  {
+    "text": "Response (✏️ changes made)\n\n1 🔧 Fixed it\n├── 1.1 Detail\n└── 1.2 More",
+    "arriving": true
+  },
+  {
+    "text": "```\nResponse (✏️ changes made)\n\n1 🔧 Fixed it\n├── 1.1 Detail\n└── 1.2 More\n```"
+  },
+  {
+    "text": "1 🌳 A tree drawn in a bubble of any kind, wrapped at that bubble's own cap\n├── 1.1 This branch is deliberately much longer than the default layout's ninety-three column budget, so it must wrap\n└── 1.2 The last branch, also long enough to run well past the budget and wrap onto a continuation line of its own"
+  },
+  {
+    "text": "Response (✏️ changes made)\n\n1 🔧 Fixed the thing in module.ts\n├── 1.1 First supporting detail\n│   └── 1.1.1 Nested detail\n└── 1.2 Second supporting detail\n\n2 ✅ Tests pass\n└── 2.1 All of them"
+  },
+  {
+    "text": "1 🎯 Root\n └── 1.1 alpha beta"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 a\n    ├── 1.1.1 b\n    └── 1.1.2 c"
+  },
+  {
+    "text": "1 🎯 Root\n├── 1.1 Short enough.\n└── 1.2 Also short."
+  },
+  {
+    "text": "1 🎯 Root\n├── 1.1 foo bar\n└── 1.2 x"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 foo bar"
+  },
+  {
+    "text": "1 🎯 foo bar\n└── 1.1 x"
+  },
+  {
+    "text": "1 🎯 Root\n├── 1.1 a\n│   ├── 1.1.1 foo bar\n│   └── 1.1.2 y\n└── 1.2 z"
+  },
+  {
+    "text": "1 🎯 Root\n├── 1.1 aaaa bbbb cccc\n│   └── 1.1.1 Leaf.\n└── 1.2 z"
+  },
+  {
+    "text": "1 🎯 Root\n├── 1.1 aaaa bbbb cccc\n└── 1.2 Leaf."
+  },
+  {
+    "text": "1 🎯 Root\n├── 1.1 aaa bbb ccc ddd\n└── 1.2 x"
+  },
+  {
+    "text": "1 🔧 First.\n└── 1.1 a\n\n2 ✅ Second.\n└── 2.1 b"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 see <a href=\"https://x/y\">symbol</a> now"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 <mark><b>alpha beta gamma</b></mark>"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 &lt;plugin&gt;"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 aaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 a\n    └── 1.1.1 text"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 `i am longer than one line after 'one'`"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 `alpha beta gamma`"
+  },
+  {
+    "text": "1 🎯 Root\n├── 1.1 see `short code` here\n└── 1.2 x"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 run `alpha beta gamma delta` now"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 `aaaa bbbb cccc dddd eeee ffff`"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 a \\` b c d e f g h i j k"
+  },
+  {
+    "text": "1 🎯 Root\n├── 1.1 Detail\n└── 1.2 x"
+  },
+  {
+    "text": "1 🎯 Root\n├── 1.1 aaaa bbbb cccc\n│   └── 1.1.1 x\n└── 1.2 y"
+  },
+  {
+    "text": "1 🔧 A\n└── 1.1 a\n\n2 ✅ B\n└── 2.1 b"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 <img src=x>"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 detail"
+  },
+  {
+    "text": "1 🔧 Made a file\n├── 1.1 File contents\n    ```python\n    if __name__ == \"__main__\":\n        main()\n    ```\n└── 1.2 Done"
+  },
+  {
+    "text": "1 🔧 Refused\n├── 1.1 The daemon logged the refusal\n│   ```json\n│   \"cause\": \"unknown_repository\"\n│   ```\n└── 1.2 Done"
+  },
+  {
+    "text": "1 🎯 Root\n├── 1.1 Shape\n    ```\n    │   ├── x\n    ```\n└── 1.2 Done"
+  },
+  {
+    "text": "1 🎯 Root\n├── 1.1 Snippet\n    ```\n    <img src=x>\n    ```\n└── 1.2 Done"
+  },
+  {
+    "text": "1 🔧 Fixed it\n└── 1.1 x"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 Inline `a    b` here."
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 a long line of plain prose that has to wrap `x  y` and then more prose after it"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 plain    prose"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 a stray ` backtick followed by enough plain words to need a wrap here"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 Detail"
+  },
+  {
+    "text": "hello"
+  },
+  {
+    "text": "**done**\n"
+  },
+  {
+    "text": "first\nsecond"
+  },
+  {
+    "text": "  \n"
+  },
+  {
+    "text": "1. one\n2. two"
+  },
+  {
+    "text": "1 🔧 Arriving\n└── 1.",
+    "arriving": true
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 see `~/a/very/long/directory/path/to/b.ts:12` now"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 see [~/a/very/long/directory/b.ts](~/a/very/long/directory/b.ts) now"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 aaaa [the long config](~/x.el)"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 aaaa **bold words**"
+  },
+  {
+    "text": "1 🎯 Root\n└── 1.1 abc `defgh`"
+  },
+  {
+    "text": "Response (`x`)\n\n1 🔧 A\n└── 1.1 b"
+  },
+  {
+    "text": "3.1 - yes",
+    "prompt": true
+  },
+  {
+    "text": "3.1 - yes\n1 🔧 Fixed\n└── 1.1 a",
+    "prompt": true
+  },
+  {
+    "text": "1 🔧 Did it\n├── 1.1 first\n└── 1.2 second"
+  }
+]

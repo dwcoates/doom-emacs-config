@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!usage-opus-absent"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!usage-opus-absent"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!usage-opus-absent"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The account-usage probe now answers with the opus_absent shape."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The account-usage probe now answers with the opus_absent shape."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The account-usage probe now answers with the opus_absent shape."
+                }
+              }
             }
           },
           "usage": {

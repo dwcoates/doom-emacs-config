@@ -126,7 +126,7 @@ func scAnsweringResponseProse(t *testing.T, w *World, ws *workspacev1.WorkspaceR
 	if success == nil {
 		t.Fatalf("e2e: answering row %s is not a settled FeedResponseSuccess: %v", answerID.GetValue(), answer)
 	}
-	return success.GetProse().GetMarkdown()
+	return success.GetProse().GetProse().GetSource().GetMarkdown()
 }
 
 // scTranscriptRecordsUnderProject reads back every non-blank line of every

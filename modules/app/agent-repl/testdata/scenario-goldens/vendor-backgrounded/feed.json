@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!vendor-backgrounded"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!vendor-backgrounded"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!vendor-backgrounded"
+                    }
+                  }
                 }
               }
             ]
@@ -57,7 +68,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Moved the command to the background."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Moved the command to the background."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Moved the command to the background."
+                }
+              }
             }
           },
           "usage": {

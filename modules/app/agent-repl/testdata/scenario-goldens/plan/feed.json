@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!plan"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!plan"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!plan"
+                    }
+                  }
                 }
               }
             ]
@@ -36,7 +47,18 @@
               "path": "${GOLDEN_ROOT}/cfg/plans/offline-plan.md"
             },
             "prose": {
-              "markdown": "1. Read the module.\n2. Change the converter.\n3. Run the suite."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "1. Read the module.\n2. Change the converter.\n3. Run the suite."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "1. Read the module.\n2. Change the converter.\n3. Run the suite."
+                }
+              }
             }
           }
         }
@@ -57,7 +79,18 @@
           "interim": true,
           "success": {
             "prose": {
-              "markdown": "Drafting the plan without touching anything."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Drafting the plan without touching anything."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Drafting the plan without touching anything."
+                }
+              }
             }
           },
           "usage": {
@@ -85,7 +118,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The plan is ready."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The plan is ready."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The plan is ready."
+                }
+              }
             }
           },
           "usage": {

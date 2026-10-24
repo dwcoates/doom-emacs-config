@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!model-fallback"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!model-fallback"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!model-fallback"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Answered on fake-sonnet-5 after the fallback."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Answered on fake-sonnet-5 after the fallback."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Answered on fake-sonnet-5 after the fallback."
+                }
+              }
             }
           },
           "usage": {

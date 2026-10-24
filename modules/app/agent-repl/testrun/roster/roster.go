@@ -266,6 +266,10 @@ var Suites = []Suite{
 			// (integration/scenariogoldens_test.go) reads the shim's goldens
 			// and keeps its own feed.json beside them.
 			"testdata/scenario-goldens/",
+			// internal/prose holds the daemon's parse to the old webapp
+			// parser's golden answers, and writes the webapp's parsed-prose
+			// fixture from its inputs, failing while it is stale.
+			"tree-sitter-tldr/tldr/test/golden/golden.json", "webapp/test/fixtures/",
 		}}},
 	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
 		Programs: map[string][]string{"integration": {"shim-claude-sidecar"}},
@@ -320,6 +324,9 @@ var Suites = []Suite{
 			"bin/fake-git.sh", "bin/fake-git.go",
 		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"}}},
 	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
+	// The TLDR-tree grammar: its corpus, and the committed parser checked
+	// against what grammar.js generates.
+	{Name: "tree-sitter-tldr", Kind: Script, Path: "tree-sitter-tldr/test-tree-sitter-tldr.sh"},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
 		Programs: map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock"}}},
@@ -348,6 +355,11 @@ var AlwaysRunRegions = []string{
 	// contract's sources; the keyed suites read what they import of
 	// proto/gen through their build graph, and proto/vocab as declared data.
 	"proto/",
+	// The tree-sitter-tldr suite (its own script, always run) reads both
+	// grammars, their generated parsers and their corpora; the daemon reads
+	// tldr's binding through its build graph and the golden answers as
+	// declared data.
+	"tree-sitter-tldr/",
 	// The logging module's TS half is the Vitest suites' import, and they
 	// always run.
 	"agent-shim/logging/",

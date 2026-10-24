@@ -2213,8 +2213,7 @@ composer's content may reach its height."
             (cl-letf (((symbol-function 'agent-repl--ensure-input-buffer)
                        (lambda (_ws) input-buf))
                       ((symbol-function 'agent-repl--log)
-                       (lambda (_ws fmt &rest args)
-                         (push (apply #'format fmt args) records))))
+                       (agent-repl-test--record-into records)))
               ;; Act
               (agent-repl--frontend-display-webview "ws1" buf)
               ;; Assert
@@ -2574,7 +2573,7 @@ Binds `resized' to the resize calls made, newest first."
   ;; Arrange
   (let ((errors nil))
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+               (agent-repl-test--record-into errors)))
       ;; Act
       (ignore-errors (agent-repl--frontend-copy-parse "not json")))
     ;; Assert
@@ -2594,7 +2593,7 @@ Binds `resized' to the resize calls made, newest first."
   ;; Arrange
   (let ((errors nil))
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+               (agent-repl-test--record-into errors)))
       ;; Act
       (ignore-errors (agent-repl--frontend-copy-decision '(:id 1 :text nil :focused t))))
     ;; Assert
@@ -2646,7 +2645,7 @@ Binds `resized' to the resize calls made, newest first."
   ;; Arrange
   (let ((errors nil))
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+               (agent-repl-test--record-into errors)))
       (with-temp-buffer
         ;; Act
         (ignore-errors (agent-repl--frontend-webview-read-script

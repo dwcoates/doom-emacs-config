@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!context-usage-drift"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!context-usage-drift"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!context-usage-drift"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The context-usage answer now grows with every turn."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The context-usage answer now grows with every turn."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The context-usage answer now grows with every turn."
+                }
+              }
             }
           },
           "usage": {

@@ -58,7 +58,7 @@ func TestAForksFeedReadsItsParentsTurnAboveItsOwn(t *testing.T) {
 		t.Fatalf("the fork's feed reads %v: want the parent's question, then its answer, then the fork's own question", texts)
 	}
 	for _, row := range rows {
-		if response := row.GetActivity().GetResponse(); response != nil && strings.Contains(response.GetSuccess().GetProse().GetMarkdown(), forkParentAnswer) && !response.GetFinalAnswer() {
+		if response := row.GetActivity().GetResponse(); response != nil && strings.Contains(response.GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(), forkParentAnswer) && !response.GetFinalAnswer() {
 			t.Fatalf("the inherited answer %v is not drawn as its turn's final answer", row.GetId())
 		}
 	}
@@ -129,10 +129,10 @@ func forkRowTexts(rows []*frontendv1.FeedRow) []string {
 		switch {
 		case row.GetUserPrompt() != nil:
 			for _, block := range row.GetUserPrompt().GetSuccess().GetBody().GetBlocks() {
-				out = append(out, block.GetText().GetText())
+				out = append(out, block.GetText().GetProse().GetSource().GetMarkdown())
 			}
 		case row.GetActivity().GetResponse() != nil:
-			out = append(out, row.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown())
+			out = append(out, row.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown())
 		}
 	}
 	return out

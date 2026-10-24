@@ -27,7 +27,7 @@
                ((symbol-function 'agent-repl-latency-report-editor)
                 (lambda (kind seconds) (push (list kind seconds) agent-repl-test-stall--reported)))
                ((symbol-function 'agent-repl--info)
-                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) agent-repl-test-stall--records))))
+                (agent-repl-test--record-into agent-repl-test-stall--records)))
        ,@body)))
 
 (defun agent-repl-test-stall--run-after (seconds)

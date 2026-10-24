@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!worktree-remove"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!worktree-remove"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!worktree-remove"
+                    }
+                  }
                 }
               }
             ]
@@ -81,7 +92,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Removed the worktree."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Removed the worktree."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Removed the worktree."
+                }
+              }
             }
           },
           "usage": {

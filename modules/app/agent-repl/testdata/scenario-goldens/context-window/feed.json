@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!context-window"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!context-window"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!context-window"
+                    }
+                  }
                 }
               }
             ]

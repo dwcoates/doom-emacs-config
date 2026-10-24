@@ -177,7 +177,7 @@ func TestCompactionDirected(t *testing.T) {
 		t.Fatalf("no FeedContextCutCompacted separation row found among %d rows", len(rows))
 	}
 	sep := compacted.GetSeparation()
-	if got := sep.GetCompacted().GetSummary().GetMarkdown(); got != wantSummary {
+	if got := sep.GetCompacted().GetSummary().GetProse().GetSource().GetMarkdown(); got != wantSummary {
 		t.Errorf("compacted summary = %q, want %q", got, wantSummary)
 	}
 	if sep.GetTokens() == nil {

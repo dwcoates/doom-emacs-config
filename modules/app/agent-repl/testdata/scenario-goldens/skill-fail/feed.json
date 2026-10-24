@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!skill-fail"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!skill-fail"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!skill-fail"
+                    }
+                  }
                 }
               }
             ]
@@ -61,7 +72,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The skill did not resolve."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The skill did not resolve."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The skill did not resolve."
+                }
+              }
             }
           },
           "usage": {

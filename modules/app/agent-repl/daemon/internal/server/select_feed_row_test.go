@@ -1290,3 +1290,197 @@ func TestSelectFeedRowFinalResponseClickIsRecordedAtInfo(t *testing.T) {
 	}
 	t.Fatalf("records = %v, want the focus request at INFO", log.records)
 }
+
+// answerMove builds a SelectFeedRow request for a click on a response's label
+// LABEL that the prompt ROW answers.
+func answerMove(row, label string) *agentreplv1.SelectFeedRowRequest {
+	return &agentreplv1.SelectFeedRowRequest{
+		Workspace: ref(),
+		Move: &agentreplv1.SelectFeedRowRequest_Answer{Answer: &agentreplv1.SelectFeedRowAnswer{
+			Row: &frontendv1.FeedId{Value: row}, Label: label}},
+	}
+}
+
+// entryMove builds a SelectFeedRow request for a click on the entry LABEL of
+// the prompt ROW.
+func entryMove(row, label string) *agentreplv1.SelectFeedRowRequest {
+	return &agentreplv1.SelectFeedRowRequest{
+		Workspace: ref(),
+		Move: &agentreplv1.SelectFeedRowRequest_Entry{Entry: &agentreplv1.SelectFeedRowEntry{
+			Row: &frontendv1.FeedId{Value: row}, Label: label}},
+	}
+}
+
+// sendMove sends REQ, failing on a transport error.
+func sendMove(t *testing.T, h *harness, req *agentreplv1.SelectFeedRowRequest) *connect.Response[agentreplv1.SelectFeedRowResponse] {
+	t.Helper()
+	resp, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(req))
+	if err != nil {
+		t.Fatalf("SelectFeedRow: %v", err)
+	}
+	return resp
+}
+
+// TestSelectFeedRowAnswerSelectsThePromptRevealingItsEntry pins a click on a
+// linked label: the answering prompt is selected as its kind, centered, with
+// the entry to flash named.
+func TestSelectFeedRowAnswerSelectsThePromptRevealingItsEntry(t *testing.T) {
+	tests := []struct {
+		name string
+		row  string
+		arm  func(*frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport
+	}{
+		{name: "a prompt a rollback can reach", row: "prompt-1", arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
+			return s.GetPrompt().GetViewport()
+		}},
+		{name: "a prompt a rollback cannot reach", row: "prompt-old", arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
+			return s.GetBubble().GetViewport()
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Feed.prompts = feedIDs("prompt-1")
+			h.Feed.promptRows = map[string]bool{"prompt-old": true}
+
+			// Act.
+			resp := sendMove(t, h, answerMove(tc.row, "3.1"))
+
+			// Assert.
+			viewport := tc.arm(resp.Msg.GetSuccess().GetSelected().GetSelection())
+			if got := viewport.GetReveal().GetEntryLabel(); got != "3.1" {
+				t.Fatalf("selection = %v, want the prompt revealed at its entry 3.1", resp.Msg.GetResult())
+			}
+		})
+	}
+}
+
+// TestSelectFeedRowAnswerNeverDeselects pins that a second click on the label
+// keeps the prompt selected: the click was on the response, never the prompt.
+func TestSelectFeedRowAnswerNeverDeselects(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.prompts = feedIDs("prompt-1")
+	sendMove(t, h, answerMove("prompt-1", "3.1"))
+
+	// Act.
+	resp := sendMove(t, h, answerMove("prompt-1", "3.1"))
+
+	// Assert.
+	if resp.Msg.GetSuccess().GetSelected().GetSelection().GetPrompt() == nil {
+		t.Fatalf("result = %v, want the prompt still selected", resp.Msg.GetResult())
+	}
+}
+
+// TestSelectFeedRowAnswerRefusesARowThatIsNotAPrompt pins that a label link
+// naming a response, not a prompt, is refused and selects nothing.
+func TestSelectFeedRowAnswerRefusesARowThatIsNotAPrompt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.finals = feedIDs("final-1")
+
+	// Act.
+	resp := sendMove(t, h, answerMove("final-1", "3.1"))
+
+	// Assert.
+	if resp.Msg.GetError().GetNotSelectable().GetRow().GetValue() != "final-1" {
+		t.Fatalf("result = %v, want not_selectable echoing final-1", resp.Msg.GetResult())
+	}
+	if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
+		t.Fatal("a refused answer move selected a row")
+	}
+}
+
+// TestSelectFeedRowEntrySelectsThePromptAndAsksTheHostToFillTheComposer pins
+// a click on an entry: the prompt is selected as a click selects (held), and
+// the host is handed the entry to fill the composer with.
+func TestSelectFeedRowEntrySelectsThePromptAndAsksTheHostToFillTheComposer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.prompts = feedIDs("prompt-1")
+	h.Feed.entries = map[string]string{"prompt-1\x003.1": "yes, that one"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := dialHostStream(t, h, ctx)
+
+	// Act.
+	resp := sendMove(t, h, entryMove("prompt-1", "3.1"))
+	event := receiveHostEventPastSelection(t, stream)
+
+	// Assert.
+	if resp.Msg.GetSuccess().GetSelected().GetSelection().GetPrompt().GetViewport().GetHold() == nil {
+		t.Fatalf("result = %v, want the prompt selected and held", resp.Msg.GetResult())
+	}
+	clicked := event.GetPromptEntryClicked()
+	if clicked.GetRow().GetValue() != "prompt-1" || clicked.GetLabel() != "3.1" || clicked.GetText() != "yes, that one" {
+		t.Fatalf("event = %v, want prompt_entry_clicked naming prompt-1's entry 3.1 and its text", event)
+	}
+}
+
+// TestSelectFeedRowEntryRefusesAnEntryThePromptDoesNotHold pins that a click
+// naming a label the prompt holds no entry for is refused, selects nothing
+// and asks nothing of the host.
+func TestSelectFeedRowEntryRefusesAnEntryThePromptDoesNotHold(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Feed.prompts = feedIDs("prompt-1")
+	h.Feed.entries = map[string]string{"prompt-1\x003.1": "yes"}
+
+	// Act.
+	resp := sendMove(t, h, entryMove("prompt-1", "9.9"))
+
+	// Assert.
+	if resp.Msg.GetError().GetNotSelectable().GetRow().GetValue() != "prompt-1" {
+		t.Fatalf("result = %v, want not_selectable echoing prompt-1", resp.Msg.GetResult())
+	}
+	if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
+		t.Fatal("a refused entry move selected a row")
+	}
+}
+
+// TestSelectFeedRowEntryClickIsRecordedAtInfo pins that the click enters the
+// workspace log, naming the row and the label.
+func TestSelectFeedRowEntryClickIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h, log := newLoggedHarness(t)
+	h.Feed.prompts = feedIDs("prompt-1")
+	h.Feed.entries = map[string]string{"prompt-1\x003.1": "yes"}
+
+	// Act.
+	sendMove(t, h, entryMove("prompt-1", "3.1"))
+
+	// Assert.
+	for _, rec := range log.at("INFO") {
+		if rec.Operation == opSelectFeedRow && rec.Context["row"] == "prompt-1" && rec.Context["label"] == "3.1" {
+			return
+		}
+	}
+	t.Fatalf("INFO records = %v, want one naming prompt-1 and its entry 3.1", log.at("INFO"))
+}
+
+// TestSelectFeedRowAnswerAndEntryRequireALabel pins that either move naming no
+// label is refused as InvalidArgument.
+func TestSelectFeedRowAnswerAndEntryRequireALabel(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.SelectFeedRowRequest
+	}{
+		{name: "an answer", req: answerMove("prompt-1", "")},
+		{name: "an entry", req: entryMove("prompt-1", "")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.SelectFeedRow(context.Background(), connect.NewRequest(tc.req))
+
+			// Assert.
+			if connectCode(t, err) != connect.CodeInvalidArgument {
+				t.Fatalf("err = %v, want InvalidArgument", err)
+			}
+		})
+	}
+}

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!task-change"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!task-change"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!task-change"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Moved the task to in progress."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Moved the task to in progress."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Moved the task to in progress."
+                }
+              }
             }
           },
           "usage": {

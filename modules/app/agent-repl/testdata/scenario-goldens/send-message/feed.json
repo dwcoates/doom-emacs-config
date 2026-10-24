@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!send-message"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!send-message"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!send-message"
+                    }
+                  }
                 }
               }
             ]
@@ -44,7 +55,18 @@
           "blocks": [
             {
               "text": {
-                "text": "check the branch"
+                "prose": {
+                  "blocks": [
+                    {
+                      "plain": {
+                        "markdown": "check the branch"
+                      }
+                    }
+                  ],
+                  "source": {
+                    "markdown": "check the branch"
+                  }
+                }
               }
             }
           ]
@@ -68,7 +90,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Queued the message for the live agent."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Queued the message for the live agent."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Queued the message for the live agent."
+                }
+              }
             }
           },
           "usage": {

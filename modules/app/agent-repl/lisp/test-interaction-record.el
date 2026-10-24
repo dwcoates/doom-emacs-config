@@ -86,7 +86,7 @@ EVENTS is a list of recorder-shaped plists (`:time', `:keys',
       (cl-letf (((symbol-function 'this-command-keys-vector)
                  (lambda () (error "recorder boom")))
                 ((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+                 (agent-repl-test--record-into warnings)))
         (agent-repl--interaction-record-capture)
         (should (string-match-p "capture failed" (car warnings)))))))
 

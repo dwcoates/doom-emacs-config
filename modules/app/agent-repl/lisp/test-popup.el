@@ -45,8 +45,7 @@ system does."
   (declare (indent 0))
   `(let ((agent-repl-test-popup--errors nil))
      (cl-letf (((symbol-function 'agent-repl--error)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-test-popup--errors))))
+                (agent-repl-test--record-into agent-repl-test-popup--errors)))
        ,@body)))
 
 (defmacro agent-repl-test-popup--with-tree (var &rest body)

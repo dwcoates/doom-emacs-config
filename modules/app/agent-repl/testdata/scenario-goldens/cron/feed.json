@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!cron"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!cron"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!cron"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Created, listed and deleted a cron job."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Created, listed and deleted a cron job."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Created, listed and deleted a cron job."
+                }
+              }
             }
           },
           "usage": {

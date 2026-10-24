@@ -20,7 +20,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Cleared the conversation."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Cleared the conversation."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Cleared the conversation."
+                }
+              }
             }
           },
           "usage": {

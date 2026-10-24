@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!web-fetch"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!web-fetch"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!web-fetch"
+                    }
+                  }
                 }
               }
             ]
@@ -65,7 +76,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Fetched and summarized the page."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Fetched and summarized the page."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Fetched and summarized the page."
+                }
+              }
             }
           },
           "usage": {

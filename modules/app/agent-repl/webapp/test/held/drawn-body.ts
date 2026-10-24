@@ -1,6 +1,6 @@
 /**
  * drawnBodyOf — the body the daemon draws a held card's `said` as, for a test
- * fixture: each text block its words, each image by path a source named for
+ * fixture: each text block its words as the daemon parses them, each image by path a source named for
  * its file (as the image origin would serve it), each quote its parts. The
  * daemon's own resolution is `feed.DrawUserBlocks`; a fixture only needs a
  * body the card can draw that is recognizably the said's.
@@ -12,6 +12,7 @@ import {
   type FeedUserPromptBody,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { UserSaid } from "../../../proto/gen/ts/conversation/v1/user_pb";
+import { servedProse } from "../prose.js";
 
 /** The source a fixture's image by PATH is served under. */
 export function servedSrcOf(path: string): string {
@@ -23,7 +24,7 @@ export function drawnBodyOf(said: UserSaid | undefined): FeedUserPromptBody {
   for (const block of said?.content?.blocks ?? []) {
     switch (block.block.case) {
       case "text":
-        blocks.push({ case: "text", value: { text: block.block.value.text } } as FeedUserPromptBlock["block"]);
+        blocks.push({ case: "text", value: { prose: servedProse(block.block.value.text) } } as FeedUserPromptBlock["block"]);
         break;
       case "image": {
         const location = block.block.value.location;

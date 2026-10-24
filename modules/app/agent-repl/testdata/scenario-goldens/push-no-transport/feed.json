@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!push-no-transport"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!push-no-transport"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!push-no-transport"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The notification was not sent."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The notification was not sent."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The notification was not sent."
+                }
+              }
             }
           },
           "usage": {

@@ -70,6 +70,7 @@
 (declare-function agent-repl-frontend-show-fn "frontends")
 (declare-function agent-repl-input-mode "input")
 (declare-function agent-repl-spell-enable "spell" (ws))
+(declare-function agent-repl-prompt-entries-enable "prompt-entries" (ws))
 (declare-function agent-repl-window--delete-buffer-windows "window")
 (declare-function agent-repl-window--delete-or-neutralize "window")
 (declare-function agent-repl-window--delete-where "window")
@@ -1374,6 +1375,9 @@ Errors if the buffer is already initialized (already in
         ;; history's unsent head and a restored draft are checked as they
         ;; arrive (spell.el).
         (agent-repl-spell-enable ws)
+        ;; A PROMPT'S ENTRIES ARE MARKED as they are typed, by the grammar
+        ;; the daemon reads them with (prompt-entries.el).
+        (agent-repl-prompt-entries-enable ws)
         (agent-repl--log ws "initialize-input-buffer: ws=%s buffer=%s mode=enabled history=restore"
                           ws (buffer-name input-buf))
         (agent-repl--history-restore ws))

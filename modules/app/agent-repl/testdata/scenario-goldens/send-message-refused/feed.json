@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!send-message-refused"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!send-message-refused"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!send-message-refused"
+                    }
+                  }
                 }
               }
             ]
@@ -42,7 +53,18 @@
           "blocks": [
             {
               "text": {
-                "text": "continue"
+                "prose": {
+                  "blocks": [
+                    {
+                      "plain": {
+                        "markdown": "continue"
+                      }
+                    }
+                  ],
+                  "source": {
+                    "markdown": "continue"
+                  }
+                }
               }
             }
           ]
@@ -70,7 +92,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The agent was stopped and cannot be resumed."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The agent was stopped and cannot be resumed."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The agent was stopped and cannot be resumed."
+                }
+              }
             }
           },
           "usage": {

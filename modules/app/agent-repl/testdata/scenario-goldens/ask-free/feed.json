@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!ask-free"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!ask-free"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!ask-free"
+                    }
+                  }
                 }
               }
             ]
@@ -95,7 +106,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The question was answered in free text."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The question was answered in free text."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The question was answered in free text."
+                }
+              }
             }
           },
           "usage": {

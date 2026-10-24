@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!fail-tool-deferred-unavailable"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!fail-tool-deferred-unavailable"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!fail-tool-deferred-unavailable"
+                    }
+                  }
                 }
               }
             ]
@@ -33,7 +44,18 @@
         "response": {
           "success": {
             "prose": {
-              "markdown": "Working on it…"
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Working on it…"
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Working on it…"
+                }
+              }
             }
           },
           "usage": {

@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agent-repld/internal/prose"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"fmt"
@@ -525,7 +526,7 @@ func (r *resolver) drawCommission(s *wsState, at placement, unitID string, state
 			Address: receivedFromAgent(r.agentOfFeed(s, r.feedKey(s.id, at.feed))),
 			Body: &frontendv1.FeedAgentPromptBody{Blocks: []*frontendv1.FeedAgentPromptBlock{{
 				Block: &frontendv1.FeedAgentPromptBlock_Text{
-					Text: &frontendv1.FeedTextBlock{Text: prompt.GetText()},
+					Text: &frontendv1.FeedTextBlock{Prose: r.parsedProse(s, prompt.GetText(), prose.Settled)},
 				},
 			}}},
 		}},

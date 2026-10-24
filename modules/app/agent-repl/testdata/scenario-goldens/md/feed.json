@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!md"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!md"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!md"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,87 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "# Markdown showcase\n\nRendered by the webapp's **markdown engine** — *streamed* over the wire like any other turn.\n\n## What works\n\n- **Bold**, *italic*, and `inline code`\n- [Links](https://example.com) with safe schemes only\n- Ordered lists too:\n\n1. first\n2. second\n\n\u003e Blockquotes for the philosophical bits.\n\n```go\nfunc main() { fmt.Println(\"fenced code, escaped \u0026 highlighted-ish\") }\n```\n\n---\n\n## A numbered tree\n\n1 🌳 A bare Unicode tree, the shape the metaprompt answers in.\n├── 1.1 This branch is deliberately longer than the bubble's live width, so the webapp wraps it before it is drawn, and every continuation line must still carry the rails of the branches around it.\n│   └── 1.1.1 A child beneath the wrapped branch, so the rail through the wrap is load-bearing.\n└── 1.2 The last branch, whose continuation carries no rail because nothing follows it, once it too runs past the bubble's width and wraps onto a second line.\n\nThat is the whole demo."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "# Markdown showcase\n\nRendered by the webapp's **markdown engine** — *streamed* over the wire like any other turn.\n\n## What works\n\n- **Bold**, *italic*, and `inline code`\n- [Links](https://example.com) with safe schemes only\n- Ordered lists too:\n\n1. first\n2. second\n\n\u003e Blockquotes for the philosophical bits.\n\n```go\nfunc main() { fmt.Println(\"fenced code, escaped \u0026 highlighted-ish\") }\n```\n\n---\n\n## A numbered tree\n"
+                    }
+                  },
+                  {
+                    "tree": {
+                      "nodes": [
+                        {
+                          "id": {},
+                          "label": {
+                            "text": "1"
+                          },
+                          "root": {
+                            "marker": {
+                              "text": "🌳"
+                            }
+                          },
+                          "text": {
+                            "markdown": "A bare Unicode tree, the shape the metaprompt answers in."
+                          }
+                        },
+                        {
+                          "branch": {
+                            "parent": {}
+                          },
+                          "id": {
+                            "index": 1
+                          },
+                          "label": {
+                            "text": "1.1"
+                          },
+                          "text": {
+                            "markdown": "This branch is deliberately longer than the bubble's live width, so the webapp wraps it before it is drawn, and every continuation line must still carry the rails of the branches around it."
+                          }
+                        },
+                        {
+                          "branch": {
+                            "parent": {
+                              "index": 1
+                            }
+                          },
+                          "id": {
+                            "index": 2
+                          },
+                          "label": {
+                            "text": "1.1.1"
+                          },
+                          "text": {
+                            "markdown": "A child beneath the wrapped branch, so the rail through the wrap is load-bearing."
+                          }
+                        },
+                        {
+                          "branch": {
+                            "parent": {}
+                          },
+                          "id": {
+                            "index": 3
+                          },
+                          "label": {
+                            "text": "1.2"
+                          },
+                          "text": {
+                            "markdown": "The last branch, whose continuation carries no rail because nothing follows it, once it too runs past the bubble's width and wraps onto a second line."
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "plain": {
+                      "markdown": "\nThat is the whole demo."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "# Markdown showcase\n\nRendered by the webapp's **markdown engine** — *streamed* over the wire like any other turn.\n\n## What works\n\n- **Bold**, *italic*, and `inline code`\n- [Links](https://example.com) with safe schemes only\n- Ordered lists too:\n\n1. first\n2. second\n\n\u003e Blockquotes for the philosophical bits.\n\n```go\nfunc main() { fmt.Println(\"fenced code, escaped \u0026 highlighted-ish\") }\n```\n\n---\n\n## A numbered tree\n\n1 🌳 A bare Unicode tree, the shape the metaprompt answers in.\n├── 1.1 This branch is deliberately longer than the bubble's live width, so the webapp wraps it before it is drawn, and every continuation line must still carry the rails of the branches around it.\n│   └── 1.1.1 A child beneath the wrapped branch, so the rail through the wrap is load-bearing.\n└── 1.2 The last branch, whose continuation carries no rail because nothing follows it, once it too runs past the bubble's width and wraps onto a second line.\n\nThat is the whole demo."
+                }
+              }
             }
           },
           "usage": {

@@ -41,7 +41,7 @@ func stampPromptCommands(row *frontendv1.FeedRow, catalog *conversationv1.Sessio
 func promptCommands(prompt *frontendv1.FeedUserPrompt, catalog *conversationv1.SessionCommandCatalog) []*frontendv1.FeedUserPromptCommand {
 	var texts []string
 	for _, block := range prompt.GetSuccess().GetBody().GetBlocks() {
-		if text := block.GetText().GetText(); strings.Contains(text, "/") {
+		if text := block.GetText().GetProse().GetSource().GetMarkdown(); strings.Contains(text, "/") {
 			texts = append(texts, text)
 		}
 	}

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!fail-structured-output"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!fail-structured-output"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!fail-structured-output"
+                    }
+                  }
                 }
               }
             ]
@@ -33,7 +44,18 @@
         "response": {
           "success": {
             "prose": {
-              "markdown": "Working on it…"
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Working on it…"
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Working on it…"
+                }
+              }
             }
           },
           "usage": {

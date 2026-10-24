@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!slash"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!slash"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!slash"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Answered the slash command locally."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Answered the slash command locally."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Answered the slash command locally."
+                }
+              }
             }
           },
           "usage": {

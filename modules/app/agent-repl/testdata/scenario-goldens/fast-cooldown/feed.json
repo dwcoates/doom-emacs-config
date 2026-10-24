@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!fast-cooldown"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!fast-cooldown"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!fast-cooldown"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Fast mode is cooldown."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Fast mode is cooldown."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Fast mode is cooldown."
+                }
+              }
             }
           },
           "usage": {

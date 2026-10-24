@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!fault-converter"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!fault-converter"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!fault-converter"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "One vendor message was unconvertible; the rest of the turn was ordinary."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "One vendor message was unconvertible; the rest of the turn was ordinary."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "One vendor message was unconvertible; the rest of the turn was ordinary."
+                }
+              }
             }
           },
           "usage": {

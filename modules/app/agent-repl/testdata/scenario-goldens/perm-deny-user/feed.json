@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!perm-deny-user"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!perm-deny-user"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!perm-deny-user"
+                    }
+                  }
                 }
               }
             ]
@@ -98,7 +109,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "I will not run that."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "I will not run that."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "I will not run that."
+                }
+              }
             }
           },
           "usage": {

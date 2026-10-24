@@ -1,0 +1,16 @@
+{
+  "grammars": [
+    {
+      "name": "tldr_prompt",
+      "camelcase": "TldrPrompt",
+      "scope": "source.tldr_prompt",
+      "path": ".",
+      "file-types": []
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "UNLICENSED",
+    "description": "The prompt entries that answer a TLDR tree's labels."
+  }
+}

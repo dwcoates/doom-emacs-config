@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!monitor-persistent"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!monitor-persistent"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!monitor-persistent"
+                    }
+                  }
                 }
               }
             ]
@@ -60,7 +71,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Monitoring until something stops it."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Monitoring until something stops it."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Monitoring until something stops it."
+                }
+              }
             }
           },
           "usage": {

@@ -88,8 +88,7 @@
                           (kill-buffer buf)
                           (agent-repl--ws-put ws :frontend-buffer nil)))
                        ((symbol-function 'agent-repl--info)
-                        (lambda (_ws fmt &rest args)
-                          (push (apply #'format fmt args) agent-repl-test-pu--logged))))
+                        (agent-repl-test--record-into agent-repl-test-pu--logged)))
                ,@body))
          (mapc #'kill-buffer (seq-filter #'buffer-live-p buffers))))))
 
@@ -323,7 +322,7 @@
     (setq agent-repl-page-unload--last-switch-at 100)
     (let ((logged nil))
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-page-unload-note-shown "alpha"))
       ;; Assert

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!write-create"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!write-create"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!write-create"
+                    }
+                  }
                 }
               }
             ]
@@ -77,7 +88,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Created the file."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Created the file."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Created the file."
+                }
+              }
             }
           },
           "usage": {

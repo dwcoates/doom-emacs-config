@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!usage-service-unavailable"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!usage-service-unavailable"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!usage-service-unavailable"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The account-usage probe now answers with the service_unavailable shape."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The account-usage probe now answers with the service_unavailable shape."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The account-usage probe now answers with the service_unavailable shape."
+                }
+              }
             }
           },
           "usage": {

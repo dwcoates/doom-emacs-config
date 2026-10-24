@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agent-repld/internal/prose"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -65,8 +66,8 @@ func (r *resolver) drawPeerMessage(s *wsState, peer *conversationv1.PeerMessage)
 		from = r.peerFrom(s.id, peer.GetInterSession())
 	}
 	row.Row = &frontendv1.FeedRow_PeerMessage{PeerMessage: &frontendv1.FeedPeerMessage{
-		From: from,
-		Body: peer.GetBody(),
+		From:  from,
+		Prose: r.parsedProse(s, peer.GetBody(), prose.Settled),
 	}}
 	log.Debug("daemon.feed.peer_message",
 		"a message from another Claude session was drawn as a peer bubble",

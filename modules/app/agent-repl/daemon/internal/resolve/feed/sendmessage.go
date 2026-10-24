@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agent-repld/internal/prose"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -98,7 +99,7 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 		Id: r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPrompt, ID: unitID, Sub: "send"}),
 		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
 			Address: r.sendAddress(s, u),
-			Body:    &frontendv1.FeedAgentPromptBody{Blocks: sendBodyBlocks(u.sendSummary)},
+			Body:    &frontendv1.FeedAgentPromptBody{Blocks: r.sendBodyBlocks(s, u.sendSummary)},
 		}},
 	}
 	// THE DELIVERY IS THE UNIT'S, NOT THIS FRAME'S. See unitState.sendDelivery
@@ -181,12 +182,12 @@ func (r *resolver) restateSend(s *wsState, act *conversationv1.AgentActivity, u 
 // sendBodyBlocks draws the caller's summary, and NOTHING when there was none:
 // the body the send carries is for the recipient and the record, never for a
 // feed.
-func sendBodyBlocks(summary string) []*frontendv1.FeedAgentPromptBlock {
+func (r *resolver) sendBodyBlocks(s *wsState, summary string) []*frontendv1.FeedAgentPromptBlock {
 	if summary == "" {
 		return nil
 	}
 	return []*frontendv1.FeedAgentPromptBlock{{
-		Block: &frontendv1.FeedAgentPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: summary}},
+		Block: &frontendv1.FeedAgentPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: r.parsedProse(s, summary, prose.Settled)}},
 	}}
 }
 

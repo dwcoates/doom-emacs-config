@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!hook-failed"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!hook-failed"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!hook-failed"
+                    }
+                  }
                 }
               }
             ]
@@ -64,7 +75,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "A startup hook failed without blocking anything."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "A startup hook failed without blocking anything."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "A startup hook failed without blocking anything."
+                }
+              }
             }
           },
           "usage": {

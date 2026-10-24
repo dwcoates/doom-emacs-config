@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!bash-timeout"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!bash-timeout"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!bash-timeout"
+                    }
+                  }
                 }
               }
             ]
@@ -57,7 +68,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The command timed out and moved to the background."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The command timed out and moved to the background."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The command timed out and moved to the background."
+                }
+              }
             }
           },
           "usage": {

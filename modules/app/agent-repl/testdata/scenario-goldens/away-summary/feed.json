@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!away-summary"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!away-summary"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!away-summary"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Recapped what happened while you were away."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Recapped what happened while you were away."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Recapped what happened while you were away."
+                }
+              }
             }
           },
           "usage": {

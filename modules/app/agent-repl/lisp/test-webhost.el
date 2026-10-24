@@ -203,7 +203,7 @@ Binds `reloads' and `records', newest first."
   (agent-repl-test--with-clean-state
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl--webhost-answered "{\"op\":\"show\",\"id\":null,\"outcome\":\"shown\",\"notes\":[]}"))
       ;; Assert
@@ -265,7 +265,7 @@ Binds `reloads' and `records', newest first."
   (agent-repl-test--with-clean-state
     (let (errors)
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl--webhost-answered "not json"))
       ;; Assert
@@ -327,7 +327,7 @@ Binds `reloads' and `records', newest first."
   (agent-repl-test-wh--with-host
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-webhost-ensure-page "alpha")
         (agent-repl-webhost-ensure-page "alpha"))
@@ -790,7 +790,7 @@ The current tab's page, not shown here, is the nearest of all."
       (agent-repl-test-wh--with-order '("alpha") nil
         (cl-letf (((symbol-function 'agent-repl-host-adopting-p) (lambda (_ws) t))
                   ((symbol-function 'agent-repl--info)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                   (agent-repl-test--record-into logged)))
           ;; Act
           (agent-repl-test-wh--load "load-committed")))
       ;; Assert
@@ -803,7 +803,7 @@ The current tab's page, not shown here, is the nearest of all."
     (agent-repl-webhost-ensure-page "alpha")
     (let ((logged nil))
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-test-wh--load "load-committed"))
       ;; Assert
@@ -1023,7 +1023,7 @@ The current tab's page, not shown here, is the nearest of all."
            (props (list 'callback closure))
            (logged nil))
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         (agent-repl-test-wh--with-props props
           ;; Act
           (agent-repl--webhost-rewatch)))
@@ -1127,7 +1127,7 @@ The current tab's page, not shown here, is the nearest of all."
   (agent-repl-test--with-clean-state
     (let (warned)
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl--webhost-refuse-kill))
       ;; Assert

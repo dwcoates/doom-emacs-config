@@ -165,7 +165,7 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
       (agent-repl-input-mode)
       (setq-local header-line-format "C-c C-c: clear+save")
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         (should (>= (agent-repl--input-help-install-in-composers) 1)))
       (should (eq header-line-format 'agent-repl-input-help-header-line))
       (should (string-match-p "install-in-composers: composers=[1-9]" (car logged))))))
@@ -303,7 +303,7 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
     (agent-repl-test--recording-popups
       (cl-letf (((symbol-function 'agent-repl--input-help-binding-context) (lambda () context))
                 ((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         (agent-repl-input-help-show 'zoom))
       (let ((buf (car agent-repl-test--popups-shown)))
         (unwind-protect

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!edit"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!edit"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!edit"
+                    }
+                  }
                 }
               }
             ]
@@ -81,7 +92,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Edited the file."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Edited the file."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Edited the file."
+                }
+              }
             }
           },
           "usage": {

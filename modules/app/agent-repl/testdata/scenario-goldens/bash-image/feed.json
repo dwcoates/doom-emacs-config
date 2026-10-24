@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!bash-image"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!bash-image"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!bash-image"
+                    }
+                  }
                 }
               }
             ]
@@ -69,7 +80,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Captured the screen."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Captured the screen."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Captured the screen."
+                }
+              }
             }
           },
           "usage": {

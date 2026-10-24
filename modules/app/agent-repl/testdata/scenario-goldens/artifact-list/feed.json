@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!artifact-list"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!artifact-list"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!artifact-list"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Listed the artifacts."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Listed the artifacts."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Listed the artifacts."
+                }
+              }
             }
           },
           "usage": {

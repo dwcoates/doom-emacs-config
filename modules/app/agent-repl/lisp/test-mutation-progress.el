@@ -93,7 +93,7 @@
   (agent-repl-mutation-progress-register "op-u" :on-stage #'ignore)
   (let (errors)
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_scope fmt &rest args) (push (apply #'format fmt args) errors))))
+               (agent-repl-test--record-into errors)))
       ;; Act.
       (agent-repl-mutation-progress--dispatch-steps
        "op-u" (gethash "op-u" agent-repl-mutation-progress--pending)
@@ -213,7 +213,7 @@
   "Return the sentences `agent-repl--backend-phase' echoed while THUNK ran."
   (let (said)
     (cl-letf (((symbol-function 'agent-repl--backend-phase)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) said))))
+               (agent-repl-test--record-into said)))
       (funcall thunk))
     (nreverse said)))
 

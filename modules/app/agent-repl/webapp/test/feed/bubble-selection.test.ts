@@ -153,11 +153,14 @@ function feed() {
   const host = document.createElement("main");
   host.innerHTML = `
     <article data-feed-row="r1" data-selection-governed data-selectable>
-      <div class="bubble"><div class="bubble-scroll"><p id="prose">words <a id="link" href="#">x</a></p></div>
+      <div class="bubble"><div class="bubble-scroll"><p id="prose">words <a id="link" href="#">x</a></p>
+        <span class="mp-label mp-label-linked" data-label="1.1" data-answer-prompt="p9" id="linked">1.1</span>
+        <div class="mp-entry" data-entry-label="3.1"><span class="mp-entry-label" id="entry">3.1</span><div class="mp-entry-text" id="entry-text">yes</div></div></div>
         <div class="bubble-subfeed"><article data-feed-row="n1"><span id="nested">inner</span></article></div>
       </div>
     </article>
-    <article data-feed-row="r2" data-selection-governed><div class="bubble"><p id="streaming">...</p></div></article>
+    <article data-feed-row="r2" data-selection-governed><div class="bubble"><p id="streaming">...</p>
+      <div class="mp-entry" data-entry-label="2"><span class="mp-entry-label" id="entry-unlanded">2</span></div></div></article>
     <article data-feed-row="t1"><div class="tool-card" id="tool">tool</div></article>`;
   document.body.replaceChildren(host);
   const at = (selector: string): Element => {
@@ -190,6 +193,11 @@ describe("bubbleClick", () => {
     ["a click that ends a text highlight", "#prose", "words", { case: "ignore", reason: "text-selection" }],
     ["a bubble that has not landed", "#streaming", "", { case: "ignore", reason: "not-landed" }],
     ["a selectable bubble", "#prose", "", { case: "select", row: "r1" }],
+    ["a linked label", "#linked", "", { case: "answer", prompt: "p9", label: "1.1" }],
+    ["a linked label ending a text highlight", "#linked", "1.1", { case: "ignore", reason: "text-selection" }],
+    ["an entry's label", "#entry", "", { case: "entry", row: "r1", label: "3.1" }],
+    ["an entry's words, which select its bubble", "#entry-text", "", { case: "select", row: "r1" }],
+    ["an entry of a bubble that has not landed", "#entry-unlanded", "", { case: "ignore", reason: "not-landed" }],
   ] as const)("decides %s", (_name, selector, selectedText, want) => {
     // Arrange
     const f = feed();
@@ -243,6 +251,52 @@ describe("installBubbleSelect", () => {
     expect(
       a.h.calls.selectFeedRow.map((r) => (r.move.case === "bubble" ? r.move.value.row?.value : r.move.case)),
     ).toEqual(["r1", "r1"]);
+  });
+
+  it("asks the daemon to select the prompt a linked label's answer is in", async () => {
+    // Arrange
+    const a = armed();
+    // Act
+    click(a.at("#linked"));
+    await settle();
+    // Assert
+    expect(
+      a.h.calls.selectFeedRow.map((r) => (r.move.case === "answer" ? [r.move.value.row?.value, r.move.value.label] : r.move.case)),
+    ).toEqual([["p9", "1.1"]]);
+  });
+
+  it("asks the daemon to select a clicked entry's prompt to edit the entry", async () => {
+    // Arrange
+    const a = armed();
+    // Act
+    click(a.at("#entry"));
+    await settle();
+    // Assert
+    expect(
+      a.h.calls.selectFeedRow.map((r) => (r.move.case === "entry" ? [r.move.value.row?.value, r.move.value.label] : r.move.case)),
+    ).toEqual([["r1", "3.1"]]);
+  });
+
+  it("logs a linked label's click at info naming the prompt and the label", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const a = armed();
+    // Act
+    click(a.at("#linked"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.label-click-answer");
+    expect([record.level.case, record.context]).toEqual(["info", expect.objectContaining({ prompt: "p9", label: "1.1" })]);
+  });
+
+  it("logs an entry's click at info naming the row and the label", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const a = armed();
+    // Act
+    click(a.at("#entry"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.entry-click");
+    expect([record.level.case, record.context]).toEqual(["info", expect.objectContaining({ row: "r1", label: "3.1" })]);
   });
 
   it("asks nothing for a bubble that has not landed", async () => {

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!perm-deny-policy"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!perm-deny-policy"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!perm-deny-policy"
+                    }
+                  }
                 }
               }
             ]
@@ -79,7 +90,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "A rule denied that command."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "A rule denied that command."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "A rule denied that command."
+                }
+              }
             }
           },
           "usage": {

@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!send-message-resumed"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!send-message-resumed"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!send-message-resumed"
+                    }
+                  }
                 }
               }
             ]
@@ -44,7 +55,18 @@
           "blocks": [
             {
               "text": {
-                "text": "resume the sweep"
+                "prose": {
+                  "blocks": [
+                    {
+                      "plain": {
+                        "markdown": "resume the sweep"
+                      }
+                    }
+                  ],
+                  "source": {
+                    "markdown": "resume the sweep"
+                  }
+                }
               }
             }
           ]
@@ -68,7 +90,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Resumed the idle agent with the message."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Resumed the idle agent with the message."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Resumed the idle agent with the message."
+                }
+              }
             }
           },
           "usage": {

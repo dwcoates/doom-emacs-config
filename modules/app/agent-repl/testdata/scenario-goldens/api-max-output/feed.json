@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!api-max-output"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!api-max-output"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!api-max-output"
+                    }
+                  }
                 }
               }
             ]

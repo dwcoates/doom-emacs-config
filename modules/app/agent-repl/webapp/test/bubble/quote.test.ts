@@ -3,25 +3,26 @@ import { describe, expect, it } from "vitest";
 import { BUBBLE_QUOTE_CLASS, quoteSlot } from "../../src/bubble/quote.js";
 import { BUBBLE_EXPANDED_ONLY_CLASS } from "../../src/bubble/expanded-only.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, createBubbleBody, paintBody } from "../../src/bubble/body.js";
+import { plainProse } from "../prose.js";
 
 describe("quoteSlot", () => {
   it("wears the drawing kind's class, the quote class, and the expanded-only mark", () => {
     // Act
-    const slot = quoteSlot("queued-quote", "the quote");
+    const slot = quoteSlot("queued-quote", plainProse("the quote"));
     // Assert
     expect([...slot.classList]).toEqual(["queued-quote", BUBBLE_QUOTE_CLASS, BUBBLE_EXPANDED_ONLY_CLASS]);
   });
 
   it("is a markdown slot, so the bubble's body pipeline paints it", () => {
     // Act
-    const slot = quoteSlot("prompt-block", "the quote");
+    const slot = quoteSlot("prompt-block", plainProse("the quote"));
     // Assert
     expect(slot.hasAttribute(MARKDOWN_SLOT_ATTRIBUTE)).toBe(true);
   });
 
   it("draws a fenced quote as a code block", () => {
     // Arrange
-    const slot = quoteSlot("prompt-block", "⟢ Replying:\n\n````\nconst x = `y`;\n````\n\n⟢ My message:\n");
+    const slot = quoteSlot("prompt-block", plainProse("⟢ Replying:\n\n````\nconst x = `y`;\n````\n\n⟢ My message:\n"));
     // Act
     paintBody(createBubbleBody(), [slot]);
     // Assert

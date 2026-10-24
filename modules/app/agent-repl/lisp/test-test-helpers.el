@@ -97,6 +97,13 @@ clean; BODY runs after the load with the same bindings still active."
   (should (equal (getenv "AGENT_REPL_LOG_LEVEL") "debug"))
   (should (eq (agent-repl--log-level-from-environment) 'debug)))
 
+(ert-deftest agent-repl-test-helpers-batch-log-level-clock-holds-the-arm-instant ()
+  "The batch window is read at the instant it was armed, however long the process runs."
+  ;; Arrange: the harness armed the window to end 300s after its instant.
+  (let ((until (string-to-number (getenv "AGENT_REPL_LOG_LEVEL_UNTIL"))))
+    ;; Act / Assert
+    (should (= (funcall agent-repl--log-level-clock) (- until 300)))))
+
 (ert-deftest agent-repl-test-helpers-batch-global-log-is-process-isolated ()
   "Each batch process writes load-time records inside its PID-scoped state dir."
   (let ((state-dir (file-name-as-directory (getenv "AGENT_REPL_STATE_DIR"))))
@@ -625,3 +632,31 @@ A site that hand-rolls `delete-process' on a subprocess orphans its children."
             (push (file-name-nondirectory file) spelled)))))
     ;; Assert
     (should-not spelled)))
+
+(ert-deftest agent-repl-test-helpers-record-into-records-formatted-newest-first ()
+  "A rung stubbed with the recorder keeps each record's text, newest first."
+  ;; Arrange
+  (let ((records nil))
+    (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-into records)))
+      ;; Act
+      (agent-repl--info "ws-1" "first n=%d" 1)
+      (agent-repl--info nil "second s=%s" "x"))
+    ;; Assert
+    (should (equal records '("second s=x" "first n=1")))))
+
+(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-recorder ()
+  "Every suite records a logging rung through `agent-repl-test--record-into'."
+  ;; Arrange
+  (let ((dir agent-repl-test-helpers--dir)
+        (hand-rolled nil))
+    ;; Act
+    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
+      (unless (equal (file-name-nondirectory file) "test-helpers.el")
+        (with-temp-buffer
+          (insert-file-contents file)
+          (when (re-search-forward
+                 "(lambda (_[a-z]* fmt &rest args)[ \t\n]*(push (apply #'format fmt args) [^() \t\n]+))"
+                 nil t)
+            (push (file-name-nondirectory file) hand-rolled)))))
+    ;; Assert
+    (should-not hand-rolled)))

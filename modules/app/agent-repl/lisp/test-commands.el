@@ -806,7 +806,7 @@ Binds `switched' to the requested target and `logged' to the log lines."
                ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
                ((symbol-function 'agent-repl--roster-recent-names) (lambda () ,recent))
                ((symbol-function 'agent-repl--info)
-                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                (agent-repl-test--record-into logged))
                ((symbol-function 'agent-repl-host-request-switch)
                 (lambda (ws trigger) (setq switched (cons ws trigger))))
                ((symbol-function 'message)
@@ -875,7 +875,7 @@ Binds `switched' to the requested target and `asked' to the names ranked."
                 (lambda (names) (setq asked names) ,finished))
                ((symbol-function 'agent-repl-roster-last-turn-ended-ms) (lambda (_ws) 42))
                ((symbol-function 'agent-repl--info)
-                (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                (agent-repl-test--record-into logged))
                ((symbol-function 'agent-repl-host-request-switch)
                 (lambda (ws trigger) (setq switched (cons ws trigger))))
                ((symbol-function 'message) (lambda (&rest _) nil)))
@@ -1013,7 +1013,7 @@ formatted `info' records, newest first."
                ((symbol-function 'agent-repl-host-request-switch)
                 (lambda (ws trigger) (push (list ws trigger) requests) t))
                ((symbol-function 'agent-repl--info)
-                (lambda (_scope fmt &rest args) (push (apply #'format fmt args) records))))
+                (agent-repl-test--record-into records)))
        ,@body)))
 
 (ert-deftest agent-repl-test-commands-step-hands-the-ring-the-pending-start ()
@@ -1877,7 +1877,7 @@ and `--switched' to the workspace whose switch was requested of the daemon."
         (row (agent-repl-test-commands--row "bare" "id-bare" 1)))
     (plist-put row :last-updated nil)
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+               (agent-repl-test--record-into errors)))
       ;; Act / Assert
       (should-error (agent-repl--switch-by-recency
                      (list (list :name "bare" :row row)
@@ -1986,7 +1986,7 @@ and `--switched' to the workspace whose switch was requested of the daemon."
   ;; Arrange
   (let ((errors nil))
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+               (agent-repl-test--record-into errors)))
       ;; Act / Assert
       (should-error (agent-repl--switch-most-recent
                      '((:name "no-instant")) (lambda (_entry) nil)))

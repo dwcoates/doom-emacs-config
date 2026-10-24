@@ -14,6 +14,9 @@ package agentrepl.v1;
 import "workspace/v1/workspace.proto";
 import "conversation/v1/user.proto";
 import "agentrepl/v1/rollback.proto";
+import "agentrepl/v1/endpoint_submit_prompt.proto";
+import "conversation/v1/prompt_origin.proto";
+import "frontend/v1/feed.proto";
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message RollBackRequest {
@@ -21,6 +24,52 @@ message RollBackRequest {
   workspace.v1.WorkspaceRef workspace = 1;
   // The plan the user confirmed, exactly as PlanRollback served it.
   RollbackToken token = 2;
+  // A PROMPT TO SEND IN THE ROLLBACK'S PLACE, in the same call: the prompt
+  // rolled back, edited. It is submitted once the conversation is cut, as
+  // SubmitPrompt submits a prompt, and its answer rides
+  // RollBackSuccess.resend. UNSET = only roll back: the composer holds the
+  // rolled-back prompt again. An `entry` edit naming a label the prompt holds
+  // no entry for is refused (`entry_not_found`) before anything is rolled
+  // back.
+  optional RollBackResend resend = 3;
+}
+
+// The prompt a rollback sends in its place.
+message RollBackResend {
+  // The submission's idempotency key, as SubmitPromptRequest takes it.
+  string idempotency_key = 1;
+  // Who sent it, as SubmitPromptRequest takes it.
+  conversation.v1.PromptOrigin origin = 2;
+  // What is sent. Exactly one is set; an unset edit is refused as
+  // InvalidArgument.
+  oneof edit {
+    // A whole new prompt: what the composer held.
+    RollBackResendWhole whole = 3;
+    // The rolled-back prompt with one entry's words replaced: the entry the
+    // reader clicked, as the composer then held it.
+    RollBackResendEntry entry = 4;
+  }
+}
+
+// A whole new prompt sent in the rolled-back one's place.
+message RollBackResendWhole {
+  // The prompt.
+  conversation.v1.UserSaid said = 1;
+}
+
+// The rolled-back prompt sent again with the entry answering LABEL saying
+// TEXT instead: its label and separator kept, every other word unchanged.
+message RollBackResendEntry {
+  // The label of the entry to replace, as frontend.v1.ProseEntry carries it.
+  string label = 1;
+  // What the entry says now.
+  string text = 2;
+  // The prompt row whose entry was clicked (HostWorkspacePromptEntryClicked).
+  // A rollback planned to any other prompt refuses the resend
+  // (`entry_not_found`) before anything is rolled back, so an edit made for
+  // one prompt can never be applied to another that happens to hold the
+  // same label.
+  frontend.v1.FeedId row = 3;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -41,6 +90,11 @@ message RollBackSuccess {
   // How many files were restored. Present exactly when the plan restored
   // files.
   optional RollBackFilesRestored files_restored = 2;
+  // The resend's submission, exactly as SubmitPrompt answers it. Present
+  // exactly when the request carried a resend. The rollback stands whichever
+  // arm it takes: a refused resend leaves the conversation cut, and the
+  // composer holds what was to be sent.
+  optional SubmitPromptResponse resend = 3;
 }
 // The files a restore changed back.
 message RollBackFilesRestored {

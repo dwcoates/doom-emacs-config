@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!push-sent"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!push-sent"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!push-sent"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Sent the notification."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Sent the notification."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Sent the notification."
+                }
+              }
             }
           },
           "usage": {

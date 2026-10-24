@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!bash-spill"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!bash-spill"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!bash-spill"
+                    }
+                  }
                 }
               }
             ]
@@ -68,7 +79,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The output was too large and spilled to a file."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The output was too large and spilled to a file."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The output was too large and spilled to a file."
+                }
+              }
             }
           },
           "usage": {

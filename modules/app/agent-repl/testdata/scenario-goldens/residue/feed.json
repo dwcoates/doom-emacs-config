@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!residue"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!residue"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!residue"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Wrote the two bookkeeping attachments."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Wrote the two bookkeeping attachments."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Wrote the two bookkeeping attachments."
+                }
+              }
             }
           },
           "usage": {

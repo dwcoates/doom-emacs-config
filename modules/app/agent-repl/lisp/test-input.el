@@ -1398,7 +1398,7 @@ ring (owner ruling overrides the old keep-the-text contract)."
     (agent-repl-test-input--compose '("/tmp/a.png") '("/tmp/gone.png"))
     (let (recorded)
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) recorded))))
+                 (agent-repl-test--record-into recorded)))
         ;; Act
         (ignore-errors (agent-repl--send :user-sent)))
       ;; Assert
@@ -1837,17 +1837,13 @@ WARN and must never reach the `unknown-error-arm' ERROR branch."
          (agent-repl-test-input--warn nil)
          (agent-repl-test-input--error nil))
      (cl-letf (((symbol-function 'agent-repl--info)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-test-input--info)))
+                (agent-repl-test--record-into agent-repl-test-input--info))
                ((symbol-function 'agent-repl--log)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-test-input--debug)))
+                (agent-repl-test--record-into agent-repl-test-input--debug))
                ((symbol-function 'agent-repl--warn)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-test-input--warn)))
+                (agent-repl-test--record-into agent-repl-test-input--warn))
                ((symbol-function 'agent-repl--error)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) agent-repl-test-input--error))))
+                (agent-repl-test--record-into agent-repl-test-input--error)))
        ,@body)))
 
 (defun agent-repl-test-input--rung-has-p (messages prefix)
@@ -2426,7 +2422,7 @@ stubbed rpc received is pushed onto `requests'."
   (agent-repl-test-input--with-open-image '(:response (:arm :success :value nil))
     (let ((infos nil))
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                 (agent-repl-test--record-into infos)))
         ;; Act
         (agent-repl--input-open-feed-image "ws-one" '(:path "/w/clip.png" :media-type "image/png")))
       ;; Assert
@@ -2569,7 +2565,7 @@ ran in onto `insert-buffers'; every INFO record lands on `infos'."
                    ((symbol-function 'evil-insert-state)
                     (lambda (&optional _arg) (push (current-buffer) insert-buffers)))
                    ((symbol-function 'agent-repl--info)
-                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                    (agent-repl-test--record-into infos)))
            ,@body)))))
 
 (ert-deftest agent-repl-test-input-focus-for-reply-selects-the-composer-window ()
@@ -2628,7 +2624,7 @@ ran in onto `insert-buffers'; every INFO record lands on `infos'."
     ;; Arrange
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-turn-boundary-select-prev))
       ;; Assert
@@ -2649,7 +2645,7 @@ ran in onto `insert-buffers'; every INFO record lands on `infos'."
     ;; Arrange
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-turn-boundary-select-next))
       ;; Assert
@@ -2662,7 +2658,7 @@ ran in onto `insert-buffers'; every INFO record lands on `infos'."
     ;; Arrange
     (let ((errors nil))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-turn-boundary-select-next))
       ;; Assert
@@ -2970,8 +2966,7 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
                  ((symbol-function 'y-or-n-p)
                   (lambda (prompt) (setq agent-repl-test-input--asked prompt) confirm))
                  ((symbol-function 'agent-repl--warn)
-                  (lambda (_ws fmt &rest args)
-                    (push (apply #'format fmt args) agent-repl-test-input--warned))))
+                  (agent-repl-test--record-into agent-repl-test-input--warned)))
          ,@body))))
 
 (defun agent-repl-test-input--plan (&rest overrides)
@@ -3423,7 +3418,7 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
     ;; Arrange
     (let ((errors nil))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-rollback-keep-files))
       ;; Assert
@@ -3503,7 +3498,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
   (agent-repl-test-input--with-rollback nil nil nil
     (let ((errors nil))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl--input-rollback-offer "ws-one" '(:arm :later :value nil)))
       ;; Assert
@@ -3586,7 +3581,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
     (let ((agent-repl-test-input--list-answer '(:response (:arm :accepted :value nil)))
           (errors nil))
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl--input-rollback-choose "ws-one"))
       ;; Assert
@@ -3697,7 +3692,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
     ;; Arrange
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-turn-boundary-select-prev))
       ;; Assert
@@ -3828,7 +3823,7 @@ recorded; the response view is killed afterwards."
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl--input-selection-changed "ws-one"))
       ;; Assert
@@ -3895,7 +3890,7 @@ recorded; the response view is killed afterwards."
     ;; Arrange
     (let (errors)
       (cl-letf (((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (should-error (agent-repl-response-search-forward))
         ;; Assert
@@ -4005,7 +4000,7 @@ The record is bound as `ran'."
     (let (errors)
       (cl-letf (((symbol-function 'key-binding) (lambda (_key &rest _) nil))
                 ((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                 (agent-repl-test--record-into errors)))
         ;; Act
         (should-error (agent-repl-response-search-buffer))
         ;; Assert
@@ -4264,7 +4259,7 @@ holds it until the condition clears."
           '(:response (:arm :error :value (:reason (:arm :merging :value nil)))))
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         ;; Act
         (agent-repl-test-input--submit-deferred))
       ;; Assert
@@ -4837,7 +4832,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
            '(:response (:arm :error :value (:cause (:arm :ask-not-standing :value nil)))))
           (warned nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warned))))
+                 (agent-repl-test--record-into warned)))
         (agent-repl-test-input--type-digit ?1))
       (should (cl-some (lambda (m) (string-match-p "elisp.input.answer-question-refused .*:label \"a\".*ask-not-standing" m))
                        warned))
@@ -4865,3 +4860,280 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
   "`C-RET' runs the confirm-or-postfix command in the composer."
   (should (eq (lookup-key agent-repl-input-mode-map (kbd "C-<return>"))
               #'agent-repl-input-control-return)))
+
+;;;; ---- Editing a prompt's entry, and resending it -----------------------
+
+(defun agent-repl-test-input--editing-entry ()
+  "The entry the composer is editing, or nil."
+  (buffer-local-value 'agent-repl--input-editing-entry agent-repl-test-input--buffer))
+
+(defmacro agent-repl-test-input--with-edit-stubs (&rest body)
+  "Run BODY with the composer's focus and flash recorded, as `focused' and `flashed'."
+  (declare (indent 0))
+  `(let (focused flashed)
+     (cl-letf (((symbol-function 'agent-repl-input-focus-for-reply) (lambda (ws) (push ws focused)))
+               ((symbol-function 'agent-repl--input-flash) (lambda (_ws text) (push text flashed))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-input-edit-entry-fills-the-composer-with-the-entry ()
+  "Clicking an entry fills the composer with what the entry says."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-edit-stubs
+      ;; Act
+      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes, that one")
+      ;; Assert
+      (should (equal (agent-repl-test-input--composer-text) "yes, that one")))))
+
+(ert-deftest agent-repl-test-input-edit-entry-records-the-entry-it-edits ()
+  "The composer records which prompt's entry it is editing."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-edit-stubs
+      ;; Act
+      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes")
+      ;; Assert
+      (should (equal (agent-repl-test-input--editing-entry) '(:row (:value "p1") :label "3.1"))))))
+
+(ert-deftest agent-repl-test-input-edit-entry-saves-the-draft-to-history ()
+  "The composer's contents are saved to its history before the entry fills it."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-edit-stubs
+      ;; Arrange
+      (agent-repl-test-input--type "my draft")
+      (let (saved)
+        (cl-letf (((symbol-function 'agent-repl--input-save-to-history)
+                   (lambda (ws) (push (list ws (buffer-string)) saved))))
+          ;; Act
+          (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes"))
+        ;; Assert
+        (should (equal saved '(("ws-one" "my draft"))))))))
+
+(ert-deftest agent-repl-test-input-edit-entry-focuses-the-composer-and-says-what-ret-does ()
+  "The keyboard goes to the composer, and the flash says RET resends the prompt."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-edit-stubs
+      ;; Act
+      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes")
+      ;; Assert
+      (should (equal (list focused (car flashed))
+                     '(("ws-one") "editing entry 3.1: RET resends the prompt with it"))))))
+
+(ert-deftest agent-repl-test-input-edit-entry-without-a-composer-changes-nothing ()
+  "A workspace with no composer has nothing to fill: recorded at WARN."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-edit-stubs
+      (let (warned)
+        (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
+                  ((symbol-function 'agent-repl--warn)
+                   (agent-repl-test--record-into warned)))
+          ;; Act
+          (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes"))
+        ;; Assert
+        (should (and (string-match-p "elisp.input.edit-entry-no-composer" (car warned)) (null focused)))))))
+
+(ert-deftest agent-repl-test-input-resend-is-nil-for-an-empty-composer ()
+  "With nothing to send, RET only rolls back."
+  (agent-repl-test-input--with
+    ;; Act / Assert
+    (should-not (agent-repl--input-resend "ws-one"))))
+
+(ert-deftest agent-repl-test-input-resend-sends-the-composer-whole ()
+  "With no entry being edited, the composer's words are resent whole."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "new words")
+    ;; Act
+    (let ((resend (agent-repl--input-resend "ws-one")))
+      ;; Assert
+      (should (equal (list (plist-get resend :raw) (plist-get (plist-get resend :edit) :arm) (plist-get resend :origin))
+                     '("new words" :whole :user-sent))))))
+
+(ert-deftest agent-repl-test-input-resend-edits-the-entry-the-composer-holds ()
+  "With an entry being edited, the resend edits that entry of that prompt."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-edit-stubs
+      ;; Arrange
+      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes")
+      (agent-repl-test-input--type "no, the other one")
+      ;; Act
+      (let ((edit (plist-get (agent-repl--input-resend "ws-one") :edit)))
+        ;; Assert
+        (should (equal edit '(:arm :entry :value (:row (:value "p1") :label "3.1" :text "no, the other one"))))))))
+
+;; An image in the composer makes an entry edit whole: an entry carries only words.
+(ert-deftest agent-repl-test-input-resend-with-an-image-goes-whole ()
+  "An entry being edited with an image beside its words is resent whole, images in place."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-edit-stubs
+      ;; Arrange
+      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes")
+      (agent-repl-test-input--compose "look " '("/tmp/a.png"))
+      ;; Act
+      (let ((edit (plist-get (agent-repl--input-resend "ws-one") :edit)))
+        ;; Assert
+        (should (equal (plist-get edit :arm) :whole))
+        (should (equal (plist-get (plist-get (plist-get (plist-get edit :value) :said) :content) :blocks)
+                       (list (agent-repl-test-input--words-block "look ")
+                             (agent-repl-test-input--image-block "/tmp/a.png"))))))))
+
+(ert-deftest agent-repl-test-input-resend-refuses-a-missing-image ()
+  "A composer holding an image whose file is gone resends nothing, as a send refuses."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--gone '("/tmp/gone.png"))
+    (agent-repl-test-input--compose "look " '("/tmp/gone.png"))
+    (let (recorded)
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (agent-repl-test--record-into recorded)))
+        ;; Act / Assert
+        (should-error (agent-repl--input-resend "ws-one") :type 'user-error))
+      (should (member "elisp.input.send-refused-missing-images ws=ws-one paths=(\"/tmp/gone.png\")"
+                      recorded)))))
+
+(ert-deftest agent-repl-test-input-resend-mints-a-key-each-time ()
+  "Every resend carries a fresh idempotency key."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "words")
+    ;; Act / Assert
+    (should-not (equal (plist-get (agent-repl--input-resend "ws-one") :key)
+                       (plist-get (agent-repl--input-resend "ws-one") :key)))))
+
+(ert-deftest agent-repl-test-input-selection-return-resends-the-composer-to-a-selected-prompt ()
+  "`RET' on a selected prompt with words in the composer rolls back and resends them."
+  (agent-repl-test-input--with-host-selection :prompt "a prompt"
+    ;; Arrange
+    (agent-repl-test-input--type "the new words")
+    (let (rolled)
+      (cl-letf (((symbol-function 'agent-repl--input-rollback)
+                 (lambda (ws files &optional prompt resend) (push (list ws files prompt (plist-get resend :raw)) rolled))))
+        ;; Act
+        (agent-repl-input-selection-return))
+      ;; Assert
+      (should (equal rolled '(("ws-one" :keep-files nil "the new words")))))))
+
+(ert-deftest agent-repl-test-input-a-send-ends-the-entry-edit ()
+  "A send ends the entry edit: the composer's words went out."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-edit-stubs
+      ;; Arrange
+      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes")
+      ;; Act
+      (agent-repl--input-optimistic-clear "ws-one" "yes")
+      ;; Assert
+      (should-not (agent-repl-test-input--editing-entry)))))
+
+(ert-deftest agent-repl-test-input-a-refusals-restore-brings-the-entry-edit-back ()
+  "A refused send restores the entry edit with the composer's words."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-edit-stubs
+      ;; Arrange
+      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes")
+      (let ((snapshot (agent-repl--input-optimistic-clear "ws-one" "yes")))
+        ;; Act
+        (agent-repl--input-restore "ws-one" snapshot))
+      ;; Assert
+      (should (equal (agent-repl-test-input--editing-entry) '(:row (:value "p1") :label "3.1"))))))
+
+(defun agent-repl-test-input--resend-of (text)
+  "A whole resend of TEXT, as `agent-repl--input-resend' builds it."
+  (list :raw text :said (agent-repl--input-said (list text)) :key "k-resend" :origin :user-sent
+        :edit (list :arm :whole :value (list :said (agent-repl--input-said (list text))))))
+
+(defun agent-repl-test-input--resent (answer)
+  "A RollBack success whose resend answered ANSWER."
+  (list :response (list :arm :success
+                        :value (list :prompt (agent-repl-test-input--said) :resend answer))))
+
+(ert-deftest agent-repl-test-input-rollback-resend-rides-the-request ()
+  "A confirmed rollback with a resend sends it with its key, origin and edit."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--resent '(:arm :success :value (:arm :turn :value (:turn (:value "t2")))))
+    ;; Arrange
+    (agent-repl-test-input--type "new words")
+    ;; Act
+    (agent-repl--input-rollback "ws-one" :keep-files nil (agent-repl-test-input--resend-of "new words"))
+    ;; Assert
+    (should (equal (plist-get (agent-repl-test-input--roll-back-sent) :resend)
+                   (list :idempotency-key "k-resend" :origin :user-sent
+                         :edit (list :arm :whole :value (list :said (agent-repl--input-said (list "new words")))))))))
+
+(ert-deftest agent-repl-test-input-rollback-resent-clears-the-composer ()
+  "The resend's words left the composer, so an accepted resend leaves it empty."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--resent '(:arm :success :value (:arm :turn :value (:turn (:value "t2")))))
+    ;; Arrange
+    (agent-repl-test-input--type "new words")
+    ;; Act
+    (agent-repl--input-rollback "ws-one" :keep-files nil (agent-repl-test-input--resend-of "new words"))
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) ""))))
+
+(ert-deftest agent-repl-test-input-rollback-refused-restores-the-resend-to-the-composer ()
+  "A refused rollback sent nothing, so the composer gets its words back."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--refusal :entry-not-found '(:label "3.1"))
+    ;; Arrange
+    (agent-repl-test-input--type "new words")
+    ;; Act
+    (agent-repl--input-rollback "ws-one" :keep-files nil (agent-repl-test-input--resend-of "new words"))
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) "new words"))))
+
+(ert-deftest agent-repl-test-input-rollback-failure-restores-the-resend-to-the-composer ()
+  "A rollback the daemon never answered sent nothing, so the composer gets its words back."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (list :failure '(:kind :transport :message "gone"))
+    ;; Arrange
+    (agent-repl-test-input--type "new words")
+    ;; Act
+    (agent-repl--input-rollback "ws-one" :keep-files nil (agent-repl-test-input--resend-of "new words"))
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) "new words"))))
+
+(ert-deftest agent-repl-test-input-rollback-resend-refused-restores-the-composer ()
+  "A resend the daemon refused did not land, so the composer gets its words back."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (agent-repl-test-input--resent '(:arm :error :value (:reason (:arm :no-session :value nil))))
+    ;; Arrange
+    (agent-repl-test-input--type "new words")
+    ;; Act
+    (agent-repl--input-rollback "ws-one" :keep-files nil (agent-repl-test-input--resend-of "new words"))
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) "new words"))))
+
+(ert-deftest agent-repl-test-input-rollback-resend-is-not-refilled-with-the-rolled-back-prompt ()
+  "An accepted resend leaves the rolled-back prompt out of the composer."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
+      (list :response (list :arm :success
+                            :value (list :prompt (agent-repl-test-input--said (agent-repl-test-input--text-block "old words"))
+                                         :resend '(:arm :success :value (:arm :turn :value (:turn (:value "t2")))))))
+    ;; Arrange
+    (agent-repl-test-input--type "new words")
+    ;; Act
+    (agent-repl--input-rollback "ws-one" :keep-files nil (agent-repl-test-input--resend-of "new words"))
+    ;; Assert
+    (should-not (string-match-p "old words" (agent-repl-test-input--composer-text)))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-names-a-whole-resend ()
+  "The confirmation says the composer's words are sent in the prompt's place."
+  (should (string-match-p "The composer's words are sent in its place."
+                          (agent-repl--input-rollback-confirmation
+                           (agent-repl-test-input--plan) (agent-repl-test-input--resend-of "x")))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-names-the-edited-entry ()
+  "The confirmation names the entry an entry resend edits."
+  (should (string-match-p "with entry 3.1 as the composer holds it"
+                          (agent-repl--input-rollback-confirmation
+                           (agent-repl-test-input--plan)
+                           (list :edit '(:arm :entry :value (:row (:value "p1") :label "3.1" :text "x")))))))
+
+(ert-deftest agent-repl-test-input-rollback-refusal-names-an-entry-not-found ()
+  "An `entry_not_found' refusal is drawn in plain words."
+  (should (equal (agent-repl--input-rollback-refusal-text '(:arm :entry-not-found :value (:label "3.1")))
+                 "rollback: the edited entry is not one the selected prompt holds; click the entry again")))

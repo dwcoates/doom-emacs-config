@@ -255,7 +255,7 @@ func bubbleMarkdown(row *frontendv1.FeedRow) (string, bool) {
 		if resp.GetNotice() != nil || resp.GetSuccess() == nil {
 			return "", false
 		}
-		return resp.GetSuccess().GetProse().GetMarkdown(), true
+		return resp.GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(), true
 	}
 	return "", false
 }
@@ -297,7 +297,7 @@ func userPromptTexts(prompt *frontendv1.FeedUserPrompt) []string {
 	var out []string
 	for _, block := range prompt.GetSuccess().GetBody().GetBlocks() {
 		if text := block.GetText(); text != nil {
-			out = append(out, text.GetText())
+			out = append(out, text.GetProse().GetSource().GetMarkdown())
 		}
 	}
 	return out
@@ -308,7 +308,7 @@ func agentPromptTexts(prompt *frontendv1.FeedAgentPrompt) []string {
 	var out []string
 	for _, block := range prompt.GetBody().GetBlocks() {
 		if text := block.GetText(); text != nil {
-			out = append(out, text.GetText())
+			out = append(out, text.GetProse().GetSource().GetMarkdown())
 		}
 	}
 	return out

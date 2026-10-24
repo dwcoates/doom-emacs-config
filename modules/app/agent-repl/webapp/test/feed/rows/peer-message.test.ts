@@ -20,12 +20,13 @@ import {
   BUBBLE_VARIANT_ATTRIBUTE,
 } from "../../../src/bubble/draw.js";
 import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../../tree-layout.js";
+import { servedProse } from "../../prose.js";
 
 /** A peer message from the workspace SENDER, with the given body. */
 function peer(sender: string, body: string) {
   return create(FeedPeerMessageSchema, {
     from: { name: { text: sender }, sender: { case: "workspace", value: {} } },
-    body,
+    prose: servedProse(body),
   });
 }
 
@@ -79,13 +80,13 @@ describe("drawFeedPeerMessage: its spec", () => {
     ["an unnamed subagent", { case: "agent" as const, value: { identity: { case: "identified" as const, value: {} } } }],
   ])("draws %s's name the same way", (_label, sender) => {
     const el = drawFeedPeerMessage(
-      create(FeedPeerMessageSchema, { from: { name: { text: "desktop-session-9f" }, sender }, body: "hi" }),
+      create(FeedPeerMessageSchema, { from: { name: { text: "desktop-session-9f" }, sender }, prose: servedProse("hi") }),
     );
     expect(el.querySelector(`.${PEER_NAME_CLASS}`)?.textContent).toBe("desktop-session-9f");
   });
 
   it("refuses a message with no sender header", () => {
-    expect(() => drawFeedPeerMessage(create(FeedPeerMessageSchema, { body: "hi" }))).toThrow(MalformedView);
+    expect(() => drawFeedPeerMessage(create(FeedPeerMessageSchema, { prose: servedProse("hi") }))).toThrow(MalformedView);
   });
 
   it("carries no private toggle of its own", () => {

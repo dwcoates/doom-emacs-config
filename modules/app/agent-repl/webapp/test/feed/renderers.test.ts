@@ -42,6 +42,7 @@ import type { RowRenderers } from "../../src/feed/renderers.js";
 import { orderFor } from "../feed-order.js";
 import { filesUnder } from "../files-under.js";
 import renderersSource from "../../src/feed/renderers.ts?raw";
+import { plainProse } from "../prose.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -184,7 +185,7 @@ describe("arrangeSubfeedRows", () => {
         value: {
           unit: {
             case: "response",
-            value: { result: { case: "success", value: { prose: { markdown: "hi" } } } },
+            value: { result: { case: "success", value: { prose: { prose: plainProse("hi") } } } },
           },
         },
       },

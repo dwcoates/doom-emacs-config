@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!web-fetch-redirect"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!web-fetch-redirect"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!web-fetch-redirect"
+                    }
+                  }
                 }
               }
             ]
@@ -65,7 +76,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The fetch was redirected."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The fetch was redirected."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The fetch was redirected."
+                }
+              }
             }
           },
           "usage": {

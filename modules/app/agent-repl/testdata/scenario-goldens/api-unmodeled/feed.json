@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!api-unmodeled"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!api-unmodeled"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!api-unmodeled"
+                    }
+                  }
                 }
               }
             ]

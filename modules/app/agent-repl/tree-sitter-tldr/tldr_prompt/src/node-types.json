@@ -1,0 +1,235 @@
+[
+  {
+    "type": "branch",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "label",
+          "named": true
+        },
+        {
+          "type": "prefix",
+          "named": true
+        },
+        {
+          "type": "text",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "continuation",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "rails",
+          "named": true
+        },
+        {
+          "type": "text",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "document",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "preamble",
+          "named": true
+        },
+        {
+          "type": "section",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "fence",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "fence_close",
+          "named": true
+        },
+        {
+          "type": "fence_line",
+          "named": true
+        },
+        {
+          "type": "fence_open",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "heading",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "label",
+          "named": true
+        },
+        {
+          "type": "marker",
+          "named": true
+        },
+        {
+          "type": "separator",
+          "named": true
+        },
+        {
+          "type": "text",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "preamble",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "blank",
+          "named": true
+        },
+        {
+          "type": "branch",
+          "named": true
+        },
+        {
+          "type": "continuation",
+          "named": true
+        },
+        {
+          "type": "fence",
+          "named": true
+        },
+        {
+          "type": "prose",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "prose",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "text",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "section",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "blank",
+          "named": true
+        },
+        {
+          "type": "branch",
+          "named": true
+        },
+        {
+          "type": "continuation",
+          "named": true
+        },
+        {
+          "type": "fence",
+          "named": true
+        },
+        {
+          "type": "heading",
+          "named": true
+        },
+        {
+          "type": "prose",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "blank",
+    "named": true
+  },
+  {
+    "type": "fence_close",
+    "named": true
+  },
+  {
+    "type": "fence_line",
+    "named": true
+  },
+  {
+    "type": "fence_open",
+    "named": true
+  },
+  {
+    "type": "label",
+    "named": true
+  },
+  {
+    "type": "marker",
+    "named": true
+  },
+  {
+    "type": "prefix",
+    "named": true
+  },
+  {
+    "type": "rails",
+    "named": true
+  },
+  {
+    "type": "separator",
+    "named": true
+  },
+  {
+    "type": "text",
+    "named": true
+  }
+]

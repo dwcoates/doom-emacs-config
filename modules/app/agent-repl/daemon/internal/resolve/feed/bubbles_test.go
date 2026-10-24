@@ -87,8 +87,8 @@ func TestTheEnterAndExitCoalesceOntoOneBubble(t *testing.T) {
 	}
 	_ = entered
 	planned := h.planBubble().GetPlanned()
-	if planned.GetProse().GetMarkdown() != "## the plan" {
-		t.Fatalf("plan = %q", planned.GetProse().GetMarkdown())
+	if planned.GetProse().GetProse().GetSource().GetMarkdown() != "## the plan" {
+		t.Fatalf("plan = %q", planned.GetProse().GetProse().GetSource().GetMarkdown())
 	}
 	if planned.GetEdit().GetPath() != path {
 		t.Fatalf("edit target = %q, want the vendor's named file", planned.GetEdit().GetPath())
@@ -214,7 +214,7 @@ func TestASettledEpisodeReDeliveredStaysPlanned(t *testing.T) {
 	})
 
 	// Assert: the presented plan stands; it does not go back to planning.
-	if h.planBubble().GetPlanned().GetProse().GetMarkdown() != "## the plan" {
+	if h.planBubble().GetPlanned().GetProse().GetProse().GetSource().GetMarkdown() != "## the plan" {
 		t.Fatalf("state = %T, want the planned bubble to stand", h.planBubble().GetState())
 	}
 }

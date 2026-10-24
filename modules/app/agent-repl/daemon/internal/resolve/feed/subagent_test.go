@@ -1187,7 +1187,7 @@ func TestASpawnsCommissionDrawsOnTheSubagentsOwnFeed(t *testing.T) {
 		t.Fatalf("sub-feed rows = %+v, want the commission", h.rows(feedid.Feed{Agent: created}))
 	}
 	blocks := row.GetAgentPrompt().GetBody().GetBlocks()
-	if len(blocks) != 1 || blocks[0].GetText().GetText() != "go and look" {
+	if len(blocks) != 1 || blocks[0].GetText().GetProse().GetSource().GetMarkdown() != "go and look" {
 		t.Fatalf("commission body = %+v, want the instruction verbatim", blocks)
 	}
 }

@@ -1653,7 +1653,7 @@ func TestAFailedTurnKeepsTheProseItHadReached(t *testing.T) {
 
 	// Assert.
 	responses := h.responseRows()
-	if len(responses) != 1 || responses[0].GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() != "Working on it…" {
+	if len(responses) != 1 || responses[0].GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() != "Working on it…" {
 		t.Fatalf("response rows = %v, want exactly the answer the turn reached before it failed", responses)
 	}
 }
@@ -1672,7 +1672,7 @@ func TestAnInterruptedTurnKeepsTheProseItHadReached(t *testing.T) {
 
 	// Assert.
 	responses := h.responseRows()
-	if len(responses) != 1 || responses[0].GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() != "Working on it…" {
+	if len(responses) != 1 || responses[0].GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() != "Working on it…" {
 		t.Fatalf("response rows = %v, want exactly the answer the turn reached before it was stopped", responses)
 	}
 }

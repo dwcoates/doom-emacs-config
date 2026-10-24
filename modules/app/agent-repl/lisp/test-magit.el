@@ -389,7 +389,7 @@ directories need not exist."
                   ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/nowhere"))
                   ((symbol-function 'window-parameter) (lambda (_w _p) nil))
                   ((symbol-function 'agent-repl--error)
-                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                   (agent-repl-test--record-into logged))
                   ((symbol-function 'magit-status-setup-buffer)
                    (lambda (&rest _) (cl-incf magit-calls))))
           (should-error (agent-repl-magit-status-main-worktree) :type 'user-error)
@@ -653,7 +653,7 @@ recorded `agent-repl--info' lines."
                    ((symbol-function 'magit-section-update-highlight)
                     (lambda (&rest _) (push (list :highlight) calls)))
                    ((symbol-function 'agent-repl--info)
-                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+                    (agent-repl-test--record-into infos)))
            ,@body)
        (kill-buffer log-buffer))))
 
@@ -955,9 +955,9 @@ current, as magit's does when it restores a configuration."
                    ((symbol-function '+magit/quit-all)
                     (lambda () (push (list :quit-all (current-buffer)) calls)))
                    ((symbol-function 'agent-repl--info)
-                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos)))
+                    (agent-repl-test--record-into infos))
                    ((symbol-function 'agent-repl--error)
-                    (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                    (agent-repl-test--record-into errors)))
            (with-current-buffer status
              (setq major-mode ,mode
                    default-directory "/repo/")

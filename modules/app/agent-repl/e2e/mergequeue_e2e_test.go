@@ -181,7 +181,7 @@ func mqOpenFeedRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, feed *
 func mqFeedRowText(row *frontendv1.FeedRow) string {
 	for _, b := range row.GetUserPrompt().GetSuccess().GetBody().GetBlocks() {
 		if t := b.GetText(); t != nil {
-			return t.GetText()
+			return t.GetProse().GetSource().GetMarkdown()
 		}
 	}
 	return ""

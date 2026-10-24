@@ -65,6 +65,7 @@
  * markdown and a half-typed construct (`**`, an opening fence) is never drawn
  * as its raw syntax. Both attributes count rendered characters.
  */
+import type { ParsedProse } from "../../../../proto/gen/ts/frontend/v1/prose_pb";
 import { cssString, fitsReserve, reserveLabels, reserveLabelsCss } from "../../width-reserve.js";
 import type {
   FeedResponse,
@@ -90,6 +91,8 @@ import {
 import { formatAge } from "../../duration.js";
 import {
   markdownSlot,
+  proseCharacters,
+  proseSource,
   paintGeneration,
   revealSlot,
   slotText,
@@ -106,6 +109,7 @@ import type { RowContext } from "./context.js";
 import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 import { easeIntoLook, readBubbleLook } from "../../bubble/collapse-motion.js";
 import { drawOutcomeCard } from "../marker.js";
+import { linkAnswers } from "../entries.js";
 
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";
@@ -164,7 +168,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const result = requireCase(u.result, `${path}.result`);
   // A VENDOR NOTICE IS NOT THE AGENT'S PROSE, so it is never a bubble: it is
   // the notice's outcome card, the drawing a fault ending's notices take.
-  if (u.notice !== undefined) return drawFeedResponseNotice(u.notice, result.value.prose?.markdown ?? "", rc, `${path}.notice`);
+  if (u.notice !== undefined) return drawFeedResponseNotice(u.notice, result.value.prose?.prose === undefined ? "" : proseSource(result.value.prose.prose), rc, `${path}.notice`);
 
   // THE THINKING MARKER RIDES EVERY STATE. It is a FIELD, not an arm: whether
   // the prose is intermediate reasoning is orthogonal to whether it is still
@@ -218,22 +222,22 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // THE SETTLED WHOLE TYPES OUT TOO: its unshown text is typed out at the
   // same pace as the rest of the block rather than appearing at once. A draw
   // with no pace (a replay) and the broken arm are drawn whole.
-  let markdown: string;
+  let served: ParsedProse;
   let pace: RevealPace | undefined;
   switch (result.case) {
     case "update":
-      markdown = drawFeedResponseProse(
+      served = drawFeedResponseProse(
         requireMessage(result.value.prose, `${path}.update.prose`),
         `${path}.update.prose`,
       );
       pace = revealPaceOf(result.value.revealPace, `${path}.update.reveal_pace`);
       break;
     case "success":
-      markdown = drawFeedResponseSuccess(result.value, `${path}.success`);
+      served = drawFeedResponseSuccess(result.value, `${path}.success`);
       pace = revealPaceOf(result.value.revealPace, `${path}.success.reveal_pace`);
       break;
     case "error":
-      markdown = drawFeedResponseError(result.value, `${path}.error`);
+      served = drawFeedResponseError(result.value, `${path}.error`);
       pace = undefined;
       break;
   }
@@ -246,7 +250,10 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     rc.previous !== undefined && isInterimResponse(u) && !rc.previous.classList.contains(INTERIM_RESPONSE_CLASS)
       ? readBubbleLook(rc.previous)
       : undefined;
-  const prose = markdownSlot(RESPONSE_PROSE_CLASS, markdown);
+  // A LABEL A LATER PROMPT ANSWERS IS A LINK to that prompt, restated on every
+  // paint of the prose (entries.ts).
+  const answers = u.answers;
+  const prose = markdownSlot(RESPONSE_PROSE_CLASS, served, answers.length === 0 ? undefined : (rendered) => linkAnswers(rendered, answers));
 
   // A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user
   // owns the scroll). The daemon re-pushes the whole row on every fragment of an
@@ -286,7 +293,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       operation: "feed.cards.response.update",
       context: {
         path: `${path}.update`,
-        length: markdown.length,
+        length: proseCharacters(served),
         resumed,
         in_place: bubble === rc.previous,
         reveal_pace: pace === undefined ? null : `${pace.minCps}-${pace.maxCps}/${pace.bankLimitSeconds}s`,
@@ -301,7 +308,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   } else {
     showWhole(bubble, body, slot);
   }
-  const characters = markdown.length;
+  const characters = proseCharacters(served);
   recordDraw(u, rc, result.case, characters);
   return bubble;
 }
@@ -410,7 +417,7 @@ function recordDraw(
 }
 
 /** The settled state: the whole markdown. */
-export function drawFeedResponseSuccess(u: FeedResponseSuccess, path: string): string {
+export function drawFeedResponseSuccess(u: FeedResponseSuccess, path: string): ParsedProse {
   log.debug("drawing a settled response", {
     operation: "feed.cards.response.success",
     context: { path },
@@ -419,7 +426,7 @@ export function drawFeedResponseSuccess(u: FeedResponseSuccess, path: string): s
 }
 
 /** The broken state: the partial markdown, kept on screen. */
-export function drawFeedResponseError(u: FeedResponseError, path: string): string {
+export function drawFeedResponseError(u: FeedResponseError, path: string): ParsedProse {
   log.debug("drawing a response cut short", {
     operation: "feed.cards.response.error",
     context: { path },
@@ -428,12 +435,13 @@ export function drawFeedResponseError(u: FeedResponseError, path: string): strin
 }
 
 /** The bubble's markdown element: the source, for the prose renderer. */
-export function drawFeedResponseProse(u: FeedResponseProse, path: string): string {
+export function drawFeedResponseProse(u: FeedResponseProse, path: string): ParsedProse {
+  const prose = requireMessage(u.prose, `${path}.prose`);
   log.debug("reading a response's prose", {
     operation: "feed.cards.response.prose",
-    context: { path, length: u.markdown.length },
+    context: { path, length: proseCharacters(prose) },
   });
-  return u.markdown;
+  return prose;
 }
 
 /**

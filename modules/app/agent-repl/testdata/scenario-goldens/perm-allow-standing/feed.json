@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!perm-allow-standing"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!perm-allow-standing"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!perm-allow-standing"
+                    }
+                  }
                 }
               }
             ]
@@ -105,7 +116,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Ran the command with 0 standing rule(s)."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Ran the command with 0 standing rule(s)."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Ran the command with 0 standing rule(s)."
+                }
+              }
             }
           },
           "usage": {

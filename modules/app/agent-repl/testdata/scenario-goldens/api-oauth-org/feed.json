@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!api-oauth-org"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!api-oauth-org"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!api-oauth-org"
+                    }
+                  }
                 }
               }
             ]

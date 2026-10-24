@@ -74,7 +74,34 @@ message SelectFeedRowRequest {
     // `prompt`) is not a click, and pushes
     // frontend.v1.FeedSelectionRowViewportCenter.
     SelectFeedRowBubble bubble = 6;
+    // The reader clicked a response's label a later prompt answers
+    // (frontend.v1.FeedResponseAnswer): select that prompt, CENTERED, and
+    // name the entry the webapp flashes in it
+    // (frontend.v1.FeedSelectionRowViewportReveal). The prompt is elsewhere
+    // in the feed, so unlike a bubble click this one moves the feed.
+    SelectFeedRowAnswer answer = 8;
+    // The reader clicked an entry of a prompt: select that prompt as a click
+    // does (frontend.v1.FeedSelectionRowViewportHold), and tell Emacs to fill
+    // the composer with the entry (HostWorkspacePromptEntryClicked), so the
+    // next send rolls the prompt back and resends it with that entry edited.
+    SelectFeedRowEntry entry = 9;
   }
+}
+
+// The prompt a response's linked label names, and the label.
+message SelectFeedRowAnswer {
+  // The answering prompt's row, as FeedResponseAnswer.prompt names it.
+  frontend.v1.FeedId row = 1;
+  // The label the reader clicked, whose entry the prompt answers it with.
+  string label = 2;
+}
+
+// The prompt entry the reader clicked.
+message SelectFeedRowEntry {
+  // The prompt's row.
+  frontend.v1.FeedId row = 1;
+  // The entry's label, as frontend.v1.ProseEntry carries it.
+  string label = 2;
 }
 
 // The bubble a click names, echoed from the FeedRow.id the webview drew.

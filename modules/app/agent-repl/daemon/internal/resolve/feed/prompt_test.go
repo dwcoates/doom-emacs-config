@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agent-repld/internal/prose"
 	"context"
 	"fmt"
 	"go/ast"
@@ -186,7 +187,7 @@ func TestTheDrawnPromptHasItsSentinelSpansStripped(t *testing.T) {
 	// Assert: the DRAWN text alone is stripped; the client never sniffs a
 	// sentinel, and the full text stays on the durable record elsewhere.
 	blocks := h.only(rootFeed()).GetUserPrompt().GetSuccess().GetBody().GetBlocks()
-	if got := blocks[0].GetText().GetText(); got != "fix the flaky test" {
+	if got := blocks[0].GetText().GetProse().GetSource().GetMarkdown(); got != "fix the flaky test" {
 		t.Fatalf("drawn text = %q, want the stripped text", got)
 	}
 }
@@ -336,12 +337,12 @@ func TestAnAgentAddressedPromptCarriesTheSameBodyAtBothEnds(t *testing.T) {
 	var senderBody, recipientBody string
 	for _, row := range h.rows(rootFeed()) {
 		if prompt := row.GetAgentPrompt(); prompt != nil {
-			senderBody = prompt.GetBody().GetBlocks()[0].GetText().GetText()
+			senderBody = prompt.GetBody().GetBlocks()[0].GetText().GetProse().GetSource().GetMarkdown()
 		}
 	}
 	for _, row := range h.rows(feedid.Feed{Agent: created}) {
 		if prompt := row.GetAgentPrompt(); prompt != nil {
-			recipientBody = prompt.GetBody().GetBlocks()[0].GetText().GetText()
+			recipientBody = prompt.GetBody().GetBlocks()[0].GetText().GetProse().GetSource().GetMarkdown()
 		}
 	}
 	if senderBody != "also check the shim" || recipientBody != senderBody {
@@ -457,7 +458,7 @@ func TestAPromptReServedOnItsTurnWithNewWordsRedrawsTheOneBubble(t *testing.T) {
 		t.Fatalf("user-prompt rows = %d, want the one bubble redrawn", len(rows))
 	}
 	blocks := rows[0].GetUserPrompt().GetSuccess().GetBody().GetBlocks()
-	if len(blocks) != 1 || blocks[0].GetText().GetText() != "is that not the case? it does send some" {
+	if len(blocks) != 1 || blocks[0].GetText().GetProse().GetSource().GetMarkdown() != "is that not the case? it does send some" {
 		t.Fatalf("bubble holds %v, want the re-sent version's words", blocks)
 	}
 }
@@ -913,7 +914,7 @@ func TestAQuotedPromptDrawsItsQuoteAsItsOwnBlock(t *testing.T) {
 	if got := blocks[0].GetQuote(); !proto.Equal(got, want) {
 		t.Errorf("first block's quote = %v, want %v", got, want)
 	}
-	if got := blocks[1].GetText().GetText(); got != "And its population?" {
+	if got := blocks[1].GetText().GetProse().GetSource().GetMarkdown(); got != "And its population?" {
 		t.Errorf("second block's text = %q, want the person's words", got)
 	}
 }
@@ -982,7 +983,7 @@ func TestAReplayedQuotedPromptStillDrawsItsQuoteApart(t *testing.T) {
 
 	// Assert.
 	blocks := h.only(rootFeed()).GetUserPrompt().GetSuccess().GetBody().GetBlocks()
-	if len(blocks) != 2 || blocks[0].GetQuote().GetQuoted() != "the quote" || blocks[1].GetText().GetText() != "And its population?" {
+	if len(blocks) != 2 || blocks[0].GetQuote().GetQuoted() != "the quote" || blocks[1].GetText().GetProse().GetSource().GetMarkdown() != "And its population?" {
 		t.Fatalf("replayed blocks = %v, want the quote then the words", blocks)
 	}
 }
@@ -1344,7 +1345,7 @@ func TestIsTurnPromptPicksOnlyThePromptsOfTheTurn(t *testing.T) {
 func TestPromptRowDrawsAnAgentSentPromptUnderItsHeader(t *testing.T) {
 	// Arrange
 	header := receivedFromWorkspace("parser-fix", true)
-	blocks := []*frontendv1.FeedUserPromptBlock{{Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: "hello"}}}}
+	blocks := []*frontendv1.FeedUserPromptBlock{{Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: prose.ParseForTest("hello")}}}}
 
 	// Act
 	row := PromptRow(conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, header, SaidText("hello"), blocks)
@@ -1384,5 +1385,22 @@ func TestPromptRowRefusesAHeaderThatDisagreesWithTheOrigin(t *testing.T) {
 			// Act
 			PromptRow(tt.origin, header, SaidText("hello"), nil)
 		})
+	}
+}
+
+// TestAPromptsTextIsDrawnWithItsEntries pins that a user prompt's text is read
+// as a prompt: an entry answering a label is drawn as its own entry block.
+func TestAPromptsTextIsDrawnWithItsEntries(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.promptWith("turn-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, textBlock("3.1 - yes, that"))
+
+	// Assert.
+	blocks := h.only(rootFeed()).GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	entry := blocks[0].GetText().GetProse().GetBlocks()[0].GetEntry()
+	if entry.GetLabel().GetText() != "3.1" || entry.GetText().GetMarkdown() != "yes, that" {
+		t.Fatalf("drawn text = %v, want the entry answering 3.1", blocks[0].GetText().GetProse())
 	}
 }

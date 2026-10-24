@@ -1,0 +1,18 @@
+{
+  "grammars": [
+    {
+      "name": "tldr",
+      "camelcase": "Tldr",
+      "scope": "source.tldr",
+      "path": ".",
+      "file-types": [
+        "tldr"
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "UNLICENSED",
+    "description": "The metaprompt's TLDR tree, as the webapp parsed it."
+  }
+}

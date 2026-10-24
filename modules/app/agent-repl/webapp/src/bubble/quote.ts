@@ -16,6 +16,7 @@
  * (`frontend.v1.FeedQuoteBlock`), and its HEADING shows folded too (owner
  * request, 2026-10-19): see `QUOTE_PARTS_CLASS`.
  */
+import type { ParsedProse } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import { markdownSlot } from "./body.js";
 import { expandedOnly } from "./expanded-only.js";
 
@@ -38,6 +39,6 @@ export const QUOTE_MARKER_CLASS = "prompt-quote-marker";
  * (the drawing kind's own hook) and `BUBBLE_QUOTE_CLASS`, drawn only while the
  * bubble is expanded.
  */
-export function quoteSlot(className: string, text: string): HTMLElement {
-  return expandedOnly(markdownSlot(`${className} ${BUBBLE_QUOTE_CLASS}`, text));
+export function quoteSlot(className: string, prose: ParsedProse): HTMLElement {
+  return expandedOnly(markdownSlot(`${className} ${BUBBLE_QUOTE_CLASS}`, prose));
 }

@@ -138,7 +138,7 @@ func TestDeliverMirrorsAReplysQuoteAsItsOwnBlock(t *testing.T) {
 	if got := blocks[0].GetQuote(); !proto.Equal(got, want) {
 		t.Fatalf("the mirrored quote = %v, want %v", got, want)
 	}
-	if got := blocks[1].GetText().GetText(); got != "and its population?" {
+	if got := blocks[1].GetText().GetProse().GetSource().GetMarkdown(); got != "and its population?" {
 		t.Fatalf("the mirrored words = %q, want the person's own", got)
 	}
 }
@@ -194,7 +194,7 @@ func TestDeliverStripsTheSentinelSpansFromTheMirror(t *testing.T) {
 		t.Fatalf("Submit: %v", err)
 	}
 	// Assert
-	drawn := h.feed.mirrored()[0].GetUserPrompt().GetSuccess().GetBody().GetBlocks()[0].GetText().GetText()
+	drawn := h.feed.mirrored()[0].GetUserPrompt().GetSuccess().GetBody().GetBlocks()[0].GetText().GetProse().GetSource().GetMarkdown()
 	if drawn != "user" {
 		t.Fatalf("drawn = %q, want the sentinel span stripped", drawn)
 	}

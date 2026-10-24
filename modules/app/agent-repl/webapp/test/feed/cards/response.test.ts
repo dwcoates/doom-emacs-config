@@ -65,6 +65,7 @@ import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import { fakePageSeen } from "../../page-seen-fake.js";
 import type { PageSeen } from "../../../src/page-seen.js";
 import { orderFor } from "../../feed-order.js";
+import { plainProse, servedProse, treeProse } from "../../prose.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -152,10 +153,12 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+const ANSWERED_TREE = "1 🔧 Did it\n├── 1.1 first\n└── 1.2 second";
+
 describe("the settled state", () => {
   it("renders the whole markdown", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "**done**" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("**done**") } } } }),
       rowContext(),
     );
     expect(el.querySelector(".bubble-body strong")?.textContent).toBe("done");
@@ -163,7 +166,7 @@ describe("the settled state", () => {
 
   it("carries the state arm", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "hi" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("hi") } } } }),
       rowContext(),
     );
     expect(el.getAttribute("data-state")).toBe("success");
@@ -171,7 +174,7 @@ describe("the settled state", () => {
 
   it("records the whole prose as shown, so a later push does not re-type it", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "hello" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("hello") } } } }),
       rowContext(),
     );
     expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe(renderedLength(el));
@@ -181,7 +184,7 @@ describe("the settled state", () => {
     const { uninstall } = installTreeLayout();
     try {
       const el = drawFeedResponse(
-        response({ result: { case: "success", value: { prose: { markdown: TREE } } } }),
+        response({ result: { case: "success", value: { prose: { prose: treeProse(TREE) } } } }),
         rowContext(),
       );
       mount(el);
@@ -195,7 +198,7 @@ describe("the settled state", () => {
 describe("the broken state", () => {
   it("keeps the prose that landed", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "error", value: { prose: { markdown: "half a thou" } } } }),
+      response({ result: { case: "error", value: { prose: { prose: plainProse("half a thou") } } } }),
       rowContext(),
     );
     expect(el.querySelector(".bubble-body")?.textContent).toContain("half a thou");
@@ -203,7 +206,7 @@ describe("the broken state", () => {
 
   it("marks the bubble as cut short", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "error", value: { prose: { markdown: "half" } } } }),
+      response({ result: { case: "error", value: { prose: { prose: plainProse("half") } } } }),
       rowContext(),
     );
     expect(el.classList.contains("response-cut-short")).toBe(true);
@@ -211,7 +214,7 @@ describe("the broken state", () => {
 
   it("draws the marker without a reason, which is the turn's to state", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "error", value: { prose: { markdown: "half" } } } }),
+      response({ result: { case: "error", value: { prose: { prose: plainProse("half") } } } }),
       rowContext(),
     );
     expect(el.querySelector(".response-cut-short-marker")?.textContent).toBe("cut short");
@@ -219,7 +222,7 @@ describe("the broken state", () => {
 
   it("offers the sign-in action inside the bubble when the daemon set it", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "error", value: { prose: { markdown: "Failed to authenticate." }, signIn: {} } } }),
+      response({ result: { case: "error", value: { prose: { prose: plainProse("Failed to authenticate.") }, signIn: {} } } }),
       rowContext(),
     );
     const action = el.querySelector(`.${RESPONSE_CUT_SHORT_ACTIONS_CLASS} [${SIGN_IN_ACTION_ATTRIBUTE}="${SIGN_IN_ACTION}"]`);
@@ -228,7 +231,7 @@ describe("the broken state", () => {
 
   it("offers no sign-in action when the daemon did not set it", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "error", value: { prose: { markdown: "half" } } } }),
+      response({ result: { case: "error", value: { prose: { prose: plainProse("half") } } } }),
       rowContext(),
     );
     expect(el.querySelector(`.${RESPONSE_CUT_SHORT_ACTIONS_CLASS}`)).toBeNull();
@@ -236,7 +239,7 @@ describe("the broken state", () => {
 
   it("opens the login overlay from the bubble's sign-in without the bubble taking the click", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "error", value: { prose: { markdown: "Failed to authenticate." }, signIn: {} } } }),
+      response({ result: { case: "error", value: { prose: { prose: plainProse("Failed to authenticate.") }, signIn: {} } } }),
       rowContext(),
     );
     const opened: HTMLElement[] = [];
@@ -253,7 +256,7 @@ describe("the broken state", () => {
 describe("the arriving state", () => {
   it("draws no arriving indicator: a streaming response shows its prose only", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "typing" }, revealPace: PACE } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("typing") }, revealPace: PACE } } }),
       rowContext(),
     );
     expect(el.querySelector(".response-arriving")).toBeNull();
@@ -262,7 +265,7 @@ describe("the arriving state", () => {
 
   it("shows nothing of a first-seen response before the first frame", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "hello world" }, revealPace: PACE } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("hello world") }, revealPace: PACE } } }),
       rowContext(),
     );
     expect(el.getAttribute(REVEALED_ATTRIBUTE)).toBe("0");
@@ -270,7 +273,7 @@ describe("the arriving state", () => {
 
   it("types the prose out as time passes", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "hello world" }, revealPace: PACE } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("hello world") }, revealPace: PACE } } }),
       rowContext(),
     );
     document.body.appendChild(el);
@@ -284,7 +287,7 @@ describe("the arriving state", () => {
     previous.setAttribute(REVEALED_ATTRIBUTE, "5");
     // Act
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "hello world" }, revealPace: PACE } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("hello world") }, revealPace: PACE } } }),
       rowContext(previous),
     );
     // Assert: the first paint already carries what was on screen.
@@ -295,7 +298,7 @@ describe("the arriving state", () => {
     // Arrange: prose long enough that the reveal is still behind when the
     // bubble is taken out of the document.
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "x".repeat(5000) }, revealPace: PACE } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("x".repeat(5000)) }, revealPace: PACE } } }),
       rowContext(),
     );
     document.body.appendChild(el);
@@ -319,7 +322,7 @@ describe("the daemon's reveal pace", () => {
 
   /** A paced bubble: MARKDOWN in ARM, at the thinking default pace. */
   function paced(arm: "update" | "success", markdown: string, revealPace = PACE): FeedResponse {
-    return response({ result: { case: arm, value: { prose: { markdown }, revealPace } } });
+    return response({ result: { case: arm, value: { prose: { prose: servedProse(markdown, { arriving: arm === "update" }) }, revealPace } } });
   }
 
   it("types an arriving bubble out at the maximum while the arrivals outrun it", () => {
@@ -364,7 +367,7 @@ describe("the daemon's reveal pace", () => {
   it("draws an unpaced arriving bubble whole at once: a replay", () => {
     // Arrange / Act
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "hello world" } } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("hello world") } } } }),
       rowContext(),
     );
     // Assert
@@ -374,7 +377,7 @@ describe("the daemon's reveal pace", () => {
   it("draws an unpaced settled bubble whole at once", () => {
     // Arrange / Act
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "hello world" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("hello world") } } } }),
       rowContext(previousAt(5)),
     );
     // Assert
@@ -407,7 +410,7 @@ describe("the usage stamp", () => {
     const el = drawFeedResponse(
       response({
         usage: { text: "2.1k", heat: { position: 0.5 } },
-        result: { case: arm, value: { prose: { markdown: "hi" } } },
+        result: { case: arm, value: { prose: { prose: plainProse("hi") } } },
       }),
       rowContext(),
     );
@@ -418,7 +421,7 @@ describe("the usage stamp", () => {
     const el = drawFeedResponse(
       response({
         usage: { text: "40k", heat: { position: 0.5 } },
-        result: { case: "success", value: { prose: { markdown: "hi" } } },
+        result: { case: "success", value: { prose: { prose: plainProse("hi") } } },
       }),
       rowContext(),
     );
@@ -432,7 +435,7 @@ describe("the usage stamp", () => {
       drawFeedResponse(
         response({
           usage: { text: "40k" },
-          result: { case: "success", value: { prose: { markdown: "hi" } } },
+          result: { case: "success", value: { prose: { prose: plainProse("hi") } } },
         }),
         rowContext(),
       ),
@@ -441,7 +444,7 @@ describe("the usage stamp", () => {
 
   it("draws no stamp at all when no usage has been observed", () => {
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "hi" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("hi") } } } }),
       rowContext(),
     );
     expect(el.querySelector(".usage-stamp")).toBeNull();
@@ -451,9 +454,9 @@ describe("the usage stamp", () => {
 describe("the sizing ghost's reserved labels", () => {
   const WITH_USAGE = {
     usage: { text: "2.1k", heat: { position: 0.5 } },
-    result: { case: "success", value: { prose: { markdown: "hi" } } },
+    result: { case: "success", value: { prose: { prose: plainProse("hi") } } },
   } as const;
-  const WITHOUT_USAGE = { result: { case: "success", value: { prose: { markdown: "hi" } } } } as const;
+  const WITHOUT_USAGE = { result: { case: "success", value: { prose: { prose: plainProse("hi") } } } } as const;
 
   it("joins every reserve label as one CSS string, one label per line", () => {
     // Arrange
@@ -507,7 +510,7 @@ describe("the usage corner's hover timestamp", () => {
   function settled(atMs: bigint) {
     return response({
       usage: { text: "2.1k", atMs, heat: { position: 0.5 } },
-      result: { case: "success", value: { prose: { markdown: "done" } } },
+      result: { case: "success", value: { prose: { prose: plainProse("done") } } },
     });
   }
 
@@ -590,7 +593,7 @@ describe("the usage corner's hover timestamp", () => {
     const el = drawFeedResponse(
       response({
         usage: { text: "2.1k", atMs: 0n, heat: { position: 0.5 } },
-        result: { case: "update", value: { prose: { markdown: "typing" } } },
+        result: { case: "update", value: { prose: { prose: plainProse("typing") } } },
       }),
       rowContext(),
     );
@@ -616,7 +619,7 @@ describe("the usage corner's hover timestamp", () => {
     const el = drawFeedResponse(
       response({
         usage: { text: "2.1k", atMs: 0n, heat: { position: 0.5 } },
-        result: { case: "update", value: { prose: { markdown: "typing" } } },
+        result: { case: "update", value: { prose: { prose: plainProse("typing") } } },
       }),
       rowContext(),
     );
@@ -648,7 +651,7 @@ describe("the usage corner's slider markup", () => {
   function withUsage(atMs: bigint) {
     return response({
       usage: { text: "12.4k", atMs, heat: { position: 0.5 } },
-      result: { case: "success", value: { prose: { markdown: "done" } } },
+      result: { case: "success", value: { prose: { prose: plainProse("done") } } },
     });
   }
 
@@ -900,7 +903,7 @@ describe("the usage corner's error paths", () => {
   function settled(atMs: bigint) {
     return response({
       usage: { text: "2.1k", atMs, heat: { position: 0.5 } },
-      result: { case: "success", value: { prose: { markdown: "done" } } },
+      result: { case: "success", value: { prose: { prose: plainProse("done") } } },
     });
   }
 
@@ -977,7 +980,7 @@ describe("the usage corner's first-line float", () => {
   function settled(atMs: bigint) {
     return response({
       usage: { text: "2.1k", atMs, heat: { position: 0.5 } },
-      result: { case: "success", value: { prose: { markdown: "done" } } },
+      result: { case: "success", value: { prose: { prose: plainProse("done") } } },
     });
   }
 
@@ -1070,7 +1073,7 @@ describe("a vendor notice draws as its outcome card", () => {
 
   it.each(STATES)("draws the card and no bubble in the %s state", (arm) => {
     const el = drawFeedResponse(
-      response({ notice: NOTICE, result: { case: arm as never, value: { prose: { markdown: "hi" } } as never } }),
+      response({ notice: NOTICE, result: { case: arm as never, value: { prose: { prose: plainProse("hi") } } as never } }),
       rowContext(),
     );
     expect([el.classList.contains(OUTCOME_CARD_CLASS), el.classList.contains("bubble")]).toEqual([true, false]);
@@ -1078,7 +1081,7 @@ describe("a vendor notice draws as its outcome card", () => {
 
   it.each(STATES)("draws the vendor's words verbatim as the face in the %s state", (arm) => {
     const el = drawFeedResponse(
-      response({ notice: NOTICE, result: { case: arm as never, value: { prose: { markdown: "You've hit your **limit**" } } as never } }),
+      response({ notice: NOTICE, result: { case: arm as never, value: { prose: { prose: plainProse("You've hit your **limit**") } } as never } }),
       rowContext(),
     );
     expect([...el.querySelectorAll(".outcome-card-said")].map((line) => line.textContent)).toEqual(["You've hit your **limit**"]);
@@ -1086,7 +1089,7 @@ describe("a vendor notice draws as its outcome card", () => {
 
   it("heads the card with the daemon's marker verbatim", () => {
     const el = drawFeedResponse(
-      response({ notice: NOTICE, result: { case: "success", value: { prose: { markdown: "hi" } } } }),
+      response({ notice: NOTICE, result: { case: "success", value: { prose: { prose: servedProse("hi") } } } }),
       rowContext(),
     );
     expect(el.querySelector(".outcome-card-head")?.textContent).toBe("◼vendor notice · allowance exhausted");
@@ -1094,7 +1097,7 @@ describe("a vendor notice draws as its outcome card", () => {
 
   it("draws a notice card that does not open: a notice has nothing behind it", () => {
     const el = drawFeedResponse(
-      response({ notice: NOTICE, result: { case: "success", value: { prose: { markdown: "hi" } } } }),
+      response({ notice: NOTICE, result: { case: "success", value: { prose: { prose: servedProse("hi") } } } }),
       rowContext(),
     );
     expect([el.classList.contains("tool-fold"), el.querySelector(".outcome-marker-expansion")]).toEqual([false, null]);
@@ -1102,13 +1105,13 @@ describe("a vendor notice draws as its outcome card", () => {
 
   it("refuses a notice with no marker", () => {
     expect(() =>
-      drawFeedResponse(response({ notice: {}, result: { case: "success", value: { prose: { markdown: "hi" } } } }), rowContext()),
+      drawFeedResponse(response({ notice: {}, result: { case: "success", value: { prose: { prose: servedProse("hi") } } } }), rowContext()),
     ).toThrow(MalformedView);
   });
 
   it.each(STATES)("draws an ordinary %s response as a bubble, no card", (arm) => {
     const el = drawFeedResponse(
-      response({ result: { case: arm as never, value: { prose: { markdown: "hi" } } as never } }),
+      response({ result: { case: arm as never, value: { prose: { prose: plainProse("hi") } } as never } }),
       rowContext(),
     );
     expect([el.classList.contains("bubble"), el.classList.contains(OUTCOME_CARD_CLASS)]).toEqual([true, false]);
@@ -1201,7 +1204,7 @@ describe("a host with no animation frames", () => {
     vi.stubGlobal("requestAnimationFrame", undefined);
     // Act
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "hello world" } } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("hello world") } } } }),
       rowContext(),
     );
     // Assert: the whole prose is on screen with no frame ever having run,
@@ -1217,7 +1220,7 @@ describe("a host with no animation frames", () => {
     vi.stubGlobal("requestAnimationFrame", undefined);
     // Act
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "typing" } } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("typing") } } } }),
       rowContext(),
     );
     // Assert — the whole prose is on screen and no indicator node was appended.
@@ -1248,7 +1251,7 @@ describe("the wrapped tree a settled response carries", () => {
     // Arrange
     const host = document.createElement("div");
     // Act — at 105 columns.
-    host.innerHTML = proseHtml(SHOWCASE_TREE, () => 105);
+    host.innerHTML = proseHtml(treeProse(SHOWCASE_TREE), () => 105);
     const prefixes = [...host.querySelectorAll(".mp-prefix")].map((el) => el.textContent ?? "");
     // Assert — 1.1 wrapped, and its continuation carries the ancestor rail plus
     // 1.1's own held-open child rail as REAL characters, so the wrap does not
@@ -1273,16 +1276,17 @@ describe("the wrapped tree a settled response carries", () => {
     ].join("\n");
     // Act
     const host = document.createElement("div");
-    host.innerHTML = proseHtml(markdown, () => 105);
+    host.innerHTML = proseHtml(servedProse(markdown), () => 105);
     // Assert — one tree, the code opaque (in a <pre><code>, `__name__` literal
-    // and never bolded), and 1.4 kept a tree line rather than spilled into
-    // generic markdown after the tree.
+    // and never bolded), and the last branch kept a tree line rather than
+    // spilled into generic markdown after the tree. The daemon labels each
+    // branch by its place, so the model's 1.4 is drawn as 1.3.
     const tree = host.querySelector(".mp-tree");
     expect(tree).not.toBeNull();
     expect(tree?.querySelector("pre code")).not.toBeNull();
     expect(host.querySelector("strong")).toBeNull();
     expect(host.textContent).toContain("__name__");
-    expect(host.textContent).toContain("1.4 Verified");
+    expect(host.textContent).toContain("1.3 Verified");
   });
 
   it("wraps a branch the model emitted with a stray leading space, no line overflows", () => {
@@ -1294,7 +1298,7 @@ describe("the wrapped tree a settled response carries", () => {
     ].join("\n");
     // Act — a width narrower than the branch text forces a wrap.
     const host = document.createElement("div");
-    host.innerHTML = proseHtml(tree, () => 60);
+    host.innerHTML = proseHtml(treeProse(tree), () => 60);
     // Assert — a tree rendered, and no rendered tree line exceeds the width.
     const lines = [...host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)")];
     expect(host.querySelector(".mp-tree")).not.toBeNull();
@@ -1307,8 +1311,8 @@ describe("the wrapped tree a settled response carries", () => {
     const narrow = document.createElement("div");
     const wide = document.createElement("div");
     // Act — the same tree at two widths, the mechanism a resize drives.
-    narrow.innerHTML = proseHtml(SHOWCASE_TREE, () => 40);
-    wide.innerHTML = proseHtml(SHOWCASE_TREE, () => 200);
+    narrow.innerHTML = proseHtml(treeProse(SHOWCASE_TREE), () => 40);
+    wide.innerHTML = proseHtml(treeProse(SHOWCASE_TREE), () => 200);
     // Assert
     const narrowLines = narrow.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length;
     const wideLines = wide.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length;
@@ -1321,11 +1325,11 @@ describe("the wrapped tree a settled response carries", () => {
     vi.stubGlobal("requestAnimationFrame", undefined);
     // Act
     const settled = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "success", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
       rowContext(),
     );
     const streaming = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "update", value: { prose: { prose: treeProse(SHOWCASE_TREE, { arriving: true }) } } } }),
       rowContext(),
     );
     mount(settled);
@@ -1336,10 +1340,38 @@ describe("the wrapped tree a settled response carries", () => {
     );
   });
 
+  it("links each label a later prompt answers to that prompt", () => {
+    // Arrange — the daemon says the prompt p2 answers 1.1.
+    const el = drawFeedResponse(
+      response({
+        result: { case: "success", value: { prose: { prose: treeProse(ANSWERED_TREE) } } },
+        answers: [{ label: "1.1", prompt: { value: "p2" } }],
+      }),
+      rowContext(),
+    );
+    // Act
+    mount(el);
+    // Assert
+    const linked = [...el.querySelectorAll(".mp-label-linked")].map((l) => [l.getAttribute("data-label"), l.getAttribute("data-answer-prompt")]);
+    expect(linked).toEqual([["1.1", "p2"]]);
+  });
+
+  it("links nothing in a response nothing answers", () => {
+    // Arrange
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { prose: treeProse(ANSWERED_TREE) } } } }),
+      rowContext(),
+    );
+    // Act
+    mount(el);
+    // Assert
+    expect([el.querySelector(".mp-label"), el.querySelector(".mp-label-linked")]).toEqual([expect.anything(), null]);
+  });
+
   it("does not pin a settled tree bubble to the cap; it shrinks to fit", () => {
     // Arrange / Act — a settled response that drew a metaprompt tree.
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "success", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
       rowContext(),
     );
     mount(el);
@@ -1353,7 +1385,7 @@ describe("the wrapped tree a settled response carries", () => {
   it("leaves a plain-prose bubble unpinned too, so a short answer may still shrink", () => {
     // Arrange / Act — prose with no tree.
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "**done**" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("**done**") } } } }),
       rowContext(),
     );
     // Assert — no full-cap pin: every response bubble is fit-content capped.
@@ -1364,7 +1396,7 @@ describe("the wrapped tree a settled response carries", () => {
   it("does not pin a cut-short (error) tree bubble to the cap", () => {
     // Arrange / Act — the error arm also paints through paintWhole.
     const el = drawFeedResponse(
-      response({ result: { case: "error", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "error", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
       rowContext(),
     );
     mount(el);
@@ -1379,7 +1411,7 @@ describe("the wrapped tree a settled response carries", () => {
     vi.stubGlobal("requestAnimationFrame", undefined);
     // Act
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "update", value: { prose: { prose: treeProse(SHOWCASE_TREE, { arriving: true }) } } } }),
       rowContext(),
     );
     mount(el);
@@ -1394,7 +1426,7 @@ describe("the wrapped tree a settled response carries", () => {
     const teardown = installStylesheet();
     try {
       const el = drawFeedResponse(
-        response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+        response({ result: { case: "success", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
         rowContext(),
       );
       document.body.appendChild(el);
@@ -1415,7 +1447,7 @@ describe("the wrapped tree a settled response carries", () => {
   it("subscribes a resize observer to the bubble's containing block", () => {
     // Arrange
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "success", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
       rowContext(),
     );
     // Act
@@ -1430,7 +1462,7 @@ describe("the wrapped tree a settled response carries", () => {
     // Arrange — the turn's answer, drawn uncapped (an interim response is
     // capped, and its has-more measurer observes the body).
     const el = drawFeedResponse(
-      response({ finalAnswer: true, result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
       rowContext(),
     );
     mount(el);
@@ -1445,7 +1477,7 @@ describe("the wrapped tree a settled response carries", () => {
   it("tears the containing block's observer down with the bubble", () => {
     // Arrange
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "success", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
       rowContext(),
     );
     const column = mount(el);
@@ -1470,7 +1502,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
   it("draws nothing of a tree while the bubble is detached", () => {
     // Arrange / Act
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "success", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
       rowContext(),
     );
     // Assert — no wrong-width tree was ever drawn.
@@ -1480,7 +1512,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
   it("draws the tree at the cap's budget the moment it is attached", () => {
     // Arrange
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "success", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
       rowContext(),
     );
     // Act
@@ -1500,7 +1532,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
       "└── 1.2 Another branch, also short enough to stand on one line.",
     ].join("\n");
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: tree } } } }),
+      response({ result: { case: "success", value: { prose: { prose: treeProse(tree) } } } }),
       rowContext(),
     );
     // Act
@@ -1513,7 +1545,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
     // Arrange
     vi.stubGlobal("requestAnimationFrame", undefined);
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "update", value: { prose: { prose: treeProse(SHOWCASE_TREE, { arriving: true }) } } } }),
       rowContext(),
     );
     expect(el.querySelector(".mp-tree")).toBeNull();
@@ -1526,7 +1558,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
   it("draws plain prose at once, detached, since it needs no width", () => {
     // Arrange / Act
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "**done**" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("**done**") } } } }),
       rowContext(),
     );
     // Assert
@@ -1536,7 +1568,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
   it("re-wraps when the containing block's width moves the budget", () => {
     // Arrange
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "success", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
       rowContext(),
     );
     const column = mount(el);
@@ -1553,7 +1585,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
   it("does not repaint when the column resizes without moving the budget", () => {
     // Arrange
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "success", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
       rowContext(),
     );
     const column = mount(el);
@@ -1568,7 +1600,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
   it("re-measures against the new containing block when the row is moved", () => {
     // Arrange
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "success", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
       rowContext(),
     );
     mount(el);
@@ -1583,7 +1615,7 @@ describe("a tree's first paint waits for the body to join the document", () => {
   it("follows the NEW containing block after a move", () => {
     // Arrange
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: SHOWCASE_TREE } } } }),
+      response({ result: { case: "success", value: { prose: { prose: treeProse(SHOWCASE_TREE) } } } }),
       rowContext(),
     );
     const first = mount(el);
@@ -1602,7 +1634,7 @@ describe("the record of the drawn response", () => {
     const capture = captureLogRecords();
     // Act
     drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "arriving" } } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("arriving") } } } }),
       rowContext(),
     );
     // Assert
@@ -1617,7 +1649,7 @@ describe("the record of the drawn response", () => {
     const previous = document.createElement("div");
     // Act
     drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "arriving still" } } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("arriving still") } } } }),
       rowContext(previous),
     );
     // Assert
@@ -1631,7 +1663,7 @@ describe("the record of the drawn response", () => {
     const previous = document.createElement("div");
     // Act
     drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "the answer" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("the answer") } } } }),
       rowContext(previous),
     );
     // Assert
@@ -1645,7 +1677,7 @@ describe("the record of the drawn response", () => {
     const previous = document.createElement("div");
     // Act
     drawFeedResponse(
-      response({ result: { case: "error", value: { prose: { markdown: "half an ans" } } } }),
+      response({ result: { case: "error", value: { prose: { prose: plainProse("half an ans") } } } }),
       rowContext(previous),
     );
     // Assert
@@ -1658,7 +1690,7 @@ describe("the record of the drawn response", () => {
     const capture = captureLogRecords();
     // Act
     drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "Here is what I found." } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("Here is what I found.") } } } }),
       rowContext(),
     );
     // Assert
@@ -1671,7 +1703,7 @@ describe("the record of the drawn response", () => {
     const capture = captureLogRecords();
     // Act
     drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "one block" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("one block") } } } }),
       rowContext(),
     );
     // Assert
@@ -1684,7 +1716,7 @@ describe("the record of the drawn response", () => {
     const capture = captureLogRecords();
     // Act
     drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "x" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("x") } } } }),
       rowContext(),
     );
     // Assert
@@ -1698,7 +1730,7 @@ describe("the record of the drawn response", () => {
     // Act — nothing is revealed on the first frame, and the record is about
     // what ARRIVED.
     drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "0123456789" } } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("0123456789") } } } }),
       rowContext(),
     );
     // Assert
@@ -1744,7 +1776,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
   it("ends the reveal byte-identical to the whole-render oracle", () => {
     // Arrange — a metaprompt tree, so the tree line-diff path is exercised too.
     const streamingEl = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: TREE } } } }),
+      response({ result: { case: "update", value: { prose: { prose: treeProse(TREE, { arriving: true }) } } } }),
       rowContext(),
     );
     document.body.appendChild(streamingEl);
@@ -1754,7 +1786,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     vi.advanceTimersByTime(5000);
     // The settled draw of the same text is the oracle: one settled paint.
     const settled = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: TREE } } } }),
+      response({ result: { case: "success", value: { prose: { prose: treeProse(TREE) } } } }),
       rowContext(),
     );
     mount(settled);
@@ -1768,7 +1800,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     // Arrange — a tree with long branches, so the reveal spends many frames
     // inside it and the leading root line settles well before the tail.
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE }, revealPace: PACE } } }),
+      response({ result: { case: "update", value: { prose: { prose: treeProse(SHOWCASE_TREE, { arriving: true }) }, revealPace: PACE } } }),
       rowContext(),
     );
     document.body.appendChild(el);
@@ -1799,7 +1831,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     // Arrange — the tree types out in a 1000px column (93 columns), in the
     // turn's answer, which is uncapped (a replayed answer still arriving).
     const el = drawFeedResponse(
-      response({ finalAnswer: true, result: { case: "update", value: { prose: { markdown: SHOWCASE_TREE }, revealPace: PACE } } }),
+      response({ finalAnswer: true, result: { case: "update", value: { prose: { prose: treeProse(SHOWCASE_TREE, { arriving: true }) }, revealPace: PACE } } }),
       rowContext(),
     );
     const column = mount(el);
@@ -1817,8 +1849,8 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     // and is no longer the render at the width it first drew at.
     const shown = Number(el.getAttribute(REVEALED_ATTRIBUTE));
     const after = stagedCols(staged.layout, "uncapped");
-    expect(prose(body)).toBe(proseHtml(SHOWCASE_TREE.slice(0, shown), () => after));
-    expect(prose(body)).not.toBe(proseHtml(SHOWCASE_TREE.slice(0, shown), () => before));
+    expect(prose(body)).toBe(proseHtml(treeProse(SHOWCASE_TREE.slice(0, shown)), () => after));
+    expect(prose(body)).not.toBe(proseHtml(treeProse(SHOWCASE_TREE.slice(0, shown)), () => before));
   });
 
   it("appends to a growing plain paragraph in place rather than rebuilding it", () => {
@@ -1827,7 +1859,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     const markdown =
       "First paragraph, complete and stable.\n\nSecond paragraph that keeps on growing word by word right here.";
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown }, revealPace: PACE } } }),
+      response({ result: { case: "update", value: { prose: { prose: servedProse(markdown, { arriving: true }) }, revealPace: PACE } } }),
       rowContext(),
     );
     document.body.appendChild(el);
@@ -1865,7 +1897,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
   it("appends no arriving ellipsis on any frame of the reveal", () => {
     // Arrange
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "some words arriving over frames" } } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("some words arriving over frames") } } } }),
       rowContext(),
     );
     document.body.appendChild(el);
@@ -1885,7 +1917,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
   it("carries no arriving ellipsis once the response has settled", () => {
     // Arrange, Act — the settled arm renders whole through paintWhole.
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "the whole answer" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("the whole answer") } } } }),
       rowContext(),
     );
     // Assert
@@ -1919,7 +1951,7 @@ describe("the type-out of a collapsed bubble", () => {
     previous?: HTMLElement;
   }): HTMLElement {
     const el = drawFeedResponse(
-      response({ thinking: opts.thinking, result: { case: "update", value: { prose: { markdown: opts.markdown ?? LONG }, revealPace: PACE } } }),
+      response({ thinking: opts.thinking, result: { case: "update", value: { prose: { prose: plainProse(opts.markdown ?? LONG) }, revealPace: PACE } } }),
       rowContext(opts.previous),
     );
     if (opts.previous === undefined) mount(el);
@@ -2015,7 +2047,7 @@ describe("the type-out of a page no reader can see", () => {
   /** An arriving, uncapped answer holding LONG, mounted on a page SEEN says. */
   function arriving(seen: PageSeen): HTMLElement {
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: LONG }, revealPace: PACE } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse(LONG) }, revealPace: PACE } } }),
       rowContext(undefined, seen),
     );
     mount(el);
@@ -2084,7 +2116,7 @@ describe("the type-out of a page no reader can see", () => {
     const first = arriving(seen);
     vi.advanceTimersByTime(FRAME_MS);
     const again = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: LONG + "y" }, revealPace: PACE } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse(LONG + "y") }, revealPace: PACE } } }),
       rowContext(first, seen),
     );
     vi.advanceTimersByTime(FRAME_MS);
@@ -2100,7 +2132,7 @@ describe("the thinking bubble", () => {
   it("draws a thinking response as a purple assistant bubble marked thinking", () => {
     // Arrange, Act — a thinking-flagged response.
     const el = drawFeedResponse(
-      response({ thinking: true, result: { case: "update", value: { prose: { markdown: "weighing" }, revealPace: PACE } } }),
+      response({ thinking: true, result: { case: "update", value: { prose: { prose: plainProse("weighing") }, revealPace: PACE } } }),
       rowContext(),
     );
     // Assert — the purple assistant bubble also carries the thinking marker.
@@ -2111,7 +2143,7 @@ describe("the thinking bubble", () => {
   it("leaves an ordinary response bubble unmarked as thinking", () => {
     // Arrange, Act — no thinking flag.
     const el = drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "an answer" }, revealPace: PACE } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("an answer") }, revealPace: PACE } } }),
       rowContext(),
     );
     // Assert
@@ -2122,7 +2154,7 @@ describe("the thinking bubble", () => {
     // Arrange — a thinking bubble that has (defensively) been given the
     // final-response class.
     const el = drawFeedResponse(
-      response({ thinking: true, result: { case: "success", value: { prose: { markdown: "reasoning" } } } }),
+      response({ thinking: true, result: { case: "success", value: { prose: { prose: plainProse("reasoning") } } } }),
       rowContext(),
     );
     el.classList.add("final-response");
@@ -2134,7 +2166,7 @@ describe("the thinking bubble", () => {
   it("does match the green rule for a NON-thinking final response", () => {
     // Arrange — an ordinary final answer wearing the class.
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "the answer" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("the answer") } } } }),
       rowContext(),
     );
     el.classList.add("final-response");
@@ -2145,11 +2177,11 @@ describe("the thinking bubble", () => {
   it("draws multiple thinking blocks as separate bubbles", () => {
     // Arrange, Act — two thinking blocks drawn as two rows.
     const first = drawFeedResponse(
-      response({ thinking: true, result: { case: "success", value: { prose: { markdown: "block one" } } } }),
+      response({ thinking: true, result: { case: "success", value: { prose: { prose: plainProse("block one") } } } }),
       rowContext(),
     );
     const second = drawFeedResponse(
-      response({ thinking: true, result: { case: "success", value: { prose: { markdown: "block two" } } } }),
+      response({ thinking: true, result: { case: "success", value: { prose: { prose: plainProse("block two") } } } }),
       rowContext(),
     );
     // Assert — two distinct thinking bubbles, each with its own reasoning.
@@ -2165,7 +2197,7 @@ describe("the thinking bubble", () => {
     const capture = captureLogRecords("debug");
     // Act
     drawFeedResponse(
-      response({ thinking: true, result: { case: "update", value: { prose: { markdown: "weighing" } } } }),
+      response({ thinking: true, result: { case: "update", value: { prose: { prose: plainProse("weighing") } } } }),
       rowContext(),
     );
     // Assert
@@ -2178,7 +2210,7 @@ describe("the thinking bubble", () => {
     const capture = captureLogRecords("debug");
     // Act
     drawFeedResponse(
-      response({ result: { case: "update", value: { prose: { markdown: "an answer" } } } }),
+      response({ result: { case: "update", value: { prose: { prose: plainProse("an answer") } } } }),
       rowContext(),
     );
     // Assert
@@ -2256,7 +2288,7 @@ describe("the one-line cap", () => {
     return response({
       thinking: kind.thinking,
       interim: !kind.thinking,
-      result: { case: kind.state, value: { prose: { markdown: "weighing" } } },
+      result: { case: kind.state, value: { prose: { prose: plainProse("weighing") } } },
     });
   }
 
@@ -2379,7 +2411,7 @@ describe("the one-line bubble's more signal", () => {
     const host = document.createElement("div");
     installClickExpand(host, () => "", (section) => refreshHasMore(section));
     const bubble = drawFeedResponse(
-      response({ thinking, interim: !thinking, result: { case: arm, value: { prose: { markdown: "weighing" } } } }),
+      response({ thinking, interim: !thinking, result: { case: arm, value: { prose: { prose: plainProse("weighing") } } } }),
       rowContext(),
     );
     host.append(bubble);
@@ -2434,7 +2466,7 @@ describe("the one-line bubble's more signal", () => {
 describe("the response bubble at its full height", () => {
   /** A response in ARM carrying MARKDOWN, the turn's answer when FINAL. */
   function said(arm: "update" | "success" | "error", final = false, markdown = "an answer", interim = false): FeedResponse {
-    return response({ finalAnswer: final, interim, result: { case: arm, value: { prose: { markdown } } } as never });
+    return response({ finalAnswer: final, interim, result: { case: arm, value: { prose: { prose: servedProse(markdown, { arriving: arm === "update" }) } } } as never });
   }
 
   /** A drawn bubble in a feed host armed with click-to-expand, as feed.ts arms it. */
@@ -2525,7 +2557,7 @@ describe("the response bubble at its full height", () => {
 describe("the whole-to-interim easing", () => {
   /** A settled response carrying "an answer", proven interim when INTERIM. */
   function settled(interim: boolean, final = false): FeedResponse {
-    return response({ finalAnswer: final, interim, result: { case: "success", value: { prose: { markdown: "an answer" } } } });
+    return response({ finalAnswer: final, interim, result: { case: "success", value: { prose: { prose: plainProse("an answer") } } } });
   }
 
   /** A drawn, connected bubble for U, standing HEIGHT px tall. */
@@ -2605,7 +2637,7 @@ describe("isInterimResponse", () => {
     { name: "a thinking bubble", thinking: true, interim: false, final: false, state: "success", want: false },
   ] as const)("calls $name interim: $want", ({ thinking, interim, final, state, want }) => {
     // Arrange
-    const u = response({ thinking, interim, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
+    const u = response({ thinking, interim, finalAnswer: final, result: { case: state, value: { prose: { prose: plainProse("x") } } } });
     // Act
     const got = isInterimResponse(u);
     // Assert
@@ -2645,7 +2677,7 @@ describe("responseCapLines", () => {
       interim: !thinking && !name.includes("not proven"),
       finalAnswer: final,
       superseded,
-      result: { case: state, value: { prose: { markdown: "x" } } },
+      result: { case: state, value: { prose: { prose: plainProse("x") } } },
     });
     // Act
     const got = responseCapLines(u);
@@ -2663,7 +2695,7 @@ describe("responseCap", () => {
     { name: "a thinking bubble cut short", thinking: true, final: false, state: "error", want: BUBBLE_MORE_ELLIPSIS },
   ] as const)("gives $name the more signal $want", ({ thinking, final, state, want }) => {
     // Arrange
-    const u = response({ thinking, interim: !thinking, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
+    const u = response({ thinking, interim: !thinking, finalAnswer: final, result: { case: state, value: { prose: { prose: plainProse("x") } } } });
     // Act
     const got = responseCap(u).more;
     // Assert
@@ -2677,7 +2709,7 @@ describe("responseCap", () => {
     { name: "the turn's answer", thinking: false, final: true, state: "success", want: null },
   ] as const)("stamps $name's bubble data-more $want", ({ thinking, final, state, want }) => {
     // Arrange
-    const u = response({ thinking, interim: !thinking, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
+    const u = response({ thinking, interim: !thinking, finalAnswer: final, result: { case: state, value: { prose: { prose: plainProse("x") } } } });
     // Act
     const got = drawFeedResponse(u, rowContext()).getAttribute(BUBBLE_MORE_ATTRIBUTE);
     // Assert
@@ -2697,7 +2729,7 @@ describe("the one-line bubble's fixed height", () => {
     return response({
       thinking,
       interim: !thinking,
-      result: { case: state, value: { prose: { markdown: "weighing" } } },
+      result: { case: state, value: { prose: { prose: plainProse("weighing") } } },
     });
   }
 
@@ -2816,7 +2848,7 @@ describe("the data-driven final-answer green", () => {
   it("greens a final answer on its FIRST draw", () => {
     // Arrange, Act — a settled response the daemon stamped as the turn's answer.
     const el = drawFeedResponse(
-      response({ finalAnswer: true, result: { case: "success", value: { prose: { markdown: "the answer" } } } }),
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { prose: plainProse("the answer") } } } }),
       rowContext(),
     );
     // Assert — the green class rides the row's own data, on the first draw, with
@@ -2828,7 +2860,7 @@ describe("the data-driven final-answer green", () => {
     // Arrange — the same final-answer data, drawn once...
     const data = response({
       finalAnswer: true,
-      result: { case: "success", value: { prose: { markdown: "the answer" } } },
+      result: { case: "success", value: { prose: { prose: plainProse("the answer") } } },
     });
     const first = drawFeedResponse(data, rowContext());
     expect(first.classList.contains(FINAL_RESPONSE_CLASS)).toBe(true);
@@ -2843,7 +2875,7 @@ describe("the data-driven final-answer green", () => {
   it("does NOT green a response that is not the answer", () => {
     // Arrange, Act — final_answer unset.
     const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "just talking" } } } }),
+      response({ result: { case: "success", value: { prose: { prose: plainProse("just talking") } } } }),
       rowContext(),
     );
     // Assert.
@@ -2858,7 +2890,7 @@ describe("the data-driven final-answer green", () => {
       response({
         thinking: true,
         finalAnswer: true,
-        result: { case: "success", value: { prose: { markdown: "reasoning" } } },
+        result: { case: "success", value: { prose: { prose: plainProse("reasoning") } } },
       }),
       rowContext(),
     );
@@ -2871,7 +2903,7 @@ describe("the data-driven final-answer green", () => {
     // Arrange — a green final answer that is also the selected reply target, so
     // both classes ride the same bubble.
     const el = drawFeedResponse(
-      response({ finalAnswer: true, result: { case: "success", value: { prose: { markdown: "the answer" } } } }),
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { prose: plainProse("the answer") } } } }),
       rowContext(),
     );
     el.classList.add("entry-selected");
@@ -2902,12 +2934,12 @@ describe("a re-push updates the bubble in place", () => {
 
   /** An arriving response carrying MARKDOWN. */
   function arriving(markdown: string, extra: Extra = {}) {
-    return response({ ...extra, result: { case: "update", value: { prose: { markdown } } } });
+    return response({ ...extra, result: { case: "update", value: { prose: { prose: servedProse(markdown, { arriving: true }) } } } });
   }
 
   /** A settled response carrying MARKDOWN. */
   function settledAs(markdown: string, extra: Extra = {}) {
-    return response({ ...extra, result: { case: "success", value: { prose: { markdown } } } });
+    return response({ ...extra, result: { case: "success", value: { prose: { prose: servedProse(markdown) } } } });
   }
 
   /** Draw FIRST, mount it, then draw NEXT over it as feed-view would. */
@@ -2930,7 +2962,7 @@ describe("a re-push updates the bubble in place", () => {
     // Arrange -- the reader scrolled 120px inside an expanded thinking bubble
     // (a thinking bubble is the response kind that keeps a scroll box).
     const thinkingArriving = (markdown: string) =>
-      response({ thinking: true, result: { case: "update", value: { prose: { markdown } } } });
+      response({ thinking: true, result: { case: "update", value: { prose: { prose: servedProse(markdown, { arriving: true }) } } } });
     const before = drawFeedResponse(thinkingArriving("hello"), rowContext());
     mount(before);
     vi.advanceTimersByTime(2000);
@@ -3018,7 +3050,7 @@ describe("a re-push updates the bubble in place", () => {
 
   it("draws one cut-short marker however often the broken state is pushed", () => {
     // Arrange
-    const broken = response({ result: { case: "error", value: { prose: { markdown: "half" } } } });
+    const broken = response({ result: { case: "error", value: { prose: { prose: plainProse("half") } } } });
     // Act
     const { after } = redraw(broken, broken);
     // Assert
@@ -3063,7 +3095,7 @@ describe("the interim response's hook class", () => {
     { name: "a response cut short", interim: true, final: false, state: "error", want: false },
   ] as const)("marks $name interim: $want", ({ interim, final, state, want }) => {
     // Arrange
-    const u = response({ interim, finalAnswer: final, result: { case: state, value: { prose: { markdown: "x" } } } });
+    const u = response({ interim, finalAnswer: final, result: { case: state, value: { prose: { prose: plainProse("x") } } } });
     // Act
     const el = drawFeedResponse(u, rowContext());
     // Assert
@@ -3073,12 +3105,12 @@ describe("the interim response's hook class", () => {
   it("takes the class back when the terminal names the interim the answer", () => {
     // Arrange
     const before = drawFeedResponse(
-      response({ interim: true, result: { case: "success", value: { prose: { markdown: "x" } } } }),
+      response({ interim: true, result: { case: "success", value: { prose: { prose: plainProse("x") } } } }),
       rowContext(),
     );
     // Act
     const after = drawFeedResponse(
-      response({ finalAnswer: true, result: { case: "success", value: { prose: { markdown: "x" } } } }),
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { prose: plainProse("x") } } } }),
       rowContext(before),
     );
     // Assert
@@ -3092,7 +3124,7 @@ describe("an interim response's usage corner", () => {
     return response({
       interim,
       ...(usage ? { usage: { text: "2.1k", atMs: 1_000n, heat: { position: 0.5 } } } : {}),
-      result: { case: "success", value: { prose: { markdown: "done" } } },
+      result: { case: "success", value: { prose: { prose: plainProse("done") } } },
     });
   }
 

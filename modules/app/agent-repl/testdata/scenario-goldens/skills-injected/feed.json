@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!skills-injected"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!skills-injected"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!skills-injected"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Loaded the injected skills."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Loaded the injected skills."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Loaded the injected skills."
+                }
+              }
             }
           },
           "usage": {

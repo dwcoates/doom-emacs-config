@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/commandcatalog/catalogtest"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/prose"
 )
 
 // THE PROMPT'S KNOWN COMMANDS. A user-prompt row names every catalog command
@@ -44,7 +45,7 @@ func userPromptOf(blocks ...*frontendv1.FeedUserPromptBlock) *frontendv1.FeedUse
 
 // drawnText is one drawn text block.
 func drawnText(text string) *frontendv1.FeedUserPromptBlock {
-	return &frontendv1.FeedUserPromptBlock{Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: text}}}
+	return &frontendv1.FeedUserPromptBlock{Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: prose.ParseForTest(text)}}}
 }
 
 func TestPromptCommandsNamesTheCatalogCommandsTheTextSlashes(t *testing.T) {
@@ -121,7 +122,7 @@ func TestStampPromptCommandsLeavesARowThatIsNotAUserPromptAlone(t *testing.T) {
 	// Arrange.
 	row := &frontendv1.FeedRow{Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
 		Body: &frontendv1.FeedAgentPromptBody{Blocks: []*frontendv1.FeedAgentPromptBlock{{
-			Block: &frontendv1.FeedAgentPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: "/merge-queue"}},
+			Block: &frontendv1.FeedAgentPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: prose.ParseForTest("/merge-queue")}},
 		}}},
 	}}}
 

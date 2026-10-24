@@ -348,7 +348,9 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"selection\":{\"none\":{}}}" :selection)
                       (list "{\"evaluate\":{\"token\":{\"value\":\"t-1\"},\"text\":\"(+ 1 2)\"}}" :evaluate)
                       (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
-                      (list "{\"selectRequested\":{}}" :select-requested)))
+                      (list "{\"selectRequested\":{}}" :select-requested)
+                      (list "{\"promptEntryClicked\":{\"row\":{\"value\":\"p1\"},\"label\":\"3.1\",\"text\":\"yes\"}}"
+                            :prompt-entry-clicked)))
     (should (equal (plist-get (agent-repl-test-wire-host--decode
                                #'agent-repl-wire-decode-watch-host-workspace-response
                                (nth 0 case))
@@ -644,6 +646,22 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   #'agent-repl-wire-decode-host-workspace-select-requested
                   "{\"workspace\":\"w\"}")
                  '("HostWorkspaceSelectRequested" workspace "unknown field"))))
+
+;;;; ---- The prompt-entry click push ----
+
+(ert-deftest agent-repl-test-wire-host-prompt-entry-clicked-decodes-its-row-label-and-text ()
+  "The entry click decodes to the prompt's row, the entry's label and its words."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace-prompt-entry-clicked
+                  "{\"row\":{\"value\":\"p1\"},\"label\":\"3.1\",\"text\":\"yes\"}")
+                 '(:row (:value "p1") :label "3.1" :text "yes"))))
+
+(ert-deftest agent-repl-test-wire-host-prompt-entry-clicked-refuses-an-unknown-field ()
+  "A field the entry click does not declare is refused, not ignored."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-prompt-entry-clicked
+                  "{\"row\":{\"value\":\"p1\"},\"label\":\"3.1\",\"text\":\"yes\",\"extra\":1}")
+                 '("HostWorkspacePromptEntryClicked" extra "unknown field"))))
 
 ;;;; ---- The notification click push ----
 
@@ -1514,7 +1532,7 @@ opens are OpenTabs streams."
                        #'string<)
                  (sort (list "evaluate" "host" "transferred" "reloadWebapp"
                              "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection"
-                             "finalResponseClicked" "selectRequested")
+                             "finalResponseClicked" "selectRequested" "promptEntryClicked")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()
@@ -2156,7 +2174,7 @@ replaces it."
   "An unknown create-stage arm is recorded at ERROR before it is refused."
   (let (logged)
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       (condition-case nil
           (agent-repl-wire-decode-workspace-create-stage
            (agent-repl-test-wire-host--parse "{\"teleporting\":{}}"))
@@ -2247,7 +2265,7 @@ replaces it."
   "An unknown open-stage arm is recorded at ERROR before it is refused."
   (let (logged)
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       (condition-case nil
           (agent-repl-wire-decode-workspace-open-stage
            (agent-repl-test-wire-host--parse "{\"teleporting\":{}}"))

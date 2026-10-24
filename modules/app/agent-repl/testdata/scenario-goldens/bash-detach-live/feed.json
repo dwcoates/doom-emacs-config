@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!bash-detach-live"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!bash-detach-live"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!bash-detach-live"
+                    }
+                  }
                 }
               }
             ]
@@ -57,7 +68,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "The command will run until something stops it."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "The command will run until something stops it."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "The command will run until something stops it."
+                }
+              }
             }
           },
           "usage": {

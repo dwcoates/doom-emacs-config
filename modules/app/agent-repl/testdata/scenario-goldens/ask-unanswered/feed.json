@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!ask-unanswered"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!ask-unanswered"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!ask-unanswered"
+                    }
+                  }
                 }
               }
             ]
@@ -84,7 +95,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Nobody answered the question."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Nobody answered the question."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Nobody answered the question."
+                }
+              }
             }
           },
           "usage": {

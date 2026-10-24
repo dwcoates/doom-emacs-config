@@ -968,8 +968,7 @@ RECORDS names a variable the caller has bound."
   `(progn
      (setq ,records nil)
      (cl-letf (((symbol-function 'agent-repl--log)
-                (lambda (_ws fmt &rest args)
-                  (push (apply #'format fmt args) ,records)))
+                (agent-repl-test--record-into ,records))
                ((symbol-function 'agent-repl--error) (lambda (&rest _) nil)))
        ,@body)
      (setq ,records (nreverse ,records))))
@@ -1051,7 +1050,7 @@ RECORDS names a variable the caller has bound."
   ;; Arrange
   (let ((errors nil))
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors)))
+               (agent-repl-test--record-into errors))
               ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
       ;; Act
       (ignore-errors

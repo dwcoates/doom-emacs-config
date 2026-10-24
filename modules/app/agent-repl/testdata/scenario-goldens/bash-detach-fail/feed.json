@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!bash-detach-fail"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!bash-detach-fail"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!bash-detach-fail"
+                    }
+                  }
                 }
               }
             ]
@@ -57,7 +68,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Backgrounded a command that will fail."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Backgrounded a command that will fail."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Backgrounded a command that will fail."
+                }
+              }
             }
           },
           "usage": {

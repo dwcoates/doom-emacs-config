@@ -37,7 +37,7 @@ func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T)
 	// against the routing of the frame tests neither.
 	page, token := f.openFeedOnceCarrying("resp-1's settled prose", func(p *frontendv1.FeedPage) bool {
 		for _, r := range p.GetSuccess().GetRows() {
-			if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "first" {
+			if r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "first" {
 				return true
 			}
 		}
@@ -52,7 +52,7 @@ func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T)
 	// watch) and no overlap (resp-1 is not re-delivered on the tail).
 	sawFirst := false
 	for _, r := range page.GetSuccess().GetRows() {
-		if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "first" {
+		if r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "first" {
 			sawFirst = true
 		}
 	}
@@ -68,17 +68,17 @@ func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T)
 	// differ from the page's, and resp-2's settled row must arrive (no gap).
 	var held *frontendv1.FeedRow
 	for _, r := range page.GetSuccess().GetRows() {
-		if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "first" {
+		if r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "first" {
 			held = r
 		}
 	}
 	// awaitRow fails the test if resp-2's settled row never arrives.
 	awaitRow(t, f, tail, "resp-2's settled row on the tail", func(r *frontendv1.FeedRow) bool {
 		resp := r.GetActivity().GetResponse()
-		if resp.GetSuccess().GetProse().GetMarkdown() == "first" && proto.Equal(r, held) {
+		if resp.GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "first" && proto.Equal(r, held) {
 			t.Errorf("the tail re-delivered resp-1 exactly as the page held it: %v", r)
 		}
-		return resp.GetSuccess().GetProse().GetMarkdown() == "second" && !resp.GetInterim()
+		return resp.GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "second" && !resp.GetInterim()
 	})
 }
 
@@ -156,7 +156,7 @@ func TestGetFeedPageFirstThenNextWalksOlderPages(t *testing.T) {
 	// land -- a page taken mid-ingest would be a page over however many rows
 	// happened to have arrived.
 	awaitRow(t, f, tail, "the last padded row", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "row "+itoa(n-1)
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "row "+itoa(n-1)
 	})
 
 	// Act
@@ -219,18 +219,18 @@ func TestGetFeedPageWalkOnASubagentBubbleFeedIdPagesTheSubFeedNotTheRoot(t *test
 	// every row pushed to "sub-walk" is durable by the time the walk begins.
 	lastSubMd := "sub-walk row " + itoa(n-1)
 	f.awaitRowInFeed(bubble.GetId(), "the subagent's last pushed row", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == lastSubMd
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == lastSubMd
 	})
 	// A row that must NEVER appear on the sub-feed's walk.
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("root-only", "root row")[0])
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("root-only", "root row")[1])
 	awaitRow(t, f, tail, "the root-only row landing on the root feed", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "root row"
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "root row"
 	})
 
 	// Act: walk the SUBAGENT BUBBLE's own FeedId, never the root.
 	isRootLeak := func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "root row"
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "root row"
 	}
 	first, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
 		Workspace: f.ws, Feed: bubble.GetId(),
@@ -260,7 +260,7 @@ func TestGetFeedPageWalkOnASubagentBubbleFeedIdPagesTheSubFeedNotTheRoot(t *test
 		t.Fatalf("GetFeedPage{next} on the subagent's FeedId served the ROOT feed's row: %v", next.Msg)
 	}
 	for _, r := range next.Msg.GetSuccess().GetSuccess().GetRows() {
-		md := r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown()
+		md := r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown()
 		if md == "" {
 			continue
 		}
@@ -335,7 +335,7 @@ func TestGetFeedPageAtStartAndAFurtherNextRepeatsTheWholeFeed(t *testing.T) {
 		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
 	}
 	awaitRow(t, f, tail, "the last padded row", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "row "+itoa(n-1)
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "row "+itoa(n-1)
 	})
 
 	first, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
@@ -425,7 +425,7 @@ func TestGetFeedPageFirstAfterNextReservesTheNewestPage(t *testing.T) {
 		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
 	}
 	awaitRow(t, f, tail, "the last padded row", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "row "+itoa(n-1)
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "row "+itoa(n-1)
 	})
 
 	first, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
@@ -469,7 +469,7 @@ func TestAWalkContinuesOnAnyConnection(t *testing.T) {
 		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
 	}
 	awaitRow(t, f, tail, "the last padded row", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "row "+itoa(n-1)
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "row "+itoa(n-1)
 	})
 	first, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
 		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
@@ -502,7 +502,7 @@ func TestTwoOpeningsWalkIndependently(t *testing.T) {
 		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
 	}
 	awaitRow(t, f, tail, "the last padded row", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "row "+itoa(n-1)
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "row "+itoa(n-1)
 	})
 	firstPage := func() *frontendv1.FeedPage {
 		resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
@@ -848,7 +848,7 @@ func TestPlanModeEnterThenExitCoalesceOntoOneFeedId(t *testing.T) {
 	planned := awaitRow(t, f, tail, "the presented plan on the same bubble", func(r *frontendv1.FeedRow) bool {
 		return r.GetId().GetValue() == id && r.GetActivity().GetPlan().GetPlanned() != nil
 	})
-	if md := planned.GetActivity().GetPlan().GetPlanned().GetProse().GetMarkdown(); md != "1. do it" {
+	if md := planned.GetActivity().GetPlan().GetPlanned().GetProse().GetProse().GetSource().GetMarkdown(); md != "1. do it" {
 		t.Fatalf("the coalesced plan bubble's document = %q, want the exit's plan", md)
 	}
 }
@@ -1118,7 +1118,7 @@ func TestASyncSubagentSpawnDrawsABubbleHeadAndItsOwnFeedServesSubFeedRows(t *tes
 		subTail := f.d.WatchFeed(subToken)
 		subRow = awaitRow(t, f, subTail, "the subagent's own work on its sub-feed", isWork)
 	}
-	if md := subRow.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown(); md != "subagent said this" {
+	if md := subRow.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(); md != "subagent said this" {
 		t.Fatalf("the sub-feed's row = %q, want the subagent's own prose", md)
 	}
 }
@@ -1657,7 +1657,7 @@ func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *tes
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-1", "first")[1])
 	_, token := f.openFeedOnceCarrying("resp-1's settled prose", func(p *frontendv1.FeedPage) bool {
 		for _, r := range p.GetSuccess().GetRows() {
-			if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "first" {
+			if r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "first" {
 				return true
 			}
 		}
@@ -1673,7 +1673,7 @@ func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *tes
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-3", "third")[1])
 	f.openFeedOnceCarrying("resp-3's settled prose", func(p *frontendv1.FeedPage) bool {
 		for _, r := range p.GetSuccess().GetRows() {
-			if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "third" {
+			if r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == "third" {
 				return true
 			}
 		}

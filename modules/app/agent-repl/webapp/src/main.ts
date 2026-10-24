@@ -224,13 +224,16 @@ export async function boot(): Promise<void> {
       onAttached: (fn) => ctx.streams.onAttached(fn),
     });
     const latencyEnv = pageSwitchLatencyEnv(document);
-    watchPageBoot(bootedAtMs, latencyEnv, (kind, seconds) => latencies.record(kind, seconds));
+    // EACH WATCHER LIVES AS LONG AS THE PAGE, so each stop is the page's
+    // (page-teardown.ts): a page-stall sampler left running after a boot test
+    // kept firing into later files (2026-10-24, a merge gate's run).
+    stopAtPageTeardown(watchPageBoot(bootedAtMs, latencyEnv, (kind, seconds) => latencies.record(kind, seconds)));
     if (pagePresence().embedded) {
-      watchSwitchLatency(pagePresence(), latencyEnv, (kind, seconds) => latencies.record(kind, seconds));
-      watchReloadBlank(pagePresence(), latencyEnv, (kind, seconds) => latencies.record(kind, seconds));
+      stopAtPageTeardown(watchSwitchLatency(pagePresence(), latencyEnv, (kind, seconds) => latencies.record(kind, seconds)));
+      stopAtPageTeardown(watchReloadBlank(pagePresence(), latencyEnv, (kind, seconds) => latencies.record(kind, seconds)));
     }
     // A STALL OF THIS PAGE'S MAIN THREAD while it is seen (page-stall.ts).
-    watchPageStall(
+    stopAtPageTeardown(watchPageStall(
       pagePresence(),
       {
         now: () => performance.now(),
@@ -240,7 +243,7 @@ export async function boot(): Promise<void> {
         },
       },
       (kind, seconds) => latencies.record(kind, seconds),
-    );
+    ));
     // A PROMPT'S ECHO ends at its row drawn here (prompt-echo.ts).
     const promptEcho = createPromptEcho(latencyEnv.wallNow, (kind, seconds) => latencies.record(kind, seconds));
     installPromptEcho(promptEcho);

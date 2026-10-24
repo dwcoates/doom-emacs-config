@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"agent-repld/internal/prose"
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -62,7 +63,7 @@ func (r *resolver) drawSubagentResult(s *wsState, at placement, act *conversatio
 		return nil, fmt.Errorf("feed: a subagent hand-back carried no result arm this resolver knows (%T)", state)
 	}
 
-	result.Report = &frontendv1.FeedSubagentResultReport{Text: u.handbackReport}
+	result.Report = &frontendv1.FeedSubagentResultReport{Prose: r.parsedProse(s, u.handbackReport, prose.Settled)}
 	row := &frontendv1.FeedRow{
 		Id: r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unitID}),
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{

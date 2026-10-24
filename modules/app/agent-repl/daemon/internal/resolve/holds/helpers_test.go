@@ -20,7 +20,7 @@ func textBody(content *conversationv1.UserContent) *frontendv1.FeedUserPromptBod
 	for _, block := range content.GetBlocks() {
 		if text := block.GetText(); text != nil {
 			body.Blocks = append(body.Blocks, &frontendv1.FeedUserPromptBlock{
-				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: "drawn:" + text.GetText()}},
+				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: &frontendv1.ParsedProse{Source: &frontendv1.ProseSource{Markdown: "drawn:" + text.GetText()}}}},
 			})
 		}
 	}

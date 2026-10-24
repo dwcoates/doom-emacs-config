@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!refusal-no-fallback"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!refusal-no-fallback"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!refusal-no-fallback"
+                    }
+                  }
                 }
               }
             ]
@@ -32,7 +43,11 @@
       "activity": {
         "response": {
           "error": {
-            "prose": {}
+            "prose": {
+              "prose": {
+                "source": {}
+              }
+            }
           }
         }
       },

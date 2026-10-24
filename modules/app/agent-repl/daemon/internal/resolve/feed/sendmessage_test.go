@@ -147,7 +147,7 @@ func TestASendDrawsTheCallersSummaryAsItsBody(t *testing.T) {
 	if len(blocks) != 1 {
 		t.Fatalf("blocks = %d, want 1", len(blocks))
 	}
-	if got := blocks[0].GetText().GetText(); got != "Report even/odd status for each number" {
+	if got := blocks[0].GetText().GetProse().GetSource().GetMarkdown(); got != "Report even/odd status for each number" {
 		t.Fatalf("block = %q, want the summary", got)
 	}
 }
@@ -237,7 +237,7 @@ func TestASendKeepsTheStartsSummaryWhenTheSuccessRestatesNone(t *testing.T) {
 
 	// Assert.
 	blocks := h.sendRow().GetBody().GetBlocks()
-	if len(blocks) != 1 || blocks[0].GetText().GetText() != "vet the diff" {
+	if len(blocks) != 1 || blocks[0].GetText().GetProse().GetSource().GetMarkdown() != "vet the diff" {
 		t.Fatalf("blocks = %v, want the start's summary held across the success", blocks)
 	}
 }
@@ -609,7 +609,7 @@ func TestAReplayedSettledSendDrawsItsSummary(t *testing.T) {
 
 			// Assert.
 			blocks := h.sendRow().GetBody().GetBlocks()
-			if len(blocks) != 1 || blocks[0].GetText().GetText() != "Scroll fix landed; merge master in" {
+			if len(blocks) != 1 || blocks[0].GetText().GetProse().GetSource().GetMarkdown() != "Scroll fix landed; merge master in" {
 				t.Fatalf("blocks = %v, want the restated summary", blocks)
 			}
 		})
@@ -767,7 +767,7 @@ func TestASettledSendRestatingNoAddressIsDrawnFromTheStartHeld(t *testing.T) {
 
 			// Assert.
 			blocks := h.sendRow().GetBody().GetBlocks()
-			if len(blocks) != 1 || blocks[0].GetText().GetText() != "vet the diff" {
+			if len(blocks) != 1 || blocks[0].GetText().GetProse().GetSource().GetMarkdown() != "vet the diff" {
 				t.Fatalf("blocks = %v, want the held start's summary", blocks)
 			}
 		})

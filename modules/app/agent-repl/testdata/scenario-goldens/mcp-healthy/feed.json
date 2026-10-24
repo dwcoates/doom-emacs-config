@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!mcp-healthy"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!mcp-healthy"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!mcp-healthy"
+                    }
+                  }
                 }
               }
             ]
@@ -34,7 +45,18 @@
           "finalAnswer": true,
           "success": {
             "prose": {
-              "markdown": "Only the healthy MCP server is now reported."
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Only the healthy MCP server is now reported."
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Only the healthy MCP server is now reported."
+                }
+              }
             }
           },
           "usage": {

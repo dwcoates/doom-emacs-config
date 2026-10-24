@@ -20,7 +20,18 @@
             "blocks": [
               {
                 "text": {
-                  "text": "!fail-hook-stopped"
+                  "prose": {
+                    "blocks": [
+                      {
+                        "plain": {
+                          "markdown": "!fail-hook-stopped"
+                        }
+                      }
+                    ],
+                    "source": {
+                      "markdown": "!fail-hook-stopped"
+                    }
+                  }
                 }
               }
             ]
@@ -33,7 +44,18 @@
         "response": {
           "success": {
             "prose": {
-              "markdown": "Working on it…"
+              "prose": {
+                "blocks": [
+                  {
+                    "plain": {
+                      "markdown": "Working on it…"
+                    }
+                  }
+                ],
+                "source": {
+                  "markdown": "Working on it…"
+                }
+              }
             }
           },
           "usage": {

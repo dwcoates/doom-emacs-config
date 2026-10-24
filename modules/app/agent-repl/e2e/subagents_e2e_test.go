@@ -97,11 +97,11 @@ func responseMarkdown(a *frontendv1.FeedTurnActivity) (string, bool) {
 	}
 	switch {
 	case resp.GetUpdate() != nil:
-		return resp.GetUpdate().GetProse().GetMarkdown(), true
+		return resp.GetUpdate().GetProse().GetProse().GetSource().GetMarkdown(), true
 	case resp.GetSuccess() != nil:
-		return resp.GetSuccess().GetProse().GetMarkdown(), true
+		return resp.GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(), true
 	case resp.GetError() != nil:
-		return resp.GetError().GetProse().GetMarkdown(), true
+		return resp.GetError().GetProse().GetProse().GetSource().GetMarkdown(), true
 	default:
 		return "", true
 	}
@@ -266,7 +266,7 @@ func pageHasAgentPromptText(rows []*frontendv1.FeedRow, text string) bool {
 			continue
 		}
 		for _, block := range prompt.GetBody().GetBlocks() {
-			if block.GetText().GetText() == text {
+			if block.GetText().GetProse().GetSource().GetMarkdown() == text {
 				return true
 			}
 		}
@@ -612,13 +612,13 @@ func TestSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 	if len(thinkingRows) != 1 {
 		t.Fatalf("the main turn drew %d thinking units, want exactly one: %v", len(thinkingRows), thinkingRows)
 	}
-	if got := thinkingRows[0].GetSuccess().GetProse().GetMarkdown(); got != thinking {
+	if got := thinkingRows[0].GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(); got != thinking {
 		t.Errorf("the main thinking unit = %q, want it whole: %q", got, thinking)
 	}
 	if len(answerRows) != 1 {
 		t.Fatalf("the main turn drew %d response units, want exactly one answer: %v", len(answerRows), answerRows)
 	}
-	if got := answerRows[0].GetSuccess().GetProse().GetMarkdown(); got != conclusion {
+	if got := answerRows[0].GetSuccess().GetProse().GetProse().GetSource().GetMarkdown(); got != conclusion {
 		t.Errorf("the main answer = %q, want it whole: %q", got, conclusion)
 	}
 	if !answerRows[0].GetFinalAnswer() {

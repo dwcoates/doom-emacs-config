@@ -79,6 +79,7 @@ import {
   FeedMergeSuccessSchema,
   FeedPageSchema,
   FeedRowSchema,
+  FeedSelectionRowViewportSchema,
   FeedSelectionSchema,
   FeedSessionSeparationSchema,
   FeedSubagentSchema,
@@ -101,6 +102,7 @@ import { testAppContext } from "../rpc/app-context.js";
 import { orderFor } from "../feed-order.js";
 import type { RowContext, RowRenderers } from "../../src/feed/renderers.js";
 import { sentTo } from "./addresses.js";
+import { servedProse } from "../prose.js";
 
 
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -403,7 +405,7 @@ export function heldPromptItem(id: string, turn: string, text = "held words"): F
       value: {
         turn: { value: turn },
         said: { content: { blocks: [{ block: { case: "text", value: { text } } }] } },
-        body: { blocks: [{ block: { case: "text", value: { text } } }] },
+        body: { blocks: [{ block: { case: "text", value: { prose: servedProse(text) } } }] },
         queuedAt: { atMs: 0n },
         classification: { case: "classifying", value: {} },
         badge: {
@@ -427,7 +429,7 @@ export function heldIngressItem(id: string, text = "ingress words"): FeedHeldIte
       case: "ingress",
       value: {
         said: { content: { blocks: [{ block: { case: "text", value: { text } } }] } },
-        body: { blocks: [{ block: { case: "text", value: { text } } }] },
+        body: { blocks: [{ block: { case: "text", value: { prose: servedProse(text) } } }] },
         queuedAt: { atMs: 0n },
         badge: { label: "waiting for the session", standsFor: { case: "noSession", value: {} } },
       },
@@ -502,7 +504,7 @@ export function userPromptRow(
         author: { label: "You" },
         result: {
           case: "success",
-          value: { body: { blocks: [{ block: { case: "text", value: { text } } }] } },
+          value: { body: { blocks: [{ block: { case: "text", value: { prose: servedProse(text) } } }] } },
         },
         working,
         awaitingUser,
@@ -531,7 +533,7 @@ export function agentPromptRow(
       case: "agentPrompt",
       value: create(FeedAgentPromptSchema, {
         address: sentTo(address),
-        body: { blocks: [{ block: { case: "text", value: { text } } }] },
+        body: { blocks: [{ block: { case: "text", value: { prose: servedProse(text) } } }] },
         working,
         awaitingUser,
       }),
@@ -647,7 +649,7 @@ export function separationRow(
               },
             },
           }
-        : { case: "compacted", value: { summary: { markdown: summary } } };
+        : { case: "compacted", value: { summary: { prose: servedProse(summary) } } };
   return create(FeedRowSchema, {
     id: feedId(id),
     order: orderFor(id),
@@ -675,7 +677,7 @@ export function responseRow(
       value: {
         unit: {
           case: "response",
-          value: { result: { case: "success", value: { prose: { markdown } } } },
+          value: { result: { case: "success", value: { prose: { prose: servedProse(markdown) } } } },
         },
       },
     },
@@ -696,7 +698,7 @@ export function finalResponseRow(id: string, markdown = "done", parent?: string)
       value: {
         unit: {
           case: "response",
-          value: { finalAnswer: true, result: { case: "success", value: { prose: { markdown } } } },
+          value: { finalAnswer: true, result: { case: "success", value: { prose: { prose: servedProse(markdown) } } } },
         },
       },
     },
@@ -716,7 +718,7 @@ export function settledResponseRow(id: string, markdown: string, flags: SettledR
       value: {
         unit: {
           case: "response",
-          value: { ...flags, result: { case: "success", value: { prose: { markdown } } } },
+          value: { ...flags, result: { case: "success", value: { prose: { prose: servedProse(markdown) } } } },
         },
       },
     },
@@ -931,8 +933,8 @@ export type SelectionShape =
   | { prompt: string; viewport?: RowViewport }
   | { bubble: string; viewport?: RowViewport };
 
-/** What the viewport does about a newly selected row. */
-type RowViewport = "center" | "hold";
+/** What the viewport does about a newly selected row; `{ reveal }` names the entry to flash. */
+type RowViewport = "center" | "hold" | { reveal: string };
 
 /** The daemon's `FeedSelection` for SHAPE. */
 export function selectionOf(shape: SelectionShape): FeedSelection {
@@ -941,7 +943,15 @@ export function selectionOf(shape: SelectionShape): FeedSelection {
       selection: { case: "none", value: { viewport: { case: shape.none, value: {} } } },
     });
   }
-  const viewport = { viewport: { case: shape.viewport ?? "center", value: {} } } as const;
+  const asked = shape.viewport ?? "center";
+  const viewport = create(FeedSelectionRowViewportSchema, {
+    viewport:
+      asked === "center"
+        ? { case: "center", value: {} }
+        : asked === "hold"
+          ? { case: "hold", value: {} }
+          : { case: "reveal", value: { entryLabel: asked.reveal } },
+  });
   if ("response" in shape) {
     return create(FeedSelectionSchema, {
       selection: { case: "response", value: { row: feedId(shape.response), viewport } },

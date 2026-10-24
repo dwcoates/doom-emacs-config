@@ -78,7 +78,7 @@ func TestAHandbackDrawsTheReportVerbatim(t *testing.T) {
 	h.sendAs(subAgent(), handbackOf(&conversationv1.AgentSubagentHandbackStart{Report: report("## Commits\n1. done")}))
 
 	// Assert.
-	if got := h.result().GetReport().GetText(); got != "## Commits\n1. done" {
+	if got := h.result().GetReport().GetProse().GetSource().GetMarkdown(); got != "## Commits\n1. done" {
 		t.Fatalf("report = %q, want the report verbatim", got)
 	}
 }
@@ -92,7 +92,7 @@ func TestAHandbackBeatKeepsTheHeldReportDelivering(t *testing.T) {
 	h.sendAs(subAgent(), handbackOf(&conversationv1.AgentToolCallProgress{LastProgressAtMs: 5_000}))
 
 	// Assert.
-	if got := h.result().GetReport().GetText(); got != "done" {
+	if got := h.result().GetReport().GetProse().GetSource().GetMarkdown(); got != "done" {
 		t.Fatalf("report after a beat = %q, want the held report", got)
 	}
 }

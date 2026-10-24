@@ -454,7 +454,7 @@ the latch cannot change a closed tab's already-partial extent."
     (let ((records nil)
           (agent-repl--tab-background-modes (make-hash-table :test 'equal)))
       (cl-letf (((symbol-function 'agent-repl--log-verbose)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) records))))
+                 (agent-repl-test--record-into records)))
         (agent-repl--note-tab-background-mode "ws1" :full "panels-open")
         ;; Act
         (agent-repl--note-tab-background-mode "ws1" :partial "panels-closed")
@@ -572,8 +572,7 @@ into `agent-repl-test--viewed-reports' instead of dialling the daemon."
                  ((symbol-function 'cancel-timer) #'ignore)
                  ((symbol-function 'timerp) (lambda (x) (eq x 'stub-timer)))
                  ((symbol-function 'agent-repl--log)
-                  (lambda (_ws fmt &rest args)
-                    (push (apply #'format fmt args) agent-repl-test--dwell-logs)))
+                  (agent-repl-test--record-into agent-repl-test--dwell-logs))
                  ((symbol-function 'agent-repl-host-mark-viewed)
                   (lambda (ws) (push ws agent-repl-test--viewed-reports) t)))
          ,@body))))
@@ -4036,7 +4035,7 @@ The buffer and the prior window configuration are both restored after."
   (agent-repl-test--with-clean-state
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         (agent-repl-test-status--with-arm "alpha" :thinking
           ;; Act
           (agent-repl-status-tab-state "alpha")
@@ -4050,7 +4049,7 @@ The buffer and the prior window configuration are both restored after."
   (agent-repl-test--with-clean-state
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         (agent-repl-test-status--with-arm "alpha" :thinking
           (agent-repl-status-tab-state "alpha"))
         ;; Act
@@ -4075,7 +4074,7 @@ The buffer and the prior window configuration are both restored after."
   (agent-repl-test--with-clean-state
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+                 (agent-repl-test--record-into logged))
                 ((symbol-function 'agent-repl-roster-async-merging-for-ws) (lambda (_) t)))
         ;; Act
         (agent-repl-status-tab-async-merging "alpha")
@@ -4273,7 +4272,7 @@ purple already says a merge is in flight, and a landed merge shows nothing
   ;; Arrange
   (let (logged)
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       (let ((agent-repl-status-glyph-inks '((:thinking . "chartreuse"))))
         ;; Act / Assert
         (should-error (agent-repl-status--glyph-ink-color :thinking))
@@ -4444,7 +4443,7 @@ violation: logged with its measurements, then signalled, and nothing cached."
       (cl-letf (((symbol-function 'agent-repl-status--row-height)
                  (lambda (_frame text) (if (= (length text) 1) 15 16)))
                 ((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act / Assert
         (should-error (agent-repl-status-glyph-image-height))
         (should (string-match-p "glyph-image-height: text-font=Menlo-13 text-row=15 image-row=16"
@@ -4530,7 +4529,7 @@ at one height, every glyph is that tall on screen."
   ;; Arrange
   (let (logged)
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       ;; Act / Assert
       (should-error (agent-repl-status--glyph-file "no-such-glyph"))
       (should (string-match-p "glyph-file: glyph \"no-such-glyph\" has no picture at .*no-such-glyph\\.svg"
@@ -4541,7 +4540,7 @@ at one height, every glyph is that tall on screen."
   ;; Arrange
   (let (logged)
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       ;; Act / Assert
       (should-error (agent-repl-status--glyph-char "no-such-glyph"))
       (should (string-match-p "glyph-char: glyph \"no-such-glyph\" has no character"
@@ -5429,7 +5428,7 @@ extent's color — and gains the underline besides."
   ;; Arrange
   (let (logged)
     (cl-letf (((symbol-function 'agent-repl--error)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+               (agent-repl-test--record-into logged)))
       ;; Act / Assert
       (should-error (agent-repl-status-roster-mark-color :no-such-arm))
       (should (string-match-p "arm :no-such-arm has no color" (car logged))))))
