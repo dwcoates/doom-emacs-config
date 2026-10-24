@@ -2601,14 +2601,22 @@ html[data-page-unshown] *::after {
    small muted icon that copies a piece of the feed. Once it copied, the check
    mark replaces the copy icon for a moment (`data-copied`). Each kind's rule
    below places it. */
+/* The control's size, its icon being 1em, and its padding, so its square box
+   is `--copy-control-box` on a side: a prompt's room reservation below
+   declares them too, so the two boxes cannot differ. */
+.copy-control,
+.bubble[data-role="prompt"] > :has(> .prompt-copy)::before {
+  font-size: calc(0.85rem * var(--feed-text-scale));
+  --copy-control-pad: 3px;
+  --copy-control-box: calc(1em + 2 * var(--copy-control-pad));
+}
 .copy-control {
   display: inline-flex;
-  padding: 3px;
+  padding: var(--copy-control-pad);
   border: none;
   border-radius: 4px;
   background: none;
   color: var(--muted);
-  font-size: calc(0.85rem * var(--feed-text-scale));
   opacity: 0.7;
   cursor: pointer;
 }
@@ -2629,11 +2637,46 @@ html[data-page-unshown] *::after {
    first lines wrap around it rather than running under it. */
 .md pre.md-code > .md-code-copy { float: right; margin: -0.3em -0.5em 0.2em 0.6em; }
 /* A selectable prompt's copy control (src/feed/rows/blocks.ts) copies the
-   whole prompt. It floats at the bubble's top right, in the prompt's own text
+   whole prompt. It sits at the bubble's top right, in the prompt's own text
    color, and shows only while the bubble is the selected entry (owner
-   request, 2026-10-20). */
-.prompt-copy { display: none; float: right; margin: -0.2em -0.4em 0.2em 0.6em; color: inherit; }
+   request, 2026-10-20).
+   ONE GAP FROM THE TOP AND RIGHT EDGES, INSIDE THE BUBBLE ALWAYS (owner
+   request, 2026-10-24: it was often off the bubble's right-hand side). It
+   used to float in the scroll box with a negative right margin, but that
+   box's right edge is only `--bubble-scroll-gap` inside the bubble, and in
+   from it by the system bar's gutter (0px overlay, about 14px classic), so
+   the margin pushed the control past the bubble's edge into the box's clip
+   with an overlay bar and left it a gutter further in with a classic one. It
+   is now placed against the BUBBLE (`.bubble` is positioned, see FIX2 below),
+   `--prompt-copy-gap` from its top and right padding edges, which no gutter,
+   fold or content moves. Its containing block is outside the scroll box, so
+   the box's clip never cuts it.
+   Out of flow it reserves no room, so the scroll box's `::before` floats right where
+   it used to and takes that room instead: the first line of the prompt wraps
+   short of the control, `--prompt-copy-text-gap` from it, and every later
+   line runs the bubble's full width. With a classic bar the reservation is a
+   gutter wider than it needs to be, never narrower. */
+/* The gap tokens, declared once for both of their readers, the control and its
+   reservation, each of which resolves them against its own (equal) size. */
+.prompt-copy,
+.bubble[data-role="prompt"] > :has(> .prompt-copy)::before {
+  --prompt-copy-gap: calc(var(--bubble-pad-y) - 0.2em);
+  --prompt-copy-text-gap: 0.6em;
+}
+.prompt-copy {
+  display: none;
+  position: absolute;
+  top: var(--prompt-copy-gap);
+  right: var(--prompt-copy-gap);
+  color: inherit;
+}
 .bubble.entry-selected > * > .prompt-copy { display: inline-flex; }
+.bubble.entry-selected > :has(> .prompt-copy)::before {
+  content: "";
+  float: right;
+  width: calc(var(--prompt-copy-gap) + var(--copy-control-box) + var(--prompt-copy-text-gap) - var(--bubble-scroll-gap));
+  height: calc(var(--prompt-copy-gap) + var(--copy-control-box) - var(--bubble-pad-y));
+}
 .md a { color: var(--accent); }
 /* A link in a blue prompt bubble takes the prompt's own link color. A held
    prompt keeps --accent, since its fill is grey, not blue. */
@@ -2645,6 +2688,14 @@ html[data-page-unshown] *::after {
 .bubble[data-variant="user"] {
   --code-bg: var(--prompt-code-bg);
   --code-block-bg: var(--prompt-code-bg);
+}
+/* A REPLY'S QUOTED RESPONSE IS GREY (owner request, 2026-10-24: it was blue
+   like the prompt): an opened reply draws the response it quotes as a code
+   block (src/feed/rows/blocks.ts `drawFeedQuoteBlock`), filled with the
+   RESPONSE bubble's own token, `--assistant`, exactly, so it reads as the
+   answer it came from rather than as the person's own code. */
+.bubble[data-variant="user"] .prompt-block-quote {
+  --code-block-bg: var(--assistant);
 }
 /* A known slash command the prompt names, marked as the composer marks it. */
 .bubble[data-variant="user"] .known-command { color: var(--known-command); font-weight: 600; }

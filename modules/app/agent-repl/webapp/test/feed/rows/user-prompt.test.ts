@@ -366,6 +366,41 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
       restore();
     }
   });
+
+  it("fills the quoted response's code block with the response bubble's grey", () => {
+    // Arrange
+    const restore = installStylesheet();
+    const el = drawFeedUserPrompt(reply());
+    document.body.append(el);
+    try {
+      // Act
+      const parts = el.querySelector(`.${QUOTE_PARTS_CLASS}`) as Element;
+      // Assert
+      expect([cascadedValue(parts, "--code-block-bg"), parts.querySelector("pre.md-code") !== null]).toEqual([
+        "var(--assistant)",
+        true,
+      ]);
+    } finally {
+      el.remove();
+      restore();
+    }
+  });
+
+  it("leaves the person's own code blocks the prompt's blue", () => {
+    // Arrange
+    const restore = installStylesheet();
+    const el = drawFeedUserPrompt(reply());
+    document.body.append(el);
+    try {
+      // Act
+      const words = el.querySelector(".prompt-block-text") as Element;
+      // Assert
+      expect(cascadedValue(words, "--code-block-bg")).toBe("var(--prompt-code-bg)");
+    } finally {
+      el.remove();
+      restore();
+    }
+  });
 });
 
 describe("drawFeedUserPrompt: the copy control", () => {
