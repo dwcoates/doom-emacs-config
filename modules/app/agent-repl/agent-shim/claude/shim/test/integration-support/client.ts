@@ -324,6 +324,7 @@ export function freshSession(
 ): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     workspaceName: "parser-fix",
+    profile: { kind: { case: "agent", value: {} } },
     source: {
       case: "fresh",
       value: create(shimv1.StartSessionFreshSchema, {
@@ -342,6 +343,7 @@ export function resumeSession(
 ): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     workspaceName: "parser-fix",
+    profile: { kind: { case: "agent", value: {} } },
     source: {
       case: "resume",
       value: create(shimv1.StartSessionResumeSchema, {

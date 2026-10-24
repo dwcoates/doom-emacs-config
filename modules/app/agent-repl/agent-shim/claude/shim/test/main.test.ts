@@ -956,6 +956,7 @@ describe("queryFactory", () => {
 
   function spec(overrides: Partial<QuerySpec> = {}): QuerySpec {
     return {
+      profile: { kind: "agent" },
       binding: { kind: "fresh", sessionId: "session-1" },
       workspaceName: "parser-fix",
       permissionMode: "default",
@@ -1572,6 +1573,7 @@ describe("queryFactory forwards the whole spec to the real query", () => {
 
   function spec(overrides: Partial<QuerySpec> = {}): QuerySpec {
     return {
+      profile: { kind: "agent" },
       binding: { kind: "fresh", sessionId: "session-1" },
       workspaceName: "parser-fix",
       permissionMode: "default",
@@ -1589,6 +1591,17 @@ describe("queryFactory forwards the whole spec to the real query", () => {
 
     // Assert.
     expect(calls[0]).toMatchObject({ model: "claude-opus-5" });
+  });
+
+  it("hands the real vendor the session's profile", async () => {
+    // Arrange.
+    const real = factory(false, env, "/ws");
+
+    // Act.
+    await real(spec({ profile: { kind: "chat", systemPrompt: "Answer questions." } }));
+
+    // Assert.
+    expect(calls[0]).toMatchObject({ profile: { kind: "chat", systemPrompt: "Answer questions." } });
   });
 
   it("omits the model entirely when the session named none", async () => {
@@ -1685,6 +1698,7 @@ describe("queryFactory hands the mocked vendor the per-task stop declaration", (
     // Arrange: the describe block's mocked fake seam.
     // Act.
     await factory(true, env, cwd)({
+      profile: { kind: "agent" },
       binding,
       workspaceName: "parser-fix",
       permissionMode: "default",
@@ -1697,10 +1711,27 @@ describe("queryFactory hands the mocked vendor the per-task stop declaration", (
     expect(handed[0]).toMatchObject({ perTaskStopAffordance: true });
   });
 
+  it("hands the mocked vendor the session's profile", async () => {
+    // Arrange: the describe block's mocked fake seam.
+    // Act.
+    await factory(true, env, cwd)({
+      profile: { kind: "chat", systemPrompt: "Answer questions." },
+      binding: { kind: "fresh", sessionId: "session-1" },
+      permissionMode: "default",
+      canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
+      abortController: new AbortController(),
+      prompt: (async function* () {})(),
+    });
+
+    // Assert.
+    expect(handed[0]).toMatchObject({ profile: { kind: "chat", systemPrompt: "Answer questions." } });
+  });
+
   it("hands the mocked vendor the rollback's fork point and dropped turn", async () => {
     // Arrange: the describe block's mocked fake seam.
     // Act.
     await factory(true, env, cwd)({
+      profile: { kind: "agent" },
       binding: { kind: "resume", resumeSessionId: "vendor-old" },
       workspaceName: "parser-fix",
       permissionMode: "default",
@@ -1732,6 +1763,7 @@ describe("queryFactory under --fake", () => {
 
     // Act.
     const query = await create({
+      profile: { kind: "agent" },
       binding: { kind: "resume", resumeSessionId: "vendor-old" },
       workspaceName: "parser-fix",
       permissionMode: "plan",

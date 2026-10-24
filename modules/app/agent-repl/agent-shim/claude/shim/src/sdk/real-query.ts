@@ -33,6 +33,7 @@
  * engine.
  */
 import { spawn } from "node:child_process";
+import type { SessionProfile } from "../engine/profile.js";
 import type { McpServerConfig, Options, SpawnedProcess, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
 import { bindLog } from "../log.js";
 import { systemPromptOption } from "../metaprompt.js";
@@ -81,6 +82,8 @@ export type VendorBinding =
 
 /** Everything a real query needs that is not fixed policy. */
 export interface RealQuerySpec {
+  /** The kind of session, which decides settings, tools and the system prompt. */
+  readonly profile: SessionProfile;
   /** The workspace directory. The session's cwd; never derived from process.cwd() here. */
   readonly cwd: string;
   /** The workspace's name, which the system prompt states (metaprompt.ts, workspaceSection). */
@@ -235,10 +238,7 @@ function defaultSpawn(options: SpawnOptions): SpawnedProcess {
  */
 export function realQueryOptions(spec: RealQuerySpec, mcpServers: Record<string, McpServerConfig>): Options {
   const options: Options = {
-    systemPrompt: systemPromptOption(spec.workspaceName, spec.home),
-    mcpServers,
-    allowedTools: [...AGENT_REPL_AUTO_ALLOWED_TOOLS],
-    settingSources: ["user", "project", "local"],
+    ...profileOptions(spec, mcpServers),
     includePartialMessages: true,
     forwardSubagentText: true,
     // REGRESSION (2026-09-23): an interrupt killed every background subagent,
@@ -342,4 +342,39 @@ export function asQueryLike(query: object): QueryLike {
     }
   }
   return query as QueryLike;
+}
+
+/**
+ * The options a session's profile decides.
+ *
+ * AN AGENT SESSION is the workspace agent: the vendor's coding preset with the
+ * metaprompt appended, agent-repl's own tools pre-allowed, and every settings
+ * source (which `denied.by_policy` gate emissions need).
+ *
+ * A CHAT SESSION answers questions in a zettel thread and must inherit nothing
+ * of the user's agent setup: no settings sources (so no skills, CLAUDE.md or
+ * memory), no tools of any kind, no MCP servers, and the daemon's system prompt
+ * in place of the coding preset.
+ */
+export function profileOptions(
+  spec: RealQuerySpec,
+  mcpServers: Record<string, McpServerConfig>,
+): Pick<Options, "systemPrompt" | "mcpServers" | "allowedTools" | "settingSources" | "tools"> {
+  switch (spec.profile.kind) {
+    case "agent":
+      return {
+        systemPrompt: systemPromptOption(spec.workspaceName, spec.home),
+        mcpServers,
+        allowedTools: [...AGENT_REPL_AUTO_ALLOWED_TOOLS],
+        settingSources: ["user", "project", "local"],
+      };
+    case "chat":
+      return {
+        systemPrompt: { type: "custom", prompt: spec.profile.systemPrompt },
+        mcpServers: {},
+        allowedTools: [],
+        settingSources: [],
+        tools: [],
+      };
+  }
 }

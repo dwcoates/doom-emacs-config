@@ -39,10 +39,43 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
+      profile: { kind: { case: "agent", value: {} } },
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "v-1" }),
       },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartSessionRequest(request))).toBeUndefined();
+  });
+
+  it("refuses a request with no session profile", () => {
+    // Arrange.
+    const request = create(shimv1.StartSessionRequestSchema, {
+      source: { case: "resume", value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "v-1" }) },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartSessionRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("refuses a chat profile with a blank system prompt", () => {
+    // Arrange.
+    const request = create(shimv1.StartSessionRequestSchema, {
+      profile: { kind: { case: "chat", value: { systemPrompt: { text: "  " } } } },
+      source: { case: "resume", value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "v-1" }) },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartSessionRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("accepts a chat profile with its system prompt", () => {
+    // Arrange.
+    const request = create(shimv1.StartSessionRequestSchema, {
+      profile: { kind: { case: "chat", value: { systemPrompt: { text: "Answer questions." } } } },
+      source: { case: "resume", value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "v-1" }) },
     });
 
     // Act, Assert.
@@ -61,6 +94,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
+      profile: { kind: { case: "agent", value: {} } },
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, {
@@ -78,6 +112,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
+      profile: { kind: { case: "agent", value: {} } },
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, {
@@ -95,6 +130,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
+      profile: { kind: { case: "agent", value: {} } },
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "" }),
@@ -111,6 +147,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
+      profile: { kind: { case: "agent", value: {} } },
       source: {
         case: "fresh",
         value: create(shimv1.StartSessionFreshSchema, {
@@ -128,6 +165,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
+      profile: { kind: { case: "agent", value: {} } },
       source: {
         case: "fresh",
         value: create(shimv1.StartSessionFreshSchema, {
@@ -145,6 +183,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
+      profile: { kind: { case: "agent", value: {} } },
       source: {
         case: "fresh",
         value: create(shimv1.StartSessionFreshSchema, {
@@ -573,6 +612,7 @@ describe("validateStartSessionRequest cold remediation", () => {
   ): shimv1.StartSessionRequest {
     return create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
+      profile: { kind: { case: "agent", value: {} } },
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, {

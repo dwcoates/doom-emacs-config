@@ -37,6 +37,7 @@ import { existsSync, mkdirSync, watch, writeFileSync, type FSWatcher } from "nod
 import { dirname } from "node:path";
 
 import { bindLog } from "../log.js";
+import type { SessionProfile } from "../engine/profile.js";
 import type {
   AccountInfoLike,
   AccountUsageLike,
@@ -452,6 +453,12 @@ export function defaultSpoolRoot(): string {
 
 /** What the entrypoint knows about a fake session when it builds one. */
 export interface FakeQueryOpts {
+  /**
+   * The session's profile, as the real query would receive it. The mock logs
+   * its kind on the session-start record, so a spawned shim's tests can assert
+   * which profile reached the vendor.
+   */
+  readonly profile?: SessionProfile;
   /** The workspace directory; every record's `cwd` and the slug's source. */
   readonly cwd?: string;
   /** `CLAUDE_CONFIG_DIR` — the account root the transcript tree hangs under. */
@@ -1741,6 +1748,7 @@ export function createFakeQuery(
         init_timing: initAfterFirstTurn ? "after-first-turn" : "at-start",
         resumed: opts.resume !== undefined,
         workspace_dir: cwd,
+        ...(opts.profile === undefined ? {} : { session_profile: opts.profile.kind }),
         // THE REWIND TARGET, as the vendor received it. PRESENT ONLY WHEN THE
         // SHIM NAMED ONE — a sentinel would make every plain start look like a
         // rewind to a reader keying on the field. A spawned shim's only

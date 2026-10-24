@@ -52,6 +52,19 @@ export function validateStartSessionRequest(request: shimv1.StartSessionRequest)
     if (request.workspaceName === "") {
       throw invalidArgument("start_session.workspace_name is empty; the system prompt names the workspace the session runs in");
     }
+    // THE PROFILE IS NEVER GUESSED: an unset one is refused rather than read
+    // as an agent session.
+    switch (request.profile?.kind.case) {
+      case "agent":
+        break;
+      case "chat":
+        if ((request.profile.kind.value.systemPrompt?.text ?? "").trim() === "") {
+          throw unsetOneof("start_session.profile.chat.system_prompt");
+        }
+        break;
+      default:
+        throw unsetOneof("start_session.profile");
+    }
     switch (request.source.case) {
       case "fresh": {
         const fresh = request.source.value;

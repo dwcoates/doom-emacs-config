@@ -33,6 +33,7 @@ export function said(text = "hello"): conversationv1.UserSaid {
 export function startSessionRequest(): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     workspaceName: "parser-fix",
+    profile: { kind: { case: "agent", value: {} } },
     source: {
       case: "fresh",
       value: create(shimv1.StartSessionFreshSchema, {
