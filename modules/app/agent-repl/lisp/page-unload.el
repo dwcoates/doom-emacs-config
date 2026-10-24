@@ -44,6 +44,16 @@
 ;; switch mounts a workspace with no page as it mounts a new one.  Until then
 ;; the pre-creation pass (webview-recovery.el) leaves it unmade: the mount's
 ;; one eligibility answer refuses it as `:unloaded'.
+;;
+;; A REMOUNT THE USER LEFT BEFORE IT DREW IS ABANDONED (owner ruling,
+;; 2026-10-24).  A remounted page boots in the one web content process every
+;; page shares, so while it loads it holds up the page the user flipped on
+;; to.  A user who leaves a page before its conversation has drawn is
+;; flipping through workspaces and does not want that one, so its load is
+;; cancelled: the host is asked whether the page has drawn (its `drawn'
+;; call), and a page that has not is unloaded as any other is, the daemon
+;; told first (`agent-repl-page-unload--abandon').  It comes back on the
+;; next switch to it.
 ;;; Code:
 (require 'cl-lib)
 
@@ -57,6 +67,12 @@
 (declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
 (declare-function agent-repl--panels-mount-awaited-view "panels" (ws))
 (declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
+(declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
+(declare-function agent-repl--webhost-id "webhost" (ws))
+(declare-function agent-repl--webhost-answered "webhost" (raw))
+(declare-function agent-repl-webhost-parse-answer "webhost" (raw))
+(declare-function agent-repl-webhost-read "webhost" (method args callback))
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-roster-update-functions)
 
@@ -123,7 +139,9 @@ The page shown until now was looked at when it was shown for at least
     (unless (equal previous ws)
       (agent-repl-page-unload--note-use now)
       (setq agent-repl-page-unload--shown ws
-            agent-repl-page-unload--shown-since now))))
+            agent-repl-page-unload--shown-since now)
+      (when (and previous (agent-repl--ws-get previous :page-remounting))
+        (agent-repl-page-unload--abandon previous)))))
 
 (defun agent-repl-page-unload-note-mounted (ws)
   "Record that WS's page was just mounted: a look, and no longer unloaded."
@@ -158,6 +176,7 @@ A switch after an idle spell starts the hold's clock afresh."
 Called from the switch's panel restore, which declined for want of the view
 this makes (panels.el); the restore runs again on the new view."
   (agent-repl--ws-put ws :page-unloaded nil)
+  (agent-repl--ws-put ws :page-remounting t)
   (agent-repl--info ws "elisp.page-unload.remount ws=%s" ws)
   (agent-repl--panels-mount-awaited-view ws))
 
@@ -202,6 +221,7 @@ the report was in flight."
          (progn
            (agent-repl--frontend-detach-webview ws buf)
            (agent-repl--ws-put ws :page-unloaded t)
+           (agent-repl--ws-put ws :page-remounting nil)
            (agent-repl--info ws "elisp.page-unload.unloaded ws=%s reason=%s unlooked-s=%d"
                              ws reason
                              (round (- now (or (agent-repl--ws-get ws :page-looked-at) now)))))
@@ -210,6 +230,57 @@ the report was in flight."
    (lambda ()
      (agent-repl--ws-put ws :page-unloading nil)
      (agent-repl--info ws "elisp.page-unload.kept ws=%s reason=%s why=not-reported" ws reason))))
+
+(defun agent-repl-page-unload--abandon (ws)
+  "Ask the host whether WS\='s remounted page has drawn, the user having left it.
+The answer goes to `agent-repl-page-unload--on-drawn-answer', which unloads
+a page that has not.  With no host there is no page loading to cancel."
+  (if-let ((id (agent-repl--webhost-id ws)))
+      (if (agent-repl-webhost-read "drawn" (list id) 'agent-repl-page-unload--on-drawn-answer)
+          (agent-repl--log ws "elisp.page-unload.abandon-asked ws=%s id=%s" ws id)
+        (agent-repl--ws-put ws :page-remounting nil)
+        (agent-repl--info ws "elisp.page-unload.abandon-skipped ws=%s reason=no-host" ws))
+    ;; A remounted page was mounted at its workspace's ref: one gone since is a bug.
+    (agent-repl--error ws "elisp.page-unload.abandon-failed ws=%s reason=no-ref" ws)
+    (error "Remounted workspace %s has no ref" ws)))
+
+(defun agent-repl-page-unload--on-drawn-answer (raw)
+  "Cancel the remounted page\='s load that RAW, the host\='s `drawn' answer, names.
+A page still loading is unloaded (`agent-repl-page-unload--unload'), the
+daemon told first, unless the user is back on it.  A page that has drawn,
+or that the host no longer holds, is left as it is.  Called BY SYMBOL from
+the read channel (`agent-repl-webhost-read')."
+  (agent-repl--webhost-answered raw)
+  (condition-case err
+      (let* ((answer (agent-repl-webhost-parse-answer raw))
+             (id (plist-get answer :id))
+             (outcome (plist-get answer :outcome))
+             (ws (and (stringp id) (agent-repl--ws-by-ref-id id))))
+        (cond
+         ((null ws)
+          (agent-repl--info agent-repl--page-unload-central
+                            "elisp.page-unload.abandon-dropped id=%s reason=no-workspace" id))
+         ((not (agent-repl--ws-get ws :page-remounting))
+          (agent-repl--log ws "elisp.page-unload.abandon-dropped ws=%s reason=settled" ws))
+         ((equal outcome "queued")
+          ;; The host is loading, and replays every page once it starts: the
+          ;; next switch away asks again.
+          (agent-repl--info ws "elisp.page-unload.abandon-deferred ws=%s reason=host-loading" ws))
+         ((not (equal outcome "present"))
+          (agent-repl--ws-put ws :page-remounting nil)
+          (agent-repl--info ws "elisp.page-unload.abandon-dropped ws=%s reason=%s" ws outcome))
+         ((plist-get answer :drawn)
+          (agent-repl--ws-put ws :page-remounting nil)
+          (agent-repl--info ws "elisp.page-unload.abandon-dropped ws=%s reason=drawn drawn=%s"
+                            ws (plist-get answer :drawn)))
+         ((not (agent-repl-page-unload--holdable-p ws))
+          (agent-repl--info ws "elisp.page-unload.abandon-deferred ws=%s reason=not-holdable" ws))
+         (t
+          (agent-repl--info ws "elisp.page-unload.abandon ws=%s reason=left-before-drawn" ws)
+          (agent-repl-page-unload--unload ws 'abandoned (agent-repl-page-unload--now)))))
+    (error
+     (agent-repl--error agent-repl--page-unload-central
+                        "elisp.page-unload.abandon-answer-unreadable raw=%S error=%S" raw err))))
 
 (defun agent-repl-page-unload-pass ()
   "Unload every held page whose workspace is hidden or not looked at lately.

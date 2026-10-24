@@ -271,6 +271,45 @@ Binds `reloads' and `records', newest first."
       ;; Assert
       (should (string-prefix-p "elisp.webhost.answer-unreadable" (car errors))))))
 
+;;;; ---- Parsing an answer ----
+
+(ert-deftest agent-repl-test-wh-a-parsed-answer-reads-null-and-false-as-nil ()
+  "JSON null and false both read as nil in a parsed answer."
+  ;; Arrange / Act
+  (let ((answer (agent-repl-webhost-parse-answer "{\"drawn\":null,\"focused\":false}")))
+    ;; Assert
+    (should (equal answer '(:drawn nil :focused nil)))))
+
+(ert-deftest agent-repl-test-wh-a-parsed-answer-reads-arrays-as-lists ()
+  "A JSON array in an answer reads as a list."
+  ;; Arrange / Act
+  (let ((answer (agent-repl-webhost-parse-answer "{\"ids\":[\"a\",\"b\"]}")))
+    ;; Assert
+    (should (equal (plist-get answer :ids) '("a" "b")))))
+
+(ert-deftest agent-repl-test-wh-parsing-an-unreadable-answer-signals ()
+  "An answer that is not JSON signals rather than reading as nothing."
+  ;; Arrange / Act / Assert
+  (should-error (agent-repl-webhost-parse-answer "not json") :type 'json-parse-error))
+
+(ert-deftest agent-repl-test-wh-every-host-answer-reader-parses-through-the-one-helper ()
+  "The webhost's own record and the page-unload cancel both parse with the helper."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((raw "{\"op\":\"drawn\",\"id\":\"none\",\"outcome\":\"absent\",\"notes\":[]}")
+          (parsed nil)
+          (real (symbol-function 'agent-repl-webhost-parse-answer)))
+      (cl-letf (((symbol-function 'agent-repl-webhost-parse-answer)
+                 (lambda (text) (push text parsed) (funcall real text)))
+                ((symbol-function 'agent-repl--ws-by-ref-id) #'ignore)
+                ((symbol-function 'agent-repl--info) #'ignore)
+                ((symbol-function 'agent-repl--log) #'ignore))
+        ;; Act
+        (agent-repl--webhost-answered raw)
+        (agent-repl-page-unload--on-drawn-answer raw))
+      ;; Assert: the cancel's own parse, and the webhost record it hands on.
+      (should (equal parsed (list raw raw raw))))))
+
 ;;;; ---- Calls without a host ----
 
 (ert-deftest agent-repl-test-wh-a-call-without-a-host-sends-nothing ()
