@@ -4218,6 +4218,19 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     expect(card).toEqual(rgbOf(block, "--panel-bg"));
   });
 
+  it("dims an expanded repository header below --fg, still above the collapsed grey (owner request, 2026-10-24)", () => {
+    // Arrange
+    const block = darkThemeBlock();
+
+    // Act
+    const [collapsed, expanded, fg] = ["--repo-head-collapsed", "--repo-head-expanded", "--fg"].map((token) =>
+      luminance(rgbOf(block, token)),
+    );
+
+    // Assert
+    expect([collapsed < expanded, expanded < fg]).toEqual([true, true]);
+  });
+
   it("sits the rail darker than the feed, as Claude's sidebar (owner ruling, 2026-10-17)", () => {
     // Arrange
     const block = darkThemeBlock();
