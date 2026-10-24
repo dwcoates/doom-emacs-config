@@ -9,18 +9,15 @@ package zettelclient
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 
 	zettelv1 "agentrepl/proto/zettel/v1"
 	"agentrepl/proto/zettel/v1/zettelv1connect"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
 
+	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -66,14 +63,7 @@ type client struct {
 // New answers a client of the zettel service at socketPath. Nothing is dialed
 // until the first call.
 func New(socketPath string) Client {
-	transport := &http2.Transport{
-		AllowHTTP: true,
-		DialTLSContext: func(ctx context.Context, _, _ string, _ *tls.Config) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", socketPath)
-		},
-	}
-	return &client{rpc: zettelv1connect.NewZettelClient(&http.Client{Transport: transport}, "http://zettel.uds")}
+	return &client{rpc: zettelv1connect.NewZettelClient(h2cclient.UnixClient(socketPath), "http://zettel.uds")}
 }
 
 // NewWith answers a client over an existing zettel.v1 client (tests).
