@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/prompts"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -736,3 +738,50 @@ func TestCreateDoesNotDisambiguateASuppliedName(t *testing.T) {
 
 // The headless-failure cause helper moved to the headless package as
 // headless.CauseOf; its tests live in internal/headless/api_test.go.
+
+func TestFreeNameAgainstSkipsWhatElseHoldsAName(t *testing.T) {
+	cases := []struct {
+		name     string
+		held     map[string]bool
+		probeErr error
+		want     string
+		wantErr  bool
+	}{
+		{name: "a free name is taken as it is", want: "why-sky"},
+		{name: "a held name takes the next suffix", held: map[string]bool{"why-sky": true}, want: "why-sky-2"},
+		{name: "every held suffix is skipped", held: map[string]bool{"why-sky": true, "why-sky-2": true}, want: "why-sky-3"},
+		{name: "a failed probe is surfaced", probeErr: errors.New("stat failed"), wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			probe := func(candidate string) (bool, error) { return tc.held[candidate], tc.probeErr }
+
+			// Act
+			got, release, err := f.verbs.(*verbs).freeNameAgainst(context.Background(), f.log.logger, "why-sky", probe)
+
+			// Assert
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+			defer release()
+			if got != tc.want {
+				t.Fatalf("name = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEveryNameIsDisambiguatedByFreeNameAgainst(t *testing.T) {
+	// Arrange / Act: the suffix loop is written once.
+	loops := sourcescan.Count(t, `"-" + strconv.Itoa(suffix)`)
+
+	// Assert
+	if loops != 1 {
+		t.Fatalf("name suffixes are composed at %d sites, want 1: freeNameAgainst", loops)
+	}
+}
