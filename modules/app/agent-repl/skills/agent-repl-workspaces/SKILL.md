@@ -187,13 +187,31 @@ Choose the combination from what the work needs:
   (`deploy_config_invalid`). The file is read at every deploy, so an edit
   applies to the next one.
 - A deploy runs THREE STAGES in order, in the deploying workspace's own feed
-  bubble, one tab per hook:
+  bubble, one tab per hook. Each stage runs one deploy at a time, in queue
+  order, unless `concurrent:` names it:
 
-| stage | holds | runs |
-|---|---|---|
-| `pre_deploy` | `hooks` (a list), then the optional built-in `local_merge` | before anything lands |
-| `deploy` | one hook, optional | after the local merge landed |
-| `post_deploy` | `hooks` (a list) | last |
+| stage | holds | runs | may be concurrent |
+|---|---|---|---|
+| `pre_deploy` | `hooks` (a list), then the optional built-in `local_merge` | before anything lands | yes, without a `local_merge` |
+| `deploy` | one hook, optional | after the local merge landed | yes, with `pre_deploy` |
+| `post_deploy` | `hooks` (a list) | last | no |
+
+- **`concurrent:` names a leading run of stages that every deploy waiting in
+  the repository's queue runs side by side, ahead of its turn.** Its one key
+  is the stage the run goes through: `through_pre_deploy: {}`, or
+  `through_deploy: {}` for `pre_deploy` and `deploy`. Unset, every stage runs
+  one deploy at a time.
+  - After its concurrent stages, a deploy waits until every deploy queued
+    ahead of it has finished, then runs the rest one at a time. A deploy whose
+    concurrent stages finish first still enters the next stage in queue
+    order. Its footer reads `awaiting turn: N ahead` while it waits.
+  - Use it when a stage waits on something outside the daemon, such as a
+    deploy hook that opens a pull request and waits for it to merge: that
+    wait then holds no other deploy back.
+  - A concurrent stage between two one-at-a-time stages cannot be written.
+    `concurrent:` beside `pre_deploy.local_merge` is refused
+    (`deploy_config_invalid`), because a local merge lands on the target,
+    which one deploy at a time moves. So is `concurrent: {}` with no stage.
 
 - Every hook entry is `hook:` (exactly one of `script:` or `prompt:`) plus
   `runs_for:` (`main: {}`, only when the deploy lands on the repository's main
@@ -210,7 +228,9 @@ Choose the combination from what the work needs:
 - `local_merge:` is the built-in local landing: `tests:` names the test
   runner (`agent_repl_suites: {script_path: ...}`), and `version_tag: {}`
   makes every agent's deploy onto main carry a version increment and tag the
-  landing. Only a repository with a local merge races its queue.
+  landing. Only a repository with a local merge races its queue; a
+  repository with `concurrent:` runs its concurrent stages ahead of its turn
+  instead.
 - **A failed hook fails the deploy**: a script that exits non-zero, runs past
   its timeout or cannot start, or a prompt whose turn does not complete. The
   workspace stays open and is handed the failure to investigate. A failure
@@ -247,6 +267,7 @@ deploy:
 | configured per repository | fixed in the daemon |
 |---|---|
 | every pre-deploy, deploy and post-deploy hook, and each one's scope | the queue: its order, placement, pause, eviction and racing window |
+| which leading stages run concurrently (`concurrent`) | that the rest are entered one deploy at a time, in queue order |
 | whether a local merge runs, and its test runner | the local merge's own steps: rebase with conflict resolution, the test gate with fixing attempts, the non-fast-forward merge commit |
 | whether the repository is versioned (`version_tag`) | the version arithmetic and the tag's form |
 | the rollout, as a deploy hook calling `roll-out-landing` | when a requested rollout fires (after the deploy's report) |
