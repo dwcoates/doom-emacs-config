@@ -172,6 +172,10 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   version, everything else). The only change to existing UI is that the
   "Workspaces" title becomes clickable, opening a dropdown of apps: today
   Workspaces and Chat.
+- The topbar stays essentially unchanged (login, model selection, token
+  count and the rest). Where it shows the workspace name, it shows the chat's
+  name, generated automatically when the chat is created, and the purple
+  summary is the chat's, computed the way a workspace's is.
 - With Chat selected, everything below the head changes: the Open, Hidden,
   Recently Merged and other bands give way to a list of chats, most recent
   first. The search icon then searches the chats' contents.
@@ -233,10 +237,16 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   - Open: whether
     a premise records a revision; how cycles among premises are prevented.
 
-- Chat nodes run on the Messages API, with context built from the graph,
-  instead of Agent SDK sessions. A linear SDK transcript does not match a
-  chain of earlier nodes, and a node with several parents has no single
-  session to resume.
+- Chat answers are billed to the Claude subscription, not an API key (owner,
+  2026-10-24). So they run through the Agent SDK (the renamed Claude Code
+  SDK), which runs the Claude Code binary under the same logins agent-repl
+  uses, rather than the Messages API, which needs an API key. Each answer is
+  a fresh one-shot query whose context zettel builds from the graph, so the
+  SDK's linear session history never comes into it. The SDK loads skills,
+  `CLAUDE.md` and memory from `~/.claude` by default, which a chat answer must
+  not inherit. Anthropic's Agent SDK docs say third-party developers may not
+  offer claude.ai login for their products unless approved; zettel runs on
+  its owner's own login, as agent-repl does.
 - Highlights in agent feeds land in the knowledge graph too (inferred from the
   owner's answer on surrounding text, not yet confirmed).
 - How sightings are counted: a bubble fully on screen, recorded by the daemon.
@@ -283,10 +293,10 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 
 ## Known complications
 
-- agent-repl runs Claude through Claude Code accounts (subscription logins,
-  routed by `daemon/internal/account`), not API keys. The Messages API needs
-  an API key, which is a separate bill. The alternative is answering chat
-  questions through the Agent SDK with no tools, which uses the same login.
+- The Agent SDK is TypeScript or Python, and the zettel service is Go. Open:
+  whether the service runs the Claude Code CLI headless (`claude -p` with JSON
+  output, which the SDK docs offer for other languages), or a TypeScript
+  process built on the SDK, like agent-repl's shim.
 
 - Several parents makes context grow with how many branches meet, on top of
   how deep the chain is, and it loses prompt caching: a combination of
