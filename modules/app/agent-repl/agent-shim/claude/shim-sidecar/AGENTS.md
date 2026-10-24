@@ -1286,25 +1286,18 @@ vendor equivalent in turn.
 From this directory:
 
 ```bash
-go build ./... && go vet ./... && ../../../bin/background.sh go test -race ./...
+go build ./... && go vet ./...
 ```
 
-Every test run goes through `../../../bin/background.sh`, at background
-priority; the bare `go test` lines below are the arguments to prefix with it.
+Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate.
 
 THE TWO SUITES, AND WHY THE INVOCATION MATTERS. `./...` is the union of the
 unit packages and `integration/`, run once each — it is not a third suite. The
 integration package carries no build tag on purpose (a tag would take it out of
-`go vet ./...` and out of `make coverage`, which runs `go test -coverpkg=./...
-./...`), so naming it separately is naming it AGAIN:
-
-```bash
-go test ./internal/... .            # the unit suites alone (~0.3s)
-go test ./integration/              # the integration suite alone (~12s)
-go test ./...                       # both, once each — NOT unit + a rerun
-```
-
-Run the union, or run the halves; never both in one pass.
+`go vet ./...` and out of the suite's coverage, which builds every package with
+`-coverpkg=./...`), so naming it separately is naming it AGAIN. Select the packages a
+change needs (`agent-repld test run -go DIR`); never a package twice in one
+run.
 
 - Table-driven tests, AAA (Arrange/Act/Assert), ONE edge case per test
   function, one `_test.go` per source file.
@@ -1322,9 +1315,9 @@ Run the union, or run the halves; never both in one pass.
 - The integration suite exercises the LOST arms through the window flags above
   (`integration/lost_policy_test.go`), with every wait a bounded receive on a
   real signal — a cursor advance, a store read, a log line — never a sleep.
-- `make coverage` reports per-function and aggregate statement coverage for this
-  module, and `modules/app/agent-repl/bin/test-all.sh` runs every tracked suite
-  across the module. Both are available for a review pass; neither is a gate.
+- A coverage run of the suite (`agent-repld test run -suite sidecar -coverage`)
+  reports per-function and aggregate statement coverage for this module; it is
+  available for a review pass, never a gate.
 
 ### Test wait bounds
 
@@ -2075,9 +2068,7 @@ classes reaching a warning threshold, and every failure are normal verbosity.
 
 ### Suites
 
-```
-go test ./internal/convert/... ./internal/handler/...
-```
+The packages are `internal/convert` and `internal/handler`.
 
 `internal/handler/golden_test.go` is the contract test: it drives every
 file-plane corpus fixture under `testdata/corpus/` plus the real transcript under

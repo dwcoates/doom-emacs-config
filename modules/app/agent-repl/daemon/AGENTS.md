@@ -6,19 +6,16 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
 
 ## Build and test
 
-- Every target below runs under `$(BACKGROUND)` (`../bin/background.sh`), at
-  background priority; see the module AGENTS.md. The integration harness
-  refuses a run without that helper's marker, so a raw
-  `go test -tags integration` must be prefixed with `../bin/background.sh`.
-- `make test` — `go build ./... && go vet ./... && test -z "$(gofmt -l .)" && go test ./... -count=1`
-  from this directory. Measured 2.2s wall; slowest package 1.21s
-  (`internal/gitclient`), slowest test 0.19s (`TestConfigDirForRouting`).
-  Nothing in it is parallelized within a package, because at those figures
-  per-test parallelism buys nothing measurable.
-- `make integration` — the integration suite:
-  `TMPDIR=/tmp go test -tags integration ./integration/... -timeout 180s -count=1 -parallel 8`
-  (a real daemon subprocess against a fake shim.v1 server, fake git repos and a
-  temp state root; the fake shim binary is `integration/fakeshim`).
+- Tests run through the daemon, naming the packages and tests a change needs
+  (`agent-repld test run -go DIR[=TestA]`; the `agent-repl-tests` skill says
+  how). The integration harness refuses a run the daemon did not start.
+- The unit suite: every package but `integration`. Measured 2.2s wall; slowest
+  package 1.21s (`internal/gitclient`), slowest test 0.19s
+  (`TestConfigDirForRouting`). Nothing in it is parallelized within a package,
+  because at those figures per-test parallelism buys nothing measurable.
+- The integration suite: `integration`, built with `-tags integration` (a real
+  daemon subprocess against a fake shim.v1 server, fake git repos and a temp
+  state root; the fake shim binary is `integration/fakeshim`).
 - **EVERY TEST IN THE INTEGRATION SUITE CALLS `t.Parallel()`, and a new one
   must too.** The suite's fixture is per-test and shares nothing: each test
   gets its own `t.TempDir()` root, its own short socket root under `/tmp`, its
@@ -31,10 +28,13 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   118.3s against 18.4s at `-parallel 8`. A `t.Run` subtest that builds its OWN
   daemon fixture calls `t.Parallel()` too; one that reads state an earlier
   sibling wrote (`register_select_test.go`'s re-registration table) does not.
-- `GOTEST_PARALLEL` bounds the concurrency; see the Makefile for the measured
-  basis. Do not raise it without re-measuring: every test owns a real daemon
-  process plus a fake shim, and at 16 that load pushed ordinary daemon steps
-  past `harness.DefaultTimeout` in tests that are green at 8.
+- The roster bounds the concurrency (`testrun/roster`, the daemon suite's
+  `TestParallel` for `integration`: 8 tests per chunk). MEASURED BASIS
+  (16-core host, `-count=3`, all green): the suite ran 118.3s at -parallel 1,
+  32.5s at 4, 18.4s at 8, 13.8s at 12 and 13.3s at 16. Do not raise it
+  without re-measuring: every test owns a real daemon process plus a fake
+  shim, and at 16 that load pushed ordinary daemon steps past
+  `harness.DefaultTimeout` in tests that are green at 8.
   **Every run lives under ONE owner-locked run root** (`/tmp/arrun*`,
   `integration/harness/runroot.go`): the built binaries, every state root,
   and every `t.TempDir` (the harness points `TMPDIR` into it). The run holds an

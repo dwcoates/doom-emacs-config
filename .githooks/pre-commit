@@ -72,7 +72,7 @@ fi
 # worktrees that still carry the pre-rename path.
 STAGED_FILES="$(git diff --cached --name-only)"
 if ! printf '%s\n' "$STAGED_FILES" | grep -qE \
-  '^(modules/app/(agent|claude)-repl/(.*\.(el|go|ts|tsx|proto)|(.*/)?(go\.(mod|sum)|package(-lock)?\.json|tsconfig[^/]*\.json|Makefile)|bin/(test-[^/]+|report-nonlisp-coverage|report-logging-density)\.sh)|\.githooks/(pre-commit|test-pre-commit\.sh))$'; then
+  '^(modules/app/(agent|claude)-repl/(.*\.(el|go|ts|tsx|proto)|(.*/)?(go\.(mod|sum)|package(-lock)?\.json|tsconfig[^/]*\.json|Makefile)|bin/(test-[^/]+|report-logging-density)\.sh)|\.githooks/(pre-commit|test-pre-commit\.sh))$'; then
   exit 0
 fi
 

@@ -1,0 +1,70 @@
+// endpoint_run_redundancy.proto — RunRedundancy: measure which test cases are
+// redundant (`testrun redundancy`) from one workspace's worktree, and stream
+// the measurement's output.
+//
+// THE DAEMON IS THE ONE RUNNER OF TESTS, and a measurement runs tests: every
+// case alone, under every mutant. So it runs where every test run does, from
+// the workspace's own worktree, at background priority, and never by hand.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "testrun/v1/redundancy.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Run one measurement or report from one workspace's worktree.
+message RunRedundancyRequest {
+  // REQUIRED. The workspace whose worktree the measurement runs in.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // REQUIRED. The measurement or report, exactly as the runner takes it.
+  testrun.v1.RedundancyRequest redundancy = 2;
+}
+
+// One frame of the measurement's stream.
+message RunRedundancyResponse {
+  // Exactly one arm is set. A measurement that starts streams its output,
+  // line by line, and ends with `ended`; one the daemon cannot start streams
+  // one `error` and closes.
+  oneof frame {
+    // One line of the measurement's output.
+    string output_line = 1;
+    // The measurement ended.
+    RunRedundancyEnded ended = 2;
+    // The daemon could not run the measurement.
+    RunRedundancyError error = 3;
+  }
+}
+
+// How the measurement ended.
+message RunRedundancyEnded {
+  // The tool's exit status: 0 measured, anything else failed (its output says
+  // why).
+  int32 exit_code = 1;
+}
+
+// Why the measurement could not run.
+message RunRedundancyError {
+  // Which failure it was.
+  oneof cause {
+    // No workspace the daemon serves is the one named.
+    RunRedundancyUnknownWorkspace unknown_workspace = 1;
+    // The request names no command.
+    RunRedundancyNoCommand no_command = 2;
+    // The runner could not be started.
+    RunRedundancyRunnerFailed runner_failed = 3;
+  }
+}
+
+// No workspace the daemon serves is the one named.
+message RunRedundancyUnknownWorkspace {}
+
+// The request names no command.
+message RunRedundancyNoCommand {}
+
+// The runner could not be started.
+message RunRedundancyRunnerFailed {
+  // What went wrong.
+  string detail = 1;
+}

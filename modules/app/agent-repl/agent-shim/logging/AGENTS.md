@@ -56,7 +56,7 @@ that runtime. A convention every runtime happens to follow but whose divergence
 is harmless belongs in `logging-contract.md` as prose, not here as code.
 
 New Go packages here are registered as the `logging` component in
-`bin/report-nonlisp-coverage.sh`, `bin/report-logging-density.sh` and
+`testrun/roster`, `bin/report-logging-density.sh` and
 `bin/test-all.sh`, and as a service prerequisite in `bin/build-frontend.sh` and
 `bin/readiness-report.sh`.
 

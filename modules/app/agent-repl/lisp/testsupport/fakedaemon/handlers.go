@@ -4,7 +4,7 @@ package main
 // per rpc.  Unary methods all delegate to handleUnary (record, then answer
 // from the scripted table or the default synthesis).  The three streams
 // Emacs holds are implemented against the subscriber registry; every other
-// stream belongs to the webapp or to the agent CLI (RunTests), which this fake
+// stream belongs to the webapp or to the agent CLI (RunTests, RunRedundancy), which this fake
 // deliberately does not mock, and answers CodeUnimplemented so a wrong caller
 // fails loudly.
 
@@ -553,6 +553,14 @@ func (s *fakeServer) UpdateDeployHold(ctx context.Context, req *connect.Request[
 
 func (s *fakeServer) RollOutLanding(ctx context.Context, req *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error) {
 	return handleUnary[v1.RollOutLandingRequest, v1.RollOutLandingResponse](ctx, s, "RollOutLanding", req.Msg)
+}
+
+func (s *fakeServer) RunRedundancy(ctx context.Context, req *connect.Request[v1.RunRedundancyRequest], stream *connect.ServerStream[v1.RunRedundancyResponse]) error {
+	s.record(ctx, "RunRedundancy", req.Msg)
+	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
+		map[string]any{"method": "RunRedundancy"})
+	return connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("fakedaemon mocks only Emacs's streams; RunRedundancy is the agent CLI's stream"))
 }
 
 func (s *fakeServer) RunTests(ctx context.Context, req *connect.Request[v1.RunTestsRequest], stream *connect.ServerStream[v1.RunTestsResponse]) error {

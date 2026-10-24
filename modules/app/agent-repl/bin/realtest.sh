@@ -1372,10 +1372,12 @@ trap sweep_end EXIT
 
 # ---- the run --------------------------------------------------------------
 #
-# BACKGROUND PRIORITY. Every realtest runs through bin/background.sh like every
-# other test. No host gate keeps other test runs off the machine (owner
-# ruling, 2026-10-14), so a breach measured while another run was loading the
-# host is read with that load in mind.
+# BACKGROUND PRIORITY. Every realtest runs through bin/low-priority.sh: the
+# same demotion every test run gets, without the test-run marker, because a
+# realtest drives the owner's live editor and is no test run the daemon starts
+# (bin/background.sh refuses every one it did not). No host gate keeps other
+# test runs off the machine (owner ruling, 2026-10-14), so a breach measured
+# while another run was loading the host is read with that load in mind.
 
 note "the vendor is forbidden for this run: $VENDOR_GUARD_ENV=1 on Emacs and everything it spawns"
 note "no picture is taken; Emacs is brought frontmost ONCE for the whole sweep and focus goes back at the end"
@@ -1399,7 +1401,7 @@ run_one() {
     AGENT_REPL_REALTEST_OUT="$RUN_DIR" \
     AGENT_REPL_REALTEST_EMACS_SOCKET="$EMACS_SOCKET" \
     AGENT_REPL_REALTEST_EMACSCLIENT="$EMACSCLIENT" \
-    "$THIS_DIR/background.sh" \
+    "$THIS_DIR/low-priority.sh" \
         go -C "$MODULE_ROOT/e2e" test -tags realtest ./realtest/ \
         -run "^${name}\$" -count=1 -v -timeout 60m ${GO_ARGS[@]+"${GO_ARGS[@]}"}
     local status=$?

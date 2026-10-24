@@ -69,7 +69,7 @@ ISOLATION_ROOT ?= ..
 # regenerate into a scratch tree and never write the committed one.
 GEN ?= gen
 
-.PHONY: all go ts lint codegen-gate conversation-isolation check-gen-version test-check-conversation-isolation test-check-generated check-generated validate coverage clean
+.PHONY: all go ts lint codegen-gate conversation-isolation check-gen-version test-check-conversation-isolation test-check-generated check-generated validate clean
 
 all: go ts
 
@@ -163,16 +163,6 @@ test-check-generated:
 
 # Validate both the source schema and the checked-in Go/TS generated artifacts.
 validate: lint test-check-conversation-isolation test-check-generated check-generated
-
-# Generated stubs are dependencies, not coverage subjects.  Each consumer's
-# own coverage configuration scopes measurement to handwritten package source.
-#
-# THE COMPONENT LIST LIVES IN bin/report-nonlisp-coverage.sh ALONE.  With no
-# arguments it runs every default component, and its `proto` component is this
-# Makefile's `validate`, run first.  A list restated here drifted: it kept
-# naming `wire` after that module was deleted, and the script refused it.
-coverage:
-	$(BACKGROUND) ../bin/report-nonlisp-coverage.sh
 
 clean:
 	rm -rf gen

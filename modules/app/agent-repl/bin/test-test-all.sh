@@ -51,6 +51,15 @@ printf 'testrun %s\n' "$*" >>"$STUB_LOG"
 printf 'marker=%s\n' "${AGENT_REPL_TEST_ALL_LOGGED:-}" >>"$STUB_LOG"
 printf 'runlog=%s\n' "${AGENT_REPL_TEST_RUN_LOG:-}" >>"$STUB_LOG"
 echo "stub testrun output"
+# A recording run stages its rows where --record-out says, as testrun does;
+# any other run leaves the path unwritten.
+recording=0 prev="" out=""
+for a in "$@"; do
+    [ "$a" = --record ] && recording=1
+    [ "$prev" = --record-out ] && out="$a"
+    prev="$a"
+done
+[ "$recording" = 1 ] && [ -n "$out" ] && : >"$out"
 exit "${STUB_TESTRUN_EXIT:-0}"
 INNER
 chmod +x "$3"
@@ -123,9 +132,10 @@ cat >"$3" <<'INNER'
 set -euo pipefail
 printf 'testrun %s\n' "$*" >>"$STUB_LOG"
 sub="$1"; shift
-RECORD_OUT="" MODULE=""
+RECORD_OUT="" MODULE="" RECORDING=0
 prev=""
 for a in "$@"; do
+    [ "$a" = "--record" ] && RECORDING=1
     [ "$prev" = "--record-out" ] && RECORD_OUT="$a"
     [ "$prev" = "--module" ] && MODULE="$a"
     prev="$a"
@@ -136,7 +146,7 @@ case "$sub" in
             (cd "$MODULE" && echo moved >moved && git add -A && git commit -m moved)
         fi
         [ "${STUB_RUN_EXIT:-0}" != 0 ] && exit "$STUB_RUN_EXIT"
-        [ -n "$RECORD_OUT" ] && printf '{"RunID":"run1","Branch":"main","Commit":"1111111111111111111111111111111111111111","Rows":[{"RunID":"run1","RecordedAt":"t","Commit":"1111111111111111111111111111111111111111","Branch":"main","Suite":"ert","Seconds":1.000,"Measure":"unit-wall-sum"}]}' >"$RECORD_OUT"
+        [ "$RECORDING" = 1 ] && [ -n "$RECORD_OUT" ] && printf '{"RunID":"run1","Branch":"main","Commit":"1111111111111111111111111111111111111111","Rows":[{"RunID":"run1","RecordedAt":"t","Commit":"1111111111111111111111111111111111111111","Branch":"main","Suite":"ert","Seconds":1.000,"Measure":"unit-wall-sum"}]}' >"$RECORD_OUT"
         exit 0
         ;;
     finish-record)
@@ -244,10 +254,11 @@ test_runs_testrun_inside_the_git_net() {
     tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
     run_test_all "$tree" "$(stub_path "$tree")" --suites ert,daemon
-    local module want
+    local module want record_out
     module="$(cd "$tree/modules/app/agent-repl" && pwd)"
-    want="$(printf 'safe --\ntestrun run --module %s --suites ert,daemon' "$module")"
-    if [ "$RUN_RC" -eq 0 ] && [ "$(grep -v -e '^go ' -e '^marker=' -e '^runlog=' "$STUB_LOG")" = "$want" ]; then
+    record_out="$(sed -n 's/^testrun run .*--record-out \(.*\)$/\1/p' "$STUB_LOG")"
+    want="$(printf 'safe --\ntestrun run --module %s --suites ert,daemon --record-out %s' "$module" "$record_out")"
+    if [ "$RUN_RC" -eq 0 ] && [ -n "$record_out" ] && [ "$(grep -v -e '^go ' -e '^marker=' -e '^runlog=' "$STUB_LOG")" = "$want" ]; then
         pass "testrun runs under the git net, with every argument"
     else
         fail "wrapper order or arguments (rc=$RUN_RC): $(cat "$STUB_LOG")"
@@ -277,6 +288,48 @@ test_record_stages_inside_the_net_then_finishes_outside_it() {
         pass "a --record run stages inside the net and finishes in a separate call outside it"
     else
         fail "record staging/finishing split (rc=$RUN_RC)" "$(cat "$STUB_LOG")"
+    fi
+    rm -rf "$tree"
+}
+
+test_a_run_that_records_nothing_never_finishes() {
+    local tree
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    run_test_all "$tree" "$(stub_path "$tree")" --suites ert
+    if [ "$RUN_RC" -eq 0 ] && grep -q '^testrun run .*--record-out ' "$STUB_LOG" && ! grep -q '^testrun finish-record ' "$STUB_LOG"; then
+        pass "every run is offered the staging path, and one that staged nothing never calls finish-record"
+    else
+        fail "a run that records nothing (rc=$RUN_RC)" "$(cat "$STUB_LOG")"
+    fi
+    rm -rf "$tree"
+}
+
+test_a_redundancy_request_runs_the_measurement_inside_the_net() {
+    local tree module repo
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    run_test_all "$tree" "$(stub_path "$tree")" --redundancy /req.pb
+    module="$(cd "$tree/modules/app/agent-repl" && pwd)"
+    repo="$(cd "$tree" && pwd)"
+    if [ "$RUN_RC" -eq 0 ] && [ "$(grep -e '^safe ' -e '^testrun ' "$STUB_LOG")" = "$(printf 'safe --\ntestrun redundancy --request /req.pb --repo %s' "$repo")" ] \
+        && grep -q "^go build .* (in $module/testrun)$" "$STUB_LOG"; then
+        pass "--redundancy builds the runner and runs the request's measurement inside the net"
+    else
+        fail "--redundancy (rc=$RUN_RC)" "$(cat "$STUB_LOG")"
+    fi
+    rm -rf "$tree"
+}
+
+test_a_redundancy_request_names_exactly_one_file() {
+    local tree
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    run_test_all "$tree" "$(stub_path "$tree")" --redundancy
+    if [ "$RUN_RC" -eq 2 ] && grep -q 'ERROR: --redundancy takes exactly one request file' "$tree/stdout" && ! grep -q '^testrun ' "$STUB_LOG"; then
+        pass "--redundancy without its request file is refused before anything runs"
+    else
+        fail "--redundancy without a file (rc=$RUN_RC)" "$(cat "$STUB_LOG")"
     fi
     rm -rf "$tree"
 }
@@ -474,6 +527,9 @@ test_the_runner_is_told_its_log() {
 
 test_runs_testrun_inside_the_git_net
 test_record_stages_inside_the_net_then_finishes_outside_it
+test_a_run_that_records_nothing_never_finishes
+test_a_redundancy_request_runs_the_measurement_inside_the_net
+test_a_redundancy_request_names_exactly_one_file
 test_a_failed_record_run_never_finishes
 test_builds_the_runner_from_its_own_tree
 test_the_runners_exit_status_is_the_runs

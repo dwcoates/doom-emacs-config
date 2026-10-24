@@ -1,0 +1,188 @@
+// redundancy.proto — WHAT ONE `testrun redundancy` MEASUREMENT OR REPORT DOES.
+//
+// A test case may be removed only if the cases that remain catch every bug it
+// catches, and "catches" is measured by mutants killed (owner ruling,
+// 2026-10-14). `testrun redundancy` is the one tool that measures it; this is
+// its request, which the daemon hands the workspace's runner whole
+// (agentrepl.v1.RunRedundancy). Every field is one of the tool's flags,
+// documented in modules/app/agent-repl/AGENTS.md, "Which tests are redundant".
+//
+// Every path is RELATIVE TO THE REPOSITORY ROOT, as a selection's is, except
+// `out_dir`, which is absolute: the measurement writes outside the checkout.
+// An unset optional field takes the tool's own default.
+syntax = "proto3";
+
+package testrun.v1;
+
+option go_package = "agentrepl/proto/testrun/v1;testrunv1";
+
+// One measurement or report.
+message RedundancyRequest {
+  // REQUIRED. Which of the tool's commands runs.
+  oneof command {
+    // Measure Go test cases (`testrun redundancy go`).
+    RedundancyGo go = 1;
+    // Measure vitest cases (`testrun redundancy vitest`).
+    RedundancyVitest vitest = 2;
+    // Redraw a report from an earlier measurement (`testrun redundancy report`).
+    RedundancyReport report = 3;
+  }
+}
+
+// Which mutants and blocks a kept set must still cover.
+enum RedundancyUniverse {
+  // The tool's default: kills-only.
+  REDUNDANCY_UNIVERSE_UNSPECIFIED = 0;
+  // Every killed mutant stays killed.
+  REDUNDANCY_UNIVERSE_KILLS_ONLY = 1;
+  // Every killed mutant stays killed and every reached block stays reached.
+  REDUNDANCY_UNIVERSE_STRICT = 2;
+}
+
+// What every measurement shares (the tool's common flags).
+message RedundancyMeasurement {
+  // REQUIRED. The absolute directory measurement.json and report.md are
+  // written to (-out).
+  string out_dir = 1;
+  // Which universe the kept set covers (-universe).
+  RedundancyUniverse universe = 2;
+  // The most statement-coverage points any system may lose
+  // (-max-coverage-drop).
+  optional double max_coverage_drop = 3;
+  // The pinned coverage baseline, e.g.
+  // "modules/app/agent-repl/testrun/coverage-baseline.json" (-baseline); ""
+  // holds each system to the measured population's own coverage.
+  string baseline = 4;
+  // A deletion set to VERIFY instead of minimizing, one case each (-delete).
+  repeated string delete_cases = 5;
+  // Cases kept whatever they cover (-pin).
+  repeated string pins = 6;
+  // The fixed weight per kept case, in microseconds (-overhead).
+  optional int64 overhead_us = 7;
+  // Keep the scratch directory (-keep-scratch).
+  bool keep_scratch = 8;
+  // The most one-minute load average a phase or a mutant starts under
+  // (-max-load).
+  optional double max_load = 9;
+  // How long to wait for the load to drop before failing, in milliseconds
+  // (-quiet-wait).
+  optional int64 quiet_wait_ms = 10;
+  // GOMAXPROCS for every process the measurement runs (-procs).
+  optional int32 procs = 11;
+}
+
+// A Go measurement.
+message RedundancyGo {
+  // REQUIRED. The common measurement settings.
+  RedundancyMeasurement measurement = 1;
+  // The Go module whose packages are mutated (-module), e.g.
+  // "modules/app/agent-repl/daemon". "" is the one roster suite's own module,
+  // and only with `roster_suites` naming one suite.
+  string module_dir = 2;
+  // REQUIRED. What is measured.
+  oneof subject {
+    // One package (-pkg, with -tests, -tags and -programs).
+    RedundancyGoPackage package = 3;
+    // Every package of these roster Go suites, integration passes included
+    // (-roster-suite).
+    RedundancyGoRosterSuites roster_suites = 4;
+    // Suites named one by one (-suites).
+    RedundancyGoSuiteList suites = 5;
+  }
+  // The packages mutated, relative to the module (-mutate); empty is the one
+  // package measured.
+  repeated string mutate = 6;
+  // Coverage runs per case, unioned (-runs).
+  optional int32 runs = 7;
+  // The calls that make a test a log-record assertion (-pin-calls); unset is
+  // the tool's default list.
+  RedundancyGoPinCalls pin_calls = 8;
+  // With delete_cases: stop after the unit tier and report what the rest
+  // would cost (-estimate).
+  bool estimate = 9;
+  // How long a case that hung reruns alone to confirm the hang, in
+  // milliseconds (-hang-bound).
+  optional int64 hang_bound_ms = 10;
+}
+
+// One package measured.
+message RedundancyGoPackage {
+  // REQUIRED. The package, relative to the module, e.g. "./internal/workspace".
+  string package = 1;
+  // The test files whose cases are measured; empty is every test file.
+  repeated string test_files = 2;
+  // The build tags its tests compile under.
+  string tags = 3;
+  // The roster programs its tests spawn.
+  repeated string programs = 4;
+}
+
+// Roster Go suites measured whole.
+message RedundancyGoRosterSuites {
+  // REQUIRED, at least one. Roster suite names, e.g. "daemon".
+  repeated string names = 1;
+}
+
+// Suites named one by one.
+message RedundancyGoSuiteList {
+  // REQUIRED, at least one.
+  repeated RedundancyGoSuite suites = 1;
+}
+
+// One suite of a hand-named list.
+message RedundancyGoSuite {
+  // REQUIRED. The package, relative to its module.
+  string package = 1;
+  // The build tags its tests compile under.
+  string tags = 2;
+  // The test files whose cases are measured; empty is every test file.
+  repeated string test_files = 3;
+  // The roster programs its tests spawn.
+  repeated string programs = 4;
+  // The kept population: measured so what it catches counts, never removed.
+  bool kept = 5;
+  // Its Go module, relative to the agent-repl module, when it is not the
+  // measurement's own.
+  string module = 6;
+}
+
+// The calls that make a test a log-record assertion.
+message RedundancyGoPinCalls {
+  // The call names, e.g. "FindRecord".
+  repeated string calls = 1;
+}
+
+// A vitest measurement.
+message RedundancyVitest {
+  // REQUIRED. The common measurement settings.
+  RedundancyMeasurement measurement = 1;
+  // REQUIRED. The npm package directory, e.g. "modules/app/agent-repl/webapp"
+  // (-package).
+  string package_dir = 2;
+  // Its coverage system's name in the baseline (-system); "" is the package
+  // directory's name.
+  string system = 3;
+  // Its vitest config, relative to the package (-config); "" is the tool's
+  // default.
+  string config = 4;
+  // REQUIRED, at least one. Source globs Stryker mutates, relative to the
+  // package (-mutate).
+  repeated string mutate = 5;
+  // Traced runs per test, unioned (-runs).
+  optional int32 runs = 6;
+}
+
+// A report redrawn from an earlier measurement.
+message RedundancyReport {
+  // REQUIRED. The measurement.json to redraw, absolute (-in).
+  string measurement_file = 1;
+  // Which universe the kept set covers (-universe).
+  RedundancyUniverse universe = 2;
+  // The fixed weight per kept case, in microseconds (-overhead).
+  optional int64 overhead_us = 3;
+  // The most statement-coverage points any system may lose
+  // (-max-coverage-drop).
+  optional double max_coverage_drop = 4;
+  // The pinned coverage baseline, relative to the repository root (-baseline).
+  string baseline = 5;
+}

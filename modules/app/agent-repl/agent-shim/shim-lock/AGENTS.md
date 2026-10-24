@@ -69,16 +69,15 @@ binary it built itself.
 
 ## Tests
 
-```bash
-../../bin/background.sh go test ./...   # tests run only at background priority
-```
+Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate.
 
 The suite re-executes its own test binary as the holder (`TestMain` honors
 `SHIM_LOCK_TEST_HELPER_ARGS`), so it drives REAL child processes and REAL
 kernel locks with no build step. It synchronizes on the ready line and on
 process exit — never on a clock.
 
-`make coverage` runs `bin/report-nonlisp-coverage.sh lock`.
+Its coverage is a coverage run of its suite (`agent-repld test run -suite lock
+-coverage`).
 
 ## Performance lessons (living document)
 

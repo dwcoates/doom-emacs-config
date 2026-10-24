@@ -11,6 +11,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/endpoint_run_redundancy.proto";
 import "agentrepl/v1/endpoint_run_tests.proto";
 import "agentrepl/v1/endpoint_submit_prompt.proto";
 import "agentrepl/v1/endpoint_retry_vendor_error.proto";
@@ -566,6 +567,9 @@ service AgentRepl {
   // reports; the daemon is the one runner of tests on the host. See
   // endpoint_run_tests.proto.
   rpc RunTests(RunTestsRequest) returns (stream RunTestsResponse);
+  // Measure which test cases are redundant from one workspace's worktree,
+  // streaming the measurement's output. See endpoint_run_redundancy.proto.
+  rpc RunRedundancy(RunRedundancyRequest) returns (stream RunRedundancyResponse);
 
   // ---- EDITOR: elisp evaluated in the running editor ----
   // Evaluate elisp in the running editor and answer with the result. See

@@ -12,7 +12,7 @@
 # and `webapp` suites' npm `pre*` hooks run ensure-deps.sh. A run that
 # selected `e2e` without them (`test-all.sh --suites daemon,e2e`, a fresh
 # merge tree) therefore failed on a missing node_modules. The e2e runners
-# (test-e2e.sh, e2e-coverage.sh) call this instead, so the suite provisions
+# (test-e2e.sh, e2e-perf.sh) call this instead, so the suite provisions
 # its own dependencies whatever else runs.
 #
 # Every install goes through ensure-deps.sh, the one path that never installs

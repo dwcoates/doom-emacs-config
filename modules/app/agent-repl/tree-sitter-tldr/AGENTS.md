@@ -53,11 +53,8 @@ npm run generate
 
 ## Testing
 
-```bash
-npm test                # or: bash test-tree-sitter-tldr.sh
-```
-
-The `tree-sitter-tldr` roster suite runs each grammar's corpus
+Tests run through the daemon (`agent-repld test run -suite tree-sitter-tldr`;
+the `agent-repl-tests` skill says how). The `tree-sitter-tldr` roster suite runs each grammar's corpus
 (`<grammar>/test/corpus/`, one case per edge) and checks every committed
 generated file. A corpus expectation is written by `tree-sitter test --update`
 and then read by hand: `--update` records whatever the grammar does, right or

@@ -676,6 +676,31 @@ SANDBOX_CPUS=${AGENT_REPL_SANDBOX_CPUS:-4}
 # purpose is to stop overcommitment, and a gate that opens wide because it
 # could not read `docker info` would be worse than no gate, since it would
 # LOOK like it was protecting something.
+# forwarded_env -- print, one per line, each NAME=VALUE the container is given
+# from the caller's environment.
+#
+# `docker run` starts a container with an EMPTY environment but for what the
+# image and the run's flags put there, so only the names listed here cross,
+# each only when the caller set it; unset stays unset, so the entrypoint's
+# defaults are untouched. A blanket passthrough would leak the host's whole
+# environment into a sandbox whose entire point is that it carries nothing of
+# the host in with it.
+#
+#   SANDBOX_NODE_MODULES, SANDBOX_SKIP_NPM  the entrypoint's own knobs; a
+#     caller who exported one once saw it silently ignored, a documented
+#     escape hatch that could not actually be reached.
+#   AGENT_REPL_TEST_RUN_BY_DAEMON  the daemon's test-run marker: every command
+#     inside runs through bin/background.sh (entrypoint.sh), which refuses a
+#     test run the daemon did not start.
+forwarded_env() {
+  local name
+  for name in SANDBOX_NODE_MODULES SANDBOX_SKIP_NPM AGENT_REPL_TEST_RUN_BY_DAEMON; do
+    if [[ -n ${!name:-} ]]; then
+      printf '%s=%s\n' "$name" "${!name}"
+    fi
+  done
+}
+
 slot_budget() {
   local rt=$1 total_bytes total_mb used_mb avail_mb n
 
@@ -1049,23 +1074,11 @@ do_run() {
   args+=(--tmpfs "/sandbox/home:rw,exec,size=8g,uid=1000,gid=1000,mode=0755")
   args+=(--tmpfs "/sandbox/doom/modules:rw,size=64m,uid=1000,gid=1000,mode=0755")
 
-  # THE ENTRYPOINT'S OWN KNOBS, FORWARDED WHEN THE CALLER SET THEM.
-  #
-  # `docker run` starts a container with an EMPTY environment but for what the
-  # image and these flags put there, so a caller who exported
-  # SANDBOX_NODE_MODULES or SANDBOX_SKIP_NPM saw it silently ignored -- a
-  # documented escape hatch that could not actually be reached. Only the names
-  # listed here are forwarded: a blanket passthrough would leak the host's
-  # whole environment into a sandbox whose entire point is that it carries
-  # nothing of the host in with it. Unset stays unset, so the entrypoint's
-  # defaults are untouched.
-  local knob
-  for knob in SANDBOX_NODE_MODULES SANDBOX_SKIP_NPM; do
-    if [[ -n ${!knob:-} ]]; then
-      args+=(--env "$knob=${!knob}")
-      log "forwarding $knob=${!knob} to the container"
-    fi
-  done
+  local forwarded
+  while IFS= read -r forwarded; do
+    args+=(--env "$forwarded")
+    log "forwarding $forwarded to the container"
+  done < <(forwarded_env)
 
   # THE CONTAINER IS NAMED AND REMOVED HERE, never `--rm`: the failure
   # artifacts are copied out of it after it exits, and run_cleanup removes it

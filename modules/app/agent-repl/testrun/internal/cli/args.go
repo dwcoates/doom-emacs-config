@@ -10,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	testrunv1 "agentrepl/proto/testrun/v1"
+
 	"agentrepl/testrun/internal/reuse"
+	"agentrepl/testrun/internal/selection"
 	"agentrepl/testrun/roster"
 )
 
@@ -23,8 +26,9 @@ type Args struct {
 	// history file: see RecordOut and "testrun run only STAGES --record" in
 	// run.go.
 	Record bool
-	// RecordOut is where a --record run stages its timing rows (see
-	// PendingRecord). Required together with Record.
+	// RecordOut is where a recording run stages its timing rows (see
+	// PendingRecord). Required when the run records; bin/test-all.sh offers
+	// it on every run, since a selection file can ask for a record.
 	RecordOut string
 	// Coverage enables the expensive coverage instrumentation and reports.
 	Coverage bool
@@ -135,11 +139,43 @@ func ParseArgs(argv []string) (Args, error) {
 		// with the canonical history's.
 		return Args{}, errors.New("--record and --coverage cannot be combined: coverage instrumentation changes the suite timings --record keeps")
 	}
+	if err := a.coverageOnlyNamed(); err != nil {
+		return Args{}, err
+	}
 	if a.Record && a.RecordOut == "" {
 		return Args{}, errors.New("--record needs --record-out: the path `run` stages this run's timing rows at, for a later `testrun finish-record` to commit outside the git-state net")
 	}
-	if a.RecordOut != "" && !a.Record {
-		return Args{}, errors.New("--record-out needs --record")
+	return a, nil
+}
+
+// WithRequest lowers a selection file's request onto the run's arguments. A
+// request of whole suites IS an ordinary suite run (--suites, or every suite
+// for every_suite): it reuses, covers and records exactly as one, and is no
+// longer Targeted. A narrower request stays Targeted, and may neither cover
+// nor record, since both are whole suites' measurements.
+func (a Args) WithRequest(req *testrunv1.TestRunRequest) (Args, error) {
+	names, whole, err := selection.Whole(req)
+	if err != nil {
+		return Args{}, err
+	}
+	switch {
+	case req.GetRecord() && req.GetCoverage():
+		return Args{}, errors.New("record and coverage cannot be combined: coverage instrumentation changes the suite timings record keeps")
+	case req.GetCoverage() && !whole:
+		return Args{}, errors.New("coverage measures whole suites: select suites (suite or every_suite), not tests within them")
+	case req.GetRecord() && (!whole || len(names) > 0):
+		return Args{}, errors.New("record keeps the whole roster's timings: the request's one selection must be every_suite")
+	case req.GetRecord() && a.RecordOut == "":
+		return Args{}, errors.New("record needs --record-out: the path the run stages its timing rows at, for `testrun finish-record` to commit")
+	}
+	if !whole {
+		return a, nil
+	}
+	a.Selection, a.Targeted = "", false
+	a.Selected = names
+	a.Coverage, a.Record = req.GetCoverage(), req.GetRecord()
+	if err := a.coverageOnlyNamed(); err != nil {
+		return Args{}, err
 	}
 	return a, nil
 }
@@ -202,7 +238,45 @@ func parseSuites(spec string) ([]string, error) {
 
 // Selects reports whether a suite is part of the run.
 func (a Args) Selects(name string) bool {
-	return len(a.Selected) == 0 || slices.Contains(a.Selected, name)
+	named := slices.Contains(a.Selected, name)
+	if s, ok := roster.Lookup(name); ok {
+		switch s.Runs {
+		case roster.RunsInCoverage:
+			if !a.Coverage {
+				return false
+			}
+		case roster.RunsWhenNamed:
+			return named
+		}
+	}
+	return len(a.Selected) == 0 || named
+}
+
+// skipReason says why a run that selects suites by name or in full skips s:
+// its run condition, or its absence from --suites.
+func (a Args) skipReason(s roster.Suite) string {
+	switch {
+	case s.Runs == roster.RunsInCoverage && !a.Coverage:
+		return "runs only in a coverage run"
+	case s.Runs == roster.RunsWhenNamed:
+		return "runs only when named"
+	}
+	return "not selected by --suites"
+}
+
+// coverageOnlyNamed refuses a run without coverage that names a suite which
+// runs only in a coverage run: naming it and running nothing would read as a
+// pass.
+func (a Args) coverageOnlyNamed() error {
+	if a.Coverage {
+		return nil
+	}
+	for _, name := range a.Selected {
+		if s, ok := roster.Lookup(name); ok && s.Runs == roster.RunsInCoverage {
+			return fmt.Errorf("suite %s runs only in a coverage run; ask for coverage", name)
+		}
+	}
+	return nil
 }
 
 // CoverArgs is a parsed `testrun cover-report` command line.

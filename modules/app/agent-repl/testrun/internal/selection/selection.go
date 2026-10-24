@@ -37,6 +37,8 @@ const (
 	kindVitest
 	kindERT
 	kindHarness
+	// kindSuite is a whole roster suite inside a narrowed request.
+	kindSuite
 )
 
 // target is one resolved selection: where it lives within its suite and what
@@ -61,6 +63,43 @@ type Resolved struct {
 	// Suites are the suites the request touches, in roster order.
 	Suites  []roster.Suite
 	targets map[string][]target
+}
+
+// Whole answers the suites a request names when it names only whole suites:
+// the names of its `suite` targets, or none at all for `every_suite` (every
+// suite runs). ok is false for a request that narrows anything, which Resolve
+// takes instead. `every_suite` must be the request's one selection.
+func Whole(req *testrunv1.TestRunRequest) (names []string, ok bool, err error) {
+	sels := req.GetSelections()
+	if len(sels) == 0 {
+		return nil, false, errors.New("the request names no test")
+	}
+	every := 0
+	for _, sel := range sels {
+		switch t := sel.GetTarget().(type) {
+		case *testrunv1.TestSelection_EverySuite:
+			every++
+		case *testrunv1.TestSelection_Suite:
+			if _, known := roster.Lookup(t.Suite.GetName()); !known {
+				return nil, false, fmt.Errorf("suite %q: no such suite in the roster; known suites: %s", t.Suite.GetName(), strings.Join(roster.Names(), " "))
+			}
+			if !slices.Contains(names, t.Suite.GetName()) {
+				names = append(names, t.Suite.GetName())
+			}
+		default:
+			if every > 0 {
+				return nil, false, errors.New("every_suite runs every suite, so it is the request's one selection")
+			}
+			return nil, false, nil
+		}
+	}
+	if every > 0 {
+		if len(sels) > 1 {
+			return nil, false, errors.New("every_suite runs every suite, so it is the request's one selection")
+		}
+		return nil, true, nil
+	}
+	return names, true, nil
 }
 
 // Resolve resolves every selection of req to the suite that owns it.
@@ -104,6 +143,14 @@ func resolveOne(sel *testrunv1.TestSelection, l suites.Layout) (roster.Suite, ta
 		}
 		s, rel, err := owningDir(l, f.GetFile(), "ERT file", roster.ERT)
 		return s, target{kind: kindERT, where: filepath.Base(rel), all: all, names: names, what: "ERT file " + f.GetFile()}, err
+	case *testrunv1.TestSelection_Suite:
+		suite, known := roster.Lookup(t.Suite.GetName())
+		if !known {
+			return roster.Suite{}, target{}, fmt.Errorf("suite %q: no such suite in the roster; known suites: %s", t.Suite.GetName(), strings.Join(roster.Names(), " "))
+		}
+		return suite, target{kind: kindSuite, all: true, what: "suite " + suite.Name}, nil
+	case *testrunv1.TestSelection_EverySuite:
+		return roster.Suite{}, target{}, errors.New("every_suite runs every suite, so it is the request's one selection")
 	case *testrunv1.TestSelection_Harness:
 		h := t.Harness
 		all, names, err := allOrNamed("harness "+h.GetScript(), h.GetAll() != nil, h.GetNamed().GetNames(), h.GetNamed() != nil)
@@ -198,15 +245,28 @@ func owningDir(l suites.Layout, path, what string, kinds ...roster.Kind) (roster
 	return best, bestRel, nil
 }
 
-// owningScript finds the harness suite whose script is path.
+// owningScript finds the harness suite whose script is path. A script
+// several suites run (each with its own arguments) names none of them alone,
+// and is refused: the caller names the suite instead.
 func owningScript(l suites.Layout, path string) (roster.Suite, error) {
 	abs := filepath.Join(l.Repo, filepath.FromSlash(path))
+	var owners []roster.Suite
 	for _, s := range roster.Suites {
 		if (s.Kind == roster.Script || s.Kind == roster.SplitScript) && roster.Resolve(l.Repo, l.Module, s.Path) == abs {
-			return s, nil
+			owners = append(owners, s)
 		}
 	}
-	return roster.Suite{}, fmt.Errorf("harness %s: no suite in the roster runs it", path)
+	switch len(owners) {
+	case 0:
+		return roster.Suite{}, fmt.Errorf("harness %s: no suite in the roster runs it", path)
+	case 1:
+		return owners[0], nil
+	}
+	names := make([]string, len(owners))
+	for i, s := range owners {
+		names[i] = s.Name
+	}
+	return roster.Suite{}, fmt.Errorf("harness %s: several suites run it (%s); select one by its suite", path, strings.Join(names, ", "))
 }
 
 // Narrow keeps only what the request names of one suite's units: the named
@@ -214,6 +274,12 @@ func owningScript(l suites.Layout, path string) (roster.Suite, error) {
 func (r Resolved) Narrow(s roster.Suite, u suites.Units) (suites.Units, error) {
 	var splits []suites.Split
 	var atomic []run.Spec
+	for _, t := range r.targets[s.Name] {
+		if t.kind == kindSuite {
+			// The whole suite runs, whatever else of it was named.
+			return u, nil
+		}
+	}
 	for _, t := range r.targets[s.Name] {
 		var got []suites.Split
 		var err error

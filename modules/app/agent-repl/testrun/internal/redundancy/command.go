@@ -1,12 +1,12 @@
 package redundancy
 
 import (
+	"agentrepl/testrun/caselist"
 	"agentrepl/testrun/internal/cores"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"agentrepl/testrun/internal/redundancy/proc"
@@ -71,43 +71,13 @@ func (c *Common) Register(fs *flag.FlagSet) func() error {
 			return err
 		}
 		if *deleteFile != "" {
-			if c.Delete, err = ReadDeleteSet(*deleteFile); err != nil {
+			if c.Delete, err = caselist.ReadDeleteSet(*deleteFile); err != nil {
 				return err
 			}
 		}
-		c.Pins = SplitList(*pins)
+		c.Pins = caselist.SplitList(*pins)
 		return nil
 	}
-}
-
-// SplitList splits a comma-separated flag, dropping empty entries.
-func SplitList(s string) []string {
-	var out []string
-	for _, p := range strings.Split(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// ReadDeleteSet reads a -delete file: one case per line; blank lines and
-// lines starting with # are skipped.
-func ReadDeleteSet(path string) ([]string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read -delete %s: %w", path, err)
-	}
-	var out []string
-	for _, l := range strings.Split(string(b), "\n") {
-		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
-			out = append(out, l)
-		}
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("-delete %s names no case", path)
-	}
-	return out, nil
 }
 
 // CommandLog is the module's one logging path (run.Log), as a command uses

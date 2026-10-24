@@ -918,7 +918,7 @@ probe numbers in the reason. Covered by `perf_decline_test.go`.
   catches "this got slower", which is the one a suite of absolute budgets
   with headroom will never catch.
 - A baseline is only ever rewritten deliberately, by a named make target
-  (`make -C e2e perf-baseline`), never automatically by a failing run. A
+  (`agent-repld test run -suite e2e-perf-baseline`), never automatically by a failing run. A
   baseline a red run can rewrite is not a baseline.
 - Baselines are recorded per host core count, because §C's numbers were taken
   on a 16-core host (`SPEC.md`'s own measurements say so) and a 4-core CI box
@@ -1391,7 +1391,7 @@ one to reuse.
     three rows, so it REPORTS rather than fails by default.** The check is built
     exactly as §D3 specifies — one committed file per assertion under
     `e2e/perf-baselines/`, p50 and p95 and the tip they were measured at, a
-    core-count guard, and rewriting only by `make -C e2e perf-baseline` — and
+    core-count guard, and rewriting only by `-suite e2e-perf-baseline` — and
     the evidence that it cannot yet be enforced here is three measurements:
 
     - a baseline recorded over THREE runs put `perf-response-bubble`'s p95 at
@@ -1406,7 +1406,7 @@ one to reuse.
     that wide, and widening the tolerance until it fits would leave a check that
     detects nothing. So the drift is REPORTED — loudly, naming the percentile,
     the baseline, the drift and this finding — while the ABSOLUTE budgets fail
-    hard on every run as normal. `make -C e2e perf-enforce` (or
+    hard on every run as normal. `agent-repld test run -suite e2e-perf-enforce` (or
     `AGENT_REPL_E2E_PERF_BASELINE=enforce`) turns the failure on, and is the
     right invocation on a quiet or dedicated host.
 

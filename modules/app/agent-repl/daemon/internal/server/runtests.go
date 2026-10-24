@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -16,6 +17,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	testrunv1 "agentrepl/proto/testrun/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
@@ -58,50 +60,113 @@ type TestRunner interface {
 }
 
 // RunTests runs the named tests from one workspace's worktree and streams what
-// the run reports.
+// the run reports, once or as many times as the request repeats it.
 func (s *server) RunTests(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.RunTestsRequest],
 	stream *connect.ServerStream[agentreplv1.RunTestsResponse],
 ) error {
 	const rpc = "RunTests"
-	if len(req.Msg.GetRun().GetSelections()) == 0 {
+	msg := req.Msg
+	if len(msg.GetRun().GetSelections()) == 0 {
 		s.log.Info(opRunTests, "refused a test run that names no test", nil)
-		return sendRunTestsError(stream, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_NoSelection{NoSelection: &agentreplv1.RunTestsNoSelection{}}})
+		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_NoSelection{NoSelection: &agentreplv1.RunTestsNoSelection{}}})
 	}
-	subject, refused, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
-	if err != nil {
-		return failResolution(s.log, rpc, err)
+	if detail := invalidRunTests(msg); detail != "" {
+		s.log.Info(opRunTests, "refused a test run whose options contradict each other", dlog.Context{"workspace_id": msg.GetWorkspace().GetId(), "detail": detail})
+		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_Invalid{Invalid: &agentreplv1.RunTestsInvalid{Detail: detail}}})
 	}
-	if refused != nil {
-		s.log.Info(opRunTests, "refused a test run for a workspace this daemon does not serve", dlog.Context{
-			"workspace_id": req.Msg.GetWorkspace().GetId(), "arm": refused.Arm, "reason": refused.Reason})
-		return sendRunTestsError(stream, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.RunTestsUnknownWorkspace{}}})
+	if msg.GetCpuLoad() != nil && msg.GetRequester().GetUser() == nil {
+		// LOAD IS THE USER'S ALONE (owner ruling, 2026-10-06).
+		s.log.Info(opRunTests, "refused CPU load a workspace asked for", dlog.Context{"workspace_id": msg.GetWorkspace().GetId(),
+			"requester": msg.GetRequester().GetWorkspace().GetWorkspace().GetId(), "loops": msg.GetCpuLoad().GetLoops()})
+		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_CpuLoadRefused{CpuLoadRefused: &agentreplv1.RunTestsCpuLoadRefused{}}})
 	}
-	log, dir := subject.Log, subject.Record.Dir
-	script, err := testScriptOf(dir)
-	if err != nil {
-		log.Error(opRunTests, "a test run has no test script to run", dlog.Context{"dir": dir, "cause": err.Error()})
-		return sendRunnerFailed(stream, -1, err.Error())
+	w, err := s.testWorktreeOf(ctx, rpc, opRunTests, msg.GetWorkspace())
+	var noScript *noTestScriptError
+	switch {
+	case errors.Is(err, errUnknownTestWorkspace):
+		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.RunTestsUnknownWorkspace{}}})
+	case errors.As(err, &noScript):
+		return sendRunnerFailed(stream, 1, -1, noScript.Error())
+	case err != nil:
+		return err
 	}
-	selection, err := writeSelection(req.Msg.GetRun())
+	log, dir, script := w.log, w.dir, w.script
+	selection, err := writeRequest(msg.GetRun(), "agent-repl-run-tests-*.pb")
 	if err != nil {
 		log.Error(opRunTests, "a test run's selection could not be handed to its runner", dlog.Context{"dir": dir, "cause": err.Error()})
-		return sendRunnerFailed(stream, -1, err.Error())
+		return sendRunnerFailed(stream, 1, -1, err.Error())
 	}
 	defer os.Remove(selection) //nolint:errcheck // a temp file the run is done with
-	return s.relayTestRun(ctx, log, stream, dir, append(merge.TestCommandFor(dir, script),
-		"--selection", selection, "--events-fd", fmt.Sprint(runTestsEventsFD)))
+	argv := runTestsArgv(merge.TestCommandFor(dir, script), msg.GetCpuLoad().GetLoops(), selection)
+	runs := max(msg.GetRuns(), 1)
+	for run := uint32(1); run <= runs; run++ {
+		outcome, err := s.relayTestRun(ctx, log, stream, dir, argv, run)
+		if err != nil || outcome != runPassed && (outcome != runFailed || msg.GetStopAtFirstFailure()) {
+			// A send that failed, a run that never said how it ended or was
+			// refused, or the first failure of a run told to stop there: no
+			// later run follows.
+			if run < runs {
+				log.Info(opRunTests, "a repeated test run stopped before its last run", dlog.Context{"dir": dir, "run": run, "runs": runs, "outcome": outcome.String()})
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// invalidRunTests answers why a request's options contradict each other, or
+// "" when they do not.
+func invalidRunTests(msg *agentreplv1.RunTestsRequest) string {
+	switch {
+	case msg.GetRequester().GetAsker() == nil:
+		return "the request names no requester"
+	case msg.GetRun().GetRecord() && msg.GetRuns() > 1:
+		return "a recording run runs once: a repeat would append its timings again"
+	case msg.GetCpuLoad() != nil && msg.GetCpuLoad().GetLoops() == 0:
+		return "CPU load names no busy loop"
+	}
+	return ""
+}
+
+// runTestsArgv is a run's command line: the test command, held under CPU
+// load when loops > 0 (bin/with-cpu-load.sh, beside the test script, wrapping
+// the script's own bash), handed the selection and the events pipe.
+func runTestsArgv(command []string, loops uint32, selection string) []string {
+	argv := append([]string(nil), command...)
+	if loops > 0 {
+		// command is `env MARKER bash SCRIPT`: the load wraps `bash SCRIPT`.
+		script := argv[len(argv)-1]
+		load := filepath.Join(filepath.Dir(script), "with-cpu-load.sh")
+		argv = append(append(argv[:len(argv)-2:len(argv)-2], "bash", load, fmt.Sprint(loops)), argv[len(argv)-2:]...)
+	}
+	return append(argv, "--selection", selection, "--events-fd", fmt.Sprint(runTestsEventsFD))
+}
+
+// runOutcome is how one run of a request ended.
+type runOutcome int
+
+const (
+	// runUnended is a run that never said how it ended (runner_failed sent).
+	runUnended runOutcome = iota
+	runPassed
+	runFailed
+	runRefused
+)
+
+func (o runOutcome) String() string {
+	return [...]string{"unended", "passed", "failed", "refused"}[o]
 }
 
 // relayTestRun runs argv in dir with an events pipe as its fd 3, sending every
-// event on as it arrives, and answers runner_failed when the run ends without
-// saying how.
-func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *connect.ServerStream[agentreplv1.RunTestsResponse], dir string, argv []string) error {
+// event on as it arrives, each framed as run RUN, and answers runner_failed
+// when the run ends without saying how.
+func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *connect.ServerStream[agentreplv1.RunTestsResponse], dir string, argv []string, run uint32) (runOutcome, error) {
 	events, pipe, err := os.Pipe()
 	if err != nil {
-		log.Error(opRunTests, "a test run's events pipe could not be made", dlog.Context{"dir": dir, "cause": err.Error()})
-		return sendRunnerFailed(stream, -1, fmt.Sprintf("make the events pipe: %v", err))
+		log.Error(opRunTests, "a test run's events pipe could not be made", dlog.Context{"dir": dir, "run": run, "cause": err.Error()})
+		return runUnended, sendRunnerFailed(stream, run, -1, fmt.Sprintf("make the events pipe: %v", err))
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -111,17 +176,17 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 		err error
 	}
 	done := make(chan ran, 1)
-	log.Info(opRunTests, "running a workspace's selected tests", dlog.Context{"dir": dir, "argv": strings.Join(argv, " ")})
+	log.Info(opRunTests, "running a workspace's selected tests", dlog.Context{"dir": dir, "run": run, "argv": strings.Join(argv, " ")})
 	go func() {
-		run, err := s.deps.Tests.RunLinesWith(runCtx, dir, argv, scriptrunner.Options{ExtraFiles: []*os.File{pipe}}, tail.add)
+		result, err := s.deps.Tests.RunLinesWith(runCtx, dir, argv, scriptrunner.Options{ExtraFiles: []*os.File{pipe}}, tail.add)
 		// THE WRITE END CLOSES WITH THE RUN, so the read below ends once
 		// every event the run wrote has been read.
 		pipe.Close() //nolint:errcheck // the reader sees its end either way
-		done <- ran{run, err}
+		done <- ran{result, err}
 	}()
 
 	reader := bufio.NewReader(events)
-	ended, sendErr := false, error(nil)
+	outcome, sendErr := runUnended, error(nil)
 	for {
 		ev := &testrunv1.TestRunEvent{}
 		err := protodelim.UnmarshalFrom(reader, ev)
@@ -131,20 +196,25 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 		if err != nil {
 			// A stream that cannot be read cannot be relayed: the run is
 			// stopped, and its end is said as the runner's failure.
-			log.Error(opRunTests, "a test run's events could not be read; the run is stopped", dlog.Context{"dir": dir, "cause": err.Error()})
+			log.Error(opRunTests, "a test run's events could not be read; the run is stopped", dlog.Context{"dir": dir, "run": run, "cause": err.Error()})
 			cancel()
 			_, _ = io.Copy(io.Discard, reader)
 			break
 		}
-		if ev.GetEnded() != nil || ev.GetRefused() != nil {
-			ended = true
+		switch {
+		case ev.GetEnded().GetPassed() != nil:
+			outcome = runPassed
+		case ev.GetEnded() != nil:
+			outcome = runFailed
+		case ev.GetRefused() != nil:
+			outcome = runRefused
 		}
 		if sendErr == nil {
-			sendErr = stream.Send(&agentreplv1.RunTestsResponse{Frame: &agentreplv1.RunTestsResponse_Event{Event: ev}})
+			sendErr = stream.Send(&agentreplv1.RunTestsResponse{Frame: &agentreplv1.RunTestsResponse_Event{Event: ev}, Run: run})
 			if sendErr != nil {
 				// The caller is gone: the run is stopped, and what it still
 				// writes is drained so it is never held on a full pipe.
-				log.Info(opRunTests, "a test run's caller went away; the run is stopped", dlog.Context{"dir": dir, "cause": sendErr.Error()})
+				log.Info(opRunTests, "a test run's caller went away; the run is stopped", dlog.Context{"dir": dir, "run": run, "cause": sendErr.Error()})
 				cancel()
 			}
 		}
@@ -152,19 +222,59 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 	events.Close() //nolint:errcheck // read to its end
 	result := <-done
 	if sendErr != nil {
-		return sendErr
+		return outcome, sendErr
 	}
 	switch {
 	case result.err != nil:
-		log.Error(opRunTests, "a test run could not be run", dlog.Context{"dir": dir, "cause": result.err.Error()})
-		return sendRunnerFailed(stream, -1, fmt.Sprintf("run %s: %v", strings.Join(argv, " "), result.err))
-	case !ended:
-		log.Error(opRunTests, "a test run ended without reporting its end", dlog.Context{"dir": dir, "exit_code": result.run.ExitCode, "tail": tail.String()})
-		return sendRunnerFailed(stream, int32(result.run.ExitCode), fmt.Sprintf(
+		log.Error(opRunTests, "a test run could not be run", dlog.Context{"dir": dir, "run": run, "cause": result.err.Error()})
+		return runUnended, sendRunnerFailed(stream, run, -1, fmt.Sprintf("run %s: %v", strings.Join(argv, " "), result.err))
+	case outcome == runUnended:
+		log.Error(opRunTests, "a test run ended without reporting its end", dlog.Context{"dir": dir, "run": run, "exit_code": result.run.ExitCode, "tail": tail.String()})
+		return runUnended, sendRunnerFailed(stream, run, int32(result.run.ExitCode), fmt.Sprintf(
 			"the runner exited %d without reporting how its run ended; its last output:\n%s", result.run.ExitCode, tail.String()))
 	}
-	log.Info(opRunTests, "a workspace's selected tests ran", dlog.Context{"dir": dir, "exit_code": result.run.ExitCode, "wall_seconds": result.run.Wall.Seconds()})
-	return nil
+	log.Info(opRunTests, "a workspace's selected tests ran", dlog.Context{"dir": dir, "run": run, "outcome": outcome.String(), "exit_code": result.run.ExitCode, "wall_seconds": result.run.Wall.Seconds()})
+	return outcome, nil
+}
+
+// errUnknownTestWorkspace is a test run's workspace this daemon does not
+// serve (testWorktreeOf).
+var errUnknownTestWorkspace = errors.New("no workspace this daemon serves is the one named")
+
+// noTestScriptError is a test run's worktree with no test script to run.
+type noTestScriptError struct{ cause error }
+
+func (e *noTestScriptError) Error() string { return e.cause.Error() }
+func (e *noTestScriptError) Unwrap() error { return e.cause }
+
+// testWorktree is where a test run or a measurement runs: the workspace's
+// worktree, its log, and the test script its deploy config names.
+type testWorktree struct {
+	log    dlog.Logger
+	dir    string
+	script string
+}
+
+// testWorktreeOf resolves ref to the worktree its test run runs in, recording
+// each refusal under op: errUnknownTestWorkspace for a workspace this daemon
+// does not serve, a *noTestScriptError for a worktree with no test script, or
+// the resolution's own failure (already answered through failResolution).
+func (s *server) testWorktreeOf(ctx context.Context, rpc, op string, ref *workspacev1.WorkspaceRef) (testWorktree, error) {
+	subject, refused, err := s.resolveRef(ctx, rpc, ref)
+	if err != nil {
+		return testWorktree{}, failResolution(s.log, rpc, err)
+	}
+	if refused != nil {
+		s.log.Info(op, "refused a test run for a workspace this daemon does not serve", dlog.Context{
+			"workspace_id": ref.GetId(), "arm": refused.Arm, "reason": refused.Reason})
+		return testWorktree{}, errUnknownTestWorkspace
+	}
+	w := testWorktree{log: subject.Log, dir: subject.Record.Dir}
+	if w.script, err = testScriptOf(w.dir); err != nil {
+		w.log.Error(op, "a test run has no test script to run", dlog.Context{"dir": w.dir, "cause": err.Error()})
+		return testWorktree{}, &noTestScriptError{cause: err}
+	}
+	return w, nil
 }
 
 // testScriptOf is the test script the worktree's own deploy config names.
@@ -180,31 +290,32 @@ func testScriptOf(dir string) (string, error) {
 	return script, nil
 }
 
-// writeSelection writes the run's selection where its runner reads it.
-func writeSelection(run *testrunv1.TestRunRequest) (string, error) {
-	data, err := proto.Marshal(run)
+// writeRequest writes a request where its runner reads it, in a temp file
+// named by pattern.
+func writeRequest(m proto.Message, pattern string) (string, error) {
+	data, err := proto.Marshal(m)
 	if err != nil {
-		return "", fmt.Errorf("encode the selection: %w", err)
+		return "", fmt.Errorf("encode the request: %w", err)
 	}
-	f, err := os.CreateTemp("", "agent-repl-run-tests-*.pb")
+	f, err := os.CreateTemp("", pattern)
 	if err != nil {
-		return "", fmt.Errorf("create the selection file: %w", err)
+		return "", fmt.Errorf("create the request file: %w", err)
 	}
 	_, werr := f.Write(data)
 	cerr := f.Close()
 	if err := errors.Join(werr, cerr); err != nil {
 		os.Remove(f.Name()) //nolint:errcheck // the write already failed
-		return "", fmt.Errorf("write the selection file %s: %w", f.Name(), err)
+		return "", fmt.Errorf("write the request file %s: %w", f.Name(), err)
 	}
 	return f.Name(), nil
 }
 
-func sendRunTestsError(stream *connect.ServerStream[agentreplv1.RunTestsResponse], e *agentreplv1.RunTestsError) error {
-	return stream.Send(&agentreplv1.RunTestsResponse{Frame: &agentreplv1.RunTestsResponse_Error{Error: e}})
+func sendRunTestsError(stream *connect.ServerStream[agentreplv1.RunTestsResponse], run uint32, e *agentreplv1.RunTestsError) error {
+	return stream.Send(&agentreplv1.RunTestsResponse{Frame: &agentreplv1.RunTestsResponse_Error{Error: e}, Run: run})
 }
 
-func sendRunnerFailed(stream *connect.ServerStream[agentreplv1.RunTestsResponse], exit int32, detail string) error {
-	return sendRunTestsError(stream, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_RunnerFailed{
+func sendRunnerFailed(stream *connect.ServerStream[agentreplv1.RunTestsResponse], run uint32, exit int32, detail string) error {
+	return sendRunTestsError(stream, run, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_RunnerFailed{
 		RunnerFailed: &agentreplv1.RunTestsRunnerFailed{ExitCode: exit, Detail: detail}}})
 }
 

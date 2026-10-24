@@ -159,6 +159,63 @@ func TestEveryAgentCommandIsReachableFromASkill(t *testing.T) {
 	}
 }
 
+// frontDoorMention is a skill's call of an installed skill's front door.
+var frontDoorMention = regexp.MustCompile(`~/\.claude/skills/([a-z0-9-]+)/agent-repld`)
+
+// availabilityRow is one row of /agent-repl-install's skill availability
+// table: `| `/name` | global|repository | why |`.
+var availabilityRow = regexp.MustCompile("(?m)^\\| `/([a-z0-9-]+)` \\| (global|repository) \\|")
+
+// globalSkillLinks answers the skills linked into the user's skills
+// directory, read off /agent-repl-install's availability table, which the
+// install requirements are held to (requirements.json; the install harness
+// checks the two agree). The table is read rather than requirements.json
+// because it is in this suite's input set.
+func globalSkillLinks(t *testing.T) map[string]bool {
+	t.Helper()
+	text, ok := readSkills(t)["agent-repl-install"]
+	if !ok {
+		t.Fatal("no agent-repl-install skill holds the availability table")
+	}
+	links := map[string]bool{}
+	for _, m := range availabilityRow.FindAllStringSubmatch(text, -1) {
+		links[m[1]] = m[2] == "global"
+	}
+	if len(links) == 0 {
+		t.Fatal("the agent-repl-install skill's availability table names no skill; the row shape no longer matches")
+	}
+	for name, global := range links {
+		if !global {
+			delete(links, name)
+		}
+	}
+	return links
+}
+
+// A FRONT DOOR A SKILL CALLS IS INSTALLED: a skill linked in the repository
+// alone has no ~/.claude/skills link, so naming its own door there names a
+// path no machine has.
+func TestEveryFrontDoorASkillCallsIsAGlobalSkills(t *testing.T) {
+	// Arrange
+	global := globalSkillLinks(t)
+
+	// Act
+	var missing []string
+	for name, text := range readSkills(t) {
+		for _, m := range frontDoorMention.FindAllStringSubmatch(text, -1) {
+			if !global[m[1]] {
+				missing = append(missing, name+" calls "+m[0])
+			}
+		}
+	}
+
+	// Assert
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Fatalf("skills call front doors no machine installs: %v", missing)
+	}
+}
+
 func TestEverySkillCallingTheAgentCLICarriesTheFrontDoor(t *testing.T) {
 	door, err := filepath.EvalSymlinks(filepath.Join(moduleDir, "bin", "agent-repld"))
 	if err != nil {

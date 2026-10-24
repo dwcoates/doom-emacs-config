@@ -59,6 +59,14 @@ func harness(script string, groups ...string) *testrunv1.TestSelection {
 	return &testrunv1.TestSelection{Target: &testrunv1.TestSelection_Harness{Harness: h}}
 }
 
+func suiteSel(name string) *testrunv1.TestSelection {
+	return &testrunv1.TestSelection{Target: &testrunv1.TestSelection_Suite{Suite: &testrunv1.TestSelectionSuite{Name: name}}}
+}
+
+func everySuite() *testrunv1.TestSelection {
+	return &testrunv1.TestSelection{Target: &testrunv1.TestSelection_EverySuite{EverySuite: &testrunv1.TestSelectionEverySuite{}}}
+}
+
 func request(sels ...*testrunv1.TestSelection) *testrunv1.TestRunRequest {
 	return &testrunv1.TestRunRequest{Selections: sels}
 }
@@ -93,6 +101,7 @@ func TestResolveFindsTheSuiteThatOwnsEachTarget(t *testing.T) {
 		{name: "a webapp vitest file", sel: vitestNamed(mod+"webapp/src/a.test.ts", "a test"), want: "webapp"},
 		{name: "an ERT file", sel: ertAll(mod + "lisp/test-status.el"), want: "ert"},
 		{name: "a whole harness", sel: harness(mod + "bin/test-test-all.sh"), want: "orchestrator-harness"},
+		{name: "a whole suite", sel: suiteSel("webapp"), want: "webapp"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -124,6 +133,9 @@ func TestResolveRefuses(t *testing.T) {
 		{name: "an empty subtest segment", req: request(goNamed(mod+"daemon", sub("TestA", []string{"x", ""}))), want: "empty subtest path"},
 		{name: "a test saying neither whole nor subtests", req: request(goNamed(mod+"daemon", &testrunv1.TestSelectionGoTest{Name: "TestA"})), want: "neither whole nor which subtests"},
 		{name: "a vitest file naming an empty test", req: request(vitestNamed(mod+"webapp/src/a.test.ts", " ")), want: "names an empty test"},
+		{name: "a suite the roster lacks", req: request(goAll(mod+"daemon"), suiteSel("nope")), want: `suite "nope": no such suite`},
+		{name: "a script several suites run", req: request(harness(mod + "bin/coverage-honesty.sh")), want: "several suites run it (webapp-coverage-honesty, shim-coverage-honesty); select one by its suite"},
+		{name: "every suite beside a narrowed target", req: request(goAll(mod+"daemon"), everySuite()), want: "the request's one selection"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -317,5 +329,80 @@ func TestNarrowRunsNamedHarnessGroups(t *testing.T) {
 	// Assert
 	if err != nil || len(got.Splits) != 1 || !reflect.DeepEqual(got.Splits[0].Items, []string{"b"}) {
 		t.Fatalf("Narrow = %+v, %v; want group b alone", got, err)
+	}
+}
+
+func TestWhole(t *testing.T) {
+	cases := []struct {
+		name      string
+		req       *testrunv1.TestRunRequest
+		wantNames []string
+		wantOK    bool
+	}{
+		{name: "named suites, each once", req: request(suiteSel("webapp"), suiteSel("daemon"), suiteSel("webapp")), wantNames: []string{"webapp", "daemon"}, wantOK: true},
+		{name: "every suite", req: request(everySuite()), wantNames: nil, wantOK: true},
+		{name: "a narrowed target is no whole-suite request", req: request(suiteSel("webapp"), goAll(mod+"daemon")), wantNames: nil, wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, ok, err := Whole(tc.req)
+
+			// Assert
+			if err != nil || ok != tc.wantOK || !reflect.DeepEqual(got, tc.wantNames) {
+				t.Fatalf("Whole = %v, %v, %v; want %v, %v", got, ok, err, tc.wantNames, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestWholeRefuses(t *testing.T) {
+	cases := []struct {
+		name string
+		req  *testrunv1.TestRunRequest
+		want string
+	}{
+		{name: "no selection", req: request(), want: "names no test"},
+		{name: "a suite the roster lacks", req: request(suiteSel("nope")), want: `suite "nope": no such suite`},
+		{name: "every suite beside a named suite", req: request(everySuite(), suiteSel("webapp")), want: "the request's one selection"},
+		{name: "every suite beside a narrowed target", req: request(everySuite(), goAll(mod+"daemon")), want: "the request's one selection"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			_, _, err := Whole(tc.req)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Whole = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestNarrowKeepsAWholeSuiteNamedBesideItsTests(t *testing.T) {
+	// Arrange
+	r, err := Resolve(request(goNamed(mod+"daemon/internal/merge", whole("TestA")), suiteSel("daemon")), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := goUnits("daemon", "internal/merge")
+
+	// Act
+	got, err := r.Narrow(suiteNamed(t, "daemon"), u)
+
+	// Assert
+	groups := func(u suites.Units) []string {
+		var out []string
+		for _, sp := range u.Splits {
+			out = append(out, sp.Group+"="+strings.Join(sp.Items, ","))
+		}
+		for _, a := range u.Atomic {
+			out = append(out, a.ID)
+		}
+		return append(out, u.Programs...)
+	}
+	if err != nil || !reflect.DeepEqual(groups(got), groups(u)) {
+		t.Fatalf("Narrow = %v, %v; want every unit of the suite, %v", groups(got), err, groups(u))
 	}
 }

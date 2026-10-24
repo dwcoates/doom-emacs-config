@@ -220,7 +220,6 @@ func TestSelectSuitesRunnerScriptSelectsEverything(t *testing.T) {
 		"modules/app/agent-repl/bin/test-all.sh",
 		"modules/app/agent-repl/testrun/internal/sched/plan.go",
 		"modules/app/agent-repl/testrun/roster/roster.go",
-		"modules/app/agent-repl/bin/report-nonlisp-coverage.sh",
 		"modules/app/agent-repl/bin/report-logging-density.sh",
 		"modules/app/agent-repl/proto/src/frontend/v1/feed.proto",
 		"modules/app/agent-repl/proto/helpers/go/rosterwalk/rosterwalk.go",

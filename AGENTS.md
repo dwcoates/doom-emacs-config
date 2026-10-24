@@ -227,18 +227,20 @@ codes: `0` clean, `1` test failures, `2` drift detected, `3` environment error.
 ### Canonical test timing history
 
 `modules/app/agent-repl/test_time.csv` is the canonical per-suite timing
-history. Normal feature-branch verification must not mutate it. After a commit
-lands on `master`, run:
+history. Normal feature-branch verification must not mutate it. A record is
+a whole-roster run on `master`, made only when the owner asks for one, through
+the daemon from the workspace whose worktree is the main checkout:
 
 ```bash
-modules/app/agent-repl/bin/test-all.sh --record
+agent-repld test run -workspace <main-checkout workspace> -every-suite -record -as-user
 ```
 
-The command appends timings only after every suite passes and only if the
+The run appends timings only after every suite passes and only if the
 branch and commit remain unchanged throughout the run. Commit the resulting
-`test_time.csv` update as a follow-up timing record.
+`test_time.csv` update as a follow-up timing record, landed through the merge
+queue.
 
-`--record`'s own suite run is wrapped by `.claude/safe-test-run.sh`'s
+A record's own suite run is wrapped by `.claude/safe-test-run.sh`'s
 git-state net like every other `test-all.sh` run (see above). Appending the
 run's timing row to the tracked `test_time.csv` is therefore never done from
 inside that net: `testrun run --record` only STAGES the row (to a path
@@ -342,7 +344,7 @@ Concretely: do not add a test whose body is "spawn the external thing, then asse
 
 - If lisp dispatches to the external thing, test the lisp dispatch — mock the wrapper and assert the dispatch logic.
 
-- If you genuinely want to cover the external thing's behavior, write that coverage as a separate runner (a `make test-install-bash` target, a CI job, a hand-run harness). It does not belong in the ERT batch invoked by the pre-commit hook.
+- If you genuinely want to cover the external thing's behavior, write that coverage as a separate roster suite the daemon runs (`testrun/roster`, a suite that runs only when named if it must stay out of every full run). It does not belong in the ERT batch invoked by the pre-commit hook.
 
 - If the external thing has been hard to test for a long time, that is a signal to port its essential logic into elisp — not a license to add an integration test to the ERT suite.
 

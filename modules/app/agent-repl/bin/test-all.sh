@@ -8,6 +8,13 @@
 #   bin/test-all.sh --record
 #   bin/test-all.sh --coverage
 #   bin/test-all.sh --suites webapp,build-frontend-harness
+#   bin/test-all.sh --selection REQUEST.pb [--events-fd N]
+#   bin/test-all.sh --redundancy REQUEST.pb
+#
+# The daemon is the one caller (agentrepl.v1.RunTests, RunRedundancy, and the
+# merge queue's gate): bin/background.sh refuses a test run it did not start.
+# --redundancy runs `testrun redundancy` on a testrun.v1.RedundancyRequest
+# from the module root, inside the same git-state net.
 #
 # THE WORK IS SCHEDULED, NOT RUN SUITE BY SUITE. testrun (../testrun, a Go
 # program this script builds and runs) turns every selected suite into units —
@@ -121,20 +128,28 @@ if ! (cd "$MODULE_ROOT/testrun" && go build -o "$TESTRUN" .); then
     exit 1
 fi
 
-# --record is staged, not committed, inside the net: see the header comment.
-# RECORD_ARGS carries --record-out only when --record is actually among "$@",
-# so an ordinary run's testrun invocation is unchanged.
-IS_RECORD=0
-for arg in "$@"; do
-    [ "$arg" = "--record" ] && IS_RECORD=1
-done
+if [ "${1:-}" = "--redundancy" ]; then
+    if [ "$#" -ne 2 ]; then
+        err "--redundancy takes exactly one request file"
+        exit 2
+    fi
+    set +e
+    (cd "$MODULE_ROOT" && "$REPO_ROOT/.claude/safe-test-run.sh" -- \
+        "$TESTRUN" redundancy --request "$2" --repo "$REPO_ROOT")
+    RUN_RC=$?
+    set -e
+    exit "$RUN_RC"
+fi
+
+# A record is staged, not committed, inside the net: see the header comment.
+# Every run is offered the staging path, because the daemon's selection file
+# (--selection) can ask for a record as well as --record can; a run that does
+# not record never writes it.
 RECORD_OUT="$RUN_TMP/pending-record.json"
-RECORD_ARGS=()
-[ "$IS_RECORD" -eq 1 ] && RECORD_ARGS=(--record-out "$RECORD_OUT")
 
 set +e
 "$REPO_ROOT/.claude/safe-test-run.sh" -- \
-    "$TESTRUN" run --module "$MODULE_ROOT" "$@" ${RECORD_ARGS[@]+"${RECORD_ARGS[@]}"}
+    "$TESTRUN" run --module "$MODULE_ROOT" "$@" --record-out "$RECORD_OUT"
 RUN_RC=$?
 set -e
 
@@ -143,7 +158,7 @@ set -e
 # run itself caused. A failed run (RUN_RC != 0, whether from a suite or
 # from real git-state drift the net caught) never reaches this: nothing is
 # recorded, exactly as before the net existed.
-if [ "$IS_RECORD" -eq 1 ] && [ "$RUN_RC" -eq 0 ]; then
+if [ -f "$RECORD_OUT" ] && [ "$RUN_RC" -eq 0 ]; then
     "$TESTRUN" finish-record --module "$MODULE_ROOT" --record-out "$RECORD_OUT"
     RUN_RC=$?
 fi

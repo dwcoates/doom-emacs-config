@@ -1110,16 +1110,16 @@ system under test is a SEPARATE PROCESS. Coverage therefore comes from
 instrumented BUILDS plus per-process output directories, and one knob turns
 all of it on: `AGENT_REPL_E2E_COVERAGE=<dir>`.
 
-**The invocation**, from `modules/app/agent-repl`:
+**The invocation** is a coverage run of the suite through the daemon:
 
 ```
-make -C e2e coverage                       # or: bin/report-nonlisp-coverage.sh e2e
-AGENT_REPL_E2E_COVERAGE_DIR=/tmp/cov make -C e2e coverage   # keep the profiles
+agent-repld test run -suite e2e -coverage
 ```
 
-It runs the suite at the documented `-parallel 8`, then merges and reports.
-`e2e` is an OPT-IN component of `bin/report-nonlisp-coverage.sh`: it is never
-part of that script's default sweep.
+The runner sets `AGENT_REPL_E2E_COVERAGE` for the suite's packages, runs them
+at the roster's parallelism, and its last unit (`testrun coverage-baseline`)
+merges every Go counter into the baseline and reports the shim's reach beside
+it. The profiles stay in the run's work directory, named in its log.
 
 **How each system is measured**
 
@@ -1130,11 +1130,11 @@ part of that script's default sweep.
 | `shim-claude-sidecar` | `go build -cover` (`goBuildCovered`) | `GOCOVERDIR=<dir>/shim-claude-sidecar` |
 | the TypeScript shim | `NODE_V8_COVERAGE`, set on the DAEMON and inherited by every shim it spawns (`shimclient.spawnEnv` copies the daemon's environment forward verbatim outside its fixed override set) | `<dir>/shim`, remapped through the bundle's source map |
 
-Reporting: `go tool covdata textfmt` merges each binary's counters into a
-profile, `go tool cover -func` (run from that binary's own module directory,
-which is what lets it resolve the packages) reports it; the shim's v8
-profiles are rendered by `c8` and summed over `agent-shim/**` sources by
-`bin/e2e-shim-coverage-summary.mjs`.
+Reporting: `testrun coverage-baseline` merges every binary's counters, every
+tier together, into each Go system's statement coverage; the shim's v8
+profiles are rendered by `c8` and summed over `agent-shim/**` sources
+(`testrun/internal/cover/shime2e.go`), reported beside the baseline and never
+merged into it, since c8's statements are not istanbul's.
 
 **COUNTERS ONLY LAND ON A GRACEFUL EXIT.** The Go runtime writes an
 instrumented binary's counters as it leaves through `main`; a SIGKILLed
@@ -1159,14 +1159,15 @@ install SIGTERM handlers and exit through their own `main`, so:
   `GOCOVERDIR`, and an instrumented Go binary started without one writes a
   warning onto a stderr the shim reads. It is built uninstrumented on purpose.
 - the webapp — `webapplayer_e2e_test.go` drives it through its own npm script;
-  its coverage belongs to `bin/report-nonlisp-coverage.sh webapp`.
+  its coverage belongs to the webapp suite's coverage run (`-suite webapp
+  -coverage`).
 
 **One production touch, stated plainly:** `agent-shim/claude/shim/build.mjs`
 emits an external source map under `SHIM_BUILD_SOURCEMAP=1`, which ONLY the
 coverage build sets. Every other build — the deploy path included — is
 byte-for-byte what it was, so the bundle's build identity is unchanged.
 
-### Baseline — measured 2026-09-04, `make -C e2e coverage`, 16-core host
+### Baseline — measured 2026-09-04, with the retired `make -C e2e coverage`, 16-core host
 
 | System | Statement coverage |
 |---|---|

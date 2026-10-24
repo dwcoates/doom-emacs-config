@@ -1570,7 +1570,7 @@ t_test_e2e_never_runs_the_suite_without_its_deps() {
 # by hand-rolling its own package list.
 t_e2e_runners_share_ensure_e2e_deps() {
     local runner bad=""
-    for runner in test-e2e.sh e2e-coverage.sh; do
+    for runner in test-e2e.sh e2e-perf.sh; do
         grep -q '"\$THIS_DIR/ensure-e2e-deps.sh"' "$THIS_DIR/$runner" || bad="$bad $runner(no helper)"
         grep -Eq '/ensure-deps\.sh"|^[[:space:]]*npm[[:space:]]' "$THIS_DIR/$runner" && bad="$bad $runner(hand-rolled)"
     done

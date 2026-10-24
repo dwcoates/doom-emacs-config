@@ -129,7 +129,8 @@ How each kind of entry point routes through it:
   `lisp/test-helpers.el` signals in batch, and the Go integration harness's
   `WithRunRoot` (daemon integration and e2e) returns 1.
   - So a bare `npx vitest`, `emacs -batch -l lisp/test-*.el` or
-    `go test -tags integration` fails loudly; prefix it with `bin/background.sh`.
+    `go test -tags integration` fails loudly; an agent runs tests through
+    `agent-repld test run`, which runs them inside the helper.
 - The e2e sandbox entrypoint execs every command through the helper.
 - The live runtime and the deploy builds (the daemon's deploy, `build-frontend.sh`,
   `launchd/`, the non-test `lisp/*.el`, npm `build`/`dev`) are NEVER demoted.
@@ -141,8 +142,8 @@ or deploy path that references it.
 ### Never load the machine to reproduce a flake (owner ruling, 2026-10-06)
 
 No artificial CPU load, ever, to reproduce a flaky or timing-dependent failure:
-no `bin/with-cpu-load.sh`, no busy loops, no batches oversubscribed to stress
-the machine. That machine is the owner's working one; on 2026-10-06 an agent's
+no CPU load (`agent-repld test run -cpu-load`), no busy loops, no batches
+oversubscribed to stress the machine. That machine is the owner's working one; on 2026-10-06 an agent's
 32 load loops plus 48 test processes (load average 173) preceded the owner's
 keyboard dying, twice that evening.
 
@@ -156,8 +157,10 @@ Instead:
   occurrence, in a test run or in production, carries the evidence, and the
   diagnosis resumes from those records.
 
-`bin/with-cpu-load.sh` and its harness (`bin/test-with-cpu-load.sh`, the
-`cpu-load-harness` suite) remain for the owner's own use only; no agent runs it.
+CPU load remains for the owner's own use only: `agent-repld test run
+-cpu-load N -as-user`, which the daemon refuses from any workspace and runs
+through `bin/with-cpu-load.sh` itself. No agent asks for it unless the owner
+does.
 
 ### When to run which tests (owner rulings, 2026-10-06 and 2026-10-23)
 
@@ -176,7 +179,7 @@ skill's.
 - A SYSTEM'S SUITE IS ITS UNIT AND INTEGRATION TESTS TOGETHER. The roster
   entry carries both (`testrun/roster/roster.go`), so `--suites daemon` runs
   the daemon's packages and its `-tags integration` package
-  (`daemon/integration`, formerly only `make integration`), and `webapp` and
+  (`daemon/integration`), and `webapp` and
   `shim` run their default vitest config and their
   `vitest.integration.config.ts` (formerly only `npm run test:integration`;
   the shim's builds the bundle and lock helper its files spawn first, as its
@@ -349,9 +352,11 @@ runs outside `testrun`:
 A test case may be removed only if the cases that remain catch every bug it
 catches. "Catches" is measured by MUTANTS KILLED, not lines reached (owner
 ruling, 2026-10-14), and `testrun redundancy` is the one tool that measures
-it. Never delete a test on a judgement of overlap alone.
+it. Never delete a test on a judgement of overlap alone. The daemon runs it
+(`agent-repld test redundancy go|vitest|report`, with the flags below); the
+`agent-repl-tests` skill says how.
 
-- `bin/background.sh testrun redundancy go -module daemon -pkg ./internal/workspace -tests sessions_test.go -out DIR`
+- `go -module daemon -pkg ./internal/workspace -tests sessions_test.go -out DIR`
   measures each leaf case alone: its reached blocks (unioned over `-runs`,
   default 3, so a path only a race reaches still counts), its runtime, and
   the mutants it kills. It writes `measurement.json` and `report.md`: the
@@ -366,13 +371,13 @@ it. Never delete a test on a judgement of overlap alone.
     deleted cases (none kills it: nothing lost), then by a kept integration
     or e2e case; a mutant only a deleted case kills puts that case back.
     `-estimate` stops after the unit tier and reports the rest's cost.
-  - `testrun redundancy report -in measurement.json` redraws a report under
+  - `report -in measurement.json` redraws a report under
     either universe (`-universe kills-only`, the default, or `strict`,
     which also keeps every reached block) without measuring again.
 - Mutants are a SCHEMA (`internal/redundancy/gomut`): every mutant is
   compiled into one binary behind `AGENT_REPL_MUTANT`, applied through `go
   -overlay`, so no source file is ever written.
-- `bin/background.sh testrun redundancy vitest -package agent-shim/claude/shim -mutate 'src/**/*.ts,!src/fake/**' -out DIR`
+- `vitest -package agent-shim/claude/shim -mutate 'src/**/*.ts,!src/fake/**' -out DIR`
   is the same measurement for a vitest package. It traces each test's
   istanbul statements (`testrun/vitest/redundancy-trace.mjs`) and joins them
   with Stryker's per-test kills.
@@ -3368,8 +3373,8 @@ never set it.
   on this machine (Emacs.app, `emacs` interactive, emacsclient, probe
   instances included); only the lead does, and only through
   `bin/realtest.sh` or a deliberate owner-facing action.**
-  - Batch ERT suites (`bin/background.sh emacs -batch -Q -l ert -l lisp/test-*.el ...`) remain
-    allowed because they open no frame and no server.
+  - Batch ERT suites (`agent-repld test run -ert ...`, which the daemon runs
+    as `emacs -batch`) remain allowed because they open no frame and no server.
   - A realtest starts Emacs once per test with `open -g -a Emacs` only.
   - Reason (owner, 2026-09-11): an agent's repeated `Emacs -Q` probes stole
     the owner's focus over and over and launched the wrong Emacs.

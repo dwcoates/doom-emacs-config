@@ -1,7 +1,7 @@
 ---
 name: agent-repl-tests
 description: Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or runs tests for a change: every run goes through `agent-repld test run`, naming only the tests needed. Holds the measured test-performance pitfalls and their fixes as a living list.
-allowed-tools: Bash(skills/agent-repl-tests/agent-repld:*)
+allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 
 # Write tests (agent-repl)
@@ -14,9 +14,10 @@ over the same code paths; it changes only what the test costs to run.
 
 ## Running tests: `agent-repld test run`
 
-Every test run goes through the daemon, run from `modules/app/agent-repl`,
-the module root:
-`skills/agent-repl-tests/agent-repld test run [-workspace WS] SELECTION...`.
+Every test run goes through the daemon:
+`~/.claude/skills/agent-repl-workspaces/agent-repld test run [-workspace WS] SELECTION...`.
+This skill is linked in the repository alone, so it calls the installed
+`/agent-repl-workspaces` front door, which runs the main checkout's build.
 Never a hand-run `go test`, `npm test`, `emacs -batch`,
 `bin/background.sh ...` or `bin/test-all.sh`. The daemon runs the
 workspace's own `bin/test-all.sh` with the selection, so the run takes
@@ -39,12 +40,29 @@ or absolute, inside the workspace's worktree):
 -ert FILE=test-a,test-b        those ert-deftests
 -harness SCRIPT                the whole shell harness
 -harness SCRIPT=group1,group2  those groups of a harness that lists groups
+-suite NAME                    one roster suite, whole
+-every-suite                   the whole roster (the merge queue's gate)
 ```
+
+`-every-suite` is the full suite; an agent names it only for a change with
+systemic knock-on effects, and says why.
+
+Options:
+
+```text
+-coverage                instrument and report coverage; every selection must be a whole suite (-suite or -every-suite); the coverage-only suites (the istanbul honesty probes) run in a coverage run of -every-suite, or when named with -suite
+-record                  append the run's timings to test_time.csv; -every-suite alone, on master, only when the user asks
+-runs N                  repeat the run N times, each its own run with its own log (every frame names its run); for a flaky test, repeat just that test
+-stop-at-first-failure   stop repeating at the first failing run
+-cpu-load N -as-user     hold N busy loops for the run's length; ONLY when the user asks for load (owner ruling 2026-10-06); the daemon refuses load from a workspace
+```
+
+The command exits 1 when any run of a repeat failed.
 
 Example, run from `modules/app/agent-repl`:
 
 ```bash
-skills/agent-repl-tests/agent-repld test run -go daemon/internal/merge=TestQueue/front -ert lisp/test-status.el=agent-repl-status-test-x
+~/.claude/skills/agent-repl-workspaces/agent-repld test run -go daemon/internal/merge=TestQueue/front -ert lisp/test-status.el=agent-repl-status-test-x
 ```
 
 Output: one line of protojson per event as it arrives: `planned` (the units
@@ -60,6 +78,24 @@ workspace, no selection), 2 the run or the call failed (e.g.
 
 A Go integration package (`-tags integration`) is selected by its directory
 like any other; the runner knows its tags.
+
+### Which tests are redundant: `agent-repld test redundancy`
+
+`agent-repld test redundancy go|vitest|report [-workspace WS] FLAGS` runs
+`testrun redundancy` through the daemon, with the tool's own flags (`-out`
+absolute or relative to the working directory; every other path relative to
+the working directory, inside the worktree). It prints the measurement's
+output as it comes and exits 0 when the measurement succeeded.
+
+What the tool measures and every flag's meaning:
+`modules/app/agent-repl/AGENTS.md`, "Which tests are redundant".
+
+Example, run from `modules/app/agent-repl`:
+
+```bash
+~/.claude/skills/agent-repl-workspaces/agent-repld test redundancy go -module daemon -pkg ./internal/workspace -tests sessions_test.go -out /tmp/redundancy-sessions
+~/.claude/skills/agent-repl-workspaces/agent-repld test redundancy vitest -package agent-shim/claude/shim -mutate 'src/**/*.ts,!src/fake/**' -out /tmp/redundancy-shim
+```
 
 ## The rules this builds on
 
@@ -142,13 +178,17 @@ coverage impact (always none).
 
 ## Measuring a test change
 
-- Whether a case is REDUNDANT (may be deleted): `testrun redundancy`, never
-  judgement. It measures the mutants each case kills and proves which cases
-  the rest dominate; see AGENTS.md, "Which tests are redundant".
+- Whether a case is REDUNDANT (may be deleted): `agent-repld test redundancy`,
+  never judgement. It measures the mutants each case kills and proves which
+  cases the rest dominate; see AGENTS.md, "Which tests are redundant".
 
 - Wall and CPU: `/usr/bin/time -p <command>` (user+sys is CPU), before and after, same host load.
 - Bytes written: sample each process's `proc_pid_rusage` `ri_diskio_byteswritten` (per process; short-lived processes and root processes are invisible to it), and the SSD's cumulative counter (`ioreg -c IOBlockStorageDriver -r -l`, "Bytes (Write)") with a quiet baseline before and after. Other sessions' runs contaminate the system counter: say so.
-- Flakes: stress with `-count=N -parallel <high>` (or the suite's repeat equivalent) and report pass counts; never `bin/with-cpu-load.sh` unless the owner asks, never a hand-written busy loop. A flaky test is root-caused and fixed, never retried.
+- Flakes: repeat with `agent-repld test run ... -runs N` (for a flaky test,
+  repeat just that test) and report pass counts; add load only with
+  `agent-repld test run ... -cpu-load N -as-user`, and only when the user
+  asks for it, never a hand-written busy loop. A flaky test is root-caused
+  and fixed, never retried.
 - Report numbers (bytes, seconds, counts), never "less" or "faster".
 
 ## Living document

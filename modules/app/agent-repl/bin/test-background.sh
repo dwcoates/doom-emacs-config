@@ -78,8 +78,9 @@ STUB
 chmod +x "$STUBS/uname" "$STUBS/perl" "$STUBS/nice" "$STUBS/taskpolicy"
 
 # run_helper DIR [ENV=VALUE...] -- <command...>
-# Runs the helper under the stubs with a CLEAN marker, the way a fresh entry
-# point would. Sets RC; the subject's stdout/stderr land in DIR.
+# Runs the helper (or SUBJECT, when set) under the stubs with a CLEAN marker,
+# as a run the daemon started, the way a fresh entry point would. Sets RC; the
+# subject's stdout/stderr land in DIR.
 run_helper() {
     local dir="$1"; shift
     local env_args=()
@@ -91,8 +92,9 @@ run_helper() {
     env -u AGENT_REPL_BACKGROUND_PRIORITY -u AGENT_REPL_PROFILE_ROOT -u AGENT_REPL_TEST_NICENESS \
         PATH="$STUBS:/usr/bin:/bin" \
         STUB_LOG="$dir/log" \
+        AGENT_REPL_TEST_RUN_BY_DAEMON=1 \
         "${env_args[@]}" \
-        bash "$HELPER" "$@" >"$dir/out" 2>"$dir/err"
+        bash "${SUBJECT:-$HELPER}" "$@" >"$dir/out" 2>"$dir/err"
     RC=$?
     set -e
 }
@@ -268,7 +270,7 @@ SUBJECT
 : >"$d/log"
 set +e
 env -u AGENT_REPL_BACKGROUND_PRIORITY -u AGENT_REPL_TEST_NICENESS PATH="$STUBS:/usr/bin:/bin" STUB_LOG="$d/log" \
-    STUB_UNAME=Darwin STUB_NICENESS=0 \
+    STUB_UNAME=Darwin STUB_NICENESS=0 AGENT_REPL_TEST_RUN_BY_DAEMON=1 \
     bash "$d/bin/test-subject.sh" one two >"$d/out" 2>"$d/err"
 RC=$?
 set -e
@@ -292,6 +294,24 @@ if [ "$RC" -eq 0 ] && [ ! -s "$d/log" ] && [ "$(cat "$d/out")" = "marker=nice-19
     pass "the prologue runs an already-marked script directly"
 else
     fail "the prologue runs an already-marked script directly" "rc=$RC out: $(cat "$d/out") log: $(cat "$d/log")"
+fi
+
+# --- 1m. low-priority.sh demotes the same way, but marks no test run --------
+d="$TMP/h1m"
+SUBJECT="$THIS_DIR/low-priority.sh" run_helper "$d" STUB_UNAME=Darwin STUB_NICENESS=0 AGENT_REPL_TEST_RUN_BY_DAEMON= -- "${MARKER_CMD[@]}"
+if [ "$RC" -eq 0 ] && grep -q '^taskpolicy -d throttle nice -n 19 bash -c' "$d/log" && [ "$(cat "$d/out")" = "marker=" ]; then
+    pass "low-priority.sh demotes as the helper does, unmarked, and needs no daemon"
+else
+    fail "low-priority.sh demotes as the helper does, unmarked, and needs no daemon" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out") err: $(cat "$d/err")"
+fi
+
+# --- 1n. the helper and low-priority.sh share one demotion -----------------
+if grep -Fqx 'priority_exec marker "$@"' "$HELPER" && grep -Fqx 'priority_exec unmarked "$@"' "$THIS_DIR/low-priority.sh" &&
+    grep -Fqx '. "$(dirname "${BASH_SOURCE[0]}")/background.sh"' "$THIS_DIR/low-priority.sh" &&
+    ! grep_in "$(grep -v '^[[:space:]]*#' "$THIS_DIR/low-priority.sh")" -Eq 'nice -n|taskpolicy'; then
+    pass "low-priority.sh demotes only through background.sh's own priority_exec, sourced"
+else
+    fail "low-priority.sh demotes only through background.sh's own priority_exec, sourced"
 fi
 
 # ============================================================================
@@ -362,7 +382,7 @@ fi
 # ============================================================================
 
 # The test-runner invocations a non-test-named file may not carry unwrapped.
-RUNNER_RE='(go test|go -C [^ ]+ test|vitest|ert-run-tests|npm (run )?test|bin/test-all\.sh|report-nonlisp-coverage\.sh|e2e-coverage\.sh|scripts/test-)'
+RUNNER_RE='(go test|go -C [^ ]+ test|vitest|ert-run-tests|npm (run )?test|bin/test-all\.sh|scripts/test-)'
 PROLOGUE_RE='^\[\[ -n \$\{AGENT_REPL_BACKGROUND_PRIORITY:-\} \]\] \|\| exec "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)/([^"]+)" bash "\$\{BASH_SOURCE\[0\]\}" "\$@"$'
 
 # resolve PATH -- the physical path of PATH's directory, plus its basename.
@@ -408,10 +428,10 @@ scan() {
         find "$root/bin" "$root/.githooks" "$root/.claude" -maxdepth 1 -name 'test-*.sh' 2>/dev/null
         find "$module" \( -name node_modules -o -name testdata \) -prune -o -name 'test-*.sh' -print
         local named
-        for named in bin/report-nonlisp-coverage.sh bin/e2e-coverage.sh bin/e2e-repeat.sh; do
+        for named in bin/coverage-honesty.sh bin/e2e-perf.sh; do
             [ -e "$module/$named" ] && echo "$module/$named"
         done
-        for named in .claude/safe-test-run.sh .claude/run-subproject-tests.sh; do
+        for named in .claude/safe-test-run.sh; do
             [ -e "$root/$named" ] && echo "$root/$named"
         done
     } | sort -u | while IFS= read -r file; do

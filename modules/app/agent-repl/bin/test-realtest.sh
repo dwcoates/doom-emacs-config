@@ -8,7 +8,7 @@
 #
 # Nothing here touches the owner's editor, the owner's state, or a real
 # deployment. realtest.sh is exercised as a COPY in a scratch directory beside
-# stub siblings — a stub readiness-report.sh, a stub background.sh, a stub
+# stub siblings — a stub readiness-report.sh, a stub low-priority.sh, a stub
 # emacsclient — so `THIS_DIR` resolves to the scratch directory and every
 # external answer the script depends on is the test's to choose. That is the
 # only way to assert a refusal: the thing being asserted is that the script does
@@ -352,7 +352,7 @@ test_prune_returns_success_when_nothing_to_prune() {
 # resolves here and every external answer is the test's.
 #
 # The stubs answer READY and NOTHING RUNNING by default; each case overwrites
-# the one it is about. background.sh records that it was reached, which is how a
+# the one it is about. low-priority.sh records that it was reached, which is how a
 # case distinguishes "declined" from "ran and failed".
 scratch_bin() {
     local dir="$SCRATCH/$1/bin"
@@ -366,13 +366,13 @@ scratch_bin() {
 cat "${STUB_READINESS_JSON:?the case must state a readiness document}"
 STUB
 
-    # THE BACKGROUND STUB IS THE RUN LOG. It appends the test name of every `go test`
+    # THE LOW-PRIORITY STUB IS THE RUN LOG. It appends the test name of every `go test`
     # invocation the script makes, which is how a sequencing case sees WHICH
     # realtests ran and in what order rather than only that one did.
     #
     # It also creates the alive flag, because every realtest leaves an editor
     # running and the next cold-start realtest in a sweep has to face one.
-    cat > "$dir/background.sh" <<'STUB'
+    cat > "$dir/low-priority.sh" <<'STUB'
 #!/usr/bin/env bash
 name=""
 while [ "$#" -gt 0 ]; do
@@ -395,7 +395,7 @@ STUB
 
     # THE EDITOR IS A FILE. It is answering exactly while STUB_ALIVE_FLAG
     # exists, so a quit really does end it and a later realtest really does
-    # bring one back (the background stub recreates the flag) — which is the whole of
+    # bring one back (the low-priority stub recreates the flag) — which is the whole of
     # what a sequencing case needs to see.
     cat > "$dir/emacsclient" <<'STUB'
 #!/usr/bin/env bash
@@ -429,7 +429,7 @@ STUB
 printf '%s guard=%s\n' "$*" "${AGENT_REPL_FORBID_VENDOR_CALLS:-unset}" \
     >> "${STUB_OPEN_MARKER:?the case must state an open marker path}"
 [ "${STUB_OPEN_FAIL:-}" = "1" ] && exit 1
-# The editor the launch brings up is answering, the same way the background stub's is.
+# The editor the launch brings up is answering, the same way the low-priority stub's is.
 [ -n "${STUB_ALIVE_FLAG:-}" ] && : > "$STUB_ALIVE_FLAG"
 exit 0
 STUB
@@ -482,7 +482,7 @@ STUB
 
     # THE SWEEP'S THREE HARNESS CHECKS ARE `go test` INVOCATIONS — the leftover
     # report at the start, the between-sweeps gap scan, the leftover clean and
-    # the mark at the end — and they do not go through background.sh, so this
+    # the mark at the end — and they do not go through low-priority.sh, so this
     # is where a case sees them and decides what they answer.
     #
     # It records "<test name> <leftover mode> <gap scan>" per invocation, which
@@ -1662,8 +1662,8 @@ test_every_world_table_row_names_a_real_test() {
 # ---- the sweep's edges: leftovers and the gap between sweeps --------------
 #
 # The three checks are `go test` invocations that do NOT go through
-# background.sh (they start no editor and hold no machine), so they are seen
-# through the `go` stub's own marker rather than the background stub's.
+# low-priority.sh (they start no editor and hold no machine), so they are seen
+# through the `go` stub's own marker rather than the low-priority stub's.
 
 test_declines_when_a_previous_sweep_left_registry_rows() {
     local name="the sweep DECLINES when a previous sweep left workspace rows in the registry"

@@ -8,7 +8,9 @@
 // name the target does not define, is refused rather than run as nothing.
 //
 // THE NARROWEST RUN IS THE DEFAULT ONE TO ASK FOR. An agent names exactly the
-// tests its change touches; the whole roster is the merge queue's to run.
+// tests its change touches; the whole roster is the merge queue's to run. A
+// whole suite (`suite`) or the whole roster (`every_suite`) is named only for
+// what only a whole suite answers: its coverage, or a stated systemic reason.
 //
 // Every path is RELATIVE TO THE REPOSITORY ROOT (for example
 // "modules/app/agent-repl/daemon/internal/merge"), so a selection reads the
@@ -42,7 +44,18 @@ type TestRunRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// REQUIRED, at least one. The tests to run; a test two selections both name
 	// runs once.
-	Selections    []*TestSelection `protobuf:"bytes,1,rep,name=selections,proto3" json:"selections,omitempty"`
+	Selections []*TestSelection `protobuf:"bytes,1,rep,name=selections,proto3" json:"selections,omitempty"`
+	// Instrument the run and report coverage: every Go and vitest suite's, the
+	// systems the integration and e2e tiers spawn included, plus the suites that
+	// run only in a coverage run (the istanbul honesty probes). Coverage is a
+	// whole suite's measurement, so every selection must then be `suite` or
+	// `every_suite`; a narrower one is refused. Refused with `record`.
+	Coverage bool `protobuf:"varint,2,opt,name=coverage,proto3" json:"coverage,omitempty"`
+	// Append the run's per-suite timings to the canonical timing history
+	// (test_time.csv), once every suite has passed on an unmoved branch. Only a
+	// run of the whole roster records: the one selection must be `every_suite`.
+	// Refused with `coverage`, whose instrumentation changes the timings.
+	Record        bool `protobuf:"varint,3,opt,name=record,proto3" json:"record,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -84,6 +97,20 @@ func (x *TestRunRequest) GetSelections() []*TestSelection {
 	return nil
 }
 
+func (x *TestRunRequest) GetCoverage() bool {
+	if x != nil {
+		return x.Coverage
+	}
+	return false
+}
+
+func (x *TestRunRequest) GetRecord() bool {
+	if x != nil {
+		return x.Record
+	}
+	return false
+}
+
 // One target and the tests within it to run.
 type TestSelection struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -96,6 +123,8 @@ type TestSelection struct {
 	//	*TestSelection_VitestFile
 	//	*TestSelection_ErtFile
 	//	*TestSelection_Harness
+	//	*TestSelection_Suite
+	//	*TestSelection_EverySuite
 	Target        isTestSelection_Target `protobuf_oneof:"target"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -174,6 +203,24 @@ func (x *TestSelection) GetHarness() *TestSelectionHarness {
 	return nil
 }
 
+func (x *TestSelection) GetSuite() *TestSelectionSuite {
+	if x != nil {
+		if x, ok := x.Target.(*TestSelection_Suite); ok {
+			return x.Suite
+		}
+	}
+	return nil
+}
+
+func (x *TestSelection) GetEverySuite() *TestSelectionEverySuite {
+	if x != nil {
+		if x, ok := x.Target.(*TestSelection_EverySuite); ok {
+			return x.EverySuite
+		}
+	}
+	return nil
+}
+
 type isTestSelection_Target interface {
 	isTestSelection_Target()
 }
@@ -198,6 +245,16 @@ type TestSelection_Harness struct {
 	Harness *TestSelectionHarness `protobuf:"bytes,4,opt,name=harness,proto3,oneof"`
 }
 
+type TestSelection_Suite struct {
+	// One roster suite, whole: every unit the roster plans for it.
+	Suite *TestSelectionSuite `protobuf:"bytes,5,opt,name=suite,proto3,oneof"`
+}
+
+type TestSelection_EverySuite struct {
+	// Every roster suite: the full run the merge queue gates on. Named alone.
+	EverySuite *TestSelectionEverySuite `protobuf:"bytes,6,opt,name=every_suite,json=everySuite,proto3,oneof"`
+}
+
 func (*TestSelection_GoPackage) isTestSelection_Target() {}
 
 func (*TestSelection_VitestFile) isTestSelection_Target() {}
@@ -205,6 +262,93 @@ func (*TestSelection_VitestFile) isTestSelection_Target() {}
 func (*TestSelection_ErtFile) isTestSelection_Target() {}
 
 func (*TestSelection_Harness) isTestSelection_Target() {}
+
+func (*TestSelection_Suite) isTestSelection_Target() {}
+
+func (*TestSelection_EverySuite) isTestSelection_Target() {}
+
+// One roster suite, whole.
+type TestSelectionSuite struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// REQUIRED. The suite's roster name (testrun/roster), e.g. "daemon".
+	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestSelectionSuite) Reset() {
+	*x = TestSelectionSuite{}
+	mi := &file_testrun_v1_selection_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestSelectionSuite) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestSelectionSuite) ProtoMessage() {}
+
+func (x *TestSelectionSuite) ProtoReflect() protoreflect.Message {
+	mi := &file_testrun_v1_selection_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestSelectionSuite.ProtoReflect.Descriptor instead.
+func (*TestSelectionSuite) Descriptor() ([]byte, []int) {
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *TestSelectionSuite) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+// Every roster suite runs. It is the only selection of its request.
+type TestSelectionEverySuite struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestSelectionEverySuite) Reset() {
+	*x = TestSelectionEverySuite{}
+	mi := &file_testrun_v1_selection_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestSelectionEverySuite) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestSelectionEverySuite) ProtoMessage() {}
+
+func (x *TestSelectionEverySuite) ProtoReflect() protoreflect.Message {
+	mi := &file_testrun_v1_selection_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestSelectionEverySuite.ProtoReflect.Descriptor instead.
+func (*TestSelectionEverySuite) Descriptor() ([]byte, []int) {
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{3}
+}
 
 // A Go package's tests: all of them, or named top-level tests and subtests.
 type TestSelectionGoPackage struct {
@@ -226,7 +370,7 @@ type TestSelectionGoPackage struct {
 
 func (x *TestSelectionGoPackage) Reset() {
 	*x = TestSelectionGoPackage{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[2]
+	mi := &file_testrun_v1_selection_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -238,7 +382,7 @@ func (x *TestSelectionGoPackage) String() string {
 func (*TestSelectionGoPackage) ProtoMessage() {}
 
 func (x *TestSelectionGoPackage) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[2]
+	mi := &file_testrun_v1_selection_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -251,7 +395,7 @@ func (x *TestSelectionGoPackage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionGoPackage.ProtoReflect.Descriptor instead.
 func (*TestSelectionGoPackage) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{2}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *TestSelectionGoPackage) GetPackageDir() string {
@@ -313,7 +457,7 @@ type TestSelectionGoAllTests struct {
 
 func (x *TestSelectionGoAllTests) Reset() {
 	*x = TestSelectionGoAllTests{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[3]
+	mi := &file_testrun_v1_selection_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -325,7 +469,7 @@ func (x *TestSelectionGoAllTests) String() string {
 func (*TestSelectionGoAllTests) ProtoMessage() {}
 
 func (x *TestSelectionGoAllTests) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[3]
+	mi := &file_testrun_v1_selection_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -338,7 +482,7 @@ func (x *TestSelectionGoAllTests) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionGoAllTests.ProtoReflect.Descriptor instead.
 func (*TestSelectionGoAllTests) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{3}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{5}
 }
 
 // The named top-level tests run, and no other.
@@ -352,7 +496,7 @@ type TestSelectionGoNamedTests struct {
 
 func (x *TestSelectionGoNamedTests) Reset() {
 	*x = TestSelectionGoNamedTests{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[4]
+	mi := &file_testrun_v1_selection_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -364,7 +508,7 @@ func (x *TestSelectionGoNamedTests) String() string {
 func (*TestSelectionGoNamedTests) ProtoMessage() {}
 
 func (x *TestSelectionGoNamedTests) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[4]
+	mi := &file_testrun_v1_selection_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -377,7 +521,7 @@ func (x *TestSelectionGoNamedTests) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionGoNamedTests.ProtoReflect.Descriptor instead.
 func (*TestSelectionGoNamedTests) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{4}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *TestSelectionGoNamedTests) GetTests() []*TestSelectionGoTest {
@@ -405,7 +549,7 @@ type TestSelectionGoTest struct {
 
 func (x *TestSelectionGoTest) Reset() {
 	*x = TestSelectionGoTest{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[5]
+	mi := &file_testrun_v1_selection_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -417,7 +561,7 @@ func (x *TestSelectionGoTest) String() string {
 func (*TestSelectionGoTest) ProtoMessage() {}
 
 func (x *TestSelectionGoTest) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[5]
+	mi := &file_testrun_v1_selection_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -430,7 +574,7 @@ func (x *TestSelectionGoTest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionGoTest.ProtoReflect.Descriptor instead.
 func (*TestSelectionGoTest) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{5}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *TestSelectionGoTest) GetName() string {
@@ -492,7 +636,7 @@ type TestSelectionGoWholeTest struct {
 
 func (x *TestSelectionGoWholeTest) Reset() {
 	*x = TestSelectionGoWholeTest{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[6]
+	mi := &file_testrun_v1_selection_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -504,7 +648,7 @@ func (x *TestSelectionGoWholeTest) String() string {
 func (*TestSelectionGoWholeTest) ProtoMessage() {}
 
 func (x *TestSelectionGoWholeTest) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[6]
+	mi := &file_testrun_v1_selection_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -517,7 +661,7 @@ func (x *TestSelectionGoWholeTest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionGoWholeTest.ProtoReflect.Descriptor instead.
 func (*TestSelectionGoWholeTest) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{6}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{8}
 }
 
 // Only the named subtests of the top-level test run.
@@ -532,7 +676,7 @@ type TestSelectionGoSubtests struct {
 
 func (x *TestSelectionGoSubtests) Reset() {
 	*x = TestSelectionGoSubtests{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[7]
+	mi := &file_testrun_v1_selection_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -544,7 +688,7 @@ func (x *TestSelectionGoSubtests) String() string {
 func (*TestSelectionGoSubtests) ProtoMessage() {}
 
 func (x *TestSelectionGoSubtests) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[7]
+	mi := &file_testrun_v1_selection_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -557,7 +701,7 @@ func (x *TestSelectionGoSubtests) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionGoSubtests.ProtoReflect.Descriptor instead.
 func (*TestSelectionGoSubtests) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{7}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *TestSelectionGoSubtests) GetPaths() []*TestSelectionGoSubtestPath {
@@ -581,7 +725,7 @@ type TestSelectionGoSubtestPath struct {
 
 func (x *TestSelectionGoSubtestPath) Reset() {
 	*x = TestSelectionGoSubtestPath{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[8]
+	mi := &file_testrun_v1_selection_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -593,7 +737,7 @@ func (x *TestSelectionGoSubtestPath) String() string {
 func (*TestSelectionGoSubtestPath) ProtoMessage() {}
 
 func (x *TestSelectionGoSubtestPath) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[8]
+	mi := &file_testrun_v1_selection_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -606,7 +750,7 @@ func (x *TestSelectionGoSubtestPath) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionGoSubtestPath.ProtoReflect.Descriptor instead.
 func (*TestSelectionGoSubtestPath) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{8}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *TestSelectionGoSubtestPath) GetSegments() []string {
@@ -634,7 +778,7 @@ type TestSelectionVitestFile struct {
 
 func (x *TestSelectionVitestFile) Reset() {
 	*x = TestSelectionVitestFile{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[9]
+	mi := &file_testrun_v1_selection_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -646,7 +790,7 @@ func (x *TestSelectionVitestFile) String() string {
 func (*TestSelectionVitestFile) ProtoMessage() {}
 
 func (x *TestSelectionVitestFile) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[9]
+	mi := &file_testrun_v1_selection_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -659,7 +803,7 @@ func (x *TestSelectionVitestFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionVitestFile.ProtoReflect.Descriptor instead.
 func (*TestSelectionVitestFile) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{9}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *TestSelectionVitestFile) GetFile() string {
@@ -721,7 +865,7 @@ type TestSelectionVitestAllTests struct {
 
 func (x *TestSelectionVitestAllTests) Reset() {
 	*x = TestSelectionVitestAllTests{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[10]
+	mi := &file_testrun_v1_selection_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -733,7 +877,7 @@ func (x *TestSelectionVitestAllTests) String() string {
 func (*TestSelectionVitestAllTests) ProtoMessage() {}
 
 func (x *TestSelectionVitestAllTests) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[10]
+	mi := &file_testrun_v1_selection_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -746,7 +890,7 @@ func (x *TestSelectionVitestAllTests) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionVitestAllTests.ProtoReflect.Descriptor instead.
 func (*TestSelectionVitestAllTests) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{10}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{12}
 }
 
 // The named tests of the file run, and no other.
@@ -763,7 +907,7 @@ type TestSelectionVitestNamedTests struct {
 
 func (x *TestSelectionVitestNamedTests) Reset() {
 	*x = TestSelectionVitestNamedTests{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[11]
+	mi := &file_testrun_v1_selection_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -775,7 +919,7 @@ func (x *TestSelectionVitestNamedTests) String() string {
 func (*TestSelectionVitestNamedTests) ProtoMessage() {}
 
 func (x *TestSelectionVitestNamedTests) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[11]
+	mi := &file_testrun_v1_selection_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -788,7 +932,7 @@ func (x *TestSelectionVitestNamedTests) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionVitestNamedTests.ProtoReflect.Descriptor instead.
 func (*TestSelectionVitestNamedTests) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{11}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TestSelectionVitestNamedTests) GetFullNames() []string {
@@ -816,7 +960,7 @@ type TestSelectionErtFile struct {
 
 func (x *TestSelectionErtFile) Reset() {
 	*x = TestSelectionErtFile{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[12]
+	mi := &file_testrun_v1_selection_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -828,7 +972,7 @@ func (x *TestSelectionErtFile) String() string {
 func (*TestSelectionErtFile) ProtoMessage() {}
 
 func (x *TestSelectionErtFile) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[12]
+	mi := &file_testrun_v1_selection_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -841,7 +985,7 @@ func (x *TestSelectionErtFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionErtFile.ProtoReflect.Descriptor instead.
 func (*TestSelectionErtFile) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{12}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *TestSelectionErtFile) GetFile() string {
@@ -903,7 +1047,7 @@ type TestSelectionErtAllTests struct {
 
 func (x *TestSelectionErtAllTests) Reset() {
 	*x = TestSelectionErtAllTests{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[13]
+	mi := &file_testrun_v1_selection_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -915,7 +1059,7 @@ func (x *TestSelectionErtAllTests) String() string {
 func (*TestSelectionErtAllTests) ProtoMessage() {}
 
 func (x *TestSelectionErtAllTests) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[13]
+	mi := &file_testrun_v1_selection_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -928,7 +1072,7 @@ func (x *TestSelectionErtAllTests) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionErtAllTests.ProtoReflect.Descriptor instead.
 func (*TestSelectionErtAllTests) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{13}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{15}
 }
 
 // The named tests of the file run, and no other.
@@ -942,7 +1086,7 @@ type TestSelectionErtNamedTests struct {
 
 func (x *TestSelectionErtNamedTests) Reset() {
 	*x = TestSelectionErtNamedTests{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[14]
+	mi := &file_testrun_v1_selection_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -954,7 +1098,7 @@ func (x *TestSelectionErtNamedTests) String() string {
 func (*TestSelectionErtNamedTests) ProtoMessage() {}
 
 func (x *TestSelectionErtNamedTests) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[14]
+	mi := &file_testrun_v1_selection_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -967,7 +1111,7 @@ func (x *TestSelectionErtNamedTests) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionErtNamedTests.ProtoReflect.Descriptor instead.
 func (*TestSelectionErtNamedTests) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{14}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *TestSelectionErtNamedTests) GetTestNames() []string {
@@ -996,7 +1140,7 @@ type TestSelectionHarness struct {
 
 func (x *TestSelectionHarness) Reset() {
 	*x = TestSelectionHarness{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[15]
+	mi := &file_testrun_v1_selection_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1008,7 +1152,7 @@ func (x *TestSelectionHarness) String() string {
 func (*TestSelectionHarness) ProtoMessage() {}
 
 func (x *TestSelectionHarness) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[15]
+	mi := &file_testrun_v1_selection_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1021,7 +1165,7 @@ func (x *TestSelectionHarness) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionHarness.ProtoReflect.Descriptor instead.
 func (*TestSelectionHarness) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{15}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *TestSelectionHarness) GetScript() string {
@@ -1083,7 +1227,7 @@ type TestSelectionHarnessAllGroups struct {
 
 func (x *TestSelectionHarnessAllGroups) Reset() {
 	*x = TestSelectionHarnessAllGroups{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[16]
+	mi := &file_testrun_v1_selection_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1095,7 +1239,7 @@ func (x *TestSelectionHarnessAllGroups) String() string {
 func (*TestSelectionHarnessAllGroups) ProtoMessage() {}
 
 func (x *TestSelectionHarnessAllGroups) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[16]
+	mi := &file_testrun_v1_selection_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1108,7 +1252,7 @@ func (x *TestSelectionHarnessAllGroups) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionHarnessAllGroups.ProtoReflect.Descriptor instead.
 func (*TestSelectionHarnessAllGroups) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{16}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{18}
 }
 
 // The named groups of the harness run, and no other.
@@ -1122,7 +1266,7 @@ type TestSelectionHarnessNamedGroups struct {
 
 func (x *TestSelectionHarnessNamedGroups) Reset() {
 	*x = TestSelectionHarnessNamedGroups{}
-	mi := &file_testrun_v1_selection_proto_msgTypes[17]
+	mi := &file_testrun_v1_selection_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1134,7 +1278,7 @@ func (x *TestSelectionHarnessNamedGroups) String() string {
 func (*TestSelectionHarnessNamedGroups) ProtoMessage() {}
 
 func (x *TestSelectionHarnessNamedGroups) ProtoReflect() protoreflect.Message {
-	mi := &file_testrun_v1_selection_proto_msgTypes[17]
+	mi := &file_testrun_v1_selection_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1147,7 +1291,7 @@ func (x *TestSelectionHarnessNamedGroups) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSelectionHarnessNamedGroups.ProtoReflect.Descriptor instead.
 func (*TestSelectionHarnessNamedGroups) Descriptor() ([]byte, []int) {
-	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{17}
+	return file_testrun_v1_selection_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *TestSelectionHarnessNamedGroups) GetNames() []string {
@@ -1162,19 +1306,27 @@ var File_testrun_v1_selection_proto protoreflect.FileDescriptor
 const file_testrun_v1_selection_proto_rawDesc = "" +
 	"\n" +
 	"\x1atestrun/v1/selection.proto\x12\n" +
-	"testrun.v1\"K\n" +
+	"testrun.v1\"\x7f\n" +
 	"\x0eTestRunRequest\x129\n" +
 	"\n" +
 	"selections\x18\x01 \x03(\v2\x19.testrun.v1.TestSelectionR\n" +
-	"selections\"\xa3\x02\n" +
+	"selections\x12\x1a\n" +
+	"\bcoverage\x18\x02 \x01(\bR\bcoverage\x12\x16\n" +
+	"\x06record\x18\x03 \x01(\bR\x06record\"\xa3\x03\n" +
 	"\rTestSelection\x12C\n" +
 	"\n" +
 	"go_package\x18\x01 \x01(\v2\".testrun.v1.TestSelectionGoPackageH\x00R\tgoPackage\x12F\n" +
 	"\vvitest_file\x18\x02 \x01(\v2#.testrun.v1.TestSelectionVitestFileH\x00R\n" +
 	"vitestFile\x12=\n" +
 	"\bert_file\x18\x03 \x01(\v2 .testrun.v1.TestSelectionErtFileH\x00R\aertFile\x12<\n" +
-	"\aharness\x18\x04 \x01(\v2 .testrun.v1.TestSelectionHarnessH\x00R\aharnessB\b\n" +
-	"\x06target\"\xba\x01\n" +
+	"\aharness\x18\x04 \x01(\v2 .testrun.v1.TestSelectionHarnessH\x00R\aharness\x126\n" +
+	"\x05suite\x18\x05 \x01(\v2\x1e.testrun.v1.TestSelectionSuiteH\x00R\x05suite\x12F\n" +
+	"\vevery_suite\x18\x06 \x01(\v2#.testrun.v1.TestSelectionEverySuiteH\x00R\n" +
+	"everySuiteB\b\n" +
+	"\x06target\"(\n" +
+	"\x12TestSelectionSuite\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\x19\n" +
+	"\x17TestSelectionEverySuite\"\xba\x01\n" +
 	"\x16TestSelectionGoPackage\x12\x1f\n" +
 	"\vpackage_dir\x18\x01 \x01(\tR\n" +
 	"packageDir\x127\n" +
@@ -1233,50 +1385,54 @@ func file_testrun_v1_selection_proto_rawDescGZIP() []byte {
 	return file_testrun_v1_selection_proto_rawDescData
 }
 
-var file_testrun_v1_selection_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_testrun_v1_selection_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_testrun_v1_selection_proto_goTypes = []any{
 	(*TestRunRequest)(nil),                  // 0: testrun.v1.TestRunRequest
 	(*TestSelection)(nil),                   // 1: testrun.v1.TestSelection
-	(*TestSelectionGoPackage)(nil),          // 2: testrun.v1.TestSelectionGoPackage
-	(*TestSelectionGoAllTests)(nil),         // 3: testrun.v1.TestSelectionGoAllTests
-	(*TestSelectionGoNamedTests)(nil),       // 4: testrun.v1.TestSelectionGoNamedTests
-	(*TestSelectionGoTest)(nil),             // 5: testrun.v1.TestSelectionGoTest
-	(*TestSelectionGoWholeTest)(nil),        // 6: testrun.v1.TestSelectionGoWholeTest
-	(*TestSelectionGoSubtests)(nil),         // 7: testrun.v1.TestSelectionGoSubtests
-	(*TestSelectionGoSubtestPath)(nil),      // 8: testrun.v1.TestSelectionGoSubtestPath
-	(*TestSelectionVitestFile)(nil),         // 9: testrun.v1.TestSelectionVitestFile
-	(*TestSelectionVitestAllTests)(nil),     // 10: testrun.v1.TestSelectionVitestAllTests
-	(*TestSelectionVitestNamedTests)(nil),   // 11: testrun.v1.TestSelectionVitestNamedTests
-	(*TestSelectionErtFile)(nil),            // 12: testrun.v1.TestSelectionErtFile
-	(*TestSelectionErtAllTests)(nil),        // 13: testrun.v1.TestSelectionErtAllTests
-	(*TestSelectionErtNamedTests)(nil),      // 14: testrun.v1.TestSelectionErtNamedTests
-	(*TestSelectionHarness)(nil),            // 15: testrun.v1.TestSelectionHarness
-	(*TestSelectionHarnessAllGroups)(nil),   // 16: testrun.v1.TestSelectionHarnessAllGroups
-	(*TestSelectionHarnessNamedGroups)(nil), // 17: testrun.v1.TestSelectionHarnessNamedGroups
+	(*TestSelectionSuite)(nil),              // 2: testrun.v1.TestSelectionSuite
+	(*TestSelectionEverySuite)(nil),         // 3: testrun.v1.TestSelectionEverySuite
+	(*TestSelectionGoPackage)(nil),          // 4: testrun.v1.TestSelectionGoPackage
+	(*TestSelectionGoAllTests)(nil),         // 5: testrun.v1.TestSelectionGoAllTests
+	(*TestSelectionGoNamedTests)(nil),       // 6: testrun.v1.TestSelectionGoNamedTests
+	(*TestSelectionGoTest)(nil),             // 7: testrun.v1.TestSelectionGoTest
+	(*TestSelectionGoWholeTest)(nil),        // 8: testrun.v1.TestSelectionGoWholeTest
+	(*TestSelectionGoSubtests)(nil),         // 9: testrun.v1.TestSelectionGoSubtests
+	(*TestSelectionGoSubtestPath)(nil),      // 10: testrun.v1.TestSelectionGoSubtestPath
+	(*TestSelectionVitestFile)(nil),         // 11: testrun.v1.TestSelectionVitestFile
+	(*TestSelectionVitestAllTests)(nil),     // 12: testrun.v1.TestSelectionVitestAllTests
+	(*TestSelectionVitestNamedTests)(nil),   // 13: testrun.v1.TestSelectionVitestNamedTests
+	(*TestSelectionErtFile)(nil),            // 14: testrun.v1.TestSelectionErtFile
+	(*TestSelectionErtAllTests)(nil),        // 15: testrun.v1.TestSelectionErtAllTests
+	(*TestSelectionErtNamedTests)(nil),      // 16: testrun.v1.TestSelectionErtNamedTests
+	(*TestSelectionHarness)(nil),            // 17: testrun.v1.TestSelectionHarness
+	(*TestSelectionHarnessAllGroups)(nil),   // 18: testrun.v1.TestSelectionHarnessAllGroups
+	(*TestSelectionHarnessNamedGroups)(nil), // 19: testrun.v1.TestSelectionHarnessNamedGroups
 }
 var file_testrun_v1_selection_proto_depIdxs = []int32{
 	1,  // 0: testrun.v1.TestRunRequest.selections:type_name -> testrun.v1.TestSelection
-	2,  // 1: testrun.v1.TestSelection.go_package:type_name -> testrun.v1.TestSelectionGoPackage
-	9,  // 2: testrun.v1.TestSelection.vitest_file:type_name -> testrun.v1.TestSelectionVitestFile
-	12, // 3: testrun.v1.TestSelection.ert_file:type_name -> testrun.v1.TestSelectionErtFile
-	15, // 4: testrun.v1.TestSelection.harness:type_name -> testrun.v1.TestSelectionHarness
-	3,  // 5: testrun.v1.TestSelectionGoPackage.all:type_name -> testrun.v1.TestSelectionGoAllTests
-	4,  // 6: testrun.v1.TestSelectionGoPackage.named:type_name -> testrun.v1.TestSelectionGoNamedTests
-	5,  // 7: testrun.v1.TestSelectionGoNamedTests.tests:type_name -> testrun.v1.TestSelectionGoTest
-	6,  // 8: testrun.v1.TestSelectionGoTest.whole:type_name -> testrun.v1.TestSelectionGoWholeTest
-	7,  // 9: testrun.v1.TestSelectionGoTest.subtests:type_name -> testrun.v1.TestSelectionGoSubtests
-	8,  // 10: testrun.v1.TestSelectionGoSubtests.paths:type_name -> testrun.v1.TestSelectionGoSubtestPath
-	10, // 11: testrun.v1.TestSelectionVitestFile.all:type_name -> testrun.v1.TestSelectionVitestAllTests
-	11, // 12: testrun.v1.TestSelectionVitestFile.named:type_name -> testrun.v1.TestSelectionVitestNamedTests
-	13, // 13: testrun.v1.TestSelectionErtFile.all:type_name -> testrun.v1.TestSelectionErtAllTests
-	14, // 14: testrun.v1.TestSelectionErtFile.named:type_name -> testrun.v1.TestSelectionErtNamedTests
-	16, // 15: testrun.v1.TestSelectionHarness.all:type_name -> testrun.v1.TestSelectionHarnessAllGroups
-	17, // 16: testrun.v1.TestSelectionHarness.named:type_name -> testrun.v1.TestSelectionHarnessNamedGroups
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	4,  // 1: testrun.v1.TestSelection.go_package:type_name -> testrun.v1.TestSelectionGoPackage
+	11, // 2: testrun.v1.TestSelection.vitest_file:type_name -> testrun.v1.TestSelectionVitestFile
+	14, // 3: testrun.v1.TestSelection.ert_file:type_name -> testrun.v1.TestSelectionErtFile
+	17, // 4: testrun.v1.TestSelection.harness:type_name -> testrun.v1.TestSelectionHarness
+	2,  // 5: testrun.v1.TestSelection.suite:type_name -> testrun.v1.TestSelectionSuite
+	3,  // 6: testrun.v1.TestSelection.every_suite:type_name -> testrun.v1.TestSelectionEverySuite
+	5,  // 7: testrun.v1.TestSelectionGoPackage.all:type_name -> testrun.v1.TestSelectionGoAllTests
+	6,  // 8: testrun.v1.TestSelectionGoPackage.named:type_name -> testrun.v1.TestSelectionGoNamedTests
+	7,  // 9: testrun.v1.TestSelectionGoNamedTests.tests:type_name -> testrun.v1.TestSelectionGoTest
+	8,  // 10: testrun.v1.TestSelectionGoTest.whole:type_name -> testrun.v1.TestSelectionGoWholeTest
+	9,  // 11: testrun.v1.TestSelectionGoTest.subtests:type_name -> testrun.v1.TestSelectionGoSubtests
+	10, // 12: testrun.v1.TestSelectionGoSubtests.paths:type_name -> testrun.v1.TestSelectionGoSubtestPath
+	12, // 13: testrun.v1.TestSelectionVitestFile.all:type_name -> testrun.v1.TestSelectionVitestAllTests
+	13, // 14: testrun.v1.TestSelectionVitestFile.named:type_name -> testrun.v1.TestSelectionVitestNamedTests
+	15, // 15: testrun.v1.TestSelectionErtFile.all:type_name -> testrun.v1.TestSelectionErtAllTests
+	16, // 16: testrun.v1.TestSelectionErtFile.named:type_name -> testrun.v1.TestSelectionErtNamedTests
+	18, // 17: testrun.v1.TestSelectionHarness.all:type_name -> testrun.v1.TestSelectionHarnessAllGroups
+	19, // 18: testrun.v1.TestSelectionHarness.named:type_name -> testrun.v1.TestSelectionHarnessNamedGroups
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_testrun_v1_selection_proto_init() }
@@ -1289,24 +1445,26 @@ func file_testrun_v1_selection_proto_init() {
 		(*TestSelection_VitestFile)(nil),
 		(*TestSelection_ErtFile)(nil),
 		(*TestSelection_Harness)(nil),
+		(*TestSelection_Suite)(nil),
+		(*TestSelection_EverySuite)(nil),
 	}
-	file_testrun_v1_selection_proto_msgTypes[2].OneofWrappers = []any{
+	file_testrun_v1_selection_proto_msgTypes[4].OneofWrappers = []any{
 		(*TestSelectionGoPackage_All)(nil),
 		(*TestSelectionGoPackage_Named)(nil),
 	}
-	file_testrun_v1_selection_proto_msgTypes[5].OneofWrappers = []any{
+	file_testrun_v1_selection_proto_msgTypes[7].OneofWrappers = []any{
 		(*TestSelectionGoTest_Whole)(nil),
 		(*TestSelectionGoTest_Subtests)(nil),
 	}
-	file_testrun_v1_selection_proto_msgTypes[9].OneofWrappers = []any{
+	file_testrun_v1_selection_proto_msgTypes[11].OneofWrappers = []any{
 		(*TestSelectionVitestFile_All)(nil),
 		(*TestSelectionVitestFile_Named)(nil),
 	}
-	file_testrun_v1_selection_proto_msgTypes[12].OneofWrappers = []any{
+	file_testrun_v1_selection_proto_msgTypes[14].OneofWrappers = []any{
 		(*TestSelectionErtFile_All)(nil),
 		(*TestSelectionErtFile_Named)(nil),
 	}
-	file_testrun_v1_selection_proto_msgTypes[15].OneofWrappers = []any{
+	file_testrun_v1_selection_proto_msgTypes[17].OneofWrappers = []any{
 		(*TestSelectionHarness_All)(nil),
 		(*TestSelectionHarness_Named)(nil),
 	}
@@ -1316,7 +1474,7 @@ func file_testrun_v1_selection_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_testrun_v1_selection_proto_rawDesc), len(file_testrun_v1_selection_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

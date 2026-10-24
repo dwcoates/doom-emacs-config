@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -89,8 +90,8 @@ func TestTestCommandPrefersTheScriptOverride(t *testing.T) {
 	got := TestCommandFor("/checkout", "bin/suites.sh")
 
 	// Assert.
-	if len(got) != 2 || got[0] != "bash" || got[1] != "/fixtures/test-all.sh" {
-		t.Fatalf("TestCommandFor answered %v, want bash and the override", got)
+	if want := []string{"env", TestRunMarkerEnv + "=1", "bash", "/fixtures/test-all.sh"}; !slices.Equal(got, want) {
+		t.Fatalf("TestCommandFor answered %v, want %v", got, want)
 	}
 }
 
@@ -103,9 +104,9 @@ func TestTestCommandFallsBackToTheRepositoryEntrypoint(t *testing.T) {
 	got := TestCommandFor("/checkout", "bin/suites.sh")
 
 	// Assert: the config's script, under the tree being tested.
-	want := "/checkout/bin/suites.sh"
-	if len(got) != 2 || got[1] != want {
-		t.Fatalf("TestCommandFor answered %v, want %q", got, want)
+	want := []string{"env", "AGENT_REPL_TEST_RUN_BY_DAEMON=1", "bash", "/checkout/bin/suites.sh"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("TestCommandFor answered %v, want %v", got, want)
 	}
 }
 

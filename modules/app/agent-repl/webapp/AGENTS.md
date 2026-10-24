@@ -166,12 +166,14 @@ and are contract on the same terms:
 ## Commands
 
 ```
-npm test                   the unit suites (vitest + jsdom)
 npm run typecheck          tsc over src/ AND test/, integration suite included
 npm run build              typecheck plus vite build
-npm run test:integration   the whole app against a loopback fake daemon
-npm run test:webkit        real headless WebKit over the real stylesheet (test/webkit/)
 ```
+
+Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. The suites: the unit
+suite (vitest + jsdom), the integration suite (the whole app against a
+loopback fake daemon), and `test:webkit` (real headless WebKit over the real
+stylesheet, test/webkit/).
 
 `npm run test:webkit` (`vitest.webkit.config.ts`) is the suite for behavior
 jsdom cannot lay out, run in Playwright's headless WebKit, the Emacs webview's
@@ -188,8 +190,8 @@ feed's corrections left, not a between-frames state no frame ever shows.
 
 The test and coverage scripts (and their `pre*` hooks) run through
 `../bin/background.sh`, at background priority; every vitest config imports
-`../bin/require-background.mjs`, so a bare `npx vitest` refuses to start
-(prefix it: `../bin/background.sh npx vitest run ...`). `build`, `dev`, `lint`
+`../bin/require-background.mjs`, so a bare `npx vitest` refuses to start;
+an agent runs vitest through `agent-repld test run`. `build`, `dev`, `lint`
 and `typecheck` stay at normal priority.
 
 `bin/build-frontend.sh webapp` is what actually SHIPS a build: it writes
@@ -789,12 +791,11 @@ hand any more:
 ```bash
 npm run lint             # eslint, type-aware, over src/, test/ and the root configs
 npm run typecheck        # tsc over src/ and test/
-npm test                 # the unit suite (un-isolated; see vitest.config.ts)
-npm run test:integration # the whole app under jsdom against the fake daemon
-npm run test:webkit      # real headless WebKit: scroll anchoring (see Commands)
-npm run coverage         # istanbul, per file, isolated (see vitest.config.ts)
-npm run coverage:verify  # prove the per-file numbers are still a measurement
 ```
+
+The package's coverage is a coverage run of its suite (`agent-repld test run
+-suite webapp -coverage`); its `coverage` and `coverage:verify` scripts are
+what that run executes.
 
 ### Coverage is istanbul, and the per-file numbers moved when it became one
 
@@ -834,9 +835,12 @@ what stops a later provider bump bringing any of that back: it runs this
 package's own `npm run coverage` three times — once naturally ordered, twice
 with the test FILES shuffled under fixed seeds — and fails if any file's
 covered or total count moves, then checks that a probe module reads no LESS in
-the full suite than it does with only its own test file running. Run it after
-any change to the provider, its version, or the isolation the coverage script
-buys. Under the v8 provider it fails on 66 of the 100 files.
+the full suite than it does with only its own test file running. It is the
+`webapp-coverage-honesty` suite, which a coverage run of every suite includes;
+after any change to the provider, its version, or the isolation the coverage
+script buys, run it by name: `agent-repld test run -suite
+webapp-coverage-honesty -coverage`. Under the v8 provider it fails on 66 of the
+100 files.
 
 `npm run lint` is TYPE-AWARE and is not a style pass: it reads the same program
 `tsc` does, and the rules it adds on top are the ones that catch what `tsc`
