@@ -119,8 +119,10 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 
 ### Data model
 
-- A node is one question and its answer. Every node has a title that makes
-  sense on its own.
+- A node is a node in the graph. It holds at least one question and its
+  answer, plus whatever else belongs with them, such as its provenance (the
+  page of a book, the response bubble, and so on). Every node has a title
+  that makes sense on its own.
 - A node's content is versioned: each revision is frozen, and correcting an
   answer adds a new revision. The UI for corrections comes later.
 - A node can have several context parents, which makes the graph a directed
@@ -225,7 +227,7 @@ Only rows marked settled are settled. Recommended picks are listed first.
 | Concept | Candidates |
 |---|---|
 | The knowledge-graph system itself | open; earlier ideas `commonplace`, `marginalia` |
-| The question-and-answer unit, the only thing stored as a graph node | `node`, `exchange`, `entry`; notertame used `datum` |
+| A node in the graph, holding at least a question and its answer | `node` (settled) |
 | A UI that adds to the data model | `contributor` (settled) |
 | A UI that renders the data model | `consumer` (settled) |
 | A frozen version of a node's content | `revision` |
