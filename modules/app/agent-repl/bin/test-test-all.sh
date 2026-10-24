@@ -305,6 +305,35 @@ test_a_run_that_records_nothing_never_finishes() {
     rm -rf "$tree"
 }
 
+test_a_redundancy_request_runs_the_measurement_inside_the_net() {
+    local tree module repo
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    run_test_all "$tree" "$(stub_path "$tree")" --redundancy /req.pb
+    module="$(cd "$tree/modules/app/agent-repl" && pwd)"
+    repo="$(cd "$tree" && pwd)"
+    if [ "$RUN_RC" -eq 0 ] && [ "$(grep -e '^safe ' -e '^testrun ' "$STUB_LOG")" = "$(printf 'safe --\ntestrun redundancy --request /req.pb --repo %s' "$repo")" ] \
+        && grep -q "^go build .* (in $module/testrun)$" "$STUB_LOG"; then
+        pass "--redundancy builds the runner and runs the request's measurement inside the net"
+    else
+        fail "--redundancy (rc=$RUN_RC)" "$(cat "$STUB_LOG")"
+    fi
+    rm -rf "$tree"
+}
+
+test_a_redundancy_request_names_exactly_one_file() {
+    local tree
+    tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$tree"
+    run_test_all "$tree" "$(stub_path "$tree")" --redundancy
+    if [ "$RUN_RC" -eq 2 ] && grep -q 'ERROR: --redundancy takes exactly one request file' "$tree/stdout" && ! grep -q '^testrun ' "$STUB_LOG"; then
+        pass "--redundancy without its request file is refused before anything runs"
+    else
+        fail "--redundancy without a file (rc=$RUN_RC)" "$(cat "$STUB_LOG")"
+    fi
+    rm -rf "$tree"
+}
+
 test_a_failed_record_run_never_finishes() {
     local tree
     tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
@@ -499,6 +528,8 @@ test_the_runner_is_told_its_log() {
 test_runs_testrun_inside_the_git_net
 test_record_stages_inside_the_net_then_finishes_outside_it
 test_a_run_that_records_nothing_never_finishes
+test_a_redundancy_request_runs_the_measurement_inside_the_net
+test_a_redundancy_request_names_exactly_one_file
 test_a_failed_record_run_never_finishes
 test_builds_the_runner_from_its_own_tree
 test_the_runners_exit_status_is_the_runs

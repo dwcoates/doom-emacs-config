@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -28,6 +29,8 @@ import (
 	"syscall"
 	"time"
 
+	testrunv1 "agentrepl/proto/testrun/v1"
+
 	"agentrepl/testrun/internal/cli"
 	"agentrepl/testrun/internal/cores"
 	"agentrepl/testrun/internal/cover"
@@ -35,10 +38,12 @@ import (
 	"agentrepl/testrun/internal/gitinfo"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/life"
+	"agentrepl/testrun/internal/protofile"
 	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/redundancy"
 	"agentrepl/testrun/internal/redundancy/gomeasure"
 	"agentrepl/testrun/internal/redundancy/proc"
+	"agentrepl/testrun/internal/redundancy/request"
 	"agentrepl/testrun/internal/redundancy/vitestmeasure"
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
@@ -460,8 +465,25 @@ func coverageBaselineCmd(log *run.Log, argv []string) int {
 // redundancyCmd is `testrun redundancy go|vitest|report`.
 func redundancyCmd(log *run.Log, argv []string) int {
 	if len(argv) == 0 {
-		log.Errorf("usage: testrun redundancy go|vitest|report ...")
+		log.Errorf("usage: testrun redundancy go|vitest|report ... | --request FILE --repo DIR")
 		return 2
+	}
+	if argv[0] == "--request" {
+		// THE DAEMON'S FORM (agentrepl.v1.RunRedundancy): a request file,
+		// lowered onto the very flags a command line would carry.
+		dir, err := os.MkdirTemp("", "testrun-redundancy-request-")
+		if err != nil {
+			log.Errorf("redundancy: make the request's scratch directory: %v", err)
+			return 1
+		}
+		defer os.RemoveAll(dir) //nolint:errcheck // a scratch directory the run is done with
+		lowered, err := redundancyRequestArgv(argv, dir)
+		if err != nil {
+			log.Errorf("redundancy: %v", err)
+			return 2
+		}
+		log.Infof("redundancy: the request runs as testrun redundancy %s", strings.Join(lowered, " "))
+		return redundancyCmd(log, lowered)
 	}
 	switch argv[0] {
 	case "go":
@@ -477,6 +499,35 @@ func redundancyCmd(log *run.Log, argv []string) int {
 	}
 	log.Errorf("unknown redundancy subcommand %q", argv[0])
 	return 2
+}
+
+// redundancyRequestArgv reads `--request FILE --repo DIR` and answers the
+// command line the request asks for, writing the files its flags name under
+// dir.
+func redundancyRequestArgv(argv []string, dir string) ([]string, error) {
+	var path, repo string
+	for i := 0; i < len(argv); i++ {
+		if i+1 >= len(argv) {
+			return nil, fmt.Errorf("%s needs a value", argv[i])
+		}
+		switch argv[i] {
+		case "--request":
+			path = argv[i+1]
+		case "--repo":
+			repo = argv[i+1]
+		default:
+			return nil, fmt.Errorf("unknown argument %q, expected --request FILE --repo DIR", argv[i])
+		}
+		i++
+	}
+	if path == "" || repo == "" {
+		return nil, errors.New("--request FILE and --repo DIR are both required")
+	}
+	req := &testrunv1.RedundancyRequest{}
+	if err := protofile.Read(path, req); err != nil {
+		return nil, fmt.Errorf("read the request: %w", err)
+	}
+	return request.Argv(req, repo, dir)
 }
 
 // confineCmd is a keyed unit's launcher: it scrubs the environment and execs

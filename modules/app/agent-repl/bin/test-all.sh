@@ -8,6 +8,13 @@
 #   bin/test-all.sh --record
 #   bin/test-all.sh --coverage
 #   bin/test-all.sh --suites webapp,build-frontend-harness
+#   bin/test-all.sh --selection REQUEST.pb [--events-fd N]
+#   bin/test-all.sh --redundancy REQUEST.pb
+#
+# The daemon is the one caller (agentrepl.v1.RunTests, RunRedundancy, and the
+# merge queue's gate): bin/background.sh refuses a test run it did not start.
+# --redundancy runs `testrun redundancy` on a testrun.v1.RedundancyRequest
+# from the module root, inside the same git-state net.
 #
 # THE WORK IS SCHEDULED, NOT RUN SUITE BY SUITE. testrun (../testrun, a Go
 # program this script builds and runs) turns every selected suite into units —
@@ -119,6 +126,19 @@ TESTRUN="$RUN_TMP/testrun"
 if ! (cd "$MODULE_ROOT/testrun" && go build -o "$TESTRUN" .); then
     err "building the test runner in $MODULE_ROOT/testrun failed"
     exit 1
+fi
+
+if [ "${1:-}" = "--redundancy" ]; then
+    if [ "$#" -ne 2 ]; then
+        err "--redundancy takes exactly one request file"
+        exit 2
+    fi
+    set +e
+    (cd "$MODULE_ROOT" && "$REPO_ROOT/.claude/safe-test-run.sh" -- \
+        "$TESTRUN" redundancy --request "$2" --repo "$REPO_ROOT")
+    RUN_RC=$?
+    set -e
+    exit "$RUN_RC"
 fi
 
 # A record is staged, not committed, inside the net: see the header comment.
