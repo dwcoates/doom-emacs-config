@@ -3814,12 +3814,16 @@ Routes through `agent-repl--capture-process-output' for worker-thread
 safety on macOS; see `agent-repl--git-string'."
   (agent-repl--capture-process-output "gh" args t))
 
-(defun agent-repl--async-command (label dir command callback)
+(defun agent-repl--async-command (label dir command callback &optional input)
   "Run COMMAND asynchronously in DIR and call CALLBACK on completion.
 COMMAND is the program followed by its arguments.  LABEL is used to
 name the process and its output buffer.  CALLBACK is called as
 `(CALLBACK ok output)' where OK is non-nil when the program exited with
 status 0 and OUTPUT is its stdout and stderr, merged.
+
+INPUT, when given, is the program's whole stdin, UTF-8: it is written
+through a pipe, never a pty (a pty's line discipline caps a line's
+length), and followed by end of file.  The output is read as UTF-8 too.
 
 THE ONE async spawn for a program that is not git (git has
 `agent-repl--async-git', whose callers need its workspace-scoped log).
@@ -3829,18 +3833,24 @@ program (see AGENTS.md \"No External Processes or External State in
 Tests\")."
   (let* ((buf (generate-new-buffer (format " *agent-repl-%s*" label)))
          (default-directory (file-name-as-directory dir))
-         (proc (apply #'start-process  ;; ALLOW-EXTERNAL-BOUNDARY
-                      (format "agent-repl-%s" label)
-                      buf
-                      command)))
+         (proc (let ((process-connection-type (and (null input) process-connection-type)))
+                 (apply #'start-process  ;; ALLOW-EXTERNAL-BOUNDARY
+                        (format "agent-repl-%s" label)
+                        buf
+                        command))))
     (agent-repl--log '(:agent-repl-central "process-wide logging and utility state")
-                      "async-command: spawned label=%s dir=%s command=%S"
-                      label default-directory command)
+                      "async-command: spawned label=%s dir=%s command=%S input-length=%s"
+                      label default-directory command (and input (length input)))
     (set-process-query-on-exit-flag proc nil)
     (set-process-sentinel
      proc
      (lambda (p event)
-       (agent-repl--async-command-handle-completion label callback p event)))))
+       (agent-repl--async-command-handle-completion label callback p event)))
+    (when input
+      (set-process-coding-system proc 'utf-8 'utf-8)
+      (process-send-string proc input)
+      (process-send-eof proc))
+    proc))
 
 (defun agent-repl--async-command-handle-completion (label callback process event)
   "Handle one async-command PROCESS sentinel EVENT for LABEL and CALLBACK.
@@ -3979,7 +3989,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--image-clipboard-selection
     agent-repl--executable-find
     agent-repl--spell-flyspell-on
-    agent-repl--spell-check-region
+    agent-repl--spell-run-hunspell
     agent-repl--prompt-summary-process-start
     agent-repl--prompt-summary-process-send-input
     agent-repl-connect--open-socket)

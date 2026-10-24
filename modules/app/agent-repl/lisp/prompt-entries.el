@@ -35,7 +35,7 @@
 
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
-(declare-function agent-repl--async-command "core" (label dir command callback))
+(declare-function agent-repl--async-command "core" (label dir command callback &optional input))
 (declare-function agent-repl-serial-create "core" (&rest slots))
 (declare-function agent-repl-serial-send "core" (serial report send))
 (declare-function agent-repl--log "core" (ws fmt &rest args))

@@ -2519,6 +2519,52 @@ post-mortem breadcrumb."
     (should (equal spawned '("agent-repl-push" "/tmp/repo/" ("/bin/tool" "--flag"))))
     (should (equal completed '("push" fake-process "finished\n")))))
 
+(defmacro agent-repl-test--async-command-feeding (&rest body)
+  "Run BODY against the real `agent-repl--async-command' with its process faked.
+Binds `real' to the wrapper, `pty' to `process-connection-type' as the
+spawn saw it, and `fed' to what reached the process, oldest first: each
+string sent, `(coding DECODE ENCODE)' and `eof'."
+  (declare (indent 0))
+  `(let ((real (cdr (assq 'agent-repl--async-command
+                          agent-repl-test--external-original-functions)))
+         (pty 'unset)
+         (fed nil)
+         (process-connection-type t)
+         (agent-repl-log-to-file nil))
+     (cl-letf (((symbol-function 'start-process)
+                (lambda (_name buffer &rest _command)
+                  (setq pty process-connection-type)
+                  (kill-buffer buffer)
+                  'fake-process))
+               ((symbol-function 'set-process-query-on-exit-flag) #'ignore)
+               ((symbol-function 'set-process-sentinel) #'ignore)
+               ((symbol-function 'set-process-coding-system)
+                (lambda (_proc decode encode) (setq fed (append fed (list (list 'coding decode encode))))))
+               ((symbol-function 'process-send-string)
+                (lambda (_proc string) (setq fed (append fed (list string)))))
+               ((symbol-function 'process-send-eof)
+                (lambda (_proc) (setq fed (append fed (list 'eof))))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-async-command-feeds-input-through-a-pipe ()
+  "INPUT goes through a pipe as UTF-8, followed by end of file."
+  (agent-repl-test--async-command-feeding
+    ;; Act
+    (let ((proc (funcall real "spell" "/tmp" '("/bin/tool") #'ignore "hi\n")))
+      ;; Assert
+      (should (eq proc 'fake-process))
+      (should (eq pty nil))
+      (should (equal fed '((coding utf-8 utf-8) "hi\n" eof))))))
+
+(ert-deftest agent-repl-test-async-command-without-input-sends-nothing ()
+  "With no INPUT the process gets the default connection and nothing is sent."
+  (agent-repl-test--async-command-feeding
+    ;; Act
+    (funcall real "push" "/tmp" '("/bin/tool") #'ignore)
+    ;; Assert
+    (should (eq pty t))
+    (should-not fed)))
+
 (ert-deftest agent-repl-test-async-gh-runs-through-async-command ()
   "`gh' shares the one async runner, with `gh' prepended to its arguments."
   ;; Arrange: the real `gh' wrapper, captured before the harness guarded it.

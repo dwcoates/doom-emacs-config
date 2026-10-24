@@ -68,7 +68,7 @@
 (declare-function agent-repl--panels-note-arrival-reason "agent-repl-panels"
                   (id reason))
 (declare-function agent-repl--async-git "agent-repl-worktree" (label root args callback))
-(declare-function agent-repl--async-command "agent-repl-core" (label dir command callback))
+(declare-function agent-repl--async-command "agent-repl-core" (label dir command callback &optional input))
 ;; `agent-repl--config-file' is defined by config.el at the module root,
 ;; which is the loader rather than a lisp/ source.
 (defvar agent-repl--config-file)
