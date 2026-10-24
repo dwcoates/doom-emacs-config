@@ -101,12 +101,30 @@ the live keymaps when the popup opens, and each VARIABLE whose value
 shapes what COMMAND does is shown with its current value.  `:features'
 are lines describing what goes with those keys.")
 
+(defconst agent-repl-input-help-bar-background "#111110"
+  "The help bar's ground: the webapp sidebar's dark `--sidebar-bg'.
+Copied from webapp/src/styles.css, as `agent-repl-input-background' copies
+`--composer-bg', and pinned by both test-input-help.el and
+webapp/test/styles.test.ts so the two cannot drift.")
+
+(defconst agent-repl-input-help-button-background "#151514"
+  "A help button's fill: a little darker than the sidebar's selected row.
+The webapp fills the selected workspace row with `--row-current-tint', 38%
+of the dark `--card' over `--sidebar-bg' (#181817); a button sits between
+that and the bar's ground, so it reads as a quieter cousin of the
+selection.  test-input-help.el checks it stays between the two, and
+webapp/test/styles.test.ts pins the selected row's color.")
+
+(agent-repl-defface 'agent-repl-input-help-bar
+  `((t :background ,agent-repl-input-help-bar-background))
+  "Face of the composer's help bar around and between its buttons.")
+
 (agent-repl-defface 'agent-repl-input-help-button
-  '((t :foreground "#8b8e91" :background "#26282b" :weight normal
-       :box (:line-width (2 . -1) :style released-button)))
+  `((t :foreground "#8b8e91" :background ,agent-repl-input-help-button-background
+       :weight normal :box (:line-width (2 . -1) :style released-button)))
   "Face of one help button in the composer's header line.
-Raised and filled a step above the header line's ground, with grey ink so
-the row stays quieter than the composer's own text.")
+Raised and filled a step above the bar's ground, with grey ink so the row
+stays quieter than the composer's own text.")
 
 (agent-repl-defface 'agent-repl-input-help-title
   '((t :inherit bold :height 1.3))
@@ -148,8 +166,14 @@ the row stays quieter than the composer's own text.")
                 'agent-repl-input-help-topic (plist-get topic :id))))
 
 (defun agent-repl--input-help-header-line-text ()
-  "Return the composer's header line: one help button per topic."
-  (concat " " (mapconcat #'agent-repl--input-help-button agent-repl-input-help-topics "  ")))
+  "Return the composer's header line: one help button per topic.
+Every column of it is this text, the last gap stretched to the window's
+right edge, so the bar's ground is `agent-repl-input-help-bar' whatever
+face a theme (solaire's, say) remaps `header-line' to."
+  (let ((gap (propertize "  " 'face 'agent-repl-input-help-bar)))
+    (concat (propertize " " 'face 'agent-repl-input-help-bar)
+            (mapconcat #'agent-repl--input-help-button agent-repl-input-help-topics gap)
+            (propertize " " 'face 'agent-repl-input-help-bar 'display '(space :align-to right)))))
 
 ;; EVERY COMPOSER'S HEADER LINE IS THIS ONE VARIABLE, never a copy of it.
 ;; `header-line-format' holds the symbol, which redisplay reads afresh, so

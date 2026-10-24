@@ -4661,6 +4661,38 @@ describe("the tool card's command grey", () => {
     // Assert
     expect(got).toBe("#181817");
   });
+
+  // The composer's help bar (lisp/input-help.el) is grounded with the dark
+  // sidebar's color, and its buttons are filled a little darker than the
+  // sidebar's selected row. Neither suite may read the other's file, so
+  // lisp/test-input-help.el pins both colors too.
+  it("defines the dark theme's sidebar as the help bar's ground, #111110", () => {
+    // Arrange
+    const block = darkThemeBlock();
+
+    // Act
+    const got = rgbOf(block, "--sidebar-bg");
+
+    // Assert
+    expect(got).toEqual([0x11, 0x11, 0x10]);
+  });
+
+  it("fills the dark theme's selected sidebar row with #181817, just lighter than a help button", () => {
+    // Arrange
+    const block = darkThemeBlock();
+    const card = rgbOf(block, "--card");
+    const ground = rgbOf(block, "--sidebar-bg");
+    const share = 0.38;
+
+    // Act
+    const tint = [0, 1, 2].map((i) => Math.round(share * card[i] + (1 - share) * ground[i]));
+
+    // Assert
+    expect(withoutBlockComments(stylesheet)).toContain(
+      "--row-current-tint: color-mix(in srgb, var(--card) 38%, var(--sidebar-bg));",
+    );
+    expect(tint).toEqual([0x18, 0x18, 0x17]);
+  });
 });
 
 /**

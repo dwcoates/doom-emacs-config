@@ -201,10 +201,6 @@ Pre-formatted once so the common case costs no formatting.")
 
 ;;;; ---- The input buffer ------------------------------------------------
 
-(defface agent-repl-header-line
-  '((t :background "white" :foreground "black" :weight bold))
-  "Face for the Agent Input header line.")
-
 (defcustom agent-repl-input-background "#181817"
   "The input buffer's background, a #rrggbb hex string.
 The webapp's dark `--composer-bg' (webapp/src/styles.css): the input
@@ -266,7 +262,6 @@ The standing notice first, then the held-prompt waiting line."
 (define-derived-mode agent-repl-input-mode fundamental-mode "Agent Input"
   "Major mode for the host-native composer buffer."
   (agent-repl-input-help-install)
-  (face-remap-add-relative 'header-line 'agent-repl-header-line)
   (agent-repl--set-buffer-background agent-repl-input-background)
   (unless (member agent-repl--input-mode-line-spec mode-line-format)
     (setq-local mode-line-format
