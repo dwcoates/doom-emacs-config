@@ -58,7 +58,7 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement
       hooks: ["user", "prompt-agent"],
       waving: promptWaves(msg),
       strip,
-      corner: drawPromptCopyControl(body.blocks, `${PATH}.body.blocks`),
+      corner: [drawPromptCopyControl(body.blocks, `${PATH}.body.blocks`)],
       content: drawFeedAgentPromptBody(body, `${PATH}.body`),
       capLines: AGENT_PROMPT_CAP_LINES,
     },

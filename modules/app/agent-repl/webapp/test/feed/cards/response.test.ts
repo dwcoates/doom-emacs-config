@@ -4,6 +4,7 @@ import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
+  FeedComposerEntrySchema,
   FeedIdSchema,
   FeedResponseSchema,
   FeedRowSchema,
@@ -21,6 +22,7 @@ import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   REVEALED_ATTRIBUTE,
   RESPONSE_CUT_SHORT_ACTIONS_CLASS,
+  RESPONSE_COPY_CLASS,
   RESPONSE_PROSE_CLASS,
   THINKING_BUBBLE_CLASS,
   USAGE_AGE_RESERVE_LABELS,
@@ -66,6 +68,8 @@ import { fakePageSeen } from "../../page-seen-fake.js";
 import type { PageSeen } from "../../../src/page-seen.js";
 import { orderFor } from "../../feed-order.js";
 import { plainProse, servedProse, treeProse } from "../../prose.js";
+import { boundCopyText } from "../../../src/copy-control.js";
+import { COMPOSER_ENTRY_CLASS, createComposerEntryHighlight } from "../../../src/feed/composer-entry.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -154,6 +158,74 @@ afterEach(() => {
 });
 
 const ANSWERED_TREE = "1 🔧 Did it\n├── 1.1 first\n└── 1.2 second";
+
+describe("a final response's copy control", () => {
+  it("copies the response's markdown as served", () => {
+    // Act
+    const el = drawFeedResponse(
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { prose: plainProse("**done**") } } } }),
+      rowContext(),
+    );
+    // Assert
+    const control = el.querySelector(`.${RESPONSE_COPY_CLASS}`);
+    expect([control?.getAttribute("data-copies"), control === null ? null : boundCopyText(control).text]).toEqual([
+      "response",
+      "**done**",
+    ]);
+  });
+
+  it("stands under the usage corner, the two in the corner in that order", () => {
+    // Act
+    const el = drawFeedResponse(
+      response({
+        finalAnswer: true,
+        usage: { text: "1.2k", heat: { position: 0.5 } },
+        result: { case: "success", value: { prose: { prose: plainProse("done") } } },
+      }),
+      rowContext(),
+    );
+    // Assert
+    const box = el.querySelector(`:scope > .${BUBBLE_BOX_CLASS}`);
+    const corner = [...(box?.children ?? [])].slice(0, 2);
+    expect(corner.map((c) => [c.classList.contains("usage-corner"), c.classList.contains(RESPONSE_COPY_CLASS)])).toEqual([
+      [true, false],
+      [false, true],
+    ]);
+  });
+
+  it.each([
+    ["an interim response", { finalAnswer: false }],
+    ["a final thinking block", { finalAnswer: true, thinking: true }],
+  ])("is not drawn on %s", (_name, flags) => {
+    // Act
+    const el = drawFeedResponse(
+      response({ ...flags, result: { case: "success", value: { prose: { prose: plainProse("done") } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelector(`.${RESPONSE_COPY_CLASS}`)).toBeNull();
+  });
+});
+
+describe("the composer's box in a response", () => {
+  useTreeLayout();
+
+  it("is drawn on the response's own paint", () => {
+    // Arrange: the composer answers 1.1 of this row.
+    createComposerEntryHighlight(document).apply(
+      create(FeedComposerEntrySchema, { at: { case: "node", value: { row: { value: "row-1" }, label: "1.1" } } }),
+    );
+    // Act
+    const el = drawFeedResponse(
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { prose: treeProse(ANSWERED_TREE) } } } }),
+      rowContext(),
+    );
+    mount(el);
+    // Assert
+    expect([...el.querySelectorAll(`.${COMPOSER_ENTRY_CLASS}`)].map((l) => l.getAttribute("data-node"))).toEqual(["1.1"]);
+    createComposerEntryHighlight(document).apply(create(FeedComposerEntrySchema, { at: { case: "none", value: {} } }));
+  });
+});
 
 describe("the settled state", () => {
   it("renders the whole markdown", () => {

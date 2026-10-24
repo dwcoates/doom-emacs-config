@@ -278,7 +278,7 @@ export function drawHeldPrompt(
       strip: [head],
       // THE REASON ENDS THE FIRST LINE (owner request, 2026-10-13): floated
       // into the corner, so the collapsed line's ellipsis falls before it.
-      ...(verdict.detail === null ? {} : { corner: verdict.detail }),
+      ...(verdict.detail === null ? {} : { corner: [verdict.detail] }),
       content,
       footer: classifierForm === null ? [controls] : [controls, classifierForm.element],
       capLines: ELLIPSIS_CAP_LINES,

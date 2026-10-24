@@ -30,7 +30,7 @@ function drawn(body: string, lang = ""): HTMLElement {
 /** Install the copy controls with the code resolver, recording what each copy wrote. */
 function installRecording(): string[] {
   const written: string[] = [];
-  teardown = installCopyControls(document, { code: codeOfCopyControl, prompt: boundCopyText }, (text) => {
+  teardown = installCopyControls(document, { code: codeOfCopyControl, prompt: boundCopyText, response: boundCopyText }, (text) => {
     written.push(text);
     return true;
   });

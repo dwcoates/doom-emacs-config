@@ -39,7 +39,7 @@ export function installForwardingLogger(
 export function installTextAffordances(doc: Document): () => void {
   const removeCopy = installCopyFallback(doc);
   const removeChords = installCopyChords(doc);
-  const removeCodeCopy = installCopyControls(doc, { code: codeOfCopyControl, prompt: boundCopyText });
+  const removeCodeCopy = installCopyControls(doc, { code: codeOfCopyControl, prompt: boundCopyText, response: boundCopyText });
   const removeGuard = installSelectionClickGuard(doc);
   return () => {
     removeCopy();

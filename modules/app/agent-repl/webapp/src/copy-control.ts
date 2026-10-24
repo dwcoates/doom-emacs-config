@@ -23,8 +23,8 @@ export const COPY_CONTROL_CLASS = "copy-control";
 /** The attribute naming what a copy control copies: its `CopyKind`. */
 export const COPY_KIND_ATTRIBUTE = "data-copies";
 
-/** What a copy control copies: a code block's code, or a whole prompt. */
-export const COPY_KINDS = ["code", "prompt"] as const;
+/** What a copy control copies: a code block's code, a whole prompt, or a whole final response. */
+export const COPY_KINDS = ["code", "prompt", "response"] as const;
 export type CopyKind = (typeof COPY_KINDS)[number];
 
 /** The attribute a copy control wears for a moment after it copied. */
