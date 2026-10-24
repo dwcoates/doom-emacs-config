@@ -2,10 +2,8 @@ package server
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,7 +17,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
@@ -36,6 +33,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/login"
@@ -1935,12 +1933,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 // h2cClient dials the surface over CLEARTEXT HTTP/2, which is the other half of
 // the one-listener contract: one origin serving HTTP/1.1 and h2c alike.
 func h2cClient() *http.Client {
-	return &http.Client{Transport: &http2.Transport{
-		AllowHTTP: true,
-		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, network, addr)
-		},
-	}}
+	return h2cclient.Client()
 }
 
 // ref is the workspace ref a test echoes back.

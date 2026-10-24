@@ -11,6 +11,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/promptqueue"
@@ -370,21 +371,12 @@ func answerable(ctx context.Context, said *conversationv1.UserSaid, origin conve
 	return words
 }
 
-// saidText renders a submission's text: the text blocks, joined. Recognition
-// reads it and nothing else — an image carries no command, and a reply's
-// quote block is not the person's words, so a command typed as a reply is
-// still recognized.
+// saidText renders a submission's text for recognition: holdfold.SaidText,
+// the one reading the classifier and the hold tray share. An image carries no
+// command, and a reply's quote block is not the person's words, so a command
+// typed as a reply is still recognized.
 func saidText(said *conversationv1.UserSaid) string {
-	out := ""
-	for _, block := range said.GetContent().GetBlocks() {
-		if text, ok := block.GetBlock().(*conversationv1.UserContentBlock_Text); ok {
-			if out != "" {
-				out += "\n"
-			}
-			out += text.Text.GetText()
-		}
-	}
-	return out
+	return holdfold.SaidText(said)
 }
 
 // recognitionName renders a recognition for a log record.

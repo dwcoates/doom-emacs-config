@@ -13,6 +13,7 @@ import (
 	zettelv1 "agentrepl/proto/zettel/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/replyquote"
@@ -1041,4 +1042,33 @@ func TestSubmitThreadQuestionWithNoAskPanics(t *testing.T) {
 	// Act
 	_, _ = h.h.SubmitThreadQuestion(context.Background(), theWorkspace, userSaid("q"), "key-1",
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
+}
+
+func TestRecognitionReadsTheSaidTextThroughHoldfold(t *testing.T) {
+	// Recognition reads a submission's text through the one reading the queue
+	// and the hold tray share, so a command they would recognize is the one
+	// recognized here.
+	tests := []struct {
+		name string
+		said *conversationv1.UserSaid
+	}{
+		{name: "one text block", said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+			{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "/compact keep the plan"}}},
+		}}}},
+		{name: "a reply's quote then the words", said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+			{Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{}}},
+			{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "/clear"}}},
+		}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := saidText(tt.said)
+
+			// Assert
+			if want := holdfold.SaidText(tt.said); got != want {
+				t.Fatalf("saidText = %q, want holdfold's %q", got, want)
+			}
+		})
+	}
 }
