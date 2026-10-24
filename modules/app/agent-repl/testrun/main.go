@@ -459,6 +459,20 @@ func coverageBaselineCmd(log *run.Log, argv []string) int {
 		log.Infof("coverage-baseline: %s %.2f%% of %d statements (floor %.2f%%; %s)", name, s.Percent, s.Statements, s.Floor, s.Tiers)
 	}
 	log.Infof("coverage-baseline: wrote %s; it becomes testrun/coverage-baseline.json only by the owner's decision", a.Out)
+	// THE SHIM'S E2E REACH is reported beside the baseline, never merged
+	// into it (internal/cover/shime2e.go).
+	reach, err := cover.ShimE2EReach(cover.Command, filepath.Join(a.Module, "agent-shim", "claude", "shim", "node_modules", ".bin", "c8"),
+		filepath.Join(a.Work, "cover"), filepath.Join(filepath.Dir(a.Out), "shim-e2e-coverage"))
+	if err != nil {
+		log.Errorf("coverage-baseline: the shim's e2e reach: %v", err)
+		return 1
+	}
+	if len(reach) == 0 {
+		log.Infof("coverage-baseline: no shim e2e reach in this run (the e2e suite did not run under coverage)")
+	}
+	for _, line := range reach {
+		log.Infof("coverage-baseline: shim e2e reach, reported and not merged: %s", line)
+	}
 	return 0
 }
 
