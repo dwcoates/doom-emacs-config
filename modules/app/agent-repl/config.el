@@ -329,6 +329,11 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "status")
 (agent-repl--load-module "autosave")
 (agent-repl--load-module "stall")
+;; WHY: input-help.el is the composer's header line of help buttons, which
+;; `agent-repl-input-mode' (input.el, next) installs.  Each button's popup
+;; reads its keys from the composer's keymaps only when clicked, and shows
+;; them through popup.el, loaded above.
+(agent-repl--load-module "input-help")
 (agent-repl--load-module "input")
 ;; The composer's spellcheck (flyspell + hunspell); panels.el turns it on
 ;; for every composer it creates.
