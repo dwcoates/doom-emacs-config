@@ -87,12 +87,8 @@ path and would not find them anywhere else:
 Sources resolve module-root siblings (`prompts/`, `images/`, `hooks/`, `bin/`,
 `skills/`, `metaprompt.md`, `webapp/`) by climbing one level out of `lisp/`.
 
-The canonical suite invocation, from `modules/app/agent-repl/`:
-
-```bash
-bin/background.sh emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exit   # everything
-bin/background.sh emacs -batch -Q -l ert -l lisp/test-<module>.el   -f ert-run-tests-batch-and-exit   # one suite
-```
+An agent runs ERT tests through the daemon (`agent-repld test run -ert
+lisp/test-<module>.el[=test-a,test-b]`); the `agent-repl-tests` skill says how.
 
 `bin/test-all.sh` runs without coverage by default; pass `--coverage` only
 when coverage is the question being asked, never for routine verification.
@@ -163,32 +159,20 @@ Instead:
 `bin/with-cpu-load.sh` and its harness (`bin/test-with-cpu-load.sh`, the
 `cpu-load-harness` suite) remain for the owner's own use only; no agent runs it.
 
-### When to run which tests (owner ruling, 2026-10-06)
+### When to run which tests (owner rulings, 2026-10-06 and 2026-10-23)
 
 Tests are not free: every suite here is sized to fill the machine, and runs
-from several agents multiply. Tests are still used ACTIVELY; what this rules
-is how broad a run is at each moment.
+from several agents multiply. How broad a run is, at every stage, is the
+metaprompt's rule ("When to run which tests"): only the tests the change
+needs, never the full suite, which is the merge queue's gate. How an agent
+names those tests and runs them through the daemon is the `agent-repl-tests`
+skill's.
 
-- WHILE DEVELOPING: run only the tests covering what you change — one ERT
-  file, one Go package or `-run` pattern, one vitest file or `-t` name. Never
-  a whole suite, never an untouched system's suite, never a repeat run for
-  confidence; a flaky test is rerun alone, not with its suite.
-- WHEN A COMPLETE SET OF CHANGES IS FINISHED (a feature fully added, a bug
-  fixed, a prescribed change made): one full unit + integration run of the
-  systems it touched, through the scheduler so it holds the machine slot:
-  `bin/test-all.sh --suites <touched suites>` (roster names, e.g.
-  `daemon,webapp,ert`). Add `e2e` only with a stated reason — the change could
-  have systemic knock-on effects. A failure goes back to targeted runs; the set
-  then finishes with one more full run.
-- AFTER A GIT MERGE YOU MADE YOURSELF, onto any branch: the full suite,
-  unit + integration + e2e — `bin/test-all.sh` with no `--suites`. Merges
-  landed back to back with no run between them share one run, which verifies
-  the combined result.
-  - NOT after a merge routed through the merge queue (the daemon's
-    workspace-merge flow): the queue already runs the full suite as its gate,
-    so an agent never runs it again (owner ruling, 2026-10-06).
-- Full runs go through `bin/test-all.sh`, never a hand-assembled set of
-  per-suite commands: the scheduler sizes and orders the whole run.
+- The full suite runs through `bin/test-all.sh`, never a hand-assembled set
+  of per-suite commands: the scheduler sizes and orders the whole run. The
+  merge queue's gate runs it; the daemon's `RunTests` runs the same script
+  with a selection (`--selection`), so an agent's run takes the same priority
+  and the same CPU budget.
 - A SYSTEM'S SUITE IS ITS UNIT AND INTEGRATION TESTS TOGETHER. The roster
   entry carries both (`testrun/roster/roster.go`), so `--suites daemon` runs
   the daemon's packages and its `-tags integration` package
