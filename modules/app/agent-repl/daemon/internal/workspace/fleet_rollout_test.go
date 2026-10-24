@@ -433,6 +433,54 @@ func TestAdoptParkedHoldsTheShimWithNoWatcherAndRaisesTheGate(t *testing.T) {
 	}
 }
 
+func TestAdoptInertHoldsTheListeningSurvivorWithNoWatcherAndNoSession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.socketState = shimsocket.StateLive
+
+	// Act.
+	_, adopted, err := f.fleet.AdoptInert(context.Background(), ws.ID)
+
+	// Assert.
+	f.fleet.mu.RLock()
+	entry := f.fleet.sessions[ws.ID]
+	f.fleet.mu.RUnlock()
+	if err != nil || !adopted || entry == nil || entry.watcher != nil || f.fleet.sessionStarted(ws.ID) {
+		t.Fatalf("AdoptInert = (%v, %v), entry %+v; want the survivor held with no watcher and no session", adopted, err, entry)
+	}
+}
+
+func TestAdoptInertHoldsNothingWhenNoShimListens(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	_, adopted, err := f.fleet.AdoptInert(context.Background(), ws.ID)
+
+	// Assert.
+	if _, held := f.fleet.Client(ws.ID); err != nil || adopted || held {
+		t.Fatalf("AdoptInert = (%v, %v) holding %v; want nothing held for an absent listener", adopted, err, held)
+	}
+}
+
+func TestAdoptInertRefusesASocketItCannotProbe(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.socketState = shimsocket.StateUndetermined
+	f.socketErr = errors.New("arranged: the probe failed")
+
+	// Act.
+	_, adopted, err := f.fleet.AdoptInert(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil || adopted {
+		t.Fatalf("AdoptInert = (%v, %v); want an undetermined socket refused, never read as absent", adopted, err)
+	}
+}
+
 func TestAdoptParkedServesTheCompactMenuForAWorkAccount(t *testing.T) {
 	// Arrange: the parked session lives under the work account.
 	f := newFleetFixture(t)

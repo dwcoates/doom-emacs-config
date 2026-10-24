@@ -9,6 +9,13 @@
 // cold gate like any lapsed conversation. Every close and reopen the daemon
 // records reaches this keeper (ObserveClosures).
 //
+// A HIDDEN MERGE WORKSPACE WHOSE MERGE HAS LEFT EVERY QUEUE is stood down the
+// same way (wsm.Workspace.Runs): its merge failed or was taken off, nothing
+// is carried, and its requester's bubble is how the user reaches it. Every
+// removal from a merge queue reaches this keeper (ObserveMergeQueues), and so
+// does every session coming up or parking, so a session a takeover or a boot
+// adopts for one is stood down too.
+//
 // Hiding a workspace no longer stands its session down at once. Its shim's
 // keep-alives are HELD (shim.v1.SetKeepalive), so the cache lapses on its own
 // clock, and until then the user can show the workspace again with its cache
@@ -47,6 +54,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/bringup"
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -59,10 +67,14 @@ const (
 	opProjection = "daemon.cachelapse.projection"
 	opCadence    = "daemon.cachelapse.cadence"
 	opLapse      = "daemon.cachelapse.lapse"
+	opMergeEnded = "daemon.cachelapse.merge_ended"
 )
 
-// DB is the slice of the state client the Keeper reads and writes.
+// DB is the slice of the state client the Keeper reads and writes. The
+// repositories and merge queues it lists answer whether a hidden merge
+// workspace still carries its merge (bringup.MergeQueued).
 type DB interface {
+	bringup.RepositoryLister
 	ListWorkspaces(ctx context.Context) ([]wsm.Workspace, error)
 	Workspace(ctx context.Context, id wsm.WorkspaceID) (wsm.Workspace, error)
 	SetCacheLapse(ctx context.Context, id wsm.WorkspaceID, lapse wsm.CacheLapse) (bool, error)
@@ -178,6 +190,12 @@ func (k *Keeper) ClosureChanged(ws ids.WorkspaceID) {
 // workspace takes the gate's lapse. It never blocks.
 func (k *Keeper) ColdGateRaised(ws ids.WorkspaceID) {
 	k.enqueue(edge{ws: ws, why: "the session parked at its cold gate"})
+}
+
+// MergeLeftQueue is WS's entry leaving its merge queue: a hidden merge
+// workspace whose merge left every queue is stood down. It never blocks.
+func (k *Keeper) MergeLeftQueue(ws ids.WorkspaceID) {
+	k.enqueue(edge{ws: ws, why: "its merge left its queue"})
 }
 
 // SessionUp is a session coming up on WS: its cadence is reconciled. It never
@@ -380,6 +398,9 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 			k.store(ctx, log, ws, lapse, "the standing cold gate")
 		}
 	}
+	if k.mergeEnded(ctx, log, record) {
+		return
+	}
 	want := cadenceFor(record)
 	fields := dlog.Context{"cadence": string(want), "hidden": record.InHiddenSection(), "selected": record.Current, "closed": record.Closed}
 	shim, ok := k.deps.Shim(ws)
@@ -402,6 +423,31 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 		return
 	}
 	log.Info(opCadence, "set the shim's keep-alive cadence to match the workspace's row", fields)
+}
+
+// mergeEnded stands RECORD's session down when it is a hidden merge workspace
+// the user is not looking at whose merge has left every queue, and answers
+// whether it did (or could not tell, which is recorded), so no cadence is set
+// on a session being stood down. The drain stands it down never under a turn,
+// and finds nothing to do when no shim serves it.
+func (k *Keeper) mergeEnded(ctx context.Context, log dlog.Logger, record wsm.Workspace) bool {
+	if !record.MergeHidden() || record.Current {
+		return false
+	}
+	queued, err := bringup.MergeQueued(ctx, k.deps.DB, record)
+	if err != nil {
+		if leaving(ctx, log, opMergeEnded, "reading the merge queues", err) {
+			return true
+		}
+		log.Error(opMergeEnded, "could not tell whether the merge workspace still carries its merge; its session is left as it is", dlog.Context{"cause": err.Error()})
+		return true
+	}
+	if queued {
+		return false
+	}
+	log.Info(opMergeEnded, "the merge workspace's merge has left every queue; its session is stood down", nil)
+	k.deps.StandDowns.StandDownWithheld(record.ID)
+	return true
 }
 
 // lapseDue takes every lapse that has come: the session is stood down, and

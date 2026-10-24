@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/wsm"
 )
 
@@ -315,6 +316,35 @@ func TestAnAdoptionOfAParkedShimRaisesTheCarriedColdGate(t *testing.T) {
 	}
 	if got := h.fleet.Adoptions(); len(got) != 0 {
 		t.Fatalf("adoptions = %v, want the parked shim held with no watcher, not adopted", got)
+	}
+}
+
+// TestAnAdoptionOfAParkedShimWhoseLockReadsFreeDialsIt pins the parked shim
+// as production finds it: it took no lock (it refused the resume before one),
+// so its lock reads free, yet it is running and its incumbent detached it.
+// Undialed, a hidden workspace's would be served by no daemon at all.
+func TestAnAdoptionOfAParkedShimWhoseLockReadsFreeDialsIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, dir := h.workspace(t)
+	h.mu.Lock()
+	h.lockStates[dir] = sessionlock.StateFree
+	h.mu.Unlock()
+	raw, err := protojson.Marshal(&conversationv1.SessionCold{ContextTokens: 1234})
+	if err != nil {
+		t.Fatalf("encode the cold facts: %v", err)
+	}
+	carryFor(t, h, ws, Carry{ColdGate: raw})
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	h.fleet.mu.Lock()
+	cold, parked := h.fleet.parkedAdoptions[ws]
+	h.fleet.mu.Unlock()
+	if !parked || cold.GetContextTokens() != 1234 {
+		t.Fatalf("parked adoption = (%v, %v), want the parked shim dialed and its gate raised", cold, parked)
 	}
 }
 

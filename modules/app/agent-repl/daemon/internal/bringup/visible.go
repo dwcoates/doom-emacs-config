@@ -3,6 +3,7 @@ package bringup
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -18,9 +19,12 @@ import (
 // the one statement of visibility (wsm.Workspace.Runs).
 
 // RepositoryLister lists the registered repositories, whose folds decide
-// which of their workspaces are collapsed. wsm.DB is the production one.
+// which of their workspaces are collapsed, and the merge queues, which decide
+// whether a hidden merge workspace still carries a merge. wsm.DB is the
+// production one.
 type RepositoryLister interface {
 	ListRepositories(ctx context.Context) ([]wsm.Repository, error)
+	AllMergeQueues(ctx context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error)
 }
 
 // WorkspaceReader reads one workspace's record. wsm.DB is the production one.
@@ -47,9 +51,41 @@ func folds(ctx context.Context, repos RepositoryLister) (map[ids.RepoID]bool, er
 	return out, nil
 }
 
+// queuedMerges answers which of pending's hidden merge workspaces have an
+// entry standing in a merge queue. The queues are read only when one of
+// pending is a hidden merge workspace: no other workspace's verdict reads
+// them.
+func queuedMerges(ctx context.Context, repos RepositoryLister, pending []wsm.Workspace) (map[ids.WorkspaceID]bool, error) {
+	if !slices.ContainsFunc(pending, wsm.Workspace.MergeHidden) {
+		return nil, nil
+	}
+	queues, err := repos.AllMergeQueues(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("bringup: read the merge queues to tell which merge workspaces carry a merge: %w", err)
+	}
+	out := map[ids.WorkspaceID]bool{}
+	for _, entries := range queues {
+		for _, entry := range entries {
+			out[entry.Workspace] = true
+		}
+	}
+	return out, nil
+}
+
+// MergeQueued reports whether WS, a hidden merge workspace, still carries its
+// merge: an entry of it stands in a merge queue (wsm.Workspace.Runs).
+func MergeQueued(ctx context.Context, repos RepositoryLister, ws wsm.Workspace) (bool, error) {
+	queued, err := queuedMerges(ctx, repos, []wsm.Workspace{ws})
+	if err != nil {
+		return false, err
+	}
+	return queued[ws.ID], nil
+}
+
 // OnlyVisible splits pending into the workspaces the daemon runs and the ones
-// it withholds (hidden, or in a collapsed repository section), each in
-// pending's order. A fold that cannot be read is an error and splits nothing:
+// it withholds (hidden, in a collapsed repository section, or a hidden merge
+// workspace whose merge left every queue), each in
+// pending's order. A fold or a queue that cannot be read is an error and splits nothing:
 // starting a workspace that may be hidden would break the principle, and
 // starting none silently would leave visible ones session-less, so the
 // caller states the failure.
@@ -61,8 +97,12 @@ func OnlyVisible(ctx context.Context, repos RepositoryLister, pending []wsm.Work
 	if err != nil {
 		return nil, nil, err
 	}
+	queued, err := queuedMerges(ctx, repos, pending)
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, ws := range pending {
-		if ws.Runs(folded[ws.Repo]) {
+		if ws.Runs(folded[ws.Repo], queued[ws.ID]) {
 			run = append(run, ws)
 			continue
 		}

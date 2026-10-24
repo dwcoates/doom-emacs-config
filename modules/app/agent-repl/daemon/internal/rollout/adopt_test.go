@@ -589,6 +589,34 @@ func TestAdoptionOfAFreeLockDialsNoShim(t *testing.T) {
 	}
 }
 
+// TestAnAdoptionOfAHiddenWorkspaceStandsDownItsInertSurvivor pins the inert
+// shim a handover detaches for a workspace that runs nothing: its lock reads
+// free, no bring-up reaches it, so the adoption stands it down rather than
+// leaving it served by no daemon.
+func TestAnAdoptionOfAHiddenWorkspaceStandsDownItsInertSurvivor(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, dir := h.workspace(t)
+	if err := h.db.SetHidden(context.Background(), ws, true, time.Now()); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+	h.mu.Lock()
+	h.lockStates[dir] = sessionlock.StateFree
+	h.mu.Unlock()
+	h.fleet.mu.Lock()
+	h.fleet.listening[ws] = true
+	h.fleet.mu.Unlock()
+
+	// Act
+	arm(t, h, ws, Participants{})
+
+	// Assert
+	held, stood := h.fleet.InertAdoptionsAndStandDowns()
+	if !slices.Equal(held, []ids.WorkspaceID{ws}) || !slices.Equal(stood, []ids.WorkspaceID{ws}) {
+		t.Fatalf("inert survivors held %v and stood down %v, want the workspace's both", held, stood)
+	}
+}
+
 func TestAdoptionSurfacesAFailedShimAdoption(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

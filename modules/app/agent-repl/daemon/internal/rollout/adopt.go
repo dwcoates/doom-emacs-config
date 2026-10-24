@@ -638,6 +638,16 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 			return fmt.Errorf("rollout: adopt %q: decode the carried cold gate: %w", ws, err)
 		}
 	}
+	// A SHIM PARKED AT ITS COLD GATE HOLDS NO LOCK, and it is running: it
+	// refused the resume before it took one (workspace.Fleet.AdoptParked), and
+	// the incumbent detached it for this daemon. Its free lock is not "no
+	// process to dial", and undialed it would be served by no daemon at all:
+	// a hidden workspace's bring-up is withheld, so nothing else here would
+	// ever reach it (shims 76760, 76813 and 76849, 2026-10-23 17:59).
+	if parked != nil && !dial {
+		c.log.Debug(opAdopt, "the lock reads free because the shim is parked at its cold gate; dialing it", fields)
+		dial = true
+	}
 
 	// THE ROW IS CLAIMED BEFORE THE SHIM IS DIALED, through the one
 	// arbitration the incumbent's reclaim also goes through. An incumbent
@@ -726,7 +736,12 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// published, so the roster never draws the adopted row idle and usable
 	// while nothing serves it; the start itself runs once the adoption is
 	// complete and the workspace is this daemon's.
-	sessionless := !dial && !record.Closed && len(c.visibleOnly(ctx, []wsm.Workspace{record}, fields)) == 1
+	runs := len(c.visibleOnly(ctx, []wsm.Workspace{record}, fields)) == 1
+	sessionless := !dial && !record.Closed && runs
+	// A WORKSPACE THAT RUNS NOTHING MAY STILL HAVE A LISTENER: an inert shim
+	// the incumbent held and detached, whose lock reads free. It is stood
+	// down once the workspace is this daemon's (standDownInert).
+	withheldInert := !dial && !record.Closed && !runs
 	if sessionless {
 		c.deps.BringingUp(ws, true)
 	}
@@ -778,6 +793,9 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 
 	if sessionless {
 		c.startSessionless([]wsm.Workspace{record}, fields)
+	}
+	if withheldInert {
+		c.standDownInert(ctx, ws, fields)
 	}
 
 	// A DIALED ADOPTION IS A HEALTHY ATTACH, the recovery edge of every

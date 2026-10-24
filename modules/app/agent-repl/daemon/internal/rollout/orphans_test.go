@@ -95,6 +95,48 @@ func TestTheTakeoverDialsNoShimForAFreeLock(t *testing.T) {
 	}
 }
 
+func TestTheTakeoverOfAFreeLock(t *testing.T) {
+	tests := []struct {
+		name      string
+		hidden    bool
+		listening bool
+		wantStood bool
+	}{
+		{name: "stands down the listening inert survivor of a hidden workspace", hidden: true, listening: true, wantStood: true},
+		{name: "holds nothing for a hidden workspace no shim listens for", hidden: true},
+		{name: "leaves a visible workspace's survivor to its bring-up", listening: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := orphan(t, h)
+			record, err := h.db.Workspace(context.Background(), ws)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if err := h.db.SetHidden(context.Background(), ws, tt.hidden, time.Now()); err != nil {
+				t.Fatalf("SetHidden: %v", err)
+			}
+			h.mu.Lock()
+			h.lockStates[record.Dir] = sessionlock.StateFree
+			h.mu.Unlock()
+			h.fleet.mu.Lock()
+			h.fleet.listening[ws] = tt.listening
+			h.fleet.mu.Unlock()
+
+			// Act
+			takeOver(h)
+
+			// Assert
+			_, stood := h.fleet.InertAdoptionsAndStandDowns()
+			if got := slices.Contains(stood, ws); got != tt.wantStood {
+				t.Fatalf("stood down %v, want the survivor stood down: %v", stood, tt.wantStood)
+			}
+		})
+	}
+}
+
 func TestTheTakeoverLeavesAClosedWorkspaceAlone(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
