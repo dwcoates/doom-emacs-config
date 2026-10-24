@@ -108,15 +108,18 @@ func TestTheHiddenSectionIsOneStatement(t *testing.T) {
 func TestRuns(t *testing.T) {
 	of := MergeOrigin{}
 	cases := []struct {
-		name       string
-		ws         Workspace
-		repoFolded bool
-		want       bool
+		name        string
+		ws          Workspace
+		repoFolded  bool
+		mergeQueued bool
+		want        bool
 	}{
 		{name: "a drawn workspace runs", ws: Workspace{}, want: true},
 		{name: "a hidden workspace does not run", ws: Workspace{Hidden: true}, want: false},
 		{name: "a collapsed workspace does not run", ws: Workspace{}, repoFolded: true, want: false},
-		{name: "a hidden merge workspace runs in a collapsed section", ws: Workspace{MergeOf: &of}, repoFolded: true, want: true},
+		{name: "a hidden merge workspace runs in a collapsed section", ws: Workspace{MergeOf: &of}, repoFolded: true, mergeQueued: true, want: true},
+		{name: "a hidden merge workspace whose merge left every queue does not run", ws: Workspace{MergeOf: &of}, want: false},
+		{name: "a hidden merge workspace whose merge left every queue runs while the user looks at it", ws: Workspace{MergeOf: &of, Current: true}, want: true},
 		{name: "a revealed merge workspace the user hid does not run", ws: Workspace{MergeOf: &of, MergeRevealed: true, Hidden: true}, want: false},
 		{name: "a hidden workspace the user is looking at runs", ws: Workspace{Hidden: true, Current: true}, want: true},
 		{name: "a collapsed workspace the user is looking at runs", ws: Workspace{Current: true}, repoFolded: true, want: true},
@@ -124,7 +127,7 @@ func TestRuns(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange / Act
-			got := tc.ws.Runs(tc.repoFolded)
+			got := tc.ws.Runs(tc.repoFolded, tc.mergeQueued)
 
 			// Assert
 			if got != tc.want {
@@ -167,7 +170,7 @@ func TestAHeldCacheNeverRuns(t *testing.T) {
 	for _, ws := range []Workspace{{}, {Hidden: true}, {Hidden: true, Current: true}, {Current: true}, {Hidden: true, MergedAt: &merged}} {
 		for _, folded := range []bool{false, true} {
 			// Act / Assert
-			if ws.KeepaliveHeld() && ws.Runs(folded) {
+			if ws.KeepaliveHeld() && ws.Runs(folded, false) {
 				t.Fatalf("%+v (folded %v) holds its cache yet runs", ws, folded)
 			}
 		}
