@@ -41,11 +41,12 @@ type migration struct {
 	// step is rolled out (see MigrationKind), so every step declares one.
 	Kind MigrationKind
 	// DDL is the whole step, run as one script inside the step's transaction.
+	// Empty for a step that is a Rewrite alone.
 	DDL string
 	// Rewrite, when set, runs in the same transaction after DDL: the part of
 	// a step SQL cannot say, such as re-encoding stored protobuf rows. Nil for
 	// a step that is DDL alone.
-	Rewrite func(ctx context.Context, tx *sql.Tx) error
+	Rewrite func(ctx context.Context, tx *sql.Tx, log dlog.Logger) error
 }
 
 // MigrationKind is what one migration step means for the build before it.
@@ -168,6 +169,7 @@ var migrations = []migration{
 	{To: 70, Name: "workspace_untold_notices", Kind: MigrationAdditive, DDL: workspaceUntoldNoticesDDL},
 	{To: 71, Name: "principal_link", Kind: MigrationAdditive, DDL: principalLinkDDL},
 	{To: 72, Name: "account_usage_windows", Kind: MigrationAdditive, DDL: accountUsageWindowsDDL},
+	{To: 73, Name: "durable_rows_parsed_prose", Kind: MigrationAdditive, Rewrite: rewriteParsedProseRows},
 }
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its
@@ -509,11 +511,13 @@ func (s *store) applyMigration(ctx context.Context, m migration) error {
 		return fmt.Errorf("wsm: begin migration to layout %d on %q: %w", m.To, s.path, err)
 	}
 	defer s.endTx(tx, "daemon.wsm.open", dlog.Context{"path": s.path, "step_layout": m.To, "migration": m.Name})
-	if _, err := tx.ExecContext(ctx, m.DDL); err != nil {
-		return fmt.Errorf("wsm: apply migration %q to layout %d in %q: %w", m.Name, m.To, s.path, err)
+	if m.DDL != "" {
+		if _, err := tx.ExecContext(ctx, m.DDL); err != nil {
+			return fmt.Errorf("wsm: apply migration %q to layout %d in %q: %w", m.Name, m.To, s.path, err)
+		}
 	}
 	if m.Rewrite != nil {
-		if err := m.Rewrite(ctx, tx); err != nil {
+		if err := m.Rewrite(ctx, tx, s.log); err != nil {
 			return fmt.Errorf("wsm: rewrite rows in migration %q to layout %d in %q: %w", m.Name, m.To, s.path, err)
 		}
 	}

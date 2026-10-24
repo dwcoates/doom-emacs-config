@@ -82,12 +82,13 @@ export function unparsedProse(markdown: string): ParsedProse {
 }
 
 /**
- * Whether drawing PROSE needs a measured column budget: it holds a tree.
- * Prose that holds none draws the same at every width, so it can be drawn
- * before the body has a containing block.
+ * Whether drawing PROSE needs a measured column budget: it holds a tree or a
+ * run of a prompt's entries, both wrapped to the budget (proseHtml). Prose
+ * that holds neither draws the same at every width, so it can be drawn before
+ * the body has a containing block.
  */
 export function proseNeedsWidth(prose: ParsedProse): boolean {
-  return prose.blocks.some((block) => block.block.case === "tree");
+  return prose.blocks.some((block) => block.block.case === "tree" || block.block.case === "entries");
 }
 
 /** The operation every unmeasurable-width violation is recorded under. */

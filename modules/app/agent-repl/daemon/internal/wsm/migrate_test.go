@@ -828,7 +828,9 @@ func fixtureAt(t *testing.T, version int) string {
 		if m.To > version {
 			break
 		}
-		execRaw(t, path, m.DDL)
+		if m.DDL != "" {
+			execRaw(t, path, m.DDL)
+		}
 		stampRaw(t, path, m.To)
 	}
 	return path
