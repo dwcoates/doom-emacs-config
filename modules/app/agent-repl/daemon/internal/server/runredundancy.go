@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -41,21 +42,17 @@ func (s *server) RunRedundancy(
 		s.log.Info(opRunRedundancy, "refused a measurement that names no command", nil)
 		return sendRedundancyError(stream, &agentreplv1.RunRedundancyError{Cause: &agentreplv1.RunRedundancyError_NoCommand{NoCommand: &agentreplv1.RunRedundancyNoCommand{}}})
 	}
-	subject, refused, err := s.resolveRef(ctx, rpc, msg.GetWorkspace())
-	if err != nil {
-		return failResolution(s.log, rpc, err)
-	}
-	if refused != nil {
-		s.log.Info(opRunRedundancy, "refused a measurement for a workspace this daemon does not serve", dlog.Context{
-			"workspace_id": msg.GetWorkspace().GetId(), "arm": refused.Arm, "reason": refused.Reason})
+	w, err := s.testWorktreeOf(ctx, rpc, opRunRedundancy, msg.GetWorkspace())
+	var noScript *noTestScriptError
+	switch {
+	case errors.Is(err, errUnknownTestWorkspace):
 		return sendRedundancyError(stream, &agentreplv1.RunRedundancyError{Cause: &agentreplv1.RunRedundancyError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.RunRedundancyUnknownWorkspace{}}})
+	case errors.As(err, &noScript):
+		return sendRedundancyRunnerFailed(stream, noScript.Error())
+	case err != nil:
+		return err
 	}
-	log, dir := subject.Log, subject.Record.Dir
-	script, err := testScriptOf(dir)
-	if err != nil {
-		log.Error(opRunRedundancy, "a measurement has no test script to run", dlog.Context{"dir": dir, "cause": err.Error()})
-		return sendRedundancyRunnerFailed(stream, err.Error())
-	}
+	log, dir, script := w.log, w.dir, w.script
 	request, err := writeRequest(msg.GetRedundancy(), "agent-repl-run-redundancy-*.pb")
 	if err != nil {
 		log.Error(opRunRedundancy, "a measurement's request could not be handed to its runner", dlog.Context{"dir": dir, "cause": err.Error()})

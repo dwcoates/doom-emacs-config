@@ -17,6 +17,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	testrunv1 "agentrepl/proto/testrun/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/deployconfig"
 	"agent-repld/internal/dlog"
@@ -81,21 +82,17 @@ func (s *server) RunTests(
 			"requester": msg.GetRequester().GetWorkspace().GetWorkspace().GetId(), "loops": msg.GetCpuLoad().GetLoops()})
 		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_CpuLoadRefused{CpuLoadRefused: &agentreplv1.RunTestsCpuLoadRefused{}}})
 	}
-	subject, refused, err := s.resolveRef(ctx, rpc, msg.GetWorkspace())
-	if err != nil {
-		return failResolution(s.log, rpc, err)
-	}
-	if refused != nil {
-		s.log.Info(opRunTests, "refused a test run for a workspace this daemon does not serve", dlog.Context{
-			"workspace_id": msg.GetWorkspace().GetId(), "arm": refused.Arm, "reason": refused.Reason})
+	w, err := s.testWorktreeOf(ctx, rpc, opRunTests, msg.GetWorkspace())
+	var noScript *noTestScriptError
+	switch {
+	case errors.Is(err, errUnknownTestWorkspace):
 		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.RunTestsUnknownWorkspace{}}})
+	case errors.As(err, &noScript):
+		return sendRunnerFailed(stream, 1, -1, noScript.Error())
+	case err != nil:
+		return err
 	}
-	log, dir := subject.Log, subject.Record.Dir
-	script, err := testScriptOf(dir)
-	if err != nil {
-		log.Error(opRunTests, "a test run has no test script to run", dlog.Context{"dir": dir, "cause": err.Error()})
-		return sendRunnerFailed(stream, 1, -1, err.Error())
-	}
+	log, dir, script := w.log, w.dir, w.script
 	selection, err := writeRequest(msg.GetRun(), "agent-repl-run-tests-*.pb")
 	if err != nil {
 		log.Error(opRunTests, "a test run's selection could not be handed to its runner", dlog.Context{"dir": dir, "cause": err.Error()})
@@ -238,6 +235,46 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 	}
 	log.Info(opRunTests, "a workspace's selected tests ran", dlog.Context{"dir": dir, "run": run, "outcome": outcome.String(), "exit_code": result.run.ExitCode, "wall_seconds": result.run.Wall.Seconds()})
 	return outcome, nil
+}
+
+// errUnknownTestWorkspace is a test run's workspace this daemon does not
+// serve (testWorktreeOf).
+var errUnknownTestWorkspace = errors.New("no workspace this daemon serves is the one named")
+
+// noTestScriptError is a test run's worktree with no test script to run.
+type noTestScriptError struct{ cause error }
+
+func (e *noTestScriptError) Error() string { return e.cause.Error() }
+func (e *noTestScriptError) Unwrap() error { return e.cause }
+
+// testWorktree is where a test run or a measurement runs: the workspace's
+// worktree, its log, and the test script its deploy config names.
+type testWorktree struct {
+	log    dlog.Logger
+	dir    string
+	script string
+}
+
+// testWorktreeOf resolves ref to the worktree its test run runs in, recording
+// each refusal under op: errUnknownTestWorkspace for a workspace this daemon
+// does not serve, a *noTestScriptError for a worktree with no test script, or
+// the resolution's own failure (already answered through failResolution).
+func (s *server) testWorktreeOf(ctx context.Context, rpc, op string, ref *workspacev1.WorkspaceRef) (testWorktree, error) {
+	subject, refused, err := s.resolveRef(ctx, rpc, ref)
+	if err != nil {
+		return testWorktree{}, failResolution(s.log, rpc, err)
+	}
+	if refused != nil {
+		s.log.Info(op, "refused a test run for a workspace this daemon does not serve", dlog.Context{
+			"workspace_id": ref.GetId(), "arm": refused.Arm, "reason": refused.Reason})
+		return testWorktree{}, errUnknownTestWorkspace
+	}
+	w := testWorktree{log: subject.Log, dir: subject.Record.Dir}
+	if w.script, err = testScriptOf(w.dir); err != nil {
+		w.log.Error(op, "a test run has no test script to run", dlog.Context{"dir": w.dir, "cause": err.Error()})
+		return testWorktree{}, &noTestScriptError{cause: err}
+	}
+	return w, nil
 }
 
 // testScriptOf is the test script the worktree's own deploy config names.

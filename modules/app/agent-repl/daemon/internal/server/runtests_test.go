@@ -428,3 +428,64 @@ func TestRunTestsRunsTheMarkedTestCommand(t *testing.T) {
 		t.Fatalf("argv = %q, want it to begin with the daemon's test command %q", h.Tests.argv, want)
 	}
 }
+
+func TestTestWorktreeOf(t *testing.T) {
+	cases := []struct {
+		name    string
+		ref     func(h *harness) *workspacev1.WorkspaceRef
+		wantErr func(error) bool
+	}{
+		{name: "a served worktree naming its script", ref: func(h *harness) *workspacev1.WorkspaceRef { return testsWorkspace(t, h, testsDeploy) },
+			wantErr: func(err error) bool { return err == nil }},
+		{name: "a workspace the daemon does not serve", ref: func(*harness) *workspacev1.WorkspaceRef { return &workspacev1.WorkspaceRef{Id: "ws-nope", Dir: "/nowhere"} },
+			wantErr: func(err error) bool { return errors.Is(err, errUnknownTestWorkspace) }},
+		{name: "a worktree with no deploy config", ref: func(h *harness) *workspacev1.WorkspaceRef { return testsWorkspace(t, h, "") },
+			wantErr: func(err error) bool { var e *noTestScriptError; return errors.As(err, &e) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			ref := tc.ref(h)
+
+			// Act
+			w, err := h.Server.(*server).testWorktreeOf(context.Background(), "RunTests", opRunTests, ref)
+
+			// Assert
+			if !tc.wantErr(err) {
+				t.Fatalf("testWorktreeOf = %+v, %v", w, err)
+			}
+			if err == nil && (w.dir != ref.GetDir() || w.script != "bin/test-all.sh") {
+				t.Fatalf("testWorktreeOf = %+v, want the worktree and its configured script", w)
+			}
+			if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: opRunTests}); err != nil && !found {
+				t.Fatalf("records = %+v, want the refusal recorded", log.Records())
+			}
+		})
+	}
+}
+
+// THE TEST ENDPOINTS RESOLVE THEIR WORKTREE ONE WAY: through testWorktreeOf,
+// never a hand-rolled resolve and script read of their own.
+func TestTheTestEndpointsResolveThroughTestWorktreeOf(t *testing.T) {
+	for _, file := range []string{"runtests.go", "runredundancy.go"} {
+		// Arrange
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(src)
+		if file == "runtests.go" {
+			body = body[:strings.Index(body, "func (s *server) testWorktreeOf(")]
+		}
+
+		// Act
+		handRolled := strings.Contains(body, "s.resolveRef(") || strings.Contains(body, "testScriptOf(")
+
+		// Assert
+		if handRolled || !strings.Contains(body, "s.testWorktreeOf(") {
+			t.Fatalf("%s resolves its worktree by hand; use testWorktreeOf", file)
+		}
+	}
+}
