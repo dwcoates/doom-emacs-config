@@ -1386,3 +1386,65 @@ func TestEveryChunkKindReadsItsTestTimes(t *testing.T) {
 		})
 	}
 }
+
+func TestVitestNamePattern(t *testing.T) {
+	// Act
+	got := VitestNamePattern([]string{"a suite", "b (x)"})
+
+	// Assert
+	if got != `^(a suite|b \(x\))( |$)` {
+		t.Fatalf("VitestNamePattern = %q", got)
+	}
+}
+
+func TestGoPkgNamedChunkRunsOneTestPath(t *testing.T) {
+	// Arrange
+	module := goPackageFixture(t, "func TestA(t *testing.T) {}\nfunc TestB(t *testing.T) {}\n")
+	_, split, err := goPkg{Suite: "m", Module: module, Rel: "p", Bin: "/bin/p.test"}.units()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	argv := split.Named("m:p#00", []string{"TestA"}, []string{"TestA/a_case/inner"}).Argv
+
+	// Assert
+	if !slices.Contains(argv, "-test.run=^TestA$/^a_case$/^inner$") {
+		t.Fatalf("argv = %v, want the one path's exact pattern", argv)
+	}
+}
+
+func TestGoPkgNamedChunkRefusesTwoPaths(t *testing.T) {
+	// Arrange
+	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+	_, split, err := goPkg{Suite: "m", Module: module, Rel: "p", Bin: "/bin/p.test"}.units()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a Go chunk was built for two test paths, which one -test.run cannot express")
+		}
+	}()
+
+	// Act
+	split.Named("m:p#00", []string{"TestA"}, []string{"TestA/x", "TestA/y/z"})
+}
+
+func TestVitestNamedChunkPassesItsNames(t *testing.T) {
+	// Arrange
+	l := Layout{Repo: t.TempDir(), Module: t.TempDir(), Work: t.TempDir()}
+	u, err := vitestUnitsForFiles(l, roster.Suite{Name: "webapp"}, t.TempDir(), []string{"src/a.test.ts"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	argv := u.Splits[0].Named("webapp#00", []string{"src/a.test.ts"}, []string{"a suite"}).Argv
+
+	// Assert
+	i := slices.Index(argv, "-t")
+	if i < 0 || argv[i+1] != VitestNamePattern([]string{"a suite"}) || argv[len(argv)-1] != "src/a.test.ts" {
+		t.Fatalf("argv = %v, want -t with the names' pattern and the file", argv)
+	}
+}

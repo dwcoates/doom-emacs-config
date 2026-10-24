@@ -42,7 +42,7 @@ func TestMain(m *testing.M) {
 	case len(os.Args) > 1 && os.Args[1] == "warden":
 		os.Exit(helperWarden(os.Args[2:]))
 	case os.Getenv(envHelper) == "sentinel":
-		os.Exit(Sentinel(os.Args[0], nil, os.Stdout, os.Stderr, &run.Log{Out: os.Stdout, Err: os.Stderr}))
+		os.Exit(Sentinel(os.Args[0], nil, nil, os.Stdout, os.Stderr, &run.Log{Out: os.Stdout, Err: os.Stderr}))
 	}
 	os.Exit(m.Run())
 }

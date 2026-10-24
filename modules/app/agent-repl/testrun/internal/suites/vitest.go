@@ -10,6 +10,7 @@ import (
 
 	"agentrepl/testrun/internal/command"
 	"agentrepl/testrun/internal/cover"
+	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/sched"
 	"agentrepl/testrun/internal/testtimes"
@@ -122,7 +123,7 @@ func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string
 		return Split{}, fmt.Errorf("suites: create %s: %w", work, err)
 	}
 	reporter := filepath.Join(l.Module, "testrun", "vitest", "items-reporter.mjs")
-	chunk := func(id string, items []string) run.Spec {
+	named := func(id string, items []string, names []string) run.Spec {
 		tag := filepath.Base(id)
 		itemsOut := filepath.Join(work, "items", tag+".json")
 		argv := []string{
@@ -141,13 +142,17 @@ func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string
 				"--coverage.reportsDirectory="+filepath.Join(cover.VitestIntegrationCoverage(l.Work, s.Name), filepath.Base(id)),
 			)
 		}
+		if len(names) > 0 {
+			argv = append(argv, "-t", VitestNamePattern(names))
+		}
 		testsOut := filepath.Join(work, "items", tag+".tests.json")
 		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut, testtimes.VitestTestsEnv+"="+testsOut)
 		sp.Items = func([]byte) (map[string]float64, error) { return ParseVitestItems(itemsOut, dir, items) }
 		sp.Tests = func([]byte, bool) ([]testtimes.Test, error) { return testtimes.ParseVitest(s.Name, testsOut, dir) }
 		return sp
 	}
-	return Split{Group: group, Suite: s.Name, Items: files, Chunk: chunk}, nil
+	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
+	return Split{Group: group, Suite: s.Name, Items: files, Chunk: chunk, Named: named}, nil
 }
 
 func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (Units, error) {
@@ -168,7 +173,7 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 	// runs (webapp and shim alike), so the unit holds the two slots it uses.
 	typecheck.Slots = TypecheckSlots
 	reporter := filepath.Join(l.Module, "testrun", "vitest", "items-reporter.mjs")
-	chunk := func(id string, items []string) run.Spec {
+	named := func(id string, items []string, names []string) run.Spec {
 		tag := filepath.Base(id)
 		itemsOut := filepath.Join(work, "items", tag+".json")
 		argv := []string{
@@ -189,12 +194,16 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 				argv = append(argv, "--coverage.all=false", "--coverage.reporter=json")
 			}
 		}
+		if len(names) > 0 {
+			argv = append(argv, "-t", VitestNamePattern(names))
+		}
 		testsOut := filepath.Join(work, "items", tag+".tests.json")
 		sp := spec(id, s.Name, dir, append(argv, items...), VitestItemsEnv+"="+itemsOut, testtimes.VitestTestsEnv+"="+testsOut)
 		sp.Items = func([]byte) (map[string]float64, error) { return ParseVitestItems(itemsOut, dir, items) }
 		sp.Tests = func([]byte, bool) ([]testtimes.Test, error) { return testtimes.ParseVitest(s.Name, testsOut, dir) }
 		return sp
 	}
+	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
 	atomic := []run.Spec{typecheck}
 	if l.Coverage {
 		merge := spec(s.Name+":coverage", s.Name, dir, []string{
@@ -206,8 +215,16 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 	}
 	return Units{
 		Atomic: atomic,
-		Splits: []Split{{Group: s.Name, Suite: s.Name, Items: files, Chunk: chunk}},
+		Splits: []Split{{Group: s.Name, Suite: s.Name, Items: files, Chunk: chunk, Named: named}},
 	}, nil
+}
+
+// VitestNamePattern is the `-t` value that runs exactly the tests whose full
+// names (describe titles and the test's own, joined by single spaces) start
+// with one of names: each name is matched literally, anchored at the start, and
+// ends at a word boundary so "a test" does not also run "a tests".
+func VitestNamePattern(names []string) string {
+	return "^" + gotest.LiteralAlternation(names) + "( |$)"
 }
 
 // VitestItemsEnv names the file testrun/vitest/items-reporter.mjs writes.

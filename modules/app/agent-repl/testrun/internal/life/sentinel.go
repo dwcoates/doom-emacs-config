@@ -19,7 +19,11 @@ import (
 // The relay is copied until every writer of it is gone (the runner and the
 // warden it started), so the run's cleanup lines reach the invoker before
 // this process answers.
-func Sentinel(name string, args []string, stdout, stderr io.Writer, log Logger) int {
+//
+// EXTRA files reach the runner after its lifeline: the runner holds the
+// lifeline as fd 3 and extra[i] as fd 4+i (the events stream, see
+// EventsFD).
+func Sentinel(name string, args []string, extra []*os.File, stdout, stderr io.Writer, log Logger) int {
 	lifeR, lifeW, err := os.Pipe()
 	if err != nil {
 		log.Errorf("make the runner's lifeline: %v", err)
@@ -41,7 +45,7 @@ func Sentinel(name string, args []string, stdout, stderr io.Writer, log Logger) 
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), EnvRole+"="+RoleRunner)
 	cmd.Stdout, cmd.Stderr = outW, errW
-	cmd.ExtraFiles = []*os.File{lifeR}
+	cmd.ExtraFiles = append([]*os.File{lifeR}, extra...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	// The signals are taken before the runner exists, so one sent the instant
 	// it starts is forwarded rather than ending this process unrelayed.
@@ -49,7 +53,10 @@ func Sentinel(name string, args []string, stdout, stderr io.Writer, log Logger) 
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signals)
 	startErr := cmd.Start()
-	for _, f := range []*os.File{lifeR, outW, errW} {
+	// The runner holds its copies now; the extra files are the invoker's to
+	// close, and closing them here is what lets the reader see the runner's
+	// end as the end of the stream.
+	for _, f := range append([]*os.File{lifeR, outW, errW}, extra...) {
 		f.Close()
 	}
 	if startErr != nil {

@@ -55,9 +55,13 @@ func ertUnits(l Layout, s roster.Suite) (Units, error) {
 		[]string{"go", "build", "-buildvcs=false", "-o", fake, "."}, "GOPROXY=off", "GOFLAGS=-mod=mod -p=1")
 	driver := filepath.Join(l.Module, "testrun", "ert", "driver.el")
 	rosterForm := lispList(files)
-	chunk := func(id string, items []string) run.Spec {
+	named := func(id string, items []string, names []string) run.Spec {
 		form := fmt.Sprintf("(agent-repl-testrun-ert %s %s %s)",
 			strconv.Quote(lispDir+"/"), lispList(items), rosterForm)
+		if len(names) > 0 {
+			form = fmt.Sprintf("(agent-repl-testrun-ert %s %s %s %s)",
+				strconv.Quote(lispDir+"/"), lispList(items), rosterForm, lispSymbols(names))
+		}
 		sp := spec(id, s.Name, lispDir,
 			[]string{"emacs", "-batch", "-Q", "-l", "ert", "-l", driver, "--eval", form},
 			"AGENT_REPL_ITEST_FAKEDAEMON="+fake)
@@ -65,10 +69,20 @@ func ertUnits(l Layout, s roster.Suite) (Units, error) {
 		sp.Tests = func(out []byte, _ bool) ([]testtimes.Test, error) { return testtimes.ParseERT(s.Name, out) }
 		return sp
 	}
+	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
 	return Units{
 		Atomic: []run.Spec{build},
-		Splits: []Split{{Group: s.Name, Suite: s.Name, Items: files, Deps: []string{build.ID}, Chunk: chunk}},
+		Splits: []Split{{Group: s.Name, Suite: s.Name, Items: files, Deps: []string{build.ID}, Chunk: chunk, Named: named}},
 	}, nil
+}
+
+// lispSymbols is a quoted list of symbols, each name interned exactly.
+func lispSymbols(names []string) string {
+	q := make([]string, len(names))
+	for i, name := range names {
+		q[i] = "(intern " + strconv.Quote(name) + ")"
+	}
+	return "(list " + strings.Join(q, " ") + ")"
 }
 
 func lispList(items []string) string {

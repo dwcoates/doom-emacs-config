@@ -63,6 +63,12 @@ type Split struct {
 	// width included, is the scheduler's (sched.Chunkable), so Chunk never
 	// sets it.
 	Chunk func(id string, items []string) run.Spec
+	// Named builds a chunk that runs only the NAMED tests within its items,
+	// for a run that asks for single tests (package selection); nil where a
+	// suite's items are its finest tests (a harness's groups). What a name is
+	// belongs to the suite: a Go test path (TestFoo/a_case, one per chunk), a
+	// vitest full-name prefix, an ERT test symbol. Chunk is Named with no names.
+	Named func(id string, items []string, names []string) run.Spec
 	// Slots is every chunk's width; zero is one slot.
 	Slots int
 }

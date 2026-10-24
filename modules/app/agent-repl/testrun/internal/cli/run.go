@@ -4,18 +4,27 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
+	testrunv1 "agentrepl/proto/testrun/v1"
+
+	"agentrepl/testrun/internal/events"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/plan"
 	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/internal/selection"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
@@ -23,9 +32,12 @@ import (
 
 // Deps are the run's seams to the outside.
 type Deps struct {
-	Log   *run.Log
-	Exec  run.Executor
-	Clock run.Clock
+	Log *run.Log
+	// Events is where the run reports its plan, each unit and its end
+	// (--events-fd); nil reports nowhere.
+	Events *events.Emitter
+	Exec   run.Executor
+	Clock  run.Clock
 	// Slots is how many units run at once: the host's core budget.
 	Slots int
 	// Cores is the host's core pool every run on the host shares.
@@ -114,12 +126,30 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		return 1
 	}
 
+	ev := d.Events
+	if ev == nil {
+		ev = events.New(io.Discard, log)
+	}
 	var selected []roster.Suite
-	for _, s := range roster.Suites {
-		if a.Selects(s.Name) {
-			selected = append(selected, s)
-		} else {
-			log.Infof("%s: not selected by --suites, skipping", s.Name)
+	var resolved selection.Resolved
+	if a.Selection != "" {
+		resolved, err = resolveSelection(a.Selection, layout)
+		if err != nil {
+			log.Errorf("the selection cannot be run: %v", err)
+			ev.Refused(err.Error())
+			return 1
+		}
+		selected = resolved.Suites
+		for _, s := range selected {
+			log.Infof("%s: selected by --selection", s.Name)
+		}
+	} else {
+		for _, s := range roster.Suites {
+			if a.Selects(s.Name) {
+				selected = append(selected, s)
+			} else {
+				log.Infof("%s: not selected by --suites, skipping", s.Name)
+			}
 		}
 	}
 	mode := a.ReuseMode()
@@ -141,18 +171,29 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	// checks, so every suite builds at once.
 	built := make([]suites.Units, len(selected))
 	buildErrs := make([]error, len(selected))
+	narrowErrs := make([]error, len(selected))
 	var wg sync.WaitGroup
 	for i, s := range selected {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			built[i], buildErrs[i] = d.Build(layout, s)
-			if buildErrs[i] == nil {
+			// NARROWED BEFORE IT IS CONFINED: confinement wraps each chunk's
+			// command, and a chunk narrowed after it would escape the wrap.
+			if buildErrs[i] == nil && a.Selection != "" {
+				built[i], narrowErrs[i] = resolved.Narrow(s, built[i])
+			}
+			if buildErrs[i] == nil && narrowErrs[i] == nil {
 				built[i] = d.Reuse.Confine(verdicts, s.Name, built[i])
 			}
 		}()
 	}
 	wg.Wait()
+	if err := errors.Join(narrowErrs...); err != nil {
+		log.Errorf("the selection cannot be run: %v", err)
+		ev.Refused(err.Error())
+		return 1
+	}
 	var planned []suites.Units
 	var unbuilt []run.SuiteResult
 	for i, s := range selected {
@@ -208,14 +249,18 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		}
 	}
 
-	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, Log: log}
+	ev.Planned(p.Specs, d.RunLog)
+	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, Log: log, Ended: ev.UnitEnded}
 	start := d.Clock.Now()
 	results, suiteResults, runErr := runner.Run(ctx, p.Specs)
 	end := d.Clock.Now()
 	if runErr != nil {
 		log.Errorf("the run was interrupted: %v", runErr)
+		// The units it never ran are failures of the run, so it ended failed.
+		ev.Ended(results, len(unbuilt)+1)
 		return 130
 	}
+	ev.Ended(results, len(unbuilt))
 	suiteResults = inRosterOrder(append(unbuilt, suiteResults...))
 
 	if err := hist.Record(plan.Measurements(results)); err != nil {
@@ -241,7 +286,9 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	if len(failed) > 0 {
 		return 1
 	}
-	if !placed {
+	if !placed && !a.Targeted {
+		// A targeted run ran only what it named: the whole checkout's
+		// placement is the full runs' to enforce.
 		log.Errorf("placement: %d file(s) are read by no suite and listed nowhere; place each in testrun/roster", len(unplaced))
 		return 1
 	}
@@ -268,6 +315,20 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		log.Infof("reused an earlier green run of their exact inputs, NOT run: %s (--no-reuse runs them)", strings.Join(names, " "))
 	}
 	return 0
+}
+
+// resolveSelection reads the testrun.v1.TestRunRequest at path and resolves it
+// against the roster.
+func resolveSelection(path string, layout suites.Layout) (selection.Resolved, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return selection.Resolved{}, fmt.Errorf("read the selection %s: %w", path, err)
+	}
+	req := &testrunv1.TestRunRequest{}
+	if err := proto.Unmarshal(data, req); err != nil {
+		return selection.Resolved{}, fmt.Errorf("decode the selection %s: %w", path, err)
+	}
+	return selection.Resolve(req, layout)
 }
 
 // needsWebappDist reports whether a suite the run will run reads the

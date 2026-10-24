@@ -945,3 +945,28 @@ func TestRunRefusesARunWithoutAHostCorePool(t *testing.T) {
 		t.Fatalf("Run = %v, want the missing pool refused", err)
 	}
 }
+
+func TestRunTellsItsObserverEveryUnitThatEnded(t *testing.T) {
+	// Arrange: a failing build cancels the chunk that depends on it.
+	specs := []Spec{spec("build", "e2e"), spec("e2e#00", "e2e", "build")}
+	e := &fakeExec{scripts: map[string]script{"build": {exit: 2, output: "boom"}}}
+	r, _, _ := newRunner(1, e)
+	type told struct {
+		id      string
+		outcome Outcome
+		output  string
+	}
+	var got []told
+	r.Ended = func(res Result, output []byte) { got = append(got, told{res.Spec.ID, res.Outcome, string(output)}) }
+
+	// Act
+	if _, _, err := r.Run(context.Background(), specs); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	want := []told{{"build", Failed, "boom"}, {"e2e#00", Cancelled, ""}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("observer was told %+v, want %+v", got, want)
+	}
+}

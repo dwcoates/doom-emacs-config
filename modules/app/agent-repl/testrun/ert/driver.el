@@ -9,6 +9,10 @@
 ;;   emacs -batch -Q -l ert -l testrun/ert/driver.el \
 ;;     --eval '(agent-repl-testrun-ert "LISP-DIR" (quote CHUNK) (quote ROSTER))'
 ;;
+;; A fourth argument, NAMES, narrows the chunk to those tests (symbols) among
+;; its files' own: a run that asks for single tests.  A name no chunk file
+;; defines is an error, never a silently empty run.
+;;
 ;; ROSTER is every file `lisp/test-agent-repl.el' loads, in its order, the
 ;; helpers included (they define tests too); CHUNK is
 ;; this process's share of it.  The driver loads the shared helpers and the
@@ -31,14 +35,21 @@
 
 (require 'ert)
 
-(defun agent-repl-testrun-ert--own-tests (file)
-  "Selector for the tests defined in FILE (a bare file name)."
-  `(satisfies ,(lambda (test)
-                 (equal file (and (ert-test-file-name test)
-                                  (file-name-nondirectory (ert-test-file-name test)))))))
+(defun agent-repl-testrun-ert--own-p (file test)
+  "Whether TEST is defined in FILE (a bare file name)."
+  (equal file (and (ert-test-file-name test)
+                   (file-name-nondirectory (ert-test-file-name test)))))
 
-(defun agent-repl-testrun-ert (dir chunk roster)
-  "Run the ERT test files CHUNK from DIR, ordered and checked against ROSTER."
+(defun agent-repl-testrun-ert--own-tests (file &optional names)
+  "Selector for the tests defined in FILE (a bare file name).
+With NAMES, only those of them."
+  `(satisfies ,(lambda (test)
+                 (and (agent-repl-testrun-ert--own-p file test)
+                      (or (null names) (memq (ert-test-name test) names))))))
+
+(defun agent-repl-testrun-ert (dir chunk roster &optional names)
+  "Run the ERT test files CHUNK from DIR, ordered and checked against ROSTER.
+With NAMES, run only those tests of CHUNK's files."
   (or noninteractive
       (user-error "This function is only for use in batch mode"))
   (let ((eln-dir (and (featurep 'native-compile)
@@ -72,9 +83,15 @@
               (unless (member file roster)
                 (error "agent-repl-testrun: test `%s' is defined in %s, which lisp/test-agent-repl.el does not load, so no chunk would run it"
                        (ert-test-name test) (or path "no file")))))
+          (dolist (name names)
+            (unless (and (ert-test-boundp name)
+                         (seq-some (lambda (file)
+                                     (agent-repl-testrun-ert--own-p file (ert-get-test name)))
+                                   chunk))
+              (error "agent-repl-testrun: no file of %s defines the test `%s'" chunk name)))
           (dolist (file ordered)
             (let* ((start (float-time))
-                   (stats (ert-run-tests-batch (agent-repl-testrun-ert--own-tests file))))
+                   (stats (ert-run-tests-batch (agent-repl-testrun-ert--own-tests file names))))
               (setq unexpected (+ unexpected (ert-stats-completed-unexpected stats)))
               (message "TESTRUN-ITEM %s %.6f" file
                        (+ (cdr (assoc file load-seconds)) (- (float-time) start)))))

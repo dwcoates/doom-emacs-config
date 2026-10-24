@@ -26,7 +26,16 @@ func ertDriver(t *testing.T) string {
 // runDriver runs one chunk of the fixture dir and answers its output and exit status.
 func runDriver(t *testing.T, dir string, chunk, roster []string) (string, int) {
 	t.Helper()
+	return runDriverNamed(t, dir, chunk, roster, nil)
+}
+
+// runDriverNamed runs one chunk narrowed to names (all of it when none).
+func runDriverNamed(t *testing.T, dir string, chunk, roster, names []string) (string, int) {
+	t.Helper()
 	form := "(agent-repl-testrun-ert " + strconv.Quote(dir+"/") + " " + lispList(chunk) + " " + lispList(roster) + ")"
+	if len(names) > 0 {
+		form = "(agent-repl-testrun-ert " + strconv.Quote(dir+"/") + " " + lispList(chunk) + " " + lispList(roster) + " " + lispSymbols(names) + ")"
+	}
 	cmd := exec.Command("emacs", "-batch", "-Q", "-l", "ert", "-l", ertDriver(t), "--eval", form)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
@@ -144,5 +153,32 @@ func TestERTDriverRefusesAnInteractiveEmacs(t *testing.T) {
 	// Assert
 	if err != nil || !strings.Contains(string(out), "only for use in batch mode") {
 		t.Fatalf("err = %v, out = %s", err, out)
+	}
+}
+
+func TestERTDriverRunsOnlyTheNamedTests(t *testing.T) {
+	// Arrange: a file with a passing and a failing test; only the passing one
+	// is named.
+	dir := ertFixture(t, map[string]string{"test-a.el": "(ert-deftest fixture-a-passes () (should t))\n(ert-deftest fixture-a-fails () (should nil))\n"})
+
+	// Act
+	out, exit := runDriverNamed(t, dir, []string{"test-a.el"}, []string{"test-helpers.el", "test-a.el"}, []string{"fixture-a-passes"})
+
+	// Assert
+	if exit != 0 || !strings.Contains(out, "fixture-a-passes") || strings.Contains(out, "fixture-a-fails") {
+		t.Fatalf("exit = %d, want 0 with only fixture-a-passes run:\n%s", exit, out)
+	}
+}
+
+func TestERTDriverRefusesANameNoChunkFileDefines(t *testing.T) {
+	// Arrange
+	dir := ertFixture(t, map[string]string{"test-a.el": "(ert-deftest fixture-a-passes () (should t))\n"})
+
+	// Act
+	out, exit := runDriverNamed(t, dir, []string{"test-a.el"}, []string{"test-helpers.el", "test-a.el"}, []string{"fixture-nope"})
+
+	// Assert
+	if exit != 2 || !strings.Contains(out, "defines the test") || !strings.Contains(out, "fixture-nope") {
+		t.Fatalf("exit = %d, want 2 naming the missing test:\n%s", exit, out)
 	}
 }

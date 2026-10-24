@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/testrun/internal/events"
 	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
@@ -21,6 +22,10 @@ import (
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
+
+	"google.golang.org/protobuf/proto"
+
+	testrunv1 "agentrepl/proto/testrun/v1"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -34,7 +39,15 @@ func TestParseArgs(t *testing.T) {
 		{name: "record and a suite list", argv: []string{"--module", "/m", "--record", "--record-out", "/r", "--suites", "ert,daemon"}, want: Args{Module: "/m", Record: true, RecordOut: "/r", Selected: []string{"ert", "daemon"}}},
 		{name: "coverage is explicit", argv: []string{"--module", "/m", "--coverage"}, want: Args{Module: "/m", Coverage: true}},
 		{name: "the = spelling", argv: []string{"--module", "/m", "--suites=e2e"}, want: Args{Module: "/m", Selected: []string{"e2e"}}},
-		{name: "an unknown argument", argv: []string{"--module", "/m", "--bogus"}, wantErr: "unknown argument '--bogus', expected --record, --record-out, --coverage, --no-reuse, or --suites <list>"},
+		{name: "an unknown argument", argv: []string{"--module", "/m", "--bogus"}, wantErr: "unknown argument '--bogus', expected --record, --record-out, --coverage, --no-reuse, --suites <list>, --selection <path> or --events-fd <n>"},
+		{name: "a selection is a targeted run", argv: []string{"--module", "/m", "--selection", "/s.pb"}, want: Args{Module: "/m", Selection: "/s.pb", Targeted: true}},
+		{name: "an events stream", argv: []string{"--module", "/m", "--events-fd", "4"}, want: Args{Module: "/m", EventsFD: 4}},
+		{name: "an events fd that is a standard stream", argv: []string{"--module", "/m", "--events-fd", "2"}, wantErr: "is not a file descriptor past stderr"},
+		{name: "an events fd that is no number", argv: []string{"--module", "/m", "--events-fd", "x"}, wantErr: "is not a file descriptor past stderr"},
+		{name: "--events-fd without a value", argv: []string{"--module", "/m", "--events-fd"}, wantErr: "--events-fd needs a file descriptor"},
+		{name: "--selection without a value", argv: []string{"--module", "/m", "--selection"}, wantErr: "--selection needs a path"},
+		{name: "a selection with a suite list", argv: []string{"--module", "/m", "--selection", "/s.pb", "--suites", "ert"}, wantErr: "--selection cannot be combined"},
+		{name: "a selection with coverage", argv: []string{"--module", "/m", "--selection", "/s.pb", "--coverage"}, wantErr: "--selection cannot be combined"},
 		{name: "an unknown suite", argv: []string{"--module", "/m", "--suites", "nope"}, wantErr: "--suites names an unknown suite 'nope'; known suites: "},
 		{name: "an empty suite list", argv: []string{"--module", "/m", "--suites", ""}, wantErr: "--suites needs at least one suite name"},
 		{name: "an empty name in the list", argv: []string{"--module", "/m", "--suites", "ert,,daemon"}, wantErr: "--suites contains an empty suite name: 'ert,,daemon'"},
@@ -1144,5 +1157,129 @@ func TestAPushLeavesOutACancelledUnit(t *testing.T) {
 	// Assert
 	if err != nil || len(got.Units) != 1 || got.Units[0].ID != "a" || got.Units[0].Outcome != testtimes.Fail || got.Units[0].Wall != 1 {
 		t.Fatalf("pushTimes = %v, units %+v; want only the failed unit, with its wall time", err, got.Units)
+	}
+}
+
+// writeSelection writes req where a --selection run reads it.
+func writeSelection(t *testing.T, req *testrunv1.TestRunRequest) string {
+	t.Helper()
+	data, err := proto.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "selection.pb")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func harnessSelection(groups ...string) *testrunv1.TestRunRequest {
+	h := &testrunv1.TestSelectionHarness{Script: "modules/app/agent-repl/bin/test-test-all.sh",
+		Groups: &testrunv1.TestSelectionHarness_All{All: &testrunv1.TestSelectionHarnessAllGroups{}}}
+	if len(groups) > 0 {
+		h.Groups = &testrunv1.TestSelectionHarness_Named{Named: &testrunv1.TestSelectionHarnessNamedGroups{Names: groups}}
+	}
+	return &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_Harness{Harness: h}}}}
+}
+
+// eventsOf reads every event a run wrote.
+func eventsOf(t *testing.T, buf *bytes.Buffer) []*testrunv1.TestRunEvent {
+	t.Helper()
+	var out []*testrunv1.TestRunEvent
+	for buf.Len() > 0 {
+		ev, err := events.Read(buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+func TestRunASelectionRunsOnlyWhatItNames(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	var stream bytes.Buffer
+	h.deps.Events = events.New(&stream, h.deps.Log)
+	path := writeSelection(t, harnessSelection())
+
+	// Act
+	code := h.run(t, "--selection", path)
+
+	// Assert
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	if len(h.exec.ran) != 1 || h.exec.ran[0] != "orchestrator-harness" {
+		t.Fatalf("ran %v, want only the selected harness", h.exec.ran)
+	}
+	evs := eventsOf(t, &stream)
+	if len(evs) != 3 || evs[0].GetPlanned() == nil || evs[1].GetUnitEnded().GetPassed() == nil || evs[2].GetEnded().GetPassed() == nil {
+		t.Fatalf("events = %v, want planned, a passing unit_ended, ended passed", evs)
+	}
+	if *h.reuser.mode != reuse.Targeted {
+		t.Fatalf("reuse mode = %v, want Targeted: a run of some tests records no pass", *h.reuser.mode)
+	}
+}
+
+func TestRunAFailingSelectionEndsFailed(t *testing.T) {
+	// Arrange
+	h := newHarness(t, map[string]int{"orchestrator-harness": 1}, nil)
+	var stream bytes.Buffer
+	h.deps.Events = events.New(&stream, h.deps.Log)
+
+	// Act
+	code := h.run(t, "--selection", writeSelection(t, harnessSelection()))
+
+	// Assert
+	evs := eventsOf(t, &stream)
+	if code != 1 || evs[len(evs)-1].GetEnded().GetFailed().GetFailedUnits() != 1 {
+		t.Fatalf("exit = %d, events = %v; want 1 and ended failed", code, evs)
+	}
+}
+
+func TestRunRefusesASelectionItCannotRun(t *testing.T) {
+	cases := []struct {
+		name string
+		req  *testrunv1.TestRunRequest
+		want string
+	}{
+		{name: "a target no suite runs", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_Harness{Harness: &testrunv1.TestSelectionHarness{
+			Script: "nowhere.sh", Groups: &testrunv1.TestSelectionHarness_All{All: &testrunv1.TestSelectionHarnessAllGroups{}}}}}}}, want: "no suite in the roster runs it"},
+		{name: "a name its target does not hold", req: harnessSelection("g"), want: "has no groups to name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, nil, nil)
+			var stream bytes.Buffer
+			h.deps.Events = events.New(&stream, h.deps.Log)
+
+			// Act
+			code := h.run(t, "--selection", writeSelection(t, tc.req))
+
+			// Assert
+			evs := eventsOf(t, &stream)
+			if code != 1 || len(h.exec.ran) != 0 || len(evs) != 1 || !strings.Contains(evs[0].GetRefused().GetDetail(), tc.want) {
+				t.Fatalf("exit = %d, ran %v, events = %v; want 1, nothing run, one refusal mentioning %q", code, h.exec.ran, evs, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunRefusesASelectionFileItCannotRead(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	var stream bytes.Buffer
+	h.deps.Events = events.New(&stream, h.deps.Log)
+
+	// Act
+	code := h.run(t, "--selection", filepath.Join(t.TempDir(), "missing.pb"))
+
+	// Assert
+	evs := eventsOf(t, &stream)
+	if code != 1 || len(evs) != 1 || !strings.Contains(evs[0].GetRefused().GetDetail(), "read the selection") {
+		t.Fatalf("exit = %d, events = %v; want 1 and a refusal naming the read", code, evs)
 	}
 }

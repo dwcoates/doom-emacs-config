@@ -31,6 +31,7 @@ import (
 	"agentrepl/testrun/internal/cli"
 	"agentrepl/testrun/internal/cores"
 	"agentrepl/testrun/internal/cover"
+	"agentrepl/testrun/internal/events"
 	"agentrepl/testrun/internal/gitinfo"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/life"
@@ -90,7 +91,39 @@ func sentinelCmd(log *run.Log, argv []string) int {
 		log.Errorf("resolve the testrun binary: %v", err)
 		return 1
 	}
-	return life.Sentinel(self, append([]string{"run"}, argv...), os.Stdout, os.Stderr, log)
+	argv, extra, err := forwardEvents(argv)
+	if err != nil {
+		log.Errorf("%v", err)
+		return 2
+	}
+	return life.Sentinel(self, append([]string{"run"}, argv...), extra, os.Stdout, os.Stderr, log)
+}
+
+// runnerEventsFD is where the runner holds the events stream: its first fd
+// after the lifeline (life.Sentinel).
+const runnerEventsFD = 4
+
+// forwardEvents hands the invoker's --events-fd stream to the runner: the file
+// rides as the runner's first extra file, and the argument names the fd the
+// runner holds it at.
+func forwardEvents(argv []string) ([]string, []*os.File, error) {
+	out := append([]string(nil), argv...)
+	for i, arg := range out {
+		if arg != "--events-fd" || i+1 >= len(out) {
+			continue
+		}
+		fd, err := strconv.Atoi(out[i+1])
+		if err != nil || fd < 3 {
+			return nil, nil, fmt.Errorf("--events-fd %q is not a file descriptor past stderr", out[i+1])
+		}
+		f := os.NewFile(uintptr(fd), "testrun-events")
+		if f == nil {
+			return nil, nil, fmt.Errorf("--events-fd %d is not an open file", fd)
+		}
+		out[i+1] = strconv.Itoa(runnerEventsFD)
+		return out, []*os.File{f}, nil
+	}
+	return out, nil, nil
 }
 
 // runnerCmd runs the suites, leading the run's session.
@@ -327,7 +360,18 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 	}
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	var emitter *events.Emitter
+	if args.EventsFD > 0 {
+		stream := os.NewFile(uintptr(args.EventsFD), "testrun-events")
+		if stream == nil {
+			log.Errorf("--events-fd %d is not an open file", args.EventsFD)
+			return 1
+		}
+		defer stream.Close()
+		emitter = events.New(stream, log)
+	}
 	return cli.Run(ctx, cli.Deps{
+		Events:            emitter,
 		Reuse:             reuse.Runner{Deps: reuseDeps, Files: func() ([]string, error) { return reuse.ExecRepoFiles(reuseDeps.Repo) }},
 		Log:               log,
 		Exec:              run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root, Prefix: prefix},
