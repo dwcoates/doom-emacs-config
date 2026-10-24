@@ -29,6 +29,7 @@
 import { createControl } from "../src/control.js";
 import { STREAM_COST_WINDOW_MS } from "../src/stream-cost.js";
 import { CENSUS_EVERY_MS } from "../src/page-census.js";
+import { PAGE_STALL_INTERVAL_MS } from "../src/page-stall.js";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -475,6 +476,28 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
 
       // Assert
       expect([cleared.mock.calls.some(([t]) => t === timer), window.setTimeout === before]).toEqual([true, true]);
+    } finally {
+      armed.mockRestore();
+      cleared.mockRestore();
+    }
+  });
+
+  test("takes its page-stall sampler down when the page is torn down", async () => {
+    // Arrange: the sampler is the one interval armed at its period.
+    // Restored however the test ends: the unit run is un-isolated.
+    const armed = vi.spyOn(window, "setInterval");
+    const cleared = vi.spyOn(window, "clearInterval");
+    try {
+      await bootMain();
+      const samplerCall = armed.mock.calls.findIndex(([, ms]) => ms === PAGE_STALL_INTERVAL_MS);
+      expect(samplerCall).toBeGreaterThanOrEqual(0);
+      const timer: unknown = armed.mock.results[samplerCall]?.value;
+
+      // Act
+      (await import("../src/page-teardown.js")).tearDownPage();
+
+      // Assert
+      expect(cleared).toHaveBeenCalledWith(timer);
     } finally {
       armed.mockRestore();
       cleared.mockRestore();
