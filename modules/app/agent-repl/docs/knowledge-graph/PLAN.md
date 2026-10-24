@@ -293,26 +293,24 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 
 ## Known complications
 
-- Under consideration (owner's idea, 2026-10-24): full convergence. A chat
-  thread is to a shim instance what a worktree is today, chats share the
-  daemon, shim and store with agent workspaces, and there is no separate
-  zettel database: the store is extended instead.
-  - For: one session lifecycle, streaming path, topbar, title and summary
-    generation, rollback and hibernation for both; the store already models
-    branching (each session has a book, and a fork reads its inherited past
-    from its parent's book up to the fork point); a node, its transcript and
-    any agent-feed bubble it quotes live in one database, so SQLite enforces
-    every reference between them and no cross-database link can dangle; no
-    new launchd service.
-  - Against: zettel stops being separable from agent-repl; the store's role
-    widens from transcript records to graph data (premises, embeddings,
-    revisions, sightings); the daemon never calls `store.v1` today, so the
-    webapp's graph queries need a read path; embedding and premise work must
-    not run in the store, which is on every workspace's hot path; a corrected
-    revision is not a transcript record, so revisions sit beside the
-    transcript rather than in it; a tree with siblings spans several forked
-    vendor sessions, so "one shim per thread" needs a rule for which session
-    the shim drives.
+- Under consideration (owner's refinement, 2026-10-24): convergence with a
+  split of storage. A chat thread is to a shim instance what a worktree is
+  today, and chats share the daemon, shim and store with agent workspaces.
+  The store keeps every transcript, chats' included, as agent-repl's. zettel
+  keeps its own service and database, but holds only the graph: nodes,
+  parents, premises, revisions, embeddings and sightings. This keeps zettel
+  separable, leaves the store's role unchanged, keeps embedding and premise
+  work out of the store, and gives corrected revisions a natural home.
+  - A node copies the question, the answer and any quote when it is created
+    (the answer's first revision), so it never depends on the store to be
+    read. Its link back to a store session, fork point or agent-feed bubble
+    is for navigation only. The store prunes only its write ledger today,
+    not conversation records, but a node must not depend on that staying
+    true; a target that is gone is shown as gone.
+  - Open: how a finished chat turn becomes a node without a crash between the
+    two writes losing it. The structural answer is ingestion by cursor: zettel
+    records the last place it ingested per session, and the daemon replays
+    from there whenever the two connect, so a turn can never be skipped.
 - Proposed (2026-10-24): chat answers run through agent-repl's existing shim
   (`agent-shim/claude/shim`), driven by the daemon, rather than a second
   adapter around the Agent SDK. Reasons:
