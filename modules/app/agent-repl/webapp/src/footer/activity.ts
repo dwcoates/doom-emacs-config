@@ -118,7 +118,7 @@ import {
 import type { TransientExpirySchedule } from "./expiry.js";
 import { footerClockSpan } from "./clock-span.js";
 import { drawFooterStatusActivityMergeStep } from "./merge-step.js";
-import { coldGateFiguredLine, grabber, statusWords, textLine } from "./parts.js";
+import { coldGateFiguredLine, statusWords, textLine } from "./parts.js";
 import { pressurePercentColor } from "../pressure-color.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { activityDatumClass } from "./tones.js";
@@ -278,7 +278,6 @@ export function drawFooterStatusActivity(
   });
   cell.appendChild(drawn.line);
   if (drawn.age !== null) cell.appendChild(drawn.age);
-  cell.appendChild(grabber());
   // THE WHOLE LINE AS THE CELL'S HOVER. The cell is the strip's one elastic
   // segment and ellipsizes by design, so whatever it cannot fit is otherwise
   // reachable only by opening a sheet. The title is read off the DRAWN line

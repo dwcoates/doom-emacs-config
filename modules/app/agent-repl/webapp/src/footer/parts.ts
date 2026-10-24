@@ -64,11 +64,3 @@ export function coldGateFiguredLine(
   line.append(document.createTextNode(parts.lead), number, document.createTextNode(parts.tail));
   return line;
 }
-
-/** The baseline strip's grabber notch, which lives inside the grow cell. */
-export function grabber(): HTMLElement {
-  const notch = document.createElement("div");
-  notch.className = "pfooter-grab";
-  notch.setAttribute("aria-hidden", "true");
-  return notch;
-}

@@ -79,7 +79,7 @@ import { heatColor } from "../heat.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { drawFooterStatusActivity, type ActivityDeps, type FooterActivity } from "./activity.js";
 import { CHIP_PANELS, type FooterChipPanel, type FooterPanel } from "./expanded.js";
-import { grabber, statusWords, textLine } from "./parts.js";
+import { statusWords, textLine } from "./parts.js";
 import { activityDatumClass, statusArmClass, type ActivityDatum } from "./tones.js";
 import type { StopControls } from "./stop.js";
 import { countNoun } from "../count-noun.js";
@@ -178,7 +178,6 @@ export function drawClientDisconnectedStrip(
   cell.className = "pfooter-cell pfooter-grow footer-activity";
   cell.appendChild(textLine("footer-activity-client-verdict", activity));
   cell.title = activity;
-  cell.appendChild(grabber());
   row.appendChild(cell);
 
   if (last !== null) {
