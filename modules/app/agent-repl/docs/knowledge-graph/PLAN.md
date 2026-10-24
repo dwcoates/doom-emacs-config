@@ -78,6 +78,23 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 - A remote client has nothing to show while the workstation is offline,
   unless caching is added later.
 
+### Stack
+
+- The webapp's new views are built with React. React has the biggest
+  ecosystem (gestures, long scrolling lists, text highlighting, markdown),
+  and coding agents write it most reliably. Long views draw only the rows on
+  screen, so the virtual DOM does not slow them.
+- The desktop shell is Tauri. On macOS and iOS it uses the same WebKit as
+  xwidget, Tauri 2 also builds for iOS and Android, and its Rust native side
+  is no downside. The webapp is bundled into the app, or remote origins are
+  allowed explicitly, because Tauri blocks remote content from native
+  features by default.
+- Remote clients reach the workstation through our own relay. The
+  workstation dials out to it, it forwards only end-to-end encrypted traffic
+  over outbound HTTPS, and pairing and encryption are built on a proven
+  protocol such as Noise. Chosen over a mesh VPN because a VPN takes iOS's
+  single VPN slot and needs setup on every device.
+
 ### Data model
 
 - A node is one question and its answer. Every node has a title that makes
@@ -144,29 +161,15 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   - how it behaves: the workstation is the only place state is stored, one
     contract serves every client, and tests never reach a real vendor.
 - Remote access: privacy comes from end-to-end encryption, not from who runs
-  the machine in the middle. The daemon listens only on `127.0.0.1` today and
-  trusts every local caller, so remote access also needs device pairing and
-  authentication. Candidates for how a phone reaches the workstation:
-  - our own relay that forwards only end-to-end encrypted traffic, which the
-    workstation dials out to;
-  - a mesh VPN built on WireGuard, such as Tailscale, or Headscale for a
-    self-hosted coordination server;
-  - ruled out: opening a port on the workstation (exposed and fragile), and
-    Cloudflare Tunnel (Cloudflare can read the traffic it terminates).
+  the relay. The daemon listens only on `127.0.0.1` today and trusts every
+  local caller, so remote access also needs device pairing and
+  authentication. Still open: who hosts the relay.
 - Stack:
   - protobuf over Connect, as agent-repl already uses; Connect runs over HTTP,
     so the proxy can carry it unchanged;
   - SQLite through `modernc.org/sqlite`; that driver cannot load vector
     extensions, so similarity search runs in Go over embeddings held in
     memory, which is fast enough for one person's graph;
-  - the webapp is not committed to staying framework-free; the choice goes
-    by what gives the best results. A framework that updates the page
-    directly without a virtual DOM (Solid, Svelte) is closest to how the
-    webapp works today;
-  - desktop shell candidates: Electron, Tauri, Wails (Go, with the operating
-    system's web view), or no shell at all (an installable web app).
-    Tauri is the leading candidate. Its Rust native side counts as no
-    downside (owner, 2026-10-24).
 
 ## Known complications
 
@@ -221,6 +224,4 @@ Nothing here is settled yet.
 - Which embedding provider: a local model on the workstation, or a hosted API
   called from the workstation? Chat answers already send content to
   Anthropic, so a hosted embedding API adds one more vendor that sees it.
-- How does a remote client reach the workstation: our own relay, or a mesh VPN?
-- Which framework for the webapp, if any, and are existing views ported to it?
-- Tauri or Electron for the desktop shell?
+- Are the existing webapp views ported to React, or left as they are?
