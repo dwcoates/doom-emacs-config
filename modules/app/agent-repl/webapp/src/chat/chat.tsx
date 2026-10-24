@@ -23,6 +23,7 @@ import { ReportChatSightingsResponseSchema } from "../../../proto/gen/ts/agentre
 import type { ChatView } from "../../../proto/gen/ts/frontend/v1/chat_pb.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
+import { noteRefusedArm } from "../rpc/refusal.js";
 import { requireCase, requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { callUnary } from "../rpc/unary.js";
@@ -64,11 +65,9 @@ function intersectionObserver(onSeen: (element: Element) => void): AnswerObserve
   );
 }
 
-/** A refused gesture's arm, recorded at INFO: the next view is the answer. */
+/** A refused gesture, recorded at INFO: the next view is the answer. */
 function refused(rpc: string, result: { case?: string | undefined; value?: unknown }): void {
-  if (result.case !== "error") return;
-  const cause = (result.value as { cause?: { case?: string } } | undefined)?.cause?.case ?? "unset";
-  log.info(`${rpc} was refused: ${cause}`, { operation: "chat.gesture-refused", context: { rpc, arm: cause } });
+  noteRefusedArm(rpc, "chat.gesture-refused", result);
 }
 
 /** Mount the chat into HOST. */

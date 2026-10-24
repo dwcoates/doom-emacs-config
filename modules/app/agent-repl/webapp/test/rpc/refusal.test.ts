@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { create } from "@bufbuild/protobuf";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CloseWorkspaceErrorSchema,
   CloseWorkspaceTransferringAwaySchema,
@@ -8,7 +11,8 @@ import {
 import { OpenInEditorErrorSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
 import { oneofArms } from "../arms.js";
 import { isMalformedView } from "../../src/rpc/malformed.js";
-import { CROSS_CUTTING_REFUSAL_ARMS, refusalSentence } from "../../src/rpc/refusal.js";
+import { log } from "../../src/log.js";
+import { CROSS_CUTTING_REFUSAL_ARMS, noteRefusedArm, refusalSentence } from "../../src/rpc/refusal.js";
 
 describe("CROSS_CUTTING_REFUSAL_ARMS", () => {
   it("names exactly the four arms every per-workspace rpc shares", () => {
@@ -90,5 +94,55 @@ describe("refusalSentence", () => {
         "CloseWorkspaceError.cause.transferringAway.address",
       );
     }
+  });
+});
+
+describe("noteRefusedArm", () => {
+  it.each([
+    ["a success", { case: "success", value: {} }, null],
+    ["a named cause", { case: "error", value: { cause: { case: "noEditor", value: {} } } }, "noEditor"],
+    ["an unset cause", { case: "error", value: { cause: { case: undefined } } }, "unset"],
+  ])("answers the arm of %s", (_name, result, want) => {
+    // Act / Assert
+    expect(noteRefusedArm("RequestNewThread", "test.refused", result)).toBe(want);
+  });
+
+  it("records a refusal at INFO under the site's operation", () => {
+    // Arrange
+    const info = vi.spyOn(log, "info");
+
+    // Act
+    noteRefusedArm("SelectWorkspace", "sidebar.app-refused", { case: "error", value: { cause: { case: "unknownWorkspace" } } });
+
+    // Assert
+    expect(info).toHaveBeenCalledWith("SelectWorkspace was refused: unknownWorkspace", {
+      operation: "sidebar.app-refused",
+      context: { rpc: "SelectWorkspace", arm: "unknownWorkspace" },
+    });
+    info.mockRestore();
+  });
+
+  it("records nothing for a success", () => {
+    // Arrange
+    const info = vi.spyOn(log, "info");
+
+    // Act
+    noteRefusedArm("SelectChatText", "chat.gesture-refused", { case: "success", value: {} });
+
+    // Assert
+    expect(info).not.toHaveBeenCalled();
+    info.mockRestore();
+  });
+
+  it.each([
+    ["src/chat/chat.tsx", "chat.gesture-refused"],
+    ["src/sidebar/threads.ts", "sidebar.app-refused"],
+  ])("is how %s records a refusal the next view answers", (file, operation) => {
+    // Arrange
+    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../..", file), "utf8");
+
+    // Assert
+    expect(source).toContain(`noteRefusedArm(rpc, "${operation}", result)`);
+    expect(source).not.toMatch(/was refused: \$\{cause\}/);
   });
 });

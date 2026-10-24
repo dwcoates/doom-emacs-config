@@ -23,6 +23,7 @@
  * and named in the sentence. Reading them is strict: an arm that should carry a
  * string and does not is a MALFORMED VIEW, never a sentence with a hole in it.
  */
+import { log } from "../log.js";
 import { MalformedView } from "./malformed.js";
 
 /** The arms this file speaks for, in the generated (lowerCamel) spelling. */
@@ -96,4 +97,25 @@ function requireStringField(rpcName: string, cause: RefusalCause, field: string)
     throw new MalformedView(path, `expected a string, got ${typeof value}`);
   }
   return value;
+}
+
+/**
+ * Record a refused verb whose answer is the NEXT VIEW, and answer its arm.
+ *
+ * Some gestures draw nothing on a refusal: the roster or the chat view the
+ * daemon pushes next is the answer (a thread selected twice, a sibling switch
+ * on a node the view no longer shows). Such a site records the refusal at INFO
+ * under its own OPERATION and reads the arm only to act on one it names; a
+ * success answers `null`. A refusal whose cause is unset is recorded as
+ * "unset", the arm a newer daemon's cause reads as here.
+ */
+export function noteRefusedArm(
+  rpc: string,
+  operation: string,
+  result: { case?: string | undefined; value?: unknown },
+): string | null {
+  if (result.case !== "error") return null;
+  const cause = (result.value as { cause?: { case?: string } } | undefined)?.cause?.case ?? "unset";
+  log.info(`${rpc} was refused: ${cause}`, { operation, context: { rpc, arm: cause } });
+  return cause;
 }

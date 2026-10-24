@@ -26,6 +26,7 @@ import type {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb.js";
 import { log } from "../log.js";
 import type { DaemonContext } from "../rpc/context.js";
+import { noteRefusedArm } from "../rpc/refusal.js";
 import { requireCase, requireMessage } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import type { Dropdowns } from "./dropdowns.js";
@@ -47,10 +48,7 @@ export function showsChat(switcher: RosterAppSwitcher): boolean {
 
 /** A refused verb's arm, recorded at INFO: the next roster is the answer. */
 function refusedArm(rpc: string, result: { case?: string | undefined; value?: unknown }): string | null {
-  if (result.case !== "error") return null;
-  const cause = (result.value as { cause?: { case?: string } } | undefined)?.cause?.case ?? "unset";
-  log.info(`${rpc} was refused: ${cause}`, { operation: "sidebar.app-refused", context: { rpc, arm: cause } });
-  return cause;
+  return noteRefusedArm(rpc, "sidebar.app-refused", result);
 }
 
 /** Create the switcher: the title button and the menu under it. */
