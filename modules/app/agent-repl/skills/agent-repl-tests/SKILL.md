@@ -1,7 +1,7 @@
 ---
 name: agent-repl-tests
 description: Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or runs tests for a change: every run goes through `agent-repld test run`, naming only the tests needed. Holds the measured test-performance pitfalls and their fixes as a living list.
-allowed-tools: Bash(skills/agent-repl-tests/agent-repld:*)
+allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 
 # Write tests (agent-repl)
@@ -14,9 +14,10 @@ over the same code paths; it changes only what the test costs to run.
 
 ## Running tests: `agent-repld test run`
 
-Every test run goes through the daemon, run from `modules/app/agent-repl`,
-the module root:
-`skills/agent-repl-tests/agent-repld test run [-workspace WS] SELECTION...`.
+Every test run goes through the daemon:
+`~/.claude/skills/agent-repl-workspaces/agent-repld test run [-workspace WS] SELECTION...`.
+This skill is linked in the repository alone, so it calls the installed
+`/agent-repl-workspaces` front door, which runs the main checkout's build.
 Never a hand-run `go test`, `npm test`, `emacs -batch`,
 `bin/background.sh ...` or `bin/test-all.sh`. The daemon runs the
 workspace's own `bin/test-all.sh` with the selection, so the run takes
@@ -44,7 +45,7 @@ or absolute, inside the workspace's worktree):
 Example, run from `modules/app/agent-repl`:
 
 ```bash
-skills/agent-repl-tests/agent-repld test run -go daemon/internal/merge=TestQueue/front -ert lisp/test-status.el=agent-repl-status-test-x
+~/.claude/skills/agent-repl-workspaces/agent-repld test run -go daemon/internal/merge=TestQueue/front -ert lisp/test-status.el=agent-repl-status-test-x
 ```
 
 Output: one line of protojson per event as it arrives: `planned` (the units

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -156,6 +157,63 @@ func TestEveryAgentCommandIsReachableFromASkill(t *testing.T) {
 	sort.Strings(unreached)
 	if len(unreached) > 0 {
 		t.Fatalf("no skill names these agent commands: %v", unreached)
+	}
+}
+
+// frontDoorMention is a skill's call of an installed skill's front door.
+var frontDoorMention = regexp.MustCompile(`~/\.claude/skills/([a-z0-9-]+)/agent-repld`)
+
+// globalSkillLinks answers the skills requirements.json links into the user's
+// skills directory: every skill_link requirement that is not retired.
+func globalSkillLinks(t *testing.T) map[string]bool {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(moduleDir, "requirements.json"))
+	if err != nil {
+		t.Fatalf("read requirements.json: %v", err)
+	}
+	var doc struct {
+		Requirements []struct {
+			Kind    string `json:"kind"`
+			Name    string `json:"name"`
+			Retired bool   `json:"retired"`
+		} `json:"requirements"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("decode requirements.json: %v", err)
+	}
+	links := map[string]bool{}
+	for _, r := range doc.Requirements {
+		if r.Kind == "skill_link" && !r.Retired {
+			links[r.Name] = true
+		}
+	}
+	if len(links) == 0 {
+		t.Fatal("requirements.json links no skill globally; the decode no longer matches its shape")
+	}
+	return links
+}
+
+// A FRONT DOOR A SKILL CALLS IS INSTALLED: a skill linked in the repository
+// alone has no ~/.claude/skills link, so naming its own door there names a
+// path no machine has.
+func TestEveryFrontDoorASkillCallsIsAGlobalSkills(t *testing.T) {
+	// Arrange
+	global := globalSkillLinks(t)
+
+	// Act
+	var missing []string
+	for name, text := range readSkills(t) {
+		for _, m := range frontDoorMention.FindAllStringSubmatch(text, -1) {
+			if !global[m[1]] {
+				missing = append(missing, name+" calls "+m[0])
+			}
+		}
+	}
+
+	// Assert
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Fatalf("skills call front doors no machine installs: %v", missing)
 	}
 }
 
