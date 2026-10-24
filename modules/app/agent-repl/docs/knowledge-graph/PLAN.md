@@ -149,8 +149,10 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   becomes a second kind of selection beside it.
 - Every view uses one shared highlight component, so building highlights for
   answers also builds them for books.
-- The webapp has its own input box, used whenever the host provides no input
-  client.
+- The webapp has no input box of its own. Input comes from the host's input
+  client, which in Emacs is agent-repl's composer, the same as for agent
+  workspaces. The mobile app will need its own input later, which is not
+  being designed yet.
 
 ### Chat UX
 
@@ -198,8 +200,16 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
     question (owner, 2026-10-24).
   - Adding or removing premises by hand is left for later, if it is ever
     needed.
-  - Open: whether the parent is expressed as the provenance's in-graph case;
-    whether
+  - Premises always point from the more general node to the more specific
+    one, so in principle they never loop. Loops are still made impossible
+    programmatically: the graph service is the only writer, and it refuses,
+    in the same transaction as the insert, any premise that would close a
+    loop.
+  - Parent and provenance are one concept (owner, 2026-10-24): where a node's
+    question came from. It can be a node in zettel, or a place outside it
+    such as a book page or an agent feed's response bubble. Open: which one
+    word names it, since the glossary allows no synonyms.
+  - Open: whether
     a premise records a revision; how cycles among premises are prevented.
 
 - Chat nodes run on the Messages API, with context built from the graph,
