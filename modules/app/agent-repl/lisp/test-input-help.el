@@ -42,15 +42,16 @@
 
 (defun agent-repl-test-input-help--context (&rest bindings)
   "Return a binding context built from BINDINGS.
-BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
-`:leader', each a list of (KEY-VECTOR . COMMAND) for that map.  A
-`:composer' KEY-VECTOR may start with an Evil `STATE-state' event."
+BINDINGS is a plist: `:composer' (the topic's own map), `:insert',
+`:normal', `:global' and `:leader', each a list of (KEY-VECTOR . COMMAND)
+for that map.  A `:composer' KEY-VECTOR may start with an Evil
+`STATE-state' event."
   (cl-flet ((map-of (pairs)
               (let ((map (make-sparse-keymap)))
                 (pcase-dolist (`(,key . ,command) pairs)
                   (define-key map key command))
                 map)))
-    (list :composer (map-of (plist-get bindings :composer))
+    (list :maps (list (map-of (plist-get bindings :composer)))
           :global (list (cons "insert" (map-of (plist-get bindings :insert)))
                         (cons "normal" (map-of (plist-get bindings :normal)))
                         (cons nil (map-of (plist-get bindings :global))))
@@ -62,10 +63,21 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
   `(mouse-1 (,(selected-window) header-line (0 . 0) 0 (,string . ,pos)
              nil (0 . 0) nil (0 . 0) (0 . 0))))
 
-(defun agent-repl-test-input-help--topic-commands ()
-  "Return every command the help topics name."
-  (delete-dups (mapcan (lambda (topic) (mapcar #'car (plist-get topic :bindings)))
-                       (copy-sequence agent-repl-input-help-topics))))
+(defun agent-repl-test-input-help--binding-commands (binding)
+  "Return the commands BINDING's row lists: one, or its list."
+  (let ((command (car binding)))
+    (if (listp command) (copy-sequence command) (list command))))
+
+(defun agent-repl-test-input-help--topic-commands (&optional loadable-only)
+  "Return every command the help topics name.
+LOADABLE-ONLY keeps only the topics whose `:requires' batch Emacs has."
+  (delete-dups
+   (mapcan (lambda (topic)
+             (when (or (not loadable-only)
+                       (cl-every (lambda (feature) (locate-library (symbol-name feature)))
+                                 (plist-get topic :requires)))
+               (mapcan #'agent-repl-test-input-help--binding-commands (plist-get topic :bindings))))
+           (copy-sequence agent-repl-input-help-topics))))
 
 (defun agent-repl-test-input-help--quoted-commands (form)
   "Return every symbol FORM quotes with `#''."
@@ -79,40 +91,56 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
       (walk form))
     found))
 
-(defun agent-repl-test-input-help--source-commands (file pred)
-  "Return the `#''-quoted commands in FILE's top-level forms PRED accepts.
-`map!' is a no-op stub under `emacs -Q', so its bindings are read off the source."
+(defconst agent-repl-test-input-help--binders
+  '(define-key map! evil-define-key evil-define-key* keymap-set global-set-key local-set-key)
+  "The forms that bind a key; a `#''-quoted command inside one is a binding.")
+
+(defun agent-repl-test-input-help--source-commands (file)
+  "Return the `#''-quoted commands inside FILE's binding forms.
+`map!' is a no-op stub under `emacs -Q', so its bindings are read off the
+source; so is every other binding form, wherever it nests."
   (with-temp-buffer
-    (insert-file-contents (expand-file-name file (file-name-directory
-                                                  (symbol-file 'agent-repl-input-help-install))))
+    (insert-file-contents file)
     (let (found)
-      (condition-case nil
-          (while t
-            (let ((form (read (current-buffer))))
-              (when (funcall pred form)
-                (setq found (append (agent-repl-test-input-help--quoted-commands form) found)))))
-        (end-of-file nil))
+      (cl-labels ((walk (x inside)
+                    (cond ((and inside (eq (car-safe x) 'function) (symbolp (cadr x)))
+                           (push (cadr x) found))
+                          ((consp x)
+                           (let ((in (or inside (memq (car x) agent-repl-test-input-help--binders))))
+                             (walk (car x) in)
+                             (when (listp (cdr x))
+                               (dolist (y (cdr x)) (walk y in))))))))
+        (condition-case nil
+            (while t (walk (read (current-buffer)) nil))
+          (end-of-file nil)))
       found)))
 
-(defun agent-repl-test-input-help--composer-map!-p (form)
-  "Non-nil when FORM is a `(map! :map agent-repl-input-mode-map ...)'."
-  (and (eq (car-safe form) 'map!)
-       (eq (nth 1 form) :map)
-       (eq (nth 2 form) 'agent-repl-input-mode-map)))
+(defun agent-repl-test-input-help--module-sources ()
+  "Return every non-test elisp source of the module, config.el included."
+  (cons (expand-file-name "config.el" agent-repl-test--module-root)
+        (seq-remove (lambda (file) (string-prefix-p "test-" (file-name-nondirectory file)))
+                    (directory-files agent-repl-test--module-dir t "\\.el\\'"))))
 
-(defun agent-repl-test-input-help--composer-bound-commands ()
-  "Return every command the composer binds: its live map, and its `map!' sources."
+(defun agent-repl-test-input-help--bound-commands ()
+  "Return every command the module binds.
+Its live keymaps (every `agent-repl'-named keymap variable, which a
+`define-key' fills even under `emacs -Q'), and every binding form of its
+sources (`agent-repl-test-input-help--source-commands').  Only commands
+count: Evil marks a map with non-command bindings, such as an intercept
+map's `[intercept-state] all'."
   (let (found)
     (cl-labels ((walk (map)
                   (map-keymap (lambda (_event def)
                                 (cond ((keymapp def) (walk def))
-                                      ((and def (symbolp def)) (push def found))))
+                                      ((and (symbolp def) (commandp def)) (push def found))))
                               map)))
-      (walk agent-repl-input-mode-map))
-    (dolist (file '("input.el" "clipboard-image.el"))
-      (setq found (append (agent-repl-test-input-help--source-commands
-                           file #'agent-repl-test-input-help--composer-map!-p)
-                          found)))
+      (mapatoms (lambda (symbol)
+                  (when (and (boundp symbol)
+                             (string-prefix-p "agent-repl" (symbol-name symbol))
+                             (keymapp (symbol-value symbol)))
+                    (walk (symbol-value symbol))))))
+    (dolist (file (agent-repl-test-input-help--module-sources))
+      (setq found (append (agent-repl-test-input-help--source-commands file) found)))
     (delete-dups found)))
 
 ;;;; ---- The header line ----
@@ -264,7 +292,7 @@ webapp/test/styles.test.ts."
                   'cmd (agent-repl-test-input-help--context
                         :composer '(([remap target] . cmd))
                         :insert '(([S-s-return] . target))))
-                 '(("S-s-<return>" . "insert mode")))))
+                 '(("S-s-RET" . "insert mode")))))
 
 (ert-deftest agent-repl-test-input-help-keys-leader-binding-is-prefixed ()
   "A leader binding is shown after the leader key."
@@ -280,19 +308,80 @@ webapp/test/styles.test.ts."
                    '("elisp.input-help.keys: unbound command=nowhere")))))
 
 (ert-deftest agent-repl-test-input-help-binding-context-reads-the-live-maps ()
-  "The live context is the composer map, Evil's state maps and Doom's leader."
+  "The live context is the topic's keymaps, Evil's state maps and Doom's leader."
   (let ((evil-insert-state-map (make-sparse-keymap))
         (evil-normal-state-map (make-sparse-keymap))
         (doom-leader-map (make-sparse-keymap))
         (doom-leader-key "SPC"))
-    (let ((context (agent-repl--input-help-binding-context)))
-      (should (eq (plist-get context :composer) agent-repl-input-mode-map))
+    (let ((context (agent-repl--input-help-binding-context
+                    '(:id x :keymaps (agent-repl-input-mode-map agent-repl-input-selection-mode-map)))))
+      (should (equal (plist-get context :maps)
+                     (list agent-repl-input-mode-map agent-repl-input-selection-mode-map)))
       (should (equal (plist-get context :global)
                      (list (cons "insert" evil-insert-state-map)
                            (cons "normal" evil-normal-state-map)
                            (cons nil (current-global-map)))))
       (should (eq (plist-get context :leader) doom-leader-map))
       (should (equal (plist-get context :leader-key) "SPC")))))
+
+(ert-deftest agent-repl-test-input-help-binding-context-loads-the-topic-requires ()
+  "A topic's `:requires' are loaded before its keymaps are read."
+  (let ((evil-insert-state-map (make-sparse-keymap))
+        (evil-normal-state-map (make-sparse-keymap))
+        (doom-leader-map (make-sparse-keymap))
+        (doom-leader-key "SPC")
+        required)
+    (cl-letf (((symbol-function 'require) (lambda (feature &rest _) (push feature required))))
+      (agent-repl--input-help-binding-context '(:id x :requires (alpha beta))))
+    (should (equal required '(beta alpha)))))
+
+(ert-deftest agent-repl-test-input-help-binding-context-unbound-keymap-is-fatal ()
+  "A topic keymap still unbound once loaded signals, naming it and the topic."
+  (let ((evil-insert-state-map (make-sparse-keymap))
+        (evil-normal-state-map (make-sparse-keymap))
+        (doom-leader-map (make-sparse-keymap))
+        (doom-leader-key "SPC"))
+    (agent-repl-test-input-help--capturing-fatals
+      (should-error (agent-repl--input-help-binding-context
+                     '(:id x :keymaps (agent-repl-test-input-help--no-such-map))))
+      (should (equal agent-repl-test-input-help--fatals
+                     '("elisp.input-help.context: unbound keymap=agent-repl-test-input-help--no-such-map topic=x"))))))
+
+(ert-deftest agent-repl-test-input-help-keys-include-global-bindings ()
+  "A command bound in a global map shows that key."
+  (should (equal (agent-repl--input-help-keys
+                  'cmd (agent-repl-test-input-help--context :global `((,(kbd "s-[") . cmd))))
+                 '(("s-[")))))
+
+(ert-deftest agent-repl-test-input-help-keys-of-a-command-list-are-one-row ()
+  "A row of several commands lists every one's keys."
+  (should (equal (agent-repl--input-help-keys
+                  '(a b) (agent-repl-test-input-help--context
+                          :composer `((,(kbd "M-1") . a) (,(kbd "M-2") . b))))
+                 '(("M-1 … M-2")))))
+
+(ert-deftest agent-repl-test-input-help-keys-unbound-command-in-a-list-is-fatal ()
+  "One unbound command in a row's list signals, naming it."
+  (agent-repl-test-input-help--capturing-fatals
+    (should-error (agent-repl--input-help-keys
+                   '(a nowhere) (agent-repl-test-input-help--context
+                                 :composer `((,(kbd "M-1") . a)))))
+    (should (equal agent-repl-test-input-help--fatals
+                   '("elisp.input-help.keys: unbound command=nowhere")))))
+
+(ert-deftest agent-repl-test-input-help-canonical-key-cases ()
+  "RET and TAB read the same whichever event names them."
+  (pcase-dolist (`(,description ,want)
+                 '(("<return>" "RET") ("C-<return>" "C-RET") ("S-s-<return>" "S-s-RET")
+                   ("<tab>" "TAB") ("C-c <tab>" "C-c TAB") ("RET" "RET") ("<escape>" "<escape>")))
+    (should (equal (agent-repl--input-help-canonical-key description) want))))
+
+(ert-deftest agent-repl-test-input-help-keys-show-return-and-RET-once ()
+  "A command bound to both C-RET and C-<return> shows one C-RET."
+  (should (equal (agent-repl--input-help-keys
+                  'cmd (agent-repl-test-input-help--context
+                        :composer `((,(kbd "C-RET") . cmd) ([C-return] . cmd))))
+                 '(("C-RET")))))
 
 ;;;; ---- Topics and their text ----
 
@@ -305,7 +394,7 @@ webapp/test/styles.test.ts."
   "An unknown topic signals, and the record names it and the known ids."
   (agent-repl-test-input-help--capturing-fatals
     (should-error (agent-repl--input-help-topic :id 'nope))
-    (should (string-match-p "unknown :id=nope known=(sending "
+    (should (string-match-p "unknown :id=nope known=(writing sending "
                             (car agent-repl-test-input-help--fatals)))))
 
 (ert-deftest agent-repl-test-input-help-keys-shortest-first-then-alphabetical ()
@@ -320,16 +409,19 @@ webapp/test/styles.test.ts."
   (should (equal (agent-repl--input-help-keys
                   'cmd (agent-repl-test-input-help--context
                         :composer (mapcar (lambda (d) (cons (string d) 'cmd)) "123456789")))
-                 '(("1-9")))))
+                 '(("1 … 9")))))
 
 (ert-deftest agent-repl-test-input-help-collapse-digits-cases ()
   "Only consecutive digits sharing an annotation join one range."
   (pcase-dolist (`(,keys ,want)
-                 '(((("1") ("2") ("3")) (("1-3")))
+                 '(((("1") ("2") ("3")) (("1 … 3")))
+                   ((("M-1") ("M-2") ("s-1") ("s-2")) (("M-1 … M-2") ("s-1 … s-2")))
+                   ((("SPC TAB 1") ("SPC TAB 2")) (("SPC TAB 1 … SPC TAB 2")))
+                   ((("F1") ("F2")) (("F1") ("F2")))
                    ((("1") ("3")) (("1") ("3")))
                    ((("1") ("2" . "insert mode")) (("1") ("2" . "insert mode")))
-                   ((("RET") ("1") ("2")) (("RET") ("1-2")))
-                   ((("C-1") ("C-2")) (("C-1") ("C-2")))))
+                   ((("RET") ("1") ("2")) (("RET") ("1 … 2")))
+                   ((("C-1") ("C-2")) (("C-1 … C-2")))))
     (should (equal (agent-repl--input-help-collapse-digits keys) want))))
 
 (ert-deftest agent-repl-test-input-help-key-cell-is-keycaps-with-annotations ()
@@ -436,24 +528,26 @@ webapp/test/styles.test.ts."
 
 (ert-deftest agent-repl-test-input-help-show-pops-a-read-only-topic-buffer ()
   "Showing a topic hands its filled, read-only buffer to the shared popup."
-  (let ((context (agent-repl-test-input-help--context :composer `((,(kbd "C-+") . agent-repl-feed-text-scale-increase)
-                                                                  (,(kbd "C--") . agent-repl-feed-text-scale-decrease))))
+  (let ((context (agent-repl-test-input-help--context
+                  :leader `((,(kbd "j a q e") . agent-repl-merge-queue-evict)
+                            (,(kbd "j a q p") . agent-repl-merge-queue-pause)
+                            (,(kbd "j a q r") . agent-repl-merge-queue-resume))))
         logged)
     (agent-repl-test--recording-popups
-      (cl-letf (((symbol-function 'agent-repl--input-help-binding-context) (lambda () context))
+      (cl-letf (((symbol-function 'agent-repl--input-help-binding-context) (lambda (_topic) context))
                 ((symbol-function 'agent-repl--log)
                  (agent-repl-test--record-into logged)))
-        (agent-repl-input-help-show 'zoom))
+        (agent-repl-input-help-show 'merge-queue))
       (let ((buf (car agent-repl-test--popups-shown)))
         (unwind-protect
             (progn
-              (should (equal (buffer-name buf) "*agent-repl help: Feed zoom*"))
+              (should (equal (buffer-name buf) "*agent-repl help: Merge queue*"))
               (with-current-buffer buf
                 (should buffer-read-only)
                 (should visual-line-mode)
                 (should-not truncate-lines)
-                (should (string-match-p "C-\\+ Make the feed's text larger" (buffer-string))))
-              (should (member "elisp.input-help.show: id=zoom buffer=*agent-repl help: Feed zoom*"
+                (should (string-match-p "SPC j a q e Take this workspace's merge off the queue" (buffer-string))))
+              (should (member "elisp.input-help.show: id=merge-queue buffer=*agent-repl help: Merge queue*"
                               logged)))
           (kill-buffer buf))))))
 
@@ -471,27 +565,43 @@ webapp/test/styles.test.ts."
   (agent-repl-test-input-help--capturing-fatals
     (agent-repl-test--recording-popups
       (cl-letf (((symbol-function 'agent-repl--input-help-binding-context)
-                 (lambda () (agent-repl-test-input-help--context))))
+                 (lambda (_topic) (agent-repl-test-input-help--context))))
         (let ((before (buffer-list)))
-          (should-error (agent-repl-input-help-show 'zoom))
+          (should-error (agent-repl-input-help-show 'merge-queue))
           (should-not agent-repl-test--popups-shown)
           (should (equal (buffer-list) before)))))))
 
-(ert-deftest agent-repl-test-input-help-menu-lists-every-topic-in-order ()
-  "The help button's menu has one item per topic, titled, in table order."
-  (let (titles)
+(defun agent-repl-test-input-help--menu-items (menu)
+  "Return MENU's (LABEL . BINDING) items, in order."
+  (let (items)
     (map-keymap (lambda (_event item)
                   (when (eq (car-safe item) 'menu-item)
-                    (push (nth 1 item) titles)))
-                (agent-repl--input-help-menu))
-    (should (equal (nreverse titles)
-                   (mapcar (lambda (topic) (plist-get topic :title)) agent-repl-input-help-topics)))))
+                    (push (cons (nth 1 item) (nth 2 item)) items)))
+                menu)
+    (nreverse items)))
+
+(ert-deftest agent-repl-test-input-help-groups-keep-table-order ()
+  "Topics are grouped by `:group', groups and topics in table order."
+  (should (equal (mapcar (lambda (group)
+                           (cons (car group) (mapcar (lambda (topic) (plist-get topic :id)) (cdr group))))
+                         (let ((agent-repl-input-help-topics
+                                '((:id a :group "G1") (:id b :group "G2") (:id c :group "G1"))))
+                           (agent-repl--input-help-groups)))
+                 '(("G1" a c) ("G2" b)))))
+
+(ert-deftest agent-repl-test-input-help-menu-has-a-submenu-per-group ()
+  "The menu's items are the groups, each a submenu of its topics' titles."
+  (let ((items (agent-repl-test-input-help--menu-items (agent-repl--input-help-menu))))
+    (should (equal (mapcar #'car items) (mapcar #'car (agent-repl--input-help-groups))))
+    (should (equal (mapcar #'car (agent-repl-test-input-help--menu-items (cdr (car items))))
+                   (mapcar (lambda (topic) (plist-get topic :title))
+                           (cdr (car (agent-repl--input-help-groups))))))))
 
 (ert-deftest agent-repl-test-input-help-menu-item-shows-its-topic ()
-  "Choosing a menu item shows that item's topic."
+  "Choosing a submenu's item shows that item's topic."
   (let (shown)
     (cl-letf (((symbol-function 'agent-repl-input-help-show) (lambda (id) (push id shown))))
-      (call-interactively (lookup-key (agent-repl--input-help-menu) [history])))
+      (call-interactively (lookup-key (agent-repl--input-help-menu) [Composer history])))
     (should (equal shown '(history)))))
 
 (ert-deftest agent-repl-test-input-help-click-drops-the-menu-at-the-click ()
@@ -502,12 +612,22 @@ webapp/test/styles.test.ts."
       (agent-repl-input-help-click event))
     (should (equal popped (list (list (agent-repl--input-help-menu) event))))))
 
-(ert-deftest agent-repl-test-input-help-command-shows-the-titled-topic ()
-  "`agent-repl-input-help' shows the topic it is given by title."
+(ert-deftest agent-repl-test-input-help-command-shows-the-chosen-topic ()
+  "`agent-repl-input-help' shows the topic it is given as GROUP: TITLE."
   (let (shown)
     (cl-letf (((symbol-function 'agent-repl-input-help-show) (lambda (id) (push id shown))))
-      (agent-repl-input-help "Images"))
+      (agent-repl-input-help "Composer: Images"))
     (should (equal shown '(images)))))
+
+(ert-deftest agent-repl-test-input-help-command-unknown-choice-is-fatal ()
+  "A choice naming no topic signals and shows nothing."
+  (let (shown)
+    (agent-repl-test-input-help--capturing-fatals
+      (cl-letf (((symbol-function 'agent-repl-input-help-show) (lambda (id) (push id shown))))
+        (should-error (agent-repl-input-help "Nowhere: Nothing")))
+      (should (equal agent-repl-test-input-help--fatals
+                     '("elisp.input-help: unknown choice=\"Nowhere: Nothing\""))))
+    (should-not shown)))
 
 ;;;; ---- The table against the composer's real bindings ----
 
@@ -525,24 +645,45 @@ webapp/test/styles.test.ts."
     (should-not (search-forward "(defface " nil t))))
 
 (ert-deftest agent-repl-test-input-help-every-topic-command-is-a-command ()
-  "Every command a topic names is an interactive command."
-  (dolist (command (agent-repl-test-input-help--topic-commands))
+  "Every command a topic names is an interactive command.
+Topics needing a package batch Emacs lacks (magit) are left out."
+  (dolist (command (agent-repl-test-input-help--topic-commands t))
     (should (commandp command))))
 
 (ert-deftest agent-repl-test-input-help-every-topic-command-is-bound ()
-  "Every command a topic names is bound in the composer or the leader map."
-  (let ((bound (append (agent-repl-test-input-help--composer-bound-commands)
-                       (agent-repl-test-input-help--source-commands
-                        "keybindings.el" (lambda (form) (and (eq (car-safe form) 'map!)
-                                                             (eq (nth 1 form) :leader)))))))
+  "Every command a topic names is bound somewhere in the module."
+  (let ((bound (agent-repl-test-input-help--bound-commands)))
     (dolist (command (agent-repl-test-input-help--topic-commands))
       (should (memq command bound)))))
 
-(ert-deftest agent-repl-test-input-help-every-composer-binding-is-in-a-topic ()
-  "Every command the composer binds is listed in some help topic."
-  (let ((listed (agent-repl-test-input-help--topic-commands)))
-    (dolist (command (agent-repl-test-input-help--composer-bound-commands))
+(ert-deftest agent-repl-test-input-help-every-binding-is-in-a-topic ()
+  "Every command the module binds is in a topic, or listed as unlisted."
+  (let ((listed (append (agent-repl-test-input-help--topic-commands)
+                        (mapcar #'car agent-repl-input-help-unlisted-commands))))
+    (dolist (command (agent-repl-test-input-help--bound-commands))
       (should (memq command listed)))))
+
+(ert-deftest agent-repl-test-input-help-every-unlisted-command-is-bound ()
+  "Every command kept out of the topics is still bound, so the list holds no stale entry."
+  (let ((bound (agent-repl-test-input-help--bound-commands)))
+    (dolist (entry agent-repl-input-help-unlisted-commands)
+      (should (memq (car entry) bound)))))
+
+(ert-deftest agent-repl-test-input-help-no-command-is-both-listed-and-unlisted ()
+  "A command is in a topic or unlisted, never both."
+  (dolist (entry agent-repl-input-help-unlisted-commands)
+    (should-not (memq (car entry) (agent-repl-test-input-help--topic-commands)))))
+
+(ert-deftest agent-repl-test-input-help-every-topic-has-a-group-and-title ()
+  "Every topic names its menu group and its title."
+  (dolist (topic agent-repl-input-help-topics)
+    (should (stringp (plist-get topic :group)))
+    (should (stringp (plist-get topic :title)))))
+
+(ert-deftest agent-repl-test-input-help-topic-ids-are-unique ()
+  "No two topics share an id."
+  (let ((ids (mapcar (lambda (topic) (plist-get topic :id)) agent-repl-input-help-topics)))
+    (should (equal ids (delete-dups (copy-sequence ids))))))
 
 (provide 'test-input-help)
 
