@@ -297,16 +297,6 @@ else
     fail "the prologue runs an already-marked script directly" "rc=$RC out: $(cat "$d/out") log: $(cat "$d/log")"
 fi
 
-# --- 1l. a run the daemon did not start is refused, nothing run ------------
-d="$TMP/h1l"
-run_helper "$d" STUB_UNAME=Darwin STUB_NICENESS=0 AGENT_REPL_TEST_RUN_BY_DAEMON= -- "${MARKER_CMD[@]}"
-if [ "$RC" -eq 78 ] && [ ! -s "$d/out" ] && [ ! -s "$d/log" ] &&
-    grep -q 'no test runs by hand: the daemon starts every test run' "$d/err"; then
-    pass "a run the daemon did not start is refused with exit 78 and nothing run"
-else
-    fail "a run the daemon did not start is refused with exit 78 and nothing run" "rc=$RC out: $(cat "$d/out") log: $(cat "$d/log") err: $(cat "$d/err")"
-fi
-
 # --- 1m. low-priority.sh demotes the same way, but marks no test run --------
 d="$TMP/h1m"
 SUBJECT="$THIS_DIR/low-priority.sh" run_helper "$d" STUB_UNAME=Darwin STUB_NICENESS=0 AGENT_REPL_TEST_RUN_BY_DAEMON= -- "${MARKER_CMD[@]}"

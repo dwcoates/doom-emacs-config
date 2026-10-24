@@ -49,8 +49,11 @@
 # `go test`/`npx vitest`/`emacs -batch` fails loudly instead of running at
 # normal priority. Only this script sets it.
 #
-# ONLY THE DAEMON STARTS A TEST RUN (owner ruling, 2026-10-24). A run is
-# refused unless AGENT_REPL_TEST_RUN_BY_DAEMON=1, which the daemon sets on
+# ONLY THE DAEMON STARTS A TEST RUN (owner ruling, 2026-10-24). The refusal
+# lands in the change after the one that makes the daemon set the marker: the
+# merge gate that lands a change is run by the daemon already deployed, so a
+# refusal landed with the marking daemon would refuse its own gate. Once it
+# lands, a run is refused unless AGENT_REPL_TEST_RUN_BY_DAEMON=1, which the daemon sets on
 # every test command it starts (daemon/internal/merge.TestCommandFor: the
 # merge queue's gates, agentrepl.v1.RunTests, RunRedundancy) and every process
 # of the run inherits. A test run by hand is refused here, before anything is
@@ -79,12 +82,6 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib-priority.sh"
 
 (( $# > 0 )) || priority_refuse "no command given; usage: background.sh <command> [args...]"
-
-if [[ ${AGENT_REPL_TEST_RUN_BY_DAEMON:-} != 1 ]]; then
-    priority_log "REFUSING TO RUN: $*"
-    priority_log "  no test runs by hand: the daemon starts every test run (agent-repld test run; the merge queue runs the full suite)"
-    exit "$PRIORITY_EXIT_REFUSED"
-fi
 
 # A TEST'S RUNTIMES PROFILE INTO THE TEST'S OWN TREE. Every daemon, store,
 # sidecar and shim arms runtime profiling at boot and writes an armed marker
