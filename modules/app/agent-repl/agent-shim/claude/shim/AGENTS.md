@@ -1757,14 +1757,13 @@ serves one on every entry it hands out.
 ```bash
 npm run lint          # eslint, type-aware, over src/, test/, scripts/ and the root configs
 npm run typecheck     # tsc over src/, test/, scripts/ and the generated stubs
-npm test              # vitest
 npm run coverage      # vitest with istanbul coverage over authored src/**/*.ts
 npm run coverage:verify  # prove the per-file numbers are still a measurement
 npm run build         # esbuild -> dist/main.js (the entry the daemon spawns)
 npm run smoke         # spawn and dial dist/main.js for real (needs a build first)
-# test, coverage and smoke (and their pre-hooks) run through ../../../bin/background.sh;
-# the vitest configs refuse a run without it, so prefix any bare `npx vitest` with it
 ```
+
+Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate.
 
 Dependencies come from the SELF-HEALING shared node store, exactly as the
 webapp's do: `node_modules` links `~/.cache/agent-repl/node-store/shim-<lockhash>`,

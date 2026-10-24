@@ -237,14 +237,12 @@ a workspace after its merge lands), ONE rule decides what Emacs selects:
 
 ## Verification
 
-Run from `modules/app/agent-repl/`, always at background priority
-(`bin/background.sh`; a bare `emacs -batch` load of `test-helpers.el` refuses
-to start):
+Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. A bare `emacs -batch`
+load of `test-helpers.el` refuses to start. Byte-compile from
+`modules/app/agent-repl/`:
 
 ```bash
-bin/background.sh emacs -batch -Q -l ert -l lisp/test-<source>.el -f ert-run-tests-batch-and-exit
-bin/background.sh emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exit
-bin/background.sh bin/byte-compile.sh
+bin/byte-compile.sh
 ```
 
 Every changed source has its matching `test-<source>.el` suite. Tests are

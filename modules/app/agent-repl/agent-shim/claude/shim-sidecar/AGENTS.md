@@ -1286,25 +1286,18 @@ vendor equivalent in turn.
 From this directory:
 
 ```bash
-go build ./... && go vet ./... && ../../../bin/background.sh go test -race ./...
+go build ./... && go vet ./...
 ```
 
-Every test run goes through `../../../bin/background.sh`, at background
-priority; the bare `go test` lines below are the arguments to prefix with it.
+Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate.
 
 THE TWO SUITES, AND WHY THE INVOCATION MATTERS. `./...` is the union of the
 unit packages and `integration/`, run once each — it is not a third suite. The
 integration package carries no build tag on purpose (a tag would take it out of
 `go vet ./...` and out of `make coverage`, which runs `go test -coverpkg=./...
-./...`), so naming it separately is naming it AGAIN:
-
-```bash
-go test ./internal/... .            # the unit suites alone (~0.3s)
-go test ./integration/              # the integration suite alone (~12s)
-go test ./...                       # both, once each — NOT unit + a rerun
-```
-
-Run the union, or run the halves; never both in one pass.
+./...`), so naming it separately is naming it AGAIN. Select the packages a
+change needs (`agent-repld test run -go DIR`); never a package twice in one
+run.
 
 - Table-driven tests, AAA (Arrange/Act/Assert), ONE edge case per test
   function, one `_test.go` per source file.
@@ -2075,9 +2068,7 @@ classes reaching a warning threshold, and every failure are normal verbosity.
 
 ### Suites
 
-```
-go test ./internal/convert/... ./internal/handler/...
-```
+The packages are `internal/convert` and `internal/handler`.
 
 `internal/handler/golden_test.go` is the contract test: it drives every
 file-plane corpus fixture under `testdata/corpus/` plus the real transcript under

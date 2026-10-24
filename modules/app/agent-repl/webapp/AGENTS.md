@@ -166,12 +166,14 @@ and are contract on the same terms:
 ## Commands
 
 ```
-npm test                   the unit suites (vitest + jsdom)
 npm run typecheck          tsc over src/ AND test/, integration suite included
 npm run build              typecheck plus vite build
-npm run test:integration   the whole app against a loopback fake daemon
-npm run test:webkit        real headless WebKit over the real stylesheet (test/webkit/)
 ```
+
+Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. The suites: the unit
+suite (vitest + jsdom), the integration suite (the whole app against a
+loopback fake daemon), and `test:webkit` (real headless WebKit over the real
+stylesheet, test/webkit/).
 
 `npm run test:webkit` (`vitest.webkit.config.ts`) is the suite for behavior
 jsdom cannot lay out, run in Playwright's headless WebKit, the Emacs webview's
@@ -188,8 +190,8 @@ feed's corrections left, not a between-frames state no frame ever shows.
 
 The test and coverage scripts (and their `pre*` hooks) run through
 `../bin/background.sh`, at background priority; every vitest config imports
-`../bin/require-background.mjs`, so a bare `npx vitest` refuses to start
-(prefix it: `../bin/background.sh npx vitest run ...`). `build`, `dev`, `lint`
+`../bin/require-background.mjs`, so a bare `npx vitest` refuses to start;
+an agent runs vitest through `agent-repld test run`. `build`, `dev`, `lint`
 and `typecheck` stay at normal priority.
 
 `bin/build-frontend.sh webapp` is what actually SHIPS a build: it writes
@@ -789,9 +791,6 @@ hand any more:
 ```bash
 npm run lint             # eslint, type-aware, over src/, test/ and the root configs
 npm run typecheck        # tsc over src/ and test/
-npm test                 # the unit suite (un-isolated; see vitest.config.ts)
-npm run test:integration # the whole app under jsdom against the fake daemon
-npm run test:webkit      # real headless WebKit: scroll anchoring (see Commands)
 npm run coverage         # istanbul, per file, isolated (see vitest.config.ts)
 npm run coverage:verify  # prove the per-file numbers are still a measurement
 ```

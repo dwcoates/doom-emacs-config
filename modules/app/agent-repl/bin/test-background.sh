@@ -411,7 +411,7 @@ scan() {
         for named in bin/report-nonlisp-coverage.sh bin/e2e-coverage.sh bin/e2e-repeat.sh; do
             [ -e "$module/$named" ] && echo "$module/$named"
         done
-        for named in .claude/safe-test-run.sh .claude/run-subproject-tests.sh; do
+        for named in .claude/safe-test-run.sh; do
             [ -e "$root/$named" ] && echo "$root/$named"
         done
     } | sort -u | while IFS= read -r file; do

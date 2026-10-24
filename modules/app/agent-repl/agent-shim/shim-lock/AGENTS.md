@@ -69,9 +69,7 @@ binary it built itself.
 
 ## Tests
 
-```bash
-../../bin/background.sh go test ./...   # tests run only at background priority
-```
+Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate.
 
 The suite re-executes its own test binary as the holder (`TestMain` honors
 `SHIM_LOCK_TEST_HELPER_ARGS`), so it drives REAL child processes and REAL

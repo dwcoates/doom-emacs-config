@@ -1285,13 +1285,12 @@ full path, rotation, attribution, and level-switch table is in
 
 ```bash
 cd modules/app/agent-repl/agent-shim/shim-store
-# every test run goes through ../../bin/background.sh (background priority)
-go build ./... && go vet ./... && ../../bin/background.sh go test -race ./...
-../../bin/background.sh go test -race ./internal/server/   # the Connect service, with a fake Store
-../../bin/background.sh go test -race ./internal/db/       # the schema, routing and reads
-../../bin/background.sh go test ./integration/             # the whole module end to end over a socket
-make coverage                         # ../../bin/report-nonlisp-coverage.sh store
+go build ./... && go vet ./...
 ```
+
+Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. The packages: `internal/server` (the Connect service, with a fake
+Store), `internal/db` (the schema, routing and reads), and `integration` (the
+whole module end to end over a socket).
 
 - Go tests are table-driven, AAA, one edge case per test function, one
   `_test.go` per source file.

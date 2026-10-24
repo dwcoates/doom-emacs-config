@@ -129,7 +129,8 @@ How each kind of entry point routes through it:
   `lisp/test-helpers.el` signals in batch, and the Go integration harness's
   `WithRunRoot` (daemon integration and e2e) returns 1.
   - So a bare `npx vitest`, `emacs -batch -l lisp/test-*.el` or
-    `go test -tags integration` fails loudly; prefix it with `bin/background.sh`.
+    `go test -tags integration` fails loudly; an agent runs tests through
+    `agent-repld test run`, which runs them inside the helper.
 - The e2e sandbox entrypoint execs every command through the helper.
 - The live runtime and the deploy builds (the daemon's deploy, `build-frontend.sh`,
   `launchd/`, the non-test `lisp/*.el`, npm `build`/`dev`) are NEVER demoted.
