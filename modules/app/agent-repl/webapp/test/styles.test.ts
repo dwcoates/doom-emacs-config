@@ -50,6 +50,7 @@ import { withoutBlockComments } from "./source-text.js";
 import { createControl } from "../src/control.js";
 import { DRAGGING_CLASS } from "../src/sidebar/drag.js";
 import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
+import { REVEAL_HIGHLIGHT_MS } from "../src/feed/feed.js";
 
 /** The selectors on which any `user-select`/`-webkit-user-select` is `none`. */
 function selectorsSuppressingSelection(css: string): string[] {
@@ -2019,7 +2020,7 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     const rule = declarationsOf(".entry-selected:not(.bubble)");
 
     // Assert
-    expect(rule).toMatch(/outline:\s*2px solid var\(--selected-entry\)/);
+    expect(rule).toMatch(/outline:\s*1px solid var\(--selected-entry\)/);
   });
 
   it("pulls the ring inside the card's own box, so nothing reflows or clips", () => {
@@ -2028,7 +2029,33 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     const rule = declarationsOf(".entry-selected:not(.bubble)");
 
     // Assert
-    expect(rule).toMatch(/outline-offset:\s*-2px/);
+    expect(rule).toMatch(/outline-offset:\s*-1px/);
+  });
+
+  it("flashes the ring once, in and back out, over the reveal's whole life", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".entry-selected:not(.bubble)") ?? "";
+    const duration = /animation:\s*entry-selected-flash\s+(\d+(?:\.\d+)?)s\s+ease-in-out\s+1\s+both/.exec(rule);
+
+    // Assert — the flash ends exactly when feed.ts lifts the reveal's mark.
+    expect(duration).not.toBeNull();
+    expect(Number(duration?.[1]) * 1000).toBe(REVEAL_HIGHLIGHT_MS);
+  });
+
+  it("starts and ends the flash transparent", () => {
+    // Arrange / Act
+    const keyframes = keyframesOf("entry-selected-flash");
+
+    // Assert
+    expect(keyframes).toMatch(/0%,\s*100%\s*\{\s*outline-color:\s*transparent;?\s*\}/);
+  });
+
+  it("peaks the flash at the selection token halfway through", () => {
+    // Arrange / Act
+    const keyframes = keyframesOf("entry-selected-flash");
+
+    // Assert
+    expect(keyframes).toMatch(/50%\s*\{\s*outline-color:\s*var\(--selected-entry\);?\s*\}/);
   });
 
   it("never changes a border width or the card's own shadow to mark a card", () => {

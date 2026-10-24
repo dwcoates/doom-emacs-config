@@ -2496,10 +2496,18 @@ html[data-page-unshown] *::after {
    marked where it is drawn rather than at the feed's far left edge. An INSET
    ring: an outline pulled inside the card's own border box never reflows the
    feed, and never replaces the card's own shadow.
+   THE RING FLASHES (owner request, 2026-10-24): a thin 1px ring fades in and
+   back out once over the reveal's whole life (REVEAL_HIGHLIGHT_MS, feed.ts,
+   one second), so it lives only that second after the jump lands.
    A bubble is excluded: its fill is its mark (below). */
 .entry-selected:not(.bubble) {
-  outline: 2px solid var(--selected-entry);
-  outline-offset: -2px;
+  outline: 1px solid var(--selected-entry);
+  outline-offset: -1px;
+  animation: entry-selected-flash 1s ease-in-out 1 both;
+}
+@keyframes entry-selected-flash {
+  0%, 100% { outline-color: transparent; }
+  50% { outline-color: var(--selected-entry); }
 }
 /* THE SELECTED BUBBLE (owner ruling, 2026-10-11, superseding 2026-10-01's
    blue border): whatever its kind — a final, interim or thinking response, a
