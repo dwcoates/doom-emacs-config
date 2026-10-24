@@ -114,9 +114,14 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   token count and login already work off shim sessions, answers stream as
   `conversation.v1`, which the webapp already renders, and the shim's fake
   SDK keeps tests off the real vendor.
-- A path from a root is linear, so it maps onto one vendor session. Asking a
-  sibling is a fork at the parent's turn (`shim.v1.ForkSessionRequest` with a
-  `shim.v1.ForkPoint`), and following one path reuses the prompt cache.
+- Every thread has one shim, and the shim has one session (owner,
+  2026-10-24). Every prompt entered in the thread goes to that session, and
+  the responses flow back into the thread and into zettel. The session is
+  chronological, so the model sees the whole thread's history, not only the
+  path to the node being asked of. A question asked of an earlier answer
+  carries that answer's quote and context, the way a reply to a past response
+  carries it today.
+- Threads are not attached to git repositories or worktrees.
 - Following premises feeds the model's context when answering: premises are
   added to the prompt as extra context.
 - Anthropic's Agent SDK docs say third-party developers may not offer
@@ -133,7 +138,7 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 - A node copies its question, its answer (as the first revision) and any
   quote when it is created. Questions and answers will become editable, and
   the store's entries must never change, so zettel owns its own copy. A
-  node's link back into the store (a session and fork point, or a quoted
+  node's link back into the store (its thread's session and the turn's place, or a quoted
   agent-feed bubble) is for navigation only. The store deletes no
   conversation records today (it prunes only its write ledger), but a node
   must not depend on that; a target that is gone is shown as gone.
@@ -197,8 +202,8 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   "Workspaces" title becomes clickable, opening a dropdown of apps: today
   Workspaces and Chat. With Chat selected, everything below the head
   changes: the Open, Hidden, Recently Merged and other bands give way to a
-  list of threads, most recent first. The search icon then searches the
-  threads' contents.
+  list of threads, the most recently interacted with first. The search icon
+  then searches the threads' contents.
 - The topbar stays essentially unchanged (login, model selection, token
   count and the rest). Where it shows the workspace name, it shows the
   thread's name, generated automatically when the thread is created, and the
@@ -270,8 +275,6 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   - `embedding`: node id, revision, embedding model, vector;
   - premise inference state per node;
   - sighting counts per node.
-  A thread's place in the sidebar list comes from the newest activity
-  anywhere in it.
 - Stack: protobuf over Connect, as agent-repl already uses, which the relay
   can carry unchanged; SQLite through `modernc.org/sqlite`, which cannot load
   vector extensions, so similarity search runs in Go over embeddings held in
@@ -281,17 +284,37 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   local caller, so remote access also needs device pairing and
   authentication.
 - How sightings are counted: a bubble fully on screen, recorded by the daemon.
+- Navigation (owner's proposal, 2026-10-24, with refinements):
+  - threads are not selectable the way workspaces are (`M-{`, `M-}`,
+    `M-<number>`, `SPC p p`), because users do not bounce between threads
+    the way they do between workspaces;
+  - the Chat view of the sidebar has a button for a new thread, and Emacs
+    has a binding for one that works like the one-shot prompt: a minibuffer
+    prompt, and on Enter the new thread opens in the webapp;
+  - Emacs has a binding for switching to the most recent thread;
+  - in the Chat view the topbar's tab bar is shown, as it is when
+    agent-repl's panels are closed, so a workspace is one click away;
+  - the sidebar's view always follows what is shown: showing a thread
+    shows the Chat view with the tab bar, and showing a workspace shows the
+    Workspaces view. Refinement: the view is derived from what is shown
+    rather than kept as separate state, so the two can never disagree, and
+    picking Chat in the dropdown shows the most recent thread.
 
 ## Known complications
 
 - The shim assumes a workspace directory: its cwd, folder trust and
-  per-session locks. A thread needs an equivalent.
+  per-session locks. A thread needs an equivalent that is not a repository.
+- Threads should inherit every part of the daemon's session management that
+  still applies. To be checked off one by one:
+  - inherited: the cold-context gate (`StartSession` refusing a cold context
+    with its cost), model and effort selection, interrupt (`KillTurn`),
+    rollback (`RollBackSession`), hibernation and keepalive, kill, the name
+    and purple summary (`GatherTitleDigest`), account selection, compaction;
+  - not applicable: permission mode, bash, workflows, subagents, and every
+    worktree, merge and deploy feature.
 - The shim hard-codes `settingSources: ["user", "project", "local"]`
   (`agent-shim/claude/shim/src/sdk/real-query.ts`), which loads skills,
   `CLAUDE.md` and memory from `~/.claude`. A chat must not inherit them.
-- A thread with branches spans several forked vendor sessions, while one
-  shim instance serves the thread. The shim needs a rule for which vendor
-  session it drives as the user moves between branches.
 - The premise judge needs model calls, which the zettel service would make
   back through the daemon and a shim.
 - Premises feeding the model's context make the prompt grow with how many
@@ -335,9 +358,10 @@ Only rows marked settled are settled.
 ## Open questions
 
 - How does a thread get the equivalent of a workspace directory for its shim?
-- Which vendor session does a thread's shim drive as the user moves between branches?
-- How is a new thread started, now that the sidebar has no "New chat" button?
-- Does "most recent" in the sidebar mean the newest question anywhere in the thread, or the last time it was opened?
+- What does a thread's shim use in place of a workspace directory?
+- Which keys do the new-thread and most-recent-thread bindings use?
+- Does opening a thread count as interacting with it, for its place in the sidebar list?
+- How does Emacs pick an older thread by name, other than clicking it in the sidebar?
 - Which embedding provider: a local model on the workstation, or a hosted API
   called from the workstation? Chat answers already send content to
   Anthropic, so a hosted embedding API adds one more vendor that sees it.
