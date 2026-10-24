@@ -103,7 +103,9 @@ func walkBuckets(unsectioned []wsm.Workspace, subs []wsm.Subsection, bySubsectio
 // recently-merged band's groups and the tab bar all follow it. It sorts a
 // copy.
 func sortRepositories(in []wsm.Repository) []wsm.Repository {
-	out := slices.Clone(in)
+	// The zettel home is no repository to the roster and is never listed: its
+	// threads are the thread section's (threads.go).
+	out := slices.DeleteFunc(slices.Clone(in), wsm.Repository.IsZettelHome)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Place < out[j].Place })
 	return out
 }

@@ -268,10 +268,12 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 	// AND closed; CLOSED is closed and never merged. A merge past the band's
 	// newest MergedShown is listed NOWHERE (owner ruling, 2026-10-15). A HIDDEN MERGE WORKSPACE IS DRAWN NOWHERE until it
 	// needs the user (owner ruling, 2026-10-11): not even in the hidden
-	// section.
-	var hidden, settled, closed []wsm.Workspace
+	// section. A CHAT THREAD is listed only in the thread section.
+	var hidden, settled, closed, threads []wsm.Workspace
 	for _, ws := range r.state.reg.Workspaces {
 		switch {
+		case ws.IsThread():
+			threads = append(threads, ws)
 		case ws.MergeHidden():
 		case ws.Closed && ws.MergedAt != nil:
 			settled = append(settled, ws)
@@ -288,6 +290,8 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		Open:           r.openSection(),
 		RecentlyMerged: r.mergedSection(recentMerges(settled), rc, log),
 		Closed:         r.closedRows(closed, rc, log),
+		AppSwitcher:    r.appSwitcher(),
+		Threads:        r.threadSection(threads),
 	}
 	if cur := r.currentWorkspace(); cur != nil {
 		out.Current = cur
