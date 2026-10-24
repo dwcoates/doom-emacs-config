@@ -165,6 +165,8 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   It looks much like the ChatGPT and claude.ai chat interfaces, and is slick
   and professional, in agent-repl's existing colors (the light and dark
   themes' variables in `webapp/src/styles.css`).
+- A design mock of the chat: `docs/knowledge-graph/chat-mock.html` (open it
+  directly in a browser).
 - The sidebar is the same across every app. A selector at its top switches
   between them, like tabs: one for agent-repl's workspaces, one for the chat,
   and so on.
