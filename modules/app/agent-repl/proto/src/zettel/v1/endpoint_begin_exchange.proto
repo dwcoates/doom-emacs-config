@@ -1,0 +1,76 @@
+// endpoint_begin_exchange.proto — BeginExchange: a question has been asked in
+// a thread, and its answer is on the way.
+
+syntax = "proto3";
+
+package zettel.v1;
+
+import "zettel/v1/zettel.proto";
+
+option go_package = "agentrepl/proto/zettel/v1;zettelv1";
+
+// Records a question the moment it is sent, before any answer exists, so the
+// node's origin (its parent, its quote) is durable from the start and a
+// restart between question and answer loses nothing.
+message BeginExchangeRequest {
+  // The thread the question was asked in.
+  ThreadId thread = 1;
+  // The daemon turn whose prompt is this question.
+  ExchangeTurn turn = 2;
+  // Where the question came from.
+  NodeParent parent = 3;
+  // The question as the user typed it.
+  NodeQuestion question = 4;
+}
+
+// The outcome of BeginExchange.
+message BeginExchangeResponse {
+  // Success carries the new exchange; failure says why none was begun.
+  oneof result {
+    BeginExchangeSuccess success = 1;
+    BeginExchangeFailure failure = 2;
+  }
+}
+
+// The exchange was recorded.
+message BeginExchangeSuccess {
+  // The new exchange, to be completed or abandoned when its turn ends.
+  ExchangeId exchange = 1;
+}
+
+// No exchange was recorded, and nothing was written.
+message BeginExchangeFailure {
+  // A one-line human-readable account of the failure, for the log.
+  string detail = 1;
+  // Which failure it was.
+  oneof kind {
+    BeginExchangeStorageFailure storage_failure = 2;
+    BeginExchangeInvalidRequest invalid_request = 3;
+    BeginExchangeUnknownParent unknown_parent = 4;
+    BeginExchangeThreadAlreadyStarted thread_already_started = 5;
+    BeginExchangeTurnAlreadyBegun turn_already_begun = 6;
+  }
+}
+
+// The database could not be written.
+message BeginExchangeStorageFailure {}
+
+// A required field was missing or empty.
+message BeginExchangeInvalidRequest {
+  // The field at fault, by its proto name.
+  string field = 1;
+}
+
+// The parent node does not exist in this thread, or its named revision does
+// not exist.
+message BeginExchangeUnknownParent {}
+
+// The parent was the thread's start, but the thread already has a root node
+// or an exchange in flight from its start: a thread starts once.
+message BeginExchangeThreadAlreadyStarted {}
+
+// An exchange for this turn was already begun: one turn is one question.
+message BeginExchangeTurnAlreadyBegun {
+  // The exchange already recorded for the turn.
+  ExchangeId existing = 1;
+}
