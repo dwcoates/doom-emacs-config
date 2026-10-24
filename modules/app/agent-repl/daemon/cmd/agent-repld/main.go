@@ -305,7 +305,7 @@ func parseFlags(program string, args []string) (options, error) {
 	if opts.replacing && opts.joining != "" {
 		return options{}, fmt.Errorf("%s: -%s and -joining are exclusive: a replacement boots as the incumbent, a successor joins one", program, rollout.ReplacingFlagName)
 	}
-	storeSocket, err := resolveStoreSocket(opts.storeSocket, os.Getenv(envStoreSocket), os.UserHomeDir)
+	storeSocket, err := resolveSocket("store", opts.storeSocket, os.Getenv(envStoreSocket), defaultStoreSocket, os.UserHomeDir)
 	if err != nil {
 		return options{}, err
 	}
@@ -371,25 +371,26 @@ func resolveFeedTailRetention(flagValue int, envValue string) (int, error) {
 	return flagValue, nil
 }
 
-// resolveStoreSocket applies the store socket's precedence: the flag beats the
-// environment, which beats the default under the home directory. Whichever
-// wins goes through dirpath.Absolute, so a `~` is expanded and a relative
-// socket is refused. The home directory is asked for only when the winner
-// needs it, and a daemon that cannot name it then does not boot: it used to
-// fall back to the bare relative default, a socket nobody listens on.
-func resolveStoreSocket(flagValue, envValue string, userHome func() (string, error)) (string, error) {
-	chosen := firstNonEmpty(flagValue, envValue, defaultStoreSocket)
+// resolveSocket applies a service socket's precedence: the flag beats the
+// environment, which beats FALLBACK under the home directory. Whichever wins
+// goes through dirpath.Absolute, so a `~` is expanded and a relative socket is
+// refused. The home directory is asked for only when the winner needs it, and
+// a daemon that cannot name it then does not boot: it used to fall back to the
+// bare relative default, a socket nobody listens on. SERVICE names the socket
+// in an error.
+func resolveSocket(service, flagValue, envValue, fallback string, userHome func() (string, error)) (string, error) {
+	chosen := firstNonEmpty(flagValue, envValue, fallback)
 	home := ""
 	if strings.HasPrefix(chosen, "~") {
 		h, err := userHome()
 		if err != nil {
-			return "", fmt.Errorf("agent-repld: resolve the home directory the store socket %q is under: %w", chosen, err)
+			return "", fmt.Errorf("agent-repld: resolve the home directory the %s socket %q is under: %w", service, chosen, err)
 		}
 		home = h
 	}
 	socket, err := dirpath.Absolute(chosen, home)
 	if err != nil {
-		return "", fmt.Errorf("agent-repld: resolve the store socket: %w", err)
+		return "", fmt.Errorf("agent-repld: resolve the %s socket: %w", service, err)
 	}
 	return socket, nil
 }
