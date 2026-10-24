@@ -290,6 +290,10 @@ type Verbs interface {
 	// naming rule, branch, worktree, layout facts recorded, and REGISTRATION
 	// ONLY AFTER MATERIALIZATION.
 	Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error)
+	// CreateThread makes a new zettel chat thread named after its first
+	// question and brings its session up (thread.go); the caller submits the
+	// question.
+	CreateThread(ctx context.Context, question string) (wsm.Workspace, error)
 	// CreateMergeWorkspace creates the hidden MERGE WORKSPACE an async merge
 	// runs in: a fork of REQUESTER's conversation named NAME, in a worktree of
 	// its own on BASE as it stands now, recorded as forked for ORIGIN's
