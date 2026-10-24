@@ -463,31 +463,21 @@ export function drawFooterSubStatus(
   switch (sub.case) {
     case "enqueued":
       // The merge's 1-based place among the merges waiting in its repository.
-      cell.appendChild(document.createTextNode(" "));
-      cell.appendChild(substatusFigure("position", `${sub.value.place}/${sub.value.waiting}`));
-      return cell;
+      return withSubstatusFigure(cell, " ", "position", `${sub.value.place}/${sub.value.waiting}`);
     case "rebasing":
       // How many of the branch's commits have been replayed onto the tip.
-      cell.appendChild(document.createTextNode(" "));
-      cell.appendChild(substatusFigure("count", `${sub.value.replayed}/${sub.value.total}`));
-      return cell;
+      return withSubstatusFigure(cell, " ", "count", `${sub.value.replayed}/${sub.value.total}`);
     case "fixing":
       // This attempt among the most the merge makes before it fails.
-      cell.appendChild(document.createTextNode(" attempt "));
-      cell.appendChild(substatusFigure("attempt", `${sub.value.attempt}/${sub.value.maxAttempts}`));
-      return cell;
+      return withSubstatusFigure(cell, " attempt ", "attempt", `${sub.value.attempt}/${sub.value.maxAttempts}`);
     case "awaitingTurn":
       // How many deploys queued ahead still run their one-at-a-time stages
       // before this one, which has run its concurrent stages.
-      cell.appendChild(document.createTextNode(": "));
-      cell.appendChild(substatusFigure("count", `${sub.value.ahead} ahead`));
-      return cell;
+      return withSubstatusFigure(cell, ": ", "count", `${sub.value.ahead} ahead`);
     case "awaitingFree":
       // What the merge, which has not started, waits on: the awaited
       // workspace's turn and detached work, as the daemon counted them.
-      cell.appendChild(document.createTextNode(" "));
-      cell.appendChild(substatusFigure("count", awaitingFreeText(sub.value)));
-      return cell;
+      return withSubstatusFigure(cell, " ", "count", awaitingFreeText(sub.value));
     default:
       return cell;
   }
@@ -523,6 +513,22 @@ export function awaitingFreeText(v: {
 }
 
 /** A substatus figure, coloured as the typed datum it is. */
+/**
+ * Ends a substatus CELL with its figure: JOINER after the substatus's words,
+ * then the figure TEXT coloured as DATUM. Every substatus with a figure is
+ * drawn through it, so each reads as its words, the joiner and the figure.
+ */
+export function withSubstatusFigure(
+  cell: HTMLElement,
+  joiner: string,
+  datum: ActivityDatum,
+  text: string,
+): HTMLElement {
+  cell.appendChild(document.createTextNode(joiner));
+  cell.appendChild(substatusFigure(datum, text));
+  return cell;
+}
+
 function substatusFigure(datum: ActivityDatum, text: string): HTMLElement {
   const figure = document.createElement("span");
   figure.className = `footer-substatus-place ${activityDatumClass(datum)}`;

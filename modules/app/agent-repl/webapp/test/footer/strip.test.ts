@@ -23,6 +23,7 @@ import {
   chipWaiting,
   footerStatusActivity,
   subStatusWords,
+  withSubstatusFigure,
 } from "../../src/footer/strip.js";
 import { CHIP_PANELS, type FooterPanel } from "../../src/footer/expanded.js";
 import {
@@ -284,6 +285,32 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
   it("colours the deploys ahead as a count", () => {
     const { row } = drawStrip({ status: withSubStatus("merging", "awaitingTurn", { ahead: 2 }) });
     expect(row.querySelector('.footer-substatus [data-datum="count"]')?.textContent).toBe("2 ahead");
+  });
+
+  it("ends a substatus cell with its joiner and its coloured figure", () => {
+    const cell = document.createElement("div");
+    cell.appendChild(document.createTextNode("rebasing"));
+
+    const got = withSubstatusFigure(cell, " ", "count", "3/7");
+
+    expect(got).toBe(cell);
+    expect(cell.textContent).toBe("rebasing 3/7");
+    expect(cell.querySelector('[data-datum="count"]')?.textContent).toBe("3/7");
+  });
+
+  it.each([
+    ["enqueued", { place: 2, waiting: 5 }],
+    ["rebasing", { replayed: 3, total: 7 }],
+    ["fixing", { attempt: 2, maxAttempts: 3 }],
+    ["awaitingTurn", { ahead: 2 }],
+    ["awaitingFree", {}],
+  ])("draws the %s substatus as its words, a joiner and one figure", (arm, value) => {
+    const { row } = drawStrip({ status: withSubStatus("merging", arm, value) });
+
+    const nodes = [...(row.querySelector(".footer-substatus")?.childNodes ?? [])];
+
+    expect(nodes.map((n) => n.nodeType)).toEqual([Node.TEXT_NODE, Node.TEXT_NODE, Node.ELEMENT_NODE]);
+    expect((nodes[2] as HTMLElement).hasAttribute("data-datum")).toBe(true);
   });
 
   it("colours the enqueued place as a queue position", () => {
