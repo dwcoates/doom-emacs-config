@@ -376,8 +376,8 @@ func TestRequestRefusedForAnUnsetNestedField(t *testing.T) {
 	}
 }
 
-// Every stream in the schema that belongs to the WEBAPP is refused, not
-// stubbed: this fake mocks Emacs's neighbor and never composes another
+// Every stream in the schema that belongs to the WEBAPP (or to the agent CLI)
+// is refused, not stubbed: this fake mocks Emacs's neighbor and never composes another
 // system, so a wrong caller has to fail loudly rather than hang on silence.
 func TestEveryWebappStreamIsRefusedAsUnimplemented(t *testing.T) {
 	tests := []struct {
@@ -412,6 +412,17 @@ func TestEveryWebappStreamIsRefusedAsUnimplemented(t *testing.T) {
 				s, err := c.WatchWebWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{}))
 				if err != nil {
 					t.Fatalf("open WatchWebWorkspace: %v", err)
+				}
+				s.Receive()
+				return s, s.Close
+			},
+		},
+		{
+			name: "RunTests",
+			open: func(ctx context.Context, c agentreplv1connectClient) (interface{ Err() error }, func() error) {
+				s, err := c.RunTests(ctx, connect.NewRequest(&agentreplv1.RunTestsRequest{}))
+				if err != nil {
+					t.Fatalf("open RunTests: %v", err)
 				}
 				s.Receive()
 				return s, s.Close
