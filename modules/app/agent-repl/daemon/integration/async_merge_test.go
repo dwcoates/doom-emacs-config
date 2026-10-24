@@ -12,6 +12,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
@@ -148,6 +149,32 @@ func TestAnAsyncMergeWorkspaceStaysHiddenEvenAfterItsMergeFails(t *testing.T) {
 			t.Fatalf("the failed merge workspace has a tab %v, want it left hidden", open.GetTab())
 		}
 	}
+}
+
+func TestAFailedAsyncMergesWorkspaceHasItsSessionStoodDown(t *testing.T) {
+	t.Parallel()
+	// A hidden merge workspace runs only while its merge is queued
+	// (wsm.Workspace.Runs): once the merge has failed nothing is carried, and
+	// its session is stood down rather than left running unseen.
+	// Arrange: replaying the merge workspace's branch conflicts.
+	s := newSourcedRepo(t)
+	s.repo.AddBranch("agent-fix")
+	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved\n")
+	s.repo.ScriptRebaseConflict("async-fix", 1, "branch.txt")
+	s.d.ExpectWarnings("daemon.gitclient.merge_no_ff")
+
+	// Act: the merge workspace's agent gives up on every attempt.
+	s.asyncMerge(t, "async-fix", "agent-fix")
+	mergeWS := mergeWorkspaceOf(t, s.d, s.f.ws)
+	shim := s.d.Shim(mergeWS)
+	for attempt := 1; attempt <= merge.MaxConflictAttempts; attempt++ {
+		shim.ExpectStartTurn()
+		s.d.AwaitWorkspaceLogOperationCount(mergeWS.GetDir(), harness.OpTurnOpened, attempt)
+		pushConcludedTurn(shim, mainAgent, "gave-up")
+	}
+
+	// Assert
+	s.d.AwaitShimLoggedRequest(mergeWS.GetDir(), harness.RPCHibernate, &shimv1.HibernateRequest{})
 }
 
 func TestAnAsyncInstructionStreamsItsAgentIntoTheResolvingTabAndThenLands(t *testing.T) {

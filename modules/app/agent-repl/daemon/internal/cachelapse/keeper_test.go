@@ -35,6 +35,25 @@ type fakeDB struct {
 	readErr   error
 	setErr    error
 	setLapses []wsm.CacheLapse
+	// queued are the workspaces with an entry standing in a merge queue;
+	// queuesErr fails the queues' read.
+	queued    []ids.WorkspaceID
+	queuesErr error
+}
+
+func (f *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) { return nil, nil }
+
+func (f *fakeDB) AllMergeQueues(context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.queuesErr != nil {
+		return nil, f.queuesErr
+	}
+	entries := make([]wsm.MergeQueueEntry, len(f.queued))
+	for i, ws := range f.queued {
+		entries[i] = wsm.MergeQueueEntry{Workspace: ws}
+	}
+	return map[wsm.RepoKey][]wsm.MergeQueueEntry{"/repo/.git": entries}, nil
 }
 
 func (f *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
@@ -153,6 +172,11 @@ func visible() wsm.Workspace {
 
 func closed() wsm.Workspace {
 	return wsm.Workspace{ID: theWorkspace, Closed: true}
+}
+
+// mergeWorkspace is a hidden merge workspace.
+func mergeWorkspace() wsm.Workspace {
+	return wsm.Workspace{ID: theWorkspace, MergeOf: &wsm.MergeOrigin{}}
 }
 
 // selectedHidden is a hidden workspace the user is looking at.
@@ -946,5 +970,71 @@ func TestLapseWritesHaveOneHome(t *testing.T) {
 	// Assert
 	if len(sites) != 1 || sites[0] != "keeper.go" {
 		t.Fatalf("a cache lapse is written at %v, want only Keeper.store in keeper.go", sites)
+	}
+}
+
+func TestReconcileOfAMergeWorkspace(t *testing.T) {
+	selected := mergeWorkspace()
+	selected.Current = true
+	tests := []struct {
+		name        string
+		rec         wsm.Workspace
+		queued      []ids.WorkspaceID
+		wantStood   bool
+		wantCadence []string
+	}{
+		{name: "whose merge left every queue is stood down", rec: mergeWorkspace(), wantStood: true},
+		{name: "whose merge is queued keeps running", rec: mergeWorkspace(), queued: []ids.WorkspaceID{theWorkspace}, wantCadence: []string{"run"}},
+		{name: "the user is looking at keeps running", rec: selected, wantCadence: []string{"run"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, tt.rec)
+			h.db.queued = tt.queued
+
+			// Act
+			h.keeper.reconcile(context.Background(), theWorkspace, "test")
+
+			// Assert
+			if got := h.stoodDown(); got != tt.wantStood || !slices.Equal(h.shim.cadence, tt.wantCadence) {
+				t.Fatalf("stood down %v with cadence %v, want %v with %v", got, h.shim.cadence, tt.wantStood, tt.wantCadence)
+			}
+		})
+	}
+}
+
+func TestReconcileOfAMergeWorkspaceWhoseQueuesCannotBeReadIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t, mergeWorkspace())
+	h.db.queuesErr = errors.New("arranged: the store is gone")
+
+	// Act
+	h.keeper.reconcile(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if h.stoodDown() || len(h.shim.cadence) != 0 || !h.found(dlog.RecordQuery{Level: "error", Operation: opMergeEnded}) {
+		t.Fatalf("cadence %v with records %v, want nothing done and the read failure at error", h.shim.cadence, h.log.Records())
+	}
+}
+
+func TestRunStandsDownAMergeWorkspaceWhoseMergeLeftItsQueue(t *testing.T) {
+	// Arrange
+	h := newHarness(t, mergeWorkspace())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- h.keeper.Run(ctx) }()
+
+	// Act
+	h.keeper.MergeLeftQueue(theWorkspace)
+
+	// Assert
+	if got := <-h.standDowns.stood; got != theWorkspace {
+		t.Fatalf("stood down %q, want %q", got, theWorkspace)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run = %v, want nil", err)
 	}
 }

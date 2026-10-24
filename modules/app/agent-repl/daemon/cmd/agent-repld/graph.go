@@ -735,6 +735,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// left to lapse. Every component built from here on writes through it; the
 	// ones built above never close or reopen a workspace.
 	p.DB = cachelapse.ObserveClosures(p.DB, cacheKeeper)
+	// EVERY MERGE LEAVING ITS QUEUE REACHES THE KEEPER TOO
+	// (cachelapse.ObserveMergeQueues): a hidden merge workspace whose merge
+	// left every queue runs nothing, and its session is stood down.
+	p.DB = cachelapse.ObserveMergeQueues(p.DB, cacheKeeper)
 
 	// THE ONE CAP ON VENDOR STARTS IN FLIGHT, shared by the fleet's starts and
 	// the prompt queue's shim restarts (startslots): a restart takes its slot
