@@ -144,18 +144,14 @@ func TestServesTheGraphOverTheSocketAndKeepsItAcrossARestart(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "zettel.db")
 	first := start(t, db)
 	ctx := context.Background()
-	begun, err := first.client().BeginExchange(ctx, connect.NewRequest(&zettelv1.BeginExchangeRequest{
+	recorded, err := first.client().RecordExchange(ctx, connect.NewRequest(&zettelv1.RecordExchangeRequest{
 		Thread: &zettelv1.ThreadId{Id: "t1"}, Turn: &zettelv1.ExchangeTurn{TurnId: "turn1"},
-		Question: &zettelv1.NodeQuestion{Text: "What are quarks?"},
-		Parent:   &zettelv1.NodeParent{Origin: &zettelv1.NodeParent_ThreadStart{ThreadStart: &zettelv1.NodeParentThreadStart{}}},
+		Question:       &zettelv1.NodeQuestion{Text: "What are quarks?"},
+		Parent:         &zettelv1.NodeParent{Origin: &zettelv1.NodeParent_ThreadStart{ThreadStart: &zettelv1.NodeParentThreadStart{}}},
+		AnswerMarkdown: "Elementary particles.",
 	}))
-	if err != nil || begun.Msg.GetSuccess() == nil {
-		t.Fatalf("BeginExchange: %v %v", err, begun)
-	}
-	if _, err := first.client().CompleteExchange(ctx, connect.NewRequest(&zettelv1.CompleteExchangeRequest{
-		Exchange: begun.Msg.GetSuccess().GetExchange(), AnswerMarkdown: "Elementary particles.",
-	})); err != nil {
-		t.Fatal(err)
+	if err != nil || recorded.Msg.GetSuccess() == nil {
+		t.Fatalf("RecordExchange: %v %v", err, recorded)
 	}
 	first.stop(t)
 

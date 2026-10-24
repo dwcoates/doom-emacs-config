@@ -132,3 +132,29 @@ Consequences and reasoning:
   is: the next prompt in the thread consumes it.
 - Thread-addressed verbs carry the standard workspace-resolution refusal arms
   (the daemon maps refusals onto arms by name) plus `not_a_thread`.
+
+### 6. Revision of 1: one idempotent `RecordExchange` replaces the exchange lifecycle
+
+What: BeginExchange, CompleteExchange, AbandonExchange, ListPendingExchanges,
+`ExchangeId`, `PendingExchange` and `GetThreadSuccess.pending` are removed.
+`RecordExchange` records a question and its answer as a node in one call,
+idempotent by the daemon turn; `Node.turn` names that turn.
+
+Why, and the root cause of the earlier shape being wrong: the exchange was keyed
+by the daemon turn at SUBMIT time, but the daemon's prompt queue re-mints a
+held prompt's turn (a vendor-blocked prompt is re-held under a new turn,
+`promptqueue/rehold.go`), so an exchange begun at submit could be orphaned from
+the turn that finally answers it. The design reasoned from the RPC surface
+without checking the queue's identity rules. The structural fix moves the
+question's origin onto the daemon's own durable prompt records (the
+submission, the held prompt and the turn row carry it, so every copy the queue
+makes carries it too), and zettel learns the question only together with its
+answer.
+
+Consequences:
+- Zettel holds answered nodes only; the chat view's question in flight is the
+  daemon's (its turn row and the feed's live answer).
+- A turn's answer can be learned more than once (the live ending, then a
+  history replay after a restart); idempotency by turn makes that one node, so
+  a restart between answer and record loses nothing and duplicates nothing.
+- A turn that ends without an answer (interrupt, failure) never reaches zettel.

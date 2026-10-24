@@ -40,15 +40,8 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
-	// ZettelBeginExchangeProcedure is the fully-qualified name of the Zettel's BeginExchange RPC.
-	ZettelBeginExchangeProcedure = "/zettel.v1.Zettel/BeginExchange"
-	// ZettelCompleteExchangeProcedure is the fully-qualified name of the Zettel's CompleteExchange RPC.
-	ZettelCompleteExchangeProcedure = "/zettel.v1.Zettel/CompleteExchange"
-	// ZettelAbandonExchangeProcedure is the fully-qualified name of the Zettel's AbandonExchange RPC.
-	ZettelAbandonExchangeProcedure = "/zettel.v1.Zettel/AbandonExchange"
-	// ZettelListPendingExchangesProcedure is the fully-qualified name of the Zettel's
-	// ListPendingExchanges RPC.
-	ZettelListPendingExchangesProcedure = "/zettel.v1.Zettel/ListPendingExchanges"
+	// ZettelRecordExchangeProcedure is the fully-qualified name of the Zettel's RecordExchange RPC.
+	ZettelRecordExchangeProcedure = "/zettel.v1.Zettel/RecordExchange"
 	// ZettelGetThreadProcedure is the fully-qualified name of the Zettel's GetThread RPC.
 	ZettelGetThreadProcedure = "/zettel.v1.Zettel/GetThread"
 	// ZettelRecordSightingsProcedure is the fully-qualified name of the Zettel's RecordSightings RPC.
@@ -57,25 +50,16 @@ const (
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
 var (
-	zettelServiceDescriptor                    = v1.File_zettel_v1_service_proto.Services().ByName("Zettel")
-	zettelBeginExchangeMethodDescriptor        = zettelServiceDescriptor.Methods().ByName("BeginExchange")
-	zettelCompleteExchangeMethodDescriptor     = zettelServiceDescriptor.Methods().ByName("CompleteExchange")
-	zettelAbandonExchangeMethodDescriptor      = zettelServiceDescriptor.Methods().ByName("AbandonExchange")
-	zettelListPendingExchangesMethodDescriptor = zettelServiceDescriptor.Methods().ByName("ListPendingExchanges")
-	zettelGetThreadMethodDescriptor            = zettelServiceDescriptor.Methods().ByName("GetThread")
-	zettelRecordSightingsMethodDescriptor      = zettelServiceDescriptor.Methods().ByName("RecordSightings")
+	zettelServiceDescriptor               = v1.File_zettel_v1_service_proto.Services().ByName("Zettel")
+	zettelRecordExchangeMethodDescriptor  = zettelServiceDescriptor.Methods().ByName("RecordExchange")
+	zettelGetThreadMethodDescriptor       = zettelServiceDescriptor.Methods().ByName("GetThread")
+	zettelRecordSightingsMethodDescriptor = zettelServiceDescriptor.Methods().ByName("RecordSightings")
 )
 
 // ZettelClient is a client for the zettel.v1.Zettel service.
 type ZettelClient interface {
-	// A question was sent: record its origin before any answer exists.
-	BeginExchange(context.Context, *connect.Request[v1.BeginExchangeRequest]) (*connect.Response[v1.BeginExchangeResponse], error)
-	// The answer finished: the exchange becomes a node.
-	CompleteExchange(context.Context, *connect.Request[v1.CompleteExchangeRequest]) (*connect.Response[v1.CompleteExchangeResponse], error)
-	// The turn ended with no answer: the exchange is removed.
-	AbandonExchange(context.Context, *connect.Request[v1.AbandonExchangeRequest]) (*connect.Response[v1.AbandonExchangeResponse], error)
-	// Every exchange in flight, for settling after a restart.
-	ListPendingExchanges(context.Context, *connect.Request[v1.ListPendingExchangesRequest]) (*connect.Response[v1.ListPendingExchangesResponse], error)
+	// A thread turn's final answer is known: record the node (idempotent by turn).
+	RecordExchange(context.Context, *connect.Request[v1.RecordExchangeRequest]) (*connect.Response[v1.RecordExchangeResponse], error)
 	// One thread whole: its nodes and its exchanges in flight.
 	GetThread(context.Context, *connect.Request[v1.GetThreadRequest]) (*connect.Response[v1.GetThreadResponse], error)
 	// Count one sighting per named node.
@@ -92,28 +76,10 @@ type ZettelClient interface {
 func NewZettelClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) ZettelClient {
 	baseURL = strings.TrimRight(baseURL, "/")
 	return &zettelClient{
-		beginExchange: connect.NewClient[v1.BeginExchangeRequest, v1.BeginExchangeResponse](
+		recordExchange: connect.NewClient[v1.RecordExchangeRequest, v1.RecordExchangeResponse](
 			httpClient,
-			baseURL+ZettelBeginExchangeProcedure,
-			connect.WithSchema(zettelBeginExchangeMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
-		completeExchange: connect.NewClient[v1.CompleteExchangeRequest, v1.CompleteExchangeResponse](
-			httpClient,
-			baseURL+ZettelCompleteExchangeProcedure,
-			connect.WithSchema(zettelCompleteExchangeMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
-		abandonExchange: connect.NewClient[v1.AbandonExchangeRequest, v1.AbandonExchangeResponse](
-			httpClient,
-			baseURL+ZettelAbandonExchangeProcedure,
-			connect.WithSchema(zettelAbandonExchangeMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
-		listPendingExchanges: connect.NewClient[v1.ListPendingExchangesRequest, v1.ListPendingExchangesResponse](
-			httpClient,
-			baseURL+ZettelListPendingExchangesProcedure,
-			connect.WithSchema(zettelListPendingExchangesMethodDescriptor),
+			baseURL+ZettelRecordExchangeProcedure,
+			connect.WithSchema(zettelRecordExchangeMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		getThread: connect.NewClient[v1.GetThreadRequest, v1.GetThreadResponse](
@@ -133,32 +99,14 @@ func NewZettelClient(httpClient connect.HTTPClient, baseURL string, opts ...conn
 
 // zettelClient implements ZettelClient.
 type zettelClient struct {
-	beginExchange        *connect.Client[v1.BeginExchangeRequest, v1.BeginExchangeResponse]
-	completeExchange     *connect.Client[v1.CompleteExchangeRequest, v1.CompleteExchangeResponse]
-	abandonExchange      *connect.Client[v1.AbandonExchangeRequest, v1.AbandonExchangeResponse]
-	listPendingExchanges *connect.Client[v1.ListPendingExchangesRequest, v1.ListPendingExchangesResponse]
-	getThread            *connect.Client[v1.GetThreadRequest, v1.GetThreadResponse]
-	recordSightings      *connect.Client[v1.RecordSightingsRequest, v1.RecordSightingsResponse]
+	recordExchange  *connect.Client[v1.RecordExchangeRequest, v1.RecordExchangeResponse]
+	getThread       *connect.Client[v1.GetThreadRequest, v1.GetThreadResponse]
+	recordSightings *connect.Client[v1.RecordSightingsRequest, v1.RecordSightingsResponse]
 }
 
-// BeginExchange calls zettel.v1.Zettel.BeginExchange.
-func (c *zettelClient) BeginExchange(ctx context.Context, req *connect.Request[v1.BeginExchangeRequest]) (*connect.Response[v1.BeginExchangeResponse], error) {
-	return c.beginExchange.CallUnary(ctx, req)
-}
-
-// CompleteExchange calls zettel.v1.Zettel.CompleteExchange.
-func (c *zettelClient) CompleteExchange(ctx context.Context, req *connect.Request[v1.CompleteExchangeRequest]) (*connect.Response[v1.CompleteExchangeResponse], error) {
-	return c.completeExchange.CallUnary(ctx, req)
-}
-
-// AbandonExchange calls zettel.v1.Zettel.AbandonExchange.
-func (c *zettelClient) AbandonExchange(ctx context.Context, req *connect.Request[v1.AbandonExchangeRequest]) (*connect.Response[v1.AbandonExchangeResponse], error) {
-	return c.abandonExchange.CallUnary(ctx, req)
-}
-
-// ListPendingExchanges calls zettel.v1.Zettel.ListPendingExchanges.
-func (c *zettelClient) ListPendingExchanges(ctx context.Context, req *connect.Request[v1.ListPendingExchangesRequest]) (*connect.Response[v1.ListPendingExchangesResponse], error) {
-	return c.listPendingExchanges.CallUnary(ctx, req)
+// RecordExchange calls zettel.v1.Zettel.RecordExchange.
+func (c *zettelClient) RecordExchange(ctx context.Context, req *connect.Request[v1.RecordExchangeRequest]) (*connect.Response[v1.RecordExchangeResponse], error) {
+	return c.recordExchange.CallUnary(ctx, req)
 }
 
 // GetThread calls zettel.v1.Zettel.GetThread.
@@ -173,14 +121,8 @@ func (c *zettelClient) RecordSightings(ctx context.Context, req *connect.Request
 
 // ZettelHandler is an implementation of the zettel.v1.Zettel service.
 type ZettelHandler interface {
-	// A question was sent: record its origin before any answer exists.
-	BeginExchange(context.Context, *connect.Request[v1.BeginExchangeRequest]) (*connect.Response[v1.BeginExchangeResponse], error)
-	// The answer finished: the exchange becomes a node.
-	CompleteExchange(context.Context, *connect.Request[v1.CompleteExchangeRequest]) (*connect.Response[v1.CompleteExchangeResponse], error)
-	// The turn ended with no answer: the exchange is removed.
-	AbandonExchange(context.Context, *connect.Request[v1.AbandonExchangeRequest]) (*connect.Response[v1.AbandonExchangeResponse], error)
-	// Every exchange in flight, for settling after a restart.
-	ListPendingExchanges(context.Context, *connect.Request[v1.ListPendingExchangesRequest]) (*connect.Response[v1.ListPendingExchangesResponse], error)
+	// A thread turn's final answer is known: record the node (idempotent by turn).
+	RecordExchange(context.Context, *connect.Request[v1.RecordExchangeRequest]) (*connect.Response[v1.RecordExchangeResponse], error)
 	// One thread whole: its nodes and its exchanges in flight.
 	GetThread(context.Context, *connect.Request[v1.GetThreadRequest]) (*connect.Response[v1.GetThreadResponse], error)
 	// Count one sighting per named node.
@@ -193,28 +135,10 @@ type ZettelHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewZettelHandler(svc ZettelHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	zettelBeginExchangeHandler := connect.NewUnaryHandler(
-		ZettelBeginExchangeProcedure,
-		svc.BeginExchange,
-		connect.WithSchema(zettelBeginExchangeMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
-	zettelCompleteExchangeHandler := connect.NewUnaryHandler(
-		ZettelCompleteExchangeProcedure,
-		svc.CompleteExchange,
-		connect.WithSchema(zettelCompleteExchangeMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
-	zettelAbandonExchangeHandler := connect.NewUnaryHandler(
-		ZettelAbandonExchangeProcedure,
-		svc.AbandonExchange,
-		connect.WithSchema(zettelAbandonExchangeMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
-	zettelListPendingExchangesHandler := connect.NewUnaryHandler(
-		ZettelListPendingExchangesProcedure,
-		svc.ListPendingExchanges,
-		connect.WithSchema(zettelListPendingExchangesMethodDescriptor),
+	zettelRecordExchangeHandler := connect.NewUnaryHandler(
+		ZettelRecordExchangeProcedure,
+		svc.RecordExchange,
+		connect.WithSchema(zettelRecordExchangeMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	zettelGetThreadHandler := connect.NewUnaryHandler(
@@ -231,14 +155,8 @@ func NewZettelHandler(svc ZettelHandler, opts ...connect.HandlerOption) (string,
 	)
 	return "/zettel.v1.Zettel/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case ZettelBeginExchangeProcedure:
-			zettelBeginExchangeHandler.ServeHTTP(w, r)
-		case ZettelCompleteExchangeProcedure:
-			zettelCompleteExchangeHandler.ServeHTTP(w, r)
-		case ZettelAbandonExchangeProcedure:
-			zettelAbandonExchangeHandler.ServeHTTP(w, r)
-		case ZettelListPendingExchangesProcedure:
-			zettelListPendingExchangesHandler.ServeHTTP(w, r)
+		case ZettelRecordExchangeProcedure:
+			zettelRecordExchangeHandler.ServeHTTP(w, r)
 		case ZettelGetThreadProcedure:
 			zettelGetThreadHandler.ServeHTTP(w, r)
 		case ZettelRecordSightingsProcedure:
@@ -252,20 +170,8 @@ func NewZettelHandler(svc ZettelHandler, opts ...connect.HandlerOption) (string,
 // UnimplementedZettelHandler returns CodeUnimplemented from all methods.
 type UnimplementedZettelHandler struct{}
 
-func (UnimplementedZettelHandler) BeginExchange(context.Context, *connect.Request[v1.BeginExchangeRequest]) (*connect.Response[v1.BeginExchangeResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zettel.v1.Zettel.BeginExchange is not implemented"))
-}
-
-func (UnimplementedZettelHandler) CompleteExchange(context.Context, *connect.Request[v1.CompleteExchangeRequest]) (*connect.Response[v1.CompleteExchangeResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zettel.v1.Zettel.CompleteExchange is not implemented"))
-}
-
-func (UnimplementedZettelHandler) AbandonExchange(context.Context, *connect.Request[v1.AbandonExchangeRequest]) (*connect.Response[v1.AbandonExchangeResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zettel.v1.Zettel.AbandonExchange is not implemented"))
-}
-
-func (UnimplementedZettelHandler) ListPendingExchanges(context.Context, *connect.Request[v1.ListPendingExchangesRequest]) (*connect.Response[v1.ListPendingExchangesResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zettel.v1.Zettel.ListPendingExchanges is not implemented"))
+func (UnimplementedZettelHandler) RecordExchange(context.Context, *connect.Request[v1.RecordExchangeRequest]) (*connect.Response[v1.RecordExchangeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zettel.v1.Zettel.RecordExchange is not implemented"))
 }
 
 func (UnimplementedZettelHandler) GetThread(context.Context, *connect.Request[v1.GetThreadRequest]) (*connect.Response[v1.GetThreadResponse], error) {

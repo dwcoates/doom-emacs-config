@@ -54,16 +54,24 @@ func (l *Logger) With(ctx Context) *Logger {
 }
 
 // Debug writes a debug record.
-func (l *Logger) Debug(operation, message string, ctx Context) { l.write("debug", operation, message, ctx) }
+func (l *Logger) Debug(operation, message string, ctx Context) {
+	l.write("debug", operation, message, ctx)
+}
 
 // Info writes an info record.
-func (l *Logger) Info(operation, message string, ctx Context) { l.write("info", operation, message, ctx) }
+func (l *Logger) Info(operation, message string, ctx Context) {
+	l.write("info", operation, message, ctx)
+}
 
 // Warn writes a warn record.
-func (l *Logger) Warn(operation, message string, ctx Context) { l.write("warn", operation, message, ctx) }
+func (l *Logger) Warn(operation, message string, ctx Context) {
+	l.write("warn", operation, message, ctx)
+}
 
 // Error writes an error record.
-func (l *Logger) Error(operation, message string, ctx Context) { l.write("error", operation, message, ctx) }
+func (l *Logger) Error(operation, message string, ctx Context) {
+	l.write("error", operation, message, ctx)
+}
 
 type record struct {
 	Timestamp string  `json:"timestamp"`

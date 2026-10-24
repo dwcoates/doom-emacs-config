@@ -25,7 +25,7 @@ the spoken term would clash in code.
 | context | The text around a highlight that gives it meaning. | code: `questionContext` (`question_context` in protos) |
 | revision | One frozen version of a node's answer. Revision 1 is the answer as first given; a correction adds the next. | |
 | premise | A node that is conceptual groundwork for another, regardless of which was asked first (phase 2). | |
-| exchange | A question in flight: asked, not yet answered. Becomes a node when its answer finishes, or is abandoned. | |
+| exchange | One answered question being recorded as a node, keyed by the daemon turn it was. Until the answer is known, the question and its origin ride the daemon's own record of the prompt; zettel holds answered nodes only. | |
 | sighting | One time a node's answer bubble came fully onto the screen in a consumer UI. | |
 | visit | One stretch during which a parent stays on the chat's shown path; each sibling's branch is picked once per visit. | |
 | contributor | A UI that adds to the graph (the chat, agent-repl's feed, a book reader). | |

@@ -1,6 +1,6 @@
 // zettel.proto — the zettel.v1 package's shared datatypes: the identities of a
-// thread, a node and an exchange, a node's parent, and the node record the
-// graph reads serve.
+// thread, a node and the turn an exchange is, a node's parent, and the node
+// record the graph reads serve.
 //
 // ZETTEL HOLDS THE KNOWLEDGE GRAPH AND NOTHING ELSE. Conversation transcripts
 // stay in agent-repl's store; zettel keeps its OWN COPY of each question and
@@ -23,14 +23,14 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file zettel/v1/zettel.proto.
  */
 export const file_zettel_v1_zettel: GenFile = /*@__PURE__*/
-  fileDesc("ChZ6ZXR0ZWwvdjEvemV0dGVsLnByb3RvEgl6ZXR0ZWwudjEiFgoIVGhyZWFkSWQSCgoCaWQYASABKAkiFAoGTm9kZUlkEgoKAmlkGAEgASgJIhgKCkV4Y2hhbmdlSWQSCgoCaWQYASABKAkiHwoMRXhjaGFuZ2VUdXJuEg8KB3R1cm5faWQYASABKAkiIAoOUmV2aXNpb25OdW1iZXISDgoGbnVtYmVyGAEgASgNInsKCk5vZGVQYXJlbnQSKQoEbm9kZRgBIAEoCzIZLnpldHRlbC52MS5Ob2RlUGFyZW50Tm9kZUgAEjgKDHRocmVhZF9zdGFydBgCIAEoCzIgLnpldHRlbC52MS5Ob2RlUGFyZW50VGhyZWFkU3RhcnRIAEIICgZvcmlnaW4ikgEKDk5vZGVQYXJlbnROb2RlEh8KBG5vZGUYASABKAsyES56ZXR0ZWwudjEuTm9kZUlkEisKCHJldmlzaW9uGAIgASgLMhkuemV0dGVsLnYxLlJldmlzaW9uTnVtYmVyEigKBXF1b3RlGAMgASgLMhQuemV0dGVsLnYxLk5vZGVRdW90ZUgAiAEBQggKBl9xdW90ZSIXChVOb2RlUGFyZW50VGhyZWFkU3RhcnQiagoJTm9kZVF1b3RlEgwKBHRleHQYASABKAkSOgoQcXVlc3Rpb25fY29udGV4dBgCIAEoCzIbLnpldHRlbC52MS5Ob2RlUXVvdGVDb250ZXh0SACIAQFCEwoRX3F1ZXN0aW9uX2NvbnRleHQiIAoQTm9kZVF1b3RlQ29udGV4dBIMCgR0ZXh0GAEgASgJIokCCgROb2RlEh0KAmlkGAEgASgLMhEuemV0dGVsLnYxLk5vZGVJZBIjCgZ0aHJlYWQYAiABKAsyEy56ZXR0ZWwudjEuVGhyZWFkSWQSJQoGcGFyZW50GAMgASgLMhUuemV0dGVsLnYxLk5vZGVQYXJlbnQSKQoIcXVlc3Rpb24YBCABKAsyFy56ZXR0ZWwudjEuTm9kZVF1ZXN0aW9uEicKBmFuc3dlchgFIAEoCzIXLnpldHRlbC52MS5Ob2RlUmV2aXNpb24SFQoNY3JlYXRlZF9hdF9tcxgGIAEoAxIrCglzaWdodGluZ3MYByABKAsyGC56ZXR0ZWwudjEuTm9kZVNpZ2h0aW5ncyIcCgxOb2RlUXVlc3Rpb24SDAoEdGV4dBgBIAEoCSJiCgxOb2RlUmV2aXNpb24SKQoGbnVtYmVyGAEgASgLMhkuemV0dGVsLnYxLlJldmlzaW9uTnVtYmVyEhAKCG1hcmtkb3duGAIgASgJEhUKDXdyaXR0ZW5fYXRfbXMYAyABKAMiHgoNTm9kZVNpZ2h0aW5ncxINCgVjb3VudBgBIAEoBCLnAQoPUGVuZGluZ0V4Y2hhbmdlEiEKAmlkGAEgASgLMhUuemV0dGVsLnYxLkV4Y2hhbmdlSWQSIwoGdGhyZWFkGAIgASgLMhMuemV0dGVsLnYxLlRocmVhZElkEiUKBHR1cm4YAyABKAsyFy56ZXR0ZWwudjEuRXhjaGFuZ2VUdXJuEiUKBnBhcmVudBgEIAEoCzIVLnpldHRlbC52MS5Ob2RlUGFyZW50EikKCHF1ZXN0aW9uGAUgASgLMhcuemV0dGVsLnYxLk5vZGVRdWVzdGlvbhITCgtiZWd1bl9hdF9tcxgGIAEoA0IkWiJhZ2VudHJlcGwvcHJvdG8vemV0dGVsL3YxO3pldHRlbHYxYgZwcm90bzM");
+  fileDesc("ChZ6ZXR0ZWwvdjEvemV0dGVsLnByb3RvEgl6ZXR0ZWwudjEiFgoIVGhyZWFkSWQSCgoCaWQYASABKAkiFAoGTm9kZUlkEgoKAmlkGAEgASgJIh8KDEV4Y2hhbmdlVHVybhIPCgd0dXJuX2lkGAEgASgJIiAKDlJldmlzaW9uTnVtYmVyEg4KBm51bWJlchgBIAEoDSJ7CgpOb2RlUGFyZW50EikKBG5vZGUYASABKAsyGS56ZXR0ZWwudjEuTm9kZVBhcmVudE5vZGVIABI4Cgx0aHJlYWRfc3RhcnQYAiABKAsyIC56ZXR0ZWwudjEuTm9kZVBhcmVudFRocmVhZFN0YXJ0SABCCAoGb3JpZ2luIpIBCg5Ob2RlUGFyZW50Tm9kZRIfCgRub2RlGAEgASgLMhEuemV0dGVsLnYxLk5vZGVJZBIrCghyZXZpc2lvbhgCIAEoCzIZLnpldHRlbC52MS5SZXZpc2lvbk51bWJlchIoCgVxdW90ZRgDIAEoCzIULnpldHRlbC52MS5Ob2RlUXVvdGVIAIgBAUIICgZfcXVvdGUiFwoVTm9kZVBhcmVudFRocmVhZFN0YXJ0ImoKCU5vZGVRdW90ZRIMCgR0ZXh0GAEgASgJEjoKEHF1ZXN0aW9uX2NvbnRleHQYAiABKAsyGy56ZXR0ZWwudjEuTm9kZVF1b3RlQ29udGV4dEgAiAEBQhMKEV9xdWVzdGlvbl9jb250ZXh0IiAKEE5vZGVRdW90ZUNvbnRleHQSDAoEdGV4dBgBIAEoCSKwAgoETm9kZRIdCgJpZBgBIAEoCzIRLnpldHRlbC52MS5Ob2RlSWQSIwoGdGhyZWFkGAIgASgLMhMuemV0dGVsLnYxLlRocmVhZElkEiUKBnBhcmVudBgDIAEoCzIVLnpldHRlbC52MS5Ob2RlUGFyZW50EikKCHF1ZXN0aW9uGAQgASgLMhcuemV0dGVsLnYxLk5vZGVRdWVzdGlvbhInCgZhbnN3ZXIYBSABKAsyFy56ZXR0ZWwudjEuTm9kZVJldmlzaW9uEhUKDWNyZWF0ZWRfYXRfbXMYBiABKAMSKwoJc2lnaHRpbmdzGAcgASgLMhguemV0dGVsLnYxLk5vZGVTaWdodGluZ3MSJQoEdHVybhgIIAEoCzIXLnpldHRlbC52MS5FeGNoYW5nZVR1cm4iHAoMTm9kZVF1ZXN0aW9uEgwKBHRleHQYASABKAkiYgoMTm9kZVJldmlzaW9uEikKBm51bWJlchgBIAEoCzIZLnpldHRlbC52MS5SZXZpc2lvbk51bWJlchIQCghtYXJrZG93bhgCIAEoCRIVCg13cml0dGVuX2F0X21zGAMgASgDIh4KDU5vZGVTaWdodGluZ3MSDQoFY291bnQYASABKARCJFoiYWdlbnRyZXBsL3Byb3RvL3pldHRlbC92MTt6ZXR0ZWx2MWIGcHJvdG8z");
 
 /**
  * A thread: one chat, its root node and every node beneath it. The id is the
  * daemon-minted workspace id of the thread's workspace (a thread is a kind of
  * workspace to the daemon), handed to zettel unchanged. Zettel never parses
- * it and never mints one; a thread exists in zettel once its first exchange
- * begins.
+ * it and never mints one; a thread exists in zettel once its first node is
+ * recorded.
  *
  * @generated from message zettel.v1.ThreadId
  */
@@ -52,7 +52,7 @@ export const ThreadIdSchema: GenMessage<ThreadId> = /*@__PURE__*/
 
 /**
  * A node: one question and its answer, as zettel identifies it. Minted by
- * zettel when an exchange completes; opaque to every caller, which hands it
+ * zettel when an exchange is recorded; opaque to every caller, which hands it
  * back unchanged.
  *
  * @generated from message zettel.v1.NodeId
@@ -74,33 +74,9 @@ export const NodeIdSchema: GenMessage<NodeId> = /*@__PURE__*/
   messageDesc(file_zettel_v1_zettel, 1);
 
 /**
- * An exchange in flight: a question that has been asked and whose answer has
- * not finished. Minted by zettel at BeginExchange and consumed by
- * CompleteExchange or AbandonExchange; opaque to the caller.
- *
- * @generated from message zettel.v1.ExchangeId
- */
-export type ExchangeId = Message<"zettel.v1.ExchangeId"> & {
-  /**
-   * Zettel's opaque exchange id, compared byte-wise.
-   *
-   * @generated from field: string id = 1;
-   */
-  id: string;
-};
-
-/**
- * Describes the message zettel.v1.ExchangeId.
- * Use `create(ExchangeIdSchema)` to create a new message.
- */
-export const ExchangeIdSchema: GenMessage<ExchangeId> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 2);
-
-/**
- * The daemon turn an exchange belongs to: the turn whose prompt is the
- * exchange's question and whose final response is its answer. It is what lets
- * the daemon match a pending exchange back to its turn after a restart, so an
- * answer that finished while the two were apart is never lost.
+ * The daemon turn an exchange is: the turn whose prompt is the question and
+ * whose final response is the answer. RecordExchange is idempotent by it, so a
+ * turn's answer learned twice (live, then on a replay) is one node.
  *
  * @generated from message zettel.v1.ExchangeTurn
  */
@@ -119,7 +95,7 @@ export type ExchangeTurn = Message<"zettel.v1.ExchangeTurn"> & {
  * Use `create(ExchangeTurnSchema)` to create a new message.
  */
 export const ExchangeTurnSchema: GenMessage<ExchangeTurn> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 3);
+  messageDesc(file_zettel_v1_zettel, 2);
 
 /**
  * One version of a node's answer. Revision 1 is the answer as first given;
@@ -141,7 +117,7 @@ export type RevisionNumber = Message<"zettel.v1.RevisionNumber"> & {
  * Use `create(RevisionNumberSchema)` to create a new message.
  */
 export const RevisionNumberSchema: GenMessage<RevisionNumber> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 4);
+  messageDesc(file_zettel_v1_zettel, 3);
 
 /**
  * Where a node's question came from. A node has at most one parent, so the
@@ -176,7 +152,7 @@ export type NodeParent = Message<"zettel.v1.NodeParent"> & {
  * Use `create(NodeParentSchema)` to create a new message.
  */
 export const NodeParentSchema: GenMessage<NodeParent> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 5);
+  messageDesc(file_zettel_v1_zettel, 4);
 
 /**
  * The question was asked of another node's answer, in the same thread.
@@ -213,7 +189,7 @@ export type NodeParentNode = Message<"zettel.v1.NodeParentNode"> & {
  * Use `create(NodeParentNodeSchema)` to create a new message.
  */
 export const NodeParentNodeSchema: GenMessage<NodeParentNode> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 6);
+  messageDesc(file_zettel_v1_zettel, 5);
 
 /**
  * The question opened the thread: nothing in zettel precedes it. A thread
@@ -229,7 +205,7 @@ export type NodeParentThreadStart = Message<"zettel.v1.NodeParentThreadStart"> &
  * Use `create(NodeParentThreadStartSchema)` to create a new message.
  */
 export const NodeParentThreadStartSchema: GenMessage<NodeParentThreadStart> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 7);
+  messageDesc(file_zettel_v1_zettel, 6);
 
 /**
  * Highlighted words a question was asked about, with the text around them.
@@ -259,7 +235,7 @@ export type NodeQuote = Message<"zettel.v1.NodeQuote"> & {
  * Use `create(NodeQuoteSchema)` to create a new message.
  */
 export const NodeQuoteSchema: GenMessage<NodeQuote> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 8);
+  messageDesc(file_zettel_v1_zettel, 7);
 
 /**
  * The text around a highlight. Its own message so the context element can
@@ -281,7 +257,7 @@ export type NodeQuoteContext = Message<"zettel.v1.NodeQuoteContext"> & {
  * Use `create(NodeQuoteContextSchema)` to create a new message.
  */
 export const NodeQuoteContextSchema: GenMessage<NodeQuoteContext> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 9);
+  messageDesc(file_zettel_v1_zettel, 8);
 
 /**
  * A node as the graph reads serve it: its identity, origin, question and
@@ -312,7 +288,7 @@ export type Node = Message<"zettel.v1.Node"> & {
   parent?: NodeParent | undefined;
 
   /**
-   * The question, as zettel copied it when the exchange began.
+   * The question, as zettel copied it when the node was recorded.
    *
    * @generated from field: zettel.v1.NodeQuestion question = 4;
    */
@@ -327,7 +303,7 @@ export type Node = Message<"zettel.v1.Node"> & {
   answer?: NodeRevision | undefined;
 
   /**
-   * When the node was created (its exchange completed), in Unix milliseconds.
+   * When the node was recorded, in Unix milliseconds.
    *
    * @generated from field: int64 created_at_ms = 6;
    */
@@ -339,6 +315,13 @@ export type Node = Message<"zettel.v1.Node"> & {
    * @generated from field: zettel.v1.NodeSightings sightings = 7;
    */
   sightings?: NodeSightings | undefined;
+
+  /**
+   * The daemon turn the node is: the turn whose prompt was its question.
+   *
+   * @generated from field: zettel.v1.ExchangeTurn turn = 8;
+   */
+  turn?: ExchangeTurn | undefined;
 };
 
 /**
@@ -346,7 +329,7 @@ export type Node = Message<"zettel.v1.Node"> & {
  * Use `create(NodeSchema)` to create a new message.
  */
 export const NodeSchema: GenMessage<Node> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 10);
+  messageDesc(file_zettel_v1_zettel, 9);
 
 /**
  * A node's question text.
@@ -368,7 +351,7 @@ export type NodeQuestion = Message<"zettel.v1.NodeQuestion"> & {
  * Use `create(NodeQuestionSchema)` to create a new message.
  */
 export const NodeQuestionSchema: GenMessage<NodeQuestion> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 11);
+  messageDesc(file_zettel_v1_zettel, 10);
 
 /**
  * One revision of a node's answer.
@@ -403,7 +386,7 @@ export type NodeRevision = Message<"zettel.v1.NodeRevision"> & {
  * Use `create(NodeRevisionSchema)` to create a new message.
  */
 export const NodeRevisionSchema: GenMessage<NodeRevision> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 12);
+  messageDesc(file_zettel_v1_zettel, 11);
 
 /**
  * How often a node has been seen: a sighting is one bubble fully on screen in
@@ -426,61 +409,5 @@ export type NodeSightings = Message<"zettel.v1.NodeSightings"> & {
  * Use `create(NodeSightingsSchema)` to create a new message.
  */
 export const NodeSightingsSchema: GenMessage<NodeSightings> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 13);
-
-/**
- * An exchange in flight, as GetThread and ListPendingExchanges serve it.
- *
- * @generated from message zettel.v1.PendingExchange
- */
-export type PendingExchange = Message<"zettel.v1.PendingExchange"> & {
-  /**
-   * The exchange's identity.
-   *
-   * @generated from field: zettel.v1.ExchangeId id = 1;
-   */
-  id?: ExchangeId | undefined;
-
-  /**
-   * The thread it belongs to.
-   *
-   * @generated from field: zettel.v1.ThreadId thread = 2;
-   */
-  thread?: ThreadId | undefined;
-
-  /**
-   * The daemon turn it belongs to.
-   *
-   * @generated from field: zettel.v1.ExchangeTurn turn = 3;
-   */
-  turn?: ExchangeTurn | undefined;
-
-  /**
-   * Where its question came from.
-   *
-   * @generated from field: zettel.v1.NodeParent parent = 4;
-   */
-  parent?: NodeParent | undefined;
-
-  /**
-   * Its question.
-   *
-   * @generated from field: zettel.v1.NodeQuestion question = 5;
-   */
-  question?: NodeQuestion | undefined;
-
-  /**
-   * When it began, in Unix milliseconds.
-   *
-   * @generated from field: int64 begun_at_ms = 6;
-   */
-  begunAtMs: bigint;
-};
-
-/**
- * Describes the message zettel.v1.PendingExchange.
- * Use `create(PendingExchangeSchema)` to create a new message.
- */
-export const PendingExchangeSchema: GenMessage<PendingExchange> = /*@__PURE__*/
-  messageDesc(file_zettel_v1_zettel, 14);
+  messageDesc(file_zettel_v1_zettel, 12);
 

@@ -1,6 +1,6 @@
 // zettel.proto — the zettel.v1 package's shared datatypes: the identities of a
-// thread, a node and an exchange, a node's parent, and the node record the
-// graph reads serve.
+// thread, a node and the turn an exchange is, a node's parent, and the node
+// record the graph reads serve.
 //
 // ZETTEL HOLDS THE KNOWLEDGE GRAPH AND NOTHING ELSE. Conversation transcripts
 // stay in agent-repl's store; zettel keeps its OWN COPY of each question and
@@ -37,8 +37,8 @@ const (
 // A thread: one chat, its root node and every node beneath it. The id is the
 // daemon-minted workspace id of the thread's workspace (a thread is a kind of
 // workspace to the daemon), handed to zettel unchanged. Zettel never parses
-// it and never mints one; a thread exists in zettel once its first exchange
-// begins.
+// it and never mints one; a thread exists in zettel once its first node is
+// recorded.
 type ThreadId struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The daemon's opaque workspace id, compared byte-wise.
@@ -85,7 +85,7 @@ func (x *ThreadId) GetId() string {
 }
 
 // A node: one question and its answer, as zettel identifies it. Minted by
-// zettel when an exchange completes; opaque to every caller, which hands it
+// zettel when an exchange is recorded; opaque to every caller, which hands it
 // back unchanged.
 type NodeId struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -132,58 +132,9 @@ func (x *NodeId) GetId() string {
 	return ""
 }
 
-// An exchange in flight: a question that has been asked and whose answer has
-// not finished. Minted by zettel at BeginExchange and consumed by
-// CompleteExchange or AbandonExchange; opaque to the caller.
-type ExchangeId struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Zettel's opaque exchange id, compared byte-wise.
-	Id            string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ExchangeId) Reset() {
-	*x = ExchangeId{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ExchangeId) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ExchangeId) ProtoMessage() {}
-
-func (x *ExchangeId) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ExchangeId.ProtoReflect.Descriptor instead.
-func (*ExchangeId) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *ExchangeId) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
-}
-
-// The daemon turn an exchange belongs to: the turn whose prompt is the
-// exchange's question and whose final response is its answer. It is what lets
-// the daemon match a pending exchange back to its turn after a restart, so an
-// answer that finished while the two were apart is never lost.
+// The daemon turn an exchange is: the turn whose prompt is the question and
+// whose final response is the answer. RecordExchange is idempotent by it, so a
+// turn's answer learned twice (live, then on a replay) is one node.
 type ExchangeTurn struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The daemon's opaque turn id (conversation.v1.TurnId's value), compared
@@ -195,7 +146,7 @@ type ExchangeTurn struct {
 
 func (x *ExchangeTurn) Reset() {
 	*x = ExchangeTurn{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[3]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -207,7 +158,7 @@ func (x *ExchangeTurn) String() string {
 func (*ExchangeTurn) ProtoMessage() {}
 
 func (x *ExchangeTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[3]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -220,7 +171,7 @@ func (x *ExchangeTurn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExchangeTurn.ProtoReflect.Descriptor instead.
 func (*ExchangeTurn) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{3}
+	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ExchangeTurn) GetTurnId() string {
@@ -242,7 +193,7 @@ type RevisionNumber struct {
 
 func (x *RevisionNumber) Reset() {
 	*x = RevisionNumber{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[4]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -254,7 +205,7 @@ func (x *RevisionNumber) String() string {
 func (*RevisionNumber) ProtoMessage() {}
 
 func (x *RevisionNumber) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[4]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -267,7 +218,7 @@ func (x *RevisionNumber) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevisionNumber.ProtoReflect.Descriptor instead.
 func (*RevisionNumber) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{4}
+	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *RevisionNumber) GetNumber() uint32 {
@@ -295,7 +246,7 @@ type NodeParent struct {
 
 func (x *NodeParent) Reset() {
 	*x = NodeParent{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[5]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -307,7 +258,7 @@ func (x *NodeParent) String() string {
 func (*NodeParent) ProtoMessage() {}
 
 func (x *NodeParent) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[5]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -320,7 +271,7 @@ func (x *NodeParent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeParent.ProtoReflect.Descriptor instead.
 func (*NodeParent) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{5}
+	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *NodeParent) GetOrigin() isNodeParent_Origin {
@@ -381,7 +332,7 @@ type NodeParentNode struct {
 
 func (x *NodeParentNode) Reset() {
 	*x = NodeParentNode{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[6]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -393,7 +344,7 @@ func (x *NodeParentNode) String() string {
 func (*NodeParentNode) ProtoMessage() {}
 
 func (x *NodeParentNode) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[6]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -406,7 +357,7 @@ func (x *NodeParentNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeParentNode.ProtoReflect.Descriptor instead.
 func (*NodeParentNode) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{6}
+	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *NodeParentNode) GetNode() *NodeId {
@@ -440,7 +391,7 @@ type NodeParentThreadStart struct {
 
 func (x *NodeParentThreadStart) Reset() {
 	*x = NodeParentThreadStart{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[7]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -452,7 +403,7 @@ func (x *NodeParentThreadStart) String() string {
 func (*NodeParentThreadStart) ProtoMessage() {}
 
 func (x *NodeParentThreadStart) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[7]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -465,7 +416,7 @@ func (x *NodeParentThreadStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeParentThreadStart.ProtoReflect.Descriptor instead.
 func (*NodeParentThreadStart) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{7}
+	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{6}
 }
 
 // Highlighted words a question was asked about, with the text around them.
@@ -483,7 +434,7 @@ type NodeQuote struct {
 
 func (x *NodeQuote) Reset() {
 	*x = NodeQuote{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[8]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -495,7 +446,7 @@ func (x *NodeQuote) String() string {
 func (*NodeQuote) ProtoMessage() {}
 
 func (x *NodeQuote) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[8]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -508,7 +459,7 @@ func (x *NodeQuote) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeQuote.ProtoReflect.Descriptor instead.
 func (*NodeQuote) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{8}
+	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *NodeQuote) GetText() string {
@@ -537,7 +488,7 @@ type NodeQuoteContext struct {
 
 func (x *NodeQuoteContext) Reset() {
 	*x = NodeQuoteContext{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[9]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -549,7 +500,7 @@ func (x *NodeQuoteContext) String() string {
 func (*NodeQuoteContext) ProtoMessage() {}
 
 func (x *NodeQuoteContext) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[9]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -562,7 +513,7 @@ func (x *NodeQuoteContext) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeQuoteContext.ProtoReflect.Descriptor instead.
 func (*NodeQuoteContext) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{9}
+	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *NodeQuoteContext) GetText() string {
@@ -582,22 +533,24 @@ type Node struct {
 	Thread *ThreadId `protobuf:"bytes,2,opt,name=thread,proto3" json:"thread,omitempty"`
 	// Where the node's question came from.
 	Parent *NodeParent `protobuf:"bytes,3,opt,name=parent,proto3" json:"parent,omitempty"`
-	// The question, as zettel copied it when the exchange began.
+	// The question, as zettel copied it when the node was recorded.
 	Question *NodeQuestion `protobuf:"bytes,4,opt,name=question,proto3" json:"question,omitempty"`
 	// The answer's newest revision. Earlier revisions are kept but not served
 	// here.
 	Answer *NodeRevision `protobuf:"bytes,5,opt,name=answer,proto3" json:"answer,omitempty"`
-	// When the node was created (its exchange completed), in Unix milliseconds.
+	// When the node was recorded, in Unix milliseconds.
 	CreatedAtMs int64 `protobuf:"varint,6,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
 	// How many times the node has been seen in a consumer UI.
-	Sightings     *NodeSightings `protobuf:"bytes,7,opt,name=sightings,proto3" json:"sightings,omitempty"`
+	Sightings *NodeSightings `protobuf:"bytes,7,opt,name=sightings,proto3" json:"sightings,omitempty"`
+	// The daemon turn the node is: the turn whose prompt was its question.
+	Turn          *ExchangeTurn `protobuf:"bytes,8,opt,name=turn,proto3" json:"turn,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Node) Reset() {
 	*x = Node{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[10]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -609,7 +562,7 @@ func (x *Node) String() string {
 func (*Node) ProtoMessage() {}
 
 func (x *Node) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[10]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -622,7 +575,7 @@ func (x *Node) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Node.ProtoReflect.Descriptor instead.
 func (*Node) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{10}
+	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Node) GetId() *NodeId {
@@ -674,6 +627,13 @@ func (x *Node) GetSightings() *NodeSightings {
 	return nil
 }
 
+func (x *Node) GetTurn() *ExchangeTurn {
+	if x != nil {
+		return x.Turn
+	}
+	return nil
+}
+
 // A node's question text.
 type NodeQuestion struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -686,7 +646,7 @@ type NodeQuestion struct {
 
 func (x *NodeQuestion) Reset() {
 	*x = NodeQuestion{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[11]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -698,7 +658,7 @@ func (x *NodeQuestion) String() string {
 func (*NodeQuestion) ProtoMessage() {}
 
 func (x *NodeQuestion) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[11]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -711,7 +671,7 @@ func (x *NodeQuestion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeQuestion.ProtoReflect.Descriptor instead.
 func (*NodeQuestion) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{11}
+	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *NodeQuestion) GetText() string {
@@ -736,7 +696,7 @@ type NodeRevision struct {
 
 func (x *NodeRevision) Reset() {
 	*x = NodeRevision{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[12]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -748,7 +708,7 @@ func (x *NodeRevision) String() string {
 func (*NodeRevision) ProtoMessage() {}
 
 func (x *NodeRevision) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[12]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -761,7 +721,7 @@ func (x *NodeRevision) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeRevision.ProtoReflect.Descriptor instead.
 func (*NodeRevision) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{12}
+	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *NodeRevision) GetNumber() *RevisionNumber {
@@ -798,7 +758,7 @@ type NodeSightings struct {
 
 func (x *NodeSightings) Reset() {
 	*x = NodeSightings{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[13]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -810,7 +770,7 @@ func (x *NodeSightings) String() string {
 func (*NodeSightings) ProtoMessage() {}
 
 func (x *NodeSightings) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[13]
+	mi := &file_zettel_v1_zettel_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -823,103 +783,12 @@ func (x *NodeSightings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeSightings.ProtoReflect.Descriptor instead.
 func (*NodeSightings) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{13}
+	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *NodeSightings) GetCount() uint64 {
 	if x != nil {
 		return x.Count
-	}
-	return 0
-}
-
-// An exchange in flight, as GetThread and ListPendingExchanges serve it.
-type PendingExchange struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The exchange's identity.
-	Id *ExchangeId `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// The thread it belongs to.
-	Thread *ThreadId `protobuf:"bytes,2,opt,name=thread,proto3" json:"thread,omitempty"`
-	// The daemon turn it belongs to.
-	Turn *ExchangeTurn `protobuf:"bytes,3,opt,name=turn,proto3" json:"turn,omitempty"`
-	// Where its question came from.
-	Parent *NodeParent `protobuf:"bytes,4,opt,name=parent,proto3" json:"parent,omitempty"`
-	// Its question.
-	Question *NodeQuestion `protobuf:"bytes,5,opt,name=question,proto3" json:"question,omitempty"`
-	// When it began, in Unix milliseconds.
-	BegunAtMs     int64 `protobuf:"varint,6,opt,name=begun_at_ms,json=begunAtMs,proto3" json:"begun_at_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PendingExchange) Reset() {
-	*x = PendingExchange{}
-	mi := &file_zettel_v1_zettel_proto_msgTypes[14]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PendingExchange) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PendingExchange) ProtoMessage() {}
-
-func (x *PendingExchange) ProtoReflect() protoreflect.Message {
-	mi := &file_zettel_v1_zettel_proto_msgTypes[14]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PendingExchange.ProtoReflect.Descriptor instead.
-func (*PendingExchange) Descriptor() ([]byte, []int) {
-	return file_zettel_v1_zettel_proto_rawDescGZIP(), []int{14}
-}
-
-func (x *PendingExchange) GetId() *ExchangeId {
-	if x != nil {
-		return x.Id
-	}
-	return nil
-}
-
-func (x *PendingExchange) GetThread() *ThreadId {
-	if x != nil {
-		return x.Thread
-	}
-	return nil
-}
-
-func (x *PendingExchange) GetTurn() *ExchangeTurn {
-	if x != nil {
-		return x.Turn
-	}
-	return nil
-}
-
-func (x *PendingExchange) GetParent() *NodeParent {
-	if x != nil {
-		return x.Parent
-	}
-	return nil
-}
-
-func (x *PendingExchange) GetQuestion() *NodeQuestion {
-	if x != nil {
-		return x.Question
-	}
-	return nil
-}
-
-func (x *PendingExchange) GetBegunAtMs() int64 {
-	if x != nil {
-		return x.BegunAtMs
 	}
 	return 0
 }
@@ -932,9 +801,6 @@ const file_zettel_v1_zettel_proto_rawDesc = "" +
 	"\bThreadId\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x18\n" +
 	"\x06NodeId\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x1c\n" +
-	"\n" +
-	"ExchangeId\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"'\n" +
 	"\fExchangeTurn\x12\x17\n" +
 	"\aturn_id\x18\x01 \x01(\tR\x06turnId\"(\n" +
@@ -956,7 +822,7 @@ const file_zettel_v1_zettel_proto_rawDesc = "" +
 	"\x10question_context\x18\x02 \x01(\v2\x1b.zettel.v1.NodeQuoteContextH\x00R\x0fquestionContext\x88\x01\x01B\x13\n" +
 	"\x11_question_context\"&\n" +
 	"\x10NodeQuoteContext\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\xc7\x02\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xf4\x02\n" +
 	"\x04Node\x12!\n" +
 	"\x02id\x18\x01 \x01(\v2\x11.zettel.v1.NodeIdR\x02id\x12+\n" +
 	"\x06thread\x18\x02 \x01(\v2\x13.zettel.v1.ThreadIdR\x06thread\x12-\n" +
@@ -964,7 +830,8 @@ const file_zettel_v1_zettel_proto_rawDesc = "" +
 	"\bquestion\x18\x04 \x01(\v2\x17.zettel.v1.NodeQuestionR\bquestion\x12/\n" +
 	"\x06answer\x18\x05 \x01(\v2\x17.zettel.v1.NodeRevisionR\x06answer\x12\"\n" +
 	"\rcreated_at_ms\x18\x06 \x01(\x03R\vcreatedAtMs\x126\n" +
-	"\tsightings\x18\a \x01(\v2\x18.zettel.v1.NodeSightingsR\tsightings\"\"\n" +
+	"\tsightings\x18\a \x01(\v2\x18.zettel.v1.NodeSightingsR\tsightings\x12+\n" +
+	"\x04turn\x18\b \x01(\v2\x17.zettel.v1.ExchangeTurnR\x04turn\"\"\n" +
 	"\fNodeQuestion\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"\x81\x01\n" +
 	"\fNodeRevision\x121\n" +
@@ -972,14 +839,7 @@ const file_zettel_v1_zettel_proto_rawDesc = "" +
 	"\bmarkdown\x18\x02 \x01(\tR\bmarkdown\x12\"\n" +
 	"\rwritten_at_ms\x18\x03 \x01(\x03R\vwrittenAtMs\"%\n" +
 	"\rNodeSightings\x12\x14\n" +
-	"\x05count\x18\x01 \x01(\x04R\x05count\"\x96\x02\n" +
-	"\x0fPendingExchange\x12%\n" +
-	"\x02id\x18\x01 \x01(\v2\x15.zettel.v1.ExchangeIdR\x02id\x12+\n" +
-	"\x06thread\x18\x02 \x01(\v2\x13.zettel.v1.ThreadIdR\x06thread\x12+\n" +
-	"\x04turn\x18\x03 \x01(\v2\x17.zettel.v1.ExchangeTurnR\x04turn\x12-\n" +
-	"\x06parent\x18\x04 \x01(\v2\x15.zettel.v1.NodeParentR\x06parent\x123\n" +
-	"\bquestion\x18\x05 \x01(\v2\x17.zettel.v1.NodeQuestionR\bquestion\x12\x1e\n" +
-	"\vbegun_at_ms\x18\x06 \x01(\x03R\tbegunAtMsB$Z\"agentrepl/proto/zettel/v1;zettelv1b\x06proto3"
+	"\x05count\x18\x01 \x01(\x04R\x05countB$Z\"agentrepl/proto/zettel/v1;zettelv1b\x06proto3"
 
 var (
 	file_zettel_v1_zettel_proto_rawDescOnce sync.Once
@@ -993,48 +853,42 @@ func file_zettel_v1_zettel_proto_rawDescGZIP() []byte {
 	return file_zettel_v1_zettel_proto_rawDescData
 }
 
-var file_zettel_v1_zettel_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_zettel_v1_zettel_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_zettel_v1_zettel_proto_goTypes = []any{
 	(*ThreadId)(nil),              // 0: zettel.v1.ThreadId
 	(*NodeId)(nil),                // 1: zettel.v1.NodeId
-	(*ExchangeId)(nil),            // 2: zettel.v1.ExchangeId
-	(*ExchangeTurn)(nil),          // 3: zettel.v1.ExchangeTurn
-	(*RevisionNumber)(nil),        // 4: zettel.v1.RevisionNumber
-	(*NodeParent)(nil),            // 5: zettel.v1.NodeParent
-	(*NodeParentNode)(nil),        // 6: zettel.v1.NodeParentNode
-	(*NodeParentThreadStart)(nil), // 7: zettel.v1.NodeParentThreadStart
-	(*NodeQuote)(nil),             // 8: zettel.v1.NodeQuote
-	(*NodeQuoteContext)(nil),      // 9: zettel.v1.NodeQuoteContext
-	(*Node)(nil),                  // 10: zettel.v1.Node
-	(*NodeQuestion)(nil),          // 11: zettel.v1.NodeQuestion
-	(*NodeRevision)(nil),          // 12: zettel.v1.NodeRevision
-	(*NodeSightings)(nil),         // 13: zettel.v1.NodeSightings
-	(*PendingExchange)(nil),       // 14: zettel.v1.PendingExchange
+	(*ExchangeTurn)(nil),          // 2: zettel.v1.ExchangeTurn
+	(*RevisionNumber)(nil),        // 3: zettel.v1.RevisionNumber
+	(*NodeParent)(nil),            // 4: zettel.v1.NodeParent
+	(*NodeParentNode)(nil),        // 5: zettel.v1.NodeParentNode
+	(*NodeParentThreadStart)(nil), // 6: zettel.v1.NodeParentThreadStart
+	(*NodeQuote)(nil),             // 7: zettel.v1.NodeQuote
+	(*NodeQuoteContext)(nil),      // 8: zettel.v1.NodeQuoteContext
+	(*Node)(nil),                  // 9: zettel.v1.Node
+	(*NodeQuestion)(nil),          // 10: zettel.v1.NodeQuestion
+	(*NodeRevision)(nil),          // 11: zettel.v1.NodeRevision
+	(*NodeSightings)(nil),         // 12: zettel.v1.NodeSightings
 }
 var file_zettel_v1_zettel_proto_depIdxs = []int32{
-	6,  // 0: zettel.v1.NodeParent.node:type_name -> zettel.v1.NodeParentNode
-	7,  // 1: zettel.v1.NodeParent.thread_start:type_name -> zettel.v1.NodeParentThreadStart
+	5,  // 0: zettel.v1.NodeParent.node:type_name -> zettel.v1.NodeParentNode
+	6,  // 1: zettel.v1.NodeParent.thread_start:type_name -> zettel.v1.NodeParentThreadStart
 	1,  // 2: zettel.v1.NodeParentNode.node:type_name -> zettel.v1.NodeId
-	4,  // 3: zettel.v1.NodeParentNode.revision:type_name -> zettel.v1.RevisionNumber
-	8,  // 4: zettel.v1.NodeParentNode.quote:type_name -> zettel.v1.NodeQuote
-	9,  // 5: zettel.v1.NodeQuote.question_context:type_name -> zettel.v1.NodeQuoteContext
+	3,  // 3: zettel.v1.NodeParentNode.revision:type_name -> zettel.v1.RevisionNumber
+	7,  // 4: zettel.v1.NodeParentNode.quote:type_name -> zettel.v1.NodeQuote
+	8,  // 5: zettel.v1.NodeQuote.question_context:type_name -> zettel.v1.NodeQuoteContext
 	1,  // 6: zettel.v1.Node.id:type_name -> zettel.v1.NodeId
 	0,  // 7: zettel.v1.Node.thread:type_name -> zettel.v1.ThreadId
-	5,  // 8: zettel.v1.Node.parent:type_name -> zettel.v1.NodeParent
-	11, // 9: zettel.v1.Node.question:type_name -> zettel.v1.NodeQuestion
-	12, // 10: zettel.v1.Node.answer:type_name -> zettel.v1.NodeRevision
-	13, // 11: zettel.v1.Node.sightings:type_name -> zettel.v1.NodeSightings
-	4,  // 12: zettel.v1.NodeRevision.number:type_name -> zettel.v1.RevisionNumber
-	2,  // 13: zettel.v1.PendingExchange.id:type_name -> zettel.v1.ExchangeId
-	0,  // 14: zettel.v1.PendingExchange.thread:type_name -> zettel.v1.ThreadId
-	3,  // 15: zettel.v1.PendingExchange.turn:type_name -> zettel.v1.ExchangeTurn
-	5,  // 16: zettel.v1.PendingExchange.parent:type_name -> zettel.v1.NodeParent
-	11, // 17: zettel.v1.PendingExchange.question:type_name -> zettel.v1.NodeQuestion
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	4,  // 8: zettel.v1.Node.parent:type_name -> zettel.v1.NodeParent
+	10, // 9: zettel.v1.Node.question:type_name -> zettel.v1.NodeQuestion
+	11, // 10: zettel.v1.Node.answer:type_name -> zettel.v1.NodeRevision
+	12, // 11: zettel.v1.Node.sightings:type_name -> zettel.v1.NodeSightings
+	2,  // 12: zettel.v1.Node.turn:type_name -> zettel.v1.ExchangeTurn
+	3,  // 13: zettel.v1.NodeRevision.number:type_name -> zettel.v1.RevisionNumber
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_zettel_v1_zettel_proto_init() }
@@ -1042,19 +896,19 @@ func file_zettel_v1_zettel_proto_init() {
 	if File_zettel_v1_zettel_proto != nil {
 		return
 	}
-	file_zettel_v1_zettel_proto_msgTypes[5].OneofWrappers = []any{
+	file_zettel_v1_zettel_proto_msgTypes[4].OneofWrappers = []any{
 		(*NodeParent_Node)(nil),
 		(*NodeParent_ThreadStart)(nil),
 	}
-	file_zettel_v1_zettel_proto_msgTypes[6].OneofWrappers = []any{}
-	file_zettel_v1_zettel_proto_msgTypes[8].OneofWrappers = []any{}
+	file_zettel_v1_zettel_proto_msgTypes[5].OneofWrappers = []any{}
+	file_zettel_v1_zettel_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zettel_v1_zettel_proto_rawDesc), len(file_zettel_v1_zettel_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

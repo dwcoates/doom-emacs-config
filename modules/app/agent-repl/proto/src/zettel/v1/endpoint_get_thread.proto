@@ -1,5 +1,4 @@
-// endpoint_get_thread.proto — GetThread: every node of one thread, and its
-// exchanges in flight.
+// endpoint_get_thread.proto — GetThread: every node of one thread.
 
 syntax = "proto3";
 
@@ -30,8 +29,6 @@ message GetThreadResponse {
 message GetThreadSuccess {
   // Every node of the thread, oldest first by creation time.
   repeated Node nodes = 1;
-  // Every exchange in flight in the thread, oldest first.
-  repeated PendingExchange pending = 2;
 }
 
 // The thread could not be read.

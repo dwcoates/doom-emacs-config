@@ -17,17 +17,15 @@ import (
 func TestMappingCoversEveryField(t *testing.T) {
 	context := "around"
 	full := graph.Node{
-		ID: "n", Thread: "t",
+		ID: "n", Thread: "t", Turn: "turn",
 		Parent:   graph.Parent{Of: &graph.AskedOf{Node: "p", Revision: 2, Quote: &graph.Quote{Text: "q", Context: &context}}},
 		Question: "question", Answer: graph.Revision{Number: 2, Markdown: "md", WrittenAt: time.UnixMilli(5)},
 		CreatedAt: time.UnixMilli(4), Sightings: 3,
 	}
-	pending := graph.Pending{ID: "e", Thread: "t", Turn: "turn", Parent: full.Parent, Question: "q", BegunAt: time.UnixMilli(9)}
 	for name, msg := range map[string]protoreflect.ProtoMessage{
-		"Node":            NodeToProto(full),
-		"PendingExchange": PendingToProto(pending),
-		"NodeParentNode":  ParentToProto(full.Parent).GetNode(),
-		"NodeQuote":       ParentToProto(full.Parent).GetNode().GetQuote(),
+		"Node":           NodeToProto(full),
+		"NodeParentNode": ParentToProto(full.Parent).GetNode(),
+		"NodeQuote":      ParentToProto(full.Parent).GetNode().GetQuote(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			// Arrange

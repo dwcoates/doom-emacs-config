@@ -11,16 +11,10 @@
 
 import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { AbandonExchangeRequestSchema, AbandonExchangeResponseSchema } from "./endpoint_abandon_exchange_pb";
-import { file_zettel_v1_endpoint_abandon_exchange } from "./endpoint_abandon_exchange_pb";
-import type { BeginExchangeRequestSchema, BeginExchangeResponseSchema } from "./endpoint_begin_exchange_pb";
-import { file_zettel_v1_endpoint_begin_exchange } from "./endpoint_begin_exchange_pb";
-import type { CompleteExchangeRequestSchema, CompleteExchangeResponseSchema } from "./endpoint_complete_exchange_pb";
-import { file_zettel_v1_endpoint_complete_exchange } from "./endpoint_complete_exchange_pb";
 import type { GetThreadRequestSchema, GetThreadResponseSchema } from "./endpoint_get_thread_pb";
 import { file_zettel_v1_endpoint_get_thread } from "./endpoint_get_thread_pb";
-import type { ListPendingExchangesRequestSchema, ListPendingExchangesResponseSchema } from "./endpoint_list_pending_exchanges_pb";
-import { file_zettel_v1_endpoint_list_pending_exchanges } from "./endpoint_list_pending_exchanges_pb";
+import type { RecordExchangeRequestSchema, RecordExchangeResponseSchema } from "./endpoint_record_exchange_pb";
+import { file_zettel_v1_endpoint_record_exchange } from "./endpoint_record_exchange_pb";
 import type { RecordSightingsRequestSchema, RecordSightingsResponseSchema } from "./endpoint_record_sightings_pb";
 import { file_zettel_v1_endpoint_record_sightings } from "./endpoint_record_sightings_pb";
 
@@ -28,53 +22,23 @@ import { file_zettel_v1_endpoint_record_sightings } from "./endpoint_record_sigh
  * Describes the file zettel/v1/service.proto.
  */
 export const file_zettel_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("Chd6ZXR0ZWwvdjEvc2VydmljZS5wcm90bxIJemV0dGVsLnYxMp4ECgZaZXR0ZWwSUgoNQmVnaW5FeGNoYW5nZRIfLnpldHRlbC52MS5CZWdpbkV4Y2hhbmdlUmVxdWVzdBogLnpldHRlbC52MS5CZWdpbkV4Y2hhbmdlUmVzcG9uc2USWwoQQ29tcGxldGVFeGNoYW5nZRIiLnpldHRlbC52MS5Db21wbGV0ZUV4Y2hhbmdlUmVxdWVzdBojLnpldHRlbC52MS5Db21wbGV0ZUV4Y2hhbmdlUmVzcG9uc2USWAoPQWJhbmRvbkV4Y2hhbmdlEiEuemV0dGVsLnYxLkFiYW5kb25FeGNoYW5nZVJlcXVlc3QaIi56ZXR0ZWwudjEuQWJhbmRvbkV4Y2hhbmdlUmVzcG9uc2USZwoUTGlzdFBlbmRpbmdFeGNoYW5nZXMSJi56ZXR0ZWwudjEuTGlzdFBlbmRpbmdFeGNoYW5nZXNSZXF1ZXN0GicuemV0dGVsLnYxLkxpc3RQZW5kaW5nRXhjaGFuZ2VzUmVzcG9uc2USRgoJR2V0VGhyZWFkEhsuemV0dGVsLnYxLkdldFRocmVhZFJlcXVlc3QaHC56ZXR0ZWwudjEuR2V0VGhyZWFkUmVzcG9uc2USWAoPUmVjb3JkU2lnaHRpbmdzEiEuemV0dGVsLnYxLlJlY29yZFNpZ2h0aW5nc1JlcXVlc3QaIi56ZXR0ZWwudjEuUmVjb3JkU2lnaHRpbmdzUmVzcG9uc2VCJFoiYWdlbnRyZXBsL3Byb3RvL3pldHRlbC92MTt6ZXR0ZWx2MWIGcHJvdG8z", [file_zettel_v1_endpoint_abandon_exchange, file_zettel_v1_endpoint_begin_exchange, file_zettel_v1_endpoint_complete_exchange, file_zettel_v1_endpoint_get_thread, file_zettel_v1_endpoint_list_pending_exchanges, file_zettel_v1_endpoint_record_sightings]);
+  fileDesc("Chd6ZXR0ZWwvdjEvc2VydmljZS5wcm90bxIJemV0dGVsLnYxMoECCgZaZXR0ZWwSVQoOUmVjb3JkRXhjaGFuZ2USIC56ZXR0ZWwudjEuUmVjb3JkRXhjaGFuZ2VSZXF1ZXN0GiEuemV0dGVsLnYxLlJlY29yZEV4Y2hhbmdlUmVzcG9uc2USRgoJR2V0VGhyZWFkEhsuemV0dGVsLnYxLkdldFRocmVhZFJlcXVlc3QaHC56ZXR0ZWwudjEuR2V0VGhyZWFkUmVzcG9uc2USWAoPUmVjb3JkU2lnaHRpbmdzEiEuemV0dGVsLnYxLlJlY29yZFNpZ2h0aW5nc1JlcXVlc3QaIi56ZXR0ZWwudjEuUmVjb3JkU2lnaHRpbmdzUmVzcG9uc2VCJFoiYWdlbnRyZXBsL3Byb3RvL3pldHRlbC92MTt6ZXR0ZWx2MWIGcHJvdG8z", [file_zettel_v1_endpoint_get_thread, file_zettel_v1_endpoint_record_exchange, file_zettel_v1_endpoint_record_sightings]);
 
 /**
- * ---- Exchanges: a question's way from asked to answered ----
+ * ---- Exchanges: an answered question becoming a node ----
  *
  * @generated from service zettel.v1.Zettel
  */
 export const Zettel: GenService<{
   /**
-   * A question was sent: record its origin before any answer exists.
+   * A thread turn's final answer is known: record the node (idempotent by turn).
    *
-   * @generated from rpc zettel.v1.Zettel.BeginExchange
+   * @generated from rpc zettel.v1.Zettel.RecordExchange
    */
-  beginExchange: {
+  recordExchange: {
     methodKind: "unary";
-    input: typeof BeginExchangeRequestSchema;
-    output: typeof BeginExchangeResponseSchema;
-  },
-  /**
-   * The answer finished: the exchange becomes a node.
-   *
-   * @generated from rpc zettel.v1.Zettel.CompleteExchange
-   */
-  completeExchange: {
-    methodKind: "unary";
-    input: typeof CompleteExchangeRequestSchema;
-    output: typeof CompleteExchangeResponseSchema;
-  },
-  /**
-   * The turn ended with no answer: the exchange is removed.
-   *
-   * @generated from rpc zettel.v1.Zettel.AbandonExchange
-   */
-  abandonExchange: {
-    methodKind: "unary";
-    input: typeof AbandonExchangeRequestSchema;
-    output: typeof AbandonExchangeResponseSchema;
-  },
-  /**
-   * Every exchange in flight, for settling after a restart.
-   *
-   * @generated from rpc zettel.v1.Zettel.ListPendingExchanges
-   */
-  listPendingExchanges: {
-    methodKind: "unary";
-    input: typeof ListPendingExchangesRequestSchema;
-    output: typeof ListPendingExchangesResponseSchema;
+    input: typeof RecordExchangeRequestSchema;
+    output: typeof RecordExchangeResponseSchema;
   },
   /**
    * One thread whole: its nodes and its exchanges in flight.

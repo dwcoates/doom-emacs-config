@@ -1,5 +1,5 @@
 // Package graph is zettel's database: the knowledge graph's nodes, their
-// revisions, the exchanges in flight, and how often each node was seen.
+// revisions, and how often each node was seen.
 //
 // THE GRAPH IS THE USER'S DATA, AND IT IS CARRIED FORWARD, NEVER THROWN AWAY.
 // Unlike agent-repl's record store (a cache of transcripts the vendor keeps
@@ -41,7 +41,7 @@ type DB struct {
 type Options struct {
 	// Now is the clock stamped on every write. Defaults to time.Now.
 	Now func() time.Time
-	// NewID mints node and exchange ids. Defaults to random 128-bit hex.
+	// NewID mints node ids. Defaults to random 128-bit hex.
 	NewID func() string
 }
 
@@ -126,6 +126,8 @@ const layoutOneDDL = `
 CREATE TABLE node (
   id               TEXT PRIMARY KEY,
   thread_id        TEXT NOT NULL,
+  -- THE DAEMON TURN THE NODE IS: recording is idempotent by it.
+  turn_id          TEXT NOT NULL UNIQUE,
   -- The parent: NULL for the thread's root (its start), else the node whose
   -- answer was asked of, the revision that was read, and the optional quote.
   parent_node_id   TEXT REFERENCES node(id),
@@ -150,23 +152,6 @@ CREATE TABLE revision (
   written_at_ms  INTEGER NOT NULL,
   PRIMARY KEY (node_id, number)
 );
-
-CREATE TABLE pending_exchange (
-  id               TEXT PRIMARY KEY,
-  thread_id        TEXT NOT NULL,
-  -- ONE TURN IS ONE QUESTION.
-  turn_id          TEXT NOT NULL UNIQUE,
-  parent_node_id   TEXT REFERENCES node(id),
-  parent_revision  INTEGER,
-  quote_text       TEXT,
-  quote_context    TEXT,
-  question         TEXT NOT NULL,
-  begun_at_ms      INTEGER NOT NULL,
-  CHECK ((parent_node_id IS NULL) = (parent_revision IS NULL)),
-  CHECK (parent_node_id IS NOT NULL OR quote_text IS NULL),
-  CHECK (quote_text IS NOT NULL OR quote_context IS NULL)
-);
-CREATE UNIQUE INDEX pending_root_per_thread ON pending_exchange(thread_id) WHERE parent_node_id IS NULL;
 `
 
 // migrate applies every step the file has not had, each in its own

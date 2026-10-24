@@ -60,98 +60,57 @@ func records(buf *bytes.Buffer) []map[string]any {
 
 func ctx() context.Context { return context.Background() }
 
-// answered begins and completes one exchange, failing the test on any error.
+// answered records one exchange, failing the test on any error.
 func (f fixture) answered(t *testing.T, thread ThreadID, turn string, parent Parent, question, answer string) Node {
 	t.Helper()
-	id, err := f.db.BeginExchange(ctx(), thread, turn, question, parent)
-	if err != nil {
-		t.Fatalf("BeginExchange: %v", err)
-	}
-	node, err := f.db.CompleteExchange(ctx(), id, answer)
-	if err != nil {
-		t.Fatalf("CompleteExchange: %v", err)
+	node, created, err := f.db.RecordExchange(ctx(), thread, turn, question, parent, answer)
+	if err != nil || !created {
+		t.Fatalf("RecordExchange: created=%v err=%v", created, err)
 	}
 	return node
 }
 
 func askedOf(n Node) Parent { return Parent{Of: &AskedOf{Node: n.ID, Revision: 1}} }
 
-func TestBeginExchangeRefusals(t *testing.T) {
+func TestRecordExchangeRefusals(t *testing.T) {
 	cases := []struct {
 		name    string
-		arrange func(t *testing.T, f fixture) (ThreadID, string, Parent)
-		want    func(error) bool
+		arrange func(t *testing.T, f fixture) (ThreadID, Parent)
+		want    error
 	}{
-		{
-			name: "a second thread start while the root is answered",
-			arrange: func(t *testing.T, f fixture) (ThreadID, string, Parent) {
-				f.answered(t, "t1", "turn1", Parent{}, "q", "a")
-				return "t1", "turn2", Parent{}
-			},
-			want: func(err error) bool { return errors.Is(err, ErrThreadAlreadyStarted) },
-		},
-		{
-			name: "a second thread start while the root is in flight",
-			arrange: func(t *testing.T, f fixture) (ThreadID, string, Parent) {
-				if _, err := f.db.BeginExchange(ctx(), "t1", "turn1", "q", Parent{}); err != nil {
-					t.Fatal(err)
-				}
-				return "t1", "turn2", Parent{}
-			},
-			want: func(err error) bool { return errors.Is(err, ErrThreadAlreadyStarted) },
-		},
-		{
-			name: "a turn begun twice",
-			arrange: func(t *testing.T, f fixture) (ThreadID, string, Parent) {
-				root := f.answered(t, "t1", "turn1", Parent{}, "q", "a")
-				if _, err := f.db.BeginExchange(ctx(), "t1", "turn2", "q2", askedOf(root)); err != nil {
-					t.Fatal(err)
-				}
-				return "t1", "turn2", askedOf(root)
-			},
-			want: func(err error) bool { var e *TurnAlreadyBegunError; return errors.As(err, &e) && e.Existing != "" },
-		},
-		{
-			name: "a parent that does not exist",
-			arrange: func(t *testing.T, f fixture) (ThreadID, string, Parent) {
-				return "t1", "turn1", Parent{Of: &AskedOf{Node: "nope", Revision: 1}}
-			},
-			want: func(err error) bool { return errors.Is(err, ErrUnknownParent) },
-		},
-		{
-			name: "a parent in another thread",
-			arrange: func(t *testing.T, f fixture) (ThreadID, string, Parent) {
-				other := f.answered(t, "t2", "turn1", Parent{}, "q", "a")
-				return "t1", "turn2", askedOf(other)
-			},
-			want: func(err error) bool { return errors.Is(err, ErrUnknownParent) },
-		},
-		{
-			name: "a revision the parent does not have",
-			arrange: func(t *testing.T, f fixture) (ThreadID, string, Parent) {
-				root := f.answered(t, "t1", "turn1", Parent{}, "q", "a")
-				return "t1", "turn2", Parent{Of: &AskedOf{Node: root.ID, Revision: 2}}
-			},
-			want: func(err error) bool { return errors.Is(err, ErrUnknownParent) },
-		},
+		{"a second thread start from another turn", func(t *testing.T, f fixture) (ThreadID, Parent) {
+			f.answered(t, "t1", "turn1", Parent{}, "q", "a")
+			return "t1", Parent{}
+		}, ErrThreadAlreadyStarted},
+		{"a parent that does not exist", func(t *testing.T, f fixture) (ThreadID, Parent) {
+			return "t1", Parent{Of: &AskedOf{Node: "nope", Revision: 1}}
+		}, ErrUnknownParent},
+		{"a parent in another thread", func(t *testing.T, f fixture) (ThreadID, Parent) {
+			other := f.answered(t, "t2", "turn1", Parent{}, "q", "a")
+			return "t1", askedOf(other)
+		}, ErrUnknownParent},
+		{"a revision the parent does not have", func(t *testing.T, f fixture) (ThreadID, Parent) {
+			root := f.answered(t, "t1", "turn1", Parent{}, "q", "a")
+			return "t1", Parent{Of: &AskedOf{Node: root.ID, Revision: 2}}
+		}, ErrUnknownParent},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
-			thread, turn, parent := tc.arrange(t, f)
-			_, pendingBefore, _ := f.db.Thread(ctx(), thread)
+			thread, parent := tc.arrange(t, f)
+			before, _ := f.db.Thread(ctx(), thread)
 
 			// Act
-			_, err := f.db.BeginExchange(ctx(), thread, turn, "question", parent)
+			_, _, err := f.db.RecordExchange(ctx(), thread, "turn-new", "question", parent, "answer")
 
 			// Assert
-			if !tc.want(err) {
-				t.Fatalf("err = %v, want the refusal", err)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
 			}
-			_, pendingAfter, _ := f.db.Thread(ctx(), thread)
-			if len(pendingAfter) != len(pendingBefore) {
-				t.Errorf("a refused begin wrote an exchange: %d before, %d after", len(pendingBefore), len(pendingAfter))
+			after, _ := f.db.Thread(ctx(), thread)
+			if len(after) != len(before) {
+				t.Errorf("a refused record wrote a node: %d before, %d after", len(before), len(after))
 			}
 			for _, rec := range records(f.log) {
 				if rec["level"] == "error" {
@@ -162,37 +121,45 @@ func TestBeginExchangeRefusals(t *testing.T) {
 	}
 }
 
-func TestCompleteExchangeMakesANodeWithRevisionOne(t *testing.T) {
+func TestRecordExchangeIsIdempotentByTurn(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	first := f.answered(t, "t1", "turn1", Parent{}, "What are quarks?", "Elementary particles.")
+
+	// Act
+	again, created, err := f.db.RecordExchange(ctx(), "t1", "turn1", "a different question", Parent{}, "a different answer")
+
+	// Assert
+	if err != nil || created {
+		t.Fatalf("created=%v err=%v, want the existing node", created, err)
+	}
+	if again.ID != first.ID || again.Answer.Markdown != "Elementary particles." || again.Question != "What are quarks?" {
+		t.Errorf("again = %+v, want the first record unchanged", again)
+	}
+	nodes, _ := f.db.Thread(ctx(), "t1")
+	if len(nodes) != 1 {
+		t.Errorf("nodes = %d, want one node for one turn", len(nodes))
+	}
+}
+
+func TestRecordExchangeStoresTheQuoteAndRevisionOne(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	root := f.answered(t, "t1", "turn1", Parent{}, "What are hydrogen ions?", "A proton.")
 	context := "it bonds to a water molecule and forms hydronium"
 	child := Parent{Of: &AskedOf{Node: root.ID, Revision: 1, Quote: &Quote{Text: "forms hydronium", Context: &context}}}
-	id, err := f.db.BeginExchange(ctx(), "t1", "turn2", "What is this?", child)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// Act
-	node, err := f.db.CompleteExchange(ctx(), id, "H3O+.")
+	node := f.answered(t, "t1", "turn2", child, "What is this?", "H3O+.")
 
 	// Assert
-	if err != nil {
-		t.Fatalf("CompleteExchange: %v", err)
-	}
-	nodes, pending, err := f.db.Thread(ctx(), "t1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pending) != 0 {
-		t.Errorf("pending = %v, want the exchange consumed", pending)
-	}
-	if len(nodes) != 2 || nodes[1].ID != node.ID {
-		t.Fatalf("nodes = %v, want root then the new node", nodes)
+	nodes, err := f.db.Thread(ctx(), "t1")
+	if err != nil || len(nodes) != 2 || nodes[1].ID != node.ID {
+		t.Fatalf("nodes = %v, err = %v, want root then the new node", nodes, err)
 	}
 	got := nodes[1]
-	if got.Answer.Number != 1 || got.Answer.Markdown != "H3O+." || got.Question != "What is this?" {
-		t.Errorf("node = %+v, want revision 1 of the given answer", got)
+	if got.Answer.Number != 1 || got.Answer.Markdown != "H3O+." || got.Question != "What is this?" || got.Turn != "turn2" {
+		t.Errorf("node = %+v, want revision 1 of the given answer for turn2", got)
 	}
 	if got.Parent.Of == nil || got.Parent.Of.Node != root.ID || got.Parent.Of.Quote == nil ||
 		got.Parent.Of.Quote.Text != "forms hydronium" || got.Parent.Of.Quote.Context == nil || *got.Parent.Of.Quote.Context != context {
@@ -209,53 +176,9 @@ func TestQuoteWithoutContextRoundTrips(t *testing.T) {
 	f.answered(t, "t1", "turn2", Parent{Of: &AskedOf{Node: root.ID, Revision: 1, Quote: &Quote{Text: "a"}}}, "q2", "a2")
 
 	// Assert
-	nodes, _, _ := f.db.Thread(ctx(), "t1")
+	nodes, _ := f.db.Thread(ctx(), "t1")
 	if q := nodes[1].Parent.Of.Quote; q == nil || q.Text != "a" || q.Context != nil {
 		t.Errorf("quote = %+v, want the text and no context", q)
-	}
-}
-
-func TestCompleteAndAbandonRefuseAnUnknownExchange(t *testing.T) {
-	cases := []struct {
-		name string
-		act  func(f fixture) error
-	}{
-		{"complete", func(f fixture) error { _, err := f.db.CompleteExchange(ctx(), "nope", "a"); return err }},
-		{"abandon", func(f fixture) error { return f.db.AbandonExchange(ctx(), "nope") }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			f := newFixture(t)
-
-			// Act
-			err := tc.act(f)
-
-			// Assert
-			if !errors.Is(err, ErrUnknownExchange) {
-				t.Errorf("err = %v, want ErrUnknownExchange", err)
-			}
-		})
-	}
-}
-
-func TestAbandonRemovesTheExchangeAndFreesTheThreadStart(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	id, err := f.db.BeginExchange(ctx(), "t1", "turn1", "q", Parent{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	err = f.db.AbandonExchange(ctx(), id)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("AbandonExchange: %v", err)
-	}
-	if _, err := f.db.BeginExchange(ctx(), "t1", "turn2", "q again", Parent{}); err != nil {
-		t.Errorf("the thread could not start again after its start was abandoned: %v", err)
 	}
 }
 
@@ -272,7 +195,7 @@ func TestRecordSightings(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		nodes, _, _ := f.db.Thread(ctx(), "t1")
+		nodes, _ := f.db.Thread(ctx(), "t1")
 		if nodes[0].Sightings != 2 {
 			t.Errorf("sightings = %d, want 2", nodes[0].Sightings)
 		}
@@ -290,29 +213,11 @@ func TestRecordSightings(t *testing.T) {
 		if !errors.As(err, &unknown) || unknown.Node != "nope" {
 			t.Fatalf("err = %v, want the unknown node named", err)
 		}
-		nodes, _, _ := f.db.Thread(ctx(), "t1")
+		nodes, _ := f.db.Thread(ctx(), "t1")
 		if nodes[0].Sightings != 0 {
 			t.Errorf("sightings = %d, want the known node's count rolled back", nodes[0].Sightings)
 		}
 	})
-}
-
-func TestAllPendingSpansThreadsOldestFirst(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	first, _ := f.db.BeginExchange(ctx(), "t1", "turn1", "q1", Parent{})
-	second, _ := f.db.BeginExchange(ctx(), "t2", "turn2", "q2", Parent{})
-
-	// Act
-	pending, err := f.db.AllPending(ctx())
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pending) != 2 || pending[0].ID != first || pending[1].ID != second || pending[1].Turn != "turn2" {
-		t.Errorf("pending = %+v, want both, oldest first", pending)
-	}
 }
 
 func TestReopenKeepsTheGraph(t *testing.T) {
@@ -328,7 +233,7 @@ func TestReopenKeepsTheGraph(t *testing.T) {
 	reopened := openAt(t, f.path, &buf)
 
 	// Assert
-	nodes, _, err := reopened.Thread(ctx(), "t1")
+	nodes, err := reopened.Thread(ctx(), "t1")
 	if err != nil || len(nodes) != 1 {
 		t.Errorf("nodes = %v, err = %v; want the node carried forward", nodes, err)
 	}
@@ -373,14 +278,14 @@ func TestStorageFailureIsLoggedAndReported(t *testing.T) {
 	f.log.Reset()
 
 	// Act
-	_, err := f.db.BeginExchange(ctx(), "t1", "turn1", "q", Parent{})
+	_, _, err := f.db.RecordExchange(ctx(), "t1", "turn1", "q", Parent{}, "a")
 
 	// Assert
 	if !errors.Is(err, ErrStorage) {
 		t.Fatalf("err = %v, want ErrStorage", err)
 	}
 	recs := records(f.log)
-	if len(recs) == 0 || recs[0]["operation"] != "zettel.exchange.begin" || recs[0]["level"] != "error" {
+	if len(recs) == 0 || recs[0]["operation"] != "zettel.exchange.record" || recs[0]["level"] != "error" {
 		t.Errorf("records = %v, want one error record for the begin", recs)
 	}
 	if ctx := recs[0]["context"].(map[string]any); ctx["thread"] != "t1" || ctx["turn"] != "turn1" {

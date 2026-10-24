@@ -73,17 +73,6 @@ func NodeToProto(n graph.Node) *zettelv1.Node {
 		},
 		CreatedAtMs: n.CreatedAt.UnixMilli(),
 		Sightings:   &zettelv1.NodeSightings{Count: n.Sightings},
-	}
-}
-
-// PendingToProto translates a stored exchange in flight.
-func PendingToProto(p graph.Pending) *zettelv1.PendingExchange {
-	return &zettelv1.PendingExchange{
-		Id:        &zettelv1.ExchangeId{Id: string(p.ID)},
-		Thread:    &zettelv1.ThreadId{Id: string(p.Thread)},
-		Turn:      &zettelv1.ExchangeTurn{TurnId: p.Turn},
-		Parent:    ParentToProto(p.Parent),
-		Question:  &zettelv1.NodeQuestion{Text: p.Question},
-		BegunAtMs: p.BegunAt.UnixMilli(),
+		Turn:        &zettelv1.ExchangeTurn{TurnId: n.Turn},
 	}
 }

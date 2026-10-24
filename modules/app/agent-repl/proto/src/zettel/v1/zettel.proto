@@ -1,6 +1,6 @@
 // zettel.proto — the zettel.v1 package's shared datatypes: the identities of a
-// thread, a node and an exchange, a node's parent, and the node record the
-// graph reads serve.
+// thread, a node and the turn an exchange is, a node's parent, and the node
+// record the graph reads serve.
 //
 // ZETTEL HOLDS THE KNOWLEDGE GRAPH AND NOTHING ELSE. Conversation transcripts
 // stay in agent-repl's store; zettel keeps its OWN COPY of each question and
@@ -22,33 +22,24 @@ option go_package = "agentrepl/proto/zettel/v1;zettelv1";
 // A thread: one chat, its root node and every node beneath it. The id is the
 // daemon-minted workspace id of the thread's workspace (a thread is a kind of
 // workspace to the daemon), handed to zettel unchanged. Zettel never parses
-// it and never mints one; a thread exists in zettel once its first exchange
-// begins.
+// it and never mints one; a thread exists in zettel once its first node is
+// recorded.
 message ThreadId {
   // The daemon's opaque workspace id, compared byte-wise.
   string id = 1;
 }
 
 // A node: one question and its answer, as zettel identifies it. Minted by
-// zettel when an exchange completes; opaque to every caller, which hands it
+// zettel when an exchange is recorded; opaque to every caller, which hands it
 // back unchanged.
 message NodeId {
   // Zettel's opaque node id, compared byte-wise.
   string id = 1;
 }
 
-// An exchange in flight: a question that has been asked and whose answer has
-// not finished. Minted by zettel at BeginExchange and consumed by
-// CompleteExchange or AbandonExchange; opaque to the caller.
-message ExchangeId {
-  // Zettel's opaque exchange id, compared byte-wise.
-  string id = 1;
-}
-
-// The daemon turn an exchange belongs to: the turn whose prompt is the
-// exchange's question and whose final response is its answer. It is what lets
-// the daemon match a pending exchange back to its turn after a restart, so an
-// answer that finished while the two were apart is never lost.
+// The daemon turn an exchange is: the turn whose prompt is the question and
+// whose final response is the answer. RecordExchange is idempotent by it, so a
+// turn's answer learned twice (live, then on a replay) is one node.
 message ExchangeTurn {
   // The daemon's opaque turn id (conversation.v1.TurnId's value), compared
   // byte-wise.
@@ -119,15 +110,17 @@ message Node {
   ThreadId thread = 2;
   // Where the node's question came from.
   NodeParent parent = 3;
-  // The question, as zettel copied it when the exchange began.
+  // The question, as zettel copied it when the node was recorded.
   NodeQuestion question = 4;
   // The answer's newest revision. Earlier revisions are kept but not served
   // here.
   NodeRevision answer = 5;
-  // When the node was created (its exchange completed), in Unix milliseconds.
+  // When the node was recorded, in Unix milliseconds.
   int64 created_at_ms = 6;
   // How many times the node has been seen in a consumer UI.
   NodeSightings sightings = 7;
+  // The daemon turn the node is: the turn whose prompt was its question.
+  ExchangeTurn turn = 8;
 }
 
 // A node's question text.
@@ -153,22 +146,4 @@ message NodeRevision {
 message NodeSightings {
   // The number of sightings recorded, starting at zero.
   uint64 count = 1;
-}
-
-// ---- The exchange record ----
-
-// An exchange in flight, as GetThread and ListPendingExchanges serve it.
-message PendingExchange {
-  // The exchange's identity.
-  ExchangeId id = 1;
-  // The thread it belongs to.
-  ThreadId thread = 2;
-  // The daemon turn it belongs to.
-  ExchangeTurn turn = 3;
-  // Where its question came from.
-  NodeParent parent = 4;
-  // Its question.
-  NodeQuestion question = 5;
-  // When it began, in Unix milliseconds.
-  int64 begun_at_ms = 6;
 }
