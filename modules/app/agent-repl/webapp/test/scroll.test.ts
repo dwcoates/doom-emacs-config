@@ -37,10 +37,10 @@ import {
   MoveWitness,
   type MoveWitnessReport,
   type RevealGeometry,
-  type ReaderInput,
   heldRowName,
 } from "../src/scroll.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
+import { tailTriggers, type TailTriggers } from "./tail-triggers.js";
 import { fireResize } from "./resize-observer.js";
 import { expandedSectionAt, installClickExpand } from "../src/expand.js";
 import { frameQueue } from "./frame-queue.js";
@@ -336,46 +336,10 @@ describe("sectionFor", () => {
 /** A box parked at its tail: 700 + 300 viewport = 1000. */
 const atTail = (): ReanchorBox => ({ scrollTop: 700, scrollHeight: 1000, clientHeight: 300 });
 
-/**
- * A follow owner plus the three triggers it subscribed to.
- *
- * `gesture` is the READER moving the box: their input reaches it first and
- * the scroll event follows, which is the order the browser delivers them in
- * and the order the owner's attribution rule depends on. `scroll` alone is
- * therefore a movement with no reader behind it -- the box's own clamp.
- */
-function armed(box: ReanchorBox): {
-  tail: TailFollow;
-  scroll: () => void;
-  resize: () => void;
-  input: () => void;
-  gesture: () => void;
-} {
-  let onScroll = (): void => {};
-  let onResize = (): void => {};
-  let onInput = (_kind: ReaderInput): void => {};
+/** A follow owner plus the three triggers it subscribed to (`tailTriggers`). */
+function armed(box: ReanchorBox): TailTriggers & { tail: TailFollow } {
   const tail = new TailFollow(box);
-  tail.observe(
-    (cb) => {
-      onScroll = cb;
-    },
-    (cb) => {
-      onResize = cb;
-    },
-    (cb) => {
-      onInput = cb;
-    },
-  );
-  return {
-    tail,
-    scroll: () => onScroll(),
-    resize: () => onResize(),
-    input: () => onInput("wheel"),
-    gesture: () => {
-      onInput("wheel");
-      onScroll();
-    },
-  };
+  return { tail, ...tailTriggers(tail) };
 }
 
 /** A box a sent prompt parked at its tail, so a follow stands. */
@@ -1042,37 +1006,17 @@ describe("TailFollow's latest-visible latch", () => {
   } {
     const box: ReanchorBox = { scrollTop, scrollHeight: 1000, clientHeight: 300 };
     const entry: Entry = { offset: 900, height: 100 };
-    let onScroll = (): void => {};
-    let onResize = (): void => {};
-    let onInput = (_kind: ReaderInput): void => {};
     const tail = new TailFollow(box, () => ({
       boxTop: 0,
       boxHeight: box.clientHeight,
       nodeTop: entry.offset - box.scrollTop,
       nodeHeight: entry.height,
     }));
-    tail.observe(
-      (cb) => {
-        onScroll = cb;
-      },
-      (cb) => {
-        onResize = cb;
-      },
-      (cb) => {
-        onInput = cb;
-      },
-    );
     return {
       tail,
       box,
       entry,
-      scroll: () => onScroll(),
-      resize: () => onResize(),
-      input: () => onInput("wheel"),
-      gesture: () => {
-        onInput("wheel");
-        onScroll();
-      },
+      ...tailTriggers(tail),
       // A new row drawn under the last one becomes the latest entry.
       append: (height: number) => {
         entry.offset = box.scrollHeight;
@@ -2888,24 +2832,17 @@ function anchoredFeed(
       return { top: at, bottom: at + (h[i] ?? 0) };
     },
   };
-  let onScroll = (): void => {};
-  let onResize = (): void => {};
-  let onInput = (_kind: ReaderInput): void => {};
   const tail = new TailFollow(box, () => null, rows);
-  tail.observe(
-    (cb) => (onScroll = cb),
-    (cb) => (onResize = cb),
-    (cb) => (onInput = cb),
-  );
+  const triggers = tailTriggers(tail);
   return {
     box,
     host,
     h,
     hidden,
     tail,
-    scroll: () => onScroll(),
-    resize: () => onResize(),
-    input: () => onInput("wheel"),
+    scroll: triggers.scroll,
+    resize: triggers.resize,
+    input: () => triggers.input(),
     /** Insert a row of HEIGHT at the top, as a prepend does. */
     prepend: (height: number) => {
       host.prepend(row(-1));
@@ -3548,15 +3485,8 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
         state.floorTop = at;
       },
     };
-    let onScroll = (): void => {};
-    let onResize = (): void => {};
-    let onInput = (_kind: ReaderInput): void => {};
     const tail = new TailFollow(box, () => null, null, floor);
-    tail.observe(
-      (cb) => (onScroll = cb),
-      (cb) => (onResize = cb),
-      (cb) => (onInput = cb),
-    );
+    const { scroll: onScroll, resize: onResize, input: onInput } = tailTriggers(tail);
     /** The box lays out: its position re-clamped into the range, as a browser's layout does. */
     const layout = (): void => {
       box.scrollTop = state.top;
@@ -3891,14 +3821,8 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
   it("takes the reader's press before the click for no gesture: a later move is uncaused", async () => {
     // Arrange -- the pointerdown that began the click is an input on the box.
     const box: ReanchorBox = { scrollTop: 700, scrollHeight: 1000, clientHeight: 300 };
-    let onScroll = (): void => {};
-    let onInput = (_kind: ReaderInput): void => {};
     const tail = new TailFollow(box);
-    tail.observe(
-      (cb) => (onScroll = cb),
-      () => {},
-      (cb) => (onInput = cb),
-    );
+    const { scroll: onScroll, input: onInput } = tailTriggers(tail);
     onInput("wheel");
     tail.readerClicked(document.createElement("div"));
     const capture = captureLogRecords();

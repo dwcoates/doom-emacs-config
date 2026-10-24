@@ -6,7 +6,8 @@ import {
   fartherThanAPage,
   mountJumpToTail,
 } from "../../src/feed/jump-to-tail.js";
-import { TailFollow, type ReanchorBox, type ReaderInput } from "../../src/scroll.js";
+import { TailFollow, type ReanchorBox } from "../../src/scroll.js";
+import { tailTriggers } from "../tail-triggers.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 describe("fartherThanAPage", () => {
@@ -32,21 +33,8 @@ describe("mountJumpToTail", () => {
   /** A box at TOP over 1000px of content in a 300px viewport, its tail owner, and the control's slot. */
   function mounted(top: number) {
     const box: ReanchorBox = { scrollTop: top, scrollHeight: 1000, clientHeight: 300 };
-    let onScroll = (): void => {};
-    let onResize = (): void => {};
-    let onInput = (_kind: ReaderInput): void => {};
     const tail = new TailFollow(box);
-    tail.observe(
-      (cb) => {
-        onScroll = cb;
-      },
-      (cb) => {
-        onResize = cb;
-      },
-      (cb) => {
-        onInput = cb;
-      },
-    );
+    const triggers = tailTriggers(tail);
     const slot = document.createElement("div");
     document.body.append(slot);
     uninstall = mountJumpToTail(slot, tail);
@@ -59,11 +47,10 @@ describe("mountJumpToTail", () => {
       control,
       /** The reader scrolls the box to TOP. */
       scrollTo: (to: number) => {
-        onInput("wheel");
         box.scrollTop = to;
-        onScroll();
+        triggers.gesture();
       },
-      resize: () => onResize(),
+      resize: triggers.resize,
     };
   }
 
