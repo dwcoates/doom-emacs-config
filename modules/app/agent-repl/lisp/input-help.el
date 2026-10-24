@@ -24,6 +24,7 @@
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--fatal "core" (ws fmt &rest args))
 (declare-function agent-repl-popup-show "popup" (buffer))
+(declare-function agent-repl-defface "core" (face spec doc &rest args))
 (declare-function agent-repl-refill-keymap "core" (map fill))
 (defvar agent-repl-input-mode-map)
 (defvar evil-normal-state-map)
@@ -38,44 +39,46 @@
 (defconst agent-repl-input-help-topics
   '((:id sending
      :title "Sending prompts"
-     :bindings ((agent-repl-send . "Send the composer's contents")
-                (newline . "Insert a newline instead of sending")
+     :bindings ((agent-repl-send "Send the composer's contents.")
+                (newline "Insert a newline instead of sending.")
                 (agent-repl-input-control-return
-                 . "Send with `agent-repl-send-postfix' appended, or confirm a multi-select")
-                (agent-repl-send-with-prefix . "Send with `agent-repl-send-prefix' prepended")
-                (agent-repl-queue-deferred-prompt . "Defer the prompt until the current turn ends")
-                (agent-repl-interrupt-turn . "Interrupt the running turn"))
-     :features ("Prompts sent while the daemon is away wait, shown in the mode line, and go out once it is back."))
+                 "Send with the send postfix appended. With a multi-select standing and an empty composer, confirm its ticks instead."
+                 :variables (agent-repl-send-postfix))
+                (agent-repl-send-with-prefix "Send with the send prefix prepended."
+                                             :variables (agent-repl-send-prefix))
+                (agent-repl-queue-deferred-prompt "Defer the prompt until the current turn ends.")
+                (agent-repl-interrupt-turn "Interrupt the running turn."))
+     :features ("Prompts sent while the daemon is away wait, counted in the mode line, and go out once it is back."))
     (:id history
      :title "Prompt history"
-     :bindings ((agent-repl-discard-input . "Save the composer to history, then clear it")
-                (agent-repl--history-prev . "Show the previous (older) history entry")
-                (agent-repl--history-next . "Show the next (newer) history entry")
-                (agent-repl-history-search . "Search the whole history and pick an entry"))
+     :bindings ((agent-repl-discard-input "Save the composer to history, then clear it.")
+                (agent-repl--history-prev "Show the previous (older) history entry.")
+                (agent-repl--history-next "Show the next (newer) history entry.")
+                (agent-repl-history-search "Search the whole history and pick an entry."))
      :features ("Every sent prompt is saved to the workspace's history, which survives restarts."
                 "Walking past the newest entry restores the draft you were typing."))
     (:id images
      :title "Images"
-     :bindings ((agent-repl-attach-clipboard-image . "Attach the clipboard's image, even beside text")
-                (agent-repl-input-yank . "Paste the clipboard's image, or yank as usual")
-                (agent-repl-input-evil-paste-after . "Evil's p: the clipboard's image, or paste after")
-                (agent-repl-input-evil-paste-before . "Evil's P: the clipboard's image, or paste before"))
+     :bindings ((agent-repl-attach-clipboard-image "Attach the clipboard's image, even when text rides beside it.")
+                (agent-repl-input-yank "Paste the clipboard's image, or yank as usual.")
+                (agent-repl-input-evil-paste-after "Evil's p: the clipboard's image, or paste after.")
+                (agent-repl-input-evil-paste-before "Evil's P: the clipboard's image, or paste before."))
      :features ("An image is one character of the prompt: delete, kill or yank it like text."
                 "Clicking an image in the composer opens it large over the feed."))
     (:id answering
      :title "Answering cards"
-     :bindings ((agent-repl-input-digit . "Pick the standing card's numbered choice")
-                (agent-repl-input-control-return . "Confirm a multi-select's ticked choices")
-                (agent-repl-input-insert-escape . "Close a standing news digest and leave insert mode"))
+     :bindings ((agent-repl-input-digit "Pick the standing card's numbered choice.")
+                (agent-repl-input-control-return "Confirm a multi-select's ticked choices.")
+                (agent-repl-input-insert-escape "Close a standing news digest and leave insert mode."))
      :features ("A digit answers only in an empty composer; anywhere else it is typed as usual."
                 "On a multi-select a digit toggles its choice's tick instead of answering."))
     (:id rollback
      :title "Rollback"
-     :bindings ((agent-repl-turn-boundary-select-next . "Select the next (newer) prompt or final response")
-                (agent-repl-turn-boundary-select-prev . "Select the previous (older) prompt or final response")
-                (agent-repl-input-selection-escape . "Clear the feed selection")
-                (agent-repl-rollback-keep-files . "Roll back to before the selected prompt, keeping files")
-                (agent-repl-rollback-restore-files . "Roll back to before the selected prompt, restoring files"))
+     :bindings ((agent-repl-turn-boundary-select-next "Select the next (newer) prompt or final response.")
+                (agent-repl-turn-boundary-select-prev "Select the previous (older) prompt or final response.")
+                (agent-repl-input-selection-escape "Clear the feed selection.")
+                (agent-repl-rollback-keep-files "Roll back to before the selected prompt, keeping files.")
+                (agent-repl-rollback-restore-files "Roll back to before the selected prompt, restoring files."))
      :features ("With no prompt selected, a rollback cancels the latest prompt."
                 "A rollback asks before it acts."
                 "Restoring files restores only the files the agent's edit tools changed."))
@@ -87,18 +90,39 @@
                 "Only TAB takes a completion: RET closes the completion popup and sends."))
     (:id zoom
      :title "Feed zoom"
-     :bindings ((agent-repl-feed-text-scale-increase . "Make the feed's text larger")
-                (agent-repl-feed-text-scale-decrease . "Make the feed's text smaller"))
+     :bindings ((agent-repl-feed-text-scale-increase "Make the feed's text larger.")
+                (agent-repl-feed-text-scale-decrease "Make the feed's text smaller."))
      :features ("The zoom changes the feed's text only, never Emacs's own font.")))
   "The composer's help topics, in header-line order.
 Each is a plist: `:id' (a symbol), `:title' (the button's label and the
-popup's heading), `:bindings' ((COMMAND . DESCRIPTION) ...), whose keys are
-read from the live keymaps when the popup opens, and `:features', lines
-describing what goes with those keys.")
+popup's heading), `:bindings' and `:features'.  A binding is
+\(COMMAND DESCRIPTION [:variables (VARIABLE ...)]): its keys are read from
+the live keymaps when the popup opens, and each VARIABLE whose value
+shapes what COMMAND does is shown with its current value.  `:features'
+are lines describing what goes with those keys.")
 
-(defface agent-repl-input-help-button
-  '((t :box (:line-width (1 . -1) :style released-button)))
-  "Face of one help button in the composer's header line.")
+(agent-repl-defface 'agent-repl-input-help-button
+  '((t :foreground "#8b8e91" :background "#26282b" :weight normal
+       :box (:line-width (2 . -1) :style released-button)))
+  "Face of one help button in the composer's header line.
+Raised and filled a step above the header line's ground, with grey ink so
+the row stays quieter than the composer's own text.")
+
+(agent-repl-defface 'agent-repl-input-help-title
+  '((t :inherit bold :height 1.3))
+  "Face of a composer help popup's title.")
+
+(agent-repl-defface 'agent-repl-input-help-section
+  '((t :inherit shadow :weight bold))
+  "Face of a section heading (Keys, Good to know) in a composer help popup.")
+
+(agent-repl-defface 'agent-repl-input-help-annotation
+  '((t :inherit shadow :slant italic))
+  "Face of the Evil state a key in a composer help popup is bound in.")
+
+(agent-repl-defface 'agent-repl-input-help-variable
+  '((t :inherit (shadow button)))
+  "Face of a variable named in a composer help popup; clicking describes it.")
 
 ;;;; ---- The header line ------------------------------------------------
 
@@ -115,7 +139,7 @@ describing what goes with those keys.")
 (defun agent-repl--input-help-button (topic)
   "Return TOPIC's header-line button, carrying its id for the click."
   (let ((title (plist-get topic :title)))
-    (propertize (concat " " title " ")
+    (propertize (concat "  " title "  ")
                 'face 'agent-repl-input-help-button
                 'mouse-face 'mode-line-highlight
                 'pointer 'hand
@@ -125,7 +149,7 @@ describing what goes with those keys.")
 
 (defun agent-repl--input-help-header-line-text ()
   "Return the composer's header line: one help button per topic."
-  (concat " " (mapconcat #'agent-repl--input-help-button agent-repl-input-help-topics " ")))
+  (concat " " (mapconcat #'agent-repl--input-help-button agent-repl-input-help-topics "  ")))
 
 ;; EVERY COMPOSER'S HEADER LINE IS THIS ONE VARIABLE, never a copy of it.
 ;; `header-line-format' holds the symbol, which redisplay reads afresh, so
@@ -203,20 +227,40 @@ STATES holds nil when the key is bound in any state.  A key reachable in
 both command and insert mode needs no annotation."
   (unless (or (memq nil states)
               (and (member "normal" states) (member "insert" states)))
-    (concat "(" (mapconcat (lambda (state)
-                             (pcase state
-                               ("normal" "command mode")
-                               ("insert" "insert mode")
-                               (_ (concat state " mode"))))
-                           (sort (delete-dups (copy-sequence states)) #'string<)
-                           ", ")
-            ")")))
+    (mapconcat (lambda (state)
+                 (pcase state
+                   ("normal" "command mode")
+                   ("insert" "insert mode")
+                   (_ (concat state " mode"))))
+               (sort (delete-dups (copy-sequence states)) #'string<)
+               ", ")))
+
+(defun agent-repl--input-help-collapse-digits (keys)
+  "Return KEYS with each run of consecutive single digits as one range key.
+KEYS are (KEY . ANNOTATION) pairs; a run is digits each one more than the
+last, sharing an annotation, so 1 2 ... 9 reads as \"1-9\"."
+  (let (out)
+    (dolist (key keys)
+      (let ((prev (car out)))
+        (if (and prev
+                 (string-match-p "\\`[0-9]\\'" (car key))
+                 (string-match "\\`\\([0-9]\\)\\(?:-\\([0-9]\\)\\)?\\'" (car prev))
+                 (equal (cdr prev) (cdr key))
+                 (= (string-to-number (car key))
+                    (1+ (string-to-number (or (match-string 2 (car prev))
+                                              (match-string 1 (car prev)))))))
+            (setcar out (cons (concat (match-string 1 (car prev)) "-" (car key)) (cdr key)))
+          (push key out))))
+    (nreverse out)))
 
 (defun agent-repl--input-help-keys (command context)
-  "Return the key labels that run COMMAND in CONTEXT, in binding order.
-A key bound in several states is one label, annotated with its states
-\(`agent-repl--input-help-state-label').  A command no map binds is a
-broken help table, and is fatal."
+  "Return the keys that run COMMAND in CONTEXT, as (KEY . ANNOTATION) pairs.
+Shortest first, then alphabetically: a keymap's own order is the reverse
+of its definitions, which says nothing to a reader.  A key bound in
+several states is one pair, annotated with its states
+(`agent-repl--input-help-state-label', nil for none), and
+a run of digits is one range (`agent-repl--input-help-collapse-digits').
+A command no map binds is a broken help table, and is fatal."
   (let ((raw (agent-repl--input-help-raw-keys command context))
         order)
     (dolist (pair raw)
@@ -225,12 +269,15 @@ broken help table, and is fatal."
     (unless order
       (agent-repl--fatal agent-repl-input-help--log-scope
                          "elisp.input-help.keys: unbound command=%s" command))
-    (mapcar (lambda (description)
-              (let ((label (agent-repl--input-help-state-label
-                            (mapcar #'cdr (seq-filter (lambda (pair) (equal (car pair) description))
-                                                      raw)))))
-                (if label (concat description " " label) description)))
-            (nreverse order))))
+    (agent-repl--input-help-collapse-digits
+     (mapcar (lambda (description)
+               (cons description
+                     (agent-repl--input-help-state-label
+                      (mapcar #'cdr (seq-filter (lambda (pair) (equal (car pair) description))
+                                                raw)))))
+             (sort order (lambda (a b)
+                           (or (< (length a) (length b))
+                               (and (= (length a) (length b)) (string< a b)))))))))
 
 ;;;; ---- The popup ------------------------------------------------------
 
@@ -243,31 +290,89 @@ No such topic is fatal."
                          key value (mapcar (lambda (topic) (plist-get topic key))
                                            agent-repl-input-help-topics))))
 
-(defun agent-repl--input-help-text (topic context)
-  "Return TOPIC's popup text, its keys read from CONTEXT."
-  (let* ((rows (mapcar (lambda (binding)
-                         (cons (string-join (agent-repl--input-help-keys (car binding) context) ", ")
-                               (cdr binding)))
-                       (plist-get topic :bindings)))
-         (width (apply #'max 0 (mapcar (lambda (row) (length (car row))) rows))))
-    (concat
-     (propertize (plist-get topic :title) 'face 'bold) "\n\n"
-     (mapconcat (lambda (row)
-                  (concat "  " (propertize (car row) 'face 'help-key-binding)
-                          (make-string (- width (length (car row))) ?\s)
-                          "  " (cdr row) "\n"))
-                rows "")
-     (and rows (plist-get topic :features) "\n")
-     (mapconcat (lambda (line) (concat "  - " line "\n")) (plist-get topic :features) ""))))
+(defconst agent-repl-input-help--key-column-max 24
+  "The widest key cell a popup row keeps beside its description.
+A wider cell puts its description on the next line, at the same column.")
+
+(defun agent-repl--input-help-key-cell (keys)
+  "Return KEYS, (KEY . ANNOTATION) pairs, as one row's keycaps."
+  (mapconcat (lambda (key)
+               (concat (propertize (car key) 'face 'help-key-binding)
+                       (and (cdr key)
+                            (concat " " (propertize (cdr key) 'face 'agent-repl-input-help-annotation)))))
+             keys "  "))
+
+(defun agent-repl--input-help-rows (topic context)
+  "Return TOPIC's rows as (CELL DESCRIPTION VARIABLES), keys read from CONTEXT.
+Every key and variable is resolved here, before any buffer is touched: a
+command no map binds, or a variable that is not bound, is fatal."
+  (mapcar (lambda (binding)
+            (pcase-let ((`(,command ,description . ,props) binding))
+              (let ((variables (plist-get props :variables)))
+                (dolist (variable variables)
+                  (unless (boundp variable)
+                    (agent-repl--fatal agent-repl-input-help--log-scope
+                                       "elisp.input-help.rows: unbound variable=%s command=%s"
+                                       variable command)))
+                (list (agent-repl--input-help-key-cell
+                       (agent-repl--input-help-keys command context))
+                      description variables))))
+          (plist-get topic :bindings)))
+
+(defun agent-repl--input-help-variable-line (variable)
+  "Return VARIABLE's line: its name, a button that describes it, and its value."
+  (let ((print-escape-newlines t))
+    (concat (make-text-button (symbol-name variable) nil
+                              'face 'agent-repl-input-help-variable
+                              'action (lambda (_) (describe-variable variable))
+                              'help-echo (concat "mouse-1: describe " (symbol-name variable)))
+            ": "
+            (propertize (prin1-to-string (symbol-value variable)) 'face 'font-lock-string-face))))
+
+(defun agent-repl--input-help-insert-row (row column)
+  "Insert ROW, (CELL DESCRIPTION VARIABLES), its text wrapping at COLUMN."
+  (pcase-let ((`(,cell ,description ,variables) row)
+              (start (point))
+              (align `(space :align-to ,column)))
+    (insert "  " cell)
+    (when (> (+ 2 (string-width cell)) (- column 2))
+      (insert "\n"))
+    (insert (propertize " " 'display align) description "\n")
+    (dolist (variable variables)
+      (insert (propertize " " 'display align) (agent-repl--input-help-variable-line variable) "\n"))
+    (put-text-property start (point) 'wrap-prefix align)))
+
+(defun agent-repl--input-help-insert (topic rows)
+  "Insert TOPIC's help, with its resolved ROWS, at point."
+  (let ((column (+ 2 (min agent-repl-input-help--key-column-max
+                          (apply #'max 0 (mapcar (lambda (row) (string-width (car row))) rows)))
+                   3))
+        (features (plist-get topic :features)))
+    (insert (propertize (plist-get topic :title) 'face 'agent-repl-input-help-title) "\n")
+    (when rows
+      (insert "\n" (propertize "Keys" 'face 'agent-repl-input-help-section) "\n")
+      (dolist (row rows)
+        (agent-repl--input-help-insert-row row column)))
+    (when features
+      (insert "\n" (propertize "Good to know" 'face 'agent-repl-input-help-section) "\n")
+      (dolist (line features)
+        (let ((start (point)))
+          (insert "  • " line "\n")
+          (put-text-property start (point) 'wrap-prefix "    "))))))
 
 (defun agent-repl--input-help-buffer (topic context)
-  "Return TOPIC's help buffer, filled from CONTEXT and read-only."
-  (let ((buf (get-buffer-create (format "*agent-repl help: %s*" (plist-get topic :title)))))
+  "Return TOPIC's help buffer, filled from CONTEXT and read-only.
+Its lines wrap at word boundaries, each under its own column."
+  (let* ((rows (agent-repl--input-help-rows topic context))
+         (buf (get-buffer-create (format "*agent-repl help: %s*" (plist-get topic :title)))))
     (with-current-buffer buf
+      (special-mode)
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (insert (agent-repl--input-help-text topic context)))
-      (special-mode)
+        (agent-repl--input-help-insert topic rows))
+      (setq-local truncate-lines nil)
+      (setq-local line-spacing 0.2)
+      (visual-line-mode 1)
       (goto-char (point-min)))
     buf))
 

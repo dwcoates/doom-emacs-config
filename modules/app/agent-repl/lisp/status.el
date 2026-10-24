@@ -7,6 +7,7 @@
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl-defface "core" (face spec doc &rest args))
 (declare-function agent-repl--agent-view-buffer-name-p "core")
 (declare-function agent-repl--agent-view-buffer-p "core")
 (declare-function agent-repl--agent-input-buffer-name-p "core")
@@ -1675,11 +1676,10 @@ spec's (unspecified) :bg/:fg."
 ;; their ink from `agent-repl--tab-bar-legible-fg' against it
 ;; (`agent-repl--tab-face-spec').  Kept as explicit defface calls so Doom
 ;; users can customize via `customize-face' (the Doom theming hook), and
-;; RE-SPECCED ON EVERY LOAD (`agent-repl--tab-state-faces'): a `defface'
-;; keeps a face's first spec when its file is loaded again, so a moved
-;; color would otherwise leave the name region on the old one while the
-;; [N] bracket, painted from the palette, took the new one (owner report,
-;; 2026-10-17: two greens in one tab).
+;; RE-SPECCED ON EVERY LOAD (`agent-repl-defface'): a moved color would
+;; otherwise leave the name region on the old one while the [N] bracket,
+;; painted from the palette, took the new one (owner report, 2026-10-17:
+;; two greens in one tab).
 
 (defun agent-repl--tab-face-spec (color)
   "The `defface' spec of a tab face filled with COLOR.
@@ -1689,33 +1689,33 @@ Its ink is `agent-repl--tab-bar-legible-fg' against COLOR, the same ink
        :foreground ,(agent-repl--tab-bar-legible-fg color)
        :weight ,agent-repl--tab-weight)))
 
-(defface agent-repl-tab-init
+(agent-repl-defface 'agent-repl-tab-init
   (agent-repl--tab-face-spec agent-repl--color-init-blue)
   "Face for workspace tabs where the agent is initializing (blue).")
 
-(defface agent-repl-tab-thinking
+(agent-repl-defface 'agent-repl-tab-thinking
   (agent-repl--tab-face-spec agent-repl--color-thinking-red)
   "Face for workspace tabs where the agent is thinking (red).")
 
-(defface agent-repl-tab-done
+(agent-repl-defface 'agent-repl-tab-done
   (agent-repl--tab-face-spec agent-repl--color-done-green)
   "Face for workspace tabs where the agent is done (green).")
 
-(defface agent-repl-tab-permission
+(agent-repl-defface 'agent-repl-tab-permission
   (agent-repl--tab-face-spec agent-repl--color-done-green)
   "Face for workspace tabs where the agent needs permission (green + emoji).")
 
-(defface agent-repl-tab-ready
+(agent-repl-defface 'agent-repl-tab-ready
   (agent-repl--tab-face-spec agent-repl--color-done-green)
   "Face for workspace tabs whose agent is ready (green): came up and was
 never prompted, or went quiet after a clean conclusion.")
 
-(defface agent-repl-tab-usable-fault
+(agent-repl-defface 'agent-repl-tab-usable-fault
   (agent-repl--tab-face-spec agent-repl--color-usable-fault-turquoise)
   "Face for workspace tabs where something went wrong while the workspace
 stays usable (turquoise): a failed turn, a degraded view, a vendor fault.")
 
-(defface agent-repl-tab-idle-async
+(agent-repl-defface 'agent-repl-tab-idle-async
   (agent-repl--tab-face-spec agent-repl--color-idle-async-yellow)
   "Face for workspace tabs with no foreground turn but live detached
 background work (yellow).")
@@ -1743,7 +1743,7 @@ against the bar's measured background by
 `agent-repl--tab-face', because no `defface' spec can express \"whichever
 of black and white can be read on this bar\".")
 
-(defface agent-repl-tab-merging
+(agent-repl-defface 'agent-repl-tab-merging
   (agent-repl--tab-face-spec agent-repl--color-merging-purple)
   "Face for workspace tabs with a merge in flight (purple): about to
 enqueue, waiting behind a sibling, or running.
@@ -1763,16 +1763,8 @@ session.")
     (agent-repl-tab-usable-fault . ,agent-repl--color-usable-fault-turquoise)
     (agent-repl-tab-idle-async   . ,agent-repl--color-idle-async-yellow)
     (agent-repl-tab-merging      . ,agent-repl--color-merging-purple))
-  "Each colored tab face and the color it is filled with.")
-
-(defun agent-repl--respec-tab-faces ()
-  "Re-state each colored tab face's default spec from its color.
-A `defface' does not re-spec a face that already exists, so this runs on
-every load of this file; a user's own customization still wins over it."
-  (dolist (pair agent-repl--tab-state-faces)
-    (face-spec-set (car pair) (agent-repl--tab-face-spec (cdr pair)) 'face-defface-spec)))
-
-(agent-repl--respec-tab-faces)
+  "Each colored tab face and the color it is filled with.
+Every one is defined by `agent-repl-defface', so a load re-specs it.")
 
 (defun agent-repl--force-tab-bar-redraw ()
   "Force the tab-bar to repaint NOW, bypassing its string-equality cache.
