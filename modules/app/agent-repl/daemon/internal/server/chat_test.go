@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/publish"
+	"agent-repld/internal/rollout"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -615,3 +616,36 @@ func (l *signalLogger) Info(op, msg string, ctx dlog.Context)  { l.send(dlog.Lev
 func (l *signalLogger) Warn(op, msg string, ctx dlog.Context)  { l.send(dlog.LevelWarn, op, msg, ctx) }
 func (l *signalLogger) Error(op, msg string, ctx dlog.Context) { l.send(dlog.LevelError, op, msg, ctx) }
 func (l *signalLogger) With(dlog.Context) dlog.Logger          { return l }
+
+func TestThePlainBootsAnswerNamesThePageToo(t *testing.T) {
+	cases := []struct {
+		name   string
+		ref    func(h *harness) *workspacev1.WorkspaceRef
+		thread bool
+	}{
+		{name: "an agent workspace", ref: func(*harness) *workspacev1.WorkspaceRef {
+			return &workspacev1.WorkspaceRef{Id: string(testWorkspaceID), Dir: testWorkspaceDir}
+		}},
+		{name: "a thread", ref: withThread, thread: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: no handover is in flight.
+			h := newHarness(t)
+			ref := tc.ref(h)
+			h.Rollout.adoptWebErr = rollout.ErrNoTransferAnnounced
+
+			// Act
+			resp, err := h.Client.AdoptWebWorkspace(context.Background(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ref}))
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			page := resp.Msg.GetError().GetNoTransferAnnounced().GetPage()
+			if page == nil || (page.GetThread() != nil) != tc.thread {
+				t.Fatalf("page = %v, want thread %v on the plain boot's answer", page, tc.thread)
+			}
+		})
+	}
+}

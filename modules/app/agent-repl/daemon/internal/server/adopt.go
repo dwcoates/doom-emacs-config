@@ -42,6 +42,10 @@ func (s *server) AdoptHostWorkspace(
 		// the host's adopt answers left no trace, and on 2026-10-11 hundreds of
 		// them in a row were invisible in every log.
 		refused.Info = true
+		// THE PLAIN BOOT'S ANSWER NAMES THE PAGE, as the success arm does.
+		if refused.Arm == "no_transfer_announced" {
+			refused.Fields["page"] = webPageOf(subject.Record)
+		}
 		return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
 	}
 	subject.Log.Info("daemon.server.adopt_host", "the host adopted the workspace", nil)
@@ -72,6 +76,10 @@ func (s *server) AdoptWebWorkspace(
 		// ordinary page boot's no_transfer_announced above all, which is an
 		// answer, not a failure.
 		refused.Info = true
+		// THE PLAIN BOOT'S ANSWER NAMES THE PAGE, as the success arm does.
+		if refused.Arm == "no_transfer_announced" {
+			refused.Fields["page"] = webPageOf(subject.Record)
+		}
 		return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
 	}
 	subject.Log.Info("daemon.server.adopt_web", "the webview adopted the workspace", dlog.Context{"thread": subject.Record.IsThread()})
