@@ -293,6 +293,26 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 
 ## Known complications
 
+- Under consideration (owner's idea, 2026-10-24): full convergence. A chat
+  thread is to a shim instance what a worktree is today, chats share the
+  daemon, shim and store with agent workspaces, and there is no separate
+  zettel database: the store is extended instead.
+  - For: one session lifecycle, streaming path, topbar, title and summary
+    generation, rollback and hibernation for both; the store already models
+    branching (each session has a book, and a fork reads its inherited past
+    from its parent's book up to the fork point); a node, its transcript and
+    any agent-feed bubble it quotes live in one database, so SQLite enforces
+    every reference between them and no cross-database link can dangle; no
+    new launchd service.
+  - Against: zettel stops being separable from agent-repl; the store's role
+    widens from transcript records to graph data (premises, embeddings,
+    revisions, sightings); the daemon never calls `store.v1` today, so the
+    webapp's graph queries need a read path; embedding and premise work must
+    not run in the store, which is on every workspace's hot path; a corrected
+    revision is not a transcript record, so revisions sit beside the
+    transcript rather than in it; a tree with siblings spans several forked
+    vendor sessions, so "one shim per thread" needs a rule for which session
+    the shim drives.
 - Proposed (2026-10-24): chat answers run through agent-repl's existing shim
   (`agent-shim/claude/shim`), driven by the daemon, rather than a second
   adapter around the Agent SDK. Reasons:
