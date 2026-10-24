@@ -1599,6 +1599,8 @@ func TestEachMergeStepDrawsItsOwnSubstatus(t *testing.T) {
 			func(m *frontendv1.FooterStatusMerging) bool { return m.GetDeploying() != nil }},
 		{"post-deploy", MergeFacts{State: "merging", Step: StepPostDeploy},
 			func(m *frontendv1.FooterStatusMerging) bool { return m.GetPostDeploy() != nil }},
+		{"awaiting turn carries how many deploys are ahead", MergeFacts{State: "merging", Step: StepAwaitingTurn, Ahead: 2},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetAwaitingTurn().GetAhead() == 2 }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1825,6 +1827,7 @@ func TestMergeStepWordsAreThePlainWordsOfEachStep(t *testing.T) {
 		{StepCommitting, "committing"},
 		{StepDeploying, "deploying"},
 		{StepPostDeploy, "post-deploy"},
+		{StepAwaitingTurn, "waiting for the deploys ahead"},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.step), func(t *testing.T) {
