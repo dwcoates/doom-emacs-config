@@ -318,7 +318,7 @@ fi
 
 # --- 1n. the helper and low-priority.sh share one demotion -----------------
 if grep -Fqx 'priority_exec marker "$@"' "$HELPER" && grep -Fqx 'priority_exec unmarked "$@"' "$THIS_DIR/low-priority.sh" &&
-    ! cat "$HELPER" "$THIS_DIR/low-priority.sh" | grep -v '^[[:space:]]*#' | grep -Eq 'nice -n|taskpolicy'; then
+    ! grep_in "$(grep -hv '^[[:space:]]*#' "$HELPER" "$THIS_DIR/low-priority.sh")" -Eq 'nice -n|taskpolicy'; then
     pass "background.sh and low-priority.sh demote only through lib-priority.sh's priority_exec"
 else
     fail "background.sh and low-priority.sh demote only through lib-priority.sh's priority_exec"
