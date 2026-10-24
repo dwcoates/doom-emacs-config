@@ -1302,7 +1302,7 @@ opens are OpenTabs streams."
                        #'string<)
                  (sort (list "shutdownAnnounced" "drainScheduled" "drainCancelled"
                              "mutationProgress" "reloadElisp" "ending" "faultsStanding"
-                             "persistentWifi" "newsDigest" "reloadWebhost")
+                             "persistentWifi" "newsDigest" "reloadWebhost" "newThreadRequested")
                        #'string<))))
 
 ;;;; ---- OpenTabs ----
@@ -1507,6 +1507,12 @@ opens are OpenTabs streams."
   (should (equal (agent-repl-test-wire-host--breach
                   #'agent-repl-wire-decode-daemon-reload-webhost "{}")
                  '("DaemonReloadWebhost" build "required string is empty"))))
+
+(ert-deftest agent-repl-test-wire-host-new-thread-requested-push-decodes ()
+  "The sidebar's new-thread button reaches Emacs as its own empty push arm."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response "{\"newThreadRequested\":{}}")
+                 '(:arm :new-thread-requested :value nil))))
 
 (ert-deftest agent-repl-test-wire-host-faults-standing-empty-is-none-standing ()
   "An empty standing set decodes to no faults: the last one closed."

@@ -23,6 +23,7 @@
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl-wire--check-keys "wire-common")
+(declare-function agent-repl-wire-decode-daemon-new-thread-requested "wire-chat" (value))
 (declare-function agent-repl-wire-decode-inside-temporary-directory "wire-common")
 (declare-function agent-repl-wire--decode-bool "wire-common")
 (declare-function agent-repl-wire--decode-empty "wire-common")
@@ -2234,7 +2235,9 @@ THE ARM IS THE FRAME; an unset one is a contract breach."
                      agent-repl-wire-decode-watch-daemon-response-faults-standing)
      (persistentWifi :persistent-wifi
                      agent-repl-wire-decode-watch-daemon-response-persistent-wifi)
-     (reloadWebhost :reload-webhost agent-repl-wire-decode-daemon-reload-webhost))))
+     (reloadWebhost :reload-webhost agent-repl-wire-decode-daemon-reload-webhost)
+     (newThreadRequested :new-thread-requested
+                         agent-repl-wire-decode-daemon-new-thread-requested))))
 
 (defun agent-repl-wire-decode-watch-daemon-response-persistent-wifi (value)
   "Decode `WatchDaemonResponse''s `persistent_wifi' push arm VALUE.
@@ -2256,7 +2259,7 @@ UpdatePersistentWifiMode's success)."
     (agent-repl-wire--check-keys
      "WatchDaemonResponse" object
      '(shutdownAnnounced drainScheduled drainCancelled mutationProgress reloadElisp
-       ending faultsStanding persistentWifi reloadWebhost))
+       ending faultsStanding persistentWifi reloadWebhost newThreadRequested))
     (agent-repl-wire--decoded
      "WatchDaemonResponse"
      (agent-repl-wire-decode-watch-daemon-response-push object))))

@@ -243,6 +243,7 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "wire-host")
 (agent-repl--load-module "wire-roster")
 (agent-repl--load-module "wire-verbs")
+(agent-repl--load-module "wire-chat")
 ;; WHY: connect.el is the Connect-over-HTTP/1.1 transport every daemon
 ;; exchange rides.  It loads right after the codec, whose error it never
 ;; needs but whose consumers all sit above it, and before any consumer of
@@ -321,6 +322,9 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; arms.
 (agent-repl--load-module "startup")
 (agent-repl--load-module "open-tabs")
+;; Chat threads: the new-thread prompt, and opening a thread (roster.el opens
+;; each thread's workspace off the tab bar).
+(agent-repl--load-module "threads")
 ;; WHY: frontends.el defines the presentation-frontend registry that
 ;; frontend.el (gui) registers into at load time.
 (agent-repl--load-module "frontends")

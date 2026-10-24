@@ -57,6 +57,8 @@
 (declare-function agent-repl-wire-encode-update-persistent-wifi-mode-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-update-persistent-wifi-mode-response "wire-verbs" (json))
 (declare-function agent-repl-wire-decode-register-workspace-response "wire-host" (alist))
+(declare-function agent-repl-wire-encode-create-thread-request "wire-chat" (request))
+(declare-function agent-repl-wire-decode-create-thread-response "wire-chat" (alist))
 (declare-function agent-repl-wire-encode-select-workspace-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-select-workspace-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-mark-workspace-viewed-request "wire-host" (request))
@@ -299,6 +301,14 @@ re-selecting the current workspace succeeds.")
   "Answer an evaluation the daemon pushed on the host stream, by its token.
 A late answer still succeeds: whether a caller still waited is the
 daemon\='s to know.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-create-thread
+  "CreateThread"
+  agent-repl-wire-encode-create-thread-request
+  agent-repl-wire-decode-create-thread-response
+  "Start a zettel chat thread from its first question.
+The daemon names the thread after the question, brings its session up and
+submits the question; the thread arrives through the roster push.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-report-editor-focus
   "ReportEditorFocus"

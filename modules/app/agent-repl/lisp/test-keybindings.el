@@ -498,3 +498,13 @@ A map built inside its `defvar' kept the first load's chords forever, so
 (provide 'test-keybindings)
 
 ;;; test-keybindings.el ends here
+
+;;;; ---- Chat threads ----
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-chat-threads ()
+  "`SPC TAB t\=', `T\=' and `.\=' start, reopen and pick a chat thread."
+  (dolist (case '(("t" . agent-repl-thread-new)
+                  ("T" . agent-repl-thread-recent)
+                  ("." . agent-repl-thread-pick)))
+    (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" (car case))
+                (cdr case)))))
