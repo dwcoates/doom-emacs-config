@@ -284,6 +284,71 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 4. Remote access and other hosts: the relay, the Tauri shell, the mobile app.
    Who hosts the relay is decided then.
 
+## Phase 1 as built (2026-10-24)
+
+What landed, by system. The contract decisions are in
+`docs/protobuf-design/zettel-phase1.md`.
+
+- **zettel** (`zettel/`): the service, a launchd singleton
+  (`com.agentrepl.zettel`) serving `zettel.v1` on
+  `~/.cache/agent-repl/sock/zettel.sock`, its graph in `~/zettel/zettel.db`.
+  Nodes, revisions (revision 1 so far) and sightings. `RecordExchange` is
+  idempotent by the daemon turn, so an answer learned twice is one node.
+- **The daemon:**
+  - a thread is a workspace of kind `thread`, in the zettel home
+    (`~/zettel/threads/<name>/`), which `ListRepositories` never lists, so no
+    repository feature sees it;
+  - `CreateThread` names the thread from its question (the naming call),
+    starts a chat session (`SessionProfile.chat`: no tools, no settings, the
+    corpus's `prompts/chat-thread-system.md`), submits the question and
+    selects the thread;
+  - a thread's question carries where it was asked from on its submission,
+    hold and turn row (`ThreadAsk`, `ThreadQuestion`), so every copy the
+    queue makes of it carries it;
+  - the chat service (`internal/chat`) composes each thread's view: the
+    shown path with its per-visit picks (least seen, newest among ties), the
+    sibling labels, the quote marks, the held highlight, and the question in
+    flight with its answer streaming; it records each answered question in
+    zettel from the feed's concluded answer (`feed.ChatSink`);
+  - watching a thread replays its newest feed page, so an answer the daemon
+    missed recording is recorded then;
+  - the roster's app switcher and thread section; threads are in no
+    repository section, band or tab;
+  - deploys build, install and restart zettel; every boot keeps it loaded and
+    current.
+- **The webapp:** React, used for the chat view; a thread's page mounts the
+  chat in place of the feed. The rail's title is the app switcher, and the
+  Chat app lists the threads with a new-thread button.
+- **Emacs:** `SPC TAB t` (new thread), `SPC TAB T` (most recent), `SPC TAB .`
+  (pick by name); every thread is an Emacs workspace the tab bar never draws;
+  the sidebar's new-thread button opens the prompt.
+
+### Judgement calls made while building
+
+- A new thread opens once created (the owner's navigation ruling: "on Enter
+  the new thread opens in the webapp"), unlike a new workspace.
+- A second question asked while a thread's first is still being answered is
+  refused with its own arm (`thread_awaiting_first_answer`): there is no
+  node yet to ask it of. The composer keeps the text.
+- A question asked while another is in flight, with no highlight, attaches
+  to the end of the path on screen, which is the in-flight question's
+  parent, so it becomes the in-flight question's sibling.
+- While a question is in flight, the shown path is the way to its parent,
+  whatever the picks say.
+- Picks and the highlight are in the daemon's memory: a restarted daemon
+  starts a fresh visit.
+- A thread's Emacs workspace is named `chat/<name>`, so no thread's name can
+  take a tab's.
+- The rail's search narrows threads by name; searching chat contents needs
+  zettel's text search (phase 2).
+
+### Deferred from phase 1
+
+- Deleting, renaming and archiving threads (the repository verbs refuse a
+  thread, since it has no repository).
+- Answer revisions beyond the first.
+- Searching chat contents.
+
 ## Proposed, not yet settled
 
 - Requirements:
@@ -349,7 +414,8 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 ## Known complications
 
 - The shim assumes a workspace directory: its cwd, folder trust and
-  per-session locks. A thread needs an equivalent that is not a repository.
+  per-session locks. Resolved: a thread's directory is
+  `~/zettel/threads/<name>/`.
 - Threads inherit every part of the daemon's session management that still
   applies (list agreed by the owner, 2026-10-24), to be checked off one by
   one during implementation:
@@ -362,6 +428,7 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 - The shim hard-codes `settingSources: ["user", "project", "local"]`
   (`agent-shim/claude/shim/src/sdk/real-query.ts`), which loads skills,
   `CLAUDE.md` and memory from `~/.claude`. A chat must not inherit them.
+  Resolved: a chat session's profile loads no settings and offers no tools.
 - The premise judge needs model calls, which the zettel service would make
   back through the daemon and a shim.
 - Premises feeding the model's context make the prompt grow with how many
@@ -404,6 +471,5 @@ Only rows marked settled are settled.
 
 ## Open questions
 
-- How does a thread get the equivalent of a workspace directory for its shim?
 - Is the least-seen pick for exploring the graph, or for remembering what's in it (spaced repetition)?
 - How much of agent-repl's elisp is domain logic that a second input client would have to rewrite? (audit)

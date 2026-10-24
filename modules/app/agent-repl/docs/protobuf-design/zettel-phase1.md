@@ -158,3 +158,33 @@ Consequences:
   history replay after a restart); idempotency by turn makes that one node, so
   a restart between answer and record loses nothing and duplicates nothing.
 - A turn that ends without an answer (interrupt, failure) never reaches zettel.
+
+### 7. Revision of 5: the plain boot's answer names the page too
+
+What: `AdoptWebWorkspaceNoTransferAnnounced` gains `WebWorkspacePage page`.
+
+Why, and the root cause: entry 5 put the page only on the adoption's
+success, reasoning from the RPC's shape. But every ordinary page boot is
+answered `no_transfer_announced` (no handover in flight), so the page would
+almost never have learned what to mount. Both answers that go on to mount a
+body now name it, so no page asks twice.
+
+### 8. `SubmitPromptError.thread_awaiting_first_answer`
+
+What: a new refusal arm, empty.
+
+Why: a question asked in a thread whose first question is still being
+answered has no node to be asked of. The alternatives were to hold it in the
+daemon until the root is recorded (a second queue beside the prompt queue,
+for one edge case) or to make it a second root (a thread is a tree with one
+root). The refusal keeps the text in the composer, which says why.
+
+### 9. zettel in the deploy vocabulary
+
+What: `agentrepl.v1.DeployComponent.DEPLOY_COMPONENT_ZETTEL` and
+`frontend.v1.FooterStatusActivityUpdateComponent.zettel`.
+
+Why: zettel is a third launchd service a deploy builds, installs and
+restarts, and both the deploy's answer and the footer's update line name
+every component they act on.
+
