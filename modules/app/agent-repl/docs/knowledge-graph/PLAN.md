@@ -126,7 +126,10 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   the nearest three or four nodes rather than twenty. One chronological
   session holds everything, so a limit would need the shim to manage what
   the session carries.
-- Threads are not attached to git repositories or worktrees.
+- Threads are not attached to git repositories or worktrees. A thread's
+  shim runs in its own directory, `~/zettel/threads/<thread-name>/`, under a
+  canonical `~/zettel` directory (owner, 2026-10-24). A thread's name is
+  generated once, when it is created, so its directory never moves.
 - Following premises feeds the model's context when answering: premises are
   added to the prompt as extra context.
 - Anthropic's Agent SDK docs say third-party developers may not offer
@@ -247,6 +250,33 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   over outbound HTTPS, and pairing and encryption are built on a proven
   protocol such as Noise. Chosen over a mesh VPN because a VPN takes iOS's
   single VPN slot and needs setup on every device.
+
+### Judgement calls (owner delegated, 2026-10-24; tweak after)
+
+- Swiping an answer bubble cycles the same siblings as swiping its question,
+  since the question and answer are one node. Revisions get their own control
+  when corrections arrive.
+- A question asked about a highlight sits in the sibling stack like any other
+  child, and its quoted words are also marked in the parent answer, as the
+  mock shows.
+- No separate graph overview for now; the chat is the way to see the graph.
+- In the chat, a new prompt attaches to the end of the path on screen, or to
+  the highlighted answer when there is a highlight.
+- Embeddings run natively on the workstation (an M4 MacBook Pro): Qwen3
+  Embedding, through Ollama on Metal, with the model size chosen by
+  measurement.
+
+## Phases
+
+1. Chats working locally, in Emacs and its xwidget webapp: threads,
+   answering through the shim, the zettel service with nodes, revisions and
+   sightings, the chat view in React, the sidebar and topbar changes, and the
+   Emacs bindings.
+2. Premises and embeddings: similarity search, the premise judge, premise
+   links in the chat. Highlights in agent feeds landing in zettel.
+3. The agent feed ported to React.
+4. Remote access and other hosts: the relay, the Tauri shell, the mobile app.
+   Who hosts the relay is decided then.
 
 ## Proposed, not yet settled
 
@@ -369,14 +399,5 @@ Only rows marked settled are settled.
 ## Open questions
 
 - How does a thread get the equivalent of a workspace directory for its shim?
-- What does a thread's shim use in place of a workspace directory?
-- Which embedding provider: a local model on the workstation, or a hosted API
-  called from the workstation? Chat answers already send content to
-  Anthropic, so a hosted embedding API adds one more vendor that sees it.
-- Who hosts the relay?
 - Is the least-seen pick for exploring the graph, or for remembering what's in it (spaced repetition)?
-- What does swiping on an answer bubble cycle through: the pair's siblings, or that answer's revisions?
-- Should questions about a highlight sit on the passage, in the sibling stack, or both?
-- In the chat, does a new prompt always attach to the end of the path on screen?
-- Is a separate overview of the graph wanted, or is the chat the only way to see it?
 - How much of agent-repl's elisp is domain logic that a second input client would have to rewrite? (audit)
