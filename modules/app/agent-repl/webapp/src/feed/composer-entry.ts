@@ -15,14 +15,10 @@ import type { FeedComposerEntry } from "../../../proto/gen/ts/frontend/v1/feed_p
 import { log } from "../log.js";
 import { TREE_LINE_CLASS, TREE_NODE_ATTRIBUTE } from "../metaprompt-tree.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import { cssString } from "../width-reserve.js";
 
 /** The id of the one style element the highlight is drawn by. */
 export const COMPOSER_ENTRY_STYLE_ID = "composer-entry-highlight";
-
-/** VALUE inside a double-quoted CSS attribute selector. */
-function quoted(value: string): string {
-  return `"${value.replace(/["\\]/gu, (c) => `\\${c}`).replace(/\n/gu, "\\a ")}"`;
-}
 
 /**
  * The stylesheet ENTRY draws: a rule over the lines of its node in its row, or
@@ -37,7 +33,7 @@ export function composerEntryRule(entry: FeedComposerEntry): string {
     case "node": {
       const row = requireMessage(at.value.row, "FeedComposerEntryNode.row").value;
       return (
-        `[data-feed-row=${quoted(row)}] .${TREE_LINE_CLASS}[${TREE_NODE_ATTRIBUTE}=${quoted(at.value.label)}]` +
+        `[data-feed-row=${cssString(row)}] .${TREE_LINE_CLASS}[${TREE_NODE_ATTRIBUTE}=${cssString(at.value.label)}]` +
         ` { background: var(--composer-entry-bg); box-shadow: inset 2px 0 0 var(--accent); }`
       );
     }

@@ -2,7 +2,9 @@ package feed
 
 import (
 	"context"
+	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -213,5 +215,22 @@ func TestALabelChangeIsAnnouncedOnTheRootFeed(t *testing.T) {
 	// Assert
 	if ws := <-changes; ws != testWorkspace {
 		t.Fatalf("announced %q, want the workspace whose response tree was drawn", ws)
+	}
+}
+
+func TestEveryComposerReadingTargetsThroughComposerTarget(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("composer.go")
+	if err != nil {
+		t.Fatalf("read composer.go: %v", err)
+	}
+
+	// Act
+	direct := strings.Count(string(src), "entryTarget(f, len(f.order)")
+	shared := strings.Count(string(src), "composerTarget(f, reply, label)")
+
+	// Assert: composerTarget's own call is the one direct reading.
+	if direct != 1 || shared != 2 {
+		t.Fatalf("composer.go reads entryTarget directly %d times and through composerTarget %d times, want 1 and 2", direct, shared)
 	}
 }

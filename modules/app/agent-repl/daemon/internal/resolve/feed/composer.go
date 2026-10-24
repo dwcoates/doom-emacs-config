@@ -58,6 +58,15 @@ func promptQuotedRow(row *frontendv1.FeedRow) string {
 	return ""
 }
 
+// composerTarget answers the row an entry answering LABEL targets in a
+// prompt not yet sent that replies to REPLY: entryTarget, read as if the
+// prompt were F's next row. The one reading ComposerTargets and EntryNeighbor
+// share.
+func composerTarget(f *feedState, reply *frontendv1.FeedId, label string) string {
+	labelsAt := func(i int) map[string]bool { return responseLabels(f.rows[f.order[i]]) }
+	return entryTarget(f, len(f.order), reply.GetValue(), label, labelsAt)
+}
+
 // rootFeedState answers WS's root feed, or nil when the resolver holds none.
 // The caller holds r.mu.
 func (r *resolver) rootFeedState(ws ids.WorkspaceID) *feedState {
@@ -79,9 +88,8 @@ func (r *resolver) ComposerTargets(ws ids.WorkspaceID, reply *frontendv1.FeedId,
 	if f == nil {
 		return targets
 	}
-	labelsAt := func(i int) map[string]bool { return responseLabels(f.rows[f.order[i]]) }
 	for i, label := range labels {
-		if id := entryTarget(f, len(f.order), reply.GetValue(), label, labelsAt); id != "" {
+		if id := composerTarget(f, reply, label); id != "" {
 			targets[i] = f.rows[id].GetId()
 		}
 	}
@@ -101,8 +109,7 @@ func (r *resolver) EntryNeighbor(ws ids.WorkspaceID, reply *frontendv1.FeedId, l
 	if f == nil {
 		return "", false
 	}
-	labelsAt := func(i int) map[string]bool { return responseLabels(f.rows[f.order[i]]) }
-	id := entryTarget(f, len(f.order), reply.GetValue(), label, labelsAt)
+	id := composerTarget(f, reply, label)
 	if id == "" {
 		return "", false
 	}
