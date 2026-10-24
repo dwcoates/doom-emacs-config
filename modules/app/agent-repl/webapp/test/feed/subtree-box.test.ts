@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { boxSubtree, inSubtree, labelColumn, unboxAll, type SubtreeBox } from "../../src/feed/subtree-box.js";
+import { boxSubtree, inSubtree, labelColumn, standingBox, unboxAll, type SubtreeBox } from "../../src/feed/subtree-box.js";
 import { boxedBy, drawnRow, exampleSubtreeWidth, exampleTree, labelledTree, lineOf } from "./tree-fixture.js";
 
 const box: SubtreeBox = { className: "box-a", leftProperty: "--a-left", rightProperty: "--a-right" };
@@ -112,6 +112,74 @@ describe("every highlight of a response's node", () => {
     // Arrange
     const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../..", file), "utf8");
     // Act + Assert: no hand-rolled box, only the shared one.
-    expect([source.includes("boxSubtree("), source.includes("textWidth("), source.includes("labelColumn(")]).toEqual([true, false, false]);
+    const shared = source.includes("boxSubtree(") || source.includes("standingBox(");
+    expect([shared, source.includes("textWidth("), source.includes("labelColumn(")]).toEqual([true, false, false]);
+  });
+});
+
+describe("standingBox", () => {
+  it("boxes the stood node in its row and in no other", () => {
+    // Arrange
+    const standing = standingBox(box);
+    const row = drawnRow("r1", exampleTree);
+    // Act
+    standing.stand(document, { row: "r1", label: "1.1" });
+    // Assert
+    expect(boxedBy(row, box).map(([node]) => node)).toEqual(["1.1", "1.1.1"]);
+  });
+
+  it("boxes nothing for a node of another row", () => {
+    // Arrange
+    const standing = standingBox(box);
+    const row = drawnRow("r2", exampleTree);
+    // Act
+    standing.stand(document, { row: "r1", label: "1.1" });
+    // Assert
+    expect(boxedBy(row, box)).toEqual([]);
+  });
+
+  it("moves the box when another node is stood", () => {
+    // Arrange
+    const standing = standingBox(box);
+    const row = drawnRow("r1", exampleTree);
+    standing.stand(document, { row: "r1", label: "1.1" });
+    // Act
+    standing.stand(document, { row: "r1", label: "1.2" });
+    // Assert
+    expect(boxedBy(row, box).map(([node]) => node)).toEqual(["1.2"]);
+  });
+
+  it("takes the box down when no node is stood", () => {
+    // Arrange
+    const standing = standingBox(box);
+    const row = drawnRow("r1", exampleTree);
+    standing.stand(document, { row: "r1", label: "1.1" });
+    // Act
+    standing.stand(document, undefined);
+    // Assert
+    expect(boxedBy(row, box)).toEqual([]);
+  });
+
+  it("redraws the stood node on a repaint of its row's prose", () => {
+    // Arrange
+    const standing = standingBox(box);
+    standing.stand(document, { row: "r1", label: "1.1" });
+    // Act
+    const row = drawnRow("r1", exampleTree);
+    standing.mark(row, "r1");
+    // Assert
+    expect(boxedBy(row, box).map(([node]) => node)).toEqual(["1.1", "1.1.1"]);
+  });
+
+  it("keeps each standing box apart from another's", () => {
+    // Arrange
+    const first = standingBox(box);
+    const second = standingBox(other);
+    const row = drawnRow("r1", exampleTree);
+    first.stand(document, { row: "r1", label: "1.1" });
+    // Act
+    second.stand(document, { row: "r1", label: "1.2" });
+    // Assert
+    expect([boxedBy(row, box).map(([node]) => node), boxedBy(row, other).map(([node]) => node)]).toEqual([["1.1", "1.1.1"], ["1.2"]]);
   });
 });

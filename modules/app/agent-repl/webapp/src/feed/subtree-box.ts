@@ -13,11 +13,18 @@
  * A tree is drawn in a monospace face with every wide character boxed to two
  * columns (metaprompt-tree.ts), so a column is one `ch`.
  *
- * Each highlight is a SubtreeBox of its own (the composer's, a hover's), with
- * its own class and edge properties, so two boxes over the same lines never
- * overwrite each other's edges.
+ * Each highlight is a SubtreeBox of its own (the composer's, a hover's, a
+ * revealed node's), with its own class and edge properties, so two boxes over
+ * the same lines never overwrite each other's edges.
+ *
+ * A box that STANDS over a node until it is moved (`standingBox`: the
+ * composer's, a revealed node's) is restated on every paint: a response's
+ * prose is repainted whenever it re-wraps or re-arrives, so the response's
+ * prose slot marks it each time it paints, and moving the box re-marks
+ * whatever is drawn now.
  */
 import { queryAll } from "../dom.js";
+import { FEED_ROW_SELECTOR, feedRowId } from "./row-id.js";
 import { TREE_CLASS, TREE_LABEL_CLASS, TREE_LINE_CLASS, TREE_NODE_ATTRIBUTE, textWidth } from "../metaprompt-tree.js";
 
 /** One kind of box: the class its lines wear and the properties naming its edges, in `ch`. */
@@ -71,4 +78,39 @@ export function boxSubtree(scope: ParentNode, label: string, box: SubtreeBox): v
       line.style.setProperty(box.rightProperty, `${right}ch`);
     }
   }
+}
+
+/** A node of a drawn response's tree: the response's row and the node's label. */
+export interface BoxedNode {
+  readonly row: string;
+  readonly label: string;
+}
+
+/** A box standing over one node, or none, until it is moved. */
+export interface StandingBox {
+  /** Stand the box over NODE (none takes it down), redrawn over every row drawn in DOC. */
+  stand(doc: Document, node: BoxedNode | undefined): void;
+  /** Redraw the box in RENDERED, the drawn prose of the row ROW: run on every paint. */
+  mark(rendered: HTMLElement, row: string): void;
+}
+
+/** A StandingBox drawn as BOX, standing over no node to begin with. */
+export function standingBox(box: SubtreeBox): StandingBox {
+  let standing: BoxedNode | undefined;
+  const mark = (rendered: HTMLElement, row: string): void => {
+    unboxAll(rendered, box);
+    if (standing === undefined || standing.row !== row) return;
+    boxSubtree(rendered, standing.label, box);
+  };
+  return {
+    stand(doc: Document, node: BoxedNode | undefined): void {
+      standing = node;
+      unboxAll(doc.body, box);
+      if (node === undefined) return;
+      for (const row of queryAll<HTMLElement>(doc.body, FEED_ROW_SELECTOR)) {
+        if (feedRowId(row) === node.row) mark(row, node.row);
+      }
+    },
+    mark,
+  };
 }
