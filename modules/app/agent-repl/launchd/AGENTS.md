@@ -1,16 +1,17 @@
 # launchd/
 
-launchd user-agent plists for the two OS-managed shim-ecosystem services,
-`com.agentrepl.shim-store` and `com.agentrepl.shim-claude-sidecar`, and for
-the metrics store, `com.agentrepl.victoriametrics` (all `RunAtLoad` +
-`KeepAlive`, so they are always available at login and recreated on
-failure). The metrics store's program is Homebrew's `victoria-metrics`, not
-a binary built here; its flags and why are in the plist's header and
-`metrics/AGENTS.md`. Installed idempotently by `.claude/install.sh`, which runs
-`bin/requirements.sh install`: each service is a `launchd_service` entry in its
-system's `requirements.json` (`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`).
+launchd user-agent plists for the OS-managed shim-ecosystem services,
+`com.agentrepl.shim-store` and `com.agentrepl.shim-claude-sidecar`, for the
+knowledge-graph service, `com.agentrepl.zettel`, and for the metrics store,
+`com.agentrepl.victoriametrics` (all `RunAtLoad` + `KeepAlive`, so they are
+always available at login and recreated on failure). The metrics store's
+program is Homebrew's `victoria-metrics`, not a binary built here; its flags and
+why are in the plist's header and `metrics/AGENTS.md`. Installed idempotently by
+`.claude/install.sh`, which runs `bin/requirements.sh install`: each service is
+a `launchd_service` entry in its system's `requirements.json`
+(`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`, `zettel/`).
 
-Both files are TEMPLATES: they use `~/`-relative paths so they read portably,
+Every file is a TEMPLATE: they use `~/`-relative paths so they read portably,
 and the installer (`bin/requirements.sh`, `rendered_plist`) rewrites every leading
 `~/` to the invoking user's absolute `$HOME` when copying them into
 `~/Library/LaunchAgents/`. launchd does not expand `~` itself, so neither
@@ -18,7 +19,7 @@ template is ever loaded directly.
 
 ## Priority: Standard, never Background
 
-Both services declare `ProcessType` `Standard`. The live editor waits on
+Every service declares `ProcessType` `Standard`. The live editor waits on
 them, so they must never rank below a test suite: launchd's `Background` is
 darwinbg (efficiency cores, throttled disk I/O), and suites run at `nice 19`
 with normal disk I/O, so a `Background` store lost every I/O contention to
@@ -43,6 +44,14 @@ passed; every other flag keeps its default.
   session id resolves to the conversation's original one), and
   `--metrics-root` (`~/.cache/agent-repl/metrics`). `--log`,
   `--poll-interval` (1s) and `--rescan-interval` (30s) stay at their defaults.
+
+- `com.agentrepl.zettel` — `--socket` (`~/.cache/agent-repl/sock/zettel.sock`),
+  `--db` (`~/zettel/zettel.db`, beside the threads' directories, because the
+  graph is the user's data and never cache) and `--log`
+  (`~/.cache/agent-repl/log/zettel.log`). `AGENT_REPL_ZETTEL_SOCKET` is its
+  test-only socket override, deliberately not set. The daemon keeps it loaded
+  and on the installed build at every boot and deploy
+  (`daemon/internal/deploy/services.go`); nothing else depends on its socket.
 
 `AGENT_REPL_STATE_DIR` is the sidecar's `--state-dir` default, and the same
 variable the daemon resolves and exports into every shim it spawns; the two

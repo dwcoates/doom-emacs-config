@@ -8,6 +8,7 @@
     "agent-shim/shim-lock/requirements.json",
     "agent-shim/shim-store/requirements.json",
     "agent-shim/claude/shim-sidecar/requirements.json",
+    "zettel/requirements.json",
     "webapp/requirements.json",
     "e2e/requirements.json",
     "lisp/requirements.json",

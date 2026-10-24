@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.agentrepl.zettel — launchd user agent for the zettel service, the
+  knowledge graph every chat thread's questions and answers are recorded in.
+  It serves zettel.v1 with Connect over a UNIX domain socket; the daemon is
+  its only caller (zettel/AGENTS.md).
+
+  TEMPLATE: this checked-in copy uses ~-relative paths so it reads portably
+  and resolves on any machine. launchd does NOT expand `~`, so
+  bin/requirements.sh rewrites every leading `~/` to the invoking user's
+  absolute $HOME when copying this file into ~/Library/LaunchAgents/. Do not
+  load this template file directly.
+
+  Flag contract (must match zettel/main.go):
+    --socket  Connect-over-UDS server path (~/.cache/agent-repl/sock/zettel.sock)
+    --db      the graph's SQLite/WAL db    (~/zettel/zettel.db)
+    --log     the service's JSONL log      (~/.cache/agent-repl/log/zettel.log)
+
+  THE DATABASE LIVES IN ~/zettel, beside the threads' directories, not under
+  the cache: the graph is the user's data and is never thrown away.
+
+  AGENT_REPL_ZETTEL_SOCKET is the TEST-ONLY override of the --socket default
+  (an explicit --socket always beats it). It is deliberately NOT set here.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.agentrepl.zettel</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>~/.cache/agent-repl/bin/zettel</string>
+        <string>--socket</string>
+        <string>~/.cache/agent-repl/sock/zettel.sock</string>
+        <string>--db</string>
+        <string>~/zettel/zettel.db</string>
+        <string>--log</string>
+        <string>~/.cache/agent-repl/log/zettel.log</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Do not respawn faster than once per 10s if the binary crash-loops. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!--
+      A STOP THAT IS ASKED FOR IS A STOP THAT HAPPENS: the service's own
+      shutdown is bounded well inside this, so reaching it means the process
+      is stuck and SIGKILL is the right answer (as for the store).
+    -->
+    <key>ExitTimeOut</key>
+    <integer>20</integer>
+
+    <!--
+      STANDARD, NEVER BACKGROUND, for the store's reason: the live editor's
+      chat waits on this service, so it must never rank below a test suite.
+    -->
+    <key>ProcessType</key>
+    <string>Standard</string>
+
+    <key>StandardOutPath</key>
+    <string>~/.cache/agent-repl/log/zettel.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>~/.cache/agent-repl/log/zettel.err.log</string>
+</dict>
+</plist>
