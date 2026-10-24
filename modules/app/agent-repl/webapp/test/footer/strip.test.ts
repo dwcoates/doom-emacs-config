@@ -276,6 +276,16 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     expect(row.querySelector(".footer-substatus")?.textContent).toBe(words);
   });
 
+  it("draws a deploy awaiting its turn with how many deploys are ahead", () => {
+    const { row } = drawStrip({ status: withSubStatus("merging", "awaitingTurn", { ahead: 2 }) });
+    expect(row.querySelector(".footer-substatus")?.textContent).toBe("awaiting turn: 2 ahead");
+  });
+
+  it("colours the deploys ahead as a count", () => {
+    const { row } = drawStrip({ status: withSubStatus("merging", "awaitingTurn", { ahead: 2 }) });
+    expect(row.querySelector('.footer-substatus [data-datum="count"]')?.textContent).toBe("2 ahead");
+  });
+
   it("colours the enqueued place as a queue position", () => {
     const { row } = drawStrip({ status: withSubStatus("merging", "enqueued", { place: 2, waiting: 5 }) });
     expect(row.querySelector('.footer-substatus [data-datum="position"]')?.textContent).toBe("2/5");

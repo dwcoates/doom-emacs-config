@@ -476,6 +476,12 @@ export function drawFooterSubStatus(
       cell.appendChild(document.createTextNode(" attempt "));
       cell.appendChild(substatusFigure("attempt", `${sub.value.attempt}/${sub.value.maxAttempts}`));
       return cell;
+    case "awaitingTurn":
+      // How many deploys queued ahead still run their one-at-a-time stages
+      // before this one, which has run its concurrent stages.
+      cell.appendChild(document.createTextNode(": "));
+      cell.appendChild(substatusFigure("count", `${sub.value.ahead} ahead`));
+      return cell;
     case "awaitingFree":
       // What the merge, which has not started, waits on: the awaited
       // workspace's turn and detached work, as the daemon counted them.
