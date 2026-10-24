@@ -1,0 +1,55 @@
+// endpoint_record_sightings.proto — RecordSightings: nodes were seen.
+
+syntax = "proto3";
+
+package zettel.v1;
+
+import "zettel/v1/zettel.proto";
+
+option go_package = "agentrepl/proto/zettel/v1;zettelv1";
+
+// Adds one sighting to each named node. All or nothing: an unknown node
+// refuses the whole request.
+message RecordSightingsRequest {
+  // The nodes seen, each counted once per occurrence in the list.
+  repeated NodeId nodes = 1;
+}
+
+// The outcome of RecordSightings.
+message RecordSightingsResponse {
+  // Success means every sighting was counted; failure means none was.
+  oneof result {
+    RecordSightingsSuccess success = 1;
+    RecordSightingsFailure failure = 2;
+  }
+}
+
+// Every sighting was counted.
+message RecordSightingsSuccess {}
+
+// No sighting was counted.
+message RecordSightingsFailure {
+  // A one-line human-readable account of the failure, for the log.
+  string detail = 1;
+  // Which failure it was.
+  oneof kind {
+    RecordSightingsStorageFailure storage_failure = 2;
+    RecordSightingsInvalidRequest invalid_request = 3;
+    RecordSightingsUnknownNode unknown_node = 4;
+  }
+}
+
+// The database could not be written.
+message RecordSightingsStorageFailure {}
+
+// A required field was missing or empty.
+message RecordSightingsInvalidRequest {
+  // The field at fault, by its proto name.
+  string field = 1;
+}
+
+// A named node does not exist.
+message RecordSightingsUnknownNode {
+  // The first unknown node in request order.
+  NodeId node = 1;
+}

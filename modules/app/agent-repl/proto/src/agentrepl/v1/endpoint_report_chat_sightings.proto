@@ -1,0 +1,75 @@
+// endpoint_report_chat_sightings.proto — ReportChatSightings: answer bubbles were seen. CHAT section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "zettel/v1/zettel.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// ReportChatSightings: answer bubbles came fully onto the screen. Each node is
+// reported once per time its answer bubble goes from not fully visible to
+// fully visible; the counts drive the chat's least-seen branch pick.
+message ReportChatSightingsRequest {
+  // The thread the bubbles are in.
+  workspace.v1.WorkspaceRef thread = 1;
+  // The nodes whose answer bubbles were seen, echoed from the chat view.
+  repeated zettel.v1.NodeId nodes = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message ReportChatSightingsResponse {
+  // Success or the refusal; exactly one is set.
+  oneof result {
+    ReportChatSightingsSuccess success = 1;
+    ReportChatSightingsError error = 2;
+  }
+}
+
+// Every sighting was recorded.
+message ReportChatSightingsSuccess {}
+
+// Why the request was refused. Validation failures (an unset field, a blank string) are Connect InvalidArgument, never an arm.
+message ReportChatSightingsError {
+  // The cause of the refusal.
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    ReportChatSightingsUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ReportChatSightingsWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    ReportChatSightingsTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    ReportChatSightingsNotYetAdopted not_yet_adopted = 4;
+    // The workspace is an agent workspace, not a chat thread.
+    ReportChatSightingsNotAThread not_a_thread = 5;
+    // A reported node is not in this thread.
+    ReportChatSightingsUnknownNode unknown_node = 6;
+  }
+}
+
+// The workspace id is not in the daemon's registry.
+message ReportChatSightingsUnknownWorkspace {}
+
+// The echoed dir disagrees with the registry's dir for this id.
+message ReportChatSightingsWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// This daemon released the workspace to a successor; dial `address`.
+message ReportChatSightingsTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting this workspace yet.
+message ReportChatSightingsNotYetAdopted {}
+
+// The workspace is an agent workspace, not a chat thread.
+message ReportChatSightingsNotAThread {}
+
+// A reported node is not in this thread.
+message ReportChatSightingsUnknownNode {}

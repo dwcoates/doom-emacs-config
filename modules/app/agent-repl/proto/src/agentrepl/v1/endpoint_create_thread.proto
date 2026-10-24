@@ -1,0 +1,56 @@
+// endpoint_create_thread.proto — CreateThread: start a chat thread with its first question. CHAT section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// CreateThread: start a new chat thread with its first question. The daemon
+// names the thread from the question, creates its directory under
+// ~/zettel/threads, starts its chat session and sends the question as the
+// thread's first prompt. CREATING A THREAD NEVER MOVES THE USER: the caller
+// selects the thread it is given back (SelectWorkspace) when it wants it on
+// screen.
+message CreateThreadRequest {
+  // The thread's first question, as the user typed it.
+  CreateThreadQuestion question = 1;
+}
+
+// A new thread's first question.
+message CreateThreadQuestion {
+  // The question text. Never blank.
+  string text = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message CreateThreadResponse {
+  // Success or the refusal; exactly one is set.
+  oneof result {
+    CreateThreadSuccess success = 1;
+    CreateThreadError error = 2;
+  }
+}
+
+// The thread exists, its session is starting, and its first question is sent.
+message CreateThreadSuccess {
+  // The new thread's workspace, the identity every later thread verb takes.
+  workspace.v1.WorkspaceRef thread = 1;
+}
+
+// Why no thread was created. Validation failures (an unset field, a blank question) are Connect InvalidArgument, never an arm.
+message CreateThreadError {
+  // The cause of the refusal.
+  oneof cause {
+    // The thread could not be created; nothing of it remains.
+    CreateThreadCreationFailed creation_failed = 1;
+  }
+}
+
+// The thread could not be created; nothing of it remains.
+message CreateThreadCreationFailed {
+  // A one-line account of what failed, for the user.
+  string detail = 1;
+}

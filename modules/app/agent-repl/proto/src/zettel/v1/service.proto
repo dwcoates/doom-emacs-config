@@ -1,0 +1,45 @@
+// service.proto — zettel's Connect service: every rpc signature, organized in
+// commented sections, one endpoint_<rpc>.proto per rpc; zettel.proto holds the
+// shared datatypes.
+//
+// THE DAEMON IS THE ONLY CALLER. It is served on a unix socket by the zettel
+// service, which alone owns zettel's database.
+
+syntax = "proto3";
+
+package zettel.v1;
+
+import "zettel/v1/endpoint_abandon_exchange.proto";
+import "zettel/v1/endpoint_begin_exchange.proto";
+import "zettel/v1/endpoint_complete_exchange.proto";
+import "zettel/v1/endpoint_get_thread.proto";
+import "zettel/v1/endpoint_list_pending_exchanges.proto";
+import "zettel/v1/endpoint_record_sightings.proto";
+
+option go_package = "agentrepl/proto/zettel/v1;zettelv1";
+
+service Zettel {
+  // ---- Exchanges: a question's way from asked to answered ----
+
+  // A question was sent: record its origin before any answer exists.
+  rpc BeginExchange(BeginExchangeRequest) returns (BeginExchangeResponse);
+
+  // The answer finished: the exchange becomes a node.
+  rpc CompleteExchange(CompleteExchangeRequest) returns (CompleteExchangeResponse);
+
+  // The turn ended with no answer: the exchange is removed.
+  rpc AbandonExchange(AbandonExchangeRequest) returns (AbandonExchangeResponse);
+
+  // Every exchange in flight, for settling after a restart.
+  rpc ListPendingExchanges(ListPendingExchangesRequest) returns (ListPendingExchangesResponse);
+
+  // ---- Graph reads: what consumer UIs are resolved from ----
+
+  // One thread whole: its nodes and its exchanges in flight.
+  rpc GetThread(GetThreadRequest) returns (GetThreadResponse);
+
+  // ---- Sightings: what consumer UIs have shown ----
+
+  // Count one sighting per named node.
+  rpc RecordSightings(RecordSightingsRequest) returns (RecordSightingsResponse);
+}

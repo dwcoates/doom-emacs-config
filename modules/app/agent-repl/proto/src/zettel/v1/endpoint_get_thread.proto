@@ -1,0 +1,55 @@
+// endpoint_get_thread.proto — GetThread: every node of one thread, and its
+// exchanges in flight.
+
+syntax = "proto3";
+
+package zettel.v1;
+
+import "zettel/v1/zettel.proto";
+
+option go_package = "agentrepl/proto/zettel/v1;zettelv1";
+
+// Reads one thread whole, which is what the daemon resolves the chat view
+// from. A thread zettel has never seen reads back empty: that is an answer,
+// not a failure.
+message GetThreadRequest {
+  // The thread to read.
+  ThreadId thread = 1;
+}
+
+// The outcome of GetThread.
+message GetThreadResponse {
+  // Success carries the thread; failure says why it could not be read.
+  oneof result {
+    GetThreadSuccess success = 1;
+    GetThreadFailure failure = 2;
+  }
+}
+
+// The thread as stored.
+message GetThreadSuccess {
+  // Every node of the thread, oldest first by creation time.
+  repeated Node nodes = 1;
+  // Every exchange in flight in the thread, oldest first.
+  repeated PendingExchange pending = 2;
+}
+
+// The thread could not be read.
+message GetThreadFailure {
+  // A one-line human-readable account of the failure, for the log.
+  string detail = 1;
+  // Which failure it was.
+  oneof kind {
+    GetThreadStorageFailure storage_failure = 2;
+    GetThreadInvalidRequest invalid_request = 3;
+  }
+}
+
+// The database could not be read.
+message GetThreadStorageFailure {}
+
+// A required field was missing or empty.
+message GetThreadInvalidRequest {
+  // The field at fault, by its proto name.
+  string field = 1;
+}

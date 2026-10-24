@@ -1,0 +1,94 @@
+// endpoint_switch_chat_sibling.proto — SwitchChatSibling: show a bubble's previous or next sibling. CHAT section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "zettel/v1/zettel.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// SwitchChatSibling: the user swiped a question or answer bubble, asking for
+// its previous or next sibling. The daemon moves the thread's shown path to
+// that sibling and pushes the new chat view; everything below the switched
+// bubble is the sibling's own branch.
+message SwitchChatSiblingRequest {
+  // The thread the bubble is in.
+  workspace.v1.WorkspaceRef thread = 1;
+  // The node whose bubble was swiped, echoed from frontend.v1.ChatExchange.
+  zettel.v1.NodeId shown = 2;
+  // Which way to move among the node's siblings. Moving past either end
+  // wraps around.
+  SwitchChatSiblingDirection direction = 3;
+}
+
+// Which way a swipe moves among siblings. The set arm IS the direction.
+message SwitchChatSiblingDirection {
+  // Previous or next, in the siblings' creation order.
+  oneof way {
+    SwitchChatSiblingPrevious previous = 1;
+    SwitchChatSiblingNext next = 2;
+  }
+}
+
+// Move to the sibling created just before the shown one.
+message SwitchChatSiblingPrevious {}
+
+// Move to the sibling created just after the shown one.
+message SwitchChatSiblingNext {}
+
+// THE ARM IS THE OUTCOME.
+message SwitchChatSiblingResponse {
+  // Success or the refusal; exactly one is set.
+  oneof result {
+    SwitchChatSiblingSuccess success = 1;
+    SwitchChatSiblingError error = 2;
+  }
+}
+
+// The shown path moved; the chat view carries it.
+message SwitchChatSiblingSuccess {}
+
+// Why the request was refused. Validation failures (an unset field, a blank string) are Connect InvalidArgument, never an arm.
+message SwitchChatSiblingError {
+  // The cause of the refusal.
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SwitchChatSiblingUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SwitchChatSiblingWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SwitchChatSiblingTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SwitchChatSiblingNotYetAdopted not_yet_adopted = 4;
+    // The workspace is an agent workspace, not a chat thread.
+    SwitchChatSiblingNotAThread not_a_thread = 5;
+    // The node is not in this thread's shown path.
+    SwitchChatSiblingUnknownNode unknown_node = 6;
+  }
+}
+
+// The workspace id is not in the daemon's registry.
+message SwitchChatSiblingUnknownWorkspace {}
+
+// The echoed dir disagrees with the registry's dir for this id.
+message SwitchChatSiblingWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// This daemon released the workspace to a successor; dial `address`.
+message SwitchChatSiblingTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting this workspace yet.
+message SwitchChatSiblingNotYetAdopted {}
+
+// The workspace is an agent workspace, not a chat thread.
+message SwitchChatSiblingNotAThread {}
+
+// The node is not in this thread's shown path.
+message SwitchChatSiblingUnknownNode {}

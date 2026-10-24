@@ -1,0 +1,47 @@
+// endpoint_show_sidebar_app.proto — ShowSidebarApp: the sidebar title's app dropdown. SIDEBAR section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "frontend/v1/sidebar.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// ShowSidebarApp: the user picked an app from the sidebar title's dropdown.
+// What the sidebar shows follows what is on screen, so the daemon answers by
+// selecting that app's most recent workspace: the most recently interacted
+// with thread for Chat, the most recently selected agent workspace for
+// Workspaces. The roster's `current` then moves the editor, exactly as a row
+// click does.
+message ShowSidebarAppRequest {
+  // The app picked, echoed from frontend.v1.RosterAppSwitcherOption.
+  frontend.v1.SidebarApp app = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ShowSidebarAppResponse {
+  // Success or the refusal; exactly one is set.
+  oneof result {
+    ShowSidebarAppSuccess success = 1;
+    ShowSidebarAppError error = 2;
+  }
+}
+
+// The app's most recent workspace is selected; the roster carries it.
+message ShowSidebarAppSuccess {
+  // The roster revision the selection is in, as SelectWorkspaceSuccess states it.
+  uint64 roster_revision = 1;
+}
+
+// Why nothing was selected.
+message ShowSidebarAppError {
+  // The cause of the refusal.
+  oneof cause {
+    // The app has no workspace to show yet (no thread has been created).
+    ShowSidebarAppNothingToShow nothing_to_show = 1;
+  }
+}
+
+// The app has no workspace to show yet.
+message ShowSidebarAppNothingToShow {}

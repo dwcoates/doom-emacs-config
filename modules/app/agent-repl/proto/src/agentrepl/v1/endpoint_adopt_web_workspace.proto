@@ -27,7 +27,27 @@ message AdoptWebWorkspaceResponse {
 
 // Adoption is COMPLETE: re-open the workspace's view streams here now; the
 // persisted feed page position makes the re-attach evidence-free.
-message AdoptWebWorkspaceSuccess {}
+message AdoptWebWorkspaceSuccess {
+  // What the page is for, deciding which body it mounts below its topbar.
+  // Always set.
+  WebWorkspacePage page = 1;
+}
+
+// What a workspace page shows. The set arm IS the kind of workspace.
+message WebWorkspacePage {
+  // An agent workspace's feed, or a chat thread's chat view.
+  oneof kind {
+    WebWorkspacePageAgent agent = 1;
+    WebWorkspacePageThread thread = 2;
+  }
+}
+
+// An agent workspace: the page mounts the feed.
+message WebWorkspacePageAgent {}
+
+// A chat thread: the page mounts the chat view (WatchChat) in place of the
+// feed.
+message WebWorkspacePageThread {}
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.

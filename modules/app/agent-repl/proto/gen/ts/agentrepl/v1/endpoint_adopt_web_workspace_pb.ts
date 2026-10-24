@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_adopt_web_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_adopt_web_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfYWRvcHRfd2ViX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkkKGEFkb3B0V2ViV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIpcBChlBZG9wdFdlYldvcmtzcGFjZVJlc3BvbnNlEjkKB3N1Y2Nlc3MYASABKAsyJi5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VTdWNjZXNzSAASNQoFZXJyb3IYAiABKAsyJC5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIaChhBZG9wdFdlYldvcmtzcGFjZVN1Y2Nlc3Mi2wQKFkFkb3B0V2ViV29ya3NwYWNlRXJyb3ISTAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLy5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASVQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIzLmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASTAoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLy5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5SAASRwoPbm90X3lldF9hZG9wdGVkGAQgASgLMiwuYWdlbnRyZXBsLnYxLkFkb3B0V2ViV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAElMKFW5vX3RyYW5zZmVyX2Fubm91bmNlZBgFIAEoCzIyLmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZU5vVHJhbnNmZXJBbm5vdW5jZWRIABJZChhwYXJ0aWNpcGFudF9ub3RfZXhwZWN0ZWQYBiABKAsyNS5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VQYXJ0aWNpcGFudE5vdEV4cGVjdGVkSAASTAoRdHJhbnNmZXJfZGVmZXJyZWQYByABKAsyLy5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VUcmFuc2ZlckRlZmVycmVkSABCBwoFY2F1c2UiIwohQWRvcHRXZWJXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIj0KJUFkb3B0V2ViV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjQKIUFkb3B0V2ViV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIiAKHkFkb3B0V2ViV29ya3NwYWNlTm90WWV0QWRvcHRlZCImCiRBZG9wdFdlYldvcmtzcGFjZU5vVHJhbnNmZXJBbm5vdW5jZWQiKQonQWRvcHRXZWJXb3Jrc3BhY2VQYXJ0aWNpcGFudE5vdEV4cGVjdGVkIiMKIUFkb3B0V2ViV29ya3NwYWNlVHJhbnNmZXJEZWZlcnJlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfYWRvcHRfd2ViX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkkKGEFkb3B0V2ViV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIpcBChlBZG9wdFdlYldvcmtzcGFjZVJlc3BvbnNlEjkKB3N1Y2Nlc3MYASABKAsyJi5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VTdWNjZXNzSAASNQoFZXJyb3IYAiABKAsyJC5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCJIChhBZG9wdFdlYldvcmtzcGFjZVN1Y2Nlc3MSLAoEcGFnZRgBIAEoCzIeLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VQYWdlIogBChBXZWJXb3Jrc3BhY2VQYWdlEjQKBWFnZW50GAEgASgLMiMuYWdlbnRyZXBsLnYxLldlYldvcmtzcGFjZVBhZ2VBZ2VudEgAEjYKBnRocmVhZBgCIAEoCzIkLmFnZW50cmVwbC52MS5XZWJXb3Jrc3BhY2VQYWdlVGhyZWFkSABCBgoEa2luZCIXChVXZWJXb3Jrc3BhY2VQYWdlQWdlbnQiGAoWV2ViV29ya3NwYWNlUGFnZVRocmVhZCLbBAoWQWRvcHRXZWJXb3Jrc3BhY2VFcnJvchJMChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIvLmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2VIABJVChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjMuYWdlbnRyZXBsLnYxLkFkb3B0V2ViV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJMChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIvLmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJHCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyLC5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkSAASUwoVbm9fdHJhbnNmZXJfYW5ub3VuY2VkGAUgASgLMjIuYWdlbnRyZXBsLnYxLkFkb3B0V2ViV29ya3NwYWNlTm9UcmFuc2ZlckFubm91bmNlZEgAElkKGHBhcnRpY2lwYW50X25vdF9leHBlY3RlZBgGIAEoCzI1LmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZVBhcnRpY2lwYW50Tm90RXhwZWN0ZWRIABJMChF0cmFuc2Zlcl9kZWZlcnJlZBgHIAEoCzIvLmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZVRyYW5zZmVyRGVmZXJyZWRIAEIHCgVjYXVzZSIjCiFBZG9wdFdlYldvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiPQolQWRvcHRXZWJXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiNAohQWRvcHRXZWJXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiIAoeQWRvcHRXZWJXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkIiYKJEFkb3B0V2ViV29ya3NwYWNlTm9UcmFuc2ZlckFubm91bmNlZCIpCidBZG9wdFdlYldvcmtzcGFjZVBhcnRpY2lwYW50Tm90RXhwZWN0ZWQiIwohQWRvcHRXZWJXb3Jrc3BhY2VUcmFuc2ZlckRlZmVycmVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.AdoptWebWorkspaceRequest
@@ -76,6 +76,13 @@ export const AdoptWebWorkspaceResponseSchema: GenMessage<AdoptWebWorkspaceRespon
  * @generated from message agentrepl.v1.AdoptWebWorkspaceSuccess
  */
 export type AdoptWebWorkspaceSuccess = Message<"agentrepl.v1.AdoptWebWorkspaceSuccess"> & {
+  /**
+   * What the page is for, deciding which body it mounts below its topbar.
+   * Always set.
+   *
+   * @generated from field: agentrepl.v1.WebWorkspacePage page = 1;
+   */
+  page?: WebWorkspacePage | undefined;
 };
 
 /**
@@ -84,6 +91,70 @@ export type AdoptWebWorkspaceSuccess = Message<"agentrepl.v1.AdoptWebWorkspaceSu
  */
 export const AdoptWebWorkspaceSuccessSchema: GenMessage<AdoptWebWorkspaceSuccess> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 2);
+
+/**
+ * What a workspace page shows. The set arm IS the kind of workspace.
+ *
+ * @generated from message agentrepl.v1.WebWorkspacePage
+ */
+export type WebWorkspacePage = Message<"agentrepl.v1.WebWorkspacePage"> & {
+  /**
+   * An agent workspace's feed, or a chat thread's chat view.
+   *
+   * @generated from oneof agentrepl.v1.WebWorkspacePage.kind
+   */
+  kind: {
+    /**
+     * @generated from field: agentrepl.v1.WebWorkspacePageAgent agent = 1;
+     */
+    value: WebWorkspacePageAgent;
+    case: "agent";
+  } | {
+    /**
+     * @generated from field: agentrepl.v1.WebWorkspacePageThread thread = 2;
+     */
+    value: WebWorkspacePageThread;
+    case: "thread";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.WebWorkspacePage.
+ * Use `create(WebWorkspacePageSchema)` to create a new message.
+ */
+export const WebWorkspacePageSchema: GenMessage<WebWorkspacePage> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 3);
+
+/**
+ * An agent workspace: the page mounts the feed.
+ *
+ * @generated from message agentrepl.v1.WebWorkspacePageAgent
+ */
+export type WebWorkspacePageAgent = Message<"agentrepl.v1.WebWorkspacePageAgent"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WebWorkspacePageAgent.
+ * Use `create(WebWorkspacePageAgentSchema)` to create a new message.
+ */
+export const WebWorkspacePageAgentSchema: GenMessage<WebWorkspacePageAgent> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 4);
+
+/**
+ * A chat thread: the page mounts the chat view (WatchChat) in place of the
+ * feed.
+ *
+ * @generated from message agentrepl.v1.WebWorkspacePageThread
+ */
+export type WebWorkspacePageThread = Message<"agentrepl.v1.WebWorkspacePageThread"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.WebWorkspacePageThread.
+ * Use `create(WebWorkspacePageThreadSchema)` to create a new message.
+ */
+export const WebWorkspacePageThreadSchema: GenMessage<WebWorkspacePageThread> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 5);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -162,7 +233,7 @@ export type AdoptWebWorkspaceError = Message<"agentrepl.v1.AdoptWebWorkspaceErro
  * Use `create(AdoptWebWorkspaceErrorSchema)` to create a new message.
  */
 export const AdoptWebWorkspaceErrorSchema: GenMessage<AdoptWebWorkspaceError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 3);
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 6);
 
 /**
  * @generated from message agentrepl.v1.AdoptWebWorkspaceUnknownWorkspace
@@ -175,7 +246,7 @@ export type AdoptWebWorkspaceUnknownWorkspace = Message<"agentrepl.v1.AdoptWebWo
  * Use `create(AdoptWebWorkspaceUnknownWorkspaceSchema)` to create a new message.
  */
 export const AdoptWebWorkspaceUnknownWorkspaceSchema: GenMessage<AdoptWebWorkspaceUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 4);
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 7);
 
 /**
  * @generated from message agentrepl.v1.AdoptWebWorkspaceWorkspaceRefMismatch
@@ -194,7 +265,7 @@ export type AdoptWebWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.AdoptW
  * Use `create(AdoptWebWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const AdoptWebWorkspaceWorkspaceRefMismatchSchema: GenMessage<AdoptWebWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 5);
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 8);
 
 /**
  * @generated from message agentrepl.v1.AdoptWebWorkspaceTransferringAway
@@ -213,7 +284,7 @@ export type AdoptWebWorkspaceTransferringAway = Message<"agentrepl.v1.AdoptWebWo
  * Use `create(AdoptWebWorkspaceTransferringAwaySchema)` to create a new message.
  */
 export const AdoptWebWorkspaceTransferringAwaySchema: GenMessage<AdoptWebWorkspaceTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 6);
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 9);
 
 /**
  * @generated from message agentrepl.v1.AdoptWebWorkspaceNotYetAdopted
@@ -226,7 +297,7 @@ export type AdoptWebWorkspaceNotYetAdopted = Message<"agentrepl.v1.AdoptWebWorks
  * Use `create(AdoptWebWorkspaceNotYetAdoptedSchema)` to create a new message.
  */
 export const AdoptWebWorkspaceNotYetAdoptedSchema: GenMessage<AdoptWebWorkspaceNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 7);
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 10);
 
 /**
  * @generated from message agentrepl.v1.AdoptWebWorkspaceNoTransferAnnounced
@@ -239,7 +310,7 @@ export type AdoptWebWorkspaceNoTransferAnnounced = Message<"agentrepl.v1.AdoptWe
  * Use `create(AdoptWebWorkspaceNoTransferAnnouncedSchema)` to create a new message.
  */
 export const AdoptWebWorkspaceNoTransferAnnouncedSchema: GenMessage<AdoptWebWorkspaceNoTransferAnnounced> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 8);
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 11);
 
 /**
  * @generated from message agentrepl.v1.AdoptWebWorkspaceParticipantNotExpected
@@ -252,7 +323,7 @@ export type AdoptWebWorkspaceParticipantNotExpected = Message<"agentrepl.v1.Adop
  * Use `create(AdoptWebWorkspaceParticipantNotExpectedSchema)` to create a new message.
  */
 export const AdoptWebWorkspaceParticipantNotExpectedSchema: GenMessage<AdoptWebWorkspaceParticipantNotExpected> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 9);
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 12);
 
 /**
  * The successor refused a mid-work adoption and the incumbent serves the
@@ -271,5 +342,5 @@ export type AdoptWebWorkspaceTransferDeferred = Message<"agentrepl.v1.AdoptWebWo
  * Use `create(AdoptWebWorkspaceTransferDeferredSchema)` to create a new message.
  */
 export const AdoptWebWorkspaceTransferDeferredSchema: GenMessage<AdoptWebWorkspaceTransferDeferred> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 10);
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 13);
 

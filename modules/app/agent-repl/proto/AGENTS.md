@@ -3,11 +3,11 @@
 The agent-shim protocol definitions. The `.proto` files ARE the contract,
 including behavioral semantics as normative comments.
 
-## The six surfaces
+## The seven surfaces
 
 Every message belongs to exactly one, and **the package boundary IS the surface
 boundary** — nothing straddles, so which surface a message is on is a fact the
-compiler checks rather than a convention a reviewer holds. The six are ROOT
+compiler checks rather than a convention a reviewer holds. The seven are ROOT
 namespaces with no umbrella prefix. The design record is
 `../docs/protobuf-design/figma-to-idl-redesign.md`; the earlier record it
 supersedes is kept as `DESIGN-protobuf-surfaces.superseded.md`, and every
@@ -21,6 +21,7 @@ decision there stands unless the new record reopens it by name.
 | `shim.v1` | `shim/v1/` | what traverses the daemon↔shim boundary and only that boundary: handshakes, commands, receipts, health, replay and page requests, `BookkeepingEntry`, and the `ExternalEntry`/`EntryDelivery`/`MessagePage` read half | shim, daemon |
 | `store.v1` | `store/v1/` | the producer-side internal half: which plane observed a record, the store's write identity, anything a producer could not convert | shim, sidecar, store ONLY |
 | `state.v1` | `state/v1/` | daemon-internal only, including the schema the daemon marshals into its own SQLite store | daemon |
+| `zettel.v1` | `zettel/v1/` | the zettel service's API: the knowledge graph's threads, nodes, exchanges and sightings (`service Zettel`). The daemon is its only caller; `frontend.v1` imports its identities (`NodeId`, `NodeQuote`) as join keys the webapp echoes back | daemon, zettel service; identities: frontend.v1, agentrepl.v1, webapp |
 
 **What decides membership is who produces a message and where it is routed** —
 never what it is about. Subject is a judgment call, which is how a message whose
