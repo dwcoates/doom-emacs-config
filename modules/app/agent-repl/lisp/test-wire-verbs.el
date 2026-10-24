@@ -4270,7 +4270,7 @@ webapp's alone."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "frontend/v1/feed.pb.go" "FeedSelectionRowViewport")
                        #'string<)
-                 '("center" "hold" "reveal"))))
+                 '("center" "hold" "reveal" "revealNode"))))
 
 (ert-deftest agent-repl-test-wire-verbs-feed-selection-row-viewport-reveal-names-its-entry ()
   "A selected prompt a linked label revealed decodes `:reveal' with its entry label."
@@ -4935,6 +4935,21 @@ encoder reads: the common codec owns the real encoding.")
     (should-error (agent-repl-wire-decode-report-latencies-response
                    '((success . ((recorded . ((recorded . 1) (extra . 2)))))))
                   :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-feed-selection-row-viewport-reveal-node-names-its-node ()
+  "A selected response a prompt's entry revealed decodes `:reveal-node' with its node's label."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-feed-selection-row-viewport
+                    (agent-repl-test-wire-verbs--parse "{\"revealNode\":{\"label\":\"3.1\"}}"))
+                   '(:viewport (:arm :reveal-node :value (:label "3.1")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-feed-selection-row-viewport-reveal-node-refuses-a-bad-message ()
+  "A revealed node with an empty label, or a field it does not declare, is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (json '("{\"revealNode\":{}}" "{\"revealNode\":{\"label\":\"3.1\",\"extra\":1}}"))
+      (should-error (agent-repl-wire-decode-feed-selection-row-viewport
+                     (agent-repl-test-wire-verbs--parse json))
+                    :type 'agent-repl-wire-error))))
 
 (provide 'test-wire-verbs)
 

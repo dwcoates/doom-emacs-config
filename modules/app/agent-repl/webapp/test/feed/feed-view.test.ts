@@ -66,7 +66,7 @@ import {
   PROMPT_WAVE_ATTRIBUTE,
   PROMPT_WAVE_WORKING,
 } from "../../src/breathing.js";
-import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { captureLogRecords, forwardedRecord, forwardedRecords } from "../log-capture.js";
 import { fireIntersection } from "../intersection-observer.js";
 import { FEED_LOAD_MORE_LABEL, WALK_LOADING_ATTRIBUTE, WALK_SPINNER_CLASS } from "../../src/feed/walk-control.js";
 import {
@@ -2442,6 +2442,29 @@ describe("createFeedController: the feed selection", () => {
     // Assert
     const record = await forwardedRecord(capture, "feed.entries.flash-absent");
     expect([acts, record.context?.label]).toEqual([[], "3.2"]);
+  });
+
+  it("centers a response a prompt's entry reveals", () => {
+    // Arrange
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(selectionOf({ response: "r1", viewport: { revealNode: "3.1" } }));
+    // Assert
+    expect(acts).toEqual(["selectionMoved"]);
+  });
+
+  it("stands the node a prompt's entry reveals for as long as its selection does", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { controller } = selecting();
+    controller.upsert(responseRow("r1"));
+    controller.applySelection(selectionOf({ response: "r1", viewport: { revealNode: "3.1" } }));
+    // Act
+    controller.applySelection(selectionOf({ none: "returnToTail" }));
+    // Assert
+    const records = (await forwardedRecords(capture)).filter((r) => r.operation === "feed.revealed-node.applied");
+    expect(records.map((r) => [r.context?.row, r.context?.label])).toEqual([["r1", "3.1"], ["none", "none"]]);
   });
 
   it("records a reveal of a row this feed has not drawn at DEBUG", async () => {

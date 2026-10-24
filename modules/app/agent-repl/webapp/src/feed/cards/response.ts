@@ -112,6 +112,7 @@ import { drawOutcomeCard } from "../marker.js";
 import { linkAnswers } from "../entries.js";
 import { boundCopyControl } from "../../copy-control.js";
 import { markComposerEntry } from "../composer-entry.js";
+import { markRevealedNode } from "../revealed-node.js";
 
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";
@@ -271,6 +272,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const prose = markdownSlot(RESPONSE_PROSE_CLASS, served, (rendered) => {
     if (answers.length > 0) linkAnswers(rendered, answers);
     markComposerEntry(rendered, rowId);
+    markRevealedNode(rendered, rowId);
   });
 
   // A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user

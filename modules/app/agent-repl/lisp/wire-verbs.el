@@ -4530,11 +4530,12 @@ it.  An incomplete request errors here rather than reaching the wire."
 (defun agent-repl-wire-decode-feed-selection-row-viewport (json)
   "Decode FeedSelectionRowViewport from JSON into (:viewport VP).
 VP is (:arm ARM :value V), and ARM is `:center' (a step from Emacs),
-`:hold' (a click in the webapp) or `:reveal' (a click on a label a prompt
-answers, V being (:entry-label LABEL)); exactly one is set.  `:center'
-and `:hold' carry a nil V."
+`:hold' (a click in the webapp), `:reveal' (a click on a label a prompt
+answers, V being (:entry-label LABEL)) or `:reveal-node' (a click on a
+prompt's entry, V being (:label LABEL), the response node it answers);
+exactly one is set.  `:center' and `:hold' carry a nil V."
   (let ((message "FeedSelectionRowViewport"))
-    (agent-repl-wire-verbs--check-keys message json '(center hold reveal))
+    (agent-repl-wire-verbs--check-keys message json '(center hold reveal revealNode))
     (list :viewport
           (agent-repl-wire-verbs--decode-oneof
            message "viewport" json
@@ -4543,13 +4544,25 @@ and `:hold' carry a nil V."
                  (list 'hold :hold
                        (agent-repl-wire-verbs--empty-arm "FeedSelectionRowViewportHold"))
                  (list 'reveal :reveal
-                       #'agent-repl-wire-decode-feed-selection-row-viewport-reveal))))))
+                       #'agent-repl-wire-decode-feed-selection-row-viewport-reveal)
+                 (list 'revealNode :reveal-node
+                       #'agent-repl-wire-decode-feed-selection-row-viewport-reveal-node))))))
 
 (defun agent-repl-wire-decode-feed-selection-row-viewport-reveal (json)
   "Decode FeedSelectionRowViewportReveal from JSON into (:entry-label LABEL)."
   (let ((message "FeedSelectionRowViewportReveal"))
     (agent-repl-wire-verbs--check-keys message json '(entryLabel))
     (list :entry-label (agent-repl-wire-verbs--decode-string message 'entryLabel json))))
+
+(defun agent-repl-wire-decode-feed-selection-row-viewport-reveal-node (json)
+  "Decode FeedSelectionRowViewportRevealNode from JSON into (:label LABEL).
+The label is never empty."
+  (let ((message "FeedSelectionRowViewportRevealNode"))
+    (agent-repl-wire-verbs--check-keys message json '(label))
+    (let ((label (agent-repl-wire-verbs--decode-string message 'label json)))
+      (when (string-empty-p label)
+        (agent-repl-wire-verbs--fail message 'label "required string is empty"))
+      (list :label label))))
 
 (defun agent-repl-wire-decode-feed-selection-row (message json)
   "Decode the selected-row MESSAGE from JSON into (:row FEEDID :viewport VP).

@@ -113,7 +113,8 @@ message ProseEntryTreeNode {
   ProseEntryLabel label = 4;
   // What the node is. THE ARM IS THE KIND.
   oneof kind {
-    // An entry the person wrote: a click target that edits it.
+    // An entry the person wrote: a click target that reveals the response
+    // node it answers (agentrepl.v1.SelectFeedRowEntry).
     ProseEntryTreeNodeAnswer answer = 5;
     // An ancestor a deeper entry's label implies, which no entry answers:
     // drawn by its label alone, dimmed.

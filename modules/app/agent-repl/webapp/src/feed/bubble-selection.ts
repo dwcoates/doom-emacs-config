@@ -171,8 +171,8 @@ export function bubbleClick(opts: { row: HTMLElement; target: Element; selectedT
   }
   if (!opts.row.hasAttribute(SELECTABLE_ATTRIBUTE)) return { case: "ignore", reason: "not-landed" };
   const row = feedRowId(opts.row) ?? "";
-  // AN ENTRY'S LABEL EDITS THAT ENTRY: the prompt is selected, and Emacs fills
-  // the composer with what the entry says (entries.ts).
+  // AN ENTRY'S LABEL REVEALS THE NODE IT ANSWERS: the response is selected,
+  // and the node is boxed with its subtree (revealed-node.ts).
   if (opts.target.closest(`.${ENTRY_LABEL_CLASS}`) !== null) {
     const entry = opts.target.closest<HTMLElement>(`.${ENTRY_CLASS}`);
     return { case: "entry", row, label: entry?.getAttribute(ENTRY_ATTRIBUTE) ?? "" };
@@ -224,7 +224,7 @@ export function installBubbleSelect(
         );
         return;
       case "entry":
-        log.info("a click on a prompt's entry selects the prompt to edit the entry", {
+        log.info("a click on a prompt's entry selects the response it answers, revealing the node", {
           operation: "feed.entry-click",
           context: { row: click.row, label: click.label },
         });
@@ -264,7 +264,7 @@ export const SELECT_REQUEST = "select the clicked bubble";
 export const ANSWER_REQUEST = "show the prompt that answered the clicked label";
 
 /** What the chip's `request` evidence names an entry's click as. */
-export const ENTRY_REQUEST = "edit the clicked entry";
+export const ENTRY_REQUEST = "show the response node the clicked entry answers";
 
 /** What the chip's `request` evidence names a response branch's click as. */
 export const BRANCH_REQUEST = "answer the clicked branch";

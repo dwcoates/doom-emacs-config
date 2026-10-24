@@ -108,7 +108,7 @@ describe("unboxAll", () => {
 });
 
 describe("every highlight of a response's node", () => {
-  it.each(["src/feed/composer-entry.ts", "src/feed/branch-hover.ts"])("draws its box through subtree-box in %s", (file) => {
+  it.each(["src/feed/composer-entry.ts", "src/feed/branch-hover.ts", "src/feed/revealed-node.ts"])("draws its box through subtree-box in %s", (file) => {
     // Arrange
     const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../..", file), "utf8");
     // Act + Assert: no hand-rolled box, only the shared one.

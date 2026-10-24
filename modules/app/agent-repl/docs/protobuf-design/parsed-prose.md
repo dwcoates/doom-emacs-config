@@ -279,3 +279,25 @@ wrong labels). That needs one parse, in one place, that every program reads.
     event carries only the label.
   - **The hover is the webapp's alone.** It is drawn from the pointer and changes no
     state, so no daemon round trip sits under the pointer.
+
+### 8. A prompt's entry reveals the response node it answers
+
+- **What:**
+  - `SelectFeedRowEntry` now selects the response the entry answers, by the one target
+    rule (`feed.Resolver.EntryTarget`), and never the prompt.
+  - `frontend.v1.FeedSelectionRowViewport` gained `reveal_node`
+    (`FeedSelectionRowViewportRevealNode.label`, tag 4).
+  - `WatchHostWorkspaceResponse.prompt_entry_clicked` (section 5) is retired: tag 13 and
+    its name are reserved, and `HostWorkspacePromptEntryClicked` is gone.
+- **Why:** the owner's ruling of 2026-10-24. A click on a prompt's entry should not
+  fill the composer at all. It should highlight the branch the entry answers, with
+  its subtree, in that response.
+- **Decisions inside the shape:**
+  - **The click selects the response**, centered as a linked label's click centers
+    its prompt, so a collapsed response opens and the node is in view.
+  - **The box is the selection's**: it stands while the selection naming the node
+    does, and the next selection push takes it down
+    (`webapp/src/feed/revealed-node.ts`).
+  - **The click asks nothing of Emacs.** RET on a selected prompt still resends the
+    composer's words whole. `RollBackResend.edit.entry` has no client since the click
+    stopped filling the composer.
