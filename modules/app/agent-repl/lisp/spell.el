@@ -31,22 +31,31 @@
 ;; It is never a silent no-op.
 ;;
 ;; TEXT THAT ARRIVES WHOLE is checked too.  flyspell checks the word a command
-;; just left, so a paste, a history recall or a restored draft would stay
-;; unchecked until point visited each word.  Every insertion longer than one
-;; character is queued and checked once the next command ends, from
-;; `post-command-hook'.  Never from a timer: a timer fires inside
-;; `accept-process-output', so it could start a second hunspell exchange
-;; while flyspell's own is waiting on its reply, and the two would read
-;; each other's answers.  The check runs with redisplay inhibited:
-;; `flyspell-small-region' calls `sit-for' after every word, which would
-;; draw the cursor walking the pasted text word by word.
+;; just left, so a paste, a history recall, a restored draft or a rollback's
+;; refill would stay unchecked until point visited each word.  Every
+;; insertion longer than one character is queued, and the queue is checked
+;; on the next turn of the command loop (a zero-second timer), so a refill
+;; that arrives in a process filter is checked at once rather than at the
+;; next keystroke.
 ;;
+;; THE CHECK NEVER HOLDS THE COMMAND LOOP.  flyspell's own region check talks
+;; to hunspell a word at a time and redisplays after each: measured on the
+;; live editor (2026-10-24), 1.2 s for a 362-character prompt and 2.7 s for
+;; 905 characters, every keystroke after a rollback's refill waiting behind
+;; it.  Instead the queued text goes to a hunspell process of its own
+;; (`agent-repl--spell-run-hunspell', through `agent-repl--async-command'),
+;; and its answer is applied when it comes: each word it names is
+;; highlighted wherever it still stands in the span, as flyspell highlights
+;; one.  A misspelling is a property of the word, not of where it stands, so
+;; an edit made while hunspell works moves nothing the answer is applied to.
+;; Being a process of its own, it never shares an exchange with flyspell's.
 ;; CODE IS NOT PROSE.  A fenced block, an inline `code' span and a token that
 ;; reads as a path, a URL, an identifier or an address are skipped
 ;; (`agent-repl--spell-prose-at-p').
 ;;
 ;; Starting flyspell starts hunspell, and checking a region talks to it, so
-;; both go through external-boundary wrappers registered in
+;; so does the queued check's own hunspell; each goes through an
+;; external-boundary wrapper registered in
 ;; `agent-repl--external-boundary-functions' (core.el), as does the PATH
 ;; lookup (`agent-repl--executable-find').
 
@@ -59,9 +68,11 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--fatal "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn-once "agent-repl-core" (ws fingerprint fmt &rest args))
+(declare-function agent-repl--async-command "agent-repl-core" (label dir command callback &optional input))
+(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--executable-find "agent-repl-core" (program))
 (declare-function flyspell-mode "flyspell" (&optional arg))
-(declare-function flyspell-region "flyspell" (beg end))
+(declare-function flyspell-highlight-incorrect-region "flyspell" (beg end poss))
 (declare-function flyspell-get-word "flyspell" (&optional following extra-otherchars))
 
 (defvar flyspell-mode)
@@ -227,11 +238,17 @@ below flyspell, where it was bound before."
 
 ;;;; ---- Text that arrives whole --------------------------------------------
 
+(defvar-local agent-repl--spell-ws nil
+  "The workspace this composer spellchecks for, named on its log records.")
+
 (defvar-local agent-repl--spell-pending nil
   "(BEG . END) markers spanning insertions not yet checked, or nil.")
 
 (defvar agent-repl--spell-pending-buffers nil
-  "Composers holding queued insertions, checked once the next command ends.")
+  "Composers holding queued insertions, checked on the next loop turn.")
+
+(defvar agent-repl--spell-check-timer nil
+  "The zero-second timer that checks the queue, or nil when none is armed.")
 
 (defun agent-repl--spell-on-change (beg end _length)
   "Queue BEG..END for checking when more than one character was inserted.
@@ -247,32 +264,99 @@ unlogged: it runs on every keystroke."
             (set-marker (cdr agent-repl--spell-pending) end)))
       (setq agent-repl--spell-pending (cons (copy-marker beg) (copy-marker end t))))
     (cl-pushnew (current-buffer) agent-repl--spell-pending-buffers)
-    (add-hook 'post-command-hook #'agent-repl--spell-check-pending-buffers)))
+    (unless agent-repl--spell-check-timer
+      (setq agent-repl--spell-check-timer
+            (run-at-time 0 nil #'agent-repl--spell-check-pending-buffers)))))
 
 (defun agent-repl--spell-check-pending-buffers ()
-  "Check every composer's queued insertions, then leave `post-command-hook'.
-On the hook only while something is queued, so a command with nothing
-queued pays nothing."
+  "Check every composer's queued insertions, oldest queued first.
+The queue's timer; it disarms itself, so the next insertion arms another."
   (let ((buffers (reverse agent-repl--spell-pending-buffers)))
-    (setq agent-repl--spell-pending-buffers nil)
-    (remove-hook 'post-command-hook #'agent-repl--spell-check-pending-buffers)
+    (setq agent-repl--spell-pending-buffers nil
+          agent-repl--spell-check-timer nil)
     (mapc #'agent-repl--spell-check-pending buffers)))
 
 (defun agent-repl--spell-check-pending (buffer)
-  "Check BUFFER's queued insertions, then forget them.
+  "Send BUFFER's queued insertions to hunspell, then forget the queue.
 A BUFFER killed, or no longer spellchecked, before the check ran has
-nothing left to check."
+nothing left to check.  The span's markers live on until the answer is
+applied (`agent-repl--spell-apply')."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (when-let* ((pending agent-repl--spell-pending))
         (setq agent-repl--spell-pending nil)
-        (when flyspell-mode
-          ;; flyspell redisplays after every word it checks; drawn, the
-          ;; cursor would walk the whole insertion (see the commentary).
-          (let ((inhibit-redisplay t))
-            (agent-repl--spell-check-region (car pending) (cdr pending))))
-        (set-marker (car pending) nil)
-        (set-marker (cdr pending) nil)))))
+        (if (not flyspell-mode)
+            (agent-repl--spell-release pending)
+          (let ((ws agent-repl--spell-ws)
+                (text (buffer-substring-no-properties (car pending) (cdr pending))))
+            (agent-repl--spell-run-hunspell
+             (agent-repl--spell-hunspell-input text)
+             (lambda (ok output)
+               (agent-repl--spell-answered ws buffer pending ok output)))))))))
+
+(defun agent-repl--spell-release (span)
+  "Point SPAN's two markers nowhere."
+  (set-marker (car span) nil)
+  (set-marker (cdr span) nil))
+
+(defun agent-repl--spell-hunspell-input (text)
+  "Return hunspell's `-a' input checking TEXT.
+`!' asks for terse answers (nothing for a correct word), and every line of
+TEXT is sent behind `^', so a line hunspell would read as a command (one
+starting `*', `@', `#' and the like) is checked as words."
+  (concat "!\n"
+          (mapconcat (lambda (line) (concat "^" line "\n"))
+                     (split-string text "\n") "")))
+
+(defun agent-repl--spell-misspelled-words (output)
+  "Return the words hunspell's `-a' OUTPUT names as misspelled, once each.
+A word with suggestions answers `& WORD ...', one without `# WORD ...',
+and a guess `? WORD ...'; every other line (the version banner, a blank
+line closing each input line) names none."
+  (let ((words nil))
+    (dolist (line (split-string output "\n"))
+      (when (string-match "\\`[&#?] \\([^ ]+\\)" line)
+        (cl-pushnew (match-string 1 line) words :test #'equal)))
+    (nreverse words)))
+
+(defun agent-repl--spell-answered (ws buffer span ok output)
+  "Apply hunspell's OUTPUT for BUFFER's SPAN, the check queued for WS.
+OK nil is a hunspell that failed: recorded at WARN with what it said, and
+nothing is highlighted.  A BUFFER killed, or no longer spellchecked, while
+hunspell worked takes nothing."
+  (unwind-protect
+      (cond
+       ((not ok)
+        (agent-repl--warn ws "elisp.spell.check-failed ws=%s buffer=%s span-length=%d output=%S"
+                          ws (buffer-name buffer)
+                          (- (or (marker-position (cdr span)) 0) (or (marker-position (car span)) 0))
+                          (string-trim output)))
+       ((buffer-live-p buffer)
+        (with-current-buffer buffer
+          (when flyspell-mode
+            (agent-repl--spell-apply (car span) (cdr span)
+                                     (agent-repl--spell-misspelled-words output))))))
+    (agent-repl--spell-release span)))
+
+(defun agent-repl--spell-apply (beg end words)
+  "Highlight each of WORDS wherever it stands as a prose word in BEG..END.
+A match counts only where flyspell reads the same whole word starting
+there (`flyspell-get-word'), so a misspelling inside a longer word is not
+one, and only where it is prose (`agent-repl--spell-prose-at-p'), so code
+stays unmarked as the as-you-type check leaves it."
+  (save-excursion
+    (let ((case-fold-search nil))
+      (dolist (word words)
+        (goto-char beg)
+        (while (search-forward word end t)
+          (let ((wbeg (match-beginning 0))
+                (wend (match-end 0)))
+            (save-excursion
+              (goto-char wbeg)
+              (let ((at (flyspell-get-word)))
+                (when (and at (equal (car at) word) (= (nth 1 at) wbeg)
+                           (agent-repl--spell-prose-at-p wbeg))
+                  (flyspell-highlight-incorrect-region wbeg wend nil))))))))))
 
 ;;;; ---- External boundary --------------------------------------------------
 
@@ -281,10 +365,16 @@ nothing left to check."
 Registered in `agent-repl--external-boundary-functions' (core.el)."
   (flyspell-mode 1)) ;; ALLOW-EXTERNAL-BOUNDARY
 
-(defun agent-repl--spell-check-region (beg end)
-  "Spellcheck BEG..END of the current buffer with the running hunspell.
-Registered in `agent-repl--external-boundary-functions' (core.el)."
-  (flyspell-region beg end)) ;; ALLOW-EXTERNAL-BOUNDARY
+(defun agent-repl--spell-run-hunspell (input callback)
+  "Run hunspell over INPUT with the composer's dictionary, then CALLBACK.
+The current buffer's dictionary, the program `ispell-program-name' names
+and the `DICPATH' `agent-repl--spell-configure-ispell' set; CALLBACK is
+`agent-repl--async-command''s.  Registered in
+`agent-repl--external-boundary-functions' (core.el)."
+  (agent-repl--async-command
+   "spell" temporary-file-directory
+   (list ispell-program-name "-a" "-i" "utf-8" "-d" ispell-local-dictionary)
+   callback input))
 
 ;;;; ---- Turning it on --------------------------------------------------------
 
@@ -327,6 +417,7 @@ log says what is missing and how to install it, once per Emacs."
         (let ((name (plist-get dictionary :name))
               (dir (plist-get dictionary :dir)))
           (agent-repl--spell-configure-ispell ws program name dir)
+          (setq-local agent-repl--spell-ws ws)
           (setq-local ispell-local-dictionary name)
           (setq-local flyspell-generic-check-word-predicate #'agent-repl--spell-check-word-p)
           (setq-local minor-mode-overriding-map-alist
