@@ -10,6 +10,9 @@ inside agent-repl.
 - Every term is settled during planning, before any code uses it.
 - Settled terms go in a glossary in the project's `AGENTS.md`.
 - Code, protos and docs use only glossary terms as identifiers, with no synonyms.
+- A glossary entry may give a code identifier that differs from the spoken
+  term, when the spoken term would clash in code. Conversation and docs use
+  the spoken term, and code uses the identifier.
 - Renaming a term changes the glossary and every place that uses it in the same commit.
 - This plan is updated continually as decisions are made, throughout the project.
 
@@ -235,7 +238,7 @@ Only rows marked settled are settled. Recommended picks are listed first.
 | The service that carries remote clients' encrypted traffic to the workstation | `relay` (settled) |
 | Where a node came from | `provenance` (recommended), `origin` (already used by `conversation.v1.PromptOrigin`) |
 | A highlighted passage | `quote` (recommended, matching the daemon's existing `replyquote` package for the whole-response reply), `excerpt` (already a rollback-preview field), `passage` |
-| Text around a highlight | `context` (owner's preference), `surround`; `context` is already Go's `context.Context` and the model's context |
+| Text around a highlight | `context` in conversation and docs, `questionContext` in code (settled) |
 | One stay of a parent on the path on screen | `visit` |
 | One counted instance of a bubble being seen | `sighting` |
 
