@@ -82,7 +82,15 @@ message AdoptWebWorkspaceTransferringAway {
   string address = 1;
 }
 message AdoptWebWorkspaceNotYetAdopted {}
-message AdoptWebWorkspaceNoTransferAnnounced {}
+// THE PLAIN BOOT'S ANSWER, and every page's ordinary one: no handover is in
+// flight, so there is nothing to adopt and the page boots as it is. It names
+// the page for the same reason the success arm does -- both are a page that
+// goes on to mount its body -- so neither path has to ask again.
+message AdoptWebWorkspaceNoTransferAnnounced {
+  // What the page is for, deciding which body it mounts below its topbar.
+  // Always set.
+  WebWorkspacePage page = 1;
+}
 message AdoptWebWorkspaceParticipantNotExpected {}
 // The successor refused a mid-work adoption and the incumbent serves the
 // workspace until it is free; it carries nothing because the incumbent's next

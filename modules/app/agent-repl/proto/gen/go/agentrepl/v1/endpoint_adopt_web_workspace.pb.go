@@ -700,8 +700,15 @@ func (*AdoptWebWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{10}
 }
 
+// THE PLAIN BOOT'S ANSWER, and every page's ordinary one: no handover is in
+// flight, so there is nothing to adopt and the page boots as it is. It names
+// the page for the same reason the success arm does -- both are a page that
+// goes on to mount its body -- so neither path has to ask again.
 type AdoptWebWorkspaceNoTransferAnnounced struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What the page is for, deciding which body it mounts below its topbar.
+	// Always set.
+	Page          *WebWorkspacePage `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -734,6 +741,13 @@ func (x *AdoptWebWorkspaceNoTransferAnnounced) ProtoReflect() protoreflect.Messa
 // Deprecated: Use AdoptWebWorkspaceNoTransferAnnounced.ProtoReflect.Descriptor instead.
 func (*AdoptWebWorkspaceNoTransferAnnounced) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *AdoptWebWorkspaceNoTransferAnnounced) GetPage() *WebWorkspacePage {
+	if x != nil {
+		return x.Page
+	}
+	return nil
 }
 
 type AdoptWebWorkspaceParticipantNotExpected struct {
@@ -846,8 +860,9 @@ const file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc = "" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"=\n" +
 	"!AdoptWebWorkspaceTransferringAway\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\" \n" +
-	"\x1eAdoptWebWorkspaceNotYetAdopted\"&\n" +
-	"$AdoptWebWorkspaceNoTransferAnnounced\")\n" +
+	"\x1eAdoptWebWorkspaceNotYetAdopted\"Z\n" +
+	"$AdoptWebWorkspaceNoTransferAnnounced\x122\n" +
+	"\x04page\x18\x01 \x01(\v2\x1e.agentrepl.v1.WebWorkspacePageR\x04page\")\n" +
 	"'AdoptWebWorkspaceParticipantNotExpected\"#\n" +
 	"!AdoptWebWorkspaceTransferDeferredB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -895,11 +910,12 @@ var file_agentrepl_v1_endpoint_adopt_web_workspace_proto_depIdxs = []int32{
 	11, // 10: agentrepl.v1.AdoptWebWorkspaceError.no_transfer_announced:type_name -> agentrepl.v1.AdoptWebWorkspaceNoTransferAnnounced
 	12, // 11: agentrepl.v1.AdoptWebWorkspaceError.participant_not_expected:type_name -> agentrepl.v1.AdoptWebWorkspaceParticipantNotExpected
 	13, // 12: agentrepl.v1.AdoptWebWorkspaceError.transfer_deferred:type_name -> agentrepl.v1.AdoptWebWorkspaceTransferDeferred
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	3,  // 13: agentrepl.v1.AdoptWebWorkspaceNoTransferAnnounced.page:type_name -> agentrepl.v1.WebWorkspacePage
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_adopt_web_workspace_proto_init() }
