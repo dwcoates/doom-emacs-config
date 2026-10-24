@@ -1269,7 +1269,18 @@ func (s *server) subjectFor(
 	ref *workspacev1.WorkspaceRef,
 	resp proto.Message,
 ) (resolved, *connect.Error, bool) {
-	if err := validateWorkspaceRef("workspace", ref); err != nil {
+	return s.subjectForField(ctx, rpc, "workspace", ref, resp)
+}
+
+// subjectForField is subjectFor for a ref the request carries under FIELD,
+// which is the name an invalid ref is refused under.
+func (s *server) subjectForField(
+	ctx context.Context,
+	rpc, field string,
+	ref *workspacev1.WorkspaceRef,
+	resp proto.Message,
+) (resolved, *connect.Error, bool) {
+	if err := validateWorkspaceRef(field, ref); err != nil {
 		return resolved{}, err, true
 	}
 	subject, r, err := s.resolveRef(ctx, rpc, ref)
