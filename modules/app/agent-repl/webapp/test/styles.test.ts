@@ -3261,11 +3261,11 @@ describe("the expanded response's eggshell border", () => {
 });
 
 describe("the response border ladder", () => {
-  it("draws the response edges at half strength, so they read thinner than every other bubble border", () => {
+  it("draws the response edges at 35% strength, so they read thinner than every other bubble border", () => {
     // Arrange / Act
     const strengths = [...stylesheet.matchAll(/--response-border-strength:\s*([0-9.]+)%/g)].map((m) => Number(m[1]));
-    // Assert — one value, shared by both themes, at half the hue's strength.
-    expect(strengths).toEqual([50]);
+    // Assert — one value, shared by both themes, at 35% of the hue's strength.
+    expect(strengths).toEqual([35]);
   });
 
   it("draws the green answer edge on the shared strength token", () => {
