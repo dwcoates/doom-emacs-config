@@ -110,6 +110,9 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   ecosystem (gestures, long scrolling lists, text highlighting, markdown),
   and coding agents write it most reliably. Long views draw only the rows on
   screen, so the virtual DOM does not slow them.
+- The first implementation supports only the Emacs host, through xwidget.
+  The Tauri shell first comes into play with the mobile app. A standalone
+  desktop app would use it too, but none is planned.
 - The shell is Tauri, on desktop and on mobile, so the mobile app hosts the
   same webapp in a web view. On macOS and iOS it uses the same WebKit as
   xwidget, Tauri 2 also builds for iOS and Android, and its Rust native side
