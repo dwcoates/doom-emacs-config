@@ -441,6 +441,8 @@ export function roster(init: {
    * numbered in the Open section's walk, as the daemon numbers it.
    */
   tabs?: Array<{ id: string; drawn?: "drawn" | "withheldCollapsed" }>;
+  /** The Chat app is shown, with these threads (id and name). */
+  chat?: { id: string; name: string; summary?: string; current?: boolean }[];
 } = {}): WorkspaceRoster {
   const repos = init.repos ?? [];
   const counted = repos.reduce((sum, section) => sum + (section.header?.count?.workspaces ?? 0), 0);
@@ -448,12 +450,31 @@ export function roster(init: {
     repos.map(sectionTabRegions),
     init.tabs?.filter((tab) => (tab.drawn ?? "drawn") === "drawn").map((tab) => tab.id),
   );
+  const chat = init.chat !== undefined;
+  const app = (which: "workspaces" | "chat") => ({ app: { case: which, value: {} } }) as const;
   return create(WorkspaceRosterSchema, {
     repository: { sections: repos, openCount: { workspaces: init.openCount ?? counted } },
     open: init.open ?? openSection(),
     recentlyMerged: init.merged ?? mergedSection(),
     hidden: init.hidden ?? hiddenSection(),
     closed: {},
+    appSwitcher: {
+      title: { text: chat ? "Chat" : "Workspaces" },
+      shown: app(chat ? "chat" : "workspaces"),
+      options: [
+        { label: { text: "Workspaces" }, hint: { text: "agent-repl" }, app: app("workspaces"), shown: chat ? undefined : {} },
+        { label: { text: "Chat" }, hint: { text: "zettel" }, app: app("chat"), shown: chat ? {} : undefined },
+      ],
+    },
+    threads: {
+      newThread: { label: "New thread" },
+      rows: (init.chat ?? []).map((t) => ({
+        thread: { id: t.id, dir: `/zettel/threads/${t.name}` },
+        name: { text: t.name },
+        summary: t.summary === undefined ? undefined : { text: t.summary },
+        current: t.current === true ? {} : undefined,
+      })),
+    },
     ...(init.current === undefined
       ? {}
       : { current: { workspace: { id: init.current, dir: `/w/${init.current}` } } }),

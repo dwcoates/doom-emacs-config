@@ -40,6 +40,7 @@ import { createRowReveal } from "./reveal.js";
 import { guardMalformedNow } from "../rpc/guard.js";
 import { placeOpenRowDetails } from "./row.js";
 import { installBandFit } from "./band-fit.js";
+import { createAppSwitcher, drawThreadSection, showsChat, type AppSwitcher } from "./threads.js";
 import { applySearch, createRailSearch, type RailSearch } from "./search.js";
 import { createSelectionEdge } from "./selection-edge.js";
 import { installWallPhase, type WallPhaseEnv } from "./wall-phase.js";
@@ -260,7 +261,7 @@ function mountSidebarIn(
     });
     bandFit.refit();
   });
-  const head = drawRailHead(search);
+  const head = drawRailHead(search, createAppSwitcher(ctx, dropdowns));
   host.replaceChildren(head.element, search.bar, arrangeStatus, body, arrangeLayer);
   // THE RAIL'S LOOPS RUN ON THE WALL CLOCK (wall-phase.ts), so neither a
   // redraw nor a switch to another workspace's page restarts one.
@@ -371,7 +372,13 @@ function mountSidebarIn(
     // The blink pass brackets the draw: markers are re-attached to the phases
     // already running, and any marker the daemon cleared is forgotten.
     attention.beginPass();
-    const drawn = drawWorkspaceRoster(roster, rail);
+    // THE TITLE IS THE APP SWITCHER, and the body is the app the roster shows
+    // (threads.ts): a thread on screen shows Chat.
+    const switcher = requireMessage(roster.appSwitcher, "WorkspaceRoster.app_switcher");
+    head.switcher.update(switcher);
+    const drawn = showsChat(switcher)
+      ? drawThreadSection(requireMessage(roster.threads, "WorkspaceRoster.threads"), ctx)
+      : drawWorkspaceRoster(roster, rail);
     attention.endPass();
     head.showVersion(roster.version);
     mark("build");
@@ -448,18 +455,17 @@ export interface RailHead {
   element: HTMLElement;
   /** State the roster's agent-repl version at the head's right; none hides it. */
   showVersion(version: RosterVersion | undefined): void;
+  /** The title, which is the app switcher (threads.ts). */
+  switcher: AppSwitcher;
 }
 
-/** The rail's header: the search toggle, its title, and the agent-repl version. */
-export function drawRailHead(search: RailSearch): RailHead {
+/** The rail's header: the search toggle, its title (the app switcher), and the agent-repl version. */
+export function drawRailHead(search: RailSearch, switcher: AppSwitcher): RailHead {
   const head = document.createElement("div");
   head.className = "sb-head";
   head.appendChild(search.toggle);
 
-  const title = document.createElement("span");
-  title.className = "sb-title";
-  title.textContent = "Workspaces";
-  head.appendChild(title);
+  head.append(switcher.title, switcher.menu);
 
   // THE VERSION IS THE DAEMON'S (frontend.v1.WorkspaceRoster.version), drawn
   // verbatim; UNSET until the daemon has resolved one, when nothing is drawn.
@@ -469,6 +475,7 @@ export function drawRailHead(search: RailSearch): RailHead {
   head.appendChild(version);
   return {
     element: head,
+    switcher,
     showVersion(next: RosterVersion | undefined): void {
       version.hidden = next === undefined;
       version.textContent = next?.text ?? "";
