@@ -578,3 +578,37 @@ func (s *fakeServer) RunTests(ctx context.Context, req *connect.Request[v1.RunTe
 	return connect.NewError(connect.CodeUnimplemented,
 		fmt.Errorf("fakedaemon mocks only Emacs's streams; RunTests is the agent CLI's stream"))
 }
+
+// ---- The chat verbs: scripted like every unary; WatchChat is not mocked ----
+
+func (s *fakeServer) CreateThread(ctx context.Context, req *connect.Request[v1.CreateThreadRequest]) (*connect.Response[v1.CreateThreadResponse], error) {
+	return handleUnary[v1.CreateThreadRequest, v1.CreateThreadResponse](ctx, s, "CreateThread", req.Msg)
+}
+
+func (s *fakeServer) RequestNewThread(ctx context.Context, req *connect.Request[v1.RequestNewThreadRequest]) (*connect.Response[v1.RequestNewThreadResponse], error) {
+	return handleUnary[v1.RequestNewThreadRequest, v1.RequestNewThreadResponse](ctx, s, "RequestNewThread", req.Msg)
+}
+
+func (s *fakeServer) SwitchChatSibling(ctx context.Context, req *connect.Request[v1.SwitchChatSiblingRequest]) (*connect.Response[v1.SwitchChatSiblingResponse], error) {
+	return handleUnary[v1.SwitchChatSiblingRequest, v1.SwitchChatSiblingResponse](ctx, s, "SwitchChatSibling", req.Msg)
+}
+
+func (s *fakeServer) ReportChatSightings(ctx context.Context, req *connect.Request[v1.ReportChatSightingsRequest]) (*connect.Response[v1.ReportChatSightingsResponse], error) {
+	return handleUnary[v1.ReportChatSightingsRequest, v1.ReportChatSightingsResponse](ctx, s, "ReportChatSightings", req.Msg)
+}
+
+func (s *fakeServer) SelectChatText(ctx context.Context, req *connect.Request[v1.SelectChatTextRequest]) (*connect.Response[v1.SelectChatTextResponse], error) {
+	return handleUnary[v1.SelectChatTextRequest, v1.SelectChatTextResponse](ctx, s, "SelectChatText", req.Msg)
+}
+
+func (s *fakeServer) ShowSidebarApp(ctx context.Context, req *connect.Request[v1.ShowSidebarAppRequest]) (*connect.Response[v1.ShowSidebarAppResponse], error) {
+	return handleUnary[v1.ShowSidebarAppRequest, v1.ShowSidebarAppResponse](ctx, s, "ShowSidebarApp", req.Msg)
+}
+
+func (s *fakeServer) WatchChat(ctx context.Context, req *connect.Request[v1.WatchChatRequest], stream *connect.ServerStream[v1.WatchChatResponse]) error {
+	s.record(ctx, "WatchChat", req.Msg)
+	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
+		map[string]any{"method": "WatchChat"})
+	return connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("fakedaemon: WatchChat is not mocked"))
+}
