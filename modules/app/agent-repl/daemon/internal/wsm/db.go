@@ -34,6 +34,10 @@ type DB interface {
 	// is not yet known is refused with ErrMainWorktreeUnregistered. The bool
 	// reports whether the record was created.
 	RegisterWorkspace(ctx context.Context, dir string, facts RegisterFacts) (Workspace, bool, error)
+	// RegisterThread records a new zettel chat thread at dir, inside the zettel
+	// home (dir's parent), which it mints on first sight. Not idempotent: a
+	// directory already registered is ErrThreadNameTaken.
+	RegisterThread(ctx context.Context, dir, name string) (Workspace, error)
 	// Workspace loads one workspace by id.
 	Workspace(ctx context.Context, id WorkspaceID) (Workspace, error)
 	// WorkspaceByDir loads one workspace by its normalized worktree directory.

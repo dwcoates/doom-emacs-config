@@ -44,6 +44,9 @@ type (
 // Workspace is one registered workspace's durable record.
 type Workspace struct {
 	ID WorkspaceID
+	// Kind is what the workspace is: a repository's worktree, or a zettel
+	// chat thread (threads.go).
+	Kind WorkspaceKind
 	// Repo is the repository the worktree belongs to.
 	Repo RepoID
 	// Dir is the normalized worktree directory.
@@ -239,6 +242,9 @@ type Repository struct {
 	// repository grouping and the tab bar both follow (arrange.go). Unique,
 	// and at least 1.
 	Place int64
+	// Kind is what the row is: a git repository, or the zettel home that holds
+	// every chat thread (threads.go).
+	Kind RepositoryKind
 }
 
 // Subsection is one user-named subsection of a repository's sidebar section
