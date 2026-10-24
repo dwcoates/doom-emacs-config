@@ -13,8 +13,10 @@
 // async merge in it are refused, naming the file; there is no default
 // destination.
 //
-// A DEPLOY RUNS THREE STAGES, IN ORDER, all inside the repository's queue, one
-// deploy at a time:
+// A DEPLOY RUNS THREE STAGES, IN ORDER, inside the repository's queue. Every
+// stage runs one deploy at a time unless `concurrent` names a leading run of
+// stages that deploys run side by side ahead of their turn
+// (DeployConcurrentStages):
 //
 //   pre_deploy   its hooks, then the built-in local merge when configured;
 //                never held
@@ -41,7 +43,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file repoconfig/v1/deploy_config.proto.
  */
 export const file_repoconfig_v1_deploy_config: GenFile = /*@__PURE__*/
-  fileDesc("CiFyZXBvY29uZmlnL3YxL2RlcGxveV9jb25maWcucHJvdG8SDXJlcG9jb25maWcudjEivAEKDERlcGxveUNvbmZpZxI3CgpwcmVfZGVwbG95GAEgASgLMiMucmVwb2NvbmZpZy52MS5EZXBsb3lQcmVEZXBsb3lTdGFnZRIzCgZkZXBsb3kYAiABKAsyHi5yZXBvY29uZmlnLnYxLkRlcGxveUhvb2tFbnRyeUgAiAEBEjMKC3Bvc3RfZGVwbG95GAMgAygLMh4ucmVwb2NvbmZpZy52MS5EZXBsb3lIb29rRW50cnlCCQoHX2RlcGxveSKQAQoURGVwbG95UHJlRGVwbG95U3RhZ2USLQoFaG9va3MYASADKAsyHi5yZXBvY29uZmlnLnYxLkRlcGxveUhvb2tFbnRyeRI5Cgtsb2NhbF9tZXJnZRgCIAEoCzIfLnJlcG9jb25maWcudjEuRGVwbG95TG9jYWxNZXJnZUgAiAEBQg4KDF9sb2NhbF9tZXJnZSKSAQoQRGVwbG95TG9jYWxNZXJnZRIzCgV0ZXN0cxgBIAEoCzIkLnJlcG9jb25maWcudjEuRGVwbG95TG9jYWxNZXJnZVRlc3RzEjkKC3ZlcnNpb25fdGFnGAIgASgLMh8ucmVwb2NvbmZpZy52MS5EZXBsb3lWZXJzaW9uVGFnSACIAQFCDgoMX3ZlcnNpb25fdGFnImcKFURlcGxveUxvY2FsTWVyZ2VUZXN0cxJGChFhZ2VudF9yZXBsX3N1aXRlcxgBIAEoCzIpLnJlcG9jb25maWcudjEuRGVwbG95VGVzdHNBZ2VudFJlcGxTdWl0ZXNIAEIGCgRraW5kIjEKGkRlcGxveVRlc3RzQWdlbnRSZXBsU3VpdGVzEhMKC3NjcmlwdF9wYXRoGAEgASgJIhIKEERlcGxveVZlcnNpb25UYWcibgoPRGVwbG95SG9va0VudHJ5EicKBGhvb2sYASABKAsyGS5yZXBvY29uZmlnLnYxLkRlcGxveUhvb2sSMgoIcnVuc19mb3IYAiABKAsyIC5yZXBvY29uZmlnLnYxLkRlcGxveUhvb2tSdW5zRm9yInoKCkRlcGxveUhvb2sSMQoGc2NyaXB0GAEgASgLMh8ucmVwb2NvbmZpZy52MS5EZXBsb3lIb29rU2NyaXB0SAASMQoGcHJvbXB0GAIgASgLMh8ucmVwb2NvbmZpZy52MS5EZXBsb3lIb29rUHJvbXB0SABCBgoEaG9vayI5ChBEZXBsb3lIb29rU2NyaXB0EgwKBHBhdGgYASABKAkSFwoPdGltZW91dF9zZWNvbmRzGAIgASgNIiAKEERlcGxveUhvb2tQcm9tcHQSDAoEdGV4dBgBIAEoCSKTAQoRRGVwbG95SG9va1J1bnNGb3ISNAoEbWFpbhgBIAEoCzIkLnJlcG9jb25maWcudjEuRGVwbG95SG9va1J1bnNGb3JNYWluSAASPwoKYW55X3RhcmdldBgCIAEoCzIpLnJlcG9jb25maWcudjEuRGVwbG95SG9va1J1bnNGb3JBbnlUYXJnZXRIAEIHCgVzY29wZSIXChVEZXBsb3lIb29rUnVuc0Zvck1haW4iHAoaRGVwbG95SG9va1J1bnNGb3JBbnlUYXJnZXRCLFoqYWdlbnRyZXBsL3Byb3RvL3JlcG9jb25maWcvdjE7cmVwb2NvbmZpZ3YxYgZwcm90bzM");
+  fileDesc("CiFyZXBvY29uZmlnL3YxL2RlcGxveV9jb25maWcucHJvdG8SDXJlcG9jb25maWcudjEiiwIKDERlcGxveUNvbmZpZxI3CgpwcmVfZGVwbG95GAEgASgLMiMucmVwb2NvbmZpZy52MS5EZXBsb3lQcmVEZXBsb3lTdGFnZRIzCgZkZXBsb3kYAiABKAsyHi5yZXBvY29uZmlnLnYxLkRlcGxveUhvb2tFbnRyeUgAiAEBEjMKC3Bvc3RfZGVwbG95GAMgAygLMh4ucmVwb2NvbmZpZy52MS5EZXBsb3lIb29rRW50cnkSPgoKY29uY3VycmVudBgEIAEoCzIlLnJlcG9jb25maWcudjEuRGVwbG95Q29uY3VycmVudFN0YWdlc0gBiAEBQgkKB19kZXBsb3lCDQoLX2NvbmN1cnJlbnQiugEKFkRlcGxveUNvbmN1cnJlbnRTdGFnZXMSTQoSdGhyb3VnaF9wcmVfZGVwbG95GAEgASgLMi8ucmVwb2NvbmZpZy52MS5EZXBsb3lDb25jdXJyZW50VGhyb3VnaFByZURlcGxveUgAEkYKDnRocm91Z2hfZGVwbG95GAIgASgLMiwucmVwb2NvbmZpZy52MS5EZXBsb3lDb25jdXJyZW50VGhyb3VnaERlcGxveUgAQgkKB3Rocm91Z2giIgogRGVwbG95Q29uY3VycmVudFRocm91Z2hQcmVEZXBsb3kiHwodRGVwbG95Q29uY3VycmVudFRocm91Z2hEZXBsb3kikAEKFERlcGxveVByZURlcGxveVN0YWdlEi0KBWhvb2tzGAEgAygLMh4ucmVwb2NvbmZpZy52MS5EZXBsb3lIb29rRW50cnkSOQoLbG9jYWxfbWVyZ2UYAiABKAsyHy5yZXBvY29uZmlnLnYxLkRlcGxveUxvY2FsTWVyZ2VIAIgBAUIOCgxfbG9jYWxfbWVyZ2UikgEKEERlcGxveUxvY2FsTWVyZ2USMwoFdGVzdHMYASABKAsyJC5yZXBvY29uZmlnLnYxLkRlcGxveUxvY2FsTWVyZ2VUZXN0cxI5Cgt2ZXJzaW9uX3RhZxgCIAEoCzIfLnJlcG9jb25maWcudjEuRGVwbG95VmVyc2lvblRhZ0gAiAEBQg4KDF92ZXJzaW9uX3RhZyJnChVEZXBsb3lMb2NhbE1lcmdlVGVzdHMSRgoRYWdlbnRfcmVwbF9zdWl0ZXMYASABKAsyKS5yZXBvY29uZmlnLnYxLkRlcGxveVRlc3RzQWdlbnRSZXBsU3VpdGVzSABCBgoEa2luZCIxChpEZXBsb3lUZXN0c0FnZW50UmVwbFN1aXRlcxITCgtzY3JpcHRfcGF0aBgBIAEoCSISChBEZXBsb3lWZXJzaW9uVGFnIm4KD0RlcGxveUhvb2tFbnRyeRInCgRob29rGAEgASgLMhkucmVwb2NvbmZpZy52MS5EZXBsb3lIb29rEjIKCHJ1bnNfZm9yGAIgASgLMiAucmVwb2NvbmZpZy52MS5EZXBsb3lIb29rUnVuc0ZvciJ6CgpEZXBsb3lIb29rEjEKBnNjcmlwdBgBIAEoCzIfLnJlcG9jb25maWcudjEuRGVwbG95SG9va1NjcmlwdEgAEjEKBnByb21wdBgCIAEoCzIfLnJlcG9jb25maWcudjEuRGVwbG95SG9va1Byb21wdEgAQgYKBGhvb2siOQoQRGVwbG95SG9va1NjcmlwdBIMCgRwYXRoGAEgASgJEhcKD3RpbWVvdXRfc2Vjb25kcxgCIAEoDSIgChBEZXBsb3lIb29rUHJvbXB0EgwKBHRleHQYASABKAkikwEKEURlcGxveUhvb2tSdW5zRm9yEjQKBG1haW4YASABKAsyJC5yZXBvY29uZmlnLnYxLkRlcGxveUhvb2tSdW5zRm9yTWFpbkgAEj8KCmFueV90YXJnZXQYAiABKAsyKS5yZXBvY29uZmlnLnYxLkRlcGxveUhvb2tSdW5zRm9yQW55VGFyZ2V0SABCBwoFc2NvcGUiFwoVRGVwbG95SG9va1J1bnNGb3JNYWluIhwKGkRlcGxveUhvb2tSdW5zRm9yQW55VGFyZ2V0QixaKmFnZW50cmVwbC9wcm90by9yZXBvY29uZmlnL3YxO3JlcG9jb25maWd2MWIGcHJvdG8z");
 
 /**
  * A repository's deploy: the whole of `.agent-repl/deploy.yaml`.
@@ -73,6 +75,16 @@ export type DeployConfig = Message<"repoconfig.v1.DeployConfig"> & {
    * @generated from field: repeated repoconfig.v1.DeployHookEntry post_deploy = 3;
    */
   postDeploy: DeployHookEntry[];
+
+  /**
+   * The stages, from the first, that deploys run CONCURRENTLY, ahead of their
+   * turn; the stages after them run one deploy at a time, entered in queue
+   * order. UNSET: every stage runs one deploy at a time, which is how a
+   * repository with a local merge always runs.
+   *
+   * @generated from field: optional repoconfig.v1.DeployConcurrentStages concurrent = 4;
+   */
+  concurrent?: DeployConcurrentStages | undefined;
 };
 
 /**
@@ -81,6 +93,79 @@ export type DeployConfig = Message<"repoconfig.v1.DeployConfig"> & {
  */
 export const DeployConfigSchema: GenMessage<DeployConfig> = /*@__PURE__*/
   messageDesc(file_repoconfig_v1_deploy_config, 0);
+
+/**
+ * THE CONCURRENT STAGES ARE A LEADING RUN, and the arm is the stage it runs
+ * through. Every deploy waiting in the repository's queue runs these stages
+ * side by side, with no other deploy's progress to wait on; each then waits
+ * for every deploy ahead of it in the queue to finish, and runs the rest of
+ * its stages one at a time, in queue order.
+ *
+ * ONLY A LEADING RUN IS EXPRESSIBLE, so a concurrent stage between two
+ * one-at-a-time stages cannot be written. A local merge cannot be concurrent:
+ * it lands on the target, which only one deploy at a time may move, so a
+ * config with `pre_deploy.local_merge` and any arm here is refused
+ * (deploy_config_invalid). SET WITH NO ARM is refused too.
+ *
+ * @generated from message repoconfig.v1.DeployConcurrentStages
+ */
+export type DeployConcurrentStages = Message<"repoconfig.v1.DeployConcurrentStages"> & {
+  /**
+   * @generated from oneof repoconfig.v1.DeployConcurrentStages.through
+   */
+  through: {
+    /**
+     * pre_deploy runs concurrently; deploy and post_deploy one at a time.
+     *
+     * @generated from field: repoconfig.v1.DeployConcurrentThroughPreDeploy through_pre_deploy = 1;
+     */
+    value: DeployConcurrentThroughPreDeploy;
+    case: "throughPreDeploy";
+  } | {
+    /**
+     * pre_deploy and deploy run concurrently; post_deploy one at a time. A
+     * deploy hook that waits on something outside the daemon (a pull request
+     * merging upstream) then holds no other deploy back.
+     *
+     * @generated from field: repoconfig.v1.DeployConcurrentThroughDeploy through_deploy = 2;
+     */
+    value: DeployConcurrentThroughDeploy;
+    case: "throughDeploy";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message repoconfig.v1.DeployConcurrentStages.
+ * Use `create(DeployConcurrentStagesSchema)` to create a new message.
+ */
+export const DeployConcurrentStagesSchema: GenMessage<DeployConcurrentStages> = /*@__PURE__*/
+  messageDesc(file_repoconfig_v1_deploy_config, 1);
+
+/**
+ * @generated from message repoconfig.v1.DeployConcurrentThroughPreDeploy
+ */
+export type DeployConcurrentThroughPreDeploy = Message<"repoconfig.v1.DeployConcurrentThroughPreDeploy"> & {
+};
+
+/**
+ * Describes the message repoconfig.v1.DeployConcurrentThroughPreDeploy.
+ * Use `create(DeployConcurrentThroughPreDeploySchema)` to create a new message.
+ */
+export const DeployConcurrentThroughPreDeploySchema: GenMessage<DeployConcurrentThroughPreDeploy> = /*@__PURE__*/
+  messageDesc(file_repoconfig_v1_deploy_config, 2);
+
+/**
+ * @generated from message repoconfig.v1.DeployConcurrentThroughDeploy
+ */
+export type DeployConcurrentThroughDeploy = Message<"repoconfig.v1.DeployConcurrentThroughDeploy"> & {
+};
+
+/**
+ * Describes the message repoconfig.v1.DeployConcurrentThroughDeploy.
+ * Use `create(DeployConcurrentThroughDeploySchema)` to create a new message.
+ */
+export const DeployConcurrentThroughDeploySchema: GenMessage<DeployConcurrentThroughDeploy> = /*@__PURE__*/
+  messageDesc(file_repoconfig_v1_deploy_config, 3);
 
 /**
  * The first stage of a deploy.
@@ -115,7 +200,7 @@ export type DeployPreDeployStage = Message<"repoconfig.v1.DeployPreDeployStage">
  * Use `create(DeployPreDeployStageSchema)` to create a new message.
  */
 export const DeployPreDeployStageSchema: GenMessage<DeployPreDeployStage> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_deploy_config, 1);
+  messageDesc(file_repoconfig_v1_deploy_config, 4);
 
 /**
  * THE BUILT-IN LOCAL MERGE. Its steps are the daemon's own code, in this
@@ -154,7 +239,7 @@ export type DeployLocalMerge = Message<"repoconfig.v1.DeployLocalMerge"> & {
  * Use `create(DeployLocalMergeSchema)` to create a new message.
  */
 export const DeployLocalMergeSchema: GenMessage<DeployLocalMerge> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_deploy_config, 2);
+  messageDesc(file_repoconfig_v1_deploy_config, 5);
 
 /**
  * Which test step the local merge runs. THE ARM IS THE STEP KIND: each is
@@ -182,7 +267,7 @@ export type DeployLocalMergeTests = Message<"repoconfig.v1.DeployLocalMergeTests
  * Use `create(DeployLocalMergeTestsSchema)` to create a new message.
  */
 export const DeployLocalMergeTestsSchema: GenMessage<DeployLocalMergeTests> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_deploy_config, 3);
+  messageDesc(file_repoconfig_v1_deploy_config, 6);
 
 /**
  * agent-repl's test runner: the suites a change touches are selected from the
@@ -208,7 +293,7 @@ export type DeployTestsAgentReplSuites = Message<"repoconfig.v1.DeployTestsAgent
  * Use `create(DeployTestsAgentReplSuitesSchema)` to create a new message.
  */
 export const DeployTestsAgentReplSuitesSchema: GenMessage<DeployTestsAgentReplSuites> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_deploy_config, 4);
+  messageDesc(file_repoconfig_v1_deploy_config, 7);
 
 /**
  * The repository versions its landings. No fields: which increment a landing
@@ -224,7 +309,7 @@ export type DeployVersionTag = Message<"repoconfig.v1.DeployVersionTag"> & {
  * Use `create(DeployVersionTagSchema)` to create a new message.
  */
 export const DeployVersionTagSchema: GenMessage<DeployVersionTag> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_deploy_config, 5);
+  messageDesc(file_repoconfig_v1_deploy_config, 8);
 
 /**
  * One hook of a stage, and which landings it runs for.
@@ -253,7 +338,7 @@ export type DeployHookEntry = Message<"repoconfig.v1.DeployHookEntry"> & {
  * Use `create(DeployHookEntrySchema)` to create a new message.
  */
 export const DeployHookEntrySchema: GenMessage<DeployHookEntry> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_deploy_config, 6);
+  messageDesc(file_repoconfig_v1_deploy_config, 9);
 
 /**
  * A hook: a script the daemon runs, or a prompt it sends to the deploy's
@@ -292,7 +377,7 @@ export type DeployHook = Message<"repoconfig.v1.DeployHook"> & {
  * Use `create(DeployHookSchema)` to create a new message.
  */
 export const DeployHookSchema: GenMessage<DeployHook> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_deploy_config, 7);
+  messageDesc(file_repoconfig_v1_deploy_config, 10);
 
 /**
  * A script hook. The daemon runs it with bash, with the repository's MAIN
@@ -332,7 +417,7 @@ export type DeployHookScript = Message<"repoconfig.v1.DeployHookScript"> & {
  * Use `create(DeployHookScriptSchema)` to create a new message.
  */
 export const DeployHookScriptSchema: GenMessage<DeployHookScript> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_deploy_config, 8);
+  messageDesc(file_repoconfig_v1_deploy_config, 11);
 
 /**
  * A prompt hook: the text is submitted verbatim as a turn of the deploy's
@@ -355,7 +440,7 @@ export type DeployHookPrompt = Message<"repoconfig.v1.DeployHookPrompt"> & {
  * Use `create(DeployHookPromptSchema)` to create a new message.
  */
 export const DeployHookPromptSchema: GenMessage<DeployHookPrompt> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_deploy_config, 9);
+  messageDesc(file_repoconfig_v1_deploy_config, 12);
 
 /**
  * Which landings a hook runs for. THE ARM IS THE SCOPE.
@@ -391,7 +476,7 @@ export type DeployHookRunsFor = Message<"repoconfig.v1.DeployHookRunsFor"> & {
  * Use `create(DeployHookRunsForSchema)` to create a new message.
  */
 export const DeployHookRunsForSchema: GenMessage<DeployHookRunsFor> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_deploy_config, 10);
+  messageDesc(file_repoconfig_v1_deploy_config, 13);
 
 /**
  * The hook runs only for landings on the repository's main branch.
@@ -406,7 +491,7 @@ export type DeployHookRunsForMain = Message<"repoconfig.v1.DeployHookRunsForMain
  * Use `create(DeployHookRunsForMainSchema)` to create a new message.
  */
 export const DeployHookRunsForMainSchema: GenMessage<DeployHookRunsForMain> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_deploy_config, 11);
+  messageDesc(file_repoconfig_v1_deploy_config, 14);
 
 /**
  * The hook runs for every landing, whatever its target.
@@ -421,5 +506,5 @@ export type DeployHookRunsForAnyTarget = Message<"repoconfig.v1.DeployHookRunsFo
  * Use `create(DeployHookRunsForAnyTargetSchema)` to create a new message.
  */
 export const DeployHookRunsForAnyTargetSchema: GenMessage<DeployHookRunsForAnyTarget> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_deploy_config, 12);
+  messageDesc(file_repoconfig_v1_deploy_config, 15);
 

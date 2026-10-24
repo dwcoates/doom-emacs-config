@@ -13,8 +13,10 @@
 // async merge in it are refused, naming the file; there is no default
 // destination.
 //
-// A DEPLOY RUNS THREE STAGES, IN ORDER, all inside the repository's queue, one
-// deploy at a time:
+// A DEPLOY RUNS THREE STAGES, IN ORDER, inside the repository's queue. Every
+// stage runs one deploy at a time unless `concurrent` names a leading run of
+// stages that deploys run side by side ahead of their turn
+// (DeployConcurrentStages):
 //
 //   pre_deploy   its hooks, then the built-in local merge when configured;
 //                never held
@@ -47,7 +49,36 @@ message DeployConfig {
   // The last stage's hooks, run in order once the deploy stage has finished.
   // Never held. Empty when the repository has none.
   repeated DeployHookEntry post_deploy = 3;
+  // The stages, from the first, that deploys run CONCURRENTLY, ahead of their
+  // turn; the stages after them run one deploy at a time, entered in queue
+  // order. UNSET: every stage runs one deploy at a time, which is how a
+  // repository with a local merge always runs.
+  optional DeployConcurrentStages concurrent = 4;
 }
+
+// THE CONCURRENT STAGES ARE A LEADING RUN, and the arm is the stage it runs
+// through. Every deploy waiting in the repository's queue runs these stages
+// side by side, with no other deploy's progress to wait on; each then waits
+// for every deploy ahead of it in the queue to finish, and runs the rest of
+// its stages one at a time, in queue order.
+//
+// ONLY A LEADING RUN IS EXPRESSIBLE, so a concurrent stage between two
+// one-at-a-time stages cannot be written. A local merge cannot be concurrent:
+// it lands on the target, which only one deploy at a time may move, so a
+// config with `pre_deploy.local_merge` and any arm here is refused
+// (deploy_config_invalid). SET WITH NO ARM is refused too.
+message DeployConcurrentStages {
+  oneof through {
+    // pre_deploy runs concurrently; deploy and post_deploy one at a time.
+    DeployConcurrentThroughPreDeploy through_pre_deploy = 1;
+    // pre_deploy and deploy run concurrently; post_deploy one at a time. A
+    // deploy hook that waits on something outside the daemon (a pull request
+    // merging upstream) then holds no other deploy back.
+    DeployConcurrentThroughDeploy through_deploy = 2;
+  }
+}
+message DeployConcurrentThroughPreDeploy {}
+message DeployConcurrentThroughDeploy {}
 
 // The first stage of a deploy.
 message DeployPreDeployStage {
