@@ -131,7 +131,7 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
 (ert-deftest agent-repl-test-input-help-button-shows-its-title ()
   "A topic's button is its title, padded, with the button face."
   (let ((button (agent-repl--input-help-button '(:id x :title "Sending prompts"))))
-    (should (equal (substring-no-properties button) " Sending prompts "))
+    (should (equal (substring-no-properties button) "  Sending prompts  "))
     (should (eq (get-text-property 1 'face button) 'agent-repl-input-help-button))
     (should (eq (get-text-property 1 'mouse-face button) 'mode-line-highlight))))
 
@@ -201,22 +201,22 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
                  '(((nil) nil)
                    (("normal" nil) nil)
                    (("normal" "insert") nil)
-                   (("normal") "(command mode)")
-                   (("insert") "(insert mode)")
-                   (("visual" "normal") "(command mode, visual mode)")))
+                   (("normal") "command mode")
+                   (("insert") "insert mode")
+                   (("visual" "normal") "command mode, visual mode")))
     (should (equal (agent-repl--input-help-state-label states) want))))
 
 (ert-deftest agent-repl-test-input-help-keys-plain-binding ()
   "A plain composer binding is its key, unannotated."
   (should (equal (agent-repl--input-help-keys
                   'cmd (agent-repl-test-input-help--context :composer `((,(kbd "C-c C-c") . cmd))))
-                 '("C-c C-c"))))
+                 '(("C-c C-c")))))
 
 (ert-deftest agent-repl-test-input-help-keys-state-binding-is-annotated ()
   "A command-mode-only binding is annotated with its state."
   (should (equal (agent-repl--input-help-keys
                   'cmd (agent-repl-test-input-help--context :composer '(([normal-state up] . cmd))))
-                 '("<up> (command mode)"))))
+                 '(("<up>" . "command mode")))))
 
 (ert-deftest agent-repl-test-input-help-keys-one-key-in-several-states-is-one-label ()
   "A key bound plainly and in both states is listed once, unannotated."
@@ -225,7 +225,7 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
                         :composer `((,(kbd "RET") . cmd)
                                     (,(vconcat [normal-state] (kbd "RET")) . cmd)
                                     (,(vconcat [insert-state] (kbd "RET")) . cmd))))
-                 '("RET"))))
+                 '(("RET")))))
 
 (ert-deftest agent-repl-test-input-help-keys-remap-resolves-through-global-maps ()
   "A `[remap X]' entry shows the keys X is bound to, with their state."
@@ -233,13 +233,13 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
                   'cmd (agent-repl-test-input-help--context
                         :composer '(([remap target] . cmd))
                         :insert '(([S-s-return] . target))))
-                 '("S-s-<return> (insert mode)"))))
+                 '(("S-s-<return>" . "insert mode")))))
 
 (ert-deftest agent-repl-test-input-help-keys-leader-binding-is-prefixed ()
   "A leader binding is shown after the leader key."
   (should (equal (agent-repl--input-help-keys
                   'cmd (agent-repl-test-input-help--context :leader `((,(kbd "j RET") . cmd))))
-                 '("SPC j RET"))))
+                 '(("SPC j RET")))))
 
 (ert-deftest agent-repl-test-input-help-keys-unbound-command-is-fatal ()
   "A command no map binds signals, and the record names it."
@@ -277,21 +277,129 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
     (should (string-match-p "unknown :id=nope known=(sending "
                             (car agent-repl-test-input-help--fatals)))))
 
-(ert-deftest agent-repl-test-input-help-text-aligns-keys-and-lists-features ()
-  "The text is the title, one aligned row per binding, then the features."
+(ert-deftest agent-repl-test-input-help-keys-shortest-first-then-alphabetical ()
+  "A command's keys are listed shortest first, then alphabetically."
+  (should (equal (agent-repl--input-help-keys
+                  'cmd (agent-repl-test-input-help--context
+                        :composer `((,(kbd "C-c C-k") . cmd) (,(kbd "RET") . cmd) (,(kbd "C-c C-a") . cmd))))
+                 '(("RET") ("C-c C-a") ("C-c C-k")))))
+
+(ert-deftest agent-repl-test-input-help-keys-collapse-a-digit-run ()
+  "Bindings 1 through 9 read as one range key."
+  (should (equal (agent-repl--input-help-keys
+                  'cmd (agent-repl-test-input-help--context
+                        :composer (mapcar (lambda (d) (cons (string d) 'cmd)) "123456789")))
+                 '(("1-9")))))
+
+(ert-deftest agent-repl-test-input-help-collapse-digits-cases ()
+  "Only consecutive digits sharing an annotation join one range."
+  (pcase-dolist (`(,keys ,want)
+                 '(((("1") ("2") ("3")) (("1-3")))
+                   ((("1") ("3")) (("1") ("3")))
+                   ((("1") ("2" . "insert mode")) (("1") ("2" . "insert mode")))
+                   ((("RET") ("1") ("2")) (("RET") ("1-2")))
+                   ((("C-1") ("C-2")) (("C-1") ("C-2")))))
+    (should (equal (agent-repl--input-help-collapse-digits keys) want))))
+
+(ert-deftest agent-repl-test-input-help-key-cell-is-keycaps-with-annotations ()
+  "A cell is each key as a keycap, followed by its dim annotation."
+  (let ((cell (agent-repl--input-help-key-cell '(("RET") ("<up>" . "command mode")))))
+    (should (equal (substring-no-properties cell) "RET  <up> command mode"))
+    (should (eq (get-text-property 0 'face cell) 'help-key-binding))
+    (should (eq (get-text-property 5 'face cell) 'help-key-binding))
+    (should (eq (get-text-property 10 'face cell) 'agent-repl-input-help-annotation))))
+
+(ert-deftest agent-repl-test-input-help-variable-line-shows-the-current-value ()
+  "A variable's line is its name, then its value printed with escaped newlines."
+  (let ((agent-repl-send-postfix "\n be brief"))
+    (should (equal (substring-no-properties
+                    (agent-repl--input-help-variable-line 'agent-repl-send-postfix))
+                   "agent-repl-send-postfix: \"\\n be brief\""))))
+
+(ert-deftest agent-repl-test-input-help-variable-line-name-describes-the-variable ()
+  "Pushing the variable's name describes it."
+  (let ((line (agent-repl--input-help-variable-line 'agent-repl-send-prefix))
+        described)
+    (cl-letf (((symbol-function 'describe-variable) (lambda (v) (push v described))))
+      (with-temp-buffer
+        (insert line)
+        (push-button 1)))
+    (should (equal described '(agent-repl-send-prefix)))))
+
+(ert-deftest agent-repl-test-input-help-rows-resolve-keys-and-variables ()
+  "A row is the binding's keycap cell, description and variables."
+  (should (equal (mapcar (lambda (row) (cons (substring-no-properties (car row)) (cdr row)))
+                         (agent-repl--input-help-rows
+                          '(:bindings ((a "Does a." :variables (agent-repl-send-prefix))))
+                          (agent-repl-test-input-help--context :composer `((,(kbd "RET") . a)))))
+                 '(("RET" "Does a." (agent-repl-send-prefix))))))
+
+(ert-deftest agent-repl-test-input-help-rows-unbound-variable-is-fatal ()
+  "A topic naming an unbound variable signals, naming it and its command."
+  (agent-repl-test-input-help--capturing-fatals
+    (should-error (agent-repl--input-help-rows
+                   '(:bindings ((a "Does a." :variables (agent-repl-test-input-help--nowhere))))
+                   (agent-repl-test-input-help--context :composer `((,(kbd "RET") . a)))))
+    (should (equal agent-repl-test-input-help--fatals
+                   '("elisp.input-help.rows: unbound variable=agent-repl-test-input-help--nowhere command=a")))))
+
+(defun agent-repl-test-input-help--inserted (topic context)
+  "Return TOPIC's help as inserted into a fresh buffer from CONTEXT."
+  (with-temp-buffer
+    (agent-repl--input-help-insert topic (agent-repl--input-help-rows topic context))
+    (buffer-string)))
+
+(ert-deftest agent-repl-test-input-help-insert-lays-out-title-keys-and-features ()
+  "The help is the title, a Keys section of rows, then a Good to know section."
   (should (equal (substring-no-properties
-                  (agent-repl--input-help-text
-                   '(:title "T" :bindings ((a . "Does a") (b . "Does b")) :features ("F."))
+                  (agent-repl-test-input-help--inserted
+                   '(:title "T" :bindings ((a "Does a.") (b "Does b.")) :features ("F."))
                    (agent-repl-test-input-help--context
                     :composer `((,(kbd "C-c C-k") . a) (,(kbd "RET") . b)))))
-                 "T\n\n  C-c C-k  Does a\n  RET      Does b\n\n  - F.\n")))
+                 "T\n\nKeys\n  C-c C-k Does a.\n  RET Does b.\n\nGood to know\n  • F.\n")))
 
-(ert-deftest agent-repl-test-input-help-text-without-bindings-is-features-only ()
-  "A topic with no bindings is its title and features."
+(ert-deftest agent-repl-test-input-help-insert-aligns-descriptions-to-one-column ()
+  "Every description starts at, and wraps back to, the widest key cell plus padding."
+  (let* ((text (agent-repl-test-input-help--inserted
+                '(:title "T" :bindings ((a "Does a.") (b "Does b.")) :features ())
+                (agent-repl-test-input-help--context
+                 :composer `((,(kbd "C-c C-k") . a) (,(kbd "RET") . b)))))
+         (gap (string-search " Does b." text)))
+    (should (equal (get-text-property gap 'display text) '(space :align-to 12)))
+    (should (equal (get-text-property gap 'wrap-prefix text) '(space :align-to 12)))))
+
+(ert-deftest agent-repl-test-input-help-insert-puts-a-wide-cell-description-below ()
+  "A key cell wider than the column cap puts its description on the next line."
+  (let ((text (substring-no-properties
+               (agent-repl-test-input-help--inserted
+                '(:title "T" :bindings ((a "Does a.")) :features ())
+                (agent-repl-test-input-help--context
+                 :composer `((,(kbd "C-c C-a") . a) (,(kbd "C-c C-b") . a) (,(kbd "C-c C-d") . a)
+                             (,(kbd "C-c C-e") . a)))))))
+    (should (string-match-p "C-c C-[a-e]\n Does a\\.\n" text))))
+
+(ert-deftest agent-repl-test-input-help-insert-shows-each-variable-under-its-row ()
+  "A row's variables follow its description, each with its current value."
+  (let ((agent-repl-send-prefix "be brief: "))
+    (should (string-match-p
+             "  RET Send\\.\n agent-repl-send-prefix: \"be brief: \"\n"
+             (substring-no-properties
+              (agent-repl-test-input-help--inserted
+               '(:title "T" :bindings ((a "Send." :variables (agent-repl-send-prefix))) :features ())
+               (agent-repl-test-input-help--context :composer `((,(kbd "RET") . a)))))))))
+
+(ert-deftest agent-repl-test-input-help-insert-without-bindings-is-features-only ()
+  "A topic with no bindings has no Keys section."
   (should (equal (substring-no-properties
-                  (agent-repl--input-help-text '(:title "T" :bindings () :features ("F."))
-                                               (agent-repl-test-input-help--context)))
-                 "T\n\n  - F.\n")))
+                  (agent-repl-test-input-help--inserted '(:title "T" :bindings () :features ("F."))
+                                                        (agent-repl-test-input-help--context)))
+                 "T\n\nGood to know\n  • F.\n")))
+
+(ert-deftest agent-repl-test-input-help-insert-wraps-features-under-their-text ()
+  "A feature line wraps back under its text, past the bullet."
+  (let ((text (agent-repl-test-input-help--inserted '(:title "T" :bindings () :features ("F."))
+                                                    (agent-repl-test-input-help--context))))
+    (should (equal (get-text-property (string-search "F." text) 'wrap-prefix text) "    "))))
 
 ;;;; ---- Showing a topic ----
 
@@ -311,7 +419,9 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
               (should (equal (buffer-name buf) "*agent-repl help: Feed zoom*"))
               (with-current-buffer buf
                 (should buffer-read-only)
-                (should (string-match-p "C-\\+  Make the feed's text larger" (buffer-string))))
+                (should visual-line-mode)
+                (should-not truncate-lines)
+                (should (string-match-p "C-\\+ Make the feed's text larger" (buffer-string))))
               (should (member "elisp.input-help.show: id=zoom buffer=*agent-repl help: Feed zoom*"
                               logged)))
           (kill-buffer buf))))))
@@ -324,6 +434,17 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
         (should-error (agent-repl-input-help-show 'nope))
         (should-not agent-repl-test--popups-shown)
         (should (equal (buffer-list) before))))))
+
+(ert-deftest agent-repl-test-input-help-show-unbound-command-shows-nothing ()
+  "A topic command no map binds signals before its buffer is made or shown."
+  (agent-repl-test-input-help--capturing-fatals
+    (agent-repl-test--recording-popups
+      (cl-letf (((symbol-function 'agent-repl--input-help-binding-context)
+                 (lambda () (agent-repl-test-input-help--context))))
+        (let ((before (buffer-list)))
+          (should-error (agent-repl-input-help-show 'zoom))
+          (should-not agent-repl-test--popups-shown)
+          (should (equal (buffer-list) before)))))))
 
 (ert-deftest agent-repl-test-input-help-click-shows-the-clicked-topic ()
   "Clicking a button shows the topic its text carries."
@@ -352,6 +473,19 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
     (should (equal shown '(images)))))
 
 ;;;; ---- The table against the composer's real bindings ----
+
+(ert-deftest agent-repl-test-input-help-every-topic-variable-is-bound ()
+  "Every variable a topic shows the value of is bound."
+  (dolist (topic agent-repl-input-help-topics)
+    (dolist (binding (plist-get topic :bindings))
+      (dolist (variable (plist-get (cddr binding) :variables))
+        (should (boundp variable))))))
+
+(ert-deftest agent-repl-test-input-help-every-face-is-an-agent-repl-defface ()
+  "input-help.el defines its faces with `agent-repl-defface', so a load re-specs them."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "input-help.el" agent-repl-test--module-dir))
+    (should-not (search-forward "(defface " nil t))))
 
 (ert-deftest agent-repl-test-input-help-every-topic-command-is-a-command ()
   "Every command a topic names is an interactive command."
