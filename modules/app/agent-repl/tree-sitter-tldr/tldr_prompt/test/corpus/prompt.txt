@@ -206,3 +206,78 @@ A symbol below the floor with no presentation selector is prose
   (preamble
     (prose
       (text))))
+
+========================================================================
+A shorter run with an info string inside a longer fence is a line
+========================================================================
+````
+1. a step
+   ```yaml
+   key: value
+   ```
+````
+
+------------------------------------------------------------------------
+
+(document
+  (preamble
+    (fence
+      (fence_open)
+      (fence_line)
+      (fence_line)
+      (fence_line)
+      (fence_line)
+      (fence_close))))
+
+========================================================================
+A bare run shorter than the opener does not close the fence
+========================================================================
+````
+```
+still inside
+````
+
+------------------------------------------------------------------------
+
+(document
+  (preamble
+    (fence
+      (fence_open)
+      (fence_line)
+      (fence_line)
+      (fence_close))))
+
+========================================================================
+A run longer than the opener closes the fence
+========================================================================
+```
+inside
+`````
+after
+
+------------------------------------------------------------------------
+
+(document
+  (preamble
+    (fence
+      (fence_open)
+      (fence_line)
+      (fence_close))
+    (prose
+      (text))))
+
+========================================================================
+A run with text after it does not close the fence
+========================================================================
+```
+```go not a close
+```
+
+------------------------------------------------------------------------
+
+(document
+  (preamble
+    (fence
+      (fence_open)
+      (fence_line)
+      (fence_close))))

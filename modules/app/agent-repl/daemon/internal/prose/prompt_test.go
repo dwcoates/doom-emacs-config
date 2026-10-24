@@ -172,6 +172,33 @@ func TestParsePromptDrawsAPastedTreeAfterAnEntryAsATree(t *testing.T) {
 	}
 }
 
+// TestParsePromptReadsAFenceThatHoldsAShorterFence pins the shape that took
+// the daemon down on 2026-10-24: a create-failure notice wraps the asked-for
+// prompt in a ```` fence, and the prompt's own indented ```yaml block sat
+// inside it. The grammar closed the outer fence on that ``` and could not
+// parse `yaml`, and the daemon panicked on the invariant.
+func TestParsePromptReadsAFenceThatHoldsAShorterFence(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "an indented info-string run inside a longer fence", text: "What the create asked for:\n````\n1. a step\n   ```yaml\n   key: value\n   ```\n````\nafter"},
+		{name: "a bare shorter run inside a longer fence", text: "````\n```\nstill inside\n````"},
+		{name: "a run with text after it", text: "```\n```go not a close\n```"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := ParsePrompt(dlog.NewTestLogger(), tc.text)
+
+			// Assert
+			if src := got.GetSource().GetMarkdown(); src != tc.text {
+				t.Fatalf("source = %q, want the text as written", src)
+			}
+		})
+	}
+}
+
 func TestParsePromptRecordsAFailureOnceAndPanics(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
