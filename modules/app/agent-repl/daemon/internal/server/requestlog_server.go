@@ -739,6 +739,14 @@ func (s *requestLoggingServer) RunTests(
 	return serveStream(s, ctx, "RunTests", req, stream, s.server.RunTests)
 }
 
+func (s *requestLoggingServer) RunRedundancy(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RunRedundancyRequest],
+	stream *connect.ServerStream[agentreplv1.RunRedundancyResponse],
+) error {
+	return serveStream(s, ctx, "RunRedundancy", req, stream, s.server.RunRedundancy)
+}
+
 func (s *requestLoggingServer) EvaluateInEditor(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.EvaluateInEditorRequest],
