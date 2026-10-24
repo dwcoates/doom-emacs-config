@@ -3990,8 +3990,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--executable-find
     agent-repl--spell-flyspell-on
     agent-repl--spell-run-hunspell
-    agent-repl--prompt-summary-process-start
-    agent-repl--prompt-summary-process-send-input
+    agent-repl--prompt-summary-run
     agent-repl-connect--open-socket)
   "Symbols of every external-process or external-state-mutation wrapper.
 Each MUST be mocked by tests that reach it via production code.  The

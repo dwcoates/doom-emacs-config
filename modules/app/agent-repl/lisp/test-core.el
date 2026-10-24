@@ -2599,6 +2599,25 @@ string sent, `(coding DECODE ENCODE)' and `eof'."
     ;; Assert
     (should (equal offenders nil))))
 
+(ert-deftest agent-repl-test-async-command-is-the-only-stdin-feed ()
+  "Only `agent-repl--async-command' closes a program's stdin, so a fed spawn reuses it."
+  ;; Arrange
+  (let ((offenders nil))
+    (dolist (file (agent-repl-test--production-lisp-files))
+      (with-temp-buffer
+        (insert-file-contents file)
+        (goto-char (point-min))
+        ;; Act
+        (while (re-search-forward "(process-send-eof\\_>" nil t)
+          (let ((defun-name (save-excursion
+                              (beginning-of-defun)
+                              (and (looking-at "(defun \\(\\_<.+?\\_>\\)")
+                                   (match-string 1)))))
+            (unless (equal defun-name "agent-repl--async-command")
+              (push (cons (file-name-nondirectory file) defun-name) offenders))))))
+    ;; Assert
+    (should (equal offenders nil))))
+
 (ert-deftest agent-repl-test-capture-process-output-uses-make-process-when-suppress-stderr ()
   "When SUPPRESS-STDERR is non-nil, `--capture-process-output' uses
 `make-process' with `:stderr' set to a separate buffer so stderr is
