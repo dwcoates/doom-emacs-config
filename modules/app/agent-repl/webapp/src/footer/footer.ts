@@ -21,6 +21,11 @@
  * a push whose generation this page has already applied changes nothing, so
  * between launches the reader's own clicks stand.
  *
+ * A SWITCH TO THE WORKSPACE MOVES IT TOO (owner ruling, 2026-10-24). When the
+ * host shows the page, the next draw opens the section if any chip has
+ * entries and collapses it if none does (`arrivalPanel`). A page the host
+ * showed before the footer mounted arrives on its first push.
+ *
  * THE ONE TIMER IS THE TRANSIENT'S EXPIRY. A drawn transient lapses on the
  * client's clock with no push to say so, so the draw that picked it schedules
  * one re-render at its expiry instant (`expiry.ts`), and every draw cancels the
@@ -41,7 +46,7 @@ import {
   type WatchFooterResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import type { FooterView } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import type { FooterExpanded, FooterView } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { Handle } from "../failure/local.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { placeChildren, queryAll } from "../dom.js";
@@ -53,8 +58,10 @@ import { onClientVerdict, standingClientFailure } from "../rpc/link.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
+import type { Presence } from "../presence.js";
 import { mountTooltips } from "../tooltip.js";
 import {
+  arrivalPanel,
   createJumpNotices,
   drawFooterExpanded,
   FOOTER_PANELS,
@@ -80,6 +87,8 @@ export function panelStorageKey(workspaceId: string): string {
 export interface FooterDeps {
   /** The reader picked a detached-work item: scroll to its card (feed.ts). */
   readonly selectDetachedWork: (id: FeedId) => Promise<boolean>;
+  /** Whether the host shows this page (`presence.ts`): its shows are switches. */
+  readonly presence: Pick<Presence, "shown" | "onChange" | "embedded">;
 }
 
 export interface FooterHandle extends Handle {
@@ -147,6 +156,15 @@ export function mountFooter(
   // The substatus arm the last push drew under statusCase, if it has one.
   let substatusCase: string | undefined;
   let disposed = false;
+  // A SWITCH TO THIS WORKSPACE NOT YET APPLIED: set by the host's show, and
+  // consumed by the next draw that has a view (`applyArrival`). Only a page in
+  // the host is ever switched to.
+  let arrivalPending = deps.presence.embedded && deps.presence.shown();
+  const unsubscribeFromPresence = deps.presence.onChange((_seen, cause) => {
+    if (cause !== "host" || !deps.presence.shown()) return;
+    arrivalPending = true;
+    redraw("footer.arrival-redraw-undecodable");
+  });
   // THE FOURTH: the one pending re-render at the drawn transient's expiry.
   const expiry = createTransientExpiry(ctx.ticker, () => {
     redraw("footer.expiry-redraw-undecodable");
@@ -196,6 +214,7 @@ export function mountFooter(
         context: {},
       });
       unsubscribeFromVerdict();
+      unsubscribeFromPresence();
       expiry.cancel();
       watch.cancel();
       // The page's compaction line belongs to the stream that just stopped.
@@ -260,6 +279,7 @@ export function mountFooter(
     const strip = requireMessage(view.strip, "FooterView.strip");
     const expanded = requireMessage(view.expanded, "FooterView.expanded");
 
+    if (arrivalPending) applyArrival(expanded);
     const resolved = shownPanel(expanded, selection, stops);
     if (resolved !== shown) {
       log.debug(`the footer shows ${resolved ?? "no"} panel for the wanted ${selection ?? "none"}`, {
@@ -403,6 +423,21 @@ export function mountFooter(
       operation: "footer.focus-applied",
       context: { panel, generation: String(focus.generation) },
     });
+    writeSelection(ctx, selection);
+  }
+
+  /**
+   * Resolve the wanted panel for a switch to this workspace (`arrivalPanel`),
+   * once per show, and persist it as a click's would be.
+   */
+  function applyArrival(expanded: FooterExpanded): void {
+    arrivalPending = false;
+    const arrived = arrivalPanel(expanded, selection, stops);
+    log.debug(`the switch to this workspace wants the ${arrived ?? "closed"} footer panel`, {
+      operation: "footer.arrival",
+      context: { wanted: arrived, previous: selection },
+    });
+    selection = arrived;
     writeSelection(ctx, selection);
   }
 

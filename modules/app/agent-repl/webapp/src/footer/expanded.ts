@@ -264,6 +264,27 @@ export function shownPanel(
 }
 
 /**
+ * The panel the reader WANTS on arriving at the workspace: the host showing
+ * its page, which is what a switch to it is.
+ *
+ * A SWITCH LANDS ON AN EXPANDED FOOTER EXACTLY WHEN A CHIP HAS ENTRIES (owner
+ * ruling, 2026-10-24). With no chip panel carrying entries the section is
+ * collapsed, whatever was wanted before, the tokens sheet included. With one,
+ * the section is open: a wanted panel stands (`shownPanel` falls back from an
+ * empty one), and a closed section opens on the first chip panel in
+ * `CHIP_PANELS` that has entries. Between switches the reader's clicks stand.
+ */
+export function arrivalPanel(
+  u: FooterExpanded,
+  wanted: FooterPanel | null,
+  stops: StopControls,
+): FooterPanel | null {
+  const live = CHIP_PANELS.find((panel) => panelHasEntries(u, panel, stops));
+  if (live === undefined) return null;
+  return wanted ?? live;
+}
+
+/**
  * The panel `shownPanel` resolved, or nothing.
  *
  * A null selection is the ordinary state — the strip stands alone — and is
