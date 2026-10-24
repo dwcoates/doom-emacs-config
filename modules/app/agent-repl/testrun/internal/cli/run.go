@@ -13,16 +13,15 @@ import (
 	"sync"
 	"time"
 
-
 	testrunv1 "agentrepl/proto/testrun/v1"
 
 	"agentrepl/testrun/internal/events"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/plan"
+	"agentrepl/testrun/internal/protofile"
 	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
-	"agentrepl/testrun/internal/protofile"
 	"agentrepl/testrun/internal/selection"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/internal/testtimes"
@@ -166,7 +165,11 @@ func Run(ctx context.Context, d Deps, a Args) int {
 			if a.Selects(s.Name) {
 				selected = append(selected, s)
 			} else {
-				log.Infof("%s: not selected by --suites, skipping", s.Name)
+				if s.CoverageOnly && !a.Coverage {
+					log.Infof("%s: runs only in a coverage run, skipping", s.Name)
+				} else {
+					log.Infof("%s: not selected by --suites, skipping", s.Name)
+				}
 			}
 		}
 	}

@@ -39,6 +39,10 @@ type Suite struct {
 	Path string
 	// Args are a Script suite's arguments.
 	Args []string
+	// CoverageOnly marks a suite that runs only in a coverage run: it checks
+	// the coverage numbers themselves. A run without coverage skips it, and
+	// refuses one that names it.
+	CoverageOnly bool
 	// MayDecline marks the suites allowed to exit 77 ("precondition unmet").
 	MayDecline bool
 	// Harness marks a suite that tests the module's own shell scripts in bin/,
@@ -323,7 +327,12 @@ var Suites = []Suite{
 			// The capture script's tests run the fake git, which builds its model.
 			"bin/fake-git.sh", "bin/fake-git.go",
 		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"}}},
-	{Name: "proto", Kind: Script, Path: "bin/report-nonlisp-coverage.sh", Args: []string{"proto"}},
+	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh"},
+	// The istanbul honesty probes (bin/coverage-honesty.mjs): whether each
+	// package's per-file coverage numbers are still a measurement. They run
+	// only in a coverage run, the one place those numbers are produced.
+	{Name: "webapp-coverage-honesty", Kind: Script, Path: "bin/coverage-honesty.sh", Args: []string{"webapp"}, CoverageOnly: true},
+	{Name: "shim-coverage-honesty", Kind: Script, Path: "bin/coverage-honesty.sh", Args: []string{"agent-shim/claude/shim"}, CoverageOnly: true},
 	// The TLDR-tree grammar: its corpus, and the committed parser checked
 	// against what grammar.js generates.
 	{Name: "tree-sitter-tldr", Kind: Script, Path: "tree-sitter-tldr/test-tree-sitter-tldr.sh"},
@@ -351,7 +360,7 @@ var AlwaysRunRegions = []string{
 	// The metrics store's manifest and scrape config, which the requirements
 	// harness reads and installs, as it does launchd/'s plists.
 	"metrics/",
-	// The proto suite (bin/report-nonlisp-coverage.sh proto) reads the
+	// The proto suite (proto/scripts/test-validate.sh) reads the
 	// contract's sources; the keyed suites read what they import of
 	// proto/gen through their build graph, and proto/vocab as declared data.
 	"proto/",

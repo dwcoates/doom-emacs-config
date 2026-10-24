@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"agentrepl/testrun/internal/reuse"
-	"agentrepl/testrun/roster"
 )
 
 func TestARunSkipsAReusedSuiteAndSaysSo(t *testing.T) {
@@ -24,7 +23,7 @@ func TestARunSkipsAReusedSuiteAndSaysSo(t *testing.T) {
 	if slices.Contains(h.exec.ran, "daemon") {
 		t.Fatal("the reused daemon suite ran")
 	}
-	if len(h.exec.ran) != len(roster.Suites)-1 {
+	if len(h.exec.ran) != fullRunSize()-1 {
 		t.Fatalf("ran %d units, want every suite but the reused one", len(h.exec.ran))
 	}
 	for _, want := range []string{

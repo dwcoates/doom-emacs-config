@@ -139,6 +139,9 @@ func ParseArgs(argv []string) (Args, error) {
 		// with the canonical history's.
 		return Args{}, errors.New("--record and --coverage cannot be combined: coverage instrumentation changes the suite timings --record keeps")
 	}
+	if err := a.coverageOnlyNamed(); err != nil {
+		return Args{}, err
+	}
 	if a.Record && a.RecordOut == "" {
 		return Args{}, errors.New("--record needs --record-out: the path `run` stages this run's timing rows at, for a later `testrun finish-record` to commit outside the git-state net")
 	}
@@ -171,6 +174,9 @@ func (a Args) WithRequest(req *testrunv1.TestRunRequest) (Args, error) {
 	a.Selection, a.Targeted = "", false
 	a.Selected = names
 	a.Coverage, a.Record = req.GetCoverage(), req.GetRecord()
+	if err := a.coverageOnlyNamed(); err != nil {
+		return Args{}, err
+	}
 	return a, nil
 }
 
@@ -232,7 +238,25 @@ func parseSuites(spec string) ([]string, error) {
 
 // Selects reports whether a suite is part of the run.
 func (a Args) Selects(name string) bool {
+	if s, ok := roster.Lookup(name); ok && s.CoverageOnly && !a.Coverage {
+		return false
+	}
 	return len(a.Selected) == 0 || slices.Contains(a.Selected, name)
+}
+
+// coverageOnlyNamed refuses a run without coverage that names a suite which
+// runs only in a coverage run: naming it and running nothing would read as a
+// pass.
+func (a Args) coverageOnlyNamed() error {
+	if a.Coverage {
+		return nil
+	}
+	for _, name := range a.Selected {
+		if s, ok := roster.Lookup(name); ok && s.CoverageOnly {
+			return fmt.Errorf("suite %s runs only in a coverage run; ask for coverage", name)
+		}
+	}
+	return nil
 }
 
 // CoverArgs is a parsed `testrun cover-report` command line.

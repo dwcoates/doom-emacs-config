@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -519,7 +520,7 @@ func TestRunEverySuitePassing(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
 	}
-	if len(h.exec.ran) != len(roster.Suites) {
+	if len(h.exec.ran) != fullRunSize() {
 		t.Fatalf("ran %d units, want one per roster suite", len(h.exec.ran))
 	}
 	for _, want := range []string{
@@ -558,12 +559,12 @@ func TestRunWithAFailureContinuesAndExitsNonZero(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}
-	if len(h.exec.ran) != len(roster.Suites) {
+	if len(h.exec.ran) != fullRunSize() {
 		t.Fatal("a failure stopped the run before every suite ran")
 	}
 	for _, want := range []string{
 		"daemon failed after ",
-		fmt.Sprintf("failure summary, 1 of %d suites failed", len(roster.Suites)),
+		fmt.Sprintf("failure summary, 1 of %d suites failed", fullRunSize()),
 		"failed: daemon exit code 3 after ",
 	} {
 		if !strings.Contains(h.errOut.String(), want) {
@@ -899,7 +900,7 @@ func TestRunASuiteThatCannotBePlannedFailsAloneAndTheRestRun(t *testing.T) {
 			t.Errorf("stderr lacks %q:\n%s", want, h.errOut)
 		}
 	}
-	if len(h.exec.ran) != len(roster.Suites)-1 {
+	if len(h.exec.ran) != fullRunSize()-1 {
 		t.Fatalf("ran %d units, want every other suite", len(h.exec.ran))
 	}
 }
@@ -1098,7 +1099,7 @@ func TestARunToldAMetricsTargetPushesEveryTestAndSuite(t *testing.T) {
 		t.Fatalf("pushes = %+v, want one to %+v", *calls, target)
 	}
 	got := (*calls)[0].report
-	if len(got.Tests) != len(roster.Suites) || len(got.Suites) != len(roster.Suites) || len(got.Units) != len(roster.Suites) {
+	if len(got.Tests) != fullRunSize() || len(got.Suites) != fullRunSize() || len(got.Units) != fullRunSize() {
 		t.Fatalf("pushed %d tests, %d suites and %d units, want one of each per roster suite", len(got.Tests), len(got.Suites), len(got.Units))
 	}
 	for _, u := range got.Units {
@@ -1115,7 +1116,7 @@ func TestARunToldAMetricsTargetPushesEveryTestAndSuite(t *testing.T) {
 			t.Errorf("suite %s pushed %s, want %s", s.Name, s.Outcome, want)
 		}
 	}
-	if !strings.Contains(h.out.String(), "metrics: pushed "+strconv.Itoa(len(roster.Suites))+" test, ") {
+	if !strings.Contains(h.out.String(), "metrics: pushed "+strconv.Itoa(fullRunSize())+" test, ") {
 		t.Errorf("stdout does not say what was pushed:\n%s", h.out)
 	}
 }
@@ -1386,5 +1387,83 @@ func TestRunRefusesARequestItCannotLower(t *testing.T) {
 	evs := eventsOf(t, &stream)
 	if code != 1 || len(h.exec.ran) != 0 || len(evs) != 1 || !strings.Contains(evs[0].GetRefused().GetDetail(), "coverage measures whole suites") {
 		t.Fatalf("exit = %d, ran %v, events = %v; want a refusal and nothing run", code, h.exec.ran, evs)
+	}
+}
+
+func TestSelectsACoverageOnlySuiteOnlyInACoverageRun(t *testing.T) {
+	cases := []struct {
+		name string
+		args Args
+		want bool
+	}{
+		{name: "a full run without coverage skips it", args: Args{}, want: false},
+		{name: "a full coverage run runs it", args: Args{Coverage: true}, want: true},
+		{name: "a coverage run of other suites skips it", args: Args{Coverage: true, Selected: []string{"webapp"}}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := tc.args.Selects("webapp-coverage-honesty")
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("Selects = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestACoverageOnlySuiteNamedWithoutCoverageIsRefused(t *testing.T) {
+	cases := []struct {
+		name string
+		act  func() error
+	}{
+		{name: "by --suites", act: func() error {
+			_, err := ParseArgs([]string{"--module", "/m", "--suites", "webapp-coverage-honesty"})
+			return err
+		}},
+		{name: "by a request", act: func() error {
+			_, err := Args{Module: "/m", Selection: "/s.pb", Targeted: true}.WithRequest(&testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{suiteSel("shim-coverage-honesty")}})
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			err := tc.act()
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), "runs only in a coverage run") {
+				t.Fatalf("err = %v, want the coverage-only refusal", err)
+			}
+		})
+	}
+}
+
+// fullRunSize is how many suites a full run without coverage runs: every
+// roster suite but the coverage-only ones.
+func fullRunSize() int {
+	n := 0
+	for _, s := range roster.Suites {
+		if !s.CoverageOnly {
+			n++
+		}
+	}
+	return n
+}
+
+func TestAFullRunWithoutCoverageSkipsTheCoverageOnlySuites(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+
+	// Act
+	code := h.run(t)
+
+	// Assert
+	if code != 0 || slices.Contains(h.exec.ran, "webapp-coverage-honesty") || slices.Contains(h.exec.ran, "shim-coverage-honesty") {
+		t.Fatalf("exit %d, ran %v; want the coverage-only suites skipped", code, h.exec.ran)
+	}
+	if !strings.Contains(h.out.String(), "webapp-coverage-honesty: runs only in a coverage run, skipping") {
+		t.Fatalf("stdout lacks the skip:\n%s", h.out.String())
 	}
 }
