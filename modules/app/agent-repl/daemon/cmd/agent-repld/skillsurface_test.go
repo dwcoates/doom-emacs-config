@@ -26,8 +26,16 @@ var codeSpan = regexp.MustCompile("`([^`]+)`")
 var fencedBlock = regexp.MustCompile("(?ms)^[ \t]*```[^\n]*\n(.*?)^[ \t]*```[ \t]*$")
 
 // commandMention is a noun and its verb at the start of a code span, or after
-// `agent-repld `.
-var commandMention = regexp.MustCompile(`(?:^|agent-repld )(workspace|merge-queue|editor|runtime) ([a-z][a-z-]*)`)
+// `agent-repld `. Its nouns are cliNouns' own, so a noun added to the CLI is
+// read in the skills without a second list to keep.
+var commandMention = func() *regexp.Regexp {
+	nouns := make([]string, 0, len(cliNouns))
+	for noun := range cliNouns {
+		nouns = append(nouns, regexp.QuoteMeta(noun))
+	}
+	sort.Strings(nouns)
+	return regexp.MustCompile(`(?:^|agent-repld )(` + strings.Join(nouns, "|") + `) ([a-z][a-z-]*)`)
+}()
 
 // mentionedCommands answers the "noun verb" commands TEXT's code spans and
 // fenced code lines name.
@@ -80,6 +88,7 @@ func TestMentionedCommandsReadsCodeSpans(t *testing.T) {
 		{name: "a noun mid-span is no command", text: "`-topology child -owner workspace x`", want: nil},
 		{name: "a fenced block's backticks pair no span", text: "```yaml\nkey: x\n```\nthen `workspace kill WS`", want: []string{"workspace kill"}},
 		{name: "a command on a fenced line", text: "```sh\nagent-repld runtime health\n```", want: []string{"runtime health"}},
+		{name: "every CLI noun is read", text: "`agent-repld test run -go x` and `editor eval x`", want: []string{"test run", "editor eval"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
