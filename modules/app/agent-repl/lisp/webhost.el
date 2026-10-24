@@ -60,6 +60,7 @@
 (declare-function agent-repl-page-unload-note-shown "page-unload" (ws))
 (declare-function agent-repl-roster-drawn-tab-order "roster" ())
 (declare-function agent-repl--ws-current-name "workspace" ())
+(declare-function agent-repl--emacs-focused-p "notifications" (&optional ws))
 (declare-function xwidget-get "xwidget" (xwidget propname))
 (declare-function xwidget-put "xwidget" (xwidget propname value))
 
@@ -535,6 +536,20 @@ reloads while the window lasts.  Non-nil when the call was sent."
   (when-let ((id (agent-repl--webhost-id ws)))
     (agent-repl--webhost-call "dismissDigest" id)))
 
+(defun agent-repl-webhost-sync-editor-focus ()
+  "Tell the host whether Emacs is the focused desktop application now.
+While it is not, the host covers the whole web view in solid orange
+\(`setEditorFocused', webapp/src/host/host.ts), so Emacs's window is the one
+spotted at a glance in macOS Mission Control; a focus gain takes it away.
+The focus is read at the call, never kept: it rides
+`agent-repl-focus-settled-hook' and every host load's replay.  Non-nil
+when the call was sent."
+  (let ((focused (and (agent-repl--emacs-focused-p) t)))
+    (agent-repl--log agent-repl--webhost-central "elisp.webhost.editor-focus focused=%s" focused)
+    (agent-repl--webhost-call "setEditorFocused" (if focused t :json-false))))
+
+(add-hook 'agent-repl-focus-settled-hook #'agent-repl-webhost-sync-editor-focus)
+
 ;;;; ---- Replay and reload -----------------------------------------------------
 
 (defun agent-repl--webhost-replay-lanes (ids)
@@ -611,6 +626,9 @@ successor\='s rendezvous completes only once the page has called, inside
 the host\='s own 10s call bound.  Queued behind a lane\='s other pages, two
 such pages missed it on the 2026-10-22 11:14 deploy, and both adopts timed
 out (`agent-repl-host-adopting-p')."
+  ;; THE FOCUS FIRST: a host loads with its shade hidden, and an unfocused
+  ;; Emacs covers it before any page draws.
+  (agent-repl-webhost-sync-editor-focus)
   (let (ids)
     (maphash (lambda (id _url) (push id ids)) agent-repl--webhost-pages)
     (when agent-repl--webhost-shown

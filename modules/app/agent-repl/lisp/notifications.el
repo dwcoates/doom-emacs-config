@@ -150,14 +150,23 @@ DONE ends the report."
                      focused detail)
   (funcall done))
 
+(defvar agent-repl-focus-settled-hook nil
+  "Run once Emacs's desktop focus has settled after a change.
+Everything that follows Emacs's focus rides this one hook, so a move
+between two Emacs frames (out, then in, in one command loop) reaches each
+of them once, as where the focus came to rest: the daemon's report
+\(`agent-repl--focus-report') and the webhost's unfocused shade
+\(`agent-repl-webhost-sync-editor-focus').  Each asks
+`agent-repl--emacs-focused-p' itself.")
+
 (defun agent-repl--focus-changed ()
-  "Report Emacs's focus once the change that called this has settled.
+  "Run `agent-repl-focus-settled-hook' once the change that called this has settled.
 Runs from `after-focus-change-function'."
   (unless (timerp agent-repl--focus-report-timer)
     (setq agent-repl--focus-report-timer
           (run-at-time 0 nil (lambda ()
                                (setq agent-repl--focus-report-timer nil)
-                               (agent-repl--focus-report))))))
+                               (run-hooks 'agent-repl-focus-settled-hook))))))
 
 (defun agent-repl--focus-report-on-link (&rest _connections)
   "Report Emacs's focus to a daemon that just became the live one.
@@ -167,6 +176,7 @@ stream stood) is told here, once the stream stands."
   (agent-repl--focus-report))
 
 (add-function :after after-focus-change-function #'agent-repl--focus-changed)
+(add-hook 'agent-repl-focus-settled-hook #'agent-repl--focus-report)
 (add-hook 'agent-repl-link-up-functions #'agent-repl--focus-report-on-link)
 (add-hook 'agent-repl-link-promote-functions #'agent-repl--focus-report-on-link)
 

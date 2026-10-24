@@ -11,6 +11,7 @@ import {
   FRAME_SHOWN_ATTRIBUTE,
   FRAME_WORKSPACE_ATTRIBUTE,
   SIDEBAR_BOTTOM_PROPERTY,
+  UNFOCUSED_SHADE_CLASS,
   createHost,
   hostHasFocus,
   type Host,
@@ -1749,5 +1750,72 @@ describe("a page re-pointed into a fresh frame", () => {
       pixels: 120,
       background: "#000",
     });
+  });
+});
+
+describe("setEditorFocused", () => {
+  /** The host's unfocused shade. */
+  function shade(): HTMLElement {
+    const found = document.querySelector<HTMLElement>(`.${UNFOCUSED_SHADE_CLASS}`);
+    if (found === null) throw new Error("no unfocused shade");
+    return found;
+  }
+
+  it("starts with the shade hidden", () => {
+    // Assert
+    expect(shade().hidden).toBe(true);
+  });
+
+  it("shows the shade when Emacs is unfocused", () => {
+    // Act
+    const answer = parsed(host.setEditorFocused(false));
+
+    // Assert
+    expect([answer.outcome, shade().hidden]).toEqual(["shown", false]);
+  });
+
+  it("hides the shade again when Emacs is focused", () => {
+    // Arrange
+    host.setEditorFocused(false);
+
+    // Act
+    const answer = parsed(host.setEditorFocused(true));
+
+    // Assert
+    expect([answer.outcome, shade().hidden]).toEqual(["hidden", true]);
+  });
+
+  it("lies over every page the host holds", () => {
+    // Arrange
+    pages(host, "a");
+
+    // Act
+    host.setEditorFocused(false);
+
+    // Assert
+    expect(shade().parentElement).toBe(document.body);
+  });
+
+  it("refuses a focus that is no boolean, noting it at warn and leaving the shade", () => {
+    // Arrange
+    host.setEditorFocused(false);
+
+    // Act
+    const answer = parsed(host.setEditorFocused(null as unknown as boolean));
+
+    // Assert
+    expect(answer).toMatchObject({
+      outcome: "refused",
+      notes: [{ level: "warn", text: expect.stringContaining("no boolean") as unknown }],
+    });
+    expect(shade().hidden).toBe(false);
+  });
+
+  it("goes with the host when it is disposed", () => {
+    // Act
+    host.dispose();
+
+    // Assert
+    expect(document.querySelector(`.${UNFOCUSED_SHADE_CLASS}`)).toBeNull();
   });
 });
