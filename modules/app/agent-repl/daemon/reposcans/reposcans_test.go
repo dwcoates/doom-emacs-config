@@ -381,3 +381,43 @@ func TestNoSuiteSpellsTheServingPredicateItself(t *testing.T) {
 		t.Fatalf("files spell the serving predicate themselves; use harness.SessionServes:\n%s", strings.Join(copies, "\n"))
 	}
 }
+
+// TestSingletonServicesBindThroughTheSharedHelper pins the extraction of the
+// socket binding (agent-shim/logging/go/singletonsocket): no launchd service
+// (the store, the sidecar, zettel) binds a unix socket by hand, so the
+// occupied/stale/non-socket/owner-only rules can never drift between them.
+func TestSingletonServicesBindThroughTheSharedHelper(t *testing.T) {
+	// Arrange
+	root := moduleRootDir(t)
+	handRolled := regexp.MustCompile(`net\.Listen\("unix"`)
+	scanned := 0
+	for _, dir := range []string{"agent-shim/shim-store", "agent-shim/claude/shim-sidecar", "zettel"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			scanned++
+
+			// Act
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+
+			// Assert
+			if handRolled.Match(body) {
+				t.Errorf("%s binds a unix socket by hand; bind it through singletonsocket.Listen or ListenReclaiming", path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("scan %s: %v", dir, err)
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("scanned no source files")
+	}
+}

@@ -80,6 +80,28 @@ type Result struct {
 // restricts the bound socket to its owner (0600). probe bounds the dial that
 // decides whether an existing socket is live.
 func Listen(path string, probe time.Duration) (net.Listener, Result, error) {
+	return bind(path, func(absolute string) error {
+		occupied, dialErr := net.DialTimeout("unix", absolute, probe)
+		if dialErr != nil {
+			return nil
+		}
+		if closeErr := occupied.Close(); closeErr != nil {
+			return &Error{Step: StepCloseProbe, Path: absolute, Err: closeErr}
+		}
+		return &Error{Step: StepOccupied, Path: absolute, Err: ErrOccupied}
+	})
+}
+
+// ListenReclaiming binds path for a private, per-process socket (a profiling
+// surface): exactly as Listen, except any socket already at the path is
+// reclaimed without probing whether something answers on it.
+func ListenReclaiming(path string) (net.Listener, Result, error) {
+	return bind(path, func(string) error { return nil })
+}
+
+// bind is Listen's body; occupied decides whether an existing socket at the
+// absolute path may be reclaimed (nil) or refuses the bind (its error).
+func bind(path string, occupied func(absolute string) error) (net.Listener, Result, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return nil, Result{}, &Error{Step: StepResolve, Path: path, Err: err}
@@ -90,11 +112,8 @@ func Listen(path string, probe time.Duration) (net.Listener, Result, error) {
 	result := Result{Path: absolute}
 	switch info, statErr := os.Lstat(absolute); {
 	case statErr == nil && info.Mode()&os.ModeSocket != 0:
-		if occupied, dialErr := net.DialTimeout("unix", absolute, probe); dialErr == nil {
-			if closeErr := occupied.Close(); closeErr != nil {
-				return nil, Result{}, &Error{Step: StepCloseProbe, Path: absolute, Err: closeErr}
-			}
-			return nil, Result{}, &Error{Step: StepOccupied, Path: absolute, Err: ErrOccupied}
+		if err := occupied(absolute); err != nil {
+			return nil, Result{}, err
 		}
 		if removeErr := os.Remove(absolute); removeErr != nil {
 			return nil, Result{}, &Error{Step: StepRemoveStale, Path: absolute, Err: removeErr}
@@ -110,11 +129,16 @@ func Listen(path string, probe time.Duration) (net.Listener, Result, error) {
 		return nil, Result{}, &Error{Step: StepBind, Path: absolute, Err: err}
 	}
 	if err := os.Chmod(absolute, 0o600); err != nil {
-		cause := &Error{Step: StepRestrict, Path: absolute, Err: err}
-		if closeErr := listener.Close(); closeErr != nil {
-			return nil, Result{}, errors.Join(cause, fmt.Errorf("closing the abandoned listener on %s: %w", absolute, closeErr))
-		}
-		return nil, Result{}, cause
+		return nil, Result{}, abandon(listener, &Error{Step: StepRestrict, Path: absolute, Err: err})
 	}
 	return listener, result, nil
+}
+
+// abandon closes a listener whose setup failed after it bound, answering the
+// setup's failure, with the close's own failure joined on when it fails too.
+func abandon(listener net.Listener, cause *Error) error {
+	if closeErr := listener.Close(); closeErr != nil {
+		return errors.Join(cause, fmt.Errorf("closing the abandoned listener on %s: %w", cause.Path, closeErr))
+	}
+	return cause
 }

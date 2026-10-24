@@ -4,10 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"time"
 
+	"agentrepl/logging/singletonsocket"
 	"agentrepl/shim-store/internal/logging"
 )
 
@@ -38,61 +37,51 @@ func Listen(path string, log *logging.Logger) (net.Listener, error) {
 	if log == nil {
 		panic("shim-store server: nil logger")
 	}
-	absolute, err := filepath.Abs(path)
+	listener, res, err := singletonsocket.Listen(path, occupancyDialTimeout)
 	if err != nil {
-		log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: path}, "resolving the socket path failed: %v", err)
-		return nil, fmt.Errorf("shim-store server: resolve socket path %q: %w", path, err)
-	}
-	if err := os.MkdirAll(filepath.Dir(absolute), 0o700); err != nil {
-		log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: absolute}, "creating the socket directory failed: %v", err)
-		return nil, fmt.Errorf("shim-store server: prepare socket directory for %q: %w", absolute, err)
-	}
-	switch info, statErr := os.Lstat(absolute); {
-	case statErr == nil && info.Mode()&os.ModeSocket != 0:
-		if occupied, dialErr := net.DialTimeout("unix", absolute, occupancyDialTimeout); dialErr == nil {
-			if closeErr := occupied.Close(); closeErr != nil {
-				log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: absolute}, "closing the occupancy probe failed: %v", closeErr)
-				return nil, fmt.Errorf("shim-store server: close occupancy probe for %q: %w", absolute, closeErr)
-			}
-			log.Log(logging.Fields{Operation: "store.listen.occupied", Level: "error", Socket: absolute},
+		var step *singletonsocket.Error
+		if !errors.As(err, &step) {
+			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: path}, "binding the socket failed: %v", err)
+			return nil, fmt.Errorf("shim-store server: listen on unix socket %q: %w", path, err)
+		}
+		at := step.Path
+		switch step.Step {
+		case singletonsocket.StepResolve:
+			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: path}, "resolving the socket path failed: %v", step.Err)
+			return nil, fmt.Errorf("shim-store server: resolve socket path %q: %w", path, step.Err)
+		case singletonsocket.StepPrepareDir:
+			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: at}, "creating the socket directory failed: %v", step.Err)
+			return nil, fmt.Errorf("shim-store server: prepare socket directory for %q: %w", at, step.Err)
+		case singletonsocket.StepCloseProbe:
+			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: at}, "closing the occupancy probe failed: %v", step.Err)
+			return nil, fmt.Errorf("shim-store server: close occupancy probe for %q: %w", at, step.Err)
+		case singletonsocket.StepOccupied:
+			log.Log(logging.Fields{Operation: "store.listen.occupied", Level: "error", Socket: at},
 				"another store is already listening on this socket; refusing to steal it — the store is a singleton and the socket is its token")
-			return nil, fmt.Errorf("shim-store server: another store is already listening on %q", absolute)
+			return nil, fmt.Errorf("shim-store server: another store is already listening on %q", at)
+		case singletonsocket.StepRemoveStale:
+			log.Log(logging.Fields{Operation: "store.listen.reclaim", Level: "warn", Socket: at}, "the socket refused a connection, so it is a stale one left by a previous store; reclaiming it")
+			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: at}, "removing the stale socket failed: %v", step.Err)
+			return nil, fmt.Errorf("shim-store server: remove stale socket %q: %w", at, step.Err)
+		case singletonsocket.StepNotASocket:
+			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: at}, "refusing to replace a non-socket at the listen path mode=%s", step.Mode)
+			return nil, fmt.Errorf("shim-store server: refusing to replace non-socket %q (mode %s)", at, step.Mode)
+		case singletonsocket.StepInspect:
+			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: at}, "inspecting the listen path failed: %v", step.Err)
+			return nil, fmt.Errorf("shim-store server: inspect socket path %q: %w", at, step.Err)
+		case singletonsocket.StepBind:
+			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: at}, "binding the socket failed: %v", step.Err)
+			return nil, fmt.Errorf("shim-store server: listen on unix socket %q: %w", at, step.Err)
+		case singletonsocket.StepRestrict:
+			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: at}, "restricting the socket to its owner failed: %v", step.Err)
+			return nil, fmt.Errorf("shim-store server: restrict socket %q to its owner: %w", at, err)
+		default:
+			panic(fmt.Sprintf("shim-store server: unhandled singleton socket step %q", step.Step))
 		}
-		log.Log(logging.Fields{Operation: "store.listen.reclaim", Level: "warn", Socket: absolute}, "the socket refused a connection, so it is a stale one left by a previous store; reclaiming it")
-		if removeErr := os.Remove(absolute); removeErr != nil {
-			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: absolute}, "removing the stale socket failed: %v", removeErr)
-			return nil, fmt.Errorf("shim-store server: remove stale socket %q: %w", absolute, removeErr)
-		}
-	case statErr == nil:
-		log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: absolute}, "refusing to replace a non-socket at the listen path mode=%s", info.Mode())
-		return nil, fmt.Errorf("shim-store server: refusing to replace non-socket %q (mode %s)", absolute, info.Mode())
-	case !errors.Is(statErr, os.ErrNotExist):
-		log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: absolute}, "inspecting the listen path failed: %v", statErr)
-		return nil, fmt.Errorf("shim-store server: inspect socket path %q: %w", absolute, statErr)
 	}
-	listener, err := net.Listen("unix", absolute)
-	if err != nil {
-		log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: absolute}, "binding the socket failed: %v", err)
-		return nil, fmt.Errorf("shim-store server: listen on unix socket %q: %w", absolute, err)
+	if res.Reclaimed {
+		log.Log(logging.Fields{Operation: "store.listen.reclaim", Level: "warn", Socket: res.Path}, "the socket refused a connection, so it is a stale one left by a previous store; reclaiming it")
 	}
-	if err := os.Chmod(absolute, 0o600); err != nil {
-		log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: absolute}, "restricting the socket to its owner failed: %v", err)
-		return nil, abandonListener(listener, absolute, fmt.Errorf("shim-store server: restrict socket %q to its owner: %w", absolute, err), log)
-	}
-	log.Log(logging.Fields{Operation: "store.listen", Socket: absolute}, "listening on the store socket")
+	log.Log(logging.Fields{Operation: "store.listen", Socket: res.Path}, "listening on the store socket")
 	return listener, nil
-}
-
-// abandonListener closes a listener whose setup failed after it was bound, and
-// returns the error Listen reports. The setup failure is the cause; a failure
-// to close on top of it is a second, separate fault — it can leave the socket
-// bound or its file on disk — so it gets its own error record and is joined
-// onto the cause rather than dropped.
-func abandonListener(listener net.Listener, absolute string, cause error, log *logging.Logger) error {
-	closeErr := listener.Close()
-	if closeErr == nil {
-		return cause
-	}
-	log.Log(logging.Fields{Operation: "store.listen.abandon", Level: "error", Socket: absolute}, "closing the listener after its setup failed also failed: %v", closeErr)
-	return errors.Join(cause, fmt.Errorf("shim-store server: close abandoned listener on %q: %w", absolute, closeErr))
 }
