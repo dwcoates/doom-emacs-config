@@ -123,9 +123,38 @@ describing what goes with those keys.")
                 'local-map agent-repl-input-help-button-map
                 'agent-repl-input-help-topic (plist-get topic :id))))
 
-(defun agent-repl-input-help-header-line ()
+(defun agent-repl--input-help-header-line-text ()
   "Return the composer's header line: one help button per topic."
   (concat " " (mapconcat #'agent-repl--input-help-button agent-repl-input-help-topics " ")))
+
+;; EVERY COMPOSER'S HEADER LINE IS THIS ONE VARIABLE, never a copy of it.
+;; `header-line-format' holds the symbol, which redisplay reads afresh, so
+;; rebuilding the value on every load (the `setq' below, since `defvar'
+;; initializes once) updates every open composer by construction.  A
+;; symbol's string value keeps its text properties, the buttons, only when
+;; the symbol is risky.
+(defvar agent-repl-input-help-header-line nil
+  "The composer's header line, every composer's `header-line-format'.")
+(put 'agent-repl-input-help-header-line 'risky-local-variable t)
+(setq agent-repl-input-help-header-line (agent-repl--input-help-header-line-text))
+
+(defun agent-repl-input-help-install ()
+  "Make the current buffer's header line `agent-repl-input-help-header-line'."
+  (setq-local header-line-format 'agent-repl-input-help-header-line)
+  (force-mode-line-update))
+
+(defun agent-repl--input-help-install-in-composers ()
+  "Install the help header line in every open composer; return how many.
+A composer made before this file last loaded may hold any header line an
+older load gave it, so each load points every one at the variable."
+  (let ((count 0))
+    (dolist (buf (buffer-list))
+      (when (eq (buffer-local-value 'major-mode buf) 'agent-repl-input-mode)
+        (with-current-buffer buf (agent-repl-input-help-install))
+        (setq count (1+ count))))
+    (agent-repl--log agent-repl-input-help--log-scope
+                     "elisp.input-help.install-in-composers: composers=%d" count)
+    count))
 
 ;;;; ---- Finding a command's keys ---------------------------------------
 
@@ -269,6 +298,8 @@ No such topic is fatal."
                                   agent-repl-input-help-topics)
                           nil t)))
   (agent-repl-input-help-show (plist-get (agent-repl--input-help-topic :title title) :id)))
+
+(agent-repl--input-help-install-in-composers)
 
 (provide 'input-help)
 

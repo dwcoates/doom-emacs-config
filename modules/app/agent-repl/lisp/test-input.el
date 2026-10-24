@@ -1659,8 +1659,7 @@ workspace's dwell clear another composer's badge."
     ;; Act.
     (agent-repl-input-mode)
     ;; Assert.
-    (should (equal-including-properties header-line-format
-                                        (agent-repl-input-help-header-line)))))
+    (should (eq header-line-format 'agent-repl-input-help-header-line))))
 
 (ert-deftest agent-repl-input-mode-enables-visual-line-mode ()
   "The composer turns on `visual-line-mode' so Evil moves by screen line."

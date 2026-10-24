@@ -84,7 +84,7 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
 `map!' is a no-op stub under `emacs -Q', so its bindings are read off the source."
   (with-temp-buffer
     (insert-file-contents (expand-file-name file (file-name-directory
-                                                  (symbol-file 'agent-repl-input-help-header-line))))
+                                                  (symbol-file 'agent-repl-input-help-install))))
     (let (found)
       (condition-case nil
           (while t
@@ -119,7 +119,7 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
 
 (ert-deftest agent-repl-test-input-help-header-line-has-one-button-per-topic-in-order ()
   "The header line carries each topic's id, in table order."
-  (let* ((line (agent-repl-input-help-header-line))
+  (let* ((line (agent-repl--input-help-header-line-text))
          (ids nil))
     (dotimes (i (length line))
       (let ((id (get-text-property i 'agent-repl-input-help-topic line)))
@@ -140,6 +140,50 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
   (let ((button (agent-repl--input-help-button '(:id x :title "T"))))
     (should (eq (lookup-key (get-text-property 1 'local-map button) [header-line mouse-1])
                 #'agent-repl-input-help-click))))
+
+;;;; ---- Installing the header line ----
+
+(ert-deftest agent-repl-test-input-help-header-line-variable-is-the-buttons ()
+  "The shared variable holds the buttons, properties and all."
+  (should (equal-including-properties agent-repl-input-help-header-line
+                                      (agent-repl--input-help-header-line-text))))
+
+(ert-deftest agent-repl-test-input-help-header-line-variable-is-risky ()
+  "The variable is risky, so redisplay keeps its buttons' text properties."
+  (should (get 'agent-repl-input-help-header-line 'risky-local-variable)))
+
+(ert-deftest agent-repl-test-input-help-install-points-at-the-variable ()
+  "Installing makes the buffer's header line the shared variable's name."
+  (with-temp-buffer
+    (agent-repl-input-help-install)
+    (should (eq header-line-format 'agent-repl-input-help-header-line))))
+
+(ert-deftest agent-repl-test-input-help-install-in-composers-updates-stale-composers ()
+  "Every open composer holding an older header line is pointed at the variable."
+  (let (logged)
+    (with-temp-buffer
+      (agent-repl-input-mode)
+      (setq-local header-line-format "C-c C-c: clear+save")
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        (should (>= (agent-repl--input-help-install-in-composers) 1)))
+      (should (eq header-line-format 'agent-repl-input-help-header-line))
+      (should (string-match-p "install-in-composers: composers=[1-9]" (car logged))))))
+
+(ert-deftest agent-repl-test-input-help-install-in-composers-leaves-other-buffers ()
+  "A buffer that is not a composer keeps its own header line."
+  (with-temp-buffer
+    (setq-local header-line-format "mine")
+    (agent-repl--input-help-install-in-composers)
+    (should (equal header-line-format "mine"))))
+
+(ert-deftest agent-repl-test-input-help-reload-updates-open-composers ()
+  "Loading input-help.el again updates a composer an older load set up."
+  (with-temp-buffer
+    (agent-repl-input-mode)
+    (setq-local header-line-format "C-c C-c: clear+save")
+    (load (symbol-file 'agent-repl-input-help-install) nil t)
+    (should (eq header-line-format 'agent-repl-input-help-header-line))))
 
 ;;;; ---- Finding a command's keys ----
 
@@ -283,7 +327,7 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
 
 (ert-deftest agent-repl-test-input-help-click-shows-the-clicked-topic ()
   "Clicking a button shows the topic its text carries."
-  (let ((line (agent-repl-input-help-header-line))
+  (let ((line (agent-repl--input-help-header-line-text))
         shown)
     (cl-letf (((symbol-function 'agent-repl-input-help-show) (lambda (id) (push id shown))))
       (agent-repl-input-help-click
