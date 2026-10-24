@@ -383,6 +383,11 @@ connection stands, the daemon refused, or it never answered."
          (agent-repl--warn ws "elisp.prompt-entries.neighbor-failure ws=%s label=%s error=%S" ws label err)
          nil)))))
 
+(defun agent-repl-prompt-entries-opening (label)
+  "The words that open a blank entry answering LABEL: `LABEL - '.
+Every line Emacs opens on an entry is opened with them."
+  (concat label " - "))
+
 (defun agent-repl-prompt-entries--open (next)
   "Open a line below (NEXT) or above point's line, filled with a neighbor.
 On an entry line whose label has a neighbor that way, the new line opens
@@ -391,7 +396,7 @@ on `LABEL - '; otherwise it opens empty, as `evil-open-below' does."
                      (agent-repl-prompt-entries--entry-at-point (agent-repl-prompt-entries--entries))))
          (neighbor (and label (agent-repl-prompt-entries--neighbor label next))))
     (if next (evil-open-below 1) (evil-open-above 1))
-    (when neighbor (insert neighbor " - "))))
+    (when neighbor (insert (agent-repl-prompt-entries-opening neighbor)))))
 
 (defun agent-repl-prompt-entries-open-below ()
   "Open a line below point; on an entry line, fill it with the next label.

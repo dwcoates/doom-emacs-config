@@ -508,6 +508,26 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
   "The text of point's line."
   (buffer-substring-no-properties (line-beginning-position) (line-end-position)))
 
+(ert-deftest agent-repl-test-prompt-entries-opening-is-the-label-and-its-dash ()
+  "A blank entry opens on the label, a space, a dash and a space."
+  (should (equal (agent-repl-prompt-entries-opening "3.1.2") "3.1.2 - ")))
+
+(ert-deftest agent-repl-test-prompt-entries-every-opened-entry-is-opened-by-the-one-helper ()
+  "`o'/`O' and a branch click open entries through `agent-repl-prompt-entries-opening'."
+  (dolist (case '(("prompt-entries.el" "agent-repl-prompt-entries--open")))
+    ;; Arrange
+    (let ((source (with-temp-buffer
+                    (insert-file-contents (expand-file-name (car case) agent-repl-test--module-dir))
+                    (goto-char (point-min))
+                    (re-search-forward (concat "^(defun " (regexp-quote (cadr case)) " "))
+                    (beginning-of-line)
+                    (buffer-substring (point) (progn (forward-sexp) (point))))))
+      ;; Act / Assert: the shared helper, never a hand-rolled " - ".
+      (should (equal (list (cadr case)
+                           (and (string-match-p "(agent-repl-prompt-entries-opening " source) t)
+                           (string-match-p "\" - \"" source))
+                     (list (cadr case) t nil))))))
+
 (ert-deftest agent-repl-test-prompt-entries-o-on-an-entry-opens-the-next-nodes-entry ()
   "`o' on an entry line opens a line below filled with the next node's label."
   (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "1.2"))))
