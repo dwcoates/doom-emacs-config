@@ -2,8 +2,14 @@
 
 The Claude REPL: an Emacs frontend (`lisp/*.el`), a resident Go daemon (`daemon/`), a
 per-session TypeScript shim driving the Claude SDK (`agent-shim/claude/shim/`), a
-browser GUI (`webapp/`), and two OS-managed services carrying the file plane
-(`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`).
+browser GUI (`webapp/`), two OS-managed services carrying the file plane
+(`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`), and zettel
+(`zettel/`), the OS-managed knowledge-graph service behind chat threads.
+
+The knowledge graph and chat have a glossary of their own, and every term in
+it is the one word for its concept in code, protos and docs alike: see
+`zettel/AGENTS.md` "Glossary". The planning record is
+`docs/knowledge-graph/PLAN.md`.
 
 The repo-wide rules in the top-level `AGENTS.md` apply here in full; this file
 covers deploying and running THIS module, plus the color vocabulary every one
@@ -1762,7 +1768,7 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
 
 - **Where entries live.**
   - `requirements.json` at the module root holds agent-repl-wide entries: Emacs, Doom, the Claude CLI, the banner program, environment variables, skills, the pre-commit hook, and module-wide dev tools.
-  - Each system keeps its own `requirements.json` beside its code (`lisp/`, `daemon/`, `webapp/`, `proto/`, `e2e/`, `agent-shim/claude/shim/`, `agent-shim/shim-lock/`, `agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`), and the root's `includes` names every one of them.
+  - Each system keeps its own `requirements.json` beside its code (`lisp/`, `daemon/`, `webapp/`, `proto/`, `e2e/`, `agent-shim/claude/shim/`, `agent-shim/shim-lock/`, `agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`, `zettel/`), and the root's `includes` names every one of them.
   - An id two systems share (a toolchain like `go` or `node`) is declared identically in each, and the runner refuses any difference.
 - **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `notification_permission`, `skill_link`, `git_hook`, `launchd_service`, `download`), and checks and installs each kind one way.
   - A new dependency is a manifest entry, never a script edit.
