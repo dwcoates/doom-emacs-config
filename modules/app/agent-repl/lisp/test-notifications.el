@@ -184,6 +184,22 @@ with its callbacks in `answers', so a test answers each one itself."
         (agent-repl--focus-changed))
       (should (= scheduled 1)))))
 
+(ert-deftest agent-repl-test-focus-changed-runs-the-settled-hook-once-settled ()
+  "The coalesced timer runs `agent-repl-focus-settled-hook' and clears itself."
+  (agent-repl-test-notifications--with-reporter t 'conn
+    (let ((agent-repl-focus-settled-hook nil)
+          (ran 0)
+          (fire nil))
+      (add-hook 'agent-repl-focus-settled-hook (lambda () (cl-incf ran)))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_time _repeat fn) (setq fire fn) (timer-create))))
+        (agent-repl--focus-changed))
+      ;; Act
+      (funcall fire)
+      ;; Assert
+      (should (= ran 1))
+      (should (null agent-repl--focus-report-timer)))))
+
 (ert-deftest agent-repl-test-focus-report-on-link-reports ()
   "A daemon that becomes the live one is told the focus Emacs holds now."
   (agent-repl-test-notifications--with-reporter t 'conn
@@ -194,7 +210,8 @@ with its callbacks in `answers', so a test answers each one itself."
   "The reporter is on the link-up and promotion hooks, and on focus changes."
   (should (memq #'agent-repl--focus-report-on-link agent-repl-link-up-functions))
   (should (memq #'agent-repl--focus-report-on-link agent-repl-link-promote-functions))
-  (should (advice-function-member-p #'agent-repl--focus-changed after-focus-change-function)))
+  (should (advice-function-member-p #'agent-repl--focus-changed after-focus-change-function))
+  (should (memq #'agent-repl--focus-report agent-repl-focus-settled-hook)))
 
 ;;;; ---- Tests: the claim a focus gain makes ----
 
