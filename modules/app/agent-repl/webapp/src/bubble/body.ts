@@ -18,7 +18,7 @@ import { requireMessage } from "../rpc/strict.js";
 import { create } from "@bufbuild/protobuf";
 import { ParsedProseSchema, type ParsedProse } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import { inline, renderMarkdown } from "../markdown.js";
-import { renderTreeHtml, type TreeCols, type TreeIssue } from "../metaprompt-tree.js";
+import { TREE_CLASS, renderTreeHtml, type TreeCols, type TreeIssue } from "../metaprompt-tree.js";
 import { computedPx, pageResizeObserver, placeChildren, queryAll, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
 import { entryTreeHtml } from "../feed/entries.js";
@@ -47,9 +47,9 @@ export function proseHtml(prose: ParsedProse, cols: TreeCols): string {
         case "plain":
           return renderMarkdown(block.block.value.markdown);
         case "tree":
-          return `<div class="mp-tree">${renderTreeHtml(block.block.value, inline, cols(), logTreeIssue)}</div>`;
+          return `<div class="${TREE_CLASS}">${renderTreeHtml(block.block.value, inline, cols(), logTreeIssue)}</div>`;
         case "entries":
-          return `<div class="mp-tree mp-entry-tree">${entryTreeHtml(block.block.value, inline, cols(), logTreeIssue)}</div>`;
+          return `<div class="${TREE_CLASS} mp-entry-tree">${entryTreeHtml(block.block.value, inline, cols(), logTreeIssue)}</div>`;
         default:
           return invariant("a prose block has no arm", { case: String(block.block.case) });
       }
@@ -169,7 +169,7 @@ export function measureTreeCols(body: HTMLElement): number {
   const containing = containingBlockOf(bubble);
 
   const probe = body.ownerDocument.createElement("div");
-  probe.className = "mp-tree";
+  probe.className = TREE_CLASS;
   probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0;";
   probe.textContent = "0".repeat(100);
   body.appendChild(probe);
@@ -517,7 +517,7 @@ function armPainter(body: BubbleBody): Painter {
       for (const fn of waiters ?? []) fn();
     }
   };
-  const drawsTree = (): boolean => body.querySelector(".mp-tree") !== null;
+  const drawsTree = (): boolean => body.querySelector(`.${TREE_CLASS}`) !== null;
   const needsWidth = (): boolean => slots().some((slot) => proseNeedsWidth(sourceOf(slot)));
   const laidOut = (): boolean =>
     body.isConnected && requireBubble(body).getClientRects().length > 0;
