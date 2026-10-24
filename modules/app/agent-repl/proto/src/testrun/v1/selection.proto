@@ -1,0 +1,177 @@
+// selection.proto — WHICH TESTS A RUN RUNS, named down to the single subtest.
+//
+// A selection names tests by WHERE THEY LIVE (a Go package's directory, a test
+// file, a harness script) and, within that, by their own names, never by
+// suite or by unit: the runner (testrun) resolves each target to the roster
+// suite that owns it and builds only the units that run what was named, with
+// the build and program units they need. A target no suite owns, or a test
+// name the target does not define, is refused rather than run as nothing.
+//
+// THE NARROWEST RUN IS THE DEFAULT ONE TO ASK FOR. An agent names exactly the
+// tests its change touches; the whole roster is the merge queue's to run.
+//
+// Every path is RELATIVE TO THE REPOSITORY ROOT (for example
+// "modules/app/agent-repl/daemon/internal/merge"), so a selection reads the
+// same from every directory and names one place.
+syntax = "proto3";
+
+package testrun.v1;
+
+option go_package = "agentrepl/proto/testrun/v1;testrunv1";
+
+// What one run is asked to run.
+message TestRunRequest {
+  // REQUIRED, at least one. The tests to run; a test two selections both name
+  // runs once.
+  repeated TestSelection selections = 1;
+}
+
+// One target and the tests within it to run.
+message TestSelection {
+  // REQUIRED. What kind of test the target is, which decides how its tests are
+  // named and run.
+  oneof target {
+    // A Go package's tests, unit or integration tier, as its suite builds them.
+    TestSelectionGoPackage go_package = 1;
+    // One vitest file's tests.
+    TestSelectionVitestFile vitest_file = 2;
+    // One ERT test file's tests.
+    TestSelectionErtFile ert_file = 3;
+    // One shell test harness, whole or by its groups.
+    TestSelectionHarness harness = 4;
+  }
+}
+
+// ---- Go ----
+
+// A Go package's tests: all of them, or named top-level tests and subtests.
+message TestSelectionGoPackage {
+  // REQUIRED. The package's directory, relative to the repository root. The
+  // package's build tags (an integration tier's) come from the suite that owns
+  // the directory, never from the caller.
+  string package_dir = 1;
+  // REQUIRED. Which of the package's tests run.
+  oneof tests {
+    // Every top-level test the package defines.
+    TestSelectionGoAllTests all = 2;
+    // Only the named tests.
+    TestSelectionGoNamedTests named = 3;
+  }
+}
+
+// Every top-level test of the package runs.
+message TestSelectionGoAllTests {}
+
+// The named top-level tests run, and no other.
+message TestSelectionGoNamedTests {
+  // REQUIRED, at least one. Each names a top-level test the package defines.
+  repeated TestSelectionGoTest tests = 1;
+}
+
+// One top-level Go test, whole or narrowed to some of its subtests.
+message TestSelectionGoTest {
+  // REQUIRED. The top-level test function's name, exactly (TestFoo).
+  string name = 1;
+  // REQUIRED. How much of the test runs.
+  oneof scope {
+    // The whole test, every subtest included.
+    TestSelectionGoWholeTest whole = 2;
+    // Only the named subtests (and whatever they nest).
+    TestSelectionGoSubtests subtests = 3;
+  }
+}
+
+// The whole top-level test runs.
+message TestSelectionGoWholeTest {}
+
+// Only the named subtests of the top-level test run.
+message TestSelectionGoSubtests {
+  // REQUIRED, at least one. Each path runs its subtest and everything nested
+  // under it.
+  repeated TestSelectionGoSubtestPath paths = 1;
+}
+
+// One subtest, by its path beneath the top-level test.
+message TestSelectionGoSubtestPath {
+  // REQUIRED, at least one. The subtest names from the outermost t.Run down,
+  // each as `go test -v` prints it (spaces become underscores): the path
+  // TestFoo/a_case/inner is the segments ["a_case", "inner"]. Each segment is
+  // matched exactly, never as a pattern.
+  repeated string segments = 1;
+}
+
+// ---- vitest ----
+
+// One vitest file's tests: all of them, or named ones.
+message TestSelectionVitestFile {
+  // REQUIRED. The test file, relative to the repository root.
+  string file = 1;
+  // REQUIRED. Which of the file's tests run.
+  oneof tests {
+    // Every test in the file.
+    TestSelectionVitestAllTests all = 2;
+    // Only the named tests.
+    TestSelectionVitestNamedTests named = 3;
+  }
+}
+
+// Every test in the file runs.
+message TestSelectionVitestAllTests {}
+
+// The named tests of the file run, and no other.
+message TestSelectionVitestNamedTests {
+  // REQUIRED, at least one. Each is a test's FULL name as vitest reports it:
+  // its describe blocks' titles and its own, joined by single spaces. A
+  // describe block's full name runs every test inside it. Matched exactly as a
+  // prefix of the full name, never as a pattern.
+  repeated string full_names = 1;
+}
+
+// ---- ERT ----
+
+// One ERT test file's tests: all of them, or named ones.
+message TestSelectionErtFile {
+  // REQUIRED. The test file, relative to the repository root.
+  string file = 1;
+  // REQUIRED. Which of the file's tests run.
+  oneof tests {
+    // Every ert-deftest the file defines.
+    TestSelectionErtAllTests all = 2;
+    // Only the named tests.
+    TestSelectionErtNamedTests named = 3;
+  }
+}
+
+// Every test the file defines runs.
+message TestSelectionErtAllTests {}
+
+// The named tests of the file run, and no other.
+message TestSelectionErtNamedTests {
+  // REQUIRED, at least one. Each is an ert-deftest's symbol name, exactly.
+  repeated string test_names = 1;
+}
+
+// ---- shell harnesses ----
+
+// One shell test harness: all of it, or named groups of a harness that splits
+// into groups (one that answers `--list`).
+message TestSelectionHarness {
+  // REQUIRED. The harness script, relative to the repository root.
+  string script = 1;
+  // REQUIRED. Which of the harness's groups run.
+  oneof groups {
+    // The whole harness.
+    TestSelectionHarnessAllGroups all = 2;
+    // Only the named groups; refused for a harness that has none.
+    TestSelectionHarnessNamedGroups named = 3;
+  }
+}
+
+// The whole harness runs.
+message TestSelectionHarnessAllGroups {}
+
+// The named groups of the harness run, and no other.
+message TestSelectionHarnessNamedGroups {
+  // REQUIRED, at least one. Each is a group the harness's `--list` names.
+  repeated string names = 1;
+}

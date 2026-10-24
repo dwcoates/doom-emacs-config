@@ -316,6 +316,8 @@ const (
 	// AgentReplUnsubscribeMergeQueueProcedure is the fully-qualified name of the AgentRepl's
 	// UnsubscribeMergeQueue RPC.
 	AgentReplUnsubscribeMergeQueueProcedure = "/agentrepl.v1.AgentRepl/UnsubscribeMergeQueue"
+	// AgentReplRunTestsProcedure is the fully-qualified name of the AgentRepl's RunTests RPC.
+	AgentReplRunTestsProcedure = "/agentrepl.v1.AgentRepl/RunTests"
 	// AgentReplEvaluateInEditorProcedure is the fully-qualified name of the AgentRepl's
 	// EvaluateInEditor RPC.
 	AgentReplEvaluateInEditorProcedure = "/agentrepl.v1.AgentRepl/EvaluateInEditor"
@@ -429,6 +431,7 @@ var (
 	agentReplUnsubscribeWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("UnsubscribeWorkspace")
 	agentReplSubscribeMergeQueueMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("SubscribeMergeQueue")
 	agentReplUnsubscribeMergeQueueMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("UnsubscribeMergeQueue")
+	agentReplRunTestsMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("RunTests")
 	agentReplEvaluateInEditorMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("EvaluateInEditor")
 	agentReplAnswerEditorEvaluationMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("AnswerEditorEvaluation")
 )
@@ -760,6 +763,10 @@ type AgentReplClient interface {
 	// End a merge-queue subscription. See
 	// endpoint_unsubscribe_merge_queue.proto.
 	UnsubscribeMergeQueue(context.Context, *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error)
+	// Run the named tests from one workspace's worktree, streaming what the run
+	// reports; the daemon is the one runner of tests on the host. See
+	// endpoint_run_tests.proto.
+	RunTests(context.Context, *connect.Request[v1.RunTestsRequest]) (*connect.ServerStreamForClient[v1.RunTestsResponse], error)
 	// ---- EDITOR: elisp evaluated in the running editor ----
 	// Evaluate elisp in the running editor and answer with the result. See
 	// endpoint_evaluate_in_editor.proto.
@@ -1399,6 +1406,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUnsubscribeMergeQueueMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		runTests: connect.NewClient[v1.RunTestsRequest, v1.RunTestsResponse](
+			httpClient,
+			baseURL+AgentReplRunTestsProcedure,
+			connect.WithSchema(agentReplRunTestsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		evaluateInEditor: connect.NewClient[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse](
 			httpClient,
 			baseURL+AgentReplEvaluateInEditorProcedure,
@@ -1518,6 +1531,7 @@ type agentReplClient struct {
 	unsubscribeWorkspace       *connect.Client[v1.UnsubscribeWorkspaceRequest, v1.UnsubscribeWorkspaceResponse]
 	subscribeMergeQueue        *connect.Client[v1.SubscribeMergeQueueRequest, v1.SubscribeMergeQueueResponse]
 	unsubscribeMergeQueue      *connect.Client[v1.UnsubscribeMergeQueueRequest, v1.UnsubscribeMergeQueueResponse]
+	runTests                   *connect.Client[v1.RunTestsRequest, v1.RunTestsResponse]
 	evaluateInEditor           *connect.Client[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse]
 	answerEditorEvaluation     *connect.Client[v1.AnswerEditorEvaluationRequest, v1.AnswerEditorEvaluationResponse]
 }
@@ -2032,6 +2046,11 @@ func (c *agentReplClient) UnsubscribeMergeQueue(ctx context.Context, req *connec
 	return c.unsubscribeMergeQueue.CallUnary(ctx, req)
 }
 
+// RunTests calls agentrepl.v1.AgentRepl.RunTests.
+func (c *agentReplClient) RunTests(ctx context.Context, req *connect.Request[v1.RunTestsRequest]) (*connect.ServerStreamForClient[v1.RunTestsResponse], error) {
+	return c.runTests.CallServerStream(ctx, req)
+}
+
 // EvaluateInEditor calls agentrepl.v1.AgentRepl.EvaluateInEditor.
 func (c *agentReplClient) EvaluateInEditor(ctx context.Context, req *connect.Request[v1.EvaluateInEditorRequest]) (*connect.Response[v1.EvaluateInEditorResponse], error) {
 	return c.evaluateInEditor.CallUnary(ctx, req)
@@ -2369,6 +2388,10 @@ type AgentReplHandler interface {
 	// End a merge-queue subscription. See
 	// endpoint_unsubscribe_merge_queue.proto.
 	UnsubscribeMergeQueue(context.Context, *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error)
+	// Run the named tests from one workspace's worktree, streaming what the run
+	// reports; the daemon is the one runner of tests on the host. See
+	// endpoint_run_tests.proto.
+	RunTests(context.Context, *connect.Request[v1.RunTestsRequest], *connect.ServerStream[v1.RunTestsResponse]) error
 	// ---- EDITOR: elisp evaluated in the running editor ----
 	// Evaluate elisp in the running editor and answer with the result. See
 	// endpoint_evaluate_in_editor.proto.
@@ -3004,6 +3027,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUnsubscribeMergeQueueMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplRunTestsHandler := connect.NewServerStreamHandler(
+		AgentReplRunTestsProcedure,
+		svc.RunTests,
+		connect.WithSchema(agentReplRunTestsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplEvaluateInEditorHandler := connect.NewUnaryHandler(
 		AgentReplEvaluateInEditorProcedure,
 		svc.EvaluateInEditor,
@@ -3222,6 +3251,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSubscribeMergeQueueHandler.ServeHTTP(w, r)
 		case AgentReplUnsubscribeMergeQueueProcedure:
 			agentReplUnsubscribeMergeQueueHandler.ServeHTTP(w, r)
+		case AgentReplRunTestsProcedure:
+			agentReplRunTestsHandler.ServeHTTP(w, r)
 		case AgentReplEvaluateInEditorProcedure:
 			agentReplEvaluateInEditorHandler.ServeHTTP(w, r)
 		case AgentReplAnswerEditorEvaluationProcedure:
@@ -3641,6 +3672,10 @@ func (UnimplementedAgentReplHandler) SubscribeMergeQueue(context.Context, *conne
 
 func (UnimplementedAgentReplHandler) UnsubscribeMergeQueue(context.Context, *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UnsubscribeMergeQueue is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RunTests(context.Context, *connect.Request[v1.RunTestsRequest], *connect.ServerStream[v1.RunTestsResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RunTests is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) EvaluateInEditor(context.Context, *connect.Request[v1.EvaluateInEditorRequest]) (*connect.Response[v1.EvaluateInEditorResponse], error) {

@@ -1,0 +1,71 @@
+// endpoint_run_tests.proto — RunTests: run the named tests from one
+// workspace's worktree, and stream what the run reports.
+//
+// THE DAEMON IS THE ONE RUNNER OF TESTS. Every test run on the host goes
+// through it — an agent's, through this endpoint, and the merge queue's — so
+// every run shares the host's one test-CPU budget, in priority order, and none
+// can start outside it. An agent names exactly the tests its change touches
+// (testrun.v1.TestSelection reaches a single subtest); the whole roster is
+// the merge queue's to run.
+//
+// THE WORKSPACE'S OWN CODE RUNS. The run builds and runs the runner from the
+// workspace's worktree, against that worktree, at background priority.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "testrun/v1/run_event.proto";
+import "testrun/v1/selection.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Run the selected tests from one workspace's worktree.
+message RunTestsRequest {
+  // REQUIRED. The workspace whose worktree the tests run in.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // REQUIRED, naming at least one test. The tests to run, exactly as the
+  // runner takes them.
+  testrun.v1.TestRunRequest run = 2;
+}
+
+// One frame of the run's stream.
+message RunTestsResponse {
+  // Exactly one arm is set. A run that starts streams its runner's events,
+  // ending with `ended` or `refused`; a run the daemon cannot start, or whose
+  // runner dies before it reports its end, streams one `error` and closes.
+  oneof frame {
+    // What the runner reported, relayed verbatim.
+    testrun.v1.TestRunEvent event = 1;
+    // The daemon could not run the tests, or the runner ended without saying
+    // how its run ended.
+    RunTestsError error = 2;
+  }
+}
+
+// Why the run could not start or did not finish.
+message RunTestsError {
+  // Which failure it was.
+  oneof cause {
+    // No workspace the daemon serves is the one named.
+    RunTestsUnknownWorkspace unknown_workspace = 1;
+    // The request named no test.
+    RunTestsNoSelection no_selection = 2;
+    // The runner could not be started, or ended without reporting its end.
+    RunTestsRunnerFailed runner_failed = 3;
+  }
+}
+
+// No workspace the daemon serves is the one named.
+message RunTestsUnknownWorkspace {}
+
+// The request named no test.
+message RunTestsNoSelection {}
+
+// The runner could not be started, or ended without reporting its end.
+message RunTestsRunnerFailed {
+  // The runner's exit status; -1 when it never started.
+  int32 exit_code = 1;
+  // What went wrong, and where the runner's log is when it got that far.
+  string detail = 2;
+}
