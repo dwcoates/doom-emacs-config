@@ -293,10 +293,25 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 
 ## Known complications
 
-- The Agent SDK is TypeScript or Python, and the zettel service is Go. Open:
-  whether the service runs the Claude Code CLI headless (`claude -p` with JSON
-  output, which the SDK docs offer for other languages), or a TypeScript
-  process built on the SDK, like agent-repl's shim.
+- Proposed (2026-10-24): chat answers run through agent-repl's existing shim
+  (`agent-shim/claude/shim`), driven by the daemon, rather than a second
+  adapter around the Agent SDK. Reasons:
+  - one place knows the SDK, so two adapters cannot drift apart;
+  - the topbar's model selection, token count and login already work off
+    shim sessions;
+  - answers stream as `conversation.v1`, which the webapp already renders;
+  - the shim's fake SDK already keeps tests off the real vendor.
+  With one parent per node, the path from a root is linear, so it maps onto
+  one vendor session, and asking a sibling is a fork at the parent's turn,
+  which the shim already supports (`ForkSession` with a `ForkPoint`). A path
+  also gets prompt-cache hits that a context rebuilt per answer would not.
+  Premises are added to the prompt as extra context. Each node records the
+  vendor session and fork point its answer ended at.
+  Friction to resolve: the shim assumes a workspace directory (cwd, folder
+  trust, per-session locks); it hard-codes `settingSources: user + project +
+  local` (`src/sdk/real-query.ts`), which a chat must not load; it writes its
+  records to the store, while answers belong in zettel's database; and the
+  premise judge also needs model calls.
 
 - Several parents makes context grow with how many branches meet, on top of
   how deep the chain is, and it loses prompt caching: a combination of
