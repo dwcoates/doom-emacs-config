@@ -85,7 +85,23 @@ message SelectFeedRowRequest {
     // the composer with the entry (HostWorkspacePromptEntryClicked), so the
     // next send rolls the prompt back and resends it with that entry edited.
     SelectFeedRowEntry entry = 9;
+    // The reader clicked a node of a response's tree (owner request,
+    // 2026-10-24): select that response as the reply's target, as a click
+    // does but never toggling (frontend.v1.FeedSelectionRowViewportHold), and
+    // tell Emacs to open an entry answering the node (HostWorkspaceComposeEntry),
+    // so the reader answers a point straight from the feed. A row that is no
+    // selectable response, or whose tree holds no such node, is refused as not
+    // selectable.
+    SelectFeedRowBranch branch = 10;
   }
+}
+
+// The node of a response's tree the reader clicked.
+message SelectFeedRowBranch {
+  // The response's row.
+  frontend.v1.FeedId row = 1;
+  // The node's label, as the response's tree carries it. Never empty.
+  string label = 2;
 }
 
 // The prompt a response's linked label names, and the label.

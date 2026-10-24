@@ -102,6 +102,13 @@ message WatchHostWorkspaceResponse {
     // never replayed to a late subscriber; the selection itself rides
     // `selection`.
     HostWorkspacePromptEntryClicked prompt_entry_clicked = 13;
+    // THE READER CLICKED A NODE OF A RESPONSE'S TREE IN THE WEBVIEW
+    // (SelectFeedRow's `branch` move), selecting the response: Emacs opens a
+    // blank entry answering the node at the end of the composer (`LABEL - `),
+    // and puts the keyboard right after it, in insert state. An event, not
+    // state: never replayed to a late subscriber; the selection itself rides
+    // `selection`.
+    HostWorkspaceComposeEntry compose_entry = 14;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -153,6 +160,13 @@ message HostWorkspaceFinalResponseClicked {}
 // it rides names the workspace, and requesting the switch to it is the whole
 // of Emacs's obligation.
 message HostWorkspaceSelectRequested {}
+// The node of a response's tree the reader clicked, which the composer opens
+// an entry answering.
+message HostWorkspaceComposeEntry {
+  // The node's label. Never empty.
+  string label = 1;
+}
+
 // The prompt entry the reader clicked in this workspace's webview.
 message HostWorkspacePromptEntryClicked {
   // The prompt's row, now the selection.
