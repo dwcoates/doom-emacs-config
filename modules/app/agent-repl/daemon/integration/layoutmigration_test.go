@@ -191,6 +191,8 @@ var layout3Undo = map[int][]string{
 		`ALTER TABLE account_usage DROP COLUMN weekly_sonnet_verdict_resets_at_s`,
 		`ALTER TABLE account_usage DROP COLUMN overage_verdict_resets_at_s`,
 	},
+	// Layout 73 re-encodes stored rows and changes no shape: nothing to undo.
+	73: {},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by

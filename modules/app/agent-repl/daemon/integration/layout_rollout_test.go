@@ -31,7 +31,7 @@ import (
 // composer drew `restarting` and Emacs refused every prompt.
 //
 // These tests stage that world for real -- a real agent-repld successor,
-// really spawned, really dying on a state database stamped one layout older
+// really spawned, really dying on a state database stamped with a layout it refuses
 // -- and pin each invariant the fix stands on.
 
 // stateDB answers the daemon's state database path.
@@ -60,14 +60,22 @@ func rawStateDB(t *testing.T, d *harness.Daemon) *sql.DB {
 	return db
 }
 
-// stampOlderLayout stamps the state database one layout older than this
-// build -- what a successor finds when master lands a layout its incumbent
-// never migrated to. The running incumbent never re-reads the stamp, so it
-// serves on exactly as the incident's did.
-func stampOlderLayout(t *testing.T, d *harness.Daemon) {
+// stampRefusedLayout stamps the state database with a layout the successor
+// refuses at boot, as the incident's successor refused the layout it found.
+// The running incumbent never re-reads the stamp, so it serves on exactly as
+// the incident's did.
+//
+// THE STAMP IS ONE LAYOUT NEWER THAN THIS BUILD, which a joining successor
+// refuses whatever the migration list holds: a downgrade is never a
+// migration. A stamp one layout OLDER made the successor replay the newest
+// step onto a file that already had it, and the successor died only while
+// that step happened to be DDL that refused to run twice; a step that can
+// replay (layout 73, a row rewrite) carried the file forward and the
+// successor served (2026-10-24).
+func stampRefusedLayout(t *testing.T, d *harness.Daemon) {
 	t.Helper()
-	if _, err := rawStateDB(t, d).ExecContext(context.Background(), `UPDATE layout SET version = ? WHERE id = 1`, wsm.LayoutVersion-1); err != nil {
-		t.Fatalf("stamp the older layout: %v", err)
+	if _, err := rawStateDB(t, d).ExecContext(context.Background(), `UPDATE layout SET version = ? WHERE id = 1`, wsm.LayoutVersion+1); err != nil {
+		t.Fatalf("stamp the refused layout: %v", err)
 	}
 }
 
@@ -96,7 +104,7 @@ func heldLeases(t *testing.T, d *harness.Daemon) []string {
 func TestAHandoverWhoseSuccessorDiesAtBootTransfersNothingAndKeepsServing(t *testing.T) {
 	t.Parallel()
 	// Arrange: an open, idle workspace on a daemon whose state database is
-	// stamped one layout older than the successor it is about to spawn.
+	// stamped with a layout the successor it is about to spawn refuses.
 	selfRepo, d := drainSelfRepoDaemon(t)
 	d.ExpectWarnings(
 		// The incumbent's abandonment of the handover, and the deploy and
@@ -115,7 +123,7 @@ func TestAHandoverWhoseSuccessorDiesAtBootTransfersNothingAndKeepsServing(t *tes
 	// taken here so the probe below sees only what the handover announced.
 	harness.AwaitView(t, d.Ctx(), daemonStream, "the persistent-wifi standing",
 		func(r *agentreplv1.WatchDaemonResponse) bool { return r.GetPersistentWifi() != nil })
-	stampOlderLayout(t, d)
+	stampRefusedLayout(t, d)
 
 	// Act
 	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
