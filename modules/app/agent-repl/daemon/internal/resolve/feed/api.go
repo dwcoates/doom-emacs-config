@@ -361,11 +361,11 @@ type Resolver interface {
 	// deem selectable — the submit path and the selection refuse it rather
 	// than using an empty text.
 	SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool)
-	// PromptEntry answers what the entry answering LABEL of the root-feed user
-	// prompt row ID says (its entry tree's answer node), as last published. A
-	// miss is a row that is not such a prompt, or holds no entry answering
-	// LABEL.
-	PromptEntry(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) (string, bool)
+	// EntryTarget answers the root-feed response row the entry answering
+	// LABEL of the user prompt row ID answers, by the rule a sent prompt's
+	// entries are bound by. A miss is a row that is no such prompt, holds no
+	// entry answering LABEL, or whose entry answers no response (answers.go).
+	EntryTarget(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) (*frontendv1.FeedId, bool)
 	// ComposerTargets answers, for each of LABELS in order, the response row
 	// an entry answering it targets in a prompt not yet sent that replies to
 	// REPLY (nil for none), or nil where it targets nothing: the rule a sent

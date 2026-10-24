@@ -209,47 +209,6 @@ func TestPromptEntriesReadsAPromptsEntriesInOrder(t *testing.T) {
 	}
 }
 
-func TestPromptEntryTextReadsTheFirstEntryAnsweringALabel(t *testing.T) {
-	tests := []struct {
-		name   string
-		label  string
-		want   string
-		wantOK bool
-	}{
-		{"an entry answering the label", "1.1", "first", true},
-		{"a label two entries answer", "1.2", "second", true},
-		{"a label no entry answers", "9.9", "", false},
-	}
-	row := entryRow([2]string{"1.1", "first"}, [2]string{"1.2", "second"}, [2]string{"1.2", "again"})
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act
-			got, ok := promptEntryText(row, tc.label)
-
-			// Assert
-			if got != tc.want || ok != tc.wantOK {
-				t.Fatalf("promptEntryText(%q) = (%q, %v), want (%q, %v)", tc.label, got, ok, tc.want, tc.wantOK)
-			}
-		})
-	}
-}
-
-func TestPromptEntryReadsAPublishedPromptsEntry(t *testing.T) {
-	// Arrange
-	h := answeredHarness(t)
-	h.deliverPrompt("turn-2", "1.1 - yes, do that")
-	row := &frontendv1.FeedId{Value: h.promptRowID("turn-2")}
-
-	// Act
-	got, ok := h.resolver.PromptEntry(testWorkspace, row, "1.1")
-	_, missing := h.resolver.PromptEntry(testWorkspace, row, "1.2")
-
-	// Assert
-	if got != "yes, do that" || !ok || missing {
-		t.Fatalf("PromptEntry = (%q, %v), absent label ok = %v; want (\"yes, do that\", true) and false", got, ok, missing)
-	}
-}
-
 func TestEveryReaderOfAPromptsEntriesWalksThemThroughPromptEntries(t *testing.T) {
 	// Arrange
 	src, err := os.ReadFile("answers.go")
@@ -261,8 +220,42 @@ func TestEveryReaderOfAPromptsEntriesWalksThemThroughPromptEntries(t *testing.T)
 	walks := strings.Count(string(src), ".GetEntries()")
 	calls := strings.Count(string(src), "promptEntries(row)")
 
-	// Assert: the one walk is promptEntries' own, and both readers call it.
-	if walks != 1 || calls != 2 {
-		t.Fatalf("answers.go reads GetEntries() %d times and calls promptEntries %d times, want 1 and 2", walks, calls)
+	// Assert: the one walk is promptEntries' own, and its one reader calls it.
+	if walks != 1 || calls != 1 {
+		t.Fatalf("answers.go reads GetEntries() %d times and calls promptEntries %d times, want 1 and 1", walks, calls)
+	}
+}
+
+func TestEntryTargetAnswersTheResponseAPromptsEntryAnswers(t *testing.T) {
+	tests := []struct {
+		name   string
+		row    func(*harness) string
+		label  string
+		wantOK bool
+	}{
+		{name: "an entry answering a node of the response", row: func(h *harness) string { return h.promptRowID("turn-2") }, label: "1.1", wantOK: true},
+		{name: "a label the prompt holds no entry for", row: func(h *harness) string { return h.promptRowID("turn-2") }, label: "1.2"},
+		{name: "an entry answering no response", row: func(h *harness) string { return h.promptRowID("turn-2") }, label: "9.9"},
+		{name: "a response row", row: func(h *harness) string { return h.responseRowID("answer-1") }, label: "1.1"},
+		{name: "a row the feed does not hold", row: func(*harness) string { return "missing" }, label: "1.1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := answeredHarness(t)
+			h.deliverPrompt("turn-2", "1.1 - yes\n9.9 - nothing holds this")
+
+			// Act
+			got, ok := h.resolver.EntryTarget(testWorkspace, &frontendv1.FeedId{Value: tc.row(h)}, tc.label)
+
+			// Assert
+			want := ""
+			if tc.wantOK {
+				want = h.responseRowID("answer-1")
+			}
+			if ok != tc.wantOK || got.GetValue() != want {
+				t.Fatalf("EntryTarget(%q) = (%v, %v), want (%q, %v)", tc.label, got, ok, want, tc.wantOK)
+			}
+		})
 	}
 }

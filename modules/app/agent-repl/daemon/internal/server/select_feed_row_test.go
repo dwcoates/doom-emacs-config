@@ -1392,50 +1392,101 @@ func TestSelectFeedRowAnswerRefusesARowThatIsNotAPrompt(t *testing.T) {
 	}
 }
 
-// TestSelectFeedRowEntrySelectsThePromptAndAsksTheHostToFillTheComposer pins
-// a click on an entry: the prompt is selected as a click selects (held), and
-// the host is handed the entry to fill the composer with.
-func TestSelectFeedRowEntrySelectsThePromptAndAsksTheHostToFillTheComposer(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Feed.prompts = feedIDs("prompt-1")
-	h.Feed.entries = map[string]string{"prompt-1\x003.1": "yes, that one"}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	stream := dialHostStream(t, h, ctx)
-
-	// Act.
-	resp := sendMove(t, h, entryMove("prompt-1", "3.1"))
-	event := receiveHostEventPastSelection(t, stream)
-
-	// Assert.
-	if resp.Msg.GetSuccess().GetSelected().GetSelection().GetPrompt().GetViewport().GetHold() == nil {
-		t.Fatalf("result = %v, want the prompt selected and held", resp.Msg.GetResult())
+// TestSelectFeedRowEntrySelectsTheResponseRevealingTheNode pins a click on a
+// prompt's entry: the response it answers is selected as its kind, centered,
+// with the node to box named.
+func TestSelectFeedRowEntrySelectsTheResponseRevealingTheNode(t *testing.T) {
+	tests := []struct {
+		name string
+		set  func(*harness)
+		arm  func(*frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport
+	}{
+		{name: "a final response", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1") },
+			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport { return s.GetResponse().GetViewport() }},
+		{name: "an interim response", set: func(h *harness) { h.Feed.markdown = map[string]string{"resp-1": "interim"} },
+			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport { return s.GetBubble().GetViewport() }},
 	}
-	clicked := event.GetPromptEntryClicked()
-	if clicked.GetRow().GetValue() != "prompt-1" || clicked.GetLabel() != "3.1" || clicked.GetText() != "yes, that one" {
-		t.Fatalf("event = %v, want prompt_entry_clicked naming prompt-1's entry 3.1 and its text", event)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tc.set(h)
+			h.Feed.prompts = feedIDs("prompt-1")
+			h.Feed.entryTargets = map[string]string{"prompt-1\x003.1": "resp-1"}
+
+			// Act.
+			resp := sendMove(t, h, entryMove("prompt-1", "3.1"))
+
+			// Assert.
+			sel := resp.Msg.GetSuccess().GetSelected().GetSelection()
+			if row, _, _ := selectedRow(sel); tc.arm(sel).GetRevealNode().GetLabel() != "3.1" || row.GetValue() != "resp-1" {
+				t.Fatalf("selection = %v, want resp-1 selected revealing its node 3.1", resp.Msg.GetResult())
+			}
+		})
 	}
 }
 
-// TestSelectFeedRowEntryRefusesAnEntryThePromptDoesNotHold pins that a click
-// naming a label the prompt holds no entry for is refused, selects nothing
-// and asks nothing of the host.
-func TestSelectFeedRowEntryRefusesAnEntryThePromptDoesNotHold(t *testing.T) {
+// TestSelectFeedRowEntryNeverDeselectsNorAsksTheHost pins that a second click
+// keeps the response selected, and that no click asks Emacs for anything: a
+// notification click is the first event the host stream carries.
+func TestSelectFeedRowEntryNeverDeselectsNorAsksTheHost(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.Feed.prompts = feedIDs("prompt-1")
-	h.Feed.entries = map[string]string{"prompt-1\x003.1": "yes"}
+	h.Feed.finals = feedIDs("resp-1")
+	h.Feed.entryTargets = map[string]string{"prompt-1\x003.1": "resp-1"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := dialHostStream(t, h, ctx)
+	sendMove(t, h, entryMove("prompt-1", "3.1"))
 
 	// Act.
-	resp := sendMove(t, h, entryMove("prompt-1", "9.9"))
+	resp := sendMove(t, h, entryMove("prompt-1", "3.1"))
+	h.Server.NotificationClicked(testWorkspaceID)
+	first := receiveHostEventPastSelection(t, stream)
 
 	// Assert.
-	if resp.Msg.GetError().GetNotSelectable().GetRow().GetValue() != "prompt-1" {
-		t.Fatalf("result = %v, want not_selectable echoing prompt-1", resp.Msg.GetResult())
+	if resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse() == nil {
+		t.Fatalf("result = %v, want the response still selected", resp.Msg.GetResult())
 	}
-	if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
-		t.Fatal("a refused entry move selected a row")
+	if first.GetNotificationClicked() == nil {
+		t.Fatalf("first event = %v, want the notification click: an entry's click asks nothing of the host", first)
+	}
+}
+
+// TestSelectFeedRowEntryRefusesAnEntryAnsweringNoSelectableResponse pins that
+// a click the daemon cannot honor is refused, echoing the prompt, and selects
+// nothing.
+func TestSelectFeedRowEntryRefusesAnEntryAnsweringNoSelectableResponse(t *testing.T) {
+	tests := []struct {
+		name string
+		set  func(*harness)
+	}{
+		{name: "an entry answering no response", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1") }},
+		{name: "an entry whose response is not selectable", set: func(h *harness) {
+			h.Feed.entryTargets = map[string]string{"prompt-1\x003.1": "resp-1"}
+		}},
+		{name: "an entry answering a prompt", set: func(h *harness) {
+			h.Feed.prompts = feedIDs("resp-1")
+			h.Feed.entryTargets = map[string]string{"prompt-1\x003.1": "resp-1"}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tc.set(h)
+
+			// Act.
+			resp := sendMove(t, h, entryMove("prompt-1", "3.1"))
+
+			// Assert.
+			if resp.Msg.GetError().GetNotSelectable().GetRow().GetValue() != "prompt-1" {
+				t.Fatalf("result = %v, want not_selectable echoing prompt-1", resp.Msg.GetResult())
+			}
+			if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
+				t.Fatal("a refused entry move selected a row")
+			}
+		})
 	}
 }
 
@@ -1444,19 +1495,19 @@ func TestSelectFeedRowEntryRefusesAnEntryThePromptDoesNotHold(t *testing.T) {
 func TestSelectFeedRowEntryClickIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
 	h, log := newLoggedHarness(t)
-	h.Feed.prompts = feedIDs("prompt-1")
-	h.Feed.entries = map[string]string{"prompt-1\x003.1": "yes"}
+	h.Feed.finals = feedIDs("resp-1")
+	h.Feed.entryTargets = map[string]string{"prompt-1\x003.1": "resp-1"}
 
 	// Act.
 	sendMove(t, h, entryMove("prompt-1", "3.1"))
 
 	// Assert.
 	for _, rec := range log.at("INFO") {
-		if rec.Operation == opSelectFeedRow && rec.Context["row"] == "prompt-1" && rec.Context["label"] == "3.1" {
+		if rec.Operation == opSelectFeedRow && rec.Context["row"] == "prompt-1" && rec.Context["label"] == "3.1" && rec.Context["response"] == "resp-1" {
 			return
 		}
 	}
-	t.Fatalf("INFO records = %v, want one naming prompt-1 and its entry 3.1", log.at("INFO"))
+	t.Fatalf("INFO records = %v, want one naming prompt-1, its entry 3.1 and resp-1", log.at("INFO"))
 }
 
 // TestSelectFeedRowAnswerAndEntryRequireALabel pins that either move naming no

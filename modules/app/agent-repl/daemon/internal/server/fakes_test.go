@@ -1285,9 +1285,10 @@ type fakeFeed struct {
 	neighbors map[string]string
 	// labelMoves is what WatchLabelChanges announces (moveLabels).
 	labelMoves publish.Events[ids.WorkspaceID]
-	// entries is what each prompt row's entry says, keyed by row id, a NUL,
-	// and the entry's label: what PromptEntry answers.
-	entries map[string]string
+	// entryTargets is the response row each prompt row's entry answers, keyed
+	// by the prompt's row id, a NUL, and the entry's label: what EntryTarget
+	// answers.
+	entryTargets map[string]string
 	// nodes is each response row's tree nodes, keyed by row id, a NUL, and
 	// the node's label: what ResponseNode answers.
 	nodes map[string]bool
@@ -1475,7 +1476,6 @@ func (f *fakeFeed) SetMergeFold(_ ids.WorkspaceID, id *frontendv1.FeedId, folded
 // landed root-feed rows by construction), answering "text of <row>" for one
 // with no scripted text; unreadable breaks that guarantee for a row, so a test
 // can drive the defect path. An unselectable row is never selectable.
-// PromptEntry answers the entry text a test filed under the row and label.
 func (f *fakeFeed) ComposerTargets(_ ids.WorkspaceID, reply *frontendv1.FeedId, labels []string) []*frontendv1.FeedId {
 	f.sentMu.Lock()
 	f.targetReplies = append(f.targetReplies, reply.GetValue())
@@ -1502,9 +1502,12 @@ func (f *fakeFeed) WatchLabelChanges(ctx context.Context) <-chan ids.WorkspaceID
 	return f.labelMoves.Subscribe(ctx)
 }
 
-func (f *fakeFeed) PromptEntry(_ ids.WorkspaceID, id *frontendv1.FeedId, label string) (string, bool) {
-	text, ok := f.entries[id.GetValue()+"\x00"+label]
-	return text, ok
+func (f *fakeFeed) EntryTarget(_ ids.WorkspaceID, id *frontendv1.FeedId, label string) (*frontendv1.FeedId, bool) {
+	target, ok := f.entryTargets[id.GetValue()+"\x00"+label]
+	if !ok {
+		return nil, false
+	}
+	return &frontendv1.FeedId{Value: target}, true
 }
 
 func (f *fakeFeed) ResponseNode(_ ids.WorkspaceID, id *frontendv1.FeedId, label string) bool {
