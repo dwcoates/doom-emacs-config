@@ -2689,6 +2689,14 @@ html[data-page-unshown] *::after {
   --code-bg: var(--prompt-code-bg);
   --code-block-bg: var(--prompt-code-bg);
 }
+/* A REPLY'S QUOTED RESPONSE IS GREY (owner request, 2026-10-24: it was blue
+   like the prompt): an opened reply draws the response it quotes as a code
+   block (src/feed/rows/blocks.ts `drawFeedQuoteBlock`), filled with the
+   RESPONSE bubble's own token, `--assistant`, exactly, so it reads as the
+   answer it came from rather than as the person's own code. */
+.bubble[data-variant="user"] .prompt-block-quote {
+  --code-block-bg: var(--assistant);
+}
 /* A known slash command the prompt names, marked as the composer marks it. */
 .bubble[data-variant="user"] .known-command { color: var(--known-command); font-weight: 600; }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 0.8em 0; }
