@@ -29,6 +29,7 @@ import (
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/wsm"
+	"agent-repld/internal/zettelclient"
 )
 
 // exitSuccess is the status of a run that ended with nothing wrong -- and of a
@@ -86,6 +87,9 @@ type options struct {
 	// storeSocket is the store's unix socket. This flag BEATS
 	// $AGENT_REPL_STORE_SOCKET, which in turn beats the default.
 	storeSocket string
+	// zettelSocket is the zettel service's unix socket. This flag BEATS
+	// $AGENT_REPL_ZETTEL_SOCKET, which in turn beats the default.
+	zettelSocket string
 	// promptsDir is the prompts/ directory the briefs are read from at use
 	// time.
 	promptsDir string
@@ -161,6 +165,11 @@ const defaultStoreSocket = "~/.cache/agent-repl/sock/store.sock"
 // processStarted is when this process started, taken as the package
 // initializes, before main: every boot phase is timed from it.
 var processStarted = time.Now()
+
+// defaultZettelSocket is the zettel service's socket when neither the flag nor
+// the environment (zettelclient.EnvSocket) names one: the zettel service's own
+// default.
+const defaultZettelSocket = "~/.cache/agent-repl/sock/zettel.sock"
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == deployVerb {
@@ -263,6 +272,7 @@ func newFlagSets(program string, opts *options) (config, boot *flag.FlagSet) {
 	config.StringVar(&opts.shim, "shim-main", "", "path to the shim's dist/main.js")
 	config.StringVar(&opts.node, "node", "node", "node binary that runs the shim")
 	config.StringVar(&opts.storeSocket, "store-socket", "", "store unix socket, overriding $"+envStoreSocket)
+	config.StringVar(&opts.zettelSocket, "zettel-socket", "", "zettel unix socket, overriding $"+zettelclient.EnvSocket)
 	config.StringVar(&opts.promptsDir, "prompts-dir", "", "prompts directory the briefs are read from")
 	config.StringVar(&opts.multiRepoConfigDir, "multi-repo-config-dir", "", "account config root for workspaces under the multi-repo root")
 	config.StringVar(&opts.defaultConfigDir, "default-config-dir", "", "account config root for every other workspace")
@@ -310,6 +320,11 @@ func parseFlags(program string, args []string) (options, error) {
 		return options{}, err
 	}
 	opts.storeSocket = storeSocket
+	zettelSocket, err := resolveSocket("zettel", opts.zettelSocket, os.Getenv(zettelclient.EnvSocket), defaultZettelSocket, os.UserHomeDir)
+	if err != nil {
+		return options{}, err
+	}
+	opts.zettelSocket = zettelSocket
 	retention, err := resolveFeedTailRetention(opts.feedTailRetention, os.Getenv(envFeedTailRetention))
 	if err != nil {
 		return options{}, err

@@ -610,3 +610,31 @@ func TestAnswerMigrationKind(t *testing.T) {
 		})
 	}
 }
+
+// TestTheZettelSocketPrecedence pins the zettel socket's precedence, which is
+// the store's: flag, then environment, then the zettel service's own default.
+func TestTheZettelSocketPrecedence(t *testing.T) {
+	// Arrange.
+	home := func() (string, error) { return "/home/tester", nil }
+	tests := []struct {
+		name      string
+		flagValue string
+		envValue  string
+		want      string
+	}{
+		{name: "the flag beats the environment", flagValue: "/run/flag.sock", envValue: "/run/env.sock", want: "/run/flag.sock"},
+		{name: "the environment beats the default", envValue: "/run/env.sock", want: "/run/env.sock"},
+		{name: "the default is the zettel service's own", want: "/home/tester/.cache/agent-repl/sock/zettel.sock"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Act.
+			got, err := resolveSocket("zettel", test.flagValue, test.envValue, defaultZettelSocket, home)
+
+			// Assert.
+			if err != nil || got != test.want {
+				t.Fatalf("resolveSocket(%q, %q) = (%q, %v), want %q", test.flagValue, test.envValue, got, err, test.want)
+			}
+		})
+	}
+}

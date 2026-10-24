@@ -20,6 +20,7 @@ import (
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/buildid"
 	"agent-repld/internal/cachelapse"
+	"agent-repld/internal/chat"
 	"agent-repld/internal/checkout"
 	"agent-repld/internal/chessboard"
 	"agent-repld/internal/classifier"
@@ -82,6 +83,7 @@ import (
 	"agent-repld/internal/workspacesubs"
 	"agent-repld/internal/wsedges"
 	"agent-repld/internal/wsm"
+	"agent-repld/internal/zettelclient"
 )
 
 // THE COMPOSITION ROOT.
@@ -575,10 +577,34 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// watchers and read by ListSlashCommands and the feed resolver.
 	slashCommands := commandcatalog.New()
 
+	// THE CHAT SERVICE: each zettel chat thread's view, fed by the feed's
+	// answers below, and the recording of those answers in zettel.
+	chatService := chat.New(chat.Deps{
+		Zettel:  zettelclient.New(p.Opts.zettelSocket),
+		Turns:   p.DB,
+		Context: ctx,
+		// A THREAD'S RECORDS GO TO ITS OWN SINK, as every workspace's do; a
+		// workspace the registry cannot name is recorded centrally, with the
+		// failed read beside it.
+		Log: func(ws ids.WorkspaceID) dlog.Logger {
+			dir, err := workspaceDir(ws)
+			if err != nil {
+				log.Error(graphOperation, "the chat service could not resolve a workspace's directory for its records", dlog.Context{
+					"workspace": string(ws), "cause": err.Error(),
+				})
+				return log.With(dlog.Context{"workspace": string(ws)})
+			}
+			return p.Surfaces.WorkspaceOrCentral(dir).With(dlog.Context{"workspace": string(ws)})
+		},
+	})
+
 	history := &historyForwarder{}
 	deliveries := &deliveryForwarder{}
 	feedResolver, err := feed.New(feed.Deps{
 		Log: p.Surfaces,
+		// A ZETTEL CHAT THREAD LEARNS ITS ANSWERS from the feed, which folds
+		// them (feed.ChatSink).
+		Chat: chatService,
 		// HISTORY IS READ ONLY ON A READER'S REQUEST, from the workspace's
 		// shim, through the fleet built below (forward.go).
 		History: history,
@@ -800,8 +826,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A FORK IS MADE while its parent's deliveries are held, through the
 		// queue built below (forward.go).
 		Deliveries: deliveries,
-		Log:        p.Surfaces,
-		Restarts:   p.Metrics,
+		// A CHAT THREAD'S SESSION runs under the corpus's chat brief, read at
+		// every start.
+		ChatSystemPrompt: workspace.ChatSystemPrompt(paths.PromptsDir),
+		Log:              p.Surfaces,
+		Restarts:         p.Metrics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the session fleet: %w", err)
@@ -1495,6 +1524,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Footer:            footerResolver,
 			Topbar:            topbarResolver,
 			Sidebar:           sidebarResolver,
+			Chat:              chatService,
 			LoudFaults:        loudFaults.Topic(),
 			Focus:             focus,
 			Emacs:             p.Metrics,
