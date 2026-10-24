@@ -71,6 +71,7 @@
 (declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
 (declare-function agent-repl--webhost-id "webhost" (ws))
 (declare-function agent-repl--webhost-answered "webhost" (raw))
+(declare-function agent-repl-webhost-parse-answer "webhost" (raw))
 (declare-function agent-repl-webhost-read "webhost" (method args callback))
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-roster-update-functions)
@@ -251,8 +252,7 @@ or that the host no longer holds, is left as it is.  Called BY SYMBOL from
 the read channel (`agent-repl-webhost-read')."
   (agent-repl--webhost-answered raw)
   (condition-case err
-      (let* ((answer (json-parse-string raw :object-type 'plist :array-type 'list
-                                        :null-object nil :false-object nil))
+      (let* ((answer (agent-repl-webhost-parse-answer raw))
              (id (plist-get answer :id))
              (outcome (plist-get answer :outcome))
              (ws (and (stringp id) (agent-repl--ws-by-ref-id id))))

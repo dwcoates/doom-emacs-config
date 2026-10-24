@@ -351,13 +351,19 @@ level this build does not know is an ERROR naming it, never dropped."
    (t
     (agent-repl--error scope "elisp.webhost.note-unknown-level op=%s note=%S" op note))))
 
+(defun agent-repl-webhost-parse-answer (raw)
+  "The host\='s RAW answer to a call or a read, as a plist.
+JSON null and false read as nil, arrays as lists.  Signals when RAW is not
+JSON; every reader of a host answer parses it here."
+  (json-parse-string raw :object-type 'plist :array-type 'list
+                     :null-object nil :false-object nil))
+
 (defun agent-repl--webhost-answered (raw)
   "Record the host's RAW answer to a call, and every note it carries.
 The xwidget `javascript-callback' handler calls this BY SYMBOL: see
 `agent-repl--frontend-webview-read-script' for why a closure would crash."
   (condition-case err
-      (let* ((answer (json-parse-string raw :object-type 'plist :array-type 'list
-                                        :null-object nil :false-object nil))
+      (let* ((answer (agent-repl-webhost-parse-answer raw))
              (scope (agent-repl--webhost-answer-ws answer)))
         (agent-repl--log scope "elisp.webhost.answer op=%s id=%s outcome=%s"
                          (plist-get answer :op) (plist-get answer :id) (plist-get answer :outcome))
