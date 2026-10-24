@@ -141,6 +141,45 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
     (should (eq (lookup-key (get-text-property 1 'local-map button) [header-line mouse-1])
                 #'agent-repl-input-help-click))))
 
+;;;; ---- The bar's colors ----
+
+(defun agent-repl-test-input-help--rgb (hex)
+  "Return HEX, a #rrggbb string, as a list of three channel integers."
+  (mapcar (lambda (i) (string-to-number (substring hex i (+ i 2)) 16)) '(1 3 5)))
+
+(ert-deftest agent-repl-test-input-help-bar-is-the-sidebar-ground ()
+  "The bar's ground is the webapp sidebar's dark --sidebar-bg, #111110.
+The ert suite may not read webapp/src/styles.css, so the shared value is
+pinned on both sides: here, and in webapp/test/styles.test.ts."
+  (should (equal agent-repl-input-help-bar-background "#111110")))
+
+(ert-deftest agent-repl-test-input-help-button-is-darker-than-the-selected-row ()
+  "A button's fill sits between the bar's ground and the selected-row tint.
+The sidebar's selected row is #181817 in the dark theme, pinned by
+webapp/test/styles.test.ts."
+  (let ((button (agent-repl-test-input-help--rgb agent-repl-input-help-button-background)))
+    (should (cl-every #'< button (agent-repl-test-input-help--rgb "#181817")))
+    (should (cl-every #'> button (agent-repl-test-input-help--rgb agent-repl-input-help-bar-background)))))
+
+(ert-deftest agent-repl-test-input-help-faces-take-the-bar-colors ()
+  "The bar and button faces are filled with their two colors."
+  (should (equal (face-attribute 'agent-repl-input-help-bar :background)
+                 agent-repl-input-help-bar-background))
+  (should (equal (face-attribute 'agent-repl-input-help-button :background)
+                 agent-repl-input-help-button-background)))
+
+(ert-deftest agent-repl-test-input-help-header-line-grounds-every-gap-with-the-bar ()
+  "Every character outside a button carries the bar's face."
+  (let ((line (agent-repl--input-help-header-line-text)))
+    (dotimes (i (length line))
+      (unless (get-text-property i 'agent-repl-input-help-topic line)
+        (should (eq (get-text-property i 'face line) 'agent-repl-input-help-bar))))))
+
+(ert-deftest agent-repl-test-input-help-header-line-stretches-to-the-right-edge ()
+  "The header line ends in a bar-faced stretch to the window's right edge."
+  (let ((line (agent-repl--input-help-header-line-text)))
+    (should (equal (get-text-property (1- (length line)) 'display line) '(space :align-to right)))))
+
 ;;;; ---- Installing the header line ----
 
 (ert-deftest agent-repl-test-input-help-header-line-variable-is-the-buttons ()
