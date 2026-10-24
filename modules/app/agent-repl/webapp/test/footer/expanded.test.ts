@@ -16,6 +16,7 @@ import {
   panelHasEntries,
   shownPanel,
   arrivalPanel,
+  firstLiveChipPanel,
   countdownClock,
   createJumpNotices,
   rowFigures,
@@ -385,6 +386,36 @@ describe("arrivalPanel: the panel a switch to the workspace wants", () => {
     const stops = createStopControls(h.ctx, () => undefined);
     const u = expanded({ merges: [MERGE_ROW] });
     expect(shownPanel(u, arrivalPanel(u, "agents", stops), stops)).toBe("merges");
+  });
+});
+
+describe("firstLiveChipPanel: the first chip panel with entries", () => {
+  const first = (init: ExpandedInit) => {
+    const h = harness();
+    return firstLiveChipPanel(expanded(init), createStopControls(h.ctx, () => undefined));
+  };
+
+  it("answers null when no chip panel has entries", () => {
+    expect(first({})).toBeNull();
+  });
+
+  it("never answers the tokens panel, whose lines are always set", () => {
+    expect(first({ crons: [CRON_ROW] })).toBe("crons");
+  });
+
+  it("answers the earliest live panel in CHIP_PANELS order", () => {
+    expect(first({ merges: [MERGE_ROW], tasks: [TASK_ROW], monitors: [MONITOR_ROW] })).toBe("tasks");
+  });
+
+  it("counts the agents panel live while its fan-wide stop holds an answer", () => {
+    const h = harness();
+    expect(firstLiveChipPanel(expanded({ shells: [SHELL_ROW] }), stopsHoldingAnswer(h))).toBe("agents");
+  });
+
+  it("is the one place the chip panels are searched for entries", () => {
+    // A resolver hand-rolling its own search would drift from the others.
+    const searches = withoutBlockComments(expandedSource).match(/CHIP_PANELS\.(find|some|filter)\(/g) ?? [];
+    expect(searches).toHaveLength(1);
   });
 });
 

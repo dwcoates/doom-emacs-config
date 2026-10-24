@@ -260,7 +260,7 @@ export function shownPanel(
 ): FooterPanel | null {
   if (wanted === null) return null;
   if (panelHasEntries(u, wanted, stops)) return wanted;
-  return CHIP_PANELS.find((panel) => panelHasEntries(u, panel, stops)) ?? null;
+  return firstLiveChipPanel(u, stops);
 }
 
 /**
@@ -279,9 +279,17 @@ export function arrivalPanel(
   wanted: FooterPanel | null,
   stops: StopControls,
 ): FooterPanel | null {
-  const live = CHIP_PANELS.find((panel) => panelHasEntries(u, panel, stops));
-  if (live === undefined) return null;
+  const live = firstLiveChipPanel(u, stops);
+  if (live === null) return null;
   return wanted ?? live;
+}
+
+/**
+ * The first chip panel in `CHIP_PANELS` with entries in U, or null when none
+ * has any: the one lookup both `shownPanel` and `arrivalPanel` fall back on.
+ */
+export function firstLiveChipPanel(u: FooterExpanded, stops: StopControls): FooterChipPanel | null {
+  return CHIP_PANELS.find((panel) => panelHasEntries(u, panel, stops)) ?? null;
 }
 
 /**
