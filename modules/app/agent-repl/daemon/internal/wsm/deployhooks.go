@@ -12,6 +12,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
+
+	"agent-repld/internal/dlog"
 )
 
 // A request's or a creation's DEPLOY HOOKS (DeployHooks) are stored as one
@@ -92,7 +94,7 @@ func decodeHooks(table, row, field, raw string) ([]*repoconfigv1.DeployHook, err
 // rewriteDeployQueueRows is layout 68's Go rewrite: the stored merge tabs and
 // the stored progress records a previous build wrote, each read again in the
 // deploy queue's vocabulary.
-func rewriteDeployQueueRows(ctx context.Context, tx *sql.Tx) error {
+func rewriteDeployQueueRows(ctx context.Context, tx *sql.Tx, _ dlog.Logger) error {
 	if err := rewriteRetiredMergeTabs(ctx, tx); err != nil {
 		return err
 	}
