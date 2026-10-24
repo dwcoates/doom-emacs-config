@@ -45,12 +45,12 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   - combined input and output: a desktop shell or a mobile app.
 - Views are what is on screen, and every view is webapp code: the agent feed, the
   chat, a book reader, later others. Hosts put the webapp on screen: Emacs
-  through xwidget, a desktop shell (Electron or Tauri), a mobile shell. A
+  through xwidget, a Tauri shell on desktop and on mobile. A
   shell has no features of its own beyond native app chrome.
 - Clients hold no domain logic. Anything a second client would have to
   reimplement belongs in the daemon.
 - Remote clients, such as the future mobile app, reach the workstation's
-  daemon only through a proxy service over HTTP. The mobile app is not built
+  daemon only through a relay over HTTP. The mobile app is not built
   now. It will eventually work with agent-repl's workspaces too, not only the
   knowledge graph, so remote access is designed once for the whole contract.
 - Each user's own workstation is the server. No shared server ever holds a
@@ -70,7 +70,7 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 
   ```text
   proto/
-  services/  daemon, shim, store, sidecar, proxy
+  services/  daemon, shim, store, sidecar, relay
   clients/   emacs, webapp, desktop, mobile
   ```
 
@@ -84,7 +84,8 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   ecosystem (gestures, long scrolling lists, text highlighting, markdown),
   and coding agents write it most reliably. Long views draw only the rows on
   screen, so the virtual DOM does not slow them.
-- The desktop shell is Tauri. On macOS and iOS it uses the same WebKit as
+- The shell is Tauri, on desktop and on mobile, so the mobile app hosts the
+  same webapp in a web view. On macOS and iOS it uses the same WebKit as
   xwidget, Tauri 2 also builds for iOS and Android, and its Rust native side
   is no downside. The webapp is bundled into the app, or remote origins are
   allowed explicitly, because Tauri blocks remote content from native
@@ -166,7 +167,7 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   authentication. Still open: who hosts the relay.
 - Stack:
   - protobuf over Connect, as agent-repl already uses; Connect runs over HTTP,
-    so the proxy can carry it unchanged;
+    so the relay can carry it unchanged;
   - SQLite through `modernc.org/sqlite`; that driver cannot load vector
     extensions, so similarity search runs in Go over embeddings held in
     memory, which is fast enough for one person's graph;
@@ -205,6 +206,7 @@ Nothing here is settled yet.
 | A source text, such as a book | open |
 | A frozen version of a node's content | `revision` |
 | The link from a question to a parent | open |
+| The service that carries remote clients' encrypted traffic to the workstation | `relay` (settled) |
 | A highlighted passage | `excerpt` (preferred), `passage`, `quote` |
 | Text around a highlight | `surround`, `setting`, `vicinity` |
 | One stay of a parent on the path on screen | `visit` |
@@ -213,8 +215,6 @@ Nothing here is settled yet.
 ## Open questions
 
 - How much of agent-repl's elisp is domain logic that a second input client would have to rewrite? (audit)
-- Should the proxy be built here, or should an existing tunnel be used?
-- Should the mobile app host the webapp in a web view rather than be built natively?
 - Is the least-seen pick for exploring the graph, or for remembering what's in it (spaced repetition)?
 - What does swiping on an answer bubble cycle through: the pair's siblings, or that answer's revisions?
 - Should questions about a highlight sit on the passage, in the sibling stack, or both?
