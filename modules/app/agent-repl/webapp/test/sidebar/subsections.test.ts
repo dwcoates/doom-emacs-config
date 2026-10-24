@@ -969,4 +969,14 @@ describe("a subsection's fold", () => {
       ]).toEqual([rows, color]);
     });
   });
+
+  it.each([true, false])("draws a subsection's name in the one purple, collapsed=%s", (collapsed) => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(subsectionOf(collapsed), sidebarContext());
+
+    // Act / Assert
+    inRail(drawn, (rail) => {
+      expect(cascadedValue(rail.querySelector(".sb-subsection-label") as HTMLElement, "color")).toBe("var(--blocked)");
+    });
+  });
 });

@@ -6199,14 +6199,12 @@ describe("the repository's subsections and the drag", () => {
     );
   });
 
-  it("draws a subsection's name in the repository headers' colour", () => {
-    expect(declarationsOf("#ws-sidebar .sb-subsection-label")).toMatch(/color:\s*var\(--repo-head-expanded\)/);
+  it("draws a subsection's name in the one purple", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-label")).toMatch(/color:\s*var\(--blocked\)/);
   });
 
-  it("greys a folded subsection's name as a folded repository's", () => {
-    expect(declarationsOf("#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label")).toMatch(
-      /color:\s*var\(--repo-head-collapsed\)/,
-    );
+  it("keeps a folded subsection's name purple, with no folded override", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label")).toBeUndefined();
   });
 
   it("draws the name popup's input with a hairline border and no focus ring", () => {

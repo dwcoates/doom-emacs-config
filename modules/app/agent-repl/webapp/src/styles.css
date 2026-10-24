@@ -1057,11 +1057,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   font-weight: 600;
 }
 #ws-sidebar .sb-subsection-head .sb-count { font-size: 0.85em; }
-/* A SUBSECTION'S NAME IS IN THE REPOSITORY HEADERS' COLOUR (owner request,
-   2026-10-20, superseding the purple it first wore), and greys with them
-   when folded. */
-#ws-sidebar .sb-subsection-label { color: var(--repo-head-expanded); }
-#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label { color: var(--repo-head-collapsed); }
+/* A SUBSECTION'S NAME IS THE ONE PURPLE (owner request, 2026-10-24,
+   superseding the repository headers' colour it wore from 2026-10-20), the
+   purple status --blocked the bands' headers wear, folded or not. Its
+   triangle and count keep the header's own colour. */
+#ws-sidebar .sb-subsection-label { color: var(--blocked); }
 #ws-sidebar .sb-subsection-delete {
   margin-left: auto;
   border: 0;
