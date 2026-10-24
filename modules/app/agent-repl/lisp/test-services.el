@@ -339,13 +339,14 @@
 
 ;;;; ---- The store/sidecar bounce ----
 
-(ert-deftest agent-repl-test-services-bounce-builds-only-its-two-targets ()
-  "The bounce owns the store and the sidecar and nothing else."
+(ert-deftest agent-repl-test-services-bounce-builds-only-the-service-targets ()
+  "The bounce builds the launchd services' binaries and nothing else: the
+store, the sidecar, and zettel, which the daemon's boot keeps current."
   (agent-repl-test-services--with-harness
     ;; Arrange / Act
     (agent-repl--shim-services-build-and-bounce t #'ignore #'ignore)
     ;; Assert
-    (should (equal (car agent-repl-test-services--builds) '("store" "sidecar")))))
+    (should (equal (car agent-repl-test-services--builds) '("store" "sidecar" "zettel")))))
 
 (ert-deftest agent-repl-test-services-bounce-kickstarts-a-stale-store ()
   "A binary whose stamp does not match reaches the running service."

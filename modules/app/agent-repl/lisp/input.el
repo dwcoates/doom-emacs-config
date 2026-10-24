@@ -1974,6 +1974,13 @@ the answer is given rather than reporting a broken session.")
 The send was a standing ask's typed answer and the ask settled before it
 arrived, so it reached nobody and the text stays in the composer.")
 
+(defconst agent-repl--input-thread-awaiting-first-answer-flash
+  "the thread's first answer is still coming; send this once it lands"
+  "The composer flash for `SubmitPromptError''s `thread_awaiting_first_answer'.
+A chat thread's first question is still being answered, so there is no
+answer yet to ask another question of.  Nothing was sent and the text
+stays in the composer, to be sent once the answer lands.")
+
 (defconst agent-repl--input-no-session-flash
   "no session; the daemon is starting it"
   "The composer flash for `SubmitPromptError''s `no_session' arm.
@@ -2079,6 +2086,13 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; text stays so the user decides what to do with it.
          (agent-repl--info ws "elisp.input.refused-ask-not-standing ws=%s origin=%S arm=%S" ws origin arm)
          (agent-repl--input-say-refusal ws agent-repl--input-ask-not-standing-flash))
+        (:thread-awaiting-first-answer
+         ;; A CHAT THREAD'S FIRST QUESTION IS STILL BEING ANSWERED: there is
+         ;; no answer yet for this one to be asked of.  An ordinary answer,
+         ;; recorded at INFO and not queued (a re-drive would meet the same
+         ;; refusal until the answer lands); the text stays in the composer.
+         (agent-repl--info ws "elisp.input.refused-thread-awaiting-first-answer ws=%s origin=%S arm=%S" ws origin arm)
+         (agent-repl--input-say-refusal ws agent-repl--input-thread-awaiting-first-answer-flash))
         (:no-session
          ;; The workspace has NO SESSION AT ALL, which is the daemon's own
          ;; to bring up.  Like the cold gate this is an answer rather than a

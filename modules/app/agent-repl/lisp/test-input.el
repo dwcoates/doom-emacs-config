@@ -2038,6 +2038,45 @@ unknown arm."
       (should-not (agent-repl-test-input--rung-has-p
                    agent-repl-test-input--error "elisp.input.unknown-error-arm")))))
 
+
+(defconst agent-repl-test-input--thread-awaiting-answer
+  '(:response (:arm :error :value (:reason (:arm :thread-awaiting-first-answer :value nil))))
+  "A scripted `thread_awaiting_first_answer' refusal: the thread's first
+answer has not landed yet.")
+
+(ert-deftest agent-repl-input-thread-awaiting-first-answer-keeps-the-text ()
+  "Nothing was sent, so the composer keeps the question for later."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--thread-awaiting-answer)
+    (agent-repl-test-input--type "and then?")
+    (agent-repl--send :user-sent)
+    (should (equal (agent-repl-test-input--composer-text) "and then?"))))
+
+(ert-deftest agent-repl-input-thread-awaiting-first-answer-is-not-queued ()
+  "A re-drive would meet the same refusal until the answer lands, so
+nothing is held."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--thread-awaiting-answer)
+    (agent-repl-test-input--type "and then?")
+    (agent-repl--send :user-sent)
+    (should-not agent-repl-test-input--queued)))
+
+(ert-deftest agent-repl-input-thread-awaiting-first-answer-flashes-and-records-it ()
+  "The refusal says what happened and is recorded at INFO, not as an
+unknown arm."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--thread-awaiting-answer)
+    (agent-repl-test-input--type "and then?")
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      (should (equal (buffer-local-value 'agent-repl-input-notice
+                                         agent-repl-test-input--buffer)
+                     agent-repl--input-thread-awaiting-first-answer-flash))
+      (should (agent-repl-test-input--rung-has-p
+               agent-repl-test-input--info "elisp.input.refused-thread-awaiting-first-answer"))
+      (should-not (agent-repl-test-input--rung-has-p
+                   agent-repl-test-input--error "elisp.input.unknown-error-arm")))))
+
 (ert-deftest agent-repl-input-say-refusal-flashes-and-echoes-the-sentence ()
   "The helper flashes the sentence in the composer and echoes it alone."
   (agent-repl-test-input--with

@@ -1293,7 +1293,8 @@ wire."
   (agent-repl-test-wire-verbs--with-common
     (dolist (case '(("DEPLOY_COMPONENT_DAEMON" :daemon) ("DEPLOY_COMPONENT_SHIM" :shim)
                     ("DEPLOY_COMPONENT_WEBAPP" :webapp) ("DEPLOY_COMPONENT_STORE" :store)
-                    ("DEPLOY_COMPONENT_SIDECAR" :sidecar) ("DEPLOY_COMPONENT_ELISP" :elisp)))
+                    ("DEPLOY_COMPONENT_SIDECAR" :sidecar) ("DEPLOY_COMPONENT_ELISP" :elisp)
+                    ("DEPLOY_COMPONENT_ZETTEL" :zettel)))
       (should (equal (plist-get
                       (car (plist-get
                             (plist-get (agent-repl-test-wire-verbs--deploy
@@ -1912,7 +1913,7 @@ agent\='s prompt and so never answer the editor\='s."
                  '("askNotStanding" "bubbleRefused" "coldGate" "duplicateSubmission"
                    "feedNotInWorkspace" "feedUndecodable" "merging"
                    "modelNotInCatalog" "modelRefused" "noSession"
-                   "notYetAdopted" "slashCommandFromAgent" "transferringAway"
+                   "notYetAdopted" "slashCommandFromAgent" "threadAwaitingFirstAnswer" "transferringAway"
                    "unknownSender" "unknownWorkspace" "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-action-arms-pinned ()
@@ -3136,7 +3137,7 @@ decodes."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptError")
                        #'string<)
-                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused" "askNotStanding" "slashCommandFromAgent" "unknownSender")
+                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused" "askNotStanding" "slashCommandFromAgent" "unknownSender" "threadAwaitingFirstAnswer")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-error-nothing-scheduled-arm ()
@@ -6026,3 +6027,10 @@ instead diverges from it unseen."
     (should-not (string-match-p
                  "(lambda (\\([a-z]+\\))[ \t\n]+(agent-repl-wire-verbs--decode-empty[ \t\n]+\"[A-Za-z]+\"[ \t\n]+\\1))"
                  source))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-thread-awaiting-first-answer-arm ()
+  "SubmitPromptError's `thread_awaiting_first_answer' arm decodes as its keyword."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse "{\"threadAwaitingFirstAnswer\":{}}"))
+                   '(:reason (:arm :thread-awaiting-first-answer :value nil))))))

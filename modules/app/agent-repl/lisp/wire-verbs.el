@@ -2833,6 +2833,16 @@ so nothing was submitted."
   "Decode SubmitPromptError's `ask_not_standing' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-ask-not-standing json))
 
+(defun agent-repl-wire-decode-submit-prompt-thread-awaiting-first-answer (json)
+  "Decode SubmitPromptThreadAwaitingFirstAnswer from JSON.  Empty: a chat
+thread's first question is still being answered, so there is no node yet
+for another question to be asked of; nothing was submitted."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptThreadAwaitingFirstAnswer" json))
+
+(defun agent-repl-wire-decode-submit-prompt-error-thread-awaiting-first-answer (json)
+  "Decode SubmitPromptError's `thread_awaiting_first_answer' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-thread-awaiting-first-answer json))
+
 (defun agent-repl-wire-decode-submit-prompt-error-duplicate-submission (json)
   "Decode SubmitPromptError's `duplicate_submission' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-duplicate-submission json))
@@ -2885,7 +2895,7 @@ arm this codec does not know is refused as an unknown field.
 refuse only an agent\='s prompt, and every prompt the editor sends is the
 user\='s."
   (let ((message "SubmitPromptError"))
-    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused coldGate modelNotInCatalog modelRefused askNotStanding))
+    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused coldGate modelNotInCatalog modelRefused askNotStanding threadAwaitingFirstAnswer))
     (list :reason
           (agent-repl-wire-verbs--decode-oneof
            message "reason" json
@@ -2902,7 +2912,9 @@ user\='s."
          (list 'coldGate :cold-gate #'agent-repl-wire-decode-submit-prompt-error-cold-gate)
          (list 'modelNotInCatalog :model-not-in-catalog #'agent-repl-wire-decode-submit-prompt-error-model-not-in-catalog)
          (list 'modelRefused :model-refused #'agent-repl-wire-decode-submit-prompt-error-model-refused)
-         (list 'askNotStanding :ask-not-standing #'agent-repl-wire-decode-submit-prompt-error-ask-not-standing))))))
+         (list 'askNotStanding :ask-not-standing #'agent-repl-wire-decode-submit-prompt-error-ask-not-standing)
+         (list 'threadAwaitingFirstAnswer :thread-awaiting-first-answer
+               #'agent-repl-wire-decode-submit-prompt-error-thread-awaiting-first-answer))))))
 
 (defun agent-repl-wire-decode-submit-prompt-response-success (json)
   "Decode SubmitPromptResponse's `success' arm from JSON."
@@ -3190,7 +3202,8 @@ and a forced one does not wait for in-flight work."
     ("DEPLOY_COMPONENT_WEBAPP" . :webapp)
     ("DEPLOY_COMPONENT_STORE" . :store)
     ("DEPLOY_COMPONENT_SIDECAR" . :sidecar)
-    ("DEPLOY_COMPONENT_ELISP" . :elisp))
+    ("DEPLOY_COMPONENT_ELISP" . :elisp)
+    ("DEPLOY_COMPONENT_ZETTEL" . :zettel))
   "The DeployComponent vocabulary, wire name to keyword.
 UNSPECIFIED is deliberately ABSENT: it is never sent, and an outcome
 carrying it is malformed.")
