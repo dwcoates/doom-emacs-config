@@ -1070,6 +1070,9 @@ describe("the page's connection budget", () => {
       "watchDaemon",
       "watchWebWorkspace",
       "watchLoginTerminal",
+      // The agent CLI's test run: finite, but no page has any business
+      // opening it, so it stays guarded rather than exempted.
+      "runTests",
     ];
 
     // Act.
