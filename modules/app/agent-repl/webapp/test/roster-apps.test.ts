@@ -34,7 +34,7 @@ describe("rosterApps", () => {
     expect(roster.threads?.newThread?.label).toBe("New thread");
   });
 
-  it.each(["integration/fixtures.ts"])("is how %s's roster carries the app boxes", (file) => {
+  it.each(["sidebar/harness.ts", "integration/fixtures.ts"])("is how %s's roster carries the app boxes", (file) => {
     // Arrange
     const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), file), "utf8");
 
