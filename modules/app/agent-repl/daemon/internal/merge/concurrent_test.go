@@ -3,7 +3,6 @@ package merge
 import (
 	"context"
 	"testing"
-	"time"
 
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
@@ -87,30 +86,10 @@ func (w *concurrentWorld) ranBy(script string) []ids.WorkspaceID {
 	return out
 }
 
-// within waits, bounded, for CH to close or deliver.
-func within[T any](t *testing.T, ch <-chan T, what string) {
-	t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s never happened", what)
-	}
-}
-
 // awaitIdle waits, bounded, for WS to wait at a boundary.
 func (w *concurrentWorld) awaitIdle(t *testing.T, ws ids.WorkspaceID) {
 	t.Helper()
-	bound := time.After(5 * time.Second)
-	for {
-		select {
-		case got := <-w.idle:
-			if got == ws {
-				return
-			}
-		case <-bound:
-			t.Fatalf("%s never waited for its turn", ws)
-		}
-	}
+	receiveUntil(t, w.idle, string(ws)+" waiting for its turn", func(got ids.WorkspaceID) bool { return got == ws })
 }
 
 func TestTwoDeploysRunTheirConcurrentStageAtOnce(t *testing.T) {
@@ -121,8 +100,8 @@ func TestTwoDeploysRunTheirConcurrentStageAtOnce(t *testing.T) {
 
 	// Act
 	done := admitAsync(w.h, context.Background())
-	within(t, headIn, "the head's deploy hook starting")
-	within(t, behindIn, "the deploy behind the head starting its deploy hook while the head's still runs")
+	receiveWithin(t, headIn, "the head's deploy hook starting")
+	receiveWithin(t, behindIn, "the deploy behind the head starting its deploy hook while the head's still runs")
 
 	// Assert: both are inside their deploy stage at once; neither ran the
 	// one-at-a-time stage.
@@ -131,7 +110,7 @@ func TestTwoDeploysRunTheirConcurrentStageAtOnce(t *testing.T) {
 	}
 	close(releaseHead)
 	close(releaseBehind)
-	within(t, done, "the head's deploy ending")
+	receiveWithin(t, done, "the head's deploy ending")
 	w.h.admit(context.Background())
 }
 
@@ -141,7 +120,7 @@ func TestTheOneAtATimeStageIsEnteredInQueueOrder(t *testing.T) {
 	w := newConcurrentWorld(t)
 	headIn, releaseHead := w.hold(prScript, theWorkspace)
 	done := admitAsync(w.h, context.Background())
-	within(t, headIn, "the head's deploy hook starting")
+	receiveWithin(t, headIn, "the head's deploy hook starting")
 	w.awaitIdle(t, behind)
 	if got := w.ranBy(updateScript); len(got) != 0 {
 		t.Fatalf("post-deploy ran for %v before the head's turn ended", got)
@@ -150,7 +129,7 @@ func TestTheOneAtATimeStageIsEnteredInQueueOrder(t *testing.T) {
 	// Act: the head's pull request merges; the head runs its post-deploy and
 	// ends, and the pump promotes the deploy behind it.
 	close(releaseHead)
-	within(t, done, "the head's deploy ending")
+	receiveWithin(t, done, "the head's deploy ending")
 	if err := w.h.admit(context.Background()); err != nil {
 		t.Fatalf("the promoted deploy ended on: %v", err)
 	}
@@ -167,7 +146,7 @@ func TestADeployWaitingForItsTurnSaysHowManyAreAhead(t *testing.T) {
 	w := newConcurrentWorld(t)
 	headIn, releaseHead := w.hold(prScript, theWorkspace)
 	done := admitAsync(w.h, context.Background())
-	within(t, headIn, "the head's deploy hook starting")
+	receiveWithin(t, headIn, "the head's deploy hook starting")
 
 	// Act
 	w.awaitIdle(t, behind)
@@ -181,7 +160,7 @@ func TestADeployWaitingForItsTurnSaysHowManyAreAhead(t *testing.T) {
 		t.Fatalf("line = %v, want the deploy ahead and its step", facts.Line)
 	}
 	close(releaseHead)
-	within(t, done, "the head's deploy ending")
+	receiveWithin(t, done, "the head's deploy ending")
 	w.h.admit(context.Background())
 }
 

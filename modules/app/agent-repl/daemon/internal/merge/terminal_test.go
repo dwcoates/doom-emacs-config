@@ -1529,11 +1529,7 @@ func endedObserved(t *testing.T, phase string, res resolution, observe func(*har
 			defer close(resolved)
 			res.resolve(t, h, context.Background())
 		}()
-		select {
-		case <-r.ctx.Done():
-		case <-time.After(5 * time.Second):
-			t.Fatal("the resolution never reached the running merge")
-		}
+		receiveWithin(t, r.ctx.Done(), "the resolution reaching the running merge")
 		close(release)
 		<-resolved
 		<-done

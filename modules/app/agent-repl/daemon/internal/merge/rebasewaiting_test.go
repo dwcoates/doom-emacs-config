@@ -3,7 +3,6 @@ package merge
 import (
 	"context"
 	"testing"
-	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -53,11 +52,7 @@ func (w *waitingWorld) land(t *testing.T) {
 // awaitPass waits for one pass over the waiting members to end.
 func (w *waitingWorld) awaitPass(t *testing.T) {
 	t.Helper()
-	select {
-	case <-w.passes:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no pass over the waiting members ended")
-	}
+	receiveWithin(t, w.passes, "a pass over the waiting members ending")
 }
 
 // finish drains the queue.

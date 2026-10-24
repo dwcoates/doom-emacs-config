@@ -62,19 +62,18 @@ type chainGit struct {
 	landings  []string
 	// rebaseHolds parks the next rebase started in a worktree; a stubborn
 	// one ignores its caller's cancellation, as a git command mid-flight does.
-	rebaseHolds map[string]chainHold
+	rebaseHolds holdSet
 	stubborn    map[string]bool
 	// cleanHolds parks the next cleanliness read in a worktree, ignoring its
 	// caller's cancellation as a git command mid-flight does.
-	cleanHolds map[string]chainHold
+	cleanHolds holdSet
 }
 
 func newChainGit(inner *fakeGit) *chainGit {
 	g := &chainGit{
 		fakeGit: inner, commits: map[string]*chainCommit{}, refs: map[string]string{},
 		rebases: map[string]*chainRebase{}, conflicts: map[[2]string][]string{}, recorded: map[[2]string]bool{},
-		trees: map[string]string{}, rebaseHolds: map[string]chainHold{}, stubborn: map[string]bool{},
-		cleanHolds: map[string]chainHold{},
+		trees: map[string]string{}, stubborn: map[string]bool{},
 	}
 	root := g.mintLocked(nil, "base")
 	g.refs["master"] = root
@@ -264,27 +263,7 @@ func (g *chainGit) TreeOf(_ context.Context, dir, ref string) (string, error) {
 // holdRebase parks the next rebase started in dir until release closes;
 // entered closes once it is parked.
 func (g *chainGit) holdRebase(dir string) (entered, release chan struct{}) {
-	return g.arm(g.rebaseHolds, dir)
-}
-
-// arm sets the next call in dir to park on a fresh hold in holds, one of
-// chainGit's per-worktree hold maps, and answers the hold's channels.
-func (g *chainGit) arm(holds map[string]chainHold, dir string) (entered, release chan struct{}) {
-	g.cmu.Lock()
-	defer g.cmu.Unlock()
-	h := chainHold{entered: make(chan struct{}), release: make(chan struct{})}
-	holds[dir] = h
-	return h.entered, h.release
-}
-
-// claimHold takes the hold armed in holds for dir, if any, so it parks
-// exactly one call.
-func (g *chainGit) claimHold(holds map[string]chainHold, dir string) (chainHold, bool) {
-	g.cmu.Lock()
-	defer g.cmu.Unlock()
-	h, ok := holds[dir]
-	delete(holds, dir)
-	return h, ok
+	return g.rebaseHolds.arm(dir)
 }
 
 // holdRebaseStubbornly is holdRebase for a rebase that ignores its caller's
@@ -301,33 +280,26 @@ func (g *chainGit) holdRebaseStubbornly(dir string) (entered, release chan struc
 // entered closes once it is parked. A rebase reads it first, so a held read
 // stands the run after it read the target's tip and before its rebase began.
 func (g *chainGit) holdClean(dir string) (entered, release chan struct{}) {
-	return g.arm(g.cleanHolds, dir)
+	return g.cleanHolds.arm(dir)
 }
 
 func (g *chainGit) IsClean(ctx context.Context, dir string) (bool, error) {
-	if hold, held := g.claimHold(g.cleanHolds, dir); held {
-		close(hold.entered)
-		<-hold.release
+	if hold, held := g.cleanHolds.claim(dir); held {
+		hold.parkUncancelled()
 	}
 	return g.fakeGit.IsClean(ctx, dir)
 }
 
 func (g *chainGit) StartRebase(ctx context.Context, dir, onto string, commits []string) (gitclient.RebaseStep, error) {
-	hold, held := g.claimHold(g.rebaseHolds, dir)
+	hold, held := g.rebaseHolds.claim(dir)
 	g.cmu.Lock()
 	stubborn := g.stubborn[dir]
 	delete(g.stubborn, dir)
 	g.cmu.Unlock()
 	if held && stubborn {
-		close(hold.entered)
-		<-hold.release
-	} else if held {
-		close(hold.entered)
-		select {
-		case <-hold.release:
-		case <-ctx.Done():
-			return gitclient.RebaseStep{}, fmt.Errorf("chain rebase: %w", ctx.Err())
-		}
+		hold.parkUncancelled()
+	} else if held && !hold.park(ctx) {
+		return gitclient.RebaseStep{}, fmt.Errorf("chain rebase: %w", ctx.Err())
 	}
 	g.cmu.Lock()
 	defer g.cmu.Unlock()
@@ -466,26 +438,20 @@ func (g *chainGit) landedOwn() [][]string {
 type chainRunner struct {
 	mu      sync.Mutex
 	results map[string][]scriptedRun
-	holds   map[string][]chainHold
+	holds   holdSet
 	calls   map[string]int
 	// running counts the runs under way now, and most the most that ever
 	// were at once: one repository's gates never overlap (testturn.go).
 	running, most int
 }
 
-type chainHold struct{ entered, release chan struct{} }
-
 func newChainRunner() *chainRunner {
-	return &chainRunner{results: map[string][]scriptedRun{}, holds: map[string][]chainHold{}, calls: map[string]int{}}
+	return &chainRunner{results: map[string][]scriptedRun{}, calls: map[string]int{}}
 }
 
 // hold parks the next gate run in dir until release closes.
 func (c *chainRunner) hold(dir string) (entered, release chan struct{}) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	h := chainHold{entered: make(chan struct{}), release: make(chan struct{})}
-	c.holds[dir] = append(c.holds[dir], h)
-	return h.entered, h.release
+	return c.holds.arm(dir)
 }
 
 // script queues the next run's answer in dir.
@@ -518,19 +484,9 @@ func (c *chainRunner) RunLinesMeasured(ctx context.Context, dir string, argv []s
 		c.running--
 		c.mu.Unlock()
 	}()
-	var hold *chainHold
-	if hs := c.holds[dir]; len(hs) > 0 {
-		hold = &hs[0]
-		c.holds[dir] = hs[1:]
-	}
 	c.mu.Unlock()
-	if hold != nil {
-		close(hold.entered)
-		select {
-		case <-hold.release:
-		case <-ctx.Done():
-			return scriptrunner.Run{}, fmt.Errorf("chain script: %w", ctx.Err())
-		}
+	if hold, held := c.holds.claim(dir); held && !hold.park(ctx) {
+		return scriptrunner.Run{}, fmt.Errorf("chain script: %w", ctx.Err())
 	}
 	c.mu.Lock()
 	var run scriptedRun
@@ -658,18 +614,8 @@ func (c *chain) headHoldsTheTurn(t *testing.T, behind ids.WorkspaceID) (releaseH
 // awaitLined waits, bounded, for ws to join the line for its test turn.
 func (c *chain) awaitLined(t *testing.T, ws ids.WorkspaceID) {
 	t.Helper()
-	bound := time.NewTimer(5 * time.Second)
-	defer bound.Stop()
-	for {
-		select {
-		case got := <-c.turns.lined:
-			if got == ws {
-				return
-			}
-		case <-bound.C:
-			t.Fatalf("%s never joined the line for its test turn", ws)
-		}
-	}
+	receiveUntil(t, c.turns.lined, string(ws)+" joining the line for its test turn",
+		func(got ids.WorkspaceID) bool { return got == ws })
 }
 
 // newChain builds a harness whose queue runs the production window over the
@@ -742,18 +688,8 @@ func (c *chain) queue(t *testing.T, ws ids.WorkspaceID, patches ...string) {
 // awaitIdle waits for ws to go idle with until true of the world.
 func (c *chain) awaitIdle(t *testing.T, ws ids.WorkspaceID, until func() bool) {
 	t.Helper()
-	bound := time.NewTimer(5 * time.Second)
-	defer bound.Stop()
-	for {
-		select {
-		case got := <-c.idle:
-			if got == ws && until() {
-				return
-			}
-		case <-bound.C:
-			t.Fatalf("%s never went idle in the awaited state", ws)
-		}
-	}
+	receiveUntil(t, c.idle, string(ws)+" going idle in the awaited state",
+		func(got ids.WorkspaceID) bool { return got == ws && until() })
 }
 
 // onTip reports whether ws's branch stands on the tip of the branch of ahead.
@@ -852,77 +788,6 @@ var broken = scriptedRun{Output: "bash: test-all.sh: command not found\n", Code:
 // failing scripts a failing gate.
 var failing = scriptedRun{Output: "[agent-repl-tests] ERROR: daemon failed after 4s with exit code 1\n", Code: 1}
 
-func TestChainGitClaimsAnArmedHoldOnceAndOnlyInItsWorktree(t *testing.T) {
-	// Arrange.
-	g := newChainGit(newFakeGit(func() int { return 0 }))
-	holds := map[string]chainHold{}
-	entered, release := g.arm(holds, "dir-a")
-
-	// Act.
-	other, otherHeld := g.claimHold(holds, "dir-b")
-	first, firstHeld := g.claimHold(holds, "dir-a")
-	_, againHeld := g.claimHold(holds, "dir-a")
-
-	// Assert.
-	if otherHeld || other.entered != nil {
-		t.Fatal("a hold armed in dir-a parked a call in dir-b")
-	}
-	if !firstHeld || first.entered != entered || first.release != release {
-		t.Fatal("the call in dir-a did not claim the hold armed there")
-	}
-	if againHeld {
-		t.Fatal("a hold parked a second call")
-	}
-}
-
-func TestEveryChainGitHoldParksItsCallThroughTheOneArmedShape(t *testing.T) {
-	// Each hold a test arms parks exactly the call it names, in its worktree,
-	// through arm and claimHold: a hold hand-rolled outside them fails here.
-	cases := []struct {
-		name  string
-		holds func(g *chainGit) map[string]chainHold
-		hold  func(g *chainGit, dir string) (entered, release chan struct{})
-		call  func(g *chainGit, dir string)
-	}{
-		{"rebase", func(g *chainGit) map[string]chainHold { return g.rebaseHolds }, (*chainGit).holdRebase,
-			func(g *chainGit, dir string) {
-				g.branch("feature", "a1")
-				_, _ = g.StartRebase(context.Background(), dir, "master", []string{g.ref("feature")})
-			}},
-		{"clean", func(g *chainGit) map[string]chainHold { return g.cleanHolds }, (*chainGit).holdClean,
-			func(g *chainGit, dir string) { _, _ = g.IsClean(context.Background(), dir) }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			g := newChainGit(newFakeGit(func() int { return 0 }))
-			entered, release := tc.hold(g, "dir-a")
-			armed, ok := tc.holds(g)["dir-a"]
-			if !ok || armed.entered != entered || armed.release != release {
-				t.Fatal("the hold was not armed in its call's hold map")
-			}
-			ended := make(chan struct{})
-
-			// Act.
-			go func() { defer close(ended); tc.call(g, "dir-a") }()
-			<-entered
-			select {
-			case <-ended:
-				t.Fatal("the held call ended before its release")
-			default:
-			}
-			close(release)
-			<-ended
-			tc.call(g, "dir-a")
-
-			// Assert.
-			if _, left := tc.holds(g)["dir-a"]; left {
-				t.Fatal("the hold outlived the one call it parks")
-			}
-		})
-	}
-}
-
 func TestTheMergeBehindTheHeadRebasesOntoTheTargetsTip(t *testing.T) {
 	// Arrange: the head holds in its gate; the merge behind it, rebased,
 	// waits in line for the test turn.
@@ -956,13 +821,7 @@ func TestTheMergeBehindTheHeadStartsWhileTheHeadsRebaseStands(t *testing.T) {
 	<-headRebase
 
 	// Act: the merge behind reaches its gate while the head's rebase stands.
-	bound := time.NewTimer(5 * time.Second)
-	defer bound.Stop()
-	select {
-	case <-behindGate:
-	case <-bound.C:
-		t.Fatal("the merge behind the head never reached its gate while the head's rebase stood: it waited on the head")
-	}
+	receiveWithin(t, behindGate, "the merge behind the head reaching its gate while the head's rebase stood (it waited on the head)")
 	close(releaseHead)
 	close(releaseBehind)
 	if err := <-done; err != nil {
@@ -994,13 +853,7 @@ func TestTheMergeBehindAPromotedHeadJoinsTheRaceAtOnce(t *testing.T) {
 
 	// Act: B is promoted; C starts while B still runs.
 	promoted := admitAsync(c.h, context.Background())
-	bound := time.NewTimer(5 * time.Second)
-	defer bound.Stop()
-	select {
-	case <-thirdRebase:
-	case <-bound.C:
-		t.Fatal("the merge behind the promoted head never started while that head ran")
-	}
+	receiveWithin(t, thirdRebase, "the merge behind the promoted head starting while that head ran")
 	close(releaseBehind)
 	close(releasePromoted)
 	close(releaseThird)
@@ -1209,13 +1062,7 @@ func TestARestartMidRaceResumesBothMergesAndLandsEachWithItsOwnCommits(t *testin
 // waitGone waits, bounded, for everything an orchestrator started to end.
 func waitGone(t *testing.T, o *orchestrator) {
 	t.Helper()
-	gone := make(chan struct{})
-	go func() { o.live.Wait(); close(gone) }()
-	select {
-	case <-gone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the exiting orchestrator's runs did not end")
-	}
+	receiveWithin(t, liveGone(o), "the exiting orchestrator's runs ending")
 }
 
 func TestASpeculativePassStartsTheFixingCountOver(t *testing.T) {

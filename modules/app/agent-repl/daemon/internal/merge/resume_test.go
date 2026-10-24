@@ -44,11 +44,9 @@ func (h *harness) restart(t *testing.T) {
 	}
 	h.o = o
 	t.Cleanup(func() {
-		gone := make(chan struct{})
-		go func() { o.live.Wait(); close(gone) }()
 		select {
-		case <-gone:
-		case <-time.After(5 * time.Second):
+		case <-liveGone(o):
+		case <-time.After(waitBound):
 			t.Error("a resumed merge run outlived its test")
 		}
 	})

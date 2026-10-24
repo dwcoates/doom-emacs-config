@@ -51,26 +51,15 @@ func (w *turnWorld) await(r *run) <-chan error {
 // awaitLined waits, bounded, for ws to join the line.
 func (w *turnWorld) awaitLined(t *testing.T, ws ids.WorkspaceID) {
 	t.Helper()
-	select {
-	case got := <-w.lined:
-		if got != ws {
-			t.Fatalf("%s joined the line, want %s", got, ws)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatalf("%s never joined the line", ws)
+	if got := receiveWithin(t, w.lined, string(ws)+" joining the line"); got != ws {
+		t.Fatalf("%s joined the line, want %s", got, ws)
 	}
 }
 
 // granted waits, bounded, for an ask to end, and answers how.
 func granted(t *testing.T, done <-chan error) error {
 	t.Helper()
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(5 * time.Second):
-		t.Fatal("the ask for the test turn never ended")
-		return nil
-	}
+	return receiveWithin(t, done, "the ask for the test turn ending")
 }
 
 // holder answers the run holding the repository's turn, nil when none does.
