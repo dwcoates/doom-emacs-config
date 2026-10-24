@@ -182,8 +182,17 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
     provenance, and premises can be added at any time.
   - The parent link records the revision of the parent the question was
     asked of.
+  - Premises are found by zettel itself, on the workstation, whenever a node
+    is inserted (owner's idea). Similarity search finds candidates, and since
+    similarity has no direction, a judge decides whether either node is
+    groundwork for the other. The search runs in both directions: the new
+    node may build on older nodes, and older nodes may build on it (the
+    quarks and nuclear physics case).
+  - Proposed: inference runs after the answer is shown, never delaying it,
+    and a node durably records that its premises are still pending, so a
+    restart picks up where it left off.
   - Open: whether the parent is expressed as the provenance's in-graph case;
-    who creates premises; whether premises feed the model's context; whether
+    whether premises can also be added or removed by hand; whether premises feed the model's context; whether
     a premise records a revision; how cycles among premises are prevented.
 
 - Chat nodes run on the Messages API, with context built from the graph,
