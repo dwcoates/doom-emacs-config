@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -163,32 +162,32 @@ func TestEveryAgentCommandIsReachableFromASkill(t *testing.T) {
 // frontDoorMention is a skill's call of an installed skill's front door.
 var frontDoorMention = regexp.MustCompile(`~/\.claude/skills/([a-z0-9-]+)/agent-repld`)
 
-// globalSkillLinks answers the skills requirements.json links into the user's
-// skills directory: every skill_link requirement that is not retired.
+// availabilityRow is one row of /agent-repl-install's skill availability
+// table: `| `/name` | global|repository | why |`.
+var availabilityRow = regexp.MustCompile("(?m)^\\| `/([a-z0-9-]+)` \\| (global|repository) \\|")
+
+// globalSkillLinks answers the skills linked into the user's skills
+// directory, read off /agent-repl-install's availability table, which the
+// install requirements are held to (requirements.json; the install harness
+// checks the two agree). The table is read rather than requirements.json
+// because it is in this suite's input set.
 func globalSkillLinks(t *testing.T) map[string]bool {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(moduleDir, "requirements.json"))
-	if err != nil {
-		t.Fatalf("read requirements.json: %v", err)
-	}
-	var doc struct {
-		Requirements []struct {
-			Kind    string `json:"kind"`
-			Name    string `json:"name"`
-			Retired bool   `json:"retired"`
-		} `json:"requirements"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("decode requirements.json: %v", err)
+	text, ok := readSkills(t)["agent-repl-install"]
+	if !ok {
+		t.Fatal("no agent-repl-install skill holds the availability table")
 	}
 	links := map[string]bool{}
-	for _, r := range doc.Requirements {
-		if r.Kind == "skill_link" && !r.Retired {
-			links[r.Name] = true
-		}
+	for _, m := range availabilityRow.FindAllStringSubmatch(text, -1) {
+		links[m[1]] = m[2] == "global"
 	}
 	if len(links) == 0 {
-		t.Fatal("requirements.json links no skill globally; the decode no longer matches its shape")
+		t.Fatal("the agent-repl-install skill's availability table names no skill; the row shape no longer matches")
+	}
+	for name, global := range links {
+		if !global {
+			delete(links, name)
+		}
 	}
 	return links
 }

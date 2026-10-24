@@ -391,7 +391,8 @@ func TestTheFixingAttemptBriefPrescribesRunningOnlyTheFailingTestsUntilTheyPass(
 	want := []string{
 		"{{failing_tests}}",
 		"RUN ONLY THE FAILING TEST CASES, AND KEEP FIXING AND RERUNNING THEM UNTIL THEY PASS, BEFORE YOU END YOUR TURN",
-		"never the whole suite and never `bin/test-all.sh`",
+		"the `agent-repld test run` command that runs only its failing cases through the daemon",
+		"never the whole suite, and never a test command by hand",
 		"Fix what fails, then rerun those same targeted cases. Repeat until every one of them passes.",
 		"Only then is the remediation resolved: commit and end your turn",
 		"The queue then runs the selected suites in full again",

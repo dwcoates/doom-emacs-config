@@ -429,6 +429,17 @@ func TestEveryWebappStreamIsRefusedAsUnimplemented(t *testing.T) {
 			},
 		},
 		{
+			name: "RunRedundancy",
+			open: func(ctx context.Context, c agentreplv1connectClient) (interface{ Err() error }, func() error) {
+				s, err := c.RunRedundancy(ctx, connect.NewRequest(&agentreplv1.RunRedundancyRequest{}))
+				if err != nil {
+					t.Fatalf("open RunRedundancy: %v", err)
+				}
+				s.Receive()
+				return s, s.Close
+			},
+		},
+		{
 			name: "WatchLoginTerminal",
 			open: func(ctx context.Context, c agentreplv1connectClient) (interface{ Err() error }, func() error) {
 				s, err := c.WatchLoginTerminal(ctx, connect.NewRequest(&agentreplv1.WatchLoginTerminalRequest{}))

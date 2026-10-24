@@ -206,15 +206,21 @@ func TestRunTestsRefuses(t *testing.T) {
 		}, check: func(e *agentreplv1.RunTestsError) bool { return e.GetNoSelection() != nil }},
 		{name: "a request naming no requester", req: func(h *harness) *agentreplv1.RunTestsRequest {
 			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: oneHarness()}
-		}, check: func(e *agentreplv1.RunTestsError) bool { return strings.Contains(e.GetInvalid().GetDetail(), "names no requester") }},
+		}, check: func(e *agentreplv1.RunTestsError) bool {
+			return strings.Contains(e.GetInvalid().GetDetail(), "names no requester")
+		}},
 		{name: "a recording run repeated", req: func(h *harness) *agentreplv1.RunTestsRequest {
 			run := oneHarness()
 			run.Record = true
 			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: run, Runs: 2, Requester: user()}
-		}, check: func(e *agentreplv1.RunTestsError) bool { return strings.Contains(e.GetInvalid().GetDetail(), "a recording run runs once") }},
+		}, check: func(e *agentreplv1.RunTestsError) bool {
+			return strings.Contains(e.GetInvalid().GetDetail(), "a recording run runs once")
+		}},
 		{name: "CPU load of no loop", req: func(h *harness) *agentreplv1.RunTestsRequest {
 			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: oneHarness(), CpuLoad: &agentreplv1.RunTestsCpuLoad{}, Requester: user()}
-		}, check: func(e *agentreplv1.RunTestsError) bool { return strings.Contains(e.GetInvalid().GetDetail(), "names no busy loop") }},
+		}, check: func(e *agentreplv1.RunTestsError) bool {
+			return strings.Contains(e.GetInvalid().GetDetail(), "names no busy loop")
+		}},
 		{name: "CPU load a workspace asks for", req: func(h *harness) *agentreplv1.RunTestsRequest {
 			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: oneHarness(), CpuLoad: &agentreplv1.RunTestsCpuLoad{Loops: 4}, Requester: agent()}
 		}, check: func(e *agentreplv1.RunTestsError) bool { return e.GetCpuLoadRefused() != nil }},
@@ -437,7 +443,9 @@ func TestTestWorktreeOf(t *testing.T) {
 	}{
 		{name: "a served worktree naming its script", ref: func(h *harness) *workspacev1.WorkspaceRef { return testsWorkspace(t, h, testsDeploy) },
 			wantErr: func(err error) bool { return err == nil }},
-		{name: "a workspace the daemon does not serve", ref: func(*harness) *workspacev1.WorkspaceRef { return &workspacev1.WorkspaceRef{Id: "ws-nope", Dir: "/nowhere"} },
+		{name: "a workspace the daemon does not serve", ref: func(*harness) *workspacev1.WorkspaceRef {
+			return &workspacev1.WorkspaceRef{Id: "ws-nope", Dir: "/nowhere"}
+		},
 			wantErr: func(err error) bool { return errors.Is(err, errUnknownTestWorkspace) }},
 		{name: "a worktree with no deploy config", ref: func(h *harness) *workspacev1.WorkspaceRef { return testsWorkspace(t, h, "") },
 			wantErr: func(err error) bool { var e *noTestScriptError; return errors.As(err, &e) }},

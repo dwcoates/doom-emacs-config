@@ -262,7 +262,6 @@ fi
 d="$TMP/h1j"
 mkdir -p "$d/bin"
 cp "$HELPER" "$d/bin/background.sh"
-cp "$THIS_DIR/lib-priority.sh" "$d/bin/lib-priority.sh"
 cat >"$d/bin/test-subject.sh" <<'SUBJECT'
 #!/usr/bin/env bash
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"
@@ -308,10 +307,11 @@ fi
 
 # --- 1n. the helper and low-priority.sh share one demotion -----------------
 if grep -Fqx 'priority_exec marker "$@"' "$HELPER" && grep -Fqx 'priority_exec unmarked "$@"' "$THIS_DIR/low-priority.sh" &&
-    ! grep_in "$(grep -hv '^[[:space:]]*#' "$HELPER" "$THIS_DIR/low-priority.sh")" -Eq 'nice -n|taskpolicy'; then
-    pass "background.sh and low-priority.sh demote only through lib-priority.sh's priority_exec"
+    grep -Fqx '. "$(dirname "${BASH_SOURCE[0]}")/background.sh"' "$THIS_DIR/low-priority.sh" &&
+    ! grep_in "$(grep -v '^[[:space:]]*#' "$THIS_DIR/low-priority.sh")" -Eq 'nice -n|taskpolicy'; then
+    pass "low-priority.sh demotes only through background.sh's own priority_exec, sourced"
 else
-    fail "background.sh and low-priority.sh demote only through lib-priority.sh's priority_exec"
+    fail "low-priority.sh demotes only through background.sh's own priority_exec, sourced"
 fi
 
 # ============================================================================
