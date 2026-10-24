@@ -698,7 +698,7 @@ export function finalResponseRow(id: string, markdown = "done", parent?: string)
       value: {
         unit: {
           case: "response",
-          value: { finalAnswer: true, result: { case: "success", value: { prose: { markdown } } } },
+          value: { finalAnswer: true, result: { case: "success", value: { prose: { prose: servedProse(markdown) } } } },
         },
       },
     },

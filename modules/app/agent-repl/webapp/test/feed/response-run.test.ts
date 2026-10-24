@@ -12,6 +12,7 @@ import {
 } from "../../src/feed/response-run.js";
 import { orderFor } from "../feed-order.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { plainProse } from "../prose.js";
 import {
   faultEndingRow,
   feedId,
@@ -34,7 +35,7 @@ function thinkingFinalRow(id: string): FeedRow {
       value: {
         unit: {
           case: "response",
-          value: { finalAnswer: true, thinking: true, result: { case: "success", value: { prose: { markdown: "x" } } } },
+          value: { finalAnswer: true, thinking: true, result: { case: "success", value: { prose: { prose: plainProse("x") } } } },
         },
       },
     },
@@ -54,7 +55,7 @@ function noticeFinalRow(id: string): FeedRow {
           value: {
             finalAnswer: true,
             notice: { marker: {} },
-            result: { case: "success", value: { prose: { markdown: "x" } } },
+            result: { case: "success", value: { prose: { prose: plainProse("x") } } },
           },
         },
       },
