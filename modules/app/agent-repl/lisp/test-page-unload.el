@@ -403,6 +403,209 @@
       (should (equal (reverse calls) '((mount "alpha" nil) (restore "alpha"))))
       (should (agent-repl-test-pu--said-p "elisp.page-unload.remount" "ws=alpha")))))
 
+;;;; ---- A remount the user left before it drew ----
+
+(defmacro agent-repl-test-pu--with-host (&rest body)
+  "Run BODY with a host whose `drawn' reads are recorded, not answered.
+Each read lands in `asked' as (METHOD ARGS CALLBACK); every workspace's id
+is \"id-\" and its name, and the answers handed to the webhost's own record
+land in `recorded'."
+  (declare (indent 0))
+  `(let ((asked nil) (recorded nil))
+     (cl-letf (((symbol-function 'agent-repl--webhost-id) (lambda (ws) (concat "id-" ws)))
+               ((symbol-function 'agent-repl--ws-by-ref-id)
+                (lambda (id) (and (string-prefix-p "id-" id) (substring id 3))))
+               ((symbol-function 'agent-repl-webhost-read)
+                (lambda (method args callback) (push (list method args callback) asked) t))
+               ((symbol-function 'agent-repl--webhost-answered) (lambda (raw) (push raw recorded))))
+       ,@body)))
+
+(defun agent-repl-test-pu--drawn-answer (ws outcome drawn)
+  "The host's `drawn' answer for WS: OUTCOME, and DRAWN or null."
+  (json-serialize `(:op "drawn" :id ,(concat "id-" ws) :outcome ,outcome
+                    :drawn ,(or drawn :null) :notes [])))
+
+(defun agent-repl-test-pu--remount-and-leave (ws other)
+  "Remount WS's page, show it, then switch on to OTHER."
+  (cl-letf (((symbol-function 'agent-repl--panels-mount-awaited-view) #'ignore))
+    (agent-repl-page-unload-remount ws))
+  (agent-repl-page-unload-note-shown ws)
+  (agent-repl-page-unload-note-shown other))
+
+(ert-deftest agent-repl-test-pu-leaving-a-remount-asks-the-host-if-it-drew ()
+  "Switching away from a remounted page asks the host whether it has drawn."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      ;; Act
+      (agent-repl-test-pu--remount-and-leave "alpha" "beta")
+      ;; Assert
+      (should (equal asked '(("drawn" ("id-alpha") agent-repl-page-unload--on-drawn-answer)))))))
+
+(ert-deftest agent-repl-test-pu-leaving-a-page-not-remounted-asks-nothing ()
+  "Switching away from a page that was not remounted asks the host nothing."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      (agent-repl-page-unload-note-shown "alpha")
+      ;; Act
+      (agent-repl-page-unload-note-shown "beta")
+      ;; Assert
+      (should-not asked))))
+
+(ert-deftest agent-repl-test-pu-a-remount-left-before-it-drew-is-unloaded ()
+  "A remounted page still loading when left is unloaded, the daemon told first."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      (agent-repl-test-pu--remount-and-leave "alpha" "beta")
+      ;; Act
+      (agent-repl-page-unload--on-drawn-answer
+       (agent-repl-test-pu--drawn-answer "alpha" "present" nil))
+      ;; Assert
+      (should (equal (list (reverse agent-repl-test-pu--events)
+                           (agent-repl-page-unloaded-p "alpha")
+                           (agent-repl--ws-get "alpha" :page-remounting))
+                     '(((report "alpha") (detach "alpha")) t nil)))
+      (should (agent-repl-test-pu--said-p "elisp.page-unload.unloaded" "ws=alpha" "reason=abandoned")))))
+
+(ert-deftest agent-repl-test-pu-the-drawn-answer-reaches-the-webhost-record ()
+  "The host's answer is recorded by the webhost, notes and all."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      (agent-repl-test-pu--remount-and-leave "alpha" "beta")
+      (let ((raw (agent-repl-test-pu--drawn-answer "alpha" "present" "page")))
+        ;; Act
+        (agent-repl-page-unload--on-drawn-answer raw)
+        ;; Assert
+        (should (equal recorded (list raw)))))))
+
+(ert-deftest agent-repl-test-pu-a-remount-that-drew-is-kept-and-settled ()
+  "A remounted page that drew before it was left stays, and is not asked of again."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      (agent-repl-test-pu--remount-and-leave "alpha" "beta")
+      ;; Act
+      (agent-repl-page-unload--on-drawn-answer
+       (agent-repl-test-pu--drawn-answer "alpha" "present" "page"))
+      ;; Assert
+      (should (equal (list agent-repl-test-pu--events (agent-repl--ws-get "alpha" :page-remounting))
+                     '(nil nil)))
+      (should (agent-repl-test-pu--said-p "elisp.page-unload.abandon-dropped" "ws=alpha" "reason=drawn")))))
+
+(ert-deftest agent-repl-test-pu-a-remount-the-user-is-back-on-is-kept ()
+  "A remounted page the user switched back to before the answer stays loaded."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      (agent-repl-test-pu--remount-and-leave "alpha" "beta")
+      (agent-repl-page-unload-note-shown "alpha")
+      ;; Act
+      (agent-repl-page-unload--on-drawn-answer
+       (agent-repl-test-pu--drawn-answer "alpha" "present" nil))
+      ;; Assert
+      (should (equal (list agent-repl-test-pu--events (agent-repl--ws-get "alpha" :page-remounting))
+                     '(nil t)))
+      (should (agent-repl-test-pu--said-p "elisp.page-unload.abandon-deferred" "ws=alpha"
+                                          "reason=not-holdable")))))
+
+(ert-deftest agent-repl-test-pu-a-remount-the-host-no-longer-holds-is-settled ()
+  "A page the host answers absent has nothing to cancel."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      (agent-repl-test-pu--remount-and-leave "alpha" "beta")
+      ;; Act
+      (agent-repl-page-unload--on-drawn-answer
+       (agent-repl-test-pu--drawn-answer "alpha" "absent" nil))
+      ;; Assert
+      (should (equal (list agent-repl-test-pu--events (agent-repl--ws-get "alpha" :page-remounting))
+                     '(nil nil)))
+      (should (agent-repl-test-pu--said-p "elisp.page-unload.abandon-dropped" "ws=alpha" "reason=absent")))))
+
+(ert-deftest agent-repl-test-pu-a-remount-asked-of-a-loading-host-is-deferred ()
+  "A read queued on a host still loading leaves the page to the next leave."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      (agent-repl-test-pu--remount-and-leave "alpha" "beta")
+      ;; Act
+      (agent-repl-page-unload--on-drawn-answer
+       (agent-repl-test-pu--drawn-answer "alpha" "queued" nil))
+      ;; Assert
+      (should (equal (list agent-repl-test-pu--events (agent-repl--ws-get "alpha" :page-remounting))
+                     '(nil t)))
+      (should (agent-repl-test-pu--said-p "elisp.page-unload.abandon-deferred" "ws=alpha"
+                                          "reason=host-loading")))))
+
+(ert-deftest agent-repl-test-pu-an-abandon-whose-report-did-not-land-is-kept ()
+  "A cancel whose report the daemon refused keeps the page, to be asked again."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      (setq agent-repl-test-pu--report 'refused)
+      (agent-repl-test-pu--remount-and-leave "alpha" "beta")
+      ;; Act
+      (agent-repl-page-unload--on-drawn-answer
+       (agent-repl-test-pu--drawn-answer "alpha" "present" nil))
+      ;; Assert
+      (should (equal (list agent-repl-test-pu--detached (agent-repl--ws-get "alpha" :page-remounting))
+                     '(nil t)))
+      (should (agent-repl-test-pu--said-p "elisp.page-unload.kept" "ws=alpha" "why=not-reported")))))
+
+(ert-deftest agent-repl-test-pu-an-answer-for-a-closed-workspace-is-dropped ()
+  "An answer naming no live workspace changes nothing, and is recorded."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      ;; Act
+      (agent-repl-page-unload--on-drawn-answer
+       (json-serialize '(:op "drawn" :id "gone" :outcome "absent" :drawn :null :notes [])))
+      ;; Assert
+      (should-not agent-repl-test-pu--events)
+      (should (agent-repl-test-pu--said-p "elisp.page-unload.abandon-dropped" "id=gone"
+                                          "reason=no-workspace")))))
+
+(ert-deftest agent-repl-test-pu-an-unreadable-answer-is-an-error ()
+  "An answer that is not JSON is recorded at ERROR and unloads nothing."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      (let (errors)
+        (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+          ;; Act
+          (agent-repl-page-unload--on-drawn-answer "not json"))
+        ;; Assert
+        (should-not agent-repl-test-pu--events)
+        (should (seq-some (lambda (text) (string-search "abandon-answer-unreadable" text)) errors))))))
+
+(ert-deftest agent-repl-test-pu-leaving-a-remount-with-no-host-settles-it ()
+  "With no host to ask there is no load to cancel, and the mark is cleared."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      (cl-letf (((symbol-function 'agent-repl-webhost-read) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl-test-pu--remount-and-leave "alpha" "beta"))
+      ;; Assert
+      (should-not (agent-repl--ws-get "alpha" :page-remounting))
+      (should (agent-repl-test-pu--said-p "elisp.page-unload.abandon-skipped" "ws=alpha" "reason=no-host")))))
+
+(ert-deftest agent-repl-test-pu-leaving-a-remount-with-no-ref-fails-hard ()
+  "A remounted workspace with no ref is a bug: recorded at ERROR, then signalled."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-test-pu--with-host
+      (let (errors)
+        (cl-letf (((symbol-function 'agent-repl--webhost-id) #'ignore)
+                  ((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+          ;; Act / Assert
+          (should-error (agent-repl-test-pu--remount-and-leave "alpha" "beta")))
+        (should (seq-some (lambda (text) (string-search "abandon-failed ws=alpha reason=no-ref" text))
+                          errors))))))
+
 (ert-deftest agent-repl-test-pu-start-keeps-a-running-timer ()
   "Starting twice keeps the one timer."
   ;; Arrange
