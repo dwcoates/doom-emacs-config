@@ -708,6 +708,26 @@ composer has nothing to fill: recorded, and nothing changes."
       (agent-repl--input-flash
        ws (format "editing entry %s: RET resends the prompt with it" label)))))
 
+(defun agent-repl-input-compose-entry (ws label)
+  "Open a blank entry answering LABEL at the end of WS's composer.
+Called when the reader clicked a response's branch in the webview (the
+host watch's `compose_entry'): the entry opens on a line of its own after
+whatever the composer holds, with `LABEL - ' (`agent-repl-prompt-entries-
+opening'), and the keyboard goes to the composer in insert state with
+point right after it.  A workspace with no composer has nothing to open
+an entry in: recorded, and nothing changes."
+  (let ((buf (agent-repl--input-buffer ws)))
+    (if (null buf)
+        (agent-repl--warn ws "elisp.input.compose-entry-no-composer ws=%s label=%s" ws label)
+      (with-current-buffer buf
+        (goto-char (point-max))
+        (unless (bolp) (insert "\n"))
+        (insert (agent-repl-prompt-entries-opening label)))
+      (agent-repl--info ws "elisp.input.compose-entry ws=%s label=%s" ws label)
+      (let ((win (agent-repl-input-focus-for-reply ws)))
+        (when win
+          (set-window-point win (with-current-buffer buf (point-max))))))))
+
 (defun agent-repl--input-resend (ws)
   "Return what WS's composer resends in a rollback's place, or nil when empty.
 A plist (:raw RAW :said SAID :key KEY :origin :user-sent :edit EDIT): the

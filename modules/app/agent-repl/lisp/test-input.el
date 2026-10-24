@@ -4969,6 +4969,69 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
         ;; Assert
         (should (and (string-match-p "elisp.input.edit-entry-no-composer" (car warned)) (null focused)))))))
 
+;;;; ---- Answering a response's branch ----
+
+(ert-deftest agent-repl-test-input-compose-entry-opens-a-blank-entry ()
+  "A branch click opens a blank entry answering its label, whatever the composer held."
+  (dolist (case '(("an empty composer" "" "3.1 - ")
+                  ("a composer ending mid-line" "my draft" "my draft\n3.1 - ")
+                  ("a composer ending on a fresh line" "my draft\n" "my draft\n3.1 - ")))
+    (agent-repl-test-input--focusing nil
+      ;; Arrange
+      (agent-repl-test-input--type (nth 1 case))
+      ;; Act
+      (agent-repl-input-compose-entry "ws-one" "3.1")
+      ;; Assert
+      (should (equal (list (car case) (agent-repl-test-input--composer-text))
+                     (list (car case) (nth 2 case)))))))
+
+(ert-deftest agent-repl-test-input-compose-entry-focuses-the-composer-in-insert-state ()
+  "The composer takes the keyboard in insert state."
+  (agent-repl-test-input--focusing t
+    ;; Act
+    (agent-repl-input-compose-entry "ws-one" "3.1")
+    ;; Assert
+    (should (equal (list (selected-window) insert-buffers)
+                   (list composer-window (list agent-repl-test-input--buffer))))))
+
+(ert-deftest agent-repl-test-input-compose-entry-puts-point-after-the-entry ()
+  "Point stands right after `LABEL - ', in the composer's window too."
+  (agent-repl-test-input--focusing t
+    ;; Arrange
+    (agent-repl-test-input--type "my draft")
+    (with-current-buffer agent-repl-test-input--buffer (goto-char (point-min)))
+    (set-window-point composer-window 1)
+    ;; Act
+    (agent-repl-input-compose-entry "ws-one" "3.1")
+    ;; Assert
+    (let ((end (with-current-buffer agent-repl-test-input--buffer (point-max))))
+      (should (equal (list (window-point composer-window)
+                           (with-current-buffer agent-repl-test-input--buffer (point)))
+                     (list end end))))))
+
+(ert-deftest agent-repl-test-input-compose-entry-is-recorded-at-info ()
+  "Opening the entry leaves an INFO record naming the label."
+  (agent-repl-test-input--focusing t
+    ;; Act
+    (agent-repl-input-compose-entry "ws-one" "3.1")
+    ;; Assert
+    (should (cl-some (lambda (m) (string-match-p "elisp.input.compose-entry ws=ws-one label=3.1" m)) infos))))
+
+(ert-deftest agent-repl-test-input-compose-entry-without-a-composer-changes-nothing ()
+  "A workspace with no composer has nothing to open an entry in: recorded at WARN."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-edit-stubs
+      (let (warned)
+        (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
+                  ((symbol-function 'agent-repl--warn)
+                   (agent-repl-test--record-into warned)))
+          ;; Act
+          (agent-repl-input-compose-entry "ws-one" "3.1"))
+        ;; Assert
+        (should (and (string-match-p "elisp.input.compose-entry-no-composer ws=ws-one label=3.1" (car warned))
+                     (null focused)
+                     (equal (agent-repl-test-input--composer-text) "")))))))
+
 (ert-deftest agent-repl-test-input-resend-is-nil-for-an-empty-composer ()
   "With nothing to send, RET only rolls back."
   (agent-repl-test-input--with

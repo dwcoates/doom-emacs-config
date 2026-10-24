@@ -385,7 +385,9 @@ connection stands, the daemon refused, or it never answered."
 
 (defun agent-repl-prompt-entries-opening (label)
   "The words that open a blank entry answering LABEL: `LABEL - '.
-Every line Emacs opens on an entry is opened with them."
+Every line Emacs opens on an entry is opened with them: `o' and `O' beside
+an entry, and a click on a response's branch in the webview
+\(`agent-repl-input-compose-entry')."
   (concat label " - "))
 
 (defun agent-repl-prompt-entries--open (next)

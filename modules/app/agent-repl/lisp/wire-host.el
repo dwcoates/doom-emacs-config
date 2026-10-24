@@ -643,6 +643,20 @@ The row is REQUIRED: it is the prompt the edit resends."
            :label (agent-repl-wire--decode-string "HostWorkspacePromptEntryClicked" 'label object)
            :text (agent-repl-wire--decode-string "HostWorkspacePromptEntryClicked" 'text object)))))
 
+;;;; ---- The branch click push ----
+
+(defun agent-repl-wire-decode-host-workspace-compose-entry (value)
+  "Decode VALUE as `HostWorkspaceComposeEntry', (:label L).
+The reader clicked a response's node in the webview, selecting the
+response; the composer opens a blank entry answering LABEL.  The label is
+never empty."
+  (let ((object (agent-repl-wire--object "HostWorkspaceComposeEntry" value)))
+    (agent-repl-wire--check-keys "HostWorkspaceComposeEntry" object '(label))
+    (let ((label (agent-repl-wire--decode-string "HostWorkspaceComposeEntry" 'label object)))
+      (when (string-empty-p label)
+        (agent-repl-wire--fail "HostWorkspaceComposeEntry" 'label "required string is empty"))
+      (agent-repl-wire--decoded "HostWorkspaceComposeEntry" (list :label label)))))
+
 ;;;; ---- The selection push ----
 
 (defun agent-repl-wire-decode-host-workspace-selection (value)
@@ -898,6 +912,10 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `prompt_entry_clicked' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-prompt-entry-clicked value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-compose-entry (value)
+  "Decode the `compose_entry' push arm VALUE."
+  (agent-repl-wire-decode-host-workspace-compose-entry value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-selection (value)
   "Decode the `selection' push arm VALUE as its `(:kind :markdown)' plist."
   (agent-repl-wire-decode-host-workspace-selection value))
@@ -949,7 +967,9 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
      (selectRequested :select-requested
                       agent-repl-wire-decode-watch-host-workspace-response-select-requested)
      (promptEntryClicked :prompt-entry-clicked
-                         agent-repl-wire-decode-watch-host-workspace-response-prompt-entry-clicked))))
+                         agent-repl-wire-decode-watch-host-workspace-response-prompt-entry-clicked)
+     (composeEntry :compose-entry
+                   agent-repl-wire-decode-watch-host-workspace-response-compose-entry))))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response (value)
   "Decode VALUE as `WatchHostWorkspaceResponse', the push oneof plist."
@@ -957,7 +977,7 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
     (agent-repl-wire--check-keys
      "WatchHostWorkspaceResponse" object
      '(host transferred reloadWebapp openInEditor openCommitLog ending notificationClicked selection evaluate
-       finalResponseClicked selectRequested promptEntryClicked))
+       finalResponseClicked selectRequested promptEntryClicked composeEntry))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))

@@ -1268,6 +1268,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:final-response-clicked (agent-repl-host--final-response-clicked ws))
     (:select-requested (agent-repl-host--select-requested ws))
     (:prompt-entry-clicked (agent-repl-host--prompt-entry-clicked ws value))
+    (:compose-entry (agent-repl-host--compose-entry ws value))
     (:transferred (agent-repl-host--transferred ws value))
     (:reload-webapp (agent-repl-host--reload-webapp ws value))
     (:open-in-editor (agent-repl-host--open-in-editor ws value))
@@ -1402,6 +1403,17 @@ replayed, so a reconnect never refills the composer."
                     ws (plist-get (plist-get value :row) :value) (plist-get value :label))
   (agent-repl-input-edit-entry ws (plist-get value :row) (plist-get value :label)
                                (plist-get value :text)))
+
+;;;; ---- The branch click ----
+
+(defun agent-repl-host--compose-entry (ws value)
+  "Open a blank entry in WS's composer for the branch the reader clicked.
+VALUE is (:label LABEL): the click on a response's node selected the
+response, and the composer opens an entry answering LABEL
+\(`agent-repl-input-compose-entry').  An event, never replayed, so a
+reconnect never opens another."
+  (agent-repl--info ws "elisp.host.compose-entry ws=%s label=%s" ws (plist-get value :label))
+  (agent-repl-input-compose-entry ws (plist-get value :label)))
 
 ;;;; ---- The notification click ----
 

@@ -350,7 +350,8 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
                       (list "{\"selectRequested\":{}}" :select-requested)
                       (list "{\"promptEntryClicked\":{\"row\":{\"value\":\"p1\"},\"label\":\"3.1\",\"text\":\"yes\"}}"
-                            :prompt-entry-clicked)))
+                            :prompt-entry-clicked)
+                      (list "{\"composeEntry\":{\"label\":\"3.1\"}}" :compose-entry)))
     (should (equal (plist-get (agent-repl-test-wire-host--decode
                                #'agent-repl-wire-decode-watch-host-workspace-response
                                (nth 0 case))
@@ -662,6 +663,23 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   #'agent-repl-wire-decode-host-workspace-prompt-entry-clicked
                   "{\"row\":{\"value\":\"p1\"},\"label\":\"3.1\",\"text\":\"yes\",\"extra\":1}")
                  '("HostWorkspacePromptEntryClicked" extra "unknown field"))))
+
+;;;; ---- The branch click push ----
+
+(ert-deftest agent-repl-test-wire-host-compose-entry-decodes-its-label ()
+  "The branch click decodes to the node's label."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace-compose-entry
+                  "{\"label\":\"3.1\"}")
+                 '(:label "3.1"))))
+
+(ert-deftest agent-repl-test-wire-host-compose-entry-refuses-a-bad-message ()
+  "An empty label, or a field the branch click does not declare, is refused."
+  (dolist (case '(("{}" ("HostWorkspaceComposeEntry" label "required string is empty"))
+                  ("{\"label\":\"3.1\",\"extra\":1}" ("HostWorkspaceComposeEntry" extra "unknown field"))))
+    (should (equal (agent-repl-test-wire-host--breach
+                    #'agent-repl-wire-decode-host-workspace-compose-entry (car case))
+                   (cadr case)))))
 
 ;;;; ---- The notification click push ----
 
@@ -1562,7 +1580,7 @@ opens are OpenTabs streams."
                        #'string<)
                  (sort (list "evaluate" "host" "transferred" "reloadWebapp"
                              "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection"
-                             "finalResponseClicked" "selectRequested" "promptEntryClicked")
+                             "finalResponseClicked" "selectRequested" "promptEntryClicked" "composeEntry")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()

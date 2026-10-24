@@ -514,7 +514,8 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
 
 (ert-deftest agent-repl-test-prompt-entries-every-opened-entry-is-opened-by-the-one-helper ()
   "`o'/`O' and a branch click open entries through `agent-repl-prompt-entries-opening'."
-  (dolist (case '(("prompt-entries.el" "agent-repl-prompt-entries--open")))
+  (dolist (case '(("prompt-entries.el" "agent-repl-prompt-entries--open")
+                  ("input.el" "agent-repl-input-compose-entry")))
     ;; Arrange
     (let ((source (with-temp-buffer
                     (insert-file-contents (expand-file-name (car case) agent-repl-test--module-dir))
