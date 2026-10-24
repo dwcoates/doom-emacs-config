@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
@@ -2741,5 +2742,52 @@ func TestAVisibleWorkspaceBesideAHiddenOneIsStillBroughtUp(t *testing.T) {
 	}
 	if len(report.PendingBringUp) != 1 || report.PendingBringUp[0].ID != shown.ID {
 		t.Fatalf("PendingBringUp = %v, want only %v", report.PendingBringUp, shown.ID)
+	}
+}
+
+// TestTheZettelStepRunsBesideTheBringUp pins that zettel's service step runs
+// on the bring-up, is joined before it returns, and that its outcome is
+// recorded: a failure at ERROR naming zettel, the exit's cut at INFO.
+func TestTheZettelStepRunsBesideTheBringUp(t *testing.T) {
+	cases := []struct {
+		name      string
+		err       func(ctx context.Context) error
+		cancelled bool
+		level     string
+		message   string
+	}{
+		{name: "a failed zettel step is an error", err: func(context.Context) error { return errBoom },
+			level: "error", message: "the zettel service could not be made current; chat threads cannot record or read their graph until it is"},
+		{name: "a zettel step the exit cut is info", err: func(ctx context.Context) error { return ctx.Err() }, cancelled: true,
+			level: "info", message: "the daemon's exit cut zettel's service step short; the next boot's service step completes it"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			var ran atomic.Bool
+			h := newHarness(t, func(deps *Deps, _ *harness) {
+				deps.EnsureServices = func(context.Context) error { return nil }
+				deps.EnsureZettel = func(ctx context.Context) error {
+					ran.Store(true)
+					return tc.err(ctx)
+				}
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancelled {
+				cancel()
+			}
+
+			// Act.
+			h.seq.BringUp(ctx, nil)
+
+			// Assert.
+			if !ran.Load() {
+				t.Fatal("BringUp returned before zettel's step ran")
+			}
+			if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: tc.level, Operation: "daemon.boot.bring_up", Message: tc.message}); !ok {
+				t.Fatalf("records = %v, want %q at %s", h.log.Records(), tc.message, tc.level)
+			}
+		})
 	}
 }

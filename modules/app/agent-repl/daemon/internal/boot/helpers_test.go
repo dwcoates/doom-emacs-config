@@ -493,6 +493,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 			return h.ensureErr
 		},
 		EnsureSidecar: func(context.Context) error { return nil },
+		EnsureZettel:  func(context.Context) error { return nil },
 		Now:           func() time.Time { return instant },
 		Log:           log,
 	}

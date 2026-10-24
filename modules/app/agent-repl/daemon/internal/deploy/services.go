@@ -200,15 +200,28 @@ func (r *Restarter) RestartZettel(ctx context.Context) error {
 	return nil
 }
 
-// ensureZettelCurrent is the boot's zettel step: launchd holds the zettel
+// EnsureZettelCurrent is the boot's zettel step: launchd holds the zettel
 // service, and it runs the installed build (restarted alone when it does not).
-// It is independent of the store and the sidecar, so it runs beside the
-// sidecar's half, never before a shim starts.
-func (r *Restarter) ensureZettelCurrent(ctx context.Context) error {
+// It is independent of the store and the sidecar -- no shim writes into it --
+// so the boot runs it beside the bring-ups, never before a shim starts.
+func (r *Restarter) EnsureZettelCurrent(ctx context.Context) error {
 	bootstrapped, err := r.ensureLoaded(ctx, ZettelLabel, dlog.Context{"zettel": ZettelLabel})
 	if err != nil {
 		return err
 	}
+	return r.zettelCurrent(ctx, bootstrapped)
+}
+
+// EnsureZettelLoaded makes sure launchd holds the zettel service, and touches
+// nothing that runs: a joining successor's zettel step, which must not
+// restart a service the incumbent is still serving through.
+func (r *Restarter) EnsureZettelLoaded(ctx context.Context) error {
+	_, err := r.ensureLoaded(ctx, ZettelLabel, dlog.Context{"zettel": ZettelLabel})
+	return err
+}
+
+// zettelCurrent restarts a running zettel that is not the installed build.
+func (r *Restarter) zettelCurrent(ctx context.Context, bootstrapped bool) error {
 	stale, err := r.runningStale(ctx, bootstrapped, ComponentZettel, ZettelLabel, buildreport.ServiceZettel)
 	if err != nil {
 		return err
@@ -250,7 +263,10 @@ func (r *Restarter) EnsureCurrent(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return sidecar(ctx)
+	if err := sidecar(ctx); err != nil {
+		return err
+	}
+	return r.EnsureZettelCurrent(ctx)
 }
 
 // EnsureStoreCurrent is EnsureCurrent's FIRST HALF, the one shims must wait
@@ -283,17 +299,12 @@ func (r *Restarter) EnsureStoreCurrent(ctx context.Context) (func(context.Contex
 		if err := r.RestartStore(ctx); err != nil {
 			return nil, err
 		}
-		return func(ctx context.Context) error {
+		return func(context.Context) error {
 			r.Log.Debug(opServices, "the store's restart already restarted the sidecar onto the installed build", nil)
-			return r.ensureZettelCurrent(ctx)
+			return nil
 		}, nil
 	}
-	return func(ctx context.Context) error {
-		if err := r.ensureSidecarCurrent(ctx, sidecarBootstrapped); err != nil {
-			return err
-		}
-		return r.ensureZettelCurrent(ctx)
-	}, nil
+	return func(ctx context.Context) error { return r.ensureSidecarCurrent(ctx, sidecarBootstrapped) }, nil
 }
 
 // ensureSidecarCurrent is EnsureCurrent's second half: the sidecar's build

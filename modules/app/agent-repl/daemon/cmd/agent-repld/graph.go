@@ -1564,6 +1564,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			StartSession:           fleet.Start,
 			EnsureServices:         services.step(bootServiceStep(p.Opts.joining != "", restarter.EnsureLoaded, sidecar.storeCurrent(restarter.EnsureStoreCurrent))),
 			EnsureSidecar:          sidecar.run,
+			EnsureZettel:           bootServiceStep(p.Opts.joining != "", restarter.EnsureZettelLoaded, restarter.EnsureZettelCurrent),
 			Unserved:               fleet.MarkUnserved,
 			BringingUp:             bringingUp,
 			AdoptBound:             adoptBound,

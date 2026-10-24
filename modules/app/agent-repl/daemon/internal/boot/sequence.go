@@ -964,6 +964,8 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 	// cuts the step above.
 	sidecar := make(chan error, 1)
 	go func() { sidecar <- s.deps.EnsureSidecar(ctx) }()
+	zettel := make(chan error, 1)
+	go func() { zettel <- s.deps.EnsureZettel(ctx) }()
 	brought := bringup.Run(ctx, bringup.Deps{
 		DB:           s.deps.DB,
 		StartSession: bringup.StartFunc(s.deps.StartSession),
@@ -981,6 +983,17 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 			})
 		} else {
 			log.Error("daemon.boot.bring_up", "the sidecar could not be made current; the sessions run beside the build it has", dlog.Context{
+				"error": err.Error(),
+			})
+		}
+	}
+	if err := <-zettel; err != nil {
+		if ctx.Err() != nil {
+			log.Info("daemon.boot.bring_up", "the daemon's exit cut zettel's service step short; the next boot's service step completes it", dlog.Context{
+				"error": err.Error(),
+			})
+		} else {
+			log.Error("daemon.boot.bring_up", "the zettel service could not be made current; chat threads cannot record or read their graph until it is", dlog.Context{
 				"error": err.Error(),
 			})
 		}

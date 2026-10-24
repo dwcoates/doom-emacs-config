@@ -1008,3 +1008,34 @@ func TestEnsureCurrentKeepsZettelLoadedAndCurrent(t *testing.T) {
 		})
 	}
 }
+
+func TestEnsureZettelLoadedNeverRestartsARunningZettel(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *restarterHarness)
+		want    []string
+	}{
+		{name: "a stale running zettel is left running", arrange: func(t *testing.T, h *restarterHarness) {
+			h.running(t, ZettelLabel, buildreport.ServiceZettel, 30, "old zettel", "new zettel")
+		}},
+		{name: "an unloaded zettel is bootstrapped", arrange: func(t *testing.T, h *restarterHarness) {
+			writeFile(t, filepath.Join(h.r.PlistDir, ZettelLabel+".plist"), "<plist/>")
+			h.launchd.loaded[ZettelLabel] = false
+		}, want: []string{"bootstrap " + ZettelLabel + ".plist"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newRestarter(t)
+			tc.arrange(t, h)
+
+			// Act
+			err := h.r.EnsureZettelLoaded(context.Background())
+
+			// Assert
+			if err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(tc.want) {
+				t.Fatalf("EnsureZettelLoaded = %v, acts %v; want %v", err, h.acts(), tc.want)
+			}
+		})
+	}
+}
