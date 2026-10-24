@@ -154,6 +154,9 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
 
 ### Chat UX
 
+- The first implementation includes the chat, the principal contributor UI.
+  It looks much like the ChatGPT and claude.ai chat interfaces.
+
 - A normal chat stream of question and answer bubbles, one path at a time.
 - Sibling questions (questions asked of the same answer) stack under that
   answer. Swiping left or right on a bubble cycles through its siblings and
@@ -191,8 +194,12 @@ Prior art: `~/workspace/notertame` (a question-and-answer card app with
   - Proposed: inference runs after the answer is shown, never delaying it,
     and a node durably records that its premises are still pending, so a
     restart picks up where it left off.
+  - Following premises feeds the model's context when answering a new
+    question (owner, 2026-10-24).
+  - Adding or removing premises by hand is left for later, if it is ever
+    needed.
   - Open: whether the parent is expressed as the provenance's in-graph case;
-    whether premises can also be added or removed by hand; whether premises feed the model's context; whether
+    whether
     a premise records a revision; how cycles among premises are prevented.
 
 - Chat nodes run on the Messages API, with context built from the graph,
