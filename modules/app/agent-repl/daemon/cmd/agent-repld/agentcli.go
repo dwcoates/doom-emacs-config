@@ -168,7 +168,8 @@ var cliNouns = map[string]map[string]cliCommand{
 		"eval": {usage: "eval [-workspace WS] TEXT", run: editorEval},
 	},
 	testNoun: {
-		"run": {usage: "run [-workspace WS] [-go DIR[=TestA,TestB/sub/path]]... [-vitest FILE[=FULL NAME]]... [-ert FILE[=test-a,test-b]]... [-harness SCRIPT[=group1,group2]]...", run: testRun},
+		"run":        {usage: "run [-workspace WS] [-go DIR[=TestA,TestB/sub/path]]... [-vitest FILE[=FULL NAME]]... [-ert FILE[=test-a,test-b]]... [-harness SCRIPT[=group1,group2]]... [-suite NAME]... [-every-suite] [-coverage] [-record] [-runs N [-stop-at-first-failure]] [-cpu-load N -as-user]", run: testRun},
+		"redundancy": {usage: "redundancy go|vitest|report [-workspace WS] FLAGS (testrun redundancy's own flags)", run: testRedundancy},
 	},
 	runtimeNoun: {
 		"deploy-hold":      {usage: "deploy-hold hold|release -repository here|DIR", run: runtimeDeployHold},

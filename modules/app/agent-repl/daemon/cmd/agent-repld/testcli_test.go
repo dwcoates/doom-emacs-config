@@ -79,6 +79,8 @@ func TestTestRunExitsByHowTheRunEnded(t *testing.T) {
 		{name: "a refused selection", frames: []*agentreplv1.RunTestsResponse{eventFrame(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Refused{Refused: &testrunv1.TestRunRefused{Detail: "no"}}})}, want: exitRefused},
 		{name: "a daemon error", frames: []*agentreplv1.RunTestsResponse{{Frame: &agentreplv1.RunTestsResponse_Error{Error: &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_NoSelection{NoSelection: &agentreplv1.RunTestsNoSelection{}}}}}}, want: exitRefused},
 		{name: "a stream that ends without its end", frames: nil, want: exitFailure},
+		{name: "a repeat whose first run failed and last passed", frames: []*agentreplv1.RunTestsResponse{endedFrame(false), endedFrame(true)}, want: exitTestsFailed},
+		{name: "a run the runner never ended", frames: []*agentreplv1.RunTestsResponse{{Frame: &agentreplv1.RunTestsResponse_Error{Error: &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_RunnerFailed{RunnerFailed: &agentreplv1.RunTestsRunnerFailed{ExitCode: 2}}}}}}, want: exitFailure},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -132,33 +134,37 @@ func TestBuildSelections(t *testing.T) {
 	}
 	cases := []struct {
 		name                        string
-		goSel, vitest, ert, harness []string
-		want                        []*testrunv1.TestSelection
+		sel  testSelections
+		want []*testrunv1.TestSelection
 	}{
-		{name: "a package relative to the working directory", goSel: []string{"../daemon/internal/merge"}, want: []*testrunv1.TestSelection{goAll("daemon/internal/merge")}},
-		{name: "an absolute package path", goSel: []string{"/wt/caller/x/y"}, want: []*testrunv1.TestSelection{goAll("x/y")}},
-		{name: "named tests and subtest paths of one test", goSel: []string{"p=TestA,TestB/case/inner,TestB/other"}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_GoPackage{GoPackage: &testrunv1.TestSelectionGoPackage{
+		{name: "a package relative to the working directory", sel: testSelections{goSel: []string{"../daemon/internal/merge"}}, want: []*testrunv1.TestSelection{goAll("daemon/internal/merge")}},
+		{name: "an absolute package path", sel: testSelections{goSel: []string{"/wt/caller/x/y"}}, want: []*testrunv1.TestSelection{goAll("x/y")}},
+		{name: "named tests and subtest paths of one test", sel: testSelections{goSel: []string{"p=TestA,TestB/case/inner,TestB/other"}}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_GoPackage{GoPackage: &testrunv1.TestSelectionGoPackage{
 			PackageDir: "src/p", Tests: &testrunv1.TestSelectionGoPackage_Named{Named: &testrunv1.TestSelectionGoNamedTests{Tests: []*testrunv1.TestSelectionGoTest{
 				{Name: "TestA", Scope: &testrunv1.TestSelectionGoTest_Whole{Whole: &testrunv1.TestSelectionGoWholeTest{}}},
 				{Name: "TestB", Scope: &testrunv1.TestSelectionGoTest_Subtests{Subtests: &testrunv1.TestSelectionGoSubtests{Paths: []*testrunv1.TestSelectionGoSubtestPath{
 					{Segments: []string{"case", "inner"}}, {Segments: []string{"other"}}}}}},
 			}}}}}}}},
-		{name: "a whole test and one of its subtests run it whole", goSel: []string{"p=TestB/x,TestB"}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_GoPackage{GoPackage: &testrunv1.TestSelectionGoPackage{
+		{name: "a whole test and one of its subtests run it whole", sel: testSelections{goSel: []string{"p=TestB/x,TestB"}}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_GoPackage{GoPackage: &testrunv1.TestSelectionGoPackage{
 			PackageDir: "src/p", Tests: &testrunv1.TestSelectionGoPackage_Named{Named: &testrunv1.TestSelectionGoNamedTests{Tests: []*testrunv1.TestSelectionGoTest{
 				{Name: "TestB", Scope: &testrunv1.TestSelectionGoTest_Whole{Whole: &testrunv1.TestSelectionGoWholeTest{}}}}}}}}}}},
-		{name: "a vitest file's names gather into one selection", vitest: []string{"a.test.ts=one, with a comma", "a.test.ts=two"}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_VitestFile{VitestFile: &testrunv1.TestSelectionVitestFile{
+		{name: "a vitest file's names gather into one selection", sel: testSelections{vitest: []string{"a.test.ts=one, with a comma", "a.test.ts=two"}}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_VitestFile{VitestFile: &testrunv1.TestSelectionVitestFile{
 			File: "src/a.test.ts", Tests: &testrunv1.TestSelectionVitestFile_Named{Named: &testrunv1.TestSelectionVitestNamedTests{FullNames: []string{"one, with a comma", "two"}}}}}}}},
-		{name: "a whole vitest file outranks its names", vitest: []string{"a.test.ts=one", "a.test.ts"}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_VitestFile{VitestFile: &testrunv1.TestSelectionVitestFile{
+		{name: "a whole vitest file outranks its names", sel: testSelections{vitest: []string{"a.test.ts=one", "a.test.ts"}}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_VitestFile{VitestFile: &testrunv1.TestSelectionVitestFile{
 			File: "src/a.test.ts", Tests: &testrunv1.TestSelectionVitestFile_All{All: &testrunv1.TestSelectionVitestAllTests{}}}}}}},
-		{name: "named ERT tests", ert: []string{"test-x.el=a-test,b-test"}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_ErtFile{ErtFile: &testrunv1.TestSelectionErtFile{
+		{name: "named ERT tests", sel: testSelections{ert: []string{"test-x.el=a-test,b-test"}}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_ErtFile{ErtFile: &testrunv1.TestSelectionErtFile{
 			File: "src/test-x.el", Tests: &testrunv1.TestSelectionErtFile_Named{Named: &testrunv1.TestSelectionErtNamedTests{TestNames: []string{"a-test", "b-test"}}}}}}}},
-		{name: "named harness groups", harness: []string{"t.sh=g1,g2"}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_Harness{Harness: &testrunv1.TestSelectionHarness{
+		{name: "whole suites by name", sel: testSelections{suites: []string{"daemon", "ert"}}, want: []*testrunv1.TestSelection{
+			{Target: &testrunv1.TestSelection_Suite{Suite: &testrunv1.TestSelectionSuite{Name: "daemon"}}},
+			{Target: &testrunv1.TestSelection_Suite{Suite: &testrunv1.TestSelectionSuite{Name: "ert"}}}}},
+		{name: "every suite", sel: testSelections{every: true}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_EverySuite{EverySuite: &testrunv1.TestSelectionEverySuite{}}}}},
+		{name: "named harness groups", sel: testSelections{harness: []string{"t.sh=g1,g2"}}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_Harness{Harness: &testrunv1.TestSelectionHarness{
 			Script: "src/t.sh", Groups: &testrunv1.TestSelectionHarness_Named{Named: &testrunv1.TestSelectionHarnessNamedGroups{Names: []string{"g1", "g2"}}}}}}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got, err := buildSelections("/wt/caller", "/wt/caller/src", tc.goSel, tc.vitest, tc.ert, tc.harness)
+			got, err := buildSelections("/wt/caller", "/wt/caller/src", tc.sel)
 
 			// Assert
 			if err != nil || !proto.Equal(got, &testrunv1.TestRunRequest{Selections: tc.want}) {
@@ -171,24 +177,78 @@ func TestBuildSelections(t *testing.T) {
 func TestBuildSelectionsRefuses(t *testing.T) {
 	cases := []struct {
 		name                        string
-		goSel, vitest, ert, harness []string
-		want                        string
+		sel  testSelections
+		want string
 	}{
-		{name: "a path outside the worktree", goSel: []string{"../../elsewhere"}, want: "outside the workspace's worktree"},
-		{name: "an empty Go test name", goSel: []string{"p=TestA,,TestB"}, want: "an empty name in the list"},
-		{name: "an empty vitest name", vitest: []string{"a.test.ts= "}, want: "an empty test name"},
-		{name: "an empty ERT name", ert: []string{"x.el=a,"}, want: "an empty name in the list"},
-		{name: "an empty harness group", harness: []string{"t.sh=,g"}, want: "an empty name in the list"},
+		{name: "a path outside the worktree", sel: testSelections{goSel: []string{"../../elsewhere"}}, want: "outside the workspace's worktree"},
+		{name: "an empty Go test name", sel: testSelections{goSel: []string{"p=TestA,,TestB"}}, want: "an empty name in the list"},
+		{name: "an empty vitest name", sel: testSelections{vitest: []string{"a.test.ts= "}}, want: "an empty test name"},
+		{name: "an empty ERT name", sel: testSelections{ert: []string{"x.el=a,"}}, want: "an empty name in the list"},
+		{name: "an empty harness group", sel: testSelections{harness: []string{"t.sh=,g"}}, want: "an empty name in the list"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			_, err := buildSelections("/wt/caller", "/wt/caller/src", tc.goSel, tc.vitest, tc.ert, tc.harness)
+			_, err := buildSelections("/wt/caller", "/wt/caller/src", tc.sel)
 
 			// Assert
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("buildSelections = %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestTestRunSendsItsOptions(t *testing.T) {
+	cases := []struct {
+		name  string
+		args  []string
+		check func(*agentreplv1.RunTestsRequest) bool
+	}{
+		{name: "an agent's run names its workspace as the requester", args: []string{"-go", "pkg"},
+			check: func(r *agentreplv1.RunTestsRequest) bool {
+				return r.GetRequester().GetWorkspace().GetWorkspace().GetId() == "ws-caller" && r.GetCpuLoad() == nil
+			}},
+		{name: "coverage of a suite", args: []string{"-suite", "webapp", "-coverage"},
+			check: func(r *agentreplv1.RunTestsRequest) bool {
+				return r.GetRun().GetCoverage() && r.GetRun().GetSelections()[0].GetSuite().GetName() == "webapp"
+			}},
+		{name: "a record of every suite", args: []string{"-every-suite", "-record"},
+			check: func(r *agentreplv1.RunTestsRequest) bool {
+				return r.GetRun().GetRecord() && r.GetRun().GetSelections()[0].GetEverySuite() != nil
+			}},
+		{name: "a repeat stopping at the first failure", args: []string{"-go", "pkg=TestA", "-runs", "9", "-stop-at-first-failure"},
+			check: func(r *agentreplv1.RunTestsRequest) bool { return r.GetRuns() == 9 && r.GetStopAtFirstFailure() }},
+		{name: "the user's run under load", args: []string{"-go", "pkg", "-cpu-load", "8", "-as-user"},
+			check: func(r *agentreplv1.RunTestsRequest) bool {
+				return r.GetCpuLoad().GetLoops() == 8 && r.GetRequester().GetUser() != nil
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{endedFrame(true)}}
+
+			// Act
+			code, _, errOut := runTestCLI(t, daemon, append([]string{"run"}, tc.args...)...)
+
+			// Assert
+			if code != exitSuccess || !tc.check(daemon.got) {
+				t.Fatalf("exit %d, request %v, stderr %q", code, daemon.got, errOut)
+			}
+		})
+	}
+}
+
+func TestTestRunRefusesLoadTheUserDidNotAskFor(t *testing.T) {
+	// Arrange
+	daemon := &testRunsDaemon{}
+
+	// Act
+	code, _, errOut := runTestCLI(t, daemon, "run", "-go", "pkg", "-cpu-load", "8")
+
+	// Assert
+	if code != exitFailure || daemon.got != nil || !strings.Contains(errOut, "-cpu-load is the user's alone") {
+		t.Fatalf("exit %d, request %v, stderr %q; want the refusal and nothing sent", code, daemon.got, errOut)
 	}
 }

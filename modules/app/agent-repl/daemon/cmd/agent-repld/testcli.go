@@ -11,15 +11,15 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	testrunv1 "agentrepl/proto/testrun/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
-// testcli.go — `agent-repld test run`: run exactly the named tests through
-// the daemon, the one runner of tests on the host.
+// testcli.go — `agent-repld test`: every test run on the host goes through
+// the daemon, the one runner of tests (bin/background.sh refuses any other).
 //
-//	agent-repld test run [-workspace WS] SELECTION...
+//	agent-repld test run [-workspace WS] SELECTION... [OPTIONS]
+//	agent-repld test redundancy go|vitest|report [-workspace WS] FLAGS...
 //
-// Each selection is one flag, repeated as needed:
+// `run`'s selections are flags, each repeated as needed:
 //
 //	-go DIR                        every test of the Go package in DIR
 //	-go DIR=TestA,TestB/case/sub   those tests; TestB/case/sub is one subtest path
@@ -30,12 +30,28 @@ import (
 //	-ert FILE=test-a,test-b        those ert-deftests
 //	-harness SCRIPT                the whole shell harness
 //	-harness SCRIPT=group1,group2  those groups of a harness that lists groups
+//	-suite NAME                    one roster suite, whole
+//	-every-suite                   the whole roster: the merge queue's gate, run
+//	                               by an agent only with a stated reason
+//
+// and its options:
+//
+//	-coverage                instrument and report (whole suites only)
+//	-record                  append the timings (-every-suite alone)
+//	-runs N                  repeat the run N times, each its own run
+//	-stop-at-first-failure   stop repeating at the first failing run
+//	-cpu-load N              hold N busy loops for the run (with -as-user only)
+//	-as-user                 the user asks, not the calling workspace
 //
 // A path is relative to the working directory (or absolute), and must lie in
 // the workspace's worktree. Each frame of the run's stream is printed as one
-// line of protojson as it arrives. The command exits 0 when the run passed,
-// exitTestsFailed when it ran and failed, and exitRefused when the daemon or
+// line of protojson as it arrives. The command exits 0 when every run passed,
+// exitTestsFailed when one ran and failed, and exitRefused when the daemon or
 // the runner refused it.
+//
+// `redundancy` takes `testrun redundancy`'s own flags (modules/app/agent-repl
+// AGENTS.md, "Which tests are redundant") and prints the measurement's output
+// as it comes; it exits 0 when the measurement succeeded.
 
 // exitTestsFailed is a run that ran and failed, as `go test` reports one.
 const exitTestsFailed = 1
@@ -55,14 +71,32 @@ func (f selectionFlag) Set(value string) error {
 	return nil
 }
 
+// testSelections are `test run`'s selection flags.
+type testSelections struct {
+	goSel, vitest, ert, harness, suites []string
+	every                               bool
+}
+
+func (t testSelections) empty() bool {
+	return len(t.goSel)+len(t.vitest)+len(t.ert)+len(t.harness)+len(t.suites) == 0 && !t.every
+}
+
 func testRun(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	workspace := fs.String("workspace", here, "the workspace whose worktree runs the tests")
-	var goSel, vitestSel, ertSel, harnessSel []string
-	fs.Var(selectionFlag{&goSel}, "go", "a Go package's tests: DIR, or DIR=TestA,TestB/sub/path")
-	fs.Var(selectionFlag{&vitestSel}, "vitest", "a vitest file's tests: FILE, or FILE=full name")
-	fs.Var(selectionFlag{&ertSel}, "ert", "an ERT file's tests: FILE, or FILE=test-a,test-b")
-	fs.Var(selectionFlag{&harnessSel}, "harness", "a shell harness: SCRIPT, or SCRIPT=group1,group2")
+	var sel testSelections
+	fs.Var(selectionFlag{&sel.goSel}, "go", "a Go package's tests: DIR, or DIR=TestA,TestB/sub/path")
+	fs.Var(selectionFlag{&sel.vitest}, "vitest", "a vitest file's tests: FILE, or FILE=full name")
+	fs.Var(selectionFlag{&sel.ert}, "ert", "an ERT file's tests: FILE, or FILE=test-a,test-b")
+	fs.Var(selectionFlag{&sel.harness}, "harness", "a shell harness: SCRIPT, or SCRIPT=group1,group2")
+	fs.Var(selectionFlag{&sel.suites}, "suite", "one roster suite, whole")
+	fs.BoolVar(&sel.every, "every-suite", false, "the whole roster (the merge queue's gate; only with a stated reason)")
+	coverage := fs.Bool("coverage", false, "instrument the run and report coverage (whole suites only)")
+	record := fs.Bool("record", false, "append the run's timings to the history (-every-suite alone)")
+	runs := fs.Uint("runs", 1, "how many times the run repeats, each its own run")
+	stop := fs.Bool("stop-at-first-failure", false, "stop repeating at the first run that fails")
+	cpuLoad := fs.Uint("cpu-load", 0, "busy loops held for the run's length (the user's alone: needs -as-user)")
+	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
 		return exitFailure
@@ -70,8 +104,11 @@ func testRun(c *cliCall, args []string) int {
 	if len(positionals) > 0 {
 		return c.usageFailed("unexpected arguments %v; every selection is a flag", positionals)
 	}
-	if len(goSel)+len(vitestSel)+len(ertSel)+len(harnessSel) == 0 {
+	if sel.empty() {
 		return c.usageFailed("name the tests to run: the full suite is the merge queue's to run")
+	}
+	if *cpuLoad > 0 && !*asUser {
+		return c.usageFailed("-cpu-load is the user's alone: pass -as-user only when the user asks for load")
 	}
 	if !c.dial(*stateDir) {
 		return exitFailure
@@ -80,21 +117,32 @@ func testRun(c *cliCall, args []string) int {
 	if !ok {
 		return exitFailure
 	}
+	requester, ok := c.requester(*asUser)
+	if !ok {
+		return exitFailure
+	}
 	cwd, err := c.deps.getwd()
 	if err != nil {
 		c.failed("read the working directory: %v", err)
 		return exitFailure
 	}
-	run, err := buildSelections(canonicalDir(ref.GetDir()), canonicalDir(cwd), goSel, vitestSel, ertSel, harnessSel)
+	run, err := buildSelections(canonicalDir(ref.GetDir()), canonicalDir(cwd), sel)
 	if err != nil {
 		return c.usageFailed("%v", err)
 	}
-	return streamTestRun(c, ref, run)
+	run.Coverage, run.Record = *coverage, *record
+	req := &agentreplv1.RunTestsRequest{Workspace: ref, Run: run, Runs: uint32(*runs), StopAtFirstFailure: *stop, Requester: requester}
+	if *cpuLoad > 0 {
+		req.CpuLoad = &agentreplv1.RunTestsCpuLoad{Loops: uint32(*cpuLoad)}
+	}
+	return streamTestRun(c, req)
 }
 
-// streamTestRun calls RunTests and prints every frame as it arrives.
-func streamTestRun(c *cliCall, ref *workspacev1.WorkspaceRef, run *testrunv1.TestRunRequest) int {
-	stream, err := openDaemonStream(c.ctx, c.client.RunTests, &agentreplv1.RunTestsRequest{Workspace: ref, Run: run})
+// streamTestRun calls RunTests and prints every frame as it arrives. Every
+// run must pass for the command to: a failed run anywhere in a repeat fails
+// it.
+func streamTestRun(c *cliCall, req *agentreplv1.RunTestsRequest) int {
+	stream, err := openDaemonStream(c.ctx, c.client.RunTests, req)
 	if errors.Is(err, errDryRun) {
 		return exitSuccess
 	}
@@ -103,7 +151,7 @@ func streamTestRun(c *cliCall, ref *workspacev1.WorkspaceRef, run *testrunv1.Tes
 		return exitFailure
 	}
 	defer stream.Close() //nolint:errcheck // the stream has ended either way
-	code := exitFailure
+	code, failed := exitFailure, false
 	for stream.Receive() {
 		frame := stream.Msg()
 		text, err := protojson.Marshal(frame)
@@ -113,38 +161,41 @@ func streamTestRun(c *cliCall, ref *workspacev1.WorkspaceRef, run *testrunv1.Tes
 		}
 		fmt.Fprintln(c.out, string(text))
 		switch {
+		case frame.GetError().GetRunnerFailed() != nil:
+			code = exitFailure
 		case frame.GetError() != nil, frame.GetEvent().GetRefused() != nil:
 			code = exitRefused
 		case frame.GetEvent().GetEnded().GetPassed() != nil:
 			code = exitSuccess
 		case frame.GetEvent().GetEnded().GetFailed() != nil:
-			code = exitTestsFailed
+			code, failed = exitTestsFailed, true
 		}
+	}
+	if failed && code == exitSuccess {
+		// A later run passed; an earlier one failed, and that is the answer.
+		code = exitTestsFailed
 	}
 	if err := stream.Err(); err != nil && !errors.Is(err, io.EOF) {
 		c.failed("the run's stream broke: %v", err)
 		return exitFailure
 	}
 	if code == exitFailure {
-		c.failed("the run's stream ended without its end")
+		c.failed("the run did not report how it ended")
 	}
 	return code
 }
 
 // buildSelections turns the flags into a TestRunRequest, every path made
 // relative to the worktree (the repository root the runner resolves against).
-func buildSelections(worktree, cwd string, goSel, vitestSel, ertSel, harnessSel []string) (*testrunv1.TestRunRequest, error) {
+func buildSelections(worktree, cwd string, sel testSelections) (*testrunv1.TestRunRequest, error) {
 	run := &testrunv1.TestRunRequest{}
-	repoPath := func(p string) (string, error) {
-		abs := p
-		if !filepath.IsAbs(abs) {
-			abs = filepath.Join(cwd, p)
-		}
-		rel, err := filepath.Rel(worktree, filepath.Clean(abs))
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return "", fmt.Errorf("%s lies outside the workspace's worktree %s", p, worktree)
-		}
-		return filepath.ToSlash(rel), nil
+	repoPath := worktreePath(worktree, cwd)
+	goSel, vitestSel, ertSel, harnessSel := sel.goSel, sel.vitest, sel.ert, sel.harness
+	if sel.every {
+		run.Selections = append(run.Selections, &testrunv1.TestSelection{Target: &testrunv1.TestSelection_EverySuite{EverySuite: &testrunv1.TestSelectionEverySuite{}}})
+	}
+	for _, name := range sel.suites {
+		run.Selections = append(run.Selections, &testrunv1.TestSelection{Target: &testrunv1.TestSelection_Suite{Suite: &testrunv1.TestSelectionSuite{Name: name}}})
 	}
 	for _, v := range goSel {
 		dir, names, named := strings.Cut(v, "=")
@@ -222,6 +273,22 @@ func buildSelections(worktree, cwd string, goSel, vitestSel, ertSel, harnessSel 
 		run.Selections = append(run.Selections, &testrunv1.TestSelection{Target: &testrunv1.TestSelection_Harness{Harness: sel}})
 	}
 	return run, nil
+}
+
+// worktreePath answers a function turning a path (relative to cwd, or
+// absolute) into one relative to the worktree, refusing a path outside it.
+func worktreePath(worktree, cwd string) func(string) (string, error) {
+	return func(p string) (string, error) {
+		abs := p
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(cwd, p)
+		}
+		rel, err := filepath.Rel(worktree, filepath.Clean(abs))
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("%s lies outside the workspace's worktree %s", p, worktree)
+		}
+		return filepath.ToSlash(rel), nil
+	}
 }
 
 // goTests reads a -go flag's test list: each TestName whole, or
