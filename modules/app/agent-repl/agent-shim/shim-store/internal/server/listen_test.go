@@ -193,4 +193,3 @@ func TestListenRecordsTheOccupiedSocketOnce(t *testing.T) {
 		t.Fatalf("no store.listen.occupied error record; log was:\n%s", sink.String())
 	}
 }
-
