@@ -71,6 +71,23 @@ func (h *handler) movedOn(ctx context.Context, ws ids.WorkspaceID) {
 // checked against the workspace, recognition forks the answer, and only an
 // ordinary prompt reaches the queue.
 func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, delivery wsm.Delivery, target *feedid.Ref) (Outcome, error) {
+	return h.submit(ctx, ws, said, idempotencyKey, origin, sentBy, delivery, target, nil)
+}
+
+// SubmitThreadQuestion is Submit for a zettel chat thread: an ordinary prompt
+// reaches the queue carrying where its question was asked from. A thread
+// question is never classified (the queue holds it for the running turn's
+// end), so its delivery is the ordinary one and it addresses the root feed.
+func (h *handler) SubmitThreadQuestion(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, ask *wsm.ThreadAsk) (Outcome, error) {
+	if ask == nil {
+		panic("prompthandler: SubmitThreadQuestion needs the question's ask")
+	}
+	return h.submit(ctx, ws, said, idempotencyKey, origin, nil, wsm.DeliveryOrdinary, nil, ask)
+}
+
+// submit is Submit's body; ask is nil for every submission but a thread
+// question's.
+func (h *handler) submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, delivery wsm.Delivery, target *feedid.Ref, ask *wsm.ThreadAsk) (Outcome, error) {
 	log, err := h.logger(ctx, ws)
 	if err != nil {
 		return Outcome{}, err
@@ -138,7 +155,7 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 		h.deps.Feed.ClaimIngress(ws, c.key, turn)
 	}
 	disposition, err := h.deps.Queue.Submit(ctx, promptqueue.Submission{
-		WS: ws, Turn: turn, Said: said, Origin: origin, SentBy: sentBy, Target: target, Delivery: delivery,
+		WS: ws, Turn: turn, Said: said, Origin: origin, SentBy: sentBy, Target: target, Delivery: delivery, Ask: ask,
 	})
 	if err != nil {
 		return Outcome{}, err
@@ -149,6 +166,7 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 	h.movedOn(ctx, ws)
 	log.Info(opSubmit, "the prompt was forwarded to the queue", dlog.Context{
 		"turn": string(turn), "delivered": disposition.Delivered, "parked": disposition.Parked(),
+		"thread_question": ask != nil,
 	})
 	return Outcome{Recognition: RecognizedNone, Turn: turn, Disposition: disposition}, nil
 }

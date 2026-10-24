@@ -1478,6 +1478,9 @@ func TestTheClassifiersLatencyIsRecordedOnEitherOutcome(t *testing.T) {
 			}
 			t.Fatalf("records = %+v, want %q at %s carrying judge_ms", h.log.Records(), tt.message, tt.level)
 		})
+	}
+}
+
 // ---- a chat thread's question is never classified --------------------------
 //
 // One turn is one question in a zettel thread, so a thread question is never
