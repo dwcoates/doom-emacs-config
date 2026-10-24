@@ -17,9 +17,12 @@
     "noEmit": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "useDefineForClassFields": true
+    "useDefineForClassFields": true,
+    // React components are .tsx, compiled with the automatic runtime (no
+    // `import React` in a component file); Vite's esbuild reads this too.
+    "jsx": "react-jsx"
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"],
   // The integration suite compiles WITH everything else: its harness mounts
   // every component through that component's own published signature, so a
   // renamed mount, a changed deps object or a dropped DOM hook fails the

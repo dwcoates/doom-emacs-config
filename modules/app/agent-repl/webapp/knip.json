@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": ["src/main.ts", "test/**/*.test.ts", "vitest.config.ts", "vitest.integration.config.ts", "vitest.webkit.config.ts", "test/webkit/*-page.ts", "vite.config.ts", "protobuf-runtime-aliases.ts"],
-  "project": ["src/**/*.ts", "test/**/*.ts", "*.ts"],
+  "entry": ["src/main.ts", "test/**/*.test.ts", "test/**/*.test.tsx", "vitest.config.ts", "vitest.integration.config.ts", "vitest.webkit.config.ts", "test/webkit/*-page.ts", "vite.config.ts", "protobuf-runtime-aliases.ts"],
+  "project": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "*.ts"],
   "ignore": ["../proto/gen/**", "proto/gen/**"]
 }

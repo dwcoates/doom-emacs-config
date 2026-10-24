@@ -95,7 +95,7 @@ export default defineConfig({
       // (`npm run coverage:verify`) is the check that keeps it that way.
       provider: "istanbul",
       all: true,
-      include: ["src/**/*.ts"],
+      include: ["src/**/*.ts", "src/**/*.tsx"],
       exclude: ["src/**/*.d.ts", "src/**/generated/**"],
       reporter: ["text", "json", "json-summary", "html"],
       reportsDirectory: "coverage",

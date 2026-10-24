@@ -8,7 +8,7 @@ import { viteRegistryGuard } from "../proto/ts/registry-guard.mjs";
  * Production build config. Tests read vitest.config.ts (which wins when both
  * files exist), so this file only shapes `vite build`.
  *
- * The heavy vendor libraries (xterm, highlight.js, markdown-it) are split into
+ * The heavy vendor libraries (xterm, highlight.js, markdown-it, React) are split into
  * their own chunks so no single chunk trips Vite's 500 kB size advisory and so
  * the browser can cache each independently of the app code.
  *
@@ -86,6 +86,7 @@ export default defineConfig({
           if (id.includes("@bufbuild/protobuf")) return "protobuf";
           if (id.includes("@connectrpc")) return "connect";
           if (id.includes("@xterm")) return "xterm";
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react";
           if (id.includes("highlight.js")) return "highlight";
           if (id.includes("markdown-it")) return "markdown";
           return undefined;
