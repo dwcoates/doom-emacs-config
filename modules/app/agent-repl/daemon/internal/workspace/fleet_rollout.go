@@ -1113,6 +1113,59 @@ func (f *Fleet) AdoptParked(ctx context.Context, ws ids.WorkspaceID, cold *conve
 	return client, nil
 }
 
+// AdoptInert holds the INERT SURVIVOR of a workspace this daemon was given
+// with no shim: a process listening on the workspace's socket whose lock
+// reads free, because it never took a session (a parked shim no carry named,
+// a prelaunch). It answers false, holding nothing, when no listener is there.
+// The client is held exactly as a parked one is, with no watcher and no
+// session noted, so the caller can stand the process down (StandDown) or a
+// later bring-up attach to it: no listener is ever left with no daemon
+// serving it.
+func (f *Fleet) AdoptInert(ctx context.Context, ws ids.WorkspaceID) (shimclient.Client, bool, error) {
+	if client, ok := f.Client(ws); ok {
+		return client, true, nil
+	}
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return nil, false, fmt.Errorf("workspace: adopt the inert survivor of %q: %w", ws, err)
+	}
+	log, err := f.deps.Log.Workspace(record.Dir)
+	if err != nil {
+		return nil, false, fmt.Errorf("workspace: adopt the inert survivor of %q: resolve the workspace log sink: %w", ws, err)
+	}
+	log = log.With(dlog.Context{"workspace": string(ws)})
+	socketPath, socket, socketErr := shimsocket.NewestLive(f.socketProbe, f.deps.SocketPath(ws))
+	switch socket {
+	case shimsocket.StateLive:
+	case shimsocket.StateUndetermined:
+		return nil, false, fmt.Errorf("workspace: adopt the inert survivor of %q: the socket probe could not tell: %v", ws, socketErr)
+	default:
+		log.Debug(opFleetRollout, "no shim listens on the workspace's socket; there is no inert survivor", dlog.Context{
+			"socket": socketPath, "socket_state": socket.String(),
+		})
+		return nil, false, nil
+	}
+	client, err := f.adoptBounded(ctx, log, ws, record.Dir, socketPath, "inert_survivor")
+	if err != nil {
+		return nil, false, fmt.Errorf("workspace: adopt the inert survivor of %q: %w", ws, err)
+	}
+	// THE CLAIM COMES BEFORE THE MAP WRITE, as AdoptParked's does: a refused
+	// claim leaves no half-adoption, and the dialed link is let go, never
+	// killed.
+	if err := f.claimServing(ctx, log, ws); err != nil {
+		client.Detach()
+		log.Info(opFleetRollout, "let go of the dialed inert survivor after a refused claim; the process keeps running", dlog.Context{
+			"shim_pid": client.PID(), "socket": socketPath,
+		})
+		return nil, false, fmt.Errorf("workspace: adopt the inert survivor of %q: %w", ws, err)
+	}
+	if err := f.hold(ctx, log, ws, &live{client: client}); err != nil {
+		return nil, false, fmt.Errorf("workspace: adopt the inert survivor of %q: %w", ws, err)
+	}
+	log.Info(opFleetRollout, "adopted the inert survivor nobody served", dlog.Context{"shim_pid": client.PID(), "socket": socketPath})
+	return client, true, nil
+}
+
 // RaiseCarriedColdGate raises a carried cold gate over the parked shim a
 // FRESH BOOT already adopted: a restart's replacement dials every surviving
 // shim in its boot, parked ones included, and the gate -- daemon memory --

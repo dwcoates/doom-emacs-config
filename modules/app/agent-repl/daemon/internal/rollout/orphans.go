@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 
+	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionlock"
@@ -99,6 +100,7 @@ func (c *controller) recoverOrphans(fields dlog.Context) {
 		}
 	}
 	c.bringUpSessionless(sessionless, fields)
+	c.standDownWithheldInert(lifetime, sessionless, fields)
 	if len(orphans) == 0 {
 		c.log.Debug(opOrphans, "no shim was left running unadopted", fields)
 		return
@@ -133,4 +135,49 @@ func (c *controller) recoverOrphan(ctx context.Context, ws ids.WorkspaceID, fiel
 	if _, err := c.checkStale(ctx, ws, false); err != nil {
 		c.log.Error(opStaleness, "an adopted orphan could not be judged against the installed build", dlog.WithCause(fields, err))
 	}
+}
+
+// standDownWithheldInert stands down, off the caller's goroutine, the inert
+// survivor of every one of PENDING that runs nothing (bringup.OnlyVisible's
+// withheld): a hidden or collapsed workspace, or a merge workspace whose
+// merge left every queue, whose lock reads free while a shim still listens.
+// No bring-up reaches such a shim, so without this it would run on served by
+// no daemon at all (2026-10-23: three shims parked since 17:50).
+func (c *controller) standDownWithheldInert(ctx context.Context, pending []wsm.Workspace, fields dlog.Context) {
+	if len(pending) == 0 {
+		return
+	}
+	_, withheld, err := bringup.OnlyVisible(ctx, c.deps.DB, pending)
+	if err != nil {
+		c.log.Error(opOrphans, "could not tell which session-less workspaces run nothing; no inert survivor is stood down",
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspaces": bringup.IDs(pending)}), err))
+		return
+	}
+	for _, ws := range withheld {
+		c.stragglerAdoptions.Add(1)
+		go func(ws ids.WorkspaceID) {
+			defer c.stragglerAdoptions.Done()
+			c.standDownInert(ctx, ws, dlog.Merge(fields, dlog.Context{"workspace": string(ws)}))
+		}(ws.ID)
+	}
+}
+
+// standDownInert adopts WS's inert survivor, when one listens, and stands it
+// down: WS runs nothing, and the survivor holds no session to keep. A failure
+// is the workspace's own loud error, and the survivor is left as it is.
+func (c *controller) standDownInert(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) {
+	client, adopted, err := c.deps.Shims.AdoptInert(ctx, ws)
+	if err != nil {
+		c.log.Error(opOrphans, "could not adopt the inert survivor of a workspace that runs nothing; it is left running", dlog.WithCause(fields, err))
+		return
+	}
+	if !adopted {
+		return
+	}
+	pid := client.PID()
+	if err := c.deps.Shims.StandDown(ctx, ws); err != nil {
+		c.log.Error(opOrphans, "could not stand down the inert survivor of a workspace that runs nothing", dlog.WithCause(dlog.Merge(fields, dlog.Context{"shim_pid": pid}), err))
+		return
+	}
+	c.log.Info(opOrphans, "stood down the inert survivor of a workspace that runs nothing", dlog.Merge(fields, dlog.Context{"shim_pid": pid}))
 }

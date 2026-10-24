@@ -641,6 +641,12 @@ type fakeFleet struct {
 	raiseErr error
 	// parkedAdoptions records every AdoptParked, with the gate it raised.
 	parkedAdoptions map[ids.WorkspaceID]*conversationv1.SessionCold
+	// listening are the workspaces an inert survivor listens for, whose
+	// AdoptInert holds one; inertAdoptions records each it held.
+	listening      map[ids.WorkspaceID]bool
+	inertAdoptions []ids.WorkspaceID
+	// stoodDown records every StandDown of a held shim.
+	stoodDown []ids.WorkspaceID
 	// factsAwaited records every AwaitFacts.
 	factsAwaited []ids.WorkspaceID
 
@@ -667,6 +673,7 @@ func newFakeFleet(order *steps) *fakeFleet {
 		order:         order,
 
 		parkedAdoptions: make(map[ids.WorkspaceID]*conversationv1.SessionCold),
+		listening:       make(map[ids.WorkspaceID]bool),
 	}
 }
 
@@ -696,6 +703,28 @@ func (f *fakeFleet) AdoptParked(_ context.Context, ws ids.WorkspaceID, cold *con
 	c := newFakeShim(4343, f.order)
 	f.live[ws] = c
 	return c, nil
+}
+
+// AdoptInert holds the scripted inert survivor, when one listens.
+func (f *fakeFleet) AdoptInert(_ context.Context, ws ids.WorkspaceID) (shimclient.Client, bool, error) {
+	f.order.record("adopt_inert")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.listening[ws] {
+		return nil, false, nil
+	}
+	f.inertAdoptions = append(f.inertAdoptions, ws)
+	c := newFakeShim(5454, f.order)
+	f.live[ws] = c
+	return c, true, nil
+}
+
+// InertAdoptionsAndStandDowns answers every inert survivor held and every
+// held shim stood down, in order.
+func (f *fakeFleet) InertAdoptionsAndStandDowns() ([]ids.WorkspaceID, []ids.WorkspaceID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), f.inertAdoptions...), append([]ids.WorkspaceID(nil), f.stoodDown...)
 }
 
 // RaiseCarriedColdGate records the gate a fresh boot raised from a carry,
@@ -810,6 +839,9 @@ func (f *fakeFleet) HandOver(ws ids.WorkspaceID) (bool, error) {
 func (f *fakeFleet) StandDown(ctx context.Context, ws ids.WorkspaceID) error {
 	f.mu.Lock()
 	shim := f.live[ws]
+	if shim != nil {
+		f.stoodDown = append(f.stoodDown, ws)
+	}
 	f.mu.Unlock()
 	if shim == nil {
 		return nil

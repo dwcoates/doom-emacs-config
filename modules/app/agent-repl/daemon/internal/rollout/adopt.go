@@ -736,7 +736,12 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// published, so the roster never draws the adopted row idle and usable
 	// while nothing serves it; the start itself runs once the adoption is
 	// complete and the workspace is this daemon's.
-	sessionless := !dial && !record.Closed && len(c.visibleOnly(ctx, []wsm.Workspace{record}, fields)) == 1
+	runs := len(c.visibleOnly(ctx, []wsm.Workspace{record}, fields)) == 1
+	sessionless := !dial && !record.Closed && runs
+	// A WORKSPACE THAT RUNS NOTHING MAY STILL HAVE A LISTENER: an inert shim
+	// the incumbent held and detached, whose lock reads free. It is stood
+	// down once the workspace is this daemon's (standDownInert).
+	withheldInert := !dial && !record.Closed && !runs
 	if sessionless {
 		c.deps.BringingUp(ws, true)
 	}
@@ -788,6 +793,9 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 
 	if sessionless {
 		c.startSessionless([]wsm.Workspace{record}, fields)
+	}
+	if withheldInert {
+		c.standDownInert(ctx, ws, fields)
 	}
 
 	// A DIALED ADOPTION IS A HEALTHY ATTACH, the recovery edge of every
