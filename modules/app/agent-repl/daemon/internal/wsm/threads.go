@@ -54,6 +54,20 @@ const (
 // IsThread reports whether the workspace is a zettel chat thread.
 func (w Workspace) IsThread() bool { return w.Kind == WorkspaceKindThread }
 
+// LastInteractedAt is when the user last interacted with the workspace: the
+// latest of its selection, its activity and its creation. Opening a thread
+// counts, so the sidebar's thread list and the Chat app's "most recent" read
+// the same instant.
+func (w Workspace) LastInteractedAt() time.Time {
+	at := w.CreatedAt
+	for _, t := range []*time.Time{w.LastSelectedAt, w.LastActivityAt} {
+		if t != nil && t.After(at) {
+			at = *t
+		}
+	}
+	return at
+}
+
 // IsZettelHome reports whether the repository is the zettel home.
 func (r Repository) IsZettelHome() bool { return r.Kind == RepositoryKindZettel }
 

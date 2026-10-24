@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	zettelv1 "agentrepl/proto/zettel/v1"
 )
@@ -334,6 +335,35 @@ func TestThreadAskGetParentNodeID(t *testing.T) {
 			// Assert
 			if got != tc.want {
 				t.Errorf("GetParentNodeID = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLastInteractedAtIsTheLatestOfSelectionActivityAndCreation(t *testing.T) {
+	created := time.Unix(100, 0)
+	early, late := time.Unix(200, 0), time.Unix(300, 0)
+	cases := []struct {
+		name     string
+		selected *time.Time
+		activity *time.Time
+		want     time.Time
+	}{
+		{name: "never selected nor active", want: created},
+		{name: "selected last", selected: &late, activity: &early, want: late},
+		{name: "active last", selected: &early, activity: &late, want: late},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			ws := Workspace{CreatedAt: created, LastSelectedAt: tc.selected, LastActivityAt: tc.activity}
+
+			// Act
+			got := ws.LastInteractedAt()
+
+			// Assert
+			if !got.Equal(tc.want) {
+				t.Fatalf("LastInteractedAt = %v, want %v", got, tc.want)
 			}
 		})
 	}
