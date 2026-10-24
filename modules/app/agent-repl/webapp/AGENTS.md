@@ -791,9 +791,11 @@ hand any more:
 ```bash
 npm run lint             # eslint, type-aware, over src/, test/ and the root configs
 npm run typecheck        # tsc over src/ and test/
-npm run coverage         # istanbul, per file, isolated (see vitest.config.ts)
-npm run coverage:verify  # prove the per-file numbers are still a measurement
 ```
+
+The package's coverage is a coverage run of its suite (`agent-repld test run
+-suite webapp -coverage`); its `coverage` and `coverage:verify` scripts are
+what that run executes.
 
 ### Coverage is istanbul, and the per-file numbers moved when it became one
 
@@ -833,9 +835,12 @@ what stops a later provider bump bringing any of that back: it runs this
 package's own `npm run coverage` three times — once naturally ordered, twice
 with the test FILES shuffled under fixed seeds — and fails if any file's
 covered or total count moves, then checks that a probe module reads no LESS in
-the full suite than it does with only its own test file running. Run it after
-any change to the provider, its version, or the isolation the coverage script
-buys. Under the v8 provider it fails on 66 of the 100 files.
+the full suite than it does with only its own test file running. It is the
+`webapp-coverage-honesty` suite, which a coverage run of every suite includes;
+after any change to the provider, its version, or the isolation the coverage
+script buys, run it by name: `agent-repld test run -suite
+webapp-coverage-honesty -coverage`. Under the v8 provider it fails on 66 of the
+100 files.
 
 `npm run lint` is TYPE-AWARE and is not a style pass: it reads the same program
 `tsc` does, and the rules it adds on top are the ones that catch what `tsc`

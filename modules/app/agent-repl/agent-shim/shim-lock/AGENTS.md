@@ -76,7 +76,8 @@ The suite re-executes its own test binary as the holder (`TestMain` honors
 kernel locks with no build step. It synchronizes on the ready line and on
 process exit — never on a clock.
 
-`make coverage` runs `bin/report-nonlisp-coverage.sh lock`.
+Its coverage is a coverage run of its suite (`agent-repld test run -suite lock
+-coverage`).
 
 ## Performance lessons (living document)
 

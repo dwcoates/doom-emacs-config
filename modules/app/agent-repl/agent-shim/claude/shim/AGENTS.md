@@ -1757,13 +1757,11 @@ serves one on every entry it hands out.
 ```bash
 npm run lint          # eslint, type-aware, over src/, test/, scripts/ and the root configs
 npm run typecheck     # tsc over src/, test/, scripts/ and the generated stubs
-npm run coverage      # vitest with istanbul coverage over authored src/**/*.ts
-npm run coverage:verify  # prove the per-file numbers are still a measurement
 npm run build         # esbuild -> dist/main.js (the entry the daemon spawns)
 npm run smoke         # spawn and dial dist/main.js for real (needs a build first)
 ```
 
-Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate.
+Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. The package's coverage is a coverage run of its suite (`agent-repld test run -suite shim -coverage`); its `coverage` and `coverage:verify` scripts are what that run executes.
 
 Dependencies come from the SELF-HEALING shared node store, exactly as the
 webapp's do: `node_modules` links `~/.cache/agent-repl/node-store/shim-<lockhash>`,
@@ -1802,9 +1800,11 @@ in atomically, never reinstalled through the link. `webapp/AGENTS.md`
   drops them, because a file with no executable statement has no coverage.
   `npm run coverage:verify` runs this package's own coverage command three times
   — once naturally ordered, twice with the test files shuffled under fixed seeds
-  — and fails if any file's counts move. Run it after any change to the
-  provider, its version, or this config's isolation, which the istanbul provider
-  needs and vitest gives by default.
+  — and fails if any file's counts move. It is the `shim-coverage-honesty`
+  suite, which a coverage run of every suite includes; after any change to the
+  provider, its version, or this config's isolation (which the istanbul
+  provider needs and vitest gives by default), run it by name:
+  `agent-repld test run -suite shim-coverage-honesty -coverage`.
 - `modules/app/agent-repl/bin/report-logging-density.sh shim` is a rough review
   aid, not semantic coverage: audit critical branches and errors directly even
   when the ratio rises.

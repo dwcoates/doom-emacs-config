@@ -1294,8 +1294,8 @@ Tests run through the daemon, naming only the tests a change needs (`agent-repld
 THE TWO SUITES, AND WHY THE INVOCATION MATTERS. `./...` is the union of the
 unit packages and `integration/`, run once each — it is not a third suite. The
 integration package carries no build tag on purpose (a tag would take it out of
-`go vet ./...` and out of `make coverage`, which runs `go test -coverpkg=./...
-./...`), so naming it separately is naming it AGAIN. Select the packages a
+`go vet ./...` and out of the suite's coverage, which builds every package with
+`-coverpkg=./...`), so naming it separately is naming it AGAIN. Select the packages a
 change needs (`agent-repld test run -go DIR`); never a package twice in one
 run.
 
@@ -1315,9 +1315,9 @@ run.
 - The integration suite exercises the LOST arms through the window flags above
   (`integration/lost_policy_test.go`), with every wait a bounded receive on a
   real signal — a cursor advance, a store read, a log line — never a sleep.
-- `make coverage` reports per-function and aggregate statement coverage for this
-  module, and `modules/app/agent-repl/bin/test-all.sh` runs every tracked suite
-  across the module. Both are available for a review pass; neither is a gate.
+- A coverage run of the suite (`agent-repld test run -suite sidecar -coverage`)
+  reports per-function and aggregate statement coverage for this module; it is
+  available for a review pass, never a gate.
 
 ### Test wait bounds
 

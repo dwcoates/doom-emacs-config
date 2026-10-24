@@ -63,7 +63,8 @@ assigned.
 
 The gate hangs off `codegen-gate`, which `make go`, `make ts` and `make lint`
 all require, so no Makefile route can emit bindings for a tree that has drifted.
-It has a self-test (`make test-check-conversation-isolation`) that drives the
+It has a self-test (`scripts/test-check-conversation-isolation.sh`, run by the
+`proto` suite) that drives the
 real script against fixtures in both directions — a gate nobody has watched fail
 is not a gate.
 
@@ -198,17 +199,11 @@ without each having to be wired into every emitting target.
 
 ## Validation and coverage
 
-For every `.proto` or `gen/` change, run:
-
-```bash
-make coverage
-```
-
-`make coverage` runs `bin/report-nonlisp-coverage.sh` with no arguments, so
-it covers exactly the script's default components and never restates them. The
-first of those is `proto`, which runs `make validate`: it lints, regenerates,
-and rejects stale committed or untracked stubs. Every downstream Go and
-TypeScript coverage suite follows. The command must pass. Generated `gen/go` and `gen/ts` files are contract artifacts,
+For every `.proto` or `gen/` change, run the `proto` suite through the daemon
+(`agent-repld test run -suite proto`), plus the tests of every consumer the
+change touches. The suite runs `scripts/test-validate.sh`, which runs `make
+validate`: it lints, regenerates, and rejects stale committed or untracked
+stubs. It must pass. Generated `gen/go` and `gen/ts` files are contract artifacts,
 never coverage subjects or threshold inputs; coverage applies only to
 handwritten downstream Go and TypeScript source.
 
