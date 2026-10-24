@@ -2,11 +2,11 @@
 
 ;;; Commentary:
 
-;; THE COMPOSER'S HEADER LINE IS A ROW OF HELP BUTTONS.  Each button names
-;; one topic ("Sending prompts", "Prompt history", ...), and clicking it
-;; opens the shared agent-repl popup (popup.el) listing that topic's keys
-;; and the features that go with them.  `agent-repl-input-help' opens the
-;; same popups from the keyboard.
+;; THE COMPOSER'S HEADER LINE ENDS IN ONE HELP BUTTON, on its far right.
+;; Clicking it drops a menu of topics ("Sending prompts", "Prompt history",
+;; ...) at the click, and picking one opens the shared agent-repl popup
+;; (popup.el) listing that topic's keys and the features that go with them.
+;; `agent-repl-input-help' opens the same popups from the keyboard.
 ;;
 ;; THE KEYS SHOWN ARE READ FROM THE LIVE KEYMAPS, never written down here.
 ;; A topic names COMMANDS; the popup asks the composer's mode map (with its
@@ -94,7 +94,7 @@
                 (agent-repl-feed-text-scale-decrease "Make the feed's text smaller."))
      :features ("The zoom changes the feed's text only, never Emacs's own font.")))
   "The composer's help topics, in header-line order.
-Each is a plist: `:id' (a symbol), `:title' (the button's label and the
+Each is a plist: `:id' (a symbol), `:title' (the menu item's label and the
 popup's heading), `:bindings' and `:features'.  A binding is
 \(COMMAND DESCRIPTION [:variables (VARIABLE ...)]): its keys are read from
 the live keymaps when the popup opens, and each VARIABLE whose value
@@ -145,35 +145,51 @@ stays quieter than the composer's own text.")
 ;;;; ---- The header line ------------------------------------------------
 
 (defvar agent-repl-input-help-button-map (make-sparse-keymap)
-  "Keymap of every help button in the composer's header line.")
+  "Keymap of the help button in the composer's header line.")
 
 (agent-repl-refill-keymap
  agent-repl-input-help-button-map
  (lambda (map)
    (define-key map [header-line mouse-1] #'agent-repl-input-help-click)
-   ;; A press on a button is not a header-line drag.
+   ;; A press on the button is not a header-line drag.
    (define-key map [header-line down-mouse-1] #'ignore)))
 
-(defun agent-repl--input-help-button (topic)
-  "Return TOPIC's header-line button, carrying its id for the click."
-  (let ((title (plist-get topic :title)))
-    (propertize (concat "  " title "  ")
-                'face 'agent-repl-input-help-button
-                'mouse-face 'mode-line-highlight
-                'pointer 'hand
-                'help-echo (concat "mouse-1: keys and features for " title)
-                'local-map agent-repl-input-help-button-map
-                'agent-repl-input-help-topic (plist-get topic :id))))
+(defconst agent-repl-input-help--button-label "  Help  "
+  "The help button's text, padded inside its raised face.")
+
+(defun agent-repl--input-help-button ()
+  "Return the header line's one help button."
+  (propertize agent-repl-input-help--button-label
+              'face 'agent-repl-input-help-button
+              'mouse-face 'mode-line-highlight
+              'pointer 'hand
+              'help-echo "mouse-1: composer keys and features"
+              'local-map agent-repl-input-help-button-map))
 
 (defun agent-repl--input-help-header-line-text ()
-  "Return the composer's header line: one help button per topic.
-Every column of it is this text, the last gap stretched to the window's
-right edge, so the bar's ground is `agent-repl-input-help-bar' whatever
-face a theme (solaire's, say) remaps `header-line' to."
-  (let ((gap (propertize "  " 'face 'agent-repl-input-help-bar)))
-    (concat (propertize " " 'face 'agent-repl-input-help-bar)
-            (mapconcat #'agent-repl--input-help-button agent-repl-input-help-topics gap)
-            (propertize " " 'face 'agent-repl-input-help-bar 'display '(space :align-to right)))))
+  "Return the composer's header line: the bar, then the help button at its right.
+Every column of it is this text: the bar's stretch reaches to the button,
+which ends one column short of the window's right edge, so the bar's
+ground is `agent-repl-input-help-bar' whatever face a theme (solaire's,
+say) remaps `header-line' to."
+  (let ((width (1+ (string-width agent-repl-input-help--button-label))))
+    (concat (propertize " " 'face 'agent-repl-input-help-bar
+                        'display `(space :align-to (- right ,width)))
+            (agent-repl--input-help-button)
+            (propertize " " 'face 'agent-repl-input-help-bar))))
+
+;;;; ---- The topic menu -------------------------------------------------
+
+(defun agent-repl--input-help-menu ()
+  "Return the help button's menu: one item per topic, in table order.
+Choosing an item shows that topic (`agent-repl-input-help-show')."
+  (let ((menu (make-sparse-keymap "Composer help")))
+    (dolist (topic (reverse agent-repl-input-help-topics))
+      (let ((id (plist-get topic :id)))
+        (define-key menu (vector id)
+                    `(menu-item ,(plist-get topic :title)
+                                ,(lambda () (interactive) (agent-repl-input-help-show id))))))
+    menu))
 
 ;; EVERY COMPOSER'S HEADER LINE IS THIS ONE VARIABLE, never a copy of it.
 ;; `header-line-format' holds the symbol, which redisplay reads afresh, so
@@ -409,15 +425,11 @@ Its lines wrap at word boundaries, each under its own column."
     (agent-repl-popup-show buf)))
 
 (defun agent-repl-input-help-click (event)
-  "Show the help topic of the header-line button EVENT clicked."
+  "Drop the topic menu at the help button's click EVENT.
+Choosing a topic shows it; dismissing the menu does nothing."
   (interactive "e")
-  (let* ((string (posn-string (event-start event)))
-         (id (and string
-                  (get-text-property (cdr string) 'agent-repl-input-help-topic (car string)))))
-    (unless id
-      (agent-repl--fatal agent-repl-input-help--log-scope
-                         "elisp.input-help.click: no topic at posn string=%S" string))
-    (agent-repl-input-help-show id)))
+  (agent-repl--log agent-repl-input-help--log-scope "elisp.input-help.click: menu")
+  (popup-menu (agent-repl--input-help-menu) event))
 
 (defun agent-repl-input-help (title)
   "Show the composer help topic named TITLE, read with completion."

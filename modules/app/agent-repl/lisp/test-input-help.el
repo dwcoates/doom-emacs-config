@@ -117,29 +117,19 @@ BINDINGS is a plist: `:composer', `:insert', `:normal', `:global' and
 
 ;;;; ---- The header line ----
 
-(ert-deftest agent-repl-test-input-help-header-line-has-one-button-per-topic-in-order ()
-  "The header line carries each topic's id, in table order."
-  (let* ((line (agent-repl--input-help-header-line-text))
-         (ids nil))
-    (dotimes (i (length line))
-      (let ((id (get-text-property i 'agent-repl-input-help-topic line)))
-        (when (and id (not (eq id (car ids))))
-          (push id ids))))
-    (should (equal (nreverse ids)
-                   (mapcar (lambda (topic) (plist-get topic :id)) agent-repl-input-help-topics)))))
-
-(ert-deftest agent-repl-test-input-help-button-shows-its-title ()
-  "A topic's button is its title, padded, with the button face."
-  (let ((button (agent-repl--input-help-button '(:id x :title "Sending prompts"))))
-    (should (equal (substring-no-properties button) "  Sending prompts  "))
-    (should (eq (get-text-property 1 'face button) 'agent-repl-input-help-button))
-    (should (eq (get-text-property 1 'mouse-face button) 'mode-line-highlight))))
+(ert-deftest agent-repl-test-input-help-header-line-is-one-help-button ()
+  "The header line's only text, apart from the bar, is the Help button."
+  (let ((line (agent-repl--input-help-header-line-text)))
+    (should (equal (string-trim (substring-no-properties line)) "Help"))
+    (should (eq (get-text-property (string-search "Help" line) 'face line)
+                'agent-repl-input-help-button))))
 
 (ert-deftest agent-repl-test-input-help-button-click-runs-the-click-command ()
-  "A button's `mouse-1' in the header line runs `agent-repl-input-help-click'."
-  (let ((button (agent-repl--input-help-button '(:id x :title "T"))))
+  "The button's `mouse-1' in the header line runs `agent-repl-input-help-click'."
+  (let ((button (agent-repl--input-help-button)))
     (should (eq (lookup-key (get-text-property 1 'local-map button) [header-line mouse-1])
-                #'agent-repl-input-help-click))))
+                #'agent-repl-input-help-click))
+    (should (eq (get-text-property 1 'mouse-face button) 'mode-line-highlight))))
 
 ;;;; ---- The bar's colors ----
 
@@ -169,16 +159,18 @@ webapp/test/styles.test.ts."
                  agent-repl-input-help-button-background)))
 
 (ert-deftest agent-repl-test-input-help-header-line-grounds-every-gap-with-the-bar ()
-  "Every character outside a button carries the bar's face."
+  "Every character outside the button carries the bar's face."
   (let ((line (agent-repl--input-help-header-line-text)))
     (dotimes (i (length line))
-      (unless (get-text-property i 'agent-repl-input-help-topic line)
+      (unless (eq (get-text-property i 'face line) 'agent-repl-input-help-button)
         (should (eq (get-text-property i 'face line) 'agent-repl-input-help-bar))))))
 
-(ert-deftest agent-repl-test-input-help-header-line-stretches-to-the-right-edge ()
-  "The header line ends in a bar-faced stretch to the window's right edge."
+(ert-deftest agent-repl-test-input-help-header-line-puts-the-button-at-the-right-edge ()
+  "The bar stretches to just short of the right edge, where the button sits."
   (let ((line (agent-repl--input-help-header-line-text)))
-    (should (equal (get-text-property (1- (length line)) 'display line) '(space :align-to right)))))
+    (should (equal (get-text-property 0 'display line)
+                   `(space :align-to (- right ,(1+ (string-width agent-repl-input-help--button-label))))))
+    (should (equal (substring-no-properties line 1) (concat agent-repl-input-help--button-label " ")))))
 
 ;;;; ---- Installing the header line ----
 
@@ -485,24 +477,30 @@ webapp/test/styles.test.ts."
           (should-not agent-repl-test--popups-shown)
           (should (equal (buffer-list) before)))))))
 
-(ert-deftest agent-repl-test-input-help-click-shows-the-clicked-topic ()
-  "Clicking a button shows the topic its text carries."
-  (let ((line (agent-repl--input-help-header-line-text))
-        shown)
+(ert-deftest agent-repl-test-input-help-menu-lists-every-topic-in-order ()
+  "The help button's menu has one item per topic, titled, in table order."
+  (let (titles)
+    (map-keymap (lambda (_event item)
+                  (when (eq (car-safe item) 'menu-item)
+                    (push (nth 1 item) titles)))
+                (agent-repl--input-help-menu))
+    (should (equal (nreverse titles)
+                   (mapcar (lambda (topic) (plist-get topic :title)) agent-repl-input-help-topics)))))
+
+(ert-deftest agent-repl-test-input-help-menu-item-shows-its-topic ()
+  "Choosing a menu item shows that item's topic."
+  (let (shown)
     (cl-letf (((symbol-function 'agent-repl-input-help-show) (lambda (id) (push id shown))))
-      (agent-repl-input-help-click
-       (agent-repl-test-input-help--click-event line (string-search "Prompt history" line))))
+      (call-interactively (lookup-key (agent-repl--input-help-menu) [history])))
     (should (equal shown '(history)))))
 
-(ert-deftest agent-repl-test-input-help-click-off-a-button-is-fatal ()
-  "A click whose text carries no topic signals and shows nothing."
-  (let (shown)
-    (agent-repl-test-input-help--capturing-fatals
-      (cl-letf (((symbol-function 'agent-repl-input-help-show) (lambda (id) (push id shown))))
-        (should-error (agent-repl-input-help-click
-                       (agent-repl-test-input-help--click-event "plain" 0))))
-      (should (string-match-p "no topic at posn" (car agent-repl-test-input-help--fatals))))
-    (should-not shown)))
+(ert-deftest agent-repl-test-input-help-click-drops-the-menu-at-the-click ()
+  "Clicking the button pops the topic menu at the click's event."
+  (let ((event (agent-repl-test-input-help--click-event agent-repl-input-help--button-label 2))
+        popped)
+    (cl-letf (((symbol-function 'popup-menu) (lambda (menu position) (push (list menu position) popped))))
+      (agent-repl-input-help-click event))
+    (should (equal popped (list (list (agent-repl--input-help-menu) event))))))
 
 (ert-deftest agent-repl-test-input-help-command-shows-the-titled-topic ()
   "`agent-repl-input-help' shows the topic it is given by title."
