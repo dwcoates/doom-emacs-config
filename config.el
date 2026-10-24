@@ -214,9 +214,6 @@
   :before #'doom/restart
   (save-some-buffers nil t))
 
-(after! evil
-  (setq evil-ex-search-persistent-highlight nil))
-
 (after! hl-todo
   (add-to-list 'hl-todo-keyword-faces '("PRREVIEW" . "#7cb8bb")))
 
@@ -238,17 +235,6 @@
   ;; useful terminal chords, and `C-h' already falls through to the
   ;; global `evil-window-left' binding.
   (map! :map vterm-mode-map :ni "C-k" #'evil-window-up))
-
-(after! evil
-  ;; Highlight the current search match more brightly
-  (set-face-attribute 'evil-ex-search nil
-                      :foreground "black" :background "gold" :weight 'bold)
-
-  ;; Optionally, make other matches less prominent
-  (set-face-attribute 'evil-ex-lazy-highlight nil
-                      :foreground "gray" :background "#a9a9a9")
-
-  )
 
 (custom-set-faces!
   '(hl-line :background "#2d2d2d"))

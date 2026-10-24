@@ -210,6 +210,7 @@
        vc
        (default +bindings +smartparens)
        personal-bindings
+       evil-search
        ;; javascript
        )
 
