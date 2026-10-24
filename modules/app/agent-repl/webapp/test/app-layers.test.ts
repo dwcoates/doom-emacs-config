@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { appLayerChunks, appLayers, type LayerModule, type ModuleGraph } from "../app-layers";
+import { appLayers, layerChunks, type LayerModule, type ModuleGraph } from "../app-layers";
 
 /** A module of SIZE bytes importing IMPORTS. */
 function mod(id: string, size: number, ...imports: string[]): LayerModule {
@@ -99,7 +99,7 @@ function graphOf(
 
 const isApp = (id: string): boolean => id.startsWith("/src/");
 
-describe("appLayerChunks", () => {
+describe("layerChunks", () => {
   it("names every app module the entry's script statically reaches by its layer", () => {
     // Arrange
     const graph = graphOf({
@@ -109,7 +109,7 @@ describe("appLayerChunks", () => {
       "/src/log.ts": {},
     });
     // Act
-    const got = Object.fromEntries(appLayerChunks(graph, isApp, 100));
+    const got = Object.fromEntries(layerChunks(graph, isApp, 100, "app"));
     // Assert
     expect(got).toEqual({ "/src/feed.ts": "app-0", "/src/log.ts": "app-0" });
   });
@@ -122,7 +122,7 @@ describe("appLayerChunks", () => {
       "/src/log.ts": {},
     });
     // Act
-    const got = appLayerChunks(graph, isApp, 100);
+    const got = layerChunks(graph, isApp, 100, "app");
     // Assert
     expect(got.has("/src/main.ts")).toBe(false);
   });
@@ -136,7 +136,7 @@ describe("appLayerChunks", () => {
       "/src/host/main.ts": { imports: ["/src/log.ts"] },
     });
     // Act
-    const got = appLayerChunks(graph, isApp, 100);
+    const got = layerChunks(graph, isApp, 100, "app");
     // Assert
     expect(got.has("/src/host/main.ts")).toBe(false);
   });
@@ -149,14 +149,43 @@ describe("appLayerChunks", () => {
       "/node_modules/x.js": {},
     });
     // Act
-    const got = appLayerChunks(graph, isApp, 100);
+    const got = layerChunks(graph, isApp, 100, "app");
     // Assert
     expect(got.size).toBe(0);
   });
 
+  it("names each chunk by the prefix it is given", () => {
+    // Arrange
+    const graph = graphOf({
+      "/index.html": { entry: true, imports: ["/src/main.ts"] },
+      "/src/main.ts": { imports: ["/src/log.ts"] },
+      "/src/log.ts": {},
+    });
+    // Act
+    const got = Object.fromEntries(layerChunks(graph, isApp, 100, "proto"));
+    // Assert
+    expect(got).toEqual({ "/src/log.ts": "proto-0" });
+  });
+
+  it("layers members reached only through modules that are not members", () => {
+    // Arrange -- the generated code is imported by app code, never by the entry's script directly.
+    const isGen = (id: string): boolean => id.startsWith("/gen/");
+    const graph = graphOf({
+      "/index.html": { entry: true, imports: ["/src/main.ts"] },
+      "/src/main.ts": { imports: ["/src/feed.ts"] },
+      "/src/feed.ts": { imports: ["/gen/a_pb.ts"] },
+      "/gen/a_pb.ts": { imports: ["/gen/b_pb.ts"] },
+      "/gen/b_pb.ts": {},
+    });
+    // Act
+    const got = Object.fromEntries(layerChunks(graph, isGen, 100, "proto"));
+    // Assert
+    expect(got).toEqual({ "/gen/a_pb.ts": "proto-0", "/gen/b_pb.ts": "proto-0" });
+  });
+
   it("names nothing for a graph with no entry", () => {
     // Act
-    const got = appLayerChunks(graphOf({ "/src/a.ts": {} }), isApp, 100);
+    const got = layerChunks(graphOf({ "/src/a.ts": {} }), isApp, 100, "app");
     // Assert
     expect(got.size).toBe(0);
   });
@@ -168,7 +197,7 @@ describe("appLayerChunks", () => {
       "/src/main.ts": { imports: ["/src/gone.ts"] },
     });
     // Act / Assert
-    expect(() => appLayerChunks(graph, isApp, 100)).toThrow(/no module info for \/src\/gone\.ts/);
+    expect(() => layerChunks(graph, isApp, 100, "app")).toThrow(/no module info for \/src\/gone\.ts/);
   });
 
   it("throws for a reached module rollup holds no code for", () => {
@@ -179,6 +208,6 @@ describe("appLayerChunks", () => {
       "/src/empty.ts": { code: null },
     });
     // Act / Assert
-    expect(() => appLayerChunks(graph, isApp, 100)).toThrow(/no code for \/src\/empty\.ts/);
+    expect(() => layerChunks(graph, isApp, 100, "app")).toThrow(/no code for \/src\/empty\.ts/);
   });
 });
