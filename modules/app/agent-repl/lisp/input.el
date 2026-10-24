@@ -66,6 +66,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl-webhost-dismiss-digest "webhost" (ws))
+(declare-function agent-repl-prompt-entries-opening "prompt-entries" (label))
 (declare-function agent-repl--frontend-webview-buffer-name "frontend" (ws))
 (declare-function evil-normal-state "evil-states" (&optional arg))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
@@ -657,11 +658,10 @@ alone, so it stands exactly while the daemon's selection does."
 A selected prompt a rollback can reach is rolled back to, keeping files.
 With the composer empty that is exactly `C-c C-RET': the composer holds
 the rolled-back prompt again.  With words in the composer the prompt is
-RESENT in the same call with those words (`agent-repl--input-resend'): the
-entry the reader clicked edited, when the composer holds one, else the
-composer's words whole.  Any other selected bubble (a final response in
-particular) is replied to: the composer is sent, and the daemon quotes the
-selected bubble ahead of it."
+RESENT in the same call with those words whole
+\(`agent-repl--input-resend').  Any other selected bubble (a final
+response in particular) is replied to: the composer is sent, and the
+daemon quotes the selected bubble ahead of it."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (kind (agent-repl-host-selection ws))
@@ -673,40 +673,13 @@ selected bubble ahead of it."
      ((eq kind :prompt) (agent-repl-rollback-keep-files))
      (t (agent-repl-send)))))
 
-;;;; ---- Editing a prompt's entry, and resending it -----------------------
+;;;; ---- Resending a selected prompt, and answering a response's branch ----
 ;;
-;; A CLICK ON AN ENTRY of a prompt in the webview (`3.1.2 - my answer')
-;; selects the prompt and fills the composer with what the entry says
-;; (`agent-repl-input-edit-entry', the host watch's `prompt_entry_clicked').
-;; `RET' then rolls back to the prompt and resends it with that entry as the
-;; composer holds it, every other word kept; the daemon does the edit and
-;; the resend in the rollback's own call (RollBackRequest.resend), and
-;; refuses an edit made for any prompt but the one rolled back to.
-
-(defvar-local agent-repl--input-editing-entry nil
-  "The prompt entry this composer is editing, or nil.
-A plist (:row FEEDID :label LABEL) from the reader's click on that entry.
-Ended by any send, and by the click on another entry.")
-
-(defun agent-repl-input-edit-entry (ws row label text)
-  "Fill WS's composer with TEXT to edit the entry answering LABEL of prompt ROW.
-The composer's contents go to its history first, as a discard saves them,
-and the keyboard goes to the composer in insert state.  A workspace with no
-composer has nothing to fill: recorded, and nothing changes."
-  (let ((buf (agent-repl--input-buffer ws)))
-    (if (null buf)
-        (agent-repl--warn ws "elisp.input.edit-entry-no-composer ws=%s row=%S label=%s"
-                          ws (plist-get row :value) label)
-      (with-current-buffer buf
-        (agent-repl--input-save-to-history ws))
-      (agent-repl--input-fill-said ws buf (agent-repl--input-said (list text)) (list text))
-      (with-current-buffer buf
-        (setq agent-repl--input-editing-entry (list :row row :label label)))
-      (agent-repl--info ws "elisp.input.edit-entry ws=%s row=%S label=%s chars=%d"
-                        ws (plist-get row :value) label (length text))
-      (agent-repl-input-focus-for-reply ws)
-      (agent-repl--input-flash
-       ws (format "editing entry %s: RET resends the prompt with it" label)))))
+;; `RET' on a selected prompt rolls back to it and resends it with the
+;; composer's words, in the rollback's own call (RollBackRequest.resend).
+;; A click on a prompt's entry in the webview never reaches the composer
+;; (owner ruling, 2026-10-24): it reveals the response node the entry
+;; answers, which is the webview's alone.
 
 (defun agent-repl-input-compose-entry (ws label)
   "Open a blank entry answering LABEL at the end of WS's composer.
@@ -732,23 +705,16 @@ an entry in: recorded, and nothing changes."
   "Return what WS's composer resends in a rollback's place, or nil when empty.
 A plist (:raw RAW :said SAID :key KEY :origin :user-sent :edit EDIT): the
 composer's words RAW (as a send prepares them, SAID), a fresh idempotency
-KEY, and EDIT, the entry the composer is editing with RAW as its words, or
-else the whole SAID.  Nil when the composer holds nothing to send, so `RET'
-only rolls back."
+KEY, and EDIT, the whole SAID.  Nil when the composer holds nothing to
+send, so `RET' only rolls back."
   (let* ((parts (agent-repl--read-input-parts ws))
          (raw (agent-repl--input-parts-text parts))
          (images (agent-repl--input-parts-images parts)))
     (unless (and (string-empty-p (string-trim raw)) (null images))
       (agent-repl--input-refuse-missing-images ws parts)
-      (let* ((said (agent-repl--input-said (agent-repl--prepare-input-parts ws parts nil)))
-             (buf (agent-repl--input-buffer ws))
-             (entry (and buf (buffer-local-value 'agent-repl--input-editing-entry buf))))
+      (let ((said (agent-repl--input-said (agent-repl--prepare-input-parts ws parts nil))))
         (list :raw raw :said said :key (agent-repl--uuid) :origin :user-sent
-              :edit (if (and entry (null images))
-                        (list :arm :entry :value (list :row (plist-get entry :row)
-                                                       :label (plist-get entry :label)
-                                                       :text (agent-repl--prepare-input ws raw nil)))
-                      (list :arm :whole :value (list :said said))))))))
+              :edit (list :arm :whole :value (list :said said)))))))
 
 (with-eval-after-load 'evil
   (agent-repl--input-selection-bind-keys))
@@ -1776,10 +1742,7 @@ stood BEFORE the push, with the unsent-discard marker the push may clear.
 the daemon REFUSES the submission, so a refused prompt is never in
 history and never costs the user their words or images.  (Regression watch: the
 optimistic clear landed without a restore arm, and six composer
-integration scenarios read an empty composer after a refusal.)
-
-A SEND ENDS AN ENTRY EDIT: the composer's words went out, whichever way.
-The edit is in the snapshot, so a refusal's restore brings it back."
+integration scenarios read an empty composer after a refusal.)"
   (let ((buf (agent-repl--input-buffer ws))
         (snapshot nil))
     (when buf
@@ -1789,15 +1752,10 @@ The edit is in the snapshot, so a refusal's restore brings it back."
                              :point (point)
                              :history agent-repl--input-history
                              :history-index agent-repl--history-index
-                             :discard-entry agent-repl--history-discard-entry
-                             :editing-entry agent-repl--input-editing-entry))
+                             :discard-entry agent-repl--history-discard-entry))
         (agent-repl--history-push (buffer-string))
         (agent-repl--history-reset)
-        (erase-buffer)
-        (when agent-repl--input-editing-entry
-          (agent-repl--log ws "elisp.input.edit-entry-ended ws=%s label=%s reason=sent"
-                           ws (plist-get agent-repl--input-editing-entry :label)))
-        (setq agent-repl--input-editing-entry nil)))
+        (erase-buffer)))
     (agent-repl--history-save ws)
     (agent-repl--log ws "elisp.input.optimistic-clear ws=%s raw-len=%d buffer=%s"
                      ws (length raw) (and buf t))
@@ -1832,8 +1790,7 @@ nothing to restore into."
           (goto-char (min (plist-get snapshot :point) (point-max))))
         (setq agent-repl--input-history (plist-get snapshot :history))
         (setq agent-repl--history-index (plist-get snapshot :history-index))
-        (setq agent-repl--history-discard-entry (plist-get snapshot :discard-entry))
-        (setq agent-repl--input-editing-entry (plist-get snapshot :editing-entry)))
+        (setq agent-repl--history-discard-entry (plist-get snapshot :discard-entry)))
       (agent-repl--history-save ws)
       (agent-repl--log ws "elisp.input.restored ws=%s text-len=%d images=%d"
                        ws (length (plist-get snapshot :text))

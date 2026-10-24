@@ -4900,11 +4900,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
   (should (eq (lookup-key agent-repl-input-mode-map (kbd "C-<return>"))
               #'agent-repl-input-control-return)))
 
-;;;; ---- Editing a prompt's entry, and resending it -----------------------
-
-(defun agent-repl-test-input--editing-entry ()
-  "The entry the composer is editing, or nil."
-  (buffer-local-value 'agent-repl--input-editing-entry agent-repl-test-input--buffer))
+;;;; ---- Resending a selected prompt, and answering a response's branch ----
 
 (defmacro agent-repl-test-input--with-edit-stubs (&rest body)
   "Run BODY with the composer's focus and flash recorded, as `focused' and `flashed'."
@@ -4913,61 +4909,6 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
      (cl-letf (((symbol-function 'agent-repl-input-focus-for-reply) (lambda (ws) (push ws focused)))
                ((symbol-function 'agent-repl--input-flash) (lambda (_ws text) (push text flashed))))
        ,@body)))
-
-(ert-deftest agent-repl-test-input-edit-entry-fills-the-composer-with-the-entry ()
-  "Clicking an entry fills the composer with what the entry says."
-  (agent-repl-test-input--with
-    (agent-repl-test-input--with-edit-stubs
-      ;; Act
-      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes, that one")
-      ;; Assert
-      (should (equal (agent-repl-test-input--composer-text) "yes, that one")))))
-
-(ert-deftest agent-repl-test-input-edit-entry-records-the-entry-it-edits ()
-  "The composer records which prompt's entry it is editing."
-  (agent-repl-test-input--with
-    (agent-repl-test-input--with-edit-stubs
-      ;; Act
-      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes")
-      ;; Assert
-      (should (equal (agent-repl-test-input--editing-entry) '(:row (:value "p1") :label "3.1"))))))
-
-(ert-deftest agent-repl-test-input-edit-entry-saves-the-draft-to-history ()
-  "The composer's contents are saved to its history before the entry fills it."
-  (agent-repl-test-input--with
-    (agent-repl-test-input--with-edit-stubs
-      ;; Arrange
-      (agent-repl-test-input--type "my draft")
-      (let (saved)
-        (cl-letf (((symbol-function 'agent-repl--input-save-to-history)
-                   (lambda (ws) (push (list ws (buffer-string)) saved))))
-          ;; Act
-          (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes"))
-        ;; Assert
-        (should (equal saved '(("ws-one" "my draft"))))))))
-
-(ert-deftest agent-repl-test-input-edit-entry-focuses-the-composer-and-says-what-ret-does ()
-  "The keyboard goes to the composer, and the flash says RET resends the prompt."
-  (agent-repl-test-input--with
-    (agent-repl-test-input--with-edit-stubs
-      ;; Act
-      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes")
-      ;; Assert
-      (should (equal (list focused (car flashed))
-                     '(("ws-one") "editing entry 3.1: RET resends the prompt with it"))))))
-
-(ert-deftest agent-repl-test-input-edit-entry-without-a-composer-changes-nothing ()
-  "A workspace with no composer has nothing to fill: recorded at WARN."
-  (agent-repl-test-input--with
-    (agent-repl-test-input--with-edit-stubs
-      (let (warned)
-        (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
-                  ((symbol-function 'agent-repl--warn)
-                   (agent-repl-test--record-into warned)))
-          ;; Act
-          (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes"))
-        ;; Assert
-        (should (and (string-match-p "elisp.input.edit-entry-no-composer" (car warned)) (null focused)))))))
 
 ;;;; ---- Answering a response's branch ----
 
@@ -5039,7 +4980,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
     (should-not (agent-repl--input-resend "ws-one"))))
 
 (ert-deftest agent-repl-test-input-resend-sends-the-composer-whole ()
-  "With no entry being edited, the composer's words are resent whole."
+  "The composer's words are resent whole."
   (agent-repl-test-input--with
     ;; Arrange
     (agent-repl-test-input--type "new words")
@@ -5049,33 +4990,18 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
       (should (equal (list (plist-get resend :raw) (plist-get (plist-get resend :edit) :arm) (plist-get resend :origin))
                      '("new words" :whole :user-sent))))))
 
-(ert-deftest agent-repl-test-input-resend-edits-the-entry-the-composer-holds ()
-  "With an entry being edited, the resend edits that entry of that prompt."
+(ert-deftest agent-repl-test-input-resend-carries-images-in-place ()
+  "A composer holding an image beside its words is resent whole, images in place."
   (agent-repl-test-input--with
-    (agent-repl-test-input--with-edit-stubs
-      ;; Arrange
-      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes")
-      (agent-repl-test-input--type "no, the other one")
-      ;; Act
-      (let ((edit (plist-get (agent-repl--input-resend "ws-one") :edit)))
-        ;; Assert
-        (should (equal edit '(:arm :entry :value (:row (:value "p1") :label "3.1" :text "no, the other one"))))))))
-
-;; An image in the composer makes an entry edit whole: an entry carries only words.
-(ert-deftest agent-repl-test-input-resend-with-an-image-goes-whole ()
-  "An entry being edited with an image beside its words is resent whole, images in place."
-  (agent-repl-test-input--with
-    (agent-repl-test-input--with-edit-stubs
-      ;; Arrange
-      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes")
-      (agent-repl-test-input--compose "look " '("/tmp/a.png"))
-      ;; Act
-      (let ((edit (plist-get (agent-repl--input-resend "ws-one") :edit)))
-        ;; Assert
-        (should (equal (plist-get edit :arm) :whole))
-        (should (equal (plist-get (plist-get (plist-get (plist-get edit :value) :said) :content) :blocks)
-                       (list (agent-repl-test-input--words-block "look ")
-                             (agent-repl-test-input--image-block "/tmp/a.png"))))))))
+    ;; Arrange
+    (agent-repl-test-input--compose "look " '("/tmp/a.png"))
+    ;; Act
+    (let ((edit (plist-get (agent-repl--input-resend "ws-one") :edit)))
+      ;; Assert
+      (should (equal (plist-get edit :arm) :whole))
+      (should (equal (plist-get (plist-get (plist-get (plist-get edit :value) :said) :content) :blocks)
+                     (list (agent-repl-test-input--words-block "look ")
+                           (agent-repl-test-input--image-block "/tmp/a.png")))))))
 
 (ert-deftest agent-repl-test-input-resend-refuses-a-missing-image ()
   "A composer holding an image whose file is gone resends nothing, as a send refuses."
@@ -5112,29 +5038,6 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
         (agent-repl-input-selection-return))
       ;; Assert
       (should (equal rolled '(("ws-one" :keep-files nil "the new words")))))))
-
-(ert-deftest agent-repl-test-input-a-send-ends-the-entry-edit ()
-  "A send ends the entry edit: the composer's words went out."
-  (agent-repl-test-input--with
-    (agent-repl-test-input--with-edit-stubs
-      ;; Arrange
-      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes")
-      ;; Act
-      (agent-repl--input-optimistic-clear "ws-one" "yes")
-      ;; Assert
-      (should-not (agent-repl-test-input--editing-entry)))))
-
-(ert-deftest agent-repl-test-input-a-refusals-restore-brings-the-entry-edit-back ()
-  "A refused send restores the entry edit with the composer's words."
-  (agent-repl-test-input--with
-    (agent-repl-test-input--with-edit-stubs
-      ;; Arrange
-      (agent-repl-input-edit-entry "ws-one" '(:value "p1") "3.1" "yes")
-      (let ((snapshot (agent-repl--input-optimistic-clear "ws-one" "yes")))
-        ;; Act
-        (agent-repl--input-restore "ws-one" snapshot))
-      ;; Assert
-      (should (equal (agent-repl-test-input--editing-entry) '(:row (:value "p1") :label "3.1"))))))
 
 (defun agent-repl-test-input--resend-of (text)
   "A whole resend of TEXT, as `agent-repl--input-resend' builds it."
