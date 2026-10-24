@@ -34,6 +34,7 @@
     --user-fg: var(--fg);
     --assistant: var(--panel-bg);
     --accent: #2563eb;
+    --tool-command: #4b5563;
     --ok: #16a34a;
     --thinking: #ea580c;
     --composer-bg: #e4e7eb;
@@ -48,7 +49,7 @@
       --card: #16191f; --panel-bg: #14171c; --sidebar-bg: #14161b;
       --sidebar-shadow: 0 2px 14px color-mix(in srgb, #000000 48%, transparent);
       --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 30%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
-      --user: #0764c2; --user-fg: #f3f6fb; --thinking: #fb923c;
+      --user: #0764c2; --user-fg: #f3f6fb; --thinking: #fb923c; --tool-command: #9ca3af;
       --composer-bg: #0c0e12; --q-border: #facc15;
       --code-bg: color-mix(in srgb, #ffffff 12%, transparent);
     }
@@ -60,7 +61,7 @@
     --card: #16191f; --panel-bg: #14171c; --sidebar-bg: #14161b;
     --sidebar-shadow: 0 2px 14px color-mix(in srgb, #000000 48%, transparent);
     --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 30%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
-    --user: #0764c2; --user-fg: #f3f6fb; --thinking: #fb923c;
+    --user: #0764c2; --user-fg: #f3f6fb; --thinking: #fb923c; --tool-command: #9ca3af;
     --composer-bg: #0c0e12; --q-border: #facc15;
     --code-bg: color-mix(in srgb, #ffffff 12%, transparent);
   }
@@ -171,10 +172,10 @@
   .a .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px;
     padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
   .chip {
-    border: 1px solid var(--border); background: var(--bg); color: var(--accent);
+    border: 1px solid var(--border); background: var(--bg); color: var(--tool-command);
     border-radius: 999px; padding: 2px 9px; font: inherit; font-size: 12px; cursor: pointer;
   }
-  .chip:hover { border-color: var(--accent); }
+  .chip:hover { border-color: var(--tool-command); color: var(--fg); }
   .pending { display: inline-flex; align-items: center; gap: 6px; }
   .pending .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--thinking);
     animation: pulse 1.4s ease-in-out infinite; }
