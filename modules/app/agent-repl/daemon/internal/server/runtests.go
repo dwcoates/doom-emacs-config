@@ -169,18 +169,13 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 
 // testScriptOf is the test script the worktree's own deploy config names.
 func testScriptOf(dir string) (string, error) {
-	path := deployconfig.Path(dir)
-	data, err := os.ReadFile(path)
+	cfg, err := deployconfig.OnDisk{}.Load(dir)
 	if err != nil {
-		return "", fmt.Errorf("read the worktree's deploy config %s: %w", path, err)
+		return "", fmt.Errorf("read the worktree's deploy config: %w", err)
 	}
-	cfg, err := deployconfig.Parse(path, data)
-	if err != nil {
-		return "", err
-	}
-	script := cfg.GetPreDeploy().GetLocalMerge().GetTests().GetAgentReplSuites().GetScriptPath()
+	script := deployconfig.TestScript(cfg)
 	if script == "" {
-		return "", fmt.Errorf("the worktree's deploy config %s names no agent_repl_suites test script, so this repository's tests are not the daemon's to run", path)
+		return "", fmt.Errorf("the worktree's deploy config %s names no agent_repl_suites test script, so this repository's tests are not the daemon's to run", deployconfig.Path(dir))
 	}
 	return script, nil
 }

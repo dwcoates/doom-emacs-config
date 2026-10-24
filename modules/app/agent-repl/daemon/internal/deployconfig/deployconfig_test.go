@@ -309,3 +309,67 @@ func TestPathIsRelBeneathTheRoot(t *testing.T) {
 		t.Fatalf("Path = %q, want %q beneath the root", got, Rel)
 	}
 }
+
+func TestTestScript(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{name: "a config with a test step names its script", yaml: agentRepl, want: "modules/app/agent-repl/bin/test-all.sh"},
+		{name: "a config with no local merge names none", yaml: "pre_deploy: {}\n", want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			cfg, err := Parse("deploy.yaml", []byte(tc.yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			got := TestScript(cfg)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("TestScript = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNoProductionCodeReadsTheTestScriptByHand(t *testing.T) {
+	// Arrange
+	daemon, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var byHand []string
+
+	// Act
+	err = filepath.WalkDir(daemon, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
+			strings.HasSuffix(path, ".pb.go") || filepath.Dir(path) == filepath.Join(daemon, "internal", "deployconfig") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(raw), "GetAgentReplSuites()") {
+			byHand = append(byHand, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byHand) != 0 {
+		t.Fatalf("the test script read by hand in %v, want deployconfig.TestScript", byHand)
+	}
+}

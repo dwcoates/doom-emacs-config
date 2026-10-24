@@ -182,6 +182,13 @@ func ScriptHook(path string, timeoutSeconds uint32) *repoconfigv1.DeployHook {
 	return &repoconfigv1.DeployHook{Hook: &repoconfigv1.DeployHook_Script{Script: &repoconfigv1.DeployHookScript{Path: path, TimeoutSeconds: timeoutSeconds}}}
 }
 
+// TestScript is the config's agent_repl_suites test runner, relative to a
+// checkout's root: the script the merge queue gates on and the daemon runs an
+// agent's selected tests with. "" is a config that names none.
+func TestScript(cfg *repoconfigv1.DeployConfig) string {
+	return cfg.GetPreDeploy().GetLocalMerge().GetTests().GetAgentReplSuites().GetScriptPath()
+}
+
 // RunsFor reports whether a hook entry runs for a deploy whose target is
 // (toMain) or is not the repository's main branch in its main worktree.
 func RunsFor(entry *repoconfigv1.DeployHookEntry, toMain bool) bool {
