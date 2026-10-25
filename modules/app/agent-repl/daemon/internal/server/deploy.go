@@ -314,26 +314,11 @@ func (s *server) PushReloadWebhost(build string) int {
 	push := &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_ReloadWebhost{
 		ReloadWebhost: &agentreplv1.DaemonReloadWebhost{Build: build},
 	}}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	reached := 0
-	for w := range s.daemonWatchers {
-		if !w.emacs {
-			continue
-		}
-		select {
-		case w.elisp <- push:
-			reached++
-			s.log.Info("daemon.server.reload_webhost", "pushed the web view host's reload to an Emacs", dlog.Context{
-				"stream": w.id, "build": build,
-			})
-		default:
-			s.log.Error("daemon.server.reload_webhost", "an Emacs stream's push queue is full; the web view host's reload did not reach it", dlog.Context{
-				"stream": w.id, "build": build,
-			})
-		}
-	}
-	return reached
+	return s.pushToEditors("daemon.server.reload_webhost", push, func(*daemonWatcher) bool { return true }, func(w *daemonWatcher) {
+		s.log.Info("daemon.server.reload_webhost", "pushed the web view host's reload to an Emacs", dlog.Context{
+			"stream": w.id, "build": build,
+		})
+	})
 }
 
 // validateWatchDaemonRequest is WatchDaemonRequest's base function: the client
