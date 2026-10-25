@@ -341,6 +341,11 @@ What landed, by system. The contract decisions are in
   take a tab's.
 - The rail's search narrows threads by name; searching chat contents needs
   zettel's text search (phase 2).
+- No test world runs a real zettel. The daemon harness and the Emacs e2e
+  world stage a placeholder zettel for deploys and point the daemon's zettel
+  socket at an unserved path (`UnservedZettelEnv`), so no test reaches the
+  owner's own `zettel.sock`. A chat e2e area needs a real zettel in the world,
+  as the store and the sidecar have; it is not built yet.
 
 ### Deferred from phase 1
 
