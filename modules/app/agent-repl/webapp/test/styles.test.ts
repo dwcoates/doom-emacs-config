@@ -3545,16 +3545,12 @@ describe("the one bubble rule set", () => {
 
   it("hands a prompt bubble the tree's face through the cascade", () => {
     // Arrange
-    const teardown = installStylesheet();
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     bubble.setAttribute("data-role", "prompt");
     bubble.setAttribute("data-variant", "user");
-    document.body.append(bubble);
     // Act
-    const face = cascadedValue(bubble, "font-family");
-    bubble.remove();
-    teardown();
+    const face = inDocument(bubble, (el) => cascadedValue(el, "font-family"));
     // Assert
     expect(face).toBe("var(--tree-font-family)");
   });
@@ -5484,13 +5480,14 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
   });
 
   it("declares the smaller size once, on the rule both kinds share", () => {
-    // Arrange / Act
+    // Arrange / Act: the prompt's rule narrows the token too, to the tree's
+    // size (2026-10-25), and is the one other rule that may.
     const declaring = rulesOf(stylesheet)
       .filter((rule) => /(?:^|;)\s*--bubble-font-rem\s*:/.test(rule.declarations) && rule.selectors.some((sel) => sel !== ":root"))
       .map((rule) => rule.selectors);
 
     // Assert
-    expect(declaring).toEqual([[...DIMMED_TEXT_SELECTORS]]);
+    expect(declaring).toEqual([['.bubble[data-role="prompt"]'], [...DIMMED_TEXT_SELECTORS]]);
   });
 
   it("sets an interim response's prose in bold", () => {
