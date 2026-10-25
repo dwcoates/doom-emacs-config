@@ -29,7 +29,12 @@ func (r *threadRegistry) RegisterThread(_ context.Context, dir, name string) (ws
 		return wsm.Workspace{}, r.err
 	}
 	r.registered = append(r.registered, name)
-	ws := wsm.Workspace{ID: wsm.NewWorkspaceID(), Kind: wsm.WorkspaceKindThread, Dir: dir, Name: name}
+	// wsm records the normalized directory, as it does every workspace's.
+	normalized, err := normalizeDir(dir)
+	if err != nil {
+		return wsm.Workspace{}, err
+	}
+	ws := wsm.Workspace{ID: wsm.NewWorkspaceID(), Kind: wsm.WorkspaceKindThread, Dir: normalized, Name: name}
 	r.with(ws)
 	return ws, nil
 }
@@ -54,7 +59,10 @@ func TestCreateThreadMakesARegisteredThreadWithItsSessionUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
-	wantDir := filepath.Join(f.home, "zettel", "threads", FixtureMintedName)
+	wantDir, err := normalizeDir(filepath.Join(f.home, "zettel", "threads", FixtureMintedName))
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
 	if record.Dir != wantDir || record.Name != FixtureMintedName || !record.IsThread() {
 		t.Fatalf("record = %+v, want thread %q at %q", record, FixtureMintedName, wantDir)
 	}
@@ -238,5 +246,70 @@ func TestAGoneThreadDirectoryIsMadeAgainWithNoGit(t *testing.T) {
 	}
 	if len(f.git.gitCalls) != 0 || len(f.git.restored) != 0 {
 		t.Fatalf("git calls = %v, want none for a thread", f.git.gitCalls)
+	}
+}
+
+// heldThread is a thread CreateThread made on F, its row then closed when
+// CLOSED.
+func heldThread(t *testing.T, f *fixture, closed bool) wsm.Workspace {
+	t.Helper()
+	record, err := f.verbs.CreateThread(context.Background(), "why is the sky blue?")
+	if err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	if closed {
+		record.Closed = true
+		f.db.with(record)
+	}
+	return record
+}
+
+func TestReRegisteringAHeldThreadAnswersTheThread(t *testing.T) {
+	// Arrange: Emacs re-announces the thread's directory at a handover.
+	f, _ := newThreadFixture(t)
+	thread := heldThread(t, f, false)
+
+	// Act
+	again, err := f.verbs.Register(context.Background(), thread.Dir, wsm.RegisterFacts{})
+
+	// Assert: the thread itself, and no git registration of its directory.
+	if err != nil || again.ID != thread.ID || !again.IsThread() {
+		t.Fatalf("Register = %+v, %v, want thread %s", again, err, thread.ID)
+	}
+	if len(f.db.registered) != 0 {
+		t.Fatalf("registrations = %+v, want none: a thread is no git worktree", f.db.registered)
+	}
+}
+
+func TestReRegisteringAClosedThreadReopensIt(t *testing.T) {
+	// Arrange
+	f, _ := newThreadFixture(t)
+	thread := heldThread(t, f, true)
+
+	// Act
+	again, err := f.verbs.Register(context.Background(), thread.Dir, wsm.RegisterFacts{})
+
+	// Assert
+	if err != nil || again.Closed {
+		t.Fatalf("Register = %+v, %v, want the thread re-opened", again, err)
+	}
+}
+
+func TestAnUnreadableRegistryFailsTheAnnouncementAndIsRecorded(t *testing.T) {
+	// Arrange
+	f, _ := newThreadFixture(t)
+	thread := heldThread(t, f, false)
+	f.db.workspaceByDirErr = errors.New("sql: database is locked")
+
+	// Act
+	_, err := f.verbs.Register(context.Background(), thread.Dir, wsm.RegisterFacts{})
+
+	// Assert
+	if !errors.Is(err, f.db.workspaceByDirErr) {
+		t.Fatalf("Register = %v, want the lookup's failure", err)
+	}
+	rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opRegister})
+	if !ok || rec.Context["dir"] != thread.Dir {
+		t.Fatalf("ERROR record = %+v, want one naming the announced directory", rec)
 	}
 }

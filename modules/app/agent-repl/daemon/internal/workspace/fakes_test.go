@@ -51,8 +51,10 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
-	// workspaceByDirErr fails WorkspaceByDir.
-	workspaceByDirErr error
+	// workspaceByDirErr fails WorkspaceByDir, at workspaceByDirErrAt alone
+	// when that is set.
+	workspaceByDirErr   error
+	workspaceByDirErrAt string
 
 	// owedMu guards owed, the resumptions a stand-down recorded.
 	owedMu sync.Mutex
@@ -460,7 +462,7 @@ func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 }
 
 func (d *fakeDB) WorkspaceByDir(_ context.Context, dir string) (wsm.Workspace, error) {
-	if d.workspaceByDirErr != nil {
+	if d.workspaceByDirErr != nil && (d.workspaceByDirErrAt == "" || d.workspaceByDirErrAt == dir) {
 		return wsm.Workspace{}, d.workspaceByDirErr
 	}
 	ws, ok := d.byDir[dir]

@@ -1239,6 +1239,7 @@ func TestAMainWorktreeLookupFailureIsSurfacedAndRecorded(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.db.workspaceByDirErr = errors.New("sql: database is locked")
+	f.db.workspaceByDirErrAt = f.git.mainWorktree
 
 	// Act.
 	_, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{})
