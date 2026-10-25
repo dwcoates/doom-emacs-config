@@ -57,7 +57,7 @@ func (s *sharedWorld) viewFor(t testing.TB, build func() *World) *World {
 	case s.skip != nil:
 		t.Skipf("e2e: the shared World did not build: %s", s.skip.Reason)
 	}
-	t.Cleanup(func() { requireServicesOutlivedTheTest(t, s.world.Store, s.world.Sidecar) })
+	t.Cleanup(func() { requireServicesOutlivedTheTest(t, s.world.Store, s.world.Sidecar, s.world.Zettel) })
 	return &World{Daemon: s.world.Daemon.View(t), Store: s.world.Store, Sidecar: s.world.Sidecar}
 }
 

@@ -201,7 +201,6 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 	if cfg.zettel {
 		zettel = startZettel(t, shortSocketPath(t, "zettel"), filepath.Join(box.Scratch(), "zettel.db"),
 			filepath.Join(logsDir, "zettel.log"), lockDir)
-		t.Cleanup(func() { requireZettelOutlivedTheTest(t, zettel) })
 		// After the unserved socket above, so this one is the daemon's.
 		extraEnv = append(extraEnv, harness.ZettelSocketEnv+"="+zettel.Socket)
 	}
@@ -264,14 +263,7 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 
 	// Registered LAST, so LIFO runs it FIRST: it observes what died on its
 	// OWN, before this world's own teardown killed anything on purpose.
-	t.Cleanup(func() {
-		if store.Exited() && !store.stopped {
-			t.Errorf("e2e: the store exited before test cleanup, and was never stopped by the test:\n%s", tailStoreLog(t, store))
-		}
-		if sidecar.Exited() && !sidecar.stopped {
-			t.Errorf("e2e: the sidecar exited before test cleanup, and was never stopped by the test")
-		}
-	})
+	t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar, zettel) })
 
 	// The module's workspace-agnostic elisp log is aimed at THIS scenario's
 	// own state root by `writeSettings' (e.LogFile), so it is already inside

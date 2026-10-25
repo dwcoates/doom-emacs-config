@@ -336,12 +336,7 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	// Store.StartSameDB) records the exit as INTENTIONAL by setting
 	// Store.stopped; this assertion is the only reader of that bit that
 	// treats it as authoritative.
-	t.Cleanup(func() {
-		requireServicesOutlivedTheTest(t, store, sidecar)
-		if zettel != nil {
-			requireZettelOutlivedTheTest(t, zettel)
-		}
-	})
+	t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar, zettel) })
 
 	return w
 }
@@ -376,11 +371,12 @@ func (w *World) RequireOpen(t testing.TB, ws *workspacev1.WorkspaceRef) {
 	}
 }
 
-// requireServicesOutlivedTheTest fails t if the store or the sidecar exited
-// on its own before t's cleanup: one a test stopped on purpose (Store.Stop,
-// Store.StartSameDB) is the test's own doing. Every World's test asks it, an
-// owned World's and a shared World's alike.
-func requireServicesOutlivedTheTest(t testing.TB, store *Store, sidecar *Sidecar) {
+// requireServicesOutlivedTheTest fails t if the store, the sidecar or zettel
+// (nil in a world that runs none) exited on its own before t's cleanup: one a
+// test stopped on purpose (Store.Stop, Store.StartSameDB) is the test's own
+// doing. Every world's test asks it, an owned World's, a shared World's and
+// an EmacsWorld's alike.
+func requireServicesOutlivedTheTest(t testing.TB, store *Store, sidecar *Sidecar, zettel *Zettel) {
 	t.Helper()
 	if store.Exited() && !store.stopped {
 		t.Errorf("e2e: the store exited before test cleanup (%s), and was never stopped by the test:\n%s",
@@ -389,6 +385,9 @@ func requireServicesOutlivedTheTest(t testing.TB, store *Store, sidecar *Sidecar
 	if sidecar.Exited() && !sidecar.stopped {
 		t.Errorf("e2e: the sidecar exited before test cleanup (%s), and was never stopped by the test",
 			sidecar.exit.status())
+	}
+	if zettel != nil && zettel.Exited() && !zettel.stopped {
+		t.Errorf("e2e: zettel exited before test cleanup (%s), and was never stopped by the test", zettel.exit.status())
 	}
 }
 

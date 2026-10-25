@@ -113,12 +113,3 @@ func (z *Zettel) Stop() {
 		z.t.Errorf("e2e: remove zettel socket %s: %v", z.Socket, err)
 	}
 }
-
-// requireZettelOutlivedTheTest fails T when Z exited before the test's
-// cleanup without the test stopping it.
-func requireZettelOutlivedTheTest(t testing.TB, z *Zettel) {
-	t.Helper()
-	if z.Exited() && !z.stopped {
-		t.Errorf("e2e: zettel exited before test cleanup (%s), and was never stopped by the test", z.exit.status())
-	}
-}
