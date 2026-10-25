@@ -77,10 +77,10 @@ type fakeDB struct {
 	leases        map[ids.WorkspaceID]wsm.Lease
 	// onAdmit, when set, is called under the lock as each merge is admitted.
 	onAdmit func(ids.WorkspaceID)
-	turns         map[ids.WorkspaceID][]wsm.Turn
-	ledger        map[ids.WorkspaceID][]wsm.MergeLedgerEntry
-	queues        map[wsm.RepoKey][]wsm.MergeQueueEntry
-	paused        map[wsm.RepoKey]bool
+	turns   map[ids.WorkspaceID][]wsm.Turn
+	ledger  map[ids.WorkspaceID][]wsm.MergeLedgerEntry
+	queues  map[wsm.RepoKey][]wsm.MergeQueueEntry
+	paused  map[wsm.RepoKey]bool
 	// allQueuesErr fails AllMergeQueues, the read a workspace's take-back
 	// (AdoptWorkspace) starts from.
 	allQueuesErr error
