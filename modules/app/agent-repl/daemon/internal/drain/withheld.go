@@ -20,6 +20,10 @@ const opWithheld = "daemon.drain.withheld"
 // KillSession, hibernated terminal and cleared pids (hibernate) — with its own
 // reason on the records and the terminal.
 //
+// A FOLD SPARES WHAT THE RECORD SPARES (owner ruling, 2026-10-25): a one-shot,
+// or a workspace with a merge pending (wsm.Workspace.FoldSpare), is never
+// stood down for a collapse, whichever attempt reads it.
+//
 // IT NEVER INTERRUPTS A TURN. A workspace the gate holds back (a turn in
 // flight, live detached work, a start or a revival under way, the shim's own
 // turn_in_flight refusal) stays PENDING, and is asked again on the daemon's

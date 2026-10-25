@@ -1134,4 +1134,7 @@ asks for the workspaces it wants open with the `OpenTabs` server stream.
   free edge a turn's end raises (`lifecycleSink.OnFree`) and a session coming
   up (`lifecycleSink.SessionUp`), never by polling; every attempt re-reads
   the visibility, so one shown again meanwhile is dropped. Show and expand
-  start nothing.
+  start nothing. A FOLD NEVER STANDS DOWN WHAT IT SPARES (owner ruling
+  2026-10-25, `docs/protobuf-design/open-tabs.md`): `foldTabs` hides every
+  open member and skips a one-shot or a workspace with a merge pending
+  (`wsm.Workspace.FoldSpare`), which every withheld attempt also re-reads.

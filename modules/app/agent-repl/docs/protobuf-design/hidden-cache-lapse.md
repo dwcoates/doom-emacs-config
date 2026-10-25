@@ -60,7 +60,8 @@ do them all yourselves").
 - The verdict is projected, not observed: the gate's floor is a constant over
   the context size, which a held session cannot change.
 - Collapsing a repository section still stands its workspaces down at once.
-  The request covered hidden workspaces only.
+  The request covered hidden workspaces only. (Amended 2026-10-25: a fold
+  spares a one-shot and a workspace with a merge pending; see open-tabs.md.)
 - "Cold cache" needs no arm of its own: a lapse at or before now IS cold, and
   the daemon republishes the roster at the deadline.
 - The workspace the user is looking at keeps its cache warm even hidden
