@@ -64,7 +64,14 @@ A frame already painted is left as it is."
                        "elisp.titlebar.paint frame=%S background=%s color=%s"
                        frame background agent-repl-titlebar-unfocused-color)
       (set-face-attribute 'internal-border frame :background background)
-      (set-frame-parameter frame 'background-color agent-repl-titlebar-unfocused-color)
+      ;; THE FRAME KEEPS ITS LIGHT OR DARK MODE.  Setting `background-color'
+      ;; has Emacs derive the frame's `background-mode' from the new color
+      ;; (`frame-set-background-mode'), and the orange reads as light, so
+      ;; every face with a light and a dark spec switched to its light one:
+      ;; the whole theme changed while Emacs was unfocused.  The variable,
+      ;; non-nil, is what that derivation takes instead of the color.
+      (let ((frame-background-mode (frame-parameter frame 'background-mode)))
+        (set-frame-parameter frame 'background-color agent-repl-titlebar-unfocused-color))
       (set-frame-parameter frame agent-repl--titlebar-painted t))))
 
 (defun agent-repl--titlebar-unpaint (frame)

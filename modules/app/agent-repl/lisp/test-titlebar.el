@@ -48,6 +48,29 @@ frame\='s paint is undone afterwards, so no case leaks into another."
       ;; Assert
       (should (equal (face-attribute 'internal-border :background frame) before)))))
 
+(ert-deftest agent-repl-test-titlebar-unfocused-keeps-the-frames-background-mode ()
+  "The orange, a light color, leaves the frame in the mode it was in."
+  (agent-repl-test-titlebar--with-frame nil
+    ;; Arrange
+    (let ((before (frame-parameter frame 'background-mode)))
+      ;; Act
+      (agent-repl-titlebar-sync)
+      ;; Assert
+      (should (eq before 'dark))
+      (should (eq (frame-parameter frame 'background-mode) before)))))
+
+(ert-deftest agent-repl-test-titlebar-unfocused-keeps-a-moded-face-its-color ()
+  "A face with light and dark specs keeps its dark color while painted."
+  (agent-repl-test-titlebar--with-frame nil
+    ;; Arrange
+    (face-spec-set 'agent-repl-test-titlebar--moded
+                   '((((background dark)) :foreground "#00ff00")
+                     (((background light)) :foreground "#ff0000")))
+    ;; Act
+    (agent-repl-titlebar-sync)
+    ;; Assert
+    (should (equal (face-foreground 'agent-repl-test-titlebar--moded frame) "#00ff00"))))
+
 (ert-deftest agent-repl-test-titlebar-unfocused-marks-the-frame-painted ()
   "A painted frame says so in its frame parameter."
   (agent-repl-test-titlebar--with-frame nil
