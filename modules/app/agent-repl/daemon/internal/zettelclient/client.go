@@ -20,6 +20,7 @@ import (
 
 	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/protoarm"
 	"agent-repld/internal/wsm"
 )
 
@@ -175,10 +176,9 @@ type failure interface {
 // from the message itself, so no table can fall behind the contract; an unset
 // kind is "unset".
 func refused(rpc string, f failure) error {
-	m := f.ProtoReflect()
 	kind := "unset"
-	if arm := m.WhichOneof(m.Descriptor().Oneofs().ByName("kind")); arm != nil {
-		kind = string(arm.Name())
+	if arm, ok := protoarm.Name(f.ProtoReflect(), "kind"); ok {
+		kind = string(arm)
 	}
 	return &RefusedError{RPC: rpc, Kind: kind, Detail: f.GetDetail()}
 }

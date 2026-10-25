@@ -227,7 +227,7 @@ func TestAGoneThreadDirectoryIsMadeAgainWithNoGit(t *testing.T) {
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID}
 
 	// Act
-	restored, err := f.verbs.RestoreMissingWorktree(context.Background(), ws)
+	restored, err := f.verbs.(*verbs).RestoreMissingWorktree(context.Background(), opOpen, ws)
 
 	// Assert
 	if !restored || err != nil {

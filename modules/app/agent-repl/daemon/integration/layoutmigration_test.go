@@ -198,6 +198,15 @@ var layout3Undo = map[int][]string{
 	76: {`ALTER TABLE sidebar_view DROP COLUMN open_shows_merge_queues`},
 	// Layout 77 re-encodes stored rows and changes no shape: nothing to undo.
 	77: {},
+	78: {
+		`DROP TRIGGER workspaces_thread_lives_in_the_zettel_home_insert`,
+		`DROP TRIGGER workspaces_thread_lives_in_the_zettel_home_update`,
+		`ALTER TABLE turns DROP COLUMN thread_parent`,
+		`ALTER TABLE turns DROP COLUMN thread_question`,
+		`ALTER TABLE held_prompts DROP COLUMN thread_parent`,
+		`ALTER TABLE workspaces DROP COLUMN kind`,
+		`ALTER TABLE repositories DROP COLUMN kind`,
+	},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by

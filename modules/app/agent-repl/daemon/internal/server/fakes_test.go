@@ -378,10 +378,10 @@ type fakeVerbs struct {
 	// sectionFolds records every sidebar view change
 	// the handler resolved onto the verbs, and sectionFoldErr is what each of
 	// those verbs answers instead.
-	sectionFolds   []sectionFold
+	sectionFolds []sectionFold
 	// showOpen records every ShowOpenMergeQueues, whether it asked for the
 	// merge queues.
-	showOpen []bool
+	showOpen       []bool
 	sectionFoldErr error
 	closeErr       error
 	// closedBy is every cause Close was asked with, in order.

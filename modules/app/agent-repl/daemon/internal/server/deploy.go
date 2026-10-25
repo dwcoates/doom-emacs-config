@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/protoarm"
 	"agent-repld/internal/rollout"
 )
 
@@ -239,7 +240,7 @@ func (s *server) pushToEditors(op string, push *agentreplv1.WatchDaemonResponse,
 
 // pushArm names a WatchDaemon push's arm for a log record.
 func pushArm(push *agentreplv1.WatchDaemonResponse) string {
-	return string(push.ProtoReflect().WhichOneof(push.ProtoReflect().Descriptor().Oneofs().ByName("push")).Name())
+	return string(protoarm.Must(push.ProtoReflect(), "push", "pushArm"))
 }
 
 // WebviewBuilds answers, per workspace, the webapp build every open webview
