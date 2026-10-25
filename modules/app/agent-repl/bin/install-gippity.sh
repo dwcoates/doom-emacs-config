@@ -33,7 +33,15 @@ APPLESCRIPT
 rm -rf "$dest"
 osacompile -o "$dest" "$script"
 if [[ -n "$icon" ]]; then
+  # The compiled asset catalog's icon outranks applet.icns, so it goes.
+  rm -f "$dest/Contents/Resources/Assets.car"
+  plist="$dest/Contents/Info.plist"
+  if /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$plist" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c 'Delete :CFBundleIconName' "$plist"
+  fi
   cp "$icon" "$dest/Contents/Resources/applet.icns"
+  # Editing the bundle broke osacompile's signature; sign it again.
+  codesign --force --sign - "$dest"
   touch "$dest"
 fi
 echo "install-gippity: built $dest, opening $launch_file"
