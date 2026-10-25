@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -121,6 +122,9 @@ type fakeDB struct {
 	current      *ids.WorkspaceID
 	currentErr   error
 	sessions     map[ids.WorkspaceID]wsm.Session
+	// sessionsReads counts the bulk session reads, so a test can pin that
+	// the roster reads every session at once.
+	sessionsReads int
 	// sessionErr makes every session read fail, which is the only way to
 	// reach the roster's session-read error branch: the fake's own map
 	// cannot fail.
@@ -788,6 +792,19 @@ func (d *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bo
 	}
 	s, ok := d.sessions[id]
 	return s, ok, nil
+}
+
+func (d *fakeDB) Sessions(context.Context) ([]wsm.Session, error) {
+	d.sessionsReads++
+	if d.sessionErr != nil {
+		return nil, d.sessionErr
+	}
+	out := make([]wsm.Session, 0, len(d.sessions))
+	for _, s := range d.sessions {
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Workspace < out[j].Workspace })
+	return out, nil
 }
 
 func (d *fakeDB) SetSessionTerminal(_ context.Context, id ids.WorkspaceID, t wsm.SessionTerminal) error {

@@ -3,8 +3,13 @@ package wsm
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"agent-repld/internal/dlog"
 )
 
 func TestPutSessionRoundTripsTheSpawnIdentity(t *testing.T) {
@@ -588,4 +593,70 @@ func vendorSession(t *testing.T, s *store, vendor string) WorkspaceID {
 		t.Fatalf("PutSession: %v", err)
 	}
 	return ws.ID
+}
+
+func TestSessions(t *testing.T) {
+	tests := []struct {
+		name  string
+		names []string
+	}{
+		{name: "no sessions", names: nil},
+		{name: "one session", names: []string{"alpha"}},
+		{name: "every session, each as its single read answers it", names: []string{"alpha", "beta", "gamma"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			var want []Session
+			for _, name := range tc.names {
+				ws := testWorkspaceNamed(t, s, name)
+				if err := s.PutSession(context.Background(), Session{
+					Workspace: ws.ID, HostSessionID: "host-" + name, VendorSessionID: "vendor-" + name,
+					ConfigDir: "/root/.claude", StartedAt: instant, LastEngagementAt: instant,
+				}); err != nil {
+					t.Fatalf("PutSession: %v", err)
+				}
+				one, _, err := s.Session(context.Background(), ws.ID)
+				if err != nil {
+					t.Fatalf("Session: %v", err)
+				}
+				want = append(want, one)
+			}
+			slices.SortFunc(want, func(a, b Session) int { return strings.Compare(string(a.Workspace), string(b.Workspace)) })
+
+			// Act
+			got, err := s.Sessions(context.Background())
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Sessions: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("Sessions = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestSessionsSurfacesAFailedRead(t *testing.T) {
+	// Arrange: a closed handle refuses every read.
+	s, log := testStore(t)
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Act
+	got, err := s.Sessions(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Sessions = nil error on a closed store, want the read's failure")
+	}
+	if got != nil {
+		t.Fatalf("Sessions = %+v beside a failure, want none", got)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.wsm.sessions", Message: "refused the read"}); !ok {
+		t.Fatalf("no ERROR daemon.wsm.sessions record; records = %+v", log.Records())
+	}
 }

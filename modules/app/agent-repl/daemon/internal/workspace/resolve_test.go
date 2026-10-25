@@ -5,11 +5,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -297,5 +299,87 @@ func TestRosterDropsTheSubsectionsOfAGoneRepository(t *testing.T) {
 	// Assert.
 	if len(kept) != 1 || kept[0].ID != "sub-live" {
 		t.Fatalf("the roster published %v, want only the live repository's subsection", kept)
+	}
+}
+
+func TestSessionRecords(t *testing.T) {
+	cases := []struct {
+		name       string
+		stored     []ids.WorkspaceID
+		workspaces []ids.WorkspaceID
+		want       []ids.WorkspaceID
+	}{
+		{name: "the list's order is kept", stored: []ids.WorkspaceID{"a", "b", "c"}, workspaces: []ids.WorkspaceID{"c", "a", "b"}, want: []ids.WorkspaceID{"c", "a", "b"}},
+		{name: "a workspace with no session contributes no record", stored: []ids.WorkspaceID{"a"}, workspaces: []ids.WorkspaceID{"a", "b"}, want: []ids.WorkspaceID{"a"}},
+		{name: "a session outside the list is left out", stored: []ids.WorkspaceID{"a", "gone"}, workspaces: []ids.WorkspaceID{"a"}, want: []ids.WorkspaceID{"a"}},
+		{name: "no workspaces reads no records", stored: []ids.WorkspaceID{"a"}, workspaces: nil, want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			db := newFakeDB()
+			for _, ws := range tc.stored {
+				db.sessions[ws] = wsm.Session{Workspace: ws}
+			}
+			workspaces := make([]wsm.Workspace, 0, len(tc.workspaces))
+			for _, ws := range tc.workspaces {
+				workspaces = append(workspaces, wsm.Workspace{ID: ws})
+			}
+
+			// Act
+			got, err := sessionRecords(context.Background(), db, workspaces)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("sessionRecords: %v", err)
+			}
+			var gotIDs []ids.WorkspaceID
+			for _, s := range got {
+				gotIDs = append(gotIDs, s.Workspace)
+			}
+			if !slices.Equal(gotIDs, tc.want) {
+				t.Fatalf("sessionRecords = %v, want %v", gotIDs, tc.want)
+			}
+		})
+	}
+}
+
+// TestSessionRecordsReadsEverySessionAtOnce pins the one bulk read: a read per
+// workspace queued each behind every other reader on the store's one
+// connection, and stretched a republish past its callers' budget.
+func TestSessionRecordsReadsEverySessionAtOnce(t *testing.T) {
+	// Arrange
+	db := newFakeDB()
+	var workspaces []wsm.Workspace
+	for _, ws := range []ids.WorkspaceID{"a", "b", "c", "d"} {
+		db.sessions[ws] = wsm.Session{Workspace: ws}
+		workspaces = append(workspaces, wsm.Workspace{ID: ws})
+	}
+
+	// Act
+	if _, err := sessionRecords(context.Background(), db, workspaces); err != nil {
+		t.Fatalf("sessionRecords: %v", err)
+	}
+
+	// Assert
+	if db.sessionsReads != 1 {
+		t.Fatalf("bulk session reads = %d, want exactly one for %d workspaces", db.sessionsReads, len(workspaces))
+	}
+}
+
+func TestSessionRecordsSurfacesTheReadsFailure(t *testing.T) {
+	// Arrange
+	db := newFakeDB()
+	db.sessionErr = errors.New("disk gone")
+
+	// Act
+	got, err := sessionRecords(context.Background(), db, []wsm.Workspace{{ID: "a"}})
+
+	// Assert
+	if !errors.Is(err, db.sessionErr) {
+		t.Fatalf("sessionRecords err = %v, want it to wrap %v", err, db.sessionErr)
+	}
+	if got != nil {
+		t.Fatalf("sessionRecords = %v, want no records beside the failure", got)
 	}
 }

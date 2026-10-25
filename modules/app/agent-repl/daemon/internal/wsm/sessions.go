@@ -144,8 +144,7 @@ func (s *store) Session(ctx context.Context, id WorkspaceID) (Session, bool, err
 	)
 	err := s.read(ctx, "daemon.wsm.session", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
 		sess, err := scanSession(s.db().QueryRowContext(ctx,
-			`SELECT workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at
-			 FROM sessions WHERE workspace_id = ?`, id))
+			`SELECT `+sessionSelectColumns+` FROM sessions WHERE workspace_id = ?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
 			out, found = Session{}, false
 			return nil
@@ -160,6 +159,44 @@ func (s *store) Session(ctx context.Context, id WorkspaceID) (Session, bool, err
 		return Session{}, false, err
 	}
 	return out, found, nil
+}
+
+// sessionSelectColumns is the one column list every session read scans, in
+// scanSession's order, so the single and the bulk read cannot drift apart.
+const sessionSelectColumns = `workspace_id, host_session_id, vendor_session_id, config_dir, selected_config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at`
+
+// Sessions loads every workspace's session in ONE read, ordered by workspace.
+//
+// THE ROSTER READS EVERY SESSION AT ONCE. It used to read them one workspace
+// at a time, and this store has one connection: each of the ~800 reads queued
+// behind every other reader, so a republish under a deploy's adoption burst
+// took seconds and the registrations waiting on it ran out their budget.
+func (s *store) Sessions(ctx context.Context) ([]Session, error) {
+	var out []Session
+	err := s.read(ctx, "daemon.wsm.sessions", dlog.Context{}, func(ctx context.Context) error {
+		rows, err := s.db().QueryContext(ctx, `SELECT `+sessionSelectColumns+` FROM sessions ORDER BY workspace_id`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var loaded []Session
+		for rows.Next() {
+			sess, err := scanSession(rows)
+			if err != nil {
+				return err
+			}
+			loaded = append(loaded, sess)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		out = loaded
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // SetSessionTerminal records a session's death with its cause. A session

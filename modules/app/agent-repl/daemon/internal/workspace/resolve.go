@@ -154,17 +154,26 @@ func withoutGoneRepositories(log dlog.Logger, arrangement wsm.Arrangement, sessi
 //
 // A workspace with no session contributes no record; the resolver keys on the
 // record's own workspace, and an absent one is the `none` arm it asserts.
+//
+// ONE READ, however many workspaces. The store has one connection, and a read
+// per workspace queued each of them behind every other reader: a deploy's
+// adoption burst stretched one republish past the budget of the registrations
+// waiting on it (2026-10-24). Records of workspaces outside the list are left
+// out, and the list's order is kept.
 func sessionRecords(ctx context.Context, db wsm.DB, workspaces []wsm.Workspace) ([]wsm.Session, error) {
+	all, err := db.Sessions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read the session records: %w", err)
+	}
+	byWorkspace := make(map[ids.WorkspaceID]wsm.Session, len(all))
+	for _, session := range all {
+		byWorkspace[session.Workspace] = session
+	}
 	sessions := make([]wsm.Session, 0, len(workspaces))
 	for _, ws := range workspaces {
-		session, found, err := db.Session(ctx, ws.ID)
-		if err != nil {
-			return nil, fmt.Errorf("read workspace %q's session record: %w", ws.ID, err)
+		if session, found := byWorkspace[ws.ID]; found {
+			sessions = append(sessions, session)
 		}
-		if !found {
-			continue
-		}
-		sessions = append(sessions, session)
 	}
 	return sessions, nil
 }

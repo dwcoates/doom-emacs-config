@@ -174,6 +174,9 @@ type DB interface {
 	PutSession(ctx context.Context, s Session) error
 	// Session loads one workspace's session; the bool reports existence.
 	Session(ctx context.Context, id WorkspaceID) (Session, bool, error)
+	// Sessions loads every workspace's session in one read, ordered by
+	// workspace.
+	Sessions(ctx context.Context) ([]Session, error)
 	// SetSessionTerminal records a session's death with its cause. A deleted
 	// session refuses resurrection.
 	SetSessionTerminal(ctx context.Context, id WorkspaceID, t SessionTerminal) error
