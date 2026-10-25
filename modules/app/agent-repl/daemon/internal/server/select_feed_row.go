@@ -430,12 +430,12 @@ func (s *server) responseKind(ws ids.WorkspaceID, row *frontendv1.FeedId) select
 	return selectionBubble
 }
 
-// selectBranch selects ROW, the response whose tree node LABEL the reader
-// clicked, as a click does (holdUnderClick, never toggling: the click answers
-// the node, so the response stays the one replied to), and asks the host to
-// open an entry answering LABEL in the composer. A final response is a
-// `response` selection, any other a `bubble`. selectable is false (and
-// nothing changes) for a row that is no selectable response holding the node.
+// selectBranch answers a click on the node LABEL of ROW's tree by asking the
+// host to open an entry answering LABEL in the composer, and NOTHING ELSE
+// (owner ruling, 2026-10-25): the click selects the entry, never the bubble,
+// so the selection stands as it was and the success names it (unchanged).
+// selectable is false (and nothing is asked of the host) for a row that is no
+// selectable response holding the node.
 func (s *server) selectBranch(log dlog.Logger, ws ids.WorkspaceID, row *frontendv1.FeedId, label string) (*agentreplv1.SelectFeedRowSuccess, bool, error) {
 	if !s.deps.Feed.ResponseNode(ws, row, label) {
 		log.Info(opSelectFeedRow, "a clicked branch is not a node of a response's tree", dlog.Context{"row": row.GetValue(), "label": label})
@@ -445,16 +445,27 @@ func (s *server) selectBranch(log dlog.Logger, ws ids.WorkspaceID, row *frontend
 		log.Info(opSelectFeedRow, "a clicked branch's response is not selectable", dlog.Context{"row": row.GetValue(), "label": label})
 		return nil, false, nil
 	}
-	kind := s.responseKind(ws, row)
-	return s.selectClicked(ws, kind, row, holdUnderClick(), func() {
-		log.Info(opSelectFeedRow, "selected the response whose branch was clicked; asked the host to open an entry answering it",
-			dlog.Context{"kind": kind.String(), "row": row.GetValue(), "label": label})
-		s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
-			Push: &agentreplv1.WatchHostWorkspaceResponse_ComposeEntry{
-				ComposeEntry: &agentreplv1.HostWorkspaceComposeEntry{Label: label},
-			},
-		})
+	s.selectionMu.Lock()
+	defer s.selectionMu.Unlock()
+	sel := s.selections[ws].GetSelection()
+	selected, _, _ := selectedRow(sel)
+	log.Info(opSelectFeedRow, "asked the host to open an entry answering a clicked branch; the selection is unchanged",
+		dlog.Context{"row": row.GetValue(), "label": label, "selected": selected.GetValue()})
+	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_ComposeEntry{
+			ComposeEntry: &agentreplv1.HostWorkspaceComposeEntry{Label: label},
+		},
 	})
+	return unchanged(sel), true, nil
+}
+
+// unchanged is the success of a move that leaves the selection SEL in force:
+// `selected` naming it, or `none` when nothing is selected.
+func unchanged(sel *frontendv1.FeedSelection) *agentreplv1.SelectFeedRowSuccess {
+	if _, _, held := selectedRow(sel); held {
+		return selectedSuccess(sel)
+	}
+	return selectedNone()
 }
 
 // finalResponseClicked pushes final_response_clicked onto the workspace's host

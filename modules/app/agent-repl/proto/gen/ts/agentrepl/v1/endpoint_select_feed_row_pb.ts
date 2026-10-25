@@ -126,10 +126,11 @@ export type SelectFeedRowRequest = Message<"agentrepl.v1.SelectFeedRowRequest"> 
   } | {
     /**
      * The reader clicked a node of a response's tree (owner request,
-     * 2026-10-24): select that response as the reply's target, as a click
-     * does but never toggling (frontend.v1.FeedSelectionRowViewportHold), and
-     * tell Emacs to open an entry answering the node (HostWorkspaceComposeEntry),
-     * so the reader answers a point straight from the feed. A row that is no
+     * 2026-10-24): tell Emacs to open an entry answering the node
+     * (HostWorkspaceComposeEntry), so the reader answers a point straight from
+     * the feed. The click selects the ENTRY, never the bubble (owner ruling,
+     * 2026-10-25): the selection stands as it was, and the success names it
+     * (`selected`, or `none` with nothing selected). A row that is no
      * selectable response, or whose tree holds no such node, is refused as not
      * selectable.
      *

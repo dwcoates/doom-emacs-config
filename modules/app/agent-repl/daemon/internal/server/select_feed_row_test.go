@@ -1550,23 +1550,20 @@ func branchMove(row, label string) *agentreplv1.SelectFeedRowRequest {
 	}
 }
 
-// TestSelectFeedRowBranchSelectsTheResponseAndAsksTheHostToOpenAnEntry pins
-// a click on a response's node: the response is selected as its kind, held,
-// and the host is asked to open an entry answering the node.
-func TestSelectFeedRowBranchSelectsTheResponseAndAsksTheHostToOpenAnEntry(t *testing.T) {
+// TestSelectFeedRowBranchAsksTheHostToOpenAnEntryAndLeavesTheSelection pins
+// a click on a response's node: the host is asked to open an entry answering
+// the node, and the selection stands exactly as it was, the clicked response
+// never selected by the click.
+func TestSelectFeedRowBranchAsksTheHostToOpenAnEntryAndLeavesTheSelection(t *testing.T) {
 	tests := []struct {
-		name string
-		arm  func(*frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport
-		set  func(*harness)
+		name     string
+		set      func(*harness)
+		selected string
 	}{
-		{name: "a final response", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1") },
-			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
-				return s.GetResponse().GetViewport()
-			}},
-		{name: "an interim response", set: func(h *harness) { h.Feed.markdown = map[string]string{"resp-1": "interim"} },
-			arm: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
-				return s.GetBubble().GetViewport()
-			}},
+		{name: "a final response, nothing selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1") }},
+		{name: "an interim response, nothing selected", set: func(h *harness) { h.Feed.markdown = map[string]string{"resp-1": "interim"} }},
+		{name: "another response selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-0", "resp-1") }, selected: "resp-0"},
+		{name: "the clicked response selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1") }, selected: "resp-1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1574,6 +1571,9 @@ func TestSelectFeedRowBranchSelectsTheResponseAndAsksTheHostToOpenAnEntry(t *tes
 			h := newHarness(t)
 			tc.set(h)
 			h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
+			if tc.selected != "" {
+				sendMove(t, h, bubbleMove(&frontendv1.FeedId{Value: tc.selected}))
+			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			stream := dialHostStream(t, h, ctx)
@@ -1583,32 +1583,49 @@ func TestSelectFeedRowBranchSelectsTheResponseAndAsksTheHostToOpenAnEntry(t *tes
 			event := receiveHostEventPastSelection(t, stream)
 
 			// Assert.
-			if tc.arm(resp.Msg.GetSuccess().GetSelected().GetSelection()).GetHold() == nil {
-				t.Fatalf("result = %v, want resp-1 selected and held", resp.Msg.GetResult())
-			}
 			if got := event.GetComposeEntry().GetLabel(); got != "3.1" {
 				t.Fatalf("event = %v, want compose_entry naming 3.1", event)
+			}
+			row, _, held := h.Server.(*server).currentSelection(testWorkspaceID)
+			if row.GetValue() != tc.selected || held != (tc.selected != "") {
+				t.Fatalf("selection after the click = (%q, %v), want %q left as it was", row.GetValue(), held, tc.selected)
+			}
+			if tc.selected == "" && resp.Msg.GetSuccess().GetNone() == nil {
+				t.Fatalf("result = %v, want none: nothing is selected", resp.Msg.GetResult())
+			}
+			if tc.selected != "" && resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue() != tc.selected {
+				t.Fatalf("result = %v, want %q still selected", resp.Msg.GetResult(), tc.selected)
 			}
 		})
 	}
 }
 
-// TestSelectFeedRowBranchNeverDeselects pins that a second click on a node
-// keeps the response selected: the click answers the node, so the response
-// stays the one replied to.
-func TestSelectFeedRowBranchNeverDeselects(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.Feed.finals = feedIDs("resp-1")
-	h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
-	sendMove(t, h, branchMove("resp-1", "3.1"))
+// TestUnchangedNamesTheSelectionInForce pins the success of a move that leaves
+// the selection alone: `selected` naming a held selection, `none` without one.
+func TestUnchangedNamesTheSelectionInForce(t *testing.T) {
+	held := selectionOf(selectionResponse, &frontendv1.FeedId{Value: "resp-1"}, holdUnderClick())
+	tests := []struct {
+		name string
+		sel  *frontendv1.FeedSelection
+		want func(*agentreplv1.SelectFeedRowSuccess) bool
+	}{
+		{name: "a held selection", sel: held, want: func(s *agentreplv1.SelectFeedRowSuccess) bool {
+			return s.GetSelected().GetSelection() == held
+		}},
+		{name: "no selection", sel: nil, want: func(s *agentreplv1.SelectFeedRowSuccess) bool { return s.GetNone() != nil }},
+		{name: "a none selection", sel: &frontendv1.FeedSelection{Selection: &frontendv1.FeedSelection_None{None: returnToTail()}},
+			want: func(s *agentreplv1.SelectFeedRowSuccess) bool { return s.GetNone() != nil }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := unchanged(tc.sel)
 
-	// Act.
-	resp := sendMove(t, h, branchMove("resp-1", "3.1"))
-
-	// Assert.
-	if resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse() == nil {
-		t.Fatalf("result = %v, want the response still selected", resp.Msg.GetResult())
+			// Assert.
+			if !tc.want(got) {
+				t.Fatalf("unchanged(%v) = %v", tc.sel, got)
+			}
+		})
 	}
 }
 
@@ -1660,23 +1677,24 @@ func TestSelectFeedRowBranchRefusesARowThatIsNoSelectableResponseHoldingTheNode(
 }
 
 // TestSelectFeedRowBranchClickIsRecordedAtInfo pins that the click enters the
-// workspace log, naming the row and the label.
+// workspace log, naming the row, the label and the selection it left alone.
 func TestSelectFeedRowBranchClickIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
 	h, log := newLoggedHarness(t)
-	h.Feed.finals = feedIDs("resp-1")
+	h.Feed.finals = feedIDs("resp-0", "resp-1")
 	h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
+	sendMove(t, h, bubbleMove(&frontendv1.FeedId{Value: "resp-0"}))
 
 	// Act.
 	sendMove(t, h, branchMove("resp-1", "3.1"))
 
 	// Assert.
 	for _, rec := range log.at("INFO") {
-		if rec.Operation == opSelectFeedRow && rec.Context["row"] == "resp-1" && rec.Context["label"] == "3.1" && rec.Context["kind"] == "response" {
+		if rec.Operation == opSelectFeedRow && rec.Context["row"] == "resp-1" && rec.Context["label"] == "3.1" && rec.Context["selected"] == "resp-0" {
 			return
 		}
 	}
-	t.Fatalf("INFO records = %v, want one naming resp-1, its node 3.1 and the response kind", log.at("INFO"))
+	t.Fatalf("INFO records = %v, want one naming resp-1, its node 3.1 and the selection resp-0", log.at("INFO"))
 }
 
 // TestSelectClickedSetsTheSelectionAndRunsThenUnderTheLock pins the one way a
@@ -1726,9 +1744,9 @@ func TestSelectClickedFailsWithoutRunningThen(t *testing.T) {
 	}
 }
 
-// TestEveryClickSelectsThroughSelectClicked pins that each click handler
-// (bubble, answer, entry, branch) selects through selectClicked, so none
-// hand-rolls the lock and the store.
+// TestEveryClickSelectsThroughSelectClicked pins that each click handler that
+// selects (bubble, answer, entry) selects through selectClicked, so none
+// hand-rolls the lock and the store. A branch click selects nothing.
 func TestEveryClickSelectsThroughSelectClicked(t *testing.T) {
 	// Arrange.
 	src, err := os.ReadFile("select_feed_row.go")
@@ -1740,8 +1758,8 @@ func TestEveryClickSelectsThroughSelectClicked(t *testing.T) {
 	calls := strings.Count(string(src), "s.selectClicked(")
 	builds := strings.Count(string(src), "selectionOf(kind, row,")
 
-	// Assert: four handlers call it, and only it builds a clicked selection.
-	if calls != 4 || builds != 1 {
-		t.Fatalf("select_feed_row.go calls selectClicked %d times and builds a clicked selection %d times, want 4 and 1", calls, builds)
+	// Assert: three handlers call it, and only it builds a clicked selection.
+	if calls != 3 || builds != 1 {
+		t.Fatalf("select_feed_row.go calls selectClicked %d times and builds a clicked selection %d times, want 3 and 1", calls, builds)
 	}
 }
