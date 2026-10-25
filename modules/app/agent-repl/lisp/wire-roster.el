@@ -1149,13 +1149,14 @@ See `agent-repl-wire--decode-expanded-collapse'."
   (agent-repl-wire--decode-empty "RosterSubsectionCollapsed" value))
 
 (defun agent-repl-wire-decode-roster-subsection (value)
-  "Decode VALUE as `RosterSubsection', a plist `(:kind :header :open-rows :fold)'.
+  "Decode VALUE as `RosterSubsection'.
+A plist `(:kind :header :open-rows :fold)'.
 One subsection of a repository's section: `:kind' is `:named', a subsection
-the user made, or `:one-shot', the repository's one-shot subsection.  Emacs draws nothing
-from it but walks its rows, because a workspace in a subsection has its
-row there and nowhere else in the repository grouping.  A collapsed
-subsection's rows carry folded tabs, which is all the tab bar reads of its
-fold."
+the user made, or `:one-shot', the repository's one-shot subsection.  Emacs
+draws nothing from it but walks its rows, because a workspace in a
+subsection has its row there and nowhere else in the repository grouping.
+A collapsed subsection's rows carry folded tabs, which is all the tab bar
+reads of its fold."
   (let ((object (agent-repl-wire--object "RosterSubsection" value)))
     (agent-repl-wire--check-keys "RosterSubsection" object '(named oneShot header openRows expanded collapsed))
     (agent-repl-wire--decoded
