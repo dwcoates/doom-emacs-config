@@ -67,6 +67,18 @@ independent of whether the webapp has been built in this checkout."
     ;; Assert
     (should (equal name "*agent-frontend-myws*"))))
 
+(ert-deftest agent-repl-test-frontend-webview-name-of-a-thread-is-an-agent-view ()
+  "A thread's `chat/NAME' names a webview the agent-view predicate matches.
+Its identity segment is the input buffer's, so the two are partners."
+  ;; Act
+  (let ((name (agent-repl--frontend-webview-buffer-name "chat/why-blue")))
+    ;; Assert
+    (should (equal name "*agent-frontend-chat_why-blue*"))
+    (should (agent-repl--agent-view-buffer-name-p name))
+    (should (equal (agent-repl--extract-panel-id name)
+                   (agent-repl--extract-panel-id
+                    (agent-repl--input-buffer-name "chat/why-blue" "chat/why-blue"))))))
+
 (ert-deftest agent-repl-test-frontend-webview-name-distinct-from-input-namespace ()
   "The webview name does not collide with the input buffer's naming scheme.
 The two buffers are named by entirely different schemes
