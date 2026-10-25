@@ -327,8 +327,9 @@ export async function boot(): Promise<void> {
     // A CHAT THREAD'S PAGE MOUNTS THE CHAT where an agent workspace's mounts
     // its feed (the daemon names which, AdoptWebWorkspace). Everything else on
     // the page -- the topbar, the footer, the sidebar -- is the same page.
-    const body = adopted.page === "thread" ? mountThreadBody(shell, ctx) : null;
-    const feed = body ?? mountFeed(shell.feed, ctx, {
+    // Only an agent workspace's feed is a footer's (`workspaceFeed`): a
+    // thread's page mounts none, so no jump row can ever reach the chat.
+    const workspaceFeed = adopted.page === "thread" ? null : mountFeed(shell.feed, ctx, {
       renderers: createRowRenderers(ctx),
       // The root feed's held section draws in the tail region after the rows.
       held: { host: shell.holdTray, editorIngress },
@@ -347,6 +348,7 @@ export async function boot(): Promise<void> {
             mountComposer(host, ctx, { feed: bubble, gate, onPanel: showPanel })
         : undefined,
     });
+    const feed: PageBody = workspaceFeed ?? mountThreadBody(shell, ctx);
     reveals.bind((row) => feed.revealRow(row));
 
     // A SWITCH TO THIS WORKSPACE RETURNS THE FEED TO ITS TAIL (owner ruling,
@@ -385,27 +387,15 @@ export async function boot(): Promise<void> {
     // where it would have been when shown (host/unshown-animations.ts).
     if (pagePresence().embedded) pauseAnimationsWhileUnshown(liveUnshownAnimationsEnv(document, pagePresence()));
 
-    const footer = mountFooter(shell.footer, ctx, {
-      selectDetachedWork: (id) => feed.selectDetachedWork(id),
-      presence: pagePresence(),
-    });
-    // A HOVERED RESPONSE'S USAGE IS READ IN THE FOOTER (owner request,
-    // 2026-10-25): the bubble draws no figure of its own, and the footer's
-    // activity cell shows it while the pointer is on the bubble.
-    installResponseUsageHover(shell.feed, (usage) => footer.showResponseUsage(usage));
-    // THE GATE IS THE FOOTER'S OWN COLOR (owner ruling, 2026-09-28). A
-    // composer is closed exactly when the footer's status arm is blue (the
-    // workspace is unusable: an agent-repl fault, a network fault, a close) —
-    // render-colors.json#composer_closed_colors; a merge in flight holds
-    // what is submitted, so purple leaves it open —
-    // and the sentence it shows is the footer's status arm rather than a
-    // second vocabulary. Every other arm is a usable workspace, turquoise
-    // included — a vendor fault's prompts are held until the vendor serves
-    // (owner ruling, 2026-10-02) — so its composer is open.
-    footer.onStatus((statusCase, substatusCase) => {
-      const closed = composerClosedFor(statusCase, substatusCase);
-      gate.set(closed ? "closed" : "open", closed ? statusCase : undefined);
-    });
+    // A CHAT THREAD'S PAGE HAS NO FOOTER (owner request, 2026-10-25): its
+    // composer is Emacs's and no webview composer is gated on a status, so
+    // the strip has nothing to say there. Its box stays hidden.
+    if (workspaceFeed === null) {
+      shell.footer.hidden = true;
+      log.info("a chat thread's page mounts no footer", { operation: "main.thread-no-footer" });
+    } else {
+      mountWorkspaceFooter(shell, ctx, workspaceFeed, gate);
+    }
 
     if (address.composer) {
       mountComposer(shell.composer, ctx, { gate, onPanel: showPanel });
@@ -423,21 +413,52 @@ export async function boot(): Promise<void> {
   }
 }
 
+/**
+ * An agent workspace's footer: its status strip, the response usage a hovered
+ * bubble shows in it, and the webview composer's gate, which is the footer's
+ * own color.
+ */
+function mountWorkspaceFooter(
+  shell: ReturnType<typeof shellElements>,
+  ctx: AppContext,
+  feed: { selectDetachedWork(id: FeedId): Promise<boolean> },
+  gate: ReturnType<typeof createComposerGate>,
+): void {
+  const footer = mountFooter(shell.footer, ctx, {
+    selectDetachedWork: (id) => feed.selectDetachedWork(id),
+    presence: pagePresence(),
+  });
+  // A HOVERED RESPONSE'S USAGE IS READ IN THE FOOTER (owner request,
+  // 2026-10-25): the bubble draws no figure of its own, and the footer's
+  // activity cell shows it while the pointer is on the bubble.
+  installResponseUsageHover(shell.feed, (usage) => footer.showResponseUsage(usage));
+  // THE GATE IS THE FOOTER'S OWN COLOR (owner ruling, 2026-09-28). A
+  // composer is closed exactly when the footer's status arm is blue (the
+  // workspace is unusable: an agent-repl fault, a network fault, a close) —
+  // render-colors.json#composer_closed_colors; a merge in flight holds
+  // what is submitted, so purple leaves it open —
+  // and the sentence it shows is the footer's status arm rather than a
+  // second vocabulary. Every other arm is a usable workspace, turquoise
+  // included — a vendor fault's prompts are held until the vendor serves
+  // (owner ruling, 2026-10-02) — so its composer is open.
+  footer.onStatus((statusCase, substatusCase) => {
+    const closed = composerClosedFor(statusCase, substatusCase);
+    gate.set(closed ? "closed" : "open", closed ? statusCase : undefined);
+  });
+}
+
 /** The body a thread page mounts, as the boot wires a feed's. */
 interface PageBody {
   /** This workspace was switched to: show the conversation's end. */
   workspaceSelected(): void;
-  /** A footer jump row asked for a detached work's row. */
-  selectDetachedWork(id: FeedId): Promise<boolean>;
   /** The daemon asked for a feed row to be revealed (WebWorkspaceRevealRow). */
   revealRow(id: FeedId): Promise<boolean>;
 }
 
 /**
  * A chat thread's body: the chat, drawn in the feed's own box. A thread has no
- * feed rows: it runs no tools, so no detached work for the footer to jump to,
- * and the daemon reveals no row of it. Either ask reaching it is a defect,
- * thrown as one (`noFeedRow`).
+ * feed rows, and the daemon reveals no row of it: that ask reaching it is a
+ * defect, thrown as one (`noFeedRow`). It has no footer, so no jump row asks.
  */
 function mountThreadBody(shell: ReturnType<typeof shellElements>, ctx: AppContext): PageBody {
   mountChat(shell.feed, ctx, { scroll: shell.feedScroll, shown: () => pagePresence().shown() });
@@ -445,8 +466,6 @@ function mountThreadBody(shell: ReturnType<typeof shellElements>, ctx: AppContex
     workspaceSelected: () => {
       landChatAtEnd(shell.feedScroll, "workspaceSelected");
     },
-    selectDetachedWork: (id) =>
-      noFeedRow(id, "main.thread-detached-work", "a footer jump row reached a chat thread, which runs no detached work"),
     revealRow: (id) => noFeedRow(id, "main.thread-reveal-row", "the daemon asked a chat thread to reveal a feed row"),
   };
 }
