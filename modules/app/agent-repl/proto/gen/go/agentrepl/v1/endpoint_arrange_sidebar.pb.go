@@ -599,10 +599,12 @@ func (*ArrangeMoveRepository_End) isArrangeMoveRepository_To() {}
 // root, so placing a parent takes its descendants and placing a child takes
 // its ancestors (and so their every descendant).
 //
-// PLACING A FAMILY TAKES IT OUT OF THE ONE-SHOT SUBSECTION: every member's
-// one-shot mark is cleared in the same write, so the family is drawn where it
-// was placed (frontend.v1.RosterSubsectionOneShot). A family enters the
-// one-shot subsection by a mark (SetWorkspaceOneShot), never by a placement.
+// PLACING A FAMILY TAKES IT OUT OF THE ONE-SHOT SUBSECTION: the one-shot
+// mark of every member that is not closed is cleared in the same write, so
+// the family is drawn where it was placed (frontend.v1.RosterSubsectionOneShot).
+// A closed member keeps its mark: a finished one-shot is still one, and its
+// mark draws the family nowhere. A family enters the one-shot subsection by a
+// mark (SetWorkspaceOneShot), never by a placement.
 type ArrangePlaceWorkspace struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Workspace *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`

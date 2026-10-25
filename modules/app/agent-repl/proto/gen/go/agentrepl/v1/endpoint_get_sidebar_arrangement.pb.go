@@ -183,8 +183,8 @@ func (x *ArrangedRepository) GetEntries() []*ArrangedEntry {
 	return nil
 }
 
-// One entry of a repository's arrangement: a family in no subsection, or a
-// subsection.
+// One entry of a repository's arrangement: a family in no subsection, a
+// subsection, or the repository's one-shot subsection.
 type ArrangedEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// THE ARM IS WHAT STANDS AT THIS POINT OF THE REPOSITORY. Never unset.
@@ -193,6 +193,7 @@ type ArrangedEntry struct {
 	//
 	//	*ArrangedEntry_Workspace
 	//	*ArrangedEntry_Subsection
+	//	*ArrangedEntry_OneShot
 	Entry         isArrangedEntry_Entry `protobuf_oneof:"entry"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -253,6 +254,15 @@ func (x *ArrangedEntry) GetSubsection() *ArrangedSubsection {
 	return nil
 }
 
+func (x *ArrangedEntry) GetOneShot() *ArrangedOneShot {
+	if x != nil {
+		if x, ok := x.Entry.(*ArrangedEntry_OneShot); ok {
+			return x.OneShot
+		}
+	}
+	return nil
+}
+
 type isArrangedEntry_Entry interface {
 	isArrangedEntry_Entry()
 }
@@ -265,9 +275,67 @@ type ArrangedEntry_Subsection struct {
 	Subsection *ArrangedSubsection `protobuf:"bytes,2,opt,name=subsection,proto3,oneof"`
 }
 
+type ArrangedEntry_OneShot struct {
+	OneShot *ArrangedOneShot `protobuf:"bytes,3,opt,name=one_shot,json=oneShot,proto3,oneof"`
+}
+
 func (*ArrangedEntry_Workspace) isArrangedEntry_Entry() {}
 
 func (*ArrangedEntry_Subsection) isArrangedEntry_Entry() {}
+
+func (*ArrangedEntry_OneShot) isArrangedEntry_Entry() {}
+
+// The repository's ONE-SHOT subsection (frontend.v1.RosterSubsectionOneShot):
+// every family holding an open workspace marked one-shot. It is derived from
+// the marks, so it is listed only while it has families, and always as the
+// repository's last entry. It has no SubsectionRef, so ArrangeSidebar can
+// neither name it as a destination or anchor nor rename, move or delete it.
+// A family enters it when a member is marked (SetWorkspaceOneShot) and leaves
+// it when its marks are cleared, which placing the family anywhere does.
+type ArrangedOneShot struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The families, root by root in drawn order.
+	Workspaces    []*ArrangedWorkspace `protobuf:"bytes,1,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArrangedOneShot) Reset() {
+	*x = ArrangedOneShot{}
+	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArrangedOneShot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArrangedOneShot) ProtoMessage() {}
+
+func (x *ArrangedOneShot) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArrangedOneShot.ProtoReflect.Descriptor instead.
+func (*ArrangedOneShot) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ArrangedOneShot) GetWorkspaces() []*ArrangedWorkspace {
+	if x != nil {
+		return x.Workspaces
+	}
+	return nil
+}
 
 // One subsection: its name and its families.
 type ArrangedSubsection struct {
@@ -282,7 +350,7 @@ type ArrangedSubsection struct {
 
 func (x *ArrangedSubsection) Reset() {
 	*x = ArrangedSubsection{}
-	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -294,7 +362,7 @@ func (x *ArrangedSubsection) String() string {
 func (*ArrangedSubsection) ProtoMessage() {}
 
 func (x *ArrangedSubsection) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -307,7 +375,7 @@ func (x *ArrangedSubsection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangedSubsection.ProtoReflect.Descriptor instead.
 func (*ArrangedSubsection) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ArrangedSubsection) GetSubsection() *SubsectionRef {
@@ -358,7 +426,7 @@ type ArrangedWorkspace struct {
 
 func (x *ArrangedWorkspace) Reset() {
 	*x = ArrangedWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -370,7 +438,7 @@ func (x *ArrangedWorkspace) String() string {
 func (*ArrangedWorkspace) ProtoMessage() {}
 
 func (x *ArrangedWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -383,7 +451,7 @@ func (x *ArrangedWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangedWorkspace.ProtoReflect.Descriptor instead.
 func (*ArrangedWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ArrangedWorkspace) GetWorkspace() *v1.WorkspaceRef {
@@ -442,13 +510,18 @@ const file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDesc = "" +
 	"repository\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x125\n" +
 	"\aentries\x18\x05 \x03(\v2\x1b.agentrepl.v1.ArrangedEntryR\aentriesJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05R\n" +
-	"workspacesR\vsubsections\"\x9d\x01\n" +
+	"workspacesR\vsubsections\"\xd9\x01\n" +
 	"\rArrangedEntry\x12?\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1f.agentrepl.v1.ArrangedWorkspaceH\x00R\tworkspace\x12B\n" +
 	"\n" +
 	"subsection\x18\x02 \x01(\v2 .agentrepl.v1.ArrangedSubsectionH\x00R\n" +
-	"subsectionB\a\n" +
-	"\x05entry\"\xa6\x01\n" +
+	"subsection\x12:\n" +
+	"\bone_shot\x18\x03 \x01(\v2\x1d.agentrepl.v1.ArrangedOneShotH\x00R\aoneShotB\a\n" +
+	"\x05entry\"R\n" +
+	"\x0fArrangedOneShot\x12?\n" +
+	"\n" +
+	"workspaces\x18\x01 \x03(\v2\x1f.agentrepl.v1.ArrangedWorkspaceR\n" +
+	"workspaces\"\xa6\x01\n" +
 	"\x12ArrangedSubsection\x12;\n" +
 	"\n" +
 	"subsection\x18\x01 \x01(\v2\x1b.agentrepl.v1.SubsectionRefR\n" +
@@ -478,34 +551,37 @@ func file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescGZIP() []by
 	return file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_goTypes = []any{
 	(*GetSidebarArrangementRequest)(nil),  // 0: agentrepl.v1.GetSidebarArrangementRequest
 	(*GetSidebarArrangementResponse)(nil), // 1: agentrepl.v1.GetSidebarArrangementResponse
 	(*ArrangedRepository)(nil),            // 2: agentrepl.v1.ArrangedRepository
 	(*ArrangedEntry)(nil),                 // 3: agentrepl.v1.ArrangedEntry
-	(*ArrangedSubsection)(nil),            // 4: agentrepl.v1.ArrangedSubsection
-	(*ArrangedWorkspace)(nil),             // 5: agentrepl.v1.ArrangedWorkspace
-	(*v1.RepositoryRef)(nil),              // 6: workspace.v1.RepositoryRef
-	(*SubsectionRef)(nil),                 // 7: agentrepl.v1.SubsectionRef
-	(*v1.WorkspaceRef)(nil),               // 8: workspace.v1.WorkspaceRef
+	(*ArrangedOneShot)(nil),               // 4: agentrepl.v1.ArrangedOneShot
+	(*ArrangedSubsection)(nil),            // 5: agentrepl.v1.ArrangedSubsection
+	(*ArrangedWorkspace)(nil),             // 6: agentrepl.v1.ArrangedWorkspace
+	(*v1.RepositoryRef)(nil),              // 7: workspace.v1.RepositoryRef
+	(*SubsectionRef)(nil),                 // 8: agentrepl.v1.SubsectionRef
+	(*v1.WorkspaceRef)(nil),               // 9: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_depIdxs = []int32{
 	2,  // 0: agentrepl.v1.GetSidebarArrangementResponse.repositories:type_name -> agentrepl.v1.ArrangedRepository
-	6,  // 1: agentrepl.v1.ArrangedRepository.repository:type_name -> workspace.v1.RepositoryRef
+	7,  // 1: agentrepl.v1.ArrangedRepository.repository:type_name -> workspace.v1.RepositoryRef
 	3,  // 2: agentrepl.v1.ArrangedRepository.entries:type_name -> agentrepl.v1.ArrangedEntry
-	5,  // 3: agentrepl.v1.ArrangedEntry.workspace:type_name -> agentrepl.v1.ArrangedWorkspace
-	4,  // 4: agentrepl.v1.ArrangedEntry.subsection:type_name -> agentrepl.v1.ArrangedSubsection
-	7,  // 5: agentrepl.v1.ArrangedSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
-	5,  // 6: agentrepl.v1.ArrangedSubsection.workspaces:type_name -> agentrepl.v1.ArrangedWorkspace
-	8,  // 7: agentrepl.v1.ArrangedWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	5,  // 8: agentrepl.v1.ArrangedWorkspace.children:type_name -> agentrepl.v1.ArrangedWorkspace
-	8,  // 9: agentrepl.v1.ArrangedWorkspace.parent:type_name -> workspace.v1.WorkspaceRef
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	6,  // 3: agentrepl.v1.ArrangedEntry.workspace:type_name -> agentrepl.v1.ArrangedWorkspace
+	5,  // 4: agentrepl.v1.ArrangedEntry.subsection:type_name -> agentrepl.v1.ArrangedSubsection
+	4,  // 5: agentrepl.v1.ArrangedEntry.one_shot:type_name -> agentrepl.v1.ArrangedOneShot
+	6,  // 6: agentrepl.v1.ArrangedOneShot.workspaces:type_name -> agentrepl.v1.ArrangedWorkspace
+	8,  // 7: agentrepl.v1.ArrangedSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
+	6,  // 8: agentrepl.v1.ArrangedSubsection.workspaces:type_name -> agentrepl.v1.ArrangedWorkspace
+	9,  // 9: agentrepl.v1.ArrangedWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	6,  // 10: agentrepl.v1.ArrangedWorkspace.children:type_name -> agentrepl.v1.ArrangedWorkspace
+	9,  // 11: agentrepl.v1.ArrangedWorkspace.parent:type_name -> workspace.v1.WorkspaceRef
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_init() }
@@ -517,15 +593,16 @@ func file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_init() {
 	file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[3].OneofWrappers = []any{
 		(*ArrangedEntry_Workspace)(nil),
 		(*ArrangedEntry_Subsection)(nil),
+		(*ArrangedEntry_OneShot)(nil),
 	}
-	file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[5].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[6].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDesc), len(file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -15,7 +15,7 @@ This change runs as a one-shot workspace with contract changes pre-approved by t
 ### A family never splits, and moves whole (owner rulings 2026-10-14 and 2026-10-20)
 
 - The unit is the family. A family is drawn in the one-shot subsection while any OPEN member is marked. A closed or hidden member's mark does not count, since finished one-shots keep their mark and are closed.
-- Placing a family elsewhere (`ArrangePlaceWorkspace`, `ArrangePlaceWorkspaces`) clears every member's mark in the same write. Otherwise the family would stay in the one-shot subsection after being dropped elsewhere.
+- Placing a family elsewhere (`ArrangePlaceWorkspace`, `ArrangePlaceWorkspaces`) clears the mark of every member that is not closed, in the same write. Otherwise the family would stay in the one-shot subsection after being dropped elsewhere. A closed member keeps its mark, since a finished one-shot is still one.
 
 ## Landed changes
 
@@ -40,8 +40,14 @@ This change runs as a one-shot workspace with contract changes pre-approved by t
 
 - What: documented on both messages, with no shape change.
 - Why: dragging a row out of the one-shot subsection is an ordinary placement. The placement must take the family out of the one-shot subsection, or the drop would not show.
-- Consequences: `wsm`'s placement write clears `creation_jobs.one_shot` for every member of each placed family, in the same transaction.
+- Consequences: `wsm`'s placement write clears `creation_jobs.one_shot` for every member of each placed family that is not closed, in the same transaction.
 
 ### Dragging INTO the one-shot subsection
 
 - It is `SetWorkspaceOneShot(workspace, one_shot)` on the dropped workspace, with no `ArrangeSidebar` change. Marking one member brings its whole family in. A refusal, such as `owner_lands`, is drawn at the drop, as any refused drop is.
+
+### 4. `agentrepl.v1.ArrangedEntry` gains `one_shot`
+
+- What: a third arm, `ArrangedOneShot { repeated ArrangedWorkspace workspaces }`, listed last and only while it has families.
+- Why: `GetSidebarArrangement` answers what the sidebar draws. Without the arm, an agent would read a marked family as an unsectioned one, at a place where the sidebar does not draw it.
+- Consequences: an agent sees the one-shot subsection, and still cannot name it in `ArrangeSidebar`.
