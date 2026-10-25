@@ -31,7 +31,7 @@ import { editorIngressEntry } from "../feed/harness.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { testHeldContext } from "./held-context.js";
 import { plainProse } from "../prose.js";
-import { PROMPT_COPY_CLASS } from "../../src/feed/rows/blocks.js";
+import { BUBBLE_COPY_CLASS } from "../../src/bubble/copy-room.js";
 import { boundCopyText } from "../../src/copy-control.js";
 import { BUBBLE_CAP_ATTRIBUTE, USER_PROMPT_CAP_LINES } from "../../src/bubble/draw.js";
 
@@ -273,7 +273,7 @@ describe("the badge every held card shares", () => {
 describe("the user prompt's look on an ingress card", () => {
   it("draws the daemon's item with the user prompt's copy control, copying its words", () => {
     // Arrange / Act
-    const copy = drawHeldIngressPrompt(ingress("noSession"), heldContext()).querySelector(`.${PROMPT_COPY_CLASS}`);
+    const copy = drawHeldIngressPrompt(ingress("noSession"), heldContext()).querySelector(`.${BUBBLE_COPY_CLASS}`);
     // Assert
     expect(copy === null ? null : boundCopyText(copy).text).toBe("what's dmitry's comment");
   });
@@ -282,7 +282,7 @@ describe("the user prompt's look on an ingress card", () => {
     // Arrange / Act
     const card = drawEditorIngressEntry(editorIngressEntry("k-1", "sent offline"), heldContext());
     // Assert
-    expect(card.querySelector(`.${PROMPT_COPY_CLASS}`)).toBeNull();
+    expect(card.querySelector(`.${BUBBLE_COPY_CLASS}`)).toBeNull();
   });
 
   it.each([

@@ -22,14 +22,8 @@ import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   REVEALED_ATTRIBUTE,
   RESPONSE_CUT_SHORT_ACTIONS_CLASS,
-  RESPONSE_COPY_CLASS,
   RESPONSE_PROSE_CLASS,
   THINKING_BUBBLE_CLASS,
-  USAGE_AGE_RESERVE_LABELS,
-  USAGE_AGO_WIDTH_PROPERTY,
-  USAGE_RESERVE_LABELS_PROPERTY,
-  USAGE_REVEALED_CLASS,
-  USAGE_TOKEN_TEXT_PROPERTY,
   INTERIM_RESPONSE_CLASS,
   drawFeedResponse,
   isInterimResponse,
@@ -37,8 +31,6 @@ import {
   responseCapLines,
   carriedNumber,
   revealedSoFar,
-  usageAgeWithinReserve,
-  usageReserveLabelsCss,
 } from "../../../src/feed/cards/response.js";
 import { proseHtml } from "../../../src/bubble/body.js";
 import {
@@ -48,7 +40,7 @@ import {
 } from "../../../src/login/request.js";
 import { visibleWidth } from "../../../src/metaprompt-tree.js";
 import { installTreeLayout, stagedCols, useTreeLayout } from "../../tree-layout.js";
-import { TICKING_ATTRIBUTE, stopClocks, stopTicking } from "../../../src/feed/ticking.js";
+import { stopTicking } from "../../../src/feed/ticking.js";
 import { fireResize } from "../../resize-observer.js";
 import stylesheet from "../../../src/styles.css?raw";
 import responseSource from "../../../src/feed/cards/response.ts?raw";
@@ -60,7 +52,6 @@ import {
   BUBBLE_MORE_ATTRIBUTE,
   BUBBLE_MORE_ELLIPSIS,
   BUBBLE_UNCAPPED,
-  SAYS_ATTRIBUTE,
 } from "../../../src/bubble/draw.js";
 import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
@@ -69,6 +60,8 @@ import type { PageSeen } from "../../../src/page-seen.js";
 import { orderFor } from "../../feed-order.js";
 import { plainProse, servedProse, treeProse } from "../../prose.js";
 import { boundCopyText } from "../../../src/copy-control.js";
+import { BUBBLE_COPY_CLASS, COPY_ROOM_CLASS } from "../../../src/bubble/copy-room.js";
+import { responseUsageOf } from "../../../src/feed/response-usage.js";
 import { COMPOSER_ENTRY_CLASS, createComposerEntryHighlight } from "../../../src/feed/composer-entry.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
@@ -167,14 +160,14 @@ describe("a final response's copy control", () => {
       rowContext(),
     );
     // Assert
-    const control = el.querySelector(`.${RESPONSE_COPY_CLASS}`);
+    const control = el.querySelector(`.${BUBBLE_COPY_CLASS}`);
     expect([control?.getAttribute("data-copies"), control === null ? null : boundCopyText(control).text]).toEqual([
       "response",
       "**done**",
     ]);
   });
 
-  it("stands under the usage corner, the two in the corner in that order", () => {
+  it("stands alone in the box's corner, before the body", () => {
     // Act
     const el = drawFeedResponse(
       response({
@@ -186,11 +179,18 @@ describe("a final response's copy control", () => {
     );
     // Assert
     const box = el.querySelector(`:scope > .${BUBBLE_BOX_CLASS}`);
-    const corner = [...(box?.children ?? [])].slice(0, 2);
-    expect(corner.map((c) => [c.classList.contains("usage-corner"), c.classList.contains(RESPONSE_COPY_CLASS)])).toEqual([
-      [true, false],
-      [false, true],
-    ]);
+    expect([...(box?.children ?? [])].map((c) => c.classList.contains(BUBBLE_COPY_CLASS))).toEqual([true, false]);
+  });
+
+  it("opens the prose's first line with the room it takes", () => {
+    // Act
+    const el = drawFeedResponse(
+      response({ finalAnswer: true, result: { case: "success", value: { prose: { prose: plainProse("done\n\nmore") } } } }),
+      rowContext(),
+    );
+    // Assert
+    const ghosts = [...el.querySelectorAll(`.${COPY_ROOM_CLASS}`)];
+    expect(ghosts.map((g) => [g.parentElement?.tagName, g.parentElement?.textContent])).toEqual([["P", "done"]]);
   });
 
   it.each([
@@ -203,7 +203,20 @@ describe("a final response's copy control", () => {
       rowContext(),
     );
     // Assert
-    expect(el.querySelector(`.${RESPONSE_COPY_CLASS}`)).toBeNull();
+    expect(el.querySelector(`.${BUBBLE_COPY_CLASS}`)).toBeNull();
+  });
+
+  it.each([
+    ["an interim response", { finalAnswer: false }],
+    ["a final thinking block", { finalAnswer: true, thinking: true }],
+  ])("leaves no room on %s's first line", (_name, flags) => {
+    // Act
+    const el = drawFeedResponse(
+      response({ ...flags, result: { case: "success", value: { prose: { prose: plainProse("done") } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelector(`.${COPY_ROOM_CLASS}`)).toBeNull();
   });
 });
 
@@ -478,655 +491,80 @@ describe("the daemon's reveal pace", () => {
 describe("the usage stamp", () => {
   const STATES = ["update", "success", "error"] as const;
 
-  it.each(STATES)("draws the stamp verbatim in the %s state", (arm) => {
-    const el = drawFeedResponse(
-      response({
-        usage: { text: "2.1k", heat: { position: 0.5 } },
-        result: { case: arm, value: { prose: { prose: plainProse("hi") } } },
-      }),
-      rowContext(),
-    );
-    expect(el.querySelector(".bubble-box .usage-stamp")?.textContent).toBe("2.1k");
+  /** A response in ARM carrying USAGE, if any. */
+  function stamped(arm: (typeof STATES)[number], usage?: { text: string; atMs?: bigint; heat?: { position: number } }) {
+    return response({
+      ...(usage === undefined ? {} : { usage }),
+      result: { case: arm, value: { prose: { prose: plainProse("hi") } } },
+    });
+  }
+
+  it.each(STATES)("draws no figure in the bubble in the %s state", (arm) => {
+    // Act
+    const el = drawFeedResponse(stamped(arm, { text: "2.1k", atMs: 1_000n, heat: { position: 0.5 } }), rowContext());
+    // Assert
+    expect(el.textContent).not.toContain("2.1k");
   });
 
-  it("colors the stamp by its heat, with the footer's token color", () => {
-    const el = drawFeedResponse(
-      response({
-        usage: { text: "40k", heat: { position: 0.5 } },
-        result: { case: "success", value: { prose: { prose: plainProse("hi") } } },
-      }),
-      rowContext(),
-    );
-    const probe = document.createElement("span");
-    probe.style.color = heatColor(0.5, "p");
-    expect(el.querySelector<HTMLElement>(".usage-stamp")?.style.color).toBe(probe.style.color);
+  it.each(STATES)("records the stamp for the footer's hover in the %s state", (arm) => {
+    // Act
+    const el = drawFeedResponse(stamped(arm, { text: "2.1k", atMs: 1_000n, heat: { position: 0.5 } }), rowContext());
+    // Assert
+    expect(responseUsageOf(el)).toEqual({ text: "2.1k", color: heatColor(0.5, "p"), settledAtMs: 1_000 });
+  });
+
+  it("records an arriving stamp as not settled", () => {
+    // Act
+    const el = drawFeedResponse(stamped("update", { text: "2.1k", atMs: 0n, heat: { position: 0.5 } }), rowContext());
+    // Assert
+    expect(responseUsageOf(el)?.settledAtMs).toBeNull();
+  });
+
+  it("records no usage when none has been observed", () => {
+    // Act
+    const el = drawFeedResponse(stamped("success"), rowContext());
+    // Assert
+    expect(responseUsageOf(el)).toBeNull();
+  });
+
+  it("forgets the usage when a redraw carries none", () => {
+    // Arrange
+    const first = drawFeedResponse(stamped("success", { text: "2.1k", heat: { position: 0.5 } }), rowContext());
+    // Act
+    const again = drawFeedResponse(stamped("success"), rowContext(first));
+    // Assert
+    expect([again === first, responseUsageOf(again)]).toEqual([true, null]);
+  });
+
+  it("restates the usage when a redraw changes the figure", () => {
+    // Arrange
+    const first = drawFeedResponse(stamped("update", { text: "1k", heat: { position: 0.5 } }), rowContext());
+    // Act
+    drawFeedResponse(stamped("update", { text: "2k", heat: { position: 0.5 } }), rowContext(first));
+    // Assert
+    expect(responseUsageOf(first)?.text).toBe("2k");
   });
 
   it("refuses a stamp that carries no heat", () => {
-    expect(() =>
-      drawFeedResponse(
-        response({
-          usage: { text: "40k" },
-          result: { case: "success", value: { prose: { prose: plainProse("hi") } } },
-        }),
-        rowContext(),
-      ),
-    ).toThrow(MalformedView);
-  });
-
-  it("draws no stamp at all when no usage has been observed", () => {
-    const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { prose: plainProse("hi") } } } }),
-      rowContext(),
-    );
-    expect(el.querySelector(".usage-stamp")).toBeNull();
-  });
-});
-
-describe("the sizing ghost's reserved labels", () => {
-  const WITH_USAGE = {
-    usage: { text: "2.1k", heat: { position: 0.5 } },
-    result: { case: "success", value: { prose: { prose: plainProse("hi") } } },
-  } as const;
-  const WITHOUT_USAGE = { result: { case: "success", value: { prose: { prose: plainProse("hi") } } } } as const;
-
-  it("joins every reserve label as one CSS string, one label per line", () => {
-    // Arrange
-    const expected = `"${USAGE_AGE_RESERVE_LABELS.join("\\A ")}"`;
-
-    // Act
-    const css = usageReserveLabelsCss();
-
-    // Assert
-    expect(css).toBe(expected);
-  });
-
-  it("names every reserve label in the CSS string, in order", () => {
-    // Arrange / Act
-    const lines = usageReserveLabelsCss().slice(1, -1).split("\\A ");
-
-    // Assert
-    expect(lines).toEqual([...USAGE_AGE_RESERVE_LABELS]);
-  });
-
-  it("sets the labels on a bubble that draws a corner", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(response(WITH_USAGE), rowContext());
-
-    // Assert
-    expect(el.style.getPropertyValue(USAGE_RESERVE_LABELS_PROPERTY)).toBe(usageReserveLabelsCss());
-  });
-
-  it("sets no labels on a bubble that draws no corner", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(response(WITHOUT_USAGE), rowContext());
-
-    // Assert
-    expect(el.style.getPropertyValue(USAGE_RESERVE_LABELS_PROPERTY)).toBe("");
-  });
-
-  it("clears the labels when an in-place redraw drops the corner", () => {
-    // Arrange
-    const first = drawFeedResponse(response(WITH_USAGE), rowContext());
-
-    // Act
-    const again = drawFeedResponse(response(WITHOUT_USAGE), rowContext(first));
-
-    // Assert
-    expect([again === first, again.style.getPropertyValue(USAGE_RESERVE_LABELS_PROPERTY)]).toEqual([true, ""]);
-  });
-});
-
-describe("the usage corner's hover timestamp", () => {
-  /** A settled response whose corner carries a token figure and a settle instant. */
-  function settled(atMs: bigint) {
-    return response({
-      usage: { text: "2.1k", atMs, heat: { position: 0.5 } },
-      result: { case: "success", value: { prose: { prose: plainProse("done") } } },
-    });
-  }
-
-  it("holds the figure and its timestamp side by side once settled", () => {
-    // Arrange, Act
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    // Assert: both elements sit in the one corner.
-    const corner = el.querySelector(".bubble-box .usage-corner");
-    expect([
-      corner?.querySelector(".usage-stamp")?.textContent,
-      corner?.querySelector(".usage-ago") !== null,
-    ]).toEqual(["2.1k", true]);
-  });
-
-  it("reads the timestamp from at_ms, relative and human-readable", () => {
-    // Arrange: the settle was five and a half minutes ago.
-    vi.setSystemTime(331_000);
-    // Act
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    // Assert
-    expect(el.querySelector(".usage-ago")?.textContent).toBe("5m 30s ago");
-  });
-
-  it("advances the timestamp on a later tick", async () => {
-    // Arrange
-    vi.setSystemTime(331_000);
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    document.body.appendChild(el);
-    // Act: half a minute later, the shared clock has ticked.
-    await vi.advanceTimersByTimeAsync(30_000);
-    // Assert
-    expect(el.querySelector(".usage-ago")?.textContent).toBe("6m ago");
-  });
-
-  it("keeps advancing after its turn's clocks are stopped, since an age stays true", async () => {
-    // Arrange: a settled corner whose turn has just ended.
-    vi.setSystemTime(1_000);
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    document.body.appendChild(el);
-    // Act: the finished turn's backstop sweeps the bubble, then time passes.
-    stopClocks(el);
-    await vi.advanceTimersByTimeAsync(3_000);
-    // Assert
-    expect(el.querySelector(".usage-ago")?.textContent).toBe("3s ago");
-  });
-
-  it("reveals the timestamp when the corner is hovered", () => {
-    // Arrange
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    const corner = el.querySelector(".usage-corner") as HTMLElement;
-    // Act
-    corner.dispatchEvent(new Event("mouseenter"));
-    // Assert
-    expect(corner.classList.contains(USAGE_REVEALED_CLASS)).toBe(true);
-  });
-
-  it("hides the timestamp again when the pointer leaves", () => {
-    // Arrange: a corner already revealed.
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    const corner = el.querySelector(".usage-corner") as HTMLElement;
-    corner.dispatchEvent(new Event("mouseenter"));
-    // Act
-    corner.dispatchEvent(new Event("mouseleave"));
-    // Assert
-    expect(corner.classList.contains(USAGE_REVEALED_CLASS)).toBe(false);
-  });
-
-  it("reveals the timestamp on keyboard focus too", () => {
-    // Arrange
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    const corner = el.querySelector(".usage-corner") as HTMLElement;
-    // Act
-    corner.dispatchEvent(new Event("focusin"));
-    // Assert: focusable, and the focus reveals the same timestamp a hover does.
-    expect([corner.tabIndex, corner.classList.contains(USAGE_REVEALED_CLASS)]).toEqual([0, true]);
-  });
-
-  it("draws no timestamp while the response is still arriving", () => {
-    // Arrange, Act: usage stated at open, but no settle instant yet.
-    const el = drawFeedResponse(
-      response({
-        usage: { text: "2.1k", atMs: 0n, heat: { position: 0.5 } },
-        result: { case: "update", value: { prose: { prose: plainProse("typing") } } },
-      }),
-      rowContext(),
-    );
-    // Assert
-    expect(el.querySelector(".usage-ago")).toBeNull();
-  });
-
-  it("stops the timestamp's clock when the bubble is disposed", () => {
-    // Arrange: a settled corner whose clock is live. The clock rides `.usage-ago`;
-    // the `data-ticking` attribute is a SHARED teardown channel (a bubble's
-    // "more below" ResizeObserver registers on it too, see bubble-more.ts), so the
-    // clock is checked on its own element rather than by a blanket attribute count.
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    expect(el.querySelector(".usage-ago")?.hasAttribute(TICKING_ATTRIBUTE)).toBe(true);
-    // Act: whoever discards the bubble stops its clocks (and every other hook).
-    stopTicking(el);
-    // Assert: nothing ticks any more.
-    expect(el.querySelectorAll(`[${TICKING_ATTRIBUTE}]`)).toHaveLength(0);
-  });
-
-  it("takes no clock at all for an arriving corner, since it draws no timestamp", () => {
-    // Arrange, Act
-    const el = drawFeedResponse(
-      response({
-        usage: { text: "2.1k", atMs: 0n, heat: { position: 0.5 } },
-        result: { case: "update", value: { prose: { prose: plainProse("typing") } } },
-      }),
-      rowContext(),
-    );
-    // Assert: no timestamp element exists, so no clock subscription was taken.
-    // (A blanket `data-ticking` count would now also see the bubble's "more below"
-    // ResizeObserver hook — a teardown hook, not a clock — so the check is
-    // clock-specific.)
-    expect(el.querySelectorAll(`.usage-ago[${TICKING_ATTRIBUTE}]`)).toHaveLength(0);
-  });
-
-  it("slides the timestamp on the phase transition, waiting out the other phase at rest", () => {
-    // Arrange / Act: the rule the .usage-ago element is styled by.
-    const rule = /\.usage-ago\s*\{([^}]*)\}/.exec(stylesheet)?.[1] ?? "";
-    // Assert: phase A's slide, delayed by one phase so the reverse runs it last.
-    expect(rule).toMatch(/transform var\(--usage-phase\) ease var\(--usage-phase\)/);
-  });
-
-  it("shows and hides the timestamp with no slide under reduced motion", () => {
-    // Arrange: the reduced-motion block.
-    const at = stylesheet.indexOf("@media (prefers-reduced-motion: reduce)");
-    const block = stylesheet.slice(at);
-    // Assert: the timestamp's transition is dropped there.
-    expect(block).toMatch(/\.usage-ago\s*\{[^}]*transition:\s*none/);
-  });
-});
-
-describe("the usage corner's slider markup", () => {
-  /** A response whose corner carries the token figure and the given settle instant. */
-  function withUsage(atMs: bigint) {
-    return response({
-      usage: { text: "12.4k", atMs, heat: { position: 0.5 } },
-      result: { case: "success", value: { prose: { prose: plainProse("done") } } },
-    });
-  }
-
-  /** The corner's structure as class names, children in document order. */
-  function shape(corner: Element): unknown {
-    return Array.from(corner.children).map((child) => ({
-      className: child.className,
-      children: Array.from(child.children).map((grandchild) => grandchild.className),
-    }));
-  }
-
-  it("carries the token text on the corner, for the width-reserving spacer", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(withUsage(1_000n), rowContext());
-    // Assert
-    const corner = el.querySelector(".usage-corner") as HTMLElement;
-    expect(corner.dataset.tokens).toBe("12.4k");
-  });
-
-  it("carries the token text on an arriving corner too", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(withUsage(0n), rowContext());
-    // Assert
-    const corner = el.querySelector(".usage-corner") as HTMLElement;
-    expect(corner.dataset.tokens).toBe("12.4k");
-  });
-
-  /** The reserve's children, as class names: one label per reserved age shape. */
-  const RESERVE_CHILDREN = USAGE_AGE_RESERVE_LABELS.map(() => "usage-reserve-label");
-
-  it("draws the reserve, then the token and the duration inside the one slider, once settled", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(withUsage(1_000n), rowContext());
-    // Assert — the reserve holds the corner's width; the duration is the
-    // slider's only in-flow content besides the out-of-flow token.
-    const corner = el.querySelector(".usage-corner") as HTMLElement;
-    expect(shape(corner)).toEqual([
-      { className: "usage-reserve", children: RESERVE_CHILDREN },
-      { className: "usage-slider", children: ["usage-stamp", "usage-ago"] },
-    ]);
-  });
-
-  it("draws the reserve and only the token inside an empty-width slider while arriving", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(withUsage(0n), rowContext());
-    // Assert — no duration, so the slider has no in-flow content and the
-    // token stays at the right edge; the reserve is already the settled width.
-    const corner = el.querySelector(".usage-corner") as HTMLElement;
-    expect(shape(corner)).toEqual([
-      { className: "usage-reserve", children: RESERVE_CHILDREN },
-      { className: "usage-slider", children: ["usage-stamp"] },
-    ]);
-  });
-
-  it("marks an arriving corner, so its empty slot never slides out", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(withUsage(0n), rowContext());
-    // Assert
-    expect(el.querySelector(".usage-corner")?.hasAttribute("data-arriving")).toBe(true);
-  });
-
-  it("does not mark a settled corner as arriving", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(withUsage(1_000n), rowContext());
-    // Assert
-    expect(el.querySelector(".usage-corner")?.hasAttribute("data-arriving")).toBe(false);
-  });
-
-  it("reserves the same labels arriving and settled, so the settle moves nothing", () => {
-    // Arrange
-    const arrivingEl = drawFeedResponse(withUsage(0n), rowContext());
-    const settledEl = drawFeedResponse(withUsage(1_000n), rowContext());
-    // Act
-    const [arriving, settled] = [arrivingEl, settledEl].map((el) =>
-      Array.from(el.querySelectorAll(".usage-reserve-label"), (label) => label.textContent),
-    );
-    // Assert
-    expect(arriving).toEqual(settled);
-  });
-
-  it("sizes the reserve by the widest label of every age shape, figures zeroed", () => {
-    // Arrange
-    const el = drawFeedResponse(withUsage(1_000n), rowContext());
-    // Act
-    const labels = Array.from(el.querySelectorAll(".usage-reserve-label"), (label) => label.textContent);
-    // Assert
-    expect(labels).toEqual([
-      "000d 00h ago",
-      "000d ago",
-      "00h 00m ago",
-      "00h ago",
-      "00m 00s ago",
-      "00m ago",
-      "00s ago",
-    ]);
-  });
-
-  it("hides the reserve from assistive technology", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(withUsage(1_000n), rowContext());
-    // Assert
-    expect(el.querySelector(".usage-reserve")?.getAttribute("aria-hidden")).toBe("true");
-  });
-
-  it("keeps the reserve's labels unchanged as the live clock advances", async () => {
-    // Arrange
-    vi.setSystemTime(31_000);
-    const el = drawFeedResponse(withUsage(1_000n), rowContext());
-    document.body.appendChild(el);
-    const read = (): unknown =>
-      Array.from(el.querySelectorAll(".usage-reserve-label"), (label) => label.textContent);
-    const before = read();
-    try {
-      // Act — the duration crosses a unit ("30s ago" to "1m ago").
-      await vi.advanceTimersByTimeAsync(30_000);
-      // Assert
-      expect(read()).toEqual(before);
-    } finally {
-      el.remove();
-    }
-  });
-
-  it("takes the slider out of flow, so the reserve alone sizes the corner", () => {
-    // Arrange
-    const teardown = installStylesheet();
-    const el = drawFeedResponse(withUsage(1_000n), rowContext());
-    document.body.appendChild(el);
-    try {
-      // Act
-      const slider = el.querySelector(".usage-slider") as HTMLElement;
-      // Assert
-      expect(cascadedValue(slider, "position")).toBe("absolute");
-    } finally {
-      el.remove();
-      teardown();
-    }
-  });
-
-  it("keeps the spacer's text and the visible token identical", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(withUsage(1_000n), rowContext());
-    // Assert — the reservation is the token's own text, so its width is the token's.
-    const corner = el.querySelector(".usage-corner") as HTMLElement;
-    expect(corner.dataset.tokens).toBe(corner.querySelector(".usage-stamp")?.textContent);
-  });
-
-  it("keeps the markup unchanged as the live clock advances", async () => {
-    // Arrange
-    vi.setSystemTime(31_000);
-    const el = drawFeedResponse(withUsage(1_000n), rowContext());
-    document.body.appendChild(el);
-    const corner = el.querySelector(".usage-corner") as HTMLElement;
-    const before = shape(corner);
-    try {
-      // Act — the duration text grows ("30s ago" to "1m ago").
-      await vi.advanceTimersByTimeAsync(30_000);
-      // Assert
-      expect([corner.querySelector(".usage-ago")?.textContent, shape(corner)]).toEqual([
-        "1m ago",
-        before,
-      ]);
-    } finally {
-      el.remove();
-    }
-  });
-
-  it("collapses the slider by 100% of its own width", () => {
-    // Arrange
-    const teardown = installStylesheet();
-    const el = drawFeedResponse(withUsage(1_000n), rowContext());
-    document.body.appendChild(el);
-    try {
-      // Act
-      const slider = el.querySelector(".usage-slider") as HTMLElement;
-      // Assert
-      expect(cascadedValue(slider, "transform")).toBe("translateX(100%)");
-    } finally {
-      el.remove();
-      teardown();
-    }
-  });
-
-  it("slides the slider to rest when the corner is revealed", () => {
-    // Arrange
-    const teardown = installStylesheet();
-    const el = drawFeedResponse(withUsage(1_000n), rowContext());
-    document.body.appendChild(el);
-    try {
-      const corner = el.querySelector(".usage-corner") as HTMLElement;
-      // Act
-      corner.dispatchEvent(new Event("mouseenter"));
-      // Assert
-      const slider = el.querySelector(".usage-slider") as HTMLElement;
-      expect(cascadedValue(slider, "transform")).toBe("translateX(0)");
-    } finally {
-      el.remove();
-      teardown();
-    }
-  });
-
-  it("anchors the token to the slider's left edge", () => {
-    // Arrange
-    const teardown = installStylesheet();
-    const el = drawFeedResponse(withUsage(0n), rowContext());
-    document.body.appendChild(el);
-    try {
-      // Act
-      const stamp = el.querySelector(".usage-stamp") as HTMLElement;
-      // Assert
-      expect([cascadedValue(stamp, "position"), cascadedValue(stamp, "right")]).toEqual([
-        "absolute",
-        "100%",
-      ]);
-    } finally {
-      el.remove();
-      teardown();
-    }
-  });
-});
-
-describe("the usage corner's duration reserve check", () => {
-  it.each(["0s ago", "59s ago", "5m 30s ago", "59m 59s ago", "23h 59m ago", "999d 23h ago", "999d ago"])(
-    "admits %s",
-    (label) => {
-      // Arrange / Act
-      const fits = usageAgeWithinReserve(label);
-      // Assert
-      expect(fits).toBe(true);
-    },
-  );
-
-  it("refuses a label with more figures than its shape reserves", () => {
-    // Arrange / Act
-    const fits = usageAgeWithinReserve("1000d ago");
-    // Assert
-    expect(fits).toBe(false);
-  });
-
-  it("refuses a label whose shape is not reserved at all", () => {
-    // Arrange / Act
-    const fits = usageAgeWithinReserve("5y ago");
-    // Assert
-    expect(fits).toBe(false);
-  });
-});
-
-describe("the usage corner's error paths", () => {
-  /** A settled response whose corner settled at AT_MS. */
-  function settled(atMs: bigint) {
-    return response({
-      usage: { text: "2.1k", atMs, heat: { position: 0.5 } },
-      result: { case: "success", value: { prose: { prose: plainProse("done") } } },
-    });
-  }
-
-  /** A thousand days, the first age the reserve cannot hold. */
-  const THOUSAND_DAYS_MS = 1000 * 86_400_000;
-
-  it("logs a duration that outgrew its reserve at error", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    vi.setSystemTime(THOUSAND_DAYS_MS + 1_000);
-    // Act
-    drawFeedResponse(settled(1_000n), rowContext());
-    // Assert
-    const record = await forwardedRecord(capture, "feed.cards.response.usage-reserve-exceeded");
-    expect(record.level.case).toBe("error");
-  });
-
-  it("names the label that outgrew the reserve", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    vi.setSystemTime(THOUSAND_DAYS_MS + 1_000);
-    // Act
-    drawFeedResponse(settled(1_000n), rowContext());
-    // Assert
-    const record = await forwardedRecord(capture, "feed.cards.response.usage-reserve-exceeded");
-    expect(record.context?.label).toBe("1000d ago");
-  });
-
-  it("logs the overflow once per corner, not on every tick", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    vi.setSystemTime(THOUSAND_DAYS_MS + 1_000);
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    document.body.appendChild(el);
-    try {
-      // Act
-      await vi.advanceTimersByTimeAsync(3_000);
-      capture.logger.flush();
-      await Promise.resolve();
-      // Assert
-      const overflows = capture.sent.filter(
-        (record) => record.operation === "feed.cards.response.usage-reserve-exceeded",
-      );
-      expect(overflows).toHaveLength(1);
-    } finally {
-      el.remove();
-    }
-  });
-
-  it("logs nothing while the duration fits its reserve", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    vi.setSystemTime(331_000);
-    // Act
-    drawFeedResponse(settled(1_000n), rowContext());
-    capture.logger.flush();
-    await Promise.resolve();
-    // Assert
-    expect(capture.sent.filter((record) => record.level.case === "error")).toEqual([]);
+    expect(() => drawFeedResponse(stamped("success", { text: "40k" }), rowContext())).toThrow(MalformedView);
   });
 
   it("refuses a settle instant beyond a safe integer as a malformed view", () => {
     // Arrange
-    const malformed = settled(BigInt(Number.MAX_SAFE_INTEGER) + 1n);
+    const malformed = stamped("success", { text: "2.1k", atMs: BigInt(Number.MAX_SAFE_INTEGER) + 1n, heat: { position: 0.5 } });
     // Act
     const draw = (): HTMLElement => drawFeedResponse(malformed, rowContext());
     // Assert
     expect(draw).toThrow(MalformedView);
   });
-});
 
-describe("the usage corner's first-line float", () => {
-  /** A settled response whose corner carries a token figure and a settle instant. */
-  function settled(atMs: bigint) {
-    return response({
-      usage: { text: "2.1k", atMs, heat: { position: 0.5 } },
-      result: { case: "success", value: { prose: { prose: plainProse("done") } } },
-    });
-  }
-
-  it("puts the corner inside the scroll box, before the body, so the first line wraps beside it", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    // Assert — the corner is the scroll box's FIRST child and the body follows
-    // it, the DOM order a `float: right` needs to shorten the body's first line.
-    const scroll = el.querySelector(".bubble-box") as HTMLElement;
-    const corner = scroll.querySelector(".usage-corner") as HTMLElement;
-    const body = scroll.querySelector(".bubble-body") as HTMLElement;
-    expect([scroll.firstElementChild === corner, corner.nextElementSibling === body]).toEqual([
-      true,
-      true,
-    ]);
-  });
-
-  it("floats the corner to the right of the prose", () => {
+  it("keeps a bubble's recorded usage when a re-push's stamp is malformed", () => {
     // Arrange
-    const teardown = installStylesheet();
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    document.body.appendChild(el);
-    try {
-      // Act
-      const corner = el.querySelector(".usage-corner") as HTMLElement;
-      // Assert — the cascade lands `float: right` on the corner.
-      expect(cascadedValue(corner, "float")).toBe("right");
-    } finally {
-      el.remove();
-      teardown();
-    }
-  });
-
-  it("keeps the duration slot the same layout width whether or not it is revealed", () => {
-    // Arrange — the real stylesheet, and a settled corner whose duration exists.
-    const teardown = installStylesheet();
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    document.body.appendChild(el);
-    try {
-      const corner = el.querySelector(".usage-corner") as HTMLElement;
-      const ago = el.querySelector(".usage-ago") as HTMLElement;
-      // Act — read every width-affecting property collapsed, then revealed.
-      const widthProps = ["margin-left", "max-width", "width"] as const;
-      const collapsed = widthProps.map((p) => cascadedValue(ago, p));
-      corner.classList.add(USAGE_REVEALED_CLASS);
-      const revealed = widthProps.map((p) => cascadedValue(ago, p));
-      // Assert — nothing that sizes the slot changed, so exposing the duration
-      // cannot reflow the first prose line that wrapped around the float.
-      expect(revealed).toEqual(collapsed);
-    } finally {
-      el.remove();
-      teardown();
-    }
-  });
-
-  it("adds no left indent to the body, so lines below the corner run full width", () => {
-    // Arrange — the corner is a float sibling, never a wrapper the body is
-    // inset behind, so subsequent lines are not indented by it.
-    const teardown = installStylesheet();
-    const el = drawFeedResponse(settled(1_000n), rowContext());
-    document.body.appendChild(el);
-    try {
-      // Act
-      const body = el.querySelector(".bubble-body") as HTMLElement;
-      // Assert — no left padding and no text-indent reserve corner space; the
-      // float alone shortens only the lines it overlaps (its single row).
-      expect([cascadedValue(body, "padding-left"), cascadedValue(body, "text-indent")]).toEqual([
-        "0",
-        "0",
-      ]);
-    } finally {
-      el.remove();
-      teardown();
-    }
+    const first = drawFeedResponse(stamped("success", { text: "1k", heat: { position: 0.5 } }), rowContext());
+    // Act
+    expect(() => drawFeedResponse(stamped("success", { text: "2k" }), rowContext(first))).toThrow(MalformedView);
+    // Assert
+    expect(responseUsageOf(first)?.text).toBe("1k");
   });
 });
 
@@ -3088,38 +2526,6 @@ describe("a re-push updates the bubble in place", () => {
     expect(before.classList.contains("entry-selected")).toBe(true);
   });
 
-  it("keeps the usage corner when its figure did not change", () => {
-    // Arrange
-    const before = drawFeedResponse(arriving("hello", { usage: { text: "1k", heat: { position: 0.5 } } }), rowContext());
-    mount(before);
-    const corner = before.querySelector(".usage-corner");
-    // Act
-    drawFeedResponse(arriving("hello world", { usage: { text: "1k", heat: { position: 0.5 } } }), rowContext(before));
-    // Assert
-    expect(before.querySelector(".usage-corner")).toBe(corner);
-  });
-
-  it("replaces the usage corner when its figure changed", () => {
-    // Arrange
-    const before = drawFeedResponse(arriving("hello", { usage: { text: "1k", heat: { position: 0.5 } } }), rowContext());
-    mount(before);
-    // Act
-    drawFeedResponse(arriving("hello world", { usage: { text: "2k", heat: { position: 0.5 } } }), rowContext(before));
-    // Assert
-    expect(before.querySelectorAll(".usage-stamp")[0]?.textContent).toBe("2k");
-  });
-
-  it("stops the clock of a corner it replaced", () => {
-    // Arrange -- a settled corner ticks its "ago".
-    const before = drawFeedResponse(settledAs("done", { usage: { text: "1k", atMs: 1_000n, heat: { position: 0.5 } } }), rowContext());
-    mount(before);
-    const corner = before.querySelector(".usage-corner");
-    // Act
-    drawFeedResponse(settledAs("done", { usage: { text: "2k", atMs: 1_000n, heat: { position: 0.5 } } }), rowContext(before));
-    // Assert
-    expect(corner?.querySelector(`[${TICKING_ATTRIBUTE}]`)).toBeNull();
-  });
-
   it("draws one cut-short marker however often the broken state is pushed", () => {
     // Arrange
     const broken = response({ result: { case: "error", value: { prose: { prose: plainProse("half") } } } });
@@ -3187,151 +2593,5 @@ describe("the interim response's hook class", () => {
     );
     // Assert
     expect(after.classList.contains(INTERIM_RESPONSE_CLASS)).toBe(false);
-  });
-});
-
-describe("an interim response's usage corner", () => {
-  /** A settled response, INTERIM or not, whose corner carries a token figure and a settle instant. */
-  function settledResponse(interim: boolean, usage = true) {
-    return response({
-      interim,
-      ...(usage ? { usage: { text: "2.1k", atMs: 1_000n, heat: { position: 0.5 } } } : {}),
-      result: { case: "success", value: { prose: { prose: plainProse("done") } } },
-    });
-  }
-
-  /** The drawn duration of EL, reporting WIDTH as its drawn width. */
-  function agoOf(el: HTMLElement, width: number): HTMLElement {
-    const ago = el.querySelector(".usage-ago") as HTMLElement;
-    vi.spyOn(ago, "getBoundingClientRect").mockReturnValue({ width } as DOMRect);
-    return ago;
-  }
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("sets the duration's drawn width on its bubble once the duration is sized", () => {
-    // Arrange
-    const el = drawFeedResponse(settledResponse(true), rowContext());
-    const ago = agoOf(el, 52.5);
-    // Act
-    fireResize(ago);
-    // Assert
-    expect(el.style.getPropertyValue(USAGE_AGO_WIDTH_PROPERTY)).toBe("52.5px");
-  });
-
-  it("follows the duration when a tick changes its width", () => {
-    // Arrange: sized once, then the label changes shape.
-    const el = drawFeedResponse(settledResponse(true), rowContext());
-    fireResize(agoOf(el, 52.5));
-    const ago = agoOf(el, 40);
-    // Act
-    fireResize(ago);
-    // Assert
-    expect(el.style.getPropertyValue(USAGE_AGO_WIDTH_PROPERTY)).toBe("40px");
-  });
-
-  it("measures no duration of a response that is not interim", () => {
-    // Arrange
-    const el = drawFeedResponse(settledResponse(false), rowContext());
-    const ago = agoOf(el, 52.5);
-    // Act / Assert: nothing watches it.
-    expect(() => fireResize(ago)).toThrow(/no ResizeObserver is watching/);
-  });
-
-  it("stops measuring once its bubble is discarded", () => {
-    // Arrange
-    const el = drawFeedResponse(settledResponse(true), rowContext());
-    const ago = agoOf(el, 52.5);
-    // Act
-    stopTicking(el);
-    // Assert
-    expect(() => fireResize(ago)).toThrow(/no ResizeObserver is watching/);
-  });
-
-  it("logs at ERROR, naming the corner, when the page has no ResizeObserver", async () => {
-    // Arrange
-    vi.stubGlobal("ResizeObserver", undefined);
-    const capture = captureLogRecords();
-    // Act
-    drawFeedResponse(settledResponse(true), rowContext());
-    // Assert
-    const record = await forwardedRecord(capture, "feed.cards.response.usage-ago-unmeasured");
-    expect([record.level.case, record.context?.path]).toEqual(["error", "FeedResponse.usage"]);
-  });
-
-  it("still draws the duration when the page has no ResizeObserver", () => {
-    // Arrange
-    vi.stubGlobal("ResizeObserver", undefined);
-    // Act
-    const el = drawFeedResponse(settledResponse(true), rowContext());
-    // Assert
-    expect(el.querySelector(".usage-ago")?.textContent).not.toBe("");
-  });
-
-  it("throws when a measured duration hangs in no bubble, setting nothing", () => {
-    // Arrange: the corner taken out of its bubble without being discarded.
-    const el = drawFeedResponse(settledResponse(true), rowContext());
-    const ago = agoOf(el, 52.5);
-    el.querySelector(".usage-corner")?.remove();
-    // Act
-    let thrown: unknown;
-    try {
-      fireResize(ago);
-    } catch (error) {
-      thrown = error;
-    }
-    // Assert
-    expect([String(thrown), el.style.getPropertyValue(USAGE_AGO_WIDTH_PROPERTY)]).toEqual([
-      expect.stringMatching(/hangs in no bubble/),
-      "",
-    ]);
-  });
-
-  it("logs at ERROR, naming the corner, when a measured duration hangs in no bubble", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    const el = drawFeedResponse(settledResponse(true), rowContext());
-    const ago = agoOf(el, 52.5);
-    el.querySelector(".usage-corner")?.remove();
-    // Act
-    expect(() => fireResize(ago)).toThrow();
-    // Assert
-    const record = await forwardedRecord(capture, "feed.cards.response.usage-ago-orphaned");
-    expect([record.level.case, record.context?.path]).toEqual(["error", "FeedResponse.usage"]);
-  });
-
-  it("hands an interim's ghost its token text, as a CSS string", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(settledResponse(true), rowContext());
-    // Assert
-    expect(el.style.getPropertyValue(USAGE_TOKEN_TEXT_PROPERTY)).toBe('"2.1k"');
-  });
-
-  it("hands a response that is not interim no token text", () => {
-    // Arrange / Act
-    const el = drawFeedResponse(settledResponse(false), rowContext());
-    // Assert
-    expect(el.style.getPropertyValue(USAGE_TOKEN_TEXT_PROPERTY)).toBe("");
-  });
-
-  it("drops the token text when a redraw of the interim draws no corner", () => {
-    // Arrange
-    const first = drawFeedResponse(settledResponse(true), rowContext());
-    // Act
-    const again = drawFeedResponse(settledResponse(true, false), rowContext(first));
-    // Assert
-    expect([again === first, again.style.getPropertyValue(USAGE_TOKEN_TEXT_PROPERTY)]).toEqual([true, ""]);
-  });
-
-  it.each([
-    [true, "interim"],
-    [false, "whole"],
-  ])("states whether it measures (interim: %s), so a redraw never keeps the other kind", (interim, kind) => {
-    // Arrange / Act
-    const el = drawFeedResponse(settledResponse(interim), rowContext());
-    // Assert
-    expect(el.querySelector(".usage-corner")?.getAttribute(SAYS_ATTRIBUTE)).toBe(`2.1k|1000|${kind}`);
   });
 });

@@ -391,8 +391,8 @@ hand any more:
   (response) bubble — a response, thinking, an agentic card, a compaction
   summary, a user or agent prompt, a peer message, a held prompt — is built by
   `drawBubble(spec, previous)` (src/bubble/draw.ts), and a kind's module only
-  builds its spec: role, variant and state, the header strip (plus the
-  response's usage corner), the content, the collapsed line count and, on a
+  builds its spec: role, variant and state, the header strip (plus a
+  bubble's copy control, src/bubble/copy-room.ts), the content, the collapsed line count and, on a
   prompt, the working flag. Content goes through ONE body pipeline
   (src/bubble/body.ts): prose is a `markdownSlot`, painted by the body, so a
   metaprompt tree in any bubble wraps at that bubble's cap (`--bubble-max-width`)
@@ -515,7 +515,7 @@ hand any more:
   has-more or toggle logic built anywhere else. Three rulings of 2026-09-23 ride
   it: "more below" is the FADE (or the ellipsis a spec chooses), never a chevron, and `has-more` means the
   BODY's rendered lines run past the cap (never the box's `scrollHeight`, which
-  counts the usage corner's hit area); no prompt wears a border: the user's own and
+  counts any chrome's hit area); no prompt wears a border: the user's own and
   a held prompt wear none, and an agent-to-agent bubble (an agent-addressed
   prompt or a peer message) is marked by its header alone, the other end's
   name beside one arrow glyph (`src/feed/rows/peer-arrow.ts`), on the final
@@ -714,7 +714,7 @@ hand any more:
   updates its bubble in place, a card holding a box the reader scrolled is
   morphed rather than replaced (src/feed/keep-scroll.ts), an unchanged re-push
   draws nothing, and anything repainted on a tick or toggled by a measurer
-  holds a fixed footprint (the cost corner, the shell clocks, `has-more`).
+  holds a fixed footprint (the shell clocks, `has-more`).
 - **A REDRAW NEVER UN-TOGGLES, WHATEVER ITS SHAPE** (owner ruling, 2026-09-18).
   The wire's fold is the INITIAL fold: an upsert carries the reader's open folds
   off the element it replaces (`carryExpanded`), and a full page replace —

@@ -20,10 +20,10 @@ import {
   drawFeedUnsupportedBlock,
   drawPromptBlockArm,
   drawPromptCopyControl,
-  PROMPT_COPY_CLASS,
   promptBlockCopyText,
 } from "../../../src/feed/rows/blocks.js";
 import { boundCopyText, COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE } from "../../../src/copy-control.js";
+import { BUBBLE_COPY_CLASS } from "../../../src/bubble/copy-room.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import imageThumbnail from "../../../../proto/vocab/image-thumbnail.json";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../../src/bubble/quote.js";
@@ -368,7 +368,7 @@ describe("drawPromptCopyControl", () => {
     // Assert
     expect([
       control.classList.contains(COPY_CONTROL_CLASS),
-      control.classList.contains(PROMPT_COPY_CLASS),
+      control.classList.contains(BUBBLE_COPY_CLASS),
       control.getAttribute(COPY_KIND_ATTRIBUTE),
       control.title,
     ]).toEqual([true, true, "prompt", "Copy prompt"]);

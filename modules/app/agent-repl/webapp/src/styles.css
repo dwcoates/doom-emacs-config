@@ -2344,8 +2344,7 @@ pre {
   font-style: italic;
 }
 /* THE INTERIM PROSE (owner request, 2026-10-14): an interim response's text is
-   bold, where a thinking bubble's is italic. It is set on the body alone, so
-   the duration in the interim's usage corner keeps its own weight. */
+   bold, where a thinking bubble's is italic. */
 .bubble.interim-response .bubble-body {
   font-weight: bold;
 }
@@ -2757,10 +2756,11 @@ html[data-page-unshown] *::after {
    mark replaces the copy icon for a moment (`data-copied`). Each kind's rule
    below places it. */
 /* The control's size, its icon being 1em, and its padding, so its square box
-   is `--copy-control-box` on a side: a prompt's room reservation below
-   declares them too, so the two boxes cannot differ. */
+   is `--copy-control-box` on a side: a bubble's room reservation and its
+   first line's ghost below declare them too, so the boxes cannot differ. */
 .copy-control,
-.bubble[data-role="prompt"] > :has(> .prompt-copy)::before {
+.bubble > :has(> .bubble-copy)::before,
+.copy-room {
   font-size: calc(0.85rem * var(--feed-text-scale));
   --copy-control-pad: 3px;
   --copy-control-box: calc(1em + 2 * var(--copy-control-pad));
@@ -2791,58 +2791,63 @@ html[data-page-unshown] *::after {
 /* A code block's copy control floats right ahead of the code, so the code's
    first lines wrap around it rather than running under it. */
 .md pre.md-code > .md-code-copy { float: right; margin: -0.3em -0.5em 0.2em 0.6em; }
-/* A prompt's copy control (src/feed/rows/blocks.ts) copies the
-   whole prompt. It sits at the bubble's top right, in the prompt's own text
-   color, on every prompt bubble, folded or opened, selected or not (owner
-   request, 2026-10-24: it showed only on the selected entry, and selecting a
-   prompt opens it, so a folded prompt never had one).
+/* A BUBBLE'S COPY CONTROL (src/bubble/copy-room.ts) copies its whole text: a
+   prompt's, on every prompt bubble, folded or opened, selected or not (owner
+   request, 2026-10-24), and the turn's final response's (owner request,
+   2026-10-24).
    ONE GAP FROM THE TOP AND RIGHT EDGES, INSIDE THE BUBBLE ALWAYS (owner
-   request, 2026-10-24: it was often off the bubble's right-hand side). It
-   used to float in the scroll box with a negative right margin, but that
-   box's right edge is only `--bubble-scroll-gap` inside the bubble, and in
-   from it by the system bar's gutter (0px overlay, about 14px classic), so
-   the margin pushed the control past the bubble's edge into the box's clip
-   with an overlay bar and left it a gutter further in with a classic one. It
-   is now placed against the BUBBLE (`.bubble` is positioned, see FIX2 below),
-   `--prompt-copy-gap` from its top and right padding edges, which no gutter,
+   request, 2026-10-24: it was often off the bubble's right-hand side). It is
+   placed against the BUBBLE (`.bubble` is positioned, see FIX2 below),
+   `--bubble-copy-gap` from its top and right padding edges, which no gutter,
    fold or content moves. Its containing block is outside the scroll box, so
    the box's clip never cuts it.
-   Out of flow it reserves no room, so the scroll box's `::before` floats right where
-   it used to and takes that room instead: the first line of the prompt wraps
-   short of the control, `--prompt-copy-text-gap` from it, and every later
-   line runs the bubble's full width. With a classic bar the reservation is a
-   gutter wider than it needs to be, never narrower. */
-/* The gap tokens, declared once for both of their readers, the control and its
-   reservation, each of which resolves them against its own (equal) size. */
-.prompt-copy,
-.bubble[data-role="prompt"] > :has(> .prompt-copy)::before {
-  --prompt-copy-gap: calc(var(--bubble-pad-y) - 0.2em);
-  --prompt-copy-text-gap: 0.6em;
+   ON THE FIRST LINE OF TEXT, NEVER A LINE OF ITS OWN (owner request,
+   2026-10-25). Out of flow it reserves no room, so the scroll box's `::before`
+   floats right where it sits and takes that room instead: the first line
+   wraps short of the control, `--bubble-copy-text-gap` from it, and every
+   later line runs the bubble's full width. That float adds nothing to the
+   bubble's fit-content width beside the body, so the first line of text
+   opens with its GHOST (`.copy-room`): as wide, zero-height and invisible,
+   inside the line's own formatting context, where a float's width does add.
+   The bubble so widens by exactly the room, and a first line at the bubble's
+   cap still wraps short of the control. With a classic bar the reservation is
+   a gutter wider than it needs to be, never narrower. */
+/* The gap and room tokens, declared once for all three readers, the control,
+   its reservation and its ghost, each of which resolves them against its own
+   (equal) size. */
+.bubble-copy,
+.bubble > :has(> .bubble-copy)::before,
+.copy-room {
+  --bubble-copy-gap: calc(var(--bubble-pad-y) - 0.2em);
+  --bubble-copy-text-gap: 0.6em;
+  --bubble-copy-room: calc(var(--bubble-copy-gap) + var(--copy-control-box) + var(--bubble-copy-text-gap) - var(--bubble-scroll-gap));
 }
-.prompt-copy {
+.bubble-copy {
   position: absolute;
-  top: var(--prompt-copy-gap);
-  right: var(--prompt-copy-gap);
-  color: inherit;
+  top: var(--bubble-copy-gap);
+  right: var(--bubble-copy-gap);
 }
-.bubble[data-role="prompt"] > :has(> .prompt-copy)::before {
+/* A prompt's control is in the prompt's own text color. */
+.bubble[data-role="prompt"] .bubble-copy { color: inherit; }
+.bubble > :has(> .bubble-copy)::before {
   content: "";
   float: right;
-  width: calc(var(--prompt-copy-gap) + var(--copy-control-box) + var(--prompt-copy-text-gap) - var(--bubble-scroll-gap));
-  height: calc(var(--prompt-copy-gap) + var(--copy-control-box) - var(--bubble-pad-y));
+  width: var(--bubble-copy-room);
+  height: calc(var(--bubble-copy-gap) + var(--copy-control-box) - var(--bubble-pad-y));
 }
-/* A PROMPT WITH A HEADER STRIP (an agent prompt's address, a held prompt's
+.copy-room {
+  float: right;
+  width: var(--bubble-copy-room);
+  height: 0;
+  visibility: hidden;
+}
+/* A BUBBLE WITH A HEADER STRIP (an agent prompt's address, a held prompt's
    badges) has its copy control beside the strip's first line, so that line
    keeps clear of it as the first line of text would: the same gap, box and
    text gap, resolved in the strip's own size. */
-.bubble[data-role="prompt"]:has(> .bubble-scroll > .prompt-copy) > .bubble-strip:first-child {
+.bubble:has(> .bubble-scroll > .bubble-copy) > .bubble-strip:first-child {
   padding-right: calc(var(--bubble-pad-y) + 1.25em + 6px);
 }
-/* A FINAL RESPONSE'S COPY CONTROL (src/feed/cards/response.ts) copies the
-   whole response, and is always shown (owner request, 2026-10-24). It floats
-   right after the usage corner and clears it, so it stands just under the
-   token count and duration, and the prose wraps short of both. */
-.response-copy { float: right; clear: right; margin: 0.15em 0 0.2em 0.6em; }
 .md a { color: var(--accent); }
 /* A link in a blue prompt bubble takes the prompt's own link color. */
 .bubble[data-role="prompt"] a { color: var(--prompt-link); }
@@ -5641,430 +5646,12 @@ body.draining #composer-input::placeholder {
 
 /* The bubble, its body, its 25-line cap and the green final-answer border are
    all the existing `.bubble.assistant.md` treatment, unchanged. These are the
-   corner stamp and the two state marks. */
+   body element and the cut-short marks. */
 
 /* The response body is a custom element (it knows when it joins the document,
    see `createBubbleBody`), and a custom element is inline until told. */
 bubble-body.bubble-body { display: block; }
 
-/* THE COST CORNER: the token figure, and — once the response has settled —
-   the relative duration it reveals on hover (owner spec, 2026-09-23).
-
-   AT REST only the token shows. Its gap to the bubble's TOP edge is
-   `--usage-corner-gap`, and its gap to the RIGHT edge is
-   `--usage-corner-gap-x`, the same sum taken over the unshrunk top padding:
-   the two are equal on a bubble at the base padding, and a prompt or response
-   bubble's tighter vertical padding shrinks only the top one. The duration
-   waits one further `--usage-corner-gap-x` beyond its normal gap from the token,
-   which puts it past the bubble's inner edge, clipped, so it never peeks in.
-
-   ON HOVER the reveal runs in two phases, in sequence:
-     A. only the duration moves: `.usage-ago` slides left by that one extra
-        `--usage-corner-gap-x` until it sits at its normal gap
-        (`--usage-pair-gap`) from the token, fading in as it comes;
-     B. then the token and the duration slide left TOGETHER: `.usage-slider`
-        goes from `translateX(100%)` — a percentage of its OWN width, which is
-        the duration plus its gap — to `translateX(0)`, so the duration's
-        right edge lands `--usage-corner-gap-x` from the bubble's right edge.
-   Mouse-leave runs B back, then A back. The sequence is `transition-delay`:
-   the phase that runs second waits out the first (`--usage-phase`).
-
-   THE MARKUP (src/feed/cards/response.ts):
-     .usage-corner[data-tokens]      ::before reserves the token's slot
-       .usage-reserve                 reserves the gap plus the widest duration
-       .usage-slider                  absolute, its right edge the corner's
-         .usage-stamp                 absolute, its right edge the slider's left
-         .usage-ago                   the slider's only in-flow content
-
-   NO REFLOW, EVER (owner rule, 2026-09-23: the user owns the scroll). The
-   corner's in-flow content is the two reserves alone, both of fixed width, so
-   its float is the corner's full HOVERED footprint — both figures, their gap
-   and the right gap — from the first draw. The prose's first line wraps
-   around that footprint, and no hover, tick or settle moves it: the slider is
-   out of flow and every motion is a transform.
-
-   FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling,
-   2026-09-15). The corner floats top-right INSIDE the scroll box, before the
-   `.bubble-body` block it shares that box's block-formatting context with, so
-   the prose's FIRST line flows to its left and every later line runs the
-   bubble's full width.
-
-   THE SIZING GHOST: THE BUBBLE FITS THE FIRST LINE AND THE CORNER TOGETHER.
-   A float that precedes a BLOCK adds nothing to the box's fit-content width
-   beside that block (the engine takes the wider of the two, never their sum),
-   so a short response sized itself to its text alone and the corner then took
-   its first line's room: a one-sentence answer wrapped well short of its
-   bubble's cap. A float shares a line's width only inside that line's own
-   inline formatting context, so an uncapped response's first paragraph opens
-   with a GHOST of the corner -- a zero-height, invisible float exactly the
-   corner's footprint wide -- and the bubble widens by that footprint before
-   its first line wraps. It changes NOTHING about the corner: the corner's
-   element, box, reveal and hover are untouched, and the ghost is zero-height,
-   so no line is shortened by it and the first line still flows beside the
-   real corner. A fade-capped bubble (agentic, compaction) has no ghost, so
-   its fold and fade measure exactly what they did.
-
-   AN OPEN ELLIPSIS BUBBLE HAS THE GHOST, A CLOSED ONE NEVER (owner request,
-   2026-10-10: an interim that showed its whole one line collapsed wrapped it
-   once selected). The collapsed ellipsis clamp makes the body a box of its own
-   (`display: -webkit-box`), and a box of its own beside a float DOES add to
-   the fit-content width: the bubble is the text plus the corner, and the line
-   sits beside the corner whole. Opening it drops the clamp, the body rejoins
-   the corner's formatting context, and without the ghost the bubble shrank to
-   the text alone and wrapped the line around the corner. With the ghost the
-   open bubble is the text plus the same footprint, so its width and its first
-   line are what the collapsed one showed. The closed box must not have it: its
-   own box already counts the corner, and the ghost would count it twice. */
-.usage-corner {
-  /* THE ONE SIZE both figures read (owner ruling, 2026-09-15): set here and
-     inherited, so the token, the duration and both reserves cannot differ. */
-  font-size: var(--usage-font-size);
-  font-weight: var(--usage-font-weight);
-  float: right;
-  position: relative;
-  display: flex;
-  flex-direction: row;
-  max-width: 100%;
-  overflow: hidden;
-  white-space: nowrap;
-  /* Enlarge the hover/hit region to roughly 4x its area, so the duration is
-     easier to summon (owner ruling, 2026-09-14). The padding grows the
-     hoverable box; `overflow: hidden` clips to it. */
-  padding: var(--usage-hit-y) var(--usage-hit-x);
-  margin-bottom: calc(0px - var(--usage-hit-y));
-  margin-left: calc(0px - var(--usage-hit-x));
-  /* THE TOP GAP: the bubble's top padding plus the line's half-leading, which
-     is `--usage-corner-gap` by definition; the margin cancels the hit padding
-     and adds exactly what the gap asks beyond that padding (nothing). */
-  margin-top: calc(
-    var(--usage-corner-gap) - var(--usage-half-leading) - var(--usage-bubble-pad-top)
-      - var(--usage-hit-y)
-  );
-  /* THE RIGHT GAP: the corner's content edge sits `--usage-corner-gap-x` from
-     the bubble's right edge. `.bubble`'s own right padding contributes one
-     `--bubble-scroll-gap` and the hit padding is cancelled, so the margin
-     supplies the rest. */
-  margin-right: var(--usage-corner-margin-right);
-}
-/* THE CORNER'S GEOMETRY TOKENS are declared once, below, for both of their
-   readers: the corner, and the ghost's host paragraph (whose `::before` the
-   ghost is, and inherits them). Each is substituted where it is used, so an
-   `em` in one resolves against the corner's own font size on the corner and
-   the ghost's identical one on the ghost. */
-.usage-corner,
-.bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child,
-.bubble[data-more="ellipsis"] > .bubble-scroll.expanded > .usage-corner + .bubble-body > .response-prose:first-child > p:first-child,
-.bubble.interim-response {
-  /* The hover hit area's padding (owner ruling, 2026-09-14). */
-  --usage-hit-x: 1.25rem;
-  --usage-hit-y: 0.4rem;
-  /* One phase of the reveal; the two phases together take 0.5s. */
-  --usage-phase: 0.25s;
-  /* AN INTERIM'S BUBBLE GROWS TWICE AS FAST AS ITS DURATION SLIDES (owner
-     request, 2026-10-13), so the duration is seen sliding in from the edge the
-     bubble has already opened. */
-  --usage-grow: calc(var(--usage-phase) / 2);
-  /* The half-leading of the corner's line: the space between its line box's
-     top and the figures' em box. It is part of the top gap as drawn, so the
-     right gap carries it too. */
-  --usage-half-leading: calc((var(--md-line-h) - 1) / 2 * 1em);
-  /* `.bubble`'s own top padding, which the corner sits under: the bubble's
-     token itself, so the two cannot disagree (styles.test.ts holds them). */
-  --usage-bubble-pad-top: var(--bubble-pad-y);
-  /* THE ONE GAP TOKEN: the distance from the bubble's edge to the figure's em
-     box, top and right alike. It is the top gap the corner has always had,
-     and the right gap is derived from it below. */
-  --usage-corner-gap: calc(var(--usage-bubble-pad-top) + var(--usage-half-leading));
-  /* THE HORIZONTAL GAP: the right gap and the duration's parked offset. It
-     reads the UNSHRUNK top padding (`--bubble-pad-y-base`), so a prompt or
-     response bubble's tighter vertical padding moves the corner up with the
-     prose but never sideways (owner request, 2026-10-12). */
-  --usage-corner-gap-x: calc(var(--bubble-pad-y-base) + var(--usage-half-leading));
-  /* The corner's right margin, read by the corner and by an open interim's
-     ghost, which must round exactly as the corner does (see "AN OPEN
-     INTERIM'S GHOST"). */
-  --usage-corner-margin-right: calc(var(--usage-corner-gap-x) - var(--bubble-scroll-gap) - var(--usage-hit-x));
-  /* An interim corner's left margin, read by the corner and its open ghost
-     for the same reason. */
-  --usage-interim-margin-left: calc(var(--usage-text-gap) - var(--bubble-content-inset) - var(--usage-hit-x));
-  /* How far an interim bubble opens on hover: the duration's drawn width
-     (set on the bubble, src/feed/cards/response.ts) and its gap. */
-  --usage-reveal-w: calc(var(--usage-pair-gap) + var(--usage-ago-w));
-  /* The normal gap between the token and the duration, unchanged. */
-  --usage-pair-gap: 0.35rem;
-  /* AN INTERIM'S GAP FROM ITS TEXT TO ITS TOKEN (owner request, 2026-10-13:
-     "a space or two"): the pair's own gap, so the line, the token and the
-     duration keep one rhythm. */
-  --usage-text-gap: var(--usage-pair-gap);
-  /* THE FIGURES' ONE SIZE, read by the corner and by the ghost that measures
-     its footprint, so the two cannot differ: a quarter smaller than the 0.85em
-     it was (owner request, 2026-10-13). */
-  --usage-font-size: calc(0.85em * 0.75);
-  /* THE FIGURES' ONE WEIGHT, read by the corner and its ghost alike: the ghost
-     sits inside the prose, which an interim sets bold, and a bold ghost
-     measured wider than the regular corner it stands for. */
-  --usage-font-weight: normal;
-}
-/* THE GHOST (see "THE SIZING GHOST" above): an invisible, zero-height float
-   exactly the corner's footprint wide. That footprint is the corner's in-flow
-   content -- the token's 6ch slot, the pair gap and the widest duration label
-   -- plus its right gap (`--usage-corner-gap` from the bubble's edge, less the
-   `--bubble-scroll-gap` the bubble's own padding gives); the hit padding the
-   corner's margins cancel adds nothing. It reads the corner's own size, 0.85em,
-   so its 6ch and its labels measure as the corner's do. The labels arrive as
-   `--usage-reserve-labels`, which the response draw sets on the bubble from
-   the one list the corner's reserve is drawn from (`USAGE_AGE_RESERVE_LABELS`,
-   src/feed/cards/response.ts), one per line, so the box is as wide as the
-   widest of them, exactly like the corner's one-cell reserve grid. The
-   real-WebKit suite (test/webkit/usage-corner-ghost.webkit.test.ts) holds the
-   ghost's width to the corner's measured footprint. */
-.bubble[data-cap-lines="none"] .usage-corner + .bubble-body > .response-prose:first-child > p:first-child::before,
-.bubble[data-more="ellipsis"] > .bubble-scroll.expanded > .usage-corner + .bubble-body > .response-prose:first-child > p:first-child::before {
-  content: var(--usage-reserve-labels);
-  float: right;
-  height: 0;
-  overflow: hidden;
-  visibility: hidden;
-  white-space: pre;
-  font-size: var(--usage-font-size);
-  font-weight: var(--usage-font-weight);
-  font-variant-numeric: tabular-nums;
-  padding-left: calc(6ch + var(--usage-pair-gap));
-  padding-right: calc(var(--usage-corner-gap-x) - var(--bubble-scroll-gap));
-}
-/* The token's width reservation: the token text again, invisible, in the
-   token's own size and figures. ITS WIDTH IS FIXED (owner rule, 2026-09-23:
-   the user owns the scroll): an arriving response restates its figure as it
-   grows, and a spacer as wide as the text reflowed the first prose line --
-   and every line under it -- whenever the figure gained a character. 6ch
-   holds the widest figure the one token formatter writes ("999.9k"). */
-.usage-corner::before {
-  content: attr(data-tokens);
-  visibility: hidden;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  width: 6ch;
-}
-/* The duration's width reservation: the normal gap, then every widest label
-   the age formatter can write, stacked in ONE grid cell so the cell is as
-   wide as the widest of them. The live clock repaints the duration every
-   second, and its width never reaches past this. */
-.usage-reserve {
-  display: grid;
-  visibility: hidden;
-  margin-left: var(--usage-pair-gap);
-  font-variant-numeric: tabular-nums;
-}
-.usage-reserve > .usage-reserve-label {
-  grid-area: 1 / 1;
-  white-space: nowrap;
-}
-/* The pair's carrier, and the element PHASE B moves: out of flow, its right
-   edge on the corner's content edge, its top on the corner's content top, and
-   as wide as the duration plus its gap. At rest it is `translateX(100%)` of
-   that width, so the token hanging off its left edge sits on the corner's
-   content edge. It starts moving back first on mouse-leave, and waits out
-   phase A on hover. */
-.usage-slider {
-  position: absolute;
-  top: var(--usage-hit-y);
-  right: var(--usage-hit-x);
-  transform: translateX(100%);
-  transition: transform var(--usage-phase) ease 0s;
-}
-/* The cost corner's figure, drawn verbatim in the token amber the footer's
-   token cell wears. Anchored to the slider's left edge at the slider's top —
-   the line the duration's text starts on, in the same inherited size and
-   leading, so the two share one baseline. It rides the slider's transform and
-   has no transform or transition of its own. */
-.usage-stamp {
-  position: absolute;
-  top: 0;
-  right: 100%;
-  white-space: nowrap;
-  color: var(--info-tokens);
-  font-variant-numeric: tabular-nums;
-}
-/* THE HOVER DURATION: the response's settled time, relative and live
-   ("5m 30s ago"), grey (the shared muted token). The element PHASE A moves:
-   at rest it waits one `--usage-corner-gap-x` beyond its normal gap, faded out;
-   on hover it slides in and fades up first, and on mouse-leave it goes back
-   last, once phase B has returned. A block, so its transform applies. */
-.usage-ago {
-  display: block;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  margin-left: var(--usage-pair-gap);
-  opacity: 0;
-  transform: translateX(var(--usage-corner-gap-x));
-  transition:
-    transform var(--usage-phase) ease var(--usage-phase),
-    opacity var(--usage-phase) ease var(--usage-phase);
-}
-/* The reveal triggers off the WHOLE assistant bubble, not just the small
-   corner: hovering the corner would put the cursor on top of the duration it
-   had just revealed. The corner's own `:hover`/`:focus-within` and the
-   `usage-corner--revealed` class (toggled on hover and keyboard focus) stay
-   too (owner ruling, 2026-09-14). The slider and the duration share the one
-   trigger list. On hover phase B waits for phase A. */
-.bubble.assistant:hover .usage-slider,
-.bubble.assistant:focus-within .usage-slider,
-.usage-corner:hover .usage-slider,
-.usage-corner:focus-within .usage-slider,
-.usage-corner.usage-corner--revealed .usage-slider {
-  transform: translateX(0);
-  transition-delay: var(--usage-phase);
-}
-.bubble.assistant:hover .usage-ago,
-.bubble.assistant:focus-within .usage-ago,
-.usage-corner:hover .usage-ago,
-.usage-corner:focus-within .usage-ago,
-.usage-corner.usage-corner--revealed .usage-ago {
-  opacity: 1;
-  transform: translateX(0);
-  transition-delay: 0s;
-}
-/* AN ARRIVING CORNER NEVER SLIDES: it has no duration yet, so revealing it
-   would move the token over nothing. (0,5,0) outranks every reveal trigger
-   above. */
-.bubble.assistant .usage-corner[data-arriving] .usage-slider {
-  transform: translateX(100%);
-}
-/* Reduced motion: the duration appears and the token moves with no slide or
-   fade. */
-@media (prefers-reduced-motion: reduce) {
-  .usage-slider,
-  .usage-ago {
-    transition: none;
-  }
-}
-/* AN INTERIM RESPONSE'S CORNER GROWS ITS BUBBLE TO THE RIGHT (owner request,
-   2026-10-13). Only the interim: a final answer and a thinking
-   bubble keep the reveal above.
-
-   AT REST the corner is the token alone, `--usage-text-gap` from the end of
-   the line, with no duration reserve and no fixed 6ch slot: the bubble fits
-   the line and its token. The figure is settled by then (a later row of the
-   turn proved the response interim), so a slot as wide as the token never
-   reflows anything.
-
-   ON HOVER the bubble opens to the right by exactly the duration and its gap,
-   `--usage-ago-w` (the duration's drawn width, which the corner measures and
-   sets on the bubble, src/feed/cards/response.ts `measureUsageAgo`) plus
-   `--usage-pair-gap`. That width is `--usage-reveal-w`, and how much of it is
-   open at this instant is `--usage-open`: 0 at rest, `--usage-reveal-w` under
-   the hover, and the ONE value the `--usage-grow` transition animates. Three
-   things grow by it, so the line beside the corner never moves:
-     - the slider's width, which widens the corner's float;
-     - the bubble's cap, so a line truncated at the cap keeps its width and
-       the bubble passes the cap rather than squeezing the line;
-     - an OPEN interim's body's right margin, since its float adds nothing to
-       the bubble's width (see "THE SIZING GHOST") and its later lines must keep
-       theirs.
-   The duration meanwhile slides in from the bubble's new right edge towards
-   the token over a whole `--usage-phase`, twice the opening's length, fading
-   in as it comes. The token never moves. Mouse-leave runs both back.
-
-   THE MARKUP is the corner's own, restyled: the slider is in flow after the
-   token's slot, so the token (anchored to the slider's left edge) sits on that
-   slot, and the duration hangs off the slider at its natural width.
-
-   ONE ANIMATED WIDTH, NEVER THREE TRANSITIONS. The three sites read
-   `--usage-open` rather than each transitioning its own property, so they
-   agree in every frame whatever starts or stops matching. A click that opens
-   a hovered interim starts the body's margin rule mid-hover: with a transition
-   of its own, that margin eased in from 0 while the corner stood fully open,
-   the first line lost the reveal width for the transition's length, wrapped,
-   and unwrapped, so the bubble grew a line and shrank back as if it had closed
-   again (2026-10-20). Read from the one value, the margin starts at the width
-   already open. */
-@property --usage-open {
-  syntax: "<length>";
-  inherits: true;
-  initial-value: 0px;
-}
-/* The corner's left margin reaches back over the body's inset, so the text
-   ends `--usage-text-gap` from the token rather than the inset plus the gap. */
-.bubble.interim-response > .bubble-scroll > .usage-corner {
-  margin-left: var(--usage-interim-margin-left);
-}
-/* AN OPEN INTERIM'S CORNER GIVES THE INSET BACK. Closed, the clamped body is a
-   box of its own, set beside the float with its right padding (the inset)
-   still inside it, so the margin above reaches back over that inset. Open, the
-   body rejoins the corner's formatting context, and its first line wraps
-   against the float's own margin edge, which the body's padding does not
-   push: the same margin let that line run the whole inset into the token's
-   gap. So the open corner's margin is the closed one plus the inset, and the
-   line again ends `--usage-text-gap` from the token. Its ghost keeps the
-   closed margin: the ghost sits inside the body's inset, where that reach is
-   still owed (see "AN OPEN INTERIM'S GHOST"). */
-.bubble.interim-response > .bubble-scroll.expanded > .usage-corner {
-  margin-left: calc(var(--usage-interim-margin-left) + var(--bubble-content-inset));
-}
-.bubble.interim-response > .bubble-scroll > .usage-corner::before {
-  width: auto;
-}
-.bubble.interim-response > .bubble-scroll > .usage-corner > .usage-reserve {
-  display: none;
-}
-.bubble.interim-response > .bubble-scroll > .usage-corner > .usage-slider {
-  position: relative;
-  top: auto;
-  right: auto;
-  width: var(--usage-open);
-  transform: none;
-}
-.bubble.interim-response > .bubble-scroll > .usage-corner .usage-ago {
-  width: max-content;
-  transform: translateX(calc(100% + var(--usage-corner-gap-x)));
-  transition:
-    transform var(--usage-phase) ease,
-    opacity var(--usage-phase) ease;
-}
-/* AN OPEN INTERIM'S GHOST IS THE RESTING CORNER: the token text (the response
-   draw sets `--usage-token-text` from the corner's own figure) in the corner's
-   own margins and padding, so the open bubble is as wide as the closed one and
-   its first line keeps every word the closed line showed.
-   THE SAME TERMS, NOT THE SAME SUM: the engine rounds each margin and padding
-   on its own, so a ghost summed from other terms than the corner's came out a
-   fraction of a pixel narrower, and a line that fit closed wrapped once
-   opened. The ghost sits inside the body's inset and the corner outside it,
-   and the inset is in both bubbles, so these terms are the whole difference. */
-.bubble.interim-response > .bubble-scroll.expanded > .usage-corner + .bubble-body > .response-prose:first-child > p:first-child::before {
-  content: var(--usage-token-text);
-  margin-left: var(--usage-interim-margin-left);
-  padding-left: var(--usage-hit-x);
-  padding-right: var(--usage-hit-x);
-  margin-right: var(--usage-corner-margin-right);
-}
-.bubble.interim-response > .bubble-scroll.expanded > .usage-corner + .bubble-body {
-  margin-right: var(--usage-open);
-}
-.bubble.interim-response {
-  max-width: calc(var(--bubble-max-width) + var(--usage-open));
-  transition: --usage-open var(--usage-grow) ease;
-}
-/* The reveal, under the one trigger every reveal reads: the bubble hovered or
-   holding focus (the corner's own triggers are inside it). An arriving corner
-   has no duration, so nothing opens for it. */
-.bubble.interim-response:hover:has(> .bubble-scroll > .usage-corner:not([data-arriving])),
-.bubble.interim-response:focus-within:has(> .bubble-scroll > .usage-corner:not([data-arriving])) {
-  --usage-open: var(--usage-reveal-w);
-}
-.bubble.interim-response:hover > .bubble-scroll > .usage-corner .usage-ago,
-.bubble.interim-response:focus-within > .bubble-scroll > .usage-corner .usage-ago {
-  opacity: 1;
-  transform: translateX(0);
-}
-@media (prefers-reduced-motion: reduce) {
-  .bubble.interim-response {
-    transition: none;
-  }
-  .bubble.interim-response > .bubble-scroll > .usage-corner .usage-ago {
-    transition: none;
-  }
-}
 /* A bubble the turn's death cut short: the border says it and the marker names
    it. WHY it died is the turn's terminal row, never this bubble's, so the
    marker carries no reason text. */
@@ -6995,6 +6582,9 @@ bubble-body.bubble-body { display: block; }
    around them stays the cell's own muted register. */
 .footer-activity { color: var(--muted); }
 .footer-activity-age { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* THE HOVERED RESPONSE'S USAGE (src/footer/response-usage.ts): its figure in
+   its own heat, in the figures the line's age wears. */
+.footer-response-tokens { font-variant-numeric: tabular-nums; }
 /* The newsworthy allowance is the one the reader must act on, so it is the one
    set in the foreground weight; its sibling stays reference. */
 .footer-allowance-newsworthy { font-weight: 650; }

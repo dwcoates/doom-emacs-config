@@ -333,6 +333,27 @@ export function markdownSlot(className: string, prose: ParsedProse, mark?: SlotM
 }
 
 /**
+ * Add MARK to SLOT's paints, after the mark it was made with: a mark that is
+ * not the slot kind's own (the copy control's room on a bubble's first line,
+ * src/bubble/copy-room.ts) composes with it rather than replacing it, and,
+ * like the kind's own, is carried to the live slot by `paintBody`.
+ */
+export function addSlotMark(slot: HTMLElement, mark: SlotMark): void {
+  const name = slot.className;
+  if (!isMarkdownSlot(slot)) invariant("a mark was added to an element that is not a markdown slot", { slot: name });
+  const own = slotMarks.get(slot);
+  slotMarks.set(
+    slot,
+    own === undefined
+      ? mark
+      : (rendered) => {
+          own(rendered);
+          mark(rendered);
+        },
+  );
+}
+
+/**
  * Paint BODY with CONTENT: its nodes, every markdown slot among them drawn.
  * Answers the nodes the body now holds, position for position with CONTENT.
  *
@@ -350,7 +371,7 @@ export function paintBody(body: BubbleBody, content: readonly ChildNode[]): read
   const live = [...body.childNodes];
   const next = content.map((want, i) => {
     const have = live[i];
-    if (isSlot(have) && isSlot(want) && have.className === want.className) {
+    if (isMarkdownSlot(have) && isMarkdownSlot(want) && have.className === want.className) {
       slotSources.set(have, sourceOf(want));
       const mark = slotMarks.get(want);
       if (mark === undefined) slotMarks.delete(have);
@@ -382,7 +403,7 @@ export function paintGeneration(body: BubbleBody): number {
 }
 
 /** Whether NODE is a markdown slot this pipeline made. */
-function isSlot(node: ChildNode | undefined): node is HTMLElement {
+export function isMarkdownSlot(node: ChildNode | undefined): node is HTMLElement {
   return node instanceof HTMLElement && slotSources.has(node);
 }
 

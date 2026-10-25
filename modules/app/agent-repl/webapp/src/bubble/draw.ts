@@ -176,9 +176,9 @@ interface BubbleSpecBase {
   /** The header strip: drawn above the scroll box, full width, in this order. */
   strip?: readonly HTMLElement[];
   /**
-   * The corner, floated top-right inside the scroll box, each element below
-   * the one before it: a response's usage corner, then its copy control, or a
-   * prompt's copy control.
+   * The corner, inside the scroll box before the body: a bubble's copy
+   * control (src/bubble/copy-room.ts), which the stylesheet places at the
+   * bubble's top right.
    */
   corner?: readonly HTMLElement[];
   /** The content: nodes, markdown slots among them (see body.ts). */

@@ -44,6 +44,7 @@ import { mountFeed } from "./feed/feed.js";
 import { mountChat } from "./chat/chat.js";
 import { landChatAtEnd } from "./scroll.js";
 import { mountFooter } from "./footer/footer.js";
+import { installResponseUsageHover } from "./feed/response-usage.js";
 import { adoptAtBoot, startLifecycle } from "./lifecycle/lifecycle.js";
 import { createRevealRelay } from "./lifecycle/reveal-relay.js";
 import { mountLoginOverlay } from "./login/login.js";
@@ -382,6 +383,10 @@ export async function boot(): Promise<void> {
       selectDetachedWork: (id) => feed.selectDetachedWork(id),
       presence: pagePresence(),
     });
+    // A HOVERED RESPONSE'S USAGE IS READ IN THE FOOTER (owner request,
+    // 2026-10-25): the bubble draws no figure of its own, and the footer's
+    // activity cell shows it while the pointer is on the bubble.
+    installResponseUsageHover(shell.feed, (usage) => footer.showResponseUsage(usage));
     // THE GATE IS THE FOOTER'S OWN COLOR (owner ruling, 2026-09-28). A
     // composer is closed exactly when the footer's status arm is blue (the
     // workspace is unusable: an agent-repl fault, a network fault, a close) —
