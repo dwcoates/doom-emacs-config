@@ -5,7 +5,7 @@
 #   bin/install-gippity.sh [--icon ICNS] [DEST]
 #
 # DEST defaults to /Applications/Gippity.app and is REPLACED. The app only
-# runs `open -a Emacs` on master's launch file (launch/open-chats.agent-repl-
+# runs `open -a Emacs` on master's launch file (lisp/open-chats.agent-repl-
 # chats); macOS holds that open until Emacs takes it, so a launch while
 # Emacs is starting is not lost, and threads.el's launch mode opens the
 # thread. --icon gives the app ICNS as its icon.
@@ -17,7 +17,7 @@ if [[ "${1:-}" == "--icon" ]]; then
   shift 2
 fi
 dest="${1:-/Applications/Gippity.app}"
-launch_file="$HOME/.config/doom/modules/app/agent-repl/launch/open-chats.agent-repl-chats"
+launch_file="$HOME/.config/doom/modules/app/agent-repl/lisp/open-chats.agent-repl-chats"
 
 if [[ -n "$icon" && ! -f "$icon" ]]; then
   echo "install-gippity: no icon at $icon" >&2

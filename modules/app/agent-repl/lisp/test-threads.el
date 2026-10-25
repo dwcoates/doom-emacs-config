@@ -164,7 +164,13 @@ WS is the workspace a thread is open in, nil while it is still opening."
   "Visiting the launch file drops its buffer and opens the most recent thread."
   (agent-repl-test-threads--with '(("t-1" "why" "chat/why"))
     (let* ((agent-repl-threads--recent-owed nil)
-           (file (make-temp-file "gippity" nil ".agent-repl-chats"))
+           ;; A copy of the launch file Gippity.app opens, so its name is the
+           ;; real one and the visit cannot touch the checked-in file.
+           (file (let ((copy (make-temp-file "gippity" t)))
+                   (copy-file (expand-file-name "open-chats.agent-repl-chats"
+                                                (file-name-directory (symbol-file 'agent-repl-threads-launch-mode 'defun)))
+                              (file-name-as-directory copy) t)
+                   (expand-file-name "open-chats.agent-repl-chats" copy)))
            (before (copy-sequence timer-list))
            (buffer (find-file-noselect file))
            (scheduled (cl-set-difference timer-list before)))
@@ -176,7 +182,7 @@ WS is the workspace a thread is open in, nil while it is still opening."
             ;; Assert
             (should-not (buffer-live-p buffer))
             (should (equal agent-repl-test-threads--switched '(("chat/why" . launch)))))
-        (delete-file file)))))
+        (delete-directory (file-name-directory file) t)))))
 
 (provide 'test-threads)
 

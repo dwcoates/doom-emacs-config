@@ -136,7 +136,8 @@ a timer, and held while another minibuffer is open."
 ;;;; ---- Opening Chats from outside Emacs (Gippity.app) ----
 
 ;; GIPPITY.APP OPENS A FILE (bin/install-gippity.sh): `open -a Emacs` on the
-;; launch file below. macOS holds that open until Emacs takes it, running or
+;; launch file, lisp/open-chats.agent-repl-chats, whose name matches the
+;; regexp below. macOS holds that open until Emacs takes it, running or
 ;; still starting, so no launch is lost to a server that is not up yet; the
 ;; file's major mode opens the most recent thread, at once or, before the
 ;; first roster, on its arrival.
