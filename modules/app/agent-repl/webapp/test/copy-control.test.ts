@@ -46,6 +46,7 @@ function installRecording(outcome: boolean): string[] {
     {
       code: (control) => ({ text: control.parentElement?.getAttribute("data-text") ?? "", context: { lang: "go" } }),
       prompt: boundCopyText,
+      response: boundCopyText,
     },
     (text) => {
       written.push(text);

@@ -176,10 +176,11 @@ interface BubbleSpecBase {
   /** The header strip: drawn above the scroll box, full width, in this order. */
   strip?: readonly HTMLElement[];
   /**
-   * The corner, floated top-right inside the scroll box: a response's usage
-   * corner, or a prompt's copy control.
+   * The corner, floated top-right inside the scroll box, each element below
+   * the one before it: a response's usage corner, then its copy control, or a
+   * prompt's copy control.
    */
-  corner?: HTMLElement;
+  corner?: readonly HTMLElement[];
   /** The content: nodes, markdown slots among them (see body.ts). */
   content: readonly ChildNode[];
   /** Chrome after the scroll box, always shown (a cut-short marker). */
@@ -313,7 +314,7 @@ export function drawBubble(spec: BubbleSpec, previous?: HTMLElement): DrawnBubbl
   placeChildren(bubble, [...strip, scroll, ...after]);
 
   const liveCorner = reused === null ? [] : [...scroll.children].filter((el) => el !== body);
-  const corner = keepSaid(liveCorner as HTMLElement[], spec.corner === undefined ? [] : [spec.corner]);
+  const corner = keepSaid(liveCorner as HTMLElement[], spec.corner ?? []);
   placeChildren(scroll, [...corner, body]);
 
   // Painted LAST, inside the finished bubble: a slot holding a tree measures

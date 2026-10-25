@@ -2753,6 +2753,11 @@ html[data-page-unshown] *::after {
   width: calc(var(--prompt-copy-gap) + var(--copy-control-box) + var(--prompt-copy-text-gap) - var(--bubble-scroll-gap));
   height: calc(var(--prompt-copy-gap) + var(--copy-control-box) - var(--bubble-pad-y));
 }
+/* A FINAL RESPONSE'S COPY CONTROL (src/feed/cards/response.ts) copies the
+   whole response, and is always shown (owner request, 2026-10-24). It floats
+   right after the usage corner and clears it, so it stands just under the
+   token count and duration, and the prose wraps short of both. */
+.response-copy { float: right; clear: right; margin: 0.15em 0 0.2em 0.6em; }
 .md a { color: var(--accent); }
 /* A link in a blue prompt bubble takes the prompt's own link color. A held
    prompt keeps --accent, since its fill is grey, not blue. */

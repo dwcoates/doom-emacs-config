@@ -110,6 +110,7 @@ import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 import { easeIntoLook, readBubbleLook } from "../../bubble/collapse-motion.js";
 import { drawOutcomeCard } from "../marker.js";
 import { linkAnswers } from "../entries.js";
+import { boundCopyControl } from "../../copy-control.js";
 import { markComposerEntry } from "../composer-entry.js";
 
 /** The attribute the shown length is carried on across a redraw. */
@@ -159,6 +160,9 @@ export const INTERIM_RESPONSE_CLASS = "interim-response";
  * where the number comes from.
  */
 const RESPONSE_PROSE_BLOCKS = 1;
+
+/** The class a final response's copy control wears (styles.css places it under the usage corner). */
+export const RESPONSE_COPY_CLASS = "response-copy";
 
 /** The class of the one markdown slot a response's prose is painted into. */
 export const RESPONSE_PROSE_CLASS = "response-prose";
@@ -254,6 +258,13 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // A LABEL A LATER PROMPT ANSWERS IS A LINK to that prompt, restated on every
   // paint of the prose (entries.ts).
   const answers = u.answers;
+  // A FINAL RESPONSE CARRIES A COPY CONTROL for its whole text (owner request,
+  // 2026-10-24), under the usage corner at the top right: the response's
+  // markdown as the daemon served it, never what it renders as.
+  const copy =
+    u.finalAnswer && !u.thinking && result.case === "success"
+      ? boundCopyControl("response", RESPONSE_COPY_CLASS, "Copy response", proseSource(served))
+      : undefined;
   // THE SUBTREE THE COMPOSER IS ANSWERING is boxed on every paint too
   // (composer-entry.ts).
   const rowId = rc.row.id?.value ?? "";
@@ -275,7 +286,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       variant: u.thinking ? "thinking" : "response",
       state: result.case,
       hooks,
-      ...(corner === undefined ? {} : { corner }),
+      corner: [...(corner === undefined ? [] : [corner]), ...(copy === undefined ? [] : [copy])],
       content: [prose],
       footer: result.case === "error" ? cutShortFooter(result.value) : [],
       ...responseCap(u),

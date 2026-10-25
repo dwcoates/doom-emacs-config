@@ -358,7 +358,7 @@ describe("drawBubble: the structure every kind shares", () => {
     // Arrange
     const corner = el("usage-corner");
     // Act
-    const { body } = drawBubble(spec("response", { corner }));
+    const { body } = drawBubble(spec("response", { corner: [corner] }));
     // Assert
     expect(corner.nextElementSibling).toBe(body);
   });
@@ -550,11 +550,11 @@ describe("drawBubble: a redraw given its previous draw updates it in place", () 
     // Arrange
     const corner = el("usage-corner", "1.2k");
     corner.setAttribute(SAYS_ATTRIBUTE, "1.2k|0");
-    const first = drawBubble(spec("response", { corner })).bubble;
+    const first = drawBubble(spec("response", { corner: [corner] })).bubble;
     const again = el("usage-corner", "1.2k (ticked)");
     again.setAttribute(SAYS_ATTRIBUTE, "1.2k|0");
     // Act
-    drawBubble(spec("response", { corner: again }), first);
+    drawBubble(spec("response", { corner: [again] }), first);
     // Assert
     expect(first.querySelector(".usage-corner")).toBe(corner);
   });
