@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,13 +70,26 @@ func (r *Repo) DeploysAsAgentRepl() {
 		r.t.Fatalf("harness: read %s: %v", source, err)
 	}
 	writeExecutable(r.t, filepath.Join(r.Dir, DeployLandingScript), string(script))
-	door := filepath.Join(r.Dir, frontDoorOf(r.t, string(script)))
+	if err := linkFrontDoor(filepath.Join(r.Dir, frontDoorOf(r.t, string(script))), DaemonBinary(r.t)); err != nil {
+		r.t.Fatalf("harness: %v", err)
+	}
+}
+
+// linkFrontDoor links DOOR to BINARY. A test restating its repository's deploy
+// (a fresh daemon on the same repository) calls DeploysAsAgentRepl again, so
+// a door already linked to BINARY is left as it is; a door that is anything
+// else is no door this harness made, and is refused.
+func linkFrontDoor(door, binary string) error {
 	if err := os.MkdirAll(filepath.Dir(door), 0o755); err != nil {
-		r.t.Fatalf("harness: mkdir %s: %v", filepath.Dir(door), err)
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(door), err)
 	}
-	if err := os.Symlink(DaemonBinary(r.t), door); err != nil {
-		r.t.Fatalf("harness: link the front door %s: %v", door, err)
+	if target, err := os.Readlink(door); err == nil && target == binary {
+		return nil
 	}
+	if err := os.Symlink(binary, door); err != nil {
+		return fmt.Errorf("link the front door %s: %w", door, err)
+	}
+	return nil
 }
 
 // frontDoorOf answers the path, relative to the repository root, SCRIPT's

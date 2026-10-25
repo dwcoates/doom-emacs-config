@@ -59,6 +59,55 @@ func TestTheFrontDoorIsReadOffTheRealDeployScript(t *testing.T) {
 	}
 }
 
+func TestLinkFrontDoor(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, door, binary string)
+		wantErr bool
+	}{
+		{name: "a missing door is linked", arrange: func(*testing.T, string, string) {}},
+		{name: "a door already linked to the binary is left linked", arrange: func(t *testing.T, door, binary string) {
+			if err := linkFrontDoor(door, binary); err != nil {
+				t.Fatalf("first link: %v", err)
+			}
+		}},
+		{name: "a door linked elsewhere is refused", wantErr: true, arrange: func(t *testing.T, door, _ string) {
+			if err := linkFrontDoor(door, filepath.Join(filepath.Dir(door), "elsewhere")); err != nil {
+				t.Fatalf("link elsewhere: %v", err)
+			}
+		}},
+		{name: "a door that is a file is refused", wantErr: true, arrange: func(t *testing.T, door, _ string) {
+			writeExecutable(t, door, "#!/bin/sh\n")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			root := t.TempDir()
+			door := filepath.Join(root, "skills", "agent-repld")
+			binary := filepath.Join(root, "agent-repld")
+			tt.arrange(t, door, binary)
+
+			// Act
+			err := linkFrontDoor(door, binary)
+
+			// Assert
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("linkFrontDoor = nil, want the door refused")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("linkFrontDoor = %v, want the door linked", err)
+			}
+			if target, err := os.Readlink(door); err != nil || target != binary {
+				t.Fatalf("the door links to %q (%v), want %q", target, err, binary)
+			}
+		})
+	}
+}
+
 func TestTheDeployScriptCallsTheDaemonRunningItsDeploy(t *testing.T) {
 	tests := []struct {
 		name string
