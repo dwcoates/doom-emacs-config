@@ -152,6 +152,8 @@ type Deps struct {
 	// is the `news_digest` state every WEBVIEW WatchDaemon stream subscribes
 	// to (an Emacs stream's never does: only a webview draws the overlay).
 	NewsDigest NewsDigest
+	// Storage backs PruneStorage: the storage sweep.
+	Storage StorageSweep
 	// ClassifierPrompt backs UpdateClassifierPrompt: the routing brief's
 	// rewrite and its commit (internal/classifierupdate).
 	ClassifierPrompt ClassifierPrompt
@@ -523,6 +525,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the hidden workspaces' cache keeper")
 	case deps.NewsDigest == nil:
 		return nil, missing("the news digest")
+	case deps.Storage == nil:
+		return nil, missing("the storage sweep")
 	case deps.ClassifierPrompt == nil:
 		return nil, missing("the classifier prompt updater")
 	case deps.EditorInstances == nil:

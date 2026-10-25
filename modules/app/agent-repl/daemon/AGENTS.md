@@ -2774,6 +2774,44 @@ Rules that fall out of it, and that a change to any of these numbers must keep:
   `EscalationBound`. That derivation is separate and is not sized by the table
   above.
 
+## The storage sweep (`internal/storagesweep`)
+
+The daemon deletes agent-repl's own stored data once nothing will read it
+again. One background loop (`storage_sweep` in `graph.go`): the first sweep
+`10m` after start, then one every `24h`, under `internal/sweepguard` with
+`<lock dir>/storage-sweep.lock`. `agent-repld runtime prune-storage
+[-preview]` (`agentrepl.v1.PruneStorage`) runs one now; `-preview` judges
+exactly as a sweep does and deletes nothing.
+
+**Shim state** (`<state root>/shim/<key>`, `sessionlock.WorkspaceKey` of the
+workspace directory, the shim's identity and transcript backups). The
+directory is listed BEFORE `wsm.ListWorkspaces` is read: the shim makes it
+only after the row exists, so a directory listed first always finds its row,
+and a workspace created mid-sweep is never taken for a forgotten one. Each
+directory is judged by every row keyed to it (a reused directory has
+several): any open row keeps it; no row deletes it (`no_workspace`: the
+workspace was forgotten); otherwise it is deleted no earlier than the latest
+deadline any row allows and no more than the least any allows:
+
+- closed by its own merge (`Closure.By == merge`): the whole directory, 3
+  days after the close (`landed`);
+- closed any other way: only `backups/`, 30 days after the close, so a
+  reopened workspace resumes as itself (`closed_backups`);
+- closed with no close record: as the line above, counted from the
+  directory's newest write.
+
+A registry that cannot be read, or a row whose key cannot be derived, deletes
+no shim state that sweep (ERROR).
+
+**Aged caches.** `~/.cache/agent-repl/profiles` (`AGENT_REPL_PROFILE_ROOT`,
+keeping `active`, `armed` and the session `active` names) and
+`~/.cache/agent-repl/test-passes` (`AGENT_REPL_TEST_PASSES`): an entry whose
+own modification time is over 30 days old is deleted (`aged`).
+
+Worktrees are the reaper's (below) and logs their writers' own retention's;
+the sweep touches neither. Every deletion is INFO with its path, reason and
+bytes; every failure is ERROR and the sweep goes on.
+
 ## The landed-worktree reaper (`internal/worktreereap`)
 
 The merge queue retires the worktrees it merges. Agents also cut worktrees
@@ -2788,7 +2826,8 @@ the schedule by hand and never sleeps. **One sweep at a time**: in process a
 `TryLock` refuses a second (`ErrSweepRunning`), and across processes the sweep
 holds `<lock dir>/worktree-reap.lock` (`internal/recordlock`) for its whole run,
 so an incumbent and its handover successor never sweep together; the loser
-records INFO and sweeps nothing.
+records INFO and sweeps nothing. Both locks are `internal/sweepguard`'s, which
+every background sweep runs under.
 
 **Which repositories.** Every row of `wsm.ListRepositories` -- the
 repositories the daemon registered for its workspaces. The "default branch"

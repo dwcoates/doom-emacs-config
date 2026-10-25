@@ -1,6 +1,6 @@
 ---
 name: agent-repl-runtime
-description: 'Operate the agent-repl runtime — build it, bounce its backends, hard bounce everything including Emacs, roll a deploy out, hot-reload elisp into the running Emacs, check health and readiness, read logs, hold or release a repository''s deploys, evaluate elisp in the running Emacs and read the answer back, arrange the sidebar, and send any unary request to the running daemon. Use whenever the user asks to build, deploy, bounce, hard bounce, restart, hot-reload, or poke agent-repl, or names one of the terms in this skill''s terminology table; whenever a hand-deployed build (a profiling build) must not be replaced by the next landing; whenever live editor state must be inspected or changed rather than reasoned about from source; and whenever the sidebar should be organized.'
+description: 'Operate the agent-repl runtime — build it, bounce its backends, hard bounce everything including Emacs, roll a deploy out, hot-reload elisp into the running Emacs, check health and readiness, read logs, hold or release a repository''s deploys, prune agent-repl''s stored data, evaluate elisp in the running Emacs and read the answer back, arrange the sidebar, and send any unary request to the running daemon. Use whenever the user asks to build, deploy, bounce, hard bounce, restart, hot-reload, prune, or poke agent-repl, or names one of the terms in this skill''s terminology table; whenever a hand-deployed build (a profiling build) must not be replaced by the next landing; whenever live editor state must be inspected or changed rather than reasoned about from source; and whenever the sidebar should be organized.'
 argument-hint: "<build|byte-compile|bounce|hard-bounce|deploy|hot-reload FILE...|call [-workspace DIR] METHOD ...|doctor|readiness|logs|deploy-hold hold|release|eval TEXT|sidebar> or a plain-English request"
 allowed-tools: Bash(~/.claude/skills/agent-repl-runtime/run.sh:*), Bash(~/.claude/skills/agent-repl-runtime/agent-repld:*)
 lineage_root: user.dodge.skills.agent-repl-runtime
@@ -40,6 +40,7 @@ Runs agent-repl's build, bounce, deploy, hot-reload, health and daemon-request o
     | "interrupt / stop the turn in WS" | `agent-repld workspace interrupt WS` | Stops the running turn. The user's own key is `C-c C-k` in the input window. |
     | "switch to / select workspace WS" | `agent-repld workspace select WS` | Makes it current; Emacs and the webapp follow. |
     | "is the daemon healthy" | `call DaemonHealth` | Prints the daemon's health and identity. |
+    | "prune agent-repl's storage" / "free up agent-repl's disk" | `agent-repld runtime prune-storage [-preview]` | Runs the storage sweep now and prints what it deleted; `-preview` deletes nothing. |
     | "hot reload" / "reload the lisp" | `hot-reload FILE.el...` | Loads the changed non-test `.el` files into the running Emacs. |
     | "reload the page" / "reload the webview" | *(no argument)* | The user's own key is `SPC o l`; suggest it, do not act. |
 
@@ -87,6 +88,11 @@ the usage.
   deploy has reported; with none it starts at once. NEVER run it by hand:
   `deploy` is the rolling deploy.
 - `runtime health` prints the daemon's health and identity.
+- `runtime prune-storage [-preview]` runs the daemon's storage sweep now
+  (it also runs once a day): it deletes forgotten and landed workspaces'
+  shim state, the transcript backups of workspaces closed over thirty days,
+  and month-old profiling sessions and test-reuse records, and prints what
+  went. `-preview` prints what a sweep would delete and deletes nothing.
 
 ## Evaluating elisp in the running Emacs (`editor eval`)
 

@@ -82,6 +82,10 @@ func (l Layout) ShimSocket(workspaceID string) string {
 	return filepath.Join(l.SockDir(), workspaceID+".sock")
 }
 
+// ShimDir holds each workspace's shim state directory, shim/<key>
+// (sessionlock.WorkspaceKey): its identity and its transcript backups.
+func (l Layout) ShimDir() string { return filepath.Join(l.dir, "shim") }
+
 // IntentDir holds the stand-down intent manifest.
 func (l Layout) IntentDir() string { return filepath.Join(l.dir, "intent") }
 

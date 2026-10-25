@@ -40,7 +40,7 @@ import (
 //	agent-repld merge-queue  status | dequeue | move-up | move-down | pause | resume
 //	                         disable-racing | enable-racing | subscribe | unsubscribe
 //	agent-repld editor       eval
-//	agent-repld runtime      deploy-hold | roll-out-landing | health
+//	agent-repld runtime      deploy-hold | roll-out-landing | health | prune-storage
 //	agent-repld test         run (testcli.go)
 //
 // EVERY COMMAND IS ONE RPC (a `set` with several flags is one rpc per flag,
@@ -175,6 +175,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"deploy-hold":      {usage: "deploy-hold hold|release -repository here|DIR", run: runtimeDeployHold},
 		"roll-out-landing": {usage: "roll-out-landing [-deploy LEDGER]", run: runtimeRollOutLanding},
 		"health":           {usage: "health", run: runtimeHealth},
+		"prune-storage":    {usage: "prune-storage [-preview]", run: runtimePruneStorage},
 	},
 }
 
@@ -1470,6 +1471,26 @@ func runtimeDeployHold(c *cliCall, args []string) int {
 	}
 	req.Repository = scope
 	resp, err := c.client.UpdateDeployHold(c.ctx, connect.NewRequest(req))
+	return answer(c, resp, err)
+}
+
+// runtimePruneStorage runs the daemon's storage sweep now. -preview asks the
+// sweep to judge and answer what it would delete, deleting nothing; it is
+// not -dry-run, which stops the request from being sent at all.
+func runtimePruneStorage(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	preview := fs.Bool("preview", false, "answer what the sweep would delete, deleting nothing")
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(positionals) != 0 {
+		return c.usageFailed("nothing is positional")
+	}
+	if !c.dial(*stateDir) {
+		return exitFailure
+	}
+	resp, err := c.client.PruneStorage(c.ctx, connect.NewRequest(&agentreplv1.PruneStorageRequest{DryRun: *preview}))
 	return answer(c, resp, err)
 }
 

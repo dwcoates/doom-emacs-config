@@ -817,6 +817,13 @@ func (s *requestLoggingServer) UpdateDeployHold(
 	return serveUnary(s, ctx, "UpdateDeployHold", req, s.server.UpdateDeployHold)
 }
 
+func (s *requestLoggingServer) PruneStorage(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.PruneStorageRequest],
+) (*connect.Response[agentreplv1.PruneStorageResponse], error) {
+	return serveUnary(s, ctx, "PruneStorage", req, s.server.PruneStorage)
+}
+
 func (s *requestLoggingServer) RollOutLanding(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.RollOutLandingRequest],

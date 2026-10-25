@@ -246,6 +246,8 @@ const (
 	// AgentReplRollOutLandingProcedure is the fully-qualified name of the AgentRepl's RollOutLanding
 	// RPC.
 	AgentReplRollOutLandingProcedure = "/agentrepl.v1.AgentRepl/RollOutLanding"
+	// AgentReplPruneStorageProcedure is the fully-qualified name of the AgentRepl's PruneStorage RPC.
+	AgentReplPruneStorageProcedure = "/agentrepl.v1.AgentRepl/PruneStorage"
 	// AgentReplDaemonHealthProcedure is the fully-qualified name of the AgentRepl's DaemonHealth RPC.
 	AgentReplDaemonHealthProcedure = "/agentrepl.v1.AgentRepl/DaemonHealth"
 	// AgentReplSessionHealthProcedure is the fully-qualified name of the AgentRepl's SessionHealth RPC.
@@ -434,6 +436,7 @@ var (
 	agentReplUpdateMergeQueueMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("UpdateMergeQueue")
 	agentReplUpdateDeployHoldMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("UpdateDeployHold")
 	agentReplRollOutLandingMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("RollOutLanding")
+	agentReplPruneStorageMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("PruneStorage")
 	agentReplDaemonHealthMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("DaemonHealth")
 	agentReplSessionHealthMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SessionHealth")
 	agentReplClientLogMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("ClientLog")
@@ -713,6 +716,9 @@ type AgentReplClient interface {
 	// agent-repl's deploy hook asks for the rollout of what a deploy landed. See
 	// endpoint_roll_out_landing.proto.
 	RollOutLanding(context.Context, *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error)
+	// Run the storage sweep now, or judge one without deleting anything. See
+	// endpoint_prune_storage.proto.
+	PruneStorage(context.Context, *connect.Request[v1.PruneStorageRequest]) (*connect.Response[v1.PruneStorageResponse], error)
 	// Is the daemon itself healthy? Unhealthy is an ANSWER. See
 	// endpoint_daemon_health.proto.
 	DaemonHealth(context.Context, *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error)
@@ -1312,6 +1318,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplRollOutLandingMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		pruneStorage: connect.NewClient[v1.PruneStorageRequest, v1.PruneStorageResponse](
+			httpClient,
+			baseURL+AgentReplPruneStorageProcedure,
+			connect.WithSchema(agentReplPruneStorageMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		daemonHealth: connect.NewClient[v1.DaemonHealthRequest, v1.DaemonHealthResponse](
 			httpClient,
 			baseURL+AgentReplDaemonHealthProcedure,
@@ -1638,6 +1650,7 @@ type agentReplClient struct {
 	updateMergeQueue           *connect.Client[v1.UpdateMergeQueueRequest, v1.UpdateMergeQueueResponse]
 	updateDeployHold           *connect.Client[v1.UpdateDeployHoldRequest, v1.UpdateDeployHoldResponse]
 	rollOutLanding             *connect.Client[v1.RollOutLandingRequest, v1.RollOutLandingResponse]
+	pruneStorage               *connect.Client[v1.PruneStorageRequest, v1.PruneStorageResponse]
 	daemonHealth               *connect.Client[v1.DaemonHealthRequest, v1.DaemonHealthResponse]
 	sessionHealth              *connect.Client[v1.SessionHealthRequest, v1.SessionHealthResponse]
 	clientLog                  *connect.Client[v1.ClientLogRequest, v1.ClientLogResponse]
@@ -2058,6 +2071,11 @@ func (c *agentReplClient) UpdateDeployHold(ctx context.Context, req *connect.Req
 // RollOutLanding calls agentrepl.v1.AgentRepl.RollOutLanding.
 func (c *agentReplClient) RollOutLanding(ctx context.Context, req *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error) {
 	return c.rollOutLanding.CallUnary(ctx, req)
+}
+
+// PruneStorage calls agentrepl.v1.AgentRepl.PruneStorage.
+func (c *agentReplClient) PruneStorage(ctx context.Context, req *connect.Request[v1.PruneStorageRequest]) (*connect.Response[v1.PruneStorageResponse], error) {
+	return c.pruneStorage.CallUnary(ctx, req)
 }
 
 // DaemonHealth calls agentrepl.v1.AgentRepl.DaemonHealth.
@@ -2497,6 +2515,9 @@ type AgentReplHandler interface {
 	// agent-repl's deploy hook asks for the rollout of what a deploy landed. See
 	// endpoint_roll_out_landing.proto.
 	RollOutLanding(context.Context, *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error)
+	// Run the storage sweep now, or judge one without deleting anything. See
+	// endpoint_prune_storage.proto.
+	PruneStorage(context.Context, *connect.Request[v1.PruneStorageRequest]) (*connect.Response[v1.PruneStorageResponse], error)
 	// Is the daemon itself healthy? Unhealthy is an ANSWER. See
 	// endpoint_daemon_health.proto.
 	DaemonHealth(context.Context, *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error)
@@ -3092,6 +3113,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplRollOutLandingMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplPruneStorageHandler := connect.NewUnaryHandler(
+		AgentReplPruneStorageProcedure,
+		svc.PruneStorage,
+		connect.WithSchema(agentReplPruneStorageMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplDaemonHealthHandler := connect.NewUnaryHandler(
 		AgentReplDaemonHealthProcedure,
 		svc.DaemonHealth,
@@ -3491,6 +3518,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplUpdateDeployHoldHandler.ServeHTTP(w, r)
 		case AgentReplRollOutLandingProcedure:
 			agentReplRollOutLandingHandler.ServeHTTP(w, r)
+		case AgentReplPruneStorageProcedure:
+			agentReplPruneStorageHandler.ServeHTTP(w, r)
 		case AgentReplDaemonHealthProcedure:
 			agentReplDaemonHealthHandler.ServeHTTP(w, r)
 		case AgentReplSessionHealthProcedure:
@@ -3882,6 +3911,10 @@ func (UnimplementedAgentReplHandler) UpdateDeployHold(context.Context, *connect.
 
 func (UnimplementedAgentReplHandler) RollOutLanding(context.Context, *connect.Request[v1.RollOutLandingRequest]) (*connect.Response[v1.RollOutLandingResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RollOutLanding is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) PruneStorage(context.Context, *connect.Request[v1.PruneStorageRequest]) (*connect.Response[v1.PruneStorageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.PruneStorage is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) DaemonHealth(context.Context, *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error) {
