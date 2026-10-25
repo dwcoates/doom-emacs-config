@@ -458,7 +458,8 @@ interface PermissionGateDeps {
   onAskOpened(): void;
   /**
    * True while the open turn is one no user attends: a merge's remediation
-   * of its own conflicts or failing tests ({@link UNATTENDED_ORIGINS}). Every
+   * of its own conflicts or failing tests, or a deploy's prompt hook
+   * ({@link UNATTENDED_ORIGINS}). Every
    * ask raised then is denied at once, never opened.
    */
   unattended(): boolean;
@@ -472,7 +473,7 @@ interface PermissionGateDeps {
  * line, and nothing landed for an hour and a half).
  */
 export const UNATTENDED_DENIAL =
-  "No one is available to answer: this turn is a merge queue remediation and runs unattended while the queue waits on it. Decide on your own judgement, or give up the attempt and say why.";
+  "No one is available to answer: this turn is a merge queue remediation or deploy hook and runs unattended while the queue waits on it. Decide on your own judgement, or give up the attempt and say why.";
 
 interface PendingBase {
   readonly toolUseId: string;
