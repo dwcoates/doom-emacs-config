@@ -529,6 +529,12 @@ func (r *run) closeLanded(ctx context.Context, log dlog.Logger, closes ids.Works
 		return
 	}
 	dir := job.Layout.SourceDir
+	// NO RELAUNCH REACHES THE WORKSPACE BETWEEN THE STOP AND THE REMOVAL. A
+	// stale-build bounce fired as the merge's work ended once installed its
+	// replacement after this stop, and the shim then ran in a worktree that
+	// was gone (2026-10-25, settings-page-land).
+	release := r.o.deps.HoldStarts(closes)
+	defer release()
 	if err := r.o.deps.StopSession(ctx, closes, true); err != nil {
 		log.Error(op, "could not stop the merged workspace's session before removing its worktree", dlog.Context{
 			"workspace": string(closes), "worktree": dir, "force": true, "error": err.Error()})

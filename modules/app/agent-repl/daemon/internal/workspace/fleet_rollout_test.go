@@ -1849,3 +1849,52 @@ func TestResumeTimesItsVendorStartAsARelaunch(t *testing.T) {
 		t.Fatalf("steps = %v, want the relaunch's slot wait and vendor start", got)
 	}
 }
+
+// TestHoldStartsTakesTheGateEveryStartTakes pins that a relaunch's hold is the
+// start gate itself: held, no start can take it; released, the next one can.
+func TestHoldStartsTakesTheGateEveryStartTakes(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+
+	// Act
+	release := f.fleet.HoldStarts("ws-1")
+	takenWhileHeld := f.fleet.startGate("ws-1").TryLock()
+	release()
+	takenAfter := f.fleet.startGate("ws-1").TryLock()
+
+	// Assert
+	if takenWhileHeld {
+		t.Fatal("the start gate was free while starts were held")
+	}
+	if !takenAfter {
+		t.Fatal("the start gate stayed held after the release")
+	}
+}
+
+// TestAStartAskedDuringAHoldWaitsForTheRelease pins the waiter's side: a start
+// asked while starts are held does not return before the release.
+func TestAStartAskedDuringAHoldWaitsForTheRelease(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	release := f.fleet.HoldStarts("ws-1")
+	returned := make(chan struct{})
+	gate := f.fleet.startGate("ws-1")
+
+	// Act
+	go func() {
+		_ = f.fleet.Start(context.Background(), "ws-1")
+		close(returned)
+	}()
+	select {
+	case <-returned:
+		t.Fatal("the start returned while starts were held")
+	default:
+	}
+	release()
+
+	// Assert
+	<-returned
+	if !gate.TryLock() {
+		t.Fatal("the start left the gate held")
+	}
+}

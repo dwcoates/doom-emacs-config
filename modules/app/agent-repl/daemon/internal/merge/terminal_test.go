@@ -2356,3 +2356,37 @@ func TestAnAbandonmentWhoseCallerLeftAnswersTheCallersEnd(t *testing.T) {
 		t.Fatalf("abandonRunning = %v, want the caller's cancellation", err)
 	}
 }
+
+// TestALandedWorkspaceHoldsItsStartsAcrossTheStopAndTheRemoval pins that no
+// relaunch can install a shim between the session's stop and the worktree's
+// removal: the start gate is held across both.
+func TestALandedWorkspaceHoldsItsStartsAcrossTheStopAndTheRemoval(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.mu.Lock()
+	holds := append([]startHold(nil), h.startHolds...)
+	stopAt := h.stopAt
+	h.mu.Unlock()
+	h.git.mu.Lock()
+	removeAt := h.git.at["remove_worktree"]
+	h.git.mu.Unlock()
+	if len(holds) != 2 || holds[0].ws != theWorkspace || holds[0].release || !holds[1].release {
+		t.Fatalf("start holds = %+v, want one hold of %s and its release", holds, theWorkspace)
+	}
+	if !(holds[0].at < stopAt && stopAt < removeAt && removeAt < holds[1].at) {
+		t.Fatalf("hold %d, stop %d, remove %d, release %d; want the stop and the removal inside the hold",
+			holds[0].at, stopAt, removeAt, holds[1].at)
+	}
+}

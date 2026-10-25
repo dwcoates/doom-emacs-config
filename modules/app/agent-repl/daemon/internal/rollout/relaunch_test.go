@@ -373,26 +373,30 @@ func TestTheHoldIsReleasedAfterAFailedResume(t *testing.T) {
 // lifetime: whichever step a bounce fails at, the restart-pending hold it took
 // is released -- including a stand-down cut short by its own context, whose
 // release used to be written through that same cancelled context and refused.
+// failedRelaunches are the steps a bounce can fail at, each arranged on a
+// fresh harness's workspace: every hold a bounce takes is released on each.
+var failedRelaunches = []struct {
+	name    string
+	arrange func(t *testing.T, h *harness, ws ids.WorkspaceID)
+}{
+	{name: "a replacement dead before the stand-down", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+		fresh := newFakeShim(9999, h.order)
+		fresh.Die()
+		h.fleet.prelaunched[ws] = fresh
+	}},
+	{name: "a failed install", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+		h.fleet.installErr[ws] = errFake
+		h.fleet.live[ws].onKillSession = func() { h.fleet.live[ws].Reap() }
+	}},
+	{name: "a stand-down ended by its context", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+		ctx, cancel := context.WithCancel(context.Background())
+		h.registry.runCtx = ctx
+		h.fleet.live[ws].onKillSession = cancel
+	}},
+}
+
 func TestEveryFailedRelaunchReleasesTheRestartHold(t *testing.T) {
-	tests := []struct {
-		name    string
-		arrange func(t *testing.T, h *harness, ws ids.WorkspaceID)
-	}{
-		{name: "a replacement dead before the stand-down", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
-			fresh := newFakeShim(9999, h.order)
-			fresh.Die()
-			h.fleet.prelaunched[ws] = fresh
-		}},
-		{name: "a failed install", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
-			h.fleet.installErr[ws] = errFake
-			h.fleet.live[ws].onKillSession = func() { h.fleet.live[ws].Reap() }
-		}},
-		{name: "a stand-down ended by its context", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
-			ctx, cancel := context.WithCancel(context.Background())
-			h.registry.runCtx = ctx
-			h.fleet.live[ws].onKillSession = cancel
-		}},
-	}
+	tests := failedRelaunches
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
@@ -409,6 +413,99 @@ func TestEveryFailedRelaunchReleasesTheRestartHold(t *testing.T) {
 			}
 			if _, held, dbErr := h.db.Lease(context.Background(), ws); dbErr != nil || held {
 				t.Fatalf("Lease after the failed bounce = (held %v, %v), want the restart hold released", held, dbErr)
+			}
+		})
+	}
+}
+
+// TestTheRelaunchHoldsStartsFromTheStandDownThroughTheResume pins the window
+// no other start may enter: from the stand-down, through the install of the
+// sessionless replacement, to the resume that starts its session.
+func TestTheRelaunchHoldsStartsFromTheStandDownThroughTheResume(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	if err := runRelaunch(t, h, ws, ReasonRestartVerb); err != nil {
+		t.Fatalf("bounce: %v", err)
+	}
+
+	// Assert
+	taken := h.order.Taken()
+	hold, kill := indexOf(taken, "hold_starts"), indexOf(taken, "kill_session")
+	install, resume := indexOf(taken, "install"), indexOf(taken, "resume")
+	release := indexOf(taken, "release_starts")
+	if hold < 0 || release < 0 || !(hold < kill && kill < install && install < resume && resume < release) {
+		t.Fatalf("steps = %v, want starts held before the stand-down and released after the resume", taken)
+	}
+}
+
+func TestARelaunchOfAClosedWorkspaceIsDroppedBeforeAnythingIsSpawned(t *testing.T) {
+	// Arrange: the workspace closed while its bounce waited.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: instant, By: wsm.CloseByMerge}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+
+	// Act
+	err := bounceAndWait(t, h, ws, ReasonRestartVerb, false)
+
+	// Assert
+	if bounce.OutcomeOf(err) != bounce.OutcomeUnregistered {
+		t.Fatalf("bounce = %v, want it dropped as unregistered", err)
+	}
+	taken := h.order.Taken()
+	for _, step := range []string{"prelaunch", "kill_session", "install", "resume"} {
+		if indexOf(taken, step) >= 0 {
+			t.Fatalf("steps = %v, want nothing spawned, stood down, installed or resumed", taken)
+		}
+	}
+	if countOf(taken, "hold_starts") != countOf(taken, "release_starts") {
+		t.Fatalf("steps = %v, want the start hold released", taken)
+	}
+	if _, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRelaunch,
+		Message: "the workspace closed before its shim was replaced; a closed workspace's session is never brought back, so the bounce is dropped"}); !found {
+		t.Fatalf("the drop was not recorded at INFO")
+	}
+}
+
+func TestTheStartHoldIsTakenBeforeThePrelaunch(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	if err := runRelaunch(t, h, ws, ReasonRestartVerb); err != nil {
+		t.Fatalf("bounce: %v", err)
+	}
+
+	// Assert
+	taken := h.order.Taken()
+	if hold, prelaunch := indexOf(taken, "hold_starts"), indexOf(taken, "prelaunch"); hold < 0 || hold > prelaunch {
+		t.Fatalf("steps = %v, want starts held before the prelaunch", taken)
+	}
+}
+
+func TestEveryFailedRelaunchReleasesTheStartHold(t *testing.T) {
+	for _, tt := range failedRelaunches {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			tt.arrange(t, h, ws)
+
+			// Act
+			err := bounceAndWait(t, h, ws, ReasonRestartVerb, false)
+
+			// Assert
+			if err == nil {
+				t.Fatal("the bounce succeeded; the case is a failure path")
+			}
+			taken := h.order.Taken()
+			if holds, releases := countOf(taken, "hold_starts"), countOf(taken, "release_starts"); holds == 0 || holds != releases {
+				t.Fatalf("steps = %v, want every start hold released", taken)
 			}
 		})
 	}

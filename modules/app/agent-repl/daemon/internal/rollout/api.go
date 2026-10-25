@@ -606,6 +606,11 @@ type ShimFleet interface {
 	Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.Client, error)
 	// Install makes c the workspace's shim client, retiring whatever was there.
 	Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client) error
+	// HoldStarts holds the workspace's starts off until the answered release
+	// is called: a start asked meanwhile waits, then finds the session the
+	// holder brought up. The relaunch holds it from the stand-down through
+	// the resume.
+	HoldStarts(ws ids.WorkspaceID) (release func())
 	// Adopt dials the workspace's ALREADY RUNNING shim without spawning — the
 	// successor's half of a transfer, and a crash boot's surviving process.
 	Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Client, error)
