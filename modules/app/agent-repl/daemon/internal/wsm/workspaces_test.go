@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestNormalizeDirCollapsesEverySpelling(t *testing.T) {
@@ -1927,26 +1928,15 @@ func TestTouchedRow(t *testing.T) {
 // touchedRow's one question.
 func TestEveryTouchedQuestionAsksTouchedRow(t *testing.T) {
 	// Arrange
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
 	handRolled := regexp.MustCompile(`n, err :?= res\.RowsAffected\(\)(?s:.{0,200}?)\bn (>|==|!=) 0\b`)
 
-	for _, path := range sources {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
+	for _, file := range sourcescan.Production(t) {
 		// Act
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		src := strings.Replace(string(raw), "func touchedRow(res sql.Result) (bool, error) {\n\tn, err := res.RowsAffected()\n\treturn n > 0, err", "", 1)
+		src := strings.Replace(string(file.Source), "func touchedRow(res sql.Result) (bool, error) {\n\tn, err := res.RowsAffected()\n\treturn n > 0, err", "", 1)
 
 		// Assert
 		if loc := handRolled.FindStringIndex(src); loc != nil {
-			t.Errorf("%s hand-rolls touchedRow: %q", path, src[loc[0]:loc[1]])
+			t.Errorf("%s hand-rolls touchedRow: %q", file.Name, src[loc[0]:loc[1]])
 		}
 	}
 }
