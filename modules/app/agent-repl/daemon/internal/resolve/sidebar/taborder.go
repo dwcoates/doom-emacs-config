@@ -79,7 +79,9 @@ func openTree(reg Registry, log dlog.Logger) ([]openRepo, map[ids.RepoID][]wsm.W
 	// every render.
 	placed := map[ids.WorkspaceID]bool{}
 	for _, ws := range reg.Workspaces {
-		if !ws.ListedOpen() {
+		// A chat thread is in no repository section and has no tab: threads
+		// are not in workspace cycling (owner ruling, 2026-10-24).
+		if !ws.ListedOpen() || ws.IsThread() {
 			continue
 		}
 		placed[ws.ID] = true

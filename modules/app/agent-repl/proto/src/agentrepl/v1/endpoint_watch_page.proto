@@ -48,6 +48,7 @@ import "agentrepl/v1/endpoint_watch_topbar.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_watch_feed.proto";
 import "agentrepl/v1/endpoint_watch_login_terminal.proto";
+import "agentrepl/v1/endpoint_watch_chat.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -114,6 +115,8 @@ message PageFrame {
     WatchFooterResponse footer = 6;
     WatchFeedResponse feed = 8;
     LoginTerminalOutput login_terminal = 9;
+    // A thread page's chat view (WatchChat).
+    WatchChatResponse chat = 10;
   }
   // Tag 7 is RETIRED: the held section rides the root feed's own frames
   // (WatchFeedResponse.held), not a stream of its own.
@@ -196,6 +199,8 @@ message SubscribePageRequest {
     WatchFooterRequest footer = 7;
     WatchFeedRequest feed = 9;
     WatchLoginTerminalRequest login_terminal = 10;
+    // A thread page's chat view (WatchChat).
+    WatchChatRequest chat = 11;
   }
   // Tag 8 is RETIRED: the held section rides the root feed's own
   // subscription (`feed`), not a stream of its own.

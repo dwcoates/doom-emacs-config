@@ -589,6 +589,53 @@ Once per push over every closed row, which is why it is DEBUG."
                       :collapsed (plist-get entry :collapsed))))
             entries)))
 
+;;;; ---- Threads -----------------------------------------------------------
+;;
+;; A ZETTEL CHAT THREAD IS A WORKSPACE (the daemon's `thread' kind) with a
+;; page and a composer of its own, so Emacs opens one exactly as it opens a
+;; tab -- a perspective, its host stream, its panels -- from the roster's
+;; thread section.  It is never DRAWN: threads are not on the tab bar and are
+;; not in workspace cycling (owner ruling, 2026-10-24), so every thread's
+;; workspace is one of the walk's hidden ones, off the bar's drawing,
+;; numbering and navigation.  It is reached by the thread commands
+;; (threads.el) and by the roster's `current', like any other workspace.
+
+(defconst agent-repl-roster-thread-prefix "chat/"
+  "The prefix of a thread's workspace name, so no thread's name can take a tab's.")
+
+(defun agent-repl-roster-threads (&optional roster)
+  "Return ROSTER's OPEN thread rows, the one last interacted with first.
+ROSTER defaults to the last accepted roster (`agent-repl-roster-view').
+An archived thread's workspace is closed, so Emacs opens no workspace for
+it and offers it to no thread command: the sidebar restores it."
+  (cl-remove-if-not (lambda (row)
+                      (eq (plist-get (plist-get row :standing) :arm) :open))
+              (plist-get (plist-get (or roster agent-repl-roster-view) :threads) :rows)))
+
+(defun agent-repl-roster-thread-p (ws)
+  "Return non-nil when the workspace named WS is a zettel chat thread.
+The roster states it on every reconcile (`agent-repl-roster--reconcile-row');
+a name the roster opened no workspace under, nil included, is no thread."
+  (and ws (agent-repl--ws-get ws :thread)))
+
+(defun agent-repl-roster-thread-workspace-name (row)
+  "Return the workspace name a thread ROW is opened under."
+  (concat agent-repl-roster-thread-prefix (plist-get row :name)))
+
+(defun agent-repl-roster-desired-threads (roster)
+  "Return the workspaces ROSTER's threads ask for, as `agent-repl-roster-desired-tabs' does.
+Each carries `:thread' t and is never `:collapsed': its page loads and its
+session runs, it is only never drawn."
+  (mapcar (lambda (row)
+            (let ((ref (plist-get row :thread)))
+              (list :id (plist-get ref :id)
+                    :name (agent-repl-roster-thread-workspace-name row)
+                    :ref ref
+                    :availability nil
+                    :collapsed nil
+                    :thread t)))
+          (agent-repl-roster-threads roster)))
+
 ;;;; ---- Reconciliation ---------------------------------------------------
 
 (defun agent-repl-roster--open-tab (desired)
@@ -621,6 +668,11 @@ this file's verb — so the tab's whole birth is a perspective plus the
     ;; authority on the directory, so the write happens here, unconditionally,
     ;; from the same `dir' `:dir' gets.
     (agent-repl--ws-put name :project-dir dir)
+    ;; A THREAD IS MARKED AT ITS BIRTH, before its panels open below: the
+    ;; tab bar's rule reads the mark the moment the thread's webview comes
+    ;; on screen (`agent-repl--tabbar-target-rows'), and no later write
+    ;; repins the frame.
+    (agent-repl--ws-put name :thread (and (plist-get desired :thread) t))
     (agent-repl--info name "elisp.roster.tab-open: ws=%s id=%s dir=%s"
                       name (plist-get desired :id) dir)
     (agent-repl-roster--subscribe-host name ref)
@@ -765,16 +817,22 @@ and every other row is still opened and ordered."
          (name (plist-get want :name))
          (existing (agent-repl--ws-by-ref-id id)))
     (condition-case err
-        (cond
-         ((null existing)
-          (agent-repl-roster--open-tab want))
-         ((equal existing name)
-          (agent-repl--ws-put name :ref (plist-get want :ref))
-          (agent-repl--log-decision (list 'roster-tab-kept id) name
-                                    name "elisp.roster.tab-kept: ws=%s id=%s" name id)
-          name)
-         (t
-          (agent-repl-roster--rename-tab existing name (plist-get want :ref))))
+        (let ((settled
+               (cond
+                ((null existing)
+                 (agent-repl-roster--open-tab want))
+                ((equal existing name)
+                 (agent-repl--ws-put name :ref (plist-get want :ref))
+                 (agent-repl--log-decision (list 'roster-tab-kept id) name
+                                           name "elisp.roster.tab-kept: ws=%s id=%s" name id)
+                 name)
+                (t
+                 (agent-repl-roster--rename-tab existing name (plist-get want :ref))))))
+          ;; WHETHER THE WORKSPACE IS A CHAT THREAD is the roster's to say,
+          ;; and is stated on every reconcile (`agent-repl-roster-thread-p').
+          (when settled
+            (agent-repl--ws-put settled :thread (and (plist-get want :thread) t)))
+          settled)
       (error
        (agent-repl-roster--log-row-failure
         (or existing name)
@@ -809,7 +867,8 @@ gone or closed, and sets the tab ORDER to the walk order strictly.
 
 A row that fails to reconcile is contained rather than fatal; see
 `agent-repl-roster--reconcile-row'."
-  (let* ((desired (agent-repl-roster-desired-tabs roster))
+  (let* ((desired (append (agent-repl-roster-desired-tabs roster)
+                          (agent-repl-roster-desired-threads roster)))
          (wanted-ids (make-hash-table :test 'equal))
          ;; Counted BEFORE the walk, because the walk is what makes rows
          ;; stop being tabless: asking the same question afterwards would
@@ -835,7 +894,10 @@ A row that fails to reconcile is contained rather than fatal; see
             (push (list :id (plist-get want :id) :name name :ref (plist-get want :ref)
                         :collapsed (plist-get want :collapsed))
                   rows)
-            (when (plist-get want :collapsed) (push name hidden)))
+            ;; A THREAD IS NEVER DRAWN, but its page loads: it is hidden
+            ;; from the bar while open-tabs asks for it like any shown tab.
+            (when (or (plist-get want :collapsed) (plist-get want :thread))
+              (push name hidden)))
           ;; A row that FAILED opened no tab, so it does not count towards
           ;; the bring-up.
           (when (and fresh name)

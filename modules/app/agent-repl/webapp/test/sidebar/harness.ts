@@ -48,6 +48,7 @@ import { createRowHover } from "../../src/sidebar/row-hover.js";
 import { createArrangeHold } from "../../src/sidebar/arrange.js";
 import type { RowReveal } from "../../src/sidebar/reveal.js";
 import { createSelectionFade } from "../../src/sidebar/selection-fade.js";
+import { rosterApps, type TestThread } from "../roster-apps.js";
 
 /** The webview's own workspace. */
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-self", dir: "/w/self" });
@@ -441,6 +442,8 @@ export function roster(init: {
    * numbered in the Open section's walk, as the daemon numbers it.
    */
   tabs?: Array<{ id: string; drawn?: "drawn" | "withheldCollapsed" }>;
+  /** The Chat app is shown, with these threads (id and name). */
+  chat?: TestThread[];
 } = {}): WorkspaceRoster {
   const repos = init.repos ?? [];
   const counted = repos.reduce((sum, section) => sum + (section.header?.count?.workspaces ?? 0), 0);
@@ -454,6 +457,7 @@ export function roster(init: {
     recentlyMerged: init.merged ?? mergedSection(),
     hidden: init.hidden ?? hiddenSection(),
     closed: {},
+    ...rosterApps(init.chat),
     ...(init.current === undefined
       ? {}
       : { current: { workspace: { id: init.current, dir: `/w/${init.current}` } } }),

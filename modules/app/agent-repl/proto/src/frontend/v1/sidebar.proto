@@ -116,7 +116,147 @@ message WorkspaceRoster {
   // at the right of the rail's header. UNSET until the daemon has resolved
   // it, and while it cannot (the failure is the daemon's to log).
   optional RosterVersion version = 15;
+  // THE RAIL'S TITLE, which is also its app switcher: the name of the app
+  // shown, and the dropdown of apps it opens. Which app is shown FOLLOWS
+  // WHAT IS ON SCREEN: a selected chat thread shows Chat, any other
+  // selection shows Workspaces. Always set.
+  RosterAppSwitcher app_switcher = 16;
+  // THE CHAT APP'S BODY: every chat thread, every open one first and then
+  // every archived one, each the most recently interacted with first, and the
+  // new-thread button. Drawn in place of the open,
+  // hidden and recently-merged sections while Chat is shown. Threads appear
+  // nowhere else in the roster: no repository section, band or tab holds
+  // one. Always set, whichever app is shown, because Emacs reads it to pick
+  // threads by name.
+  RosterThreadSection threads = 17;
 }
+
+// ---- The app switcher ----
+
+// The apps the sidebar can show. Used as an echo token: the switcher serves
+// one per option, and agentrepl.v1.ShowSidebarApp hands it back.
+message SidebarApp {
+  // Which app. The set arm IS the app.
+  oneof app {
+    SidebarAppWorkspaces workspaces = 1;
+    SidebarAppChat chat = 2;
+  }
+}
+
+// agent-repl's workspaces: the repository sections and their bands.
+message SidebarAppWorkspaces {}
+
+// zettel's chat threads.
+message SidebarAppChat {}
+
+// The rail's title and the dropdown it opens.
+message RosterAppSwitcher {
+  // The title: the shown app's name, drawn as the clickable rail title.
+  RosterAppSwitcherTitle title = 1;
+  // Which app is shown, deciding which body the rail draws below its head.
+  SidebarApp shown = 2;
+  // The dropdown's options, in drawn order.
+  repeated RosterAppSwitcherOption options = 3;
+}
+
+// The rail title's text.
+message RosterAppSwitcherTitle {
+  // The text, verbatim ("Workspaces", "Chat").
+  string text = 1;
+}
+
+// One app in the switcher's dropdown.
+message RosterAppSwitcherOption {
+  // The app's name, drawn as the option.
+  RosterAppSwitcherOptionLabel label = 1;
+  // The system the app belongs to, drawn dim beside the name.
+  RosterAppSwitcherOptionHint hint = 2;
+  // The app, handed back by agentrepl.v1.ShowSidebarApp when picked.
+  SidebarApp app = 3;
+  // Drawn with a check mark: this is the app shown.
+  optional RosterAppSwitcherOptionShown shown = 4;
+}
+
+// An option's name.
+message RosterAppSwitcherOptionLabel {
+  // The name, verbatim.
+  string text = 1;
+}
+
+// An option's dim hint.
+message RosterAppSwitcherOptionHint {
+  // The hint, verbatim ("agent-repl", "zettel").
+  string text = 1;
+}
+
+// The option is the app shown. Empty: presence is the fact.
+message RosterAppSwitcherOptionShown {}
+
+// ---- The chat app's body ----
+
+// Every chat thread, and the button that starts one.
+message RosterThreadSection {
+  // The new-thread button, drawn above the list.
+  RosterThreadNewButton new_thread = 1;
+  // The threads, the most recently interacted with first (asked in or
+  // opened). Empty when there are none.
+  repeated RosterThreadRow rows = 2;
+}
+
+// The new-thread button. A click is agentrepl.v1.RequestNewThread.
+message RosterThreadNewButton {
+  // The button's label, verbatim.
+  string label = 1;
+}
+
+// One thread in the list. A click is agentrepl.v1.SelectWorkspace with the
+// row's thread.
+message RosterThreadRow {
+  // The thread's workspace, handed back on a click.
+  workspace.v1.WorkspaceRef thread = 1;
+  // The thread's name, generated once when it was created.
+  RosterThreadName name = 2;
+  // The thread's summary, drawn under its name. UNSET until one has been
+  // generated.
+  optional RosterThreadSummary summary = 3;
+  // Drawn highlighted: this thread is the one selected.
+  optional RosterThreadCurrent current = 4;
+  // Whether the thread is open or archived. Always set: the set arm decides
+  // where the row is drawn and which verbs its menu offers.
+  RosterThreadStanding standing = 5;
+}
+
+// Where a thread stands. The set arm IS the standing.
+message RosterThreadStanding {
+  oneof standing {
+    // Open: listed with the threads, its session kept.
+    RosterThreadOpen open = 1;
+    // Archived (the thread's workspace is closed): listed after every open
+    // thread, under "Archived". Restoring it opens the workspace again.
+    RosterThreadArchived archived = 2;
+  }
+}
+
+// The thread is open. Empty: the arm is the fact.
+message RosterThreadOpen {}
+
+// The thread is archived. Empty: the arm is the fact.
+message RosterThreadArchived {}
+
+// A thread's name.
+message RosterThreadName {
+  // The name, verbatim.
+  string text = 1;
+}
+
+// A thread's summary.
+message RosterThreadSummary {
+  // The summary, verbatim.
+  string text = 1;
+}
+
+// The thread is the selected one. Empty: presence is the fact.
+message RosterThreadCurrent {}
 
 // The agent-repl release the daemon's checkout is at: the highest version tag
 // reachable from its HEAD, so a commit between landings states the last

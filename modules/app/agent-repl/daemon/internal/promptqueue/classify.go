@@ -32,6 +32,7 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 		QueuedAt:  q.deps.Now(),
 		Delivery:  sub.Delivery,
 		Act:       sub.Act,
+		Ask:       sub.Ask,
 	}
 	if lease != nil {
 		kind := lease.kind
@@ -225,6 +226,13 @@ func (q *queue) neverJudged(sub Submission) (verdict wsm.Classification, why fun
 			At:     q.deps.Now(),
 		}, func(log dlog.Logger, running ids.TurnID) { heldActNeverClassified(log, sub.Turn, sub.Act, running) }, true
 	}
+	if sub.Ask != nil {
+		return wsm.Classification{
+			Arm:    wsm.ArmHoldForTurnEnd,
+			Reason: "the prompt is a chat thread's question: it runs as its own turn after the running one, and is never classified",
+			At:     q.deps.Now(),
+		}, func(log dlog.Logger, running ids.TurnID) { threadQuestionNeverClassified(log, sub.Turn, running) }, true
+	}
 	if verdict, isDeferred := q.deferredVerdict(sub); isDeferred {
 		return verdict, func(log dlog.Logger, running ids.TurnID) { deferredNeverClassified(log, sub.Turn, running) }, true
 	}
@@ -251,6 +259,15 @@ func (q *queue) deferredVerdict(sub Submission) (wsm.Classification, bool) {
 // classifier.
 func deferredNeverClassified(log dlog.Logger, held, running ids.TurnID) {
 	log.Info(opClassify, "the prompt was deferred; it waits for the running turn to end and is never classified", dlog.Context{
+		"held_turn": string(held), "running_turn": string(running),
+	})
+}
+
+// threadQuestionNeverClassified records, at INFO, a thread question kept from
+// the classifier: one turn is one question, so it is never folded into or
+// interjected with another.
+func threadQuestionNeverClassified(log dlog.Logger, held, running ids.TurnID) {
+	log.Info(opClassify, "the prompt is a chat thread's question; it waits for the running turn to end and is never classified", dlog.Context{
 		"held_turn": string(held), "running_turn": string(running),
 	})
 }

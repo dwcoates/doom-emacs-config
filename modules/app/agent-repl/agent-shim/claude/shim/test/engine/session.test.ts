@@ -411,6 +411,7 @@ function harness(
 function freshRequest(): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     workspaceName: "parser-fix",
+    profile: { kind: { case: "agent", value: {} } },
     source: {
       case: "fresh",
       value: create(shimv1.StartSessionFreshSchema, {
@@ -427,6 +428,7 @@ function freshRequest(): shimv1.StartSessionRequest {
 function freshRequestNoFacts(): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     workspaceName: "parser-fix",
+    profile: { kind: { case: "agent", value: {} } },
     source: { case: "fresh", value: create(shimv1.StartSessionFreshSchema, {}) },
   });
 }
@@ -435,6 +437,7 @@ function freshRequestNoFacts(): shimv1.StartSessionRequest {
 function freshRequestNoModel(): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     workspaceName: "parser-fix",
+    profile: { kind: { case: "agent", value: {} } },
     source: {
       case: "fresh",
       value: create(shimv1.StartSessionFreshSchema, {
@@ -453,6 +456,7 @@ function resumeRequest(
 ): shimv1.StartSessionRequest {
   return create(shimv1.StartSessionRequestSchema, {
     workspaceName: "parser-fix",
+    profile: { kind: { case: "agent", value: {} } },
     source: {
       case: "resume",
       value: create(shimv1.StartSessionResumeSchema, {
@@ -593,6 +597,36 @@ function retryLabel(response: shimv1.StartSessionResponse): string | undefined {
 beforeEach(() => {
   resetAgentBinaryVersionForTest();
   recordAgentBinaryVersion("2.1.999");
+});
+
+describe("StartSession's session profile", () => {
+  it.each([
+    {
+      name: "an agent profile",
+      wire: (): shimv1.SessionProfile => create(shimv1.SessionProfileSchema, { kind: { case: "agent", value: {} } }),
+      want: { kind: "agent" },
+    },
+    {
+      name: "a chat profile",
+      wire: (): shimv1.SessionProfile =>
+        create(shimv1.SessionProfileSchema, { kind: { case: "chat", value: { systemPrompt: { text: "Answer questions." } } } }),
+      want: { kind: "chat", systemPrompt: "Answer questions." },
+    },
+  ])("hands the query $name", async ({ wire, want }) => {
+    // Arrange.
+    const h = harness();
+    const request = freshRequest();
+    request.profile = wire();
+
+    // Act.
+    const pending = h.engine.startSession(request);
+    const first = await untilQuery(h, 0);
+    first.query.emit(initMessage({ sessionId: freshSessionId(first.spec) }));
+    await pending;
+
+    // Assert.
+    expect(first.spec.profile).toEqual(want);
+  });
 });
 
 describe("StartSession, fresh", () => {

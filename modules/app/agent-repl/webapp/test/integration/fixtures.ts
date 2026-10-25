@@ -102,6 +102,7 @@ import { hiddenRow, numberTabs, rowEntries, sectionTabRegions, withFamily } from
 import { sentTo } from "../feed/addresses.js";
 import { drawnBodyOf } from "../held/drawn-body.js";
 import { plainProse, servedProse } from "../prose.js";
+import { rosterApps } from "../roster-apps.js";
 
 // ---------------------------------------------------------------------------
 // Arm enumeration
@@ -2612,6 +2613,7 @@ export function roster(init?: {
       fold: init?.mergedCollapsed === false ? { case: "expanded", value: {} } : { case: "collapsed", value: {} },
     },
     closed: {},
+    ...rosterApps(),
     current:
       init?.currentUnset === true
         ? undefined
@@ -2864,6 +2866,10 @@ export const WATCH_DAEMON_PUSHES = [
   // The news digest standing: a WEBVIEW stream's alone, drawn as the overlay
   // over the feed (news-digest.integration.test.ts).
   "newsDigest",
+  // The sidebar's new-thread button asking for the new-thread prompt: an
+  // EMACS stream's alone (Emacs's composer is the chat's only input), skipped
+  // as the same skew.
+  "newThreadRequested",
 ] as const;
 
 export function shutdownAnnounced(init?: {

@@ -399,7 +399,7 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the fourteen causes the owner rules allow", () => {
+  it("names exactly the fifteen causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
@@ -416,6 +416,7 @@ describe("SCROLL_CAUSES", () => {
       "tailJumped",
       "prependCompensation",
       "latestVisible",
+      "chatAnswerFollowed",
     ]);
   });
 });
@@ -1627,6 +1628,7 @@ describe("no scroll write outside scroll.ts", () => {
       "scroller.scrollTop += step;",
       "region.scrollTop += delta;",
       "box.scrollTop += delta;",
+      "box.scrollTop = box.scrollHeight;",
     ]);
   });
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"agentrepl/testrun/internal/redundancy"
+	"agentrepl/testrun/roster"
 )
 
 func TestParseArgsDefaults(t *testing.T) {
@@ -299,13 +300,22 @@ func TestParseArgsMeasuresTheE2ESuiteBesideTheDaemon(t *testing.T) {
 	// Act
 	a, err := ParseArgs([]string{"-roster-suite", "daemon,e2e", "-module", filepath.Join(root, "daemon"), "-mutate", "./internal/...", "-out", "/o"}, &bytes.Buffer{})
 
-	// Assert
+	// Assert: the root suite carries every program the roster's e2e suite builds.
 	if err != nil {
 		t.Fatal(err)
 	}
+	var want []string
+	for _, s := range roster.Suites {
+		if s.Name == "e2e" {
+			want = s.Programs["."]
+		}
+	}
+	if len(want) == 0 {
+		t.Fatal("the roster's e2e suite builds no program")
+	}
 	sawE2E := false
 	for _, s := range a.Suites {
-		if s.Module == "e2e" && s.Package == "./." && s.Prebuild && len(s.Programs) == 6 {
+		if s.Module == "e2e" && s.Package == "./." && s.Prebuild && reflect.DeepEqual(s.Programs, want) {
 			sawE2E = true
 		}
 		if s.Module == "" {
@@ -313,7 +323,7 @@ func TestParseArgsMeasuresTheE2ESuiteBesideTheDaemon(t *testing.T) {
 		}
 	}
 	if !sawE2E {
-		t.Fatalf("no e2e root suite with its prebuild and six programs: %+v", a.Suites)
+		t.Fatalf("no e2e root suite with its prebuild and the programs %v: %+v", want, a.Suites)
 	}
 }
 

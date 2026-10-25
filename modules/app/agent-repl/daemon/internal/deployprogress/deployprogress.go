@@ -67,6 +67,7 @@ const (
 	Daemon  Component = "daemon"
 	Shim    Component = "shim"
 	Webapp  Component = "webapp"
+	Zettel  Component = "zettel"
 )
 
 // Note is one thing a deploy deferred on one workspace.

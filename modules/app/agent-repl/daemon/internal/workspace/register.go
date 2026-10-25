@@ -209,13 +209,29 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 			"workspace": string(record.ID), "dir": record.Dir,
 		})
 	}
+	if err := v.admit(ctx, log, record, created); err != nil {
+		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
+	}
+	return record, created, nil
+}
+
+// admit makes a registered workspace one this daemon serves: its directory
+// bound on every resolver, its awaited correspondence restored, its footer
+// primed, its naming published, its serving claimed and its recorded
+// conversation revived. EVERY WORKSPACE IS ADMITTED HERE, whatever registered
+// its row (a worktree's announcement, a chat thread's creation), so no kind of
+// workspace can be served with a step missing. CREATED says the row was
+// minted by this registration.
+//
+// Every failure is recorded here, once; the caller wraps it.
+func (v *verbs) admit(ctx context.Context, log dlog.Logger, record wsm.Workspace, created bool) error {
 	// THE RESOLVERS ARE BOUND HERE. The footer, the topbar and the hold tray
 	// each write their records to the workspace's own log sink and resolve
 	// nothing themselves, so a frame for a workspace they were never told the
 	// directory of is an invariant violation they report and cannot serve.
 	// Registration is the one moment every workspace passes through.
-	if err := v.bindResolvers(log, record.ID, normalized); err != nil {
-		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
+	if err := v.bindResolvers(log, record.ID, record.Dir); err != nil {
+		return err
 	}
 	// THE FOOTER IS PRIMED HERE, as the topbar's naming is below. The footer
 	// topic is PER-WORKSPACE and empty after a daemon restart rebuilds the
@@ -228,11 +244,11 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 	// keeps the topic current. Bind first: Prime writes to the workspace's own
 	// log sink, which bindResolvers just resolved.
 	if err := v.restoreAwaiting(ctx, log, record); err != nil {
-		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
+		return err
 	}
 	v.deps.Footer.Prime(record.ID)
 	if err := v.publishNaming(ctx, log, record); err != nil {
-		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
+		return err
 	}
 	// THIS DAEMON SERVES IT from here. The claim is what a handover hands
 	// over, and what tells a joining successor which workspaces are still the
@@ -244,12 +260,12 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 			log.Error(opRegister, "could not claim the workspace's serving ownership", dlog.Context{
 				"workspace": string(record.ID), "instance": string(v.deps.Instance), "cause": err.Error(),
 			})
-			return wsm.Workspace{}, false, fmt.Errorf("register %q: claim serving: %w", normalized, err)
+			return fmt.Errorf("claim serving: %w", err)
 		}
 	}
 
 	v.reviveRecordedConversation(ctx, log, record, created)
-	return record, created, nil
+	return nil
 }
 
 // repositoryOfWorktree answers the main worktree of the repository the

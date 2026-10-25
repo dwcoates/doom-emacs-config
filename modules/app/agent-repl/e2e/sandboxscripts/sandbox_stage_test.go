@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"agentrepl/testrun/roster"
 )
 
 // The sandbox stages an ENUMERATED set of the module's top-level entries
@@ -49,6 +51,29 @@ func stageEntries(t *testing.T, script string) map[string]bool {
 }
 
 var localReplace = regexp.MustCompile(`=>\s+(\.\.?/\S*)`)
+
+func TestEveryProgramARunBuildsIsStagedInTheSandbox(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	staged := stageEntries(t, filepath.Join(wd, "..", "sandbox", "bin", "e2e-sandbox.sh"))
+
+	// Act: a world builds each program from its module's tree.
+	var unstaged []string
+	for _, p := range roster.Programs {
+		if top := strings.Split(p.Module, "/")[0]; !staged[top] {
+			unstaged = append(unstaged, p.Name+" (top-level "+top+")")
+		}
+	}
+
+	// Assert
+	if len(unstaged) > 0 {
+		t.Fatalf("programs a run builds whose module the sandbox does not stage:\n  %s", strings.Join(unstaged, "\n  "))
+	}
+}
 
 func TestEveryLocalGoReplaceIsStagedInTheSandbox(t *testing.T) {
 	t.Parallel()

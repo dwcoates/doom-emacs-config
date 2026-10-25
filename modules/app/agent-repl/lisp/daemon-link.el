@@ -57,6 +57,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
+(declare-function agent-repl-thread-requested "threads" ())
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl-persistent-wifi-handle "persistent-wifi" (state))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
@@ -680,6 +681,9 @@ non-nil says the daemon announced the ending first; the hooks read it as
       ;; The machine's persistent-wifi standing: persistent-wifi.el keeps it
       ;; and echoes a change.
       (:persistent-wifi (agent-repl-persistent-wifi-handle value))
+      ;; The sidebar's new-thread button: open the new-thread prompt, OUT of
+      ;; this process filter (threads.el).
+      (:new-thread-requested (agent-repl-thread-requested))
       ;; The daemon is standing down on purpose and this was the stream's
       ;; last frame; `agent-repl-link--handle-close' reads the mark.
       (:ending

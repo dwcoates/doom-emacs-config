@@ -7,6 +7,8 @@
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl-roster-thread-p "roster" (ws))
+(declare-function agent-repl--ws-frame-name "workspace" (frame))
 (declare-function agent-repl-defface "core" (face spec doc &rest args))
 (declare-function agent-repl--agent-view-buffer-name-p "core")
 (declare-function agent-repl--agent-view-buffer-p "core")
@@ -3183,11 +3185,15 @@ the frame's own layout, independent of which frame is selected."
 
 (defun agent-repl--tabbar-target-rows (frame)
   "Return the `tab-bar-lines' FRAME should carry right now.
-The tab bar shows if and only if the agent webview is NOT on screen: a
-frame showing the webview gets 0 rows (the webapp draws its own
-workspace context), every other frame gets the fixed
-`agent-repl--tabline-row-count'."
-  (if (agent-repl--tabbar-webview-shown-p frame)
+The tab bar shows unless the agent webview is on screen: a frame showing
+the webview gets 0 rows (the webapp draws its own workspace context),
+every other frame gets the fixed `agent-repl--tabline-row-count'.
+
+A CHAT THREAD KEEPS THE BAR (owner ruling, 2026-10-24: in the Chat view
+the tab bar is shown, so a workspace is one click away): a thread is on
+no tab, so the webapp's chat names no workspace to return to."
+  (if (and (agent-repl--tabbar-webview-shown-p frame)
+           (not (agent-repl-roster-thread-p (agent-repl--ws-frame-name frame))))
       0
     agent-repl--tabline-row-count))
 

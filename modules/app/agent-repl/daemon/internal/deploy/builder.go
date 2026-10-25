@@ -37,7 +37,7 @@ func (e *BuildFailed) Error() string {
 // rides with the shim — the shim spawns shim-lock for every kernel claim — so
 // it is built and installed, but it is not a running process with a build of
 // its own to compare.
-var Targets = []string{"shim", "webapp", "daemon", "store", "sidecar", "lock"}
+var Targets = []string{"shim", "webapp", "daemon", "store", "sidecar", "zettel", "lock"}
 
 // ScriptBuilder is the production Builder.
 //

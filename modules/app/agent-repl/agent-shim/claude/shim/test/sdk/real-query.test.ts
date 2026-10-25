@@ -32,6 +32,7 @@ function homeWithMetaprompt(text: string): string {
 
 function spec(overrides: Partial<RealQuerySpec> = {}): RealQuerySpec {
   return {
+    profile: { kind: "agent" },
     cwd: "/ws",
     workspaceName: "parser-fix",
     claudeConfigDir: "/accounts/primary",
@@ -227,6 +228,48 @@ describe("realQueryOptions", () => {
       canUseTool,
       abortController,
     });
+  });
+});
+
+describe("realQueryOptions for a chat session", () => {
+  const chat = (): RealQuerySpec => spec({ profile: { kind: "chat", systemPrompt: "Answer questions clearly." } });
+
+  it("answers under the daemon's system prompt verbatim, not the coding preset", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(chat(), {});
+
+    // Assert.
+    expect(options.systemPrompt).toEqual({ type: "custom", prompt: "Answer questions clearly." });
+  });
+
+  it("loads no filesystem settings, so no skills, CLAUDE.md or memory reach a chat", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(chat(), {});
+
+    // Assert.
+    expect(options.settingSources).toEqual([]);
+  });
+
+  it("gives a chat no tools, no pre-allowed tools and no MCP servers", () => {
+    // Arrange.
+    const servers = { "agent-repl": { type: "sdk", name: "agent-repl" } } as never;
+
+    // Act.
+    const options = realQueryOptions(chat(), servers);
+
+    // Assert.
+    expect(options.tools).toEqual([]);
+    expect(options.allowedTools).toEqual([]);
+    expect(options.mcpServers).toEqual({});
+  });
+
+  it("keeps everything the profile does not decide, such as the cwd and partial messages", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(chat(), {});
+
+    // Assert.
+    expect(options.cwd).toBe("/ws");
+    expect(options.includePartialMessages).toBe(true);
   });
 });
 

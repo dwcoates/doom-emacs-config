@@ -2,15 +2,14 @@ package server
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,7 +17,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
@@ -35,6 +33,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/login"
@@ -353,6 +352,14 @@ type fakeVerbs struct {
 	// lastSelectHistory is the workspace.SelectionHistory the newest Select
 	// was asked for.
 	lastSelectHistory atomic.Int32
+	// selected is every workspace Select was handed, in order.
+	selectedMu sync.Mutex
+	selected   []ids.WorkspaceID
+	// createThread and createThreadErr answer CreateThread; threadQuestions
+	// records each question it was handed.
+	createThread    wsm.Workspace
+	createThreadErr error
+	threadQuestions []string
 	// registeredPaths records every RegisterRepository path the verb received.
 	registeredPaths []string
 	// arrangements records every ArrangeSidebar verb call, spelled
@@ -371,10 +378,10 @@ type fakeVerbs struct {
 	// sectionFolds records every sidebar view change
 	// the handler resolved onto the verbs, and sectionFoldErr is what each of
 	// those verbs answers instead.
-	sectionFolds   []sectionFold
+	sectionFolds []sectionFold
 	// showOpen records every ShowOpenMergeQueues, whether it asked for the
 	// merge queues.
-	showOpen []bool
+	showOpen       []bool
 	sectionFoldErr error
 	closeErr       error
 	// closedBy is every cause Close was asked with, in order.
@@ -593,13 +600,21 @@ func (f *fakeVerbs) Interrupt(_ context.Context, _ ids.WorkspaceID, target works
 	return f.interruptOutcome, f.interruptErr
 }
 
+func (f *fakeVerbs) CreateThread(_ context.Context, question string) (wsm.Workspace, error) {
+	f.threadQuestions = append(f.threadQuestions, question)
+	return f.createThread, f.createThreadErr
+}
+
 func (f *fakeVerbs) CreateTask(context.Context, string) (wsm.Task, error) {
 	return f.createTask, f.createTaskErr
 }
 
-func (f *fakeVerbs) Select(ctx context.Context, _ ids.WorkspaceID, history workspace.SelectionHistory) error {
+func (f *fakeVerbs) Select(ctx context.Context, ws ids.WorkspaceID, history workspace.SelectionHistory) error {
 	f.selects.Add(1)
 	f.lastSelectHistory.Store(int32(history))
+	f.selectedMu.Lock()
+	f.selected = append(f.selected, ws)
+	f.selectedMu.Unlock()
 	if f.selectEntered != nil {
 		close(f.selectEntered)
 		<-ctx.Done()
@@ -737,6 +752,22 @@ type fakePrompts struct {
 	lastSentBy *ids.WorkspaceID
 	// submits counts the submissions.
 	submits int
+	// threadSubmissions records every SubmitThreadQuestion.
+	threadSubmissions []threadSubmission
+}
+
+// threadSubmission is one SubmitThreadQuestion the handler made.
+type threadSubmission struct {
+	ws     ids.WorkspaceID
+	said   *conversationv1.UserSaid
+	key    string
+	origin conversationv1.PromptOrigin
+	ask    *wsm.ThreadAsk
+}
+
+func (f *fakePrompts) SubmitThreadQuestion(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, key string, origin conversationv1.PromptOrigin, ask *wsm.ThreadAsk) (prompthandler.Outcome, error) {
+	f.threadSubmissions = append(f.threadSubmissions, threadSubmission{ws, said, key, origin, ask})
+	return f.outcome, f.err
 }
 
 func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
@@ -1236,6 +1267,10 @@ type fakeFeed struct {
 	// sent are the sent rows SentPrompt drew, in order.
 	sentMu sync.Mutex
 	sent   []sentRow
+	// readNewest is told each workspace ReadNewest read, and readNewestErr is
+	// what it answers.
+	readNewest    chan ids.WorkspaceID
+	readNewestErr error
 	// hostAsks is each workspace's standing ask HostAsk answers, and
 	// askMoves the stream WatchHostAsks hands the server.
 	hostAsksMu sync.Mutex
@@ -1675,6 +1710,7 @@ type harness struct {
 	Creates   *creategate.Gate
 	Retarget  *fakeRetarget
 	Prompts   *fakePrompts
+	Chat      *fakeChat
 	Queue     *fakeQueue
 	Merge     *fakeMerge
 	Makers    *fakeMakers
@@ -1800,6 +1836,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Footer:     &fakeFooter{},
 		Topbar:     &fakeTopbar{},
 		Sidebar:    &fakeSidebar{},
+		Chat:       &fakeChat{},
 		Surfaces:   &fakeSurfaces{},
 		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
 		Emacs:      &fakeEmacsMeasure{},
@@ -1852,6 +1889,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Footer:            h.Footer,
 		Topbar:            h.Topbar,
 		Sidebar:           h.Sidebar,
+		Chat:              h.Chat,
 		LoudFaults:        &h.LoudFaults,
 		Focus:             h.Focus,
 		Emacs:             h.Emacs,
@@ -1895,12 +1933,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 // h2cClient dials the surface over CLEARTEXT HTTP/2, which is the other half of
 // the one-listener contract: one origin serving HTTP/1.1 and h2c alike.
 func h2cClient() *http.Client {
-	return &http.Client{Transport: &http2.Transport{
-		AllowHTTP: true,
-		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, network, addr)
-		},
-	}}
+	return h2cclient.Client()
 }
 
 // ref is the workspace ref a test echoes back.
@@ -2467,4 +2500,21 @@ func (f *fakeImageSources) Drawn(*frontendv1.FeedImageBlock) error {
 
 func (f *fakeQueue) Supersede(context.Context, ids.WorkspaceID, ids.TurnID) (bool, error) {
 	return false, nil
+}
+
+// ListWorkspaces answers every registered workspace, by id.
+func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
+	out := make([]wsm.Workspace, 0, len(d.workspaces))
+	for _, ws := range d.workspaces {
+		out = append(out, ws)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (f *fakeFeed) ReadNewest(_ context.Context, ws ids.WorkspaceID) error {
+	if f.readNewest != nil {
+		f.readNewest <- ws
+	}
+	return f.readNewestErr
 }

@@ -9457,3 +9457,118 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 .news-digest-source[data-outcome="failed"] .news-digest-source-outcome {
   color: var(--err);
 }
+
+/* ── The chat (src/chat/): a zettel thread's page, drawn as a chat stream ──
+   As the design mock draws it (docs/knowledge-graph/chat-mock.html): questions
+   are right-aligned user bubbles, a question with siblings is a stack of cards
+   with a "2 of 3" control, answers are full-width cards on the answer fill. */
+.chat-col {
+  max-width: 760px; margin: 0 auto; padding: 28px 24px 48px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.chat-empty { color: var(--muted); text-align: center; margin-top: 18vh; line-height: 1.7; }
+.chat-exchange { display: flex; flex-direction: column; gap: 18px; }
+.chat-q-wrap {
+  align-self: flex-end; max-width: 78%; display: flex; flex-direction: column;
+  align-items: flex-end; gap: 6px;
+}
+.chat-q {
+  position: relative; background: var(--user); color: var(--fg);
+  padding: 10px 14px; border-radius: 8px; box-shadow: var(--bubble-shadow);
+  line-height: 1.5; z-index: 1; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+/* A stack: the siblings behind the shown question, as two offset cards. */
+.chat-q-stacked { margin-bottom: 10px; }
+.chat-q-stacked::before, .chat-q-stacked::after {
+  content: ""; position: absolute; left: 6px; right: 6px; height: 100%;
+  border-radius: 8px; background: var(--user); z-index: -1; box-shadow: var(--bubble-shadow);
+}
+.chat-q-stacked::before { top: 5px; opacity: .55; }
+.chat-q-stacked::after { top: 10px; left: 12px; right: 12px; opacity: .3; }
+.chat-q-quote {
+  display: block; margin: 0 0 8px; padding: 2px 0 2px 10px; font-size: 0.93em;
+  border-left: 3px solid var(--q-border); opacity: .85; font-style: italic;
+}
+.chat-siblings {
+  display: flex; align-items: center; gap: 2px; font-size: 12px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.chat-siblings ar-button {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  width: 22px; height: 22px; border-radius: 5px; font-size: 14px; line-height: 1;
+}
+.chat-siblings ar-button:hover { background: var(--card); color: var(--fg); }
+.chat-a {
+  background: var(--assistant); border-radius: 8px; box-shadow: var(--bubble-shadow);
+  padding: 14px 18px; line-height: 1.6; overflow-wrap: anywhere;
+}
+.chat-a > :first-child { margin-top: 0; }
+.chat-a > :last-child { margin-bottom: 0; }
+.chat-a mark.chat-quote-mark {
+  background: color-mix(in srgb, var(--q-border) 22%, transparent); color: inherit; border-radius: 2px;
+}
+.chat-a mark.chat-highlight {
+  background: color-mix(in srgb, var(--q-border) 45%, transparent); color: inherit; border-radius: 2px;
+}
+.chat-a-waiting { display: flex; gap: 6px; align-items: center; min-height: 2.6em; }
+.chat-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--thinking);
+  animation: chat-pulse 1.4s ease-in-out infinite;
+}
+.chat-dot:nth-child(2) { animation-delay: .2s; }
+.chat-dot:nth-child(3) { animation-delay: .4s; }
+@keyframes chat-pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .chat-dot { animation: none; } }
+
+/* ── The sidebar's apps (src/sidebar/threads.ts): the title is the switcher,
+   and the Chat app's body is the thread list. The head is otherwise as it
+   was; the title only gains its caret and its menu. */
+#ws-sidebar .sb-head { position: relative; }
+#ws-sidebar ar-button.sb-title {
+  display: inline-flex; align-items: center; gap: 4px; font: inherit;
+  font-weight: 600; font-size: 0.95rem; color: var(--fg); background: none; border: 0;
+  padding: 3px 6px; margin-left: -6px; border-radius: 6px; cursor: pointer;
+}
+#ws-sidebar:not(.sb-hover-suspended) ar-button.sb-title:hover, #ws-sidebar ar-button.sb-title.open { background: var(--card); }
+#ws-sidebar .sb-title-caret { color: var(--muted); font-size: 0.75em; transition: transform .15s; }
+#ws-sidebar ar-button.sb-title.open .sb-title-caret { transform: rotate(180deg); }
+#ws-sidebar .sb-apps-menu {
+  position: absolute; top: calc(var(--topbar-h) - 6px); left: 34px; min-width: 200px;
+  background: var(--sidebar-bg); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--sidebar-shadow); padding: 4px; z-index: 5;
+}
+#ws-sidebar .sb-apps-menu ar-button {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  border: 0; background: none; color: var(--fg); font: inherit; font-size: 13px;
+  padding: 7px 10px; border-radius: 6px; cursor: pointer;
+}
+#ws-sidebar:not(.sb-hover-suspended) .sb-apps-menu ar-button:hover { background: var(--card); }
+#ws-sidebar .sb-app-check { width: 12px; color: var(--muted); }
+#ws-sidebar .sb-app-hint { margin-left: auto; font-size: 11px; color: var(--muted); }
+#ws-sidebar .sb-threads { display: flex; flex-direction: column; padding: 4px 0 12px; }
+#ws-sidebar .sb-new-thread {
+  margin: 4px 12px 10px; display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--border); background: transparent; color: var(--fg);
+  font: inherit; font-weight: 550; padding: 8px 10px; border-radius: 8px; cursor: pointer;
+}
+#ws-sidebar:not(.sb-hover-suspended) .sb-new-thread:hover { background: var(--card); }
+#ws-sidebar .sb-new-thread-note { margin: -4px 14px 10px; font-size: 12px; color: var(--muted); }
+#ws-sidebar .sb-thread > .row { cursor: pointer; }
+#ws-sidebar .sb-thread-summary {
+  margin: -2px 0 4px; padding: 0 1.4rem; font-size: 12px; color: var(--info-agents);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The archived threads: listed under their heading, after every open thread,
+   receded as the rail's other settled lists are. */
+#ws-sidebar .sb-threads-heading {
+  margin: 12px 12px 4px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--muted);
+}
+#ws-sidebar .sb-thread-archived > .row .name { color: var(--muted); }
+/* A content match's words around the match, under the row (chat-search.ts). */
+#ws-sidebar .sb-thread-snippet {
+  margin: -2px 0 4px; padding: 0 1.4rem; font-size: 12px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#ws-sidebar .sb-thread-snippet mark { background: none; color: var(--fg); font-weight: 600; }

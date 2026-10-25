@@ -27,7 +27,7 @@ import type { AppContext, DaemonContext } from "../rpc/context.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
-import { AttentionRegistry, type BlinkTimers } from "./attention.js";
+import { AttentionRegistry, WINDOW_TIMERS, type BlinkTimers } from "./attention.js";
 import { createDropdowns } from "./dropdowns.js";
 import { createRowHover } from "./row-hover.js";
 import { installTransients } from "./transients.js";
@@ -40,7 +40,9 @@ import { createRowReveal } from "./reveal.js";
 import { guardMalformedNow } from "../rpc/guard.js";
 import { placeOpenRowDetails } from "./row.js";
 import { installBandFit } from "./band-fit.js";
+import { createAppSwitcher, disposeThreadList, drawThreadList, showsChat, type AppSwitcher } from "./threads.js";
 import { applySearch, createRailSearch, type RailSearch } from "./search.js";
+import { createChatSearch } from "./chat-search.js";
 import { createSelectionEdge } from "./selection-edge.js";
 import { installWallPhase, type WallPhaseEnv } from "./wall-phase.js";
 import { createUnseenGate, unseenEnv, type UnseenEnv } from "./unseen.js";
@@ -221,6 +223,8 @@ function mountSidebarIn(
   // run again over the rail.
   const reveal = createRowReveal(() => {
     applySearch(body, search.query());
+    chatSearch.changed(search.query(), chatShown);
+    chatSearch.apply(body);
     placeOpenRowDetails(body);
   });
   const body = document.createElement("div");
@@ -252,15 +256,26 @@ function mountSidebarIn(
   // THE SEARCH NARROWS THE DRAWN ROWS (search.ts): on every keystroke, and
   // again after every push and every row drawn as it came into view, since
   // either draws rows the query has not narrowed.
+  // WHETHER CHAT IS SHOWN is the last drawn roster's, and decides whether
+  // the search also asks the chats (chat-search.ts).
+  let chatShown = false;
+  const chatSearch = createChatSearch({
+    ctx,
+    timers: deps.timers ?? WINDOW_TIMERS,
+    root: () => body,
+    applied: () => bandFit.refit(),
+  });
   const search = createRailSearch((query) => {
     const outcome = applySearch(body, query);
+    chatSearch.changed(query, chatShown);
+    chatSearch.apply(body);
     log.debug("narrowed the rail to the search", {
       operation: "sidebar.search",
       context: { query, ...outcome },
     });
     bandFit.refit();
   });
-  const head = drawRailHead(search);
+  const head = drawRailHead(search, createAppSwitcher(ctx, dropdowns));
   host.replaceChildren(head.element, search.bar, arrangeStatus, body, arrangeLayer);
   // THE RAIL'S LOOPS RUN ON THE WALL CLOCK (wall-phase.ts), so neither a
   // redraw nor a switch to another workspace's page restarts one.
@@ -371,7 +386,18 @@ function mountSidebarIn(
     // The blink pass brackets the draw: markers are re-attached to the phases
     // already running, and any marker the daemon cleared is forgotten.
     attention.beginPass();
-    const drawn = drawWorkspaceRoster(roster, rail);
+    // THE TITLE IS THE APP SWITCHER, and the body is the app the roster shows
+    // (threads.ts): a thread on screen shows Chat.
+    const switcher = requireMessage(roster.appSwitcher, "WorkspaceRoster.app_switcher");
+    head.switcher.update(switcher);
+    let drawn: HTMLElement;
+    chatShown = showsChat(switcher);
+    if (chatShown) {
+      drawn = drawThreadList(requireMessage(roster.threads, "WorkspaceRoster.threads"), rail);
+    } else {
+      disposeThreadList(rail);
+      drawn = drawWorkspaceRoster(roster, rail);
+    }
     attention.endPass();
     head.showVersion(roster.version);
     mark("build");
@@ -435,6 +461,8 @@ function mountSidebarIn(
       transients.dispose();
       rail.rowHover.dispose();
       disposeWorkspaceRoster(rail);
+      disposeThreadList(rail);
+      chatSearch.dispose();
       reveal.dispose();
       attention.dispose();
       host.replaceChildren();
@@ -448,18 +476,18 @@ export interface RailHead {
   element: HTMLElement;
   /** State the roster's agent-repl version at the head's right; none hides it. */
   showVersion(version: RosterVersion | undefined): void;
+  /** The title, which is the app switcher (threads.ts). */
+  switcher: AppSwitcher;
 }
 
-/** The rail's header: the search toggle, its title, and the agent-repl version. */
-export function drawRailHead(search: RailSearch): RailHead {
+/** The rail's header: the search toggle, its title (the app switcher), and the agent-repl version. */
+export function drawRailHead(search: RailSearch, switcher: AppSwitcher): RailHead {
   const head = document.createElement("div");
   head.className = "sb-head";
-  head.appendChild(search.toggle);
-
-  const title = document.createElement("span");
-  title.className = "sb-title";
-  title.textContent = "Workspaces";
-  head.appendChild(title);
+  // THE APPS MENU IS DRAWN UNDER THE HEAD (absolutely, styles.css), so it
+  // leads the head's children and leaves the toggle, title and version
+  // adjacent, in their drawn order.
+  head.append(switcher.menu, search.toggle, switcher.title);
 
   // THE VERSION IS THE DAEMON'S (frontend.v1.WorkspaceRoster.version), drawn
   // verbatim; UNSET until the daemon has resolved one, when nothing is drawn.
@@ -469,6 +497,7 @@ export function drawRailHead(search: RailSearch): RailHead {
   head.appendChild(version);
   return {
     element: head,
+    switcher,
     showVersion(next: RosterVersion | undefined): void {
       version.hidden = next === undefined;
       version.textContent = next?.text ?? "";

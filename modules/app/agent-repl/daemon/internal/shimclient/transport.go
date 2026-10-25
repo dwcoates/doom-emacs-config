@@ -1,9 +1,9 @@
 package shimclient
 
 import (
+	"agent-repld/internal/h2cclient"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -11,8 +11,6 @@ import (
 	"net/http"
 	"sync"
 	"time"
-
-	"golang.org/x/net/http2"
 )
 
 // udsBaseURL is the base URL every shim connection uses. The authority is
@@ -25,17 +23,7 @@ const udsBaseURL = "http://shim.uds"
 // client can hang up on the shim (dialedConns.hangUp).
 func newUDSClient(udsPath string, conns *dialedConns) *http.Client {
 	return &http.Client{
-		Transport: &ownedRequestBody{next: &http2.Transport{
-			AllowHTTP: true,
-			DialTLSContext: func(ctx context.Context, _, _ string, _ *tls.Config) (net.Conn, error) {
-				var d net.Dialer
-				conn, err := d.DialContext(ctx, "unix", udsPath)
-				if err != nil {
-					return nil, err
-				}
-				return conns.track(conn), nil
-			},
-		}},
+		Transport: &ownedRequestBody{next: h2cclient.UnixTransport(udsPath, conns.track)},
 	}
 }
 

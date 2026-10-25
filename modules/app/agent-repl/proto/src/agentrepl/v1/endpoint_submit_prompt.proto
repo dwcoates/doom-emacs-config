@@ -262,6 +262,10 @@ message SubmitPromptError {
     // Nothing was submitted: a prompt's header names the workspace that sent
     // it, and no workspace is known to have.
     SubmitPromptUnknownSender unknown_sender = 17;
+    // A zettel chat thread's FIRST question is still being answered, so the
+    // thread has no node yet for another question to be asked of. Nothing was
+    // submitted; the composer keeps the text, to send once the answer lands.
+    SubmitPromptThreadAwaitingFirstAnswer thread_awaiting_first_answer = 18;
   }
 }
 // Names the sender that is no other registered workspace.
@@ -274,6 +278,8 @@ message SubmitPromptSlashCommandFromAgent {
   // The command as the prompt began with it, slash included ("/clear").
   string command = 1;
 }
+// The awaiting-first-answer refusal. Empty: the arm is the whole fact.
+message SubmitPromptThreadAwaitingFirstAnswer {}
 // The settled-ask refusal. Empty: the arm is the whole fact.
 message SubmitPromptAskNotStanding {}
 

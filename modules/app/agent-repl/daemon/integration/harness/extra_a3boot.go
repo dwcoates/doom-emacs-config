@@ -1,15 +1,10 @@
 package harness
 
 import (
-	"context"
-	"crypto/tls"
-	"net"
-	"net/http"
+	"agent-repld/internal/h2cclient"
 	"testing"
 
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
-
-	"golang.org/x/net/http2"
 )
 
 // DialAt builds a Connect client against an arbitrary address, for a daemon
@@ -19,14 +14,6 @@ import (
 // wants to prove THAT needs to dial it directly by the address it reported.
 func DialAt(t testing.TB, addr string) agentreplv1connect.AgentReplClient {
 	t.Helper()
-	httpClient := &http.Client{
-		Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-				var dialer net.Dialer
-				return dialer.DialContext(ctx, network, addr)
-			},
-		},
-	}
+	httpClient := h2cclient.Client()
 	return agentreplv1connect.NewAgentReplClient(httpClient, "http://"+addr)
 }

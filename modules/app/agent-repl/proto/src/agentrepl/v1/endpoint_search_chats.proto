@@ -1,0 +1,58 @@
+// endpoint_search_chats.proto — SearchChats: the threads whose chats say these words. CHAT section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "zettel/v1/endpoint_search_threads.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// SearchChats: the sidebar's search, while the Chat app is shown, asks which
+// threads' questions and answers say the typed words (zettel.v1.SearchThreads
+// states how words match). The rail keeps the threads whose NAME matches, as
+// it narrows every list, and also keeps every thread answered here, drawing
+// its snippet under the row. A blank query is invalid.
+message SearchChatsRequest {
+  // The words searched for, as typed.
+  string query = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message SearchChatsResponse {
+  // Success or the refusal; exactly one is set.
+  oneof result {
+    SearchChatsSuccess success = 1;
+    SearchChatsError error = 2;
+  }
+}
+
+// Every registered thread whose chat matched, the best match first. Empty is
+// an answer: no thread says those words.
+message SearchChatsSuccess {
+  repeated SearchChatsMatch matches = 1;
+}
+
+// One thread whose chat matched.
+message SearchChatsMatch {
+  // The thread, as the roster's thread rows carry it.
+  workspace.v1.WorkspaceRef thread = 1;
+  // The words around the best match in the thread, the matched words marked.
+  zettel.v1.Snippet snippet = 2;
+}
+
+// Why no search was answered.
+message SearchChatsError {
+  // The cause of the refusal.
+  oneof cause {
+    // zettel could not search its graph.
+    SearchChatsGraphFailed graph_failed = 1;
+  }
+}
+
+// zettel could not search its graph.
+message SearchChatsGraphFailed {
+  // zettel's own account, verbatim.
+  string detail = 1;
+}

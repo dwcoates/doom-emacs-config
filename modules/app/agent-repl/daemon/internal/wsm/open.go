@@ -27,7 +27,7 @@ import (
 //
 // A NEW VERSION IS A NEW ENTRY IN `migrations`. Bumping this constant alone
 // makes the daemon refuse every database the previous build wrote.
-const LayoutVersion = 77
+const LayoutVersion = 78
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.
@@ -662,6 +662,13 @@ func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn 
 		var queued *MergeQueuedError
 		if errors.As(err, &queued) {
 			s.log.Debug(op, "the workspace is already in its merge queue; the request was refused", withError(fields, err))
+			return err
+		}
+		// A THREAD NAME ALREADY TAKEN is the store answering what was asked;
+		// RegisterThread states it at info and the thread verb picks the next
+		// name.
+		if errors.Is(err, ErrThreadNameTaken) {
+			s.log.Debug(op, "the thread directory is already registered; nothing was written", withError(fields, err))
 			return err
 		}
 		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "refused the write", withError(fields, err))

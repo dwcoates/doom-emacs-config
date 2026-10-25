@@ -866,6 +866,8 @@ STAGE_ENTRIES=(
   agent-shim
   proto
   testrun
+  # zettel, the knowledge graph service a chat world runs for real.
+  zettel
   # The TLDR-tree grammars: tldr's generated parser and its Go binding
   # (tldr/src), which the daemon links through cgo.
   tree-sitter-tldr

@@ -1221,6 +1221,18 @@ as if it were understood."
       ;; Assert
       (should (equal reloaded (list (list conn "Web2")))))))
 
+(ert-deftest agent-repl-test-link-a-new-thread-request-opens-the-prompt ()
+  "A `new_thread_requested' push asks threads.el for the new-thread prompt."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (asked 0))
+      (cl-letf (((symbol-function 'agent-repl-thread-requested) (lambda () (cl-incf asked))))
+        ;; Act
+        (agent-repl-test-link--push conn (list :arm :new-thread-requested :value nil)))
+      ;; Assert
+      (should (= asked 1)))))
+
 ;;;; ---- The daemon's standing loud faults ----
 
 (defun agent-repl-test-link--standing (&rest ids)

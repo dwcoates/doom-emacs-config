@@ -284,6 +284,11 @@ type Deps struct {
 	// before a shim starts, and a sidecar restart beside running shims loses
 	// nothing (it resumes from its cursors in the store).
 	EnsureSidecar func(context.Context) error
+	// EnsureZettel keeps the zettel service loaded and on the installed build
+	// (deploy.Restarter.EnsureZettelCurrent). It runs BESIDE the bring-up's
+	// starts like the sidecar's half: no shim writes into zettel, so nothing
+	// waits on it.
+	EnsureZettel func(context.Context) error
 	// Unserved states, on a workspace's views, that this daemon serves no
 	// session for it: its link is dead before it ever connected. The
 	// reconciliation calls it for every UNDETERMINED workspace, which no
@@ -385,6 +390,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a launchd service ensurer")
 	case deps.EnsureSidecar == nil:
 		return nil, missing("a sidecar service ensurer")
+	case deps.EnsureZettel == nil:
+		return nil, missing("a zettel service ensurer")
 	case deps.Unserved == nil:
 		return nil, missing("an unserved-workspace marker")
 	case deps.BringingUp == nil:

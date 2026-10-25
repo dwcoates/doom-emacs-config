@@ -150,6 +150,8 @@ type harness struct {
 	// replay; sendersErr fails that read.
 	senders    map[ids.TurnID]ids.WorkspaceID
 	sendersErr error
+	// chat records every edge the resolver told its chat sink (Deps.Chat).
+	chat *fakeChatSink
 	// faults is the fake fault record every raise in this resolver lands in.
 	faults *fakeFaults
 	// clock is the fake AfterFunc: stall windows are armed into it and fired
@@ -231,6 +233,7 @@ func newDurableHarness(t *testing.T, rolledBack RolledBackTurnStore, signedIn Si
 		faults: &fakeFaults{}, clock: &fakeStallClock{}, warnings: &fakeWarnings{},
 		boards: newFakeChessBoards(), catalogs: commandcatalog.New(),
 		names: map[ids.WorkspaceID]string{}, peerSource: &fakePeerDeliveries{}, taskSource: &fakeVendorTasks{},
+		chat: &fakeChatSink{},
 	}
 
 	resolver, err := newResolver(Deps{
@@ -305,6 +308,7 @@ func newDurableHarness(t *testing.T, rolledBack RolledBackTurnStore, signedIn Si
 		PeerDeliveries: h.peerSource,
 		VendorTasks:    h.taskSource,
 		Go:             func(f func()) { h.spawned = append(h.spawned, f) },
+		Chat:           h.chat,
 		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
 			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})
 		},

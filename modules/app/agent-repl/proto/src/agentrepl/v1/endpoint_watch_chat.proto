@@ -1,0 +1,24 @@
+// endpoint_watch_chat.proto — WatchChat: one thread's chat view, pushed whole. CHAT section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "frontend/v1/chat.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// WatchChat: the chat view of one thread, whole-replaced on every change. The
+// thread page's chat component watches it in place of the agent feed.
+message WatchChatRequest {
+  // The thread to watch.
+  workspace.v1.WorkspaceRef thread = 1;
+}
+
+// One push of the chat view.
+message WatchChatResponse {
+  // The whole chat view, resolved by the daemon. Every push replaces the
+  // last.
+  frontend.v1.ChatView view = 1;
+}

@@ -11,6 +11,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/promptqueue"
@@ -71,6 +72,23 @@ func (h *handler) movedOn(ctx context.Context, ws ids.WorkspaceID) {
 // checked against the workspace, recognition forks the answer, and only an
 // ordinary prompt reaches the queue.
 func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, delivery wsm.Delivery, target *feedid.Ref) (Outcome, error) {
+	return h.submit(ctx, ws, said, idempotencyKey, origin, sentBy, delivery, target, nil)
+}
+
+// SubmitThreadQuestion is Submit for a zettel chat thread: an ordinary prompt
+// reaches the queue carrying where its question was asked from. A thread
+// question is never classified (the queue holds it for the running turn's
+// end), so its delivery is the ordinary one and it addresses the root feed.
+func (h *handler) SubmitThreadQuestion(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, ask *wsm.ThreadAsk) (Outcome, error) {
+	if ask == nil {
+		panic("prompthandler: SubmitThreadQuestion needs the question's ask")
+	}
+	return h.submit(ctx, ws, said, idempotencyKey, origin, nil, wsm.DeliveryOrdinary, nil, ask)
+}
+
+// submit is Submit's body; ask is nil for every submission but a thread
+// question's.
+func (h *handler) submit(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, delivery wsm.Delivery, target *feedid.Ref, ask *wsm.ThreadAsk) (Outcome, error) {
 	log, err := h.logger(ctx, ws)
 	if err != nil {
 		return Outcome{}, err
@@ -138,7 +156,7 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 		h.deps.Feed.ClaimIngress(ws, c.key, turn)
 	}
 	disposition, err := h.deps.Queue.Submit(ctx, promptqueue.Submission{
-		WS: ws, Turn: turn, Said: said, Origin: origin, SentBy: sentBy, Target: target, Delivery: delivery,
+		WS: ws, Turn: turn, Said: said, Origin: origin, SentBy: sentBy, Target: target, Delivery: delivery, Ask: ask,
 	})
 	if err != nil {
 		return Outcome{}, err
@@ -149,6 +167,7 @@ func (h *handler) Submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 	h.movedOn(ctx, ws)
 	log.Info(opSubmit, "the prompt was forwarded to the queue", dlog.Context{
 		"turn": string(turn), "delivered": disposition.Delivered, "parked": disposition.Parked(),
+		"thread_question": ask != nil,
 	})
 	return Outcome{Recognition: RecognizedNone, Turn: turn, Disposition: disposition}, nil
 }
@@ -352,21 +371,12 @@ func answerable(ctx context.Context, said *conversationv1.UserSaid, origin conve
 	return words
 }
 
-// saidText renders a submission's text: the text blocks, joined. Recognition
-// reads it and nothing else — an image carries no command, and a reply's
-// quote block is not the person's words, so a command typed as a reply is
-// still recognized.
+// saidText renders a submission's text for recognition: holdfold.SaidText,
+// the one reading the classifier and the hold tray share. An image carries no
+// command, and a reply's quote block is not the person's words, so a command
+// typed as a reply is still recognized.
 func saidText(said *conversationv1.UserSaid) string {
-	out := ""
-	for _, block := range said.GetContent().GetBlocks() {
-		if text, ok := block.GetBlock().(*conversationv1.UserContentBlock_Text); ok {
-			if out != "" {
-				out += "\n"
-			}
-			out += text.Text.GetText()
-		}
-	}
-	return out
+	return holdfold.SaidText(said)
 }
 
 // recognitionName renders a recognition for a log record.

@@ -7,6 +7,7 @@ import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
   AdoptWebWorkspaceErrorSchema,
   AdoptWebWorkspaceResponseSchema,
+  WebWorkspacePageSchema,
   type AdoptWebWorkspaceResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_web_workspace_pb";
 import {
@@ -33,6 +34,7 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   AdoptionFailed,
   adoptAtBoot,
+  webPage,
   announceShutdown,
   isDeployHandover,
   classifyAdoptionRefusal,
@@ -431,7 +433,7 @@ function lifecycleClient(script: {
         state.adoptCalls += 1;
         return (
           script.adopt?.() ??
-          create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: {} } })
+          create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: { page: AGENT_PAGE } } })
         );
       },
     });
@@ -902,9 +904,27 @@ describe("workspaceMoved", () => {
 
 // ---------------------------------------------------------------------------
 
+/** The two pages a daemon names. */
+const AGENT_PAGE = { kind: { case: "agent" as const, value: {} } };
+const THREAD_PAGE = { kind: { case: "thread" as const, value: {} } };
+
+describe("webPage", () => {
+  it.each([
+    ["agent", AGENT_PAGE, "agent"],
+    ["thread", THREAD_PAGE, "thread"],
+  ])("reads the %s page", (_name, page, want) => {
+    expect(webPage(create(WebWorkspacePageSchema, page), "p")).toBe(want);
+  });
+
+  it("refuses an absent page and an unset kind", () => {
+    expect(() => webPage(undefined, "p")).toThrow(MalformedView);
+    expect(() => webPage(create(WebWorkspacePageSchema, {}), "p")).toThrow(MalformedView);
+  });
+});
+
 describe("classifyAdoptionRefusal", () => {
   const table: ReadonlyArray<readonly [string, unknown, string]> = [
-    ["noTransferAnnounced", { case: "noTransferAnnounced", value: {} }, "no-transfer"],
+    ["noTransferAnnounced", { case: "noTransferAnnounced", value: { page: AGENT_PAGE } }, "no-transfer"],
     ["notYetAdopted", { case: "notYetAdopted", value: {} }, "retry"],
     ["unknownWorkspace", { case: "unknownWorkspace", value: {} }, "terminal"],
     [
@@ -949,18 +969,26 @@ describe("adoptAtBoot", () => {
       result: { case: "error", value: { cause: cause as never } },
     });
 
-  it("resolves adopted on success", async () => {
+  it("resolves adopted on success, naming the page", async () => {
     const { client } = lifecycleClient({});
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
-    await expect(adoptAtBoot(ctx)).resolves.toBe("adopted");
+    await expect(adoptAtBoot(ctx)).resolves.toEqual({ outcome: "adopted", page: "agent" });
   });
 
-  it("resolves no-transfer on the ordinary non-handover boot", async () => {
+  it("resolves no-transfer on the ordinary non-handover boot, naming the page", async () => {
     const { client } = lifecycleClient({
-      adopt: () => refusal({ case: "noTransferAnnounced", value: {} }),
+      adopt: () => refusal({ case: "noTransferAnnounced", value: { page: THREAD_PAGE } }),
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
-    await expect(adoptAtBoot(ctx)).resolves.toBe("no-transfer");
+    await expect(adoptAtBoot(ctx)).resolves.toEqual({ outcome: "no-transfer", page: "thread" });
+  });
+
+  it("refuses an answer that names no page", async () => {
+    const { client } = lifecycleClient({
+      adopt: () => create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: {} } }),
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    await expect(adoptAtBoot(ctx)).rejects.toBeInstanceOf(MalformedView);
   });
 
   it("resolves deferred, calling the verb once, when the incumbent kept the workspace", async () => {
@@ -1034,7 +1062,7 @@ describe("adoptAtBoot", () => {
         calls += 1;
         return calls < 3
           ? refusal({ case: "notYetAdopted", value: {} })
-          : create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+          : create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: { page: AGENT_PAGE } } });
       },
     });
     const ticker = fakeTicker();
@@ -1045,7 +1073,7 @@ describe("adoptAtBoot", () => {
     await vi.advanceTimersByTimeAsync(500);
     await vi.advanceTimersByTimeAsync(0);
     // ASSERT
-    await expect(promise).resolves.toBe("adopted");
+    await expect(promise).resolves.toEqual({ outcome: "adopted", page: "agent" });
     expect(calls).toBe(3);
   });
 

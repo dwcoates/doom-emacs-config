@@ -1119,6 +1119,8 @@ describe("the page's connection budget", () => {
       "watchDaemon",
       "watchWebWorkspace",
       "watchLoginTerminal",
+      // A chat thread's view: the page reads it through the mux's `chat` arm.
+      "watchChat",
       // The agent CLI's test run and redundancy measurement: finite, but no
       // page has any business opening either, so both stay guarded rather
       // than exempted.

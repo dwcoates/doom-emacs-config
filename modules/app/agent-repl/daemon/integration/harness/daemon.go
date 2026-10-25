@@ -1,8 +1,8 @@
 package harness
 
 import (
+	"agent-repld/internal/h2cclient"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"maps"
@@ -36,9 +36,9 @@ import (
 	"agent-repld/internal/tempdirs"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
+	"agent-repld/internal/zettelclient"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
 )
 
 // DefaultTimeout bounds every wait the harness performs, from one Daemon's
@@ -270,6 +270,18 @@ func statedEmpty(keys ...string) []string {
 // daemon (Opts.ServiceBinaries). Both or neither.
 type ServiceBinaries struct {
 	Store, Sidecar string
+}
+
+// ZettelSocketEnv is the variable a daemon reads its zettel socket from, for a
+// launcher that runs a real zettel and points the daemon at it.
+const ZettelSocketEnv = zettelclient.EnvSocket
+
+// UnservedZettelEnv is the environment entry pointing a daemon's zettel
+// socket at an unserved path under dir: no world runs a real zettel, so a
+// daemon's zettel calls fail there, and never reach the owner's own
+// zettel.sock. Every launcher of a test daemon states it.
+func UnservedZettelEnv(dir string) string {
+	return ZettelSocketEnv + "=" + filepath.Join(dir, "unused-zettel.sock")
 }
 
 // LockDirFor is the kernel-lock and build-report directory StartDaemon
@@ -813,6 +825,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		wsm.EnvTestUnsyncedWrites+"=1",
 		"AGENT_REPL_LOCK_DIR="+d.LockDir,
 		"AGENT_REPL_STORE_SOCKET="+filepath.Join(sockRoot, "unused-store.sock"),
+		UnservedZettelEnv(sockRoot),
 		"MULTI_REPO_ROOT="+multiRoot,
 		"AGENT_REPL_BROWSER_CMD="+d.Browser.Path,
 		"AGENT_REPL_DEPLOY_BUILDER="+d.Deploy.Path,
@@ -1168,15 +1181,7 @@ func (d *Daemon) expectedExit() bool {
 // origin; the harness uses h2c so a server stream is not head-of-line blocked.
 func (d *Daemon) dial(jsonCodec bool) {
 	d.t.Helper()
-	d.http = &http.Client{
-		Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-				var dialer net.Dialer
-				return dialer.DialContext(ctx, network, addr)
-			},
-		},
-	}
+	d.http = h2cclient.Client()
 	var opts []connect.ClientOption
 	if jsonCodec {
 		opts = append(opts, connect.WithProtoJSON())
@@ -1197,15 +1202,7 @@ func (d *Daemon) Client() agentreplv1connect.AgentReplClient {
 // subject is per-connection state (a feed page walk).
 func (d *Daemon) Dial() agentreplv1connect.AgentReplClient {
 	d.t.Helper()
-	client := &http.Client{
-		Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-				var dialer net.Dialer
-				return dialer.DialContext(ctx, network, addr)
-			},
-		},
-	}
+	client := h2cclient.Client()
 	return agentreplv1connect.NewAgentReplClient(client, "http://"+d.Addr)
 }
 

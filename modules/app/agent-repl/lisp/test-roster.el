@@ -73,14 +73,15 @@ COLLAPSED non-nil puts it on the `repository_collapsed' arm."
         :merged-rows (agent-repl-test--merged-rows rows)
         :drawn (list :arm (if collapsed :repository-collapsed :shown) :value nil)))
 
-(cl-defun agent-repl-test-roster--roster (&key sections hidden merged merged-groups closed current)
+(cl-defun agent-repl-test-roster--roster (&key sections hidden merged merged-groups closed current threads)
   "Return a decoded `WorkspaceRoster' plist from SECTIONS, HIDDEN, MERGED and CURRENT.
 SECTIONS' open rows get their tabs numbered as the daemon numbers them
 \(`agent-repl-test--number-tabs').  HIDDEN is the hidden section's rows;
 the section itself is always there, expanded, as the daemon always sends
 it.  MERGED is the recently-merged rows, carried in one shown group;
 MERGED-GROUPS, when given, is the band's groups instead.  CLOSED is the
-closed list's rows."
+closed list's rows.  THREADS are the thread section's rows, each
+`(ID . NAME)', the one last interacted with first."
   (list :repository (list :sections (agent-repl-test--number-tabs sections))
         :hidden (list :header (list :label (list :text "Hidden"))
                       :hidden-rows (agent-repl-test--hidden-rows hidden)
@@ -91,7 +92,14 @@ closed list's rows."
                                            (and merged
                                                 (list (agent-repl-test-roster--merged-group
                                                        "alpha" merged)))))
-        :current (and current (list :workspace (list :id current :dir (concat "/w/" current))))))
+        :current (and current (list :workspace (list :id current :dir (concat "/w/" current))))
+        :threads (list :new-thread "New thread"
+                       :rows (mapcar (lambda (thread)
+                                       (list :thread (list :id (car thread)
+                                                           :dir (concat "/zettel/threads/" (cdr thread)))
+                                             :name (cdr thread)
+                                             :standing (list :arm :open :value nil)))
+                                     threads))))
 
 ;;;; ---- Harness ----
 
@@ -3738,3 +3746,62 @@ judged as any roster is."
   "No push carried, no names."
   (agent-repl-test-roster--with-rows nil
     (should-not (agent-repl-roster-open-workspace-names))))
+;;;; ---- Threads are workspaces off the bar ----
+
+(ert-deftest agent-repl-test-roster-reconcile-opens-a-thread-off-the-drawing ()
+  "A thread opens a workspace of its own, which the bar never draws."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-reconcile
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
+      :threads '(("t1" . "why-blue"))))
+    (should (equal (agent-repl--ws-by-ref-id "t1") "chat/why-blue"))
+    (should (member "chat/why-blue" agent-repl-test-roster--created))
+    (should (equal (agent-repl-roster-drawn-tab-order) '("one")))))
+
+(ert-deftest agent-repl-test-roster-reconcile-marks-which-workspaces-are-threads ()
+  "Every reconcile states whether each workspace it settled is a thread."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-reconcile
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
+      :threads '(("t1" . "why-blue"))))
+    (should (agent-repl-roster-thread-p "chat/why-blue"))
+    (should-not (agent-repl-roster-thread-p "one"))
+    (should-not (agent-repl-roster-thread-p nil))))
+
+(ert-deftest agent-repl-test-roster-a-thread-is-marked-before-its-panels-open ()
+  "A thread's tab is a thread when its panels open, so the tab bar reads it."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl--panels-arrivals-armed t)
+          marked)
+      (cl-letf (((symbol-function 'agent-repl--panels-open-on-arrival)
+                 (lambda (ws _id) (push (cons ws (agent-repl-roster-thread-p ws)) marked))))
+        ;; Act
+        (agent-repl-roster-reconcile
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
+          :threads '(("t1" . "why-blue")))))
+      ;; Assert
+      (should (equal (alist-get "chat/why-blue" marked nil nil #'equal) t))
+      (should (assoc "one" marked))
+      (should-not (cdr (assoc "one" marked))))))
+
+(ert-deftest agent-repl-test-roster-a-thread-gone-from-the-roster-is-torn-down ()
+  "A thread the next roster no longer carries loses its workspace."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :threads '(("t1" . "why"))))
+    (agent-repl-roster-reconcile (agent-repl-test-roster--roster))
+    (should (member "chat/why" agent-repl-test-roster--killed))
+    (should-not (agent-repl--ws-by-ref-id "t1"))))
+
+(ert-deftest agent-repl-test-roster-threads-read-the-last-roster ()
+  "The thread rows are the accepted roster's, newest first."
+  (let ((agent-repl-roster-view (agent-repl-test-roster--roster :threads '(("t2" . "b") ("t1" . "a")))))
+    (should (equal (mapcar (lambda (row) (plist-get row :name)) (agent-repl-roster-threads)) '("b" "a")))
+    (should (equal (agent-repl-roster-thread-workspace-name (car (agent-repl-roster-threads))) "chat/b"))))
+

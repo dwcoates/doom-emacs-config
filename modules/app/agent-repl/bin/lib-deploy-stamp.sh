@@ -256,6 +256,7 @@ deploy_stamp_system_paths() {
         # No proto: shim-lock speaks no wire at all. Its whole contract is argv,
         # one stdout line, stdin's EOF and an exit code.
         shim-lock)           printf '%s %s' "$(deploy_stamp_prefix agent-shim/shim-lock "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
+        zettel)              printf '%s %s %s' "$(deploy_stamp_prefix zettel "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_proto_paths "$rel")" ;;
         *) return 1 ;;
     esac
 }

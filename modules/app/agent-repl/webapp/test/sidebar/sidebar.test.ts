@@ -21,6 +21,8 @@ import {
 } from "../../src/sidebar/sidebar.js";
 import { RosterVersionSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { createRailSearch } from "../../src/sidebar/search.js";
+import { createAppSwitcher } from "../../src/sidebar/threads.js";
+import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
 import { HOVER_SUSPENDED_CLASS } from "../../src/sidebar/transients.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
@@ -34,6 +36,7 @@ import {
   NOW,
   SINK,
   WORKSPACE,
+  appContext,
   fakeTicker,
   fakeTimers,
   mergedSection,
@@ -203,7 +206,7 @@ describe("the preferences a page stored before the view was the daemon's", () =>
 
 /** The rail's header, with a search no test here types into. */
 function railHead(): ReturnType<typeof drawRailHead> {
-  return drawRailHead(createRailSearch(() => {}));
+  return drawRailHead(createRailSearch(() => {}), createAppSwitcher(appContext(), createDropdowns()));
 }
 
 describe("the rail's header", () => {

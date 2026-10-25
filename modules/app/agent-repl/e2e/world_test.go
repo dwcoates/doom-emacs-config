@@ -107,6 +107,8 @@ type World struct {
 	*harness.Daemon
 	Store   *Store
 	Sidecar *Sidecar
+	// Zettel is the world's real zettel (WorldOpts.Zettel), or nil.
+	Zettel *Zettel
 }
 
 // WorldOpts configures one World. DaemonOpts is forwarded to
@@ -143,6 +145,12 @@ type WorldOpts struct {
 	// NewWorldWithSidecarStaleness rather than by hand, so the reason a
 	// world runs with a short window is stated at its construction site.
 	SidecarStaleness SidecarStaleness
+
+	// Zettel runs a REAL zettel beside the daemon, on a socket and a graph of
+	// the world's own, for a test of the chat threads. Unset, the daemon's
+	// zettel socket is an unserved path (harness.UnservedZettelEnv), as every
+	// other world's is.
+	Zettel bool
 }
 
 // SidecarStaleness is the sidecar's LOST-policy window set, as this suite
@@ -263,6 +271,14 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	spoolRoot := t.TempDir()
 
 	daemonOpts := opts.DaemonOpts
+	var zettel *Zettel
+	if opts.Zettel {
+		zettel = startZettel(t, shortSocketPath(t, "zettel"), filepath.Join(t.TempDir(), "zettel.db"),
+			filepath.Join(logsDir, "zettel.log"), lockDir)
+		// Appended to the caller's ExtraEnv, which harness.StartDaemon appends
+		// after its own unserved zettel socket, so this one is the daemon's.
+		daemonOpts.ExtraEnv = append(append([]string{}, daemonOpts.ExtraEnv...), harness.ZettelSocketEnv+"="+zettel.Socket)
+	}
 	daemonOpts.ShimNode = node
 	daemonOpts.ShimMain = shimMain
 	daemonOpts.StoreSocket = store.Socket
@@ -309,7 +325,7 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 
 	assertOneSpoolRoot(t, daemonOpts.ExtraEnv, sidecar)
 
-	w := &World{Daemon: d, Store: store, Sidecar: sidecar}
+	w := &World{Daemon: d, Store: store, Sidecar: sidecar, Zettel: zettel}
 
 	// Registered LAST, so t.Cleanup's LIFO unwind runs this FIRST — before
 	// the store/sidecar/daemon Stop cleanups above ever touch the
@@ -320,7 +336,7 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	// Store.StartSameDB) records the exit as INTENTIONAL by setting
 	// Store.stopped; this assertion is the only reader of that bit that
 	// treats it as authoritative.
-	t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar) })
+	t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar, zettel) })
 
 	return w
 }
@@ -355,11 +371,12 @@ func (w *World) RequireOpen(t testing.TB, ws *workspacev1.WorkspaceRef) {
 	}
 }
 
-// requireServicesOutlivedTheTest fails t if the store or the sidecar exited
-// on its own before t's cleanup: one a test stopped on purpose (Store.Stop,
-// Store.StartSameDB) is the test's own doing. Every World's test asks it, an
-// owned World's and a shared World's alike.
-func requireServicesOutlivedTheTest(t testing.TB, store *Store, sidecar *Sidecar) {
+// requireServicesOutlivedTheTest fails t if the store, the sidecar or zettel
+// (nil in a world that runs none) exited on its own before t's cleanup: one a
+// test stopped on purpose (Store.Stop, Store.StartSameDB) is the test's own
+// doing. Every world's test asks it, an owned World's, a shared World's and
+// an EmacsWorld's alike.
+func requireServicesOutlivedTheTest(t testing.TB, store *Store, sidecar *Sidecar, zettel *Zettel) {
 	t.Helper()
 	if store.Exited() && !store.stopped {
 		t.Errorf("e2e: the store exited before test cleanup (%s), and was never stopped by the test:\n%s",
@@ -368,6 +385,9 @@ func requireServicesOutlivedTheTest(t testing.TB, store *Store, sidecar *Sidecar
 	if sidecar.Exited() && !sidecar.stopped {
 		t.Errorf("e2e: the sidecar exited before test cleanup (%s), and was never stopped by the test",
 			sidecar.exit.status())
+	}
+	if zettel != nil && zettel.Exited() && !zettel.stopped {
+		t.Errorf("e2e: zettel exited before test cleanup (%s), and was never stopped by the test", zettel.exit.status())
 	}
 }
 
@@ -799,30 +819,12 @@ func startStore(t testing.TB, socket, dbPath, logPath, lockDir string) *Store {
 	if lockDir == "" {
 		t.Fatal("e2e: the store needs the world's lock dir; an empty one would write its build report over the owner's own in ~/.cache/agent-repl/run")
 	}
-	cmd := exec.Command(bin, "--socket", socket, "--db", dbPath, "--log", logPath)
-	cmd.Env = append(os.Environ(),
+	// The store's --log lives under the daemon's state root, so its argv names
+	// the state directory a daemon's stray reap matches on: it is the test's.
+	cmd := startService(t, "store", "start", bin, []string{"--socket", socket, "--db", dbPath, "--log", logPath}, lockDir,
 		"AGENT_REPL_STORE_SOCKET="+socket,
-		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 		// The store's database is thrown away with the world: no forced flushes.
-		"AGENT_REPL_TEST_SQLITE_UNSYNCED=1",
-		// The world's lock dir keeps the boot's build-report write
-		// (agentrepl/logging/buildreport) out of the owner's real
-		// ~/.cache/agent-repl/run, and in the one the daemon's deploy reads.
-		"AGENT_REPL_LOCK_DIR="+lockDir,
-	)
-	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-store")...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("e2e: start store: %v", err)
-	}
-	// The store's own --log path lives under the daemon's state root (logsDir),
-	// so this process's argv NAMES the state directory — the exact key
-	// harness.Daemon.ReapStrays uses to find the shims a dead daemon leaked.
-	// The store is not a stray: this test starts it, stops it, and asserts it
-	// was still running at the end. Declaring it spares it from every daemon's
-	// reap, including a cold-booted successor's on the same state root.
-	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
+		"AGENT_REPL_TEST_SQLITE_UNSYNCED=1")
 	s := &Store{
 		t:       t,
 		bin:     bin,
@@ -943,21 +945,9 @@ func (s *Store) StartSameDB(t testing.TB) {
 	if s.shared {
 		t.Fatalf("e2e: StartSameDB on the shared World's store; a test that restarts the store owns its own World")
 	}
-	cmd := exec.Command(s.bin, "--socket", s.Socket, "--db", s.DBPath, "--log", s.LogPath)
-	cmd.Env = append(os.Environ(),
-		"AGENT_REPL_STORE_SOCKET="+s.Socket,
-		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
-		"AGENT_REPL_TEST_SQLITE_UNSYNCED=1",
-		"AGENT_REPL_LOCK_DIR="+s.lockDir,
-	)
-	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-store")...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("e2e: restart store: %v", err)
-	}
-	// A restart is a NEW pid; the exemption is per-pid.
-	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
+	// A restart is a NEW pid, spared anew.
+	cmd := startService(t, "store", "restart", s.bin, []string{"--socket", s.Socket, "--db", s.DBPath, "--log", s.LogPath}, s.lockDir,
+		"AGENT_REPL_STORE_SOCKET="+s.Socket, "AGENT_REPL_TEST_SQLITE_UNSYNCED=1")
 	s.cmd = cmd
 	s.stopped = false
 	s.exit = watchProcess(cmd)
@@ -1110,24 +1100,7 @@ func startSidecar(t testing.TB, bin string, opts sidecarOpts) *Sidecar {
 		}
 	}
 	lockDir := opts.LockDir
-	cmd := exec.Command(bin, args...)
-	cmd.Env = append(os.Environ(),
-		"AGENT_REPL_STORE_SOCKET="+opts.StoreSocket,
-		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
-		// The world's lock dir keeps the boot's build-report write
-		// (agentrepl/logging/buildreport) out of the owner's real
-		// ~/.cache/agent-repl/run, and in the one the daemon's deploy reads.
-		"AGENT_REPL_LOCK_DIR="+lockDir,
-	)
-	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-claude-sidecar")...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("e2e: start sidecar: %v", err)
-	}
-	// Same reasoning as startStore's: --log puts the state root in this
-	// process's argv, and the sidecar is the test's own, never a daemon stray.
-	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
+	cmd := startService(t, "sidecar", "start", bin, args, lockDir, "AGENT_REPL_STORE_SOCKET="+opts.StoreSocket)
 	s := &Sidecar{t: t, bin: bin, args: args, lockDir: lockDir, LogPath: opts.LogPath, SpoolRoot: opts.SpoolRoot, cmd: cmd, exit: watchProcess(cmd)}
 	t.Cleanup(s.Stop)
 	return s
@@ -1205,20 +1178,7 @@ func (s *Sidecar) Restart(t testing.TB) {
 		t.Fatalf("e2e: Restart on the shared World's sidecar; a test that restarts the sidecar owns its own World")
 	}
 	s.Stop()
-	cmd := exec.Command(s.bin, s.args...)
-	cmd.Env = append(os.Environ(),
-		"AGENT_REPL_STORE_SOCKET="+storeSocketOf(s.args),
-		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
-		"AGENT_REPL_LOCK_DIR="+s.lockDir,
-	)
-	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-claude-sidecar")...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("e2e: restart sidecar: %v", err)
-	}
-	// A restart is a NEW pid; the exemption is per-pid.
-	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
+	cmd := startService(t, "sidecar", "restart", s.bin, s.args, s.lockDir, "AGENT_REPL_STORE_SOCKET="+storeSocketOf(s.args))
 	s.cmd = cmd
 	// The new process is the one the end-of-test guarantee now judges, and it
 	// has not been stopped.
@@ -1531,3 +1491,41 @@ func awaitCursors(t testing.TB, w *World, bound time.Duration, what string, done
 // `git` process: every git fact the daemon reads comes from the fixture the
 // harness's World(t) mints, reachable off the embedded *harness.Daemon as
 // w.Git.
+
+// startService starts one of the world's real services: BIN with ARGS, the
+// vendor-call prohibition, LOCKDIR for its build report and ENV beside them,
+// its coverage, its output on this test's stderr, and its pid spared from
+// every daemon's stray reap (its --log names the state root, but it is the
+// test's own). VERB names the start in a failure ("start", "restart").
+func startService(t testing.TB, service, verb, bin string, args []string, lockDir string, env ...string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Env = append(append(os.Environ(), env...),
+		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+		// The world's lock dir keeps the boot's build-report write
+		// (agentrepl/logging/buildreport) out of the owner's real
+		// ~/.cache/agent-repl/run, and in the one the daemon's deploy reads.
+		"AGENT_REPL_LOCK_DIR="+lockDir,
+	)
+	cmd.Env = append(cmd.Env, coverageEnv(t, coverageSystemOf(service))...)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("e2e: %s %s: %v", verb, service, err)
+	}
+	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
+	return cmd
+}
+
+// coverageSystemOf is the coverage system SERVICE's binary is built as.
+func coverageSystemOf(service string) string {
+	switch service {
+	case "store":
+		return "shim-store"
+	case "sidecar":
+		return "shim-claude-sidecar"
+	case "zettel":
+		return "zettel"
+	}
+	panic("e2e: no coverage system for service " + service)
+}

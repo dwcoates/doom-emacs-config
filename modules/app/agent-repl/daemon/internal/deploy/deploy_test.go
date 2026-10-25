@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1559,6 +1560,44 @@ func TestAHandoverCarriesTheDeploysStart(t *testing.T) {
 	}
 }
 
+func TestAStaleZettelRestartsAloneAndIsReported(t *testing.T) {
+	cases := []struct {
+		name      string
+		stale     bool
+		wantCalls []string
+		want      OutcomeKind
+	}{
+		{name: "zettel reports the fresh build: nothing restarts", want: UpToDate},
+		{name: "zettel reports an older build: it alone restarts", stale: true, wantCalls: []string{"zettel"}, want: Restarted},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			if tc.stale {
+				h.report(t, buildreport.ServiceZettel, 103, hashOf(t, theOld.zettel))
+			}
+
+			// Act
+			result, err := h.d.Deploy(context.Background(), false)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Deploy: %v", err)
+			}
+			if got := h.services.Calls(); !reflect.DeepEqual(got, tc.wantCalls) {
+				t.Fatalf("restarts = %v, want %v", got, tc.wantCalls)
+			}
+			if got := outcome(t, result, ComponentZettel).Kind; got != tc.want {
+				t.Fatalf("zettel = %s, want %s", got, tc.want)
+			}
+			if got := readFile(t, h.live.CacheBinPath(buildreport.ServiceZettel)); got != theFresh.zettel {
+				t.Fatalf("installed zettel = %q, want the fresh build", got)
+			}
+		})
+	}
+}
+
 func TestNewRefusesAMissingRestartRecorder(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -1606,5 +1645,24 @@ func TestNewRefusesAMissingReconnectTracker(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatalf("New accepted a Deployer with no reconnect tracker")
+	}
+}
+
+func TestAFailedZettelRestartIsTheDeploysAnswer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.report(t, buildreport.ServiceZettel, 103, hashOf(t, theOld.zettel))
+	h.services.zettelErr = errors.New("kickstart refused")
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	var failed *ServiceRestartFailed
+	if !errors.As(err, &failed) || failed.Component != ComponentZettel {
+		t.Fatalf("Deploy = %v, want zettel's ServiceRestartFailed", err)
+	}
+	if !logged(h.log, "error", opDecide, "the zettel restart failed") {
+		t.Fatalf("records = %+v, want the failure at ERROR", h.log.Records())
 	}
 }

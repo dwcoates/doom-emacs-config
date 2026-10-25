@@ -37,11 +37,11 @@ func TestTheStoreSocketPrecedence(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Act.
-			got, err := resolveStoreSocket(test.flagValue, test.envValue, home)
+			got, err := resolveSocket("store", test.flagValue, test.envValue, defaultStoreSocket, home)
 
 			// Assert.
 			if err != nil || got != test.want {
-				t.Fatalf("resolveStoreSocket(%q, %q) = (%q, %v), want %q", test.flagValue, test.envValue, got, err, test.want)
+				t.Fatalf("resolveSocket(%q, %q) = (%q, %v), want %q", test.flagValue, test.envValue, got, err, test.want)
 			}
 		})
 	}
@@ -63,11 +63,11 @@ func TestTheStoreSocketRefusals(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Act.
-			got, err := resolveStoreSocket(test.flagValue, "", test.home)
+			got, err := resolveSocket("store", test.flagValue, "", defaultStoreSocket, test.home)
 
 			// Assert.
 			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
-				t.Fatalf("resolveStoreSocket() = (%q, %v), want an error containing %q", got, err, test.wantErr)
+				t.Fatalf("resolveSocket() = (%q, %v), want an error containing %q", got, err, test.wantErr)
 			}
 		})
 	}
@@ -81,11 +81,11 @@ func TestAnAbsoluteStoreSocketNeverAsksForHome(t *testing.T) {
 	home := func() (string, error) { asked = true; return "", errors.New("unreachable") }
 
 	// Act.
-	got, err := resolveStoreSocket("/run/flag.sock", "", home)
+	got, err := resolveSocket("store", "/run/flag.sock", "", defaultStoreSocket, home)
 
 	// Assert.
 	if err != nil || got != "/run/flag.sock" || asked {
-		t.Fatalf("resolveStoreSocket() = (%q, %v), asked for home = %v, want the flag and no home lookup", got, err, asked)
+		t.Fatalf("resolveSocket() = (%q, %v), asked for home = %v, want the flag and no home lookup", got, err, asked)
 	}
 }
 
@@ -606,6 +606,34 @@ func TestAnswerMigrationKind(t *testing.T) {
 			}
 			if tt.wantCode == exitFailure && stderr.Len() == 0 {
 				t.Fatal("a refused question said nothing on stderr")
+			}
+		})
+	}
+}
+
+// TestTheZettelSocketPrecedence pins the zettel socket's precedence, which is
+// the store's: flag, then environment, then the zettel service's own default.
+func TestTheZettelSocketPrecedence(t *testing.T) {
+	// Arrange.
+	home := func() (string, error) { return "/home/tester", nil }
+	tests := []struct {
+		name      string
+		flagValue string
+		envValue  string
+		want      string
+	}{
+		{name: "the flag beats the environment", flagValue: "/run/flag.sock", envValue: "/run/env.sock", want: "/run/flag.sock"},
+		{name: "the environment beats the default", envValue: "/run/env.sock", want: "/run/env.sock"},
+		{name: "the default is the zettel service's own", want: "/home/tester/.cache/agent-repl/sock/zettel.sock"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Act.
+			got, err := resolveSocket("zettel", test.flagValue, test.envValue, defaultZettelSocket, home)
+
+			// Assert.
+			if err != nil || got != test.want {
+				t.Fatalf("resolveSocket(%q, %q) = (%q, %v), want %q", test.flagValue, test.envValue, got, err, test.want)
 			}
 		})
 	}

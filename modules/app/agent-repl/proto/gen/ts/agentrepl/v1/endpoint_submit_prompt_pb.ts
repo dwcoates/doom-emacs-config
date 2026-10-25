@@ -38,7 +38,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_submit_prompt.proto.
  */
 export const file_agentrepl_v1_endpoint_submit_prompt: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3VibWl0X3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIskDChNTdWJtaXRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgFIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJwoEc2FpZBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBIXCg9pZGVtcG90ZW5jeV9rZXkYAiABKAkSJgoEZmVlZBgDIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBEi0KBm9yaWdpbhgEIAEoDjIdLmNvbnZlcnNhdGlvbi52MS5Qcm9tcHRPcmlnaW4SOQoIZGVsaXZlcnkYByABKA4yIi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0RGVsaXZlcnlIAYgBARIhChRzdWJtaXR0ZWRfYXRfdW5peF9tcxgIIAEoA0gCiAEBEjAKB3NlbnRfYnkYCSABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSAOIAQFCBwoFX2ZlZWRCCwoJX2RlbGl2ZXJ5QhcKFV9zdWJtaXR0ZWRfYXRfdW5peF9tc0IKCghfc2VudF9ieUoECAYQB1IZcmVmZXJlbmNlX3Jlc3BvbnNlX2ZlZWRpZCKIAQoUU3VibWl0UHJvbXB0UmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0RXJyb3JIAEIICgZyZXN1bHQi1gIKE1N1Ym1pdFByb21wdFN1Y2Nlc3MSLgoEdHVybhgBIAEoCzIeLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRUdXJuSAASPwoNY29tbWFuZF9wYW5lbBgCIAEoCzImLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRDb21tYW5kUGFuZWxIABJDCg9jb21tYW5kX3JlZnVzZWQYAyABKAsyKC5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Q29tbWFuZFJlZnVzZWRIABI/Cg1jb21tYW5kX2FjdGVkGAQgASgLMiYuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdENvbW1hbmRBY3RlZEgAEj0KDGFza19hbnN3ZXJlZBgFIAEoCzIlLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRBc2tBbnN3ZXJlZEgAQgkKB291dGNvbWUiGQoXU3VibWl0UHJvbXB0QXNrQW5zd2VyZWQiGgoYU3VibWl0UHJvbXB0Q29tbWFuZEFjdGVkIi0KGlN1Ym1pdFByb21wdENvbW1hbmRSZWZ1c2VkEg8KB2NvbW1hbmQYASABKAkiOQoQU3VibWl0UHJvbXB0VHVybhIlCgR0dXJuGAEgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZCK5AgoYU3VibWl0UHJvbXB0Q29tbWFuZFBhbmVsEi4KBnN0YXR1cxgBIAEoCzIcLmZyb250ZW5kLnYxLlN0YXR1c1BhbmVsVmlld0gAEiwKBXRvZG9zGAQgASgLMhsuZnJvbnRlbmQudjEuVG9kb3NQYW5lbFZpZXdIABIuCgZhZ2VudHMYBSABKAsyHC5mcm9udGVuZC52MS5BZ2VudHNQYW5lbFZpZXdIABIoCgNtY3AYBiABKAsyGS5mcm9udGVuZC52MS5NY3BQYW5lbFZpZXdIABIwCgdjb250ZXh0GAcgASgLMh0uZnJvbnRlbmQudjEuQ29udGV4dFBhbmVsVmlld0gAEioKBGhlbHAYCCABKAsyGi5mcm9udGVuZC52MS5IZWxwUGFuZWxWaWV3SABCBwoFcGFuZWwiowkKEVN1Ym1pdFByb21wdEVycm9yEjsKB21lcmdpbmcYASABKAsyKC5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0UmVmdXNlZE1lcmdpbmdIABJHChF1bmtub3duX3dvcmtzcGFjZRgCIAEoCzIqLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRVbmtub3duV29ya3NwYWNlSAASUAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgDIAEoCzIuLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkcKEXRyYW5zZmVycmluZ19hd2F5GAQgASgLMiouYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFRyYW5zZmVycmluZ0F3YXlIABJCCg9ub3RfeWV0X2Fkb3B0ZWQYBSABKAsyJy5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Tm90WWV0QWRvcHRlZEgAEk0KFWZlZWRfbm90X2luX3dvcmtzcGFjZRgGIAEoCzIsLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRGZWVkTm90SW5Xb3Jrc3BhY2VIABJFChBmZWVkX3VuZGVjb2RhYmxlGAcgASgLMikuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEZlZWRVbmRlY29kYWJsZUgAEjkKCm5vX3Nlc3Npb24YCSABKAsyIy5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Tm9TZXNzaW9uSAASTQoUZHVwbGljYXRlX3N1Ym1pc3Npb24YCiABKAsyLS5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0RHVwbGljYXRlU3VibWlzc2lvbkgAEkEKDmJ1YmJsZV9yZWZ1c2VkGAsgASgLMicuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEJ1YmJsZVJlZnVzZWRIABI3Cgljb2xkX2dhdGUYDCABKAsyIi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Q29sZEdhdGVIABJLChRtb2RlbF9ub3RfaW5fY2F0YWxvZxgNIAEoCzIrLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRNb2RlbE5vdEluQ2F0YWxvZ0gAEj8KDW1vZGVsX3JlZnVzZWQYDiABKAsyJi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0TW9kZWxSZWZ1c2VkSAASRAoQYXNrX25vdF9zdGFuZGluZxgPIAEoCzIoLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRBc2tOb3RTdGFuZGluZ0gAElMKGHNsYXNoX2NvbW1hbmRfZnJvbV9hZ2VudBgQIAEoCzIvLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRTbGFzaENvbW1hbmRGcm9tQWdlbnRIABJBCg51bmtub3duX3NlbmRlchgRIAEoCzInLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRVbmtub3duU2VuZGVySABCCAoGcmVhc29uSgQICBAJUhF0dXJuX2FscmVhZHlfb3BlbiJIChlTdWJtaXRQcm9tcHRVbmtub3duU2VuZGVyEisKB3NlbnRfYnkYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIjQKIVN1Ym1pdFByb21wdFNsYXNoQ29tbWFuZEZyb21BZ2VudBIPCgdjb21tYW5kGAEgASgJIhwKGlN1Ym1pdFByb21wdEFza05vdFN0YW5kaW5nIi8KHVN1Ym1pdFByb21wdE1vZGVsTm90SW5DYXRhbG9nEg4KBmRldGFpbBgBIAEoCSIqChhTdWJtaXRQcm9tcHRNb2RlbFJlZnVzZWQSDgoGZGV0YWlsGAEgASgJIiYKFFN1Ym1pdFByb21wdENvbGRHYXRlEg4KBmRldGFpbBgBIAEoCSK/AQoZU3VibWl0UHJvbXB0QnViYmxlUmVmdXNlZBIOCgZkZXRhaWwYASABKAkSSQoPbm90X2RlbGl2ZXJhYmxlGAIgASgLMi4uYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEJ1YmJsZU5vdERlbGl2ZXJhYmxlSAASPwoKYWdlbnRfYnVzeRgDIAEoCzIpLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRCdWJibGVBZ2VudEJ1c3lIAEIGCgRraW5kIiIKIFN1Ym1pdFByb21wdEJ1YmJsZU5vdERlbGl2ZXJhYmxlIh0KG1N1Ym1pdFByb21wdEJ1YmJsZUFnZW50QnVzeSIhCh9TdWJtaXRQcm9tcHREdXBsaWNhdGVTdWJtaXNzaW9uIhwKGlN1Ym1pdFByb21wdFJlZnVzZWRNZXJnaW5nIh4KHFN1Ym1pdFByb21wdFVua25vd25Xb3Jrc3BhY2UiOAogU3VibWl0UHJvbXB0V29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIi8KHFN1Ym1pdFByb21wdFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIbChlTdWJtaXRQcm9tcHROb3RZZXRBZG9wdGVkIiAKHlN1Ym1pdFByb21wdEZlZWROb3RJbldvcmtzcGFjZSIdChtTdWJtaXRQcm9tcHRGZWVkVW5kZWNvZGFibGUiFwoVU3VibWl0UHJvbXB0Tm9TZXNzaW9uKmMKFFN1Ym1pdFByb21wdERlbGl2ZXJ5EiYKIlNVQk1JVF9QUk9NUFRfREVMSVZFUllfVU5TUEVDSUZJRUQQABIjCh9TVUJNSVRfUFJPTVBUX0RFTElWRVJZX0RFRkVSUkVEEAFCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin, file_workspace_v1_workspace, file_frontend_v1_status_panel, file_frontend_v1_todos_panel, file_frontend_v1_agents_panel, file_frontend_v1_mcp_panel, file_frontend_v1_context_panel, file_frontend_v1_help_panel, file_frontend_v1_feed]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3VibWl0X3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIskDChNTdWJtaXRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgFIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJwoEc2FpZBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBIXCg9pZGVtcG90ZW5jeV9rZXkYAiABKAkSJgoEZmVlZBgDIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBEi0KBm9yaWdpbhgEIAEoDjIdLmNvbnZlcnNhdGlvbi52MS5Qcm9tcHRPcmlnaW4SOQoIZGVsaXZlcnkYByABKA4yIi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0RGVsaXZlcnlIAYgBARIhChRzdWJtaXR0ZWRfYXRfdW5peF9tcxgIIAEoA0gCiAEBEjAKB3NlbnRfYnkYCSABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSAOIAQFCBwoFX2ZlZWRCCwoJX2RlbGl2ZXJ5QhcKFV9zdWJtaXR0ZWRfYXRfdW5peF9tc0IKCghfc2VudF9ieUoECAYQB1IZcmVmZXJlbmNlX3Jlc3BvbnNlX2ZlZWRpZCKIAQoUU3VibWl0UHJvbXB0UmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0RXJyb3JIAEIICgZyZXN1bHQi1gIKE1N1Ym1pdFByb21wdFN1Y2Nlc3MSLgoEdHVybhgBIAEoCzIeLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRUdXJuSAASPwoNY29tbWFuZF9wYW5lbBgCIAEoCzImLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRDb21tYW5kUGFuZWxIABJDCg9jb21tYW5kX3JlZnVzZWQYAyABKAsyKC5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Q29tbWFuZFJlZnVzZWRIABI/Cg1jb21tYW5kX2FjdGVkGAQgASgLMiYuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdENvbW1hbmRBY3RlZEgAEj0KDGFza19hbnN3ZXJlZBgFIAEoCzIlLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRBc2tBbnN3ZXJlZEgAQgkKB291dGNvbWUiGQoXU3VibWl0UHJvbXB0QXNrQW5zd2VyZWQiGgoYU3VibWl0UHJvbXB0Q29tbWFuZEFjdGVkIi0KGlN1Ym1pdFByb21wdENvbW1hbmRSZWZ1c2VkEg8KB2NvbW1hbmQYASABKAkiOQoQU3VibWl0UHJvbXB0VHVybhIlCgR0dXJuGAEgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZCK5AgoYU3VibWl0UHJvbXB0Q29tbWFuZFBhbmVsEi4KBnN0YXR1cxgBIAEoCzIcLmZyb250ZW5kLnYxLlN0YXR1c1BhbmVsVmlld0gAEiwKBXRvZG9zGAQgASgLMhsuZnJvbnRlbmQudjEuVG9kb3NQYW5lbFZpZXdIABIuCgZhZ2VudHMYBSABKAsyHC5mcm9udGVuZC52MS5BZ2VudHNQYW5lbFZpZXdIABIoCgNtY3AYBiABKAsyGS5mcm9udGVuZC52MS5NY3BQYW5lbFZpZXdIABIwCgdjb250ZXh0GAcgASgLMh0uZnJvbnRlbmQudjEuQ29udGV4dFBhbmVsVmlld0gAEioKBGhlbHAYCCABKAsyGi5mcm9udGVuZC52MS5IZWxwUGFuZWxWaWV3SABCBwoFcGFuZWwigAoKEVN1Ym1pdFByb21wdEVycm9yEjsKB21lcmdpbmcYASABKAsyKC5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0UmVmdXNlZE1lcmdpbmdIABJHChF1bmtub3duX3dvcmtzcGFjZRgCIAEoCzIqLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRVbmtub3duV29ya3NwYWNlSAASUAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgDIAEoCzIuLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkcKEXRyYW5zZmVycmluZ19hd2F5GAQgASgLMiouYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFRyYW5zZmVycmluZ0F3YXlIABJCCg9ub3RfeWV0X2Fkb3B0ZWQYBSABKAsyJy5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Tm90WWV0QWRvcHRlZEgAEk0KFWZlZWRfbm90X2luX3dvcmtzcGFjZRgGIAEoCzIsLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRGZWVkTm90SW5Xb3Jrc3BhY2VIABJFChBmZWVkX3VuZGVjb2RhYmxlGAcgASgLMikuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEZlZWRVbmRlY29kYWJsZUgAEjkKCm5vX3Nlc3Npb24YCSABKAsyIy5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Tm9TZXNzaW9uSAASTQoUZHVwbGljYXRlX3N1Ym1pc3Npb24YCiABKAsyLS5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0RHVwbGljYXRlU3VibWlzc2lvbkgAEkEKDmJ1YmJsZV9yZWZ1c2VkGAsgASgLMicuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEJ1YmJsZVJlZnVzZWRIABI3Cgljb2xkX2dhdGUYDCABKAsyIi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Q29sZEdhdGVIABJLChRtb2RlbF9ub3RfaW5fY2F0YWxvZxgNIAEoCzIrLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRNb2RlbE5vdEluQ2F0YWxvZ0gAEj8KDW1vZGVsX3JlZnVzZWQYDiABKAsyJi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0TW9kZWxSZWZ1c2VkSAASRAoQYXNrX25vdF9zdGFuZGluZxgPIAEoCzIoLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRBc2tOb3RTdGFuZGluZ0gAElMKGHNsYXNoX2NvbW1hbmRfZnJvbV9hZ2VudBgQIAEoCzIvLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRTbGFzaENvbW1hbmRGcm9tQWdlbnRIABJBCg51bmtub3duX3NlbmRlchgRIAEoCzInLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRVbmtub3duU2VuZGVySAASWwocdGhyZWFkX2F3YWl0aW5nX2ZpcnN0X2Fuc3dlchgSIAEoCzIzLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRUaHJlYWRBd2FpdGluZ0ZpcnN0QW5zd2VySABCCAoGcmVhc29uSgQICBAJUhF0dXJuX2FscmVhZHlfb3BlbiJIChlTdWJtaXRQcm9tcHRVbmtub3duU2VuZGVyEisKB3NlbnRfYnkYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIjQKIVN1Ym1pdFByb21wdFNsYXNoQ29tbWFuZEZyb21BZ2VudBIPCgdjb21tYW5kGAEgASgJIicKJVN1Ym1pdFByb21wdFRocmVhZEF3YWl0aW5nRmlyc3RBbnN3ZXIiHAoaU3VibWl0UHJvbXB0QXNrTm90U3RhbmRpbmciLwodU3VibWl0UHJvbXB0TW9kZWxOb3RJbkNhdGFsb2cSDgoGZGV0YWlsGAEgASgJIioKGFN1Ym1pdFByb21wdE1vZGVsUmVmdXNlZBIOCgZkZXRhaWwYASABKAkiJgoUU3VibWl0UHJvbXB0Q29sZEdhdGUSDgoGZGV0YWlsGAEgASgJIr8BChlTdWJtaXRQcm9tcHRCdWJibGVSZWZ1c2VkEg4KBmRldGFpbBgBIAEoCRJJCg9ub3RfZGVsaXZlcmFibGUYAiABKAsyLi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0QnViYmxlTm90RGVsaXZlcmFibGVIABI/CgphZ2VudF9idXN5GAMgASgLMikuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEJ1YmJsZUFnZW50QnVzeUgAQgYKBGtpbmQiIgogU3VibWl0UHJvbXB0QnViYmxlTm90RGVsaXZlcmFibGUiHQobU3VibWl0UHJvbXB0QnViYmxlQWdlbnRCdXN5IiEKH1N1Ym1pdFByb21wdER1cGxpY2F0ZVN1Ym1pc3Npb24iHAoaU3VibWl0UHJvbXB0UmVmdXNlZE1lcmdpbmciHgocU3VibWl0UHJvbXB0VW5rbm93bldvcmtzcGFjZSI4CiBTdWJtaXRQcm9tcHRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiLwocU3VibWl0UHJvbXB0VHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhsKGVN1Ym1pdFByb21wdE5vdFlldEFkb3B0ZWQiIAoeU3VibWl0UHJvbXB0RmVlZE5vdEluV29ya3NwYWNlIh0KG1N1Ym1pdFByb21wdEZlZWRVbmRlY29kYWJsZSIXChVTdWJtaXRQcm9tcHROb1Nlc3Npb24qYwoUU3VibWl0UHJvbXB0RGVsaXZlcnkSJgoiU1VCTUlUX1BST01QVF9ERUxJVkVSWV9VTlNQRUNJRklFRBAAEiMKH1NVQk1JVF9QUk9NUFRfREVMSVZFUllfREVGRVJSRUQQAUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin, file_workspace_v1_workspace, file_frontend_v1_status_panel, file_frontend_v1_todos_panel, file_frontend_v1_agents_panel, file_frontend_v1_mcp_panel, file_frontend_v1_context_panel, file_frontend_v1_help_panel, file_frontend_v1_feed]);
 
 /**
  * What the user typed, submitted whole.
@@ -572,6 +572,16 @@ export type SubmitPromptError = Message<"agentrepl.v1.SubmitPromptError"> & {
      */
     value: SubmitPromptUnknownSender;
     case: "unknownSender";
+  } | {
+    /**
+     * A zettel chat thread's FIRST question is still being answered, so the
+     * thread has no node yet for another question to be asked of. Nothing was
+     * submitted; the composer keeps the text, to send once the answer lands.
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptThreadAwaitingFirstAnswer thread_awaiting_first_answer = 18;
+     */
+    value: SubmitPromptThreadAwaitingFirstAnswer;
+    case: "threadAwaitingFirstAnswer";
   } | { case: undefined; value?: undefined };
 };
 
@@ -625,6 +635,21 @@ export const SubmitPromptSlashCommandFromAgentSchema: GenMessage<SubmitPromptSla
   messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 10);
 
 /**
+ * The awaiting-first-answer refusal. Empty: the arm is the whole fact.
+ *
+ * @generated from message agentrepl.v1.SubmitPromptThreadAwaitingFirstAnswer
+ */
+export type SubmitPromptThreadAwaitingFirstAnswer = Message<"agentrepl.v1.SubmitPromptThreadAwaitingFirstAnswer"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptThreadAwaitingFirstAnswer.
+ * Use `create(SubmitPromptThreadAwaitingFirstAnswerSchema)` to create a new message.
+ */
+export const SubmitPromptThreadAwaitingFirstAnswerSchema: GenMessage<SubmitPromptThreadAwaitingFirstAnswer> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 11);
+
+/**
  * The settled-ask refusal. Empty: the arm is the whole fact.
  *
  * @generated from message agentrepl.v1.SubmitPromptAskNotStanding
@@ -637,7 +662,7 @@ export type SubmitPromptAskNotStanding = Message<"agentrepl.v1.SubmitPromptAskNo
  * Use `create(SubmitPromptAskNotStandingSchema)` to create a new message.
  */
 export const SubmitPromptAskNotStandingSchema: GenMessage<SubmitPromptAskNotStanding> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 11);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 12);
 
 /**
  * The model a `/model` act named is not in this session's catalog.
@@ -659,7 +684,7 @@ export type SubmitPromptModelNotInCatalog = Message<"agentrepl.v1.SubmitPromptMo
  * Use `create(SubmitPromptModelNotInCatalogSchema)` to create a new message.
  */
 export const SubmitPromptModelNotInCatalogSchema: GenMessage<SubmitPromptModelNotInCatalog> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 12);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 13);
 
 /**
  * The vendor refused the model change a `/model` act asked for.
@@ -680,7 +705,7 @@ export type SubmitPromptModelRefused = Message<"agentrepl.v1.SubmitPromptModelRe
  * Use `create(SubmitPromptModelRefusedSchema)` to create a new message.
  */
 export const SubmitPromptModelRefusedSchema: GenMessage<SubmitPromptModelRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 13);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 14);
 
 /**
  * The cold-gate refusal: the session is parked on the user's remediation
@@ -705,7 +730,7 @@ export type SubmitPromptColdGate = Message<"agentrepl.v1.SubmitPromptColdGate"> 
  * Use `create(SubmitPromptColdGateSchema)` to create a new message.
  */
 export const SubmitPromptColdGateSchema: GenMessage<SubmitPromptColdGate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 14);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 15);
 
 /**
  * The shim's refusal of a bubble-addressed prompt, relayed. ONE arm, the
@@ -751,7 +776,7 @@ export type SubmitPromptBubbleRefused = Message<"agentrepl.v1.SubmitPromptBubble
  * Use `create(SubmitPromptBubbleRefusedSchema)` to create a new message.
  */
 export const SubmitPromptBubbleRefusedSchema: GenMessage<SubmitPromptBubbleRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 15);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 16);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptBubbleNotDeliverable
@@ -764,7 +789,7 @@ export type SubmitPromptBubbleNotDeliverable = Message<"agentrepl.v1.SubmitPromp
  * Use `create(SubmitPromptBubbleNotDeliverableSchema)` to create a new message.
  */
 export const SubmitPromptBubbleNotDeliverableSchema: GenMessage<SubmitPromptBubbleNotDeliverable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 16);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 17);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptBubbleAgentBusy
@@ -777,7 +802,7 @@ export type SubmitPromptBubbleAgentBusy = Message<"agentrepl.v1.SubmitPromptBubb
  * Use `create(SubmitPromptBubbleAgentBusySchema)` to create a new message.
  */
 export const SubmitPromptBubbleAgentBusySchema: GenMessage<SubmitPromptBubbleAgentBusy> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 17);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 18);
 
 /**
  * The duplicate-key refusal. Empty on purpose (see the arm).
@@ -792,7 +817,7 @@ export type SubmitPromptDuplicateSubmission = Message<"agentrepl.v1.SubmitPrompt
  * Use `create(SubmitPromptDuplicateSubmissionSchema)` to create a new message.
  */
 export const SubmitPromptDuplicateSubmissionSchema: GenMessage<SubmitPromptDuplicateSubmission> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 18);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 19);
 
 /**
  * The merge-in-flight refusal. Empty: the set arm is the whole assertion —
@@ -809,7 +834,7 @@ export type SubmitPromptRefusedMerging = Message<"agentrepl.v1.SubmitPromptRefus
  * Use `create(SubmitPromptRefusedMergingSchema)` to create a new message.
  */
 export const SubmitPromptRefusedMergingSchema: GenMessage<SubmitPromptRefusedMerging> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 19);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 20);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptUnknownWorkspace
@@ -822,7 +847,7 @@ export type SubmitPromptUnknownWorkspace = Message<"agentrepl.v1.SubmitPromptUnk
  * Use `create(SubmitPromptUnknownWorkspaceSchema)` to create a new message.
  */
 export const SubmitPromptUnknownWorkspaceSchema: GenMessage<SubmitPromptUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 20);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 21);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptWorkspaceRefMismatch
@@ -841,7 +866,7 @@ export type SubmitPromptWorkspaceRefMismatch = Message<"agentrepl.v1.SubmitPromp
  * Use `create(SubmitPromptWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const SubmitPromptWorkspaceRefMismatchSchema: GenMessage<SubmitPromptWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 21);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 22);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptTransferringAway
@@ -860,7 +885,7 @@ export type SubmitPromptTransferringAway = Message<"agentrepl.v1.SubmitPromptTra
  * Use `create(SubmitPromptTransferringAwaySchema)` to create a new message.
  */
 export const SubmitPromptTransferringAwaySchema: GenMessage<SubmitPromptTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 22);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 23);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptNotYetAdopted
@@ -873,7 +898,7 @@ export type SubmitPromptNotYetAdopted = Message<"agentrepl.v1.SubmitPromptNotYet
  * Use `create(SubmitPromptNotYetAdoptedSchema)` to create a new message.
  */
 export const SubmitPromptNotYetAdoptedSchema: GenMessage<SubmitPromptNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 23);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 24);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptFeedNotInWorkspace
@@ -886,7 +911,7 @@ export type SubmitPromptFeedNotInWorkspace = Message<"agentrepl.v1.SubmitPromptF
  * Use `create(SubmitPromptFeedNotInWorkspaceSchema)` to create a new message.
  */
 export const SubmitPromptFeedNotInWorkspaceSchema: GenMessage<SubmitPromptFeedNotInWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 24);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 25);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptFeedUndecodable
@@ -899,7 +924,7 @@ export type SubmitPromptFeedUndecodable = Message<"agentrepl.v1.SubmitPromptFeed
  * Use `create(SubmitPromptFeedUndecodableSchema)` to create a new message.
  */
 export const SubmitPromptFeedUndecodableSchema: GenMessage<SubmitPromptFeedUndecodable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 25);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 26);
 
 /**
  * @generated from message agentrepl.v1.SubmitPromptNoSession
@@ -912,7 +937,7 @@ export type SubmitPromptNoSession = Message<"agentrepl.v1.SubmitPromptNoSession"
  * Use `create(SubmitPromptNoSessionSchema)` to create a new message.
  */
 export const SubmitPromptNoSessionSchema: GenMessage<SubmitPromptNoSession> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 26);
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 27);
 
 /**
  * HOW a submitted prompt is delivered, when it asks for something other than

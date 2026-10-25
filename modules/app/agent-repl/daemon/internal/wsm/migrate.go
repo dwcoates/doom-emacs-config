@@ -176,6 +176,7 @@ var migrations = []migration{
 	// IT IS ADDITIVE: the build before it already reads and writes only the
 	// successors, so a rewritten row is the shape it draws (retiredshapes.go).
 	{To: 77, Name: "durable_rows_retired_shapes", Kind: MigrationAdditive, Rewrite: rewriteRetiredShapeRows},
+	{To: 78, Name: "threads", Kind: MigrationAdditive, DDL: threadsDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

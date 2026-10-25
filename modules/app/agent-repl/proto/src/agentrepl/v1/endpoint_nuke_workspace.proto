@@ -65,7 +65,15 @@ message NukeWorkspaceError {
     // The workspace has open children (hidden ones included), and nuking it
     // would leave them without their parent in the Open section.
     WorkspaceHasOpenChildren has_open_children = 6;
+    // A zettel chat thread's graph or directory could not be deleted. The
+    // thread is closed but still recorded: nothing of it was forgotten.
+    NukeWorkspaceThreadDeleteFailed thread_delete_failed = 7;
   }
+}
+// What would not be deleted, and why.
+message NukeWorkspaceThreadDeleteFailed {
+  // The failure's own account (zettel's, or the file system's), verbatim.
+  string detail = 1;
 }
 message NukeWorkspaceUnknownWorkspace {}
 message NukeWorkspaceWorkspaceRefMismatch {

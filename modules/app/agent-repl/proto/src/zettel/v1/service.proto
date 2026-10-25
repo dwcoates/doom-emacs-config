@@ -1,0 +1,43 @@
+// service.proto — zettel's Connect service: every rpc signature, organized in
+// commented sections, one endpoint_<rpc>.proto per rpc; zettel.proto holds the
+// shared datatypes.
+//
+// THE DAEMON IS THE ONLY CALLER. It is served on a unix socket by the zettel
+// service, which alone owns zettel's database.
+
+syntax = "proto3";
+
+package zettel.v1;
+
+import "zettel/v1/endpoint_delete_thread.proto";
+import "zettel/v1/endpoint_get_thread.proto";
+import "zettel/v1/endpoint_record_exchange.proto";
+import "zettel/v1/endpoint_record_sightings.proto";
+import "zettel/v1/endpoint_search_threads.proto";
+
+option go_package = "agentrepl/proto/zettel/v1;zettelv1";
+
+service Zettel {
+  // ---- Exchanges: an answered question becoming a node ----
+
+  // A thread turn's final answer is known: record the node (idempotent by turn).
+  rpc RecordExchange(RecordExchangeRequest) returns (RecordExchangeResponse);
+
+  // ---- Graph reads: what consumer UIs are resolved from ----
+
+  // One thread whole: its nodes and its exchanges in flight.
+  rpc GetThread(GetThreadRequest) returns (GetThreadResponse);
+
+  // The threads whose questions or answers say the query's words.
+  rpc SearchThreads(SearchThreadsRequest) returns (SearchThreadsResponse);
+
+  // ---- Sightings: what consumer UIs have shown ----
+
+  // Count one sighting per named node.
+  rpc RecordSightings(RecordSightingsRequest) returns (RecordSightingsResponse);
+
+  // ---- Deletion: a thread's graph destroyed ----
+
+  // Destroy one thread's nodes, revisions and sightings (the thread is deleted).
+  rpc DeleteThread(DeleteThreadRequest) returns (DeleteThreadResponse);
+}

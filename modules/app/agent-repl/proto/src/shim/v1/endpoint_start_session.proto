@@ -46,6 +46,43 @@ message StartSessionRequest {
   // agent API (`agent-repld workspace ...`) call that workspace by. A
   // workspace's name never changes, so it holds for the session's life.
   string workspace_name = 4;
+  // What kind of session this is, which decides what the vendor is given:
+  // settings, tools and system prompt. Always set by the daemon; the shim
+  // refuses a request that leaves it unset rather than guess a kind. Applies
+  // to a resume exactly as to a fresh start, because every query the shim
+  // opens is built from it.
+  SessionProfile profile = 5;
+}
+
+// What kind of session the shim drives. The set arm IS the kind.
+message SessionProfile {
+  // The kind: an agent working in a workspace, or a chat answering questions.
+  oneof kind {
+    SessionProfileAgent agent = 1;
+    SessionProfileChat chat = 2;
+  }
+}
+
+// An agent session in a workspace: the user's and project's settings, the
+// coding tools, agent-repl's own tools, and the agent metaprompt appended to
+// the vendor's coding preset. DELIBERATELY EMPTY: everything it implies is the
+// shim's standing policy for agent sessions.
+message SessionProfileAgent {}
+
+// A chat session, answering questions in a zettel thread: no filesystem
+// settings (so no skills, CLAUDE.md or memory from the user's agent setup), no
+// tools of any kind, and the given system prompt in place of the vendor's
+// coding preset.
+message SessionProfileChat {
+  // The whole system prompt the chat is answered under. Owned and worded by
+  // the daemon; the shim passes it to the vendor verbatim.
+  SessionProfileChatSystemPrompt system_prompt = 1;
+}
+
+// A chat session's system prompt.
+message SessionProfileChatSystemPrompt {
+  // The prompt text, verbatim.
+  string text = 1;
 }
 
 // The session starts with its keep-alives held. DELIBERATELY EMPTY: presence

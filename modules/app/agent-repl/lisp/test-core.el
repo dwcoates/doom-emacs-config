@@ -483,6 +483,18 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("status.el" agent-repl-tabbar-apply-row-count
      "agent-repl: tab-bar set to %d line%s on this frame"
      "confirms the interactive tab-bar layout command")
+    ("threads.el" agent-repl-threads--create "[agent-repl] Starting a thread…"
+     "tells the user their new-thread question was sent")
+    ("threads.el" agent-repl-threads--create "[agent-repl] The thread was not started: the daemon could not be reached"
+     "reports why the user's new thread was not started")
+    ("threads.el" agent-repl-threads--created "[agent-repl] Thread %s started"
+     "confirms the user's new thread, by its name")
+    ("threads.el" agent-repl-threads--created "[agent-repl] The thread was not started: %s"
+     "reports why the daemon refused the user's new thread")
+    ("threads.el" agent-repl-threads--created "[agent-repl] The daemon answered the new thread with %S"
+     "reports an answer to the user's new thread this build cannot read")
+    ("threads.el" agent-repl-threads--open "[agent-repl] Thread %s is still opening"
+     "tells the user the thread they picked has no workspace open yet")
     ("verbs.el" agent-repl-verbs--on-refusal "%s refused: %s"
      "tells the user why a workspace with nothing left to restore it from cannot be opened")
     ("verbs.el" agent-repl-verbs--on-refusal "agent-repl: %s"

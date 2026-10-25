@@ -366,6 +366,7 @@ type WatchDaemonResponse struct {
 	//	*WatchDaemonResponse_PersistentWifi
 	//	*WatchDaemonResponse_NewsDigest
 	//	*WatchDaemonResponse_ReloadWebhost
+	//	*WatchDaemonResponse_NewThreadRequested
 	Push          isWatchDaemonResponse_Push `protobuf_oneof:"push"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -498,6 +499,15 @@ func (x *WatchDaemonResponse) GetReloadWebhost() *DaemonReloadWebhost {
 	return nil
 }
 
+func (x *WatchDaemonResponse) GetNewThreadRequested() *DaemonNewThreadRequested {
+	if x != nil {
+		if x, ok := x.Push.(*WatchDaemonResponse_NewThreadRequested); ok {
+			return x.NewThreadRequested
+		}
+	}
+	return nil
+}
+
 type isWatchDaemonResponse_Push interface {
 	isWatchDaemonResponse_Push()
 }
@@ -587,6 +597,13 @@ type WatchDaemonResponse_ReloadWebhost struct {
 	ReloadWebhost *DaemonReloadWebhost `protobuf:"bytes,11,opt,name=reload_webhost,json=reloadWebhost,proto3,oneof"`
 }
 
+type WatchDaemonResponse_NewThreadRequested struct {
+	// THE SIDEBAR'S NEW-THREAD BUTTON WAS CLICKED (RequestNewThread): open
+	// the new-thread prompt, as the new-thread binding does. An event, not
+	// state: never replayed to a late subscriber.
+	NewThreadRequested *DaemonNewThreadRequested `protobuf:"bytes,12,opt,name=new_thread_requested,json=newThreadRequested,proto3,oneof"`
+}
+
 func (*WatchDaemonResponse_ShutdownAnnounced) isWatchDaemonResponse_Push() {}
 
 func (*WatchDaemonResponse_DrainScheduled) isWatchDaemonResponse_Push() {}
@@ -606,6 +623,8 @@ func (*WatchDaemonResponse_PersistentWifi) isWatchDaemonResponse_Push() {}
 func (*WatchDaemonResponse_NewsDigest) isWatchDaemonResponse_Push() {}
 
 func (*WatchDaemonResponse_ReloadWebhost) isWatchDaemonResponse_Push() {}
+
+func (*WatchDaemonResponse_NewThreadRequested) isWatchDaemonResponse_Push() {}
 
 // Whether a news digest stands. THE ARM IS THE STANDING; exactly one is set.
 type NewsDigestStanding struct {
@@ -1364,6 +1383,43 @@ func (*DaemonDrainCancelled) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{18}
 }
 
+// Open the new-thread prompt. DELIBERATELY EMPTY: the click is the whole fact.
+type DaemonNewThreadRequested struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DaemonNewThreadRequested) Reset() {
+	*x = DaemonNewThreadRequested{}
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DaemonNewThreadRequested) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DaemonNewThreadRequested) ProtoMessage() {}
+
+func (x *DaemonNewThreadRequested) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DaemonNewThreadRequested.ProtoReflect.Descriptor instead.
+func (*DaemonNewThreadRequested) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP(), []int{19}
+}
+
 var File_agentrepl_v1_endpoint_watch_daemon_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
@@ -1385,7 +1441,7 @@ const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
 	"\x05value\x18\x01 \x01(\tR\x05value\"!\n" +
 	"\rEditorProcess\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\x05R\x03pid\"\x14\n" +
-	"\x12WatchDaemonWebview\"\xaa\x06\n" +
+	"\x12WatchDaemonWebview\"\x86\a\n" +
 	"\x13WatchDaemonResponse\x12V\n" +
 	"\x12shutdown_announced\x18\x01 \x01(\v2%.agentrepl.v1.DaemonShutdownAnnouncedH\x00R\x11shutdownAnnounced\x12M\n" +
 	"\x0fdrain_scheduled\x18\x02 \x01(\v2\".agentrepl.v1.DaemonDrainScheduledH\x00R\x0edrainScheduled\x12M\n" +
@@ -1397,7 +1453,8 @@ const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
 	"\x0fpersistent_wifi\x18\b \x01(\v2!.agentrepl.v1.PersistentWifiStateH\x00R\x0epersistentWifi\x12C\n" +
 	"\vnews_digest\x18\t \x01(\v2 .agentrepl.v1.NewsDigestStandingH\x00R\n" +
 	"newsDigest\x12J\n" +
-	"\x0ereload_webhost\x18\v \x01(\v2!.agentrepl.v1.DaemonReloadWebhostH\x00R\rreloadWebhostB\x06\n" +
+	"\x0ereload_webhost\x18\v \x01(\v2!.agentrepl.v1.DaemonReloadWebhostH\x00R\rreloadWebhost\x12Z\n" +
+	"\x14new_thread_requested\x18\f \x01(\v2&.agentrepl.v1.DaemonNewThreadRequestedH\x00R\x12newThreadRequestedB\x06\n" +
 	"\x04pushJ\x04\b\n" +
 	"\x10\vR\astartup\"\x8c\x01\n" +
 	"\x12NewsDigestStanding\x126\n" +
@@ -1441,7 +1498,8 @@ const file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc = "" +
 	"\x14DaemonDrainScheduled\x12\x13\n" +
 	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\x121\n" +
 	"\x06reason\x18\x02 \x01(\v2\x19.agentrepl.v1.DrainReasonR\x06reason\"\x16\n" +
-	"\x14DaemonDrainCancelledB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x14DaemonDrainCancelled\"\x1a\n" +
+	"\x18DaemonNewThreadRequestedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescOnce sync.Once
@@ -1455,7 +1513,7 @@ func file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_watch_daemon_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_agentrepl_v1_endpoint_watch_daemon_proto_goTypes = []any{
 	(*WatchDaemonRequest)(nil),             // 0: agentrepl.v1.WatchDaemonRequest
 	(*WatchDaemonEmacs)(nil),               // 1: agentrepl.v1.WatchDaemonEmacs
@@ -1476,46 +1534,48 @@ var file_agentrepl_v1_endpoint_watch_daemon_proto_goTypes = []any{
 	(*DaemonShutdownImmediate)(nil),        // 16: agentrepl.v1.DaemonShutdownImmediate
 	(*DaemonDrainScheduled)(nil),           // 17: agentrepl.v1.DaemonDrainScheduled
 	(*DaemonDrainCancelled)(nil),           // 18: agentrepl.v1.DaemonDrainCancelled
-	(*EditorFocus)(nil),                    // 19: agentrepl.v1.EditorFocus
-	(*WorkspaceMutationProgress)(nil),      // 20: agentrepl.v1.WorkspaceMutationProgress
-	(*DaemonStreamEnding)(nil),             // 21: agentrepl.v1.DaemonStreamEnding
-	(*PersistentWifiState)(nil),            // 22: agentrepl.v1.PersistentWifiState
-	(*v1.NewsDigestOverlay)(nil),           // 23: frontend.v1.NewsDigestOverlay
-	(*DaemonFault)(nil),                    // 24: agentrepl.v1.DaemonFault
-	(*DrainReason)(nil),                    // 25: agentrepl.v1.DrainReason
+	(*DaemonNewThreadRequested)(nil),       // 19: agentrepl.v1.DaemonNewThreadRequested
+	(*EditorFocus)(nil),                    // 20: agentrepl.v1.EditorFocus
+	(*WorkspaceMutationProgress)(nil),      // 21: agentrepl.v1.WorkspaceMutationProgress
+	(*DaemonStreamEnding)(nil),             // 22: agentrepl.v1.DaemonStreamEnding
+	(*PersistentWifiState)(nil),            // 23: agentrepl.v1.PersistentWifiState
+	(*v1.NewsDigestOverlay)(nil),           // 24: frontend.v1.NewsDigestOverlay
+	(*DaemonFault)(nil),                    // 25: agentrepl.v1.DaemonFault
+	(*DrainReason)(nil),                    // 26: agentrepl.v1.DrainReason
 }
 var file_agentrepl_v1_endpoint_watch_daemon_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.WatchDaemonRequest.emacs:type_name -> agentrepl.v1.WatchDaemonEmacs
 	4,  // 1: agentrepl.v1.WatchDaemonRequest.webview:type_name -> agentrepl.v1.WatchDaemonWebview
-	19, // 2: agentrepl.v1.WatchDaemonEmacs.focus:type_name -> agentrepl.v1.EditorFocus
+	20, // 2: agentrepl.v1.WatchDaemonEmacs.focus:type_name -> agentrepl.v1.EditorFocus
 	2,  // 3: agentrepl.v1.WatchDaemonEmacs.instance:type_name -> agentrepl.v1.EditorInstance
 	3,  // 4: agentrepl.v1.WatchDaemonEmacs.process:type_name -> agentrepl.v1.EditorProcess
 	12, // 5: agentrepl.v1.WatchDaemonResponse.shutdown_announced:type_name -> agentrepl.v1.DaemonShutdownAnnounced
 	17, // 6: agentrepl.v1.WatchDaemonResponse.drain_scheduled:type_name -> agentrepl.v1.DaemonDrainScheduled
 	18, // 7: agentrepl.v1.WatchDaemonResponse.drain_cancelled:type_name -> agentrepl.v1.DaemonDrainCancelled
-	20, // 8: agentrepl.v1.WatchDaemonResponse.mutation_progress:type_name -> agentrepl.v1.WorkspaceMutationProgress
+	21, // 8: agentrepl.v1.WatchDaemonResponse.mutation_progress:type_name -> agentrepl.v1.WorkspaceMutationProgress
 	10, // 9: agentrepl.v1.WatchDaemonResponse.reload_elisp:type_name -> agentrepl.v1.DaemonReloadElisp
-	21, // 10: agentrepl.v1.WatchDaemonResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
+	22, // 10: agentrepl.v1.WatchDaemonResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
 	8,  // 11: agentrepl.v1.WatchDaemonResponse.faults_standing:type_name -> agentrepl.v1.DaemonFaultsStanding
-	22, // 12: agentrepl.v1.WatchDaemonResponse.persistent_wifi:type_name -> agentrepl.v1.PersistentWifiState
+	23, // 12: agentrepl.v1.WatchDaemonResponse.persistent_wifi:type_name -> agentrepl.v1.PersistentWifiState
 	6,  // 13: agentrepl.v1.WatchDaemonResponse.news_digest:type_name -> agentrepl.v1.NewsDigestStanding
 	11, // 14: agentrepl.v1.WatchDaemonResponse.reload_webhost:type_name -> agentrepl.v1.DaemonReloadWebhost
-	23, // 15: agentrepl.v1.NewsDigestStanding.shown:type_name -> frontend.v1.NewsDigestOverlay
-	7,  // 16: agentrepl.v1.NewsDigestStanding.none:type_name -> agentrepl.v1.NewsDigestNone
-	9,  // 17: agentrepl.v1.DaemonFaultsStanding.faults:type_name -> agentrepl.v1.DaemonStandingFault
-	24, // 18: agentrepl.v1.DaemonStandingFault.fault:type_name -> agentrepl.v1.DaemonFault
-	13, // 19: agentrepl.v1.DaemonShutdownAnnounced.cause:type_name -> agentrepl.v1.DaemonShutdownCause
-	14, // 20: agentrepl.v1.DaemonShutdownCause.self_merge_rollout:type_name -> agentrepl.v1.DaemonShutdownSelfMergeRollout
-	15, // 21: agentrepl.v1.DaemonShutdownCause.scheduled_drain:type_name -> agentrepl.v1.DaemonShutdownScheduledDrain
-	16, // 22: agentrepl.v1.DaemonShutdownCause.immediate:type_name -> agentrepl.v1.DaemonShutdownImmediate
-	25, // 23: agentrepl.v1.DaemonShutdownScheduledDrain.reason:type_name -> agentrepl.v1.DrainReason
-	25, // 24: agentrepl.v1.DaemonShutdownImmediate.reason:type_name -> agentrepl.v1.DrainReason
-	25, // 25: agentrepl.v1.DaemonDrainScheduled.reason:type_name -> agentrepl.v1.DrainReason
-	26, // [26:26] is the sub-list for method output_type
-	26, // [26:26] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	19, // 15: agentrepl.v1.WatchDaemonResponse.new_thread_requested:type_name -> agentrepl.v1.DaemonNewThreadRequested
+	24, // 16: agentrepl.v1.NewsDigestStanding.shown:type_name -> frontend.v1.NewsDigestOverlay
+	7,  // 17: agentrepl.v1.NewsDigestStanding.none:type_name -> agentrepl.v1.NewsDigestNone
+	9,  // 18: agentrepl.v1.DaemonFaultsStanding.faults:type_name -> agentrepl.v1.DaemonStandingFault
+	25, // 19: agentrepl.v1.DaemonStandingFault.fault:type_name -> agentrepl.v1.DaemonFault
+	13, // 20: agentrepl.v1.DaemonShutdownAnnounced.cause:type_name -> agentrepl.v1.DaemonShutdownCause
+	14, // 21: agentrepl.v1.DaemonShutdownCause.self_merge_rollout:type_name -> agentrepl.v1.DaemonShutdownSelfMergeRollout
+	15, // 22: agentrepl.v1.DaemonShutdownCause.scheduled_drain:type_name -> agentrepl.v1.DaemonShutdownScheduledDrain
+	16, // 23: agentrepl.v1.DaemonShutdownCause.immediate:type_name -> agentrepl.v1.DaemonShutdownImmediate
+	26, // 24: agentrepl.v1.DaemonShutdownScheduledDrain.reason:type_name -> agentrepl.v1.DrainReason
+	26, // 25: agentrepl.v1.DaemonShutdownImmediate.reason:type_name -> agentrepl.v1.DrainReason
+	26, // 26: agentrepl.v1.DaemonDrainScheduled.reason:type_name -> agentrepl.v1.DrainReason
+	27, // [27:27] is the sub-list for method output_type
+	27, // [27:27] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_daemon_proto_init() }
@@ -1545,6 +1605,7 @@ func file_agentrepl_v1_endpoint_watch_daemon_proto_init() {
 		(*WatchDaemonResponse_PersistentWifi)(nil),
 		(*WatchDaemonResponse_NewsDigest)(nil),
 		(*WatchDaemonResponse_ReloadWebhost)(nil),
+		(*WatchDaemonResponse_NewThreadRequested)(nil),
 	}
 	file_agentrepl_v1_endpoint_watch_daemon_proto_msgTypes[6].OneofWrappers = []any{
 		(*NewsDigestStanding_Shown)(nil),
@@ -1562,7 +1623,7 @@ func file_agentrepl_v1_endpoint_watch_daemon_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc), len(file_agentrepl_v1_endpoint_watch_daemon_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

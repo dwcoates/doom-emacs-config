@@ -1,0 +1,425 @@
+<!doctype html>
+<!-- Design mock for zettel's chat (see docs/knowledge-graph/PLAN.md). Static,
+     self-contained, no build step: open directly in a browser. Palette
+     variables are copied from webapp/src/styles.css so the mock previews the
+     chat in agent-repl's real light and dark themes.
+
+     What it shows:
+     - the shared sidebar, whose title is the app switcher: click it for a
+       menu of apps (Workspaces, Chat). `#menu` in the URL opens it on load;
+     - one path through a tree, as a normal chat stream;
+     - sibling stacks: arrows (or left/right swipe on a trackpad) on a question
+       cycle its siblings, and everything below it redraws;
+     - a question asked about a highlighted quote;
+     - premises on each answer, as links that jump to that node's path;
+     - premise inference still pending on the newest answer;
+     - no composer: the prompt is typed in Emacs. Selecting text in an answer
+       shows the hint a highlight would get. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>zettel chat — design mock</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --card: #eef1f4;
+    --panel-bg: var(--card);
+    --sidebar-bg: #ffffff;
+    --sidebar-shadow: 0 2px 12px color-mix(in srgb, #000000 14%, transparent);
+    --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 7%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 35%, transparent);
+    --user: #b8d2ff;
+    --user-fg: var(--fg);
+    --assistant: var(--panel-bg);
+    --accent: #2563eb;
+    --tool-command: #4b5563;
+    --info-agents: #7c3aed;
+    --topbar-h: 2.75rem;
+    --ok: #16a34a;
+    --thinking: #ea580c;
+    --composer-bg: #e4e7eb;
+    --q-border: #eab308;
+    --code-bg: color-mix(in srgb, #000000 13%, transparent);
+    --bubble-radius: 8px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111318; --fg: #e5e7eb; --muted: #9ca3af; --border: #2a2e37;
+      --card: #16191f; --panel-bg: #14171c; --sidebar-bg: #14161b;
+      --sidebar-shadow: 0 2px 14px color-mix(in srgb, #000000 48%, transparent);
+      --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 30%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
+      --user: #0764c2; --user-fg: #f3f6fb; --thinking: #fb923c; --tool-command: #9ca3af;
+      --info-agents: #c4b5fd;
+      --composer-bg: #0c0e12; --q-border: #facc15;
+      --code-bg: color-mix(in srgb, #ffffff 12%, transparent);
+    }
+  }
+  /* Mock-only override so both themes can be previewed with the toggle; the
+     real app relies on prefers-color-scheme alone. */
+  :root[data-theme="dark"] {
+    --bg: #111318; --fg: #e5e7eb; --muted: #9ca3af; --border: #2a2e37;
+    --card: #16191f; --panel-bg: #14171c; --sidebar-bg: #14161b;
+    --sidebar-shadow: 0 2px 14px color-mix(in srgb, #000000 48%, transparent);
+    --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 30%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
+    --user: #0764c2; --user-fg: #f3f6fb; --thinking: #fb923c; --tool-command: #9ca3af;
+    --info-agents: #c4b5fd;
+    --composer-bg: #0c0e12; --q-border: #facc15;
+    --code-bg: color-mix(in srgb, #ffffff 12%, transparent);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    display: flex; flex-direction: column; font-size: 14px;
+  }
+  .app { flex: 1 1 auto; min-height: 0; display: flex; }
+
+  /* ── Sidebar ─────────────────────────────────────────────── */
+  .sidebar {
+    width: 264px; flex: 0 0 auto; background: var(--sidebar-bg);
+    border-right: 1px solid var(--border); box-shadow: var(--sidebar-shadow);
+    display: flex; flex-direction: column; z-index: 2;
+  }
+  /* The rail's head, as agent-repl draws it (.sb-head): the search toggle,
+     then the title. The title is now the app switcher. */
+  .sb-head {
+    position: relative; display: flex; align-items: center; gap: .5rem;
+    height: var(--topbar-h); flex: 0 0 auto; padding: 0 .7rem;
+    border-bottom: 1px solid var(--border); margin-bottom: 10px;
+  }
+  .sb-search-btn {
+    display: inline-flex; align-items: center; color: var(--info-agents);
+    background: none; border: none; outline: none; opacity: .75; cursor: pointer; padding: .1rem;
+  }
+  .sb-search-btn:hover, .sb-search-btn.active { opacity: 1; }
+  .sb-title {
+    display: inline-flex; align-items: center; gap: 4px; font: inherit;
+    font-weight: 600; font-size: .95rem; color: var(--fg); background: none; border: 0;
+    padding: 3px 6px; margin-left: -6px; border-radius: 6px; cursor: pointer;
+  }
+  .sb-title:hover, .sb-title.open { background: var(--card); }
+  .sb-title .caret { color: var(--muted); margin-top: 1px; transition: transform .15s; }
+  .sb-title.open .caret { transform: rotate(180deg); }
+  .apps-menu {
+    position: absolute; top: calc(var(--topbar-h) - 6px); left: 34px; min-width: 200px;
+    background: var(--sidebar-bg); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: var(--sidebar-shadow); padding: 4px; display: none; z-index: 5;
+  }
+  .apps-menu.open { display: block; }
+  .apps-menu button {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    border: 0; background: none; color: var(--fg); font: inherit; font-size: 13px;
+    padding: 7px 10px; border-radius: 6px; cursor: pointer;
+  }
+  .apps-menu button:hover { background: var(--card); }
+  .apps-menu .check { width: 12px; color: var(--muted); }
+  .apps-menu .hint { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .new-chat {
+    margin: 4px 12px 10px; display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--border); background: transparent; color: var(--fg);
+    font: inherit; font-weight: 550; padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  }
+  .new-chat:hover { background: var(--card); }
+  .new-chat kbd { margin-left: auto; font: 11px ui-monospace, monospace; color: var(--muted); }
+  .search.open { display: block; }
+  .search {
+    display: none;
+    margin: 0 12px 10px; padding: 7px 10px; border-radius: 8px; border: 0;
+    background: var(--card); color: var(--fg); font: inherit; font-size: 13px; outline: none;
+  }
+  .group { margin: 10px 18px 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--muted); }
+  .trees { overflow-y: auto; flex: 1; padding: 0 8px 12px; }
+  .tree {
+    display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; border-radius: 6px;
+    cursor: pointer; color: var(--fg);
+  }
+  .tree:hover { background: var(--card); }
+  .tree.on { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .tree .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree .n { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ── Main column ─────────────────────────────────────────── */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    height: var(--topbar-h); flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+    padding: 0 20px; border-bottom: 1px solid var(--border);
+  }
+  .crumbs { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center;
+    color: var(--muted); font-size: 13px; overflow: hidden; white-space: nowrap; }
+  .crumbs b { color: var(--fg); font-weight: 600; }
+  .crumbs .sep { opacity: .5; }
+  .theme { border: 1px solid var(--border); background: transparent; color: var(--muted);
+    font: inherit; font-size: 12px; padding: 4px 9px; border-radius: 6px; cursor: pointer; }
+
+  .stream { flex: 1; overflow-y: auto; scroll-behavior: smooth; }
+  .col { max-width: 760px; margin: 0 auto; padding: 28px 24px 48px; display: flex;
+    flex-direction: column; gap: 18px; }
+
+  /* Questions: right-aligned user bubbles, as in a normal chat. */
+  .q-wrap { align-self: flex-end; max-width: 78%; display: flex; flex-direction: column;
+    align-items: flex-end; gap: 6px; }
+  .q {
+    position: relative; background: var(--user); color: var(--user-fg);
+    padding: 10px 14px; border-radius: var(--bubble-radius);
+    box-shadow: var(--bubble-shadow); line-height: 1.5; z-index: 1;
+  }
+  /* A stack: the siblings behind the shown question, as two offset cards. */
+  .q.stacked::before, .q.stacked::after {
+    content: ""; position: absolute; left: 6px; right: 6px; height: 100%;
+    border-radius: var(--bubble-radius); background: var(--user); z-index: -1;
+    box-shadow: var(--bubble-shadow);
+  }
+  .q.stacked::before { top: 5px; opacity: .55; }
+  .q.stacked::after { top: 10px; left: 12px; right: 12px; opacity: .3; }
+  .q.stacked { margin-bottom: 10px; }
+  .q .quote {
+    display: block; margin: 0 0 8px; padding: 2px 0 2px 10px; font-size: 13px;
+    border-left: 3px solid var(--q-border); opacity: .85; font-style: italic;
+  }
+  .siblings { display: flex; align-items: center; gap: 2px; font-size: 12px; color: var(--muted);
+    font-variant-numeric: tabular-nums; user-select: none; }
+  .siblings button {
+    border: 0; background: transparent; color: var(--muted); cursor: pointer;
+    width: 22px; height: 22px; border-radius: 5px; font-size: 14px; line-height: 1;
+  }
+  .siblings button:hover { background: var(--card); color: var(--fg); }
+
+  /* Answers: full-width cards on the answer color. */
+  .a {
+    background: var(--assistant); border-radius: var(--bubble-radius);
+    box-shadow: var(--bubble-shadow); padding: 14px 18px; line-height: 1.6;
+  }
+  .a p { margin: 0 0 .7em; } .a p:last-of-type { margin-bottom: 0; }
+  .a code { background: var(--code-bg); border-radius: 4px; padding: .05em .35em;
+    font: .85em ui-monospace, monospace; }
+  .a .title { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px;
+    letter-spacing: .01em; }
+  .a .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px;
+    padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+  .chip {
+    border: 1px solid var(--border); background: var(--bg); color: var(--tool-command);
+    border-radius: 999px; padding: 2px 9px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .chip:hover { border-color: var(--tool-command); color: var(--fg); }
+  .pending { display: inline-flex; align-items: center; gap: 6px; }
+  .pending .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--thinking);
+    animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .a mark { background: color-mix(in srgb, var(--q-border) 35%, transparent); color: inherit;
+    border-radius: 2px; }
+  .flash { animation: flash 1.2s ease-out; }
+  @keyframes flash { 0% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: var(--bubble-shadow); } }
+
+  /* No composer: input is Emacs's. The strip only says where to type. */
+  .footer {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 14px; padding: 8px 20px;
+    background: var(--composer-bg); border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--muted);
+  }
+  .footer .where { color: var(--fg); }
+  .footer .sel { margin-left: auto; color: var(--q-border); display: none; }
+  .footer .sel.on { display: inline; }
+  .empty { color: var(--muted); text-align: center; margin-top: 18vh; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sb-head">
+      <button class="sb-search-btn" id="searchbtn" title="search chats">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14"/></svg>
+      </button>
+      <button class="sb-title" id="apptitle"><span id="appname">Chat</span><svg class="caret" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3.5 5 6.5 8 3.5"/></svg></button>
+      <div class="apps-menu" id="appsmenu">
+        <button data-app="Workspaces"><span class="check"></span>Workspaces<span class="hint">agent-repl</span></button>
+        <button data-app="Chat"><span class="check">✓</span>Chat<span class="hint">zettel</span></button>
+      </div>
+    </div>
+    <button class="new-chat" id="new">＋ New chat</button>
+    <input class="search" id="search" placeholder="Search chats" />
+    <div class="trees" id="trees"></div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="crumbs" id="crumbs"></div>
+      <button class="theme" id="theme">Theme</button>
+    </div>
+    <div class="stream" id="stream"><div class="col" id="col"></div></div>
+    <div class="footer">
+      <span>Type in Emacs to ask</span>
+      <span>·</span>
+      <span>follows up on <span class="where" id="where"></span></span>
+      <span class="sel" id="sel">Highlight selected · your next prompt asks about it</span>
+    </div>
+  </main>
+</div>
+<script>
+// The mock's graph: each node is one question and its answer. `parent` names
+// the node a question was asked of, `quote` the highlighted words, and
+// `premises` the nodes it builds on.
+const N = {
+  h1: { title: "What are hydrogen ions?", q: "What are hydrogen ions?",
+    a: "<p>A hydrogen ion is a hydrogen atom that has lost its electron, which leaves a bare <b>proton</b>, written <code>H⁺</code>. In water it never stays bare: it bonds to a water molecule and forms <b>hydronium</b>, <code>H₃O⁺</code>.</p><p>How many of them a solution holds is what makes it acidic or basic.</p>",
+    premises: ["at"], seen: "Last week" },
+  h2: { parent: "h1", title: "How do hydrogen ions set pH?", q: "How do they set pH?",
+    a: "<p>pH is the negative base-10 logarithm of the hydrogen ion concentration: <code>pH = −log₁₀[H⁺]</code>. Each step of one pH unit is a tenfold change in concentration, so pH 3 holds ten times the hydrogen ions of pH 4.</p>",
+    premises: ["lg"] },
+  h3: { parent: "h1", title: "Why is a bare proton unstable in water?", q: "Why can't it stay a bare proton?",
+    a: "<p>A bare proton has a very high charge density, so it pulls hard on the lone electron pairs of nearby water molecules and bonds to one almost at once.</p>",
+    premises: [] },
+  h4: { parent: "h1", title: "What is hydronium?", quote: "bonds to a water molecule", q: "What is this exactly?",
+    a: "<p>Hydronium, <code>H₃O⁺</code>, is a water molecule carrying one extra proton. It's the form hydrogen ions actually take in water.</p>",
+    premises: [] },
+  h5: { parent: "h2", title: "How do buffers resist pH changes?", q: "And how do buffers hold pH steady?",
+    a: "<p>A buffer pairs a weak acid with its conjugate base. Added hydrogen ions are taken up by the base, and removed ones are replaced by the acid, so the concentration, and with it the pH, barely moves.</p>",
+    premises: [], pending: true },
+  h6: { parent: "h2", title: "What is the pH of pure water?", q: "What's the pH of pure water?",
+    a: "<p>At 25 °C pure water has a hydrogen ion concentration of 10⁻⁷ mol/L, so its pH is 7.</p>",
+    premises: [] },
+  at: { title: "What is an atom made of?", q: "What is an atom made of?",
+    a: "<p>A nucleus of protons and neutrons, surrounded by electrons.</p>", premises: [], seen: "3 weeks ago" },
+  lg: { title: "What is a logarithm?", q: "What is a logarithm?",
+    a: "<p>The exponent you raise a base to in order to get a number: <code>log₁₀ 1000 = 3</code>.</p>", premises: [], seen: "Last month" },
+  np: { title: "What does nuclear physics study?", q: "What does nuclear physics study?",
+    a: "<p>The structure of atomic nuclei, the forces holding them together, and how they decay and react.</p>", premises: ["at"], seen: "Yesterday" },
+  qk: { title: "What are quarks?", q: "What are quarks?",
+    a: "<p>The elementary particles that make up protons and neutrons, bound together by the strong force.</p>", premises: ["np"], seen: "Last week" },
+};
+for (const id in N) { N[id].id = id; N[id].children = []; }
+for (const id in N) if (N[id].parent) N[N[id].parent].children.push(id);
+const roots = ["np", "h1", "qk", "at", "lg"];
+const pick = {};         // node → index of the child shown below it
+let root = "h1";
+
+const rootOf = id => { while (N[id].parent) id = N[id].parent; return id; };
+function path() {
+  const out = [root];
+  for (let n = N[root]; n.children.length; ) {
+    n = N[n.children[pick[n.id] || 0]]; out.push(n.id);
+  }
+  return out;
+}
+function count(id) { return 1 + N[id].children.reduce((s, c) => s + count(c), 0); }
+
+function drawSidebar() {
+  const el = document.getElementById("trees");
+  el.innerHTML = "";
+  let group = null;
+  for (const r of roots) {
+    if (N[r].seen !== group) {
+      group = N[r].seen;
+      el.insertAdjacentHTML("beforeend", `<div class="group">${group}</div>`);
+    }
+    const row = document.createElement("div");
+    row.className = "tree" + (r === root ? " on" : "");
+    row.innerHTML = `<span class="t">${N[r].title}</span><span class="n">${count(r)}</span>`;
+    row.onclick = () => { root = r; draw(); };
+    el.appendChild(row);
+  }
+}
+
+function drawStream() {
+  const col = document.getElementById("col");
+  col.innerHTML = "";
+  const p = path();
+  for (const id of p) {
+    const n = N[id];
+    const sibs = n.parent ? N[n.parent].children : [id];
+    const qw = document.createElement("div");
+    qw.className = "q-wrap";
+    qw.innerHTML = `<div class="q${sibs.length > 1 ? " stacked" : ""}">` +
+      (n.quote ? `<span class="quote">“${n.quote}”</span>` : "") + n.q + `</div>`;
+    if (sibs.length > 1) {
+      const i = sibs.indexOf(id);
+      const s = document.createElement("div");
+      s.className = "siblings";
+      s.innerHTML = `<button title="Previous sibling">‹</button><span>${i + 1} of ${sibs.length}</span><button title="Next sibling">›</button>`;
+      const [prev, , next] = s.children;
+      const step = d => { pick[n.parent] = (i + d + sibs.length) % sibs.length; drawStream(); };
+      prev.onclick = () => step(-1); next.onclick = () => step(1);
+      qw.appendChild(s);
+      qw.querySelector(".q").addEventListener("wheel", e => {
+        if (Math.abs(e.deltaX) > 30 && Math.abs(e.deltaX) > Math.abs(e.deltaY)) step(e.deltaX > 0 ? 1 : -1);
+      }, { passive: true });
+    }
+    col.appendChild(qw);
+
+    const a = document.createElement("div");
+    a.className = "a"; a.dataset.id = id;
+    let meta = "";
+    if (n.pending) meta = `<span class="pending"><span class="dot"></span>Finding premises…</span>`;
+    else if (n.premises.length) meta = `<span>Builds on</span>` +
+      n.premises.map(pr => `<button class="chip" data-go="${pr}">${N[pr].title}</button>`).join("");
+    a.innerHTML = `<div class="title">${n.title}</div>${n.a}` +
+      (meta ? `<div class="meta">${meta}</div>` : "");
+    col.appendChild(a);
+  }
+  // A question asked about a highlight marks the quoted words in its parent.
+  for (const id of p) {
+    const n = N[id];
+    if (!n.quote) continue;
+    const pa = col.querySelector(`.a[data-id="${n.parent}"]`);
+    if (pa) pa.innerHTML = pa.innerHTML.replace(n.quote, `<mark>${n.quote}</mark>`);
+  }
+  col.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+  const last = N[p[p.length - 1]];
+  document.getElementById("where").textContent = last.title;
+  document.getElementById("crumbs").innerHTML = p.map((id, i) =>
+    i === p.length - 1 ? `<b>${N[id].title}</b>` : `<span>${N[id].title}</span>`
+  ).join(`<span class="sep">›</span>`);
+}
+
+// Jump to a premise: open its tree, point every pick along its ancestry at it.
+function go(id) {
+  root = rootOf(id);
+  for (let c = id; N[c].parent; c = N[c].parent) pick[N[c].parent] = N[N[c].parent].children.indexOf(c);
+  draw();
+  const el = document.querySelector(`.a[data-id="${id}"]`);
+  el.scrollIntoView({ block: "center" });
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+}
+
+function draw() { drawSidebar(); drawStream(); }
+
+document.addEventListener("selectionchange", () => {
+  const s = document.getSelection();
+  const inAnswer = s && !s.isCollapsed && s.anchorNode && s.anchorNode.parentElement.closest(".a");
+  document.getElementById("sel").classList.toggle("on", !!inAnswer);
+});
+document.getElementById("new").onclick = () => {
+  document.getElementById("col").innerHTML =
+    `<div class="empty">New chat<br>Type your first question in Emacs.</div>`;
+  document.getElementById("crumbs").innerHTML = "<b>New chat</b>";
+  document.getElementById("where").textContent = "nothing yet, this starts a new tree";
+  document.querySelectorAll(".tree.on").forEach(t => t.classList.remove("on"));
+};
+// The rail title is the app switcher: click it for the menu of apps.
+const title = document.getElementById("apptitle"), menu = document.getElementById("appsmenu");
+title.onclick = e => { e.stopPropagation(); title.classList.toggle("open"); menu.classList.toggle("open"); };
+document.addEventListener("click", () => { title.classList.remove("open"); menu.classList.remove("open"); });
+menu.querySelectorAll("button").forEach(b => b.onclick = () => {
+  menu.querySelectorAll(".check").forEach(c => c.textContent = "");
+  b.querySelector(".check").textContent = "✓";
+  document.getElementById("appname").textContent = b.dataset.app;
+});
+document.getElementById("searchbtn").onclick = e => {
+  e.currentTarget.classList.toggle("active");
+  document.getElementById("search").classList.toggle("open");
+};
+document.getElementById("theme").onclick = () => {
+  const r = document.documentElement;
+  const dark = r.dataset.theme ? r.dataset.theme === "dark"
+    : matchMedia("(prefers-color-scheme: dark)").matches;
+  r.dataset.theme = dark ? "light" : "dark";
+};
+draw();
+if (location.hash === "#menu") { title.classList.add("open"); menu.classList.add("open"); }
+</script>
+</body>
+</html>

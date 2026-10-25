@@ -113,6 +113,9 @@ message FoldHeldPromptError {
     // two workspaces sent them. The merged prompt would be drawn under one
     // author, so the other's words would be attributed to it.
     FoldHeldPromptAboveOtherAuthor above_other_author = 12;
+    // Either entry is a chat thread's question: one turn is one question, so
+    // a thread's questions are never folded together.
+    FoldHeldPromptThreadQuestion thread_question = 13;
   }
 }
 
@@ -174,3 +177,6 @@ message FoldHeldPromptBeingEdited {
 
 // The prompt's delivery call is in flight. See the `being_delivered` arm.
 message FoldHeldPromptBeingDelivered {}
+
+// Either entry is a chat thread's question, which is never folded.
+message FoldHeldPromptThreadQuestion {}

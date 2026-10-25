@@ -27,7 +27,7 @@ export default tseslint.config(
   // ---- the type-aware program: src/ and test/, exactly what tsconfig.json
   // compiles ------------------------------------------------------------
   {
-    files: ["src/**/*.ts", "test/**/*.ts"],
+    files: ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx"],
     extends: [tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
@@ -164,7 +164,7 @@ export default tseslint.config(
     //
     // Scoped, not global: `src/` — the mocked vendor in `src/fake/` included —
     // keeps all three.
-    files: ["test/**/*.ts"],
+    files: ["test/**/*.ts", "test/**/*.tsx"],
     rules: {
       "@typescript-eslint/only-throw-error": "off",
       "@typescript-eslint/prefer-promise-reject-errors": "off",
@@ -186,7 +186,7 @@ export default tseslint.config(
     // rpc/client-log-sink.ts owns the sanctioned `ClientLog` sink and log.ts
     // owns every record. Everywhere else a direct rpc call or the retired
     // generic `log(level, ...)` spelling bypasses the one-method-per-level API.
-    files: ["src/**/*.ts"],
+    files: ["src/**/*.ts", "src/**/*.tsx"],
     ignores: ["src/log.ts", "src/main.ts", "src/rpc/client-log-sink.ts"],
     rules: {
       "no-restricted-syntax": [

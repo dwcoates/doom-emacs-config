@@ -260,6 +260,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	if !fold.settled {
 		r.armAnswerStall(s, unit, fold.turn)
 	}
+	r.tellAnswerProse(s, at, fold)
 	return &frontendv1.FeedRow{
 		Id: id,
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{

@@ -172,6 +172,12 @@ type Submission struct {
 	// permission-mode change) rather than a prompt: never classified, and run
 	// as the act when what is ahead of it ends.
 	Act *wsm.HeldAct
+	// Ask, when set, makes the submission a zettel THREAD QUESTION: where it
+	// was asked from rides the hold, and the turn it is delivered as records
+	// the question whole (wsm.ThreadQuestion), so the answer can be recorded in
+	// zettel. A thread question is never classified, never interjected and
+	// never folded: one turn is one question.
+	Ask *wsm.ThreadAsk
 
 	// interjected reports a held prompt delivered because its verdict
 	// interrupted the running turn: its StartTurn carries the interruption

@@ -289,6 +289,7 @@ type NukeWorkspaceError struct {
 	//	*NukeWorkspaceError_NotYetAdopted
 	//	*NukeWorkspaceError_GitFailed
 	//	*NukeWorkspaceError_HasOpenChildren
+	//	*NukeWorkspaceError_ThreadDeleteFailed
 	Cause         isNukeWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -385,6 +386,15 @@ func (x *NukeWorkspaceError) GetHasOpenChildren() *WorkspaceHasOpenChildren {
 	return nil
 }
 
+func (x *NukeWorkspaceError) GetThreadDeleteFailed() *NukeWorkspaceThreadDeleteFailed {
+	if x != nil {
+		if x, ok := x.Cause.(*NukeWorkspaceError_ThreadDeleteFailed); ok {
+			return x.ThreadDeleteFailed
+		}
+	}
+	return nil
+}
+
 type isNukeWorkspaceError_Cause interface {
 	isNukeWorkspaceError_Cause()
 }
@@ -420,6 +430,12 @@ type NukeWorkspaceError_HasOpenChildren struct {
 	HasOpenChildren *WorkspaceHasOpenChildren `protobuf:"bytes,6,opt,name=has_open_children,json=hasOpenChildren,proto3,oneof"`
 }
 
+type NukeWorkspaceError_ThreadDeleteFailed struct {
+	// A zettel chat thread's graph or directory could not be deleted. The
+	// thread is closed but still recorded: nothing of it was forgotten.
+	ThreadDeleteFailed *NukeWorkspaceThreadDeleteFailed `protobuf:"bytes,7,opt,name=thread_delete_failed,json=threadDeleteFailed,proto3,oneof"`
+}
+
 func (*NukeWorkspaceError_UnknownWorkspace) isNukeWorkspaceError_Cause() {}
 
 func (*NukeWorkspaceError_WorkspaceRefMismatch) isNukeWorkspaceError_Cause() {}
@@ -432,6 +448,54 @@ func (*NukeWorkspaceError_GitFailed) isNukeWorkspaceError_Cause() {}
 
 func (*NukeWorkspaceError_HasOpenChildren) isNukeWorkspaceError_Cause() {}
 
+func (*NukeWorkspaceError_ThreadDeleteFailed) isNukeWorkspaceError_Cause() {}
+
+// What would not be deleted, and why.
+type NukeWorkspaceThreadDeleteFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The failure's own account (zettel's, or the file system's), verbatim.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NukeWorkspaceThreadDeleteFailed) Reset() {
+	*x = NukeWorkspaceThreadDeleteFailed{}
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NukeWorkspaceThreadDeleteFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NukeWorkspaceThreadDeleteFailed) ProtoMessage() {}
+
+func (x *NukeWorkspaceThreadDeleteFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NukeWorkspaceThreadDeleteFailed.ProtoReflect.Descriptor instead.
+func (*NukeWorkspaceThreadDeleteFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *NukeWorkspaceThreadDeleteFailed) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 type NukeWorkspaceUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -440,7 +504,7 @@ type NukeWorkspaceUnknownWorkspace struct {
 
 func (x *NukeWorkspaceUnknownWorkspace) Reset() {
 	*x = NukeWorkspaceUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -452,7 +516,7 @@ func (x *NukeWorkspaceUnknownWorkspace) String() string {
 func (*NukeWorkspaceUnknownWorkspace) ProtoMessage() {}
 
 func (x *NukeWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -465,7 +529,7 @@ func (x *NukeWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NukeWorkspaceUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*NukeWorkspaceUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{6}
 }
 
 type NukeWorkspaceWorkspaceRefMismatch struct {
@@ -478,7 +542,7 @@ type NukeWorkspaceWorkspaceRefMismatch struct {
 
 func (x *NukeWorkspaceWorkspaceRefMismatch) Reset() {
 	*x = NukeWorkspaceWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -490,7 +554,7 @@ func (x *NukeWorkspaceWorkspaceRefMismatch) String() string {
 func (*NukeWorkspaceWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *NukeWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -503,7 +567,7 @@ func (x *NukeWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use NukeWorkspaceWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*NukeWorkspaceWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *NukeWorkspaceWorkspaceRefMismatch) GetRegistryDir() string {
@@ -523,7 +587,7 @@ type NukeWorkspaceTransferringAway struct {
 
 func (x *NukeWorkspaceTransferringAway) Reset() {
 	*x = NukeWorkspaceTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -535,7 +599,7 @@ func (x *NukeWorkspaceTransferringAway) String() string {
 func (*NukeWorkspaceTransferringAway) ProtoMessage() {}
 
 func (x *NukeWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -548,7 +612,7 @@ func (x *NukeWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NukeWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
 func (*NukeWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *NukeWorkspaceTransferringAway) GetAddress() string {
@@ -566,7 +630,7 @@ type NukeWorkspaceNotYetAdopted struct {
 
 func (x *NukeWorkspaceNotYetAdopted) Reset() {
 	*x = NukeWorkspaceNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -578,7 +642,7 @@ func (x *NukeWorkspaceNotYetAdopted) String() string {
 func (*NukeWorkspaceNotYetAdopted) ProtoMessage() {}
 
 func (x *NukeWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -591,7 +655,7 @@ func (x *NukeWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NukeWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*NukeWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{9}
 }
 
 type NukeWorkspaceGitFailed struct {
@@ -604,7 +668,7 @@ type NukeWorkspaceGitFailed struct {
 
 func (x *NukeWorkspaceGitFailed) Reset() {
 	*x = NukeWorkspaceGitFailed{}
-	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -616,7 +680,7 @@ func (x *NukeWorkspaceGitFailed) String() string {
 func (*NukeWorkspaceGitFailed) ProtoMessage() {}
 
 func (x *NukeWorkspaceGitFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -629,7 +693,7 @@ func (x *NukeWorkspaceGitFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NukeWorkspaceGitFailed.ProtoReflect.Descriptor instead.
 func (*NukeWorkspaceGitFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *NukeWorkspaceGitFailed) GetDetail() string {
@@ -655,7 +719,7 @@ const file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDesc = "" +
 	"\x06result\",\n" +
 	"\x15NukeWorkspaceAccepted\x12\x13\n" +
 	"\x05op_id\x18\x01 \x01(\tR\x04opId\"\x16\n" +
-	"\x14NukeWorkspaceSuccess\"\xaf\x04\n" +
+	"\x14NukeWorkspaceSuccess\"\x92\x05\n" +
 	"\x12NukeWorkspaceError\x12Z\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2+.agentrepl.v1.NukeWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12g\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2/.agentrepl.v1.NukeWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Z\n" +
@@ -663,8 +727,11 @@ const file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDesc = "" +
 	"\x0fnot_yet_adopted\x18\x04 \x01(\v2(.agentrepl.v1.NukeWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12E\n" +
 	"\n" +
 	"git_failed\x18\x05 \x01(\v2$.agentrepl.v1.NukeWorkspaceGitFailedH\x00R\tgitFailed\x12T\n" +
-	"\x11has_open_children\x18\x06 \x01(\v2&.agentrepl.v1.WorkspaceHasOpenChildrenH\x00R\x0fhasOpenChildrenB\a\n" +
-	"\x05cause\"\x1f\n" +
+	"\x11has_open_children\x18\x06 \x01(\v2&.agentrepl.v1.WorkspaceHasOpenChildrenH\x00R\x0fhasOpenChildren\x12a\n" +
+	"\x14thread_delete_failed\x18\a \x01(\v2-.agentrepl.v1.NukeWorkspaceThreadDeleteFailedH\x00R\x12threadDeleteFailedB\a\n" +
+	"\x05cause\"9\n" +
+	"\x1fNukeWorkspaceThreadDeleteFailed\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x1f\n" +
 	"\x1dNukeWorkspaceUnknownWorkspace\"F\n" +
 	"!NukeWorkspaceWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"9\n" +
@@ -686,37 +753,39 @@ func file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_agentrepl_v1_endpoint_nuke_workspace_proto_goTypes = []any{
 	(*NukeWorkspaceRequest)(nil),              // 0: agentrepl.v1.NukeWorkspaceRequest
 	(*NukeWorkspaceResponse)(nil),             // 1: agentrepl.v1.NukeWorkspaceResponse
 	(*NukeWorkspaceAccepted)(nil),             // 2: agentrepl.v1.NukeWorkspaceAccepted
 	(*NukeWorkspaceSuccess)(nil),              // 3: agentrepl.v1.NukeWorkspaceSuccess
 	(*NukeWorkspaceError)(nil),                // 4: agentrepl.v1.NukeWorkspaceError
-	(*NukeWorkspaceUnknownWorkspace)(nil),     // 5: agentrepl.v1.NukeWorkspaceUnknownWorkspace
-	(*NukeWorkspaceWorkspaceRefMismatch)(nil), // 6: agentrepl.v1.NukeWorkspaceWorkspaceRefMismatch
-	(*NukeWorkspaceTransferringAway)(nil),     // 7: agentrepl.v1.NukeWorkspaceTransferringAway
-	(*NukeWorkspaceNotYetAdopted)(nil),        // 8: agentrepl.v1.NukeWorkspaceNotYetAdopted
-	(*NukeWorkspaceGitFailed)(nil),            // 9: agentrepl.v1.NukeWorkspaceGitFailed
-	(*v1.WorkspaceRef)(nil),                   // 10: workspace.v1.WorkspaceRef
-	(*WorkspaceHasOpenChildren)(nil),          // 11: agentrepl.v1.WorkspaceHasOpenChildren
+	(*NukeWorkspaceThreadDeleteFailed)(nil),   // 5: agentrepl.v1.NukeWorkspaceThreadDeleteFailed
+	(*NukeWorkspaceUnknownWorkspace)(nil),     // 6: agentrepl.v1.NukeWorkspaceUnknownWorkspace
+	(*NukeWorkspaceWorkspaceRefMismatch)(nil), // 7: agentrepl.v1.NukeWorkspaceWorkspaceRefMismatch
+	(*NukeWorkspaceTransferringAway)(nil),     // 8: agentrepl.v1.NukeWorkspaceTransferringAway
+	(*NukeWorkspaceNotYetAdopted)(nil),        // 9: agentrepl.v1.NukeWorkspaceNotYetAdopted
+	(*NukeWorkspaceGitFailed)(nil),            // 10: agentrepl.v1.NukeWorkspaceGitFailed
+	(*v1.WorkspaceRef)(nil),                   // 11: workspace.v1.WorkspaceRef
+	(*WorkspaceHasOpenChildren)(nil),          // 12: agentrepl.v1.WorkspaceHasOpenChildren
 }
 var file_agentrepl_v1_endpoint_nuke_workspace_proto_depIdxs = []int32{
-	10, // 0: agentrepl.v1.NukeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	11, // 0: agentrepl.v1.NukeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	3,  // 1: agentrepl.v1.NukeWorkspaceResponse.success:type_name -> agentrepl.v1.NukeWorkspaceSuccess
 	4,  // 2: agentrepl.v1.NukeWorkspaceResponse.error:type_name -> agentrepl.v1.NukeWorkspaceError
 	2,  // 3: agentrepl.v1.NukeWorkspaceResponse.accepted:type_name -> agentrepl.v1.NukeWorkspaceAccepted
-	5,  // 4: agentrepl.v1.NukeWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.NukeWorkspaceUnknownWorkspace
-	6,  // 5: agentrepl.v1.NukeWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.NukeWorkspaceWorkspaceRefMismatch
-	7,  // 6: agentrepl.v1.NukeWorkspaceError.transferring_away:type_name -> agentrepl.v1.NukeWorkspaceTransferringAway
-	8,  // 7: agentrepl.v1.NukeWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.NukeWorkspaceNotYetAdopted
-	9,  // 8: agentrepl.v1.NukeWorkspaceError.git_failed:type_name -> agentrepl.v1.NukeWorkspaceGitFailed
-	11, // 9: agentrepl.v1.NukeWorkspaceError.has_open_children:type_name -> agentrepl.v1.WorkspaceHasOpenChildren
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	6,  // 4: agentrepl.v1.NukeWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.NukeWorkspaceUnknownWorkspace
+	7,  // 5: agentrepl.v1.NukeWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.NukeWorkspaceWorkspaceRefMismatch
+	8,  // 6: agentrepl.v1.NukeWorkspaceError.transferring_away:type_name -> agentrepl.v1.NukeWorkspaceTransferringAway
+	9,  // 7: agentrepl.v1.NukeWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.NukeWorkspaceNotYetAdopted
+	10, // 8: agentrepl.v1.NukeWorkspaceError.git_failed:type_name -> agentrepl.v1.NukeWorkspaceGitFailed
+	12, // 9: agentrepl.v1.NukeWorkspaceError.has_open_children:type_name -> agentrepl.v1.WorkspaceHasOpenChildren
+	5,  // 10: agentrepl.v1.NukeWorkspaceError.thread_delete_failed:type_name -> agentrepl.v1.NukeWorkspaceThreadDeleteFailed
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_nuke_workspace_proto_init() }
@@ -738,6 +807,7 @@ func file_agentrepl_v1_endpoint_nuke_workspace_proto_init() {
 		(*NukeWorkspaceError_NotYetAdopted)(nil),
 		(*NukeWorkspaceError_GitFailed)(nil),
 		(*NukeWorkspaceError_HasOpenChildren)(nil),
+		(*NukeWorkspaceError_ThreadDeleteFailed)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -745,7 +815,7 @@ func file_agentrepl_v1_endpoint_nuke_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

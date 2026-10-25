@@ -13,6 +13,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/bounce"
+	"agent-repld/internal/chat"
 	"agent-repld/internal/classifierupdate"
 	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
@@ -160,6 +161,14 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		return s.fill(refusal{Arm: "above_not_a_prompt", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrAboveOtherAuthor):
 		return s.fill(refusal{Arm: "above_other_author", Reason: err.Error()}), true
+	case errors.Is(err, promptqueue.ErrThreadQuestion):
+		return s.fill(refusal{Arm: "thread_question", Reason: err.Error()}), true
+
+	// The chat service's refusals.
+	case errors.Is(err, chat.ErrUnknownNode):
+		return s.fill(refusal{Arm: "unknown_node", Reason: err.Error(), NotFound: true}), true
+	case errors.Is(err, chat.ErrAwaitingFirstAnswer):
+		return s.fill(refusal{Arm: "thread_awaiting_first_answer", Reason: err.Error()}), true
 
 	// The feed resolver's page-walk refusals.
 	case errors.Is(err, feed.ErrUnknownFeed):

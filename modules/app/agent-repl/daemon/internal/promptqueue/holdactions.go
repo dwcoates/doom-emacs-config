@@ -362,6 +362,7 @@ func submissionOf(held wsm.HeldPrompt) Submission {
 		Target:   held.Target,
 		Delivery: held.Delivery,
 		Act:      held.Act,
+		Ask:      held.Ask,
 	}
 }
 

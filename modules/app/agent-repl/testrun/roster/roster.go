@@ -196,6 +196,7 @@ var Programs = []Program{
 	{Name: "shim-store", Owner: "store", Module: "agent-shim/shim-store", Package: "."},
 	{Name: "shim-claude-sidecar", Owner: "sidecar", Module: "agent-shim/claude/shim-sidecar", Package: "."},
 	{Name: "shim-lock", Owner: "lock", Module: "agent-shim/shim-lock", Package: "."},
+	{Name: "zettel", Owner: "zettel", Module: "zettel", Package: "."},
 }
 
 // CoverageSystems are the suites whose code is a system the coverage
@@ -305,6 +306,8 @@ var Suites = []Suite{
 		// internal/testclose's scan walks the store's own tree.
 		Reuse: &Reuse{Inputs: []string{"agent-shim/shim-store/"}}},
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock", Reuse: &Reuse{}},
+	{Name: "zettel", Kind: GoModule, Path: "zettel", Programs: map[string][]string{"integration": {"zettel"}},
+		Reuse: &Reuse{Inputs: []string{"zettel/"}}},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go", Reuse: &Reuse{Inputs: []string{"proto/vocab/"}}},
 	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go", Reuse: &Reuse{}},
 	// The tests that read the whole module rather than one system's tree:
@@ -356,7 +359,7 @@ var Suites = []Suite{
 	{Name: "tree-sitter-tldr", Kind: Script, Path: "tree-sitter-tldr/test-tree-sitter-tldr.sh"},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
-		Programs: map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock"}}},
+		Programs: map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}}},
 	// Two slots: the sandbox container is capped to the width it is given
 	// (docker --cpus, GOMAXPROCS), and the layer runs its two Emacsen
 	// (e2e/EMACS-LAYER-SPEC.md, "The parallelism bound, measured") on two

@@ -228,9 +228,33 @@ func (v *verbs) namingQuestion(log dlog.Logger, prompt, conversation string, rej
 // could not arise; the roster reads these names, so the suffix is now paid
 // only by the names that actually collide.
 func (v *verbs) freeName(ctx context.Context, log dlog.Logger, repoDir, branch string) (string, func(), error) {
+	// A BRANCH IS A FACT ABOUT THE REPOSITORY, not about the registry: a stale
+	// branch left by a nuked workspace collides just as hard.
+	return v.freeNameAgainst(ctx, log, branch, func(candidate string) (bool, error) {
+		exists, err := v.deps.Git.BranchExists(ctx, repoDir, candidate)
+		if err != nil {
+			return false, fmt.Errorf("probe the branch %q: %w", candidate, err)
+		}
+		if exists {
+			return true, nil
+		}
+		// So is a directory: another branch's worktree under the same bare
+		// name stands where this one would be materialized (worktreeOccupied).
+		occupied, _, err := worktreeOccupied(repoDir, candidate)
+		if err != nil {
+			return false, err
+		}
+		return occupied, nil
+	})
+}
+
+// freeNameAgainst is freeName's disambiguation, against a registry name, a
+// reservation, a claim, and whatever else TAKEN says holds the candidate (a
+// branch, a thread's directory).
+func (v *verbs) freeNameAgainst(ctx context.Context, log dlog.Logger, branch string, taken func(candidate string) (bool, error)) (string, func(), error) {
 	v.names.mu.Lock()
 	defer v.names.mu.Unlock()
-	taken, err := v.takenLocked(ctx, "")
+	registered, err := v.takenLocked(ctx, "")
 	if err != nil {
 		return "", nil, err
 	}
@@ -239,25 +263,14 @@ func (v *verbs) freeName(ctx context.Context, log dlog.Logger, repoDir, branch s
 		if suffix > 1 {
 			candidate = branch + "-" + strconv.Itoa(suffix)
 		}
-		if taken[candidate] {
+		if registered[candidate] {
 			continue
 		}
-		// A BRANCH IS A FACT ABOUT THE REPOSITORY, not about the registry: a
-		// stale branch left by a nuked workspace collides just as hard.
-		exists, err := v.deps.Git.BranchExists(ctx, repoDir, candidate)
-		if err != nil {
-			return "", nil, fmt.Errorf("probe the branch %q: %w", candidate, err)
-		}
-		if exists {
-			continue
-		}
-		// So is a directory: another branch's worktree under the same bare
-		// name stands where this one would be materialized (worktreeOccupied).
-		occupied, _, err := worktreeOccupied(repoDir, candidate)
+		held, err := taken(candidate)
 		if err != nil {
 			return "", nil, err
 		}
-		if occupied {
+		if held {
 			continue
 		}
 		if suffix > 1 {

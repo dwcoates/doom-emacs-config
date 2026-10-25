@@ -183,6 +183,27 @@ const (
 	// AgentReplAssignWorkspaceTaskProcedure is the fully-qualified name of the AgentRepl's
 	// AssignWorkspaceTask RPC.
 	AgentReplAssignWorkspaceTaskProcedure = "/agentrepl.v1.AgentRepl/AssignWorkspaceTask"
+	// AgentReplShowSidebarAppProcedure is the fully-qualified name of the AgentRepl's ShowSidebarApp
+	// RPC.
+	AgentReplShowSidebarAppProcedure = "/agentrepl.v1.AgentRepl/ShowSidebarApp"
+	// AgentReplCreateThreadProcedure is the fully-qualified name of the AgentRepl's CreateThread RPC.
+	AgentReplCreateThreadProcedure = "/agentrepl.v1.AgentRepl/CreateThread"
+	// AgentReplRequestNewThreadProcedure is the fully-qualified name of the AgentRepl's
+	// RequestNewThread RPC.
+	AgentReplRequestNewThreadProcedure = "/agentrepl.v1.AgentRepl/RequestNewThread"
+	// AgentReplWatchChatProcedure is the fully-qualified name of the AgentRepl's WatchChat RPC.
+	AgentReplWatchChatProcedure = "/agentrepl.v1.AgentRepl/WatchChat"
+	// AgentReplSwitchChatSiblingProcedure is the fully-qualified name of the AgentRepl's
+	// SwitchChatSibling RPC.
+	AgentReplSwitchChatSiblingProcedure = "/agentrepl.v1.AgentRepl/SwitchChatSibling"
+	// AgentReplReportChatSightingsProcedure is the fully-qualified name of the AgentRepl's
+	// ReportChatSightings RPC.
+	AgentReplReportChatSightingsProcedure = "/agentrepl.v1.AgentRepl/ReportChatSightings"
+	// AgentReplSelectChatTextProcedure is the fully-qualified name of the AgentRepl's SelectChatText
+	// RPC.
+	AgentReplSelectChatTextProcedure = "/agentrepl.v1.AgentRepl/SelectChatText"
+	// AgentReplSearchChatsProcedure is the fully-qualified name of the AgentRepl's SearchChats RPC.
+	AgentReplSearchChatsProcedure = "/agentrepl.v1.AgentRepl/SearchChats"
 	// AgentReplWatchTopbarProcedure is the fully-qualified name of the AgentRepl's WatchTopbar RPC.
 	AgentReplWatchTopbarProcedure = "/agentrepl.v1.AgentRepl/WatchTopbar"
 	// AgentReplSetModelProcedure is the fully-qualified name of the AgentRepl's SetModel RPC.
@@ -389,6 +410,14 @@ var (
 	agentReplCreateTaskMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("CreateTask")
 	agentReplUpdateTaskMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("UpdateTask")
 	agentReplAssignWorkspaceTaskMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("AssignWorkspaceTask")
+	agentReplShowSidebarAppMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("ShowSidebarApp")
+	agentReplCreateThreadMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("CreateThread")
+	agentReplRequestNewThreadMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("RequestNewThread")
+	agentReplWatchChatMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("WatchChat")
+	agentReplSwitchChatSiblingMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SwitchChatSibling")
+	agentReplReportChatSightingsMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportChatSightings")
+	agentReplSelectChatTextMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SelectChatText")
+	agentReplSearchChatsMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SearchChats")
 	agentReplWatchTopbarMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchTopbar")
 	agentReplSetModelMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("SetModel")
 	agentReplSetEffortMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("SetEffort")
@@ -616,6 +645,22 @@ type AgentReplClient interface {
 	// Assign a workspace to a task, or unassign it. See
 	// endpoint_assign_workspace_task.proto.
 	AssignWorkspaceTask(context.Context, *connect.Request[v1.AssignWorkspaceTaskRequest]) (*connect.Response[v1.AssignWorkspaceTaskResponse], error)
+	// Show an app's most recent workspace: the rail title's dropdown.
+	ShowSidebarApp(context.Context, *connect.Request[v1.ShowSidebarAppRequest]) (*connect.Response[v1.ShowSidebarAppResponse], error)
+	// Start a thread with its first question.
+	CreateThread(context.Context, *connect.Request[v1.CreateThreadRequest]) (*connect.Response[v1.CreateThreadResponse], error)
+	// The sidebar's new-thread button: ask Emacs to open its new-thread prompt.
+	RequestNewThread(context.Context, *connect.Request[v1.RequestNewThreadRequest]) (*connect.Response[v1.RequestNewThreadResponse], error)
+	// One thread's chat view, pushed whole on every change.
+	WatchChat(context.Context, *connect.Request[v1.WatchChatRequest]) (*connect.ServerStreamForClient[v1.WatchChatResponse], error)
+	// Show a bubble's previous or next sibling.
+	SwitchChatSibling(context.Context, *connect.Request[v1.SwitchChatSiblingRequest]) (*connect.Response[v1.SwitchChatSiblingResponse], error)
+	// Answer bubbles were seen.
+	ReportChatSightings(context.Context, *connect.Request[v1.ReportChatSightingsRequest]) (*connect.Response[v1.ReportChatSightingsResponse], error)
+	// Hold or clear the thread's highlight.
+	SelectChatText(context.Context, *connect.Request[v1.SelectChatTextRequest]) (*connect.Response[v1.SelectChatTextResponse], error)
+	// The threads whose chats say the sidebar search's words.
+	SearchChats(context.Context, *connect.Request[v1.SearchChatsRequest]) (*connect.Response[v1.SearchChatsResponse], error)
 	// The topbar's stream: the view, whole (the token-breakdown menu inside).
 	WatchTopbar(context.Context, *connect.Request[v1.WatchTopbarRequest]) (*connect.ServerStreamForClient[v1.WatchTopbarResponse], error)
 	// The selector's pick: the typed echo token handed back. See
@@ -1123,6 +1168,54 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplAssignWorkspaceTaskMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		showSidebarApp: connect.NewClient[v1.ShowSidebarAppRequest, v1.ShowSidebarAppResponse](
+			httpClient,
+			baseURL+AgentReplShowSidebarAppProcedure,
+			connect.WithSchema(agentReplShowSidebarAppMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		createThread: connect.NewClient[v1.CreateThreadRequest, v1.CreateThreadResponse](
+			httpClient,
+			baseURL+AgentReplCreateThreadProcedure,
+			connect.WithSchema(agentReplCreateThreadMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		requestNewThread: connect.NewClient[v1.RequestNewThreadRequest, v1.RequestNewThreadResponse](
+			httpClient,
+			baseURL+AgentReplRequestNewThreadProcedure,
+			connect.WithSchema(agentReplRequestNewThreadMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		watchChat: connect.NewClient[v1.WatchChatRequest, v1.WatchChatResponse](
+			httpClient,
+			baseURL+AgentReplWatchChatProcedure,
+			connect.WithSchema(agentReplWatchChatMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		switchChatSibling: connect.NewClient[v1.SwitchChatSiblingRequest, v1.SwitchChatSiblingResponse](
+			httpClient,
+			baseURL+AgentReplSwitchChatSiblingProcedure,
+			connect.WithSchema(agentReplSwitchChatSiblingMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		reportChatSightings: connect.NewClient[v1.ReportChatSightingsRequest, v1.ReportChatSightingsResponse](
+			httpClient,
+			baseURL+AgentReplReportChatSightingsProcedure,
+			connect.WithSchema(agentReplReportChatSightingsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		selectChatText: connect.NewClient[v1.SelectChatTextRequest, v1.SelectChatTextResponse](
+			httpClient,
+			baseURL+AgentReplSelectChatTextProcedure,
+			connect.WithSchema(agentReplSelectChatTextMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		searchChats: connect.NewClient[v1.SearchChatsRequest, v1.SearchChatsResponse](
+			httpClient,
+			baseURL+AgentReplSearchChatsProcedure,
+			connect.WithSchema(agentReplSearchChatsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		watchTopbar: connect.NewClient[v1.WatchTopbarRequest, v1.WatchTopbarResponse](
 			httpClient,
 			baseURL+AgentReplWatchTopbarProcedure,
@@ -1521,6 +1614,14 @@ type agentReplClient struct {
 	createTask                 *connect.Client[v1.CreateTaskRequest, v1.CreateTaskResponse]
 	updateTask                 *connect.Client[v1.UpdateTaskRequest, v1.UpdateTaskResponse]
 	assignWorkspaceTask        *connect.Client[v1.AssignWorkspaceTaskRequest, v1.AssignWorkspaceTaskResponse]
+	showSidebarApp             *connect.Client[v1.ShowSidebarAppRequest, v1.ShowSidebarAppResponse]
+	createThread               *connect.Client[v1.CreateThreadRequest, v1.CreateThreadResponse]
+	requestNewThread           *connect.Client[v1.RequestNewThreadRequest, v1.RequestNewThreadResponse]
+	watchChat                  *connect.Client[v1.WatchChatRequest, v1.WatchChatResponse]
+	switchChatSibling          *connect.Client[v1.SwitchChatSiblingRequest, v1.SwitchChatSiblingResponse]
+	reportChatSightings        *connect.Client[v1.ReportChatSightingsRequest, v1.ReportChatSightingsResponse]
+	selectChatText             *connect.Client[v1.SelectChatTextRequest, v1.SelectChatTextResponse]
+	searchChats                *connect.Client[v1.SearchChatsRequest, v1.SearchChatsResponse]
 	watchTopbar                *connect.Client[v1.WatchTopbarRequest, v1.WatchTopbarResponse]
 	setModel                   *connect.Client[v1.SetModelRequest, v1.SetModelResponse]
 	setEffort                  *connect.Client[v1.SetEffortRequest, v1.SetEffortResponse]
@@ -1837,6 +1938,46 @@ func (c *agentReplClient) UpdateTask(ctx context.Context, req *connect.Request[v
 // AssignWorkspaceTask calls agentrepl.v1.AgentRepl.AssignWorkspaceTask.
 func (c *agentReplClient) AssignWorkspaceTask(ctx context.Context, req *connect.Request[v1.AssignWorkspaceTaskRequest]) (*connect.Response[v1.AssignWorkspaceTaskResponse], error) {
 	return c.assignWorkspaceTask.CallUnary(ctx, req)
+}
+
+// ShowSidebarApp calls agentrepl.v1.AgentRepl.ShowSidebarApp.
+func (c *agentReplClient) ShowSidebarApp(ctx context.Context, req *connect.Request[v1.ShowSidebarAppRequest]) (*connect.Response[v1.ShowSidebarAppResponse], error) {
+	return c.showSidebarApp.CallUnary(ctx, req)
+}
+
+// CreateThread calls agentrepl.v1.AgentRepl.CreateThread.
+func (c *agentReplClient) CreateThread(ctx context.Context, req *connect.Request[v1.CreateThreadRequest]) (*connect.Response[v1.CreateThreadResponse], error) {
+	return c.createThread.CallUnary(ctx, req)
+}
+
+// RequestNewThread calls agentrepl.v1.AgentRepl.RequestNewThread.
+func (c *agentReplClient) RequestNewThread(ctx context.Context, req *connect.Request[v1.RequestNewThreadRequest]) (*connect.Response[v1.RequestNewThreadResponse], error) {
+	return c.requestNewThread.CallUnary(ctx, req)
+}
+
+// WatchChat calls agentrepl.v1.AgentRepl.WatchChat.
+func (c *agentReplClient) WatchChat(ctx context.Context, req *connect.Request[v1.WatchChatRequest]) (*connect.ServerStreamForClient[v1.WatchChatResponse], error) {
+	return c.watchChat.CallServerStream(ctx, req)
+}
+
+// SwitchChatSibling calls agentrepl.v1.AgentRepl.SwitchChatSibling.
+func (c *agentReplClient) SwitchChatSibling(ctx context.Context, req *connect.Request[v1.SwitchChatSiblingRequest]) (*connect.Response[v1.SwitchChatSiblingResponse], error) {
+	return c.switchChatSibling.CallUnary(ctx, req)
+}
+
+// ReportChatSightings calls agentrepl.v1.AgentRepl.ReportChatSightings.
+func (c *agentReplClient) ReportChatSightings(ctx context.Context, req *connect.Request[v1.ReportChatSightingsRequest]) (*connect.Response[v1.ReportChatSightingsResponse], error) {
+	return c.reportChatSightings.CallUnary(ctx, req)
+}
+
+// SelectChatText calls agentrepl.v1.AgentRepl.SelectChatText.
+func (c *agentReplClient) SelectChatText(ctx context.Context, req *connect.Request[v1.SelectChatTextRequest]) (*connect.Response[v1.SelectChatTextResponse], error) {
+	return c.selectChatText.CallUnary(ctx, req)
+}
+
+// SearchChats calls agentrepl.v1.AgentRepl.SearchChats.
+func (c *agentReplClient) SearchChats(ctx context.Context, req *connect.Request[v1.SearchChatsRequest]) (*connect.Response[v1.SearchChatsResponse], error) {
+	return c.searchChats.CallUnary(ctx, req)
 }
 
 // WatchTopbar calls agentrepl.v1.AgentRepl.WatchTopbar.
@@ -2288,6 +2429,22 @@ type AgentReplHandler interface {
 	// Assign a workspace to a task, or unassign it. See
 	// endpoint_assign_workspace_task.proto.
 	AssignWorkspaceTask(context.Context, *connect.Request[v1.AssignWorkspaceTaskRequest]) (*connect.Response[v1.AssignWorkspaceTaskResponse], error)
+	// Show an app's most recent workspace: the rail title's dropdown.
+	ShowSidebarApp(context.Context, *connect.Request[v1.ShowSidebarAppRequest]) (*connect.Response[v1.ShowSidebarAppResponse], error)
+	// Start a thread with its first question.
+	CreateThread(context.Context, *connect.Request[v1.CreateThreadRequest]) (*connect.Response[v1.CreateThreadResponse], error)
+	// The sidebar's new-thread button: ask Emacs to open its new-thread prompt.
+	RequestNewThread(context.Context, *connect.Request[v1.RequestNewThreadRequest]) (*connect.Response[v1.RequestNewThreadResponse], error)
+	// One thread's chat view, pushed whole on every change.
+	WatchChat(context.Context, *connect.Request[v1.WatchChatRequest], *connect.ServerStream[v1.WatchChatResponse]) error
+	// Show a bubble's previous or next sibling.
+	SwitchChatSibling(context.Context, *connect.Request[v1.SwitchChatSiblingRequest]) (*connect.Response[v1.SwitchChatSiblingResponse], error)
+	// Answer bubbles were seen.
+	ReportChatSightings(context.Context, *connect.Request[v1.ReportChatSightingsRequest]) (*connect.Response[v1.ReportChatSightingsResponse], error)
+	// Hold or clear the thread's highlight.
+	SelectChatText(context.Context, *connect.Request[v1.SelectChatTextRequest]) (*connect.Response[v1.SelectChatTextResponse], error)
+	// The threads whose chats say the sidebar search's words.
+	SearchChats(context.Context, *connect.Request[v1.SearchChatsRequest]) (*connect.Response[v1.SearchChatsResponse], error)
 	// The topbar's stream: the view, whole (the token-breakdown menu inside).
 	WatchTopbar(context.Context, *connect.Request[v1.WatchTopbarRequest], *connect.ServerStream[v1.WatchTopbarResponse]) error
 	// The selector's pick: the typed echo token handed back. See
@@ -2791,6 +2948,54 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplAssignWorkspaceTaskMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplShowSidebarAppHandler := connect.NewUnaryHandler(
+		AgentReplShowSidebarAppProcedure,
+		svc.ShowSidebarApp,
+		connect.WithSchema(agentReplShowSidebarAppMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplCreateThreadHandler := connect.NewUnaryHandler(
+		AgentReplCreateThreadProcedure,
+		svc.CreateThread,
+		connect.WithSchema(agentReplCreateThreadMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplRequestNewThreadHandler := connect.NewUnaryHandler(
+		AgentReplRequestNewThreadProcedure,
+		svc.RequestNewThread,
+		connect.WithSchema(agentReplRequestNewThreadMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplWatchChatHandler := connect.NewServerStreamHandler(
+		AgentReplWatchChatProcedure,
+		svc.WatchChat,
+		connect.WithSchema(agentReplWatchChatMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSwitchChatSiblingHandler := connect.NewUnaryHandler(
+		AgentReplSwitchChatSiblingProcedure,
+		svc.SwitchChatSibling,
+		connect.WithSchema(agentReplSwitchChatSiblingMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplReportChatSightingsHandler := connect.NewUnaryHandler(
+		AgentReplReportChatSightingsProcedure,
+		svc.ReportChatSightings,
+		connect.WithSchema(agentReplReportChatSightingsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSelectChatTextHandler := connect.NewUnaryHandler(
+		AgentReplSelectChatTextProcedure,
+		svc.SelectChatText,
+		connect.WithSchema(agentReplSelectChatTextMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSearchChatsHandler := connect.NewUnaryHandler(
+		AgentReplSearchChatsProcedure,
+		svc.SearchChats,
+		connect.WithSchema(agentReplSearchChatsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplWatchTopbarHandler := connect.NewServerStreamHandler(
 		AgentReplWatchTopbarProcedure,
 		svc.WatchTopbar,
@@ -3238,6 +3443,22 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplUpdateTaskHandler.ServeHTTP(w, r)
 		case AgentReplAssignWorkspaceTaskProcedure:
 			agentReplAssignWorkspaceTaskHandler.ServeHTTP(w, r)
+		case AgentReplShowSidebarAppProcedure:
+			agentReplShowSidebarAppHandler.ServeHTTP(w, r)
+		case AgentReplCreateThreadProcedure:
+			agentReplCreateThreadHandler.ServeHTTP(w, r)
+		case AgentReplRequestNewThreadProcedure:
+			agentReplRequestNewThreadHandler.ServeHTTP(w, r)
+		case AgentReplWatchChatProcedure:
+			agentReplWatchChatHandler.ServeHTTP(w, r)
+		case AgentReplSwitchChatSiblingProcedure:
+			agentReplSwitchChatSiblingHandler.ServeHTTP(w, r)
+		case AgentReplReportChatSightingsProcedure:
+			agentReplReportChatSightingsHandler.ServeHTTP(w, r)
+		case AgentReplSelectChatTextProcedure:
+			agentReplSelectChatTextHandler.ServeHTTP(w, r)
+		case AgentReplSearchChatsProcedure:
+			agentReplSearchChatsHandler.ServeHTTP(w, r)
 		case AgentReplWatchTopbarProcedure:
 			agentReplWatchTopbarHandler.ServeHTTP(w, r)
 		case AgentReplSetModelProcedure:
@@ -3565,6 +3786,38 @@ func (UnimplementedAgentReplHandler) UpdateTask(context.Context, *connect.Reques
 
 func (UnimplementedAgentReplHandler) AssignWorkspaceTask(context.Context, *connect.Request[v1.AssignWorkspaceTaskRequest]) (*connect.Response[v1.AssignWorkspaceTaskResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AssignWorkspaceTask is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ShowSidebarApp(context.Context, *connect.Request[v1.ShowSidebarAppRequest]) (*connect.Response[v1.ShowSidebarAppResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ShowSidebarApp is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) CreateThread(context.Context, *connect.Request[v1.CreateThreadRequest]) (*connect.Response[v1.CreateThreadResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.CreateThread is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RequestNewThread(context.Context, *connect.Request[v1.RequestNewThreadRequest]) (*connect.Response[v1.RequestNewThreadResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RequestNewThread is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) WatchChat(context.Context, *connect.Request[v1.WatchChatRequest], *connect.ServerStream[v1.WatchChatResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchChat is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SwitchChatSibling(context.Context, *connect.Request[v1.SwitchChatSiblingRequest]) (*connect.Response[v1.SwitchChatSiblingResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SwitchChatSibling is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReportChatSightings(context.Context, *connect.Request[v1.ReportChatSightingsRequest]) (*connect.Response[v1.ReportChatSightingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportChatSightings is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SelectChatText(context.Context, *connect.Request[v1.SelectChatTextRequest]) (*connect.Response[v1.SelectChatTextResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectChatText is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SearchChats(context.Context, *connect.Request[v1.SearchChatsRequest]) (*connect.Response[v1.SearchChatsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SearchChats is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) WatchTopbar(context.Context, *connect.Request[v1.WatchTopbarRequest], *connect.ServerStream[v1.WatchTopbarResponse]) error {

@@ -153,6 +153,10 @@ message WatchDaemonResponse {
     // ONLY on an Emacs stream, and never replayed: a host loaded later states
     // its own build, and a deploy that runs after it compares that.
     DaemonReloadWebhost reload_webhost = 11;
+    // THE SIDEBAR'S NEW-THREAD BUTTON WAS CLICKED (RequestNewThread): open
+    // the new-thread prompt, as the new-thread binding does. An event, not
+    // state: never replayed to a late subscriber.
+    DaemonNewThreadRequested new_thread_requested = 12;
   }
 }
 
@@ -270,3 +274,6 @@ message DaemonDrainScheduled {
 // Presence is the fact: the schedule was cancelled.
 message DaemonDrainCancelled {
 }
+
+// Open the new-thread prompt. DELIBERATELY EMPTY: the click is the whole fact.
+message DaemonNewThreadRequested {}

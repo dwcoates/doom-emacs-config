@@ -61,6 +61,10 @@ import {
   type WatchTopbarResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
 import {
+  WatchChatResponseSchema,
+  type WatchChatRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_chat_pb";
+import {
   WatchWorkspaceRosterResponseSchema,
   type WatchWorkspaceRosterRequest,
   type WatchWorkspaceRosterResponse,
@@ -979,6 +983,23 @@ export function createFakeDaemon(): FakeDaemon {
     return iterate();
   };
 
+  /** A thread's chat view: the empty view until a test publishes another. */
+  const chatSource = (request: WatchChatRequest, signal: AbortSignal): AsyncGenerator<object> => {
+    record("watchChat", request);
+    consumeFailure("watchChat");
+    const workspace = request.thread?.id ?? "";
+    const { channel, iterate } = openStream("watchChat", workspace, signal);
+    channel.push(
+      taint(
+        "watchChat",
+        create(WatchChatResponseSchema, {
+          view: { state: { case: "empty", value: { hint: { text: "Ask your first question in the composer." } } } },
+        }),
+      ),
+    );
+    return iterate();
+  };
+
   /**
    * Open the source one `SubscribePage` arm stands for.
    *
@@ -1005,6 +1026,8 @@ export function createFakeDaemon(): FakeDaemon {
         return feedSource(request.value, signal);
       case "loginTerminal":
         return loginTerminalSource(request.value, signal);
+      case "chat":
+        return chatSource(request.value, signal);
       case undefined:
         throw new ConnectError(
           "SubscribePageRequest.request is required and no arm was set",
@@ -1633,7 +1656,7 @@ export function createFakeDaemon(): FakeDaemon {
       adoptWebWorkspace(request) {
         record("adoptWebWorkspace", request);
         return answerFor("adoptWebWorkspace", AdoptWebWorkspaceResponseSchema, {
-          result: { case: "success", value: {} },
+          result: { case: "success", value: { page: { kind: { case: "agent", value: {} } } } },
         });
       },
 

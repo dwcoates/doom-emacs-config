@@ -1,0 +1,149 @@
+// zettel.proto — the zettel.v1 package's shared datatypes: the identities of a
+// thread, a node and the turn an exchange is, a node's parent, and the node
+// record the graph reads serve.
+//
+// ZETTEL HOLDS THE KNOWLEDGE GRAPH AND NOTHING ELSE. Conversation transcripts
+// stay in agent-repl's store; zettel keeps its OWN COPY of each question and
+// answer, taken when the node is created, because a node's question and answer
+// can later be revised while a stored transcript never changes. Nothing here
+// points into the store for its content.
+//
+// THE DAEMON IS THE ONLY CALLER. Clients reach zettel through the daemon's
+// agentrepl.v1 verbs, which resolve into these.
+
+syntax = "proto3";
+
+package zettel.v1;
+
+option go_package = "agentrepl/proto/zettel/v1;zettelv1";
+
+// ---- Identities ----
+
+// A thread: one chat, its root node and every node beneath it. The id is the
+// daemon-minted workspace id of the thread's workspace (a thread is a kind of
+// workspace to the daemon), handed to zettel unchanged. Zettel never parses
+// it and never mints one; a thread exists in zettel once its first node is
+// recorded.
+message ThreadId {
+  // The daemon's opaque workspace id, compared byte-wise.
+  string id = 1;
+}
+
+// A node: one question and its answer, as zettel identifies it. Minted by
+// zettel when an exchange is recorded; opaque to every caller, which hands it
+// back unchanged.
+message NodeId {
+  // Zettel's opaque node id, compared byte-wise.
+  string id = 1;
+}
+
+// The daemon turn an exchange is: the turn whose prompt is the question and
+// whose final response is the answer. RecordExchange is idempotent by it, so a
+// turn's answer learned twice (live, then on a replay) is one node.
+message ExchangeTurn {
+  // The daemon's opaque turn id (conversation.v1.TurnId's value), compared
+  // byte-wise.
+  string turn_id = 1;
+}
+
+// One version of a node's answer. Revision 1 is the answer as first given;
+// a correction adds the next number and never rewrites an earlier one.
+message RevisionNumber {
+  // 1 for the answer as first given, counting up by one per revision.
+  uint32 number = 1;
+}
+
+// ---- A node's parent ----
+
+// Where a node's question came from. A node has at most one parent, so the
+// parents form a tree per thread; the set arm IS the kind of origin.
+message NodeParent {
+  // The origin: another node in the same thread, or the start of the thread.
+  // Exactly one is set on every stored node.
+  oneof origin {
+    NodeParentNode node = 1;
+    NodeParentThreadStart thread_start = 2;
+  }
+}
+
+// The question was asked of another node's answer, in the same thread.
+message NodeParentNode {
+  // The node whose answer the question was asked of.
+  NodeId node = 1;
+  // Which revision of that answer the asker was reading, so the question
+  // still makes sense after the answer is corrected.
+  RevisionNumber revision = 2;
+  // The exact words the asker highlighted in that answer. UNSET when the
+  // question was asked of the answer as a whole.
+  optional NodeQuote quote = 3;
+}
+
+// The question opened the thread: nothing in zettel precedes it. A thread
+// has exactly one node with this origin, its root.
+message NodeParentThreadStart {}
+
+// Highlighted words a question was asked about, with the text around them.
+message NodeQuote {
+  // The highlighted words, verbatim.
+  string text = 1;
+  // The text surrounding the highlight that gives it meaning, as the view the
+  // highlight was made in chose it (for an answer, the answer's paragraph).
+  // UNSET when the view captured none. Spoken of as the quote's "context".
+  optional NodeQuoteContext question_context = 2;
+}
+
+// The text around a highlight. Its own message so the context element can
+// grow (its source range, say) without touching the quote.
+message NodeQuoteContext {
+  // The surrounding text, verbatim.
+  string text = 1;
+}
+
+// ---- The node record ----
+
+// A node as the graph reads serve it: its identity, origin, question and
+// current answer, and how often it has been seen.
+message Node {
+  // The node's identity.
+  NodeId id = 1;
+  // The thread the node belongs to.
+  ThreadId thread = 2;
+  // Where the node's question came from.
+  NodeParent parent = 3;
+  // The question, as zettel copied it when the node was recorded.
+  NodeQuestion question = 4;
+  // The answer's newest revision. Earlier revisions are kept but not served
+  // here.
+  NodeRevision answer = 5;
+  // When the node was recorded, in Unix milliseconds.
+  int64 created_at_ms = 6;
+  // How many times the node has been seen in a consumer UI.
+  NodeSightings sightings = 7;
+  // The daemon turn the node is: the turn whose prompt was its question.
+  ExchangeTurn turn = 8;
+}
+
+// A node's question text.
+message NodeQuestion {
+  // The question, verbatim as asked (the prompt the user typed, without any
+  // quoted material the daemon added for the model).
+  string text = 1;
+}
+
+// One revision of a node's answer.
+message NodeRevision {
+  // Which revision this is.
+  RevisionNumber number = 1;
+  // The answer, as markdown.
+  string markdown = 2;
+  // When this revision was written, in Unix milliseconds.
+  int64 written_at_ms = 3;
+}
+
+// How often a node has been seen: a sighting is one bubble fully on screen in
+// a consumer UI, as the daemon reports it. The chat's branch pick follows the
+// least-seen child, so this count drives which branch is drawn.
+message NodeSightings {
+  // The number of sightings recorded, starting at zero.
+  uint64 count = 1;
+}

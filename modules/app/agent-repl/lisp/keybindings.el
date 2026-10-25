@@ -146,7 +146,11 @@ the module."
        :desc "Switch to the previously selected workspace" "TAB" #'agent-repl-switch-to-previous-workspace
        :desc "Switch to the workspace that most recently finished" "g" #'agent-repl-switch-to-last-finished-workspace
        :desc "Swap workspace with tab (digit, 0 = 10)" "p" #'agent-repl-workspace-swap
-       :desc "Move workspace onto tab (digit, 0 = 10)" "P" #'agent-repl-workspace-move))
+       :desc "Move workspace onto tab (digit, 0 = 10)" "P" #'agent-repl-workspace-move
+       ;; Chat threads (threads.el): never on the tab bar, so reached here.
+       :desc "New chat thread" "t" #'agent-repl-thread-new
+       :desc "Open the most recent chat thread" "T" #'agent-repl-thread-recent
+       :desc "Open a chat thread by name" "." #'agent-repl-thread-pick))
 
 ;; Tabs follow ROSTER ORDER strictly (the resolver orders them, priority
 ;; included), so these two are navigation over a given order and never a

@@ -1,4 +1,4 @@
-// Package buildreport is how a launchd SERVICE — the store, the sidecar —
+// Package buildreport is how a launchd SERVICE — the store, the sidecar, zettel —
 // reports the build it is running, so the daemon's deploy can tell whether it
 // is out of date.
 //
@@ -36,6 +36,8 @@ const (
 	ServiceStore = "shim-store"
 	// ServiceSidecar is agent-shim/claude/shim-sidecar.
 	ServiceSidecar = "shim-claude-sidecar"
+	// ServiceZettel is zettel, the knowledge graph service.
+	ServiceZettel = "zettel"
 )
 
 // Report is one service's statement of what it runs.

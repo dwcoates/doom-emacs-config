@@ -29,6 +29,9 @@ const (
 	HeadingResponse = "⟢ Replying to an earlier response of yours"
 	// HeadingPrompt names a quoted PROMPT: it was not the agent's response.
 	HeadingPrompt = "⟢ Replying to an earlier prompt in this conversation"
+	// HeadingHighlight names words the person highlighted in a response of
+	// the agent's, to ask about them (a zettel chat thread's quote).
+	HeadingHighlight = "⟢ Asking about these words from an earlier response of yours"
 	// LabelResponse is how a prompt bubble NAMES a quoted response of the
 	// agent's (owner request, 2026-10-20): shorter than HeadingResponse, which
 	// stays what the agent is told, so the bubble's label can change without
@@ -41,6 +44,8 @@ const (
 	openingResponse = HeadingResponse + ":\n\n"
 	// openingPrompt introduces a quoted PROMPT.
 	openingPrompt = HeadingPrompt + ":\n\n"
+	// openingHighlight introduces highlighted words.
+	openingHighlight = HeadingHighlight + ":\n\n"
 	// closing introduces the person's own words. It ENDS IN A NEWLINE because
 	// the blocks of a prompt are delivered joined by one, so the person's words
 	// follow it after a blank line.
@@ -84,14 +89,21 @@ func Block(markdown string, prompt bool, quotedRow string) *conversationv1.UserC
 	if prompt {
 		opening = openingPrompt
 	}
-	text := opening + Fenced(markdown) + closing
+	return quoteBlock(opening, markdown, quotedRow)
+}
+
+// quoteBlock is THE quote block: OPENING, the quoted text inside its code
+// fence, and the marker introducing the person's words, naming QUOTEDROW.
+func quoteBlock(opening, quoted, quotedRow string) *conversationv1.UserContentBlock {
+	text := opening + Fenced(quoted) + closing
 	return &conversationv1.UserContentBlock{
 		Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{Text: text, QuotedRow: quotedRow}},
 	}
 }
 
 // Parts is a composed quote taken apart again: the heading a bubble draws
-// naming what is quoted (LabelResponse or HeadingPrompt, without its colon),
+// naming what is quoted (LabelResponse, HeadingPrompt or HeadingHighlight,
+// without its colon),
 // the quoted
 // markdown unfenced, and the marker introducing the person's words
 // (ClosingMarker, without its colon). A client draws each part in its own
@@ -116,6 +128,8 @@ func Split(text string) (Parts, error) {
 		heading, rest = LabelResponse, text[len(openingResponse):]
 	case strings.HasPrefix(text, openingPrompt):
 		heading, rest = HeadingPrompt, text[len(openingPrompt):]
+	case strings.HasPrefix(text, openingHighlight):
+		heading, rest = HeadingHighlight, text[len(openingHighlight):]
 	default:
 		return Parts{}, ErrNotComposed
 	}
@@ -139,8 +153,20 @@ func Split(text string) (Parts, error) {
 // naming QUOTEDROW, the quoted bubble's feed row. SAID itself
 // is not modified.
 func Quote(said *conversationv1.UserSaid, markdown string, prompt bool, quotedRow string) *conversationv1.UserSaid {
+	return prepend(said, Block(markdown, prompt, quotedRow))
+}
+
+// Highlighted is SAID asking about WORDS the person highlighted in one of the
+// agent's responses: the words' quote ahead of every block the person
+// composed. The highlight quotes no feed row. SAID itself is not modified.
+func Highlighted(said *conversationv1.UserSaid, words string) *conversationv1.UserSaid {
+	return prepend(said, quoteBlock(openingHighlight, words, ""))
+}
+
+// prepend is SAID with QUOTE ahead of its blocks.
+func prepend(said *conversationv1.UserSaid, quote *conversationv1.UserContentBlock) *conversationv1.UserSaid {
 	blocks := make([]*conversationv1.UserContentBlock, 0, len(said.GetContent().GetBlocks())+1)
-	blocks = append(blocks, Block(markdown, prompt, quotedRow))
+	blocks = append(blocks, quote)
 	blocks = append(blocks, said.GetContent().GetBlocks()...)
 	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}
 }

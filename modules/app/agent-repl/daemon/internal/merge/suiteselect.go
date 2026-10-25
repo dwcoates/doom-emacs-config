@@ -136,16 +136,18 @@ var suiteRules = []suiteRule{
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "sidecar", "e2e", "e2e-emacs", repoScans}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar", "e2e", "e2e-emacs", repoScans}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store", "e2e", "e2e-emacs", repoScans}},
+	// zettel, the knowledge graph service: its own suite.
+	{Kind: matchSubtree, Path: moduleRoot + "zettel/", Suites: []string{"zettel", repoScans}},
 	// The shim's integration files, and the sidecar's mocked vendor, spawn the
 	// real lock helper.
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-lock/", Suites: []string{"lock", "shim", "sidecar", "e2e", "e2e-emacs", repoScans}},
 
 	// SHARED BY SEVERAL SYSTEMS: their consumers, plus the end-to-end suites.
 	// The logging module's Go half is replaced into the daemon, the store, the
-	// sidecar, the lock helper and the test runner; its TS half is imported by the shim and the
+	// sidecar, the lock helper, the test runner and zettel; its TS half is imported by the shim and the
 	// webapp (whose build harness builds the webapp).
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{
-		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "shim", "webapp", "build-frontend-harness", testrunSuite, "e2e", "e2e-emacs", repoScans}},
+		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "zettel", "shim", "webapp", "build-frontend-harness", testrunSuite, "e2e", "e2e-emacs", repoScans}},
 	// The TLDR-tree grammars: their consumer, the daemon (which parses every
 	// drawn text with tldr through cgo, internal/prose, and holds its reading
 	// to tldr's golden answers), the end-to-end suites whose real daemon serves

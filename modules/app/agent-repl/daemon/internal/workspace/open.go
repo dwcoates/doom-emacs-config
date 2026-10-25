@@ -287,6 +287,25 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 	unrestorable := func(detail string) error {
 		return refuseUnrestorable(log, rpc, record, detail)
 	}
+	// A CHAT THREAD'S DIRECTORY HOLDS NOTHING BUT ITS RECORDS: its graph is
+	// zettel's and its transcript the store's. So it is made again, with no
+	// branch to restore and no repository to ask.
+	if record.IsThread() {
+		if err := os.MkdirAll(record.Dir, 0o755); err != nil {
+			log.Error(opOpen, "could not make the thread's directory again", dlog.Context{"dir": record.Dir, "cause": err.Error()})
+			return nil, fmt.Errorf("open %q: make the thread's directory %q: %w", record.ID, record.Dir, err)
+		}
+		log = v.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(record.ID)})
+		log.Info(opOpen, "the thread's directory was gone; it was made again", dlog.Context{"dir": record.Dir})
+		if err := v.bindResolvers(log, record.ID, record.Dir); err != nil {
+			return nil, fmt.Errorf("open %q: bind the thread's views: %w", record.ID, err)
+		}
+		if err := v.publishNaming(ctx, log, record); err != nil {
+			log.Error(opOpen, "could not publish the thread's naming", dlog.Context{"dir": record.Dir, "cause": err.Error()})
+			return nil, fmt.Errorf("open %q: publish the thread's naming: %w", record.ID, err)
+		}
+		return log, nil
+	}
 	// A MERGED WORKSPACE IS RESTORED LIKE ANY OTHER: the merge keeps its
 	// branch, and opening one is the user taking it back to revise it.
 	if record.Branch == "" {

@@ -64,7 +64,7 @@ interface BootRecord {
   /** The rejection `main.ts` handed to `queueMicrotask` to re-raise. */
   rethrown: (() => void)[];
   /** What `adoptAtBoot` does when the boot reaches it. */
-  adopt: () => Promise<void | "deferred" | "moved">;
+  adopt: () => Promise<import("../src/lifecycle/lifecycle.js").AdoptedPage | "deferred" | "moved">;
   /** The composer gate the boot built, so the footer's status can be read off it. */
   gateSet: Mock;
   /** The footer's status subscriber, captured so a test can drive it. */
@@ -76,6 +76,8 @@ interface BootRecord {
   loginOpen: Mock;
   /** The footer's `selectDetachedWork`, and the feed handle's it must reach. */
   footerSelectDetachedWork: ((id: unknown) => void) | null;
+  /** The reveal the page bound for the daemon's reveal_row asks. */
+  revealRow: ((id: { value: string }) => Promise<boolean>) | null;
   feedSelectDetachedWork: Mock;
   /** The feed's "this workspace was switched to", as the boot wires it. */
   feedWorkspaceSelected: Mock;
@@ -90,6 +92,7 @@ interface BootRecord {
     sidebar: Mock;
     topbar: Mock;
     feed: Mock;
+    chat: Mock;
     footer: Mock;
     composer: Mock;
     login: Mock;
@@ -103,13 +106,14 @@ function freshRecord(): BootRecord {
     clientLogFails: false,
     clientLogs: [],
     rethrown: [],
-    adopt: async () => {},
+    adopt: async () => ({ outcome: "no-transfer", page: "agent" }),
     gateSet: vi.fn(),
     onFooterStatus: null,
     onComposerPanel: null,
     openLogin: null,
     loginOpen: vi.fn(),
     footerSelectDetachedWork: null,
+    revealRow: null,
     feedSelectDetachedWork: vi.fn(),
     feedWorkspaceSelected: vi.fn(),
     feedDeps: null,
@@ -119,6 +123,7 @@ function freshRecord(): BootRecord {
       sidebar: vi.fn(),
       topbar: vi.fn(),
       feed: vi.fn(),
+      chat: vi.fn(),
       footer: vi.fn(),
       composer: vi.fn(),
       login: vi.fn(),
@@ -223,6 +228,14 @@ async function runBoot(rec: BootRecord): Promise<void> {
       },
     })),
   }));
+  vi.doMock("../src/lifecycle/reveal-relay.js", () => ({
+    createRevealRelay: () => ({
+      request: vi.fn(),
+      bind: (fn: (id: { value: string }) => Promise<boolean>) => {
+        rec.revealRow = fn;
+      },
+    }),
+  }));
   vi.doMock("../src/lifecycle/lifecycle.js", () => ({
     adoptAtBoot: vi.fn(async () => {
       rec.order.push("adopt");
@@ -278,6 +291,12 @@ async function runBoot(rec: BootRecord): Promise<void> {
         };
       },
     ),
+  }));
+  vi.doMock("../src/chat/chat.js", () => ({
+    mountChat: rec.mounts.chat.mockImplementation(() => {
+      rec.order.push("chat");
+      return { dispose: vi.fn() };
+    }),
   }));
   vi.doMock("../src/feed/renderers.js", () => ({
     createRowRenderers: vi.fn(() => ({})),
@@ -576,6 +595,39 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     await bootMain();
 
     expect(page.order.indexOf("adopt")).toBeLessThan(page.order.indexOf("topbar"));
+  });
+
+  test("mounts the chat in the feed's box, and no feed, on a chat thread's page", async () => {
+    page.adopt = async () => ({ outcome: "no-transfer", page: "thread" });
+
+    await bootMain();
+
+    expect(page.mounts.chat.mock.calls[0]?.[0]).toBe(document.getElementById("feed"));
+    expect(page.mounts.feed).not.toHaveBeenCalled();
+    expect(page.order.indexOf("chat")).toBeLessThan(page.order.indexOf("footer"));
+  });
+
+  test("mounts the feed, and no chat, on an agent workspace's page", async () => {
+    await bootMain();
+
+    expect(page.mounts.feed).toHaveBeenCalledTimes(1);
+    expect(page.mounts.chat).not.toHaveBeenCalled();
+  });
+
+  test("a footer jump row reaching a chat thread is a refused defect", async () => {
+    page.adopt = async () => ({ outcome: "no-transfer", page: "thread" });
+    await bootMain();
+
+    await expect(
+      (page.footerSelectDetachedWork as unknown as (id: { value: string }) => Promise<boolean>)({ value: "row-1" }),
+    ).rejects.toThrow("a chat thread has no feed row row-1");
+  });
+
+  test("a reveal_row ask reaching a chat thread is a refused defect", async () => {
+    page.adopt = async () => ({ outcome: "no-transfer", page: "thread" });
+    await bootMain();
+
+    await expect(page.revealRow?.({ value: "row-1" })).rejects.toThrow("a chat thread has no feed row row-1");
   });
 
   test("mounts the feed before the footer whose jump rows reveal its rows", async () => {
@@ -901,8 +953,8 @@ describe("the harness", { timeout: BOOT_TIMEOUT_MS }, () => {
     let releaseAdoption: () => void = () => {};
     straggler.adopt = () => {
       reachedAdoption();
-      return new Promise<void>((resolve) => {
-        releaseAdoption = resolve;
+      return new Promise((resolve) => {
+        releaseAdoption = () => resolve({ outcome: "no-transfer", page: "agent" });
       });
     };
     const boot = bootMain();

@@ -1523,6 +1523,8 @@ message FooterStatusActivityUpdateComponent {
     FooterStatusActivityUpdateComponentShim shim = 4;
     // This webapp.
     FooterStatusActivityUpdateComponentWebapp webapp = 5;
+    // The zettel knowledge-graph service.
+    FooterStatusActivityUpdateComponentZettel zettel = 6;
   }
 }
 // The record store service.
@@ -1535,6 +1537,8 @@ message FooterStatusActivityUpdateComponentDaemon {}
 message FooterStatusActivityUpdateComponentShim {}
 // This webapp.
 message FooterStatusActivityUpdateComponentWebapp {}
+// The zettel knowledge-graph service.
+message FooterStatusActivityUpdateComponentZettel {}
 // One thing the deploy deferred on this workspace.
 message FooterStatusActivityUpdateNote {
   oneof note {

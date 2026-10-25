@@ -117,6 +117,14 @@ import "agentrepl/v1/endpoint_compact_workspace.proto";
 import "agentrepl/v1/endpoint_set_workspace_correspondence.proto";
 import "agentrepl/v1/endpoint_set_workspace_principal_link.proto";
 import "agentrepl/v1/endpoint_set_workspace_one_shot.proto";
+import "agentrepl/v1/endpoint_create_thread.proto";
+import "agentrepl/v1/endpoint_request_new_thread.proto";
+import "agentrepl/v1/endpoint_watch_chat.proto";
+import "agentrepl/v1/endpoint_switch_chat_sibling.proto";
+import "agentrepl/v1/endpoint_report_chat_sightings.proto";
+import "agentrepl/v1/endpoint_select_chat_text.proto";
+import "agentrepl/v1/endpoint_search_chats.proto";
+import "agentrepl/v1/endpoint_show_sidebar_app.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -330,6 +338,26 @@ service AgentRepl {
   // Assign a workspace to a task, or unassign it. See
   // endpoint_assign_workspace_task.proto.
   rpc AssignWorkspaceTask(AssignWorkspaceTaskRequest) returns (AssignWorkspaceTaskResponse);
+
+  // Show an app's most recent workspace: the rail title's dropdown.
+  rpc ShowSidebarApp(ShowSidebarAppRequest) returns (ShowSidebarAppResponse);
+
+  // ---- CHAT: zettel threads, their chat view and its gestures ----
+
+  // Start a thread with its first question.
+  rpc CreateThread(CreateThreadRequest) returns (CreateThreadResponse);
+  // The sidebar's new-thread button: ask Emacs to open its new-thread prompt.
+  rpc RequestNewThread(RequestNewThreadRequest) returns (RequestNewThreadResponse);
+  // One thread's chat view, pushed whole on every change.
+  rpc WatchChat(WatchChatRequest) returns (stream WatchChatResponse);
+  // Show a bubble's previous or next sibling.
+  rpc SwitchChatSibling(SwitchChatSiblingRequest) returns (SwitchChatSiblingResponse);
+  // Answer bubbles were seen.
+  rpc ReportChatSightings(ReportChatSightingsRequest) returns (ReportChatSightingsResponse);
+  // Hold or clear the thread's highlight.
+  rpc SelectChatText(SelectChatTextRequest) returns (SelectChatTextResponse);
+  // The threads whose chats say the sidebar search's words.
+  rpc SearchChats(SearchChatsRequest) returns (SearchChatsResponse);
 
   // ---- TOPBAR ----
 

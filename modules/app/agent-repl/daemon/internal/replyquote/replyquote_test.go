@@ -349,3 +349,60 @@ func TestSplitRefusesTextBlockDidNotCompose(t *testing.T) {
 		})
 	}
 }
+
+func TestHighlighted(t *testing.T) {
+	cases := []struct {
+		name  string
+		said  *conversationv1.UserSaid
+		words string
+		want  *conversationv1.UserSaid
+	}{
+		{
+			name:  "the words' quote leads the person's blocks",
+			said:  said(text("why?")),
+			words: "the sky is blue",
+			want: said(quote("⟢ Asking about these words from an earlier response of yours:\n\n```\nthe sky is blue\n```\n\n⟢ My message:\n"),
+				text("why?")),
+		},
+		{
+			name:  "words carrying a fence get a longer one",
+			said:  said(text("why?"), image("/a.png")),
+			words: "```x```",
+			want: said(quote("⟢ Asking about these words from an earlier response of yours:\n\n````\n```x```\n````\n\n⟢ My message:\n"),
+				text("why?"), image("/a.png")),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			before := proto.Clone(tc.said)
+
+			// Act
+			got := Highlighted(tc.said, tc.words)
+
+			// Assert
+			if !proto.Equal(got, tc.want) {
+				t.Fatalf("Highlighted = %v, want %v", got, tc.want)
+			}
+			if !proto.Equal(tc.said, before) {
+				t.Fatal("Highlighted modified the said it was given")
+			}
+		})
+	}
+}
+
+func TestSplitTakesAHighlightApart(t *testing.T) {
+	// Arrange
+	composed := Highlighted(said(text("why?")), "the sky is blue").GetContent().GetBlocks()[0].GetQuote().GetText()
+
+	// Act
+	got, err := Split(composed)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Split: %v", err)
+	}
+	if want := (Parts{Heading: HeadingHighlight, Quoted: "the sky is blue", Closing: ClosingMarker}); got != want {
+		t.Fatalf("Split = %+v, want %+v", got, want)
+	}
+}

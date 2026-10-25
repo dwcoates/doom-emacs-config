@@ -13,7 +13,7 @@
 # looks exactly like a fix that does not work. This report makes that state
 # visible instead of leaving it to be rediscovered during a debugging session.
 #
-# Systems reported: daemon, shim, webapp, shim-store, shim-claude-sidecar,
+# Systems reported: daemon, shim, webapp, shim-store, shim-claude-sidecar, zettel,
 # shim-lock. shim-lock has no long-lived process — it lives exactly as long as
 # the claim it holds — so it reports staleness only, never a running build.
 #
@@ -154,7 +154,7 @@ REL_ROOT="$(deploy_stamp_rel_root "$REPO_ROOT" "$ROOT")"
 
 CACHE_BIN="$HOME/.cache/agent-repl/bin"
 
-SYSTEMS=(daemon shim webapp shim-store shim-claude-sidecar shim-lock)
+SYSTEMS=(daemon shim webapp shim-store shim-claude-sidecar shim-lock zettel)
 
 system_known() {
     local system
@@ -184,6 +184,7 @@ system_stamp() {
         shim-store)          printf '%s' "$CACHE_BIN/.shim-store.built-sha" ;;
         shim-claude-sidecar) printf '%s' "$CACHE_BIN/.shim-claude-sidecar.built-sha" ;;
         shim-lock)           printf '%s' "$CACHE_BIN/.shim-lock.built-sha" ;;
+        zettel)              printf '%s' "$CACHE_BIN/.zettel.built-sha" ;;
         *) return 1 ;;
     esac
 }
@@ -207,6 +208,7 @@ system_tree_stamp() {
         shim-store)          printf '%s' "$CACHE_BIN/.shim-store.source-tree" ;;
         shim-claude-sidecar) printf '%s' "$CACHE_BIN/.shim-claude-sidecar.source-tree" ;;
         shim-lock)           printf '%s' "$CACHE_BIN/.shim-lock.source-tree" ;;
+        zettel)              printf '%s' "$CACHE_BIN/.zettel.source-tree" ;;
         *) return 1 ;;
     esac
 }
@@ -224,6 +226,7 @@ system_process_match() {
         daemon)              printf '%s' "$ROOT/daemon/bin/agent-repld" ;;
         shim-store)          printf '%s' "$CACHE_BIN/shim-store" ;;
         shim-claude-sidecar) printf '%s' "$CACHE_BIN/shim-claude-sidecar" ;;
+        zettel)              printf '%s' "$CACHE_BIN/zettel" ;;
         *) printf '' ;;
     esac
 }

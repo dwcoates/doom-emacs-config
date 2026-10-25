@@ -35,7 +35,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "the shared logging module selects its consumers and the cross-system suite",
 			paths: []string{"modules/app/agent-repl/agent-shim/logging/go/log.go"},
-			want:  []string{"daemon", "sidecar", "store", "lock", "shim", "webapp", "build-frontend-harness", "testrun", "logging", "logging-density", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"daemon", "sidecar", "store", "lock", "zettel", "shim", "webapp", "build-frontend-harness", "testrun", "logging", "logging-density", "e2e", "e2e-emacs", "repo-scans"},
 		},
 		{
 			name:  "an ordinary bin script selects the script harnesses",
@@ -81,6 +81,11 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			name:  "a sidecar change selects the sidecar suite and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/agent-shim/claude/shim-sidecar/main.go"},
 			want:  []string{"sidecar", "e2e", "e2e-emacs", "repo-scans"},
+		},
+		{
+			name:  "zettel selects its own suite and the scans",
+			paths: []string{"modules/app/agent-repl/zettel/main.go"},
+			want:  []string{"zettel", "repo-scans"},
 		},
 		{
 			name:  "a store change selects the store suite and the end-to-end suites",

@@ -44,6 +44,9 @@ type (
 // Workspace is one registered workspace's durable record.
 type Workspace struct {
 	ID WorkspaceID
+	// Kind is what the workspace is: a repository's worktree, or a zettel
+	// chat thread (threads.go).
+	Kind WorkspaceKind
 	// Repo is the repository the worktree belongs to.
 	Repo RepoID
 	// Dir is the normalized worktree directory.
@@ -239,6 +242,9 @@ type Repository struct {
 	// repository grouping and the tab bar both follow (arrange.go). Unique,
 	// and at least 1.
 	Place int64
+	// Kind is what the row is: a git repository, or the zettel home that holds
+	// every chat thread (threads.go).
+	Kind RepositoryKind
 }
 
 // Subsection is one user-named subsection of a repository's sidebar section
@@ -592,6 +598,9 @@ type HeldPrompt struct {
 	// Coalesced records that later prompts were folded into this one while it
 	// was still queued, so the tray can say so.
 	Coalesced bool
+	// Ask is where a zettel thread prompt's question was asked from, carried
+	// until it is delivered (threads.go); nil for every other prompt.
+	Ask *ThreadAsk
 }
 
 // HeldAct is a session act held in the queue.
@@ -747,6 +756,9 @@ type Turn struct {
 	ClosedAt *time.Time
 	// Close is how it ended, nil while it runs.
 	Close *TurnClose
+	// Question is a zettel thread turn's question and origin (threads.go); nil
+	// for every other turn.
+	Question *ThreadQuestion
 }
 
 // TurnClose is how a turn ended.

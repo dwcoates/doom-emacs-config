@@ -60,6 +60,7 @@ func (q *queue) deliver(ctx context.Context, d *delivery, sub Submission, sender
 		Origin:    sub.Origin.String(),
 		SentBy:    sub.SentBy,
 		StartedAt: q.deps.Now(),
+		Question:  threadQuestionOf(sub),
 	}
 	if err := q.recordTurn(ctx, record, log); err != nil {
 		log.Error(opDeliver, "could not record the turn before delivering it", dlog.Context{"cause": err.Error()})
@@ -400,4 +401,14 @@ func (q *queue) ackTurn(ws ids.WorkspaceID) {
 func (q *queue) setTurn(ws ids.WorkspaceID, turn *footer.TurnStarted) {
 	q.deps.Footer.SetTurn(ws, turn)
 	q.deps.Sidebar.SetTurn(ws, turn)
+}
+
+// threadQuestionOf is a thread question's record on its turn: the words the
+// user typed, as they stand at delivery (an edit while held is already in
+// them), and where they asked them from. Nil for every other submission.
+func threadQuestionOf(sub Submission) *wsm.ThreadQuestion {
+	if sub.Ask == nil {
+		return nil
+	}
+	return &wsm.ThreadQuestion{Text: saidText(sub.Said), Parent: sub.Ask.Parent}
 }

@@ -2690,22 +2690,24 @@ type fixture struct {
 	// creates is the create gate the verbs hold a ticket from.
 	creates *creategate.Gate
 	// home is the home directory a feed link's leading `~` expands to.
-	home     string
-	verbs    Verbs
-	db       *fakeDB
-	git      *fakeGit
-	account  *fakeAccounts
-	queue    *fakeQueue
-	merge    *fakeMerge
-	rollout  *fakeRollout
-	feed     *fakeFeed
-	footer   *fakeFooter
-	sidebar  *fakeSidebar
-	health   *fakeHealth
-	host     *fakeHost
-	banners  *fakeBanners
-	browser  *fakeBrowser
-	fleet    *fakeSessions
+	home    string
+	verbs   Verbs
+	db      *fakeDB
+	git     *fakeGit
+	account *fakeAccounts
+	queue   *fakeQueue
+	merge   *fakeMerge
+	rollout *fakeRollout
+	feed    *fakeFeed
+	footer  *fakeFooter
+	sidebar *fakeSidebar
+	health  *fakeHealth
+	host    *fakeHost
+	banners *fakeBanners
+	browser *fakeBrowser
+	fleet   *fakeSessions
+	// threads is the threads' graphs a nuke deletes.
+	threads  *fakeThreadGraphs
 	shim     *fakeShim
 	owner    *fakeOwnership
 	cards    *fakeCards
@@ -2788,6 +2790,7 @@ func newFixture(t *testing.T) *fixture {
 		banners:   &fakeBanners{},
 		browser:   &fakeBrowser{},
 		fleet:     newFakeSessions(),
+		threads:   &fakeThreadGraphs{},
 		shim:      &fakeShim{},
 		owner:     &fakeOwnership{standing: StandingOwned},
 		cards:     newFakeCards(),
@@ -2815,7 +2818,7 @@ func newFixture(t *testing.T) *fixture {
 		Instance: fixtureInstance,
 		DB:       f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, principalLinks: &f.topbarPrincipalLinks}, Browser: f.browser,
-		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet,
+		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads,
 		Headless:   f.headless,
 		Health:     f.health,
 		PromptsDir: "/prompts", CheckoutRoot: fixtureCheckoutRoot, HomeDir: f.home, Log: f.log,
@@ -2938,13 +2941,28 @@ func (f *fixture) mutable(t *testing.T) *verbs {
 // workspace registers one workspace in the fixture's fake registry. The
 // directory is NORMALIZED first, exactly as the real state client records it,
 // so a ref echoing any spelling of the same tree still matches.
+// fakeThreadGraphs records each thread whose graph was deleted, failing with
+// err when it is set.
+type fakeThreadGraphs struct {
+	deleted []ids.WorkspaceID
+	err     error
+}
+
+func (f *fakeThreadGraphs) Delete(_ context.Context, thread ids.WorkspaceID) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.deleted = append(f.deleted, thread)
+	return nil
+}
+
 func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 	normalized, err := normalizeDir(dir)
 	if err != nil {
 		panic(err)
 	}
 	dir = normalized
-	ws := wsm.Workspace{ID: id, Dir: dir, Repo: "repo-1", Name: "sample", Branch: "ABC/sample"}
+	ws := wsm.Workspace{ID: id, Kind: wsm.WorkspaceKindRepository, Dir: dir, Repo: "repo-1", Name: "sample", Branch: "ABC/sample"}
 	f.db.with(ws)
 	// A REAL DIRECTORY, because the roster no longer publishes a repository
 	// whose main worktree is gone (`withoutGoneRepositories'). The workspace's

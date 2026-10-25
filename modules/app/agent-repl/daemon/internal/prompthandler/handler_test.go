@@ -10,8 +10,10 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	zettelv1 "agentrepl/proto/zettel/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/replyquote"
@@ -985,5 +987,88 @@ func TestSubmitCarriesTheSenderIntoTheQueue(t *testing.T) {
 	forwarded := h.queue.forwarded()
 	if len(forwarded) != 1 || forwarded[0].SentBy == nil || *forwarded[0].SentBy != sender {
 		t.Fatalf("forwarded = %+v, want one submission sent by %s", forwarded, sender)
+	}
+}
+func threadAsk() *wsm.ThreadAsk {
+	return &wsm.ThreadAsk{Parent: &zettelv1.NodeParent{Origin: &zettelv1.NodeParent_ThreadStart{ThreadStart: &zettelv1.NodeParentThreadStart{}}}}
+}
+
+func TestSubmitThreadQuestionCarriesItsAskIntoTheQueue(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ask := threadAsk()
+
+	// Act
+	got, err := h.h.SubmitThreadQuestion(context.Background(), theWorkspace, userSaid("what are quarks?"), "key-1",
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, ask)
+
+	// Assert
+	if err != nil || got.Recognition != RecognizedNone {
+		t.Fatalf("outcome = %+v, err = %v, want an ordinary prompt", got, err)
+	}
+	forwarded := h.queue.forwarded()
+	if len(forwarded) != 1 || forwarded[0].Ask != ask || forwarded[0].Delivery != wsm.DeliveryOrdinary || forwarded[0].Target != nil {
+		t.Fatalf("forwarded = %+v, want the ask carried to the root feed", forwarded)
+	}
+}
+
+func TestSubmitThreadQuestionCarriesNoAskForACommand(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	got, err := h.h.SubmitThreadQuestion(context.Background(), theWorkspace, userSaid("/help"), "key-1",
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, threadAsk())
+
+	// Assert
+	if err != nil || got.Recognition == RecognizedNone {
+		t.Fatalf("outcome = %+v, err = %v, want the command recognized", got, err)
+	}
+	if forwarded := h.queue.forwarded(); len(forwarded) != 0 {
+		t.Fatalf("forwarded = %+v, want a command never queued as a question", forwarded)
+	}
+}
+
+func TestSubmitThreadQuestionWithNoAskPanics(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("a thread question with no ask did not panic")
+		}
+	}()
+
+	// Act
+	_, _ = h.h.SubmitThreadQuestion(context.Background(), theWorkspace, userSaid("q"), "key-1",
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
+}
+
+func TestRecognitionReadsTheSaidTextThroughHoldfold(t *testing.T) {
+	// Recognition reads a submission's text through the one reading the queue
+	// and the hold tray share, so a command they would recognize is the one
+	// recognized here.
+	tests := []struct {
+		name string
+		said *conversationv1.UserSaid
+	}{
+		{name: "one text block", said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+			{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "/compact keep the plan"}}},
+		}}}},
+		{name: "a reply's quote then the words", said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+			{Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{}}},
+			{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "/clear"}}},
+		}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := saidText(tt.said)
+
+			// Assert
+			if want := holdfold.SaidText(tt.said); got != want {
+				t.Fatalf("saidText = %q, want holdfold's %q", got, want)
+			}
+		})
 	}
 }

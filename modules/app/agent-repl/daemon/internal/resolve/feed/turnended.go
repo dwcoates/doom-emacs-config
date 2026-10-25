@@ -126,6 +126,8 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	if !suppress {
 		r.fileLiveEnding(s, *turn, ended, failure)
 	}
+	// A CHAT THREAD LEARNS ITS ANSWER HERE (chatsink.go), replayed or live.
+	r.tellTurnEnded(s, *turn, ended)
 
 	// THE TURN'S PROMPTS STOP WORKING ON THIS EDGE, whether or not the terminal
 	// row itself was drawn (a confirmed /clear suppresses it, and still ended).

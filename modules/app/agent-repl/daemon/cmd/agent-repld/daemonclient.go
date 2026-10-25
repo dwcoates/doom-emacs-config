@@ -1,14 +1,12 @@
 package main
 
 import (
+	"agent-repld/internal/h2cclient"
 	"context"
-	"crypto/tls"
 	"fmt"
-	"net"
 	"net/http"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
 
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 
@@ -28,13 +26,7 @@ func newDaemonClient(address string, options ...connect.ClientOption) agentreplv
 // h2cClient is the transport every verb dials the daemon with: HTTP/2 in
 // cleartext over the loopback.
 func h2cClient() *http.Client {
-	return &http.Client{Transport: &http2.Transport{
-		AllowHTTP: true,
-		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			var dialer net.Dialer
-			return dialer.DialContext(ctx, network, addr)
-		},
-	}}
+	return h2cclient.Client()
 }
 
 // daemonStream is a server stream a verb reads from the daemon, opened on a

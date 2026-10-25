@@ -1,0 +1,81 @@
+// endpoint_record_exchange.proto — RecordExchange: a question was answered, so
+// it becomes a node.
+
+syntax = "proto3";
+
+package zettel.v1;
+
+import "zettel/v1/zettel.proto";
+
+option go_package = "agentrepl/proto/zettel/v1;zettelv1";
+
+// Records one answered question as a node, its answer as revision 1.
+//
+// IDEMPOTENT BY TURN. The daemon calls this whenever it learns a thread turn's
+// final answer, which can happen more than once for one turn (the live ending,
+// then a replay of the same history after a restart). A turn already recorded
+// answers the node it became, unchanged, so a repeat never makes a second node.
+//
+// THE ORIGIN IS THE DAEMON'S UNTIL THEN. Where a question came from (its parent,
+// its quote) is decided when it is sent and rides the daemon's own durable
+// record of the prompt until the answer finishes, so zettel holds only answered
+// nodes and never a question in flight.
+message RecordExchangeRequest {
+  // The thread the question was asked in.
+  ThreadId thread = 1;
+  // The daemon turn whose prompt was the question and whose final response is
+  // the answer. The idempotency key.
+  ExchangeTurn turn = 2;
+  // Where the question came from.
+  NodeParent parent = 3;
+  // The question as the user typed it.
+  NodeQuestion question = 4;
+  // The final answer, as markdown, verbatim from the turn's final response.
+  string answer_markdown = 5;
+}
+
+// The outcome of RecordExchange.
+message RecordExchangeResponse {
+  // Success carries the node; failure says why none was recorded.
+  oneof result {
+    RecordExchangeSuccess success = 1;
+    RecordExchangeFailure failure = 2;
+  }
+}
+
+// The node the turn is recorded as: newly created, or the one an earlier call
+// for the same turn created.
+message RecordExchangeSuccess {
+  // The node.
+  Node node = 1;
+}
+
+// Nothing was recorded.
+message RecordExchangeFailure {
+  // A one-line human-readable account of the failure, for the log.
+  string detail = 1;
+  // Which failure it was.
+  oneof kind {
+    RecordExchangeStorageFailure storage_failure = 2;
+    RecordExchangeInvalidRequest invalid_request = 3;
+    RecordExchangeUnknownParent unknown_parent = 4;
+    RecordExchangeThreadAlreadyStarted thread_already_started = 5;
+  }
+}
+
+// The database could not be written.
+message RecordExchangeStorageFailure {}
+
+// A required field was missing or empty.
+message RecordExchangeInvalidRequest {
+  // The field at fault, by its proto name.
+  string field = 1;
+}
+
+// The parent node does not exist in this thread, or its named revision does
+// not exist.
+message RecordExchangeUnknownParent {}
+
+// The parent was the thread's start, but the thread already has a root node
+// from another turn: a thread starts once.
+message RecordExchangeThreadAlreadyStarted {}

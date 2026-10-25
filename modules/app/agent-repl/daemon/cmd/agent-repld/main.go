@@ -29,6 +29,7 @@ import (
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/wsm"
+	"agent-repld/internal/zettelclient"
 )
 
 // exitSuccess is the status of a run that ended with nothing wrong -- and of a
@@ -86,6 +87,9 @@ type options struct {
 	// storeSocket is the store's unix socket. This flag BEATS
 	// $AGENT_REPL_STORE_SOCKET, which in turn beats the default.
 	storeSocket string
+	// zettelSocket is the zettel service's unix socket. This flag BEATS
+	// $AGENT_REPL_ZETTEL_SOCKET, which in turn beats the default.
+	zettelSocket string
 	// promptsDir is the prompts/ directory the briefs are read from at use
 	// time.
 	promptsDir string
@@ -161,6 +165,11 @@ const defaultStoreSocket = "~/.cache/agent-repl/sock/store.sock"
 // processStarted is when this process started, taken as the package
 // initializes, before main: every boot phase is timed from it.
 var processStarted = time.Now()
+
+// defaultZettelSocket is the zettel service's socket when neither the flag nor
+// the environment (zettelclient.EnvSocket) names one: the zettel service's own
+// default.
+const defaultZettelSocket = "~/.cache/agent-repl/sock/zettel.sock"
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == deployVerb {
@@ -263,6 +272,7 @@ func newFlagSets(program string, opts *options) (config, boot *flag.FlagSet) {
 	config.StringVar(&opts.shim, "shim-main", "", "path to the shim's dist/main.js")
 	config.StringVar(&opts.node, "node", "node", "node binary that runs the shim")
 	config.StringVar(&opts.storeSocket, "store-socket", "", "store unix socket, overriding $"+envStoreSocket)
+	config.StringVar(&opts.zettelSocket, "zettel-socket", "", "zettel unix socket, overriding $"+zettelclient.EnvSocket)
 	config.StringVar(&opts.promptsDir, "prompts-dir", "", "prompts directory the briefs are read from")
 	config.StringVar(&opts.multiRepoConfigDir, "multi-repo-config-dir", "", "account config root for workspaces under the multi-repo root")
 	config.StringVar(&opts.defaultConfigDir, "default-config-dir", "", "account config root for every other workspace")
@@ -305,11 +315,16 @@ func parseFlags(program string, args []string) (options, error) {
 	if opts.replacing && opts.joining != "" {
 		return options{}, fmt.Errorf("%s: -%s and -joining are exclusive: a replacement boots as the incumbent, a successor joins one", program, rollout.ReplacingFlagName)
 	}
-	storeSocket, err := resolveStoreSocket(opts.storeSocket, os.Getenv(envStoreSocket), os.UserHomeDir)
+	storeSocket, err := resolveSocket("store", opts.storeSocket, os.Getenv(envStoreSocket), defaultStoreSocket, os.UserHomeDir)
 	if err != nil {
 		return options{}, err
 	}
 	opts.storeSocket = storeSocket
+	zettelSocket, err := resolveSocket("zettel", opts.zettelSocket, os.Getenv(zettelclient.EnvSocket), defaultZettelSocket, os.UserHomeDir)
+	if err != nil {
+		return options{}, err
+	}
+	opts.zettelSocket = zettelSocket
 	retention, err := resolveFeedTailRetention(opts.feedTailRetention, os.Getenv(envFeedTailRetention))
 	if err != nil {
 		return options{}, err
@@ -371,25 +386,26 @@ func resolveFeedTailRetention(flagValue int, envValue string) (int, error) {
 	return flagValue, nil
 }
 
-// resolveStoreSocket applies the store socket's precedence: the flag beats the
-// environment, which beats the default under the home directory. Whichever
-// wins goes through dirpath.Absolute, so a `~` is expanded and a relative
-// socket is refused. The home directory is asked for only when the winner
-// needs it, and a daemon that cannot name it then does not boot: it used to
-// fall back to the bare relative default, a socket nobody listens on.
-func resolveStoreSocket(flagValue, envValue string, userHome func() (string, error)) (string, error) {
-	chosen := firstNonEmpty(flagValue, envValue, defaultStoreSocket)
+// resolveSocket applies a service socket's precedence: the flag beats the
+// environment, which beats FALLBACK under the home directory. Whichever wins
+// goes through dirpath.Absolute, so a `~` is expanded and a relative socket is
+// refused. The home directory is asked for only when the winner needs it, and
+// a daemon that cannot name it then does not boot: it used to fall back to the
+// bare relative default, a socket nobody listens on. SERVICE names the socket
+// in an error.
+func resolveSocket(service, flagValue, envValue, fallback string, userHome func() (string, error)) (string, error) {
+	chosen := firstNonEmpty(flagValue, envValue, fallback)
 	home := ""
 	if strings.HasPrefix(chosen, "~") {
 		h, err := userHome()
 		if err != nil {
-			return "", fmt.Errorf("agent-repld: resolve the home directory the store socket %q is under: %w", chosen, err)
+			return "", fmt.Errorf("agent-repld: resolve the home directory the %s socket %q is under: %w", service, chosen, err)
 		}
 		home = h
 	}
 	socket, err := dirpath.Absolute(chosen, home)
 	if err != nil {
-		return "", fmt.Errorf("agent-repld: resolve the store socket: %w", err)
+		return "", fmt.Errorf("agent-repld: resolve the %s socket: %w", service, err)
 	}
 	return socket, nil
 }

@@ -99,6 +99,13 @@ export type Verb =
 /** The priority menu's entries; `clear` is the unset request. */
 export type PriorityChoice = "p05" | "p1" | "p2" | "p3" | "clear";
 
+/**
+ * What kind of row a menu is drawn for. THE VERBS ARE THE SAME for every
+ * kind (a chat thread is a workspace), so every kind issues the same requests;
+ * only what a verb is called, and what deleting destroys, are the kind's.
+ */
+export type RowKind = "workspace" | "thread";
+
 /** The workspace a menu acts on. */
 export interface VerbTarget {
   sc: SidebarContext;
@@ -106,6 +113,8 @@ export interface VerbTarget {
   workspace: WorkspaceRef;
   /** The row's display name, which is what `nuke` asks to be typed back. */
   name: string;
+  /** The row's kind, which names its verbs. */
+  kind: RowKind;
 }
 
 /** What each menu entry is labelled. */
@@ -118,6 +127,22 @@ const VERB_LABELS: Readonly<Record<Verb, string>> = {
   restart: "Restart",
   priority: "Priority",
 };
+
+/**
+ * What a chat thread calls the verbs it shares (owner ruling, 2026-10-24: a
+ * thread is archived, restored and deleted like any workspace): closing
+ * archives it, opening restores it, nuking deletes it.
+ */
+const THREAD_LABELS: Readonly<Partial<Record<Verb, string>>> = {
+  open: "Restore",
+  close: "Archive",
+  nuke: "Delete",
+};
+
+/** What VERB is labelled on a row of KIND. */
+export function verbLabel(verb: Verb, kind: RowKind): string {
+  return (kind === "thread" ? THREAD_LABELS[verb] : undefined) ?? VERB_LABELS[verb];
+}
 
 /** What each priority entry is labelled; the badge itself is the daemon's. */
 const PRIORITY_LABELS: Readonly<Record<PriorityChoice, string>> = {
@@ -153,13 +178,26 @@ export function drawRowMenu(target: VerbTarget): HTMLElement {
   return menu;
 }
 
+/**
+ * A chat thread row's verb menu: archive (or restore, when ARCHIVED) and
+ * delete, drawn hidden like every row's menu and revealed the same way.
+ */
+export function drawThreadMenu(target: VerbTarget, archived: boolean): HTMLElement {
+  const menu = document.createElement("div");
+  menu.className = "sb-menu list-rows";
+  menu.hidden = true;
+  menu.appendChild(simpleVerbItem(archived ? "open" : "close", target));
+  menu.appendChild(drawNukeItem(target));
+  return menu;
+}
+
 /** The verbs whose whole interaction is one click. */
 function simpleVerbItem(
   verb: "open" | "close" | "finish" | "restart",
   target: VerbTarget,
 ): HTMLElement {
   const row = menuRow();
-  const button = verbButton(verb);
+  const button = verbButton(verb, target.kind);
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -238,7 +276,7 @@ export function drawKillConfirm(target: VerbTarget): HTMLElement {
   note.className = "sb-confirm-note";
   note.textContent = "Kill the session? The worktree and branch survive.";
   confirm.appendChild(note);
-  const go = verbButton("kill");
+  const go = verbButton("kill", target.kind);
   go.classList.add("sb-confirm-go");
   go.textContent = "Kill";
   go.addEventListener("click", (event) => {
@@ -260,7 +298,7 @@ export function drawKillConfirm(target: VerbTarget): HTMLElement {
 function drawNukeItem(target: VerbTarget): HTMLElement {
   const row = menuRow();
   row.classList.add("sb-menu-destructive");
-  const button = disclosureButton("Nuke…");
+  const button = disclosureButton(`${verbLabel("nuke", target.kind)}…`);
   const confirm = drawNukeConfirm(target);
   confirm.hidden = true;
   button.addEventListener("click", (event) => {
@@ -272,6 +310,12 @@ function drawNukeItem(target: VerbTarget): HTMLElement {
   row.appendChild(confirm);
   return row;
 }
+
+/** What a nuke destroys, by the row's kind. */
+const NUKE_DESTROYS: Readonly<Record<RowKind, string>> = {
+  workspace: "Deletes the worktree and branch.",
+  thread: "Deletes the thread and everything asked in it.",
+};
 
 /**
  * The nuke confirmation.
@@ -285,7 +329,7 @@ export function drawNukeConfirm(target: VerbTarget): HTMLElement {
   confirm.className = "sb-confirm sb-confirm-nuke";
   const note = document.createElement("div");
   note.className = "sb-confirm-note";
-  note.textContent = `Deletes the worktree and branch. Type "${target.name}" to confirm.`;
+  note.textContent = `${NUKE_DESTROYS[target.kind]} Type "${target.name}" to confirm.`;
   confirm.appendChild(note);
 
   const typed = document.createElement("input");
@@ -294,9 +338,8 @@ export function drawNukeConfirm(target: VerbTarget): HTMLElement {
   typed.setAttribute("name", "confirm_name");
   confirm.appendChild(typed);
 
-  const go = verbButton("nuke");
+  const go = verbButton("nuke", target.kind);
   go.classList.add("sb-confirm-go");
-  go.textContent = "Nuke";
   // The typed name is the deliberation the drawer asks for; it marks the
   // button as armed rather than disabling it, because `[data-verb="nuke"]` is
   // the contract's nuke control and a control the contract names must be
@@ -377,11 +420,11 @@ function disclosureButton(label: string): Control {
   return button;
 }
 
-function verbButton(verb: Verb): Control {
+function verbButton(verb: Verb, kind: RowKind): Control {
   const button = createControl();
   button.className = "sb-menu-item";
   button.setAttribute("data-verb", verb);
-  button.textContent = VERB_LABELS[verb];
+  button.textContent = verbLabel(verb, kind);
   return button;
 }
 
@@ -666,11 +709,16 @@ export function closeWorkspaceRefusal(cause: CauseOf<CloseWorkspaceError>): stri
   }
 }
 
-/** NukeWorkspace's own arm: the git operation that destroys the worktree. */
+/**
+ * NukeWorkspace's own arms: what would not be destroyed, by the workspace's
+ * kind (a git workspace's worktree, a chat thread's graph or directory).
+ */
 export function nukeWorkspaceRefusal(cause: CauseOf<NukeWorkspaceError>): string {
   switch (cause.case) {
     case "gitFailed":
       return `git refused to remove the worktree: ${cause.value.detail}`;
+    case "threadDeleteFailed":
+      return `the thread could not be deleted: ${cause.value.detail}`;
     case "hasOpenChildren":
       return hasOpenChildrenSentence(cause.value, "NukeWorkspaceError.has_open_children", "nuke");
     default:

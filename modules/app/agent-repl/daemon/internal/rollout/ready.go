@@ -1,16 +1,13 @@
 package rollout
 
 import (
+	"agent-repld/internal/h2cclient"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"time"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
@@ -37,13 +34,7 @@ type HealthProbe func(ctx context.Context, address string) error
 // DaemonHealthProbe is the production HealthProbe: one DaemonHealth unary over
 // h2c, exactly the call Emacs recognizes a daemon by.
 func DaemonHealthProbe(ctx context.Context, address string) error {
-	client := &http.Client{Transport: &http2.Transport{
-		AllowHTTP: true,
-		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			var dialer net.Dialer
-			return dialer.DialContext(ctx, network, addr)
-		},
-	}}
+	client := h2cclient.Client()
 	defer client.CloseIdleConnections()
 	if _, err := agentreplv1connect.NewAgentReplClient(client, "http://"+address).
 		DaemonHealth(ctx, connect.NewRequest(&agentreplv1.DaemonHealthRequest{})); err != nil {

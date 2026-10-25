@@ -23,6 +23,7 @@ func systemTree(t *testing.T) Layout {
 		"agent-shim/shim-lock":           "module agentrepl/shim-lock\n",
 		"agent-shim/logging/go":          "module agentrepl/logging\n",
 		"proto/helpers/go":               "module agentrepl/protohelpers\n",
+		"zettel":                         "module agentrepl/zettel\n",
 	}
 	for dir, body := range mods {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {

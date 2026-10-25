@@ -871,3 +871,29 @@ Every file or directory agent-repl shows you opens in **the editor popup**.
   2. A relative path is taken from the worktree root.
   3. A bare name is looked for in `<worktree>/modules/app/agent-repl/<name>`, then in `<git root>/<name>`.
   4. If none exists, the footer briefly says "unknown file" with the name, and the agent is sent a follow-up question about which file you meant.
+
+## Chat threads
+
+A **chat thread** is a chat, in the style of claude.ai, whose questions and answers are kept in zettel, agent-repl's knowledge graph.
+
+- **Starting one:** `SPC TAB t` asks for your first question in the minibuffer.
+  - The daemon names the thread after the question, starts its session, asks it, and opens the thread.
+  - Unlike a new workspace, a new thread is switched to, so you see its answer arrive.
+  - The sidebar's **New thread** button opens the same prompt in Emacs.
+- **Opening one:**
+  - `SPC TAB T` opens the thread you used last.
+  - `SPC TAB .` picks one by name, the most recent first.
+  - The sidebar's title is a menu of apps. Pick **Chat** to list the threads, and click one to open it.
+  - Threads are never on the tab bar, and the tab keys (cycling, `M-1`..`M-9`, `SPC p p`) never land on one.
+- **Asking:** type in the input window, as in any workspace, and send.
+  - The question is asked of the answer at the end of the chat on screen.
+  - To ask about a few words of an answer, select them in the chat first. They are marked, and your next question quotes them. A click that selects nothing lets them go.
+  - While the thread's first answer is still coming, a second question waits: the input window keeps it, and says so.
+- **Branches:** every question asked of the same answer is a sibling of the others.
+  - Siblings are drawn as a stack of cards under the answer, with `‹ 2 of 3 ›` to move between them.
+  - A two-finger sideways swipe on a question moves between its siblings too.
+  - Below each answer, the branch you have seen least is shown first, and it stays put while you read the answer above it.
+- **Where it lives:**
+  - Each thread has a directory in `~/zettel/threads/`.
+  - The graph is `~/zettel/zettel.db`, kept by the `com.agentrepl.zettel` service.
+  - A chat runs with no tools: it answers from what the model knows and from the conversation.

@@ -848,6 +848,7 @@ export function queryFactory(
       trusted();
       return vendors.real(
         {
+          profile: spec.profile,
           cwd,
           workspaceName: spec.workspaceName,
           claudeConfigDir: environment.claudeConfigDir,
@@ -869,6 +870,7 @@ export function queryFactory(
     trusted();
     return Promise.resolve(
       vendors.fake(spec.prompt, spec.canUseTool, {
+        profile: spec.profile,
         cwd,
         configDir: environment.claudeConfigDir,
         sessionId:

@@ -3496,3 +3496,42 @@ func TestAnUnknownProcedureIsUnimplementedRatherThanAHang(t *testing.T) {
 		t.Fatalf("code = %v (err %v), want %v", code, err, connect.CodeUnimplemented)
 	}
 }
+
+func TestASendThatFailsIsAWarningUnlessTheWatcherLeft(t *testing.T) {
+	cases := []struct {
+		name      string
+		cancelled bool
+		wantErr   bool
+		wantWarn  bool
+	}{
+		{name: "the watcher's context ended: the caller went away", cancelled: true},
+		{name: "the watcher is still there: a failed delivery", wantErr: true, wantWarn: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			sink := &syncBuffer{}
+			srv := New(newFakeStore(), logging.New(sink, io.Discard, true), 0)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancelled {
+				cancel()
+			}
+			deliver := func(*storev1.WatchAgentSessionResponse) error {
+				return connect.NewError(connect.CodeCanceled, fmt.Errorf("write: broken pipe"))
+			}
+			line := LineWritten{AgentID: "a1", WriteSeq: 7, Line: &storev1.StoreLineAt{}}
+
+			// Act
+			err := srv.send(ctx, logging.New(sink, io.Discard, true), deliver, line)
+
+			// Assert
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("send = %v, want an error %v", err, tc.wantErr)
+			}
+			if _, warned := findRecord(t, sink, "store.rpc.watch-agent-session", "warn"); warned != tc.wantWarn {
+				t.Fatalf("warn record = %v, want %v: %s", warned, tc.wantWarn, sink.String())
+			}
+		})
+	}
+}

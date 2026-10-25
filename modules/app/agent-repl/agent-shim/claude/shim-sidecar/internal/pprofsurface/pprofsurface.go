@@ -16,10 +16,11 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"agentrepl/logging/singletonsocket"
 )
 
 // EnvAddr is the environment variable the surface's address defaults from.
@@ -72,48 +73,17 @@ func Open(addr string) (*Surface, error) {
 }
 
 func openUnix(path string) (*Surface, error) {
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return nil, fmt.Errorf("pprofsurface: resolve socket path %q: %w", path, err)
-	}
-	if err := os.MkdirAll(filepath.Dir(absolute), 0o700); err != nil {
-		return nil, fmt.Errorf("pprofsurface: prepare socket directory for %q: %w", absolute, err)
-	}
 	// A LEFTOVER SOCKET IS RECLAIMED; ANYTHING ELSE IS REFUSED. A previous
-	// sidecar that died holding this path leaves a stale socket which would
+	// process that died holding this path leaves a stale socket which would
 	// otherwise make the capability permanently unusable — but unlinking
 	// whatever happens to be at an operator-supplied path is how a profiling
-	// knob deletes somebody's file, so the mode is proved first.
-	switch info, statErr := os.Lstat(absolute); {
-	case statErr == nil && info.Mode()&os.ModeSocket != 0:
-		if err := os.Remove(absolute); err != nil {
-			return nil, fmt.Errorf("pprofsurface: remove stale socket %q: %w", absolute, err)
-		}
-	case statErr == nil:
-		return nil, fmt.Errorf("pprofsurface: refusing to replace non-socket %q (mode %s)", absolute, info.Mode())
-	case !errors.Is(statErr, os.ErrNotExist):
-		return nil, fmt.Errorf("pprofsurface: inspect socket path %q: %w", absolute, statErr)
-	}
-	listener, err := net.Listen("unix", absolute)
+	// knob deletes somebody's file, so the mode is proved first
+	// (singletonsocket.ListenReclaiming).
+	listener, res, err := singletonsocket.ListenReclaiming(path)
 	if err != nil {
-		return nil, fmt.Errorf("pprofsurface: listen on unix socket %q: %w", absolute, err)
+		return nil, fmt.Errorf("pprofsurface: bind socket %q: %w", path, err)
 	}
-	if err := os.Chmod(absolute, 0o600); err != nil {
-		return nil, abandonListener(listener, absolute, fmt.Errorf("pprofsurface: restrict socket %q to its owner: %w", absolute, err))
-	}
-	return newSurface("unix", absolute, listener), nil
-}
-
-// abandonListener closes a listener whose setup failed after it was bound, and
-// returns the error Open reports. The setup failure is the cause; a failure to
-// close on top of it is a second fault — it can leave the socket bound or its
-// file on disk — so it is joined onto the cause for the caller, which owns this
-// package's logging, rather than dropped.
-func abandonListener(listener net.Listener, absolute string, cause error) error {
-	if closeErr := listener.Close(); closeErr != nil {
-		return errors.Join(cause, fmt.Errorf("pprofsurface: close abandoned listener on %q: %w", absolute, closeErr))
-	}
-	return cause
+	return newSurface("unix", res.Path, listener), nil
 }
 
 func openTCP(addr string) (*Surface, error) {

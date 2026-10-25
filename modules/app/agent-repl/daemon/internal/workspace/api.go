@@ -290,6 +290,10 @@ type Verbs interface {
 	// naming rule, branch, worktree, layout facts recorded, and REGISTRATION
 	// ONLY AFTER MATERIALIZATION.
 	Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error)
+	// CreateThread makes a new zettel chat thread named after its first
+	// question and brings its session up (thread.go); the caller submits the
+	// question.
+	CreateThread(ctx context.Context, question string) (wsm.Workspace, error)
 	// CreateMergeWorkspace creates the hidden MERGE WORKSPACE an async merge
 	// runs in: a fork of REQUESTER's conversation named NAME, in a worktree of
 	// its own on BASE as it stands now, recorded as forked for ORIGIN's
@@ -638,6 +642,9 @@ type Deps struct {
 	// Sessions brings sessions up and down; injected so the verbs do not own
 	// the shim fleet.
 	Sessions Sessions
+	// Threads holds the zettel chat threads' graphs, which a nuke deletes as
+	// it deletes a git workspace's worktree and branch.
+	Threads ThreadGraphs
 	// Browser opens a clicked link in the pinned external browser.
 	Browser externalbrowser.Opener
 	// Headless is the daemon's own one-shot vendor run. A create that supplies
@@ -1012,6 +1019,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a desktop notifier")
 	case deps.Sessions == nil:
 		return nil, missing("a session fleet")
+	case deps.Threads == nil:
+		return nil, missing("the threads' graphs")
 	case deps.Shim == nil:
 		return nil, missing("a shim resolver")
 	case deps.Freeness == nil:
@@ -1064,6 +1073,14 @@ func New(deps Deps) (Verbs, error) {
 		worktreeBound = DefaultWorktreeBound
 	}
 	return &verbs{deps: deps, load: load, splice: splice, now: now, restartStopBound: stopBound, worktreeBound: worktreeBound}, nil
+}
+
+// ThreadGraphs is where the zettel chat threads' graphs live (the chat
+// service, over zettel).
+type ThreadGraphs interface {
+	// Delete destroys one thread's graph and forgets what is held of it,
+	// recording its own failure.
+	Delete(ctx context.Context, thread ids.WorkspaceID) error
 }
 
 // SelectionHistory says what a select does to the durable selection history

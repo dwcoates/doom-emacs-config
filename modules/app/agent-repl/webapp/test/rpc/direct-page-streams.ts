@@ -34,6 +34,7 @@ const RPC_FOR_KIND = {
   footer: "watchFooter",
   feed: "watchFeed",
   loginTerminal: "watchLoginTerminal",
+  chat: "watchChat",
 } as const satisfies Record<PageWatchKind, keyof AgentReplClient>;
 
 /** A page-streams stand-in that calls each subscription's own rpc directly. */

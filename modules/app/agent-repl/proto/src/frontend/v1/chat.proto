@@ -1,0 +1,175 @@
+// chat.proto — THE CHAT VIEW: one zettel thread drawn as a chat stream, the
+// page component a thread's page shows in place of the agent feed.
+//
+// LAYOUT (each box is one message, nesting for nesting):
+//
+//   +-ChatView-------------------------------------------------+
+//   | ChatViewEmpty                     (a thread not yet asked) |
+//   |   or                                                      |
+//   | +-ChatViewConversation---------------------------------+ |
+//   | | +-ChatExchange (one per node on the shown path)----+ | |
+//   | | | +-ChatQuestion-----------------------------------+ | | |
+//   | | | | [ChatQuestionQuote]  ChatQuestionText          | | | |
+//   | | | +------------------------------------------------+ | | |
+//   | | | [ChatSiblings:  <  2 of 3  >]                      | | |
+//   | | | +-ChatAnswer-------------------------------------+ | | |
+//   | | | | ChatAnswerMarkdown, its quote marks, highlight | | | |
+//   | | | +------------------------------------------------+ | | |
+//   | | +----------------------------------------------------+ | |
+//   | | +-ChatPending (the question in flight, if any)-----+ | |
+//   | | | ChatQuestion   ChatPendingAnswer                  | | |
+//   | | +----------------------------------------------------+ | |
+//   | +--------------------------------------------------------+ |
+//   +----------------------------------------------------------+
+//
+// THE DAEMON RESOLVES EVERYTHING. Which path is shown (the least-seen child
+// below every node, fixed for a visit), the sibling labels, which words are
+// marked: the webapp draws the view verbatim and derives none of it.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+import "zettel/v1/zettel.proto";
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// The whole chat view of one thread.
+message ChatView {
+  // Whether the thread has anything to show yet. The set arm IS the state.
+  oneof state {
+    ChatViewEmpty empty = 1;
+    ChatViewConversation conversation = 2;
+  }
+}
+
+// The thread has no node and no question in flight: it is waiting for its
+// first question.
+message ChatViewEmpty {
+  // The line drawn in the empty view, telling the user where to type.
+  ChatViewEmptyHint hint = 1;
+}
+
+// The empty view's line.
+message ChatViewEmptyHint {
+  // The line, verbatim.
+  string text = 1;
+}
+
+// The thread's shown path, and the question in flight below it.
+message ChatViewConversation {
+  // The nodes on the shown path, root first. A path of N nodes is N
+  // exchanges; the root is the first.
+  repeated ChatExchange exchanges = 1;
+  // The question in flight, drawn below the last exchange. UNSET when no
+  // question is being answered. The shown path always ends at the pending
+  // question's parent while one is in flight.
+  optional ChatPending pending = 2;
+}
+
+// One node on the shown path: its question bubble, its sibling control and
+// its answer bubble.
+message ChatExchange {
+  // The node, echoed back by SwitchChatSibling, SelectChatText and
+  // ReportChatSightings. Never drawn.
+  zettel.v1.NodeId node = 1;
+  // The question bubble.
+  ChatQuestion question = 2;
+  // The sibling control under the question. UNSET when the node has no
+  // siblings (it is its parent's only child), so no stack is drawn.
+  optional ChatSiblings siblings = 3;
+  // The answer bubble.
+  ChatAnswer answer = 4;
+}
+
+// A question bubble: the user's words, with the quote they were asked about.
+message ChatQuestion {
+  // The question text, drawn as plain text.
+  ChatQuestionText text = 1;
+  // The highlighted words the question was asked about, drawn above the text.
+  // UNSET when the question was asked of the answer as a whole.
+  optional ChatQuestionQuote quote = 2;
+}
+
+// A question's text.
+message ChatQuestionText {
+  // The text, verbatim.
+  string text = 1;
+}
+
+// The words a question quoted.
+message ChatQuestionQuote {
+  // The quoted words, verbatim.
+  string text = 1;
+}
+
+// The sibling stack under a question: the node has siblings, drawn as cards
+// stacked behind its question, with a control to move among them.
+message ChatSiblings {
+  // Where the shown sibling sits among them, as drawn ("2 of 3").
+  ChatSiblingsPosition position = 1;
+}
+
+// The sibling control's label.
+message ChatSiblingsPosition {
+  // The label, verbatim.
+  string label = 1;
+}
+
+// An answer bubble.
+message ChatAnswer {
+  // The answer, drawn as markdown.
+  ChatAnswerMarkdown markdown = 1;
+  // Words in the answer that a child question quoted, each drawn marked in
+  // the text. Empty when no child quoted it. Each is marked at its first
+  // occurrence.
+  repeated ChatAnswerQuoteMark quote_marks = 2;
+  // The thread's held highlight, when it is in this answer: drawn marked
+  // until it is cleared or a prompt consumes it. UNSET when the highlight is
+  // elsewhere or there is none.
+  optional ChatAnswerHighlight highlight = 3;
+}
+
+// An answer's markdown.
+message ChatAnswerMarkdown {
+  // The markdown source, verbatim.
+  string text = 1;
+}
+
+// Words of an answer that a child question quoted.
+message ChatAnswerQuoteMark {
+  // The quoted words, verbatim.
+  string text = 1;
+}
+
+// The highlight held in an answer.
+message ChatAnswerHighlight {
+  // The highlighted words, verbatim.
+  string text = 1;
+}
+
+// The question in flight and its answer so far.
+message ChatPending {
+  // The question bubble.
+  ChatQuestion question = 1;
+  // The answer as far as it has come.
+  ChatPendingAnswer answer = 2;
+}
+
+// An answer in progress. The set arm IS how far it has come.
+message ChatPendingAnswer {
+  // Nothing yet, or some text.
+  oneof progress {
+    ChatPendingAnswerWaiting waiting = 1;
+    ChatPendingAnswerStreaming streaming = 2;
+  }
+}
+
+// No answer text has arrived yet; a working indicator is drawn.
+message ChatPendingAnswerWaiting {}
+
+// Answer text is arriving.
+message ChatPendingAnswerStreaming {
+  // The answer so far, drawn as markdown.
+  ChatAnswerMarkdown markdown = 1;
+}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,7 +52,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, owner_lands, context_from, requested_by, close_when_turn_ends, awaiting_correspondence, principal_link, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, owner_lands, context_from, requested_by, close_when_turn_ends, awaiting_correspondence, principal_link, kind, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`(EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id) ` +
 	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -95,9 +96,16 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		selfClose     sql.NullInt64
 		awaiting      sql.NullString
 		principalLink sql.NullString
+		kind          string
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OwnerLands, &contextFrom, &requestedBy, &selfClose, &awaiting, &principalLink, &ws.OneShot, &ws.MergePending, &ended); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OwnerLands, &contextFrom, &requestedBy, &selfClose, &awaiting, &principalLink, &kind, &ws.OneShot, &ws.MergePending, &ended); err != nil {
 		return Workspace{}, err
+	}
+	switch WorkspaceKind(kind) {
+	case WorkspaceKindRepository, WorkspaceKindThread:
+		ws.Kind = WorkspaceKind(kind)
+	default:
+		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "kind", Err: fmt.Errorf("unknown workspace kind %q", kind)}
 	}
 	if mergeOf.Valid != request.Valid {
 		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "merge_of", Err: errors.New("a merge workspace records both its requester and its request")}
@@ -273,6 +281,7 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		}
 		out = Workspace{
 			ID:           NewWorkspaceID(),
+			Kind:         WorkspaceKindRepository,
 			Repo:         repo,
 			Dir:          normalized,
 			Name:         name,
@@ -465,13 +474,22 @@ func listWorkspaces(ctx context.Context, q querier) ([]Workspace, error) {
 
 // repositoryColumns is every column a Repository is read from, in
 // scanRepository's order: the ONE column list both reads share.
-const repositoryColumns = `id, dir, name, default_branch, folded, place`
+const repositoryColumns = `id, dir, name, default_branch, folded, place, kind`
 
 // scanRepository reads one Repository from a row of repositoryColumns.
 func scanRepository(row interface{ Scan(...any) error }) (Repository, error) {
 	var repo Repository
-	err := row.Scan(&repo.ID, &repo.Dir, &repo.Name, &repo.DefaultBranch, &repo.Folded, &repo.Place)
-	return repo, err
+	var kind string
+	if err := row.Scan(&repo.ID, &repo.Dir, &repo.Name, &repo.DefaultBranch, &repo.Folded, &repo.Place, &kind); err != nil {
+		return Repository{}, err
+	}
+	switch RepositoryKind(kind) {
+	case RepositoryKindGit, RepositoryKindZettel:
+		repo.Kind = RepositoryKind(kind)
+	default:
+		return Repository{}, &DecodeError{Table: "repositories", Row: string(repo.ID), Field: "kind", Err: fmt.Errorf("unknown repository kind %q", kind)}
+	}
+	return repo, nil
 }
 
 // SetRepositoryFolded records whether a repository's roster section is
@@ -505,7 +523,13 @@ func (s *store) ListRepositories(ctx context.Context) ([]Repository, error) {
 // listRepositories loads every repository through Q, in their stored order,
 // all-or-nothing.
 func listRepositories(ctx context.Context, q querier) ([]Repository, error) {
-	return listRows(ctx, q, `SELECT `+repositoryColumns+` FROM repositories ORDER BY place`, scanRepository)
+	all, err := listRows(ctx, q, `SELECT `+repositoryColumns+` FROM repositories ORDER BY place`, scanRepository)
+	if err != nil {
+		return nil, err
+	}
+	// EVERY ROW IS DECODED, so a corrupt kind fails the read loudly; only then
+	// is the zettel home left out (db.go).
+	return slices.DeleteFunc(all, Repository.IsZettelHome), nil
 }
 
 // setWorkspaceField is the one write path for a single workspace column: it

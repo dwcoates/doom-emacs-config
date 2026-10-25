@@ -1341,6 +1341,19 @@ NAME is the canonical spelling, e.g. \"Content-Type\"."
 
 ;;;; ---- The roster's listing ----
 
+(defun agent-repl-itest--with-apps (roster)
+  "Return the protojson ROSTER with the sidebar's app sections, when absent.
+The daemon always sends the app switcher and the thread section; a fixture
+that is not about threads gets the Workspaces app shown and no thread."
+  (append roster
+          (unless (assq 'appSwitcher roster)
+            '((appSwitcher . ((title . ((text . "Workspaces")))
+                              (shown . ((workspaces . ())))
+                              (options . [])))))
+          (unless (assq 'threads roster)
+            '((threads . ((newThread . ((label . "New thread")))
+                          (rows . [])))))))
+
 (defun agent-repl-itest--listed (roster)
   "Return the protojson ROSTER as the daemon lists it on the wire.
 A fixture states its rows the way a test reads them: plain `RosterRow's in
@@ -1353,7 +1366,9 @@ walk or folded under a collapsed repository or subsection; a hidden row
 nesting its family; a merged row alone -- the family taken off the shared
 row, and every closed row of a section moved to the `closed' list.  A
 ROSTER already in that shape (it carries `closed') is handed back as it
-is."
+is.  It also carries the app sections every roster does
+(`agent-repl-itest--with-apps')."
+  (setq roster (agent-repl-itest--with-apps roster))
   (if (assq 'closed roster)
       roster
     (let ((next 0) closed)

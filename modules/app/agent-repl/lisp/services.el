@@ -93,8 +93,11 @@ daemon's.")
 (defconst agent-repl--shim-services-buffer "*agent-repl-shim-services*"
   "Capture buffer for launchctl diagnostics.")
 
-(defconst agent-repl--shim-service-build-targets '("store" "sidecar")
-  "Build-script targets covering the two launchd-managed services.")
+(defconst agent-repl--shim-service-build-targets '("store" "sidecar" "zettel")
+  "Build-script targets covering the launchd-managed services.
+The zettel service is built here and kept current by the daemon's own boot
+\(daemon/internal/deploy/services.go), so this file kickstarts only the
+store and the sidecar.")
 
 ;;;; ---- External boundaries ----
 

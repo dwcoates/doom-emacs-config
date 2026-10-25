@@ -160,6 +160,12 @@ type Submitter interface {
 // Handler is SubmitPrompt's body.
 type Handler interface {
 	Submitter
+	// SubmitThreadQuestion runs one submission to a zettel chat thread: exactly
+	// Submit, except that an ordinary prompt reaches the queue carrying ASK,
+	// where its question was asked from, so the turn it is delivered as records
+	// the question whole. A recognized command, panel or act is handled as
+	// Submit handles it and carries no ask: it is not a question.
+	SubmitThreadQuestion(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, idempotencyKey string, origin conversationv1.PromptOrigin, ask *wsm.ThreadAsk) (Outcome, error)
 	// Recognize reports what the daemon makes of a submission's text without
 	// acting on it. It is exported so the recognition table has one home and
 	// one test surface.

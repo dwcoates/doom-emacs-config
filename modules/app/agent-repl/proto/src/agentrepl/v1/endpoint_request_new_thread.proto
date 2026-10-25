@@ -1,0 +1,38 @@
+// endpoint_request_new_thread.proto — RequestNewThread: the sidebar's new-thread button, relayed to Emacs. CHAT section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// RequestNewThread: the sidebar's new-thread button. The webapp cannot take
+// typed input, so the daemon asks Emacs to open its new-thread prompt
+// (agentrepl.v1.DaemonNewThreadRequested on WatchDaemon); the question typed
+// there arrives as CreateThread.
+message RequestNewThreadRequest {}
+
+// THE ARM IS THE OUTCOME.
+message RequestNewThreadResponse {
+  // Success or the refusal; exactly one is set.
+  oneof result {
+    RequestNewThreadSuccess success = 1;
+    RequestNewThreadError error = 2;
+  }
+}
+
+// The request was relayed to every connected Emacs.
+message RequestNewThreadSuccess {}
+
+// Why the request was not relayed.
+message RequestNewThreadError {
+  // The cause of the refusal.
+  oneof cause {
+    // No Emacs is connected to take the question.
+    RequestNewThreadNoEditor no_editor = 1;
+  }
+}
+
+// No Emacs is connected to take the question.
+message RequestNewThreadNoEditor {}

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 	"context"
 
 	"connectrpc.com/connect"
@@ -40,6 +42,10 @@ func (s *server) AdoptHostWorkspace(
 		// the host's adopt answers left no trace, and on 2026-10-11 hundreds of
 		// them in a row were invisible in every log.
 		refused.Info = true
+		// THE PLAIN BOOT'S ANSWER NAMES THE PAGE, as the success arm does.
+		if refused.Arm == "no_transfer_announced" {
+			refused.Fields["page"] = webPageOf(subject.Record)
+		}
 		return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
 	}
 	subject.Log.Info("daemon.server.adopt_host", "the host adopted the workspace", nil)
@@ -70,11 +76,15 @@ func (s *server) AdoptWebWorkspace(
 		// ordinary page boot's no_transfer_announced above all, which is an
 		// answer, not a failure.
 		refused.Info = true
+		// THE PLAIN BOOT'S ANSWER NAMES THE PAGE, as the success arm does.
+		if refused.Arm == "no_transfer_announced" {
+			refused.Fields["page"] = webPageOf(subject.Record)
+		}
 		return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
 	}
-	subject.Log.Info("daemon.server.adopt_web", "the webview adopted the workspace", nil)
+	subject.Log.Info("daemon.server.adopt_web", "the webview adopted the workspace", dlog.Context{"thread": subject.Record.IsThread()})
 	resp.Result = &agentreplv1.AdoptWebWorkspaceResponse_Success{
-		Success: &agentreplv1.AdoptWebWorkspaceSuccess{},
+		Success: &agentreplv1.AdoptWebWorkspaceSuccess{Page: webPageOf(subject.Record)},
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -113,4 +123,13 @@ func (s *server) subjectForAdoption(
 		return resolved{}, s.refuse(s.log, rpc, resp, *r), true
 	}
 	return subject, nil, false
+}
+
+// webPageOf is the page a webview mounts for a workspace: a chat thread's
+// chat view, or an agent workspace's feed.
+func webPageOf(record wsm.Workspace) *agentreplv1.WebWorkspacePage {
+	if record.IsThread() {
+		return &agentreplv1.WebWorkspacePage{Kind: &agentreplv1.WebWorkspacePage_Thread{Thread: &agentreplv1.WebWorkspacePageThread{}}}
+	}
+	return &agentreplv1.WebWorkspacePage{Kind: &agentreplv1.WebWorkspacePage_Agent{Agent: &agentreplv1.WebWorkspacePageAgent{}}}
 }

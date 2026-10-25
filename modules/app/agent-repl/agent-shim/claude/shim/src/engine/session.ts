@@ -121,6 +121,7 @@ import { readTitleDigest } from "./title-digest.js";
 import { readTranscripts } from "./transcripts.js";
 import { createTranscriptIndex, planCut, readLiveChain, vendorCutRefusal, type GuardArming, type TranscriptIndex } from "./rollback.js";
 import { settleable, type Settleable } from "./settleable.js";
+import { profileFromProto, type SessionProfile } from "./profile.js";
 import type { EngineFold, FoldContext, LastChange } from "./fold-context.js";
 import { normalizeModel, SYNTHETIC_MODEL } from "../model.js";
 import { TRUST_KEY, VENDOR_CONFIG_FILE, trustRoot } from "../trust.js";
@@ -216,6 +217,8 @@ const LOGGER = bindLog({ component: "shim-engine-session", operation: "shim.engi
 
 /** How the engine asks for a query; the factory behind it is real or fake. */
 export interface QuerySpec {
+  /** The kind of session: what the vendor is given (settings, tools, prompt). */
+  readonly profile: SessionProfile;
   readonly binding:
     | { readonly kind: "fresh"; readonly sessionId: string }
     | { readonly kind: "resume"; readonly resumeSessionId: string };
@@ -1037,6 +1040,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   let shimTurnEnd: Settleable<void> | undefined;
   let effectiveModel = "";
+  /**
+   * The session's profile, fixed by StartSession and carried by every query the
+   * session opens. Undefined only before the first StartSession.
+   */
+  let profile: SessionProfile | undefined;
   /**
    * The mode in force. `auto` IS THE UNSTATED MODE (owner ruling 2026-09-14):
    * a `StartSession{fresh}` that names no mode, and a resume whose transcript
@@ -5079,6 +5087,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const queue = new PromptQueue();
     const controller = new AbortController();
     const created = await deps.createQuery({
+      profile: sessionProfile(),
       binding,
       workspaceName: requireWorkspaceName(),
       permissionMode: toVendorPermissionMode(permissionMode),
@@ -5107,6 +5116,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     loopPark = park;
     loop = runLoop(created, park, released.signal);
     return created;
+  }
+
+  /** The session's profile; a query before StartSession set it is a bug. */
+  function sessionProfile(): SessionProfile {
+    if (profile === undefined) {
+      throw new Error("shim session: a query was opened before StartSession fixed the session profile");
+    }
+    return profile;
   }
 
   // -- StartSession ---------------------------------------------------------
@@ -5305,6 +5322,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // THE NAME IS RECORDED BEFORE ANY QUERY: every query this session creates
     // states it in the system prompt.
     workspaceName = request.workspaceName;
+    profile = profileFromProto(request.profile);
     // WHEN THIS ATTEMPT BEGAN, for the failed start's record: how long the
     // vendor was given before the start was refused is half its diagnosis.
     const startBeganMs = deps.nowMs();
@@ -5886,6 +5904,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     );
     try {
       throwaway = await deps.createQuery({
+        profile: sessionProfile(),
         binding: { kind: "resume", resumeSessionId: vendorSessionId },
         workspaceName: requireWorkspaceName(),
         // THE SUMMARY IS OF THE LIVE CONVERSATION: a rolled-back turn still at

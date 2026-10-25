@@ -227,8 +227,12 @@ back the recipe out instead of just the diagnosis."
 ;;;; ---- Webview buffer lifecycle ---------------------------------------------
 
 (defun agent-repl--frontend-webview-buffer-name (ws)
-  "Return the pinned webview buffer name for workspace WS."
-  (format agent-repl-frontend-buffer-name-format ws))
+  "Return the pinned webview buffer name for workspace WS.
+WS is sanitized as every workspace buffer's name is
+\(`agent-repl--sanitize-ws-name'), so the name always matches
+`agent-repl--frontend-buffer-re' and its identity segment is the one the
+input buffer carries: a thread's `chat/NAME' is `chat_NAME' in both."
+  (format agent-repl-frontend-buffer-name-format (agent-repl--sanitize-ws-name ws)))
 
 (defun agent-repl--frontend-make-webview-buffer (url)
   "External-boundary wrapper: create a WKWebView xwidget buffer on URL.

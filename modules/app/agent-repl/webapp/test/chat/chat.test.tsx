@@ -1,0 +1,324 @@
+// @vitest-environment jsdom
+/**
+ * THE CHAT, over a scripted daemon: the view it draws from WatchChat, and the
+ * gestures it hands the daemon (sibling switches, highlights, sightings).
+ */
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { createRouterTransport } from "@connectrpc/connect";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
+import { ReportChatSightingsResponseSchema, type ReportChatSightingsRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_report_chat_sightings_pb";
+import { SelectChatTextResponseSchema, type SelectChatTextRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_chat_text_pb";
+import { SwitchChatSiblingResponseSchema, type SwitchChatSiblingRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_switch_chat_sibling_pb";
+import { WatchChatResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_chat_pb";
+import { ChatViewSchema, type ChatView } from "../../../proto/gen/ts/frontend/v1/chat_pb";
+import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { mountChat, SIGHTING_BATCH_MS, type ChatHandle } from "../../src/chat/chat.js";
+import { HIGHLIGHT_CLASS, QUOTE_MARK_CLASS } from "../../src/chat/chat-view.js";
+import { createAgentReplClient } from "../../src/rpc/client.js";
+import { testAppContext } from "../rpc/app-context.js";
+import { fakeTicker, SINK } from "../sidebar/harness.js";
+
+const THREAD = create(WorkspaceRefSchema, { id: "thread-1", dir: "/zettel/threads/why" });
+
+type ViewInit = MessageInitShape<typeof ChatViewSchema>;
+
+/** A conversation of the given exchanges. */
+function conversation(exchanges: unknown[], pending?: unknown): ViewInit {
+  return { state: { case: "conversation", value: { exchanges: exchanges as never, pending: pending as never } } };
+}
+
+/** One exchange. */
+function exchange(node: string, question: string, answer: string, extra: Record<string, unknown> = {}): unknown {
+  return {
+    node: { id: node },
+    question: { text: { text: question }, quote: extra.quote === undefined ? undefined : { text: extra.quote } },
+    siblings: extra.siblings === undefined ? undefined : { position: { label: extra.siblings } },
+    answer: {
+      markdown: { text: answer },
+      quoteMarks: ((extra.marks as string[] | undefined) ?? []).map((text) => ({ text })),
+      highlight: extra.highlight === undefined ? undefined : { text: extra.highlight },
+    },
+  };
+}
+
+/** A scripted daemon: views pushed by the test, gestures recorded. */
+function daemon() {
+  const views: ChatView[] = [];
+  let wake: (() => void) | null = null;
+  const switches: SwitchChatSiblingRequest[] = [];
+  const selections: SelectChatTextRequest[] = [];
+  const sightings: ReportChatSightingsRequest[] = [];
+  const transport = createRouterTransport(({ service }) => {
+    service(AgentRepl, {
+      async *watchChat(_request, context) {
+        for (;;) {
+          while (views.length > 0) {
+            const view = views.shift() as ChatView;
+            yield create(WatchChatResponseSchema, { view });
+          }
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+            context.signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          if (context.signal.aborted) return;
+        }
+      },
+      switchChatSibling(request) {
+        switches.push(request);
+        return create(SwitchChatSiblingResponseSchema, { result: { case: "success", value: {} } });
+      },
+      selectChatText(request) {
+        selections.push(request);
+        return create(SelectChatTextResponseSchema, { result: { case: "success", value: {} } });
+      },
+      reportChatSightings(request) {
+        sightings.push(request);
+        return create(ReportChatSightingsResponseSchema, { result: { case: "success", value: {} } });
+      },
+    });
+  });
+  return {
+    transport,
+    switches,
+    selections,
+    sightings,
+    push(view: ViewInit) {
+      views.push(create(ChatViewSchema, view as never));
+      wake?.();
+    },
+  };
+}
+
+let host: HTMLElement;
+let scroll: HTMLElement;
+let handle: ChatHandle | null;
+let seenCallback: ((el: Element) => void) | null;
+let observed: Element[];
+
+beforeEach(() => {
+  scroll = document.createElement("div");
+  host = document.createElement("div");
+  scroll.append(host);
+  document.body.append(scroll);
+  handle = null;
+  seenCallback = null;
+  observed = [];
+});
+
+afterEach(() => {
+  handle?.dispose();
+  scroll.remove();
+  vi.useRealTimers();
+});
+
+function mount(d: ReturnType<typeof daemon>, shown = true): void {
+  const ctx = testAppContext({
+    client: createAgentReplClient(d.transport),
+    workspace: THREAD,
+    ticker: fakeTicker(),
+    failures: SINK,
+    composerEnabled: false,
+  });
+  handle = mountChat(host, ctx, {
+    scroll,
+    shown: () => shown,
+    observe: (onSeen) => {
+      seenCallback = onSeen;
+      return {
+        observe: (el) => observed.push(el),
+        unobserve: (el) => (observed = observed.filter((o) => o !== el)),
+        disconnect: () => (observed = []),
+      };
+    },
+  });
+}
+
+/** The element answering SELECTOR, once the chat has drawn it. */
+async function drawn(selector: string): Promise<HTMLElement> {
+  return vi.waitFor(() => {
+    const el = host.querySelector<HTMLElement>(selector);
+    if (el === null) throw new Error(`${selector} is not drawn yet`);
+    return el;
+  });
+}
+
+describe("the chat view", () => {
+  it("draws the empty thread's hint", async () => {
+    // Arrange
+    const d = daemon();
+    mount(d);
+
+    // Act
+    d.push({ state: { case: "empty", value: { hint: { text: "Ask your first question." } } } });
+
+    // Assert
+    expect((await drawn("[data-chat-empty]")).textContent).toBe("Ask your first question.");
+  });
+
+  it("draws the path's questions and answers, a quote, and a sibling control", async () => {
+    // Arrange
+    const d = daemon();
+    mount(d);
+
+    // Act
+    d.push(
+      conversation([
+        exchange("n1", "why is the sky blue?", "Because of **Rayleigh** scattering."),
+        exchange("n2", "what is it?", "Light scattering.", { quote: "Rayleigh", siblings: "2 of 3" }),
+      ]),
+    );
+
+    // Assert
+    const second = await drawn('[data-chat-node="n2"]');
+    expect(second.querySelector(".chat-q-quote")?.textContent).toBe("Rayleigh");
+    expect(second.querySelector(".chat-q-stacked")).not.toBeNull();
+    expect(second.querySelector("[data-chat-siblings] span")?.textContent).toBe("2 of 3");
+    expect(host.querySelector('[data-chat-answer="n1"] strong')?.textContent).toBe("Rayleigh");
+  });
+
+  it("marks the words a child quoted and the held highlight", async () => {
+    // Arrange
+    const d = daemon();
+    mount(d);
+
+    // Act
+    d.push(conversation([exchange("n1", "q", "the sky is blue today", { marks: ["sky"], highlight: "blue" })]));
+
+    // Assert
+    const answer = await drawn('[data-chat-answer="n1"]');
+    expect(answer.querySelector(`mark.${QUOTE_MARK_CLASS}`)?.textContent).toBe("sky");
+    expect(answer.querySelector(`mark.${HIGHLIGHT_CLASS}`)?.textContent).toBe("blue");
+  });
+
+  it.each([
+    ["waiting", { case: "waiting", value: {} }, "[data-chat-waiting]", ""],
+    ["streaming", { case: "streaming", value: { markdown: { text: "Half an *answer*" } } }, "[data-chat-streaming]", "Half an answer"],
+  ])("draws the question in flight, %s", async (_name, progress, selector, text) => {
+    // Arrange
+    const d = daemon();
+    mount(d);
+
+    // Act
+    d.push(conversation([], { question: { text: { text: "and then?" } }, answer: { progress } }));
+
+    // Assert
+    const pending = await drawn("[data-chat-pending]");
+    expect(pending.querySelector("[data-chat-question]")?.textContent).toBe("and then?");
+    expect(pending.querySelector(selector)?.textContent?.trim()).toBe(text);
+  });
+});
+
+describe("the chat's gestures", () => {
+  it.each([
+    ["previous", 0, "previous"],
+    ["next", 1, "next"],
+  ])("a %s sibling click asks the daemon to switch", async (_name, button, way) => {
+    // Arrange
+    const d = daemon();
+    mount(d);
+    d.push(conversation([exchange("n2", "q", "a", { siblings: "1 of 2" })]));
+    const control = await drawn("[data-chat-siblings]");
+
+    // Act
+    control.querySelectorAll<HTMLElement>("ar-button")[button].click();
+
+    // Assert
+    await vi.waitFor(() => expect(d.switches).toHaveLength(1));
+    expect(d.switches[0].shown?.id).toBe("n2");
+    expect(d.switches[0].direction?.way.case).toBe(way);
+  });
+
+  it("a horizontal swipe switches once per swipe", async () => {
+    // Arrange
+    const d = daemon();
+    mount(d);
+    d.push(conversation([exchange("n2", "q", "a", { siblings: "1 of 2" })]));
+    const wrap = await drawn(".chat-q-wrap");
+
+    // Act: one swipe travelling far past the distance.
+    for (let i = 0; i < 6; i += 1) wrap.dispatchEvent(new WheelEvent("wheel", { deltaX: 40, bubbles: true }));
+
+    // Assert
+    await vi.waitFor(() => expect(d.switches).toHaveLength(1));
+    expect(d.switches[0].direction?.way.case).toBe("next");
+  });
+
+  it("words selected in an answer are held as the highlight, with their context", async () => {
+    // Arrange
+    const d = daemon();
+    mount(d);
+    d.push(conversation([exchange("n1", "q", "the sky is blue")]));
+    const answer = await drawn('[data-chat-answer="n1"]');
+    const text = answer.querySelector("p")?.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 4);
+    range.setEnd(text, 7);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+
+    // Act
+    answer.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+    // Assert
+    await vi.waitFor(() => expect(d.selections).toHaveLength(1));
+    const state = d.selections[0].selection?.state;
+    expect(state?.case).toBe("highlighted");
+    if (state?.case === "highlighted") {
+      expect(state.value.node?.id).toBe("n1");
+      expect(state.value.quote?.text).toBe("sky");
+      expect(state.value.quote?.questionContext?.text).toBe("the sky is blue");
+    }
+    window.getSelection()?.removeAllRanges();
+  });
+
+  it("a click that selects nothing lets a held highlight go", async () => {
+    // Arrange
+    const d = daemon();
+    mount(d);
+    d.push(conversation([exchange("n1", "q", "the sky is blue", { highlight: "sky" })]));
+    const answer = await drawn('[data-chat-answer="n1"]');
+    window.getSelection()?.removeAllRanges();
+
+    // Act
+    answer.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+    // Assert
+    await vi.waitFor(() => expect(d.selections).toHaveLength(1));
+    expect(d.selections[0].selection?.state.case).toBe("cleared");
+  });
+
+  it("answers seen on a shown page are reported together", async () => {
+    // Arrange
+    const d = daemon();
+    mount(d);
+    d.push(conversation([exchange("n1", "q", "a"), exchange("n2", "q", "b")]));
+    await drawn('[data-chat-answer="n2"]');
+    vi.useFakeTimers();
+
+    // Act
+    for (const el of observed) seenCallback?.(el);
+    vi.advanceTimersByTime(SIGHTING_BATCH_MS);
+    vi.useRealTimers();
+
+    // Assert
+    await vi.waitFor(() => expect(d.sightings).toHaveLength(1));
+    expect(d.sightings[0].nodes.map((n) => n.id)).toEqual(["n1", "n2"]);
+  });
+
+  it("answers on a hidden page are not seen", async () => {
+    // Arrange
+    const d = daemon();
+    mount(d, false);
+    d.push(conversation([exchange("n1", "q", "a")]));
+    await drawn('[data-chat-answer="n1"]');
+    vi.useFakeTimers();
+
+    // Act
+    for (const el of observed) seenCallback?.(el);
+    vi.advanceTimersByTime(SIGHTING_BATCH_MS);
+
+    // Assert
+    expect(d.sightings).toHaveLength(0);
+  });
+});

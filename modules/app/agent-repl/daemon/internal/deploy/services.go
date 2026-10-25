@@ -16,10 +16,11 @@ import (
 	"agent-repld/internal/restarttiming"
 )
 
-// The launchd labels of the two services a deploy restarts.
+// The launchd labels of the three services a deploy restarts.
 const (
 	StoreLabel   = "com.agentrepl.shim-store"
 	SidecarLabel = "com.agentrepl.shim-claude-sidecar"
+	ZettelLabel  = "com.agentrepl.zettel"
 )
 
 const opServices = "daemon.deploy.services"
@@ -187,6 +188,52 @@ func (r *Restarter) ensureBothLoaded(ctx context.Context) (storeBootstrapped, si
 	return storeBootstrapped, sidecarBootstrapped, nil
 }
 
+// RestartZettel restarts the zettel service alone. Nothing else depends on
+// its socket but the daemon's chat calls, which fail loudly while it is out.
+func (r *Restarter) RestartZettel(ctx context.Context) error {
+	fields := dlog.Context{"zettel": ZettelLabel}
+	if err := r.Launchd.Kickstart(ctx, ZettelLabel); err != nil {
+		r.failed("the zettel kickstart failed", fields, err)
+		return fmt.Errorf("deploy: kickstart %s: %w", ZettelLabel, err)
+	}
+	r.Log.Info(opServices, "kickstarted zettel", fields)
+	return nil
+}
+
+// EnsureZettelCurrent is the boot's zettel step: launchd holds the zettel
+// service, and it runs the installed build (restarted alone when it does not).
+// It is independent of the store and the sidecar -- no shim writes into it --
+// so the boot runs it beside the bring-ups, never before a shim starts.
+func (r *Restarter) EnsureZettelCurrent(ctx context.Context) error {
+	bootstrapped, err := r.ensureLoaded(ctx, ZettelLabel, dlog.Context{"zettel": ZettelLabel})
+	if err != nil {
+		return err
+	}
+	return r.zettelCurrent(ctx, bootstrapped)
+}
+
+// EnsureZettelLoaded makes sure launchd holds the zettel service, and touches
+// nothing that runs: a joining successor's zettel step, which must not
+// restart a service the incumbent is still serving through.
+func (r *Restarter) EnsureZettelLoaded(ctx context.Context) error {
+	_, err := r.ensureLoaded(ctx, ZettelLabel, dlog.Context{"zettel": ZettelLabel})
+	return err
+}
+
+// zettelCurrent restarts a running zettel that is not the installed build.
+func (r *Restarter) zettelCurrent(ctx context.Context, bootstrapped bool) error {
+	stale, err := r.runningStale(ctx, bootstrapped, ComponentZettel, ZettelLabel, buildreport.ServiceZettel)
+	if err != nil {
+		return err
+	}
+	if stale {
+		r.Log.Info(opServices, "the running zettel is not the installed build; restarting it", nil)
+		return r.RestartZettel(ctx)
+	}
+	r.Log.Debug(opServices, "zettel runs the installed build", nil)
+	return nil
+}
+
 // EnsureCurrent is the BOOT's service step: launchd holds both services
 // (EnsureLoaded), and neither RUNS an older build than the one installed in
 // CacheBin. A running service whose build report is not the installed build
@@ -216,7 +263,10 @@ func (r *Restarter) EnsureCurrent(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return sidecar(ctx)
+	if err := sidecar(ctx); err != nil {
+		return err
+	}
+	return r.EnsureZettelCurrent(ctx)
 }
 
 // EnsureStoreCurrent is EnsureCurrent's FIRST HALF, the one shims must wait

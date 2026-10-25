@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -571,5 +575,94 @@ func TestAKillOrNukeOfAParentWithOpenChildrenLeavesItsMergeQueued(t *testing.T) 
 				t.Fatalf("merges dropped = %v, want the queued merge left standing", f.merge.closed)
 			}
 		})
+	}
+}
+
+// threadToNuke registers a zettel chat thread whose directory holds a file.
+func (f *fixture) threadToNuke(t *testing.T) wsm.Workspace {
+	t.Helper()
+	dir := filepath.Join(f.home, "zettel", "threads", "why")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws := wsm.Workspace{ID: "t1", Kind: wsm.WorkspaceKindThread, Dir: dir, Name: "why"}
+	f.db.with(ws)
+	return ws
+}
+
+func TestNukeOfAThreadDeletesItsGraphAndDirectory(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.threadToNuke(t)
+
+	// Act
+	err := f.verbs.Nuke(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Nuke: %v", err)
+	}
+	if !slices.Equal(f.threads.deleted, []ids.WorkspaceID{ws.ID}) {
+		t.Fatalf("deleted graphs = %v, want the thread's", f.threads.deleted)
+	}
+	if _, statErr := os.Stat(ws.Dir); !os.IsNotExist(statErr) {
+		t.Fatalf("the thread's directory survived: %v", statErr)
+	}
+	if len(f.git.nuked) != 0 {
+		t.Fatalf("git nuked %+v, want git untouched for a thread", f.git.nuked)
+	}
+	if !slices.Equal(f.db.forgotten, []ids.WorkspaceID{ws.ID}) {
+		t.Fatalf("forgotten = %v, want the thread", f.db.forgotten)
+	}
+}
+
+func TestNukeOfAThreadWhoseGraphWillNotGoForgetsNothing(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.threadToNuke(t)
+	f.threads.err = errors.New("zettelclient: DeleteThread: unavailable")
+
+	// Act
+	err := f.verbs.Nuke(context.Background(), ws.ID)
+
+	// Assert
+	var refusal *Refusal
+	if !errors.As(err, &refusal) || refusal.Arm != ArmThreadDeleteFailed || !strings.Contains(refusal.Reason, "unavailable") {
+		t.Fatalf("Nuke = %v, want thread_delete_failed carrying zettel's account", err)
+	}
+	if _, statErr := os.Stat(ws.Dir); statErr != nil {
+		t.Fatalf("the directory went with the graph still standing: %v", statErr)
+	}
+	if len(f.db.forgotten) != 0 {
+		t.Fatalf("forgotten = %v, want the record kept", f.db.forgotten)
+	}
+}
+
+func TestNukeOfAThreadWhoseDirectoryWillNotGoKeepsTheRecord(t *testing.T) {
+	// Arrange: the directory's parent refuses writes, so it cannot be removed.
+	f := newFixture(t)
+	ws := f.threadToNuke(t)
+	parent := filepath.Dir(ws.Dir)
+	if err := os.Chmod(parent, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+
+	// Act
+	err := f.verbs.Nuke(context.Background(), ws.ID)
+
+	// Assert
+	var refusal *Refusal
+	if !errors.As(err, &refusal) || refusal.Arm != ArmThreadDeleteFailed || !strings.Contains(refusal.Reason, ws.Dir) {
+		t.Fatalf("Nuke = %v, want thread_delete_failed naming the directory", err)
+	}
+	if len(f.db.forgotten) != 0 {
+		t.Fatalf("forgotten = %v, want the record kept", f.db.forgotten)
+	}
+	if !hasRecord(f, "error", opNuke) {
+		t.Fatal("no error record for the directory that would not go")
 	}
 }

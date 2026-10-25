@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestDeployPassesTheForceThrough(t *testing.T) {
@@ -586,5 +587,15 @@ func TestTheEdgesThatCanReloadTheWebviewHostReconcileIt(t *testing.T) {
 				t.Fatalf("reconciles = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEveryEditorPushGoesThroughPushToEditors(t *testing.T) {
+	// Arrange / Act: only pushToEditors writes an Emacs stream's addressed queue.
+	sites := sourcescan.Count(t, "w.elisp <- ")
+
+	// Assert
+	if sites != 1 {
+		t.Fatalf("Emacs addressed pushes are written at %d sites, want 1: pushToEditors", sites)
 	}
 }

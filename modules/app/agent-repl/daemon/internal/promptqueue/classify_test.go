@@ -11,6 +11,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	zettelv1 "agentrepl/proto/zettel/v1"
 
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/dlog"
@@ -1477,5 +1478,94 @@ func TestTheClassifiersLatencyIsRecordedOnEitherOutcome(t *testing.T) {
 			}
 			t.Fatalf("records = %+v, want %q at %s carrying judge_ms", h.log.Records(), tt.message, tt.level)
 		})
+	}
+}
+
+// ---- a chat thread's question is never classified --------------------------
+//
+// One turn is one question in a zettel thread, so a thread question is never
+// interjected, folded or coalesced: it waits for the running turn's end, and
+// where it was asked from rides its hold to the turn it is delivered as.
+
+// threadSubmission composes one thread question asked of node n1.
+func threadSubmission(turn ids.TurnID, text string) Submission {
+	sub := submission(turn, text)
+	sub.Ask = &wsm.ThreadAsk{Parent: &zettelv1.NodeParent{Origin: &zettelv1.NodeParent_Node{Node: &zettelv1.NodeParentNode{
+		Node: &zettelv1.NodeId{Id: "n1"}, Revision: &zettelv1.RevisionNumber{Number: 1},
+	}}}}
+	return sub
+}
+
+func TestAThreadQuestionIsNeverClassified(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running answer")
+
+	// Act
+	got, err := h.q.Submit(context.Background(), threadSubmission("t1", "and what about buffers?"))
+	h.q.waitForClassifications()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if got.Classification == nil || got.Classification.Arm != wsm.ArmHoldForTurnEnd {
+		t.Fatalf("disposition = %+v, want held for the running turn's end", got)
+	}
+	if n := askedCount(h); n != 0 {
+		t.Fatalf("the judge was asked %d times, want never for a thread question", n)
+	}
+	held, err := h.q.standingHold(context.Background(), theWorkspace, "t1")
+	if err != nil || held.Ask.GetParentNodeID() != "n1" {
+		t.Fatalf("held = %+v, err = %v, want the ask carried on the hold", held, err)
+	}
+}
+
+func TestADeliveredThreadQuestionRecordsItsQuestionOnTheTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), threadSubmission("t1", "what is hydronium?")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	turn, err := h.db.Turn(context.Background(), theWorkspace, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Question == nil || turn.Question.Text != "what is hydronium?" || turn.Question.Parent.GetNode().GetNode().GetId() != "n1" {
+		t.Fatalf("turn question = %+v, want the typed words and the ask's parent", turn.Question)
+	}
+}
+
+func TestAnOrdinaryTurnRecordsNoQuestion(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "run the tests")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	turn, err := h.db.Turn(context.Background(), theWorkspace, "t1")
+	if err != nil || turn.Question != nil {
+		t.Fatalf("turn question = %+v, err = %v, want none", turn.Question, err)
+	}
+}
+
+func TestAHoldReconstructsItsThreadAsk(t *testing.T) {
+	// Arrange
+	held := wsm.HeldPrompt{Workspace: theWorkspace, Turn: "t1", Said: userSaid("q"), Origin: "PROMPT_ORIGIN_USER_SENT",
+		Ask: threadSubmission("t1", "q").Ask}
+
+	// Act
+	sub := submissionOf(held)
+
+	// Assert
+	if sub.Ask.GetParentNodeID() != "n1" {
+		t.Fatalf("submission ask = %+v, want the hold's ask", sub.Ask)
 	}
 }

@@ -34,6 +34,10 @@ type DB interface {
 	// is not yet known is refused with ErrMainWorktreeUnregistered. The bool
 	// reports whether the record was created.
 	RegisterWorkspace(ctx context.Context, dir string, facts RegisterFacts) (Workspace, bool, error)
+	// RegisterThread records a new zettel chat thread at dir, inside the zettel
+	// home (dir's parent), which it mints on first sight. Not idempotent: a
+	// directory already registered is ErrThreadNameTaken.
+	RegisterThread(ctx context.Context, dir, name string) (Workspace, error)
 	// Workspace loads one workspace by id.
 	Workspace(ctx context.Context, id WorkspaceID) (Workspace, error)
 	// WorkspaceByDir loads one workspace by its normalized worktree directory.
@@ -46,7 +50,11 @@ type DB interface {
 	// anything (CreateWorkspace's repository). A dir that cannot be judged is
 	// an ordinary error.
 	RefuseTemporary(dir string) error
-	// ListRepositories loads every repository, all-or-nothing.
+	// ListRepositories loads every GIT repository, all-or-nothing. The zettel
+	// home, which holds the chat threads (threads.go), is no repository to
+	// any repository feature -- the roster's sections, the reaper, the
+	// divergence sweep, the boot's retirement, the merge queue -- and is
+	// never listed.
 	ListRepositories(ctx context.Context) ([]Repository, error)
 	// SetRepositoryFolded records whether a repository's roster section is
 	// collapsed; an unknown repository is ErrNotFound.

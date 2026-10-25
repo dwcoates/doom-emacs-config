@@ -88,6 +88,9 @@ cat >"$cache/agent-repl/log/shim-store.log" <<'EOF'
 {"timestamp":"2026-09-10T10:05:00.000000Z","runtime":"store","pid":40,"level":"error","verbosity":"normal","operation":"store.failure","message":"store failed","context":{"cause":"fixture"}}
 EOF
 : >"$cache/agent-repl/log/shim-claude-sidecar.log"
+cat >"$cache/agent-repl/log/zettel.log" <<'EOF'
+{"timestamp":"2026-09-10T10:06:00.000000Z","runtime":"zettel","pid":60,"level":"info","verbosity":"normal","operation":"zettel.rpc.record_exchange","message":"zettel recorded","context":{}}
+EOF
 emacs_global="$runtime_tmp/emacs-global.log"
 cat >"$emacs_global" <<'EOF'
 {"timestamp":"2026-09-10T10:00:15.000000Z","runtime":"emacs","pid":50,"level":"info","verbosity":"normal","operation":"emacs.ready","message":"emacs central","context":{}}
@@ -366,6 +369,16 @@ test_harvest() {
         pass "--harvest attributes and counts all warn/error records"
     else
         fail "--harvest attributes and counts all warn/error records"
+    fi
+}
+
+test_central_reads_the_zettel_log() {
+    local out
+    out="$(run_logs --central --runtime zettel --json)"
+    if grep_in "$out" -q '"message":"zettel recorded"' && ! grep_in "$out" -q '"runtime":"store"'; then
+        pass "--central --runtime zettel reads the zettel service's log"
+    else
+        fail "--central --runtime zettel reads the zettel service's log" "out: $out"
     fi
 }
 
@@ -995,5 +1008,6 @@ test_messages_source_in_tally
 test_messages_source_in_timeline
 test_messages_source_fields_and_level
 test_follow
+test_central_reads_the_zettel_log
 
 harness_finish
