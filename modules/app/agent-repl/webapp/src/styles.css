@@ -381,8 +381,10 @@
      every bubble's base (`--bubble-base-font-rem`) but a thinking bubble's and
      an interim response's, which narrow it (owner requests, 2026-10-14).
      `--tree-font-rem` and `--tree-line-h` are a metaprompt tree's monospace
-     size and leading. A prompt's leading is derived from all three so its
-     lines sit as far apart as a tree's (owner request, 2026-10-13), less a quarter of the gap (2026-10-14). */
+     size and leading, and `--tree-font-family` its face. A prompt's text is
+     set in all three, so it reads exactly as a response's tree does (owner
+     request, 2026-10-25, superseding 2026-10-13's and 2026-10-14's prose
+     prompt spaced from the tree's leading). */
   --bubble-base-font-rem: 0.9;
   --bubble-font-rem: var(--bubble-base-font-rem);
   /* THE SMALLER PROSE SIZE: a thinking bubble's and an interim response's
@@ -395,6 +397,7 @@
   --tool-head-font-rem: 0.75;
   --tree-font-rem: 0.85;
   --tree-line-h: 1.45;
+  --tree-font-family: ui-monospace, monospace;
   /* THE FEED'S BOTTOM GAP (owner ruling, 2026-09-27): the one source of the
      space between the conversation and the footer dock. It is NOT padding on
      the scrolled content, which only showed once the reader reached the end
@@ -2136,14 +2139,14 @@ pre {
    image. */
 .bubble[data-role="prompt"] {
   --bubble-bg: var(--user);
-  /* A PROMPT'S LINES ARE SPACED AS A TREE'S (owner request, 2026-10-13,
-     narrowing 2026-09-23's one leading for every bubble): the prompt keeps the
-     bubble's text size, and this ratio puts its lines exactly one tree line
-     apart. The SPACE BETWEEN those lines, the leading above 1, is then 25%
-     tighter (owner request, 2026-10-14): 0.75 of the tree-line gap, so the
-     glyphs themselves keep their full height. The collapsed cap counts in
-     `--md-line-h`, so it follows. */
-  --md-line-h: calc(1 + (var(--tree-font-rem) * var(--tree-line-h) / var(--bubble-font-rem) - 1) * 0.75);
+  /* A PROMPT IS SET AS A RESPONSE'S TREE IS (owner request, 2026-10-25,
+     superseding 2026-10-13's tree-spaced prose): the tree's face, size and
+     leading, read from the tokens `.mp-tree` reads, so the two cannot drift.
+     The size feeds the one bubble size rule through `--bubble-font-rem`, and
+     the collapsed cap counts in `--md-line-h`, so it follows. */
+  --bubble-font-rem: var(--tree-font-rem);
+  --md-line-h: var(--tree-line-h);
+  font-family: var(--tree-font-family);
   margin-left: auto;
   margin-right: var(--agent-rail-inset);
 }
@@ -2805,7 +2808,7 @@ html[data-page-unshown] *::after {
    floated cost corner, so the tree's box is the body's full width — the
    width its budget was measured for — instead of a box narrowed beside
    the float. */
-.mp-tree { font-family: ui-monospace, monospace; font-size: calc(var(--tree-font-rem) * 1rem * var(--feed-text-scale)); line-height: var(--tree-line-h); white-space: pre-wrap; overflow-wrap: anywhere; clear: right; }
+.mp-tree { font-family: var(--tree-font-family); font-size: calc(var(--tree-font-rem) * 1rem * var(--feed-text-scale)); line-height: var(--tree-line-h); white-space: pre-wrap; overflow-wrap: anywhere; clear: right; }
 .md .mp-tree { margin: 0.5em 0; }
 .mp-prefix, .mp-content { white-space: pre-wrap; }
 /* A TREE LABEL A LATER PROMPT ANSWERS is a link to that prompt (feed/entries.ts):
