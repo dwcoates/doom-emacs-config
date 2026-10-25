@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -162,6 +163,19 @@ func awaitTabsOpen(e *Emacs, names []string) []string {
 				}
 			}
 			return true
+		}))
+}
+
+// awaitTabOrder waits until the tab order is exactly WANT, every tab answered
+// open and in that order. Having every name present is not enough after a
+// reorder: the tabs were open in their old order before the reordering
+// roster landed.
+func awaitTabOrder(e *Emacs, want []string) []string {
+	e.t.Helper()
+	return decodeStrings(e.AwaitEvalFor(emacsTabOpenBound, fmt.Sprintf("the tab order to be %q", want),
+		emacsTabOrderForm,
+		func(raw json.RawMessage) bool {
+			return slices.Equal(decodeStrings(raw), want)
 		}))
 }
 
