@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { captureLogRecords, type LogCapture } from "./log-capture.js";
-import { CENSUS_EVERY_MS, installPageCensus } from "../src/page-census.js";
+import { animationCensus, CENSUS_ANIMATION_NAMES, CENSUS_EVERY_MS, installPageCensus } from "../src/page-census.js";
 import type { After } from "../src/every.js";
 
 let capture: LogCapture;
@@ -24,8 +24,14 @@ async function censusRecords(): Promise<Record<string, unknown>[]> {
     .map((record) => ({ level: record.level.case, ...(record.context ?? {}) }));
 }
 
+/** Stand DOC's live animations in as these names, as WebKit answers getAnimations. */
+function withAnimations(doc: Document, names: (string | undefined)[]): void {
+  doc.getAnimations = () => names.map((animationName) => ({ animationName }) as unknown as Animation);
+}
+
 beforeEach(() => {
   capture = captureLogRecords();
+  withAnimations(document, []);
   scheduledMs = [];
   fire = () => undefined;
   document.body.replaceChildren();
@@ -55,5 +61,48 @@ describe("installPageCensus", () => {
 
     // Assert
     expect(await censusRecords()).toEqual([]);
+  });
+});
+
+describe("animationCensus", () => {
+  it("counts the live animations by name, a script animation as script", () => {
+    // Arrange
+    withAnimations(document, ["pulse", "pulse", "bubble-wave", undefined]);
+
+    // Act
+    const census = animationCensus(document);
+
+    // Assert
+    expect(census).toEqual({ animations: 4, animation_names: { pulse: 2, "bubble-wave": 1, script: 1 } });
+  });
+
+  it("names only the most numerous names, though it counts every animation", () => {
+    // Arrange
+    const names = ["a", "b", "c", "d", "e", "f", "f"];
+    withAnimations(document, names);
+
+    // Act
+    const census = animationCensus(document);
+
+    // Assert
+    expect([census.animations, Object.keys(census.animation_names).length, census.animation_names.f]).toEqual([
+      names.length,
+      CENSUS_ANIMATION_NAMES,
+      2,
+    ]);
+  });
+
+  it("states the animations in the census record", async () => {
+    // Arrange
+    withAnimations(document, ["pulse"]);
+    installPageCensus(document, after);
+
+    // Act
+    fire();
+
+    // Assert
+    expect(await censusRecords()).toEqual([
+      expect.objectContaining({ animations: 1, animation_names: { pulse: 1 } }),
+    ]);
   });
 });
