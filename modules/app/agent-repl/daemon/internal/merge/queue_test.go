@@ -1989,3 +1989,28 @@ func TestAnAdmittedHeadAlwaysHoldsItsRunsLease(t *testing.T) {
 		t.Fatal("the head was admitted before its lease was taken")
 	}
 }
+
+func TestHeldByAnother(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "a restart's lease is another holder", err: &wsm.LeaseHeldError{Holder: wsm.HolderRestart}, want: true},
+		{name: "a wrapped hold is read through", err: fmt.Errorf("acquire: %w", &wsm.LeaseHeldError{Holder: wsm.HolderRestart}), want: true},
+		{name: "another merge's lease is not", err: &wsm.LeaseHeldError{Holder: wsm.HolderMerge}, want: false},
+		{name: "any other error is not", err: errors.New("database is locked"), want: false},
+		{name: "no error is not", err: nil, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, got := heldByAnother(tt.err)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("heldByAnother(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}

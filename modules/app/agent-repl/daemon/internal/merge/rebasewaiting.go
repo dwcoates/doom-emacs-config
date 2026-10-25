@@ -137,6 +137,16 @@ func (o *orchestrator) rebaseWaitingMember(ctx context.Context, repo wsm.RepoKey
 	}
 	defer close(r.finished)
 	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, o.mintLedger(ws), wsm.HolderMerge, wsm.PolicyHold)
+	// A WORKSPACE ANOTHER HOLDER HOLDS IS BUSY, as one with work in flight is
+	// above: freeness reads the session, not the lease, so a shim restart's
+	// lease passes it (2026-10-25: a skills bounce held a waiting merge's
+	// workspace, and the skip was stated at ERROR).
+	if other, held := heldByAnother(err); held {
+		fields["holder"], fields["lease"] = other.Holder.String(), string(other.Lease)
+		log.Info(op, "a waiting merge's workspace is held by another lease; it keeps its base this round and catches up at a later landing", fields)
+		o.unregisterBackground(r)
+		return
+	}
 	if err != nil {
 		log.Error(op, "could not take the merge lease to rebase a waiting merge", withField(fields, "error", err.Error()))
 		o.unregisterBackground(r)

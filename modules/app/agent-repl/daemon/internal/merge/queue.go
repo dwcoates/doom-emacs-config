@@ -1161,8 +1161,7 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	// no run when a restart held its workspace, which read as a merge another
 	// daemon drives, and the queue stood still behind it (2026-10-24 19:33).
 	lease, err := o.deps.DB.AcquireLeaseAs(ctx, front.Workspace, o.mintLedger(front.Workspace), wsm.HolderMerge, wsm.PolicyHold)
-	var other *wsm.LeaseHeldError
-	if errors.As(err, &other) && other.Holder != wsm.HolderMerge {
+	if other, held := heldByAnother(err); held {
 		o.releaseRepoLockIfIdle(ctx, repo)
 		o.mu.Lock()
 		o.leaseWaits[front.Workspace] = repo
@@ -1424,3 +1423,16 @@ func enqueuedMS(entry wsm.MergeQueueEntry) (int64, error) {
 
 // nowMS is the clock in the epoch milliseconds every drawn stamp uses.
 func (o *orchestrator) nowMS() int64 { return o.deps.Now().UnixMilli() }
+
+// heldByAnother answers the lease holding the workspace when ERR is a merge
+// lease refused because a holder other than a merge holds it: a shim restart,
+// a drain or a hibernation. That workspace is busy, not broken, and the merge
+// waits for the lease to change. A merge lease held by another merge is not
+// that case.
+func heldByAnother(err error) (*wsm.LeaseHeldError, bool) {
+	var other *wsm.LeaseHeldError
+	if errors.As(err, &other) && other.Holder != wsm.HolderMerge {
+		return other, true
+	}
+	return nil, false
+}
