@@ -1354,3 +1354,91 @@ func TestMoveWorkspaceRefusesAMoveOntoItsOwnTab(t *testing.T) {
 		t.Fatalf("move record = %+v (found %v), want an ERROR naming the workspace", rec, ok)
 	}
 }
+
+// markOneShot records a creation job for WS and marks it a one-shot.
+func markOneShot(t *testing.T, s *store, ws Workspace) {
+	t.Helper()
+	if err := s.PutCreationJob(context.Background(), CreationJob{Workspace: ws.ID, Layout: MergeLayout{SourceBranch: ws.Branch, SourceDir: ws.Dir, TargetDir: ws.Dir}}); err != nil {
+		t.Fatalf("PutCreationJob(%s): %v", ws.Name, err)
+	}
+	if err := s.SetOneShot(context.Background(), ws.ID, true); err != nil {
+		t.Fatalf("SetOneShot(%s): %v", ws.Name, err)
+	}
+}
+
+// oneShotOf reads WS's one-shot mark.
+func oneShotOf(t *testing.T, s *store, ws WorkspaceID) bool {
+	t.Helper()
+	got, err := s.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace(%s): %v", ws, err)
+	}
+	return got.OneShot
+}
+
+func TestPlacingAFamilyClearsItsOneShotMarks(t *testing.T) {
+	// Arrange -- dragging a family out of the sidebar's one-shot subsection
+	// is a placement, which clears the marks that drew it there.
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	parent := registerIn(t, s, repoDir, "parent", nil)
+	child := registerChild(t, s, repoDir, "child", parent.ID)
+	bystander := registerIn(t, s, repoDir, "bystander", nil)
+	for _, ws := range []Workspace{parent, child, bystander} {
+		markOneShot(t, s, ws)
+	}
+	later := mustSubsection(t, s, parent.Repo, "later")
+
+	// Act -- the child dragged into later.
+	mustPlace(t, s, child.ID, &later.ID, AtEnd{})
+
+	// Assert
+	for _, ws := range []WorkspaceID{parent.ID, child.ID} {
+		if oneShotOf(t, s, ws) {
+			t.Errorf("family member %s is still marked one-shot", ws)
+		}
+	}
+	if !oneShotOf(t, s, bystander.ID) {
+		t.Error("the bystander's one-shot mark was cleared")
+	}
+}
+
+func TestPlacingAFamilyKeepsAClosedMembersOneShotMark(t *testing.T) {
+	// Arrange -- a finished one-shot is still one, and its mark draws the
+	// family nowhere.
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	parent := registerIn(t, s, repoDir, "parent", nil)
+	done := registerChild(t, s, repoDir, "done", parent.ID)
+	markOneShot(t, s, done)
+	if err := s.MarkClosed(context.Background(), done.ID, Closure{At: hiddenAtInstant, By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+
+	// Act
+	mustPlace(t, s, parent.ID, nil, AtEnd{})
+
+	// Assert
+	if !oneShotOf(t, s, done.ID) {
+		t.Error("the closed member's one-shot mark was cleared")
+	}
+}
+
+func TestARefusedPlacementClearsNoOneShotMark(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := registerIn(t, s, arrangeRepo(t, "repo"), "one", nil)
+	markOneShot(t, s, ws)
+	unknown := SubsectionID("sub-none")
+
+	// Act
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws.ID}, &unknown, AtEnd{})
+
+	// Assert
+	if !errors.Is(err, ErrUnknownSubsection) {
+		t.Fatalf("PlaceWorkspaces = %v, want ErrUnknownSubsection", err)
+	}
+	if !oneShotOf(t, s, ws.ID) {
+		t.Error("a refused placement cleared the one-shot mark")
+	}
+}
