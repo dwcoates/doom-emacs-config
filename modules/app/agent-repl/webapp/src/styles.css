@@ -754,6 +754,12 @@ body::after {
      prompt's right rail, the footer dock, the turn-ended line) follows without
      a second edit, which is the whole reason the number lives here. */
   --agent-bubble-cap: 82.5%;
+  /* THE RAIL INSET: half the column the cap leaves, the margin that puts a
+     bubble's or card's edge on a rail (the response's left, the prompt's
+     right). Unregistered, so its `100%` resolves where it is used, against
+     that element's own containing block. Every rail margin reads it rather
+     than restating the arithmetic. */
+  --agent-rail-inset: calc((100% - var(--agent-bubble-cap)) / 2);
   /* THE SCROLLBAR RIDES THE INNER EDGE (same ruling): "ensure the scrollbar of
      the response bubble (and all bubbles, in fact) abuts (or close to) the
      right hand side of the bubble". A bubble's own right padding used to sit
@@ -2105,11 +2111,11 @@ pre {
      `--md-line-h`, so it follows. */
   --md-line-h: calc(1 + (var(--tree-font-rem) * var(--tree-line-h) / var(--bubble-font-rem) - 1) * 0.75);
   margin-left: auto;
-  margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
+  margin-right: var(--agent-rail-inset);
 }
 .bubble[data-role="response"] {
   --bubble-bg: var(--assistant);
-  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
+  margin-left: var(--agent-rail-inset);
   margin-right: auto;
 }
 /* THE ONE BACKGROUND A VARIANT SETS (owner ruling, 2026-10-08, superseding
@@ -2484,7 +2490,7 @@ html[data-page-unshown] *::after {
    sub-feed bubble spans the cap (below), because its panel is a feed. */
 .feed-item > .tool-card:has(> .tool-head) {
   width: fit-content;
-  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
+  margin-left: var(--agent-rail-inset);
   margin-right: auto;
 }
 .feed-item > .tool-card.bubble-fold[data-expanded="true"] {
@@ -2560,7 +2566,7 @@ html[data-page-unshown] *::after {
    line separates each member from the one above it (a concluded turn ending
    between two members takes no slot, so the sibling rule skips it). */
 .feed-item > .response-run {
-  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
+  margin-left: var(--agent-rail-inset);
   margin-right: auto;
   width: fit-content;
   max-width: var(--bubble-max-width);
@@ -3703,7 +3709,7 @@ html[data-page-unshown] *::after {
 .merge-handback-badge {
   width: fit-content;
   max-width: var(--agent-bubble-cap);
-  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
+  margin-left: var(--agent-rail-inset);
   margin-right: auto;
 }
 
@@ -4211,12 +4217,12 @@ html[data-page-unshown] *::after {
 /* Flush the row's left edge with the response column's left rail rather than
    the feed's far-left gutter. The bubbles and tool cards above hug a column
    inset half the agent cap's leftover from each side (the same
-   `calc((100% - var(--agent-bubble-cap)) / 2)` the assistant response's
+   `--agent-rail-inset` the assistant response's
    `margin-left` and the centered `.feed-item > .tool-card` derive from), so
    the identical left margin lands the row's spinner directly beneath where the
    last response bubble's own left edge sits. */
 .thinking-pending {
-  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
+  margin-left: var(--agent-rail-inset);
 }
 /* A tool call that has not settled spins the same arc, one size down, inside
    its running badge — through BOTH in-flight phases (streaming input, then

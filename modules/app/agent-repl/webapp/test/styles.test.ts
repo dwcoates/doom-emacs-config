@@ -268,7 +268,7 @@ describe("the bubble geometry: the two caps", () => {
     const role = declarationsOf('.bubble[data-role="response"]');
 
     // Assert
-    expect(role).toMatch(/margin-left:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
+    expect(role).toMatch(/margin-left:\s*var\(--agent-rail-inset\)/);
   });
 
   it("hangs a prompt on the right rail, its margin biased off the unscaled cap", () => {
@@ -276,7 +276,31 @@ describe("the bubble geometry: the two caps", () => {
     const role = declarationsOf('.bubble[data-role="prompt"]');
 
     // Assert
-    expect(role).toMatch(/margin-right:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
+    expect(role).toMatch(/margin-right:\s*var\(--agent-rail-inset\)/);
+  });
+
+  it("declares the rail inset once on the column, as half the cap's leftover", () => {
+    // Arrange / Act
+    const column = declarationsOf("#main-col");
+
+    // Assert
+    expect(column).toMatch(/--agent-rail-inset:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
+  });
+
+  it("restates the rail arithmetic nowhere but the inset's declaration", () => {
+    // Arrange / Act
+    const copies = withoutBlockComments(stylesheet).match(/100% - var\(--agent-bubble-cap\)/g) ?? [];
+
+    // Assert
+    expect(copies).toHaveLength(1);
+  });
+
+  it("hangs a titled card on the response's rail through the inset", () => {
+    // Arrange / Act
+    const rule = rulesOfSelector(".feed-item > .tool-card:has(> .tool-head)");
+
+    // Assert
+    expect(rule).toMatch(/margin-left:\s*var\(--agent-rail-inset\)/);
   });
 
   it("leaves no second copy of the old 75% cap behind", () => {
@@ -1981,7 +2005,7 @@ describe("a coalesced run of final responses (response-run.ts)", () => {
 
   it("hangs the run on the response's rail at the bubble cap", () => {
     const rule = rulesOfSelector(".feed-item > .response-run");
-    expect(rule).toMatch(/margin-left:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/);
+    expect(rule).toMatch(/margin-left:\s*var\(--agent-rail-inset\)/);
     expect(rule).toMatch(/max-width:\s*var\(--bubble-max-width\)/);
     expect(rule).toMatch(/width:\s*fit-content/);
   });
