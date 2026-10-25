@@ -3,7 +3,11 @@ package wsm
 import (
 	"context"
 	"errors"
+	"regexp"
 	"testing"
+
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestClaimServingRecordsTheOwner(t *testing.T) {
@@ -234,5 +238,57 @@ func TestClaimUnownedServingRefusesAnUnknownWorkspace(t *testing.T) {
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ClaimUnownedServing on an unknown workspace = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRequireInstance(t *testing.T) {
+	tests := []struct {
+		name    string
+		daemon  InstanceID
+		wantErr bool
+	}{
+		{name: "an instance passes", daemon: "instance-a", wantErr: false},
+		{name: "no instance is refused at error", daemon: "", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+
+			// Act
+			err := s.requireInstance("daemon.wsm.test_write", dlog.Context{"workspace": "w1"}, tt.daemon, "refused a test write with no instance")
+
+			// Assert
+			if gotErr := err != nil; gotErr != tt.wantErr {
+				t.Fatalf("requireInstance = %v, want an error %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !errors.Is(err, errEmptyInstance) {
+				t.Fatalf("requireInstance = %v, want errEmptyInstance", err)
+			}
+			if got := loggedOperation(log, "daemon.wsm.test_write", "error"); got != tt.wantErr {
+				t.Fatalf("logged at error = %v, want %v: %v", got, tt.wantErr, log.Records())
+			}
+		})
+	}
+}
+
+// TestServingWritesRefuseAnEmptyInstanceThroughRequireInstance keeps every
+// serving write's empty-instance refusal on the one helper: an inline check is
+// a second spelling of the refusal to drift.
+func TestServingWritesRefuseAnEmptyInstanceThroughRequireInstance(t *testing.T) {
+	// Arrange
+	inline := regexp.MustCompile(`== ""\s*\{\s*err := errors\.New\("wsm: empty daemon instance id"\)`)
+
+	// Act
+	var offenders []string
+	for _, file := range sourcescan.Production(t) {
+		if inline.Match(file.Source) {
+			offenders = append(offenders, file.Name)
+		}
+	}
+
+	// Assert
+	if len(offenders) != 0 {
+		t.Fatalf("%v refuse an empty instance inline; use requireInstance", offenders)
 	}
 }

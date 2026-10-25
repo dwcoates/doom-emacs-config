@@ -685,9 +685,7 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) error {
 	const op = "daemon.wsm.reopen"
 	fields := dlog.Context{"workspace": string(id), "instance": string(serving)}
-	if serving == "" {
-		err := errors.New("wsm: empty daemon instance id")
-		s.log.Error(op, "refused a re-open with no instance to serve it", withError(fields, err))
+	if err := s.requireInstance(op, fields, serving, "refused a re-open with no instance to serve it"); err != nil {
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {

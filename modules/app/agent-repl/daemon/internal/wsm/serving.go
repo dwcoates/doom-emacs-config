@@ -8,15 +8,27 @@ import (
 	"agent-repld/internal/dlog"
 )
 
+// errEmptyInstance is the refusal of a serving write that names no daemon
+// instance.
+var errEmptyInstance = errors.New("wsm: empty daemon instance id")
+
+// requireInstance refuses a serving write naming no daemon instance, recording
+// the refusal at ERROR under op as refused says it.
+func (s *store) requireInstance(op string, fields dlog.Context, daemon InstanceID, refused string) error {
+	if daemon != "" {
+		return nil
+	}
+	s.log.Error(op, refused, withError(fields, errEmptyInstance))
+	return errEmptyInstance
+}
+
 // ClaimServing records this daemon instance as the workspace's serving owner —
 // the handover's per-workspace transfer. The claim is unconditional by design:
 // the kernel lock is the arbitration, this row is who serves it now.
 func (s *store) ClaimServing(ctx context.Context, id WorkspaceID, daemon InstanceID) error {
 	const op = "daemon.wsm.claim_serving"
 	fields := dlog.Context{"workspace": string(id), "instance": string(daemon)}
-	if daemon == "" {
-		err := errors.New("wsm: empty daemon instance id")
-		s.log.Error(op, "refused a serving claim with no instance", withError(fields, err))
+	if err := s.requireInstance(op, fields, daemon, "refused a serving claim with no instance"); err != nil {
 		return err
 	}
 	return s.setWorkspaceField(ctx, op, "serving_instance", id, string(daemon), fields)
@@ -39,9 +51,7 @@ func (s *store) ClaimServing(ctx context.Context, id WorkspaceID, daemon Instanc
 func (s *store) ClaimUnownedServing(ctx context.Context, id WorkspaceID, daemon InstanceID) (bool, InstanceID, error) {
 	const op = "daemon.wsm.claim_unowned_serving"
 	fields := dlog.Context{"workspace": string(id), "instance": string(daemon)}
-	if daemon == "" {
-		err := errors.New("wsm: empty daemon instance id")
-		s.log.Error(op, "refused a serving claim with no instance", withError(fields, err))
+	if err := s.requireInstance(op, fields, daemon, "refused a serving claim with no instance"); err != nil {
 		return false, "", err
 	}
 	var (
