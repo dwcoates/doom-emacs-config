@@ -4,7 +4,6 @@ import (
 	"sort"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/wsm"
 )
@@ -93,7 +92,7 @@ func (r *resolver) threadSection(threads []wsm.Workspace) *frontendv1.RosterThre
 	out := &frontendv1.RosterThreadSection{NewThread: &frontendv1.RosterThreadNewButton{Label: NewThreadLabel}}
 	for _, ws := range sorted {
 		row := &frontendv1.RosterThreadRow{
-			Thread: &workspacev1.WorkspaceRef{Id: string(ws.ID), Dir: ws.Dir},
+			Thread: ws.Ref(),
 			Name:   &frontendv1.RosterThreadName{Text: ws.Name},
 		}
 		if s, ok := r.state.workspaces[ws.ID]; ok && s.summary != "" {
