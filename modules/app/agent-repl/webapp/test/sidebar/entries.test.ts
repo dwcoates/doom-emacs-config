@@ -58,7 +58,7 @@ describe("the section's lists", () => {
   });
 
   it("reads the subsections in drawn order", () => {
-    expect(sectionSubsections(example(), "s").map(({ subsection, path }) => [subsection.key?.subsectionId, path])).toEqual([
+    expect(sectionSubsections(example(), "s").map(({ subsection, path }) => [(subsection.kind.case === "named" ? subsection.kind.value.key?.subsectionId : subsection.kind.case), path])).toEqual([
       ["foo", "s.entries[1].subsection"],
     ]);
   });
