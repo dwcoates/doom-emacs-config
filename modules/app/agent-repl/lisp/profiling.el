@@ -10,10 +10,20 @@
 ;; signaled); closing the session and calling again stops the profile and
 ;; writes into `<root>/<id>/':
 ;;
-;;   emacs-<pid>.cpu.elprof, emacs-<pid>.mem.elprof
+;;   emacs-<pid>.mem.elprof
 ;;       loadable with `profiler-find-profile';
-;;   emacs-<pid>.cpu.txt, emacs-<pid>.mem.txt
+;;   emacs-<pid>.mem.txt
 ;;       the reversed call tree, hottest leaf functions first.
+;;
+;; NO CPU PROFILE IS TAKEN IN HERE.  Emacs's CPU profiler is driven by
+;; SIGPROF, and a signal the kernel delivers to one of WebKit's threads is
+;; forwarded by Emacs to its main thread with `pthread_kill'; when that
+;; thread held a libpas lock, the forwarding took it again and aborted the
+;; process (2026-10-25: the editor crashed, "Trying to recursively lock an
+;; os_unfair_lock" on JavaScriptCore's scavenger thread).  Every agent-repl
+;; Emacs hosts WebKit, so the collector samples Emacs's CPU from outside
+;; with macOS `sample' instead (bin/profile-agent-repl.sh,
+;; emacs-<pid>.cpu.sample).
 ;;
 ;;   webapp-<workspace>.lag.json
 ;;       every live page's main-thread stalls over the session: a
@@ -103,13 +113,11 @@ Signals an error when the file names no valid session."
         id))))
 
 (defun agent-repl-profiling--start (session)
-  "Start CPU and memory profiling into SESSION."
+  "Start memory profiling into SESSION; never the SIGPROF CPU profiler."
   (when (profiler-running-p)
     (error "The profiler is already running outside this session; stop it first"))
   (make-directory (expand-file-name session (agent-repl-profiling-root)) t)
   (profiler-reset)
-  (when (fboundp 'profiler-cpu-start)
-    (profiler-cpu-start profiler-sampling-interval))
   (profiler-memory-start)
   (setq agent-repl-profiling--session session
         agent-repl-profiling--generation (1+ agent-repl-profiling--generation))
@@ -183,14 +191,10 @@ Answers the files written."
       (cancel-timer agent-repl-profiling--timer))
     (setq agent-repl-profiling--session nil
           agent-repl-profiling--timer nil)
-    (when (and (fboundp 'profiler-cpu-running-p) (profiler-cpu-running-p))
-      (setq profiler-cpu-log (profiler-cpu-log)))
     (when (profiler-memory-running-p)
       (setq profiler-memory-log (profiler-memory-log)))
-    (when (fboundp 'profiler-cpu-stop) (profiler-cpu-stop))
     (profiler-memory-stop)
-    (dolist (spec (list (list "cpu" profiler-cpu-log #'profiler-cpu-profile)
-                        (list "mem" profiler-memory-log #'profiler-memory-profile)))
+    (dolist (spec (list (list "mem" profiler-memory-log #'profiler-memory-profile)))
       (when (nth 1 spec)
         (let ((profile (funcall (nth 2 spec)))
               (data (expand-file-name (format "%s.%s.elprof" base (car spec)) dir))

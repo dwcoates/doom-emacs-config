@@ -261,6 +261,8 @@ func frames(w io.Writer, session string) error {
 			text, err = cpuprofileTop(path, 12)
 		case strings.HasSuffix(e.Name(), ".heapprofile"):
 			text, err = heapprofileTop(path, 12)
+		case strings.HasSuffix(e.Name(), ".cpu.sample"):
+			text, err = sampleTop(path, 15)
 		case strings.HasSuffix(e.Name(), ".txt"):
 			text, err = head(path, 15)
 		case strings.HasSuffix(e.Name(), ".lag.json"):
@@ -274,6 +276,40 @@ func frames(w io.Writer, session string) error {
 		fmt.Fprintf(w, "### %s\n\n```\n%s\n```\n\n", e.Name(), strings.TrimRight(text, "\n"))
 	}
 	return nil
+}
+
+// sampleTop answers the first n leaf frames of a macOS `sample' report, its
+// "Sort by top of stack" section: where the sampled threads spent their time,
+// hottest first.  A report without the section is an error, never an empty
+// answer, because a sample that wrote no section sampled nothing.
+func sampleTop(path string, n int) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	const heading = "Sort by top of stack"
+	_, after, found := strings.Cut(string(data), heading)
+	if !found {
+		return "", fmt.Errorf("%s has no %q section", path, heading)
+	}
+	var b strings.Builder
+	lines := strings.Split(after, "\n")
+	taken := 0
+	for _, line := range lines[1:] {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if taken > 0 {
+				break
+			}
+			continue
+		}
+		fmt.Fprintln(&b, line)
+		taken++
+		if taken == n {
+			break
+		}
+	}
+	return b.String(), nil
 }
 
 // lagSummary answers a page's main-thread stalls: how long it was stalled,
