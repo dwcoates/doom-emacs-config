@@ -151,6 +151,8 @@ type fixture struct {
 	turns  *fakeTurns
 	log    *dlog.TestLogger
 	svc    *Service
+	// jobs are the background jobs deferJobs held back, oldest first.
+	jobs []func()
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -162,6 +164,12 @@ func newFixture(t *testing.T) *fixture {
 		Go:  func(job func()) { job() },
 	})
 	return f
+}
+
+// deferJobs makes the service's background jobs wait in f.jobs until the
+// test runs them, so a test chooses the order racing jobs finish in.
+func (f *fixture) deferJobs() {
+	f.svc.deps.Go = func(job func()) { f.jobs = append(f.jobs, job) }
 }
 
 func (f *fixture) open() {
@@ -498,6 +506,68 @@ func TestAQuestionInFlightGoesFromWaitingToANode(t *testing.T) {
 	}
 	if got := f.exchange("n3").GetAnswer().GetMarkdown().GetText(); got != "Then this." {
 		t.Fatalf("answer = %q", got)
+	}
+}
+
+func TestAnAnswerRecordedAfterItsTurnClosedIsShownBelowItsParent(t *testing.T) {
+	// Arrange: a highlight's question asked of n1, whose shown child is n2.
+	f := newFixture(t)
+	f.zettel.seed("", 0)
+	f.zettel.seed("n1", 0)
+	f.open()
+	f.turns.ask("turn-9", "why that word?", "n1", "sky")
+	if err := f.svc.Asked(context.Background(), thr, nil); err != nil {
+		t.Fatal(err)
+	}
+	f.deferJobs()
+	f.svc.TurnAnswered(thr, "turn-9", "Because.")
+	f.turns.close()
+	f.svc.TurnEnded(thr, "turn-9")
+	record, refresh := f.jobs[0], f.jobs[1]
+
+	// Act and assert: the records say closed before zettel answers the record.
+	refresh()
+	if got := f.view().GetConversation().GetPending().GetAnswer().GetStreaming().GetMarkdown().GetText(); got != "Because." {
+		t.Fatalf("pending answer = %q, want the answer still in flight while it is recorded", got)
+	}
+	if got := f.path(); !equal(got, []string{"n1"}) {
+		t.Fatalf("path = %v, want [n1] while the answer is recorded", got)
+	}
+	record()
+	if p := f.view().GetConversation().GetPending(); p != nil {
+		t.Fatalf("pending = %v, want none once recorded", p)
+	}
+	if got := f.path(); !equal(got, []string{"n1", "n3"}) {
+		t.Fatalf("path = %v, want the new answer shown below n1", got)
+	}
+}
+
+func TestAForgottenAnswerOfAClosedTurnIsNoLongerInFlight(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.zettel.seed("", 0)
+	f.open()
+	f.turns.ask("turn-9", "why?", "n1", "")
+	if err := f.svc.Asked(context.Background(), thr, nil); err != nil {
+		t.Fatal(err)
+	}
+	f.zettel.recordErr = errors.New("zettel gone")
+	f.deferJobs()
+	f.svc.TurnAnswered(thr, "turn-9", "Because.")
+	f.turns.close()
+	f.svc.TurnEnded(thr, "turn-9")
+	record, refresh := f.jobs[0], f.jobs[1]
+	refresh()
+
+	// Act
+	record()
+
+	// Assert
+	if p := f.view().GetConversation().GetPending(); p != nil {
+		t.Fatalf("pending = %v, want none once the answer is forgotten", p)
+	}
+	if got := f.records("error", "daemon.chat.record_failed"); got != 1 {
+		t.Fatalf("record_failed records = %d, want 1", got)
 	}
 }
 

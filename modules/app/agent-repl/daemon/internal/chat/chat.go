@@ -140,10 +140,20 @@ type thread struct {
 	// answer is known and is being recorded; ended is a turn the feed saw
 	// end, which the prompt records may not yet say.
 	prose    map[ids.TurnID]string
-	answered map[ids.TurnID]string
+	answered map[ids.TurnID]answeredTurn
 	ended    map[ids.TurnID]bool
 	// path is the shown path as last composed, root first.
 	path []NodeID
+}
+
+// answeredTurn is a turn whose answer is being recorded. It holds the turn's
+// question as the records last said, because the turn stays in flight until
+// its node exists, though the records may call it closed first.
+type answeredTurn struct {
+	markdown string
+	// turn is the turn as last read open, nil while the records have not
+	// said it is.
+	turn *wsm.Turn
 }
 
 // state answers a thread's state, creating it. Called under s.mu.
@@ -153,7 +163,7 @@ func (s *Service) state(id ids.WorkspaceID) *thread {
 		t = &thread{
 			id: id, topic: publish.NewLatestOnly[*frontendv1.ChatView](),
 			nodes: map[NodeID]*zettelv1.Node{}, picks: map[NodeID]NodeID{},
-			prose: map[ids.TurnID]string{}, answered: map[ids.TurnID]string{}, ended: map[ids.TurnID]bool{},
+			prose: map[ids.TurnID]string{}, answered: map[ids.TurnID]answeredTurn{}, ended: map[ids.TurnID]bool{},
 		}
 		s.threads[id] = t
 	}
@@ -254,6 +264,12 @@ func (s *Service) refresh(ctx context.Context, id ids.WorkspaceID) error {
 		}
 	}
 	sort.SliceStable(t.open, func(i, j int) bool { return t.open[i].StartedAt.Before(t.open[j].StartedAt) })
+	for turn, answer := range t.answered {
+		if answer.turn == nil {
+			answer.turn = t.openTurn(turn)
+			t.answered[turn] = answer
+		}
+	}
 	t.held = t.held[:0]
 	for _, h := range held {
 		if h.Ask != nil && h.Tombstone == nil {
@@ -303,7 +319,7 @@ func (s *Service) AnswerProse(ws ids.WorkspaceID, turn ids.TurnID, markdown stri
 func (s *Service) TurnAnswered(ws ids.WorkspaceID, turn ids.TurnID, markdown string) {
 	s.mu.Lock()
 	if t, ok := s.threads[ws]; ok && t.loaded {
-		t.answered[turn] = markdown
+		t.answered[turn] = answeredTurn{markdown: markdown, turn: t.openTurn(turn)}
 		s.publish(t)
 	}
 	s.mu.Unlock()
@@ -543,13 +559,30 @@ func (t *thread) children(parent NodeID) []NodeID {
 }
 
 // isOpen reports whether a turn is one the records last said was open.
-func (t *thread) isOpen(turn ids.TurnID) bool {
+func (t *thread) isOpen(turn ids.TurnID) bool { return t.openTurn(turn) != nil }
+
+// openTurn answers a copy of the turn the records last said was open, or nil.
+func (t *thread) openTurn(turn ids.TurnID) *wsm.Turn {
 	for _, o := range t.open {
 		if o.ID == turn {
-			return true
+			return &o
 		}
 	}
-	return false
+	return nil
+}
+
+// inFlight answers the turns whose questions are in flight, oldest first: the
+// open ones, and the answered ones the records already call closed, which
+// stay in flight until their node is recorded.
+func (t *thread) inFlight() []wsm.Turn {
+	turns := slices.Clone(t.open)
+	for id, answer := range t.answered {
+		if answer.turn != nil && !t.isOpen(id) {
+			turns = append(turns, *answer.turn)
+		}
+	}
+	sort.SliceStable(turns, func(i, j int) bool { return turns[i].StartedAt.Before(turns[j].StartedAt) })
+	return turns
 }
 
 // recordedTurn reports whether a turn is already a node.

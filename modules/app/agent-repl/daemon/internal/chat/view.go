@@ -52,17 +52,18 @@ func (s *Service) publish(t *thread) {
 	t.topic.Publish(&frontendv1.ChatView{State: &frontendv1.ChatView_Conversation{Conversation: conversation}})
 }
 
-// pending answers the thread's question in flight: the oldest open turn not
-// yet a node and not ended unanswered, else the oldest held question.
+// pending answers the thread's question in flight: the oldest turn in flight
+// not yet a node and not ended unanswered, else the oldest held question.
 func (t *thread) pending() (pendingQuestion, bool) {
-	for _, turn := range t.open {
+	for _, turn := range t.inFlight() {
 		if t.recordedTurn(turn.ID) {
 			continue
 		}
-		answer, answered := t.answered[turn.ID]
+		recording, answered := t.answered[turn.ID]
 		if t.ended[turn.ID] && !answered {
 			continue
 		}
+		answer := recording.markdown
 		if !answered {
 			answer = t.prose[turn.ID]
 		}
