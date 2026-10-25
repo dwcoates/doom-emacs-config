@@ -861,15 +861,20 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   border-bottom: 1px solid var(--border);
 }
 #ws-sidebar .sb-title { font-weight: 600; font-size: 0.95rem; }
-/* THE AGENT-REPL VERSION (owner request, 2026-10-21): pushed to the head's
-   top right, small, in a grey mixed most of the way into the rail's ground so
-   it reads only when looked for. Mixed from the theme's tokens, so either
-   theme's ground and grey carry it. */
+/* THE AGENT-REPL VERSION (owner request, 2026-10-21): small, in a grey
+   mixed most of the way into the rail's ground so it reads only when looked
+   for. Mixed from the theme's tokens, so either theme's ground and grey carry
+   it. Tucked into the head's top-right corner, out of the title's line, and
+   a touch smaller and dimmer (owner request, 2026-10-25). The head is its
+   containing block (`position: relative`, the apps section below). */
 #ws-sidebar .sb-version {
-  margin-left: auto;
-  font-size: 0.68rem;
+  position: absolute;
+  top: 5px;
+  right: 0.7rem;
+  font-size: 0.64rem;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
-  color: color-mix(in srgb, var(--muted) 45%, var(--sidebar-bg));
+  color: color-mix(in srgb, var(--muted) 38%, var(--sidebar-bg));
 }
 /* THE SEARCH (src/sidebar/search.ts): the magnifier left of the title, and
    the bar it slides open under the head. The bar hangs absolutely, its top
