@@ -205,17 +205,66 @@ type MergeQueue struct {
 	// Workspaces are the workspaces with a row on the queue, in queue order:
 	// the queue a `merging` or `merge_queued` row's own merge is on.
 	Workspaces []ids.WorkspaceID
-	// Line is the workspaces whose merge is IN LINE, front first: the
-	// running merge (when one runs) first, then every waiting merge in the
-	// order it will run -- Workspaces less the merges only requested. A
-	// repository section showing its merge queue draws one row for each
-	// (frontend.v1.RosterRepoMergeQueue).
-	Line []ids.WorkspaceID
+	// Line is the merges IN LINE, front first: the running merge (when one
+	// runs) first, then every waiting merge in the order it will run --
+	// Workspaces less the merges only requested. A repository section
+	// showing its merge queue draws the first as its head and the rest as
+	// its waiting merges (frontend.v1.RosterRepoMergeQueue).
+	Line []QueueEntry
+	// Failed is the last merge on the queue that failed, nil when none
+	// stands: it is set when a merge fails and cleared when the next merge
+	// is put in line. The section draws it as its head while Line is empty.
+	Failed *FailedMerge
 	// AsyncRequesters are the workspaces whose own branch has an async merge
 	// on the queue, from the moment the async request is recorded until its
 	// merge leaves the queue. Each row carries the `async_merging` marker
 	// beside its own status arm.
 	AsyncRequesters []ids.WorkspaceID
+}
+
+// LineWorkspaces answers the workspace each merge in line runs in, front
+// first.
+func (q MergeQueue) LineWorkspaces() []ids.WorkspaceID {
+	out := make([]ids.WorkspaceID, 0, len(q.Line))
+	for _, entry := range q.Line {
+		out = append(out, entry.Workspace)
+	}
+	return out
+}
+
+// QueueEntry is one merge in line, as a repository section showing its merge
+// queue draws it.
+type QueueEntry struct {
+	// Workspace is the workspace the merge runs in: an async merge's merge
+	// workspace once it exists. The roster reads its merge facts.
+	Workspace ids.WorkspaceID
+	// Credited is the workspace the roster credits the merge to: Workspace
+	// itself for a workspace landing its own branch, and the requester for
+	// an async merge, which is never drawn as its hidden merge workspace.
+	Credited ids.WorkspaceID
+	// Async reports whether the merge runs in a hidden merge workspace.
+	Async bool
+	// Reveal is the merge bubble's head row on Credited's root feed, nil when
+	// the merge has no bubble identity in this daemon.
+	Reveal *frontendv1.FeedId
+	// QueuedAt is when the merge was put in line.
+	QueuedAt time.Time
+	// PlacedAtFront reports that it was put in line at the front.
+	PlacedAtFront bool
+	// Admitted reports that the merge's run was admitted: it is being worked
+	// on rather than waiting.
+	Admitted bool
+	// Stages are the merge's stages so far, read from its ledger
+	// (frontend.v1.RosterMergeQueueHead.stages). Only the front of the line
+	// and a failed merge carry them.
+	Stages []*frontendv1.RosterMergeQueueStage
+}
+
+// FailedMerge is the last merge on a queue that failed: the merge as its
+// head draws it, and the one-line account of why it gave up.
+type FailedMerge struct {
+	Entry   QueueEntry
+	Summary string
 }
 
 // FooterStatus is the footer resolver's answers to what a workspace's strip

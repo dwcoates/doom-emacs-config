@@ -511,12 +511,7 @@ func detachedWork(id string) *conversationv1.AgentDetachedWork {
 
 // hasError reports whether any captured record was an error under operation.
 func hasError(records []dlog.Record, operation string) bool {
-	for _, rec := range records {
-		if rec.Level == "error" && rec.Operation == operation {
-			return true
-		}
-	}
-	return false
+	return hasRecord(records, dlog.LevelError, operation)
 }
 
 // twoRepoRegistry is a registry carrying the fixture repository and a second
@@ -529,3 +524,16 @@ func twoRepoRegistry(ws ...wsm.Workspace) sidebar.Registry {
 
 // otherRepo is a second repository, so a section or the merged band can span two.
 var otherRepo = wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", DefaultBranch: "main", Place: 2}
+
+// hasRecord reports whether any captured record was at LEVEL under operation.
+func hasRecord(records []dlog.Record, level, operation string) bool {
+	for _, rec := range records {
+		if rec.Level == level && rec.Operation == operation {
+			return true
+		}
+	}
+	return false
+}
+
+// ptr answers a pointer to V.
+func ptr[T any](v T) *T { return &v }

@@ -43,6 +43,7 @@ syntax = "proto3";
 
 package frontend.v1;
 
+import "frontend/v1/feed.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
@@ -765,7 +766,7 @@ message RosterRepoSection {
   // daemon resolves both from the one view it holds, so they never disagree.
   // `entries` is carried under EITHER arm, because the Emacs tab bar walks
   // it whatever the sidebar shows; under `merge_queue` the sidebar draws the
-  // queue in its place, and the header's count is the queue's rows. Never
+  // queue in its place, and the header's count is the merges in line. Never
   // unset on a wire section.
   oneof shows {
     // The body is `entries`.
@@ -779,26 +780,158 @@ message RosterRepoSection {
 // the fact.
 message RosterRepoShowsWorkspaces {}
 
-// ONE REPOSITORY'S MERGE QUEUE as its section draws it: every merge in line,
-// front first -- the running merge (when one runs) first, then every waiting
-// merge in the order it will run -- the same line agentrepl.v1
-// .MergeQueueStatus.entries reads. A merge only REQUESTED, its asking turn
-// still running, is in no line and is not listed. An empty queue lists no
-// row.
+// ONE REPOSITORY'S MERGE QUEUE as its section draws it (owner request,
+// 2026-10-25): a small merge bubble for the merge at the head of the line,
+// then every merge waiting behind it, in the order it will run -- the same
+// line agentrepl.v1.MergeQueueStatus.entries reads. A merge only REQUESTED,
+// its asking turn still running, is in no line and is not listed.
+//
+// EVERY MERGE IS CREDITED AS THE REST OF THE ROSTER CREDITS IT: to the
+// workspace landing its own branch, or, for an async merge, to the workspace
+// that asked for it, which carries the `async_merging` marker in the
+// workspaces view (RosterRow.async_merging). A hidden merge workspace is never
+// named, drawn or selected here.
+//
+// A queue with no head and nothing waiting draws no body: its section is its
+// header alone, drawn in the folded header's faded grey whether it is folded
+// or not.
 message RosterRepoMergeQueue {
-  // Each merge in line, front first.
-  repeated RosterMergeQueueRow rows = 1;
+  // Tag 1 (`rows`, every merge in line drawn as a workspace row) is RETIRED:
+  // the queue is drawn as its head and its waiting merges.
+  reserved 1;
+  reserved "rows";
+  // The merge at the head: the merge at the front of the line, or, while the
+  // line is empty, the last merge on this queue that FAILED, until the next
+  // merge joins the line. UNSET when neither stands.
+  optional RosterMergeQueueHead head = 2;
+  // Every merge waiting behind the head, in the order it will run. Empty
+  // when the head is the failed merge, since nothing is in line then.
+  repeated RosterMergeQueueWaiting waiting = 3;
+  // PRESENT while the queue is paused: merges still join it, but nothing
+  // runs until it is resumed.
+  optional RosterMergeQueuePaused paused = 4;
 }
 
-// ONE MERGE IN LINE, drawn as the workspace it runs in: the workspace landing
-// its own branch, an async merge's merge workspace once it exists (a hidden
-// merge workspace is drawn here though no other list carries it), or, for an
-// async merge waiting to start, the workspace that asked for it. FLAT: a
-// queue lists merges, not families. The row's own status arm says whether it
-// runs (`merging`) or waits (`merge_queued`).
-message RosterMergeQueueRow {
-  // The row as every list draws it.
-  RosterRow row = 1;
+// The queue is paused. DELIBERATELY EMPTY: presence is the fact.
+message RosterMergeQueuePaused {}
+
+// Which workspace a merge in the queue is credited to, and where a click on
+// it goes.
+message RosterMergeQueueSubject {
+  // The workspace the merge is credited to (see RosterRepoMergeQueue). A
+  // click selects it.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // That workspace's name, drawn verbatim.
+  string name = 2;
+  // The merge bubble's head row on that workspace's root feed, which a click
+  // brings on screen and opens once the workspace is selected
+  // (agentrepl.v1.SelectWorkspaceRequest.reveal). UNSET for a merge this
+  // daemon holds no bubble identity for; a click then only selects.
+  optional FeedId reveal = 3;
+  // How the merge runs: in place, or in a hidden merge workspace.
+  RosterMergeQueueMode mode = 4;
+}
+
+// How a merge in the queue runs. THE ARM IS THE MODE.
+message RosterMergeQueueMode {
+  oneof mode {
+    // The workspace landing its own branch in place.
+    RosterMergeQueueModeSync sync = 1;
+    // An async merge, run in a hidden merge workspace.
+    RosterMergeQueueModeAsync async = 2;
+  }
+}
+// In place. No fields.
+message RosterMergeQueueModeSync {}
+// Async. No fields.
+message RosterMergeQueueModeAsync {}
+
+// THE HEAD OF THE QUEUE, drawn as a small merge bubble: who it is, the stages
+// it has been through, and where it stands.
+message RosterMergeQueueHead {
+  RosterMergeQueueSubject subject = 1;
+  // The merge's stages so far, in the order each began, read from the
+  // merge's ledger: one per top-level tab of its bubble, the rebasing and
+  // the tests tab each drawn once over all its rounds (a conflict resolution
+  // is part of the rebasing stage and a fixing attempt part of the tests
+  // stage). Empty while the merge has not been admitted.
+  repeated RosterMergeQueueStage stages = 2;
+  // WHERE THE HEAD STANDS. THE ARM IS THE STANDING. Never unset.
+  oneof standing {
+    // At the front of the line, not yet admitted: the queue is paused, or
+    // its admission has not run yet.
+    RosterMergeQueueHeadWaiting waiting = 3;
+    // Being worked on.
+    RosterMergeQueueHeadMerging merging = 4;
+    // Gave up. Stands only while the line is empty.
+    RosterMergeQueueHeadFailed failed = 5;
+  }
+}
+
+// The head waits at the front of the line.
+message RosterMergeQueueHeadWaiting {
+  // When the merge was put in line, epoch ms. The client ticks how long it
+  // has waited from it.
+  int64 queued_at_ms = 1;
+}
+
+// The head is being worked on.
+message RosterMergeQueueHeadMerging {
+  // The step the merge stands on and its figure, in plain words, composed by
+  // the daemon from the merge's own facts ("rebasing 3/7", "fixing attempt
+  // 2/3") and drawn verbatim. UNSET while the merge's facts have not named a
+  // step yet.
+  optional string step = 1;
+}
+
+// The head gave up.
+message RosterMergeQueueHeadFailed {
+  // The daemon's one-line account of the failure, the same one the merge
+  // bubble's head carries (FeedMergeFailed.summary), drawn verbatim.
+  string summary = 1;
+}
+
+// ONE STAGE of the head's merge.
+message RosterMergeQueueStage {
+  // The stage's words ("queue", "rebasing", "tests", "committing"), drawn
+  // verbatim.
+  string label = 1;
+  // The 1-based round of a stage drawn once per round (a second committing
+  // is "committing (2)"); the client decorates rounds beyond the first and
+  // draws nothing for round 1. Always 1 for the rebasing and the tests stage.
+  uint32 round = 2;
+  // THE ARM IS THE STAGE'S STATE. Never unset.
+  oneof state {
+    RosterMergeQueueStageLive live = 3;
+    RosterMergeQueueStageSucceeded succeeded = 4;
+    RosterMergeQueueStageFailed failed = 5;
+  }
+}
+// The stage is running.
+message RosterMergeQueueStageLive {
+  // When it began, epoch ms. The client ticks its elapsed time from it.
+  int64 started_at_ms = 1;
+}
+// The stage ended and succeeded.
+message RosterMergeQueueStageSucceeded {
+  int64 started_at_ms = 1;
+  int64 ended_at_ms = 2;
+}
+// The stage ended and did not succeed: it failed, the merge started over from
+// it because its target moved, or the merge was abandoned during it.
+message RosterMergeQueueStageFailed {
+  int64 started_at_ms = 1;
+  int64 ended_at_ms = 2;
+}
+
+// ONE MERGE WAITING behind the head.
+message RosterMergeQueueWaiting {
+  RosterMergeQueueSubject subject = 1;
+  // When it was put in line, epoch ms.
+  int64 queued_at_ms = 2;
+  // TRUE when it was put in line at the front
+  // (agentrepl.v1.MergeQueuePlacementFront).
+  bool placed_at_front = 3;
 }
 
 // One entry of a repository section's body: a top-level row in no
