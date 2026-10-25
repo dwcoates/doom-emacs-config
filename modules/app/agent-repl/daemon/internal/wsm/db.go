@@ -562,6 +562,9 @@ type DB interface {
 	// SetPrincipalLink records a workspace's principal link, or clears it
 	// with nil (principallink.go).
 	SetPrincipalLink(ctx context.Context, id WorkspaceID, link *string) error
+	// SetName records a workspace's new name, leaving its branch and
+	// directory as they are (rename.go). An empty name is refused.
+	SetName(ctx context.Context, id WorkspaceID, name string) error
 	// SetOneShot marks a workspace's creation a one-shot or unmarks it; a
 	// workspace with no creation job is ErrNotFound (standings.go).
 	SetOneShot(ctx context.Context, id WorkspaceID, oneShot bool) error
