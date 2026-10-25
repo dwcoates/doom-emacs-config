@@ -359,7 +359,7 @@ var Suites = []Suite{
 	{Name: "tree-sitter-tldr", Kind: Script, Path: "tree-sitter-tldr/test-tree-sitter-tldr.sh"},
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
-		Programs: map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock"}}},
+		Programs: map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}}},
 	// Two slots: the sandbox container is capped to the width it is given
 	// (docker --cpus, GOMAXPROCS), and the layer runs its two Emacsen
 	// (e2e/EMACS-LAYER-SPEC.md, "The parallelism bound, measured") on two
