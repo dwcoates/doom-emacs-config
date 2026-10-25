@@ -754,3 +754,40 @@ func TestSessionsFailsWholeOnAHalfWrittenTerminal(t *testing.T) {
 		t.Fatalf("the decode failure was not logged at error: %v", log.Records())
 	}
 }
+
+// TestSessionAndSessionsDecodeTheSameRow pins the shared column list
+// (sessionSelectColumns): a row carrying every field, terminal and shim pid
+// included, reads back identically through the single-record read and the
+// bulk one, so neither read can select a column set the other does not.
+func TestSessionAndSessionsDecodeTheSameRow(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	pid := 4242
+	if err := s.PutSession(context.Background(), Session{
+		Workspace: ws.ID, HostSessionID: "host-1", VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+		SelectedConfigDir: "/root/.claude-alt", Model: "opus", PermissionMode: "default",
+		StartedAt: instant, LastEngagementAt: instant.Add(time.Minute), ShimPID: &pid,
+		Terminal: &SessionTerminal{Kind: "killed", Detail: "KillWorkspace", At: instant.Add(time.Hour)},
+	}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+
+	// Act
+	one, _, err := s.Session(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	all, err := s.Sessions(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sessions: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("Sessions = %+v, want the one record", all)
+	}
+	if !reflect.DeepEqual(one, all[0]) {
+		t.Fatalf("Session = %+v, Sessions[0] = %+v, want the same decoded row", one, all[0])
+	}
+}
