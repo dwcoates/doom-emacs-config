@@ -372,6 +372,9 @@ type fakeVerbs struct {
 	// the handler resolved onto the verbs, and sectionFoldErr is what each of
 	// those verbs answers instead.
 	sectionFolds   []sectionFold
+	// showOpen records every ShowOpenMergeQueues, whether it asked for the
+	// merge queues.
+	showOpen []bool
 	sectionFoldErr error
 	closeErr       error
 	// closedBy is every cause Close was asked with, in order.
@@ -2068,6 +2071,13 @@ func (v *fakeVerbs) FoldHiddenSection(_ context.Context, folded bool) error {
 
 func (v *fakeVerbs) FoldOpenSection(_ context.Context, folded bool) error {
 	v.sectionFolds = append(v.sectionFolds, sectionFold{open: true, folded: folded})
+	return v.sectionFoldErr
+}
+
+// ShowOpenMergeQueues records what the open section was asked to show, in
+// showOpen, and answers sectionFoldErr like every other view change.
+func (v *fakeVerbs) ShowOpenMergeQueues(_ context.Context, mergeQueues bool) error {
+	v.showOpen = append(v.showOpen, mergeQueues)
 	return v.sectionFoldErr
 }
 

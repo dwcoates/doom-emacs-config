@@ -12,7 +12,8 @@ import (
 )
 
 // UpdateSidebarView changes one piece of the sidebar's view state — a
-// section's fold — which the roster push carries to every page. A change to what the view already holds is success.
+// section's fold, or what the open section's repository sections show —
+// which the roster push carries to every page. A change to what the view already holds is success.
 func (s *server) UpdateSidebarView(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UpdateSidebarViewRequest],
@@ -33,6 +34,8 @@ func (s *server) UpdateSidebarView(
 		if answered {
 			return answer(resp, cerr)
 		}
+	case *agentreplv1.UpdateSidebarViewRequest_ShowOpen:
+		err = s.deps.Verbs.ShowOpenMergeQueues(ctx, change.ShowOpen.GetMergeQueues() != nil)
 	default:
 		// validateUpdateSidebarViewRequest refuses an unset arm, and every arm
 		// the contract names is a case above: reaching here is a validator
