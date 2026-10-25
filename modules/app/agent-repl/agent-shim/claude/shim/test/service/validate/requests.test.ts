@@ -75,6 +75,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       profile: { kind: { case: "chat", value: { systemPrompt: { text: "Answer questions." } } } },
+      workspaceName: "why-sky",
       source: { case: "resume", value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "v-1" }) },
     });
 
