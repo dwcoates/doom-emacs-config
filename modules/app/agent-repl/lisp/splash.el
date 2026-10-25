@@ -120,18 +120,11 @@ Doom shows each with the key that runs its `:action'.")
                              'action (lambda (_) (agent-repl-settings))))
           "\n"))
 
-(defconst agent-repl-splash--banner-widgets
-  '(doom-dashboard-widget-banner +dwc/splash-widget-banner)
-  "The dashboard widgets that draw the banner Settings goes under.
-Doom's own, and the splash config module's, which replaces it.")
-
 (defun agent-repl-splash--with-settings (functions)
   "Return Doom's dashboard widget FUNCTIONS with Settings after the banner."
   (if (memq #'agent-repl-splash-widget-settings functions)
       functions
-    (let ((banner (seq-drop-while
-                   (lambda (f) (not (memq f agent-repl-splash--banner-widgets)))
-                   functions)))
+    (let ((banner (memq 'doom-dashboard-widget-banner functions)))
       (unless banner
         (agent-repl--fatal agent-repl-splash--log-scope
                            "elisp.splash.widgets: no banner widget functions=%S" functions))
