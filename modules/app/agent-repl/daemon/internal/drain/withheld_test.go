@@ -109,14 +109,7 @@ func TestAWithheldStandDownClearsTheShimPids(t *testing.T) {
 func TestACollapsedWorkspaceIsStoodDown(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.workspace(t, instant)
-	record, err := h.db.Workspace(context.Background(), ws)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
-	if err := h.db.SetRepositoryFolded(context.Background(), record.Repo, true); err != nil {
-		t.Fatalf("SetRepositoryFolded: %v", err)
-	}
+	ws := h.collapsed(t)
 
 	// Act
 	h.c.StandDownWithheld(ws)
@@ -154,17 +147,7 @@ func TestTheSelectedHiddenWorkspaceIsNotStoodDown(t *testing.T) {
 		withhold func(t *testing.T, h *harness) ids.WorkspaceID
 	}{
 		{name: "hidden", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) }},
-		{name: "collapsed", withhold: func(t *testing.T, h *harness) ids.WorkspaceID {
-			ws := h.workspace(t, instant)
-			record, err := h.db.Workspace(context.Background(), ws)
-			if err != nil {
-				t.Fatalf("Workspace: %v", err)
-			}
-			if err := h.db.SetRepositoryFolded(context.Background(), record.Repo, true); err != nil {
-				t.Fatalf("SetRepositoryFolded: %v", err)
-			}
-			return ws
-		}},
+		{name: "collapsed", withhold: func(t *testing.T, h *harness) ids.WorkspaceID { return h.collapsed(t) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
