@@ -57,3 +57,9 @@ This change runs as a one-shot workspace with contract changes pre-approved by t
 - What: the revision of the roster resolved after the mark changed, as `ArrangeSidebarSuccess.roster_revision` carries for a placement.
 - Why: a drag into the one-shot subsection is `SetWorkspaceOneShot`. The page holds its drawing until the push that shows the change, and without a revision it could only let go at once, so an older push would put the row back for an instant.
 - Consequences: the daemon reads the revision after `SetOneShot` republished, as `ArrangeSidebar` does.
+
+### 6. The user taking a workspace back clears its mark (owner addendum, 2026-10-24)
+
+- What: documented on `SetWorkspaceOneShot`, with no shape change. A prompt the user submits (`promptorigin.UserSent`: the editor's and the webapp's user-typed origins) clears the mark before it is delivered, and so does reopening a closed one-shot. A prompt from another workspace or from the daemon does not.
+- Why: no agent has to remember to unmark itself when the user steps in, whether the one-shot finished, failed its deploy and stayed open, or is mid-work.
+- Consequences: the clear is `SetOneShot(false)` asked by the user, so the one-shot subsection updates with no code of its own. It is recorded at INFO under `daemon.workspace.take_back_one_shot`, naming the workspace and `cleared_by`.

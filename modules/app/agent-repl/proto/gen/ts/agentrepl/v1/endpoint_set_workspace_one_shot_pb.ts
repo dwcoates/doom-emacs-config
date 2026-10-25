@@ -11,6 +11,12 @@
 // performs nothing on the agent's behalf: the agent carries the directive
 // out.
 //
+// THE USER TAKING THE WORKSPACE BACK CLEARS THE MARK, with no ask: a prompt
+// the user submits from the editor or the webapp clears it before the prompt
+// is delivered, and so does reopening a closed one-shot (OpenWorkspace). A
+// prompt another workspace's agent sent, or one the daemon submits, leaves
+// it. The clear is this verb's unmark, asked by the user.
+//
 // A CHILD ITS OWNER LANDS IS NEVER A ONE-SHOT: landing it is its owner's act,
 // so marking one is refused (`owner_lands`), as creating one is
 // (CreateWorkspaceError.one_shot_owner_lands).
