@@ -581,6 +581,27 @@ describe("retireAll", () => {
     expect(parsed(host.ids()).ids).toEqual([]);
   });
 
+  it("reads a removed page's last message at info, not as a stranger's", () => {
+    // Arrange: the page's message was on its way when the reload retired it.
+    pages(host, "a");
+    const removed = frame("a").contentWindow;
+    host.retireAll();
+    window.dispatchEvent(
+      new MessageEvent("message", { data: { channel: HOST_CHANNEL, kind: "hello" }, source: removed }),
+    );
+
+    // Act
+    const answer = parsed(host.ids());
+
+    // Assert
+    expect(answer.notes).toEqual([
+      {
+        level: "info",
+        text: expect.stringContaining("already removed") as unknown,
+      },
+    ]);
+  });
+
   it("ends the webhost's own page, aborting its requests", () => {
     // Arrange
     pages(host, "a");
@@ -862,27 +883,6 @@ describe("notes", () => {
       {
         level: "warn",
         text: expect.stringContaining("no workspace page") as unknown,
-      },
-    ]);
-  });
-
-  it("reads a removed page's last message at info, not as a stranger's", () => {
-    // Arrange: the page's message was on its way when the reload retired it.
-    pages(host, "a");
-    const removed = frame("a").contentWindow;
-    host.retireAll();
-    window.dispatchEvent(
-      new MessageEvent("message", { data: { channel: HOST_CHANNEL, kind: "hello" }, source: removed }),
-    );
-
-    // Act
-    const answer = parsed(host.ids());
-
-    // Assert
-    expect(answer.notes).toEqual([
-      {
-        level: "info",
-        text: expect.stringContaining("already removed") as unknown,
       },
     ]);
   });
