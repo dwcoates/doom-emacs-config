@@ -33,6 +33,7 @@
  */
 import { armButtonRole } from "../control.js";
 import { armTooltip } from "../tooltip.js";
+import { MERGE_GLYPH } from "../merge-glyph.js";
 import type {
   FooterChipAgents,
   FooterChipCrons,
@@ -748,7 +749,7 @@ export function drawFooterChipMonitors(u: FooterChipMonitors, deps: StripDeps): 
  * daemon's.
  */
 export function drawFooterChipMerges(u: FooterChipMerges, deps: StripDeps): HTMLElement {
-  const el = chip("merges", "⇄", String(u.count), deps);
+  const el = chip("merges", MERGE_GLYPH, String(u.count), deps);
   if (u.waitingOnUser === undefined) return el;
   el.appendChild(chipWaiting("waitingOnUser", WAITING_ON_USER_GLYPH, u.waitingOnUser.count, "waiting on you"));
   return el;
