@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 /** The one timer seam (src/timers.ts). */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { filesUnder } from "./files-under.js";
 import { WINDOW_TIMERS } from "../src/timers.js";
 
 describe("WINDOW_TIMERS", () => {
@@ -29,12 +30,7 @@ describe("WINDOW_TIMERS", () => {
 describe("the timer seam's call sites", () => {
   it("declare no timer seam of their own beside src/timers.ts", () => {
     const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src");
-    const files = (dir: string): string[] =>
-      readdirSync(dir).flatMap((name) => {
-        const full = path.join(dir, name);
-        return statSync(full).isDirectory() ? files(full) : /\.tsx?$/.test(name) ? [full] : [];
-      });
-    const own = files(src).filter(
+    const own = filesUnder(src, [".ts", ".tsx"]).filter(
       (file) => !file.endsWith(`${path.sep}timers.ts`) && /setTimeout\(fn: \(\) => void, ms: number\): number;/.test(readFileSync(file, "utf8")),
     );
     expect(own.map((file) => path.relative(src, file))).toEqual([]);

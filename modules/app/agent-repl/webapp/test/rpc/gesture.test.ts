@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 /** A verb whose answer is the next view (src/rpc/gesture.ts). */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { filesUnder } from "../files-under.js";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { ShowChatNodeResponseSchema, type ShowChatNodeResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_chat_node_pb";
 import { log } from "../../src/log.js";
@@ -61,12 +62,7 @@ describe("sendGesture", () => {
 describe("the gesture sites", () => {
   it("note a refused arm only through sendGesture, but for the chat search that reads its success", () => {
     const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../src");
-    const files = (dir: string): string[] =>
-      readdirSync(dir).flatMap((name) => {
-        const full = path.join(dir, name);
-        return statSync(full).isDirectory() ? files(full) : /\.tsx?$/.test(name) ? [full] : [];
-      });
-    const noting = files(src)
+    const noting = filesUnder(src, [".ts", ".tsx"])
       .filter((file) => /noteRefusedArm\(/.test(readFileSync(file, "utf8")))
       .map((file) => path.relative(src, file))
       .sort();
