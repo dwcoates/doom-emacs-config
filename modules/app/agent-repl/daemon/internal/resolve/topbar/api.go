@@ -10,6 +10,7 @@
 // resolved, which means all five of these have arrived:
 //
 //	SetNaming              the title and the session line's config dir
+//	SetName                the workspace name alone, on a rename
 //	OnSessionStarted       the vendor session id and the effective model
 //	SetAccount             the account arm (a logged-out root is a DRAWN
 //	                       warning, so "not yet read" is not the same fact)
@@ -148,6 +149,10 @@ type Resolver interface {
 	SetWorkspaceDir(ws ids.WorkspaceID, dir string) error
 	// SetNaming installs the WSM-derived title and session line.
 	SetNaming(ws ids.WorkspaceID, naming Naming)
+	// SetName replaces the workspace name the topbar draws
+	// (TopbarWorkspaceName), leaving the session line's config dir as it is.
+	// Its sole producer is the workspace verbs, on every SetWorkspaceName.
+	SetName(ws ids.WorkspaceID, name string)
 	// SetSynthesizedTitle installs the daemon's OWN one-sentence workspace
 	// summary, shown in the title's FIRST precedence: above the vendor's
 	// ai-title and the workspace name. An empty text retracts it. Its sole

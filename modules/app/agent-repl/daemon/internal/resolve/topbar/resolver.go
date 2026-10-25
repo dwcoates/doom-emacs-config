@@ -540,6 +540,16 @@ func (r *resolver) SetNaming(ws ids.WorkspaceID, naming Naming) {
 		})
 }
 
+// SetName replaces the workspace name a rename changed. The session line's
+// config dir stays: a rename moves no account.
+func (r *resolver) SetName(ws ids.WorkspaceID, name string) {
+	r.mutate(ws, "daemon.topbar.set_name", "the topbar took the workspace's new name",
+		dlog.Context{"name": name},
+		func(s *wsState) {
+			s.naming.Name = name
+		})
+}
+
 // SetSynthesizedTitle installs the daemon's OWN one-line summary of the
 // conversation. It is the first precedence in the title, ahead of the vendor's
 // ai-title. An empty text retracts it (the title falls back to the vendor's
