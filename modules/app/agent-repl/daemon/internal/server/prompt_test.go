@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -11,6 +13,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
@@ -781,5 +784,58 @@ func TestSubmitPromptLeavesTheSelectionStandingForATypedAnswer(t *testing.T) {
 	}
 	if got := resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue(); got != "resp-1-old" {
 		t.Fatalf("selected = %q, want resp-1-old (the selection survived and stepped older)", got)
+	}
+}
+
+func TestSubmitPromptTakesAOneShotBack(t *testing.T) {
+	sender := &workspacev1.WorkspaceRef{Id: string(senderWorkspaceID), Dir: "/tmp/sender"}
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		sentBy *workspacev1.WorkspaceRef
+		want   []fakeTakeBack
+	}{
+		{name: "a prompt the user typed in the editor", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+			want: []fakeTakeBack{{ws: testWorkspaceID, by: workspace.TakenBackByUserPrompt}}},
+		{name: "a prompt the user typed in the webapp", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
+			want: []fakeTakeBack{{ws: testWorkspaceID, by: workspace.TakenBackByUserPrompt}}},
+		{name: "a prompt another workspace's agent sent", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, sentBy: sender},
+		{name: "a prompt the daemon submitted", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			registerSender(h)
+			h.Verbs.api.prompts = h.Prompts
+			h.Prompts.outcome = prompthandler.Outcome{Turn: "turn-1", Disposition: promptqueue.Disposition{Delivered: true}}
+			req := submitRequest()
+			req.Origin, req.SentBy = tt.origin, tt.sentBy
+
+			// Act
+			_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(req))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SubmitPrompt: %v", err)
+			}
+			if got := h.Verbs.api.takeBacks; !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("take-backs = %+v, want %+v, each before the prompt was handed on", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSubmitPromptWhoseTakeBackFailsDeliversNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Verbs.api.takeBackErr = errors.New("the store is gone")
+
+	// Act
+	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal || h.Prompts.submits != 0 {
+		t.Fatalf("SubmitPrompt = %v with %d submissions, want an internal error and none", err, h.Prompts.submits)
 	}
 }

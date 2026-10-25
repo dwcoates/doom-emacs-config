@@ -30,7 +30,7 @@ import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_
 import { log } from "../log.js";
 import { unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
-import { fireVerb } from "./verbs.js";
+import { fireVerb, type VerbCall, type VerbResponse } from "./verbs.js";
 
 /** One ArrangeSidebar change: the request's change arm. */
 export type ArrangeChange = MessageInitShape<typeof ArrangeSidebarRequestSchema>["change"];
@@ -77,17 +77,45 @@ export async function sendArrangement(sc: SidebarContext, control: HTMLElement, 
     operation: "sidebar.arrange.send",
     context: { change: change?.case },
   });
-  sc.arrange.hold.await();
-  let revision: bigint | null = null;
-  const took = await fireVerb(control, {
-    sc,
+  return sendHeld(sc, control, {
     rpc: "ArrangeSidebar",
     call: (client) => client.arrangeSidebar(buildArrangeSidebarRequest(change)),
     schema: ArrangeSidebarResponseSchema,
     refusalText: (cause) => arrangeSidebarRefusal(cause as never),
+    revision: (response: ArrangeSidebarResponse) =>
+      response.result.case === "success" ? response.result.value.rosterRevision : null,
+  });
+}
+
+/**
+ * A verb that changes what the sidebar draws, and whose success answers the
+ * revision of the roster that carries the change (REVISION, null for a
+ * response that names none).
+ */
+export interface HeldVerb<Res extends VerbResponse> extends Omit<VerbCall<Res>, "sc" | "outlivesPush" | "took"> {
+  revision: (response: Res) => bigint | null;
+}
+
+/**
+ * THE ONE WAY A GESTURE THAT REARRANGES THE SIDEBAR ASKS THE DAEMON: VERB,
+ * with CONTROL the element a refusal is drawn beside. While the ask is in
+ * flight the page's drawing is held (`ArrangeHold.await`), and the answer
+ * settles the hold: at the revision a success names, at once otherwise.
+ * Answers whether the change took.
+ */
+export async function sendHeld<Res extends VerbResponse>(
+  sc: SidebarContext,
+  control: HTMLElement,
+  verb: HeldVerb<Res>,
+): Promise<boolean> {
+  sc.arrange.hold.await();
+  let revision: bigint | null = null;
+  const took = await fireVerb(control, {
+    ...verb,
+    sc,
     outlivesPush: true,
-    took: (response: ArrangeSidebarResponse) => {
-      if (response.result.case === "success") revision = response.result.value.rosterRevision;
+    took: (response: Res) => {
+      revision = verb.revision(response);
     },
   });
   sc.arrange.hold.settle(took ? revision : null);

@@ -429,7 +429,7 @@ function verbButton(verb: Verb, kind: RowKind): Control {
 }
 
 /** A response with the outcome oneof every verb in this section answers on. */
-type VerbResponse = Message & { result: { case?: string | undefined; value?: unknown } };
+export type VerbResponse = Message & { result: { case?: string | undefined; value?: unknown } };
 
 /** What one verb call needs to run and to report. */
 export interface VerbCall<Res extends VerbResponse> {

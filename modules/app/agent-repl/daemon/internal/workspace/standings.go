@@ -18,7 +18,20 @@ import (
 
 const (
 	opSetOneShot        = "daemon.workspace.set_one_shot"
+	opTakeBackOneShot   = "daemon.workspace.take_back_one_shot"
 	opSetCorrespondence = "daemon.workspace.set_correspondence"
+)
+
+// OneShotTakeBack names what took a one-shot back from its agent for the user
+// (TakeBackOneShot).
+type OneShotTakeBack string
+
+const (
+	// TakenBackByUserPrompt is a prompt the user submitted, from the editor
+	// or the webapp (promptorigin.UserSent).
+	TakenBackByUserPrompt OneShotTakeBack = "user_prompt"
+	// TakenBackByReopen is a closed one-shot reopened (OpenWorkspace).
+	TakenBackByReopen OneShotTakeBack = "reopen"
 )
 
 // The standings' refusal arms.
@@ -81,6 +94,30 @@ func (v *verbs) SetOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.W
 	log.Info(opSetOneShot, "recorded the workspace's one-shot standing", fields)
 	v.republishRegistry(ctx, log, opSetOneShot)
 	return directive, nil
+}
+
+// TakeBackOneShot clears WS's one-shot mark because the user took the
+// workspace back, as BY says: the agent no longer finishes it unattended, so
+// no agent has to remember to unmark itself. A workspace that is not marked is
+// left as it is, and so is a closed one, whose mark records the one-shot it
+// finished: a reopen clears it once the row is open. The clear IS SetOneShot(not one-shot) asked by the user, so
+// it republishes the roster, and the sidebar's one-shot subsection lets the
+// family go, with no code of its own.
+func (v *verbs) TakeBackOneShot(ctx context.Context, ws ids.WorkspaceID, by OneShotTakeBack) error {
+	record, log, err := v.owned(ctx, "TakeBackOneShot", ws)
+	if err != nil {
+		return err
+	}
+	if !record.OneShot || record.Closed {
+		return nil
+	}
+	if _, err := v.SetOneShot(ctx, ws, nil, false); err != nil {
+		log.Error(opTakeBackOneShot, "could not clear the one-shot mark of a workspace the user took back", dlog.Context{
+			"cleared_by": string(by), "cause": err.Error()})
+		return fmt.Errorf("take back one-shot %q: %w", ws, err)
+	}
+	log.Info(opTakeBackOneShot, "the user took the one-shot back; its mark is cleared", dlog.Context{"cleared_by": string(by)})
+	return nil
 }
 
 // SetCorrespondence marks WS awaiting correspondence from AWAITED, or clears

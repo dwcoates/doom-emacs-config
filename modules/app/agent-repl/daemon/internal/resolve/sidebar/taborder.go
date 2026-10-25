@@ -44,15 +44,19 @@ type openNode struct {
 }
 
 // openRegion is one rows region of a repository's Open section: a run of its
-// rows in no subsection (subsection nil) or one subsection's.
+// rows in no subsection (subsection nil, oneShot false), one named
+// subsection's, or the repository's one-shot subsection's (oneShot).
 type openRegion struct {
 	subsection *wsm.Subsection
+	oneShot    bool
 	rows       []openNode
 }
 
 // folded reports whether the region's tabs are folded off the tab bar: its
-// repository is collapsed, or it is a subsection that is. The one statement
-// of a folded tab, which the sidebar's numbering and the tab bar read alike.
+// repository is collapsed, or it is a named subsection that is. The one-shot
+// subsection never collapses itself (frontend.v1.RosterSubsectionNeverCollapses).
+// The one statement of a folded tab, which the sidebar's numbering and the
+// tab bar read alike.
 func (r openRegion) folded(repo wsm.Repository) bool {
 	return repo.Folded || (r.subsection != nil && r.subsection.Folded)
 }
@@ -106,7 +110,7 @@ func openTree(reg Registry, log dlog.Logger) ([]openRepo, map[ids.RepoID][]wsm.W
 		repo := openRepo{repo: placedRepo.repo}
 		for _, b := range placedRepo.buckets {
 			tree := nest(b.workspaces, log)
-			repo.regions = append(repo.regions, openRegion{subsection: b.subsection, rows: openNodes(tree, tree.roots)})
+			repo.regions = append(repo.regions, openRegion{subsection: b.subsection, oneShot: b.oneShot, rows: openNodes(tree, tree.roots)})
 		}
 		out = append(out, repo)
 	}

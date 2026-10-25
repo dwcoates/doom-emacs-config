@@ -139,3 +139,26 @@ func TestEverySenderCheckIsCheckSender(t *testing.T) {
 		t.Fatalf("these files compare an origin to PROMPT_ORIGIN_AGENT_SENT by hand instead of asking CheckSender: %v", found)
 	}
 }
+
+func TestUserSent(t *testing.T) {
+	user := map[conversationv1.PromptOrigin]bool{
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT:                 true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_AND_HIDE:        true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT: true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX:    true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_PREFIX:     true,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT:          true,
+	}
+	for value := range conversationv1.PromptOrigin_name {
+		origin := conversationv1.PromptOrigin(value)
+		t.Run(origin.String(), func(t *testing.T) {
+			// Act
+			got := UserSent(origin)
+
+			// Assert
+			if got != user[origin] {
+				t.Fatalf("UserSent(%s) = %v, want %v", origin, got, user[origin])
+			}
+		})
+	}
+}

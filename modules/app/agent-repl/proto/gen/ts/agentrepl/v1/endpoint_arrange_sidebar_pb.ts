@@ -302,6 +302,13 @@ export const ArrangeMoveRepositorySchema: GenMessage<ArrangeMoveRepository> = /*
  * root, so placing a parent takes its descendants and placing a child takes
  * its ancestors (and so their every descendant).
  *
+ * PLACING A FAMILY TAKES IT OUT OF THE ONE-SHOT SUBSECTION: the one-shot
+ * mark of every member that is not closed is cleared in the same write, so
+ * the family is drawn where it was placed (frontend.v1.RosterSubsectionOneShot).
+ * A closed member keeps its mark: a finished one-shot is still one, and its
+ * mark draws the family nowhere. A family enters the one-shot subsection by a
+ * mark (SetWorkspaceOneShot), never by a placement.
+ *
  * @generated from message agentrepl.v1.ArrangePlaceWorkspace
  */
 export type ArrangePlaceWorkspace = Message<"agentrepl.v1.ArrangePlaceWorkspace"> & {
@@ -381,6 +388,8 @@ export const ArrangePlaceWorkspaceSchema: GenMessage<ArrangePlaceWorkspace> = /*
  * Put several workspaces' FAMILIES of one repository, in the order given,
  * into a subsection of it (or into none) as one block at a place among the roots
  * already there: ArrangePlaceWorkspace for many, applied whole or not at all.
+ * Each placed family leaves the one-shot subsection, as ArrangePlaceWorkspace
+ * says.
  * The bulk form an agent files a batch of workspaces with.
  *
  * @generated from message agentrepl.v1.ArrangePlaceWorkspaces

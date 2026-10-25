@@ -6,7 +6,22 @@ import {
   type ArrangeSidebarRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_arrange_sidebar_pb";
 import { disposeWorkspaceRoster, drawWorkspaceRoster } from "../../src/sidebar/roster.js";
-import { familyTop } from "../../src/sidebar/subsections.js";
+import {
+  bucketOf,
+  familyTop,
+  sameBucket,
+  setWorkspaceOneShotRefusal,
+  stampBucket,
+} from "../../src/sidebar/subsections.js";
+import {
+  SetWorkspaceOneShotResponseSchema,
+  type SetWorkspaceOneShotRequest,
+  type SetWorkspaceOneShotResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_one_shot_pb";
+import {
+  RosterSubsectionCollapsedSchema,
+  RosterSubsectionExpandedSchema,
+} from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { DRAG_GHOST_CLASS, DRAG_SLOT_CLASS, DROP_TARGET_CLASS, REARRANGED_ATTRIBUTE } from "../../src/sidebar/drag.js";
 import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { frameQueue } from "../frame-queue.js";
@@ -978,5 +993,265 @@ describe("a subsection's fold", () => {
     inRail(drawn, (rail) => {
       expect(cascadedValue(rail.querySelector(".sb-subsection-label") as HTMLElement, "color")).toBe("var(--blocked)");
     });
+  });
+});
+
+describe("the one-shot subsection", () => {
+  /** A context recording every ArrangeSidebar and SetWorkspaceOneShot ask, the mark answered by ANSWER. */
+  function marking(answer: () => SetWorkspaceOneShotResponse = () =>
+    create(SetWorkspaceOneShotResponseSchema, { result: { case: "success", value: { rosterRevision: 2n } } })) {
+    const arranged: ArrangeSidebarRequest[] = [];
+    const marked: SetWorkspaceOneShotRequest[] = [];
+    const asked: UpdateSidebarViewRequest[] = [];
+    const sc = sidebarContext(
+      appContext({
+        arrangeSidebar: (request) => {
+          arranged.push(request);
+          return create(ArrangeSidebarResponseSchema, { result: { case: "success", value: { rosterRevision: 1n } } });
+        },
+        setWorkspaceOneShot: (request) => {
+          marked.push(request);
+          return answer();
+        },
+        updateSidebarView: (request) => {
+          asked.push(request);
+          return create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
+        },
+      }),
+    );
+    return { sc, arranged, marked, asked };
+  }
+
+  /** a, b, [later: l], <one-shot: o p>. */
+  const example = () =>
+    roster({
+      repos: [
+        repoSection({
+          id: "repo-1",
+          rows: [row({ id: "a" }), row({ id: "b" })],
+          subsections: [{ id: "later", rows: [row({ id: "l" })] }],
+          oneShot: [row({ id: "o" }), row({ id: "p" })],
+        }),
+      ],
+    });
+
+  const oneShotOf = (pane: HTMLElement): HTMLElement => pane.querySelector(".sb-subsection[data-one-shot]") as HTMLElement;
+
+  it("draws last in its repository's list, after every named subsection", () => {
+    const pane = mount(example(), sidebarContext());
+    expect(drawnEntries(sectionList(pane))).toEqual(["a", "b", "[later]", "<one-shot>"]);
+  });
+
+  it("draws its name, count and rows as a subsection does", () => {
+    const sub = oneShotOf(mount(example(), sidebarContext()));
+    expect([
+      sub.querySelector(".sb-subsection-label")?.textContent,
+      sub.querySelector(".sb-count")?.textContent,
+      drawnEntries(sub.querySelector(":scope > .rows") as HTMLElement),
+    ]).toEqual(["one-shot", "(2)", ["o", "p"]]);
+  });
+
+  it("states no subsection id, on itself or its rows", () => {
+    const sub = oneShotOf(mount(example(), sidebarContext()));
+    expect([sub.hasAttribute("data-subsection"), sub.querySelector(":scope > .rows")?.hasAttribute("data-subsection")]).toEqual([false, false]);
+  });
+
+  it("has no delete control", () => {
+    const sub = oneShotOf(mount(example(), sidebarContext()));
+    expect(sub.querySelector("[data-subsection-delete]")).toBeNull();
+  });
+
+  it("opens no rename popup on a double-click of its name", () => {
+    const { sc } = marking();
+    const sub = oneShotOf(mount(example(), sc));
+    sub.querySelector(".sb-subsection-label")?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    expect(sc.arrange.layer.querySelector("[data-subsection-popup]")).toBeNull();
+  });
+
+  it("asks nothing from its triangle, and logs that it never collapses", async () => {
+    // Arrange
+    const { sc, asked } = marking();
+    const debug = vi.spyOn(log, "debug");
+    const sub = oneShotOf(mount(example(), sc));
+
+    // Act
+    (sub.querySelector("[data-section-fold]") as HTMLElement).click();
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+
+    // Assert
+    expect([asked, sub.classList.contains("folded"), debug.mock.calls.some(([, f]) => f?.operation === "sidebar.fold.never-collapses")]).toEqual([
+      [],
+      false,
+      true,
+    ]);
+  });
+
+  it.each([
+    { name: "a one-shot subsection that may collapse", oneShot: true, collapse: "collapsible" as const },
+    { name: "a collapsed one-shot subsection", oneShot: true, collapse: null },
+    { name: "a named subsection that never collapses", oneShot: false, collapse: "neverCollapses" as const },
+  ])("refuses $name as a malformed view", ({ oneShot, collapse }) => {
+    // Arrange
+    const made = example();
+    const entry = made.repository!.sections[0].entries.filter((e) => e.entry.case === "subsection")[oneShot ? 1 : 0].entry;
+    if (entry.case !== "subsection") throw new Error("the fixture has its subsections");
+    entry.value.fold =
+      collapse === null
+        ? { case: "collapsed", value: create(RosterSubsectionCollapsedSchema) }
+        : { case: "expanded", value: create(RosterSubsectionExpandedSchema, { collapse: { case: collapse, value: {} } }) };
+
+    // Act / Assert
+    expect(() => drawWorkspaceRoster(made, sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("does not drag by its header", async () => {
+    // Arrange -- a 0, b 20, [later: l] 40, <one-shot: o p> 80.
+    const { sc, arranged: sent, marked } = marking();
+    const pane = mount(example(), sc);
+    layOut(sectionList(pane), 0);
+
+    // Act
+    await drag(oneShotOf(pane).querySelector(".sb-subsection-head") as HTMLElement, 85, 5);
+
+    // Assert
+    expect([sent, marked, oneShotOf(pane).classList.contains(DRAG_SLOT_CLASS)]).toEqual([[], [], false]);
+  });
+
+  it("marks a row dropped into it one-shot, as the user, and places nothing", async () => {
+    // Arrange -- o at 100, p at 120.
+    const { sc, arranged: sent, marked } = marking();
+    const pane = mount(example(), sc);
+    layOut(sectionList(pane), 0);
+
+    // Act
+    await drag(rowLine(pane, "a"), 5, 115);
+
+    // Assert
+    expect([sent, marked.map((r) => [r.workspace?.id, r.oneShot, r.requester?.asker.case])]).toEqual([[], [["a", true, "user"]]]);
+  });
+
+  it("holds the drawing after a drop into it until the push at the answered revision", async () => {
+    // Arrange
+    const { sc } = marking();
+    const pane = mount(example(), sc);
+    layOut(sectionList(pane), 0);
+
+    // Act
+    await drag(rowLine(pane, "a"), 5, 115);
+
+    // Assert
+    expect(sc.arrange.hold.holding()).toBe(true);
+  });
+
+  it("draws a refused mark beside the arrangement status and lets the hold go", async () => {
+    // Arrange
+    const { sc } = marking(() =>
+      create(SetWorkspaceOneShotResponseSchema, {
+        result: { case: "error", value: { cause: { case: "ownerLands", value: {} } } },
+      }),
+    );
+    const pane = mount(example(), sc);
+    layOut(sectionList(pane), 0);
+
+    // Act
+    await drag(rowLine(pane, "a"), 5, 115);
+
+    // Assert
+    expect([document.querySelector('.refusal[data-arm="ownerLands"]') !== null, sc.arrange.hold.holding()]).toEqual([true, false]);
+  });
+
+  it("places a row dragged out of it where it was dropped, which clears the mark", async () => {
+    // Arrange
+    const { sc, arranged: sent, marked } = marking();
+    const pane = mount(example(), sc);
+    layOut(sectionList(pane), 0);
+
+    // Act -- o, from 100 to above a.
+    await drag(rowLine(pane, "o"), 105, 2);
+
+    // Assert
+    const change = sent[0]?.change;
+    expect([
+      marked,
+      change?.case === "placeWorkspace"
+        ? [change.value.workspace?.id, change.value.into.case, change.value.at.case === "before" ? change.value.at.value.id : null]
+        : change,
+    ]).toEqual([[], ["o", "noSubsection", "a"]]);
+  });
+
+  it("sends nothing for a row reordered inside it, whose order is the roster's", async () => {
+    // Arrange
+    const { sc, arranged: sent, marked } = marking();
+    const pane = mount(example(), sc);
+    layOut(sectionList(pane), 0);
+
+    // Act -- p, from 120 to above o.
+    await drag(rowLine(pane, "p"), 125, 101);
+
+    // Assert
+    expect([sent, marked, sc.arrange.hold.holding()]).toEqual([[], [], false]);
+  });
+
+  it("lands a row dropped below every entry at the end of the repository's own rows, never after it", async () => {
+    // Arrange -- the section's own list; the one-shot subsection is no anchor.
+    const { sc, arranged: sent } = marking();
+    const pane = mount(
+      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a" }), row({ id: "b" })], oneShot: [row({ id: "o" })] })] }),
+      sc,
+    );
+    layOut(sectionList(pane), 0);
+
+    // Act -- a, dropped just above the one-shot header.
+    await drag(rowLine(pane, "a"), 5, 39);
+
+    // Assert
+    const change = sent[0]?.change;
+    expect(change?.case === "placeWorkspace" ? [change.value.into.case, change.value.at.case] : change).toEqual(["noSubsection", "end"]);
+  });
+});
+
+describe("setWorkspaceOneShotRefusal", () => {
+  it.each([
+    ["closed", "the workspace is closed"],
+    ["noCreationJob", "a registered workspace cannot be a one-shot"],
+    ["ownerLands", "its owner lands this workspace, so it is never a one-shot"],
+    ["requesterMayNotSet", "only the workspace, its owner or the user may mark it"],
+  ])("words %s", (arm, text) => {
+    expect(setWorkspaceOneShotRefusal({ case: arm, value: {} } as never)).toBe(text);
+  });
+});
+
+describe("a list's bucket", () => {
+  const list = (): HTMLElement => document.createElement("div");
+
+  it.each([
+    { case: "none" as const },
+    { case: "named" as const, id: "sub-1" },
+    { case: "oneShot" as const },
+  ])("reads back what was stamped ($case)", (bucket) => {
+    const el = list();
+    stampBucket(el, bucket);
+    expect(bucketOf(el)).toEqual(bucket);
+  });
+
+  it("refuses a list stating both a subsection id and the one-shot subsection", () => {
+    const el = list();
+    stampBucket(el, { case: "named", id: "sub-1" });
+    stampBucket(el, { case: "oneShot" });
+    expect(() => bucketOf(el)).toThrow(/invariant/);
+  });
+
+  it("refuses a list stating no bucket", () => {
+    expect(() => bucketOf(list())).toThrow(/invariant/);
+  });
+
+  it.each([
+    [{ case: "none" as const }, { case: "none" as const }, true],
+    [{ case: "named" as const, id: "a" }, { case: "named" as const, id: "a" }, true],
+    [{ case: "named" as const, id: "a" }, { case: "named" as const, id: "b" }, false],
+    [{ case: "oneShot" as const }, { case: "oneShot" as const }, true],
+    [{ case: "oneShot" as const }, { case: "none" as const }, false],
+  ])("compares %j and %j: %s", (a, b, same) => {
+    expect(sameBucket(a, b)).toBe(same);
   });
 });

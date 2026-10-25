@@ -299,6 +299,8 @@ export function repoSection(init: {
    * unless said, the section shows its workspaces.
    */
   mergeQueue?: RosterRow[];
+  /** The rows of the repository's one-shot subsection, drawn last; none unless said. */
+  oneShot?: RosterRow[];
 }): RosterRepoSection {
   const rows = init.rows ?? [];
   const entries = rowEntries(rows);
@@ -307,7 +309,7 @@ export function repoSection(init: {
       entry: {
         case: "subsection",
         value: {
-          key: { subsectionId: sub.id },
+          kind: { case: "named", value: { key: { subsectionId: sub.id } } },
           header: { label: { text: sub.label ?? sub.id }, count: { workspaces: sub.rows?.length ?? 0 } },
           openRows: { rows: (sub.rows ?? []).map(openRow) },
           fold: sectionFold(sub.collapsed, sub.holdsCurrent),
@@ -317,6 +319,21 @@ export function repoSection(init: {
     const at = sub.before === undefined ? -1 : entries.findIndex((e) => e.entry.case === "row" && e.entry.value.row?.workspace?.workspace?.id === sub.before);
     if (sub.before !== undefined && at < 0) throw new Error(`harness: no row ${sub.before} for subsection ${sub.id} to stand before`);
     entries.splice(at < 0 ? entries.length : at, 0, entry);
+  }
+  if (init.oneShot !== undefined) {
+    entries.push(
+      create(RosterRepoEntrySchema, {
+        entry: {
+          case: "subsection",
+          value: {
+            kind: { case: "oneShot", value: {} },
+            header: { label: { text: "one-shot" }, count: { workspaces: init.oneShot.length } },
+            openRows: { rows: init.oneShot.map(openRow) },
+            fold: { case: "expanded", value: { collapse: { case: "neverCollapses", value: {} } } },
+          },
+        },
+      }),
+    );
   }
   return create(RosterRepoSectionSchema, {
     key: { repository: { id: init.id, dir: `/repo/${init.id}` } },
@@ -484,9 +501,13 @@ export function primaryPointer(type: string, target: EventTarget, y: number): vo
   target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, isPrimary: true, button: 0, clientX: 10, clientY: y }));
 }
 
-/** The drawn entries of a repository section's list, in order: a row by its id, a subsection as [id]. */
+/** The drawn entries of a repository section's list, in order: a row by its id, a named subsection as [id], the one-shot subsection as <one-shot>. */
 export function drawnEntries(list: Element): string[] {
   return [...list.children].map((el) =>
-    el.classList.contains("sb-subsection") ? `[${el.getAttribute("data-subsection")}]` : (el.getAttribute("data-roster-row") ?? "?"),
+    el.classList.contains("sb-subsection")
+      ? el.hasAttribute("data-one-shot")
+        ? "<one-shot>"
+        : `[${el.getAttribute("data-subsection")}]`
+      : (el.getAttribute("data-roster-row") ?? "?"),
   );
 }

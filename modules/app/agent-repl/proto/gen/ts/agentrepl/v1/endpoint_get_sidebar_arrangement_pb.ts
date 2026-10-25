@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_get_sidebar_arrangement.proto.
  */
 export const file_agentrepl_v1_endpoint_get_sidebar_arrangement: GenFile = /*@__PURE__*/
-  fileDesc("CjNhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZ2V0X3NpZGViYXJfYXJyYW5nZW1lbnQucHJvdG8SDGFnZW50cmVwbC52MSIeChxHZXRTaWRlYmFyQXJyYW5nZW1lbnRSZXF1ZXN0IlcKHUdldFNpZGViYXJBcnJhbmdlbWVudFJlc3BvbnNlEjYKDHJlcG9zaXRvcmllcxgBIAMoCzIgLmFnZW50cmVwbC52MS5BcnJhbmdlZFJlcG9zaXRvcnkipgEKEkFycmFuZ2VkUmVwb3NpdG9yeRIvCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWYSDAoEbmFtZRgCIAEoCRIsCgdlbnRyaWVzGAUgAygLMhsuYWdlbnRyZXBsLnYxLkFycmFuZ2VkRW50cnlKBAgDEARKBAgEEAVSCndvcmtzcGFjZXNSC3N1YnNlY3Rpb25zIoYBCg1BcnJhbmdlZEVudHJ5EjQKCXdvcmtzcGFjZRgBIAEoCzIfLmFnZW50cmVwbC52MS5BcnJhbmdlZFdvcmtzcGFjZUgAEjYKCnN1YnNlY3Rpb24YAiABKAsyIC5hZ2VudHJlcGwudjEuQXJyYW5nZWRTdWJzZWN0aW9uSABCBwoFZW50cnkiiAEKEkFycmFuZ2VkU3Vic2VjdGlvbhIvCgpzdWJzZWN0aW9uGAEgASgLMhsuYWdlbnRyZXBsLnYxLlN1YnNlY3Rpb25SZWYSDAoEbmFtZRgCIAEoCRIzCgp3b3Jrc3BhY2VzGAMgAygLMh8uYWdlbnRyZXBsLnYxLkFycmFuZ2VkV29ya3NwYWNlIt8BChFBcnJhbmdlZFdvcmtzcGFjZRItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEgwKBG5hbWUYAiABKAkSDgoGYnJhbmNoGAMgASgJEg4KBmhpZGRlbhgEIAEoCBIxCghjaGlsZHJlbhgFIAMoCzIfLmFnZW50cmVwbC52MS5BcnJhbmdlZFdvcmtzcGFjZRIvCgZwYXJlbnQYBiABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSACIAQFCCQoHX3BhcmVudEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
+  fileDesc("CjNhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZ2V0X3NpZGViYXJfYXJyYW5nZW1lbnQucHJvdG8SDGFnZW50cmVwbC52MSIeChxHZXRTaWRlYmFyQXJyYW5nZW1lbnRSZXF1ZXN0IlcKHUdldFNpZGViYXJBcnJhbmdlbWVudFJlc3BvbnNlEjYKDHJlcG9zaXRvcmllcxgBIAMoCzIgLmFnZW50cmVwbC52MS5BcnJhbmdlZFJlcG9zaXRvcnkipgEKEkFycmFuZ2VkUmVwb3NpdG9yeRIvCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWYSDAoEbmFtZRgCIAEoCRIsCgdlbnRyaWVzGAUgAygLMhsuYWdlbnRyZXBsLnYxLkFycmFuZ2VkRW50cnlKBAgDEARKBAgEEAVSCndvcmtzcGFjZXNSC3N1YnNlY3Rpb25zIrkBCg1BcnJhbmdlZEVudHJ5EjQKCXdvcmtzcGFjZRgBIAEoCzIfLmFnZW50cmVwbC52MS5BcnJhbmdlZFdvcmtzcGFjZUgAEjYKCnN1YnNlY3Rpb24YAiABKAsyIC5hZ2VudHJlcGwudjEuQXJyYW5nZWRTdWJzZWN0aW9uSAASMQoIb25lX3Nob3QYAyABKAsyHS5hZ2VudHJlcGwudjEuQXJyYW5nZWRPbmVTaG90SABCBwoFZW50cnkiRgoPQXJyYW5nZWRPbmVTaG90EjMKCndvcmtzcGFjZXMYASADKAsyHy5hZ2VudHJlcGwudjEuQXJyYW5nZWRXb3Jrc3BhY2UiiAEKEkFycmFuZ2VkU3Vic2VjdGlvbhIvCgpzdWJzZWN0aW9uGAEgASgLMhsuYWdlbnRyZXBsLnYxLlN1YnNlY3Rpb25SZWYSDAoEbmFtZRgCIAEoCRIzCgp3b3Jrc3BhY2VzGAMgAygLMh8uYWdlbnRyZXBsLnYxLkFycmFuZ2VkV29ya3NwYWNlIt8BChFBcnJhbmdlZFdvcmtzcGFjZRItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEgwKBG5hbWUYAiABKAkSDgoGYnJhbmNoGAMgASgJEg4KBmhpZGRlbhgEIAEoCBIxCghjaGlsZHJlbhgFIAMoCzIfLmFnZW50cmVwbC52MS5BcnJhbmdlZFdvcmtzcGFjZRIvCgZwYXJlbnQYBiABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSACIAQFCCQoHX3BhcmVudEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
 
 /**
  * Asks for the whole arrangement. DELIBERATELY EMPTY.
@@ -101,8 +101,8 @@ export const ArrangedRepositorySchema: GenMessage<ArrangedRepository> = /*@__PUR
   messageDesc(file_agentrepl_v1_endpoint_get_sidebar_arrangement, 2);
 
 /**
- * One entry of a repository's arrangement: a family in no subsection, or a
- * subsection.
+ * One entry of a repository's arrangement: a family in no subsection, a
+ * subsection, or the repository's one-shot subsection.
  *
  * @generated from message agentrepl.v1.ArrangedEntry
  */
@@ -124,6 +124,12 @@ export type ArrangedEntry = Message<"agentrepl.v1.ArrangedEntry"> & {
      */
     value: ArrangedSubsection;
     case: "subsection";
+  } | {
+    /**
+     * @generated from field: agentrepl.v1.ArrangedOneShot one_shot = 3;
+     */
+    value: ArrangedOneShot;
+    case: "oneShot";
   } | { case: undefined; value?: undefined };
 };
 
@@ -133,6 +139,33 @@ export type ArrangedEntry = Message<"agentrepl.v1.ArrangedEntry"> & {
  */
 export const ArrangedEntrySchema: GenMessage<ArrangedEntry> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_get_sidebar_arrangement, 3);
+
+/**
+ * The repository's ONE-SHOT subsection (frontend.v1.RosterSubsectionOneShot):
+ * every family holding an open workspace marked one-shot. It is derived from
+ * the marks, so it is listed only while it has families, and always as the
+ * repository's last entry. It has no SubsectionRef, so ArrangeSidebar can
+ * neither name it as a destination or anchor nor rename, move or delete it.
+ * A family enters it when a member is marked (SetWorkspaceOneShot) and leaves
+ * it when its marks are cleared, which placing the family anywhere does.
+ *
+ * @generated from message agentrepl.v1.ArrangedOneShot
+ */
+export type ArrangedOneShot = Message<"agentrepl.v1.ArrangedOneShot"> & {
+  /**
+   * The families, root by root in drawn order.
+   *
+   * @generated from field: repeated agentrepl.v1.ArrangedWorkspace workspaces = 1;
+   */
+  workspaces: ArrangedWorkspace[];
+};
+
+/**
+ * Describes the message agentrepl.v1.ArrangedOneShot.
+ * Use `create(ArrangedOneShotSchema)` to create a new message.
+ */
+export const ArrangedOneShotSchema: GenMessage<ArrangedOneShot> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_get_sidebar_arrangement, 4);
 
 /**
  * One subsection: its name and its families.
@@ -163,7 +196,7 @@ export type ArrangedSubsection = Message<"agentrepl.v1.ArrangedSubsection"> & {
  * Use `create(ArrangedSubsectionSchema)` to create a new message.
  */
 export const ArrangedSubsectionSchema: GenMessage<ArrangedSubsection> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_get_sidebar_arrangement, 4);
+  messageDesc(file_agentrepl_v1_endpoint_get_sidebar_arrangement, 5);
 
 /**
  * One open workspace and its nested family. Only a ROOT (one with no
@@ -224,5 +257,5 @@ export type ArrangedWorkspace = Message<"agentrepl.v1.ArrangedWorkspace"> & {
  * Use `create(ArrangedWorkspaceSchema)` to create a new message.
  */
 export const ArrangedWorkspaceSchema: GenMessage<ArrangedWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_get_sidebar_arrangement, 5);
+  messageDesc(file_agentrepl_v1_endpoint_get_sidebar_arrangement, 6);
 

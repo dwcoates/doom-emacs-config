@@ -1,4 +1,5 @@
-// Package promptorigin is what a prompt's origin decides: whether the prompt
+// Package promptorigin is what a prompt's origin decides: whether the USER
+// sent it, which takes a one-shot back (UserSent); whether the prompt
 // is DRAWN, shared by the two resolvers that draw a prompt (the feed's prompt
 // rows in resolve/feed and the held section's cards in resolve/holds), and
 // whether it NAMES ITS SENDER, shared by every layer that carries a prompt's
@@ -56,4 +57,22 @@ func Unseen(origin conversationv1.PromptOrigin) bool {
 // is not unseen.
 func UnseenNamed(origin string) bool {
 	return Unseen(conversationv1.PromptOrigin(conversationv1.PromptOrigin_value[origin]))
+}
+
+// UserSent reports whether a prompt of ORIGIN is the user's own, typed into
+// the editor or the webapp: the user stepping into the workspace, which takes
+// a one-shot back from its agent (workspace.Verbs.TakeBackOneShot). A prompt
+// another workspace's agent sent, or one the daemon or a program submits on
+// the user's behalf, is not.
+func UserSent(origin conversationv1.PromptOrigin) bool {
+	switch origin {
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_AND_HIDE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_PREFIX,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT:
+		return true
+	}
+	return false
 }

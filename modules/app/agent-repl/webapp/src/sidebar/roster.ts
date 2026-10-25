@@ -64,12 +64,14 @@ import {
 } from "./context.js";
 import { REARRANGED_ATTRIBUTE } from "./drag.js";
 import {
-  BUCKET_ATTRIBUTE,
   drawCreateSubsectionControl,
   drawRosterSubsection,
   installArrangeDrag,
   REPOSITORY_ATTRIBUTE,
+  requireDrawnBucket,
+  stampBucket,
   SUBSECTION_CLASS,
+  subsectionBucket,
   type ArrangeRefs,
 } from "./subsections.js";
 import {
@@ -383,10 +385,7 @@ export function paintRepoHoldsCurrent(element: HTMLElement, u: RosterRepoSection
     throw new Error(`${path}: ${drawn.length} subsections drawn for ${wire.length} on the wire`);
   }
   wire.forEach(({ subsection: sub, path: subPath }, index) => {
-    const id = requireMessage(sub.key, `${subPath}.key`).subsectionId;
-    if (drawn[index].getAttribute(BUCKET_ATTRIBUTE) !== id) {
-      throw new Error(`${subPath}: subsection ${id} is not the one drawn in its place`);
-    }
+    requireDrawnBucket(drawn[index], subsectionBucket(sub, subPath), subPath);
     paintHoldsCurrent(drawn[index], drawRosterHoldsCurrent(sub.fold, `${subPath}.fold`));
   });
 }
@@ -535,7 +534,7 @@ export function drawRosterRepoSection(
       if (shows.case === "mergeQueue") return drawRosterMergeQueue(shows.queue, sc, `${path}.merge_queue`);
       const body = document.createElement("div");
       body.className = "rows";
-      body.setAttribute(BUCKET_ATTRIBUTE, "");
+      stampBucket(body, { case: "none" });
       const own = drawRows.own(unsectionedRows(u, path));
       let rows = 0;
       let subsections = 0;

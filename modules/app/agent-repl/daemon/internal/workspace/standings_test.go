@@ -147,6 +147,104 @@ func TestSetOneShotFailsHardWhenTheDaemonsDirectiveCannotBeRead(t *testing.T) {
 	}
 }
 
+// markedOneShot is standingWorkspace with w1 marked a one-shot.
+func markedOneShot(t *testing.T) *fixture {
+	t.Helper()
+	f := standingWorkspace(t)
+	if err := f.db.SetOneShot(context.Background(), "w1", true); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	return f
+}
+
+func TestTakeBackOneShotClearsTheMarkAndRecordsWhatClearedIt(t *testing.T) {
+	for _, by := range []OneShotTakeBack{TakenBackByUserPrompt, TakenBackByReopen} {
+		t.Run(string(by), func(t *testing.T) {
+			// Arrange
+			f := markedOneShot(t)
+
+			// Act
+			err := f.verbs.TakeBackOneShot(context.Background(), "w1", by)
+
+			// Assert
+			if err != nil || f.db.jobs["w1"].OneShot {
+				t.Fatalf("TakeBackOneShot = %v, one-shot %v; want the mark cleared", err, f.db.jobs["w1"].OneShot)
+			}
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opTakeBackOneShot,
+				Message: "the user took the one-shot back; its mark is cleared"})
+			if !ok || record.Context["cleared_by"] != string(by) || record.Context["workspace"] != "w1" {
+				t.Errorf("info record = %+v, want one naming w1 and %s", record, by)
+			}
+		})
+	}
+}
+
+func TestTakeBackOneShotRepublishesTheRoster(t *testing.T) {
+	// Arrange
+	f := markedOneShot(t)
+	before := len(f.sidebar.registries)
+
+	// Act
+	err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+
+	// Assert
+	if err != nil || len(f.sidebar.registries) == before {
+		t.Fatalf("TakeBackOneShot = %v; the roster was not republished", err)
+	}
+}
+
+func TestTakeBackOneShotLeavesAnUnmarkedWorkspaceAlone(t *testing.T) {
+	// Arrange
+	f := standingWorkspace(t)
+	f.db.setOneShotErr = errors.New("no write was expected")
+
+	// Act
+	err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("TakeBackOneShot = %v, want nothing written", err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Operation: opTakeBackOneShot}); ok {
+		t.Error("an unmarked workspace recorded a take-back")
+	}
+}
+
+func TestTakeBackOneShotLeavesAClosedWorkspacesMark(t *testing.T) {
+	// Arrange -- a finished one-shot keeps its mark until it is reopened.
+	f := markedOneShot(t)
+	ws := f.db.workspaces["w1"]
+	ws.Closed = true
+	f.db.workspaces["w1"] = ws
+
+	// Act
+	err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+
+	// Assert
+	if err != nil || !f.db.jobs["w1"].OneShot {
+		t.Fatalf("TakeBackOneShot = %v, one-shot %v; want the closed workspace's mark kept", err, f.db.jobs["w1"].OneShot)
+	}
+}
+
+func TestTakeBackOneShotFailsHardWhenTheMarkCannotBeCleared(t *testing.T) {
+	// Arrange
+	f := markedOneShot(t)
+	f.db.setOneShotErr = errors.New("db gone")
+
+	// Act
+	err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByReopen)
+
+	// Assert
+	if _, refused := AsRefusal(err); err == nil || refused {
+		t.Fatalf("TakeBackOneShot = %v, want a hard failure", err)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opTakeBackOneShot,
+		Message: "could not clear the one-shot mark of a workspace the user took back"})
+	if !ok || record.Context["cleared_by"] != string(TakenBackByReopen) {
+		t.Errorf("error record = %+v, want one naming the reopen", record)
+	}
+}
+
 func TestSetCorrespondenceMarksAndClears(t *testing.T) {
 	// Arrange
 	f := standingWorkspace(t)

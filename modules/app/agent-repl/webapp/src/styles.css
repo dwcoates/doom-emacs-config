@@ -1119,7 +1119,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    rather than to a touch scroll. */
 #ws-sidebar .sb-sections > .repo-section > .repo-head,
 #ws-sidebar .sb-subsection-head,
-#ws-sidebar .rows[data-subsection] > [data-roster-row] > .row { touch-action: none; }
+#ws-sidebar .rows[data-subsection] > [data-roster-row] > .row,
+#ws-sidebar .rows[data-one-shot] > [data-roster-row] > .row { touch-action: none; }
 #ws-sidebar .sb-drag-slot { opacity: 0.35; outline: 1px dashed var(--border); outline-offset: -1px; }
 /* THE SUBSECTION A DRAGGED ROW WOULD JOIN lights up, subtly, while the row
    is over it (owner request, 2026-10-20): the rail's lifted grey, half

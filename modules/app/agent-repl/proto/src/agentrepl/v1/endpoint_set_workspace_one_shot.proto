@@ -11,6 +11,12 @@
 // performs nothing on the agent's behalf: the agent carries the directive
 // out.
 //
+// THE USER TAKING THE WORKSPACE BACK CLEARS THE MARK, with no ask: a prompt
+// the user submits from the editor or the webapp clears it before the prompt
+// is delivered, and so does reopening a closed one-shot (OpenWorkspace). A
+// prompt another workspace's agent sent, or one the daemon submits, leaves
+// it. The clear is this verb's unmark, asked by the user.
+//
 // A CHILD ITS OWNER LANDS IS NEVER A ONE-SHOT: landing it is its owner's act,
 // so marking one is refused (`owner_lands`), as creating one is
 // (CreateWorkspaceError.one_shot_owner_lands).
@@ -50,6 +56,14 @@ message SetWorkspaceOneShotSuccess {
   // sentence a one-shot's first message carries -- what the agent does when
   // its work is done. UNSET when unmarked.
   optional string completion_directive = 1;
+  // The revision of the roster the daemon resolved after the change
+  // (frontend.v1.WorkspaceRoster.revision): every roster at or above it draws
+  // the workspace's family in, or out of, its repository's one-shot
+  // subsection (frontend.v1.RosterSubsectionOneShot). A sidebar that drew a
+  // drag into that subsection at once holds its drawing until a push at or
+  // above it arrives, as it does for ArrangeSidebarSuccess.roster_revision.
+  // 0 when the daemon has resolved no roster yet.
+  uint64 roster_revision = 2;
 }
 
 // Validation failures (unset field, blank string) are Connect InvalidArgument,

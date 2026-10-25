@@ -358,6 +358,17 @@ describe("paintRepoHoldsCurrent", () => {
       /s2 is not the one drawn/,
     );
   });
+
+  it("refuses a drawn named subsection where the wire stands the one-shot subsection", () => {
+    // Arrange
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "a", subsections: [{ id: "s1" }] })] }), sidebarContext());
+    const element = drawn.querySelector(".repo-section") as HTMLElement;
+
+    // Act / Assert
+    expect(() => paintRepoHoldsCurrent(element, repoSection({ id: "a", oneShot: [] }), "section")).toThrow(
+      /the one-shot subsection is not the one drawn/,
+    );
+  });
 });
 
 describe("folding a section is the daemon's view, shared by every page", () => {

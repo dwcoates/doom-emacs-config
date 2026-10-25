@@ -409,6 +409,9 @@ func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *Sub
 				return err
 			}
 		}
+		if err := clearFamilyOneShot(ctx, tx, ws); err != nil {
+			return err
+		}
 		walk, err := readWalk(ctx, tx, repo)
 		if err != nil {
 			return err
@@ -432,6 +435,26 @@ func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *Sub
 		walk[k].members = slices.Insert(slices.Clone(members), j, ws...)
 		return writeWalk(ctx, tx, walk)
 	})
+}
+
+// clearFamilyOneShot clears the one-shot mark (CreationJob.OneShot) of every
+// member of ROOTS' families that is not closed, so a placed family leaves the
+// sidebar's one-shot subsection, which is derived from those marks, for the
+// place it was put. A closed member keeps its mark: a finished one-shot is
+// still one, and its mark draws the family nowhere.
+func clearFamilyOneShot(ctx context.Context, tx *sql.Tx, roots []WorkspaceID) error {
+	for _, root := range roots {
+		if _, err := tx.ExecContext(ctx, `WITH RECURSIVE family(id) AS (
+  SELECT ?
+  UNION
+  SELECT child.id FROM workspaces AS child JOIN family ON child.parent_id = family.id
+)
+UPDATE creation_jobs SET one_shot = 0
+WHERE one_shot AND workspace_id IN (SELECT family.id FROM family JOIN workspaces USING (id) WHERE NOT workspaces.closed)`, root); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // MoveWorkspace moves workspace WS onto TARGET's tab in the arrangement's

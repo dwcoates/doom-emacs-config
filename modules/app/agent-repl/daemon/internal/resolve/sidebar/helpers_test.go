@@ -328,7 +328,8 @@ func repoOpen(t *testing.T, roster *frontendv1.WorkspaceRoster) []*frontendv1.Ro
 }
 
 // entryShape spells SECTION's entries in drawn order: a row by its name, a
-// subsection as [label: row row].
+// named subsection as [label: row row], the one-shot subsection as
+// <label: row row>.
 func entryShape(section *frontendv1.RosterRepoSection) []string {
 	var out []string
 	for _, entry := range section.GetEntries() {
@@ -338,6 +339,10 @@ func entryShape(section *frontendv1.RosterRepoSection) []string {
 		}
 		sub := entry.GetSubsection()
 		parts := append([]string{sub.GetHeader().GetLabel().GetText() + ":"}, rowNames(innerRows(sub.GetOpenRows().GetRows()))...)
+		if sub.GetOneShot() != nil {
+			out = append(out, "<"+strings.Join(parts, " ")+">")
+			continue
+		}
 		out = append(out, "["+strings.Join(parts, " ")+"]")
 	}
 	return out
