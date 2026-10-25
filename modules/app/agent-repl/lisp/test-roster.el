@@ -3759,6 +3759,18 @@ judged as any roster is."
     (should (member "chat/why-blue" agent-repl-test-roster--created))
     (should (equal (agent-repl-roster-drawn-tab-order) '("one")))))
 
+(ert-deftest agent-repl-test-roster-reconcile-marks-which-workspaces-are-threads ()
+  "Every reconcile states whether each workspace it settled is a thread."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-reconcile
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
+      :threads '(("t1" . "why-blue"))))
+    (should (agent-repl-roster-thread-p "chat/why-blue"))
+    (should-not (agent-repl-roster-thread-p "one"))
+    (should-not (agent-repl-roster-thread-p nil))))
+
 (ert-deftest agent-repl-test-roster-a-thread-gone-from-the-roster-is-torn-down ()
   "A thread the next roster no longer carries loses its workspace."
   (agent-repl-test-roster--with-editor

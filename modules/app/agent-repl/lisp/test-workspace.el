@@ -1318,6 +1318,29 @@ workspace's badge."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
       (should-not (agent-repl--ws-current-name)))))
 
+;;;; ---- Tests: --ws-frame-name ----
+
+(ert-deftest agent-repl-test-ws-frame-name-names-the-frames-workspace ()
+  "ws-frame-name asks persp-mode for FRAME's own workspace."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'get-current-persp)
+               (lambda (&optional frame _window) (and (eq frame 'frame-a) 'persp-a)))
+              ((symbol-function 'safe-persp-name) (lambda (p) (and (eq p 'persp-a) "chat/why"))))
+      (should (equal (agent-repl--ws-frame-name 'frame-a) "chat/why")))))
+
+(ert-deftest agent-repl-test-ws-frame-name-is-nil-for-a-frame-with-no-workspace ()
+  "ws-frame-name answers nil when FRAME shows no workspace."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'get-current-persp) (lambda (&optional _frame _window) nil)))
+      (should-not (agent-repl--ws-frame-name 'frame-a)))))
+
+(ert-deftest agent-repl-test-ws-frame-name-is-nil-without-persp-mode ()
+  "ws-frame-name answers nil when persp-mode is not loaded."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'get-current-persp) nil))
+      (fmakunbound 'get-current-persp)
+      (should-not (agent-repl--ws-frame-name 'frame-a)))))
+
 ;;;; ---- Tests: --ws-exists-p ----
 
 ;;;; ---- Tests: sidebar repaint on tab-bar departure ----

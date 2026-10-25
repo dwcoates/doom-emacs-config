@@ -94,6 +94,8 @@
 (declare-function persp-frames-with-persp "ext:persp-mode" (&optional persp))
 (declare-function persp-other-persps-with-buffer-except-nil "ext:persp-mode" (&optional buff-or-name persp phash del-weak))
 (declare-function persp-update-names-cache "ext:persp-mode" (cache))
+(declare-function get-current-persp "ext:persp-mode" (&optional frame window))
+(declare-function safe-persp-name "ext:persp-mode" (p))
 (declare-function persp-rename "ext:persp-mode" (new-name &optional persp phash))
 (declare-function persp-add-new "ext:persp-mode" (name))
 (declare-function set-persp-parameter "ext:persp-mode" (parameter value &optional persp))
@@ -1352,6 +1354,15 @@ Callers must use this function instead of calling
 `fboundp'."
   (and (fboundp '+workspace-current-name)
        (+workspace-current-name)))
+
+(defun agent-repl--ws-frame-name (frame)
+  "Return the name of the workspace FRAME shows, or nil.
+The frame-shaped `agent-repl--ws-current-name', answering for FRAME
+whichever frame is selected; nil when persp-mode is not loaded or FRAME
+shows no workspace."
+  (and (fboundp 'get-current-persp)
+       (let ((persp (get-current-persp frame)))
+         (and persp (safe-persp-name persp)))))
 
 (defun agent-repl--ws-log-name (ws)
   "Return WS when it owns a durable log sink, else nil for the global sink.

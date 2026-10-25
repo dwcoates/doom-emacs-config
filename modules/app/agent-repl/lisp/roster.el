@@ -608,6 +608,12 @@ Once per push over every closed row, which is why it is DEBUG."
 ROSTER defaults to the last accepted roster (`agent-repl-roster-view')."
   (plist-get (plist-get (or roster agent-repl-roster-view) :threads) :rows))
 
+(defun agent-repl-roster-thread-p (ws)
+  "Return non-nil when the workspace named WS is a zettel chat thread.
+The roster states it on every reconcile (`agent-repl-roster--reconcile-row');
+a name the roster opened no workspace under, nil included, is no thread."
+  (and ws (agent-repl--ws-get ws :thread)))
+
 (defun agent-repl-roster-thread-workspace-name (row)
   "Return the workspace name a thread ROW is opened under."
   (concat agent-repl-roster-thread-prefix (plist-get row :name)))
@@ -802,16 +808,22 @@ and every other row is still opened and ordered."
          (name (plist-get want :name))
          (existing (agent-repl--ws-by-ref-id id)))
     (condition-case err
-        (cond
-         ((null existing)
-          (agent-repl-roster--open-tab want))
-         ((equal existing name)
-          (agent-repl--ws-put name :ref (plist-get want :ref))
-          (agent-repl--log-decision (list 'roster-tab-kept id) name
-                                    name "elisp.roster.tab-kept: ws=%s id=%s" name id)
-          name)
-         (t
-          (agent-repl-roster--rename-tab existing name (plist-get want :ref))))
+        (let ((settled
+               (cond
+                ((null existing)
+                 (agent-repl-roster--open-tab want))
+                ((equal existing name)
+                 (agent-repl--ws-put name :ref (plist-get want :ref))
+                 (agent-repl--log-decision (list 'roster-tab-kept id) name
+                                           name "elisp.roster.tab-kept: ws=%s id=%s" name id)
+                 name)
+                (t
+                 (agent-repl-roster--rename-tab existing name (plist-get want :ref))))))
+          ;; WHETHER THE WORKSPACE IS A CHAT THREAD is the roster's to say,
+          ;; and is stated on every reconcile (`agent-repl-roster-thread-p').
+          (when settled
+            (agent-repl--ws-put settled :thread (and (plist-get want :thread) t)))
+          settled)
       (error
        (agent-repl-roster--log-row-failure
         (or existing name)

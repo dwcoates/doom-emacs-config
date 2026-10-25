@@ -3971,6 +3971,22 @@ test can assert the re-assertion left an already-correct frame alone, and
              (lambda (_frame) t)))
     (should (= 0 (agent-repl--tabbar-target-rows 'frame-a)))))
 
+(ert-deftest agent-repl-test-tabbar-target-rows-fixed-for-a-shown-thread ()
+  "A frame showing a chat thread's webview keeps the fixed row count."
+  (cl-letf (((symbol-function 'agent-repl--tabbar-webview-shown-p) (lambda (_frame) t))
+            ((symbol-function 'agent-repl--ws-frame-name)
+             (lambda (frame) (and (eq frame 'frame-a) "chat/why")))
+            ((symbol-function 'agent-repl-roster-thread-p) (lambda (ws) (equal ws "chat/why"))))
+    (should (= agent-repl--tabline-row-count
+               (agent-repl--tabbar-target-rows 'frame-a)))))
+
+(ert-deftest agent-repl-test-tabbar-target-rows-zero-for-a-shown-workspace ()
+  "A frame showing an agent workspace's webview hides the bar."
+  (cl-letf (((symbol-function 'agent-repl--tabbar-webview-shown-p) (lambda (_frame) t))
+            ((symbol-function 'agent-repl--ws-frame-name) (lambda (_frame) "one"))
+            ((symbol-function 'agent-repl-roster-thread-p) (lambda (_ws) nil)))
+    (should (= 0 (agent-repl--tabbar-target-rows 'frame-a)))))
+
 (ert-deftest agent-repl-test-tabbar-target-rows-fixed-without-webview ()
   "A frame without the webview targets the fixed row count."
   (cl-letf (((symbol-function 'agent-repl--tabbar-webview-shown-p)
