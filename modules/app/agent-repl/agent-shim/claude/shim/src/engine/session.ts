@@ -1293,6 +1293,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       pushPermissionMode();
     },
     onAskOpened: () => withdrawJoinsForAsk(),
+    unattended: () => open?.unattended === true,
   });
 
   /** Whether the ask raised on `agentId`'s book is the keep-alive's. */

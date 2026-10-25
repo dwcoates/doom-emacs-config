@@ -18,6 +18,7 @@ import {
   fromStanding,
   fromVendorPermissionMode,
   PermissionGate,
+  UNATTENDED_DENIAL,
   toQuestionBatch,
   toStanding,
   toVendorAnswers,
@@ -34,6 +35,7 @@ function gateWith(
   keepalive: (agentId: conversationv1.AgentId) => boolean = () => false,
   turn: (agentId: conversationv1.AgentId) => conversationv1.TurnId | undefined = () => undefined,
   nowMs: () => number = () => 1000,
+  unattended: () => boolean = () => false,
 ): {
   gate: PermissionGate;
   written: PersistEntry[];
@@ -53,6 +55,7 @@ function gateWith(
     nowMs,
     onPermissionModeSet: (mode) => modes.push(mode),
     onAskOpened: () => asksOpened.push(written.length),
+    unattended,
   });
   return { gate, written, modes, asksOpened };
 }
@@ -893,6 +896,7 @@ describe("an ask whose book is resolved asynchronously", () => {
       nowMs: () => 1000,
       onPermissionModeSet: () => undefined,
       onAskOpened: () => undefined,
+      unattended: () => false,
     });
     return { gate, written, settle: (agent) => settle(agent) };
   }
@@ -1638,5 +1642,41 @@ describe("the session hears every ask that blocks the vendor", () => {
 
     // Assert
     expect(gate.askOpen).toBe(false);
+  });
+});
+
+describe("an ask in an unattended merge remediation turn", () => {
+  const OPTIONS = { signal: new AbortController().signal, toolUseID: "toolu_unattended", requestId: "req-1" };
+
+  it.each([
+    ["a question", ASK_USER_QUESTION_TOOL, QUESTION_INPUT],
+    ["a permission ask", "Bash", { command: "ls" }],
+  ])("denies %s at once, opening nothing", async (_name, tool, input) => {
+    // Arrange
+    const { gate, written, asksOpened } = gateWith(undefined, undefined, undefined, () => true);
+
+    // Act
+    const answer = await gate.canUseTool(tool, input, OPTIONS);
+
+    // Assert
+    expect([answer, written.length, asksOpened.length, gate.askOpen, gate.deniedCall("toolu_unattended")]).toEqual([
+      { behavior: "deny", message: UNATTENDED_DENIAL },
+      0,
+      0,
+      false,
+      true,
+    ]);
+  });
+
+  it("opens the ask as ever in an attended turn", async () => {
+    // Arrange
+    const { gate, asksOpened } = gateWith(undefined, undefined, undefined, () => false);
+
+    // Act
+    void gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, OPTIONS);
+    await Promise.resolve();
+
+    // Assert
+    expect([gate.askOpen, asksOpened.length]).toEqual([true, 1]);
   });
 });

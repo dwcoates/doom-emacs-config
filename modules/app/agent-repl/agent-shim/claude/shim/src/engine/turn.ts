@@ -95,8 +95,19 @@ export interface OpenTurn {
    * shim sent itself. Otherwise a real turn in every respect.
    */
   readonly adopted?: boolean;
+  /** True when no user attends this turn: its prompt's origin is a merge remediation's. */
+  readonly unattended?: boolean;
   readonly startedAtMs: number;
 }
+
+/**
+ * The prompt origins of turns no user attends: a merge queue's remediation of
+ * its own rebase conflicts and failing tests, which the whole queue waits on.
+ */
+export const UNATTENDED_ORIGINS: ReadonlySet<conversationv1.PromptOrigin> = new Set([
+  conversationv1.PromptOrigin.MERGE_CONFLICT_REPAIR,
+  conversationv1.PromptOrigin.MERGE_TEST_REPAIR,
+]);
 
 /** What the turn verbs need from the session that owns them. */
 export interface SessionContext {
@@ -697,7 +708,12 @@ export class TurnEngine {
         `turn ${taken.id.value} took the send slot while turn ${requested} was being started; nothing was delivered`,
       );
     }
-    const opened: OpenTurn = { id: turn, keepalive: false, startedAtMs: this.session.nowMs() };
+    const opened: OpenTurn = {
+      id: turn,
+      keepalive: false,
+      unattended: UNATTENDED_ORIGINS.has(request.origin),
+      startedAtMs: this.session.nowMs(),
+    };
     this.session.setOpenTurn(opened);
     try {
       await this.session.submit(vendorSaid(said, request.vendorNote), opened, request.sentBy);

@@ -123,6 +123,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     nowMs: () => 1,
     onPermissionModeSet: () => undefined,
     onAskOpened: () => undefined,
+    unattended: () => false,
   });
   const state: Harness = {
     turns: undefined as unknown as TurnEngine,
@@ -4233,5 +4234,23 @@ describe("an agent's prompt", () => {
 
     // Assert
     expect([response.result.case, h.joins.length]).toEqual(["success", 2]);
+  });
+});
+
+describe("a turn no user attends", () => {
+  it.each([
+    ["a merge's conflict repair", true, conversationv1.PromptOrigin.MERGE_CONFLICT_REPAIR],
+    ["a merge's test repair", true, conversationv1.PromptOrigin.MERGE_TEST_REPAIR],
+    ["the user's own prompt", false, conversationv1.PromptOrigin.USER_SENT],
+    ["a deploy's prompt hook", false, conversationv1.PromptOrigin.MERGE_BEFORE_ACTION],
+  ])("opens %s marked unattended: %s", async (_name, unattended, origin) => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    await h.turns.startTurn(startTurn(TURN, origin));
+
+    // Assert
+    expect(h.open?.unattended === true).toBe(unattended);
   });
 });

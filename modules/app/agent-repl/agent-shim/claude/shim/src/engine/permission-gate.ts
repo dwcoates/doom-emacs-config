@@ -456,7 +456,23 @@ interface PermissionGateDeps {
    * ask registers and before its start frame is recorded.
    */
   onAskOpened(): void;
+  /**
+   * True while the open turn is one no user attends: a merge's remediation
+   * of its own conflicts or failing tests ({@link UNATTENDED_ORIGINS}). Every
+   * ask raised then is denied at once, never opened.
+   */
+  unattended(): boolean;
 }
+
+/**
+ * The denial an ask raised in an unattended turn answers with. THE QUEUE WAITS
+ * ON NO ONE: a merge's remediation turn runs while every merge behind it waits,
+ * and an ask opened there stood the whole queue still on a user who was not
+ * watching (2026-10-25: a test-repair turn asked whether it might restore one
+ * line, and nothing landed for an hour and a half).
+ */
+export const UNATTENDED_DENIAL =
+  "No one is available to answer: this turn is a merge queue remediation and runs unattended while the queue waits on it. Decide on your own judgement, or give up the attempt and say why.";
 
 interface PendingBase {
   readonly toolUseId: string;
@@ -583,6 +599,14 @@ export class PermissionGate {
       matchedAskRule?: { source: string; toolName: string; ruleContent?: string };
     },
   ): Promise<PermissionResultLike> => {
+    if (this.deps.unattended()) {
+      this.noteDenied(options.toolUseID);
+      LOGGER.info(
+        { tool: toolName, tool_use_id: options.toolUseID },
+        "an ask in an unattended merge remediation turn was denied without opening it",
+      );
+      return { behavior: "deny", message: UNATTENDED_DENIAL };
+    }
     return toolName === ASK_USER_QUESTION_TOOL
       ? this.openQuestion(input, options)
       : this.openPermission(toolName, options);
