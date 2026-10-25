@@ -1,8 +1,10 @@
 package server
 
 import (
+	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -81,6 +83,9 @@ type Serving struct {
 	// streams counts the standing streams still open, or still writing the
 	// end frame the exit ended them with.
 	streams int
+	// streamPaths counts the same streams by procedure path, so an exit that
+	// leaves some open names which (`daemon.server.await_streams_ended`).
+	streamPaths map[string]int
 	// streamsGone is closed when streams reaches zero, only while somebody is
 	// waiting.
 	streamsGone chan struct{}
@@ -142,7 +147,7 @@ func (s *Serving) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Serving) counted(inner http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if standingStreamPaths[r.URL.Path] {
-			s.enterStream()
+			s.enterStream(r.URL.Path)
 			defer s.leaveStreamOnceEnded(r)
 			inner.ServeHTTP(w, r)
 			return
@@ -227,15 +232,22 @@ func (s *Serving) AwaitQuiet(bound time.Duration) int {
 	}
 }
 
-func (s *Serving) enterStream() {
+func (s *Serving) enterStream(path string) {
 	s.mu.Lock()
 	s.streams++
+	if s.streamPaths == nil {
+		s.streamPaths = map[string]int{}
+	}
+	s.streamPaths[path]++
 	s.mu.Unlock()
 }
 
-func (s *Serving) leaveStream() {
+func (s *Serving) leaveStream(path string) {
 	s.mu.Lock()
 	s.streams--
+	if s.streamPaths[path]--; s.streamPaths[path] == 0 {
+		delete(s.streamPaths, path)
+	}
 	if s.streams == 0 && s.streamsGone != nil {
 		close(s.streamsGone)
 		s.streamsGone = nil
@@ -257,7 +269,7 @@ func (s *Serving) leaveStreamOnceEnded(r *http.Request) {
 	s.mu.Unlock()
 	answered := r.Context()
 	if !ending || answered.Done() == nil {
-		s.leaveStream()
+		s.leaveStream(r.URL.Path)
 		return
 	}
 	mark := s.barrier.Mark()
@@ -269,7 +281,7 @@ func (s *Serving) leaveStreamOnceEnded(r *http.Request) {
 				"a standing stream the exit ended never had its end frame reach the socket before the exit's deadline; its client will read a cut connection",
 				dlog.Context{"path": path, "deadline": deadline.Format(time.RFC3339Nano)})
 		}
-		s.leaveStream()
+		s.leaveStream(path)
 	}()
 }
 
@@ -280,10 +292,10 @@ func (s *Serving) EndStreams(deadline time.Time, end func()) {
 	s.mu.Lock()
 	s.ending = true
 	s.deadline = deadline
-	open := s.streams
+	open, paths := s.streams, s.openStreamPathsLocked()
 	s.mu.Unlock()
 	if s.log != nil {
-		s.log.Info("daemon.server.end_streams", "ending every standing stream with its end frame", dlog.Context{"open": open})
+		s.log.Info("daemon.server.end_streams", "ending every standing stream with its end frame", dlog.Context{"open": open, "paths": paths})
 	}
 	end()
 }
@@ -311,14 +323,25 @@ func (s *Serving) AwaitStreamsEnded(deadline time.Time) int {
 		return 0
 	case <-timer.C:
 		s.mu.Lock()
-		left := s.streams
+		left, paths := s.streams, s.openStreamPathsLocked()
 		s.mu.Unlock()
 		if s.log != nil {
 			s.log.Error("daemon.server.await_streams_ended", "the exit's deadline passed with standing streams still open; their clients will read a cut connection rather than an end frame",
-				dlog.Context{"open": left, "deadline": deadline.Format(time.RFC3339Nano)})
+				dlog.Context{"open": left, "paths": paths, "deadline": deadline.Format(time.RFC3339Nano)})
 		}
 		return left
 	}
+}
+
+// openStreamPathsLocked answers the open standing streams as "path=count"
+// entries, sorted, for a record. s.mu is held.
+func (s *Serving) openStreamPathsLocked() []string {
+	paths := make([]string, 0, len(s.streamPaths))
+	for path, n := range s.streamPaths {
+		paths = append(paths, fmt.Sprintf("%s=%d", path, n))
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 // AwaitWritesQuiet waits for the connections to fall silent, so the exit does
