@@ -85,6 +85,7 @@
 (declare-function agent-repl-host-subscribe "host" (conn ws ref))
 (declare-function agent-repl-host-rename "host" (old new))
 (declare-function agent-repl--frontend-rename-webview "frontend" (ws))
+(declare-function agent-repl-host--apply-naming "host" (ws))
 (declare-function agent-repl-link-primary "daemon-link" ())
 (defvar agent-repl-host-reselect-pending)
 (defvar agent-repl-link-up-functions)
@@ -738,6 +739,8 @@ second tab."
     ;; deletes it as another workspace's orphan and the layout shows it
     ;; again, a loop that pins Emacs.
     (agent-repl--frontend-rename-webview new)
+    ;; So is the composer's: its identity segment is the workspace name.
+    (agent-repl-host--apply-naming new)
     (agent-repl--info new "elisp.roster.tab-rename: old=%s new=%s id=%s"
                       old new (plist-get ref :id))
     new))
