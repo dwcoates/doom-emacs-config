@@ -1885,12 +1885,19 @@ The repository\='s deploy config at PATH could not be used, for DETAIL."
     (list :path (agent-repl-wire-verbs--decode-string message 'path json)
           :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
 
+(defun agent-repl-wire-decode-merge-queue-placement-behind-not-in-line (json)
+  "Decode MergeQueuePlacementBehindNotInLine from JSON into (:behind NAME).
+The merge a placement asked to stand behind is in no queue."
+  (let ((message "MergeQueuePlacementBehindNotInLine"))
+    (agent-repl-wire-verbs--check-keys message json '(behind))
+    (list :behind (agent-repl-wire-verbs--decode-string message 'behind json))))
+
 (defun agent-repl-wire-decode-finish-workspace-error (json)
   "Decode FinishWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "FinishWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyDeploying versionIncrementRequired versionIncrementUnexpected ownerLands requesterMayNotLand noBranchCheckedOut hasOpenChildren noDeployConfig deployConfigInvalid))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyDeploying versionIncrementRequired versionIncrementUnexpected ownerLands requesterMayNotLand noBranchCheckedOut hasOpenChildren noDeployConfig deployConfigInvalid placementBehindNotInLine))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -1909,7 +1916,9 @@ arm this codec does not know is refused as an unknown field."
                  (list 'noBranchCheckedOut :no-branch-checked-out #'agent-repl-wire-decode-finish-workspace-error-no-branch-checked-out)
                  agent-repl-wire-verbs--has-open-children-arm
                  (list 'noDeployConfig :no-deploy-config #'agent-repl-wire-decode-deploy-config-missing)
-                 (list 'deployConfigInvalid :deploy-config-invalid #'agent-repl-wire-decode-deploy-config-invalid))))))
+                 (list 'deployConfigInvalid :deploy-config-invalid #'agent-repl-wire-decode-deploy-config-invalid)
+                 (list 'placementBehindNotInLine :placement-behind-not-in-line
+                       #'agent-repl-wire-decode-merge-queue-placement-behind-not-in-line))))))
 
 (defun agent-repl-wire-decode-finish-workspace-response-success (json)
   "Decode FinishWorkspaceResponse's `success' arm from JSON."

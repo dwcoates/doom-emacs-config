@@ -2057,7 +2057,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-fork-source-arm ()
@@ -2756,8 +2756,17 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_finish_workspace.pb.go" "FinishWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyDeploying" "versionIncrementRequired" "versionIncrementUnexpected" "ownerLands" "requesterMayNotLand" "noBranchCheckedOut" "hasOpenChildren" "noDeployConfig" "deployConfigInvalid")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyDeploying" "versionIncrementRequired" "versionIncrementUnexpected" "ownerLands" "requesterMayNotLand" "noBranchCheckedOut" "hasOpenChildren" "noDeployConfig" "deployConfigInvalid" "placementBehindNotInLine")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-finish-error-placement-behind-not-in-line-arm ()
+  "FinishWorkspaceError's `placement_behind_not_in_line' arm decodes the merge
+the placement named."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"placementBehindNotInLine\":{\"behind\":\"two\"}}"))
+                   '(:cause (:arm :placement-behind-not-in-line :value (:behind "two")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-restart-error-unknown-workspace-arm ()
   "RestartWorkspaceError's `unknown_workspace' arm decodes with everything it
