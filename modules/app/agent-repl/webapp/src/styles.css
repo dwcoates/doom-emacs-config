@@ -1074,6 +1074,58 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .repo-head > .sb-merge-queue-toggle[data-merge-queue-paused] { color: var(--merge-paused); }
 /* After the paused amber, at its specificity, so the queues' view wins. */
 #ws-sidebar .repo-head > .sb-merge-queue-toggle[data-shows="merge-queues"] { color: var(--repo-head-expanded); }
+/* THE MERGE QUEUE VIEW (owner request, 2026-10-25; src/sidebar/merge-queue-view.ts):
+   each repository section draws its queue as a small merge bubble for the
+   merge at its head and one line per merge waiting behind it. The head's
+   card and each waiting line take a row's padding, so the queue lines up
+   with the workspaces' rows, a row's hover, and a clock that reads as a
+   row's when-column. */
+#ws-sidebar .sb-mq-head,
+#ws-sidebar .sb-mq-waiting {
+  padding: var(--row-pad-y) 0.7rem var(--row-pad-y) 0.9rem;
+  cursor: pointer;
+  min-width: 0;
+}
+#ws-sidebar .sb-mq-head { display: flex; flex-direction: column; gap: 0.15rem; }
+#ws-sidebar .sb-mq-head-line,
+#ws-sidebar .sb-mq-waiting { display: flex; align-items: center; gap: 0.45rem; }
+#ws-sidebar .sb-mq-glyph { color: var(--blocked); flex: 0 0 auto; }
+#ws-sidebar .sb-mq-head[data-standing="failed"] .sb-mq-glyph { color: var(--err); }
+#ws-sidebar .sb-mq-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* THE STAGES wear the bubble's tab glyphs, and their colours from the
+   bubble's own rules (".merge-tab-glyph.is-live" and its siblings). */
+#ws-sidebar .sb-mq-stages {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.5rem;
+  row-gap: 0.05rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+#ws-sidebar .sb-mq-stage { display: inline-flex; align-items: center; gap: 0.2rem; white-space: nowrap; }
+#ws-sidebar .sb-mq-stage[data-state="live"] { color: var(--fg); }
+#ws-sidebar .sb-mq-detail {
+  font-size: 0.7rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#ws-sidebar .sb-mq-head[data-standing="failed"] .sb-mq-detail { color: var(--err); white-space: normal; }
+/* A waiting merge's place in line, and its front mark. */
+#ws-sidebar .sb-mq-place {
+  flex: 0 0 auto;
+  width: var(--ws-mark-width);
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+#ws-sidebar .sb-mq-front { flex: 0 0 auto; color: var(--blocked); font-size: 0.65rem; }
+/* A REPOSITORY WHOSE QUEUE HOLDS NOTHING draws its header alone, in the
+   folded header's faded grey whether it is folded or not (owner request,
+   2026-10-25). */
+#ws-sidebar .repo.repo-section.sb-merge-queue-empty > .repo-head { color: var(--repo-head-collapsed); }
 /* A folded open workspaces section folds away every grouping section it
    holds, headers included; only its own header stays. */
 #ws-sidebar .repo.open-section.folded > .sb-sections { display: none; }
@@ -1248,7 +1300,9 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 /* EVERY HOVER HIGHLIGHT IN THE RAIL is drawn only while the rail is not
    `.sb-hover-suspended`: WebKit keeps `:hover` on an element the user left by a
    focus change, so the rail stops drawing it then (src/sidebar/transients.ts). */
-#ws-sidebar:not(.sb-hover-suspended) .row:hover { background: var(--card); }
+#ws-sidebar:not(.sb-hover-suspended) .row:hover,
+#ws-sidebar:not(.sb-hover-suspended) .sb-mq-head:hover,
+#ws-sidebar:not(.sb-hover-suspended) .sb-mq-waiting:hover { background: var(--card); }
 
 /* THE STATUS MARK'S BOX. Every mark, a dot, the merge glyph or an emoji,
    takes this one box, so every mark is centered on one line and every name
@@ -1420,7 +1474,8 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   from { background-position-x: 100%; }
   to { background-position-x: 0%; }
 }
-#ws-sidebar .row .when {
+#ws-sidebar .row .when,
+#ws-sidebar .sb-mq-clock {
   margin-left: auto;
   color: var(--muted);
   font-size: 0.68rem;
@@ -8654,12 +8709,14 @@ bubble-body.bubble-body { display: block; }
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.merge-tab-glyph.is-live { color: var(--blocked); animation: merge-breathe 1.8s ease-in-out infinite; }
+.merge-tab-glyph.is-live,
+#ws-sidebar .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph { color: var(--blocked); animation: merge-breathe 1.8s ease-in-out infinite; }
 /* A TAB'S DOT, live or in line for its turn, at 70% of the badge's size
    (owner request, 2026-10-17); the check, the cross and the question mark
    keep the badge's size. */
 .merge-tab-glyph.is-live,
-.merge-tab-glyph.is-waiting-for-turn { font-size: 0.7em; }
+.merge-tab-glyph.is-waiting-for-turn,
+#ws-sidebar .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph { font-size: 0.7em; }
 /* A replayed commit's badge (tab-strip.ts): its short hash at the duration's
    size, in a darker grey than the duration, beside a subject in the badge's
    own color. */
@@ -8670,8 +8727,10 @@ bubble-body.bubble-body { display: block; }
 }
 /* HOLLOWED OUT FOR DONE: a settled success should recede, not compete with
    the live tab for attention. */
-.merge-tab-glyph.is-succeeded { color: var(--ok); opacity: 0.7; }
-.merge-tab-glyph.is-failed { color: var(--err); }
+.merge-tab-glyph.is-succeeded,
+#ws-sidebar .sb-mq-stage[data-state="succeeded"] .sb-mq-stage-glyph { color: var(--ok); opacity: 0.7; }
+.merge-tab-glyph.is-failed,
+#ws-sidebar .sb-mq-stage[data-state="failed"] .sb-mq-stage-glyph { color: var(--err); }
 .merge-tab-summary .merge-tab-failed {
   padding: 0.25rem 0;
   color: var(--err);

@@ -980,7 +980,7 @@ export function toggleRowMenu(ws: HTMLElement, target: VerbTarget): void {
  * Emacs holds no tab for is selected by the daemon instead; either way the
  * answer says which party made the switch, recorded here at DEBUG.
  */
-async function selectWorkspace(
+export async function selectWorkspace(
   line: HTMLElement,
   sc: SidebarContext,
   workspace: WorkspaceRef,
@@ -1173,7 +1173,7 @@ function appendDetailLine(list: HTMLElement, label: string, value: string): void
  * Ticks EL with the footer turn clock's own reading of the time since
  * STARTED_MS: the one reading every counting arm of the column shows.
  */
-function tickElapsed(el: HTMLElement, sc: SidebarContext, startedMs: number): void {
+export function tickElapsed(el: HTMLElement, sc: SidebarContext, startedMs: number): void {
   tickPaint(sc, (nowMs) => {
     el.textContent = liveElapsedReading(startedMs, nowMs);
   });

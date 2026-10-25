@@ -6543,3 +6543,43 @@ describe("the chat column", () => {
     expect(declarationsOf(".chat-q-wrap")).toMatch(/align-self:\s*flex-end;\s*max-width:\s*60%/);
   });
 });
+
+/**
+ * THE MERGE QUEUE VIEW SHARES THE RULES IT READS AS (owner request,
+ * 2026-10-25): its clock is a row's when-column, its hover a row's, and its
+ * stage glyphs the bubble's tab glyphs, each declared once for both.
+ */
+describe("the sidebar's merge queue view", () => {
+  it.each([
+    { name: "ticks its clock as a row's when-column", shared: "#ws-sidebar .row .when", own: "#ws-sidebar .sb-mq-clock" },
+    { name: "highlights its head card on hover as a row", shared: "#ws-sidebar:not(.sb-hover-suspended) .row:hover", own: "#ws-sidebar:not(.sb-hover-suspended) .sb-mq-head:hover" },
+    { name: "highlights a waiting merge on hover as a row", shared: "#ws-sidebar:not(.sb-hover-suspended) .row:hover", own: "#ws-sidebar:not(.sb-hover-suspended) .sb-mq-waiting:hover" },
+    { name: "colours a live stage's glyph as the bubble's live tab", shared: ".merge-tab-glyph.is-live", own: '#ws-sidebar .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph' },
+    { name: "colours a passed stage's glyph as the bubble's passed tab", shared: ".merge-tab-glyph.is-succeeded", own: '#ws-sidebar .sb-mq-stage[data-state="succeeded"] .sb-mq-stage-glyph' },
+    { name: "colours a failed stage's glyph as the bubble's failed tab", shared: ".merge-tab-glyph.is-failed", own: '#ws-sidebar .sb-mq-stage[data-state="failed"] .sb-mq-stage-glyph' },
+  ])("$name", ({ shared, own }) => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(shared) && /(?:color|background|margin-left)\s*:/.test(r.declarations));
+
+    // Assert
+    expect(rule?.selectors).toContain(own);
+  });
+
+  it("declares the queue's clock, hover and stage glyph colours in no rule of their own", () => {
+    // Arrange
+    const own = [
+      "#ws-sidebar .sb-mq-clock",
+      "#ws-sidebar:not(.sb-hover-suspended) .sb-mq-head:hover",
+      "#ws-sidebar:not(.sb-hover-suspended) .sb-mq-waiting:hover",
+      '#ws-sidebar .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph',
+      '#ws-sidebar .sb-mq-stage[data-state="succeeded"] .sb-mq-stage-glyph',
+      '#ws-sidebar .sb-mq-stage[data-state="failed"] .sb-mq-stage-glyph',
+    ];
+
+    // Act
+    const alone = rulesOf(stylesheet).filter((r) => r.selectors.length === 1 && own.includes(r.selectors[0] ?? ""));
+
+    // Assert
+    expect(alone).toEqual([]);
+  });
+});
