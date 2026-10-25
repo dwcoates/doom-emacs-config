@@ -156,6 +156,9 @@ type Orchestrator interface {
 	// whether it replaced one. A closed subscriber is refused
 	// (ArmSubscriberClosed), as is an unknown repository.
 	Subscribe(ctx context.Context, subscriber ids.WorkspaceID, scope *RepositoryScope, detail wsm.MergeQueueDetail) (bool, error)
+	// LeaseChanged is told each lease change of a workspace: a queue front
+	// that waited for that workspace's lease is offered to its queue again.
+	LeaseChanged(ws ids.WorkspaceID)
 	// Unsubscribe ends SUBSCRIBER's subscription in SCOPE, and only there. A
 	// subscriber holding none there is refused (ArmNotSubscribed).
 	Unsubscribe(ctx context.Context, subscriber ids.WorkspaceID, scope *RepositoryScope) error

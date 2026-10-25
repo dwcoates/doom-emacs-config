@@ -466,6 +466,7 @@ func (f *statusChangedForwarder) StatusChanged(ws ids.WorkspaceID) {
 type mergeTarget interface {
 	rollout.MergeMover
 	drain.MergeSuspension
+	promptqueue.LeaseWatcher
 }
 
 // mergeForwarder carries a handover's merge moves and the immediate
@@ -523,6 +524,18 @@ func (f *mergeForwarder) Drain(ctx context.Context) {
 		panic(err)
 	}
 	m.Drain(ctx)
+}
+
+// LeaseChanged tells the orchestrator a workspace's lease changed, so a queue
+// front waiting on it is offered again. Before the orchestrator is bound no
+// merge exists to wait on a lease, so a change then concerns none.
+func (f *mergeForwarder) LeaseChanged(ws ids.WorkspaceID) {
+	f.mu.RLock()
+	target := f.target
+	f.mu.RUnlock()
+	if target != nil {
+		target.LeaseChanged(ws)
+	}
 }
 
 // errMergeMoverUnbound is a merge move or drain asked before the orchestrator

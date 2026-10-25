@@ -183,6 +183,15 @@ type orchestrator struct {
 	abandonsAtTakeBack map[ids.WorkspaceID]AbandonCause
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
+	// headLeases are the merge leases admitFront took for the heads it
+	// admitted, handed to start: the lease goes first and the admission
+	// after, so an admitted head always has its run's lease.
+	headLeases map[ids.WorkspaceID]wsm.Lease
+	// leaseWaits are the queue fronts whose workspace another holder (a
+	// restart, a drain, a hibernation) held when they came to be admitted,
+	// by workspace, with their repository: each waits, unadmitted, and its
+	// workspace's next lease change kicks its repository (LeaseChanged).
+	leaseWaits map[ids.WorkspaceID]wsm.RepoKey
 	// admissions counts the admission steps in flight -- the store reads and
 	// the admission write the pump makes before a run starts. It is held under
 	// mu: a step is added only while not draining (enterAdmission) and
@@ -323,6 +332,8 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		offers:             map[ids.WorkspaceID]bool{},
 		repoOf:             map[ids.WorkspaceID]wsm.RepoKey{},
 		pumping:            map[wsm.RepoKey]bool{},
+		headLeases:         map[ids.WorkspaceID]wsm.Lease{},
+		leaseWaits:         map[ids.WorkspaceID]wsm.RepoKey{},
 		events:             newQueueEvents(),
 	}
 	// EVERY WRITE THAT ADDS OR REMOVES A QUEUE ROW REPUBLISHES THE ROSTER'S

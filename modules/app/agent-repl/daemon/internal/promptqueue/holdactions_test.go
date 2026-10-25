@@ -400,3 +400,28 @@ func TestSupersedeFailsLoudlyAndRetiresNothing(t *testing.T) {
 		})
 	}
 }
+
+func TestALeaseChangeIsPassedToTheLeaseWatcher(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{name: "after the holds are re-judged", arrange: func(*harness) {}},
+		{name: "even when the holds cannot be read", arrange: func(h *harness) { h.db.heldErr = errors.New("the store is gone") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(h)
+
+			// Act
+			h.q.OnLeaseChanged(theWorkspace)
+
+			// Assert
+			if got := h.leases.told(); len(got) != 1 || got[0] != theWorkspace {
+				t.Fatalf("watcher told %v, want the one change of %s", got, theWorkspace)
+			}
+		})
+	}
+}

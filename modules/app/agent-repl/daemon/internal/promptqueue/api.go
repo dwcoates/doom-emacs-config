@@ -418,9 +418,19 @@ type TurnEdges interface {
 }
 
 // Deps are the queue's collaborators.
+// LeaseWatcher is told each lease change of a workspace (Deps.Leases).
+type LeaseWatcher interface {
+	LeaseChanged(ws ids.WorkspaceID)
+}
+
 type Deps struct {
 	// DB is the durable hold store and the lease's policy metadata.
 	DB wsm.DB
+	// Leases is told each lease change of a workspace, once the queue has
+	// re-judged its holds (OnLeaseChanged, the one sink every lease change
+	// reaches): a merge waiting for a workspace another holder held takes it
+	// from here (merge.Orchestrator.LeaseChanged). REQUIRED.
+	Leases LeaseWatcher
 	// Judge classifies interjection.
 	Judge classifier.Judge
 	// Feed mirrors an accepted prompt as a user_prompt row.

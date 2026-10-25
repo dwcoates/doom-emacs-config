@@ -527,15 +527,16 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	}
 	// THE OCCUPANCY IS TAKEN UNDER THE LEDGER IDENTITY minted when the merge
 	// was put in line, so the queued bubble and the running one are one bubble.
-	ledger := o.mintLedger(ws)
 	// THE LEASE HOLDS what the user submits while the merge runs; a prompt
 	// held under it keeps the requester open past the landing
-	// (wsm.bindMergeHold, readKeepOpen).
-	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, ledger, wsm.HolderMerge, wsm.PolicyHold)
-	if err != nil {
-		o.releaseRepoLockIfIdle(ctx, repo)
-		log.Error(op, "could not take the merge lease", dlog.Context{"workspace": string(ws), "error": err.Error()})
-		return nil, err
+	// (wsm.bindMergeHold, readKeepOpen). admitFront took it before it
+	// admitted the merge, so an admitted head always has one.
+	o.mu.Lock()
+	lease, leased := o.headLeases[ws]
+	delete(o.headLeases, ws)
+	o.mu.Unlock()
+	if !leased {
+		panic(fmt.Sprintf("merge: the admitted head %s was started with no lease taken for it", ws))
 	}
 	// EVERY PROMPT ALREADY HELD NOW WAITS FOR THE MERGE: the restamp binds
 	// each to it (wsm.bindMergeHold), so the requester stays open for them as

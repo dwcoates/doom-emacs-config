@@ -854,7 +854,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	// ---- the prompt queue ----
 
+	// THE ORCHESTRATOR, through the forwarder: it is built below, and is
+	// told each lease change through the queue's lease sink.
+	mergeMover := &mergeForwarder{}
 	queue, err = promptqueue.New(promptqueue.Deps{
+		Leases:         mergeMover,
 		RestartSlots:   startSlots,
 		TurnBanners:    turnBanners,
 		Commits:        commitRecounter,
@@ -986,7 +990,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// waits the tickets out first -- a handover or restart before it lists
 	// what it serves, every other exit before it ends its streams.
 	creates := creategate.New()
-	mergeMover := &mergeForwarder{}
 	// THE DETACHED-MERGE SERVICE IS BUILT AFTER THE ROLLOUT AND THE DEPLOY,
 	// which pay the landing reports it owes; both reach it through this.
 	detachedRef := &detachedForwarder{}

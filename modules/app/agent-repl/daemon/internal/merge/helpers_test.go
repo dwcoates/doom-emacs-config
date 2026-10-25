@@ -75,6 +75,8 @@ type fakeDB struct {
 	jobDecodeErrs map[ids.WorkspaceID]error
 	sessions      map[ids.WorkspaceID]wsm.Session
 	leases        map[ids.WorkspaceID]wsm.Lease
+	// onAdmit, when set, is called under the lock as each merge is admitted.
+	onAdmit func(ids.WorkspaceID)
 	turns         map[ids.WorkspaceID][]wsm.Turn
 	ledger        map[ids.WorkspaceID][]wsm.MergeLedgerEntry
 	queues        map[wsm.RepoKey][]wsm.MergeQueueEntry
@@ -701,6 +703,9 @@ func (f *fakeDB) SweepOrphanedMergeState(context.Context, time.Time) (wsm.Orphan
 func (f *fakeDB) AdmitMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.onAdmit != nil {
+		f.onAdmit(id)
+	}
 	for i, entry := range f.queues[repo] {
 		if entry.Workspace == id {
 			f.queues[repo][i].State = wsm.MergeAdmitted

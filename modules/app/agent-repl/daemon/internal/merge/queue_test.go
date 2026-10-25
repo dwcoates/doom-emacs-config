@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1890,5 +1891,101 @@ func TestAQueuedMergesLabelThatCannotBeReadIsRecordedByWhyItFailed(t *testing.T)
 				t.Fatalf("records = %+v, want one %s record naming the workspace", recs, tt.wantLevel)
 			}
 		})
+	}
+}
+
+// restartHolds puts a shim restart's hold on the harness's workspace, as a
+// stale-build bounce takes it (rollout relaunch).
+func restartHolds(t *testing.T, h *harness) wsm.Lease {
+	t.Helper()
+	lease, err := h.db.AcquireLease(context.Background(), theWorkspace, wsm.HolderRestart, wsm.PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	return lease
+}
+
+func TestAQueueFrontWhoseWorkspaceAnotherHolderLeasesWaitsUnadmitted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 1)
+	enqueue(t, h)
+	restartHolds(t, h)
+
+	// Act.
+	ran, err := h.o.pumpOnce(context.Background(), h.repoKey())
+
+	// Assert: nothing ran, nothing failed, and the front stays waiting in line.
+	if ran || err != nil {
+		t.Fatalf("pumpOnce = %v, %v; want nothing run and no error", ran, err)
+	}
+	queue, err := h.db.MergeQueue(context.Background(), h.repoKey())
+	if err != nil || len(queue) != 1 || queue[0].State != wsm.MergeQueued {
+		t.Fatalf("queue = %+v, %v; want the merge still waiting, unadmitted", queue, err)
+	}
+	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.admit", text: "held by another lease", context: map[string]string{"holder": "restart"}}) {
+		t.Fatalf("no record of the wait: %+v", h.logs.Records())
+	}
+}
+
+func TestTheLeaseChangeOfAWaitingFrontOffersItToItsQueueAgain(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 1)
+	enqueue(t, h)
+	restart := restartHolds(t, h)
+	if ran, err := h.o.pumpOnce(context.Background(), h.repoKey()); ran || err != nil {
+		t.Fatalf("pumpOnce = %v, %v; want the front waiting", ran, err)
+	}
+	var kicked []wsm.RepoKey
+	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+	if err := h.db.ReleaseLease(context.Background(), restart.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	h.o.LeaseChanged(theWorkspace)
+	h.o.LeaseChanged(theWorkspace)
+
+	// Assert: one kick, and the next admission runs the merge.
+	if !reflect.DeepEqual(kicked, []wsm.RepoKey{h.repoKey()}) {
+		t.Fatalf("kicked = %v, want the front's queue once", kicked)
+	}
+	if ran, err := h.o.pumpOnce(context.Background(), h.repoKey()); !ran {
+		t.Fatalf("pumpOnce after the release = %v, %v; want the merge run", ran, err)
+	}
+}
+
+func TestALeaseChangeOfAWorkspaceNobodyWaitsOnKicksNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	var kicked []wsm.RepoKey
+	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+
+	// Act.
+	h.o.LeaseChanged(theWorkspace)
+
+	// Assert.
+	if kicked != nil {
+		t.Fatalf("kicked = %v, want nothing", kicked)
+	}
+}
+
+func TestAnAdmittedHeadAlwaysHoldsItsRunsLease(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 1)
+	enqueue(t, h)
+	var leasedAtAdmission bool
+	h.db.onAdmit = func(ws wsm.WorkspaceID) {
+		_, leasedAtAdmission = h.db.leases[ws]
+	}
+
+	// Act.
+	_ = h.admit(context.Background())
+
+	// Assert.
+	if !leasedAtAdmission {
+		t.Fatal("the head was admitted before its lease was taken")
 	}
 }

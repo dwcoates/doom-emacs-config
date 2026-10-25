@@ -1153,11 +1153,56 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace), "picking": picking})
 		return "", nil, false, nil
 	}
-	if err := o.deps.DB.AdmitMerge(ctx, repo, front.Workspace); err != nil {
+	// THE LEASE GOES FIRST, THE ADMISSION AFTER, as for a merge behind the
+	// head (chain.go): an admitted entry always has a run holding a lease.
+	// A WORKSPACE ANOTHER HOLDER HOLDS (a shim restart, a drain, a
+	// hibernation) is waited for, unadmitted: its lease's next change kicks
+	// the queue (LeaseChanged). Admitting first once left a head admitted with
+	// no run when a restart held its workspace, which read as a merge another
+	// daemon drives, and the queue stood still behind it (2026-10-24 19:33).
+	lease, err := o.deps.DB.AcquireLeaseAs(ctx, front.Workspace, o.mintLedger(front.Workspace), wsm.HolderMerge, wsm.PolicyHold)
+	var other *wsm.LeaseHeldError
+	if errors.As(err, &other) && other.Holder != wsm.HolderMerge {
+		o.releaseRepoLockIfIdle(ctx, repo)
+		o.mu.Lock()
+		o.leaseWaits[front.Workspace] = repo
+		o.mu.Unlock()
+		o.deps.Log.Global().Info(op, "the queue front's workspace is held by another lease; it is admitted once that lease changes",
+			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace), "holder": other.Holder.String(), "lease": string(other.Lease)})
+		return "", nil, false, nil
+	}
+	if err != nil {
 		o.releaseRepoLockIfIdle(ctx, repo)
 		return "", nil, false, err
 	}
+	if err := o.deps.DB.AdmitMerge(ctx, repo, front.Workspace); err != nil {
+		if releaseErr := o.deps.DB.ReleaseLease(ctx, lease.ID); releaseErr != nil {
+			o.deps.Log.Global().Error(op, "could not release the lease of a merge whose admission failed",
+				dlog.Context{"workspace": string(front.Workspace), "lease": string(lease.ID), "error": releaseErr.Error()})
+		}
+		o.releaseRepoLockIfIdle(ctx, repo)
+		return "", nil, false, err
+	}
+	o.mu.Lock()
+	o.headLeases[front.Workspace] = lease
+	o.mu.Unlock()
 	return front.Workspace, nil, true, nil
+}
+
+// LeaseChanged is told each lease change of a workspace (the prompt queue's
+// lease sink, promptqueue.Deps.Leases). A queue front that waited for that
+// workspace's lease is offered to its queue again.
+func (o *orchestrator) LeaseChanged(ws ids.WorkspaceID) {
+	o.mu.Lock()
+	repo, waiting := o.leaseWaits[ws]
+	delete(o.leaseWaits, ws)
+	o.mu.Unlock()
+	if !waiting {
+		return
+	}
+	o.deps.Log.Global().Info("daemon.merge.admit", "the lease the queue front waited for changed; the queue is offered it again",
+		dlog.Context{"repo": string(repo), "workspace": string(ws)})
+	o.kick(repo)
 }
 
 // resumeIn answers the merge of one repository the boot recovery handed the

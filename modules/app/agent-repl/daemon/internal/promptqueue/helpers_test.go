@@ -1612,6 +1612,7 @@ type harness struct {
 	footer  *fakeFooter
 	sidebar *fakeSidebar
 	edges   *fakeEdges
+	leases  *fakeLeases
 	holds   *fakeHolds
 	judge   *scriptedJudge
 	// elapsed advances the queue's clock past instant; zero unless a test
@@ -1671,6 +1672,7 @@ func newHarness(t *testing.T) *harness {
 		footer:  &fakeFooter{},
 		sidebar: &fakeSidebar{},
 		edges:   &fakeEdges{},
+		leases:  &fakeLeases{},
 		holds:   &fakeHolds{},
 		judge:   &scriptedJudge{},
 		drain:   &noteRecorder{},
@@ -1693,6 +1695,7 @@ func newHarness(t *testing.T) *harness {
 		Footer:  h.footer,
 		Sidebar: h.sidebar,
 		Edges:   h.edges,
+		Leases:  h.leases,
 		Holds:   h.holds,
 		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession && !h.clientReaped },
 		Revive: func(context.Context, ids.WorkspaceID) error {
@@ -1873,4 +1876,22 @@ func productionFuncs(t *testing.T) (*token.FileSet, []*ast.FuncDecl) {
 		}
 	}
 	return fset, funcs
+}
+
+// fakeLeases records every workspace whose lease change the queue passed on.
+type fakeLeases struct {
+	mu      sync.Mutex
+	changed []ids.WorkspaceID
+}
+
+func (l *fakeLeases) LeaseChanged(ws ids.WorkspaceID) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.changed = append(l.changed, ws)
+}
+
+func (l *fakeLeases) told() []ids.WorkspaceID {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), l.changed...)
 }

@@ -475,6 +475,10 @@ func (q *queue) nextDeliverable(ctx context.Context, ws ids.WorkspaceID, holding
 // lease policy: a hold the lease no longer projects is released, and a hold a
 // new lease projects is stamped.
 func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
+	// THE WATCHER IS TOLD LAST, after the holds are re-judged and the
+	// delivery lock released, and always: a merge waiting on this
+	// workspace's lease must hear of every change of it.
+	defer q.deps.Leases.LeaseChanged(ws)
 	ctx := context.Background()
 	log, err := q.logger(ctx, ws)
 	if err != nil {

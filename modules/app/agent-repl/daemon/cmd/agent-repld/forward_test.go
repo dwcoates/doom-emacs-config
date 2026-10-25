@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -308,6 +309,39 @@ func (m *recordingMover) AdoptWorkspace(_ context.Context, ws ids.WorkspaceID) e
 
 func (m *recordingMover) Drain(context.Context) {
 	m.calls = append(m.calls, "drain")
+}
+
+func (m *recordingMover) LeaseChanged(ws ids.WorkspaceID) {
+	m.calls = append(m.calls, "lease "+string(ws))
+}
+
+func TestTheMergeForwarderCarriesALeaseChange(t *testing.T) {
+	cases := []struct {
+		name  string
+		bound bool
+		want  []string
+	}{
+		{name: "bound, to the orchestrator", bound: true, want: []string{"lease ws-1"}},
+		{name: "unbound, to nobody: no merge exists yet to wait on a lease", bound: false, want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := &mergeForwarder{}
+			target := &recordingMover{}
+			if tc.bound {
+				f.bind(target)
+			}
+
+			// Act.
+			f.LeaseChanged("ws-1")
+
+			// Assert.
+			if !reflect.DeepEqual(target.calls, tc.want) {
+				t.Fatalf("calls = %v, want %v", target.calls, tc.want)
+			}
+		})
+	}
 }
 
 func TestABoundMergeMoverCarriesBothMoves(t *testing.T) {
