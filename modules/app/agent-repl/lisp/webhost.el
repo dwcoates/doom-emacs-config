@@ -685,20 +685,31 @@ the host's answer (`agent-repl--webhost-on-retired')."
 
 (defun agent-repl--webhost-on-retired (raw)
   "Navigate the host now that RAW, its `retireAll' answer, says its pages ended.
-Called BY SYMBOL from the read channel (`agent-repl-webhost-read').  An
-answer that cannot be read is recorded at ERROR, and the reload still
-navigates: it is the reload asked for, and the pages are gone either way."
-  (let ((conn agent-repl--webhost-retiring-conn))
+Called BY SYMBOL from the read channel (`agent-repl-webhost-read').
+
+THE RELOAD NAVIGATES EXACTLY ONCE.  A host older than `retireAll' answers
+`unknown-call', and that answer's own handling reloads it
+\(`agent-repl--webhost-predates-call'): navigating here too sent the host
+three navigations in 20ms, each cutting off the last (2026-10-24).  A host
+still booting answers `queued' and holds no page yet, so it is navigated.
+An answer that cannot be read is recorded at ERROR and still navigates: it
+is the reload asked for."
+  (let ((conn agent-repl--webhost-retiring-conn)
+        (outcome nil))
     (setq agent-repl--webhost-retiring-conn nil)
     (condition-case err
-        (progn
+        (let ((answer (agent-repl-webhost-parse-answer raw)))
           (agent-repl--webhost-answered raw)
-          (agent-repl--info agent-repl--webhost-central "elisp.webhost.retired pages=%s"
-                            (plist-get (agent-repl-webhost-parse-answer raw) :pages)))
+          (setq outcome (plist-get answer :outcome))
+          (agent-repl--info agent-repl--webhost-central "elisp.webhost.retired outcome=%s pages=%s"
+                            outcome (plist-get answer :pages)))
       (error
        (agent-repl--error agent-repl--webhost-central
                           "elisp.webhost.retire-answer-unreadable raw=%S error=%S" raw err)))
-    (agent-repl--webhost-navigate conn)))
+    (if (equal outcome "unknown-call")
+        (agent-repl--info agent-repl--webhost-central
+                          "elisp.webhost.retire-predated: the host predates retireAll; its reload is the predates call's")
+      (agent-repl--webhost-navigate conn))))
 
 (defun agent-repl--webhost-navigate (conn)
   "Navigate the host to its URL on CONN's daemon; its load replays the rest."

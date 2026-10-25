@@ -1268,7 +1268,7 @@ The current tab's page, not shown here, is the nearest of all."
         (agent-repl-test-wh--reload-and-answer (agent-repl-test-wh--conn "127.0.0.1:4242")))
       ;; Assert
       (should (equal navigated "http://host.localhost:4242/?host=1"))
-      (should (member "elisp.webhost.retired pages=2" infos)))))
+      (should (member "elisp.webhost.retired outcome=retired pages=2" infos)))))
 
 (ert-deftest agent-repl-test-wh-an-unreadable-retired-answer-is-an-error-and-still-navigates ()
   "An answer that cannot be read is recorded at ERROR; the reload still runs."
@@ -1284,3 +1284,34 @@ The current tab's page, not shown here, is the nearest of all."
       ;; Assert
       (should (equal navigated "http://host.localhost:4242/?host=1"))
       (should (seq-some (lambda (e) (string-prefix-p "elisp.webhost.retire-answer-unreadable" e)) errors)))))
+
+(ert-deftest agent-repl-test-wh-a-host-predating-retire-all-is-not-navigated-twice ()
+  "A host older than `retireAll' is reloaded by the predates path alone."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let (navigated predated)
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                 (lambda (_xw uri) (push uri navigated)))
+                ((symbol-function 'agent-repl--webhost-predates-call)
+                 (lambda (op) (push op predated))))
+        ;; Act
+        (agent-repl-test-wh--reload-and-answer
+         (agent-repl-test-wh--conn "127.0.0.1:4242")
+         "{\"op\":\"retireAll\",\"id\":null,\"outcome\":\"unknown-call\",\"notes\":[]}"))
+      ;; Assert
+      (should (equal predated '("retireAll")))
+      (should-not navigated))))
+
+(ert-deftest agent-repl-test-wh-a-booting-host-is-navigated ()
+  "A host still booting answers `queued', holds no page, and is navigated."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let (navigated)
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                 (lambda (_xw uri) (push uri navigated))))
+        ;; Act
+        (agent-repl-test-wh--reload-and-answer
+         (agent-repl-test-wh--conn "127.0.0.1:4242")
+         "{\"op\":\"retireAll\",\"id\":null,\"outcome\":\"queued\",\"notes\":[]}"))
+      ;; Assert
+      (should (equal navigated '("http://host.localhost:4242/?host=1"))))))
