@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_nuke_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_nuke_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfbnVrZV93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJjChROdWtlV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhIKBW9wX2lkGAIgASgJSACIAQFCCAoGX29wX2lkIsQBChVOdWtlV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VFcnJvckgAEjcKCGFjY2VwdGVkGAMgASgLMiMuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VBY2NlcHRlZEgAQggKBnJlc3VsdCImChVOdWtlV29ya3NwYWNlQWNjZXB0ZWQSDQoFb3BfaWQYASABKAkiFgoUTnVrZVdvcmtzcGFjZVN1Y2Nlc3MiygMKEk51a2VXb3Jrc3BhY2VFcnJvchJIChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIrLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElEKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyLy5hZ2VudHJlcGwudjEuTnVrZVdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSAoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKy5hZ2VudHJlcGwudjEuTnVrZVdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJDCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKC5hZ2VudHJlcGwudjEuTnVrZVdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIABI6CgpnaXRfZmFpbGVkGAUgASgLMiQuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VHaXRGYWlsZWRIABJDChFoYXNfb3Blbl9jaGlsZHJlbhgGIAEoCzImLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VIYXNPcGVuQ2hpbGRyZW5IAEIHCgVjYXVzZSIfCh1OdWtlV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZSI5CiFOdWtlV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjAKHU51a2VXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHAoaTnVrZVdvcmtzcGFjZU5vdFlldEFkb3B0ZWQiKAoWTnVrZVdvcmtzcGFjZUdpdEZhaWxlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_family, file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfbnVrZV93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJjChROdWtlV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhIKBW9wX2lkGAIgASgJSACIAQFCCAoGX29wX2lkIsQBChVOdWtlV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VFcnJvckgAEjcKCGFjY2VwdGVkGAMgASgLMiMuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VBY2NlcHRlZEgAQggKBnJlc3VsdCImChVOdWtlV29ya3NwYWNlQWNjZXB0ZWQSDQoFb3BfaWQYASABKAkiFgoUTnVrZVdvcmtzcGFjZVN1Y2Nlc3MimQQKEk51a2VXb3Jrc3BhY2VFcnJvchJIChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIrLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElEKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyLy5hZ2VudHJlcGwudjEuTnVrZVdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSAoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKy5hZ2VudHJlcGwudjEuTnVrZVdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJDCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKC5hZ2VudHJlcGwudjEuTnVrZVdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIABI6CgpnaXRfZmFpbGVkGAUgASgLMiQuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VHaXRGYWlsZWRIABJDChFoYXNfb3Blbl9jaGlsZHJlbhgGIAEoCzImLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VIYXNPcGVuQ2hpbGRyZW5IABJNChR0aHJlYWRfZGVsZXRlX2ZhaWxlZBgHIAEoCzItLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlVGhyZWFkRGVsZXRlRmFpbGVkSABCBwoFY2F1c2UiMQofTnVrZVdvcmtzcGFjZVRocmVhZERlbGV0ZUZhaWxlZBIOCgZkZXRhaWwYASABKAkiHwodTnVrZVdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiOQohTnVrZVdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIwCh1OdWtlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhwKGk51a2VXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkIigKFk51a2VXb3Jrc3BhY2VHaXRGYWlsZWQSDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_family, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceRequest
@@ -193,6 +193,15 @@ export type NukeWorkspaceError = Message<"agentrepl.v1.NukeWorkspaceError"> & {
      */
     value: WorkspaceHasOpenChildren;
     case: "hasOpenChildren";
+  } | {
+    /**
+     * A zettel chat thread's graph or directory could not be deleted. The
+     * thread is closed but still recorded: nothing of it was forgotten.
+     *
+     * @generated from field: agentrepl.v1.NukeWorkspaceThreadDeleteFailed thread_delete_failed = 7;
+     */
+    value: NukeWorkspaceThreadDeleteFailed;
+    case: "threadDeleteFailed";
   } | { case: undefined; value?: undefined };
 };
 
@@ -202,6 +211,27 @@ export type NukeWorkspaceError = Message<"agentrepl.v1.NukeWorkspaceError"> & {
  */
 export const NukeWorkspaceErrorSchema: GenMessage<NukeWorkspaceError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 4);
+
+/**
+ * What would not be deleted, and why.
+ *
+ * @generated from message agentrepl.v1.NukeWorkspaceThreadDeleteFailed
+ */
+export type NukeWorkspaceThreadDeleteFailed = Message<"agentrepl.v1.NukeWorkspaceThreadDeleteFailed"> & {
+  /**
+   * The failure's own account (zettel's, or the file system's), verbatim.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.NukeWorkspaceThreadDeleteFailed.
+ * Use `create(NukeWorkspaceThreadDeleteFailedSchema)` to create a new message.
+ */
+export const NukeWorkspaceThreadDeleteFailedSchema: GenMessage<NukeWorkspaceThreadDeleteFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 5);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceUnknownWorkspace
@@ -214,7 +244,7 @@ export type NukeWorkspaceUnknownWorkspace = Message<"agentrepl.v1.NukeWorkspaceU
  * Use `create(NukeWorkspaceUnknownWorkspaceSchema)` to create a new message.
  */
 export const NukeWorkspaceUnknownWorkspaceSchema: GenMessage<NukeWorkspaceUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 5);
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 6);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceWorkspaceRefMismatch
@@ -233,7 +263,7 @@ export type NukeWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.NukeWorksp
  * Use `create(NukeWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const NukeWorkspaceWorkspaceRefMismatchSchema: GenMessage<NukeWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 6);
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 7);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceTransferringAway
@@ -252,7 +282,7 @@ export type NukeWorkspaceTransferringAway = Message<"agentrepl.v1.NukeWorkspaceT
  * Use `create(NukeWorkspaceTransferringAwaySchema)` to create a new message.
  */
 export const NukeWorkspaceTransferringAwaySchema: GenMessage<NukeWorkspaceTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 7);
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 8);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceNotYetAdopted
@@ -265,7 +295,7 @@ export type NukeWorkspaceNotYetAdopted = Message<"agentrepl.v1.NukeWorkspaceNotY
  * Use `create(NukeWorkspaceNotYetAdoptedSchema)` to create a new message.
  */
 export const NukeWorkspaceNotYetAdoptedSchema: GenMessage<NukeWorkspaceNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 8);
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 9);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceGitFailed
@@ -284,5 +314,5 @@ export type NukeWorkspaceGitFailed = Message<"agentrepl.v1.NukeWorkspaceGitFaile
  * Use `create(NukeWorkspaceGitFailedSchema)` to create a new message.
  */
 export const NukeWorkspaceGitFailedSchema: GenMessage<NukeWorkspaceGitFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 9);
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 10);
 
