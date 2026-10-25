@@ -27,23 +27,21 @@
 ;;;; ---- Fixtures ----
 
 (defvar agent-repl-test-ps--started nil
-  "Process-start invocations, as (WS CMD).")
+  "Summary runs, as (DIR CMD INPUT).")
 
 (defvar agent-repl-test-ps--state nil
   "Workspace plist writes the stubbed `--ws-put' recorded.")
 
 (defmacro agent-repl-test-ps--with (&rest body)
-  "Run BODY with both process boundaries and the workspace store stubbed."
+  "Run BODY with the summary run and the workspace store stubbed."
   (declare (indent 0))
   `(let ((agent-repl-test-ps--started nil)
          (agent-repl-test-ps--state nil)
          (agent-repl--prompt-summary-forbid-warned nil))
-     (cl-letf (((symbol-function 'agent-repl--prompt-summary-process-start)
-                (lambda (ws _out-buf cmd _sentinel)
-                  (push (list ws cmd) agent-repl-test-ps--started)
+     (cl-letf (((symbol-function 'agent-repl--prompt-summary-run)
+                (lambda (dir cmd input _callback)
+                  (push (list dir cmd input) agent-repl-test-ps--started)
                   'fake-process))
-               ((symbol-function 'agent-repl--prompt-summary-process-send-input)
-                (lambda (_proc _input) nil))
                ((symbol-function 'agent-repl--ws-put)
                 (lambda (_ws key value) (push (cons key value) agent-repl-test-ps--state)))
                ((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) nil))
@@ -208,9 +206,9 @@ cost up to seven cores per summary."
     (unwind-protect
         (agent-repl-test-ps--with
           (agent-repl-test-ps--unguarded
-            (cl-letf (((symbol-function 'agent-repl--prompt-summary-process-start)
-                       (lambda (_ws _out-buf _cmd _sentinel)
-                         (setq seen-dir default-directory)
+            (cl-letf (((symbol-function 'agent-repl--prompt-summary-run)
+                       (lambda (dir _cmd _input _callback)
+                         (setq seen-dir (file-name-as-directory dir))
                          'fake-process)))
               (agent-repl--prompt-summary-spawn "ws-one" "a reasonably long prompt to summarize"))))
       (delete-directory temporary-file-directory t))
@@ -242,15 +240,34 @@ cost up to seven cores per summary."
 
 ;;;; ---- The boundaries are registered ----
 
-(ert-deftest agent-repl-ps-process-start-is-a-registered-boundary ()
-  "The spawn is a registered external boundary, so tests cannot reach a shell."
-  (should (memq 'agent-repl--prompt-summary-process-start
+(ert-deftest agent-repl-ps-run-is-a-registered-boundary ()
+  "The summary run is a registered external boundary, so tests cannot reach a shell."
+  (should (memq 'agent-repl--prompt-summary-run
                 agent-repl--external-boundary-functions)))
 
-(ert-deftest agent-repl-ps-process-send-input-is-a-registered-boundary ()
-  "So is the stdin write paired with it."
-  (should (memq 'agent-repl--prompt-summary-process-send-input
-                agent-repl--external-boundary-functions)))
+(ert-deftest agent-repl-ps-run-goes-through-async-command ()
+  "The summary shares the one async runner, its input fed as the program's stdin."
+  ;; Arrange: the real run, captured before the harness guarded it.
+  (let ((real (cdr (assq 'agent-repl--prompt-summary-run
+                         agent-repl-test--external-original-functions)))
+        (ran nil))
+    (cl-letf (((symbol-function 'agent-repl--async-command)
+               (lambda (&rest args) (setq ran args) 'fake-process)))
+      ;; Act
+      (should (eq (funcall real "/tmp/ps" '("claude" "-p") "the prompt" #'ignore)
+                  'fake-process)))
+    ;; Assert
+    (should (equal ran '("prompt-summary" "/tmp/ps" ("claude" "-p") ignore "the prompt")))))
+
+(ert-deftest agent-repl-ps-spawn-feeds-the-built-input ()
+  "The run is fed the prompt and its context as built for it."
+  (agent-repl-test-ps--with
+    (agent-repl-test-ps--unguarded
+      (cl-letf (((symbol-function 'agent-repl--prompt-summary-build-input)
+                 (lambda (raw _context) (concat "INPUT:" raw))))
+        (agent-repl--prompt-summary-spawn "ws-one" "a reasonably long prompt to summarize"))
+      (should (equal (nth 2 (car agent-repl-test-ps--started))
+                     "INPUT:a reasonably long prompt to summarize")))))
 
 ;;;; ---- Truncation and cleaning ----
 
@@ -316,29 +333,53 @@ cost up to seven cores per summary."
         (agent-repl-prompt-summary-attach-all)
         (should-not attached)))))
 
-;;;; ---- The sentinel's own buffer teardown ----
+;;;; ---- The run's completion callback ----
 
-(ert-deftest agent-repl-test-ps-sentinel-tears-down-through-the-safe-kill ()
-  "OUT-BUF is the process's OWN buffer, so it goes through the detaching kill.
-A bare `kill-buffer' would delete the process from inside the kill and
-re-enter this sentinel forever."
-  (agent-repl-test--with-clean-state
-    ;; Arrange
-    (let ((buf (generate-new-buffer " *agent-repl-test-ps-out*"))
-          (safe nil))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--kill-buffer-safely)
-                     (lambda (b) (setq safe b)))
-                    ((symbol-function 'process-exit-status) (lambda (_p) 0))
-                    ((symbol-function 'process-status) (lambda (_p) 'exit))
-                    ((symbol-function 'agent-repl--prompt-summary-apply) #'ignore))
-            (with-current-buffer buf (insert "a summary"))
-            ;; Act
-            (funcall (agent-repl--prompt-summary-make-sentinel "ws" "raw" buf)
-                     'fake-proc "finished\n")
-            ;; Assert
-            (should (eq safe buf)))
-        (kill-buffer buf)))))
+(ert-deftest agent-repl-ps-callback-applies-a-clean-summary ()
+  "A run that succeeded with output applies its cleaned summary."
+  (agent-repl-test-ps--with
+    (let ((applied nil))
+      (cl-letf (((symbol-function 'agent-repl--prompt-summary-apply)
+                 (lambda (ws raw summary) (setq applied (list ws raw summary)))))
+        (funcall (agent-repl--prompt-summary-make-callback "ws" "raw") t "  a summary  \n")
+        (should (equal applied '("ws" "raw" "a summary.")))))))
+
+(ert-deftest agent-repl-ps-callback-rejects-a-failed-run-and-clears-pending ()
+  "A failed run applies nothing, warns with what it said, and clears pending."
+  (agent-repl-test-ps--with
+    (let ((applied nil) (warned nil))
+      (cl-letf (((symbol-function 'agent-repl--prompt-summary-apply)
+                 (lambda (&rest _) (setq applied t)))
+                ((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) "raw"))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (&rest args) (push args warned))))
+        (funcall (agent-repl--prompt-summary-make-callback "ws" "raw") nil "auth failed\n")
+        (should-not applied)
+        (should (equal (car warned)
+                       '("ws" "prompt-summary: run rejected result; clearing pending ok=%s output=%S current-raw-len=%d"
+                         nil "auth failed" 3)))
+        (should (member '(:last-prompt-summary-pending) agent-repl-test-ps--state))))))
+
+(ert-deftest agent-repl-ps-callback-rejects-an-empty-summary ()
+  "A run that succeeded with nothing to say applies nothing."
+  (agent-repl-test-ps--with
+    (let ((applied nil))
+      (cl-letf (((symbol-function 'agent-repl--prompt-summary-apply)
+                 (lambda (&rest _) (setq applied t)))
+                ((symbol-function 'agent-repl--warn) #'ignore))
+        (funcall (agent-repl--prompt-summary-make-callback "ws" "raw") t "  \n")
+        (should-not applied)))))
+
+(ert-deftest agent-repl-ps-callback-leaves-a-newer-prompts-pending-alone ()
+  "A failed run for a superseded prompt neither warns nor clears pending."
+  (agent-repl-test-ps--with
+    (let ((warned nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) "newer"))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (&rest args) (push args warned))))
+        (funcall (agent-repl--prompt-summary-make-callback "ws" "raw") nil "")
+        (should-not warned)
+        (should-not agent-repl-test-ps--state)))))
 
 (provide 'test-prompt-summary)
 

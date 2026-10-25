@@ -27,7 +27,7 @@
 ;; follow-ups.
 ;;
 ;; Concurrency model: each kickoff captures the workspace name and the
-;; raw prompt text in lexical scope.  The process sentinel writes the
+;; raw prompt text in lexical scope.  The run's completion callback writes the
 ;; summary back to that workspace's state only if the workspace's
 ;; `:last-prompt-text' still equals the captured raw — otherwise a newer
 ;; send has already overwritten the bookmark and the stale summary is
@@ -48,7 +48,7 @@
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--ws-put "workspace")
 
-(declare-function agent-repl--kill-buffer-safely "worktree" (buf))
+(declare-function agent-repl--async-command "core" (label dir command callback &optional input))
 
 ;;;; Defcustoms
 
@@ -504,69 +504,40 @@ live buffer instead of always missing one."
         (force-mode-line-update t))
       (agent-repl--log-verbose ws "prompt-summary: redisplay complete buffer=%S" buf)))))
 
-(defun agent-repl--prompt-summary-make-sentinel (ws raw out-buf)
-  "Build a process sentinel that writes the summary for WS/RAW.
-OUT-BUF is the process's stdout collection buffer; it is killed when
-the process exits."
-  (lambda (proc event)
-    (when (memq (process-status proc) '(exit signal))
-      (unwind-protect
-          (let* ((status (process-exit-status proc))
-                 (raw-out (and (buffer-live-p out-buf)
-                               (with-current-buffer out-buf (buffer-string))))
-                 (cleaned (and raw-out (agent-repl--prompt-summary-clean raw-out))))
-            (agent-repl--log ws "prompt-summary: sentinel complete status=%s proc-status=%s event=%s stdout-len=%s summary-len=%s"
-                              status (process-status proc) (string-trim (or event ""))
-                              (if raw-out (length raw-out) "nil")
-                              (if cleaned (length cleaned) "nil"))
-            (cond
-             ((and (eq (process-status proc) 'exit)
-                   (zerop status)
-                   cleaned
-                   (not (string-empty-p cleaned)))
-              (agent-repl--log ws "prompt-summary: sentinel accepted result summary-len=%d" (length cleaned))
-              (agent-repl--prompt-summary-apply ws raw cleaned))
-             (t
-              ;; Failed / empty — clear pending so the segment goes back
-              ;; to whatever summary was there before (or nothing).
-              (let ((current-raw (agent-repl--ws-get ws :last-prompt-text)))
-                (if (equal current-raw raw)
-                    (progn
-                      (agent-repl--warn ws "prompt-summary: sentinel rejected result; clearing pending status=%s current-raw-len=%d" status (length current-raw))
-                      (agent-repl--ws-put ws :last-prompt-summary-pending nil)
-                      (agent-repl--prompt-summary-redisplay ws)
-                      (agent-repl--log ws "prompt-summary: persist rejected result begin")
-                      (agent-repl--state-save ws)
-                      (agent-repl--log ws "prompt-summary: persist rejected result complete"))
-                  (agent-repl--log ws "prompt-summary: sentinel rejected stale result; pending unchanged captured-raw-len=%d current-raw-len=%s"
-                                    (length raw)
-                                    (if (stringp current-raw) (length current-raw) "non-string")))))))
-        ;; OUT-BUF is this process's OWN buffer: a bare `kill-buffer' here
-        ;; deletes the process from inside the kill and re-enters this very
-        ;; sentinel.  The shared teardown detaches the process first, so the
-        ;; re-delivered status has nowhere to go.
-        (agent-repl--kill-buffer-safely out-buf)))))
+(defun agent-repl--prompt-summary-make-callback (ws raw)
+  "Build the completion callback that writes the summary for WS/RAW.
+Called as `agent-repl--async-command' calls it, with OK and the run's
+OUTPUT; the runner owns the process and its buffer."
+  (lambda (ok output)
+    (let ((cleaned (agent-repl--prompt-summary-clean output)))
+      (agent-repl--log ws "prompt-summary: run complete ok=%s stdout-len=%d summary-len=%d"
+                        ok (length output) (length cleaned))
+      (if (and ok (not (string-empty-p cleaned)))
+          (progn
+            (agent-repl--log ws "prompt-summary: run accepted result summary-len=%d" (length cleaned))
+            (agent-repl--prompt-summary-apply ws raw cleaned))
+        ;; Failed / empty -- clear pending so the segment goes back to
+        ;; whatever summary was there before (or nothing).
+        (let ((current-raw (agent-repl--ws-get ws :last-prompt-text)))
+          (if (equal current-raw raw)
+              (progn
+                (agent-repl--warn ws "prompt-summary: run rejected result; clearing pending ok=%s output=%S current-raw-len=%d"
+                                  ok (string-trim output) (length current-raw))
+                (agent-repl--ws-put ws :last-prompt-summary-pending nil)
+                (agent-repl--prompt-summary-redisplay ws)
+                (agent-repl--log ws "prompt-summary: persist rejected result begin")
+                (agent-repl--state-save ws)
+                (agent-repl--log ws "prompt-summary: persist rejected result complete"))
+            (agent-repl--log ws "prompt-summary: run rejected stale result; pending unchanged captured-raw-len=%d current-raw-len=%s"
+                              (length raw)
+                              (if (stringp current-raw) (length current-raw) "non-string"))))))))
 
-(defun agent-repl--prompt-summary-process-start (ws out-buf cmd sentinel)
-  "Start the headless summary process for WS.
-This is the external-process boundary for prompt summaries; callers own
-command construction and error handling, while tests stub this function.
-Registered in `agent-repl--external-boundary-functions' (core.el)."
-  (make-process ;; ALLOW-EXTERNAL-BOUNDARY
-   :name (format "agent-prompt-summary-%s" ws)
-   :buffer out-buf
-   :command cmd
-   :connection-type 'pipe
-   :noquery t
-   :sentinel sentinel))
-
-(defun agent-repl--prompt-summary-process-send-input (proc input)
-  "Send INPUT to headless summary PROC, then close its standard input.
-This is the external-process boundary paired with
-`agent-repl--prompt-summary-process-start'.  Registered in
-`agent-repl--external-boundary-functions' (core.el)."
-  (process-send-string proc input) ;; ALLOW-EXTERNAL-BOUNDARY
-  (process-send-eof proc))
+(defun agent-repl--prompt-summary-run (dir cmd input callback)
+  "Run the headless summary CMD from DIR over INPUT, then CALLBACK.
+CALLBACK is `agent-repl--async-command''s, which runs it.  Registered in
+`agent-repl--external-boundary-functions' (core.el), so a test of the
+summary stubs the run it means."
+  (agent-repl--async-command "prompt-summary" dir cmd callback input))
 
 (defconst agent-repl--prompt-summary-forbid-env "AGENT_REPL_FORBID_VENDOR_CALLS"
   "Environment variable that forbids every real vendor call.
@@ -620,33 +591,29 @@ to walk, and it is no workspace, so the run's hooks resolve to none."
   "Spawn the async claude process to summarize RAW for WS.
 Returns the process, or nil when prerequisites are missing.  Separated
 from `agent-repl--kickoff-prompt-summary' so tests can stub
-the prompt-summary process-boundary wrappers without going through the
+`agent-repl--prompt-summary-run' without going through the
 state-mutation entry point."
-  (let ((out-buf (generate-new-buffer
-                  (format " *agent-prompt-summary-%s*" ws))))
-    (condition-case err
-        ;; Spawn from a non-project cwd so the headless claude's hooks
-        ;; (SessionStart / UserPromptSubmit / Stop) fire with a cwd that
-        ;; doesn't resolve to any registered workspace.  Otherwise the
-        ;; sentinel watcher attributes them to the calling workspace and
-        ;; flips :agent-state to :done while the user's interactive Claude
-        ;; is still mid-turn.  The cwd is an EMPTY one of its own, so the
-        ;; run's startup index walks nothing.
-        (let* ((cmd (agent-repl--prompt-summary-command))
-               (context (agent-repl--prompt-summary-collect-context ws))
-               (proc-input (agent-repl--prompt-summary-build-input raw context))
-               (sentinel (agent-repl--prompt-summary-make-sentinel ws raw out-buf))
-               (default-directory (agent-repl--prompt-summary-directory)))
-          (agent-repl--log ws "prompt-summary: spawn request raw-len=%d context-count=%d input-len=%d command-argc=%d"
-                            (length raw) (length context) (length proc-input) (length cmd))
-          (let ((proc (agent-repl--prompt-summary-process-start ws out-buf cmd sentinel)))
-            (agent-repl--prompt-summary-process-send-input proc proc-input)
-            (agent-repl--log ws "prompt-summary: spawn accepted process=%S" proc)
-            proc))
-      (error
-       (agent-repl--warn ws "prompt-summary: spawn failed raw-len=%d err=%S" (length raw) err)
-       (agent-repl--kill-buffer-safely out-buf)
-       nil))))
+  (condition-case err
+      ;; Spawn from a non-project cwd so the headless claude's hooks
+      ;; (SessionStart / UserPromptSubmit / Stop) fire with a cwd that
+      ;; doesn't resolve to any registered workspace.  Otherwise the
+      ;; sentinel watcher attributes them to the calling workspace and
+      ;; flips :agent-state to :done while the user's interactive Claude
+      ;; is still mid-turn.  The cwd is an EMPTY one of its own, so the
+      ;; run's startup index walks nothing.
+      (let* ((cmd (agent-repl--prompt-summary-command))
+             (context (agent-repl--prompt-summary-collect-context ws))
+             (proc-input (agent-repl--prompt-summary-build-input raw context))
+             (dir (agent-repl--prompt-summary-directory)))
+        (agent-repl--log ws "prompt-summary: spawn request raw-len=%d context-count=%d input-len=%d command-argc=%d"
+                          (length raw) (length context) (length proc-input) (length cmd))
+        (let ((proc (agent-repl--prompt-summary-run
+                     dir cmd proc-input (agent-repl--prompt-summary-make-callback ws raw))))
+          (agent-repl--log ws "prompt-summary: spawn accepted process=%S" proc)
+          proc))
+    (error
+     (agent-repl--warn ws "prompt-summary: spawn failed raw-len=%d err=%S" (length raw) err)
+     nil)))
 
 (defun agent-repl--kickoff-prompt-summary (ws raw)
   "Fire an async haiku summary call for RAW in workspace WS.

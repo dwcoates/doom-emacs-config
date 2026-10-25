@@ -8,7 +8,7 @@
 ;;
 ;; Nothing here starts hunspell.  The three boundaries spell.el crosses
 ;; (`agent-repl--executable-find', `agent-repl--spell-flyspell-on' and
-;; `agent-repl--spell-check-region') are stubbed per case, and the
+;; `agent-repl--spell-run-hunspell') are stubbed per case, and the
 ;; dictionary's files live in a temporary cache dir the case names through
 ;; `XDG_CACHE_HOME'.  The harness turns `agent-repl-input-spellcheck' off for
 ;; every suite, so each case here that turns a composer on binds it back.
@@ -355,6 +355,7 @@ ispell state is bound afresh, so a case never leaks it."
             (should (equal (getenv "DICPATH") dir))
             (should (local-variable-p 'ispell-local-dictionary))
             (should (equal ispell-local-dictionary "en_US-scowl80"))
+            (should (equal agent-repl--spell-ws "ws"))
             (should (eq flyspell-generic-check-word-predicate #'agent-repl--spell-check-word-p))
             (should (assq 'flyspell-mode minor-mode-overriding-map-alist))
             (should (memq #'agent-repl--spell-on-change after-change-functions))
@@ -436,80 +437,87 @@ ispell state is bound afresh, so a case never leaks it."
 ;;;; ---- Tests: text that arrives whole ----
 
 (defmacro agent-repl-test-spell--queueing (&rest body)
-  "Run BODY in a composer whose after-change queues checks, with checks recorded.
-Binds `checked' to the (BEG . END) spans checked, oldest first.  The
-global queue and `post-command-hook' are bound afresh."
+  "Run BODY in a composer whose after-change queues checks, with hunspell recorded.
+Binds `ran' to the (INPUT . CALLBACK) of each hunspell run, oldest first.
+The global queue is bound afresh, and a timer it arms is cancelled after."
   (declare (indent 0))
-  `(let ((checked nil)
+  `(let ((ran nil)
          (agent-repl--spell-pending-buffers nil)
-         (post-command-hook nil))
-     (cl-letf (((symbol-function 'agent-repl--spell-check-region)
-                (lambda (beg end) (setq checked (append checked (list (cons (+ 0 beg) (+ 0 end))))))))
-       (agent-repl-test--with-temp-buffer " *test-spell-composer*"
-         (add-hook 'after-change-functions #'agent-repl--spell-on-change nil t)
-         ,@body))))
+         (agent-repl--spell-check-timer nil))
+     (cl-letf (((symbol-function 'agent-repl--spell-run-hunspell)
+                (lambda (input callback) (setq ran (append ran (list (cons input callback)))))))
+       (unwind-protect
+           (agent-repl-test--with-temp-buffer " *test-spell-composer*"
+             (add-hook 'after-change-functions #'agent-repl--spell-on-change nil t)
+             ,@body)
+         (when agent-repl--spell-check-timer
+           (cancel-timer agent-repl--spell-check-timer))))))
+
+(defun agent-repl-test-spell--sent (input)
+  "Return the text hunspell INPUT checks, without the `!' and `^' framing."
+  (mapconcat (lambda (line) (substring line 1))
+             (cdr (split-string (string-remove-suffix "\n" input) "\n")) "\n"))
 
 (ert-deftest agent-repl-test-spell-a-typed-character-is-flyspells-own ()
-  "A one-character insertion queues nothing."
+  "A one-character insertion queues nothing and arms no check."
   (agent-repl-test-spell--queueing
     (insert "a")
     (should-not agent-repl--spell-pending)
     (should-not agent-repl--spell-pending-buffers)
-    (should-not (memq #'agent-repl--spell-check-pending-buffers post-command-hook))))
+    (should-not agent-repl--spell-check-timer)))
 
-(ert-deftest agent-repl-test-spell-an-insertion-is-queued-for-the-next-command ()
-  "A longer insertion is queued, and the check joins `post-command-hook'."
+(ert-deftest agent-repl-test-spell-an-insertion-is-queued-for-the-next-loop-turn ()
+  "A longer insertion is queued, and a zero-second timer is armed to check it."
   (agent-repl-test-spell--queueing
     (insert "hello world")
     (should (equal (cons (marker-position (car agent-repl--spell-pending))
                          (marker-position (cdr agent-repl--spell-pending)))
                    '(1 . 12)))
     (should (equal agent-repl--spell-pending-buffers (list (current-buffer))))
-    (should (memq #'agent-repl--spell-check-pending-buffers post-command-hook))))
+    (should (timerp agent-repl--spell-check-timer))
+    (should (equal (timer--function agent-repl--spell-check-timer)
+                   #'agent-repl--spell-check-pending-buffers))))
 
 (ert-deftest agent-repl-test-spell-a-second-insertion-widens-the-queue ()
-  "Two insertions before the check are checked as one span covering both."
+  "Two insertions before the check are one span covering both, under one timer."
   (agent-repl-test-spell--queueing
     (insert "hello world")
-    (goto-char (point-min))
-    (insert "say ")
-    (goto-char (point-max))
-    (insert " again")
+    (let ((timer agent-repl--spell-check-timer))
+      (goto-char (point-min))
+      (insert "say ")
+      (goto-char (point-max))
+      (insert " again")
+      (should (eq agent-repl--spell-check-timer timer)))
     (should (equal (cons (marker-position (car agent-repl--spell-pending))
                          (marker-position (cdr agent-repl--spell-pending)))
                    (cons 1 (point-max))))
     (should (equal agent-repl--spell-pending-buffers (list (current-buffer))))))
 
-(ert-deftest agent-repl-test-spell-the-command-end-checks-and-forgets ()
-  "The end of the next command checks the queued span once, then leaves the hook."
+(ert-deftest agent-repl-test-spell-the-check-sends-the-span-and-forgets ()
+  "The timer's run sends the queued span to hunspell once, then disarms."
   (agent-repl-test-spell--queueing
     (setq-local flyspell-mode t)
     (insert "hello world")
-    (run-hooks 'post-command-hook)
-    (should (equal checked '((1 . 12))))
+    (agent-repl--spell-check-pending-buffers)
+    (should (equal (mapcar (lambda (r) (agent-repl-test-spell--sent (car r))) ran)
+                   '("hello world")))
     (should-not agent-repl--spell-pending)
     (should-not agent-repl--spell-pending-buffers)
-    (should-not (memq #'agent-repl--spell-check-pending-buffers post-command-hook))
+    (should-not agent-repl--spell-check-timer)
     (agent-repl--spell-check-pending (current-buffer))
-    (should (equal checked '((1 . 12))))))
+    (should (= (length ran) 1))))
 
-(ert-deftest agent-repl-test-spell-the-pending-check-inhibits-redisplay ()
-  "The queued span is checked with redisplay inhibited, so no cursor walks it."
-  (let ((agent-repl--spell-pending-buffers nil)
-        (post-command-hook nil)
-        (inhibited 'unset))
-    (cl-letf (((symbol-function 'agent-repl--spell-check-region)
-               (lambda (_beg _end) (setq inhibited inhibit-redisplay))))
-      (agent-repl-test--with-temp-buffer " *test-spell-composer*"
-        (add-hook 'after-change-functions #'agent-repl--spell-on-change nil t)
-        (setq-local flyspell-mode t)
-        (insert "hello world")
-        (run-hooks 'post-command-hook)))
-    (should (eq inhibited t))
-    (should-not inhibit-redisplay)))
+(ert-deftest agent-repl-test-spell-the-check-holds-nothing-up ()
+  "Sending the span returns before hunspell answers: nothing is highlighted yet."
+  (agent-repl-test-spell--queueing
+    (setq-local flyspell-mode t)
+    (insert "wrold")
+    (agent-repl--spell-check-pending-buffers)
+    (should (= (length ran) 1))
+    (should-not (seq-filter #'flyspell-overlay-p (overlays-in (point-min) (point-max))))))
 
-(ert-deftest agent-repl-test-spell-the-command-end-checks-every-queued-composer ()
-  "Two composers queued before a command ends are both checked."
+(ert-deftest agent-repl-test-spell-the-check-covers-every-queued-composer ()
+  "Two composers queued before the timer runs are both sent, oldest first."
   (agent-repl-test-spell--queueing
     (setq-local flyspell-mode t)
     (insert "hello world")
@@ -520,21 +528,24 @@ global queue and `post-command-hook' are bound afresh."
               (setq-local flyspell-mode t)
               (add-hook 'after-change-functions #'agent-repl--spell-on-change nil t)
               (insert "abc def"))
-            (run-hooks 'post-command-hook)
-            (should (equal checked '((1 . 12) (1 . 8)))))
+            (agent-repl--spell-check-pending-buffers)
+            (should (equal (mapcar (lambda (r) (agent-repl-test-spell--sent (car r))) ran)
+                           '("hello world" "abc def"))))
         (kill-buffer other)))))
 
-(ert-deftest agent-repl-test-spell-the-pending-check-skips-a-composer-without-flyspell ()
-  "A composer whose flyspell was turned off checks nothing, and forgets the queue."
+(ert-deftest agent-repl-test-spell-the-check-skips-a-composer-without-flyspell ()
+  "A composer whose flyspell was turned off sends nothing, and forgets the queue."
   (agent-repl-test-spell--queueing
     (setq-local flyspell-mode nil)
     (insert "hello world")
-    (run-hooks 'post-command-hook)
-    (should-not checked)
-    (should-not agent-repl--spell-pending)))
+    (let ((span agent-repl--spell-pending))
+      (agent-repl--spell-check-pending-buffers)
+      (should-not ran)
+      (should-not agent-repl--spell-pending)
+      (should-not (marker-buffer (car span))))))
 
 (ert-deftest agent-repl-test-spell-a-killed-composer-is-not-checked ()
-  "A composer killed before the command ended is dropped from the queue unchecked."
+  "A composer killed before the timer ran is dropped from the queue unsent."
   (agent-repl-test-spell--queueing
     (let ((buf (generate-new-buffer " *test-spell-killed*")))
       (with-current-buffer buf
@@ -542,16 +553,166 @@ global queue and `post-command-hook' are bound afresh."
         (add-hook 'after-change-functions #'agent-repl--spell-on-change nil t)
         (insert "hello world"))
       (kill-buffer buf)
-      (run-hooks 'post-command-hook)
-      (should-not checked)
+      (agent-repl--spell-check-pending-buffers)
+      (should-not ran)
       (should-not agent-repl--spell-pending-buffers))))
+
+(ert-deftest agent-repl-test-spell-hunspell-input-is-terse-and-escapes-each-line ()
+  "The input asks for terse answers and puts `^' before every line."
+  (should (equal (agent-repl--spell-hunspell-input "one\n*two")
+                 "!\n^one\n^*two\n")))
+
+(ert-deftest agent-repl-test-spell-hunspell-input-keeps-an-empty-line ()
+  "An empty line is still a line, so the answer's lines keep their count."
+  (should (equal (agent-repl--spell-hunspell-input "a\n\nb") "!\n^a\n^\n^b\n")))
+
+(ert-deftest agent-repl-test-spell-misspelled-words-reads-each-answer-kind ()
+  "`&', `#' and `?' lines name a misspelling; the banner and blank lines do not."
+  (should (equal (agent-repl--spell-misspelled-words
+                  (concat "@(#) International Ispell Version 3.2.06 (but really Hunspell 1.7.2)\n"
+                          "& wrold 2 7: world, wold\n"
+                          "# xyzzyq 3\n"
+                          "\n"
+                          "? teh 0 9: the\n"
+                          "\n"))
+                 '("wrold" "xyzzyq" "teh"))))
+
+(ert-deftest agent-repl-test-spell-misspelled-words-names-a-word-once ()
+  "A word misspelled on two lines is named once."
+  (should (equal (agent-repl--spell-misspelled-words "& wrold 1 0: world\n\n& wrold 1 0: world\n")
+                 '("wrold"))))
+
+(ert-deftest agent-repl-test-spell-misspelled-words-of-a-clean-answer-is-nil ()
+  "An answer with nothing misspelled names nothing."
+  (should-not (agent-repl--spell-misspelled-words "@(#) banner\n\n\n")))
+
+(defmacro agent-repl-test-spell--answering (text &rest body)
+  "Run BODY in a spellchecked composer holding TEXT, its whole span queued and sent.
+Binds `answer' to the sent check's callback, `span' to its markers, and
+`marks' to a function returning the highlighted words, in buffer order."
+  (declare (indent 1))
+  `(agent-repl-test-spell--queueing
+     (setq-local flyspell-mode t)
+     (setq-local agent-repl--spell-ws "ws-a")
+     (setq-local ispell-local-dictionary "en_US-scowl80")
+     (let ((ispell-current-dictionary "en_US-scowl80")
+           (ispell-local-dictionary-alist
+            (list (agent-repl--spell-dictionary-entry "en_US-scowl80"))))
+       (insert ,text)
+       (let ((span agent-repl--spell-pending))
+         (agent-repl--spell-check-pending-buffers)
+         (let ((answer (cdr (car ran)))
+               (marks (lambda ()
+                        (mapcar (lambda (o) (buffer-substring-no-properties
+                                             (overlay-start o) (overlay-end o)))
+                                (sort (seq-filter #'flyspell-overlay-p
+                                                  (overlays-in (point-min) (point-max)))
+                                      (lambda (a b) (< (overlay-start a) (overlay-start b))))))))
+           ,@body)))))
+
+(ert-deftest agent-repl-test-spell-an-answer-highlights-each-misspelled-word ()
+  "Every prose occurrence of a word hunspell names is highlighted."
+  (agent-repl-test-spell--answering "say wrold and wrold again"
+    (funcall answer t "@(#) banner\n& wrold 1 4: world\n\n")
+    (should (equal (funcall marks) '("wrold" "wrold")))))
+
+(ert-deftest agent-repl-test-spell-an-answer-leaves-code-unmarked ()
+  "A named word inside inline code or a code token is not highlighted."
+  (agent-repl-test-spell--answering "wrold `wrold` wrold_x"
+    (funcall answer t "& wrold 1 0: world\n\n")
+    (should (equal (funcall marks) '("wrold")))))
+
+(ert-deftest agent-repl-test-spell-an-answer-marks-only-whole-words ()
+  "A named word standing inside a longer word is not highlighted there."
+  (agent-repl-test-spell--answering "teh tehran"
+    (funcall answer t "& teh 1 0: the\n\n")
+    (should (equal (funcall marks) '("teh")))))
+
+(ert-deftest agent-repl-test-spell-an-answer-follows-an-edit-made-meanwhile ()
+  "Text typed before the answer came moves the word, and the mark follows it."
+  (agent-repl-test-spell--answering "a wrold"
+    (goto-char (point-min))
+    (insert "x")
+    (funcall answer t "& wrold 1 2: world\n\n")
+    (should (equal (funcall marks) '("wrold")))
+    (should (equal (overlay-start (car (seq-filter #'flyspell-overlay-p
+                                                   (overlays-in (point-min) (point-max)))))
+                   4))))
+
+(ert-deftest agent-repl-test-spell-an-answer-stays-inside-its-span ()
+  "A named word outside the checked span is flyspell's own, not the answer's."
+  (agent-repl-test-spell--answering "a wrold"
+    (set-marker (cdr span) 3)
+    (funcall answer t "& wrold 1 2: world\n\n")
+    (should-not (funcall marks))))
+
+(ert-deftest agent-repl-test-spell-an-answer-releases-the-span ()
+  "Once applied, the span's markers point nowhere."
+  (agent-repl-test-spell--answering "a wrold"
+    (funcall answer t "\n")
+    (should-not (marker-buffer (car span)))
+    (should-not (marker-buffer (cdr span)))))
+
+(ert-deftest agent-repl-test-spell-an-answer-after-flyspell-stopped-marks-nothing ()
+  "A composer whose flyspell was turned off while hunspell worked takes nothing."
+  (agent-repl-test-spell--answering "a wrold"
+    (setq-local flyspell-mode nil)
+    (funcall answer t "& wrold 1 2: world\n\n")
+    (should-not (funcall marks))
+    (should-not (marker-buffer (car span)))))
+
+(ert-deftest agent-repl-test-spell-an-answer-for-a-killed-composer-is-dropped ()
+  "A composer killed while hunspell worked takes nothing and raises nothing."
+  (agent-repl-test-spell--queueing
+    (let ((buf (generate-new-buffer " *test-spell-killed*"))
+          (span nil))
+      (with-current-buffer buf
+        (setq-local flyspell-mode t)
+        (add-hook 'after-change-functions #'agent-repl--spell-on-change nil t)
+        (insert "a wrold")
+        (setq span agent-repl--spell-pending))
+      (agent-repl--spell-check-pending-buffers)
+      (kill-buffer buf)
+      (funcall (cdr (car ran)) t "& wrold 1 2: world\n\n")
+      (should-not (marker-buffer (car span))))))
+
+(ert-deftest agent-repl-test-spell-a-failed-check-warns-and-marks-nothing ()
+  "A hunspell that failed is recorded at WARN with what it said; nothing is marked."
+  (agent-repl-test-spell--with-logging
+    (cl-letf (((symbol-function 'agent-repl--warn)
+               (lambda (&rest args) (push (cons 'warn args) agent-repl-test-spell--logged))))
+      (agent-repl-test-spell--answering "a wrold"
+        (funcall answer nil "Can't open affix or dictionary files\n")
+        (should-not (funcall marks))
+        (should-not (marker-buffer (car span)))
+        (let ((warned (agent-repl-test-spell--records 'warn)))
+          (should (= (length warned) 1))
+          (should (equal (car warned)
+                         (list "ws-a" "elisp.spell.check-failed ws=%s buffer=%s span-length=%d output=%S"
+                               "ws-a" " *test-spell-composer*" 7
+                               "Can't open affix or dictionary files"))))))))
+
+(ert-deftest agent-repl-test-spell-run-hunspell-runs-through-async-command ()
+  "hunspell shares the one async runner, with the composer's dictionary and stdin."
+  (let ((real (cdr (assq 'agent-repl--spell-run-hunspell
+                         agent-repl-test--external-original-functions)))
+        (ran nil))
+    (cl-letf (((symbol-function 'agent-repl--async-command)
+               (lambda (&rest args) (setq ran args))))
+      (with-temp-buffer
+        (setq-local ispell-local-dictionary "en_US-scowl80")
+        (let ((ispell-program-name "/bin/hunspell"))
+          (funcall real "!\n^hi\n" #'ignore))))
+    (should (equal ran (list "spell" temporary-file-directory
+                             '("/bin/hunspell" "-a" "-i" "utf-8" "-d" "en_US-scowl80")
+                             #'ignore "!\n^hi\n")))))
 
 ;;;; ---- Tests: the boundary ----
 
 (ert-deftest agent-repl-test-spell-boundaries-are-registered ()
-  "Starting flyspell and checking a region are registered boundaries the harness guards."
+  "Starting flyspell and running hunspell are registered boundaries the harness guards."
   (should (memq 'agent-repl--spell-flyspell-on agent-repl--external-boundary-functions))
-  (should (memq 'agent-repl--spell-check-region agent-repl--external-boundary-functions)))
+  (should (memq 'agent-repl--spell-run-hunspell agent-repl--external-boundary-functions)))
 
 (ert-deftest agent-repl-test-spell-the-harness-starts-composers-unspellchecked ()
   "Every other suite's composers are born unspellchecked, so none reaches hunspell."
