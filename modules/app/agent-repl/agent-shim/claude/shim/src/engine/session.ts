@@ -659,6 +659,9 @@ const ROLLBACK_STOP_SETTLE_MS = 10_000;
 /** How often the account's rate-limit windows are sampled. */
 const ACCOUNT_USAGE_INTERVAL_MS = 5 * 60 * 1000;
 
+/** What a message loop's read answers when the shim let its query go first. */
+const LOOP_STOPPED: unique symbol = Symbol("the shim let the query go");
+
 /**
  * A push-style bridge onto the SDK's pull-style streaming input.
  *
@@ -3935,7 +3938,21 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     await pushAppliedEffort();
   }
 
-  function runLoop(active: QueryLike, park: LoopPark): Promise<void> {
+  /**
+   * Run the message loop of `active`, which ends when the vendor's stream
+   * does or the moment `stop` (the query's own abort signal) fires.
+   *
+   * THE SHIM ENDS ITS OWN READ. Every place the shim lets a query go aborts
+   * its controller and closes it, but a closed query is not a stream that
+   * ends: nothing in the SDK's declared surface promises the iterator settles
+   * after `close()`, and on 2026-10-25's deploy three stand-downs each waited
+   * out the whole budget on a loop still parked in the vendor's iterator, at
+   * ERROR. The wait on the vendor is raced against the abort, so the loop
+   * ends when the shim is done with the query, whatever the iterator does.
+   * A message the vendor sends after the abort is not read: the shim has let
+   * the query go, and nothing it says can settle anything.
+   */
+  function runLoop(active: QueryLike, park: LoopPark, stop: AbortSignal): Promise<void> {
     const parkAt = (at: LoopPark["at"], message: string): void => {
       park.at = at;
       park.message = message;
@@ -3946,8 +3963,26 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // the next message is timed, and a long one is recorded with how busy
       // this shim was across it (vendor-cadence.ts).
       const cadence = new VendorCadence(deps.nowMs);
+      const stopped = new Promise<typeof LOOP_STOPPED>((resolve) => {
+        if (stop.aborted) resolve(LOOP_STOPPED);
+        stop.addEventListener("abort", () => resolve(LOOP_STOPPED), { once: true });
+      });
+      const messages = active[Symbol.asyncIterator]();
       try {
-        for await (const message of active) {
+        for (;;) {
+          // THE RACE SUBSCRIBES TO THE PENDING READ, so a vendor read that
+          // rejects after the abort won it is a settled race's input, never an
+          // unhandled rejection.
+          const next = await Promise.race([messages.next(), stopped]);
+          if (next === LOOP_STOPPED) {
+            LOGGER.debug(
+              { parked_ms: deps.nowMs() - park.sinceMs },
+              "the shim let the query go; its message loop reads no more of it",
+            );
+            return;
+          }
+          if (next.done === true) break;
+          const message = next.value;
           cadence.received();
           const named = messageKind(message);
           try {
@@ -5031,7 +5066,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     beforeLoop?.(created);
     const park: LoopPark = { at: "vendor", message: "", sinceMs: deps.nowMs() };
     loopPark = park;
-    loop = runLoop(created, park);
+    loop = runLoop(created, park, controller.signal);
     return created;
   }
 
