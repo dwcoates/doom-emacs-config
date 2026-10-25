@@ -46,7 +46,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_subscribe_merge_queue.proto.
  */
 export const file_agentrepl_v1_endpoint_subscribe_merge_queue: GenFile = /*@__PURE__*/
-  fileDesc("CjFhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3Vic2NyaWJlX21lcmdlX3F1ZXVlLnByb3RvEgxhZ2VudHJlcGwudjEiygEKGlN1YnNjcmliZU1lcmdlUXVldWVSZXF1ZXN0Ei4KCnN1YnNjcmliZXIYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjQKCnJlcG9zaXRvcnkYAiABKAsyGy53b3Jrc3BhY2UudjEuUmVwb3NpdG9yeVJlZkgAiAEBEjcKBmRldGFpbBgDIAEoCzInLmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlRGV0YWlsQg0KC19yZXBvc2l0b3J5IugBChlTdWJzY3JpYmVNZXJnZVF1ZXVlRGV0YWlsEkQKDGV2ZXJ5X2NoYW5nZRgBIAEoCzIsLmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlRXZlcnlDaGFuZ2VIABI9CghhZHZhbmNlcxgCIAEoCzIpLmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlQWR2YW5jZXNIABI9CghkZXBsZXRlcxgDIAEoCzIpLmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlRGVwbGV0ZXNIAEIHCgVsZXZlbCIgCh5TdWJzY3JpYmVNZXJnZVF1ZXVlRXZlcnlDaGFuZ2UiHQobU3Vic2NyaWJlTWVyZ2VRdWV1ZUFkdmFuY2VzIh0KG1N1YnNjcmliZU1lcmdlUXVldWVEZXBsZXRlcyKdAQobU3Vic2NyaWJlTWVyZ2VRdWV1ZVJlc3BvbnNlEjsKB3N1Y2Nlc3MYASABKAsyKC5hZ2VudHJlcGwudjEuU3Vic2NyaWJlTWVyZ2VRdWV1ZVN1Y2Nlc3NIABI3CgVlcnJvchgCIAEoCzImLmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlRXJyb3JIAEIICgZyZXN1bHQiigEKGlN1YnNjcmliZU1lcmdlUXVldWVTdWNjZXNzEjwKBXRha2VuGAEgASgLMi0uYWdlbnRyZXBsLnYxLlN1YnNjcmliZU1lcmdlUXVldWVTdWNjZXNzVGFrZW4SLgoGcXVldWVzGAIgAygLMh4uYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXMizAEKH1N1YnNjcmliZU1lcmdlUXVldWVTdWNjZXNzVGFrZW4STQoKc3Vic2NyaWJlZBgBIAEoCzI3LmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlU3VjY2Vzc1Rha2VuU3Vic2NyaWJlZEgAElEKDHJlc3Vic2NyaWJlZBgCIAEoCzI5LmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlU3VjY2Vzc1Rha2VuUmVzdWJzY3JpYmVkSABCBwoFdGFrZW4iKwopU3Vic2NyaWJlTWVyZ2VRdWV1ZVN1Y2Nlc3NUYWtlblN1YnNjcmliZWQiLQorU3Vic2NyaWJlTWVyZ2VRdWV1ZVN1Y2Nlc3NUYWtlblJlc3Vic2NyaWJlZCKXAgoYU3Vic2NyaWJlTWVyZ2VRdWV1ZUVycm9yElAKEnVua25vd25fc3Vic2NyaWJlchgBIAEoCzIyLmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlVW5rbm93blN1YnNjcmliZXJIABJQChJ1bmtub3duX3JlcG9zaXRvcnkYAiABKAsyMi5hZ2VudHJlcGwudjEuU3Vic2NyaWJlTWVyZ2VRdWV1ZVVua25vd25SZXBvc2l0b3J5SAASTgoRc3Vic2NyaWJlcl9jbG9zZWQYAyABKAsyMS5hZ2VudHJlcGwudjEuU3Vic2NyaWJlTWVyZ2VRdWV1ZVN1YnNjcmliZXJDbG9zZWRIAEIHCgVjYXVzZSImCiRTdWJzY3JpYmVNZXJnZVF1ZXVlVW5rbm93blN1YnNjcmliZXIiJgokU3Vic2NyaWJlTWVyZ2VRdWV1ZVVua25vd25SZXBvc2l0b3J5IiUKI1N1YnNjcmliZU1lcmdlUXVldWVTdWJzY3JpYmVyQ2xvc2VkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_merge_queue_status, file_workspace_v1_workspace]);
+  fileDesc("CjFhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3Vic2NyaWJlX21lcmdlX3F1ZXVlLnByb3RvEgxhZ2VudHJlcGwudjEiygEKGlN1YnNjcmliZU1lcmdlUXVldWVSZXF1ZXN0Ei4KCnN1YnNjcmliZXIYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjQKCnJlcG9zaXRvcnkYAiABKAsyGy53b3Jrc3BhY2UudjEuUmVwb3NpdG9yeVJlZkgAiAEBEjcKBmRldGFpbBgDIAEoCzInLmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlRGV0YWlsQg0KC19yZXBvc2l0b3J5IqUCChlTdWJzY3JpYmVNZXJnZVF1ZXVlRGV0YWlsEkQKDGV2ZXJ5X2NoYW5nZRgBIAEoCzIsLmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlRXZlcnlDaGFuZ2VIABI9CghhZHZhbmNlcxgCIAEoCzIpLmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlQWR2YW5jZXNIABI9CghkZXBsZXRlcxgDIAEoCzIpLmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlRGVwbGV0ZXNIABI7CgdkZXBsb3lzGAQgASgLMiguYWdlbnRyZXBsLnYxLlN1YnNjcmliZU1lcmdlUXVldWVEZXBsb3lzSABCBwoFbGV2ZWwiIAoeU3Vic2NyaWJlTWVyZ2VRdWV1ZUV2ZXJ5Q2hhbmdlIh0KG1N1YnNjcmliZU1lcmdlUXVldWVBZHZhbmNlcyIcChpTdWJzY3JpYmVNZXJnZVF1ZXVlRGVwbG95cyIdChtTdWJzY3JpYmVNZXJnZVF1ZXVlRGVwbGV0ZXMinQEKG1N1YnNjcmliZU1lcmdlUXVldWVSZXNwb25zZRI7CgdzdWNjZXNzGAEgASgLMiguYWdlbnRyZXBsLnYxLlN1YnNjcmliZU1lcmdlUXVldWVTdWNjZXNzSAASNwoFZXJyb3IYAiABKAsyJi5hZ2VudHJlcGwudjEuU3Vic2NyaWJlTWVyZ2VRdWV1ZUVycm9ySABCCAoGcmVzdWx0IooBChpTdWJzY3JpYmVNZXJnZVF1ZXVlU3VjY2VzcxI8CgV0YWtlbhgBIAEoCzItLmFnZW50cmVwbC52MS5TdWJzY3JpYmVNZXJnZVF1ZXVlU3VjY2Vzc1Rha2VuEi4KBnF1ZXVlcxgCIAMoCzIeLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzIswBCh9TdWJzY3JpYmVNZXJnZVF1ZXVlU3VjY2Vzc1Rha2VuEk0KCnN1YnNjcmliZWQYASABKAsyNy5hZ2VudHJlcGwudjEuU3Vic2NyaWJlTWVyZ2VRdWV1ZVN1Y2Nlc3NUYWtlblN1YnNjcmliZWRIABJRCgxyZXN1YnNjcmliZWQYAiABKAsyOS5hZ2VudHJlcGwudjEuU3Vic2NyaWJlTWVyZ2VRdWV1ZVN1Y2Nlc3NUYWtlblJlc3Vic2NyaWJlZEgAQgcKBXRha2VuIisKKVN1YnNjcmliZU1lcmdlUXVldWVTdWNjZXNzVGFrZW5TdWJzY3JpYmVkIi0KK1N1YnNjcmliZU1lcmdlUXVldWVTdWNjZXNzVGFrZW5SZXN1YnNjcmliZWQilwIKGFN1YnNjcmliZU1lcmdlUXVldWVFcnJvchJQChJ1bmtub3duX3N1YnNjcmliZXIYASABKAsyMi5hZ2VudHJlcGwudjEuU3Vic2NyaWJlTWVyZ2VRdWV1ZVVua25vd25TdWJzY3JpYmVySAASUAoSdW5rbm93bl9yZXBvc2l0b3J5GAIgASgLMjIuYWdlbnRyZXBsLnYxLlN1YnNjcmliZU1lcmdlUXVldWVVbmtub3duUmVwb3NpdG9yeUgAEk4KEXN1YnNjcmliZXJfY2xvc2VkGAMgASgLMjEuYWdlbnRyZXBsLnYxLlN1YnNjcmliZU1lcmdlUXVldWVTdWJzY3JpYmVyQ2xvc2VkSABCBwoFY2F1c2UiJgokU3Vic2NyaWJlTWVyZ2VRdWV1ZVVua25vd25TdWJzY3JpYmVyIiYKJFN1YnNjcmliZU1lcmdlUXVldWVVbmtub3duUmVwb3NpdG9yeSIlCiNTdWJzY3JpYmVNZXJnZVF1ZXVlU3Vic2NyaWJlckNsb3NlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_merge_queue_status, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SubscribeMergeQueueRequest
@@ -91,8 +91,9 @@ export const SubscribeMergeQueueRequestSchema: GenMessage<SubscribeMergeQueueReq
 export type SubscribeMergeQueueDetail = Message<"agentrepl.v1.SubscribeMergeQueueDetail"> & {
   /**
    * THE ARM IS THE LEVEL. The levels nest -- every depletion is an advance,
-   * and every advance is a change -- so a subscriber picks the coarsest one
-   * that still wakes it for what it waits on.
+   * every advance is told at deploys, and all of it is a change -- so a
+   * subscriber picks the coarsest one that still wakes it for what it waits
+   * on.
    *
    * @generated from oneof agentrepl.v1.SubscribeMergeQueueDetail.level
    */
@@ -120,6 +121,15 @@ export type SubscribeMergeQueueDetail = Message<"agentrepl.v1.SubscribeMergeQueu
      */
     value: SubscribeMergeQueueDepletes;
     case: "depletes";
+  } | {
+    /**
+     * A merge leaving the queue, and each deploy of the daemon's own
+     * checkout ending.
+     *
+     * @generated from field: agentrepl.v1.SubscribeMergeQueueDeploys deploys = 4;
+     */
+    value: SubscribeMergeQueueDeploys;
+    case: "deploys";
   } | { case: undefined; value?: undefined };
 };
 
@@ -133,8 +143,8 @@ export const SubscribeMergeQueueDetailSchema: GenMessage<SubscribeMergeQueueDeta
 /**
  * EVERY CHANGE: a merge put in line, started, moved to a new step, landed,
  * failed, or taken off the queue (evicted, dequeued, or abandoned under its
- * closing workspace or a restart); the queue's order changed by a move; and
- * the queue paused or resumed. Several changes made at once arrive as one
+ * closing workspace or a restart); the queue's order changed by a move; the
+ * queue paused or resumed; and a deploy of the daemon's own checkout ended. Several changes made at once arrive as one
  * notice per change, each carrying the queue as it stood after its own.
  *
  * @generated from message agentrepl.v1.SubscribeMergeQueueEveryChange
@@ -166,6 +176,27 @@ export const SubscribeMergeQueueAdvancesSchema: GenMessage<SubscribeMergeQueueAd
   messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 3);
 
 /**
+ * DEPLOYS: a merge leaves the queue (as ADVANCES), and a deploy of the
+ * daemon's own checkout ends -- whichever daemon ends it, the one that stays
+ * or the successor it handed over to, and a fresh boot on a new build --
+ * once its build is running, shims judged, or once it failed. The notice
+ * names the reported landings its build carries. A deploy is the daemon's
+ * own, not one queue's, so it is told to every subscription at this level
+ * (or every_change), whatever repository it scopes.
+ *
+ * @generated from message agentrepl.v1.SubscribeMergeQueueDeploys
+ */
+export type SubscribeMergeQueueDeploys = Message<"agentrepl.v1.SubscribeMergeQueueDeploys"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SubscribeMergeQueueDeploys.
+ * Use `create(SubscribeMergeQueueDeploysSchema)` to create a new message.
+ */
+export const SubscribeMergeQueueDeploysSchema: GenMessage<SubscribeMergeQueueDeploys> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 4);
+
+/**
  * DEPLETES: a merge leaves the queue and no merge is left in line, reported
  * once per emptying. A queue that empties by a removal of a merge never put
  * in line is not reported, since nothing left the line.
@@ -180,7 +211,7 @@ export type SubscribeMergeQueueDepletes = Message<"agentrepl.v1.SubscribeMergeQu
  * Use `create(SubscribeMergeQueueDepletesSchema)` to create a new message.
  */
 export const SubscribeMergeQueueDepletesSchema: GenMessage<SubscribeMergeQueueDepletes> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 4);
+  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 5);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -211,7 +242,7 @@ export type SubscribeMergeQueueResponse = Message<"agentrepl.v1.SubscribeMergeQu
  * Use `create(SubscribeMergeQueueResponseSchema)` to create a new message.
  */
 export const SubscribeMergeQueueResponseSchema: GenMessage<SubscribeMergeQueueResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 5);
+  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 6);
 
 /**
  * Subscribed, with the queues in scope as they stand now.
@@ -239,7 +270,7 @@ export type SubscribeMergeQueueSuccess = Message<"agentrepl.v1.SubscribeMergeQue
  * Use `create(SubscribeMergeQueueSuccessSchema)` to create a new message.
  */
 export const SubscribeMergeQueueSuccessSchema: GenMessage<SubscribeMergeQueueSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 6);
+  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 7);
 
 /**
  * New or replacing.
@@ -276,7 +307,7 @@ export type SubscribeMergeQueueSuccessTaken = Message<"agentrepl.v1.SubscribeMer
  * Use `create(SubscribeMergeQueueSuccessTakenSchema)` to create a new message.
  */
 export const SubscribeMergeQueueSuccessTakenSchema: GenMessage<SubscribeMergeQueueSuccessTaken> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 7);
+  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 8);
 
 /**
  * A new subscription. No fields.
@@ -291,7 +322,7 @@ export type SubscribeMergeQueueSuccessTakenSubscribed = Message<"agentrepl.v1.Su
  * Use `create(SubscribeMergeQueueSuccessTakenSubscribedSchema)` to create a new message.
  */
 export const SubscribeMergeQueueSuccessTakenSubscribedSchema: GenMessage<SubscribeMergeQueueSuccessTakenSubscribed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 8);
+  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 9);
 
 /**
  * A replaced subscription. No fields.
@@ -306,7 +337,7 @@ export type SubscribeMergeQueueSuccessTakenResubscribed = Message<"agentrepl.v1.
  * Use `create(SubscribeMergeQueueSuccessTakenResubscribedSchema)` to create a new message.
  */
 export const SubscribeMergeQueueSuccessTakenResubscribedSchema: GenMessage<SubscribeMergeQueueSuccessTakenResubscribed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 9);
+  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 10);
 
 /**
  * @generated from message agentrepl.v1.SubscribeMergeQueueError
@@ -348,7 +379,7 @@ export type SubscribeMergeQueueError = Message<"agentrepl.v1.SubscribeMergeQueue
  * Use `create(SubscribeMergeQueueErrorSchema)` to create a new message.
  */
 export const SubscribeMergeQueueErrorSchema: GenMessage<SubscribeMergeQueueError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 10);
+  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 11);
 
 /**
  * @generated from message agentrepl.v1.SubscribeMergeQueueUnknownSubscriber
@@ -361,7 +392,7 @@ export type SubscribeMergeQueueUnknownSubscriber = Message<"agentrepl.v1.Subscri
  * Use `create(SubscribeMergeQueueUnknownSubscriberSchema)` to create a new message.
  */
 export const SubscribeMergeQueueUnknownSubscriberSchema: GenMessage<SubscribeMergeQueueUnknownSubscriber> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 11);
+  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 12);
 
 /**
  * @generated from message agentrepl.v1.SubscribeMergeQueueUnknownRepository
@@ -374,7 +405,7 @@ export type SubscribeMergeQueueUnknownRepository = Message<"agentrepl.v1.Subscri
  * Use `create(SubscribeMergeQueueUnknownRepositorySchema)` to create a new message.
  */
 export const SubscribeMergeQueueUnknownRepositorySchema: GenMessage<SubscribeMergeQueueUnknownRepository> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 12);
+  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 13);
 
 /**
  * @generated from message agentrepl.v1.SubscribeMergeQueueSubscriberClosed
@@ -387,5 +418,5 @@ export type SubscribeMergeQueueSubscriberClosed = Message<"agentrepl.v1.Subscrib
  * Use `create(SubscribeMergeQueueSubscriberClosedSchema)` to create a new message.
  */
 export const SubscribeMergeQueueSubscriberClosedSchema: GenMessage<SubscribeMergeQueueSubscriberClosed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 13);
+  messageDesc(file_agentrepl_v1_endpoint_subscribe_merge_queue, 14);
 

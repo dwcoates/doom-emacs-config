@@ -1317,6 +1317,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// THE REAPER'S OWN LOCK: a requester is retired only while the
 		// landed-worktree reaper is not sweeping.
 		WorktreeLock: worktreeLockPath(paths.RunDir),
+		// EVERY DEPLOY ENDS IN THE REPORTS' PAYMENT, so that is where the
+		// queue's subscribers are told of it.
+		Deploys: queueNotices,
 	})
 	detachedRef.bind(detached)
 	// THE RETARGET pairs the verb that records a new merge target with the

@@ -134,10 +134,13 @@ Either kind:
   or resume a queue.
 - `merge-queue disable-racing` and `merge-queue enable-racing`: on AC power the
   top two merges race at the tests; disabled, every queue works its head alone.
-- `merge-queue subscribe -detail every_change|advances|depletes
+- `merge-queue subscribe -detail every_change|deploys|advances|depletes
   [-repository here|DIR]` has this workspace told as the queue changes (to land
   after it drains, to report a landing) instead of polling it;
-  `merge-queue unsubscribe` ends it.
+  `merge-queue unsubscribe` ends it. `deploys` tells each merge leaving the
+  queue and each deploy of the daemon's own checkout ending (its build
+  running, or failed), naming the reported landings it carries: the level
+  for watching what a landing's rollout did.
 - Holding or releasing a repository's deploys is `/agent-repl-runtime`'s.
 
 ### Commandeering the running spot

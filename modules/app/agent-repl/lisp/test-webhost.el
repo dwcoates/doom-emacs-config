@@ -1287,8 +1287,7 @@ The current tab's page, not shown here, is the nearest of all."
     (let (navigated errors)
       (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget)
                  (lambda (_xw uri) (setq navigated uri)))
-                ((symbol-function 'agent-repl--error)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                ((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
         ;; Act
         (agent-repl-test-wh--reload-and-answer (agent-repl-test-wh--conn "127.0.0.1:4242") "not json"))
       ;; Assert

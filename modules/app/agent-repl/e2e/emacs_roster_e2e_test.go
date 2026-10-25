@@ -291,7 +291,7 @@ func TestEmacsUnfocusedTurnEndRaisesTheDaemonsBanner(t *testing.T) {
              (agent-repl--focus-report)
              t)`)
 	e.AwaitTrue("Emacs's unfocused report to be answered",
-		`(not agent-repl--focus-report-in-flight)`)
+		`(not (agent-repl-serial-in-flight agent-repl--focus-serial))`)
 
 	typeIntoComposer(e, s.Input, "finish this turn and tell me about it")
 	e.KeysIn(s.Input, "RET")

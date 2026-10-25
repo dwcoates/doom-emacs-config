@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -161,6 +162,16 @@ type fixture struct {
 	briefErr   error
 	// keyErrOn fails MintKey for the one key prefix it names.
 	keyErrOn string
+	deploys  *fakeDeploys
+}
+
+// fakeDeploys records every deploy end told to the queue's subscribers.
+type fakeDeploys struct {
+	ends []merge.DeployEnd
+}
+
+func (d *fakeDeploys) DeployEnded(end merge.DeployEnd) {
+	d.ends = append(d.ends, end)
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -170,7 +181,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("OpenInMemory: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	f := &fixture{db: db, prompts: &fakePrompts{}, feed: &fakeFeed{}, logs: dlog.NewTestSurfaces(), now: time.Now()}
+	f := &fixture{db: db, prompts: &fakePrompts{}, feed: &fakeFeed{}, logs: dlog.NewTestSurfaces(), now: time.Now(), deploys: &fakeDeploys{}}
 	f.workspaces = &fakeWorkspaces{db: db, t: t}
 	f.svc = New(Deps{
 		DB: db, Workspaces: f.workspaces, Prompts: f.prompts, Feed: f.feed, Log: f.logs,
@@ -188,6 +199,7 @@ func newFixture(t *testing.T) *fixture {
 		},
 		Now:          func() time.Time { return f.now },
 		WorktreeLock: filepath.Join(t.TempDir(), "worktree-reap.lock"),
+		Deploys:      f.deploys,
 	})
 	return f
 }
@@ -1554,5 +1566,68 @@ func TestAFailedHandBackNeverSaysTheMergeWorkspaceIsShown(t *testing.T) {
 	}
 	if text := f.prompts.sent[0].text; strings.Contains(text, "now shown") || strings.Contains(text, "tab bar") {
 		t.Fatalf("text = %q, want no claim that the hidden merge workspace is shown", text)
+	}
+}
+
+func TestPayOwedTellsTheQueueHowTheDeployEnded(t *testing.T) {
+	cases := []struct {
+		name        string
+		coveredOnly bool
+		deployErr   error
+		want        merge.DeployEnd
+	}{
+		{name: "a deploy whose build runs", coveredOnly: true, want: merge.DeployEnd{Carried: []string{"a-merge"}}},
+		{name: "a deploy that failed", coveredOnly: true, deployErr: errors.New("the build failed"), want: merge.DeployEnd{Failure: "the build failed", Carried: []string{"a-merge"}}},
+		{name: "a fresh boot", coveredOnly: false, want: merge.DeployEnd{Boot: true, Carried: []string{"a-merge"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.owe(t, wsm.Workspace{ID: "ws-merge-a", Name: "a-merge"})
+			if err := f.svc.CoverOwed(context.Background()); err != nil {
+				t.Fatalf("CoverOwed: %v", err)
+			}
+
+			// Act
+			f.svc.PayOwed(context.Background(), tc.coveredOnly, tc.deployErr)
+
+			// Assert
+			if len(f.deploys.ends) != 1 || !reflect.DeepEqual(f.deploys.ends[0], tc.want) {
+				t.Fatalf("told %+v, want %+v", f.deploys.ends, tc.want)
+			}
+		})
+	}
+}
+
+func TestPayOwedTellsTheQueueOfADeployThatCarriedNoReport(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	f.svc.PayOwed(context.Background(), true, nil)
+
+	// Assert
+	if len(f.deploys.ends) != 1 || f.deploys.ends[0].Carried != nil || f.deploys.ends[0].Failure != "" {
+		t.Fatalf("told %+v, want one finished deploy carrying nothing", f.deploys.ends)
+	}
+}
+
+func TestPayOwedTellsTheQueueOfTheDeployEvenWhenTheReportsCannotBeRead(t *testing.T) {
+	// Arrange: a registry that refuses every read.
+	f := newFixture(t)
+	if err := f.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	f.svc.PayOwed(context.Background(), true, nil)
+
+	// Assert
+	if len(f.deploys.ends) != 1 || f.deploys.ends[0].Carried != nil {
+		t.Fatalf("told %+v, want the deploy told with no landing named", f.deploys.ends)
+	}
+	if _, ok := f.recordWith(dlog.LevelError, "could not read the owed landing reports; they stay owed"); !ok {
+		t.Fatalf("the read failure was not recorded: %+v", f.logs.Records())
 	}
 }

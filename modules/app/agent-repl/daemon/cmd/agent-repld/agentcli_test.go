@@ -1246,3 +1246,21 @@ func TestEveryQueueVerbNamesTheCallingWorkspaceAsWhoAsked(t *testing.T) {
 		})
 	}
 }
+
+// EVERY SUBSCRIPTION DETAIL THE CONTRACT DECLARES HAS A -detail SPELLING, so a
+// level added to the proto is never one the command line cannot ask for.
+func TestEveryMergeQueueDetailHasASpelling(t *testing.T) {
+	// Arrange
+	levels := (&agentreplv1.SubscribeMergeQueueDetail{}).ProtoReflect().Descriptor().Oneofs().ByName("level").Fields()
+
+	// Act
+	for i := 0; i < levels.Len(); i++ {
+		name := string(levels.Get(i).Name())
+		detail, spelled := queueDetails[name]
+
+		// Assert
+		if !spelled || detail.ProtoReflect().WhichOneof(detail.ProtoReflect().Descriptor().Oneofs().ByName("level")).Name() != levels.Get(i).Name() {
+			t.Errorf("the detail %s has no -detail spelling that asks for it", name)
+		}
+	}
+}

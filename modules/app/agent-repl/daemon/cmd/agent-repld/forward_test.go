@@ -15,6 +15,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/merge"
 	"agent-repld/internal/mergeworkspace"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/feed"
@@ -588,7 +589,7 @@ func boundDetached(t *testing.T) (*detachedForwarder, wsm.DB, *dlog.TestSurfaces
 	}
 	logs := dlog.NewTestSurfaces()
 	f := &detachedForwarder{}
-	f.bind(mergeworkspace.New(mergeworkspace.Deps{DB: db, Log: logs}))
+	f.bind(mergeworkspace.New(mergeworkspace.Deps{DB: db, Log: logs, Deploys: discardDeploys{}}))
 	return f, db, logs
 }
 
@@ -718,3 +719,8 @@ func TestHoldsForwarderRefusesASupersessionBeforeTheQueue(t *testing.T) {
 		t.Fatalf("Supersede = (%v, %v), want a refusal before the queue is bound", retired, err)
 	}
 }
+
+// discardDeploys tells nobody of a deploy's end.
+type discardDeploys struct{}
+
+func (discardDeploys) DeployEnded(merge.DeployEnd) {}

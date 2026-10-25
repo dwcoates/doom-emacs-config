@@ -159,6 +159,9 @@ type Orchestrator interface {
 	// LeaseChanged is told each lease change of a workspace: a queue front
 	// that waited for that workspace's lease is offered to its queue again.
 	LeaseChanged(ws ids.WorkspaceID)
+	// ReportDeploy tells the subscribers of CHECKOUT's queue that a deploy of
+	// it ended (QueueChangeDeployed).
+	ReportDeploy(ctx context.Context, checkout string, end DeployEnd)
 	// Unsubscribe ends SUBSCRIBER's subscription in SCOPE, and only there. A
 	// subscriber holding none there is refused (ArmNotSubscribed).
 	Unsubscribe(ctx context.Context, subscriber ids.WorkspaceID, scope *RepositoryScope) error

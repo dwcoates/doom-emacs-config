@@ -736,6 +736,8 @@ export function finishWorkspaceRefusal(cause: CauseOf<FinishWorkspaceError>): st
       return `the repository states no deploy: ${cause.value.path} does not exist`;
     case "deployConfigInvalid":
       return `the repository's deploy config ${cause.value.path} is unusable: ${cause.value.detail}`;
+    case "placementBehindNotInLine":
+      return `no merge named ${cause.value.behind} is in the queue to go behind`;
     default:
       return unreachableArm("FinishWorkspaceError.cause", cause.case);
   }

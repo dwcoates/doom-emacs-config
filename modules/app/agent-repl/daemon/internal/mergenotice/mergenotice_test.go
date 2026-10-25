@@ -200,16 +200,18 @@ func TestAdmitsEachChangeAtEachDetail(t *testing.T) {
 		{name: "a pause", change: change(merge.QueueChangePaused, repoDoom, merge.QueueMember{}, other),
 			want: map[wsm.MergeQueueDetail]bool{wsm.MergeQueueDetailEveryChange: true}},
 		{name: "a landing with merges left", change: change(merge.QueueChangeLanded, repoDoom, member("ws-fix", "fix", true, ""), other),
-			want: map[wsm.MergeQueueDetail]bool{wsm.MergeQueueDetailEveryChange: true, wsm.MergeQueueDetailAdvances: true}},
+			want: map[wsm.MergeQueueDetail]bool{wsm.MergeQueueDetailEveryChange: true, wsm.MergeQueueDetailDeploys: true, wsm.MergeQueueDetailAdvances: true}},
 		{name: "a failure with merges left", change: change(merge.QueueChangeFailed, repoDoom, member("ws-fix", "fix", true, ""), other),
-			want: map[wsm.MergeQueueDetail]bool{wsm.MergeQueueDetailEveryChange: true, wsm.MergeQueueDetailAdvances: true}},
+			want: map[wsm.MergeQueueDetail]bool{wsm.MergeQueueDetailEveryChange: true, wsm.MergeQueueDetailDeploys: true, wsm.MergeQueueDetailAdvances: true}},
 		{name: "a dequeue emptying the line", change: change(merge.QueueChangeDequeued, repoDoom, other),
-			want: map[wsm.MergeQueueDetail]bool{wsm.MergeQueueDetailEveryChange: true, wsm.MergeQueueDetailAdvances: true, wsm.MergeQueueDetailDepletes: true}},
+			want: map[wsm.MergeQueueDetail]bool{wsm.MergeQueueDetailEveryChange: true, wsm.MergeQueueDetailDeploys: true, wsm.MergeQueueDetailAdvances: true, wsm.MergeQueueDetailDepletes: true}},
+		{name: "a deploy's end", change: deployed(merge.DeployEnd{Carried: []string{"fix-land"}}),
+			want: map[wsm.MergeQueueDetail]bool{wsm.MergeQueueDetailEveryChange: true, wsm.MergeQueueDetailDeploys: true}},
 		{name: "a landing emptying the line", change: landedLast,
-			want: map[wsm.MergeQueueDetail]bool{wsm.MergeQueueDetailEveryChange: true, wsm.MergeQueueDetailAdvances: true, wsm.MergeQueueDetailDepletes: true}},
+			want: map[wsm.MergeQueueDetail]bool{wsm.MergeQueueDetailEveryChange: true, wsm.MergeQueueDetailDeploys: true, wsm.MergeQueueDetailAdvances: true, wsm.MergeQueueDetailDepletes: true}},
 	}
 	for _, tt := range tests {
-		for _, detail := range []wsm.MergeQueueDetail{wsm.MergeQueueDetailEveryChange, wsm.MergeQueueDetailAdvances, wsm.MergeQueueDetailDepletes} {
+		for _, detail := range []wsm.MergeQueueDetail{wsm.MergeQueueDetailEveryChange, wsm.MergeQueueDetailDeploys, wsm.MergeQueueDetailAdvances, wsm.MergeQueueDetailDepletes} {
 			t.Run(tt.name+" at "+detail.String(), func(t *testing.T) {
 				// Act.
 				got := Admits(detail, tt.change)
@@ -856,5 +858,118 @@ func TestHeadlineOfAPausedQueueNamesNoMerge(t *testing.T) {
 	// Assert.
 	if got != "merge queue of doom: paused" {
 		t.Fatalf("Headline = %q, want the queue paused and no merge named", got)
+	}
+}
+
+// deployed is a deploy's end, as DeployEnded reports it: no queue's.
+func deployed(end merge.DeployEnd) merge.QueueChange {
+	return merge.QueueChange{Kind: merge.QueueChangeDeployed, Deploy: end}
+}
+
+func TestASubscriberToldAtTheFinerOfDeploysAndAdvances(t *testing.T) {
+	// Arrange.
+	subs := []wsm.MergeQueueSubscription{sub(alice, wsm.EveryRepository, wsm.MergeQueueDetailAdvances), sub(alice, repoDoom, wsm.MergeQueueDetailDeploys)}
+
+	// Act.
+	got := Recipients(subs, landedLast)
+
+	// Assert.
+	if want := []Recipient{{Subscriber: alice, Detail: wsm.MergeQueueDetailDeploys}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Recipients = %+v, want alice once, at deploys", got)
+	}
+}
+
+func TestADeploysEndIsToldInFull(t *testing.T) {
+	tests := []struct {
+		name        string
+		end         merge.DeployEnd
+		headline    string
+		sentenceHas []string
+	}{
+		{name: "a deploy whose build runs", end: merge.DeployEnd{Carried: []string{"fix-land", "docs-land"}},
+			headline: "the daemon's deploy: a deploy finished", sentenceHas: []string{"its build is running, every shim judged against it", "It carries the landings of `fix-land`, `docs-land`."}},
+		{name: "a deploy that failed", end: merge.DeployEnd{Failure: "the build failed"},
+			headline: "the daemon's deploy: a deploy failed", sentenceHas: []string{"failed (the build failed)", "the running build does not carry"}},
+		{name: "a fresh boot", end: merge.DeployEnd{Boot: true},
+			headline: "the daemon's deploy: the daemon booted on a new build", sentenceHas: []string{"The daemon booted on a new build"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			change := deployed(tt.end)
+
+			// Act.
+			headline, sentence := Headline(change), Sentence(change)
+
+			// Assert.
+			if headline != tt.headline {
+				t.Fatalf("Headline = %q, want %q", headline, tt.headline)
+			}
+			for _, want := range tt.sentenceHas {
+				if !strings.Contains(sentence, want) {
+					t.Fatalf("Sentence = %q, want it to say %q", sentence, want)
+				}
+			}
+			if len(tt.end.Carried) == 0 && strings.Contains(sentence, "carries the landings") {
+				t.Fatalf("Sentence = %q names landings it carried none of", sentence)
+			}
+		})
+	}
+}
+
+func TestADeploysSubscriberIsToldWhatItAskedFor(t *testing.T) {
+	// Act.
+	values := Values(wsm.MergeQueueDetailDeploys, []string{Sentence(deployed(merge.DeployEnd{}))}, deployed(merge.DeployEnd{}))
+
+	// Assert.
+	if values["detail"] != "each merge leaving the queue and each deploy's end" {
+		t.Fatalf("detail = %q", values["detail"])
+	}
+}
+
+func TestADeploysEndReachesEverySubscriptionThatAdmitsIt(t *testing.T) {
+	// Arrange: subscriptions of every scope and level.
+	subs := []wsm.MergeQueueSubscription{
+		sub(alice, repoDoom, wsm.MergeQueueDetailDeploys),
+		sub(bob, wsm.EveryRepository, wsm.MergeQueueDetailEveryChange),
+		sub("ws-carol", repoOther, wsm.MergeQueueDetailDeploys),
+		sub("ws-dave", repoDoom, wsm.MergeQueueDetailAdvances),
+	}
+
+	// Act.
+	got := Recipients(subs, deployed(merge.DeployEnd{}))
+
+	// Assert.
+	want := []Recipient{{Subscriber: alice, Detail: wsm.MergeQueueDetailDeploys}, {Subscriber: bob, Detail: wsm.MergeQueueDetailEveryChange},
+		{Subscriber: "ws-carol", Detail: wsm.MergeQueueDetailDeploys}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Recipients = %+v, want every scope's deploys and every-change subscribers, not advances", got)
+	}
+}
+
+func TestADeploysNoticeNamesNoQueue(t *testing.T) {
+	// Act.
+	values := Values(wsm.MergeQueueDetailDeploys, []string{Sentence(deployed(merge.DeployEnd{}))}, deployed(merge.DeployEnd{}))
+
+	// Assert.
+	if !strings.Contains(values["queue"], "not one queue's") || strings.Contains(values["queue"], "The queue of") {
+		t.Fatalf("queue = %q, want no queue's line", values["queue"])
+	}
+}
+
+func TestDeployEndedIsDeliveredToItsSubscribers(t *testing.T) {
+	// Arrange.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoOther, wsm.MergeQueueDetailDeploys)}})
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act: the end is reported, then the loop runs it and drains.
+	f.s.DeployEnded(merge.DeployEnd{Carried: []string{"fix-land"}})
+	cancel()
+	f.s.Run(ctx, f.prompts)
+
+	// Assert.
+	got := f.prompts.submissions()
+	if len(got) != 1 || got[0].ws != alice || !strings.Contains(got[0].text, "`fix-land`") {
+		t.Fatalf("submissions = %+v, want alice told of the deploy carrying fix-land", got)
 	}
 }

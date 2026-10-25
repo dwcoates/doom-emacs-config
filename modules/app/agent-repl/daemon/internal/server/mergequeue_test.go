@@ -98,6 +98,8 @@ func TestSubscribeMergeQueueReachesTheOrchestratorAtEachDetail(t *testing.T) {
 		{name: "advances", want: wsm.MergeQueueDetailAdvances, detail: advancesDetail()},
 		{name: "depletes", want: wsm.MergeQueueDetailDepletes, detail: &agentreplv1.SubscribeMergeQueueDetail{
 			Level: &agentreplv1.SubscribeMergeQueueDetail_Depletes{Depletes: &agentreplv1.SubscribeMergeQueueDepletes{}}}},
+		{name: "deploys", want: wsm.MergeQueueDetailDeploys, detail: &agentreplv1.SubscribeMergeQueueDetail{
+			Level: &agentreplv1.SubscribeMergeQueueDetail_Deploys{Deploys: &agentreplv1.SubscribeMergeQueueDeploys{}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
