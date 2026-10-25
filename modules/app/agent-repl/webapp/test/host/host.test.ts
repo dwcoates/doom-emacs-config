@@ -4,6 +4,8 @@
 import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { levelApplyShapeOf } from "./level-apply-shape.js";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -862,6 +864,38 @@ describe("notes", () => {
         text: expect.stringContaining("no workspace page") as unknown,
       },
     ]);
+  });
+
+  it("reads a removed page's last message at info, not as a stranger's", () => {
+    // Arrange: the page's message was on its way when the reload retired it.
+    pages(host, "a");
+    const removed = frame("a").contentWindow;
+    host.retireAll();
+    window.dispatchEvent(
+      new MessageEvent("message", { data: { channel: HOST_CHANNEL, kind: "hello" }, source: removed }),
+    );
+
+    // Act
+    const answer = parsed(host.ids());
+
+    // Assert
+    expect(answer.notes).toEqual([
+      {
+        level: "info",
+        text: expect.stringContaining("already removed") as unknown,
+      },
+    ]);
+  });
+
+  it("takes every page out of the document through one removal", () => {
+    // A removal that skips removeFrame forgets the window, and the page's
+    // last message would read as a stranger's warning. dispose alone removes
+    // directly: it has already stopped listening.
+    const source = readFileSync(path.join(import.meta.dirname, "../../src/host/host.ts"), "utf8");
+    const direct = source.match(/\.iframe\.remove\(\)/g) ?? [];
+    expect(direct.length).toBe(2);
+    expect(source).toMatch(/const removeFrame = \(frame: Frame\): void => \{[^}]*frame\.iframe\.remove\(\);/s);
+    expect(source).toMatch(/dispose\(\) \{[^}]*for \(const frame of frames\.values\(\)\) frame\.iframe\.remove\(\);/s);
   });
 
   it("hands each note to one answer only", () => {
