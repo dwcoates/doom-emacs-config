@@ -3865,19 +3865,29 @@ describe("themeRgbOf", () => {
 });
 
 /**
- * THE RESPONSE BUBBLE'S FILL IS THE SHARED PANEL FILL (owner ruling,
- * 2026-10-11, narrowed 2026-10-14): `--assistant` is derived from `--panel-bg`
- * once, on the light `:root`, so the dark theme's panel fill carries through
- * without a copied override, and the dark tool card's own darker step never
- * reaches a response.
+ * THE RESPONSE BUBBLE'S FILL IS THE TOOL CARD'S FILL (owner rulings,
+ * 2026-10-11 and 2026-10-25): `--assistant` is derived from `--tool-card-bg`
+ * once, on the light `:root`, so the dark theme's tool-card fill carries
+ * through without a copied override, and the two cannot drift apart.
  */
 describe("the response bubble's fill", () => {
-  it("derives --assistant from --panel-bg on the light :root", () => {
+  it("derives --assistant from --tool-card-bg on the light :root", () => {
     // Arrange / Act
     const decls = withoutBlockComments(declarationsOf(":root") ?? "");
 
     // Assert
-    expect(decls).toMatch(/--assistant:\s*var\(--panel-bg\)\s*;/);
+    expect(decls).toMatch(/--assistant:\s*var\(--tool-card-bg\)\s*;/);
+  });
+
+  it.each(THEME_BLOCKS)("resolves the %s theme's response and tool card to one RGB", (_theme, block) => {
+    // Arrange
+    const css = block();
+
+    // Act
+    const [response, card] = ["--assistant", "--tool-card-bg"].map((token) => themeRgbOf(css, token));
+
+    // Assert
+    expect(response).toEqual(card);
   });
 
   it("leaves --assistant unset in the dark theme so the derivation carries", () => {
@@ -3888,7 +3898,7 @@ describe("the response bubble's fill", () => {
     expect(decls).not.toMatch(/--assistant:/);
   });
 
-  it.each(THEME_BLOCKS)("paints the %s theme's tool card --panel-bg moved 40%% of the way to --bg (owner request, 2026-10-24)", (_theme, block) => {
+  it.each(THEME_BLOCKS)("paints the %s theme's tool card --panel-bg moved 20%% of the way to --bg (owner request, 2026-10-25)", (_theme, block) => {
     // Arrange
     const css = block();
 
@@ -3896,10 +3906,10 @@ describe("the response bubble's fill", () => {
     const [panel, bg, card] = ["--panel-bg", "--bg", "--tool-card-bg"].map((token) => themeRgbOf(css, token));
 
     // Assert
-    expect(card).toEqual(panel.map((channel, i) => Math.round(channel + (bg[i] - channel) * 0.4)));
+    expect(card).toEqual(panel.map((channel, i) => Math.round(channel + (bg[i] - channel) * 0.2)));
   });
 
-  it("paints the dark theme's response Claude's code-block fill (owner ruling, 2026-10-17)", () => {
+  it("paints the dark theme's response midway between the old tool card and Claude's code-block fill (owner request, 2026-10-25)", () => {
     // Arrange
     const css = darkThemeBlock();
 
@@ -3907,7 +3917,7 @@ describe("the response bubble's fill", () => {
     const response = themeRgbOf(css, "--assistant");
 
     // Assert
-    expect(response).toEqual([0x1a, 0x1a, 0x19]);
+    expect(response).toEqual([0x19, 0x19, 0x18]);
   });
 
   it("is what a response bubble paints", () => {
