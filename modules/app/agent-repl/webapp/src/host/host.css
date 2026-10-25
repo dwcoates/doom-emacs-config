@@ -58,15 +58,3 @@ html.agent-repl-host #ws-sidebar {
   visibility: visible;
   pointer-events: auto;
 }
-
-/* THE UNFOCUSED SHADE (host.ts `setEditorFocused`): solid orange over the whole
-   web view while Emacs is not the focused application, so its window is the
-   one spotted at a glance in macOS Mission Control. It takes the pointer too,
-   so the click that brings Emacs forward lands on no control the user could
-   not see. */
-.webhost-unfocused-shade {
-  position: fixed;
-  inset: 0;
-  z-index: 2;
-  background: var(--compact-rule);
-}

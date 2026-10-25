@@ -327,6 +327,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "notifications")
 (agent-repl--load-module "history")
 (agent-repl--load-module "status")
+;; WHY: titlebar.el colors the title bar while Emacs is unfocused.  Its
+;; orange is status.el's render-colors value, read at load, and it rides
+;; notifications.el's focus hook, both loaded above.
+(agent-repl--load-module "titlebar")
 (agent-repl--load-module "autosave")
 (agent-repl--load-module "stall")
 ;; WHY: input-help.el is the composer's header line of help buttons, which

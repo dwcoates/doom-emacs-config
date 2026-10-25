@@ -155,8 +155,8 @@ DONE ends the report."
 Everything that follows Emacs's focus rides this one hook, so a move
 between two Emacs frames (out, then in, in one command loop) reaches each
 of them once, as where the focus came to rest: the daemon's report
-\(`agent-repl--focus-report') and the webhost's unfocused shade
-\(`agent-repl-webhost-sync-editor-focus').  Each asks
+\(`agent-repl--focus-report') and the orange title bar
+\(`agent-repl-titlebar-sync').  Each asks
 `agent-repl--emacs-focused-p' itself.")
 
 (defun agent-repl--focus-changed ()
