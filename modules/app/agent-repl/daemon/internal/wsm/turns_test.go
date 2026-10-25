@@ -13,6 +13,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	zettelv1 "agentrepl/proto/zettel/v1"
 
 	"agent-repld/internal/feedid"
 )
@@ -1656,5 +1657,56 @@ func TestThePerTurnReadsAreTurnFactsCalls(t *testing.T) {
 		if !found {
 			t.Errorf("%s was not found in the package", name)
 		}
+	}
+}
+
+// THE LAST QUESTION ASKED is derived on read from the turns that carry a chat
+// question, so a thread's read answers its newest question's start.
+func TestTheWorkspaceReadAnswersItsLastQuestionAsked(t *testing.T) {
+	type turnSpec struct {
+		question bool
+		start    time.Duration
+	}
+	hour, twoHours := time.Hour, 2*time.Hour
+	tests := []struct {
+		name  string
+		turns []turnSpec
+		want  *time.Duration
+	}{
+		{name: "no turn at all", want: nil},
+		{name: "only turns that asked no question", turns: []turnSpec{{start: hour}}, want: nil},
+		{name: "the newest question's start", turns: []turnSpec{{question: true, start: hour}, {question: true, start: twoHours}}, want: &twoHours},
+		{name: "a later turn that asked nothing moves nothing", turns: []turnSpec{{question: true, start: hour}, {start: twoHours}}, want: &hour},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			ctx := context.Background()
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			for _, spec := range tc.turns {
+				turn := Turn{ID: NewTurnID(), Workspace: ws.ID, Text: "go", Origin: "emacs", StartedAt: instant.Add(spec.start)}
+				if spec.question {
+					turn.Question = &ThreadQuestion{Text: "why?", Parent: &zettelv1.NodeParent{Origin: &zettelv1.NodeParent_ThreadStart{ThreadStart: &zettelv1.NodeParentThreadStart{}}}}
+				}
+				if err := s.PutTurn(ctx, turn); err != nil {
+					t.Fatalf("PutTurn: %v", err)
+				}
+			}
+
+			// Act.
+			got, err := s.Workspace(ctx, ws.ID)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			switch {
+			case tc.want == nil && got.LastAskedAt != nil:
+				t.Fatalf("last asked = %v, want none", got.LastAskedAt)
+			case tc.want != nil && (got.LastAskedAt == nil || !got.LastAskedAt.Equal(instant.Add(*tc.want))):
+				t.Fatalf("last asked = %v, want %v", got.LastAskedAt, instant.Add(*tc.want))
+			}
+		})
 	}
 }

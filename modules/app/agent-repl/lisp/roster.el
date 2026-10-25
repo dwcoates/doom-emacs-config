@@ -605,7 +605,7 @@ Once per push over every closed row, which is why it is DEBUG."
   "The prefix of a thread's workspace name, so no thread's name can take a tab's.")
 
 (defun agent-repl-roster-threads (&optional roster)
-  "Return ROSTER's OPEN thread rows, the one last interacted with first.
+  "Return ROSTER's OPEN thread rows, the one last asked a question first.
 ROSTER defaults to the last accepted roster (`agent-repl-roster-view').
 An archived thread's workspace is closed, so Emacs opens no workspace for
 it and offers it to no thread command: the sidebar restores it."

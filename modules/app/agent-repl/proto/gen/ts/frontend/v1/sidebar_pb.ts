@@ -169,7 +169,7 @@ export type WorkspaceRoster = Message<"frontend.v1.WorkspaceRoster"> & {
 
   /**
    * THE CHAT APP'S BODY: every chat thread, every open one first and then
-   * every archived one, each the most recently interacted with first, and the
+   * every archived one, each the one last asked a question first, and the
    * new-thread button. Drawn in place of the open,
    * hidden and recently-merged sections while Chat is shown. Threads appear
    * nowhere else in the roster: no repository section, band or tab holds
@@ -397,8 +397,8 @@ export type RosterThreadSection = Message<"frontend.v1.RosterThreadSection"> & {
   newThread?: RosterThreadNewButton | undefined;
 
   /**
-   * The threads, the most recently interacted with first (asked in or
-   * opened). Empty when there are none.
+   * The threads, the one last asked a question first (or created, until
+   * asked one): viewing a thread never moves it. Empty when there are none.
    *
    * @generated from field: repeated frontend.v1.RosterThreadRow rows = 2;
    */
