@@ -211,7 +211,6 @@
        (default +bindings +smartparens)
        personal-bindings
        evil-search
-       splash
        ;; javascript
        )
 
