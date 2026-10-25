@@ -5,7 +5,7 @@
  * the geometry the engine would give: a rows region VIEW lines tall at the
  * page's top, scrolling lines of ROW px each.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetLoggingForTests } from "../../src/log.js";
 import { createSelectionScroll, scrollLineIntoBand } from "../../src/sidebar/selection-scroll.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -81,6 +81,29 @@ afterEach(() => {
 });
 
 describe("scrollLineIntoBand", () => {
+  it("brings a chat thread's row into view through the rail, as no band holds it", () => {
+    // Arrange
+    const section = document.createElement("div");
+    section.setAttribute("data-thread-section", "");
+    const ws = document.createElement("div");
+    ws.setAttribute("data-roster-row", "t-1");
+    const line = document.createElement("div");
+    line.className = "row";
+    ws.append(line);
+    section.append(ws);
+    document.body.append(section);
+    const scrolled = vi.fn();
+    line.scrollIntoView = scrolled;
+
+    // Act
+    const moved = scrollLineIntoBand(line);
+
+    // Assert
+    expect(moved).toBeNull();
+    expect(scrolled).toHaveBeenCalledWith({ block: "nearest" });
+    section.remove();
+  });
+
   it("leaves a line that already shows whole where it is", () => {
     // Arrange
     const b = band({ lines: 10, view: 3 });

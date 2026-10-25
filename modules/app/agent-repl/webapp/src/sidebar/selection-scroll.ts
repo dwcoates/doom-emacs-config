@@ -72,6 +72,12 @@ export interface BandScroll {
  * move. Answers how it moved, or null when LINE already showed whole.
  */
 export function scrollLineIntoBand(line: HTMLElement): BandScroll | null {
+  // A CHAT THREAD'S ROW is in the Chat app's list, which is no band: the rail
+  // itself scrolls it, so it is brought into view there.
+  if (line.closest("[data-thread-section]") !== null) {
+    line.scrollIntoView({ block: "nearest" });
+    return null;
+  }
   const region = line.closest<HTMLElement>(REGION_SELECTOR);
   if (region === null) {
     log.error("a rail row hangs in no section's rows region", {
