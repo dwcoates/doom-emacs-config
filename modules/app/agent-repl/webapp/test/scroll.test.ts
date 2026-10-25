@@ -1589,7 +1589,7 @@ describe("no scroll write outside scroll.ts", () => {
     // Assert
     expect(writes).toEqual([
       "this.box.scrollTop = this.box.scrollHeight;",
-      "if (delta !== 0) this.box.scrollTop += delta;",
+      "if (delta !== 0) this.box.scrollTop = to;",
       "feed.scrollTop += delta;",
       "section.scrollTop = 0;",
       "scroller.scrollTop += step;",
@@ -3454,7 +3454,7 @@ describe("MoveWitness", () => {
  */
 describe("TailFollow: the scroll floor under a click-held view", () => {
   /** A clamping box over CONTENT px, a 300px viewport at TOP, with a fake floor. */
-  function floored(top: number, content = 1000) {
+  function floored(top: number, content = 1000, opts: { clampOnRead?: boolean } = {}) {
     const state: { content: number; floorTop: number | null; top: number; clientHeight: number } = {
       content,
       floorTop: null,
@@ -3472,6 +3472,9 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
         return scrollHeight();
       },
       get scrollTop() {
+        // A real box lays out before it answers, so a lowered floor has
+        // clamped the position by the time it is read.
+        if (opts.clampOnRead === true) state.top = Math.max(0, Math.min(state.top, scrollHeight() - state.clientHeight));
         return state.top;
       },
       set scrollTop(v: number) {
@@ -3514,6 +3517,18 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
       },
     };
   }
+
+  it("lands a correction under the held view at its target when lowering the floor clamps the box first", () => {
+    // Arrange -- at the tail: 700 + 300 is the whole content.
+    const f = floored(700, 1000, { clampOnRead: true });
+    f.tail.readerClicked(document.createElement("div"));
+    f.state.content = 800;
+    // Act -- the 200px above the reader closed; lowering the floor to 500
+    // clamps the box to 500 before the correction writes.
+    f.tail.prependCompensation(-200);
+    // Assert -- a relative write would have landed at 300.
+    expect(f.box.scrollTop).toBe(500);
+  });
 
   it("arms the floor at the held view's bottom when the reader clicks", () => {
     // Arrange

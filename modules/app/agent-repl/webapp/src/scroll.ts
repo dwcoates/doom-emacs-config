@@ -1000,9 +1000,13 @@ export class TailFollow {
   private shift(cause: ScrollCause, delta: number): void {
     this.sync();
     const from = this.box.scrollTop;
+    const to = from + delta;
     // An anchoring correction under a click hold must reach its target too.
-    if (this.clickHeld) this.setFloor(from + delta);
-    if (delta !== 0) this.box.scrollTop += delta;
+    // The target is written whole, never added to the live position: lowering
+    // the floor lets the box clamp before the write, and a relative write
+    // would then add the delta to the clamped position and overshoot by it.
+    if (this.clickHeld) this.setFloor(to);
+    if (delta !== 0) this.box.scrollTop = to;
     this.lastTop = this.box.scrollTop;
     if (this.clickHeld) this.heldTop = this.lastTop;
     recordMove(cause, from, this.lastTop, false);
