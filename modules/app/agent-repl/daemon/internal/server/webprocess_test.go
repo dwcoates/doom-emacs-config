@@ -124,9 +124,7 @@ func TestAWorkspaceSubscriptionTellsTheSupersededPageTracker(t *testing.T) {
 			attachPageStream(t, h, ctx, "page-1")
 
 			// Act
-			if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(tt.req)); err != nil {
-				t.Fatalf("SubscribePage: %v", err)
-			}
+			subscribePage(t, ctx, h, tt.req)
 
 			// Assert
 			got := h.Pages.pages()

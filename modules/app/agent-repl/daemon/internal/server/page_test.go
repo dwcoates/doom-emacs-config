@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -77,15 +80,13 @@ func TestPageCarriesASubscriptionsPushes(t *testing.T) {
 	stream := attachPageStream(t, h, ctx, "page-1")
 
 	// Act.
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page:         "page-1",
 		Subscription: "footer-1",
 		Request: &agentreplv1.SubscribePageRequest_Footer{
 			Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()},
 		},
-	})); err != nil {
-		t.Fatalf("subscribe the footer: %v", err)
-	}
+	})
 	h.Footer.topic.Publish(footerView(42))
 
 	// Assert.
@@ -115,15 +116,13 @@ func TestSubscribePageAnswersOnlyOnceSubscribed(t *testing.T) {
 	stream := attachPageStream(t, h, ctx, "page-1")
 
 	// Act: publish strictly after the answer.
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page:         "page-1",
 		Subscription: "footer-1",
 		Request: &agentreplv1.SubscribePageRequest_Footer{
 			Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()},
 		},
-	})); err != nil {
-		t.Fatalf("subscribe the footer: %v", err)
-	}
+	})
 	h.Footer.topic.Publish(footerView(7))
 
 	// Assert.
@@ -161,9 +160,7 @@ func TestPageCarriesTwoSubscriptionsAtOnce(t *testing.T) {
 			},
 		}},
 	} {
-		if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(sub.req)); err != nil {
-			t.Fatalf("subscribe %s: %v", sub.id, err)
-		}
+		subscribePage(t, ctx, h, sub.req)
 	}
 
 	// Act.
@@ -276,9 +273,7 @@ func TestSubscribePageRefusesASecondSubscriptionOnOneId(t *testing.T) {
 			Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()},
 		},
 	}
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(first)); err != nil {
-		t.Fatalf("subscribe the footer: %v", err)
-	}
+	subscribePage(t, ctx, h, first)
 
 	// Act.
 	_, err := h.Client.SubscribePage(ctx, connect.NewRequest(first))
@@ -370,9 +365,7 @@ func TestUnsubscribePageStopsOnlyThatSubscription(t *testing.T) {
 				Topbar: &agentreplv1.WatchTopbarRequest{Workspace: ref()},
 			}},
 	} {
-		if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(req)); err != nil {
-			t.Fatalf("subscribe %s: %v", req.GetSubscription(), err)
-		}
+		subscribePage(t, ctx, h, req)
 	}
 
 	// Act.
@@ -488,14 +481,12 @@ func TestSubscriptionThatEndsOnItsOwnIsAnnounced(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := attachPageStream(t, h, ctx, "page-1")
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page: "page-1", Subscription: "login-1",
 		Request: &agentreplv1.SubscribePageRequest_LoginTerminal{
 			LoginTerminal: &agentreplv1.WatchLoginTerminalRequest{Workspace: ref()},
 		},
-	})); err != nil {
-		t.Fatalf("subscribe the login terminal: %v", err)
-	}
+	})
 
 	// Act: the pty's LAST frame, which ends the watch.
 	frames <- login.Output{Closed: true}
@@ -606,28 +597,24 @@ func TestPageStartsASubscriptionAddedMidStream(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := attachPageStream(t, h, ctx, "page-1")
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page: "page-1", Subscription: "footer-1",
 		Request: &agentreplv1.SubscribePageRequest_Footer{
 			Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()},
 		},
-	})); err != nil {
-		t.Fatalf("subscribe the footer: %v", err)
-	}
+	})
 	h.Footer.topic.Publish(footerView(1))
 	if !stream.Receive() {
 		t.Fatalf("the first subscription never delivered: %v", stream.Err())
 	}
 
 	// Act: a second subscription, opened while the first is live.
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page: "page-1", Subscription: "topbar-1",
 		Request: &agentreplv1.SubscribePageRequest_Topbar{
 			Topbar: &agentreplv1.WatchTopbarRequest{Workspace: ref()},
 		},
-	})); err != nil {
-		t.Fatalf("subscribe the topbar mid-stream: %v", err)
-	}
+	})
 	h.Topbar.topic.Publish(topbarView())
 	h.Footer.topic.Publish(footerView(2))
 
@@ -678,9 +665,7 @@ func TestUnsubscribingReleasesTheTopicItHeld(t *testing.T) {
 				Topbar: &agentreplv1.WatchTopbarRequest{Workspace: ref()},
 			}},
 	} {
-		if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(req)); err != nil {
-			t.Fatalf("subscribe %s: %v", req.GetSubscription(), err)
-		}
+		subscribePage(t, ctx, h, req)
 	}
 	awaitSubscribers(t, "footer", &h.Footer.topic, 1)
 
@@ -706,14 +691,12 @@ func TestUnsubscribingAnnouncesTheEndAsUnsubscribed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := attachPageStream(t, h, ctx, "page-1")
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page: "page-1", Subscription: "footer-1",
 		Request: &agentreplv1.SubscribePageRequest_Footer{
 			Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()},
 		},
-	})); err != nil {
-		t.Fatalf("subscribe the footer: %v", err)
-	}
+	})
 
 	// Act.
 	if _, err := h.Client.UnsubscribePage(ctx, connect.NewRequest(&agentreplv1.UnsubscribePageRequest{
@@ -745,14 +728,12 @@ func TestASourceThatFinishesAnnouncesTheSourceEndedArm(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := attachPageStream(t, h, ctx, "page-1")
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page: "page-1", Subscription: "login-1",
 		Request: &agentreplv1.SubscribePageRequest_LoginTerminal{
 			LoginTerminal: &agentreplv1.WatchLoginTerminalRequest{Workspace: ref()},
 		},
-	})); err != nil {
-		t.Fatalf("subscribe the login terminal: %v", err)
-	}
+	})
 
 	// Act.
 	frames <- login.Output{Closed: true}
@@ -798,9 +779,7 @@ func TestAFailedSubscriptionEndsAloneAndNamesItsError(t *testing.T) {
 				Topbar: &agentreplv1.WatchTopbarRequest{Workspace: ref()},
 			}},
 	} {
-		if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(req)); err != nil {
-			t.Fatalf("subscribe %s: %v", req.GetSubscription(), err)
-		}
+		subscribePage(t, ctx, h, req)
 	}
 	page, attached := surface.pageFor("page-1")
 	if !attached {
@@ -908,9 +887,7 @@ func TestAPageThatEndsReleasesEverySubscription(t *testing.T) {
 				Topbar: &agentreplv1.WatchTopbarRequest{Workspace: ref()},
 			}},
 	} {
-		if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(req)); err != nil {
-			t.Fatalf("subscribe %s: %v", req.GetSubscription(), err)
-		}
+		subscribePage(t, ctx, h, req)
 	}
 	awaitSubscribers(t, "footer", &h.Footer.topic, 1)
 
@@ -953,14 +930,12 @@ func TestASlowPageDoesNotStallATopicsOtherSubscribers(t *testing.T) {
 	if _, err := surface.attachPage("stalled-page", pageCtx); err != nil {
 		t.Fatalf("attach the stalled page: %v", err)
 	}
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page: "stalled-page", Subscription: "footer-1",
 		Request: &agentreplv1.SubscribePageRequest_Footer{
 			Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()},
 		},
-	})); err != nil {
-		t.Fatalf("subscribe the stalled page's footer: %v", err)
-	}
+	})
 	other, err := h.Client.WatchFooter(ctx, connect.NewRequest(&agentreplv1.WatchFooterRequest{
 		Workspace: ref(),
 	}))
@@ -1008,14 +983,12 @@ func TestAPageSubscriptionReplaysWhatTheDedicatedRpcReplays(t *testing.T) {
 		t.Fatalf("the dedicated stream carried no first frame: %v", dedicated.Err())
 	}
 	stream := attachPageStream(t, h, ctx, "page-1")
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page: "page-1", Subscription: "footer-1",
 		Request: &agentreplv1.SubscribePageRequest_Footer{
 			Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()},
 		},
-	})); err != nil {
-		t.Fatalf("subscribe the footer: %v", err)
-	}
+	})
 	if !stream.Receive() {
 		t.Fatalf("the page carried no first frame: %v", stream.Err())
 	}
@@ -1104,14 +1077,12 @@ func TestARefusedSubscriptionAnnouncesNothingOnThePage(t *testing.T) {
 	})); err == nil {
 		t.Fatal("a subscription for an unknown workspace was accepted")
 	}
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page: "page-1", Subscription: "topbar-1",
 		Request: &agentreplv1.SubscribePageRequest_Topbar{
 			Topbar: &agentreplv1.WatchTopbarRequest{Workspace: ref()},
 		},
-	})); err != nil {
-		t.Fatalf("subscribe the topbar: %v", err)
-	}
+	})
 	h.Topbar.topic.Publish(topbarView())
 
 	// Assert.
@@ -1185,14 +1156,13 @@ func TestASubscriptionThatAcceptsAndEndsAtOnceIsStillAccepted(t *testing.T) {
 	// Act, Assert.
 	for attempt := 0; attempt < 50; attempt++ {
 		id := fmt.Sprintf("login-%d", attempt)
-		if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+		// A subscription accepted and ended at once must be answered accepted.
+		subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 			Page: "page-1", Subscription: id,
 			Request: &agentreplv1.SubscribePageRequest_LoginTerminal{
 				LoginTerminal: &agentreplv1.WatchLoginTerminalRequest{Workspace: ref()},
 			},
-		})); err != nil {
-			t.Fatalf("subscription %s accepted and ended at once, and was answered %v; it must be answered accepted", id, err)
-		}
+		})
 	}
 	cancel()
 	<-drained
@@ -1317,5 +1287,37 @@ func subscribePage(t *testing.T, ctx context.Context, h *harness, req *agentrepl
 	t.Helper()
 	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(req)); err != nil {
 		t.Fatalf("subscribe %s: %v", req.GetSubscription(), err)
+	}
+}
+
+// TestPageTestsSubscribeThroughTheHelper keeps every subscription a test
+// expects to be accepted on subscribePage, so the accepted path is spelled
+// once: a hand-rolled SubscribePage that fails the test on its error is a
+// second copy of the helper.
+func TestPageTestsSubscribeThroughTheHelper(t *testing.T) {
+	// Arrange
+	helperDef := regexp.MustCompile(`(?s)\nfunc subscribePage\(.*?\n\}\n`)
+	handRolled := regexp.MustCompile(`if _, err := h\.Client\.SubscribePage\(ctx, connect\.NewRequest\([^;]*?\)\); err != nil \{\n\s*t\.Fatalf`)
+	names, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+
+	// Act
+	var offenders []string
+	for _, name := range names {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		// The helper's own body is the one spelling the rule allows.
+		if handRolled.Match(helperDef.ReplaceAll(source, nil)) {
+			offenders = append(offenders, name)
+		}
+	}
+
+	// Assert
+	if len(offenders) != 0 {
+		t.Fatalf("%v subscribe a page by hand; use subscribePage", offenders)
 	}
 }

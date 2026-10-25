@@ -268,12 +268,10 @@ func TestOpenTabsWaitsForTheWorkspacesPageToConnectAndDraw(t *testing.T) {
 	}
 
 	// Act: the page's footer subscription names the workspace, then it draws.
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page: "page-1", Subscription: "footer-1",
 		Request: &agentreplv1.SubscribePageRequest_Footer{Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()}},
-	})); err != nil {
-		t.Fatalf("SubscribePage: %v", err)
-	}
+	})
 	connected := nextOpenFrame(t, stream).GetStep().GetPageConnected()
 	if _, err := h.Client.ReportPageDrawn(ctx, connect.NewRequest(&agentreplv1.ReportPageDrawnRequest{Workspace: ref(), Page: "page-1"})); err != nil {
 		t.Fatalf("ReportPageDrawn: %v", err)
@@ -299,12 +297,10 @@ func TestATopbarSubscriptionServesItsWorkspace(t *testing.T) {
 	nextOpenFrame(t, stream) // conversation read
 
 	// Act
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page: "page-1", Subscription: "topbar-1",
 		Request: &agentreplv1.SubscribePageRequest_Topbar{Topbar: &agentreplv1.WatchTopbarRequest{Workspace: ref()}},
-	})); err != nil {
-		t.Fatalf("SubscribePage: %v", err)
-	}
+	})
 
 	// Assert
 	if nextOpenFrame(t, stream).GetStep().GetPageConnected() == nil {
