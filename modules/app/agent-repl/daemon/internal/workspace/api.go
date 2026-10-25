@@ -279,12 +279,13 @@ type Verbs interface {
 	// The boot calls it once its gone repositories are retired: a repository
 	// is known exactly as long as its main worktree is a registered workspace.
 	EnsureMainWorktrees(ctx context.Context) error
-	// RestoreMissingWorktree recreates a workspace's deleted worktree from its
-	// recorded branch, as an open of it does, for the boot's missing-directory
-	// step. It answers true when it restored the tree, false with a nil error
-	// when there is nothing to restore from, and an error when git could not
-	// act (already recorded at ERROR).
-	RestoreMissingWorktree(ctx context.Context, ws wsm.Workspace) (bool, error)
+	// SettleMissingDirectory settles an OPEN workspace whose directory a stat
+	// found gone (statErr): recreated from its recorded branch, as an open of
+	// it does, or closed by the daemon when there is nothing to restore from.
+	// It answers whether the tree was recreated, and an error only when the
+	// close could not be written. Every outcome is recorded under op, the
+	// step that asked.
+	SettleMissingDirectory(ctx context.Context, op string, ws wsm.Workspace, statErr error) (bool, error)
 	// Create materializes a new workspace: slug from the initial prompt by the
 	// naming rule, branch, worktree, layout facts recorded, and REGISTRATION
 	// ONLY AFTER MATERIALIZATION.

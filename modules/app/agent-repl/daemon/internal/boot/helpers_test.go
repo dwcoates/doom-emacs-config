@@ -81,6 +81,12 @@ type fakeShimClient struct {
 
 func (c *fakeShimClient) PID() int { return c.pid }
 
+// settleAsk is one ask of the harness's missing-directory settler.
+type settleAsk struct {
+	op      string
+	statErr error
+}
+
 // hasRecord reports whether the boot logged a record at level under operation.
 func (h *harness) hasRecord(level, operation string) bool {
 	_, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
@@ -281,12 +287,17 @@ type harness struct {
 	// reposAtMainEnsure is the registry's repositories as the last
 	// EnsureMainWorktrees call found them.
 	reposAtMainEnsure []wsm.Repository
-	// restore answers the boot's missing-worktree restorer; nil answers
-	// "nothing to restore from", which is what every arrangement that does
-	// not name a branch means. restoreAsked records every workspace it was
-	// asked about, in order.
+	// restore answers the boot's missing-directory settler whether it
+	// recreated the tree; nil answers "nothing to restore from", which is
+	// what every arrangement that does not name a branch means, and a tree
+	// not recreated is closed by the daemon as the settlement does.
+	// restoreAsked records every workspace it was asked about, in order, and
+	// settleAsked the operation and stat error each ask carried. settleErr
+	// fails the settlement, as a close that could not be written does.
 	restore      func(wsm.Workspace) (bool, error)
 	restoreAsked []ids.WorkspaceID
+	settleAsked  []settleAsk
+	settleErr    error
 	// repoDir is the repository every registered workspace belongs to. It is
 	// a directory of its own that outlives every workspace directory a test
 	// removes: a worktree's removal is not its repository's, and a
@@ -419,12 +430,18 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 			h.reposAtMainEnsure = repos
 			return h.mainEnsureErr
 		},
-		RestoreMissingWorktree: func(_ context.Context, ws wsm.Workspace) (bool, error) {
+		SettleMissingDirectory: func(ctx context.Context, op string, ws wsm.Workspace, statErr error) (bool, error) {
 			h.restoreAsked = append(h.restoreAsked, ws.ID)
-			if h.restore == nil {
-				return false, nil
+			h.settleAsked = append(h.settleAsked, settleAsk{op: op, statErr: statErr})
+			if h.settleErr != nil {
+				return false, h.settleErr
 			}
-			return h.restore(ws)
+			if h.restore != nil {
+				if restored, _ := h.restore(ws); restored {
+					return true, nil
+				}
+			}
+			return false, db.MarkClosed(ctx, ws.ID, wsm.Closure{At: time.Now(), By: wsm.CloseByDaemon})
 		},
 		Layout:     layout,
 		DB:         db,

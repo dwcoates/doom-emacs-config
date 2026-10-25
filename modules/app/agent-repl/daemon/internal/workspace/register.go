@@ -679,27 +679,27 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 		// reason to refuse the whole roster -- and refusing it failed the BOOT
 		// of every daemon that inherited one, a handover's successor included.
 		//
-		// AND AN OPEN ONE IS CLOSED HERE. The boot reconciliation closes these
+		// AND AN OPEN ONE IS SETTLED HERE, recreated or closed as
+		// SettleMissingDirectory rules. The boot reconciliation settles these
 		// rows (internal/boot/sequence.go closeMissingDirs), but a JOINING
 		// SUCCESSOR RECONCILES NOTHING -- it takes ownership workspace by
-		// workspace and never runs that step -- so this walk, which is the one
-		// that publishes the opening roster, is what keeps a successor from
-		// handing Emacs a live row for a directory that is not there. An
-		// already-closed row is left alone, which is every merged and nuked
-		// one.
-		if _, err := os.Stat(ws.Dir); errors.Is(err, fs.ErrNotExist) {
+		// workspace and never runs that step -- and a running daemon reaches
+		// no boot at all, so this walk, which publishes the roster, is what
+		// keeps either from handing Emacs a live row for a directory that is
+		// not there. An already-closed row is left alone, which is every
+		// merged and nuked one.
+		if _, statErr := os.Stat(ws.Dir); errors.Is(statErr, fs.ErrNotExist) {
 			if !ws.Closed {
-				if err := v.deps.DB.MarkClosed(ctx, ws.ID, wsm.Closure{At: v.now(), By: wsm.CloseByDaemon}); err != nil {
-					global.Error(opRegister, "a workspace whose directory is gone could not be closed", dlog.Context{
-						"workspace": string(ws.ID), "dir": ws.Dir, "cause": err.Error(),
-					})
-					return fmt.Errorf("publish the opening roster: close the missing-directory workspace %q: %w", ws.ID, err)
+				restored, err := v.SettleMissingDirectory(ctx, opRegister, *ws, statErr)
+				if err != nil {
+					return fmt.Errorf("publish the opening roster: %w", err)
+				}
+				// A RECREATED WORKSPACE IS PUBLISHED OPEN: the restore bound
+				// its views and published its naming.
+				if restored {
+					continue
 				}
 				ws.Closed = true
-				global.Warn(opRegister, "the workspace directory is gone; the workspace is closed", dlog.Context{
-					dlog.KeyWorkspaceID: string(ws.ID), dlog.KeyWorkspaceDir: ws.Dir,
-					"error": err.Error(),
-				})
 			}
 			global.Debug(opRegister, "the workspace's directory is gone; its views are not bound", dlog.Context{
 				"workspace": string(ws.ID), "dir": ws.Dir,

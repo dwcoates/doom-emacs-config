@@ -245,22 +245,23 @@ func mergeIsPending(state string) bool {
 	}
 }
 
-// RestoreMissingWorktree is restoreWorktree for the boot's missing-directory
-// step: no open is in flight, so there is no progress to report, and an
-// unrestorable workspace is an answer (false) rather than a refusal.
-func (v *verbs) RestoreMissingWorktree(ctx context.Context, ws wsm.Workspace) (bool, error) {
+// RestoreMissingWorktree is restoreWorktree for SettleMissingDirectory: no
+// open is in flight, so there is no progress to report, and an unrestorable
+// workspace is an answer (false) rather than a refusal. op names the step
+// that asked, for the records.
+func (v *verbs) RestoreMissingWorktree(ctx context.Context, op string, ws wsm.Workspace) (bool, error) {
 	log := v.deps.Log.WorkspaceOrCentral(ws.Dir).With(dlog.Context{"workspace": string(ws.ID)})
 	// A MERGED WORKSPACE'S WORKTREE WAS REMOVED ON PURPOSE. The merge queue
 	// stamps merged_at before it closes the row and removes the tree, so the
 	// stamp alone -- even on a row a crash left open -- says the directory's
 	// absence is the merge's doing. Only the user's own open brings a merged
-	// workspace back; the boot never does.
+	// workspace back; the daemon never does.
 	if ws.MergedAt != nil {
-		log.Info("daemon.boot.close_missing_dir", "the merged workspace's directory is gone on purpose; the boot does not restore it", dlog.Context{
+		log.Info(op, "the merged workspace's directory is gone on purpose; the daemon does not restore it", dlog.Context{
 			"dir": ws.Dir, "branch": ws.Branch, "merged_at": ws.MergedAt.UTC()})
 		return false, nil
 	}
-	_, err := v.restoreWorktree(ctx, log, ws, nil, "daemon.boot.close_missing_dir")
+	_, err := v.restoreWorktree(ctx, log, ws, nil, op)
 	if _, refused := AsRefusal(err); refused {
 		return false, nil
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1059,7 +1060,7 @@ func TestAnOpenWorkspaceWhoseBranchSurvivesIsRecreatedNotClosed(t *testing.T) {
 	}
 }
 
-func TestARecreatedWorkspaceIsStatedAtInfo(t *testing.T) {
+func TestTheMissingDirectoryStepSettlesUnderItsOwnOperation(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	dir := t.TempDir()
@@ -1067,7 +1068,6 @@ func TestARecreatedWorkspaceIsStatedAtInfo(t *testing.T) {
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatalf("remove the workspace directory: %v", err)
 	}
-	h.restore = restoringDir
 
 	// Act.
 	if _, err := h.seq.Run(context.Background()); err != nil {
@@ -1075,8 +1075,31 @@ func TestARecreatedWorkspaceIsStatedAtInfo(t *testing.T) {
 	}
 
 	// Assert.
-	if !h.hasRecord("info", "daemon.boot.close_missing_dir") {
-		t.Fatal("the recreation was not stated at INFO")
+	if len(h.settleAsked) != 1 {
+		t.Fatalf("settlements asked = %+v, want one", h.settleAsked)
+	}
+	ask := h.settleAsked[0]
+	if ask.op != "daemon.boot.close_missing_dir" || !errors.Is(ask.statErr, fs.ErrNotExist) {
+		t.Fatalf("settlement asked with %+v, want the boot's operation and the not-exist stat", ask)
+	}
+}
+
+func TestAFailedSettlementFailsTheBoot(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	dir := t.TempDir()
+	h.register(t, dir, sessionlock.StateFree)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+	h.settleErr = errors.New("database is locked")
+
+	// Act.
+	_, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("Run = %v, want the settlement's failure", err)
 	}
 }
 
@@ -1233,34 +1256,6 @@ func TestAClosedMissingDirectoryIsNeverAdopted(t *testing.T) {
 	}
 	if len(report.MissingDirClosed) != 1 || report.MissingDirClosed[0] != ws.ID {
 		t.Fatalf("report.MissingDirClosed = %v, want [%v]", report.MissingDirClosed, ws.ID)
-	}
-}
-
-// TestTheRuledAutomaticCloseIsRecordedAtInfo pins the LEVEL of the ruling
-// above. The owner ruled the close automatic on 2026-09-11, so a close that
-// happened is the ruling being carried out and not a condition to remediate;
-// the arms beside it -- a stat that failed for any other reason, and a close
-// that could not be written -- keep their WARN and their ERROR.
-func TestTheRuledAutomaticCloseIsRecordedAtInfo(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	dir := t.TempDir()
-	h.register(t, dir, sessionlock.StateFree)
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("remove the workspace directory: %v", err)
-	}
-
-	// Act.
-	if _, err := h.seq.Run(context.Background()); err != nil {
-		t.Fatalf("Run = error %v, want a completed boot", err)
-	}
-
-	// Assert.
-	if h.hasRecord("warn", "daemon.boot.close_missing_dir") {
-		t.Fatalf("the ruled automatic close was recorded at warn: %v", h.log.Records())
-	}
-	if !h.hasRecord("info", "daemon.boot.close_missing_dir") {
-		t.Fatalf("no info record named the close: %v", h.log.Records())
 	}
 }
 
@@ -2453,18 +2448,18 @@ func TestNewRefusesASequenceWithNoViewBinder(t *testing.T) {
 	}
 }
 
-func TestNewRefusesASequenceWithNoMissingWorktreeRestorer(t *testing.T) {
+func TestNewRefusesASequenceWithNoMissingDirectorySettler(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	deps := h.deps
-	deps.RestoreMissingWorktree = nil
+	deps.SettleMissingDirectory = nil
 
 	// Act
 	_, err := New(deps)
 
 	// Assert
 	if err == nil {
-		t.Fatalf("New accepted a sequence that cannot restore a missing worktree")
+		t.Fatalf("New accepted a sequence that cannot settle a missing directory")
 	}
 }
 

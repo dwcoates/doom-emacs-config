@@ -228,12 +228,14 @@ type Deps struct {
 	// repositories are retired, so only a repository still on disk is asked
 	// for one. Required.
 	EnsureMainWorktrees func(ctx context.Context) error
-	// RestoreMissingWorktree recreates an open workspace's deleted worktree
-	// from its recorded branch (workspace.Verbs.RestoreMissingWorktree). It
-	// answers true when it restored the tree, false with a nil error when
-	// there is nothing to restore from (the branch is gone, or the workspace
-	// was merged), and an error when git could not act. Required.
-	RestoreMissingWorktree func(ctx context.Context, ws wsm.Workspace) (bool, error)
+	// SettleMissingDirectory settles an open workspace whose directory is
+	// gone (workspace.Verbs.SettleMissingDirectory): recreated from its
+	// recorded branch, or closed by the daemon when there is nothing to
+	// restore from (the branch is gone, or the workspace was merged). It
+	// answers whether the tree was recreated, records every outcome under the
+	// op it is given, and errs only when the close could not be written.
+	// Required.
+	SettleMissingDirectory func(ctx context.Context, op string, ws wsm.Workspace, statErr error) (bool, error)
 	// RunDir is the kernel-lock directory the workspace locks are probed in.
 	RunDir string
 	// JoiningAddress is the incumbent's address when this daemon is a joining
@@ -391,8 +393,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a view binder")
 	case deps.EnsureMainWorktrees == nil:
 		return nil, missing("a main-worktree ensurer")
-	case deps.RestoreMissingWorktree == nil:
-		return nil, missing("a missing-worktree restorer")
+	case deps.SettleMissingDirectory == nil:
+		return nil, missing("a missing-directory settler")
 	case deps.RunDir == "":
 		return nil, missing("a kernel-lock run directory")
 	case deps.Restarts == nil:

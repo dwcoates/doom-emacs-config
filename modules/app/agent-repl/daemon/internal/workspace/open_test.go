@@ -992,7 +992,7 @@ func TestRestoreMissingWorktreeAnswersTheBootsThreeOutcomes(t *testing.T) {
 			ws = f.db.workspaces["w1"]
 
 			// Act.
-			restored, err := f.verbs.RestoreMissingWorktree(context.Background(), ws)
+			restored, err := f.verbs.(*verbs).RestoreMissingWorktree(context.Background(), testMissingDirOp, ws)
 
 			// Assert.
 			if restored != tc.wantRestored || (err != nil) != tc.wantErr {
@@ -1014,7 +1014,7 @@ func TestRestoreMissingWorktreeNeverRecreatesAMergedWorkspace(t *testing.T) {
 	f.db.with(ws)
 
 	// Act.
-	_, _ = f.verbs.RestoreMissingWorktree(context.Background(), ws)
+	_, _ = f.verbs.(*verbs).RestoreMissingWorktree(context.Background(), testMissingDirOp, ws)
 
 	// Assert.
 	if len(f.git.restored) != 0 || len(f.git.gitCalls) != 0 {
@@ -1301,15 +1301,15 @@ func TestRestoreMissingWorktreeRecordsTheMergedWorkspaceItLeavesAtInfo(t *testin
 	ws := mergedWorkspace(t, f)
 
 	// Act.
-	_, _ = f.verbs.RestoreMissingWorktree(context.Background(), ws)
+	_, _ = f.verbs.(*verbs).RestoreMissingWorktree(context.Background(), testMissingDirOp, ws)
 
 	// Assert.
 	for _, r := range f.log.logger.Records() {
-		if r.Level == dlog.LevelInfo && strings.Contains(r.Message, "the boot does not restore it") {
+		if r.Level == dlog.LevelInfo && strings.Contains(r.Message, "the daemon does not restore it") {
 			return
 		}
 	}
-	t.Fatalf("no INFO record of the merged workspace the boot left; records = %+v", f.log.logger.Records())
+	t.Fatalf("no INFO record of the merged workspace the daemon left; records = %+v", f.log.logger.Records())
 }
 
 func TestOpenRefusesAClosedChildOfAParentThatIsNotOpenBeforeStartingAnything(t *testing.T) {

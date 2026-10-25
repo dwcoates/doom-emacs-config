@@ -1519,7 +1519,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Restarts:               p.Metrics,
 			BindViews:              verbs.BindViews,
 			EnsureMainWorktrees:    verbs.EnsureMainWorktrees,
-			RestoreMissingWorktree: verbs.RestoreMissingWorktree,
+			SettleMissingDirectory: verbs.SettleMissingDirectory,
 			Layout:                 p.Layout,
 			DB:                     p.DB,
 			Supervisor:             supervisor,

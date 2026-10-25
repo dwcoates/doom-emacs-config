@@ -358,36 +358,21 @@ func (s *sequence) closeMissingDirs(ctx context.Context, log dlog.Logger, worksp
 			continue
 		}
 		// AN OPEN WORKSPACE WHOSE BRANCH SURVIVES IS RECREATED, NOT CLOSED
-		// (owner ruling, 2026-10-06): its directory was deleted underneath
-		// it, and the row is still the user's. Only when there is nothing to
-		// restore from -- the branch is gone too, or the workspace was merged
-		// (its tree removed on purpose) -- is it closed as before. A restore
-		// git could not perform is the restorer's own ERROR; the row is then
-		// closed like an unrestorable one, so the boot finishes and an
-		// explicit open retries the restore and surfaces its failure.
-		restored, err := s.deps.RestoreMissingWorktree(ctx, *ws)
+		// (owner ruling, 2026-10-06), and the close of one with nothing to
+		// restore from is ruled automatic (2026-09-11). Both are the
+		// workspace verbs' one settlement, which records the outcome under
+		// this step's operation.
+		restored, err := s.deps.SettleMissingDirectory(ctx, "daemon.boot.close_missing_dir", *ws, statErr)
+		if err != nil {
+			return fmt.Errorf("boot: %w", err)
+		}
 		if restored {
-			log.Info("daemon.boot.close_missing_dir", "the workspace directory was gone; its worktree was recreated from its branch", context)
 			report.MissingDirRestored = append(report.MissingDirRestored, ws.ID)
 			continue
-		}
-		if err != nil {
-			context["restore_error"] = err.Error()
-		}
-		if err := s.deps.DB.MarkClosed(ctx, ws.ID, wsm.Closure{At: s.now(), By: wsm.CloseByDaemon}); err != nil {
-			context["error"] = err.Error()
-			log.Error("daemon.boot.close_missing_dir", "a workspace whose directory is gone could not be closed", context)
-			return fmt.Errorf("boot: close the missing-directory workspace %s: %w", ws.ID, err)
 		}
 		// The LOCAL row is closed with the durable one, so every step below
 		// this reads the workspace as the closed row it now is.
 		ws.Closed = true
-		// THE OWNER RULED THIS AUTOMATIC (2026-09-11): a workspace whose
-		// directory no longer exists is closed, no question asked. A ruled
-		// automatic action that succeeded states what it did; the two arms
-		// above it -- a stat that failed for any other reason, and a close
-		// that could not be written -- keep their WARN and their ERROR.
-		log.Info("daemon.boot.close_missing_dir", "the workspace directory is gone; the workspace is closed", context)
 		report.MissingDirClosed = append(report.MissingDirClosed, ws.ID)
 	}
 	return nil
