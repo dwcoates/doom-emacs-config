@@ -1240,7 +1240,7 @@ export const RosterRowAsyncMergingSchema: GenMessage<RosterRowAsyncMerging> = /*
  * The sidebar draws it per `render-colors.json#paused_merge_mark` (owner
  * ruling, 2026-10-14):
  *
- *   - every merge indicator's INK is that section's grey: the merge glyph of
+ *   - every merge indicator's INK is that section's ink: the merge glyph of
  *     a `merging` or `merge_queued` row, and the async-merge mark;
  *   - the breath the merge gave the row's NAME stops, and the name keeps its
  *     color. A `merging` row's name holds still. A row breathing only for its

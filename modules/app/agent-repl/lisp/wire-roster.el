@@ -201,7 +201,7 @@ its [N] run with the shared vocabulary\='s `async_merge_mark\='."
 The MERGE-PAUSED marker: the merge queue holding the row\='s merge is
 paused.  EMPTY, and PRESENCE IS THE FACT, as for the markers above.
 
-EMACS DECODES IT AND DRAWS NOTHING FROM IT.  The marker greys the
+EMACS DECODES IT AND DRAWS NOTHING FROM IT.  The marker inks amber the
 webapp sidebar\='s merge indicators, and the tab bar is outside that
 ruling.  It is decoded because the codec refuses unknown fields, and
 refusing this one would drop every roster push."

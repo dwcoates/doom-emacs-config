@@ -276,8 +276,8 @@ describe("asyncMergeMark", () => {
 });
 
 describe("pausedMergeMark", () => {
-  it("is the file's still grey ink", () => {
-    expect(pausedMergeMark()).toEqual({ ink: "grey", motion: "still" });
+  it("is the file's still amber ink", () => {
+    expect(pausedMergeMark()).toEqual({ ink: "amber", motion: "still" });
   });
 
   it("reads the file's section rather than a local copy", () => {

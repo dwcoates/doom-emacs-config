@@ -85,8 +85,9 @@
     "compaction orange a compacting turn's dot is inked with and the feed's",
     "compacted rule is drawn in, one value on every surface (owner ruling,",
     "2026-10-18: the dark one taken stronger, #ffc07a -> #ff9646;",
-    "design-compact-orange.html beside this module). 'grey' has no value: each",
-    "surface draws it in its own muted text grey."
+    "design-compact-orange.html beside this module). 'amber' has no value:",
+    "the webapp, its one surface, draws it in the paused-queue amber its",
+    "merge bubbles are framed in (--merge-paused)."
   ],
   "color_values": {
     "light": {
@@ -282,7 +283,7 @@
   },
   "glyph_only_colors": [
     "orange",
-    "grey"
+    "amber"
   ],
   "_async_merge_mark_comment": [
     "THE ASYNC-MERGE MARK (frontend.v1.RosterRowAsyncMerging, owner request",
@@ -318,10 +319,14 @@
     "'async_merge_mark' -- in 'ink' instead of its own, and the breath the",
     "merge gave the row's name takes 'motion'. The row's status color, and so",
     "its name's color, is untouched, and a breath the row's own status arm",
-    "draws (a turn in flight) stands. The tab bar draws nothing for it."
+    "draws (a turn in flight) stands. The tab bar draws nothing for it.",
+    "",
+    "The ink is the amber a paused queue's merge bubble is framed in, so",
+    "the sidebar and the feed say 'paused' in one color (owner request,",
+    "2026-10-25, replacing the 2026-10-14 grey)."
   ],
   "paused_merge_mark": {
-    "ink": "grey",
+    "ink": "amber",
     "motion": "still"
   },
   "_one_shot_glyph_arms_comment": [

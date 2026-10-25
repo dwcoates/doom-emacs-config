@@ -859,9 +859,9 @@ func TestThePausedMergeMarkIsAStillGreyInk(t *testing.T) {
 	got := c.PausedMergeMark
 
 	// Assert.
-	want := PausedMergeMark{Ink: "grey", Motion: "still"}
+	want := PausedMergeMark{Ink: "amber", Motion: "still"}
 	if got != want {
-		t.Fatalf("paused_merge_mark = %+v, want %+v (owner ruling, 2026-10-14)", got, want)
+		t.Fatalf("paused_merge_mark = %+v, want %+v (owner request, 2026-10-25)", got, want)
 	}
 }
 
@@ -1058,7 +1058,7 @@ func TestInkColorTakesAColorOrAGlyphOnlyColorAndNeverNone(t *testing.T) {
 	}{
 		{ink: "red", want: true},
 		{ink: "orange", want: true},
-		{ink: "grey", want: true},
+		{ink: "amber", want: true},
 		{ink: ColorNone, want: false},
 		{ink: "chartreuse", want: false},
 	}

@@ -415,7 +415,8 @@
   --merge-card: #fef3c7;
   --merge-border: #ca8a04;
   /* A PAUSED MERGE QUEUE'S AMBER (owner request, 2026-10-23): the merge
-     bubble's "paused" pill, its queue tab's banner and its frame. A warm
+     bubble's "paused" pill, its queue tab's banner and its frame, and the
+     sidebar's paused merge glyphs (render-colors.json's 'amber' ink). A warm
      orange, so a stopped queue reads at a glance apart from the purple of a
      merge at work. */
   --merge-paused: #d97706;
@@ -6711,9 +6712,10 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .st.ink-orange { color: var(--compact-rule); }
 #ws-sidebar .st.ink-purple { color: var(--blocked); }
 /* A PAUSED QUEUE'S MERGE INDICATORS (render-colors.json paused_merge_mark,
-   owner ruling 2026-10-14): the merge glyph of a merging, queued or async
-   merge whose queue is paused, in the grey of an inactive dot. */
-#ws-sidebar .st.ink-grey { color: var(--muted); }
+   owner ruling 2026-10-14, amber per owner request 2026-10-25): the merge
+   glyph of a merging, queued or async merge whose queue is paused, in the
+   amber a paused merge bubble is framed in. */
+#ws-sidebar .st.ink-amber { color: var(--merge-paused); }
 #ws-sidebar .st[data-glyph="none"] { visibility: hidden; }
 /* ONE ANIMATION FOR THE WHOLE RAIL (owner ruling, 2026-10-13): every breath
    (bright, faded, bright) runs the same keyframes, easing and
