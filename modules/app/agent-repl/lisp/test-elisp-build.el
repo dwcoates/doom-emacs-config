@@ -99,6 +99,9 @@ Every module in ABSENT is named by config.el but gets no file."
                  agent-repl-test-eb--logs)
        t))
 
+(defvar agent-repl-test-eb--compiles nil
+  "Every compile the reload scheduled, newest first, as (ROOT MODULES).")
+
 (defvar agent-repl-test-eb--reported nil
   "Every editor latency the reload reported, newest first, as (KIND SECONDS).")
 
@@ -113,8 +116,11 @@ Every module in ABSENT is named by config.el but gets no file."
          (agent-repl-test-eb--timers nil)
          (agent-repl-test-eb--failing-loads nil)
          (agent-repl-test-eb--reported nil)
+         (agent-repl-test-eb--compiles nil)
          (agent-repl--elisp-module-builds agent-repl--elisp-module-builds))
-     (cl-letf (((symbol-function 'agent-repl-latency-report-editor)
+     (cl-letf (((symbol-function 'agent-repl-bytecode-schedule)
+                (lambda (root modules) (push (list root modules) agent-repl-test-eb--compiles)))
+               ((symbol-function 'agent-repl-latency-report-editor)
                 (lambda (kind seconds) (push (list kind seconds) agent-repl-test-eb--reported)))
                ((symbol-function 'agent-repl--log)
                 (lambda (_ws fmt &rest args)
@@ -311,6 +317,29 @@ Every module in ABSENT is named by config.el but gets no file."
       (should (equal (reverse agent-repl-test-eb--loaded)
                      (mapcar (lambda (m) (expand-file-name (format "lisp/%s.el" m) root))
                              '("core" "status" "autosave")))))))
+
+(ert-deftest agent-repl-test-eb-reload-schedules-the-compile-of-what-it-loaded ()
+  "The reload hands bytecode.el the root and the modules it loaded, in order."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status" "autosave"))
+      ;; Act
+      (agent-repl--elisp-reload-run root "any")
+      ;; Assert
+      (should (equal agent-repl-test-eb--compiles
+                     (list (list root '("core" "status" "autosave"))))))))
+
+(ert-deftest agent-repl-test-eb-reload-compiles-no-absent-module ()
+  "An absent module contributes nothing to the compile the reload schedules."
+  (agent-repl-test-eb--with-harness
+    (agent-repl-test-eb--with-root root
+      ;; Arrange
+      (agent-repl-test-eb--write-root root '("core" "status") '("status"))
+      ;; Act
+      (agent-repl--elisp-reload-run root "any")
+      ;; Assert
+      (should (equal agent-repl-test-eb--compiles (list (list root '("core"))))))))
 
 (ert-deftest agent-repl-test-eb-reload-runs-the-heartbeat-assertion ()
   "The heartbeat assertion runs after the load."
