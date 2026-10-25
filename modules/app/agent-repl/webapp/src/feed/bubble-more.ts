@@ -20,7 +20,7 @@
  * section still never wears the affordance.
  *
  * THE ELLIPSIS (owner rulings, 2026-09-27): a bubble whose spec chooses it
- * (`data-more="ellipsis"`: a held prompt) shows no
+ * (`data-more="ellipsis"`: a thinking bubble, an interim response) shows no
  * fade. Its collapsed body is clamped to its one line by the stylesheet,
  * which ends that line in `…` exactly when anything follows it; the measurer
  * still decides `has-more` for it, from the body's lines (see

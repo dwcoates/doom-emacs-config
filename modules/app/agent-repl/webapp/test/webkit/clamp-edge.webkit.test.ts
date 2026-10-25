@@ -39,7 +39,7 @@ const LONG_WORDS = "cd /a/really/long/path extraordinarilylongwordthatoverrunsth
 const CARD = `<div class="tool-card tool-fold" style="width: 360px">
   <div class="tool-input ${TITLE_FOLD_CLASS}">${LONG_WORDS}</div></div>`;
 
-/** A collapsed ellipsis bubble: a held prompt on its one-line cap. */
+/** A collapsed ellipsis bubble on its one-line cap. */
 const BUBBLE = `<div class="bubble md" data-role="prompt" data-variant="held" data-cap-lines="${ELLIPSIS_CAP_LINES}"
   data-more="${BUBBLE_MORE_ELLIPSIS}" style="width: 360px">
   <div class="bubble-box bubble-scroll"><div class="bubble-body"><p>${LONG_WORDS}</p></div></div></div>`;

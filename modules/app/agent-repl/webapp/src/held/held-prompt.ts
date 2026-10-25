@@ -3,29 +3,22 @@
  *
  * A HELD PROMPT IS NOT A FEED ROW. It is daemon-owned pending intent the
  * vendor never saw, so it draws beside the conversation rather than in it. But
- * it IS the prompt it will become, so it is drawn by the one bubble
- * (src/bubble/draw.ts, owner rulings 2026-09-23): a prompt-role bubble on the
- * prompt rail whose fill is only 5% of the held grey-blue tint over the feed
- * (owner ruling, 2026-09-27), so it barely lifts off the page — the reader
- * sees their words have NOT reached the agent — at the one bubble width every
- * prompt takes (owner request, 2026-10-13), whose header strip is its status
- * BADGES, whose content is what the user said, painted by the one body
- * pipeline, and which collapses to ONE line ending in the one bubble's ellipsis when there is more, never a fade (owner
- * ruling, 2026-09-27), opened by the one toggle (expand.ts, armed on the held section).
- *
- * COLLAPSED IT IS ONE LINE AND ITS BADGES (owner spec, 2026-09-23; one line,
- * 2026-09-27). The rest —
- * the queued age, the classifier's rationale or failure detail, and the
- * actions — is the bubble's EXPAND-ONLY region (`expandOnly`,
- * src/bubble/draw.ts), shown once the same click that opens the text opens it.
+ * it IS the prompt it will become, so it is drawn as the user prompt it
+ * becomes (owner request, 2026-10-25): the one bubble (src/bubble/draw.ts)
+ * with the user prompt's own look (`userPromptLook`, src/feed/rows/user-prompt.ts)
+ * — its words in the same blocks, the same copy control, the same unbounded
+ * fold — on a markedly darker blue, so the reader sees their words have NOT
+ * reached the agent. Its header strip is its status BADGES and its footer its
+ * controls, both always shown.
  *
  * ONE BADGE, ALWAYS (owner ruling, 2026-10-08). The daemon ranks the standing
  * facts and sends the strongest as `badge`, naming the fact it stands for in
  * `stands_for`; every other fact is a `notes` sentence. `HELD_STATUS_BADGES` is
  * the ONE table from that fact to the badge's color class. THE WORDS ARE THE
- * DAEMON'S: the label is drawn VERBATIM, and its detail and the notes verbatim
- * in the expand-only details; this card composes no status sentence of its own
- * and never re-ranks the facts.
+ * DAEMON'S: the label is drawn VERBATIM, the notes verbatim as quiet pills,
+ * and the badge's detail and the classifier's reason verbatim as the badge's
+ * hover title (owner request, 2026-10-25); this card composes no status
+ * sentence of its own and never re-ranks the facts.
  *
  * WHY RELEASE IS NOT ALWAYS DRAWN. A release's MECHANISM is an interrupt.
  * Against a context cut or a session still coming up, the interrupt is
@@ -53,7 +46,8 @@
  * listens in production (the composer is host-native) and the event is
  * harmless there — it is the seam, not a promise about who is on the far end.
  */
-import { drawFeedUserPromptBody } from "../feed/rows/user-prompt.js";
+import { USER_PROMPT_CAP_LINES } from "../bubble/draw.js";
+import { userPromptLook, type HeldPromptLook } from "../feed/rows/user-prompt.js";
 import { labelledControl, whileControlsDisabled, type Control } from "../control.js";
 import { getOption } from "@bufbuild/protobuf";
 import type {
@@ -112,11 +106,7 @@ import { formatTickedAge } from "../duration.js";
 import { markdownSlot, unparsedProse } from "../bubble/body.js";
 import { quoteSlot } from "../bubble/quote.js";
 import { expandedOnly } from "../bubble/expanded-only.js";
-import {
-  BUBBLE_MORE_ELLIPSIS,
-  ELLIPSIS_CAP_LINES,
-  drawBubble,
-} from "../bubble/draw.js";
+import { drawBubble } from "../bubble/draw.js";
 import { log } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { callUnary } from "../rpc/unary.js";
@@ -210,9 +200,8 @@ export function drawHeldPrompt(
   });
 
   // THE STRIP IS THE STATUS LINE (owner request, 2026-10-13): the one badge,
-  // a quiet pill for every further standing fact, and the queued age. A
-  // collapsed card shows everything but the rest of the words, so expanding
-  // one only ever reveals more of what was said.
+  // a quiet pill for every further standing fact, and the queued age, all
+  // shown whether or not the card is opened.
   const head = document.createElement("div");
   head.className = "queued-head";
   const verdict = drawClassification(classification, `${path}.classification`);
@@ -220,6 +209,7 @@ export function drawHeldPrompt(
   const drawn = drawHeldPromptBadge(
     requireMessage(u.badge, `${path}.badge`),
     u.notes,
+    verdict.reason,
     `${path}.badge`,
   );
   head.appendChild(drawn.pill);
@@ -236,12 +226,13 @@ export function drawHeldPrompt(
     // card to the shutdown it should explain.
     drawn.pill.setAttribute("data-schedule-id", hold.value.scheduleId);
   }
-  // A HELD SESSION ACT IS DRAWN AS WHAT IT DOES; a prompt, as its feed row
-  // will draw it: the daemon's resolved body, images and all.
-  const content =
+  // A HELD SESSION ACT IS DRAWN AS WHAT IT DOES, with nothing to copy; a
+  // prompt, as its feed row will draw it: the daemon's resolved body, images,
+  // copy control and all.
+  const look: HeldPromptLook =
     u.act === undefined
-      ? drawFeedUserPromptBody(requireMessage(u.body, `${path}.body`), `${path}.body`)
-      : [drawHeldSessionAct(u.act, `${path}.act`)];
+      ? userPromptLook(requireMessage(u.body, `${path}.body`), `${path}.body`)
+      : { content: [drawHeldSessionAct(u.act, `${path}.act`)], capLines: USER_PROMPT_CAP_LINES };
 
   // THE CONTROLS ARE ALWAYS SHOWN (owner request, 2026-10-13), in ONE footer
   // element, so a refusal an action draws beside its row lands in it too.
@@ -276,13 +267,8 @@ export function drawHeldPrompt(
       hooks: holdCardHooks(hold === null ? null : hold.case),
       waving: false,
       strip: [head],
-      // THE REASON ENDS THE FIRST LINE (owner request, 2026-10-13): floated
-      // into the corner, so the collapsed line's ellipsis falls before it.
-      ...(verdict.detail === null ? {} : { corner: [verdict.detail] }),
-      content,
+      ...look,
       footer: classifierForm === null ? [controls] : [controls, classifierForm.element],
-      capLines: ELLIPSIS_CAP_LINES,
-      more: BUBBLE_MORE_ELLIPSIS,
     },
     previous,
   ).bubble;
@@ -385,8 +371,8 @@ export function drawQueuedAge(atMs: number, tc: HeldContext, path: string): HTML
 
 /** What one classification arm contributes to the card. */
 interface Verdict {
-  /** The rationale or failure detail, when the arm carries one. */
-  detail: HTMLElement | null;
+  /** The rationale or failure detail, when the arm carries one: the badge's hover title. */
+  reason: string | null;
 }
 
 /** Route the verdict. EVERY arm is named; an unknown one is a malformed view. */
@@ -453,7 +439,7 @@ export function drawHeldPromptClassifying(
     operation: "held.held-prompt.classifying",
     context: { path },
   });
-  return { detail: null };
+  return { reason: null };
 }
 
 /** Interjects: the green the owner named for a prompt that interrupts. */
@@ -465,7 +451,7 @@ export function drawHeldPromptInterject(
     operation: "held.held-prompt.interject",
     context: { path },
   });
-  return { detail: rationale(u.rationale) };
+  return { reason: rationale(u.rationale) };
 }
 
 /**
@@ -480,7 +466,7 @@ export function drawHeldPromptAfterToolCall(
     operation: "held.held-prompt.after-tool-call",
     context: { path },
   });
-  return { detail: rationale(u.rationale) };
+  return { reason: rationale(u.rationale) };
 }
 
 /** Waits for the turn to end on its own, with the classifier's reason. */
@@ -492,7 +478,7 @@ export function drawHeldPromptHoldForTurnEnd(
     operation: "held.held-prompt.hold-for-turn-end",
     context: { path },
   });
-  return { detail: rationale(u.rationale) };
+  return { reason: rationale(u.rationale) };
 }
 
 /**
@@ -509,10 +495,10 @@ export function drawHeldPromptUninterruptibleTurn(
     operation: "held.held-prompt.uninterruptible-turn",
     context: { path, command: literal },
   });
-  return { detail: null };
+  return { reason: null };
 }
 
-/** Nothing decided this: the error red, and the failure said out loud. */
+/** Nothing decided this: the error red, and the failure said in the badge's title. */
 export function drawHeldPromptClassificationError(
   u: HeldPromptClassificationError,
   path: string,
@@ -521,7 +507,7 @@ export function drawHeldPromptClassificationError(
     operation: "held.held-prompt.classification-error",
     context: { path, detail: u.detail },
   });
-  return { detail: reasonBadge(u.detail, `badge ${HELD_REASON_CLASS} queued-unclassified`) };
+  return { reason: u.detail };
 }
 
 /**
@@ -536,7 +522,7 @@ export function drawHeldPromptDaemonHeld(
     operation: "held.held-prompt.daemon-held",
     context: { path },
   });
-  return { detail: null };
+  return { reason: null };
 }
 
 /**
@@ -551,7 +537,7 @@ export function drawHeldPromptAwaitingDelivery(
     operation: "held.held-prompt.awaiting-delivery",
     context: { path },
   });
-  return { detail: null };
+  return { reason: null };
 }
 
 /**
@@ -1268,31 +1254,35 @@ export const HELD_STATUS_ATTRIBUTE = "data-held-status";
 
 /**
  * A held card's one status badge: LABEL verbatim, in TONE's color, naming
- * STATUS, the fact it stands for. Every held card's badge is drawn here, a
- * held prompt's and an ingress prompt's (ingress-prompt.ts) alike.
+ * STATUS, the fact it stands for, its hover title every non-empty line of WHY
+ * in order (owner request, 2026-10-25: the reason is hovered, never drawn
+ * beside the words), and no title when none says anything. Every held card's
+ * badge is drawn here, a held prompt's and an ingress prompt's
+ * (ingress-prompt.ts) alike.
  */
-export function drawHeldBadgePill(label: string, tone: HeldBadgeTone, status: string): HTMLElement {
+export function drawHeldBadgePill(
+  label: string,
+  tone: HeldBadgeTone,
+  status: string,
+  why: readonly (string | null | undefined)[] = [],
+): HTMLElement {
   const pill = document.createElement("span");
   pill.className = heldBadgeToneClasses(tone);
   pill.setAttribute(HELD_STATUS_ATTRIBUTE, status);
   pill.textContent = label;
+  const title = why.filter((line) => line !== null && line !== undefined && line !== "").join("\n");
+  if (title !== "") pill.title = title;
   return pill;
-}
-
-/** The status badge: the daemon's label verbatim, and the table's color for STATUS. */
-function badge(label: string, status: HeldStatus): HTMLElement {
-  return drawHeldBadgePill(label, heldStatusTone(status), status);
 }
 
 /** The class a note on a fact the badge does not show wears, a quiet pill in the strip. */
 export const HELD_NOTE_CLASS = "queued-status-note";
 
-/** The class the reason badge ending the card's first line wears. */
-export const HELD_REASON_CLASS = "held-reason";
-
 /**
- * The wire's ONE badge, colored by the fact it stands for, its detail the
- * badge's hover title, and a quiet pill for every other standing fact.
+ * The wire's ONE badge, colored by the fact it stands for, and a quiet pill
+ * for every other standing fact. Its hover title is the wire's detail, then
+ * REASON (the classifier's rationale or failure detail), a line apart: the
+ * words a reason pill beside the text once said (owner request, 2026-10-25).
  *
  * A badge with no fact or an empty label, and a note with an empty sentence,
  * are malformed views (feed_held.proto), logged and thrown, never drawn.
@@ -1300,6 +1290,7 @@ export const HELD_REASON_CLASS = "held-reason";
 export function drawHeldPromptBadge(
   wire: HeldPromptBadge,
   notes: readonly HeldPromptStatusNote[],
+  reason: string | null,
   path: string,
 ): { pill: HTMLElement; status: HeldStatus; notes: HTMLElement[] } {
   const status = requireCase(wire.standsFor, `${path}.stands_for`).case;
@@ -1324,28 +1315,13 @@ export function drawHeldPromptBadge(
     pill.textContent = n.sentence;
     pills.push(pill);
   }
-  const pill = badge(wire.label, status);
-  if (wire.detail !== undefined) pill.title = wire.detail;
+  const pill = drawHeldBadgePill(wire.label, heldStatusTone(status), status, [wire.detail, reason]);
   return { pill, status, notes: pills };
 }
 
-/**
- * The classifier quoting itself, as the badge that ends the card's first line,
- * and only when it said something. Its full words are its hover title too,
- * since the collapsed badge may be cut short.
- */
-function rationale(text: string): HTMLElement | null {
-  if (text === "") return null;
-  return reasonBadge(text, `badge ${HELD_REASON_CLASS}`);
-}
-
-/** The reason badge: TEXT in an element of CLASSNAME, titled with itself. */
-function reasonBadge(text: string, className: string): HTMLElement {
-  const reason = document.createElement("span");
-  reason.className = className;
-  reason.textContent = text;
-  reason.title = text;
-  return reason;
+/** The classifier quoting itself, and only when it said something. */
+function rationale(text: string): string | null {
+  return text === "" ? null : text;
 }
 
 /**
@@ -1404,7 +1380,7 @@ export function drawTextBlock(u: TextBlock, path: string): HTMLElement {
 
 /**
  * A reply's quote of an earlier bubble: drawn only once the card is expanded
- * (src/bubble/quote.ts), so the collapsed one line is the person's own words.
+ * (src/bubble/quote.ts), so the folded card is the person's own words.
  */
 export function drawQuoteBlock(u: UserQuoteBlock, path: string): HTMLElement {
   log.debug("drawing a quote block", {

@@ -7,7 +7,7 @@
  * Opening the bubble (expand.ts's one toggle) draws it at the full thumbnail
  * height (`.prompt-block-image`).
  *
- * A bubble in the ellipsis mode (a held prompt, src/feed/bubble-more.ts)
+ * A bubble in the ellipsis mode (a thinking bubble, src/feed/bubble-more.ts)
  * collapses to ONE line, which no picture fits, so there the stylesheet hides
  * the image until the card is opened, as it does an expanded-only block
  * (src/bubble/expanded-only.ts).

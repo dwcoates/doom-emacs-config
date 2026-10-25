@@ -119,6 +119,12 @@
      fill, but still that blue rather than a near-navy, so the code reads as
      set into the bubble. */
   --prompt-code-bg: #8fb5f2;
+  /* A HELD PROMPT'S FILL (owner request, 2026-10-25): a markedly darker blue
+     than --user, so a prompt that has not reached the agent reads as the
+     prompt it will become, still parked. Its code sits a step darker again,
+     as a user prompt's does under --user. */
+  --held-prompt-bg: #7ea6e8;
+  --held-prompt-code-bg: #6690d8;
   /* --ok, the green status: render-colors.json#color_values (src/vocab.ts). */
   /* The cold gate's compact border: the success green, a touch darker
      (owner request, 2026-10-03). */
@@ -556,6 +562,9 @@
     --known-command: #f0c4ff;
     /* The same darker step under this theme's --user blue. */
     --prompt-code-bg: #054a91;
+    /* The held prompt's darker blue, and its code's, under this theme's --user. */
+    --held-prompt-bg: #033a72;
+    --held-prompt-code-bg: #022a54;
     /* THE DARK ACCENTS ARE THE PASTEL SET (owner ruling, 2026-10-17): each hue
        kept, drawn at one lightness with its strength capped, as
        design-dark-accent-tuner.html beside this module derives them. The six
@@ -2160,19 +2169,14 @@ pre {
   margin-left: var(--agent-rail-inset);
   margin-right: auto;
 }
-/* THE ONE BACKGROUND A VARIANT SETS (owner ruling, 2026-10-08, superseding
-   2026-09-23's grey-blue tint and 2026-09-27's 5% mix of it): a HELD prompt's
-   fill is now the RESPONSE bubble's own token, `--assistant`, exactly — not a
-   copied value — so a prompt the daemon is holding reads in the same color as
-   the agent's settled answer. It feeds `--bubble-bg`, so anything painted
-   from it matches in both themes. The retired `--held-prompt-bg` tint token
-   is gone with it; nothing else read it. */
-/* A HELD prompt takes the one bubble width every prompt does (owner request,
-   2026-10-13, superseding 2026-09-23's halved cap), so it sets no `max-width`
-   of its own. What keeps it short is its one-line collapsed cap
-   (`ELLIPSIS_CAP_LINES`, src/bubble/draw.ts), not its width. */
+/* THE ONE BACKGROUND A VARIANT SETS (owner request, 2026-10-25, superseding
+   2026-10-08's response grey): a HELD prompt looks like the user prompt it
+   will become (src/feed/rows/user-prompt.ts `userPromptLook`), on a markedly
+   darker blue, `--held-prompt-bg`. It feeds `--bubble-bg`, so anything
+   painted from it matches in both themes. It takes the one bubble width
+   every prompt does (owner request, 2026-10-13). */
 .bubble[data-variant="held"] {
-  --bubble-bg: var(--assistant);
+  --bubble-bg: var(--held-prompt-bg);
 }
 /* AN AGENT-TO-AGENT BUBBLE takes the final response's fill (owner request,
    2026-10-17): the RESPONSE bubble's own token, `--assistant`, exactly, as the
@@ -2192,10 +2196,10 @@ pre {
      base horizontally. Its rung is one that also sets `--bubble-pad-x`.
    - A USER PROMPT then sits 15% WIDER than that ON EVERY SIDE (owner request,
      2026-10-14): 1.15 of the prompt's 0.49 vertically and 0.7 horizontally,
-     on a rung of its own that also sets `--bubble-pad-x`.
+     on a rung of its own that also sets `--bubble-pad-x`. A HELD prompt
+     shares the user prompt's rung (owner request, 2026-10-25).
    - A USER, AGENT OR PEER PROMPT then sits 30% WIDER top and bottom only
-     (owner request, 2026-10-17): 1.3 of its vertical rung. A HELD prompt is
-     left out, so it keeps the 0.49 on a rung of its own. The same prompts
+     (owner request, 2026-10-17): 1.3 of its vertical rung. The same prompts
      then sit 10% wider again top and bottom (owner request, 2026-10-20).
    - AN INTERIM RESPONSE, the one with no fill and no border, sits 30% tighter
      again (owner request, 2026-10-13): 0.7 of 0.7. Its gap then shrinks ON EVERY SIDE by as much as its
@@ -2219,11 +2223,8 @@ pre {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49 * 1.3 * 1.1);
   --bubble-pad-x: calc(var(--bubble-pad-x-base) * 0.7);
 }
+.bubble[data-variant="user"],
 .bubble[data-variant="held"] {
-  --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49);
-  --bubble-pad-x: calc(var(--bubble-pad-x-base) * 0.7);
-}
-.bubble[data-variant="user"] {
   --bubble-pad-y: calc(var(--bubble-pad-y-base) * 0.49 * 1.15 * 1.3 * 1.1);
   --bubble-pad-x: calc(var(--bubble-pad-x-base) * 0.7 * 1.15);
 }
@@ -2763,33 +2764,45 @@ html[data-page-unshown] *::after {
   width: calc(var(--prompt-copy-gap) + var(--copy-control-box) + var(--prompt-copy-text-gap) - var(--bubble-scroll-gap));
   height: calc(var(--prompt-copy-gap) + var(--copy-control-box) - var(--bubble-pad-y));
 }
+/* A PROMPT WITH A HEADER STRIP (an agent prompt's address, a held prompt's
+   badges) has its copy control beside the strip's first line, so that line
+   keeps clear of it as the first line of text would: the same gap, box and
+   text gap, resolved in the strip's own size. */
+.bubble[data-role="prompt"]:has(> .bubble-scroll > .prompt-copy) > .bubble-strip:first-child {
+  padding-right: calc(var(--bubble-pad-y) + 1.25em + 6px);
+}
 /* A FINAL RESPONSE'S COPY CONTROL (src/feed/cards/response.ts) copies the
    whole response, and is always shown (owner request, 2026-10-24). It floats
    right after the usage corner and clears it, so it stands just under the
    token count and duration, and the prose wraps short of both. */
 .response-copy { float: right; clear: right; margin: 0.15em 0 0.2em 0.6em; }
 .md a { color: var(--accent); }
-/* A link in a blue prompt bubble takes the prompt's own link color. A held
-   prompt keeps --accent, since its fill is grey, not blue. */
-.bubble[data-role="prompt"]:not([data-variant="held"]) a { color: var(--prompt-link); }
+/* A link in a blue prompt bubble takes the prompt's own link color. */
+.bubble[data-role="prompt"] a { color: var(--prompt-link); }
 /* Inline code and code blocks in a blue prompt bubble take the prompt's own
    darker blue, by feeding the two tokens the one markdown rule set above
-   reads. Only the user's prompt is blue: a held, agent or peer prompt wears
-   the response's fill, so its code keeps the shared washes. */
+   reads. Only the user's prompt and a held one are blue: an agent or peer
+   prompt wears the response's fill, so its code keeps the shared washes. */
 .bubble[data-variant="user"] {
   --code-bg: var(--prompt-code-bg);
   --code-block-bg: var(--prompt-code-bg);
+}
+.bubble[data-variant="held"] {
+  --code-bg: var(--held-prompt-code-bg);
+  --code-block-bg: var(--held-prompt-code-bg);
 }
 /* A REPLY'S QUOTED RESPONSE IS GREY (owner request, 2026-10-24: it was blue
    like the prompt): an opened reply draws the response it quotes as a code
    block (src/feed/rows/blocks.ts `drawFeedQuoteBlock`), filled with the
    RESPONSE bubble's own token, `--assistant`, exactly, so it reads as the
    answer it came from rather than as the person's own code. */
-.bubble[data-variant="user"] .prompt-block-quote {
+.bubble[data-variant="user"] .prompt-block-quote,
+.bubble[data-variant="held"] .prompt-block-quote {
   --code-block-bg: var(--assistant);
 }
 /* A known slash command the prompt names, marked as the composer marks it. */
-.bubble[data-variant="user"] .known-command { color: var(--known-command); font-weight: 600; }
+.bubble[data-variant="user"] .known-command,
+.bubble[data-variant="held"] .known-command { color: var(--known-command); font-weight: 600; }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 0.8em 0; }
 /* GFM tables: bordered and compact, their cells wrapping when the table would
    be wider than the bubble instead of forcing the bubble to grow. */
@@ -3346,8 +3359,8 @@ html[data-page-unshown] *::after {
    `BubbleCapLines` value (`BUBBLE_CAP_LINES`, src/bubble/draw.ts; styles.test.ts
    holds the two together). The uncapped mode (`data-cap-lines="none"`) has no
    entry and needs none: its box wears no `.bubble-scroll`, so no cap rule can
-   reach it. The shared feed cap for most capped bubbles, one line for a held
-   prompt, and NONE past the header strip for a
+   reach it. The shared feed cap for most capped bubbles, one line for a
+   thinking or interim response, and NONE past the header strip for a
    peer message, whose label is the whole of its collapsed face. The unbounded
    fold (`BUBBLE_FOLD_UNBOUNDED`: a user or subagent prompt) has no line count;
    its rule, after the expanded rule below, lifts the cap instead. The cap rides
@@ -3422,8 +3435,7 @@ html[data-page-unshown] *::after {
   overscroll-behavior: contain;
 }
 /* THE EXPAND-ONLY REGION (src/bubble/draw.ts `expandOnly`): chrome after a
-   bubble's scroll box that the reader sees only once the bubble is opened (a
-   held prompt's details and actions). It is keyed on the one toggle's own
+   bubble's scroll box that the reader sees only once the bubble is opened. It is keyed on the one toggle's own
    `.expanded` on the sibling scroll box, so the click that opens the text
    opens this too, and no second fold exists. */
 .bubble-scroll:not(.expanded) ~ .bubble-expand-only { display: none; }
@@ -3448,7 +3460,7 @@ html[data-page-unshown] *::after {
    owner request, 2026-10-22): no wider than about a dozen characters and a
    few lines tall, its aspect ratio kept, until the bubble is opened and the
    image takes the full thumbnail height (`.prompt-block-image`). A bubble in
-   the ellipsis mode (a held prompt) collapses to one line, which no picture
+   the ellipsis mode collapses to one line, which no picture
    fits, so there the image is hidden until the card is opened. Child
    combinators keep an open bubble from reaching a nested bubble's image. */
 .bubble-scroll:not(.expanded) > .bubble-body > img.bubble-collapsed-thumbnail {
@@ -3649,8 +3661,8 @@ html[data-page-unshown] *::after {
    on every bubble: nothing draws a glyph from `has-more`,
    and no `::before` keys on it. styles.test.ts fails any rule that does. */
 /* THE ELLIPSIS INSTEAD OF THE FADE (owner rulings, 2026-09-27). A bubble whose
-   spec chooses it (`data-more="ellipsis"`, src/bubble/draw.ts: a held prompt,
-   a thinking bubble, an interim response)
+   spec chooses it (`data-more="ellipsis"`, src/bubble/draw.ts: a thinking
+   bubble, an interim response)
    shows its ONE collapsed line and, when there is
    more, ends that line in `…`; no fade. The collapsed BODY is clamped to the
    cap's lines, so the engine itself writes the `…` at the end of the last line
@@ -3908,8 +3920,8 @@ html[data-page-unshown] *::after {
    A queued message is PARKED, not active. It must read as plainly distinct
    from a live prompt bubble, so the user sees the message is waiting for later
    and is explicitly NOT interrupting the running turn unless escalated: its
-   near-feed held fill and its badges carry that, and everything else is the
-   one bubble's.
+   darker blue fill and its badges carry that, and everything else is the
+   user prompt's.
    A HELD PROMPT HAS NO BORDER (owner ruling, 2026-09-23): a border lands only
    once the prompt is received (see "THE PROMPT BORDERS"), so the dashed blue
    frame and the lease hold's amber are gone; the hold's badge alone says what
@@ -3917,28 +3929,6 @@ html[data-page-unshown] *::after {
 .queued-head { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; margin-bottom: 0.3rem; }
 /* A standing fact the one badge does not show: the same pill, quiet. */
 .badge.queued-status-note { color: var(--muted); }
-/* THE REASON ENDS THE FIRST LINE (owner request, 2026-10-13): the classifier's
-   words as a quiet pill floated into the scroll box's corner. A collapsed body
-   is clamped as its own box (the ellipsis rule), so it sits BESIDE the float
-   and its `…` falls before the reason, never under it. The pill keeps to its
-   share of the line and cuts its own words short; expanded, the body wraps
-   around it and the pill opens to every word. */
-.held-reason {
-  float: right;
-  max-width: 40%;
-  margin-left: 0.6rem;
-  font-style: italic;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.bubble-scroll.expanded > .held-reason {
-  white-space: normal;
-  border-radius: 8px;
-}
-/* An unclassified prompt's reason is the failure itself, said plainly. */
-.held-reason.queued-unclassified { font-style: normal; }
 /* THE ROW IS COMPACT AND EVEN (owner request, 2026-10-13): every control is
    one width, the widest label's, because a grid's `1fr` columns sized at the
    row's own max-content all resolve to the largest column. */

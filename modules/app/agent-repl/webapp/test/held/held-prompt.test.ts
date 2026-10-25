@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { drawnBodyOf, servedSrcOf } from "./drawn-body.js";
-import { FeedUserPromptBodySchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedUserPromptBodySchema, FeedUserPromptSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { drawFeedUserPrompt } from "../../src/feed/rows/user-prompt.js";
+import { PROMPT_COPY_CLASS } from "../../src/feed/rows/blocks.js";
+import { boundCopyText } from "../../src/copy-control.js";
 import { type Control } from "../../src/control.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -48,7 +51,6 @@ import {
   EDIT_REQUEST,
   NO_RELEASE_TITLES,
   SEND_NOW_LABEL,
-  HELD_REASON_CLASS,
   HELD_STATUS_BADGES,
   HELD_NOTE_CLASS,
   drawHeldPrompt,
@@ -77,6 +79,7 @@ import {
   BUBBLE_ROLE_ATTRIBUTE,
   BUBBLE_STRIP_CLASS,
   BUBBLE_VARIANT_ATTRIBUTE,
+  USER_PROMPT_CAP_LINES,
 } from "../../src/bubble/draw.js";
 import { PROMPT_WAVE_ATTRIBUTE } from "../../src/breathing.js";
 import {
@@ -87,9 +90,8 @@ import {
   useTreeLayout,
 } from "../tree-layout.js";
 import { installClickExpand } from "../../src/expand.js";
-import { HAS_MORE_CLASS, refreshHasMore } from "../../src/feed/bubble-more.js";
 import { resetLoggingForTests } from "../../src/log.js";
-import { selectorOf } from "../stylesheet.js";
+import { cascadedValue, installStylesheet, selectorOf } from "../stylesheet.js";
 import { servedProse } from "../prose.js";
 import { codeOf } from "../source-text.js";
 import heldPromptSource from "../../src/held/held-prompt.ts?raw";
@@ -382,7 +384,11 @@ describe("drawHeldPrompt classification arms", () => {
     });
   }
 
-  it("draws the classifier's rationale on an interjection", () => {
+  /** The hover title of CARD's one status badge. */
+  const badgeTitle = (card: HTMLElement): string | undefined =>
+    card.querySelector<HTMLElement>(".queued-head > .held-badge")?.title;
+
+  it("titles the badge with the classifier's rationale on an interjection", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
       heldPrompt({
@@ -390,10 +396,10 @@ describe("drawHeldPrompt classification arms", () => {
       }),
       tc,
     );
-    expect(card.querySelector(`.${HELD_REASON_CLASS}`)?.textContent).toBe("urgent");
+    expect(badgeTitle(card)).toBe(`${wireDetail("interject")}\nurgent`);
   });
 
-  it("draws the classifier's rationale on a prompt joining the running turn", () => {
+  it("titles the badge with the classifier's rationale on a prompt joining the running turn", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
       heldPrompt({
@@ -404,12 +410,10 @@ describe("drawHeldPrompt classification arms", () => {
       }),
       tc,
     );
-    expect(card.querySelector(`.${HELD_REASON_CLASS}`)?.textContent).toBe(
-      "it adds to it",
-    );
+    expect(badgeTitle(card)).toBe(`${wireDetail("afterToolCall")}\nit adds to it`);
   });
 
-  it("draws no rationale element when the classifier gave none", () => {
+  it("titles the badge with the wire's detail alone when the classifier gave no rationale", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
       heldPrompt({
@@ -417,10 +421,10 @@ describe("drawHeldPrompt classification arms", () => {
       }),
       tc,
     );
-    expect(card.querySelector(`.${HELD_REASON_CLASS}`)).toBeNull();
+    expect(badgeTitle(card)).toBe(wireDetail("interject"));
   });
 
-  it("draws the failure detail on classification_error", () => {
+  it("titles the badge with the failure detail on classification_error", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
       heldPrompt({
@@ -431,9 +435,42 @@ describe("drawHeldPrompt classification arms", () => {
       }),
       tc,
     );
-    expect(card.querySelector(".queued-unclassified")?.textContent).toBe(
-      "both tokens",
+    expect(badgeTitle(card)).toBe(`${wireDetail("classificationError")}\nboth tokens`);
+  });
+
+  it("titles the badge with the reason alone when the wire sends no detail", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(
+      heldPrompt({
+        classification: { case: "interject", value: { rationale: "urgent" } },
+        badge: { label: "wire interject", standsFor: { case: "interject", value: {} } } as never,
+      }),
+      tc,
     );
+    expect(badgeTitle(card)).toBe("urgent");
+  });
+
+  it("titles the badge with nothing when neither the wire nor the classifier says why", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(
+      heldPrompt({
+        classification: { case: "interject", value: { rationale: "" } },
+        badge: { label: "wire interject", standsFor: { case: "interject", value: {} } } as never,
+      }),
+      tc,
+    );
+    expect(card.querySelector(".queued-head > .held-badge")?.hasAttribute("title")).toBe(false);
+  });
+
+  it("draws no reason beside the words", () => {
+    const { tc } = trayContext();
+    const card = drawHeldPrompt(
+      heldPrompt({
+        classification: { case: "interject", value: { rationale: "urgent" } },
+      }),
+      tc,
+    );
+    expect(card.querySelector(".bubble-scroll")?.textContent).not.toContain("urgent");
   });
 
   it("refuses an entry whose classification oneof is unset", () => {
@@ -975,16 +1012,6 @@ describe("the drawn body", () => {
     expect(card.querySelector("img.prompt-block-image")?.classList.contains(BUBBLE_COLLAPSED_THUMBNAIL_CLASS)).toBe(true);
   });
 
-  it("draws the held card in the ellipsis mode, whose one collapsed line hides a thumbnail", () => {
-    const { tc } = trayContext();
-    const card = drawHeldPrompt(
-      heldPrompt({ body: { blocks: [{ block: { case: "image", value: { src: "/feed-images/a", alt: "a.png" } } }] } }),
-      tc,
-    );
-    const image = card.querySelector("img.prompt-block-image");
-    expect(image?.closest(".bubble")?.getAttribute("data-more")).toBe("ellipsis");
-  });
-
   it("refuses a card the daemon served with no body", () => {
     const { tc } = trayContext();
     const prompt = heldPrompt();
@@ -1093,7 +1120,7 @@ const saying = (text: string): HeldPrompt =>
     },
   });
 
-describe("the held prompt's spec: a prompt bubble on the held fill", () => {
+describe("the held prompt's spec: a user prompt's look on the held fill", () => {
   it("is a prompt-role bubble", () => {
     const { tc } = trayContext();
     expect(
@@ -1101,30 +1128,56 @@ describe("the held prompt's spec: a prompt bubble on the held fill", () => {
     ).toBe("prompt");
   });
 
-  it("is the held variant, whose fill is the held grey", () => {
+  it("is the held variant, whose fill is the held blue", () => {
     const { tc } = trayContext();
     expect(
       drawHeldPrompt(heldPrompt(), tc).getAttribute(BUBBLE_VARIANT_ATTRIBUTE),
     ).toBe("held");
   });
 
-  it("collapses at one line", () => {
+  it("folds as a user prompt does, showing every line folded", () => {
     const { tc } = trayContext();
     expect(
       drawHeldPrompt(
         saying("first line\nsecond line\nthird line"),
         tc,
       ).getAttribute(BUBBLE_CAP_ATTRIBUTE),
-    ).toBe("1");
+    ).toBe(String(USER_PROMPT_CAP_LINES));
   });
 
-  it("signals more with the ellipsis, never the fade", () => {
+  it("signals more as a user prompt does, never with the one-line ellipsis", () => {
     const { tc } = trayContext();
     expect(
       drawHeldPrompt(saying("first line\nsecond line"), tc).getAttribute(
         BUBBLE_MORE_ATTRIBUTE,
       ),
-    ).toBe(BUBBLE_MORE_ELLIPSIS);
+    ).not.toBe(BUBBLE_MORE_ELLIPSIS);
+  });
+
+  it("draws the user prompt's copy control, copying the words", () => {
+    const { tc } = trayContext();
+    const copy = drawHeldPrompt(saying("fix the test"), tc).querySelector(`.${PROMPT_COPY_CLASS}`);
+    expect(copy === null ? null : boundCopyText(copy).text).toBe("fix the test");
+  });
+
+  it("draws no copy control on a held session act, which has no words", () => {
+    const { tc } = trayContext();
+    const u = heldPrompt();
+    u.act = create(HeldSessionActSchema, { act: { case: "model", value: { model: "m" } } });
+    expect(drawHeldPrompt(u, tc).querySelector(`.${PROMPT_COPY_CLASS}`)).toBeNull();
+  });
+
+  it("draws its words exactly as the user prompt it becomes draws them", () => {
+    const { tc } = trayContext();
+    const u = saying("fix **the** test");
+    const held = drawHeldPrompt(u, tc).querySelector(".bubble-scroll");
+    const user = drawFeedUserPrompt(
+      create(FeedUserPromptSchema, {
+        author: { label: "You" },
+        result: { case: "success", value: { body: u.body } },
+      }),
+    ).querySelector(".bubble-scroll");
+    expect(held?.innerHTML).toBe(user?.innerHTML);
   });
 
   it("never waves: a held prompt has no turn in flight", () => {
@@ -1299,7 +1352,7 @@ describe("in-flight", () => {
     });
     const card = drawHeldPrompt(heldPrompt(), tc);
     card.querySelector<Control>('[data-held-action="drop"]')?.click();
-    const disabled = [...card.querySelectorAll<Control>("ar-button")].every(
+    const disabled = [...card.querySelectorAll<Control>(".queued-actions ar-button")].every(
       (b) => b.disabled,
     );
     expect(disabled).toBe(true);
@@ -1721,6 +1774,26 @@ describe("the held status badge table", () => {
     ]);
   });
 
+  it.each([
+    ["titles the pill with every line of why, in order", ["a", "b"], "a\nb"],
+    ["skips an empty, null or absent line", ["", null, "a", undefined], "a"],
+  ] as const)("%s", (_name, why, title) => {
+    // Act
+    const pill = drawHeldBadgePill("x", "err", "holdForTurnEnd", why);
+    // Assert
+    expect(pill.title).toBe(title);
+  });
+
+  it.each([
+    ["no why at all", undefined],
+    ["only empty lines", ["", null]],
+  ] as const)("gives the pill no title when %s", (_name, why) => {
+    // Act
+    const pill = drawHeldBadgePill("x", "err", "holdForTurnEnd", why);
+    // Assert
+    expect(pill.hasAttribute("title")).toBe(false);
+  });
+
   it("names every fact the schema's badge can stand for", () => {
     // Arrange / Act
     const arms = [...oneofArms(HeldPromptBadgeSchema, "stands_for")].sort();
@@ -1905,7 +1978,6 @@ describe("a held prompt collapsed", () => {
     ["the status badge", ".held-badge"],
     ["a further fact's note", `.${HELD_NOTE_CLASS}`],
     ["the queued age", "[data-queued]"],
-    ["the reason", `.${HELD_REASON_CLASS}`],
     ["the Send now button", '[data-held-action="release"]'],
     ["the Meta button", '[data-held-action="update-classifier"]'],
     ["the Cancel button", '[data-held-action="drop"]'],
@@ -1942,18 +2014,11 @@ describe("a held prompt collapsed", () => {
     ).toEqual(["badge", "note", "age"]);
   });
 
-  it("floats the reason into the scroll box's corner, ahead of the words", () => {
+  it("titles the badge with the reason's whole words", () => {
     // Arrange / Act
-    const scroll = mountedFull().querySelector(".bubble-scroll");
+    const badge = mountedFull().querySelector<HTMLElement>(".queued-head > .held-badge");
     // Assert
-    expect(scroll?.firstElementChild?.classList.contains(HELD_REASON_CLASS)).toBe(true);
-  });
-
-  it("titles the reason with its whole words, since the pill may cut them short", () => {
-    // Arrange / Act
-    const reason = mountedFull().querySelector<HTMLElement>(`.${HELD_REASON_CLASS}`);
-    // Assert
-    expect(reason?.title).toBe("it can wait");
+    expect(badge?.title).toBe(`${wireDetail("shutdown")}\nit can wait`);
   });
 
   it("draws the controls in the bubble's footer", () => {
@@ -2322,143 +2387,102 @@ const CLAMPED_BODY = selectorOf(
   "ellipsis clamp",
 );
 
-/** The box whose fade the ellipsis hides, as the stylesheet writes it (the pseudo dropped). */
-const FADE_HIDDEN_ON = selectorOf(
-  /([^{}]*\.bubble-scroll)::after\s*\{\s*display:\s*none;\s*\}/,
-  "hidden fade",
-);
-
 /**
- * THE HELD PROMPT'S ONE LINE (owner ruling, 2026-09-27). Collapsed, it shows its
- * first line, ending in the ellipsis the stylesheet's clamp writes when anything
- * follows it, and no fade; expanded, everything. jsdom lays nothing out, so
- * each case states the geometry the engine would give it: the clamp holds the
- * body's own box at one line, and its rendered lines run LINES deep.
+ * A HELD PROMPT FOLDS AS A USER PROMPT DOES (owner request, 2026-10-25):
+ * folded, it shows every line the person typed, under its badges and above its
+ * controls, on the held prompt's darker blue.
  */
-describe("a held prompt's one collapsed line", () => {
-  const LINE_PX = 21;
-
-  /** A held prompt saying TEXT, laid out as LINES rendered lines, mounted under the one toggle. */
-  function mounted(
-    text: string,
-    lines: number,
-  ): { card: HTMLElement; box: HTMLElement; body: HTMLElement } {
+describe("a held prompt folded", () => {
+  /** Run CHECK on a held prompt of forty lines, mounted with the real stylesheet. */
+  function withTallHeld(check: (card: HTMLElement, box: HTMLElement) => void): void {
+    const restore = installStylesheet();
     const { tc } = trayContext();
-    const card = drawHeldPrompt(saying(text), tc);
-    const host = document.createElement("div");
-    installClickExpand(
-      host,
-      () => "",
-      (section) => refreshHasMore(section),
-    );
-    host.append(card);
-    document.body.append(host);
-    const box = card.querySelector<HTMLElement>(":scope > .bubble-scroll");
-    const body = box?.querySelector<HTMLElement>(":scope > .bubble-body");
-    if (
-      box === null ||
-      box === undefined ||
-      body === null ||
-      body === undefined
-    )
-      throw new Error("fixture: no box");
-    Object.defineProperty(box, "clientHeight", {
-      configurable: true,
-      value: LINE_PX,
-    });
-    Object.defineProperty(body, "offsetHeight", {
-      configurable: true,
-      value: LINE_PX,
-    });
-    Object.defineProperty(body, "scrollHeight", {
-      configurable: true,
-      value: lines * LINE_PX,
-    });
-    refreshHasMore(box);
-    return { card, box, body };
+    const card = drawHeldPrompt(saying(Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n\n")), tc);
+    document.body.append(card);
+    try {
+      check(card, card.querySelector<HTMLElement>(":scope > .bubble-scroll") as HTMLElement);
+    } finally {
+      card.remove();
+      restore();
+    }
   }
 
-  /** Whether the collapsed line ends in the ellipsis: the clamp holds it, and something follows it. */
-  const ellipsized = (box: HTMLElement, body: HTMLElement): boolean =>
-    body.matches(CLAMPED_BODY) && box.classList.contains(HAS_MORE_CLASS);
-
-  it("clamps its collapsed body to one line", () => {
-    // Arrange / Act
-    const { body } = mounted("only line", 1);
-    // Assert
-    expect(body.matches(CLAMPED_BODY)).toBe(true);
+  it("clamps nothing, so every line shows", () => {
+    // Arrange / Act / Assert
+    withTallHeld((_card, box) => expect(box.querySelector(".bubble-body")?.matches(CLAMPED_BODY)).toBe(false));
   });
 
-  it("ends the line in an ellipsis when further lines follow", () => {
-    // Arrange / Act
-    const { box, body } = mounted("first line\nsecond line\nthird line", 3);
-    // Assert
-    expect(ellipsized(box, body)).toBe(true);
+  it("puts no height cap on the folded bubble", () => {
+    // Arrange / Act / Assert
+    withTallHeld((_card, box) => expect(cascadedValue(box, "max-height")).toBe("none"));
   });
 
-  it("ends the line in an ellipsis when the one line is too long to fit", () => {
-    // Arrange / Act — one over-long line, which wraps once into the clamp's hidden second line.
-    const { box, body } = mounted("word ".repeat(80), 2);
-    // Assert
-    expect(ellipsized(box, body)).toBe(true);
+  it("puts no height cap on the open bubble, so opening it never shrinks it", () => {
+    // Arrange / Act / Assert
+    withTallHeld((_card, box) => {
+      box.classList.add("expanded");
+      expect(cascadedValue(box, "max-height")).toBe("none");
+    });
   });
 
-  it("ends the line in nothing when it is the whole prompt", () => {
-    // Arrange / Act
-    const { box, body } = mounted("only line", 1);
-    // Assert
-    expect(ellipsized(box, body)).toBe(false);
+  it("fills the bubble with the held prompt's darker blue", () => {
+    // Arrange / Act / Assert
+    withTallHeld((card) => expect(cascadedValue(card, "--bubble-bg")).toBe("var(--held-prompt-bg)"));
   });
 
-  it("draws no fade, even with more to show", () => {
-    // Arrange / Act
-    const { box } = mounted("first line\nsecond line", 2);
-    // Assert
-    expect([
-      box.classList.contains(HAS_MORE_CLASS),
-      box.matches(FADE_HIDDEN_ON),
-    ]).toEqual([true, true]);
+  it("sets its code on the held prompt's code blue", () => {
+    // Arrange / Act / Assert
+    withTallHeld((card) => expect(cascadedValue(card, "--code-bg")).toBe("var(--held-prompt-code-bg)"));
   });
 
-  it("keeps its badges shown beside the one line", () => {
-    // Arrange / Act
-    const { card } = mounted("first line\nsecond line", 2);
-    // Assert
-    expect(
-      card.querySelector(".held-badge")?.closest(HIDDEN_WHILE_COLLAPSED),
-    ).toBeNull();
-  });
-
-  it("lifts the clamp once expanded, showing everything", () => {
+  it.each(["--bubble-pad-y", "--bubble-pad-x"])("pads the bubble as a user prompt does (%s)", (property) => {
     // Arrange
-    const { card, body } = mounted("first line\nsecond line\nthird line", 3);
-    // Act
-    card.querySelector<HTMLElement>(".queued-head")?.click();
-    // Assert
-    expect(body.matches(CLAMPED_BODY)).toBe(false);
-  });
-
-  it("drops the more signal once expanded", () => {
-    // Arrange
-    const { card, box } = mounted("first line\nsecond line\nthird line", 3);
-    // Act
-    card.querySelector<HTMLElement>(".queued-head")?.click();
-    // Assert
-    expect(box.classList.contains(HAS_MORE_CLASS)).toBe(false);
-  });
-
-  it("clamps to the one line again once collapsed", () => {
-    // Arrange
-    const { card, box, body } = mounted(
-      "first line\nsecond line\nthird line",
-      3,
+    const user = drawFeedUserPrompt(
+      create(FeedUserPromptSchema, {
+        author: { label: "You" },
+        result: { case: "success", value: { body: drawnBodyOf(saying("hi").said) } },
+      }),
     );
-    const head = card.querySelector<HTMLElement>(".queued-head");
-    head?.click();
-    // Act
-    head?.click();
-    // Assert
-    expect(ellipsized(box, body)).toBe(true);
+    document.body.append(user);
+    // Act / Assert
+    try {
+      withTallHeld((card) => expect(cascadedValue(card, property)).toBe(cascadedValue(user, property)));
+    } finally {
+      user.remove();
+    }
+  });
+
+  it("keeps its badge strip clear of the copy control at the bubble's top right", () => {
+    // Arrange / Act / Assert
+    withTallHeld((card) =>
+      expect(cascadedValue(card.querySelector(".queued-head") as Element, "padding-right")).toBe(
+        "calc(var(--bubble-pad-y) + 1.25em + 6px)",
+      ),
+    );
+  });
+
+  it("keeps a session act's strip at the plain inset, having no copy control to clear", () => {
+    // Arrange
+    const restore = installStylesheet();
+    const { tc } = trayContext();
+    const u = heldPrompt();
+    u.act = create(HeldSessionActSchema, { act: { case: "model", value: { model: "m" } } });
+    const card = drawHeldPrompt(u, tc);
+    document.body.append(card);
+    // Act / Assert
+    try {
+      expect(cascadedValue(card.querySelector(".queued-head") as Element, "padding-right")).toBe(
+        "var(--bubble-content-inset)",
+      );
+    } finally {
+      card.remove();
+      restore();
+    }
+  });
+
+  it("keeps its badges shown while folded", () => {
+    // Arrange / Act / Assert
+    withTallHeld((card) => expect(card.querySelector(".held-badge")?.closest(HIDDEN_WHILE_COLLAPSED)).toBeNull());
   });
 });
 

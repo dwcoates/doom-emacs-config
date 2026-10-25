@@ -31,6 +31,9 @@ import { editorIngressEntry } from "../feed/harness.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { testHeldContext } from "./held-context.js";
 import { plainProse } from "../prose.js";
+import { PROMPT_COPY_CLASS } from "../../src/feed/rows/blocks.js";
+import { boundCopyText } from "../../src/copy-control.js";
+import { BUBBLE_CAP_ATTRIBUTE, USER_PROMPT_CAP_LINES } from "../../src/bubble/draw.js";
 
 const NOW = 1_700_000_060_000;
 const ticker: Ticker = { now: () => NOW, subscribe: () => () => undefined };
@@ -264,5 +267,31 @@ describe("the badge every held card shares", () => {
     // Assert
     const shape = (el: Element | null) => [el?.tagName, [...(el?.classList ?? [])].slice(0, 2)];
     expect(shape(card.querySelector(`[${HELD_STATUS_ATTRIBUTE}]`))).toEqual(shape(held.querySelector(`[${HELD_STATUS_ATTRIBUTE}]`)));
+  });
+});
+
+describe("the user prompt's look on an ingress card", () => {
+  it("draws the daemon's item with the user prompt's copy control, copying its words", () => {
+    // Arrange / Act
+    const copy = drawHeldIngressPrompt(ingress("noSession"), heldContext()).querySelector(`.${PROMPT_COPY_CLASS}`);
+    // Assert
+    expect(copy === null ? null : boundCopyText(copy).text).toBe("what's dmitry's comment");
+  });
+
+  it("draws no copy control on the editor's own entry, which no daemon drew", () => {
+    // Arrange / Act
+    const card = drawEditorIngressEntry(editorIngressEntry("k-1", "sent offline"), heldContext());
+    // Assert
+    expect(card.querySelector(`.${PROMPT_COPY_CLASS}`)).toBeNull();
+  });
+
+  it.each([
+    ["the daemon's item", () => drawHeldIngressPrompt(ingress("noSession"), heldContext())],
+    ["the editor's own entry", () => drawEditorIngressEntry(editorIngressEntry("k-1", "sent offline"), heldContext())],
+  ])("folds %s as a user prompt does", (_name, draw) => {
+    // Arrange / Act
+    const card = draw();
+    // Assert
+    expect(card.getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe(String(USER_PROMPT_CAP_LINES));
   });
 });
