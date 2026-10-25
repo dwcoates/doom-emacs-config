@@ -517,39 +517,76 @@ V the keymap variable and the key vector in it whose binding puts it
 there, so `(define-key (symbol-value VARIABLE) V nil)' takes it away.
 Each map of `:maps' is searched, a `[remap X]' entry standing for X's
 keys in the global maps (its V is the remap entry, which every one of
-those keys shares); then the global maps and the leader themselves."
+those keys shares); then the global maps, less the keys a map of
+`:maps' gives another command (`agent-repl--input-help-shadowed-p'), and
+the leader."
+  ;; Every search names its keymap in a list: given one keymap alone,
+  ;; `where-is-internal' searches the global map too, which put Emacs's own
+  ;; global keys under every map, the leader's included.
   (let (found)
     (cl-flet ((add (description state variable vector)
                 (push (list :description description :state state
                             :keymap variable :vector vector)
                       found)))
       (pcase-dolist (`(,variable . ,map) (plist-get context :maps))
-        (dolist (key (where-is-internal command map nil t t))
+        (dolist (key (where-is-internal command (list map) nil t t))
           (if (eq (aref key 0) 'remap)
               (pcase-dolist (`(,state ,_ . ,global) (plist-get context :global))
-                (dolist (target (where-is-internal (aref key 1) global nil t))
+                (dolist (target (where-is-internal (aref key 1) (list global) nil t))
                   (add (agent-repl--input-help-canonical-key (key-description target))
                        state variable key)))
             (pcase-let ((`(,state . ,rest) (agent-repl--input-help-state-key key)))
               (add (agent-repl--input-help-canonical-key (key-description rest))
                    state variable key)))))
       (pcase-dolist (`(,state ,variable . ,global) (plist-get context :global))
-        (dolist (key (where-is-internal command global nil t t))
-          (unless (eq (aref key 0) 'remap)
+        (dolist (key (where-is-internal command (list global) nil t t))
+          (unless (or (eq (aref key 0) 'remap)
+                      (agent-repl--input-help-shadowed-p key state command context))
             (add (agent-repl--input-help-canonical-key (key-description key))
                  state variable key))))
-      (dolist (key (where-is-internal command (plist-get context :leader) nil t))
+      (dolist (key (where-is-internal command (list (plist-get context :leader)) nil t))
         (add (concat (plist-get context :leader-key) " "
                      (agent-repl--input-help-canonical-key (key-description key)))
              nil 'doom-leader-map key)))
     (nreverse found)))
 
-(defun agent-repl--input-help-raw-keys (command context)
-  "Return COMMAND's keys in CONTEXT as (DESCRIPTION . STATE) pairs.
-STATE is the Evil state name a key is bound in, or nil for any state
-\(`agent-repl--input-help-key-sources')."
-  (mapcar (lambda (source) (cons (plist-get source :description) (plist-get source :state)))
-          (agent-repl--input-help-key-sources command context)))
+(defun agent-repl--input-help-shadowed-p (key state command context)
+  "Non-nil when a map of CONTEXT's `:maps' binds KEY to other than COMMAND.
+A global key reaches the topic only where its own maps leave it free: the
+composer's RET sends, so the global RET that runs `newline' is not
+`newline''s key there.  KEY is read plainly and under STATE's Evil prefix,
+both command and insert mode's when STATE is nil."
+  (seq-some
+   (pcase-lambda (`(,_ . ,map))
+     (seq-some (lambda (vector)
+                 (let ((binding (lookup-key map vector)))
+                   (and binding (not (numberp binding)) (not (keymapp binding))
+                        (not (eq binding command)))))
+               (cons key (mapcar (lambda (each) (vconcat (vector (intern (concat each "-state"))) key))
+                                 (if state (list state) '("normal" "insert"))))))
+   (plist-get context :maps)))
+
+(defun agent-repl--input-help-group-sources (sources)
+  "Return SOURCES grouped by key, as (DESCRIPTION . SOURCES) pairs.
+Shortest key first, then alphabetically: a keymap's own order is the
+reverse of its definitions, which says nothing to a reader.  Shared by
+the help popup and the Settings page (settings.el), so a key reads as
+one key wherever it is bound."
+  (let (groups)
+    (dolist (source sources)
+      (let ((group (assoc (plist-get source :description) groups)))
+        (if group
+            (setcdr group (append (cdr group) (list source)))
+          (push (list (plist-get source :description) source) groups))))
+    (sort groups (lambda (a b)
+                   (let ((x (car a)) (y (car b)))
+                     (or (< (length x) (length y))
+                         (and (= (length x) (length y)) (string< x y))))))))
+
+(defun agent-repl--input-help-group-label (sources)
+  "Return the state annotation for one key's SOURCES, or nil for none."
+  (agent-repl--input-help-state-label
+   (mapcar (lambda (source) (plist-get source :state)) sources)))
 
 (defun agent-repl--input-help-state-label (states)
   "Return the annotation for a key bound in STATES, or nil for none.
@@ -613,24 +650,15 @@ several states is one pair, annotated with its states
 (`agent-repl--input-help-state-label', nil for none), and
 a run of digits is one range (`agent-repl--input-help-collapse-digits').
 A command no map binds is a broken help table, and is fatal."
-  (let ((raw (mapcan (lambda (one)
-                       (or (agent-repl--input-help-raw-keys one context)
-                           (agent-repl--fatal agent-repl-input-help--log-scope
-                                              "elisp.input-help.keys: unbound command=%s" one)))
-                     (if (listp command) (copy-sequence command) (list command))))
-        order)
-    (dolist (pair raw)
-      (unless (member (car pair) order)
-        (push (car pair) order)))
-    (agent-repl--input-help-collapse-digits
-     (mapcar (lambda (description)
-               (cons description
-                     (agent-repl--input-help-state-label
-                      (mapcar #'cdr (seq-filter (lambda (pair) (equal (car pair) description))
-                                                raw)))))
-             (sort order (lambda (a b)
-                           (or (< (length a) (length b))
-                               (and (= (length a) (length b)) (string< a b)))))))))
+  (agent-repl--input-help-collapse-digits
+   (mapcar (lambda (group)
+             (cons (car group) (agent-repl--input-help-group-label (cdr group))))
+           (agent-repl--input-help-group-sources
+            (mapcan (lambda (one)
+                      (or (agent-repl--input-help-key-sources one context)
+                          (agent-repl--fatal agent-repl-input-help--log-scope
+                                             "elisp.input-help.keys: unbound command=%s" one)))
+                    (if (listp command) (copy-sequence command) (list command)))))))
 
 ;;;; ---- The popup ------------------------------------------------------
 

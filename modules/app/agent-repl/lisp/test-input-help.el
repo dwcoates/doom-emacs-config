@@ -411,6 +411,55 @@ Compared in description order: a keymap's own order says nothing."
                   'cmd (agent-repl-test-input-help--context :normal `((,(kbd "s-[") . cmd))))
                  `((:description "s-[" :state "normal" :keymap normal-map :vector ,(vconcat (kbd "s-[")))))))
 
+(ert-deftest agent-repl-test-input-help-key-sources-skip-a-shadowed-global-key ()
+  "A global key the topic's own map gives another command is not this command's key."
+  (should-not (agent-repl--input-help-key-sources
+               'newline (agent-repl-test-input-help--context
+                         :composer `((,(kbd "RET") . send))
+                         :insert `((,(kbd "RET") . newline))))))
+
+(ert-deftest agent-repl-test-input-help-key-sources-keep-a-free-global-key ()
+  "A global key the topic's own maps leave free is shown."
+  (should (equal (mapcar (lambda (source) (plist-get source :description))
+                         (agent-repl--input-help-key-sources
+                          'cmd (agent-repl-test-input-help--context
+                                :composer `((,(kbd "C-c x") . other))
+                                :global `((,(kbd "s-[") . cmd)))))
+                 '("s-["))))
+
+(ert-deftest agent-repl-test-input-help-shadowed-p-cases ()
+  "A key is shadowed only by a binding to another command, plainly or in its state."
+  (let ((context (agent-repl-test-input-help--context
+                  :composer `((,(kbd "RET") . send) ([normal-state ?x] . other)
+                              (,(kbd "C-c y") . cmd)))))
+    (pcase-dolist (`(,key ,state ,want)
+                   `((,(kbd "RET") "insert" t)
+                     ([?x] "normal" t)
+                     ([?x] "insert" nil)
+                     ([?x] nil t)
+                     (,(kbd "C-c y") nil nil)
+                     (,(kbd "C-c z") nil nil)))
+      (should (eq (and (agent-repl--input-help-shadowed-p key state 'cmd context) t) want)))))
+
+(ert-deftest agent-repl-test-input-help-group-sources-one-group-per-key ()
+  "Sources of one key are one group, keys shortest first."
+  (should (equal (agent-repl--input-help-group-sources
+                  '((:description "C-c a" :state nil) (:description "RET" :state "normal")
+                    (:description "RET" :state "insert")))
+                 '(("RET" (:description "RET" :state "normal") (:description "RET" :state "insert"))
+                   ("C-c a" (:description "C-c a" :state nil))))))
+
+(ert-deftest agent-repl-test-input-help-group-label-is-the-state-label ()
+  "A group's label is the state label of its sources' states."
+  (should (equal (agent-repl--input-help-group-label '((:state "normal"))) "command mode"))
+  (should-not (agent-repl--input-help-group-label '((:state "normal") (:state "insert")))))
+
+(ert-deftest agent-repl-test-input-help-key-sources-search-only-the-named-maps ()
+  "A key Emacs's own global map binds is never reported under another map."
+  (let ((global (current-global-map)))
+    (should (eq (lookup-key global (kbd "C-f")) #'forward-char))
+    (should-not (agent-repl--input-help-key-sources 'forward-char (agent-repl-test-input-help--context)))))
+
 (ert-deftest agent-repl-test-input-help-canonical-key-cases ()
   "RET and TAB read the same whichever event names them."
   (pcase-dolist (`(,description ,want)
