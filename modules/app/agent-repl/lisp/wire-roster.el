@@ -1577,11 +1577,33 @@ SHOWN is the app keyword the rail shows, which follows the selection."
   (agent-repl-wire--decode-empty "RosterThreadCurrent" value)
   t)
 
+(defun agent-repl-wire-decode-roster-thread-open (value)
+  "Decode VALUE as the empty `RosterThreadOpen'."
+  (agent-repl-wire--decode-empty "RosterThreadOpen" value))
+
+(defun agent-repl-wire-decode-roster-thread-archived (value)
+  "Decode VALUE as the empty `RosterThreadArchived'."
+  (agent-repl-wire--decode-empty "RosterThreadArchived" value))
+
+(defun agent-repl-wire-decode-roster-thread-standing (value)
+  "Decode VALUE as `RosterThreadStanding', `(:arm :open|:archived :value nil)'.
+THE ARM IS THE STANDING, so an unset one is a contract breach."
+  (let ((object (agent-repl-wire--object "RosterThreadStanding" value)))
+    (agent-repl-wire--check-keys "RosterThreadStanding" object '(open archived))
+    (agent-repl-wire--decoded
+     "RosterThreadStanding"
+     (agent-repl-wire--decode-oneof
+      "RosterThreadStanding" 'standing object
+      '((open :open agent-repl-wire-decode-roster-thread-open)
+        (archived :archived agent-repl-wire-decode-roster-thread-archived))))))
+
 (defun agent-repl-wire-decode-roster-thread-row (value)
-  "Decode VALUE as `RosterThreadRow', `(:thread REF :name :summary :current)'.
-SUMMARY is nil when none is set; CURRENT is t on the selected thread."
+  "Decode VALUE as `RosterThreadRow',
+`(:thread REF :name :summary :current :standing S)'.
+SUMMARY is nil when none is set; CURRENT is t on the selected thread;
+STANDING is `agent-repl-wire-decode-roster-thread-standing''s."
   (let ((object (agent-repl-wire--object "RosterThreadRow" value)))
-    (agent-repl-wire--check-keys "RosterThreadRow" object '(thread name summary current))
+    (agent-repl-wire--check-keys "RosterThreadRow" object '(thread name summary current standing))
     (agent-repl-wire--decoded
      "RosterThreadRow"
      (list :thread (agent-repl-wire--decode-message
@@ -1593,11 +1615,15 @@ SUMMARY is nil when none is set; CURRENT is t on the selected thread."
                      #'agent-repl-wire-decode-roster-thread-summary)
            :current (agent-repl-wire--decode-optional-message
                      "RosterThreadRow" 'current object
-                     #'agent-repl-wire-decode-roster-thread-current)))))
+                     #'agent-repl-wire-decode-roster-thread-current)
+           :standing (agent-repl-wire--decode-message
+                      "RosterThreadRow" 'standing object
+                      #'agent-repl-wire-decode-roster-thread-standing)))))
 
 (defun agent-repl-wire-decode-roster-thread-section (value)
   "Decode VALUE as `RosterThreadSection', `(:new-thread LABEL :rows ROWS)'.
-ROWS are every open thread, the one last interacted with first."
+ROWS are every open thread and then every archived one, each the one last
+interacted with first."
   (let ((object (agent-repl-wire--object "RosterThreadSection" value)))
     (agent-repl-wire--check-keys "RosterThreadSection" object '(newThread rows))
     (agent-repl-wire--decoded

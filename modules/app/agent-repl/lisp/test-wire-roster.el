@@ -1722,11 +1722,26 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   #'agent-repl-wire-decode-roster-thread-section
                   (concat "{\"newThread\":{\"label\":\"New thread\"},\"rows\":["
                           "{\"thread\":{\"id\":\"t2\",\"dir\":\"/z/b\"},\"name\":{\"text\":\"b\"},"
-                          "\"summary\":{\"text\":\"light\"},\"current\":{}},"
-                          "{\"thread\":{\"id\":\"t1\",\"dir\":\"/z/a\"},\"name\":{\"text\":\"a\"}}]}"))
+                          "\"summary\":{\"text\":\"light\"},\"current\":{},\"standing\":{\"open\":{}}},"
+                          "{\"thread\":{\"id\":\"t1\",\"dir\":\"/z/a\"},\"name\":{\"text\":\"a\"},"
+                          "\"standing\":{\"archived\":{}}}]}"))
                  '(:new-thread "New thread"
-                   :rows ((:thread (:id "t2" :dir "/z/b") :name "b" :summary "light" :current t)
-                          (:thread (:id "t1" :dir "/z/a") :name "a" :summary nil :current nil))))))
+                   :rows ((:thread (:id "t2" :dir "/z/b") :name "b" :summary "light" :current t
+                           :standing (:arm :open :value nil))
+                          (:thread (:id "t1" :dir "/z/a") :name "a" :summary nil :current nil
+                           :standing (:arm :archived :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-roster-a-thread-row-without-a-standing-is-a-breach ()
+  "Whether a thread is open or archived is never unset on the wire."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-thread-row
+                  "{\"thread\":{\"id\":\"t1\",\"dir\":\"/z/a\"},\"name\":{\"text\":\"a\"}}")
+                 '("RosterThreadRow" standing "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-standing-with-no-arm-is-a-breach ()
+  "A thread's standing is never unset."
+  (should (equal (agent-repl-test-wire-roster--breach #'agent-repl-wire-decode-roster-thread-standing "{}")
+                 '("RosterThreadStanding" standing "oneof is unset"))))
 
 (ert-deftest agent-repl-test-wire-roster-an-app-with-no-arm-is-a-breach ()
   "Which app is shown is never unset on the wire."

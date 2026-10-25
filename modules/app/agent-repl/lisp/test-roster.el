@@ -97,7 +97,8 @@ closed list's rows.  THREADS are the thread section's rows, each
                        :rows (mapcar (lambda (thread)
                                        (list :thread (list :id (car thread)
                                                            :dir (concat "/zettel/threads/" (cdr thread)))
-                                             :name (cdr thread)))
+                                             :name (cdr thread)
+                                             :standing (list :arm :open :value nil)))
                                      threads))))
 
 ;;;; ---- Harness ----

@@ -604,9 +604,13 @@ Once per push over every closed row, which is why it is DEBUG."
   "The prefix of a thread's workspace name, so no thread's name can take a tab's.")
 
 (defun agent-repl-roster-threads (&optional roster)
-  "Return ROSTER's thread rows, the one last interacted with first.
-ROSTER defaults to the last accepted roster (`agent-repl-roster-view')."
-  (plist-get (plist-get (or roster agent-repl-roster-view) :threads) :rows))
+  "Return ROSTER's OPEN thread rows, the one last interacted with first.
+ROSTER defaults to the last accepted roster (`agent-repl-roster-view').
+An archived thread's workspace is closed, so Emacs opens no workspace for
+it and offers it to no thread command: the sidebar restores it."
+  (cl-remove-if-not (lambda (row)
+                      (eq (plist-get (plist-get row :standing) :arm) :open))
+              (plist-get (plist-get (or roster agent-repl-roster-view) :threads) :rows)))
 
 (defun agent-repl-roster-thread-p (ws)
   "Return non-nil when the workspace named WS is a zettel chat thread.

@@ -28,7 +28,8 @@ WS is the workspace a thread is open in, nil while it is still opening."
           (list :threads (list :rows (mapcar (lambda (thread)
                                                (list :thread (list :id (nth 0 thread)
                                                                    :dir (concat "/z/" (nth 1 thread)))
-                                                     :name (nth 1 thread)))
+                                                     :name (nth 1 thread)
+                                                     :standing (list :arm :open :value nil)))
                                              ,threads)))))
      (cl-letf (((symbol-function 'agent-repl-link-primary) (lambda () 'conn))
                ((symbol-function 'agent-repl-rpc-create-thread)
@@ -126,3 +127,13 @@ WS is the workspace a thread is open in, nil while it is still opening."
 (provide 'test-threads)
 
 ;;; test-threads.el ends here
+
+(ert-deftest agent-repl-test-threads-an-archived-thread-is-offered-to-no-command ()
+  "The thread commands see only open threads: an archived one is the sidebar's to restore."
+  (let ((agent-repl-roster-view
+         (list :threads (list :rows (list (list :thread '(:id "t2") :name "archived"
+                                                :standing '(:arm :archived :value nil))
+                                          (list :thread '(:id "t1") :name "open"
+                                                :standing '(:arm :open :value nil)))))))
+    (should (equal (mapcar (lambda (row) (plist-get row :name)) (agent-repl-roster-threads))
+                   '("open")))))
