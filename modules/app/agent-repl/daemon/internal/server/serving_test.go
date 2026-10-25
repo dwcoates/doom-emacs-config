@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -540,6 +542,51 @@ func TestAStreamStillOpenAtTheExitsDeadlineIsRecordedAtError(t *testing.T) {
 	if len(got) != 1 || got[0].Level != dlog.LevelError || got[0].Context["open"] != 1 ||
 		got[0].Context["deadline"] != deadline.Format(time.RFC3339Nano) {
 		t.Fatalf("records = %+v, want one ERROR naming the one open stream and the deadline", got)
+	}
+}
+
+// TestTheExitsStreamRecordsNameEachOpenStreamByItsPath pins what makes an
+// overrun diagnosable: both the exit's start and its overrun name the
+// standing streams still open, by procedure path.
+func TestTheExitsStreamRecordsNameEachOpenStreamByItsPath(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation string
+	}{
+		{name: "the exit's start", operation: "daemon.server.end_streams"},
+		{name: "the exit's overrun", operation: "daemon.server.await_streams_ended"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var held writeHold
+			ended, release := make(chan struct{}), make(chan struct{})
+			t.Cleanup(func() { close(ended); close(release) })
+			log := dlog.NewTestLogger()
+			serving, streamURL := standingStreamServingLogged(t, ended, &held, release, log)
+			openStream(t, streamURL)
+			parsed, err := neturl.Parse(streamURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(20 * time.Millisecond)
+
+			// Act
+			serving.EndStreams(deadline, func() {})
+			serving.AwaitStreamsEnded(deadline)
+
+			// Assert
+			want := []string{parsed.Path + "=1"}
+			var got []any
+			for _, r := range log.Records() {
+				if r.Operation == tt.operation {
+					got = append(got, r.Context["paths"])
+				}
+			}
+			if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
+				t.Fatalf("%s paths = %v, want one record naming %v", tt.operation, got, want)
+			}
+		})
 	}
 }
 

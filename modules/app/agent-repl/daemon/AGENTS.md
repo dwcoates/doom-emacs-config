@@ -168,7 +168,7 @@ and h2c through a real exit.
 
 | window | value | why |
 | --- | --- | --- |
-| `streamsEndBound` (cmd/agent-repld/run.go) | 500ms | contains one `server.answerWriteBound` (250ms, one end frame's write) plus as much again for the handlers to leave, each of which selects on the lifetime `Close` cancels. An overrun is ERROR `daemon.server.await_streams_ended` naming how many streams were left open |
+| `streamsEndBound` (cmd/agent-repld/run.go) | 500ms | contains one `server.answerWriteBound` (250ms, one end frame's write) plus as much again for the handlers to leave, each of which selects on the lifetime `Close` cancels. An overrun is ERROR `daemon.server.await_streams_ended` naming how many streams were left open and their procedure paths |
 
 The end frame is Connect's plain end-of-stream. `WatchHostWorkspace`,
 `WatchDaemon` and `WatchWorkspaceRoster` carry one more frame BEFORE it: the
