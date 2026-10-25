@@ -53,6 +53,18 @@
 so stubbing the accessor would not reach the code under test."
   (agent-repl-connect-connection-create :address address))
 
+(defconst agent-repl-test-wh--retired
+  "{\"op\":\"retireAll\",\"id\":null,\"outcome\":\"retired\",\"pages\":2,\"notes\":[]}"
+  "The host's answer to `retireAll' with two pages ended.")
+
+(defun agent-repl-test-wh--reload-and-answer (conn &optional raw)
+  "Reload the host onto CONN and answer its `retireAll' with RAW.
+RAW defaults to `agent-repl-test-wh--retired'."
+  (agent-repl--webhost-reload-now conn)
+  (let ((call (seq-find (lambda (c) (string-search "h.retireAll(" (car c))) agent-repl-test-wh--calls)))
+    (unless call (error "the reload sent no retireAll"))
+    (funcall (cdr call) (or raw agent-repl-test-wh--retired))))
+
 (defun agent-repl-test-wh--sent (method)
   "The scripts sent that call the host's METHOD, oldest first."
   (seq-filter (lambda (script) (string-search (format "h.%s(" method) script))
@@ -572,7 +584,7 @@ Binds `reloads' and `records', newest first."
     (cl-letf (((symbol-function 'agent-repl-webhost-url) (lambda (_conn) "http://host.localhost:3/?host=1"))
               ((symbol-function 'agent-repl--frontend-webview-navigate-widget) (lambda (_xw _url) nil)))
       ;; Act
-      (agent-repl--webhost-reload-now 'conn))
+      (agent-repl-test-wh--reload-and-answer 'conn))
     ;; Assert
     (should-not agent-repl--webhost-daemon-origin)
     (should-not agent-repl--webhost-follow-conn)))
@@ -601,7 +613,7 @@ Binds `reloads' and `records', newest first."
   (agent-repl-test-wh--with-host
     (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget) (lambda (_xw _url) nil)))
       ;; Act
-      (agent-repl--webhost-reload-now (agent-repl-test-wh--conn "127.0.0.1:7")))
+      (agent-repl-test-wh--reload-and-answer (agent-repl-test-wh--conn "127.0.0.1:7")))
     ;; Assert
     (should (equal agent-repl--webhost-url "http://host.localhost:7/?host=1"))))
 
@@ -732,7 +744,7 @@ Binds `reloads' and `records', newest first."
               ((symbol-function 'agent-repl-webhost-url) (lambda (_conn) "http://host.localhost:2/?host=1"))
               ((symbol-function 'agent-repl--frontend-webview-navigate-widget) (lambda (_xw _url) nil)))
       ;; Act
-      (agent-repl--webhost-reload-now 'conn))
+      (agent-repl-test-wh--reload-and-answer 'conn))
     ;; Assert
     (should (equal agent-repl--webhost-reload-started-ms 1700000000500))))
 
@@ -1165,7 +1177,7 @@ The current tab's page, not shown here, is the nearest of all."
       (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget)
                  (lambda (_xw uri) (setq navigated uri))))
         ;; Act
-        (agent-repl--webhost-reload-now (agent-repl-test-wh--conn "127.0.0.1:4242")))
+        (agent-repl-test-wh--reload-and-answer (agent-repl-test-wh--conn "127.0.0.1:4242")))
       ;; Assert
       (should (equal navigated "http://host.localhost:4242/?host=1")))))
 
@@ -1226,3 +1238,49 @@ The current tab's page, not shown here, is the nearest of all."
     (should (agent-repl--webhost-refuse-kill))))
 
 ;;; test-webhost.el ends here
+
+;;;; ---- A reload retires the pages before it navigates ----
+
+(ert-deftest agent-repl-test-wh-a-reload-retires-the-pages-before-it-navigates ()
+  "The host is asked to end its pages, and nothing navigates until it answers.
+2026-10-24: a navigation cancelled every frame's loads before their pages saw
+`pagehide', and each page drew the unreachable chip."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let (navigated)
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                 (lambda (_xw uri) (setq navigated uri))))
+        ;; Act
+        (agent-repl--webhost-reload-now (agent-repl-test-wh--conn "127.0.0.1:4242")))
+      ;; Assert
+      (should (= 1 (length (agent-repl-test-wh--sent "retireAll"))))
+      (should-not navigated))))
+
+(ert-deftest agent-repl-test-wh-the-retired-answer-navigates-and-is-recorded ()
+  "The host's answer to `retireAll' navigates the host, recorded at INFO."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let (navigated infos)
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                 (lambda (_xw uri) (setq navigated uri)))
+                ((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+        ;; Act
+        (agent-repl-test-wh--reload-and-answer (agent-repl-test-wh--conn "127.0.0.1:4242")))
+      ;; Assert
+      (should (equal navigated "http://host.localhost:4242/?host=1"))
+      (should (member "elisp.webhost.retired pages=2" infos)))))
+
+(ert-deftest agent-repl-test-wh-an-unreadable-retired-answer-is-an-error-and-still-navigates ()
+  "An answer that cannot be read is recorded at ERROR; the reload still runs."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let (navigated errors)
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                 (lambda (_xw uri) (setq navigated uri)))
+                ((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+        ;; Act
+        (agent-repl-test-wh--reload-and-answer (agent-repl-test-wh--conn "127.0.0.1:4242") "not json"))
+      ;; Assert
+      (should (equal navigated "http://host.localhost:4242/?host=1"))
+      (should (seq-some (lambda (e) (string-prefix-p "elisp.webhost.retire-answer-unreadable" e)) errors)))))

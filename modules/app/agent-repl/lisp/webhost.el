@@ -660,9 +660,48 @@ out (`agent-repl-host-adopting-p')."
     (agent-repl--webhost-call "setLogLevel" (symbol-name (car agent-repl--webhost-log-level))
                               (cdr agent-repl--webhost-log-level))))
 
+(defvar agent-repl--webhost-retiring-conn nil
+  "The connection a reload navigates the host onto once its pages are retired.
+Set while the host's `retireAll' is out; its answer's handler, which the
+read channel calls by symbol, takes it (`agent-repl--webhost-on-retired').")
+
 (defun agent-repl--webhost-reload-now (conn)
-  "Navigate the host to its URL on CONN's daemon; its load replays the rest."
+  "Reload the host onto CONN's daemon: retire its pages, then navigate.
+THE PAGES END BEFORE THE NAVIGATION, by the host's own act (its
+`retireAll'): a navigation cancels every frame's loads before their
+documents see `pagehide', and each page read its streams' ends as a cut
+link and drew the unreachable chip (2026-10-24).  The navigation runs on
+the host's answer (`agent-repl--webhost-on-retired')."
   (setq agent-repl--webhost-reload-timer nil)
+  (if (agent-repl-webhost-xwidget)
+      (progn
+        (setq agent-repl--webhost-retiring-conn conn)
+        (if (agent-repl-webhost-read "retireAll" nil 'agent-repl--webhost-on-retired)
+            (agent-repl--log agent-repl--webhost-central "elisp.webhost.retiring pages=%d"
+                             (hash-table-count agent-repl--webhost-pages))
+          (setq agent-repl--webhost-retiring-conn nil)
+          (agent-repl--webhost-navigate conn)))
+    (agent-repl--log agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-host")))
+
+(defun agent-repl--webhost-on-retired (raw)
+  "Navigate the host now that RAW, its `retireAll' answer, says its pages ended.
+Called BY SYMBOL from the read channel (`agent-repl-webhost-read').  An
+answer that cannot be read is recorded at ERROR, and the reload still
+navigates: it is the reload asked for, and the pages are gone either way."
+  (let ((conn agent-repl--webhost-retiring-conn))
+    (setq agent-repl--webhost-retiring-conn nil)
+    (condition-case err
+        (progn
+          (agent-repl--webhost-answered raw)
+          (agent-repl--info agent-repl--webhost-central "elisp.webhost.retired pages=%s"
+                            (plist-get (agent-repl-webhost-parse-answer raw) :pages)))
+      (error
+       (agent-repl--error agent-repl--webhost-central
+                          "elisp.webhost.retire-answer-unreadable raw=%S error=%S" raw err)))
+    (agent-repl--webhost-navigate conn)))
+
+(defun agent-repl--webhost-navigate (conn)
+  "Navigate the host to its URL on CONN's daemon; its load replays the rest."
   (if-let ((xw (agent-repl-webhost-xwidget)))
       (progn
         (setq agent-repl--webhost-url (agent-repl-webhost-url conn)

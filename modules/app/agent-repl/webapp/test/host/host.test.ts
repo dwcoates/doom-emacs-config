@@ -17,6 +17,7 @@ import {
   type Host,
 } from "../../src/host/host.js";
 import { HOST_CHANNEL, type HostToPage } from "../../src/host/protocol.js";
+import { beginPage, pageEnded } from "../../src/page-teardown.js";
 
 let host: Host;
 
@@ -556,6 +557,37 @@ describe("remove", () => {
 
   it("answers absent for a workspace it holds no page for", () => {
     expect(parsed(host.remove("nobody")).outcome).toBe("absent");
+  });
+});
+
+describe("retireAll", () => {
+  // THE RELOAD'S TEARDOWN IS THE HOST'S OWN ACT (2026-10-24): every page ends
+  // before Emacs navigates, so none reads its streams' ends as a cut link.
+  afterEach(() => beginPage());
+
+  it("removes every page's frame and answers how many ended", () => {
+    // Arrange
+    pages(host, "a", "b");
+    host.show("a");
+
+    // Act
+    const answer = parsed(host.retireAll());
+
+    // Assert
+    expect([answer.outcome, answer.pages]).toEqual(["retired", 2]);
+    expect(document.querySelectorAll("iframe")).toHaveLength(0);
+    expect(parsed(host.ids()).ids).toEqual([]);
+  });
+
+  it("ends the webhost's own page, aborting its requests", () => {
+    // Arrange
+    pages(host, "a");
+
+    // Act
+    host.retireAll();
+
+    // Assert
+    expect(pageEnded()).toBe(true);
   });
 });
 

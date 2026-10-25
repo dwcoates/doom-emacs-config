@@ -25,6 +25,7 @@
  * tells every page whether it is docked and which of the webhost's failures
  * stand, and ends the sidebar above the gate band of the page on screen.
  */
+import { endPage } from "../page-teardown.js";
 import {
   parseWindowLevel,
   type AppliedLevel,
@@ -158,6 +159,13 @@ export interface Host {
   dismissDigest(id: string): string;
   /** Whether ID's page has drawn its conversation. */
   drawn(id: string): string;
+  /**
+   * End every page and then the webhost's own, for the reload Emacs is about
+   * to make: each page's frame is removed, which ends its document now (its
+   * `pagehide` aborts its requests), so no stream of a page the reload tears
+   * down is read as a cut link. Answers `retired` with how many pages ended.
+   */
+  retireAll(): string;
   /** The shown page's selection and focus. */
   selection(): string;
   /** Whether a text field of the shown page holds the keyboard. */
@@ -747,6 +755,22 @@ export function createHost(env: HostEnv): Host {
         post(frame, { channel: HOST_CHANNEL, kind: "dismissDigest" });
         return "sent";
       });
+    },
+    retireAll() {
+      // THE RELOAD'S TEARDOWN IS THE HOST'S OWN ACT, so it ends the pages
+      // before Emacs navigates: the navigation cancels every frame's loads
+      // before their documents see `pagehide`, and each page read its
+      // streams' ends as a cut link and drew the unreachable chip
+      // (2026-10-24).
+      const pages = frames.size;
+      for (const frame of frames.values()) {
+        dropIncoming(frame.id);
+        retire(frame);
+      }
+      frames.clear();
+      shownId = null;
+      endPage();
+      return answer("retireAll", null, "retired", { pages });
     },
     drawn(id) {
       const frame = frames.get(id);
