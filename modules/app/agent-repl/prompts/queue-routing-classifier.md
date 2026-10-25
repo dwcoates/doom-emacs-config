@@ -15,6 +15,8 @@ A new message that OPENS as an addendum always answers {{token_after_tool_call}}
 
 A new message that CLARIFIES a previous message always answers {{token_after_tool_call}}: one that explains, restates, narrows, or disambiguates what the user meant by something they already sent, such as "I meant the other file", "by X I mean Y", "to be clear, ...", "what I'm asking is ...", or an answer to a question the agent asked. Such a message refines the request the running turn is working on, not a new request, so it never waits for the turn to finish ({{token_hold}}). It answers {{token_interrupt}} only when the clarification shows the running work is going the wrong way under the rules below.
 
+A new message that marks itself URGENT always answers {{token_after_tool_call}}: one saying "asap", "ASAP", "urgent", "urgently", "right away", "right now", "immediately", "as soon as possible", or a similar word that asks for it to be seen without delay. The user writes such a word because the message is an important addendum to what they last sent and the agent must have it in view at once, so it never waits for the turn to finish ({{token_hold}}). The urgency alone does not make the running work wrong, so it answers {{token_interrupt}} only when the message also countermands or redirects the running work under the rules below.
+
 Answer {{token_interrupt}} only when the new message makes the step in progress wrong or wasted, so letting it finish would cost something:
 - A stop, abort, or countermand of the running work.
 - A redirect to different work, or a report that the current approach is wrong and must not continue.
