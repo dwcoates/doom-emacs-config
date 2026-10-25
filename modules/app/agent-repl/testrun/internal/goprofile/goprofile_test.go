@@ -1,11 +1,11 @@
 package goprofile
 
 import (
+	"agentrepl/testrun/internal/testdir"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -102,11 +102,8 @@ func TestHoldingIsInnermostFirstAndPerFile(t *testing.T) {
 // reader: a second parser of the "mode: " format would drift from it.
 func TestNoOtherFileReadsAProfileItself(t *testing.T) {
 	// Arrange
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller could not locate this file")
-	}
-	module := filepath.Clean(filepath.Join(filepath.Dir(self), "..", ".."))
+	self := filepath.Join(testdir.Here(t), "goprofile_test.go")
+	module := filepath.Join(testdir.ModuleRoot(t), "testrun")
 	var found []string
 
 	// Act

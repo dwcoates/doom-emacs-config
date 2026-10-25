@@ -1,11 +1,11 @@
 package run
 
 import (
+	"agentrepl/testrun/internal/testdir"
 	"bufio"
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -26,12 +26,7 @@ var pipedEarlyExit = regexp.MustCompile(`(^|[^|])\|\s*(grep\b[^|;&)]*\s-[A-Za-z]
 
 func TestNoSuiteScriptPipesIntoAnEarlyExitingReader(t *testing.T) {
 	// Arrange
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller could not locate this file")
-	}
-	module := filepath.Clean(filepath.Join(filepath.Dir(self), "..", "..", ".."))
-	repo := filepath.Clean(filepath.Join(module, "..", "..", ".."))
+	module, repo := testdir.ModuleRoot(t), testdir.RepoRoot(t)
 	var scripts []string
 	for _, glob := range []string{
 		filepath.Join(module, "bin", "*.sh"),

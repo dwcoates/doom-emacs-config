@@ -1,12 +1,12 @@
 package run
 
 import (
+	"agentrepl/testrun/internal/testdir"
 	"bufio"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,11 +21,8 @@ var goBuildCall = regexp.MustCompile(`"go",\s*"build"|:=\s*\[\]string\{"build"[,
 
 func TestEveryGoBuildATestRunsRefusesTheVCSStamp(t *testing.T) {
 	// Arrange
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller could not locate this file")
-	}
-	module := filepath.Clean(filepath.Join(filepath.Dir(self), "..", "..", ".."))
+	self := filepath.Join(testdir.Here(t), "buildvcs_scan_test.go")
+	module := testdir.ModuleRoot(t)
 	var sources []string
 	err := filepath.WalkDir(module, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

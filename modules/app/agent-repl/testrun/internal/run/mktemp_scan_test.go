@@ -1,11 +1,11 @@
 package run
 
 import (
+	"agentrepl/testrun/internal/testdir"
 	"bufio"
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,12 +21,7 @@ var bareMktemp = regexp.MustCompile(`\bmktemp((\s+-[A-Za-z]+)*)\s*($|[);|&]|-t\b
 
 func TestNoSuiteScriptMakesATempFileWithoutNamingItsParent(t *testing.T) {
 	// Arrange
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller could not locate this file")
-	}
-	module := filepath.Clean(filepath.Join(filepath.Dir(self), "..", "..", ".."))
-	repo := filepath.Clean(filepath.Join(module, "..", "..", ".."))
+	module, repo := testdir.ModuleRoot(t), testdir.RepoRoot(t)
 	var scripts []string
 	for _, dir := range []string{filepath.Join(module, "bin"), filepath.Join(module, "scripts"), filepath.Join(repo, ".githooks"), filepath.Join(repo, ".claude"), filepath.Join(repo, "bin")} {
 		matches, err := filepath.Glob(filepath.Join(dir, "*.sh"))

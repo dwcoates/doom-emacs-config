@@ -33,7 +33,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -105,11 +104,13 @@ type layout struct {
 }
 
 func resolveLayout() (layout, error) {
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		return layout{}, errors.New("runtime.Caller could not locate helpers_test.go")
+	// A test runs in its package's directory (runtime.Caller's file carries
+	// no absolute path under -trimpath).
+	here, err := os.Getwd()
+	if err != nil {
+		return layout{}, fmt.Errorf("the working directory, which is the integration package's: %w", err)
 	}
-	l := layout{integrationDir: filepath.Dir(self)}
+	l := layout{integrationDir: here}
 	l.sidecarDir = filepath.Dir(l.integrationDir)
 	l.agentShimDir = filepath.Dir(filepath.Dir(l.sidecarDir)) // shim-sidecar -> claude -> agent-shim
 	l.moduleRoot = filepath.Dir(l.agentShimDir)

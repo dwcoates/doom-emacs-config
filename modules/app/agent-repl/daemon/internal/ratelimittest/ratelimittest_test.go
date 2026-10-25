@@ -4,7 +4,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -89,13 +88,17 @@ func TestUpdateWrapsTheStatus(t *testing.T) {
 // tests: a test file that builds a window's oneof arm by hand fails here.
 func TestNoTestHandRollsARateLimitWindow(t *testing.T) {
 	// Arrange
-	_, self, _, _ := runtime.Caller(0)
-	here := filepath.Dir(self)
+	// A test runs in its package's directory (runtime.Caller's file carries
+	// no absolute path under -trimpath).
+	here, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("the working directory, which is this package's: %v", err)
+	}
 	root := filepath.Join(here, "..", "..")
 	var offenders []string
 
 	// Act
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

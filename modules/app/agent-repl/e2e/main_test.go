@@ -23,7 +23,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -111,11 +110,13 @@ type layout struct {
 var repo layout
 
 func resolveLayout() (layout, error) {
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		return layout{}, fmt.Errorf("runtime.Caller could not locate main_test.go")
+	// A test runs in its package's directory (runtime.Caller's file carries
+	// no absolute path under -trimpath).
+	here, err := os.Getwd()
+	if err != nil {
+		return layout{}, fmt.Errorf("the working directory, which is the e2e package's: %w", err)
 	}
-	l := layout{e2eDir: filepath.Dir(self)}
+	l := layout{e2eDir: here}
 	l.repoDir = filepath.Dir(l.e2eDir)
 	l.daemonDir = filepath.Join(l.repoDir, "daemon")
 	l.shimDir = filepath.Join(l.repoDir, "agent-shim", "claude", "shim")
