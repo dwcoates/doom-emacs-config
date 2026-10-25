@@ -122,7 +122,7 @@ func (s *store) ColdReadPaymentOf(ctx context.Context, id WorkspaceID) (ColdRead
 			p      ColdReadPayment
 			paidAt int64
 		)
-		err := s.db().QueryRowContext(ctx,
+		err := s.q(ctx).QueryRowContext(ctx,
 			`SELECT vendor_session_id, last_request_at_ms, model, paid_at FROM cold_read_payments WHERE workspace_id = ?`, id).
 			Scan(&p.VendorSessionID, &p.LastRequestAtMs, &p.Model, &paidAt)
 		if errors.Is(err, sql.ErrNoRows) {

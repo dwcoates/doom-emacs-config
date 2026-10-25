@@ -99,7 +99,7 @@ func (s *store) PendingFork(ctx context.Context, id WorkspaceID) (PendingFork, b
 	)
 	err := s.read(ctx, "daemon.wsm.pending_fork", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
 		var parent string
-		err := s.db().QueryRowContext(ctx,
+		err := s.q(ctx).QueryRowContext(ctx,
 			`SELECT parent_workspace_id FROM pending_forks WHERE workspace_id = ?`, id).Scan(&parent)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
@@ -186,7 +186,7 @@ func (s *store) Lineage(ctx context.Context, id WorkspaceID) ([]ForkLineage, err
 				link   ForkLineage
 				parent string
 			)
-			err := s.db().QueryRowContext(ctx,
+			err := s.q(ctx).QueryRowContext(ctx,
 				`SELECT parent_workspace_id, parent_book, through_ms FROM fork_lineage WHERE workspace_id = ?`, at).
 				Scan(&parent, &link.ParentBook, &link.ThroughMs)
 			if errors.Is(err, sql.ErrNoRows) {
@@ -211,7 +211,7 @@ func (s *store) Lineage(ctx context.Context, id WorkspaceID) ([]ForkLineage, err
 
 // uninheritedTurns reads one fork's uninherited turns. Called inside a read.
 func (s *store) uninheritedTurns(ctx context.Context, id WorkspaceID) ([]TurnID, error) {
-	rows, err := s.db().QueryContext(ctx,
+	rows, err := s.q(ctx).QueryContext(ctx,
 		`SELECT turn_id FROM fork_uninherited_turns WHERE workspace_id = ? ORDER BY turn_id`, id)
 	if err != nil {
 		return nil, err

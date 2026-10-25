@@ -182,7 +182,7 @@ func (s *store) NewsDigestState(ctx context.Context) (NewsDigestState, error) {
 			since      sql.NullInt64
 		)
 		loaded := NewsDigestState{Snapshots: map[string]string{}}
-		err := s.db().QueryRowContext(ctx,
+		err := s.q(ctx).QueryRowContext(ctx,
 			`SELECT last_run_end, baseline, latest_digest_id, standing, latest_overlay, latest_made_at, history_since FROM news_digest WHERE id = 1`).
 			Scan(&lastRunEnd, &baseline, &latest, &standing, &overlay, &madeAt, &since)
 		switch {
@@ -208,7 +208,7 @@ func (s *store) NewsDigestState(ctx context.Context) (NewsDigestState, error) {
 				loaded.HistorySince = fromNanos(since.Int64)
 			}
 		}
-		rows, err := s.db().QueryContext(ctx, `SELECT source_key, snapshot FROM news_digest_sources ORDER BY source_key`)
+		rows, err := s.q(ctx).QueryContext(ctx, `SELECT source_key, snapshot FROM news_digest_sources ORDER BY source_key`)
 		if err != nil {
 			return err
 		}
@@ -309,7 +309,7 @@ func (s *store) NewsDigestRisksSince(ctx context.Context, since time.Time) ([]Ne
 	var out []NewsDigestRisk
 	fields := dlog.Context{"since": since.UTC().Format(time.RFC3339Nano)}
 	err := s.read(ctx, "daemon.wsm.news_digest_risks_since", fields, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx,
+		rows, err := s.q(ctx).QueryContext(ctx,
 			`SELECT run_end, position, item, risk FROM news_digest_items
 			 WHERE run_end >= ? AND risk IS NOT NULL ORDER BY run_end, position`, nanos(since))
 		if err != nil {

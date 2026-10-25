@@ -164,7 +164,7 @@ func validRevealSpeedWindow(w RevealSpeedWindow) error {
 func (s *store) RevealSpeedWindows(ctx context.Context) ([]RevealSpeedWindow, error) {
 	var out []RevealSpeedWindow
 	err := s.read(ctx, "daemon.wsm.reveal_speed_windows", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx,
+		rows, err := s.q(ctx).QueryContext(ctx,
 			`SELECT model, kind, position, chars_per_second FROM reveal_block_speeds ORDER BY model, kind, position`)
 		if err != nil {
 			return err

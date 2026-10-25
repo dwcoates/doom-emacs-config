@@ -55,7 +55,7 @@ func (s *store) MergeWorkspaceFor(ctx context.Context, request DetachedMergeID) 
 		found bool
 	)
 	err := s.read(ctx, op, dlog.Context{"request": string(request)}, func(ctx context.Context) error {
-		ws, err := scanWorkspace(s.db().QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE merge_request_id = ?`, request))
+		ws, err := scanWorkspace(s.q(ctx).QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE merge_request_id = ?`, request))
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			return nil
@@ -156,7 +156,7 @@ func (s *store) MergeWorkspaceRemovedAt(ctx context.Context, ws WorkspaceID) (ti
 	)
 	err := s.read(ctx, op, dlog.Context{"workspace": string(ws)}, func(ctx context.Context) error {
 		var removed int64
-		err := s.db().QueryRowContext(ctx, `SELECT removed_at FROM removed_merge_workspaces WHERE workspace_id = ?`, ws).Scan(&removed)
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT removed_at FROM removed_merge_workspaces WHERE workspace_id = ?`, ws).Scan(&removed)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			return nil

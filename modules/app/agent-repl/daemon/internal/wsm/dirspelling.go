@@ -131,7 +131,7 @@ func (s *store) reconcileDirSpellings(ctx context.Context) error {
 func (s *store) spelledRows(ctx context.Context) ([]spelledRow, error) {
 	var out []spelledRow
 	err := s.read(ctx, "daemon.wsm.dir_spelling", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `SELECT id, dir, closed FROM workspaces ORDER BY created_at, id`)
+		rows, err := s.q(ctx).QueryContext(ctx, `SELECT id, dir, closed FROM workspaces ORDER BY created_at, id`)
 		if err != nil {
 			return err
 		}
@@ -197,7 +197,7 @@ func (s *store) stateHeldBy(ctx context.Context, id WorkspaceID) ([]string, erro
 		var held []string
 		for _, q := range heldStateQueries {
 			var n int
-			if err := s.db().QueryRowContext(ctx, q.query, id).Scan(&n); err != nil {
+			if err := s.q(ctx).QueryRowContext(ctx, q.query, id).Scan(&n); err != nil {
 				return fmt.Errorf("count %s: %w", q.kind, err)
 			}
 			if n > 0 {

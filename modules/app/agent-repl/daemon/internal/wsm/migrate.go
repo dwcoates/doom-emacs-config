@@ -570,7 +570,7 @@ func (s *store) copyAsideBeforeMigrating(ctx context.Context, from int) (string,
 	case !errors.Is(err, os.ErrNotExist):
 		return "", fmt.Errorf("wsm: inspect the pre-migration copy %q: %w", path, err)
 	}
-	if _, err := s.db().ExecContext(ctx, `VACUUM INTO `+quoteSQLText(path)); err != nil {
+	if _, err := s.q(ctx).ExecContext(ctx, `VACUUM INTO `+quoteSQLText(path)); err != nil {
 		return "", fmt.Errorf("wsm: copy %q aside as %q before migrating: %w", s.path, path, err)
 	}
 	return path, nil

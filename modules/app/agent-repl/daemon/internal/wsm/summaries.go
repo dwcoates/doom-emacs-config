@@ -156,7 +156,7 @@ func (s *store) WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (Workspa
 			prompts  sql.NullInt64
 			boundary sql.NullInt64
 		)
-		err := s.db().QueryRowContext(ctx,
+		err := s.q(ctx).QueryRowContext(ctx,
 			`SELECT title, digest_hash, digest_prompts, digest_boundary FROM workspace_summaries WHERE workspace_id = ?`, id).
 			Scan(&title, &hash, &prompts, &boundary)
 		if errors.Is(err, sql.ErrNoRows) {

@@ -143,7 +143,7 @@ func (s *store) Session(ctx context.Context, id WorkspaceID) (Session, bool, err
 		found bool
 	)
 	err := s.read(ctx, "daemon.wsm.session", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		sess, err := scanSession(s.db().QueryRowContext(ctx,
+		sess, err := scanSession(s.q(ctx).QueryRowContext(ctx,
 			`SELECT `+sessionSelectColumns+` FROM sessions WHERE workspace_id = ?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
 			out, found = Session{}, false
@@ -174,7 +174,7 @@ const sessionSelectColumns = `workspace_id, host_session_id, vendor_session_id, 
 func (s *store) Sessions(ctx context.Context) ([]Session, error) {
 	var out []Session
 	err := s.read(ctx, "daemon.wsm.sessions", dlog.Context{}, func(ctx context.Context) error {
-		loaded, err := listRows(ctx, s.db(), `SELECT `+sessionSelectColumns+` FROM sessions ORDER BY workspace_id`, scanSession)
+		loaded, err := listRows(ctx, s.q(ctx), `SELECT `+sessionSelectColumns+` FROM sessions ORDER BY workspace_id`, scanSession)
 		if err != nil {
 			return err
 		}

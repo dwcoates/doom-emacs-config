@@ -78,7 +78,7 @@ func (s *store) OwedTurns(ctx context.Context, ws WorkspaceID) ([]TurnID, error)
 	const op = "daemon.wsm.owed_turns"
 	var out []TurnID
 	err := s.read(ctx, op, dlog.Context{"workspace": string(ws)}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `SELECT turn_id FROM owed_resumptions WHERE workspace_id = ? ORDER BY interrupted_at, turn_id`, ws)
+		rows, err := s.q(ctx).QueryContext(ctx, `SELECT turn_id FROM owed_resumptions WHERE workspace_id = ? ORDER BY interrupted_at, turn_id`, ws)
 		if err != nil {
 			return err
 		}

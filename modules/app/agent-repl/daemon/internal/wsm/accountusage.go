@@ -358,7 +358,7 @@ func windowArgs(w *AllowanceFigures) []any {
 func (s *store) AccountUsages(ctx context.Context) ([]AccountUsage, error) {
 	var out []AccountUsage
 	err := s.read(ctx, "daemon.wsm.account_usages", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, accountUsageSelect())
+		rows, err := s.q(ctx).QueryContext(ctx, accountUsageSelect())
 		if err != nil {
 			return err
 		}

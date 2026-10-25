@@ -89,7 +89,7 @@ func (s *store) MergeProgressOf(ctx context.Context, id WorkspaceID) (MergeProgr
 			updated  int64
 			document string
 		)
-		err := s.db().QueryRowContext(ctx,
+		err := s.q(ctx).QueryRowContext(ctx,
 			`SELECT lease_id, updated_at, document FROM merge_progress WHERE workspace_id = ?`, id).
 			Scan(&lease, &updated, &document)
 		if errors.Is(err, sql.ErrNoRows) {

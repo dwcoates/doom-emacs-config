@@ -111,7 +111,7 @@ func (s *store) OwedHandBacks(ctx context.Context, coveredOnly bool) ([]OwedHand
 	const op = "daemon.wsm.owed_handbacks"
 	var out []OwedHandBack
 	err := s.read(ctx, op, dlog.Context{"covered_only": coveredOnly}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx,
+		rows, err := s.q(ctx).QueryContext(ctx,
 			`SELECT merge_workspace, requester, merge_name, branch, summary, compact_after, idempotency_key, owed_at, covered
 			 FROM owed_handbacks WHERE covered = 1 OR NOT ? ORDER BY owed_at, merge_workspace`, coveredOnly)
 		if err != nil {

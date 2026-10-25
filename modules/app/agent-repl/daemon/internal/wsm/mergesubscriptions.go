@@ -182,7 +182,7 @@ func (s *store) UnsubscribeMergeQueue(ctx context.Context, subscriber WorkspaceI
 func (s *store) MergeQueueSubscriptions(ctx context.Context) ([]MergeQueueSubscription, error) {
 	var out []MergeQueueSubscription
 	err := s.read(ctx, "daemon.wsm.merge_queue_subscriptions", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx,
+		rows, err := s.q(ctx).QueryContext(ctx,
 			`SELECT subscriber, repo_key, detail, subscribed_at FROM merge_queue_subscriptions ORDER BY subscriber, repo_key`)
 		if err != nil {
 			return err

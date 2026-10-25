@@ -18,7 +18,7 @@ import (
 func (s *store) DataVersion(ctx context.Context) (int64, error) {
 	var version int64
 	err := s.read(ctx, "daemon.wsm.data_version", dlog.Context{}, func(ctx context.Context) error {
-		return s.db().QueryRowContext(ctx, `PRAGMA data_version`).Scan(&version)
+		return s.q(ctx).QueryRowContext(ctx, `PRAGMA data_version`).Scan(&version)
 	})
 	return version, err
 }

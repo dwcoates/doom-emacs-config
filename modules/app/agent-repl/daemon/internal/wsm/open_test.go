@@ -622,7 +622,7 @@ func TestReadRecordsACancelledCallerWithoutAnError(t *testing.T) {
 			ctx := tc.ctx(t)
 			err := s.read(ctx, "daemon.wsm.test_read", dlog.Context{"workspace": string(ws.ID)},
 				func(ctx context.Context) error {
-					return s.db().QueryRowContext(ctx, "SELECT no_such_column FROM workspaces").Scan(new(int))
+					return s.q(ctx).QueryRowContext(ctx, "SELECT no_such_column FROM workspaces").Scan(new(int))
 				})
 
 			// Assert.

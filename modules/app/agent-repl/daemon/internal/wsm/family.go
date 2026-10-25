@@ -243,7 +243,7 @@ func requireOpenParentOf(ctx context.Context, tx *sql.Tx, id WorkspaceID) error 
 // spares the work.
 func (s *store) RequireOpenParent(ctx context.Context, parent WorkspaceID) error {
 	return s.familyRead(ctx, "daemon.wsm.require_open_parent", dlog.Context{"parent": string(parent)}, func(ctx context.Context) error {
-		return requireOpenParent(ctx, s.db(), parent)
+		return requireOpenParent(ctx, s.q(ctx), parent)
 	})
 }
 
@@ -254,7 +254,7 @@ func (s *store) RequireOpenParent(ctx context.Context, parent WorkspaceID) error
 func (s *store) RequireNoOpenChildren(ctx context.Context, ids ...WorkspaceID) error {
 	return s.familyRead(ctx, "daemon.wsm.require_no_open_children", dlog.Context{"workspaces": len(ids)}, func(ctx context.Context) error {
 		for _, id := range ids {
-			if err := refuseOpenChildren(ctx, s.db(), id); err != nil {
+			if err := refuseOpenChildren(ctx, s.q(ctx), id); err != nil {
 				return err
 			}
 		}

@@ -168,7 +168,7 @@ func (s *store) SidebarView(ctx context.Context) (SidebarView, error) {
 	view := DefaultSidebarView
 	err := s.read(ctx, "daemon.wsm.sidebar_view", dlog.Context{}, func(ctx context.Context) error {
 		var read SidebarView
-		err := s.db().QueryRowContext(ctx, `SELECT merged_folded, hidden_folded, open_folded FROM sidebar_view WHERE id = 1`).
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT merged_folded, hidden_folded, open_folded FROM sidebar_view WHERE id = 1`).
 			Scan(&read.MergedFolded, &read.HiddenFolded, &read.OpenFolded)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil

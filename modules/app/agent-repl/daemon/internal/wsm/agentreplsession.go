@@ -111,7 +111,7 @@ func (s *store) AgentReplSession(ctx context.Context) (AgentReplSession, bool, e
 			startedAt int64
 			began     string
 		)
-		err := s.db().QueryRowContext(ctx,
+		err := s.q(ctx).QueryRowContext(ctx,
 			`SELECT started_at, began FROM agent_repl_session WHERE id = 1`).
 			Scan(&startedAt, &began)
 		switch {

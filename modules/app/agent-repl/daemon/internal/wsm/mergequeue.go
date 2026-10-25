@@ -727,7 +727,7 @@ const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, source_ki
 // read's own WHERE and ORDER BY; the columns are always mergeQueueColumns. The rows
 // arrive in sequence order, so the position is the index within its repository.
 func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (map[RepoKey][]MergeQueueEntry, error) {
-	rows, err := s.db().QueryContext(ctx, `SELECT `+mergeQueueColumns+` FROM merge_queue `+tail, args...)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+mergeQueueColumns+` FROM merge_queue `+tail, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -830,7 +830,7 @@ func (s *store) MergeQueuePaused(ctx context.Context, repo RepoKey) (bool, error
 	}
 	var paused bool
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
-		err := s.db().QueryRowContext(ctx, `SELECT paused FROM merge_queue_repos WHERE repo_key = ?`, key).Scan(&paused)
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT paused FROM merge_queue_repos WHERE repo_key = ?`, key).Scan(&paused)
 		if errors.Is(err, sql.ErrNoRows) {
 			paused = false
 			return nil

@@ -99,7 +99,7 @@ func (s *store) recentTurns(ctx context.Context, level recentLevel, limit int) (
 			query = `SELECT ` + turnColumns + ` FROM turns WHERE workspace_id = ? AND started_at <= ? ORDER BY started_at DESC, id DESC`
 			args = append(args, nanos(time.UnixMilli(level.throughMs)))
 		}
-		rows, err := s.db().QueryContext(ctx, query, args...)
+		rows, err := s.q(ctx).QueryContext(ctx, query, args...)
 		if err != nil {
 			return err
 		}

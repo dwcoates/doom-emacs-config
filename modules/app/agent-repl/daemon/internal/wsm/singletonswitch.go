@@ -47,7 +47,7 @@ func (sw singletonSwitch) get(ctx context.Context, s *store, op string) (bool, t
 	var since time.Time
 	err := s.read(ctx, op, dlog.Context{}, func(ctx context.Context) error {
 		var at int64
-		err := s.db().QueryRowContext(ctx, fmt.Sprintf(`SELECT %s FROM %s WHERE id = 1`, sw.column, sw.table)).Scan(&at)
+		err := s.q(ctx).QueryRowContext(ctx, fmt.Sprintf(`SELECT %s FROM %s WHERE id = 1`, sw.column, sw.table)).Scan(&at)
 		if errors.Is(err, sql.ErrNoRows) {
 			on, since = false, time.Time{}
 			return nil

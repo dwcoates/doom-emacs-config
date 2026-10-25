@@ -61,7 +61,7 @@ func (s *store) loadTurnSet(ctx context.Context, set turnSet, id WorkspaceID) ([
 	var out []TurnID
 	query := fmt.Sprintf(`SELECT turn_id FROM %s WHERE workspace_id = ? ORDER BY %s, turn_id`, set.table, set.atColumn)
 	err := s.read(ctx, set.loadOp, dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, query, id)
+		rows, err := s.q(ctx).QueryContext(ctx, query, id)
 		if err != nil {
 			return err
 		}

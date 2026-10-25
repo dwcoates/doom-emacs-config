@@ -79,7 +79,7 @@ func (s *store) Serving(ctx context.Context, id WorkspaceID) (*InstanceID, error
 	var out *InstanceID
 	err := s.read(ctx, "daemon.wsm.serving", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
 		var instance sql.NullString
-		err := scanWorkspaceRow(ctx, s.db(), id, "serving_instance", &instance)
+		err := scanWorkspaceRow(ctx, s.q(ctx), id, "serving_instance", &instance)
 		if err != nil {
 			return err
 		}

@@ -48,7 +48,7 @@ func (s *store) FeedTextScale(ctx context.Context) (float64, error) {
 	scale := DefaultFeedTextScale
 	err := s.read(ctx, "daemon.wsm.feed_text_scale", dlog.Context{}, func(ctx context.Context) error {
 		var stored float64
-		err := s.db().QueryRowContext(ctx, `SELECT scale FROM feed_text_scale WHERE id = 1`).Scan(&stored)
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT scale FROM feed_text_scale WHERE id = 1`).Scan(&stored)
 		if errors.Is(err, sql.ErrNoRows) {
 			scale = DefaultFeedTextScale
 			return nil

@@ -193,7 +193,7 @@ func (s *store) UnsubscribeWorkspace(ctx context.Context, subscriber, followed W
 func (s *store) WorkspaceSubscribers(ctx context.Context, followed WorkspaceID) ([]WorkspaceSubscription, error) {
 	var out []WorkspaceSubscription
 	err := s.read(ctx, "daemon.wsm.workspace_subscribers", dlog.Context{"followed": string(followed)}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx,
+		rows, err := s.q(ctx).QueryContext(ctx,
 			`SELECT subscriber, events, subscribed_at FROM workspace_subscriptions WHERE followed = ? ORDER BY subscriber`, followed)
 		if err != nil {
 			return err

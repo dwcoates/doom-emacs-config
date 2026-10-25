@@ -623,7 +623,7 @@ func moveBefore[ID comparable](order []ID, id ID, before *ID) []ID {
 func (s *store) ListSubsections(ctx context.Context) ([]Subsection, error) {
 	var out []Subsection
 	err := s.read(ctx, "daemon.wsm.list_subsections", dlog.Context{}, func(ctx context.Context) error {
-		loaded, err := listSubsections(ctx, s.db())
+		loaded, err := listSubsections(ctx, s.q(ctx))
 		out = loaded
 		return err
 	})
@@ -672,7 +672,7 @@ type Arrangement struct {
 func (s *store) ReadArrangement(ctx context.Context) (Arrangement, error) {
 	var out Arrangement
 	err := s.read(ctx, "daemon.wsm.read_arrangement", dlog.Context{}, func(ctx context.Context) error {
-		tx, err := s.db().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		tx, err := s.q(ctx).BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 		if err != nil {
 			return fmt.Errorf("wsm: begin the arrangement read: %w", err)
 		}

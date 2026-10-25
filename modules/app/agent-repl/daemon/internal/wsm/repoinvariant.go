@@ -56,7 +56,7 @@ const orphanRemediation = "re-register the workspace's directory, which mints it
 func (s *store) workspacesWithUnregisteredRepository(ctx context.Context) ([]orphanWorkspace, error) {
 	var out []orphanWorkspace
 	err := s.read(ctx, "daemon.wsm.repository_invariant", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `
+		rows, err := s.q(ctx).QueryContext(ctx, `
 			SELECT workspaces.id, workspaces.dir, workspaces.repo_id
 			  FROM workspaces
 			  LEFT JOIN repositories ON repositories.id = workspaces.repo_id

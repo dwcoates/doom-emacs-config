@@ -181,7 +181,7 @@ func (s *store) CloseTurn(ctx context.Context, turn TurnID, at time.Time, how Tu
 func (s *store) Turn(ctx context.Context, id WorkspaceID, turn TurnID) (Turn, error) {
 	var out Turn
 	err := s.read(ctx, "daemon.wsm.turn", dlog.Context{"workspace": string(id), "turn": string(turn)}, func(ctx context.Context) error {
-		t, err := scanTurn(s.db().QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ? AND workspace_id = ?`, turn, id))
+		t, err := scanTurn(s.q(ctx).QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ? AND workspace_id = ?`, turn, id))
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("wsm: turn %s of workspace %s: %w", turn, id, ErrNotFound)
 		}
@@ -204,7 +204,7 @@ func (s *store) TurnCloses(ctx context.Context, id WorkspaceID, turns []TurnID) 
 	}
 	err := s.read(ctx, "daemon.wsm.turn_closes", dlog.Context{"workspace": string(id), "turns": len(turns)}, func(ctx context.Context) error {
 		for _, turn := range turns {
-			t, err := scanTurn(s.db().QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ? AND workspace_id = ?`, turn, id))
+			t, err := scanTurn(s.q(ctx).QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ? AND workspace_id = ?`, turn, id))
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
@@ -244,7 +244,7 @@ func turnFacts[T any](ctx context.Context, s *store, op string, id WorkspaceID, 
 	}
 	err := s.read(ctx, op, dlog.Context{"workspace": string(id), "turns": len(turns)}, func(ctx context.Context) error {
 		for _, turn := range turns {
-			t, err := scanTurn(s.db().QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ? AND workspace_id = ?`, turn, id))
+			t, err := scanTurn(s.q(ctx).QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ? AND workspace_id = ?`, turn, id))
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
@@ -279,7 +279,7 @@ func (s *store) RecordedTurns(ctx context.Context, id WorkspaceID, turns []TurnI
 	err := s.read(ctx, "daemon.wsm.recorded_turns", dlog.Context{"workspace": string(id), "turns": len(turns)}, func(ctx context.Context) error {
 		for _, turn := range turns {
 			var one int
-			err := s.db().QueryRowContext(ctx, `SELECT 1 FROM turns WHERE id = ? AND workspace_id = ?`, turn, id).Scan(&one)
+			err := s.q(ctx).QueryRowContext(ctx, `SELECT 1 FROM turns WHERE id = ? AND workspace_id = ?`, turn, id).Scan(&one)
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
@@ -300,7 +300,7 @@ func (s *store) RecordedTurns(ctx context.Context, id WorkspaceID, turns []TurnI
 func (s *store) OpenTurns(ctx context.Context, id WorkspaceID) ([]Turn, error) {
 	var out []Turn
 	err := s.read(ctx, "daemon.wsm.open_turns", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		loaded, err := openTurns(ctx, s.db(), id)
+		loaded, err := openTurns(ctx, s.q(ctx), id)
 		if err != nil {
 			return err
 		}
@@ -327,7 +327,7 @@ func (s *store) HasTurns(ctx context.Context, id WorkspaceID) (bool, error) {
 	var has bool
 	err := s.read(ctx, "daemon.wsm.has_turns", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
 		var one int
-		err := s.db().QueryRowContext(ctx, `SELECT 1 FROM turns WHERE workspace_id = ? LIMIT 1`, id).Scan(&one)
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT 1 FROM turns WHERE workspace_id = ? LIMIT 1`, id).Scan(&one)
 		if errors.Is(err, sql.ErrNoRows) {
 			has = false
 			return nil
@@ -581,7 +581,7 @@ func (s *store) CloseOrphans(ctx context.Context, id WorkspaceID, at time.Time) 
 func (s *store) AllDisplacedTurns(ctx context.Context) ([]Turn, error) {
 	var out []Turn
 	err := s.read(ctx, "daemon.wsm.all_displaced_turns", nil, func(ctx context.Context) error {
-		loaded, err := listRows(ctx, s.db(), `SELECT `+turnColumns+` FROM turns WHERE displaced = 1 ORDER BY started_at, id`, scanTurn)
+		loaded, err := listRows(ctx, s.q(ctx), `SELECT `+turnColumns+` FROM turns WHERE displaced = 1 ORDER BY started_at, id`, scanTurn)
 		out = loaded
 		return err
 	})

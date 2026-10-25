@@ -554,7 +554,7 @@ func (s *store) AllHeldPrompts(ctx context.Context) ([]HeldPrompt, error) {
 func (s *store) loadHeldPrompts(ctx context.Context, op string, fields dlog.Context, query string, args ...any) ([]HeldPrompt, error) {
 	var out []HeldPrompt
 	err := s.read(ctx, op, fields, func(ctx context.Context) error {
-		loaded, err := listRows(ctx, s.db(), query, scanHeldPrompt, args...)
+		loaded, err := listRows(ctx, s.q(ctx), query, scanHeldPrompt, args...)
 		out = loaded
 		return err
 	})

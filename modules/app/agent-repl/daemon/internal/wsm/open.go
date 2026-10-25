@@ -122,6 +122,11 @@ type store struct {
 	heldMu    sync.Mutex
 	heldUsage map[string]AccountUsage
 
+	// conns accounts for every operation's use of the one connection
+	// (conn.go); now is its clock, time.Now outside a test.
+	conns connUse
+	now   func() time.Time
+
 	// leaseMu guards owned.
 	leaseMu sync.Mutex
 	// owned is every lease THIS HANDLE acquired and has not released. One
@@ -332,7 +337,7 @@ func openStore(ctx context.Context, path, dsn string, readOnly bool, opts []Opti
 		handle.Close()
 		return nil, fmt.Errorf("wsm: open %q: %w", path, err)
 	}
-	s := &store{path: path, log: discardLogger{}, canonicalDir: dirpath.Canonical}
+	s := &store{path: path, log: discardLogger{}, canonicalDir: dirpath.Canonical, now: time.Now}
 	s.current.Store(&handleState{db: handle, readOnly: readOnly})
 	for _, opt := range opts {
 		opt(s)
@@ -352,7 +357,7 @@ func openStore(ctx context.Context, path, dsn string, readOnly bool, opts []Opti
 // existing file forward to it.
 func (s *store) ensureLayout(ctx context.Context) error {
 	var count int
-	err := s.db().QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'layout'`).Scan(&count)
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'layout'`).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("wsm: probe layout table in %q: %w", s.path, err)
 	}
@@ -401,7 +406,7 @@ func (s *store) checkLayout(ctx context.Context) error {
 // row is undecodable, not merely foreign.
 func (s *store) layoutVersion(ctx context.Context) (int, error) {
 	var version int
-	err := s.db().QueryRowContext(ctx, `SELECT version FROM layout WHERE id = 1`).Scan(&version)
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT version FROM layout WHERE id = 1`).Scan(&version)
 	if errors.Is(err, sql.ErrNoRows) {
 		refusal := &DecodeError{Table: "layout", Row: "1", Err: errors.New("no layout row")}
 		s.log.Error("daemon.wsm.open", "state database carries no layout version", dlog.Context{"path": s.path, "error": refusal.Error()})
@@ -553,7 +558,23 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 		s.log.Error(op, "refused a write on a read-only handle", withError(fields, ErrReadOnly))
 		return ErrReadOnly
 	}
-	tx, err := current.db.BeginTx(ctx, nil)
+	// THE CONNECTION IS TAKEN FIRST, and its wait and hold accounted
+	// (conn.go); a wait cut short is a transaction that never began.
+	acquired, err := s.withConn(ctx, current.db, op, fields, func(ctx context.Context) error {
+		return s.writeTx(ctx, op, fields, fn)
+	})
+	if !acquired {
+		wrapped := fmt.Errorf("wsm: begin transaction: %w", err)
+		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "could not begin the transaction", withError(fields, wrapped))
+		return wrapped
+	}
+	return err
+}
+
+// writeTx runs one write's transaction on the connection ctx's operation
+// holds, and records how it ended.
+func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn func(context.Context, *sql.Tx) error) error {
+	tx, err := s.q(ctx).BeginTx(ctx, nil)
 	if err != nil {
 		wrapped := fmt.Errorf("wsm: begin transaction: %w", err)
 		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "could not begin the transaction", withError(fields, wrapped))
@@ -688,7 +709,7 @@ func committed(ctx context.Context, err error) error {
 // that at ERROR would put an error line on every shutdown. It is recorded at
 // INFO instead; the error is still returned unchanged.
 func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn func(context.Context) error) error {
-	if err := fn(ctx); err != nil {
+	if _, err := s.withConn(ctx, s.db(), op, fields, fn); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			s.log.Debug(op, "the read found no such record", withError(fields, err))
 			return err

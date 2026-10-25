@@ -40,7 +40,7 @@ func (s *store) readUntold(ctx context.Context, t untoldTable, op string, subscr
 	)
 	err := s.read(ctx, op, fields, func(ctx context.Context) error {
 		var raw, sentences string
-		err := s.db().QueryRowContext(ctx,
+		err := s.q(ctx).QueryRowContext(ctx,
 			`SELECT turn_id, sentences FROM `+t.table+` WHERE subscriber = ? AND `+t.subject+` = ?`,
 			subscriber, subject).Scan(&raw, &sentences)
 		if errors.Is(err, sql.ErrNoRows) {

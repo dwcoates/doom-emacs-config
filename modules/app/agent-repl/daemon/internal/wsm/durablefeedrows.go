@@ -97,7 +97,7 @@ func (s *store) PutDurableFeedRow(ctx context.Context, row DurableFeedRow) error
 func (s *store) DurableFeedRows(ctx context.Context, id WorkspaceID) ([]DurableFeedRow, error) {
 	var out []DurableFeedRow
 	err := s.read(ctx, "daemon.wsm.durable_feed_rows", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx,
+		rows, err := s.q(ctx).QueryContext(ctx,
 			`SELECT row_id, plane, order_key, row FROM durable_feed_rows WHERE workspace_id = ? ORDER BY order_key, row_id`, id)
 		if err != nil {
 			return err

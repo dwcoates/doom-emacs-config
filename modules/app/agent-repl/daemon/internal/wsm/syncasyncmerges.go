@@ -105,7 +105,7 @@ func (s *store) ReservedMergeNames(ctx context.Context) (map[string]WorkspaceID,
 	const op = "daemon.wsm.reserved_merge_names"
 	out := map[string]WorkspaceID{}
 	err := s.read(ctx, op, dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `SELECT source_detach_name, workspace_id FROM merge_queue WHERE source_detach_name IS NOT NULL`)
+		rows, err := s.q(ctx).QueryContext(ctx, `SELECT source_detach_name, workspace_id FROM merge_queue WHERE source_detach_name IS NOT NULL`)
 		if err != nil {
 			return err
 		}

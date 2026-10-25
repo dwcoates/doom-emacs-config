@@ -104,7 +104,7 @@ func (s *store) DeployHoldOf(ctx context.Context, repo RepoKey) (DeployHold, err
 	var hold DeployHold
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
 		var heldAt sql.NullInt64
-		err := s.db().QueryRowContext(ctx,
+		err := s.q(ctx).QueryRowContext(ctx,
 			`SELECT deploy_held_at, deploy_skipped FROM merge_queue_repos WHERE repo_key = ?`, key).Scan(&heldAt, &hold.Skipped)
 		if errors.Is(err, sql.ErrNoRows) {
 			hold = DeployHold{}
