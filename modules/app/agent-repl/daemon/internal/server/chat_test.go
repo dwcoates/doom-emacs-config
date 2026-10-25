@@ -744,3 +744,45 @@ func TestSearchChatsAnswersAGraphFailure(t *testing.T) {
 	}
 	t.Fatalf("records = %+v, want the failed search at error with its query", log.Records())
 }
+
+// TestSelectChatTextHighlightAsksTheHostToFocusTheComposer pins that only a
+// highlight pushes chat_text_highlighted: each selection is followed by a
+// notification click, which must then be the first event the thread's host
+// stream carries when no focus was asked.
+func TestSelectChatTextHighlightAsksTheHostToFocusTheComposer(t *testing.T) {
+	cases := []struct {
+		name      string
+		selection *agentreplv1.SelectChatTextSelection
+		wantFocus bool
+	}{
+		{name: "a highlight", wantFocus: true, selection: &agentreplv1.SelectChatTextSelection{State: &agentreplv1.SelectChatTextSelection_Highlighted{
+			Highlighted: &agentreplv1.SelectChatTextHighlighted{Node: &zettelv1.NodeId{Id: "n1"}, Quote: &zettelv1.NodeQuote{Text: "words"}},
+		}}},
+		{name: "a clear", selection: &agentreplv1.SelectChatTextSelection{State: &agentreplv1.SelectChatTextSelection_Cleared{Cleared: &agentreplv1.SelectChatTextCleared{}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			thread := withThread(h)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream, err := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: thread}))
+			if err != nil {
+				t.Fatalf("open the thread's host stream: %v", err)
+			}
+
+			// Act
+			if _, err := h.Client.SelectChatText(context.Background(), connect.NewRequest(&agentreplv1.SelectChatTextRequest{Thread: thread, Selection: tc.selection})); err != nil {
+				t.Fatalf("SelectChatText: %v", err)
+			}
+			h.Server.NotificationClicked(testThreadID)
+			first := receiveHostEventPastSelection(t, stream)
+
+			// Assert
+			if got := first.GetChatTextHighlighted() != nil; got != tc.wantFocus {
+				t.Fatalf("first event = %v, want chat_text_highlighted %v", first, tc.wantFocus)
+			}
+		})
+	}
+}

@@ -349,7 +349,8 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"evaluate\":{\"token\":{\"value\":\"t-1\"},\"text\":\"(+ 1 2)\"}}" :evaluate)
                       (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
                       (list "{\"selectRequested\":{}}" :select-requested)
-                      (list "{\"composeEntry\":{\"label\":\"3.1\"}}" :compose-entry)))
+                      (list "{\"composeEntry\":{\"label\":\"3.1\"}}" :compose-entry)
+                      (list "{\"chatTextHighlighted\":{}}" :chat-text-highlighted)))
     (should (equal (plist-get (agent-repl-test-wire-host--decode
                                #'agent-repl-wire-decode-watch-host-workspace-response
                                (nth 0 case))
@@ -629,6 +630,15 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   #'agent-repl-wire-decode-host-workspace-final-response-clicked
                   "{\"row\":\"r\"}")
                  '("HostWorkspaceFinalResponseClicked" row "unknown field"))))
+
+;;;; ---- The chat highlight push ----
+
+(ert-deftest agent-repl-test-wire-host-chat-text-highlighted-refuses-a-field ()
+  "A field on the empty highlight message is refused, not ignored."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-chat-text-highlighted
+                  "{\"node\":\"n\"}")
+                 '("HostWorkspaceChatTextHighlighted" node "unknown field"))))
 
 ;;;; ---- The rail's row click push ----
 
@@ -1573,7 +1583,8 @@ opens are OpenTabs streams."
                        #'string<)
                  (sort (list "evaluate" "host" "transferred" "reloadWebapp"
                              "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection"
-                             "finalResponseClicked" "selectRequested" "composeEntry")
+                             "finalResponseClicked" "selectRequested" "composeEntry"
+                             "chatTextHighlighted")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()

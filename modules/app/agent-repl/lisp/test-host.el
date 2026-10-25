@@ -2255,6 +2255,28 @@ answers `:unknown' and records the breach rather than opening."
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.final-response-clicked ws=ws-1"))))
 
+;;;; ---- The chat highlight ----
+
+(ert-deftest agent-repl-test-host-chat-highlight-focuses-this-threads-composer ()
+  "A `chat_text_highlighted' push focuses the composer of the thread its stream carries."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :chat-text-highlighted :value nil))
+    ;; Assert
+    (should (equal (car agent-repl-test-host--effects) '(:focus-for-reply . "ws-1")))))
+
+(ert-deftest agent-repl-test-host-chat-highlight-is-logged ()
+  "The highlight reaching Emacs leaves an INFO record naming the thread."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :chat-text-highlighted :value nil))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.chat-text-highlighted ws=ws-1"))))
+
 ;;;; ---- The branch click ----
 
 (ert-deftest agent-repl-test-host-compose-entry-opens-an-entry-in-this-workspaces-composer ()

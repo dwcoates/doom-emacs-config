@@ -1266,6 +1266,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:notification-clicked (agent-repl-host--notification-clicked ws))
     (:selection (agent-repl-host--apply-selection ws value))
     (:final-response-clicked (agent-repl-host--final-response-clicked ws))
+    (:chat-text-highlighted (agent-repl-host--chat-text-highlighted ws))
     (:select-requested (agent-repl-host--select-requested ws))
     (:compose-entry (agent-repl-host--compose-entry ws value))
     (:transferred (agent-repl-host--transferred ws value))
@@ -1374,6 +1375,17 @@ keyboard is still in the webview, and the composer takes it in insert
 state (`agent-repl-input-focus-for-reply').  An event, never replayed, so
 a reconnect never moves the keyboard."
   (agent-repl--info ws "elisp.host.final-response-clicked ws=%s" ws)
+  (agent-repl-input-focus-for-reply ws))
+
+;;;; ---- The chat highlight ----
+
+(defun agent-repl-host--chat-text-highlighted (ws)
+  "Focus WS's composer: the reader selected words in its chat answer.
+The next question is asked of the highlighted words, so the composer
+takes the keyboard in insert state (`agent-repl-input-focus-for-reply'),
+as for a final response's click.  An event, never replayed, so a
+reconnect never moves the keyboard."
+  (agent-repl--info ws "elisp.host.chat-text-highlighted ws=%s" ws)
   (agent-repl-input-focus-for-reply ws))
 
 ;;;; ---- The rail's row click ----
