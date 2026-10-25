@@ -128,7 +128,6 @@
 (declare-function agent-repl-webhost-ensure "webhost" (conn))
 (declare-function agent-repl-webhost-xwidget "webhost" ())
 (declare-function agent-repl-page-unload-note-mounted "page-unload" (ws))
-(declare-function agent-repl-page-unloaded-p "page-unload" (ws))
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
 (declare-function agent-repl-webhost-remove "webhost" (ws))
 (declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
@@ -1133,8 +1132,6 @@ Refusals, all preconditions rather than failures:
   - `:hidden'            the user hid it, or its repository section is
                          collapsed, and the user is not looking at it:
                          it runs nothing (`agent-repl-open-tabs-withheld-p');
-  - `:unloaded'          its page was unloaded because nobody looked at
-                         it (page-unload.el); the switch to it remounts it;
   - `:already-mounted'   a live webview buffer already exists (this is
                          what makes pre-creation idempotent);
   - `:no-xwidget'        an Emacs with no xwidget support has no webview
@@ -1144,7 +1141,6 @@ Refusals, all preconditions rather than failures:
    ((not (agent-repl--ws-gui-frontend-p ws)) :not-gui)
    ((null (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws))) :no-ref)
    ((and (fboundp 'agent-repl-open-tabs-withheld-p) (agent-repl-open-tabs-withheld-p ws)) :hidden)
-   ((and (fboundp 'agent-repl-page-unloaded-p) (agent-repl-page-unloaded-p ws)) :unloaded)
    ((buffer-live-p (agent-repl--ws-get ws :frontend-buffer)) :already-mounted)
    ((not (agent-repl--frontend-xwidget-available-p)) :no-xwidget)))
 
