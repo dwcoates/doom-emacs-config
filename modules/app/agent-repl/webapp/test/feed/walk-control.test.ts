@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FEED_LOAD_MORE_LABEL,
+  FEED_LOADING_LABEL,
   WALK_LOADING_ATTRIBUTE,
   WALK_SPINNER_CLASS,
   createWalkTrigger,
@@ -25,23 +26,35 @@ function mounted() {
 }
 
 describe("drawWalkControl", () => {
-  it("draws the control idle, reading its label", () => {
+  it("draws the control idle, its spinner alone with no text", () => {
     // Arrange / Act
     const control = drawWalkControl();
 
     // Assert
     expect({
       text: control.textContent,
+      spinners: control.querySelectorAll(`.${WALK_SPINNER_CLASS}`).length,
+      children: control.children.length,
       disabled: control.disabled,
       loading: control.hasAttribute(WALK_LOADING_ATTRIBUTE),
+      label: control.getAttribute("aria-label"),
       marked: control.hasAttribute("data-load-more"),
       className: control.className,
-    }).toEqual({ text: FEED_LOAD_MORE_LABEL, disabled: false, loading: false, marked: true, className: "feed-load-more" });
+    }).toEqual({
+      text: "",
+      spinners: 1,
+      children: 1,
+      disabled: false,
+      loading: false,
+      label: FEED_LOAD_MORE_LABEL,
+      marked: true,
+      className: "feed-load-more",
+    });
   });
 });
 
 describe("setWalkLoading", () => {
-  it("replaces the label with a spinner while loading", () => {
+  it("marks the control loading, keeping its one spinner, while loading", () => {
     // Arrange
     const control = drawWalkControl();
 
@@ -55,7 +68,7 @@ describe("setWalkLoading", () => {
       children: control.children.length,
       loading: control.hasAttribute(WALK_LOADING_ATTRIBUTE),
       label: control.getAttribute("aria-label"),
-    }).toEqual({ text: "", spinners: 1, children: 1, loading: true, label: "loading the previous page" });
+    }).toEqual({ text: "", spinners: 1, children: 1, loading: true, label: FEED_LOADING_LABEL });
   });
 
   it("disables the control while loading", () => {
@@ -69,7 +82,7 @@ describe("setWalkLoading", () => {
     expect(control.getAttribute("aria-disabled")).toBe("true");
   });
 
-  it("restores the label and enables the control once idle again", () => {
+  it("rests the spinner and enables the control once idle again", () => {
     // Arrange
     const control = drawWalkControl();
     setWalkLoading(control, true);
@@ -80,10 +93,11 @@ describe("setWalkLoading", () => {
     // Assert
     expect({
       text: control.textContent,
+      spinners: control.querySelectorAll(`.${WALK_SPINNER_CLASS}`).length,
       disabled: control.disabled,
       loading: control.hasAttribute(WALK_LOADING_ATTRIBUTE),
-      label: control.hasAttribute("aria-label"),
-    }).toEqual({ text: FEED_LOAD_MORE_LABEL, disabled: false, loading: false, label: false });
+      label: control.getAttribute("aria-label"),
+    }).toEqual({ text: "", spinners: 1, disabled: false, loading: false, label: FEED_LOAD_MORE_LABEL });
   });
 
   it("shows one spinner however often loading is set", () => {

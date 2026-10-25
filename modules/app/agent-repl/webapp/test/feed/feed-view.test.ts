@@ -884,7 +884,7 @@ describe("createFeedController: the walk", () => {
     );
   });
 
-  it("labels the load-more control \"load previous page\"", () => {
+  it("draws the load-more control as its spinner alone, with no text", () => {
     // Arrange
     const { controller, host } = fixture();
 
@@ -892,7 +892,14 @@ describe("createFeedController: the walk", () => {
     controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
 
     // Assert
-    expect(host.querySelector("[data-load-more]")?.textContent).toBe("load previous page");
+    const control = host.querySelector("[data-load-more]");
+    if (control === null) throw new Error("the feed drew no load-more control");
+    expect({
+      text: control.textContent,
+      spinners: control.querySelectorAll(`.${WALK_SPINNER_CLASS}`).length,
+      children: control.children.length,
+      label: control.getAttribute("aria-label"),
+    }).toEqual({ text: "", spinners: 1, children: 1, label: FEED_LOAD_MORE_LABEL });
   });
 
   it("takes it away once the walk reaches the start", () => {
@@ -3420,7 +3427,7 @@ describe("createFeedController: the walk control on sight", () => {
     expect(h.calls.getFeedPage).toEqual([]);
   });
 
-  it("shows a spinner in place of the label while the page loads", async () => {
+  it("turns the spinner while the page loads", async () => {
     // Arrange
     const { h, answer } = heldPage();
     const { controller, host } = fixture(h);
@@ -3460,7 +3467,7 @@ describe("createFeedController: the walk control on sight", () => {
     await settle();
   });
 
-  it("restores the label once the page lands", async () => {
+  it("rests the spinner once the page lands", async () => {
     // Arrange
     const { h, answer } = heldPage();
     const { controller, host } = fixture(h);
@@ -3476,12 +3483,12 @@ describe("createFeedController: the walk control on sight", () => {
     const control = controlOf(host);
     expect({ loading: control.hasAttribute(WALK_LOADING_ATTRIBUTE), text: control.textContent, disabled: control.disabled }).toEqual({
       loading: false,
-      text: FEED_LOAD_MORE_LABEL,
+      text: "",
       disabled: false,
     });
   });
 
-  it("restores the label when the page is refused", async () => {
+  it("rests the spinner when the page is refused", async () => {
     // Arrange
     const h = harness({ getFeedPage: () => create(GetFeedPageResponseSchema, { result: { case: "error", value: {} } }) });
     const { controller, host } = fixture(h);
@@ -3492,8 +3499,8 @@ describe("createFeedController: the walk control on sight", () => {
     await settle();
 
     // Assert
-    expect({ text: controlOf(host).textContent, refusal: host.querySelector(".refusal")?.getAttribute("data-arm") }).toEqual({
-      text: FEED_LOAD_MORE_LABEL,
+    expect({ loading: controlOf(host).hasAttribute(WALK_LOADING_ATTRIBUTE), refusal: host.querySelector(".refusal")?.getAttribute("data-arm") }).toEqual({
+      loading: false,
       refusal: "error",
     });
   });
