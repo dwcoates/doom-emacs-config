@@ -517,3 +517,74 @@ describe("a file link draws its file name, not its path", () => {
     expect(renderMarkdown("[~/a/b.ts:4](~/a/b.ts:4)")).toContain('href="~/a/b.ts:4"');
   });
 });
+
+describe("renderMarkdown TeX", () => {
+  /** The rendered HTML of SRC parsed, for querying. */
+  const drawn = (src: string): HTMLElement => {
+    const el = document.createElement("div");
+    el.innerHTML = renderMarkdown(src);
+    return el;
+  };
+
+  it.each([
+    ["dollars", "the area $\\pi r^2$ grows"],
+    ["parentheses", "the area \\(\\pi r^2\\) grows"],
+  ])("typesets inline TeX between %s, in its line", (_name, src) => {
+    // Act
+    const el = drawn(src);
+
+    // Assert
+    const eq = el.querySelector("p > eq");
+    expect(eq?.querySelector(".katex")).not.toBeNull();
+    expect(el.textContent).toContain("grows");
+    expect(el.textContent).not.toContain("$");
+  });
+
+  it.each([
+    ["double dollars", "$$\\int_0^1 x\\,dx$$"],
+    ["brackets", "\\[\\int_0^1 x\\,dx\\]"],
+    ["a math fence", "```math\n\\int_0^1 x\\,dx\n```"],
+  ])("typesets display TeX between %s as its own block", (_name, src) => {
+    // Act
+    const el = drawn(src);
+
+    // Assert
+    expect(el.querySelector("section > eqn .katex-display")).not.toBeNull();
+    expect(el.querySelector("pre")).toBeNull();
+  });
+
+  it("leaves money as text", () => {
+    // Act
+    const el = drawn("it costs $5 and $10");
+
+    // Assert
+    expect(el.querySelector(".katex")).toBeNull();
+    expect(el.textContent?.trim()).toBe("it costs $5 and $10");
+  });
+
+  it("leaves TeX in a code span as code", () => {
+    // Act
+    const el = drawn("write `$x$` for x");
+
+    // Assert
+    expect(el.querySelector(".katex")).toBeNull();
+    expect(el.querySelector("code")?.textContent).toBe("$x$");
+  });
+
+  it("draws a formula KaTeX cannot parse as its marked source, and the rest of the text", () => {
+    // Act
+    const el = drawn("bad $\\frac{1}{$ then more");
+
+    // Assert
+    expect(el.querySelector(".katex-error")?.textContent).toContain("\\frac{1}{");
+    expect(el.textContent).toContain("then more");
+  });
+
+  it("keeps a TeX-shaped attack inert: KaTeX trusts no HTML", () => {
+    // Act
+    const el = drawn("$\\href{javascript:alert(1)}{x}$");
+
+    // Assert
+    expect(el.querySelector('a[href^="javascript"]')).toBeNull();
+  });
+});

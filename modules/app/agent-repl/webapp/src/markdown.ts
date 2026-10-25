@@ -20,14 +20,25 @@
  * or inside a fence, as a tree block of its own (prose.proto), which
  * metaprompt-tree.ts draws.
  *
+ * TeX IS TYPESET (owner request, 2026-10-25): `$…$` and `\(…\)` inline,
+ * `$$…$$`, `\[…\]` and a ```math fence as a display block, each through
+ * KaTeX (markdown-it-texmath), drawn in the text's own color on no ground
+ * (styles.css, "TeX"). A `$` beside a digit is money, never math (`$5 and
+ * $10`). KaTeX's output is its own markup from the parsed TeX, never the
+ * model's HTML (`trust` stays off), so the escape-first guarantee holds; a
+ * formula KaTeX cannot parse draws its source, marked as KaTeX marks an
+ * error, rather than failing the whole render.
+ *
  * Streaming-safe: markdown-it parses partial input on every call without
  * throwing (an unterminated fence renders as a still-open code block, a
  * half-typed construct degrades to literal text), so it can re-render on
  * every text-delta.
  */
 
+import katex from "katex";
 import MarkdownIt from "markdown-it";
 import taskLists from "markdown-it-task-lists";
+import texmath from "markdown-it-texmath";
 import { codeBlockHtml } from "./code-block.js";
 import { escapeHtml } from "./highlight.js";
 import {
@@ -133,6 +144,12 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
 
 md.use(taskLists);
 
+/** KaTeX's options for every formula: a malformed one draws, never throws. */
+const KATEX_OPTIONS = { throwOnError: false } as const;
+
+// texmath writes into the options it is handed, so it is handed a copy.
+md.use(texmath, { engine: katex, delimiters: ["dollars", "brackets"], katexOptions: { ...KATEX_OPTIONS } });
+
 // A BARE FILE NAME IS A FILE, NOT A HOST. The fuzzy linkifier must first SEE
 // `foo.ts` (most extensions are no TLD), then the rule below turns every
 // scheme-less autolink ending in a file extension into a file link: its href
@@ -225,8 +242,10 @@ function fenceParts(token: { info: string; content: string }): { lang: string; b
 
 // Fenced code: the md-code + hljs shape. highlightCode escapes in both
 // branches (hljs escapes its own output), so the escape-first guarantee holds.
+// A ```math fence is a display formula, drawn as `$$…$$` is.
 md.renderer.rules.fence = (tokens, idx): string => {
   const { lang, body } = fenceParts(tokens[idx]);
+  if (lang === "math") return `<section><eqn>${texmath.render(body, true, { ...KATEX_OPTIONS })}</eqn></section>`;
   return codeBlockHtml(body, lang);
 };
 

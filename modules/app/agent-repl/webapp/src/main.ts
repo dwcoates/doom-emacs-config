@@ -37,6 +37,8 @@ import "./styles.css";
 // the same face: the optical-size axis, upright and italic.
 import "@fontsource-variable/source-serif-4/opsz.css";
 import "@fontsource-variable/source-serif-4/opsz-italic.css";
+// KaTeX's layout and fonts, for the TeX markdown.ts typesets.
+import "katex/dist/katex.min.css";
 import { createTicker } from "./clock.js";
 import { createComposerGate, mountComposer } from "./composer/composer.js";
 import { createRowRenderers } from "./feed/renderers.js";
