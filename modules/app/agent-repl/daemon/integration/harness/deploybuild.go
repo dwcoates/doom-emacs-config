@@ -29,7 +29,8 @@ import (
 // launchd. A world that runs the REAL services names their binaries
 // (Opts.ServiceBinaries, DeploySources.Store/Sidecar): the staged cache-bin
 // then carries copies of them, and the processes' own reports are the ones
-// the deploy reads.
+// the deploy reads. No world runs a real zettel, so zettel is a placeholder
+// in every world, and its report is always the harness's to state.
 //
 // A test that needs a deploy to CHANGE something — a handover, a webview
 // reload — or to FAIL stages it with Daemon.StageDeployBuild (or
@@ -94,6 +95,17 @@ type DeploySources struct {
 // realServices reports whether the staged services are real binaries.
 func (s DeploySources) realServices() bool { return s.Store != "" }
 
+// placeholderServices are the cache-bin services this build stages as
+// placeholder bytes, whose reports the harness states itself
+// (Daemon.StateServiceBuilds): zettel always, and the store and the sidecar
+// when the world runs no real ones.
+func (s DeploySources) placeholderServices() []string {
+	if s.realServices() {
+		return []string{buildreport.ServiceZettel}
+	}
+	return []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel}
+}
+
 // DeployBuilder is the deploy's fake build: a Recorder, so a test can count
 // and read the deploys' builds, that stages one DeployBuild.
 type DeployBuilder struct {
@@ -153,8 +165,9 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
   done
   ` + service(buildreport.ServiceStore, src.Store) + `
   ` + service(buildreport.ServiceSidecar, src.Sidecar) + `
+  ` + service(buildreport.ServiceZettel, "") + `
   printf 'harness shim-lock\n' > "$out/cache-bin/shim-lock"
-  for n in shim-store shim-claude-sidecar shim-lock; do
+  for n in shim-store shim-claude-sidecar zettel shim-lock; do
     for f in built-sha source-tree; do printf 'harness\n' > "$out/cache-bin/.$n.$f"; done
   done
   exit 0
@@ -185,29 +198,37 @@ func (b *DeployBuilder) Stage(build DeployBuild) {
 	b.SetExitCode(0)
 }
 
-// StageDeployBuild makes the next deploys' build the named one. When this
-// daemon's world runs no real store or sidecar, it states their builds as the
-// staged placeholders, from the daemon's own pid; real services state their
-// own.
+// StageDeployBuild makes the next deploys' build the named one, and states
+// the staged placeholder services' builds from the daemon's own pid; real
+// services state their own.
 func (d *Daemon) StageDeployBuild(build DeployBuild) {
 	d.t.Helper()
 	d.Deploy.Stage(build)
-	if build == DeployFails || d.Deploy.sources.realServices() {
+	if build == DeployFails {
 		return
 	}
 	d.StateServiceBuilds(d.PID())
 }
 
-// StateServiceBuilds states the placeholder store and sidecar builds as run by
-// PID. A report names a live process, so a world whose deploys reach a
-// handover successor restates them under the successor's pid once the
-// incumbent that StageDeployBuild named has exited.
+// StateServiceBuilds states the placeholder services' builds as run by PID
+// (DeployBuilder.StatePlaceholderBuilds). A report names a live process, so a
+// world whose deploys reach a handover successor restates them under the
+// successor's pid once the incumbent that StageDeployBuild named has exited.
 func (d *Daemon) StateServiceBuilds(pid int) {
 	d.t.Helper()
-	for _, service := range []string{buildreport.ServiceStore, buildreport.ServiceSidecar} {
+	d.Deploy.StatePlaceholderBuilds(d.t, d.LockDir, pid)
+}
+
+// StatePlaceholderBuilds states, into lockDir, the builds of the services
+// this build stages as placeholders (DeploySources.placeholderServices) as
+// run by PID, a live process. A world whose daemon some other launcher starts
+// (the Emacs layer's) calls it beside Stage, as StageDeployBuild does.
+func (b *DeployBuilder) StatePlaceholderBuilds(t testing.TB, lockDir string, pid int) {
+	t.Helper()
+	for _, service := range b.sources.placeholderServices() {
 		sum := sha256.Sum256([]byte(fakeServiceBinary(service)))
-		if err := buildreport.Write(d.LockDir, service, buildreport.Report{PID: pid, Build: hex.EncodeToString(sum[:])}); err != nil {
-			d.t.Fatalf("harness: state the %s build report: %v", service, err)
+		if err := buildreport.Write(lockDir, service, buildreport.Report{PID: pid, Build: hex.EncodeToString(sum[:])}); err != nil {
+			t.Fatalf("harness: state the %s build report: %v", service, err)
 		}
 	}
 }

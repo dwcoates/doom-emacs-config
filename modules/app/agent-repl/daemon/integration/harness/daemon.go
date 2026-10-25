@@ -36,6 +36,7 @@ import (
 	"agent-repld/internal/tempdirs"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
+	"agent-repld/internal/zettelclient"
 
 	"connectrpc.com/connect"
 )
@@ -269,6 +270,14 @@ func statedEmpty(keys ...string) []string {
 // daemon (Opts.ServiceBinaries). Both or neither.
 type ServiceBinaries struct {
 	Store, Sidecar string
+}
+
+// UnservedZettelEnv is the environment entry pointing a daemon's zettel
+// socket at an unserved path under dir: no world runs a real zettel, so a
+// daemon's zettel calls fail there, and never reach the owner's own
+// zettel.sock. Every launcher of a test daemon states it.
+func UnservedZettelEnv(dir string) string {
+	return zettelclient.EnvSocket + "=" + filepath.Join(dir, "unused-zettel.sock")
 }
 
 // LockDirFor is the kernel-lock and build-report directory StartDaemon
@@ -812,6 +821,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		wsm.EnvTestUnsyncedWrites+"=1",
 		"AGENT_REPL_LOCK_DIR="+d.LockDir,
 		"AGENT_REPL_STORE_SOCKET="+filepath.Join(sockRoot, "unused-store.sock"),
+		UnservedZettelEnv(sockRoot),
 		"MULTI_REPO_ROOT="+multiRoot,
 		"AGENT_REPL_BROWSER_CMD="+d.Browser.Path,
 		"AGENT_REPL_DEPLOY_BUILDER="+d.Deploy.Path,

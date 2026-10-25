@@ -151,6 +151,9 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		Store: store.bin, Sidecar: sidecarBin,
 	})
 	deploy.Stage(harness.DeployCurrent)
+	// No world runs a real zettel: its staged placeholder's report is stated
+	// here, from this test's own (live) pid, so a deploy restarts no zettel.
+	deploy.StatePlaceholderBuilds(t, lockDir, os.Getpid())
 	launchctl := harness.NewFakeLaunchctl(t, deployBin)
 
 	extraEnv := []string{
@@ -182,6 +185,7 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		"AGENT_REPL_DEPLOY_BUILDER=" + deploy.Path,
 		"AGENT_REPL_LAUNCHCTL=" + launchctl.Path,
 		"AGENT_REPL_LAUNCH_AGENTS_DIR=" + filepath.Join(box.Scratch(), "LaunchAgents"),
+		harness.UnservedZettelEnv(harness.ShortTempDir(t)),
 	}
 	// LAST, so a scenario's own statement is the one the process carries.
 	extraEnv = append(extraEnv, cfg.extraEnv...)

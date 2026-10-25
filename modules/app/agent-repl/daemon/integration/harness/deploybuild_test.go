@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"agentrepl/logging/buildreport"
@@ -33,6 +35,10 @@ func TestFakeDeployBuilderStagesTheServicesTheWorldRuns(t *testing.T) {
 			want: func(_, _ string) string { return fakeServiceBinary("shim-store") }},
 		{name: "no real sidecar stages the placeholder", service: "shim-claude-sidecar",
 			want: func(_, _ string) string { return fakeServiceBinary("shim-claude-sidecar") }},
+		{name: "zettel stages the placeholder beside real services", real: true, service: "zettel",
+			want: func(_, _ string) string { return fakeServiceBinary("zettel") }},
+		{name: "zettel stages the placeholder beside placeholder services", service: "zettel",
+			want: func(_, _ string) string { return fakeServiceBinary("zettel") }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -94,10 +100,10 @@ func readOrFail(t *testing.T, path string) string {
 // build, so a world can restate them under a handover successor once the
 // incumbent StageDeployBuild named has exited.
 func TestStateServiceBuildsNamesThePidItIsGiven(t *testing.T) {
-	for _, service := range []string{buildreport.ServiceStore, buildreport.ServiceSidecar} {
+	for _, service := range []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel} {
 		t.Run(service, func(t *testing.T) {
 			// Arrange
-			d := &Daemon{t: t, LockDir: t.TempDir()}
+			d := &Daemon{t: t, LockDir: t.TempDir(), Deploy: &DeployBuilder{}}
 			sum := sha256.Sum256([]byte(fakeServiceBinary(service)))
 
 			// Act
@@ -110,6 +116,59 @@ func TestStateServiceBuildsNamesThePidItIsGiven(t *testing.T) {
 			}
 			if got.PID != 4242 || got.Build != hex.EncodeToString(sum[:]) {
 				t.Fatalf("report = %+v, want pid 4242 and the placeholder's build", got)
+			}
+		})
+	}
+}
+
+// TestPlaceholderServicesAreTheOnesNoWorldRunsForReal pins which services the
+// harness states the builds of: zettel in every world, the store and the
+// sidecar only in a world that runs no real ones.
+func TestPlaceholderServicesAreTheOnesNoWorldRunsForReal(t *testing.T) {
+	tests := []struct {
+		name    string
+		sources DeploySources
+		want    []string
+	}{
+		{name: "no real services", sources: DeploySources{}, want: []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel}},
+		{name: "a real store and sidecar", sources: DeploySources{Store: "/bin/store", Sidecar: "/bin/sidecar"}, want: []string{buildreport.ServiceZettel}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.sources.placeholderServices()
+
+			// Assert
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("placeholderServices() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestUnservedZettelEnvNamesTheZettelSocketUnderDir pins the one statement
+// every test-daemon launcher makes: the zettel socket, under the world's dir.
+func TestUnservedZettelEnvNamesTheZettelSocketUnderDir(t *testing.T) {
+	// Act
+	got := UnservedZettelEnv("/tmp/w")
+
+	// Assert
+	if want := "AGENT_REPL_ZETTEL_SOCKET=/tmp/w/unused-zettel.sock"; got != want {
+		t.Fatalf("UnservedZettelEnv = %q, want %q", got, want)
+	}
+}
+
+// TestEveryTestDaemonLauncherStatesTheUnservedZettel pins both launchers of
+// a test daemon to UnservedZettelEnv, so neither can reach the owner's zettel.
+func TestEveryTestDaemonLauncherStatesTheUnservedZettel(t *testing.T) {
+	for _, file := range []string{"daemon.go", "../../../e2e/emacs_e2e_test.go"} {
+		t.Run(file, func(t *testing.T) {
+			// Act
+			source := readOrFail(t, file)
+
+			// Assert
+			if !strings.Contains(source, "UnservedZettelEnv(") {
+				t.Fatalf("%s states no UnservedZettelEnv", file)
 			}
 		})
 	}
